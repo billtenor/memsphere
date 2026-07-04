@@ -17,7 +17,7 @@ flow:
   - !if
     用户输入不包含明确变更诉求:
       - 向用户询问要构建或修复什么，并要求描述目标、背景或问题。
-      - 在理解用户变更诉求前停止流程，不创建 artifact。
+      - 在理解用户变更诉求前暂停后续处理，不创建 artifact。
   - 从用户描述推导 kebab-case change 名称。
   - 检查目标 OpenSpec change 是否已经存在。
   - !if
@@ -142,19 +142,11 @@ flow:
           - 至少再执行一轮 review。
       - 运行 OpenSpec 校验，并把结果写入 review.md。
   - 判断是否 apply-ready。
-  - !if
-    tasks 和 review 未全部完成:
-      - 继续按依赖顺序补齐缺失 artifact。
-  - !elseif
-    review.md 当前结论不允许进入 apply:
-      - 停止进入 apply，向用户说明阻塞原因和待确认问题。
-  - !elseif
-    OpenSpec 校验未通过:
-      - 停止进入 apply，修正校验问题或记录工具环境问题并请求用户确认是否继续。
-  - !else
-    otherwise:
-      - 汇总 change 名称、位置、已创建 artifacts 和当前状态。
-      - 告知用户所有 apply 所需 artifacts 已完成，可以进入实现阶段。
+  - 若 tasks 或 review 未全部完成，继续按依赖顺序补齐缺失 artifact。
+  - 确认 review.md 当前结论允许进入 apply。
+  - 确认 OpenSpec 校验通过。
+  - 汇总 change 名称、位置、已创建 artifacts 和当前状态。
+  - 告知用户所有 apply 所需 artifacts 已完成，可以进入实现阶段。
   - 进入 apply 阶段。
   - !if
     用户要求开始实现:

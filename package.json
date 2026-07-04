@@ -10,7 +10,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"const fs=require('node:fs'); fs.rmSync('dist/skills',{recursive:true,force:true}); fs.cpSync('src/skills','dist/skills',{recursive:true});\"",
     "dev": "tsx src/cli.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "validate": "npm run build"

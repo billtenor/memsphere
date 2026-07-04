@@ -5,13 +5,20 @@ import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 
 const configSchema = z.object({
-  memoryRoot: z.string().min(1)
+  memoryRoot: z.string().min(1),
+  reviewsRoot: z.string().min(1).optional()
 });
 
-export type VibeMemConfig = z.infer<typeof configSchema>;
+type VibeMemConfigFile = z.infer<typeof configSchema>;
+
+export type VibeMemConfig = {
+  memoryRoot: string;
+  reviewsRoot: string;
+};
 
 export const defaultConfigPath = join(homedir(), ".vibe-mem", "config.json");
 export const defaultMemoryRoot = join(homedir(), ".vibe-mem", "memory");
+export const defaultReviewsRoot = join(homedir(), ".vibe-mem", "reviews");
 
 export function expandHome(input: string): string {
   if (input === "~") {
@@ -35,12 +42,13 @@ export async function readConfig(configPath = defaultConfigPath): Promise<VibeMe
   const config = configSchema.parse(parsed);
 
   return {
-    memoryRoot: resolvePath(config.memoryRoot)
+    memoryRoot: resolvePath(config.memoryRoot),
+    reviewsRoot: resolvePath(config.reviewsRoot ?? "~/.vibe-mem/reviews")
   };
 }
 
 export async function writeConfig(
-  config: VibeMemConfig,
+  config: VibeMemConfigFile,
   options: { configPath?: string; force?: boolean } = {}
 ): Promise<void> {
   const configPath = options.configPath ?? defaultConfigPath;

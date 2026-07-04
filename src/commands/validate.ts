@@ -11,6 +11,10 @@ export async function validateCommand(): Promise<void> {
       console.log(`memoryRoot: ${result.memoryRoot}`);
     }
 
+    if (result.reviewsRoot) {
+      console.log(`reviewsRoot: ${result.reviewsRoot}`);
+    }
+
     return;
   }
 

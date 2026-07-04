@@ -1,7 +1,16 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { relative } from "node:path";
-import { readConfig } from "../config.js";
+import { type VibeMemConfig, readConfig } from "../config.js";
 import { readAllMemoryFiles } from "../memory/store.js";
+import {
+  createReview,
+  getReview,
+  listReviews,
+  reviewStatuses,
+  updateReview,
+  type ReviewComment,
+  type ReviewStatus
+} from "../review/store.js";
 import { browserHtml } from "../view/browser.js";
 
 type ViewOptions = {
@@ -26,7 +35,7 @@ export async function viewCommand(options: ViewOptions): Promise<void> {
 
   const server = createServer(async (request, response) => {
     try {
-      await handleRequest(request, response, config.memoryRoot);
+      await handleRequest(request, response, config);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       sendJson(response, 500, { error: message });
@@ -43,6 +52,7 @@ export async function viewCommand(options: ViewOptions): Promise<void> {
     const actualPort = typeof address === "object" && address ? address.port : port;
     console.log(`vibe-mem view running at http://${host}:${actualPort}`);
     console.log(`memoryRoot: ${config.memoryRoot}`);
+    console.log(`reviewsRoot: ${config.reviewsRoot}`);
     console.log("Press Ctrl+C to stop.");
   });
 }
@@ -61,22 +71,64 @@ function parsePort(value: string | undefined): number {
   return port;
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, memoryRoot: string): Promise<void> {
+async function handleRequest(request: IncomingMessage, response: ServerResponse, config: VibeMemConfig): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
+  const { memoryRoot, reviewsRoot } = config;
 
-  if (request.method !== "GET") {
-    sendText(response, 405, "Method Not Allowed");
-    return;
-  }
-
-  if (url.pathname === "/") {
+  if (request.method === "GET" && url.pathname === "/") {
     sendHtml(response, browserHtml);
     return;
   }
 
-  if (url.pathname === "/api/memories") {
+  if (request.method === "GET" && url.pathname === "/api/memories") {
     const payload = await loadMemoryPayload(memoryRoot);
     sendJson(response, 200, payload);
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/reviews") {
+    sendJson(response, 200, { reviews: await listReviews(reviewsRoot) });
+    return;
+  }
+
+  const reviewMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)$/);
+  if (request.method === "GET" && reviewMatch) {
+    const review = await getReview(reviewsRoot, decodeURIComponent(reviewMatch[1]));
+    if (!review) {
+      sendJson(response, 404, { error: "review not found" });
+      return;
+    }
+    sendJson(response, 200, { review });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/reviews") {
+    const body = await readJsonBody<{ title?: unknown }>(request);
+    const title = typeof body.title === "string" ? body.title : undefined;
+    const review = await createReview({ title, memoryRoot, reviewsRoot });
+    sendJson(response, 201, { review });
+    return;
+  }
+
+  if (request.method === "PATCH" && reviewMatch) {
+    const body = await readJsonBody<{ title?: unknown; status?: unknown; comments?: unknown }>(request);
+    const status = normalizeReviewStatus(body.status);
+    const comments = body.comments === undefined ? undefined : normalizeReviewComments(body.comments);
+    const review = await updateReview(reviewsRoot, decodeURIComponent(reviewMatch[1]), {
+      title: typeof body.title === "string" ? body.title : undefined,
+      status,
+      comments
+    });
+    if (!review) {
+      sendJson(response, 404, { error: "review not found" });
+      return;
+    }
+    sendJson(response, 200, { review });
+    return;
+  }
+
+  if (!["GET", "POST", "PATCH"].includes(request.method ?? "")) {
+    sendText(response, 405, "Method Not Allowed");
     return;
   }
 
@@ -97,6 +149,85 @@ async function loadMemoryPayload(memoryRoot: string): Promise<MemoryPayload> {
         entity: file.entity
       };
     })
+  };
+}
+
+async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+
+  for await (const chunk of request) {
+    const buffer = chunk as Buffer;
+    total += buffer.length;
+    if (total > 512 * 1024) {
+      throw new Error("request body is too large");
+    }
+    chunks.push(buffer);
+  }
+
+  if (!chunks.length) {
+    return {} as T;
+  }
+
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
+}
+
+function normalizeReviewStatus(value: unknown): ReviewStatus | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "string" && reviewStatuses.includes(value as ReviewStatus)) {
+    return value as ReviewStatus;
+  }
+  throw new Error("invalid review status");
+}
+
+function normalizeReviewComments(value: unknown): ReviewComment[] {
+  if (!Array.isArray(value)) {
+    throw new Error("comments must be an array");
+  }
+
+  return value.map((comment, index) => {
+    if (!comment || typeof comment !== "object") {
+      throw new Error(`comments[${index}] must be an object`);
+    }
+
+    const record = comment as Record<string, unknown>;
+    const body = typeof record.body === "string" ? record.body.trim() : "";
+    const memoryId = typeof record.memoryId === "string" ? record.memoryId : "";
+    const memoryName = typeof record.memoryName === "string" ? record.memoryName : "";
+    const kind = typeof record.kind === "string" ? record.kind : "";
+    const createdAt = typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString();
+
+    if (!body) {
+      throw new Error(`comments[${index}].body is required`);
+    }
+    if (!memoryId || !memoryName || !kind) {
+      throw new Error(`comments[${index}] must include memoryId, memoryName, and kind`);
+    }
+
+    return {
+      id: typeof record.id === "string" ? record.id : `${Date.now()}-${index}`,
+      memoryId,
+      memoryName,
+      kind,
+      target: typeof record.target === "string" ? record.target : undefined,
+      location: normalizeCommentLocation(record.location),
+      snapshot: typeof record.snapshot === "string" ? record.snapshot : undefined,
+      body,
+      createdAt
+    };
+  });
+}
+
+function normalizeCommentLocation(value: unknown): ReviewComment["location"] {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.anchor !== "string" || !record.anchor) return undefined;
+  const line = Number(record.line);
+  if (!Number.isInteger(line) || line < 1) return undefined;
+  return {
+    anchor: record.anchor,
+    line,
+    hash: typeof record.hash === "string" ? record.hash : undefined
   };
 }
 
