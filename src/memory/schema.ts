@@ -3,12 +3,15 @@ import type { MemoryKind } from "./kinds.js";
 
 const stringArray = z.array(z.string()).default([]);
 const nonEmptyStringArray = z.array(z.string().min(1)).min(1);
+const schemaFormatSchema = z.enum(["section", "field", "table", "list", "template"]);
 
 export type FlowStep = string | Record<string, unknown>;
+export type SchemaFormat = z.infer<typeof schemaFormatSchema>;
 
 export type SchemaMemory = {
   tag: "!schema";
   names: string[];
+  format?: SchemaFormat;
   defines: string[];
   asserts?: string[];
   fields?: SchemaMemory[];
@@ -23,6 +26,7 @@ const schemaMemorySchema: z.ZodType<SchemaMemory, z.ZodTypeDef, unknown> = z.laz
   baseMemorySchema
     .extend({
       tag: z.literal("!schema"),
+      format: schemaFormatSchema.optional(),
       asserts: stringArray.optional(),
       fields: z.array(schemaMemorySchema).optional()
     })

@@ -135,6 +135,7 @@ fields:
   - !schema
     names:
       - 需求概述
+    format: section
     defines:
       - 描述需求来源、目标用户、核心问题和成功标准。
     fields:
@@ -143,6 +144,34 @@ fields:
           - 背景
         defines:
           - 说明需求来源、业务背景和为什么现在需要解决。
+```
+
+`!schema` may include an optional `format` field. `format` describes how the schema should be organized when rendered or written; it does not replace semantic fields such as `defines`, `asserts`, or `fields`.
+
+Supported formats:
+
+```yaml
+format: section
+format: field
+format: table
+format: list
+format: template
+```
+
+Tables are represented by setting `format: table` on the schema that is itself table-shaped; table columns are nested `fields`:
+
+```yaml
+!schema
+names:
+  - 需求清单
+format: table
+fields:
+  - !schema
+    names:
+      - ID
+  - !schema
+    names:
+      - 需求描述
 ```
 
 ## Persistence Rules
