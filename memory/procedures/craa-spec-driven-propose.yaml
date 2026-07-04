@@ -1,0 +1,165 @@
+!procedure
+names:
+  - craa-spec-driven-propose
+  - craa-spec-driven
+  - CRAA OpenSpec 提案撰写流程
+defines:
+  - 用于按 CRAA 定制 OpenSpec schema 创建、审议并收敛 change artifacts 的流程。
+  - 将用户变更诉求依次转化为 requirements、proposal、specs、design、test、tasks、review，并在满足门禁后进入 apply。
+  - 流程强调 artifact 依赖顺序、人工审议暂停点、schema 驱动写作、review 修正闭环和 apply 前置条件。
+goals:
+  - 在不越过人工审议门禁的前提下，生成当前 change 所需的 OpenSpec artifacts。
+  - 确保每个 artifact 使用对应 schema 作为结构和写作约束。
+  - 确保 requirements、proposal、specs、design、test、tasks、review 之间范围、术语和结论一致。
+  - 在进入 apply 前确认 tasks 与 review 均完成，且 review 结论允许实现。
+flow:
+  - 确认用户输入中是否包含明确 change 名称或可推导 change 名称的变更描述。
+  - !if
+    用户输入不包含明确变更诉求:
+      - 向用户询问要构建或修复什么，并要求描述目标、背景或问题。
+      - 在理解用户变更诉求前停止流程，不创建 artifact。
+  - 从用户描述推导 kebab-case change 名称。
+  - 检查目标 OpenSpec change 是否已经存在。
+  - !if
+    change 已存在:
+      - 询问用户是继续已有 change，还是使用新名称创建新 change。
+      - 在用户确认前停止修改已有 artifacts。
+  - 创建或进入 change 目录。
+  - 获取 artifact 构建状态、依赖关系和 apply 所需 artifact 列表。
+  - 按 artifact 依赖顺序维护待办进度。
+  - !call craa-spec-driven-requirements
+  - 撰写 requirements.md。
+  - !if
+    需求存在阻塞性不清楚:
+      - 只记录最小必要上下文、已知事实、阻塞问题和待澄清问题。
+      - 将“需求审议结论”状态设为“待澄清”。
+      - 向用户提出澄清问题，说明每个问题阻塞的后续文档。
+      - 停止生成 proposal 及所有下游 artifact。
+  - !else
+    otherwise:
+      - 完成 requirements.md。
+      - 将“需求审议结论”状态设为“待确认”。
+      - 向用户摘要需求边界、需求清单、原型引用、验收口径和未决问题。
+      - 请求用户审议 requirements.md。
+      - 在用户明确确认前停止生成 proposal 及所有下游 artifact。
+  - !if
+    用户明确确认 requirements 已通过:
+      - 将“需求审议结论”状态更新为“已确认”。
+  - !call craa-spec-driven-proposal
+  - 撰写 proposal.md。
+  - !if
+    requirements.md 顶部“需求审议结论”不是“已确认”:
+      - 停止创建 proposal.md。
+      - 请求用户先完成需求审议确认。
+  - !else
+    otherwise:
+      - 将 requirements 中的业务需求翻译成工程能力边界、变更范围和 OpenSpec capability。
+      - 初次创建 proposal.md 时，将“提案审议结论”状态设为“待确认”。
+      - 向用户摘要 capability 划分、变更范围、影响面预判、风险约束和待技术方案确认的问题。
+      - 请求用户审议 proposal.md。
+      - 在用户明确确认前停止生成 specs、design、test、tasks 和 review。
+  - !if
+    用户明确确认 proposal 已通过:
+      - 将“提案审议结论”状态更新为“已确认”。
+  - !call craa-spec-driven-spec
+  - 创建或修改 specs。
+  - !if
+    requirements 或 proposal 任一审议状态不是“已确认”:
+      - 停止创建或修改 specs。
+      - 请求用户先完成上游审议确认。
+  - !else
+    otherwise:
+      - 阅读 openspec/specs/ 中已有 capability。
+      - 判断每个 capability 应该 ADDED、MODIFIED、REMOVED 还是 RENAMED。
+      - 默认优先修改既有 capability；只有确认为新的稳定行为边界时才新增 capability。
+      - 为 proposal 中声明的每个新增 capability 创建 specs/<capability>/spec.md。
+      - 确保每个 requirement 至少包含一个 scenario。
+  - !call craa-spec-driven-design
+  - 撰写 design.md。
+  - !if
+    requirements 或 proposal 任一审议状态不是“已确认”:
+      - 停止创建或修改 design.md。
+      - 请求用户先完成上游审议确认。
+  - !else
+    otherwise:
+      - 基于 proposal 和 specs 说明技术方案如何可靠落地。
+      - 记录技术约束、关键决策、方案总览、详细方案、正确性、一致性、稳定性、兼容性、灰度和回滚。
+      - 将代码结构与主要文件映射放在 design.md，而不是 proposal.md。
+  - !call craa-spec-driven-test
+  - 撰写 test.md。
+  - !if
+    requirements 或 proposal 任一审议状态不是“已确认”:
+      - 停止创建或修改 test.md。
+      - 请求用户先完成上游审议确认。
+  - !else
+    otherwise:
+      - 基于 specs 和 design 说明如何证明本次变更满足关键行为和技术风险。
+      - 覆盖 specs 中的关键 requirement。
+      - 覆盖 design 中识别的关键风险、关键决策、失败路径、兼容性和回滚要求。
+      - 对无法自动化的验证项说明人工验证方式、通过标准影响或遗留风险。
+  - !call craa-spec-driven-tasks
+  - 撰写 tasks.md。
+  - !if
+    requirements 或 proposal 任一审议状态不是“已确认”:
+      - 停止创建或修改 tasks.md。
+      - 请求用户先完成上游审议确认。
+  - !else
+    otherwise:
+      - 参考 specs 的行为要求、design 的技术方案和 test 的验证方案拆解实现工作。
+      - 每个任务使用 checkbox。
+      - 按依赖顺序分组任务。
+      - 确保每个任务足够小且可验证。
+  - !call craa-spec-driven-review
+  - 执行 review 阶段。
+  - !if
+    requirements 或 proposal 任一审议状态不是“已确认”:
+      - 不启动 reviewer。
+      - 如需落盘 review.md，只记录“等待用户确认”的当前结论、未确认的审议状态和继续条件。
+      - 停止进入 apply。
+  - !else
+    otherwise:
+      - 读取 prompts/review.md。
+      - 第一轮 review 前确认执行模式。
+      - !if
+        用户当前请求已显式授权使用子 agent 且当前环境支持子 agent:
+          - 启动产品、架构师、开发工程师、测试工程师四个独立 reviewer。
+          - 主 agent 等待 reviewer 结果，不额外开展探索、自审、方案推演或提前修改文档。
+      - !else
+        otherwise:
+          - 询问用户是否允许启动多个子 agent 并行 review。
+          - !if
+            用户同意且工具可用:
+              - 启动四个独立 reviewer 子 agent 并等待结果。
+          - !else
+            otherwise:
+              - 降级为主 agent 按产品、架构师、开发工程师、测试工程师四个视角分别独立审阅。
+      - 汇总 reviewer 输出和人工 review 意见。
+      - 优先直接修改 requirements、proposal、specs、design、test 或 tasks，而不是只记录问题。
+      - 如果修改了上游 artifact，按 requirements -> proposal -> specs -> design -> test -> tasks 顺序同步检查并调整下游 artifact。
+      - 在 review.md 中记录轮次、意见来源、采纳情况、未采纳原因、待确认问题和收敛结论。
+      - !if
+        本轮 review 采纳了实质修改:
+          - 至少再执行一轮 review。
+      - 运行 OpenSpec 校验，并把结果写入 review.md。
+  - 判断是否 apply-ready。
+  - !if
+    tasks 和 review 未全部完成:
+      - 继续按依赖顺序补齐缺失 artifact。
+  - !elseif
+    review.md 当前结论不允许进入 apply:
+      - 停止进入 apply，向用户说明阻塞原因和待确认问题。
+  - !elseif
+    OpenSpec 校验未通过:
+      - 停止进入 apply，修正校验问题或记录工具环境问题并请求用户确认是否继续。
+  - !else
+    otherwise:
+      - 汇总 change 名称、位置、已创建 artifacts 和当前状态。
+      - 告知用户所有 apply 所需 artifacts 已完成，可以进入实现阶段。
+  - 进入 apply 阶段。
+  - !if
+    用户要求开始实现:
+      - 读取 requirements、proposal、specs、design、test、review 和 tasks.md。
+      - 再次确认 requirements 为“已确认”、proposal 为“已确认”、review 当前结论允许进入 apply。
+      - 按 tasks.md 中未完成任务逐项实现。
+      - 实现过程中及时勾选已完成任务。
+      - 遇到阻塞问题或需要用户确认时暂停并说明原因。

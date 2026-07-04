@@ -37,11 +37,20 @@ node dist/cli.js <command>
 vibe-mem init
 vibe-mem validate
 vibe-mem list
+vibe-mem view
 vibe-mem list procedures
 vibe-mem list concepts
 vibe-mem list statements
 vibe-mem list schemas
 ```
+
+`view` starts a local read-only memory browser:
+
+```bash
+vibe-mem view
+```
+
+The browser renders schemas as progressive disclosure sections. `format: table` schemas render their child `fields` as table columns. Procedures render `flow` as readable steps, with visual blocks for `!if`, `!elseif`, `!else`, `!while`, and `!call`.
 
 `init` creates:
 

@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { initCommand } from "./commands/init.js";
 import { listCommand } from "./commands/list.js";
 import { validateCommand } from "./commands/validate.js";
+import { viewCommand } from "./commands/view.js";
 
 const program = new Command();
 
@@ -28,6 +29,13 @@ program
   .description("List memory entities.")
   .argument("[kind]", "one of: procedures, concepts, statements, schemas")
   .action(listCommand);
+
+program
+  .command("view")
+  .description("Start a local read-only memory browser.")
+  .option("--host <host>", "host to bind", "127.0.0.1")
+  .option("--port <port>", "port to bind; 0 picks a random open port", "0")
+  .action(viewCommand);
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
