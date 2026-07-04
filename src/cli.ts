@@ -1,0 +1,36 @@
+#!/usr/bin/env node
+import { Command } from "commander";
+import { initCommand } from "./commands/init.js";
+import { listCommand } from "./commands/list.js";
+import { validateCommand } from "./commands/validate.js";
+
+const program = new Command();
+
+program
+  .name("vibe-mem")
+  .description("Manage local YAML-backed memory entities for AI runtimes.")
+  .version("0.1.0");
+
+program
+  .command("init")
+  .description("Create the default config file and memory directory structure.")
+  .option("--memory-root <path>", "memory root directory")
+  .option("--force", "overwrite the existing config file")
+  .action(initCommand);
+
+program
+  .command("validate")
+  .description("Validate config, memory directories, and YAML memory entities.")
+  .action(validateCommand);
+
+program
+  .command("list")
+  .description("List memory entities.")
+  .argument("[kind]", "one of: procedures, concepts, statements, schemas")
+  .action(listCommand);
+
+program.parseAsync(process.argv).catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`error: ${message}`);
+  process.exitCode = 1;
+});
