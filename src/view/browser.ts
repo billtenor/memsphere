@@ -70,6 +70,8 @@ export const browserHtml = String.raw`<!doctype html>
     .pill.processing { color: var(--accent); background: #edf6f3; border-color: #b8cbc7; }
     .pill.done { color: var(--ok); background: #edf6f0; border-color: #b8d8c5; }
     .pill.outdated { color: var(--danger); background: #fbefed; border-color: #e5bcb5; }
+    .pill.human { color: #7b3f17; background: #fff1df; border-color: #e5c09c; }
+    .pill.agent { color: #173f3c; background: #edf6f3; border-color: #b8cbc7; }
     .section { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); margin: 10px 0; overflow: hidden; }
     .section-header { width: 100%; border: 0; background: transparent; text-align: left; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 12px 14px; color: var(--text); }
     .section-header:hover { background: #f4f5f1; }
@@ -238,6 +240,9 @@ export const browserHtml = String.raw`<!doctype html>
       else: { zh: "否则", yaml: "else" },
       while: { zh: "循环判断", yaml: "!while" },
       call: { zh: "调用流程", yaml: "!call" },
+      actor: { zh: "执行者", yaml: "actor" },
+      agent: { zh: "Agent", yaml: "agent" },
+      human: { zh: "人", yaml: "human" },
       artifact: { zh: "产物", yaml: "artifact" },
       schema: { zh: "图式", yaml: "schema" },
       action: { zh: "要做什么", yaml: "action" },
@@ -1047,6 +1052,12 @@ export const browserHtml = String.raw`<!doctype html>
     function renderArtifactRow(step, status) {
       const row = document.createElement("div");
       row.className = "artifact-row";
+      if (stepActor(step) === "human") {
+        const actorLabel = document.createElement("span");
+        actorLabel.className = "artifact-label";
+        actorLabel.textContent = t("actor");
+        row.append(actorLabel, actorPill("human"));
+      }
       const label = document.createElement("span");
       label.className = "artifact-label";
       label.textContent = t("artifact");
@@ -1054,6 +1065,10 @@ export const browserHtml = String.raw`<!doctype html>
       appendArtifactMeta(row, step);
       if (status) row.append(pill(status, false, status === t("currentStep") ? "processing" : status === t("completed") ? "done" : ""));
       return row;
+    }
+
+    function actorPill(actor) {
+      return pill(t(actor), false, actor === "human" ? "human" : "agent");
     }
 
     function appendArtifactMeta(target, step) {
@@ -1107,6 +1122,10 @@ export const browserHtml = String.raw`<!doctype html>
         format: step?.format || "",
         schema: step?.schema || ""
       };
+    }
+
+    function stepActor(step) {
+      return step?.actor === "human" ? "human" : "agent";
     }
 
     function formatLabel(format) {

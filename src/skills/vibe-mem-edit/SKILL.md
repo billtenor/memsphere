@@ -65,6 +65,7 @@ Runnable flow syntax:
 ```yaml
 flow:
   - action: 判断用户输入是否包含明确变更诉求。
+    actor: agent
     artifact:
       name: 用户输入是否包含明确变更诉求
       format: boolean
@@ -76,6 +77,7 @@ flow:
         format: boolean
     then:
       - action: 补充背景信息。
+        actor: human
         artifact:
           name: 背景信息
           format: markdown
@@ -113,6 +115,9 @@ flow:
 Rules:
 
 - A plain step must include `action` and an `artifact` object.
+- `actor` is optional and defaults to `agent`.
+- Use `actor: agent` when the agent can perform the action directly from available context.
+- Use `actor: human` when a person must make a judgment, provide missing information, approve something, or perform external work. The agent will ask the human for the artifact and then report it.
 - `artifact.name` is a human-readable deliverable name. Prefer natural language over variable-style names.
 - `artifact.format` is one of `string`, `int`, `boolean`, `markdown`, `json`, `yaml`, or `schema`.
 - `artifact.schema` is required only when `artifact.format` is `schema`.

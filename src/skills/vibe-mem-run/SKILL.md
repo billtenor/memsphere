@@ -13,6 +13,8 @@ Use this skill when executing a vibe-mem procedure.
 - Only perform the step returned by the latest `vibe-mem run` command.
 - Do not execute undisclosed future steps.
 - Every step must produce the requested artifact.
+- If the step actor is `agent`, perform the action yourself and report the artifact.
+- If the step actor is `human`, ask the human to perform the action or provide the requested artifact. Do not invent the artifact. After the human provides it, report that value with `vibe-mem run report`.
 - After producing a non-schema artifact, report it with `vibe-mem run report --run <id> --artifact <value>`.
 - If the artifact is large or multiline, write it to a file and use `--artifact-file <path>`.
 - If the returned artifact format is `schema`, call `vibe-mem run enter-schema <schema-name> --run <id>` and follow the schema field steps depth-first.
@@ -25,8 +27,14 @@ Runnable procedure flow steps must be structured. Plain steps use `action`, `art
 ```yaml
 flow:
   - action: 判断用户输入是否包含明确变更诉求。
+    actor: agent
     artifact:
       name: 用户输入是否包含明确变更诉求
+      format: boolean
+  - action: 请用户确认是否继续执行。
+    actor: human
+    artifact:
+      name: 用户是否确认继续
       format: boolean
   - action: 撰写 proposal。
     artifact:
@@ -38,6 +46,7 @@ flow:
 Fields:
 
 - `action`: what to do now.
+- `actor`: optional executor, either `agent` or `human`. Missing means `agent`.
 - `artifact.name`: required human-readable artifact name.
 - `artifact.format`: artifact format: `string`, `int`, `boolean`, `markdown`, `json`, `yaml`, or `schema`.
 - `artifact.schema`: schema memory name, required only when `artifact.format` is `schema`.
@@ -110,3 +119,4 @@ vibe-mem run status --run run-...
 ```
 
 The CLI output is intentionally minimal. Treat the `Do:` section as the only current instruction.
+When the CLI prints `Actor: human`, turn the action into a concise question or request for the user, wait for their answer, and report the artifact exactly from the user's supplied result.

@@ -14,6 +14,11 @@ flow:
     artifact:
       name: 当前输入是否足够开始测试
       format: boolean
+  - action: 请用户确认是否允许继续执行 smoke test。
+    actor: human
+    artifact:
+      name: 用户是否允许继续执行测试
+      format: boolean
   - !if
     condition:
       action: 判断是否需要先补充测试目标。

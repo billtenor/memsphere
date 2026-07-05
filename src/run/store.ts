@@ -7,12 +7,15 @@ import type { ProcedureMemory, SchemaMemory } from "../memory/schema.js";
 
 export const artifactFormats = ["string", "int", "boolean", "markdown", "json", "yaml", "schema"] as const;
 export type ArtifactFormat = (typeof artifactFormats)[number];
+export const stepActors = ["agent", "human"] as const;
+export type StepActor = (typeof stepActors)[number];
 
 export type RunStatus = "running" | "done";
 export type FrameType = "procedure" | "schema";
 
 export type ProcedureStep = {
   action: string;
+  actor: StepActor;
   artifactName: string;
   format: ArtifactFormat;
   schemaName?: string;
@@ -30,6 +33,7 @@ export type RunStep = {
   id: string;
   kind?: "action" | "branch" | "loop" | "call";
   instruction: string;
+  actor?: StepActor;
   artifact?: string;
   format?: ArtifactFormat;
   schemaName?: string;
@@ -73,6 +77,7 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
     id: z.string(),
     kind: z.enum(["action", "branch", "loop", "call"]).optional(),
     instruction: z.string(),
+    actor: z.enum(stepActors).optional(),
     artifact: z.string().optional(),
     format: z.enum(artifactFormats).optional(),
     schemaName: z.string().optional(),
@@ -316,6 +321,7 @@ function compileFlowStep(raw: unknown, id: string, position: number): RunStep {
         id,
         kind: "branch",
         instruction: step.action,
+        actor: step.actor,
         artifact: step.artifactName,
         format: step.format,
         schemaName: step.schemaName,
@@ -331,6 +337,7 @@ function compileFlowStep(raw: unknown, id: string, position: number): RunStep {
         id,
         kind: "loop",
         instruction: step.action,
+        actor: step.actor,
         artifact: step.artifactName,
         format: step.format,
         schemaName: step.schemaName,
@@ -345,6 +352,7 @@ function compileFlowStep(raw: unknown, id: string, position: number): RunStep {
     id,
     kind: "action",
     instruction: step.action,
+    actor: step.actor,
     artifact: step.artifactName,
     format: step.format,
     schemaName: step.schemaName
@@ -362,6 +370,7 @@ function compileIfStep(record: Record<string, unknown>, id: string, position: nu
     id,
     kind: "branch",
     instruction: condition.action,
+    actor: condition.actor,
     artifact: condition.artifactName,
     format: condition.format,
     schemaName: condition.schemaName,
@@ -403,6 +412,7 @@ function compileWhileStep(record: Record<string, unknown>, id: string, position:
     id,
     kind: "loop",
     instruction: condition.action,
+    actor: condition.actor,
     artifact: condition.artifactName,
     format: condition.format,
     schemaName: condition.schemaName,
@@ -421,16 +431,26 @@ function normalizeProcedureStep(raw: unknown, position: number | string): Proced
     throw new Error(`flow[${position}] must be an object with action, artifact, and format`);
   }
   const action = typeof record.action === "string" ? record.action.trim() : "";
+  const actor = readStepActor(record.actor, position);
   const artifact = readArtifactSpec(record.artifact, position);
 
   if (!action) throw new Error(`flow[${position}].action is required`);
 
   return {
     action,
+    actor,
     artifactName: artifact.name,
     format: artifact.format,
     schemaName: artifact.schema
   };
+}
+
+function readStepActor(value: unknown, position: number | string): StepActor {
+  if (value === undefined) return "agent";
+  if (typeof value === "string" && (stepActors as readonly string[]).includes(value)) {
+    return value as StepActor;
+  }
+  throw new Error(`flow[${position}].actor must be one of: ${stepActors.join(", ")}`);
 }
 
 function readArtifactSpec(value: unknown, position: number | string): { name: string; format: ArtifactFormat; schema?: string } {
@@ -532,6 +552,7 @@ function walkSchema(node: SchemaMemory, path: string, steps: RunStep[]): void {
   steps.push({
     id: `schema:${path}`,
     instruction: `Write ${path}`,
+    actor: "agent",
     artifact: path,
     format: schemaFormatToArtifactFormat(node.format),
     details: [

@@ -107,7 +107,11 @@ function printNext(run: RunState): void {
   }
 
   console.log("");
-  console.log("Do:");
+  console.log("Actor:");
+  console.log(step.actor === "human" ? "human" : "agent");
+
+  console.log("");
+  console.log(step.actor === "human" ? "Ask human to do:" : "Do:");
   console.log(step.instruction);
 
   if (step.details?.length) {
@@ -121,6 +125,9 @@ function printNext(run: RunState): void {
   console.log("");
   console.log("Artifact:");
   console.log(`${step.artifact} (${step.format})`);
+  if (step.actor === "human") {
+    console.log("Report the artifact value provided by the human.");
+  }
 
   console.log("");
   if (step.format === "schema") {

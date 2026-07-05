@@ -5,6 +5,7 @@ const stringArray = z.array(z.string()).default([]);
 const nonEmptyStringArray = z.array(z.string().min(1)).min(1);
 const schemaFormatSchema = z.enum(["section", "field", "table", "list", "template"]);
 const artifactFormatSchema = z.enum(["string", "int", "boolean", "markdown", "json", "yaml", "schema"]);
+const stepActorSchema = z.enum(["agent", "human"]);
 
 export type FlowStep = string | Record<string, unknown>;
 export type SchemaFormat = z.infer<typeof schemaFormatSchema>;
@@ -33,6 +34,7 @@ const procedureFlowStepSchema = z.union([
   z.string(),
   z.object({
     action: z.string().min(1),
+    actor: stepActorSchema.optional(),
     artifact: stepArtifactSchema
   }).strict(),
   z.record(z.unknown())
