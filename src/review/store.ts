@@ -9,9 +9,14 @@ export type ReviewStatus = (typeof reviewStatuses)[number];
 
 export type ReviewComment = {
   id: string;
+  source?: "memory" | "task";
   memoryId: string;
   memoryName: string;
   kind: string;
+  runId?: string;
+  runName?: string;
+  stepId?: string;
+  artifactName?: string;
   target?: string;
   location?: {
     anchor: string;
@@ -25,6 +30,7 @@ export type ReviewComment = {
 
 export type ReviewFile = {
   id: string;
+  source?: "memory" | "task";
   title: string;
   status: ReviewStatus;
   createdAt: string;
@@ -40,9 +46,14 @@ export type ReviewFile = {
 
 const commentSchema = z.object({
   id: z.string(),
+  source: z.enum(["memory", "task"]).optional(),
   memoryId: z.string(),
   memoryName: z.string(),
   kind: z.string(),
+  runId: z.string().optional(),
+  runName: z.string().optional(),
+  stepId: z.string().optional(),
+  artifactName: z.string().optional(),
   target: z.string().optional(),
   location: z.object({
     anchor: z.string(),
@@ -56,6 +67,7 @@ const commentSchema = z.object({
 
 const reviewSchema = z.object({
   id: z.string(),
+  source: z.enum(["memory", "task"]).optional(),
   title: z.string(),
   status: z.enum(reviewStatuses),
   createdAt: z.string(),
@@ -69,6 +81,7 @@ const reviewSchema = z.object({
 
 type CreateReviewInput = {
   title?: string;
+  source?: "memory" | "task";
   memoryRoot: string;
   reviewsRoot: string;
 };
@@ -115,6 +128,7 @@ export async function createReview(input: CreateReviewInput): Promise<ReviewFile
   const id = makeReviewId(now);
   const review: ReviewFile = {
     id,
+    source: input.source ?? "memory",
     title: input.title?.trim() || `Review ${new Date(now).toLocaleString()}`,
     status: "draft",
     createdAt: now,

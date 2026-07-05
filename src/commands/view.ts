@@ -116,9 +116,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   }
 
   if (request.method === "POST" && url.pathname === "/api/reviews") {
-    const body = await readJsonBody<{ title?: unknown }>(request);
+    const body = await readJsonBody<{ title?: unknown; source?: unknown }>(request);
     const title = typeof body.title === "string" ? body.title : undefined;
-    const review = await createReview({ title, memoryRoot, reviewsRoot });
+    const source = body.source === "task" ? "task" : "memory";
+    const review = await createReview({ title, source, memoryRoot, reviewsRoot });
     sendJson(response, 201, { review });
     return;
   }
@@ -209,6 +210,7 @@ function normalizeReviewComments(value: unknown): ReviewComment[] {
     const memoryName = typeof record.memoryName === "string" ? record.memoryName : "";
     const kind = typeof record.kind === "string" ? record.kind : "";
     const createdAt = typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString();
+    const source = record.source === "task" ? "task" : record.source === "memory" ? "memory" : undefined;
 
     if (!body) {
       throw new Error(`comments[${index}].body is required`);
@@ -219,9 +221,14 @@ function normalizeReviewComments(value: unknown): ReviewComment[] {
 
     return {
       id: typeof record.id === "string" ? record.id : `${Date.now()}-${index}`,
+      source,
       memoryId,
       memoryName,
       kind,
+      runId: typeof record.runId === "string" ? record.runId : undefined,
+      runName: typeof record.runName === "string" ? record.runName : undefined,
+      stepId: typeof record.stepId === "string" ? record.stepId : undefined,
+      artifactName: typeof record.artifactName === "string" ? record.artifactName : undefined,
       target: typeof record.target === "string" ? record.target : undefined,
       location: normalizeCommentLocation(record.location),
       snapshot: typeof record.snapshot === "string" ? record.snapshot : undefined,
