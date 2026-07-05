@@ -17,6 +17,8 @@ program
 program
   .command("init")
   .description("Create the default config file and memory directory structure.")
+  .option("--global", "initialize the global ~/.vibe-mem scope")
+  .option("--folder <path>", "initialize a specific folder scope at <path>/.vibe-mem")
   .option("--memory-root <path>", "memory root directory")
   .option("--reviews-root <path>", "review files root directory")
   .option("--runs-root <path>", "run state files root directory")

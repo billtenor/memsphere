@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { ZodError } from "zod";
-import { defaultConfigPath, readConfig } from "./config.js";
+import { findConfigPath, readConfig, readConfigAt } from "./config.js";
 import { memoryKinds, type MemoryKind } from "./memory/kinds.js";
 import { listMemoryFiles, pathExists, readMemoryFile } from "./memory/store.js";
 
@@ -38,13 +38,14 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
-export async function validateMemoryStore(configPath = defaultConfigPath): Promise<ValidationResult> {
+export async function validateMemoryStore(configPath?: string): Promise<ValidationResult> {
   const issues: ValidationIssue[] = [];
+  const resolvedConfigPath = configPath ?? await findConfigPath();
 
-  if (!(await pathExists(configPath))) {
+  if (!resolvedConfigPath || !(await pathExists(resolvedConfigPath))) {
     return {
-      configPath,
-      issues: [{ path: configPath, message: "config file does not exist. Run vibe-mem init." }]
+      configPath: resolvedConfigPath ?? "(not found)",
+      issues: [{ path: resolvedConfigPath ?? "(not found)", message: "config file does not exist. Run vibe-mem init." }]
     };
   }
 
@@ -53,14 +54,14 @@ export async function validateMemoryStore(configPath = defaultConfigPath): Promi
   let runsRoot: string | undefined;
 
   try {
-    const config = await readConfig(configPath);
+    const config = configPath ? await readConfig(configPath) : await readConfigAt(resolvedConfigPath);
     memoryRoot = config.memoryRoot;
     reviewsRoot = config.reviewsRoot;
     runsRoot = config.runsRoot;
   } catch (error) {
     return {
-      configPath,
-      issues: [{ path: configPath, message: formatError(error) }]
+      configPath: resolvedConfigPath,
+      issues: [{ path: resolvedConfigPath, message: formatError(error) }]
     };
   }
 
@@ -88,7 +89,7 @@ export async function validateMemoryStore(configPath = defaultConfigPath): Promi
   }
 
   return {
-    configPath,
+    configPath: resolvedConfigPath,
     memoryRoot,
     reviewsRoot,
     runsRoot,

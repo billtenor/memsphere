@@ -10,7 +10,7 @@ The first MVP focuses only on domain entity abstraction and local persistence:
 - `!statement`
 - `!schema`
 
-Scopes are intentionally out of scope for this version.
+The current MVP uses directory scopes before richer scope modeling exists.
 
 ## Install
 
@@ -35,6 +35,8 @@ node dist/cli.js <command>
 
 ```bash
 vibe-mem init
+vibe-mem init --global
+vibe-mem init --folder ./some-folder
 vibe-mem validate
 vibe-mem list
 vibe-mem view
@@ -52,26 +54,30 @@ vibe-mem view
 
 The browser renders schemas as progressive disclosure sections. `format: table` schemas render their child `fields` as table columns. Procedures render `flow` as readable steps, with visual blocks for `!if`, `!elseif`, `!else`, `!while`, and `!call`.
 
-`init` creates:
+`init` defaults to the current git repository scope. It creates `.vibe-mem/` in the git root:
 
 ```text
-~/.vibe-mem/config.json
-~/.vibe-mem/memory/
+<git-root>/.vibe-mem/config.json
+<git-root>/.vibe-mem/memory/
   procedures/
   concepts/
   statements/
   schemas/
-~/.vibe-mem/reviews/
-~/.vibe-mem/runs/
+<git-root>/.vibe-mem/reviews/
+<git-root>/.vibe-mem/runs/
 ```
 
-The config file stores the memory and review roots:
+Use `vibe-mem init --global` for `~/.vibe-mem`, or `vibe-mem init --folder <path>` for `<path>/.vibe-mem`.
+
+At runtime, `vibe-mem` starts at the current directory and walks upward looking for `.vibe-mem/config.json`. If none is found, it tries the global `~/.vibe-mem/config.json`.
+
+The config file stores roots relative to the `.vibe-mem` directory by default:
 
 ```json
 {
-  "memoryRoot": "~/.vibe-mem/memory",
-  "reviewsRoot": "~/.vibe-mem/reviews",
-  "runsRoot": "~/.vibe-mem/runs"
+  "memoryRoot": "memory",
+  "reviewsRoot": "reviews",
+  "runsRoot": "runs"
 }
 ```
 
