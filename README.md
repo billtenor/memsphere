@@ -62,6 +62,7 @@ The browser renders schemas as progressive disclosure sections. `format: table` 
   statements/
   schemas/
 ~/.vibe-mem/reviews/
+~/.vibe-mem/runs/
 ```
 
 The config file stores the memory and review roots:
@@ -69,7 +70,8 @@ The config file stores the memory and review roots:
 ```json
 {
   "memoryRoot": "~/.vibe-mem/memory",
-  "reviewsRoot": "~/.vibe-mem/reviews"
+  "reviewsRoot": "~/.vibe-mem/reviews",
+  "runsRoot": "~/.vibe-mem/runs"
 }
 ```
 

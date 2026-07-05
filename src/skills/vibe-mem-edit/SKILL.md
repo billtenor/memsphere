@@ -52,15 +52,74 @@ Allowed fields:
 - `names`
 - `defines`
 - `goals`: string array
-- `flow`: array of strings or tagged control/call nodes
+- `flow`: array of structured steps or tagged control/call nodes
 
 Supported flow tags:
 
-- `!call target-memory-name`
 - `!if`
-- `!elseif`
-- `!else`
 - `!while`
+- `!call`
+
+Runnable flow syntax:
+
+```yaml
+flow:
+  - action: 判断用户输入是否包含明确变更诉求。
+    artifact:
+      name: 用户输入是否包含明确变更诉求
+      format: boolean
+  - !if
+    condition:
+      action: 判断是否需要补充背景。
+      artifact:
+        name: 是否需要补充背景
+        format: boolean
+    then:
+      - action: 补充背景信息。
+        artifact:
+          name: 背景信息
+          format: markdown
+    elseif:
+      - condition:
+          action: 判断是否需要补充约束。
+          artifact:
+            name: 是否需要补充约束
+            format: boolean
+        then:
+          - action: 补充约束信息。
+            artifact:
+              name: 约束信息
+              format: markdown
+    else:
+      - action: 确认当前信息足够。
+        artifact:
+          name: 信息足够确认
+          format: string
+  - !while
+    condition:
+      action: 判断是否仍有观察点需要补充。
+      artifact:
+        name: 是否仍有观察点需要补充
+        format: boolean
+    do:
+      - action: 补充一个观察点。
+        artifact:
+          name: 观察点
+          format: string
+  - !call
+    target: another-procedure-name
+```
+
+Rules:
+
+- A plain step must include `action` and an `artifact` object.
+- `artifact.name` is a human-readable deliverable name. Prefer natural language over variable-style names.
+- `artifact.format` is one of `string`, `int`, `boolean`, `markdown`, `json`, `yaml`, or `schema`.
+- `artifact.schema` is required only when `artifact.format` is `schema`.
+- `!if.condition` and `!while.condition` are also steps and must report a boolean artifact.
+- `!if.then`, each `!if.elseif[].then`, and `!while.do` contain nested flow steps.
+- `!if.else` is optional and contains nested flow steps.
+- `!call` only includes `target`; it does not include `artifact` or `format` because the called procedure defines its own artifacts.
 
 Keep procedure steps actionable and ordered. Use `!call` when a step delegates to another named memory.
 

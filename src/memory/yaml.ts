@@ -14,7 +14,7 @@ const memoryYamlTags: CollectionTag[] = Object.values(memoryKindTags).map((tag) 
   collection: "map"
 }));
 
-const flowCollectionTags: CollectionTag[] = ["!if", "!elseif", "!else", "!while"].map((tag) => ({
+const flowCollectionTags: CollectionTag[] = ["!if", "!elseif", "!else", "!while", "!call"].map((tag) => ({
   tag,
   collection: "map"
 }));

@@ -11,6 +11,7 @@ import {
   type ReviewComment,
   type ReviewStatus
 } from "../review/store.js";
+import { listRuns, readRun } from "../run/store.js";
 import { browserHtml } from "../view/browser.js";
 
 type ViewOptions = {
@@ -73,7 +74,7 @@ function parsePort(value: string | undefined): number {
 
 async function handleRequest(request: IncomingMessage, response: ServerResponse, config: VibeMemConfig): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
-  const { memoryRoot, reviewsRoot } = config;
+  const { memoryRoot, reviewsRoot, runsRoot } = config;
 
   if (request.method === "GET" && url.pathname === "/") {
     sendHtml(response, browserHtml);
@@ -88,6 +89,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 
   if (request.method === "GET" && url.pathname === "/api/reviews") {
     sendJson(response, 200, { reviews: await listReviews(reviewsRoot) });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/runs") {
+    sendJson(response, 200, { runs: await listRuns(runsRoot) });
+    return;
+  }
+
+  const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)$/);
+  if (request.method === "GET" && runMatch) {
+    const run = await readRun(runsRoot, decodeURIComponent(runMatch[1]));
+    sendJson(response, 200, { run });
     return;
   }
 

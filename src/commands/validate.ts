@@ -15,6 +15,10 @@ export async function validateCommand(): Promise<void> {
       console.log(`reviewsRoot: ${result.reviewsRoot}`);
     }
 
+    if (result.runsRoot) {
+      console.log(`runsRoot: ${result.runsRoot}`);
+    }
+
     return;
   }
 

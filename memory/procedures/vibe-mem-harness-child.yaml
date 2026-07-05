@@ -1,0 +1,14 @@
+!procedure
+names:
+  - vibe-mem-harness-child
+  - harness-child
+defines:
+  - 用于验证 !call 会自动进入被调用流程的最小子流程。
+goals:
+  - 验证 !call 自身不需要 artifact。
+  - 验证被调用流程内部的 step 会继续要求 artifact report。
+flow:
+  - action: 记录子流程已经被调用。
+    artifact:
+      name: 子流程调用记录
+      format: string

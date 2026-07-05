@@ -4,6 +4,7 @@ import type { MemoryKind } from "./kinds.js";
 const stringArray = z.array(z.string()).default([]);
 const nonEmptyStringArray = z.array(z.string().min(1)).min(1);
 const schemaFormatSchema = z.enum(["section", "field", "table", "list", "template"]);
+const artifactFormatSchema = z.enum(["string", "int", "boolean", "markdown", "json", "yaml", "schema"]);
 
 export type FlowStep = string | Record<string, unknown>;
 export type SchemaFormat = z.infer<typeof schemaFormatSchema>;
@@ -22,6 +23,21 @@ const baseMemorySchema = z.object({
   defines: stringArray
 });
 
+const stepArtifactSchema = z.object({
+  name: z.string().min(1),
+  format: artifactFormatSchema,
+  schema: z.string().min(1).optional()
+}).strict();
+
+const procedureFlowStepSchema = z.union([
+  z.string(),
+  z.object({
+    action: z.string().min(1),
+    artifact: stepArtifactSchema
+  }).strict(),
+  z.record(z.unknown())
+]);
+
 const schemaMemorySchema: z.ZodType<SchemaMemory, z.ZodTypeDef, unknown> = z.lazy(() =>
   baseMemorySchema
     .extend({
@@ -37,7 +53,7 @@ export const procedureMemorySchema = baseMemorySchema
   .extend({
     tag: z.literal("!procedure"),
     goals: stringArray,
-    flow: z.array(z.union([z.string(), z.record(z.unknown())])).default([])
+    flow: z.array(procedureFlowStepSchema).default([])
   })
   .strict();
 

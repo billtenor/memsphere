@@ -1,0 +1,20 @@
+!schema
+names:
+  - vibe-mem-harness-note
+  - harness-note
+format: section
+defines:
+  - 用于验证 vibe-mem run harness schema 深度优先执行的最小 artifact。
+fields:
+  - !schema
+    names:
+      - title
+    format: field
+    defines:
+      - 用一句短标题描述本次 smoke test。
+  - !schema
+    names:
+      - result
+    format: field
+    defines:
+      - 记录本次 smoke test 的观察结果。

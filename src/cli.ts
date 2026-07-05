@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { initCommand } from "./commands/init.js";
 import { listCommand } from "./commands/list.js";
+import { runEnterSchemaCommand, runReportCommand, runStartCommand, runStatusCommand } from "./commands/run.js";
 import { skillInitCommand } from "./commands/skill.js";
 import { validateCommand } from "./commands/validate.js";
 import { viewCommand } from "./commands/view.js";
@@ -18,6 +19,7 @@ program
   .description("Create the default config file and memory directory structure.")
   .option("--memory-root <path>", "memory root directory")
   .option("--reviews-root <path>", "review files root directory")
+  .option("--runs-root <path>", "run state files root directory")
   .option("--force", "overwrite the existing config file")
   .action(initCommand);
 
@@ -49,6 +51,37 @@ skill
   .option("--directory <path>", "skills directory", ".agents/skills")
   .option("--force", "overwrite the existing skill")
   .action(skillInitCommand);
+
+const run = program
+  .command("run")
+  .description("Execute a procedure with step-gated progress reporting.");
+
+run
+  .command("start")
+  .description("Start a run from a procedure.")
+  .argument("<procedure-name>", "procedure primary name or alias")
+  .action(runStartCommand);
+
+run
+  .command("report")
+  .description("Report the current step artifact and advance the run.")
+  .requiredOption("--run <id>", "run id")
+  .option("--artifact <value>", "artifact value")
+  .option("--artifact-file <path>", "read artifact value from file")
+  .action(runReportCommand);
+
+run
+  .command("enter-schema")
+  .description("Enter a schema artifact writing flow.")
+  .argument("<schema-name>", "schema primary name or alias")
+  .requiredOption("--run <id>", "run id")
+  .action(runEnterSchemaCommand);
+
+run
+  .command("status")
+  .description("Show run status or list recent runs.")
+  .option("--run <id>", "run id")
+  .action(runStatusCommand);
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);

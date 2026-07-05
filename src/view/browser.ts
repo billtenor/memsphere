@@ -30,6 +30,9 @@ export const browserHtml = String.raw`<!doctype html>
     .brand, .review-head, .toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
     .brand h1, .review-head h2, .title { margin: 0; letter-spacing: 0; }
     .brand h1 { font-size: 18px; }
+    .view-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 14px; }
+    .view-tab { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); padding: 7px 8px; }
+    .view-tab.active { border-color: #b8cbc7; background: var(--accent-soft); color: #173f3c; font-weight: 700; }
     .count, .muted, .subtitle, .review-sub { color: var(--muted); }
     .count { font-size: 12px; }
     .search, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); outline: none; }
@@ -37,12 +40,14 @@ export const browserHtml = String.raw`<!doctype html>
     textarea { min-height: 92px; resize: vertical; padding: 10px; }
     .search:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(40, 108, 103, .12); }
     .kind { margin: 14px 0 6px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
-    .memory-list, .review-list, .comment-list, .flow { display: grid; gap: 8px; }
-    .memory-button, .review-card { width: 100%; text-align: left; border: 0; border-radius: 6px; background: transparent; color: var(--text); padding: 8px 9px; }
-    .memory-button:hover, .review-card:hover { background: #eceee8; }
-    .memory-button.active, .review-card.active { background: var(--accent-soft); color: #173f3c; font-weight: 700; }
+    .memory-list, .review-list, .comment-list, .flow, .task-list, .event-list { display: grid; gap: 8px; }
+    .memory-button, .review-card, .task-card { width: 100%; text-align: left; border: 0; border-radius: 6px; background: transparent; color: var(--text); padding: 8px 9px; }
+    .memory-button:hover, .review-card:hover, .task-card:hover { background: #eceee8; }
+    .memory-button.active, .review-card.active, .task-card.active { background: var(--accent-soft); color: #173f3c; font-weight: 700; }
     .review-card { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; box-shadow: var(--shadow); }
     .review-card b { display: block; overflow-wrap: anywhere; margin-bottom: 4px; }
+    .task-card { display: grid; gap: 4px; }
+    .task-card b { overflow-wrap: anywhere; }
     .content { min-width: 0; padding: 22px 28px 48px; }
     .toolbar { margin-bottom: 18px; }
     .toolbar-actions, .comment-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -58,6 +63,8 @@ export const browserHtml = String.raw`<!doctype html>
     .panel { padding: 12px; margin: 12px 0; }
     .meta { display: flex; gap: 8px; flex-wrap: wrap; margin: 13px 0 18px; }
     .pill { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 3px 8px; font-size: 12px; }
+    button.pill { cursor: pointer; }
+    button.pill:hover { border-color: var(--accent); color: var(--accent); }
     .pill.strong { color: #173f3c; border-color: #b8cbc7; background: #edf6f3; }
     .pill.warn { color: var(--warn); background: #fbf2e8; border-color: #ead2b7; }
     .pill.processing { color: var(--accent); background: #edf6f3; border-color: #b8cbc7; }
@@ -90,14 +97,28 @@ export const browserHtml = String.raw`<!doctype html>
     .field-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
     .field-table th, .field-table td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; white-space: pre-wrap; }
     .field-table th { width: 220px; background: #f3f5f0; font-weight: 700; }
-    .flow-item { border: 1px solid var(--line); border-left: 4px solid #a7b0a5; background: var(--surface); border-radius: 8px; padding: 10px 12px; box-shadow: var(--shadow); white-space: pre-wrap; }
+    .flow-item { border: 1px solid var(--line); border-left: 4px solid #a7b0a5; background: var(--surface); border-radius: 8px; padding: 10px 14px; box-shadow: var(--shadow); white-space: normal; }
     .flow-item.call { border-left-color: var(--accent); background: #f2f8f6; }
     .flow-item.branch { border-left-color: var(--warn); background: #fbf7f0; }
-    .flow-label { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 5px; }
-    .flow-condition { font-weight: 700; margin-bottom: 7px; }
-    .flow-children { margin-left: 14px; padding-left: 14px; border-left: 1px solid var(--line); display: grid; gap: 8px; }
+    .flow-head { display: grid; grid-template-columns: max-content minmax(220px, 1fr) max-content; gap: 12px; align-items: center; }
+    .flow-label { display: inline-flex; align-items: center; width: fit-content; border-radius: 999px; background: #eef1ed; color: #4f5a5c; font-size: 12px; font-weight: 700; padding: 2px 8px; }
+    .flow-condition { color: #4f5a5c; font-size: 13px; font-weight: 700; margin: 12px 0 7px; }
+    .flow-children { margin-left: 12px; padding-left: 14px; border-left: 2px solid var(--line); display: grid; gap: 8px; }
+    .flow-branch-row { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px; align-items: start; margin-top: 10px; }
+    .flow-branch-row .flow-condition { margin: 8px 0 0; }
+    .flow-branch-row .flow-children { margin-left: 0; }
+    .flow-else { display: grid; gap: 8px; margin-top: 10px; }
+    .flow-action { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .artifact-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-end; min-width: 260px; color: var(--muted); }
+    .artifact-label { color: var(--muted); font-size: 12px; font-weight: 700; }
     .call-link { color: var(--accent); text-decoration: none; font-weight: 700; }
     .call-link:hover { text-decoration: underline; }
+    .task-summary { display: grid; gap: 12px; }
+    .task-step { border-left: 4px solid var(--accent); }
+    .task-result { margin-top: 8px; }
+    .task-result .pre { margin-top: 6px; }
+    .pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f3f5f0; border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin: 8px 0 0; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 12px; }
     .comment-card { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; }
     .comment-card b { display: block; overflow-wrap: anywhere; }
     .comment-card p { margin: 6px 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -129,6 +150,9 @@ export const browserHtml = String.raw`<!doctype html>
     }
     .review-sub { margin: 4px 0 14px; font-size: 13px; }
     code { background: var(--soft); border-radius: 4px; padding: 1px 4px; }
+    body.task-mode .shell { grid-template-columns: 300px minmax(0, 1fr); }
+    body.task-mode .review { display: none; }
+    body.task-mode .search, body.task-mode #expand, body.task-mode #collapse { display: none; }
     @media (max-width: 1100px) {
       .shell { grid-template-columns: 280px minmax(0, 1fr); }
       .review { grid-column: 1 / -1; height: auto; position: static; border-left: 0; border-top: 1px solid var(--line); }
@@ -138,6 +162,8 @@ export const browserHtml = String.raw`<!doctype html>
       .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
       .content { padding: 18px 16px 36px; }
       .toolbar { flex-direction: column; }
+      .flow-head { grid-template-columns: 1fr; gap: 8px; align-items: flex-start; }
+      .artifact-row { justify-content: flex-start; min-width: 0; }
     }
   </style>
 </head>
@@ -145,6 +171,10 @@ export const browserHtml = String.raw`<!doctype html>
   <main class="shell">
     <aside class="sidebar">
       <div class="brand"><h1>vibe-mem</h1><span class="count" id="count">Loading</span></div>
+      <div class="view-tabs">
+        <button class="view-tab active" id="memory-tab" type="button">Memory</button>
+        <button class="view-tab" id="task-tab" type="button">Task</button>
+      </div>
       <input id="search" class="search" type="search" placeholder="Search memories" />
       <div id="nav"></div>
     </aside>
@@ -189,16 +219,63 @@ export const browserHtml = String.raw`<!doctype html>
   <script>
     const kindOrder = ["procedures", "schemas", "concepts", "statements"];
     const selectedReviewKey = "vibe-mem.selectedReview.v2";
+    const selectedTaskKey = "vibe-mem.selectedTask.v1";
+    const viewModeKey = "vibe-mem.viewMode.v1";
+    const displayLanguageKey = "vibe-mem.displayLanguage.v1";
+    const displayLanguage = localStorage.getItem(displayLanguageKey) === "yaml" ? "yaml" : "zh";
+    const vocabulary = {
+      procedures: { zh: "流程", yaml: "procedures" },
+      schemas: { zh: "图式", yaml: "schemas" },
+      concepts: { zh: "概念", yaml: "concepts" },
+      statements: { zh: "命题", yaml: "statements" },
+      defines: { zh: "定义", yaml: "defines" },
+      asserts: { zh: "断言", yaml: "asserts" },
+      goals: { zh: "目标", yaml: "goals" },
+      flow: { zh: "流程", yaml: "flow" },
+      step: { zh: "步骤", yaml: "action" },
+      if: { zh: "条件判断", yaml: "!if" },
+      elseif: { zh: "否则如果", yaml: "elseif" },
+      else: { zh: "否则", yaml: "else" },
+      while: { zh: "循环判断", yaml: "!while" },
+      call: { zh: "调用流程", yaml: "!call" },
+      artifact: { zh: "产物", yaml: "artifact" },
+      schema: { zh: "图式", yaml: "schema" },
+      action: { zh: "要做什么", yaml: "action" },
+      then: { zh: "然后", yaml: "then" },
+      artifactContent: { zh: "产物内容", yaml: "artifact.value" },
+      currentStep: { zh: "当前步骤", yaml: "current" },
+      completed: { zh: "已完成", yaml: "done" },
+      notStarted: { zh: "未开始", yaml: "pending" },
+      waitingReport: { zh: "等待上报", yaml: "waiting" },
+      none: { zh: "无", yaml: "none" },
+      missingTarget: { zh: "未找到 ", yaml: "missing " },
+      noSteps: { zh: "没有步骤", yaml: "No steps" },
+      noArtifacts: { zh: "还没有上报产物。", yaml: "No artifact has been reported yet." },
+      format: { zh: "格式", yaml: "format" },
+      boolean: { zh: "判断结果", yaml: "boolean" },
+      string: { zh: "短文本", yaml: "string" },
+      int: { zh: "数字", yaml: "int" },
+      markdown: { zh: "文档", yaml: "markdown" },
+      json: { zh: "JSON", yaml: "json" },
+      yaml: { zh: "YAML", yaml: "yaml" }
+    };
     const state = {
+      viewMode: localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
       payload: null,
       memories: [],
       filtered: [],
       selectedId: null,
+      selectedTaskId: localStorage.getItem(selectedTaskKey) || null,
       selectedReviewId: localStorage.getItem(selectedReviewKey) || null,
       byName: new Map(),
       reviews: [],
+      runs: [],
       renderLine: 0
     };
+
+    function t(key) {
+      return vocabulary[key]?.[displayLanguage] || key;
+    }
 
     const el = {
       nav: document.getElementById("nav"),
@@ -211,13 +288,17 @@ export const browserHtml = String.raw`<!doctype html>
       comments: document.getElementById("comments"),
       commentSummary: document.getElementById("comment-summary"),
       submitReview: document.getElementById("submit-review"),
-      reviewLabel: document.getElementById("review-label")
+      reviewLabel: document.getElementById("review-label"),
+      memoryTab: document.getElementById("memory-tab"),
+      taskTab: document.getElementById("task-tab")
     };
 
     document.getElementById("expand").addEventListener("click", () => setAllSections(true));
     document.getElementById("collapse").addEventListener("click", () => setAllSections(false));
     document.getElementById("refresh").addEventListener("click", () => loadAll());
     document.getElementById("create-review").addEventListener("click", createReview);
+    el.memoryTab.addEventListener("click", () => setViewMode("memory"));
+    el.taskTab.addEventListener("click", () => setViewMode("task"));
     el.submitReview.addEventListener("click", submitReview);
     el.search.addEventListener("input", () => {
       applyFilter();
@@ -225,9 +306,12 @@ export const browserHtml = String.raw`<!doctype html>
     });
 
     loadAll();
+    setInterval(() => {
+      if (state.viewMode === "task") loadRuns().then(renderAll).catch(console.error);
+    }, 4000);
 
     async function loadAll() {
-      await Promise.all([loadMemories(), loadReviews()]);
+      await Promise.all([loadMemories(), loadReviews(), loadRuns()]);
       renderAll();
     }
 
@@ -257,11 +341,36 @@ export const browserHtml = String.raw`<!doctype html>
       }
     }
 
+    async function loadRuns() {
+      const response = await fetch("/api/runs");
+      if (!response.ok) throw new Error(await response.text());
+      state.runs = (await response.json()).runs || [];
+      if (!state.runs.some(run => run.id === state.selectedTaskId)) {
+        state.selectedTaskId = state.runs[0]?.id || null;
+        saveSelectedTask();
+      }
+    }
+
     function renderAll() {
-      document.body.classList.toggle("review-active", canComment());
+      document.body.classList.toggle("task-mode", state.viewMode === "task");
+      document.body.classList.toggle("review-active", state.viewMode === "memory" && canComment());
+      el.memoryTab.classList.toggle("active", state.viewMode === "memory");
+      el.taskTab.classList.toggle("active", state.viewMode === "task");
+      if (state.viewMode === "task") {
+        renderTaskNav();
+        renderSelectedTask();
+        return;
+      }
+      el.count.textContent = state.memories.length + " memories";
       renderNav();
       renderSelected();
       renderReview();
+    }
+
+    function setViewMode(mode) {
+      state.viewMode = mode;
+      localStorage.setItem(viewModeKey, mode);
+      renderAll();
     }
 
     function applyFilter() {
@@ -279,7 +388,7 @@ export const browserHtml = String.raw`<!doctype html>
         if (!group.length) continue;
         const label = document.createElement("div");
         label.className = "kind";
-        label.textContent = kind;
+        label.textContent = t(kind);
         el.nav.append(label);
         const list = document.createElement("div");
         list.className = "memory-list";
@@ -296,6 +405,309 @@ export const browserHtml = String.raw`<!doctype html>
         }
         el.nav.append(list);
       }
+    }
+
+    function renderTaskNav() {
+      el.nav.innerHTML = "";
+      el.count.textContent = state.runs.length + " tasks";
+      if (!state.runs.length) {
+        const empty = document.createElement("div");
+        empty.className = "muted";
+        empty.textContent = "No task runs yet.";
+        el.nav.append(empty);
+        return;
+      }
+
+      for (const status of ["running", "done"]) {
+        const group = state.runs.filter(run => run.status === status);
+        if (!group.length) continue;
+        const label = document.createElement("div");
+        label.className = "kind";
+        label.textContent = status;
+        el.nav.append(label);
+        const list = document.createElement("div");
+        list.className = "task-list";
+        for (const run of group) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "task-card" + (run.id === state.selectedTaskId ? " active" : "");
+          const title = document.createElement("b");
+          title.textContent = run.procedureName;
+          const meta = document.createElement("span");
+          meta.className = "muted";
+          meta.textContent = shortRunId(run.id) + " · " + run.events.length + " artifact(s)";
+          button.append(title, meta);
+          button.addEventListener("click", () => {
+            state.selectedTaskId = run.id;
+            saveSelectedTask();
+            renderAll();
+          });
+          list.append(button);
+        }
+        el.nav.append(list);
+      }
+    }
+
+    function selectedTask() {
+      return state.runs.find(run => run.id === state.selectedTaskId) || state.runs[0] || null;
+    }
+
+    function renderSelectedTask() {
+      const run = selectedTask();
+      if (!run) {
+        el.title.textContent = "Tasks";
+        el.subtitle.textContent = "No runs found.";
+        el.detail.className = "empty";
+        el.detail.innerHTML = 'Start one with <code>vibe-mem run start &lt;procedure&gt;</code>.';
+        return;
+      }
+
+      state.selectedTaskId = run.id;
+      saveSelectedTask();
+      el.title.textContent = run.procedureName;
+      el.subtitle.textContent = run.id;
+      el.detail.className = "task-summary";
+      el.detail.innerHTML = "";
+      el.detail.append(renderRunMeta(run));
+      if (run.plan && run.plan.length) el.detail.append(renderRunFlow(run));
+      else el.detail.append(renderRunArtifacts(run));
+    }
+
+    function renderRunMeta(run) {
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.append(pill(run.status, false, statusPillClass(run.status)));
+      meta.append(pill(run.stack.length + " active frame(s)"));
+      meta.append(pill(run.events.length + " artifact(s)"));
+      meta.append(pill("updated " + formatTime(run.updatedAt)));
+      return meta;
+    }
+
+    function renderCurrentRunStep(run, step) {
+      const frame = currentRunFrame(run);
+      const section = document.createElement("section");
+      section.className = "section open task-step";
+      section.append(taskSectionHeader("Next: " + step.artifact, formatLabel(step.format), "next-step"));
+      const panel = document.createElement("div");
+      panel.className = "section-body";
+      panel.append(blockTitle(t("action")));
+      const instruction = document.createElement("div");
+      instruction.textContent = step.instruction;
+      panel.append(instruction);
+      if (step.details && step.details.length) {
+        const details = document.createElement("ul");
+        details.className = "text-list";
+        for (const detail of step.details) {
+          const item = document.createElement("li");
+          item.textContent = detail;
+          details.append(item);
+        }
+        panel.append(details);
+      }
+      const artifact = document.createElement("div");
+      artifact.className = "meta";
+      if (step.kind) artifact.append(pill(step.kind));
+      artifact.append(pill(step.artifact, true));
+      appendFormatMeta(artifact, step.format, step.schemaName);
+      artifact.append(pill((frame?.type || "run") + " · " + (frame ? (frame.index + 1) + "/" + frame.steps.length : "")));
+      panel.append(artifact);
+      const command = document.createElement("div");
+      command.className = "pre mono";
+      command.textContent = step.format === "schema"
+        ? "vibe-mem run enter-schema " + shellQuote(step.schemaName || step.artifact) + " --run " + shellQuote(run.id)
+        : "vibe-mem run report --run " + shellQuote(run.id) + " --artifact <value>";
+      panel.append(blockTitle(t("then")));
+      panel.append(command);
+      section.append(panel);
+      return section;
+    }
+
+    function renderRunArtifacts(run) {
+      const wrap = document.createElement("div");
+      if (!run.events.length) {
+        const empty = document.createElement("section");
+        empty.className = "panel";
+        empty.append(blockTitle(t("artifact")));
+        const body = document.createElement("div");
+        body.className = "muted";
+        body.textContent = t("noArtifacts");
+        empty.append(body);
+        wrap.append(empty);
+        return wrap;
+      }
+      const title = document.createElement("div");
+      title.className = "block-title";
+      title.textContent = t("artifact");
+      wrap.append(title);
+      for (const event of run.events) {
+        wrap.append(renderRunArtifact(event));
+      }
+      return wrap;
+    }
+
+    function renderRunArtifact(event) {
+      const section = document.createElement("section");
+      section.className = "section open";
+      section.append(taskSectionHeader(event.artifact.name, artifactHeaderBadge(event.artifact), event.stepId));
+      const body = document.createElement("div");
+      body.className = "section-body";
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.append(pill(event.frame));
+      appendFormatMeta(meta, event.artifact.format, event.artifact.schemaName);
+      meta.append(pill(formatTime(event.at)));
+      const value = document.createElement("div");
+      value.className = "pre";
+      value.textContent = event.artifact.value;
+      body.append(meta, blockTitle(t("artifactContent")), value);
+      section.append(body);
+      return section;
+    }
+
+    function renderRunFlow(run) {
+      const wrap = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "block-title";
+      title.textContent = t("flow");
+      wrap.append(title);
+      const flow = document.createElement("div");
+      flow.className = "flow";
+      const eventsByStep = new Map();
+      for (const event of run.events) eventsByStep.set(event.stepId, event);
+      const activeStep = currentRunStep(run);
+      for (const step of run.plan || []) {
+        flow.append(renderTaskFlowStep(step, eventsByStep, activeStep, run));
+      }
+      wrap.append(flow);
+      return wrap;
+    }
+
+    function renderTaskFlowStep(step, eventsByStep, activeStep, run) {
+      if (step.kind === "branch" && step.branches) return renderTaskBranch(step, eventsByStep, activeStep, run);
+      if (step.kind === "loop" && step.loop) return renderTaskLoop(step, eventsByStep, activeStep, run);
+      if (step.kind === "call") return renderTaskCall(step);
+      return renderTaskAction(step, eventsByStep, activeStep, run);
+    }
+
+    function renderTaskAction(step, eventsByStep, activeStep, run) {
+      const item = document.createElement("div");
+      item.className = "flow-item" + (activeStep && activeStep.id === step.id ? " task-step" : "");
+      item.append(renderFlowHead(t("step"), step.instruction, step.artifact || step.id, step.id, step, taskStepStatus(step, eventsByStep.get(step.id), activeStep)));
+      item.append(renderTaskStepResult(step, eventsByStep.get(step.id), activeStep, run));
+      return item;
+    }
+
+    function renderTaskBranch(step, eventsByStep, activeStep, run) {
+      const item = document.createElement("div");
+      item.className = "flow-item branch" + (activeStep && activeStep.id === step.id ? " task-step" : "");
+      item.append(renderFlowHead(t("if"), step.instruction, step.artifact || step.id, step.id, step, taskStepStatus(step, eventsByStep.get(step.id), activeStep)));
+      item.append(renderTaskStepResult(step, eventsByStep.get(step.id), activeStep, run));
+      item.append(renderTaskChildSteps(step.branches.truthy, eventsByStep, activeStep, run));
+      if (step.branches.falsy.length) item.append(renderElseTaskBranch(step.branches.falsy, eventsByStep, activeStep, run));
+      return item;
+    }
+
+    function renderTaskLoop(step, eventsByStep, activeStep, run) {
+      const item = document.createElement("div");
+      item.className = "flow-item branch" + (activeStep && activeStep.id === step.id ? " task-step" : "");
+      item.append(renderFlowHead(t("while"), step.instruction, step.artifact || step.id, step.id, step, taskStepStatus(step, eventsByStep.get(step.id), activeStep)));
+      item.append(renderTaskStepResult(step, eventsByStep.get(step.id), activeStep, run));
+      item.append(renderTaskChildSteps(step.loop.body, eventsByStep, activeStep, run));
+      return item;
+    }
+
+    function renderTaskCall(step) {
+      return renderCall(step.target, step.id);
+    }
+
+    function renderTaskChildSteps(steps, eventsByStep, activeStep, run) {
+      const children = document.createElement("div");
+      children.className = "flow-children";
+      if (!steps.length) {
+        const empty = document.createElement("div");
+        empty.className = "muted";
+        empty.textContent = t("noSteps");
+        children.append(empty);
+      } else {
+        steps.forEach(step => children.append(renderTaskFlowStep(step, eventsByStep, activeStep, run)));
+      }
+      return children;
+    }
+
+    function renderElseTaskBranch(steps, eventsByStep, activeStep, run) {
+      const wrap = document.createElement("div");
+      wrap.className = "flow-else";
+      const head = document.createElement("div");
+      head.className = "flow-head";
+      const label = document.createElement("div");
+      label.className = "flow-label";
+      label.textContent = t("else");
+      head.append(label, document.createElement("div"));
+      wrap.append(head, renderTaskChildSteps(steps, eventsByStep, activeStep, run));
+      return wrap;
+    }
+
+    function renderTaskStepResult(step, event, activeStep, run) {
+      const box = document.createElement("div");
+      box.className = "task-result";
+      const title = document.createElement("div");
+      title.className = "block-title";
+      title.textContent = t("artifactContent");
+      const value = document.createElement("div");
+      value.className = event ? "pre" : "muted";
+      value.textContent = event ? event.artifact.value : activeStep && activeStep.id === step.id ? t("waitingReport") : t("none");
+      box.append(title, value);
+      return box;
+    }
+
+    function taskStepStatus(step, event, activeStep) {
+      if (event) return t("completed");
+      if (activeStep && activeStep.id === step.id) return t("currentStep");
+      return t("notStarted");
+    }
+
+    function taskSectionHeader(text, badge, anchor) {
+      const button = document.createElement("button");
+      button.className = "section-header";
+      button.dataset.anchor = "task:" + anchor;
+      button.innerHTML = '<span class="chevron">›</span><span class="node-title"></span><span class="pill"></span>';
+      button.querySelector(".node-title").textContent = text;
+      button.querySelector(".pill").textContent = badge;
+      button.addEventListener("click", () => button.parentElement.classList.toggle("open"));
+      return button;
+    }
+
+    function currentRunFrame(run) {
+      return run.stack && run.stack.length ? run.stack[run.stack.length - 1] : null;
+    }
+
+    function currentRunStep(run) {
+      const frame = currentRunFrame(run);
+      return frame ? frame.steps[frame.index] : null;
+    }
+
+    function blockTitle(text) {
+      const title = document.createElement("div");
+      title.className = "block-title";
+      title.textContent = text;
+      return title;
+    }
+
+    function shortRunId(id) {
+      return String(id || "").replace(/^run-/, "").slice(0, 18);
+    }
+
+    function formatTime(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString();
+    }
+
+    function shellQuote(value) {
+      const text = String(value ?? "");
+      if (/^[a-zA-Z0-9_./:-]+$/.test(text)) return text;
+      return "'" + text.replace(/'/g, "'\\''") + "'";
     }
 
     function selectedMemory() {
@@ -410,8 +822,8 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function appendTextBlocks(target, node) {
-      appendList(target, "defines", node.defines, "defines");
-      appendList(target, "asserts", node.asserts, "asserts");
+      appendList(target, t("defines"), node.defines, "defines");
+      appendList(target, t("asserts"), node.asserts, "asserts");
     }
 
     function appendList(target, heading, values, key) {
@@ -459,10 +871,10 @@ export const browserHtml = String.raw`<!doctype html>
     function renderProcedure(entity) {
       const wrap = document.createElement("div");
       appendTextBlocks(wrap, entity);
-      if (entity.goals && entity.goals.length) appendList(wrap, "goals", entity.goals, "goals");
+      if (entity.goals && entity.goals.length) appendList(wrap, t("goals"), entity.goals, "goals");
       const title = document.createElement("div");
       title.className = "block-title";
-      title.textContent = "flow";
+      title.textContent = t("flow");
       const flow = document.createElement("div");
       flow.className = "flow";
       for (const [index, step] of (entity.flow || []).entries()) flow.append(renderFlowStep(step, "flow[" + (index + 1) + "]"));
@@ -473,8 +885,13 @@ export const browserHtml = String.raw`<!doctype html>
     function renderFlowStep(step, anchor) {
       if (typeof step === "string") return flowItem(commentable(step, anchor, step, anchor));
       if (!step || typeof step !== "object") return flowItem(commentable(String(step), anchor, String(step), anchor));
-      if (step.tag === "!call") return renderCall(step.value, anchor);
+      if (step.tag === "!call") return renderCall(step.target || step.value, anchor);
+      if (step.tag === "!if" && step.condition) return renderCanonicalIf(step, anchor);
+      if (step.tag === "!while" && step.condition) return renderCanonicalWhile(step, anchor);
       if (step.tag === "!if" || step.tag === "!elseif" || step.tag === "!else" || step.tag === "!while") return renderBranch(step, anchor);
+      if (step.branch) return renderStructuredBranch(step, anchor);
+      if (step.loop) return renderStructuredLoop(step, anchor);
+      if (step.action && artifactSpec(step).format) return renderStructuredAction(step, anchor);
       const text = JSON.stringify(step, null, 2);
       return flowItem(commentable(text, anchor, text, anchor));
     }
@@ -489,21 +906,243 @@ export const browserHtml = String.raw`<!doctype html>
     function renderCall(name, anchor) {
       const item = document.createElement("div");
       item.className = "flow-item call";
-      const label = document.createElement("div");
-      label.className = "flow-label";
-      label.textContent = "call";
+      const target = state.byName.get(name);
       const link = document.createElement("a");
       link.className = "call-link";
-      link.textContent = name;
-      link.addEventListener("click", () => {
-        const target = state.byName.get(name);
+      link.href = "#";
+      link.textContent = target ? primaryName(target.entity) : (name || "(missing target)");
+      link.title = target ? "Open called memory" : "Called memory not found";
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
         if (target) {
           state.selectedId = target.id;
           renderAll();
         }
       });
-      item.append(label, commentable(link, "!call " + name, String(name), anchor));
+      const head = document.createElement("div");
+      head.className = "flow-head";
+      const label = document.createElement("div");
+      label.className = "flow-label";
+      label.textContent = t("call");
+      const action = document.createElement("div");
+      action.className = "flow-action";
+      const content = document.createElement("span");
+      if (!target) {
+        const text = document.createElement("span");
+        text.textContent = t("missingTarget");
+        content.append(text);
+      }
+      content.append(link);
+      action.append(commentable(content, "!call " + name, String(name), anchor));
+      head.append(label, action);
+      item.append(head);
       return item;
+    }
+
+    function renderCanonicalIf(step, anchor) {
+      const item = document.createElement("div");
+      item.className = "flow-item branch";
+      item.append(renderStructuredControlHead(step.condition, anchor + ".condition", t("if")));
+      item.append(renderNamedFlowChildren("", step.then || [], anchor + ".then"));
+      const elseif = Array.isArray(step.elseif) ? step.elseif : [];
+      elseif.forEach((branch, index) => {
+        const branchWrap = document.createElement("div");
+        branchWrap.append(renderStructuredControlHead(branch.condition, anchor + ".elseif[" + (index + 1) + "].condition", t("elseif")));
+        branchWrap.append(renderNamedFlowChildren("", branch.then || [], anchor + ".elseif[" + (index + 1) + "].then"));
+        item.append(branchWrap);
+      });
+      if (step.else) item.append(renderElseBranch(step.else || [], anchor + ".else"));
+      return item;
+    }
+
+    function renderCanonicalWhile(step, anchor) {
+      const item = document.createElement("div");
+      item.className = "flow-item branch";
+      item.append(renderStructuredControlHead(step.condition, anchor + ".condition", t("while")));
+      item.append(renderNamedFlowChildren("", step.do || [], anchor + ".do"));
+      return item;
+    }
+
+    function renderStructuredAction(step, anchor) {
+      const item = document.createElement("div");
+      item.className = "flow-item";
+      const artifact = artifactSpec(step);
+      item.append(renderFlowHead(t("step"), step.action, artifact.name || anchor, anchor + ".action", step));
+      return item;
+    }
+
+    function renderStructuredBranch(step, anchor) {
+      const item = document.createElement("div");
+      item.className = "flow-item branch";
+      item.append(renderStructuredControlHead(step.branch, anchor + ".branch", t("if")));
+      item.append(renderNamedFlowChildren("when true", step.when_true || [], anchor + ".when_true"));
+      item.append(renderNamedFlowChildren("when false", step.when_false || [], anchor + ".when_false"));
+      return item;
+    }
+
+    function renderStructuredLoop(step, anchor) {
+      const item = document.createElement("div");
+      item.className = "flow-item branch";
+      item.append(renderStructuredControlHead(step.loop, anchor + ".loop", t("while")));
+      item.append(renderNamedFlowChildren("while true", step.while_true || [], anchor + ".while_true"));
+      return item;
+    }
+
+    function renderStructuredControlHead(step, anchor, labelText = t("if")) {
+      const head = document.createElement("div");
+      if (!step || typeof step !== "object") {
+        head.append(commentable(String(step), anchor, String(step), anchor));
+        return head;
+      }
+      const artifact = artifactSpec(step);
+      head.append(renderFlowHead(labelText, step.action || "", artifact.name || anchor, anchor + ".action", step));
+      return head;
+    }
+
+    function renderElseBranch(steps, anchor) {
+      const wrap = document.createElement("div");
+      wrap.className = "flow-else";
+      const head = document.createElement("div");
+      head.className = "flow-head";
+      const label = document.createElement("div");
+      label.className = "flow-label";
+      label.textContent = t("else");
+      const action = document.createElement("div");
+      action.className = "flow-action muted";
+      head.append(label, action);
+      wrap.append(head);
+      const children = document.createElement("div");
+      children.className = "flow-children";
+      if (!Array.isArray(steps) || !steps.length) {
+        const empty = document.createElement("div");
+        empty.className = "muted";
+        empty.textContent = t("noSteps");
+        children.append(empty);
+      } else {
+        steps.forEach((child, index) => children.append(renderFlowStep(child, anchor + "[" + (index + 1) + "]")));
+      }
+      wrap.append(children);
+      return wrap;
+    }
+
+    function renderFlowHead(labelText, action, target, anchor, step, status) {
+      const head = document.createElement("div");
+      head.className = "flow-head";
+      const label = document.createElement("div");
+      label.className = "flow-label";
+      label.textContent = labelText || t("if");
+      head.append(label);
+      head.append(renderActionText(action, target, anchor));
+      head.append(renderArtifactRow(step, status));
+      return head;
+    }
+
+    function renderActionText(text, target, anchor) {
+      const wrap = document.createElement("div");
+      wrap.className = "flow-action";
+      wrap.append(commentable(text, target, text, anchor));
+      return wrap;
+    }
+
+    function renderArtifactRow(step, status) {
+      const row = document.createElement("div");
+      row.className = "artifact-row";
+      const label = document.createElement("span");
+      label.className = "artifact-label";
+      label.textContent = t("artifact");
+      row.append(label);
+      appendArtifactMeta(row, step);
+      if (status) row.append(pill(status, false, status === t("currentStep") ? "processing" : status === t("completed") ? "done" : ""));
+      return row;
+    }
+
+    function appendArtifactMeta(target, step) {
+      const artifact = artifactSpec(step);
+      target.append(pill(artifact.name || t("artifact"), true));
+      appendFormatMeta(target, artifact.format, artifact.schema);
+    }
+
+    function appendFormatMeta(target, format, schemaName) {
+      if (format === "schema" && schemaName) {
+        target.append(schemaLinkPill(schemaName));
+        return;
+      }
+      target.append(pill(formatLabel(format)));
+    }
+
+    function schemaLinkPill(schemaName) {
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "pill schema-link";
+      link.textContent = t("schema") + ": " + schemaName;
+      link.title = "Open schema";
+      link.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const target = state.byName.get(schemaName);
+        if (target) {
+          state.viewMode = "memory";
+          localStorage.setItem(viewModeKey, "memory");
+          state.selectedId = target.id;
+          renderAll();
+        }
+      });
+      return link;
+    }
+
+    function artifactHeaderBadge(artifact) {
+      if (artifact.format === "schema" && artifact.schemaName) return t("schema") + ": " + artifact.schemaName;
+      return formatLabel(artifact.format);
+    }
+
+    function artifactSpec(step) {
+      if (step && step.artifact && typeof step.artifact === "object") {
+        return {
+          name: step.artifact.name || "",
+          format: step.artifact.format || "",
+          schema: step.artifact.schema || ""
+        };
+      }
+      return {
+        name: typeof step?.artifact === "string" ? step.artifact : "",
+        format: step?.format || "",
+        schema: step?.schema || ""
+      };
+    }
+
+    function formatLabel(format) {
+      if (format === "boolean") return t("boolean");
+      if (format === "string") return t("string");
+      if (format === "int") return t("int");
+      if (format === "markdown") return t("markdown");
+      if (format === "json") return t("json");
+      if (format === "yaml") return t("yaml");
+      if (format === "schema") return t("schema");
+      return format || t("format");
+    }
+
+    function renderNamedFlowChildren(labelText, steps, anchor) {
+      const wrap = document.createElement("div");
+      const children = document.createElement("div");
+      children.className = "flow-children";
+      if (!Array.isArray(steps) || !steps.length) {
+        const empty = document.createElement("div");
+        empty.className = "muted";
+        empty.textContent = t("noSteps");
+        children.append(empty);
+      } else {
+        steps.forEach((child, index) => children.append(renderFlowStep(child, anchor + "[" + (index + 1) + "]")));
+      }
+      if (labelText) {
+        wrap.className = "flow-branch-row";
+        const condition = document.createElement("div");
+        condition.className = "flow-condition";
+        condition.textContent = labelText;
+        wrap.append(condition);
+      } else {
+        wrap.className = "flow-branch-body";
+      }
+      wrap.append(children);
+      return wrap;
     }
 
     function renderBranch(step, anchor) {
@@ -926,9 +1565,15 @@ export const browserHtml = String.raw`<!doctype html>
 
     function statusPillClass(status) {
       if (status === "done") return "done";
+      if (status === "running") return "processing";
       if (status === "processing") return "processing";
       if (status === "draft") return "warn";
       return "";
+    }
+
+    function saveSelectedTask() {
+      if (state.selectedTaskId) localStorage.setItem(selectedTaskKey, state.selectedTaskId);
+      else localStorage.removeItem(selectedTaskKey);
     }
 
     function saveSelectedReview() {

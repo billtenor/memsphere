@@ -6,7 +6,8 @@ import { z } from "zod";
 
 const configSchema = z.object({
   memoryRoot: z.string().min(1),
-  reviewsRoot: z.string().min(1).optional()
+  reviewsRoot: z.string().min(1).optional(),
+  runsRoot: z.string().min(1).optional()
 });
 
 type VibeMemConfigFile = z.infer<typeof configSchema>;
@@ -14,11 +15,13 @@ type VibeMemConfigFile = z.infer<typeof configSchema>;
 export type VibeMemConfig = {
   memoryRoot: string;
   reviewsRoot: string;
+  runsRoot: string;
 };
 
 export const defaultConfigPath = join(homedir(), ".vibe-mem", "config.json");
 export const defaultMemoryRoot = join(homedir(), ".vibe-mem", "memory");
 export const defaultReviewsRoot = join(homedir(), ".vibe-mem", "reviews");
+export const defaultRunsRoot = join(homedir(), ".vibe-mem", "runs");
 
 export function expandHome(input: string): string {
   if (input === "~") {
@@ -43,7 +46,8 @@ export async function readConfig(configPath = defaultConfigPath): Promise<VibeMe
 
   return {
     memoryRoot: resolvePath(config.memoryRoot),
-    reviewsRoot: resolvePath(config.reviewsRoot ?? "~/.vibe-mem/reviews")
+    reviewsRoot: resolvePath(config.reviewsRoot ?? "~/.vibe-mem/reviews"),
+    runsRoot: resolvePath(config.runsRoot ?? "~/.vibe-mem/runs")
   };
 }
 

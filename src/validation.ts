@@ -14,6 +14,7 @@ export type ValidationResult = {
   configPath: string;
   memoryRoot?: string;
   reviewsRoot?: string;
+  runsRoot?: string;
   issues: ValidationIssue[];
 };
 
@@ -49,11 +50,13 @@ export async function validateMemoryStore(configPath = defaultConfigPath): Promi
 
   let memoryRoot: string | undefined;
   let reviewsRoot: string | undefined;
+  let runsRoot: string | undefined;
 
   try {
     const config = await readConfig(configPath);
     memoryRoot = config.memoryRoot;
     reviewsRoot = config.reviewsRoot;
+    runsRoot = config.runsRoot;
   } catch (error) {
     return {
       configPath,
@@ -67,6 +70,10 @@ export async function validateMemoryStore(configPath = defaultConfigPath): Promi
 
   if (!(await pathExists(reviewsRoot))) {
     issues.push({ path: reviewsRoot, message: "reviews root does not exist" });
+  }
+
+  if (!(await pathExists(runsRoot))) {
+    issues.push({ path: runsRoot, message: "runs root does not exist" });
   }
 
   for (const kind of memoryKinds) {
@@ -84,6 +91,7 @@ export async function validateMemoryStore(configPath = defaultConfigPath): Promi
     configPath,
     memoryRoot,
     reviewsRoot,
+    runsRoot,
     issues
   };
 }
