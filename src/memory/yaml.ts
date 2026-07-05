@@ -64,10 +64,9 @@ function nodeToPlainValue(node: ParsedNode | null | undefined): unknown {
   }
 
   if (isMap(node)) {
-    return {
-      tag: nodeTag(node),
-      ...mapToPlainObject(node)
-    };
+    const tag = nodeTag(node);
+    const value = mapToPlainObject(node);
+    return tag?.startsWith("!") && tag !== "!" ? { tag, ...value } : value;
   }
 
   if ("items" in node && Array.isArray(node.items)) {

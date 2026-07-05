@@ -61,6 +61,11 @@ export const browserHtml = String.raw`<!doctype html>
     .empty, .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); }
     .empty { padding: 24px; color: var(--muted); }
     .panel { padding: 12px; margin: 12px 0; }
+    .error-panel { background: #fffdfb; border: 1px solid #e8c7bd; border-left: 4px solid var(--danger); border-radius: 8px; box-shadow: var(--shadow); padding: 18px; }
+    .error-panel h3 { margin: 0 0 8px; font-size: 16px; color: var(--danger); }
+    .error-panel p { margin: 0 0 12px; color: var(--muted); }
+    .error-list { margin: 0; padding-left: 18px; }
+    .error-list li { margin: 6px 0; overflow-wrap: anywhere; }
     .meta { display: flex; gap: 8px; flex-wrap: wrap; margin: 13px 0 18px; }
     .pill { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 3px 8px; font-size: 12px; }
     button.pill { cursor: pointer; }
@@ -301,7 +306,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     document.getElementById("expand").addEventListener("click", () => setAllSections(true));
     document.getElementById("collapse").addEventListener("click", () => setAllSections(false));
-    document.getElementById("refresh").addEventListener("click", () => loadAll());
+    document.getElementById("refresh").addEventListener("click", () => loadAll().catch(renderFatalError));
     document.getElementById("create-review").addEventListener("click", createReview);
     el.memoryTab.addEventListener("click", () => setViewMode("memory"));
     el.taskTab.addEventListener("click", () => setViewMode("task"));
@@ -311,7 +316,7 @@ export const browserHtml = String.raw`<!doctype html>
       renderNav();
     });
 
-    loadAll();
+    loadAll().catch(renderFatalError);
     setInterval(() => {
       if (state.viewMode === "task" && !hasOpenInlineEditor()) {
         loadRuns().then(renderAll).catch(console.error);
@@ -323,6 +328,17 @@ export const browserHtml = String.raw`<!doctype html>
       renderAll();
     }
 
+    function renderFatalError(error) {
+      const message = error instanceof Error ? error.message : String(error);
+      el.title.textContent = "Failed to load vibe-mem";
+      el.subtitle.textContent = "";
+      el.detail.className = "empty";
+      el.detail.textContent = message;
+      el.nav.innerHTML = "";
+      el.count.textContent = "Error";
+      renderReview();
+    }
+
     async function loadMemories() {
       el.detail.className = "empty";
       el.detail.textContent = "Loading...";
@@ -332,6 +348,7 @@ export const browserHtml = String.raw`<!doctype html>
       state.memories = state.payload.memories;
       state.byName = new Map();
       for (const memory of state.memories) {
+        if (!memory.entity) continue;
         for (const name of memory.entity.names || []) state.byName.set(name, memory);
       }
       applyFilter();
@@ -428,7 +445,7 @@ export const browserHtml = String.raw`<!doctype html>
       const q = el.search.value.trim().toLowerCase();
       state.filtered = state.memories.filter((memory) => {
         if (!q) return true;
-        return [memory.kind, ...(memory.entity.names || [])].join(" ").toLowerCase().includes(q);
+        return [memory.kind, memory.path, errorText(memory.error), ...(memory.entity?.names || [])].join(" ").toLowerCase().includes(q);
       });
     }
 
@@ -446,8 +463,8 @@ export const browserHtml = String.raw`<!doctype html>
         for (const memory of group) {
           const button = document.createElement("button");
           button.className = "memory-button" + (memory.id === state.selectedId ? " active" : "");
-          button.textContent = primaryName(memory.entity);
-          button.title = primaryName(memory.entity);
+          button.textContent = memory.error ? invalidMemoryName(memory) : primaryName(memory.entity);
+          button.title = memory.error ? errorText(memory.error) : primaryName(memory.entity);
           button.addEventListener("click", () => {
             state.selectedId = memory.id;
             renderAll();
@@ -869,6 +886,11 @@ export const browserHtml = String.raw`<!doctype html>
         el.detail.textContent = "No memory entities found.";
         return;
       }
+      if (memory.error) {
+        if (!currentReviewSnapshot("memory")) state.selectedId = memory.id;
+        renderInvalidMemory(memory);
+        return;
+      }
       if (!currentReviewSnapshot("memory")) state.selectedId = memory.id;
       el.title.textContent = primaryName(memory.entity);
       el.subtitle.textContent = memory.kind + " / " + primaryName(memory.entity);
@@ -890,6 +912,48 @@ export const browserHtml = String.raw`<!doctype html>
 
     function primaryName(entity) {
       return entity && Array.isArray(entity.names) && entity.names.length ? entity.names[0] : "(unnamed)";
+    }
+
+    function invalidMemoryName(memory) {
+      return memory.path ? memory.path.replace(/^.*\//, "").replace(/\.ya?ml$/, "") : "Invalid memory";
+    }
+
+    function renderInvalidMemory(memory) {
+      el.title.textContent = invalidMemoryName(memory);
+      el.subtitle.textContent = memory.kind + " / " + memory.path;
+      el.detail.className = "";
+      el.detail.innerHTML = "";
+
+      const panel = document.createElement("section");
+      panel.className = "error-panel";
+
+      const heading = document.createElement("h3");
+      heading.textContent = "Invalid memory YAML";
+      panel.append(heading);
+
+      const body = document.createElement("p");
+      body.textContent = memory.error?.message || "This memory could not be loaded.";
+      panel.append(body);
+
+      const issues = Array.isArray(memory.error?.issues) && memory.error.issues.length
+        ? memory.error.issues
+        : [errorText(memory.error)];
+      const list = document.createElement("ul");
+      list.className = "error-list";
+      for (const issue of issues) {
+        const item = document.createElement("li");
+        item.textContent = issue;
+        list.append(item);
+      }
+      panel.append(list);
+
+      el.detail.append(panel);
+    }
+
+    function errorText(error) {
+      if (!error) return "";
+      if (typeof error === "string") return error;
+      return [error.message, ...(Array.isArray(error.issues) ? error.issues : [])].filter(Boolean).join(" ");
     }
 
     function renderMeta(memory) {
@@ -1027,23 +1091,26 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderFlowStep(step, anchor) {
-      if (typeof step === "string") return flowItem(commentable(step, anchor, step, anchor));
-      if (!step || typeof step !== "object") return flowItem(commentable(String(step), anchor, String(step), anchor));
-      if (step.tag === "!call") return renderCall(step.target || step.value, anchor);
+      if (!step || typeof step !== "object") return invalidFlowItem(step, anchor);
+      if (step.tag === "!call" && step.target) return renderCall(step.target, anchor);
       if (step.tag === "!if" && step.condition) return renderCanonicalIf(step, anchor);
       if (step.tag === "!while" && step.condition) return renderCanonicalWhile(step, anchor);
-      if (step.tag === "!if" || step.tag === "!elseif" || step.tag === "!else" || step.tag === "!while") return renderBranch(step, anchor);
-      if (step.branch) return renderStructuredBranch(step, anchor);
-      if (step.loop) return renderStructuredLoop(step, anchor);
       if (step.action && artifactSpec(step).format) return renderStructuredAction(step, anchor);
-      const text = JSON.stringify(step, null, 2);
-      return flowItem(commentable(text, anchor, text, anchor));
+      return invalidFlowItem(step, anchor);
     }
 
     function flowItem(child) {
       const item = document.createElement("div");
       item.className = "flow-item";
       item.append(child);
+      return item;
+    }
+
+    function invalidFlowItem(step, anchor) {
+      const text = "Invalid flow step: " + JSON.stringify(step, null, 2);
+      const item = document.createElement("div");
+      item.className = "flow-item branch";
+      item.append(commentable(text, anchor, text, anchor));
       return item;
     }
 

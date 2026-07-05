@@ -1,7 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join, relative } from "node:path";
+import { ZodError, type ZodIssue } from "zod";
 import { type VibeMemConfig, readConfig } from "../config.js";
-import { readAllMemoryFiles } from "../memory/store.js";
+import { listMemoryFiles, readAllMemoryFiles, readMemoryFile } from "../memory/store.js";
+import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
 import {
   createReview,
@@ -27,8 +29,14 @@ type MemoryPayload = {
     id: string;
     kind: string;
     path: string;
-    entity: unknown;
+    entity?: unknown;
+    error?: MemoryLoadError;
   }>;
+};
+
+type MemoryLoadError = {
+  message: string;
+  issues: string[];
 };
 
 export async function viewCommand(options: ViewOptions): Promise<void> {
@@ -237,20 +245,37 @@ async function resolveReviewSnapshotFiles(input: {
 }
 
 async function loadMemoryPayload(memoryRoot: string): Promise<MemoryPayload> {
-  const files = await readAllMemoryFiles(memoryRoot);
+  const memories: MemoryPayload["memories"] = [];
 
-  return {
-    memoryRoot,
-    memories: files.map((file) => {
-      const primaryName = Array.isArray(file.entity.names) ? file.entity.names[0] : file.path;
-      return {
-        id: `${file.kind}/${primaryName}`,
-        kind: file.kind,
-        path: relative(memoryRoot, file.path),
-        entity: file.entity
-      };
-    })
-  };
+  for (const kind of memoryKinds) {
+    const paths = await listMemoryFiles(memoryRoot, kind);
+    for (const path of paths) {
+      memories.push(await loadMemoryListItem(memoryRoot, kind, path));
+    }
+  }
+
+  return { memoryRoot, memories };
+}
+
+async function loadMemoryListItem(memoryRoot: string, kind: MemoryKind, path: string): Promise<MemoryPayload["memories"][number]> {
+  const relativePath = relative(memoryRoot, path);
+  try {
+    const file = await readMemoryFile(kind, path);
+    const primaryName = Array.isArray(file.entity.names) ? file.entity.names[0] : file.path;
+    return {
+      id: `${file.kind}/${primaryName}`,
+      kind: file.kind,
+      path: relativePath,
+      entity: file.entity
+    };
+  } catch (error) {
+    return {
+      id: `${kind}/${relativePath}`,
+      kind,
+      path: relativePath,
+      error: formatMemoryLoadError(error)
+    };
+  }
 }
 
 async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
@@ -279,6 +304,64 @@ function normalizeReviewStatus(value: unknown): ReviewStatus | undefined {
     return value as ReviewStatus;
   }
   throw new Error("invalid review status");
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function formatMemoryLoadError(error: unknown): MemoryLoadError {
+  if (error instanceof ZodError) {
+    const issues = summarizeZodIssues(error.issues);
+    return {
+      message: "This memory does not match the current vibe-mem YAML model.",
+      issues
+    };
+  }
+
+  return {
+    message: "This memory could not be loaded.",
+    issues: [formatError(error)]
+  };
+}
+
+function summarizeZodIssues(issues: ZodIssue[]): string[] {
+  const summary: string[] = [];
+  const seen = new Set<string>();
+
+  for (const issue of issues) {
+    const text = summarizeZodIssue(issue);
+    if (seen.has(text)) continue;
+    seen.add(text);
+    summary.push(text);
+    if (summary.length >= 8) break;
+  }
+
+  const omitted = issues.length - summary.length;
+  if (omitted > 0) {
+    summary.push(`还有 ${omitted} 个类似问题，建议先运行 vibe-mem validate 查看完整列表。`);
+  }
+
+  return summary;
+}
+
+function summarizeZodIssue(issue: ZodIssue): string {
+  const path = issue.path.join(".") || "(root)";
+
+  if (issue.code === "invalid_union" && issue.path[0] === "flow" && typeof issue.path[1] === "number") {
+    return `${path}: 流程步骤不符合当前 DSL。请使用 { action, artifact }，或 !if / !while / !call 结构。`;
+  }
+
+  if (issue.code === "invalid_type") {
+    return `${path}: 类型不正确，期望 ${issue.expected}，实际 ${issue.received}。`;
+  }
+
+  if (issue.code === "unrecognized_keys") {
+    return `${path}: 出现了当前模型不认识的字段：${issue.keys.join(", ")}。`;
+  }
+
+  return `${path}: ${issue.message}`;
 }
 
 function normalizeReviewComments(value: unknown): ReviewComment[] {

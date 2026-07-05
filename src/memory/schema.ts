@@ -7,7 +7,7 @@ const schemaFormatSchema = z.enum(["section", "field", "table", "list", "templat
 const artifactFormatSchema = z.enum(["string", "int", "boolean", "markdown", "json", "yaml", "schema"]);
 const stepActorSchema = z.enum(["agent", "human"]);
 
-export type FlowStep = string | Record<string, unknown>;
+export type FlowStep = Record<string, unknown>;
 export type SchemaFormat = z.infer<typeof schemaFormatSchema>;
 
 export type SchemaMemory = {
@@ -30,15 +30,36 @@ const stepArtifactSchema = z.object({
   schema: z.string().min(1).optional()
 }).strict();
 
-const procedureFlowStepSchema = z.union([
-  z.string(),
-  z.object({
-    action: z.string().min(1),
-    actor: stepActorSchema.optional(),
-    artifact: stepArtifactSchema
-  }).strict(),
-  z.record(z.unknown())
-]);
+const procedureRunnableStepSchema = z.object({
+  action: z.string().min(1),
+  actor: stepActorSchema.optional(),
+  artifact: stepArtifactSchema
+}).strict();
+
+const procedureFlowStepSchema: z.ZodType<FlowStep> = z.lazy(() =>
+  z.union([
+    procedureRunnableStepSchema,
+    z.object({
+      tag: z.literal("!call"),
+      target: z.string().min(1)
+    }).strict(),
+    z.object({
+      tag: z.literal("!if"),
+      condition: procedureRunnableStepSchema,
+      then: z.array(procedureFlowStepSchema).min(1),
+      elseif: z.array(z.object({
+        condition: procedureRunnableStepSchema,
+        then: z.array(procedureFlowStepSchema).min(1)
+      }).strict()).optional(),
+      else: z.array(procedureFlowStepSchema).optional()
+    }).strict(),
+    z.object({
+      tag: z.literal("!while"),
+      condition: procedureRunnableStepSchema,
+      do: z.array(procedureFlowStepSchema).min(1)
+    }).strict()
+  ])
+);
 
 const schemaMemorySchema: z.ZodType<SchemaMemory, z.ZodTypeDef, unknown> = z.lazy(() =>
   baseMemorySchema
