@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { basename, extname, isAbsolute, join, normalize } from "node:path";
 import { parse, stringify } from "yaml";
@@ -35,9 +35,18 @@ export type ReviewSnapshot = {
   createdAt: string;
 };
 
+export type ReviewTarget = {
+  source: "memory" | "task";
+  id: string;
+  name?: string;
+  path?: string;
+  runId?: string;
+};
+
 export type ReviewFile = {
   id: string;
   source?: "memory" | "task";
+  target?: ReviewTarget;
   title: string;
   status: ReviewStatus;
   createdAt: string;
@@ -76,6 +85,13 @@ const commentSchema = z.object({
 const reviewSchema = z.object({
   id: z.string(),
   source: z.enum(["memory", "task"]).optional(),
+  target: z.object({
+    source: z.enum(["memory", "task"]),
+    id: z.string(),
+    name: z.string().optional(),
+    path: z.string().optional(),
+    runId: z.string().optional()
+  }).optional(),
   title: z.string(),
   status: z.enum(reviewStatuses),
   createdAt: z.string(),
@@ -96,6 +112,7 @@ const reviewSchema = z.object({
 type CreateReviewInput = {
   title?: string;
   source?: "memory" | "task";
+  target?: ReviewTarget;
   memoryRoot: string;
   reviewsRoot: string;
   snapshotFiles?: Array<{
@@ -166,6 +183,7 @@ export async function createReview(input: CreateReviewInput): Promise<ReviewFile
   const review: ReviewFile = {
     id,
     source: input.source ?? "memory",
+    target: input.target,
     title: input.title?.trim() || `Review ${new Date(now).toLocaleString()}`,
     status: "draft",
     createdAt: now,
@@ -197,6 +215,13 @@ export async function updateReview(reviewsRoot: string, id: string, patch: Updat
   review.updatedAt = now;
   await writeReview(reviewsRoot, review);
   return review;
+}
+
+export async function deleteReview(reviewsRoot: string, id: string): Promise<boolean> {
+  const filePath = directoryReviewPath(reviewsRoot, id);
+  if (!(await pathExists(filePath))) return false;
+  await rm(join(reviewsRoot, id), { recursive: true, force: true });
+  return true;
 }
 
 function directoryReviewPath(reviewsRoot: string, id: string): string {

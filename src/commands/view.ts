@@ -1,8 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { join, relative } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { ZodError, type ZodIssue } from "zod";
 import { type VibeMemConfig, readConfig } from "../config.js";
-import { listMemoryFiles, readAllMemoryFiles, readMemoryFile } from "../memory/store.js";
+import { listMemoryFiles, readMemoryFile } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
 import {
@@ -12,6 +12,7 @@ import {
   readReviewSnapshot,
   reviewStatuses,
   updateReview,
+  deleteReview,
   type ReviewComment,
   type ReviewStatus
 } from "../review/store.js";
@@ -139,17 +140,32 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   }
 
   if (request.method === "POST" && url.pathname === "/api/reviews") {
-    const body = await readJsonBody<{ title?: unknown; source?: unknown; memoryId?: unknown; runId?: unknown }>(request);
+    const body = await readJsonBody<{ title?: unknown; source?: unknown; memoryId?: unknown; memoryName?: unknown; memoryPath?: unknown; runId?: unknown; runName?: unknown }>(request);
     const title = typeof body.title === "string" ? body.title : undefined;
     const source = body.source === "task" ? "task" : "memory";
+    const memoryId = typeof body.memoryId === "string" ? body.memoryId : undefined;
+    const memoryName = typeof body.memoryName === "string" ? body.memoryName : undefined;
+    const memoryPath = typeof body.memoryPath === "string" ? body.memoryPath : undefined;
+    const runId = typeof body.runId === "string" ? body.runId : undefined;
+    const runName = typeof body.runName === "string" ? body.runName : undefined;
     const snapshotFiles = await resolveReviewSnapshotFiles({
       memoryRoot,
       runsRoot,
       source,
-      memoryId: typeof body.memoryId === "string" ? body.memoryId : undefined,
-      runId: typeof body.runId === "string" ? body.runId : undefined
+      memoryId,
+      memoryPath,
+      runId
     });
-    const review = await createReview({ title, source, memoryRoot, reviewsRoot, snapshotFiles });
+    const review = await createReview({
+      title,
+      source,
+      target: source === "task"
+        ? { source, id: runId ? `task/${runId}` : "", runId, name: runName }
+        : { source, id: memoryId ?? "", path: memoryPath, name: memoryName },
+      memoryRoot,
+      reviewsRoot,
+      snapshotFiles
+    });
     sendJson(response, 201, { review });
     return;
   }
@@ -171,7 +187,17 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     return;
   }
 
-  if (!["GET", "POST", "PATCH"].includes(request.method ?? "")) {
+  if (request.method === "DELETE" && reviewMatch) {
+    const deleted = await deleteReview(reviewsRoot, decodeURIComponent(reviewMatch[1]));
+    if (!deleted) {
+      sendJson(response, 404, { error: "review not found" });
+      return;
+    }
+    sendJson(response, 200, { deleted: true });
+    return;
+  }
+
+  if (!["GET", "POST", "PATCH", "DELETE"].includes(request.method ?? "")) {
     sendText(response, 405, "Method Not Allowed");
     return;
   }
@@ -219,6 +245,7 @@ async function resolveReviewSnapshotFiles(input: {
   runsRoot: string;
   source: "memory" | "task";
   memoryId?: string;
+  memoryPath?: string;
   runId?: string;
 }): Promise<Array<{ label: string; path: string; kind: "memory" | "task" }>> {
   if (input.source === "task") {
@@ -231,17 +258,50 @@ async function resolveReviewSnapshotFiles(input: {
   }
 
   if (!input.memoryId) return [];
-  const files = await readAllMemoryFiles(input.memoryRoot);
-  const file = files.find((item) => {
-    const primaryName = Array.isArray(item.entity.names) ? item.entity.names[0] : item.path;
-    return `${item.kind}/${primaryName}` === input.memoryId;
-  });
+
+  if (input.memoryPath) {
+    const path = resolveMemoryPath(input.memoryRoot, input.memoryPath);
+    return [{
+      label: relative(input.memoryRoot, path),
+      path,
+      kind: "memory"
+    }];
+  }
+
+  const file = await findMemoryFileById(input.memoryRoot, input.memoryId);
   if (!file) return [];
   return [{
     label: relative(input.memoryRoot, file.path),
     path: file.path,
     kind: "memory"
   }];
+}
+
+function resolveMemoryPath(memoryRoot: string, memoryPath: string): string {
+  const root = resolve(memoryRoot);
+  const path = resolve(root, memoryPath);
+  if (path !== root && !path.startsWith(root + sep)) {
+    throw new Error(`invalid memory path: ${memoryPath}`);
+  }
+  return path;
+}
+
+async function findMemoryFileById(memoryRoot: string, memoryId: string): Promise<{ kind: MemoryKind; path: string } | undefined> {
+  for (const kind of memoryKinds) {
+    const paths = await listMemoryFiles(memoryRoot, kind);
+    for (const path of paths) {
+      try {
+        const file = await readMemoryFile(kind, path);
+        const primaryName = Array.isArray(file.entity.names) ? file.entity.names[0] : file.path;
+        if (`${file.kind}/${primaryName}` === memoryId) {
+          return { kind: file.kind, path: file.path };
+        }
+      } catch {
+        // Invalid memories should not block creating a review for another file.
+      }
+    }
+  }
+  return undefined;
 }
 
 async function loadMemoryPayload(memoryRoot: string): Promise<MemoryPayload> {

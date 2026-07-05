@@ -46,6 +46,10 @@ export const browserHtml = String.raw`<!doctype html>
     .memory-button.active, .review-card.active, .task-card.active { background: var(--accent-soft); color: #173f3c; font-weight: 700; }
     .review-card { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; box-shadow: var(--shadow); }
     .review-card b { display: block; overflow-wrap: anywhere; margin-bottom: 4px; }
+    .review-card-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+    .review-card-main { min-width: 0; border: 0; background: transparent; color: inherit; padding: 0; text-align: left; cursor: pointer; }
+    .review-card-main b { display: block; overflow-wrap: anywhere; margin-bottom: 4px; }
+    .review-delete { padding: 4px 7px; font-size: 12px; }
     .task-card { display: grid; gap: 4px; }
     .task-card b { overflow-wrap: anywhere; }
     .content { min-width: 0; padding: 22px 28px 48px; }
@@ -325,6 +329,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function loadAll() {
       await Promise.all([loadMemories(), loadReviews(), loadRuns()]);
+      ensureSelectedReview();
       renderAll();
     }
 
@@ -360,11 +365,7 @@ export const browserHtml = String.raw`<!doctype html>
       const response = await fetch("/api/reviews");
       if (!response.ok) throw new Error(await response.text());
       state.reviews = (await response.json()).reviews || [];
-      const reviews = filteredReviews();
-      if (!reviews.some(review => review.id === state.selectedReviewId)) {
-        state.selectedReviewId = reviews[0]?.id || null;
-        saveSelectedReview();
-      }
+      ensureSelectedReview();
     }
 
     async function ensureReviewSnapshot(kind) {
@@ -828,8 +829,48 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function filteredReviews() {
-      const source = state.viewMode === "task" ? "task" : "memory";
-      return state.reviews.filter(review => reviewSource(review) === source);
+      const subject = reviewListSubject();
+      if (!subject) return [];
+      return state.reviews.filter(review => reviewMatchesSubject(review, subject));
+    }
+
+    function reviewListSubject() {
+      if (state.viewMode === "task") {
+        const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
+        if (!run) return null;
+        return {
+          source: "task",
+          id: "task/" + run.id,
+          runId: run.id
+        };
+      }
+      const memory = state.memories.find((item) => item.id === state.selectedId) || state.filtered[0];
+      if (!memory) return null;
+      return {
+        source: "memory",
+        id: memory.id,
+        path: memory.path
+      };
+    }
+
+    function reviewMatchesSubject(review, subject) {
+      if (reviewSource(review) !== subject.source) return false;
+
+      if (review.target) {
+        if (review.target.source !== subject.source) return false;
+        if (subject.source === "task") {
+          return review.target.runId === subject.runId || review.target.id === subject.id;
+        }
+        if (review.target.path && subject.path) return review.target.path === subject.path;
+        return review.target.id === subject.id;
+      }
+
+      if (subject.source === "task") {
+        return review.snapshots?.some(snapshot => snapshot.kind === "task" && snapshot.label === subject.runId + ".json");
+      }
+
+      return review.snapshots?.some(snapshot => snapshot.kind === "memory" && snapshot.label === subject.path)
+        || review.comments?.some(comment => comment.memoryId === subject.id);
     }
 
     function reviewSource(review) {
@@ -855,7 +896,8 @@ export const browserHtml = String.raw`<!doctype html>
         source: "memory",
         id: memory.id,
         kind: memory.kind,
-        name: primaryName(memory.entity)
+        name: memory.error ? invalidMemoryName(memory) : primaryName(memory.entity),
+        path: memory.path
       };
     }
 
@@ -1609,7 +1651,10 @@ export const browserHtml = String.raw`<!doctype html>
           title,
           source: subject?.source || (state.viewMode === "task" ? "task" : "memory"),
           memoryId: subject?.source === "memory" ? subject.id : undefined,
-          runId: subject?.source === "task" ? subject.runId : undefined
+          memoryName: subject?.source === "memory" ? subject.name : undefined,
+          memoryPath: subject?.source === "memory" ? subject.path : undefined,
+          runId: subject?.source === "task" ? subject.runId : undefined,
+          runName: subject?.source === "task" ? subject.name : undefined
         })
       });
       if (!response.ok) throw new Error(await response.text());
@@ -1647,6 +1692,20 @@ export const browserHtml = String.raw`<!doctype html>
       const review = selectedReview();
       if (!review || !canComment()) return;
       await patchReview(review.id, { comments: review.comments.filter(comment => comment.id !== id) });
+    }
+
+    async function deleteSelectedReview(id) {
+      const review = state.reviews.find(item => item.id === id);
+      if (!review) return;
+      const label = review.title || review.id;
+      if (!confirm("Delete review \"" + label + "\"? This will remove its comments and snapshots.")) return;
+      const response = await fetch("/api/reviews/" + encodeURIComponent(id), { method: "DELETE" });
+      if (!response.ok) throw new Error(await response.text());
+      state.reviewSnapshots.delete(id + ":memory");
+      state.reviewSnapshots.delete(id + ":task");
+      await loadReviews();
+      ensureSelectedReview();
+      renderAll();
     }
 
     async function updateComment(id, body) {
@@ -1814,9 +1873,11 @@ export const browserHtml = String.raw`<!doctype html>
       const reviews = filteredReviews();
       if (!reviews.length) return;
       for (const review of reviews) {
+        const card = document.createElement("article");
+        card.className = "review-card review-card-row" + (review.id === state.selectedReviewId ? " active" : "");
         const button = document.createElement("button");
         button.type = "button";
-        button.className = "review-card" + (review.id === state.selectedReviewId ? " active" : "");
+        button.className = "review-card-main";
         const title = document.createElement("b");
         title.textContent = review.title || review.id;
         const meta = document.createElement("div");
@@ -1830,7 +1891,13 @@ export const browserHtml = String.raw`<!doctype html>
           saveSelectedReview();
           renderAll();
         });
-        el.reviews.append(button);
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "btn danger review-delete";
+        del.textContent = "Delete";
+        del.addEventListener("click", () => runButtonAction(del, () => deleteSelectedReview(review.id)));
+        card.append(button, del);
+        el.reviews.append(card);
       }
     }
 
