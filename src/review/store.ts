@@ -1,6 +1,6 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { basename, extname, isAbsolute, join, normalize } from "node:path";
 import { parse, stringify } from "yaml";
 import { z } from "zod";
 
@@ -28,6 +28,13 @@ export type ReviewComment = {
   createdAt: string;
 };
 
+export type ReviewSnapshot = {
+  label: string;
+  path: string;
+  kind: "memory" | "task";
+  createdAt: string;
+};
+
 export type ReviewFile = {
   id: string;
   source?: "memory" | "task";
@@ -38,6 +45,7 @@ export type ReviewFile = {
   submittedAt?: string;
   doneAt?: string;
   memoryRoot: string;
+  snapshots: ReviewSnapshot[];
   comments: ReviewComment[];
   agent?: {
     summary?: string;
@@ -75,6 +83,12 @@ const reviewSchema = z.object({
   submittedAt: z.string().optional(),
   doneAt: z.string().optional(),
   memoryRoot: z.string(),
+  snapshots: z.array(z.object({
+    label: z.string(),
+    path: z.string(),
+    kind: z.enum(["memory", "task"]),
+    createdAt: z.string()
+  })).min(1),
   comments: z.array(commentSchema),
   agent: z.object({ summary: z.string().optional() }).optional()
 });
@@ -84,6 +98,11 @@ type CreateReviewInput = {
   source?: "memory" | "task";
   memoryRoot: string;
   reviewsRoot: string;
+  snapshotFiles?: Array<{
+    label: string;
+    path: string;
+    kind: "memory" | "task";
+  }>;
 };
 
 type UpdateReviewInput = {
@@ -103,15 +122,19 @@ export async function listReviews(reviewsRoot: string): Promise<ReviewFile[]> {
   const reviews: ReviewFile[] = [];
 
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".yaml")) continue;
-    reviews.push(await readReviewByFile(join(dir, entry.name)));
+    if (entry.isDirectory()) {
+      const filePath = join(dir, entry.name, "review.yaml");
+      if (await pathExists(filePath)) {
+        reviews.push(await readReviewByFile(filePath));
+      }
+    }
   }
 
   return reviews.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function getReview(reviewsRoot: string, id: string): Promise<ReviewFile | undefined> {
-  const filePath = reviewPath(reviewsRoot, id);
+  const filePath = directoryReviewPath(reviewsRoot, id);
   try {
     return await readReviewByFile(filePath);
   } catch (error) {
@@ -120,6 +143,20 @@ export async function getReview(reviewsRoot: string, id: string): Promise<Review
     }
     throw error;
   }
+}
+
+export async function readReviewSnapshot(
+  reviewsRoot: string,
+  id: string,
+  kind?: "memory" | "task"
+): Promise<{ snapshot: ReviewSnapshot; content: string } | undefined> {
+  const review = await getReview(reviewsRoot, id);
+  if (!review) return undefined;
+  const snapshot = review.snapshots.find((item) => !kind || item.kind === kind);
+  if (!snapshot) return undefined;
+  const safePath = safeRelativePath(snapshot.path);
+  const content = await readFile(join(reviewsRoot, id, safePath), "utf8");
+  return { snapshot, content };
 }
 
 export async function createReview(input: CreateReviewInput): Promise<ReviewFile> {
@@ -134,9 +171,10 @@ export async function createReview(input: CreateReviewInput): Promise<ReviewFile
     createdAt: now,
     updatedAt: now,
     memoryRoot: input.memoryRoot,
+    snapshots: await createSnapshots(input.reviewsRoot, id, input.snapshotFiles ?? [], now),
     comments: []
   };
-  await writeReview(input.reviewsRoot, review);
+  await writeReviewToDirectory(input.reviewsRoot, review);
   return review;
 }
 
@@ -161,8 +199,8 @@ export async function updateReview(reviewsRoot: string, id: string, patch: Updat
   return review;
 }
 
-function reviewPath(reviewsRoot: string, id: string): string {
-  return join(reviewsRoot, `${id}.yaml`);
+function directoryReviewPath(reviewsRoot: string, id: string): string {
+  return join(reviewsRoot, id, "review.yaml");
 }
 
 async function readReviewByFile(filePath: string): Promise<ReviewFile> {
@@ -171,7 +209,70 @@ async function readReviewByFile(filePath: string): Promise<ReviewFile> {
 }
 
 async function writeReview(reviewsRoot: string, review: ReviewFile): Promise<void> {
-  await writeFile(reviewPath(reviewsRoot, review.id), stringify(review, { lineWidth: 0 }), "utf8");
+  await writeReviewToDirectory(reviewsRoot, review);
+}
+
+async function writeReviewToDirectory(reviewsRoot: string, review: ReviewFile): Promise<void> {
+  const reviewDir = join(reviewsRoot, review.id);
+  await mkdir(reviewDir, { recursive: true });
+  await writeFile(join(reviewDir, "review.yaml"), stringify(review, { lineWidth: 0 }), "utf8");
+}
+
+async function createSnapshots(
+  reviewsRoot: string,
+  reviewId: string,
+  files: NonNullable<CreateReviewInput["snapshotFiles"]>,
+  createdAt: string
+): Promise<ReviewSnapshot[]> {
+  if (!files.length) {
+    throw new Error("review requires at least one snapshot file");
+  }
+
+  const snapshotsDir = join(reviewsRoot, reviewId, "snapshots");
+  await mkdir(snapshotsDir, { recursive: true });
+  const snapshots: ReviewSnapshot[] = [];
+
+  for (const [index, file] of files.entries()) {
+    if (!(await pathExists(file.path))) continue;
+    const snapshotName = `${String(index + 1).padStart(2, "0")}-${safeSnapshotName(file.label || basename(file.path), file.path)}`;
+    const snapshotPath = join(snapshotsDir, snapshotName);
+    await copyFile(file.path, snapshotPath);
+    snapshots.push({
+      label: file.label,
+      path: `snapshots/${snapshotName}`,
+      kind: file.kind,
+      createdAt
+    });
+  }
+
+  if (!snapshots.length) {
+    throw new Error("review snapshot files were not found");
+  }
+  return snapshots;
+}
+
+function safeSnapshotName(label: string, sourcePath: string): string {
+  const ext = extname(sourcePath);
+  const base = label.replace(ext, "").trim().toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-").replace(/^-+|-+$/g, "") || "snapshot";
+  return `${base}${ext || ".txt"}`;
+}
+
+function safeRelativePath(path: string): string {
+  const normalized = normalize(path);
+  if (isAbsolute(normalized) || normalized.startsWith("..")) {
+    throw new Error(`invalid snapshot path: ${path}`);
+  }
+  return normalized;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 function makeReviewId(iso: string): string {

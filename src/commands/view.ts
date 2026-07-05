@@ -1,11 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { relative } from "node:path";
+import { join, relative } from "node:path";
 import { type VibeMemConfig, readConfig } from "../config.js";
 import { readAllMemoryFiles } from "../memory/store.js";
+import { parseMemoryYaml } from "../memory/yaml.js";
 import {
   createReview,
   getReview,
   listReviews,
+  readReviewSnapshot,
   reviewStatuses,
   updateReview,
   type ReviewComment,
@@ -97,6 +99,19 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     return;
   }
 
+  const reviewSnapshotMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)\/snapshot$/);
+  if (request.method === "GET" && reviewSnapshotMatch) {
+    const id = decodeURIComponent(reviewSnapshotMatch[1]);
+    const kind = url.searchParams.get("kind") === "task" ? "task" : url.searchParams.get("kind") === "memory" ? "memory" : undefined;
+    const snapshot = await readReviewSnapshot(reviewsRoot, id, kind);
+    if (!snapshot) {
+      sendJson(response, 404, { error: "snapshot not found" });
+      return;
+    }
+    sendJson(response, 200, snapshotPayload(snapshot));
+    return;
+  }
+
   const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)$/);
   if (request.method === "GET" && runMatch) {
     const run = await readRun(runsRoot, decodeURIComponent(runMatch[1]));
@@ -116,10 +131,17 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   }
 
   if (request.method === "POST" && url.pathname === "/api/reviews") {
-    const body = await readJsonBody<{ title?: unknown; source?: unknown }>(request);
+    const body = await readJsonBody<{ title?: unknown; source?: unknown; memoryId?: unknown; runId?: unknown }>(request);
     const title = typeof body.title === "string" ? body.title : undefined;
     const source = body.source === "task" ? "task" : "memory";
-    const review = await createReview({ title, source, memoryRoot, reviewsRoot });
+    const snapshotFiles = await resolveReviewSnapshotFiles({
+      memoryRoot,
+      runsRoot,
+      source,
+      memoryId: typeof body.memoryId === "string" ? body.memoryId : undefined,
+      runId: typeof body.runId === "string" ? body.runId : undefined
+    });
+    const review = await createReview({ title, source, memoryRoot, reviewsRoot, snapshotFiles });
     sendJson(response, 201, { review });
     return;
   }
@@ -147,6 +169,71 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   }
 
   sendText(response, 404, "Not Found");
+}
+
+function snapshotPayload(input: { snapshot: { label: string; path: string; kind: "memory" | "task"; createdAt: string }; content: string }): unknown {
+  if (input.snapshot.kind === "task") {
+    return {
+      snapshot: input.snapshot,
+      run: JSON.parse(input.content)
+    };
+  }
+
+  const entity = parseMemoryYaml(input.content);
+  const kind = memoryKindFromSnapshot(input.snapshot.label, entity);
+  const primaryName = entity && typeof entity === "object" && Array.isArray((entity as { names?: unknown }).names)
+    ? ((entity as { names: string[] }).names[0] ?? input.snapshot.label)
+    : input.snapshot.label;
+  return {
+    snapshot: input.snapshot,
+    memory: {
+      id: `${kind}/${primaryName}`,
+      kind,
+      path: input.snapshot.label,
+      entity
+    }
+  };
+}
+
+function memoryKindFromSnapshot(label: string, entity: unknown): string {
+  const fromLabel = label.split(/[\\/]/)[0];
+  if (["procedures", "schemas", "concepts", "statements"].includes(fromLabel)) return fromLabel;
+  const tag = entity && typeof entity === "object" ? (entity as { tag?: unknown }).tag : undefined;
+  if (tag === "!procedure") return "procedures";
+  if (tag === "!schema") return "schemas";
+  if (tag === "!concept") return "concepts";
+  if (tag === "!statement") return "statements";
+  return "memories";
+}
+
+async function resolveReviewSnapshotFiles(input: {
+  memoryRoot: string;
+  runsRoot: string;
+  source: "memory" | "task";
+  memoryId?: string;
+  runId?: string;
+}): Promise<Array<{ label: string; path: string; kind: "memory" | "task" }>> {
+  if (input.source === "task") {
+    if (!input.runId) return [];
+    return [{
+      label: `${input.runId}.json`,
+      path: join(input.runsRoot, `${input.runId}.json`),
+      kind: "task"
+    }];
+  }
+
+  if (!input.memoryId) return [];
+  const files = await readAllMemoryFiles(input.memoryRoot);
+  const file = files.find((item) => {
+    const primaryName = Array.isArray(item.entity.names) ? item.entity.names[0] : item.path;
+    return `${item.kind}/${primaryName}` === input.memoryId;
+  });
+  if (!file) return [];
+  return [{
+    label: relative(input.memoryRoot, file.path),
+    path: file.path,
+    kind: "memory"
+  }];
 }
 
 async function loadMemoryPayload(memoryRoot: string): Promise<MemoryPayload> {

@@ -274,6 +274,8 @@ export const browserHtml = String.raw`<!doctype html>
       byName: new Map(),
       reviews: [],
       runs: [],
+      reviewSnapshots: new Map(),
+      loadingSnapshots: new Set(),
       renderLine: 0
     };
 
@@ -346,6 +348,38 @@ export const browserHtml = String.raw`<!doctype html>
         state.selectedReviewId = reviews[0]?.id || null;
         saveSelectedReview();
       }
+    }
+
+    async function ensureReviewSnapshot(kind) {
+      const review = selectedReview();
+      if (!review?.snapshots?.length) return null;
+      const key = review.id + ":" + kind;
+      if (state.reviewSnapshots.has(key)) return state.reviewSnapshots.get(key);
+      if (state.loadingSnapshots.has(key)) return null;
+      state.loadingSnapshots.add(key);
+      fetch("/api/reviews/" + encodeURIComponent(review.id) + "/snapshot?kind=" + encodeURIComponent(kind))
+        .then(async response => {
+          if (!response.ok) {
+            if (response.status !== 404) throw new Error(await response.text());
+            return null;
+          }
+          return response.json();
+        })
+        .then(snapshot => {
+          if (snapshot) state.reviewSnapshots.set(key, snapshot);
+        })
+        .catch(console.error)
+        .finally(() => {
+          state.loadingSnapshots.delete(key);
+          renderAll();
+        });
+      return null;
+    }
+
+    function currentReviewSnapshot(kind) {
+      const review = selectedReview();
+      if (!review?.snapshots?.length) return null;
+      return state.reviewSnapshots.get(review.id + ":" + kind) || null;
     }
 
     async function loadRuns() {
@@ -466,10 +500,25 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function selectedTask() {
+      const snapshot = currentReviewSnapshot("task");
+      if (snapshot?.run) return snapshot.run;
       return state.runs.find(run => run.id === state.selectedTaskId) || state.runs[0] || null;
     }
 
     function renderSelectedTask() {
+      const review = selectedReview();
+      if (review && !review.snapshots?.some(snapshot => snapshot.kind === "task")) {
+        renderInvalidReview(review, "Task review has no task snapshot.");
+        return;
+      }
+      if (review && !currentReviewSnapshot("task")) {
+        ensureReviewSnapshot("task");
+        el.title.textContent = "Tasks";
+        el.subtitle.textContent = review.id;
+        el.detail.className = "empty";
+        el.detail.textContent = "Loading review snapshot...";
+        return;
+      }
       const run = selectedTask();
       if (!run) {
         el.title.textContent = "Tasks";
@@ -480,7 +529,7 @@ export const browserHtml = String.raw`<!doctype html>
       }
 
       state.selectedTaskId = run.id;
-      saveSelectedTask();
+      if (!currentReviewSnapshot("task")) saveSelectedTask();
       el.title.textContent = run.procedureName;
       el.subtitle.textContent = run.id;
       el.detail.className = "task-summary";
@@ -752,6 +801,8 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function selectedMemory() {
+      const snapshot = currentReviewSnapshot("memory");
+      if (snapshot?.memory) return snapshot.memory;
       return state.memories.find((item) => item.id === state.selectedId) || state.filtered[0];
     }
 
@@ -766,8 +817,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function reviewSource(review) {
       if (review.source === "task" || review.source === "memory") return review.source;
-      if ((review.comments || []).some(comment => comment.source === "task" || comment.kind === "tasks" || comment.runId)) return "task";
-      return "memory";
+      return "invalid";
     }
 
     function currentReviewSubject() {
@@ -798,6 +848,19 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderSelected() {
+      const review = selectedReview();
+      if (review && !review.snapshots?.some(snapshot => snapshot.kind === "memory")) {
+        renderInvalidReview(review, "Memory review has no memory snapshot.");
+        return;
+      }
+      if (review && !currentReviewSnapshot("memory")) {
+        ensureReviewSnapshot("memory");
+        el.title.textContent = "Memory";
+        el.subtitle.textContent = review.id;
+        el.detail.className = "empty";
+        el.detail.textContent = "Loading review snapshot...";
+        return;
+      }
       const memory = selectedMemory();
       if (!memory) {
         el.title.textContent = "No memories";
@@ -806,7 +869,7 @@ export const browserHtml = String.raw`<!doctype html>
         el.detail.textContent = "No memory entities found.";
         return;
       }
-      state.selectedId = memory.id;
+      if (!currentReviewSnapshot("memory")) state.selectedId = memory.id;
       el.title.textContent = primaryName(memory.entity);
       el.subtitle.textContent = memory.kind + " / " + primaryName(memory.entity);
       el.detail.className = "";
@@ -816,6 +879,13 @@ export const browserHtml = String.raw`<!doctype html>
       if (memory.kind === "schemas") el.detail.append(renderSchema(memory.entity, 0, primaryName(memory.entity)));
       else if (memory.kind === "procedures") el.detail.append(renderProcedure(memory.entity));
       else el.detail.append(renderGeneric(memory.entity));
+    }
+
+    function renderInvalidReview(review, message) {
+      el.title.textContent = "Invalid review";
+      el.subtitle.textContent = review?.id || "";
+      el.detail.className = "empty";
+      el.detail.textContent = message || "This review has no snapshot.";
     }
 
     function primaryName(entity) {
@@ -1468,7 +1538,12 @@ export const browserHtml = String.raw`<!doctype html>
       const response = await fetch("/api/reviews", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title, source: subject?.source || (state.viewMode === "task" ? "task" : "memory") })
+        body: JSON.stringify({
+          title,
+          source: subject?.source || (state.viewMode === "task" ? "task" : "memory"),
+          memoryId: subject?.source === "memory" ? subject.id : undefined,
+          runId: subject?.source === "task" ? subject.runId : undefined
+        })
       });
       if (!response.ok) throw new Error(await response.text());
       const review = (await response.json()).review;
