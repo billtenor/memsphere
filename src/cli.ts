@@ -49,8 +49,9 @@ const skill = program
 
 skill
   .command("init")
-  .description("Install vibe-mem Agent skills into .agents/skills.")
-  .option("--directory <path>", "skills directory", ".agents/skills")
+  .description("Install vibe-mem Agent skills.")
+  .option("--global", "install into ~/.agents/skills")
+  .option("--directory <path>", "skills directory")
   .option("--force", "overwrite the existing skill")
   .action(skillInitCommand);
 
