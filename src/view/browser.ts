@@ -78,6 +78,9 @@ export const browserHtml = String.raw`<!doctype html>
     .pill { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 3px 8px; font-size: 12px; }
     button.pill { cursor: pointer; }
     button.pill:hover { border-color: var(--accent); color: var(--accent); }
+    .current-step-jump { color: var(--accent); background: #edf6f3; border-color: #b8cbc7; font-weight: 700; }
+    .current-step-jump:hover { background: #e3f2ee; }
+    .current-step-jump:focus-visible { outline: 3px solid rgba(40, 108, 103, .18); outline-offset: 2px; }
     .pill.strong { color: #173f3c; border-color: #b8cbc7; background: #edf6f3; }
     .pill.warn { color: var(--warn); background: #fbf2e8; border-color: #ead2b7; }
     .pill.processing { color: var(--accent); background: #edf6f3; border-color: #b8cbc7; }
@@ -130,6 +133,7 @@ export const browserHtml = String.raw`<!doctype html>
     .call-link:hover { text-decoration: underline; }
     .task-summary { display: grid; gap: 12px; }
     .task-step { border-left: 4px solid var(--accent); }
+    .task-step-spotlight { animation: taskStepSpotlight 1600ms ease-out; box-shadow: 0 0 0 3px rgba(40, 108, 103, .18), var(--shadow); }
     .task-result { margin-top: 8px; }
     .task-result .pre { margin-top: 6px; }
     .pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f3f5f0; border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin: 8px 0 0; }
@@ -167,6 +171,10 @@ export const browserHtml = String.raw`<!doctype html>
     code { background: var(--soft); border-radius: 4px; padding: 1px 4px; }
     body.task-mode .shell { grid-template-columns: 300px minmax(0, 1fr) 300px; }
     body.task-mode .search, body.task-mode #expand, body.task-mode #collapse { display: none; }
+    @keyframes taskStepSpotlight {
+      0% { box-shadow: 0 0 0 5px rgba(40, 108, 103, .24), var(--shadow); }
+      100% { box-shadow: var(--shadow); }
+    }
     @media (max-width: 1100px) {
       .shell { grid-template-columns: 280px minmax(0, 1fr); }
       .review { grid-column: 1 / -1; height: auto; position: static; border-left: 0; border-top: 1px solid var(--line); }
@@ -261,6 +269,8 @@ export const browserHtml = String.raw`<!doctype html>
       then: { zh: "然后", yaml: "then" },
       artifactContent: { zh: "产物内容", yaml: "artifact.value" },
       currentStep: { zh: "当前步骤", yaml: "current" },
+      jumpToCurrentStep: { zh: "跳到当前步骤", yaml: "Jump to current" },
+      jumpToCurrentStepTitle: { zh: "跳转到当前正在运行的流程节点", yaml: "Jump to the currently running flow node" },
       completed: { zh: "已完成", yaml: "done" },
       notStarted: { zh: "未开始", yaml: "pending" },
       waitingReport: { zh: "等待上报", yaml: "waiting" },
@@ -511,9 +521,11 @@ export const browserHtml = String.raw`<!doctype html>
           meta.textContent = shortRunId(run.id) + " · " + run.events.length + " artifact(s)";
           button.append(title, meta);
           button.addEventListener("click", () => {
+            const changedTask = state.selectedTaskId !== run.id;
             state.selectedTaskId = run.id;
             saveSelectedTask();
             renderAll();
+            if (changedTask) scrollTaskDetailToTop();
           });
           list.append(button);
         }
@@ -568,10 +580,23 @@ export const browserHtml = String.raw`<!doctype html>
       meta.append(pill(run.stack.length + " active frame(s)"));
       meta.append(pill(run.events.length + " artifact(s)"));
       meta.append(pill("updated " + formatTime(run.updatedAt)));
+      const activeStep = currentRunStep(run);
+      if (activeStep && run.plan && run.plan.length) meta.append(currentStepJumpButton(run));
       const review = selectedReview();
       const commentCount = review ? review.comments.filter(comment => comment.memoryId === "task/" + run.id).length : 0;
       if (commentCount) meta.append(pill(commentCount + " review comments", false, "warn"));
       return meta;
+    }
+
+    function currentStepJumpButton(run) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "pill current-step-jump";
+      button.textContent = t("jumpToCurrentStep");
+      button.title = t("jumpToCurrentStepTitle");
+      button.setAttribute("aria-label", t("jumpToCurrentStepTitle"));
+      button.addEventListener("click", () => scrollToCurrentTaskStep(run));
+      return button;
     }
 
     function renderCurrentRunStep(run, step) {
@@ -683,7 +708,9 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderTaskAction(step, eventsByStep, activeStep, run) {
       const item = document.createElement("div");
-      item.className = "flow-item" + (activeStep && activeStep.id === step.id ? " task-step" : "");
+      const isActive = activeStep && activeStep.id === step.id;
+      item.className = "flow-item" + (isActive ? " task-step" : "");
+      attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("step"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
       appendOptional(item, renderTaskStepResult(step, event, run));
@@ -692,7 +719,9 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderTaskBranch(step, eventsByStep, activeStep, run) {
       const item = document.createElement("div");
-      item.className = "flow-item branch" + (activeStep && activeStep.id === step.id ? " task-step" : "");
+      const isActive = activeStep && activeStep.id === step.id;
+      item.className = "flow-item branch" + (isActive ? " task-step" : "");
+      attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("if"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
       appendOptional(item, renderTaskStepResult(step, event, run));
@@ -703,7 +732,9 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderTaskLoop(step, eventsByStep, activeStep, run) {
       const item = document.createElement("div");
-      item.className = "flow-item branch" + (activeStep && activeStep.id === step.id ? " task-step" : "");
+      const isActive = activeStep && activeStep.id === step.id;
+      item.className = "flow-item branch" + (isActive ? " task-step" : "");
+      attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("while"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
       appendOptional(item, renderTaskStepResult(step, event, run));
@@ -774,6 +805,34 @@ export const browserHtml = String.raw`<!doctype html>
 
     function taskAnchor(run, step, part) {
       return "task:" + run.id + ":" + step.id + ":" + part;
+    }
+
+    function attachTaskStepLocation(item, run, step, isActive) {
+      item.dataset.stepId = step.id;
+      if (!isActive) return;
+      item.dataset.currentTaskStep = "true";
+      item.id = taskStepDomId(run, step);
+    }
+
+    function scrollToCurrentTaskStep(run) {
+      const activeStep = currentRunStep(run);
+      if (!activeStep) return;
+      const target = document.getElementById(taskStepDomId(run, activeStep))
+        || el.detail.querySelector('[data-current-task-step="true"]')
+        || el.detail.querySelector(".task-step");
+      if (!target) return;
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.classList.remove("task-step-spotlight");
+      setTimeout(() => target.classList.add("task-step-spotlight"), 20);
+      setTimeout(() => target.classList.remove("task-step-spotlight"), 1700);
+    }
+
+    function taskStepDomId(run, step) {
+      return "task-step-" + slug(run.id + "-" + step.id);
+    }
+
+    function scrollTaskDetailToTop() {
+      requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
     }
 
     function taskStepStatus(step, event, activeStep) {
