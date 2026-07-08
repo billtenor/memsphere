@@ -87,8 +87,8 @@ flow:
 
   - !while
     condition:
-      action: 判断交付物与验收标准是否仍需 human 确认或修正。
-      actor: agent
+      action: 请 human 判断交付物与验收标准是否仍需确认或修正。
+      actor: human
       artifact:
         name: 交付物与验收标准是否仍需确认或修正
         format: boolean
@@ -204,8 +204,8 @@ flow:
 
   - !while
     condition:
-      action: 判断提需方验收是否仍未通过。
-      actor: agent
+      action: 请 human 判断提需方验收是否仍未通过。
+      actor: human
       artifact:
         name: 提需方验收是否仍未通过
         format: boolean
