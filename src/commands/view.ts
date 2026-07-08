@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { access, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { ZodError, type ZodIssue } from "zod";
 import { type VibeMemConfig, readConfig } from "../config.js";
@@ -16,7 +17,7 @@ import {
   type ReviewComment,
   type ReviewStatus
 } from "../review/store.js";
-import { listRuns, readRun } from "../run/store.js";
+import { listRuns, readRun, type RunState } from "../run/store.js";
 import { browserHtml } from "../view/browser.js";
 
 type ViewOptions = {
@@ -104,7 +105,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   }
 
   if (request.method === "GET" && url.pathname === "/api/runs") {
-    sendJson(response, 200, { runs: await listRuns(runsRoot) });
+    sendJson(response, 200, { runs: await loadRunPayload(runsRoot) });
     return;
   }
 
@@ -124,7 +125,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)$/);
   if (request.method === "GET" && runMatch) {
     const run = await readRun(runsRoot, decodeURIComponent(runMatch[1]));
-    sendJson(response, 200, { run });
+    sendJson(response, 200, { run: await hydrateRunArtifactContent(runsRoot, run) });
     return;
   }
 
@@ -252,7 +253,7 @@ async function resolveReviewSnapshotFiles(input: {
     if (!input.runId) return [];
     return [{
       label: `${input.runId}.json`,
-      path: join(input.runsRoot, `${input.runId}.json`),
+      path: await resolveRunSnapshotPath(input.runsRoot, input.runId),
       kind: "task"
     }];
   }
@@ -275,6 +276,16 @@ async function resolveReviewSnapshotFiles(input: {
     path: file.path,
     kind: "memory"
   }];
+}
+
+async function resolveRunSnapshotPath(runsRoot: string, runId: string): Promise<string> {
+  const current = join(runsRoot, runId, `${runId}.json`);
+  try {
+    await access(current);
+    return current;
+  } catch {
+    return join(runsRoot, `${runId}.json`);
+  }
 }
 
 function resolveMemoryPath(memoryRoot: string, memoryPath: string): string {
@@ -315,6 +326,38 @@ async function loadMemoryPayload(memoryRoot: string): Promise<MemoryPayload> {
   }
 
   return { memoryRoot, memories };
+}
+
+async function loadRunPayload(runsRoot: string): Promise<RunState[]> {
+  const runs = await listRuns(runsRoot);
+  return Promise.all(runs.map((run) => hydrateRunArtifactContent(runsRoot, run)));
+}
+
+async function hydrateRunArtifactContent(runsRoot: string, run: RunState): Promise<RunState> {
+  const hydrated = JSON.parse(JSON.stringify(run)) as RunState;
+  for (const event of hydrated.events) {
+    const artifact = event.artifact as RunState["events"][number]["artifact"] & { content?: string; contentError?: string };
+    if (artifact.storage !== "file" || !artifact.path || !isTextArtifactFormat(artifact.format)) continue;
+    try {
+      artifact.content = await readFile(resolveRunArtifactPath(runsRoot, hydrated.id, artifact.path), "utf8");
+    } catch (error) {
+      artifact.contentError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  return hydrated;
+}
+
+function isTextArtifactFormat(format: string): boolean {
+  return ["markdown", "yaml", "json", "schema", "string"].includes(format);
+}
+
+function resolveRunArtifactPath(runsRoot: string, runId: string, artifactPath: string): string {
+  const artifactRoot = resolve(runsRoot, runId, "artifacts");
+  const path = resolve(runsRoot, artifactPath);
+  if (path !== artifactRoot && !path.startsWith(artifactRoot + sep)) {
+    throw new Error(`invalid artifact path: ${artifactPath}`);
+  }
+  return path;
 }
 
 async function loadMemoryListItem(memoryRoot: string, kind: MemoryKind, path: string): Promise<MemoryPayload["memories"][number]> {

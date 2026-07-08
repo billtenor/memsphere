@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
 import { readConfig } from "../config.js";
 import {
+  type ArtifactReportSource,
   currentFrame,
   currentStep,
   enterSchema,
@@ -33,12 +33,12 @@ export async function runStartCommand(procedureName: string): Promise<void> {
 
 export async function runReportCommand(options: ReportOptions): Promise<void> {
   const runId = requireRunId(options.run);
-  const artifact = await readArtifactOption(options);
+  const artifact = readArtifactOption(options);
   const config = await readConfig();
   const run = await reportRun({
     runsRoot: config.runsRoot,
     runId,
-    artifactValue: artifact
+    artifact
   });
   printNext(run);
 }
@@ -73,12 +73,12 @@ export async function runStatusCommand(options: RunIdOptions): Promise<void> {
   }
 }
 
-async function readArtifactOption(options: ReportOptions): Promise<string> {
+function readArtifactOption(options: ReportOptions): ArtifactReportSource {
   if (typeof options.artifact === "string") {
-    return options.artifact;
+    return { kind: "inline", value: options.artifact };
   }
   if (options.artifactFile) {
-    return readFile(options.artifactFile, "utf8");
+    return { kind: "file", path: options.artifactFile };
   }
   throw new Error("report requires --artifact <value> or --artifact-file <path>");
 }

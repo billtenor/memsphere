@@ -641,11 +641,12 @@ export const browserHtml = String.raw`<!doctype html>
       const meta = document.createElement("div");
       meta.className = "meta";
       meta.append(pill(event.frame));
-      appendFormatMeta(meta, event.artifact.format, event.artifact.schemaName);
+      appendFormatMeta(meta, event.artifact.format, artifactSchemaName(event.artifact));
+      appendArtifactStorageMeta(meta, event.artifact);
       meta.append(pill(formatTime(event.at)));
       const value = document.createElement("div");
       value.className = "pre";
-      value.textContent = event.artifact.value;
+      value.textContent = artifactDisplayValue(event.artifact);
       body.append(meta, blockTitle(t("artifactContent")), value);
       section.append(body);
       return section;
@@ -747,11 +748,12 @@ export const browserHtml = String.raw`<!doctype html>
       if (event) {
         const pre = document.createElement("div");
         pre.className = "pre";
-        pre.textContent = event.artifact.value;
+        const artifactValue = artifactDisplayValue(event.artifact);
+        pre.textContent = artifactValue;
         value = commentable(
           pre,
           event.artifact.name,
-          event.artifact.value,
+          artifactValue,
           taskAnchor(run, step, "artifact"),
           { run, step, event, commentKind: "artifact" }
         );
@@ -1333,6 +1335,16 @@ export const browserHtml = String.raw`<!doctype html>
       target.append(pill(formatLabel(format)));
     }
 
+    function appendArtifactStorageMeta(target, artifact) {
+      if (!artifact) return;
+      if (artifact.storage === "file") {
+        target.append(pill("file", false, "strong"));
+        if (artifact.path) target.append(pill(artifact.path));
+        return;
+      }
+      if (artifact.storage === "inline") target.append(pill("inline"));
+    }
+
     function schemaLinkPill(schemaName) {
       const link = document.createElement("button");
       link.type = "button";
@@ -1353,8 +1365,24 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function artifactHeaderBadge(artifact) {
-      if (artifact.format === "schema" && artifact.schemaName) return t("schema") + ": " + artifact.schemaName;
+      const schemaName = artifactSchemaName(artifact);
+      if (artifact.format === "schema" && schemaName) return t("schema") + ": " + schemaName;
       return formatLabel(artifact.format);
+    }
+
+    function artifactSchemaName(artifact) {
+      const fieldValue = artifact?.fields?.schema_name;
+      return typeof fieldValue === "string" ? fieldValue : artifact?.schemaName || "";
+    }
+
+    function artifactDisplayValue(artifact) {
+      if (!artifact) return "";
+      if (artifact.storage === "file") {
+        if (typeof artifact.content === "string") return artifact.content;
+        if (artifact.contentError) return "Unable to read artifact file: " + artifact.contentError;
+        return artifact.path ? "File artifact: " + artifact.path : "";
+      }
+      return artifact.value ?? "";
     }
 
     function artifactSpec(step) {

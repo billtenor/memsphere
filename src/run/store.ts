@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
 import type { ProcedureMemory, SchemaMemory } from "../memory/schema.js";
@@ -55,10 +55,19 @@ export type RunEvent = {
   artifact: {
       name: string;
       format: ArtifactFormat;
+      fields?: Record<string, unknown>;
       schemaName?: string;
-      value: string;
+      storage?: "inline" | "file";
+      value?: string;
+      path?: string;
+      fileName?: string;
+      contentType?: string;
   };
 };
+
+export type ArtifactReportSource =
+  | { kind: "inline"; value: string }
+  | { kind: "file"; path: string };
 
 export type RunState = {
   id: string;
@@ -115,8 +124,13 @@ const runStateSchema: z.ZodType<RunState> = z.object({
     artifact: z.object({
       name: z.string(),
       format: z.enum(artifactFormats),
+      fields: z.record(z.unknown()).optional(),
       schemaName: z.string().optional(),
-      value: z.string()
+      storage: z.enum(["inline", "file"]).optional(),
+      value: z.string().optional(),
+      path: z.string().optional(),
+      fileName: z.string().optional(),
+      contentType: z.string().optional()
     })
   }))
 });
@@ -162,22 +176,35 @@ export async function startRun(input: { memoryRoot: string; runsRoot: string; pr
 }
 
 export async function readRun(runsRoot: string, id: string): Promise<RunState> {
-  const raw = await readFile(runPath(runsRoot, id), "utf8");
+  const raw = await readFile(await existingRunPath(runsRoot, id), "utf8");
   return runStateSchema.parse(JSON.parse(raw));
 }
 
 export async function listRuns(runsRoot: string): Promise<RunState[]> {
   await ensureRunDirectory(runsRoot);
   const entries = await readdir(runsRoot, { withFileTypes: true });
-  const runs: RunState[] = [];
+  const runsById = new Map<string, RunState>();
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-    runs.push(await readRun(runsRoot, entry.name.slice(0, -".json".length)));
+    if (entry.isDirectory()) {
+      const id = entry.name;
+      try {
+        const run = await readRun(runsRoot, id);
+        runsById.set(run.id, run);
+      } catch {
+        // Ignore directories that are not run roots.
+      }
+      continue;
+    }
+    if (entry.isFile() && entry.name.endsWith(".json")) {
+      const id = entry.name.slice(0, -".json".length);
+      if (!runsById.has(id)) runsById.set(id, await readRun(runsRoot, id));
+    }
   }
+  const runs = [...runsById.values()];
   return runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export async function reportRun(input: { runsRoot: string; runId: string; artifactValue: string }): Promise<RunState> {
+export async function reportRun(input: { runsRoot: string; runId: string; artifact: ArtifactReportSource }): Promise<RunState> {
   const run = await readRun(input.runsRoot, input.runId);
   if (run.status === "done") {
     throw new Error(`run is already done: ${input.runId}`);
@@ -192,25 +219,35 @@ export async function reportRun(input: { runsRoot: string; runId: string; artifa
     throw new Error(`run has no current step: ${input.runId}`);
   }
 
+  const artifact = await buildRunEventArtifact(input.runsRoot, run, step, input.artifact);
+  const controlValue = step.kind === "branch" || step.kind === "loop" ? artifactInlineValue(artifact) : "";
+
   run.events.push({
     at: new Date().toISOString(),
     frame: frame.type,
     stepId: step.id,
-    artifact: {
-      name: step.artifact,
-      format: step.format,
-      schemaName: step.schemaName,
-      value: input.artifactValue
-    }
+    artifact
   });
 
   frame.index += 1;
-  applyControlStep(frame, step, input.artifactValue);
-  collapseCompletedFrames(run);
+  applyControlStep(frame, step, controlValue);
+  await collapseCompletedFrames(input.runsRoot, run);
   await expandAutoCallSteps(run.memoryRoot, run);
   run.updatedAt = new Date().toISOString();
   await writeRun(input.runsRoot, run);
   return run;
+}
+
+export function artifactInlineValue(artifact: RunEvent["artifact"]): string {
+  if (artifact.storage === "file") {
+    throw new Error(`artifact is stored as file and has no inline value: ${artifact.name}`);
+  }
+  return artifact.value ?? "";
+}
+
+export function artifactSchemaName(artifact: RunEvent["artifact"]): string | undefined {
+  const fieldValue = artifact.fields?.schema_name;
+  return typeof fieldValue === "string" ? fieldValue : artifact.schemaName;
 }
 
 export async function enterSchema(input: { memoryRoot: string; runsRoot: string; runId: string; schemaName: string }): Promise<RunState> {
@@ -249,7 +286,7 @@ export function currentFrame(run: RunState): RunFrame | undefined {
   return run.stack.at(-1);
 }
 
-function collapseCompletedFrames(run: RunState): void {
+async function collapseCompletedFrames(runsRoot: string, run: RunState): Promise<void> {
   while (run.stack.length > 0) {
     const frame = currentFrame(run);
     if (!frame || frame.index < frame.steps.length) break;
@@ -264,16 +301,15 @@ function collapseCompletedFrames(run: RunState): void {
       parentStep.format === "schema" &&
       (parentStep.schemaName ?? parentStep.artifact) === completed.memoryName
     ) {
+      const artifact = await buildRunEventArtifact(runsRoot, run, parentStep, {
+        kind: "inline",
+        value: `schema:${completed.memoryName}`
+      });
       run.events.push({
         at: new Date().toISOString(),
         frame: parent.type,
         stepId: parentStep.id,
-        artifact: {
-          name: parentStep.artifact,
-          format: parentStep.format,
-          schemaName: parentStep.schemaName,
-          value: `schema:${completed.memoryName}`
-        }
+        artifact
       });
       parent.index += 1;
     }
@@ -542,6 +578,129 @@ async function expandAutoCallSteps(memoryRoot: string, run: RunState): Promise<v
   }
 }
 
+async function buildRunEventArtifact(
+  runsRoot: string,
+  run: RunState,
+  step: RunStep,
+  source: ArtifactReportSource
+): Promise<RunEvent["artifact"]> {
+  if (!step.artifact || !step.format) {
+    throw new Error(`step ${step.id} has no artifact`);
+  }
+
+  const base = {
+    name: step.artifact,
+    format: step.format,
+    fields: artifactFieldsForStep(step)
+  };
+
+  if (source.kind === "inline" && !shouldStoreArtifactAsFile(step.format)) {
+    return compactArtifact({
+      ...base,
+      storage: "inline",
+      value: source.value
+    });
+  }
+
+  const artifactDir = await ensureRunArtifactDirectory(runsRoot, run.id);
+  const fileName = nextArtifactFileName(run, step);
+  const absolutePath = resolve(artifactDir, fileName);
+  assertInsideRunArtifactDirectory(absolutePath, artifactDir);
+
+  if (source.kind === "file") {
+    await copyFile(source.path, absolutePath);
+  } else {
+    await writeFile(absolutePath, source.value, "utf8");
+  }
+
+  return compactArtifact({
+    ...base,
+    storage: "file",
+    path: join(run.id, "artifacts", fileName),
+    fileName,
+    contentType: contentTypeForFormat(step.format)
+  });
+}
+
+function compactArtifact(artifact: RunEvent["artifact"]): RunEvent["artifact"] {
+  if (artifact.fields && Object.keys(artifact.fields).length === 0) {
+    delete artifact.fields;
+  }
+  return artifact;
+}
+
+function artifactFieldsForStep(step: RunStep): Record<string, unknown> | undefined {
+  if (step.format === "schema") {
+    return { schema_name: step.schemaName ?? step.artifact };
+  }
+  return undefined;
+}
+
+function shouldStoreArtifactAsFile(format: ArtifactFormat): boolean {
+  return ["markdown", "yaml", "json", "schema"].includes(format);
+}
+
+function runArtifactDirectory(runsRoot: string, runId: string): string {
+  return join(runsRoot, runId, "artifacts");
+}
+
+async function ensureRunArtifactDirectory(runsRoot: string, runId: string): Promise<string> {
+  const artifactDir = runArtifactDirectory(runsRoot, runId);
+  await mkdir(artifactDir, { recursive: true });
+  return artifactDir;
+}
+
+function assertInsideRunArtifactDirectory(path: string, artifactDir: string): void {
+  const rel = relative(resolve(artifactDir), resolve(path));
+  if (rel.startsWith("..") || rel === "" || rel.includes("..")) {
+    throw new Error(`artifact path escapes run artifacts directory: ${path}`);
+  }
+}
+
+function nextArtifactFileName(run: RunState, step: RunStep): string {
+  const index = String(run.events.length + 1).padStart(3, "0");
+  const slug = slugify(step.artifact ?? step.id) || slugify(step.id) || "artifact";
+  return `${index}-${slug}${extensionForFormat(step.format ?? "string")}`;
+}
+
+function slugify(value: string): string {
+  return value
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
+function extensionForFormat(format: ArtifactFormat): string {
+  switch (format) {
+    case "markdown":
+      return ".md";
+    case "yaml":
+      return ".yaml";
+    case "json":
+      return ".json";
+    case "schema":
+      return ".schema.md";
+    default:
+      return ".txt";
+  }
+}
+
+function contentTypeForFormat(format: ArtifactFormat): string | undefined {
+  switch (format) {
+    case "markdown":
+    case "schema":
+      return "text/markdown";
+    case "yaml":
+      return "application/yaml";
+    case "json":
+      return "application/json";
+    default:
+      return undefined;
+  }
+}
+
 function compileSchemaSteps(schema: SchemaMemory): RunStep[] {
   const steps: RunStep[] = [];
   walkSchema(schema, schema.names[0], steps);
@@ -592,11 +751,25 @@ function isArtifactFormat(value: string): value is ArtifactFormat {
 }
 
 function runPath(runsRoot: string, id: string): string {
+  return join(runsRoot, id, `${id}.json`);
+}
+
+function legacyRunPath(runsRoot: string, id: string): string {
   return join(runsRoot, `${id}.json`);
 }
 
+async function existingRunPath(runsRoot: string, id: string): Promise<string> {
+  const current = runPath(runsRoot, id);
+  try {
+    await readFile(current, "utf8");
+    return current;
+  } catch {
+    return legacyRunPath(runsRoot, id);
+  }
+}
+
 async function writeRun(runsRoot: string, run: RunState): Promise<void> {
-  await ensureRunDirectory(runsRoot);
+  await mkdir(join(runsRoot, run.id), { recursive: true });
   await writeFile(runPath(runsRoot, run.id), `${JSON.stringify(run, null, 2)}\n`, "utf8");
 }
 

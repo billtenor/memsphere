@@ -8,6 +8,7 @@ goals:
   - 验证 procedure step 可以通过 artifact report 顺序推进。
   - 验证 branch 可以根据 boolean artifact 选择后续步骤。
   - 验证 loop 可以通过 boolean artifact 决定继续或退出。
+  - 验证 markdown artifact 会写入 run artifacts 目录，并可在 view 中显示文件内容。
   - 验证 format 为 schema 的 artifact 可以进入 schema 深度优先编写流程。
 flow:
   - action: 判断当前输入是否足够开始 smoke test。
@@ -29,7 +30,7 @@ flow:
       - action: 写出缺失的测试目标，要求只用一句话。
         artifact:
           name: 缺失的测试目标
-          format: string
+          format: markdown
     elseif:
       - condition:
           action: 判断是否需要记录目标已经充分的原因。
@@ -40,12 +41,12 @@ flow:
           - action: 写出当前测试目标已经充分的原因。
             artifact:
               name: 测试目标已经充分的原因
-              format: string
+              format: markdown
     else:
       - action: 确认当前测试目标已经足够。
         artifact:
           name: 测试目标充分确认
-          format: string
+          format: markdown
   - !while
     condition:
       action: 判断是否还需要继续补充 smoke test 观察点。
@@ -56,11 +57,11 @@ flow:
       - action: 补充一个新的观察点，要求具体说明你想验证什么。
         artifact:
           name: 新增观察点
-          format: string
+          format: markdown
   - action: 用一句话总结本次 smoke test 的目的。
     artifact:
       name: 本次测试目的总结
-      format: string
+      format: markdown
   - !call
     target: vibe-mem-harness-child
   - action: 编写一份最小 harness note artifact。
