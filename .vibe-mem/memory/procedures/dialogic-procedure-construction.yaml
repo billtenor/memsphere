@@ -1,0 +1,224 @@
+!procedure
+names:
+  - 对话式构建 procedure 流程
+  - 人工构建程序性记忆流程
+  - dialogic-procedure-construction
+defines:
+  - 通过人工主动发起与 agent 的对话，把 human 已经掌握或可以描述的流程经验逐步构建为结构严谨、可验证的 !procedure 记忆。
+  - 该流程暂不覆盖 agent 自主发现流程、从代码或文档反推流程、或从多轮实践中归纳流程的 procedure 构建方式。
+  - 该流程先产出边界、目标、原始经验、原子步骤和审查结果，再生成最终 YAML，避免直接把自然语言说明写成不可运行的 procedure。
+goals:
+  - 明确待构建 procedure 的调用场景、目标、边界和最终交付物。
+  - 将 human 的经验描述拆解为有序、可执行、带 artifact 的流程步骤。
+  - 显式识别 human 判断、agent 动作、分支条件、循环条件和可复用 !call。
+  - 在生成 YAML 前完成严谨性审查，降低 procedure 逻辑不清、步骤过粗或 artifact 缺失的风险。
+  - 生成符合 vibe-mem 语法约束并可通过 validate 的 !procedure YAML。
+flow:
+  - action: 接收 human 对待构建 procedure 的初始描述。
+    actor: human
+    artifact:
+      name: 初始 procedure 构建诉求
+      format: markdown
+  - !if
+    condition:
+      action: 判断初始描述是否缺少流程目标、典型触发场景或非适用场景。
+      actor: agent
+      artifact:
+        name: 是否缺少流程定位信息
+        format: boolean
+    then:
+      - action: 补充该 procedure 要解决的问题、典型触发场景和不应覆盖的场景。
+        actor: human
+        artifact:
+          name: 流程定位补充信息
+          format: markdown
+    else:
+      - action: 确认初始描述已经覆盖流程目标、典型触发场景和非适用场景。
+        actor: agent
+        artifact:
+          name: 流程定位信息完整性确认
+          format: string
+  - action: 基于初始描述和补充信息整理流程定位摘要，必须包含流程目标、典型触发场景、非适用场景和当前不确定项。
+    actor: agent
+    artifact:
+      name: 流程定位摘要
+      format: markdown
+  - action: 整理 procedure 边界草稿，必须包含候选名称、defines、goals、适用场景、非适用场景、最终交付物和暂不处理的问题。
+    actor: agent
+    artifact:
+      name: procedure 边界草稿
+      format: markdown
+  - !while
+    condition:
+      action: 判断 procedure 边界草稿是否仍需调整。
+      actor: human
+      artifact:
+        name: procedure 边界是否仍需调整
+        format: boolean
+    do:
+      - action: 说明需要调整的边界、名称、目标或非适用场景。
+        actor: human
+        artifact:
+          name: procedure 边界调整意见
+          format: markdown
+      - action: 根据调整意见更新 procedure 边界草稿。
+        actor: agent
+        artifact:
+          name: 更新后的 procedure 边界草稿
+          format: markdown
+  - action: 描述运行该 procedure 后必须得到的最终交付物。
+    actor: human
+    artifact:
+      name: 最终交付物期望
+      format: markdown
+  - action: 将最终交付物期望整理为 artifact 名称、格式和验收标准。
+    actor: agent
+    artifact:
+      name: 最终 artifact 定义
+      format: markdown
+  - action: 讲述 human 实际执行该流程时通常会如何做。
+    actor: human
+    artifact:
+      name: 原始流程经验叙述
+      format: markdown
+  - !while
+    condition:
+      action: 判断原始流程经验中是否仍存在关键缺口、隐含判断或未说明的例外。
+      actor: agent
+      artifact:
+        name: 是否仍需追问流程经验
+        format: boolean
+    do:
+      - action: 针对一个关键缺口、隐含判断或例外情况提出追问。
+        actor: agent
+        artifact:
+          name: 流程经验追问
+          format: string
+      - action: 回答追问并补充对应经验。
+        actor: human
+        artifact:
+          name: 流程经验补充回答
+          format: markdown
+  - action: 从原始经验中抽取按执行顺序排列的候选步骤。
+    actor: agent
+    artifact:
+      name: 候选步骤清单
+      format: markdown
+  - action: 将候选步骤拆分为原子动作，确保每个动作都有 action、actor 和 artifact。
+    actor: agent
+    artifact:
+      name: 原子步骤草稿
+      format: markdown
+  - !while
+    condition:
+      action: 判断原子步骤草稿中是否仍有步骤过粗、artifact 缺失或 actor 不明确。
+      actor: agent
+      artifact:
+        name: 原子步骤是否仍需细化
+        format: boolean
+    do:
+      - action: 指出一个需要细化的步骤及其问题。
+        actor: agent
+        artifact:
+          name: 待细化步骤问题
+          format: markdown
+      - action: 补充该步骤的执行细节、判断依据或预期产物。
+        actor: human
+        artifact:
+          name: 步骤细化补充信息
+          format: markdown
+      - action: 根据补充信息更新原子步骤草稿。
+        actor: agent
+        artifact:
+          name: 更新后的原子步骤草稿
+          format: markdown
+  - action: 基于原子步骤草稿生成结构化流程草稿，必须把条件判断映射为 !if.condition，把重复动作映射为 !while，把可复用子流程映射为 !call，并确保每个普通步骤都有 action、actor 和 artifact。
+    actor: agent
+    artifact:
+      name: 结构化流程草稿
+      format: yaml
+  - action: "审查结构化流程草稿是否满足每个普通步骤都有 artifact、每个条件输出 boolean、human 判断显式标注 actor: human。"
+    actor: agent
+    artifact:
+      name: 结构化流程严谨性审查结果
+      format: markdown
+  - !if
+    condition:
+      action: 判断严谨性审查是否发现必须修复的问题。
+      actor: agent
+      artifact:
+        name: 是否存在必须修复的问题
+        format: boolean
+    then:
+      - !while
+        condition:
+          action: 判断是否仍存在未修复的严谨性问题。
+          actor: agent
+          artifact:
+            name: 是否仍有未修复严谨性问题
+            format: boolean
+        do:
+          - action: 选择一个必须修复的问题并说明修复方向。
+            actor: agent
+            artifact:
+              name: 严谨性问题修复建议
+              format: markdown
+          - action: 在需要 human 判断时补充取舍或确认修复方向。
+            actor: human
+            artifact:
+              name: 严谨性修复确认
+              format: markdown
+          - action: 根据修复方向更新结构化流程草稿。
+            actor: agent
+            artifact:
+              name: 修复后的结构化流程草稿
+              format: yaml
+    else:
+      - action: 确认结构化流程草稿无需强制修复即可生成 YAML。
+        actor: agent
+        artifact:
+          name: 结构化流程通过审查确认
+          format: string
+  - action: 根据边界草稿、最终 artifact 定义和结构化流程草稿生成完整 !procedure YAML。
+    actor: agent
+    artifact:
+      name: 最终 !procedure YAML
+      format: yaml
+  - action: 将初版最终 !procedure YAML 写入 memoryRoot 的 procedures 目录，使 vibe-mem view 可以监控到该 procedure 并支持 human review。
+    actor: agent
+    artifact:
+      name: 写入后的初版 procedure memory 文件
+      format: yaml
+  - action: 对写入初版后的 memory store 运行 vibe-mem validate，确认该 procedure 已进入 memory 目录且语法有效。
+    actor: agent
+    artifact:
+      name: 初版写入后校验结果
+      format: markdown
+  - !while
+    condition:
+      action: 判断最终 !procedure YAML 是否仍需语义调整。
+      actor: human
+      artifact:
+        name: 最终 YAML 是否仍需语义调整
+        format: boolean
+    do:
+      - action: 说明最终 YAML 需要调整的内容。
+        actor: human
+        artifact:
+          name: 最终 YAML 调整意见
+          format: markdown
+      - action: 根据调整意见更新最终 !procedure YAML。
+        actor: agent
+        artifact:
+          name: 调整后的最终 !procedure YAML
+          format: yaml
+      - action: 将调整后的最终 !procedure YAML 同步写回 memoryRoot 的 procedures 目录。
+        actor: agent
+        artifact:
+          name: 调整后写回的 procedure memory 文件
+          format: yaml
+      - action: 对调整后写回的 memory store 重新运行 vibe-mem validate。
+        actor: agent
+        artifact:
+          name: 调整后重新校验结果
+          format: markdown
