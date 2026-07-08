@@ -1,3 +1,7 @@
+export function shouldRenderTaskStepArtifact(event: unknown): boolean {
+  return Boolean(event);
+}
+
 export const browserHtml = String.raw`<!doctype html>
 <html lang="en">
 <head>
@@ -682,7 +686,7 @@ export const browserHtml = String.raw`<!doctype html>
       item.className = "flow-item" + (activeStep && activeStep.id === step.id ? " task-step" : "");
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("step"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
-      item.append(renderTaskStepResult(step, eventsByStep.get(step.id), activeStep, run));
+      appendOptional(item, renderTaskStepResult(step, event, run));
       return item;
     }
 
@@ -691,7 +695,7 @@ export const browserHtml = String.raw`<!doctype html>
       item.className = "flow-item branch" + (activeStep && activeStep.id === step.id ? " task-step" : "");
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("if"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
-      item.append(renderTaskStepResult(step, event, activeStep, run));
+      appendOptional(item, renderTaskStepResult(step, event, run));
       item.append(renderTaskChildSteps(step.branches.truthy, eventsByStep, activeStep, run));
       if (step.branches.falsy.length) item.append(renderElseTaskBranch(step.branches.falsy, eventsByStep, activeStep, run));
       return item;
@@ -702,7 +706,7 @@ export const browserHtml = String.raw`<!doctype html>
       item.className = "flow-item branch" + (activeStep && activeStep.id === step.id ? " task-step" : "");
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("while"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
-      item.append(renderTaskStepResult(step, event, activeStep, run));
+      appendOptional(item, renderTaskStepResult(step, event, run));
       item.append(renderTaskChildSteps(step.loop.body, eventsByStep, activeStep, run));
       return item;
     }
@@ -738,30 +742,32 @@ export const browserHtml = String.raw`<!doctype html>
       return wrap;
     }
 
-    function renderTaskStepResult(step, event, activeStep, run) {
+    function appendOptional(parent, child) {
+      if (child) parent.append(child);
+    }
+
+    function shouldRenderTaskStepArtifact(event) {
+      return Boolean(event);
+    }
+
+    function renderTaskStepResult(step, event, run) {
+      if (!shouldRenderTaskStepArtifact(event)) return null;
       const box = document.createElement("div");
       box.className = "task-result";
       const title = document.createElement("div");
       title.className = "block-title";
       title.textContent = t("artifactContent");
-      let value;
-      if (event) {
-        const pre = document.createElement("div");
-        pre.className = "pre";
-        const artifactValue = artifactDisplayValue(event.artifact);
-        pre.textContent = artifactValue;
-        value = commentable(
-          pre,
-          event.artifact.name,
-          artifactValue,
-          taskAnchor(run, step, "artifact"),
-          { run, step, event, commentKind: "artifact" }
-        );
-      } else {
-        value = document.createElement("div");
-        value.className = "muted";
-        value.textContent = activeStep && activeStep.id === step.id ? t("waitingReport") : t("none");
-      }
+      const pre = document.createElement("div");
+      pre.className = "pre";
+      const artifactValue = artifactDisplayValue(event.artifact);
+      pre.textContent = artifactValue;
+      const value = commentable(
+        pre,
+        event.artifact.name,
+        artifactValue,
+        taskAnchor(run, step, "artifact"),
+        { run, step, event, commentKind: "artifact" }
+      );
       box.append(title, value);
       return box;
     }
