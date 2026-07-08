@@ -27,7 +27,17 @@ export async function readMemoryFile(kind: MemoryKind, filePath: string): Promis
 
 export async function listMemoryFiles(memoryRoot: string, kind: MemoryKind): Promise<string[]> {
   const dir = join(memoryRoot, kind);
-  const entries = await readdir(dir, { withFileTypes: true });
+  let entries;
+
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return [];
+    }
+
+    throw error;
+  }
 
   return entries
     .filter((entry) => entry.isFile() && [".yaml", ".yml"].some((suffix) => entry.name.endsWith(suffix)))
