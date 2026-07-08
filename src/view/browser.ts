@@ -437,7 +437,7 @@ export const browserHtml = String.raw`<!doctype html>
     function ensureSelectedReview() {
       const reviews = filteredReviews();
       if (!reviews.some(review => review.id === state.selectedReviewId)) {
-        state.selectedReviewId = reviews[0]?.id || null;
+        state.selectedReviewId = null;
         saveSelectedReview();
       }
     }
@@ -1915,7 +1915,7 @@ export const browserHtml = String.raw`<!doctype html>
         meta.append(pill(review.comments.length + " comments"));
         button.append(title, meta);
         button.addEventListener("click", () => {
-          state.selectedReviewId = review.id;
+          state.selectedReviewId = state.selectedReviewId === review.id ? null : review.id;
           saveSelectedReview();
           renderAll();
         });
