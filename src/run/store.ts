@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { readAllMemoryFiles, type MemoryFile } from "../memory/store.js";
+import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
 import type { ProcedureMemory, SchemaMemory } from "../memory/schema.js";
 
 export const artifactFormats = ["string", "int", "boolean", "markdown", "json", "yaml", "schema"] as const;
@@ -573,8 +573,18 @@ function schemaFormatToArtifactFormat(format: SchemaMemory["format"]): ArtifactF
 }
 
 async function findMemoryByName(memoryRoot: string, kind: "procedures" | "schemas", name: string): Promise<MemoryFile | undefined> {
-  const files = await readAllMemoryFiles(memoryRoot, kind);
-  return files.find((file) => file.entity.names.includes(name));
+  const paths = await listMemoryFiles(memoryRoot, kind);
+
+  for (const path of paths) {
+    try {
+      const file = await readMemoryFile(kind, path);
+      if (file.entity.names.includes(name)) return file;
+    } catch {
+      // Run lookup should not be blocked by unrelated invalid memories.
+    }
+  }
+
+  return undefined;
 }
 
 function isArtifactFormat(value: string): value is ArtifactFormat {
