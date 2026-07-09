@@ -10,9 +10,9 @@ const configSchema = z.object({
   runsRoot: z.string().min(1).optional()
 });
 
-type VibeMemConfigFile = z.infer<typeof configSchema>;
+type MemsphereConfigFile = z.infer<typeof configSchema>;
 
-export type VibeMemConfig = {
+export type MemsphereConfig = {
   configPath: string;
   scopeRoot: string;
   memoryRoot: string;
@@ -20,11 +20,11 @@ export type VibeMemConfig = {
   runsRoot: string;
 };
 
-export const defaultConfigPath = join(homedir(), ".vibe-mem", "config.json");
-export const defaultMemoryRoot = join(homedir(), ".vibe-mem", "memory");
-export const defaultReviewsRoot = join(homedir(), ".vibe-mem", "reviews");
-export const defaultRunsRoot = join(homedir(), ".vibe-mem", "runs");
-export const scopeDirectoryName = ".vibe-mem";
+export const defaultConfigPath = join(homedir(), ".memsphere", "config.json");
+export const defaultMemoryRoot = join(homedir(), ".memsphere", "memory");
+export const defaultReviewsRoot = join(homedir(), ".memsphere", "reviews");
+export const defaultRunsRoot = join(homedir(), ".memsphere", "runs");
+export const scopeDirectoryName = ".memsphere";
 export const configFileName = "config.json";
 
 export function expandHome(input: string): string {
@@ -69,16 +69,16 @@ export async function findGitRoot(cwd = process.cwd()): Promise<string | undefin
   }
 }
 
-export async function readConfig(configPath?: string): Promise<VibeMemConfig> {
+export async function readConfig(configPath?: string): Promise<MemsphereConfig> {
   const resolvedConfigPath = configPath ? resolvePath(configPath) : await findConfigPath();
   if (!resolvedConfigPath) {
-    throw new Error("config file does not exist. Run vibe-mem init.");
+    throw new Error("config file does not exist. Run memsphere init.");
   }
 
   return readConfigAt(resolvedConfigPath);
 }
 
-export async function readConfigAt(configPath: string): Promise<VibeMemConfig> {
+export async function readConfigAt(configPath: string): Promise<MemsphereConfig> {
   const raw = await readFile(configPath, "utf8");
   const parsed: unknown = JSON.parse(raw);
   const config = configSchema.parse(parsed);
@@ -94,7 +94,7 @@ export async function readConfigAt(configPath: string): Promise<VibeMemConfig> {
 }
 
 export async function writeConfig(
-  config: VibeMemConfigFile,
+  config: MemsphereConfigFile,
   options: { configPath?: string; force?: boolean } = {}
 ): Promise<void> {
   const configPath = options.configPath ?? defaultConfigPath;

@@ -1,10 +1,10 @@
 !procedure
 names:
-  - vibe-mem 小型需求敏捷开发流程
-  - vibe-mem 敏捷需求开发流程
-  - vibe-mem-small-agile-development
+  - memsphere 小型需求敏捷开发流程
+  - memsphere 敏捷需求开发流程
+  - memsphere-small-agile-development
 defines:
-  - 面向 vibe-mem 工程小型功能、简单功能和轻量体验改进的敏捷需求开发流程。
+  - 面向 memsphere 工程小型功能、简单功能和轻量体验改进的敏捷需求开发流程。
   - 该流程将几句话或简单图片描述的需求，通过 human 与 agent 的协作，推进到功能开发完成、提需方验收通过，并完成项目回归测试摘要。
   - 该流程不覆盖大型需求、bug 修复、技术重构、架构演进、性能专项或需要复杂评审的需求。
 goals:

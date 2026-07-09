@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { access, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { ZodError, type ZodIssue } from "zod";
-import { type VibeMemConfig, readConfig } from "../config.js";
+import { type MemsphereConfig, readConfig } from "../config.js";
 import { listMemoryFiles, readMemoryFile } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
@@ -63,7 +63,7 @@ export async function viewCommand(options: ViewOptions): Promise<void> {
   server.listen(port, host, () => {
     const address = server.address();
     const actualPort = typeof address === "object" && address ? address.port : port;
-    console.log(`vibe-mem view running at http://${host}:${actualPort}`);
+    console.log(`memsphere view running at http://${host}:${actualPort}`);
     console.log(`memoryRoot: ${config.memoryRoot}`);
     console.log(`reviewsRoot: ${config.reviewsRoot}`);
     console.log("Press Ctrl+C to stop.");
@@ -84,7 +84,7 @@ function parsePort(value: string | undefined): number {
   return port;
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, config: VibeMemConfig): Promise<void> {
+async function handleRequest(request: IncomingMessage, response: ServerResponse, config: MemsphereConfig): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   const { memoryRoot, reviewsRoot, runsRoot } = config;
 
@@ -418,7 +418,7 @@ function formatMemoryLoadError(error: unknown): MemoryLoadError {
   if (error instanceof ZodError) {
     const issues = summarizeZodIssues(error.issues);
     return {
-      message: "This memory does not match the current vibe-mem YAML model.",
+      message: "This memory does not match the current memsphere YAML model.",
       issues
     };
   }
@@ -443,7 +443,7 @@ function summarizeZodIssues(issues: ZodIssue[]): string[] {
 
   const omitted = issues.length - summary.length;
   if (omitted > 0) {
-    summary.push(`还有 ${omitted} 个类似问题，建议先运行 vibe-mem validate 查看完整列表。`);
+    summary.push(`还有 ${omitted} 个类似问题，建议先运行 memsphere validate 查看完整列表。`);
   }
 
   return summary;

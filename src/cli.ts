@@ -10,15 +10,15 @@ import { viewCommand } from "./commands/view.js";
 const program = new Command();
 
 program
-  .name("vibe-mem")
+  .name("memsphere")
   .description("Manage local YAML-backed memory entities for AI runtimes.")
   .version("0.1.0");
 
 program
   .command("init")
   .description("Create the default config file and memory directory structure.")
-  .option("--global", "initialize the global ~/.vibe-mem scope")
-  .option("--folder <path>", "initialize a specific folder scope at <path>/.vibe-mem")
+  .option("--global", "initialize the global ~/.memsphere scope")
+  .option("--folder <path>", "initialize a specific folder scope at <path>/.memsphere")
   .option("--memory-root <path>", "memory root directory")
   .option("--reviews-root <path>", "review files root directory")
   .option("--runs-root <path>", "run state files root directory")
@@ -45,11 +45,11 @@ program
 
 const skill = program
   .command("skill")
-  .description("Manage vibe-mem Agent skills.");
+  .description("Manage memsphere Agent skills.");
 
 skill
   .command("init")
-  .description("Install vibe-mem Agent skills.")
+  .description("Install memsphere Agent skills.")
   .option("--global", "install into ~/.agents/skills")
   .option("--directory <path>", "skills directory")
   .option("--force", "overwrite the existing skill")

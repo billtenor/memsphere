@@ -12,7 +12,7 @@ goals:
   - 将 human 的经验描述拆解为有序、可执行、带 artifact 的流程步骤。
   - 显式识别 human 判断、agent 动作、分支条件、循环条件和可复用 !call。
   - 在生成 YAML 前完成严谨性审查，降低 procedure 逻辑不清、步骤过粗或 artifact 缺失的风险。
-  - 生成符合 vibe-mem 语法约束并可通过 validate 的 !procedure YAML。
+  - 生成符合 memsphere 语法约束并可通过 validate 的 !procedure YAML。
 flow:
   - action: 接收 human 对待构建 procedure 的初始描述。
     actor: human
@@ -184,12 +184,12 @@ flow:
     artifact:
       name: 最终 !procedure YAML
       format: yaml
-  - action: 将初版最终 !procedure YAML 写入 memoryRoot 的 procedures 目录，使 vibe-mem view 可以监控到该 procedure 并支持 human review。
+  - action: 将初版最终 !procedure YAML 写入 memoryRoot 的 procedures 目录，使 memsphere view 可以监控到该 procedure 并支持 human review。
     actor: agent
     artifact:
       name: 写入后的初版 procedure memory 文件
       format: yaml
-  - action: 对写入初版后的 memory store 运行 vibe-mem validate，确认该 procedure 已进入 memory 目录且语法有效。
+  - action: 对写入初版后的 memory store 运行 memsphere validate，确认该 procedure 已进入 memory 目录且语法有效。
     actor: agent
     artifact:
       name: 初版写入后校验结果
@@ -217,7 +217,7 @@ flow:
         artifact:
           name: 调整后写回的 procedure memory 文件
           format: yaml
-      - action: 对调整后写回的 memory store 重新运行 vibe-mem validate。
+      - action: 对调整后写回的 memory store 重新运行 memsphere validate。
         actor: agent
         artifact:
           name: 调整后重新校验结果

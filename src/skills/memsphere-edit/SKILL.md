@@ -1,15 +1,15 @@
 ---
-name: vibe-mem-edit
-description: Create or edit vibe-mem YAML memory entities safely. Use when changing !procedure, !concept, !statement, or !schema files in a vibe-mem memory store.
+name: memsphere-edit
+description: Create or edit memsphere YAML memory entities safely. Use when changing !procedure, !concept, !statement, or !schema files in a memsphere memory store.
 ---
 
-# vibe-mem Memory Editing
+# memsphere Memory Editing
 
-Use this skill when creating or modifying vibe-mem memory YAML files.
+Use this skill when creating or modifying memsphere memory YAML files.
 
 ## Roots
 
-`~/.vibe-mem/config.json` contains:
+`~/.memsphere/config.json` contains:
 
 ```json
 {
@@ -172,4 +172,4 @@ Nested `fields` are full schema nodes and may also have their own `asserts`, `fo
 - Do not remove content unless it is redundant, obsolete, or explicitly requested.
 - Keep YAML tags intact.
 - Prefer precise, small edits over broad rewrites.
-- After editing, run `vibe-mem validate`.
+- After editing, run `memsphere validate`.

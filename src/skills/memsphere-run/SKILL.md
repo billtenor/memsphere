@@ -1,23 +1,23 @@
 ---
-name: vibe-mem-run
-description: Execute vibe-mem procedures through the run harness. Use when an agent must follow a procedure step by step, report artifacts with vibe-mem run, and only continue after the CLI returns the next step.
+name: memsphere-run
+description: Execute memsphere procedures through the run harness. Use when an agent must follow a procedure step by step, report artifacts with memsphere run, and only continue after the CLI returns the next step.
 ---
 
-# vibe-mem Run Harness
+# memsphere Run Harness
 
-Use this skill when executing a vibe-mem procedure.
+Use this skill when executing a memsphere procedure.
 
 ## Rules
 
-- Always start with `vibe-mem run start <procedure-name>`.
-- Only perform the step returned by the latest `vibe-mem run` command.
+- Always start with `memsphere run start <procedure-name>`.
+- Only perform the step returned by the latest `memsphere run` command.
 - Do not execute undisclosed future steps.
 - Every step must produce the requested artifact.
 - If the step actor is `agent`, perform the action yourself and report the artifact.
-- If the step actor is `human`, ask the human to perform the action or provide the requested artifact. Do not invent the artifact. After the human provides it, report that value with `vibe-mem run report`.
-- After producing a non-schema artifact, report it with `vibe-mem run report --run <id> --artifact <value>`.
+- If the step actor is `human`, ask the human to perform the action or provide the requested artifact. Do not invent the artifact. After the human provides it, report that value with `memsphere run report`.
+- After producing a non-schema artifact, report it with `memsphere run report --run <id> --artifact <value>`.
 - If the artifact is large or multiline, write it to a file and use `--artifact-file <path>`.
-- If the returned artifact format is `schema`, call `vibe-mem run enter-schema <schema-name> --run <id>` and follow the schema field steps depth-first.
+- If the returned artifact format is `schema`, call `memsphere run enter-schema <schema-name> --run <id>` and follow the schema field steps depth-first.
 - Continue until the CLI prints `done`.
 
 ## Procedure Step Shape
@@ -97,25 +97,25 @@ String flow steps and legacy control syntax are not runnable by the MVP harness.
 Start:
 
 ```bash
-vibe-mem run start craa-spec-driven-propose
+memsphere run start craa-spec-driven-propose
 ```
 
 Report:
 
 ```bash
-vibe-mem run report --run run-... --artifact "true"
+memsphere run report --run run-... --artifact "true"
 ```
 
 Enter schema artifact:
 
 ```bash
-vibe-mem run enter-schema craa-spec-driven-proposal --run run-...
+memsphere run enter-schema craa-spec-driven-proposal --run run-...
 ```
 
 Status:
 
 ```bash
-vibe-mem run status --run run-...
+memsphere run status --run run-...
 ```
 
 The CLI output is intentionally minimal. Treat the `Do:` section as the only current instruction.

@@ -1,6 +1,6 @@
 !procedure
 names:
-  - vibe-mem-harness-child
+  - memsphere-harness-child
   - harness-child
 defines:
   - 用于验证 !call 会自动进入被调用流程的最小子流程。

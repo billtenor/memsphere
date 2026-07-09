@@ -45,7 +45,7 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
   if (!resolvedConfigPath || !(await pathExists(resolvedConfigPath))) {
     return {
       configPath: resolvedConfigPath ?? "(not found)",
-      issues: [{ path: resolvedConfigPath ?? "(not found)", message: "config file does not exist. Run vibe-mem init." }]
+      issues: [{ path: resolvedConfigPath ?? "(not found)", message: "config file does not exist. Run memsphere init." }]
     };
   }
 

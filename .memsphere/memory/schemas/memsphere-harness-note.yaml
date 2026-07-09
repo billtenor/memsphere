@@ -1,10 +1,10 @@
 !schema
 names:
-  - vibe-mem-harness-note
+  - memsphere-harness-note
   - harness-note
 format: section
 defines:
-  - 用于验证 vibe-mem run harness schema 深度优先执行的最小 artifact。
+  - 用于验证 memsphere run harness schema 深度优先执行的最小 artifact。
 fields:
   - !schema
     names:

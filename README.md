@@ -1,7 +1,7 @@
-vibe-mem
+memsphere
 ========
 
-`vibe-mem` is a TypeScript CLI for managing local, YAML-backed memory entities for AI runtimes.
+`memsphere` is a TypeScript CLI for managing local, YAML-backed memory entities for AI runtimes.
 
 The first MVP focuses only on domain entity abstraction and local persistence:
 
@@ -34,44 +34,44 @@ node dist/cli.js <command>
 ## Commands
 
 ```bash
-vibe-mem init
-vibe-mem init --global
-vibe-mem init --folder ./some-folder
-vibe-mem validate
-vibe-mem list
-vibe-mem view
-vibe-mem list procedures
-vibe-mem list concepts
-vibe-mem list statements
-vibe-mem list schemas
+memsphere init
+memsphere init --global
+memsphere init --folder ./some-folder
+memsphere validate
+memsphere list
+memsphere view
+memsphere list procedures
+memsphere list concepts
+memsphere list statements
+memsphere list schemas
 ```
 
 `view` starts a local read-only memory browser:
 
 ```bash
-vibe-mem view
+memsphere view
 ```
 
 The browser renders schemas as progressive disclosure sections. `format: table` schemas render their child `fields` as table columns. Procedures render `flow` as readable steps, with visual blocks for `!if`, `!elseif`, `!else`, `!while`, and `!call`.
 
-`init` defaults to the current git repository scope. It creates `.vibe-mem/` in the git root:
+`init` defaults to the current git repository scope. It creates `.memsphere/` in the git root:
 
 ```text
-<git-root>/.vibe-mem/config.json
-<git-root>/.vibe-mem/memory/
+<git-root>/.memsphere/config.json
+<git-root>/.memsphere/memory/
   procedures/
   concepts/
   statements/
   schemas/
-<git-root>/.vibe-mem/reviews/
-<git-root>/.vibe-mem/runs/
+<git-root>/.memsphere/reviews/
+<git-root>/.memsphere/runs/
 ```
 
-Use `vibe-mem init --global` for `~/.vibe-mem`, or `vibe-mem init --folder <path>` for `<path>/.vibe-mem`.
+Use `memsphere init --global` for `~/.memsphere`, or `memsphere init --folder <path>` for `<path>/.memsphere`.
 
-At runtime, `vibe-mem` starts at the current directory and walks upward looking for `.vibe-mem/config.json`. If none is found, it tries the global `~/.vibe-mem/config.json`.
+At runtime, `memsphere` starts at the current directory and walks upward looking for `.memsphere/config.json`. If none is found, it tries the global `~/.memsphere/config.json`.
 
-The config file stores roots relative to the `.vibe-mem` directory by default:
+The config file stores roots relative to the `.memsphere` directory by default:
 
 ```json
 {

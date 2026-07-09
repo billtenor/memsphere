@@ -10,7 +10,7 @@ type SkillOptions = {
 };
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
-const skillNames = ["vibe-mem-edit", "vibe-mem-review", "vibe-mem-run"];
+const skillNames = ["memsphere-edit", "memsphere-review", "memsphere-run"];
 
 export async function skillInitCommand(options: SkillOptions): Promise<void> {
   if (options.global && options.directory) {

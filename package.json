@@ -1,10 +1,10 @@
 {
-  "name": "vibe-mem",
+  "name": "memsphere",
   "version": "0.1.0",
   "description": "A local YAML-backed memory CLI for AI runtimes.",
   "type": "module",
   "bin": {
-    "vibe-mem": "./dist/cli.js"
+    "memsphere": "./dist/cli.js"
   },
   "files": [
     "dist"

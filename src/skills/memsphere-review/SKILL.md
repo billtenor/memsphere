@@ -1,13 +1,13 @@
 ---
-name: vibe-mem-review
-description: Apply vibe-mem review YAML comments to memory files. Use when given a review file from reviewsRoot and asked to update !procedure, !concept, !statement, or !schema memories.
+name: memsphere-review
+description: Apply memsphere review YAML comments to memory files. Use when given a review file from reviewsRoot and asked to update !procedure, !concept, !statement, or !schema memories.
 ---
 
-# vibe-mem Apply Review
+# memsphere Apply Review
 
-Use this skill when applying a vibe-mem review YAML file to memory files.
+Use this skill when applying a memsphere review YAML file to memory files.
 
-Also use the `vibe-mem-edit` skill for memory YAML structure and editing rules.
+Also use the `memsphere-edit` skill for memory YAML structure and editing rules.
 
 ## Review Files
 
@@ -22,7 +22,7 @@ status: submitted
 createdAt: "2026-07-04T12:00:00.000Z"
 updatedAt: "2026-07-04T12:03:00.000Z"
 submittedAt: "2026-07-04T12:03:00.000Z"
-memoryRoot: ~/.vibe-mem/memory
+memoryRoot: ~/.memsphere/memory
 comments:
   - id: comment-id
     memoryId: schemas/example
@@ -86,7 +86,7 @@ status: processing
 updatedAt: "<current ISO timestamp>"
 ```
 
-After memory edits and `vibe-mem validate` pass, write:
+After memory edits and `memsphere validate` pass, write:
 
 ```yaml
 status: done
@@ -110,7 +110,7 @@ The final response must state the review file path and final review status.
 6. Treat comments with stale anchors cautiously: if the current content no longer matches `snapshot` or `location.hash`, use the review body as advisory context and avoid blind positional edits.
 7. Edit memory YAML files directly.
 8. Preserve unrelated content.
-9. Run `vibe-mem validate`.
+9. Run `memsphere validate`.
 10. If validation passes, update the review file to `done` using the Required Status Updates protocol.
 11. Report changed files, what changed, and validation result.
 

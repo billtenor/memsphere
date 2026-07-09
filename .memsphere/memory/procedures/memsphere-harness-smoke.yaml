@@ -1,9 +1,9 @@
 !procedure
 names:
-  - vibe-mem-harness-smoke
+  - memsphere-harness-smoke
   - harness-smoke
 defines:
-  - 用于手动验证 vibe-mem run harness 的最小流程。
+  - 用于手动验证 memsphere run harness 的最小流程。
 goals:
   - 验证 procedure step 可以通过 artifact report 顺序推进。
   - 验证 branch 可以根据 boolean artifact 选择后续步骤。
@@ -63,9 +63,9 @@ flow:
       name: 本次测试目的总结
       format: markdown
   - !call
-    target: vibe-mem-harness-child
+    target: memsphere-harness-child
   - action: 编写一份最小 harness note artifact。
     artifact:
       name: 最小 Harness 记录
       format: schema
-      schema: vibe-mem-harness-note
+      schema: memsphere-harness-note

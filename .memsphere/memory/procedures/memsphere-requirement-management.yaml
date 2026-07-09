@@ -1,10 +1,10 @@
 !procedure
 names:
-  - vibe-mem 需求管理流程
-  - vibe-mem idea 记录流程
-  - vibe-mem-requirement-management
+  - memsphere 需求管理流程
+  - memsphere idea 记录流程
+  - memsphere-requirement-management
 defines:
-  - 用于在 human 产生 vibe-mem 相关产品、体验、工程或能力建设 idea 时，低成本收集并记录需求。
+  - 用于在 human 产生 memsphere 相关产品、体验、工程或能力建设 idea 时，低成本收集并记录需求。
   - 该流程强调先把想法记录在案，再进行必要澄清、归类和结构化，方便后续大版本规划与产品迭代复用。
   - 该流程不负责需求排期和实现，只负责形成可追踪、可管理、可被后续流程消费的需求记录。
 goals:
@@ -14,7 +14,7 @@ goals:
   - 判断是否需要去重、合并或关联已有需求。
   - 按 schema 约束更新总需求池 Markdown，并向 human 汇报记录结果。
 flow:
-  - action: 接收 human 对 vibe-mem 需求或 idea 的自然语言描述。
+  - action: 接收 human 对 memsphere 需求或 idea 的自然语言描述。
     actor: human
     artifact:
       name: 需求或 idea 原始描述

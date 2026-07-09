@@ -7,7 +7,7 @@ export const browserHtml = String.raw`<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>vibe-mem</title>
+  <title>memsphere</title>
   <style>
     :root {
       --bg: #f6f7f4;
@@ -192,7 +192,7 @@ export const browserHtml = String.raw`<!doctype html>
 <body>
   <main class="shell">
     <aside class="sidebar">
-      <div class="brand"><h1>vibe-mem</h1><span class="count" id="count">Loading</span></div>
+      <div class="brand"><h1>memsphere</h1><span class="count" id="count">Loading</span></div>
       <div class="view-tabs">
         <button class="view-tab active" id="memory-tab" type="button">Memory</button>
         <button class="view-tab" id="task-tab" type="button">Task</button>
@@ -240,10 +240,10 @@ export const browserHtml = String.raw`<!doctype html>
 
   <script>
     const kindOrder = ["procedures", "schemas", "concepts", "statements"];
-    const selectedReviewKey = "vibe-mem.selectedReview.v2";
-    const selectedTaskKey = "vibe-mem.selectedTask.v1";
-    const viewModeKey = "vibe-mem.viewMode.v1";
-    const displayLanguageKey = "vibe-mem.displayLanguage.v1";
+    const selectedReviewKey = "memsphere.selectedReview.v2";
+    const selectedTaskKey = "memsphere.selectedTask.v1";
+    const viewModeKey = "memsphere.viewMode.v1";
+    const displayLanguageKey = "memsphere.displayLanguage.v1";
     const displayLanguage = localStorage.getItem(displayLanguageKey) === "yaml" ? "yaml" : "zh";
     const vocabulary = {
       procedures: { zh: "流程", yaml: "procedures" },
@@ -349,7 +349,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderFatalError(error) {
       const message = error instanceof Error ? error.message : String(error);
-      el.title.textContent = "Failed to load vibe-mem";
+      el.title.textContent = "Failed to load memsphere";
       el.subtitle.textContent = "";
       el.detail.className = "empty";
       el.detail.textContent = message;
@@ -558,7 +558,7 @@ export const browserHtml = String.raw`<!doctype html>
         el.title.textContent = "Tasks";
         el.subtitle.textContent = "No runs found.";
         el.detail.className = "empty";
-        el.detail.innerHTML = 'Start one with <code>vibe-mem run start &lt;procedure&gt;</code>.';
+        el.detail.innerHTML = 'Start one with <code>memsphere run start &lt;procedure&gt;</code>.';
         return;
       }
 
@@ -630,8 +630,8 @@ export const browserHtml = String.raw`<!doctype html>
       const command = document.createElement("div");
       command.className = "pre mono";
       command.textContent = step.format === "schema"
-        ? "vibe-mem run enter-schema " + shellQuote(step.schemaName || step.artifact) + " --run " + shellQuote(run.id)
-        : "vibe-mem run report --run " + shellQuote(run.id) + " --artifact <value>";
+        ? "memsphere run enter-schema " + shellQuote(step.schemaName || step.artifact) + " --run " + shellQuote(run.id)
+        : "memsphere run report --run " + shellQuote(run.id) + " --artifact <value>";
       panel.append(blockTitle(t("then")));
       panel.append(command);
       section.append(panel);

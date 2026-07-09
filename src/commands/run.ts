@@ -133,9 +133,9 @@ function printNext(run: RunState): void {
   if (step.format === "schema") {
     const schemaName = step.schemaName ?? step.artifact;
     console.log("Then:");
-    console.log(`vibe-mem run enter-schema ${schemaName} --run ${run.id}`);
+    console.log(`memsphere run enter-schema ${schemaName} --run ${run.id}`);
   } else {
     console.log("Then:");
-    console.log(`vibe-mem run report --run ${run.id} --artifact <value>`);
+    console.log(`memsphere run report --run ${run.id} --artifact <value>`);
   }
 }

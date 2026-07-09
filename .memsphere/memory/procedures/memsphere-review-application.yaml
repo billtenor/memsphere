@@ -1,10 +1,10 @@
 !procedure
 names:
-  - 处理 vibe-mem review 流程
-  - 应用 vibe-mem review comments 流程
-  - vibe-mem-review-application
+  - 处理 memsphere review 流程
+  - 应用 memsphere review comments 流程
+  - memsphere-review-application
 defines:
-  - 用于处理 vibe-mem review comments 的程序性记忆。
+  - 用于处理 memsphere review comments 的程序性记忆。
   - 适用于 human 明确要求 agent 应用或处理 review comments 的场景，覆盖 memory review 和 task review。
   - 强调以当前目标 memory YAML 为准，并使用 review metadata、snapshot 与 task/run artifacts 作为上下文理解 comment 意图。
 goals:
@@ -131,7 +131,7 @@ flow:
             artifact:
               name: comment 未处理原因
               format: markdown
-  - action: 运行适合的校验；核心是 vibe-mem validate，必要时补充 task/run 上下文可读性检查。
+  - action: 运行适合的校验；核心是 memsphere validate，必要时补充 task/run 上下文可读性检查。
     actor: agent
     artifact:
       name: 校验结果
@@ -159,7 +159,7 @@ flow:
         artifact:
           name: 收敛处理结果
           format: markdown
-      - action: 重新运行适合的校验；核心是 vibe-mem validate，必要时补充 task/run 上下文可读性检查。
+      - action: 重新运行适合的校验；核心是 memsphere validate，必要时补充 task/run 上下文可读性检查。
         actor: agent
         artifact:
           name: 重新校验结果

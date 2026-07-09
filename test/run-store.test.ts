@@ -8,7 +8,7 @@ import { artifactSchemaName, enterSchema, readRun, reportRun, startRun } from ".
 import { validateMemoryStore } from "../src/validation.js";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await mkdtemp(join(tmpdir(), "vibe-mem-test-"));
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-test-"));
 
   try {
     await fn(dir);
