@@ -15,8 +15,9 @@ Use this skill when executing a memsphere procedure.
 - Every step must produce the requested artifact.
 - If the step actor is `agent`, perform the action yourself and report the artifact.
 - If the step actor is `human`, ask the human to perform the action or provide the requested artifact. Do not invent the artifact. After the human provides it, report that value with `memsphere run report`.
-- After producing a non-schema artifact, report it with `memsphere run report --run <id> --artifact <value>`.
-- If the artifact is large or multiline, write it to a file and use `--artifact-file <path>`.
+- After producing a non-schema artifact, report simple scalar values with `memsphere run report --run <id> --artifact <value>`.
+- If the artifact is large, multiline, Markdown, JSON, YAML, or may contain shell-sensitive characters such as backticks, `$`, quotes, angle brackets, or code fences, write it to a file under the current run's `artifacts/` directory and use `--artifact-file <path>`.
+- Prefer `--artifact-file` for all `markdown`, `json`, and `yaml` artifacts. Do not pass Markdown directly through a double-quoted shell argument, because backticks in inline code such as `` `memsphere` `` are interpreted by the shell before `memsphere` receives the value.
 - If the returned artifact format is `schema`, call `memsphere run enter-schema <schema-name> --run <id>` and follow the schema field steps depth-first.
 - Continue until the CLI prints `done`.
 

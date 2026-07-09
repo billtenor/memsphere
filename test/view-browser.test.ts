@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { shouldRenderTaskStepArtifact } from "../src/view/browser.js";
+import { renderMarkdownContent } from "../src/commands/view.js";
+import { browserHtml, shouldRenderMarkdownArtifact, shouldRenderTaskStepArtifact } from "../src/view/browser.js";
 
 test("task step artifact area is hidden when no event exists", () => {
   assert.equal(shouldRenderTaskStepArtifact(undefined), false);
@@ -9,4 +10,40 @@ test("task step artifact area is hidden when no event exists", () => {
 
 test("task step artifact area is shown when an event exists", () => {
   assert.equal(shouldRenderTaskStepArtifact({ stepId: "flow-1", artifact: { value: "done" } }), true);
+});
+
+test("markdown artifacts use rendered markdown content when available", () => {
+  assert.equal(shouldRenderMarkdownArtifact({ format: "markdown", renderedContent: "<h1>Title</h1>" }), true);
+  assert.equal(shouldRenderMarkdownArtifact({ format: "markdown" }), false);
+  assert.equal(shouldRenderMarkdownArtifact({ format: "string", renderedContent: "<h1>Title</h1>" }), false);
+});
+
+test("renderMarkdownContent renders basic markdown blocks", () => {
+  const html = renderMarkdownContent("# Title\n\n- one\n- two\n\n```ts\nconst x = 1;\n```");
+
+  assert.match(html, /<h1>Title<\/h1>/);
+  assert.match(html, /<ul>/);
+  assert.match(html, /<li>one<\/li>/);
+  assert.match(html, /<pre><code class="language-ts">const x = 1;\n<\/code><\/pre>/);
+});
+
+test("renderMarkdownContent escapes raw HTML", () => {
+  const html = renderMarkdownContent("<script>alert(1)</script>");
+
+  assert.doesNotMatch(html, /<script>/i);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+});
+
+test("renderMarkdownContent rejects unsafe links and annotates safe links", () => {
+  const unsafe = renderMarkdownContent("[bad](javascript:alert(1))");
+  assert.doesNotMatch(unsafe, /href="javascript:/i);
+
+  const safe = renderMarkdownContent("[ok](https://example.com)");
+  assert.match(safe, /href="https:\/\/example\.com"/);
+  assert.match(safe, /target="_blank"/);
+  assert.match(safe, /rel="noopener noreferrer nofollow"/);
+});
+
+test("markdown body resets inherited pre-wrap whitespace", () => {
+  assert.match(browserHtml, /\.markdown-body \{[^}]*white-space: normal;/);
 });
