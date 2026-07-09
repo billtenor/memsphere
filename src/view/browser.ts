@@ -2,6 +2,10 @@ export function shouldRenderTaskStepArtifact(event: unknown): boolean {
   return Boolean(event);
 }
 
+export function shouldRenderMarkdownArtifact(artifact: { format?: string; renderedContent?: string } | undefined): boolean {
+  return artifact?.format === "markdown" && typeof artifact.renderedContent === "string";
+}
+
 export const browserHtml = String.raw`<!doctype html>
 <html lang="en">
 <head>
@@ -137,6 +141,27 @@ export const browserHtml = String.raw`<!doctype html>
     .task-result { margin-top: 8px; }
     .task-result .pre { margin-top: 6px; }
     .pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f3f5f0; border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin: 8px 0 0; }
+    .markdown-body { white-space: normal; overflow-wrap: anywhere; background: #f3f5f0; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin: 8px 0 0; line-height: 1.55; }
+    .markdown-body > :first-child { margin-top: 0; }
+    .markdown-body > :last-child { margin-bottom: 0; }
+    .markdown-body p { margin: 6px 0; }
+    .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6 { margin: 12px 0 6px; line-height: 1.3; font-weight: 800; }
+    .markdown-body h1 { font-size: 21px; }
+    .markdown-body h2 { font-size: 18px; }
+    .markdown-body h3 { font-size: 16px; }
+    .markdown-body h4, .markdown-body h5, .markdown-body h6 { font-size: 14px; }
+    .markdown-body ul, .markdown-body ol { margin: 6px 0; padding-left: 22px; }
+    .markdown-body li { margin: 3px 0; }
+    .markdown-body blockquote { margin: 8px 0; padding: 2px 12px; border-left: 3px solid var(--line); color: var(--muted); }
+    .markdown-body a { color: var(--accent); text-decoration: underline; }
+    .markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 12px; background: #e9ece6; border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; }
+    .markdown-body pre { margin: 8px 0; background: #e9ece6; border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; overflow-x: auto; }
+    .markdown-body pre code { background: none; border: 0; padding: 0; white-space: pre; }
+    .markdown-body table { border-collapse: collapse; display: block; overflow-x: auto; margin: 8px 0; }
+    .markdown-body th, .markdown-body td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; }
+    .markdown-body th { background: #e9ece6; }
+    .markdown-body img { max-width: 100%; height: auto; }
+    .markdown-body hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 12px; }
     .comment-card { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; }
     .comment-card b { display: block; overflow-wrap: anywhere; }
@@ -673,9 +698,7 @@ export const browserHtml = String.raw`<!doctype html>
       appendFormatMeta(meta, event.artifact.format, artifactSchemaName(event.artifact));
       appendArtifactStorageMeta(meta, event.artifact);
       meta.append(pill(formatTime(event.at)));
-      const value = document.createElement("div");
-      value.className = "pre";
-      value.textContent = artifactDisplayValue(event.artifact);
+      const value = renderArtifactValue(event.artifact);
       body.append(meta, blockTitle(t("artifactContent")), value);
       section.append(body);
       return section;
@@ -788,12 +811,10 @@ export const browserHtml = String.raw`<!doctype html>
       const title = document.createElement("div");
       title.className = "block-title";
       title.textContent = t("artifactContent");
-      const pre = document.createElement("div");
-      pre.className = "pre";
       const artifactValue = artifactDisplayValue(event.artifact);
-      pre.textContent = artifactValue;
+      const artifactContent = renderArtifactValue(event.artifact);
       const value = commentable(
-        pre,
+        artifactContent,
         event.artifact.name,
         artifactValue,
         taskAnchor(run, step, "artifact"),
@@ -1448,6 +1469,23 @@ export const browserHtml = String.raw`<!doctype html>
         return artifact.path ? "File artifact: " + artifact.path : "";
       }
       return artifact.value ?? "";
+    }
+
+    function shouldRenderMarkdownArtifact(artifact) {
+      return artifact?.format === "markdown" && typeof artifact.renderedContent === "string";
+    }
+
+    function renderArtifactValue(artifact) {
+      if (shouldRenderMarkdownArtifact(artifact)) {
+        const markdown = document.createElement("div");
+        markdown.className = "markdown-body";
+        markdown.innerHTML = artifact.renderedContent;
+        return markdown;
+      }
+      const pre = document.createElement("div");
+      pre.className = "pre";
+      pre.textContent = artifactDisplayValue(artifact);
+      return pre;
     }
 
     function artifactSpec(step) {

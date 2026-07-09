@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { access, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
+import MarkdownIt from "markdown-it";
 import { ZodError, type ZodIssue } from "zod";
 import { type VibeMemConfig, readConfig } from "../config.js";
 import { listMemoryFiles, readMemoryFile } from "../memory/store.js";
@@ -19,6 +20,8 @@ import {
 } from "../review/store.js";
 import { listRuns, readRun, type RunState } from "../run/store.js";
 import { browserHtml } from "../view/browser.js";
+
+const markdown = createMarkdownRenderer();
 
 type ViewOptions = {
   host?: string;
@@ -336,15 +339,54 @@ async function loadRunPayload(runsRoot: string): Promise<RunState[]> {
 async function hydrateRunArtifactContent(runsRoot: string, run: RunState): Promise<RunState> {
   const hydrated = JSON.parse(JSON.stringify(run)) as RunState;
   for (const event of hydrated.events) {
-    const artifact = event.artifact as RunState["events"][number]["artifact"] & { content?: string; contentError?: string };
-    if (artifact.storage !== "file" || !artifact.path || !isTextArtifactFormat(artifact.format)) continue;
-    try {
-      artifact.content = await readFile(resolveRunArtifactPath(runsRoot, hydrated.id, artifact.path), "utf8");
-    } catch (error) {
-      artifact.contentError = error instanceof Error ? error.message : String(error);
+    const artifact = event.artifact as RunState["events"][number]["artifact"] & {
+      content?: string;
+      contentError?: string;
+      renderedContent?: string;
+      renderedContentType?: string;
+    };
+    if (artifact.storage === "file" && artifact.path && isTextArtifactFormat(artifact.format)) {
+      try {
+        artifact.content = await readFile(resolveRunArtifactPath(runsRoot, hydrated.id, artifact.path), "utf8");
+      } catch (error) {
+        artifact.contentError = error instanceof Error ? error.message : String(error);
+      }
+    }
+    if (artifact.format === "markdown") {
+      const value = artifact.content ?? artifact.value;
+      if (typeof value === "string") {
+        artifact.renderedContent = renderMarkdownContent(value);
+        artifact.renderedContentType = "text/html";
+      }
     }
   }
   return hydrated;
+}
+
+export function renderMarkdownContent(value: string): string {
+  try {
+    return markdown.render(value).trim();
+  } catch {
+    return "";
+  }
+}
+
+function createMarkdownRenderer(): MarkdownIt {
+  const renderer = new MarkdownIt({
+    html: false,
+    linkify: false,
+    breaks: true
+  });
+  renderer.validateLink = (url: string) => /^(https?:|mailto:)/i.test(url.trim());
+  const defaultLinkOpen = renderer.renderer.rules.link_open;
+  renderer.renderer.rules.link_open = (tokens, index, options, env, self) => {
+    tokens[index]?.attrSet("target", "_blank");
+    tokens[index]?.attrSet("rel", "noopener noreferrer nofollow");
+    return defaultLinkOpen
+      ? defaultLinkOpen(tokens, index, options, env, self)
+      : self.renderToken(tokens, index, options);
+  };
+  return renderer;
 }
 
 function isTextArtifactFormat(format: string): boolean {
