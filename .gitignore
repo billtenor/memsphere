@@ -36,6 +36,7 @@ temp/
 .memsphere/runs/
 .memsphere/archives/
 .memsphere/config.json
+.memsphere/reserved-memory/
 
 # AI/runtime artifacts
 .openai/
