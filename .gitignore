@@ -32,11 +32,9 @@ pnpm-debug.log*
 .tmp/
 tmp/
 temp/
-.memsphere/reviews/
-.memsphere/runs/
-.memsphere/archives/
-.memsphere/config.json
-.memsphere/reserved-memory/
+.memsphere/*
+!.memsphere/memory/
+!.memsphere/memory/**
 
 # AI/runtime artifacts
 .openai/
