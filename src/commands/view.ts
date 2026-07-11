@@ -3,7 +3,7 @@ import { access, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import MarkdownIt from "markdown-it";
 import { ZodError, type ZodIssue } from "zod";
-import { archiveReview, archiveRootForScope, archiveRun } from "../archive/store.js";
+import { archiveReview, archiveRun } from "../archive/store.js";
 import { type MemsphereConfig, readConfig } from "../config.js";
 import { listMemoryFiles, readMemoryFile } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
@@ -91,7 +91,7 @@ function parsePort(value: string | undefined): number {
 async function handleRequest(request: IncomingMessage, response: ServerResponse, config: MemsphereConfig): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   const { memoryRoot, reviewsRoot, runsRoot } = config;
-  const archiveRoot = archiveRootForScope(config.scopeRoot);
+  const archiveRoot = config.archiveRoot;
 
   if (request.method === "GET" && url.pathname === "/") {
     sendHtml(response, browserHtml);

@@ -1,6 +1,5 @@
 import {
   archiveReview,
-  archiveRootForScope,
   archiveRun,
   listArchived,
   restoreReview,
@@ -21,7 +20,7 @@ export async function archiveListCommand(kind?: string): Promise<void> {
   const config = await readConfig();
   const normalizedKind = normalizeArchiveKind(kind);
   const entries = await listArchived({
-    archiveRoot: archiveRootForScope(config.scopeRoot),
+    archiveRoot: config.archiveRoot,
     kind: normalizedKind
   });
 
@@ -38,7 +37,7 @@ export async function archiveListCommand(kind?: string): Promise<void> {
 export async function archiveReviewCommand(id: string): Promise<void> {
   const config = await readConfig();
   const entry = await archiveReview({
-    archiveRoot: archiveRootForScope(config.scopeRoot),
+    archiveRoot: config.archiveRoot,
     reviewsRoot: config.reviewsRoot,
     id
   });
@@ -48,7 +47,7 @@ export async function archiveReviewCommand(id: string): Promise<void> {
 export async function archiveRunCommand(id: string): Promise<void> {
   const config = await readConfig();
   const entry = await archiveRun({
-    archiveRoot: archiveRootForScope(config.scopeRoot),
+    archiveRoot: config.archiveRoot,
     runsRoot: config.runsRoot,
     id
   });
@@ -58,7 +57,7 @@ export async function archiveRunCommand(id: string): Promise<void> {
 export async function archiveRestoreReviewCommand(id: string): Promise<void> {
   const config = await readConfig();
   const review = await restoreReview({
-    archiveRoot: archiveRootForScope(config.scopeRoot),
+    archiveRoot: config.archiveRoot,
     reviewsRoot: config.reviewsRoot,
     id
   });
@@ -68,7 +67,7 @@ export async function archiveRestoreReviewCommand(id: string): Promise<void> {
 export async function archiveRestoreRunCommand(id: string): Promise<void> {
   const config = await readConfig();
   const run = await restoreRun({
-    archiveRoot: archiveRootForScope(config.scopeRoot),
+    archiveRoot: config.archiveRoot,
     runsRoot: config.runsRoot,
     id
   });

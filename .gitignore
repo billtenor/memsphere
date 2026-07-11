@@ -35,6 +35,7 @@ temp/
 .memsphere/reviews/
 .memsphere/runs/
 .memsphere/archives/
+.memsphere/config.json
 
 # AI/runtime artifacts
 .openai/

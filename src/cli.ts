@@ -29,6 +29,7 @@ program
   .option("--memory-root <path>", "memory root directory")
   .option("--reviews-root <path>", "review files root directory")
   .option("--runs-root <path>", "run state files root directory")
+  .option("--archive-root <path>", "archived review and run root directory")
   .option("--force", "overwrite the existing config file")
   .action(initCommand);
 
