@@ -65,6 +65,7 @@ The browser renders schemas as progressive disclosure sections. `format: table` 
   schemas/
 <git-root>/.memsphere/reviews/
 <git-root>/.memsphere/runs/
+<git-root>/.memsphere/archives/
 ```
 
 Use `memsphere init --global` for `~/.memsphere`, or `memsphere init --folder <path>` for `<path>/.memsphere`.
@@ -77,9 +78,12 @@ The config file stores roots relative to the `.memsphere` directory by default:
 {
   "memoryRoot": "memory",
   "reviewsRoot": "reviews",
-  "runsRoot": "runs"
+  "runsRoot": "runs",
+  "archiveRoot": "archives"
 }
 ```
+
+Set `archiveRoot` to an absolute path when multiple scopes should share archived runs and reviews.
 
 ## YAML DSL
 

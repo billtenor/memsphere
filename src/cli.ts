@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import {
+  archiveListCommand,
+  archiveRestoreReviewCommand,
+  archiveRestoreRunCommand,
+  archiveReviewCommand,
+  archiveRunCommand
+} from "./commands/archive.js";
 import { initCommand } from "./commands/init.js";
 import { listCommand } from "./commands/list.js";
 import { runEnterSchemaCommand, runReportCommand, runStartCommand, runStatusCommand } from "./commands/run.js";
@@ -22,6 +29,7 @@ program
   .option("--memory-root <path>", "memory root directory")
   .option("--reviews-root <path>", "review files root directory")
   .option("--runs-root <path>", "run state files root directory")
+  .option("--archive-root <path>", "archived review and run root directory")
   .option("--force", "overwrite the existing config file")
   .action(initCommand);
 
@@ -85,6 +93,44 @@ run
   .description("Show run status or list recent runs.")
   .option("--run <id>", "run id")
   .action(runStatusCommand);
+
+const archive = program
+  .command("archive")
+  .description("Archive and restore completed reviews and runs.");
+
+archive
+  .command("list")
+  .description("List archived items.")
+  .argument("[kind]", "one of: reviews, runs")
+  .action(archiveListCommand);
+
+archive
+  .command("review")
+  .description("Archive a done review.")
+  .argument("<id>", "review id")
+  .action(archiveReviewCommand);
+
+archive
+  .command("run")
+  .description("Archive a done run.")
+  .argument("<id>", "run id")
+  .action(archiveRunCommand);
+
+const restore = archive
+  .command("restore")
+  .description("Restore an archived review or run.");
+
+restore
+  .command("review")
+  .description("Restore an archived review.")
+  .argument("<id>", "review id")
+  .action(archiveRestoreReviewCommand);
+
+restore
+  .command("run")
+  .description("Restore an archived run.")
+  .argument("<id>", "run id")
+  .action(archiveRestoreRunCommand);
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
