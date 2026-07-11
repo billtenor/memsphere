@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderMarkdownContent } from "../src/commands/view.js";
-import { browserHtml, shouldRenderMarkdownArtifact, shouldRenderTaskStepArtifact } from "../src/view/browser.js";
+import { browserHtml, canCreateTaskReview, shouldRenderMarkdownArtifact, shouldRenderTaskStepArtifact } from "../src/view/browser.js";
 
 test("task step artifact area is hidden when no event exists", () => {
   assert.equal(shouldRenderTaskStepArtifact(undefined), false);
@@ -10,6 +10,12 @@ test("task step artifact area is hidden when no event exists", () => {
 
 test("task step artifact area is shown when an event exists", () => {
   assert.equal(shouldRenderTaskStepArtifact({ stepId: "flow-1", artifact: { value: "done" } }), true);
+});
+
+test("only done tasks enable task review creation", () => {
+  assert.equal(canCreateTaskReview("done"), true);
+  assert.equal(canCreateTaskReview("running"), false);
+  assert.match(browserHtml, /Only done tasks can create a review/);
 });
 
 test("markdown artifacts use rendered markdown content when available", () => {

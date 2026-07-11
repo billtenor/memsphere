@@ -6,6 +6,10 @@ export function shouldRenderMarkdownArtifact(artifact: { format?: string; render
   return artifact?.format === "markdown" && typeof artifact.renderedContent === "string";
 }
 
+export function canCreateTaskReview(status: string | undefined): boolean {
+  return status === "done";
+}
+
 export const browserHtml = String.raw`<!doctype html>
 <html lang="en">
 <head>
@@ -343,6 +347,7 @@ export const browserHtml = String.raw`<!doctype html>
       commentSummary: document.getElementById("comment-summary"),
       submitReview: document.getElementById("submit-review"),
       reviewLabel: document.getElementById("review-label"),
+      createReview: document.getElementById("create-review"),
       memoryTab: document.getElementById("memory-tab"),
       taskTab: document.getElementById("task-tab")
     };
@@ -350,7 +355,7 @@ export const browserHtml = String.raw`<!doctype html>
     document.getElementById("expand").addEventListener("click", () => setAllSections(true));
     document.getElementById("collapse").addEventListener("click", () => setAllSections(false));
     document.getElementById("refresh").addEventListener("click", () => loadAll().catch(renderFatalError));
-    document.getElementById("create-review").addEventListener("click", createReview);
+    el.createReview.addEventListener("click", createReview);
     el.memoryTab.addEventListener("click", () => setViewMode("memory"));
     el.taskTab.addEventListener("click", () => setViewMode("task"));
     el.submitReview.addEventListener("click", submitReview);
@@ -992,6 +997,12 @@ export const browserHtml = String.raw`<!doctype html>
     function canComment() {
       const status = selectedReview()?.status;
       return status === "draft" || status === "submitted";
+    }
+
+    function canCreateReview() {
+      const subject = currentReviewSubject();
+      if (!subject) return false;
+      return subject.source !== "task" || selectedTask()?.status === "done";
     }
 
     function renderSelected() {
@@ -1771,6 +1782,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function createReview() {
+      if (!canCreateReview()) return;
       const subject = currentReviewSubject();
       const title = subject
         ? (subject.source === "task" ? "Task review · " : "Memory review · ") + subject.name
@@ -1877,6 +1889,11 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderReview() {
       const review = selectedReview();
+      const canCreate = canCreateReview();
+      el.createReview.disabled = !canCreate;
+      el.createReview.title = canCreate || state.viewMode !== "task"
+        ? "Create Review"
+        : "Only done tasks can create a review";
       renderReviewList();
       el.reviewLabel.textContent = review
         ? review.status + " · " + review.comments.length + " comment(s)"
