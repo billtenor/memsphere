@@ -47,3 +47,11 @@ test("renderMarkdownContent rejects unsafe links and annotates safe links", () =
 test("markdown body resets inherited pre-wrap whitespace", () => {
   assert.match(browserHtml, /\.markdown-body \{[^}]*white-space: normal;/);
 });
+
+test("browser exposes archive controls for done reviews and runs", () => {
+  assert.match(browserHtml, /review-archive/);
+  assert.match(browserHtml, /task-card-archive/);
+  assert.match(browserHtml, /\/api\/archive\/reviews\//);
+  assert.match(browserHtml, /\/api\/archive\/runs\//);
+  assert.match(browserHtml, /archiveDoneOnly/);
+});
