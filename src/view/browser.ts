@@ -6,6 +6,10 @@ export function shouldRenderMarkdownArtifact(artifact: { format?: string; render
   return artifact?.format === "markdown" && typeof artifact.renderedContent === "string";
 }
 
+export function canCreateTaskReview(status: string | undefined): boolean {
+  return status === "done";
+}
+
 export const browserHtml = String.raw`<!doctype html>
 <html lang="en">
 <head>
@@ -61,8 +65,11 @@ export const browserHtml = String.raw`<!doctype html>
     .review-card-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
     .review-card-main { min-width: 0; border: 0; background: transparent; color: inherit; padding: 0; text-align: left; cursor: pointer; }
     .review-card-main b { display: block; overflow-wrap: anywhere; margin-bottom: 4px; }
+    .review-card-actions { display: grid; gap: 6px; justify-items: end; }
     .review-delete { padding: 4px 7px; font-size: 12px; }
-    .task-card { display: grid; gap: 4px; }
+    .review-archive { padding: 4px 7px; font-size: 12px; }
+    .task-card { width: 100%; border: 0; border-radius: 6px; background: transparent; color: var(--text); padding: 8px 9px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+    .task-card-main { min-width: 0; border: 0; background: transparent; color: inherit; padding: 0; text-align: left; cursor: pointer; display: grid; gap: 4px; }
     .task-card b { overflow-wrap: anywhere; }
     .content { min-width: 0; padding: 22px 28px 48px; }
     .toolbar { margin-bottom: 18px; }
@@ -70,7 +77,7 @@ export const browserHtml = String.raw`<!doctype html>
     .title { font-size: 26px; line-height: 1.2; }
     .subtitle { margin-top: 7px; font-size: 13px; overflow-wrap: anywhere; }
     .btn { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); padding: 7px 10px; }
-    .btn:hover { border-color: var(--accent); }
+    .btn:not(:disabled):hover { border-color: var(--accent); }
     .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
     .btn.danger { color: var(--danger); }
     .btn:disabled { opacity: .55; cursor: not-allowed; }
@@ -85,7 +92,11 @@ export const browserHtml = String.raw`<!doctype html>
     .meta { display: flex; gap: 8px; flex-wrap: wrap; margin: 13px 0 18px; }
     .pill { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 3px 8px; font-size: 12px; }
     button.pill { cursor: pointer; }
-    button.pill:hover { border-color: var(--accent); color: var(--accent); }
+    button.pill:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+    .archive-run-action { align-self: center; min-height: 30px; min-width: 52px; padding: 5px 10px; font-size: 12px; line-height: 1.45; color: #4f5a5c; background: var(--surface); border-color: #c7cfca; box-shadow: var(--shadow); }
+    .archive-run-action:not(:disabled):hover { color: #173f3c; border-color: var(--accent); background: #edf6f3; }
+    .archive-run-action:disabled { color: #9aa1a5; background: #f2f3ef; border-color: var(--line); box-shadow: none; }
+    .task-card-archive { justify-self: end; align-self: end; }
     .current-step-jump { color: var(--accent); background: #edf6f3; border-color: #b8cbc7; font-weight: 700; }
     .current-step-jump:hover { background: #e3f2ee; }
     .current-step-jump:focus-visible { outline: 3px solid rgba(40, 108, 103, .18); outline-offset: 2px; }
@@ -300,6 +311,10 @@ export const browserHtml = String.raw`<!doctype html>
       currentStep: { zh: "当前步骤", yaml: "current" },
       jumpToCurrentStep: { zh: "跳到当前步骤", yaml: "Jump to current" },
       jumpToCurrentStepTitle: { zh: "跳转到当前正在运行的流程节点", yaml: "Jump to the currently running flow node" },
+      archive: { zh: "归档", yaml: "Archive" },
+      archiveDoneOnly: { zh: "只有 done 状态的内容可以归档", yaml: "Only done items can be archived" },
+      archiveRunConfirm: { zh: "归档这个 run？归档后它将不再出现在 Task 列表中。", yaml: "Archive this run? It will no longer appear in the Task list." },
+      archiveReviewConfirm: { zh: "归档这个 review？归档后它将不再出现在 Review 列表中。", yaml: "Archive this review? It will no longer appear in the Review list." },
       completed: { zh: "已完成", yaml: "done" },
       notStarted: { zh: "未开始", yaml: "pending" },
       waitingReport: { zh: "等待上报", yaml: "waiting" },
@@ -348,6 +363,7 @@ export const browserHtml = String.raw`<!doctype html>
       commentSummary: document.getElementById("comment-summary"),
       submitReview: document.getElementById("submit-review"),
       reviewLabel: document.getElementById("review-label"),
+      createReview: document.getElementById("create-review"),
       memoryTab: document.getElementById("memory-tab"),
       taskTab: document.getElementById("task-tab")
     };
@@ -355,7 +371,7 @@ export const browserHtml = String.raw`<!doctype html>
     document.getElementById("expand").addEventListener("click", () => setAllSections(true));
     document.getElementById("collapse").addEventListener("click", () => setAllSections(false));
     document.getElementById("refresh").addEventListener("click", () => loadAll().catch(renderFatalError));
-    document.getElementById("create-review").addEventListener("click", createReview);
+    el.createReview.addEventListener("click", createReview);
     el.memoryTab.addEventListener("click", () => setViewMode("memory"));
     el.taskTab.addEventListener("click", () => setViewMode("task"));
     el.submitReview.addEventListener("click", submitReview);
@@ -602,9 +618,11 @@ export const browserHtml = String.raw`<!doctype html>
         const list = document.createElement("div");
         list.className = "task-list";
         for (const run of group) {
+          const card = document.createElement("article");
+          card.className = "task-card" + (run.id === state.selectedTaskId ? " active" : "");
           const button = document.createElement("button");
           button.type = "button";
-          button.className = "task-card" + (run.id === state.selectedTaskId ? " active" : "");
+          button.className = "task-card-main";
           const title = document.createElement("b");
           title.textContent = run.procedureName;
           const meta = document.createElement("span");
@@ -618,7 +636,8 @@ export const browserHtml = String.raw`<!doctype html>
             renderAll();
             if (changedTask) scrollTaskDetailToTop();
           });
-          list.append(button);
+          card.append(button, archiveRunButton(run, "task-card-archive"));
+          list.append(card);
         }
         el.nav.append(list);
       }
@@ -677,6 +696,17 @@ export const browserHtml = String.raw`<!doctype html>
       const commentCount = review ? review.comments.filter(comment => comment.memoryId === "task/" + run.id).length : 0;
       if (commentCount) meta.append(pill(commentCount + " review comments", false, "warn"));
       return meta;
+    }
+
+    function archiveRunButton(run, className = "") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = ["btn", "archive-run-action", className].filter(Boolean).join(" ");
+      button.textContent = t("archive");
+      button.disabled = run.status !== "done";
+      button.title = run.status === "done" ? t("archiveRunConfirm") : t("archiveDoneOnly");
+      button.addEventListener("click", () => runButtonAction(button, () => archiveSelectedRun(run)));
+      return button;
     }
 
     function currentStepJumpButton(run) {
@@ -1061,6 +1091,12 @@ export const browserHtml = String.raw`<!doctype html>
     function canComment() {
       const status = selectedReview()?.status;
       return status === "draft" || status === "submitted";
+    }
+
+    function canCreateReview() {
+      const subject = currentReviewSubject();
+      if (!subject) return false;
+      return subject.source !== "task" || selectedTask()?.status === "done";
     }
 
     function renderSelected() {
@@ -1844,6 +1880,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function createReview() {
+      if (!canCreateReview()) return;
       const subject = currentReviewSubject();
       const title = subject
         ? (subject.source === "task" ? "Task review · " : "Memory review · ") + subject.name
@@ -1912,6 +1949,35 @@ export const browserHtml = String.raw`<!doctype html>
       renderAll();
     }
 
+    async function archiveSelectedRun(run) {
+      if (!run || run.status !== "done") return;
+      if (!confirm(t("archiveRunConfirm"))) return;
+      const response = await fetch("/api/archive/runs/" + encodeURIComponent(run.id), { method: "POST" });
+      if (!response.ok) throw new Error(await response.text());
+      if (state.selectedTaskId === run.id) {
+        state.selectedTaskId = null;
+        saveSelectedTask();
+      }
+      await loadRuns();
+      renderAll();
+    }
+
+    async function archiveReviewById(id) {
+      const review = state.reviews.find(item => item.id === id);
+      if (!review || review.status !== "done") return;
+      if (!confirm(t("archiveReviewConfirm"))) return;
+      const response = await fetch("/api/archive/reviews/" + encodeURIComponent(review.id), { method: "POST" });
+      if (!response.ok) throw new Error(await response.text());
+      state.reviewSnapshots.delete(review.id + ":memory");
+      state.reviewSnapshots.delete(review.id + ":task");
+      if (state.selectedReviewId === review.id) {
+        state.selectedReviewId = null;
+        saveSelectedReview();
+      }
+      await loadReviews();
+      renderAll();
+    }
+
     async function updateComment(id, body) {
       const review = selectedReview();
       if (!review || !canComment()) return;
@@ -1950,6 +2016,11 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderReview() {
       const review = selectedReview();
+      const canCreate = canCreateReview();
+      el.createReview.disabled = !canCreate;
+      el.createReview.title = canCreate || state.viewMode !== "task"
+        ? "Create Review"
+        : "Only done tasks can create a review";
       renderReviewList();
       el.reviewLabel.textContent = review
         ? review.status + " · " + review.comments.length + " comment(s)"
@@ -2100,7 +2171,17 @@ export const browserHtml = String.raw`<!doctype html>
         del.className = "btn danger review-delete";
         del.textContent = "Delete";
         del.addEventListener("click", () => runButtonAction(del, () => deleteSelectedReview(review.id)));
-        card.append(button, del);
+        const archive = document.createElement("button");
+        archive.type = "button";
+        archive.className = "btn review-archive";
+        archive.textContent = t("archive");
+        archive.disabled = review.status !== "done";
+        archive.title = review.status === "done" ? t("archiveReviewConfirm") : t("archiveDoneOnly");
+        archive.addEventListener("click", () => runButtonAction(archive, () => archiveReviewById(review.id)));
+        const actions = document.createElement("div");
+        actions.className = "review-card-actions";
+        actions.append(del, archive);
+        card.append(button, actions);
         el.reviews.append(card);
       }
     }

@@ -4,11 +4,13 @@ import { installReservedMemories } from "../reserved/store.js";
 import { ensureRunDirectory } from "../run/store.js";
 import { ensureMemoryDirectories } from "../validation.js";
 import { join } from "node:path";
+import { mkdir } from "node:fs/promises";
 
 type InitOptions = {
   memoryRoot?: string;
   reviewsRoot?: string;
   runsRoot?: string;
+  archiveRoot?: string;
   global?: boolean;
   folder?: string;
   force?: boolean;
@@ -24,15 +26,18 @@ export async function initCommand(options: InitOptions): Promise<void> {
   const memoryRootConfigValue = options.memoryRoot ?? "memory";
   const reviewsRootConfigValue = options.reviewsRoot ?? "reviews";
   const runsRootConfigValue = options.runsRoot ?? "runs";
+  const archiveRootConfigValue = options.archiveRoot ?? "archives";
   const memoryRoot = resolveScopedPath(scopeRoot, memoryRootConfigValue);
   const reviewsRoot = resolveScopedPath(scopeRoot, reviewsRootConfigValue);
   const runsRoot = resolveScopedPath(scopeRoot, runsRootConfigValue);
+  const archiveRoot = resolveScopedPath(scopeRoot, archiveRootConfigValue);
 
   await writeConfig(
     {
       memoryRoot: memoryRootConfigValue,
       reviewsRoot: reviewsRootConfigValue,
-      runsRoot: runsRootConfigValue
+      runsRoot: runsRootConfigValue,
+      archiveRoot: archiveRootConfigValue
     },
     {
       configPath,
@@ -44,12 +49,14 @@ export async function initCommand(options: InitOptions): Promise<void> {
   await ensureReviewDirectory(reviewsRoot);
   await ensureRunDirectory(runsRoot);
   const reservedMemoryRoot = await installReservedMemories(join(scopeRoot, scopeDirectoryName));
+  await mkdir(archiveRoot, { recursive: true });
 
   console.log(`Created config: ${configPath}`);
   console.log(`Created memory root: ${memoryRoot}`);
   console.log(`Created reviews root: ${reviewsRoot}`);
   console.log(`Created runs root: ${runsRoot}`);
   console.log(`Installed reserved memory root: ${reservedMemoryRoot}`);
+  console.log(`Created archive root: ${archiveRoot}`);
 }
 
 async function initScopeRoot(options: InitOptions): Promise<string> {

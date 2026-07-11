@@ -3,8 +3,9 @@ import { access, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import MarkdownIt from "markdown-it";
 import { ZodError, type ZodIssue } from "zod";
+import { archiveReview, archiveRun } from "../archive/store.js";
 import { type MemsphereConfig, readConfig } from "../config.js";
-import { listMemoryFiles, readMemoryFile } from "../memory/store.js";
+import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
 import {
@@ -23,7 +24,7 @@ import {
   type ReviewComment,
   type ReviewStatus
 } from "../review/store.js";
-import { listRuns, readRun, type RunState } from "../run/store.js";
+import { listRuns, readRun, type RunState, type RunStep } from "../run/store.js";
 import { browserHtml } from "../view/browser.js";
 
 const markdown = createMarkdownRenderer();
@@ -56,14 +57,7 @@ export async function viewCommand(options: ViewOptions): Promise<void> {
   const port = parsePort(options.port);
   const config = await readConfig();
 
-  const server = createServer(async (request, response) => {
-    try {
-      await handleRequest(request, response, config);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      sendJson(response, 500, { error: message });
-    }
-  });
+  const server = createViewServer(config);
 
   server.on("error", (error) => {
     console.error(`error: failed to start view server: ${error.message}`);
@@ -77,6 +71,17 @@ export async function viewCommand(options: ViewOptions): Promise<void> {
     console.log(`memoryRoot: ${config.memoryRoot}`);
     console.log(`reviewsRoot: ${config.reviewsRoot}`);
     console.log("Press Ctrl+C to stop.");
+  });
+}
+
+export function createViewServer(config: MemsphereConfig) {
+  return createServer(async (request, response) => {
+    try {
+      await handleRequest(request, response, config);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      sendJson(response, 500, { error: message });
+    }
   });
 }
 
@@ -97,6 +102,7 @@ function parsePort(value: string | undefined): number {
 async function handleRequest(request: IncomingMessage, response: ServerResponse, config: MemsphereConfig): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   const { memoryRoot, reviewsRoot, runsRoot } = config;
+  const archiveRoot = config.archiveRoot;
 
   if (request.method === "GET" && url.pathname === "/") {
     sendHtml(response, browserHtml);
@@ -142,7 +148,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       sendJson(response, 404, { error: "snapshot not found" });
       return;
     }
-    sendJson(response, 200, snapshotPayload(snapshot));
+    sendJson(response, 200, await snapshotPayload(snapshot));
     return;
   }
 
@@ -173,13 +179,31 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     const memoryPath = typeof body.memoryPath === "string" ? body.memoryPath : undefined;
     const runId = typeof body.runId === "string" ? body.runId : undefined;
     const runName = typeof body.runName === "string" ? body.runName : undefined;
+    let taskRun: RunState | undefined;
+    if (source === "task") {
+      if (!runId) {
+        sendJson(response, 400, { error: "task review requires a run id" });
+        return;
+      }
+      try {
+        taskRun = await readRun(runsRoot, runId);
+      } catch {
+        sendJson(response, 404, { error: "task run not found" });
+        return;
+      }
+      if (!canCreateTaskReview(taskRun.status)) {
+        sendJson(response, 409, { error: "only done tasks can create a review" });
+        return;
+      }
+    }
     const snapshotFiles = await resolveReviewSnapshotFiles({
       memoryRoot,
       runsRoot,
       source,
       memoryId,
       memoryPath,
-      runId
+      runId,
+      run: taskRun
     });
     const review = await createReview({
       title,
@@ -222,6 +246,28 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     return;
   }
 
+  const archiveReviewMatch = url.pathname.match(/^\/api\/archive\/reviews\/([^/]+)$/);
+  if (request.method === "POST" && archiveReviewMatch) {
+    const entry = await archiveReview({
+      archiveRoot,
+      reviewsRoot,
+      id: decodeURIComponent(archiveReviewMatch[1])
+    });
+    sendJson(response, 200, { archived: entry });
+    return;
+  }
+
+  const archiveRunMatch = url.pathname.match(/^\/api\/archive\/runs\/([^/]+)$/);
+  if (request.method === "POST" && archiveRunMatch) {
+    const entry = await archiveRun({
+      archiveRoot,
+      runsRoot,
+      id: decodeURIComponent(archiveRunMatch[1])
+    });
+    sendJson(response, 200, { archived: entry });
+    return;
+  }
+
   if (!["GET", "POST", "PATCH", "DELETE"].includes(request.method ?? "")) {
     sendText(response, 405, "Method Not Allowed");
     return;
@@ -230,11 +276,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   sendText(response, 404, "Not Found");
 }
 
-function snapshotPayload(input: { snapshot: { label: string; path: string; kind: "memory" | "task"; createdAt: string }; content: string }): unknown {
+async function snapshotPayload(input: { snapshot: { label: string; path: string; kind: "memory" | "task"; createdAt: string }; content: string; snapshotRoot: string }): Promise<unknown> {
   if (input.snapshot.kind === "task") {
     return {
       snapshot: input.snapshot,
-      run: JSON.parse(input.content)
+      run: await hydrateRunArtifactContent(input.snapshotRoot, JSON.parse(input.content) as RunState)
     };
   }
 
@@ -272,12 +318,30 @@ async function resolveReviewSnapshotFiles(input: {
   memoryId?: string;
   memoryPath?: string;
   runId?: string;
-}): Promise<Array<{ label: string; path: string; kind: "memory" | "task" }>> {
+  run?: RunState;
+}): Promise<Array<{ label: string; path: string; kind: "memory" | "task"; directory?: boolean; entryPath?: string; rewriteRunMemoryRoot?: string; snapshotPath?: string; snapshotDirectoryPath?: string }>> {
   if (input.source === "task") {
     if (!input.runId) return [];
+    const runPath = await resolveRunSnapshotPath(input.runsRoot, input.runId);
+    const runDirectory = join(input.runsRoot, input.runId);
+    try {
+      await access(runDirectory);
+      const taskSnapshot = {
+        label: `${input.runId}.json`,
+        path: runDirectory,
+        kind: "task",
+        directory: true,
+        entryPath: relative(runDirectory, runPath),
+        rewriteRunMemoryRoot: "snapshots/memory",
+        snapshotDirectoryPath: join("runs", input.runId)
+      } as const;
+      return [taskSnapshot, ...(await resolveTaskMemorySnapshotFiles(input.memoryRoot, input.run))];
+    } catch {
+      // Legacy root-level run JSON files have no run directory to snapshot.
+    }
     return [{
       label: `${input.runId}.json`,
-      path: await resolveRunSnapshotPath(input.runsRoot, input.runId),
+      path: runPath,
       kind: "task"
     }];
   }
@@ -300,6 +364,147 @@ async function resolveReviewSnapshotFiles(input: {
     path: file.path,
     kind: "memory"
   }];
+}
+
+async function resolveTaskMemorySnapshotFiles(memoryRoot: string, run?: RunState): Promise<Array<{ label: string; path: string; kind: "memory"; snapshotPath: string }>> {
+  if (!run) return [];
+  const references = collectRunMemoryReferences(run);
+  const index = await indexMemoryFiles(memoryRoot);
+  expandMemoryReferenceClosure(references, index);
+  const snapshots: Array<{ label: string; path: string; kind: "memory"; snapshotPath: string }> = [];
+
+  for (const kind of memoryKinds) {
+    const files = new Map<string, MemoryFile>();
+    for (const name of references[kind]) {
+      for (const memory of index[kind].get(name) ?? []) {
+        files.set(memory.path, memory);
+      }
+    }
+    for (const memory of files.values()) {
+      const relativePath = relative(memoryRoot, memory.path);
+      snapshots.push({
+        label: relativePath,
+        path: memory.path,
+        kind: "memory",
+        snapshotPath: join("memory", relativePath)
+      });
+    }
+  }
+  return snapshots;
+}
+
+async function indexMemoryFiles(memoryRoot: string): Promise<Record<MemoryKind, Map<string, MemoryFile[]>>> {
+  const index = Object.fromEntries(memoryKinds.map((kind) => [kind, new Map<string, MemoryFile[]>()])) as Record<MemoryKind, Map<string, MemoryFile[]>>;
+  for (const kind of memoryKinds) {
+    for (const path of await listMemoryFiles(memoryRoot, kind)) {
+      try {
+        const memory = await readMemoryFile(kind, path);
+        for (const name of memory.entity.names) {
+          const matches = index[kind].get(name) ?? [];
+          matches.push(memory);
+          index[kind].set(name, matches);
+        }
+      } catch {
+        // Invalid memories cannot participate in a structured dependency closure.
+      }
+    }
+  }
+  return index;
+}
+
+function expandMemoryReferenceClosure(
+  references: Record<MemoryKind, Set<string>>,
+  index: Record<MemoryKind, Map<string, MemoryFile[]>>
+): void {
+  const visited = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const kind of memoryKinds) {
+      for (const name of references[kind]) {
+        for (const memory of index[kind].get(name) ?? []) {
+          const key = `${kind}:${memory.path}`;
+          if (visited.has(key)) continue;
+          visited.add(key);
+          if (collectMemoryEntityReferences(kind, memory, references)) changed = true;
+        }
+      }
+    }
+  }
+}
+
+function collectMemoryEntityReferences(
+  kind: MemoryKind,
+  memory: MemoryFile,
+  references: Record<MemoryKind, Set<string>>
+): boolean {
+  const entity = memory.entity as Record<string, unknown>;
+  if (kind === "concepts") {
+    return addMemoryReferences(references.concepts, entity.extends);
+  }
+  if (kind === "procedures") {
+    return collectStructuredMemoryReferences(entity.flow, references);
+  }
+  return false;
+}
+
+function collectStructuredMemoryReferences(value: unknown, references: Record<MemoryKind, Set<string>>): boolean {
+  if (Array.isArray(value)) return value.reduce((changed, item) => collectStructuredMemoryReferences(item, references) || changed, false);
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  let changed = false;
+  if (record.tag === "!call" && typeof record.target === "string") {
+    changed = addMemoryReference(references.procedures, record.target) || changed;
+  }
+  const artifact = record.artifact;
+  if (artifact && typeof artifact === "object" && !Array.isArray(artifact)) {
+    const spec = artifact as Record<string, unknown>;
+    if (spec.format === "schema" && typeof spec.schema === "string") {
+      changed = addMemoryReference(references.schemas, spec.schema) || changed;
+    }
+  }
+  for (const child of Object.values(record)) {
+    changed = collectStructuredMemoryReferences(child, references) || changed;
+  }
+  return changed;
+}
+
+function addMemoryReferences(target: Set<string>, values: unknown): boolean {
+  if (!Array.isArray(values)) return false;
+  return values.reduce((changed, value) => typeof value === "string" ? addMemoryReference(target, value) || changed : changed, false);
+}
+
+function addMemoryReference(target: Set<string>, value: string): boolean {
+  if (!value || target.has(value)) return false;
+  target.add(value);
+  return true;
+}
+
+function collectRunMemoryReferences(run: RunState): Record<MemoryKind, Set<string>> {
+  const references = Object.fromEntries(memoryKinds.map((kind) => [kind, new Set<string>()])) as Record<MemoryKind, Set<string>>;
+  references.procedures.add(run.procedureName);
+  for (const frame of run.stack) {
+    references[frame.type === "procedure" ? "procedures" : "schemas"].add(frame.memoryName);
+    collectStepMemoryReferences(frame.steps, references);
+  }
+  collectStepMemoryReferences(run.plan ?? [], references);
+  for (const event of run.events) {
+    const schemaName = event.artifact.fields?.schema_name ?? event.artifact.schemaName;
+    if (typeof schemaName === "string") references.schemas.add(schemaName);
+  }
+  return references;
+}
+
+function collectStepMemoryReferences(steps: RunStep[], references: Record<MemoryKind, Set<string>>): void {
+  for (const step of steps) {
+    if (step.target) references.procedures.add(step.target);
+    if (step.schemaName) references.schemas.add(step.schemaName);
+    if (step.branches) {
+      collectStepMemoryReferences(step.branches.truthy, references);
+      collectStepMemoryReferences(step.branches.falsy, references);
+    }
+    if (step.loop) collectStepMemoryReferences(step.loop.body, references);
+  }
 }
 
 async function resolveRunSnapshotPath(runsRoot: string, runId: string): Promise<string> {
@@ -382,7 +587,7 @@ async function loadRunPayload(runsRoot: string): Promise<RunState[]> {
   return Promise.all(runs.map((run) => hydrateRunArtifactContent(runsRoot, run)));
 }
 
-async function hydrateRunArtifactContent(runsRoot: string, run: RunState): Promise<RunState> {
+export async function hydrateRunArtifactContent(runsRoot: string, run: RunState): Promise<RunState> {
   const hydrated = JSON.parse(JSON.stringify(run)) as RunState;
   for (const event of hydrated.events) {
     const artifact = event.artifact as RunState["events"][number]["artifact"] & {
@@ -407,6 +612,10 @@ async function hydrateRunArtifactContent(runsRoot: string, run: RunState): Promi
     }
   }
   return hydrated;
+}
+
+export function canCreateTaskReview(status: RunState["status"]): boolean {
+  return status === "done";
 }
 
 export function renderMarkdownContent(value: string): string {
