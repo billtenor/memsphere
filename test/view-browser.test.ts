@@ -47,3 +47,11 @@ test("renderMarkdownContent rejects unsafe links and annotates safe links", () =
 test("markdown body resets inherited pre-wrap whitespace", () => {
   assert.match(browserHtml, /\.markdown-body \{[^}]*white-space: normal;/);
 });
+
+test("browser exposes reserved memory controls", () => {
+  assert.match(browserHtml, /\/api\/reserved-memories/);
+  assert.match(browserHtml, /\/api\/reserved-memories\/import/);
+  assert.match(browserHtml, /Reserved/);
+  assert.match(browserHtml, /Import/);
+  assert.match(browserHtml, /Imported/);
+});

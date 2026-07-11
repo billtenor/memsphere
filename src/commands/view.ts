@@ -8,6 +8,11 @@ import { listMemoryFiles, readMemoryFile } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
 import {
+  assertSafeReservedRelativePath,
+  importReservedMemory,
+  listReservedMemories
+} from "../reserved/store.js";
+import {
   createReview,
   getReview,
   listReviews,
@@ -34,6 +39,8 @@ type MemoryPayload = {
     id: string;
     kind: string;
     path: string;
+    source?: "memory" | "reserved";
+    imported?: boolean;
     entity?: unknown;
     error?: MemoryLoadError;
   }>;
@@ -99,6 +106,20 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   if (request.method === "GET" && url.pathname === "/api/memories") {
     const payload = await loadMemoryPayload(memoryRoot);
     sendJson(response, 200, payload);
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/reserved-memories") {
+    sendJson(response, 200, { memories: await loadReservedMemoryPayload(config.scopeRoot, memoryRoot) });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/reserved-memories/import") {
+    const body = await readJsonBody<{ path?: unknown }>(request);
+    const path = typeof body.path === "string" ? body.path : "";
+    assertSafeReservedRelativePath(path);
+    await importReservedMemory(config.scopeRoot, memoryRoot, path);
+    sendJson(response, 200, { memories: await loadReservedMemoryPayload(config.scopeRoot, memoryRoot) });
     return;
   }
 
@@ -329,6 +350,31 @@ async function loadMemoryPayload(memoryRoot: string): Promise<MemoryPayload> {
   }
 
   return { memoryRoot, memories };
+}
+
+async function loadReservedMemoryPayload(scopeRoot: string, memoryRoot: string): Promise<MemoryPayload["memories"]> {
+  const items = await listReservedMemories(scopeRoot, memoryRoot);
+  return items.map((item) => {
+    if (item.file) {
+      const primaryName = Array.isArray(item.file.entity.names) ? item.file.entity.names[0] : item.path;
+      return {
+        id: `reserved/${item.kind}/${primaryName}`,
+        kind: item.kind,
+        path: item.path,
+        source: "reserved" as const,
+        imported: item.imported,
+        entity: item.file.entity
+      };
+    }
+    return {
+      id: `reserved/${item.kind}/${item.path}`,
+      kind: item.kind,
+      path: item.path,
+      source: "reserved" as const,
+      imported: item.imported,
+      error: formatMemoryLoadError(item.error)
+    };
+  });
 }
 
 async function loadRunPayload(runsRoot: string): Promise<RunState[]> {

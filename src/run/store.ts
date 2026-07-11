@@ -170,7 +170,7 @@ export async function startRun(input: { memoryRoot: string; runsRoot: string; pr
     events: []
   };
 
-  await expandAutoCallSteps(input.memoryRoot, run);
+  await expandAutoCallSteps(run);
   await writeRun(input.runsRoot, run);
   return run;
 }
@@ -232,7 +232,7 @@ export async function reportRun(input: { runsRoot: string; runId: string; artifa
   frame.index += 1;
   applyControlStep(frame, step, controlValue);
   await collapseCompletedFrames(input.runsRoot, run);
-  await expandAutoCallSteps(run.memoryRoot, run);
+  await expandAutoCallSteps(run);
   run.updatedAt = new Date().toISOString();
   await writeRun(input.runsRoot, run);
   return run;
@@ -557,7 +557,7 @@ function cloneStep(step: RunStep): RunStep {
   };
 }
 
-async function expandAutoCallSteps(memoryRoot: string, run: RunState): Promise<void> {
+async function expandAutoCallSteps(run: RunState): Promise<void> {
   let guard = 0;
   while (run.status !== "done") {
     if (guard++ > 20) throw new Error("too many nested !call steps");
@@ -566,7 +566,7 @@ async function expandAutoCallSteps(memoryRoot: string, run: RunState): Promise<v
     if (!frame || !step || step.kind !== "call") return;
     if (!step.target) throw new Error(`${step.id}.target is required`);
     frame.index += 1;
-    const procedure = await findMemoryByName(memoryRoot, "procedures", step.target);
+    const procedure = await findMemoryByName(run.memoryRoot, "procedures", step.target);
     if (!procedure) throw new Error(`procedure not found: ${step.target}`);
     run.stack.push({
       type: "procedure",

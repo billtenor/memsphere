@@ -49,9 +49,13 @@ export const browserHtml = String.raw`<!doctype html>
     .search:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(40, 108, 103, .12); }
     .kind { margin: 14px 0 6px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
     .memory-list, .review-list, .comment-list, .flow, .task-list, .event-list { display: grid; gap: 8px; }
+    .memory-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
     .memory-button, .review-card, .task-card { width: 100%; text-align: left; border: 0; border-radius: 6px; background: transparent; color: var(--text); padding: 8px 9px; }
     .memory-button:hover, .review-card:hover, .task-card:hover { background: #eceee8; }
     .memory-button.active, .review-card.active, .task-card.active { background: var(--accent-soft); color: #173f3c; font-weight: 700; }
+    .memory-toggle { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); padding: 4px 7px; font-size: 12px; line-height: 1.2; min-width: 52px; }
+    .memory-toggle:hover { border-color: var(--accent); color: var(--accent); }
+    .memory-toggle.imported { color: var(--ok); border-color: #b8d8c5; background: #edf6f0; }
     .review-card { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; box-shadow: var(--shadow); }
     .review-card b { display: block; overflow-wrap: anywhere; margin-bottom: 4px; }
     .review-card-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
@@ -315,6 +319,7 @@ export const browserHtml = String.raw`<!doctype html>
       viewMode: localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
       payload: null,
       memories: [],
+      reservedMemories: [],
       filtered: [],
       selectedId: null,
       selectedTaskId: localStorage.getItem(selectedTaskKey) || null,
@@ -367,7 +372,7 @@ export const browserHtml = String.raw`<!doctype html>
     }, 4000);
 
     async function loadAll() {
-      await Promise.all([loadMemories(), loadReviews(), loadRuns()]);
+      await Promise.all([loadMemories(), loadReservedMemories(), loadReviews(), loadRuns()]);
       ensureSelectedReview();
       renderAll();
     }
@@ -398,6 +403,12 @@ export const browserHtml = String.raw`<!doctype html>
       applyFilter();
       el.count.textContent = state.memories.length + " memories";
       if (!state.selectedId && state.filtered[0]) state.selectedId = state.filtered[0].id;
+    }
+
+    async function loadReservedMemories() {
+      const response = await fetch("/api/reserved-memories");
+      if (!response.ok) throw new Error(await response.text());
+      state.reservedMemories = (await response.json()).memories || [];
     }
 
     async function loadReviews() {
@@ -513,6 +524,61 @@ export const browserHtml = String.raw`<!doctype html>
         }
         el.nav.append(list);
       }
+      for (const kind of kindOrder) {
+        const reserved = filteredReservedMemories().filter((memory) => memory.kind === kind);
+        if (!reserved.length) continue;
+        const label = document.createElement("div");
+        label.className = "kind";
+        label.textContent = "Reserved / " + t(kind);
+        el.nav.append(label);
+        const list = document.createElement("div");
+        list.className = "memory-list";
+        for (const memory of reserved) {
+          const row = document.createElement("div");
+          row.className = "memory-row";
+          const button = document.createElement("button");
+          button.className = "memory-button" + (memory.id === state.selectedId ? " active" : "");
+          button.textContent = memory.error ? invalidMemoryName(memory) : primaryName(memory.entity);
+          button.title = memory.path;
+          button.addEventListener("click", () => {
+            state.selectedId = memory.id;
+            renderAll();
+          });
+          const toggle = document.createElement("button");
+          toggle.type = "button";
+          toggle.className = "memory-toggle" + (memory.imported ? " imported" : "");
+          toggle.textContent = memory.imported ? "Imported" : "Import";
+          toggle.title = memory.imported ? "Already imported into memory" : "Import reserved memory";
+          toggle.disabled = Boolean(memory.imported);
+          toggle.addEventListener("click", () => importReservedMemory(memory, toggle));
+          row.append(button, toggle);
+          list.append(row);
+        }
+        el.nav.append(list);
+      }
+    }
+
+    function filteredReservedMemories() {
+      const q = el.search.value.trim().toLowerCase();
+      return state.reservedMemories.filter((memory) => {
+        if (!q) return true;
+        return [memory.kind, memory.path, errorText(memory.error), ...(memory.entity?.names || [])].join(" ").toLowerCase().includes(q);
+      });
+    }
+
+    async function importReservedMemory(memory, button) {
+      await runButtonAction(button, async () => {
+        const response = await fetch("/api/reserved-memories/import", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ path: memory.path })
+        });
+        if (!response.ok) throw new Error(await response.text());
+        await Promise.all([loadMemories(), loadReservedMemories()]);
+        const current = state.reservedMemories.find((item) => item.path === memory.path);
+        state.selectedId = current?.id || memory.id;
+        renderAll();
+      });
     }
 
     function renderTaskNav() {
@@ -909,7 +975,10 @@ export const browserHtml = String.raw`<!doctype html>
     function selectedMemory() {
       const snapshot = currentReviewSnapshot("memory");
       if (snapshot?.memory) return snapshot.memory;
-      return state.memories.find((item) => item.id === state.selectedId) || state.filtered[0];
+      return state.memories.find((item) => item.id === state.selectedId)
+        || state.reservedMemories.find((item) => item.id === state.selectedId)
+        || state.filtered[0]
+        || state.reservedMemories[0];
     }
 
     function selectedReview() {
@@ -1090,6 +1159,10 @@ export const browserHtml = String.raw`<!doctype html>
       const meta = document.createElement("div");
       meta.className = "meta";
       meta.append(pill(memory.entity.tag || memory.kind, true));
+      if (memory.source === "reserved") {
+        meta.append(pill("reserved", true));
+        meta.append(pill(memory.imported ? "imported" : "not imported", false, memory.imported ? "done" : ""));
+      }
       if (memory.entity.format) meta.append(pill("format: " + memory.entity.format));
       for (const name of (memory.entity.names || []).slice(1)) meta.append(pill(name));
       const review = selectedReview();

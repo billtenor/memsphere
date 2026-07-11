@@ -1,5 +1,6 @@
 import { configFileName, findGitRoot, resolvePath, scopeDirectoryName, writeConfig } from "../config.js";
 import { ensureReviewDirectory } from "../review/store.js";
+import { installReservedMemories } from "../reserved/store.js";
 import { ensureRunDirectory } from "../run/store.js";
 import { ensureMemoryDirectories } from "../validation.js";
 import { join } from "node:path";
@@ -42,11 +43,13 @@ export async function initCommand(options: InitOptions): Promise<void> {
   await ensureMemoryDirectories(memoryRoot);
   await ensureReviewDirectory(reviewsRoot);
   await ensureRunDirectory(runsRoot);
+  const reservedMemoryRoot = await installReservedMemories(join(scopeRoot, scopeDirectoryName));
 
   console.log(`Created config: ${configPath}`);
   console.log(`Created memory root: ${memoryRoot}`);
   console.log(`Created reviews root: ${reviewsRoot}`);
   console.log(`Created runs root: ${runsRoot}`);
+  console.log(`Installed reserved memory root: ${reservedMemoryRoot}`);
 }
 
 async function initScopeRoot(options: InitOptions): Promise<string> {
