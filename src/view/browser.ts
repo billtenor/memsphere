@@ -308,6 +308,7 @@ export const browserHtml = String.raw`<!doctype html>
       human: { zh: "人", yaml: "human" },
       artifact: { zh: "产物", yaml: "artifact" },
       schema: { zh: "图式", yaml: "schema" },
+      items: { zh: "元素类型", yaml: "items" },
       statement: { zh: "命题", yaml: "statement" },
       action: { zh: "要做什么", yaml: "action" },
       then: { zh: "然后", yaml: "then" },
@@ -1244,6 +1245,7 @@ export const browserHtml = String.raw`<!doctype html>
       const body = document.createElement("div");
       body.className = "section-body";
       appendTextBlocks(body, node);
+      appendSchemaItems(body, node.items);
       if (node.format === "table") body.append(renderTableFields(node.fields || [], path));
       else if (node.fields && node.fields.length) {
         const children = document.createElement("div");
@@ -1259,6 +1261,17 @@ export const browserHtml = String.raw`<!doctype html>
       }
       section.append(body);
       return section;
+    }
+
+    function appendSchemaItems(target, items) {
+      if (!items || !items.length) return;
+      const title = document.createElement("div");
+      title.className = "block-title";
+      title.textContent = t("items");
+      const row = document.createElement("div");
+      row.className = "meta";
+      for (const item of items) row.append(pill(item));
+      target.append(title, row);
     }
 
     function sectionHeader(text, badges, target, anchor) {

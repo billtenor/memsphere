@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { procedureMemorySchema, schemaMemorySchema } from "../src/memory/schema.js";
+import { schemaFormats } from "../src/memory/ast.js";
+import { conceptMemorySchema, procedureMemorySchema, schemaMemorySchema } from "../src/memory/schema.js";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
 
 function parseProcedure(source: string) {
@@ -20,7 +21,7 @@ defines:
     asserts:
       - A rule must hold.
   - !schema
-    format: section
+    format: outline
     fields:
       - shorthand
       - !schema
@@ -31,7 +32,6 @@ fields:
   - simple
   - !schema
     names: [nested]
-    format: field
 `);
 
   assert.equal(entity.defines[1].tag, "!statement");
@@ -224,18 +224,89 @@ flow:
 
 test("requires names for top-level and field Schema but permits anonymous embedded Schema", () => {
   assert.throws(() => parseSchema(`!schema
-format: field
+format: outline
 `), /top-level memory/);
   assert.throws(() => parseSchema(`!schema
 names: [root]
 fields:
   - !schema
-    format: field
+    asserts: [Required.]
 `), /non-empty names/);
   assert.doesNotThrow(() => parseSchema(`!schema
 names: [root]
 defines:
   - !schema
-    format: field
+    items: [string]
 `));
+});
+
+test("Schema format defaults to outline and accepts explicit outline", () => {
+  assert.deepEqual(schemaFormats, ["outline", "table"]);
+  assert.equal(parseSchema(`!schema
+names: [default-outline]
+fields: [summary]
+`).format, undefined);
+  assert.equal(parseSchema(`!schema
+names: [explicit-outline]
+format: outline
+fields: [summary]
+`).format, "outline");
+});
+
+test("format is rejected on memory types without format implementations", () => {
+  assert.throws(() => conceptMemorySchema.parse(parseMemoryYaml(`!concept
+names: [invalid]
+format: outline
+`)), /format/);
+});
+
+test("table Schema requires List<Schema> items and non-empty fields", () => {
+  const table = parseSchema(`!schema
+names: [requirements]
+format: table
+items: [Schema]
+fields: [id, description]
+`);
+  assert.deepEqual(table.items, ["Schema"]);
+
+  assert.throws(() => parseSchema(`!schema
+names: [invalid-table]
+format: table
+fields: [id]
+`), /items: \[Schema\]/);
+  assert.throws(() => parseSchema(`!schema
+names: [invalid-table]
+format: table
+items: [Schema]
+fields: []
+`), /at least one field/);
+});
+
+for (const format of ["section", "field", "list", "template"]) {
+  test(`rejects removed Schema format ${format}`, () => {
+    assert.throws(() => parseSchema(`!schema
+names: [legacy]
+format: ${format}
+`), /format/);
+  });
+}
+
+test("Schema items rejects unknown, duplicate, and incompatible field types", () => {
+  assert.throws(() => parseSchema(`!schema
+names: [unknown-items]
+items: [Unknown]
+`), /items/);
+  assert.throws(() => parseSchema(`!schema
+names: [duplicate-items]
+items: [string, string]
+`), /duplicate/);
+  assert.throws(() => parseSchema(`!schema
+names: [empty-items]
+items: []
+`), /items/);
+  assert.throws(() => parseSchema(`!schema
+names: [invalid-structure]
+items: [string]
+fields: [value]
+`), /must include Schema/);
 });

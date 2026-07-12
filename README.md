@@ -182,6 +182,7 @@ asserts:
 names:
   - Requirements Document
   - 需求文档
+format: outline
 defines:
   - 用于收敛用户场景、需求边界、原型引用和业务验收口径的文档图式。
 asserts:
@@ -191,7 +192,6 @@ fields:
   - !schema
     names:
       - 需求概述
-    format: section
     defines:
       - 描述需求来源、目标用户、核心问题和成功标准。
     fields:
@@ -202,35 +202,34 @@ fields:
           - 说明需求来源、业务背景和为什么现在需要解决。
 ```
 
-`Schema.fields` has type `List<string | Schema>`. A string is the shortest field form and only supplies the field name. A nested `!schema` supplies richer descriptions, assertions, format, or child fields, and must have a non-empty `names` value when used in `fields`.
+`Schema.fields` has type `List<string | Schema>`. A string is the shortest field form and only supplies the field name. A nested `!schema` supplies richer descriptions, assertions, item types, or child fields, and must have a non-empty `names` value when used in `fields`.
 
-`!schema` may include an optional `format` field. `format` describes how the schema should be organized when rendered or written; it does not replace semantic fields such as `defines`, `asserts`, or `fields`.
+`Schema.items` describes `List<T>`. Its non-empty entries are the allowed element types. For example, `items: [string]` means `List<string>` and `items: [string, Statement, Schema]` means `List<string | Statement | Schema>`.
+
+`!schema` may include an optional presentation `format`. Missing format means `outline`.
 
 Supported formats:
 
 ```yaml
-format: section
-format: field
+format: outline
 format: table
-format: list
-format: template
 ```
 
-Tables are represented by setting `format: table` on the schema that is itself table-shaped; table columns are nested `fields`:
+`outline` renders nested fields as a heading hierarchy. `table` renders fields as columns and must explicitly describe a list of Schema rows:
 
 ```yaml
 !schema
 names:
   - 需求清单
 format: table
+items:
+  - Schema
 fields:
-  - !schema
-    names:
-      - ID
-  - !schema
-    names:
-      - 需求描述
+  - ID
+  - 需求描述
 ```
+
+The removed formats `section`, `field`, `list`, and `template` are invalid. Structural level is expressed by `fields`, list cardinality by `items`, and Schema itself already serves as the template.
 
 ## Persistence Rules
 

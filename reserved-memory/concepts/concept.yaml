@@ -13,7 +13,7 @@ defines:
       - 需要独立判断真假的事实、规则或约束应当使用 Statement 表达。
       - 文档、数据或协作产物的结构应当使用 Schema 表达。
   - !schema
-    format: template
+    format: outline
     asserts:
       - 根节点必须使用 !concept 标签，不得使用独立的 type 字段。
       - 顶层 Concept 的 names 必须是非空字符串数组，首项为规范名称。
@@ -22,19 +22,24 @@ defines:
       - !schema
         names:
           - names
-        format: list
+        items:
+          - string
         defines:
           - Concept 的规范名称与别名，首项为规范名称。
       - !schema
         names:
           - defines
-        format: list
+        items:
+          - string
+          - Statement
+          - Schema
         defines:
           - Concept 的文本定义，以及用于补充其规则或结构的匿名嵌套记忆实体。
       - !schema
         names:
           - extends
-        format: list
+        items:
+          - string
         defines:
           - 可选，Concept 所继承的上位概念。
 extends:

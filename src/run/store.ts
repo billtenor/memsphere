@@ -588,13 +588,16 @@ function compileSchemaSteps(schema: SchemaMemory): RunStep[] {
 }
 
 function walkSchema(node: SchemaMemory, path: string, steps: RunStep[]): void {
+  const itemDetails = node.items?.length ? [`items: List<${node.items.join(" | ")}>`] : [];
   steps.push({
     id: `schema:${path}`,
     instruction: `Write ${path}`,
     actor: "agent",
     artifact: path,
-    format: schemaFormatToArtifactFormat(node.format),
-    details: definitionDetails(node.defines).concat((node.asserts ?? []).map((value) => `asserts: ${value}`))
+    format: schemaNodeArtifactFormat(node),
+    details: definitionDetails(node.defines)
+      .concat(itemDetails)
+      .concat((node.asserts ?? []).map((value) => `asserts: ${value}`))
   });
 
   for (const child of node.fields ?? []) {
@@ -630,10 +633,8 @@ function definitionDetails(defines: DefinitionPart[]): string[] {
   return details;
 }
 
-function schemaFormatToArtifactFormat(format: SchemaMemory["format"]): ArtifactFormat {
-  if (format === "table" || format === "template") return "markdown";
-  if (format === "list") return "markdown";
-  return "string";
+function schemaNodeArtifactFormat(node: SchemaNode): ArtifactFormat {
+  return node.format === "table" || node.fields?.length || node.items?.length ? "markdown" : "string";
 }
 
 async function findMemoryByName(memoryRoot: string, kind: "procedures" | "schemas", name: string): Promise<MemoryFile | undefined> {

@@ -434,7 +434,6 @@ fields:
   - summary
   - !schema
     names: [details]
-    format: field
 `);
 
     const started = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
@@ -445,6 +444,7 @@ fields:
       "demo-schema.summary",
       "demo-schema.details"
     ]);
+    assert.deepEqual(schemaFrame?.steps.map((step) => step.format), ["markdown", "string", "string"]);
     assert(schemaFrame?.steps[0].details?.includes("asserts: Keep it concise."));
   });
 });

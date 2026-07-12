@@ -54,7 +54,7 @@ defines:
     asserts:
       - 必须满足的命题。
   - !schema
-    format: section
+    format: outline
     fields:
       - 简写字段名
       - !schema
@@ -181,16 +181,33 @@ Use statements for rules, constraints, or facts that should be evaluated as asse
 Allowed fields:
 
 - `names`
-- `format`: optional, one of `section`, `field`, `table`, `list`, `template`
+- `format`: optional, one of `outline`, `table`; missing means `outline`
 - `defines`
 - `asserts`: optional string array
+- `items`: optional non-empty array of registered type names
 - `fields`: optional array of strings or nested `!schema` nodes
 
-Use `defines` only for concise field or section descriptions. Put writing requirements, validation rules, and expected content constraints in `asserts`.
+`format` only controls the final presentation of a Schema. `outline` renders nested fields as a heading hierarchy. `table` renders first-level fields as columns. Do not use format to describe cardinality, structural level, or purpose.
 
-Use `fields` for collaborator-fillable or structurally meaningful child fields. If a schema represents a table, set `format: table` and put columns in `fields`.
+Use `items` to express `List<T>`. Each entry is one allowed element type. For example, `items: [string]` means `List<string>`, while `items: [string, Statement, Schema]` means `List<string | Statement | Schema>`. Registered item types are `string`, `number`, `boolean`, `Concept`, `Statement`, `Schema`, `Procedure`, `Action`, `Artifact`, `If`, `While`, and `Call`. Duplicate item types are invalid.
 
-A string field is the shortest form and only names the field. Use a nested `!schema` when a field needs descriptions, assertions, format, or child fields. A Schema used as a field must have a non-empty `names` value. Anonymous embedded Schemas in `defines` may omit `names`, but must contain meaningful structure such as `format`, `asserts`, or `fields`.
+Use `fields` for collaborator-fillable or structurally meaningful child fields. A string field is the shortest form and only names the field. Use a nested `!schema` when a field needs definitions, assertions, item types, or child fields. A Schema used as a field must have a non-empty `names` value.
+
+A table must declare `format: table`, `items: [Schema]`, and at least one field. Its fields are the table columns:
+
+```yaml
+!schema
+names: [requirements]
+format: table
+items:
+  - Schema
+fields:
+  - id
+  - description
+  - status
+```
+
+Anonymous embedded Schemas in `defines` may omit `names`, but must contain meaningful structure such as `format`, `asserts`, `items`, or `fields`. Old Schema formats `section`, `field`, `list`, and `template` are invalid and must be upgraded rather than accepted as compatibility syntax.
 
 ## Type Rules
 

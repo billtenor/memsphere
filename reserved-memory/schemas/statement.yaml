@@ -2,7 +2,7 @@
 names:
   - Statement entity schema
   - "!statement 编写模板"
-format: template
+format: outline
 defines:
   - 描述 memsphere !statement 记忆实体的合法结构。
 asserts:
@@ -14,18 +14,23 @@ fields:
   - !schema
     names:
       - names
-    format: list
+    items:
+      - string
     defines:
       - 陈述主题的名称与别名，首项为规范名称。
   - !schema
     names:
       - defines
-    format: list
+    items:
+      - string
+      - Statement
+      - Schema
     defines:
       - 对陈述主题的文本说明，以及用于补充规则或结构的匿名 Statement、Schema。
   - !schema
     names:
       - asserts
-    format: list
+    items:
+      - string
     defines:
       - 必须成立或需要被验证的事实、规则或约束。

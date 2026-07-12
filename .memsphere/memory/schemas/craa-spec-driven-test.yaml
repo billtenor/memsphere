@@ -66,6 +66,8 @@ fields:
     names:
       - "3. 关键要求验证表"
     format: table
+    items:
+      - Schema
     asserts:
       - |-
         把 specs 中的关键 requirement、design 中的关键风险，映射到验证方式。
@@ -164,6 +166,8 @@ fields:
     names:
       - "5. 测试环境与依赖"
     format: table
+    items:
+      - Schema
     asserts:
       - |-
         说明测试需要哪些环境、依赖、配置、账号或资源。
@@ -192,6 +196,8 @@ fields:
     names:
       - "6. 测试数据设计"
     format: table
+    items:
+      - Schema
     asserts:
       - |-
         说明关键测试数据类别，不要求贴完整大样本。
@@ -264,6 +270,8 @@ fields:
     names:
       - "8. 失败场景验证"
     format: table
+    items:
+      - Schema
     asserts:
       - |-
         列出必须验证的失败路径、超时、重试、幂等、降级、取消和资源释放场景。
