@@ -48,7 +48,9 @@ export async function initCommand(options: InitOptions): Promise<void> {
   await ensureMemoryDirectories(memoryRoot);
   await ensureReviewDirectory(reviewsRoot);
   await ensureRunDirectory(runsRoot);
-  const reservedMemoryRoot = await installReservedMemories(join(scopeRoot, scopeDirectoryName));
+  const reservedMemoryRoot = await installReservedMemories(join(scopeRoot, scopeDirectoryName), {
+    force: options.force
+  });
   await mkdir(archiveRoot, { recursive: true });
 
   console.log(`Created config: ${configPath}`);

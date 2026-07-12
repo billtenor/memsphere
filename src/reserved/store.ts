@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readdir, stat } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
@@ -32,9 +32,15 @@ export async function ensureReservedMemoryDirectories(root: string): Promise<voi
   }
 }
 
-export async function installReservedMemories(scopeRoot: string): Promise<string> {
+export async function installReservedMemories(
+  scopeRoot: string,
+  options: { force?: boolean } = {}
+): Promise<string> {
   const sourceRoot = bundledReservedMemoryRoot();
   const targetRoot = reservedMemoryRoot(scopeRoot);
+  if (options.force) {
+    await rm(targetRoot, { recursive: true, force: true });
+  }
   await ensureReservedMemoryDirectories(targetRoot);
 
   if (!(await pathExists(sourceRoot))) {

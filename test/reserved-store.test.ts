@@ -51,6 +51,23 @@ test("reserved memory install does not overwrite existing files", async () => {
   });
 });
 
+test("forced init rebuilds the installed reserved memory cache", async () => {
+  await withTempDir(async (dir) => {
+    await initCommand({ folder: dir });
+
+    const scopeRoot = join(dir, ".memsphere");
+    const target = join(reservedMemoryRoot(scopeRoot), "concepts", "concept.yaml");
+    const stale = join(reservedMemoryRoot(scopeRoot), "concepts", "stale.yaml");
+    await writeFile(target, "!concept\nnames: [local reserved]\ndefines: [local edit]\n");
+    await writeFile(stale, "!concept\nnames: [stale]\n");
+
+    await initCommand({ folder: dir, force: true });
+
+    assert.doesNotMatch(await readFile(target, "utf8"), /local edit/);
+    await assert.rejects(readFile(stale, "utf8"), /ENOENT/);
+  });
+});
+
 test("importReservedMemory copies reserved memory into the user memory root", async () => {
   await withTempDir(async (dir) => {
     const scopeRoot = join(dir, ".memsphere");

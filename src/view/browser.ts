@@ -113,6 +113,7 @@ export const browserHtml = String.raw`<!doctype html>
     .chevron { color: var(--muted); transition: transform 120ms ease; }
     .section.open > .section-header .chevron { transform: rotate(90deg); }
     .node-title { overflow-wrap: anywhere; font-weight: 700; }
+    .node-badges { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
     .section-body { display: none; border-top: 1px solid var(--line); padding: 12px 14px 14px; }
     .section.open > .section-body { display: block; }
     .block-title { margin: 12px 0 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
@@ -131,6 +132,8 @@ export const browserHtml = String.raw`<!doctype html>
     .inline-comment-editor textarea { margin-bottom: 8px; }
     .thread-edit-editor { grid-column: auto; margin: 2px 0 0; }
     .child-stack { margin-top: 12px; }
+    .definition-list > li { margin: 10px 0; }
+    .definition-list > li > .section { min-width: 0; margin: 0; }
     .field-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
     .field-table th, .field-table td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; white-space: pre-wrap; }
     .field-table th { width: 220px; background: #f3f5f0; font-weight: 700; }
@@ -1223,7 +1226,7 @@ export const browserHtml = String.raw`<!doctype html>
     function renderGeneric(entity) {
       const box = document.createElement("div");
       box.className = "section open";
-      box.append(sectionHeader(primaryName(entity), entity.tag || "memory", primaryName(entity), "section:" + primaryName(entity)));
+      box.append(sectionHeader("", entity.tag || "memory", primaryName(entity), "section:" + primaryName(entity)));
       const body = document.createElement("div");
       body.className = "section-body";
       appendTextBlocks(body, entity);
@@ -1231,12 +1234,13 @@ export const browserHtml = String.raw`<!doctype html>
       return box;
     }
 
-    function renderSchema(node, depth, path) {
+    function renderSchema(node, depth, path, fallbackName = t("schema")) {
       const section = document.createElement("div");
       section.className = "section" + (depth < 2 ? " open" : "");
-      const badge = node.format ? "format: " + node.format : (node.fields && node.fields.length ? node.fields.length + " fields" : "field");
-      const name = displayName(node, t("schema"));
-      section.append(sectionHeader(name, badge, path, "schema:" + path));
+      const badges = ["!schema"];
+      if (node.format) badges.push("format: " + node.format);
+      const name = displayName(node, fallbackName);
+      section.append(sectionHeader(name, badges, path, "schema:" + path));
       const body = document.createElement("div");
       body.className = "section-body";
       appendTextBlocks(body, node);
@@ -1257,17 +1261,20 @@ export const browserHtml = String.raw`<!doctype html>
       return section;
     }
 
-    function sectionHeader(text, badge, target, anchor) {
+    function sectionHeader(text, badges, target, anchor) {
       const location = nextLocation(anchor || "section:" + target);
       const button = document.createElement("button");
       button.className = "section-header";
       button.dataset.anchor = location.anchor;
       button.id = domIdForAnchor(location.anchor);
-      button.innerHTML = '<span class="chevron">›</span><span class="node-title"></span><span class="pill"></span>';
+      button.innerHTML = '<span class="chevron">›</span><span class="node-title"></span><span class="node-badges"></span>';
       button.querySelector(".node-title").textContent = text;
-      button.querySelector(".pill").textContent = badge;
+      const badgeContainer = button.querySelector(".node-badges");
+      for (const badge of (Array.isArray(badges) ? badges : [badges])) {
+        badgeContainer.append(pill(badge));
+      }
       const count = commentsForAnchor(location.anchor, text).length;
-      if (count) button.append(pill(count + " comments", false, "warn"));
+      if (count) badgeContainer.append(pill(count + " comments", false, "warn"));
       const targetButton = document.createElement("span");
       targetButton.className = "target-add";
       targetButton.textContent = "+";
@@ -1288,13 +1295,14 @@ export const browserHtml = String.raw`<!doctype html>
 
     function appendDefinitions(target, definitions) {
       if (!definitions || !definitions.length) return;
+      const title = document.createElement("div");
+      title.className = "block-title";
+      title.textContent = t("defines");
+      target.append(title);
       const strings = definitions
         .map((value, index) => ({ value, index }))
         .filter(entry => typeof entry.value === "string");
       if (strings.length) {
-        const title = document.createElement("div");
-        title.className = "block-title";
-        title.textContent = t("defines");
         const list = document.createElement("ul");
         list.className = "text-list";
         for (const entry of strings) {
@@ -1303,35 +1311,38 @@ export const browserHtml = String.raw`<!doctype html>
           item.append(commentable(entry.value, label, entry.value, "defines[" + (entry.index + 1) + "]"));
           list.append(item);
         }
-        target.append(title, list);
+        target.append(list);
       }
       const structures = definitions
         .map((value, index) => ({ value, index }))
         .filter(entry => entry.value && typeof entry.value === "object");
       if (!structures.length) return;
-      const title = document.createElement("div");
-      title.className = "block-title";
-      title.textContent = t("defines");
-      const children = document.createElement("div");
-      children.className = "child-stack";
+      const children = document.createElement("ul");
+      children.className = "text-list definition-list child-stack";
       structures.forEach((entry) => {
         const definition = entry.value;
         const path = "defines[" + (entry.index + 1) + "]";
         if (definition.tag === "!schema") {
-          children.append(renderSchema(definition, 1, path));
+          children.append(renderDefinitionItem(renderSchema(definition, 1, path, "")));
           return;
         }
         const section = document.createElement("div");
         section.className = "section open";
-        const name = displayName(definition, t("statement"));
+        const name = displayName(definition, "");
         section.append(sectionHeader(name, definition.tag || "!statement", path, path));
         const body = document.createElement("div");
         body.className = "section-body";
         appendTextBlocks(body, definition);
         section.append(body);
-        children.append(section);
+        children.append(renderDefinitionItem(section));
       });
-      target.append(title, children);
+      target.append(children);
+    }
+
+    function renderDefinitionItem(section) {
+      const item = document.createElement("li");
+      item.append(section);
+      return item;
     }
 
     function appendList(target, heading, values, key) {
@@ -1382,7 +1393,7 @@ export const browserHtml = String.raw`<!doctype html>
     function renderSimpleSchemaField(name, path) {
       const section = document.createElement("div");
       section.className = "section";
-      section.append(sectionHeader(name, t("string"), path, "field:" + path));
+      section.append(sectionHeader(name, "string", path, "field:" + path));
       return section;
     }
 
