@@ -38,12 +38,30 @@ The root YAML node must use a YAML tag. Do not add a separate `type` field.
 
 ## Common Fields
 
-All memory entities have:
+Top-level memory entities have:
 
 - `names`: non-empty string array. The first name is the canonical primary name.
-- `defines`: string array. Use concise descriptions only.
+- `defines`: array of strings, nested `!statement` nodes, or nested `!schema` nodes.
 
 Prefer arrays for semantic text. Do not collapse meaningful requirements into a single large paragraph.
+
+Use a string for a concise natural-language definition. Use an embedded `!statement` when the definition needs assertions, and an embedded `!schema` when it needs explicit structure. Embedded Statement and Schema values may omit `names` and `defines`; their type and meaningful fields carry the anonymous structure.
+
+```yaml
+defines:
+  - 一段简洁的自然语言定义。
+  - !statement
+    asserts:
+      - 必须满足的命题。
+  - !schema
+    format: section
+    fields:
+      - 简写字段名
+      - !schema
+        names: [详细字段]
+        asserts:
+          - 详细字段不能为空。
+```
 
 ## !procedure
 
@@ -56,6 +74,8 @@ Allowed fields:
 
 Supported flow tags:
 
+- `!action`
+- `!artifact`
 - `!if`
 - `!while`
 - `!call`
@@ -64,48 +84,53 @@ Runnable flow syntax:
 
 ```yaml
 flow:
-  - action: 判断用户输入是否包含明确变更诉求。
+  - !action
+    action: 判断用户输入是否包含明确变更诉求。
     actor: agent
-    artifact:
+    artifact: !artifact
       name: 用户输入是否包含明确变更诉求
       format: boolean
   - !if
-    condition:
+    condition: !action
       action: 判断是否需要补充背景。
-      artifact:
+      artifact: !artifact
         name: 是否需要补充背景
         format: boolean
     then:
-      - action: 补充背景信息。
+      - !action
+        action: 补充背景信息。
         actor: human
-        artifact:
+        artifact: !artifact
           name: 背景信息
           format: markdown
-    elseif:
-      - condition:
-          action: 判断是否需要补充约束。
-          artifact:
-            name: 是否需要补充约束
-            format: boolean
-        then:
-          - action: 补充约束信息。
-            artifact:
-              name: 约束信息
-              format: markdown
+    elseif: !if
+      condition: !action
+        action: 判断是否需要补充约束。
+        artifact: !artifact
+          name: 是否需要补充约束
+          format: boolean
+      then:
+        - !action
+          action: 补充约束信息。
+          artifact: !artifact
+            name: 约束信息
+            format: markdown
     else:
-      - action: 确认当前信息足够。
-        artifact:
+      - !action
+        action: 确认当前信息足够。
+        artifact: !artifact
           name: 信息足够确认
           format: string
   - !while
-    condition:
+    condition: !action
       action: 判断是否仍有观察点需要补充。
-      artifact:
+      artifact: !artifact
         name: 是否仍有观察点需要补充
         format: boolean
     do:
-      - action: 补充一个观察点。
-        artifact:
+      - !action
+        action: 补充一个观察点。
+        artifact: !artifact
           name: 观察点
           format: string
   - !call
@@ -114,16 +139,17 @@ flow:
 
 Rules:
 
-- A plain step must include `action` and an `artifact` object.
+- Every action must be tagged `!action` and include `action` and an `artifact: !artifact` value. Untagged mappings are invalid.
 - `actor` is optional and defaults to `agent`.
 - Use `actor: agent` when the agent can perform the action directly from available context.
 - Use `actor: human` when a person must make a judgment, provide missing information, approve something, or perform external work. The agent will ask the human for the artifact and then report it.
 - `artifact.name` is a human-readable deliverable name. Prefer natural language over variable-style names.
-- `artifact.format` is one of `string`, `int`, `boolean`, `markdown`, `json`, `yaml`, or `schema`.
+- `artifact.format` is one of `string`, `number`, `boolean`, `markdown`, `json`, `yaml`, or `schema`.
 - `artifact.schema` is required only when `artifact.format` is `schema`.
 - `!if.condition` and `!while.condition` are also steps and must report a boolean artifact.
-- `!if.then`, each `!if.elseif[].then`, and `!while.do` contain nested flow steps.
-- `!if.else` is optional and contains nested flow steps.
+- `!if.condition` and `!if.then` are required. `!if.elseif` is an optional single nested `!if`, so additional branches are represented recursively. There is no `!elseif` tag and `elseif` is not a list.
+- Only the root `!if` in an elseif chain may have the optional `else` field.
+- `!if.then`, `!if.else`, and `!while.do` contain non-empty nested flow arrays.
 - `!call` only includes `target`; it does not include `artifact` or `format` because the called procedure defines its own artifacts.
 
 Keep procedure steps actionable and ordered. Use `!call` when a step delegates to another named memory.
@@ -138,6 +164,8 @@ Allowed fields:
 
 Use concepts for stable vocabulary and domain abstractions.
 
+Concepts may use embedded Statement and Schema values in `defines` when prose alone is insufficient.
+
 ## !statement
 
 Allowed fields:
@@ -146,7 +174,7 @@ Allowed fields:
 - `defines`
 - `asserts`: string array
 
-Use statements for rules, constraints, or facts that should be evaluated as assertions.
+Use statements for rules, constraints, or facts that should be evaluated as assertions. A top-level Statement requires `names`; an embedded Statement may be anonymous but still requires at least one assertion.
 
 ## !schema
 
@@ -156,13 +184,21 @@ Allowed fields:
 - `format`: optional, one of `section`, `field`, `table`, `list`, `template`
 - `defines`
 - `asserts`: optional string array
-- `fields`: optional array of nested `!schema` nodes
+- `fields`: optional array of strings or nested `!schema` nodes
 
 Use `defines` only for concise field or section descriptions. Put writing requirements, validation rules, and expected content constraints in `asserts`.
 
 Use `fields` for collaborator-fillable or structurally meaningful child fields. If a schema represents a table, set `format: table` and put columns in `fields`.
 
-Nested `fields` are full schema nodes and may also have their own `asserts`, `format`, and nested `fields`.
+A string field is the shortest form and only names the field. Use a nested `!schema` when a field needs descriptions, assertions, format, or child fields. A Schema used as a field must have a non-empty `names` value. Anonymous embedded Schemas in `defines` may omit `names`, but must contain meaningful structure such as `format`, `asserts`, or `fields`.
+
+## Type Rules
+
+- Primitive authoring types are `string`, `number`, and `boolean`.
+- Built-in struct types are Concept, Statement, Schema, Procedure, Action, Artifact, If, While, and Call, represented by their lowercase YAML tags.
+- `List<T>` is the only generic extension currently supported; it is not a third type category.
+- A YAML mapping that represents a memory structure must carry its known tag. Field names express relationships; tags express value types. For example, write `artifact: !artifact`, not a bare `!artifact` without the `artifact` field.
+- Old untagged action/artifact mappings, `int`, elseif arrays, scalar `!call`, `!elseif`, and `!else` are invalid and must be upgraded rather than accepted as compatibility syntax.
 
 ## Editing Rules
 

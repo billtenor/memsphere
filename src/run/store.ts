@@ -3,23 +3,26 @@ import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises"
 import { join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
-import type { ProcedureMemory, SchemaMemory } from "../memory/schema.js";
+import {
+  artifactFormats,
+  stepActors,
+  type ActionNode,
+  type ArtifactFormat,
+  type DefinitionPart,
+  type FlowNode,
+  type IfNode,
+  type ProcedureMemory,
+  type SchemaMemory,
+  type SchemaNode,
+  type StepActor,
+  type WhileNode
+} from "../memory/ast.js";
 
-export const artifactFormats = ["string", "int", "boolean", "markdown", "json", "yaml", "schema"] as const;
-export type ArtifactFormat = (typeof artifactFormats)[number];
-export const stepActors = ["agent", "human"] as const;
-export type StepActor = (typeof stepActors)[number];
+export { artifactFormats, stepActors };
+export type { ArtifactFormat, StepActor };
 
 export type RunStatus = "running" | "done";
 export type FrameType = "procedure" | "schema";
-
-export type ProcedureStep = {
-  action: string;
-  actor: StepActor;
-  artifactName: string;
-  format: ArtifactFormat;
-  schemaName?: string;
-};
 
 export type RunFrame = {
   type: FrameType;
@@ -323,199 +326,76 @@ function compileProcedureSteps(procedure: ProcedureMemory): RunStep[] {
   return compileFlowSteps(procedure.flow, "flow");
 }
 
-function compileFlowSteps(flow: unknown[], prefix: string): RunStep[] {
-  return flow.map((raw, index) => compileFlowStep(raw, `${prefix}[${index + 1}]`, index + 1));
+function compileFlowSteps(flow: FlowNode[], prefix: string): RunStep[] {
+  return flow.map((node, index) => compileFlowStep(node, `${prefix}[${index + 1}]`));
 }
 
-function compileFlowStep(raw: unknown, id: string, position: number): RunStep {
-  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    const record = raw as Record<string, unknown>;
-    if (record.tag === "!if") {
-      return compileIfStep(record, id, position);
-    }
-
-    if (record.tag === "!while") {
-      return compileWhileStep(record, id, position);
-    }
-
-    if (record.tag === "!call") {
-      const target = typeof record.target === "string" ? record.target.trim() : typeof record.value === "string" ? record.value.trim() : "";
-      if (!target) throw new Error(`flow[${position}].target is required`);
+function compileFlowStep(node: FlowNode, id: string): RunStep {
+  switch (node.tag) {
+    case "!action":
+      return compileActionStep(node, id);
+    case "!if":
+      return compileIfStep(node, id);
+    case "!while":
+      return compileWhileStep(node, id);
+    case "!call":
       return {
         id,
         kind: "call",
-        instruction: `Call ${target}`,
-        target
+        instruction: `Call ${node.target}`,
+        target: node.target
       };
-    }
-
-    if (record.branch !== undefined) {
-      const step = normalizeProcedureStep(record.branch, `${position}.branch`);
-      const truthy = compileFlowSteps(readStepArray(record.when_true, `${id}.when_true`), `${id}.when_true`);
-      const falsy = compileFlowSteps(readStepArray(record.when_false, `${id}.when_false`), `${id}.when_false`);
-      return {
-        id,
-        kind: "branch",
-        instruction: step.action,
-        actor: step.actor,
-        artifact: step.artifactName,
-        format: step.format,
-        schemaName: step.schemaName,
-        details: describeControlTargets("true", truthy).concat(describeControlTargets("false", falsy)),
-        branches: { truthy, falsy }
-      };
-    }
-
-    if (record.loop !== undefined) {
-      const step = normalizeProcedureStep(record.loop, `${position}.loop`);
-      const body = compileFlowSteps(readStepArray(record.while_true, `${id}.while_true`), `${id}.while_true`);
-      return {
-        id,
-        kind: "loop",
-        instruction: step.action,
-        actor: step.actor,
-        artifact: step.artifactName,
-        format: step.format,
-        schemaName: step.schemaName,
-        details: describeControlTargets("while true", body).concat(["false: continue after loop"]),
-        loop: { body }
-      };
-    }
   }
+}
 
-  const step = normalizeProcedureStep(raw, position);
+function compileActionStep(node: ActionNode, id: string): RunStep {
   return {
     id,
     kind: "action",
-    instruction: step.action,
-    actor: step.actor,
-    artifact: step.artifactName,
-    format: step.format,
-    schemaName: step.schemaName
+    instruction: node.action,
+    actor: node.actor ?? "agent",
+    artifact: node.artifact.name,
+    format: node.artifact.format,
+    schemaName: node.artifact.schema
   };
 }
 
-function compileIfStep(record: Record<string, unknown>, id: string, position: number | string): RunStep {
-  const condition = normalizeProcedureStep(record.condition, `${position}.condition`);
-  if (condition.format !== "boolean") {
-    throw new Error(`flow[${position}].condition.format must be boolean`);
-  }
-  const thenSteps = compileFlowSteps(readRequiredStepArray(record.then, `${id}.then`), `${id}.then`);
-  const elseSteps = compileElseSteps(record, id, position);
+function compileIfStep(node: IfNode, id: string): RunStep {
+  const fallback = compileFlowSteps(node.else ?? [], `${id}.else`);
+  return compileIfChain(node, id, fallback);
+}
+
+function compileIfChain(node: IfNode, id: string, fallback: RunStep[]): RunStep {
+  const thenSteps = compileFlowSteps(node.then, `${id}.then`);
+  const elseSteps = node.elseif
+    ? [compileIfChain(node.elseif, `${id}.elseif`, fallback)]
+    : fallback;
   return {
     id,
     kind: "branch",
-    instruction: condition.action,
-    actor: condition.actor,
-    artifact: condition.artifactName,
-    format: condition.format,
-    schemaName: condition.schemaName,
+    instruction: node.condition.action,
+    actor: node.condition.actor ?? "agent",
+    artifact: node.condition.artifact.name,
+    format: node.condition.artifact.format,
+    schemaName: node.condition.artifact.schema,
     details: describeControlTargets("true", thenSteps).concat(describeControlTargets("false", elseSteps)),
     branches: { truthy: thenSteps, falsy: elseSteps }
   };
 }
 
-function compileElseSteps(record: Record<string, unknown>, id: string, position: number | string): RunStep[] {
-  const elseif = record.elseif;
-  if (elseif !== undefined) {
-    if (!Array.isArray(elseif)) throw new Error(`flow[${position}].elseif must be an array`);
-    if (elseif.length > 0) {
-      const [head, ...tail] = elseif;
-      if (!head || typeof head !== "object" || Array.isArray(head)) {
-        throw new Error(`flow[${position}].elseif[1] must be an object`);
-      }
-      const nestedRecord = {
-        tag: "!if",
-        ...(head as Record<string, unknown>),
-        elseif: tail.length ? tail : undefined,
-        else: tail.length ? record.else : (head as Record<string, unknown>).else ?? record.else
-      };
-      return [compileIfStep(nestedRecord, `${id}.elseif[1]`, `${position}.elseif[1]`)];
-    }
-  }
-  return readStepArray(record.else, `${id}.else`).length
-    ? compileFlowSteps(readStepArray(record.else, `${id}.else`), `${id}.else`)
-    : [];
-}
-
-function compileWhileStep(record: Record<string, unknown>, id: string, position: number | string): RunStep {
-  const condition = normalizeProcedureStep(record.condition, `${position}.condition`);
-  if (condition.format !== "boolean") {
-    throw new Error(`flow[${position}].condition.format must be boolean`);
-  }
-  const body = compileFlowSteps(readRequiredStepArray(record.do, `${id}.do`), `${id}.do`);
+function compileWhileStep(node: WhileNode, id: string): RunStep {
+  const body = compileFlowSteps(node.do, `${id}.do`);
   return {
     id,
     kind: "loop",
-    instruction: condition.action,
-    actor: condition.actor,
-    artifact: condition.artifactName,
-    format: condition.format,
-    schemaName: condition.schemaName,
+    instruction: node.condition.action,
+    actor: node.condition.actor ?? "agent",
+    artifact: node.condition.artifact.name,
+    format: node.condition.artifact.format,
+    schemaName: node.condition.artifact.schema,
     details: describeControlTargets("while true", body).concat(["false: continue after loop"]),
     loop: { body }
   };
-}
-
-function normalizeProcedureStep(raw: unknown, position: number | string): ProcedureStep {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(`flow[${position}] must be an object with action, artifact, and format`);
-  }
-
-  const record = raw as Record<string, unknown>;
-  if (typeof record.tag === "string" && record.tag.startsWith("!")) {
-    throw new Error(`flow[${position}] must be an object with action, artifact, and format`);
-  }
-  const action = typeof record.action === "string" ? record.action.trim() : "";
-  const actor = readStepActor(record.actor, position);
-  const artifact = readArtifactSpec(record.artifact, position);
-
-  if (!action) throw new Error(`flow[${position}].action is required`);
-
-  return {
-    action,
-    actor,
-    artifactName: artifact.name,
-    format: artifact.format,
-    schemaName: artifact.schema
-  };
-}
-
-function readStepActor(value: unknown, position: number | string): StepActor {
-  if (value === undefined) return "agent";
-  if (typeof value === "string" && (stepActors as readonly string[]).includes(value)) {
-    return value as StepActor;
-  }
-  throw new Error(`flow[${position}].actor must be one of: ${stepActors.join(", ")}`);
-}
-
-function readArtifactSpec(value: unknown, position: number | string): { name: string; format: ArtifactFormat; schema?: string } {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`flow[${position}].artifact must be an object with name and format`);
-  }
-
-  const record = value as Record<string, unknown>;
-  const name = typeof record.name === "string" ? record.name.trim() : "";
-  const format = typeof record.format === "string" && isArtifactFormat(record.format) ? record.format : undefined;
-  const schema = typeof record.schema === "string" ? record.schema.trim() : undefined;
-
-  if (!name) throw new Error(`flow[${position}].artifact.name is required`);
-  if (!format) throw new Error(`flow[${position}].artifact.format is required and must be one of: ${artifactFormats.join(", ")}`);
-  if (format === "schema" && !schema) throw new Error(`flow[${position}].artifact.schema is required when format is schema`);
-
-  return { name, format, schema };
-}
-
-function readStepArray(value: unknown, path: string): unknown[] {
-  if (value === undefined) return [];
-  if (Array.isArray(value)) return value;
-  throw new Error(`${path} must be an array`);
-}
-
-function readRequiredStepArray(value: unknown, path: string): unknown[] {
-  const steps = readStepArray(value, path);
-  if (!steps.length) throw new Error(`${path} must contain at least one step`);
-  return steps;
 }
 
 function describeControlTargets(label: string, steps: RunStep[]): string[] {
@@ -714,15 +594,40 @@ function walkSchema(node: SchemaMemory, path: string, steps: RunStep[]): void {
     actor: "agent",
     artifact: path,
     format: schemaFormatToArtifactFormat(node.format),
-    details: [
-      ...node.defines.map((value) => `defines: ${value}`),
-      ...(node.asserts ?? []).map((value) => `asserts: ${value}`)
-    ]
+    details: definitionDetails(node.defines).concat((node.asserts ?? []).map((value) => `asserts: ${value}`))
   });
 
   for (const child of node.fields ?? []) {
+    if (typeof child === "string") {
+      const childPath = `${path}.${child}`;
+      steps.push({
+        id: `schema:${childPath}`,
+        instruction: `Write ${childPath}`,
+        actor: "agent",
+        artifact: childPath,
+        format: "string"
+      });
+      continue;
+    }
     walkSchema(child, `${path}.${child.names[0]}`, steps);
   }
+}
+
+function definitionDetails(defines: DefinitionPart[]): string[] {
+  const details: string[] = [];
+  for (const definition of defines) {
+    if (typeof definition === "string") {
+      details.push(`defines: ${definition}`);
+      continue;
+    }
+    if (definition.tag === "!statement") {
+      details.push(...definition.asserts.map((value) => `asserts: ${value}`));
+      continue;
+    }
+    details.push(...definitionDetails(definition.defines));
+    details.push(...(definition.asserts ?? []).map((value) => `asserts: ${value}`));
+  }
+  return details;
 }
 
 function schemaFormatToArtifactFormat(format: SchemaMemory["format"]): ArtifactFormat {
@@ -744,10 +649,6 @@ async function findMemoryByName(memoryRoot: string, kind: "procedures" | "schema
   }
 
   return undefined;
-}
-
-function isArtifactFormat(value: string): value is ArtifactFormat {
-  return (artifactFormats as readonly string[]).includes(value);
 }
 
 function runPath(runsRoot: string, id: string): string {

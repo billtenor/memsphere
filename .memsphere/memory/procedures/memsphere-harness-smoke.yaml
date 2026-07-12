@@ -11,61 +11,69 @@ goals:
   - 验证 markdown artifact 会写入 run artifacts 目录，并可在 view 中显示文件内容。
   - 验证 format 为 schema 的 artifact 可以进入 schema 深度优先编写流程。
 flow:
-  - action: 判断当前输入是否足够开始 smoke test。
-    artifact:
+  - !action
+    action: 判断当前输入是否足够开始 smoke test。
+    artifact: !artifact
       name: 当前输入是否足够开始测试
       format: boolean
-  - action: 请用户确认是否允许继续执行 smoke test。
+  - !action
+    action: 请用户确认是否允许继续执行 smoke test。
     actor: human
-    artifact:
+    artifact: !artifact
       name: 用户是否允许继续执行测试
       format: boolean
   - !if
-    condition:
+    condition: !action
       action: 判断是否需要先补充测试目标。
-      artifact:
+      artifact: !artifact
         name: 是否需要补充测试目标
         format: boolean
     then:
-      - action: 写出缺失的测试目标，要求只用一句话。
-        artifact:
+      - !action
+        action: 写出缺失的测试目标，要求只用一句话。
+        artifact: !artifact
           name: 缺失的测试目标
           format: markdown
-    elseif:
-      - condition:
-          action: 判断是否需要记录目标已经充分的原因。
-          artifact:
-            name: 是否需要记录目标充分的原因
-            format: boolean
-        then:
-          - action: 写出当前测试目标已经充分的原因。
-            artifact:
-              name: 测试目标已经充分的原因
-              format: markdown
+    elseif: !if
+      condition: !action
+        action: 判断是否需要记录目标已经充分的原因。
+        artifact: !artifact
+          name: 是否需要记录目标充分的原因
+          format: boolean
+      then:
+        - !action
+          action: 写出当前测试目标已经充分的原因。
+          artifact: !artifact
+            name: 测试目标已经充分的原因
+            format: markdown
     else:
-      - action: 确认当前测试目标已经足够。
-        artifact:
+      - !action
+        action: 确认当前测试目标已经足够。
+        artifact: !artifact
           name: 测试目标充分确认
           format: markdown
   - !while
-    condition:
+    condition: !action
       action: 判断是否还需要继续补充 smoke test 观察点。
-      artifact:
+      artifact: !artifact
         name: 是否需要继续补充观察点
         format: boolean
     do:
-      - action: 补充一个新的观察点，要求具体说明你想验证什么。
-        artifact:
+      - !action
+        action: 补充一个新的观察点，要求具体说明你想验证什么。
+        artifact: !artifact
           name: 新增观察点
           format: markdown
-  - action: 用一句话总结本次 smoke test 的目的。
-    artifact:
+  - !action
+    action: 用一句话总结本次 smoke test 的目的。
+    artifact: !artifact
       name: 本次测试目的总结
       format: markdown
   - !call
     target: memsphere-harness-child
-  - action: 编写一份最小 harness note artifact。
-    artifact:
+  - !action
+    action: 编写一份最小 harness note artifact。
+    artifact: !artifact
       name: 最小 Harness 记录
       format: schema
       schema: memsphere-harness-note

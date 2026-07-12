@@ -27,18 +27,21 @@ Runnable procedure flow steps must be structured. Plain steps use `action`, `art
 
 ```yaml
 flow:
-  - action: 判断用户输入是否包含明确变更诉求。
+  - !action
+    action: 判断用户输入是否包含明确变更诉求。
     actor: agent
-    artifact:
+    artifact: !artifact
       name: 用户输入是否包含明确变更诉求
       format: boolean
-  - action: 请用户确认是否继续执行。
+  - !action
+    action: 请用户确认是否继续执行。
     actor: human
-    artifact:
+    artifact: !artifact
       name: 用户是否确认继续
       format: boolean
-  - action: 撰写 proposal。
-    artifact:
+  - !action
+    action: 撰写 proposal。
+    artifact: !artifact
       name: OpenSpec Proposal
       format: schema
       schema: craa-spec-driven-proposal
@@ -49,7 +52,7 @@ Fields:
 - `action`: what to do now.
 - `actor`: optional executor, either `agent` or `human`. Missing means `agent`.
 - `artifact.name`: required human-readable artifact name.
-- `artifact.format`: artifact format: `string`, `int`, `boolean`, `markdown`, `json`, `yaml`, or `schema`.
+- `artifact.format`: artifact format: `string`, `number`, `boolean`, `markdown`, `json`, `yaml`, or `schema`.
 - `artifact.schema`: schema memory name, required only when `artifact.format` is `schema`.
 
 Conditions are also runnable steps. They must report boolean artifacts:
@@ -57,41 +60,44 @@ Conditions are also runnable steps. They must report boolean artifacts:
 ```yaml
 flow:
   - !if
-    condition:
+    condition: !action
       action: 判断是否需要补充背景。
-      artifact:
+      artifact: !artifact
         name: 是否需要补充背景
         format: boolean
     then:
-      - action: 补充背景信息。
-        artifact:
+      - !action
+        action: 补充背景信息。
+        artifact: !artifact
           name: 背景信息
           format: markdown
     else:
-      - action: 确认当前信息足够。
-        artifact:
+      - !action
+        action: 确认当前信息足够。
+        artifact: !artifact
           name: 信息足够确认
           format: string
   - !while
-    condition:
+    condition: !action
       action: 判断是否还需要继续补充观察点。
-      artifact:
+      artifact: !artifact
         name: 是否还需要继续补充观察点
         format: boolean
     do:
-      - action: 补充一个观察点。
-        artifact:
+      - !action
+        action: 补充一个观察点。
+        artifact: !artifact
           name: 观察点
           format: string
   - !call
     target: another-procedure-name
 ```
 
-For `!if`, report the condition artifact; the harness chooses `then`, `elseif`, or `else`.
+For `!if`, report the condition artifact; the harness chooses `then`, recursively evaluates the optional `elseif: !if`, or uses the root `else` branch. `elseif` is a single nested If value, not a list.
 For `!while`, report the condition artifact; `true` enters `do` and returns to the condition, `false` exits.
 For `!call`, do not report anything for the call itself. The harness automatically enters the target procedure, whose internal steps define their own artifacts.
 
-String flow steps and legacy control syntax are not runnable by the MVP harness.
+String flow steps, untagged mappings, elseif arrays, scalar `!call`, `!elseif`, and `!else` are invalid memory syntax and must fail validation before a run starts.
 
 ## CLI Loop
 

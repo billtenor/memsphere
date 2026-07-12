@@ -1,0 +1,8 @@
+!concept
+names:
+  - Statement
+  - 陈述记忆
+  - "!statement"
+defines:
+  - memsphere 中用于表达可被核查的事实、规则或约束的记忆实体。
+  - 用于让记忆库明确哪些内容应当成立或被验证，不用于定义术语，也不用于描述结构模板。

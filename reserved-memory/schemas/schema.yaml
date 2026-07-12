@@ -1,0 +1,45 @@
+!schema
+names:
+  - Schema entity schema
+  - "!schema 编写模板"
+format: template
+defines:
+  - 描述 memsphere !schema 记忆实体的合法结构。
+asserts:
+  - 根节点必须使用 !schema 标签，不得使用独立的 type 字段。
+  - names 必须是非空字符串数组，首项为规范名称。
+  - format 如出现，只能是 section、field、table、list 或 template。
+  - defines 可以包含字符串、!statement 或 !schema；嵌套结构必须携带 YAML tag。
+  - fields 如出现，可以包含表示最简字段名的字符串，或带 !schema tag 的详细字段。
+  - fields 中的 !schema 必须具有非空 names；defines 中的匿名 !schema 可以省略 names，但必须包含有意义的结构。
+fields:
+  - !schema
+    names:
+      - names
+    format: list
+    defines:
+      - 结构名称与别名，首项为规范名称。
+  - !schema
+    names:
+      - format
+    format: field
+    defines:
+      - 可选，结构的呈现形式。
+  - !schema
+    names:
+      - defines
+    format: list
+    defines:
+      - 对结构语义的文本说明，以及用于补充规则或结构的匿名 Statement、Schema。
+  - !schema
+    names:
+      - asserts
+    format: list
+    defines:
+      - 可选，内容、书写或校验要求。
+  - !schema
+    names:
+      - fields
+    format: list
+    defines:
+      - 可选，由简写字段名或嵌套 !schema 节点组成的子结构。

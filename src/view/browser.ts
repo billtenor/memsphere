@@ -305,6 +305,7 @@ export const browserHtml = String.raw`<!doctype html>
       human: { zh: "人", yaml: "human" },
       artifact: { zh: "产物", yaml: "artifact" },
       schema: { zh: "图式", yaml: "schema" },
+      statement: { zh: "命题", yaml: "statement" },
       action: { zh: "要做什么", yaml: "action" },
       then: { zh: "然后", yaml: "then" },
       artifactContent: { zh: "产物内容", yaml: "artifact.value" },
@@ -325,7 +326,7 @@ export const browserHtml = String.raw`<!doctype html>
       format: { zh: "格式", yaml: "format" },
       boolean: { zh: "判断结果", yaml: "boolean" },
       string: { zh: "短文本", yaml: "string" },
-      int: { zh: "数字", yaml: "int" },
+      number: { zh: "数字", yaml: "number" },
       markdown: { zh: "文档", yaml: "markdown" },
       json: { zh: "JSON", yaml: "json" },
       yaml: { zh: "YAML", yaml: "yaml" }
@@ -1149,6 +1150,11 @@ export const browserHtml = String.raw`<!doctype html>
       return entity && Array.isArray(entity.names) && entity.names.length ? entity.names[0] : "(unnamed)";
     }
 
+    function displayName(entity, fallback) {
+      const name = primaryName(entity);
+      return name === "(unnamed)" ? fallback : name;
+    }
+
     function invalidMemoryName(memory) {
       return memory.path ? memory.path.replace(/^.*\//, "").replace(/\.ya?ml$/, "") : "Invalid memory";
     }
@@ -1229,7 +1235,8 @@ export const browserHtml = String.raw`<!doctype html>
       const section = document.createElement("div");
       section.className = "section" + (depth < 2 ? " open" : "");
       const badge = node.format ? "format: " + node.format : (node.fields && node.fields.length ? node.fields.length + " fields" : "field");
-      section.append(sectionHeader(primaryName(node), badge, path, "schema:" + path));
+      const name = displayName(node, t("schema"));
+      section.append(sectionHeader(name, badge, path, "schema:" + path));
       const body = document.createElement("div");
       body.className = "section-body";
       appendTextBlocks(body, node);
@@ -1237,7 +1244,13 @@ export const browserHtml = String.raw`<!doctype html>
       else if (node.fields && node.fields.length) {
         const children = document.createElement("div");
         children.className = "child-stack";
-        for (const child of node.fields) children.append(renderSchema(child, depth + 1, path + " > " + primaryName(child)));
+        for (const child of node.fields) {
+          const childName = typeof child === "string" ? child : displayName(child, t("schema"));
+          const childPath = path + " > " + childName;
+          children.append(typeof child === "string"
+            ? renderSimpleSchemaField(child, childPath)
+            : renderSchema(child, depth + 1, childPath));
+        }
         body.append(children);
       }
       section.append(body);
@@ -1269,8 +1282,56 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function appendTextBlocks(target, node) {
-      appendList(target, t("defines"), node.defines, "defines");
+      appendDefinitions(target, node.defines);
       appendList(target, t("asserts"), node.asserts, "asserts");
+    }
+
+    function appendDefinitions(target, definitions) {
+      if (!definitions || !definitions.length) return;
+      const strings = definitions
+        .map((value, index) => ({ value, index }))
+        .filter(entry => typeof entry.value === "string");
+      if (strings.length) {
+        const title = document.createElement("div");
+        title.className = "block-title";
+        title.textContent = t("defines");
+        const list = document.createElement("ul");
+        list.className = "text-list";
+        for (const entry of strings) {
+          const item = document.createElement("li");
+          const label = t("defines") + "[" + (entry.index + 1) + "]";
+          item.append(commentable(entry.value, label, entry.value, "defines[" + (entry.index + 1) + "]"));
+          list.append(item);
+        }
+        target.append(title, list);
+      }
+      const structures = definitions
+        .map((value, index) => ({ value, index }))
+        .filter(entry => entry.value && typeof entry.value === "object");
+      if (!structures.length) return;
+      const title = document.createElement("div");
+      title.className = "block-title";
+      title.textContent = t("defines");
+      const children = document.createElement("div");
+      children.className = "child-stack";
+      structures.forEach((entry) => {
+        const definition = entry.value;
+        const path = "defines[" + (entry.index + 1) + "]";
+        if (definition.tag === "!schema") {
+          children.append(renderSchema(definition, 1, path));
+          return;
+        }
+        const section = document.createElement("div");
+        section.className = "section open";
+        const name = displayName(definition, t("statement"));
+        section.append(sectionHeader(name, definition.tag || "!statement", path, path));
+        const body = document.createElement("div");
+        body.className = "section-body";
+        appendTextBlocks(body, definition);
+        section.append(body);
+        children.append(section);
+      });
+      target.append(title, children);
     }
 
     function appendList(target, heading, values, key) {
@@ -1294,18 +1355,21 @@ export const browserHtml = String.raw`<!doctype html>
       table.className = "field-table";
       const body = document.createElement("tbody");
       for (const field of fields) {
+        const fieldName = typeof field === "string" ? field : displayName(field, t("schema"));
         const row = document.createElement("tr");
         const th = document.createElement("th");
-        th.textContent = primaryName(field);
-        const fieldTarget = path + " > " + primaryName(field);
+        th.textContent = fieldName;
+        const fieldTarget = path + " > " + fieldName;
         const fieldAnchor = "field:" + fieldTarget;
         const fieldLocation = nextLocation(fieldAnchor);
         th.dataset.anchor = fieldLocation.anchor;
-        th.append(commentButton(fieldTarget, primaryName(field), withLocationHash(fieldLocation, primaryName(field))));
+        th.append(commentButton(fieldTarget, fieldName, withLocationHash(fieldLocation, fieldName)));
         const td = document.createElement("td");
         const parts = [];
-        if (field.defines && field.defines.length) parts.push(field.defines.join("\n"));
-        if (field.asserts && field.asserts.length) parts.push(field.asserts.join("\n"));
+        if (typeof field !== "string") {
+          if (field.defines && field.defines.length) parts.push(field.defines.filter(value => typeof value === "string").join("\n"));
+          if (field.asserts && field.asserts.length) parts.push(field.asserts.join("\n"));
+        }
         const snapshot = parts.join("\n\n") || "Column";
         td.append(commentable(snapshot, fieldTarget, snapshot, fieldAnchor + ":body"));
         row.append(th, td);
@@ -1313,6 +1377,13 @@ export const browserHtml = String.raw`<!doctype html>
       }
       table.append(body);
       return table;
+    }
+
+    function renderSimpleSchemaField(name, path) {
+      const section = document.createElement("div");
+      section.className = "section";
+      section.append(sectionHeader(name, t("string"), path, "field:" + path));
+      return section;
     }
 
     function renderProcedure(entity) {
@@ -1334,7 +1405,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (step.tag === "!call" && step.target) return renderCall(step.target, anchor);
       if (step.tag === "!if" && step.condition) return renderCanonicalIf(step, anchor);
       if (step.tag === "!while" && step.condition) return renderCanonicalWhile(step, anchor);
-      if (step.action && artifactSpec(step).format) return renderStructuredAction(step, anchor);
+      if (step.tag === "!action" && step.action && artifactSpec(step).format) return renderStructuredAction(step, anchor);
       return invalidFlowItem(step, anchor);
     }
 
@@ -1394,13 +1465,17 @@ export const browserHtml = String.raw`<!doctype html>
       item.className = "flow-item branch";
       item.append(renderStructuredControlHead(step.condition, anchor + ".condition", t("if")));
       item.append(renderNamedFlowChildren("", step.then || [], anchor + ".then"));
-      const elseif = Array.isArray(step.elseif) ? step.elseif : [];
-      elseif.forEach((branch, index) => {
+      let branch = step.elseif;
+      let index = 1;
+      while (branch) {
         const branchWrap = document.createElement("div");
-        branchWrap.append(renderStructuredControlHead(branch.condition, anchor + ".elseif[" + (index + 1) + "].condition", t("elseif")));
-        branchWrap.append(renderNamedFlowChildren("", branch.then || [], anchor + ".elseif[" + (index + 1) + "].then"));
+        const branchAnchor = anchor + ".elseif".repeat(index);
+        branchWrap.append(renderStructuredControlHead(branch.condition, branchAnchor + ".condition", t("elseif")));
+        branchWrap.append(renderNamedFlowChildren("", branch.then || [], branchAnchor + ".then"));
         item.append(branchWrap);
-      });
+        branch = branch.elseif;
+        index += 1;
+      }
       if (step.else) item.append(renderElseBranch(step.else || [], anchor + ".else"));
       return item;
     }
@@ -1418,23 +1493,6 @@ export const browserHtml = String.raw`<!doctype html>
       item.className = "flow-item";
       const artifact = artifactSpec(step);
       item.append(renderFlowHead(t("step"), step.action, artifact.name || anchor, anchor + ".action", step));
-      return item;
-    }
-
-    function renderStructuredBranch(step, anchor) {
-      const item = document.createElement("div");
-      item.className = "flow-item branch";
-      item.append(renderStructuredControlHead(step.branch, anchor + ".branch", t("if")));
-      item.append(renderNamedFlowChildren("when true", step.when_true || [], anchor + ".when_true"));
-      item.append(renderNamedFlowChildren("when false", step.when_false || [], anchor + ".when_false"));
-      return item;
-    }
-
-    function renderStructuredLoop(step, anchor) {
-      const item = document.createElement("div");
-      item.className = "flow-item branch";
-      item.append(renderStructuredControlHead(step.loop, anchor + ".loop", t("while")));
-      item.append(renderNamedFlowChildren("while true", step.while_true || [], anchor + ".while_true"));
       return item;
     }
 
@@ -1619,7 +1677,7 @@ export const browserHtml = String.raw`<!doctype html>
     function formatLabel(format) {
       if (format === "boolean") return t("boolean");
       if (format === "string") return t("string");
-      if (format === "int") return t("int");
+      if (format === "number") return t("number");
       if (format === "markdown") return t("markdown");
       if (format === "json") return t("json");
       if (format === "yaml") return t("yaml");

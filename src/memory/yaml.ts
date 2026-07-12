@@ -4,7 +4,6 @@ import {
   type CollectionTag,
   type ParsedNode,
   type Scalar,
-  type ScalarTag,
   type YAMLMap
 } from "yaml";
 import { memoryKindTags, type MemoryKind } from "./kinds.js";
@@ -14,17 +13,12 @@ const memoryYamlTags: CollectionTag[] = Object.values(memoryKindTags).map((tag) 
   collection: "map"
 }));
 
-const flowCollectionTags: CollectionTag[] = ["!if", "!elseif", "!else", "!while", "!call"].map((tag) => ({
+const nestedStructTags: CollectionTag[] = ["!action", "!artifact", "!if", "!while", "!call"].map((tag) => ({
   tag,
   collection: "map"
 }));
 
-const flowScalarTags: ScalarTag[] = ["!call"].map((tag) => ({
-  tag,
-  resolve: (value: string) => value
-}));
-
-const customTags = [...memoryYamlTags, ...flowCollectionTags, ...flowScalarTags];
+const customTags = [...memoryYamlTags, ...nestedStructTags];
 
 function nodeTag(node: ParsedNode | null | undefined): string | undefined {
   return node?.tag ?? undefined;

@@ -10,105 +10,129 @@ goals:
   - 补充能够覆盖该 bug 的测试 case；自动化不可行时，将手工验证 case 整理到测试文档或测试文档集合。
   - 给出验证摘要，说明已执行验证、结果、未执行项及原因。
 flow:
-  - action: 接收 bug 初始描述。
+  - !action
+    action: 接收 bug 初始描述。
     actor: human
-    artifact:
+    artifact: !artifact
       name: bug 初始描述
       format: markdown
 
-  - action: 整理 agent 对 bug 的理解，包含实际行为、期望行为、影响范围和已知证据。
+  - !action
+
+    action: 整理 agent 对 bug 的理解，包含实际行为、期望行为、影响范围和已知证据。
     actor: agent
-    artifact:
+    artifact: !artifact
       name: bug 理解摘要
       format: markdown
 
   - !while
-    condition:
+    condition: !action
       action: 判断 human 与 agent 是否尚未达成 bug 理解一致。
       actor: human
-      artifact:
+      artifact: !artifact
         name: bug 理解是否仍需澄清
         format: boolean
     do:
-      - action: 针对当前理解差异提出一个澄清问题或请求补充证据。
+      - !action
+        action: 针对当前理解差异提出一个澄清问题或请求补充证据。
         actor: agent
-        artifact:
+        artifact: !artifact
           name: bug 澄清追问
           format: string
-      - action: 回答澄清问题或补充截图、日志、命令输出、复现信息等证据。
+      - !action
+        action: 回答澄清问题或补充截图、日志、命令输出、复现信息等证据。
         actor: human
-        artifact:
+        artifact: !artifact
           name: bug 补充信息
           format: markdown
-      - action: 根据补充信息更新 bug 理解摘要。
+      - !action
+        action: 根据补充信息更新 bug 理解摘要。
         actor: agent
-        artifact:
+        artifact: !artifact
           name: 更新后的 bug 理解摘要
           format: markdown
 
-  - action: 分析 bug 的代码原因或流程原因。
+  - !action
+
+    action: 分析 bug 的代码原因或流程原因。
     actor: agent
-    artifact:
+    artifact: !artifact
       name: bug 根因分析
       format: markdown
 
-  - action: 分析现有自动化测试为什么没有覆盖该 bug。
+  - !action
+
+    action: 分析现有自动化测试为什么没有覆盖该 bug。
     actor: agent
-    artifact:
+    artifact: !artifact
       name: 测试缺口分析
       format: markdown
 
-  - action: 形成代码修复方案。
+  - !action
+
+    action: 形成代码修复方案。
     actor: agent
-    artifact:
+    artifact: !artifact
       name: 代码修复方案
       format: markdown
 
-  - action: 形成测试修复方案，优先自动化测试；如果自动化不可行，说明手工验证 case 及测试文档沉淀方式。
+  - !action
+
+    action: 形成测试修复方案，优先自动化测试；如果自动化不可行，说明手工验证 case 及测试文档沉淀方式。
     actor: agent
-    artifact:
+    artifact: !artifact
       name: 测试修复方案
       format: markdown
 
   - !while
-    condition:
+    condition: !action
       action: 判断 human 是否仍不认可当前修复方案。
       actor: human
-      artifact:
+      artifact: !artifact
         name: 修复方案是否仍需调整
         format: boolean
     do:
-      - action: 提供修复方案调整意见。
+      - !action
+        action: 提供修复方案调整意见。
         actor: human
-        artifact:
+        artifact: !artifact
           name: 修复方案调整意见
           format: markdown
-      - action: 根据调整意见更新代码修复方案和测试修复方案。
+      - !action
+        action: 根据调整意见更新代码修复方案和测试修复方案。
         actor: agent
-        artifact:
+        artifact: !artifact
           name: 更新后的修复方案
           format: markdown
 
-  - action: 实施代码修复。
+  - !action
+
+    action: 实施代码修复。
     actor: agent
-    artifact:
+    artifact: !artifact
       name: 代码修复结果
       format: markdown
 
-  - action: 补充或更新测试 case；自动化不可行时，将手工验证 case 整理到测试文档或测试文档集合。
+  - !action
+
+    action: 补充或更新测试 case；自动化不可行时，将手工验证 case 整理到测试文档或测试文档集合。
     actor: agent
-    artifact:
+    artifact: !artifact
       name: 补充测试 case
       format: markdown
 
-  - action: 执行验证命令或手工验证步骤。
+  - !action
+
+    action: 执行验证命令或手工验证步骤。
     actor: agent
-    artifact:
+    artifact: !artifact
       name: 验证执行记录
       format: markdown
 
-  - action: 整理最终验证摘要，说明已执行验证、结果、未执行项及原因。
+  - !action
+
+    action: 整理最终验证摘要，说明已执行验证、结果、未执行项及原因。
     actor: agent
-    artifact:
+    artifact: !artifact
       name: 验证摘要
       format: markdown

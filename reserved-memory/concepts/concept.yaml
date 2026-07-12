@@ -1,0 +1,41 @@
+!concept
+names:
+  - Concept
+  - 概念
+  - 概念记忆
+defines:
+  - 用于沉淀稳定词汇和领域抽象的记忆实体。
+  - 用于统一记忆术语，使不同记忆和执行流程对同一概念形成一致理解。
+  - !statement
+    asserts:
+      - 一份 Concept 记忆应当围绕一个可稳定复用的词汇或领域抽象建立定义。
+      - 同一 Concept 的名称与别名应当表达同一个概念，不应引入彼此冲突的含义。
+      - 需要独立判断真假的事实、规则或约束应当使用 Statement 表达。
+      - 文档、数据或协作产物的结构应当使用 Schema 表达。
+  - !schema
+    format: template
+    asserts:
+      - 根节点必须使用 !concept 标签，不得使用独立的 type 字段。
+      - 顶层 Concept 的 names 必须是非空字符串数组，首项为规范名称。
+      - defines 可以包含文本定义，以及带 YAML tag 的匿名嵌套记忆实体。
+    fields:
+      - !schema
+        names:
+          - names
+        format: list
+        defines:
+          - Concept 的规范名称与别名，首项为规范名称。
+      - !schema
+        names:
+          - defines
+        format: list
+        defines:
+          - Concept 的文本定义，以及用于补充其规则或结构的匿名嵌套记忆实体。
+      - !schema
+        names:
+          - extends
+        format: list
+        defines:
+          - 可选，Concept 所继承的上位概念。
+extends:
+  - Memory

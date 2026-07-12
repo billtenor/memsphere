@@ -1,0 +1,31 @@
+!schema
+names:
+  - Concept entity schema
+  - "!concept 编写模板"
+format: template
+defines:
+  - 描述 memsphere !concept 记忆实体的合法结构。
+asserts:
+  - 根节点必须使用 !concept 标签，不得使用独立的 type 字段。
+  - names 必须是非空字符串数组，首项为规范名称。
+  - defines 可以包含字符串、!statement 或 !schema；嵌套结构必须携带 YAML tag。
+  - extends 如出现，必须是字符串数组。
+fields:
+  - !schema
+    names:
+      - names
+    format: list
+    defines:
+      - 概念名称与别名，首项为规范名称。
+  - !schema
+    names:
+      - defines
+    format: list
+    defines:
+      - 对概念语义的文本定义，以及用于补充规则或结构的匿名 Statement、Schema。
+  - !schema
+    names:
+      - extends
+    format: list
+    defines:
+      - 可选，概念所继承的上位概念。

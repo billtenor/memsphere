@@ -52,7 +52,7 @@ memsphere list schemas
 memsphere view
 ```
 
-The browser renders schemas as progressive disclosure sections. `format: table` schemas render their child `fields` as table columns. Procedures render `flow` as readable steps, with visual blocks for `!if`, `!elseif`, `!else`, `!while`, and `!call`.
+The browser renders schemas as progressive disclosure sections. `format: table` schemas render their child `fields` as table columns. Procedures render `flow` as readable steps, with visual blocks for `!action`, `!if`, `!while`, and `!call`. Recursive `elseif: !if` values are displayed as a flat if/elseif/else chain.
 
 `init` defaults to the current git repository scope. It creates `.memsphere/` in the git root:
 
@@ -89,7 +89,9 @@ Set `archiveRoot` to an absolute path when multiple scopes should share archived
 
 Entity type is represented by the YAML document root tag. There is no `type` field.
 
-Semantic-bearing fields are arrays. Each item should be one independently reviewable memory unit.
+The authoring type system has three primitive types (`string`, `number`, and `boolean`), fixed tagged struct types, and the `List<T>` generic extension. Mappings that represent memory structures must carry their registered YAML tag; the validator does not infer a struct type from its fields.
+
+`defines` has type `List<string | Statement | Schema>`. Use strings for concise definitions, embedded `!statement` values for assertions, and embedded `!schema` values for explicit structure. Embedded Statement and Schema values may be anonymous.
 
 ### Procedure
 
@@ -103,20 +105,47 @@ defines:
 goals:
   - 找到最可能的根因。
 flow:
-  - 确认用户观察到的异常现象和问题边界。
-  - 建立最小可复现路径。
-```
-
-`flow` may also contain tagged control steps from the memory DSL. The first version parses and validates them as structured flow items, without interpreting execution semantics:
-
-```yaml
-flow:
-  - 确认用户观察到的异常现象和问题边界。
+  - !action
+    action: 确认用户观察到的异常现象和问题边界。
+    actor: human
+    artifact: !artifact
+      name: 问题边界
+      format: markdown
   - !if
-    问题可以稳定复现:
-      - 阅读错误日志、失败测试或异常堆栈。
-  - !call SummarizeFix
+    condition: !action
+      action: 判断问题是否可以稳定复现。
+      artifact: !artifact
+        name: 问题是否可以稳定复现
+        format: boolean
+    then:
+      - !action
+        action: 阅读错误日志、失败测试或异常堆栈。
+        artifact: !artifact
+          name: 错误证据
+          format: markdown
+    elseif: !if
+      condition: !action
+        action: 判断是否还缺少复现信息。
+        artifact: !artifact
+          name: 是否缺少复现信息
+          format: boolean
+      then:
+        - !action
+          action: 收集缺失的复现信息。
+          artifact: !artifact
+            name: 补充复现信息
+            format: markdown
+    else:
+      - !action
+        action: 记录当前无法复现。
+        artifact: !artifact
+          name: 无法复现说明
+          format: string
+  - !call
+    target: SummarizeFix
 ```
+
+`flow` has type `List<Action | If | While | Call>`. An Action always contains `artifact: !artifact`. If and While conditions are Actions whose artifact format is `boolean`. `elseif` is an optional single nested `!if`, not a list, and only the root If in a chain may contain `else`.
 
 ### Concept
 
@@ -129,6 +158,9 @@ extends:
   - Account
 defines:
   - 已完成企业实名认证，并且至少有一次成功交易记录的 B 端客户。
+  - !statement
+    asserts:
+      - 一个 Customer 必须属于一个 Account。
 ```
 
 ### Statement
@@ -155,6 +187,7 @@ defines:
 asserts:
   - 不负责工程 capability 划分，也不展开详细技术方案。
 fields:
+  - 摘要
   - !schema
     names:
       - 需求概述
@@ -168,6 +201,8 @@ fields:
         defines:
           - 说明需求来源、业务背景和为什么现在需要解决。
 ```
+
+`Schema.fields` has type `List<string | Schema>`. A string is the shortest field form and only supplies the field name. A nested `!schema` supplies richer descriptions, assertions, format, or child fields, and must have a non-empty `names` value when used in `fields`.
 
 `!schema` may include an optional `format` field. `format` describes how the schema should be organized when rendered or written; it does not replace semantic fields such as `defines`, `asserts`, or `fields`.
 

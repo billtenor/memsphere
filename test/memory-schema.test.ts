@@ -1,0 +1,241 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { procedureMemorySchema, schemaMemorySchema } from "../src/memory/schema.js";
+import { parseMemoryYaml } from "../src/memory/yaml.js";
+
+function parseProcedure(source: string) {
+  return procedureMemorySchema.parse(parseMemoryYaml(source));
+}
+
+function parseSchema(source: string) {
+  return schemaMemorySchema.parse(parseMemoryYaml(source));
+}
+
+test("defines accepts text, anonymous Statement, and anonymous Schema", () => {
+  const entity = parseSchema(`!schema
+names: [example]
+defines:
+  - Text definition.
+  - !statement
+    asserts:
+      - A rule must hold.
+  - !schema
+    format: section
+    fields:
+      - shorthand
+      - !schema
+        names: [detailed]
+        asserts:
+          - Detailed value is required.
+fields:
+  - simple
+  - !schema
+    names: [nested]
+    format: field
+`);
+
+  assert.equal(entity.defines[1].tag, "!statement");
+  assert.equal(entity.defines[2].tag, "!schema");
+  assert.equal(entity.fields?.[0], "simple");
+  assert.equal(entity.fields?.[1].tag, "!schema");
+});
+
+test("recursive elseif uses a single nested If and keeps else on the root", () => {
+  const entity = parseProcedure(`!procedure
+names: [branching]
+flow:
+  - !if
+    condition: !action
+      action: Check A.
+      artifact: !artifact
+        name: A
+        format: boolean
+    then:
+      - !action
+        action: Handle A.
+        artifact: !artifact
+          name: A result
+          format: string
+    elseif: !if
+      condition: !action
+        action: Check B.
+        artifact: !artifact
+          name: B
+          format: boolean
+      then:
+        - !action
+          action: Handle B.
+          artifact: !artifact
+            name: B result
+            format: string
+    else:
+      - !action
+        action: Handle fallback.
+        artifact: !artifact
+          name: fallback
+          format: string
+`);
+
+  const node = entity.flow[0];
+  assert.equal(node.tag, "!if");
+  if (node.tag !== "!if") return;
+  assert.equal(node.elseif?.condition.artifact.name, "B");
+  assert.equal(node.else?.[0].tag, "!action");
+});
+
+const invalidProcedures: Array<[string, string, RegExp]> = [
+  ["untagged Action", `!procedure
+names: [invalid]
+flow:
+  - action: Old action.
+    artifact: !artifact
+      name: result
+      format: string
+`, /flow/],
+  ["untagged Artifact", `!procedure
+names: [invalid]
+flow:
+  - !action
+    action: Old artifact.
+    artifact:
+      name: result
+      format: string
+`, /artifact/],
+  ["int artifact format", `!procedure
+names: [invalid]
+flow:
+  - !action
+    action: Old number.
+    artifact: !artifact
+      name: result
+      format: int
+`, /format/],
+  ["elseif array", `!procedure
+names: [invalid]
+flow:
+  - !if
+    condition: !action
+      action: Check A.
+      artifact: !artifact
+        name: A
+        format: boolean
+    then:
+      - !action
+        action: Handle A.
+        artifact: !artifact
+          name: A result
+          format: string
+    elseif:
+      - !if
+        condition: !action
+          action: Check B.
+          artifact: !artifact
+            name: B
+            format: boolean
+        then:
+          - !action
+            action: Handle B.
+            artifact: !artifact
+              name: B result
+              format: string
+`, /elseif/],
+  ["else on nested elseif", `!procedure
+names: [invalid]
+flow:
+  - !if
+    condition: !action
+      action: Check A.
+      artifact: !artifact
+        name: A
+        format: boolean
+    then:
+      - !action
+        action: Handle A.
+        artifact: !artifact
+          name: A result
+          format: string
+    elseif: !if
+      condition: !action
+        action: Check B.
+        artifact: !artifact
+          name: B
+          format: boolean
+      then:
+        - !action
+          action: Handle B.
+          artifact: !artifact
+            name: B result
+            format: string
+      else:
+        - !action
+          action: Nested fallback.
+          artifact: !artifact
+            name: fallback
+            format: string
+`, /else is only allowed/],
+  ["non-boolean condition", `!procedure
+names: [invalid]
+flow:
+  - !while
+    condition: !action
+      action: Check.
+      artifact: !artifact
+        name: result
+        format: string
+    do:
+      - !action
+        action: Repeat.
+        artifact: !artifact
+          name: repeated
+          format: string
+`, /boolean/],
+  ["empty branch", `!procedure
+names: [invalid]
+flow:
+  - !if
+    condition: !action
+      action: Check.
+      artifact: !artifact
+        name: result
+        format: boolean
+    then: []
+`, /then/]
+];
+
+for (const [name, source, expected] of invalidProcedures) {
+  test(`rejects ${name}`, () => {
+    assert.throws(() => parseProcedure(source), expected);
+  });
+}
+
+test("rejects scalar call and unregistered control tags at YAML parsing", () => {
+  assert.throws(() => parseProcedure(`!procedure
+names: [invalid]
+flow:
+  - !call child
+`));
+  assert.throws(() => parseProcedure(`!procedure
+names: [invalid]
+flow:
+  - !elseif
+    condition: value
+`));
+});
+
+test("requires names for top-level and field Schema but permits anonymous embedded Schema", () => {
+  assert.throws(() => parseSchema(`!schema
+format: field
+`), /top-level memory/);
+  assert.throws(() => parseSchema(`!schema
+names: [root]
+fields:
+  - !schema
+    format: field
+`), /non-empty names/);
+  assert.doesNotThrow(() => parseSchema(`!schema
+names: [root]
+defines:
+  - !schema
+    format: field
+`));
+});
