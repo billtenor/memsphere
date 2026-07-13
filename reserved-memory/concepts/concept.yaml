@@ -22,14 +22,14 @@ defines:
       - !schema
         names:
           - names
-        items:
+        element_types:
           - string
         defines:
           - Concept 的规范名称与别名，首项为规范名称。
       - !schema
         names:
           - defines
-        items:
+        element_types:
           - string
           - Statement
           - Schema
@@ -38,7 +38,7 @@ defines:
       - !schema
         names:
           - extends
-        items:
+        element_types:
           - string
         defines:
           - 可选，Concept 所继承的上位概念。

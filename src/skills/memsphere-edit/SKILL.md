@@ -184,22 +184,22 @@ Allowed fields:
 - `format`: optional, one of `outline`, `table`; missing means `outline`
 - `defines`
 - `asserts`: optional string array
-- `items`: optional non-empty array of registered type names
+- `element_types`: optional non-empty array of registered type names
 - `fields`: optional array of strings or nested `!schema` nodes
 
 `format` only controls the final presentation of a Schema. `outline` renders nested fields as a heading hierarchy. `table` renders first-level fields as columns. Do not use format to describe cardinality, structural level, or purpose.
 
-Use `items` to express `List<T>`. Each entry is one allowed element type. For example, `items: [string]` means `List<string>`, while `items: [string, Statement, Schema]` means `List<string | Statement | Schema>`. Registered item types are `string`, `number`, `boolean`, `Concept`, `Statement`, `Schema`, `Procedure`, `Action`, `Artifact`, `If`, `While`, and `Call`. Duplicate item types are invalid.
+Use `element_types` to express `List<T>`. Each entry is one allowed element type. For example, `element_types: [string]` means `List<string>`, while `element_types: [string, Statement, Schema]` means `List<string | Statement | Schema>`. Registered element types are `string`, `number`, `boolean`, `Concept`, `Statement`, `Schema`, `Procedure`, `Action`, `Artifact`, `If`, `While`, and `Call`. Duplicate element types are invalid.
 
 Use `fields` for collaborator-fillable or structurally meaningful child fields. A string field is the shortest form and only names the field. Use a nested `!schema` when a field needs definitions, assertions, item types, or child fields. A Schema used as a field must have a non-empty `names` value.
 
-A table must declare `format: table`, `items: [Schema]`, and at least one field. Its fields are the table columns:
+A table must declare `format: table`, `element_types: [Schema]`, and at least one field. Its fields are the table columns:
 
 ```yaml
 !schema
 names: [requirements]
 format: table
-items:
+element_types:
   - Schema
 fields:
   - id
@@ -207,7 +207,7 @@ fields:
   - status
 ```
 
-Anonymous embedded Schemas in `defines` may omit `names`, but must contain meaningful structure such as `format`, `asserts`, `items`, or `fields`. Old Schema formats `section`, `field`, `list`, and `template` are invalid and must be upgraded rather than accepted as compatibility syntax.
+Anonymous embedded Schemas in `defines` may omit `names`, but must contain meaningful structure such as `format`, `asserts`, `element_types`, or `fields`. Old Schema formats `section`, `field`, `list`, and `template` are invalid and must be upgraded rather than accepted as compatibility syntax.
 
 ## Type Rules
 

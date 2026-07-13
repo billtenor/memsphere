@@ -134,7 +134,7 @@ defines:
       - !schema
         names:
           - names
-        items:
+        element_types:
           - string
         defines:
           - Concept 的规范名称与别名。
@@ -153,7 +153,7 @@ defines:
 匿名结构仍然必须包含有意义的类型专属内容：
 
 - 匿名 Statement 必须至少包含一条 assertion。
-- 匿名 Schema 必须至少包含 `format`、`asserts`、`items` 或 `fields` 等有效结构信息。
+- 匿名 Schema 必须至少包含 `format`、`asserts`、`element_types` 或 `fields` 等有效结构信息。
 - 匿名结构不进入全局记忆名称索引。
 
 ## 字段放置规则
@@ -163,13 +163,13 @@ defines:
 ```text
 defines = List<string | Statement | Schema>
 fields  = List<string | Schema>
-items   = List<TypeReference>
+element_types   = List<TypeReference>
 flow    = List<Action | If | While | Call>
 ```
 
 `Schema.fields` 中的字符串表示只有字段名的最简字段；需要定义、断言、元素类型或子字段时，使用带 `!schema` tag 的详细字段。作为 field 使用的 Schema 必须具有非空 `names`。
 
-`Schema.items` 表达 `List<T>` 的元素类型联合。TypeReference 可以引用已注册的基本类型或结构体类型。例如 `items: [string]` 表示 `List<string>`，`items: [string, Statement, Schema]` 表示 `List<string | Statement | Schema>`。
+`Schema.element_types` 表达 `List<T>` 的元素类型联合。TypeReference 可以引用已注册的基本类型或结构体类型。例如 `element_types: [string]` 表示 `List<string>`，`element_types: [string, Statement, Schema]` 表示 `List<string | Statement | Schema>`。
 
 Procedure flow 节点只能出现在 flow 中：
 
@@ -292,7 +292,7 @@ json     = 以 JSON 序列化的字符串或结构化内容
 schema   = 受某个 !schema 记忆约束的值
 ```
 
-Schema format 只描述最终呈现形态：`outline` 将嵌套 fields 呈现为多级标题，`table` 将 fields 呈现为列。省略 format 时默认使用 `outline`。旧 `section`、`field`、`list` 和 `template` 不再兼容；结构层级由 fields 表达，列表类型由 items 表达。
+Schema format 只描述最终呈现形态：`outline` 将嵌套 fields 呈现为多级标题，`table` 将 fields 呈现为列。省略 format 时默认使用 `outline`。旧 `section`、`field`、`list` 和 `template` 不再兼容；结构层级由 fields 表达，列表类型由 element_types 表达。
 
 ## 校验模型
 

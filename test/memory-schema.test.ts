@@ -236,7 +236,7 @@ fields:
 names: [root]
 defines:
   - !schema
-    items: [string]
+    element_types: [string]
 `));
 });
 
@@ -260,24 +260,24 @@ format: outline
 `)), /format/);
 });
 
-test("table Schema requires List<Schema> items and non-empty fields", () => {
+test("table Schema requires List<Schema> element_types and non-empty fields", () => {
   const table = parseSchema(`!schema
 names: [requirements]
 format: table
-items: [Schema]
+element_types: [Schema]
 fields: [id, description]
 `);
-  assert.deepEqual(table.items, ["Schema"]);
+  assert.deepEqual(table.element_types, ["Schema"]);
 
   assert.throws(() => parseSchema(`!schema
 names: [invalid-table]
 format: table
 fields: [id]
-`), /items: \[Schema\]/);
+`), /element_types: \[Schema\]/);
   assert.throws(() => parseSchema(`!schema
 names: [invalid-table]
 format: table
-items: [Schema]
+element_types: [Schema]
 fields: []
 `), /at least one field/);
 });
@@ -291,22 +291,33 @@ format: ${format}
   });
 }
 
-test("Schema items rejects unknown, duplicate, and incompatible field types", () => {
+test("Schema element_types rejects unknown, duplicate, and incompatible field types", () => {
   assert.throws(() => parseSchema(`!schema
-names: [unknown-items]
-items: [Unknown]
-`), /items/);
+names: [unknown-element_types]
+element_types: [Unknown]
+`), /element_types/);
   assert.throws(() => parseSchema(`!schema
-names: [duplicate-items]
-items: [string, string]
+names: [duplicate-element_types]
+element_types: [string, string]
 `), /duplicate/);
   assert.throws(() => parseSchema(`!schema
-names: [empty-items]
-items: []
-`), /items/);
+names: [empty-element_types]
+element_types: []
+`), /element_types/);
   assert.throws(() => parseSchema(`!schema
 names: [invalid-structure]
-items: [string]
+element_types: [string]
 fields: [value]
 `), /must include Schema/);
+});
+
+test("Schema rejects non-snake-case and legacy element type field names", () => {
+  assert.throws(() => parseSchema(`!schema
+names: [legacy-items]
+items: [string]
+`), /items/);
+  assert.throws(() => parseSchema(`!schema
+names: [camel-case]
+elementTypes: [string]
+`), /elementTypes/);
 });

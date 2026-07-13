@@ -1,7 +1,7 @@
 export const schemaFormats = ["outline", "table"] as const;
 export type SchemaFormat = (typeof schemaFormats)[number];
 
-export const schemaItemTypes = [
+export const schemaElementTypes = [
   "string",
   "number",
   "boolean",
@@ -15,7 +15,7 @@ export const schemaItemTypes = [
   "While",
   "Call"
 ] as const;
-export type SchemaItemType = (typeof schemaItemTypes)[number];
+export type SchemaElementType = (typeof schemaElementTypes)[number];
 
 export const artifactFormats = ["string", "number", "boolean", "markdown", "json", "yaml", "schema"] as const;
 export type ArtifactFormat = (typeof artifactFormats)[number];
@@ -46,7 +46,7 @@ export type SchemaNode = CommonMemoryNode & {
   tag: "!schema";
   format?: SchemaFormat;
   asserts?: string[];
-  items?: SchemaItemType[];
+  element_types?: SchemaElementType[];
   fields?: SchemaField[];
 };
 

@@ -66,7 +66,7 @@ fields:
     names:
       - "3. 关键要求验证表"
     format: table
-    items:
+    element_types:
       - Schema
     asserts:
       - |-
@@ -166,7 +166,7 @@ fields:
     names:
       - "5. 测试环境与依赖"
     format: table
-    items:
+    element_types:
       - Schema
     asserts:
       - |-
@@ -196,7 +196,7 @@ fields:
     names:
       - "6. 测试数据设计"
     format: table
-    items:
+    element_types:
       - Schema
     asserts:
       - |-
@@ -270,7 +270,7 @@ fields:
     names:
       - "8. 失败场景验证"
     format: table
-    items:
+    element_types:
       - Schema
     asserts:
       - |-

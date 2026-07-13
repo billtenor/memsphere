@@ -3,7 +3,7 @@ import type { MemoryKind } from "./kinds.js";
 import {
   artifactFormats,
   schemaFormats,
-  schemaItemTypes,
+  schemaElementTypes,
   stepActors,
   type ActionNode,
   type ArtifactNode,
@@ -49,7 +49,7 @@ const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(()
     defines: definesSchema,
     format: z.enum(schemaFormats).optional(),
     asserts: z.array(nonEmptyString).optional(),
-    items: z.array(z.enum(schemaItemTypes)).min(1).optional(),
+    element_types: z.array(z.enum(schemaElementTypes)).min(1).optional(),
     fields: z.lazy(() => z.array(schemaFieldSchema)).optional()
   }).strict().superRefine((node, context) => {
     if (
@@ -57,34 +57,34 @@ const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(()
       node.defines.length === 0 &&
       !node.format &&
       (node.asserts?.length ?? 0) === 0 &&
-      (node.items?.length ?? 0) === 0 &&
+      (node.element_types?.length ?? 0) === 0 &&
       (node.fields?.length ?? 0) === 0
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "anonymous Schema must define format, defines, asserts, items, or fields"
+        message: "anonymous Schema must define format, defines, asserts, element_types, or fields"
       });
     }
-    if (node.items && new Set(node.items).size !== node.items.length) {
+    if (node.element_types && new Set(node.element_types).size !== node.element_types.length) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["items"],
-        message: "Schema items must not contain duplicate types"
+        path: ["element_types"],
+        message: "Schema element_types must not contain duplicate types"
       });
     }
-    if (node.items && node.fields?.length && !node.items.includes("Schema")) {
+    if (node.element_types && node.fields?.length && !node.element_types.includes("Schema")) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["fields"],
-        message: "Schema with both items and fields must include Schema in items"
+        message: "Schema with both element_types and fields must include Schema in element_types"
       });
     }
     if (node.format === "table") {
-      if (node.items?.length !== 1 || node.items[0] !== "Schema") {
+      if (node.element_types?.length !== 1 || node.element_types[0] !== "Schema") {
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["items"],
-          message: "table Schema must declare items: [Schema]"
+          path: ["element_types"],
+          message: "table Schema must declare element_types: [Schema]"
         });
       }
       if (!node.fields?.length) {

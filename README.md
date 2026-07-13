@@ -204,7 +204,7 @@ fields:
 
 `Schema.fields` has type `List<string | Schema>`. A string is the shortest field form and only supplies the field name. A nested `!schema` supplies richer descriptions, assertions, item types, or child fields, and must have a non-empty `names` value when used in `fields`.
 
-`Schema.items` describes `List<T>`. Its non-empty entries are the allowed element types. For example, `items: [string]` means `List<string>` and `items: [string, Statement, Schema]` means `List<string | Statement | Schema>`.
+`Schema.element_types` describes `List<T>`. Its non-empty entries are the allowed element types. For example, `element_types: [string]` means `List<string>` and `element_types: [string, Statement, Schema]` means `List<string | Statement | Schema>`.
 
 `!schema` may include an optional presentation `format`. Missing format means `outline`.
 
@@ -222,14 +222,14 @@ format: table
 names:
   - 需求清单
 format: table
-items:
+element_types:
   - Schema
 fields:
   - ID
   - 需求描述
 ```
 
-The removed formats `section`, `field`, `list`, and `template` are invalid. Structural level is expressed by `fields`, list cardinality by `items`, and Schema itself already serves as the template.
+The removed formats `section`, `field`, `list`, and `template` are invalid. Structural level is expressed by `fields`, list cardinality by `element_types`, and Schema itself already serves as the template.
 
 ## Persistence Rules
 

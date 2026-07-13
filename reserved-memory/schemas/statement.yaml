@@ -14,14 +14,14 @@ fields:
   - !schema
     names:
       - names
-    items:
+    element_types:
       - string
     defines:
       - 陈述主题的名称与别名，首项为规范名称。
   - !schema
     names:
       - defines
-    items:
+    element_types:
       - string
       - Statement
       - Schema
@@ -30,7 +30,7 @@ fields:
   - !schema
     names:
       - asserts
-    items:
+    element_types:
       - string
     defines:
       - 必须成立或需要被验证的事实、规则或约束。

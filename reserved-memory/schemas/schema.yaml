@@ -11,14 +11,14 @@ asserts:
   - format 如出现，只能是 outline 或 table；省略时默认按 outline 呈现。
   - defines 可以包含字符串、!statement 或 !schema；嵌套结构必须携带 YAML tag。
   - fields 如出现，可以包含表示最简字段名的字符串，或带 !schema tag 的详细字段。
-  - items 如出现，必须是非空且不重复的元素类型列表，用于表达 List<T>。
-  - format 为 table 时，items 必须为 Schema，fields 必须定义至少一列。
+  - element_types 如出现，必须是非空且不重复的元素类型列表，用于表达 List<T>。
+  - format 为 table 时，element_types 必须为 Schema，fields 必须定义至少一列。
   - fields 中的 !schema 必须具有非空 names；defines 中的匿名 !schema 可以省略 names，但必须包含有意义的结构。
 fields:
   - !schema
     names:
       - names
-    items:
+    element_types:
       - string
     defines:
       - 结构名称与别名，首项为规范名称。
@@ -32,7 +32,7 @@ fields:
   - !schema
     names:
       - defines
-    items:
+    element_types:
       - string
       - Statement
       - Schema
@@ -41,14 +41,14 @@ fields:
   - !schema
     names:
       - asserts
-    items:
+    element_types:
       - string
     defines:
       - 可选，内容、书写或校验要求。
   - !schema
     names:
-      - items
-    items:
+      - element_types
+    element_types:
       - string
     defines:
       - 可选，Schema 所描述列表允许的元素类型。
@@ -58,7 +58,7 @@ fields:
   - !schema
     names:
       - fields
-    items:
+    element_types:
       - string
       - Schema
     defines:

@@ -588,7 +588,9 @@ function compileSchemaSteps(schema: SchemaMemory): RunStep[] {
 }
 
 function walkSchema(node: SchemaMemory, path: string, steps: RunStep[]): void {
-  const itemDetails = node.items?.length ? [`items: List<${node.items.join(" | ")}>`] : [];
+  const elementTypeDetails = node.element_types?.length
+    ? [`element_types: List<${node.element_types.join(" | ")}>`]
+    : [];
   steps.push({
     id: `schema:${path}`,
     instruction: `Write ${path}`,
@@ -596,7 +598,7 @@ function walkSchema(node: SchemaMemory, path: string, steps: RunStep[]): void {
     artifact: path,
     format: schemaNodeArtifactFormat(node),
     details: definitionDetails(node.defines)
-      .concat(itemDetails)
+      .concat(elementTypeDetails)
       .concat((node.asserts ?? []).map((value) => `asserts: ${value}`))
   });
 
@@ -634,7 +636,7 @@ function definitionDetails(defines: DefinitionPart[]): string[] {
 }
 
 function schemaNodeArtifactFormat(node: SchemaNode): ArtifactFormat {
-  return node.format === "table" || node.fields?.length || node.items?.length ? "markdown" : "string";
+  return node.format === "table" || node.fields?.length || node.element_types?.length ? "markdown" : "string";
 }
 
 async function findMemoryByName(memoryRoot: string, kind: "procedures" | "schemas", name: string): Promise<MemoryFile | undefined> {

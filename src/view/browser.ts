@@ -308,7 +308,7 @@ export const browserHtml = String.raw`<!doctype html>
       human: { zh: "人", yaml: "human" },
       artifact: { zh: "产物", yaml: "artifact" },
       schema: { zh: "图式", yaml: "schema" },
-      items: { zh: "元素类型", yaml: "items" },
+      element_types: { zh: "元素类型", yaml: "element_types" },
       statement: { zh: "命题", yaml: "statement" },
       action: { zh: "要做什么", yaml: "action" },
       then: { zh: "然后", yaml: "then" },
@@ -1245,7 +1245,7 @@ export const browserHtml = String.raw`<!doctype html>
       const body = document.createElement("div");
       body.className = "section-body";
       appendTextBlocks(body, node);
-      appendSchemaItems(body, node.items);
+      appendSchemaElementTypes(body, node.element_types);
       if (node.format === "table") body.append(renderTableFields(node.fields || [], path));
       else if (node.fields && node.fields.length) {
         const children = document.createElement("div");
@@ -1263,14 +1263,14 @@ export const browserHtml = String.raw`<!doctype html>
       return section;
     }
 
-    function appendSchemaItems(target, items) {
-      if (!items || !items.length) return;
+    function appendSchemaElementTypes(target, elementTypes) {
+      if (!elementTypes || !elementTypes.length) return;
       const title = document.createElement("div");
       title.className = "block-title";
-      title.textContent = t("items");
+      title.textContent = t("element_types");
       const row = document.createElement("div");
       row.className = "meta";
-      for (const item of items) row.append(pill(item));
+      for (const elementType of elementTypes) row.append(pill(elementType));
       target.append(title, row);
     }
 
