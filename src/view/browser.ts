@@ -290,6 +290,7 @@ export const browserHtml = String.raw`<!doctype html>
       schemas: { zh: "图式", yaml: "schemas" },
       concepts: { zh: "概念", yaml: "concepts" },
       statements: { zh: "命题", yaml: "statements" },
+      names: { zh: "名称", yaml: "names" },
       defines: { zh: "定义", yaml: "defines" },
       asserts: { zh: "断言", yaml: "asserts" },
       goals: { zh: "目标", yaml: "goals" },
@@ -1128,7 +1129,7 @@ export const browserHtml = String.raw`<!doctype html>
       }
       if (!currentReviewSnapshot("memory")) state.selectedId = memory.id;
       el.title.textContent = primaryName(memory.entity);
-      el.subtitle.textContent = memory.kind + " / " + primaryName(memory.entity);
+      el.subtitle.textContent = memory.path;
       el.detail.className = "";
       el.detail.innerHTML = "";
       state.renderLine = 0;
@@ -1200,7 +1201,6 @@ export const browserHtml = String.raw`<!doctype html>
         meta.append(pill(memory.imported ? "imported" : "not imported", false, memory.imported ? "done" : ""));
       }
       if (memory.entity.format) meta.append(pill("format: " + memory.entity.format));
-      for (const name of (memory.entity.names || []).slice(1)) meta.append(pill(name));
       const review = selectedReview();
       const commentCount = review ? review.comments.filter(c => c.memoryId === memory.id).length : 0;
       if (commentCount) meta.append(pill(commentCount + " review comments", false, "warn"));
@@ -1217,9 +1217,11 @@ export const browserHtml = String.raw`<!doctype html>
     function renderGeneric(entity) {
       const box = document.createElement("div");
       box.className = "section open";
-      box.append(sectionHeader(primaryName(entity), entity.tag || "memory", primaryName(entity), "section:" + primaryName(entity)));
+      const label = entity.tag || "memory";
+      box.append(sectionHeader(label, label, label, "section:" + label));
       const body = document.createElement("div");
       body.className = "section-body";
+      appendNames(body, entity);
       appendTextBlocks(body, entity);
       box.append(body);
       return box;
@@ -1229,9 +1231,11 @@ export const browserHtml = String.raw`<!doctype html>
       const section = document.createElement("div");
       section.className = "section" + (depth < 2 ? " open" : "");
       const badge = node.format ? "format: " + node.format : (node.fields && node.fields.length ? node.fields.length + " fields" : "field");
-      section.append(sectionHeader(primaryName(node), badge, path, "schema:" + path));
+      const label = depth === 0 ? (node.tag || "schema") : primaryName(node);
+      section.append(sectionHeader(label, badge, path, "schema:" + path));
       const body = document.createElement("div");
       body.className = "section-body";
+      if (depth === 0) appendNames(body, node);
       appendTextBlocks(body, node);
       if (node.format === "table") body.append(renderTableFields(node.fields || [], path));
       else if (node.fields && node.fields.length) {
@@ -1271,6 +1275,10 @@ export const browserHtml = String.raw`<!doctype html>
     function appendTextBlocks(target, node) {
       appendList(target, t("defines"), node.defines, "defines");
       appendList(target, t("asserts"), node.asserts, "asserts");
+    }
+
+    function appendNames(target, node) {
+      appendList(target, t("names"), node.names, "names");
     }
 
     function appendList(target, heading, values, key) {
@@ -1317,6 +1325,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderProcedure(entity) {
       const wrap = document.createElement("div");
+      appendNames(wrap, entity);
       appendTextBlocks(wrap, entity);
       if (entity.goals && entity.goals.length) appendList(wrap, t("goals"), entity.goals, "goals");
       const title = document.createElement("div");

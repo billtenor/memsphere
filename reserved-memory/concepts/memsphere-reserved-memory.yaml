@@ -1,0 +1,5 @@
+!concept
+names:
+  - memsphere reserved memory
+defines:
+  - A built-in memory example that can be imported into a local memsphere store.

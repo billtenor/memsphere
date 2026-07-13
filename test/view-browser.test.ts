@@ -69,3 +69,9 @@ test("browser exposes archive controls for done reviews and runs", () => {
   assert.match(browserHtml, /\/api\/archive\/runs\//);
   assert.match(browserHtml, /archiveDoneOnly/);
 });
+
+test("memory details render names as a field while retaining the primary name as the page title", () => {
+  assert.match(browserHtml, /names: \{ zh: "名称", yaml: "names" \}/);
+  assert.match(browserHtml, /appendList\(target, t\("names"\), node\.names, "names"\)/);
+  assert.match(browserHtml, /el\.title\.textContent = primaryName\(memory\.entity\);/);
+});
