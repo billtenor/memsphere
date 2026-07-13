@@ -3,6 +3,19 @@ import test from "node:test";
 import { renderMarkdownContent } from "../src/commands/view.js";
 import { browserHtml, canCreateTaskReview, shouldRenderMarkdownArtifact, shouldRenderTaskStepArtifact } from "../src/view/browser.js";
 
+test("embedded browser script is valid JavaScript", () => {
+  const script = browserHtml.match(/<script>([\s\S]*)<\/script>/)?.[1];
+  assert(script);
+  assert.doesNotThrow(() => new Function(script));
+});
+
+test("memory view recognizes only tagged actions and renders recursive typed structures", () => {
+  assert.match(browserHtml, /step\.tag === "!action"/);
+  assert.match(browserHtml, /while \(branch\)/);
+  assert.match(browserHtml, /definition\.tag === "!schema"/);
+  assert.match(browserHtml, /typeof child === "string"/);
+});
+
 test("task step artifact area is hidden when no event exists", () => {
   assert.equal(shouldRenderTaskStepArtifact(undefined), false);
   assert.equal(shouldRenderTaskStepArtifact(null), false);

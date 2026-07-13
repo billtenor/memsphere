@@ -2,19 +2,17 @@
 names:
   - memsphere-harness-note
   - harness-note
-format: section
+format: outline
 defines:
   - 用于验证 memsphere run harness schema 深度优先执行的最小 artifact。
 fields:
   - !schema
     names:
       - title
-    format: field
     defines:
       - 用一句短标题描述本次 smoke test。
   - !schema
     names:
       - result
-    format: field
     defines:
       - 记录本次 smoke test 的观察结果。

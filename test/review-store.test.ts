@@ -93,7 +93,7 @@ test("task review API rejects running tasks and reads artifacts from the saved s
     await writeFile(join(memoryRoot, "procedures", "child-procedure.yaml"), "!procedure\nnames: [child procedure]\nflow:\n  - !call\n    target: grandchild procedure\n");
     await writeFile(join(memoryRoot, "procedures", "grandchild-procedure.yaml"), "!procedure\nnames: [grandchild procedure]\nflow: []\n");
     await writeFile(join(memoryRoot, "procedures", "unrelated.yaml"), "!procedure\nnames: [unrelated]\nflow: []\n");
-    await writeFile(join(memoryRoot, "schemas", "used-schema.yaml"), "!schema\nnames: [used schema]\nformat: section\nfields: []\n");
+    await writeFile(join(memoryRoot, "schemas", "used-schema.yaml"), "!schema\nnames: [used schema]\nformat: outline\nfields: []\n");
     await writeFile(join(runDir, "artifacts", "001-result.md"), "snapshot artifact\n");
 
     const run: RunState = {
@@ -149,7 +149,7 @@ test("task review API rejects running tasks and reads artifacts from the saved s
       assert.equal(await readFile(join(reviewsRoot, review.id, "snapshots", "memory", "procedures", "api-procedure.yaml"), "utf8"), "!procedure\nnames: [api procedure]\nflow: []\n");
       assert.equal(await readFile(join(reviewsRoot, review.id, "snapshots", "memory", "procedures", "child-procedure.yaml"), "utf8"), "!procedure\nnames: [child procedure]\nflow:\n  - !call\n    target: grandchild procedure\n");
       assert.equal(await readFile(join(reviewsRoot, review.id, "snapshots", "memory", "procedures", "grandchild-procedure.yaml"), "utf8"), "!procedure\nnames: [grandchild procedure]\nflow: []\n");
-      assert.equal(await readFile(join(reviewsRoot, review.id, "snapshots", "memory", "schemas", "used-schema.yaml"), "utf8"), "!schema\nnames: [used schema]\nformat: section\nfields: []\n");
+      assert.equal(await readFile(join(reviewsRoot, review.id, "snapshots", "memory", "schemas", "used-schema.yaml"), "utf8"), "!schema\nnames: [used schema]\nformat: outline\nfields: []\n");
       await assert.rejects(readFile(join(reviewsRoot, review.id, "snapshots", "memory", "procedures", "unrelated.yaml")));
       assert.doesNotMatch(await readFile(join(reviewsRoot, review.id, "review.yaml"), "utf8"), new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 

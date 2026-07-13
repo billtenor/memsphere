@@ -30,7 +30,7 @@ program
   .option("--reviews-root <path>", "review files root directory")
   .option("--runs-root <path>", "run state files root directory")
   .option("--archive-root <path>", "archived review and run root directory")
-  .option("--force", "overwrite the existing config file")
+  .option("--force", "overwrite the existing config and reinstall reserved memory")
   .action(initCommand);
 
 program

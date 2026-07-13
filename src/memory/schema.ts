@@ -1,100 +1,235 @@
 import { z } from "zod";
 import type { MemoryKind } from "./kinds.js";
+import {
+  artifactFormats,
+  schemaFormats,
+  schemaElementTypes,
+  stepActors,
+  type ActionNode,
+  type ArtifactNode,
+  type CallNode,
+  type ConceptMemory,
+  type DefinitionPart,
+  type FlowNode,
+  type IfNode,
+  type MemoryEntity,
+  type ProcedureMemory,
+  type SchemaField,
+  type SchemaMemory,
+  type SchemaNode,
+  type StatementMemory,
+  type StatementNode,
+  type WhileNode
+} from "./ast.js";
 
-const stringArray = z.array(z.string()).default([]);
-const nonEmptyStringArray = z.array(z.string().min(1)).min(1);
-const schemaFormatSchema = z.enum(["section", "field", "table", "list", "template"]);
-const artifactFormatSchema = z.enum(["string", "int", "boolean", "markdown", "json", "yaml", "schema"]);
-const stepActorSchema = z.enum(["agent", "human"]);
+const nonEmptyString = z.string().min(1);
+const stringArray = z.array(nonEmptyString).default([]);
+const namesSchema = z.array(nonEmptyString).default([]);
 
-export type FlowStep = Record<string, unknown>;
-export type SchemaFormat = z.infer<typeof schemaFormatSchema>;
+let definitionPartSchema: z.ZodType<DefinitionPart, z.ZodTypeDef, unknown>;
+let schemaFieldSchema: z.ZodType<SchemaField, z.ZodTypeDef, unknown>;
+let flowNodeSchema: z.ZodType<FlowNode, z.ZodTypeDef, unknown>;
+let ifNodeSchema: z.ZodType<IfNode, z.ZodTypeDef, unknown>;
 
-export type SchemaMemory = {
-  tag: "!schema";
-  names: string[];
-  format?: SchemaFormat;
-  defines: string[];
-  asserts?: string[];
-  fields?: SchemaMemory[];
-};
+const definesSchema = z.lazy(() => z.array(definitionPartSchema)).default([]);
 
-const baseMemorySchema = z.object({
-  names: nonEmptyStringArray,
-  defines: stringArray
+const statementNodeSchema: z.ZodType<StatementNode, z.ZodTypeDef, unknown> = z.lazy(() =>
+  z.object({
+    tag: z.literal("!statement"),
+    names: namesSchema,
+    defines: definesSchema,
+    asserts: z.array(nonEmptyString).min(1)
+  }).strict()
+);
+
+const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(() =>
+  z.object({
+    tag: z.literal("!schema"),
+    names: namesSchema,
+    defines: definesSchema,
+    format: z.enum(schemaFormats).optional(),
+    asserts: z.array(nonEmptyString).optional(),
+    element_types: z.array(z.enum(schemaElementTypes)).min(1).optional(),
+    fields: z.lazy(() => z.array(schemaFieldSchema)).optional()
+  }).strict().superRefine((node, context) => {
+    if (
+      node.names.length === 0 &&
+      node.defines.length === 0 &&
+      !node.format &&
+      (node.asserts?.length ?? 0) === 0 &&
+      (node.element_types?.length ?? 0) === 0 &&
+      (node.fields?.length ?? 0) === 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "anonymous Schema must define format, defines, asserts, element_types, or fields"
+      });
+    }
+    if (node.element_types && new Set(node.element_types).size !== node.element_types.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["element_types"],
+        message: "Schema element_types must not contain duplicate types"
+      });
+    }
+    if (node.element_types && node.fields?.length && !node.element_types.includes("Schema")) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["fields"],
+        message: "Schema with both element_types and fields must include Schema in element_types"
+      });
+    }
+    if (node.format === "table") {
+      if (node.element_types?.length !== 1 || node.element_types[0] !== "Schema") {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["element_types"],
+          message: "table Schema must declare element_types: [Schema]"
+        });
+      }
+      if (!node.fields?.length) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["fields"],
+          message: "table Schema must define at least one field"
+        });
+      }
+    }
+  })
+);
+
+definitionPartSchema = z.lazy(() => z.union([nonEmptyString, statementNodeSchema, schemaNodeSchema]));
+
+schemaFieldSchema = z.lazy(() => z.union([
+  nonEmptyString,
+  schemaNodeSchema.superRefine((field, context) => {
+    if (field.names.length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["names"],
+        message: "Schema used in fields must have a non-empty names list"
+      });
+    }
+  })
+]));
+
+export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> = z.object({
+  tag: z.literal("!artifact"),
+  name: nonEmptyString,
+  format: z.enum(artifactFormats),
+  schema: nonEmptyString.optional()
+}).strict().superRefine((artifact, context) => {
+  if (artifact.format === "schema" && !artifact.schema) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["schema"],
+      message: "schema is required when Artifact format is schema"
+    });
+  }
+  if (artifact.format !== "schema" && artifact.schema) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["schema"],
+      message: "schema is only allowed when Artifact format is schema"
+    });
+  }
 });
 
-const stepArtifactSchema = z.object({
-  name: z.string().min(1),
-  format: artifactFormatSchema,
-  schema: z.string().min(1).optional()
+export const actionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = z.object({
+  tag: z.literal("!action"),
+  action: nonEmptyString,
+  actor: z.enum(stepActors).optional(),
+  artifact: artifactNodeSchema
 }).strict();
 
-const procedureRunnableStepSchema = z.object({
-  action: z.string().min(1),
-  actor: stepActorSchema.optional(),
-  artifact: stepArtifactSchema
+const callNodeSchema: z.ZodType<CallNode, z.ZodTypeDef, unknown> = z.object({
+  tag: z.literal("!call"),
+  target: nonEmptyString
 }).strict();
 
-const procedureFlowStepSchema: z.ZodType<FlowStep> = z.lazy(() =>
-  z.union([
-    procedureRunnableStepSchema,
-    z.object({
-      tag: z.literal("!call"),
-      target: z.string().min(1)
-    }).strict(),
-    z.object({
-      tag: z.literal("!if"),
-      condition: procedureRunnableStepSchema,
-      then: z.array(procedureFlowStepSchema).min(1),
-      elseif: z.array(z.object({
-        condition: procedureRunnableStepSchema,
-        then: z.array(procedureFlowStepSchema).min(1)
-      }).strict()).optional(),
-      else: z.array(procedureFlowStepSchema).optional()
-    }).strict(),
-    z.object({
-      tag: z.literal("!while"),
-      condition: procedureRunnableStepSchema,
-      do: z.array(procedureFlowStepSchema).min(1)
-    }).strict()
-  ])
-);
-
-const schemaMemorySchema: z.ZodType<SchemaMemory, z.ZodTypeDef, unknown> = z.lazy(() =>
-  baseMemorySchema
-    .extend({
-      tag: z.literal("!schema"),
-      format: schemaFormatSchema.optional(),
-      asserts: stringArray.optional(),
-      fields: z.array(schemaMemorySchema).optional()
-    })
-    .strict()
-);
-
-export const procedureMemorySchema = baseMemorySchema
-  .extend({
-    tag: z.literal("!procedure"),
-    goals: stringArray,
-    flow: z.array(procedureFlowStepSchema).default([])
+const whileNodeSchema: z.ZodType<WhileNode, z.ZodTypeDef, unknown> = z.lazy(() =>
+  z.object({
+    tag: z.literal("!while"),
+    condition: actionNodeSchema,
+    do: z.array(flowNodeSchema).min(1)
+  }).strict().superRefine((node, context) => {
+    if (node.condition.artifact.format !== "boolean") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["condition", "artifact", "format"],
+        message: "While condition Artifact format must be boolean"
+      });
+    }
   })
-  .strict();
+);
 
-export const conceptMemorySchema = baseMemorySchema
-  .extend({
+ifNodeSchema = z.lazy(() =>
+  z.object({
+    tag: z.literal("!if"),
+    condition: actionNodeSchema,
+    then: z.array(flowNodeSchema).min(1),
+    elseif: ifNodeSchema.optional(),
+    else: z.array(flowNodeSchema).optional()
+  }).strict().superRefine((node, context) => {
+    if (node.condition.artifact.format !== "boolean") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["condition", "artifact", "format"],
+        message: "If condition Artifact format must be boolean"
+      });
+    }
+    if (node.elseif?.else !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["elseif", "else"],
+        message: "else is only allowed on the root If in an elseif chain"
+      });
+    }
+  })
+);
+
+flowNodeSchema = z.lazy(() => z.union([
+  actionNodeSchema,
+  ifNodeSchema,
+  whileNodeSchema,
+  callNodeSchema
+]));
+
+function requireTopLevelName<T extends { names: string[] }>(schema: z.ZodType<T, z.ZodTypeDef, unknown>): z.ZodType<T, z.ZodTypeDef, unknown> {
+  return schema.superRefine((node, context) => {
+    if (node.names.length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["names"],
+        message: "top-level memory must have a non-empty names list"
+      });
+    }
+  });
+}
+
+export const conceptMemorySchema: z.ZodType<ConceptMemory, z.ZodTypeDef, unknown> = requireTopLevelName(
+  z.object({
     tag: z.literal("!concept"),
+    names: namesSchema,
+    defines: definesSchema,
     extends: stringArray.optional()
-  })
-  .strict();
+  }).strict()
+);
 
-export const statementMemorySchema = baseMemorySchema
-  .extend({
-    tag: z.literal("!statement"),
-    asserts: stringArray
-  })
-  .strict();
+export const statementMemorySchema: z.ZodType<StatementMemory, z.ZodTypeDef, unknown> = requireTopLevelName(statementNodeSchema);
+export const schemaMemorySchema: z.ZodType<SchemaMemory, z.ZodTypeDef, unknown> = requireTopLevelName(schemaNodeSchema);
 
-export { schemaMemorySchema };
+export const procedureMemorySchema: z.ZodType<ProcedureMemory, z.ZodTypeDef, unknown> = requireTopLevelName(
+  z.object({
+    tag: z.literal("!procedure"),
+    names: namesSchema,
+    defines: definesSchema,
+    goals: stringArray,
+    flow: z.array(flowNodeSchema).default([])
+  }).strict()
+);
+
+export { definitionPartSchema, flowNodeSchema, ifNodeSchema, schemaFieldSchema, schemaNodeSchema, statementNodeSchema };
 
 export const memorySchemas = {
   procedures: procedureMemorySchema,
@@ -103,7 +238,4 @@ export const memorySchemas = {
   schemas: schemaMemorySchema
 } as const satisfies Record<MemoryKind, z.ZodTypeAny>;
 
-export type ProcedureMemory = z.infer<typeof procedureMemorySchema>;
-export type ConceptMemory = z.infer<typeof conceptMemorySchema>;
-export type StatementMemory = z.infer<typeof statementMemorySchema>;
-export type MemoryEntity = ProcedureMemory | ConceptMemory | StatementMemory | SchemaMemory;
+export type { MemoryEntity };

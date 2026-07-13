@@ -170,6 +170,8 @@ fields:
     names:
       - "4. 需求清单"
     format: table
+    element_types:
+      - Schema
     asserts:
       - |-
         需求清单写可验收的用户可见需求。
@@ -277,6 +279,8 @@ fields:
     names:
       - "8. 未决问题"
     format: table
+    element_types:
+      - Schema
     asserts:
       - |-
         记录需求阶段尚未关闭的问题。
