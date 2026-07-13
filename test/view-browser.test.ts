@@ -87,3 +87,9 @@ test("browser renders Statement suggestions separately from assertions", () => {
   assert.match(browserHtml, /suggests: \{ zh: "建议", yaml: "suggests" \}/);
   assert.match(browserHtml, /appendList\(target, t\("suggests"\), node\.suggests, "suggests"\)/);
 });
+
+test("memory details render names as a field while retaining the primary name as the page title", () => {
+  assert.match(browserHtml, /names: \{ zh: "名称", yaml: "names" \}/);
+  assert.match(browserHtml, /appendList\(target, t\("names"\), node\.names, "names"\)/);
+  assert.match(browserHtml, /el\.title\.textContent = primaryName\(memory\.entity\);/);
+});

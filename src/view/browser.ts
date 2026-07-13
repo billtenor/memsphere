@@ -293,6 +293,7 @@ export const browserHtml = String.raw`<!doctype html>
       schemas: { zh: "图式", yaml: "schemas" },
       concepts: { zh: "概念", yaml: "concepts" },
       statements: { zh: "命题", yaml: "statements" },
+      names: { zh: "名称", yaml: "names" },
       defines: { zh: "定义", yaml: "defines" },
       asserts: { zh: "断言", yaml: "asserts" },
       suggests: { zh: "建议", yaml: "suggests" },
@@ -1134,7 +1135,7 @@ export const browserHtml = String.raw`<!doctype html>
       }
       if (!currentReviewSnapshot("memory")) state.selectedId = memory.id;
       el.title.textContent = primaryName(memory.entity);
-      el.subtitle.textContent = memory.kind + " / " + primaryName(memory.entity);
+      el.subtitle.textContent = memory.path;
       el.detail.className = "";
       el.detail.innerHTML = "";
       state.renderLine = 0;
@@ -1211,7 +1212,6 @@ export const browserHtml = String.raw`<!doctype html>
         meta.append(pill(memory.imported ? "imported" : "not imported", false, memory.imported ? "done" : ""));
       }
       if (memory.entity.format) meta.append(pill("format: " + memory.entity.format));
-      for (const name of (memory.entity.names || []).slice(1)) meta.append(pill(name));
       const review = selectedReview();
       const commentCount = review ? review.comments.filter(c => c.memoryId === memory.id).length : 0;
       if (commentCount) meta.append(pill(commentCount + " review comments", false, "warn"));
@@ -1231,6 +1231,7 @@ export const browserHtml = String.raw`<!doctype html>
       box.append(sectionHeader("", entity.tag || "memory", primaryName(entity), "section:" + primaryName(entity)));
       const body = document.createElement("div");
       body.className = "section-body";
+      appendNames(body, entity);
       appendTextBlocks(body, entity);
       box.append(body);
       return box;
@@ -1241,10 +1242,11 @@ export const browserHtml = String.raw`<!doctype html>
       section.className = "section" + (depth < 2 ? " open" : "");
       const badges = ["!schema"];
       if (node.format) badges.push("format: " + node.format);
-      const name = displayName(node, fallbackName);
+      const name = depth === 0 ? "" : displayName(node, fallbackName);
       section.append(sectionHeader(name, badges, path, "schema:" + path));
       const body = document.createElement("div");
       body.className = "section-body";
+      if (depth === 0) appendNames(body, node);
       appendTextBlocks(body, node);
       appendSchemaElementTypes(body, node.element_types);
       if (node.format === "table") body.append(renderTableFields(node.fields || [], path));
@@ -1306,6 +1308,10 @@ export const browserHtml = String.raw`<!doctype html>
       appendDefinitions(target, node.defines);
       appendList(target, t("asserts"), node.asserts, "asserts");
       appendList(target, t("suggests"), node.suggests, "suggests");
+    }
+
+    function appendNames(target, node) {
+      appendList(target, t("names"), node.names, "names");
     }
 
     function appendDefinitions(target, definitions) {
@@ -1414,6 +1420,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderProcedure(entity) {
       const wrap = document.createElement("div");
+      appendNames(wrap, entity);
       appendTextBlocks(wrap, entity);
       if (entity.goals && entity.goals.length) appendList(wrap, t("goals"), entity.goals, "goals");
       const title = document.createElement("div");
