@@ -295,6 +295,7 @@ export const browserHtml = String.raw`<!doctype html>
       statements: { zh: "命题", yaml: "statements" },
       defines: { zh: "定义", yaml: "defines" },
       asserts: { zh: "断言", yaml: "asserts" },
+      suggests: { zh: "建议", yaml: "suggests" },
       goals: { zh: "目标", yaml: "goals" },
       flow: { zh: "流程", yaml: "flow" },
       step: { zh: "步骤", yaml: "action" },
@@ -1304,6 +1305,7 @@ export const browserHtml = String.raw`<!doctype html>
     function appendTextBlocks(target, node) {
       appendDefinitions(target, node.defines);
       appendList(target, t("asserts"), node.asserts, "asserts");
+      appendList(target, t("suggests"), node.suggests, "suggests");
     }
 
     function appendDefinitions(target, definitions) {

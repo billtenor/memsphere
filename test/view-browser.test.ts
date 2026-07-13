@@ -82,3 +82,8 @@ test("browser exposes archive controls for done reviews and runs", () => {
   assert.match(browserHtml, /\/api\/archive\/runs\//);
   assert.match(browserHtml, /archiveDoneOnly/);
 });
+
+test("browser renders Statement suggestions separately from assertions", () => {
+  assert.match(browserHtml, /suggests: \{ zh: "建议", yaml: "suggests" \}/);
+  assert.match(browserHtml, /appendList\(target, t\("suggests"\), node\.suggests, "suggests"\)/);
+});

@@ -173,8 +173,9 @@ Allowed fields:
 - `names`
 - `defines`
 - `asserts`: string array
+- `suggests`: optional string array
 
-Use statements for rules, constraints, or facts that should be evaluated as assertions. A top-level Statement requires `names`; an embedded Statement may be anonymous but still requires at least one assertion.
+Use `asserts` for facts, rules, or constraints that should be evaluated as assertions. Use `suggests` for non-binding recommendations or priority guidance. A top-level Statement requires `names`; an embedded Statement may be anonymous but still requires at least one assertion. Omitted `suggests` parses as an empty list.
 
 ## !schema
 

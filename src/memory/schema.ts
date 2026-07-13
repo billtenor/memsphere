@@ -38,7 +38,8 @@ const statementNodeSchema: z.ZodType<StatementNode, z.ZodTypeDef, unknown> = z.l
     tag: z.literal("!statement"),
     names: namesSchema,
     defines: definesSchema,
-    asserts: z.array(nonEmptyString).min(1)
+    asserts: z.array(nonEmptyString).min(1),
+    suggests: stringArray
   }).strict()
 );
 

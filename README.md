@@ -173,7 +173,11 @@ defines:
   - 这是一组关于 Customer 和 Tenant 关系的命题。
 asserts:
   - 一个 Customer 必须且只能属于一个 Tenant。
+suggests:
+  - Customer 的展示名称应优先使用经过人工确认的名称。
 ```
+
+`asserts` 表达可判断的事实、规则或约束。`suggests` 表达非强制的建议或优先性指导；它可省略，省略时解析为一个空列表。
 
 ### Schema
 

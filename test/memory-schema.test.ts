@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { schemaFormats } from "../src/memory/ast.js";
-import { conceptMemorySchema, procedureMemorySchema, schemaMemorySchema } from "../src/memory/schema.js";
+import { conceptMemorySchema, procedureMemorySchema, schemaMemorySchema, statementMemorySchema } from "../src/memory/schema.js";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
 
 function parseProcedure(source: string) {
@@ -12,6 +12,10 @@ function parseSchema(source: string) {
   return schemaMemorySchema.parse(parseMemoryYaml(source));
 }
 
+function parseStatement(source: string) {
+  return statementMemorySchema.parse(parseMemoryYaml(source));
+}
+
 test("defines accepts text, anonymous Statement, and anonymous Schema", () => {
   const entity = parseSchema(`!schema
 names: [example]
@@ -20,6 +24,8 @@ defines:
   - !statement
     asserts:
       - A rule must hold.
+    suggests:
+      - Prefer the documented path.
   - !schema
     format: outline
     fields:
@@ -34,10 +40,44 @@ fields:
     names: [nested]
 `);
 
-  assert.equal(entity.defines[1].tag, "!statement");
+  const embeddedStatement = entity.defines[1];
+  assert.equal(typeof embeddedStatement === "string" ? undefined : embeddedStatement.tag, "!statement");
+  if (typeof embeddedStatement !== "string" && embeddedStatement.tag === "!statement") {
+    assert.deepEqual(embeddedStatement.suggests, ["Prefer the documented path."]);
+  }
   assert.equal(entity.defines[2].tag, "!schema");
   assert.equal(entity.fields?.[0], "simple");
   assert.equal(entity.fields?.[1].tag, "!schema");
+});
+
+test("Statement supports optional suggestions without weakening assertions", () => {
+  const withSuggestions = parseStatement(`!statement
+names: [guidance]
+asserts: [A required rule.]
+suggests: [Prefer the documented path.]
+`);
+  assert.deepEqual(withSuggestions.suggests, ["Prefer the documented path."]);
+
+  const withoutSuggestions = parseStatement(`!statement
+names: [rule]
+asserts: [A required rule.]
+`);
+  assert.deepEqual(withoutSuggestions.suggests, []);
+
+  assert.throws(() => parseStatement(`!statement
+names: [invalid]
+asserts: [A required rule.]
+suggests: [1]
+`), /suggests/);
+  assert.throws(() => parseStatement(`!statement
+names: [invalid]
+asserts: []
+`), /asserts/);
+  assert.throws(() => parseStatement(`!statement
+names: [invalid]
+asserts: [A required rule.]
+unknown: value
+`), /unknown/);
 });
 
 test("recursive elseif uses a single nested If and keeps else on the root", () => {
