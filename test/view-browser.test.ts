@@ -88,6 +88,26 @@ test("browser renders Statement suggestions separately from assertions", () => {
   assert.match(browserHtml, /appendList\(target, t\("suggests"\), node\.suggests, "suggests"\)/);
 });
 
+test("browser renders Action contracts, inline schemas, and final artifacts as distinct task UI", () => {
+  assert.match(browserHtml, /function renderActionContracts\(step\)/);
+  assert.match(browserHtml, /step\.asserts/);
+  assert.match(browserHtml, /step\.suggests/);
+  assert.match(browserHtml, /function renderInlineSchemaDetails\(step, expanded = false\)/);
+  assert.match(browserHtml, /inline schema/);
+  assert.match(browserHtml, /const section = renderSchema\(schema, 1, "inline-schema:" \+ identity, t\("inlineSchema"\)\)/);
+  assert.match(browserHtml, /section\.classList\.add\("inline-schema-section"\)/);
+  assert.match(browserHtml, /wrap\.append\(blockTitle\(t\("artifact"\)\), section\)/);
+  assert.match(browserHtml, /body\.append\(blockTitle\(t\("fields"\)\), children\)/);
+  assert.match(browserHtml, /function renderSimpleSchemaField\(name, path\)[\s\S]*field\.className = "schema-field-plain"/);
+  assert.doesNotMatch(browserHtml, /function renderSimpleSchemaField\(name, path\)[\s\S]*sectionHeader\(name, "string"/);
+  assert.match(browserHtml, /function renderFinalArtifacts\(run\)/);
+  assert.match(browserHtml, /event\.artifact\.final/);
+  assert.match(browserHtml, /renderStructuredAction\(step, anchor\)[\s\S]*renderActionContracts\(step\)/);
+  assert.match(browserHtml, /renderStructuredControlHead\(step, anchor, labelText[\s\S]*renderInlineSchemaDetails\(step\)/);
+  assert.match(browserHtml, /function inlineSchemaTogglePill\(schema\)/);
+  assert.match(browserHtml, /function inlineSchemaSummary\(schema\)/);
+});
+
 test("memory details render names as a field while retaining the primary name as the page title", () => {
   assert.match(browserHtml, /names: \{ zh: "名称", yaml: "names" \}/);
   assert.match(browserHtml, /appendList\(target, t\("names"\), node\.names, "names"\)/);

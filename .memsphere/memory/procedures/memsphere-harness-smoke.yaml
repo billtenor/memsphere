@@ -10,18 +10,45 @@ goals:
   - 验证 loop 可以通过 boolean artifact 决定继续或退出。
   - 验证 markdown artifact 会写入 run artifacts 目录，并可在 view 中显示文件内容。
   - 验证 format 为 schema 的 artifact 可以进入 schema 深度优先编写流程。
+  - 验证 Action 的断言和建议、内嵌图式与最终交付物可以贯通 Run 和 View。
 flow:
-  - !action
-    action: 判断当前输入是否足够开始 smoke test。
-    artifact: !artifact
-      name: 当前输入是否足够开始测试
-      format: boolean
-  - !action
-    action: 请用户确认是否允许继续执行 smoke test。
-    actor: human
-    artifact: !artifact
-      name: 用户是否允许继续执行测试
-      format: boolean
+  - !if
+    condition: !action
+      action: 判断当前输入是否足够开始 smoke test。
+      artifact: !artifact
+        name: 当前输入是否足够开始测试
+        format: boolean
+    then:
+      - !action
+        action: 记录当前输入已足够开始 smoke test。
+        artifact: !artifact
+          name: Smoke 测试输入确认
+          format: markdown
+    else:
+      - !action
+        action: 记录当前输入暂不足以开始 smoke test 的原因。
+        artifact: !artifact
+          name: Smoke 测试输入不足原因
+          format: markdown
+  - !if
+    condition: !action
+      action: 请用户确认是否允许继续执行 smoke test。
+      actor: human
+      artifact: !artifact
+        name: 用户是否允许继续执行测试
+        format: boolean
+    then:
+      - !action
+        action: 记录用户已允许继续执行 smoke test。
+        artifact: !artifact
+          name: Smoke 测试授权确认
+          format: markdown
+    else:
+      - !action
+        action: 记录用户暂不允许继续执行 smoke test。
+        artifact: !artifact
+          name: Smoke 测试未授权原因
+          format: markdown
   - !if
     condition: !action
       action: 判断是否需要先补充测试目标。
@@ -77,3 +104,19 @@ flow:
       name: 最小 Harness 记录
       format: schema
       schema: memsphere-harness-note
+  - !action
+    action: 产出一份用于验证 Action 与 Artifact 契约的最终交付物。
+    asserts:
+      - 交付物必须包含摘要字段。
+    suggests:
+      - 摘要优先保持简洁。
+    artifact: !artifact
+      name: 契约验收交付物
+      format: schema
+      schema: !schema
+        format: outline
+        asserts:
+          - 所有字段均应可审计。
+        fields:
+          - 摘要
+      final: true
