@@ -46,6 +46,44 @@ test("listMemoryFiles keeps yaml filtering and sorting for existing directories"
   });
 });
 
+test("validateMemoryStore reports kind-scoped canonical and alias conflicts", async () => {
+  await withTempDir(async (dir) => {
+    const configPath = join(dir, "config.json");
+    const memoryRoot = join(dir, "memory");
+    await mkdir(join(dir, "reviews"));
+    await mkdir(join(dir, "runs"));
+    for (const kind of memoryKinds) await mkdir(join(memoryRoot, kind), { recursive: true });
+    await writeFile(configPath, `${JSON.stringify({ memoryRoot: "memory", reviewsRoot: "reviews", runsRoot: "runs" })}\n`);
+    await writeFile(join(memoryRoot, "concepts", "one.yaml"), "!concept\nnames: [Memory, shared]\ndefines: []\n");
+    await writeFile(join(memoryRoot, "concepts", "two.yaml"), "!concept\nnames: [Other, shared]\ndefines: []\n");
+    await writeFile(join(memoryRoot, "concepts", "three.yaml"), "!concept\nnames: [Memory]\ndefines: []\n");
+    await writeFile(join(memoryRoot, "statements", "same-name.yaml"), "!statement\nnames: [Memory]\nasserts: [valid]\n");
+
+    const result = await validateMemoryStore(configPath);
+    assert(result.issues.some((issue) => issue.message.includes('memory name "shared" conflicts within concepts')));
+    assert(result.issues.some((issue) => issue.message.includes('memory name "Memory" conflicts within concepts')));
+    assert(!result.issues.some((issue) => issue.message.includes("conflicts within statements")));
+  });
+});
+
+test("validateMemoryStore reports normalized empty and repeated names with parse errors", async () => {
+  await withTempDir(async (dir) => {
+    const configPath = join(dir, "config.json");
+    const memoryRoot = join(dir, "memory");
+    await mkdir(join(dir, "reviews"));
+    await mkdir(join(dir, "runs"));
+    for (const kind of memoryKinds) await mkdir(join(memoryRoot, kind), { recursive: true });
+    await writeFile(configPath, `${JSON.stringify({ memoryRoot: "memory", reviewsRoot: "reviews", runsRoot: "runs" })}\n`);
+    await writeFile(join(memoryRoot, "concepts", "names.yaml"), "!concept\nnames: [' Memory ', Memory, ' ']\ndefines: []\n");
+    await writeFile(join(memoryRoot, "schemas", "broken.yaml"), "!schema\nnames: [Broken\n");
+
+    const result = await validateMemoryStore(configPath);
+    assert(result.issues.some((issue) => issue.message.includes('repeats the normalized name "Memory"')));
+    assert(result.issues.some((issue) => issue.message.includes("alias at names[2] is empty")));
+    assert(result.issues.some((issue) => issue.path.endsWith("broken.yaml")));
+  });
+});
+
 for (const missingKind of memoryKinds) {
   test(`validateMemoryStore still reports missing ${missingKind} directory`, async () => {
     await withTempDir(async (dir) => {

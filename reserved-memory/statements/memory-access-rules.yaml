@@ -1,0 +1,19 @@
+!statement
+names:
+  - Memory 访问规则
+  - Memory discovery and read rules
+defines:
+  - 规定 Agent 如何通过 memsphere 的稳定访问边界发现和读取当前 scope 中的 Memory。
+asserts:
+  - 当用户已经给出可唯一解析的规范名称、别名或逻辑引用时，Agent 可以直接使用 memsphere memory read；目标尚未唯一确定时，必须先使用 memsphere memory list 发现候选。
+  - memsphere memory list 的 --query 只精确匹配规范名称或别名，不执行全文检索或语义检索；Agent 应优先使用从用户请求中提取的准确名称或别名，并在已知类型时同时使用 --kind。
+  - memsphere memory list 的 YAML 和 JSON 结果用 names 与顶层字符串 defines 作为紧凑的发现元数据，作用类似 Skill 的 name 与 description；内嵌 Statement 和 Schema 只通过 structured_defines 展示直接成员数量。
+  - list 中的 defines 用于理解和选择候选，但不能代替完整 Memory；Agent 在解释、应用或执行一份 Memory 前，必须使用 memsphere memory read 读取完整 YAML。
+  - 只有无法提取可用名称、别名或类型时，才应使用不带 --query 或 --kind 的完整列表，避免把无关摘要大量载入上下文。
+  - Agent 不得使用 find、rg、cat、sed 或同类文件工具直接搜索或读取 Memory Store。
+  - Agent 不得读取仓库或 package 中的 reserved-memory 源码代替当前 scope 中已安装的 Memory。
+  - memsphere memory list 返回的 names 首项是规范名称，其余项是别名；规范名称和别名都可用于发现候选 Memory。
+  - Agent 应优先根据用户明确表达的目标选择 Memory，不能仅因某份 Memory 能解释输入中的局部事实就忽略更符合目标的候选。
+  - 存在多个同样符合目标且无法消除歧义的候选时，Agent 必须列出候选并请求用户确认，不得静默选择。
+  - Agent 不需要判断 Memory 是预置安装还是用户创建，也不得依赖该来源作出语义选择。
+  - CLI 读取失败时应先运行 memsphere validate；修复或重新安装需要覆盖现有内容时必须取得用户确认。

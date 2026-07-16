@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import {
   archiveListCommand,
   archiveRestoreReviewCommand,
@@ -8,7 +8,8 @@ import {
   archiveRunCommand
 } from "./commands/archive.js";
 import { initCommand } from "./commands/init.js";
-import { listCommand } from "./commands/list.js";
+import { memoryListCommand, memoryReadCommand } from "./commands/memory.js";
+import { memoryKinds } from "./memory/kinds.js";
 import { runEnterSchemaCommand, runReportCommand, runStartCommand, runStatusCommand } from "./commands/run.js";
 import { skillInitCommand } from "./commands/skill.js";
 import { validateCommand } from "./commands/validate.js";
@@ -38,11 +39,25 @@ program
   .description("Validate config, memory directories, and YAML memory entities.")
   .action(validateCommand);
 
-program
+const memory = program
+  .command("memory")
+  .description("Discover and read memory entities.");
+
+memory
   .command("list")
-  .description("List memory entities.")
-  .argument("[kind]", "one of: procedures, concepts, statements, schemas")
-  .action(listCommand);
+  .description("List memory entities in the current scope.")
+  .addOption(new Option("--kind <kind>", "filter by memory kind").choices([...memoryKinds]))
+  .option("--query <text>", "match an exact canonical name or alias")
+  .addOption(new Option("--output <format>", "output format").choices(["yaml", "json", "text"]).default("yaml"))
+  .action((options) => memoryListCommand(options));
+
+memory
+  .command("read")
+  .description("Read one memory entity by logical reference, canonical name, or alias.")
+  .argument("<reference>", "logical reference, canonical name, or alias")
+  .addOption(new Option("--kind <kind>", "narrow name resolution by memory kind").choices([...memoryKinds]))
+  .addOption(new Option("--output <format>", "output format").choices(["yaml", "json"]).default("yaml"))
+  .action((reference, options) => memoryReadCommand(reference, options));
 
 program
   .command("view")

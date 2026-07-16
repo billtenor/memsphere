@@ -1,0 +1,123 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { MemoryEntity } from "../src/memory/ast.js";
+import { memorySchemas } from "../src/memory/schema.js";
+import {
+  serializeMemoryJson,
+  serializeMemoryListJson,
+  serializeMemoryListText,
+  serializeMemoryListYaml,
+  serializeMemoryYaml
+} from "../src/memory/serializer.js";
+import { parseMemoryYaml } from "../src/memory/yaml.js";
+import { parse } from "yaml";
+
+const entities: MemoryEntity[] = [
+  {
+    tag: "!concept",
+    names: ["Memory: core", "记忆 #1"],
+    defines: [
+      "A multiline\ndefinition",
+      {
+        tag: "!statement",
+        names: ["Embedded statement"],
+        defines: [],
+        asserts: ["Nested tags survive."],
+        suggests: ["Keep them structured."]
+      }
+    ],
+    extends: []
+  },
+  {
+    tag: "!statement",
+    names: ["Suggestion"],
+    defines: [],
+    asserts: ["Statements assert."],
+    suggests: ["Statements may suggest."]
+  },
+  {
+    tag: "!schema",
+    names: ["Record"],
+    defines: [],
+    format: "table",
+    element_types: ["Schema"],
+    fields: [
+      {
+        tag: "!schema",
+        names: ["title"],
+        defines: ["A title: with punctuation"],
+        element_types: ["string"]
+      }
+    ]
+  },
+  {
+    tag: "!procedure",
+    names: ["Nested procedure"],
+    defines: [],
+    goals: ["Exercise every flow tag."],
+    flow: [
+      {
+        tag: "!if",
+        condition: {
+          tag: "!action",
+          action: "Decide.",
+          artifact: { tag: "!artifact", name: "decision", format: "boolean" }
+        },
+        then: [
+          {
+            tag: "!while",
+            condition: {
+              tag: "!action",
+              action: "Continue?",
+              artifact: { tag: "!artifact", name: "continue", format: "boolean" }
+            },
+            do: [{ tag: "!call", target: "child" }]
+          }
+        ],
+        else: [
+          {
+            tag: "!action",
+            action: "Write markdown.",
+            artifact: { tag: "!artifact", name: "note", format: "markdown" }
+          }
+        ]
+      }
+    ]
+  }
+];
+
+for (const entity of entities) {
+  test(`YAML serializer round-trips ${entity.tag}`, () => {
+    const source = serializeMemoryYaml(entity);
+    assert(source.startsWith(`${entity.tag}\n`));
+    assert(!/^tag:/m.test(source));
+    const parsed = parseMemoryYaml(source);
+    const kind = entity.tag === "!concept"
+      ? "concepts"
+      : entity.tag === "!statement"
+        ? "statements"
+        : entity.tag === "!schema"
+          ? "schemas"
+          : "procedures";
+    assert.deepEqual(memorySchemas[kind].parse(parsed), entity);
+  });
+
+  test(`JSON serializer preserves ${entity.tag} AST`, () => {
+    assert.deepEqual(JSON.parse(serializeMemoryJson(entity)), entity);
+  });
+}
+
+test("list serializers produce structured machine output and compact text", () => {
+  const page = {
+    memories: [
+      { reference: "concepts/Memory", kind: "concepts" as const, names: ["Memory", "记忆"], defines: ["A memory."] },
+      { reference: "schemas/Record", kind: "schemas" as const, names: ["Record"], defines: [] }
+    ],
+    next_cursor: null
+  };
+
+  assert.deepEqual(parse(serializeMemoryListYaml(page)), page);
+  assert.deepEqual(JSON.parse(serializeMemoryListJson(page)), page);
+  assert.equal(serializeMemoryListText(page), "concepts/Memory (记忆)\nschemas/Record\n");
+  assert.equal(serializeMemoryListText({ memories: [], next_cursor: null }), "");
+});

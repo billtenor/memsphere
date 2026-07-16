@@ -1,0 +1,4 @@
+interface:
+  display_name: "Memsphere"
+  short_description: "Discover, read, and apply project Memory"
+  default_prompt: "Use memsphere to discover the relevant Memory and complete this task according to it."
