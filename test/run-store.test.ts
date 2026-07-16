@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { memoryKinds } from "../src/memory/kinds.js";
-import { artifactSchemaName, enterSchema, readRun, reportRun, startRun } from "../src/run/store.js";
+import { artifactSchemaName, enterSchema, finalArtifacts, readRun, reportRun, startRun } from "../src/run/store.js";
 import { validateMemoryStore } from "../src/validation.js";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
@@ -179,6 +179,90 @@ flow:
     assert.equal(artifact.schemaName, undefined);
     assert.match(artifact.fileName ?? "", /\.schema\.md$/);
     assert.equal(await readFile(join(runsRoot, artifact.path ?? ""), "utf8"), "schema content\n");
+  });
+});
+
+test("inline schema contracts are snapshotted, enter without a name, and persist final artifacts", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    const procedurePath = join(proceduresRoot, "inline.yaml");
+    await writeFile(procedurePath, `!procedure
+names: [inline-contract]
+flow:
+  - !action
+    action: Produce delivery.
+    asserts: [Keep every required field.]
+    suggests: [Prefer short prose.]
+    artifact: !artifact
+      name: delivery
+      format: schema
+      final: true
+      schema: !schema
+        format: outline
+        fields: [summary]
+`);
+
+    const started = await startRun({ memoryRoot, runsRoot, procedureName: "inline-contract" });
+    const step = started.stack[0].steps[0];
+    assert.deepEqual(step.asserts, ["Keep every required field."]);
+    assert.deepEqual(step.suggests, ["Prefer short prose."]);
+    assert(step.inlineSchema);
+    assert(step.inlineSchemaId?.startsWith("inline:flow[1]:delivery"));
+    await writeFile(procedurePath, validProcedure);
+
+    const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id });
+    assert.equal(entered.stack.at(-1)?.memoryName, step.inlineSchemaId);
+    assert.equal(entered.stack.at(-1)?.steps[0]?.artifact, step.inlineSchemaId);
+    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery\n" } });
+    const done = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "finished" } });
+    assert.equal(done.status, "done");
+    assert.equal(finalArtifacts(done).length, 1);
+    const delivery = finalArtifacts(done)[0];
+    assert.equal(delivery.schemaKind, "inline");
+    assert.equal(delivery.final, true);
+    assert.match(delivery.path ?? "", /\.schema\.md$/);
+    assert.equal(await readFile(join(runsRoot, delivery.path ?? ""), "utf8"), `schema:${step.inlineSchemaId}`);
+  });
+});
+
+test("final artifacts only include the executed branch", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "branch.yaml"), `!procedure
+names: [branch-final]
+flow:
+  - !if
+    condition: !action
+      action: Choose path.
+      artifact: !artifact
+        name: choose
+        format: boolean
+    then:
+      - !action
+        action: True delivery.
+        artifact: !artifact
+          name: true result
+          format: string
+          final: true
+    else:
+      - !action
+        action: False delivery.
+        artifact: !artifact
+          name: false result
+          format: string
+          final: true
+`);
+    const started = await startRun({ memoryRoot, runsRoot, procedureName: "branch-final" });
+    const afterChoice = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "false" } });
+    const done = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "false result" } });
+    assert.equal(afterChoice.stack[0].steps[afterChoice.stack[0].index]?.artifact, "false result");
+    assert.deepEqual(finalArtifacts(done).map((artifact) => artifact.name), ["false result"]);
   });
 });
 

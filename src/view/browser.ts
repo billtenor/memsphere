@@ -134,6 +134,12 @@ export const browserHtml = String.raw`<!doctype html>
     .child-stack { margin-top: 12px; }
     .definition-list > li { margin: 10px 0; }
     .definition-list > li > .section { min-width: 0; margin: 0; }
+    .schema-node > .section-header .node-title { font-weight: 400; }
+    .schema-field-list { margin-top: 0; }
+    .schema-field-content { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+    .schema-field-plain .node-title { font-weight: 400; }
+    .schema-field-type { color: var(--muted); font-size: 13px; }
+    .schema-field-type .target-add { margin-left: 8px; vertical-align: middle; }
     .field-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
     .field-table th, .field-table td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; white-space: pre-wrap; }
     .field-table th { width: 220px; background: #f3f5f0; font-weight: 700; }
@@ -180,6 +186,10 @@ export const browserHtml = String.raw`<!doctype html>
     .markdown-body th { background: #e9ece6; }
     .markdown-body img { max-width: 100%; height: auto; }
     .markdown-body hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+    .action-contracts { display: grid; gap: 6px; margin-top: 8px; }
+    .action-contracts ul { margin: 0; padding-left: 20px; }
+    .inline-schema-toggle { border: 1px solid var(--line); cursor: pointer; font-family: inherit; font-size: 12px; font-weight: inherit; }
+    .inline-schema-toggle:hover, .inline-schema-toggle:focus-visible { border-color: var(--accent); color: var(--accent); }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 12px; }
     .comment-card { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; }
     .comment-card b { display: block; overflow-wrap: anywhere; }
@@ -310,6 +320,10 @@ export const browserHtml = String.raw`<!doctype html>
       human: { zh: "人", yaml: "human" },
       artifact: { zh: "产物", yaml: "artifact" },
       schema: { zh: "图式", yaml: "schema" },
+      inlineSchema: { zh: "内嵌图式", yaml: "inline schema" },
+      fields: { zh: "字段", yaml: "fields" },
+      final: { zh: "最终交付物", yaml: "final" },
+      finalArtifacts: { zh: "最终交付物", yaml: "final artifacts" },
       element_types: { zh: "元素类型", yaml: "element_types" },
       statement: { zh: "命题", yaml: "statement" },
       action: { zh: "要做什么", yaml: "action" },
@@ -686,7 +700,10 @@ export const browserHtml = String.raw`<!doctype html>
       el.detail.className = "task-summary";
       el.detail.innerHTML = "";
       el.detail.append(renderRunMeta(run));
-      if (run.plan && run.plan.length) el.detail.append(renderRunFlow(run));
+      if (run.plan && run.plan.length) {
+        el.detail.append(renderRunFlow(run));
+        el.detail.append(renderFinalArtifacts(run));
+      }
       else el.detail.append(renderRunArtifacts(run));
     }
 
@@ -730,7 +747,7 @@ export const browserHtml = String.raw`<!doctype html>
     function renderCurrentRunStep(run, step) {
       const frame = currentRunFrame(run);
       const section = document.createElement("section");
-      section.className = "section open task-step";
+      section.className = "section open task-step inline-schema-host";
       section.append(taskSectionHeader("Next: " + step.artifact, formatLabel(step.format), "next-step"));
       const panel = document.createElement("div");
       panel.className = "section-body";
@@ -738,6 +755,8 @@ export const browserHtml = String.raw`<!doctype html>
       const instruction = document.createElement("div");
       instruction.textContent = step.instruction;
       panel.append(instruction);
+      appendOptional(panel, renderActionContracts(step));
+      appendOptional(panel, renderInlineSchemaDetails(step, true));
       if (step.details && step.details.length) {
         const details = document.createElement("ul");
         details.className = "text-list";
@@ -751,14 +770,13 @@ export const browserHtml = String.raw`<!doctype html>
       const artifact = document.createElement("div");
       artifact.className = "meta";
       if (step.kind) artifact.append(pill(step.kind));
-      artifact.append(pill(step.artifact, true));
-      appendFormatMeta(artifact, step.format, step.schemaName);
+      appendArtifactMeta(artifact, step);
       artifact.append(pill((frame?.type || "run") + " · " + (frame ? (frame.index + 1) + "/" + frame.steps.length : "")));
       panel.append(artifact);
       const command = document.createElement("div");
       command.className = "pre mono";
       command.textContent = step.format === "schema"
-        ? "memsphere run enter-schema " + shellQuote(step.schemaName || step.artifact) + " --run " + shellQuote(run.id)
+        ? "memsphere run enter-schema" + (step.inlineSchema ? "" : " " + shellQuote(step.schemaName || step.artifact)) + " --run " + shellQuote(run.id)
         : "memsphere run report --run " + shellQuote(run.id) + " --artifact <value>";
       panel.append(blockTitle(t("then")));
       panel.append(command);
@@ -789,6 +807,18 @@ export const browserHtml = String.raw`<!doctype html>
       return wrap;
     }
 
+    function renderFinalArtifacts(run) {
+      const events = run.events.filter(event => event.artifact && event.artifact.final);
+      if (!events.length) return document.createDocumentFragment();
+      const wrap = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "block-title";
+      title.textContent = t("finalArtifacts");
+      wrap.append(title);
+      for (const event of events) wrap.append(renderRunArtifact(event));
+      return wrap;
+    }
+
     function renderRunArtifact(event) {
       const section = document.createElement("section");
       section.className = "section open";
@@ -798,8 +828,9 @@ export const browserHtml = String.raw`<!doctype html>
       const meta = document.createElement("div");
       meta.className = "meta";
       meta.append(pill(event.frame));
-      appendFormatMeta(meta, event.artifact.format, artifactSchemaName(event.artifact));
+      appendFormatMeta(meta, event.artifact.format, artifactSchemaName(event.artifact), event.artifact.schemaKind === "inline");
       appendArtifactStorageMeta(meta, event.artifact);
+      if (event.artifact.final) meta.append(pill(t("final"), false, "done"));
       meta.append(pill(formatTime(event.at)));
       const value = renderArtifactValue(event.artifact);
       body.append(meta, blockTitle(t("artifactContent")), value);
@@ -839,6 +870,8 @@ export const browserHtml = String.raw`<!doctype html>
       attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("step"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
+      appendOptional(item, renderActionContracts(step));
+      appendOptional(item, renderInlineSchemaDetails(step, Boolean(isActive)));
       appendOptional(item, renderTaskStepResult(step, event, run));
       return item;
     }
@@ -850,6 +883,8 @@ export const browserHtml = String.raw`<!doctype html>
       attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("if"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
+      appendOptional(item, renderActionContracts(step));
+      appendOptional(item, renderInlineSchemaDetails(step, Boolean(isActive)));
       appendOptional(item, renderTaskStepResult(step, event, run));
       item.append(renderTaskChildSteps(step.branches.truthy, eventsByStep, activeStep, run));
       if (step.branches.falsy.length) item.append(renderElseTaskBranch(step.branches.falsy, eventsByStep, activeStep, run));
@@ -863,6 +898,8 @@ export const browserHtml = String.raw`<!doctype html>
       attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("while"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
+      appendOptional(item, renderActionContracts(step));
+      appendOptional(item, renderInlineSchemaDetails(step, Boolean(isActive)));
       appendOptional(item, renderTaskStepResult(step, event, run));
       item.append(renderTaskChildSteps(step.loop.body, eventsByStep, activeStep, run));
       return item;
@@ -1239,7 +1276,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderSchema(node, depth, path, fallbackName = t("schema")) {
       const section = document.createElement("div");
-      section.className = "section" + (depth < 2 ? " open" : "");
+      section.className = "section schema-node" + (depth < 2 ? " open" : "");
       const badges = ["!schema"];
       if (node.format) badges.push("format: " + node.format);
       const name = depth === 0 ? "" : displayName(node, fallbackName);
@@ -1249,7 +1286,9 @@ export const browserHtml = String.raw`<!doctype html>
       if (depth === 0) appendNames(body, node);
       appendTextBlocks(body, node);
       appendSchemaElementTypes(body, node.element_types);
-      if (node.format === "table") body.append(renderTableFields(node.fields || [], path));
+      if (node.format === "table" && node.fields?.length) {
+        body.append(blockTitle(t("fields")), renderTableFields(node.fields, path));
+      }
       else if (node.fields && node.fields.length) {
         const children = document.createElement("div");
         children.className = "child-stack";
@@ -1260,7 +1299,7 @@ export const browserHtml = String.raw`<!doctype html>
             ? renderSimpleSchemaField(child, childPath)
             : renderSchema(child, depth + 1, childPath));
         }
-        body.append(children);
+        body.append(blockTitle(t("fields")), children);
       }
       section.append(body);
       return section;
@@ -1412,10 +1451,35 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderSimpleSchemaField(name, path) {
-      const section = document.createElement("div");
-      section.className = "section";
-      section.append(sectionHeader(name, "string", path, "field:" + path));
-      return section;
+      const location = nextLocation("field:" + path);
+      const list = document.createElement("ul");
+      list.className = "text-list schema-field-list";
+      const field = document.createElement("li");
+      field.className = "schema-field-plain";
+      field.dataset.anchor = location.anchor;
+      field.id = domIdForAnchor(location.anchor);
+      const content = document.createElement("span");
+      content.className = "schema-field-content";
+      const title = document.createElement("span");
+      title.className = "node-title";
+      title.textContent = name;
+      const meta = document.createElement("span");
+      meta.className = "schema-field-type";
+      meta.textContent = "string";
+      const count = commentsForAnchor(location.anchor, name).length;
+      if (count) meta.append(" · " + count + " comments");
+      const targetButton = document.createElement("button");
+      targetButton.className = "target-add";
+      targetButton.textContent = "+";
+      targetButton.title = "Add review comment";
+      targetButton.addEventListener("click", () => {
+        openInlineEditor(field, path, name, withLocationHash(location, name));
+      });
+      meta.append(targetButton);
+      content.append(title, meta);
+      field.append(content);
+      list.append(field);
+      return list;
     }
 
     function renderProcedure(entity) {
@@ -1526,18 +1590,22 @@ export const browserHtml = String.raw`<!doctype html>
       item.className = "flow-item";
       const artifact = artifactSpec(step);
       item.append(renderFlowHead(t("step"), step.action, artifact.name || anchor, anchor + ".action", step));
+      appendOptional(item, renderActionContracts(step));
+      appendOptional(item, renderInlineSchemaDetails(step));
       return item;
     }
 
     function renderStructuredControlHead(step, anchor, labelText = t("if")) {
-      const head = document.createElement("div");
+      const wrap = document.createElement("div");
       if (!step || typeof step !== "object") {
-        head.append(commentable(String(step), anchor, String(step), anchor));
-        return head;
+        wrap.append(commentable(String(step), anchor, String(step), anchor));
+        return wrap;
       }
       const artifact = artifactSpec(step);
-      head.append(renderFlowHead(labelText, step.action || "", artifact.name || anchor, anchor + ".action", step));
-      return head;
+      wrap.append(renderFlowHead(labelText, step.action || "", artifact.name || anchor, anchor + ".action", step));
+      appendOptional(wrap, renderActionContracts(step));
+      appendOptional(wrap, renderInlineSchemaDetails(step));
+      return wrap;
     }
 
     function renderElseBranch(steps, anchor) {
@@ -1610,10 +1678,44 @@ export const browserHtml = String.raw`<!doctype html>
     function appendArtifactMeta(target, step) {
       const artifact = artifactSpec(step);
       target.append(pill(artifact.name || t("artifact"), true));
-      appendFormatMeta(target, artifact.format, artifact.schema);
+      if (artifact.format === "schema" && typeof artifact.schema === "object") {
+        target.append(inlineSchemaTogglePill(artifact.schema));
+      } else {
+        appendFormatMeta(target, artifact.format, typeof artifact.schema === "string" ? artifact.schema : undefined, false);
+      }
+      if (artifact.final) target.append(pill(t("final"), false, "done"));
     }
 
-    function appendFormatMeta(target, format, schemaName) {
+    function inlineSchemaTogglePill(schema) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "pill inline-schema-toggle";
+      button.textContent = inlineSchemaSummary(schema);
+      button.title = t("inlineSchema");
+      button.setAttribute("aria-expanded", "false");
+      button.addEventListener("click", () => {
+        const host = button.closest(".inline-schema-host") || button.closest(".flow-item");
+        const details = host?.querySelector(".inline-schema-section");
+        if (!details) return;
+        const open = !details.classList.contains("open");
+        details.classList.toggle("open", open);
+        button.setAttribute("aria-expanded", String(open));
+      });
+      return button;
+    }
+
+    function inlineSchemaSummary(schema) {
+      const parts = [t("inlineSchema")];
+      if (schema.asserts?.length) parts.push(schema.asserts.length + " " + t("asserts"));
+      if (schema.fields?.length) parts.push(schema.fields.length + " " + t("fields"));
+      return parts.join(" · ");
+    }
+
+    function appendFormatMeta(target, format, schemaName, inlineSchema) {
+      if (format === "schema" && inlineSchema) {
+        target.append(pill(t("inlineSchema")));
+        return;
+      }
       if (format === "schema" && schemaName) {
         target.append(schemaLinkPill(schemaName));
         return;
@@ -1652,6 +1754,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function artifactHeaderBadge(artifact) {
       const schemaName = artifactSchemaName(artifact);
+      if (artifact.format === "schema" && artifact.schemaKind === "inline") return t("inlineSchema");
       if (artifact.format === "schema" && schemaName) return t("schema") + ": " + schemaName;
       return formatLabel(artifact.format);
     }
@@ -1659,6 +1762,40 @@ export const browserHtml = String.raw`<!doctype html>
     function artifactSchemaName(artifact) {
       const fieldValue = artifact?.fields?.schema_name;
       return typeof fieldValue === "string" ? fieldValue : artifact?.schemaName || "";
+    }
+
+    function renderActionContracts(step) {
+      if (!step || (!step.asserts?.length && !step.suggests?.length)) return null;
+      const wrap = document.createElement("div");
+      wrap.className = "action-contracts";
+      for (const [label, values] of [[t("asserts"), step.asserts], [t("suggests"), step.suggests]]) {
+        if (!values?.length) continue;
+        const group = document.createElement("div");
+        group.append(blockTitle(label));
+        const list = document.createElement("ul");
+        for (const value of values) {
+          const item = document.createElement("li");
+          item.textContent = value;
+          list.append(item);
+        }
+        group.append(list);
+        wrap.append(group);
+      }
+      return wrap;
+    }
+
+    function renderInlineSchemaDetails(step, expanded = false) {
+      const artifact = artifactSpec(step || {});
+      const schema = step?.inlineSchema || (typeof artifact.schema === "object" ? artifact.schema : undefined);
+      if (!schema) return null;
+      const identity = step?.inlineSchemaId || step?.id || artifact.name || "artifact";
+      const section = renderSchema(schema, 1, "inline-schema:" + identity, t("inlineSchema"));
+      section.classList.add("inline-schema-section");
+      if (!expanded) section.classList.remove("open");
+      const wrap = document.createElement("div");
+      wrap.className = "artifact-structure";
+      wrap.append(blockTitle(t("artifact")), section);
+      return wrap;
     }
 
     function artifactDisplayValue(artifact) {
@@ -1693,13 +1830,15 @@ export const browserHtml = String.raw`<!doctype html>
         return {
           name: step.artifact.name || "",
           format: step.artifact.format || "",
-          schema: step.artifact.schema || ""
+          schema: step.artifact.schema || "",
+          final: Boolean(step.artifact.final)
         };
       }
       return {
         name: typeof step?.artifact === "string" ? step.artifact : "",
         format: step?.format || "",
-        schema: step?.schema || ""
+        schema: step?.inlineSchema || step?.schemaName || step?.schema || "",
+        final: Boolean(step?.final)
       };
     }
 

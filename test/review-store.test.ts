@@ -106,7 +106,19 @@ test("task review API rejects running tasks and reads artifacts from the saved s
       stack: [],
       plan: [
         { id: "flow[2]", kind: "call", instruction: "Call child", target: "child procedure" },
-        { id: "flow[3]", kind: "action", instruction: "Use schema", artifact: "schema", format: "schema", schemaName: "used schema" }
+        { id: "flow[3]", kind: "action", instruction: "Use schema", artifact: "schema", format: "schema", schemaName: "used schema" },
+        {
+          id: "flow[4]",
+          kind: "action",
+          instruction: "Use private schema",
+          artifact: "private schema",
+          format: "schema",
+          inlineSchemaId: "inline:flow[4]:private-schema",
+          inlineSchema: { tag: "!schema", names: [], defines: [], format: "outline", fields: ["summary"] },
+          asserts: ["Keep it auditable."],
+          suggests: ["Prefer concise text."],
+          final: true
+        }
       ],
       events: [{
         at: "2026-07-11T00:00:00.000Z",
@@ -158,6 +170,10 @@ test("task review API rejects running tasks and reads artifacts from the saved s
       assert.equal(snapshot.status, 200);
       const body = await snapshot.json() as { run: RunState };
       assert.equal((body.run.events[0]?.artifact as { content?: string }).content, "snapshot artifact\n");
+      const inlineStep = body.run.plan?.find((step) => step.id === "flow[4]");
+      assert.equal(inlineStep?.inlineSchemaId, "inline:flow[4]:private-schema");
+      assert.deepEqual(inlineStep?.asserts, ["Keep it auditable."]);
+      await assert.rejects(readFile(join(reviewsRoot, review.id, "snapshots", "memory", "schemas", "inline:flow[4]:private-schema.yaml")));
     } finally {
       server.close();
       await once(server, "close");

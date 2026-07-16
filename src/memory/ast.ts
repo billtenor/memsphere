@@ -55,13 +55,16 @@ export type ArtifactNode = {
   tag: "!artifact";
   name: string;
   format: ArtifactFormat;
-  schema?: string;
+  schema?: string | SchemaNode;
+  final?: boolean;
 };
 
 export type ActionNode = {
   tag: "!action";
   action: string;
   actor?: StepActor;
+  asserts?: string[];
+  suggests?: string[];
   artifact: ArtifactNode;
 };
 

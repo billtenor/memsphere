@@ -118,7 +118,8 @@ export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> 
   tag: z.literal("!artifact"),
   name: nonEmptyString,
   format: z.enum(artifactFormats),
-  schema: nonEmptyString.optional()
+  schema: z.lazy(() => z.union([nonEmptyString, schemaNodeSchema])).optional(),
+  final: z.boolean().optional()
 }).strict().superRefine((artifact, context) => {
   if (artifact.format === "schema" && !artifact.schema) {
     context.addIssue({
@@ -140,8 +141,20 @@ export const actionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = z.
   tag: z.literal("!action"),
   action: nonEmptyString,
   actor: z.enum(stepActors).optional(),
+  asserts: z.array(nonEmptyString).min(1).optional(),
+  suggests: z.array(nonEmptyString).min(1).optional(),
   artifact: artifactNodeSchema
 }).strict();
+
+const plainActionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = actionNodeSchema.superRefine((node, context) => {
+  if (node.artifact.format === "boolean") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["artifact", "format"],
+      message: "boolean Artifact format is only allowed for If or While conditions"
+    });
+  }
+});
 
 const callNodeSchema: z.ZodType<CallNode, z.ZodTypeDef, unknown> = z.object({
   tag: z.literal("!call"),
@@ -190,7 +203,7 @@ ifNodeSchema = z.lazy(() =>
 );
 
 flowNodeSchema = z.lazy(() => z.union([
-  actionNodeSchema,
+  plainActionNodeSchema,
   ifNodeSchema,
   whileNodeSchema,
   callNodeSchema

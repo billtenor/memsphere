@@ -99,7 +99,7 @@ run
 run
   .command("enter-schema")
   .description("Enter a schema artifact writing flow.")
-  .argument("<schema-name>", "schema primary name or alias")
+  .argument("[schema-name]", "schema primary name or alias; omit for the current inline schema")
   .requiredOption("--run <id>", "run id")
   .action(runEnterSchemaCommand);
 

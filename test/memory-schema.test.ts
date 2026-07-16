@@ -80,6 +80,64 @@ unknown: value
 `), /unknown/);
 });
 
+test("Action supports contracts and Artifact supports inline Schema and final metadata", () => {
+  const entity = parseProcedure(`!procedure
+names: [contracts]
+flow:
+  - !action
+    action: Produce a private delivery.
+    asserts: [The result is complete.]
+    suggests: [Prefer concise wording.]
+    artifact: !artifact
+      name: delivery
+      format: schema
+      final: true
+      schema: !schema
+        format: outline
+        asserts: [Keep the structure auditable.]
+        fields: [summary]
+`);
+  const step = entity.flow[0];
+  assert.equal(step.tag, "!action");
+  if (step.tag === "!action") {
+    assert.deepEqual(step.asserts, ["The result is complete."]);
+    assert.deepEqual(step.suggests, ["Prefer concise wording."]);
+    assert.equal(step.artifact.final, true);
+    assert.equal(typeof step.artifact.schema, "object");
+  }
+
+  assert.throws(() => parseProcedure(`!procedure
+names: [invalid-contract]
+flow:
+  - !action
+    action: Invalid.
+    asserts: []
+    artifact: !artifact
+      name: result
+      format: string
+`), /asserts/);
+  assert.throws(() => parseProcedure(`!procedure
+names: [invalid-boolean]
+flow:
+  - !action
+    action: Invalid.
+    artifact: !artifact
+      name: result
+      format: boolean
+`), /boolean Artifact/);
+  assert.throws(() => parseProcedure(`!procedure
+names: [invalid-inline]
+flow:
+  - !action
+    action: Invalid.
+    artifact: !artifact
+      name: result
+      format: string
+      schema: !schema
+        fields: [summary]
+`), /schema is only allowed/);
+});
+
 test("recursive elseif uses a single nested If and keeps else on the root", () => {
   const entity = parseProcedure(`!procedure
 names: [branching]

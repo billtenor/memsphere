@@ -4,6 +4,7 @@ import {
   currentFrame,
   currentStep,
   enterSchema,
+  finalArtifacts,
   listRuns,
   readRun,
   reportRun,
@@ -43,7 +44,7 @@ export async function runReportCommand(options: ReportOptions): Promise<void> {
   printNext(run);
 }
 
-export async function runEnterSchemaCommand(schemaName: string, options: RunIdOptions): Promise<void> {
+export async function runEnterSchemaCommand(schemaName: string | undefined, options: RunIdOptions): Promise<void> {
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await enterSchema({
@@ -96,6 +97,12 @@ function printNext(run: RunState): void {
 
   if (run.status === "done") {
     console.log("done");
+    const finals = finalArtifacts(run);
+    if (finals.length) {
+      console.log("");
+      console.log("Final Artifacts:");
+      for (const artifact of finals) console.log(`- ${artifact.name}${artifact.path ? `: ${artifact.path}` : ""}`);
+    }
     return;
   }
 
@@ -114,6 +121,18 @@ function printNext(run: RunState): void {
   console.log(step.actor === "human" ? "Ask human to do:" : "Do:");
   console.log(step.instruction);
 
+  if (step.asserts?.length) {
+    console.log("");
+    console.log("Asserts:");
+    for (const value of step.asserts) console.log(`- ${value}`);
+  }
+
+  if (step.suggests?.length) {
+    console.log("");
+    console.log("Suggests:");
+    for (const value of step.suggests) console.log(`- ${value}`);
+  }
+
   if (step.details?.length) {
     console.log("");
     console.log("Details:");
@@ -131,9 +150,12 @@ function printNext(run: RunState): void {
 
   console.log("");
   if (step.format === "schema") {
-    const schemaName = step.schemaName ?? step.artifact;
     console.log("Then:");
-    console.log(`memsphere run enter-schema ${schemaName} --run ${run.id}`);
+    if (step.inlineSchema) {
+      console.log(`memsphere run enter-schema --run ${run.id}`);
+    } else {
+      console.log(`memsphere run enter-schema ${step.schemaName ?? step.artifact} --run ${run.id}`);
+    }
   } else {
     console.log("Then:");
     console.log(`memsphere run report --run ${run.id} --artifact <value>`);

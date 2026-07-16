@@ -484,7 +484,11 @@ function collectRunMemoryReferences(run: RunState): Record<MemoryKind, Set<strin
   const references = Object.fromEntries(memoryKinds.map((kind) => [kind, new Set<string>()])) as Record<MemoryKind, Set<string>>;
   references.procedures.add(run.procedureName);
   for (const frame of run.stack) {
-    references[frame.type === "procedure" ? "procedures" : "schemas"].add(frame.memoryName);
+    if (frame.type === "procedure") {
+      references.procedures.add(frame.memoryName);
+    } else if (!frame.memoryName.startsWith("inline:")) {
+      references.schemas.add(frame.memoryName);
+    }
     collectStepMemoryReferences(frame.steps, references);
   }
   collectStepMemoryReferences(run.plan ?? [], references);

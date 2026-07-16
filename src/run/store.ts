@@ -30,6 +30,7 @@ export type RunFrame = {
   steps: RunStep[];
   index: number;
   returnTo?: string;
+  sourceStepId?: string;
 };
 
 export type RunStep = {
@@ -40,6 +41,11 @@ export type RunStep = {
   artifact?: string;
   format?: ArtifactFormat;
   schemaName?: string;
+  inlineSchema?: SchemaNode;
+  inlineSchemaId?: string;
+  final?: boolean;
+  asserts?: string[];
+  suggests?: string[];
   details?: string[];
   target?: string;
   branches?: {
@@ -60,6 +66,9 @@ export type RunEvent = {
       format: ArtifactFormat;
       fields?: Record<string, unknown>;
       schemaName?: string;
+      schemaKind?: "external" | "inline";
+      inlineSchemaId?: string;
+      final?: boolean;
       storage?: "inline" | "file";
       value?: string;
       path?: string;
@@ -93,6 +102,11 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
     artifact: z.string().optional(),
     format: z.enum(artifactFormats).optional(),
     schemaName: z.string().optional(),
+    inlineSchema: z.custom<SchemaNode>().optional(),
+    inlineSchemaId: z.string().optional(),
+    final: z.boolean().optional(),
+    asserts: z.array(z.string()).optional(),
+    suggests: z.array(z.string()).optional(),
     details: z.array(z.string()).optional(),
     target: z.string().optional(),
     branches: z.object({
@@ -118,7 +132,8 @@ const runStateSchema: z.ZodType<RunState> = z.object({
     memoryName: z.string(),
     steps: z.array(runStepSchema),
     index: z.number(),
-    returnTo: z.string().optional()
+    returnTo: z.string().optional(),
+    sourceStepId: z.string().optional()
   })),
   events: z.array(z.object({
     at: z.string(),
@@ -129,6 +144,9 @@ const runStateSchema: z.ZodType<RunState> = z.object({
       format: z.enum(artifactFormats),
       fields: z.record(z.unknown()).optional(),
       schemaName: z.string().optional(),
+      schemaKind: z.enum(["external", "inline"]).optional(),
+      inlineSchemaId: z.string().optional(),
+      final: z.boolean().optional(),
       storage: z.enum(["inline", "file"]).optional(),
       value: z.string().optional(),
       path: z.string().optional(),
@@ -253,28 +271,39 @@ export function artifactSchemaName(artifact: RunEvent["artifact"]): string | und
   return typeof fieldValue === "string" ? fieldValue : artifact.schemaName;
 }
 
-export async function enterSchema(input: { memoryRoot: string; runsRoot: string; runId: string; schemaName: string }): Promise<RunState> {
+export async function enterSchema(input: { memoryRoot: string; runsRoot: string; runId: string; schemaName?: string }): Promise<RunState> {
   const run = await readRun(input.runsRoot, input.runId);
   if (run.status === "done") {
     throw new Error(`run is already done: ${input.runId}`);
   }
 
-  const schema = await findMemoryByName(input.memoryRoot, "schemas", input.schemaName);
-  if (!schema) {
-    throw new Error(`schema not found: ${input.schemaName}`);
+  const activeStep = currentStep(run);
+  if (!input.schemaName) {
+    if (!activeStep?.inlineSchema || !activeStep.inlineSchemaId) {
+      throw new Error("current Artifact does not use an inline schema; provide an external schema name");
+    }
+    const steps = compileSchemaSteps(activeStep.inlineSchema, activeStep.inlineSchemaId);
+    if (!steps.length) throw new Error(`inline schema has no executable fields: ${activeStep.artifact}`);
+    run.stack.push({
+      type: "schema",
+      memoryName: activeStep.inlineSchemaId,
+      sourceStepId: activeStep.id,
+      steps,
+      index: 0
+    });
+  } else {
+    const schema = await findMemoryByName(input.memoryRoot, "schemas", input.schemaName);
+    if (!schema) throw new Error(`schema not found: ${input.schemaName}`);
+    const steps = compileSchemaSteps(schema.entity as SchemaMemory, schema.entity.names[0]);
+    if (!steps.length) throw new Error(`schema has no executable fields: ${input.schemaName}`);
+    run.stack.push({
+      type: "schema",
+      memoryName: schema.entity.names[0],
+      sourceStepId: activeStep?.id,
+      steps,
+      index: 0
+    });
   }
-
-  const steps = compileSchemaSteps(schema.entity as SchemaMemory);
-  if (!steps.length) {
-    throw new Error(`schema has no executable fields: ${input.schemaName}`);
-  }
-
-  run.stack.push({
-    type: "schema",
-    memoryName: schema.entity.names[0],
-    steps,
-    index: 0
-  });
   run.updatedAt = new Date().toISOString();
   await writeRun(input.runsRoot, run);
   return run;
@@ -287,6 +316,10 @@ export function currentStep(run: RunState): RunStep | undefined {
 
 export function currentFrame(run: RunState): RunFrame | undefined {
   return run.stack.at(-1);
+}
+
+export function finalArtifacts(run: RunState): RunEvent["artifact"][] {
+  return run.events.filter((event) => event.artifact.final).map((event) => event.artifact);
 }
 
 async function collapseCompletedFrames(runsRoot: string, run: RunState): Promise<void> {
@@ -302,7 +335,7 @@ async function collapseCompletedFrames(runsRoot: string, run: RunState): Promise
       parentStep &&
       parentStep.artifact &&
       parentStep.format === "schema" &&
-      (parentStep.schemaName ?? parentStep.artifact) === completed.memoryName
+      completed.sourceStepId === parentStep.id
     ) {
       const artifact = await buildRunEventArtifact(runsRoot, run, parentStep, {
         kind: "inline",
@@ -356,7 +389,22 @@ function compileActionStep(node: ActionNode, id: string): RunStep {
     actor: node.actor ?? "agent",
     artifact: node.artifact.name,
     format: node.artifact.format,
-    schemaName: node.artifact.schema
+    ...compileArtifactStep(node.artifact, id),
+    asserts: node.asserts ? [...node.asserts] : undefined,
+    suggests: node.suggests ? [...node.suggests] : undefined
+  };
+}
+
+function compileArtifactStep(artifact: ActionNode["artifact"], id: string): Pick<RunStep, "artifact" | "format" | "schemaName" | "inlineSchema" | "inlineSchemaId" | "final"> {
+  const schemaName = typeof artifact.schema === "string" ? artifact.schema : undefined;
+  const inlineSchema = typeof artifact.schema === "object" ? cloneSchema(artifact.schema) : undefined;
+  return {
+    artifact: artifact.name,
+    format: artifact.format,
+    schemaName,
+    inlineSchema,
+    inlineSchemaId: inlineSchema ? `inline:${id}:${slugify(artifact.name) || "artifact"}` : undefined,
+    final: artifact.final || undefined
   };
 }
 
@@ -375,9 +423,9 @@ function compileIfChain(node: IfNode, id: string, fallback: RunStep[]): RunStep 
     kind: "branch",
     instruction: node.condition.action,
     actor: node.condition.actor ?? "agent",
-    artifact: node.condition.artifact.name,
-    format: node.condition.artifact.format,
-    schemaName: node.condition.artifact.schema,
+    ...compileArtifactStep(node.condition.artifact, id),
+    asserts: node.condition.asserts ? [...node.condition.asserts] : undefined,
+    suggests: node.condition.suggests ? [...node.condition.suggests] : undefined,
     details: describeControlTargets("true", thenSteps).concat(describeControlTargets("false", elseSteps)),
     branches: { truthy: thenSteps, falsy: elseSteps }
   };
@@ -390,9 +438,9 @@ function compileWhileStep(node: WhileNode, id: string): RunStep {
     kind: "loop",
     instruction: node.condition.action,
     actor: node.condition.actor ?? "agent",
-    artifact: node.condition.artifact.name,
-    format: node.condition.artifact.format,
-    schemaName: node.condition.artifact.schema,
+    ...compileArtifactStep(node.condition.artifact, id),
+    asserts: node.condition.asserts ? [...node.condition.asserts] : undefined,
+    suggests: node.condition.suggests ? [...node.condition.suggests] : undefined,
     details: describeControlTargets("while true", body).concat(["false: continue after loop"]),
     loop: { body }
   };
@@ -426,6 +474,9 @@ function cloneSteps(steps: RunStep[]): RunStep[] {
 function cloneStep(step: RunStep): RunStep {
   return {
     ...step,
+    inlineSchema: step.inlineSchema ? cloneSchema(step.inlineSchema) : undefined,
+    asserts: step.asserts ? [...step.asserts] : undefined,
+    suggests: step.suggests ? [...step.suggests] : undefined,
     details: step.details ? [...step.details] : undefined,
     branches: step.branches
       ? {
@@ -471,7 +522,10 @@ async function buildRunEventArtifact(
   const base = {
     name: step.artifact,
     format: step.format,
-    fields: artifactFieldsForStep(step)
+    fields: artifactFieldsForStep(step),
+    schemaKind: step.inlineSchema ? "inline" as const : step.schemaName ? "external" as const : undefined,
+    inlineSchemaId: step.inlineSchemaId,
+    final: step.final
   };
 
   if (source.kind === "inline" && !shouldStoreArtifactAsFile(step.format)) {
@@ -511,7 +565,8 @@ function compactArtifact(artifact: RunEvent["artifact"]): RunEvent["artifact"] {
 
 function artifactFieldsForStep(step: RunStep): Record<string, unknown> | undefined {
   if (step.format === "schema") {
-    return { schema_name: step.schemaName ?? step.artifact };
+    if (step.schemaName) return { schema_name: step.schemaName };
+    if (step.inlineSchemaId) return { inline_schema_id: step.inlineSchemaId };
   }
   return undefined;
 }
@@ -581,13 +636,13 @@ function contentTypeForFormat(format: ArtifactFormat): string | undefined {
   }
 }
 
-function compileSchemaSteps(schema: SchemaMemory): RunStep[] {
+function compileSchemaSteps(schema: SchemaNode, rootName: string): RunStep[] {
   const steps: RunStep[] = [];
-  walkSchema(schema, schema.names[0], steps);
+  walkSchema(schema, rootName, steps);
   return steps;
 }
 
-function walkSchema(node: SchemaMemory, path: string, steps: RunStep[]): void {
+function walkSchema(node: SchemaNode, path: string, steps: RunStep[]): void {
   const elementTypeDetails = node.element_types?.length
     ? [`element_types: List<${node.element_types.join(" | ")}>`]
     : [];
@@ -616,6 +671,10 @@ function walkSchema(node: SchemaMemory, path: string, steps: RunStep[]): void {
     }
     walkSchema(child, `${path}.${child.names[0]}`, steps);
   }
+}
+
+function cloneSchema(schema: SchemaNode): SchemaNode {
+  return JSON.parse(JSON.stringify(schema)) as SchemaNode;
 }
 
 function definitionDetails(defines: DefinitionPart[]): string[] {
