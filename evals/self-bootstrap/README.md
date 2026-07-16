@@ -81,7 +81,7 @@ TRIAL="$(./evals/prepare-case.sh self-bootstrap/001-create-bookkeeping-entry)"
 ./evals/run-traex-agent.sh --model gemini-3-flash "$TRIAL"
 ```
 
-准备脚本默认从 `PATH` 中查找 `memsphere`，agent runner 分别从 `PATH` 中查找 `codex` 或 `traex`。也可以通过 `MEMSPHERE_BIN`、`CODEX_BIN`、`CODEX_MODEL`、`TRAEX_BIN` 和 `TRAEX_MODEL` 覆盖。
+准备脚本和 agent runner 默认从 `PATH` 中查找 `memsphere`，runner 分别从 `PATH` 中查找 `codex` 或 `traex`。runner 会把选中的 memsphere CLI 注入隔离运行环境。也可以通过 `MEMSPHERE_BIN`、`CODEX_BIN`、`CODEX_MODEL`、`TRAEX_BIN` 和 `TRAEX_MODEL` 覆盖。
 
 脚本会打印结果目录，并有意将其保留在 `/tmp` 下，供父 agent 检查：
 

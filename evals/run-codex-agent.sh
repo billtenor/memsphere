@@ -16,6 +16,7 @@ Options:
 Environment:
   CODEX_BIN        codex executable name or path. Defaults to codex.
   CODEX_MODEL      default Codex model when --model is omitted.
+  MEMSPHERE_BIN    memsphere executable name or path. Defaults to memsphere.
 
 The agent run path is written to stdout. Progress is written to stderr.
 EOF
@@ -74,17 +75,24 @@ codex_command="${CODEX_BIN:-codex}"
 codex_bin="$(command -v -- "$codex_command" || true)"
 [[ -n "$codex_bin" ]] || die "codex executable not found: $codex_command"
 
+memsphere_command="${MEMSPHERE_BIN:-memsphere}"
+memsphere_bin="$(command -v -- "$memsphere_command" || true)"
+[[ -n "$memsphere_bin" ]] || die "memsphere executable not found: $memsphere_command"
+memsphere_bin="$(cd -- "$(dirname -- "$memsphere_bin")" && pwd)/$(basename -- "$memsphere_bin")"
+
 mkdir -p -- "$trial_dir/runs"
 run_dir="$(mktemp -d "$trial_dir/runs/codex.XXXXXX")"
 workspace_dir="$run_dir/workspace"
 home_dir="$run_dir/home"
+bin_dir="$home_dir/go/bin"
 events_file="$run_dir/agent-events.jsonl"
 stderr_file="$run_dir/agent-stderr.log"
 answer_file="$run_dir/final-answer.md"
 metadata_file="$run_dir/metadata.txt"
 
-mkdir -p -- "$workspace_dir" "$home_dir"
+mkdir -p -- "$workspace_dir" "$home_dir" "$bin_dir"
 cp -a -- "$baseline_workspace/." "$workspace_dir/"
+ln -s -- "$memsphere_bin" "$bin_dir/memsphere"
 
 {
   printf 'agent=codex\n'
@@ -97,6 +105,8 @@ cp -a -- "$baseline_workspace/." "$workspace_dir/"
   printf 'codex_bin=%s\n' "$codex_bin"
   printf 'codex_version=%s\n' "$("$codex_bin" --version)"
   printf 'codex_model=%s\n' "${codex_model:-default}"
+  printf 'memsphere_bin=%s\n' "$memsphere_bin"
+  printf 'memsphere_version=%s\n' "$("$memsphere_bin" --version)"
 } >"$metadata_file"
 
 if $dry_run; then
@@ -122,7 +132,7 @@ if [[ -n "$codex_model" ]]; then
 fi
 
 set +e
-HOME="$home_dir" CODEX_HOME="$codex_home" "$codex_bin" "${codex_args[@]}" \
+HOME="$home_dir" CODEX_HOME="$codex_home" PATH="$bin_dir:$PATH" "$codex_bin" "${codex_args[@]}" \
   - <"$prompt_file" >"$events_file" 2>"$stderr_file"
 codex_status=$?
 set -e
