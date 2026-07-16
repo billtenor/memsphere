@@ -38,13 +38,16 @@ memsphere init
 memsphere init --global
 memsphere init --folder ./some-folder
 memsphere validate
-memsphere list
+memsphere memory list
+memsphere memory list --kind concepts --query Memory
+memsphere memory list --output json
+memsphere memory read concepts/Memory
+memsphere memory read 记忆 --kind concepts
+memsphere memory read Memory --output json
 memsphere view
-memsphere list procedures
-memsphere list concepts
-memsphere list statements
-memsphere list schemas
 ```
+
+`memory list` discovers memories through stable logical references rather than file paths. YAML and JSON list items include `names` and `defines` as a quick-loading summary; `--output text` remains compact. `memory read` accepts a logical reference, canonical name, or alias and returns tagged memsphere YAML by default.
 
 `view` starts a local read-only memory browser:
 

@@ -2,7 +2,9 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { ZodError } from "zod";
 import { findConfigPath, readConfig, readConfigAt } from "./config.js";
+import { analyzeMemoryDescriptors } from "./memory/catalog.js";
 import { memoryKinds, type MemoryKind } from "./memory/kinds.js";
+import type { ProviderMemoryDescriptor } from "./memory/provider.js";
 import { listMemoryFiles, pathExists, readMemoryFile } from "./memory/store.js";
 
 export type ValidationIssue = {
@@ -77,6 +79,7 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
     issues.push({ path: runsRoot, message: "runs root does not exist" });
   }
 
+  const descriptors: ProviderMemoryDescriptor[] = [];
   for (const kind of memoryKinds) {
     const dir = join(memoryRoot, kind);
 
@@ -85,7 +88,15 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
       continue;
     }
 
-    await validateKindDirectory(memoryRoot, kind, issues);
+    descriptors.push(...await validateKindDirectory(memoryRoot, kind, issues));
+  }
+
+  const catalogIssues = analyzeMemoryDescriptors(descriptors);
+  for (const issue of catalogIssues) {
+    issues.push({
+      path: join(memoryRoot, issue.kind),
+      message: issue.message
+    });
   }
 
   return {
@@ -101,7 +112,7 @@ async function validateKindDirectory(
   memoryRoot: string,
   kind: MemoryKind,
   issues: ValidationIssue[]
-): Promise<void> {
+): Promise<ProviderMemoryDescriptor[]> {
   let filePaths: string[];
 
   try {
@@ -111,12 +122,19 @@ async function validateKindDirectory(
       path: join(memoryRoot, kind),
       message: formatError(error)
     });
-    return;
+    return [];
   }
 
+  const descriptors: ProviderMemoryDescriptor[] = [];
   for (const filePath of filePaths) {
     try {
-      await readMemoryFile(kind, filePath);
+      const file = await readMemoryFile(kind, filePath);
+      descriptors.push({
+        id: filePath,
+        kind,
+        names: [...file.entity.names],
+        defines: structuredClone(file.entity.defines)
+      });
     } catch (error) {
       issues.push({
         path: filePath,
@@ -124,4 +142,5 @@ async function validateKindDirectory(
       });
     }
   }
+  return descriptors;
 }

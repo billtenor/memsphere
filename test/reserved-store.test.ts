@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { initCommand } from "../src/commands/init.js";
+import { DefaultMemoryCatalog } from "../src/memory/catalog.js";
+import { FileMemoryProvider } from "../src/memory/file-provider.js";
 import { readAllMemoryFiles } from "../src/memory/store.js";
 import {
   importReservedMemory,
@@ -35,6 +37,7 @@ test("init installs reserved memory into the scope root without importing it int
     assert(items.every((item) => item.error === undefined));
     assert(items.every((item) => item.imported === false));
     assert.deepEqual(await readAllMemoryFiles(memoryRoot, "concepts"), []);
+    assert.deepEqual((await new DefaultMemoryCatalog(new FileMemoryProvider(memoryRoot)).list()).memories, []);
   });
 });
 
@@ -76,6 +79,8 @@ test("importReservedMemory copies reserved memory into the user memory root", as
     await installReservedMemories(scopeRoot);
 
     assert.deepEqual(await readAllMemoryFiles(memoryRoot, "concepts"), []);
+    const reservedPath = join(reservedMemoryRoot(scopeRoot), "concepts", "concept.yaml");
+    const reservedSource = await readFile(reservedPath, "utf8");
 
     const importedPath = await importReservedMemory(scopeRoot, memoryRoot, "concepts/concept.yaml");
     assert.equal(importedPath, join(memoryRoot, "concepts", "concept.yaml"));
@@ -83,6 +88,11 @@ test("importReservedMemory copies reserved memory into the user memory root", as
     const files = await readAllMemoryFiles(memoryRoot, "concepts");
     assert.equal(files.length, 1);
     assert.equal(files[0].entity.names[0], "Concept");
+    assert.equal(await readFile(reservedPath, "utf8"), reservedSource);
+    assert.deepEqual(
+      (await new DefaultMemoryCatalog(new FileMemoryProvider(memoryRoot)).list()).memories.map((item) => item.reference),
+      ["concepts/Concept"]
+    );
 
     const items = await listReservedMemories(scopeRoot, memoryRoot);
     assert.equal(items.find((item) => item.path === "concepts/concept.yaml")?.imported, true);
