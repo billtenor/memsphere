@@ -46,6 +46,27 @@ test("renderMarkdownContent renders basic markdown blocks", () => {
   assert.match(html, /<pre><code class="language-ts">const x = 1;\n<\/code><\/pre>/);
 });
 
+test("renderMarkdownContent renders GFM tables with semantic structure", () => {
+  const html = renderMarkdownContent("| Name | Value |\n| --- | --- |\n| Alpha | `one` |\n| Beta | &lt;safe&gt; |");
+
+  assert.match(html, /<div class="markdown-table-scroll"><table>/);
+  assert.match(html, /<thead>/);
+  assert.match(html, /<tbody>/);
+  assert.match(html, /<th>Name<\/th>/);
+  assert.match(html, /<td>Alpha<\/td>/);
+  assert.match(html, /<td><code>one<\/code><\/td>/);
+  assert.match(html, /&lt;safe&gt;/);
+});
+
+test("renderMarkdownContent does not mistake pipe text or code fences for tables", () => {
+  const pipeText = renderMarkdownContent("Alpha | Beta");
+  const codeBlock = renderMarkdownContent("```text\n| Name | Value |\n| --- | --- |\n| Alpha | Beta |\n```");
+
+  assert.doesNotMatch(pipeText, /<table>/);
+  assert.doesNotMatch(codeBlock, /<table>/);
+  assert.match(codeBlock, /<pre><code class="language-text">/);
+});
+
 test("renderMarkdownContent escapes raw HTML", () => {
   const html = renderMarkdownContent("<script>alert(1)</script>");
 
@@ -65,6 +86,11 @@ test("renderMarkdownContent rejects unsafe links and annotates safe links", () =
 
 test("markdown body resets inherited pre-wrap whitespace", () => {
   assert.match(browserHtml, /\.markdown-body \{[^}]*white-space: normal;/);
+});
+
+test("markdown tables use a horizontal scrolling container", () => {
+  assert.match(browserHtml, /\.markdown-table-scroll \{[^}]*max-width: 100%;[^}]*overflow-x: auto;/);
+  assert.match(browserHtml, /\.markdown-body table \{[^}]*width: max-content;[^}]*min-width: 100%;/);
 });
 
 test("browser exposes reserved memory controls", () => {
