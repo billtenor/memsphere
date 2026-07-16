@@ -57,7 +57,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
   await withScope(async ({ nested, memoryRoot }) => {
     await writeFile(
       join(memoryRoot, "concepts", "random-95f2.yaml"),
-      "!concept\nnames: [Memory, 记忆]\ndefines: [A managed memory.]\n"
+      "!concept\nnames: [Memory, 记忆]\ndefines:\n  - A managed memory.\n  - !statement\n    asserts: [Read the complete memory.]\n"
     );
     await writeFile(
       join(memoryRoot, "schemas", "another-random-name.yaml"),
@@ -69,7 +69,10 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
     assert.equal(list.stderr, "");
     const page = parse(list.stdout);
     assert.deepEqual(page.memories.map((item: { reference: string }) => item.reference), ["concepts/Memory", "schemas/Record"]);
-    assert.deepEqual(page.memories.find((item: { reference: string }) => item.reference === "concepts/Memory").defines, ["A managed memory."]);
+    const memorySummary = page.memories.find((item: { reference: string }) => item.reference === "concepts/Memory");
+    assert.deepEqual(memorySummary.defines, ["A managed memory."]);
+    assert.deepEqual(memorySummary.structured_defines, { statement: 1 });
+    assert(!list.stdout.includes("Read the complete memory."));
     assert.equal(page.next_cursor, null);
     assert(!list.stdout.includes("random-95f2"));
     assert(!list.stdout.includes(memoryRoot));
@@ -79,6 +82,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
     const filteredPage = JSON.parse(filtered.stdout);
     assert.deepEqual(filteredPage.memories.map((item: { reference: string }) => item.reference), ["concepts/Memory"]);
     assert.deepEqual(filteredPage.memories[0].defines, ["A managed memory."]);
+    assert.deepEqual(filteredPage.memories[0].structured_defines, { statement: 1 });
 
     for (const reference of ["concepts/Memory", "Memory", "记忆"]) {
       const read = await runCli(nested, ["memory", "read", reference]);
@@ -87,7 +91,16 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
       assert.deepEqual(parseMemoryYaml(read.stdout), {
         tag: "!concept",
         names: ["Memory", "记忆"],
-        defines: ["A managed memory."]
+        defines: [
+          "A managed memory.",
+          {
+            tag: "!statement",
+            names: [],
+            defines: [],
+            asserts: ["Read the complete memory."],
+            suggests: []
+          }
+        ]
       });
     }
   });

@@ -1,0 +1,23 @@
+!concept
+names:
+  - 费用清单
+defines:
+  - 一份费用清单汇总多笔已经发生的支出，用于统一查看支出内容及其分类。
+  - !statement
+    asserts:
+      - 每笔支出必须单独占一行。
+      - 每笔支出的金额必须大于零。
+      - 日期必须使用 YYYY-MM-DD 格式。
+      - 公共交通工具产生的支出归类为交通。
+      - 食物和饮品支出归类为餐饮。
+      - 工作材料的制作或打印支出归类为办公。
+      - 费用清单实例必须以 Markdown 文件保存到 artifacts/expense-list.md。
+  - !schema
+    format: table
+    element_types:
+      - Schema
+    fields:
+      - 日期
+      - 内容
+      - 金额
+      - 分类
