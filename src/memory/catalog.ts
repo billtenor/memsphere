@@ -6,7 +6,11 @@ export type MemoryDescriptor = {
   reference: string;
   kind: MemoryKind;
   names: string[];
-  defines: DefinitionPart[];
+  defines: string[];
+  structured_defines?: {
+    statement?: number;
+    schema?: number;
+  };
 };
 
 export type MemoryListQuery = {
@@ -172,13 +176,14 @@ function buildCatalogIndex(descriptors: ProviderMemoryDescriptor[]): CatalogInde
       });
     }
 
+    const definitionSummary = summarizeDefinitions(source.defines);
     entries.push({
       providerId: source.id,
       descriptor: {
         reference,
         kind: source.kind,
         names,
-        defines: structuredClone(source.defines)
+        ...definitionSummary
       }
     });
   }
@@ -210,6 +215,28 @@ function buildCatalogIndex(descriptors: ProviderMemoryDescriptor[]): CatalogInde
   entries.sort((a, b) => compareDescriptors(a.descriptor, b.descriptor));
   issues.sort((a, b) => compareStrings(`${a.kind}/${a.name ?? ""}/${a.message}`, `${b.kind}/${b.name ?? ""}/${b.message}`));
   return { entries, issues };
+}
+
+function summarizeDefinitions(defines: DefinitionPart[]): Pick<MemoryDescriptor, "defines" | "structured_defines"> {
+  const text = defines.filter((part): part is string => typeof part === "string");
+  let statement = 0;
+  let schema = 0;
+
+  for (const part of defines) {
+    if (typeof part === "string") continue;
+    if (part.tag === "!statement") statement += 1;
+    if (part.tag === "!schema") schema += 1;
+  }
+
+  const structured_defines = {
+    ...(statement > 0 ? { statement } : {}),
+    ...(schema > 0 ? { schema } : {})
+  };
+
+  return {
+    defines: [...text],
+    ...(statement > 0 || schema > 0 ? { structured_defines } : {})
+  };
 }
 
 function resolveEntry(

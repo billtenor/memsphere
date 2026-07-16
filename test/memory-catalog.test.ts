@@ -60,6 +60,33 @@ test("catalog lists stable public descriptors without reading bodies", async () 
   assert(!JSON.stringify(await catalog.list()).includes("/private/"));
 });
 
+test("catalog folds structured definitions into counts while preserving prose", async () => {
+  const provider = new FakeProvider(
+    [{
+      id: "one",
+      kind: "concepts",
+      names: ["Memory"],
+      defines: [
+        "A managed memory.",
+        { tag: "!statement", names: [], defines: [], asserts: ["Required."], suggests: [] },
+        { tag: "!schema", names: [], defines: [], fields: ["value"] }
+      ]
+    }],
+    {}
+  );
+
+  assert.deepEqual(await new DefaultMemoryCatalog(provider).list(), {
+    memories: [{
+      reference: "concepts/Memory",
+      kind: "concepts",
+      names: ["Memory"],
+      defines: ["A managed memory."],
+      structured_defines: { statement: 1, schema: 1 }
+    }],
+    next_cursor: null
+  });
+});
+
 test("catalog filters exact normalized names and passes kind to provider", async () => {
   const provider = new FakeProvider(
     [

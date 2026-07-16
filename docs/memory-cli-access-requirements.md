@@ -84,7 +84,7 @@ memsphere memory read <reference>
 
 ### `memsphere memory list`
 
-用途：列出当前 scope 中可被读取和使用的 Memory，只返回发现与选择所需的公共摘要（names + defines），不返回类型专属正文。
+用途：列出当前 scope 中可被读取和使用的 Memory，只返回发现与选择所需的紧凑摘要（names、字符串 defines 与结构化定义计数），不返回类型专属正文。
 
 建议参数：
 
@@ -114,6 +114,9 @@ memories:
       - 记账记录
     defines:
       - 记账是记录收支与资金变化的行为。
+    structured_defines:
+      statement: 1
+      schema: 1
   - reference: concepts/Memory
     kind: concepts
     names:
@@ -129,7 +132,9 @@ next_cursor: null
 - `reference` 是 Catalog 生成的逻辑引用，不是相对文件路径。
 - `kind` 使用现有复数目录类型名，保持与 CLI 参数一致。
 - `names[0]` 是规范名称，其余元素是别名。
-- `defines` 是所有 Memory 共有的定义摘要，与 names 共同支持快速选择；goals、asserts、suggests、fields、flow 等类型专属字段不进入 list。
+- `defines` 原样保留原 Memory 的全部顶层字符串定义，与 names 共同构成类似 Skill name 与 description 的发现元数据。
+- 内嵌 `!statement` 和 `!schema` 不在列表中展开；存在时由 `structured_defines.statement` 和 `structured_defines.schema` 分别给出直接成员数量，提示 Agent 继续 read。
+- list 不截断单个结构化定义，也不返回 goals、asserts、suggests、fields、flow 等类型专属内容，避免摘要形成不完整或失真的约束。
 - `next_cursor` 为未来大规模或远端 Catalog 分页预留；文件 Provider 初期可始终返回 `null`。
 
 ### `memsphere memory read <reference>`
@@ -313,7 +318,7 @@ CLI 至少应区分并稳定表达以下错误：
 
 ### CLI 集成测试
 
-- `memory list` 默认输出合法 YAML，包含 names + defines 公共摘要，不暴露创建来源或物理路径。
+- `memory list` 默认输出合法 YAML，包含 names、字符串 defines 与 structured_defines 紧凑摘要，不暴露创建来源或物理路径。
 - `memory list --kind` 和 `--query` 组合工作正常。
 - `memory read` 可通过稳定引用、规范名称和别名读取。
 - `memory read` 的 YAML 输出可被当前 parser 再次解析并得到语义等价实体。

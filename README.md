@@ -47,7 +47,7 @@ memsphere memory read Memory --output json
 memsphere view
 ```
 
-`memory list` discovers memories through stable logical references rather than file paths. YAML and JSON list items include `names` and `defines` as a quick-loading summary; `--output text` remains compact. `memory read` accepts a logical reference, canonical name, or alias and returns tagged memsphere YAML by default.
+`memory list` discovers memories through stable logical references rather than file paths. YAML and JSON list items include `names`, prose `defines`, and counts of folded structured definitions as compact discovery metadata, analogous to a Skill's name and description; `--output text` remains compact. `memory read` accepts a logical reference, canonical name, or alias and returns the complete tagged memsphere YAML by default.
 
 `view` starts a local read-only memory browser:
 

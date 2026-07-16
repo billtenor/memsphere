@@ -1,0 +1,119 @@
+!procedure
+names:
+  - 基于 Memory 完成任务流程
+  - Memory 引导任务执行流程
+  - memory-guided-task-execution
+defines:
+  - 使用当前 scope 中已有的 Memory 理解用户目标、形成执行契约，并创建符合定义的实例或任务产物。
+  - 适用于用户要求根据已有概念、规则或结构完成任务，不适用于创建、修改或 review Memory 本身。
+  - 缺少必填信息时只请求补充，输入违反约束时只说明冲突；两种情况都不得创建不合法产物。
+goals:
+  - 通过 CLI 发现并读取与用户目标最匹配的 Memory。
+  - 将目标 Memory 的文本、Statement 和 Schema 完整转化为任务执行契约。
+  - 在信息完整且约束成立时创建并验证产物。
+  - 在信息缺失、约束冲突或目标歧义时给出准确且克制的响应。
+flow:
+  - !action
+    action: 从用户请求中识别要完成的目标、目标对象、关键名称或别名，以及明确提供的事实。
+    actor: agent
+    artifact: !artifact
+      name: 用户目标与已知事实
+      format: markdown
+  - !action
+    action: 提取用户请求中可能对应规范名称或别名的准确术语，优先使用 memsphere memory list --query 与 --kind 获取候选；--query 只做名称或别名精确匹配，无法提取可用术语时才读取更宽范围的列表，并根据 names、字符串 defines、structured_defines 计数和用户目标筛选候选。
+    actor: agent
+    artifact: !artifact
+      name: 候选 Memory 清单
+      format: yaml
+  - !action
+    action: 使用 memsphere memory read 读取每一份合理候选的完整 YAML，不得直接读取 Memory Store 文件。
+    actor: agent
+    artifact: !artifact
+      name: 候选 Memory 完整内容
+      format: yaml
+  - !action
+    action: 根据用户明确目标、Memory 的规范名称、别名和完整定义，选择最符合任务目的的目标 Memory。
+    actor: agent
+    artifact: !artifact
+      name: 目标 Memory 选择结果
+      format: string
+  - !if
+    condition: !action
+      action: 判断是否仍有多个同样符合用户目标且无法依据现有信息消除歧义的 Memory。
+      actor: agent
+      artifact: !artifact
+        name: 是否存在未消除的 Memory 歧义
+        format: boolean
+    then:
+      - !action
+        action: 向 human 说明各候选 Memory 与当前目标的关系，并请求选择要应用的 Memory。
+        actor: agent
+        artifact: !artifact
+          name: Memory 选择确认请求
+          format: markdown
+      - !action
+        action: 选择本次任务要应用的 Memory。
+        actor: human
+        artifact: !artifact
+          name: human 确认的目标 Memory
+          format: string
+    else:
+      - !action
+        action: 确认目标 Memory 已经由用户目标和现有信息唯一确定。
+        actor: agent
+        artifact: !artifact
+          name: 目标 Memory 唯一性确认
+          format: string
+  - !action
+    action: 递归解释目标 Memory 的全部 defines，将文本含义、Statement 断言、Schema 字段与 format、保存路径及其他交付要求整理为一个完整执行契约。
+    actor: agent
+    artifact: !artifact
+      name: Memory 任务执行契约
+      format: markdown
+  - !if
+    condition: !action
+      action: 判断用户输入是否缺少执行契约明确要求的必填信息。
+      actor: agent
+      artifact: !artifact
+        name: 是否缺少必填信息
+        format: boolean
+    then:
+      - !action
+        action: 列出真正缺失的必填信息并请求 human 补充，不得创建实例、猜测值或占位产物。
+        actor: agent
+        artifact: !artifact
+          name: 必填信息补充请求
+          format: markdown
+    elseif: !if
+      condition: !action
+        action: 判断用户已经提供的事实是否违反执行契约中的任一约束。
+        actor: agent
+        artifact: !artifact
+          name: 是否存在约束冲突
+          format: boolean
+      then:
+        - !action
+          action: 指出发生冲突的用户事实和具体约束，不得创建实例或静默修改用户输入。
+          actor: agent
+          artifact: !artifact
+            name: 约束冲突说明
+            format: markdown
+    else:
+      - !action
+        action: 根据执行契约创建用户请求的实例或任务产物；允许进行语义明确的推断，但不得发明事实，并且不得修改任何 Memory。
+        actor: agent
+        artifact: !artifact
+          name: 任务产物路径或结果引用
+          format: string
+      - !action
+        action: 对照目标 Memory 的全部 defines 复核产物的语义、约束、字段、Schema format 和保存路径，并修正发现的问题。
+        actor: agent
+        artifact: !artifact
+          name: 任务产物复核结果
+          format: markdown
+      - !action
+        action: 面向用户简要说明任务完成情况和实际产物路径，不重复无关的 Memory 内部细节。
+        actor: agent
+        artifact: !artifact
+          name: 任务处理摘要
+          format: string

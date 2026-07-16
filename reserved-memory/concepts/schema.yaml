@@ -6,3 +6,12 @@ names:
 defines:
   - memsphere 中用于描述文档、数据或协作产物结构的记忆实体。
   - 用于让协作者按共同的结构填写或验证产物，不用于表达领域术语或独立事实。
+  - fields 共同定义产物包含的字段；字段是结构要求，不是可以任意选择的示例项。
+  - format 描述 Schema 实例最终如何呈现；当前支持 outline 和 table，省略时按照 outline 理解。
+  - !statement
+    asserts:
+      - format 为 outline 时，字段名称必须成为 Markdown 标题，并按 fields 的嵌套关系形成标题层级；项目符号、键值列表、粗体标签或表格不能代替标题结构。
+      - format 为 table 时，第一层 fields 必须成为 Markdown 表格列，每个列表元素占一行；标题大纲、项目符号或键值列表不能代替表格。
+      - Schema 的 asserts 是对实例内容和结构的附加约束，必须与 fields 和 format 一并满足。
+      - 字符串 field 只提供字段名称；嵌套 !schema 用于继续描述该字段的子结构或约束。
+      - element_types 表示 Schema 描述的是列表，列出的类型是允许的列表元素类型；它不改变 format 的呈现语义。
