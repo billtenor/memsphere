@@ -1,0 +1,12 @@
+!concept
+names:
+  - Memory
+  - 记忆
+  - memsphere 记忆
+defines:
+  - memsphere 中为了跨越单次对话或运行而被有意沉淀，并可供 agent 重复理解、引用或执行的语义实体。
+  - Memory 是各种具体记忆类型的抽象上位概念。
+  - Concept、Statement、Schema 和 Procedure 是 memsphere 当前提供的具体记忆类型。
+  - 一段信息只有在被有意沉淀以供后续复用时，才成为 Memory；单次任务产物、临时对话或运行状态不会因此自动成为 Memory。
+  - CLI 读取 Memory 时会返回 YAML；在当前这份文档中，开头的 !concept 表示它是一份 Concept，names 给出规范名称和别名，defines 中的全部成员共同解释 Memory。其他记忆应继续按照各自具体类型理解。
+  - 初次理解 memsphere 时，接下来依次读取 Memsphere、Concept、Statement、Schema、Procedure、Memory 访问规则和 Memory 解读与应用规则。

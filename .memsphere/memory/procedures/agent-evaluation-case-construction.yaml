@@ -1,0 +1,182 @@
+!procedure
+names:
+  - Agent 测试任务建设流程
+  - 创建 Agent 测试任务流程
+  - Agent evaluation case construction
+defines:
+  - 用于为一个 Agent Evaluation 测试组设计、实现和静态验收一批可重复运行的测试 case。
+  - 该流程默认只建设 case、fixture、评分标准和测试组文档，不启动被测子 agent；case 运行与结果评估应在 human 明确要求后另行执行。
+  - 每个 case 应尽量只暴露一个主要能力点，任务使用真实行动检验能力，而不是直接询问被测概念的定义。
+  - !statement
+    asserts:
+      - task.md 必须以“使用目标技能，完成以下任务”表达任务，并只提供完成任务所需的最小业务输入。
+      - task.md 应明确足以路由到目标能力的业务概念，但不得泄漏 Memory 路径、字段映射、产物格式、保存路径或参考答案。
+      - fixture 必须包含被测 agent 在隔离工程中允许读取的全部测试输入，不得通过仓库源码或评测者上下文补充答案。
+      - evaluation.md 只供评测者使用，不得复制到被测 agent 的工作区。
+      - 每个 case 源码目录应包含 task.md、evaluation.md 和可选 fixtures；测试组目录不应复制公共准备脚本或 agent runner。
+      - 公共准备脚本和 agent runner 应位于 evals 根目录；每次 agent 运行必须从 agent 无关的基线复制独立工作区。
+      - evaluation.md 中的每项通过或失败标准都必须能追溯到 task.md、fixture 或测试组统一声明的规则。
+      - 缺失信息、约束冲突和合法输入必须形成不同 case，不得在评分时混淆预期行为。
+      - 评分标准必须分别说明必须满足、允许差异、失败条件和无效条件。
+      - case 建设完成后必须准备隔离基线并执行静态校验，但默认不得启动子 agent。
+      - 被 human 否决且已经不再属于测试组的旧 case 应从测试组源码目录移除。
+  - !schema
+    format: outline
+    fields:
+      - 测试组与目标能力
+      - 单一主要观察点
+      - 非目标能力
+      - 最小任务输入
+      - fixture 提供的知识与规则
+      - 期望产物或拒绝行为
+      - 确定性检查项
+      - 允许差异
+      - 失败条件
+      - 无效条件
+goals:
+  - 将 human 的测试想法整理为边界清晰、难度递进的 case 建设方案。
+  - 为每个 case 创建最小任务、完整 fixture 和独立评分标准。
+  - 保证任务、fixture、评分标准与测试组文档之间逻辑自洽。
+  - 通过基线准备、Memory validator 和静态审计证明 case 已具备运行条件。
+  - 在不启动被测 agent 的前提下，向 human 汇报新增 case 和静态验收结果。
+flow:
+  - !action
+    action: 说明要建设的测试组、目标能力、已有思路和本轮期望范围。
+    actor: human
+    artifact: !artifact
+      name: Agent 测试任务建设诉求
+      format: markdown
+  - !action
+    action: 阅读测试组设计文档、现有 case、公共 eval 基础设施和被测知识或技能，盘点已覆盖能力与真实约束。
+    actor: agent
+    artifact: !artifact
+      name: 测试组现状与约束盘点
+      format: markdown
+  - !action
+    action: 将本轮目标拆成难度递进的 case 方案，为每个 case 说明主要观察点、非目标能力和预期行为。
+    actor: agent
+    artifact: !artifact
+      name: Agent 测试 case 建设方案
+      format: markdown
+  - !while
+    condition: !action
+      action: 判断 human 是否尚未认可当前 case 建设方案。
+      actor: agent
+      artifact: !artifact
+        name: human 是否尚未认可 case 建设方案
+        format: boolean
+    do:
+      - !action
+        action: 审阅 case 建设方案并指出需要保留、删除、简化或调整的内容。
+        actor: human
+        artifact: !artifact
+          name: case 建设方案反馈
+          format: markdown
+      - !action
+        action: 根据 human 反馈修订 case 建设方案，并明确本轮最终建设清单。
+        actor: agent
+        artifact: !artifact
+          name: 修订后的 Agent 测试 case 建设方案
+          format: markdown
+  - !action
+    action: 删除已被 human 否决且仍残留在测试组源码目录中的旧 case，保留已认可 case 和历史运行证据。
+    actor: agent
+    artifact: !artifact
+      name: 旧 case 清理结果
+      format: markdown
+  - !while
+    condition: !action
+      action: 判断已认可清单中是否仍有尚未建设的 case。
+      actor: agent
+      artifact: !artifact
+        name: 是否仍有尚未建设的 case
+        format: boolean
+    do:
+      - !action
+        action: 选择下一个 case，并形成包含主要观察点、非目标能力、最小输入、fixture 知识、预期行为和确定性检查项的 case 契约。
+        actor: agent
+        artifact: !artifact
+          name: 当前 case 契约
+          format: markdown
+      - !action
+        action: 编写最小化 task.md，使任务明确指向目标业务概念，但不泄漏应从 fixture 或 Memory 中发现的信息。
+        actor: agent
+        artifact: !artifact
+          name: 当前 case 的 task.md
+          format: markdown
+      - !action
+        action: 编写当前 case 的 fixture，确保被测 agent 所需知识、约束、结构、路径和异常行为均有明确来源。
+        actor: agent
+        artifact: !artifact
+          name: 当前 case 的 fixture 文件集
+          format: markdown
+      - !action
+        action: 编写 evaluator-only 的 evaluation.md，定义参考行为、必须满足、允许差异、失败条件和无效条件。
+        actor: agent
+        artifact: !artifact
+          name: 当前 case 的 evaluation.md
+          format: markdown
+      - !action
+        action: 使用公共 case 准备脚本生成隔离基线，并对基线中的 Memory、配置和测试输入执行静态校验。
+        actor: agent
+        artifact: !artifact
+          name: 当前 case 静态校验结果
+          format: markdown
+      - !action
+        action: 逐项建立 evaluation.md 要求到 task.md、fixture 或测试组规则的来源映射，并检查是否意外考察了非目标能力。
+        actor: agent
+        artifact: !artifact
+          name: 当前 case 自洽性审计
+          format: markdown
+      - !while
+        condition: !action
+          action: 判断当前 case 是否仍存在语法错误、规则无来源、提示泄漏、输入歧义或能力点混杂。
+          actor: agent
+          artifact: !artifact
+            name: 当前 case 是否仍存在静态问题
+            format: boolean
+        do:
+          - !action
+            action: 根据静态问题修订 task.md、fixture、evaluation.md 或 case 契约，优先消除隐含规则和无关难度。
+            actor: agent
+            artifact: !artifact
+              name: 当前 case 修订内容
+              format: markdown
+          - !action
+            action: 重新准备隔离基线并重复静态校验与自洽性审计。
+            actor: agent
+            artifact: !artifact
+              name: 当前 case 复验结果
+              format: markdown
+      - !action
+        action: 将通过静态验收的 case 登记到测试组清单和说明文档中。
+        actor: agent
+        artifact: !artifact
+          name: 更新后的测试组文档
+          format: markdown
+  - !action
+    action: 对本批 case 执行跨 case 审计，检查编号、命名、难度梯度、重复覆盖、fixture 一致性和测试组通过策略。
+    actor: agent
+    artifact: !artifact
+      name: 本批 case 跨 case 审计结果
+      format: markdown
+  - !while
+    condition: !action
+      action: 判断跨 case 审计是否仍发现需要修复的问题。
+      actor: agent
+      artifact: !artifact
+        name: 跨 case 审计是否仍有问题
+        format: boolean
+    do:
+      - !action
+        action: 修复跨 case 不一致，并对受影响 case 重新执行基线准备、静态校验和自洽性审计。
+        actor: agent
+        artifact: !artifact
+          name: 跨 case 问题修复与复验结果
+          format: markdown
+  - !action
+    action: 向 human 汇报最终 case 清单、文件位置、静态校验、自洽性结论、未运行说明和后续可执行命令。
+    actor: agent
+    artifact: !artifact
+      name: Agent 测试任务建设摘要
+      format: markdown

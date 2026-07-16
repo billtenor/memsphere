@@ -1,0 +1,18 @@
+!statement
+names:
+  - Memory 解读与应用规则
+  - Memory interpretation and application rules
+defines:
+  - 规定 Agent 如何把一份 Memory 的完整定义转化为当前任务的执行契约。
+asserts:
+  - Agent 必须完整读取目标 Memory，不能只根据名称、列表摘要或常识执行任务。
+  - defines 中的全部成员共同定义 Memory 并同时生效，不得把文本、Statement 或 Schema 当作互斥解释。
+  - 字符串 defines 用于确定对象的含义、用途和边界。
+  - 匿名 !statement 中的全部 asserts 都是必须满足的约束。
+  - 匿名 !schema 的 fields、asserts 和 format 共同规定实例的结构、内容要求和最终呈现方式。
+  - Agent 可以从用户已经提供的信息中作出语义明确且可追溯的推断，但不得发明金额、日期、标识符或其他无法从输入推出的事实。
+  - 被 Statement 或 Schema asserts 声明为必填的信息缺失时，Agent 不得创建空值、占位值或猜测值的实例，必须指出缺失项并请求用户补充。
+  - 用户输入与任一约束冲突时，Agent 不得创建实例或静默修正输入，必须指出输入事实和具体冲突约束。
+  - 创建实例时必须遵守 Memory 定义的文件格式、Schema format 和保存路径。
+  - 应用 Memory 完成任务不等于编辑 Memory；除非用户明确要求修改记忆，否则不得新增、修改或删除任何 Memory。
+  - 交付前必须重新核对目标 Memory 的全部 defines，确认语义、约束、字段、呈现形态和保存位置均已满足。

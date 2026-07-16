@@ -1,0 +1,114 @@
+# memsphere 自举验收
+
+本目录保存人工编写的验收 case，用于检查一个上下文干净的 agent 能否依靠统一 memsphere Skill 和已安装的 Memory 理解并正确使用测试提供的业务 Memory。
+
+第一版有意保持简单：每次通过一个全新的子 agent 运行一个 case，并采用软隔离，包括临时工程根目录、临时 `HOME`、禁止读取工程外文件的明确指令，以及可审计的事件日志。
+
+## 目录结构
+
+```text
+evals/
+├── README.md
+├── prepare-case.sh
+├── run-codex-agent.sh
+├── run-traex-agent.sh
+└── self-bootstrap/
+    ├── README.md
+    ├── suite.md
+    └── cases/
+        ├── 001-create-bookkeeping-entry/
+        ├── 002-request-missing-bookkeeping-data/
+        ├── 003-reject-invalid-bookkeeping-entry/
+        ├── 004-create-outline-meeting-note/
+        ├── 005-create-table-expense-list/
+        └── 006-select-correct-memory/
+```
+
+- `suite.md`：说明验收集合包含哪些 case，以及如何判断整个集合是否通过。
+- `task.md`：当前 case 中唯一会发送给子 agent 的内容。
+- `evaluation.md`：仅供父 agent 使用的参考答案和评分标准，绝不能复制到子 agent 的工作区。
+- `fixtures/`：可选目录；存在时，其内容会复制到临时工作区。
+- `prepare-case.sh`：生成与 agent 无关的基线工程和提示词，并安装预置 Memory 与统一 memsphere Skill。
+- `run-codex-agent.sh`：从基线复制独立工作区，启动一个干净的 Codex 子 agent，并保留执行证据。
+- `run-traex-agent.sh`：从同一类基线复制独立工作区，启动一个干净的 TraeX 子 agent，并保留执行证据。
+- 后续接入其他 agent 时，为其增加独立 runner；case、fixture 和基线准备逻辑保持不变。
+
+## 可见性边界
+
+子 agent 可以看到：
+
+- 生成后的任务提示词；
+- 当前 case 的可选 `fixtures/` 内容；
+- 当前 scope 中由 `memsphere init` 安装或 case fixture 提供的 Memory；
+- `.agents/skills/memsphere/SKILL.md`；
+- memsphere CLI 及其输出；
+- 子 agent 在临时工作区内创建的文件。
+
+子 agent 不得读取：
+
+- `evaluation.md`；
+- 其他 case；
+- 源代码仓库中的 `README.md`、`docs/`、`src/` 或 `reserved-memory/`；
+- 旧的 memsphere skills；
+- 临时工程根目录以外的文件。
+
+只要读取了禁止来源，本次验收就记为 `invalid`，无论答案质量如何。
+
+## 运行 case
+
+准备一份 agent 无关的验收基线：
+
+```bash
+TRIAL="$(./evals/prepare-case.sh self-bootstrap/001-create-bookkeeping-entry)"
+```
+
+从该基线准备 Codex 的独立运行目录，但不启动子 agent：
+
+```bash
+./evals/run-codex-agent.sh --dry-run "$TRIAL"
+```
+
+启动 Codex 子 agent：
+
+```bash
+./evals/run-codex-agent.sh --model gpt-5.5 "$TRIAL"
+```
+
+启动 TraeX 子 agent：
+
+```bash
+./evals/run-traex-agent.sh --model gemini-3-flash "$TRIAL"
+```
+
+准备脚本默认从 `PATH` 中查找 `memsphere`，agent runner 分别从 `PATH` 中查找 `codex` 或 `traex`。也可以通过 `MEMSPHERE_BIN`、`CODEX_BIN`、`CODEX_MODEL`、`TRAEX_BIN` 和 `TRAEX_MODEL` 覆盖。
+
+脚本会打印结果目录，并有意将其保留在 `/tmp` 下，供父 agent 检查：
+
+```text
+baseline/
+  workspace/
+prompt.md
+setup.log
+metadata.txt
+runs/
+  codex.XXXXXX/
+    home/
+    workspace/
+    metadata.txt
+    agent-events.jsonl
+    agent-stderr.log
+    final-answer.md
+  traex.XXXXXX/
+    home/
+    workspace/
+    metadata.txt
+    agent-events.jsonl
+    agent-stderr.log
+    final-answer.md
+```
+
+## 当前过渡状态
+
+基线只安装统一的 `memsphere` Skill，不安装旧的 `memsphere-edit`、`memsphere-review` 或 `memsphere-run`。`memsphere memory list` 和 `memsphere memory read` 已经实现；当前剩余前置条件是让 `init` 经用户确认后把自举所需的预置 Memory 安装到标准 Memory Store。现有 `init` 仍只准备独立的待导入区，因此在该安装流程完成或由验收基线显式模拟安装前，不能正式判定本组自举 case。
+
+后续将为 runner 增加完整 Skill 与只保留启动内核的两种模式，用同一组 case 分别验证快速使用能力和纯 Memory 自举能力。
