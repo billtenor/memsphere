@@ -1,6 +1,7 @@
-import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readFile, readdir, rm, stat, unlink } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
 
@@ -13,6 +14,65 @@ export type ReservedMemoryListItem = {
 };
 
 export const reservedMemoryDirectoryName = "reserved-memory";
+export const reservedMemoryManifestFileName = "manifest.json";
+
+const memoryPathSchema = z.string().min(1).superRefine((value, context) => {
+  try {
+    assertSafeMemoryRelativePath(value);
+  } catch (error) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: error instanceof Error ? error.message : "invalid memory path"
+    });
+  }
+});
+
+const uniqueMemoryPathsSchema = z.array(memoryPathSchema).superRefine((paths, context) => {
+  const seen = new Set<string>();
+  for (const [index, path] of paths.entries()) {
+    if (seen.has(path)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [index],
+        message: `duplicate memory path: ${path}`
+      });
+    }
+    seen.add(path);
+  }
+});
+
+export const reservedMemoryManifestSchema = z.object({
+  version: z.literal(1),
+  system_memory: z.object({
+    install: uniqueMemoryPathsSchema,
+    remove: uniqueMemoryPathsSchema
+  }).strict()
+}).strict().superRefine((manifest, context) => {
+  const install = new Set(manifest.system_memory.install);
+  for (const [index, path] of manifest.system_memory.remove.entries()) {
+    if (install.has(path)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["system_memory", "remove", index],
+        message: `memory path cannot be installed and removed: ${path}`
+      });
+    }
+  }
+});
+
+export type ReservedMemoryManifest = z.infer<typeof reservedMemoryManifestSchema>;
+
+export type ReservedMemoryInstallResult = {
+  reservedMemoryRoot: string;
+  installedSystemMemories: number;
+  removedSystemMemories: number;
+  installedReservedMemories: number;
+};
+
+type InstallReservedMemoryOptions = {
+  memoryRoot?: string;
+  sourceRoot?: string;
+};
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(moduleDir, "../..");
@@ -32,24 +92,73 @@ export async function ensureReservedMemoryDirectories(root: string): Promise<voi
   }
 }
 
-export async function installReservedMemories(scopeRoot: string): Promise<string> {
-  const sourceRoot = bundledReservedMemoryRoot();
+export async function readReservedMemoryManifest(sourceRoot = bundledReservedMemoryRoot()): Promise<ReservedMemoryManifest> {
+  const manifestPath = join(sourceRoot, reservedMemoryManifestFileName);
+  const source = await readFile(manifestPath, "utf8");
+  const parsed: unknown = JSON.parse(source);
+  const manifest = reservedMemoryManifestSchema.parse(parsed);
+
+  for (const relativePath of manifest.system_memory.install) {
+    const sourcePath = resolveMemoryPath(sourceRoot, relativePath);
+    const sourceStat = await lstat(sourcePath).catch((error: unknown) => {
+      if (isNodeError(error, "ENOENT")) {
+        throw new Error(`system memory source not found: ${relativePath}`);
+      }
+      throw error;
+    });
+    if (!sourceStat.isFile()) {
+      throw new Error(`system memory source is not a regular file: ${relativePath}`);
+    }
+  }
+
+  return manifest;
+}
+
+export async function installReservedMemories(
+  scopeRoot: string,
+  options: InstallReservedMemoryOptions = {}
+): Promise<ReservedMemoryInstallResult> {
+  const sourceRoot = options.sourceRoot ?? bundledReservedMemoryRoot();
+  const memoryRoot = options.memoryRoot ?? join(scopeRoot, "memory");
   const targetRoot = reservedMemoryRoot(scopeRoot);
+  const manifest = await readReservedMemoryManifest(sourceRoot);
+  const sourcePaths = await listBundledMemoryPaths(sourceRoot);
+  const systemMemoryPaths = new Set(manifest.system_memory.install);
+
+  for (const relativePath of manifest.system_memory.remove) {
+    await validateRemovalTarget(memoryRoot, relativePath);
+  }
+  for (const relativePath of manifest.system_memory.install) {
+    await validateInstallTarget(memoryRoot, relativePath);
+  }
+
+  let removedSystemMemories = 0;
+  for (const relativePath of manifest.system_memory.remove) {
+    if (await removeMemoryFile(memoryRoot, relativePath)) {
+      removedSystemMemories += 1;
+    }
+  }
+
+  for (const relativePath of manifest.system_memory.install) {
+    await copyMemoryFile(sourceRoot, memoryRoot, relativePath);
+  }
+
   await rm(targetRoot, { recursive: true, force: true });
   await ensureReservedMemoryDirectories(targetRoot);
 
-  if (!(await pathExists(sourceRoot))) {
-    return targetRoot;
+  let installedReservedMemories = 0;
+  for (const relativePath of sourcePaths) {
+    if (systemMemoryPaths.has(relativePath)) continue;
+    await copyMemoryFile(sourceRoot, targetRoot, relativePath);
+    installedReservedMemories += 1;
   }
 
-  for (const kind of memoryKinds) {
-    const sourceKindRoot = join(sourceRoot, kind);
-    const targetKindRoot = join(targetRoot, kind);
-    if (!(await pathExists(sourceKindRoot))) continue;
-    await copyReservedFiles(sourceKindRoot, targetKindRoot);
-  }
-
-  return targetRoot;
+  return {
+    reservedMemoryRoot: targetRoot,
+    installedSystemMemories: manifest.system_memory.install.length,
+    removedSystemMemories,
+    installedReservedMemories
+  };
 }
 
 export async function importReservedMemory(scopeRoot: string, memoryRoot: string, relativePath: string): Promise<string> {
@@ -100,33 +209,107 @@ export async function listReservedMemories(scopeRoot: string, memoryRoot?: strin
 }
 
 export function assertSafeReservedRelativePath(relativePath: string): void {
-  const normalized = relativePath.replace(/\\/g, "/");
-  if (
-    !normalized ||
-    normalized.startsWith("/") ||
-    normalized.includes("\0") ||
-    normalized.split("/").includes("..") ||
-    !memoryKinds.some((kind) => normalized.startsWith(`${kind}/`))
-  ) {
+  try {
+    assertSafeMemoryRelativePath(relativePath);
+  } catch {
     throw new Error(`invalid reserved memory path: ${relativePath}`);
   }
 }
 
-async function copyReservedFiles(sourceRoot: string, targetRoot: string): Promise<void> {
-  await mkdir(targetRoot, { recursive: true });
-  const entries = await readdir(sourceRoot, { withFileTypes: true });
+function assertSafeMemoryRelativePath(relativePath: string): void {
+  const segments = relativePath.split("/");
+  if (
+    !relativePath ||
+    relativePath.includes("\\") ||
+    relativePath.startsWith("/") ||
+    relativePath.includes("\0") ||
+    segments.some((segment) => segment === "" || segment === "." || segment === "..") ||
+    !memoryKinds.some((kind) => relativePath.startsWith(`${kind}/`)) ||
+    ![".yaml", ".yml"].some((suffix) => relativePath.endsWith(suffix))
+  ) {
+    throw new Error(`invalid memory path: ${relativePath}`);
+  }
+}
+
+async function listBundledMemoryPaths(sourceRoot: string): Promise<string[]> {
+  const paths: string[] = [];
+  for (const kind of memoryKinds) {
+    const kindRoot = join(sourceRoot, kind);
+    if (!(await pathExists(kindRoot))) continue;
+    await collectBundledMemoryPaths(sourceRoot, kindRoot, paths);
+  }
+  return paths.sort((a, b) => a.localeCompare(b));
+}
+
+async function collectBundledMemoryPaths(sourceRoot: string, currentRoot: string, paths: string[]): Promise<void> {
+  const entries = await readdir(currentRoot, { withFileTypes: true });
   for (const entry of entries) {
-    const sourcePath = join(sourceRoot, entry.name);
-    const targetPath = join(targetRoot, entry.name);
+    const path = join(currentRoot, entry.name);
     if (entry.isDirectory()) {
-      await copyReservedFiles(sourcePath, targetPath);
+      await collectBundledMemoryPaths(sourceRoot, path, paths);
       continue;
     }
     if (!entry.isFile() || ![".yaml", ".yml"].some((suffix) => entry.name.endsWith(suffix))) continue;
-    assertInsideDirectory(targetPath, targetRoot);
-    await mkdir(dirname(targetPath), { recursive: true });
-    await copyFile(sourcePath, targetPath);
+    paths.push(relative(sourceRoot, path).split(sep).join("/"));
   }
+}
+
+async function copyMemoryFile(sourceRoot: string, targetRoot: string, relativePath: string): Promise<void> {
+  const sourcePath = resolveMemoryPath(sourceRoot, relativePath);
+  const targetPath = resolveMemoryPath(targetRoot, relativePath);
+  await mkdir(dirname(targetPath), { recursive: true });
+  await copyFile(sourcePath, targetPath);
+}
+
+async function removeMemoryFile(memoryRoot: string, relativePath: string): Promise<boolean> {
+  const path = resolveMemoryPath(memoryRoot, relativePath);
+  let targetStat;
+  try {
+    targetStat = await lstat(path);
+  } catch (error) {
+    if (isNodeError(error, "ENOENT")) return false;
+    throw error;
+  }
+  if (!targetStat.isFile() && !targetStat.isSymbolicLink()) {
+    throw new Error(`system memory removal target is not a file: ${relativePath}`);
+  }
+  await unlink(path);
+  return true;
+}
+
+async function validateRemovalTarget(memoryRoot: string, relativePath: string): Promise<void> {
+  const path = resolveMemoryPath(memoryRoot, relativePath);
+  const targetStat = await lstatIfExists(path);
+  if (targetStat && !targetStat.isFile() && !targetStat.isSymbolicLink()) {
+    throw new Error(`system memory removal target is not a file: ${relativePath}`);
+  }
+}
+
+async function validateInstallTarget(memoryRoot: string, relativePath: string): Promise<void> {
+  const path = resolveMemoryPath(memoryRoot, relativePath);
+  const targetStat = await lstatIfExists(path);
+  if (targetStat?.isSymbolicLink()) {
+    throw new Error(`system memory install target is a symbolic link: ${relativePath}`);
+  }
+  if (targetStat && !targetStat.isFile()) {
+    throw new Error(`system memory install target is not a file: ${relativePath}`);
+  }
+}
+
+async function lstatIfExists(path: string): Promise<Awaited<ReturnType<typeof lstat>> | undefined> {
+  try {
+    return await lstat(path);
+  } catch (error) {
+    if (isNodeError(error, "ENOENT")) return undefined;
+    throw error;
+  }
+}
+
+function resolveMemoryPath(root: string, relativePath: string): string {
+  assertSafeMemoryRelativePath(relativePath);
+  const path = resolve(root, relativePath);
+  assertInsideDirectory(path, root);
+  return path;
 }
 
 function resolveReservedMemoryPath(scopeRoot: string, relativePath: string): string {
@@ -157,4 +340,8 @@ async function pathExists(path: string): Promise<boolean> {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return false;
     throw error;
   }
+}
+
+function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error && error.code === code;
 }

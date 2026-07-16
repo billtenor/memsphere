@@ -88,6 +88,18 @@ The config file stores roots relative to the `.memsphere` directory by default:
 
 Set `archiveRoot` to an absolute path when multiple scopes should share archived runs and reviews.
 
+### Bundled memory installation
+
+`reserved-memory/manifest.json` classifies the memories bundled with the npm package. Paths in
+`system_memory.install` are required runtime memories: every `memsphere init` copies them into the configured
+Memory Store and overwrites files at the same paths. Paths in `system_memory.remove` are deleted from the Memory
+Store during init so renamed or retired system memories do not remain installed.
+
+Bundled YAML files not listed in `system_memory.install` are copied to `.memsphere/reserved-memory/`. They remain
+inactive until the user imports them from View. Re-running `init` preserves the existing config, refreshes system
+memories, and rebuilds this reserved-memory staging directory. Changing configured root paths still requires
+`--force`.
+
 ## YAML DSL
 
 Entity type is represented by the YAML document root tag. There is no `type` field.

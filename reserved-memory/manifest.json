@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "system_memory": {
+    "install": [
+      "concepts/memory.yaml",
+      "concepts/memsphere.yaml",
+      "concepts/concept.yaml",
+      "concepts/statement.yaml",
+      "concepts/procedure.yaml",
+      "concepts/schema.yaml",
+      "statements/memory-access-rules.yaml",
+      "statements/memory-interpretation-application-rules.yaml",
+      "procedures/general-task-execution.yaml"
+    ],
+    "remove": []
+  }
+}

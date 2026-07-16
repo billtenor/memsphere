@@ -67,14 +67,17 @@ export async function initCommand(options: InitOptions): Promise<void> {
   await ensureMemoryDirectories(memoryRoot);
   await ensureReviewDirectory(reviewsRoot);
   await ensureRunDirectory(runsRoot);
-  const reservedMemoryRoot = await installReservedMemories(join(scopeRoot, scopeDirectoryName));
+  const installedMemories = await installReservedMemories(join(scopeRoot, scopeDirectoryName), { memoryRoot });
   await mkdir(archiveRoot, { recursive: true });
 
   console.log(`${configExists && !options.force ? "Using existing" : "Created"} config: ${configPath}`);
   console.log(`Ensured memory root: ${memoryRoot}`);
   console.log(`Ensured reviews root: ${reviewsRoot}`);
   console.log(`Ensured runs root: ${runsRoot}`);
-  console.log(`Installed reserved memory root: ${reservedMemoryRoot}`);
+  console.log(`Installed system memories: ${installedMemories.installedSystemMemories}`);
+  console.log(`Removed system memories: ${installedMemories.removedSystemMemories}`);
+  console.log(`Installed reserved memories: ${installedMemories.installedReservedMemories}`);
+  console.log(`Installed reserved memory root: ${installedMemories.reservedMemoryRoot}`);
   console.log(`Ensured archive root: ${archiveRoot}`);
 }
 
