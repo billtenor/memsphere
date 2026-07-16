@@ -135,7 +135,9 @@ test("task review API rejects running tasks and reads artifacts from the saved s
       scopeRoot: dir,
       memoryRoot,
       reviewsRoot,
-      runsRoot
+      runsRoot,
+      archiveRoot: join(dir, "archives"),
+      view: { host: "127.0.0.1", port: 0 }
     };
     const server = createViewServer(config);
     server.listen(0, "127.0.0.1");

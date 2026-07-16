@@ -12,7 +12,13 @@ import { listCommand } from "./commands/list.js";
 import { runEnterSchemaCommand, runReportCommand, runStartCommand, runStatusCommand } from "./commands/run.js";
 import { skillInitCommand } from "./commands/skill.js";
 import { validateCommand } from "./commands/validate.js";
-import { viewCommand } from "./commands/view.js";
+import {
+  viewRestartCommand,
+  viewServeCommand,
+  viewStartCommand,
+  viewStatusCommand,
+  viewStopCommand
+} from "./commands/view.js";
 
 const program = new Command();
 
@@ -44,12 +50,36 @@ program
   .argument("[kind]", "one of: procedures, concepts, statements, schemas")
   .action(listCommand);
 
-program
+const view = program
   .command("view")
-  .description("Start a local memory browser and review UI.")
-  .option("--host <host>", "host to bind", "127.0.0.1")
-  .option("--port <port>", "port to bind; 0 picks a random open port", "0")
-  .action(viewCommand);
+  .description("Manage the local memory browser and review UI.");
+
+view
+  .command("start")
+  .description("Start the View service in the background.")
+  .action(viewStartCommand);
+
+view
+  .command("stop")
+  .description("Stop the managed View service.")
+  .action(viewStopCommand);
+
+view
+  .command("restart")
+  .description("Restart the managed View service.")
+  .action(viewRestartCommand);
+
+view
+  .command("status")
+  .description("Show the managed View service status.")
+  .action(viewStatusCommand);
+
+view
+  .command("serve", { hidden: true })
+  .description("Run the internal View HTTP server.")
+  .option("--config <path>", "config file path")
+  .option("--state <path>", "service state file path")
+  .action(viewServeCommand);
 
 const skill = program
   .command("skill")

@@ -26,12 +26,22 @@ import {
 } from "../review/store.js";
 import { listRuns, readRun, type RunState, type RunStep } from "../run/store.js";
 import { browserHtml } from "../view/browser.js";
+import {
+  clearViewServiceState,
+  getViewServiceStatus,
+  restartViewService,
+  startViewService,
+  stopViewService,
+  viewServiceStatePath,
+  viewServiceUrl,
+  writeViewServiceState
+} from "../view/service.js";
 
 const markdown = createMarkdownRenderer();
 
-type ViewOptions = {
-  host?: string;
-  port?: string;
+type ViewServeOptions = {
+  config?: string;
+  state?: string;
 };
 
 type MemoryPayload = {
@@ -52,26 +62,74 @@ type MemoryLoadError = {
   issues: string[];
 };
 
-export async function viewCommand(options: ViewOptions): Promise<void> {
-  const host = options.host ?? "127.0.0.1";
-  const port = parsePort(options.port);
+export async function viewStartCommand(): Promise<void> {
   const config = await readConfig();
+  const state = await startViewService(config);
+  console.log(`memsphere view running at ${viewServiceUrl(state)}`);
+  console.log(`pid: ${state.pid}`);
+}
+
+export async function viewStopCommand(): Promise<void> {
+  const config = await readConfig();
+  const status = await stopViewService(config);
+  console.log(status.running ? "memsphere view is still running" : "memsphere view stopped");
+}
+
+export async function viewRestartCommand(): Promise<void> {
+  const config = await readConfig();
+  const state = await restartViewService(config);
+  console.log(`memsphere view restarted at ${viewServiceUrl(state)}`);
+  console.log(`pid: ${state.pid}`);
+}
+
+export async function viewStatusCommand(): Promise<void> {
+  const config = await readConfig();
+  const status = await getViewServiceStatus(config);
+  if (!status.running || !status.state) {
+    console.log("memsphere view stopped");
+    return;
+  }
+  console.log(`memsphere view running at ${viewServiceUrl(status.state)}`);
+  console.log(`pid: ${status.state.pid}`);
+  console.log(`started: ${status.state.startedAt}`);
+}
+
+export async function viewServeCommand(options: ViewServeOptions): Promise<void> {
+  const config = await readConfig(options.config);
+  const host = config.view.host;
+  const port = config.view.port;
+  const statePath = options.state ?? viewServiceStatePath(config);
 
   const server = createViewServer(config);
 
-  server.on("error", (error) => {
+  server.on("error", async (error) => {
+    await clearViewServiceState(statePath, process.pid);
     console.error(`error: failed to start view server: ${error.message}`);
     process.exitCode = 1;
   });
 
-  server.listen(port, host, () => {
+  server.listen(port, host, async () => {
     const address = server.address();
     const actualPort = typeof address === "object" && address ? address.port : port;
+    await clearViewServiceState(statePath);
+    await writeViewServiceState(statePath, {
+      pid: process.pid,
+      host,
+      port: actualPort,
+      startedAt: new Date().toISOString(),
+      configPath: config.configPath
+    });
     console.log(`memsphere view running at http://${host}:${actualPort}`);
     console.log(`memoryRoot: ${config.memoryRoot}`);
     console.log(`reviewsRoot: ${config.reviewsRoot}`);
-    console.log("Press Ctrl+C to stop.");
   });
+
+  const close = async () => {
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    await clearViewServiceState(statePath, process.pid);
+  };
+  process.once("SIGTERM", () => void close());
+  process.once("SIGINT", () => void close());
 }
 
 export function createViewServer(config: MemsphereConfig) {
@@ -83,20 +141,6 @@ export function createViewServer(config: MemsphereConfig) {
       sendJson(response, 500, { error: message });
     }
   });
-}
-
-function parsePort(value: string | undefined): number {
-  if (!value) {
-    return 0;
-  }
-
-  const port = Number(value);
-
-  if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    throw new Error(`invalid port: ${value}`);
-  }
-
-  return port;
 }
 
 async function handleRequest(request: IncomingMessage, response: ServerResponse, config: MemsphereConfig): Promise<void> {

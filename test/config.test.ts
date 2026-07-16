@@ -22,6 +22,27 @@ test("readConfigAt defaults archiveRoot within the scope", async () => {
     const config = await readConfigAt(configPath);
 
     assert.equal(config.archiveRoot, join(dir, "archives"));
+    assert.deepEqual(config.view, { host: "127.0.0.1", port: 0 });
+  });
+});
+
+test("readConfigAt resolves View service configuration", async () => {
+  await withTempDir(async (dir) => {
+    const configPath = join(dir, "config.json");
+    await writeFile(configPath, JSON.stringify({ memoryRoot: "memory", view: { host: "0.0.0.0", port: 30002 } }));
+
+    const config = await readConfigAt(configPath);
+
+    assert.deepEqual(config.view, { host: "0.0.0.0", port: 30002 });
+  });
+});
+
+test("readConfigAt rejects an invalid View service port", async () => {
+  await withTempDir(async (dir) => {
+    const configPath = join(dir, "config.json");
+    await writeFile(configPath, JSON.stringify({ memoryRoot: "memory", view: { host: "127.0.0.1", port: 65536 } }));
+
+    await assert.rejects(readConfigAt(configPath));
   });
 });
 

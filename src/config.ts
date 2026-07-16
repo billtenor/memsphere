@@ -8,7 +8,11 @@ const configSchema = z.object({
   memoryRoot: z.string().min(1),
   reviewsRoot: z.string().min(1).optional(),
   runsRoot: z.string().min(1).optional(),
-  archiveRoot: z.string().min(1).optional()
+  archiveRoot: z.string().min(1).optional(),
+  view: z.object({
+    host: z.string().min(1),
+    port: z.number().int().min(0).max(65535)
+  }).optional()
 });
 
 type MemsphereConfigFile = z.infer<typeof configSchema>;
@@ -20,6 +24,10 @@ export type MemsphereConfig = {
   reviewsRoot: string;
   runsRoot: string;
   archiveRoot: string;
+  view: {
+    host: string;
+    port: number;
+  };
 };
 
 export const defaultConfigPath = join(homedir(), ".memsphere", "config.json");
@@ -92,7 +100,8 @@ export async function readConfigAt(configPath: string): Promise<MemsphereConfig>
     memoryRoot: resolveConfigPath(config.memoryRoot, scopeRoot),
     reviewsRoot: resolveConfigPath(config.reviewsRoot ?? "reviews", scopeRoot),
     runsRoot: resolveConfigPath(config.runsRoot ?? "runs", scopeRoot),
-    archiveRoot: resolveConfigPath(config.archiveRoot ?? "archives", scopeRoot)
+    archiveRoot: resolveConfigPath(config.archiveRoot ?? "archives", scopeRoot),
+    view: config.view ?? { host: "127.0.0.1", port: 0 }
   };
 }
 
