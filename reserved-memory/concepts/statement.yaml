@@ -4,12 +4,50 @@ names:
   - 陈述记忆
   - "!statement"
 defines:
-  - memsphere 中用于表达可被核查的事实、规则或约束的记忆实体。
-  - 用于让记忆库明确哪些内容应当成立或被验证，不用于定义术语，也不用于描述结构模板。
-  - Statement 通过 asserts 列出必须成立的断言；应用一份 Memory 时，其中全部断言都具有约束力。
+  - memsphere 中用于表达可被核查的事实、规则、约束和建议的 Memory。
+  - Statement 通过 asserts 列出必须成立的断言，通过可选的 suggests 列出执行时可以参考但不强制满足的建议。
+  - Statement 不用于解释领域术语，也不用于定义文档或数据结构；这些内容分别由 Concept 和 Schema 表达。
   - !statement
     asserts:
       - asserts 中的每一项都必须独立成立，列表成员不是候选项或建议项。
       - 一项断言不得因为同一 Memory 中存在文本定义或 Schema 而被忽略。
       - 断言与用户输入冲突时，Agent 不得静默改写输入或继续生成违反断言的产物。
       - 无法判断断言是否成立时，Agent 应取得必要信息，而不是把未知当作成立。
+      - suggests 不得削弱、替代或覆盖任何 asserts。
+  - !schema
+    format: outline
+    asserts:
+      - 根节点必须使用 !statement 标签，不得使用独立的 type 字段。
+      - 顶层 Statement 的 names 必须是非空字符串数组，首项为规范名称。
+      - asserts 必须是至少包含一项非空字符串的数组；suggests 是可选的字符串数组。
+    fields:
+      - !schema
+        names:
+          - names
+        element_types:
+          - string
+        defines:
+          - Statement 的规范名称与别名，首项为规范名称。
+      - !schema
+        names:
+          - defines
+        element_types:
+          - string
+          - Statement
+          - Schema
+        defines:
+          - Statement 的文本定义，以及用于补充其规则或结构的匿名嵌套记忆实体。
+      - !schema
+        names:
+          - asserts
+        element_types:
+          - string
+        defines:
+          - 必须成立或需要被验证的事实、规则和约束。
+      - !schema
+        names:
+          - suggests
+        element_types:
+          - string
+        defines:
+          - 可选，执行时可以参考但不强制满足的建议。

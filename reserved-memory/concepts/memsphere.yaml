@@ -3,8 +3,8 @@ names:
   - Memsphere
   - memsphere
 defines:
-  - 面向 Agent 的记忆管理系统，用统一的 Memory 表达可复用概念、规则、结构和流程。
-  - memsphere Skill 是 Agent 的统一入口，负责启动、发现和路由；Memory 是知识和流程的事实来源；CLI 提供稳定的发现、读取、校验和运行能力。
-  - Agent 通过 memsphere memory list 发现当前 scope 可用的 Memory，通过 memsphere memory read 读取完整 Memory，而不依赖 Memory 当前存储为文件还是其他后端。
-  - 预置记忆在 init 阶段经用户确认后安装到标准 Memory Store；实际使用时，Agent 不区分一份 Memory 是预置安装还是用户创建。
-  - 查询和解释任务读取相关 Concept、Statement 或 Schema；需要执行可重复流程时读取对应 Procedure，并由 memsphere Run 推进。
+  - memsphere 定义了一套维护、检索和遵循 Memory 的框架，使 Agent 能够复用当前工程积累的概念、陈述、流程和图式。
+  - memsphere Skill 提供与预置 Memory 一致的快速入口和冗余摘要；Memory 承载完整知识与流程，CLI 提供稳定的发现、读取和 Run 执行能力。
+  - Agent 通过 memsphere memory list 发现当前工程可用的 Memory，通过 memsphere memory read 读取完整 Memory，而不依赖 Memory 当前使用文件还是其他存储后端。
+  - memsphere init 由用户执行，并安装或更新当前工程的预置 Memory；实际使用时，Agent 不区分一份 Memory 是预置安装还是用户创建。
+  - 需要遵循 Memory 完成任务时，Agent 必须先选择适用的 Procedure；没有专用 Procedure 时使用通用流程，再根据当前步骤按需读取 Concept、Statement 和 Schema。

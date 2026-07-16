@@ -43,6 +43,7 @@ test("bundled reserved memory contains a valid self-bootstrap chain", async () =
     "Statement",
     "Schema",
     "Procedure",
+    "Procedure entity schema",
     "Memory 访问规则",
     "Memory 解读与应用规则",
     "基于 Memory 完成任务流程",

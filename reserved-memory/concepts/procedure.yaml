@@ -4,9 +4,63 @@ names:
   - 程序性记忆
   - 流程
 defines:
-  - 可被重复执行的、声明式描述的工作流程。
-  - 它定义要达成的目标，以及为达成目标而安排的有序步骤、分支、循环或对子流程的调用。
-  - Procedure 的 asserts 声明选择和执行整个流程时必须满足的全局约束；Action 的 asserts 只约束所属步骤。
-  - 每个可执行步骤应产生明确的产物；步骤可由 agent 或 human 执行。
-  - 同一个 Procedure 可以被多次执行，每次执行形成相互独立的 Run。
-  - Agent 应通过 memsphere CLI 读取 Procedure，并通过 Run 按系统返回的当前步骤推进，不应脱离流程一次性猜测后续步骤。
+  - memsphere 中用于描述一个任务从开始到结束如何执行的 Memory。
+  - Procedure 通过 goals 描述目标，通过 asserts 声明全局约束，通过 flow 安排有序 Action、分支、循环和对子流程的调用。
+  - 同一个 Procedure 可以被多次执行，每次执行形成相互独立的 Run；Run 记录当前步骤、步骤产物和最终交付物。
+  - !statement
+    asserts:
+      - 需要使用 memsphere 遵循 Memory 完成任务时，必须先选择并完整读取适用的 Procedure。
+      - 存在适用的专用 Procedure 时必须优先使用；没有适用的专用 Procedure 时使用通用流程。
+      - Agent 必须使用 memsphere run start 启动 Procedure，并只执行 CLI 当前返回的步骤，不得提前执行尚未返回的步骤。
+      - CLI 返回的 Procedure Asserts 是当前调用链中持续生效的全局约束，Asserts 是当前步骤必须满足的要求，Suggests 是执行时可以参考但不强制满足的建议。
+      - CLI 返回的 Actor 表示步骤由 agent 还是 human 执行，Do 或 Ask human to do 表示当前动作，Details 提供补充上下文，Artifact 规定步骤产物及其格式，Then 给出下一条命令。
+      - 每个 Action 都必须产生明确的 Artifact；Actor 为 human 时，Agent 必须等待 human 提供结果后再上报和继续。
+      - 短内容使用 memsphere run report 的 --artifact 上报，文件产物使用 --artifact-file 上报；Schema 产物必须按照 Then 提示进入 Schema 填写流程。
+      - 完成当前步骤后，必须按照 CLI 返回的 Then 命令上报 Artifact；Run 显示 done 后才能汇报流程完成和最终产物。
+  - !schema
+    format: outline
+    asserts:
+      - 根节点必须使用 !procedure 标签，不得使用独立的 type 字段。
+      - 顶层 Procedure 的 names 必须是非空字符串数组，首项为规范名称。
+      - flow 中的结构化值必须使用已注册的 YAML tag。
+    fields:
+      - !schema
+        names:
+          - names
+        element_types:
+          - string
+        defines:
+          - Procedure 的规范名称与别名，首项为规范名称。
+      - !schema
+        names:
+          - defines
+        element_types:
+          - string
+          - Statement
+          - Schema
+        defines:
+          - Procedure 的含义、用途和适用边界。
+      - !schema
+        names:
+          - asserts
+        element_types:
+          - string
+        defines:
+          - 可选，选择和执行整个 Procedure 时持续生效的全局约束。
+      - !schema
+        names:
+          - goals
+        element_types:
+          - string
+        defines:
+          - Procedure 要达成的目标。
+      - !schema
+        names:
+          - flow
+        element_types:
+          - Action
+          - If
+          - While
+          - Call
+        defines:
+          - 由 Action、If、While 或 Call 组成的有序执行流程。

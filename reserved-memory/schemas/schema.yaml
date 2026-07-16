@@ -4,7 +4,7 @@ names:
   - "!schema 编写模板"
 format: outline
 defines:
-  - 描述 memsphere !schema 记忆实体的合法结构。
+  - 定义 memsphere !schema Memory 的合法内容结构和字段要求。
 asserts:
   - 根节点必须使用 !schema 标签，不得使用独立的 type 字段。
   - names 必须是非空字符串数组，首项为规范名称。
@@ -12,7 +12,7 @@ asserts:
   - defines 可以包含字符串、!statement 或 !schema；嵌套结构必须携带 YAML tag。
   - fields 如出现，可以包含表示最简字段名的字符串，或带 !schema tag 的详细字段。
   - element_types 如出现，必须是非空且不重复的元素类型列表，用于表达 List<T>。
-  - format 为 table 时，element_types 必须为 Schema，fields 必须定义至少一列。
+  - format 为 table 时，element_types 必须为 [Schema]，fields 必须定义至少一列。
   - fields 中的 !schema 必须具有非空 names；defines 中的匿名 !schema 可以省略 names，但必须包含有意义的结构。
 fields:
   - !schema
@@ -37,7 +37,7 @@ fields:
       - Statement
       - Schema
     defines:
-      - 对结构语义的文本说明，以及用于补充规则或结构的匿名 Statement、Schema。
+      - 对结构语义的文本说明，以及用于补充规则或结构的匿名 Statement、Schema；全部成员共同生效。
   - !schema
     names:
       - asserts

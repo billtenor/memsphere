@@ -4,15 +4,15 @@ names:
   - 人工构建程序性记忆流程
   - dialogic-procedure-construction
 defines:
-  - 通过人工主动发起与 agent 的对话，把 human 已经掌握或可以描述的流程经验逐步构建为结构严谨、可验证的 !procedure 记忆。
-  - 该流程作为通用预置记忆随 memsphere 提供，供用户按需导入自己的 memory store。
-  - 该流程暂不覆盖 agent 自主发现流程、从代码或文档反推流程、或从多轮实践中归纳流程的 procedure 构建方式。
-  - 该流程先产出边界、目标、原始经验、原子步骤和审查结果，再生成最终 YAML，避免直接把自然语言说明写成不可运行的 procedure。
+  - 通过 human 主动发起与 Agent 的对话，把 human 已经掌握或可以描述的流程经验逐步构建为结构严谨、可验证的 !procedure Memory。
+  - 该流程作为预置 Memory 由 memsphere init 安装或更新，实际使用时与其他已安装 Memory 一样通过标准 CLI 发现和读取。
+  - 该流程暂不覆盖 Agent 自主发现流程、从代码或文档反推流程、或从多轮实践中归纳流程的 Procedure 构建方式。
+  - 该流程先产出边界、目标、原始经验、原子步骤和审查结果，再生成最终 YAML，避免直接把自然语言说明写成不可运行的 Procedure。
 goals:
-  - 明确待构建 procedure 的调用场景、目标、边界和最终交付物。
-  - 将 human 的经验描述拆解为有序、可执行、带 artifact 的流程步骤。
-  - 显式识别 human 判断、agent 动作、分支条件、循环条件和可复用 !call。
-  - 在生成 YAML 前完成严谨性审查，降低 procedure 逻辑不清、步骤过粗或 artifact 缺失的风险。
+  - 明确待构建 Procedure 的调用场景、目标、边界和最终交付物。
+  - 将 human 的经验描述拆解为有序、可执行、带 Artifact 的流程步骤。
+  - 显式识别 human 判断、Agent 动作、分支条件、循环条件和可复用 !call。
+  - 在生成 YAML 前完成严谨性审查，降低 Procedure 逻辑不清、步骤过粗或 Artifact 缺失的风险。
   - 生成符合 memsphere 语法约束并可通过 validate 的 !procedure YAML。
 flow:
   - !action
@@ -49,7 +49,7 @@ flow:
       name: 流程定位摘要
       format: markdown
   - !action
-    action: 整理 procedure 边界草稿，必须包含候选名称、defines、goals、适用场景、非适用场景、最终交付物和暂不处理的问题。
+    action: 整理 Procedure 边界草稿，必须包含候选名称、defines、asserts、goals、适用场景、非适用场景、最终交付物和暂不处理的问题。
     actor: agent
     artifact: !artifact
       name: procedure 边界草稿
@@ -81,7 +81,7 @@ flow:
       name: 最终交付物期望
       format: markdown
   - !action
-    action: 将最终交付物期望整理为 artifact 名称、格式和验收标准。
+    action: 将最终交付物期望整理为 Artifact 名称、格式和验收标准。
     actor: agent
     artifact: !artifact
       name: 最终 artifact 定义
@@ -119,7 +119,7 @@ flow:
       name: 候选步骤清单
       format: markdown
   - !action
-    action: 将候选步骤拆分为原子动作，确保每个动作都有 action、actor 和 artifact。
+    action: 将候选步骤拆分为原子 Action，确保每个 Action 都有 action、actor 和 artifact，并把强制步骤约束与非强制建议分别整理为 asserts 和 suggests。
     actor: agent
     artifact: !artifact
       name: 原子步骤草稿
@@ -151,13 +151,13 @@ flow:
           name: 更新后的原子步骤草稿
           format: markdown
   - !action
-    action: 基于原子步骤草稿生成结构化流程草稿，必须把条件判断映射为 !if.condition，把重复动作映射为 !while，把可复用子流程映射为 !call，并确保每个普通步骤都有 action、actor 和 artifact。
+    action: 基于原子步骤草稿生成结构化流程草稿，必须把条件判断映射为 !if.condition，把重复动作映射为 !while，把可复用子流程映射为 !call，并确保每个普通步骤都是带 action、actor 和 artifact 的 !action；步骤约束和非强制建议分别按需写入 asserts 和 suggests。
     actor: agent
     artifact: !artifact
       name: 结构化流程草稿
       format: yaml
   - !action
-    action: "审查结构化流程草稿是否满足每个普通步骤都有 artifact、每个条件输出 boolean、human 判断显式标注 actor: human。"
+    action: "审查结构化流程草稿是否满足跨步骤约束写入 Procedure asserts、步骤约束写入 Action asserts、每个 Action 都有 Artifact、每个条件输出 boolean、human 判断显式标注 actor: human。"
     actor: agent
     artifact: !artifact
       name: 结构化流程严谨性审查结果
@@ -204,19 +204,19 @@ flow:
           name: 结构化流程通过审查确认
           format: string
   - !action
-    action: 根据边界草稿、最终 artifact 定义和结构化流程草稿生成完整 !procedure YAML。
+    action: 根据边界草稿、最终 Artifact 定义和结构化流程草稿生成包含 names、defines、可选 asserts、goals 和 flow 的完整 !procedure YAML。
     actor: agent
     artifact: !artifact
       name: 最终 !procedure YAML
       format: yaml
   - !action
-    action: 将初版最终 !procedure YAML 写入 memoryRoot 的 procedures 目录，使 memsphere view 可以监控到该 procedure 并支持 human review。
+    action: 将初版最终 !procedure YAML 写入 memoryRoot 的 procedures 目录，使 memsphere View 可以读取该 Procedure 并支持 human review。
     actor: agent
     artifact: !artifact
       name: 写入后的初版 procedure memory 文件
       format: yaml
   - !action
-    action: 对写入初版后的 memory store 运行 memsphere validate，确认该 procedure 已进入 memory 目录且语法有效。
+    action: 对写入初版后的 Memory Store 运行 memsphere validate，确认该 Procedure 已进入 memory 目录且语法有效。
     actor: agent
     artifact: !artifact
       name: 初版写入后校验结果
@@ -248,8 +248,15 @@ flow:
           name: 调整后写回的 procedure memory 文件
           format: yaml
       - !action
-        action: 对调整后写回的 memory store 重新运行 memsphere validate。
+        action: 对调整后写回的 Memory Store 重新运行 memsphere validate。
         actor: agent
         artifact: !artifact
           name: 调整后重新校验结果
           format: markdown
+  - !action
+    action: 汇总最终 Procedure Memory 的文件路径和最近一次校验结果，面向 human 说明构建完成情况。
+    actor: agent
+    artifact: !artifact
+      name: Procedure 构建结果
+      format: string
+      final: true

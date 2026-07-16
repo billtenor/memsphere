@@ -4,7 +4,7 @@ names:
   - 图式记忆
   - "!schema"
 defines:
-  - memsphere 中用于描述文档、数据或协作产物结构的记忆实体。
+  - memsphere 中用于定义文档、数据或协作产物的内容结构和呈现格式的 Memory。
   - 用于让协作者按共同的结构填写或验证产物，不用于表达领域术语或独立事实。
   - fields 共同定义产物包含的字段；字段是结构要求，不是可以任意选择的示例项。
   - format 描述 Schema 实例最终如何呈现；当前支持 outline 和 table，省略时按照 outline 理解。
@@ -15,3 +15,52 @@ defines:
       - Schema 的 asserts 是对实例内容和结构的附加约束，必须与 fields 和 format 一并满足。
       - 字符串 field 只提供字段名称；嵌套 !schema 用于继续描述该字段的子结构或约束。
       - element_types 表示 Schema 描述的是列表，列出的类型是允许的列表元素类型；它不改变 format 的呈现语义。
+  - !schema
+    format: outline
+    asserts:
+      - 根节点必须使用 !schema 标签，不得使用独立的 type 字段。
+      - 顶层 Schema 的 names 必须是非空字符串数组，首项为规范名称。
+    fields:
+      - !schema
+        names:
+          - names
+        element_types:
+          - string
+        defines:
+          - Schema 的规范名称与别名，首项为规范名称。
+      - !schema
+        names:
+          - defines
+        element_types:
+          - string
+          - Statement
+          - Schema
+        defines:
+          - Schema 的文本定义，以及用于补充其规则或结构的匿名嵌套记忆实体。
+      - !schema
+        names:
+          - format
+        defines:
+          - 可选，Schema 实例的最终呈现形态；只能是 outline 或 table，省略时按 outline 理解。
+      - !schema
+        names:
+          - asserts
+        element_types:
+          - string
+        defines:
+          - 可选，实例内容和结构必须满足的附加约束。
+      - !schema
+        names:
+          - element_types
+        element_types:
+          - string
+        defines:
+          - 可选，Schema 描述的列表允许包含的元素类型。
+      - !schema
+        names:
+          - fields
+        element_types:
+          - string
+          - Schema
+        defines:
+          - 可选，由最简字段名或嵌套 !schema 组成的子结构。

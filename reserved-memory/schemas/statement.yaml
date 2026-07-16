@@ -4,12 +4,13 @@ names:
   - "!statement 编写模板"
 format: outline
 defines:
-  - 描述 memsphere !statement 记忆实体的合法结构。
+  - 定义 memsphere !statement Memory 的合法内容结构和字段要求。
 asserts:
   - 根节点必须使用 !statement 标签，不得使用独立的 type 字段。
   - names 必须是非空字符串数组，首项为规范名称。
   - defines 可以包含字符串、!statement 或 !schema；嵌套结构必须携带 YAML tag。
   - asserts 必须是非空的可核查断言数组。
+  - suggests 是可选的字符串数组，并且不得削弱或替代 asserts。
 fields:
   - !schema
     names:
@@ -26,7 +27,7 @@ fields:
       - Statement
       - Schema
     defines:
-      - 对陈述主题的文本说明，以及用于补充规则或结构的匿名 Statement、Schema。
+      - 对陈述主题的文本说明，以及用于补充规则或结构的匿名 Statement、Schema；全部成员共同生效。
   - !schema
     names:
       - asserts
@@ -34,3 +35,10 @@ fields:
       - string
     defines:
       - 必须成立或需要被验证的事实、规则或约束。
+  - !schema
+    names:
+      - suggests
+    element_types:
+      - string
+    defines:
+      - 可选，执行时可以参考但不强制满足的建议。

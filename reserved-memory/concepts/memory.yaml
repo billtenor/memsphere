@@ -6,7 +6,7 @@ names:
 defines:
   - memsphere 中为了跨越单次对话或运行而被有意沉淀，并可供 agent 重复理解、引用或执行的语义实体。
   - Memory 是各种具体记忆类型的抽象上位概念。
-  - Concept、Statement、Schema 和 Procedure 是 memsphere 当前提供的具体记忆类型。
+  - Concept、Statement、Procedure 和 Schema 是 memsphere 当前提供的四种具体 Memory 类型。
   - 一段信息只有在被有意沉淀以供后续复用时，才成为 Memory；单次任务产物、临时对话或运行状态不会因此自动成为 Memory。
-  - CLI 读取 Memory 时会返回 YAML；在当前这份文档中，开头的 !concept 表示它是一份 Concept，names 给出规范名称和别名，defines 中的全部成员共同解释 Memory。其他记忆应继续按照各自具体类型理解。
-  - 初次理解 memsphere 时，接下来依次读取 Memsphere、Concept、Statement、Schema、Procedure、Memory 访问规则和 Memory 解读与应用规则。
+  - memsphere 使用带 YAML tag 的 mapping 描述 Memory；根节点 tag 表示具体 Memory 类型，names 的首项是规范名称，其余项是别名，defines 中的全部成员共同定义该 Memory。
+  - 初次理解 memsphere 时，应从 Memory 开始，依次读取 Concept、Statement、Procedure 和 Schema。

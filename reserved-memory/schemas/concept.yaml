@@ -4,7 +4,7 @@ names:
   - "!concept 编写模板"
 format: outline
 defines:
-  - 描述 memsphere !concept 记忆实体的合法结构。
+  - 定义 memsphere !concept Memory 的合法内容结构和字段要求。
 asserts:
   - 根节点必须使用 !concept 标签，不得使用独立的 type 字段。
   - names 必须是非空字符串数组，首项为规范名称。
@@ -26,7 +26,7 @@ fields:
       - Statement
       - Schema
     defines:
-      - 对概念语义的文本定义，以及用于补充规则或结构的匿名 Statement、Schema。
+      - 对概念语义的文本定义，以及用于补充规则或结构的匿名 Statement、Schema；全部成员共同生效。
   - !schema
     names:
       - extends
