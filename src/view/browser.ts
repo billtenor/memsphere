@@ -181,9 +181,10 @@ export const browserHtml = String.raw`<!doctype html>
     .markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 12px; background: #e9ece6; border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; }
     .markdown-body pre { margin: 8px 0; background: #e9ece6; border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; overflow-x: auto; }
     .markdown-body pre code { background: none; border: 0; padding: 0; white-space: pre; }
-    .markdown-body table { border-collapse: collapse; display: block; overflow-x: auto; margin: 8px 0; }
-    .markdown-body th, .markdown-body td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; }
-    .markdown-body th { background: #e9ece6; }
+    .markdown-table-scroll { max-width: 100%; overflow-x: auto; margin: 8px 0; }
+    .markdown-body table { width: max-content; min-width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); }
+    .markdown-body th, .markdown-body td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; white-space: nowrap; }
+    .markdown-body th { background: #f3f5f0; font-weight: 700; }
     .markdown-body img { max-width: 100%; height: auto; }
     .markdown-body hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
     .action-contracts { display: grid; gap: 6px; margin-top: 8px; }

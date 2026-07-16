@@ -680,6 +680,7 @@ function createMarkdownRenderer(): MarkdownIt {
     linkify: false,
     breaks: true
   });
+  renderer.enable(["table"]);
   renderer.validateLink = (url: string) => /^(https?:|mailto:)/i.test(url.trim());
   const defaultLinkOpen = renderer.renderer.rules.link_open;
   renderer.renderer.rules.link_open = (tokens, index, options, env, self) => {
@@ -688,6 +689,20 @@ function createMarkdownRenderer(): MarkdownIt {
     return defaultLinkOpen
       ? defaultLinkOpen(tokens, index, options, env, self)
       : self.renderToken(tokens, index, options);
+  };
+  const defaultTableOpen = renderer.renderer.rules.table_open;
+  renderer.renderer.rules.table_open = (tokens, index, options, env, self) => {
+    const table = defaultTableOpen
+      ? defaultTableOpen(tokens, index, options, env, self)
+      : self.renderToken(tokens, index, options);
+    return `<div class="markdown-table-scroll">${table}`;
+  };
+  const defaultTableClose = renderer.renderer.rules.table_close;
+  renderer.renderer.rules.table_close = (tokens, index, options, env, self) => {
+    const table = defaultTableClose
+      ? defaultTableClose(tokens, index, options, env, self)
+      : self.renderToken(tokens, index, options);
+    return `${table}</div>`;
   };
   return renderer;
 }
