@@ -37,7 +37,11 @@ export async function initCommand(options: InitOptions): Promise<void> {
       memoryRoot: memoryRootConfigValue,
       reviewsRoot: reviewsRootConfigValue,
       runsRoot: runsRootConfigValue,
-      archiveRoot: archiveRootConfigValue
+      archiveRoot: archiveRootConfigValue,
+      view: {
+        host: "127.0.0.1",
+        port: 3000
+      }
     },
     {
       configPath,
