@@ -109,6 +109,8 @@ ln -s -- "$memsphere_bin" "$bin_dir/memsphere"
   printf 'memsphere_version=%s\n' "$("$memsphere_bin" --version)"
 } >"$metadata_file"
 
+printf 'Codex run directory: %s\n' "$run_dir" >&2
+
 if $dry_run; then
   printf 'Prepared Codex dry run: %s\n' "$run_dir" >&2
   printf '%s\n' "$run_dir"

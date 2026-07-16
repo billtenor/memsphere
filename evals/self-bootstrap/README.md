@@ -10,6 +10,8 @@
 evals/
 ├── README.md
 ├── prepare-case.sh
+├── prepare-cases.sh
+├── run-cases.sh
 ├── run-codex-agent.sh
 ├── run-traex-agent.sh
 └── self-bootstrap/
@@ -29,6 +31,8 @@ evals/
 - `evaluation.md`：仅供父 agent 使用的参考答案和评分标准，绝不能复制到子 agent 的工作区。
 - `fixtures/`：可选目录；其中 `.memsphere/` 复制到临时 trial 根目录，其他内容复制到 Agent workspace。
 - `prepare-case.sh`：生成与 agent 无关的基线工程和提示词，并安装预置 Memory 与统一 memsphere Skill。
+- `prepare-cases.sh`：一次选择并准备多个 case；未指定 case 时准备当前 suite 的全部 case。
+- `run-cases.sh`：用指定 Agent 并行运行一批已准备的 case，并汇总结果路径与退出码。
 - `run-codex-agent.sh`：从基线复制独立 workspace，启动一个干净的 Codex 子 agent，并保留执行证据。
 - `run-traex-agent.sh`：从同一类基线复制独立 workspace，启动一个干净的 TraeX 子 agent，并保留执行证据。
 - 后续接入其他 agent 时，为其增加独立 runner；case、fixture 和基线准备逻辑保持不变。
@@ -81,6 +85,22 @@ TRIAL="$(./evals/prepare-case.sh self-bootstrap/001-create-bookkeeping-entry)"
 ./evals/run-traex-agent.sh --model gemini-3-flash "$TRIAL"
 ```
 
+准备并并行运行整个测试组：
+
+```bash
+BATCH="$(./evals/prepare-cases.sh self-bootstrap)"
+./evals/run-cases.sh --agent traex --model gemini-3-flash "$BATCH"
+```
+
+只运行指定 case：
+
+```bash
+BATCH="$(./evals/prepare-cases.sh self-bootstrap \
+  001-create-bookkeeping-entry \
+  002-request-missing-bookkeeping-data)"
+./evals/run-cases.sh --agent traex --model gemini-3-flash "$BATCH"
+```
+
 准备脚本和 agent runner 默认从 `PATH` 中查找 `memsphere`，runner 分别从 `PATH` 中查找 `codex` 或 `traex`。runner 会把选中的 memsphere CLI 注入隔离运行环境。也可以通过 `MEMSPHERE_BIN`、`CODEX_BIN`、`CODEX_MODEL`、`TRAEX_BIN` 和 `TRAEX_MODEL` 覆盖。
 
 脚本会打印结果目录，并有意将其保留在 `/tmp` 下，供父 agent 检查：
@@ -109,8 +129,4 @@ runs/
     final-answer.md
 ```
 
-## 当前过渡状态
-
-基线只安装统一的 `memsphere` Skill，不安装旧的 `memsphere-edit`、`memsphere-review` 或 `memsphere-run`。`memsphere memory list` 和 `memsphere memory read` 已经实现；当前剩余前置条件是让 `init` 经用户确认后把自举所需的预置 Memory 安装到标准 Memory Store。现有 `init` 仍只准备独立的待导入区，因此在该安装流程完成或由验收基线显式模拟安装前，不能正式判定本组自举 case。
-
-后续将为 runner 增加完整 Skill 与只保留启动内核的两种模式，用同一组 case 分别验证快速使用能力和纯 Memory 自举能力。
+基线只安装统一的 `memsphere` Skill，不安装旧的 `memsphere-edit`、`memsphere-review` 或 `memsphere-run`。后续将为 runner 增加完整 Skill 与只保留启动内核的两种模式，用同一组 case 分别验证快速使用能力和纯 Memory 自举能力。
