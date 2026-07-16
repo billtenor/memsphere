@@ -1,5 +1,6 @@
 import { readConfig } from "../config.js";
 import {
+  activeProcedureAsserts,
   type ArtifactReportSource,
   currentFrame,
   currentStep,
@@ -29,7 +30,7 @@ export async function runStartCommand(procedureName: string): Promise<void> {
     runsRoot: config.runsRoot,
     procedureName
   });
-  printNext(run);
+  printRunState(run);
 }
 
 export async function runReportCommand(options: ReportOptions): Promise<void> {
@@ -41,7 +42,7 @@ export async function runReportCommand(options: ReportOptions): Promise<void> {
     runId,
     artifact
   });
-  printNext(run);
+  printRunState(run);
 }
 
 export async function runEnterSchemaCommand(schemaName: string | undefined, options: RunIdOptions): Promise<void> {
@@ -53,13 +54,13 @@ export async function runEnterSchemaCommand(schemaName: string | undefined, opti
     runId,
     schemaName
   });
-  printNext(run);
+  printRunState(run);
 }
 
 export async function runStatusCommand(options: RunIdOptions): Promise<void> {
   const config = await readConfig();
   if (options.run) {
-    printNext(await readRun(config.runsRoot, options.run));
+    printRunState(await readRun(config.runsRoot, options.run));
     return;
   }
 
@@ -92,7 +93,7 @@ function requireRunId(value: string | undefined): string {
   return runId;
 }
 
-function printNext(run: RunState): void {
+export function printRunState(run: RunState): void {
   console.log(`run ${run.id}`);
 
   if (run.status === "done") {
@@ -111,6 +112,13 @@ function printNext(run: RunState): void {
   if (!frame || !step || !step.artifact || !step.format) {
     console.log("done");
     return;
+  }
+
+  const procedureAsserts = activeProcedureAsserts(run);
+  if (procedureAsserts.length) {
+    console.log("");
+    console.log("Procedure Asserts:");
+    for (const value of procedureAsserts) console.log(`- ${value}`);
   }
 
   console.log("");

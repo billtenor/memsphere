@@ -176,6 +176,8 @@ Procedure flow 节点只能出现在 flow 中：
 - `!action`、`!if`、`!while` 和 `!call` 不能出现在 `defines` 或 `fields` 中。
 - `!statement` 和 `!schema` 不能作为 Procedure flow 节点，除非未来标准明确增加这种能力。
 
+`Procedure.asserts` 是可选的非空 `List<string>`，用于声明选择和执行整个流程时持续生效的全局约束。`Action.asserts` 只约束所属步骤，不能替代 Procedure 级断言。
+
 ## 递归 If 与 Elseif
 
 `condition`、`then`、`elseif` 和 `else` 都是 If 的字段。`elseif` 不是 List，也不对应独立的 ElseIf 类型；它的字段类型仍然是 If。

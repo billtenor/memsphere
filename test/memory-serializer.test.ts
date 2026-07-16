@@ -54,6 +54,7 @@ const entities: MemoryEntity[] = [
     tag: "!procedure",
     names: ["Nested procedure"],
     defines: [],
+    asserts: ["Global procedure contracts survive."],
     goals: ["Exercise every flow tag."],
     flow: [
       {

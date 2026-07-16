@@ -105,6 +105,8 @@ names:
   - DebugIssue
 defines:
   - 从异常现象中定位最可能的根因，并给出可验证的修复方向。
+asserts:
+  - 诊断结论必须由可核查的证据支持。
 goals:
   - 找到最可能的根因。
 flow:
@@ -148,7 +150,7 @@ flow:
     target: SummarizeFix
 ```
 
-`flow` has type `List<Action | If | While | Call>`. An Action always contains `artifact: !artifact`. If and While conditions are Actions whose artifact format is `boolean`. `elseif` is an optional single nested `!if`, not a list, and only the root If in a chain may contain `else`.
+Procedure `asserts` are global constraints that remain active throughout the Run. Action `asserts` apply only to their own step. `flow` has type `List<Action | If | While | Call>`. An Action always contains `artifact: !artifact`. If and While conditions are Actions whose artifact format is `boolean`. `elseif` is an optional single nested `!if`, not a list, and only the root If in a chain may contain `else`.
 
 ### Concept
 

@@ -238,6 +238,7 @@ export const procedureMemorySchema: z.ZodType<ProcedureMemory, z.ZodTypeDef, unk
     tag: z.literal("!procedure"),
     names: namesSchema,
     defines: definesSchema,
+    asserts: z.array(nonEmptyString).min(1).optional(),
     goals: stringArray,
     flow: z.array(flowNodeSchema).default([])
   }).strict()

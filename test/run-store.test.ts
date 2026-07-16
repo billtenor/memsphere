@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { memoryKinds } from "../src/memory/kinds.js";
-import { artifactSchemaName, enterSchema, finalArtifacts, readRun, reportRun, startRun } from "../src/run/store.js";
+import { activeProcedureAsserts, artifactSchemaName, enterSchema, finalArtifacts, readRun, reportRun, startRun } from "../src/run/store.js";
 import { validateMemoryStore } from "../src/validation.js";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
@@ -19,6 +19,8 @@ async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
 
 const validProcedure = `!procedure
 names: [target-procedure]
+asserts:
+  - Keep the procedure contract active.
 flow:
   - !action
     action: Capture result.
@@ -47,7 +49,10 @@ test("startRun skips unrelated invalid procedures when resolving the target proc
 
     assert.equal(run.status, "running");
     assert.equal(run.procedureName, "target-procedure");
+    assert.deepEqual(run.asserts, ["Keep the procedure contract active."]);
     assert.equal(run.stack[0].memoryName, "target-procedure");
+    assert.deepEqual(run.stack[0].asserts, ["Keep the procedure contract active."]);
+    assert.deepEqual(activeProcedureAsserts(run), ["Keep the procedure contract active."]);
     assert.equal(run.stack[0].steps[0].instruction, "Capture result.");
   });
 });
@@ -447,6 +452,7 @@ test("while repeats its body and call automatically enters the child procedure",
 
     await writeFile(join(proceduresRoot, "parent.yaml"), `!procedure
 names: [parent]
+asserts: [Keep the parent contract active.]
 flow:
   - !while
     condition: !action
@@ -465,6 +471,7 @@ flow:
 `);
     await writeFile(join(proceduresRoot, "child.yaml"), `!procedure
 names: [child]
+asserts: [Keep the child contract active.]
 flow:
   - !action
     action: Finish child.
@@ -483,6 +490,10 @@ flow:
     const enteredChild = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "false" } });
     assert.equal(enteredChild.stack.at(-1)?.memoryName, "child");
     assert.equal(enteredChild.stack.at(-1)?.steps[0].artifact, "child result");
+    assert.deepEqual(activeProcedureAsserts(enteredChild), [
+      "Keep the parent contract active.",
+      "Keep the child contract active."
+    ]);
 
     const done = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "done" } });
     assert.equal(done.status, "done");

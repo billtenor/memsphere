@@ -30,14 +30,14 @@ program
 
 program
   .command("init")
-  .description("Create the default config file and memory directory structure.")
+  .description("Create or refresh a memsphere scope and its reserved memory.")
   .option("--global", "initialize the global ~/.memsphere scope")
   .option("--folder <path>", "initialize a specific folder scope at <path>/.memsphere")
   .option("--memory-root <path>", "memory root directory")
   .option("--reviews-root <path>", "review files root directory")
   .option("--runs-root <path>", "run state files root directory")
   .option("--archive-root <path>", "archived review and run root directory")
-  .option("--force", "overwrite the existing config and reinstall reserved memory")
+  .option("--force", "overwrite the existing config")
   .action(initCommand);
 
 program

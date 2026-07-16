@@ -80,6 +80,28 @@ unknown: value
 `), /unknown/);
 });
 
+test("Procedure supports optional global assertions", () => {
+  const entity = parseProcedure(`!procedure
+names: [guarded-procedure]
+asserts:
+  - A more specific Procedure must take precedence.
+flow: []
+`);
+
+  assert.deepEqual(entity.asserts, ["A more specific Procedure must take precedence."]);
+
+  assert.throws(() => parseProcedure(`!procedure
+names: [invalid]
+asserts: []
+flow: []
+`), /asserts/);
+  assert.throws(() => parseProcedure(`!procedure
+names: [invalid]
+asserts: [1]
+flow: []
+`), /asserts/);
+});
+
 test("Action supports contracts and Artifact supports inline Schema and final metadata", () => {
   const entity = parseProcedure(`!procedure
 names: [contracts]

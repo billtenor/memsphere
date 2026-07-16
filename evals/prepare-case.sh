@@ -97,10 +97,21 @@ mkdir -p -- "$workspace_dir" "$setup_home" "$trial_dir/runs"
 HOME="$setup_home" git -C "$workspace_dir" init -q
 
 if [[ -d "$fixtures_dir" ]]; then
-  cp -a -- "$fixtures_dir/." "$workspace_dir/"
+  shopt -s dotglob nullglob
+  fixture_entries=("$fixtures_dir"/*)
+  shopt -u dotglob nullglob
+  for fixture_entry in "${fixture_entries[@]}"; do
+    if [[ "$(basename -- "$fixture_entry")" == ".memsphere" ]]; then
+      [[ -d "$fixture_entry" ]] || die "fixtures/.memsphere must be a directory"
+      mkdir -p -- "$trial_dir/.memsphere"
+      cp -a -- "$fixture_entry/." "$trial_dir/.memsphere/"
+    else
+      cp -a -- "$fixture_entry" "$workspace_dir/"
+    fi
+  done
 fi
 
-HOME="$setup_home" "$memsphere_bin" init --folder "$workspace_dir" >"$setup_log" 2>&1
+HOME="$setup_home" "$memsphere_bin" init --folder "$trial_dir" >"$setup_log" 2>&1
 HOME="$setup_home" "$memsphere_bin" skill init --directory "$workspace_dir/.agents/skills" >>"$setup_log" 2>&1
 
 cat >"$prompt_file" <<'EOF'
@@ -119,6 +130,7 @@ cat -- "$task_file" >>"$prompt_file"
   printf 'created_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'isolation_level=soft\n'
   printf 'trial_dir=%s\n' "$trial_dir"
+  printf 'scope=%s\n' "$trial_dir"
   printf 'baseline_workspace=%s\n' "$workspace_dir"
   printf 'evaluation_file=%s\n' "$evaluation_file"
   printf 'memsphere_bin=%s\n' "$memsphere_bin"

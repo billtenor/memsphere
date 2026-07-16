@@ -87,7 +87,7 @@ memsphere Skill
   -> Procedure
   -> memsphere 类型系统
   -> Action / Artifact / If / While / Call
-  -> Memory Store / 预置安装机制 / Review / Run / Archive / Memsphere Skill
+  -> Memory Store / 预置安装机制 / Review / Run / Archive
   -> memsphere CLI
   -> 实际操作流程
 ```
@@ -167,7 +167,6 @@ memsphere Skill
 - `Review`
 - `Run`
 - `Archive`
-- `Memsphere Skill`
 - `Memsphere CLI`
 
 这一层解释记忆如何被存储、发现、安装、review、执行和归档，以及 agent 如何通过唯一 Skill 与 memsphere 协作。
@@ -578,7 +577,7 @@ memsphere 自举验收流程
 4. 初始化、检查和查看记忆。
 5. 发起并处理 Review。
 6. 启动并推进 Procedure Run。
-7. 说明预置安装机制、Memsphere Skill 和 Archive 的作用。
+7. 说明预置安装机制、唯一 Skill 的入口职责和 Archive 的作用。
 8. 分别使用完整 Skill 和启动内核版本完成一次知识查询和一次 Procedure 操作。
 
 ### 任务验收

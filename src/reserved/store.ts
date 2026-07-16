@@ -32,15 +32,10 @@ export async function ensureReservedMemoryDirectories(root: string): Promise<voi
   }
 }
 
-export async function installReservedMemories(
-  scopeRoot: string,
-  options: { force?: boolean } = {}
-): Promise<string> {
+export async function installReservedMemories(scopeRoot: string): Promise<string> {
   const sourceRoot = bundledReservedMemoryRoot();
   const targetRoot = reservedMemoryRoot(scopeRoot);
-  if (options.force) {
-    await rm(targetRoot, { recursive: true, force: true });
-  }
+  await rm(targetRoot, { recursive: true, force: true });
   await ensureReservedMemoryDirectories(targetRoot);
 
   if (!(await pathExists(sourceRoot))) {
@@ -51,7 +46,7 @@ export async function installReservedMemories(
     const sourceKindRoot = join(sourceRoot, kind);
     const targetKindRoot = join(targetRoot, kind);
     if (!(await pathExists(sourceKindRoot))) continue;
-    await copyMissingFiles(sourceKindRoot, targetKindRoot);
+    await copyReservedFiles(sourceKindRoot, targetKindRoot);
   }
 
   return targetRoot;
@@ -117,19 +112,18 @@ export function assertSafeReservedRelativePath(relativePath: string): void {
   }
 }
 
-async function copyMissingFiles(sourceRoot: string, targetRoot: string): Promise<void> {
+async function copyReservedFiles(sourceRoot: string, targetRoot: string): Promise<void> {
   await mkdir(targetRoot, { recursive: true });
   const entries = await readdir(sourceRoot, { withFileTypes: true });
   for (const entry of entries) {
     const sourcePath = join(sourceRoot, entry.name);
     const targetPath = join(targetRoot, entry.name);
     if (entry.isDirectory()) {
-      await copyMissingFiles(sourcePath, targetPath);
+      await copyReservedFiles(sourcePath, targetPath);
       continue;
     }
     if (!entry.isFile() || ![".yaml", ".yml"].some((suffix) => entry.name.endsWith(suffix))) continue;
     assertInsideDirectory(targetPath, targetRoot);
-    if (await pathExists(targetPath)) continue;
     await mkdir(dirname(targetPath), { recursive: true });
     await copyFile(sourcePath, targetPath);
   }

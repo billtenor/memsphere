@@ -43,10 +43,10 @@ test("bundled reserved memory contains a valid self-bootstrap chain", async () =
     "Statement",
     "Schema",
     "Procedure",
-    "Memsphere Skill",
     "Memory 访问规则",
     "Memory 解读与应用规则",
-    "基于 Memory 完成任务流程"
+    "基于 Memory 完成任务流程",
+    "通用流程"
   ]) {
     assert(names.has(expected), `missing reserved memory: ${expected}`);
   }
@@ -73,7 +73,7 @@ test("init installs reserved memory into the scope root without importing it int
   });
 });
 
-test("reserved memory install does not overwrite existing files", async () => {
+test("reserved memory install rebuilds managed files", async () => {
   await withTempDir(async (dir) => {
     const scopeRoot = join(dir, ".memsphere");
     await installReservedMemories(scopeRoot);
@@ -82,24 +82,39 @@ test("reserved memory install does not overwrite existing files", async () => {
     await writeFile(target, "!concept\nnames: [local reserved]\ndefines: [local edit]\n");
     await installReservedMemories(scopeRoot);
 
-    assert.match(await readFile(target, "utf8"), /local edit/);
+    assert.doesNotMatch(await readFile(target, "utf8"), /local edit/);
   });
 });
 
-test("forced init rebuilds the installed reserved memory cache", async () => {
+test("repeated init preserves config and rebuilds the installed reserved memory cache", async () => {
   await withTempDir(async (dir) => {
-    await initCommand({ folder: dir });
+    await initCommand({ folder: dir, memoryRoot: "custom-memory" });
 
     const scopeRoot = join(dir, ".memsphere");
+    const configPath = join(scopeRoot, "config.json");
+    const originalConfig = await readFile(configPath, "utf8");
     const target = join(reservedMemoryRoot(scopeRoot), "concepts", "concept.yaml");
     const stale = join(reservedMemoryRoot(scopeRoot), "concepts", "stale.yaml");
     await writeFile(target, "!concept\nnames: [local reserved]\ndefines: [local edit]\n");
     await writeFile(stale, "!concept\nnames: [stale]\n");
 
-    await initCommand({ folder: dir, force: true });
+    await initCommand({ folder: dir });
 
+    assert.equal(await readFile(configPath, "utf8"), originalConfig);
     assert.doesNotMatch(await readFile(target, "utf8"), /local edit/);
     await assert.rejects(readFile(stale, "utf8"), /ENOENT/);
+    assert.deepEqual(await readAllMemoryFiles(join(scopeRoot, "custom-memory"), "concepts"), []);
+  });
+});
+
+test("repeated init requires force only when changing configured paths", async () => {
+  await withTempDir(async (dir) => {
+    await initCommand({ folder: dir });
+
+    await assert.rejects(
+      initCommand({ folder: dir, memoryRoot: "other-memory" }),
+      /Use --force to change its configured paths/
+    );
   });
 });
 

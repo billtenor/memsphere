@@ -27,6 +27,7 @@ export type FrameType = "procedure" | "schema";
 export type RunFrame = {
   type: FrameType;
   memoryName: string;
+  asserts?: string[];
   steps: RunStep[];
   index: number;
   returnTo?: string;
@@ -85,6 +86,7 @@ export type RunState = {
   id: string;
   status: RunStatus;
   procedureName: string;
+  asserts?: string[];
   memoryRoot: string;
   createdAt: string;
   updatedAt: string;
@@ -123,6 +125,7 @@ const runStateSchema: z.ZodType<RunState> = z.object({
   id: z.string(),
   status: z.enum(["running", "done"]),
   procedureName: z.string(),
+  asserts: z.array(z.string()).optional(),
   memoryRoot: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -130,6 +133,7 @@ const runStateSchema: z.ZodType<RunState> = z.object({
   stack: z.array(z.object({
     type: z.enum(["procedure", "schema"]),
     memoryName: z.string(),
+    asserts: z.array(z.string()).optional(),
     steps: z.array(runStepSchema),
     index: z.number(),
     returnTo: z.string().optional(),
@@ -168,7 +172,8 @@ export async function startRun(input: { memoryRoot: string; runsRoot: string; pr
     throw new Error(`procedure not found: ${input.procedureName}`);
   }
 
-  const steps = compileProcedureSteps(procedure.entity as ProcedureMemory);
+  const procedureMemory = procedure.entity as ProcedureMemory;
+  const steps = compileProcedureSteps(procedureMemory);
   if (!steps.length) {
     throw new Error(`procedure has no flow steps: ${input.procedureName}`);
   }
@@ -178,6 +183,7 @@ export async function startRun(input: { memoryRoot: string; runsRoot: string; pr
     id: makeRunId(now),
     status: "running",
     procedureName: procedure.entity.names[0],
+    asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
     memoryRoot: input.memoryRoot,
     createdAt: now,
     updatedAt: now,
@@ -185,6 +191,7 @@ export async function startRun(input: { memoryRoot: string; runsRoot: string; pr
     stack: [{
       type: "procedure",
       memoryName: procedure.entity.names[0],
+      asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
       steps,
       index: 0
     }],
@@ -316,6 +323,15 @@ export function currentStep(run: RunState): RunStep | undefined {
 
 export function currentFrame(run: RunState): RunFrame | undefined {
   return run.stack.at(-1);
+}
+
+export function activeProcedureAsserts(run: RunState): string[] {
+  return [...new Set([
+    ...(run.asserts ?? []),
+    ...run.stack
+      .filter((frame) => frame.type === "procedure")
+      .flatMap((frame) => frame.asserts ?? [])
+  ])];
 }
 
 export function finalArtifacts(run: RunState): RunEvent["artifact"][] {
@@ -499,10 +515,12 @@ async function expandAutoCallSteps(run: RunState): Promise<void> {
     frame.index += 1;
     const procedure = await findMemoryByName(run.memoryRoot, "procedures", step.target);
     if (!procedure) throw new Error(`procedure not found: ${step.target}`);
+    const procedureMemory = procedure.entity as ProcedureMemory;
     run.stack.push({
       type: "procedure",
       memoryName: procedure.entity.names[0],
-      steps: compileProcedureSteps(procedure.entity as ProcedureMemory),
+      asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
+      steps: compileProcedureSteps(procedureMemory),
       index: 0,
       returnTo: step.id
     });

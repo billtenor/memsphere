@@ -307,6 +307,7 @@ export const browserHtml = String.raw`<!doctype html>
       names: { zh: "名称", yaml: "names" },
       defines: { zh: "定义", yaml: "defines" },
       asserts: { zh: "断言", yaml: "asserts" },
+      procedureAsserts: { zh: "流程断言", yaml: "Procedure Asserts" },
       suggests: { zh: "建议", yaml: "suggests" },
       goals: { zh: "目标", yaml: "goals" },
       flow: { zh: "流程", yaml: "flow" },
@@ -701,6 +702,7 @@ export const browserHtml = String.raw`<!doctype html>
       el.detail.className = "task-summary";
       el.detail.innerHTML = "";
       el.detail.append(renderRunMeta(run));
+      appendOptional(el.detail, renderRunProcedureAsserts(run));
       if (run.plan && run.plan.length) {
         el.detail.append(renderRunFlow(run));
         el.detail.append(renderFinalArtifacts(run));
@@ -721,6 +723,31 @@ export const browserHtml = String.raw`<!doctype html>
       const commentCount = review ? review.comments.filter(comment => comment.memoryId === "task/" + run.id).length : 0;
       if (commentCount) meta.append(pill(commentCount + " review comments", false, "warn"));
       return meta;
+    }
+
+    function renderRunProcedureAsserts(run) {
+      const values = activeRunProcedureAsserts(run);
+      if (!values.length) return null;
+      const wrap = document.createElement("div");
+      wrap.className = "run-procedure-asserts";
+      wrap.append(blockTitle(t("procedureAsserts")));
+      const list = document.createElement("ul");
+      list.className = "text-list";
+      for (const value of values) {
+        const item = document.createElement("li");
+        item.textContent = value;
+        list.append(item);
+      }
+      wrap.append(list);
+      return wrap;
+    }
+
+    function activeRunProcedureAsserts(run) {
+      const values = [...(run.asserts || [])];
+      for (const frame of (run.stack || [])) {
+        if (frame.type === "procedure") values.push(...(frame.asserts || []));
+      }
+      return [...new Set(values)];
     }
 
     function archiveRunButton(run, className = "") {

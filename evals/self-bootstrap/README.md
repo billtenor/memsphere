@@ -27,10 +27,10 @@ evals/
 - `suite.md`：说明验收集合包含哪些 case，以及如何判断整个集合是否通过。
 - `task.md`：当前 case 中唯一会发送给子 agent 的内容。
 - `evaluation.md`：仅供父 agent 使用的参考答案和评分标准，绝不能复制到子 agent 的工作区。
-- `fixtures/`：可选目录；存在时，其内容会复制到临时工作区。
+- `fixtures/`：可选目录；其中 `.memsphere/` 复制到临时 trial 根目录，其他内容复制到 Agent workspace。
 - `prepare-case.sh`：生成与 agent 无关的基线工程和提示词，并安装预置 Memory 与统一 memsphere Skill。
-- `run-codex-agent.sh`：从基线复制独立工作区，启动一个干净的 Codex 子 agent，并保留执行证据。
-- `run-traex-agent.sh`：从同一类基线复制独立工作区，启动一个干净的 TraeX 子 agent，并保留执行证据。
+- `run-codex-agent.sh`：从基线复制独立 workspace，启动一个干净的 Codex 子 agent，并保留执行证据。
+- `run-traex-agent.sh`：从同一类基线复制独立 workspace，启动一个干净的 TraeX 子 agent，并保留执行证据。
 - 后续接入其他 agent 时，为其增加独立 runner；case、fixture 和基线准备逻辑保持不变。
 
 ## 可见性边界
@@ -38,8 +38,8 @@ evals/
 子 agent 可以看到：
 
 - 生成后的任务提示词；
-- 当前 case 的可选 `fixtures/` 内容；
-- 当前 scope 中由 `memsphere init` 安装或 case fixture 提供的 Memory；
+- 当前 case 中复制到 workspace 的可选 fixture 内容；
+- 通过 memsphere CLI 访问的当前 scope Memory；
 - `.agents/skills/memsphere/SKILL.md`；
 - memsphere CLI 及其输出；
 - 子 agent 在临时工作区内创建的文件。
@@ -50,7 +50,8 @@ evals/
 - 其他 case；
 - 源代码仓库中的 `README.md`、`docs/`、`src/` 或 `reserved-memory/`；
 - 旧的 memsphere skills；
-- 临时工程根目录以外的文件。
+- 临时工程根目录以外的文件；
+- trial 根目录中的 `.memsphere/` 文件；这些内容只能通过 memsphere CLI 访问。
 
 只要读取了禁止来源，本次验收就记为 `invalid`，无论答案质量如何。
 
@@ -85,6 +86,7 @@ TRIAL="$(./evals/prepare-case.sh self-bootstrap/001-create-bookkeeping-entry)"
 脚本会打印结果目录，并有意将其保留在 `/tmp` 下，供父 agent 检查：
 
 ```text
+.memsphere/
 baseline/
   workspace/
 prompt.md

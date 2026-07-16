@@ -134,6 +134,13 @@ test("browser renders Action contracts, inline schemas, and final artifacts as d
   assert.match(browserHtml, /function inlineSchemaSummary\(schema\)/);
 });
 
+test("browser renders Procedure assertions in memory and active run views", () => {
+  assert.match(browserHtml, /appendTextBlocks\(wrap, entity\)/);
+  assert.match(browserHtml, /function renderRunProcedureAsserts\(run\)/);
+  assert.match(browserHtml, /function activeRunProcedureAsserts\(run\)/);
+  assert.match(browserHtml, /frame\.asserts/);
+});
+
 test("memory details render names as a field while retaining the primary name as the page title", () => {
   assert.match(browserHtml, /names: \{ zh: "名称", yaml: "names" \}/);
   assert.match(browserHtml, /appendList\(target, t\("names"\), node\.names, "names"\)/);

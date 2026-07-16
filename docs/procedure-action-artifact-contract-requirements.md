@@ -261,17 +261,18 @@ Action asserts 可以显著改善提示、执行和 review 精度，但系统无
 
 1. 将散落在 `defines` 中、实际只约束某一步的规则移动到对应 Action asserts。
 2. 将只被一个 Artifact 使用的交付结构移动到 `artifact.schema: !schema`。
-3. 保留真正描述 Procedure 整体含义、边界和适用场景的 defines。
-4. 将最终交付步骤的 Artifact 标记为 `final: true`。
-5. 将普通 boolean Action 改造成 `!if.condition` 或 `!while.condition`。
-6. 不为了内嵌而内嵌：跨流程复用的 Schema 继续保持为顶层 Memory。
+3. 将跨步骤持续生效的全局约束移动到 Procedure asserts。
+4. 保留真正描述 Procedure 整体含义、边界和适用场景的 defines。
+5. 将最终交付步骤的 Artifact 标记为 `final: true`。
+6. 将普通 boolean Action 改造成 `!if.condition` 或 `!while.condition`。
+7. 不为了内嵌而内嵌：跨流程复用的 Schema 继续保持为顶层 Memory。
 
 “Agent 测试任务建设流程”可作为首个迁移样例：
 
 - 各静态校验、审计和文件写入步骤使用 Action asserts。
 - 最后一步的“Agent 测试任务建设摘要”改为 `format: schema`。
 - 建设摘要的结构以内嵌 Schema 描述，并标记 `final: true`。
-- Procedure defines 只保留流程总体定义和跨步骤规则。
+- Procedure defines 只保留流程总体定义，跨步骤规则写入 Procedure asserts。
 
 ## 实现影响范围
 

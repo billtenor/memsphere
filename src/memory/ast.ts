@@ -91,6 +91,7 @@ export type FlowNode = ActionNode | IfNode | WhileNode | CallNode;
 
 export type ProcedureNode = CommonMemoryNode & {
   tag: "!procedure";
+  asserts?: string[];
   goals: string[];
   flow: FlowNode[];
 };

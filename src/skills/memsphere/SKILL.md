@@ -5,68 +5,146 @@ description: Use memsphere to discover, read, interpret, and apply project Memor
 
 # Memsphere
 
-Memsphere manages reusable knowledge and workflows as Memory. Use the CLI as the only Memory access boundary; installed Memory is authoritative, while this Skill provides startup routing and a compact fast-start synopsis.
+memsphere 定义了一套维护记忆、检索记忆和遵循记忆的框架。通过 memsphere CLI，可以在执行任务时读取当前工程积累的知识和流程，并按照这些历史经验完成任务。
 
-## Start
+## Memsphere 如何组织记忆
 
-1. Confirm the current project is a memsphere scope with `memsphere validate` when scope health is uncertain.
-2. If the request supplies a likely canonical name or alias, discover narrowly with `memsphere memory list --query "<exact-name-or-alias>" --output yaml`; add `--kind` when the type is known. `--query` is exact name/alias matching, not semantic search.
-3. Use an unfiltered `memsphere memory list --output yaml` only when no usable name, alias, or kind can be extracted.
-4. Treat list output as compact discovery metadata: `names`, prose `defines`, and folded structured-definition counts, analogous to a Skill's name and description. Read every selected Memory in full with `memsphere memory read <reference>` before interpreting or applying it.
-5. Never search or read the Memory Store with `find`, `rg`, `cat`, `sed`, or equivalent filesystem tools.
-6. Never read bundled `reserved-memory/` source in a repository or package. `init` installs selected built-ins into the standard Memory Store; after installation their origin is irrelevant.
+memsphere 将 Memory 分为四类：
 
-When first encountering memsphere, read these memories in order:
+- Concept（概念）：解释一个概念或词汇是什么。
+- Statement（陈述）：表达可被核查的事实、规则、约束和建议。
+- Procedure（流程）：描述一个任务从开始到结束的执行流程。
+- Schema（图式）：定义一种内容结构和呈现格式。
+
+四类 Memory 可以相互配合。例如，一份 Procedure 负责安排步骤，步骤中涉及的概念由 Concept 解释，必须满足的规则由 Statement 表达，交付物结构由 Schema 定义。
+
+## Memsphere 如何读取记忆
+
+已知 Memory 的名称或逻辑引用时，直接读取：
+
+```bash
+memsphere memory read "<名称/逻辑引用>"
+```
+
+不知道 Memory 的名称或逻辑引用时，使用 list 命令查看当前工程中的 Memory：
+
+```bash
+memsphere memory list
+```
+
+使用 `--kind` 按类型筛选。可用类型为 `concepts`、`statements`、`procedures` 和 `schemas`：
+
+```bash
+memsphere memory list --kind procedures
+```
+
+list 结果中的 `names` 是规范名称和别名，`defines` 是简要定义。确定候选后，使用 `memory read` 读取完整 Memory。
+
+描述 memsphere 本身的概念、陈述、流程和图式，也使用 Memory 管理。不理解 memsphere 时，可以从以下 Memory 开始读取：
 
 ```bash
 memsphere memory read Memory
-memsphere memory read Memsphere
 memsphere memory read Concept
 memsphere memory read Statement
-memsphere memory read Schema
 memsphere memory read Procedure
-memsphere memory read "Memory 访问规则"
-memsphere memory read "Memory 解读与应用规则"
+memsphere memory read Schema
 ```
 
-If `memsphere memory list` or `memsphere memory read` is unavailable, do not bypass the missing CLI capability by reading storage files. Report that the required Memory access interface is unavailable. If validation reports missing installed memories, enter a user-confirmed `memsphere init` repair or installation flow; do not overwrite automatically.
+如果命令提示当前工程尚未初始化，告知用户需要执行 `memsphere init`，等待用户完成初始化后再重试。
 
-## Route The Request
+## Memsphere 记忆语法规则
 
-- For an explanation or knowledge query, find and read the relevant Concept, Statement, or Schema, then answer from the complete Memory.
-- To apply existing Memory and create an instance or task artifact, read and follow `基于 Memory 完成任务流程`.
-- To create, edit, review, or execute Memory, list Procedure memories, read the procedure matching the user's goal, and execute it through `memsphere run`.
-- If no installed Procedure covers an operational request, state that the required memsphere capability has not been installed instead of inventing a workflow.
+memsphere 使用带 YAML tag 的 mapping 描述一份 Memory。根节点的 tag 表示 Memory 类型：
 
-Do not start a Run for a simple knowledge explanation. Do not edit Memory while merely applying it to create an instance.
+```yaml
+!concept
+names:
+  - 示例概念
+  - 示例别名
+defines:
+  - 对这个概念的定义。
+```
 
-## Apply Memory
+- `!concept`、`!statement`、`!procedure`、`!schema` 分别表示四种 Memory。
+- `names` 的第一项是规范名称，其余项是别名。
+- `defines` 用于定义这份 Memory；其中的全部成员共同生效。
+- 不同类型还拥有自己的字段。编写或解释某种 Memory 前，读取对应的 Concept Memory 了解完整语义和字段规则。
 
-Use this compact interpretation model while reading the authoritative memories:
+## Memsphere 如何遵循记忆
 
-- Select candidates by canonical name, alias, and the user's actual goal. A Memory that explains a side fact is not automatically the task target.
-- Use list metadata to understand and choose candidates. Type-specific fields remain absent, so list output never replaces `memory read` before applying a Memory.
-- Read every plausible candidate when the target is uncertain. Ask the user only when the full definitions do not resolve the ambiguity.
-- All members of `defines` apply together. They are complementary parts of one definition, not alternatives.
-- A string definition establishes meaning, purpose, or boundary.
-- Every assertion in an embedded `!statement` is mandatory.
-- An embedded `!schema` supplies fields, content assertions, and presentation format.
-- `format: outline` requires field names to be Markdown headings arranged by hierarchy. Bullets, key-value lines, bold labels, and tables are not outline substitutes.
-- `format: table` requires first-level fields to be Markdown table columns and each element to be a row. Headings and bullets are not table substitutes.
-- Infer information only when it follows unambiguously from the user's input and the Memory. Never invent missing amounts, dates, identifiers, or other facts.
-- If required information is missing, do not create an empty, placeholder, or guessed artifact. Ask only for the missing information.
-- If input conflicts with a constraint, do not create the artifact or silently repair the input. Identify the fact and the violated assertion.
-- Obey the file format and output path defined by Memory, then verify every definition, assertion, field, format, and path before reporting completion.
-- Unless the user explicitly requests a Memory change, do not create, modify, or delete Memory.
+### 永远从流程记忆开始
 
-## Run Procedures
+需要使用 memsphere 遵循记忆完成任务时，必须先从当前工程中选择适用的 Procedure。Procedure 负责组织相关 Memory 的引用、每个步骤的产物约束、完整执行过程和过程产物记录，是遵循记忆的统一入口。
 
-For an operational request backed by a Procedure:
+```bash
+memsphere memory list --kind procedures
+```
 
-1. Read the complete Procedure Memory.
-2. Start it with `memsphere run start <procedure-name>`.
-3. Execute only the current step returned by the CLI.
-4. Report the step artifact with `memsphere run report --run <run-id>` using `--artifact` or `--artifact-file` as appropriate.
-5. Continue until the CLI reports the Run is done, respecting every human checkpoint and branch.
+根据 `names`、`defines` 和用户目标选择候选，并使用 `memory read` 完整读取。创建、编辑、review Memory 等操作也必须从相应的 Procedure 开始。
 
-The installed Memory is the source of truth. When a Skill synopsis conflicts with a Memory read from the current scope, follow the Memory and report the inconsistency.
+如果没有适用的专用 Procedure，读取并执行 `通用流程`。只有当前工程连通用流程也没有时，才告知用户缺少可执行流程，并由用户决定是否建设或安装 Procedure。
+
+### 按需加载概念、陈述和图式
+
+选定 Procedure 并开始执行后，根据 Procedure 中的引用和当前步骤按需读取相关 Memory：
+
+- 遇到需要理解的术语或领域对象时，读取 Concept。
+- 需要确认事实、规则、约束或建议时，读取 Statement。
+- 需要创建或检查结构化产物时，读取 Schema。
+
+读取到的定义和规则应共同生效，并与当前步骤的产物约束一起执行。信息不足时向用户补充询问；用户输入与规则冲突时说明冲突；完成步骤后检查产物是否满足已读取的定义、规则、结构和 Procedure 约束。
+
+### 使用 memsphere 框架遵循流程记忆
+
+memsphere 使用 Run 记录和控制一次 Procedure 的执行过程，保证 Agent 每次只处理当前步骤，并在取得步骤产物后继续推进。
+
+#### 启动流程
+
+完整读取选中的 Procedure 后，使用它的名称启动一次 Run：
+
+```bash
+memsphere run start "<Procedure 名称>"
+```
+
+命令会返回 Run ID 和第一个待执行步骤。后续命令都使用这个 Run ID，不要再次启动同一个流程。
+
+#### 理解当前步骤
+
+每次启动或上报后，CLI 都会返回当前步骤的提示：
+
+- `Procedure Asserts` 是当前调用链中全部 Procedure 必须持续满足的全局约束。
+- `Actor` 表示当前步骤由 agent 还是 human 执行。
+- `Do` 或 `Ask human to do` 表示当前步骤需要完成的事情。
+- `Asserts` 是当前步骤必须满足的要求。
+- `Suggests` 是执行时可以参考的建议。
+- `Details` 是理解和执行当前步骤所需的补充上下文。
+- `Artifact` 表示当前步骤需要产出的内容及其格式。
+- `Then` 给出完成当前步骤后应执行的下一条 memsphere 命令。
+
+只执行当前返回的步骤，不提前执行尚未返回的后续步骤。
+
+#### 上报步骤产物
+
+完成当前步骤后，检查产物是否满足 `Procedure Asserts`、步骤提示、`Asserts` 和 `Artifact` 格式，然后执行 CLI 在 `Then` 中给出的命令。
+
+普通产物通常使用 `memsphere run report` 上报。内容较短时直接上报：
+
+```bash
+memsphere run report --run <Run ID> --artifact "<产物内容>"
+```
+
+产物已经写入文件时，上报文件：
+
+```bash
+memsphere run report --run <Run ID> --artifact-file <文件路径>
+```
+
+Schema 产物按照 CLI 提示进入 Schema 填写流程。不要自己猜测下一条命令，以当前 CLI 输出的 `Then` 为准。
+
+上报成功后，CLI 会返回下一个待执行步骤；继续执行和上报，直到显示 `done`。
+
+#### 人机协同
+
+当 `Actor` 为 `human` 时，暂停 Agent 执行，把 `Ask human to do`、相关要求和产物格式清楚地告知用户，并等待用户提供结果。不要代替用户完成 human 步骤，也不要在用户回复前继续推进。
+
+收到用户结果后，将它作为当前步骤产物按 `Then` 命令上报，再继续处理 CLI 返回的新步骤。Run 显示 `done` 时，向用户汇报流程完成情况和最终产物。

@@ -9,7 +9,7 @@ Usage: run-codex-agent.sh [--dry-run] [--model <model>] <prepared-trial-director
 Run one clean Codex child agent from a prepared evaluation trial baseline.
 
 Options:
-  --dry-run        Create the isolated run workspace without launching Codex.
+  --dry-run        Create the isolated run scope without launching Codex.
   --model <model>  Codex model used by the child agent. Defaults to CODEX_MODEL or Codex default.
   -h, --help       Show this help.
 
@@ -66,6 +66,7 @@ trial_dir="$(cd -- "$trial_input" && pwd)"
 baseline_workspace="$trial_dir/baseline/workspace"
 prompt_file="$trial_dir/prompt.md"
 
+[[ -d "$trial_dir/.memsphere" ]] || die "trial memsphere scope does not exist: $trial_dir/.memsphere"
 [[ -d "$baseline_workspace" ]] || die "baseline workspace does not exist: $baseline_workspace"
 [[ -f "$prompt_file" ]] || die "prepared prompt does not exist: $prompt_file"
 
@@ -91,6 +92,7 @@ cp -a -- "$baseline_workspace/." "$workspace_dir/"
   printf 'dry_run=%s\n' "$dry_run"
   printf 'trial_dir=%s\n' "$trial_dir"
   printf 'run_dir=%s\n' "$run_dir"
+  printf 'scope=%s\n' "$trial_dir"
   printf 'workspace=%s\n' "$workspace_dir"
   printf 'codex_bin=%s\n' "$codex_bin"
   printf 'codex_version=%s\n' "$("$codex_bin" --version)"

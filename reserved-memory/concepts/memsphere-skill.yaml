@@ -1,9 +1,0 @@
-!concept
-names:
-  - Memsphere Skill
-  - memsphere 技能
-defines:
-  - Agent 使用 memsphere 的统一启动和路由入口。
-  - Skill 保存定位 scope、调用 CLI、冷启动和意图路由所需的稳定内核，并冗余少量高频语义帮助 Agent 快速开始。
-  - 完整概念、规则、结构和流程由当前 scope 中已安装的 Memory 承载；Skill 摘要与 Memory 不一致时，以 CLI 读取到的 Memory 为准。
-  - Skill 不要求 Agent 了解 Memory 的物理目录，不允许 Agent 以直接遍历存储文件代替 memsphere memory list 和 memsphere memory read。
