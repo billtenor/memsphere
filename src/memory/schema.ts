@@ -38,9 +38,41 @@ const statementNodeSchema: z.ZodType<StatementNode, z.ZodTypeDef, unknown> = z.l
     tag: z.literal("!statement"),
     names: namesSchema,
     defines: definesSchema,
-    asserts: z.array(nonEmptyString).min(1),
-    suggests: stringArray
-  }).strict()
+    asserts: z.array(nonEmptyString).min(1).optional(),
+    suggests: z.array(nonEmptyString).min(1).optional(),
+    sections: z.array(statementNodeSchema).min(1).optional()
+  }).strict().superRefine((node, context) => {
+    if (!node.asserts?.length && !node.suggests?.length && !node.sections?.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Statement must define asserts, suggests, or sections"
+      });
+    }
+
+    const sectionNames = new Map<string, number>();
+    for (const [index, section] of (node.sections ?? []).entries()) {
+      const canonicalName = section.names[0]?.trim();
+      if (!canonicalName) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sections", index, "names"],
+          message: "Statement section must have a non-empty names list"
+        });
+        continue;
+      }
+
+      const previousIndex = sectionNames.get(canonicalName);
+      if (previousIndex !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sections", index, "names", 0],
+          message: `Statement section canonical name must be unique among siblings; first used at sections[${previousIndex}]`
+        });
+        continue;
+      }
+      sectionNames.set(canonicalName, index);
+    }
+  })
 );
 
 const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(() =>

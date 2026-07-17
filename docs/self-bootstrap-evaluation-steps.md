@@ -135,5 +135,5 @@ Step 1 的评分应以 Statement 表达的约束边界为准，而不是要求 A
 
 1. 现有六个 Concept case 已调整为 `evals/self-bootstrap-step0`，case 语义和评分标准保持不变。
 2. `evals/self-bootstrap-step2` 已建设首批六个 Schema case，覆盖简单 outline、嵌套 outline、table、Schema asserts、缺失字段和候选 Schema 选择。
-3. Statement 的组织结构仍在讨论，因此 `evals/self-bootstrap-step1` 暂不固化 fixture 和评分标准。
-4. Statement 结构确定后，再建设 Step 1 并分别运行 Step 0、Step 1 和 Step 2。
+3. Statement 已确定使用递归 `sections` 组织同一领域内的规则；`evals/self-bootstrap-step1` 尚未建设 fixture 和评分标准。
+4. 树状 Statement 功能完成并验收后，再建设 Step 1 并分别运行 Step 0、Step 1 和 Step 2。

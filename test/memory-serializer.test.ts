@@ -33,7 +33,15 @@ const entities: MemoryEntity[] = [
     names: ["Suggestion"],
     defines: [],
     asserts: ["Statements assert."],
-    suggests: ["Statements may suggest."]
+    suggests: ["Statements may suggest."],
+    sections: [
+      {
+        tag: "!statement",
+        names: ["Nested guidance"],
+        defines: [],
+        suggests: ["Nested Statement tags survive."]
+      }
+    ]
   },
   {
     tag: "!schema",

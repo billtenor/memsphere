@@ -109,9 +109,16 @@ test("browser exposes archive controls for done reviews and runs", () => {
   assert.match(browserHtml, /archiveDoneOnly/);
 });
 
-test("browser renders Statement suggestions separately from assertions", () => {
+test("browser renders recursive Statement sections and keeps suggestions separate", () => {
   assert.match(browserHtml, /suggests: \{ zh: "建议", yaml: "suggests" \}/);
+  assert.match(browserHtml, /sections: \{ zh: "章节", yaml: "sections" \}/);
   assert.match(browserHtml, /appendList\(target, t\("suggests"\), node\.suggests, "suggests"\)/);
+  assert.match(browserHtml, /memory\.kind === "statements"\) el\.detail\.append\(renderStatement/);
+  assert.match(browserHtml, /function renderStatement\(node, depth, path, fallbackName = t\("statements"\), anchor = "statement:" \+ path\)/);
+  assert.match(browserHtml, /for \(const \[index, child\] of node\.sections\.entries\(\)\)/);
+  assert.match(browserHtml, /children\.append\(renderStatement\(child, depth \+ 1, childPath, t\("statements"\), anchor \+ ":sections\["/);
+  assert.match(browserHtml, /sectionHeader\(name, "!statement", path, anchor\)/);
+  assert.match(browserHtml, /renderStatement\(definition, 1, path, "", path\)/);
 });
 
 test("browser renders Action contracts, inline schemas, and final artifacts as distinct task UI", () => {

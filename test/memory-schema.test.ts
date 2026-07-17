@@ -26,6 +26,11 @@ defines:
       - A rule must hold.
     suggests:
       - Prefer the documented path.
+    sections:
+      - !statement
+        names: [Nested guidance]
+        suggests:
+          - Prefer a focused example.
   - !schema
     format: outline
     fields:
@@ -44,13 +49,14 @@ fields:
   assert.equal(typeof embeddedStatement === "string" ? undefined : embeddedStatement.tag, "!statement");
   if (typeof embeddedStatement !== "string" && embeddedStatement.tag === "!statement") {
     assert.deepEqual(embeddedStatement.suggests, ["Prefer the documented path."]);
+    assert.deepEqual(embeddedStatement.sections?.[0].suggests, ["Prefer a focused example."]);
   }
   assert.equal(entity.defines[2].tag, "!schema");
   assert.equal(entity.fields?.[0], "simple");
   assert.equal(entity.fields?.[1].tag, "!schema");
 });
 
-test("Statement supports optional suggestions without weakening assertions", () => {
+test("Statement supports independent assertion and suggestion collections", () => {
   const withSuggestions = parseStatement(`!statement
 names: [guidance]
 asserts: [A required rule.]
@@ -62,12 +68,23 @@ suggests: [Prefer the documented path.]
 names: [rule]
 asserts: [A required rule.]
 `);
-  assert.deepEqual(withoutSuggestions.suggests, []);
+  assert.equal(withoutSuggestions.suggests, undefined);
+
+  const suggestionsOnly = parseStatement(`!statement
+names: [advice]
+suggests: [Prefer the documented path.]
+`);
+  assert.equal(suggestionsOnly.asserts, undefined);
+  assert.deepEqual(suggestionsOnly.suggests, ["Prefer the documented path."]);
 
   assert.throws(() => parseStatement(`!statement
 names: [invalid]
 asserts: [A required rule.]
 suggests: [1]
+`), /suggests/);
+  assert.throws(() => parseStatement(`!statement
+names: [invalid]
+suggests: []
 `), /suggests/);
   assert.throws(() => parseStatement(`!statement
 names: [invalid]
@@ -78,6 +95,96 @@ names: [invalid]
 asserts: [A required rule.]
 unknown: value
 `), /unknown/);
+});
+
+test("Statement sections organize recursive and mixed rule nodes", () => {
+  const entity = parseStatement(`!statement
+names: [Repository rules]
+asserts: [All changes must be reviewed.]
+sections:
+  - !statement
+    names: [Code organization]
+    suggests: [Prefer domain-oriented modules.]
+    sections:
+      - !statement
+        names: [Module boundaries]
+        asserts: [Cross-module access must use public interfaces.]
+  - !statement
+    names: [Testing]
+    asserts: [Core logic changes require tests.]
+    suggests: [Prefer focused tests.]
+`);
+
+  assert.deepEqual(entity.asserts, ["All changes must be reviewed."]);
+  assert.equal(entity.sections?.[0].names[0], "Code organization");
+  assert.deepEqual(entity.sections?.[0].suggests, ["Prefer domain-oriented modules."]);
+  assert.deepEqual(
+    entity.sections?.[0].sections?.[0].asserts,
+    ["Cross-module access must use public interfaces."]
+  );
+  assert.deepEqual(entity.sections?.[1].suggests, ["Prefer focused tests."]);
+
+  const categoriesOnly = parseStatement(`!statement
+names: [Repository rules]
+sections:
+  - !statement
+    names: [Testing]
+    asserts: [Core logic changes require tests.]
+`);
+  assert.equal(categoriesOnly.asserts, undefined);
+  assert.equal(categoriesOnly.sections?.length, 1);
+});
+
+test("Statement sections reject empty, unnamed, and duplicate nodes with precise paths", () => {
+  assert.throws(() => parseStatement(`!statement
+names: [empty]
+`), /Statement must define asserts, suggests, or sections/);
+  assert.throws(() => parseStatement(`!statement
+names: [empty sections]
+sections: []
+`), /sections/);
+  assert.throws(() => parseStatement(`!statement
+names: [untagged section]
+sections:
+  - names: [Testing]
+    asserts: [A rule.]
+`), /tag/);
+  assert.throws(() => parseStatement(`!statement
+names: [invalid section]
+sections: [Testing]
+`), /sections/);
+
+  const unnamed = statementMemorySchema.safeParse(parseMemoryYaml(`!statement
+names: [Repository rules]
+sections:
+  - !statement
+    asserts: [A rule.]
+`));
+  assert.equal(unnamed.success, false);
+  if (!unnamed.success) {
+    assert(unnamed.error.issues.some((issue) =>
+      issue.path.join(".") === "sections.0.names"
+      && issue.message.includes("non-empty names")
+    ));
+  }
+
+  const duplicate = statementMemorySchema.safeParse(parseMemoryYaml(`!statement
+names: [Repository rules]
+sections:
+  - !statement
+    names: [Testing]
+    asserts: [First rule.]
+  - !statement
+    names: [" Testing "]
+    suggests: [Second rule.]
+`));
+  assert.equal(duplicate.success, false);
+  if (!duplicate.success) {
+    assert(duplicate.error.issues.some((issue) =>
+      issue.path.join(".") === "sections.1.names.0"
+      && issue.message.includes("unique among siblings")
+    ));
+  }
 });
 
 test("Procedure supports optional global assertions", () => {

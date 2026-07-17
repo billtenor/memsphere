@@ -14,6 +14,7 @@ import {
   type ProcedureMemory,
   type SchemaMemory,
   type SchemaNode,
+  type StatementNode,
   type StepActor,
   type WhileNode
 } from "../memory/ast.js";
@@ -703,11 +704,23 @@ function definitionDetails(defines: DefinitionPart[]): string[] {
       continue;
     }
     if (definition.tag === "!statement") {
-      details.push(...definition.asserts.map((value) => `asserts: ${value}`));
+      details.push(...statementDefinitionDetails(definition));
       continue;
     }
     details.push(...definitionDetails(definition.defines));
     details.push(...(definition.asserts ?? []).map((value) => `asserts: ${value}`));
+  }
+  return details;
+}
+
+function statementDefinitionDetails(statement: StatementNode, path: string[] = []): string[] {
+  const details = definitionDetails(statement.defines);
+  const qualifier = path.length > 0 ? ` [${path.join(" > ")}]` : "";
+  details.push(...(statement.asserts ?? []).map((value) => `asserts${qualifier}: ${value}`));
+  details.push(...(statement.suggests ?? []).map((value) => `suggests${qualifier}: ${value}`));
+
+  for (const section of statement.sections ?? []) {
+    details.push(...statementDefinitionDetails(section, [...path, section.names[0].trim()]));
   }
   return details;
 }

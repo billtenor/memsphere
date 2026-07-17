@@ -45,6 +45,7 @@ Artifact 的数值格式统一使用 `number`。旧 `int` 不再兼容，存量 
 ```text
 names   = List<string>
 asserts = List<string>
+sections = List<Statement>
 fields  = List<string | Schema>
 flow    = List<Action | If | While | Call>
 ```
@@ -148,11 +149,11 @@ defines:
 
 顶层记忆文档必须具有非空 `names`，以便被索引、引用、导入和 review。
 
-嵌套在其他记忆中的带 tag 结构属于匿名结构。它的 `names` 和 `defines` 可以省略或为空，由 YAML tag 及其在父节点中的位置确定身份。
+嵌套在其他记忆中的带 tag 结构属于匿名结构。它的 `names` 和 `defines` 可以省略或为空，由 YAML tag 及其在父节点中的位置确定身份。Statement `sections` 中的节点需要使用名称形成树状章节，因此是这一规则的例外。
 
 匿名结构仍然必须包含有意义的类型专属内容：
 
-- 匿名 Statement 必须至少包含一条 assertion。
+- 匿名 Statement 必须至少包含非空的 `asserts`、`suggests` 或 `sections` 之一；`sections` 成员必须具有非空 `names`，同级规范名称不得重复。
 - 匿名 Schema 必须至少包含 `format`、`asserts`、`element_types` 或 `fields` 等有效结构信息。
 - 匿名结构不进入全局记忆名称索引。
 
@@ -162,6 +163,7 @@ defines:
 
 ```text
 defines = List<string | Statement | Schema>
+sections = List<Statement>
 fields  = List<string | Schema>
 element_types   = List<TypeReference>
 flow    = List<Action | If | While | Call>

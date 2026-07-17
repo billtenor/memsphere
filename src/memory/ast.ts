@@ -37,8 +37,9 @@ export type ConceptNode = CommonMemoryNode & {
 
 export type StatementNode = CommonMemoryNode & {
   tag: "!statement";
-  asserts: string[];
-  suggests: string[];
+  asserts?: string[];
+  suggests?: string[];
+  sections?: StatementNode[];
 };
 
 export type SchemaField = string | SchemaNode;

@@ -68,7 +68,7 @@ test("catalog folds structured definitions into counts while preserving prose", 
       names: ["Memory"],
       defines: [
         "A managed memory.",
-        { tag: "!statement", names: [], defines: [], asserts: ["Required."], suggests: [] },
+        { tag: "!statement", names: [], defines: [], asserts: ["Required."] },
         { tag: "!schema", names: [], defines: [], fields: ["value"] }
       ]
     }],
@@ -124,8 +124,7 @@ test("catalog reports cross-kind ambiguity without reading and kind disambiguate
     tag: "!statement",
     names: ["Shared"],
     defines: [],
-    asserts: ["Shared is a statement."],
-    suggests: []
+    asserts: ["Shared is a statement."]
   };
   const provider = new FakeProvider(
     [

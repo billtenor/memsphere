@@ -97,12 +97,39 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
             tag: "!statement",
             names: [],
             defines: [],
-            asserts: ["Read the complete memory."],
-            suggests: []
+            asserts: ["Read the complete memory."]
           }
         ]
       });
     }
+  });
+});
+
+test("memory CLI reads recursive Statement sections without flattening them", async () => {
+  await withScope(async ({ nested, memoryRoot }) => {
+    await writeFile(join(memoryRoot, "statements", "repository-rules.yaml"), `!statement
+names: [Repository rules]
+asserts: [All changes require review.]
+sections:
+  - !statement
+    names: [Testing]
+    suggests: [Prefer focused tests.]
+    sections:
+      - !statement
+        names: [Core logic]
+        asserts: [Core logic changes require tests.]
+`);
+
+    const read = await runCli(nested, ["memory", "read", "Repository rules"]);
+    assert.equal(read.code, 0, read.stderr);
+    assert.equal(read.stderr, "");
+    const statement = parseMemoryYaml(read.stdout);
+    assert.equal(statement.tag, "!statement");
+    assert.deepEqual(statement.asserts, ["All changes require review."]);
+    assert.equal(statement.sections[0].tag, "!statement");
+    assert.equal(statement.sections[0].names[0], "Testing");
+    assert.equal(statement.sections[0].sections[0].names[0], "Core logic");
+    assert.deepEqual(statement.sections[0].sections[0].asserts, ["Core logic changes require tests."]);
   });
 });
 

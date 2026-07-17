@@ -185,16 +185,31 @@ defines:
 ```yaml
 !statement
 names:
-  - CustomerTenantRule
+  - RepositoryDevelopmentRules
 defines:
-  - 这是一组关于 Customer 和 Tenant 关系的命题。
+  - 代码仓库开发活动需要遵循的统一规范。
 asserts:
-  - 一个 Customer 必须且只能属于一个 Tenant。
-suggests:
-  - Customer 的展示名称应优先使用经过人工确认的名称。
+  - 所有变更必须经过 review。
+sections:
+  - !statement
+    names:
+      - 测试规范
+    asserts:
+      - 修改核心逻辑时必须补充对应测试。
+    suggests:
+      - 优先编写范围明确的测试。
+  - !statement
+    names:
+      - 代码组织
+    sections:
+      - !statement
+        names:
+          - 模块边界
+        asserts:
+          - 跨模块访问必须通过公开接口。
 ```
 
-`asserts` 表达可判断的事实、规则或约束。`suggests` 表达非强制的建议或优先性指导；它可省略，省略时解析为一个空列表。
+`asserts` 表达可判断的事实、规则或约束，`suggests` 表达非强制的建议或优先性指导，`sections` 使用有名称的内嵌 `!statement` 递归组织同一领域中的规则。三个字段都可以省略，但每个 Statement 节点必须至少包含其中一个；字段如出现则必须是非空数组。一个节点可以同时包含规则和子章节。树状层级只负责组织，读取整份 Statement 后，其中与当前任务相关的全部规则共同生效。
 
 ### Schema
 

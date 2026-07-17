@@ -525,6 +525,18 @@ defines:
   - !statement
     asserts:
       - Keep it concise.
+    suggests:
+      - Prefer direct wording.
+    sections:
+      - !statement
+        names: [Formatting]
+        asserts:
+          - Use Markdown headings.
+        sections:
+          - !statement
+            names: [Examples]
+            suggests:
+              - Include one example when useful.
 fields:
   - summary
   - !schema
@@ -541,6 +553,9 @@ fields:
     ]);
     assert.deepEqual(schemaFrame?.steps.map((step) => step.format), ["markdown", "string", "string"]);
     assert(schemaFrame?.steps[0].details?.includes("asserts: Keep it concise."));
+    assert(schemaFrame?.steps[0].details?.includes("suggests: Prefer direct wording."));
+    assert(schemaFrame?.steps[0].details?.includes("asserts [Formatting]: Use Markdown headings."));
+    assert(schemaFrame?.steps[0].details?.includes("suggests [Formatting > Examples]: Include one example when useful."));
   });
 });
 

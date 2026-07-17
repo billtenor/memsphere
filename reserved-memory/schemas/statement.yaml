@@ -9,8 +9,11 @@ asserts:
   - 根节点必须使用 !statement 标签，不得使用独立的 type 字段。
   - names 必须是非空字符串数组，首项为规范名称。
   - defines 可以包含字符串、!statement 或 !schema；嵌套结构必须携带 YAML tag。
-  - asserts 必须是非空的可核查断言数组。
-  - suggests 是可选的字符串数组，并且不得削弱或替代 asserts。
+  - asserts、suggests 和 sections 如出现，必须是非空数组；每个 Statement 节点必须至少包含其中一个。
+  - suggests 不得削弱或替代 asserts。
+  - sections 的每个成员必须携带 !statement tag 和非空 names，并递归遵循本 Schema。
+  - 同一父节点下各 section 的首个规范名称不得重复。
+  - 一个节点可以同时包含 asserts、suggests 和 sections；sections 只组织内容，不改变规则生效语义。
 fields:
   - !schema
     names:
@@ -42,3 +45,10 @@ fields:
       - string
     defines:
       - 可选，执行时可以参考但不强制满足的建议。
+  - !schema
+    names:
+      - sections
+    element_types:
+      - Statement
+    defines:
+      - 可选，用有名称的内嵌 Statement 节点递归组织规则；同级规范名称必须唯一。

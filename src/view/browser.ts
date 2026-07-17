@@ -309,6 +309,7 @@ export const browserHtml = String.raw`<!doctype html>
       asserts: { zh: "断言", yaml: "asserts" },
       procedureAsserts: { zh: "流程断言", yaml: "Procedure Asserts" },
       suggests: { zh: "建议", yaml: "suggests" },
+      sections: { zh: "章节", yaml: "sections" },
       goals: { zh: "目标", yaml: "goals" },
       flow: { zh: "流程", yaml: "flow" },
       step: { zh: "步骤", yaml: "action" },
@@ -1206,6 +1207,7 @@ export const browserHtml = String.raw`<!doctype html>
       state.renderLine = 0;
       el.detail.append(renderMeta(memory));
       if (memory.kind === "schemas") el.detail.append(renderSchema(memory.entity, 0, primaryName(memory.entity)));
+      else if (memory.kind === "statements") el.detail.append(renderStatement(memory.entity, 0, primaryName(memory.entity)));
       else if (memory.kind === "procedures") el.detail.append(renderProcedure(memory.entity));
       else el.detail.append(renderGeneric(memory.entity));
     }
@@ -1333,6 +1335,29 @@ export const browserHtml = String.raw`<!doctype html>
       return section;
     }
 
+    function renderStatement(node, depth, path, fallbackName = t("statements"), anchor = "statement:" + path) {
+      const section = document.createElement("div");
+      section.className = "section statement-node" + (depth < 2 ? " open" : "");
+      const name = depth === 0 ? "" : displayName(node, fallbackName);
+      section.append(sectionHeader(name, "!statement", path, anchor));
+      const body = document.createElement("div");
+      body.className = "section-body";
+      if (depth === 0) appendNames(body, node);
+      appendTextBlocks(body, node);
+      if (node.sections && node.sections.length) {
+        const children = document.createElement("div");
+        children.className = "child-stack";
+        for (const [index, child] of node.sections.entries()) {
+          const childName = displayName(child, t("statements"));
+          const childPath = path + " > " + childName;
+          children.append(renderStatement(child, depth + 1, childPath, t("statements"), anchor + ":sections[" + (index + 1) + "]"));
+        }
+        body.append(blockTitle(t("sections")), children);
+      }
+      section.append(body);
+      return section;
+    }
+
     function appendSchemaElementTypes(target, elementTypes) {
       if (!elementTypes || !elementTypes.length) return;
       const title = document.createElement("div");
@@ -1414,15 +1439,7 @@ export const browserHtml = String.raw`<!doctype html>
           children.append(renderDefinitionItem(renderSchema(definition, 1, path, "")));
           return;
         }
-        const section = document.createElement("div");
-        section.className = "section open";
-        const name = displayName(definition, "");
-        section.append(sectionHeader(name, definition.tag || "!statement", path, path));
-        const body = document.createElement("div");
-        body.className = "section-body";
-        appendTextBlocks(body, definition);
-        section.append(body);
-        children.append(renderDefinitionItem(section));
+        children.append(renderDefinitionItem(renderStatement(definition, 1, path, "", path)));
       });
       target.append(children);
     }
