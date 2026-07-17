@@ -1,0 +1,17 @@
+!schema
+names:
+  - 单次客户反馈记录
+  - 客户反馈记录
+  - 反馈记录
+format: outline
+defines:
+  - 记录一名客户的一次反馈及其负责人和处理状态。
+asserts:
+  - 日期必须使用 YYYY-MM-DD 格式。
+  - 单次客户反馈记录实例必须以 Markdown 文件保存到 artifacts/customer-feedback.md。
+fields:
+  - 日期
+  - 客户
+  - 反馈内容
+  - 跟进人
+  - 处理状态

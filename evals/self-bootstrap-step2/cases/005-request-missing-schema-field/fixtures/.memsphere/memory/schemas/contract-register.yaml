@@ -1,0 +1,18 @@
+!schema
+names:
+  - 合同登记
+  - 合同登记记录
+format: outline
+defines:
+  - 记录一份已签署合同的编号、签署日期、对方主体、金额和有效期。
+asserts:
+  - fields 中的每个字段都必须填写，并且只能使用用户已经明确提供的信息。
+  - 任一字段缺少必要信息时，必须先向用户询问，不得猜测或创建不完整实例。
+  - 签署日期必须使用 YYYY-MM-DD 格式。
+  - 合同登记实例必须以 Markdown 文件保存到 artifacts/contract-register.md。
+fields:
+  - 合同编号
+  - 签署日期
+  - 对方主体
+  - 合同金额
+  - 有效期

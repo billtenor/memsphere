@@ -12,13 +12,17 @@ evals/
 ├── run-cases.sh
 ├── run-codex-agent.sh
 ├── run-traex-agent.sh
-└── self-bootstrap/
+├── self-bootstrap-step0/
+│   ├── README.md
+│   ├── suite.md
+│   └── cases/
+└── self-bootstrap-step2/
     ├── README.md
     ├── suite.md
     └── cases/
 ```
 
-- 每个一级子目录代表一组测试，例如 `self-bootstrap/`。
+- 每个一级子目录代表一组测试，例如 `self-bootstrap-step0/`。
 - 测试组负责定义 case、fixture、评分标准和组级通过策略。
 - `prepare-case.sh` 负责将指定 case 准备成与 agent 无关的基线，并安装统一 memsphere Skill。
 - `prepare-cases.sh` 负责一次选择并准备一组 case；省略 case ID 时选择 suite 的全部 case。
@@ -33,7 +37,7 @@ evals/
 先使用 `<suite-id>/<case-id>` 准备基线：
 
 ```bash
-TRIAL="$(./evals/prepare-case.sh self-bootstrap/001-create-bookkeeping-entry)"
+TRIAL="$(./evals/prepare-case.sh self-bootstrap-step0/001-create-bookkeeping-entry)"
 ```
 
 然后选择一个 agent runner：
@@ -48,13 +52,13 @@ TRIAL="$(./evals/prepare-case.sh self-bootstrap/001-create-bookkeeping-entry)"
 运行一组 case 时，先在准备阶段选择 case。省略 case ID 会准备整个 suite：
 
 ```bash
-BATCH="$(./evals/prepare-cases.sh self-bootstrap)"
+BATCH="$(./evals/prepare-cases.sh self-bootstrap-step0)"
 ```
 
 也可以只准备指定 case：
 
 ```bash
-BATCH="$(./evals/prepare-cases.sh self-bootstrap \
+BATCH="$(./evals/prepare-cases.sh self-bootstrap-step0 \
   001-create-bookkeeping-entry \
   002-request-missing-bookkeeping-data)"
 ```

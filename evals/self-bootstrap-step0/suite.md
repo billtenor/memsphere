@@ -1,8 +1,8 @@
-# memsphere 自举验收集合
+# memsphere 自举验收 Step 0：Concept
 
 ## 目的
 
-验证一个上下文干净的子 agent 能否依靠统一 `memsphere` Skill 和 `memsphere init` 安装到标准 Store 的 Memory，正确发现、理解并使用测试提供的业务 Memory，而不依赖仓库文档、实现代码、参考答案或旧的 memsphere skills。
+验证一个上下文干净的子 agent 能否依靠统一 `memsphere` Skill 和 `memsphere init` 安装到标准 Store 的 Memory，正确发现、理解并应用测试提供的领域 Concept，而不依赖仓库文档、实现代码、参考答案或旧的 memsphere skills。
 
 ## 当前 case
 

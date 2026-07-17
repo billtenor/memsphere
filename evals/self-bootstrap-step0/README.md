@@ -1,4 +1,4 @@
-# memsphere 自举验收
+# memsphere 自举验收 Step 0
 
 本目录保存人工编写的验收 case，用于检查一个上下文干净的 agent 能否依靠统一 memsphere Skill 和已安装的 Memory 理解并正确使用测试提供的业务 Memory。
 
@@ -14,7 +14,7 @@ evals/
 ├── run-cases.sh
 ├── run-codex-agent.sh
 ├── run-traex-agent.sh
-└── self-bootstrap/
+└── self-bootstrap-step0/
     ├── README.md
     ├── suite.md
     └── cases/
@@ -64,7 +64,7 @@ evals/
 准备一份 agent 无关的验收基线：
 
 ```bash
-TRIAL="$(./evals/prepare-case.sh self-bootstrap/001-create-bookkeeping-entry)"
+TRIAL="$(./evals/prepare-case.sh self-bootstrap-step0/001-create-bookkeeping-entry)"
 ```
 
 从该基线准备 Codex 的独立运行目录，但不启动子 agent：
@@ -88,14 +88,14 @@ TRIAL="$(./evals/prepare-case.sh self-bootstrap/001-create-bookkeeping-entry)"
 准备并并行运行整个测试组：
 
 ```bash
-BATCH="$(./evals/prepare-cases.sh self-bootstrap)"
+BATCH="$(./evals/prepare-cases.sh self-bootstrap-step0)"
 ./evals/run-cases.sh --agent traex --model gemini-3-flash "$BATCH"
 ```
 
 只运行指定 case：
 
 ```bash
-BATCH="$(./evals/prepare-cases.sh self-bootstrap \
+BATCH="$(./evals/prepare-cases.sh self-bootstrap-step0 \
   001-create-bookkeeping-entry \
   002-request-missing-bookkeeping-data)"
 ./evals/run-cases.sh --agent traex --model gemini-3-flash "$BATCH"
