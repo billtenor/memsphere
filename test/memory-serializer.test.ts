@@ -7,6 +7,11 @@ import {
   serializeMemoryListJson,
   serializeMemoryListText,
   serializeMemoryListYaml,
+  serializeMemoryNodeListJson,
+  serializeMemoryNodeListText,
+  serializeMemoryNodeListYaml,
+  serializeMemoryNodeReadJson,
+  serializeMemoryNodeReadYaml,
   serializeMemoryYaml
 } from "../src/memory/serializer.js";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
@@ -140,4 +145,47 @@ test("list serializers produce structured machine output and compact text", () =
   assert.deepEqual(JSON.parse(serializeMemoryListJson(page)), page);
   assert.equal(serializeMemoryListText(page), "concepts/Memory (记忆)\nschemas/Record\n");
   assert.equal(serializeMemoryListText({ memories: [], next_cursor: null }), "");
+});
+
+test("memory node serializers preserve tagged fragments and copyable text references", () => {
+  const page = {
+    memory: { reference: "procedures/Flow", kind: "procedures" as const, names: ["Flow"] },
+    nodes: [{
+      node_ref: "action:Result",
+      type: "Action" as const,
+      artifact: "Result",
+      summary: "Produce a result.",
+      relation: "flow",
+      has_children: false
+    }],
+    next_cursor: null
+  };
+  assert.deepEqual(parse(serializeMemoryNodeListYaml(page)), page);
+  assert.deepEqual(JSON.parse(serializeMemoryNodeListJson(page)), page);
+  assert.equal(serializeMemoryNodeListText(page), "action:Result\n");
+  assert.match(serializeMemoryNodeListYaml(page), /artifact: Result/);
+
+  const result = {
+    memory: page.memory,
+    node_ref: "action:Result",
+    node_type: "Action" as const,
+    context: {
+      root: { tag: "!procedure", names: ["Flow"], defines: [], goals: ["Finish."] },
+      ancestors: []
+    },
+    fragment: {
+      tag: "!action",
+      action: "Produce a result.",
+      artifact: {
+        tag: "!artifact",
+        name: "Result",
+        type: "string",
+        format: { name: "markdown", options: {} }
+      }
+    }
+  };
+  const yaml = serializeMemoryNodeReadYaml(result);
+  assert.match(yaml, /root: !procedure/);
+  assert.match(yaml, /fragment: !action/);
+  assert.deepEqual(JSON.parse(serializeMemoryNodeReadJson(result)), result);
 });

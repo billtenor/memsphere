@@ -35,6 +35,11 @@ test("unified skill and reserved memories keep the same bootstrap contract", asy
   for (const signal of [
     "memsphere memory list",
     "memsphere memory read",
+    "--node",
+    "node_ref",
+    "context",
+    "fragment",
+    "condition_artifact",
     "memsphere init",
     "memsphere run start",
     "memsphere run report",
@@ -53,7 +58,9 @@ test("unified skill and reserved memories keep the same bootstrap contract", asy
   for (const obsolete of [
     "不得使用 find",
     "不得直接读取 Memory Store 文件",
-    "按需导入"
+    "按需导入",
+    "Agent 必须完整读取目标 Memory",
+    "必须先选择并完整读取适用的 Procedure"
   ]) {
     assert.doesNotMatch(skill, new RegExp(obsolete));
     assert.doesNotMatch(reserved, new RegExp(obsolete));

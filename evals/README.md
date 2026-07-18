@@ -16,6 +16,10 @@ evals/
 │   ├── README.md
 │   ├── suite.md
 │   └── cases/
+├── self-bootstrap-step1/
+│   ├── README.md
+│   ├── suite.md
+│   └── cases/
 └── self-bootstrap-step2/
     ├── README.md
     ├── suite.md

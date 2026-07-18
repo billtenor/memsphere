@@ -38,7 +38,27 @@ memsphere memory list
 memsphere memory list --kind procedures
 ```
 
-list 结果中的 `names` 是规范名称和别名，`defines` 是简要定义。确定候选后，使用 `memory read` 读取完整 Memory。
+list 结果中的 `names` 是规范名称和别名，`defines` 是简要定义。确定候选后，完整读取 Memory，或按 Node 读取完成任务所需的内容。
+
+当一份 Statement、Schema 或 Procedure 较长时，可以先列出它的直接子 Node：
+
+```bash
+memsphere memory list "<名称/逻辑引用>"
+```
+
+结果中的 `node_ref` 是 CLI 生成的节点引用。不同 Node 会同时显示其主引用来源，例如 Action 的 `artifact`、If/While 的 `condition_artifact` 和 Call 的 `target`。需要继续查看下一层时，把 `node_ref` 原样传给 `--node`：
+
+```bash
+memsphere memory list "<名称/逻辑引用>" --node "<node_ref>"
+```
+
+确定目标 Node 后，只读取该 Node 及理解它所需的根级和祖先上下文：
+
+```bash
+memsphere memory read "<名称/逻辑引用>" --node "<node_ref>"
+```
+
+不要自行猜测或拼接 `node_ref`。Concept 直接完整读取，不提供内部 Node。局部读取结果中，`context` 与 `fragment` 必须一起理解和应用；它们不是一份可单独校验的完整 Memory。任务涉及多个 Node 或范围不明确时，继续读取相关 Node，必要时读取完整 Memory。
 
 描述 memsphere 本身的概念、陈述、流程和图式，也使用 Memory 管理。不理解 memsphere 时，可以从以下 Memory 开始读取：
 
@@ -114,7 +134,7 @@ fields:
 memsphere memory list --kind procedures
 ```
 
-根据 `names`、`defines` 和用户目标选择候选，并使用 `memory read` 完整读取。创建、编辑、review Memory 等操作也必须从相应的 Procedure 开始。
+根据 `names`、`defines` 和用户目标选择候选，并读取执行任务所需的 Procedure 内容。创建、编辑、review Memory 等操作也必须从相应的 Procedure 开始。
 
 如果没有适用的专用 Procedure，读取并执行 `通用流程`。只有当前工程连通用流程也没有时，才告知用户缺少可执行流程，并由用户决定是否建设或安装 Procedure。
 
@@ -128,13 +148,15 @@ memsphere memory list --kind procedures
 
 读取到的定义和规则应共同生效，并与当前步骤的产物约束一起执行。信息不足时向用户补充询问；用户输入与规则冲突时说明冲突；完成步骤后检查产物是否满足已读取的定义、规则、结构和 Procedure 约束。
 
+读取较长的 Statement、Schema 或 Procedure 时，可以按 Node 定位，但不得只看 Node 列表摘要。局部读取必须同时应用返回的 `context` 和 `fragment`，并覆盖当前任务涉及的全部相关 Node。
+
 ### 使用 memsphere 框架遵循流程记忆
 
 memsphere 使用 Run 记录和控制一次 Procedure 的执行过程，保证 Agent 每次只处理当前步骤，并在取得步骤产物后继续推进。
 
 #### 启动流程
 
-完整读取选中的 Procedure 后，使用它的名称启动一次 Run：
+读取执行所需的 Procedure 内容后，使用它的名称启动一次 Run：
 
 ```bash
 memsphere run start "<Procedure 名称>"

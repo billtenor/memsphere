@@ -133,6 +133,106 @@ sections:
   });
 });
 
+test("memory CLI lists and reads internal nodes across Memory kinds", async () => {
+  await withScope(async ({ nested, memoryRoot }) => {
+    await writeFile(join(memoryRoot, "concepts", "memory.yaml"), "!concept\nnames: [Memory]\ndefines: [A memory.]\n");
+    await writeFile(join(memoryRoot, "statements", "rules.yaml"), `!statement
+names: [Rules]
+asserts: [All sections apply.]
+sections:
+  - !statement
+    names: [Testing]
+    asserts: [Run tests.]
+`);
+    await writeFile(join(memoryRoot, "schemas", "report.yaml"), `!schema
+names: [Report]
+fields:
+  - Title
+  - !repeat
+    limit: { min: 1, max: 2 }
+    body:
+      - !schema
+        names: [Item]
+        fields: [Value]
+`);
+    await writeFile(join(memoryRoot, "procedures", "workflow.yaml"), `!procedure
+names: [Workflow]
+goals: [Finish.]
+flow:
+  - !if
+    condition: !action
+      action: Decide whether to continue.
+      artifact: !artifact
+        name: Continue
+        type: boolean
+    then:
+      - !action
+        action: Produce the result.
+        artifact: !artifact
+          name: Result
+          type: string
+          format: markdown
+`);
+
+    const concept = await runCli(nested, ["memory", "list", "Memory", "--output", "json"]);
+    assert.equal(concept.code, 0, concept.stderr);
+    assert.deepEqual(JSON.parse(concept.stdout).nodes, []);
+
+    const statement = await runCli(nested, ["memory", "list", "Rules", "--output", "json"]);
+    assert.equal(statement.code, 0, statement.stderr);
+    assert.equal(JSON.parse(statement.stdout).nodes[0].node_ref, "statement:Testing");
+
+    const statementRead = await runCli(nested, [
+      "memory", "read", "Rules", "--node", "statement:Testing", "--output", "json"
+    ]);
+    assert.equal(statementRead.code, 0, statementRead.stderr);
+    assert.deepEqual(JSON.parse(statementRead.stdout).context.root.asserts, ["All sections apply."]);
+
+    const schema = await runCli(nested, ["memory", "list", "Report", "--output", "json"]);
+    assert.equal(schema.code, 0, schema.stderr);
+    assert.deepEqual(JSON.parse(schema.stdout).nodes.map((node: { node_ref: string }) => node.node_ref), [
+      "string:Title",
+      "repeat[1]/schema:Item"
+    ]);
+
+    const schemaRead = await runCli(nested, [
+      "memory", "read", "Report", "--node", "repeat[1]/schema:Item/string:Value", "--output", "json"
+    ]);
+    assert.equal(schemaRead.code, 0, schemaRead.stderr);
+    assert.equal(JSON.parse(schemaRead.stdout).context.ancestors[0].type, "Repeat");
+
+    const procedure = await runCli(nested, ["memory", "list", "Workflow", "--output", "text"]);
+    assert.equal(procedure.code, 0, procedure.stderr);
+    assert.equal(procedure.stdout, "if:Continue\n");
+
+    const branch = await runCli(nested, [
+      "memory", "list", "Workflow", "--node", "if:Continue", "--output", "json"
+    ]);
+    assert.equal(branch.code, 0, branch.stderr);
+    const branchNode = JSON.parse(branch.stdout).nodes[0];
+    assert.equal(branchNode.node_ref, "if:Continue/then/action:Result");
+    assert.equal(branchNode.artifact, "Result");
+
+    const procedureRead = await runCli(nested, [
+      "memory", "read", "Workflow", "--node", "if:Continue/then/action:Result", "--output", "json"
+    ]);
+    assert.equal(procedureRead.code, 0, procedureRead.stderr);
+    const procedureResult = JSON.parse(procedureRead.stdout);
+    assert.equal(procedureResult.context.ancestors[0].relation, "then");
+    assert.equal(procedureResult.fragment.artifact.name, "Result");
+
+    const missing = await runCli(nested, ["memory", "read", "Workflow", "--node", "action:Missing"]);
+    assert.notEqual(missing.code, 0);
+    assert.equal(missing.stdout, "");
+    assert.match(missing.stderr, /memsphere memory list "procedures\/Workflow"/);
+
+    const invalidCombination = await runCli(nested, ["memory", "list", "Workflow", "--query", "Workflow"]);
+    assert.notEqual(invalidCombination.code, 0);
+    assert.equal(invalidCombination.stdout, "");
+    assert.match(invalidCombination.stderr, /cannot be used with a memory reference/);
+  });
+});
+
 test("memory CLI reports ambiguity and other failures only on stderr", async () => {
   await withScope(async ({ nested, memoryRoot }) => {
     await writeFile(join(memoryRoot, "concepts", "one.yaml"), "!concept\nnames: [Shared]\ndefines: []\n");

@@ -28,6 +28,7 @@ defines:
           - 树状规则语义
         asserts:
           - 读取一份树状 Statement 后，其中与当前任务相关的全部节点共同生效，不得只读取或应用根节点规则。
+          - 按 Node 局部读取时，返回的根级与祖先 context 和目标 fragment 必须共同生效；任务涉及其他节点时必须继续读取。
   - !schema
     asserts:
       - 根节点必须使用 !statement 标签，不得使用独立的 type 字段。

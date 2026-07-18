@@ -58,17 +58,20 @@ const memory = program
 
 memory
   .command("list")
-  .description("List memory entities in the current scope.")
-  .addOption(new Option("--kind <kind>", "filter by memory kind").choices([...memoryKinds]))
-  .option("--query <text>", "match an exact canonical name or alias")
+  .description("List memory entities or the direct child nodes of one memory.")
+  .argument("[reference]", "memory logical reference, canonical name, or alias")
+  .addOption(new Option("--kind <kind>", "filter or narrow resolution by memory kind").choices([...memoryKinds]))
+  .option("--query <text>", "match a top-level canonical name or alias")
+  .option("--node <node-ref>", "list direct children of a memory node")
   .addOption(new Option("--output <format>", "output format").choices(["yaml", "json", "text"]).default("yaml"))
-  .action((options) => memoryListCommand(options));
+  .action((reference, options) => memoryListCommand(reference, options));
 
 memory
   .command("read")
   .description("Read one memory entity by logical reference, canonical name, or alias.")
   .argument("<reference>", "logical reference, canonical name, or alias")
   .addOption(new Option("--kind <kind>", "narrow name resolution by memory kind").choices([...memoryKinds]))
+  .option("--node <node-ref>", "read one memory node with its required context")
   .addOption(new Option("--output <format>", "output format").choices(["yaml", "json"]).default("yaml"))
   .action((reference, options) => memoryReadCommand(reference, options));
 

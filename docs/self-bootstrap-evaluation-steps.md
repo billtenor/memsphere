@@ -79,6 +79,7 @@ Step 2 验证 Agent 能否发现独立的 Schema Memory，并根据 Schema 生�
 - 同时满足字段类型、必填性和嵌套结构。
 - 面对缺失字段时询问用户。
 - 在多个候选 Schema 中选择与交付物匹配的 Schema。
+- 根据实际内容整体展开 `!repeat.body`，并在重复数量超出 `limit` 时停止创建违规产物。
 - 不把 Schema 示例误当成唯一允许的内容模板。
 
 ### Step 3：选择并执行 Procedure
@@ -90,6 +91,7 @@ Step 3 验证 Agent 能否从 Procedure 开始完成任务，而不只是读取�
 - 使用 `memsphere run start` 启动一次 Run。
 - 只执行 CLI 当前返回的步骤。
 - 正确上报普通 Artifact 和文件 Artifact。
+- Schema Artifact 到达 Repeat 控制步骤时，按照 CLI 提示选择合法重复次数并完整填写每轮 body。
 - 在 human 步骤暂停，取得用户输入后继续执行到 `done`。
 
 ### 后续步骤：独立编写 Memory
@@ -134,6 +136,6 @@ Step 1 的评分应以 Statement 表达的约束边界为准，而不是要求 A
 ## 当前建设状态
 
 1. 现有六个 Concept case 已调整为 `evals/self-bootstrap-step0`，case 语义和评分标准保持不变。
-2. `evals/self-bootstrap-step2` 已建设首批六个 Schema case，覆盖简单 outline、嵌套 outline、table、Schema asserts、缺失字段和候选 Schema 选择。
-3. Statement 已确定使用递归 `sections` 组织同一领域内的规则；`evals/self-bootstrap-step1` 尚未建设 fixture 和评分标准。
-4. 树状 Statement 功能完成并验收后，再建设 Step 1 并分别运行 Step 0、Step 1 和 Step 2。
+2. `evals/self-bootstrap-step2` 已建设八个 Schema case，覆盖简单 outline、嵌套 outline、table、Schema asserts、缺失字段、候选 Schema 选择、Repeat 字段组展开和 Repeat 上限冲突。
+3. `evals/self-bootstrap-step1` 已建设七个 Statement case，覆盖平铺断言、建议边界、递归 `sections`、多份 Statement、规则冲突、信息不足和适用规则选择。
+4. Step 0、Step 1 和 Step 2 均已具备运行条件；后续分别运行并根据评测结果迭代 Memory、Skill、case 或产品能力。

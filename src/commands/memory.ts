@@ -6,8 +6,14 @@ import {
   serializeMemoryListJson,
   serializeMemoryListText,
   serializeMemoryListYaml,
+  serializeMemoryNodeListJson,
+  serializeMemoryNodeListText,
+  serializeMemoryNodeListYaml,
+  serializeMemoryNodeReadJson,
+  serializeMemoryNodeReadYaml,
   serializeMemoryYaml
 } from "../memory/serializer.js";
+import { MemoryNavigation, type MemoryIdentity } from "../memory/navigation.js";
 
 const listOutputs = ["yaml", "json", "text"] as const;
 const readOutputs = ["yaml", "json"] as const;
@@ -18,11 +24,13 @@ type ReadOutput = (typeof readOutputs)[number];
 export type MemoryListCommandOptions = {
   kind?: string;
   query?: string;
+  node?: string;
   output?: string;
 };
 
 export type MemoryReadCommandOptions = {
   kind?: string;
+  node?: string;
   output?: string;
 };
 
@@ -37,12 +45,32 @@ const defaultDependencies: MemoryCommandDependencies = {
 };
 
 export async function memoryListCommand(
+  reference: string | undefined,
   options: MemoryListCommandOptions,
   dependencies: MemoryCommandDependencies = defaultDependencies
 ): Promise<void> {
   const kind = parseKind(options.kind);
   const output = parseOutput(options.output ?? "yaml", listOutputs, "memory list");
+  if (!reference && options.node !== undefined) {
+    throw new Error("memory list --node requires a memory reference");
+  }
+  if (reference && options.query) {
+    throw new Error("memory list --query cannot be used with a memory reference");
+  }
   const catalog = await dependencies.createCatalog();
+  if (reference) {
+    const descriptor = await catalog.resolve(reference, { kind });
+    const entity = await catalog.read(descriptor.reference, { kind: descriptor.kind });
+    const navigation = new MemoryNavigation(toIdentity(descriptor), entity);
+    const page = navigation.listChildren(options.node);
+    const value = output === "json"
+      ? serializeMemoryNodeListJson(page)
+      : output === "text"
+        ? serializeMemoryNodeListText(page)
+        : serializeMemoryNodeListYaml(page);
+    dependencies.writeStdout(value);
+    return;
+  }
   const page = await catalog.list({ kind, query: options.query });
   const value = output === "json"
     ? serializeMemoryListJson(page)
@@ -60,9 +88,25 @@ export async function memoryReadCommand(
   const kind = parseKind(options.kind);
   const output = parseOutput(options.output ?? "yaml", readOutputs, "memory read");
   const catalog = await dependencies.createCatalog();
+  if (options.node !== undefined) {
+    const descriptor = await catalog.resolve(reference, { kind });
+    const entity = await catalog.read(descriptor.reference, { kind: descriptor.kind });
+    const result = new MemoryNavigation(toIdentity(descriptor), entity).readNode(options.node);
+    const value = output === "json" ? serializeMemoryNodeReadJson(result) : serializeMemoryNodeReadYaml(result);
+    dependencies.writeStdout(value);
+    return;
+  }
   const entity = await catalog.read(reference, { kind });
   const value = output === "json" ? serializeMemoryJson(entity) : serializeMemoryYaml(entity);
   dependencies.writeStdout(value);
+}
+
+function toIdentity(descriptor: { reference: string; kind: MemoryKind; names: string[] }): MemoryIdentity {
+  return {
+    reference: descriptor.reference,
+    kind: descriptor.kind,
+    names: [...descriptor.names]
+  };
 }
 
 function parseKind(value: string | undefined): MemoryKind | undefined {

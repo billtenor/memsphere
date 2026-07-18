@@ -49,7 +49,9 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "Procedure entity schema",
     "Memory 访问规则",
     "Memory 解读与应用规则",
+    "Memory 撰写规则",
     "基于 Memory 完成任务流程",
+    "敏捷需求开发流程",
     "通用流程"
   ]) {
     assert(names.has(expected), `missing reserved memory: ${expected}`);
@@ -71,6 +73,8 @@ test("init installs system memory and keeps other bundled memory reserved", asyn
     const items = await listReservedMemories(scopeRoot, memoryRoot);
 
     assert(items.some((item) => item.path === "schemas/concept.yaml"));
+    assert(items.some((item) => item.path === "statements/memory-authoring-rules.yaml"));
+    assert(items.some((item) => item.path === "procedures/agile-requirement-development.yaml"));
     assert.equal(items.some((item) => item.path === "concepts/concept.yaml"), false);
     assert(items.length > 0);
     assert(items.every((item) => item.error === undefined));
@@ -79,6 +83,8 @@ test("init installs system memory and keeps other bundled memory reserved", asyn
     const catalog = await new DefaultMemoryCatalog(new FileMemoryProvider(memoryRoot)).list();
     assert(catalog.memories.some((item) => item.reference === "concepts/Memory"));
     assert(catalog.memories.some((item) => item.reference === "procedures/通用流程"));
+    assert.equal(catalog.memories.some((item) => item.reference === "statements/Memory 撰写规则"), false);
+    assert.equal(catalog.memories.some((item) => item.reference === "procedures/敏捷需求开发流程"), false);
     assert.equal(catalog.memories.some((item) => item.reference === "schemas/Concept entity schema"), false);
   });
 });

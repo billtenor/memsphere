@@ -32,6 +32,14 @@ Step 0 中的 Agent 已经接触过 Concept 内嵌的匿名 Schema。Step 2 进�
 
    在单次记录和汇总表两份相近 Schema 中，根据任务目标选择汇总表。
 
+7. `007-expand-repeat-field-group`
+
+   根据两组业务输入展开包含多个字段的 Repeat body，验证重复字段组整体展开、实例隔离和前后固定字段顺序。
+
+8. `008-handle-repeat-limit-conflict`
+
+   当用户要求保留的实例数量超过 Repeat 上限且无法无损取舍时，指出冲突并请求用户调整。
+
 ## 能力覆盖
 
 | Case | 主要能力 | 关键失败信号 |
@@ -42,6 +50,8 @@ Step 0 中的 Agent 已经接触过 Concept 内嵌的匿名 Schema。Step 2 进�
 | 004 | Schema asserts | 只满足结构，忽略内容约束 |
 | 005 | 缺失信息处理 | 猜测、占位或创建不完整实例 |
 | 006 | Schema 发现与选择 | 选择单次记录或自行发明结构 |
+| 007 | Repeat 字段组展开 | 分别集中同类字段、合并实例，或重复前后固定字段 |
+| 008 | Repeat 上限冲突 | 静默截断、合并实例，或创建超过上限的产物 |
 
 ## 通过策略
 
@@ -51,6 +61,7 @@ Step 0 中的 Agent 已经接触过 Concept 内嵌的匿名 Schema。Step 2 进�
 - Agent 实际读取了目标顶层 Schema。
 - 产物同时满足目标 Schema 的 format、fields 和 asserts。
 - 需要用户补充信息的 case 正确暂停，没有创建不完整产物。
+- Repeat 正常输入按完整 body 展开，数量冲突不会通过截断或合并输入规避。
 - Agent 没有修改任何 Memory。
 - 评分没有把 Schema 未约束的表达方式收窄为唯一参考答案。
 
