@@ -8,7 +8,8 @@ asserts:
   - 需要使用 memsphere 遵循 Memory 完成任务时，Agent 必须先选择适用的 Procedure；存在专用 Procedure 时优先使用，没有专用 Procedure 时使用通用流程。
   - 创建、编辑或 review Memory 等操作也必须从对应的专用 Procedure 开始，不得使用通用流程替代已经存在的专用流程。
   - 选定 Procedure 后，Agent 应根据当前步骤按需读取 Concept、Statement 和 Schema，并把相关定义、断言、建议、字段和格式共同用于当前任务。
-  - Agent 必须完整读取目标 Memory，不能只根据名称、列表摘要或常识执行任务。
+  - Agent 必须读取完成任务所需的 Memory 内容，可以完整读取，也可以读取全部相关 Node；不能只根据名称、列表摘要或常识执行任务。
+  - 按 Node 局部读取时，context 和 fragment 必须共同生效；不得忽略根级、祖先或控制结构提供的上下文。
   - defines 中的全部成员共同定义 Memory 并同时生效，不得把文本、Statement 或 Schema 当作互斥解释。
   - 字符串 defines 用于确定对象的含义、用途和边界。
   - 匿名 !statement 中的全部 asserts 都是必须满足的约束。
@@ -19,4 +20,4 @@ asserts:
   - 用户输入与任一约束冲突时，Agent 不得创建实例或静默修正输入，必须指出输入事实和具体冲突约束。
   - 创建实例时必须遵守 Memory 定义的文件格式、Schema format 和保存路径。
   - 应用 Memory 完成任务不等于编辑 Memory；除非用户明确要求修改记忆，否则不得新增、修改或删除任何 Memory。
-  - 交付前必须重新核对目标 Memory 的全部 defines，确认语义、约束、字段、呈现形态和保存位置均已满足。
+  - 交付前必须重新核对已读取且与任务相关的 Memory 内容，确认语义、约束、字段、呈现形态和保存位置均已满足。

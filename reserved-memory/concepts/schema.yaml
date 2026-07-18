@@ -13,6 +13,7 @@ defines:
       - format 为 outline 时，字段名称必须成为 Markdown 标题，并按 fields 的嵌套关系形成标题层级；项目符号、键值列表、粗体标签或表格不能代替标题结构。
       - format 为 table 时，第一层 fields 必须成为 Markdown 表格列，每个列表元素占一行；标题大纲、项目符号或键值列表不能代替表格。
       - Schema 的 asserts 是对实例内容和结构的附加约束，必须与 fields 和 format 一并满足。
+      - 按 Node 局部读取嵌套字段时，返回的根级与祖先 Schema context、Repeat 限制和目标 fragment 必须共同生效。
       - 字符串 field 只提供字段名称；嵌套 !schema 用于继续描述该字段的子结构或约束。
       - "!repeat 是 outline fields 中的结构控制节点，它让 body 中的一组字段按同一轮次整体重复；自身不是字段产物，也不生成 Artifact。"
       - "!repeat 的 limit 可用 min/max 约束次数；未给 min 时按 0 理解，未给 max 时表示没有业务上限。"

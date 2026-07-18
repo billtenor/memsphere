@@ -41,13 +41,16 @@ memsphere validate
 memsphere memory list
 memsphere memory list --kind concepts --query Memory
 memsphere memory list --output json
+memsphere memory list "Repository rules"
+memsphere memory list "Repository rules" --node "statement:Testing"
 memsphere memory read concepts/Memory
 memsphere memory read 记忆 --kind concepts
 memsphere memory read Memory --output json
+memsphere memory read "Repository rules" --node "statement:Testing"
 memsphere view
 ```
 
-`memory list` discovers memories through stable logical references rather than file paths. YAML and JSON list items include `names`, prose `defines`, and counts of folded structured definitions as compact discovery metadata, analogous to a Skill's name and description; `--output text` remains compact. `memory read` accepts a logical reference, canonical name, or alias and returns the complete tagged memsphere YAML by default.
+`memory list` discovers memories through stable logical references rather than file paths. YAML and JSON list items include `names`, prose `defines`, and counts of folded structured definitions as compact discovery metadata, analogous to a Skill's name and description; `--output text` remains compact. Given a Memory reference, `memory list` returns its direct child Nodes, copyable `node_ref` values, and each Node's actual reference source, such as an Action `artifact`, an If/While `condition_artifact`, or a Call `target`. Pass a `node_ref` back through `--node` to continue listing or to read that fragment with the root and ancestor context required to interpret it. Without `--node`, `memory read` continues to return the complete tagged memsphere YAML.
 
 `view` starts a local read-only memory browser:
 

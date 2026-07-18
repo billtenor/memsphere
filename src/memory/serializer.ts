@@ -1,6 +1,7 @@
 import { Document, Pair, YAMLMap, YAMLSeq, type Node } from "yaml";
 import type { MemoryEntity } from "./ast.js";
 import type { MemoryListPage } from "./catalog.js";
+import type { MemoryNodeListPage, MemoryNodeReadResult } from "./navigation.js";
 
 export function serializeMemoryYaml(entity: MemoryEntity): string {
   return serializeYaml(entity);
@@ -26,6 +27,27 @@ export function serializeMemoryListText(page: MemoryListPage): string {
       ? `${memory.reference} (${aliases.join(", ")})`
       : memory.reference;
   }).join("\n")}\n`;
+}
+
+export function serializeMemoryNodeListYaml(page: MemoryNodeListPage): string {
+  return serializeYaml(page);
+}
+
+export function serializeMemoryNodeListJson(page: MemoryNodeListPage): string {
+  return `${JSON.stringify(page, null, 2)}\n`;
+}
+
+export function serializeMemoryNodeListText(page: MemoryNodeListPage): string {
+  if (page.nodes.length === 0) return "";
+  return `${page.nodes.map((node) => node.node_ref).join("\n")}\n`;
+}
+
+export function serializeMemoryNodeReadYaml(result: MemoryNodeReadResult): string {
+  return serializeYaml(result);
+}
+
+export function serializeMemoryNodeReadJson(result: MemoryNodeReadResult): string {
+  return `${JSON.stringify(result, null, 2)}\n`;
 }
 
 function serializeYaml(value: unknown): string {
