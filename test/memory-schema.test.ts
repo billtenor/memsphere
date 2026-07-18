@@ -480,6 +480,55 @@ fields: [summary]
 `).format, "outline");
 });
 
+test("Schema outline fields support mapping Repeat groups and limits", () => {
+  const entity = parseSchema(`!schema
+names: [decision record]
+fields:
+  - context
+  - !repeat
+    limit:
+      min: 1
+      max: 3
+    body:
+      - !schema
+        names: [decision]
+        fields: [conclusion]
+      - owner
+  - summary
+`);
+
+  const repeat = entity.fields?.[1];
+  assert.equal(typeof repeat === "object" ? repeat.tag : undefined, "!repeat");
+  if (typeof repeat === "object" && repeat.tag === "!repeat") {
+    assert.deepEqual(repeat.limit, { min: 1, max: 3 });
+    assert.equal(repeat.body.length, 2);
+  }
+});
+
+test("Schema Repeat rejects invalid shape, limits, nesting, and table usage", () => {
+  const invalidSources = [
+    `!schema\nnames: [empty body]\nfields:\n  - !repeat\n    body: []\n`,
+    `!schema\nnames: [empty limit]\nfields:\n  - !repeat\n    limit: {}\n    body: [value]\n`,
+    `!schema\nnames: [negative]\nfields:\n  - !repeat\n    limit: { min: -1 }\n    body: [value]\n`,
+    `!schema\nnames: [fraction]\nfields:\n  - !repeat\n    limit: { max: 1.5 }\n    body: [value]\n`,
+    `!schema\nnames: [reversed]\nfields:\n  - !repeat\n    limit: { min: 3, max: 2 }\n    body: [value]\n`,
+    `!schema\nnames: [nested]\nfields:\n  - !repeat\n    body:\n      - !repeat\n        body: [value]\n`,
+    `!schema\nnames: [nested in schema]\nfields:\n  - !repeat\n    body:\n      - !schema\n        names: [item]\n        fields:\n          - !repeat\n            body: [value]\n`,
+    `!schema\nnames: [unknown]\nfields:\n  - !repeat\n    body: [value]\n    extra: true\n`,
+    `!schema\nnames: [table]\nformat: table\nelement_types: [Schema]\nfields:\n  - !repeat\n    body: [value]\n`
+  ];
+
+  for (const source of invalidSources) {
+    assert.throws(() => parseSchema(source));
+  }
+
+  assert.throws(() => parseSchema(`!schema
+names: [sequence repeat]
+fields:
+  - !repeat [value]
+`));
+});
+
 test("format is rejected on memory types without format implementations", () => {
   assert.throws(() => conceptMemorySchema.parse(parseMemoryYaml(`!concept
 names: [invalid]

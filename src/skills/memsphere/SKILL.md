@@ -70,6 +70,20 @@ defines:
 - `defines` 用于定义这份 Memory；其中的全部成员共同生效。
 - 不同类型还拥有自己的字段。编写或解释某种 Memory 前，读取对应的 Concept Memory 了解完整语义和字段规则。
 
+Schema 的 outline `fields` 可以使用 mapping 形式的 `!repeat`，把非空 `body` 中的一组字符串或 `!schema` 字段整体重复。`limit.min/max` 如出现必须是非负整数且 `min <= max`。首版不允许 Repeat 嵌套，也不允许把 Repeat 放在 table、defines、flow 或其他位置：
+
+```yaml
+fields:
+  - 背景
+  - !repeat
+    limit: { min: 1, max: 3 }
+    body:
+      - !schema
+        names: [决策]
+        fields: [结论, 负责人]
+  - 总结
+```
+
 ## Memsphere 如何遵循记忆
 
 ### 永远从流程记忆开始
@@ -140,6 +154,14 @@ memsphere run report --run <Run ID> --artifact-file <文件路径>
 ```
 
 Schema 产物按照 CLI 提示进入 Schema 填写流程。不要自己猜测下一条命令，以当前 CLI 输出的 `Then` 为准。
+
+当 Schema Run 到达 `!repeat` 控制步骤时，CLI 不要求 Artifact，而会提示一次提交总重复次数：
+
+```bash
+memsphere run repeat <count> --run <Run ID>
+```
+
+次数必须满足当前步骤显示的 min/max。提交后，Run 会按轮次展开完整 body，再继续逐项产出普通字段 Artifact。
 
 上报成功后，CLI 会返回下一个待执行步骤；继续执行和上报，直到显示 `done`。
 

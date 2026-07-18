@@ -16,6 +16,15 @@ test("memory view recognizes only tagged actions and renders recursive typed str
   assert.match(browserHtml, /typeof child === "string"/);
 });
 
+test("browser renders Schema Repeat structure and its Run control command", () => {
+  assert.match(browserHtml, /function renderSchemaRepeat\(node, depth, path\)/);
+  assert.match(browserHtml, /child\.tag === "!repeat"/);
+  assert.match(browserHtml, /body\.append\(children\)/);
+  assert.doesNotMatch(browserHtml, /body\.append\(blockTitle\("body"\), children\)/);
+  assert.match(browserHtml, /"memsphere run repeat <count> --run "/);
+  assert.match(browserHtml, /const isRepeat = step\.kind === "repeat" && step\.repeat/);
+});
+
 test("task step artifact area is hidden when no event exists", () => {
   assert.equal(shouldRenderTaskStepArtifact(undefined), false);
   assert.equal(shouldRenderTaskStepArtifact(null), false);

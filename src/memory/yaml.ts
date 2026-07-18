@@ -13,7 +13,7 @@ const memoryYamlTags: CollectionTag[] = Object.values(memoryKindTags).map((tag) 
   collection: "map"
 }));
 
-const nestedStructTags: CollectionTag[] = ["!action", "!artifact", "!if", "!while", "!call"].map((tag) => ({
+const nestedStructTags: CollectionTag[] = ["!action", "!artifact", "!if", "!while", "!call", "!repeat"].map((tag) => ({
   tag,
   collection: "map"
 }));

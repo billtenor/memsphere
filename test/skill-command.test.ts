@@ -20,6 +20,7 @@ test("skill init installs only the unified memsphere skill", async () => {
     assert.match(source, /memsphere memory list/);
     assert.match(source, /memsphere memory read/);
     assert.match(source, /memsphere run start/);
+    assert.match(source, /memsphere run repeat/);
     assert.doesNotMatch(source, /--output yaml/);
     assert.doesNotMatch(source, /\.memsphere\/memory\/concepts/);
   } finally {

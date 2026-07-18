@@ -10,7 +10,13 @@ import {
 import { initCommand } from "./commands/init.js";
 import { memoryListCommand, memoryReadCommand } from "./commands/memory.js";
 import { memoryKinds } from "./memory/kinds.js";
-import { runEnterSchemaCommand, runReportCommand, runStartCommand, runStatusCommand } from "./commands/run.js";
+import {
+  runEnterSchemaCommand,
+  runRepeatCommand,
+  runReportCommand,
+  runStartCommand,
+  runStatusCommand
+} from "./commands/run.js";
 import { skillInitCommand } from "./commands/skill.js";
 import { validateCommand } from "./commands/validate.js";
 import {
@@ -132,6 +138,13 @@ run
   .argument("[schema-name]", "schema primary name or alias; omit for the current inline schema")
   .requiredOption("--run <id>", "run id")
   .action(runEnterSchemaCommand);
+
+run
+  .command("repeat")
+  .description("Choose a repeat count for the current Schema Repeat step.")
+  .argument("<count>", "non-negative repeat count within the Schema limit")
+  .requiredOption("--run <id>", "run id")
+  .action(runRepeatCommand);
 
 run
   .command("status")

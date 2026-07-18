@@ -12,8 +12,10 @@ import {
   type FlowNode,
   type IfNode,
   type ProcedureMemory,
+  type RepeatNode,
   type SchemaMemory,
   type SchemaNode,
+  type StaticSchemaField,
   type StatementNode,
   type StepActor,
   type WhileNode
@@ -37,7 +39,7 @@ export type RunFrame = {
 
 export type RunStep = {
   id: string;
-  kind?: "action" | "branch" | "loop" | "call";
+  kind?: "action" | "branch" | "loop" | "call" | "repeat";
   instruction: string;
   actor?: StepActor;
   artifact?: string;
@@ -56,6 +58,13 @@ export type RunStep = {
   };
   loop?: {
     body: RunStep[];
+  };
+  repeat?: {
+    parentPath: string;
+    fieldIndex: number;
+    body: StaticSchemaField[];
+    min: number;
+    max?: number;
   };
 };
 
@@ -99,7 +108,7 @@ export type RunState = {
 const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
   z.object({
     id: z.string(),
-    kind: z.enum(["action", "branch", "loop", "call"]).optional(),
+    kind: z.enum(["action", "branch", "loop", "call", "repeat"]).optional(),
     instruction: z.string(),
     actor: z.enum(stepActors).optional(),
     artifact: z.string().optional(),
@@ -118,6 +127,13 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
     }).optional(),
     loop: z.object({
       body: z.array(runStepSchema)
+    }).optional(),
+    repeat: z.object({
+      parentPath: z.string(),
+      fieldIndex: z.number().int().nonnegative(),
+      body: z.custom<StaticSchemaField[]>(),
+      min: z.number().int().nonnegative(),
+      max: z.number().int().nonnegative().optional()
     }).optional()
   })
 );
@@ -241,6 +257,9 @@ export async function reportRun(input: { runsRoot: string; runId: string; artifa
 
   const frame = currentFrame(run);
   const step = currentStep(run);
+  if (step?.kind === "repeat") {
+    throw new Error(`current step is Repeat control; use memsphere run repeat <count> --run ${input.runId}`);
+  }
   if (!frame || !step || !step.artifact || !step.format) {
     run.status = "done";
     run.updatedAt = new Date().toISOString();
@@ -260,6 +279,36 @@ export async function reportRun(input: { runsRoot: string; runId: string; artifa
 
   frame.index += 1;
   applyControlStep(frame, step, controlValue);
+  await collapseCompletedFrames(input.runsRoot, run);
+  await expandAutoCallSteps(run);
+  run.updatedAt = new Date().toISOString();
+  await writeRun(input.runsRoot, run);
+  return run;
+}
+
+export async function repeatRun(input: { runsRoot: string; runId: string; count: number }): Promise<RunState> {
+  const run = await readRun(input.runsRoot, input.runId);
+  if (run.status === "done") {
+    throw new Error(`run is already done: ${input.runId}`);
+  }
+
+  const frame = currentFrame(run);
+  const step = currentStep(run);
+  if (!frame || step?.kind !== "repeat" || !step.repeat) {
+    throw new Error(`current step is not Repeat control: ${input.runId}`);
+  }
+  if (!Number.isSafeInteger(input.count) || input.count < 0) {
+    throw new Error("repeat count must be a non-negative integer");
+  }
+  if (input.count < step.repeat.min) {
+    throw new Error(`repeat count must be at least ${step.repeat.min}`);
+  }
+  if (step.repeat.max !== undefined && input.count > step.repeat.max) {
+    throw new Error(`repeat count must be at most ${step.repeat.max}`);
+  }
+
+  const expanded = compileRepeatBody(step.repeat, input.count);
+  frame.steps.splice(frame.index, 1, ...expanded);
   await collapseCompletedFrames(input.runsRoot, run);
   await expandAutoCallSteps(run);
   run.updatedAt = new Date().toISOString();
@@ -501,7 +550,13 @@ function cloneStep(step: RunStep): RunStep {
           falsy: cloneSteps(step.branches.falsy)
         }
       : undefined,
-    loop: step.loop ? { body: cloneSteps(step.loop.body) } : undefined
+    loop: step.loop ? { body: cloneSteps(step.loop.body) } : undefined,
+    repeat: step.repeat
+      ? {
+          ...step.repeat,
+          body: JSON.parse(JSON.stringify(step.repeat.body)) as StaticSchemaField[]
+        }
+      : undefined
   };
 }
 
@@ -676,20 +731,64 @@ function walkSchema(node: SchemaNode, path: string, steps: RunStep[]): void {
       .concat((node.asserts ?? []).map((value) => `asserts: ${value}`))
   });
 
-  for (const child of node.fields ?? []) {
+  for (const [fieldIndex, child] of (node.fields ?? []).entries()) {
     if (typeof child === "string") {
-      const childPath = `${path}.${child}`;
-      steps.push({
-        id: `schema:${childPath}`,
-        instruction: `Write ${childPath}`,
-        actor: "agent",
-        artifact: childPath,
-        format: "string"
-      });
+      steps.push(compileStringSchemaStep(`${path}.${child}`));
+      continue;
+    }
+    if (child.tag === "!repeat") {
+      steps.push(compileRepeatStep(child, path, fieldIndex));
       continue;
     }
     walkSchema(child, `${path}.${child.names[0]}`, steps);
   }
+}
+
+function compileStringSchemaStep(path: string): RunStep {
+  return {
+    id: `schema:${path}`,
+    instruction: `Write ${path}`,
+    actor: "agent",
+    artifact: path,
+    format: "string"
+  };
+}
+
+function compileRepeatStep(node: RepeatNode, parentPath: string, fieldIndex: number): RunStep {
+  const min = node.limit?.min ?? 0;
+  const max = node.limit?.max;
+  return {
+    id: `schema:${parentPath}.fields[${fieldIndex + 1}].repeat`,
+    kind: "repeat",
+    instruction: `Choose how many times to repeat the field group in ${parentPath}`,
+    actor: "agent",
+    details: [
+      `min: ${min}`,
+      `max: ${max === undefined ? "unbounded" : max}`,
+      `body fields: ${node.body.length}`
+    ],
+    repeat: {
+      parentPath,
+      fieldIndex,
+      body: JSON.parse(JSON.stringify(node.body)) as StaticSchemaField[],
+      min,
+      max
+    }
+  };
+}
+
+function compileRepeatBody(repeat: NonNullable<RunStep["repeat"]>, count: number): RunStep[] {
+  const steps: RunStep[] = [];
+  for (let iteration = 1; iteration <= count; iteration += 1) {
+    for (const child of repeat.body) {
+      if (typeof child === "string") {
+        steps.push(compileStringSchemaStep(`${repeat.parentPath}.${child}[${iteration}]`));
+      } else {
+        walkSchema(child, `${repeat.parentPath}.${child.names[0]}[${iteration}]`, steps);
+      }
+    }
+  }
+  return steps;
 }
 
 function cloneSchema(schema: SchemaNode): SchemaNode {

@@ -47,14 +47,26 @@ const entities: MemoryEntity[] = [
     tag: "!schema",
     names: ["Record"],
     defines: [],
-    format: "table",
-    element_types: ["Schema"],
+    format: "outline",
     fields: [
       {
         tag: "!schema",
         names: ["title"],
         defines: ["A title: with punctuation"],
         element_types: ["string"]
+      },
+      {
+        tag: "!repeat",
+        limit: { min: 1, max: 2 },
+        body: [
+          "note",
+          {
+            tag: "!schema",
+            names: ["decision"],
+            defines: [],
+            fields: ["conclusion"]
+          }
+        ]
       }
     ]
   },

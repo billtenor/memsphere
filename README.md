@@ -238,7 +238,37 @@ fields:
           - 说明需求来源、业务背景和为什么现在需要解决。
 ```
 
-`Schema.fields` has type `List<string | Schema>`. A string is the shortest field form and only supplies the field name. A nested `!schema` supplies richer descriptions, assertions, item types, or child fields, and must have a non-empty `names` value when used in `fields`.
+`Schema.fields` has type `List<string | Schema | Repeat>`. A string is the shortest field form and only supplies the field name. A nested `!schema` supplies richer descriptions, assertions, item types, or child fields, and must have a non-empty `names` value when used in `fields`.
+
+An outline Schema may use a mapping `!repeat` field to repeat a non-empty group of fields:
+
+```yaml
+!schema
+names: [关键决策记录]
+format: outline
+fields:
+  - 背景
+  - !repeat
+    limit:
+      min: 1
+      max: 3
+    body:
+      - !schema
+        names: [决策]
+        fields:
+          - 结论
+          - 理由
+      - 负责人
+  - 总结
+```
+
+`body` has type `List<string | Schema>` and repeats as one group, producing stable Run paths such as `关键决策记录.决策[2].结论` and `关键决策记录.负责人[2]`. `limit` is optional; its `min` and `max` values are optional non-negative integers, at least one must be present when `limit` exists, and `min` cannot exceed `max`. Repeat is not allowed in table Schemas, `defines`, Procedure `flow`, or another Repeat body.
+
+When a Schema Run reaches Repeat, choose the total count once. This control action creates no Artifact:
+
+```bash
+memsphere run repeat 2 --run <run-id>
+```
 
 `Schema.element_types` describes `List<T>`. Its non-empty entries are the allowed element types. For example, `element_types: [string]` means `List<string>` and `element_types: [string, Statement, Schema]` means `List<string | Statement | Schema>`.
 

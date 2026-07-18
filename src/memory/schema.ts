@@ -14,9 +14,11 @@ import {
   type IfNode,
   type MemoryEntity,
   type ProcedureMemory,
+  type RepeatNode,
   type SchemaField,
   type SchemaMemory,
   type SchemaNode,
+  type StaticSchemaField,
   type StatementMemory,
   type StatementNode,
   type WhileNode
@@ -27,6 +29,7 @@ const stringArray = z.array(nonEmptyString).default([]);
 const namesSchema = z.array(nonEmptyString).default([]);
 
 let definitionPartSchema: z.ZodType<DefinitionPart, z.ZodTypeDef, unknown>;
+let staticSchemaFieldSchema: z.ZodType<StaticSchemaField, z.ZodTypeDef, unknown>;
 let schemaFieldSchema: z.ZodType<SchemaField, z.ZodTypeDef, unknown>;
 let flowNodeSchema: z.ZodType<FlowNode, z.ZodTypeDef, unknown>;
 let ifNodeSchema: z.ZodType<IfNode, z.ZodTypeDef, unknown>;
@@ -127,13 +130,22 @@ const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(()
           message: "table Schema must define at least one field"
         });
       }
+      for (const [index, field] of (node.fields ?? []).entries()) {
+        if (typeof field === "object" && field.tag === "!repeat") {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["fields", index],
+            message: "Repeat is only allowed in outline Schema fields"
+          });
+        }
+      }
     }
   })
 );
 
 definitionPartSchema = z.lazy(() => z.union([nonEmptyString, statementNodeSchema, schemaNodeSchema]));
 
-schemaFieldSchema = z.lazy(() => z.union([
+staticSchemaFieldSchema = z.lazy(() => z.union([
   nonEmptyString,
   schemaNodeSchema.superRefine((field, context) => {
     if (field.names.length === 0) {
@@ -145,6 +157,50 @@ schemaFieldSchema = z.lazy(() => z.union([
     }
   })
 ]));
+
+const repeatLimitSchema = z.object({
+  min: z.number().int().nonnegative().optional(),
+  max: z.number().int().nonnegative().optional()
+}).strict().superRefine((limit, context) => {
+  if (limit.min === undefined && limit.max === undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Repeat limit must define min or max"
+    });
+  }
+  if (limit.min !== undefined && limit.max !== undefined && limit.min > limit.max) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["max"],
+      message: "Repeat limit max must be greater than or equal to min"
+    });
+  }
+});
+
+function schemaContainsRepeat(node: SchemaNode): boolean {
+  return (node.fields ?? []).some((field) =>
+    typeof field === "object" && (
+      field.tag === "!repeat" || schemaContainsRepeat(field)
+    )
+  );
+}
+
+const repeatBodyFieldSchema = z.lazy(() => staticSchemaFieldSchema.superRefine((field, context) => {
+  if (typeof field === "object" && schemaContainsRepeat(field)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Repeat body must not contain a nested Repeat"
+    });
+  }
+}));
+
+const repeatNodeSchema: z.ZodType<RepeatNode, z.ZodTypeDef, unknown> = z.object({
+  tag: z.literal("!repeat"),
+  limit: repeatLimitSchema.optional(),
+  body: z.array(repeatBodyFieldSchema).min(1)
+}).strict();
+
+schemaFieldSchema = z.lazy(() => z.union([staticSchemaFieldSchema, repeatNodeSchema]));
 
 export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> = z.object({
   tag: z.literal("!artifact"),
@@ -276,7 +332,16 @@ export const procedureMemorySchema: z.ZodType<ProcedureMemory, z.ZodTypeDef, unk
   }).strict()
 );
 
-export { definitionPartSchema, flowNodeSchema, ifNodeSchema, schemaFieldSchema, schemaNodeSchema, statementNodeSchema };
+export {
+  definitionPartSchema,
+  flowNodeSchema,
+  ifNodeSchema,
+  repeatNodeSchema,
+  schemaFieldSchema,
+  schemaNodeSchema,
+  statementNodeSchema,
+  staticSchemaFieldSchema
+};
 
 export const memorySchemas = {
   procedures: procedureMemorySchema,

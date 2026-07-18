@@ -4,7 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { memoryKinds } from "../src/memory/kinds.js";
-import { activeProcedureAsserts, artifactSchemaName, enterSchema, finalArtifacts, readRun, reportRun, startRun } from "../src/run/store.js";
+import {
+  activeProcedureAsserts,
+  artifactSchemaName,
+  currentStep,
+  enterSchema,
+  finalArtifacts,
+  readRun,
+  repeatRun,
+  reportRun,
+  startRun
+} from "../src/run/store.js";
 import { validateMemoryStore } from "../src/validation.js";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
@@ -556,6 +566,67 @@ fields:
     assert(schemaFrame?.steps[0].details?.includes("suggests: Prefer direct wording."));
     assert(schemaFrame?.steps[0].details?.includes("asserts [Formatting]: Use Markdown headings."));
     assert(schemaFrame?.steps[0].details?.includes("suggests [Formatting > Examples]: Include one example when useful."));
+  });
+});
+
+test("schema Repeat persists its control step and expands a chosen count without artifacts", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const schemasRoot = join(memoryRoot, "schemas");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await mkdir(schemasRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "target.yaml"), `!procedure
+names: [target-procedure]
+flow:
+  - !action
+    action: Capture schema.
+    artifact: !artifact
+      name: schema result
+      format: schema
+      schema: repeat-schema
+`);
+    await writeFile(join(schemasRoot, "repeat.yaml"), `!schema
+names: [repeat-schema]
+fields:
+  - context
+  - !repeat
+    limit: { min: 1, max: 3 }
+    body:
+      - !schema
+        names: [decision]
+        fields: [conclusion]
+      - owner
+  - summary
+`);
+
+    const started = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
+    await enterSchema({ memoryRoot, runsRoot, runId: started.id, schemaName: "repeat-schema" });
+    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Record" } });
+    const waiting = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "context" } });
+
+    assert.equal(currentStep(waiting)?.kind, "repeat");
+    assert.deepEqual(currentStep(waiting)?.repeat?.body.map((field) => typeof field === "string" ? field : field.names[0]), ["decision", "owner"]);
+    assert.equal((await readRun(runsRoot, started.id)).stack.at(-1)?.steps.at(-2)?.kind, "repeat");
+    await assert.rejects(
+      reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "2" } }),
+      /run repeat/
+    );
+    await assert.rejects(repeatRun({ runsRoot, runId: started.id, count: 0 }), /at least 1/);
+    await assert.rejects(repeatRun({ runsRoot, runId: started.id, count: 4 }), /at most 3/);
+
+    const expanded = await repeatRun({ runsRoot, runId: started.id, count: 2 });
+    assert.equal(expanded.events.length, 2);
+    assert.deepEqual(expanded.stack.at(-1)?.steps.slice(expanded.stack.at(-1)?.index).map((step) => step.artifact), [
+      "repeat-schema.decision[1]",
+      "repeat-schema.decision[1].conclusion",
+      "repeat-schema.owner[1]",
+      "repeat-schema.decision[2]",
+      "repeat-schema.decision[2].conclusion",
+      "repeat-schema.owner[2]",
+      "repeat-schema.summary"
+    ]);
   });
 });
 

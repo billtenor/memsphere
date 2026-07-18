@@ -318,6 +318,7 @@ export const browserHtml = String.raw`<!doctype html>
       else: { zh: "否则", yaml: "else" },
       while: { zh: "循环判断", yaml: "!while" },
       call: { zh: "调用流程", yaml: "!call" },
+      repeat: { zh: "重复字段组", yaml: "!repeat" },
       actor: { zh: "执行者", yaml: "actor" },
       agent: { zh: "Agent", yaml: "agent" },
       human: { zh: "人", yaml: "human" },
@@ -777,7 +778,9 @@ export const browserHtml = String.raw`<!doctype html>
       const frame = currentRunFrame(run);
       const section = document.createElement("section");
       section.className = "section open task-step inline-schema-host";
-      section.append(taskSectionHeader("Next: " + step.artifact, formatLabel(step.format), "next-step"));
+      const isRepeat = step.kind === "repeat" && step.repeat;
+      const title = isRepeat ? t("repeat") : step.artifact;
+      section.append(taskSectionHeader("Next: " + title, isRepeat ? "!repeat" : formatLabel(step.format), "next-step"));
       const panel = document.createElement("div");
       panel.className = "section-body";
       panel.append(blockTitle(t("action")));
@@ -799,14 +802,16 @@ export const browserHtml = String.raw`<!doctype html>
       const artifact = document.createElement("div");
       artifact.className = "meta";
       if (step.kind) artifact.append(pill(step.kind));
-      appendArtifactMeta(artifact, step);
+      if (!isRepeat) appendArtifactMeta(artifact, step);
       artifact.append(pill((frame?.type || "run") + " · " + (frame ? (frame.index + 1) + "/" + frame.steps.length : "")));
       panel.append(artifact);
       const command = document.createElement("div");
       command.className = "pre mono";
-      command.textContent = step.format === "schema"
-        ? "memsphere run enter-schema" + (step.inlineSchema ? "" : " " + shellQuote(step.schemaName || step.artifact)) + " --run " + shellQuote(run.id)
-        : "memsphere run report --run " + shellQuote(run.id) + " --artifact <value>";
+      command.textContent = isRepeat
+        ? "memsphere run repeat <count> --run " + shellQuote(run.id)
+        : step.format === "schema"
+          ? "memsphere run enter-schema" + (step.inlineSchema ? "" : " " + shellQuote(step.schemaName || step.artifact)) + " --run " + shellQuote(run.id)
+          : "memsphere run report --run " + shellQuote(run.id) + " --artifact <value>";
       panel.append(blockTitle(t("then")));
       panel.append(command);
       section.append(panel);
@@ -1323,14 +1328,42 @@ export const browserHtml = String.raw`<!doctype html>
         const children = document.createElement("div");
         children.className = "child-stack";
         for (const child of node.fields) {
-          const childName = typeof child === "string" ? child : displayName(child, t("schema"));
+          const childName = typeof child === "string"
+            ? child
+            : child.tag === "!repeat"
+              ? t("repeat")
+              : displayName(child, t("schema"));
           const childPath = path + " > " + childName;
           children.append(typeof child === "string"
             ? renderSimpleSchemaField(child, childPath)
-            : renderSchema(child, depth + 1, childPath));
+            : child.tag === "!repeat"
+              ? renderSchemaRepeat(child, depth + 1, childPath)
+              : renderSchema(child, depth + 1, childPath));
         }
         body.append(blockTitle(t("fields")), children);
       }
+      section.append(body);
+      return section;
+    }
+
+    function renderSchemaRepeat(node, depth, path) {
+      const section = document.createElement("div");
+      section.className = "section schema-node" + (depth < 2 ? " open" : "");
+      const min = node.limit && node.limit.min !== undefined ? node.limit.min : 0;
+      const max = node.limit && node.limit.max !== undefined ? node.limit.max : "unbounded";
+      section.append(sectionHeader(t("repeat"), ["!repeat", "min: " + min, "max: " + max], path, "schema:" + path));
+      const body = document.createElement("div");
+      body.className = "section-body";
+      const children = document.createElement("div");
+      children.className = "child-stack";
+      for (const child of node.body || []) {
+        const childName = typeof child === "string" ? child : displayName(child, t("schema"));
+        const childPath = path + " > " + childName;
+        children.append(typeof child === "string"
+          ? renderSimpleSchemaField(child, childPath)
+          : renderSchema(child, depth + 1, childPath));
+      }
+      body.append(children);
       section.append(body);
       return section;
     }

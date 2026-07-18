@@ -43,3 +43,39 @@ test("run output separates Procedure assertions from Action assertions", () => {
   assert.match(output, /Asserts:\n- Check this step\./);
   assert(output.indexOf("Procedure Asserts:") < output.indexOf("\nAsserts:"));
 });
+
+test("run output presents Repeat as control without an Artifact", () => {
+  const run: RunState = {
+    id: "run-repeat",
+    status: "running",
+    procedureName: "repeat-procedure",
+    memoryRoot: "/memory",
+    createdAt: "2026-07-17T00:00:00.000Z",
+    updatedAt: "2026-07-17T00:00:00.000Z",
+    stack: [{
+      type: "schema",
+      memoryName: "record",
+      steps: [{
+        id: "schema:record.fields[1].repeat",
+        kind: "repeat",
+        instruction: "Choose repeat count.",
+        repeat: { parentPath: "record", fieldIndex: 0, body: ["item"], min: 1, max: 3 }
+      }],
+      index: 0
+    }],
+    events: []
+  };
+  const lines: string[] = [];
+  const originalLog = console.log;
+  console.log = (...values: unknown[]) => lines.push(values.join(" "));
+  try {
+    printRunState(run);
+  } finally {
+    console.log = originalLog;
+  }
+
+  const output = lines.join("\n");
+  assert.match(output, /allowed count: 1\.\.3/);
+  assert.match(output, /memsphere run repeat <count> --run run-repeat/);
+  assert.doesNotMatch(output, /Artifact:/);
+});

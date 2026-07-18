@@ -8,6 +8,7 @@ import {
   finalArtifacts,
   listRuns,
   readRun,
+  repeatRun,
   reportRun,
   startRun,
   type RunState
@@ -54,6 +55,20 @@ export async function runEnterSchemaCommand(schemaName: string | undefined, opti
     runId,
     schemaName
   });
+  printRunState(run);
+}
+
+export async function runRepeatCommand(countValue: string, options: RunIdOptions): Promise<void> {
+  const runId = requireRunId(options.run);
+  if (!/^\d+$/.test(countValue)) {
+    throw new Error("repeat count must be a non-negative integer");
+  }
+  const count = Number(countValue);
+  if (!Number.isSafeInteger(count)) {
+    throw new Error("repeat count must be a safe integer");
+  }
+  const config = await readConfig();
+  const run = await repeatRun({ runsRoot: config.runsRoot, runId, count });
   printRunState(run);
 }
 
@@ -109,6 +124,23 @@ export function printRunState(run: RunState): void {
 
   const frame = currentFrame(run);
   const step = currentStep(run);
+  if (frame && step?.kind === "repeat" && step.repeat) {
+    const max = step.repeat.max === undefined ? "unbounded" : String(step.repeat.max);
+    console.log("");
+    console.log("Actor:");
+    console.log("agent");
+    console.log("");
+    console.log("Do:");
+    console.log(step.instruction);
+    console.log("");
+    console.log("Details:");
+    console.log(`- allowed count: ${step.repeat.min}..${max}`);
+    console.log(`- body fields: ${step.repeat.body.length}`);
+    console.log("");
+    console.log("Then:");
+    console.log(`memsphere run repeat <count> --run ${run.id}`);
+    return;
+  }
   if (!frame || !step || !step.artifact || !step.format) {
     console.log("done");
     return;

@@ -14,6 +14,9 @@ defines:
       - format 为 table 时，第一层 fields 必须成为 Markdown 表格列，每个列表元素占一行；标题大纲、项目符号或键值列表不能代替表格。
       - Schema 的 asserts 是对实例内容和结构的附加约束，必须与 fields 和 format 一并满足。
       - 字符串 field 只提供字段名称；嵌套 !schema 用于继续描述该字段的子结构或约束。
+      - "!repeat 是 outline fields 中的结构控制节点，它让 body 中的一组字段按同一轮次整体重复；自身不是字段产物，也不生成 Artifact。"
+      - "!repeat 的 limit 可用 min/max 约束次数；未给 min 时按 0 理解，未给 max 时表示没有业务上限。"
+      - "!repeat 不允许用于 table、defines、Procedure flow 或其他位置，body 中也不能再次嵌套 !repeat。"
       - element_types 表示 Schema 描述的是列表，列出的类型是允许的列表元素类型；它不改变 format 的呈现语义。
   - !schema
     format: outline
@@ -63,4 +66,4 @@ defines:
           - string
           - Schema
         defines:
-          - 可选，由最简字段名或嵌套 !schema 组成的子结构。
+          - 可选，由最简字段名、嵌套 !schema 或 !repeat 重复字段组组成的子结构。

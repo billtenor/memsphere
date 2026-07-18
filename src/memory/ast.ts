@@ -42,7 +42,20 @@ export type StatementNode = CommonMemoryNode & {
   sections?: StatementNode[];
 };
 
-export type SchemaField = string | SchemaNode;
+export type RepeatLimitNode = {
+  min?: number;
+  max?: number;
+};
+
+export type StaticSchemaField = string | SchemaNode;
+
+export type RepeatNode = {
+  tag: "!repeat";
+  limit?: RepeatLimitNode;
+  body: StaticSchemaField[];
+};
+
+export type SchemaField = StaticSchemaField | RepeatNode;
 
 export type SchemaNode = CommonMemoryNode & {
   tag: "!schema";
