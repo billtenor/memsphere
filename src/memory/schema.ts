@@ -186,7 +186,7 @@ const artifactFormatInputSchema = z.union([
 export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> = z.object({
   tag: z.literal("!artifact"),
   name: nonEmptyString,
-  type: nonEmptyString,
+  type: nonEmptyString.default("string"),
   format: artifactFormatInputSchema,
   schema: z.lazy(() => z.union([nonEmptyString, schemaNodeSchema])).optional(),
   final: z.boolean().optional()

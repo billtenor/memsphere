@@ -45,9 +45,11 @@ flow:
   const written = await writeArtifactContractV2Migration(config);
   assert(written.backupRoot);
   const migrated = await readFile(procedurePath, "utf8");
-  assert.match(migrated, /type: string/);
+  assert.doesNotMatch(migrated, /type: string/);
   assert.doesNotMatch(migrated, /format: string/);
-  await readMemoryFile("procedures", procedurePath);
+  const memory = await readMemoryFile("procedures", procedurePath);
+  const step = memory.entity.tag === "!procedure" ? memory.entity.flow[0] : undefined;
+  assert.equal(step?.tag === "!action" ? step.artifact.type : undefined, "string");
 
   const second = await checkArtifactContractV2Migration(config, { includeRuns: false });
   assert.equal(second.manifest.status, "ready");
@@ -77,6 +79,32 @@ flow:
   const result = await checkArtifactContractV2Migration(config, { includeRuns: false });
   assert.equal(result.manifest.status, "blocked");
   assert.equal(result.manifest.issues[0]?.code, "migration.artifact.structured_type_required");
+});
+
+test("Artifact Contract v2 check rejects prepared output that still uses Schema format", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-artifact-v2-invalid-output-"));
+  const memoryRoot = join(root, "memory");
+  for (const kind of ["procedures", "concepts", "statements", "schemas"]) {
+    await mkdir(join(memoryRoot, kind), { recursive: true });
+  }
+  await writeFile(join(memoryRoot, "concepts", "legacy.yaml"), `!concept
+names: [legacy]
+defines:
+  - !schema
+    format: outline
+    fields: [summary]
+`);
+  const config: MemsphereConfig = {
+    configPath: join(root, "config.json"), scopeRoot: root, memoryRoot,
+    reviewsRoot: join(root, "reviews"), runsRoot: join(root, "runs"), archiveRoot: join(root, "archives"),
+    view: { host: "127.0.0.1", port: 0 }
+  };
+
+  const result = await checkArtifactContractV2Migration(config, { includeRuns: false });
+  assert.equal(result.manifest.status, "blocked");
+  assert(result.manifest.issues.some((issue) =>
+    issue.code === "migration.output.invalid" && issue.file === "concepts/legacy.yaml" && issue.path === "defines.0"
+  ));
 });
 
 test("Artifact Contract v2 migration resolves external Schema consumers across files", async () => {

@@ -310,6 +310,35 @@ flow:
   assert.equal(node.else?.[0].tag, "!action");
 });
 
+test("Artifact defaults omitted type to string while conditions still require boolean", () => {
+  const entity = parseProcedure(`!procedure
+names: [default-string]
+flow:
+  - !action
+    action: Write a note.
+    artifact: !artifact
+      name: note
+      format: markdown
+`);
+  const step = entity.flow[0];
+  assert.equal(step.tag === "!action" ? step.artifact.type : undefined, "string");
+
+  assert.throws(() => parseProcedure(`!procedure
+names: [default-string-condition]
+flow:
+  - !while
+    condition: !action
+      action: Continue?
+      artifact: !artifact
+        name: decision
+    do:
+      - !action
+        action: Record progress.
+        artifact: !artifact
+          name: progress
+`), /boolean/);
+});
+
 const invalidProcedures: Array<[string, string, RegExp]> = [
   ["untagged Action", `!procedure
 names: [invalid]

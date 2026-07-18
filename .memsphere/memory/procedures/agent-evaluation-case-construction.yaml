@@ -20,19 +20,6 @@ defines:
       - 评分标准必须分别说明必须满足、允许差异、失败条件和无效条件。
       - case 建设完成后必须准备隔离基线并执行静态校验，但默认不得启动子 agent。
       - 被 human 否决且已经不再属于测试组的旧 case 应从测试组源码目录移除。
-  - !schema
-    format: outline
-    fields:
-      - 测试组与目标能力
-      - 单一主要观察点
-      - 非目标能力
-      - 最小任务输入
-      - fixture 提供的知识与规则
-      - 期望产物或拒绝行为
-      - 确定性检查项
-      - 允许差异
-      - 失败条件
-      - 无效条件
 goals:
   - 将 human 的测试想法整理为边界清晰、难度递进的 case 建设方案。
   - 为每个 case 创建最小任务、完整 fixture 和独立评分标准。
@@ -64,7 +51,7 @@ flow:
       actor: agent
       artifact: !artifact
         name: human 是否尚未认可 case 建设方案
-        format: boolean
+        type: boolean
     do:
       - !action
         action: 审阅 case 建设方案并指出需要保留、删除、简化或调整的内容。
@@ -90,14 +77,29 @@ flow:
       actor: agent
       artifact: !artifact
         name: 是否仍有尚未建设的 case
-        format: boolean
+        type: boolean
     do:
       - !action
         action: 选择下一个 case，并形成包含主要观察点、非目标能力、最小输入、fixture 知识、预期行为和确定性检查项的 case 契约。
         actor: agent
         artifact: !artifact
           name: 当前 case 契约
-          format: markdown
+          type: object
+          format:
+            name: markdown
+            layout: outline
+          schema: !schema
+            fields:
+              - 测试组与目标能力
+              - 单一主要观察点
+              - 非目标能力
+              - 最小任务输入
+              - fixture 提供的知识与规则
+              - 期望产物或拒绝行为
+              - 确定性检查项
+              - 允许差异
+              - 失败条件
+              - 无效条件
       - !action
         action: 编写最小化 task.md，使任务明确指向目标业务概念，但不泄漏应从 fixture 或 Memory 中发现的信息。
         actor: agent
@@ -134,7 +136,7 @@ flow:
           actor: agent
           artifact: !artifact
             name: 当前 case 是否仍存在静态问题
-            format: boolean
+            type: boolean
         do:
           - !action
             action: 根据静态问题修订 task.md、fixture、evaluation.md 或 case 契约，优先消除隐含规则和无关难度。
@@ -166,7 +168,7 @@ flow:
       actor: agent
       artifact: !artifact
         name: 跨 case 审计是否仍有问题
-        format: boolean
+        type: boolean
     do:
       - !action
         action: 修复跨 case 不一致，并对受影响 case 重新执行基线准备、静态校验和自洽性审计。

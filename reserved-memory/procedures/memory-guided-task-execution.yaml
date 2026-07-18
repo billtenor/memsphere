@@ -21,7 +21,6 @@ flow:
     actor: agent
     artifact: !artifact
       name: 用户目标与已知事实
-      type: string
       format: markdown
   - !action
     action: 提取用户请求中可能对应规范名称或别名的准确术语，优先使用 memsphere memory list --query 与 --kind 获取候选；--query 只做名称或别名精确匹配，无法提取可用术语时才读取更宽范围的列表，并根据 names、字符串 defines、structured_defines 计数和用户目标筛选候选。
@@ -42,7 +41,6 @@ flow:
     actor: agent
     artifact: !artifact
       name: 目标 Memory 选择结果
-      type: string
   - !if
     condition: !action
       action: 判断是否仍有多个同样符合用户目标且无法依据现有信息消除歧义的 Memory。
@@ -56,27 +54,23 @@ flow:
         actor: agent
         artifact: !artifact
           name: Memory 选择确认请求
-          type: string
           format: markdown
       - !action
         action: 选择本次任务要应用的 Memory。
         actor: human
         artifact: !artifact
           name: human 确认的目标 Memory
-          type: string
     else:
       - !action
         action: 确认目标 Memory 已经由用户目标和现有信息唯一确定。
         actor: agent
         artifact: !artifact
           name: 目标 Memory 唯一性确认
-          type: string
   - !action
     action: 递归解释目标 Memory 的全部 defines，将文本含义、Statement 断言、Artifact type/format、Schema 字段、保存路径及其他交付要求整理为一个完整执行契约。
     actor: agent
     artifact: !artifact
       name: Memory 任务执行契约
-      type: string
       format: markdown
   - !if
     condition: !action
@@ -91,7 +85,6 @@ flow:
         actor: agent
         artifact: !artifact
           name: 必填信息补充请求
-          type: string
           format: markdown
           final: true
     elseif: !if
@@ -107,7 +100,6 @@ flow:
           actor: agent
           artifact: !artifact
             name: 约束冲突说明
-            type: string
             format: markdown
             final: true
     else:
@@ -116,19 +108,16 @@ flow:
         actor: agent
         artifact: !artifact
           name: 任务产物路径或结果引用
-          type: string
           final: true
       - !action
         action: 对照目标 Memory 的全部 defines 复核产物的语义、约束、Artifact type/format、Schema 字段和保存路径，并修正发现的问题。
         actor: agent
         artifact: !artifact
           name: 任务产物复核结果
-          type: string
           format: markdown
       - !action
         action: 面向用户简要说明任务完成情况和实际产物路径，不重复无关的 Memory 内部细节。
         actor: agent
         artifact: !artifact
           name: 任务处理摘要
-          type: string
           final: true

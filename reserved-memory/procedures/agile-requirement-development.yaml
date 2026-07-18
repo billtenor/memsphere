@@ -22,7 +22,6 @@ flow:
       - 需求契约必须包含整体目标、当前迭代范围、后续范围、交付物、验收标准和待确认项。
     artifact: !artifact
       name: 当前迭代需求契约
-      type: string
       format: markdown
 
   - !while
@@ -38,7 +37,6 @@ flow:
         actor: human
         artifact: !artifact
           name: 当前迭代需求契约修正反馈
-          type: string
           format: markdown
       - !action
         action: 根据反馈补充调查并完整修正当前迭代需求契约。
@@ -47,7 +45,6 @@ flow:
           - 范围或规范领域变化时，补充读取相关 Statement。
         artifact: !artifact
           name: 修正后的当前迭代需求契约
-          type: string
           format: markdown
 
   - !action
@@ -58,7 +55,6 @@ flow:
       - 方案必须基于实际代码，说明实现方式、影响范围、开发任务和验证方式；待决问题先与 human 对齐。
     artifact: !artifact
       name: 实施与验证方案
-      type: string
       format: markdown
 
   - !if
@@ -84,14 +80,12 @@ flow:
             actor: human
             artifact: !artifact
               name: 实施与验证方案修正反馈
-              type: string
               format: markdown
           - !action
             action: 根据反馈修正实施与验证方案。
             actor: agent
             artifact: !artifact
               name: 修正后的实施与验证方案
-              type: string
               format: markdown
 
   - !action
@@ -99,7 +93,6 @@ flow:
     actor: agent
     artifact: !artifact
       name: 开发计划
-      type: string
       format: markdown
 
   - !action
@@ -113,7 +106,6 @@ flow:
       - 在满足需求契约和实施与验证方案的前提下，agent 可以自主安排具体实施与验证过程。
     artifact: !artifact
       name: 功能实现摘要
-      type: string
       format: markdown
 
   - !action
@@ -125,7 +117,6 @@ flow:
       - 必须区分本轮失败、历史失败和环境阻塞。
     artifact: !artifact
       name: 初始验证报告
-      type: string
       format: markdown
 
   - !while
@@ -144,7 +135,6 @@ flow:
           - 需要调整需求契约时，必须先取得 human 确认。
         artifact: !artifact
           name: 验收前修复与复测报告
-          type: string
           format: markdown
 
   - !action
@@ -152,7 +142,6 @@ flow:
     actor: human
     artifact: !artifact
       name: 提需方验收反馈
-      type: string
       format: markdown
 
   - !while
@@ -171,14 +160,12 @@ flow:
           - 新增需求需要纳入本轮时，先更新需求契约并取得 human 确认。
         artifact: !artifact
           name: 验收反馈修正与复测报告
-          type: string
           format: markdown
       - !action
         action: 请 human 重新完成提需方验收。
         actor: human
         artifact: !artifact
           name: 提需方复验反馈
-          type: string
           format: markdown
 
   - !action
@@ -189,7 +176,6 @@ flow:
       - 报告必须包含交付内容、验证结果、验收结论、后续范围和残留问题。
     artifact: !artifact
       name: 敏捷需求开发交付报告
-      type: string
       format: markdown
       final: true
 
@@ -209,6 +195,5 @@ flow:
           - 只允许提交当前迭代产生的改动，不得暂存或提交其他工作区内容。
         artifact: !artifact
           name: 本轮 Commit 结果
-          type: string
           format: markdown
           final: true

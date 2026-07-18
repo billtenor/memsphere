@@ -116,6 +116,7 @@ for (const entity of entities) {
     const source = serializeMemoryYaml(entity);
     assert(source.startsWith(`${entity.tag}\n`));
     assert(!/^tag:/m.test(source));
+    if (entity.tag === "!procedure") assert.doesNotMatch(source, /type: string/);
     const parsed = parseMemoryYaml(source);
     const kind = entity.tag === "!concept"
       ? "concepts"

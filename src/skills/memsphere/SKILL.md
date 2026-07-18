@@ -104,7 +104,7 @@ artifact: !artifact
   final: true
 ```
 
-- `type` 必填，内置值为 `boolean`、`number`、`string`、`object`、`array`。
+- `type` 省略时默认为 `string`；`boolean`、`number`、`object`、`array` 必须显式声明。
 - `format` 省略时默认为 `plain`；简单格式可写 `markdown`、`json` 或 `yaml`，格式参数使用带 `name` 的对象。
 - `layout` 属于 markdown format：object 使用 outline，array 使用 table。
 - Schema 只描述 fields、element_types 和 Repeat，不再拥有 format。

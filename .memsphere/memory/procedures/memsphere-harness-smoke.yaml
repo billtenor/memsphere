@@ -17,7 +17,7 @@ flow:
       action: 判断当前输入是否足够开始 smoke test。
       artifact: !artifact
         name: 当前输入是否足够开始测试
-        format: boolean
+        type: boolean
     then:
       - !action
         action: 记录当前输入已足够开始 smoke test。
@@ -36,7 +36,7 @@ flow:
       actor: human
       artifact: !artifact
         name: 用户是否允许继续执行测试
-        format: boolean
+        type: boolean
     then:
       - !action
         action: 记录用户已允许继续执行 smoke test。
@@ -54,7 +54,7 @@ flow:
       action: 判断是否需要先补充测试目标。
       artifact: !artifact
         name: 是否需要补充测试目标
-        format: boolean
+        type: boolean
     then:
       - !action
         action: 写出缺失的测试目标，要求只用一句话。
@@ -66,7 +66,7 @@ flow:
         action: 判断是否需要记录目标已经充分的原因。
         artifact: !artifact
           name: 是否需要记录目标充分的原因
-          format: boolean
+          type: boolean
       then:
         - !action
           action: 写出当前测试目标已经充分的原因。
@@ -84,7 +84,7 @@ flow:
       action: 判断是否还需要继续补充 smoke test 观察点。
       artifact: !artifact
         name: 是否需要继续补充观察点
-        format: boolean
+        type: boolean
     do:
       - !action
         action: 补充一个新的观察点，要求具体说明你想验证什么。
@@ -102,8 +102,11 @@ flow:
     action: 编写一份最小 harness note artifact。
     artifact: !artifact
       name: 最小 Harness 记录
-      format: schema
+      format:
+        name: markdown
+        layout: outline
       schema: memsphere-harness-note
+      type: object
   - !action
     action: 产出一份用于验证 Action 与 Artifact 契约的最终交付物。
     asserts:
@@ -112,11 +115,13 @@ flow:
       - 摘要优先保持简洁。
     artifact: !artifact
       name: 契约验收交付物
-      format: schema
+      format:
+        name: markdown
+        layout: outline
       schema: !schema
-        format: outline
         asserts:
           - 所有字段均应可审计。
         fields:
           - 摘要
       final: true
+      type: object

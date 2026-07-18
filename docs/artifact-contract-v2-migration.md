@@ -8,8 +8,8 @@ Artifact Contract v2 把旧 format 的多重职责拆为 `type -> format -> sche
 | --- | --- |
 | format: boolean | type: boolean，省略 format |
 | format: number | type: number，省略 format |
-| format: string | type: string，省略 format |
-| format: markdown | type: string + format: markdown |
+| format: string | 省略 type 和 format，默认 string + plain |
+| format: markdown | 省略 type，保留 format: markdown |
 | format: json/yaml | 必须人工选择 type: object 或 array |
 | format: schema + outline | type: object + markdown layout: outline + schema |
 | format: schema + table | type: array + markdown layout: table + schema |

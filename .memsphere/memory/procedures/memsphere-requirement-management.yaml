@@ -26,14 +26,13 @@ flow:
       actor: agent
       artifact: !artifact
         name: 原始描述是否足够进入需求池
-        format: boolean
+        type: boolean
     then:
       - !action
         action: 确认原始描述已达到记录门槛。
         actor: agent
         artifact: !artifact
           name: 需求记录门槛确认
-          format: string
     else:
       - !action
         action: 针对缺失的最低必要信息提出 1-3 个澄清问题。
@@ -59,7 +58,7 @@ flow:
       actor: agent
       artifact: !artifact
         name: 需求池 Markdown schema 记忆是否已存在
-        format: boolean
+        type: boolean
     then:
       - !action
         action: 读取已有需求池 Markdown schema 记忆，并提取文档结构和字段约束。
@@ -73,6 +72,7 @@ flow:
         actor: agent
         artifact: !artifact
           name: 需求池 Markdown schema 记忆
+          type: object
           format: yaml
   - !action
     action: 读取或初始化总需求池 Markdown 文档。
@@ -86,7 +86,7 @@ flow:
       actor: agent
       artifact: !artifact
         name: 是否存在重复或强相关需求
-        format: boolean
+        type: boolean
     then:
       - !if
         condition: !action
@@ -94,7 +94,7 @@ flow:
           actor: agent
           artifact: !artifact
             name: 合并是否损失独立价值
-            format: boolean
+            type: boolean
         then:
           - !action
             action: 将该 idea 作为关联需求独立记录，并说明与已有需求的关系。

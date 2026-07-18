@@ -27,7 +27,7 @@ artifact: !artifact
   final: true
 ```
 
-`name` 和 `type` 必填。`format` 完全省略时默认 plain；`format: {}`、null 或对象缺少 name 都非法。Schema 可以是外部名称或内嵌 `!schema`。
+`name` 必填。`type` 省略时默认 string，其他 type 必须显式声明。`format` 完全省略时默认 plain；`format: {}`、null 或对象缺少 name 都非法。Schema 可以是外部名称或内嵌 `!schema`。
 
 内置 type：
 

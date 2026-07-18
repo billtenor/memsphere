@@ -63,6 +63,7 @@ function prepareMemoryForYaml(value: unknown): unknown {
   const record = value as Record<string, unknown>;
   const prepared: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(record)) {
+    if (record.tag === "!artifact" && key === "type" && item === "string") continue;
     if (record.tag === "!artifact" && key === "format" && isFormatSpec(item)) {
       const optionEntries = Object.entries(item.options);
       if (item.name === "plain" && optionEntries.length === 0) continue;

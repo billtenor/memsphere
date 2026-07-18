@@ -140,7 +140,6 @@ flow:
     actor: human
     artifact: !artifact
       name: 问题边界
-      type: string
       format: markdown
   - !if
     condition: !action
@@ -153,7 +152,6 @@ flow:
         action: 阅读错误日志、失败测试或异常堆栈。
         artifact: !artifact
           name: 错误证据
-          type: string
           format: markdown
     elseif: !if
       condition: !action
@@ -166,14 +164,12 @@ flow:
           action: 收集缺失的复现信息。
           artifact: !artifact
             name: 补充复现信息
-            type: string
             format: markdown
     else:
       - !action
         action: 记录当前无法复现。
         artifact: !artifact
           name: 无法复现说明
-          type: string
   - !call
     target: SummarizeFix
 ```
@@ -196,7 +192,7 @@ artifact: !artifact
   final: true
 ```
 
-Built-in types are `boolean`, `number`, `string`, `object`, and `array`. `format` is optional and defaults to `plain`; scalar formats can use `format: markdown`, `format: json`, or `format: yaml`. Format-specific options use the object form. `layout` belongs to Markdown: object Markdown requires `outline`, and array Markdown requires `table`.
+Built-in types are `boolean`, `number`, `string`, `object`, and `array`. Omitted `type` defaults to `string`; every other type must be explicit. `format` is optional and defaults to `plain`; scalar formats can use `format: markdown`, `format: json`, or `format: yaml`. Format-specific options use the object form. `layout` belongs to Markdown: object Markdown requires `outline`, and array Markdown requires `table`.
 
 Schema is optional for JSON/YAML object and array Artifacts, and required for structured Markdown. `asserts` and `suggests` remain natural-language contracts; executable report validation is performed by the registered type, format, and Schema validators.
 

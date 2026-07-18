@@ -17,12 +17,12 @@ const context: ArtifactValidationContext = {
   attemptId: "attempt-1"
 };
 
-test("Artifact v2 defaults omitted format to normalized plain", () => {
+test("Artifact v2 defaults omitted type and format to normalized string and plain", () => {
   const artifact = artifactNodeSchema.parse({
     tag: "!artifact",
-    name: "result",
-    type: "string"
+    name: "result"
   });
+  assert.equal(artifact.type, "string");
   assert.deepEqual(artifact.format, { name: "plain", options: {} });
   assert.throws(() => artifactNodeSchema.parse({
     tag: "!artifact",

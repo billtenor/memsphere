@@ -20,7 +20,6 @@ flow:
     actor: human
     artifact: !artifact
       name: 初始 procedure 构建诉求
-      type: string
       format: markdown
   - !if
     condition: !action
@@ -35,7 +34,6 @@ flow:
         actor: human
         artifact: !artifact
           name: 流程定位补充信息
-          type: string
           format: markdown
     else:
       - !action
@@ -43,20 +41,17 @@ flow:
         actor: agent
         artifact: !artifact
           name: 流程定位信息完整性确认
-          type: string
   - !action
     action: 基于初始描述和补充信息整理流程定位摘要，必须包含流程目标、典型触发场景、非适用场景和当前不确定项。
     actor: agent
     artifact: !artifact
       name: 流程定位摘要
-      type: string
       format: markdown
   - !action
     action: 整理 Procedure 边界草稿，必须包含候选名称、defines、asserts、goals、适用场景、非适用场景、最终交付物和暂不处理的问题。
     actor: agent
     artifact: !artifact
       name: procedure 边界草稿
-      type: string
       format: markdown
   - !while
     condition: !action
@@ -71,35 +66,30 @@ flow:
         actor: human
         artifact: !artifact
           name: procedure 边界调整意见
-          type: string
           format: markdown
       - !action
         action: 根据调整意见更新 procedure 边界草稿。
         actor: agent
         artifact: !artifact
           name: 更新后的 procedure 边界草稿
-          type: string
           format: markdown
   - !action
     action: 描述运行该 procedure 后必须得到的最终交付物。
     actor: human
     artifact: !artifact
       name: 最终交付物期望
-      type: string
       format: markdown
   - !action
     action: 将最终交付物期望整理为 Artifact 名称、格式和验收标准。
     actor: agent
     artifact: !artifact
       name: 最终 artifact 定义
-      type: string
       format: markdown
   - !action
     action: 讲述 human 实际执行该流程时通常会如何做。
     actor: human
     artifact: !artifact
       name: 原始流程经验叙述
-      type: string
       format: markdown
   - !while
     condition: !action
@@ -114,27 +104,23 @@ flow:
         actor: agent
         artifact: !artifact
           name: 流程经验追问
-          type: string
       - !action
         action: 回答追问并补充对应经验。
         actor: human
         artifact: !artifact
           name: 流程经验补充回答
-          type: string
           format: markdown
   - !action
     action: 从原始经验中抽取按执行顺序排列的候选步骤。
     actor: agent
     artifact: !artifact
       name: 候选步骤清单
-      type: string
       format: markdown
   - !action
     action: 将候选步骤拆分为原子 Action，确保每个 Action 都有 action、actor 和 artifact，并把强制步骤约束与非强制建议分别整理为 asserts 和 suggests。
     actor: agent
     artifact: !artifact
       name: 原子步骤草稿
-      type: string
       format: markdown
   - !while
     condition: !action
@@ -149,21 +135,18 @@ flow:
         actor: agent
         artifact: !artifact
           name: 待细化步骤问题
-          type: string
           format: markdown
       - !action
         action: 补充该步骤的执行细节、判断依据或预期产物。
         actor: human
         artifact: !artifact
           name: 步骤细化补充信息
-          type: string
           format: markdown
       - !action
         action: 根据补充信息更新原子步骤草稿。
         actor: agent
         artifact: !artifact
           name: 更新后的原子步骤草稿
-          type: string
           format: markdown
   - !action
     action: 基于原子步骤草稿生成结构化流程草稿，必须把条件判断映射为 !if.condition，把重复动作映射为 !while，把可复用子流程映射为 !call，并确保每个普通步骤都是带 action、actor 和 artifact 的 !action；步骤约束和非强制建议分别按需写入 asserts 和 suggests。
@@ -177,7 +160,6 @@ flow:
     actor: agent
     artifact: !artifact
       name: 结构化流程严谨性审查结果
-      type: string
       format: markdown
   - !if
     condition: !action
@@ -200,14 +182,12 @@ flow:
             actor: agent
             artifact: !artifact
               name: 严谨性问题修复建议
-              type: string
               format: markdown
           - !action
             action: 在需要 human 判断时补充取舍或确认修复方向。
             actor: human
             artifact: !artifact
               name: 严谨性修复确认
-              type: string
               format: markdown
           - !action
             action: 根据修复方向更新结构化流程草稿。
@@ -222,7 +202,6 @@ flow:
         actor: agent
         artifact: !artifact
           name: 结构化流程通过审查确认
-          type: string
   - !action
     action: 根据边界草稿、最终 Artifact 定义和结构化流程草稿生成包含 names、defines、可选 asserts、goals 和 flow 的完整 !procedure YAML。
     actor: agent
@@ -242,7 +221,6 @@ flow:
     actor: agent
     artifact: !artifact
       name: 初版写入后校验结果
-      type: string
       format: markdown
   - !while
     condition: !action
@@ -257,7 +235,6 @@ flow:
         actor: human
         artifact: !artifact
           name: 最终 YAML 调整意见
-          type: string
           format: markdown
       - !action
         action: 根据调整意见更新最终 !procedure YAML。
@@ -278,12 +255,10 @@ flow:
         actor: agent
         artifact: !artifact
           name: 调整后重新校验结果
-          type: string
           format: markdown
   - !action
     action: 汇总最终 Procedure Memory 的文件路径和最近一次校验结果，面向 human 说明构建完成情况。
     actor: agent
     artifact: !artifact
       name: Procedure 构建结果
-      type: string
       final: true

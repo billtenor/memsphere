@@ -4,8 +4,9 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { isMap, isSeq, type Document, type ParsedNode, type Scalar, type YAMLMap } from "yaml";
 import type { MemsphereConfig } from "../config.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
+import { memorySchemas } from "../memory/schema.js";
 import { readMemoryFile } from "../memory/store.js";
-import { parseMemoryYamlDocument } from "../memory/yaml.js";
+import { parseMemoryYaml, parseMemoryYamlDocument } from "../memory/yaml.js";
 import { listRuns } from "../run/store.js";
 
 export type ArtifactContractMigrationIssue = {
@@ -94,6 +95,8 @@ export async function checkArtifactContractV2Migration(
     };
   });
 
+  if (issues.length === 0) validatePreparedOutputs(prepared, issues);
+
   if (options.includeRuns !== false) {
     for (const run of await listRuns(config.runsRoot)) {
       if (run.contractVersion === 1 && run.status === "running") {
@@ -116,6 +119,36 @@ export async function checkArtifactContractV2Migration(
     generatedAt: new Date().toISOString()
   };
   return { manifest, prepared };
+}
+
+function validatePreparedOutputs(
+  prepared: PreparedFile[],
+  issues: ArtifactContractMigrationIssue[]
+): void {
+  for (const file of prepared) {
+    const kind = file.path.split("/")[0] as MemoryKind;
+    const schema = memorySchemas[kind];
+
+    try {
+      const result = schema.safeParse(parseMemoryYaml(file.output));
+      if (result.success) continue;
+      for (const issue of result.error.issues) {
+        issues.push({
+          code: "migration.output.invalid",
+          file: file.path,
+          path: issue.path.join("."),
+          message: issue.message
+        });
+      }
+    } catch (error) {
+      issues.push({
+        code: "migration.output.invalid",
+        file: file.path,
+        path: "",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
 }
 
 export async function writeArtifactContractV2Migration(config: MemsphereConfig): Promise<ArtifactContractMigrationManifest> {
@@ -209,20 +242,15 @@ function migrateArtifactMap(
     return;
   }
   const format = scalarString(artifact.get("format", true) as ParsedNode | undefined);
-  if (!format) {
-    issues.push({ code: "migration.artifact.type_required", file, path, message: "Artifact has neither v2 type nor a migratable v1 format" });
-    return;
-  }
+  if (!format) return;
 
   if (["boolean", "number", "string"].includes(format)) {
-    artifact.set("type", format);
+    if (format !== "string") artifact.set("type", format);
     artifact.delete("format");
     dirty.add(document);
     return;
   }
   if (format === "markdown") {
-    artifact.set("type", "string");
-    dirty.add(document);
     return;
   }
   if (format === "json" || format === "yaml") {
