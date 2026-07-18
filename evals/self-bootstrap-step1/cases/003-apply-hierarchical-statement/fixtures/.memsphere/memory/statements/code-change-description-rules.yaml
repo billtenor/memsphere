@@ -1,0 +1,26 @@
+!statement
+names:
+  - 代码变更说明规则
+  - code change description rules
+defines:
+  - 适用于记录代码和配置变更的说明。
+asserts:
+  - 代码变更说明必须保存到 artifacts/change-summary.md。
+  - 代码变更说明必须包含对应的变更单号。
+sections:
+  - !statement
+    names:
+      - 后端变更
+    asserts:
+      - 后端变更必须说明受影响的服务和向后兼容情况。
+    sections:
+      - !statement
+        names:
+          - 数据库变更
+        asserts:
+          - 数据库变更必须说明迁移验证结果和可执行的回滚方式。
+  - !statement
+    names:
+      - 前端变更
+    asserts:
+      - 前端变更必须说明支持的浏览器和视觉回归结果。

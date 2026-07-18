@@ -16,7 +16,9 @@ self-bootstrap-step2/
     ├── 003-create-table-device-inventory/
     ├── 004-apply-schema-asserts/
     ├── 005-request-missing-schema-field/
-    └── 006-select-correct-schema/
+    ├── 006-select-correct-schema/
+    ├── 007-expand-repeat-field-group/
+    └── 008-handle-repeat-limit-conflict/
 ```
 
 每个 case 包含：
@@ -58,3 +60,4 @@ BATCH="$(./evals/prepare-cases.sh self-bootstrap-step2)"
 - Agent 不得新增、修改或删除任何 Memory。
 - 评分以 Schema 的 format、fields 和 asserts 为边界，不要求复现参考产物的具体措辞。
 - Schema 未限制的内容允许 Agent 自由组织和补充。
+- Repeat case 只检查 `body` 整体重复、实例数量、字段顺序和 `limit` 等 Schema 已声明语义，不要求唯一的实例标题编号方式。

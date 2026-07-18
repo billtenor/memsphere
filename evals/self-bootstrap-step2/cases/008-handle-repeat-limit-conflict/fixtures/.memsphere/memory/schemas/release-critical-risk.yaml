@@ -1,0 +1,24 @@
+!schema
+names:
+  - 上线关键风险记录
+  - 发布关键风险记录
+format: outline
+defines:
+  - 记录一次软件上线前由用户确认保留的一至两项关键风险、对应措施和上线决定。
+asserts:
+  - 不得自行删除或合并用户明确要求保留的候选风险；候选风险超过 Schema 容量时，必须先请求用户选择或调整要求。
+  - 上线关键风险记录实例必须以 Markdown 文件保存到 artifacts/release-critical-risks.md。
+fields:
+  - 版本
+  - !repeat
+    limit:
+      min: 1
+      max: 2
+    body:
+      - !schema
+        names:
+          - 关键风险
+        fields:
+          - 风险描述
+          - 应对措施
+  - 上线决定

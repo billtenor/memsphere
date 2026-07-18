@@ -276,6 +276,12 @@ case 建设阶段应审查每条检查是否来自任务或 Memory，防止出�
 - 环境或 adapter 不支持纠错闭环。
 - 验收过程受到污染而无效。
 
+## 固化验收样本
+
+Artifact 格式校验输入由测试方根据 [`docs/artifact-format-validation-cases.md`](artifact-format-validation-cases.md) 准备，建议统一放在 `test/fixtures/artifact-format-validation/`。
+
+每个输入目录只提供 `memory.yaml` 和 `artifact.md`，不依赖其产生过程。实现 validator 后，必须逐个读取 Memory 与 Artifact，返回说明文档要求的错误。
+
 ## 验收标准
 
 1. 使用 001 当前失败产物进行测试时，validator 能稳定识别五个字段不是 Markdown 标题。
