@@ -44,18 +44,24 @@ memsphere memory list --output json
 memsphere memory read concepts/Memory
 memsphere memory read 记忆 --kind concepts
 memsphere memory read Memory --output json
-memsphere view
+memsphere view start
+memsphere view status
+memsphere run start <procedure-name>
+memsphere migrate artifact-contract-v2 --check
 ```
 
 `memory list` discovers memories through stable logical references rather than file paths. YAML and JSON list items include `names`, prose `defines`, and counts of folded structured definitions as compact discovery metadata, analogous to a Skill's name and description; `--output text` remains compact. `memory read` accepts a logical reference, canonical name, or alias and returns the complete tagged memsphere YAML by default.
 
-`view` starts a local read-only memory browser:
+`view start` starts the local memory browser as a managed background service using the configured host and port:
 
 ```bash
-memsphere view
+memsphere view start
+memsphere view stop
+memsphere view restart
+memsphere view status
 ```
 
-The browser renders schemas as progressive disclosure sections. `format: table` schemas render their child `fields` as table columns. Procedures render `flow` as readable steps, with visual blocks for `!action`, `!if`, `!while`, and `!call`. Recursive `elseif: !if` values are displayed as a flat if/elseif/else chain.
+The browser renders schemas as progressive disclosure sections. Artifact contracts using Markdown `layout: table` render Schema `fields` as table columns. Procedures render `flow` as readable steps, with visual blocks for `!action`, `!if`, `!while`, and `!call`. Recursive `elseif: !if` values are displayed as a flat if/elseif/else chain.
 
 `init` defaults to the current git repository scope. It creates `.memsphere/` in the git root:
 
@@ -82,7 +88,11 @@ The config file stores roots relative to the `.memsphere` directory by default:
   "memoryRoot": "memory",
   "reviewsRoot": "reviews",
   "runsRoot": "runs",
-  "archiveRoot": "archives"
+  "archiveRoot": "archives",
+  "view": {
+    "host": "127.0.0.1",
+    "port": 30000
+  }
 }
 ```
 
@@ -127,42 +137,74 @@ flow:
     actor: human
     artifact: !artifact
       name: 问题边界
+      type: string
       format: markdown
   - !if
     condition: !action
       action: 判断问题是否可以稳定复现。
       artifact: !artifact
         name: 问题是否可以稳定复现
-        format: boolean
+        type: boolean
     then:
       - !action
         action: 阅读错误日志、失败测试或异常堆栈。
         artifact: !artifact
           name: 错误证据
+          type: string
           format: markdown
     elseif: !if
       condition: !action
         action: 判断是否还缺少复现信息。
         artifact: !artifact
           name: 是否缺少复现信息
-          format: boolean
+          type: boolean
       then:
         - !action
           action: 收集缺失的复现信息。
           artifact: !artifact
             name: 补充复现信息
+            type: string
             format: markdown
     else:
       - !action
         action: 记录当前无法复现。
         artifact: !artifact
           name: 无法复现说明
-          format: string
+          type: string
   - !call
     target: SummarizeFix
 ```
 
-Procedure `asserts` are global constraints that remain active throughout the Run. Action `asserts` apply only to their own step. `flow` has type `List<Action | If | While | Call>`. An Action always contains `artifact: !artifact`. If and While conditions are Actions whose artifact format is `boolean`. `elseif` is an optional single nested `!if`, not a list, and only the root If in a chain may contain `else`.
+Procedure `asserts` are global constraints that remain active throughout the Run. Action `asserts` apply only to their own step. `flow` has type `List<Action | If | While | Call>`. An Action always contains `artifact: !artifact`. If and While conditions are Actions whose Artifact type is `boolean`. `elseif` is an optional single nested `!if`, not a list, and only the root If in a chain may contain `else`.
+
+### Artifact Contract
+
+Every Artifact uses the executable contract `type -> format -> schema`:
+
+```yaml
+artifact: !artifact
+  name: 发布记录
+  type: object
+  format:
+    name: markdown
+    layout: outline
+  schema: !schema
+    fields: [版本, 发布日期, 结果]
+  final: true
+```
+
+Built-in types are `boolean`, `number`, `string`, `object`, and `array`. `format` is optional and defaults to `plain`; scalar formats can use `format: markdown`, `format: json`, or `format: yaml`. Format-specific options use the object form. `layout` belongs to Markdown: object Markdown requires `outline`, and array Markdown requires `table`.
+
+Schema is optional for JSON/YAML object and array Artifacts, and required for structured Markdown. `asserts` and `suggests` remain natural-language contracts; executable report validation is performed by the registered type, format, and Schema validators.
+
+Artifact Contract v2 is a breaking change from the former overloaded `format` model. Before upgrading an existing Memory Store, run the read-only check and resolve every reported blocker:
+
+```bash
+memsphere migrate artifact-contract-v2 --check
+memsphere migrate artifact-contract-v2 --write
+```
+
+The migration command is config-driven and does not depend on Git. Running v1 Runs are blocked; completed v1 Runs and Review snapshots remain available as read-only evidence.
 
 ### Concept
 
@@ -218,7 +260,6 @@ sections:
 names:
   - Requirements Document
   - 需求文档
-format: outline
 defines:
   - 用于收敛用户场景、需求边界、原型引用和业务验收口径的文档图式。
 asserts:
@@ -240,12 +281,11 @@ fields:
 
 `Schema.fields` has type `List<string | Schema | Repeat>`. A string is the shortest field form and only supplies the field name. A nested `!schema` supplies richer descriptions, assertions, item types, or child fields, and must have a non-empty `names` value when used in `fields`.
 
-An outline Schema may use a mapping `!repeat` field to repeat a non-empty group of fields:
+When consumed by an object Markdown Artifact with `layout: outline`, a Schema may use a mapping `!repeat` field to repeat a non-empty group of fields:
 
 ```yaml
 !schema
 names: [关键决策记录]
-format: outline
 fields:
   - 背景
   - !repeat
@@ -272,30 +312,21 @@ memsphere run repeat 2 --run <run-id>
 
 `Schema.element_types` describes `List<T>`. Its non-empty entries are the allowed element types. For example, `element_types: [string]` means `List<string>` and `element_types: [string, Statement, Schema]` means `List<string | Statement | Schema>`.
 
-`!schema` may include an optional presentation `format`. Missing format means `outline`.
-
-Supported formats:
+Schema does not own presentation format. To render fields as table columns, define an array Markdown Artifact whose format carries `layout: table`:
 
 ```yaml
-format: outline
-format: table
+artifact: !artifact
+  name: 需求清单
+  type: array
+  format:
+    name: markdown
+    layout: table
+  schema: !schema
+    element_types: [Schema]
+    fields: [ID, 需求描述]
 ```
 
-`outline` renders nested fields as a heading hierarchy. `table` renders fields as columns and must explicitly describe a list of Schema rows:
-
-```yaml
-!schema
-names:
-  - 需求清单
-format: table
-element_types:
-  - Schema
-fields:
-  - ID
-  - 需求描述
-```
-
-The removed formats `section`, `field`, `list`, and `template` are invalid. Structural level is expressed by `fields`, list cardinality by `element_types`, and Schema itself already serves as the template.
+Structural level is expressed by `fields`, list cardinality by `element_types`, and presentation options by the owning Artifact format.
 
 ## Persistence Rules
 

@@ -1,0 +1,16 @@
+!concept
+names:
+  - 会议记录
+defines:
+  - 一份会议记录沉淀一次会议讨论形成的主题、结论和后续行动，供参会者后续查阅与执行。
+  - !statement
+    asserts:
+      - 会议主题、日期、结论和待办均不能为空。
+      - 日期和待办中的截止日期必须使用 YYYY-MM-DD 格式。
+      - 会议记录实例必须以 Markdown 文件保存到 artifacts/meeting-note.md。
+  - !schema
+    fields:
+      - 会议主题
+      - 日期
+      - 结论
+      - 待办

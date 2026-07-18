@@ -36,7 +36,7 @@ flow:
     action: Capture result.
     artifact: !artifact
       name: result
-      format: string
+      type: string
 `;
 
 const invalidProcedure = `!procedure
@@ -145,6 +145,7 @@ flow:
     action: Capture markdown.
     artifact: !artifact
       name: markdown result
+      type: string
       format: markdown
 `);
 
@@ -157,18 +158,20 @@ flow:
 
     const artifact = updated.events[0].artifact;
     assert.equal(artifact.storage, "file");
-    assert.equal(artifact.format, "markdown");
+    assert.deepEqual(artifact.format, { name: "markdown", options: {} });
     assert.match(artifact.path ?? "", new RegExp(`^${run.id}/artifacts/`));
     assert.equal(await readFile(join(runsRoot, artifact.path ?? ""), "utf8"), "# Result\n");
   });
 });
 
-test("reportRun stores schema artifacts with fields and .schema.md extension", async () => {
+test("reportRun validates and stores external-schema Markdown artifacts", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
     const proceduresRoot = join(memoryRoot, "procedures");
+    const schemasRoot = join(memoryRoot, "schemas");
     const runsRoot = join(dir, "runs");
     await mkdir(proceduresRoot, { recursive: true });
+    await mkdir(schemasRoot, { recursive: true });
 
     await writeFile(join(proceduresRoot, "target.yaml"), `!procedure
 names: [target-procedure]
@@ -177,23 +180,107 @@ flow:
     action: Capture schema.
     artifact: !artifact
       name: schema result
-      format: schema
+      type: object
+      format:
+        name: markdown
+        layout: outline
       schema: demo-schema
+`);
+    await writeFile(join(schemasRoot, "demo.yaml"), `!schema
+names: [demo-schema]
+fields: [summary]
 `);
 
     const run = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
     const updated = await reportRun({
       runsRoot,
       runId: run.id,
-      artifact: { kind: "inline", value: "schema content\n" }
+      artifact: { kind: "inline", value: "# Delivery\n\n## summary\n\nschema content\n" }
     });
 
     const artifact = updated.events[0].artifact;
     assert.equal(artifact.storage, "file");
     assert.equal(artifactSchemaName(artifact), "demo-schema");
-    assert.equal(artifact.schemaName, undefined);
-    assert.match(artifact.fileName ?? "", /\.schema\.md$/);
-    assert.equal(await readFile(join(runsRoot, artifact.path ?? ""), "utf8"), "schema content\n");
+    assert.match(artifact.fileName ?? "", /\.md$/);
+    assert.equal(await readFile(join(runsRoot, artifact.path ?? ""), "utf8"), "# Delivery\n\n## summary\n\nschema content\n");
+  });
+});
+
+test("failed Artifact validation leaves Run state and managed artifacts unchanged", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "target.yaml"), `!procedure
+names: [atomic-report]
+flow:
+  - !action
+    action: Produce a release record.
+    artifact: !artifact
+      name: release record
+      type: object
+      format:
+        name: markdown
+        layout: outline
+      schema: !schema
+        fields: [summary]
+`);
+
+    const started = await startRun({ memoryRoot, runsRoot, procedureName: "atomic-report" });
+    const runPath = join(runsRoot, started.id, `${started.id}.json`);
+    const before = await readFile(runPath, "utf8");
+    await assert.rejects(
+      reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Release\n\nNo summary heading.\n" } }),
+      /missing heading summary/
+    );
+    assert.equal(await readFile(runPath, "utf8"), before);
+    await assert.rejects(readFile(join(runsRoot, started.id, "artifacts", "001-release-record.md"), "utf8"), { code: "ENOENT" });
+
+    const done = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "# Release\n\n## summary\n\nReady.\n" }
+    });
+    assert.equal(done.status, "done");
+    assert.equal(done.events.length, 1);
+    assert.equal(done.events[0]?.artifact.validation?.status, "passed");
+  });
+});
+
+test("external schemas are snapshotted when a Run starts", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const schemasRoot = join(memoryRoot, "schemas");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await mkdir(schemasRoot, { recursive: true });
+    const schemaPath = join(schemasRoot, "release.yaml");
+    await writeFile(join(proceduresRoot, "target.yaml"), `!procedure
+names: [schema-snapshot]
+flow:
+  - !action
+    action: Produce a release record.
+    artifact: !artifact
+      name: release record
+      type: object
+      format: { name: markdown, layout: outline }
+      schema: release-schema
+`);
+    await writeFile(schemaPath, "!schema\nnames: [release-schema]\nfields: [summary]\n");
+
+    const started = await startRun({ memoryRoot, runsRoot, procedureName: "schema-snapshot" });
+    assert.equal(started.stack[0]?.steps[0]?.schema?.kind, "external");
+    assert.deepEqual(started.stack[0]?.steps[0]?.schema?.node?.fields, ["summary"]);
+    await writeFile(schemaPath, "!schema\nnames: [release-schema]\nfields: [different]\n");
+
+    const done = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "# Release\n\n## summary\n\nReady.\n" }
+    });
+    assert.equal(done.status, "done");
   });
 });
 
@@ -213,10 +300,12 @@ flow:
     suggests: [Prefer short prose.]
     artifact: !artifact
       name: delivery
-      format: schema
+      type: object
+      format:
+        name: markdown
+        layout: outline
       final: true
       schema: !schema
-        format: outline
         fields: [summary]
 `);
 
@@ -224,22 +313,23 @@ flow:
     const step = started.stack[0].steps[0];
     assert.deepEqual(step.asserts, ["Keep every required field."]);
     assert.deepEqual(step.suggests, ["Prefer short prose."]);
-    assert(step.inlineSchema);
-    assert(step.inlineSchemaId?.startsWith("inline:flow[1]:delivery"));
+    assert.equal(step.schema?.kind, "inline");
+    assert(step.schema?.kind === "inline" && step.schema.id.startsWith("inline:flow[1]:delivery"));
     await writeFile(procedurePath, validProcedure);
 
     const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id });
-    assert.equal(entered.stack.at(-1)?.memoryName, step.inlineSchemaId);
-    assert.equal(entered.stack.at(-1)?.steps[0]?.artifact, step.inlineSchemaId);
+    const inlineSchemaId = step.schema?.kind === "inline" ? step.schema.id : "";
+    assert.equal(entered.stack.at(-1)?.memoryName, inlineSchemaId);
+    assert.equal(entered.stack.at(-1)?.steps[0]?.artifact, inlineSchemaId);
     await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery\n" } });
     const done = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "finished" } });
     assert.equal(done.status, "done");
     assert.equal(finalArtifacts(done).length, 1);
     const delivery = finalArtifacts(done)[0];
-    assert.equal(delivery.schemaKind, "inline");
+    assert.equal(delivery.schema?.kind, "inline");
     assert.equal(delivery.final, true);
-    assert.match(delivery.path ?? "", /\.schema\.md$/);
-    assert.equal(await readFile(join(runsRoot, delivery.path ?? ""), "utf8"), `schema:${step.inlineSchemaId}`);
+    assert.match(delivery.path ?? "", /\.md$/);
+    assert.equal(await readFile(join(runsRoot, delivery.path ?? ""), "utf8"), "# Delivery\n\n## summary\n\nfinished\n");
   });
 });
 
@@ -257,20 +347,20 @@ flow:
       action: Choose path.
       artifact: !artifact
         name: choose
-        format: boolean
+        type: boolean
     then:
       - !action
         action: True delivery.
         artifact: !artifact
           name: true result
-          format: string
+          type: string
           final: true
     else:
       - !action
         action: False delivery.
         artifact: !artifact
           name: false result
-          format: string
+          type: string
           final: true
 `);
     const started = await startRun({ memoryRoot, runsRoot, procedureName: "branch-final" });
@@ -297,7 +387,10 @@ flow:
     action: Capture schema.
     artifact: !artifact
       name: schema result
-      format: schema
+      type: object
+      format:
+        name: markdown
+        layout: outline
       schema: demo-schema
 `);
     await writeFile(join(schemasRoot, "demo.yaml"), `!schema
@@ -318,8 +411,8 @@ defines:
     assert.equal(artifact?.name, "schema result");
     assert.equal(artifact?.storage, "file");
     assert.equal(artifactSchemaName(artifact), "demo-schema");
-    assert.match(artifact?.fileName ?? "", /\.schema\.md$/);
-    assert.equal(await readFile(join(runsRoot, artifact?.path ?? ""), "utf8"), "schema:demo-schema");
+    assert.match(artifact?.fileName ?? "", /\.md$/);
+    assert.equal(await readFile(join(runsRoot, artifact?.path ?? ""), "utf8"), "schema field value\n");
   });
 });
 
@@ -339,6 +432,7 @@ flow:
     action: Capture markdown.
     artifact: !artifact
       name: markdown result
+      type: string
       format: markdown
 `);
 
@@ -372,19 +466,19 @@ flow:
       action: Choose path.
       artifact: !artifact
         name: choose
-        format: boolean
+        type: boolean
     then:
       - !action
         action: Capture true path.
         artifact: !artifact
           name: true result
-          format: string
+          type: string
     else:
       - !action
         action: Capture false path.
         artifact: !artifact
           name: false result
-          format: string
+          type: string
 `);
 
     const run = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
@@ -395,7 +489,7 @@ flow:
     });
 
     assert.equal(updated.events[0].artifact.storage, "inline");
-    assert.equal(updated.events[0].artifact.value, "true");
+    assert.equal(updated.events[0].artifact.value, true);
     assert.equal(updated.stack[0].steps[updated.stack[0].index].artifact, "true result");
   });
 });
@@ -415,31 +509,31 @@ flow:
       action: Check A.
       artifact: !artifact
         name: A
-        format: boolean
+        type: boolean
     then:
       - !action
         action: Handle A.
         artifact: !artifact
           name: A result
-          format: string
+          type: string
     elseif: !if
       condition: !action
         action: Check B.
         artifact: !artifact
           name: B
-          format: boolean
+          type: boolean
       then:
         - !action
           action: Handle B.
           artifact: !artifact
             name: B result
-            format: string
+            type: string
     else:
       - !action
         action: Handle fallback.
         artifact: !artifact
           name: fallback result
-          format: string
+          type: string
 `);
 
     const started = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
@@ -469,13 +563,13 @@ flow:
       action: Continue?
       artifact: !artifact
         name: continue
-        format: boolean
+        type: boolean
     do:
       - !action
         action: Record iteration.
         artifact: !artifact
           name: iteration
-          format: number
+          type: number
   - !call
     target: child
 `);
@@ -487,7 +581,7 @@ flow:
     action: Finish child.
     artifact: !artifact
       name: child result
-      format: string
+      type: string
 `);
 
     const started = await startRun({ memoryRoot, runsRoot, procedureName: "parent" });
@@ -526,7 +620,10 @@ flow:
     action: Capture schema.
     artifact: !artifact
       name: schema result
-      format: schema
+      type: object
+      format:
+        name: markdown
+        layout: outline
       schema: demo-schema
 `);
     await writeFile(join(schemasRoot, "demo.yaml"), `!schema
@@ -561,7 +658,11 @@ fields:
       "demo-schema.summary",
       "demo-schema.details"
     ]);
-    assert.deepEqual(schemaFrame?.steps.map((step) => step.format), ["markdown", "string", "string"]);
+    assert.deepEqual(schemaFrame?.steps.map((step) => step.format), [
+      { name: "markdown", options: {} },
+      { name: "plain", options: {} },
+      { name: "plain", options: {} }
+    ]);
     assert(schemaFrame?.steps[0].details?.includes("asserts: Keep it concise."));
     assert(schemaFrame?.steps[0].details?.includes("suggests: Prefer direct wording."));
     assert(schemaFrame?.steps[0].details?.includes("asserts [Formatting]: Use Markdown headings."));
@@ -584,7 +685,10 @@ flow:
     action: Capture schema.
     artifact: !artifact
       name: schema result
-      format: schema
+      type: object
+      format:
+        name: markdown
+        layout: outline
       schema: repeat-schema
 `);
     await writeFile(join(schemasRoot, "repeat.yaml"), `!schema
@@ -661,6 +765,40 @@ test("readRun accepts legacy artifact value and schemaName fields", async () => 
   });
 });
 
+test("running v1 Runs remain byte-for-byte read-only", async () => {
+  await withTempDir(async (dir) => {
+    const runsRoot = join(dir, "runs");
+    const runId = "run-v1-running";
+    await mkdir(runsRoot);
+    const path = join(runsRoot, `${runId}.json`);
+    const source = `${JSON.stringify({
+      id: runId,
+      status: "running",
+      procedureName: "legacy",
+      memoryRoot: join(dir, "memory"),
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+      stack: [{
+        type: "procedure",
+        memoryName: "legacy",
+        steps: [{ id: "flow[1]", instruction: "Legacy step", artifact: "result", format: "string" }],
+        index: 0
+      }],
+      events: []
+    }, null, 2)}\n`;
+    await writeFile(path, source);
+
+    const run = await readRun(runsRoot, runId);
+    assert.equal(run.contractVersion, 1);
+    assert.equal(run.readOnly, true);
+    await assert.rejects(
+      reportRun({ runsRoot, runId, artifact: { kind: "inline", value: "result" } }),
+      /v1 run is read-only/
+    );
+    assert.equal(await readFile(path, "utf8"), source);
+  });
+});
+
 test("missing file sources do not append partial events", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
@@ -675,6 +813,7 @@ flow:
     action: Capture markdown.
     artifact: !artifact
       name: markdown result
+      type: string
       format: markdown
 `);
 

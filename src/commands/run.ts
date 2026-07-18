@@ -183,21 +183,27 @@ export function printRunState(run: RunState): void {
 
   console.log("");
   console.log("Artifact:");
-  console.log(`${step.artifact} (${step.format})`);
+  console.log(`${step.artifact} (${step.type ?? "unknown"} · ${formatDisplay(step.format)})`);
   if (step.actor === "human") {
     console.log("Report the artifact value provided by the human.");
   }
 
   console.log("");
-  if (step.format === "schema") {
+  if (step.format.name === "markdown" && step.schema) {
     console.log("Then:");
-    if (step.inlineSchema) {
+    if (step.schema.kind === "inline") {
       console.log(`memsphere run enter-schema --run ${run.id}`);
     } else {
-      console.log(`memsphere run enter-schema ${step.schemaName ?? step.artifact} --run ${run.id}`);
+      console.log(`memsphere run enter-schema ${step.schema.name} --run ${run.id}`);
     }
   } else {
     console.log("Then:");
     console.log(`memsphere run report --run ${run.id} --artifact <value>`);
   }
+}
+
+function formatDisplay(format: NonNullable<ReturnType<typeof currentStep>>["format"]): string {
+  if (!format) return "unknown";
+  const options = Object.entries(format.options).map(([name, value]) => `${name}: ${String(value)}`);
+  return options.length ? `${format.name} (${options.join(", ")})` : format.name;
 }

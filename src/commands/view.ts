@@ -24,7 +24,7 @@ import {
   type ReviewComment,
   type ReviewStatus
 } from "../review/store.js";
-import { listRuns, readRun, type RunState, type RunStep } from "../run/store.js";
+import { listRuns, parseRunState, readRun, type RunState, type RunStep } from "../run/store.js";
 import { browserHtml } from "../view/browser.js";
 import {
   clearViewServiceState,
@@ -503,7 +503,7 @@ function collectStructuredMemoryReferences(value: unknown, references: Record<Me
   const artifact = record.artifact;
   if (artifact && typeof artifact === "object" && !Array.isArray(artifact)) {
     const spec = artifact as Record<string, unknown>;
-    if (spec.format === "schema" && typeof spec.schema === "string") {
+    if (typeof spec.schema === "string") {
       changed = addMemoryReference(references.schemas, spec.schema) || changed;
     }
   }
@@ -537,8 +537,7 @@ function collectRunMemoryReferences(run: RunState): Record<MemoryKind, Set<strin
   }
   collectStepMemoryReferences(run.plan ?? [], references);
   for (const event of run.events) {
-    const schemaName = event.artifact.fields?.schema_name ?? event.artifact.schemaName;
-    if (typeof schemaName === "string") references.schemas.add(schemaName);
+    if (event.artifact.schema?.kind === "external") references.schemas.add(event.artifact.schema.name);
   }
   return references;
 }
@@ -546,7 +545,7 @@ function collectRunMemoryReferences(run: RunState): Record<MemoryKind, Set<strin
 function collectStepMemoryReferences(steps: RunStep[], references: Record<MemoryKind, Set<string>>): void {
   for (const step of steps) {
     if (step.target) references.procedures.add(step.target);
-    if (step.schemaName) references.schemas.add(step.schemaName);
+    if (step.schema?.kind === "external") references.schemas.add(step.schema.name);
     if (step.branches) {
       collectStepMemoryReferences(step.branches.truthy, references);
       collectStepMemoryReferences(step.branches.falsy, references);
@@ -636,7 +635,7 @@ async function loadRunPayload(runsRoot: string): Promise<RunState[]> {
 }
 
 export async function hydrateRunArtifactContent(runsRoot: string, run: RunState): Promise<RunState> {
-  const hydrated = JSON.parse(JSON.stringify(run)) as RunState;
+  const hydrated = parseRunState(JSON.parse(JSON.stringify(run)));
   for (const event of hydrated.events) {
     const artifact = event.artifact as RunState["events"][number]["artifact"] & {
       content?: string;
@@ -644,14 +643,14 @@ export async function hydrateRunArtifactContent(runsRoot: string, run: RunState)
       renderedContent?: string;
       renderedContentType?: string;
     };
-    if (artifact.storage === "file" && artifact.path && isTextArtifactFormat(artifact.format)) {
+    if (artifact.storage === "file" && artifact.path && isTextArtifactFormat(artifact.format.name)) {
       try {
         artifact.content = await readFile(resolveRunArtifactPath(runsRoot, hydrated.id, artifact.path), "utf8");
       } catch (error) {
         artifact.contentError = error instanceof Error ? error.message : String(error);
       }
     }
-    if (artifact.format === "markdown") {
+    if (artifact.format.name === "markdown") {
       const value = artifact.content ?? artifact.value;
       if (typeof value === "string") {
         artifact.renderedContent = renderMarkdownContent(value);

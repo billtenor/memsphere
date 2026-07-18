@@ -29,7 +29,6 @@ defines:
         asserts:
           - 读取一份树状 Statement 后，其中与当前任务相关的全部节点共同生效，不得只读取或应用根节点规则。
   - !schema
-    format: outline
     asserts:
       - 根节点必须使用 !statement 标签，不得使用独立的 type 字段。
       - 顶层 Statement 的 names 必须是非空字符串数组，首项为规范名称。

@@ -2,7 +2,6 @@
 names:
   - Statement entity schema
   - "!statement 编写模板"
-format: outline
 defines:
   - 定义 memsphere !statement Memory 的合法内容结构和字段要求。
 asserts:

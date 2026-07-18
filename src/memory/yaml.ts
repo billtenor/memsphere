@@ -1,4 +1,5 @@
 import {
+  type Document,
   isMap,
   parseDocument,
   type CollectionTag,
@@ -18,7 +19,7 @@ const nestedStructTags: CollectionTag[] = ["!action", "!artifact", "!if", "!whil
   collection: "map"
 }));
 
-const customTags = [...memoryYamlTags, ...nestedStructTags];
+export const memoryCustomTags = [...memoryYamlTags, ...nestedStructTags];
 
 function nodeTag(node: ParsedNode | null | undefined): string | undefined {
   return node?.tag ?? undefined;
@@ -81,14 +82,7 @@ function nodeToPlainValue(node: ParsedNode | null | undefined): unknown {
 }
 
 export function parseMemoryYaml(source: string): unknown {
-  const document = parseDocument(source, {
-    prettyErrors: false,
-    customTags
-  });
-
-  if (document.errors.length > 0) {
-    throw document.errors[0];
-  }
+  const document = parseMemoryYamlDocument(source);
 
   const contents = document.contents;
 
@@ -97,6 +91,19 @@ export function parseMemoryYaml(source: string): unknown {
   }
 
   return nodeToPlainValue(contents);
+}
+
+export function parseMemoryYamlDocument(source: string): Document.Parsed {
+  const document = parseDocument(source, {
+    prettyErrors: false,
+    customTags: memoryCustomTags
+  });
+
+  if (document.errors.length > 0) {
+    throw document.errors[0];
+  }
+
+  return document;
 }
 
 export function assertExpectedTag(entity: unknown, kind: MemoryKind, filePath: string): void {

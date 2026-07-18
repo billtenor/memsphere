@@ -47,7 +47,6 @@ const entities: MemoryEntity[] = [
     tag: "!schema",
     names: ["Record"],
     defines: [],
-    format: "outline",
     fields: [
       {
         tag: "!schema",
@@ -82,7 +81,7 @@ const entities: MemoryEntity[] = [
         condition: {
           tag: "!action",
           action: "Decide.",
-          artifact: { tag: "!artifact", name: "decision", format: "boolean" }
+          artifact: { tag: "!artifact", name: "decision", type: "boolean", format: { name: "plain", options: {} } }
         },
         then: [
           {
@@ -90,7 +89,7 @@ const entities: MemoryEntity[] = [
             condition: {
               tag: "!action",
               action: "Continue?",
-              artifact: { tag: "!artifact", name: "continue", format: "boolean" }
+              artifact: { tag: "!artifact", name: "continue", type: "boolean", format: { name: "plain", options: {} } }
             },
             do: [{ tag: "!call", target: "child" }]
           }
@@ -99,7 +98,7 @@ const entities: MemoryEntity[] = [
           {
             tag: "!action",
             action: "Write markdown.",
-            artifact: { tag: "!artifact", name: "note", format: "markdown" }
+            artifact: { tag: "!artifact", name: "note", type: "string", format: { name: "markdown", options: {} } }
           }
         ]
       }

@@ -2,7 +2,6 @@
 names:
   - Concept entity schema
   - "!concept 编写模板"
-format: outline
 defines:
   - 定义 memsphere !concept Memory 的合法内容结构和字段要求。
 asserts:

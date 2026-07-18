@@ -150,6 +150,13 @@ test("browser renders Action contracts, inline schemas, and final artifacts as d
   assert.match(browserHtml, /function inlineSchemaSummary\(schema\)/);
 });
 
+test("browser marks v1 runs read-only and shows v2 Artifact validation metadata", () => {
+  assert.match(browserHtml, /legacyReadOnly: \{ zh: "旧版只读", yaml: "v1 read-only" \}/);
+  assert.match(browserHtml, /run\.contractVersion === 1 \|\| run\.readOnly/);
+  assert.match(browserHtml, /event\.artifact\.type/);
+  assert.match(browserHtml, /event\.artifact\.validation\?\.status === "passed"/);
+});
+
 test("browser renders Procedure assertions in memory and active run views", () => {
   assert.match(browserHtml, /appendTextBlocks\(wrap, entity\)/);
   assert.match(browserHtml, /function renderRunProcedureAsserts\(run\)/);

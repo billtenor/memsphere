@@ -1,0 +1,24 @@
+!schema
+names:
+  - 故障复盘
+  - 故障复盘报告
+defines:
+  - 沉淀一次线上故障的时间、影响、根因和改进措施。
+asserts:
+  - 发生时间和恢复时间必须使用 YYYY-MM-DD HH:mm 格式。
+  - 故障复盘实例必须以 Markdown 文件保存到 artifacts/incident-review.md。
+fields:
+  - !schema
+    names:
+      - 基本信息
+    fields:
+      - 发生时间
+      - 恢复时间
+  - !schema
+    names:
+      - 影响
+    fields:
+      - 受影响服务
+      - 用户影响
+  - 根因
+  - 改进项

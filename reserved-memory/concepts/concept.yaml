@@ -16,7 +16,6 @@ defines:
       - 需要独立判断真假的事实、规则或约束应当使用 Statement 表达。
       - 文档、数据或协作产物的结构应当使用 Schema 表达。
   - !schema
-    format: outline
     asserts:
       - 根节点必须使用 !concept 标签，不得使用独立的 type 字段。
       - 顶层 Concept 的 names 必须是非空字符串数组，首项为规范名称。

@@ -1,5 +1,5 @@
-export const schemaFormats = ["outline", "table"] as const;
-export type SchemaFormat = (typeof schemaFormats)[number];
+export const legacySchemaFormats = ["outline", "table"] as const;
+export type LegacySchemaFormat = (typeof legacySchemaFormats)[number];
 
 export const schemaElementTypes = [
   "string",
@@ -17,8 +17,17 @@ export const schemaElementTypes = [
 ] as const;
 export type SchemaElementType = (typeof schemaElementTypes)[number];
 
-export const artifactFormats = ["string", "number", "boolean", "markdown", "json", "yaml", "schema"] as const;
-export type ArtifactFormat = (typeof artifactFormats)[number];
+export const builtInArtifactTypes = ["boolean", "number", "string", "object", "array"] as const;
+export type BuiltInArtifactType = (typeof builtInArtifactTypes)[number];
+export type ArtifactType = string;
+
+export const builtInArtifactFormats = ["plain", "markdown", "json", "yaml"] as const;
+export type BuiltInArtifactFormat = (typeof builtInArtifactFormats)[number];
+
+export type ArtifactFormatSpec = {
+  name: string;
+  options: Readonly<Record<string, unknown>>;
+};
 
 export const stepActors = ["agent", "human"] as const;
 export type StepActor = (typeof stepActors)[number];
@@ -59,7 +68,6 @@ export type SchemaField = StaticSchemaField | RepeatNode;
 
 export type SchemaNode = CommonMemoryNode & {
   tag: "!schema";
-  format?: SchemaFormat;
   asserts?: string[];
   element_types?: SchemaElementType[];
   fields?: SchemaField[];
@@ -68,7 +76,8 @@ export type SchemaNode = CommonMemoryNode & {
 export type ArtifactNode = {
   tag: "!artifact";
   name: string;
-  format: ArtifactFormat;
+  type: ArtifactType;
+  format: ArtifactFormatSpec;
   schema?: string | SchemaNode;
   final?: boolean;
 };

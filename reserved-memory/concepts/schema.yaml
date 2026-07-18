@@ -4,22 +4,21 @@ names:
   - 图式记忆
   - "!schema"
 defines:
-  - memsphere 中用于定义文档、数据或协作产物的内容结构和呈现格式的 Memory。
+  - memsphere 中用于定义文档、数据或协作产物内容结构的 Memory。
   - 用于让协作者按共同的结构填写或验证产物，不用于表达领域术语或独立事实。
   - fields 共同定义产物包含的字段；字段是结构要求，不是可以任意选择的示例项。
-  - format 描述 Schema 实例最终如何呈现；当前支持 outline 和 table，省略时按照 outline 理解。
+  - Artifact 的 type 和 format 决定值类型及编码方式，Schema 只负责 fields、element_types 和重复结构约束。
   - !statement
     asserts:
-      - format 为 outline 时，字段名称必须成为 Markdown 标题，并按 fields 的嵌套关系形成标题层级；项目符号、键值列表、粗体标签或表格不能代替标题结构。
-      - format 为 table 时，第一层 fields 必须成为 Markdown 表格列，每个列表元素占一行；标题大纲、项目符号或键值列表不能代替表格。
-      - Schema 的 asserts 是对实例内容和结构的附加约束，必须与 fields 和 format 一并满足。
+      - "当 Artifact 使用 markdown + layout: outline 时，字段名称必须成为 Markdown 标题，并按 fields 的嵌套关系形成标题层级。"
+      - "当 Artifact 使用 markdown + layout: table 时，第一层 fields 必须成为 Markdown 表格列，每个列表元素占一行。"
+      - Schema 的 asserts 是对实例内容和结构的自然语言附加约束，必须与 fields 一并满足，但不由代码 validator 猜测执行。
       - 字符串 field 只提供字段名称；嵌套 !schema 用于继续描述该字段的子结构或约束。
-      - "!repeat 是 outline fields 中的结构控制节点，它让 body 中的一组字段按同一轮次整体重复；自身不是字段产物，也不生成 Artifact。"
+      - "!repeat 是供 object + markdown + layout: outline Artifact 使用的结构控制节点，它让 body 中的一组字段按同一轮次整体重复。"
       - "!repeat 的 limit 可用 min/max 约束次数；未给 min 时按 0 理解，未给 max 时表示没有业务上限。"
       - "!repeat 不允许用于 table、defines、Procedure flow 或其他位置，body 中也不能再次嵌套 !repeat。"
-      - element_types 表示 Schema 描述的是列表，列出的类型是允许的列表元素类型；它不改变 format 的呈现语义。
+      - element_types 表示 Schema 描述的列表允许包含哪些元素类型；它不决定 Artifact format。
   - !schema
-    format: outline
     asserts:
       - 根节点必须使用 !schema 标签，不得使用独立的 type 字段。
       - 顶层 Schema 的 names 必须是非空字符串数组，首项为规范名称。
@@ -40,11 +39,6 @@ defines:
           - Schema
         defines:
           - Schema 的文本定义，以及用于补充其规则或结构的匿名嵌套记忆实体。
-      - !schema
-        names:
-          - format
-        defines:
-          - 可选，Schema 实例的最终呈现形态；只能是 outline 或 table，省略时按 outline 理解。
       - !schema
         names:
           - asserts
