@@ -78,6 +78,7 @@ memsphere 使用带 YAML tag 的 mapping 描述一份 Memory。根节点的 tag 
 
 ```yaml
 !concept
+syntax: memsphere-20260719-stable
 names:
   - 示例概念
   - 示例别名
@@ -86,7 +87,9 @@ defines:
 ```
 
 - `!concept`、`!statement`、`!procedure`、`!schema` 分别表示四种 Memory。
+- 顶层 Memory 使用 `syntax` 声明不可变的语法版本；当前稳定版本是 `memsphere-20260719-stable`。省略时固定按历史起点 `start` 解释，不得按最新版猜测。
 - `names` 的第一项是规范名称，其余项是别名。
+- 原本允许 `names` 的节点也允许写单个 `name`，其解析结果等价于 `names: [name]`；二者不能同时出现。
 - `defines` 用于定义这份 Memory；其中的全部成员共同生效。
 - 不同类型还拥有自己的字段。编写或解释某种 Memory 前，读取对应的 Concept Memory 了解完整语义和字段规则。
 
@@ -107,7 +110,10 @@ artifact: !artifact
 - `type` 省略时默认为 `string`；`boolean`、`number`、`object`、`array` 必须显式声明。
 - `format` 省略时默认为 `plain`；简单格式可写 `markdown`、`json` 或 `yaml`，格式参数使用带 `name` 的对象。
 - `layout` 属于 markdown format：object 使用 outline，array 使用 table。
-- Schema 只描述 fields、element_types 和 Repeat，不再拥有 format。
+- Schema 的 `type` 不继承：显式声明优先，省略时有 `fields` 推断为 `object`、无 `fields` 推断为 `string`。Schema 的 `format` 省略时继承父 Schema 或根 Artifact；Markdown `layout` 只由兼容的 object outline 或 array table 节点保留，标量字段不继承 layout。
+- array Schema 使用 `item: !schema` 表示唯一元素契约，或使用至少两个 `!schema` 组成的 `items` 表示联合元素契约；每个元素必须满足至少一个候选。二者互斥且要求显式 `type: array`。
+- array Schema 不允许直接声明 `fields`。对象元素应在 `item` 或 `items` 的 `type: object` Schema 中声明 `fields`；省略 `item/items` 时只校验数组容器。
+- 不要使用已删除的 `element_types`；旧版字符串 `items` 必须迁移为带 `!schema` tag 的 `item/items`。
 - `asserts` 和 `suggests` 是自然语言契约，不会被代码 validator 猜测执行。
 
 当 Artifact 使用 `type: object`、`format.name: markdown` 和 `layout: outline` 时，Schema 的 `fields` 可以使用 mapping 形式的 `!repeat`，把非空 `body` 中的一组字符串或 `!schema` 字段整体重复。`limit.min/max` 如出现必须是非负整数且 `min <= max`。首版不允许 Repeat 嵌套，也不允许把 Repeat 放在 table、defines、flow 或其他位置：
@@ -213,4 +219,4 @@ memsphere run repeat <count> --run <Run ID>
 
 收到用户结果后，将它作为当前步骤产物按 `Then` 命令上报，再继续处理 CLI 返回的新步骤。Run 显示 `done` 时，向用户汇报流程完成情况和最终产物。
 
-旧 Memory 若仍使用 `format: boolean/string/number/schema` 或 `Schema.format`，先执行 `memsphere migrate artifact-contract-v2 --check`。未经 human 明确确认，不对真实 Memory Store 执行 `--write`。v1 running Run 不得跨版本继续，done Run 与 Review snapshot 仅只读展示。
+旧 Memory 若未声明 `syntax`，先执行 `memsphere migrate syntax --check`；若仍使用 `format: boolean/string/number/schema`，执行 `memsphere migrate artifact-contract-v2 --check`；若使用 `element_types`、字符串形式的旧 `items`、array 直接声明 `fields`，或旧式 Schema `format: outline/table`，再执行 `memsphere migrate schema-contract-v2 --check`。未经 human 明确确认，不对真实 Memory Store 执行 `--write`。旧语法不能启动新 Run，v1 running Run 不得跨版本继续，done Run 与 Review snapshot 仅只读展示。

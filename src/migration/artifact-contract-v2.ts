@@ -1,13 +1,15 @@
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { isMap, isSeq, type Document, type ParsedNode, type Scalar, type YAMLMap } from "yaml";
 import type { MemsphereConfig } from "../config.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
-import { memorySchemas } from "../memory/schema.js";
+import { memorySyntaxRegistry } from "../memory/schema.js";
 import { readMemoryFile } from "../memory/store.js";
+import { readMemorySyntax } from "../memory/syntax.js";
 import { parseMemoryYaml, parseMemoryYamlDocument } from "../memory/yaml.js";
 import { listRuns } from "../run/store.js";
+import { assertMigrationSourcesUnchanged, withMemoryStoreMigrationLock } from "./store-write.js";
 
 export type ArtifactContractMigrationIssue = {
   code: string;
@@ -64,7 +66,7 @@ type ExternalSchemaConsumer = {
 
 export async function checkArtifactContractV2Migration(
   config: MemsphereConfig,
-  options: { includeRuns?: boolean } = {}
+  options: { includeRuns?: boolean; validateOutputs?: boolean } = {}
 ): Promise<{ manifest: ArtifactContractMigrationManifest; prepared: PreparedFile[] }> {
   const issues: ArtifactContractMigrationIssue[] = [];
   const documents: MigrationDocument[] = [];
@@ -95,7 +97,7 @@ export async function checkArtifactContractV2Migration(
     };
   });
 
-  if (issues.length === 0) validatePreparedOutputs(prepared, issues);
+  if (issues.length === 0 && options.validateOutputs !== false) validatePreparedOutputs(prepared, issues);
 
   if (options.includeRuns !== false) {
     for (const run of await listRuns(config.runsRoot)) {
@@ -127,10 +129,9 @@ function validatePreparedOutputs(
 ): void {
   for (const file of prepared) {
     const kind = file.path.split("/")[0] as MemoryKind;
-    const schema = memorySchemas[kind];
-
     try {
-      const result = schema.safeParse(parseMemoryYaml(file.output));
+      const entity = parseMemoryYaml(file.output);
+      const result = memorySyntaxRegistry.require(readMemorySyntax(entity)).schemas[kind].safeParse(entity);
       if (result.success) continue;
       for (const issue of result.error.issues) {
         issues.push({
@@ -152,16 +153,7 @@ function validatePreparedOutputs(
 }
 
 export async function writeArtifactContractV2Migration(config: MemsphereConfig): Promise<ArtifactContractMigrationManifest> {
-  const lockPath = join(config.scopeRoot, "migrations", "artifact-contract-v2.lock");
-  await mkdir(dirname(lockPath), { recursive: true });
-  const lock = await open(lockPath, "wx").catch((error: unknown) => {
-    if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {
-      throw new Error(`Artifact Contract v2 migration is already running: ${lockPath}`);
-    }
-    throw error;
-  });
-
-  try {
+  return withMemoryStoreMigrationLock(config, "Artifact Contract v2 migration", async () => {
     const { manifest, prepared } = await checkArtifactContractV2Migration(config);
     if (manifest.status !== "ready") {
       throw new Error(`Artifact Contract v2 migration is blocked by ${manifest.issues.length} issue(s)`);
@@ -183,15 +175,18 @@ export async function writeArtifactContractV2Migration(config: MemsphereConfig):
     }
     await validateStagedRoot(stagedRoot);
 
+    await assertMigrationSourcesUnchanged(changed);
     for (const file of changed) {
       const backupPath = join(backupRoot, file.path);
       await mkdir(dirname(backupPath), { recursive: true });
       await copyFile(file.absolutePath, backupPath);
     }
+    await assertMigrationSourcesUnchanged(changed);
 
     const written: PreparedFile[] = [];
     try {
       for (const file of changed) {
+        await assertMigrationSourcesUnchanged([file]);
         const tempPath = join(dirname(file.absolutePath), `.${basename(file.absolutePath)}.artifact-v2.tmp`);
         await writeFile(tempPath, file.output, "utf8");
         await rename(tempPath, file.absolutePath);
@@ -206,10 +201,7 @@ export async function writeArtifactContractV2Migration(config: MemsphereConfig):
     const completed = { ...manifest, backupRoot };
     await writeFile(join(migrationRoot, "manifest.json"), `${JSON.stringify(completed, null, 2)}\n`, "utf8");
     return completed;
-  } finally {
-    await lock.close();
-    await rm(lockPath, { force: true });
-  }
+  });
 }
 
 function migrateDocument(

@@ -1,4 +1,5 @@
 !procedure
+syntax: memsphere-20260719-stable
 names:
   - memsphere bug 修复流程
   - MemsphereBugFix

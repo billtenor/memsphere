@@ -1,7 +1,8 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { memoryKinds, type MemoryKind } from "./kinds.js";
-import { memorySchemas, type MemoryEntity } from "./schema.js";
+import { memorySyntaxRegistry, type MemoryEntity } from "./schema.js";
+import { readMemorySyntax } from "./syntax.js";
 import { assertExpectedTag, parseMemoryYaml } from "./yaml.js";
 
 export type MemoryFile = {
@@ -15,14 +16,18 @@ export async function readMemoryFile(kind: MemoryKind, filePath: string): Promis
   const entity = parseMemoryYaml(source);
 
   assertExpectedTag(entity, kind, filePath);
-
-  const parsed = memorySchemas[kind].parse(entity) as MemoryEntity;
+  const parsed = parseMemoryEntity(kind, entity);
 
   return {
     kind,
     path: filePath,
     entity: parsed
   };
+}
+
+export function parseMemoryEntity(kind: MemoryKind, entity: unknown): MemoryEntity {
+  const syntax = readMemorySyntax(entity);
+  return memorySyntaxRegistry.require(syntax).schemas[kind].parse(entity) as MemoryEntity;
 }
 
 export async function listMemoryFiles(memoryRoot: string, kind: MemoryKind): Promise<string[]> {

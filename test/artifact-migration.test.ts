@@ -81,7 +81,7 @@ flow:
   assert.equal(result.manifest.issues[0]?.code, "migration.artifact.structured_type_required");
 });
 
-test("Artifact Contract v2 check rejects prepared output that still uses Schema format", async () => {
+test("Artifact Contract v2 check rejects prepared output that still uses removed Schema fields", async () => {
   const root = await mkdtemp(join(tmpdir(), "memsphere-artifact-v2-invalid-output-"));
   const memoryRoot = join(root, "memory");
   for (const kind of ["procedures", "concepts", "statements", "schemas"]) {
@@ -91,8 +91,7 @@ test("Artifact Contract v2 check rejects prepared output that still uses Schema 
 names: [legacy]
 defines:
   - !schema
-    format: outline
-    fields: [summary]
+    element_types: [string]
 `);
   const config: MemsphereConfig = {
     configPath: join(root, "config.json"), scopeRoot: root, memoryRoot,

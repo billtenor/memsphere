@@ -304,6 +304,7 @@ export const browserHtml = String.raw`<!doctype html>
       schemas: { zh: "图式", yaml: "schemas" },
       concepts: { zh: "概念", yaml: "concepts" },
       statements: { zh: "命题", yaml: "statements" },
+      syntax: { zh: "语法版本", yaml: "syntax" },
       names: { zh: "名称", yaml: "names" },
       defines: { zh: "定义", yaml: "defines" },
       asserts: { zh: "断言", yaml: "asserts" },
@@ -325,10 +326,15 @@ export const browserHtml = String.raw`<!doctype html>
       artifact: { zh: "产物", yaml: "artifact" },
       schema: { zh: "图式", yaml: "schema" },
       inlineSchema: { zh: "内嵌图式", yaml: "inline schema" },
+      type: { zh: "类型", yaml: "type" },
       fields: { zh: "字段", yaml: "fields" },
+      item: { zh: "元素", yaml: "item" },
+      items: { zh: "候选元素", yaml: "items" },
+      itemCandidate: { zh: "候选元素", yaml: "item candidate" },
       final: { zh: "最终交付物", yaml: "final" },
       finalArtifacts: { zh: "最终交付物", yaml: "final artifacts" },
-      element_types: { zh: "元素类型", yaml: "element_types" },
+      layout: { zh: "布局", yaml: "layout" },
+      legacyElementTypes: { zh: "旧版元素类型（只读）", yaml: "legacy element_types (read-only)" },
       statement: { zh: "命题", yaml: "statement" },
       action: { zh: "要做什么", yaml: "action" },
       then: { zh: "然后", yaml: "then" },
@@ -1284,6 +1290,7 @@ export const browserHtml = String.raw`<!doctype html>
       const meta = document.createElement("div");
       meta.className = "meta";
       meta.append(pill(memory.entity.tag || memory.kind, true));
+      if (memory.entity.syntax) meta.append(pill(t("syntax") + ": " + memory.entity.syntax));
       if (memory.source === "reserved") {
         meta.append(pill("reserved", true));
         meta.append(pill(memory.imported ? "imported" : "not imported", false, memory.imported ? "done" : ""));
@@ -1318,15 +1325,21 @@ export const browserHtml = String.raw`<!doctype html>
       const section = document.createElement("div");
       section.className = "section schema-node" + (depth < 2 ? " open" : "");
       const badges = ["!schema"];
-      if (node.format) badges.push("format: " + node.format);
+      if (node.type) badges.push(t("type") + ": " + node.type);
+      if (node.format) {
+        badges.push(t("format") + ": " + formatLabel(node.format));
+        const layout = formatOptions(node.format).layout;
+        if (layout) badges.push(t("layout") + ": " + layout);
+      }
+      if (node.element_types?.length) badges.push(t("legacyElementTypes"));
       const name = depth === 0 ? "" : displayName(node, fallbackName);
       section.append(sectionHeader(name, badges, path, "schema:" + path));
       const body = document.createElement("div");
       body.className = "section-body";
       if (depth === 0) appendNames(body, node);
       appendTextBlocks(body, node);
-      appendSchemaElementTypes(body, node.element_types);
-      if (node.format === "table" && node.fields?.length) {
+      appendLegacySchemaElementTypes(body, node.element_types);
+      if (formatName(node.format) === "markdown" && formatOptions(node.format).layout === "table" && node.fields?.length) {
         body.append(blockTitle(t("fields")), renderTableFields(node.fields, path));
       }
       else if (node.fields && node.fields.length) {
@@ -1346,6 +1359,20 @@ export const browserHtml = String.raw`<!doctype html>
               : renderSchema(child, depth + 1, childPath));
         }
         body.append(blockTitle(t("fields")), children);
+      }
+      if (node.item) {
+        const itemPath = path + " > " + t("item");
+        body.append(blockTitle(t("item")), renderSchema(node.item, depth + 1, itemPath, t("item")));
+      }
+      if (node.items?.length) {
+        const candidates = document.createElement("div");
+        candidates.className = "child-stack";
+        for (const [index, item] of node.items.entries()) {
+          const fallback = t("itemCandidate") + " " + (index + 1);
+          const itemPath = path + " > " + fallback;
+          candidates.append(renderSchema(item, depth + 1, itemPath, fallback));
+        }
+        body.append(blockTitle(t("items")), candidates);
       }
       section.append(body);
       return section;
@@ -1396,15 +1423,12 @@ export const browserHtml = String.raw`<!doctype html>
       return section;
     }
 
-    function appendSchemaElementTypes(target, elementTypes) {
-      if (!elementTypes || !elementTypes.length) return;
-      const title = document.createElement("div");
-      title.className = "block-title";
-      title.textContent = t("element_types");
+    function appendLegacySchemaElementTypes(target, elementTypes) {
+      if (!elementTypes?.length) return;
       const row = document.createElement("div");
       row.className = "meta";
       for (const elementType of elementTypes) row.append(pill(elementType));
-      target.append(title, row);
+      target.append(blockTitle(t("legacyElementTypes")), row);
     }
 
     function sectionHeader(text, badges, target, anchor) {
@@ -1791,8 +1815,16 @@ export const browserHtml = String.raw`<!doctype html>
 
     function inlineSchemaSummary(schema) {
       const parts = [t("inlineSchema")];
+      if (schema.type) parts.push(t("type") + ": " + schema.type);
+      if (schema.format) {
+        parts.push(t("format") + ": " + formatLabel(schema.format));
+        const layout = formatOptions(schema.format).layout;
+        if (layout) parts.push(t("layout") + ": " + layout);
+      }
       if (schema.asserts?.length) parts.push(schema.asserts.length + " " + t("asserts"));
       if (schema.fields?.length) parts.push(schema.fields.length + " " + t("fields"));
+      if (schema.item) parts.push("1 " + t("item"));
+      if (schema.items?.length) parts.push(schema.items.length + " " + t("items"));
       return parts.join(" · ");
     }
 

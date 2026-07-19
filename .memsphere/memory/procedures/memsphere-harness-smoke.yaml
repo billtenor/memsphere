@@ -1,4 +1,5 @@
 !procedure
+syntax: memsphere-20260719-stable
 names:
   - memsphere-harness-smoke
   - harness-smoke
@@ -11,6 +12,7 @@ goals:
   - 验证 markdown artifact 会写入 run artifacts 目录，并可在 view 中显示文件内容。
   - 验证 format 为 schema 的 artifact 可以进入 schema 深度优先编写流程。
   - 验证 Action 的断言和建议、内嵌图式与最终交付物可以贯通 Run 和 View。
+  - 验证 Schema 合约继承，以及 outline 标题子树中的局部 Markdown table 校验。
 flow:
   - !if
     condition: !action
@@ -123,5 +125,17 @@ flow:
           - 所有字段均应可审计。
         fields:
           - 摘要
+          - !schema
+            names:
+              - 验证项
+            type: array
+            format:
+              name: markdown
+              layout: table
+            item: !schema
+              type: object
+              fields:
+                - ID
+                - 结果
       final: true
       type: object

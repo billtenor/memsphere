@@ -9,7 +9,11 @@ import {
 } from "./commands/archive.js";
 import { initCommand } from "./commands/init.js";
 import { memoryListCommand, memoryReadCommand } from "./commands/memory.js";
-import { migrateArtifactContractV2Command } from "./commands/migrate.js";
+import {
+  migrateArtifactContractV2Command,
+  migrateMemorySyntaxCommand,
+  migrateSchemaContractV2Command
+} from "./commands/migrate.js";
 import { memoryKinds } from "./memory/kinds.js";
 import {
   runEnterSchemaCommand,
@@ -161,12 +165,29 @@ const migrate = program
   .description("Migrate persisted memsphere data between contract versions.");
 
 migrate
+  .command("syntax")
+  .description("Migrate Memory YAML to a registered syntax version.")
+  .option("--check", "scan and print a read-only migration manifest")
+  .option("--write", "stage, validate, back up, and apply the migration")
+  .option("--to <syntax>", "target syntax; defaults to the current stable syntax")
+  .option("--config <path>", "config file path")
+  .action(migrateMemorySyntaxCommand);
+
+migrate
   .command("artifact-contract-v2")
   .description("Migrate Memory Artifact contracts to type, format, and schema v2.")
   .option("--check", "scan and print a read-only migration manifest")
   .option("--write", "stage, validate, back up, and apply the migration")
   .option("--config <path>", "config file path")
   .action(migrateArtifactContractV2Command);
+
+migrate
+  .command("schema-contract-v2")
+  .description("Migrate Schema contracts to inferred types and inherited formats v2.")
+  .option("--check", "scan and print a read-only migration manifest")
+  .option("--write", "stage, validate, back up, and apply the migration")
+  .option("--config <path>", "config file path")
+  .action(migrateSchemaContractV2Command);
 
 const archive = program
   .command("archive")

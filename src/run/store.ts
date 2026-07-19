@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
@@ -15,6 +15,8 @@ import {
   prepareArtifactCandidate
 } from "../artifact-validation.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
+import { currentMemorySyntax, type MemorySyntaxVersion } from "../memory/syntax.js";
+import { inheritSchemaFormat, resolveSchemaContract } from "../memory/schema.js";
 import {
   builtInArtifactFormats,
   stepActors,
@@ -24,6 +26,7 @@ import {
   type FlowNode,
   type IfNode,
   type ProcedureMemory,
+  schemaNodeFromMemory,
   type RepeatNode,
   type SchemaMemory,
   type SchemaNode,
@@ -114,6 +117,7 @@ export type RunEvent = {
 export type RunState = {
   contractVersion: 1 | 2;
   readOnly?: boolean;
+  memorySyntax?: MemorySyntaxVersion;
   id: string;
   status: RunStatus;
   procedureName: string;
@@ -140,7 +144,8 @@ const validationPlanEntrySchema = z.object({
   id: z.string(),
   version: z.string(),
   stage: z.enum(["type", "format", "schema"]),
-  target: z.string()
+  target: z.string(),
+  contractPath: z.string().optional()
 }).strict();
 
 const validationResultSchema: z.ZodType<ArtifactValidationResult> = z.object({
@@ -195,6 +200,7 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
 const runStateSchema: z.ZodType<RunState> = z.object({
   contractVersion: z.literal(2),
   readOnly: z.boolean().optional(),
+  memorySyntax: z.string().optional(),
   id: z.string(),
   status: z.enum(["running", "done"]),
   procedureName: z.string(),
@@ -256,6 +262,7 @@ export async function startRun(input: { memoryRoot: string; runsRoot: string; pr
   const now = new Date().toISOString();
   const run: RunState = {
     contractVersion: 2,
+    memorySyntax: procedure.entity.syntax,
     id: makeRunId(now),
     status: "running",
     procedureName: procedure.entity.names[0],
@@ -316,6 +323,10 @@ export async function listRuns(runsRoot: string): Promise<RunState[]> {
 }
 
 export async function reportRun(input: { runsRoot: string; runId: string; artifact: ArtifactReportSource }): Promise<RunState> {
+  return withRunWriteLock(input.runsRoot, input.runId, () => reportRunUnlocked(input));
+}
+
+async function reportRunUnlocked(input: { runsRoot: string; runId: string; artifact: ArtifactReportSource }): Promise<RunState> {
   const run = await readRun(input.runsRoot, input.runId);
   if (run.contractVersion === 1 || run.readOnly) {
     throw new Error(`v1 run is read-only and cannot report after the Artifact Contract v2 upgrade: ${input.runId}`);
@@ -348,26 +359,43 @@ export async function reportRun(input: { runsRoot: string; runId: string; artifa
   const validation = await artifactValidatorRegistry.execute(plan, { contract, candidate, context });
   if (validation.status !== "passed") throw new ArtifactValidationFailure(validation);
 
-  const artifact = await buildRunEventArtifact(input.runsRoot, run, step, candidate, validation);
-  const controlValue = step.kind === "branch" || step.kind === "loop" ? candidate.representation.value : undefined;
+  const createdArtifactFiles: string[] = [];
+  try {
+    const artifact = await buildRunEventArtifact(
+      input.runsRoot,
+      run,
+      step,
+      candidate,
+      validation,
+      createdArtifactFiles
+    );
+    const controlValue = step.kind === "branch" || step.kind === "loop" ? candidate.representation.value : undefined;
 
-  run.events.push({
-    at: new Date().toISOString(),
-    frame: frame.type,
-    stepId: step.id,
-    artifact
-  });
+    run.events.push({
+      at: new Date().toISOString(),
+      frame: frame.type,
+      stepId: step.id,
+      artifact
+    });
 
-  frame.index += 1;
-  applyControlStep(frame, step, controlValue);
-  await collapseCompletedFrames(input.runsRoot, run);
-  await expandAutoCallSteps(run);
-  run.updatedAt = new Date().toISOString();
-  await writeRun(input.runsRoot, run);
-  return run;
+    frame.index += 1;
+    applyControlStep(frame, step, controlValue);
+    await collapseCompletedFrames(input.runsRoot, run, createdArtifactFiles);
+    await expandAutoCallSteps(run);
+    run.updatedAt = new Date().toISOString();
+    await writeRun(input.runsRoot, run);
+    return run;
+  } catch (error) {
+    await removeArtifactFiles(createdArtifactFiles);
+    throw error;
+  }
 }
 
 export async function repeatRun(input: { runsRoot: string; runId: string; count: number }): Promise<RunState> {
+  return withRunWriteLock(input.runsRoot, input.runId, () => repeatRunUnlocked(input));
+}
+
+async function repeatRunUnlocked(input: { runsRoot: string; runId: string; count: number }): Promise<RunState> {
   const run = await readRun(input.runsRoot, input.runId);
   if (run.contractVersion === 1 || run.readOnly) {
     throw new Error(`v1 run is read-only and cannot continue after the Artifact Contract v2 upgrade: ${input.runId}`);
@@ -391,13 +419,19 @@ export async function repeatRun(input: { runsRoot: string; runId: string; count:
     throw new Error(`repeat count must be at most ${step.repeat.max}`);
   }
 
-  const expanded = compileRepeatBody(step.repeat, input.count);
-  frame.steps.splice(frame.index, 1, ...expanded);
-  await collapseCompletedFrames(input.runsRoot, run);
-  await expandAutoCallSteps(run);
-  run.updatedAt = new Date().toISOString();
-  await writeRun(input.runsRoot, run);
-  return run;
+  const createdArtifactFiles: string[] = [];
+  try {
+    const expanded = compileRepeatBody(step.repeat, input.count);
+    frame.steps.splice(frame.index, 1, ...expanded);
+    await collapseCompletedFrames(input.runsRoot, run, createdArtifactFiles);
+    await expandAutoCallSteps(run);
+    run.updatedAt = new Date().toISOString();
+    await writeRun(input.runsRoot, run);
+    return run;
+  } catch (error) {
+    await removeArtifactFiles(createdArtifactFiles);
+    throw error;
+  }
 }
 
 export function artifactInlineValue(artifact: RunEvent["artifact"]): unknown {
@@ -412,6 +446,10 @@ export function artifactSchemaName(artifact: RunEvent["artifact"]): string | und
 }
 
 export async function enterSchema(input: { memoryRoot: string; runsRoot: string; runId: string; schemaName?: string }): Promise<RunState> {
+  return withRunWriteLock(input.runsRoot, input.runId, () => enterSchemaUnlocked(input));
+}
+
+async function enterSchemaUnlocked(input: { memoryRoot: string; runsRoot: string; runId: string; schemaName?: string }): Promise<RunState> {
   const run = await readRun(input.runsRoot, input.runId);
   if (run.contractVersion === 1 || run.readOnly) {
     throw new Error(`v1 run is read-only and cannot enter schema after the Artifact Contract v2 upgrade: ${input.runId}`);
@@ -425,7 +463,7 @@ export async function enterSchema(input: { memoryRoot: string; runsRoot: string;
     if (activeStep?.schema?.kind !== "inline") {
       throw new Error("current Artifact does not use an inline schema; provide an external schema name");
     }
-    const steps = compileSchemaSteps(activeStep.schema.node, activeStep.schema.id);
+    const steps = compileSchemaSteps(activeStep.schema.node, activeStep.schema.id, stepContract(activeStep));
     if (!steps.length) throw new Error(`inline schema has no executable fields: ${activeStep.artifact}`);
     run.stack.push({
       type: "schema",
@@ -444,7 +482,7 @@ export async function enterSchema(input: { memoryRoot: string; runsRoot: string;
     }
     if (!activeStep.schema.node) throw new Error(`schema snapshot missing from Run contract: ${input.schemaName}`);
     const schemaName = activeStep.schema.name;
-    const steps = compileSchemaSteps(activeStep.schema.node, schemaName);
+    const steps = compileSchemaSteps(activeStep.schema.node, schemaName, stepContract(activeStep));
     if (!steps.length) throw new Error(`schema has no executable fields: ${input.schemaName}`);
     run.stack.push({
       type: "schema",
@@ -482,7 +520,11 @@ export function finalArtifacts(run: RunState): RunEvent["artifact"][] {
   return run.events.filter((event) => event.artifact.final).map((event) => event.artifact);
 }
 
-async function collapseCompletedFrames(runsRoot: string, run: RunState): Promise<void> {
+async function collapseCompletedFrames(
+  runsRoot: string,
+  run: RunState,
+  createdArtifactFiles: string[] = []
+): Promise<void> {
   while (run.stack.length > 0) {
     const frame = currentFrame(run);
     if (!frame || frame.index < frame.steps.length) break;
@@ -512,7 +554,14 @@ async function collapseCompletedFrames(runsRoot: string, run: RunState): Promise
       const plan = parentStep.validationPlan ?? artifactValidatorRegistry.resolvePlan(contract);
       const validation = await artifactValidatorRegistry.execute(plan, { contract, candidate, context });
       if (validation.status !== "passed") throw new ArtifactValidationFailure(validation);
-      const artifact = await buildRunEventArtifact(runsRoot, run, parentStep, candidate, validation);
+      const artifact = await buildRunEventArtifact(
+        runsRoot,
+        run,
+        parentStep,
+        candidate,
+        validation,
+        createdArtifactFiles
+      );
       run.events.push({
         at: new Date().toISOString(),
         frame: parent.type,
@@ -705,7 +754,8 @@ async function buildRunEventArtifact(
   run: RunState,
   step: RunStep,
   candidate: PreparedArtifactCandidate,
-  validation: ArtifactValidationResult
+  validation: ArtifactValidationResult,
+  createdArtifactFiles: string[] = []
 ): Promise<RunEvent["artifact"]> {
   if (!step.artifact || !step.type || !step.format) {
     throw new Error(`step ${step.id} has no artifact`);
@@ -735,6 +785,7 @@ async function buildRunEventArtifact(
   assertInsideRunArtifactDirectory(absolutePath, artifactDir);
 
   await writeFile(absolutePath, candidate.raw);
+  createdArtifactFiles.push(absolutePath);
 
   return compactArtifact({
     ...base,
@@ -743,6 +794,10 @@ async function buildRunEventArtifact(
     fileName,
     contentType: contentTypeForFormat(step.format)
   });
+}
+
+async function removeArtifactFiles(paths: readonly string[]): Promise<void> {
+  for (const path of [...paths].reverse()) await rm(path, { force: true });
 }
 
 async function contractForStep(run: RunState, step: RunStep): Promise<CompiledArtifactContract> {
@@ -759,6 +814,17 @@ async function contractForStep(run: RunState, step: RunStep): Promise<CompiledAr
     type: step.type,
     format: { name: step.format.name, options: structuredClone(step.format.options) },
     schema,
+    final: step.final === true
+  };
+}
+
+function stepContract(step: RunStep): CompiledArtifactContract {
+  if (!step.artifact || !step.type || !step.format) throw new Error(`step ${step.id} has no Artifact contract`);
+  return {
+    name: step.artifact,
+    type: step.type,
+    format: structuredClone(step.format),
+    schema: step.schema?.node ? cloneSchema(step.schema.node) : undefined,
     final: step.final === true
   };
 }
@@ -838,45 +904,74 @@ function contentTypeForFormat(format: ArtifactFormatSpec): string | undefined {
   }
 }
 
-function compileSchemaSteps(schema: SchemaNode, rootName: string): RunStep[] {
+function compileSchemaSteps(
+  schema: SchemaNode,
+  rootName: string,
+  parentContract: CompiledArtifactContract
+): RunStep[] {
   const steps: RunStep[] = [];
-  walkSchema(schema, rootName, steps);
+  walkSchema(schema, rootName, steps, parentContract);
   return steps;
 }
 
-function walkSchema(node: SchemaNode, path: string, steps: RunStep[]): void {
-  const elementTypeDetails = node.element_types?.length
-    ? [`element_types: List<${node.element_types.join(" | ")}>`]
-    : [];
+function schemaStepContract(
+  schema: SchemaNode,
+  parent: CompiledArtifactContract,
+  name: string
+): CompiledArtifactContract {
+  const resolved = resolveSchemaContract(schema, parent.format);
+  return {
+    name,
+    type: resolved.type,
+    format: structuredClone(resolved.format),
+    final: false
+  };
+}
+
+function walkSchema(
+  node: SchemaNode,
+  path: string,
+  steps: RunStep[],
+  parentContract: CompiledArtifactContract
+): void {
+    const contract = schemaStepContract(node, parentContract, path);
   steps.push(compileSchemaValueStep({
     id: `schema:${path}`,
     instruction: `Write ${path}`,
     artifact: path,
-    formatName: schemaNodeArtifactFormat(node),
+    contract,
     details: definitionDetails(node.defines)
-      .concat(elementTypeDetails)
       .concat((node.asserts ?? []).map((value) => `asserts: ${value}`))
   }));
 
+  if (!(contract.type === "object" && contract.format.name === "markdown" && contract.format.options.layout === "outline")) {
+    return;
+  }
+
   for (const [fieldIndex, child] of (node.fields ?? []).entries()) {
     if (typeof child === "string") {
-      steps.push(compileStringSchemaStep(`${path}.${child}`));
+      steps.push(compileStringSchemaStep(`${path}.${child}`, contract));
       continue;
     }
     if (child.tag === "!repeat") {
       steps.push(compileRepeatStep(child, path, fieldIndex));
       continue;
     }
-    walkSchema(child, `${path}.${child.names[0]}`, steps);
+    walkSchema(child, `${path}.${child.names[0]}`, steps, contract);
   }
 }
 
-function compileStringSchemaStep(path: string): RunStep {
+function compileStringSchemaStep(path: string, parent: CompiledArtifactContract): RunStep {
   return compileSchemaValueStep({
     id: `schema:${path}`,
     instruction: `Write ${path}`,
     artifact: path,
-    formatName: "plain"
+    contract: {
+      name: path,
+      type: "string",
+      format: inheritSchemaFormat(parent.format, "string"),
+      final: false
+    }
   });
 }
 
@@ -884,15 +979,10 @@ function compileSchemaValueStep(input: {
   id: string;
   instruction: string;
   artifact: string;
-  formatName: "plain" | "markdown";
+  contract: CompiledArtifactContract;
   details?: string[];
 }): RunStep {
-  const contract: CompiledArtifactContract = {
-    name: input.artifact,
-    type: "string",
-    format: { name: input.formatName, options: {} },
-    final: false
-  };
+  const contract = input.contract;
   return {
     id: input.id,
     instruction: input.instruction,
@@ -933,9 +1023,19 @@ function compileRepeatBody(repeat: NonNullable<RunStep["repeat"]>, count: number
   for (let iteration = 1; iteration <= count; iteration += 1) {
     for (const child of repeat.body) {
       if (typeof child === "string") {
-        steps.push(compileStringSchemaStep(`${repeat.parentPath}.${child}[${iteration}]`));
+        steps.push(compileStringSchemaStep(`${repeat.parentPath}.${child}[${iteration}]`, {
+          name: repeat.parentPath,
+          type: "object",
+          format: { name: "markdown", options: { layout: "outline" } },
+          final: false
+        }));
       } else {
-        walkSchema(child, `${repeat.parentPath}.${child.names[0]}[${iteration}]`, steps);
+        walkSchema(child, `${repeat.parentPath}.${child.names[0]}[${iteration}]`, steps, {
+          name: repeat.parentPath,
+          type: "object",
+          format: { name: "markdown", options: { layout: "outline" } },
+          final: false
+        });
       }
     }
   }
@@ -975,16 +1075,15 @@ function statementDefinitionDetails(statement: StatementNode, path: string[] = [
   return details;
 }
 
-function schemaNodeArtifactFormat(node: SchemaNode): "plain" | "markdown" {
-  return node.fields?.length || node.element_types?.length ? "markdown" : "plain";
-}
-
 async function snapshotExternalSchemas(memoryRoot: string, steps: RunStep[]): Promise<void> {
   for (const step of steps) {
     if (step.schema?.kind === "external" && !step.schema.node) {
       const memory = await findMemoryByName(memoryRoot, "schemas", step.schema.name);
       if (!memory) throw new Error(`schema not found: ${step.schema.name}`);
-      step.schema.node = cloneSchema(memory.entity as SchemaMemory);
+      step.schema.node = cloneSchema(schemaNodeFromMemory(memory.entity as SchemaMemory));
+    }
+    if (step.schema?.node && step.artifact && step.type && step.format) {
+      step.validationPlan = artifactValidatorRegistry.resolvePlan(stepContract(step));
     }
     if (
       step.schema?.node &&
@@ -1004,7 +1103,8 @@ async function snapshotExternalSchemas(memoryRoot: string, steps: RunStep[]): Pr
 function schemaHasRepeat(schema: SchemaNode): boolean {
   return (schema.fields ?? []).some((field) =>
     typeof field === "object" && (field.tag === "!repeat" || schemaHasRepeat(field))
-  );
+  ) || (schema.item !== undefined && schemaHasRepeat(schema.item)) ||
+    (schema.items ?? []).some((item) => schemaHasRepeat(item));
 }
 
 async function assembleSchemaArtifact(runsRoot: string, run: RunState, frame: RunFrame): Promise<string> {
@@ -1037,11 +1137,21 @@ async function findMemoryByName(memoryRoot: string, kind: "procedures" | "schema
   const paths = await listMemoryFiles(memoryRoot, kind);
 
   for (const path of paths) {
+    let file: MemoryFile;
     try {
-      const file = await readMemoryFile(kind, path);
-      if (file.entity.names.includes(name)) return file;
+      file = await readMemoryFile(kind, path);
     } catch {
       // Run lookup should not be blocked by unrelated invalid memories.
+      continue;
+    }
+    if (file.entity.names.includes(name)) {
+      if (file.entity.syntax !== currentMemorySyntax) {
+        throw new Error(
+          `${kind === "procedures" ? "procedure" : "schema"} ${name} uses outdated Memory syntax ${file.entity.syntax}; ` +
+          `run memsphere migrate syntax --write to upgrade to ${currentMemorySyntax}`
+        );
+      }
+      return file;
     }
   }
 
@@ -1067,8 +1177,84 @@ async function existingRunPath(runsRoot: string, id: string): Promise<string> {
 }
 
 async function writeRun(runsRoot: string, run: RunState): Promise<void> {
-  await mkdir(join(runsRoot, run.id), { recursive: true });
-  await writeFile(runPath(runsRoot, run.id), `${JSON.stringify(run, null, 2)}\n`, "utf8");
+  const directory = join(runsRoot, run.id);
+  const targetPath = runPath(runsRoot, run.id);
+  const tempPath = join(directory, `.${run.id}.${process.pid}.${randomUUID()}.tmp`);
+  await mkdir(directory, { recursive: true });
+  try {
+    await writeFile(tempPath, `${JSON.stringify(run, null, 2)}\n`, "utf8");
+    await rename(tempPath, targetPath);
+  } finally {
+    await rm(tempPath, { force: true });
+  }
+}
+
+async function withRunWriteLock<T>(runsRoot: string, runId: string, work: () => Promise<T>): Promise<T> {
+  const lockRoot = join(runsRoot, ".locks");
+  const lockName = createHash("sha256").update(runId).digest("hex");
+  const lockPath = join(lockRoot, `${lockName}.lock`);
+  await mkdir(lockRoot, { recursive: true });
+  const deadline = Date.now() + 30_000;
+  const owner = { pid: process.pid, token: randomUUID(), startedAt: new Date().toISOString() };
+  while (true) {
+    try {
+      await writeFile(lockPath, `${JSON.stringify(owner)}\n`, { flag: "wx" });
+      break;
+    } catch (error) {
+      if (!error || typeof error !== "object" || !("code" in error) || error.code !== "EEXIST") throw error;
+      await removeStaleRunLock(lockPath);
+      if (Date.now() >= deadline) throw new Error(`run is busy: ${runId}`);
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+    }
+  }
+
+  try {
+    return await work();
+  } finally {
+    await removeOwnedRunLock(lockPath, owner.token);
+  }
+}
+
+async function removeStaleRunLock(lockPath: string): Promise<void> {
+  const owner = await readRunLockOwner(lockPath);
+  if (!owner) {
+    try {
+      if (Date.now() - (await stat(lockPath)).mtimeMs < 1_000) return;
+      if (!await readRunLockOwner(lockPath)) await rm(lockPath, { force: true });
+    } catch (error) {
+      if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") throw error;
+    }
+    return;
+  }
+  if (processExists(owner.pid)) return;
+  const current = await readRunLockOwner(lockPath);
+  if (current?.token === owner.token && !processExists(current.pid)) await rm(lockPath, { force: true });
+}
+
+async function removeOwnedRunLock(lockPath: string, token: string): Promise<void> {
+  const owner = await readRunLockOwner(lockPath);
+  if (owner?.token === token) await rm(lockPath, { force: true });
+}
+
+async function readRunLockOwner(lockPath: string): Promise<{ pid: number; token: string } | undefined> {
+  try {
+    const value = JSON.parse(await readFile(lockPath, "utf8")) as Record<string, unknown>;
+    return Number.isSafeInteger(value.pid) && typeof value.token === "string"
+      ? { pid: value.pid as number, token: value.token }
+      : undefined;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined;
+    return undefined;
+  }
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return Boolean(error && typeof error === "object" && "code" in error && error.code !== "ESRCH");
+  }
 }
 
 function makeRunId(iso: string): string {
@@ -1243,8 +1429,9 @@ function normalizeLegacySchema(value: unknown): SchemaNode {
     names: stringList(source.names) ?? [],
     defines: Array.isArray(source.defines) ? source.defines as DefinitionPart[] : [],
     asserts: stringList(source.asserts),
-    element_types: Array.isArray(source.element_types) ? source.element_types as SchemaNode["element_types"] : undefined,
-    fields: fields as SchemaNode["fields"]
+    fields: fields as SchemaNode["fields"],
+    item: source.item ? normalizeLegacySchema(source.item) : undefined,
+    items: Array.isArray(source.items) ? source.items.map(normalizeLegacySchema) : undefined
   };
 }
 

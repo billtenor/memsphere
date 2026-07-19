@@ -61,7 +61,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
     );
     await writeFile(
       join(memoryRoot, "schemas", "another-random-name.yaml"),
-      "!schema\nnames: [Record]\ndefines: []\nelement_types: [string]\n"
+      "!schema\nnames: [Record]\ndefines: []\n"
     );
 
     const list = await runCli(nested, ["memory", "list"]);
@@ -90,6 +90,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
       assert.equal(read.stderr, "");
       assert.deepEqual(parseMemoryYaml(read.stdout), {
         tag: "!concept",
+        syntax: "start",
         names: ["Memory", "记忆"],
         defines: [
           "A managed memory.",

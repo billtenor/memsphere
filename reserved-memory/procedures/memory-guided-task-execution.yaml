@@ -1,4 +1,5 @@
 !procedure
+syntax: memsphere-20260719-stable
 names:
   - 基于 Memory 完成任务流程
   - Memory 引导任务执行流程

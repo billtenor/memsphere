@@ -50,6 +50,7 @@ memsphere memory read "Repository rules" --node "statement:Testing"
 memsphere view start
 memsphere view status
 memsphere run start <procedure-name>
+memsphere migrate syntax --check
 memsphere migrate artifact-contract-v2 --check
 ```
 
@@ -117,6 +118,23 @@ memories, and rebuilds this reserved-memory staging directory. Changing configur
 
 Entity type is represented by the YAML document root tag. There is no `type` field.
 
+Every top-level Memory declares its immutable YAML syntax version with `syntax`. The current stable version is `memsphere-20260719-stable`. An omitted value is always interpreted as `start`, the unversioned migration origin, rather than whichever version happens to be current:
+
+```yaml
+!concept
+syntax: memsphere-20260719-stable
+name: Customer
+defines:
+  - A party that receives a product or service.
+```
+
+Check or upgrade a Memory Store through the registered migration path:
+
+```bash
+memsphere migrate syntax --check
+memsphere migrate syntax --write
+```
+
 The authoring type system has three primitive types (`string`, `number`, and `boolean`), fixed tagged struct types, and the `List<T>` generic extension. Mappings that represent memory structures must carry their registered YAML tag; the validator does not infer a struct type from its fields.
 
 `defines` has type `List<string | Statement | Schema>`. Use strings for concise definitions, embedded `!statement` values for assertions, and embedded `!schema` values for explicit structure. Embedded Statement and Schema values may be anonymous.
@@ -125,6 +143,7 @@ The authoring type system has three primitive types (`string`, `number`, and `bo
 
 ```yaml
 !procedure
+syntax: memsphere-20260719-stable
 names:
   - DiagnoseBug
   - DebugIssue
@@ -205,10 +224,13 @@ memsphere migrate artifact-contract-v2 --write
 
 The migration command is config-driven and does not depend on Git. Running v1 Runs are blocked; completed v1 Runs and Review snapshots remain available as read-only evidence.
 
+Any Memory or nested node that accepts `names` also accepts `name` as a single-value shorthand. `name: Customer` is normalized to `names: [Customer]`; the two fields are mutually exclusive. Artifact `name` remains the deliverable name and is not this shorthand.
+
 ### Concept
 
 ```yaml
 !concept
+syntax: memsphere-20260719-stable
 names:
   - Customer
   - Buyer
@@ -225,6 +247,7 @@ defines:
 
 ```yaml
 !statement
+syntax: memsphere-20260719-stable
 names:
   - RepositoryDevelopmentRules
 defines:
@@ -256,6 +279,7 @@ sections:
 
 ```yaml
 !schema
+syntax: memsphere-20260719-stable
 names:
   - Requirements Document
   - 需求文档
@@ -278,12 +302,15 @@ fields:
           - 说明需求来源、业务背景和为什么现在需要解决。
 ```
 
-`Schema.fields` has type `List<string | Schema | Repeat>`. A string is the shortest field form and only supplies the field name. A nested `!schema` supplies richer descriptions, assertions, item types, or child fields, and must have a non-empty `names` value when used in `fields`.
+`Schema.fields` has type `List<string | Schema | Repeat>`. A string is the shortest field form and always has type `string`; its format follows the containing Schema context. A nested `!schema` supplies richer descriptions, assertions, an explicit value contract, or child fields, and must have a non-empty `names` value when used in `fields`.
+
+Schema can declare the same optional `type` and `format` vocabulary as Artifact, but resolves them independently. Type never inherits: an omitted type is inferred as `object` when the Schema has fields, otherwise as `string`. Format inherits from the parent Schema or owning Artifact unless explicitly overridden. Markdown `layout` is retained only by compatible structural nodes (`object + outline` or `array + table`); scalar fields inherit Markdown without a layout. The root Schema's inferred type and effective format must match the owning Artifact.
 
 When consumed by an object Markdown Artifact with `layout: outline`, a Schema may use a mapping `!repeat` field to repeat a non-empty group of fields:
 
 ```yaml
 !schema
+syntax: memsphere-20260719-stable
 names: [关键决策记录]
 fields:
   - 背景
@@ -309,23 +336,37 @@ When a Schema Run reaches Repeat, choose the total count once. This control acti
 memsphere run repeat 2 --run <run-id>
 ```
 
-`Schema.element_types` describes `List<T>`. Its non-empty entries are the allowed element types. For example, `element_types: [string]` means `List<string>` and `element_types: [string, Statement, Schema]` means `List<string | Statement | Schema>`.
+For an array Schema, `item: !schema` defines one element contract and `items` defines a union of at least two candidate contracts. Every array element must satisfy `item`, or at least one `items` candidate. `item` and `items` are mutually exclusive and require an explicit `type: array`; omitting both validates only the array container. Array Schemas do not declare `fields` directly. Structured rows put `fields` under an object `item/items` Schema. The old `element_types` field and string-valued legacy `items` syntax require migration.
 
-Schema does not own presentation format. To render fields as table columns, define an array Markdown Artifact whose format carries `layout: table`:
+A nested Schema can override the inherited representation. This example validates a Markdown table only inside the `需求清单` heading subtree:
 
 ```yaml
 artifact: !artifact
-  name: 需求清单
-  type: array
+  name: 需求文档
+  type: object
   format:
     name: markdown
-    layout: table
+    layout: outline
   schema: !schema
-    element_types: [Schema]
-    fields: [ID, 需求描述]
+    fields:
+      - 摘要
+      - !schema
+        names: [需求清单]
+        type: array
+        format:
+          name: markdown
+          layout: table
+        item: !schema
+          type: object
+          fields: [ID, 需求描述]
 ```
 
-Structural level is expressed by `fields`, list cardinality by `element_types`, and presentation options by the owning Artifact format.
+Before upgrading memories that use `element_types`, string-valued legacy `items`, direct `array + fields`, or legacy Schema `format: outline/table`, run:
+
+```bash
+memsphere migrate schema-contract-v2 --check
+memsphere migrate schema-contract-v2 --write
+```
 
 ## Persistence Rules
 

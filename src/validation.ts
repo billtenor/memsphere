@@ -6,6 +6,7 @@ import { analyzeMemoryDescriptors } from "./memory/catalog.js";
 import { memoryKinds, type MemoryKind } from "./memory/kinds.js";
 import type { ProviderMemoryDescriptor } from "./memory/provider.js";
 import { listMemoryFiles, pathExists, readMemoryFile } from "./memory/store.js";
+import { currentMemorySyntax } from "./memory/syntax.js";
 
 export type ValidationIssue = {
   path: string;
@@ -129,6 +130,12 @@ async function validateKindDirectory(
   for (const filePath of filePaths) {
     try {
       const file = await readMemoryFile(kind, filePath);
+      if (file.entity.syntax !== currentMemorySyntax) {
+        issues.push({
+          path: filePath,
+          message: `Memory syntax ${file.entity.syntax} is outdated; run memsphere migrate syntax --write to upgrade to ${currentMemorySyntax}`
+        });
+      }
       descriptors.push({
         id: filePath,
         kind,

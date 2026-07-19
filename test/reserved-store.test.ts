@@ -7,6 +7,7 @@ import { initCommand } from "../src/commands/init.js";
 import { DefaultMemoryCatalog } from "../src/memory/catalog.js";
 import { FileMemoryProvider } from "../src/memory/file-provider.js";
 import { readAllMemoryFiles } from "../src/memory/store.js";
+import { currentMemorySyntax } from "../src/memory/syntax.js";
 import {
   bundledReservedMemoryRoot,
   importReservedMemory,
@@ -49,7 +50,6 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "Procedure entity schema",
     "Memory 访问规则",
     "Memsphere YAML 语法规则",
-    "Memory 解读与应用规则",
     "Memory 撰写规则",
     "基于 Memory 完成任务流程",
     "敏捷需求开发流程",
@@ -60,9 +60,12 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
 
   const memory = files.find((file) => file.entity.names[0] === "Memory");
   assert(memory);
+  assert(files.every((file) => file.entity.syntax === currentMemorySyntax));
   assert(memory.entity.defines.every((definition) => typeof definition === "string"));
-  assert.equal(manifest.system_memory.install.length, 10);
-  assert.deepEqual(manifest.system_memory.remove, []);
+  assert.equal(manifest.version, 2);
+  assert.equal("memory_syntax" in manifest ? manifest.memory_syntax : undefined, currentMemorySyntax);
+  assert.equal(manifest.system_memory.install.length, 9);
+  assert.deepEqual(manifest.system_memory.remove, ["statements/memory-interpretation-application-rules.yaml"]);
 });
 
 test("init installs system memory and keeps other bundled memory reserved", async () => {

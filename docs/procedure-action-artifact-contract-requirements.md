@@ -60,14 +60,19 @@ layout 是 Markdown format 的 option，不属于 Schema。object/array 省略 f
 
 ## Schema
 
-Schema v2 不包含 format。它可以声明：
+Schema v2 删除 `element_types`，并使用 Schema 形式的 `item/items` 取代旧字符串成员类型。它可以声明：
 
 - fields：全部为必填结构字段，额外字段允许存在。
-- element_types：数组允许的元素类型。
+- type：不继承父层；显式声明优先，省略时有 fields 推断 object、无 fields 推断 string。
+- format：显式声明优先，省略时继承父层；Markdown layout 只保留给兼容的 object outline 或 array table 节点，标量字段不继承 layout。
 - 嵌套 Schema：约束对象子字段。
+- item：约束 array 的唯一元素结构；每个元素都必须满足该 Schema。
+- items：至少两个候选 Schema 组成的联合元素约束；每个元素至少满足一个候选，不表达 tuple。
 - Repeat：只允许 object + markdown + layout: outline 使用。
 
-Markdown outline 的字段必须是 heading 节点并符合父子层级；列表项、粗体标签和键值文本不能冒充标题。Markdown table 的第一层字段必须成为列名，每一行解码为一个对象。
+`item/items` 互斥并要求所在 Schema 显式声明 `type: array`。array 不允许直接声明 fields；对象元素的 fields 位于 item/items 的 object Schema 中。省略 item/items 时只校验容器。
+
+Markdown outline 的字段必须是 heading 节点并符合父子层级；列表项、粗体标签和键值文本不能冒充标题。Markdown table 的 item object 第一层字段必须成为列名，每一行解码为一个对象。
 
 ## Validator
 
@@ -113,7 +118,7 @@ memsphere migrate artifact-contract-v2 --write
 - parser/serializer 覆盖默认 plain、简写、展开形式和非法 option。
 - boolean、number、string、object、array type validator 有正反例。
 - plain、Markdown、JSON、YAML format 有解码和失败诊断。
-- JSON/YAML nested fields、array element_types、Markdown outline/table、Repeat 有测试。
+- JSON/YAML nested fields、array 容器、item/items 单契约与联合契约、Markdown outline/table、Repeat 有测试。
 - `test/fixtures/artifact-format-validation/` 九组结构错误全部稳定失败。
 - report 失败前后 Run JSON 和 artifacts 目录字节级不变，修正后只产生一次成功 event。
 - View 展示 type、format、layout、Schema、final、validation 和 v1 只读状态。
