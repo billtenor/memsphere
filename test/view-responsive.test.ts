@@ -7,6 +7,7 @@ import test from "node:test";
 import { chromium, type Browser, type Page } from "playwright";
 import { createViewServer } from "../src/commands/view.js";
 import type { MemsphereConfig } from "../src/config.js";
+import { currentMemorySyntax } from "../src/memory/syntax.js";
 import type { RunState } from "../src/run/store.js";
 
 const runId = "run-responsive-view";
@@ -26,6 +27,8 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     `| Wide content | ${"x".repeat(240)} |`
   ].join("\n"));
   const run: RunState = {
+    contractVersion: 2,
+    memorySyntax: currentMemorySyntax,
     id: runId,
     status: "done",
     procedureName: "Responsive browser fixture",
@@ -38,7 +41,8 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
       kind: "action" as const,
       instruction: `A deliberately long instruction ${index + 1} verifies that the flow header can shrink inside its column.`,
       artifact: index === 0 ? "wide table" : `result ${index + 1}`,
-      format: "markdown" as const
+      type: "string",
+      format: { name: "markdown", options: {} }
     })),
     events: [{
       at: "2026-07-19T00:00:00.000Z",
@@ -46,7 +50,8 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
       stepId: "flow[1]",
       artifact: {
         name: "wide table",
-        format: "markdown",
+        type: "string",
+        format: { name: "markdown", options: {} },
         storage: "file",
         path: `${runId}/artifacts/001-wide-table.md`
       }
