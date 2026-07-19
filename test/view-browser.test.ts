@@ -117,6 +117,37 @@ test("markdown tables use a horizontal scrolling container", () => {
   assert.match(browserHtml, /\.markdown-body table \{[^}]*width: max-content;[^}]*min-width: 100%;/);
 });
 
+test("task view switches to two columns on compact desktop screens", () => {
+  const compactLayout = browserHtml.match(/@media \(max-width: 1400px\) \{([\s\S]*?)\n    \}/)?.[1];
+  const narrowLayout = browserHtml.match(/@media \(max-width: 1100px\) \{([\s\S]*?)\n    \}/)?.[1];
+
+  assert(compactLayout);
+  assert(narrowLayout);
+  assert.match(compactLayout, /body\.task-mode \.shell \{ grid-template-columns: 280px minmax\(0, 1fr\) 0; \}/);
+  assert.match(narrowLayout, /\.flow-head \{ grid-template-columns: 1fr;/);
+  assert.match(narrowLayout, /\.artifact-row \{ justify-content: flex-start; min-width: 0; \}/);
+});
+
+test("Review expands the shell into a third layout column on demand", () => {
+  assert.match(browserHtml, /\.shell \{ display: grid; grid-template-columns: 300px minmax\(0, 1fr\) 0;/);
+  assert.match(browserHtml, /body\.review-drawer-open \.shell \{ grid-template-columns: 300px minmax\(0, 1fr\) minmax\(300px, 380px\); \}/);
+  assert.match(browserHtml, /\.review \{ min-width: 0; overflow: hidden; visibility: hidden;/);
+  assert.doesNotMatch(browserHtml, /position: fixed; z-index: 30;/);
+  assert.doesNotMatch(browserHtml, /function isCompactReviewLayout/);
+});
+
+test("flow cards can shrink inside the task grid", () => {
+  assert.match(browserHtml, /\.flow-item \{ min-width: 0;/);
+});
+
+test("Review has accessible open and close controls", () => {
+  assert.match(browserHtml, /id="review-toggle"[^>]*aria-controls="review-panel"[^>]*aria-expanded="false"/);
+  assert.match(browserHtml, /id="review-close"/);
+  assert.match(browserHtml, /function setReviewDrawer\(open\)/);
+  assert.match(browserHtml, /event\.key === "Escape" && state\.reviewDrawerOpen/);
+  assert.match(browserHtml, /body\.review-drawer-open \.review \{ overflow: auto; visibility: visible; pointer-events: auto;/);
+});
+
 test("browser exposes reserved memory controls", () => {
   assert.match(browserHtml, /\/api\/reserved-memories/);
   assert.match(browserHtml, /\/api\/reserved-memories\/import/);

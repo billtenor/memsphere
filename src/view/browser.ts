@@ -35,11 +35,13 @@ export const browserHtml = String.raw`<!doctype html>
     body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     button, input, textarea { font: inherit; }
     button { cursor: pointer; }
-    .shell { display: grid; grid-template-columns: 300px minmax(0, 1fr) 360px; min-height: 100vh; }
-    .sidebar, .review { background: #fbfbf8; border-color: var(--line); overflow: auto; height: 100vh; position: sticky; top: 0; }
+    .shell { display: grid; grid-template-columns: 300px minmax(0, 1fr) 0; min-height: 100vh; transition: grid-template-columns 160ms ease; }
+    .sidebar { background: #fbfbf8; border-color: var(--line); overflow: auto; height: 100vh; position: sticky; top: 0; }
     .sidebar { border-right: 1px solid var(--line); padding: 16px; }
-    .review { border-left: 1px solid var(--line); padding: 16px; }
+    .review { min-width: 0; overflow: hidden; visibility: hidden; pointer-events: none; background: #fbfbf8; border-left: 0; padding: 0; }
     .brand, .review-head, .toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .review-actions { display: flex; gap: 8px; align-items: flex-start; }
+    .review-toggle, .review-close { display: inline-flex; }
     .brand h1, .review-head h2, .title { margin: 0; letter-spacing: 0; }
     .brand h1 { font-size: 18px; }
     .view-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 14px; }
@@ -143,7 +145,7 @@ export const browserHtml = String.raw`<!doctype html>
     .field-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
     .field-table th, .field-table td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; white-space: pre-wrap; }
     .field-table th { width: 220px; background: #f3f5f0; font-weight: 700; }
-    .flow-item { border: 1px solid var(--line); border-left: 4px solid #a7b0a5; background: var(--surface); border-radius: 8px; padding: 10px 14px; box-shadow: var(--shadow); white-space: normal; }
+    .flow-item { min-width: 0; border: 1px solid var(--line); border-left: 4px solid #a7b0a5; background: var(--surface); border-radius: 8px; padding: 10px 14px; box-shadow: var(--shadow); white-space: normal; }
     .flow-item.call { border-left-color: var(--accent); background: #f2f8f6; }
     .flow-item.branch { border-left-color: var(--warn); background: #fbf7f0; }
     .flow-head { display: grid; grid-template-columns: max-content minmax(220px, 1fr) max-content; gap: 12px; align-items: center; }
@@ -223,23 +225,28 @@ export const browserHtml = String.raw`<!doctype html>
     }
     .review-sub { margin: 4px 0 14px; font-size: 13px; }
     code { background: var(--soft); border-radius: 4px; padding: 1px 4px; }
-    body.task-mode .shell { grid-template-columns: 300px minmax(0, 1fr) 300px; }
     body.task-mode .search, body.task-mode #expand, body.task-mode #collapse { display: none; }
+    body.review-drawer-open .shell { grid-template-columns: 300px minmax(0, 1fr) minmax(300px, 380px); }
+    body.review-drawer-open .review { overflow: auto; visibility: visible; pointer-events: auto; border-left: 1px solid var(--line); padding: 16px; }
     @keyframes taskStepSpotlight {
       0% { box-shadow: 0 0 0 5px rgba(40, 108, 103, .24), var(--shadow); }
       100% { box-shadow: var(--shadow); }
     }
-    @media (max-width: 1100px) {
-      .shell { grid-template-columns: 280px minmax(0, 1fr); }
-      .review { grid-column: 1 / -1; height: auto; position: static; border-left: 0; border-top: 1px solid var(--line); }
+    @media (max-width: 1400px) {
+      .shell { grid-template-columns: 280px minmax(0, 1fr) 0; }
+      body.task-mode .shell { grid-template-columns: 280px minmax(0, 1fr) 0; }
+      body.review-drawer-open .shell { grid-template-columns: 280px minmax(0, 1fr) minmax(300px, 380px); }
     }
-    @media (max-width: 760px) {
-      .shell { grid-template-columns: 1fr; }
-      .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-      .content { padding: 18px 16px 36px; }
-      .toolbar { flex-direction: column; }
+    @media (max-width: 1100px) {
       .flow-head { grid-template-columns: 1fr; gap: 8px; align-items: flex-start; }
       .artifact-row { justify-content: flex-start; min-width: 0; }
+    }
+    @media (max-width: 760px) {
+      .shell, body.review-drawer-open .shell { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .review { grid-column: 1; }
+      .content { padding: 18px 16px 36px; }
+      .toolbar { flex-direction: column; }
     }
   </style>
 </head>
@@ -264,19 +271,23 @@ export const browserHtml = String.raw`<!doctype html>
         <div class="toolbar-actions">
           <button class="btn" id="expand">Expand all</button>
           <button class="btn" id="collapse">Collapse all</button>
+          <button class="btn review-toggle" id="review-toggle" type="button" aria-controls="review-panel" aria-expanded="false">Review</button>
           <button class="btn" id="refresh">Refresh</button>
         </div>
       </div>
       <div id="detail" class="empty">Loading...</div>
     </section>
 
-    <aside class="review">
+    <aside class="review" id="review-panel" aria-labelledby="review-heading">
       <div class="review-head">
         <div>
-          <h2>Review</h2>
+          <h2 id="review-heading">Review</h2>
           <div class="review-sub" id="review-label">Create or select a review to comment inline</div>
         </div>
-        <button class="btn primary" id="create-review">Create Review</button>
+        <div class="review-actions">
+          <button class="btn primary" id="create-review">Create Review</button>
+          <button class="btn review-close" id="review-close" type="button">Close</button>
+        </div>
       </div>
       <div id="reviews" class="review-list"></div>
       <section class="panel">
@@ -377,6 +388,7 @@ export const browserHtml = String.raw`<!doctype html>
       runs: [],
       reviewSnapshots: new Map(),
       loadingSnapshots: new Set(),
+      reviewDrawerOpen: false,
       renderLine: 0
     };
 
@@ -397,6 +409,9 @@ export const browserHtml = String.raw`<!doctype html>
       submitReview: document.getElementById("submit-review"),
       reviewLabel: document.getElementById("review-label"),
       createReview: document.getElementById("create-review"),
+      reviewPanel: document.getElementById("review-panel"),
+      reviewToggle: document.getElementById("review-toggle"),
+      reviewClose: document.getElementById("review-close"),
       memoryTab: document.getElementById("memory-tab"),
       taskTab: document.getElementById("task-tab")
     };
@@ -405,6 +420,8 @@ export const browserHtml = String.raw`<!doctype html>
     document.getElementById("collapse").addEventListener("click", () => setAllSections(false));
     document.getElementById("refresh").addEventListener("click", () => loadAll().catch(renderFatalError));
     el.createReview.addEventListener("click", createReview);
+    el.reviewToggle.addEventListener("click", () => setReviewDrawer(!state.reviewDrawerOpen));
+    el.reviewClose.addEventListener("click", () => setReviewDrawer(false));
     el.memoryTab.addEventListener("click", () => setViewMode("memory"));
     el.taskTab.addEventListener("click", () => setViewMode("task"));
     el.submitReview.addEventListener("click", submitReview);
@@ -412,6 +429,10 @@ export const browserHtml = String.raw`<!doctype html>
       applyFilter();
       renderNav();
     });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && state.reviewDrawerOpen) setReviewDrawer(false);
+    });
+    window.addEventListener("resize", () => syncReviewDrawer());
 
     loadAll().catch(renderFatalError);
     setInterval(() => {
@@ -512,6 +533,7 @@ export const browserHtml = String.raw`<!doctype html>
     function renderAll() {
       document.body.classList.toggle("task-mode", state.viewMode === "task");
       document.body.classList.toggle("review-active", canComment());
+      syncReviewDrawer();
       el.memoryTab.classList.toggle("active", state.viewMode === "memory");
       el.taskTab.classList.toggle("active", state.viewMode === "task");
       if (state.viewMode === "task") {
@@ -531,6 +553,20 @@ export const browserHtml = String.raw`<!doctype html>
       localStorage.setItem(viewModeKey, mode);
       ensureSelectedReview();
       renderAll();
+    }
+
+    function syncReviewDrawer() {
+      const open = state.reviewDrawerOpen;
+      document.body.classList.toggle("review-drawer-open", open);
+      el.reviewToggle.setAttribute("aria-expanded", String(open));
+      el.reviewPanel.setAttribute("aria-hidden", String(!open));
+    }
+
+    function setReviewDrawer(open) {
+      state.reviewDrawerOpen = Boolean(open);
+      syncReviewDrawer();
+      if (state.reviewDrawerOpen) requestAnimationFrame(() => el.reviewClose.focus());
+      else el.reviewToggle.focus();
     }
 
     function ensureSelectedReview() {
