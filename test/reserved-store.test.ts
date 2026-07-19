@@ -48,6 +48,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "Procedure",
     "Procedure entity schema",
     "Memory 访问规则",
+    "Memsphere YAML 语法规则",
     "Memory 解读与应用规则",
     "Memory 撰写规则",
     "基于 Memory 完成任务流程",
@@ -60,7 +61,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   const memory = files.find((file) => file.entity.names[0] === "Memory");
   assert(memory);
   assert(memory.entity.defines.every((definition) => typeof definition === "string"));
-  assert.equal(manifest.system_memory.install.length, 9);
+  assert.equal(manifest.system_memory.install.length, 10);
   assert.deepEqual(manifest.system_memory.remove, []);
 });
 
