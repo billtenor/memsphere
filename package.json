@@ -1,6 +1,6 @@
 {
   "name": "memsphere",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A local YAML-backed memory CLI for AI runtimes.",
   "type": "module",
   "bin": {
