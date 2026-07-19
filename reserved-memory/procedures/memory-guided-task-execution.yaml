@@ -27,26 +27,27 @@ flow:
     actor: agent
     artifact: !artifact
       name: 候选 Memory 清单
+      type: array
       format: yaml
   - !action
     action: 使用 memsphere memory read 读取每一份合理候选的完整 YAML。
     actor: agent
     artifact: !artifact
       name: 候选 Memory 完整内容
+      type: array
       format: yaml
   - !action
     action: 根据用户明确目标、Memory 的规范名称、别名和完整定义，选择最符合任务目的的目标 Memory。
     actor: agent
     artifact: !artifact
       name: 目标 Memory 选择结果
-      format: string
   - !if
     condition: !action
       action: 判断是否仍有多个同样符合用户目标且无法依据现有信息消除歧义的 Memory。
       actor: agent
       artifact: !artifact
         name: 是否存在未消除的 Memory 歧义
-        format: boolean
+        type: boolean
     then:
       - !action
         action: 向 human 说明各候选 Memory 与当前目标的关系，并请求选择要应用的 Memory。
@@ -59,16 +60,14 @@ flow:
         actor: human
         artifact: !artifact
           name: human 确认的目标 Memory
-          format: string
     else:
       - !action
         action: 确认目标 Memory 已经由用户目标和现有信息唯一确定。
         actor: agent
         artifact: !artifact
           name: 目标 Memory 唯一性确认
-          format: string
   - !action
-    action: 递归解释目标 Memory 的全部 defines，将文本含义、Statement 断言、Schema 字段与 format、保存路径及其他交付要求整理为一个完整执行契约。
+    action: 递归解释目标 Memory 的全部 defines，将文本含义、Statement 断言、Artifact type/format、Schema 字段、保存路径及其他交付要求整理为一个完整执行契约。
     actor: agent
     artifact: !artifact
       name: Memory 任务执行契约
@@ -79,7 +78,7 @@ flow:
       actor: agent
       artifact: !artifact
         name: 是否缺少必填信息
-        format: boolean
+        type: boolean
     then:
       - !action
         action: 列出真正缺失的必填信息并请求 human 补充，不得创建实例、猜测值或占位产物。
@@ -94,7 +93,7 @@ flow:
         actor: agent
         artifact: !artifact
           name: 是否存在约束冲突
-          format: boolean
+          type: boolean
       then:
         - !action
           action: 指出发生冲突的用户事实和具体约束，不得创建实例或静默修改用户输入。
@@ -109,10 +108,9 @@ flow:
         actor: agent
         artifact: !artifact
           name: 任务产物路径或结果引用
-          format: string
           final: true
       - !action
-        action: 对照目标 Memory 的全部 defines 复核产物的语义、约束、字段、Schema format 和保存路径，并修正发现的问题。
+        action: 对照目标 Memory 的全部 defines 复核产物的语义、约束、Artifact type/format、Schema 字段和保存路径，并修正发现的问题。
         actor: agent
         artifact: !artifact
           name: 任务产物复核结果
@@ -122,5 +120,4 @@ flow:
         actor: agent
         artifact: !artifact
           name: 任务处理摘要
-          format: string
           final: true

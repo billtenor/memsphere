@@ -2,19 +2,16 @@
 names:
   - Schema entity schema
   - "!schema 编写模板"
-format: outline
 defines:
   - 定义 memsphere !schema Memory 的合法内容结构和字段要求。
 asserts:
   - 根节点必须使用 !schema 标签，不得使用独立的 type 字段。
   - names 必须是非空字符串数组，首项为规范名称。
-  - format 如出现，只能是 outline 或 table；省略时默认按 outline 呈现。
   - defines 可以包含字符串、!statement 或 !schema；嵌套结构必须携带 YAML tag。
   - fields 如出现，可以包含表示最简字段名的字符串、带 !schema tag 的详细字段，或带 !repeat tag 的重复字段组。
-  - "!repeat 只能直接出现在 outline Schema 的 fields 中；body 必须非空，只能包含字符串或 !schema，不能嵌套 !repeat。"
+  - "!repeat 只能供 object + markdown + layout: outline Artifact 使用；body 必须非空，只能包含字符串或 !schema，不能嵌套 !repeat。"
   - "!repeat.limit 如出现，必须至少包含非负整数 min 或 max；两者同时存在时 min 不能大于 max。"
   - element_types 如出现，必须是非空且不重复的元素类型列表，用于表达 List<T>。
-  - format 为 table 时，element_types 必须为 [Schema]，fields 必须定义至少一列。
   - fields 中的 !schema 必须具有非空 names；defines 中的匿名 !schema 可以省略 names，但必须包含有意义的结构。
 fields:
   - !schema
@@ -24,13 +21,6 @@ fields:
       - string
     defines:
       - 结构名称与别名，首项为规范名称。
-  - !schema
-    names:
-      - format
-    defines:
-      - 可选，Schema 最终呈现为多级标题或表格；省略时默认为 outline。
-    asserts:
-      - 只能填写 outline 或 table。
   - !schema
     names:
       - defines

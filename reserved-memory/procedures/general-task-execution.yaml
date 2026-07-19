@@ -19,7 +19,6 @@ flow:
       - 不存在需要补充理解的概念时，不得进行无必要的检索或询问，概念理解简述填写“无”。
     artifact: !artifact
       name: 概念理解简述
-      format: string
   - !action
     action: 对齐交付物。明确最终交付物及其交付标准；分别使用 memsphere memory list --kind statements 和 memsphere memory list --kind schemas 获取候选，再使用 memsphere memory read 检索与交付物相关的 Statement 和 Schema，将其与用户明确要求共同整理为交付契约。缺少影响交付的必要信息时，向 human 询问并等待补充。
     actor: agent
@@ -28,7 +27,6 @@ flow:
       - 必须检索并纳入相关 Statement 和 Schema；必要信息缺失或约束冲突时不得进入执行步骤。
     artifact: !artifact
       name: 最终交付物简述
-      format: string
   - !action
     action: 执行任务并产出最终交付物。
     actor: agent
@@ -39,5 +37,4 @@ flow:
       - 具体执行方式可以根据实际情况拟定。
     artifact: !artifact
       name: 最终交付结果简述
-      format: string
       final: true

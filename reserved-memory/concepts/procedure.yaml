@@ -15,10 +15,9 @@ defines:
       - CLI 返回的 Procedure Asserts 是当前调用链中持续生效的全局约束，Asserts 是当前步骤必须满足的要求，Suggests 是执行时可以参考但不强制满足的建议。
       - CLI 返回的 Actor 表示步骤由 agent 还是 human 执行，Do 或 Ask human to do 表示当前动作，Details 提供补充上下文，Artifact 规定步骤产物及其格式，Then 给出下一条命令。
       - 每个 Action 都必须产生明确的 Artifact；Actor 为 human 时，Agent 必须等待 human 提供结果后再上报和继续。
-      - 短内容使用 memsphere run report 的 --artifact 上报，文件产物使用 --artifact-file 上报；Schema 产物必须按照 Then 提示进入 Schema 填写流程。
+      - 短内容使用 memsphere run report 的 --artifact 上报，文件产物使用 --artifact-file 上报；带 Schema 的结构化 Markdown 产物可以按照 Then 提示进入 Schema 填写流程。
       - 完成当前步骤后，必须按照 CLI 返回的 Then 命令上报 Artifact；Run 显示 done 后才能汇报流程完成和最终产物。
   - !schema
-    format: outline
     asserts:
       - 根节点必须使用 !procedure 标签，不得使用独立的 type 字段。
       - 顶层 Procedure 的 names 必须是非空字符串数组，首项为规范名称。

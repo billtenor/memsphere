@@ -90,7 +90,27 @@ defines:
 - `defines` 用于定义这份 Memory；其中的全部成员共同生效。
 - 不同类型还拥有自己的字段。编写或解释某种 Memory 前，读取对应的 Concept Memory 了解完整语义和字段规则。
 
-Schema 的 outline `fields` 可以使用 mapping 形式的 `!repeat`，把非空 `body` 中的一组字符串或 `!schema` 字段整体重复。`limit.min/max` 如出现必须是非负整数且 `min <= max`。首版不允许 Repeat 嵌套，也不允许把 Repeat 放在 table、defines、flow 或其他位置：
+Procedure 中每个 `!action` 的 `!artifact` 使用 `type -> format -> schema` 三层机器契约：
+
+```yaml
+artifact: !artifact
+  name: 发布记录
+  type: object
+  format:
+    name: markdown
+    layout: outline
+  schema: !schema
+    fields: [版本, 发布日期, 结果]
+  final: true
+```
+
+- `type` 省略时默认为 `string`；`boolean`、`number`、`object`、`array` 必须显式声明。
+- `format` 省略时默认为 `plain`；简单格式可写 `markdown`、`json` 或 `yaml`，格式参数使用带 `name` 的对象。
+- `layout` 属于 markdown format：object 使用 outline，array 使用 table。
+- Schema 只描述 fields、element_types 和 Repeat，不再拥有 format。
+- `asserts` 和 `suggests` 是自然语言契约，不会被代码 validator 猜测执行。
+
+当 Artifact 使用 `type: object`、`format.name: markdown` 和 `layout: outline` 时，Schema 的 `fields` 可以使用 mapping 形式的 `!repeat`，把非空 `body` 中的一组字符串或 `!schema` 字段整体重复。`limit.min/max` 如出现必须是非负整数且 `min <= max`。首版不允许 Repeat 嵌套，也不允许把 Repeat 放在 table、defines、flow 或其他位置：
 
 ```yaml
 fields:
@@ -154,7 +174,7 @@ memsphere run start "<Procedure 名称>"
 - `Asserts` 是当前步骤必须满足的要求。
 - `Suggests` 是执行时可以参考的建议。
 - `Details` 是理解和执行当前步骤所需的补充上下文。
-- `Artifact` 表示当前步骤需要产出的内容及其格式。
+      - `Artifact` 表示当前步骤需要产出的内容、业务类型、编码格式和可选 Schema。
 - `Then` 给出完成当前步骤后应执行的下一条 memsphere 命令。
 
 只执行当前返回的步骤，不提前执行尚未返回的后续步骤。
@@ -175,7 +195,7 @@ memsphere run report --run <Run ID> --artifact "<产物内容>"
 memsphere run report --run <Run ID> --artifact-file <文件路径>
 ```
 
-Schema 产物按照 CLI 提示进入 Schema 填写流程。不要自己猜测下一条命令，以当前 CLI 输出的 `Then` 为准。
+带 Schema 的 Markdown 结构化产物可以按照 CLI 提示进入 Schema 填写流程。不要自己猜测下一条命令，以当前 CLI 输出的 `Then` 为准。
 
 当 Schema Run 到达 `!repeat` 控制步骤时，CLI 不要求 Artifact，而会提示一次提交总重复次数：
 
@@ -192,3 +212,5 @@ memsphere run repeat <count> --run <Run ID>
 当 `Actor` 为 `human` 时，暂停 Agent 执行，把 `Ask human to do`、相关要求和产物格式清楚地告知用户，并等待用户提供结果。不要代替用户完成 human 步骤，也不要在用户回复前继续推进。
 
 收到用户结果后，将它作为当前步骤产物按 `Then` 命令上报，再继续处理 CLI 返回的新步骤。Run 显示 `done` 时，向用户汇报流程完成情况和最终产物。
+
+旧 Memory 若仍使用 `format: boolean/string/number/schema` 或 `Schema.format`，先执行 `memsphere migrate artifact-contract-v2 --check`。未经 human 明确确认，不对真实 Memory Store 执行 `--write`。v1 running Run 不得跨版本继续，done Run 与 Review snapshot 仅只读展示。

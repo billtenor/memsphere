@@ -364,7 +364,9 @@ export const browserHtml = String.raw`<!doctype html>
       number: { zh: "数字", yaml: "number" },
       markdown: { zh: "文档", yaml: "markdown" },
       json: { zh: "JSON", yaml: "json" },
-      yaml: { zh: "YAML", yaml: "yaml" }
+      yaml: { zh: "YAML", yaml: "yaml" },
+      legacyReadOnly: { zh: "旧版只读", yaml: "v1 read-only" },
+      validated: { zh: "校验通过", yaml: "validated" }
     };
     const state = {
       viewMode: localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
@@ -752,6 +754,7 @@ export const browserHtml = String.raw`<!doctype html>
       const meta = document.createElement("div");
       meta.className = "meta";
       meta.append(pill(run.status, false, statusPillClass(run.status)));
+      if (run.contractVersion === 1 || run.readOnly) meta.append(pill(t("legacyReadOnly"), false, "warn"));
       meta.append(pill(run.stack.length + " active frame(s)"));
       meta.append(pill(run.events.length + " artifact(s)"));
       meta.append(pill("updated " + formatTime(run.updatedAt)));
@@ -845,8 +848,8 @@ export const browserHtml = String.raw`<!doctype html>
       command.className = "pre mono";
       command.textContent = isRepeat
         ? "memsphere run repeat <count> --run " + shellQuote(run.id)
-        : step.format === "schema"
-          ? "memsphere run enter-schema" + (step.inlineSchema ? "" : " " + shellQuote(step.schemaName || step.artifact)) + " --run " + shellQuote(run.id)
+        : formatName(step.format) === "markdown" && step.schema
+          ? "memsphere run enter-schema" + (step.schema.kind === "inline" ? "" : " " + shellQuote(step.schema.name || step.artifact)) + " --run " + shellQuote(run.id)
           : "memsphere run report --run " + shellQuote(run.id) + " --artifact <value>";
       panel.append(blockTitle(t("then")));
       panel.append(command);
@@ -898,8 +901,10 @@ export const browserHtml = String.raw`<!doctype html>
       const meta = document.createElement("div");
       meta.className = "meta";
       meta.append(pill(event.frame));
-      appendFormatMeta(meta, event.artifact.format, artifactSchemaName(event.artifact), event.artifact.schemaKind === "inline");
+      if (event.artifact.type) meta.append(pill(event.artifact.type));
+      appendFormatMeta(meta, event.artifact.format, artifactSchemaName(event.artifact), event.artifact.schema?.kind === "inline");
       appendArtifactStorageMeta(meta, event.artifact);
+      if (event.artifact.validation?.status === "passed") meta.append(pill(t("validated"), false, "done"));
       if (event.artifact.final) meta.append(pill(t("final"), false, "done"));
       meta.append(pill(formatTime(event.at)));
       const value = renderArtifactValue(event.artifact);
@@ -1792,10 +1797,12 @@ export const browserHtml = String.raw`<!doctype html>
     function appendArtifactMeta(target, step) {
       const artifact = artifactSpec(step);
       target.append(pill(artifact.name || t("artifact"), true));
-      if (artifact.format === "schema" && typeof artifact.schema === "object") {
-        target.append(inlineSchemaTogglePill(artifact.schema));
+      if (artifact.type) target.append(pill(artifact.type));
+      if (artifact.schema?.kind === "inline") {
+        target.append(inlineSchemaTogglePill(artifact.schema.node));
+        appendFormatMeta(target, artifact.format, undefined, true);
       } else {
-        appendFormatMeta(target, artifact.format, typeof artifact.schema === "string" ? artifact.schema : undefined, false);
+        appendFormatMeta(target, artifact.format, artifact.schema?.kind === "external" ? artifact.schema.name : undefined, false);
       }
       if (artifact.final) target.append(pill(t("final"), false, "done"));
     }
@@ -1826,15 +1833,11 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function appendFormatMeta(target, format, schemaName, inlineSchema) {
-      if (format === "schema" && inlineSchema) {
-        target.append(pill(t("inlineSchema")));
-        return;
-      }
-      if (format === "schema" && schemaName) {
-        target.append(schemaLinkPill(schemaName));
-        return;
-      }
       target.append(pill(formatLabel(format)));
+      const options = formatOptions(format);
+      for (const [name, value] of Object.entries(options)) target.append(pill(name + ": " + String(value)));
+      if (inlineSchema) target.append(pill(t("inlineSchema")));
+      if (schemaName) target.append(schemaLinkPill(schemaName));
     }
 
     function appendArtifactStorageMeta(target, artifact) {
@@ -1868,14 +1871,13 @@ export const browserHtml = String.raw`<!doctype html>
 
     function artifactHeaderBadge(artifact) {
       const schemaName = artifactSchemaName(artifact);
-      if (artifact.format === "schema" && artifact.schemaKind === "inline") return t("inlineSchema");
-      if (artifact.format === "schema" && schemaName) return t("schema") + ": " + schemaName;
+      if (artifact.schema?.kind === "inline") return t("inlineSchema");
+      if (schemaName) return t("schema") + ": " + schemaName;
       return formatLabel(artifact.format);
     }
 
     function artifactSchemaName(artifact) {
-      const fieldValue = artifact?.fields?.schema_name;
-      return typeof fieldValue === "string" ? fieldValue : artifact?.schemaName || "";
+      return artifact?.schema?.kind === "external" ? artifact.schema.name : "";
     }
 
     function renderActionContracts(step) {
@@ -1900,9 +1902,9 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderInlineSchemaDetails(step, expanded = false) {
       const artifact = artifactSpec(step || {});
-      const schema = step?.inlineSchema || (typeof artifact.schema === "object" ? artifact.schema : undefined);
+      const schema = artifact.schema?.kind === "inline" ? artifact.schema.node : undefined;
       if (!schema) return null;
-      const identity = step?.inlineSchemaId || step?.id || artifact.name || "artifact";
+      const identity = artifact.schema.id || step?.id || artifact.name || "artifact";
       const section = renderSchema(schema, 1, "inline-schema:" + identity, t("inlineSchema"));
       section.classList.add("inline-schema-section");
       if (!expanded) section.classList.remove("open");
@@ -1923,7 +1925,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function shouldRenderMarkdownArtifact(artifact) {
-      return artifact?.format === "markdown" && typeof artifact.renderedContent === "string";
+      return formatName(artifact?.format) === "markdown" && typeof artifact.renderedContent === "string";
     }
 
     function renderArtifactValue(artifact) {
@@ -1941,17 +1943,24 @@ export const browserHtml = String.raw`<!doctype html>
 
     function artifactSpec(step) {
       if (step && step.artifact && typeof step.artifact === "object") {
+        const inlineSchema = step.artifact.schema && typeof step.artifact.schema === "object"
+          ? { kind: "inline", id: "inline:" + (step.id || step.artifact.name || "artifact"), node: step.artifact.schema }
+          : typeof step.artifact.schema === "string"
+            ? { kind: "external", name: step.artifact.schema }
+            : undefined;
         return {
           name: step.artifact.name || "",
-          format: step.artifact.format || "",
-          schema: step.artifact.schema || "",
+          type: step.artifact.type || "",
+          format: step.artifact.format || { name: "plain", options: {} },
+          schema: inlineSchema,
           final: Boolean(step.artifact.final)
         };
       }
       return {
         name: typeof step?.artifact === "string" ? step.artifact : "",
-        format: step?.format || "",
-        schema: step?.inlineSchema || step?.schemaName || step?.schema || "",
+        type: step?.type || "",
+        format: step?.format || { name: "plain", options: {} },
+        schema: step?.schema,
         final: Boolean(step?.final)
       };
     }
@@ -1961,14 +1970,22 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function formatLabel(format) {
-      if (format === "boolean") return t("boolean");
-      if (format === "string") return t("string");
-      if (format === "number") return t("number");
-      if (format === "markdown") return t("markdown");
-      if (format === "json") return t("json");
-      if (format === "yaml") return t("yaml");
-      if (format === "schema") return t("schema");
-      return format || t("format");
+      const name = formatName(format);
+      if (name === "plain") return "plain";
+      if (name === "markdown") return t("markdown");
+      if (name === "json") return t("json");
+      if (name === "yaml") return t("yaml");
+      return name || t("format");
+    }
+
+    function formatName(format) {
+      return typeof format === "string" ? format : format?.name || "";
+    }
+
+    function formatOptions(format) {
+      return format && typeof format === "object" && format.options && typeof format.options === "object"
+        ? format.options
+        : {};
     }
 
     function renderNamedFlowChildren(labelText, steps, anchor) {

@@ -107,7 +107,12 @@ function action(name: string, instruction = `Produce ${name}`): ProcedureMemory[
   return {
     tag: "!action",
     action: instruction,
-    artifact: { tag: "!artifact", name, format: "markdown" }
+    artifact: {
+      tag: "!artifact",
+      name,
+      type: "string",
+      format: { name: "markdown", options: {} }
+    }
   };
 }
 
@@ -115,7 +120,12 @@ function booleanAction(name: string, instruction: string) {
   return {
     tag: "!action" as const,
     action: instruction,
-    artifact: { tag: "!artifact" as const, name, format: "boolean" as const }
+    artifact: {
+      tag: "!artifact" as const,
+      name,
+      type: "boolean" as const,
+      format: { name: "plain" as const, options: {} }
+    }
   };
 }
 

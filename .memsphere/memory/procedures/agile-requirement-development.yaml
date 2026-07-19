@@ -30,7 +30,7 @@ flow:
       actor: human
       artifact: !artifact
         name: 当前迭代需求契约是否仍需修正
-        format: boolean
+        type: boolean
     do:
       - !action
         action: 请 human 说明需要修正的内容。
@@ -65,7 +65,7 @@ flow:
         - 需求复杂或 human 明确要求审阅方案时，必须返回 true。
       artifact: !artifact
         name: 实施与验证方案是否需要 Human 确认
-        format: boolean
+        type: boolean
     then:
       - !while
         condition: !action
@@ -73,7 +73,7 @@ flow:
           actor: human
           artifact: !artifact
             name: 实施与验证方案是否仍需修正
-            format: boolean
+            type: boolean
         do:
           - !action
             action: 请 human 说明需要修正的内容。
@@ -125,7 +125,7 @@ flow:
       actor: agent
       artifact: !artifact
         name: 是否仍有验收前未解决问题
-        format: boolean
+        type: boolean
     do:
       - !action
         action: 分类并解决验收前问题，重新执行受影响验证。
@@ -150,7 +150,7 @@ flow:
       actor: agent
       artifact: !artifact
         name: 是否仍需根据验收反馈修正
-        format: boolean
+        type: boolean
     do:
       - !action
         action: 分类验收反馈，完成当前迭代范围内的修正和验证。
@@ -185,7 +185,7 @@ flow:
       actor: human
       artifact: !artifact
         name: 是否需要创建本轮 Commit
-        format: boolean
+        type: boolean
     then:
       - !action
         action: 按当前迭代范围检查改动并创建 Git commit。

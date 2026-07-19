@@ -9,6 +9,7 @@ import {
 } from "./commands/archive.js";
 import { initCommand } from "./commands/init.js";
 import { memoryListCommand, memoryReadCommand } from "./commands/memory.js";
+import { migrateArtifactContractV2Command } from "./commands/migrate.js";
 import { memoryKinds } from "./memory/kinds.js";
 import {
   runEnterSchemaCommand,
@@ -154,6 +155,18 @@ run
   .description("Show run status or list recent runs.")
   .option("--run <id>", "run id")
   .action(runStatusCommand);
+
+const migrate = program
+  .command("migrate")
+  .description("Migrate persisted memsphere data between contract versions.");
+
+migrate
+  .command("artifact-contract-v2")
+  .description("Migrate Memory Artifact contracts to type, format, and schema v2.")
+  .option("--check", "scan and print a read-only migration manifest")
+  .option("--write", "stage, validate, back up, and apply the migration")
+  .option("--config <path>", "config file path")
+  .action(migrateArtifactContractV2Command);
 
 const archive = program
   .command("archive")

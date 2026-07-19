@@ -52,7 +52,6 @@ const entities: MemoryEntity[] = [
     tag: "!schema",
     names: ["Record"],
     defines: [],
-    format: "outline",
     fields: [
       {
         tag: "!schema",
@@ -87,7 +86,7 @@ const entities: MemoryEntity[] = [
         condition: {
           tag: "!action",
           action: "Decide.",
-          artifact: { tag: "!artifact", name: "decision", format: "boolean" }
+          artifact: { tag: "!artifact", name: "decision", type: "boolean", format: { name: "plain", options: {} } }
         },
         then: [
           {
@@ -95,7 +94,7 @@ const entities: MemoryEntity[] = [
             condition: {
               tag: "!action",
               action: "Continue?",
-              artifact: { tag: "!artifact", name: "continue", format: "boolean" }
+              artifact: { tag: "!artifact", name: "continue", type: "boolean", format: { name: "plain", options: {} } }
             },
             do: [{ tag: "!call", target: "child" }]
           }
@@ -104,7 +103,7 @@ const entities: MemoryEntity[] = [
           {
             tag: "!action",
             action: "Write markdown.",
-            artifact: { tag: "!artifact", name: "note", format: "markdown" }
+            artifact: { tag: "!artifact", name: "note", type: "string", format: { name: "markdown", options: {} } }
           }
         ]
       }
@@ -117,6 +116,7 @@ for (const entity of entities) {
     const source = serializeMemoryYaml(entity);
     assert(source.startsWith(`${entity.tag}\n`));
     assert(!/^tag:/m.test(source));
+    if (entity.tag === "!procedure") assert.doesNotMatch(source, /type: string/);
     const parsed = parseMemoryYaml(source);
     const kind = entity.tag === "!concept"
       ? "concepts"
@@ -177,7 +177,12 @@ test("memory node serializers preserve tagged fragments and copyable text refere
     fragment: {
       tag: "!action",
       action: "Produce a result.",
-      artifact: { tag: "!artifact", name: "Result", format: "markdown" }
+      artifact: {
+        tag: "!artifact",
+        name: "Result",
+        type: "string",
+        format: { name: "markdown", options: {} }
+      }
     }
   };
   const yaml = serializeMemoryNodeReadYaml(result);

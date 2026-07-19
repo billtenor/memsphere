@@ -12,4 +12,3 @@ flow:
     action: 记录子流程已经被调用。
     artifact: !artifact
       name: 子流程调用记录
-      format: string

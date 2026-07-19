@@ -146,7 +146,6 @@ sections:
 `);
     await writeFile(join(memoryRoot, "schemas", "report.yaml"), `!schema
 names: [Report]
-format: outline
 fields:
   - Title
   - !repeat
@@ -165,12 +164,13 @@ flow:
       action: Decide whether to continue.
       artifact: !artifact
         name: Continue
-        format: boolean
+        type: boolean
     then:
       - !action
         action: Produce the result.
         artifact: !artifact
           name: Result
+          type: string
           format: markdown
 `);
 

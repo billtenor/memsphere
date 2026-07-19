@@ -67,7 +67,7 @@ flow:
         - 只有 human 可以允许跳过，Agent 不得自行跳过 case。
       artifact: !artifact
         name: 是否仍有未通过且未获准跳过的 Case
-        format: boolean
+        type: boolean
     do:
       - !action
         action: 整理未通过 case 的根因和处理方案。区分 Agent、环境、harness、case、评分标准、Memory、Skill、Procedure、CLI 和产品代码问题，并判断属于本轮可修复问题还是需要功能迭代的需求。

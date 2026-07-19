@@ -5,6 +5,7 @@ import type { RunState } from "../src/run/store.js";
 
 test("run output separates Procedure assertions from Action assertions", () => {
   const run: RunState = {
+    contractVersion: 2,
     id: "run-contract",
     status: "running",
     procedureName: "guarded-procedure",
@@ -22,7 +23,8 @@ test("run output separates Procedure assertions from Action assertions", () => {
         instruction: "Produce the result.",
         actor: "agent",
         artifact: "result",
-        format: "string",
+        type: "string",
+        format: { name: "plain", options: {} },
         asserts: ["Check this step."]
       }],
       index: 0
@@ -46,6 +48,7 @@ test("run output separates Procedure assertions from Action assertions", () => {
 
 test("run output presents Repeat as control without an Artifact", () => {
   const run: RunState = {
+    contractVersion: 2,
     id: "run-repeat",
     status: "running",
     procedureName: "repeat-procedure",

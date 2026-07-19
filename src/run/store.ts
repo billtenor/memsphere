@@ -1,13 +1,25 @@
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { z } from "zod";
+import {
+  ArtifactValidationFailure,
+  type ArtifactReportSource,
+  type ArtifactValidationPlan,
+  type ArtifactValidatorRegistration,
+  type ArtifactValidationResult,
+  type CompiledArtifactContract,
+  type PreparedArtifactCandidate,
+  compileArtifactContract,
+  createBuiltInArtifactValidatorRegistry,
+  prepareArtifactCandidate
+} from "../artifact-validation.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
 import {
-  artifactFormats,
+  builtInArtifactFormats,
   stepActors,
   type ActionNode,
-  type ArtifactFormat,
+  type ArtifactFormatSpec,
   type DefinitionPart,
   type FlowNode,
   type IfNode,
@@ -21,8 +33,14 @@ import {
   type WhileNode
 } from "../memory/ast.js";
 
-export { artifactFormats, stepActors };
-export type { ArtifactFormat, StepActor };
+export { builtInArtifactFormats, stepActors };
+export type { ArtifactFormatSpec, ArtifactReportSource, StepActor };
+
+const artifactValidatorRegistry = createBuiltInArtifactValidatorRegistry();
+
+export function registerArtifactValidator(registration: ArtifactValidatorRegistration): void {
+  artifactValidatorRegistry.register(registration);
+}
 
 export type RunStatus = "running" | "done";
 export type FrameType = "procedure" | "schema";
@@ -35,6 +53,7 @@ export type RunFrame = {
   index: number;
   returnTo?: string;
   sourceStepId?: string;
+  eventStartIndex?: number;
 };
 
 export type RunStep = {
@@ -43,10 +62,10 @@ export type RunStep = {
   instruction: string;
   actor?: StepActor;
   artifact?: string;
-  format?: ArtifactFormat;
-  schemaName?: string;
-  inlineSchema?: SchemaNode;
-  inlineSchemaId?: string;
+  type?: string;
+  format?: ArtifactFormatSpec;
+  schema?: RunSchemaContract;
+  validationPlan?: ArtifactValidationPlan;
   final?: boolean;
   asserts?: string[];
   suggests?: string[];
@@ -68,31 +87,33 @@ export type RunStep = {
   };
 };
 
+export type RunSchemaContract =
+  | { kind: "external"; name: string; node?: SchemaNode }
+  | { kind: "inline"; id: string; node: SchemaNode };
+
 export type RunEvent = {
   at: string;
   frame: FrameType;
   stepId: string;
   artifact: {
       name: string;
-      format: ArtifactFormat;
+      type: string;
+      format: ArtifactFormatSpec;
       fields?: Record<string, unknown>;
-      schemaName?: string;
-      schemaKind?: "external" | "inline";
-      inlineSchemaId?: string;
+      schema?: RunSchemaContract;
+      validation?: ArtifactValidationResult;
       final?: boolean;
       storage?: "inline" | "file";
-      value?: string;
+      value?: unknown;
       path?: string;
       fileName?: string;
       contentType?: string;
   };
 };
 
-export type ArtifactReportSource =
-  | { kind: "inline"; value: string }
-  | { kind: "file"; path: string };
-
 export type RunState = {
+  contractVersion: 1 | 2;
+  readOnly?: boolean;
   id: string;
   status: RunStatus;
   procedureName: string;
@@ -105,6 +126,39 @@ export type RunState = {
   events: RunEvent[];
 };
 
+const artifactFormatSpecSchema = z.object({
+  name: z.string().min(1),
+  options: z.record(z.unknown())
+}).strict();
+
+const runSchemaContractSchema: z.ZodType<RunSchemaContract> = z.union([
+  z.object({ kind: z.literal("external"), name: z.string(), node: z.custom<SchemaNode>().optional() }).strict(),
+  z.object({ kind: z.literal("inline"), id: z.string(), node: z.custom<SchemaNode>() }).strict()
+]);
+
+const validationPlanEntrySchema = z.object({
+  id: z.string(),
+  version: z.string(),
+  stage: z.enum(["type", "format", "schema"]),
+  target: z.string()
+}).strict();
+
+const validationResultSchema: z.ZodType<ArtifactValidationResult> = z.object({
+  status: z.enum(["passed", "failed", "unsupported"]),
+  correctable: z.boolean(),
+  issues: z.array(z.object({
+    code: z.string(),
+    stage: z.enum(["type", "format", "schema"]),
+    validatorId: z.string(),
+    artifactPath: z.string(),
+    contractPath: z.string().optional(),
+    fieldPath: z.string().optional(),
+    actual: z.unknown().optional(),
+    expected: z.unknown().optional(),
+    message: z.string()
+  }))
+});
+
 const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
   z.object({
     id: z.string(),
@@ -112,10 +166,10 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
     instruction: z.string(),
     actor: z.enum(stepActors).optional(),
     artifact: z.string().optional(),
-    format: z.enum(artifactFormats).optional(),
-    schemaName: z.string().optional(),
-    inlineSchema: z.custom<SchemaNode>().optional(),
-    inlineSchemaId: z.string().optional(),
+    type: z.string().optional(),
+    format: artifactFormatSpecSchema.optional(),
+    schema: runSchemaContractSchema.optional(),
+    validationPlan: z.array(validationPlanEntrySchema).optional(),
     final: z.boolean().optional(),
     asserts: z.array(z.string()).optional(),
     suggests: z.array(z.string()).optional(),
@@ -139,6 +193,8 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
 );
 
 const runStateSchema: z.ZodType<RunState> = z.object({
+  contractVersion: z.literal(2),
+  readOnly: z.boolean().optional(),
   id: z.string(),
   status: z.enum(["running", "done"]),
   procedureName: z.string(),
@@ -154,7 +210,8 @@ const runStateSchema: z.ZodType<RunState> = z.object({
     steps: z.array(runStepSchema),
     index: z.number(),
     returnTo: z.string().optional(),
-    sourceStepId: z.string().optional()
+    sourceStepId: z.string().optional(),
+    eventStartIndex: z.number().int().nonnegative().optional()
   })),
   events: z.array(z.object({
     at: z.string(),
@@ -162,14 +219,14 @@ const runStateSchema: z.ZodType<RunState> = z.object({
     stepId: z.string(),
     artifact: z.object({
       name: z.string(),
-      format: z.enum(artifactFormats),
+      type: z.string(),
+      format: artifactFormatSpecSchema,
       fields: z.record(z.unknown()).optional(),
-      schemaName: z.string().optional(),
-      schemaKind: z.enum(["external", "inline"]).optional(),
-      inlineSchemaId: z.string().optional(),
+      schema: runSchemaContractSchema.optional(),
+      validation: validationResultSchema.optional(),
       final: z.boolean().optional(),
       storage: z.enum(["inline", "file"]).optional(),
-      value: z.string().optional(),
+      value: z.unknown().optional(),
       path: z.string().optional(),
       fileName: z.string().optional(),
       contentType: z.string().optional()
@@ -191,12 +248,14 @@ export async function startRun(input: { memoryRoot: string; runsRoot: string; pr
 
   const procedureMemory = procedure.entity as ProcedureMemory;
   const steps = compileProcedureSteps(procedureMemory);
+  await snapshotExternalSchemas(input.memoryRoot, steps);
   if (!steps.length) {
     throw new Error(`procedure has no flow steps: ${input.procedureName}`);
   }
 
   const now = new Date().toISOString();
   const run: RunState = {
+    contractVersion: 2,
     id: makeRunId(now),
     status: "running",
     procedureName: procedure.entity.names[0],
@@ -222,7 +281,14 @@ export async function startRun(input: { memoryRoot: string; runsRoot: string; pr
 
 export async function readRun(runsRoot: string, id: string): Promise<RunState> {
   const raw = await readFile(await existingRunPath(runsRoot, id), "utf8");
-  return runStateSchema.parse(JSON.parse(raw));
+  return parseRunState(JSON.parse(raw));
+}
+
+export function parseRunState(parsed: unknown): RunState {
+  if (parsed && typeof parsed === "object" && (parsed as { contractVersion?: unknown }).contractVersion === 2) {
+    return runStateSchema.parse(parsed);
+  }
+  return normalizeLegacyRun(parsed);
 }
 
 export async function listRuns(runsRoot: string): Promise<RunState[]> {
@@ -251,6 +317,9 @@ export async function listRuns(runsRoot: string): Promise<RunState[]> {
 
 export async function reportRun(input: { runsRoot: string; runId: string; artifact: ArtifactReportSource }): Promise<RunState> {
   const run = await readRun(input.runsRoot, input.runId);
+  if (run.contractVersion === 1 || run.readOnly) {
+    throw new Error(`v1 run is read-only and cannot report after the Artifact Contract v2 upgrade: ${input.runId}`);
+  }
   if (run.status === "done") {
     throw new Error(`run is already done: ${input.runId}`);
   }
@@ -267,8 +336,20 @@ export async function reportRun(input: { runsRoot: string; runId: string; artifa
     throw new Error(`run has no current step: ${input.runId}`);
   }
 
-  const artifact = await buildRunEventArtifact(input.runsRoot, run, step, input.artifact);
-  const controlValue = step.kind === "branch" || step.kind === "loop" ? artifactInlineValue(artifact) : "";
+  const contract = await contractForStep(run, step);
+  const context = {
+    runId: run.id,
+    stepId: step.id,
+    artifactPath: step.id,
+    attemptId: randomUUID()
+  };
+  const candidate = await prepareArtifactCandidate(contract, input.artifact, context);
+  const plan = step.validationPlan ?? artifactValidatorRegistry.resolvePlan(contract);
+  const validation = await artifactValidatorRegistry.execute(plan, { contract, candidate, context });
+  if (validation.status !== "passed") throw new ArtifactValidationFailure(validation);
+
+  const artifact = await buildRunEventArtifact(input.runsRoot, run, step, candidate, validation);
+  const controlValue = step.kind === "branch" || step.kind === "loop" ? candidate.representation.value : undefined;
 
   run.events.push({
     at: new Date().toISOString(),
@@ -288,6 +369,9 @@ export async function reportRun(input: { runsRoot: string; runId: string; artifa
 
 export async function repeatRun(input: { runsRoot: string; runId: string; count: number }): Promise<RunState> {
   const run = await readRun(input.runsRoot, input.runId);
+  if (run.contractVersion === 1 || run.readOnly) {
+    throw new Error(`v1 run is read-only and cannot continue after the Artifact Contract v2 upgrade: ${input.runId}`);
+  }
   if (run.status === "done") {
     throw new Error(`run is already done: ${input.runId}`);
   }
@@ -316,7 +400,7 @@ export async function repeatRun(input: { runsRoot: string; runId: string; count:
   return run;
 }
 
-export function artifactInlineValue(artifact: RunEvent["artifact"]): string {
+export function artifactInlineValue(artifact: RunEvent["artifact"]): unknown {
   if (artifact.storage === "file") {
     throw new Error(`artifact is stored as file and has no inline value: ${artifact.name}`);
   }
@@ -324,39 +408,49 @@ export function artifactInlineValue(artifact: RunEvent["artifact"]): string {
 }
 
 export function artifactSchemaName(artifact: RunEvent["artifact"]): string | undefined {
-  const fieldValue = artifact.fields?.schema_name;
-  return typeof fieldValue === "string" ? fieldValue : artifact.schemaName;
+  return artifact.schema?.kind === "external" ? artifact.schema.name : undefined;
 }
 
 export async function enterSchema(input: { memoryRoot: string; runsRoot: string; runId: string; schemaName?: string }): Promise<RunState> {
   const run = await readRun(input.runsRoot, input.runId);
+  if (run.contractVersion === 1 || run.readOnly) {
+    throw new Error(`v1 run is read-only and cannot enter schema after the Artifact Contract v2 upgrade: ${input.runId}`);
+  }
   if (run.status === "done") {
     throw new Error(`run is already done: ${input.runId}`);
   }
 
   const activeStep = currentStep(run);
   if (!input.schemaName) {
-    if (!activeStep?.inlineSchema || !activeStep.inlineSchemaId) {
+    if (activeStep?.schema?.kind !== "inline") {
       throw new Error("current Artifact does not use an inline schema; provide an external schema name");
     }
-    const steps = compileSchemaSteps(activeStep.inlineSchema, activeStep.inlineSchemaId);
+    const steps = compileSchemaSteps(activeStep.schema.node, activeStep.schema.id);
     if (!steps.length) throw new Error(`inline schema has no executable fields: ${activeStep.artifact}`);
     run.stack.push({
       type: "schema",
-      memoryName: activeStep.inlineSchemaId,
+      memoryName: activeStep.schema.id,
       sourceStepId: activeStep.id,
+      eventStartIndex: run.events.length,
       steps,
       index: 0
     });
   } else {
-    const schema = await findMemoryByName(input.memoryRoot, "schemas", input.schemaName);
-    if (!schema) throw new Error(`schema not found: ${input.schemaName}`);
-    const steps = compileSchemaSteps(schema.entity as SchemaMemory, schema.entity.names[0]);
+    if (activeStep?.schema?.kind !== "external") {
+      throw new Error("current Artifact does not use an external schema; omit the name for an inline schema");
+    }
+    if (activeStep.schema.name !== input.schemaName) {
+      throw new Error(`current Artifact requires schema ${activeStep.schema.name}, not ${input.schemaName}`);
+    }
+    if (!activeStep.schema.node) throw new Error(`schema snapshot missing from Run contract: ${input.schemaName}`);
+    const schemaName = activeStep.schema.name;
+    const steps = compileSchemaSteps(activeStep.schema.node, schemaName);
     if (!steps.length) throw new Error(`schema has no executable fields: ${input.schemaName}`);
     run.stack.push({
       type: "schema",
-      memoryName: schema.entity.names[0],
+      memoryName: schemaName,
       sourceStepId: activeStep?.id,
+      eventStartIndex: run.events.length,
       steps,
       index: 0
     });
@@ -400,13 +494,25 @@ async function collapseCompletedFrames(runsRoot: string, run: RunState): Promise
       parent &&
       parentStep &&
       parentStep.artifact &&
-      parentStep.format === "schema" &&
+      parentStep.schema &&
       completed.sourceStepId === parentStep.id
     ) {
-      const artifact = await buildRunEventArtifact(runsRoot, run, parentStep, {
+      const contract = await contractForStep(run, parentStep);
+      const assembled = await assembleSchemaArtifact(runsRoot, run, completed);
+      const context = {
+        runId: run.id,
+        stepId: parentStep.id,
+        artifactPath: parentStep.id,
+        attemptId: randomUUID()
+      };
+      const candidate = await prepareArtifactCandidate(contract, {
         kind: "inline",
-        value: `schema:${completed.memoryName}`
-      });
+        value: assembled
+      }, context);
+      const plan = parentStep.validationPlan ?? artifactValidatorRegistry.resolvePlan(contract);
+      const validation = await artifactValidatorRegistry.execute(plan, { contract, candidate, context });
+      if (validation.status !== "passed") throw new ArtifactValidationFailure(validation);
+      const artifact = await buildRunEventArtifact(runsRoot, run, parentStep, candidate, validation);
       run.events.push({
         at: new Date().toISOString(),
         frame: parent.type,
@@ -454,22 +560,28 @@ function compileActionStep(node: ActionNode, id: string): RunStep {
     instruction: node.action,
     actor: node.actor ?? "agent",
     artifact: node.artifact.name,
-    format: node.artifact.format,
     ...compileArtifactStep(node.artifact, id),
     asserts: node.asserts ? [...node.asserts] : undefined,
     suggests: node.suggests ? [...node.suggests] : undefined
   };
 }
 
-function compileArtifactStep(artifact: ActionNode["artifact"], id: string): Pick<RunStep, "artifact" | "format" | "schemaName" | "inlineSchema" | "inlineSchemaId" | "final"> {
-  const schemaName = typeof artifact.schema === "string" ? artifact.schema : undefined;
-  const inlineSchema = typeof artifact.schema === "object" ? cloneSchema(artifact.schema) : undefined;
+function compileArtifactStep(
+  artifact: ActionNode["artifact"],
+  id: string
+): Pick<RunStep, "artifact" | "type" | "format" | "schema" | "validationPlan" | "final"> {
+  const contract = compileArtifactContract(artifact);
+  const schema = typeof artifact.schema === "string"
+    ? { kind: "external" as const, name: artifact.schema }
+    : typeof artifact.schema === "object"
+      ? { kind: "inline" as const, id: `inline:${id}:${slugify(artifact.name) || "artifact"}`, node: cloneSchema(artifact.schema) }
+      : undefined;
   return {
     artifact: artifact.name,
-    format: artifact.format,
-    schemaName,
-    inlineSchema,
-    inlineSchemaId: inlineSchema ? `inline:${id}:${slugify(artifact.name) || "artifact"}` : undefined,
+    type: contract.type,
+    format: contract.format,
+    schema,
+    validationPlan: artifactValidatorRegistry.resolvePlan(contract),
     final: artifact.final || undefined
   };
 }
@@ -517,7 +629,7 @@ function describeControlTargets(label: string, steps: RunStep[]): string[] {
   return [`${label}: ${steps.map((step) => step.artifact ?? step.target ?? step.id).join(", ")}`];
 }
 
-function applyControlStep(frame: RunFrame, step: RunStep, artifactValue: string): void {
+function applyControlStep(frame: RunFrame, step: RunStep, artifactValue: unknown): void {
   if (step.kind === "branch" && step.branches) {
     const selected = parseBooleanArtifact(artifactValue) ? step.branches.truthy : step.branches.falsy;
     frame.steps.splice(frame.index, 0, ...cloneSteps(selected));
@@ -529,8 +641,9 @@ function applyControlStep(frame: RunFrame, step: RunStep, artifactValue: string)
   }
 }
 
-function parseBooleanArtifact(value: string): boolean {
-  return ["true", "yes", "y", "1", "继续", "是"].includes(value.trim().toLowerCase());
+function parseBooleanArtifact(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  return typeof value === "string" && ["true", "yes", "y", "1", "继续", "是"].includes(value.trim().toLowerCase());
 }
 
 function cloneSteps(steps: RunStep[]): RunStep[] {
@@ -540,7 +653,9 @@ function cloneSteps(steps: RunStep[]): RunStep[] {
 function cloneStep(step: RunStep): RunStep {
   return {
     ...step,
-    inlineSchema: step.inlineSchema ? cloneSchema(step.inlineSchema) : undefined,
+    format: step.format ? { name: step.format.name, options: structuredClone(step.format.options) } : undefined,
+    schema: step.schema ? structuredClone(step.schema) : undefined,
+    validationPlan: step.validationPlan ? structuredClone(step.validationPlan) : undefined,
     asserts: step.asserts ? [...step.asserts] : undefined,
     suggests: step.suggests ? [...step.suggests] : undefined,
     details: step.details ? [...step.details] : undefined,
@@ -572,11 +687,13 @@ async function expandAutoCallSteps(run: RunState): Promise<void> {
     const procedure = await findMemoryByName(run.memoryRoot, "procedures", step.target);
     if (!procedure) throw new Error(`procedure not found: ${step.target}`);
     const procedureMemory = procedure.entity as ProcedureMemory;
+    const steps = compileProcedureSteps(procedureMemory);
+    await snapshotExternalSchemas(run.memoryRoot, steps);
     run.stack.push({
       type: "procedure",
       memoryName: procedure.entity.names[0],
       asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
-      steps: compileProcedureSteps(procedureMemory),
+      steps,
       index: 0,
       returnTo: step.id
     });
@@ -587,26 +704,28 @@ async function buildRunEventArtifact(
   runsRoot: string,
   run: RunState,
   step: RunStep,
-  source: ArtifactReportSource
+  candidate: PreparedArtifactCandidate,
+  validation: ArtifactValidationResult
 ): Promise<RunEvent["artifact"]> {
-  if (!step.artifact || !step.format) {
+  if (!step.artifact || !step.type || !step.format) {
     throw new Error(`step ${step.id} has no artifact`);
   }
 
   const base = {
     name: step.artifact,
+    type: step.type,
     format: step.format,
     fields: artifactFieldsForStep(step),
-    schemaKind: step.inlineSchema ? "inline" as const : step.schemaName ? "external" as const : undefined,
-    inlineSchemaId: step.inlineSchemaId,
+    schema: step.schema,
+    validation,
     final: step.final
   };
 
-  if (source.kind === "inline" && !shouldStoreArtifactAsFile(step.format)) {
+  if (!shouldStoreArtifactAsFile(step.format)) {
     return compactArtifact({
       ...base,
       storage: "inline",
-      value: source.value
+      value: candidate.representation.value
     });
   }
 
@@ -615,11 +734,7 @@ async function buildRunEventArtifact(
   const absolutePath = resolve(artifactDir, fileName);
   assertInsideRunArtifactDirectory(absolutePath, artifactDir);
 
-  if (source.kind === "file") {
-    await copyFile(source.path, absolutePath);
-  } else {
-    await writeFile(absolutePath, source.value, "utf8");
-  }
+  await writeFile(absolutePath, candidate.raw);
 
   return compactArtifact({
     ...base,
@@ -630,6 +745,24 @@ async function buildRunEventArtifact(
   });
 }
 
+async function contractForStep(run: RunState, step: RunStep): Promise<CompiledArtifactContract> {
+  if (!step.artifact || !step.type || !step.format) throw new Error(`step ${step.id} has no Artifact contract`);
+  let schema: string | SchemaNode | undefined;
+  if (step.schema?.kind === "inline") {
+    schema = cloneSchema(step.schema.node);
+  } else if (step.schema?.kind === "external") {
+    if (!step.schema.node) throw new Error(`schema snapshot missing from Run contract: ${step.schema.name}`);
+    schema = cloneSchema(step.schema.node);
+  }
+  return {
+    name: step.artifact,
+    type: step.type,
+    format: { name: step.format.name, options: structuredClone(step.format.options) },
+    schema,
+    final: step.final === true
+  };
+}
+
 function compactArtifact(artifact: RunEvent["artifact"]): RunEvent["artifact"] {
   if (artifact.fields && Object.keys(artifact.fields).length === 0) {
     delete artifact.fields;
@@ -638,15 +771,13 @@ function compactArtifact(artifact: RunEvent["artifact"]): RunEvent["artifact"] {
 }
 
 function artifactFieldsForStep(step: RunStep): Record<string, unknown> | undefined {
-  if (step.format === "schema") {
-    if (step.schemaName) return { schema_name: step.schemaName };
-    if (step.inlineSchemaId) return { inline_schema_id: step.inlineSchemaId };
-  }
+  if (step.schema?.kind === "external") return { schema_name: step.schema.name };
+  if (step.schema?.kind === "inline") return { inline_schema_id: step.schema.id };
   return undefined;
 }
 
-function shouldStoreArtifactAsFile(format: ArtifactFormat): boolean {
-  return ["markdown", "yaml", "json", "schema"].includes(format);
+function shouldStoreArtifactAsFile(format: ArtifactFormatSpec): boolean {
+  return ["markdown", "yaml", "json"].includes(format.name);
 }
 
 function runArtifactDirectory(runsRoot: string, runId: string): string {
@@ -669,7 +800,7 @@ function assertInsideRunArtifactDirectory(path: string, artifactDir: string): vo
 function nextArtifactFileName(run: RunState, step: RunStep): string {
   const index = String(run.events.length + 1).padStart(3, "0");
   const slug = slugify(step.artifact ?? step.id) || slugify(step.id) || "artifact";
-  return `${index}-${slug}${extensionForFormat(step.format ?? "string")}`;
+  return `${index}-${slug}${extensionForFormat(step.format ?? { name: "plain", options: {} })}`;
 }
 
 function slugify(value: string): string {
@@ -681,25 +812,22 @@ function slugify(value: string): string {
     .slice(0, 60);
 }
 
-function extensionForFormat(format: ArtifactFormat): string {
-  switch (format) {
+function extensionForFormat(format: ArtifactFormatSpec): string {
+  switch (format.name) {
     case "markdown":
       return ".md";
     case "yaml":
       return ".yaml";
     case "json":
       return ".json";
-    case "schema":
-      return ".schema.md";
     default:
       return ".txt";
   }
 }
 
-function contentTypeForFormat(format: ArtifactFormat): string | undefined {
-  switch (format) {
+function contentTypeForFormat(format: ArtifactFormatSpec): string | undefined {
+  switch (format.name) {
     case "markdown":
-    case "schema":
       return "text/markdown";
     case "yaml":
       return "application/yaml";
@@ -720,16 +848,15 @@ function walkSchema(node: SchemaNode, path: string, steps: RunStep[]): void {
   const elementTypeDetails = node.element_types?.length
     ? [`element_types: List<${node.element_types.join(" | ")}>`]
     : [];
-  steps.push({
+  steps.push(compileSchemaValueStep({
     id: `schema:${path}`,
     instruction: `Write ${path}`,
-    actor: "agent",
     artifact: path,
-    format: schemaNodeArtifactFormat(node),
+    formatName: schemaNodeArtifactFormat(node),
     details: definitionDetails(node.defines)
       .concat(elementTypeDetails)
       .concat((node.asserts ?? []).map((value) => `asserts: ${value}`))
-  });
+  }));
 
   for (const [fieldIndex, child] of (node.fields ?? []).entries()) {
     if (typeof child === "string") {
@@ -745,12 +872,36 @@ function walkSchema(node: SchemaNode, path: string, steps: RunStep[]): void {
 }
 
 function compileStringSchemaStep(path: string): RunStep {
-  return {
+  return compileSchemaValueStep({
     id: `schema:${path}`,
     instruction: `Write ${path}`,
-    actor: "agent",
     artifact: path,
-    format: "string"
+    formatName: "plain"
+  });
+}
+
+function compileSchemaValueStep(input: {
+  id: string;
+  instruction: string;
+  artifact: string;
+  formatName: "plain" | "markdown";
+  details?: string[];
+}): RunStep {
+  const contract: CompiledArtifactContract = {
+    name: input.artifact,
+    type: "string",
+    format: { name: input.formatName, options: {} },
+    final: false
+  };
+  return {
+    id: input.id,
+    instruction: input.instruction,
+    actor: "agent",
+    artifact: input.artifact,
+    type: contract.type,
+    format: contract.format,
+    validationPlan: artifactValidatorRegistry.resolvePlan(contract),
+    details: input.details
   };
 }
 
@@ -824,8 +975,62 @@ function statementDefinitionDetails(statement: StatementNode, path: string[] = [
   return details;
 }
 
-function schemaNodeArtifactFormat(node: SchemaNode): ArtifactFormat {
-  return node.format === "table" || node.fields?.length || node.element_types?.length ? "markdown" : "string";
+function schemaNodeArtifactFormat(node: SchemaNode): "plain" | "markdown" {
+  return node.fields?.length || node.element_types?.length ? "markdown" : "plain";
+}
+
+async function snapshotExternalSchemas(memoryRoot: string, steps: RunStep[]): Promise<void> {
+  for (const step of steps) {
+    if (step.schema?.kind === "external" && !step.schema.node) {
+      const memory = await findMemoryByName(memoryRoot, "schemas", step.schema.name);
+      if (!memory) throw new Error(`schema not found: ${step.schema.name}`);
+      step.schema.node = cloneSchema(memory.entity as SchemaMemory);
+    }
+    if (
+      step.schema?.node &&
+      schemaHasRepeat(step.schema.node) &&
+      !(step.type === "object" && step.format?.name === "markdown" && step.format.options.layout === "outline")
+    ) {
+      throw new Error(`Schema Repeat is only supported by object markdown Artifacts with layout: outline: ${step.id}`);
+    }
+    if (step.branches) {
+      await snapshotExternalSchemas(memoryRoot, step.branches.truthy);
+      await snapshotExternalSchemas(memoryRoot, step.branches.falsy);
+    }
+    if (step.loop) await snapshotExternalSchemas(memoryRoot, step.loop.body);
+  }
+}
+
+function schemaHasRepeat(schema: SchemaNode): boolean {
+  return (schema.fields ?? []).some((field) =>
+    typeof field === "object" && (field.tag === "!repeat" || schemaHasRepeat(field))
+  );
+}
+
+async function assembleSchemaArtifact(runsRoot: string, run: RunState, frame: RunFrame): Promise<string> {
+  const events = run.events.slice(frame.eventStartIndex ?? 0);
+  const chunks: string[] = [];
+  for (const step of frame.steps) {
+    if (!step.artifact || step.kind === "repeat") continue;
+    const event = events.find((candidate) => candidate.stepId === step.id);
+    if (!event) continue;
+    const value = event.artifact.storage === "file" && event.artifact.path
+      ? await readFile(join(runsRoot, event.artifact.path), "utf8")
+      : String(event.artifact.value ?? "");
+    if (step.artifact === frame.memoryName) {
+      if (value.trim()) chunks.push(value.trim());
+      continue;
+    }
+    const relativePath = step.artifact.startsWith(`${frame.memoryName}.`)
+      ? step.artifact.slice(frame.memoryName.length + 1)
+      : step.artifact;
+    const segments = relativePath.split(".");
+    const title = segments.at(-1)?.replace(/\[(\d+)\]/g, " $1") ?? relativePath;
+    const headingLevel = Math.min(6, segments.length + 1);
+    chunks.push(`${"#".repeat(headingLevel)} ${title}`);
+    if (value.trim()) chunks.push(value.trim());
+  }
+  return `${chunks.join("\n\n")}\n`;
 }
 
 async function findMemoryByName(memoryRoot: string, kind: "procedures" | "schemas", name: string): Promise<MemoryFile | undefined> {
@@ -869,4 +1074,201 @@ async function writeRun(runsRoot: string, run: RunState): Promise<void> {
 function makeRunId(iso: string): string {
   const stamp = iso.replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z").replace("T", "-").toLowerCase();
   return `run-${stamp}-${randomUUID().slice(0, 8)}`;
+}
+
+function normalizeLegacyRun(value: unknown): RunState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid v1 run state");
+  const legacy = value as Record<string, unknown>;
+  const plan = Array.isArray(legacy.plan) ? legacy.plan.map(normalizeLegacyStep) : undefined;
+  const stack = Array.isArray(legacy.stack) ? legacy.stack.map((frameValue) => {
+    const frame = frameValue as Record<string, unknown>;
+    return {
+      type: frame.type === "schema" ? "schema" as const : "procedure" as const,
+      memoryName: String(frame.memoryName ?? ""),
+      asserts: stringList(frame.asserts),
+      steps: Array.isArray(frame.steps) ? frame.steps.map(normalizeLegacyStep) : [],
+      index: Number(frame.index ?? 0),
+      returnTo: typeof frame.returnTo === "string" ? frame.returnTo : undefined,
+      sourceStepId: typeof frame.sourceStepId === "string" ? frame.sourceStepId : undefined,
+      eventStartIndex: typeof frame.eventStartIndex === "number" ? frame.eventStartIndex : undefined
+    };
+  }) : [];
+  const stepsById = new Map<string, RunStep>();
+  for (const step of [...(plan ?? []), ...stack.flatMap((frame) => frame.steps)]) collectSteps(step, stepsById);
+  const events = Array.isArray(legacy.events) ? legacy.events.map((eventValue) => normalizeLegacyEvent(eventValue, stepsById)) : [];
+
+  return {
+    contractVersion: 1,
+    readOnly: true,
+    id: String(legacy.id ?? ""),
+    status: legacy.status === "done" ? "done" : "running",
+    procedureName: String(legacy.procedureName ?? ""),
+    asserts: stringList(legacy.asserts),
+    memoryRoot: String(legacy.memoryRoot ?? ""),
+    createdAt: String(legacy.createdAt ?? ""),
+    updatedAt: String(legacy.updatedAt ?? legacy.createdAt ?? ""),
+    plan,
+    stack,
+    events
+  };
+}
+
+function normalizeLegacyStep(value: unknown): RunStep {
+  const legacy = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const normalized = legacyContract(String(legacy.artifact ?? ""), legacy.format, legacy.inlineSchema);
+  const schema = legacySchemaContract(legacy);
+  return {
+    id: String(legacy.id ?? ""),
+    kind: isRunStepKind(legacy.kind) ? legacy.kind : undefined,
+    instruction: String(legacy.instruction ?? ""),
+    actor: legacy.actor === "human" ? "human" : legacy.actor === "agent" ? "agent" : undefined,
+    artifact: typeof legacy.artifact === "string" ? legacy.artifact : undefined,
+    type: normalized?.type,
+    format: normalized?.format,
+    schema,
+    final: legacy.final === true || undefined,
+    asserts: stringList(legacy.asserts),
+    suggests: stringList(legacy.suggests),
+    details: stringList(legacy.details),
+    target: typeof legacy.target === "string" ? legacy.target : undefined,
+    branches: legacy.branches && typeof legacy.branches === "object"
+      ? {
+          truthy: Array.isArray((legacy.branches as Record<string, unknown>).truthy)
+            ? ((legacy.branches as Record<string, unknown>).truthy as unknown[]).map(normalizeLegacyStep)
+            : [],
+          falsy: Array.isArray((legacy.branches as Record<string, unknown>).falsy)
+            ? ((legacy.branches as Record<string, unknown>).falsy as unknown[]).map(normalizeLegacyStep)
+            : []
+        }
+      : undefined,
+    loop: legacy.loop && typeof legacy.loop === "object" && Array.isArray((legacy.loop as Record<string, unknown>).body)
+      ? { body: ((legacy.loop as Record<string, unknown>).body as unknown[]).map(normalizeLegacyStep) }
+      : undefined,
+    repeat: legacy.repeat as RunStep["repeat"]
+  };
+}
+
+function normalizeLegacyEvent(value: unknown, stepsById: Map<string, RunStep>): RunEvent {
+  const legacy = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const artifact = legacy.artifact && typeof legacy.artifact === "object" && !Array.isArray(legacy.artifact)
+    ? legacy.artifact as Record<string, unknown>
+    : {};
+  const stepId = String(legacy.stepId ?? "");
+  const step = stepsById.get(stepId);
+  const normalized = step?.type && step.format
+    ? { type: step.type, format: step.format }
+    : legacyContract(String(artifact.name ?? ""), artifact.format, undefined) ?? {
+        type: "string",
+        format: { name: "plain", options: {} }
+      };
+  const schema = step?.schema ?? legacyEventSchema(artifact);
+  return {
+    at: String(legacy.at ?? ""),
+    frame: legacy.frame === "schema" ? "schema" : "procedure",
+    stepId,
+    artifact: {
+      name: String(artifact.name ?? step?.artifact ?? ""),
+      type: normalized.type,
+      format: normalized.format,
+      fields: artifact.fields && typeof artifact.fields === "object" && !Array.isArray(artifact.fields)
+        ? artifact.fields as Record<string, unknown>
+        : undefined,
+      schema,
+      final: artifact.final === true || undefined,
+      storage: artifact.storage === "file" ? "file" : artifact.storage === "inline" ? "inline" : undefined,
+      value: artifact.value,
+      path: typeof artifact.path === "string" ? artifact.path : undefined,
+      fileName: typeof artifact.fileName === "string" ? artifact.fileName : undefined,
+      contentType: typeof artifact.contentType === "string" ? artifact.contentType : undefined
+    }
+  };
+}
+
+function legacyContract(name: string, formatValue: unknown, schemaValue: unknown): Pick<CompiledArtifactContract, "type" | "format"> | undefined {
+  if (typeof formatValue !== "string") return undefined;
+  switch (formatValue) {
+    case "boolean": return { type: "boolean", format: { name: "plain", options: {} } };
+    case "number": return { type: "number", format: { name: "plain", options: {} } };
+    case "string": return { type: "string", format: { name: "plain", options: {} } };
+    case "markdown": return { type: "string", format: { name: "markdown", options: {} } };
+    case "json": return { type: "object", format: { name: "json", options: {} } };
+    case "yaml": return { type: "object", format: { name: "yaml", options: {} } };
+    case "schema": {
+      const layout = legacySchemaLayout(schemaValue);
+      return {
+        type: layout === "table" ? "array" : "object",
+        format: { name: "markdown", options: { layout } }
+      };
+    }
+    default:
+      throw new Error(`unsupported v1 Artifact format ${formatValue} for ${name}`);
+  }
+}
+
+function legacySchemaContract(legacy: Record<string, unknown>): RunSchemaContract | undefined {
+  if (typeof legacy.schemaName === "string") return { kind: "external", name: legacy.schemaName };
+  if (legacy.inlineSchema && typeof legacy.inlineSchema === "object" && !Array.isArray(legacy.inlineSchema)) {
+    return {
+      kind: "inline",
+      id: typeof legacy.inlineSchemaId === "string" ? legacy.inlineSchemaId : "inline:v1",
+      node: normalizeLegacySchema(legacy.inlineSchema)
+    };
+  }
+  return undefined;
+}
+
+function legacyEventSchema(artifact: Record<string, unknown>): RunSchemaContract | undefined {
+  const fields = artifact.fields && typeof artifact.fields === "object" && !Array.isArray(artifact.fields)
+    ? artifact.fields as Record<string, unknown>
+    : {};
+  const name = typeof fields.schema_name === "string" ? fields.schema_name : artifact.schemaName;
+  if (typeof name === "string") return { kind: "external", name };
+  const id = typeof fields.inline_schema_id === "string" ? fields.inline_schema_id : artifact.inlineSchemaId;
+  return typeof id === "string" ? { kind: "inline", id, node: emptyLegacySchema(id) } : undefined;
+}
+
+function normalizeLegacySchema(value: unknown): SchemaNode {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const fields = Array.isArray(source.fields) ? source.fields.map((field) => {
+    if (typeof field === "string") return field;
+    if (field && typeof field === "object" && (field as { tag?: unknown }).tag === "!repeat") {
+      const repeat = structuredClone(field) as Record<string, unknown>;
+      if (Array.isArray(repeat.body)) repeat.body = repeat.body.map((bodyField) => typeof bodyField === "string" ? bodyField : normalizeLegacySchema(bodyField));
+      return repeat as unknown as StaticSchemaField;
+    }
+    return normalizeLegacySchema(field);
+  }) : undefined;
+  return {
+    tag: "!schema",
+    names: stringList(source.names) ?? [],
+    defines: Array.isArray(source.defines) ? source.defines as DefinitionPart[] : [],
+    asserts: stringList(source.asserts),
+    element_types: Array.isArray(source.element_types) ? source.element_types as SchemaNode["element_types"] : undefined,
+    fields: fields as SchemaNode["fields"]
+  };
+}
+
+function emptyLegacySchema(id: string): SchemaNode {
+  return { tag: "!schema", names: [id], defines: [] };
+}
+
+function legacySchemaLayout(value: unknown): "outline" | "table" {
+  return value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).format === "table"
+    ? "table"
+    : "outline";
+}
+
+function collectSteps(step: RunStep, steps: Map<string, RunStep>): void {
+  steps.set(step.id, step);
+  for (const child of step.branches?.truthy ?? []) collectSteps(child, steps);
+  for (const child of step.branches?.falsy ?? []) collectSteps(child, steps);
+  for (const child of step.loop?.body ?? []) collectSteps(child, steps);
+}
+
+function stringList(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : undefined;
+}
+
+function isRunStepKind(value: unknown): value is NonNullable<RunStep["kind"]> {
+  return ["action", "branch", "loop", "call", "repeat"].includes(String(value));
 }

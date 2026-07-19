@@ -1,8 +1,8 @@
 import { z } from "zod";
 import type { MemoryKind } from "./kinds.js";
 import {
-  artifactFormats,
-  schemaFormats,
+  builtInArtifactFormats,
+  builtInArtifactTypes,
   schemaElementTypes,
   stepActors,
   type ActionNode,
@@ -83,7 +83,6 @@ const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(()
     tag: z.literal("!schema"),
     names: namesSchema,
     defines: definesSchema,
-    format: z.enum(schemaFormats).optional(),
     asserts: z.array(nonEmptyString).optional(),
     element_types: z.array(z.enum(schemaElementTypes)).min(1).optional(),
     fields: z.lazy(() => z.array(schemaFieldSchema)).optional()
@@ -91,14 +90,13 @@ const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(()
     if (
       node.names.length === 0 &&
       node.defines.length === 0 &&
-      !node.format &&
       (node.asserts?.length ?? 0) === 0 &&
       (node.element_types?.length ?? 0) === 0 &&
       (node.fields?.length ?? 0) === 0
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "anonymous Schema must define format, defines, asserts, element_types, or fields"
+        message: "anonymous Schema must define defines, asserts, element_types, or fields"
       });
     }
     if (node.element_types && new Set(node.element_types).size !== node.element_types.length) {
@@ -114,31 +112,6 @@ const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(()
         path: ["fields"],
         message: "Schema with both element_types and fields must include Schema in element_types"
       });
-    }
-    if (node.format === "table") {
-      if (node.element_types?.length !== 1 || node.element_types[0] !== "Schema") {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["element_types"],
-          message: "table Schema must declare element_types: [Schema]"
-        });
-      }
-      if (!node.fields?.length) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["fields"],
-          message: "table Schema must define at least one field"
-        });
-      }
-      for (const [index, field] of (node.fields ?? []).entries()) {
-        if (typeof field === "object" && field.tag === "!repeat") {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["fields", index],
-            message: "Repeat is only allowed in outline Schema fields"
-          });
-        }
-      }
     }
   })
 );
@@ -202,25 +175,106 @@ const repeatNodeSchema: z.ZodType<RepeatNode, z.ZodTypeDef, unknown> = z.object(
 
 schemaFieldSchema = z.lazy(() => z.union([staticSchemaFieldSchema, repeatNodeSchema]));
 
+const artifactFormatInputSchema = z.union([
+  nonEmptyString.transform((name) => ({ name, options: {} })),
+  z.object({ name: nonEmptyString }).catchall(z.unknown()).transform((value) => {
+    const { name, ...options } = value;
+    return { name, options };
+  })
+]).optional().transform((value) => value ?? { name: "plain", options: {} });
+
 export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> = z.object({
   tag: z.literal("!artifact"),
   name: nonEmptyString,
-  format: z.enum(artifactFormats),
+  type: nonEmptyString.default("string"),
+  format: artifactFormatInputSchema,
   schema: z.lazy(() => z.union([nonEmptyString, schemaNodeSchema])).optional(),
   final: z.boolean().optional()
 }).strict().superRefine((artifact, context) => {
-  if (artifact.format === "schema" && !artifact.schema) {
+  const formatName = artifact.format.name;
+  const layout = (artifact.format.options as Record<string, unknown>).layout;
+  const knownType = builtInArtifactTypes.includes(artifact.type as (typeof builtInArtifactTypes)[number]);
+  const knownFormat = builtInArtifactFormats.includes(formatName as (typeof builtInArtifactFormats)[number]);
+
+  if (!knownType || !knownFormat) return;
+
+  if (formatName !== "markdown" && layout !== undefined) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      path: ["schema"],
-      message: "schema is required when Artifact format is schema"
+      path: ["format", "layout"],
+      message: "layout is only allowed for markdown Artifact format"
     });
   }
-  if (artifact.format !== "schema" && artifact.schema) {
+
+  if (formatName === "markdown" && layout !== undefined && layout !== "outline" && layout !== "table") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["format", "layout"],
+      message: "markdown layout must be outline or table"
+    });
+  }
+
+  const validCombination =
+    (["boolean", "number", "string"].includes(artifact.type) && formatName === "plain") ||
+    (artifact.type === "string" && formatName === "markdown") ||
+    (["object", "array"].includes(artifact.type) && ["json", "yaml", "markdown"].includes(formatName));
+  if (!validCombination) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["format"],
+      message: `Artifact type ${artifact.type} does not support format ${formatName}`
+    });
+  }
+
+  if (artifact.type === "string" && formatName === "markdown" && layout !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["format", "layout"],
+      message: "string markdown Artifact must not declare layout"
+    });
+  }
+
+  if (formatName === "markdown" && artifact.type === "object" && layout !== "outline") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["format", "layout"],
+      message: "object markdown Artifact requires layout: outline"
+    });
+  }
+
+  if (formatName === "markdown" && artifact.type === "array" && layout !== "table") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["format", "layout"],
+      message: "array markdown Artifact requires layout: table"
+    });
+  }
+
+  if (formatName === "markdown" && ["object", "array"].includes(artifact.type) && !artifact.schema) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["schema"],
-      message: "schema is only allowed when Artifact format is schema"
+      message: "structured markdown Artifact requires schema"
+    });
+  }
+
+  if (["boolean", "number", "string"].includes(artifact.type) && artifact.schema) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["schema"],
+      message: `Artifact type ${artifact.type} does not support schema`
+    });
+  }
+
+  if (
+    typeof artifact.schema === "object" &&
+    schemaContainsRepeat(artifact.schema) &&
+    !(artifact.type === "object" && formatName === "markdown" && layout === "outline")
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["schema", "fields"],
+      message: "Schema Repeat is only supported by object markdown Artifacts with layout: outline"
     });
   }
 });
@@ -235,11 +289,11 @@ export const actionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = z.
 }).strict();
 
 const plainActionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = actionNodeSchema.superRefine((node, context) => {
-  if (node.artifact.format === "boolean") {
+  if (node.artifact.type === "boolean") {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      path: ["artifact", "format"],
-      message: "boolean Artifact format is only allowed for If or While conditions"
+      path: ["artifact", "type"],
+      message: "boolean Artifact type is only allowed for If or While conditions"
     });
   }
 });
@@ -255,11 +309,11 @@ const whileNodeSchema: z.ZodType<WhileNode, z.ZodTypeDef, unknown> = z.lazy(() =
     condition: actionNodeSchema,
     do: z.array(flowNodeSchema).min(1)
   }).strict().superRefine((node, context) => {
-    if (node.condition.artifact.format !== "boolean") {
+    if (node.condition.artifact.type !== "boolean") {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["condition", "artifact", "format"],
-        message: "While condition Artifact format must be boolean"
+        path: ["condition", "artifact", "type"],
+        message: "While condition Artifact type must be boolean"
       });
     }
   })
@@ -273,11 +327,11 @@ ifNodeSchema = z.lazy(() =>
     elseif: ifNodeSchema.optional(),
     else: z.array(flowNodeSchema).optional()
   }).strict().superRefine((node, context) => {
-    if (node.condition.artifact.format !== "boolean") {
+    if (node.condition.artifact.type !== "boolean") {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["condition", "artifact", "format"],
-        message: "If condition Artifact format must be boolean"
+        path: ["condition", "artifact", "type"],
+        message: "If condition Artifact type must be boolean"
       });
     }
     if (node.elseif?.else !== undefined) {

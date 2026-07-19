@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { schemaFormats } from "../src/memory/ast.js";
 import { conceptMemorySchema, procedureMemorySchema, schemaMemorySchema, statementMemorySchema } from "../src/memory/schema.js";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
 
@@ -32,7 +31,6 @@ defines:
         suggests:
           - Prefer a focused example.
   - !schema
-    format: outline
     fields:
       - shorthand
       - !schema
@@ -219,10 +217,12 @@ flow:
     suggests: [Prefer concise wording.]
     artifact: !artifact
       name: delivery
-      format: schema
+      type: object
+      format:
+        name: markdown
+        layout: outline
       final: true
       schema: !schema
-        format: outline
         asserts: [Keep the structure auditable.]
         fields: [summary]
 `);
@@ -243,7 +243,7 @@ flow:
     asserts: []
     artifact: !artifact
       name: result
-      format: string
+      type: string
 `), /asserts/);
   assert.throws(() => parseProcedure(`!procedure
 names: [invalid-boolean]
@@ -252,7 +252,7 @@ flow:
     action: Invalid.
     artifact: !artifact
       name: result
-      format: boolean
+      type: boolean
 `), /boolean Artifact/);
   assert.throws(() => parseProcedure(`!procedure
 names: [invalid-inline]
@@ -261,10 +261,10 @@ flow:
     action: Invalid.
     artifact: !artifact
       name: result
-      format: string
+      type: string
       schema: !schema
         fields: [summary]
-`), /schema is only allowed/);
+`), /does not support schema/);
 });
 
 test("recursive elseif uses a single nested If and keeps else on the root", () => {
@@ -276,31 +276,31 @@ flow:
       action: Check A.
       artifact: !artifact
         name: A
-        format: boolean
+        type: boolean
     then:
       - !action
         action: Handle A.
         artifact: !artifact
           name: A result
-          format: string
+          type: string
     elseif: !if
       condition: !action
         action: Check B.
         artifact: !artifact
           name: B
-          format: boolean
+          type: boolean
       then:
         - !action
           action: Handle B.
           artifact: !artifact
             name: B result
-            format: string
+            type: string
     else:
       - !action
         action: Handle fallback.
         artifact: !artifact
           name: fallback
-          format: string
+          type: string
 `);
 
   const node = entity.flow[0];
@@ -310,6 +310,35 @@ flow:
   assert.equal(node.else?.[0].tag, "!action");
 });
 
+test("Artifact defaults omitted type to string while conditions still require boolean", () => {
+  const entity = parseProcedure(`!procedure
+names: [default-string]
+flow:
+  - !action
+    action: Write a note.
+    artifact: !artifact
+      name: note
+      format: markdown
+`);
+  const step = entity.flow[0];
+  assert.equal(step.tag === "!action" ? step.artifact.type : undefined, "string");
+
+  assert.throws(() => parseProcedure(`!procedure
+names: [default-string-condition]
+flow:
+  - !while
+    condition: !action
+      action: Continue?
+      artifact: !artifact
+        name: decision
+    do:
+      - !action
+        action: Record progress.
+        artifact: !artifact
+          name: progress
+`), /boolean/);
+});
+
 const invalidProcedures: Array<[string, string, RegExp]> = [
   ["untagged Action", `!procedure
 names: [invalid]
@@ -317,7 +346,7 @@ flow:
   - action: Old action.
     artifact: !artifact
       name: result
-      format: string
+      type: string
 `, /flow/],
   ["untagged Artifact", `!procedure
 names: [invalid]
@@ -326,17 +355,18 @@ flow:
     action: Old artifact.
     artifact:
       name: result
-      format: string
+      type: string
 `, /artifact/],
-  ["int artifact format", `!procedure
+  ["empty artifact format", `!procedure
 names: [invalid]
 flow:
   - !action
     action: Old number.
     artifact: !artifact
       name: result
-      format: int
-`, /format/],
+      type: string
+      format: {}
+`, /name/],
   ["elseif array", `!procedure
 names: [invalid]
 flow:
@@ -345,26 +375,26 @@ flow:
       action: Check A.
       artifact: !artifact
         name: A
-        format: boolean
+        type: boolean
     then:
       - !action
         action: Handle A.
         artifact: !artifact
           name: A result
-          format: string
+          type: string
     elseif:
       - !if
         condition: !action
           action: Check B.
           artifact: !artifact
             name: B
-            format: boolean
+            type: boolean
         then:
           - !action
             action: Handle B.
             artifact: !artifact
               name: B result
-              format: string
+              type: string
 `, /elseif/],
   ["else on nested elseif", `!procedure
 names: [invalid]
@@ -374,31 +404,31 @@ flow:
       action: Check A.
       artifact: !artifact
         name: A
-        format: boolean
+        type: boolean
     then:
       - !action
         action: Handle A.
         artifact: !artifact
           name: A result
-          format: string
+          type: string
     elseif: !if
       condition: !action
         action: Check B.
         artifact: !artifact
           name: B
-          format: boolean
+          type: boolean
       then:
         - !action
           action: Handle B.
           artifact: !artifact
             name: B result
-            format: string
+            type: string
       else:
         - !action
           action: Nested fallback.
           artifact: !artifact
             name: fallback
-            format: string
+            type: string
 `, /else is only allowed/],
   ["non-boolean condition", `!procedure
 names: [invalid]
@@ -408,13 +438,13 @@ flow:
       action: Check.
       artifact: !artifact
         name: result
-        format: string
+        type: string
     do:
       - !action
         action: Repeat.
         artifact: !artifact
           name: repeated
-          format: string
+          type: string
 `, /boolean/],
   ["empty branch", `!procedure
 names: [invalid]
@@ -424,7 +454,7 @@ flow:
       action: Check.
       artifact: !artifact
         name: result
-        format: boolean
+        type: boolean
     then: []
 `, /then/]
 ];
@@ -451,7 +481,7 @@ flow:
 
 test("requires names for top-level and field Schema but permits anonymous embedded Schema", () => {
   assert.throws(() => parseSchema(`!schema
-format: outline
+defines: [value]
 `), /top-level memory/);
   assert.throws(() => parseSchema(`!schema
 names: [root]
@@ -467,17 +497,18 @@ defines:
 `));
 });
 
-test("Schema format defaults to outline and accepts explicit outline", () => {
-  assert.deepEqual(schemaFormats, ["outline", "table"]);
-  assert.equal(parseSchema(`!schema
-names: [default-outline]
+test("Schema no longer owns presentation format", () => {
+  assert.doesNotThrow(() => parseSchema(`!schema
+names: [structure]
 fields: [summary]
-`).format, undefined);
-  assert.equal(parseSchema(`!schema
-names: [explicit-outline]
-format: outline
+`));
+  for (const format of ["outline", "table"]) {
+    assert.throws(() => parseSchema(`!schema
+names: [legacy]
+format: ${format}
 fields: [summary]
-`).format, "outline");
+`), /format/);
+  }
 });
 
 test("Schema outline fields support mapping Repeat groups and limits", () => {
@@ -505,7 +536,7 @@ fields:
   }
 });
 
-test("Schema Repeat rejects invalid shape, limits, nesting, and table usage", () => {
+test("Schema Repeat rejects invalid shape, limits, and nesting", () => {
   const invalidSources = [
     `!schema\nnames: [empty body]\nfields:\n  - !repeat\n    body: []\n`,
     `!schema\nnames: [empty limit]\nfields:\n  - !repeat\n    limit: {}\n    body: [value]\n`,
@@ -514,8 +545,7 @@ test("Schema Repeat rejects invalid shape, limits, nesting, and table usage", ()
     `!schema\nnames: [reversed]\nfields:\n  - !repeat\n    limit: { min: 3, max: 2 }\n    body: [value]\n`,
     `!schema\nnames: [nested]\nfields:\n  - !repeat\n    body:\n      - !repeat\n        body: [value]\n`,
     `!schema\nnames: [nested in schema]\nfields:\n  - !repeat\n    body:\n      - !schema\n        names: [item]\n        fields:\n          - !repeat\n            body: [value]\n`,
-    `!schema\nnames: [unknown]\nfields:\n  - !repeat\n    body: [value]\n    extra: true\n`,
-    `!schema\nnames: [table]\nformat: table\nelement_types: [Schema]\nfields:\n  - !repeat\n    body: [value]\n`
+    `!schema\nnames: [unknown]\nfields:\n  - !repeat\n    body: [value]\n    extra: true\n`
   ];
 
   for (const source of invalidSources) {
@@ -536,26 +566,38 @@ format: outline
 `)), /format/);
 });
 
-test("table Schema requires List<Schema> element_types and non-empty fields", () => {
-  const table = parseSchema(`!schema
-names: [requirements]
-format: table
-element_types: [Schema]
-fields: [id, description]
+test("table layout belongs to an array markdown Artifact", () => {
+  const procedure = parseProcedure(`!procedure
+names: [table]
+flow:
+  - !action
+    action: Write rows.
+    artifact: !artifact
+      name: requirements
+      type: array
+      format:
+        name: markdown
+        layout: table
+      schema: !schema
+        fields: [id, description]
 `);
-  assert.deepEqual(table.element_types, ["Schema"]);
+  const step = procedure.flow[0];
+  assert.equal(step.tag === "!action" ? step.artifact.format.options.layout : undefined, "table");
 
-  assert.throws(() => parseSchema(`!schema
+  assert.throws(() => parseProcedure(`!procedure
 names: [invalid-table]
-format: table
-fields: [id]
-`), /element_types: \[Schema\]/);
-  assert.throws(() => parseSchema(`!schema
-names: [invalid-table]
-format: table
-element_types: [Schema]
-fields: []
-`), /at least one field/);
+flow:
+  - !action
+    action: Write rows.
+    artifact: !artifact
+      name: requirements
+      type: object
+      format:
+        name: markdown
+        layout: table
+      schema: !schema
+        fields: [id]
+`), /requires layout: outline/);
 });
 
 for (const format of ["section", "field", "list", "template"]) {

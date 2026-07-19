@@ -4,7 +4,7 @@ import type { MemoryListPage } from "./catalog.js";
 import type { MemoryNodeListPage, MemoryNodeReadResult } from "./navigation.js";
 
 export function serializeMemoryYaml(entity: MemoryEntity): string {
-  return serializeYaml(entity);
+  return serializeYaml(prepareMemoryForYaml(entity));
 }
 
 export function serializeMemoryJson(entity: MemoryEntity): string {
@@ -54,6 +54,38 @@ function serializeYaml(value: unknown): string {
   const document = new Document();
   document.contents = createYamlNode(document, value);
   return document.toString({ lineWidth: 0 });
+}
+
+function prepareMemoryForYaml(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(prepareMemoryForYaml);
+  if (value === null || typeof value !== "object") return value;
+
+  const record = value as Record<string, unknown>;
+  const prepared: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(record)) {
+    if (record.tag === "!artifact" && key === "type" && item === "string") continue;
+    if (record.tag === "!artifact" && key === "format" && isFormatSpec(item)) {
+      const optionEntries = Object.entries(item.options);
+      if (item.name === "plain" && optionEntries.length === 0) continue;
+      prepared.format = optionEntries.length === 0
+        ? item.name
+        : { name: item.name, ...Object.fromEntries(optionEntries.map(([name, option]) => [name, prepareMemoryForYaml(option)])) };
+      continue;
+    }
+    prepared[key] = prepareMemoryForYaml(item);
+  }
+  return prepared;
+}
+
+function isFormatSpec(value: unknown): value is { name: string; options: Readonly<Record<string, unknown>> } {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    typeof (value as { name?: unknown }).name === "string" &&
+    (value as { options?: unknown }).options &&
+    typeof (value as { options?: unknown }).options === "object" &&
+    !Array.isArray((value as { options?: unknown }).options)
+  );
 }
 
 function createYamlNode(document: Document, value: unknown): Node {

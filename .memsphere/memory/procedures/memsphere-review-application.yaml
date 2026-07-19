@@ -32,7 +32,7 @@ flow:
       actor: agent
       artifact: !artifact
         name: review 是否尚未 submitted
-        format: boolean
+        type: boolean
     do:
       - !action
         action: 提示 human 需要先提交 review，说明当前 review 状态不能直接应用 comments。
@@ -64,7 +64,7 @@ flow:
       actor: agent
       artifact: !artifact
         name: review source 是否为 task
-        format: boolean
+        type: boolean
     then:
       - !action
         action: 读取 task/run snapshot、运行 artifacts，以及最终仍要修改的目标 memory YAML。
@@ -91,7 +91,7 @@ flow:
       actor: agent
       artifact: !artifact
         name: 是否还有未处理 comment
-        format: boolean
+        type: boolean
     do:
       - !action
         action: 结合 target、location.anchor、location.hash、snapshot、body、当前 YAML 和 task/run artifacts 上下文理解一条 comment 的修改意图。
@@ -105,7 +105,7 @@ flow:
           actor: agent
           artifact: !artifact
             name: comment 是否可安全应用
-            format: boolean
+            type: boolean
         then:
           - !action
             action: 对可安全应用的 comment，产出拟修改摘要，说明准备调整的目标、原因、范围和不会改动的内容。
@@ -119,7 +119,7 @@ flow:
               actor: human
               artifact: !artifact
                 name: comment 拟修改摘要是否仍需调整
-                format: boolean
+                type: boolean
             do:
               - !action
                 action: 说明 comment 拟修改摘要需要调整的内容。
@@ -158,7 +158,7 @@ flow:
       actor: agent
       artifact: !artifact
         name: 是否仍有待收敛问题
-        format: boolean
+        type: boolean
     do:
       - !action
         action: 汇总当前未处理 comment、阻塞问题或校验失败原因，并说明下一步需要 human 还是 agent 处理。
@@ -189,6 +189,7 @@ flow:
     actor: agent
     artifact: !artifact
       name: 更新后的 review YAML
+      type: object
       format: yaml
   - !action
     action: 向 human 汇报 review 文件路径、最终 review status 和处理摘要。

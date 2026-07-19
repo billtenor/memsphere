@@ -1,6 +1,6 @@
 # Artifact 格式校验 Case 说明
 
-本文逐项说明每份 Artifact 错在哪里，以及 harness 回归时至少应观察到什么校验结果。测试方应在 `test/fixtures/artifact-format-validation/` 下准备输入，每个目录只包含 `memory.yaml` 和 `artifact.md`；所有判断只能来自这两个文件。
+本文逐项说明每份 Artifact 错在哪里，以及 harness 回归时至少应观察到什么校验结果。测试方应在 `test/fixtures/artifact-format-validation/` 下准备输入，每个目录只包含 `memory.yaml` 和 `artifact.md`；所有判断只能来自这两个文件。每份 fixture 的 Schema 统一作为 `type: object`、`format.name: markdown`、`layout: outline` Artifact contract 执行。
 
 ## 回归判定规则
 
@@ -26,7 +26,7 @@ Case：`001-bookkeeping`
 
 - Memory：`memory.yaml`
 - Artifact：`artifact.md`
-- 错误：匿名 Schema 声明 `format: outline`，但日期、类型、金额、分类和备注全部使用 `- 字段: 值` 列表项表达。
+- 错误：Artifact contract 声明 Markdown outline，但日期、类型、金额、分类和备注全部使用 `- 字段: 值` 列表项表达。
 
 | 错误码 | 字段 | 消息应说明 |
 | --- | --- | --- |
