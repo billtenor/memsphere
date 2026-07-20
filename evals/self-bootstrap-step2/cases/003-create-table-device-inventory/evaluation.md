@@ -4,7 +4,7 @@
 
 ## 期望行为
 
-子 agent 应读取“设备盘点表”Schema，根据 `format: table` 创建 `artifacts/device-inventory.md`。
+子 agent 应读取“设备盘点表”Schema，根据 array + Markdown `layout: table` 及其 item object 创建 `artifacts/device-inventory.md`。
 
 参考产物：
 
