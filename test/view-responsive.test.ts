@@ -21,6 +21,7 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
   const runDir = join(runsRoot, runId);
   await Promise.all([
     mkdir(join(memoryRoot, "concepts"), { recursive: true }),
+    mkdir(join(memoryRoot, "procedures"), { recursive: true }),
     mkdir(join(memoryRoot, "schemas"), { recursive: true }),
     mkdir(join(reservedRoot, "concepts"), { recursive: true }),
     mkdir(reviewsRoot, { recursive: true }),
@@ -38,6 +39,22 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     `syntax: ${currentMemorySyntax}`,
     "names: [ User note ]",
     "defines: [ A user memory fixture. ]"
+  ].join("\n"));
+  await writeFile(join(memoryRoot, "procedures", "reviewable-procedure.yaml"), [
+    "!procedure",
+    `syntax: ${currentMemorySyntax}`,
+    "names: [ Reviewable procedure ]",
+    "defines: [ A procedure fixture for inline task field review. ]",
+    "goals:",
+    "  - Verify comments on action fields.",
+    "flow:",
+    "  - !action",
+    "    action: Inspect an action field.",
+    "    asserts:",
+    "      - Action field comments must be available.",
+    "    artifact: !artifact",
+    "      name: Field comment target",
+    "      format: markdown"
   ].join("\n"));
   await writeFile(join(reservedRoot, "concepts", "reserved-tip.yaml"), [
     "!concept",
@@ -77,10 +94,13 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     createdAt: "2026-07-19T00:00:00.000Z",
     updatedAt: "2026-07-19T00:00:00.000Z",
     stack: [],
+    asserts: ["The task-level procedure contract remains reviewable."],
     plan: Array.from({ length: 24 }, (_, index) => ({
       id: `flow[${index + 1}]`,
-      kind: "action" as const,
+      kind: (index === 1 ? "call" : "action") as "action" | "call",
       instruction: `A deliberately long instruction ${index + 1} verifies that the flow header can shrink inside its column.`,
+      target: index === 1 ? "Reviewable procedure" : undefined,
+      asserts: index === 0 ? ["The task action contract remains reviewable."] : undefined,
       artifact: index === 0 ? "wide table" : `result ${index + 1}`,
       type: "string",
       format: { name: "markdown", options: {} },
@@ -267,6 +287,81 @@ test("Memory nav hides installed system memory but keeps non-system reserved mem
       await hideSystem.check();
       assert.equal(await page.locator(".memory-button", { hasText: "Memory" }).count(), 0);
       assert.equal(await page.locator(".memory-button", { hasText: "Reserved tip" }).count(), 1);
+      await page.locator(".memory-button", { hasText: "Reserved tip" }).click();
+      await page.getByRole("button", { name: "Review", exact: true }).click();
+      const createReview = page.getByRole("button", { name: "Create Review", exact: true });
+      assert.equal(await createReview.isDisabled(), true);
+      assert.equal(await createReview.getAttribute("title"), "Import reserved memory before creating a review");
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+test("procedure action contract fields can receive review comments", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+    page.setDefaultTimeout(5_000);
+    try {
+      await page.goto(url);
+      await page.getByRole("button", { name: "Memory", exact: true }).click();
+      await page.getByRole("button", { name: "Reviewable procedure", exact: true }).click();
+      await page.getByRole("button", { name: "Review", exact: true }).click();
+      await page.getByRole("button", { name: "Create Review", exact: true }).click();
+      await page.waitForFunction(() => document.body.classList.contains("review-active"));
+      const fieldComment = page.locator('[data-anchor="flow[1].asserts[1]"] .inline-plus').first();
+      await fieldComment.click({ force: true });
+      await page.getByPlaceholder("What should change here?").fill("This action field can be reviewed.");
+      await page.getByRole("button", { name: "Add comment", exact: true }).click();
+      await page.locator(".comment-card").waitFor();
+      assert.equal(await page.locator(".pill.outdated").count(), 0);
+      await page.locator('[data-anchor="flow[1].asserts[1]"] .inline-thread-item').waitFor();
+      await page.getByRole("button", { name: "Open", exact: true }).click();
+      await page.locator('[data-anchor="flow[1].asserts[1]"] .inline-thread-item').waitFor();
+      await page.getByRole("button", { name: "Edit", exact: true }).last().click();
+      const editor = page.locator('[data-anchor="flow[1].asserts[1]"] .thread-edit-editor textarea');
+      await editor.fill("This action field remains reviewable after editing.");
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await page.reload();
+      await page.locator('[data-anchor="flow[1].asserts[1]"] .inline-thread-item').waitFor();
+      assert.equal(await page.locator(".pill.outdated").count(), 0);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+test("task procedure assertions and call steps can receive review comments", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+    page.setDefaultTimeout(5_000);
+    try {
+      await page.goto(url);
+      await page.getByRole("button", { name: "Task", exact: true }).click();
+      await page.getByRole("button", { name: "Review", exact: true }).click();
+      await page.getByRole("button", { name: "Create Review", exact: true }).click();
+      await page.waitForFunction(() => document.body.classList.contains("review-active"));
+
+      const procedureAssert = page.locator('[data-anchor="task:' + runId + ':procedure:asserts[1]"] .inline-plus');
+      await procedureAssert.click({ force: true });
+      await page.getByPlaceholder("What should change here?").fill("Review the task-level contract.");
+      await page.getByRole("button", { name: "Add comment", exact: true }).click();
+      await page.waitForFunction(() => document.querySelectorAll(".comment-card").length === 1);
+
+      const taskCall = page.locator('[data-anchor="task:' + runId + ':flow[2]:call"] .inline-plus');
+      await taskCall.click({ force: true });
+      await page.getByPlaceholder("What should change here?").fill("Review the called procedure.");
+      await page.getByRole("button", { name: "Add comment", exact: true }).click();
+
+      await page.waitForFunction(() => document.querySelectorAll(".comment-card").length === 2);
+      assert.equal(await page.locator(".pill.outdated").count(), 0);
+      await page.reload();
+      await page.waitForFunction(() => document.querySelectorAll(".comment-card").length === 2);
+      assert.equal(await page.locator(".pill.outdated").count(), 0);
+
+      await page.locator('[data-anchor="task:' + runId + ':flow[2]:call"] .call-link').click();
+      await page.getByRole("button", { name: "Reviewable procedure", exact: true }).waitFor();
+      assert.equal(await page.getByRole("button", { name: "Memory", exact: true }).getAttribute("class").then(value => value?.includes("active")), true);
     } finally {
       await page.close();
     }

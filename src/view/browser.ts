@@ -428,12 +428,12 @@ export const browserHtml = String.raw`<!doctype html>
     document.getElementById("expand").addEventListener("click", () => setAllSections(true));
     document.getElementById("collapse").addEventListener("click", () => setAllSections(false));
     document.getElementById("refresh").addEventListener("click", () => loadAll().catch(renderFatalError));
-    el.createReview.addEventListener("click", createReview);
+    el.createReview.addEventListener("click", () => runButtonAction(el.createReview, createReview));
     el.reviewToggle.addEventListener("click", () => setReviewDrawer(!state.reviewDrawerOpen));
     el.reviewClose.addEventListener("click", () => setReviewDrawer(false));
     el.memoryTab.addEventListener("click", () => setViewMode("memory"));
     el.taskTab.addEventListener("click", () => setViewMode("task"));
-    el.submitReview.addEventListener("click", submitReview);
+    el.submitReview.addEventListener("click", () => runButtonAction(el.submitReview, submitReview));
     el.search.addEventListener("input", () => {
       applyFilter();
       renderNav();
@@ -446,7 +446,9 @@ export const browserHtml = String.raw`<!doctype html>
     loadAll().catch(renderFatalError);
     setInterval(() => {
       if (state.viewMode === "task" && !hasOpenInlineEditor()) {
-        loadRuns().then(renderAll).catch(console.error);
+        loadRuns().then(() => {
+          if (!hasOpenInlineEditor()) renderAll();
+        }).catch(console.error);
       }
     }, 4000);
 
@@ -494,7 +496,6 @@ export const browserHtml = String.raw`<!doctype html>
       const response = await fetch("/api/reviews");
       if (!response.ok) throw new Error(await response.text());
       state.reviews = (await response.json()).reviews || [];
-      ensureSelectedReview();
     }
 
     async function ensureReviewSnapshot(kind) {
@@ -821,11 +822,18 @@ export const browserHtml = String.raw`<!doctype html>
       wrap.append(blockTitle(t("procedureAsserts")));
       const list = document.createElement("ul");
       list.className = "text-list";
-      for (const value of values) {
+      values.forEach((value, index) => {
         const item = document.createElement("li");
-        item.textContent = value;
+        const target = t("procedureAsserts") + "[" + (index + 1) + "]";
+        item.append(commentable(
+          value,
+          target,
+          value,
+          "task:" + run.id + ":procedure:asserts[" + (index + 1) + "]",
+          { run, commentKind: "asserts" }
+        ));
         list.append(item);
-      }
+      });
       wrap.append(list);
       return wrap;
     }
@@ -873,7 +881,7 @@ export const browserHtml = String.raw`<!doctype html>
       const instruction = document.createElement("div");
       instruction.textContent = step.instruction;
       panel.append(instruction);
-      appendOptional(panel, renderActionContracts(step));
+      appendOptional(panel, renderActionContracts(step, run));
       appendOptional(panel, renderInlineSchemaDetails(step, true));
       if (step.details && step.details.length) {
         const details = document.createElement("ul");
@@ -981,7 +989,7 @@ export const browserHtml = String.raw`<!doctype html>
     function renderTaskFlowStep(step, eventsByStep, activeStep, run) {
       if (step.kind === "branch" && step.branches) return renderTaskBranch(step, eventsByStep, activeStep, run);
       if (step.kind === "loop" && step.loop) return renderTaskLoop(step, eventsByStep, activeStep, run);
-      if (step.kind === "call") return renderTaskCall(step);
+      if (step.kind === "call") return renderTaskCall(step, run);
       return renderTaskAction(step, eventsByStep, activeStep, run);
     }
 
@@ -992,7 +1000,7 @@ export const browserHtml = String.raw`<!doctype html>
       attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("step"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
-      appendOptional(item, renderActionContracts(step));
+      appendOptional(item, renderActionContracts(step, run));
       appendOptional(item, renderInlineSchemaDetails(step, Boolean(isActive)));
       appendOptional(item, renderTaskStepResult(step, event, run));
       return item;
@@ -1005,7 +1013,7 @@ export const browserHtml = String.raw`<!doctype html>
       attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("if"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
-      appendOptional(item, renderActionContracts(step));
+      appendOptional(item, renderActionContracts(step, run));
       appendOptional(item, renderInlineSchemaDetails(step, Boolean(isActive)));
       appendOptional(item, renderTaskStepResult(step, event, run));
       item.append(renderTaskChildSteps(step.branches.truthy, eventsByStep, activeStep, run));
@@ -1020,15 +1028,19 @@ export const browserHtml = String.raw`<!doctype html>
       attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("while"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
-      appendOptional(item, renderActionContracts(step));
+      appendOptional(item, renderActionContracts(step, run));
       appendOptional(item, renderInlineSchemaDetails(step, Boolean(isActive)));
       appendOptional(item, renderTaskStepResult(step, event, run));
       item.append(renderTaskChildSteps(step.loop.body, eventsByStep, activeStep, run));
       return item;
     }
 
-    function renderTaskCall(step) {
-      return renderCall(step.target, step.id);
+    function renderTaskCall(step, run) {
+      return renderCall(
+        step.target,
+        taskAnchor(run, step, "call"),
+        { run, step, commentKind: "call" }
+      );
     }
 
     function renderTaskChildSteps(steps, eventsByStep, activeStep, run) {
@@ -1262,7 +1274,20 @@ export const browserHtml = String.raw`<!doctype html>
     function canCreateReview() {
       const subject = currentReviewSubject();
       if (!subject) return false;
+      if (subject.source === "memory" && selectedMemory()?.source === "reserved") return false;
       return subject.source !== "task" || selectedTask()?.status === "done";
+    }
+
+    function reviewCreationDisabledReason() {
+      const subject = currentReviewSubject();
+      if (!subject) return "Select a Memory or Task before creating a review";
+      if (subject.source === "memory" && selectedMemory()?.source === "reserved") {
+        return "Import reserved memory before creating a review";
+      }
+      if (subject.source === "task" && selectedTask()?.status !== "done") {
+        return "Only done tasks can create a review";
+      }
+      return "";
     }
 
     function renderSelected() {
@@ -1715,7 +1740,7 @@ export const browserHtml = String.raw`<!doctype html>
       return item;
     }
 
-    function renderCall(name, anchor) {
+    function renderCall(name, anchor, context = {}) {
       const item = document.createElement("div");
       item.className = "flow-item call";
       const target = state.byName.get(name);
@@ -1727,6 +1752,8 @@ export const browserHtml = String.raw`<!doctype html>
       link.addEventListener("click", (event) => {
         event.preventDefault();
         if (target) {
+          state.viewMode = "memory";
+          localStorage.setItem(viewModeKey, "memory");
           state.selectedId = target.id;
           renderAll();
         }
@@ -1745,7 +1772,7 @@ export const browserHtml = String.raw`<!doctype html>
         content.append(text);
       }
       content.append(link);
-      action.append(commentable(content, "!call " + name, String(name), anchor));
+      action.append(commentable(content, "!call " + name, String(name), anchor, context));
       head.append(label, action);
       item.append(head);
       return item;
@@ -1784,7 +1811,7 @@ export const browserHtml = String.raw`<!doctype html>
       item.className = "flow-item";
       const artifact = artifactSpec(step);
       item.append(renderFlowHead(t("step"), step.action, artifact.name || anchor, anchor + ".action", step));
-      appendOptional(item, renderActionContracts(step));
+      appendOptional(item, renderActionContracts(step, null, anchor));
       appendOptional(item, renderInlineSchemaDetails(step));
       return item;
     }
@@ -1797,7 +1824,7 @@ export const browserHtml = String.raw`<!doctype html>
       }
       const artifact = artifactSpec(step);
       wrap.append(renderFlowHead(labelText, step.action || "", artifact.name || anchor, anchor + ".action", step));
-      appendOptional(wrap, renderActionContracts(step));
+      appendOptional(wrap, renderActionContracts(step, null, anchor));
       appendOptional(wrap, renderInlineSchemaDetails(step));
       return wrap;
     }
@@ -1963,20 +1990,23 @@ export const browserHtml = String.raw`<!doctype html>
       return artifact?.schema?.kind === "external" ? artifact.schema.name : "";
     }
 
-    function renderActionContracts(step) {
+    function renderActionContracts(step, run, anchorPrefix = "") {
       if (!step || (!step.asserts?.length && !step.suggests?.length)) return null;
       const wrap = document.createElement("div");
       wrap.className = "action-contracts";
-      for (const [label, values] of [[t("asserts"), step.asserts], [t("suggests"), step.suggests]]) {
+      for (const [key, label, values] of [["asserts", t("asserts"), step.asserts], ["suggests", t("suggests"), step.suggests]]) {
         if (!values?.length) continue;
         const group = document.createElement("div");
         group.append(blockTitle(label));
         const list = document.createElement("ul");
-        for (const value of values) {
+        values.forEach((value, index) => {
           const item = document.createElement("li");
-          item.textContent = value;
+          const target = label + "[" + (index + 1) + "]";
+          const fieldAnchor = key + "[" + (index + 1) + "]";
+          const anchor = run ? taskAnchor(run, step, fieldAnchor) : anchorPrefix ? anchorPrefix + "." + fieldAnchor : fieldAnchor;
+          item.append(commentable(value, target, value, anchor, { run, step, commentKind: key }));
           list.append(item);
-        }
+        });
         group.append(list);
         wrap.append(group);
       }
@@ -2168,15 +2198,17 @@ export const browserHtml = String.raw`<!doctype html>
       cancel.type = "button";
       cancel.className = "btn";
       cancel.textContent = "Cancel";
-      save.addEventListener("click", async () => {
+      save.addEventListener("click", () => {
         const body = textarea.value.trim();
         if (!body) {
           textarea.focus();
           return;
         }
-        const comment = await addComment(target, snapshot, body, location, context);
-        editor.remove();
-        if (comment) scrollToComment(comment);
+        runButtonAction(save, async () => {
+          const comment = await addComment(target, snapshot, body, location, context);
+          editor.remove();
+          if (comment) scrollToComment(comment);
+        });
       });
       cancel.addEventListener("click", () => editor.remove());
       actions.append(save, cancel);
@@ -2285,13 +2317,13 @@ export const browserHtml = String.raw`<!doctype html>
       cancel.type = "button";
       cancel.className = "btn";
       cancel.textContent = "Cancel";
-      save.addEventListener("click", async () => {
+      save.addEventListener("click", () => {
         const body = textarea.value.trim();
         if (!body) {
           textarea.focus();
           return;
         }
-        await updateComment(comment.id, body);
+        runButtonAction(save, () => updateComment(comment.id, body));
       });
       cancel.addEventListener("click", () => {
         host.classList.remove("editing");
@@ -2470,9 +2502,7 @@ export const browserHtml = String.raw`<!doctype html>
       const review = selectedReview();
       const canCreate = canCreateReview();
       el.createReview.disabled = !canCreate;
-      el.createReview.title = canCreate || state.viewMode !== "task"
-        ? "Create Review"
-        : "Only done tasks can create a review";
+      el.createReview.title = canCreate ? "Create Review" : reviewCreationDisabledReason();
       renderReviewList();
       el.reviewLabel.textContent = review
         ? review.status + " · " + review.comments.length + " comment(s)"
