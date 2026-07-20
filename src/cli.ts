@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
 import { Command, Option } from "commander";
 import {
   archiveListCommand,
@@ -32,12 +33,14 @@ import {
   viewStopCommand
 } from "./commands/view.js";
 
+const require = createRequire(import.meta.url);
+const { version } = require("../package.json") as { version: string };
 const program = new Command();
 
 program
   .name("memsphere")
   .description("Manage local YAML-backed memory entities for AI runtimes.")
-  .version("0.1.0");
+  .version(version);
 
 program
   .command("init")
