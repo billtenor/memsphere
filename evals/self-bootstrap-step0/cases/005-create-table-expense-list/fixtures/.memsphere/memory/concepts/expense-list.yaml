@@ -1,4 +1,5 @@
 !concept
+syntax: memsphere-20260719-stable
 names:
   - 费用清单
 defines:
@@ -13,11 +14,14 @@ defines:
       - 工作材料的制作或打印支出归类为办公。
       - 费用清单实例必须以 Markdown 文件保存到 artifacts/expense-list.md。
   - !schema
-    format: table
-    element_types:
-      - Schema
-    fields:
-      - 日期
-      - 内容
-      - 金额
-      - 分类
+    format:
+      name: markdown
+      layout: table
+    type: array
+    item: !schema
+      type: object
+      fields:
+        - 日期
+        - 内容
+        - 金额
+        - 分类

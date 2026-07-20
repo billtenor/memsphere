@@ -1,4 +1,5 @@
 !concept
+syntax: memsphere-20260719-stable
 names:
   - 记账
   - 记账记录
@@ -8,10 +9,13 @@ defines:
     asserts:
       - 记账实例必须以 Markdown 文件保存到 artifacts/bookkeeping.md。
   - !schema
-    format: outline
+    format:
+      name: markdown
+      layout: outline
     fields:
       - 日期
       - 类型
       - 金额
       - 分类
       - 备注
+    type: object
