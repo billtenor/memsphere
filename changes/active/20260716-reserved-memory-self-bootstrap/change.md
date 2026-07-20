@@ -1,6 +1,16 @@
+---
+id: 20260716-reserved-memory-self-bootstrap
+status: doing
+type: feature
+created: 2026-07-16
+run_id:
+---
+
 # memsphere 预置记忆自举建设思路
 
-> 状态：讨论稿。本文用于记录当前思路，不代表已经定案的 memsphere 规范。
+## 需求管理摘要
+
+预置 Memory、统一 Skill、安装清单、Memory Catalog 和 Step 0-2 评测集已经建设；干净子 Agent 的完整自举验收、正式门禁和部分托管保护能力仍未全部完成，因此当前状态为 doing。
 
 ## 背景
 

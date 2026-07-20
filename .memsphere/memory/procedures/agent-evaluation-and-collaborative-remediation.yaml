@@ -1,4 +1,5 @@
 !procedure
+syntax: memsphere-20260719-stable
 names:
   - Agent 评测与协同修复流程
   - Agent 测试、判分与修复流程

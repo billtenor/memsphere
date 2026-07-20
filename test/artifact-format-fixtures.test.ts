@@ -8,7 +8,7 @@ import {
   prepareArtifactCandidate,
   type ArtifactValidationContext
 } from "../src/artifact-validation.js";
-import type { SchemaNode } from "../src/memory/ast.js";
+import { schemaNodeFromMemory, type SchemaNode } from "../src/memory/ast.js";
 import { artifactNodeSchema, conceptMemorySchema, schemaMemorySchema } from "../src/memory/schema.js";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
 
@@ -88,7 +88,7 @@ function invalidParent(fieldPath: string): { code: string; fieldPath: string } {
 async function readFixtureSchema(path: string): Promise<SchemaNode> {
   const parsed = parseMemoryYaml(await readFile(path, "utf8"));
   if (parsed && typeof parsed === "object" && (parsed as { tag?: unknown }).tag === "!schema") {
-    return schemaMemorySchema.parse(parsed);
+    return schemaNodeFromMemory(schemaMemorySchema.parse(parsed));
   }
   const concept = conceptMemorySchema.parse(parsed);
   const schema = concept.defines.find((definition): definition is SchemaNode =>

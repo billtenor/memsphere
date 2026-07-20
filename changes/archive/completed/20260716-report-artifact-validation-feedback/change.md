@@ -1,3 +1,11 @@
+---
+id: 20260716-report-artifact-validation-feedback
+type: feature
+created: 2026-07-16
+completed_at: 2026-07-18
+run_id:
+---
+
 # Report 阶段 Artifact 校验反馈需求
 
 ## 问题
@@ -55,3 +63,10 @@ schema: <fixture Schema>
 3. 修正文档后重报，断言只产生一个成功 event。
 4. 确认 event 保存 type、format、Schema snapshot、validation 和 final 元数据。
 5. 在 View 中确认契约、结构化产物、校验通过状态和历史 v1 只读标识可见。
+
+## 验收结果
+
+- Run report 已按 type、format、schema 顺序校验，并在失败时保持 Run 和 artifacts 不变。
+- CLI issue 包含稳定 code、Artifact path、field path 和修正提示；九组固定格式错误案例均已覆盖。
+- View 已展示 v2 validation 元数据和 v1 只读状态。
+- 2026-07-20 全量测试通过：202 passed，0 failed。

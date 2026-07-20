@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import MarkdownIt from "markdown-it";
 import { parse as parseYaml } from "yaml";
 import type { ArtifactFormatSpec, ArtifactNode, SchemaField, SchemaNode } from "./memory/ast.js";
+import { inferSchemaType, inheritSchemaFormat, resolveSchemaContract } from "./memory/schema.js";
 
 export type ArtifactValidationStage = "type" | "format" | "schema";
 export type ArtifactValidationStatus = "passed" | "failed" | "unsupported";
@@ -34,7 +35,7 @@ export type CompiledArtifactContract = {
 
 export type ArtifactRepresentation =
   | { kind: "plain"; value: unknown }
-  | { kind: "json" | "yaml"; value: unknown }
+  | { kind: "json" | "yaml"; value: unknown; decodeError?: string }
   | { kind: "markdown"; value: unknown; ast: readonly MarkdownToken[] };
 
 export type PreparedArtifactCandidate = {
@@ -49,6 +50,8 @@ export type ArtifactValidationContext = {
   stepId: string;
   artifactPath: string;
   attemptId: string;
+  contractPath?: string;
+  fieldPath?: string;
   signal?: AbortSignal;
 };
 
@@ -70,7 +73,9 @@ export type ArtifactValidatorRegistration = {
   readonly validator: ArtifactValidator;
 };
 
-export type ArtifactValidationPlanEntry = Omit<ArtifactValidatorRegistration, "validator">;
+export type ArtifactValidationPlanEntry = Omit<ArtifactValidatorRegistration, "validator"> & {
+  contractPath?: string;
+};
 export type ArtifactValidationPlan = readonly ArtifactValidationPlanEntry[];
 
 export type ArtifactReportSource =
@@ -82,6 +87,7 @@ type MarkdownToken = {
   tag: string;
   content: string;
   level: number;
+  map?: [number, number] | null;
   children?: MarkdownToken[] | null;
 };
 
@@ -119,31 +125,254 @@ export class ArtifactValidatorRegistry {
   }
 
   resolvePlan(contract: CompiledArtifactContract): ArtifactValidationPlan {
-    const targets: Array<[ArtifactValidationStage, string]> = [
-      ["type", contract.type],
-      ["format", contract.format.name]
-    ];
-    if (contract.schema) targets.push(["schema", schemaTarget(contract)]);
+    const plan: ArtifactValidationPlanEntry[] = [];
+    this.#appendPlanTarget(plan, "type", contract.type, "artifact");
+    this.#appendPlanTarget(plan, "format", contract.format.name, "artifact");
 
-    return targets.flatMap(([stage, target]) => {
-      const registrations = this.resolve(stage, target);
-      if (!registrations.length) {
-        throw new Error(`Unsupported Artifact validation target: ${stage}:${target}`);
-      }
-      return registrations.map(({ id, version, stage: registeredStage, target: registeredTarget }) => ({
-        id,
-        version,
-        stage: registeredStage,
-        target: registeredTarget
-      }));
-    });
+    if (typeof contract.schema === "object") {
+      this.#compileSchemaPlan(plan, contract.schema, contract, "schema", true);
+    }
+    return plan;
   }
 
   async execute(plan: ArtifactValidationPlan, request: ArtifactValidationRequest): Promise<ArtifactValidationResult> {
+    if (!plan.some((entry) => entry.contractPath !== undefined)) {
+      return this.#executeEntries(plan, request);
+    }
+
+    const root = await this.#executeEntries(plan.filter((entry) => entry.contractPath === "artifact"), {
+      ...request,
+      context: { ...request.context, contractPath: "artifact" }
+    });
+    if (root.status !== "passed") return root;
+    if (typeof request.contract.schema !== "object") return root;
+
+    return this.#executeSchemaNode(
+      plan,
+      request.contract.schema,
+      request.contract,
+      request.candidate,
+      request.context,
+      "schema",
+      ""
+    );
+  }
+
+  #appendPlanTarget(
+    plan: ArtifactValidationPlanEntry[],
+    stage: ArtifactValidationStage,
+    target: string,
+    contractPath: string
+  ): void {
+    const registrations = this.resolve(stage, target);
+    if (!registrations.length) throw new Error(`Unsupported Artifact validation target: ${stage}:${target}`);
+    plan.push(...registrations.map(({ id, version, stage: registeredStage, target: registeredTarget }) => ({
+      id,
+      version,
+      stage: registeredStage,
+      target: registeredTarget,
+      contractPath
+    })));
+  }
+
+  #compileSchemaPlan(
+    plan: ArtifactValidationPlanEntry[],
+    schema: SchemaNode,
+    parent: CompiledArtifactContract,
+    path: string,
+    root: boolean
+  ): void {
+    const contract = schemaContract(schema, parent);
+    if (root && !sameContractRepresentation(contract, parent)) {
+      throw new Error("root Schema inferred type and effective format must match its Artifact contract");
+    }
+    this.#appendPlanTarget(plan, "type", contract.type, path);
+    this.#appendPlanTarget(plan, "format", contract.format.name, path);
+    if (
+      (schema.fields?.length ?? 0) > 0 ||
+      schema.item !== undefined ||
+      (schema.items?.length ?? 0) > 0 ||
+      (contract.format.name === "markdown" && contract.format.options.layout !== undefined)
+    ) {
+      this.#appendPlanTarget(plan, "schema", schemaTarget(contract), path);
+    }
+
+    for (const [index, field] of (schema.fields ?? []).entries()) {
+      const fieldPath = `${path}.fields[${index}]`;
+      if (typeof field === "string") {
+        const fieldContract = stringFieldContract(field, contract);
+        this.#appendPlanTarget(plan, "type", fieldContract.type, fieldPath);
+        this.#appendPlanTarget(plan, "format", fieldContract.format.name, fieldPath);
+      } else if (field.tag === "!repeat") {
+        for (const [bodyIndex, bodyField] of field.body.entries()) {
+          const bodyPath = `${fieldPath}.body[${bodyIndex}]`;
+          if (typeof bodyField === "string") {
+            const bodyContract = stringFieldContract(bodyField, contract);
+            this.#appendPlanTarget(plan, "type", bodyContract.type, bodyPath);
+            this.#appendPlanTarget(plan, "format", bodyContract.format.name, bodyPath);
+          } else {
+            this.#compileSchemaPlan(plan, bodyField, contract, bodyPath, false);
+          }
+        }
+      } else {
+        this.#compileSchemaPlan(plan, field, contract, fieldPath, false);
+      }
+    }
+
+    if (schema.item) {
+      this.#compileSchemaPlan(plan, schema.item, contract, `${path}.item`, false);
+    }
+    for (const [index, item] of (schema.items ?? []).entries()) {
+      this.#compileSchemaPlan(plan, item, contract, `${path}.items[${index}]`, false);
+    }
+  }
+
+  async #executeSchemaNode(
+    plan: ArtifactValidationPlan,
+    schema: SchemaNode,
+    parent: CompiledArtifactContract,
+    candidate: PreparedArtifactCandidate,
+    rootContext: ArtifactValidationContext,
+    contractPath: string,
+    fieldPath: string
+  ): Promise<ArtifactValidationResult> {
+    const contract = schemaContract(schema, parent);
+    const context = { ...rootContext, contractPath, fieldPath: fieldPath || undefined };
+    const own = await this.#executeEntries(
+      plan.filter((entry) => entry.contractPath === contractPath),
+      { contract, candidate, context }
+    );
+    if (own.status !== "passed") return own;
+
+    const arrayItems = await this.#executeArrayItems(
+      plan,
+      schema,
+      contract,
+      candidate,
+      rootContext,
+      contractPath,
+      fieldPath
+    );
+    if (arrayItems.status !== "passed") return arrayItems;
+
+    const children = deriveSchemaChildren(schema, contract, candidate, contractPath, fieldPath);
+    for (const child of children) {
+      const childContext = { ...rootContext, contractPath: child.contractPath, fieldPath: child.fieldPath };
+      if (typeof child.field === "string") {
+        const childContract = stringFieldContract(child.field, contract);
+        const result = await this.#executeEntries(
+          plan.filter((entry) => entry.contractPath === child.contractPath),
+          { contract: childContract, candidate: child.candidate, context: childContext }
+        );
+        if (result.status !== "passed") return result;
+      } else {
+        const result = await this.#executeSchemaNode(
+          plan,
+          child.field,
+          contract,
+          child.candidate,
+          rootContext,
+          child.contractPath,
+          child.fieldPath
+        );
+        if (result.status !== "passed") return result;
+      }
+    }
+    return passedResult();
+  }
+
+  async #executeArrayItems(
+    plan: ArtifactValidationPlan,
+    schema: SchemaNode,
+    contract: CompiledArtifactContract,
+    candidate: PreparedArtifactCandidate,
+    rootContext: ArtifactValidationContext,
+    contractPath: string,
+    fieldPath: string
+  ): Promise<ArtifactValidationResult> {
+    const value = candidate.representation.value;
+    if (!Array.isArray(value) || (!schema.item && !schema.items?.length)) return passedResult();
+
+    for (const [index, element] of value.entries()) {
+      const elementPath = `${fieldPath || ""}[${index}]`;
+      if (schema.item) {
+        const itemContract = schemaContract(schema.item, contract);
+        const result = await this.#executeSchemaNode(
+          plan,
+          schema.item,
+          contract,
+          candidateFromStructuredValue(candidate, element, itemContract, schema.item.format !== undefined),
+          rootContext,
+          `${contractPath}.item`,
+          elementPath
+        );
+        if (result.status !== "passed") return result;
+        continue;
+      }
+
+      const failures: ArtifactValidationResult[] = [];
+      let matched = false;
+      for (const [candidateIndex, itemSchema] of (schema.items ?? []).entries()) {
+        const itemContract = schemaContract(itemSchema, contract);
+        const result = await this.#executeSchemaNode(
+          plan,
+          itemSchema,
+          contract,
+          candidateFromStructuredValue(candidate, element, itemContract, itemSchema.format !== undefined),
+          rootContext,
+          `${contractPath}.items[${candidateIndex}]`,
+          elementPath
+        );
+        if (result.status === "passed") {
+          matched = true;
+          break;
+        }
+        failures.push(result);
+      }
+      if (!matched) {
+        const expected = (schema.items ?? []).map((item) => schemaContract(item, contract).type);
+        return {
+          status: "failed",
+          correctable: failures.every((failure) => failure.correctable),
+          issues: [
+            {
+              code: "artifact.schema.array.no_matching_item",
+              stage: "schema",
+              validatorId: "builtin.schema.array",
+              artifactPath: rootContext.artifactPath,
+              contractPath: `${contractPath}.items`,
+              fieldPath: elementPath,
+              actual: actualType(element),
+              expected,
+              message: `Array element ${elementPath} does not satisfy any items candidate`
+            },
+            ...failures.flatMap((failure) => failure.issues)
+          ]
+        };
+      }
+    }
+    return passedResult();
+  }
+
+  async #executeEntries(plan: ArtifactValidationPlan, request: ArtifactValidationRequest): Promise<ArtifactValidationResult> {
+    const representation = request.candidate.representation;
+    if ((representation.kind === "json" || representation.kind === "yaml") && representation.decodeError) {
+      return failedResult({
+        code: "artifact.format.decode_failed",
+        stage: "format",
+        validatorId: `builtin.format.${representation.kind}`,
+        artifactPath: request.context.artifactPath,
+        contractPath: validationContractPath(request, "format"),
+        fieldPath: request.context.fieldPath,
+        actual: request.candidate.text,
+        expected: representation.kind,
+        message: representation.decodeError
+      });
+    }
     for (const entry of plan) {
       const registration = this.#byId.get(entry.id);
       if (!registration || registration.version !== entry.version || registration.stage !== entry.stage || registration.target !== entry.target) {
-        return unsupportedResult(entry, request.context.artifactPath);
+        return unsupportedResult(entry, request.context);
       }
 
       let result: ArtifactValidationResult;
@@ -155,6 +384,8 @@ export class ArtifactValidatorRegistry {
           stage: entry.stage,
           validatorId: entry.id,
           artifactPath: request.context.artifactPath,
+          contractPath: validationContractPath(request, entry.stage),
+          fieldPath: request.context.fieldPath,
           message: error instanceof Error ? error.message : String(error)
         }, false);
       }
@@ -164,10 +395,21 @@ export class ArtifactValidatorRegistry {
           stage: entry.stage,
           validatorId: entry.id,
           artifactPath: request.context.artifactPath,
+          contractPath: validationContractPath(request, entry.stage),
+          fieldPath: request.context.fieldPath,
           message: "validator returned an invalid result"
         }, false);
       }
-      if (result.status !== "passed") return result;
+      if (result.status !== "passed") {
+        return {
+          ...result,
+          issues: result.issues.map((issue) => ({
+            ...issue,
+            contractPath: issue.contractPath ?? validationContractPath(request, entry.stage),
+            fieldPath: issue.fieldPath ?? request.context.fieldPath
+          }))
+        };
+      }
     }
     return passedResult();
   }
@@ -184,6 +426,32 @@ export function compileArtifactContract(artifact: ArtifactNode): CompiledArtifac
     schema: artifact.schema ? structuredClone(artifact.schema) : undefined,
     final: artifact.final === true
   };
+}
+
+function schemaContract(schema: SchemaNode, parent: CompiledArtifactContract): CompiledArtifactContract {
+  const resolved = resolveSchemaContract(schema, parent.format);
+  return {
+    name: schema.names[0] ?? parent.name,
+    type: resolved.type,
+    format: structuredClone(resolved.format),
+    schema,
+    final: false
+  };
+}
+
+function stringFieldContract(name: string, parent: CompiledArtifactContract): CompiledArtifactContract {
+  return {
+    name,
+    type: "string",
+    format: inheritSchemaFormat(parent.format, "string"),
+    final: false
+  };
+}
+
+function sameContractRepresentation(left: CompiledArtifactContract, right: CompiledArtifactContract): boolean {
+  return left.type === right.type &&
+    left.format.name === right.format.name &&
+    JSON.stringify(left.format.options) === JSON.stringify(right.format.options);
 }
 
 export async function prepareArtifactCandidate(
@@ -210,7 +478,7 @@ export async function prepareArtifactCandidate(
       case "markdown": {
         const ast = markdown.parse(text, {}) as MarkdownToken[];
         const layout = contract.format.options.layout;
-        const value = layout === "outline" ? {} : layout === "table" ? decodeMarkdownTable(ast) : text;
+        const value = layout === "outline" ? {} : layout === "table" ? decodeMarkdownTable(ast) : decodePlain(text, contract.type);
         return { source: snapshotSource, raw, text, representation: { kind: "markdown", value, ast } };
       }
       default:
@@ -268,7 +536,8 @@ class TypeValidator implements ArtifactValidator {
       stage: "type",
       validatorId: `builtin.type.${this.expected}`,
       artifactPath: request.context.artifactPath,
-      contractPath: "type",
+      contractPath: validationContractPath(request, "type"),
+      fieldPath: request.context.fieldPath,
       actual: actualType(value),
       expected: this.expected,
       message: `Artifact value must decode as ${this.expected}`
@@ -287,7 +556,8 @@ class FormatValidator implements ArtifactValidator {
         stage: "format",
         validatorId: `builtin.format.${this.expected}`,
         artifactPath: request.context.artifactPath,
-        contractPath: "format",
+        contractPath: validationContractPath(request, "format"),
+        fieldPath: request.context.fieldPath,
         actual: representation.kind,
         expected: this.expected,
         message: `Artifact representation must be ${this.expected}`
@@ -302,7 +572,8 @@ class FormatValidator implements ArtifactValidator {
         stage: "format",
         validatorId: `builtin.format.${this.expected}`,
         artifactPath: request.context.artifactPath,
-        contractPath: `format.${unknown}`,
+        contractPath: `${validationContractPath(request, "format")}.${unknown}`,
+        fieldPath: request.context.fieldPath,
         actual: request.contract.format.options[unknown],
         expected: allowed,
         message: `format ${this.expected} does not support option ${unknown}`
@@ -316,16 +587,13 @@ class StructuredObjectSchemaValidator implements ArtifactValidator {
   validate(request: ArtifactValidationRequest): ArtifactValidationResult {
     const schema = requireInlineSchema(request);
     if (!schema) return passedResult();
-    return validateObjectFields(request, request.candidate.representation.value, schema, "", "builtin.schema.object");
+    return validateObjectFields(request, request.candidate.representation.value, schema, "builtin.schema.object");
   }
 }
 
 class StructuredArraySchemaValidator implements ArtifactValidator {
-  validate(request: ArtifactValidationRequest): ArtifactValidationResult {
-    const schema = requireInlineSchema(request);
-    if (!schema) return passedResult();
-    const value = request.candidate.representation.value;
-    return validateArrayItems(request, value, schema, "builtin.schema.array");
+  validate(_request: ArtifactValidationRequest): ArtifactValidationResult {
+    return passedResult();
   }
 }
 
@@ -348,31 +616,32 @@ class MarkdownTableSchemaValidator implements ArtifactValidator {
     const representation = request.candidate.representation;
     if (!schema || representation.kind !== "markdown") return passedResult();
     const headers = extractMarkdownTableHeaders(representation.ast);
+    const columns = tableSchemaColumns(schema);
     if (!headers.length) {
       return failedResult({
         code: "artifact.schema.markdown_table.missing_table",
         stage: "schema",
         validatorId: "builtin.schema.markdown-table",
         artifactPath: request.context.artifactPath,
-        contractPath: "schema.fields",
-        expected: schemaFieldNames(schema.fields ?? []),
+        contractPath: validationContractPath(request, columns.contractSuffix),
+        fieldPath: request.context.fieldPath,
+        expected: columns.names,
         message: "Markdown Artifact must contain a GFM table"
       });
     }
-    const expected = schemaFieldNames(schema.fields ?? []);
-    const missing = expected.find((field) => !headers.includes(field));
+    const missing = columns.groups.find((aliases) => !aliases.some((name) => headers.includes(name)));
     if (missing) return failedResult({
       code: "artifact.schema.markdown_table.missing_column",
       stage: "schema",
       validatorId: "builtin.schema.markdown-table",
       artifactPath: request.context.artifactPath,
-      contractPath: "schema.fields",
-      fieldPath: missing,
+      contractPath: validationContractPath(request, columns.contractSuffix),
+      fieldPath: joinFieldPath(request.context.fieldPath ?? "", missing[0]),
       actual: headers,
       expected: missing,
-      message: `Markdown table is missing column ${missing}`
+      message: `Markdown table is missing column ${missing[0]}`
     });
-    return validateArrayItems(request, representation.value, schema, "builtin.schema.markdown-table");
+    return passedResult();
   }
 }
 
@@ -389,7 +658,10 @@ function schemaRegistration(target: string, validator: ArtifactValidator): Artif
 }
 
 function schemaTarget(contract: CompiledArtifactContract): string {
-  if (contract.format.name === "markdown") return `markdown:${String(contract.format.options.layout ?? "")}`;
+  const layout = contract.format.options.layout;
+  if (contract.format.name === "markdown" && (layout === "outline" || layout === "table")) {
+    return `markdown:${layout}`;
+  }
   return contract.type;
 }
 
@@ -412,6 +684,270 @@ function actualType(value: unknown): string {
   return typeof value;
 }
 
+type DerivedSchemaChild = {
+  field: string | SchemaNode;
+  contractPath: string;
+  fieldPath: string;
+  candidate: PreparedArtifactCandidate;
+};
+
+function deriveSchemaChildren(
+  schema: SchemaNode,
+  contract: CompiledArtifactContract,
+  candidate: PreparedArtifactCandidate,
+  contractPath: string,
+  fieldPath: string
+): DerivedSchemaChild[] {
+  if (!schema.fields?.length) return [];
+  if (candidate.representation.kind === "markdown" && contract.format.name === "markdown" && contract.format.options.layout === "outline") {
+    return deriveMarkdownOutlineChildren(schema, contract, candidate, contractPath, fieldPath);
+  }
+
+  const value = candidate.representation.value;
+  if (value && typeof value === "object") {
+    return deriveRecordChildren(schema, contract, candidate, value as Record<string, unknown>, contractPath, fieldPath);
+  }
+  return [];
+}
+
+function deriveMarkdownOutlineChildren(
+  schema: SchemaNode,
+  contract: CompiledArtifactContract,
+  candidate: PreparedArtifactCandidate,
+  contractPath: string,
+  fieldPath: string
+): DerivedSchemaChild[] {
+  if (candidate.representation.kind !== "markdown") return [];
+  const headings = extractMarkdownHeadings(candidate.representation.ast);
+  const firstField = firstConcreteField(schema.fields ?? []);
+  const firstHeading = firstField
+    ? headings.find((heading) => headingMatches(heading, firstField, undefined))
+    : undefined;
+  const parentIndex = firstHeading?.parentIndex;
+  const children: DerivedSchemaChild[] = [];
+  let cursor = 0;
+
+  for (const [index, field] of (schema.fields ?? []).entries()) {
+    const path = `${contractPath}.fields[${index}]`;
+    if (typeof field === "object" && field.tag === "!repeat") {
+      const first = field.body[0];
+      if (!first) continue;
+      const occurrences = headings.filter((heading) =>
+        heading.index >= cursor &&
+        heading.parentIndex === parentIndex &&
+        headingMatches(heading, first, undefined)
+      );
+      for (const [iterationIndex, occurrence] of occurrences.entries()) {
+        const groupEnd = occurrences[iterationIndex + 1]?.index ?? headings.length;
+        for (const [bodyIndex, bodyField] of field.body.entries()) {
+          const match = bodyIndex === 0
+            ? occurrence
+            : findOutlineHeading(headings, bodyField, occurrence.index + 1, groupEnd, parentIndex, iterationIndex + 1);
+          if (!match) continue;
+          children.push(derivedMarkdownChild(
+            bodyField,
+            `${path}.body[${bodyIndex}]`,
+            joinFieldPath(fieldPath, `${primaryFieldName(bodyField)}[${iterationIndex + 1}]`),
+            contract,
+            candidate,
+            headings,
+            match
+          ));
+        }
+      }
+      cursor = Math.max(cursor, occurrences.at(-1)?.index ?? cursor);
+      continue;
+    }
+
+    const match = findOutlineHeading(headings, field, cursor, headings.length, parentIndex);
+    if (!match) continue;
+    children.push(derivedMarkdownChild(
+      field,
+      path,
+      joinFieldPath(fieldPath, primaryFieldName(field)),
+      contract,
+      candidate,
+      headings,
+      match
+    ));
+    cursor = match.index + 1;
+  }
+  return children;
+}
+
+function derivedMarkdownChild(
+  field: string | SchemaNode,
+  contractPath: string,
+  fieldPath: string,
+  parentContract: CompiledArtifactContract,
+  parentCandidate: PreparedArtifactCandidate,
+  headings: readonly MarkdownHeading[],
+  heading: MarkdownHeading
+): DerivedSchemaChild {
+  const contract = typeof field === "string" ? stringFieldContract(field, parentContract) : schemaContract(field, parentContract);
+  return {
+    field,
+    contractPath,
+    fieldPath,
+    candidate: candidateFromMarkdownSubtree(parentCandidate, headings, heading, contract)
+  };
+}
+
+function candidateFromMarkdownSubtree(
+  parent: PreparedArtifactCandidate,
+  headings: readonly MarkdownHeading[],
+  heading: MarkdownHeading,
+  contract: CompiledArtifactContract
+): PreparedArtifactCandidate {
+  if (parent.representation.kind !== "markdown") return parent;
+  const endHeading = headings[subtreeEnd(headings, heading, headings.length)];
+  const tokens = parent.representation.ast.slice(heading.tokenIndex, endHeading?.tokenIndex ?? parent.representation.ast.length);
+  const headingToken = parent.representation.ast[heading.tokenIndex];
+  const startLine = headingToken?.map?.[1] ?? 0;
+  const endLine = endHeading
+    ? parent.representation.ast[endHeading.tokenIndex]?.map?.[0]
+    : undefined;
+  const lines = (parent.text ?? "").split(/\r?\n/);
+  const text = lines.slice(startLine, endLine).join("\n").trim();
+  let representation: ArtifactRepresentation;
+
+  switch (contract.format.name) {
+    case "plain":
+      representation = { kind: "plain", value: decodePlain(text, contract.type) };
+      break;
+    case "json":
+      representation = decodeStructuredSection(text, "json");
+      break;
+    case "yaml":
+      representation = decodeStructuredSection(text, "yaml");
+      break;
+    case "markdown":
+      representation = {
+        kind: "markdown",
+        value: contract.format.options.layout === "outline"
+          ? {}
+          : contract.format.options.layout === "table"
+            ? decodeMarkdownTable(tokens)
+            : decodePlain(text, contract.type),
+        ast: tokens
+      };
+      break;
+    default:
+      representation = { kind: "plain", value: text };
+  }
+
+  return {
+    source: parent.source,
+    raw: new TextEncoder().encode(text),
+    text: contract.format.name === "markdown" ? parent.text : text,
+    representation
+  };
+}
+
+function decodeStructuredSection(
+  text: string,
+  format: "json" | "yaml"
+): Extract<ArtifactRepresentation, { kind: "json" | "yaml" }> {
+  try {
+    return { kind: format, value: format === "json" ? JSON.parse(text) : parseYaml(text) };
+  } catch (error) {
+    return {
+      kind: format,
+      value: text,
+      decodeError: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+function deriveRecordChildren(
+  schema: SchemaNode,
+  contract: CompiledArtifactContract,
+  parentCandidate: PreparedArtifactCandidate,
+  record: Record<string, unknown>,
+  contractPath: string,
+  fieldPath: string
+): DerivedSchemaChild[] {
+  const children: DerivedSchemaChild[] = [];
+  for (const [index, field] of (schema.fields ?? []).entries()) {
+    if (typeof field === "object" && field.tag === "!repeat") continue;
+    const names = fieldNames(field);
+    const key = names.find((name) => Object.hasOwn(record, name));
+    if (!key) continue;
+    const path = `${contractPath}.fields[${index}]`;
+    const childPath = joinFieldPath(fieldPath, primaryFieldName(field));
+    const childContract = typeof field === "string" ? stringFieldContract(field, contract) : schemaContract(field, contract);
+    children.push({
+      field,
+      contractPath: path,
+      fieldPath: childPath,
+      candidate: candidateFromStructuredValue(
+        parentCandidate,
+        record[key],
+        childContract,
+        typeof field === "object" && field.format !== undefined
+      )
+    });
+  }
+  return children;
+}
+
+function candidateFromStructuredValue(
+  parent: PreparedArtifactCandidate,
+  value: unknown,
+  contract: CompiledArtifactContract,
+  decodeLocalFormat = false
+): PreparedArtifactCandidate {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  let representation: ArtifactRepresentation;
+  switch (contract.format.name) {
+    case "plain":
+      representation = {
+        kind: "plain",
+        value: typeof value === "string" ? decodePlain(value, contract.type) : value
+      };
+      break;
+    case "json":
+      representation = typeof value === "string" && decodeLocalFormat
+        ? decodeStructuredSection(value, "json")
+        : { kind: "json", value };
+      break;
+    case "yaml":
+      representation = typeof value === "string" && decodeLocalFormat
+        ? decodeStructuredSection(value, "yaml")
+        : { kind: "yaml", value };
+      break;
+    case "markdown": {
+      const ast = markdown.parse(text ?? "", {}) as MarkdownToken[];
+      representation = {
+        kind: "markdown",
+        value: contract.format.options.layout === "outline"
+          ? {}
+          : contract.format.options.layout === "table"
+            ? decodeMarkdownTable(ast)
+            : (["object", "array"].includes(contract.type) ? value : decodePlain(text, contract.type)),
+        ast
+      };
+      break;
+    }
+    default:
+      representation = { kind: parent.representation.kind === "plain" ? "plain" : parent.representation.kind, value } as ArtifactRepresentation;
+  }
+  return {
+    source: parent.source,
+    raw: new TextEncoder().encode(text ?? ""),
+    text,
+    representation
+  };
+}
+
+function joinFieldPath(prefix: string, name: string): string {
+  return prefix ? `${prefix}.${name}` : name;
+}
+
+function validationContractPath(request: ArtifactValidationRequest, suffix: string): string {
+  return request.context.contractPath ? `${request.context.contractPath}.${suffix}` : suffix;
+}
+
 function requireInlineSchema(request: ArtifactValidationRequest): SchemaNode | undefined {
   return typeof request.contract.schema === "object" ? request.contract.schema : undefined;
 }
@@ -420,7 +956,6 @@ function validateObjectFields(
   request: ArtifactValidationRequest,
   value: unknown,
   schema: SchemaNode,
-  prefix: string,
   validatorId: string
 ): ArtifactValidationResult {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -429,72 +964,34 @@ function validateObjectFields(
       stage: "schema",
       validatorId,
       artifactPath: request.context.artifactPath,
-      contractPath: "schema.fields",
-      fieldPath: prefix || undefined,
+      contractPath: validationContractPath(request, "fields"),
+      fieldPath: request.context.fieldPath,
       actual: actualType(value),
       expected: "object",
-      message: `${prefix || "Artifact"} must be an object to satisfy Schema fields`
+      message: `${request.context.fieldPath ?? "Artifact"} must be an object to satisfy Schema fields`
     });
   }
   const record = value as Record<string, unknown>;
   for (const field of schema.fields ?? []) {
     if (typeof field === "object" && field.tag === "!repeat") continue;
-    const name = typeof field === "string" ? field : field.names[0];
-    if (!Object.hasOwn(record, name)) {
-      const fieldPath = prefix ? `${prefix}.${name}` : name;
+    const names = fieldNames(field);
+    const name = names.find((candidate) => Object.hasOwn(record, candidate)) ?? names[0];
+    if (!names.some((candidate) => Object.hasOwn(record, candidate))) {
+      const fieldPath = joinFieldPath(request.context.fieldPath ?? "", name);
       return failedResult({
         code: "artifact.schema.object.missing_field",
         stage: "schema",
         validatorId,
         artifactPath: request.context.artifactPath,
-        contractPath: "schema.fields",
+        contractPath: validationContractPath(request, "fields"),
         fieldPath,
         actual: Object.keys(record),
         expected: name,
         message: `Artifact object is missing field ${fieldPath}`
       });
     }
-    if (typeof field === "object") {
-      const nested = validateObjectFields(request, record[name], field, prefix ? `${prefix}.${name}` : name, validatorId);
-      if (nested.status !== "passed") return nested;
-    }
   }
   return passedResult();
-}
-
-function validateArrayItems(
-  request: ArtifactValidationRequest,
-  value: unknown,
-  schema: SchemaNode,
-  validatorId: string
-): ArtifactValidationResult {
-  if (!Array.isArray(value)) return passedResult();
-  const allowedElementTypes = schema.element_types ?? [];
-  for (const [index, item] of value.entries()) {
-    if (allowedElementTypes.length && !allowedElementTypes.some((type) => elementTypeMatches(type, item))) {
-      return failedResult({
-        code: "artifact.schema.array.invalid_element_type",
-        stage: "schema",
-        validatorId,
-        artifactPath: request.context.artifactPath,
-        contractPath: "schema.element_types",
-        fieldPath: `[${index}]`,
-        actual: actualType(item),
-        expected: allowedElementTypes,
-        message: `Array item [${index}] does not match an allowed element type`
-      });
-    }
-    if ((schema.fields?.length ?? 0) > 0) {
-      const result = validateObjectFields(request, item, schema, `[${index}]`, validatorId);
-      if (result.status !== "passed") return result;
-    }
-  }
-  return passedResult();
-}
-
-function elementTypeMatches(expected: string, value: unknown): boolean {
-  if (["string", "number", "boolean"].includes(expected)) return actualType(value) === expected;
-  return actualType(value) === "object";
 }
 
 function decodeMarkdownTable(tokens: readonly MarkdownToken[]): Array<Record<string, string>> {
@@ -517,6 +1014,7 @@ function decodeMarkdownTable(tokens: readonly MarkdownToken[]): Array<Record<str
 
 type MarkdownHeading = {
   index: number;
+  tokenIndex: number;
   level: number;
   text: string;
   parentIndex?: number;
@@ -533,6 +1031,7 @@ function extractMarkdownHeadings(tokens: readonly MarkdownToken[]): MarkdownHead
     while (ancestors.at(-1) && ancestors.at(-1)!.level >= level) ancestors.pop();
     const heading: MarkdownHeading = {
       index: headings.length,
+      tokenIndex: index,
       level,
       text: inline?.content.trim() ?? "",
       parentIndex: ancestors.at(-1)?.index
@@ -569,6 +1068,10 @@ type OutlineRange = {
   path: string[];
 };
 
+function inheritsMarkdownOutline(schema: SchemaNode): boolean {
+  return schema.format === undefined && inferSchemaType(schema) === "object";
+}
+
 function validateOutlineFields(
   request: ArtifactValidationRequest,
   fields: readonly SchemaField[],
@@ -590,7 +1093,7 @@ function validateOutlineFields(
         expected: fieldNames(field),
         message: `Markdown outline is missing heading ${path.join(" / ")}`
       }));
-      if (typeof field === "object") {
+      if (typeof field === "object" && inheritsMarkdownOutline(field)) {
         reportChildrenUnderMissingParent(request, field, headings, { ...range, start: cursor }, path, issues);
       }
       continue;
@@ -603,7 +1106,7 @@ function validateOutlineFields(
       }));
     }
     cursor = Math.max(cursor, match.index + 1);
-    if (typeof field === "object") {
+    if (typeof field === "object" && inheritsMarkdownOutline(field)) {
       const childEnd = subtreeEnd(headings, match, range.end);
       validateOutlineFields(request, field.fields ?? [], headings, {
         start: match.index + 1,
@@ -657,7 +1160,7 @@ function validateOutlineRepeat(
           expected: fieldNames(field),
           message: `Markdown outline is missing heading ${path.join(" / ")}`
         }));
-        if (typeof field === "object") {
+        if (typeof field === "object" && inheritsMarkdownOutline(field)) {
           reportChildrenUnderMissingParent(request, field, headings, {
             start: groupStart,
             end: groupEnd,
@@ -668,7 +1171,7 @@ function validateOutlineRepeat(
         continue;
       }
       cursor = Math.max(cursor, match.index + 1);
-      if (typeof field === "object") {
+      if (typeof field === "object" && inheritsMarkdownOutline(field)) {
         validateOutlineFields(request, field.fields ?? [], headings, {
           start: match.index + 1,
           end: subtreeEnd(headings, match, groupEnd),
@@ -760,8 +1263,8 @@ function outlineIssue(
     stage: "schema",
     validatorId: "builtin.schema.markdown-outline",
     artifactPath: request.context.artifactPath,
-    contractPath: "schema.fields",
-    fieldPath: path.join(" / "),
+    contractPath: validationContractPath(request, "fields"),
+    fieldPath: [request.context.fieldPath, path.join(" / ")].filter(Boolean).join(" / "),
     ...detail
   };
 }
@@ -779,12 +1282,29 @@ function extractMarkdownTableHeaders(tokens: readonly MarkdownToken[]): string[]
     .map((token) => token.content.trim());
 }
 
-function schemaFieldNames(fields: readonly SchemaField[]): string[] {
+function schemaFieldNameGroups(fields: readonly SchemaField[]): string[][] {
   return fields.flatMap((field) => {
-    if (typeof field === "string") return [field];
-    if (field.tag === "!repeat") return field.body.flatMap((bodyField) => fieldNames(bodyField));
-    return fieldNames(field);
+    if (typeof field === "string") return [[field]];
+    if (field.tag === "!repeat") return field.body.map((bodyField) => fieldNames(bodyField));
+    return [fieldNames(field)];
   });
+}
+
+function tableSchemaColumns(schema: SchemaNode): { names: string[]; groups: string[][]; contractSuffix: string } {
+  if (schema.item) {
+    const groups = schemaFieldNameGroups(schema.item.fields ?? []);
+    return { names: groups.map(([name]) => name), groups, contractSuffix: "item.fields" };
+  }
+  if (schema.items?.length) {
+    const groups = schema.items.flatMap((item) => schemaFieldNameGroups(item.fields ?? []));
+    return {
+      names: [...new Set(groups.map(([name]) => name))],
+      groups,
+      contractSuffix: "items"
+    };
+  }
+  const groups = schemaFieldNameGroups(schema.fields ?? []);
+  return { names: groups.map(([name]) => name), groups, contractSuffix: "fields" };
 }
 
 function fieldNames(field: string | SchemaNode): string[] {
@@ -799,7 +1319,7 @@ function failedResult(issue: ArtifactValidationIssue, correctable = true): Artif
   return { status: "failed", correctable, issues: [issue] };
 }
 
-function unsupportedResult(entry: ArtifactValidationPlanEntry, artifactPath: string): ArtifactValidationResult {
+function unsupportedResult(entry: ArtifactValidationPlanEntry, context: ArtifactValidationContext): ArtifactValidationResult {
   return {
     status: "unsupported",
     correctable: false,
@@ -807,7 +1327,9 @@ function unsupportedResult(entry: ArtifactValidationPlanEntry, artifactPath: str
       code: "artifact.validator.unsupported",
       stage: entry.stage,
       validatorId: entry.id,
-      artifactPath,
+      artifactPath: context.artifactPath,
+      contractPath: context.contractPath ? `${context.contractPath}.${entry.stage}` : entry.stage,
+      fieldPath: context.fieldPath,
       expected: `${entry.id}@${entry.version}`,
       message: `Artifact validator is not registered: ${entry.id}@${entry.version}`
     }]

@@ -1,9 +1,13 @@
 !schema
+syntax: memsphere-20260719-stable
 names:
   - "craa-spec-driven-spec"
   - "spec.md"
   - "specs/**/*.md"
   - "CRAA Capability Spec"
+format:
+  name: markdown
+  layout: outline
 defines:
   - "CRAA OpenSpec 流程中的行为契约文档图式。"
   - "用于描述 capability 必须满足什么稳定行为。"
@@ -11,59 +15,59 @@ asserts:
   - |-
     每个 capability 对应一个 spec 文件：`specs/<capability>/spec.md`。
     capability 名称必须来自 proposal 的“能力定义”，并且必须先阅读 `openspec/specs/` 中已有 capability，再决定新增、修改、删除或重命名。
-    
+
     默认优先修改既有 capability。新增 capability 是最后选择，必须证明这是新的行为边界，而不是新的代码边界、模块边界或任务边界。
-    
+
     Spec 定义系统“应该做什么”，不是解释技术方案“怎么实现”。
     每个 requirement 都必须可测试，并至少包含一个 Scenario。
-    
+
     Spec 应该写稳定行为契约：
     - 外部可感知的输入、输出、状态和错误语义。
     - 调用方、使用方、运维方能依赖的兼容性承诺。
     - 安全、隐私、幂等、一致性、失败处理等系统必须满足的结果。
     - 可以用 Scenario 验收的系统行为。
-    
+
     Spec 不应该写 design/test/tasks 细节：
     - 不写具体类名、函数名、包结构、模块拆分、依赖注入、线程模型或内部 buffer 策略。
     - 不写 `RichSinkFunction`、`.addSink()`、`build.sh`、`java/output/`、Maven shade 细节等实现落点，除非它们本身就是调用方必须依赖的对外行为契约。
     - 不写 checkpoint 间隔默认值、重试退避默认值、具体限流器实现等可由 design 决策的参数细节；如果这些值是对外承诺的运行契约，先在 proposal/design 中说明原因，再谨慎写入 spec。
     - 不写“链路测试 MUST 断言”“单元测试覆盖 xxx”这类测试执行方式；测试怎么证明放到 test.md。
     - 不写“实现步骤”“构建步骤”“更新文档”等任务拆解；这些放到 tasks.md。
-    
+
     归属判断：
     - 如果换一种实现方式后这句话就不成立，它多半应该放到 design.md。
     - 如果换一种测试方式后这句话就不成立，它多半应该放到 test.md。
     - 如果这句话描述的是“要做哪些开发步骤”，它应该放到 tasks.md。
     - 如果这句话描述的是调用方或运维方长期能依赖的系统结果，它才适合放到 spec。
-    
+
     Capability 粒度判断：
     - 这是一个新的稳定使用场景。
     - 有独立调用方或独立用户视角。
     - 可以有独立的迭代生命周期，包括独立验收、发布、废弃，或未来被多个 change 独立修改。
     - 放进既有 capability 会让原能力语义变混乱。
-    
+
     如果只是新增一个函数、类、包、任务、参数、错误码、配置项或内部实现步骤，通常不应该新增 capability，而应该在既有 capability 下新增或修改 requirement。
-    
+
     每个 spec 文件开头必须写 capability 定义，用来说明这个 capability 到底承诺什么，避免只靠目录名表达语义。
-    
+
     注意：OpenSpec archive 只会合并 ADDED/MODIFIED/REMOVED/RENAMED Requirements 中的 requirement delta。
     Capability 定义不是 OpenSpec 原生 delta，不会被 archive 自动合并到 `openspec/specs/<capability>/spec.md`。
     归档后必须由 agent 对照 change spec 手动同步主线 spec 的 Capability 定义：
     - 新增 capability：用 change spec 的 Capability 定义替换主线 spec 默认生成的 `## Purpose TBD`。
     - 修改既有 capability：如果行为边界、使用方或不包含范围变化，需要同步更新主线 spec 的 Capability 定义。
-    
+
     OpenSpec 关键标题必须使用以下形式之一：
     - ## ADDED Requirements
     - ## MODIFIED Requirements
     - ## REMOVED Requirements
     - ## RENAMED Requirements
-    
+
     每个 requirement 使用：
     ### Requirement: <name>
-    
+
     每个 scenario 使用四级标题：
     #### Scenario: <name>
-    
+
     注意：Scenario 必须是 `####` 四个井号。
   - |-
     文档标题格式：Capability: <capability-name>
@@ -71,7 +75,7 @@ asserts:
   - |-
     用 5-8 行说明这个 capability 的稳定语义。这里不是写技术方案，也不是写模块介绍。
     这段内容用于 proposal/review 阶段解释 capability 边界；archive 后需要同步到主线 spec。
-    
+
     - 使用场景：这个 capability 面向什么长期稳定的使用场景。
     - 使用方 / 视角：谁会感知或依赖这个能力，可以是外部调用方、内部系统、运维人员或数据消费方。
     - 行为边界：这个 capability 承诺哪些系统行为。
@@ -127,7 +131,7 @@ fields:
         只有修改既有 capability 的已有 requirement 时才使用。
         必须复制既有完整 requirement block，再修改为新的完整行为。
         不要只写变化片段，否则 archive 时容易丢失旧细节。
-        
+
         如果本次没有修改既有 requirement，可以删除本节。
     fields:
       - !schema
@@ -150,7 +154,7 @@ fields:
       - |-
         只有移除既有 requirement 时才使用。
         必须写 Reason 和 Migration。
-        
+
         如果本次没有移除 requirement，可以删除本节。
     fields:
       - !schema
@@ -167,7 +171,7 @@ fields:
       - |-
         只有纯重命名 requirement 时才使用。
         如果行为同时变化，应使用 MODIFIED Requirements。
-        
+
         如果本次没有重命名 requirement，可以删除本节。
     fields:
       - !schema

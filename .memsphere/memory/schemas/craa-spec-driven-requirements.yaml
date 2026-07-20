@@ -1,9 +1,13 @@
 !schema
+syntax: memsphere-20260719-stable
 names:
   - "craa-spec-driven-requirements"
   - "requirements.md"
   - "CRAA Requirements Document"
   - "CRAA 需求文档"
+format:
+  name: markdown
+  layout: outline
 defines:
   - "CRAA OpenSpec 流程中的产品和业务需求文档图式。"
   - "用于把 PRD、业务诉求、用户反馈或讨论结论收敛成当前 change 可审阅的需求输入。"
@@ -11,15 +15,15 @@ asserts:
   - "文档标题格式：需求文档：<需求名称>"
   - |-
     Requirements 用来回答：为什么要做、给谁用、用户期望什么、业务侧怎样验收。
-    
+
     它是 proposal 的上游输入，不负责工程 capability 划分，也不展开技术方案。
     如果已有独立 PRD，可以在本文引用 PRD，并把与本次 OpenSpec change 直接相关的需求结论收敛到这里。
-    
+
     写作边界：
     - 应该写业务背景、使用方、用户场景、需求边界、需求清单、原型与交互说明、非功能诉求和业务验收标准。
     - 不应该写代码结构、模块拆分、数据库表设计、接口调用编排、测试执行入口或开发任务。
     - 如果业务强制指定技术平台或外部系统，可以作为约束写入；具体接入方案放到 design.md。
-    
+
     澄清优先：
     - 写正文前先判断需求本身是否足够清楚。
     - 如果目标用户、核心问题、需求边界、需求清单、原型冲突或验收口径不清楚，必须把状态标为“待澄清”，只记录已知事实和阻塞问题，然后停止并向用户提问。
@@ -135,7 +139,7 @@ fields:
       - |-
         需求边界只负责界定本次业务需求覆盖什么、不覆盖什么。
         不要在这里逐条写功能需求；可验收的需求条目放到“需求清单”。
-        
+
         先写前提与假设，是因为本次覆盖和本次不覆盖通常依赖这些前提。
         如果某条“假设”其实是系统必须保证的行为，不要放在假设里，应进入需求清单或非功能需求。
     fields:
@@ -145,11 +149,11 @@ fields:
         asserts:
           - |-
             写本需求成立所依赖的业务、数据、权限、平台、时间窗口等前提。
-            
+
             示例：
             - 使用方已经具备访问目标数据的业务权限。
             - 上游系统能够提供本次需求约定的数据范围。
-            
+
             反例：
             - 系统必须校验用户权限。这个是系统行为要求，应写入需求清单或非功能需求。
       - !schema
@@ -169,43 +173,46 @@ fields:
   - !schema
     names:
       - "4. 需求清单"
-    format: table
-    element_types:
-      - Schema
+    type: array
+    format:
+      name: markdown
+      layout: table
     asserts:
       - |-
         需求清单写可验收的用户可见需求。
         每条需求应能追溯到用户场景，并能被后续 proposal/spec/test 进一步翻译和验证。
         如果需求有原型图、截图或交互稿，表格中只写原型 ID；图片和交互说明放到“原型与交互说明”章节。
-        
+
         优先级建议：
         - P0：没有它需求不可用或无法验收。
         - P1：应随本次交付，否则明显影响使用效果或业务目标。
         - P2：建议支持，但可延期。
-        
+
         不要把开发任务写成需求，例如“新增 xxx 类”“修改 xxx 表”“编写单元测试”。
       - |-
         表格示例行：
         | R-001 | <用户希望系统支持什么> | P0 | <场景> | P-001 | <怎样算满足> |
-    fields:
-      - !schema
-        names:
-          - "ID"
-      - !schema
-        names:
-          - "需求描述"
-      - !schema
-        names:
-          - "优先级"
-      - !schema
-        names:
-          - "来源场景"
-      - !schema
-        names:
-          - "原型引用"
-      - !schema
-        names:
-          - "验收口径"
+    item: !schema
+      type: object
+      fields:
+        - !schema
+          names:
+            - "ID"
+        - !schema
+          names:
+            - "需求描述"
+        - !schema
+          names:
+            - "优先级"
+        - !schema
+          names:
+            - "来源场景"
+        - !schema
+          names:
+            - "原型引用"
+        - !schema
+          names:
+            - "验收口径"
   - !schema
     names:
       - "5. 原型与交互说明"
@@ -213,7 +220,7 @@ fields:
       - |-
         原型与交互说明用于承载截图、原型图、页面状态和关键交互。
         需求清单中通过 `原型引用` 列关联这里的原型 ID。
-        
+
         注意：
         - 原型用于表达业务交互和用户可见结果，不约束最终技术实现细节。
         - 如果没有原型，写“无”；不要为了填充模板而临时编造图片。
@@ -278,9 +285,10 @@ fields:
   - !schema
     names:
       - "8. 未决问题"
-    format: table
-    element_types:
-      - Schema
+    type: array
+    format:
+      name: markdown
+      layout: table
     asserts:
       - |-
         记录需求阶段尚未关闭的问题。
@@ -288,22 +296,24 @@ fields:
       - |-
         表格示例行：
         | <待确认问题> | 是 / 否 | <影响范围> | <负责人> | <时间> |
-    fields:
-      - !schema
-        names:
-          - "问题"
-      - !schema
-        names:
-          - "是否阻塞"
-      - !schema
-        names:
-          - "影响"
-      - !schema
-        names:
-          - "Owner"
-      - !schema
-        names:
-          - "期望确认时间"
+    item: !schema
+      type: object
+      fields:
+        - !schema
+          names:
+            - "问题"
+        - !schema
+          names:
+            - "是否阻塞"
+        - !schema
+          names:
+            - "影响"
+        - !schema
+          names:
+            - "Owner"
+        - !schema
+          names:
+            - "期望确认时间"
   - !schema
     names:
       - "9. 参考资料"

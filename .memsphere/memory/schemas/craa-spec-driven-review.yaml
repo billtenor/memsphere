@@ -1,27 +1,31 @@
 !schema
+syntax: memsphere-20260719-stable
 names:
   - "craa-spec-driven-review"
   - "review.md"
   - "CRAA Review Document"
   - "CRAA 多角色文档评审记录"
+format:
+  name: markdown
+  layout: outline
 defines:
   - "CRAA OpenSpec 流程中的多角色文档评审记录图式。"
   - "用于进入 apply 前系统性审阅 requirements、proposal、specs、design、test 和 tasks。"
 asserts:
   - |-
     Review 是进入 apply/实现阶段前的文档评审记录。
-    
+
     执行 review 前，必须先读取：
     `openspec/schemas/craa-spec-driven/prompts/review.md`
-    
+
     review.md 只记录评审轮次、意见来源、采纳情况、未采纳原因、待确认问题和收敛结论。
     发现问题时，优先直接修改 requirements/proposal/specs/design/test/tasks；不要只把问题写在 review.md 里。
-    
+
     第一轮 review 前，必须先确认执行模式：
     - 用户已显式授权且工具可用时，使用子 agent 并行评审。
     - 用户未显式授权时，先询问用户是否允许启动子 agent，不要直接降级。
     - 用户拒绝、工具不可用或工具规则禁止时，才按角色独立审阅。
-    
+
     正式 review 前还必须确认：
     - requirements.md 顶部“需求审议结论”为“已确认”。
     - proposal.md 顶部“提案审议结论”为“已确认”。
@@ -37,7 +41,7 @@ fields:
         - 可进入 apply
         - 需要继续 review
         - 等待用户确认
-        
+
         如果仍有阻塞性待确认问题，不应标记为“可进入 apply”。
     fields:
       - !schema

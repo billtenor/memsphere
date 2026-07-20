@@ -1,23 +1,27 @@
 !schema
+syntax: memsphere-20260719-stable
 names:
   - "craa-spec-driven-tasks"
   - "tasks.md"
   - "CRAA Tasks Document"
   - "CRAA 开发任务清单"
+format:
+  name: markdown
+  layout: outline
 defines:
   - "CRAA OpenSpec 流程中的开发任务清单图式。"
   - "用于把 specs 的行为要求、design 的技术方案和 test 的验证方案拆解成可执行、可追踪、可验证的实现任务。"
 asserts:
   - |-
     Tasks 用来拆解实现工作，供 apply 阶段逐项执行和勾选。
-    
+
     格式要求：
     - 必须使用 checkbox：`- [ ]`
     - 建议按依赖顺序分组
     - 每个任务要小到一个开发会话内可完成
     - 每个任务都应可验证，能判断什么时候完成
     - 不要把多个无法一起验证的大动作塞进同一个 checkbox
-    
+
     任务应参考：
     - specs：要实现什么行为
     - design：按什么方案实现
@@ -51,7 +55,7 @@ fields:
     asserts:
       - |-
         根据变更类型填写验证项。
-        
+
         Go 代码默认验证入口优先使用仓库约定的 `make test_local`。
         Java 子工程应列出 Maven test/package/build.sh 等对应验证入口。
         测试任务应来自 test.md 的关键验证场景、失败场景验证、兼容性与通过标准。

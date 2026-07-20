@@ -1,5 +1,6 @@
 {
-  "version": 1,
+  "version": 2,
+  "memory_syntax": "memsphere-20260719-stable",
   "system_memory": {
     "install": [
       "concepts/memory.yaml",
@@ -9,9 +10,11 @@
       "concepts/procedure.yaml",
       "concepts/schema.yaml",
       "statements/memory-access-rules.yaml",
-      "statements/memory-interpretation-application-rules.yaml",
+      "statements/memsphere-yaml-syntax-rules.yaml",
       "procedures/general-task-execution.yaml"
     ],
-    "remove": []
+    "remove": [
+      "statements/memory-interpretation-application-rules.yaml"
+    ]
   }
 }

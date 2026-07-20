@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile as writeRawFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { memoryKinds } from "../src/memory/kinds.js";
+import { currentMemorySyntax } from "../src/memory/syntax.js";
 import {
   activeProcedureAsserts,
   artifactSchemaName,
@@ -25,6 +27,13 @@ async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+async function writeFile(path: string, data: string): Promise<void> {
+  const versioned = /\.ya?ml$/.test(path) && /^!(?:concept|statement|schema|procedure)\n/.test(data)
+    ? data.replace(/^(!(?:concept|statement|schema|procedure))\n/, `$1\nsyntax: ${currentMemorySyntax}\n`)
+    : data;
+  await writeRawFile(path, versioned);
 }
 
 const validProcedure = `!procedure
@@ -58,12 +67,27 @@ test("startRun skips unrelated invalid procedures when resolving the target proc
     const run = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
 
     assert.equal(run.status, "running");
+    assert.equal(run.memorySyntax, currentMemorySyntax);
     assert.equal(run.procedureName, "target-procedure");
     assert.deepEqual(run.asserts, ["Keep the procedure contract active."]);
     assert.equal(run.stack[0].memoryName, "target-procedure");
     assert.deepEqual(run.stack[0].asserts, ["Keep the procedure contract active."]);
     assert.deepEqual(activeProcedureAsserts(run), ["Keep the procedure contract active."]);
     assert.equal(run.stack[0].steps[0].instruction, "Capture result.");
+  });
+});
+
+test("startRun routes an unversioned Procedure to store validation without parsing legacy content", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeRawFile(join(proceduresRoot, "target.yaml"), validProcedure);
+
+    await assert.rejects(
+      startRun({ memoryRoot, runsRoot: join(dir, "runs"), procedureName: "target-procedure" }),
+      /Memory store contains invalid Memory YAML; run memsphere validate/
+    );
   });
 });
 
@@ -333,6 +357,100 @@ flow:
   });
 });
 
+test("enter-schema records a local Markdown table as one complete structured step", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "table.yaml"), `!procedure
+names: [table-contract]
+flow:
+  - !action
+    action: Produce delivery.
+    artifact: !artifact
+      name: delivery
+      type: object
+      format: { name: markdown, layout: outline }
+      schema: !schema
+        fields:
+          - !schema
+            names: [Requirements]
+            type: array
+            format: { name: markdown, layout: table }
+            item: !schema
+              type: object
+              fields: [ID, Summary]
+`);
+
+    const started = await startRun({ memoryRoot, runsRoot, procedureName: "table-contract" });
+    const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id });
+    const schemaSteps = entered.stack.at(-1)?.steps ?? [];
+    assert.equal(schemaSteps.length, 2);
+    assert.equal(schemaSteps[1]?.artifact?.endsWith(".Requirements"), true);
+    assert.deepEqual(schemaSteps[1]?.format, { name: "markdown", options: { layout: "table" } });
+
+    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery" } });
+    const done = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "| ID | Summary |\n| --- | --- |\n| R-1 | First |\n" }
+    });
+    assert.equal(done.status, "done");
+    assert.equal(done.events.filter((event) => event.frame === "schema").length, 2);
+    assert.match(await readFile(join(runsRoot, done.events.at(-1)?.artifact.path ?? ""), "utf8"), /## Requirements/);
+  });
+});
+
+test("enter-schema parent validation failure leaves Run state and managed artifacts unchanged", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "table.yaml"), `!procedure
+names: [table-contract]
+flow:
+  - !action
+    action: Produce delivery.
+    artifact: !artifact
+      name: delivery
+      type: object
+      format: { name: markdown, layout: outline }
+      schema: !schema
+        fields:
+          - !schema
+            names: [Requirements]
+            type: array
+            format: { name: markdown, layout: table }
+            item: !schema
+              type: object
+              fields: [ID, Summary]
+`);
+
+    const started = await startRun({ memoryRoot, runsRoot, procedureName: "table-contract" });
+    await enterSchema({ memoryRoot, runsRoot, runId: started.id });
+    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery" } });
+
+    const runPath = join(runsRoot, started.id, `${started.id}.json`);
+    const artifactRoot = join(runsRoot, started.id, "artifacts");
+    const runBefore = await readFile(runPath, "utf8");
+    const artifactsBefore = (await readdir(artifactRoot)).sort();
+
+    await assert.rejects(
+      reportRun({
+        runsRoot,
+        runId: started.id,
+        artifact: { kind: "inline", value: "| ID |\n| --- |\n| R-1 |\n" }
+      }),
+      /missing column Summary/
+    );
+
+    assert.equal(await readFile(runPath, "utf8"), runBefore);
+    assert.deepEqual((await readdir(artifactRoot)).sort(), artifactsBefore);
+  });
+});
+
 test("final artifacts only include the executed branch", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
@@ -395,6 +513,7 @@ flow:
 `);
     await writeFile(join(schemasRoot, "demo.yaml"), `!schema
 names: [demo-schema]
+type: object
 defines:
   - Demo schema.
 `);
@@ -659,10 +778,11 @@ fields:
       "demo-schema.details"
     ]);
     assert.deepEqual(schemaFrame?.steps.map((step) => step.format), [
+      { name: "markdown", options: { layout: "outline" } },
       { name: "markdown", options: {} },
-      { name: "plain", options: {} },
-      { name: "plain", options: {} }
+      { name: "markdown", options: {} }
     ]);
+    assert.deepEqual(schemaFrame?.steps.map((step) => step.type), ["object", "string", "string"]);
     assert(schemaFrame?.steps[0].details?.includes("asserts: Keep it concise."));
     assert(schemaFrame?.steps[0].details?.includes("suggests: Prefer direct wording."));
     assert(schemaFrame?.steps[0].details?.includes("asserts [Formatting]: Use Markdown headings."));
@@ -829,5 +949,72 @@ flow:
 
     const unchanged = await readRun(runsRoot, run.id);
     assert.equal(unchanged.events.length, 0);
+  });
+});
+
+test("concurrent reports serialize through the per-Run write lock", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "concurrent.yaml"), `!procedure
+names: [concurrent-report]
+flow:
+  - !action
+    action: Capture first.
+    artifact: !artifact
+      name: first
+  - !action
+    action: Capture second.
+    artifact: !artifact
+      name: second
+`);
+    const started = await startRun({ memoryRoot, runsRoot, procedureName: "concurrent-report" });
+
+    await Promise.all([
+      reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "A" } }),
+      reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "B" } })
+    ]);
+
+    const completed = await readRun(runsRoot, started.id);
+    assert.equal(completed.status, "done");
+    assert.equal(completed.events.length, 2);
+    assert.deepEqual(new Set(completed.events.map((event) => event.artifact.value)), new Set(["A", "B"]));
+  });
+});
+
+test("Run writes recover a lock left by a terminated process", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "stale-lock.yaml"), `!procedure
+names: [stale-lock]
+flow:
+  - !action
+    action: Capture result.
+    artifact: !artifact
+      name: result
+`);
+    const started = await startRun({ memoryRoot, runsRoot, procedureName: "stale-lock" });
+    const lockRoot = join(runsRoot, ".locks");
+    const lockName = createHash("sha256").update(started.id).digest("hex");
+    await mkdir(lockRoot, { recursive: true });
+    await writeRawFile(join(lockRoot, `${lockName}.lock`), `${JSON.stringify({
+      pid: 99_999_999,
+      token: "terminated-owner",
+      startedAt: "2026-01-01T00:00:00.000Z"
+    })}\n`);
+
+    const completed = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "done" }
+    });
+    assert.equal(completed.status, "done");
+    assert.deepEqual(await readdir(lockRoot), []);
+    assert.equal((await readdir(join(runsRoot, started.id))).some((name) => name.endsWith(".tmp")), false);
   });
 });

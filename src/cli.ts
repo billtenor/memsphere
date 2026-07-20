@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
 import { Command, Option } from "commander";
 import {
   archiveListCommand,
@@ -9,7 +10,11 @@ import {
 } from "./commands/archive.js";
 import { initCommand } from "./commands/init.js";
 import { memoryListCommand, memoryReadCommand } from "./commands/memory.js";
-import { migrateArtifactContractV2Command } from "./commands/migrate.js";
+import {
+  migrateArtifactContractV2Command,
+  migrateMemorySyntaxCommand,
+  migrateSchemaContractV2Command
+} from "./commands/migrate.js";
 import { memoryKinds } from "./memory/kinds.js";
 import {
   runEnterSchemaCommand,
@@ -28,12 +33,14 @@ import {
   viewStopCommand
 } from "./commands/view.js";
 
+const require = createRequire(import.meta.url);
+const { version } = require("../package.json") as { version: string };
 const program = new Command();
 
 program
   .name("memsphere")
   .description("Manage local YAML-backed memory entities for AI runtimes.")
-  .version("0.1.0");
+  .version(version);
 
 program
   .command("init")
@@ -161,12 +168,29 @@ const migrate = program
   .description("Migrate persisted memsphere data between contract versions.");
 
 migrate
+  .command("syntax")
+  .description("Migrate Memory YAML to a registered syntax version.")
+  .option("--check", "scan and print a read-only migration manifest")
+  .option("--write", "stage, validate, back up, and apply the migration")
+  .option("--to <syntax>", "target syntax; defaults to the current stable syntax")
+  .option("--config <path>", "config file path")
+  .action(migrateMemorySyntaxCommand);
+
+migrate
   .command("artifact-contract-v2")
   .description("Migrate Memory Artifact contracts to type, format, and schema v2.")
   .option("--check", "scan and print a read-only migration manifest")
   .option("--write", "stage, validate, back up, and apply the migration")
   .option("--config <path>", "config file path")
   .action(migrateArtifactContractV2Command);
+
+migrate
+  .command("schema-contract-v2")
+  .description("Migrate Schema contracts to inferred types and inherited formats v2.")
+  .option("--check", "scan and print a read-only migration manifest")
+  .option("--write", "stage, validate, back up, and apply the migration")
+  .option("--config <path>", "config file path")
+  .action(migrateSchemaContractV2Command);
 
 const archive = program
   .command("archive")

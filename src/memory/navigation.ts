@@ -125,10 +125,55 @@ function buildRootNodes(entity: MemoryEntity): InternalMemoryNode[] {
     case "!statement":
       return buildStatementNodes(entity.sections ?? [], "", []);
     case "!schema":
-      return buildSchemaFields(entity.fields ?? [], "", []);
+      return buildSchemaChildren(entity, "", []);
     case "!procedure":
       return buildFlowNodes(entity.flow, "", [], "flow");
   }
+}
+
+function buildSchemaChildren(
+  schema: SchemaNode,
+  prefix: string,
+  contexts: MemoryNodeContextEntry[]
+): InternalMemoryNode[] {
+  const nodes = buildSchemaFields(schema.fields ?? [], prefix, contexts);
+  if (schema.item) {
+    nodes.push(buildSchemaItemNode(schema.item, prefix, "item", contexts, "item"));
+  }
+  for (const [index, item] of (schema.items ?? []).entries()) {
+    nodes.push(buildSchemaItemNode(item, prefix, `items[${index + 1}]`, contexts, "items"));
+  }
+  return nodes;
+}
+
+function buildSchemaItemNode(
+  schema: SchemaNode,
+  prefix: string,
+  segment: string,
+  contexts: MemoryNodeContextEntry[],
+  relation: "item" | "items"
+): InternalMemoryNode {
+  const nodeRef = joinReference(prefix, segment);
+  const children = buildSchemaChildren(
+    schema,
+    nodeRef,
+    contexts.concat({
+      node_ref: nodeRef,
+      type: "Schema",
+      relation,
+      value: stripSchemaChildren(schema)
+    })
+  );
+  return createNode({
+    nodeRef,
+    type: "Schema",
+    name: schema.names[0],
+    summary: definitionSummary(schema.defines, schema.asserts),
+    relation,
+    value: schema,
+    contexts,
+    children
+  });
 }
 
 function buildStatementNodes(
@@ -223,14 +268,14 @@ function buildSchemaFieldNode(
     });
   }
 
-  const children = buildSchemaFields(
-    field.fields ?? [],
+  const children = buildSchemaChildren(
+    field,
     nodeRef,
     contexts.concat({
       node_ref: nodeRef,
       type: "Schema",
       relation,
-      value: stripSchemaFields(field)
+      value: stripSchemaChildren(field)
     })
   );
   return createNode({
@@ -462,7 +507,7 @@ function rootContext(entity: MemoryEntity): unknown {
     case "!statement":
       return stripStatementSections(entity);
     case "!schema":
-      return stripSchemaFields(entity);
+      return stripSchemaChildren(entity);
     case "!procedure":
       return stripProcedureFlow(entity);
   }
@@ -473,8 +518,8 @@ function stripStatementSections(statement: StatementNode): Omit<StatementNode, "
   return context;
 }
 
-function stripSchemaFields(schema: SchemaNode): Omit<SchemaNode, "fields"> {
-  const { fields: _fields, ...context } = schema;
+function stripSchemaChildren(schema: SchemaNode): Omit<SchemaNode, "fields" | "item" | "items"> {
+  const { fields: _fields, item: _item, items: _items, ...context } = schema;
   return context;
 }
 

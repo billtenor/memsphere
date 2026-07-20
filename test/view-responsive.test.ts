@@ -7,6 +7,7 @@ import test from "node:test";
 import { chromium, type Browser, type Page } from "playwright";
 import { createViewServer } from "../src/commands/view.js";
 import type { MemsphereConfig } from "../src/config.js";
+import { currentMemorySyntax } from "../src/memory/syntax.js";
 import type { RunState } from "../src/run/store.js";
 
 const runId = "run-responsive-view";
@@ -21,6 +22,7 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
 
   await writeFile(join(memoryRoot, "schemas", "reviewable-schema.yaml"), [
     "!schema",
+    `syntax: ${currentMemorySyntax}`,
     "names: [ Reviewable schema ]",
     "defines: [ A schema fixture for inline review. ]",
     "asserts:",
@@ -41,6 +43,7 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
   ].join("\n"));
   const run: RunState = {
     contractVersion: 2,
+    memorySyntax: currentMemorySyntax,
     id: runId,
     status: "done",
     procedureName: "Responsive browser fixture",

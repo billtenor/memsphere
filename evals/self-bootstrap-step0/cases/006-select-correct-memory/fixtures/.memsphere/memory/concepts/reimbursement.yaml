@@ -1,4 +1,5 @@
 !concept
+syntax: memsphere-20260719-stable
 names:
   - 报销申请
   - 报销
@@ -12,7 +13,9 @@ defines:
       - 凭证编号不能为空。
       - 报销申请实例必须以 Markdown 文件保存到 artifacts/reimbursement.md。
   - !schema
-    format: outline
+    format:
+      name: markdown
+      layout: outline
     asserts:
       - 发生日期、费用内容、金额、业务用途和凭证编号均不能为空。
     fields:
@@ -21,3 +24,4 @@ defines:
       - 金额
       - 业务用途
       - 凭证编号
+    type: object

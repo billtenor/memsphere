@@ -10,10 +10,24 @@ test("embedded browser script is valid JavaScript", () => {
 });
 
 test("memory view recognizes only tagged actions and renders recursive typed structures", () => {
+  assert.match(browserHtml, /syntax: \{ zh: "语法版本", yaml: "syntax" \}/);
+  assert.match(browserHtml, /memory\.entity\.syntax/);
   assert.match(browserHtml, /step\.tag === "!action"/);
   assert.match(browserHtml, /while \(branch\)/);
   assert.match(browserHtml, /definition\.tag === "!schema"/);
   assert.match(browserHtml, /typeof child === "string"/);
+});
+
+test("browser renders current Schema type, format, layout, and item contracts", () => {
+  assert.match(browserHtml, /type: \{ zh: "类型", yaml: "type" \}/);
+  assert.match(browserHtml, /layout: \{ zh: "布局", yaml: "layout" \}/);
+  assert.match(browserHtml, /if \(node\.type\) badges\.push\(t\("type"\) \+ ": " \+ node\.type\)/);
+  assert.match(browserHtml, /formatOptions\(node\.format\)\.layout/);
+  assert.doesNotMatch(browserHtml, /element_types/);
+  assert.match(browserHtml, /item: \{ zh: "元素", yaml: "item" \}/);
+  assert.match(browserHtml, /items: \{ zh: "候选元素", yaml: "items" \}/);
+  assert.match(browserHtml, /if \(node\.item\)/);
+  assert.match(browserHtml, /for \(const \[index, item\] of node\.items\.entries\(\)\)/);
 });
 
 test("browser renders Schema Repeat structure and its Run control command", () => {

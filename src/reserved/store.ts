@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
+import { currentMemorySyntax } from "../memory/syntax.js";
 
 export type ReservedMemoryListItem = {
   kind: MemoryKind;
@@ -41,13 +42,22 @@ const uniqueMemoryPathsSchema = z.array(memoryPathSchema).superRefine((paths, co
   }
 });
 
-export const reservedMemoryManifestSchema = z.object({
-  version: z.literal(1),
-  system_memory: z.object({
-    install: uniqueMemoryPathsSchema,
-    remove: uniqueMemoryPathsSchema
+const manifestSystemMemorySchema = z.object({
+  install: uniqueMemoryPathsSchema,
+  remove: uniqueMemoryPathsSchema
+}).strict();
+
+export const reservedMemoryManifestSchema = z.discriminatedUnion("version", [
+  z.object({
+    version: z.literal(1),
+    system_memory: manifestSystemMemorySchema
+  }).strict(),
+  z.object({
+    version: z.literal(2),
+    memory_syntax: z.literal(currentMemorySyntax),
+    system_memory: manifestSystemMemorySchema
   }).strict()
-}).strict().superRefine((manifest, context) => {
+]).superRefine((manifest, context) => {
   const install = new Set(manifest.system_memory.install);
   for (const [index, path] of manifest.system_memory.remove.entries()) {
     if (install.has(path)) {
@@ -123,6 +133,17 @@ export async function installReservedMemories(
   const targetRoot = reservedMemoryRoot(scopeRoot);
   const manifest = await readReservedMemoryManifest(sourceRoot);
   const sourcePaths = await listBundledMemoryPaths(sourceRoot);
+  if (manifest.version === 2) {
+    for (const relativePath of sourcePaths) {
+      const kind = relativePath.split("/")[0] as MemoryKind;
+      const file = await readMemoryFile(kind, resolveMemoryPath(sourceRoot, relativePath));
+      if (file.entity.syntax !== manifest.memory_syntax) {
+        throw new Error(
+          `reserved Memory ${relativePath} uses syntax ${file.entity.syntax}; expected ${manifest.memory_syntax}`
+        );
+      }
+    }
+  }
   const systemMemoryPaths = new Set(manifest.system_memory.install);
 
   for (const relativePath of manifest.system_memory.remove) {

@@ -1,19 +1,61 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { conceptMemorySchema, procedureMemorySchema, schemaMemorySchema, statementMemorySchema } from "../src/memory/schema.js";
+import {
+  conceptMemorySchema,
+  inferSchemaType,
+  procedureMemorySchema,
+  resolveSchemaContract,
+  schemaMemorySchema,
+  statementMemorySchema
+} from "../src/memory/schema.js";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
+import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
 function parseProcedure(source: string) {
-  return procedureMemorySchema.parse(parseMemoryYaml(source));
+  return procedureMemorySchema.parse(parseMemoryYaml(withCurrentMemorySyntax(source)));
 }
 
 function parseSchema(source: string) {
-  return schemaMemorySchema.parse(parseMemoryYaml(source));
+  return schemaMemorySchema.parse(parseMemoryYaml(withCurrentMemorySyntax(source)));
 }
 
 function parseStatement(source: string) {
-  return statementMemorySchema.parse(parseMemoryYaml(source));
+  return statementMemorySchema.parse(parseMemoryYaml(withCurrentMemorySyntax(source)));
 }
+
+test("name is a canonical single-value shorthand for names", () => {
+  const concept = conceptMemorySchema.parse(parseMemoryYaml(withCurrentMemorySyntax(`!concept
+name: Work item
+defines: [A unit of work.]
+`)));
+  const statement = parseStatement(`!statement
+name: Rules
+asserts: [A rule holds.]
+sections:
+  - !statement
+    name: Nested rule
+    asserts: [A nested rule holds.]
+`);
+  const schema = parseSchema(`!schema
+name: Record
+fields:
+  - !schema
+    name: title
+`);
+  const procedure = parseProcedure(`!procedure
+name: Workflow
+`);
+
+  assert.deepEqual(concept.names, ["Work item"]);
+  assert.deepEqual(statement.sections?.[0].names, ["Nested rule"]);
+  assert.deepEqual(schema.fields?.[0].names, ["title"]);
+  assert.deepEqual(procedure.names, ["Workflow"]);
+  assert.throws(() => parseSchema(`!schema
+name: Record
+names: [Record]
+fields: []
+`), /name/);
+});
 
 test("defines accepts text, anonymous Statement, and anonymous Schema", () => {
   const entity = parseSchema(`!schema
@@ -152,12 +194,12 @@ names: [invalid section]
 sections: [Testing]
 `), /sections/);
 
-  const unnamed = statementMemorySchema.safeParse(parseMemoryYaml(`!statement
+  const unnamed = statementMemorySchema.safeParse(parseMemoryYaml(withCurrentMemorySyntax(`!statement
 names: [Repository rules]
 sections:
   - !statement
     asserts: [A rule.]
-`));
+`)));
   assert.equal(unnamed.success, false);
   if (!unnamed.success) {
     assert(unnamed.error.issues.some((issue) =>
@@ -166,7 +208,7 @@ sections:
     ));
   }
 
-  const duplicate = statementMemorySchema.safeParse(parseMemoryYaml(`!statement
+  const duplicate = statementMemorySchema.safeParse(parseMemoryYaml(withCurrentMemorySyntax(`!statement
 names: [Repository rules]
 sections:
   - !statement
@@ -175,7 +217,7 @@ sections:
   - !statement
     names: [" Testing "]
     suggests: [Second rule.]
-`));
+`)));
   assert.equal(duplicate.success, false);
   if (!duplicate.success) {
     assert(duplicate.error.issues.some((issue) =>
@@ -493,22 +535,108 @@ fields:
 names: [root]
 defines:
   - !schema
-    element_types: [string]
+    type: array
+    format: json
 `));
 });
 
-test("Schema no longer owns presentation format", () => {
-  assert.doesNotThrow(() => parseSchema(`!schema
+test("Schema supports optional type and format contracts", () => {
+  const inherited = parseSchema(`!schema
 names: [structure]
 fields: [summary]
-`));
-  for (const format of ["outline", "table"]) {
-    assert.throws(() => parseSchema(`!schema
-names: [legacy]
-format: ${format}
-fields: [summary]
-`), /format/);
-  }
+`);
+  assert.equal(inherited.type, undefined);
+  assert.equal(inherited.format, undefined);
+
+  const table = parseSchema(`!schema
+names: [rows]
+type: array
+format:
+  name: markdown
+  layout: table
+item: !schema
+  type: object
+  fields: [ID, Summary]
+`);
+  assert.equal(table.type, "array");
+  assert.deepEqual(table.format, { name: "markdown", options: { layout: "table" } });
+
+  const localPlain = parseSchema(`!schema
+names: [value]
+type: string
+`);
+  assert.equal(localPlain.type, "string");
+  assert.equal(localPlain.format, undefined);
+
+  const inheritedFormat = parseSchema(`!schema
+names: [inherits-format]
+type: array
+item: !schema
+  type: string
+`);
+  assert.equal(inheritedFormat.type, "array");
+  assert.equal(inheritedFormat.format, undefined);
+
+  assert.throws(() => parseSchema(`!schema
+names: [invalid-scalar]
+type: string
+fields: [value]
+`), /fields/);
+  assert.throws(() => parseSchema(`!schema
+names: [invalid-array]
+type: array
+fields: [value]
+`), /fields/);
+  assert.throws(() => parseSchema(`!schema
+names: [invalid-table]
+type: object
+format:
+  name: markdown
+  layout: table
+fields: [value]
+`), /layout: outline/);
+});
+
+test("Schema infers local types and inherits only compatible format layout", () => {
+  const leaf = parseSchema(`!schema
+names: [leaf]
+defines: [value]
+`);
+  assert.equal(inferSchemaType(leaf), "string");
+  assert.deepEqual(resolveSchemaContract(leaf, {
+    name: "markdown",
+    options: { layout: "outline" }
+  }), {
+    type: "string",
+    format: { name: "markdown", options: {} }
+  });
+
+  const object = parseSchema(`!schema
+names: [object]
+fields: [value]
+`);
+  assert.equal(inferSchemaType(object), "object");
+  assert.deepEqual(resolveSchemaContract(object, {
+    name: "markdown",
+    options: { layout: "outline" }
+  }), {
+    type: "object",
+    format: { name: "markdown", options: { layout: "outline" } }
+  });
+
+  const emptyObject = parseSchema(`!schema
+names: [empty object]
+fields: []
+`);
+  assert.equal(inferSchemaType(emptyObject), "object");
+
+  assert.deepEqual(resolveSchemaContract(leaf, {
+    name: "yaml",
+    options: {}
+  }), {
+    type: "string",
+    format: { name: "yaml", options: {} }
+  });
 });
 
 test("Schema outline fields support mapping Repeat groups and limits", () => {
@@ -560,10 +688,10 @@ fields:
 });
 
 test("format is rejected on memory types without format implementations", () => {
-  assert.throws(() => conceptMemorySchema.parse(parseMemoryYaml(`!concept
+  assert.throws(() => conceptMemorySchema.parse(parseMemoryYaml(withCurrentMemorySyntax(`!concept
 names: [invalid]
 format: outline
-`)), /format/);
+`))), /format/);
 });
 
 test("table layout belongs to an array markdown Artifact", () => {
@@ -579,7 +707,10 @@ flow:
         name: markdown
         layout: table
       schema: !schema
-        fields: [id, description]
+        type: array
+        item: !schema
+          type: object
+          fields: [id, description]
 `);
   const step = procedure.flow[0];
   assert.equal(step.tag === "!action" ? step.artifact.format.options.layout : undefined, "table");
@@ -600,40 +731,70 @@ flow:
 `), /requires layout: outline/);
 });
 
-for (const format of ["section", "field", "list", "template"]) {
-  test(`rejects removed Schema format ${format}`, () => {
-    assert.throws(() => parseSchema(`!schema
-names: [legacy]
-format: ${format}
-`), /format/);
-  });
-}
-
-test("Schema element_types rejects unknown, duplicate, and incompatible field types", () => {
-  assert.throws(() => parseSchema(`!schema
-names: [unknown-element_types]
-element_types: [Unknown]
-`), /element_types/);
-  assert.throws(() => parseSchema(`!schema
-names: [duplicate-element_types]
-element_types: [string, string]
-`), /duplicate/);
-  assert.throws(() => parseSchema(`!schema
-names: [empty-element_types]
-element_types: []
-`), /element_types/);
-  assert.throws(() => parseSchema(`!schema
-names: [invalid-structure]
-element_types: [string]
-fields: [value]
-`), /must include Schema/);
+test("Schema preserves custom format targets for registered validators", () => {
+  const schema = parseSchema(`!schema
+names: [custom]
+format: domain-specific
+`);
+  assert.deepEqual(schema.format, { name: "domain-specific", options: {} });
 });
 
-test("Schema rejects non-snake-case and legacy element type field names", () => {
+test("Schema supports item and union items while rejecting legacy element_types", () => {
   assert.throws(() => parseSchema(`!schema
-names: [legacy-items]
-items: [string]
-`), /items/);
+names: [unknown-element_types]
+element_types: [string]
+`), /element_types/);
+
+  const single = parseSchema(`!schema
+names: [strings]
+type: array
+item: !schema
+  type: string
+`);
+  assert.equal(single.item?.type, "string");
+
+  const union = parseSchema(`!schema
+names: [mixed]
+type: array
+items:
+  - !schema
+    type: string
+  - !schema
+    type: number
+`);
+  assert.deepEqual(union.items?.map((item) => item.type), ["string", "number"]);
+
+  assert.throws(() => parseSchema(`!schema
+names: [too-few]
+type: array
+items:
+  - !schema
+    type: string
+`), /at least 2/);
+  assert.throws(() => parseSchema(`!schema
+names: [both]
+type: array
+item: !schema
+  type: string
+items:
+  - !schema
+    type: string
+  - !schema
+    type: number
+`), /mutually exclusive/);
+  assert.throws(() => parseSchema(`!schema
+names: [wrong-owner]
+item: !schema
+  type: string
+`), /explicit type: array/);
+  assert.throws(() => parseSchema(`!schema
+names: [repeat-item]
+type: array
+item: !schema
+  fields:
+    - !repeat
+      body: [value]
+`), /not allowed under array item/);
   assert.throws(() => parseSchema(`!schema
 names: [camel-case]
 elementTypes: [string]

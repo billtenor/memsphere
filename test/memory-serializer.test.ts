@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { MemoryEntity } from "../src/memory/ast.js";
 import { memorySchemas } from "../src/memory/schema.js";
+import { currentMemorySyntax } from "../src/memory/syntax.js";
 import {
   serializeMemoryJson,
   serializeMemoryListJson,
@@ -20,6 +21,7 @@ import { parse } from "yaml";
 const entities: MemoryEntity[] = [
   {
     tag: "!concept",
+    syntax: currentMemorySyntax,
     names: ["Memory: core", "记忆 #1"],
     defines: [
       "A multiline\ndefinition",
@@ -35,6 +37,7 @@ const entities: MemoryEntity[] = [
   },
   {
     tag: "!statement",
+    syntax: currentMemorySyntax,
     names: ["Suggestion"],
     defines: [],
     asserts: ["Statements assert."],
@@ -50,14 +53,17 @@ const entities: MemoryEntity[] = [
   },
   {
     tag: "!schema",
+    syntax: currentMemorySyntax,
     names: ["Record"],
     defines: [],
+    format: { name: "markdown", options: { layout: "outline" } },
     fields: [
       {
         tag: "!schema",
         names: ["title"],
         defines: ["A title: with punctuation"],
-        element_types: ["string"]
+        type: "string",
+        format: { name: "plain", options: {} }
       },
       {
         tag: "!repeat",
@@ -71,11 +77,25 @@ const entities: MemoryEntity[] = [
             fields: ["conclusion"]
           }
         ]
+      },
+      {
+        tag: "!schema",
+        names: ["values"],
+        defines: [],
+        type: "array",
+        format: { name: "yaml", options: {} },
+        item: {
+          tag: "!schema",
+          names: [],
+          defines: [],
+          type: "string"
+        }
       }
     ]
   },
   {
     tag: "!procedure",
+    syntax: currentMemorySyntax,
     names: ["Nested procedure"],
     defines: [],
     asserts: ["Global procedure contracts survive."],

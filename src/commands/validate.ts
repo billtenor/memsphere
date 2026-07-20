@@ -28,5 +28,12 @@ export async function validateCommand(): Promise<void> {
     console.error(`- ${issue.path}: ${issue.message}`);
   }
 
+  if (result.issues.some((issue) => issue.migration === "syntax")) {
+    console.error("");
+    console.error("Hint: This Memory store contains an older YAML syntax with a registered migration path.");
+    console.error("Check the migration first: memsphere migrate syntax --check");
+    console.error("After reviewing the changes: memsphere migrate syntax --write");
+  }
+
   process.exitCode = 1;
 }

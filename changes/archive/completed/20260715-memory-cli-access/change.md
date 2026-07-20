@@ -1,8 +1,12 @@
+---
+id: 20260715-memory-cli-access
+type: feature
+created: 2026-07-15
+completed_at: 2026-07-16
+run_id:
+---
+
 # Memory CLI 访问与 Catalog 抽象需求
-
-状态：Proposed
-
-日期：2026-07-15
 
 ## 背景
 
@@ -360,3 +364,10 @@ CLI 至少应区分并稳定表达以下错误：
 - 其他分支交付的唯一 memsphere Skill 不再指导 Agent 直接读取 Memory 文件。
 - 其他分支交付的六个首批 self-bootstrap case 可以把 CLI 作为唯一 Memory 读取入口。
 - 文件 Provider 可被替换而无需修改 CLI 契约、Skill 或测试任务提示词。
+
+## 验收结果
+
+- 已实现统一 Memory Catalog、File Provider、稳定逻辑引用以及 `memory list/read`。
+- CLI 已覆盖名称和别名解析、歧义、嵌套 scope、节点读取、YAML/JSON/text 输出及 stderr 错误边界。
+- 主要实现提交为 `5c4b101`，后续补充了局部 Node 读取和统一 Skill 接入。
+- 2026-07-20 全量测试通过：202 passed，0 failed。

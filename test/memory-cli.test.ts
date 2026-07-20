@@ -7,6 +7,8 @@ import { spawn } from "node:child_process";
 import test from "node:test";
 import { parse } from "yaml";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
+import { currentMemorySyntax } from "../src/memory/syntax.js";
+import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cliPath = join(projectRoot, "src", "cli.ts");
@@ -53,15 +55,54 @@ async function runCli(cwd: string, args: string[], home?: string): Promise<Comma
   });
 }
 
+test("validate suggests syntax migration only for outdated Memory YAML", async () => {
+  await withScope(async ({ nested, memoryRoot }) => {
+    await writeFile(
+      join(memoryRoot, "schemas", "legacy.yaml"),
+      "!schema\nnames: [Legacy]\nelement_types: [string]\n"
+    );
+
+    const legacy = await runCli(nested, ["validate"]);
+    assert.equal(legacy.code, 1);
+    assert.match(legacy.stderr, /older YAML syntax with a registered migration path/);
+    assert.match(legacy.stderr, /memsphere migrate syntax --check/);
+    assert.match(legacy.stderr, /memsphere migrate syntax --write/);
+
+    await writeFile(
+      join(memoryRoot, "schemas", "legacy.yaml"),
+      `!schema\nsyntax: ${currentMemorySyntax}\nnames: [Current]\nunknown_key: true\n`
+    );
+
+    const current = await runCli(nested, ["validate"]);
+    assert.equal(current.code, 1);
+    assert.doesNotMatch(current.stderr, /memsphere migrate syntax/);
+
+    await writeFile(
+      join(memoryRoot, "schemas", "legacy.yaml"),
+      "!schema\nsyntax: memsphere-20990101-stable\nnames: [Future]\n"
+    );
+
+    const future = await runCli(nested, ["validate"]);
+    assert.equal(future.code, 1);
+    assert.match(future.stderr, /upgrade memsphere/i);
+    assert.doesNotMatch(future.stderr, /memsphere migrate syntax/);
+
+    await writeFile(join(memoryRoot, "schemas", "legacy.yaml"), "!schema\nnames: [Broken\n");
+    const malformed = await runCli(nested, ["validate"]);
+    assert.equal(malformed.code, 1);
+    assert.doesNotMatch(malformed.stderr, /memsphere migrate syntax/);
+  });
+});
+
 test("memory CLI lists and reads from a nested scope without exposing file paths", async () => {
   await withScope(async ({ nested, memoryRoot }) => {
     await writeFile(
       join(memoryRoot, "concepts", "random-95f2.yaml"),
-      "!concept\nnames: [Memory, 记忆]\ndefines:\n  - A managed memory.\n  - !statement\n    asserts: [Read the complete memory.]\n"
+      withCurrentMemorySyntax("!concept\nnames: [Memory, 记忆]\ndefines:\n  - A managed memory.\n  - !statement\n    asserts: [Read the complete memory.]\n")
     );
     await writeFile(
       join(memoryRoot, "schemas", "another-random-name.yaml"),
-      "!schema\nnames: [Record]\ndefines: []\nelement_types: [string]\n"
+      withCurrentMemorySyntax("!schema\nnames: [Record]\ndefines: []\n")
     );
 
     const list = await runCli(nested, ["memory", "list"]);
@@ -90,6 +131,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
       assert.equal(read.stderr, "");
       assert.deepEqual(parseMemoryYaml(read.stdout), {
         tag: "!concept",
+        syntax: currentMemorySyntax,
         names: ["Memory", "记忆"],
         defines: [
           "A managed memory.",
@@ -107,7 +149,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
 
 test("memory CLI reads recursive Statement sections without flattening them", async () => {
   await withScope(async ({ nested, memoryRoot }) => {
-    await writeFile(join(memoryRoot, "statements", "repository-rules.yaml"), `!statement
+    await writeFile(join(memoryRoot, "statements", "repository-rules.yaml"), withCurrentMemorySyntax(`!statement
 names: [Repository rules]
 asserts: [All changes require review.]
 sections:
@@ -118,7 +160,7 @@ sections:
       - !statement
         names: [Core logic]
         asserts: [Core logic changes require tests.]
-`);
+`));
 
     const read = await runCli(nested, ["memory", "read", "Repository rules"]);
     assert.equal(read.code, 0, read.stderr);
@@ -135,16 +177,16 @@ sections:
 
 test("memory CLI lists and reads internal nodes across Memory kinds", async () => {
   await withScope(async ({ nested, memoryRoot }) => {
-    await writeFile(join(memoryRoot, "concepts", "memory.yaml"), "!concept\nnames: [Memory]\ndefines: [A memory.]\n");
-    await writeFile(join(memoryRoot, "statements", "rules.yaml"), `!statement
+    await writeFile(join(memoryRoot, "concepts", "memory.yaml"), withCurrentMemorySyntax("!concept\nnames: [Memory]\ndefines: [A memory.]\n"));
+    await writeFile(join(memoryRoot, "statements", "rules.yaml"), withCurrentMemorySyntax(`!statement
 names: [Rules]
 asserts: [All sections apply.]
 sections:
   - !statement
     names: [Testing]
     asserts: [Run tests.]
-`);
-    await writeFile(join(memoryRoot, "schemas", "report.yaml"), `!schema
+`));
+    await writeFile(join(memoryRoot, "schemas", "report.yaml"), withCurrentMemorySyntax(`!schema
 names: [Report]
 fields:
   - Title
@@ -154,8 +196,8 @@ fields:
       - !schema
         names: [Item]
         fields: [Value]
-`);
-    await writeFile(join(memoryRoot, "procedures", "workflow.yaml"), `!procedure
+`));
+    await writeFile(join(memoryRoot, "procedures", "workflow.yaml"), withCurrentMemorySyntax(`!procedure
 names: [Workflow]
 goals: [Finish.]
 flow:
@@ -172,7 +214,7 @@ flow:
           name: Result
           type: string
           format: markdown
-`);
+`));
 
     const concept = await runCli(nested, ["memory", "list", "Memory", "--output", "json"]);
     assert.equal(concept.code, 0, concept.stderr);
@@ -235,8 +277,8 @@ flow:
 
 test("memory CLI reports ambiguity and other failures only on stderr", async () => {
   await withScope(async ({ nested, memoryRoot }) => {
-    await writeFile(join(memoryRoot, "concepts", "one.yaml"), "!concept\nnames: [Shared]\ndefines: []\n");
-    await writeFile(join(memoryRoot, "statements", "two.yaml"), "!statement\nnames: [Shared]\nasserts: [valid]\n");
+    await writeFile(join(memoryRoot, "concepts", "one.yaml"), withCurrentMemorySyntax("!concept\nnames: [Shared]\ndefines: []\n"));
+    await writeFile(join(memoryRoot, "statements", "two.yaml"), withCurrentMemorySyntax("!statement\nnames: [Shared]\nasserts: [valid]\n"));
 
     const ambiguous = await runCli(nested, ["memory", "read", "Shared"]);
     assert.notEqual(ambiguous.code, 0);
@@ -261,7 +303,7 @@ test("memory CLI reports ambiguity and other failures only on stderr", async () 
 
 test("memory CLI rejects malformed stores, uninitialized scopes, and the removed top-level list", async () => {
   await withScope(async ({ nested, memoryRoot }) => {
-    await writeFile(join(memoryRoot, "schemas", "broken.yaml"), "!schema\nnames: [Broken\n");
+    await writeFile(join(memoryRoot, "schemas", "broken.yaml"), withCurrentMemorySyntax("!schema\nnames: [Broken\n"));
 
     const broken = await runCli(nested, ["memory", "list"]);
     assert.notEqual(broken.code, 0);

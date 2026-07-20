@@ -1,22 +1,26 @@
 !schema
+syntax: memsphere-20260719-stable
 names:
   - "craa-spec-driven-test"
   - "test.md"
   - "CRAA Test Document"
   - "CRAA 测试方案文档"
+format:
+  name: markdown
+  layout: outline
 defines:
   - "CRAA OpenSpec 流程中的测试方案文档图式。"
   - "用于说明如何证明本次变更满足 specs 和 design。"
 asserts:
   - |-
     Test 用来回答一个问题：怎么证明这次变更真的满足 specs 和 design。
-    
+
     它不是单元测试 case 清单，也不是把测试代码再抄一遍。
-    
+
     撰写时机：
     - 在 proposal、specs、design 都完成后撰写。
     - 在 tasks.md 之前撰写，tasks 需要把测试方案中的关键验证项拆成可执行任务。
-    
+
     写作原则：
     - 重点写关键行为、关键风险、端到端链路、兼容性和上线前必须确认的验证。
     - 单元测试只写覆盖策略、关键边界和验证入口；具体 case 以测试代码为准。
@@ -30,7 +34,7 @@ fields:
     asserts:
       - |-
         用几句话说明这次测试到底要证明什么。
-        
+
         建议回答：
         - 这次最需要证明什么。
         - 哪些行为必须自动化覆盖。
@@ -54,7 +58,7 @@ fields:
         asserts:
           - |-
             说明哪些内容只要求代码测试覆盖，不在 test.md 逐条列出，避免文档复制测试代码。
-            
+
             示例：
             - 纯函数级单元测试 case。
             - SDK 内部小分支 mock case。
@@ -65,14 +69,15 @@ fields:
   - !schema
     names:
       - "3. 关键要求验证表"
-    format: table
-    element_types:
-      - Schema
+    type: array
+    format:
+      name: markdown
+      layout: table
     asserts:
       - |-
         把 specs 中的关键 requirement、design 中的关键风险，映射到验证方式。
         不是每个单元测试 case 一行，而是每个关键行为或风险点一行。
-        
+
         自动化程度建议填写：
         - 自动化
         - 半自动
@@ -81,25 +86,27 @@ fields:
       - |-
         表格示例行：
         | <capability> | <requirement 或风险点> | <单元 / 模块 / 链路 / 端到端 / 人工> | <关键验证场景> | <自动化程度> | <备注> |
-    fields:
-      - !schema
-        names:
-          - "Capability"
-      - !schema
-        names:
-          - "Requirement / 风险点"
-      - !schema
-        names:
-          - "验证方式"
-      - !schema
-        names:
-          - "关键场景"
-      - !schema
-        names:
-          - "自动化程度"
-      - !schema
-        names:
-          - "备注"
+    item: !schema
+      type: object
+      fields:
+        - !schema
+          names:
+            - "Capability"
+        - !schema
+          names:
+            - "Requirement / 风险点"
+        - !schema
+          names:
+            - "验证方式"
+        - !schema
+          names:
+            - "关键场景"
+        - !schema
+          names:
+            - "自动化程度"
+        - !schema
+          names:
+            - "备注"
   - !schema
     names:
       - "4. 测试类型与覆盖策略"
@@ -115,7 +122,7 @@ fields:
           - |-
             验证函数、类、小段纯逻辑。
             只写覆盖策略和关键边界，不逐条列 case。
-            
+
             建议说明：
             - 哪些纯逻辑必须有单元测试。
             - 哪些边界必须覆盖。
@@ -129,7 +136,7 @@ fields:
         asserts:
           - |-
             验证一个可独立封装的模块或组件，通常仍然使用单测框架运行，外部依赖用 mock / fake / stub。
-            
+
             示例：
             - SDK client 使用 fake HTTP server。
             - SinkFunction 使用 fake SDK。
@@ -144,7 +151,7 @@ fields:
           - |-
             验证多个真实模块组合后的链路，尽量少 mock。
             重点看模块之间的协议、状态、错误传播、资源生命周期是否正确。
-            
+
             示例：
             - API + workflow + storage。
             - batch job + parser + sink + SDK。
@@ -165,13 +172,14 @@ fields:
   - !schema
     names:
       - "5. 测试环境与依赖"
-    format: table
-    element_types:
-      - Schema
+    type: array
+    format:
+      name: markdown
+      layout: table
     asserts:
       - |-
         说明测试需要哪些环境、依赖、配置、账号或资源。
-        
+
         注意：
         - 不要写明文 token、密钥、DSN 等敏感信息。
         - 如果依赖外部平台，需要说明测试环境和生产环境的差异。
@@ -179,29 +187,32 @@ fields:
       - |-
         表格示例行：
         | <环境或依赖> | <用途> | <配置方式> | <风险或限制> |
-    fields:
-      - !schema
-        names:
-          - "环境 / 依赖"
-      - !schema
-        names:
-          - "用途"
-      - !schema
-        names:
-          - "配置方式"
-      - !schema
-        names:
-          - "风险或限制"
+    item: !schema
+      type: object
+      fields:
+        - !schema
+          names:
+            - "环境 / 依赖"
+        - !schema
+          names:
+            - "用途"
+        - !schema
+          names:
+            - "配置方式"
+        - !schema
+          names:
+            - "风险或限制"
   - !schema
     names:
       - "6. 测试数据设计"
-    format: table
-    element_types:
-      - Schema
+    type: array
+    format:
+      name: markdown
+      layout: table
     asserts:
       - |-
         说明关键测试数据类别，不要求贴完整大样本。
-        
+
         建议覆盖：
         - 正常输入
         - 边界输入
@@ -213,19 +224,21 @@ fields:
       - |-
         表格示例行：
         | <数据类别> | <验证目的> | <样例说明> | <预期结果> |
-    fields:
-      - !schema
-        names:
-          - "数据类别"
-      - !schema
-        names:
-          - "目的"
-      - !schema
-        names:
-          - "样例说明"
-      - !schema
-        names:
-          - "预期结果"
+    item: !schema
+      type: object
+      fields:
+        - !schema
+          names:
+            - "数据类别"
+        - !schema
+          names:
+            - "目的"
+        - !schema
+          names:
+            - "样例说明"
+        - !schema
+          names:
+            - "预期结果"
   - !schema
     names:
       - "7. 关键验证场景"
@@ -269,31 +282,34 @@ fields:
   - !schema
     names:
       - "8. 失败场景验证"
-    format: table
-    element_types:
-      - Schema
+    type: array
+    format:
+      name: markdown
+      layout: table
     asserts:
       - |-
         列出必须验证的失败路径、超时、重试、幂等、降级、取消和资源释放场景。
         对长耗时、异步、并发、外部依赖调用尤其重要。
-        
+
         如果无法真实注入故障，可以说明使用 mock、fake server、测试开关或人工方式模拟。
       - |-
         表格示例行：
         | <故障场景> | <如何注入或模拟> | <系统应该如何表现> | <如何验证> |
-    fields:
-      - !schema
-        names:
-          - "故障场景"
-      - !schema
-        names:
-          - "注入方式"
-      - !schema
-        names:
-          - "预期行为"
-      - !schema
-        names:
-          - "验证方式"
+    item: !schema
+      type: object
+      fields:
+        - !schema
+          names:
+            - "故障场景"
+        - !schema
+          names:
+            - "注入方式"
+        - !schema
+          names:
+            - "预期行为"
+        - !schema
+          names:
+            - "验证方式"
   - !schema
     names:
       - "9. 兼容性与回归验证"
@@ -309,7 +325,7 @@ fields:
       - |-
         这一节回答两个问题：测试按什么顺序执行，以及满足什么条件才算测试通过。
         如果变更很小，可以写得很短；如果涉及平台、打包、上线或人工验证，必须写清楚。
-        
+
         建议包含：
         - 本地验证入口
         - CI / 端到端测试入口

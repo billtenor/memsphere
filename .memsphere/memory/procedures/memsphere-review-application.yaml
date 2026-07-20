@@ -1,4 +1,5 @@
 !procedure
+syntax: memsphere-20260719-stable
 names:
   - 处理 memsphere review 流程
   - 应用 memsphere review comments 流程

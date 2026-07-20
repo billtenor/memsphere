@@ -1,21 +1,4 @@
-export const legacySchemaFormats = ["outline", "table"] as const;
-export type LegacySchemaFormat = (typeof legacySchemaFormats)[number];
-
-export const schemaElementTypes = [
-  "string",
-  "number",
-  "boolean",
-  "Concept",
-  "Statement",
-  "Schema",
-  "Procedure",
-  "Action",
-  "Artifact",
-  "If",
-  "While",
-  "Call"
-] as const;
-export type SchemaElementType = (typeof schemaElementTypes)[number];
+import type { MemorySyntaxVersion } from "./syntax.js";
 
 export const builtInArtifactTypes = ["boolean", "number", "string", "object", "array"] as const;
 export type BuiltInArtifactType = (typeof builtInArtifactTypes)[number];
@@ -69,8 +52,11 @@ export type SchemaField = StaticSchemaField | RepeatNode;
 export type SchemaNode = CommonMemoryNode & {
   tag: "!schema";
   asserts?: string[];
-  element_types?: SchemaElementType[];
+  type?: ArtifactType;
+  format?: ArtifactFormatSpec;
   fields?: SchemaField[];
+  item?: SchemaNode;
+  items?: SchemaNode[];
 };
 
 export type ArtifactNode = {
@@ -119,8 +105,17 @@ export type ProcedureNode = CommonMemoryNode & {
   flow: FlowNode[];
 };
 
-export type ConceptMemory = ConceptNode;
-export type StatementMemory = StatementNode;
-export type SchemaMemory = SchemaNode;
-export type ProcedureMemory = ProcedureNode;
+export type VersionedMemory = {
+  syntax: MemorySyntaxVersion;
+};
+
+export type ConceptMemory = ConceptNode & VersionedMemory;
+export type StatementMemory = StatementNode & VersionedMemory;
+export type SchemaMemory = SchemaNode & VersionedMemory;
+export type ProcedureMemory = ProcedureNode & VersionedMemory;
 export type MemoryEntity = ConceptMemory | StatementMemory | SchemaMemory | ProcedureMemory;
+
+export function schemaNodeFromMemory(memory: SchemaMemory): SchemaNode {
+  const { syntax: _syntax, ...node } = memory;
+  return node;
+}

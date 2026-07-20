@@ -103,6 +103,32 @@ test("Schema navigation exposes fields under Repeat while retaining Repeat and p
   assert.equal(read.fragment, "Value");
 });
 
+test("Schema navigation exposes item and union items as recursive contracts", () => {
+  const schema: SchemaMemory = {
+    tag: "!schema",
+    names: ["Values"],
+    defines: [],
+    type: "array",
+    items: [
+      { tag: "!schema", names: [], defines: [], type: "string" },
+      { tag: "!schema", names: ["Record"], defines: [], type: "object", fields: ["ID"] }
+    ]
+  };
+  const navigation = new MemoryNavigation(identity("schemas", "Values"), schema);
+
+  assert.deepEqual(navigation.listChildren().nodes.map((node) => [node.node_ref, node.relation]), [
+    ["items[1]", "items"],
+    ["items[2]", "items"]
+  ]);
+  assert.deepEqual(navigation.listChildren("items[2]").nodes.map((node) => node.node_ref), [
+    "items[2]/string:ID"
+  ]);
+  const read = navigation.readNode("items[2]/string:ID");
+  assert.equal((read.context.root as SchemaMemory).items, undefined);
+  assert.equal(read.context.ancestors[0]?.relation, "items");
+  assert.equal(read.fragment, "ID");
+});
+
 function action(name: string, instruction = `Produce ${name}`): ProcedureMemory["flow"][number] {
   return {
     tag: "!action",
