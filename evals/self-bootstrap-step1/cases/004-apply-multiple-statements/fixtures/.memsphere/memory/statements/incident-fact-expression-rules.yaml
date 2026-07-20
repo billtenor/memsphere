@@ -1,4 +1,5 @@
 !statement
+syntax: memsphere-20260719-stable
 names:
   - 故障事实表达规则
   - incident fact expression rules
