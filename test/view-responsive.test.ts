@@ -316,7 +316,7 @@ test("procedure action contract fields can receive review comments", async () =>
       await page.locator(".comment-card").waitFor();
       assert.equal(await page.locator(".pill.outdated").count(), 0);
       await page.locator('[data-anchor="flow[1].asserts[1]"] .inline-thread-item').waitFor();
-      await page.getByRole("button", { name: "Open", exact: true }).click();
+      await page.getByRole("button", { name: "Go to", exact: true }).click();
       await page.locator('[data-anchor="flow[1].asserts[1]"] .inline-thread-item').waitFor();
       await page.getByRole("button", { name: "Edit", exact: true }).last().click();
       const editor = page.locator('[data-anchor="flow[1].asserts[1]"] .thread-edit-editor textarea');
