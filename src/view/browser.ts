@@ -110,7 +110,7 @@ export const browserHtml = String.raw`<!doctype html>
     .pill.human { color: #7b3f17; background: #fff1df; border-color: #e5c09c; }
     .pill.agent { color: #173f3c; background: #edf6f3; border-color: #b8cbc7; }
     .section { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); margin: 10px 0; overflow: hidden; }
-    .section-header { width: 100%; border: 0; background: transparent; text-align: left; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 12px 14px; color: var(--text); }
+    .section-header { width: 100%; border: 0; background: transparent; text-align: left; display: grid; grid-template-columns: 22px 24px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 12px 14px; color: var(--text); }
     .section-header:hover { background: #f4f5f1; }
     .chevron { color: var(--muted); transition: transform 120ms ease; }
     .section.open > .section-header .chevron { transform: rotate(90deg); }
@@ -123,13 +123,15 @@ export const browserHtml = String.raw`<!doctype html>
     .text-list li { margin: 5px 0; white-space: pre-wrap; }
     .commentable { position: relative; display: block; margin: 4px 0; width: 100%; }
     .review-active .commentable { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 7px; align-items: flex-start; }
-    .commentable-body { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .commentable-body { min-width: 0; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
     .inline-plus, .target-add { border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); padding: 0; }
     .inline-plus { width: 20px; height: 20px; line-height: 16px; opacity: 0; transition: opacity 120ms ease, border-color 120ms ease, color 120ms ease; }
-    .target-add { width: 24px; height: 24px; }
-    .review-active .commentable:hover .inline-plus, .review-active .field-table th:hover .inline-plus, .review-active .inline-plus:focus { opacity: 1; }
+    .target-add { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; line-height: 1; opacity: 0; transition: opacity 120ms ease, border-color 120ms ease, color 120ms ease; }
+    .review-active .commentable:hover .inline-plus, .review-active .field-table th:hover .inline-plus, .review-active .inline-plus:focus, .review-active .section-header:hover .target-add, .review-active .schema-field-content:hover .target-add, .review-active .target-add:focus { opacity: 1; }
     .inline-plus:hover, .target-add:hover { border-color: var(--accent); color: var(--accent); }
     body:not(.review-active) .target-add, body:not(.review-active) .inline-plus { display: none; }
+    body:not(.review-active) .section-header { grid-template-columns: 22px minmax(0, 1fr) auto; }
+    body:not(.review-active) .schema-field-content { grid-template-columns: minmax(0, 1fr) auto; }
     .inline-comment-editor { grid-column: 2; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 10px; box-shadow: var(--shadow); margin-top: 8px; width: 100%; }
     .inline-comment-editor textarea { margin-bottom: 8px; }
     .thread-edit-editor { grid-column: auto; margin: 2px 0 0; }
@@ -138,14 +140,15 @@ export const browserHtml = String.raw`<!doctype html>
     .definition-list > li > .section { min-width: 0; margin: 0; }
     .schema-node > .section-header .node-title { font-weight: 400; }
     .schema-field-list { margin-top: 0; }
-    .schema-field-content { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+    .schema-field-content { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
     .schema-field-plain .node-title { font-weight: 400; }
     .schema-field-type { color: var(--muted); font-size: 13px; }
-    .schema-field-type .target-add { margin-left: 8px; vertical-align: middle; }
     .field-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
     .field-table th, .field-table td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; white-space: pre-wrap; }
     .field-table th { width: 220px; background: #f3f5f0; font-weight: 700; }
     .flow-item { min-width: 0; border: 1px solid var(--line); border-left: 4px solid #a7b0a5; background: var(--surface); border-radius: 8px; padding: 10px 14px; box-shadow: var(--shadow); white-space: normal; }
+    .flow, .task-summary, .section-body, .task-result { min-width: 0; }
+    .flow > *, .task-summary > *, .section-body > *, .task-result > * { min-width: 0; }
     .flow-item.call { border-left-color: var(--accent); background: #f2f8f6; }
     .flow-item.branch { border-left-color: var(--warn); background: #fbf7f0; }
     .flow-head { display: grid; grid-template-columns: max-content minmax(220px, 1fr) max-content; gap: 12px; align-items: center; }
@@ -167,7 +170,7 @@ export const browserHtml = String.raw`<!doctype html>
     .task-result { margin-top: 8px; }
     .task-result .pre { margin-top: 6px; }
     .pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f3f5f0; border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin: 8px 0 0; }
-    .markdown-body { white-space: normal; overflow-wrap: anywhere; background: #f3f5f0; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin: 8px 0 0; line-height: 1.55; }
+    .markdown-body { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; background: #f3f5f0; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin: 8px 0 0; line-height: 1.55; }
     .markdown-body > :first-child { margin-top: 0; }
     .markdown-body > :last-child { margin-bottom: 0; }
     .markdown-body p { margin: 6px 0; }
@@ -183,7 +186,7 @@ export const browserHtml = String.raw`<!doctype html>
     .markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 12px; background: #e9ece6; border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; }
     .markdown-body pre { margin: 8px 0; background: #e9ece6; border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; overflow-x: auto; }
     .markdown-body pre code { background: none; border: 0; padding: 0; white-space: pre; }
-    .markdown-table-scroll { max-width: 100%; overflow-x: auto; margin: 8px 0; }
+    .markdown-table-scroll { width: 100%; min-width: 0; max-width: 100%; overflow-x: auto; contain: inline-size; margin: 8px 0; }
     .markdown-body table { width: max-content; min-width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); }
     .markdown-body th, .markdown-body td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; white-space: nowrap; }
     .markdown-body th { background: #f3f5f0; font-weight: 700; }
@@ -1341,9 +1344,11 @@ export const browserHtml = String.raw`<!doctype html>
     function renderGeneric(entity) {
       const box = document.createElement("div");
       box.className = "section open";
-      box.append(sectionHeader("", entity.tag || "memory", primaryName(entity), "section:" + primaryName(entity)));
+      const headerAnchor = "section:" + primaryName(entity);
+      box.append(sectionHeader("", entity.tag || "memory", primaryName(entity), headerAnchor));
       const body = document.createElement("div");
       body.className = "section-body";
+      appendSectionHeaderThread(body, headerAnchor, "");
       appendNames(body, entity);
       appendTextBlocks(body, entity);
       box.append(body);
@@ -1356,11 +1361,13 @@ export const browserHtml = String.raw`<!doctype html>
       const badges = ["!schema"];
       if (node.format) badges.push("format: " + node.format);
       const name = depth === 0 ? "" : displayName(node, fallbackName);
-      section.append(sectionHeader(name, badges, path, "schema:" + path));
+      const headerAnchor = "schema:" + path;
+      section.append(sectionHeader(name, badges, path, headerAnchor));
       const body = document.createElement("div");
       body.className = "section-body";
+      appendSectionHeaderThread(body, headerAnchor, name);
       if (depth === 0) appendNames(body, node);
-      appendTextBlocks(body, node);
+      appendTextBlocks(body, node, path);
       appendSchemaElementTypes(body, node.element_types);
       if (node.format === "table" && node.fields?.length) {
         body.append(blockTitle(t("fields")), renderTableFields(node.fields, path));
@@ -1392,9 +1399,12 @@ export const browserHtml = String.raw`<!doctype html>
       section.className = "section schema-node" + (depth < 2 ? " open" : "");
       const min = node.limit && node.limit.min !== undefined ? node.limit.min : 0;
       const max = node.limit && node.limit.max !== undefined ? node.limit.max : "unbounded";
-      section.append(sectionHeader(t("repeat"), ["!repeat", "min: " + min, "max: " + max], path, "schema:" + path));
+      const name = t("repeat");
+      const headerAnchor = "schema:" + path;
+      section.append(sectionHeader(name, ["!repeat", "min: " + min, "max: " + max], path, headerAnchor));
       const body = document.createElement("div");
       body.className = "section-body";
+      appendSectionHeaderThread(body, headerAnchor, name);
       const children = document.createElement("div");
       children.className = "child-stack";
       for (const child of node.body || []) {
@@ -1416,8 +1426,9 @@ export const browserHtml = String.raw`<!doctype html>
       section.append(sectionHeader(name, "!statement", path, anchor));
       const body = document.createElement("div");
       body.className = "section-body";
+      appendSectionHeaderThread(body, anchor, name);
       if (depth === 0) appendNames(body, node);
-      appendTextBlocks(body, node);
+      appendTextBlocks(body, node, path);
       if (node.sections && node.sections.length) {
         const children = document.createElement("div");
         children.className = "child-stack";
@@ -1448,6 +1459,7 @@ export const browserHtml = String.raw`<!doctype html>
       const button = document.createElement("button");
       button.className = "section-header";
       button.dataset.anchor = location.anchor;
+      button.dataset.commentSnapshot = String(text ?? "");
       button.id = domIdForAnchor(location.anchor);
       button.innerHTML = '<span class="chevron">›</span><span class="node-title"></span><span class="node-badges"></span>';
       button.querySelector(".node-title").textContent = text;
@@ -1463,24 +1475,32 @@ export const browserHtml = String.raw`<!doctype html>
       targetButton.title = "Add review comment";
       targetButton.addEventListener("click", (event) => {
         event.stopPropagation();
-        openInlineEditor(button.parentElement, target || text, text, withLocationHash(location, text));
+        event.preventDefault();
+        const section = button.parentElement;
+        section.classList.add("open");
+        openInlineEditor(section.querySelector(".section-body") || section, target || text, text, withLocationHash(location, text), {}, true);
       });
-      button.append(targetButton);
+      button.insertBefore(targetButton, button.querySelector(".node-title"));
       button.addEventListener("click", () => button.parentElement.classList.toggle("open"));
       return button;
     }
 
-    function appendTextBlocks(target, node) {
-      appendDefinitions(target, node.defines);
-      appendList(target, t("asserts"), node.asserts, "asserts");
-      appendList(target, t("suggests"), node.suggests, "suggests");
+    function appendSectionHeaderThread(body, anchor, snapshot) {
+      const thread = renderInlineThread(anchor, snapshot);
+      if (thread) body.append(thread);
+    }
+
+    function appendTextBlocks(target, node, path = "") {
+      appendDefinitions(target, node.defines, path);
+      appendList(target, t("asserts"), node.asserts, "asserts", path);
+      appendList(target, t("suggests"), node.suggests, "suggests", path);
     }
 
     function appendNames(target, node) {
       appendList(target, t("names"), node.names, "names");
     }
 
-    function appendDefinitions(target, definitions) {
+    function appendDefinitions(target, definitions, path = "") {
       if (!definitions || !definitions.length) return;
       const title = document.createElement("div");
       title.className = "block-title";
@@ -1495,7 +1515,9 @@ export const browserHtml = String.raw`<!doctype html>
         for (const entry of strings) {
           const item = document.createElement("li");
           const label = t("defines") + "[" + (entry.index + 1) + "]";
-          item.append(commentable(entry.value, label, entry.value, "defines[" + (entry.index + 1) + "]"));
+          const legacyAnchor = "defines[" + (entry.index + 1) + "]";
+          const anchor = path ? path + "." + legacyAnchor : legacyAnchor;
+          item.append(commentable(entry.value, label, entry.value, anchor, {}, legacyAnchor));
           list.append(item);
         }
         target.append(list);
@@ -1524,7 +1546,7 @@ export const browserHtml = String.raw`<!doctype html>
       return item;
     }
 
-    function appendList(target, heading, values, key) {
+    function appendList(target, heading, values, key, path = "") {
       if (!values || !values.length) return;
       const title = document.createElement("div");
       title.className = "block-title";
@@ -1534,7 +1556,9 @@ export const browserHtml = String.raw`<!doctype html>
       values.forEach((value, index) => {
         const item = document.createElement("li");
         const label = heading + "[" + (index + 1) + "]";
-        item.append(commentable(value, label, value, key + "[" + (index + 1) + "]"));
+        const legacyAnchor = key + "[" + (index + 1) + "]";
+        const anchor = path ? path + "." + legacyAnchor : legacyAnchor;
+        item.append(commentable(value, label, value, anchor, {}, legacyAnchor));
         list.append(item);
       });
       target.append(title, list);
@@ -1553,7 +1577,7 @@ export const browserHtml = String.raw`<!doctype html>
         const fieldAnchor = "field:" + fieldTarget;
         const fieldLocation = nextLocation(fieldAnchor);
         th.dataset.anchor = fieldLocation.anchor;
-        th.append(commentButton(fieldTarget, fieldName, withLocationHash(fieldLocation, fieldName)));
+        th.prepend(commentButton(fieldTarget, fieldName, withLocationHash(fieldLocation, fieldName)));
         const td = document.createElement("td");
         const parts = [];
         if (typeof field !== "string") {
@@ -1594,8 +1618,7 @@ export const browserHtml = String.raw`<!doctype html>
       targetButton.addEventListener("click", () => {
         openInlineEditor(field, path, name, withLocationHash(location, name));
       });
-      meta.append(targetButton);
-      content.append(title, meta);
+      content.append(targetButton, title, meta);
       field.append(content);
       list.append(field);
       return list;
@@ -2035,20 +2058,22 @@ export const browserHtml = String.raw`<!doctype html>
       return item;
     }
 
-    function commentable(content, target, snapshot, anchor, context = {}) {
+    function commentable(content, target, snapshot, anchor, context = {}, legacyAnchor = "") {
       const location = nextLocation(anchor || target);
       const locationWithHash = withLocationHash(location, snapshot);
       const wrap = document.createElement("div");
       wrap.className = "commentable";
       wrap.dataset.anchor = location.anchor;
+      if (legacyAnchor && legacyAnchor !== location.anchor) wrap.dataset.legacyAnchor = legacyAnchor;
       wrap.id = domIdForAnchor(location.anchor);
       wrap.append(commentButton(target, snapshot, locationWithHash, context));
       const body = document.createElement("div");
       body.className = "commentable-body";
+      body.dataset.commentSnapshot = String(snapshot ?? "");
       if (content instanceof Node) body.append(content);
       else body.textContent = String(content);
       wrap.append(body);
-      const thread = renderInlineThread(location.anchor, snapshot);
+      const thread = renderInlineThread(location.anchor, snapshot, legacyAnchor);
       if (thread) wrap.append(thread);
       return wrap;
     }
@@ -2066,7 +2091,7 @@ export const browserHtml = String.raw`<!doctype html>
       return button;
     }
 
-    function openInlineEditor(host, target, snapshot, location, context = {}) {
+    function openInlineEditor(host, target, snapshot, location, context = {}, insertAtStart = false) {
       if (!canComment() || !host) return;
       closeInlineEditors();
       const editor = document.createElement("div");
@@ -2089,13 +2114,15 @@ export const browserHtml = String.raw`<!doctype html>
           textarea.focus();
           return;
         }
-        await addComment(target, snapshot, body, location, context);
+        const comment = await addComment(target, snapshot, body, location, context);
         editor.remove();
+        if (comment) scrollToComment(comment);
       });
       cancel.addEventListener("click", () => editor.remove());
       actions.append(save, cancel);
       editor.append(textarea, actions);
-      host.append(editor);
+      if (insertAtStart) host.prepend(editor);
+      else host.append(editor);
       textarea.focus();
     }
 
@@ -2128,21 +2155,23 @@ export const browserHtml = String.raw`<!doctype html>
       return String(value ?? "").replace(/\r\n/g, "\n").trim();
     }
 
-    function commentsForAnchor(anchor, snapshot) {
+    function commentsForAnchor(anchor, snapshot, legacyAnchor = "") {
       const review = selectedReview();
       const subject = currentReviewSubject();
       if (!review || !subject) return [];
       return review.comments.filter(comment => {
         if (comment.memoryId !== subject.id) return false;
-        const anchorMatches = comment.location?.anchor ? comment.location.anchor === anchor : comment.target === anchor;
+        const anchorMatches = comment.location?.anchor
+          ? comment.location.anchor === anchor || (legacyAnchor && comment.location.anchor === legacyAnchor)
+          : comment.target === anchor;
         if (!anchorMatches) return false;
         if (!comment.location?.hash) return true;
         return comment.location.hash === hashSnapshot(snapshot);
       });
     }
 
-    function renderInlineThread(anchor, snapshot) {
-      const comments = commentsForAnchor(anchor, snapshot);
+    function renderInlineThread(anchor, snapshot, legacyAnchor = "") {
+      const comments = commentsForAnchor(anchor, snapshot, legacyAnchor);
       if (!comments.length) return null;
       const thread = document.createElement("div");
       thread.className = "inline-thread";
@@ -2271,7 +2300,7 @@ export const browserHtml = String.raw`<!doctype html>
       const review = selectedReview();
       const subject = currentReviewSubject();
       if (!subject || !review || !canComment()) return;
-      const comments = review.comments.concat({
+      const comment = {
         id: uuid(),
         source: subject.source,
         memoryId: subject.id,
@@ -2286,8 +2315,10 @@ export const browserHtml = String.raw`<!doctype html>
         snapshot: snapshot === undefined ? undefined : String(snapshot),
         body,
         createdAt: new Date().toISOString()
-      });
+      };
+      const comments = review.comments.concat(comment);
       await patchReview(review.id, { comments });
+      return comment;
     }
 
     async function removeComment(id) {
@@ -2449,9 +2480,11 @@ export const browserHtml = String.raw`<!doctype html>
 
     function scrollToComment(comment) {
       if (isCommentOutdated(comment)) return;
-      const anchor = comment.location?.anchor || comment.target || "";
-      const target = document.getElementById(domIdForAnchor(anchor)) || document.querySelector('[data-anchor="' + CSS.escape(anchor) + '"]');
+      const target = findCommentTarget(comment);
       if (target) {
+        for (const section of target.closest(".content")?.querySelectorAll(".section") || []) {
+          if (section.contains(target)) section.classList.add("open");
+        }
         target.scrollIntoView({ block: "center", behavior: "smooth" });
       }
     }
@@ -2477,9 +2510,18 @@ export const browserHtml = String.raw`<!doctype html>
       if (!comment.location?.hash) return false;
       const subject = currentReviewSubject();
       if (!subject || subject.id !== comment.memoryId) return false;
-      const node = document.querySelector('[data-anchor="' + CSS.escape(comment.location.anchor) + '"] .commentable-body');
-      if (!node) return true;
-      return hashSnapshot(node.textContent || "") !== comment.location.hash;
+      return !findCommentTarget(comment);
+    }
+
+    function findCommentTarget(comment) {
+      const anchor = comment.location?.anchor || comment.target || "";
+      const selector = '[data-anchor="' + CSS.escape(anchor) + '"], [data-legacy-anchor="' + CSS.escape(anchor) + '"]';
+      const candidates = [...document.querySelectorAll(selector)];
+      if (!comment.location?.hash) return candidates[0] || null;
+      return candidates.find(node => {
+        const snapshot = node.dataset.commentSnapshot ?? node.querySelector(".commentable-body")?.dataset.commentSnapshot;
+        return snapshot !== undefined && hashSnapshot(snapshot) === comment.location.hash;
+      }) || null;
     }
 
     function commentTitle(comment) {

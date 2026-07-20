@@ -133,6 +133,45 @@ test("Review has accessible open and close controls", () => {
   assert.match(browserHtml, /body\.review-drawer-open \.review \{ overflow: auto; visibility: visible; pointer-events: auto;/);
 });
 
+test("node comment controls stay contextual instead of permanently occupying headers", () => {
+  assert.match(browserHtml, /\.target-add \{ width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; line-height: 1; opacity: 0;/);
+  assert.match(browserHtml, /\.review-active \.section-header:hover \.target-add/);
+  assert.match(browserHtml, /body:not\(\.review-active\) \.section-header \{ grid-template-columns: 22px minmax\(0, 1fr\) auto; \}/);
+  assert.match(browserHtml, /body:not\(\.review-active\) \.schema-field-content \{ grid-template-columns: minmax\(0, 1fr\) auto; \}/);
+});
+
+test("comment controls lead their node content and node editors open at the top", () => {
+  assert.match(browserHtml, /grid-template-columns: 22px 24px minmax\(0, 1fr\) auto/);
+  assert.match(browserHtml, /button\.insertBefore\(targetButton, button\.querySelector\("\.node-title"\)\)/);
+  assert.match(browserHtml, /th\.prepend\(commentButton/);
+  assert.match(browserHtml, /content\.append\(targetButton, title, meta\)/);
+  assert.match(browserHtml, /if \(insertAtStart\) host\.prepend\(editor\);/);
+});
+
+test("comment freshness compares the saved source snapshot instead of rendered control text", () => {
+  assert.match(browserHtml, /body\.dataset\.commentSnapshot = String\(snapshot \?\? ""\);/);
+  assert.match(browserHtml, /button\.dataset\.commentSnapshot = String\(text \?\? ""\);/);
+  assert.match(browserHtml, /data-legacy-anchor/);
+  assert.match(browserHtml, /hashSnapshot\(snapshot\) === comment\.location\.hash/);
+  assert.doesNotMatch(browserHtml, /hashSnapshot\(node\.textContent \|\| ""\)/);
+});
+
+test("saving a comment restores its expanded, anchored location", () => {
+  assert.match(browserHtml, /const comment = await addComment\(target, snapshot, body, location, context\);/);
+  assert.match(browserHtml, /if \(comment\) scrollToComment\(comment\);/);
+  assert.match(browserHtml, /node\.dataset\.commentSnapshot \?\? node\.querySelector\("\.commentable-body"\)\?\.dataset\.commentSnapshot/);
+});
+
+test("section title comments render inline in the expanded node", () => {
+  assert.match(browserHtml, /function appendSectionHeaderThread\(body, anchor, snapshot\)/);
+  assert.match(browserHtml, /appendSectionHeaderThread\(body, headerAnchor, name\);/);
+});
+
+test("opening a legacy comment falls back to its nested legacy anchor", () => {
+  assert.match(browserHtml, /\[data-legacy-anchor="' \+ CSS\.escape\(anchor\) \+ '"\]/);
+  assert.match(browserHtml, /section\.contains\(target\)\) section\.classList\.add\("open"\)/);
+});
+
 test("browser exposes reserved memory controls", () => {
   assert.match(browserHtml, /\/api\/reserved-memories/);
   assert.match(browserHtml, /\/api\/reserved-memories\/import/);
@@ -152,7 +191,7 @@ test("browser exposes archive controls for done reviews and runs", () => {
 test("browser renders recursive Statement sections and keeps suggestions separate", () => {
   assert.match(browserHtml, /suggests: \{ zh: "建议", yaml: "suggests" \}/);
   assert.match(browserHtml, /sections: \{ zh: "章节", yaml: "sections" \}/);
-  assert.match(browserHtml, /appendList\(target, t\("suggests"\), node\.suggests, "suggests"\)/);
+  assert.match(browserHtml, /appendList\(target, t\("suggests"\), node\.suggests, "suggests", path\)/);
   assert.match(browserHtml, /memory\.kind === "statements"\) el\.detail\.append\(renderStatement/);
   assert.match(browserHtml, /function renderStatement\(node, depth, path, fallbackName = t\("statements"\), anchor = "statement:" \+ path\)/);
   assert.match(browserHtml, /for \(const \[index, child\] of node\.sections\.entries\(\)\)/);

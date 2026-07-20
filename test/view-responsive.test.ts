@@ -17,7 +17,21 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
   const reviewsRoot = join(dir, "reviews");
   const runsRoot = join(dir, "runs");
   const runDir = join(runsRoot, runId);
-  await Promise.all([mkdir(memoryRoot, { recursive: true }), mkdir(reviewsRoot, { recursive: true }), mkdir(join(runDir, "artifacts"), { recursive: true })]);
+  await Promise.all([mkdir(join(memoryRoot, "schemas"), { recursive: true }), mkdir(reviewsRoot, { recursive: true }), mkdir(join(runDir, "artifacts"), { recursive: true })]);
+
+  await writeFile(join(memoryRoot, "schemas", "reviewable-schema.yaml"), [
+    "!schema",
+    "names: [ Reviewable schema ]",
+    "defines: [ A schema fixture for inline review. ]",
+    "asserts:",
+    "  - A newly added comment must remain current.",
+    "fields:",
+    "  - !schema",
+    "    names: [ Background ]",
+    "    fields:",
+    "      - !schema",
+    "        names: [ Requirement source ]"
+  ].join("\n"));
 
   const artifactPath = join(runDir, "artifacts", "001-wide-table.md");
   await writeFile(artifactPath, [
@@ -26,6 +40,7 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     `| Wide content | ${"x".repeat(240)} |`
   ].join("\n"));
   const run: RunState = {
+    contractVersion: 2,
     id: runId,
     status: "done",
     procedureName: "Responsive browser fixture",
@@ -38,7 +53,9 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
       kind: "action" as const,
       instruction: `A deliberately long instruction ${index + 1} verifies that the flow header can shrink inside its column.`,
       artifact: index === 0 ? "wide table" : `result ${index + 1}`,
-      format: "markdown" as const
+      type: "string",
+      format: { name: "markdown", options: {} },
+      final: index === 0
     })),
     events: [{
       at: "2026-07-19T00:00:00.000Z",
@@ -46,7 +63,9 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
       stepId: "flow[1]",
       artifact: {
         name: "wide table",
-        format: "markdown",
+        type: "string",
+        format: { name: "markdown", options: {} },
+        final: true,
         storage: "file",
         path: `${runId}/artifacts/001-wide-table.md`
       }
@@ -84,7 +103,7 @@ async function openTaskPage(browser: Browser, url: string, width: number): Promi
   await page.goto(url);
   await page.getByRole("button", { name: "Task", exact: true }).click();
   await page.locator(".task-card-main").first().click();
-  await page.locator(".markdown-table-scroll").waitFor();
+  await page.locator(".markdown-table-scroll").first().waitFor();
   return page;
 }
 
@@ -157,7 +176,7 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
     try {
       await assertPageDoesNotOverflow(narrowPage);
       assert.equal(await narrowPage.locator(".flow-head").first().evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length), 1);
-      const scrollBox = narrowPage.locator(".markdown-table-scroll");
+      const scrollBox = narrowPage.locator(".markdown-table-scroll").first();
       const box = await scrollBox.boundingBox();
       assert(box);
       await narrowPage.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -168,6 +187,36 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
       await assertPageDoesNotOverflow(narrowPage);
     } finally {
       await narrowPage.close();
+    }
+  });
+});
+
+test("a newly added memory comment is current until its source text changes", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+    page.setDefaultTimeout(5_000);
+    try {
+      await page.goto(url);
+      await page.getByRole("button", { name: "Memory", exact: true }).click();
+      await page.getByRole("button", { name: "Reviewable schema", exact: true }).click();
+      const fieldHeader = page.locator(".section-header").filter({ hasText: "Background" }).first();
+      const title = fieldHeader.locator(".node-title");
+      assert.equal(await fieldHeader.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length), 3);
+      assert((await title.boundingBox())!.width > 100);
+      await page.getByRole("button", { name: "Review", exact: true }).click();
+      await page.getByRole("button", { name: "Create Review", exact: true }).click();
+      await fieldHeader.waitFor();
+      await page.waitForFunction(() => document.body.classList.contains("review-active"));
+      assert.equal(await fieldHeader.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length), 4);
+      assert((await title.boundingBox())!.width > 100);
+      const assertComment = page.locator('[data-anchor="Reviewable schema.asserts[1]"] .inline-plus, [data-legacy-anchor="asserts[1]"] .inline-plus').first();
+      await assertComment.click({ force: true });
+      await page.getByPlaceholder("What should change here?").fill("Keep this comment current.");
+      await page.getByRole("button", { name: "Add comment", exact: true }).click();
+      await page.locator(".comment-card").waitFor();
+      assert.equal(await page.locator(".pill.outdated").count(), 0);
+    } finally {
+      await page.close();
     }
   });
 });
