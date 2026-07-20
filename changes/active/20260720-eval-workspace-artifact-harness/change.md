@@ -1,8 +1,16 @@
+---
+id: 20260720-eval-workspace-artifact-harness
+status: todo
+type: feature
+created: 2026-07-20
+run_id:
+---
+
 # Eval Workspace Artifact Harness 需求
 
-状态：Proposed
+## 需求管理摘要
 
-日期：2026-07-20
+现有 eval 脚本能够创建隔离 workspace，但尚未实现期望 Artifact 声明、Validation Round、向同一 Agent 反馈并续接修正以及完整证据持久化，因此当前状态为 todo。
 
 ## 背景
 
@@ -12,8 +20,8 @@ Memsphere 已支持在 `memsphere run report` 时依据 Artifact 的 type、form
 
 现有相关能力：
 
-- `docs/self-bootstrap-artifact-validation-feedback-requirements.md` 定义 `run report` 阶段的 Artifact validator 和结构化 issues。
-- `docs/eval-cli-and-view-requirements.md` 定义 Eval Case、Case Execution、机器 Harness 契约和 Validation Round。
+- `changes/archive/completed/20260716-report-artifact-validation-feedback/change.md` 定义 `run report` 阶段的 Artifact validator 和结构化 issues。
+- `changes/active/20260718-eval-cli-and-view/change.md` 定义 Eval Case、Case Execution、机器 Harness 契约和 Validation Round。
 - 本需求负责把已有 Artifact validator 接入 Eval workspace 产物验收，不重新实现一套格式校验器。
 
 ## 问题

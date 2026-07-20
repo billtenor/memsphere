@@ -1,6 +1,16 @@
+---
+id: 20260717-self-bootstrap-evaluation-steps
+status: accepting
+type: feature
+created: 2026-07-17
+run_id:
+---
+
 # memsphere 自举评测步骤规划
 
-> 状态：讨论稿。本文记录 self-bootstrap 评测集的分步建设思路，具体 case 和步骤顺序可在建设过程中继续调整。
+## 需求管理摘要
+
+Step 0、Step 1 和 Step 2 的 Suite 与 Case 已经完成建设并具备运行条件；尚需完成真实 Agent 全量评测并整理验收结论，因此当前状态为 accepting。
 
 ## 背景
 

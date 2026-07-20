@@ -1,3 +1,11 @@
+---
+id: 20260716-artifact-contract-v2
+type: feature
+created: 2026-07-16
+completed_at: 2026-07-18
+run_id:
+---
+
 # Procedure Action Artifact Contract v2 需求
 
 ## 目标
@@ -122,3 +130,10 @@ memsphere migrate artifact-contract-v2 --write
 - `test/fixtures/artifact-format-validation/` 九组结构错误全部稳定失败。
 - report 失败前后 Run JSON 和 artifacts 目录字节级不变，修正后只产生一次成功 event。
 - View 展示 type、format、layout、Schema、final、validation 和 v1 只读状态。
+
+## 验收结果
+
+- Artifact Contract 已按 `type -> format -> schema` 实现，内置类型、格式和递归 Schema 校验已接入 Run report。
+- v1 迁移器、只读兼容、View 展示和九组格式错误 fixture 均有自动化覆盖。
+- 主要实现提交包括 `ab30755`、`85e4c6f` 和 `5ff96d0`。
+- 2026-07-20 全量测试通过：202 passed，0 failed。

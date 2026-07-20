@@ -1,8 +1,16 @@
+---
+id: 20260718-eval-cli-and-view
+status: todo
+type: feature
+created: 2026-07-18
+run_id:
+---
+
 # Eval CLI、Procedure 协同与 View 展示需求
 
-状态：Proposed
+## 需求管理摘要
 
-日期：2026-07-18
+当前仓库只有公开 eval shell harness 和评测用例，尚未实现本文要求的 `memsphere eval` CLI、Eval Store、Procedure Batch 协同和 View Eval 页面，因此当前状态为 todo。
 
 ## 背景
 
@@ -30,9 +38,9 @@ memsphere 已经建设 `self-bootstrap-step0`、`self-bootstrap-step1` 和 `self
 
 ## 相关需求
 
-- `docs/self-bootstrap-artifact-validation-feedback-requirements.md` 定义 Artifact 独立验证、最小纠错反馈和同一子 Agent 修正闭环。本需求引用该专项能力，不重复其 validator 细节。
-- `docs/self-bootstrap-evaluation-steps.md` 定义 self-bootstrap 各 Step 的认知顺序和 Case 建设原则。本需求不改变 Case 的考题语义。
-- `docs/reserved-memory-self-bootstrap-design.md` 定义自举验收目标、干净上下文和 Memory 自举边界。
+- `changes/archive/completed/20260716-report-artifact-validation-feedback/change.md` 定义 Artifact 独立验证、最小纠错反馈和同一子 Agent 修正闭环。本需求引用该专项能力，不重复其 validator 细节。
+- `changes/active/20260717-self-bootstrap-evaluation-steps/change.md` 定义 self-bootstrap 各 Step 的认知顺序和 Case 建设原则。本需求不改变 Case 的考题语义。
+- `changes/active/20260716-reserved-memory-self-bootstrap/change.md` 定义自举验收目标、干净上下文和 Memory 自举边界。
 - `evals/README.md` 描述当前脚本和临时目录，是本需求实施前的现状，不作为长期产品契约。
 
 ## 核心问题
