@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import { initCommand } from "../src/commands/init.js";
 import { DefaultMemoryCatalog } from "../src/memory/catalog.js";
@@ -34,6 +34,8 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   const names = new Map<string, string>();
 
   for (const file of files) {
+    assert.match(basename(file.path), /^memsphere-/);
+    assert.equal(file.entity.names.at(-1), basename(file.path, ".yaml"));
     for (const name of file.entity.names) {
       assert.equal(names.has(name), false, `duplicate reserved memory name: ${name}`);
       names.set(name, file.path);
@@ -42,31 +44,112 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
 
   for (const expected of [
     "Memory",
+    "memsphere-memory",
     "Memsphere",
+    "memsphere-framework",
     "Concept",
+    "memsphere-concept",
     "Statement",
+    "memsphere-statement",
     "Schema",
+    "memsphere-schema",
     "Procedure",
-    "Procedure entity schema",
+    "memsphere-procedure",
+    "Concept Schema",
+    "memsphere-concept-schema",
+    "Statement Schema",
+    "memsphere-statement-schema",
+    "Procedure Schema",
+    "memsphere-procedure-schema",
+    "Schema Schema",
+    "memsphere-schema-schema",
     "Memory 访问规则",
+    "memsphere-memory-access-rules",
     "Memsphere YAML 语法规则",
+    "memsphere-yaml-syntax-rules",
     "敏捷需求开发流程",
+    "需求敏捷开发流程",
+    "memsphere-agile-requirement-development",
     "Procedure 提取流程",
+    "memsphere-procedure-construction",
     "memsphere review 流程",
-    "通用流程"
+    "memsphere-review",
+    "通用流程",
+    "兜底流程",
+    "memsphere-general-task-execution"
   ]) {
     assert(names.has(expected), `missing reserved memory: ${expected}`);
   }
+  for (const removed of [
+    "Concept entity schema",
+    "Statement entity schema",
+    "Procedure entity schema",
+    "Schema entity schema",
+    "Memory discovery and read rules",
+    "Memsphere YAML syntax rules"
+  ]) {
+    assert.equal(names.has(removed), false, `obsolete reserved memory name: ${removed}`);
+  }
 
-  const memory = files.find((file) => file.entity.names[0] === "Memory");
+  const memory = files.find((file) => file.entity.names.includes("memsphere-memory"));
   assert(memory);
+  for (const [conceptName, schemaReference] of [
+    ["memsphere-concept", "schemas/Concept Schema"],
+    ["memsphere-statement", "schemas/Statement Schema"],
+    ["memsphere-procedure", "schemas/Procedure Schema"],
+    ["memsphere-schema", "schemas/Schema Schema"]
+  ]) {
+    const concept = files.find((file) => file.entity.names.includes(conceptName));
+    assert(concept?.entity.tag === "!concept");
+    assert(concept.entity.defines.some((definition) =>
+      typeof definition === "object" &&
+      definition.tag === "!ref" &&
+      definition.target === schemaReference
+    ));
+    assert.equal(concept.entity.defines.some((definition) =>
+      typeof definition === "object" && definition.tag === "!schema"
+    ), false);
+  }
+  for (const [entitySchemaName, expectedFields] of [
+    ["memsphere-concept-schema", ["syntax", "name", "names", "defines", "extends"]],
+    ["memsphere-statement-schema", ["syntax", "name", "names", "defines", "asserts", "suggests", "sections"]],
+    ["memsphere-procedure-schema", ["syntax", "name", "names", "defines", "asserts", "goals", "flow"]],
+    ["memsphere-schema-schema", ["syntax", "name", "names", "defines", "asserts", "optional", "type", "format", "fields", "item", "items"]]
+  ] as const) {
+    const entitySchema = files.find((file) => file.entity.names.includes(entitySchemaName));
+    assert(entitySchema?.entity.tag === "!schema");
+    const fields = (entitySchema.entity.fields ?? []).map((field) => {
+      assert(typeof field === "object" && field.tag === "!schema");
+      return { name: field.names[0], optional: field.optional === true };
+    });
+    assert.deepEqual(fields.map((field) => field.name), expectedFields);
+    assert.equal(fields[0]?.optional, false);
+    assert(fields.slice(1).every((field) => field.optional));
+  }
   assert(files.every((file) => file.entity.syntax === currentMemorySyntax));
-  assert(memory.entity.defines.every((definition) => typeof definition === "string"));
+  assert(memory.entity.defines.some((definition) => typeof definition === "object" && definition.tag === "!statement"));
   assert.equal(manifest.version, 2);
   assert.equal("memory_syntax" in manifest ? manifest.memory_syntax : undefined, currentMemorySyntax);
-  assert.equal(manifest.system_memory.install.length, 11);
+  assert.equal(manifest.system_memory.install.length, 15);
   assert.deepEqual(manifest.system_memory.remove, [
+    "concepts/memory.yaml",
+    "concepts/memsphere.yaml",
+    "concepts/concept.yaml",
+    "concepts/statement.yaml",
+    "concepts/procedure.yaml",
+    "concepts/schema.yaml",
+    "schemas/concept.yaml",
+    "schemas/statement.yaml",
+    "schemas/procedure.yaml",
+    "schemas/schema.yaml",
+    "schemas/concept-entity-schema.yaml",
+    "schemas/statement-entity-schema.yaml",
+    "schemas/procedure-entity-schema.yaml",
+    "schemas/schema-entity-schema.yaml",
+    "statements/memory-access-rules.yaml",
     "statements/memory-interpretation-application-rules.yaml",
+    "procedures/general-task-execution.yaml",
+    "procedures/procedure-construction.yaml",
     "procedures/dialogic-procedure-construction.yaml",
     "procedures/memsphere-review-application.yaml"
   ]);
@@ -80,11 +163,11 @@ test("init installs system memory and keeps other bundled memory reserved", asyn
     const memoryRoot = join(scopeRoot, "memory");
     const items = await listReservedMemories(scopeRoot, memoryRoot);
 
-    assert(items.some((item) => item.path === "schemas/concept.yaml"));
-    assert(items.some((item) => item.path === "procedures/agile-requirement-development.yaml"));
-    assert.equal(items.some((item) => item.path === "procedures/procedure-construction.yaml"), false);
+    assert(items.some((item) => item.path === "procedures/memsphere-agile-requirement-development.yaml"));
+    assert.equal(items.some((item) => item.path === "concepts/memsphere-concept.yaml"), false);
+    assert.equal(items.some((item) => item.path === "schemas/memsphere-concept-schema.yaml"), false);
+    assert.equal(items.some((item) => item.path === "procedures/memsphere-procedure-construction.yaml"), false);
     assert.equal(items.some((item) => item.path === "procedures/memsphere-review.yaml"), false);
-    assert.equal(items.some((item) => item.path === "concepts/concept.yaml"), false);
     assert(items.length > 0);
     assert(items.every((item) => item.error === undefined));
     assert(items.every((item) => item.imported === false));
@@ -95,7 +178,10 @@ test("init installs system memory and keeps other bundled memory reserved", asyn
     assert(catalog.memories.some((item) => item.reference === "procedures/Procedure 提取流程"));
     assert(catalog.memories.some((item) => item.reference === "procedures/memsphere review 流程"));
     assert.equal(catalog.memories.some((item) => item.reference === "procedures/敏捷需求开发流程"), false);
-    assert.equal(catalog.memories.some((item) => item.reference === "schemas/Concept entity schema"), false);
+    assert(catalog.memories.some((item) => item.reference === "schemas/Concept Schema"));
+    assert(catalog.memories.some((item) => item.reference === "schemas/Statement Schema"));
+    assert(catalog.memories.some((item) => item.reference === "schemas/Procedure Schema"));
+    assert(catalog.memories.some((item) => item.reference === "schemas/Schema Schema"));
   });
 });
 
@@ -104,8 +190,8 @@ test("reserved memory install rebuilds managed files", async () => {
     const scopeRoot = join(dir, ".memsphere");
     await installReservedMemories(scopeRoot);
 
-    const target = join(reservedMemoryRoot(scopeRoot), "schemas", "concept.yaml");
-    await writeFile(target, "!schema\nnames: [local reserved]\ndefines: [local edit]\n");
+    const target = join(reservedMemoryRoot(scopeRoot), "procedures", "memsphere-agile-requirement-development.yaml");
+    await writeFile(target, "!procedure\nnames: [local reserved]\ndefines: [local edit]\n");
     await installReservedMemories(scopeRoot);
 
     assert.doesNotMatch(await readFile(target, "utf8"), /local edit/);
@@ -119,10 +205,10 @@ test("repeated init preserves config and rebuilds the installed reserved memory 
     const scopeRoot = join(dir, ".memsphere");
     const configPath = join(scopeRoot, "config.json");
     const originalConfig = await readFile(configPath, "utf8");
-    const target = join(reservedMemoryRoot(scopeRoot), "schemas", "concept.yaml");
+    const target = join(reservedMemoryRoot(scopeRoot), "procedures", "memsphere-agile-requirement-development.yaml");
     const stale = join(reservedMemoryRoot(scopeRoot), "concepts", "stale.yaml");
-    const systemTarget = join(scopeRoot, "custom-memory", "concepts", "concept.yaml");
-    await writeFile(target, "!schema\nnames: [local reserved]\ndefines: [local edit]\n");
+    const systemTarget = join(scopeRoot, "custom-memory", "concepts", "memsphere-concept.yaml");
+    await writeFile(target, "!procedure\nnames: [local reserved]\ndefines: [local edit]\n");
     await writeFile(systemTarget, "!concept\nnames: [local system]\ndefines: [local edit]\n");
     await writeFile(stale, "!concept\nnames: [stale]\n");
 
@@ -151,28 +237,28 @@ test("importReservedMemory copies reserved memory into the user memory root", as
   await withTempDir(async (dir) => {
     const scopeRoot = join(dir, ".memsphere");
     const memoryRoot = join(scopeRoot, "memory");
-    await mkdir(join(memoryRoot, "schemas"), { recursive: true });
+    await mkdir(join(memoryRoot, "procedures"), { recursive: true });
     await installReservedMemories(scopeRoot);
 
-    assert.deepEqual(await readAllMemoryFiles(memoryRoot, "schemas"), []);
-    const reservedPath = join(reservedMemoryRoot(scopeRoot), "schemas", "concept.yaml");
+    const filesBeforeImport = await readAllMemoryFiles(memoryRoot, "procedures");
+    const reservedPath = join(reservedMemoryRoot(scopeRoot), "procedures", "memsphere-agile-requirement-development.yaml");
     const reservedSource = await readFile(reservedPath, "utf8");
 
-    const importedPath = await importReservedMemory(scopeRoot, memoryRoot, "schemas/concept.yaml");
-    assert.equal(importedPath, join(memoryRoot, "schemas", "concept.yaml"));
+    const importedPath = await importReservedMemory(scopeRoot, memoryRoot, "procedures/memsphere-agile-requirement-development.yaml");
+    assert.equal(importedPath, join(memoryRoot, "procedures", "memsphere-agile-requirement-development.yaml"));
 
-    const files = await readAllMemoryFiles(memoryRoot, "schemas");
-    assert.equal(files.length, 1);
-    assert.equal(files[0].entity.names[0], "Concept entity schema");
+    const files = await readAllMemoryFiles(memoryRoot, "procedures");
+    assert.equal(files.length, filesBeforeImport.length + 1);
+    assert(files.some((file) => file.entity.names.includes("memsphere-agile-requirement-development")));
     assert.equal(await readFile(reservedPath, "utf8"), reservedSource);
     const references = (await new DefaultMemoryCatalog(new FileMemoryProvider(memoryRoot)).list()).memories.map(
       (item) => item.reference
     );
     assert(references.includes("concepts/Memory"));
-    assert(references.includes("schemas/Concept entity schema"));
+    assert(references.includes("procedures/敏捷需求开发流程"));
 
     const items = await listReservedMemories(scopeRoot, memoryRoot);
-    assert.equal(items.find((item) => item.path === "schemas/concept.yaml")?.imported, true);
+    assert.equal(items.find((item) => item.path === "procedures/memsphere-agile-requirement-development.yaml")?.imported, true);
   });
 });
 
@@ -180,21 +266,21 @@ test("importReservedMemory does not overwrite existing user memory", async () =>
   await withTempDir(async (dir) => {
     const scopeRoot = join(dir, ".memsphere");
     const memoryRoot = join(scopeRoot, "memory");
-    await mkdir(join(memoryRoot, "schemas"), { recursive: true });
+    await mkdir(join(memoryRoot, "procedures"), { recursive: true });
     await installReservedMemories(scopeRoot);
 
     await writeFile(
-      join(memoryRoot, "schemas", "concept.yaml"),
-      "!schema\nnames:\n  - Concept entity schema\ndefines:\n  - User-owned memory wins.\n"
+      join(memoryRoot, "procedures", "memsphere-agile-requirement-development.yaml"),
+      "!procedure\nnames:\n  - memsphere-agile-requirement-development\ndefines:\n  - User-owned memory wins.\n"
     );
 
     await assert.rejects(
-      importReservedMemory(scopeRoot, memoryRoot, "schemas/concept.yaml"),
+      importReservedMemory(scopeRoot, memoryRoot, "procedures/memsphere-agile-requirement-development.yaml"),
       /memory already exists/
     );
 
     assert.match(
-      await readFile(join(memoryRoot, "schemas", "concept.yaml"), "utf8"),
+      await readFile(join(memoryRoot, "procedures", "memsphere-agile-requirement-development.yaml"), "utf8"),
       /User-owned memory wins/
     );
   });

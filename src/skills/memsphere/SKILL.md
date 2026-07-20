@@ -63,11 +63,11 @@ memsphere memory read "<名称/逻辑引用>" --node "<node_ref>"
 描述 memsphere 本身的概念、陈述、流程和图式，也使用 Memory 管理。不理解 memsphere 时，可以从以下 Memory 开始读取：
 
 ```bash
-memsphere memory read Memory
-memsphere memory read Concept
-memsphere memory read Statement
-memsphere memory read Procedure
-memsphere memory read Schema
+memsphere memory read memsphere-memory
+memsphere memory read memsphere-concept
+memsphere memory read memsphere-statement
+memsphere memory read memsphere-procedure
+memsphere memory read memsphere-schema
 ```
 
 如果命令提示当前工程尚未初始化，告知用户需要执行 `memsphere init`，等待用户完成初始化后再重试。
@@ -145,7 +145,7 @@ memsphere memory list --kind procedures
 
 根据 `names`、`defines` 和用户目标选择候选，并读取执行任务所需的 Procedure 内容。创建、编辑、review Memory 等操作也必须从相应的 Procedure 开始。
 
-如果没有适用的专用 Procedure，读取并执行 `通用流程`。只有当前工程连通用流程也没有时，才告知用户缺少可执行流程，并由用户决定是否建设或安装 Procedure。
+如果没有适用的专用 Procedure，读取并执行 `memsphere-general-task-execution`。只有当前工程连该流程也没有时，才告知用户缺少可执行流程，并由用户决定是否建设或安装 Procedure。
 
 ### 按需加载概念、陈述和图式
 

@@ -2,7 +2,7 @@
 syntax: memsphere-20260719-stable
 names:
   - Memsphere YAML 语法规则
-  - Memsphere YAML syntax rules
+  - memsphere-yaml-syntax-rules
 defines:
   - 定义 memsphere Memory YAML DSL 的节点、字段、缺省值、组合约束和树状关系，作为语法设计与实现的一致性基线。
   - 本记忆描述当前稳定版本 memsphere-20260719-stable 支持的 Memsphere YAML 语法。
@@ -240,7 +240,7 @@ sections:
             ```yaml
             defines:
               - !ref
-                target: schemas/Concept entity schema
+                target: schemas/Concept Schema
             ```
         asserts:
           - "!ref 只能使用 mapping 形式，且必须声明非空 target。"

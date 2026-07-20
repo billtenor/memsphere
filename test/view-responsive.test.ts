@@ -28,10 +28,10 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     mkdir(join(runDir, "artifacts"), { recursive: true })
   ]);
 
-  await writeFile(join(memoryRoot, "concepts", "memory.yaml"), [
+  await writeFile(join(memoryRoot, "concepts", "memsphere-memory.yaml"), [
     "!concept",
     `syntax: ${currentMemorySyntax}`,
-    "names: [ Memory ]",
+    "names: [ Memory, memsphere-memory ]",
     "defines: [ A system memory fixture. ]"
   ].join("\n"));
   await writeFile(join(memoryRoot, "concepts", "user-note.yaml"), [

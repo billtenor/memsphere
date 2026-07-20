@@ -2,8 +2,7 @@
 syntax: memsphere-20260719-stable
 names:
   - Procedure 提取流程
-  - 程序性记忆提取流程
-  - procedure-construction
+  - memsphere-procedure-construction
 defines:
   - 从已完成任务、Run、产物、仓库证据或已经理清的执行思路中，提取可复用、可执行且可验证的 Procedure Memory。
   - 适用于新建 Procedure 或根据可靠实践更新已有 Procedure，不负责执行被提取的流程。
