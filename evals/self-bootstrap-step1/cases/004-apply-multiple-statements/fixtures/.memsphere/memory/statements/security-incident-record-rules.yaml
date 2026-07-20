@@ -1,4 +1,5 @@
 !statement
+syntax: memsphere-20260719-stable
 names:
   - 安全事件记录规则
   - security incident record rules

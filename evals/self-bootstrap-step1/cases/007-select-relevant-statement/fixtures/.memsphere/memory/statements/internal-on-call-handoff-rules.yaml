@@ -1,4 +1,5 @@
 !statement
+syntax: memsphere-20260719-stable
 names:
   - 内部值班交接规则
   - internal on-call handoff rules

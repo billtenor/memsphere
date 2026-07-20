@@ -1,4 +1,5 @@
 !statement
+syntax: memsphere-20260719-stable
 names:
   - 客户数据外发规则
   - customer data sharing rules

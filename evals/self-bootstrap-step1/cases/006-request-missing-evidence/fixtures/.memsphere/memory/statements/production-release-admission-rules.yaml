@@ -1,4 +1,5 @@
 !statement
+syntax: memsphere-20260719-stable
 names:
   - 生产发布准入规则
   - production release admission rules

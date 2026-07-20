@@ -1,4 +1,5 @@
 !statement
+syntax: memsphere-20260719-stable
 names:
   - 客户故障告知规则
   - customer incident notice rules
