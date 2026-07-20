@@ -6,6 +6,7 @@ import test from "node:test";
 import { memoryKinds, type MemoryKind } from "../src/memory/kinds.js";
 import { listMemoryFiles } from "../src/memory/store.js";
 import { validateMemoryStore } from "../src/validation.js";
+import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-test-"));
@@ -34,10 +35,10 @@ test("listMemoryFiles keeps yaml filtering and sorting for existing directories"
     const proceduresRoot = join(memoryRoot, "procedures");
     await mkdir(proceduresRoot, { recursive: true });
     await mkdir(join(proceduresRoot, "nested"));
-    await writeFile(join(proceduresRoot, "b.yml"), "!procedure\nnames: [b]\nflow: []\n");
-    await writeFile(join(proceduresRoot, "a.yaml"), "!procedure\nnames: [a]\nflow: []\n");
+    await writeFile(join(proceduresRoot, "b.yml"), withCurrentMemorySyntax("!procedure\nnames: [b]\nflow: []\n"));
+    await writeFile(join(proceduresRoot, "a.yaml"), withCurrentMemorySyntax("!procedure\nnames: [a]\nflow: []\n"));
     await writeFile(join(proceduresRoot, "note.txt"), "not a memory\n");
-    await writeFile(join(proceduresRoot, "nested", "c.yaml"), "!procedure\nnames: [c]\nflow: []\n");
+    await writeFile(join(proceduresRoot, "nested", "c.yaml"), withCurrentMemorySyntax("!procedure\nnames: [c]\nflow: []\n"));
 
     assert.deepEqual(await listMemoryFiles(memoryRoot, "procedures"), [
       join(proceduresRoot, "a.yaml"),
@@ -54,10 +55,10 @@ test("validateMemoryStore reports kind-scoped canonical and alias conflicts", as
     await mkdir(join(dir, "runs"));
     for (const kind of memoryKinds) await mkdir(join(memoryRoot, kind), { recursive: true });
     await writeFile(configPath, `${JSON.stringify({ memoryRoot: "memory", reviewsRoot: "reviews", runsRoot: "runs" })}\n`);
-    await writeFile(join(memoryRoot, "concepts", "one.yaml"), "!concept\nnames: [Memory, shared]\ndefines: []\n");
-    await writeFile(join(memoryRoot, "concepts", "two.yaml"), "!concept\nnames: [Other, shared]\ndefines: []\n");
-    await writeFile(join(memoryRoot, "concepts", "three.yaml"), "!concept\nnames: [Memory]\ndefines: []\n");
-    await writeFile(join(memoryRoot, "statements", "same-name.yaml"), "!statement\nnames: [Memory]\nasserts: [valid]\n");
+    await writeFile(join(memoryRoot, "concepts", "one.yaml"), withCurrentMemorySyntax("!concept\nnames: [Memory, shared]\ndefines: []\n"));
+    await writeFile(join(memoryRoot, "concepts", "two.yaml"), withCurrentMemorySyntax("!concept\nnames: [Other, shared]\ndefines: []\n"));
+    await writeFile(join(memoryRoot, "concepts", "three.yaml"), withCurrentMemorySyntax("!concept\nnames: [Memory]\ndefines: []\n"));
+    await writeFile(join(memoryRoot, "statements", "same-name.yaml"), withCurrentMemorySyntax("!statement\nnames: [Memory]\nasserts: [valid]\n"));
 
     const result = await validateMemoryStore(configPath);
     assert(result.issues.some((issue) => issue.message.includes('memory name "shared" conflicts within concepts')));
@@ -74,8 +75,8 @@ test("validateMemoryStore reports normalized empty and repeated names with parse
     await mkdir(join(dir, "runs"));
     for (const kind of memoryKinds) await mkdir(join(memoryRoot, kind), { recursive: true });
     await writeFile(configPath, `${JSON.stringify({ memoryRoot: "memory", reviewsRoot: "reviews", runsRoot: "runs" })}\n`);
-    await writeFile(join(memoryRoot, "concepts", "names.yaml"), "!concept\nnames: [' Memory ', Memory, ' ']\ndefines: []\n");
-    await writeFile(join(memoryRoot, "schemas", "broken.yaml"), "!schema\nnames: [Broken\n");
+    await writeFile(join(memoryRoot, "concepts", "names.yaml"), withCurrentMemorySyntax("!concept\nnames: [' Memory ', Memory, ' ']\ndefines: []\n"));
+    await writeFile(join(memoryRoot, "schemas", "broken.yaml"), withCurrentMemorySyntax("!schema\nnames: [Broken\n"));
 
     const result = await validateMemoryStore(configPath);
     assert(result.issues.some((issue) => issue.message.includes('repeats the normalized name "Memory"')));

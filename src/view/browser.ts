@@ -345,7 +345,6 @@ export const browserHtml = String.raw`<!doctype html>
       final: { zh: "最终交付物", yaml: "final" },
       finalArtifacts: { zh: "最终交付物", yaml: "final artifacts" },
       layout: { zh: "布局", yaml: "layout" },
-      legacyElementTypes: { zh: "旧版元素类型（只读）", yaml: "legacy element_types (read-only)" },
       statement: { zh: "命题", yaml: "statement" },
       action: { zh: "要做什么", yaml: "action" },
       then: { zh: "然后", yaml: "then" },
@@ -1367,14 +1366,12 @@ export const browserHtml = String.raw`<!doctype html>
         const layout = formatOptions(node.format).layout;
         if (layout) badges.push(t("layout") + ": " + layout);
       }
-      if (node.element_types?.length) badges.push(t("legacyElementTypes"));
       const name = depth === 0 ? "" : displayName(node, fallbackName);
       section.append(sectionHeader(name, badges, path, "schema:" + path));
       const body = document.createElement("div");
       body.className = "section-body";
       if (depth === 0) appendNames(body, node);
       appendTextBlocks(body, node);
-      appendLegacySchemaElementTypes(body, node.element_types);
       if (formatName(node.format) === "markdown" && formatOptions(node.format).layout === "table" && node.fields?.length) {
         body.append(blockTitle(t("fields")), renderTableFields(node.fields, path));
       }
@@ -1457,14 +1454,6 @@ export const browserHtml = String.raw`<!doctype html>
       }
       section.append(body);
       return section;
-    }
-
-    function appendLegacySchemaElementTypes(target, elementTypes) {
-      if (!elementTypes?.length) return;
-      const row = document.createElement("div");
-      row.className = "meta";
-      for (const elementType of elementTypes) row.append(pill(elementType));
-      target.append(blockTitle(t("legacyElementTypes")), row);
     }
 
     function sectionHeader(text, badges, target, anchor) {

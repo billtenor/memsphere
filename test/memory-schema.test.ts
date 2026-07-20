@@ -9,24 +9,25 @@ import {
   statementMemorySchema
 } from "../src/memory/schema.js";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
+import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
 function parseProcedure(source: string) {
-  return procedureMemorySchema.parse(parseMemoryYaml(source));
+  return procedureMemorySchema.parse(parseMemoryYaml(withCurrentMemorySyntax(source)));
 }
 
 function parseSchema(source: string) {
-  return schemaMemorySchema.parse(parseMemoryYaml(source));
+  return schemaMemorySchema.parse(parseMemoryYaml(withCurrentMemorySyntax(source)));
 }
 
 function parseStatement(source: string) {
-  return statementMemorySchema.parse(parseMemoryYaml(source));
+  return statementMemorySchema.parse(parseMemoryYaml(withCurrentMemorySyntax(source)));
 }
 
 test("name is a canonical single-value shorthand for names", () => {
-  const concept = conceptMemorySchema.parse(parseMemoryYaml(`!concept
+  const concept = conceptMemorySchema.parse(parseMemoryYaml(withCurrentMemorySyntax(`!concept
 name: Work item
 defines: [A unit of work.]
-`));
+`)));
   const statement = parseStatement(`!statement
 name: Rules
 asserts: [A rule holds.]
@@ -193,12 +194,12 @@ names: [invalid section]
 sections: [Testing]
 `), /sections/);
 
-  const unnamed = statementMemorySchema.safeParse(parseMemoryYaml(`!statement
+  const unnamed = statementMemorySchema.safeParse(parseMemoryYaml(withCurrentMemorySyntax(`!statement
 names: [Repository rules]
 sections:
   - !statement
     asserts: [A rule.]
-`));
+`)));
   assert.equal(unnamed.success, false);
   if (!unnamed.success) {
     assert(unnamed.error.issues.some((issue) =>
@@ -207,7 +208,7 @@ sections:
     ));
   }
 
-  const duplicate = statementMemorySchema.safeParse(parseMemoryYaml(`!statement
+  const duplicate = statementMemorySchema.safeParse(parseMemoryYaml(withCurrentMemorySyntax(`!statement
 names: [Repository rules]
 sections:
   - !statement
@@ -216,7 +217,7 @@ sections:
   - !statement
     names: [" Testing "]
     suggests: [Second rule.]
-`));
+`)));
   assert.equal(duplicate.success, false);
   if (!duplicate.success) {
     assert(duplicate.error.issues.some((issue) =>
@@ -687,10 +688,10 @@ fields:
 });
 
 test("format is rejected on memory types without format implementations", () => {
-  assert.throws(() => conceptMemorySchema.parse(parseMemoryYaml(`!concept
+  assert.throws(() => conceptMemorySchema.parse(parseMemoryYaml(withCurrentMemorySyntax(`!concept
 names: [invalid]
 format: outline
-`)), /format/);
+`))), /format/);
 });
 
 test("table layout belongs to an array markdown Artifact", () => {

@@ -8,6 +8,7 @@ import { canCreateTaskReview, createViewServer, hydrateRunArtifactContent } from
 import type { MemsphereConfig } from "../src/config.js";
 import { createReview, getReview, readReviewSnapshot } from "../src/review/store.js";
 import type { RunState } from "../src/run/store.js";
+import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-review-test-"));
@@ -89,11 +90,16 @@ test("task review API rejects running tasks and reads artifacts from the saved s
     await mkdir(join(runDir, "artifacts"), { recursive: true });
     await mkdir(join(memoryRoot, "procedures"), { recursive: true });
     await mkdir(join(memoryRoot, "schemas"), { recursive: true });
-    await writeFile(join(memoryRoot, "procedures", "api-procedure.yaml"), "!procedure\nnames: [api procedure]\nflow: []\n");
-    await writeFile(join(memoryRoot, "procedures", "child-procedure.yaml"), "!procedure\nnames: [child procedure]\nflow:\n  - !call\n    target: grandchild procedure\n");
-    await writeFile(join(memoryRoot, "procedures", "grandchild-procedure.yaml"), "!procedure\nnames: [grandchild procedure]\nflow: []\n");
-    await writeFile(join(memoryRoot, "procedures", "unrelated.yaml"), "!procedure\nnames: [unrelated]\nflow: []\n");
-    await writeFile(join(memoryRoot, "schemas", "used-schema.yaml"), "!schema\nnames: [used schema]\nfields: []\n");
+    const apiProcedure = withCurrentMemorySyntax("!procedure\nnames: [api procedure]\nflow: []\n");
+    const childProcedure = withCurrentMemorySyntax("!procedure\nnames: [child procedure]\nflow:\n  - !call\n    target: grandchild procedure\n");
+    const grandchildProcedure = withCurrentMemorySyntax("!procedure\nnames: [grandchild procedure]\nflow: []\n");
+    const unrelatedProcedure = withCurrentMemorySyntax("!procedure\nnames: [unrelated]\nflow: []\n");
+    const usedSchema = withCurrentMemorySyntax("!schema\nnames: [used schema]\nfields: []\n");
+    await writeFile(join(memoryRoot, "procedures", "api-procedure.yaml"), apiProcedure);
+    await writeFile(join(memoryRoot, "procedures", "child-procedure.yaml"), childProcedure);
+    await writeFile(join(memoryRoot, "procedures", "grandchild-procedure.yaml"), grandchildProcedure);
+    await writeFile(join(memoryRoot, "procedures", "unrelated.yaml"), unrelatedProcedure);
+    await writeFile(join(memoryRoot, "schemas", "used-schema.yaml"), usedSchema);
     await writeFile(join(runDir, "artifacts", "001-result.md"), "snapshot artifact\n");
 
     const run: RunState = {
@@ -160,10 +166,10 @@ test("task review API rejects running tasks and reads artifacts from the saved s
       const savedReview = await getReview(reviewsRoot, review.id);
       assert(savedReview);
       assert.equal(savedReview.memoryRoot, "snapshots/memory");
-      assert.equal(await readFile(join(reviewsRoot, review.id, "snapshots", "memory", "procedures", "api-procedure.yaml"), "utf8"), "!procedure\nnames: [api procedure]\nflow: []\n");
-      assert.equal(await readFile(join(reviewsRoot, review.id, "snapshots", "memory", "procedures", "child-procedure.yaml"), "utf8"), "!procedure\nnames: [child procedure]\nflow:\n  - !call\n    target: grandchild procedure\n");
-      assert.equal(await readFile(join(reviewsRoot, review.id, "snapshots", "memory", "procedures", "grandchild-procedure.yaml"), "utf8"), "!procedure\nnames: [grandchild procedure]\nflow: []\n");
-      assert.equal(await readFile(join(reviewsRoot, review.id, "snapshots", "memory", "schemas", "used-schema.yaml"), "utf8"), "!schema\nnames: [used schema]\nfields: []\n");
+      assert.equal(await readFile(join(reviewsRoot, review.id, "snapshots", "memory", "procedures", "api-procedure.yaml"), "utf8"), apiProcedure);
+      assert.equal(await readFile(join(reviewsRoot, review.id, "snapshots", "memory", "procedures", "child-procedure.yaml"), "utf8"), childProcedure);
+      assert.equal(await readFile(join(reviewsRoot, review.id, "snapshots", "memory", "procedures", "grandchild-procedure.yaml"), "utf8"), grandchildProcedure);
+      assert.equal(await readFile(join(reviewsRoot, review.id, "snapshots", "memory", "schemas", "used-schema.yaml"), "utf8"), usedSchema);
       await assert.rejects(readFile(join(reviewsRoot, review.id, "snapshots", "memory", "procedures", "unrelated.yaml")));
       assert.doesNotMatch(await readFile(join(reviewsRoot, review.id, "review.yaml"), "utf8"), new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 

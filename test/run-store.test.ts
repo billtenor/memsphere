@@ -77,7 +77,7 @@ test("startRun skips unrelated invalid procedures when resolving the target proc
   });
 });
 
-test("startRun rejects an unversioned start Procedure", async () => {
+test("startRun routes an unversioned Procedure to store validation without parsing legacy content", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
     const proceduresRoot = join(memoryRoot, "procedures");
@@ -86,7 +86,7 @@ test("startRun rejects an unversioned start Procedure", async () => {
 
     await assert.rejects(
       startRun({ memoryRoot, runsRoot: join(dir, "runs"), procedureName: "target-procedure" }),
-      /outdated Memory syntax start/
+      /Memory store contains invalid Memory YAML; run memsphere validate/
     );
   });
 });

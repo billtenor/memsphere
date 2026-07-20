@@ -17,6 +17,7 @@ import {
   checkMemorySyntaxMigration,
   writeMemorySyntaxMigration
 } from "../src/migration/memory-syntax.js";
+import { canMigrateMemorySyntax } from "../src/migration/memory-syntax-path.js";
 import { writeArtifactContractV2Migration } from "../src/migration/artifact-contract-v2.js";
 import { writeSchemaContractV2Migration } from "../src/migration/schema-contract-v2.js";
 import { assertMigrationSourcesUnchanged } from "../src/migration/store-write.js";
@@ -38,7 +39,13 @@ test("Memory syntax defaults to start and formal versions use immutable identifi
   assert.throws(() => readMemorySyntax({ syntax: "memsphere-20260230-stable" }), /memsphere-YYYYMMDD/);
 });
 
-test("Memory syntax dispatch rejects unknown versions and nested syntax fields", () => {
+test("Memory syntax migration availability comes from the migration graph", () => {
+  assert.equal(canMigrateMemorySyntax(startMemorySyntax, currentMemorySyntax), true);
+  assert.equal(canMigrateMemorySyntax(currentMemorySyntax, currentMemorySyntax), false);
+  assert.equal(canMigrateMemorySyntax("memsphere-20990101-stable", currentMemorySyntax), false);
+});
+
+test("Memory syntax dispatch accepts only the current version and rejects nested syntax fields", () => {
   const current = parseMemoryEntity("concepts", parseMemoryYaml(`!concept
 syntax: ${currentMemorySyntax}
 name: Current
@@ -46,11 +53,10 @@ defines: [Current syntax.]
 `));
   assert.equal(current.syntax, currentMemorySyntax);
 
-  const unversioned = parseMemoryEntity("concepts", parseMemoryYaml(`!concept
+  assert.throws(() => parseMemoryEntity("concepts", parseMemoryYaml(`!concept
 name: Legacy
 defines: [Legacy syntax.]
-`));
-  assert.equal(unversioned.syntax, startMemorySyntax);
+`)), /Unsupported Memory syntax start/);
 
   assert.throws(() => parseMemoryEntity("concepts", parseMemoryYaml(`!concept
 syntax: memsphere-20990101-stable

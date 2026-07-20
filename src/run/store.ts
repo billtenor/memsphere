@@ -1135,6 +1135,7 @@ async function assembleSchemaArtifact(runsRoot: string, run: RunState, frame: Ru
 
 async function findMemoryByName(memoryRoot: string, kind: "procedures" | "schemas", name: string): Promise<MemoryFile | undefined> {
   const paths = await listMemoryFiles(memoryRoot, kind);
+  let hasInvalidMemory = false;
 
   for (const path of paths) {
     let file: MemoryFile;
@@ -1142,19 +1143,20 @@ async function findMemoryByName(memoryRoot: string, kind: "procedures" | "schema
       file = await readMemoryFile(kind, path);
     } catch {
       // Run lookup should not be blocked by unrelated invalid memories.
+      hasInvalidMemory = true;
       continue;
     }
     if (file.entity.names.includes(name)) {
-      if (file.entity.syntax !== currentMemorySyntax) {
-        throw new Error(
-          `${kind === "procedures" ? "procedure" : "schema"} ${name} uses outdated Memory syntax ${file.entity.syntax}; ` +
-          `run memsphere migrate syntax --write to upgrade to ${currentMemorySyntax}`
-        );
-      }
       return file;
     }
   }
 
+  if (hasInvalidMemory) {
+    throw new Error(
+      `${kind === "procedures" ? "procedure" : "schema"} ${name} could not be resolved because the Memory store ` +
+      "contains invalid Memory YAML; run memsphere validate"
+    );
+  }
   return undefined;
 }
 

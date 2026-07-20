@@ -18,13 +18,12 @@ test("memory view recognizes only tagged actions and renders recursive typed str
   assert.match(browserHtml, /typeof child === "string"/);
 });
 
-test("browser renders Schema type, format, layout, item contracts, and read-only legacy metadata", () => {
+test("browser renders current Schema type, format, layout, and item contracts", () => {
   assert.match(browserHtml, /type: \{ zh: "类型", yaml: "type" \}/);
   assert.match(browserHtml, /layout: \{ zh: "布局", yaml: "layout" \}/);
   assert.match(browserHtml, /if \(node\.type\) badges\.push\(t\("type"\) \+ ": " \+ node\.type\)/);
   assert.match(browserHtml, /formatOptions\(node\.format\)\.layout/);
-  assert.match(browserHtml, /appendLegacySchemaElementTypes\(body, node\.element_types\)/);
-  assert.match(browserHtml, /legacy element_types \(read-only\)/);
+  assert.doesNotMatch(browserHtml, /element_types/);
   assert.match(browserHtml, /item: \{ zh: "元素", yaml: "item" \}/);
   assert.match(browserHtml, /items: \{ zh: "候选元素", yaml: "items" \}/);
   assert.match(browserHtml, /if \(node\.item\)/);

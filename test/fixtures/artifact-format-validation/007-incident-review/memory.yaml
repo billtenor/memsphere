@@ -1,4 +1,5 @@
 !schema
+syntax: memsphere-20260719-stable
 names:
   - 故障复盘
   - 故障复盘报告

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { MemsphereConfig } from "../src/config.js";
 import { procedureMemorySchema, schemaMemorySchema } from "../src/memory/schema.js";
+import { currentMemorySyntax } from "../src/memory/syntax.js";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
 import {
   checkSchemaContractV2Migration,
@@ -54,7 +55,10 @@ flow:
     assert.equal(checked.manifest.status, "ready", JSON.stringify(checked.manifest.issues));
     assert.equal(checked.manifest.files.find((file) => file.path === "procedures/rows.yaml")?.changed, true);
     assert.doesNotMatch(checked.prepared[0]?.output ?? "", /element_types/);
-    const migrated = procedureMemorySchema.parse(parseMemoryYaml(checked.prepared[0]?.output ?? ""));
+    const migrated = procedureMemorySchema.parse({
+      ...(parseMemoryYaml(checked.prepared[0]?.output ?? "") as Record<string, unknown>),
+      syntax: currentMemorySyntax
+    });
     const action = migrated.flow[0];
     assert.equal(action?.tag, "!action");
     if (action?.tag === "!action" && typeof action.artifact.schema === "object") {
@@ -106,7 +110,10 @@ fields: [ID, Summary]
     const output = checked.prepared[0]?.output ?? "";
     assert.match(output, /item: !schema/);
     assert.match(output, /type: object/);
-    const migrated = schemaMemorySchema.parse(parseMemoryYaml(output));
+    const migrated = schemaMemorySchema.parse({
+      ...(parseMemoryYaml(output) as Record<string, unknown>),
+      syntax: currentMemorySyntax
+    });
     assert.deepEqual(migrated.item?.fields, ["ID", "Summary"]);
     await writeFile(path, output);
     const repeated = await checkSchemaContractV2Migration(config);

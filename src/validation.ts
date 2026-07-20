@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ZodError } from "zod";
 import { findConfigPath, readConfig, readConfigAt } from "./config.js";
@@ -6,11 +6,14 @@ import { analyzeMemoryDescriptors } from "./memory/catalog.js";
 import { memoryKinds, type MemoryKind } from "./memory/kinds.js";
 import type { ProviderMemoryDescriptor } from "./memory/provider.js";
 import { listMemoryFiles, pathExists, readMemoryFile } from "./memory/store.js";
-import { currentMemorySyntax } from "./memory/syntax.js";
+import { currentMemorySyntax, readMemorySyntax } from "./memory/syntax.js";
+import { parseMemoryYaml } from "./memory/yaml.js";
+import { canMigrateMemorySyntax } from "./migration/memory-syntax-path.js";
 
 export type ValidationIssue = {
   path: string;
   message: string;
+  migration?: "syntax";
 };
 
 export type ValidationResult = {
@@ -130,12 +133,6 @@ async function validateKindDirectory(
   for (const filePath of filePaths) {
     try {
       const file = await readMemoryFile(kind, filePath);
-      if (file.entity.syntax !== currentMemorySyntax) {
-        issues.push({
-          path: filePath,
-          message: `Memory syntax ${file.entity.syntax} is outdated; run memsphere migrate syntax --write to upgrade to ${currentMemorySyntax}`
-        });
-      }
       descriptors.push({
         id: filePath,
         kind,
@@ -145,9 +142,20 @@ async function validateKindDirectory(
     } catch (error) {
       issues.push({
         path: filePath,
-        message: formatError(error)
+        message: formatError(error),
+        migration: await usesMigratableSyntax(filePath) ? "syntax" : undefined
       });
     }
   }
   return descriptors;
+}
+
+async function usesMigratableSyntax(filePath: string): Promise<boolean> {
+  try {
+    const entity = parseMemoryYaml(await readFile(filePath, "utf8"));
+    const syntax = readMemorySyntax(entity);
+    return canMigrateMemorySyntax(syntax, currentMemorySyntax);
+  } catch {
+    return false;
+  }
 }

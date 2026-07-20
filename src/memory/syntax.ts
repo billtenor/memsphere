@@ -34,7 +34,7 @@ export class MemorySyntaxRegistry {
     if (!definition) {
       throw new Error(
         `Unsupported Memory syntax ${version}; current syntax is ${currentMemorySyntax}. ` +
-        "Upgrade memsphere or migrate the Memory store."
+        "This runtime only accepts the current syntax; upgrade memsphere if the Memory uses a newer syntax."
       );
     }
     return definition;

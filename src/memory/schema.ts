@@ -29,7 +29,6 @@ import {
   assertMemorySyntaxIdentifier,
   firstStableMemorySyntax,
   MemorySyntaxRegistry,
-  startMemorySyntax,
   type MemorySyntaxVersion
 } from "./syntax.js";
 
@@ -79,8 +78,8 @@ function withRootSyntax<T extends { tag: string }>(
       ? value as Record<string, unknown>
       : value;
     const syntaxInput = source && typeof source === "object" && !Array.isArray(source)
-      ? (source as Record<string, unknown>).syntax ?? startMemorySyntax
-      : startMemorySyntax;
+      ? (source as Record<string, unknown>).syntax
+      : undefined;
     const nodeInput = source && typeof source === "object" && !Array.isArray(source)
       ? Object.fromEntries(Object.entries(source).filter(([key]) => key !== "syntax"))
       : source;
@@ -616,7 +615,6 @@ export const memorySchemas = {
 } as const satisfies Record<MemoryKind, z.ZodTypeAny>;
 
 export const memorySyntaxRegistry = new MemorySyntaxRegistry();
-memorySyntaxRegistry.register({ version: startMemorySyntax, schemas: memorySchemas });
 memorySyntaxRegistry.register({ version: firstStableMemorySyntax, schemas: memorySchemas });
 
 export type { MemoryEntity };

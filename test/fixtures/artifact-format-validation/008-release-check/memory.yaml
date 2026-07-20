@@ -1,4 +1,5 @@
 !schema
+syntax: memsphere-20260719-stable
 names:
   - 上线检查记录
   - 发布检查记录

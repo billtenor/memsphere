@@ -8,7 +8,10 @@ import {
   checkArtifactContractV2Migration,
   writeArtifactContractV2Migration
 } from "../src/migration/artifact-contract-v2.js";
+import { procedureMemorySchema } from "../src/memory/schema.js";
 import { readMemoryFile } from "../src/memory/store.js";
+import { currentMemorySyntax } from "../src/memory/syntax.js";
+import { parseMemoryYaml } from "../src/memory/yaml.js";
 
 test("Artifact Contract v2 migration stages, backs up, validates, and is idempotent", async () => {
   const root = await mkdtemp(join(tmpdir(), "memsphere-artifact-v2-"));
@@ -47,8 +50,11 @@ flow:
   const migrated = await readFile(procedurePath, "utf8");
   assert.doesNotMatch(migrated, /type: string/);
   assert.doesNotMatch(migrated, /format: string/);
-  const memory = await readMemoryFile("procedures", procedurePath);
-  const step = memory.entity.tag === "!procedure" ? memory.entity.flow[0] : undefined;
+  const memory = procedureMemorySchema.parse({
+    ...(parseMemoryYaml(migrated) as Record<string, unknown>),
+    syntax: currentMemorySyntax
+  });
+  const step = memory.flow[0];
   assert.equal(step?.tag === "!action" ? step.artifact.type : undefined, "string");
 
   const second = await checkArtifactContractV2Migration(config, { includeRuns: false });
@@ -144,8 +150,8 @@ fields: [summary]
   assert.match(procedure, /name: markdown/);
   assert.match(procedure, /layout: outline/);
   assert.doesNotMatch(schema, /format:/);
-  await readMemoryFile("procedures", procedurePath);
-  await readMemoryFile("schemas", schemaPath);
+  await assert.rejects(readMemoryFile("procedures", procedurePath), /Unsupported Memory syntax start/);
+  await assert.rejects(readMemoryFile("schemas", schemaPath), /Unsupported Memory syntax start/);
 });
 
 test("Artifact Contract v2 migration leaves v2 source bytes unchanged", async () => {

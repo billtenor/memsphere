@@ -5,11 +5,11 @@ import { isMap, isSeq, type Document, type ParsedNode, type Scalar, type YAMLMap
 import type { MemsphereConfig } from "../config.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { memorySyntaxRegistry } from "../memory/schema.js";
-import { readMemoryFile } from "../memory/store.js";
-import { readMemorySyntax } from "../memory/syntax.js";
+import { currentMemorySyntax } from "../memory/syntax.js";
 import { parseMemoryYaml, parseMemoryYamlDocument } from "../memory/yaml.js";
 import { listRuns } from "../run/store.js";
 import { assertMigrationSourcesUnchanged, withMemoryStoreMigrationLock } from "./store-write.js";
+import { validateMigrationOutputRoot } from "./validate-output.js";
 
 export type ArtifactContractMigrationIssue = {
   code: string;
@@ -131,7 +131,10 @@ function validatePreparedOutputs(
     const kind = file.path.split("/")[0] as MemoryKind;
     try {
       const entity = parseMemoryYaml(file.output);
-      const result = memorySyntaxRegistry.require(readMemorySyntax(entity)).schemas[kind].safeParse(entity);
+      const result = memorySyntaxRegistry.require(currentMemorySyntax).schemas[kind].safeParse({
+        ...(entity as Record<string, unknown>),
+        syntax: currentMemorySyntax
+      });
       if (result.success) continue;
       for (const issue of result.error.issues) {
         issues.push({
@@ -391,9 +394,7 @@ async function validateStagedRoot(root: string): Promise<void> {
 }
 
 async function validateRealRoot(root: string): Promise<void> {
-  for (const kind of memoryKinds) {
-    for (const path of await listYamlFiles(join(root, kind))) await readMemoryFile(kind as MemoryKind, path);
-  }
+  await validateMigrationOutputRoot(root);
 }
 
 function sha256(value: string): string {

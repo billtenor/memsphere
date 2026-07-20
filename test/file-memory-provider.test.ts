@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { FileMemoryProvider } from "../src/memory/file-provider.js";
+import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-provider-test-"));
@@ -18,7 +19,7 @@ test("file provider lists summaries and reads only ids from the current list", a
   await withTempDir(async (memoryRoot) => {
     const path = join(memoryRoot, "concepts", "unrelated-file-name.yaml");
     await mkdir(join(memoryRoot, "concepts"), { recursive: true });
-    await writeFile(path, "!concept\nnames: [Memory, 记忆]\ndefines: [original]\n");
+    await writeFile(path, withCurrentMemorySyntax("!concept\nnames: [Memory, 记忆]\ndefines: [original]\n"));
 
     const provider = new FileMemoryProvider(memoryRoot);
     const descriptors = await provider.list({ kind: "concepts" });
@@ -26,7 +27,7 @@ test("file provider lists summaries and reads only ids from the current list", a
     assert.deepEqual(descriptors, [{ id: path, kind: "concepts", names: ["Memory", "记忆"], defines: ["original"] }]);
     await assert.rejects(provider.read(join(memoryRoot, "concepts", "other.yaml")), /not returned by the current list/);
 
-    await writeFile(path, "!concept\nnames: [Changed]\ndefines: [changed]\n");
+    await writeFile(path, withCurrentMemorySyntax("!concept\nnames: [Changed]\ndefines: [changed]\n"));
     assert.equal((await provider.read(path)).names[0], "Memory");
 
     const nextProvider = new FileMemoryProvider(memoryRoot);
@@ -42,8 +43,8 @@ test("file provider clears ids that were not returned by its latest list", async
     const schemaPath = join(memoryRoot, "schemas", "two.yaml");
     await mkdir(join(memoryRoot, "concepts"), { recursive: true });
     await mkdir(join(memoryRoot, "schemas"), { recursive: true });
-    await writeFile(conceptPath, "!concept\nnames: [One]\ndefines: []\n");
-    await writeFile(schemaPath, "!schema\nnames: [Two]\ndefines: []\n");
+    await writeFile(conceptPath, withCurrentMemorySyntax("!concept\nnames: [One]\ndefines: []\n"));
+    await writeFile(schemaPath, withCurrentMemorySyntax("!schema\nnames: [Two]\ndefines: []\n"));
 
     const provider = new FileMemoryProvider(memoryRoot);
     await provider.list({ kind: "concepts" });
