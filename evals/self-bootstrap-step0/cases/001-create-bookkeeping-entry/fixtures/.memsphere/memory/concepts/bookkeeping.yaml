@@ -1,4 +1,5 @@
 !concept
+syntax: memsphere-20260719-stable
 names:
   - 记账
   - 记账记录
@@ -11,10 +12,12 @@ defines:
       - 类型只能是“收入”或“支出”。
       - 备注不能为空，必须描述本次收入或支出的具体内容。
       - 记账实例必须以 Markdown 文件保存到 artifacts/bookkeeping.md。
-      - 缺少任一必填字段时，不得猜测或创建记账实例，应请求用户补充缺失信息。
+      - 必填字段可以根据用户提供的信息可靠推导；无法直接取得或可靠推导时，不得猜测或创建记账实例，应请求用户补充。
       - 用户信息违反记账约束时，不得创建记账实例，应指出冲突的约束。
   - !schema
-    format: outline
+    format:
+      name: markdown
+      layout: outline
     asserts:
       - 日期、类型、金额、分类和备注均不能为空。
     fields:
@@ -23,3 +26,4 @@ defines:
       - 金额
       - 分类
       - 备注
+    type: object

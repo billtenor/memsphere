@@ -12,12 +12,14 @@ goals:
   - 高质量地完成一项通用任务。
 flow:
   - !action
-    action: 对齐认知。识别完成任务所需但当前不能准确理解的概念，使用 memsphere memory list --kind concepts 和 memsphere memory read 检索相关 Concept；Memory 中没有相关定义时，使用模型自身理解补充。存在会影响执行方向的歧义时，向 human 询问并等待确认。
+    action: 对齐认知。提取任务中的核心领域对象和交付物名称，使用 memsphere memory list --kind concepts 检索同名或相关 Concept；命中后使用 memsphere memory read 完整读取并应用，未命中时使用模型自身理解。存在会影响执行方向的歧义时，向 human 询问并等待确认。
     actor: agent
     asserts:
-      - Memory 中存在相关 Concept 时必须以其定义为准；只有不存在相关定义时才可使用模型自身理解。
+      - 不得因模型自认为熟悉某个术语而跳过核心领域对象和交付物名称的 Concept 检索。
+      - 命中相关 Concept 后必须完整读取并以其全部 defines 为准；memory list 摘要不得替代 memory read。
+      - 只有未命中相关 Concept 时才可使用模型自身理解；未命中且不存在歧义时不得扩大检索。
       - 影响后续执行的概念歧义必须在进入下一步前解决。
-      - 不存在需要补充理解的概念时，不得进行无必要的检索或询问，概念理解简述填写“无”。
+      - 任务没有可识别的核心领域对象或交付物名称，或者完成检索后未命中相关 Concept 且不存在概念歧义时，概念理解简述可以填写“无”。
     artifact: !artifact
       name: 概念理解简述
   - !action

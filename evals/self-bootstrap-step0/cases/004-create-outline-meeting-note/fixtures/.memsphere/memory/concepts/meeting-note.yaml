@@ -1,4 +1,5 @@
 !concept
+syntax: memsphere-20260719-stable
 names:
   - 会议记录
 defines:
@@ -9,9 +10,12 @@ defines:
       - 日期和待办中的截止日期必须使用 YYYY-MM-DD 格式。
       - 会议记录实例必须以 Markdown 文件保存到 artifacts/meeting-note.md。
   - !schema
-    format: outline
+    format:
+      name: markdown
+      layout: outline
     fields:
       - 会议主题
       - 日期
       - 结论
       - 待办
+    type: object

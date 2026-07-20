@@ -38,7 +38,7 @@ memsphere memory list
 memsphere memory list --kind procedures
 ```
 
-list 结果中的 `names` 是规范名称和别名，`defines` 是简要定义。确定候选后，完整读取 Memory，或按 Node 读取完成任务所需的内容。
+list 结果中的 `names` 是规范名称和别名，`defines` 是简要定义。list 只用于发现候选，不能替代 read；确定候选后，必须完整读取 Memory，或按 Node 读取完成任务所需的内容。
 
 当一份 Statement、Schema 或 Procedure 较长时，可以先列出它的直接子 Node：
 
@@ -148,7 +148,7 @@ memsphere memory list --kind procedures
 
 选定 Procedure 并开始执行后，根据 Procedure 中的引用和当前步骤按需读取相关 Memory：
 
-- 遇到需要理解的术语或领域对象时，读取 Concept。
+- 任务涉及明确的核心领域对象或交付物名称时，先检索同名或相关 Concept；不得因模型自认为理解而跳过，命中后必须完整读取。
 - 需要确认事实、规则、约束或建议时，读取 Statement。
 - 需要创建或检查结构化产物时，读取 Schema。
 
