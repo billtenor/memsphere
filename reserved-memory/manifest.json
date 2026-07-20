@@ -17,7 +17,8 @@
       "statements/memsphere-yaml-syntax-rules.yaml",
       "procedures/memsphere-general-task-execution.yaml",
       "procedures/memsphere-procedure-construction.yaml",
-      "procedures/memsphere-review.yaml"
+      "procedures/memsphere-review.yaml",
+      "procedures/memsphere-tutorial.yaml"
     ],
     "remove": [
       "concepts/memory.yaml",

@@ -74,6 +74,8 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "memsphere-procedure-construction",
     "memsphere review 流程",
     "memsphere-review",
+    "memsphere tutorial 流程",
+    "memsphere-tutorial",
     "通用流程",
     "兜底流程",
     "memsphere-general-task-execution"
@@ -130,7 +132,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   assert(memory.entity.defines.some((definition) => typeof definition === "object" && definition.tag === "!statement"));
   assert.equal(manifest.version, 2);
   assert.equal("memory_syntax" in manifest ? manifest.memory_syntax : undefined, currentMemorySyntax);
-  assert.equal(manifest.system_memory.install.length, 15);
+  assert.equal(manifest.system_memory.install.length, 16);
   assert.deepEqual(manifest.system_memory.remove, [
     "concepts/memory.yaml",
     "concepts/memsphere.yaml",
@@ -168,6 +170,7 @@ test("init installs system memory and keeps other bundled memory reserved", asyn
     assert.equal(items.some((item) => item.path === "schemas/memsphere-concept-schema.yaml"), false);
     assert.equal(items.some((item) => item.path === "procedures/memsphere-procedure-construction.yaml"), false);
     assert.equal(items.some((item) => item.path === "procedures/memsphere-review.yaml"), false);
+    assert.equal(items.some((item) => item.path === "procedures/memsphere-tutorial.yaml"), false);
     assert(items.length > 0);
     assert(items.every((item) => item.error === undefined));
     assert(items.every((item) => item.imported === false));
@@ -177,6 +180,7 @@ test("init installs system memory and keeps other bundled memory reserved", asyn
     assert(catalog.memories.some((item) => item.reference === "procedures/通用流程"));
     assert(catalog.memories.some((item) => item.reference === "procedures/Procedure 提取流程"));
     assert(catalog.memories.some((item) => item.reference === "procedures/memsphere review 流程"));
+    assert(catalog.memories.some((item) => item.reference === "procedures/memsphere tutorial 流程"));
     assert.equal(catalog.memories.some((item) => item.reference === "procedures/敏捷需求开发流程"), false);
     assert(catalog.memories.some((item) => item.reference === "schemas/Concept Schema"));
     assert(catalog.memories.some((item) => item.reference === "schemas/Statement Schema"));
