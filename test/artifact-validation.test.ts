@@ -386,6 +386,102 @@ test("Markdown outline validates a table only inside its child heading subtree",
   assert.equal(result.issues[0]?.fieldPath, "Requirements");
 });
 
+test("Markdown outline Repeat matches dynamic titles by position while validating nested fields", async () => {
+  const registry = createBuiltInArtifactValidatorRegistry();
+  const contract = compileArtifactContract(artifactNodeSchema.parse({
+    tag: "!artifact",
+    name: "changes",
+    type: "object",
+    format: { name: "markdown", layout: "outline" },
+    schema: {
+      tag: "!schema",
+      names: [],
+      defines: [],
+      fields: [
+        "Overview",
+        {
+          tag: "!repeat",
+          limit: { min: 2, max: 2 },
+          body: [
+            { tag: "!schema", names: ["Change"], defines: [], fields: ["Summary"] },
+            { tag: "!schema", names: ["Verification"], defines: [], fields: ["Status"] }
+          ]
+        },
+        "Conclusion"
+      ]
+    }
+  }));
+  const validSource = `# Report
+
+## Overview
+Current release.
+
+## Add export support
+### Summary
+Implemented.
+
+## Verify export support
+### Status
+Passed.
+
+## Fix timeout handling
+### Summary
+Implemented.
+
+## Verify timeout handling
+### Status
+Passed.
+
+## Conclusion
+Ready.
+`;
+  const valid = await prepareArtifactCandidate(contract, { kind: "inline", value: validSource }, context);
+  assert.equal((await registry.execute(registry.resolvePlan(contract), { contract, candidate: valid, context })).status, "passed");
+
+  const missingNested = await prepareArtifactCandidate(contract, {
+    kind: "inline",
+    value: validSource.replace("### Status\nPassed.\n\n## Conclusion", "No status heading.\n\n## Conclusion")
+  }, context);
+  const missingResult = await registry.execute(registry.resolvePlan(contract), { contract, candidate: missingNested, context });
+  assert.equal(missingResult.status, "failed");
+  assert(missingResult.issues.some((issue) =>
+    issue.code === "schema.format.outline.expected_heading" && issue.fieldPath === "Verification[2] / Status"
+  ), JSON.stringify(missingResult.issues, null, 2));
+
+  const tooMany = await prepareArtifactCandidate(contract, {
+    kind: "inline",
+    value: validSource.replace("## Conclusion", "## Another change\n### Summary\nDone.\n\n## Another check\n### Status\nPassed.\n\n## Conclusion")
+  }, context);
+  const countResult = await registry.execute(registry.resolvePlan(contract), { contract, candidate: tooMany, context });
+  assert(countResult.issues.some((issue) => issue.code === "schema.format.outline.repeat_count"));
+
+  const repeatOnlyContract = compileArtifactContract(artifactNodeSchema.parse({
+    tag: "!artifact",
+    name: "notes",
+    type: "object",
+    format: { name: "markdown", layout: "outline" },
+    schema: {
+      tag: "!schema",
+      names: [],
+      defines: [],
+      fields: [{
+        tag: "!repeat",
+        limit: { min: 2 },
+        body: [{ tag: "!schema", names: ["Note"], defines: [], fields: ["Summary"] }]
+      }]
+    }
+  }));
+  const repeatOnly = await prepareArtifactCandidate(repeatOnlyContract, {
+    kind: "inline",
+    value: "# Notes\n\n## Improve startup\n### Summary\nDone.\n\n## Reduce latency\n### Summary\nDone.\n"
+  }, context);
+  assert.equal((await registry.execute(registry.resolvePlan(repeatOnlyContract), {
+    contract: repeatOnlyContract,
+    candidate: repeatOnly,
+    context
+  })).status, "passed");
+});
+
 test("structured parents re-decode fields that establish a local format contract", async () => {
   const registry = createBuiltInArtifactValidatorRegistry();
   const contract = compileArtifactContract(artifactNodeSchema.parse({

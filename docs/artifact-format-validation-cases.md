@@ -135,27 +135,21 @@ Case：`008-release-check`
 
 两个版本号格式正确，两项检查值也严格为“通过”。不得报告 `schema_assert_violation`。
 
-## Case 009：Repeat 每轮缺少核验项父标题
+## Case 009：Repeat 使用动态标题
 
 Case：`009-release-change-verification`
 
 - Memory：`memory.yaml`
 - Artifact：`artifact.md`
-- 错误：Repeat body 每轮依次要求一个“变更项”和一个同级“核验项”。Artifact 创建了两个“变更项”，却没有“核验项”；核验方式和核验结果标题被直接放在对应“变更项”下面。
+- 结果：通过。Repeat body 的直接字段按同级标题顺序和每轮字段数量匹配，不要求标题文本等于字段 `names`。Artifact 中两个不同的“变更项”标题依次承载 body 的两个位置，其嵌套字段满足各自 Schema。
 
-| 错误码 | 字段或路径 | 消息应说明 |
-| --- | --- | --- |
-| `schema.format.outline.expected_heading` | 第 1、2 轮的核验项 | 每轮都缺少“核验项”标题，期望 2 次，实际 0 次。 |
-| `schema.format.outline.invalid_parent` | 第 1、2 轮的核验项 / 核验方式 | “核验方式”当前父标题是对应“变更项”，期望父标题是对应“核验项”。 |
-| `schema.format.outline.invalid_parent` | 第 1、2 轮的核验项 / 核验结果 | “核验结果”当前父标题是对应“变更项”，期望父标题是对应“核验项”。 |
-
-发布版本、两组业务事实、核验结果和发布结论满足 Memory。validator 不应把内容判错，也不应要求第三轮。
+直接 Repeat 标题允许表达每项业务内容，不应因名称不同而失败。嵌套的“变更内容”“负责人”“核验方式”和“核验结果”仍按名称及父子层级校验。
 
 ## 完整回归通过条件
 
-1. 九个 case 全部稳定返回 `failed` 和 `correctable: true`。
-2. 每个 case 的错误覆盖本文列出的全部字段或字段路径。
+1. Case 001 至 008 稳定返回 `failed` 和 `correctable: true`，Case 009 返回 `passed`。
+2. 失败 case 的错误覆盖本文列出的全部字段或字段路径。
 3. 文档标题、粗体标签或同名列表项不能冒充字段标题。
 4. 嵌套 Schema 能检查父子标题层级。
-5. Repeat 能检查每轮完整 body、标题次数和字段父级。
+5. Repeat 按位置检查每轮完整 body 和次数，不检查直接 body 标题名称，并继续检查嵌套字段名称与父级。
 6. 已满足的内容 asserts、合法正文列表和不同正文措辞不会产生无来源错误。

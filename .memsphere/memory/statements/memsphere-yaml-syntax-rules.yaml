@@ -871,6 +871,7 @@ sections:
                   - 声明当前重复区块每一轮整体重复的一组 Schema 字段。
                 asserts:
                   - body 必须是由字符串字段或带 !schema tag 的字段组成的非空数组。
+                  - body 的直接字段按每轮位置和字段数量匹配 Markdown 标题，不校验标题文本是否等于字段 names；字段内部的嵌套 fields 仍按名称和层级校验。
                   - body 不得直接包含 !repeat，也不得通过 body 内的 Schema 嵌套 !repeat。
 
       - !statement

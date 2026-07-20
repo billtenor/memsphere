@@ -719,30 +719,20 @@ function deriveMarkdownOutlineChildren(
 ): DerivedSchemaChild[] {
   if (candidate.representation.kind !== "markdown") return [];
   const headings = extractMarkdownHeadings(candidate.representation.ast);
-  const firstField = firstConcreteField(schema.fields ?? []);
-  const firstHeading = firstField
-    ? headings.find((heading) => headingMatches(heading, firstField, undefined))
-    : undefined;
-  const parentIndex = firstHeading?.parentIndex;
+  const parentIndex = inferOutlineParentIndex(schema.fields ?? [], headings);
   const children: DerivedSchemaChild[] = [];
   let cursor = 0;
 
-  for (const [index, field] of (schema.fields ?? []).entries()) {
+  const fields = schema.fields ?? [];
+  for (const [index, field] of fields.entries()) {
     const path = `${contractPath}.fields[${index}]`;
     if (typeof field === "object" && field.tag === "!repeat") {
-      const first = field.body[0];
-      if (!first) continue;
-      const occurrences = headings.filter((heading) =>
-        heading.index >= cursor &&
-        heading.parentIndex === parentIndex &&
-        headingMatches(heading, first, undefined)
-      );
-      for (const [iterationIndex, occurrence] of occurrences.entries()) {
-        const groupEnd = occurrences[iterationIndex + 1]?.index ?? headings.length;
+      const end = repeatRangeEnd(fields, index, headings, cursor, headings.length, parentIndex);
+      const repeatedHeadings = siblingHeadings(headings, cursor, end, parentIndex);
+      const iterationCount = Math.ceil(repeatedHeadings.length / field.body.length);
+      for (let iterationIndex = 0; iterationIndex < iterationCount; iterationIndex += 1) {
         for (const [bodyIndex, bodyField] of field.body.entries()) {
-          const match = bodyIndex === 0
-            ? occurrence
-            : findOutlineHeading(headings, bodyField, occurrence.index + 1, groupEnd, parentIndex, iterationIndex + 1);
+          const match = repeatedHeadings[iterationIndex * field.body.length + bodyIndex];
           if (!match) continue;
           children.push(derivedMarkdownChild(
             bodyField,
@@ -755,7 +745,7 @@ function deriveMarkdownOutlineChildren(
           ));
         }
       }
-      cursor = Math.max(cursor, occurrences.at(-1)?.index ?? cursor);
+      cursor = Math.max(cursor, repeatedHeadings.at(-1)?.index ?? cursor);
       continue;
     }
 
@@ -1048,14 +1038,10 @@ function validateMarkdownOutline(
   headings: readonly MarkdownHeading[]
 ): ArtifactValidationIssue[] {
   const issues: ArtifactValidationIssue[] = [];
-  const firstField = firstConcreteField(fields);
-  const firstHeading = firstField
-    ? headings.find((heading) => headingMatches(heading, firstField, undefined))
-    : undefined;
   validateOutlineFields(request, fields, headings, {
     start: 0,
     end: headings.length,
-    parentIndex: firstHeading?.parentIndex,
+    parentIndex: inferOutlineParentIndex(fields, headings),
     path: []
   }, issues);
   return issues;
@@ -1080,9 +1066,10 @@ function validateOutlineFields(
   issues: ArtifactValidationIssue[]
 ): number {
   let cursor = range.start;
-  for (const field of fields) {
+  for (const [index, field] of fields.entries()) {
     if (typeof field === "object" && field.tag === "!repeat") {
-      cursor = validateOutlineRepeat(request, field, headings, { ...range, start: cursor }, issues);
+      const end = repeatRangeEnd(fields, index, headings, cursor, range.end, range.parentIndex);
+      cursor = validateOutlineRepeat(request, field, headings, { ...range, start: cursor, end }, issues);
       continue;
     }
     const match = findOutlineHeading(headings, field, cursor, range.end, range.parentIndex);
@@ -1128,18 +1115,14 @@ function validateOutlineRepeat(
 ): number {
   const first = repeat.body[0];
   if (!first) return range.start;
-  const occurrences = headings.filter((heading) =>
-    heading.index >= range.start &&
-    heading.index < range.end &&
-    heading.parentIndex === range.parentIndex &&
-    headingMatches(heading, first, undefined)
-  );
+  const repeatedHeadings = siblingHeadings(headings, range.start, range.end, range.parentIndex);
   const min = repeat.limit?.min ?? 0;
   const max = repeat.limit?.max;
-  const expectedCount = Math.max(min, occurrences.length);
-  if (max !== undefined && occurrences.length > max) {
+  const actualCount = Math.ceil(repeatedHeadings.length / repeat.body.length);
+  const expectedCount = Math.max(min, actualCount);
+  if (max !== undefined && actualCount > max) {
     issues.push(outlineIssue(request, "schema.format.outline.repeat_count", [...range.path, primaryFieldName(first)], {
-      actual: occurrences.length,
+      actual: actualCount,
       expected: `${min}..${max}`,
       message: `Markdown outline repeat count exceeds ${max}`
     }));
@@ -1147,13 +1130,12 @@ function validateOutlineRepeat(
 
   let cursor = range.start;
   for (let iteration = 1; iteration <= expectedCount; iteration += 1) {
-    const groupStart = occurrences[iteration - 1]?.index ?? cursor;
-    const groupEnd = occurrences[iteration]?.index ?? range.end;
+    const groupOffset = (iteration - 1) * repeat.body.length;
+    const groupStart = repeatedHeadings[groupOffset]?.index ?? cursor;
+    const groupEnd = repeatedHeadings[groupOffset + repeat.body.length]?.index ?? range.end;
     for (const [bodyIndex, field] of repeat.body.entries()) {
       const path = [...range.path, `${primaryFieldName(field)}[${iteration}]`];
-      const match = bodyIndex === 0
-        ? occurrences[iteration - 1]
-        : findOutlineHeading(headings, field, groupStart + 1, groupEnd, range.parentIndex, iteration);
+      const match = repeatedHeadings[groupOffset + bodyIndex];
       if (!match) {
         issues.push(outlineIssue(request, "schema.format.outline.expected_heading", path, {
           actual: headings.slice(groupStart, groupEnd).map((heading) => heading.text),
@@ -1182,6 +1164,30 @@ function validateOutlineRepeat(
     }
   }
   return cursor;
+}
+
+function repeatRangeEnd(
+  fields: readonly SchemaField[],
+  repeatIndex: number,
+  headings: readonly MarkdownHeading[],
+  start: number,
+  end: number,
+  parentIndex: number | undefined
+): number {
+  const nextField = firstConcreteField(fields.slice(repeatIndex + 1));
+  if (!nextField) return end;
+  return findOutlineHeading(headings, nextField, start, end, parentIndex)?.index ?? end;
+}
+
+function siblingHeadings(
+  headings: readonly MarkdownHeading[],
+  start: number,
+  end: number,
+  parentIndex: number | undefined
+): MarkdownHeading[] {
+  return headings.filter((heading) =>
+    heading.index >= start && heading.index < end && heading.parentIndex === parentIndex
+  );
 }
 
 function reportChildrenUnderMissingParent(
@@ -1236,6 +1242,25 @@ function firstConcreteField(fields: readonly SchemaField[]): string | SchemaNode
     return field;
   }
   return undefined;
+}
+
+function inferOutlineParentIndex(
+  fields: readonly SchemaField[],
+  headings: readonly MarkdownHeading[]
+): number | undefined {
+  for (const field of fields) {
+    if (typeof field === "object" && field.tag === "!repeat") continue;
+    const match = headings.find((heading) => headingMatches(heading, field, undefined));
+    if (match) return match.parentIndex;
+  }
+
+  const siblingCounts = new Map<number | undefined, number>();
+  for (const heading of headings) {
+    siblingCounts.set(heading.parentIndex, (siblingCounts.get(heading.parentIndex) ?? 0) + 1);
+  }
+  return [...siblingCounts.entries()].sort(([leftParent, leftCount], [rightParent, rightCount]) =>
+    rightCount - leftCount || Number(rightParent !== undefined) - Number(leftParent !== undefined)
+  )[0]?.[0];
 }
 
 function primaryFieldName(field: string | SchemaNode): string {
