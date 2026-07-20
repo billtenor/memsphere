@@ -4,6 +4,7 @@ import type {
   DefinitionPart,
   FlowNode,
   IfNode,
+  MemoryRefNode,
   MemoryEntity,
   ProcedureMemory,
   RepeatNode,
@@ -14,7 +15,7 @@ import type {
 } from "./ast.js";
 import type { MemoryKind } from "./kinds.js";
 
-export const memoryNodeTypes = ["Statement", "String", "Schema", "Action", "If", "While", "Call"] as const;
+export const memoryNodeTypes = ["Statement", "String", "Schema", "Ref", "Action", "If", "While", "Call"] as const;
 export type MemoryNodeType = (typeof memoryNodeTypes)[number];
 
 export type MemoryIdentity = {
@@ -138,10 +139,14 @@ function buildSchemaChildren(
 ): InternalMemoryNode[] {
   const nodes = buildSchemaFields(schema.fields ?? [], prefix, contexts);
   if (schema.item) {
-    nodes.push(buildSchemaItemNode(schema.item, prefix, "item", contexts, "item"));
+    nodes.push(schema.item.tag === "!ref"
+      ? buildRefNode(schema.item, prefix, "item", contexts, "item")
+      : buildSchemaItemNode(schema.item, prefix, "item", contexts, "item"));
   }
   for (const [index, item] of (schema.items ?? []).entries()) {
-    nodes.push(buildSchemaItemNode(item, prefix, `items[${index + 1}]`, contexts, "items"));
+    nodes.push(item.tag === "!ref"
+      ? buildRefNode(item, prefix, `items[${index + 1}]`, contexts, "items")
+      : buildSchemaItemNode(item, prefix, `items[${index + 1}]`, contexts, "items"));
   }
   return nodes;
 }
@@ -266,6 +271,10 @@ function buildSchemaFieldNode(
       contexts,
       children: []
     });
+  }
+
+  if (field.tag === "!ref") {
+    return buildRefNode(field, prefix, segment, contexts, relation);
   }
 
   const children = buildSchemaChildren(
@@ -450,9 +459,28 @@ function flowNodeSegment(node: FlowNode): string {
 }
 
 function schemaFieldSegment(field: Exclude<SchemaField, RepeatNode>): string {
-  return typeof field === "string"
-    ? `string:${escapeReferenceValue(field)}`
-    : `schema:${escapeReferenceValue(field.names[0])}`;
+  if (typeof field === "string") return `string:${escapeReferenceValue(field)}`;
+  if (field.tag === "!ref") return `ref:${escapeReferenceValue(field.target)}`;
+  return `schema:${escapeReferenceValue(field.names[0])}`;
+}
+
+function buildRefNode(
+  ref: MemoryRefNode,
+  prefix: string,
+  segment: string,
+  contexts: MemoryNodeContextEntry[],
+  relation: string
+): InternalMemoryNode {
+  return createNode({
+    nodeRef: joinReference(prefix, segment),
+    type: "Ref",
+    target: ref.target,
+    summary: `Reference ${ref.target}`,
+    relation,
+    value: ref,
+    contexts,
+    children: []
+  });
 }
 
 function createNode(input: {
@@ -539,6 +567,7 @@ function definitionSummary(
   suggests?: string[]
 ): string | undefined {
   return defines.find((definition): definition is string => typeof definition === "string")
+    ?? defines.find((definition): definition is MemoryRefNode => typeof definition === "object" && definition.tag === "!ref")?.target
     ?? asserts?.[0]
     ?? suggests?.[0];
 }

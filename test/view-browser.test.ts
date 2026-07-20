@@ -30,6 +30,20 @@ test("browser renders current Schema type, format, layout, and item contracts", 
   assert.match(browserHtml, /for \(const \[index, item\] of node\.items\.entries\(\)\)/);
 });
 
+test("browser shows explicit optional true metadata", () => {
+  assert.match(browserHtml, /badges\.push\("optional: true"\)/);
+  assert.match(browserHtml, /\(optional: true\)/);
+});
+
+test("browser renders Memory refs as direct navigation links", () => {
+  assert.match(browserHtml, /function renderMemoryRef\(ref, path\)/);
+  assert.match(browserHtml, /className = "memory-ref-link"/);
+  assert.match(browserHtml, /function memoryByReference\(reference\)/);
+  assert.match(browserHtml, /function openMemoryReference\(reference\)/);
+  assert.match(browserHtml, /state\.selectedId = target\.id;/);
+  assert.doesNotMatch(browserHtml, /className = "section ref-node"/);
+});
+
 test("browser renders Schema Repeat structure and its Run control command", () => {
   assert.match(browserHtml, /function renderSchemaRepeat\(node, depth, path\)/);
   assert.match(browserHtml, /child\.tag === "!repeat"/);

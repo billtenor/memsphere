@@ -15,6 +15,7 @@ import {
   readRun,
   repeatRun,
   reportRun,
+  skipRun,
   startRun
 } from "../src/run/store.js";
 import { validateMemoryStore } from "../src/validation.js";
@@ -305,6 +306,68 @@ flow:
       artifact: { kind: "inline", value: "# Release\n\n## summary\n\nReady.\n" }
     });
     assert.equal(done.status, "done");
+  });
+});
+
+test("schema Memory refs are resolved into the Run schema snapshot", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const schemasRoot = join(memoryRoot, "schemas");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await mkdir(schemasRoot, { recursive: true });
+
+    await writeFile(join(proceduresRoot, "target.yaml"), `!procedure
+names: [schema-ref-procedure]
+flow:
+  - !action
+    action: Produce delivery.
+    artifact: !artifact
+      name: delivery
+      type: object
+      format: { name: markdown, layout: outline }
+      schema: !ref
+        target: schemas/Delivery Schema
+`);
+    await writeFile(join(schemasRoot, "delivery.yaml"), `!schema
+names: [Delivery Schema]
+fields:
+  - summary
+  - !ref
+    target: schemas/Detail Schema
+`);
+    await writeFile(join(schemasRoot, "detail.yaml"), `!schema
+names: [Detail Schema]
+fields: [owner]
+`);
+
+    const started = await startRun({ memoryRoot, runsRoot, procedureName: "schema-ref-procedure" });
+    const step = started.stack[0].steps[0];
+    assert.equal(step.schema?.kind, "external");
+    assert.equal(step.schema?.name, "schemas/Delivery Schema");
+    assert.deepEqual(step.schema?.node?.fields?.map((field) => typeof field === "string" ? field : field.names[0]), [
+      "summary",
+      "Detail Schema"
+    ]);
+
+    const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id, schemaName: "schemas/Delivery Schema" });
+    assert.deepEqual(entered.stack.at(-1)?.steps.map((schemaStep) => schemaStep.artifact), [
+      "schemas/Delivery Schema",
+      "schemas/Delivery Schema.summary",
+      "schemas/Delivery Schema.Detail Schema",
+      "schemas/Delivery Schema.Detail Schema.owner"
+    ]);
+
+    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery\n" } });
+    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "ready" } });
+    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "Detail" } });
+    const done = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "Ada" } });
+
+    assert.equal(done.status, "done");
+    const delivery = done.events.find((event) => event.artifact.name === "delivery")?.artifact;
+    assert(delivery?.path);
+    assert.match(await readFile(join(runsRoot, delivery.path), "utf8"), /## Detail Schema\n\nDetail\n\n### owner\n\nAda/);
   });
 });
 
@@ -851,6 +914,56 @@ fields:
       "repeat-schema.owner[2]",
       "repeat-schema.summary"
     ]);
+  });
+});
+
+test("schema optional fields can be explicitly skipped", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const schemasRoot = join(memoryRoot, "schemas");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await mkdir(schemasRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "target.yaml"), `!procedure
+names: [target-procedure]
+flow:
+  - !action
+    action: Capture schema.
+    artifact: !artifact
+      name: schema result
+      type: object
+      format:
+        name: markdown
+        layout: outline
+      schema: optional-schema
+`);
+    await writeFile(join(schemasRoot, "optional.yaml"), `!schema
+names: [optional-schema]
+fields:
+  - required
+  - !schema
+    names: [notes]
+    optional: true
+`);
+
+    const started = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
+    await enterSchema({ memoryRoot, runsRoot, runId: started.id, schemaName: "optional-schema" });
+    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Record" } });
+    await assert.rejects(skipRun({ runsRoot, runId: started.id }), /required/);
+    const required = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "ready" } });
+
+    assert.equal(currentStep(required)?.artifact, "optional-schema.notes");
+    assert.equal(currentStep(required)?.optional, true);
+
+    const skipped = await skipRun({ runsRoot, runId: started.id });
+    assert.equal(skipped.events.find((event) => event.stepId === "schema:optional-schema.notes")?.artifact.fields?.skipped, true);
+    assert.equal(skipped.status, "done");
+    const assembledArtifact = skipped.events.find((event) => event.artifact.name === "schema result")?.artifact;
+    assert(assembledArtifact?.path);
+    const assembled = await readFile(join(runsRoot, assembledArtifact.path), "utf8");
+    assert.match(assembled, /## required/);
+    assert.doesNotMatch(assembled, /notes/);
   });
 });
 

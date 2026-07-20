@@ -1,0 +1,61 @@
+!schema
+syntax: memsphere-20260719-stable
+names:
+  - Procedure entity schema
+  - "!procedure 编写模板"
+format: yaml
+defines:
+  - 定义 memsphere !procedure Memory 的合法内容结构和字段要求。
+asserts:
+  - 根节点必须使用 !procedure 标签，不得使用独立的 type 字段。
+  - names 必须是非空字符串数组，首项为规范名称。
+  - defines 可以包含字符串、!ref、!statement 或 !schema；列表中的全部成员共同生效。
+  - asserts 如出现，必须是非空字符串数组，并在整个 Procedure 执行期间持续生效。
+  - goals 必须是字符串数组。
+  - flow 必须由带 tag 的 !action、!if、!while 或 !call 组成。
+fields:
+  - !schema
+    name: syntax
+    type: string
+    defines:
+      - 当前 Procedure 使用的不可变语法版本。
+  - !schema
+    name: names
+    type: array
+    item: !schema
+      type: string
+    defines:
+      - Procedure 的规范名称与别名，首项为规范名称。
+  - !schema
+    name: defines
+    optional: true
+    type: array
+    items:
+      - !schema
+        type: string
+      - !schema
+        type: object
+    defines:
+      - Procedure 的含义、用途、适用边界，以及可选的外部 Memory 引用。
+  - !schema
+    name: asserts
+    optional: true
+    type: array
+    item: !schema
+      type: string
+    defines:
+      - 选择和执行整个 Procedure 时持续生效的全局约束。
+  - !schema
+    name: goals
+    type: array
+    item: !schema
+      type: string
+    defines:
+      - Procedure 要达成的目标。
+  - !schema
+    name: flow
+    type: array
+    item: !schema
+      type: object
+    defines:
+      - 由 Action、If、While 或 Call 组成的有序执行流程。

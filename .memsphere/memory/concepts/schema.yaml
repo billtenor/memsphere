@@ -9,6 +9,8 @@ defines:
   - 用于让协作者按共同的结构填写或验证产物，不用于表达领域术语或独立事实。
   - fields 共同定义产物包含的字段；字段是结构要求，不是可以任意选择的示例项。
   - Artifact 与 Schema 都可以声明 type 和 format；Schema 还用 fields 与重复结构描述当前值内部的结构。
+  - !ref
+    target: schemas/Schema entity schema
   - !statement
     asserts:
       - "当 Artifact 使用 markdown + layout: outline 时，字段名称必须成为 Markdown 标题，并按 fields 的嵌套关系形成标题层级。"

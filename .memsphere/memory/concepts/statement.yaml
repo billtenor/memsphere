@@ -9,6 +9,8 @@ defines:
   - Statement 通过 asserts 列出必须成立的断言，通过 suggests 列出执行时可以参考但不强制满足的建议，并通过 sections 在同一领域内按树状层级组织较大的规则集合。
   - 任意 Statement 节点都可以同时包含 asserts、suggests 和 sections；树状层级只负责组织内容，不产生额外的规则继承语义。
   - Statement 不用于解释领域术语，也不用于定义文档或数据结构；这些内容分别由 Concept 和 Schema 表达。
+  - !ref
+    target: schemas/Statement entity schema
   - !statement
     sections:
       - !statement

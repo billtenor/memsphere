@@ -10,6 +10,7 @@ import {
   readRun,
   repeatRun,
   reportRun,
+  skipRun,
   startRun,
   type RunState
 } from "../run/store.js";
@@ -69,6 +70,13 @@ export async function runRepeatCommand(countValue: string, options: RunIdOptions
   }
   const config = await readConfig();
   const run = await repeatRun({ runsRoot: config.runsRoot, runId, count });
+  printRunState(run);
+}
+
+export async function runSkipCommand(options: RunIdOptions): Promise<void> {
+  const runId = requireRunId(options.run);
+  const config = await readConfig();
+  const run = await skipRun({ runsRoot: config.runsRoot, runId });
   printRunState(run);
 }
 
@@ -197,9 +205,12 @@ export function printRunState(run: RunState): void {
       console.log(`memsphere run enter-schema ${step.schema.name} --run ${run.id}`);
     }
   } else {
-    console.log("Then:");
-    console.log(`memsphere run report --run ${run.id} --artifact <value>`);
+  console.log("Then:");
+  console.log(`memsphere run report --run ${run.id} --artifact <value>`);
+  if (step.optional === true) {
+    console.log(`memsphere run skip --run ${run.id}`);
   }
+}
 }
 
 function formatDisplay(format: NonNullable<ReturnType<typeof currentStep>>["format"]): string {

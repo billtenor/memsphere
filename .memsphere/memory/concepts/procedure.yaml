@@ -8,6 +8,8 @@ defines:
   - memsphere 中用于描述一个任务从开始到结束如何执行的 Memory。
   - Procedure 通过 goals 描述目标，通过 asserts 声明全局约束，通过 flow 安排有序 Action、分支、循环和对子流程的调用。
   - 同一个 Procedure 可以被多次执行，每次执行形成相互独立的 Run；Run 记录当前步骤、步骤产物和最终交付物。
+  - !ref
+    target: schemas/Procedure entity schema
   - !statement
     asserts:
       - 需要使用 memsphere 遵循 Memory 完成任务时，必须先选择适用的 Procedure，并完整读取或按 Node 读取执行任务所需的内容。

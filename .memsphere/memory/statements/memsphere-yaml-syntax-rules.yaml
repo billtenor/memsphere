@@ -140,7 +140,7 @@ sections:
               - 读取一个节点时，必须先根据 YAML tag 确定区块，再检查区块允许和要求的关键字，随后按关键字规则检查字段值，并递归处理字段中的子区块。
               - 示例中的 !procedure、!action 和 !artifact 是区块；names、flow、action、artifact、name、type 和 format 是关键字；flow 的值是包含子区块的 YAML sequence。
               - 顶层 Memory 必须具有非空 names，或使用非空 name 作为 names 的单值简写；嵌套节点是否必须具有名称由所在区块决定。
-              - defines 中的匿名 !statement 和 !schema 可以省略 names 和 name，但必须分别满足自身的最小有效内容要求。
+              - defines 中的匿名 !statement 和 !schema 可以省略 names 和 name，但必须分别满足自身的最小有效内容要求；!ref 是结构化外部 Memory 引用，不会被解析为普通文本定义。
 
   - !statement
     names:
@@ -227,8 +227,27 @@ sections:
                   - 发布前必须完成验收。
             ```
         asserts:
-          - defines 的值必须是由非空字符串、匿名 !statement 或匿名 !schema 组成的数组。
+          - defines 的值必须是由非空字符串、!ref、匿名 !statement 或匿名 !schema 组成的数组。
           - defines 中的全部成员共同定义当前节点并同时生效，不得被解释为互斥候选。
+
+      - !statement
+        names:
+          - "!ref"
+          - Memory 引用
+        defines:
+          - 通过稳定逻辑引用连接外部 Concept、Statement 或 Schema Memory，使定义和结构可以复用而不复制内嵌内容。
+          - |-
+            ```yaml
+            defines:
+              - !ref
+                target: schemas/Concept entity schema
+            ```
+        asserts:
+          - "!ref 只能使用 mapping 形式，且必须声明非空 target。"
+          - target 必须是 Memory 逻辑引用，形如 concepts/名称、statements/名称 或 schemas/名称；不得只写普通名称。
+          - defines 中的 !ref 可以指向 Concept、Statement 或 Schema；Schema fields、item、items 和 Artifact.schema 中的 !ref 只能指向 Schema。
+          - validate 必须拒绝不存在、目标类型不允许和形成循环依赖的 !ref。
+          - memory read 与 View 必须展示 !ref 及其 target，但默认不得递归内联目标内容。
 
       - !statement
         names:
@@ -454,11 +473,17 @@ sections:
         names:
           - schema
         defines:
-          - 为当前值绑定外部 Schema 引用或 inline !schema，形成结构校验契约。
+          - 为当前值绑定外部 Schema 引用、!ref 或 inline !schema，形成结构校验契约。
           - |-
             引用已经命名的外部 Schema：
             ```yaml
             schema: 需求文档
+            ```
+          - |-
+            使用逻辑引用指向外部 Schema：
+            ```yaml
+            schema: !ref
+              target: schemas/需求文档
             ```
           - |-
             直接内嵌一个匿名 Schema：
@@ -470,7 +495,7 @@ sections:
                 - 结论
             ```
         asserts:
-          - schema 如出现必须是非空 Schema 名称引用或带 !schema tag 的 YAML mapping。
+          - schema 如出现必须是非空 Schema 名称引用、指向 schemas/* 的 !ref，或带 !schema tag 的 YAML mapping。
           - schema 的根值契约必须与其约束的值契约一致。
 
       - !statement
@@ -489,9 +514,21 @@ sections:
                 type: number
             ```
         asserts:
-          - fields 如出现必须是由字符串、带 !schema tag 的字段或合法 !repeat 组成的数组。
+          - fields 如出现必须是由字符串、指向 schemas/* 的 !ref、带 !schema tag 的字段或合法 !repeat 组成的数组。
           - "字符串成员是 type: string 字段的最简写法；详细字段 Schema 必须声明非空 names 或非空 name。"
+          - "带 optional: true 的详细字段缺失时可以通过校验；字符串简写字段和未声明 optional 的详细字段仍为必填。"
           - fields 中的每一项约束一个具名子值，不得用于表达匿名数组元素。
+
+      - !statement
+        names:
+          - optional
+        defines:
+          - 声明 fields 中的具名 Schema 字段是否可以缺失。
+        asserts:
+          - optional 只能出现在 fields 中作为字段使用的具名 !schema 节点上，不得出现在顶层 Schema、defines、item 或 items 中。
+          - optional 如出现必须是 boolean；省略或 false 表示字段必填。
+          - 可选字段缺失时 JSON/YAML object、Markdown outline 和 Markdown table 校验均应放行；字段存在时仍必须完整满足其类型、format 和嵌套 Schema。
+          - Schema Run 可以显式 skip 当前可选字段；必填字段不得 skip。
 
       - !statement
         names:
@@ -510,7 +547,7 @@ sections:
             ```
         asserts:
           - item 只允许用于显式声明 type 为 array 的 Schema。
-          - item 的值必须是单个匿名 !schema，数组中的每个元素都必须满足该 Schema。
+          - item 的值必须是单个匿名 !schema 或指向 schemas/* 的 !ref，数组中的每个元素都必须满足该 Schema。
           - item 与 items 不得同时出现。
 
       - !statement
@@ -530,7 +567,7 @@ sections:
             ```
         asserts:
           - items 只允许用于显式声明 type 为 array 的 Schema。
-          - items 的值必须是由至少两个匿名 !schema 组成的 YAML sequence。
+          - items 的值必须是由至少两个匿名 !schema 或指向 schemas/* 的 !ref 组成的 YAML sequence。
           - 数组中的每个元素都必须满足 items 中至少一个候选 Schema；不同元素可以满足不同候选。
           - items 表达联合成员约束，不表达按位置匹配的 tuple。
           - items 与 item 不得同时出现。
@@ -723,9 +760,10 @@ sections:
                   - 风险必须说明影响范围。
             ```
         asserts:
-          - "!schema 节点允许 name/names、defines、asserts、type、format、fields、item 和 items 字段。"
+          - "!schema 节点允许 name/names、defines、asserts、optional、type、format、fields、item 和 items 字段。"
           - 顶层 !schema 与 fields 中作为具名字段使用的 !schema 必须具有非空 names 或非空 name。
           - defines 与 item/items 中的匿名 !schema 可以省略 names 和 name，但必须至少具有非空 defines、asserts、type、format、fields、item 或 items 中的一项。
+          - fields、item、items 和 Artifact.schema 中的 !ref 必须指向 Schema Memory，解析后按目标 Schema 约束当前值。
           - Schema.asserts 如出现，必须是字符串数组，用于表达代码无法自动推导的内容或业务约束。
           - Schema 不支持 suggests；非强制结构建议应写入相关 Statement 或 Procedure Action。
         sections:
@@ -786,10 +824,11 @@ sections:
             names:
               - fields
             asserts:
-              - fields 表达 object 值内部由字段名索引的子值约束；列表中的每一项都是必需结构字段，额外字段当前允许存在。
-              - fields 成员可以是字符串简写、带 !schema tag 的详细字段，或满足适用条件的 !repeat 控制节点。
+              - "fields 表达 object 值内部由字段名索引的子值约束；除 optional: true 的详细字段外，列表中的每一项都是必需结构字段，额外字段当前允许存在。"
+              - fields 成员可以是字符串简写、指向 Schema 的 !ref、带 !schema tag 的详细字段，或满足适用条件的 !repeat 控制节点。
               - 字符串字段是仅声明字段名的最简写法，等价于省略显式 type 的 string 叶子 Schema，并继承所在结构的兼容格式上下文。
               - 带 !schema tag 的字段用于声明该字段的定义、断言、显式类型、显式格式或递归子结构。
+              - "optional: true 只能用于 fields 中的具名 !schema 字段；字符串简写和 !ref 字段本身不携带 optional。"
               - array Schema 不允许直接使用 fields；对象元素的字段必须放在 item 或 items 的 object Schema 中。
 
           - !statement
@@ -801,8 +840,8 @@ sections:
             asserts:
               - "type: array 同时省略 item 和 items 时只校验数组容器，不约束元素类型。"
               - item 与 items 互斥；任意一个出现时，所在 Schema 都必须显式声明 type 为 array。
-              - item 的值是单个匿名 Schema，数组中的每个元素都必须满足该 Schema。
-              - items 的值是由至少两个匿名 Schema 组成的 YAML sequence，数组中的每个元素必须至少满足一个候选 Schema，不同元素可以满足不同候选。
+              - item 的值是单个匿名 Schema 或指向 Schema 的 !ref，数组中的每个元素都必须满足该 Schema。
+              - items 的值是由至少两个匿名 Schema 或指向 Schema 的 !ref 组成的 YAML sequence，数组中的每个元素必须至少满足一个候选 Schema，不同元素可以满足不同候选。
               - items 表达联合成员约束，不表达按位置匹配的 tuple。
               - item 和 items 中的 Schema 约束数组元素值而不是 object 字段，因此可以省略 names 和 name；存在名称时只作为元素约束名称，不产生字段键。
               - "type: array 不应直接声明 fields；只有一种对象元素结构时，应写成 item 下 type: object 且包含 fields 的 Schema。"

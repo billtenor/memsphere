@@ -146,6 +146,9 @@ export const browserHtml = String.raw`<!doctype html>
     .schema-field-content { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
     .schema-field-plain .node-title { font-weight: 400; }
     .schema-field-type { color: var(--muted); font-size: 13px; }
+    .memory-ref-link { display: inline-flex; align-items: center; width: fit-content; max-width: 100%; border: 0; background: transparent; color: var(--accent); padding: 0; font: inherit; font-weight: 700; text-align: left; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: 3px; }
+    .memory-ref-link:hover { color: #173f3c; }
+    .memory-ref-link.missing { color: var(--muted); text-decoration-style: dotted; }
     .field-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
     .field-table th, .field-table td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; white-space: pre-wrap; }
     .field-table th { width: 220px; background: #f3f5f0; font-weight: 700; }
@@ -1429,6 +1432,7 @@ export const browserHtml = String.raw`<!doctype html>
       const section = document.createElement("div");
       section.className = "section schema-node" + (depth < 2 ? " open" : "");
       const badges = ["!schema"];
+      if (node.optional) badges.push("optional: true");
       if (node.type) badges.push(t("type") + ": " + node.type);
       if (node.format) {
         badges.push(t("format") + ": " + formatLabel(node.format));
@@ -1454,19 +1458,25 @@ export const browserHtml = String.raw`<!doctype html>
             ? child
             : child.tag === "!repeat"
               ? t("repeat")
+              : child.tag === "!ref"
+                ? child.target
               : displayName(child, t("schema"));
           const childPath = path + " > " + childName;
           children.append(typeof child === "string"
             ? renderSimpleSchemaField(child, childPath)
             : child.tag === "!repeat"
               ? renderSchemaRepeat(child, depth + 1, childPath)
+              : child.tag === "!ref"
+                ? renderMemoryRef(child, childPath)
               : renderSchema(child, depth + 1, childPath));
         }
         body.append(blockTitle(t("fields")), children);
       }
       if (node.item) {
         const itemPath = path + " > " + t("item");
-        body.append(blockTitle(t("item")), renderSchema(node.item, depth + 1, itemPath, t("item")));
+        body.append(blockTitle(t("item")), node.item.tag === "!ref"
+          ? renderMemoryRef(node.item)
+          : renderSchema(node.item, depth + 1, itemPath, t("item")));
       }
       if (node.items?.length) {
         const candidates = document.createElement("div");
@@ -1474,7 +1484,9 @@ export const browserHtml = String.raw`<!doctype html>
         for (const [index, item] of node.items.entries()) {
           const fallback = t("itemCandidate") + " " + (index + 1);
           const itemPath = path + " > " + fallback;
-          candidates.append(renderSchema(item, depth + 1, itemPath, fallback));
+          candidates.append(item.tag === "!ref"
+            ? renderMemoryRef(item)
+            : renderSchema(item, depth + 1, itemPath, fallback));
         }
         body.append(blockTitle(t("items")), candidates);
       }
@@ -1500,6 +1512,8 @@ export const browserHtml = String.raw`<!doctype html>
         const childPath = path + " > " + childName;
         children.append(typeof child === "string"
           ? renderSimpleSchemaField(child, childPath)
+          : child.tag === "!ref"
+            ? renderMemoryRef(child, childPath)
           : renderSchema(child, depth + 1, childPath));
       }
       body.append(children);
@@ -1612,9 +1626,52 @@ export const browserHtml = String.raw`<!doctype html>
           children.append(renderDefinitionItem(renderSchema(definition, 1, path, "")));
           return;
         }
+        if (definition.tag === "!ref") {
+          children.append(renderDefinitionItem(renderMemoryRef(definition, path)));
+          return;
+        }
         children.append(renderDefinitionItem(renderStatement(definition, 1, path, "", path)));
       });
       target.append(children);
+    }
+
+    function renderMemoryRef(ref, path) {
+      const target = ref.target || "";
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "memory-ref-link" + (memoryByReference(target) ? "" : " missing");
+      link.textContent = target || t("missingTarget");
+      link.title = memoryByReference(target) ? "Open referenced memory" : "Referenced memory not found";
+      link.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openMemoryReference(target);
+      });
+      return link;
+    }
+
+    function memoryByReference(reference) {
+      const value = String(reference || "");
+      if (!value) return null;
+      const direct = [...state.memories, ...state.reservedMemories].find(memory => memory.id === value);
+      if (direct) return direct;
+      const separator = value.indexOf("/");
+      if (separator > 0) {
+        const kind = value.slice(0, separator);
+        const name = value.slice(separator + 1);
+        return [...state.memories, ...state.reservedMemories].find(memory =>
+          memory.kind === kind && memory.entity?.names?.includes(name)
+        ) || null;
+      }
+      return state.byName.get(value) || null;
+    }
+
+    function openMemoryReference(reference) {
+      const target = memoryByReference(reference);
+      if (!target) return;
+      state.viewMode = "memory";
+      localStorage.setItem(viewModeKey, "memory");
+      state.selectedId = target.id;
+      renderAll();
     }
 
     function renderDefinitionItem(section) {
@@ -1646,10 +1703,14 @@ export const browserHtml = String.raw`<!doctype html>
       table.className = "field-table";
       const body = document.createElement("tbody");
       for (const field of fields) {
-        const fieldName = typeof field === "string" ? field : displayName(field, t("schema"));
+        const fieldName = typeof field === "string"
+          ? field
+          : field.tag === "!ref"
+            ? field.target
+            : displayName(field, t("schema"));
         const row = document.createElement("tr");
         const th = document.createElement("th");
-        th.textContent = fieldName;
+        th.textContent = fieldName + (field && typeof field === "object" && field.optional ? " (optional: true)" : "");
         const fieldTarget = path + " > " + fieldName;
         const fieldAnchor = "field:" + fieldTarget;
         const fieldLocation = nextLocation(fieldAnchor);
@@ -1658,6 +1719,7 @@ export const browserHtml = String.raw`<!doctype html>
         const td = document.createElement("td");
         const parts = [];
         if (typeof field !== "string") {
+          if (field.tag === "!ref") parts.push("!ref " + field.target);
           if (field.defines && field.defines.length) parts.push(field.defines.filter(value => typeof value === "string").join("\n"));
           if (field.asserts && field.asserts.length) parts.push(field.asserts.join("\n"));
         }

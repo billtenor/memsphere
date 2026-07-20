@@ -1,0 +1,88 @@
+!schema
+syntax: memsphere-20260719-stable
+names:
+  - Schema entity schema
+  - "!schema 编写模板"
+format: yaml
+defines:
+  - 定义 memsphere !schema Memory 的合法内容结构和字段要求。
+asserts:
+  - 根节点必须使用 !schema 标签。
+  - names 必须是非空字符串数组，首项为规范名称。
+  - defines 可以包含字符串、!ref、!statement 或 !schema；嵌套结构必须携带 YAML tag。
+  - fields 如出现，可以包含表示最简字段名的字符串、!ref、带 !schema tag 的详细字段，或带 !repeat tag 的重复字段组。
+  - item 和 items 中的成员可以是 !schema 或指向 Schema Memory 的 !ref。
+fields:
+  - !schema
+    name: syntax
+    type: string
+    defines:
+      - 当前 Schema 使用的不可变语法版本。
+  - !schema
+    name: names
+    type: array
+    item: !schema
+      type: string
+    defines:
+      - 结构名称与别名，首项为规范名称。
+  - !schema
+    name: defines
+    optional: true
+    type: array
+    items:
+      - !schema
+        type: string
+      - !schema
+        type: object
+    defines:
+      - 对结构语义的文本说明、外部 Memory 引用，以及用于补充规则或结构的匿名 Statement、Schema；全部成员共同生效。
+  - !schema
+    name: asserts
+    optional: true
+    type: array
+    item: !schema
+      type: string
+    defines:
+      - 内容、书写或校验要求。
+  - !schema
+    name: optional
+    optional: true
+    type: boolean
+    defines:
+      - 仅允许出现在 fields 中的具名 Schema 字段上；true 表示该字段缺失时可通过校验。
+  - !schema
+    name: type
+    optional: true
+    type: string
+    defines:
+      - 本层 Schema 的值类型。
+  - !schema
+    name: format
+    optional: true
+    defines:
+      - 本层 Schema 的编码格式与格式参数。
+  - !schema
+    name: fields
+    optional: true
+    type: array
+    items:
+      - !schema
+        type: string
+      - !schema
+        type: object
+    defines:
+      - 由简写字段名、!ref、嵌套 !schema 节点或 !repeat 重复字段组组成的子结构。
+  - !schema
+    name: item
+    optional: true
+    type: object
+    defines:
+      - array 的唯一元素 Schema 契约，可以是内嵌 !schema 或指向 Schema Memory 的 !ref。
+  - !schema
+    name: items
+    optional: true
+    type: array
+    item: !schema
+      type: object
+    defines:
+      - 至少两个候选 Schema 组成的联合元素契约；每个候选可以是内嵌 !schema 或指向 Schema Memory 的 !ref。

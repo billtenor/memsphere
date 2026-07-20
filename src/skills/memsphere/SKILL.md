@@ -91,6 +91,7 @@ defines:
 - `names` 的第一项是规范名称，其余项是别名。
 - 原本允许 `names` 的节点也允许写单个 `name`，其解析结果等价于 `names: [name]`；二者不能同时出现。
 - `defines` 用于定义这份 Memory；其中的全部成员共同生效。
+- `defines` 可以包含 `!ref` 外部 Memory 引用；`target` 必须是 `concepts/...`、`statements/...` 或 `schemas/...` 形式的逻辑引用，不接受只写普通名称。
 - 不同类型还拥有自己的字段。编写或解释某种 Memory 前，读取对应的 Concept Memory 了解完整语义和字段规则。
 
 Procedure 中每个 `!action` 的 `!artifact` 使用 `type -> format -> schema` 三层机器契约：
@@ -112,6 +113,8 @@ artifact: !artifact
 - `layout` 属于 markdown format：object 使用 outline，array 使用 table。
 - Schema 的 `type` 不继承：显式声明优先，省略时有 `fields` 推断为 `object`、无 `fields` 推断为 `string`。Schema 的 `format` 省略时继承父 Schema 或根 Artifact；Markdown `layout` 只由兼容的 object outline 或 array table 节点保留，标量字段不继承 layout。
 - array Schema 使用 `item: !schema` 表示唯一元素契约，或使用至少两个 `!schema` 组成的 `items` 表示联合元素契约；每个元素必须满足至少一个候选。二者互斥且要求显式 `type: array`。
+- `schema`、Schema `fields`、`item` 和 `items` 中可以使用 `!ref` 引用外部 Schema Memory；这些位置的 `target` 必须指向 `schemas/...`，运行和校验时会按目标 Schema 展开。
+- `fields` 中的具名 `!schema` 字段可以声明 `optional: true`；缺失时自动校验放行，存在时仍完整校验。字符串简写字段和未声明 optional 的字段仍为必填。
 - array Schema 不允许直接声明 `fields`。对象元素应在 `item` 或 `items` 的 `type: object` Schema 中声明 `fields`；省略 `item/items` 时只校验数组容器。
 - 不要使用已删除的 `element_types`；旧版字符串 `items` 必须迁移为带 `!schema` tag 的 `item/items`。
 - `asserts` 和 `suggests` 是自然语言契约，不会被代码 validator 猜测执行。
@@ -210,6 +213,14 @@ memsphere run repeat <count> --run <Run ID>
 ```
 
 次数必须满足当前步骤显示的 min/max。提交后，Run 会按轮次展开完整 body，再继续逐项产出普通字段 Artifact。
+
+当 Schema Run 到达可选字段步骤时，CLI 会提示可以跳过该字段：
+
+```bash
+memsphere run skip --run <Run ID>
+```
+
+只能跳过当前可选字段；必填字段不得 skip。跳过后 Run 会记录 skipped 事件，最终组装的结构化 Artifact 中省略该字段内容。
 
 上报成功后，CLI 会返回下一个待执行步骤；继续执行和上报，直到显示 `done`。
 

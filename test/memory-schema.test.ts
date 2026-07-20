@@ -57,11 +57,13 @@ fields: []
 `), /name/);
 });
 
-test("defines accepts text, anonymous Statement, and anonymous Schema", () => {
+test("defines accepts text, Memory refs, anonymous Statement, and anonymous Schema", () => {
   const entity = parseSchema(`!schema
 names: [example]
 defines:
   - Text definition.
+  - !ref
+    target: statements/External rule
   - !statement
     asserts:
       - A rule must hold.
@@ -85,15 +87,22 @@ fields:
     names: [nested]
 `);
 
-  const embeddedStatement = entity.defines[1];
+  assert.deepEqual(entity.defines[1], { tag: "!ref", target: "statements/External rule" });
+  const embeddedStatement = entity.defines[2];
   assert.equal(typeof embeddedStatement === "string" ? undefined : embeddedStatement.tag, "!statement");
   if (typeof embeddedStatement !== "string" && embeddedStatement.tag === "!statement") {
     assert.deepEqual(embeddedStatement.suggests, ["Prefer the documented path."]);
     assert.deepEqual(embeddedStatement.sections?.[0].suggests, ["Prefer a focused example."]);
   }
-  assert.equal(entity.defines[2].tag, "!schema");
+  assert.equal(entity.defines[3].tag, "!schema");
   assert.equal(entity.fields?.[0], "simple");
   assert.equal(entity.fields?.[1].tag, "!schema");
+  assert.throws(() => parseSchema(`!schema
+names: [example]
+defines:
+  - !ref
+    target: External rule
+`), /logical reference/);
 });
 
 test("Statement supports independent assertion and suggestion collections", () => {

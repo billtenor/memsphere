@@ -5,7 +5,8 @@ import { findConfigPath, readConfig, readConfigAt } from "./config.js";
 import { analyzeMemoryDescriptors } from "./memory/catalog.js";
 import { memoryKinds, type MemoryKind } from "./memory/kinds.js";
 import type { ProviderMemoryDescriptor } from "./memory/provider.js";
-import { listMemoryFiles, pathExists, readMemoryFile } from "./memory/store.js";
+import { validateMemoryReferences } from "./memory/references.js";
+import { listMemoryFiles, pathExists, readMemoryFile, type MemoryFile } from "./memory/store.js";
 import { currentMemorySyntax, readMemorySyntax } from "./memory/syntax.js";
 import { parseMemoryYaml } from "./memory/yaml.js";
 import { canMigrateMemorySyntax } from "./migration/memory-syntax-path.js";
@@ -84,6 +85,7 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
   }
 
   const descriptors: ProviderMemoryDescriptor[] = [];
+  const validFiles: MemoryFile[] = [];
   for (const kind of memoryKinds) {
     const dir = join(memoryRoot, kind);
 
@@ -92,7 +94,9 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
       continue;
     }
 
-    descriptors.push(...await validateKindDirectory(memoryRoot, kind, issues));
+    const result = await validateKindDirectory(memoryRoot, kind, issues);
+    descriptors.push(...result.descriptors);
+    validFiles.push(...result.files);
   }
 
   const catalogIssues = analyzeMemoryDescriptors(descriptors);
@@ -101,6 +105,10 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
       path: join(memoryRoot, issue.kind),
       message: issue.message
     });
+  }
+
+  for (const issue of validateMemoryReferences(validFiles)) {
+    issues.push(issue);
   }
 
   return {
@@ -116,7 +124,7 @@ async function validateKindDirectory(
   memoryRoot: string,
   kind: MemoryKind,
   issues: ValidationIssue[]
-): Promise<ProviderMemoryDescriptor[]> {
+): Promise<{ descriptors: ProviderMemoryDescriptor[]; files: MemoryFile[] }> {
   let filePaths: string[];
 
   try {
@@ -126,13 +134,15 @@ async function validateKindDirectory(
       path: join(memoryRoot, kind),
       message: formatError(error)
     });
-    return [];
+    return { descriptors: [], files: [] };
   }
 
   const descriptors: ProviderMemoryDescriptor[] = [];
+  const files: MemoryFile[] = [];
   for (const filePath of filePaths) {
     try {
       const file = await readMemoryFile(kind, filePath);
+      files.push(file);
       descriptors.push({
         id: filePath,
         kind,
@@ -147,7 +157,7 @@ async function validateKindDirectory(
       });
     }
   }
-  return descriptors;
+  return { descriptors, files };
 }
 
 async function usesMigratableSyntax(filePath: string): Promise<boolean> {
