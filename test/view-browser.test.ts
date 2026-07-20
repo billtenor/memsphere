@@ -221,6 +221,11 @@ test("opening a legacy comment falls back to its nested legacy anchor", () => {
   assert.match(browserHtml, /section\.contains\(target\)\) section\.classList\.add\("open"\)/);
 });
 
+test("comment cards label their navigation action as Go to", () => {
+  assert.match(browserHtml, /open\.textContent = "Go to"/);
+  assert.doesNotMatch(browserHtml, /open\.textContent = "Open"/);
+});
+
 test("browser exposes reserved memory controls", () => {
   assert.match(browserHtml, /\/api\/reserved-memories/);
   assert.match(browserHtml, /\/api\/reserved-memories\/import/);

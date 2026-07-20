@@ -11,10 +11,14 @@
       "concepts/schema.yaml",
       "statements/memory-access-rules.yaml",
       "statements/memsphere-yaml-syntax-rules.yaml",
-      "procedures/general-task-execution.yaml"
+      "procedures/general-task-execution.yaml",
+      "procedures/procedure-construction.yaml",
+      "procedures/memsphere-review.yaml"
     ],
     "remove": [
-      "statements/memory-interpretation-application-rules.yaml"
+      "statements/memory-interpretation-application-rules.yaml",
+      "procedures/dialogic-procedure-construction.yaml",
+      "procedures/memsphere-review-application.yaml"
     ]
   }
 }

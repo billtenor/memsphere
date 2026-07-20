@@ -2607,7 +2607,7 @@ export const browserHtml = String.raw`<!doctype html>
         actions.className = "comment-actions";
         const open = document.createElement("button");
         open.className = "btn";
-        open.textContent = "Open";
+        open.textContent = "Go to";
         open.addEventListener("click", () => {
           selectCommentSubject(comment);
           renderAll();

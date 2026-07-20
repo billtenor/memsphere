@@ -17,6 +17,7 @@ const registry = createBuiltInArtifactValidatorRegistry();
 
 const cases: Array<{
   id: string;
+  status?: "passed" | "failed";
   expected: Array<{ code: string; fieldPath: string }>;
 }> = [
   { id: "001-bookkeeping", expected: ["日期", "类型", "金额", "分类", "备注"].map(expectedHeading) },
@@ -37,19 +38,13 @@ const cases: Array<{
   { id: "008-release-check", expected: ["版本", "数据库迁移检查", "接口冒烟检查", "回滚版本"].map(expectedHeading) },
   {
     id: "009-release-change-verification",
-    expected: [
-      expectedHeading("核验项[1]"),
-      expectedHeading("核验项[2]"),
-      invalidParent("核验项[1] / 核验方式"),
-      invalidParent("核验项[1] / 核验结果"),
-      invalidParent("核验项[2] / 核验方式"),
-      invalidParent("核验项[2] / 核验结果")
-    ]
+    status: "passed",
+    expected: []
   }
 ];
 
 for (const fixture of cases) {
-  test(`Artifact format fixture ${fixture.id} reports every structural issue`, async () => {
+  test(`Artifact format fixture ${fixture.id} produces the expected validation result`, async () => {
     const directory = join(fixtureRoot, fixture.id);
     const schema = await readFixtureSchema(join(directory, "memory.yaml"));
     const contract = compileArtifactContract(artifactNodeSchema.parse({
@@ -68,8 +63,8 @@ for (const fixture of cases) {
     const candidate = await prepareArtifactCandidate(contract, { kind: "file", path: join(directory, "artifact.md") }, context);
     const result = await registry.execute(registry.resolvePlan(contract), { contract, candidate, context });
 
-    assert.equal(result.status, "failed");
-    assert.equal(result.correctable, true);
+    assert.equal(result.status, fixture.status ?? "failed");
+    if ((fixture.status ?? "failed") === "failed") assert.equal(result.correctable, true);
     for (const expected of fixture.expected) {
       assert(result.issues.some((issue) => issue.code === expected.code && issue.fieldPath === expected.fieldPath),
         `missing ${expected.code} for ${expected.fieldPath}; got ${JSON.stringify(result.issues)}`);
@@ -79,10 +74,6 @@ for (const fixture of cases) {
 
 function expectedHeading(fieldPath: string): { code: string; fieldPath: string } {
   return { code: "schema.format.outline.expected_heading", fieldPath };
-}
-
-function invalidParent(fieldPath: string): { code: string; fieldPath: string } {
-  return { code: "schema.format.outline.invalid_parent", fieldPath };
 }
 
 async function readFixtureSchema(path: string): Promise<SchemaNode> {

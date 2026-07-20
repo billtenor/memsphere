@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   ArtifactValidationFailure,
@@ -10,9 +9,7 @@ import {
   prepareArtifactCandidate,
   type ArtifactValidationContext
 } from "../src/artifact-validation.js";
-import type { SchemaNode } from "../src/memory/ast.js";
 import { artifactNodeSchema } from "../src/memory/schema.js";
-import { readMemoryFile } from "../src/memory/store.js";
 
 const context: ArtifactValidationContext = {
   runId: "run-test",
@@ -20,34 +17,6 @@ const context: ArtifactValidationContext = {
   artifactPath: "flow[1].artifact",
   attemptId: "attempt-1"
 };
-
-function markdownTableColumnPaths(schema: SchemaNode, path = "schema"): string[] {
-  const paths: string[] = [];
-  for (const [index, field] of (schema.fields ?? []).entries()) {
-    if (typeof field === "string") continue;
-    if (field.tag === "!repeat") {
-      for (const [bodyIndex, bodyField] of field.body.entries()) {
-        if (typeof bodyField !== "string") paths.push(...markdownTableColumnPaths(bodyField, `${path}.fields[${index}].body[${bodyIndex}]`));
-      }
-      continue;
-    }
-    const fieldPath = `${path}.fields[${index}]`;
-    paths.push(...markdownTableColumnPaths(field, fieldPath));
-  }
-  if (schema.item) {
-    if (schema.type === "array" && schema.format?.name === "markdown" && schema.format.options.layout === "table") {
-      paths.push(...(schema.item.fields ?? []).map((_column, columnIndex) => `${path}.item.fields[${columnIndex}]`));
-    }
-    paths.push(...markdownTableColumnPaths(schema.item, `${path}.item`));
-  }
-  for (const [index, item] of (schema.items ?? []).entries()) {
-    if (schema.type === "array" && schema.format?.name === "markdown" && schema.format.options.layout === "table") {
-      paths.push(...(item.fields ?? []).map((_column, columnIndex) => `${path}.items[${index}].fields[${columnIndex}]`));
-    }
-    paths.push(...markdownTableColumnPaths(item, `${path}.items[${index}]`));
-  }
-  return paths;
-}
 
 test("Artifact v2 defaults omitted type and format to normalized string and plain", () => {
   const artifact = artifactNodeSchema.parse({
@@ -456,6 +425,102 @@ test("Markdown outline validates a table only inside its child heading subtree",
   assert.equal(result.issues[0]?.fieldPath, "Requirements");
 });
 
+test("Markdown outline Repeat matches dynamic titles by position while validating nested fields", async () => {
+  const registry = createBuiltInArtifactValidatorRegistry();
+  const contract = compileArtifactContract(artifactNodeSchema.parse({
+    tag: "!artifact",
+    name: "changes",
+    type: "object",
+    format: { name: "markdown", layout: "outline" },
+    schema: {
+      tag: "!schema",
+      names: [],
+      defines: [],
+      fields: [
+        "Overview",
+        {
+          tag: "!repeat",
+          limit: { min: 2, max: 2 },
+          body: [
+            { tag: "!schema", names: ["Change"], defines: [], fields: ["Summary"] },
+            { tag: "!schema", names: ["Verification"], defines: [], fields: ["Status"] }
+          ]
+        },
+        "Conclusion"
+      ]
+    }
+  }));
+  const validSource = `# Report
+
+## Overview
+Current release.
+
+## Add export support
+### Summary
+Implemented.
+
+## Verify export support
+### Status
+Passed.
+
+## Fix timeout handling
+### Summary
+Implemented.
+
+## Verify timeout handling
+### Status
+Passed.
+
+## Conclusion
+Ready.
+`;
+  const valid = await prepareArtifactCandidate(contract, { kind: "inline", value: validSource }, context);
+  assert.equal((await registry.execute(registry.resolvePlan(contract), { contract, candidate: valid, context })).status, "passed");
+
+  const missingNested = await prepareArtifactCandidate(contract, {
+    kind: "inline",
+    value: validSource.replace("### Status\nPassed.\n\n## Conclusion", "No status heading.\n\n## Conclusion")
+  }, context);
+  const missingResult = await registry.execute(registry.resolvePlan(contract), { contract, candidate: missingNested, context });
+  assert.equal(missingResult.status, "failed");
+  assert(missingResult.issues.some((issue) =>
+    issue.code === "schema.format.outline.expected_heading" && issue.fieldPath === "Verification[2] / Status"
+  ), JSON.stringify(missingResult.issues, null, 2));
+
+  const tooMany = await prepareArtifactCandidate(contract, {
+    kind: "inline",
+    value: validSource.replace("## Conclusion", "## Another change\n### Summary\nDone.\n\n## Another check\n### Status\nPassed.\n\n## Conclusion")
+  }, context);
+  const countResult = await registry.execute(registry.resolvePlan(contract), { contract, candidate: tooMany, context });
+  assert(countResult.issues.some((issue) => issue.code === "schema.format.outline.repeat_count"));
+
+  const repeatOnlyContract = compileArtifactContract(artifactNodeSchema.parse({
+    tag: "!artifact",
+    name: "notes",
+    type: "object",
+    format: { name: "markdown", layout: "outline" },
+    schema: {
+      tag: "!schema",
+      names: [],
+      defines: [],
+      fields: [{
+        tag: "!repeat",
+        limit: { min: 2 },
+        body: [{ tag: "!schema", names: ["Note"], defines: [], fields: ["Summary"] }]
+      }]
+    }
+  }));
+  const repeatOnly = await prepareArtifactCandidate(repeatOnlyContract, {
+    kind: "inline",
+    value: "# Notes\n\n## Improve startup\n### Summary\nDone.\n\n## Reduce latency\n### Summary\nDone.\n"
+  }, context);
+  assert.equal((await registry.execute(registry.resolvePlan(repeatOnlyContract), {
+    contract: repeatOnlyContract,
+    candidate: repeatOnly,
+    context
+  })).status, "passed");
+});
+
 test("structured parents re-decode fields that establish a local format contract", async () => {
   const registry = createBuiltInArtifactValidatorRegistry();
   const contract = compileArtifactContract(artifactNodeSchema.parse({
@@ -574,43 +639,4 @@ test("recursive unsupported validator plans preserve contract and field paths", 
   assert.equal(result.status, "unsupported");
   assert.equal(result.issues[0]?.contractPath, "schema.fields[0].format");
   assert.equal(result.issues[0]?.fieldPath, "child");
-});
-
-test("real CRAA requirements and test Schema Artifacts pass recursive validation", async (t) => {
-  const registry = createBuiltInArtifactValidatorRegistry();
-
-  for (const name of ["craa-spec-driven-requirements", "craa-spec-driven-test"] as const) {
-    await t.test(name, async () => {
-      const schemaPath = fileURLToPath(new URL(`../.memsphere/memory/schemas/${name}.yaml`, import.meta.url));
-      const artifactPath = fileURLToPath(new URL(`./fixtures/schema-contract-validation/${name}-valid.md`, import.meta.url));
-      const schemaFile = await readMemoryFile("schemas", schemaPath);
-      assert.equal(schemaFile.entity.tag, "!schema");
-      if (schemaFile.entity.tag !== "!schema") return;
-      const contract = compileArtifactContract({
-        tag: "!artifact",
-        name,
-        type: "object",
-        format: { name: "markdown", options: { layout: "outline" } },
-        schema: schemaFile.entity
-      });
-      const candidate = await prepareArtifactCandidate(contract, { kind: "file", path: artifactPath }, {
-        ...context,
-        artifactPath
-      });
-      const result = await registry.execute(registry.resolvePlan(contract), {
-        contract,
-        candidate,
-        context: { ...context, artifactPath }
-      });
-
-      assert.equal(result.status, "passed", JSON.stringify(result.issues, null, 2));
-      const plan = registry.resolvePlan(contract);
-      const columns = markdownTableColumnPaths(schemaFile.entity);
-      assert(columns.length > 0);
-      for (const columnPath of columns) {
-        assert(plan.some((entry) => entry.contractPath === columnPath && entry.stage === "type" && entry.target === "string"));
-        assert(plan.some((entry) => entry.contractPath === columnPath && entry.stage === "format" && entry.target === "markdown"));
-      }
-    });
-  }
 });

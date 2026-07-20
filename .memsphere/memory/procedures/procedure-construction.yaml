@@ -1,0 +1,111 @@
+!procedure
+syntax: memsphere-20260719-stable
+names:
+  - Procedure 提取流程
+  - 程序性记忆提取流程
+  - procedure-construction
+defines:
+  - 从已完成任务、Run、产物、仓库证据或已经理清的执行思路中，提取可复用、可执行且可验证的 Procedure Memory。
+  - 适用于新建 Procedure 或根据可靠实践更新已有 Procedure，不负责执行被提取的流程。
+  - 只保留会改变执行、判断或验收结果的内容，不把对话记录、临时尝试和通用常识照搬进 Memory。
+asserts:
+  - 提取前必须使用 memsphere memory list 和 memory read 查找并应用当前工程中的 Memory 撰写、Procedure 编写和 YAML 语法规则；未找到时遵循本流程约束。
+  - 只能把 human 输入、实际执行证据或可验证来源支持的内容写入 Procedure；尚未执行的思路不得描述为已验证经验。
+  - 必须提取可复用的任务逻辑，不得记录仅适用于本次任务的路径、值、偶发重试或无关工具调用。
+  - 只创建或更新目标 Procedure 文件，不得修改其他 Memory 或无关工作区内容。
+goals:
+  - 明确 Procedure 的触发场景、边界、目标和最终交付物。
+  - 将可靠经验压缩为最小且完整的执行流程。
+  - 生成并验证可被 memsphere Run 执行的 Procedure YAML。
+flow:
+  - !action
+    action: 提供需要提取的任务、已完成实践或执行思路，并按需指定目标 Procedure。
+    actor: human
+    artifact: !artifact
+      name: Procedure 提取请求
+      format: markdown
+
+  - !action
+    action: 收集当前对话、Run、Artifact、代码、文档和现有 Memory 中与目标任务直接相关的证据，确定提取来源、适用边界和目标 Procedure。
+    actor: agent
+    asserts:
+      - 更新已有 Procedure 时必须完整读取原文件，并保留仍然有效的行为和约束。
+      - 实际执行结果用于确定已验证步骤和约束；human 明确确认的规则按强制程度写入 asserts 或 suggests；仅完成推演的判断不得表述为已经实践验证，关键不确定性必须进入补充循环。
+    suggests:
+      - 尽量复用当前上下文中的已有信息，避免要求 human 重复描述。
+    artifact: !artifact
+      name: Procedure 提取依据
+      format: markdown
+
+  - !while
+    condition: !action
+      action: 判断是否仍缺少会影响流程触发、最终产物、关键分支、human 决策或循环终止的必要信息。
+      actor: agent
+      artifact: !artifact
+        name: 是否缺少关键流程信息
+        type: boolean
+    do:
+      - !action
+        action: 补充当前证据无法判断且会影响流程触发、最终产物、关键分支、human 决策或循环终止的信息。
+        actor: human
+        artifact: !artifact
+          name: Procedure 提取补充信息
+          format: markdown
+
+  - !action
+    action: 根据提取依据和补充信息提取可复用流程，并生成完整 !procedure YAML 草稿。
+    actor: agent
+    asserts:
+      - names、defines 和 goals 必须准确表达规范名称、用途、适用边界和预期结果。
+      - 必须区分强制规范和可选建议；持续约束写入 Procedure asserts，局部约束写入 Action asserts，可选做法写入 suggests。
+      - flow 只保留完成任务所必需的步骤；不得为展示思考过程而拆分中间 Action。
+      - 每个 Action 必须职责单一、actor 准确并产出后续步骤或 human 实际需要的 Artifact。
+      - 只有真正改变控制流的判断和重复执行才使用 !if、!while；condition 必须产出 boolean，循环必须具有可判断的终止条件。
+      - 只有可复用且已存在的独立 Procedure 才使用 !call。
+      - 强制使用的命令或工具必须写入 action 或 asserts，可选做法写入 suggests。
+      - "只有最终交付物和面向 human 的处理摘要可以标记 final: true。"
+    suggests:
+      - 避免按单次执行时间线照抄对话、工具调用、探索过程和偶发重试，应提取稳定且可复用的任务逻辑。
+      - 避免把同一 actor 可以连续完成且没有新输入或独立交付价值的工作拆成多个 Action。
+      - 避免用 !if 判断后再用 !while 重复判断同一条件；需要反复处理时直接使用 !while。
+      - 避免为了满足语法而创建后续步骤和 human 都不会使用的确认结果、候选清单或检查 Artifact。
+      - 避免要求 human 重复已有信息，或确认 agent 能依据证据自行判断的事项。
+      - 避免把局部约束提升为 Procedure asserts，或把可选做法写成强制要求。
+      - 避免穷举低概率例外；分支只保留常见情况或会改变任务结果的关键情况。
+      - 避免在校验和必要复核完成前把草稿或中间产物标记为 final。
+    artifact: !artifact
+      name: Procedure Memory 草稿
+      type: object
+      format: yaml
+
+  - !action
+    action: 将 Procedure Memory 草稿写入 memoryRoot 的 procedures 目录。
+    actor: agent
+    asserts:
+      - 新建时使用唯一且可识别的 YAML 文件名；更新时写回原文件。
+      - 不得把草稿写入临时目录作为最终结果。
+    artifact: !artifact
+      name: 初版 Procedure Memory
+      type: object
+      format: yaml
+
+  - !action
+    action: 对目标文件运行 memsphere validate，检查语义和执行连贯性，并修正问题直至通过或明确报告无法解决的阻塞。
+    actor: agent
+    asserts:
+      - 必须检查步骤输入与 Artifact 衔接、actor 归属、约束作用域、分支完整性、循环终止和最终交付物。
+      - 必须删除重复、无执行价值或可由其他已读取 Memory 提供的内容。
+      - 未通过 memsphere validate 时不得声称 Procedure 已完成。
+    artifact: !artifact
+      name: 已验证的 Procedure Memory
+      type: object
+      format: yaml
+      final: true
+
+  - !action
+    action: 向 human 简要说明 Procedure 的文件路径、提取依据、关键边界和校验结果。
+    actor: agent
+    artifact: !artifact
+      name: Procedure 提取结果
+      format: markdown
+      final: true

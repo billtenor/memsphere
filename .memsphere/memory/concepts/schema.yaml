@@ -13,7 +13,7 @@ defines:
     target: schemas/Schema entity schema
   - !statement
     asserts:
-      - "当 Artifact 使用 markdown + layout: outline 时，字段名称必须成为 Markdown 标题，并按 fields 的嵌套关系形成标题层级。"
+      - "当 Artifact 使用 markdown + layout: outline 时，普通字段名称必须成为 Markdown 标题，并按 fields 的嵌套关系形成标题层级；!repeat body 的直接字段按位置匹配，不校验标题名称。"
       - "当 Artifact 使用 markdown + layout: table 时，array 的 item object 第一层 fields 必须成为 Markdown 表格列，每个列表元素占一行。"
       - Schema 的 asserts 是对实例内容和结构的自然语言附加约束，必须与 fields 一并满足，但不由代码 validator 猜测执行。
       - 按 Node 局部读取嵌套字段时，返回的根级与祖先 Schema context、Repeat 限制和目标 fragment 必须共同生效。
