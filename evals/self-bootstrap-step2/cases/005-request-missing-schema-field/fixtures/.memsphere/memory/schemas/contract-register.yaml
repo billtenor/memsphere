@@ -1,8 +1,8 @@
 !schema
+syntax: memsphere-20260719-stable
 names:
   - 合同登记
   - 合同登记记录
-format: outline
 defines:
   - 记录一份已签署合同的编号、签署日期、对方主体、金额和有效期。
 asserts:
@@ -10,6 +10,10 @@ asserts:
   - 任一字段缺少必要信息时，必须先向用户询问，不得猜测或创建不完整实例。
   - 签署日期必须使用 YYYY-MM-DD 格式。
   - 合同登记实例必须以 Markdown 文件保存到 artifacts/contract-register.md。
+type: object
+format:
+  name: markdown
+  layout: outline
 fields:
   - 合同编号
   - 签署日期

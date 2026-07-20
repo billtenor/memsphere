@@ -1,14 +1,18 @@
 !schema
+syntax: memsphere-20260719-stable
 names:
   - 单次客户反馈记录
   - 客户反馈记录
   - 反馈记录
-format: outline
 defines:
   - 记录一名客户的一次反馈及其负责人和处理状态。
 asserts:
   - 日期必须使用 YYYY-MM-DD 格式。
   - 单次客户反馈记录实例必须以 Markdown 文件保存到 artifacts/customer-feedback.md。
+type: object
+format:
+  name: markdown
+  layout: outline
 fields:
   - 日期
   - 客户
