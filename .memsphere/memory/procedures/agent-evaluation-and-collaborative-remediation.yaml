@@ -75,9 +75,12 @@ flow:
         actor: agent
         asserts:
           - 修复真实的问题层级，不得把 case、评分或环境问题包装成模型失败。
+          - 根因归类前必须核对判定依据、实际执行链路和机制输出；目标对象未实际进入某机制时，不得归因为该机制漏检。
           - 不得通过堆叠提示或禁止项压缩 Agent 的合理判断空间。
           - 对本轮可修复问题说明修改、影响和复测范围；对迭代需求说明背景、目标和验收方向。
           - 本步骤只提出方案，不得修改文件。
+        suggests:
+          - 涉及 Artifact 校验时，依次检查 Schema 定义、Procedure Artifact 契约、report 实际输入和 validator 结果。
         artifact: !artifact
           name: 根因与分类处理方案
           format: markdown

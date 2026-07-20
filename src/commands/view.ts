@@ -11,7 +11,8 @@ import { parseMemoryYaml } from "../memory/yaml.js";
 import {
   assertSafeReservedRelativePath,
   importReservedMemory,
-  listReservedMemories
+  listReservedMemories,
+  readReservedMemoryManifest
 } from "../reserved/store.js";
 import {
   createReview,
@@ -46,6 +47,7 @@ type ViewServeOptions = {
 
 type MemoryPayload = {
   memoryRoot: string;
+  systemMemoryPaths: string[];
   memories: Array<{
     id: string;
     kind: string;
@@ -593,6 +595,7 @@ async function findMemoryFileById(memoryRoot: string, memoryId: string): Promise
 
 async function loadMemoryPayload(memoryRoot: string): Promise<MemoryPayload> {
   const memories: MemoryPayload["memories"] = [];
+  const systemMemoryPaths = (await readReservedMemoryManifest()).system_memory.install;
 
   for (const kind of memoryKinds) {
     const paths = await listMemoryFiles(memoryRoot, kind);
@@ -601,7 +604,7 @@ async function loadMemoryPayload(memoryRoot: string): Promise<MemoryPayload> {
     }
   }
 
-  return { memoryRoot, memories };
+  return { memoryRoot, systemMemoryPaths, memories };
 }
 
 async function loadReservedMemoryPayload(scopeRoot: string, memoryRoot: string): Promise<MemoryPayload["memories"]> {

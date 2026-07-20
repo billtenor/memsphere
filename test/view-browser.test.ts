@@ -54,6 +54,18 @@ test("only done tasks enable task review creation", () => {
   assert.match(browserHtml, /Only done tasks can create a review/);
 });
 
+test("reserved memories must be imported before review creation", () => {
+  assert.match(browserHtml, /selectedMemory\(\)\?\.source === "reserved"/);
+  assert.match(browserHtml, /Import reserved memory before creating a review/);
+});
+
+test("review mutations use button action guards", () => {
+  assert.match(browserHtml, /runButtonAction\(el\.createReview, createReview\)/);
+  assert.match(browserHtml, /runButtonAction\(el\.submitReview, submitReview\)/);
+  assert.match(browserHtml, /runButtonAction\(save, async \(\) => \{/);
+  assert.match(browserHtml, /runButtonAction\(save, \(\) => updateComment\(comment\.id, body\)\)/);
+});
+
 test("markdown artifacts use rendered markdown content when available", () => {
   assert.equal(shouldRenderMarkdownArtifact({ format: "markdown", renderedContent: "<h1>Title</h1>" }), true);
   assert.equal(shouldRenderMarkdownArtifact({ format: "markdown" }), false);
@@ -176,6 +188,15 @@ test("saving a comment restores its expanded, anchored location", () => {
   assert.match(browserHtml, /node\.dataset\.commentSnapshot \?\? node\.querySelector\("\.commentable-body"\)\?\.dataset\.commentSnapshot/);
 });
 
+test("initial loading validates the saved review only after its subject data is available", () => {
+  assert.match(browserHtml, /await Promise\.all\(\[loadMemories\(\), loadReservedMemories\(\), loadReviews\(\), loadRuns\(\)\]\);\s*ensureSelectedReview\(\);/);
+  assert.doesNotMatch(browserHtml, /async function loadReviews\(\) \{[\s\S]*?state\.reviews =[^}]*ensureSelectedReview\(\);/);
+});
+
+test("task polling does not replace an editor opened while refresh is in flight", () => {
+  assert.match(browserHtml, /loadRuns\(\)\.then\(\(\) => \{[\s\S]*if \(!hasOpenInlineEditor\(\)\) renderAll\(\);/);
+});
+
 test("section title comments render inline in the expanded node", () => {
   assert.match(browserHtml, /function appendSectionHeaderThread\(body, anchor, snapshot\)/);
   assert.match(browserHtml, /appendSectionHeaderThread\(body, headerAnchor, name\);/);
@@ -186,12 +207,26 @@ test("opening a legacy comment falls back to its nested legacy anchor", () => {
   assert.match(browserHtml, /section\.contains\(target\)\) section\.classList\.add\("open"\)/);
 });
 
+test("comment cards label their navigation action as Go to", () => {
+  assert.match(browserHtml, /open\.textContent = "Go to"/);
+  assert.doesNotMatch(browserHtml, /open\.textContent = "Open"/);
+});
+
 test("browser exposes reserved memory controls", () => {
   assert.match(browserHtml, /\/api\/reserved-memories/);
   assert.match(browserHtml, /\/api\/reserved-memories\/import/);
   assert.match(browserHtml, /Reserved/);
   assert.match(browserHtml, /Import/);
   assert.match(browserHtml, /Imported/);
+});
+
+test("browser hides installed system memory without hiding reserved memory", () => {
+  assert.match(browserHtml, /hideSystemMemoriesKey = "memsphere\.hideSystemMemories\.v1"/);
+  assert.match(browserHtml, /hideSystemMemories: localStorage\.getItem\(hideSystemMemoriesKey\) !== "false"/);
+  assert.match(browserHtml, /if \(state\.hideSystemMemories && isSystemMemory\(memory\)\) return false;/);
+  assert.match(browserHtml, /memory\?\.source !== "reserved" && state\.systemMemoryPaths\.has\(memory\.path\)/);
+  assert.match(browserHtml, /function filteredReservedMemories\(\)/);
+  assert.match(browserHtml, /text\.textContent = t\("hideSystemMemories"\)/);
 });
 
 test("browser exposes archive controls for done reviews and runs", () => {
@@ -215,9 +250,12 @@ test("browser renders recursive Statement sections and keeps suggestions separat
 });
 
 test("browser renders Action contracts, inline schemas, and final artifacts as distinct task UI", () => {
-  assert.match(browserHtml, /function renderActionContracts\(step\)/);
+  assert.match(browserHtml, /function renderActionContracts\(step/);
   assert.match(browserHtml, /step\.asserts/);
   assert.match(browserHtml, /step\.suggests/);
+  assert.match(browserHtml, /const fieldAnchor = key \+ "\[" \+ \(index \+ 1\) \+ "\]"/);
+  assert.match(browserHtml, /anchorPrefix \? anchorPrefix \+ "\." \+ fieldAnchor : fieldAnchor/);
+  assert.match(browserHtml, /item\.append\(commentable\(value, target, value, anchor/);
   assert.match(browserHtml, /function renderInlineSchemaDetails\(step, expanded = false\)/);
   assert.match(browserHtml, /inline schema/);
   assert.match(browserHtml, /const section = renderSchema\(schema, 1, "inline-schema:" \+ identity, t\("inlineSchema"\)\)/);
@@ -228,7 +266,7 @@ test("browser renders Action contracts, inline schemas, and final artifacts as d
   assert.doesNotMatch(browserHtml, /function renderSimpleSchemaField\(name, path\)[\s\S]*sectionHeader\(name, "string"/);
   assert.match(browserHtml, /function renderFinalArtifacts\(run\)/);
   assert.match(browserHtml, /event\.artifact\.final/);
-  assert.match(browserHtml, /renderStructuredAction\(step, anchor\)[\s\S]*renderActionContracts\(step\)/);
+  assert.match(browserHtml, /renderStructuredAction\(step, anchor\)[\s\S]*renderActionContracts\(step, null, anchor\)/);
   assert.match(browserHtml, /renderStructuredControlHead\(step, anchor, labelText[\s\S]*renderInlineSchemaDetails\(step\)/);
   assert.match(browserHtml, /function inlineSchemaTogglePill\(schema\)/);
   assert.match(browserHtml, /function inlineSchemaSummary\(schema\)/);
@@ -246,6 +284,17 @@ test("browser renders Procedure assertions in memory and active run views", () =
   assert.match(browserHtml, /function renderRunProcedureAsserts\(run\)/);
   assert.match(browserHtml, /function activeRunProcedureAsserts\(run\)/);
   assert.match(browserHtml, /frame\.asserts/);
+  assert.match(browserHtml, /"task:" \+ run\.id \+ ":procedure:asserts\["/);
+  assert.match(browserHtml, /commentKind: "asserts"/);
+});
+
+test("task calls use task-scoped review anchors and navigate to Memory", () => {
+  assert.match(browserHtml, /function renderTaskCall\(step, run\)/);
+  assert.match(browserHtml, /taskAnchor\(run, step, "call"\)/);
+  assert.match(browserHtml, /commentKind: "call"/);
+  assert.match(browserHtml, /function renderCall\(name, anchor, context = \{\}\)/);
+  assert.match(browserHtml, /state\.viewMode = "memory";[\s\S]*localStorage\.setItem\(viewModeKey, "memory"\)/);
+  assert.match(browserHtml, /commentable\(content, "!call " \+ name, String\(name\), anchor, context\)/);
 });
 
 test("memory details render names as a field while retaining the primary name as the page title", () => {

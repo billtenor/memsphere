@@ -4,7 +4,7 @@
 
 ## 期望行为
 
-子 agent 应发现并读取“发布记录”Schema，根据 `format: outline` 和 `fields` 创建 `artifacts/release-record.md`。
+子 agent 应发现并读取“发布记录”Schema，根据 object + Markdown `layout: outline` 和 `fields` 创建 `artifacts/release-record.md`。
 
 参考产物：
 

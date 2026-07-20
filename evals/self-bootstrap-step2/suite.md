@@ -10,7 +10,7 @@ Step 0 中的 Agent 已经接触过 Concept 内嵌的匿名 Schema。Step 2 进�
 
 1. `001-create-outline-release-record`
 
-   根据简单的 outline Schema 创建发布记录，验证第一层字段是否成为 Markdown 标题。
+   根据 object + Markdown outline Schema 创建发布记录，验证第一层字段是否成为 Markdown 标题。
 
 2. `002-create-nested-incident-review`
 
@@ -18,7 +18,7 @@ Step 0 中的 Agent 已经接触过 Concept 内嵌的匿名 Schema。Step 2 进�
 
 3. `003-create-table-device-inventory`
 
-   根据 table Schema 创建设备盘点表，验证字段是否成为表格列、列表元素是否各占一行。
+   根据 array + Markdown table Schema 创建设备盘点表，验证 item object 的字段是否成为表格列、数组元素是否各占一行。
 
 4. `004-apply-schema-asserts`
 
@@ -69,6 +69,6 @@ Step 0 中的 Agent 已经接触过 Concept 内嵌的匿名 Schema。Step 2 进�
 
 ## 暂不覆盖
 
-第一批 Step 2 不单独测试 `List<string>` 等基本类型列表的最终呈现方式。当前 `element_types` 已定义列表元素类型，但基本类型列表使用项目符号、表格还是其他形式尚无独立呈现契约。
+第一批 Step 2 不单独测试 `array<string>` 等基本类型数组的最终呈现方式。基本类型数组使用项目符号、表格还是其他形式尚无独立呈现契约。
 
-本批次通过 table Schema 的 `element_types: [Schema]` 验证列表型结构。基本类型列表的呈现规则明确后，再补充对应 case。
+本批次通过 `type: array`、Markdown table 和 `item` object 验证表格型数组结构。基本类型数组的呈现规则明确后，再补充对应 case。

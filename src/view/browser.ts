@@ -62,6 +62,9 @@ export const browserHtml = String.raw`<!doctype html>
     .memory-toggle { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); padding: 4px 7px; font-size: 12px; line-height: 1.2; min-width: 52px; }
     .memory-toggle:hover { border-color: var(--accent); color: var(--accent); }
     .memory-toggle.imported { color: var(--ok); border-color: #b8d8c5; background: #edf6f0; }
+    .memory-options { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; }
+    .memory-option { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    .memory-option input { width: 15px; height: 15px; accent-color: var(--accent); }
     .review-card { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; box-shadow: var(--shadow); }
     .review-card b { display: block; overflow-wrap: anywhere; margin-bottom: 4px; }
     .review-card-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
@@ -312,6 +315,7 @@ export const browserHtml = String.raw`<!doctype html>
     const selectedTaskKey = "memsphere.selectedTask.v1";
     const viewModeKey = "memsphere.viewMode.v1";
     const displayLanguageKey = "memsphere.displayLanguage.v1";
+    const hideSystemMemoriesKey = "memsphere.hideSystemMemories.v1";
     const displayLanguage = localStorage.getItem(displayLanguageKey) === "yaml" ? "yaml" : "zh";
     const vocabulary = {
       procedures: { zh: "流程", yaml: "procedures" },
@@ -366,6 +370,7 @@ export const browserHtml = String.raw`<!doctype html>
       missingTarget: { zh: "未找到 ", yaml: "missing " },
       noSteps: { zh: "没有步骤", yaml: "No steps" },
       noArtifacts: { zh: "还没有上报产物。", yaml: "No artifact has been reported yet." },
+      hideSystemMemories: { zh: "隐藏系统记忆", yaml: "Hide system memory" },
       format: { zh: "格式", yaml: "format" },
       boolean: { zh: "判断结果", yaml: "boolean" },
       string: { zh: "短文本", yaml: "string" },
@@ -380,8 +385,10 @@ export const browserHtml = String.raw`<!doctype html>
       viewMode: localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
       payload: null,
       memories: [],
+      systemMemoryPaths: new Set(),
       reservedMemories: [],
       filtered: [],
+      hideSystemMemories: localStorage.getItem(hideSystemMemoriesKey) !== "false",
       selectedId: null,
       selectedTaskId: localStorage.getItem(selectedTaskKey) || null,
       selectedReviewId: localStorage.getItem(selectedReviewKey) || null,
@@ -421,12 +428,12 @@ export const browserHtml = String.raw`<!doctype html>
     document.getElementById("expand").addEventListener("click", () => setAllSections(true));
     document.getElementById("collapse").addEventListener("click", () => setAllSections(false));
     document.getElementById("refresh").addEventListener("click", () => loadAll().catch(renderFatalError));
-    el.createReview.addEventListener("click", createReview);
+    el.createReview.addEventListener("click", () => runButtonAction(el.createReview, createReview));
     el.reviewToggle.addEventListener("click", () => setReviewDrawer(!state.reviewDrawerOpen));
     el.reviewClose.addEventListener("click", () => setReviewDrawer(false));
     el.memoryTab.addEventListener("click", () => setViewMode("memory"));
     el.taskTab.addEventListener("click", () => setViewMode("task"));
-    el.submitReview.addEventListener("click", submitReview);
+    el.submitReview.addEventListener("click", () => runButtonAction(el.submitReview, submitReview));
     el.search.addEventListener("input", () => {
       applyFilter();
       renderNav();
@@ -439,7 +446,9 @@ export const browserHtml = String.raw`<!doctype html>
     loadAll().catch(renderFatalError);
     setInterval(() => {
       if (state.viewMode === "task" && !hasOpenInlineEditor()) {
-        loadRuns().then(renderAll).catch(console.error);
+        loadRuns().then(() => {
+          if (!hasOpenInlineEditor()) renderAll();
+        }).catch(console.error);
       }
     }, 4000);
 
@@ -467,13 +476,13 @@ export const browserHtml = String.raw`<!doctype html>
       if (!response.ok) throw new Error(await response.text());
       state.payload = await response.json();
       state.memories = state.payload.memories;
+      state.systemMemoryPaths = new Set(state.payload.systemMemoryPaths || []);
       state.byName = new Map();
       for (const memory of state.memories) {
         if (!memory.entity) continue;
         for (const name of memory.entity.names || []) state.byName.set(name, memory);
       }
       applyFilter();
-      el.count.textContent = state.memories.length + " memories";
       if (!state.selectedId && state.filtered[0]) state.selectedId = state.filtered[0].id;
     }
 
@@ -487,7 +496,6 @@ export const browserHtml = String.raw`<!doctype html>
       const response = await fetch("/api/reviews");
       if (!response.ok) throw new Error(await response.text());
       state.reviews = (await response.json()).reviews || [];
-      ensureSelectedReview();
     }
 
     async function ensureReviewSnapshot(kind) {
@@ -544,7 +552,7 @@ export const browserHtml = String.raw`<!doctype html>
         renderReview();
         return;
       }
-      el.count.textContent = state.memories.length + " memories";
+      updateMemoryCount();
       renderNav();
       renderSelected();
       renderReview();
@@ -582,9 +590,11 @@ export const browserHtml = String.raw`<!doctype html>
     function applyFilter() {
       const q = el.search.value.trim().toLowerCase();
       state.filtered = state.memories.filter((memory) => {
+        if (state.hideSystemMemories && isSystemMemory(memory)) return false;
         if (!q) return true;
         return [memory.kind, memory.path, errorText(memory.error), ...(memory.entity?.names || [])].join(" ").toLowerCase().includes(q);
       });
+      updateMemoryCount();
     }
 
     function renderNav() {
@@ -643,6 +653,36 @@ export const browserHtml = String.raw`<!doctype html>
         }
         el.nav.append(list);
       }
+      renderSystemMemoryToggle();
+    }
+
+    function renderSystemMemoryToggle() {
+      const options = document.createElement("div");
+      options.className = "memory-options";
+      const label = document.createElement("label");
+      label.className = "memory-option";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = state.hideSystemMemories;
+      checkbox.addEventListener("change", () => {
+        state.hideSystemMemories = checkbox.checked;
+        localStorage.setItem(hideSystemMemoriesKey, String(state.hideSystemMemories));
+        applyFilter();
+        renderAll();
+      });
+      const text = document.createElement("span");
+      text.textContent = t("hideSystemMemories");
+      label.append(checkbox, text);
+      options.append(label);
+      el.nav.append(options);
+    }
+
+    function isSystemMemory(memory) {
+      return memory?.source !== "reserved" && state.systemMemoryPaths.has(memory.path);
+    }
+
+    function updateMemoryCount() {
+      el.count.textContent = state.filtered.length + " memories";
     }
 
     function filteredReservedMemories() {
@@ -782,11 +822,18 @@ export const browserHtml = String.raw`<!doctype html>
       wrap.append(blockTitle(t("procedureAsserts")));
       const list = document.createElement("ul");
       list.className = "text-list";
-      for (const value of values) {
+      values.forEach((value, index) => {
         const item = document.createElement("li");
-        item.textContent = value;
+        const target = t("procedureAsserts") + "[" + (index + 1) + "]";
+        item.append(commentable(
+          value,
+          target,
+          value,
+          "task:" + run.id + ":procedure:asserts[" + (index + 1) + "]",
+          { run, commentKind: "asserts" }
+        ));
         list.append(item);
-      }
+      });
       wrap.append(list);
       return wrap;
     }
@@ -834,7 +881,7 @@ export const browserHtml = String.raw`<!doctype html>
       const instruction = document.createElement("div");
       instruction.textContent = step.instruction;
       panel.append(instruction);
-      appendOptional(panel, renderActionContracts(step));
+      appendOptional(panel, renderActionContracts(step, run));
       appendOptional(panel, renderInlineSchemaDetails(step, true));
       if (step.details && step.details.length) {
         const details = document.createElement("ul");
@@ -942,7 +989,7 @@ export const browserHtml = String.raw`<!doctype html>
     function renderTaskFlowStep(step, eventsByStep, activeStep, run) {
       if (step.kind === "branch" && step.branches) return renderTaskBranch(step, eventsByStep, activeStep, run);
       if (step.kind === "loop" && step.loop) return renderTaskLoop(step, eventsByStep, activeStep, run);
-      if (step.kind === "call") return renderTaskCall(step);
+      if (step.kind === "call") return renderTaskCall(step, run);
       return renderTaskAction(step, eventsByStep, activeStep, run);
     }
 
@@ -953,7 +1000,7 @@ export const browserHtml = String.raw`<!doctype html>
       attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("step"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
-      appendOptional(item, renderActionContracts(step));
+      appendOptional(item, renderActionContracts(step, run));
       appendOptional(item, renderInlineSchemaDetails(step, Boolean(isActive)));
       appendOptional(item, renderTaskStepResult(step, event, run));
       return item;
@@ -966,7 +1013,7 @@ export const browserHtml = String.raw`<!doctype html>
       attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("if"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
-      appendOptional(item, renderActionContracts(step));
+      appendOptional(item, renderActionContracts(step, run));
       appendOptional(item, renderInlineSchemaDetails(step, Boolean(isActive)));
       appendOptional(item, renderTaskStepResult(step, event, run));
       item.append(renderTaskChildSteps(step.branches.truthy, eventsByStep, activeStep, run));
@@ -981,15 +1028,19 @@ export const browserHtml = String.raw`<!doctype html>
       attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
       item.append(renderFlowHead(t("while"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
-      appendOptional(item, renderActionContracts(step));
+      appendOptional(item, renderActionContracts(step, run));
       appendOptional(item, renderInlineSchemaDetails(step, Boolean(isActive)));
       appendOptional(item, renderTaskStepResult(step, event, run));
       item.append(renderTaskChildSteps(step.loop.body, eventsByStep, activeStep, run));
       return item;
     }
 
-    function renderTaskCall(step) {
-      return renderCall(step.target, step.id);
+    function renderTaskCall(step, run) {
+      return renderCall(
+        step.target,
+        taskAnchor(run, step, "call"),
+        { run, step, commentKind: "call" }
+      );
     }
 
     function renderTaskChildSteps(steps, eventsByStep, activeStep, run) {
@@ -1132,10 +1183,10 @@ export const browserHtml = String.raw`<!doctype html>
     function selectedMemory() {
       const snapshot = currentReviewSnapshot("memory");
       if (snapshot?.memory) return snapshot.memory;
-      return state.memories.find((item) => item.id === state.selectedId)
-        || state.reservedMemories.find((item) => item.id === state.selectedId)
+      return state.filtered.find((item) => item.id === state.selectedId)
+        || filteredReservedMemories().find((item) => item.id === state.selectedId)
         || state.filtered[0]
-        || state.reservedMemories[0];
+        || filteredReservedMemories()[0];
     }
 
     function selectedReview() {
@@ -1223,7 +1274,20 @@ export const browserHtml = String.raw`<!doctype html>
     function canCreateReview() {
       const subject = currentReviewSubject();
       if (!subject) return false;
+      if (subject.source === "memory" && selectedMemory()?.source === "reserved") return false;
       return subject.source !== "task" || selectedTask()?.status === "done";
+    }
+
+    function reviewCreationDisabledReason() {
+      const subject = currentReviewSubject();
+      if (!subject) return "Select a Memory or Task before creating a review";
+      if (subject.source === "memory" && selectedMemory()?.source === "reserved") {
+        return "Import reserved memory before creating a review";
+      }
+      if (subject.source === "task" && selectedTask()?.status !== "done") {
+        return "Only done tasks can create a review";
+      }
+      return "";
     }
 
     function renderSelected() {
@@ -1676,7 +1740,7 @@ export const browserHtml = String.raw`<!doctype html>
       return item;
     }
 
-    function renderCall(name, anchor) {
+    function renderCall(name, anchor, context = {}) {
       const item = document.createElement("div");
       item.className = "flow-item call";
       const target = state.byName.get(name);
@@ -1688,6 +1752,8 @@ export const browserHtml = String.raw`<!doctype html>
       link.addEventListener("click", (event) => {
         event.preventDefault();
         if (target) {
+          state.viewMode = "memory";
+          localStorage.setItem(viewModeKey, "memory");
           state.selectedId = target.id;
           renderAll();
         }
@@ -1706,7 +1772,7 @@ export const browserHtml = String.raw`<!doctype html>
         content.append(text);
       }
       content.append(link);
-      action.append(commentable(content, "!call " + name, String(name), anchor));
+      action.append(commentable(content, "!call " + name, String(name), anchor, context));
       head.append(label, action);
       item.append(head);
       return item;
@@ -1745,7 +1811,7 @@ export const browserHtml = String.raw`<!doctype html>
       item.className = "flow-item";
       const artifact = artifactSpec(step);
       item.append(renderFlowHead(t("step"), step.action, artifact.name || anchor, anchor + ".action", step));
-      appendOptional(item, renderActionContracts(step));
+      appendOptional(item, renderActionContracts(step, null, anchor));
       appendOptional(item, renderInlineSchemaDetails(step));
       return item;
     }
@@ -1758,7 +1824,7 @@ export const browserHtml = String.raw`<!doctype html>
       }
       const artifact = artifactSpec(step);
       wrap.append(renderFlowHead(labelText, step.action || "", artifact.name || anchor, anchor + ".action", step));
-      appendOptional(wrap, renderActionContracts(step));
+      appendOptional(wrap, renderActionContracts(step, null, anchor));
       appendOptional(wrap, renderInlineSchemaDetails(step));
       return wrap;
     }
@@ -1924,20 +1990,23 @@ export const browserHtml = String.raw`<!doctype html>
       return artifact?.schema?.kind === "external" ? artifact.schema.name : "";
     }
 
-    function renderActionContracts(step) {
+    function renderActionContracts(step, run, anchorPrefix = "") {
       if (!step || (!step.asserts?.length && !step.suggests?.length)) return null;
       const wrap = document.createElement("div");
       wrap.className = "action-contracts";
-      for (const [label, values] of [[t("asserts"), step.asserts], [t("suggests"), step.suggests]]) {
+      for (const [key, label, values] of [["asserts", t("asserts"), step.asserts], ["suggests", t("suggests"), step.suggests]]) {
         if (!values?.length) continue;
         const group = document.createElement("div");
         group.append(blockTitle(label));
         const list = document.createElement("ul");
-        for (const value of values) {
+        values.forEach((value, index) => {
           const item = document.createElement("li");
-          item.textContent = value;
+          const target = label + "[" + (index + 1) + "]";
+          const fieldAnchor = key + "[" + (index + 1) + "]";
+          const anchor = run ? taskAnchor(run, step, fieldAnchor) : anchorPrefix ? anchorPrefix + "." + fieldAnchor : fieldAnchor;
+          item.append(commentable(value, target, value, anchor, { run, step, commentKind: key }));
           list.append(item);
-        }
+        });
         group.append(list);
         wrap.append(group);
       }
@@ -2129,15 +2198,17 @@ export const browserHtml = String.raw`<!doctype html>
       cancel.type = "button";
       cancel.className = "btn";
       cancel.textContent = "Cancel";
-      save.addEventListener("click", async () => {
+      save.addEventListener("click", () => {
         const body = textarea.value.trim();
         if (!body) {
           textarea.focus();
           return;
         }
-        const comment = await addComment(target, snapshot, body, location, context);
-        editor.remove();
-        if (comment) scrollToComment(comment);
+        runButtonAction(save, async () => {
+          const comment = await addComment(target, snapshot, body, location, context);
+          editor.remove();
+          if (comment) scrollToComment(comment);
+        });
       });
       cancel.addEventListener("click", () => editor.remove());
       actions.append(save, cancel);
@@ -2246,13 +2317,13 @@ export const browserHtml = String.raw`<!doctype html>
       cancel.type = "button";
       cancel.className = "btn";
       cancel.textContent = "Cancel";
-      save.addEventListener("click", async () => {
+      save.addEventListener("click", () => {
         const body = textarea.value.trim();
         if (!body) {
           textarea.focus();
           return;
         }
-        await updateComment(comment.id, body);
+        runButtonAction(save, () => updateComment(comment.id, body));
       });
       cancel.addEventListener("click", () => {
         host.classList.remove("editing");
@@ -2431,9 +2502,7 @@ export const browserHtml = String.raw`<!doctype html>
       const review = selectedReview();
       const canCreate = canCreateReview();
       el.createReview.disabled = !canCreate;
-      el.createReview.title = canCreate || state.viewMode !== "task"
-        ? "Create Review"
-        : "Only done tasks can create a review";
+      el.createReview.title = canCreate ? "Create Review" : reviewCreationDisabledReason();
       renderReviewList();
       el.reviewLabel.textContent = review
         ? review.status + " · " + review.comments.length + " comment(s)"
@@ -2476,7 +2545,7 @@ export const browserHtml = String.raw`<!doctype html>
         actions.className = "comment-actions";
         const open = document.createElement("button");
         open.className = "btn";
-        open.textContent = "Open";
+        open.textContent = "Go to";
         open.addEventListener("click", () => {
           selectCommentSubject(comment);
           renderAll();

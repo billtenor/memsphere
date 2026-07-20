@@ -1,14 +1,18 @@
 !schema
+syntax: memsphere-20260719-stable
 names:
   - 发布记录
   - 版本发布记录
-format: outline
 defines:
   - 记录一次软件版本发布的版本、日期、主要变更和最终结果。
 asserts:
   - 发布日期必须使用 YYYY-MM-DD 格式。
   - 发布结果只能填写“成功”或“失败”。
   - 发布记录实例必须以 Markdown 文件保存到 artifacts/release-record.md。
+type: object
+format:
+  name: markdown
+  layout: outline
 fields:
   - 版本
   - 发布日期
