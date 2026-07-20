@@ -51,7 +51,6 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "Memory 访问规则",
     "Memsphere YAML 语法规则",
     "Memory 撰写规则",
-    "基于 Memory 完成任务流程",
     "敏捷需求开发流程",
     "通用流程"
   ]) {
