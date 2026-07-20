@@ -194,6 +194,15 @@ test("browser exposes reserved memory controls", () => {
   assert.match(browserHtml, /Imported/);
 });
 
+test("browser hides installed system memory without hiding reserved memory", () => {
+  assert.match(browserHtml, /hideSystemMemoriesKey = "memsphere\.hideSystemMemories\.v1"/);
+  assert.match(browserHtml, /hideSystemMemories: localStorage\.getItem\(hideSystemMemoriesKey\) !== "false"/);
+  assert.match(browserHtml, /if \(state\.hideSystemMemories && isSystemMemory\(memory\)\) return false;/);
+  assert.match(browserHtml, /memory\?\.source !== "reserved" && state\.systemMemoryPaths\.has\(memory\.path\)/);
+  assert.match(browserHtml, /function filteredReservedMemories\(\)/);
+  assert.match(browserHtml, /text\.textContent = t\("hideSystemMemories"\)/);
+});
+
 test("browser exposes archive controls for done reviews and runs", () => {
   assert.match(browserHtml, /review-archive/);
   assert.match(browserHtml, /task-card-archive/);

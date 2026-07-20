@@ -15,10 +15,36 @@ const runId = "run-responsive-view";
 async function withResponsiveView(fn: (browser: Browser, url: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-responsive-view-"));
   const memoryRoot = join(dir, "memory");
+  const reservedRoot = join(dir, "reserved-memory");
   const reviewsRoot = join(dir, "reviews");
   const runsRoot = join(dir, "runs");
   const runDir = join(runsRoot, runId);
-  await Promise.all([mkdir(join(memoryRoot, "schemas"), { recursive: true }), mkdir(reviewsRoot, { recursive: true }), mkdir(join(runDir, "artifacts"), { recursive: true })]);
+  await Promise.all([
+    mkdir(join(memoryRoot, "concepts"), { recursive: true }),
+    mkdir(join(memoryRoot, "schemas"), { recursive: true }),
+    mkdir(join(reservedRoot, "concepts"), { recursive: true }),
+    mkdir(reviewsRoot, { recursive: true }),
+    mkdir(join(runDir, "artifacts"), { recursive: true })
+  ]);
+
+  await writeFile(join(memoryRoot, "concepts", "memory.yaml"), [
+    "!concept",
+    `syntax: ${currentMemorySyntax}`,
+    "names: [ Memory ]",
+    "defines: [ A system memory fixture. ]"
+  ].join("\n"));
+  await writeFile(join(memoryRoot, "concepts", "user-note.yaml"), [
+    "!concept",
+    `syntax: ${currentMemorySyntax}`,
+    "names: [ User note ]",
+    "defines: [ A user memory fixture. ]"
+  ].join("\n"));
+  await writeFile(join(reservedRoot, "concepts", "reserved-tip.yaml"), [
+    "!concept",
+    `syntax: ${currentMemorySyntax}`,
+    "names: [ Reserved tip ]",
+    "defines: [ A non-system reserved memory fixture. ]"
+  ].join("\n"));
 
   await writeFile(join(memoryRoot, "schemas", "reviewable-schema.yaml"), [
     "!schema",
@@ -218,6 +244,29 @@ test("a newly added memory comment is current until its source text changes", as
       await page.getByRole("button", { name: "Add comment", exact: true }).click();
       await page.locator(".comment-card").waitFor();
       assert.equal(await page.locator(".pill.outdated").count(), 0);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+test("Memory nav hides installed system memory but keeps non-system reserved memory visible", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+    page.setDefaultTimeout(5_000);
+    try {
+      await page.goto(url);
+      await page.getByRole("button", { name: "Memory", exact: true }).click();
+      const hideSystem = page.getByLabel("隐藏系统记忆");
+      assert.equal(await hideSystem.isChecked(), true);
+      await page.locator(".memory-button", { hasText: "User note" }).waitFor();
+      await page.locator(".memory-button", { hasText: "Reserved tip" }).waitFor();
+      assert.equal(await page.locator(".memory-button", { hasText: "Memory" }).count(), 0);
+      await hideSystem.uncheck();
+      await page.locator(".memory-button", { hasText: "Memory" }).waitFor();
+      await hideSystem.check();
+      assert.equal(await page.locator(".memory-button", { hasText: "Memory" }).count(), 0);
+      assert.equal(await page.locator(".memory-button", { hasText: "Reserved tip" }).count(), 1);
     } finally {
       await page.close();
     }
