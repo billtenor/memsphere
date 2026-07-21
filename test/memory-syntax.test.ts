@@ -95,6 +95,7 @@ flow:
     action: Produce an Artifact.
     artifact: !artifact
       name: result
+      review: artifact_acceptance.unanimous
       role_bindings:
         reviewer: [human, agent]
       permission_grants:
@@ -108,6 +109,7 @@ flow:
   if (action.tag !== "!action") return;
   assert.deepEqual(action.artifact.roleBindings, { reviewer: ["human", "agent"] });
   assert.deepEqual(action.artifact.permissionGrants, { runner: ["decision.decide"] });
+  assert.equal(action.artifact.review, "artifact_acceptance.unanimous");
 
   assert.throws(() => parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
 syntax: ${firstStableMemorySyntax}
@@ -115,6 +117,28 @@ name: old-governed
 role_bindings: { reviewer: human }
 flow: []
 `)), /Unrecognized key.*role_bindings/);
+
+  assert.throws(() => parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
+syntax: ${firstStableMemorySyntax}
+name: old-reviewed
+flow:
+  - !action
+    action: Produce.
+    artifact: !artifact
+      name: result
+      review: artifact_acceptance.unanimous
+`)), /Unrecognized key.*review/);
+
+  assert.throws(() => parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
+syntax: ${currentMemorySyntax}
+name: unknown-policy
+flow:
+  - !action
+    action: Produce.
+    artifact: !artifact
+      name: result
+      review: artifact_acceptance.missing
+`)), /Unknown Decision Policy id/);
 
   assert.throws(() => parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
 syntax: ${currentMemorySyntax}

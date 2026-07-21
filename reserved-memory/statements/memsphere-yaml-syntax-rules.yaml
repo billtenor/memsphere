@@ -21,8 +21,13 @@ sections:
           - start 是历史未版本化 Memory 的缺省迁移起点，不是正式发布版本；当前正式版本是 memsphere-20260721-stable。
         asserts:
           - 省略 syntax 时必须按 start 解析，不得按运行时最新版本解释。
-          - stable 版本一经发布，其解析、缺省值和校验语义不得原地修改；语法变化必须发布新版本并提供显式迁移路径。
+          - stable 版本中已经存在的关键字、结构、缺省值和校验语义不得做不兼容修改。
+          - 最新版 parser 可以在当前 stable syntax 下增加不改变旧 Memory 解释结果的可选关键字或能力；这种向前兼容扩展不递进 syntax，也不要求旧 Memory 迁移。
+          - 删除或重命名既有字段、改变既有值或缺省值的语义，或其他要求旧 Memory 改写后才能继续解析和执行的变化，必须发布新 syntax 并提供显式 migrate 路径。
           - draft 与 stable 都是不可变的完整版本标识，不得把 stable 当作动态指向最新版的别名。
+        suggests:
+          - "兼容扩展示例：为 !artifact 增加可选 review 字段；未声明该字段的旧 Memory 仍保持原行为，因此沿用当前 syntax。"
+          - "不兼容升级示例：删除既有字段或改变其默认值，导致旧 Memory 必须改写；此时应发布新 syntax，并让 migrate 逐版本转换。"
 
       - !statement
         names:
@@ -337,6 +342,27 @@ sections:
           - permission_grants 只允许出现在 !artifact，不得出现在 !procedure、!action 或其他区块。
           - Role 和 Permission 必须存在，且每个 Permission 必须列在该 Role 的 grantable_permissions 中；Grant 不能撤销基础 Permission，也不能越过配置上限。
           - Grant 仅对当前 Artifact 生效，不传播到后续 Artifact 或被调用 Procedure 的其他 Artifact。
+
+      - !statement
+        names:
+          - review
+        defines:
+          - 声明当前 Artifact 在确定性校验通过后必须进入的内置 Decision Policy。
+          - |-
+            `review` 使用 Decision Policy id；角色和身份仍由 Procedure 或 Artifact 的 `role_bindings` 提供：
+            ```yaml
+            artifact: !artifact
+              name: 需求文档
+              format: markdown
+              review: artifact_acceptance.unanimous
+              role_bindings:
+                reviewer: human_reviewer
+            ```
+        asserts:
+          - review 只允许出现在 !artifact，值必须是已注册的非空 Decision Policy id。
+          - 省略 review 时，Artifact 在 type、format 和 schema 校验通过后按既有行为立即被接纳并推进 Run。
+          - 配置 review 时，Artifact 校验通过后必须创建 Artifact Review；Review 通过前不得把候选 Artifact 加入 Run events 或推进当前 Action。
+          - 当前内置 artifact_acceptance.unanimous 要求全部 Human Assignment 提交；只有具有 decision.decide 的 Vote 参与一致通过判定，只有 decision.assess 的 Vote 作为建议保存。
 
       - !statement
         names:
@@ -988,10 +1014,11 @@ sections:
                         fields:
                           - 结果
                           - 证据
+                      review: artifact_acceptance.unanimous
                       final: true
                     ```
                 asserts:
-                  - "!artifact 只允许 name、type、format、schema、final、role_bindings 和 permission_grants 字段。"
+                  - "!artifact 只允许 name、type、format、schema、review、final、role_bindings 和 permission_grants 字段。"
                   - name 必须是非空字符串，用于描述当前 Action 的交付物。
                   - type 省略时默认为 string；format 省略时默认为 plain。
                   - schema 可以是外部 Schema 的名称引用，或一个 inline !schema；string、number 和 boolean Artifact 不得声明 schema。
@@ -1003,6 +1030,7 @@ sections:
                   - "object + markdown 必须声明 layout: outline 并提供 schema。"
                   - "array + markdown 必须声明 layout: table 并提供 schema。"
                   - inline Schema 根节点解析后的 type 和 format 必须与 Artifact 契约完全一致。
+                  - review 如出现必须引用已注册 Decision Policy；确定性校验通过后进入 Review，通过前不得接纳 Artifact 或推进 Action。
                   - Artifact.role_bindings 覆盖当前调用链中同名 Role 的 Procedure Binding，未声明 Role 继续继承。
                   - Artifact.permission_grants 只能从目标 Role 的 grantable_permissions 中临时追加权限，并且只对当前 Artifact 生效。
 

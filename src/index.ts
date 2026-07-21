@@ -1,4 +1,5 @@
 export * from "./artifact-validation.js";
+export * from "./artifact-review.js";
 export * from "./control-plane/index.js";
 export {
   registerArtifactValidator,

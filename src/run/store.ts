@@ -3,6 +3,20 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import { join, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
+  artifactReviewVoteValues,
+  authorizeArtifactReviewIdentity,
+  createArtifactReviewAssignments,
+  evaluateArtifactReviewRound,
+  makeReviewEntityId,
+  submittedAssignmentVote,
+  type ArtifactReview,
+  type ArtifactReviewAnchor,
+  type ArtifactReviewAssignment,
+  type ArtifactReviewComment,
+  type ArtifactReviewRound,
+  type ArtifactReviewVoteValue
+} from "../artifact-review.js";
+import {
   ArtifactValidationFailure,
   type ArtifactReportSource,
   type ArtifactValidationPlan,
@@ -19,6 +33,7 @@ import {
   controlPlaneSnapshotSchema,
   createControlPlaneSnapshot,
   mergeRoleBindings,
+  permissionIds,
   renderPermissionGuidance,
   resolveArtifactControlPlane,
   validateControlPlaneReferences,
@@ -101,6 +116,7 @@ export type RunStep = {
   schema?: RunSchemaContract;
   validationPlan?: ArtifactValidationPlan;
   final?: boolean;
+  reviewPolicy?: string;
   asserts?: string[];
   suggests?: string[];
   details?: string[];
@@ -172,6 +188,7 @@ export type RunState = {
   events: RunEvent[];
   controlPlane?: ControlPlaneSnapshot;
   procedureSnapshots?: Record<string, RunProcedureTemplate>;
+  artifactReviews?: ArtifactReview<RunEvent["artifact"]>[];
 };
 
 const artifactFormatSpecSchema = z.object({
@@ -257,6 +274,7 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
     schema: runSchemaContractSchema.optional(),
     validationPlan: z.array(validationPlanEntrySchema).optional(),
     final: z.boolean().optional(),
+    reviewPolicy: z.string().optional(),
     asserts: z.array(z.string()).optional(),
     suggests: z.array(z.string()).optional(),
     details: z.array(z.string()).optional(),
@@ -333,6 +351,125 @@ const runProcedureTemplateSchema: z.ZodType<RunProcedureTemplate> = z.object({
   steps: z.array(runStepSchema)
 }).strict();
 
+const artifactReviewAnchorSchema = z.object({
+  target: z.string(),
+  location: z.string().optional(),
+  sourceHash: z.string()
+}).strict();
+
+const artifactReviewCommentSchema = z.object({
+  id: z.string(),
+  body: z.string(),
+  anchor: artifactReviewAnchorSchema.optional(),
+  createdAt: z.string(),
+  updatedAt: z.string()
+}).strict();
+
+const artifactReviewAssignmentSchema = z.object({
+  identityId: z.string(),
+  identityName: z.string(),
+  roleIds: z.array(z.string()),
+  permissions: z.array(z.enum(permissionIds)),
+  binding: z.enum(["decision", "advisory"]),
+  status: z.enum(["draft", "submitted"]),
+  draft: z.object({
+    comments: z.array(artifactReviewCommentSchema),
+    vote: z.enum(artifactReviewVoteValues).optional(),
+    updatedAt: z.string().optional()
+  }).strict(),
+  submitted: z.object({
+    comments: z.array(artifactReviewCommentSchema),
+    vote: z.enum(artifactReviewVoteValues),
+    submittedAt: z.string(),
+    authorization: authorizationDecisionSchema
+  }).strict().optional()
+}).strict();
+
+const artifactReviewVoteSchema = z.object({
+  id: z.string(),
+  subject: z.union([
+    z.object({ kind: z.literal("runner") }).strict(),
+    z.object({ kind: z.literal("identity"), identityId: z.string() }).strict()
+  ]),
+  binding: z.enum(["decision", "advisory"]),
+  value: z.enum(artifactReviewVoteValues),
+  automatic: z.boolean(),
+  comment: z.string().optional(),
+  authorization: authorizationDecisionSchema,
+  submittedAt: z.string()
+}).strict();
+
+const artifactReviewResultSchema = z.object({
+  status: z.enum(["passed", "changes_requested"]),
+  completedAt: z.string(),
+  humanSubmitted: z.number().int().nonnegative(),
+  humanTotal: z.number().int().nonnegative(),
+  decisionApprove: z.number().int().nonnegative(),
+  decisionTotal: z.number().int().nonnegative(),
+  advisoryTotal: z.number().int().nonnegative()
+}).strict();
+
+const artifactReviewRoundSchema = z.object({
+  id: z.string(),
+  sequence: z.number().int().positive(),
+  submissionId: z.string(),
+  status: z.enum(["pending", "awaiting_runner_vote", "passed", "changes_requested"]),
+  revision: z.number().int().positive(),
+  createdAt: z.string(),
+  assignments: z.array(artifactReviewAssignmentSchema),
+  votes: z.array(artifactReviewVoteSchema),
+  result: artifactReviewResultSchema.optional()
+}).strict();
+
+const runEventArtifactSchema = z.object({
+  name: z.string(),
+  type: z.string(),
+  format: artifactFormatSpecSchema,
+  fields: z.record(z.unknown()).optional(),
+  schema: runSchemaContractSchema.optional(),
+  validation: validationResultSchema.optional(),
+  final: z.boolean().optional(),
+  storage: z.enum(["inline", "file"]).optional(),
+  value: z.unknown().optional(),
+  path: z.string().optional(),
+  fileName: z.string().optional(),
+  contentType: z.string().optional(),
+  authorization: authorizationDecisionSchema.optional()
+}).strict();
+
+const artifactReviewSubmissionSchema = z.object({
+  id: z.string(),
+  digest: z.string(),
+  createdAt: z.string(),
+  artifact: runEventArtifactSchema,
+  revisionSummary: z.object({
+    body: z.string(),
+    digest: z.string(),
+    createdAt: z.string(),
+    previousSubmissionId: z.string()
+  }).strict().optional()
+}).strict();
+
+const artifactReviewSchema: z.ZodType<ArtifactReview<RunEvent["artifact"]>, z.ZodTypeDef, unknown> = z.object({
+  id: z.string(),
+  stepId: z.string(),
+  artifactName: z.string(),
+  policyId: z.string(),
+  controlPlane: artifactControlPlaneSchema,
+  status: z.enum(["pending", "awaiting_runner_vote", "awaiting_revision", "passed"]),
+  currentRoundId: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  submissions: z.array(artifactReviewSubmissionSchema),
+  rounds: z.array(artifactReviewRoundSchema),
+  outcome: z.object({
+    status: z.literal("passed"),
+    submissionId: z.string(),
+    roundId: z.string(),
+    completedAt: z.string()
+  }).strict().optional()
+}).strict();
+
 const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
   contractVersion: z.literal(3),
   readOnly: z.boolean().optional(),
@@ -360,24 +497,11 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
     at: z.string(),
     frame: z.enum(["procedure", "schema"]),
     stepId: z.string(),
-    artifact: z.object({
-      name: z.string(),
-      type: z.string(),
-      format: artifactFormatSpecSchema,
-      fields: z.record(z.unknown()).optional(),
-      schema: runSchemaContractSchema.optional(),
-      validation: validationResultSchema.optional(),
-      final: z.boolean().optional(),
-      storage: z.enum(["inline", "file"]).optional(),
-      value: z.unknown().optional(),
-      path: z.string().optional(),
-      fileName: z.string().optional(),
-      contentType: z.string().optional(),
-      authorization: authorizationDecisionSchema.optional()
-    }).strict()
+    artifact: runEventArtifactSchema
   }).strict()),
   controlPlane: controlPlaneSnapshotSchema.optional(),
-  procedureSnapshots: z.record(runProcedureTemplateSchema)
+  procedureSnapshots: z.record(runProcedureTemplateSchema),
+  artifactReviews: z.array(artifactReviewSchema).optional()
 }).strict();
 
 export async function ensureRunDirectory(runsRoot: string): Promise<string> {
@@ -481,6 +605,7 @@ export async function reportRun(input: {
   runsRoot: string;
   runId: string;
   artifact: ArtifactReportSource;
+  revisionSummary?: string;
   locale?: "zh-CN" | "en";
 }): Promise<RunState> {
   return withRunWriteLock(input.runsRoot, input.runId, () => reportRunUnlocked(input));
@@ -490,6 +615,7 @@ async function reportRunUnlocked(input: {
   runsRoot: string;
   runId: string;
   artifact: ArtifactReportSource;
+  revisionSummary?: string;
   locale?: "zh-CN" | "en";
 }): Promise<RunState> {
   const run = await readRun(input.runsRoot, input.runId);
@@ -525,6 +651,10 @@ async function reportRunUnlocked(input: {
   const validation = await artifactValidatorRegistry.execute(plan, { contract, candidate, context });
   if (validation.status !== "passed") throw new ArtifactValidationFailure(validation);
 
+  if (step.reviewPolicy) {
+    return reportReviewedArtifact(input, run, step, candidate, validation, authorization);
+  }
+
   const createdArtifactFiles: string[] = [];
   try {
     const artifact = await buildRunEventArtifact(
@@ -556,6 +686,570 @@ async function reportRunUnlocked(input: {
     await removeArtifactFiles(createdArtifactFiles);
     throw error;
   }
+}
+
+async function reportReviewedArtifact(
+  input: {
+    runsRoot: string;
+    runId: string;
+    artifact: ArtifactReportSource;
+    revisionSummary?: string;
+    locale?: "zh-CN" | "en";
+  },
+  run: RunState,
+  step: RunStep,
+  candidate: PreparedArtifactCandidate,
+  validation: ArtifactValidationResult,
+  authorization?: AuthorizationDecision
+): Promise<RunState> {
+  if (run.contractVersion !== 3 || !run.controlPlane || !step.controlPlane || !step.reviewPolicy || !step.artifact) {
+    throw new Error(`Artifact Review requires a Run v3 control-plane snapshot: ${step.id}`);
+  }
+  const policy = run.controlPlane.decisionPolicyCatalog.definitions.find((item) => item.id === step.reviewPolicy);
+  if (!policy) throw new Error(`Unknown Decision Policy id in Run snapshot: ${step.reviewPolicy}`);
+  if (policy.completion !== "all_assigned" || policy.resolution !== "unanimous") {
+    throw new Error(`Unsupported Decision Policy contract: ${step.reviewPolicy}`);
+  }
+  const runnerRead = authorizeArtifactOperation({
+    controlPlane: step.controlPlane,
+    subject: { kind: "runner" },
+    permission: "artifact.read"
+  });
+  if (!runnerRead.allowed) {
+    throw new ArtifactAuthorizationFailure(runnerRead, [
+      "Artifact Review requires runner artifact.read so run review wait can return the result."
+    ]);
+  }
+
+  const digest = digestBytes(candidate.raw);
+  const existing = activeReviewForStep(run, step.id);
+  if (existing?.status === "pending" || existing?.status === "awaiting_runner_vote") {
+    const submission = reviewSubmission(existing, currentReviewRound(existing).submissionId);
+    if (submission.digest === digest) return run;
+    throw new Error(
+      `Artifact Review ${existing.id} is in progress; wait for ${existing.currentRoundId} before reporting a different candidate`
+    );
+  }
+  if (existing?.status === "passed") {
+    throw new Error(`Artifact Review is already passed: ${existing.id}`);
+  }
+  if (existing?.status === "awaiting_revision" && !input.revisionSummary?.trim()) {
+    throw new Error(`Artifact Review ${existing.id} requires --revision-summary-file before the next report`);
+  }
+  if (!existing && input.revisionSummary !== undefined) {
+    throw new Error("--revision-summary-file is only allowed after an Artifact Review requests changes");
+  }
+
+  const now = new Date().toISOString();
+  const reviewId = existing?.id ?? makeReviewEntityId("review", now);
+  const submissionId = makeReviewEntityId("submission", now);
+  const roundId = makeReviewEntityId("round", now);
+  const assignmentSet = createArtifactReviewAssignments({
+    snapshot: run.controlPlane,
+    controlPlane: step.controlPlane,
+    now
+  });
+  const createdArtifactFiles: string[] = [];
+  try {
+    const artifact = await buildRunEventArtifact(
+      input.runsRoot,
+      run,
+      step,
+      candidate,
+      validation,
+      createdArtifactFiles,
+      authorization,
+      {
+        relativeDirectory: join("reviews", reviewId, submissionId),
+        fileName: `${slugify(step.artifact) || "artifact"}${extensionForFormat(step.format ?? { name: "plain", options: {} })}`
+      }
+    );
+    const previousSubmission = existing?.submissions.at(-1);
+    const submission = {
+      id: submissionId,
+      digest,
+      createdAt: now,
+      artifact,
+      revisionSummary: existing && previousSubmission
+        ? {
+            body: input.revisionSummary!.trim(),
+            digest: digestText(input.revisionSummary!.trim()),
+            createdAt: now,
+            previousSubmissionId: previousSubmission.id
+          }
+        : undefined
+    };
+    const round: ArtifactReviewRound = {
+      id: roundId,
+      sequence: (existing?.rounds.length ?? 0) + 1,
+      submissionId,
+      status: "pending",
+      revision: 1,
+      createdAt: now,
+      assignments: assignmentSet.assignments,
+      votes: []
+    };
+
+    if (existing) {
+      existing.status = "pending";
+      existing.currentRoundId = roundId;
+      existing.updatedAt = now;
+      existing.submissions.push(submission);
+      existing.rounds.push(round);
+    } else {
+      (run.artifactReviews ??= []).push({
+        id: reviewId,
+        stepId: step.id,
+        artifactName: step.artifact,
+        policyId: step.reviewPolicy,
+        controlPlane: structuredClone(step.controlPlane),
+        status: "pending",
+        currentRoundId: roundId,
+        createdAt: now,
+        updatedAt: now,
+        submissions: [submission],
+        rounds: [round]
+      });
+    }
+    run.updatedAt = now;
+    await writeRun(input.runsRoot, run);
+    return run;
+  } catch (error) {
+    await removeArtifactFiles(createdArtifactFiles);
+    throw error;
+  }
+}
+
+export type ArtifactReviewDraftInput = {
+  vote?: ArtifactReviewVoteValue;
+  comments: Array<{
+    id?: string;
+    body: string;
+    anchor?: ArtifactReviewAnchor;
+  }>;
+};
+
+export type ArtifactReviewContext = {
+  run: RunState;
+  review: ArtifactReview<RunEvent["artifact"]>;
+  round: ArtifactReviewRound;
+  assignment: ArtifactReviewAssignment;
+};
+
+export function currentArtifactReview(run: RunState): ArtifactReview<RunEvent["artifact"]> | undefined {
+  return run.artifactReviews?.find((review) => review.status !== "passed" && currentStep(run)?.id === review.stepId);
+}
+
+export async function findArtifactReview(input: {
+  runsRoot: string;
+  reviewId: string;
+}): Promise<{ run: RunState; review: ArtifactReview<RunEvent["artifact"]> }> {
+  for (const run of await listRuns(input.runsRoot)) {
+    const review = run.artifactReviews?.find((candidate) => candidate.id === input.reviewId);
+    if (review) return { run, review };
+  }
+  throw new Error(`Artifact Review not found: ${input.reviewId}`);
+}
+
+export async function readArtifactReviewForIdentity(input: {
+  runsRoot: string;
+  reviewId: string;
+  roundId: string;
+  identityId: string;
+}): Promise<ArtifactReviewContext> {
+  const { run, review } = await findArtifactReview(input);
+  const round = review.rounds.find((candidate) => candidate.id === input.roundId);
+  if (!round) throw new Error(`Artifact Review Round not found: ${input.roundId}`);
+  const assignment = round.assignments.find((candidate) => candidate.identityId === input.identityId);
+  if (!assignment) throw new Error(`Identity is not assigned to Artifact Review Round: ${input.identityId}`);
+  const authorization = authorizeArtifactReviewIdentity({
+    controlPlane: review.controlPlane,
+    assignment,
+    permission: "artifact.read"
+  });
+  if (!authorization.allowed) throw new ArtifactAuthorizationFailure(authorization, []);
+  return { run, review, round, assignment };
+}
+
+export async function readArtifactReviewForRunner(input: {
+  runsRoot: string;
+  reviewId: string;
+}): Promise<{ run: RunState; review: ArtifactReview<RunEvent["artifact"]>; round: ArtifactReviewRound }> {
+  const { run, review } = await findArtifactReview(input);
+  const authorization = authorizeArtifactOperation({
+    controlPlane: review.controlPlane,
+    subject: { kind: "runner" },
+    permission: "artifact.read"
+  });
+  if (!authorization.allowed) throw new ArtifactAuthorizationFailure(authorization, []);
+  return { run, review, round: currentReviewRound(review) };
+}
+
+export async function waitForArtifactReview(input: {
+  runsRoot: string;
+  reviewId: string;
+  pollIntervalMs?: number;
+  signal?: AbortSignal;
+}): Promise<{ run: RunState; review: ArtifactReview<RunEvent["artifact"]>; round: ArtifactReviewRound }> {
+  const interval = input.pollIntervalMs ?? 1_000;
+  if (!Number.isFinite(interval) || interval < 0) throw new Error("pollIntervalMs must be a non-negative number");
+  while (true) {
+    if (input.signal?.aborted) throw input.signal.reason ?? new Error("Artifact Review wait aborted");
+    const context = await readArtifactReviewForRunner(input);
+    if (context.review.status !== "pending") return context;
+    await sleep(interval, input.signal);
+  }
+}
+
+export async function updateArtifactReviewDraft(input: {
+  runsRoot: string;
+  reviewId: string;
+  roundId: string;
+  identityId: string;
+  expectedRevision: number;
+  draft: ArtifactReviewDraftInput;
+}): Promise<ArtifactReviewContext> {
+  const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
+  return withRunWriteLock(input.runsRoot, located.run.id, async () => {
+    const run = await readRun(input.runsRoot, located.run.id);
+    const review = requireArtifactReview(run, input.reviewId);
+    const round = requireArtifactReviewRound(review, input.roundId);
+    if (review.status !== "pending" || round.status !== "pending") {
+      throw new Error(`Artifact Review Round is read-only: ${round.id}`);
+    }
+    if (round.revision !== input.expectedRevision) {
+      throw new ArtifactReviewConflictError(round.id, round.revision);
+    }
+    const assignment = requireArtifactReviewAssignment(round, input.identityId);
+    if (assignment.status === "submitted") return { run, review, round, assignment };
+    const permission = assignment.binding === "decision" ? "decision.decide" : "decision.assess";
+    const authorization = authorizeArtifactReviewIdentity({
+      controlPlane: review.controlPlane,
+      assignment,
+      permission
+    });
+    if (!authorization.allowed) throw new ArtifactAuthorizationFailure(authorization, []);
+    const submission = reviewSubmission(review, round.submissionId);
+    const now = new Date().toISOString();
+    const comments = normalizeArtifactReviewComments(
+      input.draft.comments,
+      submission.digest,
+      now,
+      assignment.draft.comments
+    );
+    assignment.draft = {
+      comments,
+      vote: input.draft.vote,
+      updatedAt: now
+    };
+    round.revision += 1;
+    review.updatedAt = now;
+    run.updatedAt = now;
+    await writeRun(input.runsRoot, run);
+    return { run, review, round, assignment };
+  });
+}
+
+export async function submitArtifactReviewAssignment(input: {
+  runsRoot: string;
+  reviewId: string;
+  roundId: string;
+  identityId: string;
+  expectedRevision: number;
+}): Promise<ArtifactReviewContext> {
+  const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
+  return withRunWriteLock(input.runsRoot, located.run.id, async () => {
+    const run = await readRun(input.runsRoot, located.run.id);
+    const review = requireArtifactReview(run, input.reviewId);
+    const round = requireArtifactReviewRound(review, input.roundId);
+    const assignment = requireArtifactReviewAssignment(round, input.identityId);
+    if (assignment.status === "submitted") return { run, review, round, assignment };
+    if (review.status !== "pending" || round.status !== "pending") {
+      throw new Error(`Artifact Review Round is read-only: ${round.id}`);
+    }
+    if (round.revision !== input.expectedRevision) {
+      throw new ArtifactReviewConflictError(round.id, round.revision);
+    }
+    const vote = assignment.draft.vote;
+    if (!vote) throw new Error("Artifact Review vote is required before Submit Review");
+    if (vote === "request_changes" && assignment.draft.comments.length === 0) {
+      throw new Error("request_changes requires at least one Comment");
+    }
+    const permission = assignment.binding === "decision" ? "decision.decide" : "decision.assess";
+    const authorization = authorizeArtifactReviewIdentity({
+      controlPlane: review.controlPlane,
+      assignment,
+      permission
+    });
+    if (!authorization.allowed) throw new ArtifactAuthorizationFailure(authorization, []);
+
+    const now = new Date().toISOString();
+    assignment.status = "submitted";
+    assignment.submitted = {
+      comments: structuredClone(assignment.draft.comments),
+      vote,
+      submittedAt: now,
+      authorization
+    };
+    round.votes.push(submittedAssignmentVote(assignment, authorization));
+    round.revision += 1;
+    review.updatedAt = now;
+    const createdArtifactFiles: string[] = [];
+    try {
+      await settleArtifactReviewRound(input.runsRoot, run, review, round, createdArtifactFiles, now);
+      run.updatedAt = now;
+      await writeRun(input.runsRoot, run);
+      return { run, review, round, assignment };
+    } catch (error) {
+      await removeArtifactFiles(createdArtifactFiles);
+      throw error;
+    }
+  });
+}
+
+export type ArtifactReviewRunnerVoteContext = {
+  run: RunState;
+  review: ArtifactReview<RunEvent["artifact"]>;
+  round: ArtifactReviewRound;
+};
+
+export async function submitArtifactReviewRunnerVote(input: {
+  runsRoot: string;
+  reviewId: string;
+  roundId: string;
+  vote: "approve" | "request_changes";
+  comment?: string;
+}): Promise<ArtifactReviewRunnerVoteContext> {
+  const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
+  return withRunWriteLock(input.runsRoot, located.run.id, async () => {
+    const run = await readRun(input.runsRoot, located.run.id);
+    const review = requireArtifactReview(run, input.reviewId);
+    if (review.currentRoundId !== input.roundId) {
+      throw new Error(`Artifact Review Runner vote targets a stale Round: ${input.roundId}`);
+    }
+    const round = requireArtifactReviewRound(review, input.roundId);
+    const comment = input.comment?.trim() || undefined;
+    const existingVote = round.votes.find((candidate) => candidate.subject.kind === "runner");
+    if (existingVote) {
+      if (!existingVote.automatic && existingVote.value === input.vote && existingVote.comment === comment) {
+        return { run, review, round };
+      }
+      throw new Error(`Runner has already voted in Artifact Review Round: ${round.id}`);
+    }
+    if (review.status !== "awaiting_runner_vote" || round.status !== "awaiting_runner_vote") {
+      throw new Error(`Artifact Review Round is not awaiting a Runner vote: ${round.id}`);
+    }
+    if (input.vote === "request_changes" && !comment) {
+      throw new Error("Runner request_changes requires --comment or --comment-file");
+    }
+    const authorization = authorizeArtifactOperation({
+      controlPlane: review.controlPlane,
+      subject: { kind: "runner" },
+      permission: "decision.decide"
+    });
+    if (!authorization.allowed) throw new ArtifactAuthorizationFailure(authorization, []);
+
+    const now = new Date().toISOString();
+    round.votes.push({
+      id: makeReviewEntityId("vote", now),
+      subject: { kind: "runner" },
+      binding: "decision",
+      value: input.vote,
+      automatic: false,
+      comment,
+      authorization,
+      submittedAt: now
+    });
+    round.revision += 1;
+    review.updatedAt = now;
+    const createdArtifactFiles: string[] = [];
+    try {
+      await settleArtifactReviewRound(input.runsRoot, run, review, round, createdArtifactFiles, now);
+      run.updatedAt = now;
+      await writeRun(input.runsRoot, run);
+      return { run, review, round };
+    } catch (error) {
+      await removeArtifactFiles(createdArtifactFiles);
+      throw error;
+    }
+  });
+}
+
+export class ArtifactReviewConflictError extends Error {
+  constructor(readonly roundId: string, readonly actualRevision: number) {
+    super(`Artifact Review Round revision conflict: ${roundId}; current revision is ${actualRevision}`);
+    this.name = "ArtifactReviewConflictError";
+  }
+}
+
+async function settleArtifactReviewRound(
+  runsRoot: string,
+  run: RunState,
+  review: ArtifactReview<RunEvent["artifact"]>,
+  round: ArtifactReviewRound,
+  createdArtifactFiles: string[],
+  now: string
+): Promise<void> {
+  if (round.assignments.some((assignment) => assignment.status !== "submitted")) return;
+
+  const humanDecisionVotes = round.votes.filter(
+    (vote) => vote.subject.kind === "identity" && vote.binding === "decision"
+  );
+  const humanDecisionRejected = humanDecisionVotes.some((vote) => vote.value !== "approve");
+  const runnerAuthorization = authorizeArtifactOperation({
+    controlPlane: review.controlPlane,
+    subject: { kind: "runner" },
+    permission: "decision.decide"
+  });
+  const runnerVote = round.votes.find(
+    (vote) => vote.subject.kind === "runner" && vote.binding === "decision"
+  );
+
+  if (!humanDecisionRejected && runnerAuthorization.allowed && !runnerVote) {
+    round.status = "awaiting_runner_vote";
+    review.status = "awaiting_runner_vote";
+    return;
+  }
+
+  const result = evaluateArtifactReviewRound(round, now);
+  if (!result) return;
+  round.result = result;
+  round.status = result.status;
+  if (result.status === "passed") {
+    await acceptArtifactReviewSubmission(runsRoot, run, review, round, createdArtifactFiles, now);
+  } else {
+    review.status = "awaiting_revision";
+  }
+}
+
+async function acceptArtifactReviewSubmission(
+  runsRoot: string,
+  run: RunState,
+  review: ArtifactReview<RunEvent["artifact"]>,
+  round: ArtifactReviewRound,
+  createdArtifactFiles: string[],
+  now: string
+): Promise<void> {
+  const frame = currentFrame(run);
+  const step = currentStep(run);
+  if (!frame || !step || step.id !== review.stepId) {
+    throw new Error(`Artifact Review current Step changed before acceptance: ${review.stepId}`);
+  }
+  const submission = reviewSubmission(review, round.submissionId);
+  run.events.push({
+    at: now,
+    frame: frame.type,
+    stepId: step.id,
+    artifact: structuredClone(submission.artifact)
+  });
+  const controlValue = step.kind === "branch" || step.kind === "loop"
+    ? submission.artifact.value
+    : undefined;
+  frame.index += 1;
+  applyControlStep(frame, step, controlValue);
+  await collapseCompletedFrames(runsRoot, run, createdArtifactFiles);
+  await expandAutoCallSteps(run);
+  review.status = "passed";
+  review.currentRoundId = round.id;
+  review.updatedAt = now;
+  review.outcome = {
+    status: "passed",
+    submissionId: submission.id,
+    roundId: round.id,
+    completedAt: now
+  };
+}
+
+function normalizeArtifactReviewComments(
+  comments: ArtifactReviewDraftInput["comments"],
+  submissionDigest: string,
+  now: string,
+  existingComments: readonly ArtifactReviewComment[] = []
+): ArtifactReviewComment[] {
+  const existingById = new Map(existingComments.map((comment) => [comment.id, comment]));
+  const ids = new Set<string>();
+  return comments.map((comment) => {
+    const body = comment.body.trim();
+    if (!body) throw new Error("Artifact Review Comment body must not be empty");
+    if (comment.anchor && comment.anchor.sourceHash !== submissionDigest) {
+      throw new Error("Artifact Review Comment anchor does not match the current Submission");
+    }
+    const id = comment.id?.trim() || makeReviewEntityId("comment", now);
+    if (ids.has(id)) throw new Error(`Duplicate Artifact Review Comment id: ${id}`);
+    ids.add(id);
+    return {
+      id,
+      body,
+      anchor: comment.anchor ? structuredClone(comment.anchor) : undefined,
+      createdAt: existingById.get(id)?.createdAt ?? now,
+      updatedAt: now
+    };
+  });
+}
+
+function requireArtifactReview(run: RunState, reviewId: string): ArtifactReview<RunEvent["artifact"]> {
+  const review = run.artifactReviews?.find((candidate) => candidate.id === reviewId);
+  if (!review) throw new Error(`Artifact Review not found: ${reviewId}`);
+  return review;
+}
+
+function requireArtifactReviewRound(
+  review: ArtifactReview<RunEvent["artifact"]>,
+  roundId: string
+): ArtifactReviewRound {
+  const round = review.rounds.find((candidate) => candidate.id === roundId);
+  if (!round) throw new Error(`Artifact Review Round not found: ${roundId}`);
+  return round;
+}
+
+function requireArtifactReviewAssignment(round: ArtifactReviewRound, identityId: string): ArtifactReviewAssignment {
+  const assignment = round.assignments.find((candidate) => candidate.identityId === identityId);
+  if (!assignment) throw new Error(`Identity is not assigned to Artifact Review Round: ${identityId}`);
+  return assignment;
+}
+
+function activeReviewForStep(
+  run: RunState,
+  stepId: string
+): ArtifactReview<RunEvent["artifact"]> | undefined {
+  return run.artifactReviews?.find((review) => review.stepId === stepId && review.status !== "passed");
+}
+
+function currentReviewRound(review: ArtifactReview<RunEvent["artifact"]>): ArtifactReviewRound {
+  return requireArtifactReviewRound(review, review.currentRoundId);
+}
+
+function reviewSubmission(
+  review: ArtifactReview<RunEvent["artifact"]>,
+  submissionId: string
+): ArtifactReview<RunEvent["artifact"]>["submissions"][number] {
+  const submission = review.submissions.find((candidate) => candidate.id === submissionId);
+  if (!submission) throw new Error(`Artifact Review Submission not found: ${submissionId}`);
+  return submission;
+}
+
+function digestBytes(value: Uint8Array): string {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
+function digestText(value: string): string {
+  return digestBytes(new TextEncoder().encode(value));
+}
+
+async function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  await new Promise<void>((resolveDelay, rejectDelay) => {
+    const abort = () => {
+      clearTimeout(timeout);
+      rejectDelay(signal?.reason ?? new Error("Artifact Review wait aborted"));
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolveDelay();
+    }, milliseconds);
+    if (!signal) return;
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+  });
 }
 
 function authorizeRunnerForReport(
@@ -819,11 +1513,25 @@ function collectCallTargets(steps: readonly RunStep[]): string[] {
   return [...new Set(targets)];
 }
 
+function containsArtifactReview(steps: readonly RunStep[]): boolean {
+  return steps.some((step) =>
+    Boolean(
+      step.reviewPolicy ||
+        (step.branches &&
+          (containsArtifactReview(step.branches.truthy) || containsArtifactReview(step.branches.falsy))) ||
+        (step.loop && containsArtifactReview(step.loop.body))
+    )
+  );
+}
+
 function instantiateProcedureTemplate(
   template: RunProcedureTemplate,
   parentBindings: ResolvedRoleBindings,
   snapshot: ControlPlaneSnapshot | undefined
 ): { steps: RunStep[]; roleBindings: ResolvedRoleBindings } {
+  if (!snapshot && containsArtifactReview(template.steps)) {
+    throw new Error(`control_plane config is required for Artifact Review: procedure:${template.memoryName}`);
+  }
   assertGovernanceReferences(
     snapshot,
     template.roleBindings,
@@ -849,6 +1557,9 @@ function applyControlPlaneToSteps(
   for (const step of steps) {
     if (step.artifact) {
       const artifactScope = `${procedureName}#${step.id}`;
+      if (step.reviewPolicy && !snapshot) {
+        throw new Error(`control_plane config is required for Artifact Review: ${artifactScope}`);
+      }
       assertGovernanceReferences(snapshot, step.roleBindings, step.permissionGrants, `artifact:${artifactScope}`);
       if (snapshot) {
         step.controlPlane = resolveArtifactControlPlane({
@@ -860,6 +1571,7 @@ function applyControlPlaneToSteps(
           artifactBindingSource: `artifact:${artifactScope}`,
           artifactGrantSource: `artifact:${artifactScope}`
         });
+        if (step.reviewPolicy) assertArtifactReviewCanStart(snapshot, step.controlPlane, step.reviewPolicy);
       }
     }
     if (step.branches) {
@@ -868,6 +1580,26 @@ function applyControlPlaneToSteps(
     }
     if (step.loop) applyControlPlaneToSteps(step.loop.body, procedureBindings, snapshot, procedureName);
   }
+}
+
+function assertArtifactReviewCanStart(
+  snapshot: ControlPlaneSnapshot,
+  controlPlane: ArtifactControlPlane,
+  policyId: string
+): void {
+  const policy = snapshot.decisionPolicyCatalog.definitions.find((candidate) => candidate.id === policyId);
+  if (!policy) throw new Error(`Unknown Decision Policy id in Run snapshot: ${policyId}`);
+  const runnerRead = authorizeArtifactOperation({
+    controlPlane,
+    subject: { kind: "runner" },
+    permission: "artifact.read"
+  });
+  if (!runnerRead.allowed) throw new Error("Artifact Review requires runner artifact.read for run review wait");
+  createArtifactReviewAssignments({
+    snapshot,
+    controlPlane,
+    now: "1970-01-01T00:00:00.000Z"
+  });
 }
 
 function assertGovernanceReferences(
@@ -924,7 +1656,7 @@ function compileActionStep(node: ActionNode, id: string): RunStep {
 function compileArtifactStep(
   artifact: ActionNode["artifact"],
   id: string
-): Pick<RunStep, "artifact" | "type" | "format" | "schema" | "validationPlan" | "final" | "roleBindings" | "permissionGrants"> {
+): Pick<RunStep, "artifact" | "type" | "format" | "schema" | "validationPlan" | "final" | "reviewPolicy" | "roleBindings" | "permissionGrants"> {
   const contract = compileArtifactContract(artifact);
   const schema = typeof artifact.schema === "string"
     ? { kind: "external" as const, name: artifact.schema }
@@ -938,6 +1670,7 @@ function compileArtifactStep(
     schema,
     validationPlan: artifactValidatorRegistry.resolvePlan(contract),
     final: artifact.final || undefined,
+    reviewPolicy: artifact.review,
     roleBindings: artifact.roleBindings ? structuredClone(artifact.roleBindings) : undefined,
     permissionGrants: artifact.permissionGrants ? structuredClone(artifact.permissionGrants) : undefined
   };
@@ -1013,6 +1746,7 @@ function cloneStep(step: RunStep): RunStep {
     format: step.format ? { name: step.format.name, options: structuredClone(step.format.options) } : undefined,
     schema: step.schema ? structuredClone(step.schema) : undefined,
     validationPlan: step.validationPlan ? structuredClone(step.validationPlan) : undefined,
+    reviewPolicy: step.reviewPolicy,
     asserts: step.asserts ? [...step.asserts] : undefined,
     suggests: step.suggests ? [...step.suggests] : undefined,
     details: step.details ? [...step.details] : undefined,
@@ -1082,7 +1816,8 @@ async function buildRunEventArtifact(
   candidate: PreparedArtifactCandidate,
   validation: ArtifactValidationResult,
   createdArtifactFiles: string[] = [],
-  authorization?: AuthorizationDecision
+  authorization?: AuthorizationDecision,
+  storage?: { relativeDirectory: string; fileName: string }
 ): Promise<RunEvent["artifact"]> {
   if (!step.artifact || !step.type || !step.format) {
     throw new Error(`step ${step.id} has no artifact`);
@@ -1107,10 +1842,13 @@ async function buildRunEventArtifact(
     });
   }
 
-  const artifactDir = await ensureRunArtifactDirectory(runsRoot, run.id);
-  const fileName = nextArtifactFileName(run, step);
+  const artifactRoot = await ensureRunArtifactDirectory(runsRoot, run.id);
+  const artifactDir = storage ? resolve(artifactRoot, storage.relativeDirectory) : artifactRoot;
+  assertInsideRunArtifactDirectory(artifactDir, artifactRoot, true);
+  await mkdir(artifactDir, { recursive: true });
+  const fileName = storage?.fileName ?? nextArtifactFileName(run, step);
   const absolutePath = resolve(artifactDir, fileName);
-  assertInsideRunArtifactDirectory(absolutePath, artifactDir);
+  assertInsideRunArtifactDirectory(absolutePath, artifactRoot);
 
   await writeFile(absolutePath, candidate.raw);
   createdArtifactFiles.push(absolutePath);
@@ -1118,7 +1856,7 @@ async function buildRunEventArtifact(
   return compactArtifact({
     ...base,
     storage: "file",
-    path: join(run.id, "artifacts", fileName),
+    path: join(run.id, "artifacts", storage?.relativeDirectory ?? "", fileName),
     fileName,
     contentType: contentTypeForFormat(step.format)
   });
@@ -1184,9 +1922,9 @@ async function ensureRunArtifactDirectory(runsRoot: string, runId: string): Prom
   return artifactDir;
 }
 
-function assertInsideRunArtifactDirectory(path: string, artifactDir: string): void {
+function assertInsideRunArtifactDirectory(path: string, artifactDir: string, allowRoot = false): void {
   const rel = relative(resolve(artifactDir), resolve(path));
-  if (rel.startsWith("..") || rel === "" || rel.includes("..")) {
+  if (rel.startsWith("..") || (!allowRoot && rel === "") || rel.includes("..")) {
     throw new Error(`artifact path escapes run artifacts directory: ${path}`);
   }
 }

@@ -131,6 +131,7 @@ flow:
     action: 生成受控产物。
     artifact: !artifact
       name: 受控产物
+      review: artifact_acceptance.unanimous
       role_bindings:
         reviewer: [human_reviewer, review_agent]
       permission_grants:
@@ -142,6 +143,7 @@ flow:
 - `runner` 是当前 Run 执行上下文隐式承担的保留 Role，不得显式绑定 Identity。
 - `!action` 不允许直接声明 `role_bindings` 或 `permission_grants`，两个字段必须写在其 `artifact` 中。
 - Runner 在 `run report` 前应阅读 CLI 输出的权限说明；成功或拒绝结果中的权限、来源和自然语言说明均来自 Run 启动时保存的控制平面快照。
+- `!artifact.review` 如出现必须引用内置 Decision Policy。确定性校验通过后，Run 会返回稳定的 `review_id` 和 `memsphere run review wait --review <review_id>`；Review 通过前当前 Action 不推进。全部评审意见收齐后，如 CLI 提示等待 Runner 投票，必须先阅读全部意见，再显式执行 `memsphere run review vote`。
 
 当 Artifact 使用 `type: object`、`format.name: markdown` 和 `layout: outline` 时，Schema 的 `fields` 可以使用 mapping 形式的 `!repeat`，把非空 `body` 中的一组字符串或 `!schema` 字段整体重复。`limit.min/max` 如出现必须是非负整数且 `min <= max`。首版不允许 Repeat 嵌套，也不允许把 Repeat 放在 table、defines、flow 或其他位置：
 
@@ -228,6 +230,30 @@ memsphere run report --run <Run ID> --artifact "<产物内容>"
 
 ```bash
 memsphere run report --run <Run ID> --artifact-file <文件路径>
+```
+
+如果 report 触发 Artifact Review，执行 CLI 返回的等待命令，不要继续执行后续步骤：
+
+```bash
+memsphere run review wait --review <Review ID>
+```
+
+如果 wait 返回 `awaiting_runner_vote`，当前执行本 Run 的 Agent 就是 Runner；先阅读全部参与者的 Comment 和 Vote，再由自己明确决定接纳或修改。接纳才会推进 Run：
+
+```bash
+memsphere run review vote --review <Review ID> --round <Review Round ID> --vote approve
+```
+
+要求修改时必须说明理由，随后修改 Artifact 并进入下一轮：
+
+```bash
+memsphere run review vote --review <Review ID> --round <Review Round ID> --vote request_changes --comment "<修改要求>"
+```
+
+Review 要求修改时，先修改 Artifact，再把本轮修改摘要写入文件并原子重报：
+
+```bash
+memsphere run report --run <Run ID> --artifact-file <文件路径> --revision-summary-file <摘要文件路径>
 ```
 
 带 Schema 的 Markdown 结构化产物可以按照 CLI 提示进入 Schema 填写流程。不要自己猜测下一条命令，以当前 CLI 输出的 `Then` 为准。

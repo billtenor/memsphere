@@ -12,13 +12,18 @@ import {
   activeProcedureAsserts,
   ArtifactAuthorizationFailure,
   artifactSchemaName,
+  currentArtifactReview,
   currentStep,
   enterSchema,
   finalArtifacts,
   readRun,
   repeatRun,
   reportRun,
-  startRun
+  submitArtifactReviewAssignment,
+  submitArtifactReviewRunnerVote,
+  startRun,
+  updateArtifactReviewDraft,
+  waitForArtifactReview
 } from "../src/run/store.js";
 import { validateMemoryStore } from "../src/validation.js";
 
@@ -1258,5 +1263,234 @@ flow:
     assert.equal(currentStep(enteredChild)?.instruction, "Original child instruction.");
     assert.equal(currentStep(enteredChild)?.artifact, "child result");
     assert.deepEqual(currentStep(enteredChild)?.controlPlane?.bindings.reviewer.identityIds, ["agent"]);
+  });
+});
+
+test("Artifact Review prerequisites fail before a Run is persisted", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "reviewed.yaml"), `!procedure
+name: reviewed-prerequisites
+role_bindings:
+  reviewer: human
+flow:
+  - !action
+    action: Produce a reviewed Artifact.
+    artifact: !artifact
+      name: reviewed result
+      review: artifact_acceptance.unanimous
+`);
+
+    await assert.rejects(
+      startRun({ memoryRoot, runsRoot, procedureName: "reviewed-prerequisites" }),
+      /control_plane config is required for Artifact Review/
+    );
+    assert.deepEqual(await readdir(runsRoot), []);
+
+    const noDecider = parseControlPlaneConfig({
+      identities: { human: { kind: "human", name: "Human" } },
+      roles: {
+        runner: { name: "Runner", permissions: ["artifact.read", "artifact.submit"] },
+        reviewer: { name: "Reviewer", permissions: ["artifact.read", "decision.assess"] }
+      }
+    });
+    await assert.rejects(
+      startRun({ memoryRoot, runsRoot, procedureName: "reviewed-prerequisites", controlPlane: noDecider }),
+      /requires at least one decision\.decide subject/
+    );
+    assert.deepEqual(await readdir(runsRoot), []);
+  });
+});
+
+test("Artifact Review requests a revision and accepts only the approved Submission", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "reviewed.yaml"), `!procedure
+name: reviewed
+role_bindings:
+  reviewer: human
+flow:
+  - !action
+    action: Produce a reviewed Artifact.
+    artifact: !artifact
+      name: reviewed result
+      format: markdown
+      review: artifact_acceptance.unanimous
+  - !action
+    action: Continue after review.
+    artifact: !artifact
+      name: continuation
+`);
+    const controlPlane = parseControlPlaneConfig({
+      identities: {
+        human: { kind: "human", name: "Human" }
+      },
+      roles: {
+        runner: {
+          name: "Runner",
+          permissions: ["artifact.read", "artifact.submit", "decision.decide"]
+        },
+        reviewer: {
+          name: "Reviewer",
+          permissions: ["artifact.read", "decision.decide"]
+        }
+      }
+    });
+
+    const started = await startRun({ memoryRoot, runsRoot, procedureName: "reviewed", controlPlane });
+    const first = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "# First candidate\n" }
+    });
+    const review = currentArtifactReview(first);
+    assert(review);
+    assert.equal(first.events.length, 0);
+    assert.equal(currentStep(first)?.id, "flow[1]");
+    assert.equal(review.rounds[0].votes.length, 0);
+
+    const duplicate = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "# First candidate\n" }
+    });
+    assert.equal(currentArtifactReview(duplicate)?.rounds.length, 1);
+    await assert.rejects(
+      reportRun({
+        runsRoot,
+        runId: started.id,
+        artifact: { kind: "inline", value: "# Conflicting candidate\n" }
+      }),
+      /is in progress; wait/
+    );
+
+    const draft = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      identityId: "human",
+      expectedRevision: 1,
+      draft: {
+        vote: "request_changes",
+        comments: [{ body: "Please revise the candidate." }]
+      }
+    });
+    const rejected = await submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      identityId: "human",
+      expectedRevision: draft.round.revision
+    });
+    assert.equal(rejected.review.status, "awaiting_revision");
+    assert.equal(rejected.run.events.length, 0);
+    await assert.rejects(
+      reportRun({
+        runsRoot,
+        runId: started.id,
+        artifact: { kind: "inline", value: "# Second candidate\n" }
+      }),
+      /requires --revision-summary-file/
+    );
+
+    const second = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "# Second candidate\n" },
+      revisionSummary: "Addressed the Human comment."
+    });
+    const secondReview = currentArtifactReview(second);
+    assert(secondReview);
+    assert.equal(secondReview.id, review.id);
+    assert.equal(secondReview.rounds.length, 2);
+    assert.equal(secondReview.submissions[1].revisionSummary?.previousSubmissionId, secondReview.submissions[0].id);
+
+    const approvedDraft = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: review.id,
+      roundId: secondReview.currentRoundId,
+      identityId: "human",
+      expectedRevision: 1,
+      draft: { vote: "approve", comments: [] }
+    });
+    const awaitingRunner = await submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: secondReview.currentRoundId,
+      identityId: "human",
+      expectedRevision: approvedDraft.round.revision
+    });
+    assert.equal(awaitingRunner.review.status, "awaiting_runner_vote");
+    assert.equal(awaitingRunner.round.status, "awaiting_runner_vote");
+    assert.equal(awaitingRunner.run.events.length, 0);
+    assert.equal(currentStep(awaitingRunner.run)?.id, "flow[1]");
+    const waited = await waitForArtifactReview({ runsRoot, reviewId: review.id, pollIntervalMs: 0 });
+    assert.equal(waited.review.status, "awaiting_runner_vote");
+    await assert.rejects(
+      submitArtifactReviewRunnerVote({
+        runsRoot,
+        reviewId: review.id,
+        roundId: secondReview.currentRoundId,
+        vote: "request_changes"
+      }),
+      /requires --comment/
+    );
+    const runnerRejected = await submitArtifactReviewRunnerVote({
+      runsRoot,
+      reviewId: review.id,
+      roundId: secondReview.currentRoundId,
+      vote: "request_changes",
+      comment: "Please address the advisory feedback before acceptance."
+    });
+    assert.equal(runnerRejected.review.status, "awaiting_revision");
+    assert.equal(runnerRejected.run.events.length, 0);
+    assert.equal(runnerRejected.round.votes.find((vote) => vote.subject.kind === "runner")?.automatic, false);
+    assert.equal(
+      runnerRejected.round.votes.find((vote) => vote.subject.kind === "runner")?.comment,
+      "Please address the advisory feedback before acceptance."
+    );
+
+    const third = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "# Third candidate\n" },
+      revisionSummary: "Addressed the Runner decision comment."
+    });
+    const thirdReview = currentArtifactReview(third);
+    assert(thirdReview);
+    const thirdDraft = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: review.id,
+      roundId: thirdReview.currentRoundId,
+      identityId: "human",
+      expectedRevision: 1,
+      draft: { vote: "approve", comments: [] }
+    });
+    await submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: thirdReview.currentRoundId,
+      identityId: "human",
+      expectedRevision: thirdDraft.round.revision
+    });
+    const approved = await submitArtifactReviewRunnerVote({
+      runsRoot,
+      reviewId: review.id,
+      roundId: thirdReview.currentRoundId,
+      vote: "approve"
+    });
+    assert.equal(approved.review.status, "passed");
+    assert.equal(approved.run.events.length, 1);
+    assert.equal(approved.run.events[0].artifact.path?.includes(thirdReview.submissions[2].id), true);
+    assert.equal(currentStep(approved.run)?.id, "flow[2]");
+    const waitedAfterVote = await waitForArtifactReview({ runsRoot, reviewId: review.id, pollIntervalMs: 0 });
+    assert.equal(waitedAfterVote.review.status, "passed");
+    assert.equal(waitedAfterVote.round.id, thirdReview.currentRoundId);
   });
 });

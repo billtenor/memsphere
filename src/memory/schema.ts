@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requireDecisionPolicyDefinition } from "../control-plane/catalog.js";
 import type { MemoryKind } from "./kinds.js";
 import {
   builtInArtifactFormats,
@@ -632,6 +633,17 @@ const permissionGrantsInputSchema = z.record(uniqueNonEmptyStringArray).superRef
   }
 });
 
+const decisionPolicyIdSchema = nonEmptyString.superRefine((value, context) => {
+  try {
+    requireDecisionPolicyDefinition(value);
+  } catch {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Unknown Decision Policy id: ${value}`
+    });
+  }
+});
+
 export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> = z.unknown().transform((value, context) => {
   const source = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -640,10 +652,12 @@ export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> 
   if (source) {
     delete (baseInput as Record<string, unknown>).role_bindings;
     delete (baseInput as Record<string, unknown>).permission_grants;
+    delete (baseInput as Record<string, unknown>).review;
   }
   const base = legacyArtifactNodeSchema.safeParse(baseInput);
   const roleBindings = roleBindingsInputSchema.optional().safeParse(source?.role_bindings);
   const permissionGrants = permissionGrantsInputSchema.optional().safeParse(source?.permission_grants);
+  const review = decisionPolicyIdSchema.optional().safeParse(source?.review);
   if (!base.success) {
     for (const issue of base.error.issues) context.addIssue(issue);
   }
@@ -653,9 +667,13 @@ export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> 
   if (!permissionGrants.success) {
     for (const issue of permissionGrants.error.issues) context.addIssue({ ...issue, path: ["permission_grants", ...issue.path] });
   }
-  if (!base.success || !roleBindings.success || !permissionGrants.success) return z.NEVER;
+  if (!review.success) {
+    for (const issue of review.error.issues) context.addIssue({ ...issue, path: ["review", ...issue.path] });
+  }
+  if (!base.success || !roleBindings.success || !permissionGrants.success || !review.success) return z.NEVER;
   return {
     ...base.data,
+    ...(review.data ? { review: review.data } : {}),
     ...(roleBindings.data ? { roleBindings: roleBindings.data } : {}),
     ...(permissionGrants.data ? { permissionGrants: permissionGrants.data } : {})
   };

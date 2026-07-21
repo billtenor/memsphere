@@ -20,6 +20,8 @@ import {
   runEnterSchemaCommand,
   runRepeatCommand,
   runReportCommand,
+  runReviewVoteCommand,
+  runReviewWaitCommand,
   runStartCommand,
   runStatusCommand
 } from "./commands/run.js";
@@ -141,7 +143,28 @@ run
   .requiredOption("--run <id>", "run id")
   .option("--artifact <value>", "artifact value")
   .option("--artifact-file <path>", "read artifact value from file")
+  .option("--revision-summary-file <path>", "read the revision summary from file")
   .action(runReportCommand);
+
+const runReview = run
+  .command("review")
+  .description("Wait for and decide an Artifact Review.");
+
+runReview
+  .command("wait")
+  .description("Wait until assigned reviews are submitted or the current round is decided.")
+  .requiredOption("--review <id>", "artifact review id")
+  .action(runReviewWaitCommand);
+
+runReview
+  .command("vote")
+  .description("Cast the Runner decision vote for the current Artifact Review round.")
+  .requiredOption("--review <id>", "artifact review id")
+  .requiredOption("--round <id>", "artifact review round id")
+  .addOption(new Option("--vote <vote>", "Runner vote").choices(["approve", "request_changes"]).makeOptionMandatory())
+  .option("--comment <text>", "Runner decision comment")
+  .option("--comment-file <path>", "read the Runner decision comment from a file")
+  .action(runReviewVoteCommand);
 
 run
   .command("enter-schema")

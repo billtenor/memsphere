@@ -30,15 +30,21 @@ export const browserHtml = String.raw`<!doctype html>
       --danger: #a14436;
       --ok: #23744d;
       --shadow: 0 1px 2px rgba(25, 30, 35, .08);
+      --review-width: 380px;
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     button, input, textarea { font: inherit; }
     button { cursor: pointer; }
-    .shell { display: grid; grid-template-columns: 300px minmax(0, 1fr) 0; min-height: 100vh; transition: grid-template-columns 160ms ease; }
+    .shell { display: grid; grid-template-columns: 300px minmax(0, 1fr) 0 0; min-height: 100vh; transition: grid-template-columns 160ms ease; }
+    body.review-resizing, body.review-resizing * { cursor: col-resize !important; user-select: none !important; }
+    body.review-resizing .shell { transition: none; }
     .sidebar { background: #fbfbf8; border-color: var(--line); overflow: auto; height: 100vh; position: sticky; top: 0; }
     .sidebar { border-right: 1px solid var(--line); padding: 16px; }
     .review { min-width: 0; overflow: hidden; visibility: hidden; pointer-events: none; background: #fbfbf8; border-left: 0; padding: 0; }
+    .review-resizer { display: none; position: relative; min-width: 8px; background: #fbfbf8; cursor: col-resize; touch-action: none; outline: none; }
+    .review-resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--line); transition: background 120ms ease, width 120ms ease; }
+    .review-resizer:hover::before, .review-resizer:focus-visible::before, body.review-resizing .review-resizer::before { width: 2px; background: var(--accent); }
     .brand, .review-head, .toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
     .review-actions { display: flex; gap: 8px; align-items: flex-start; }
     .review-toggle, .review-close { display: inline-flex; }
@@ -230,18 +236,50 @@ export const browserHtml = String.raw`<!doctype html>
       font-weight: 700;
     }
     .review-sub { margin: 4px 0 14px; font-size: 13px; }
+    .artifact-review-stack { display: grid; gap: 10px; }
+    .artifact-review-grid { display: grid; gap: 8px; }
+    .artifact-review-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .artifact-review-row:last-child { border-bottom: 0; }
+    .artifact-review-row-main { min-width: 0; display: grid; gap: 3px; }
+    .artifact-review-controls { display: grid; gap: 8px; }
+    .artifact-review-select { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); padding: 8px 9px; }
+    .artifact-review-round-select { position: relative; min-width: 0; }
+    .artifact-review-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; cursor: pointer; }
+    .artifact-review-select-trigger[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+    .artifact-review-select-caret { color: var(--muted); font-size: 13px; line-height: 1; }
+    .artifact-review-select-menu { position: absolute; top: calc(100% + 4px); right: 0; left: 0; z-index: 30; display: grid; gap: 2px; max-height: 240px; overflow-y: auto; padding: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); box-shadow: 0 10px 28px rgba(25, 30, 35, .16); }
+    .artifact-review-select-menu[hidden] { display: none; }
+    .artifact-review-select-option { width: 100%; border: 0; border-radius: 4px; background: transparent; color: var(--text); padding: 7px 8px; text-align: left; cursor: pointer; }
+    .artifact-review-select-option:hover, .artifact-review-select-option:focus-visible { outline: 0; background: var(--soft); }
+    .artifact-review-select-option[aria-selected="true"] { background: var(--accent-soft); color: #173f3c; }
+    .artifact-review-vote { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    .artifact-review-vote .btn { min-width: 0; padding: 7px 5px; }
+    .artifact-review-vote .btn.active { background: var(--accent-soft); border-color: var(--accent); color: #173f3c; font-weight: 700; }
+    .artifact-review-message { border-left: 3px solid var(--accent); background: #f2f8f6; padding: 8px 10px; color: #315653; }
+    .artifact-review-message.warn { border-left-color: var(--warn); background: #fbf7f0; color: #71471f; }
+    .artifact-review-comment { display: grid; gap: 6px; }
+    .artifact-review-candidate { border-left-color: var(--accent); }
+    .artifact-review-candidate .section-body { display: block; }
+    .artifact-review-progress { font-variant-numeric: tabular-nums; }
+    .artifact-review-id { overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+    dialog.artifact-review-dialog { width: min(460px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 8px; padding: 0; color: var(--text); box-shadow: 0 20px 60px rgba(25, 30, 35, .24); }
+    dialog.artifact-review-dialog::backdrop { background: rgba(22, 28, 30, .34); }
+    .artifact-review-dialog-body { padding: 18px; display: grid; gap: 12px; }
+    .artifact-review-dialog-body h3 { margin: 0; font-size: 18px; }
+    .artifact-review-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
     code { background: var(--soft); border-radius: 4px; padding: 1px 4px; }
     body.task-mode .search, body.task-mode #expand, body.task-mode #collapse { display: none; }
-    body.review-drawer-open .shell { grid-template-columns: 300px minmax(0, 1fr) minmax(300px, 380px); }
-    body.review-drawer-open .review { overflow: auto; visibility: visible; pointer-events: auto; border-left: 1px solid var(--line); padding: 16px; }
+    body.review-drawer-open .shell { grid-template-columns: 300px minmax(0, 1fr) 8px var(--review-width); }
+    body.review-drawer-open .review-resizer { display: block; }
+    body.review-drawer-open .review { overflow: auto; visibility: visible; pointer-events: auto; padding: 16px; }
     @keyframes taskStepSpotlight {
       0% { box-shadow: 0 0 0 5px rgba(40, 108, 103, .24), var(--shadow); }
       100% { box-shadow: var(--shadow); }
     }
     @media (max-width: 1400px) {
-      .shell { grid-template-columns: 280px minmax(0, 1fr) 0; }
-      body.task-mode .shell { grid-template-columns: 280px minmax(0, 1fr) 0; }
-      body.review-drawer-open .shell { grid-template-columns: 280px minmax(0, 1fr) minmax(300px, 380px); }
+      .shell { grid-template-columns: 280px minmax(0, 1fr) 0 0; }
+      body.task-mode .shell { grid-template-columns: 280px minmax(0, 1fr) 0 0; }
+      body.review-drawer-open .shell { grid-template-columns: 280px minmax(0, 1fr) 8px var(--review-width); }
     }
     @media (max-width: 1100px) {
       .flow-head { grid-template-columns: 1fr; gap: 8px; align-items: flex-start; }
@@ -250,9 +288,12 @@ export const browserHtml = String.raw`<!doctype html>
     @media (max-width: 760px) {
       .shell, body.review-drawer-open .shell { grid-template-columns: 1fr; }
       .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .review-resizer, body.review-drawer-open .review-resizer { display: none; }
       .review { grid-column: 1; }
       .content { padding: 18px 16px 36px; }
       .toolbar { flex-direction: column; }
+      body.review-drawer-open .sidebar, body.review-drawer-open .content { display: none; }
+      body.review-drawer-open .review { min-height: 100vh; border-left: 0; }
     }
   </style>
 </head>
@@ -283,6 +324,8 @@ export const browserHtml = String.raw`<!doctype html>
       </div>
       <div id="detail" class="empty">Loading...</div>
     </section>
+
+    <div class="review-resizer" id="review-resizer" role="separator" aria-controls="review-panel" aria-orientation="vertical" aria-valuemin="300" aria-valuenow="380" tabindex="-1"></div>
 
     <aside class="review" id="review-panel" aria-labelledby="review-heading">
       <div class="review-head">
@@ -316,6 +359,9 @@ export const browserHtml = String.raw`<!doctype html>
     const viewModeKey = "memsphere.viewMode.v1";
     const displayLanguageKey = "memsphere.displayLanguage.v1";
     const hideSystemMemoriesKey = "memsphere.hideSystemMemories.v1";
+    const artifactReviewIdentityKey = "memsphere.artifactReviewIdentity.v1";
+    const artifactReviewOpenedKey = "memsphere.artifactReviewOpened.v1";
+    const reviewPanelWidthKey = "memsphere.reviewPanelWidth.v1";
     const displayLanguage = localStorage.getItem(displayLanguageKey) === "yaml" ? "yaml" : "zh";
     const vocabulary = {
       procedures: { zh: "流程", yaml: "procedures" },
@@ -379,7 +425,33 @@ export const browserHtml = String.raw`<!doctype html>
       json: { zh: "JSON", yaml: "json" },
       yaml: { zh: "YAML", yaml: "yaml" },
       legacyReadOnly: { zh: "旧版只读", yaml: "v1 read-only" },
-      validated: { zh: "校验通过", yaml: "validated" }
+      validated: { zh: "校验通过", yaml: "validated" },
+      artifactReview: { zh: "产物评审", yaml: "Artifact Review" },
+      pendingReview: { zh: "待评审", yaml: "Pending review" },
+      reviewedArtifact: { zh: "待评审产物", yaml: "Artifact under review" },
+      identity: { zh: "评审身份", yaml: "Review identity" },
+      decisionVote: { zh: "决策票", yaml: "Decision vote" },
+      advisoryVote: { zh: "建议票", yaml: "Advisory vote" },
+      approve: { zh: "通过", yaml: "Approve" },
+      requestChanges: { zh: "修改", yaml: "Request changes" },
+      abstain: { zh: "弃权", yaml: "Abstain" },
+      submitArtifactReview: { zh: "提交评审", yaml: "Submit review" },
+      participants: { zh: "参与进度", yaml: "Participation" },
+      roundSummary: { zh: "本轮汇总", yaml: "Round summary" },
+      myDraft: { zh: "我的草稿", yaml: "My draft" },
+      submittedOpinions: { zh: "已提交意见", yaml: "Submitted opinions" },
+      automatic: { zh: "自动", yaml: "Automatic" },
+      round: { zh: "轮次", yaml: "Round" },
+      revisionSummary: { zh: "修改摘要", yaml: "Revision summary" },
+      selectIdentity: { zh: "请选择评审身份", yaml: "Select a review identity" },
+      resizeReview: { zh: "调整产物与评审区域宽度", yaml: "Resize artifact and review panels" },
+      resetReviewWidth: { zh: "双击恢复默认宽度", yaml: "Double-click to reset width" },
+      submitted: { zh: "已提交", yaml: "Submitted" },
+      draft: { zh: "草稿", yaml: "Draft" },
+      passed: { zh: "已通过", yaml: "Passed" },
+      changesRequested: { zh: "需修改", yaml: "Changes requested" },
+      awaitingRunnerVote: { zh: "等待 Runner 投票", yaml: "Awaiting Runner vote" },
+      pendingVote: { zh: "待投票", yaml: "Pending vote" }
     };
     const state = {
       viewMode: localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
@@ -395,9 +467,19 @@ export const browserHtml = String.raw`<!doctype html>
       byName: new Map(),
       reviews: [],
       runs: [],
+      artifactReviewContext: null,
+      artifactReviewLoading: false,
+      artifactReviewSaving: false,
+      artifactReviewRequest: 0,
+      artifactReviewConflict: "",
+      taskPollingRenderPending: false,
+      artifactReviewHistoryRoundId: null,
+      artifactReviewIdentityByReview: readStoredObject(artifactReviewIdentityKey),
+      artifactReviewOpenedRounds: readStoredObject(artifactReviewOpenedKey),
       reviewSnapshots: new Map(),
       loadingSnapshots: new Set(),
       reviewDrawerOpen: false,
+      reviewPanelWidth: Number.parseFloat(localStorage.getItem(reviewPanelWidthKey) || "") || 380,
       renderLine: 0
     };
 
@@ -416,9 +498,13 @@ export const browserHtml = String.raw`<!doctype html>
       comments: document.getElementById("comments"),
       commentSummary: document.getElementById("comment-summary"),
       submitReview: document.getElementById("submit-review"),
+      reviewHeading: document.getElementById("review-heading"),
       reviewLabel: document.getElementById("review-label"),
       createReview: document.getElementById("create-review"),
       reviewPanel: document.getElementById("review-panel"),
+      reviewResizer: document.getElementById("review-resizer"),
+      shell: document.querySelector(".shell"),
+      sidebar: document.querySelector(".sidebar"),
       reviewToggle: document.getElementById("review-toggle"),
       reviewClose: document.getElementById("review-close"),
       memoryTab: document.getElementById("memory-tab"),
@@ -431,6 +517,11 @@ export const browserHtml = String.raw`<!doctype html>
     el.createReview.addEventListener("click", () => runButtonAction(el.createReview, createReview));
     el.reviewToggle.addEventListener("click", () => setReviewDrawer(!state.reviewDrawerOpen));
     el.reviewClose.addEventListener("click", () => setReviewDrawer(false));
+    el.reviewResizer.addEventListener("pointerdown", beginReviewResize);
+    el.reviewResizer.addEventListener("keydown", resizeReviewWithKeyboard);
+    el.reviewResizer.addEventListener("dblclick", () => setReviewPanelWidth(380, true));
+    el.reviewResizer.setAttribute("aria-label", t("resizeReview"));
+    el.reviewResizer.title = t("resizeReview") + " · " + t("resetReviewWidth");
     el.memoryTab.addEventListener("click", () => setViewMode("memory"));
     el.taskTab.addEventListener("click", () => setViewMode("task"));
     el.submitReview.addEventListener("click", () => runButtonAction(el.submitReview, submitReview));
@@ -441,13 +532,25 @@ export const browserHtml = String.raw`<!doctype html>
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && state.reviewDrawerOpen) setReviewDrawer(false);
     });
+    document.addEventListener("focusout", () => {
+      setTimeout(() => {
+        if (!state.taskPollingRenderPending || hasActiveTaskInteraction()) return;
+        state.taskPollingRenderPending = false;
+        renderAll();
+      }, 0);
+    });
     window.addEventListener("resize", () => syncReviewDrawer());
 
     loadAll().catch(renderFatalError);
     setInterval(() => {
-      if (state.viewMode === "task" && !hasOpenInlineEditor()) {
+      if (state.viewMode === "task" && !hasActiveTaskInteraction()) {
         loadRuns().then(() => {
-          if (!hasOpenInlineEditor()) renderAll();
+          if (hasActiveTaskInteraction()) {
+            state.taskPollingRenderPending = true;
+            return;
+          }
+          state.taskPollingRenderPending = false;
+          renderAll();
         }).catch(console.error);
       }
     }, 4000);
@@ -538,11 +641,69 @@ export const browserHtml = String.raw`<!doctype html>
         state.selectedTaskId = state.runs[0]?.id || null;
         saveSelectedTask();
       }
+      await syncArtifactReviewContext();
+    }
+
+    async function syncArtifactReviewContext(force = false) {
+      if (state.viewMode !== "task") return;
+      const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
+      const review = run?.artifactReview;
+      if (!review?.round) {
+        state.artifactReviewContext = null;
+        state.artifactReviewConflict = "";
+        return;
+      }
+      const assignments = review.round.assignments || [];
+      let identityId = state.artifactReviewIdentityByReview[review.id] || "";
+      if (!assignments.some(assignment => assignment.identityId === identityId)) {
+        identityId = assignments.length === 1 ? assignments[0].identityId : "";
+      }
+      if (identityId) {
+        state.artifactReviewIdentityByReview[review.id] = identityId;
+        writeStoredObject(artifactReviewIdentityKey, state.artifactReviewIdentityByReview);
+      }
+      if (identityId && (force || !hasOpenInlineEditor())) {
+        await loadArtifactReviewContext(review.id, review.currentRoundId, identityId);
+      } else if (!identityId) {
+        state.artifactReviewContext = null;
+      }
+      if (!state.artifactReviewOpenedRounds[review.currentRoundId]) {
+        state.reviewDrawerOpen = true;
+        state.artifactReviewOpenedRounds[review.currentRoundId] = true;
+        writeStoredObject(artifactReviewOpenedKey, state.artifactReviewOpenedRounds);
+      }
+    }
+
+    async function loadArtifactReviewContext(reviewId, roundId, identityId) {
+      const requestId = ++state.artifactReviewRequest;
+      state.artifactReviewLoading = true;
+      try {
+        const response = await fetch(
+          "/api/artifact-reviews/" + encodeURIComponent(reviewId)
+          + "/rounds/" + encodeURIComponent(roundId)
+          + "?identity_id=" + encodeURIComponent(identityId)
+        );
+        if (!response.ok) throw new Error(await response.text());
+        const context = await response.json();
+        if (requestId !== state.artifactReviewRequest) return;
+        const previousRoundId = state.artifactReviewContext?.review?.currentRoundId;
+        if (previousRoundId && previousRoundId !== context.review?.currentRoundId) {
+          state.artifactReviewHistoryRoundId = null;
+        }
+        state.artifactReviewContext = context;
+        state.artifactReviewConflict = "";
+      } finally {
+        if (requestId === state.artifactReviewRequest) state.artifactReviewLoading = false;
+      }
     }
 
     function renderAll() {
       document.body.classList.toggle("task-mode", state.viewMode === "task");
       document.body.classList.toggle("review-active", canComment());
+      const artifactReview = activeArtifactReviewSummary();
+      el.reviewToggle.textContent = artifactReview?.round
+        ? t("artifactReview") + " " + artifactReview.round.submitted + "/" + artifactReview.round.total
+        : "Review";
       syncReviewDrawer();
       el.memoryTab.classList.toggle("active", state.viewMode === "memory");
       el.taskTab.classList.toggle("active", state.viewMode === "task");
@@ -558,18 +719,89 @@ export const browserHtml = String.raw`<!doctype html>
       renderReview();
     }
 
-    function setViewMode(mode) {
+    async function setViewMode(mode) {
       state.viewMode = mode;
       localStorage.setItem(viewModeKey, mode);
       ensureSelectedReview();
       renderAll();
+      if (mode === "task") {
+        await syncArtifactReviewContext();
+        renderAll();
+      }
     }
 
     function syncReviewDrawer() {
       const open = state.reviewDrawerOpen;
+      const resizable = open && window.innerWidth > 760;
       document.body.classList.toggle("review-drawer-open", open);
       el.reviewToggle.setAttribute("aria-expanded", String(open));
       el.reviewPanel.setAttribute("aria-hidden", String(!open));
+      el.reviewResizer.tabIndex = resizable ? 0 : -1;
+      el.reviewResizer.setAttribute("aria-hidden", String(!resizable));
+      applyReviewPanelWidth(state.reviewPanelWidth);
+    }
+
+    function reviewPanelWidthBounds() {
+      const shellWidth = el.shell.getBoundingClientRect().width || window.innerWidth;
+      const sidebarWidth = window.innerWidth > 760 ? el.sidebar.getBoundingClientRect().width : 0;
+      const min = 300;
+      const max = Math.max(min, Math.floor(shellWidth - sidebarWidth - 360 - 8));
+      return { min, max };
+    }
+
+    function applyReviewPanelWidth(width) {
+      const bounds = reviewPanelWidthBounds();
+      const numericWidth = Number.isFinite(width) ? width : 380;
+      const clamped = Math.round(Math.min(bounds.max, Math.max(bounds.min, numericWidth)));
+      document.documentElement.style.setProperty("--review-width", clamped + "px");
+      el.reviewResizer.setAttribute("aria-valuemin", String(bounds.min));
+      el.reviewResizer.setAttribute("aria-valuemax", String(bounds.max));
+      el.reviewResizer.setAttribute("aria-valuenow", String(clamped));
+      el.reviewResizer.setAttribute("aria-valuetext", clamped + "px");
+      return clamped;
+    }
+
+    function setReviewPanelWidth(width, persist) {
+      const clamped = applyReviewPanelWidth(width);
+      state.reviewPanelWidth = clamped;
+      if (persist) localStorage.setItem(reviewPanelWidthKey, String(clamped));
+    }
+
+    function beginReviewResize(event) {
+      if (!state.reviewDrawerOpen || window.innerWidth <= 760 || event.button !== 0) return;
+      event.preventDefault();
+      const pointerId = event.pointerId;
+      const shellRight = el.shell.getBoundingClientRect().right;
+      document.body.classList.add("review-resizing");
+      el.reviewResizer.setPointerCapture(pointerId);
+      const move = moveEvent => {
+        setReviewPanelWidth(shellRight - moveEvent.clientX - 4, false);
+      };
+      const finish = finishEvent => {
+        if (el.reviewResizer.hasPointerCapture(pointerId)) el.reviewResizer.releasePointerCapture(pointerId);
+        el.reviewResizer.removeEventListener("pointermove", move);
+        el.reviewResizer.removeEventListener("pointerup", finish);
+        el.reviewResizer.removeEventListener("pointercancel", finish);
+        document.body.classList.remove("review-resizing");
+        setReviewPanelWidth(state.reviewPanelWidth, true);
+      };
+      el.reviewResizer.addEventListener("pointermove", move);
+      el.reviewResizer.addEventListener("pointerup", finish);
+      el.reviewResizer.addEventListener("pointercancel", finish);
+      move(event);
+    }
+
+    function resizeReviewWithKeyboard(event) {
+      const bounds = reviewPanelWidthBounds();
+      const step = event.shiftKey ? 64 : 24;
+      let width = Number(el.reviewResizer.getAttribute("aria-valuenow")) || state.reviewPanelWidth;
+      if (event.key === "ArrowLeft") width += step;
+      else if (event.key === "ArrowRight") width -= step;
+      else if (event.key === "Home") width = bounds.min;
+      else if (event.key === "End") width = bounds.max;
+      else return;
+      event.preventDefault();
+      setReviewPanelWidth(width, true);
     }
 
     function setReviewDrawer(open) {
@@ -739,13 +971,22 @@ export const browserHtml = String.raw`<!doctype html>
           const meta = document.createElement("span");
           meta.className = "muted";
           meta.textContent = shortRunId(run.id) + " · " + run.events.length + " artifact(s)";
+          if (run.artifactReview?.round) {
+            meta.append(
+              " · ",
+              t("pendingReview") + " " + run.artifactReview.round.submitted + "/" + run.artifactReview.round.total
+            );
+          }
           button.append(title, meta);
-          button.addEventListener("click", () => {
+          button.addEventListener("click", async () => {
             const changedTask = state.selectedTaskId !== run.id;
             state.selectedTaskId = run.id;
             saveSelectedTask();
+            if (changedTask) state.artifactReviewContext = null;
             renderAll();
             if (changedTask) scrollTaskDetailToTop();
+            await syncArtifactReviewContext();
+            renderAll();
           });
           card.append(button, archiveRunButton(run, "task-card-archive"));
           list.append(card);
@@ -756,7 +997,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function selectedTask() {
       const snapshot = currentReviewSnapshot("task");
-      if (snapshot?.run) return snapshot.run;
+      if (snapshot?.run && !activeArtifactReviewSummary()) return snapshot.run;
       return state.runs.find(run => run.id === state.selectedTaskId) || state.runs[0] || null;
     }
 
@@ -806,6 +1047,14 @@ export const browserHtml = String.raw`<!doctype html>
       meta.append(pill(run.stack.length + " active frame(s)"));
       meta.append(pill(run.events.length + " artifact(s)"));
       meta.append(pill("updated " + formatTime(run.updatedAt)));
+      if (run.artifactReview?.round) {
+        const reviewStatus = artifactReviewRoundStatusLabel(run.artifactReview.round.status);
+        meta.append(pill(
+          reviewStatus + " " + run.artifactReview.round.submitted + "/" + run.artifactReview.round.total,
+          false,
+          run.artifactReview.status === "awaiting_revision" ? "warn" : "processing"
+        ));
+      }
       const activeStep = currentRunStep(run);
       if (activeStep && run.plan && run.plan.length) meta.append(currentStepJumpButton(run));
       const review = selectedReview();
@@ -1079,23 +1328,42 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderTaskStepResult(step, event, run) {
-      if (!shouldRenderTaskStepArtifact(event)) return null;
+      const reviewContext = artifactReviewContextForStep(run, step);
+      if (!shouldRenderTaskStepArtifact(event) && !reviewContext) return null;
       const box = document.createElement("div");
       box.className = "task-result";
       const title = document.createElement("div");
       title.className = "block-title";
-      title.textContent = t("artifactContent");
-      const artifactValue = artifactDisplayValue(event.artifact);
-      const artifactContent = renderArtifactValue(event.artifact);
+      title.textContent = reviewContext ? t("reviewedArtifact") : t("artifactContent");
+      const artifact = reviewContext ? reviewContext.submission.artifact : event.artifact;
+      const artifactValue = artifactDisplayValue(artifact);
+      const artifactContent = renderArtifactValue(artifact);
       const value = commentable(
         artifactContent,
-        event.artifact.name,
+        artifact.name,
         artifactValue,
-        taskAnchor(run, step, "artifact"),
-        { run, step, event, commentKind: "artifact" }
+        taskAnchor(run, step, reviewContext ? "artifact-review" : "artifact"),
+        { run, step, event, artifactReview: reviewContext, commentKind: "artifact" }
       );
+      if (reviewContext) {
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.append(pill(
+          artifactReviewRoundStatusLabel(reviewContext.review.round.status),
+          false,
+          reviewContext.review.status === "awaiting_revision" ? "warn" : "processing"
+        ));
+        meta.append(pill(t("round") + " " + reviewContext.review.round.sequence));
+        box.append(meta);
+      }
       box.append(title, value);
       return box;
+    }
+
+    function artifactReviewContextForStep(run, step) {
+      const context = state.artifactReviewContext;
+      if (!context || context.review?.id !== run.artifactReview?.id) return null;
+      return run.artifactReview && step.id === currentRunStep(run)?.id ? context : null;
     }
 
     function taskAnchor(run, step, part) {
@@ -1193,6 +1461,16 @@ export const browserHtml = String.raw`<!doctype html>
       return filteredReviews().find(review => review.id === state.selectedReviewId) || null;
     }
 
+    function activeArtifactReviewSummary() {
+      if (state.viewMode !== "task") return null;
+      const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
+      return run?.artifactReview || null;
+    }
+
+    function isArtifactReviewMode() {
+      return Boolean(activeArtifactReviewSummary());
+    }
+
     function filteredReviews() {
       const subject = reviewListSubject();
       if (!subject) return [];
@@ -1267,6 +1545,15 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function canComment() {
+      if (isArtifactReviewMode()) {
+        const context = state.artifactReviewContext;
+        return Boolean(
+          context
+          && context.review?.status === "pending"
+          && context.assignment?.status === "draft"
+          && !state.artifactReviewConflict
+        );
+      }
       const status = selectedReview()?.status;
       return status === "draft" || status === "submitted";
     }
@@ -2248,6 +2535,13 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function commentsForAnchor(anchor, snapshot, legacyAnchor = "") {
+      if (isArtifactReviewMode()) {
+        return artifactReviewVisibleComments().filter(comment => {
+          const candidate = comment.anchor;
+          if (!candidate || candidate.sourceHash !== state.artifactReviewContext?.submission?.digest) return false;
+          return candidate.location === anchor || candidate.target === anchor || (legacyAnchor && candidate.location === legacyAnchor);
+        });
+      }
       const review = selectedReview();
       const subject = currentReviewSubject();
       if (!review || !subject) return [];
@@ -2277,7 +2571,7 @@ export const browserHtml = String.raw`<!doctype html>
         note.className = "inline-thread-note";
         note.textContent = comment.body;
         view.append(note);
-        if (canComment()) {
+        if (canComment() && (!isArtifactReviewMode() || comment._mineDraft)) {
           const actions = document.createElement("div");
           actions.className = "comment-actions";
           const edit = document.createElement("button");
@@ -2354,7 +2648,15 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function hasOpenInlineEditor() {
-      return Boolean(document.querySelector(".inline-comment-editor"));
+      if (document.querySelector(".inline-comment-editor")) return true;
+      const composer = document.querySelector(".artifact-review-comment textarea");
+      return Boolean(composer && (composer === document.activeElement || composer.value));
+    }
+
+    function hasActiveTaskInteraction() {
+      if (hasOpenInlineEditor()) return true;
+      if (document.querySelector(".artifact-review-select-menu:not([hidden])")) return true;
+      return Boolean(document.activeElement?.matches?.(".artifact-review-select"));
     }
 
     function setAllSections(open) {
@@ -2389,6 +2691,25 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function addComment(target, snapshot, body, location, context = {}) {
+      if (isArtifactReviewMode()) {
+        const reviewContext = state.artifactReviewContext;
+        if (!reviewContext || !canComment()) return;
+        const comment = {
+          id: uuid(),
+          body,
+          anchor: {
+            target: String(target || "").trim(),
+            location: String(location?.anchor || ""),
+            sourceHash: reviewContext.submission.digest
+          },
+          _mineDraft: true
+        };
+        await saveArtifactReviewDraft({
+          ...reviewContext.assignment.draft,
+          comments: reviewContext.assignment.draft.comments.concat(comment)
+        });
+        return comment;
+      }
       const review = selectedReview();
       const subject = currentReviewSubject();
       if (!subject || !review || !canComment()) return;
@@ -2414,6 +2735,15 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function removeComment(id) {
+      if (isArtifactReviewMode()) {
+        const context = state.artifactReviewContext;
+        if (!context || !canComment()) return;
+        await saveArtifactReviewDraft({
+          ...context.assignment.draft,
+          comments: context.assignment.draft.comments.filter(comment => comment.id !== id)
+        });
+        return;
+      }
       const review = selectedReview();
       if (!review || !canComment()) return;
       await patchReview(review.id, { comments: review.comments.filter(comment => comment.id !== id) });
@@ -2463,6 +2793,15 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function updateComment(id, body) {
+      if (isArtifactReviewMode()) {
+        const context = state.artifactReviewContext;
+        if (!context || !canComment()) return;
+        await saveArtifactReviewDraft({
+          ...context.assignment.draft,
+          comments: context.assignment.draft.comments.map(comment => comment.id === id ? { ...comment, body } : comment)
+        });
+        return;
+      }
       const review = selectedReview();
       if (!review || !canComment()) return;
       await patchReview(review.id, {
@@ -2471,9 +2810,160 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function submitReview() {
+      if (isArtifactReviewMode()) {
+        await submitArtifactReview();
+        return;
+      }
       const review = selectedReview();
       if (!review || review.status !== "draft" || !review.comments.length) return;
       await patchReview(review.id, { status: "submitted" });
+    }
+
+    function artifactReviewVisibleComments() {
+      const context = state.artifactReviewContext;
+      if (!context) return [];
+      const comments = (context.assignment?.draft?.comments || []).map(comment => ({ ...comment, _mineDraft: true }));
+      const selectedRoundId = state.artifactReviewHistoryRoundId || context.review.currentRoundId;
+      const selectedRounds = (context.rounds || []).filter(round => round.id === selectedRoundId);
+      for (const round of selectedRounds) {
+        for (const assignment of round.assignments || []) {
+          for (const comment of assignment.submitted?.comments || []) {
+            comments.push({
+              ...comment,
+              _mineDraft: false,
+              _identityName: assignment.identityName,
+              _binding: assignment.binding,
+              _round: round.sequence
+            });
+          }
+        }
+      }
+      return comments;
+    }
+
+    async function saveArtifactReviewDraft(draft) {
+      const context = state.artifactReviewContext;
+      if (!context || context.assignment.status !== "draft" || state.artifactReviewSaving) return;
+      state.artifactReviewSaving = true;
+      setArtifactReviewControlsBusy(true);
+      try {
+        const response = await fetch(artifactReviewAssignmentUrl(context, "draft"), {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            expectedRevision: context.review.round.revision,
+            vote: draft.vote,
+            comments: (draft.comments || []).map(comment => ({
+              id: comment.id,
+              body: comment.body,
+              anchor: comment.anchor
+            }))
+          })
+        });
+        if (response.status === 409) {
+          state.artifactReviewConflict = t("round") + " " + t("changesRequested") + ": " + response.statusText;
+          throw new Error(t("round") + " revision conflict; your text is still in this page");
+        }
+        if (!response.ok) throw new Error(await response.text());
+        state.artifactReviewContext = await response.json();
+        state.artifactReviewConflict = "";
+      } finally {
+        state.artifactReviewSaving = false;
+        renderAll();
+      }
+    }
+
+    function setArtifactReviewControlsBusy(busy) {
+      for (const control of el.reviewPanel.querySelectorAll(".artifact-review-vote button, .artifact-review-comment button, .artifact-review-select, #submit-review")) {
+        control.disabled = busy;
+      }
+    }
+
+    function artifactReviewAssignmentUrl(context, operation) {
+      return "/api/artifact-reviews/" + encodeURIComponent(context.review.id)
+        + "/rounds/" + encodeURIComponent(context.review.currentRoundId)
+        + "/assignments/" + encodeURIComponent(context.assignment.identityId)
+        + "/" + operation;
+    }
+
+    function artifactReviewSubmitDisabledReason() {
+      const context = state.artifactReviewContext;
+      if (!context) return t("selectIdentity");
+      if (state.artifactReviewSaving) return displayLanguage === "zh" ? "正在保存评审草稿" : "Saving review draft";
+      if (state.artifactReviewConflict) return state.artifactReviewConflict;
+      if (context.review.status !== "pending") return t("round") + " " + context.review.status;
+      if (context.assignment.status === "submitted") return t("submitted");
+      const vote = context.assignment.draft.vote;
+      if (!vote) return displayLanguage === "zh" ? "请先选择投票结果" : "Select a vote first";
+      if (vote === "request_changes" && !(context.assignment.draft.comments || []).length) {
+        return displayLanguage === "zh" ? "选择修改时，至少需要一条意见" : "Requesting changes requires at least one comment";
+      }
+      return "";
+    }
+
+    async function submitArtifactReview() {
+      const context = state.artifactReviewContext;
+      const disabledReason = artifactReviewSubmitDisabledReason();
+      if (!context || disabledReason) return;
+      const confirmed = await confirmArtifactReviewSubmit(context);
+      if (!confirmed) return;
+      const response = await fetch(artifactReviewAssignmentUrl(context, "submit"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ expectedRevision: context.review.round.revision })
+      });
+      if (response.status === 409) {
+        state.artifactReviewConflict = displayLanguage === "zh"
+          ? "评审轮次已更新；当前页面中的未提交文本仍然保留，请刷新本轮后再操作。"
+          : "The review round changed. Your local text is preserved; refresh before submitting.";
+        renderAll();
+        return;
+      }
+      if (!response.ok) throw new Error(await response.text());
+      state.artifactReviewContext = await response.json();
+      await loadRuns();
+      renderAll();
+    }
+
+    function confirmArtifactReviewSubmit(context) {
+      return new Promise(resolve => {
+        const dialog = document.createElement("dialog");
+        dialog.className = "artifact-review-dialog";
+        const body = document.createElement("div");
+        body.className = "artifact-review-dialog-body";
+        const title = document.createElement("h3");
+        title.textContent = t("submitArtifactReview");
+        const summary = document.createElement("div");
+        const vote = artifactReviewVoteLabel(context.assignment.draft.vote, context.assignment.binding);
+        summary.textContent = context.assignment.identityName + " · "
+          + t("round") + " " + context.review.round.sequence + " · "
+          + (context.assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote")) + " · "
+          + vote + " · " + context.assignment.draft.comments.length + " comment(s)";
+        const warning = document.createElement("div");
+        warning.className = "artifact-review-message warn";
+        warning.textContent = displayLanguage === "zh" ? "提交后，本轮评审不可修改。" : "This round cannot be edited after submission.";
+        const actions = document.createElement("div");
+        actions.className = "artifact-review-dialog-actions";
+        const cancel = document.createElement("button");
+        cancel.className = "btn";
+        cancel.textContent = displayLanguage === "zh" ? "取消" : "Cancel";
+        const confirmButton = document.createElement("button");
+        confirmButton.className = "btn primary";
+        confirmButton.textContent = t("submitArtifactReview");
+        cancel.addEventListener("click", () => dialog.close("cancel"));
+        confirmButton.addEventListener("click", () => dialog.close("confirm"));
+        dialog.addEventListener("close", () => {
+          const confirmed = dialog.returnValue === "confirm";
+          dialog.remove();
+          resolve(confirmed);
+        });
+        actions.append(cancel, confirmButton);
+        body.append(title, summary, warning, actions);
+        dialog.append(body);
+        document.body.append(dialog);
+        dialog.showModal();
+        cancel.focus();
+      });
     }
 
     async function patchReview(id, patch) {
@@ -2499,7 +2989,14 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderReview() {
+      if (isArtifactReviewMode()) {
+        renderArtifactReviewPanel();
+        return;
+      }
       const review = selectedReview();
+      el.reviewHeading.textContent = "Review";
+      el.createReview.hidden = false;
+      el.submitReview.hidden = false;
       const canCreate = canCreateReview();
       el.createReview.disabled = !canCreate;
       el.createReview.title = canCreate ? "Create Review" : reviewCreationDisabledReason();
@@ -2568,7 +3065,427 @@ export const browserHtml = String.raw`<!doctype html>
       }
     }
 
+    function renderArtifactReviewPanel() {
+      const review = activeArtifactReviewSummary();
+      const context = state.artifactReviewContext;
+      el.reviewHeading.textContent = t("artifactReview");
+      el.createReview.hidden = true;
+      el.submitReview.hidden = false;
+      el.reviews.innerHTML = "";
+      el.comments.innerHTML = "";
+      if (!review?.round) {
+        el.reviewLabel.textContent = "";
+        el.commentSummary.textContent = "";
+        el.submitReview.disabled = true;
+        return;
+      }
+
+      el.reviewLabel.textContent = review.artifactName + " · " + t("round") + " " + review.round.sequence;
+      const controls = document.createElement("section");
+      controls.className = "panel artifact-review-stack";
+      const identityLabel = blockTitle(t("identity"));
+      const identitySelect = document.createElement("select");
+      identitySelect.className = "artifact-review-select";
+      identitySelect.setAttribute("aria-label", t("identity"));
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = t("selectIdentity");
+      identitySelect.append(placeholder);
+      for (const assignment of review.round.assignments || []) {
+        const option = document.createElement("option");
+        option.value = assignment.identityId;
+        option.textContent = assignment.identityName + " · "
+          + (assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote"));
+        identitySelect.append(option);
+      }
+      identitySelect.value = context?.assignment?.identityId || state.artifactReviewIdentityByReview[review.id] || "";
+      identitySelect.disabled = state.artifactReviewSaving;
+      identitySelect.addEventListener("change", async () => {
+        const identityId = identitySelect.value;
+        if (!identityId) {
+          delete state.artifactReviewIdentityByReview[review.id];
+          state.artifactReviewContext = null;
+          writeStoredObject(artifactReviewIdentityKey, state.artifactReviewIdentityByReview);
+          renderAll();
+          return;
+        }
+        state.artifactReviewIdentityByReview[review.id] = identityId;
+        writeStoredObject(artifactReviewIdentityKey, state.artifactReviewIdentityByReview);
+        await loadArtifactReviewContext(review.id, review.currentRoundId, identityId);
+        renderAll();
+      });
+      controls.append(identityLabel, identitySelect);
+
+      if (context) {
+        const role = document.createElement("div");
+        role.className = "meta";
+        role.style.margin = "0";
+        role.append(pill(
+          context.assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote"),
+          false,
+          context.assignment.binding === "decision" ? "strong" : "warn"
+        ));
+        controls.append(role);
+      }
+
+      controls.append(blockTitle(t("participants")), renderArtifactReviewProgress(review, context));
+      if (context?.rounds?.length > 1) controls.append(renderArtifactReviewHistorySelector(context));
+      el.reviews.append(controls);
+
+      if (state.artifactReviewLoading) {
+        const loading = document.createElement("div");
+        loading.className = "muted";
+        loading.textContent = "Loading...";
+        el.comments.append(loading);
+      } else if (!context) {
+        const empty = document.createElement("div");
+        empty.className = "artifact-review-message";
+        empty.textContent = t("selectIdentity");
+        el.comments.append(empty);
+      } else {
+        renderArtifactReviewWorkspace(context);
+      }
+
+      const disabledReason = artifactReviewSubmitDisabledReason();
+      el.submitReview.textContent = context?.assignment?.status === "submitted" ? t("submitted") : t("submitArtifactReview");
+      el.submitReview.disabled = Boolean(disabledReason);
+      el.submitReview.title = disabledReason;
+      el.commentSummary.textContent = context
+        ? context.assignment.identityName + " · " + context.review.id
+        : review.id;
+    }
+
+    function renderArtifactReviewProgress(review, context) {
+      const list = document.createElement("div");
+      list.className = "artifact-review-grid";
+      const currentRound = context?.rounds?.find(round => round.id === review.currentRoundId);
+      for (const assignment of review.round.assignments || []) {
+        const submitted = currentRound?.assignments?.find(item => item.identityId === assignment.identityId)?.submitted;
+        const row = document.createElement("div");
+        row.className = "artifact-review-row";
+        const main = document.createElement("div");
+        main.className = "artifact-review-row-main";
+        const name = document.createElement("span");
+        name.textContent = assignment.identityName;
+        const type = document.createElement("span");
+        type.className = "muted";
+        type.textContent = assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote");
+        main.append(name, type);
+        const status = document.createElement("span");
+        status.className = "artifact-review-progress";
+        status.textContent = submitted
+          ? artifactReviewVoteLabel(submitted.vote, assignment.binding)
+          : assignment.status === "submitted" ? t("submitted") : t("draft");
+        row.append(main, status);
+        list.append(row);
+      }
+      if (review.round.runner) {
+        const row = document.createElement("div");
+        row.className = "artifact-review-row";
+        const main = document.createElement("div");
+        main.className = "artifact-review-row-main";
+        const name = document.createElement("span");
+        name.textContent = "Runner" + (review.round.runner.automatic ? " · " + t("automatic") : "");
+        const type = document.createElement("span");
+        type.className = "muted";
+        type.textContent = t("decisionVote");
+        main.append(name, type);
+        const status = document.createElement("span");
+        status.className = "artifact-review-progress";
+        status.textContent = review.round.runner.status === "submitted"
+          ? artifactReviewVoteLabel(review.round.runner.vote, "decision")
+          : t("pendingVote");
+        row.append(main, status);
+        list.append(row);
+      }
+      return list;
+    }
+
+    function renderArtifactReviewHistorySelector(context) {
+      const wrap = document.createElement("div");
+      wrap.className = "artifact-review-controls";
+      wrap.append(blockTitle(t("round")));
+      const currentId = state.artifactReviewHistoryRoundId || context.review.currentRoundId;
+      const selectedId = context.rounds.some(round => round.id === currentId)
+        ? currentId
+        : context.review.currentRoundId;
+      const selectedRound = context.rounds.find(round => round.id === selectedId);
+      const chooser = document.createElement("div");
+      chooser.className = "artifact-review-round-select";
+      const trigger = document.createElement("button");
+      trigger.type = "button";
+      trigger.className = "artifact-review-select artifact-review-select-trigger";
+      trigger.setAttribute("aria-label", t("round"));
+      trigger.setAttribute("aria-haspopup", "listbox");
+      trigger.setAttribute("aria-expanded", "false");
+      const triggerText = document.createElement("span");
+      triggerText.textContent = selectedRound
+        ? t("round") + " " + selectedRound.sequence + " · " + artifactReviewRoundStatusLabel(selectedRound.status)
+        : t("round");
+      const caret = document.createElement("span");
+      caret.className = "artifact-review-select-caret";
+      caret.setAttribute("aria-hidden", "true");
+      caret.textContent = "⌄";
+      trigger.append(triggerText, caret);
+      const menu = document.createElement("div");
+      menu.className = "artifact-review-select-menu";
+      menu.setAttribute("role", "listbox");
+      menu.setAttribute("aria-label", t("round"));
+      menu.hidden = true;
+
+      const setOpen = open => {
+        menu.hidden = !open;
+        trigger.setAttribute("aria-expanded", String(open));
+      };
+      const focusOption = offset => {
+        const options = [...menu.querySelectorAll(".artifact-review-select-option")];
+        if (!options.length) return;
+        const focusedIndex = options.indexOf(document.activeElement);
+        const selectedIndex = options.findIndex(option => option.getAttribute("aria-selected") === "true");
+        const start = focusedIndex >= 0 ? focusedIndex : selectedIndex >= 0 ? selectedIndex : 0;
+        options[(start + offset + options.length) % options.length].focus();
+      };
+      for (const round of context.rounds) {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "artifact-review-select-option";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", String(round.id === selectedId));
+        option.dataset.roundId = round.id;
+        option.textContent = t("round") + " " + round.sequence + " · " + artifactReviewRoundStatusLabel(round.status);
+        option.addEventListener("click", () => {
+          state.artifactReviewHistoryRoundId = round.id;
+          setOpen(false);
+          renderAll();
+        });
+        menu.append(option);
+      }
+      trigger.addEventListener("click", () => {
+        setOpen(menu.hidden);
+      });
+      trigger.addEventListener("keydown", event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          setOpen(true);
+          focusOption(event.key === "ArrowDown" ? 1 : -1);
+        } else if (event.key === "Escape") {
+          event.stopPropagation();
+          setOpen(false);
+        }
+      });
+      menu.addEventListener("keydown", event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          focusOption(event.key === "ArrowDown" ? 1 : -1);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+          trigger.focus();
+        }
+      });
+      chooser.addEventListener("focusout", () => {
+        setTimeout(() => {
+          if (!chooser.contains(document.activeElement)) setOpen(false);
+        }, 0);
+      });
+      trigger.addEventListener("click", () => {
+        if (menu.hidden) return;
+        setTimeout(() => {
+          document.addEventListener("pointerdown", event => {
+            if (!chooser.contains(event.target)) setOpen(false);
+          }, { once: true });
+        }, 0);
+      });
+      chooser.append(trigger, menu);
+      wrap.append(chooser);
+      return wrap;
+    }
+
+    function renderArtifactReviewWorkspace(context) {
+      if (state.artifactReviewConflict) {
+        const conflict = document.createElement("div");
+        conflict.className = "artifact-review-message warn";
+        conflict.textContent = state.artifactReviewConflict;
+        const refresh = document.createElement("button");
+        refresh.className = "btn";
+        refresh.textContent = displayLanguage === "zh" ? "刷新当前轮次" : "Refresh round";
+        refresh.addEventListener("click", async () => {
+          await syncArtifactReviewContext(true);
+          renderAll();
+        });
+        el.comments.append(conflict, refresh);
+      }
+      const selectedRoundId = state.artifactReviewHistoryRoundId || context.review.currentRoundId;
+      const selectedRound = context.rounds.find(round => round.id === selectedRoundId)
+        || context.rounds.find(round => round.id === context.review.currentRoundId);
+      const viewingHistory = selectedRound?.id !== context.review.currentRoundId;
+      if (viewingHistory) {
+        renderArtifactReviewSubmittedOpinions(selectedRound);
+        renderArtifactReviewRoundSummary(context, selectedRound, true);
+        return;
+      }
+
+      const assignment = context.assignment;
+      const readOnly = assignment.status === "submitted" || context.review.status !== "pending";
+      const controls = document.createElement("div");
+      controls.className = "artifact-review-controls";
+      controls.append(blockTitle(readOnly ? t("submitted") : t("myDraft")));
+      controls.append(renderArtifactVoteControl(context, readOnly));
+      if (!readOnly) controls.append(renderArtifactReviewCommentComposer(context));
+      el.comments.append(controls);
+
+      const draftComments = assignment.draft?.comments || [];
+      if (draftComments.length) {
+        for (const comment of draftComments) el.comments.append(renderArtifactReviewCommentCard(comment, assignment.identityName, true));
+      }
+      renderArtifactReviewSubmittedOpinions(selectedRound);
+      renderArtifactReviewRoundSummary(context, selectedRound, false);
+    }
+
+    function renderArtifactReviewSubmittedOpinions(round) {
+      const submitted = (round?.assignments || [])
+        .filter(assignment => assignment.submitted)
+        .map(assignment => ({ assignment, opinion: assignment.submitted }));
+      if (submitted.length) {
+        el.comments.append(blockTitle(t("submittedOpinions")));
+        for (const entry of submitted) {
+          const heading = document.createElement("div");
+          heading.className = "artifact-review-message";
+          heading.textContent = entry.assignment.identityName + " · "
+            + (entry.assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote")) + " · "
+            + artifactReviewVoteLabel(entry.opinion.vote, entry.assignment.binding);
+          el.comments.append(heading);
+          for (const comment of entry.opinion.comments || []) {
+            el.comments.append(renderArtifactReviewCommentCard(comment, entry.assignment.identityName, false));
+          }
+        }
+      }
+    }
+
+    function renderArtifactVoteControl(context, readOnly) {
+      const group = document.createElement("div");
+      group.className = "artifact-review-vote";
+      group.setAttribute("role", "radiogroup");
+      group.setAttribute("aria-label", context.assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote"));
+      const current = context.assignment.submitted?.vote || context.assignment.draft?.vote;
+      for (const value of ["approve", "request_changes", "abstain"]) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "btn" + (current === value ? " active" : "");
+        button.textContent = artifactReviewVoteLabel(value, context.assignment.binding);
+        button.setAttribute("role", "radio");
+        button.setAttribute("aria-checked", String(current === value));
+        button.disabled = readOnly || state.artifactReviewSaving;
+        button.addEventListener("click", () => saveArtifactReviewDraft({
+          ...context.assignment.draft,
+          vote: value
+        }));
+        group.append(button);
+      }
+      return group;
+    }
+
+    function renderArtifactReviewCommentComposer(context) {
+      const wrap = document.createElement("div");
+      wrap.className = "artifact-review-comment";
+      const textarea = document.createElement("textarea");
+      textarea.placeholder = displayLanguage === "zh" ? "补充整体评审意见" : "Add an overall review comment";
+      textarea.disabled = state.artifactReviewSaving;
+      const add = document.createElement("button");
+      add.className = "btn";
+      add.textContent = displayLanguage === "zh" ? "添加意见" : "Add comment";
+      add.disabled = state.artifactReviewSaving;
+      add.addEventListener("click", () => {
+        const body = textarea.value.trim();
+        if (!body) return textarea.focus();
+        runButtonAction(add, async () => {
+          await saveArtifactReviewDraft({
+            ...context.assignment.draft,
+            comments: context.assignment.draft.comments.concat({ id: uuid(), body })
+          });
+        });
+      });
+      wrap.append(textarea, add);
+      return wrap;
+    }
+
+    function renderArtifactReviewCommentCard(comment, identityName, editable) {
+      const card = document.createElement("article");
+      card.className = "comment-card";
+      const title = document.createElement("b");
+      title.textContent = identityName + (comment.anchor?.target ? " · " + comment.anchor.target : "");
+      const body = document.createElement("p");
+      body.textContent = comment.body;
+      card.append(title, body);
+      if (comment.anchor?.location) {
+        const go = document.createElement("button");
+        go.className = "btn";
+        go.textContent = displayLanguage === "zh" ? "定位" : "Go to";
+        go.addEventListener("click", () => {
+          const target = document.querySelector('[data-anchor="' + CSS.escape(comment.anchor.location) + '"]');
+          if (target) target.scrollIntoView({ block: "center", behavior: "smooth" });
+        });
+        card.append(go);
+      }
+      if (editable) {
+        const remove = document.createElement("button");
+        remove.className = "btn danger";
+        remove.textContent = displayLanguage === "zh" ? "删除" : "Remove";
+        remove.addEventListener("click", () => runButtonAction(remove, () => removeComment(comment.id)));
+        card.append(remove);
+      }
+      return card;
+    }
+
+    function renderArtifactReviewRoundSummary(context, round, history) {
+      if (!round) return;
+      el.comments.append(blockTitle(t("roundSummary")));
+      const summary = document.createElement("div");
+      summary.className = "artifact-review-message" + (round.status === "changes_requested" ? " warn" : "");
+      const result = round.result;
+      summary.textContent = result
+        ? t("round") + " " + round.sequence + " · " + artifactReviewRoundStatusLabel(round.status)
+          + " · " + result.decisionApprove + "/" + result.decisionTotal + " " + t("approve")
+        : t("round") + " " + round.sequence + " · "
+          + (round.assignments || []).filter(assignment => assignment.status === "submitted").length
+          + "/" + (round.assignments || []).length + " " + t("submitted");
+      el.comments.append(summary);
+      if (history) {
+        const id = document.createElement("div");
+        id.className = "muted artifact-review-id";
+        id.textContent = round.id;
+        el.comments.append(id);
+      }
+      if (round.revisionSummary?.body) {
+        el.comments.append(blockTitle(t("revisionSummary")));
+        const revision = document.createElement("div");
+        revision.className = "pre";
+        revision.textContent = round.revisionSummary.body;
+        el.comments.append(revision);
+      }
+    }
+
+    function artifactReviewVoteLabel(value, binding) {
+      if (value === "approve") return t("approve");
+      if (value === "request_changes") return t("requestChanges");
+      if (value === "abstain") return t("abstain");
+      return t("draft");
+    }
+
+    function artifactReviewRoundStatusLabel(status) {
+      if (status === "passed") return t("passed");
+      if (status === "changes_requested") return t("changesRequested");
+      if (status === "awaiting_runner_vote") return t("awaitingRunnerVote");
+      return t("pendingReview");
+    }
+
     function scrollToComment(comment) {
+      if (isArtifactReviewMode() && comment.anchor?.location) {
+        const artifactTarget = document.querySelector('[data-anchor="' + CSS.escape(comment.anchor.location) + '"]');
+        if (artifactTarget) artifactTarget.scrollIntoView({ block: "center", behavior: "smooth" });
+        return;
+      }
       if (isCommentOutdated(comment)) return;
       const target = findCommentTarget(comment);
       if (target) {
@@ -2695,6 +3612,19 @@ export const browserHtml = String.raw`<!doctype html>
     function saveSelectedReview() {
       if (state.selectedReviewId) localStorage.setItem(selectedReviewKey, state.selectedReviewId);
       else localStorage.removeItem(selectedReviewKey);
+    }
+
+    function readStoredObject(key) {
+      try {
+        const value = JSON.parse(localStorage.getItem(key) || "{}");
+        return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+      } catch {
+        return {};
+      }
+    }
+
+    function writeStoredObject(key, value) {
+      localStorage.setItem(key, JSON.stringify(value));
     }
 
     function uuid() {

@@ -5,6 +5,7 @@ import MarkdownIt from "markdown-it";
 import { ZodError, type ZodIssue } from "zod";
 import { archiveReview, archiveRun } from "../archive/store.js";
 import { type MemsphereConfig, readConfig } from "../config.js";
+import { authorizeArtifactOperation } from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
@@ -25,7 +26,21 @@ import {
   type ReviewComment,
   type ReviewStatus
 } from "../review/store.js";
-import { listRuns, parseRunState, readRun, type RunState, type RunStep } from "../run/store.js";
+import {
+  ArtifactAuthorizationFailure,
+  ArtifactReviewConflictError,
+  currentArtifactReview,
+  listRuns,
+  parseRunState,
+  readArtifactReviewForIdentity,
+  readRun,
+  submitArtifactReviewAssignment,
+  updateArtifactReviewDraft,
+  type ArtifactReviewDraftInput,
+  type ArtifactReviewContext,
+  type RunState,
+  type RunStep
+} from "../run/store.js";
 import { browserHtml } from "../view/browser.js";
 import {
   clearViewServiceState,
@@ -185,6 +200,65 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     return;
   }
 
+  const artifactReviewRoundMatch = url.pathname.match(/^\/api\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)$/);
+  if (request.method === "GET" && artifactReviewRoundMatch) {
+    const identityId = url.searchParams.get("identity_id")?.trim();
+    if (!identityId) {
+      sendJson(response, 400, { error: "identity_id is required" });
+      return;
+    }
+    try {
+      const context = await readArtifactReviewForIdentity({
+        runsRoot,
+        reviewId: decodeURIComponent(artifactReviewRoundMatch[1]),
+        roundId: decodeURIComponent(artifactReviewRoundMatch[2]),
+        identityId
+      });
+      sendJson(response, 200, await artifactReviewContextPayload(runsRoot, context));
+    } catch (error) {
+      sendArtifactReviewError(response, error);
+    }
+    return;
+  }
+
+  const artifactReviewAssignmentMatch = url.pathname.match(
+    /^\/api\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)\/assignments\/([^/]+)\/(draft|submit)$/
+  );
+  if (artifactReviewAssignmentMatch && ["PATCH", "POST"].includes(request.method ?? "")) {
+    const reviewId = decodeURIComponent(artifactReviewAssignmentMatch[1]);
+    const roundId = decodeURIComponent(artifactReviewAssignmentMatch[2]);
+    const identityId = decodeURIComponent(artifactReviewAssignmentMatch[3]);
+    const operation = artifactReviewAssignmentMatch[4];
+    try {
+      const body = await readJsonBody<{
+        expectedRevision?: unknown;
+        vote?: unknown;
+        comments?: unknown;
+      }>(request);
+      const expectedRevision = normalizeExpectedRevision(body.expectedRevision);
+      const context = operation === "draft"
+        ? await updateArtifactReviewDraft({
+            runsRoot,
+            reviewId,
+            roundId,
+            identityId,
+            expectedRevision,
+            draft: normalizeArtifactReviewDraft(body)
+          })
+        : await submitArtifactReviewAssignment({
+            runsRoot,
+            reviewId,
+            roundId,
+            identityId,
+            expectedRevision
+          });
+      sendJson(response, 200, await artifactReviewContextPayload(runsRoot, context));
+    } catch (error) {
+      sendArtifactReviewError(response, error);
+    }
+    return;
+  }
+
   const reviewSnapshotMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)\/snapshot$/);
   if (request.method === "GET" && reviewSnapshotMatch) {
     const id = decodeURIComponent(reviewSnapshotMatch[1]);
@@ -201,7 +275,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)$/);
   if (request.method === "GET" && runMatch) {
     const run = await readRun(runsRoot, decodeURIComponent(runMatch[1]));
-    sendJson(response, 200, { run: await hydrateRunArtifactContent(runsRoot, run) });
+    sendJson(response, 200, { run: await toViewRunPayload(runsRoot, run) });
     return;
   }
 
@@ -326,7 +400,7 @@ async function snapshotPayload(input: { snapshot: { label: string; path: string;
   if (input.snapshot.kind === "task") {
     return {
       snapshot: input.snapshot,
-      run: await hydrateRunArtifactContent(input.snapshotRoot, JSON.parse(input.content) as RunState)
+      run: await toViewRunPayload(input.snapshotRoot, JSON.parse(input.content) as RunState)
     };
   }
 
@@ -632,9 +706,100 @@ async function loadReservedMemoryPayload(scopeRoot: string, memoryRoot: string):
   });
 }
 
-async function loadRunPayload(runsRoot: string): Promise<RunState[]> {
+async function loadRunPayload(runsRoot: string): Promise<unknown[]> {
   const runs = await listRuns(runsRoot);
-  return Promise.all(runs.map((run) => hydrateRunArtifactContent(runsRoot, run)));
+  return Promise.all(runs.map((run) => toViewRunPayload(runsRoot, run)));
+}
+
+async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknown> {
+  const hydrated = await hydrateRunArtifactContent(runsRoot, run);
+  const { artifactReviews: _privateArtifactReviews, ...publicRun } = hydrated;
+  const review = currentArtifactReview(hydrated);
+  return {
+    ...publicRun,
+    artifactReview: review ? artifactReviewSummary(review) : undefined
+  };
+}
+
+function artifactReviewSummary(review: NonNullable<RunState["artifactReviews"]>[number]): unknown {
+  const round = review.rounds.find((candidate) => candidate.id === review.currentRoundId);
+  const runnerVote = round?.votes.find((vote) => vote.subject.kind === "runner");
+  const runnerCanDecide = authorizeArtifactOperation({
+    controlPlane: review.controlPlane,
+    subject: { kind: "runner" },
+    permission: "decision.decide"
+  }).allowed;
+  return {
+    id: review.id,
+    artifactName: review.artifactName,
+    policyId: review.policyId,
+    status: review.status,
+    currentRoundId: review.currentRoundId,
+    round: round ? {
+      id: round.id,
+      sequence: round.sequence,
+      revision: round.revision,
+      status: round.status,
+      submitted: round.assignments.filter((assignment) => assignment.status === "submitted").length,
+      total: round.assignments.length,
+      assignments: round.assignments.map((assignment) => ({
+        identityId: assignment.identityId,
+        identityName: assignment.identityName,
+        binding: assignment.binding,
+        status: assignment.status
+      })),
+      runner: runnerCanDecide || runnerVote ? {
+        binding: "decision",
+        status: runnerVote ? "submitted" : "pending",
+        vote: runnerVote?.value,
+        automatic: runnerVote?.automatic ?? false,
+        comment: runnerVote?.comment
+      } : undefined,
+      result: round.result
+    } : undefined
+  };
+}
+
+async function artifactReviewContextPayload(runsRoot: string, context: ArtifactReviewContext): Promise<unknown> {
+  const submission = context.review.submissions.find((candidate) => candidate.id === context.round.submissionId);
+  if (!submission) throw new Error(`Artifact Review Submission not found: ${context.round.submissionId}`);
+  const artifact = structuredClone(submission.artifact) as RunState["events"][number]["artifact"] & {
+    content?: string;
+    contentError?: string;
+    renderedContent?: string;
+    renderedContentType?: string;
+  };
+  await hydrateArtifactContent(runsRoot, context.run.id, artifact);
+  return {
+    review: artifactReviewSummary(context.review),
+    submission: {
+      id: submission.id,
+      digest: submission.digest,
+      createdAt: submission.createdAt,
+      artifact,
+      revisionSummary: submission.revisionSummary
+    },
+    assignment: structuredClone(context.assignment),
+    rounds: context.review.rounds.map((round) => ({
+      id: round.id,
+      sequence: round.sequence,
+      submissionId: round.submissionId,
+      status: round.status,
+      revision: round.revision,
+      createdAt: round.createdAt,
+      assignments: round.assignments.map((assignment) => ({
+        identityId: assignment.identityId,
+        identityName: assignment.identityName,
+        roleIds: assignment.roleIds,
+        binding: assignment.binding,
+        status: assignment.status,
+        submitted: assignment.submitted
+      })),
+      votes: round.votes,
+      result: round.result,
+      revisionSummary: context.review.submissions.find((submission) => submission.id === round.submissionId)?.revisionSummary
+    }))
+  };
 }
 
 export async function hydrateRunArtifactContent(runsRoot: string, run: RunState): Promise<RunState> {
@@ -646,22 +811,35 @@ export async function hydrateRunArtifactContent(runsRoot: string, run: RunState)
       renderedContent?: string;
       renderedContentType?: string;
     };
-    if (artifact.storage === "file" && artifact.path && isTextArtifactFormat(artifact.format.name)) {
-      try {
-        artifact.content = await readFile(resolveRunArtifactPath(runsRoot, hydrated.id, artifact.path), "utf8");
-      } catch (error) {
-        artifact.contentError = error instanceof Error ? error.message : String(error);
-      }
-    }
-    if (artifact.format.name === "markdown") {
-      const value = artifact.content ?? artifact.value;
-      if (typeof value === "string") {
-        artifact.renderedContent = renderMarkdownContent(value);
-        artifact.renderedContentType = "text/html";
-      }
-    }
+    await hydrateArtifactContent(runsRoot, hydrated.id, artifact);
   }
   return hydrated;
+}
+
+async function hydrateArtifactContent(
+  runsRoot: string,
+  runId: string,
+  artifact: RunState["events"][number]["artifact"] & {
+    content?: string;
+    contentError?: string;
+    renderedContent?: string;
+    renderedContentType?: string;
+  }
+): Promise<void> {
+  if (artifact.storage === "file" && artifact.path && isTextArtifactFormat(artifact.format.name)) {
+    try {
+      artifact.content = await readFile(resolveRunArtifactPath(runsRoot, runId, artifact.path), "utf8");
+    } catch (error) {
+      artifact.contentError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  if (artifact.format.name === "markdown") {
+    const value = artifact.content ?? artifact.value;
+    if (typeof value === "string") {
+      artifact.renderedContent = renderMarkdownContent(value);
+      artifact.renderedContentType = "text/html";
+    }
+  }
 }
 
 export function canCreateTaskReview(status: RunState["status"]): boolean {
@@ -761,6 +939,68 @@ async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
   }
 
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
+}
+
+function normalizeExpectedRevision(value: unknown): number {
+  if (!Number.isInteger(value) || Number(value) < 0) {
+    throw new Error("expectedRevision must be a non-negative integer");
+  }
+  return Number(value);
+}
+
+function normalizeArtifactReviewDraft(input: { vote?: unknown; comments?: unknown }): ArtifactReviewDraftInput {
+  const vote = input.vote === undefined
+    ? undefined
+    : input.vote === "approve" || input.vote === "request_changes" || input.vote === "abstain"
+      ? input.vote
+      : (() => { throw new Error("invalid Artifact Review vote"); })();
+  if (!Array.isArray(input.comments)) throw new Error("Artifact Review comments must be an array");
+  const comments = input.comments.map((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("invalid Artifact Review comment");
+    }
+    const comment = value as Record<string, unknown>;
+    if (typeof comment.body !== "string") throw new Error("Artifact Review comment body must be a string");
+    let anchor: ArtifactReviewDraftInput["comments"][number]["anchor"];
+    if (comment.anchor !== undefined) {
+      if (!comment.anchor || typeof comment.anchor !== "object" || Array.isArray(comment.anchor)) {
+        throw new Error("invalid Artifact Review comment anchor");
+      }
+      const candidate = comment.anchor as Record<string, unknown>;
+      if (typeof candidate.target !== "string" || typeof candidate.sourceHash !== "string") {
+        throw new Error("Artifact Review comment anchor requires target and sourceHash");
+      }
+      anchor = {
+        target: candidate.target,
+        sourceHash: candidate.sourceHash,
+        location: typeof candidate.location === "string" ? candidate.location : undefined
+      };
+    }
+    return {
+      id: typeof comment.id === "string" ? comment.id : undefined,
+      body: comment.body,
+      anchor
+    };
+  });
+  return { vote, comments };
+}
+
+function sendArtifactReviewError(response: ServerResponse, error: unknown): void {
+  if (error instanceof ArtifactReviewConflictError) {
+    sendJson(response, 409, {
+      error: error.message,
+      roundId: error.roundId,
+      actualRevision: error.actualRevision
+    });
+    return;
+  }
+  if (error instanceof ArtifactAuthorizationFailure) {
+    sendJson(response, 403, { error: error.message, decision: error.decision });
+    return;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  const status = /not found/i.test(message) ? 404 : /not assigned|read-only/i.test(message) ? 403 : 400;
+  sendJson(response, status, { error: message });
 }
 
 function normalizeReviewStatus(value: unknown): ReviewStatus | undefined {

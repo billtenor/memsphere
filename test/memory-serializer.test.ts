@@ -221,6 +221,7 @@ test("memory node serializers preserve tagged fragments and copyable text refere
         name: "Result",
         type: "string",
         format: { name: "markdown", options: {} },
+        review: "artifact_acceptance.unanimous",
         permissionGrants: { runner: ["artifact.submit"] }
       }
     }
@@ -230,6 +231,7 @@ test("memory node serializers preserve tagged fragments and copyable text refere
   assert.match(yaml, /fragment: !action/);
   assert.match(yaml, /role_bindings:/);
   assert.match(yaml, /permission_grants:/);
+  assert.match(yaml, /review: artifact_acceptance\.unanimous/);
   assert.doesNotMatch(yaml, /roleBindings|permissionGrants/);
   assert.deepEqual(JSON.parse(serializeMemoryNodeReadJson(result)), result);
 });

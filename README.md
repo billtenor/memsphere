@@ -238,12 +238,17 @@ artifact: !artifact
     layout: outline
   schema: !schema
     fields: [版本, 发布日期, 结果]
+  review: artifact_acceptance.unanimous
   final: true
 ```
 
 Built-in types are `boolean`, `number`, `string`, `object`, and `array`. Omitted `type` defaults to `string`; every other type must be explicit. `format` is optional and defaults to `plain`; scalar formats can use `format: markdown`, `format: json`, or `format: yaml`. Format-specific options use the object form. `layout` belongs to Markdown: object Markdown requires `outline`, and array Markdown requires `table`.
 
 Schema is optional for JSON/YAML object and array Artifacts, and required for structured Markdown. `asserts` and `suggests` remain natural-language contracts; executable report validation is performed by the registered type, format, and Schema validators.
+
+`review` is an optional Decision Policy id. When present, a validated report creates a persistent Artifact Review instead of immediately advancing the Run. Reviewers work in View, while the Runner waits with `memsphere run review wait --review <review_id>`. After all assigned reviews are submitted, a Runner with `decision.decide` must explicitly vote with `memsphere run review vote --review <review_id> --round <review_round_id> --vote approve|request_changes`; requesting changes also requires `--comment` or `--comment-file`. A rejected round is revised with the original artifact option plus `--revision-summary-file <path>`. The built-in `artifact_acceptance.unanimous` policy waits for every assignment and counts only votes authorized by `decision.decide`; assess-only votes remain advisory.
+
+Adding `review` is a compatible extension of `memsphere-20260721-stable`: existing Memories that omit it retain their prior interpretation and require no migration. Syntax advances only when a change forces existing Memory YAML to be rewritten; such incompatible releases must provide an explicit migration path.
 
 Artifact Contract v2 is a breaking change from the former overloaded `format` model. Before upgrading an existing Memory Store, run the read-only check and resolve every reported blocker:
 

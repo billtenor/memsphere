@@ -69,6 +69,7 @@ export type ArtifactNode = {
   format: ArtifactFormatSpec;
   schema?: string | SchemaNode;
   final?: boolean;
+  review?: string;
   roleBindings?: RoleBindings;
   permissionGrants?: PermissionGrants;
 };

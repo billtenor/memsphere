@@ -134,14 +134,14 @@ test("task view switches to two columns on compact desktop screens", () => {
 
   assert(compactLayout);
   assert(narrowLayout);
-  assert.match(compactLayout, /body\.task-mode \.shell \{ grid-template-columns: 280px minmax\(0, 1fr\) 0; \}/);
+  assert.match(compactLayout, /body\.task-mode \.shell \{ grid-template-columns: 280px minmax\(0, 1fr\) 0 0; \}/);
   assert.match(narrowLayout, /\.flow-head \{ grid-template-columns: 1fr;/);
   assert.match(narrowLayout, /\.artifact-row \{ justify-content: flex-start; min-width: 0; \}/);
 });
 
-test("Review expands the shell into a third layout column on demand", () => {
-  assert.match(browserHtml, /\.shell \{ display: grid; grid-template-columns: 300px minmax\(0, 1fr\) 0;/);
-  assert.match(browserHtml, /body\.review-drawer-open \.shell \{ grid-template-columns: 300px minmax\(0, 1fr\) minmax\(300px, 380px\); \}/);
+test("Review expands the shell with a resizable divider on demand", () => {
+  assert.match(browserHtml, /\.shell \{ display: grid; grid-template-columns: 300px minmax\(0, 1fr\) 0 0;/);
+  assert.match(browserHtml, /body\.review-drawer-open \.shell \{ grid-template-columns: 300px minmax\(0, 1fr\) 8px var\(--review-width\); \}/);
   assert.match(browserHtml, /\.review \{ min-width: 0; overflow: hidden; visibility: hidden;/);
   assert.doesNotMatch(browserHtml, /position: fixed; z-index: 30;/);
   assert.doesNotMatch(browserHtml, /function isCompactReviewLayout/);
@@ -154,6 +154,9 @@ test("flow cards can shrink inside the task grid", () => {
 test("Review has accessible open and close controls", () => {
   assert.match(browserHtml, /id="review-toggle"[^>]*aria-controls="review-panel"[^>]*aria-expanded="false"/);
   assert.match(browserHtml, /id="review-close"/);
+  assert.match(browserHtml, /id="review-resizer"[^>]*role="separator"[^>]*aria-controls="review-panel"/);
+  assert.match(browserHtml, /function beginReviewResize\(event\)/);
+  assert.match(browserHtml, /localStorage\.setItem\(reviewPanelWidthKey, String\(clamped\)\)/);
   assert.match(browserHtml, /function setReviewDrawer\(open\)/);
   assert.match(browserHtml, /event\.key === "Escape" && state\.reviewDrawerOpen/);
   assert.match(browserHtml, /body\.review-drawer-open \.review \{ overflow: auto; visibility: visible; pointer-events: auto;/);
@@ -193,8 +196,11 @@ test("initial loading validates the saved review only after its subject data is 
   assert.doesNotMatch(browserHtml, /async function loadReviews\(\) \{[\s\S]*?state\.reviews =[^}]*ensureSelectedReview\(\);/);
 });
 
-test("task polling does not replace an editor opened while refresh is in flight", () => {
-  assert.match(browserHtml, /loadRuns\(\)\.then\(\(\) => \{[\s\S]*if \(!hasOpenInlineEditor\(\)\) renderAll\(\);/);
+test("task polling does not replace active editors or open Artifact Review selectors", () => {
+  assert.match(browserHtml, /state\.viewMode === "task" && !hasActiveTaskInteraction\(\)/);
+  assert.match(browserHtml, /loadRuns\(\)\.then\(\(\) => \{[\s\S]*if \(hasActiveTaskInteraction\(\)\) \{[\s\S]*taskPollingRenderPending = true/);
+  assert.match(browserHtml, /artifact-review-select-menu:not\(\[hidden\]\)/);
+  assert.match(browserHtml, /document\.activeElement\?\.matches\?\.\("\.artifact-review-select"\)/);
 });
 
 test("section title comments render inline in the expanded node", () => {
