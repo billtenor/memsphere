@@ -1,5 +1,5 @@
 !statement
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - Memory 访问规则
   - Memory discovery and read rules

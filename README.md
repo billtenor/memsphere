@@ -96,11 +96,41 @@ The config file stores roots relative to the `.memsphere` directory by default:
   "view": {
     "host": "127.0.0.1",
     "port": 30000
+  },
+  "control_plane": {
+    "identities": {
+      "human_reviewer": {
+        "kind": "human",
+        "name": "Human Reviewer"
+      },
+      "review_agent": {
+        "kind": "agent",
+        "name": "Review Agent",
+        "agent": {
+          "command": "codex",
+          "args": ["acp"]
+        }
+      }
+    },
+    "roles": {
+      "runner": {
+        "name": "Runner",
+        "permissions": ["artifact.read", "artifact.write", "artifact.submit"]
+      },
+      "reviewer": {
+        "name": "Reviewer",
+        "permissions": ["artifact.read", "decision.assess"],
+        "grantable_permissions": ["decision.challenge"],
+        "system_prompt": "Review the Artifact independently."
+      }
+    }
   }
 }
 ```
 
 Set `archiveRoot` to an absolute path when multiple scopes should share archived runs and reviews.
+
+`control_plane` is optional. When present, it defines Identity and Role records; the `runner` Role is required and is carried implicitly by the current Run executor. Permission and Decision Policy catalogs are built into memsphere and cannot be redefined in config. Agent identities accept only `command` and `args`; credentials, environment variables, and secrets are not control-plane fields.
 
 ### Bundled memory installation
 
@@ -118,11 +148,11 @@ memories, and rebuilds this reserved-memory staging directory. Changing configur
 
 Entity type is represented by the YAML document root tag. There is no `type` field.
 
-Every top-level Memory declares its immutable YAML syntax version with `syntax`. The current stable version is `memsphere-20260719-stable`. An omitted value is always interpreted as `start`, the unversioned migration origin, rather than whichever version happens to be current:
+Every top-level Memory declares its immutable YAML syntax version with `syntax`. The current stable version is `memsphere-20260721-stable`. An omitted value is always interpreted as `start`, the unversioned migration origin, rather than whichever version happens to be current:
 
 ```yaml
 !concept
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 name: Customer
 defines:
   - A party that receives a product or service.
@@ -143,7 +173,7 @@ The authoring type system has three primitive types (`string`, `number`, and `bo
 
 ```yaml
 !procedure
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - DiagnoseBug
   - DebugIssue
@@ -230,7 +260,7 @@ Any Memory or nested node that accepts `names` also accepts `name` as a single-v
 
 ```yaml
 !concept
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - Customer
   - Buyer
@@ -247,7 +277,7 @@ defines:
 
 ```yaml
 !statement
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - RepositoryDevelopmentRules
 defines:
@@ -279,7 +309,7 @@ sections:
 
 ```yaml
 !schema
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - Requirements Document
   - 需求文档
@@ -310,7 +340,7 @@ When consumed by an object Markdown Artifact with `layout: outline`, a Schema ma
 
 ```yaml
 !schema
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names: [关键决策记录]
 fields:
   - 背景

@@ -43,7 +43,7 @@ export function serializeMemoryNodeListText(page: MemoryNodeListPage): string {
 }
 
 export function serializeMemoryNodeReadYaml(result: MemoryNodeReadResult): string {
-  return serializeYaml(result);
+  return serializeYaml(prepareMemoryForYaml(result));
 }
 
 export function serializeMemoryNodeReadJson(result: MemoryNodeReadResult): string {
@@ -63,6 +63,14 @@ function prepareMemoryForYaml(value: unknown): unknown {
   const record = value as Record<string, unknown>;
   const prepared: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(record)) {
+    if ((record.tag === "!procedure" || record.tag === "!artifact") && key === "roleBindings") {
+      prepared.role_bindings = prepareMemoryForYaml(item);
+      continue;
+    }
+    if (record.tag === "!artifact" && key === "permissionGrants") {
+      prepared.permission_grants = prepareMemoryForYaml(item);
+      continue;
+    }
     if (record.tag === "!artifact" && key === "type" && item === "string") continue;
     if ((record.tag === "!artifact" || record.tag === "!schema") && key === "format" && isFormatSpec(item)) {
       const optionEntries = Object.entries(item.options);

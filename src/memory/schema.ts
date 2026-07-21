@@ -27,6 +27,7 @@ import {
 } from "./ast.js";
 import {
   assertMemorySyntaxIdentifier,
+  controlPlaneMemorySyntax,
   firstStableMemorySyntax,
   MemorySyntaxRegistry,
   type MemorySyntaxVersion
@@ -102,8 +103,8 @@ function withRootSyntax<T extends { tag: string }>(
 let definitionPartSchema: z.ZodType<DefinitionPart, z.ZodTypeDef, unknown>;
 let staticSchemaFieldSchema: z.ZodType<StaticSchemaField, z.ZodTypeDef, unknown>;
 let schemaFieldSchema: z.ZodType<SchemaField, z.ZodTypeDef, unknown>;
-let flowNodeSchema: z.ZodType<FlowNode, z.ZodTypeDef, unknown>;
-let ifNodeSchema: z.ZodType<IfNode, z.ZodTypeDef, unknown>;
+let legacyFlowNodeSchema: z.ZodType<FlowNode, z.ZodTypeDef, unknown>;
+let legacyIfNodeSchema: z.ZodType<IfNode, z.ZodTypeDef, unknown>;
 
 const definesSchema = z.lazy(() => z.array(definitionPartSchema)).default([]);
 
@@ -379,7 +380,7 @@ const repeatNodeSchema: z.ZodType<RepeatNode, z.ZodTypeDef, unknown> = z.object(
 
 schemaFieldSchema = z.lazy(() => z.union([staticSchemaFieldSchema, repeatNodeSchema]));
 
-export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> = z.object({
+const legacyArtifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> = z.object({
   tag: z.literal("!artifact"),
   name: nonEmptyString,
   type: nonEmptyString.default("string"),
@@ -486,6 +487,180 @@ export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> 
   }
 });
 
+const legacyActionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = z.object({
+  tag: z.literal("!action"),
+  action: nonEmptyString,
+  actor: z.enum(stepActors).optional(),
+  asserts: z.array(nonEmptyString).min(1).optional(),
+  suggests: z.array(nonEmptyString).min(1).optional(),
+  artifact: legacyArtifactNodeSchema
+}).strict();
+
+const legacyPlainActionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = legacyActionNodeSchema.superRefine((node, context) => {
+  if (node.artifact.type === "boolean") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["artifact", "type"],
+      message: "boolean Artifact type is only allowed for If or While conditions"
+    });
+  }
+});
+
+const callNodeSchema: z.ZodType<CallNode, z.ZodTypeDef, unknown> = z.object({
+  tag: z.literal("!call"),
+  target: nonEmptyString
+}).strict();
+
+const legacyWhileNodeSchema: z.ZodType<WhileNode, z.ZodTypeDef, unknown> = z.lazy(() =>
+  z.object({
+    tag: z.literal("!while"),
+    condition: legacyActionNodeSchema,
+    do: z.array(legacyFlowNodeSchema).min(1)
+  }).strict().superRefine((node, context) => {
+    if (node.condition.artifact.type !== "boolean") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["condition", "artifact", "type"],
+        message: "While condition Artifact type must be boolean"
+      });
+    }
+  })
+);
+
+legacyIfNodeSchema = z.lazy(() =>
+  z.object({
+    tag: z.literal("!if"),
+    condition: legacyActionNodeSchema,
+    then: z.array(legacyFlowNodeSchema).min(1),
+    elseif: legacyIfNodeSchema.optional(),
+    else: z.array(legacyFlowNodeSchema).optional()
+  }).strict().superRefine((node, context) => {
+    if (node.condition.artifact.type !== "boolean") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["condition", "artifact", "type"],
+        message: "If condition Artifact type must be boolean"
+      });
+    }
+    if (node.elseif?.else !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["elseif", "else"],
+        message: "else is only allowed on the root If in an elseif chain"
+      });
+    }
+  })
+);
+
+legacyFlowNodeSchema = z.lazy(() => z.union([
+  legacyPlainActionNodeSchema,
+  legacyIfNodeSchema,
+  legacyWhileNodeSchema,
+  callNodeSchema
+]));
+
+function requireTopLevelName<T extends { names: string[] }>(schema: z.ZodType<T, z.ZodTypeDef, unknown>): z.ZodType<T, z.ZodTypeDef, unknown> {
+  return schema.superRefine((node, context) => {
+    if (node.names.length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["names"],
+        message: "top-level memory must have a non-empty names list"
+      });
+    }
+  });
+}
+
+const conceptNodeSchema: z.ZodType<ConceptNode, z.ZodTypeDef, unknown> = requireTopLevelName(
+  z.preprocess(normalizeNameShorthand, z.object({
+    tag: z.literal("!concept"),
+    names: namesSchema,
+    defines: definesSchema,
+    extends: stringArray.optional()
+  }).strict())
+);
+
+export const conceptMemorySchema: z.ZodType<ConceptMemory, z.ZodTypeDef, unknown> = withRootSyntax(conceptNodeSchema);
+export const statementMemorySchema: z.ZodType<StatementMemory, z.ZodTypeDef, unknown> = withRootSyntax(requireTopLevelName(statementNodeSchema));
+export const schemaMemorySchema: z.ZodType<SchemaMemory, z.ZodTypeDef, unknown> = withRootSyntax(requireTopLevelName(schemaNodeSchema));
+
+const legacyProcedureNodeSchema: z.ZodType<ProcedureNode, z.ZodTypeDef, unknown> = requireTopLevelName(
+  z.preprocess(normalizeNameShorthand, z.object({
+    tag: z.literal("!procedure"),
+    names: namesSchema,
+    defines: definesSchema,
+    asserts: z.array(nonEmptyString).min(1).optional(),
+    goals: stringArray,
+    flow: z.array(legacyFlowNodeSchema).default([])
+  }).strict())
+);
+
+const legacyProcedureMemorySchema: z.ZodType<ProcedureMemory, z.ZodTypeDef, unknown> = withRootSyntax(legacyProcedureNodeSchema);
+
+const uniqueNonEmptyStringArray = z.array(nonEmptyString).min(1).superRefine((values, context) => {
+  const seen = new Map<string, number>();
+  for (const [index, value] of values.entries()) {
+    const previous = seen.get(value);
+    if (previous !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [index],
+        message: `value must be unique; first used at index ${previous}`
+      });
+    } else {
+      seen.set(value, index);
+    }
+  }
+});
+
+const roleBindingsInputSchema = z.record(z.union([
+  nonEmptyString.transform((value) => [value]),
+  uniqueNonEmptyStringArray
+])).superRefine((bindings, context) => {
+  for (const roleId of Object.keys(bindings)) {
+    if (!roleId.trim()) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: [roleId], message: "Role id must not be empty" });
+    }
+  }
+});
+
+const permissionGrantsInputSchema = z.record(uniqueNonEmptyStringArray).superRefine((grants, context) => {
+  for (const roleId of Object.keys(grants)) {
+    if (!roleId.trim()) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: [roleId], message: "Role id must not be empty" });
+    }
+  }
+});
+
+export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> = z.unknown().transform((value, context) => {
+  const source = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+  const baseInput = source ? { ...source } : value;
+  if (source) {
+    delete (baseInput as Record<string, unknown>).role_bindings;
+    delete (baseInput as Record<string, unknown>).permission_grants;
+  }
+  const base = legacyArtifactNodeSchema.safeParse(baseInput);
+  const roleBindings = roleBindingsInputSchema.optional().safeParse(source?.role_bindings);
+  const permissionGrants = permissionGrantsInputSchema.optional().safeParse(source?.permission_grants);
+  if (!base.success) {
+    for (const issue of base.error.issues) context.addIssue(issue);
+  }
+  if (!roleBindings.success) {
+    for (const issue of roleBindings.error.issues) context.addIssue({ ...issue, path: ["role_bindings", ...issue.path] });
+  }
+  if (!permissionGrants.success) {
+    for (const issue of permissionGrants.error.issues) context.addIssue({ ...issue, path: ["permission_grants", ...issue.path] });
+  }
+  if (!base.success || !roleBindings.success || !permissionGrants.success) return z.NEVER;
+  return {
+    ...base.data,
+    ...(roleBindings.data ? { roleBindings: roleBindings.data } : {}),
+    ...(permissionGrants.data ? { permissionGrants: permissionGrants.data } : {})
+  };
+});
+
 export const actionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = z.object({
   tag: z.literal("!action"),
   action: nonEmptyString,
@@ -505,10 +680,8 @@ const plainActionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = acti
   }
 });
 
-const callNodeSchema: z.ZodType<CallNode, z.ZodTypeDef, unknown> = z.object({
-  tag: z.literal("!call"),
-  target: nonEmptyString
-}).strict();
+let ifNodeSchema: z.ZodType<IfNode, z.ZodTypeDef, unknown>;
+let flowNodeSchema: z.ZodType<FlowNode, z.ZodTypeDef, unknown>;
 
 const whileNodeSchema: z.ZodType<WhileNode, z.ZodTypeDef, unknown> = z.lazy(() =>
   z.object({
@@ -558,31 +731,6 @@ flowNodeSchema = z.lazy(() => z.union([
   callNodeSchema
 ]));
 
-function requireTopLevelName<T extends { names: string[] }>(schema: z.ZodType<T, z.ZodTypeDef, unknown>): z.ZodType<T, z.ZodTypeDef, unknown> {
-  return schema.superRefine((node, context) => {
-    if (node.names.length === 0) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["names"],
-        message: "top-level memory must have a non-empty names list"
-      });
-    }
-  });
-}
-
-const conceptNodeSchema: z.ZodType<ConceptNode, z.ZodTypeDef, unknown> = requireTopLevelName(
-  z.preprocess(normalizeNameShorthand, z.object({
-    tag: z.literal("!concept"),
-    names: namesSchema,
-    defines: definesSchema,
-    extends: stringArray.optional()
-  }).strict())
-);
-
-export const conceptMemorySchema: z.ZodType<ConceptMemory, z.ZodTypeDef, unknown> = withRootSyntax(conceptNodeSchema);
-export const statementMemorySchema: z.ZodType<StatementMemory, z.ZodTypeDef, unknown> = withRootSyntax(requireTopLevelName(statementNodeSchema));
-export const schemaMemorySchema: z.ZodType<SchemaMemory, z.ZodTypeDef, unknown> = withRootSyntax(requireTopLevelName(schemaNodeSchema));
-
 const procedureNodeSchema: z.ZodType<ProcedureNode, z.ZodTypeDef, unknown> = requireTopLevelName(
   z.preprocess(normalizeNameShorthand, z.object({
     tag: z.literal("!procedure"),
@@ -590,8 +738,12 @@ const procedureNodeSchema: z.ZodType<ProcedureNode, z.ZodTypeDef, unknown> = req
     defines: definesSchema,
     asserts: z.array(nonEmptyString).min(1).optional(),
     goals: stringArray,
+    role_bindings: roleBindingsInputSchema.optional(),
     flow: z.array(flowNodeSchema).default([])
-  }).strict())
+  }).strict().transform((procedure) => {
+    const { role_bindings, ...base } = procedure;
+    return { ...base, ...(role_bindings ? { roleBindings: role_bindings } : {}) };
+  }))
 );
 
 export const procedureMemorySchema: z.ZodType<ProcedureMemory, z.ZodTypeDef, unknown> = withRootSyntax(procedureNodeSchema);
@@ -614,7 +766,15 @@ export const memorySchemas = {
   schemas: schemaMemorySchema
 } as const satisfies Record<MemoryKind, z.ZodTypeAny>;
 
+const legacyMemorySchemas = {
+  procedures: legacyProcedureMemorySchema,
+  concepts: conceptMemorySchema,
+  statements: statementMemorySchema,
+  schemas: schemaMemorySchema
+} as const satisfies Record<MemoryKind, z.ZodTypeAny>;
+
 export const memorySyntaxRegistry = new MemorySyntaxRegistry();
-memorySyntaxRegistry.register({ version: firstStableMemorySyntax, schemas: memorySchemas });
+memorySyntaxRegistry.register({ version: firstStableMemorySyntax, schemas: legacyMemorySchemas });
+memorySyntaxRegistry.register({ version: controlPlaneMemorySyntax, schemas: memorySchemas });
 
 export type { MemoryEntity };

@@ -1,5 +1,5 @@
 !schema
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - Concept entity schema
   - "!concept 编写模板"
@@ -8,7 +8,7 @@ defines:
   - 定义 memsphere !concept Memory 的合法内容结构和字段要求。
 asserts:
   - 根节点必须使用 !concept 标签，不得使用独立的 type 字段。
-  - "必须声明 syntax: memsphere-20260719-stable。"
+  - "必须声明 syntax: memsphere-20260721-stable。"
   - 必须声明非空 names，或使用非空 name 作为单值简写。
   - defines 可以包含字符串、!statement 或 !schema；嵌套结构必须携带 YAML tag。
   - extends 如出现，必须是字符串数组。
@@ -17,7 +17,7 @@ fields:
     name: syntax
     type: string
     defines:
-      - 必填，当前 Memory 使用的不可变语法版本；本 Schema 要求 memsphere-20260719-stable。
+      - 必填，当前 Memory 使用的不可变语法版本；本 Schema 要求 memsphere-20260721-stable。
   - !schema
     names:
       - names

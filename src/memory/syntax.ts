@@ -3,7 +3,8 @@ import type { MemoryKind } from "./kinds.js";
 
 export const startMemorySyntax = "start";
 export const firstStableMemorySyntax = "memsphere-20260719-stable";
-export const currentMemorySyntax = firstStableMemorySyntax;
+export const controlPlaneMemorySyntax = "memsphere-20260721-stable";
+export const currentMemorySyntax = controlPlaneMemorySyntax;
 
 export type MemorySyntaxVersion = string;
 
@@ -34,7 +35,7 @@ export class MemorySyntaxRegistry {
     if (!definition) {
       throw new Error(
         `Unsupported Memory syntax ${version}; current syntax is ${currentMemorySyntax}. ` +
-        "This runtime only accepts the current syntax; upgrade memsphere if the Memory uses a newer syntax."
+        "Upgrade memsphere if the Memory uses a newer syntax."
       );
     }
     return definition;

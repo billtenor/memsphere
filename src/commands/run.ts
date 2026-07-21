@@ -1,4 +1,5 @@
 import { readConfig } from "../config.js";
+import { renderPermissionGuidance, type PermissionLocale } from "../control-plane/index.js";
 import {
   activeProcedureAsserts,
   type ArtifactReportSource,
@@ -29,7 +30,8 @@ export async function runStartCommand(procedureName: string): Promise<void> {
   const run = await startRun({
     memoryRoot: config.memoryRoot,
     runsRoot: config.runsRoot,
-    procedureName
+    procedureName,
+    controlPlane: config.controlPlane
   });
   printRunState(run);
 }
@@ -41,8 +43,10 @@ export async function runReportCommand(options: ReportOptions): Promise<void> {
   const run = await reportRun({
     runsRoot: config.runsRoot,
     runId,
-    artifact
+    artifact,
+    locale: permissionLocale()
   });
+  printLatestReportAuthorization(run);
   printRunState(run);
 }
 
@@ -188,6 +192,8 @@ export function printRunState(run: RunState): void {
     console.log("Report the artifact value provided by the human.");
   }
 
+  printPermissionGuidance(run, step);
+
   console.log("");
   if (step.format.name === "markdown" && step.schema) {
     console.log("Then:");
@@ -200,6 +206,70 @@ export function printRunState(run: RunState): void {
     console.log("Then:");
     console.log(`memsphere run report --run ${run.id} --artifact <value>`);
   }
+}
+
+function printPermissionGuidance(run: RunState, step: NonNullable<ReturnType<typeof currentStep>>): void {
+  if (!run.controlPlane || !step.controlPlane) return;
+  const permissions = step.controlPlane.permissions.runner;
+  if (!permissions) return;
+  const guidance = renderPermissionGuidance({
+    snapshot: run.controlPlane,
+    roleId: "runner",
+    permissions,
+    artifactScope: step.controlPlane.artifactScope,
+    locale: permissionLocale()
+  });
+  console.log("");
+  console.log("Control Plane:");
+  console.log("- mode: enabled");
+  console.log(`- revision: ${run.controlPlane.revision}`);
+  console.log("- runner: current run context");
+  console.log(`- permission catalog: ${run.controlPlane.permissionCatalog.version}`);
+  console.log(`- decision policy catalog: ${run.controlPlane.decisionPolicyCatalog.version}`);
+  for (const [roleId, binding] of Object.entries(step.controlPlane.bindings)) {
+    const prompt = run.controlPlane.roles[roleId]?.systemPrompt ? "; system_prompt: present" : "";
+    console.log(`- ${roleId}: ${binding.identityIds.join(", ")} (${binding.source}${prompt})`);
+  }
+  console.log(`- runner base permissions: ${permissions.base.join(", ") || "none"}`);
+  console.log(`- runner grants: ${permissions.grants.join(", ") || "none"}`);
+  console.log(`- runner effective permissions: ${permissions.effective.join(", ") || "none"}`);
+  console.log("");
+  console.log(permissionLocale() === "zh-CN" ? "权限说明:" : "Permission Guidance:");
+  for (const line of guidance.lines) console.log(line);
+}
+
+export function printLatestReportAuthorization(run: RunState): void {
+  const authorization = [...run.events].reverse().find((event) => event.artifact.authorization)?.artifact.authorization;
+  if (!authorization) return;
+  console.log("Report Authorization:");
+  console.log(`- allowed: ${authorization.permission}`);
+  console.log(`- role: ${authorization.roleId}`);
+  console.log(`- artifact: ${authorization.artifactScope}`);
+  console.log(`- revision: ${authorization.revision}`);
+  if (run.controlPlane) {
+    const locale = permissionLocale();
+    const guidance = renderPermissionGuidance({
+      snapshot: run.controlPlane,
+      roleId: authorization.roleId,
+      permissions: {
+        base: authorization.basePermissions,
+        grants: authorization.grantedPermissions,
+        effective: authorization.effectivePermissions,
+        roleSource: authorization.roleSource,
+        grantSource: authorization.grantSource
+      },
+      artifactScope: authorization.artifactScope,
+      locale,
+      decision: authorization
+    });
+    console.log(locale === "zh-CN" ? "权限说明:" : "Permission Guidance:");
+    for (const line of guidance.lines) console.log(line);
+  }
+  console.log("");
+}
+
+function permissionLocale(): PermissionLocale {
+  return process.env.LANG?.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
 }
 
 function formatDisplay(format: NonNullable<ReturnType<typeof currentStep>>["format"]): string {

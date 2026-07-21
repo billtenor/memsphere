@@ -1,5 +1,5 @@
 !schema
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - Procedure entity schema
   - "!procedure 编写模板"
@@ -8,11 +8,12 @@ defines:
   - 定义 memsphere !procedure Memory 的合法内容结构和字段要求。
 asserts:
   - 根节点必须使用 !procedure 标签，不得使用独立的 type 字段。
-  - "必须声明 syntax: memsphere-20260719-stable。"
+  - "必须声明 syntax: memsphere-20260721-stable。"
   - 必须声明非空 names，或使用非空 name 作为单值简写。
   - defines 可以包含字符串、!statement 或 !schema；列表中的全部成员共同生效。
   - asserts 如出现，必须是非空字符串数组，并在整个 Procedure 执行期间持续生效。
   - goals 必须是字符串数组。
+  - role_bindings 如出现，必须引用 control_plane 中存在的 Role 与 Identity，不得显式绑定 runner，并作为当前 Procedure 的默认绑定。
   - flow 必须由带 tag 的 !action、!if、!while 或 !call 组成。
   - "每个 !action 都必须包含 action 和 artifact: !artifact；actor 省略时默认为 agent。"
   - "!if 和 !while 的 condition 必须是产出 boolean Artifact 的 !action。"
@@ -21,7 +22,7 @@ fields:
     name: syntax
     type: string
     defines:
-      - 必填，当前 Memory 使用的不可变语法版本；本 Schema 要求 memsphere-20260719-stable。
+      - 必填，当前 Memory 使用的不可变语法版本；本 Schema 要求 memsphere-20260721-stable。
   - !schema
     names:
       - names
@@ -57,6 +58,12 @@ fields:
       type: string
     defines:
       - Procedure 要达成的目标。
+  - !schema
+    names:
+      - role_bindings
+    type: object
+    defines:
+      - 可选，为当前 Procedure 的 Artifact 提供默认 Role Binding；被调用 Procedure 和当前 Artifact 可以按同名 Role 覆盖。
   - !schema
     names:
       - flow

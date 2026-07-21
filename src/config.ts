@@ -3,8 +3,9 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, parse, resolve } from "node:path";
 import { z } from "zod";
+import { controlPlaneConfigSchema, type ControlPlaneConfig } from "./control-plane/index.js";
 
-const configSchema = z.object({
+export const configSchema = z.object({
   memoryRoot: z.string().min(1),
   reviewsRoot: z.string().min(1).optional(),
   runsRoot: z.string().min(1).optional(),
@@ -12,10 +13,11 @@ const configSchema = z.object({
   view: z.object({
     host: z.string().min(1),
     port: z.number().int().min(0).max(65535)
-  }).optional()
-});
+  }).strict().optional(),
+  control_plane: controlPlaneConfigSchema.optional()
+}).strict();
 
-type MemsphereConfigFile = z.infer<typeof configSchema>;
+export type MemsphereConfigFile = z.input<typeof configSchema>;
 
 export type MemsphereConfig = {
   configPath: string;
@@ -24,6 +26,7 @@ export type MemsphereConfig = {
   reviewsRoot: string;
   runsRoot: string;
   archiveRoot: string;
+  controlPlane?: ControlPlaneConfig;
   view: {
     host: string;
     port: number;
@@ -101,6 +104,7 @@ export async function readConfigAt(configPath: string): Promise<MemsphereConfig>
     reviewsRoot: resolveConfigPath(config.reviewsRoot ?? "reviews", scopeRoot),
     runsRoot: resolveConfigPath(config.runsRoot ?? "runs", scopeRoot),
     archiveRoot: resolveConfigPath(config.archiveRoot ?? "archives", scopeRoot),
+    controlPlane: config.control_plane,
     view: config.view ?? { host: "127.0.0.1", port: 0 }
   };
 }

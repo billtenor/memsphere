@@ -14,6 +14,21 @@ import {
   createBuiltInArtifactValidatorRegistry,
   prepareArtifactCandidate
 } from "../artifact-validation.js";
+import {
+  authorizeArtifactOperation,
+  controlPlaneSnapshotSchema,
+  createControlPlaneSnapshot,
+  mergeRoleBindings,
+  renderPermissionGuidance,
+  resolveArtifactControlPlane,
+  validateControlPlaneReferences,
+  type ArtifactControlPlane,
+  type AuthorizationDecision,
+  type ControlPlaneConfig,
+  type ControlPlaneSnapshot,
+  type PermissionGrants as ControlPlanePermissionGrants,
+  type ResolvedRoleBindings
+} from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
 import { currentMemorySyntax, type MemorySyntaxVersion } from "../memory/syntax.js";
 import { inheritSchemaFormat, resolveSchemaContract } from "../memory/schema.js";
@@ -26,6 +41,8 @@ import {
   type FlowNode,
   type IfNode,
   type ProcedureMemory,
+  type PermissionGrants as MemoryPermissionGrants,
+  type RoleBindings,
   schemaNodeFromMemory,
   type RepeatNode,
   type SchemaMemory,
@@ -45,6 +62,19 @@ export function registerArtifactValidator(registration: ArtifactValidatorRegistr
   artifactValidatorRegistry.register(registration);
 }
 
+export class ArtifactAuthorizationFailure extends Error {
+  constructor(
+    readonly decision: AuthorizationDecision,
+    readonly guidance: string[]
+  ) {
+    super([
+      `Artifact authorization denied: ${decision.permission} for ${decision.artifactScope}`,
+      ...guidance
+    ].join("\n"));
+    this.name = "ArtifactAuthorizationFailure";
+  }
+}
+
 export type RunStatus = "running" | "done";
 export type FrameType = "procedure" | "schema";
 
@@ -57,6 +87,7 @@ export type RunFrame = {
   returnTo?: string;
   sourceStepId?: string;
   eventStartIndex?: number;
+  roleBindings?: ResolvedRoleBindings;
 };
 
 export type RunStep = {
@@ -73,6 +104,9 @@ export type RunStep = {
   asserts?: string[];
   suggests?: string[];
   details?: string[];
+  roleBindings?: RoleBindings;
+  permissionGrants?: MemoryPermissionGrants;
+  controlPlane?: ArtifactControlPlane;
   target?: string;
   branches?: {
     truthy: RunStep[];
@@ -99,23 +133,31 @@ export type RunEvent = {
   frame: FrameType;
   stepId: string;
   artifact: {
-      name: string;
-      type: string;
-      format: ArtifactFormatSpec;
-      fields?: Record<string, unknown>;
-      schema?: RunSchemaContract;
-      validation?: ArtifactValidationResult;
-      final?: boolean;
-      storage?: "inline" | "file";
-      value?: unknown;
-      path?: string;
-      fileName?: string;
-      contentType?: string;
+    name: string;
+    type: string;
+    format: ArtifactFormatSpec;
+    fields?: Record<string, unknown>;
+    schema?: RunSchemaContract;
+    validation?: ArtifactValidationResult;
+    final?: boolean;
+    storage?: "inline" | "file";
+    value?: unknown;
+    path?: string;
+    fileName?: string;
+    contentType?: string;
+    authorization?: AuthorizationDecision;
   };
 };
 
+export type RunProcedureTemplate = {
+  memoryName: string;
+  asserts?: string[];
+  roleBindings?: RoleBindings;
+  steps: RunStep[];
+};
+
 export type RunState = {
-  contractVersion: 1 | 2;
+  contractVersion: 1 | 2 | 3;
   readOnly?: boolean;
   memorySyntax?: MemorySyntaxVersion;
   id: string;
@@ -128,6 +170,8 @@ export type RunState = {
   plan?: RunStep[];
   stack: RunFrame[];
   events: RunEvent[];
+  controlPlane?: ControlPlaneSnapshot;
+  procedureSnapshots?: Record<string, RunProcedureTemplate>;
 };
 
 const artifactFormatSpecSchema = z.object({
@@ -164,6 +208,43 @@ const validationResultSchema: z.ZodType<ArtifactValidationResult> = z.object({
   }))
 });
 
+const roleBindingsSchema = z.record(z.array(z.string().min(1)));
+const resolvedRoleBindingsSchema = z.record(z.object({
+  identityIds: z.array(z.string()),
+  source: z.string()
+}).strict());
+const resolvedRolePermissionsSchema = z.object({
+  base: z.array(z.string()),
+  grants: z.array(z.string()),
+  effective: z.array(z.string()),
+  roleSource: z.string(),
+  grantSource: z.string().optional()
+}).strict();
+const artifactControlPlaneSchema: z.ZodType<ArtifactControlPlane> = z.object({
+  revision: z.string(),
+  artifactScope: z.string(),
+  bindings: resolvedRoleBindingsSchema,
+  permissions: z.record(resolvedRolePermissionsSchema)
+}).strict() as z.ZodType<ArtifactControlPlane>;
+const authorizationSubjectSchema = z.union([
+  z.object({ kind: z.literal("runner") }).strict(),
+  z.object({ kind: z.literal("identity"), identityId: z.string(), roleId: z.string() }).strict()
+]);
+const authorizationDecisionSchema: z.ZodType<AuthorizationDecision> = z.object({
+  allowed: z.boolean(),
+  permission: z.string(),
+  subject: authorizationSubjectSchema,
+  artifactScope: z.string(),
+  revision: z.string(),
+  roleId: z.string(),
+  roleSource: z.string(),
+  grantSource: z.string().optional(),
+  basePermissions: z.array(z.string()),
+  grantedPermissions: z.array(z.string()),
+  effectivePermissions: z.array(z.string()),
+  reason: z.enum(["allowed", "role_not_found", "identity_not_bound", "permission_missing"])
+}).strict() as z.ZodType<AuthorizationDecision>;
+
 const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
   z.object({
     id: z.string(),
@@ -179,6 +260,9 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
     asserts: z.array(z.string()).optional(),
     suggests: z.array(z.string()).optional(),
     details: z.array(z.string()).optional(),
+    roleBindings: roleBindingsSchema.optional(),
+    permissionGrants: roleBindingsSchema.optional(),
+    controlPlane: artifactControlPlaneSchema.optional(),
     target: z.string().optional(),
     branches: z.object({
       truthy: z.array(runStepSchema),
@@ -217,7 +301,8 @@ const runStateSchema: z.ZodType<RunState> = z.object({
     index: z.number(),
     returnTo: z.string().optional(),
     sourceStepId: z.string().optional(),
-    eventStartIndex: z.number().int().nonnegative().optional()
+    eventStartIndex: z.number().int().nonnegative().optional(),
+    roleBindings: resolvedRoleBindingsSchema.optional()
   })),
   events: z.array(z.object({
     at: z.string(),
@@ -235,17 +320,77 @@ const runStateSchema: z.ZodType<RunState> = z.object({
       value: z.unknown().optional(),
       path: z.string().optional(),
       fileName: z.string().optional(),
-      contentType: z.string().optional()
+      contentType: z.string().optional(),
+      authorization: authorizationDecisionSchema.optional()
     })
   }))
 });
+
+const runProcedureTemplateSchema: z.ZodType<RunProcedureTemplate> = z.object({
+  memoryName: z.string(),
+  asserts: z.array(z.string()).optional(),
+  roleBindings: roleBindingsSchema.optional(),
+  steps: z.array(runStepSchema)
+}).strict();
+
+const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
+  contractVersion: z.literal(3),
+  readOnly: z.boolean().optional(),
+  memorySyntax: z.string().optional(),
+  id: z.string(),
+  status: z.enum(["running", "done"]),
+  procedureName: z.string(),
+  asserts: z.array(z.string()).optional(),
+  memoryRoot: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  plan: z.array(runStepSchema).optional(),
+  stack: z.array(z.object({
+    type: z.enum(["procedure", "schema"]),
+    memoryName: z.string(),
+    asserts: z.array(z.string()).optional(),
+    steps: z.array(runStepSchema),
+    index: z.number(),
+    returnTo: z.string().optional(),
+    sourceStepId: z.string().optional(),
+    eventStartIndex: z.number().int().nonnegative().optional(),
+    roleBindings: resolvedRoleBindingsSchema.optional()
+  }).strict()),
+  events: z.array(z.object({
+    at: z.string(),
+    frame: z.enum(["procedure", "schema"]),
+    stepId: z.string(),
+    artifact: z.object({
+      name: z.string(),
+      type: z.string(),
+      format: artifactFormatSpecSchema,
+      fields: z.record(z.unknown()).optional(),
+      schema: runSchemaContractSchema.optional(),
+      validation: validationResultSchema.optional(),
+      final: z.boolean().optional(),
+      storage: z.enum(["inline", "file"]).optional(),
+      value: z.unknown().optional(),
+      path: z.string().optional(),
+      fileName: z.string().optional(),
+      contentType: z.string().optional(),
+      authorization: authorizationDecisionSchema.optional()
+    }).strict()
+  }).strict()),
+  controlPlane: controlPlaneSnapshotSchema.optional(),
+  procedureSnapshots: z.record(runProcedureTemplateSchema)
+}).strict();
 
 export async function ensureRunDirectory(runsRoot: string): Promise<string> {
   await mkdir(runsRoot, { recursive: true });
   return runsRoot;
 }
 
-export async function startRun(input: { memoryRoot: string; runsRoot: string; procedureName: string }): Promise<RunState> {
+export async function startRun(input: {
+  memoryRoot: string;
+  runsRoot: string;
+  procedureName: string;
+  controlPlane?: ControlPlaneConfig;
+}): Promise<RunState> {
   await ensureRunDirectory(input.runsRoot);
   const procedure = await findMemoryByName(input.memoryRoot, "procedures", input.procedureName);
   if (!procedure) {
@@ -253,15 +398,19 @@ export async function startRun(input: { memoryRoot: string; runsRoot: string; pr
   }
 
   const procedureMemory = procedure.entity as ProcedureMemory;
-  const steps = compileProcedureSteps(procedureMemory);
-  await snapshotExternalSchemas(input.memoryRoot, steps);
+  const procedureSnapshots = await snapshotReachableProcedureTemplates(input.memoryRoot, procedureMemory);
+  const rootTemplate = procedureSnapshots[procedureMemory.names[0]];
+  if (!rootTemplate) throw new Error(`procedure snapshot missing: ${procedureMemory.names[0]}`);
+  const controlPlane = input.controlPlane ? createControlPlaneSnapshot(input.controlPlane) : undefined;
+  const instantiated = instantiateProcedureTemplate(rootTemplate, {}, controlPlane);
+  const steps = instantiated.steps;
   if (!steps.length) {
     throw new Error(`procedure has no flow steps: ${input.procedureName}`);
   }
 
   const now = new Date().toISOString();
   const run: RunState = {
-    contractVersion: 2,
+    contractVersion: 3,
     memorySyntax: procedure.entity.syntax,
     id: makeRunId(now),
     status: "running",
@@ -276,9 +425,12 @@ export async function startRun(input: { memoryRoot: string; runsRoot: string; pr
       memoryName: procedure.entity.names[0],
       asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
       steps,
-      index: 0
+      index: 0,
+      roleBindings: instantiated.roleBindings
     }],
-    events: []
+    events: [],
+    controlPlane,
+    procedureSnapshots
   };
 
   await expandAutoCallSteps(run);
@@ -292,6 +444,9 @@ export async function readRun(runsRoot: string, id: string): Promise<RunState> {
 }
 
 export function parseRunState(parsed: unknown): RunState {
+  if (parsed && typeof parsed === "object" && (parsed as { contractVersion?: unknown }).contractVersion === 3) {
+    return runStateV3Schema.parse(parsed);
+  }
   if (parsed && typeof parsed === "object" && (parsed as { contractVersion?: unknown }).contractVersion === 2) {
     return runStateSchema.parse(parsed);
   }
@@ -322,11 +477,21 @@ export async function listRuns(runsRoot: string): Promise<RunState[]> {
   return runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export async function reportRun(input: { runsRoot: string; runId: string; artifact: ArtifactReportSource }): Promise<RunState> {
+export async function reportRun(input: {
+  runsRoot: string;
+  runId: string;
+  artifact: ArtifactReportSource;
+  locale?: "zh-CN" | "en";
+}): Promise<RunState> {
   return withRunWriteLock(input.runsRoot, input.runId, () => reportRunUnlocked(input));
 }
 
-async function reportRunUnlocked(input: { runsRoot: string; runId: string; artifact: ArtifactReportSource }): Promise<RunState> {
+async function reportRunUnlocked(input: {
+  runsRoot: string;
+  runId: string;
+  artifact: ArtifactReportSource;
+  locale?: "zh-CN" | "en";
+}): Promise<RunState> {
   const run = await readRun(input.runsRoot, input.runId);
   if (run.contractVersion === 1 || run.readOnly) {
     throw new Error(`v1 run is read-only and cannot report after the Artifact Contract v2 upgrade: ${input.runId}`);
@@ -347,6 +512,7 @@ async function reportRunUnlocked(input: { runsRoot: string; runId: string; artif
     throw new Error(`run has no current step: ${input.runId}`);
   }
 
+  const authorization = authorizeRunnerForReport(run, step, input.locale ?? "en");
   const contract = await contractForStep(run, step);
   const context = {
     runId: run.id,
@@ -367,7 +533,8 @@ async function reportRunUnlocked(input: { runsRoot: string; runId: string; artif
       step,
       candidate,
       validation,
-      createdArtifactFiles
+      createdArtifactFiles,
+      authorization
     );
     const controlValue = step.kind === "branch" || step.kind === "loop" ? candidate.representation.value : undefined;
 
@@ -389,6 +556,36 @@ async function reportRunUnlocked(input: { runsRoot: string; runId: string; artif
     await removeArtifactFiles(createdArtifactFiles);
     throw error;
   }
+}
+
+function authorizeRunnerForReport(
+  run: RunState,
+  step: RunStep,
+  locale: "zh-CN" | "en"
+): AuthorizationDecision | undefined {
+  if (!step.controlPlane) return undefined;
+  if (!run.controlPlane) throw new Error(`control plane snapshot missing for governed Artifact ${step.id}`);
+  const decision = authorizeArtifactOperation({
+    controlPlane: step.controlPlane,
+    subject: { kind: "runner" },
+    permission: "artifact.submit"
+  });
+  if (decision.allowed) return decision;
+  const runnerPermissions = step.controlPlane.permissions.runner ?? {
+    base: [],
+    grants: [],
+    effective: [],
+    roleSource: "config:control_plane.roles.runner"
+  };
+  const guidance = renderPermissionGuidance({
+    snapshot: run.controlPlane,
+    roleId: "runner",
+    permissions: runnerPermissions,
+    artifactScope: step.controlPlane.artifactScope,
+    locale,
+    decision
+  });
+  throw new ArtifactAuthorizationFailure(decision, guidance.lines);
 }
 
 export async function repeatRun(input: { runsRoot: string; runId: string; count: number }): Promise<RunState> {
@@ -421,7 +618,7 @@ async function repeatRunUnlocked(input: { runsRoot: string; runId: string; count
 
   const createdArtifactFiles: string[] = [];
   try {
-    const expanded = compileRepeatBody(step.repeat, input.count);
+    const expanded = compileRepeatBody(step.repeat, input.count, step.controlPlane);
     frame.steps.splice(frame.index, 1, ...expanded);
     await collapseCompletedFrames(input.runsRoot, run, createdArtifactFiles);
     await expandAutoCallSteps(run);
@@ -463,7 +660,7 @@ async function enterSchemaUnlocked(input: { memoryRoot: string; runsRoot: string
     if (activeStep?.schema?.kind !== "inline") {
       throw new Error("current Artifact does not use an inline schema; provide an external schema name");
     }
-    const steps = compileSchemaSteps(activeStep.schema.node, activeStep.schema.id, stepContract(activeStep));
+    const steps = compileSchemaSteps(activeStep.schema.node, activeStep.schema.id, stepContract(activeStep), activeStep.controlPlane);
     if (!steps.length) throw new Error(`inline schema has no executable fields: ${activeStep.artifact}`);
     run.stack.push({
       type: "schema",
@@ -482,7 +679,7 @@ async function enterSchemaUnlocked(input: { memoryRoot: string; runsRoot: string
     }
     if (!activeStep.schema.node) throw new Error(`schema snapshot missing from Run contract: ${input.schemaName}`);
     const schemaName = activeStep.schema.name;
-    const steps = compileSchemaSteps(activeStep.schema.node, schemaName, stepContract(activeStep));
+    const steps = compileSchemaSteps(activeStep.schema.node, schemaName, stepContract(activeStep), activeStep.controlPlane);
     if (!steps.length) throw new Error(`schema has no executable fields: ${input.schemaName}`);
     run.stack.push({
       type: "schema",
@@ -576,6 +773,115 @@ async function collapseCompletedFrames(
   }
 }
 
+async function snapshotReachableProcedureTemplates(
+  memoryRoot: string,
+  root: ProcedureMemory
+): Promise<Record<string, RunProcedureTemplate>> {
+  const snapshots: Record<string, RunProcedureTemplate> = {};
+  const visited = new Set<string>();
+
+  const visit = async (procedure: ProcedureMemory): Promise<void> => {
+    const canonicalName = procedure.names[0];
+    if (visited.has(canonicalName)) return;
+    visited.add(canonicalName);
+
+    const steps = compileProcedureSteps(procedure);
+    await snapshotExternalSchemas(memoryRoot, steps);
+    const template: RunProcedureTemplate = {
+      memoryName: canonicalName,
+      asserts: procedure.asserts ? [...procedure.asserts] : undefined,
+      roleBindings: procedure.roleBindings ? structuredClone(procedure.roleBindings) : undefined,
+      steps
+    };
+    for (const name of procedure.names) snapshots[name] = template;
+
+    for (const target of collectCallTargets(steps)) {
+      const called = await findMemoryByName(memoryRoot, "procedures", target);
+      if (!called) throw new Error(`procedure not found: ${target}`);
+      await visit(called.entity as ProcedureMemory);
+    }
+  };
+
+  await visit(root);
+  return snapshots;
+}
+
+function collectCallTargets(steps: readonly RunStep[]): string[] {
+  const targets: string[] = [];
+  for (const step of steps) {
+    if (step.kind === "call" && step.target) targets.push(step.target);
+    if (step.branches) {
+      targets.push(...collectCallTargets(step.branches.truthy));
+      targets.push(...collectCallTargets(step.branches.falsy));
+    }
+    if (step.loop) targets.push(...collectCallTargets(step.loop.body));
+  }
+  return [...new Set(targets)];
+}
+
+function instantiateProcedureTemplate(
+  template: RunProcedureTemplate,
+  parentBindings: ResolvedRoleBindings,
+  snapshot: ControlPlaneSnapshot | undefined
+): { steps: RunStep[]; roleBindings: ResolvedRoleBindings } {
+  assertGovernanceReferences(
+    snapshot,
+    template.roleBindings,
+    undefined,
+    `procedure:${template.memoryName}`
+  );
+  const roleBindings = mergeRoleBindings(
+    parentBindings,
+    template.roleBindings,
+    `procedure:${template.memoryName}`
+  );
+  const steps = cloneSteps(template.steps);
+  applyControlPlaneToSteps(steps, roleBindings, snapshot, template.memoryName);
+  return { steps, roleBindings };
+}
+
+function applyControlPlaneToSteps(
+  steps: RunStep[],
+  procedureBindings: ResolvedRoleBindings,
+  snapshot: ControlPlaneSnapshot | undefined,
+  procedureName: string
+): void {
+  for (const step of steps) {
+    if (step.artifact) {
+      const artifactScope = `${procedureName}#${step.id}`;
+      assertGovernanceReferences(snapshot, step.roleBindings, step.permissionGrants, `artifact:${artifactScope}`);
+      if (snapshot) {
+        step.controlPlane = resolveArtifactControlPlane({
+          snapshot,
+          procedureBindings,
+          artifactBindings: step.roleBindings,
+          permissionGrants: step.permissionGrants as ControlPlanePermissionGrants | undefined,
+          artifactScope,
+          artifactBindingSource: `artifact:${artifactScope}`,
+          artifactGrantSource: `artifact:${artifactScope}`
+        });
+      }
+    }
+    if (step.branches) {
+      applyControlPlaneToSteps(step.branches.truthy, procedureBindings, snapshot, procedureName);
+      applyControlPlaneToSteps(step.branches.falsy, procedureBindings, snapshot, procedureName);
+    }
+    if (step.loop) applyControlPlaneToSteps(step.loop.body, procedureBindings, snapshot, procedureName);
+  }
+}
+
+function assertGovernanceReferences(
+  snapshot: ControlPlaneSnapshot | undefined,
+  roleBindings: RoleBindings | undefined,
+  permissionGrants: MemoryPermissionGrants | undefined,
+  path: string
+): void {
+  if (!roleBindings && !permissionGrants) return;
+  if (!snapshot) throw new Error(`control_plane config is required for ${path}`);
+  const issues = validateControlPlaneReferences({ snapshot, roleBindings, permissionGrants, path });
+  if (issues.length) throw new Error(issues.map((issue) => `${issue.path}: ${issue.message}`).join("; "));
+}
+
 function compileProcedureSteps(procedure: ProcedureMemory): RunStep[] {
   return compileFlowSteps(procedure.flow, "flow");
 }
@@ -618,7 +924,7 @@ function compileActionStep(node: ActionNode, id: string): RunStep {
 function compileArtifactStep(
   artifact: ActionNode["artifact"],
   id: string
-): Pick<RunStep, "artifact" | "type" | "format" | "schema" | "validationPlan" | "final"> {
+): Pick<RunStep, "artifact" | "type" | "format" | "schema" | "validationPlan" | "final" | "roleBindings" | "permissionGrants"> {
   const contract = compileArtifactContract(artifact);
   const schema = typeof artifact.schema === "string"
     ? { kind: "external" as const, name: artifact.schema }
@@ -631,7 +937,9 @@ function compileArtifactStep(
     format: contract.format,
     schema,
     validationPlan: artifactValidatorRegistry.resolvePlan(contract),
-    final: artifact.final || undefined
+    final: artifact.final || undefined,
+    roleBindings: artifact.roleBindings ? structuredClone(artifact.roleBindings) : undefined,
+    permissionGrants: artifact.permissionGrants ? structuredClone(artifact.permissionGrants) : undefined
   };
 }
 
@@ -708,6 +1016,9 @@ function cloneStep(step: RunStep): RunStep {
     asserts: step.asserts ? [...step.asserts] : undefined,
     suggests: step.suggests ? [...step.suggests] : undefined,
     details: step.details ? [...step.details] : undefined,
+    roleBindings: step.roleBindings ? structuredClone(step.roleBindings) : undefined,
+    permissionGrants: step.permissionGrants ? structuredClone(step.permissionGrants) : undefined,
+    controlPlane: step.controlPlane ? structuredClone(step.controlPlane) : undefined,
     branches: step.branches
       ? {
           truthy: cloneSteps(step.branches.truthy),
@@ -733,6 +1044,21 @@ async function expandAutoCallSteps(run: RunState): Promise<void> {
     if (!frame || !step || step.kind !== "call") return;
     if (!step.target) throw new Error(`${step.id}.target is required`);
     frame.index += 1;
+    if (run.contractVersion === 3) {
+      const template = run.procedureSnapshots?.[step.target];
+      if (!template) throw new Error(`procedure snapshot not found: ${step.target}`);
+      const instantiated = instantiateProcedureTemplate(template, frame.roleBindings ?? {}, run.controlPlane);
+      run.stack.push({
+        type: "procedure",
+        memoryName: template.memoryName,
+        asserts: template.asserts ? [...template.asserts] : undefined,
+        steps: instantiated.steps,
+        index: 0,
+        returnTo: step.id,
+        roleBindings: instantiated.roleBindings
+      });
+      continue;
+    }
     const procedure = await findMemoryByName(run.memoryRoot, "procedures", step.target);
     if (!procedure) throw new Error(`procedure not found: ${step.target}`);
     const procedureMemory = procedure.entity as ProcedureMemory;
@@ -755,7 +1081,8 @@ async function buildRunEventArtifact(
   step: RunStep,
   candidate: PreparedArtifactCandidate,
   validation: ArtifactValidationResult,
-  createdArtifactFiles: string[] = []
+  createdArtifactFiles: string[] = [],
+  authorization?: AuthorizationDecision
 ): Promise<RunEvent["artifact"]> {
   if (!step.artifact || !step.type || !step.format) {
     throw new Error(`step ${step.id} has no artifact`);
@@ -768,7 +1095,8 @@ async function buildRunEventArtifact(
     fields: artifactFieldsForStep(step),
     schema: step.schema,
     validation,
-    final: step.final
+    final: step.final,
+    authorization
   };
 
   if (!shouldStoreArtifactAsFile(step.format)) {
@@ -907,10 +1235,11 @@ function contentTypeForFormat(format: ArtifactFormatSpec): string | undefined {
 function compileSchemaSteps(
   schema: SchemaNode,
   rootName: string,
-  parentContract: CompiledArtifactContract
+  parentContract: CompiledArtifactContract,
+  controlPlane?: ArtifactControlPlane
 ): RunStep[] {
   const steps: RunStep[] = [];
-  walkSchema(schema, rootName, steps, parentContract);
+  walkSchema(schema, rootName, steps, parentContract, controlPlane);
   return steps;
 }
 
@@ -932,14 +1261,16 @@ function walkSchema(
   node: SchemaNode,
   path: string,
   steps: RunStep[],
-  parentContract: CompiledArtifactContract
+  parentContract: CompiledArtifactContract,
+  controlPlane?: ArtifactControlPlane
 ): void {
-    const contract = schemaStepContract(node, parentContract, path);
+  const contract = schemaStepContract(node, parentContract, path);
   steps.push(compileSchemaValueStep({
     id: `schema:${path}`,
     instruction: `Write ${path}`,
     artifact: path,
     contract,
+    controlPlane,
     details: definitionDetails(node.defines)
       .concat((node.asserts ?? []).map((value) => `asserts: ${value}`))
   }));
@@ -950,22 +1281,23 @@ function walkSchema(
 
   for (const [fieldIndex, child] of (node.fields ?? []).entries()) {
     if (typeof child === "string") {
-      steps.push(compileStringSchemaStep(`${path}.${child}`, contract));
+      steps.push(compileStringSchemaStep(`${path}.${child}`, contract, controlPlane));
       continue;
     }
     if (child.tag === "!repeat") {
-      steps.push(compileRepeatStep(child, path, fieldIndex));
+      steps.push(compileRepeatStep(child, path, fieldIndex, controlPlane));
       continue;
     }
-    walkSchema(child, `${path}.${child.names[0]}`, steps, contract);
+    walkSchema(child, `${path}.${child.names[0]}`, steps, contract, controlPlane);
   }
 }
 
-function compileStringSchemaStep(path: string, parent: CompiledArtifactContract): RunStep {
+function compileStringSchemaStep(path: string, parent: CompiledArtifactContract, controlPlane?: ArtifactControlPlane): RunStep {
   return compileSchemaValueStep({
     id: `schema:${path}`,
     instruction: `Write ${path}`,
     artifact: path,
+    controlPlane,
     contract: {
       name: path,
       type: "string",
@@ -981,6 +1313,7 @@ function compileSchemaValueStep(input: {
   artifact: string;
   contract: CompiledArtifactContract;
   details?: string[];
+  controlPlane?: ArtifactControlPlane;
 }): RunStep {
   const contract = input.contract;
   return {
@@ -991,11 +1324,12 @@ function compileSchemaValueStep(input: {
     type: contract.type,
     format: contract.format,
     validationPlan: artifactValidatorRegistry.resolvePlan(contract),
-    details: input.details
+    details: input.details,
+    controlPlane: input.controlPlane ? structuredClone(input.controlPlane) : undefined
   };
 }
 
-function compileRepeatStep(node: RepeatNode, parentPath: string, fieldIndex: number): RunStep {
+function compileRepeatStep(node: RepeatNode, parentPath: string, fieldIndex: number, controlPlane?: ArtifactControlPlane): RunStep {
   const min = node.limit?.min ?? 0;
   const max = node.limit?.max;
   return {
@@ -1008,6 +1342,7 @@ function compileRepeatStep(node: RepeatNode, parentPath: string, fieldIndex: num
       `max: ${max === undefined ? "unbounded" : max}`,
       `body fields: ${node.body.length}`
     ],
+    controlPlane: controlPlane ? structuredClone(controlPlane) : undefined,
     repeat: {
       parentPath,
       fieldIndex,
@@ -1018,7 +1353,11 @@ function compileRepeatStep(node: RepeatNode, parentPath: string, fieldIndex: num
   };
 }
 
-function compileRepeatBody(repeat: NonNullable<RunStep["repeat"]>, count: number): RunStep[] {
+function compileRepeatBody(
+  repeat: NonNullable<RunStep["repeat"]>,
+  count: number,
+  controlPlane?: ArtifactControlPlane
+): RunStep[] {
   const steps: RunStep[] = [];
   for (let iteration = 1; iteration <= count; iteration += 1) {
     for (const child of repeat.body) {
@@ -1028,14 +1367,14 @@ function compileRepeatBody(repeat: NonNullable<RunStep["repeat"]>, count: number
           type: "object",
           format: { name: "markdown", options: { layout: "outline" } },
           final: false
-        }));
+        }, controlPlane));
       } else {
         walkSchema(child, `${repeat.parentPath}.${child.names[0]}[${iteration}]`, steps, {
           name: repeat.parentPath,
           type: "object",
           format: { name: "markdown", options: { layout: "outline" } },
           final: false
-        });
+        }, controlPlane);
       }
     }
   }

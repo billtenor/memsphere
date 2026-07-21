@@ -1,11 +1,13 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ZodError } from "zod";
-import { findConfigPath, readConfig, readConfigAt } from "./config.js";
+import { configSchema, findConfigPath, readConfigAt, type MemsphereConfig } from "./config.js";
+import { createControlPlaneSnapshot, validateControlPlaneReferences, type ControlPlaneSnapshot } from "./control-plane/index.js";
+import type { FlowNode, ProcedureMemory } from "./memory/ast.js";
 import { analyzeMemoryDescriptors } from "./memory/catalog.js";
 import { memoryKinds, type MemoryKind } from "./memory/kinds.js";
 import type { ProviderMemoryDescriptor } from "./memory/provider.js";
-import { listMemoryFiles, pathExists, readMemoryFile } from "./memory/store.js";
+import { listMemoryFiles, pathExists, readMemoryFile, type MemoryFile } from "./memory/store.js";
 import { currentMemorySyntax, readMemorySyntax } from "./memory/syntax.js";
 import { parseMemoryYaml } from "./memory/yaml.js";
 import { canMigrateMemorySyntax } from "./migration/memory-syntax-path.js";
@@ -58,9 +60,20 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
   let memoryRoot: string | undefined;
   let reviewsRoot: string | undefined;
   let runsRoot: string | undefined;
+  let config: MemsphereConfig;
 
   try {
-    const config = configPath ? await readConfig(configPath) : await readConfigAt(resolvedConfigPath);
+    const parsedConfig = configSchema.safeParse(JSON.parse(await readFile(resolvedConfigPath, "utf8")));
+    if (!parsedConfig.success) {
+      return {
+        configPath: resolvedConfigPath,
+        issues: parsedConfig.error.issues.map((issue) => ({
+          path: configIssuePath(resolvedConfigPath, issue.path),
+          message: issue.message
+        }))
+      };
+    }
+    config = await readConfigAt(resolvedConfigPath);
     memoryRoot = config.memoryRoot;
     reviewsRoot = config.reviewsRoot;
     runsRoot = config.runsRoot;
@@ -84,6 +97,7 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
   }
 
   const descriptors: ProviderMemoryDescriptor[] = [];
+  const validFiles: MemoryFile[] = [];
   for (const kind of memoryKinds) {
     const dir = join(memoryRoot, kind);
 
@@ -92,7 +106,7 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
       continue;
     }
 
-    descriptors.push(...await validateKindDirectory(memoryRoot, kind, issues));
+    descriptors.push(...await validateKindDirectory(memoryRoot, kind, issues, validFiles));
   }
 
   const catalogIssues = analyzeMemoryDescriptors(descriptors);
@@ -102,6 +116,8 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
       message: issue.message
     });
   }
+
+  validateControlPlaneMemories(validFiles, config.controlPlane ? createControlPlaneSnapshot(config.controlPlane) : undefined, issues);
 
   return {
     configPath: resolvedConfigPath,
@@ -115,7 +131,8 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
 async function validateKindDirectory(
   memoryRoot: string,
   kind: MemoryKind,
-  issues: ValidationIssue[]
+  issues: ValidationIssue[],
+  validFiles: MemoryFile[]
 ): Promise<ProviderMemoryDescriptor[]> {
   let filePaths: string[];
 
@@ -133,6 +150,7 @@ async function validateKindDirectory(
   for (const filePath of filePaths) {
     try {
       const file = await readMemoryFile(kind, filePath);
+      validFiles.push(file);
       descriptors.push({
         id: filePath,
         kind,
@@ -148,6 +166,107 @@ async function validateKindDirectory(
     }
   }
   return descriptors;
+}
+
+function configIssuePath(configPath: string, path: PropertyKey[]): string {
+  let suffix = "";
+  for (const part of path) {
+    suffix += typeof part === "number" ? `[${part}]` : `${suffix ? "." : ""}${String(part)}`;
+  }
+  return suffix ? `${configPath}#${suffix}` : configPath;
+}
+
+function validateControlPlaneMemories(
+  files: readonly MemoryFile[],
+  snapshot: ControlPlaneSnapshot | undefined,
+  issues: ValidationIssue[]
+): void {
+  for (const file of files) {
+    if (file.entity.tag !== "!procedure") continue;
+    const procedure = file.entity as ProcedureMemory;
+    validateGovernanceFields({
+      filePath: file.path,
+      nodePath: "root",
+      roleBindings: procedure.roleBindings,
+      snapshot,
+      issues
+    });
+    validateFlowGovernance(procedure.flow, "flow", file.path, snapshot, issues);
+  }
+}
+
+function validateFlowGovernance(
+  flow: readonly FlowNode[],
+  path: string,
+  filePath: string,
+  snapshot: ControlPlaneSnapshot | undefined,
+  issues: ValidationIssue[]
+): void {
+  for (const [index, node] of flow.entries()) {
+    const nodePath = `${path}[${index}]`;
+    if (node.tag === "!action") {
+      validateGovernanceFields({
+        filePath,
+        nodePath: `${nodePath}.artifact`,
+        roleBindings: node.artifact.roleBindings,
+        permissionGrants: node.artifact.permissionGrants,
+        snapshot,
+        issues
+      });
+      continue;
+    }
+    if (node.tag === "!if") {
+      validateGovernanceFields({
+        filePath,
+        nodePath: `${nodePath}.condition.artifact`,
+        roleBindings: node.condition.artifact.roleBindings,
+        permissionGrants: node.condition.artifact.permissionGrants,
+        snapshot,
+        issues
+      });
+      validateFlowGovernance(node.then, `${nodePath}.then`, filePath, snapshot, issues);
+      if (node.elseif) validateFlowGovernance([node.elseif], `${nodePath}.elseif`, filePath, snapshot, issues);
+      if (node.else) validateFlowGovernance(node.else, `${nodePath}.else`, filePath, snapshot, issues);
+      continue;
+    }
+    if (node.tag === "!while") {
+      validateGovernanceFields({
+        filePath,
+        nodePath: `${nodePath}.condition.artifact`,
+        roleBindings: node.condition.artifact.roleBindings,
+        permissionGrants: node.condition.artifact.permissionGrants,
+        snapshot,
+        issues
+      });
+      validateFlowGovernance(node.do, `${nodePath}.do`, filePath, snapshot, issues);
+    }
+  }
+}
+
+function validateGovernanceFields(input: {
+  filePath: string;
+  nodePath: string;
+  roleBindings?: Record<string, string[]>;
+  permissionGrants?: Record<string, string[]>;
+  snapshot: ControlPlaneSnapshot | undefined;
+  issues: ValidationIssue[];
+}): void {
+  if (!input.roleBindings && !input.permissionGrants) return;
+  if (!input.snapshot) {
+    input.issues.push({
+      path: `${input.filePath}#${input.nodePath}`,
+      message: "control_plane config is required when Memory declares role_bindings or permission_grants"
+    });
+    return;
+  }
+  for (const issue of validateControlPlaneReferences({
+    snapshot: input.snapshot,
+    roleBindings: input.roleBindings,
+    permissionGrants: input.permissionGrants,
+    path: `${input.filePath}#${input.nodePath}`
+  })) {
+    input.issues.push(issue);
+  }
 }
 
 async function usesMigratableSyntax(filePath: string): Promise<boolean> {

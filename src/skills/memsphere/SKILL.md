@@ -78,7 +78,7 @@ memsphere 使用带 YAML tag 的 mapping 描述一份 Memory。根节点的 tag 
 
 ```yaml
 !concept
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - 示例概念
   - 示例别名
@@ -87,7 +87,7 @@ defines:
 ```
 
 - `!concept`、`!statement`、`!procedure`、`!schema` 分别表示四种 Memory。
-- 顶层 Memory 使用 `syntax` 声明不可变的语法版本；当前稳定版本是 `memsphere-20260719-stable`。省略时固定按历史起点 `start` 解释，不得按最新版猜测。
+- 顶层 Memory 使用 `syntax` 声明不可变的语法版本；当前稳定版本是 `memsphere-20260721-stable`。省略时固定按历史起点 `start` 解释，不得按最新版猜测。
 - `names` 的第一项是规范名称，其余项是别名。
 - 原本允许 `names` 的节点也允许写单个 `name`，其解析结果等价于 `names: [name]`；二者不能同时出现。
 - `defines` 用于定义这份 Memory；其中的全部成员共同生效。
@@ -115,6 +115,33 @@ artifact: !artifact
 - array Schema 不允许直接声明 `fields`。对象元素应在 `item` 或 `items` 的 `type: object` Schema 中声明 `fields`；省略 `item/items` 时只校验数组容器。
 - 不要使用已删除的 `element_types`；旧版字符串 `items` 必须迁移为带 `!schema` tag 的 `item/items`。
 - `asserts` 和 `suggests` 是自然语言契约，不会被代码 validator 猜测执行。
+
+Procedure 和 Artifact 可以声明 Artifact Review 控制平面字段。`role_bindings` 把 `.memsphere/config.json` 中的 Role 绑定到 Identity；`permission_grants` 只在当前 Artifact 临时追加 Role 被允许授予的 Permission：
+
+```yaml
+!procedure
+syntax: memsphere-20260721-stable
+name: 受控交付流程
+role_bindings:
+  reviewer: review_agent
+goals:
+  - 交付受控产物。
+flow:
+  - !action
+    action: 生成受控产物。
+    artifact: !artifact
+      name: 受控产物
+      role_bindings:
+        reviewer: [human_reviewer, review_agent]
+      permission_grants:
+        runner: [artifact.submit]
+```
+
+- `!procedure.role_bindings` 是默认绑定；调用方 Procedure、被调用 Procedure、当前 Artifact 依次覆盖同名 Role，未声明 Role 继续继承。
+- `!artifact.role_bindings` 只覆盖当前 Artifact；`!artifact.permission_grants` 只能使用目标 Role 的 `grantable_permissions`，且只对当前 Artifact 生效。
+- `runner` 是当前 Run 执行上下文隐式承担的保留 Role，不得显式绑定 Identity。
+- `!action` 不允许直接声明 `role_bindings` 或 `permission_grants`，两个字段必须写在其 `artifact` 中。
+- Runner 在 `run report` 前应阅读 CLI 输出的权限说明；成功或拒绝结果中的权限、来源和自然语言说明均来自 Run 启动时保存的控制平面快照。
 
 当 Artifact 使用 `type: object`、`format.name: markdown` 和 `layout: outline` 时，Schema 的 `fields` 可以使用 mapping 形式的 `!repeat`，把非空 `body` 中的一组字符串或 `!schema` 字段整体重复。`limit.min/max` 如出现必须是非负整数且 `min <= max`。首版不允许 Repeat 嵌套，也不允许把 Repeat 放在 table、defines、flow 或其他位置：
 
@@ -182,6 +209,8 @@ memsphere run start "<Procedure 名称>"
 - `Details` 是理解和执行当前步骤所需的补充上下文。
       - `Artifact` 表示当前步骤需要产出的内容、业务类型、编码格式和可选 Schema。
 - `Then` 给出完成当前步骤后应执行的下一条 memsphere 命令。
+
+启用控制平面的步骤还会在 `Then` 前显示 `Control Plane` 和 `Permission Guidance`（中文环境显示“权限说明”）。执行者必须先理解当前 Artifact 下的有效 Permission、临时 Grant 和来源，再执行 `run report`；不得把 Memsphere Permission 误解为任意操作系统文件、进程或网络权限。
 
 只执行当前返回的步骤，不提前执行尚未返回的后续步骤。
 

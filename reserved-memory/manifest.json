@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "memory_syntax": "memsphere-20260719-stable",
+  "memory_syntax": "memsphere-20260721-stable",
   "system_memory": {
     "install": [
       "concepts/memory.yaml",

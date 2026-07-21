@@ -1,12 +1,12 @@
 !concept
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - Procedure
   - 程序性记忆
   - 流程
 defines:
   - memsphere 中用于描述一个任务从开始到结束如何执行的 Memory。
-  - Procedure 通过 goals 描述目标，通过 asserts 声明全局约束，通过 flow 安排有序 Action、分支、循环和对子流程的调用。
+  - Procedure 通过 goals 描述目标，通过 asserts 声明全局约束，通过可选 role_bindings 提供 Artifact Review 默认角色绑定，并通过 flow 安排有序 Action、分支、循环和对子流程的调用。
   - 同一个 Procedure 可以被多次执行，每次执行形成相互独立的 Run；Run 记录当前步骤、步骤产物和最终交付物。
   - !statement
     asserts:
@@ -17,14 +17,16 @@ defines:
       - CLI 返回的 Actor 表示步骤由 agent 还是 human 执行，Do 或 Ask human to do 表示当前动作，Details 提供补充上下文，Artifact 规定步骤产物及其格式，Then 给出下一条命令。
       - 每个 Action 都必须产生明确的 Artifact；Actor 为 human 时，Agent 必须等待 human 提供结果后再上报和继续。
       - 短内容使用 memsphere run report 的 --artifact 上报，文件产物使用 --artifact-file 上报；带 Schema 的结构化 Markdown 产物可以按照 Then 提示进入 Schema 填写流程。
+      - 配置 control_plane 后，每个 Artifact 都必须通过 Runner 的 artifact.submit 鉴权；执行者必须在 report 前阅读 CLI 的自然语言权限说明，拒绝不会改变 Run 状态或写入 Artifact。
       - 完成当前步骤后，必须按照 CLI 返回的 Then 命令上报 Artifact；Run 显示 done 后才能汇报流程完成和最终产物。
   - !schema
     format: yaml
     asserts:
       - 根节点必须使用 !procedure 标签，不得使用独立的 type 字段。
-      - "必须声明 syntax: memsphere-20260719-stable。"
+      - "必须声明 syntax: memsphere-20260721-stable。"
       - 顶层 Procedure 必须声明非空 names，或使用非空 name 作为单值简写。
       - flow 中的结构化值必须使用已注册的 YAML tag。
+      - role_bindings 如出现，必须引用 control_plane 中存在的 Role 与 Identity，且不得显式绑定保留的 runner Role。
     fields:
       - !schema
         name: syntax
@@ -66,6 +68,12 @@ defines:
           type: string
         defines:
           - Procedure 要达成的目标。
+      - !schema
+        names:
+          - role_bindings
+        type: object
+        defines:
+          - 可选，为当前 Procedure 的 Artifact 提供默认 Role Binding；被调用 Procedure 和当前 Artifact 可以按同名 Role 覆盖。
       - !schema
         names:
           - flow

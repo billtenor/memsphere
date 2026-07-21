@@ -1,5 +1,5 @@
 !concept
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - Concept
   - 概念
@@ -20,7 +20,7 @@ defines:
     format: yaml
     asserts:
       - 根节点必须使用 !concept 标签，不得使用独立的 type 字段。
-      - "必须声明 syntax: memsphere-20260719-stable。"
+      - "必须声明 syntax: memsphere-20260721-stable。"
       - 顶层 Concept 必须声明非空 names，或使用非空 name 作为单值简写。
       - defines 可以包含文本定义，以及带 YAML tag 的匿名嵌套记忆实体。
     fields:

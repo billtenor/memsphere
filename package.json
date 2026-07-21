@@ -9,6 +9,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./artifact-validation": "./dist/artifact-validation.js",
+    "./control-plane": "./dist/control-plane.js",
     "./run": "./dist/run/store.js"
   },
   "files": [

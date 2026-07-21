@@ -1,6 +1,7 @@
 import type { Document } from "yaml";
 import {
   assertMemorySyntaxIdentifier,
+  controlPlaneMemorySyntax,
   firstStableMemorySyntax,
   startMemorySyntax,
   type MemorySyntaxVersion
@@ -54,6 +55,11 @@ export const memorySyntaxMigrationRegistry = new MemorySyntaxMigrationRegistry()
 memorySyntaxMigrationRegistry.register({
   from: startMemorySyntax,
   to: firstStableMemorySyntax,
+  migrate: () => undefined
+});
+memorySyntaxMigrationRegistry.register({
+  from: firstStableMemorySyntax,
+  to: controlPlaneMemorySyntax,
   migrate: () => undefined
 });
 

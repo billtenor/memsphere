@@ -1,0 +1,34 @@
+{
+  "memoryRoot": "memory",
+  "reviewsRoot": "reviews",
+  "runsRoot": "runs",
+  "control_plane": {
+    "identities": {
+      "human_reviewer": {
+        "kind": "human",
+        "name": "Human Reviewer"
+      },
+      "review_agent": {
+        "kind": "agent",
+        "name": "Review Agent",
+        "agent": {
+          "command": "codex",
+          "args": ["acp"]
+        }
+      }
+    },
+    "roles": {
+      "runner": {
+        "name": "Runner",
+        "permissions": ["artifact.read"],
+        "grantable_permissions": ["artifact.submit"]
+      },
+      "reviewer": {
+        "name": "Reviewer",
+        "permissions": ["artifact.read", "decision.assess"],
+        "grantable_permissions": ["decision.challenge"],
+        "system_prompt": "Review the Artifact independently."
+      }
+    }
+  }
+}

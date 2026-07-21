@@ -4,10 +4,13 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile as writeRawFile } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readConfigAt } from "../src/config.js";
+import { parseControlPlaneConfig } from "../src/control-plane/index.js";
 import { memoryKinds } from "../src/memory/kinds.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 import {
   activeProcedureAsserts,
+  ArtifactAuthorizationFailure,
   artifactSchemaName,
   currentStep,
   enterSchema,
@@ -1016,5 +1019,244 @@ flow:
     assert.equal(completed.status, "done");
     assert.deepEqual(await readdir(lockRoot), []);
     assert.equal((await readdir(join(runsRoot, started.id))).some((name) => name.endsWith(".tmp")), false);
+  });
+});
+
+test("Run v3 snapshots control-plane bindings, grants, and report authorization", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "governed.yaml"), `!procedure
+name: governed
+role_bindings:
+  reviewer: human
+flow:
+  - !action
+    action: Produce a governed Artifact.
+    artifact: !artifact
+      name: governed result
+      role_bindings:
+        reviewer: [human, agent]
+      permission_grants:
+        runner: [decision.decide]
+`);
+    const controlPlane = parseControlPlaneConfig({
+      identities: {
+        human: { kind: "human", name: "Human" },
+        agent: { kind: "agent", name: "Agent", agent: { command: "codex", args: ["acp"] } }
+      },
+      roles: {
+        runner: {
+          name: "Runner",
+          permissions: ["artifact.read", "artifact.submit"],
+          grantable_permissions: ["decision.decide"]
+        },
+        reviewer: { name: "Reviewer", permissions: ["artifact.read", "decision.assess"] }
+      }
+    });
+
+    const run = await startRun({ memoryRoot, runsRoot, procedureName: "governed", controlPlane });
+    assert.equal(run.contractVersion, 3);
+    assert(run.controlPlane);
+    assert(run.procedureSnapshots?.governed);
+    assert.deepEqual(currentStep(run)?.controlPlane?.bindings.reviewer.identityIds, ["human", "agent"]);
+    assert.deepEqual(currentStep(run)?.controlPlane?.permissions.runner.effective, [
+      "artifact.read",
+      "artifact.submit",
+      "decision.decide"
+    ]);
+
+    const completed = await reportRun({
+      runsRoot,
+      runId: run.id,
+      artifact: { kind: "inline", value: "done" }
+    });
+    assert.equal(completed.events[0].artifact.authorization?.allowed, true);
+    assert.equal(completed.events[0].artifact.authorization?.permission, "artifact.submit");
+    assert.equal(completed.events[0].artifact.authorization?.artifactScope, "governed#flow[1]");
+    assert.equal(completed.events[0].artifact.authorization?.grantSource, "artifact:governed#flow[1]");
+  });
+});
+
+test("control-plane fixture validates and runs through caller and callee precedence", async () => {
+  await withTempDir(async (dir) => {
+    const fixtureRoot = join(process.cwd(), "test", "fixtures", "control-plane", ".memsphere");
+    const config = await readConfigAt(join(fixtureRoot, "config.json"));
+    const validation = await validateMemoryStore(join(fixtureRoot, "config.json"));
+    assert.deepEqual(validation.issues, []);
+
+    const run = await startRun({
+      memoryRoot: config.memoryRoot,
+      runsRoot: join(dir, "runs"),
+      procedureName: "control-plane-caller",
+      controlPlane: config.controlPlane
+    });
+    assert.deepEqual(currentStep(run)?.controlPlane?.bindings.reviewer.identityIds, [
+      "human_reviewer",
+      "review_agent"
+    ]);
+
+    const child = await reportRun({
+      runsRoot: join(dir, "runs"),
+      runId: run.id,
+      artifact: { kind: "inline", value: "caller" }
+    });
+    assert.equal(currentStep(child)?.instruction, "Produce the child Artifact.");
+    assert.deepEqual(currentStep(child)?.controlPlane?.bindings.reviewer.identityIds, ["review_agent"]);
+  });
+});
+
+test("report authorization denial leaves Run and Artifact files unchanged", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "governed.yaml"), `!procedure
+name: governed
+role_bindings: { reviewer: human }
+flow:
+  - !action
+    action: Produce a governed Artifact.
+    artifact: !artifact { name: result }
+`);
+    const controlPlane = parseControlPlaneConfig({
+      identities: { human: { kind: "human", name: "Human" } },
+      roles: {
+        runner: { name: "Runner", permissions: ["artifact.read"] },
+        reviewer: { name: "Reviewer", permissions: ["artifact.read"] }
+      }
+    });
+    const run = await startRun({ memoryRoot, runsRoot, procedureName: "governed", controlPlane });
+    const runPath = join(runsRoot, run.id, `${run.id}.json`);
+    const before = await readFile(runPath, "utf8");
+
+    await assert.rejects(
+      reportRun({ runsRoot, runId: run.id, artifact: { kind: "inline", value: "denied" } }),
+      (error: unknown) => {
+        assert(error instanceof ArtifactAuthorizationFailure);
+        assert.match(error.message, /requires artifact\.submit|requires artifact.submit/);
+        assert.match(error.message, /artifact\.read/);
+        return true;
+      }
+    );
+    assert.equal(await readFile(runPath, "utf8"), before);
+    assert.deepEqual(await readdir(join(runsRoot, run.id)), [`${run.id}.json`]);
+  });
+});
+
+test("configured control plane authorizes every Artifact even without Memory governance fields", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "plain.yaml"), `!procedure
+name: plain
+flow:
+  - !action
+    action: Produce an ordinary Artifact.
+    artifact: !artifact { name: result }
+`);
+    const controlPlane = parseControlPlaneConfig({
+      identities: {},
+      roles: {
+        runner: { name: "Runner", permissions: ["artifact.read"] }
+      }
+    });
+    const run = await startRun({ memoryRoot, runsRoot, procedureName: "plain", controlPlane });
+    assert(currentStep(run)?.controlPlane);
+
+    await assert.rejects(
+      reportRun({ runsRoot, runId: run.id, artifact: { kind: "inline", value: "denied" } }),
+      ArtifactAuthorizationFailure
+    );
+  });
+});
+
+test("Artifact grants can supply runner artifact.submit within the configured ceiling", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "granted.yaml"), `!procedure
+name: granted
+flow:
+  - !action
+    action: Produce a granted Artifact.
+    artifact: !artifact
+      name: result
+      permission_grants:
+        runner: [artifact.submit]
+`);
+    const controlPlane = parseControlPlaneConfig({
+      identities: {},
+      roles: {
+        runner: {
+          name: "Runner",
+          permissions: ["artifact.read"],
+          grantable_permissions: ["artifact.submit"]
+        }
+      }
+    });
+    const run = await startRun({ memoryRoot, runsRoot, procedureName: "granted", controlPlane });
+    const completed = await reportRun({ runsRoot, runId: run.id, artifact: { kind: "inline", value: "allowed" } });
+    assert.equal(completed.events[0].artifact.authorization?.allowed, true);
+    assert.equal(completed.events[0].artifact.authorization?.grantSource, "artifact:granted#flow[1]");
+  });
+});
+
+test("reachable called Procedures are frozen before the Run advances into them", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "caller.yaml"), `!procedure
+name: caller
+role_bindings: { reviewer: human }
+flow:
+  - !action
+    action: Before call.
+    artifact: !artifact { name: first }
+  - !call
+    target: child
+`);
+    const childPath = join(proceduresRoot, "child.yaml");
+    await writeFile(childPath, `!procedure
+name: child
+role_bindings: { reviewer: agent }
+flow:
+  - !action
+    action: Original child instruction.
+    artifact: !artifact { name: child result }
+`);
+    const controlPlane = parseControlPlaneConfig({
+      identities: {
+        human: { kind: "human", name: "Human" },
+        agent: { kind: "agent", name: "Agent", agent: { command: "codex", args: [] } }
+      },
+      roles: {
+        runner: { name: "Runner", permissions: ["artifact.submit"] },
+        reviewer: { name: "Reviewer", permissions: ["artifact.read"] }
+      }
+    });
+    const run = await startRun({ memoryRoot, runsRoot, procedureName: "caller", controlPlane });
+
+    await writeFile(childPath, `!procedure
+name: child
+role_bindings: { reviewer: human }
+flow:
+  - !action
+    action: Mutated child instruction.
+    artifact: !artifact { name: mutated result }
+`);
+    const enteredChild = await reportRun({ runsRoot, runId: run.id, artifact: { kind: "inline", value: "first" } });
+    assert.equal(currentStep(enteredChild)?.instruction, "Original child instruction.");
+    assert.equal(currentStep(enteredChild)?.artifact, "child result");
+    assert.deepEqual(currentStep(enteredChild)?.controlPlane?.bindings.reviewer.identityIds, ["agent"]);
   });
 });

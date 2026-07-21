@@ -1,11 +1,11 @@
 !statement
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - Memsphere YAML 语法规则
   - Memsphere YAML syntax rules
 defines:
   - 定义 memsphere Memory YAML DSL 的节点、字段、缺省值、组合约束和树状关系，作为语法设计与实现的一致性基线。
-  - 本记忆描述当前稳定版本 memsphere-20260719-stable 支持的 Memsphere YAML 语法。
+  - 本记忆描述当前稳定版本 memsphere-20260721-stable 支持的 Memsphere YAML 语法。
 asserts:
   - 语法实现、Reserved Memory、技能文档、迁移工具和示例必须以本规则树中评审通过的规则为共同依据。
 sections:
@@ -18,7 +18,7 @@ sections:
           - 语法版本
         defines:
           - 每份顶层 Memory 使用 syntax 声明其 Memsphere YAML 语法版本；版本标识采用 memsphere-YYYYMMDD-draft 或 memsphere-YYYYMMDD-stable 格式。
-          - start 是历史未版本化 Memory 的缺省迁移起点，不是正式发布版本；当前正式版本是 memsphere-20260719-stable。
+          - start 是历史未版本化 Memory 的缺省迁移起点，不是正式发布版本；当前正式版本是 memsphere-20260721-stable。
         asserts:
           - 省略 syntax 时必须按 start 解析，不得按运行时最新版本解释。
           - stable 版本一经发布，其解析、缺省值和校验语义不得原地修改；语法变化必须发布新版本并提供显式迁移路径。
@@ -32,7 +32,7 @@ sections:
             根 Memory 通过 YAML tag 声明自己的区块类型：
             ```yaml
             !statement
-            syntax: memsphere-20260719-stable
+            syntax: memsphere-20260721-stable
             names:
               - 发布规则
             asserts:
@@ -125,7 +125,7 @@ sections:
                 例如：
                 ```yaml
                 !procedure
-                syntax: memsphere-20260719-stable
+                syntax: memsphere-20260721-stable
                 names:
                   - 示例流程
                 flow:
@@ -166,7 +166,7 @@ sections:
             正式 Memory 应显式声明稳定版本：
             ```yaml
             !schema
-            syntax: memsphere-20260719-stable
+            syntax: memsphere-20260721-stable
             name: 发布记录
             type: object
             ```
@@ -296,6 +296,47 @@ sections:
             ```
         asserts:
           - extends 如出现必须是字符串数组，每一项都是非空的可解析名称或引用。
+
+      - !statement
+        names:
+          - role_bindings
+        defines:
+          - 在 Procedure 或 Artifact 作用域把配置中的 Role 绑定到一个或多个 Identity。
+          - |-
+            单个 Identity 可以使用字符串简写，多个 Identity 使用 YAML sequence：
+            ```yaml
+            role_bindings:
+              reviewer:
+                - human_reviewer
+                - review_agent
+              decider: release_owner
+            ```
+        asserts:
+          - role_bindings 的值必须是 YAML mapping；每个 key 是非空 Role id，每个 value 是一个非空 Identity id，或由不重复非空 Identity id 组成的非空 YAML sequence。
+          - role_bindings 只允许出现在 !procedure 和 !artifact；!action、!if、!while、!call 及其他区块不得直接声明。
+          - runner 是当前 Run 执行上下文隐式承担的保留 Role，不得出现在 role_bindings 中。
+          - Role 与 Identity 必须存在于当前 control_plane 配置中；悬空引用必须被 validate 拒绝。
+          - 调用链中的绑定按调用方 Procedure、被调用 Procedure、当前 Artifact 从低到高覆盖；高优先级作用域声明同一 Role 时整体替换，未声明的 Role 继续继承。
+
+      - !statement
+        names:
+          - permission_grants
+        defines:
+          - 为当前 Artifact 中的指定 Role 临时追加一组 Permission。
+          - |-
+            每个 Grant 都必须落在对应 Role 配置的 `grantable_permissions` 上限内：
+            ```yaml
+            permission_grants:
+              runner:
+                - artifact.submit
+              reviewer:
+                - decision.challenge
+            ```
+        asserts:
+          - permission_grants 的值必须是 YAML mapping；每个 key 是非空 Role id，每个 value 是由不重复非空 Permission id 组成的非空 YAML sequence。
+          - permission_grants 只允许出现在 !artifact，不得出现在 !procedure、!action 或其他区块。
+          - Role 和 Permission 必须存在，且每个 Permission 必须列在该 Role 的 grantable_permissions 中；Grant 不能撤销基础 Permission，也不能越过配置上限。
+          - Grant 仅对当前 Artifact 生效，不传播到后续 Artifact 或被调用 Procedure 的其他 Artifact。
 
       - !statement
         names:
@@ -895,10 +936,11 @@ sections:
                   format: markdown
             ```
         asserts:
-          - "!procedure 根节点允许 name/names、defines、asserts、goals 和 flow 字段。"
+          - "!procedure 根节点允许 name/names、defines、asserts、goals、role_bindings 和 flow 字段。"
           - Procedure.asserts 如出现，必须是非空字符串数组，并在当前 Procedure 及其调用链执行期间持续生效。
           - goals 必须是字符串数组，用于声明流程目标。
           - flow 必须是由 !action、!if、!while 或 !call 节点组成的有序数组。
+          - role_bindings 如出现，为当前 Procedure 中所有 Artifact 提供默认 Role Binding；被调用 Procedure 对同名 Role 的声明覆盖调用方默认值。
         sections:
           - !statement
             names:
@@ -920,7 +962,7 @@ sections:
                     format: markdown
                 ```
             asserts:
-              - "!action 只允许 action、actor、asserts、suggests 和 artifact 字段。"
+              - "!action 只允许 action、actor、asserts、suggests 和 artifact 字段；role_bindings 与 permission_grants 必须写入 artifact，而不是 Action。"
               - action 必须是非空字符串，描述当前步骤要完成的动作。
               - actor 只允许 agent 或 human，省略时默认为 agent。
               - Action.asserts 如出现，必须是非空字符串数组，只约束当前步骤。
@@ -949,7 +991,7 @@ sections:
                       final: true
                     ```
                 asserts:
-                  - "!artifact 只允许 name、type、format、schema 和 final 字段。"
+                  - "!artifact 只允许 name、type、format、schema、final、role_bindings 和 permission_grants 字段。"
                   - name 必须是非空字符串，用于描述当前 Action 的交付物。
                   - type 省略时默认为 string；format 省略时默认为 plain。
                   - schema 可以是外部 Schema 的名称引用，或一个 inline !schema；string、number 和 boolean Artifact 不得声明 schema。
@@ -961,6 +1003,8 @@ sections:
                   - "object + markdown 必须声明 layout: outline 并提供 schema。"
                   - "array + markdown 必须声明 layout: table 并提供 schema。"
                   - inline Schema 根节点解析后的 type 和 format 必须与 Artifact 契约完全一致。
+                  - Artifact.role_bindings 覆盖当前调用链中同名 Role 的 Procedure Binding，未声明 Role 继续继承。
+                  - Artifact.permission_grants 只能从目标 Role 的 grantable_permissions 中临时追加权限，并且只对当前 Artifact 生效。
 
           - !statement
             names:

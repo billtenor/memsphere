@@ -8,6 +8,7 @@ import { memoryKinds } from "../src/memory/kinds.js";
 import { parseMemoryEntity, readAllMemoryFiles } from "../src/memory/store.js";
 import {
   currentMemorySyntax,
+  firstStableMemorySyntax,
   MemorySyntaxRegistry,
   readMemorySyntax,
   startMemorySyntax
@@ -41,17 +42,25 @@ test("Memory syntax defaults to start and formal versions use immutable identifi
 
 test("Memory syntax migration availability comes from the migration graph", () => {
   assert.equal(canMigrateMemorySyntax(startMemorySyntax, currentMemorySyntax), true);
+  assert.equal(canMigrateMemorySyntax(firstStableMemorySyntax, currentMemorySyntax), true);
   assert.equal(canMigrateMemorySyntax(currentMemorySyntax, currentMemorySyntax), false);
   assert.equal(canMigrateMemorySyntax("memsphere-20990101-stable", currentMemorySyntax), false);
 });
 
-test("Memory syntax dispatch accepts only the current version and rejects nested syntax fields", () => {
+test("Memory syntax dispatch accepts registered stable versions and rejects nested syntax fields", () => {
   const current = parseMemoryEntity("concepts", parseMemoryYaml(`!concept
 syntax: ${currentMemorySyntax}
 name: Current
 defines: [Current syntax.]
 `));
   assert.equal(current.syntax, currentMemorySyntax);
+
+  const previous = parseMemoryEntity("concepts", parseMemoryYaml(`!concept
+syntax: ${firstStableMemorySyntax}
+name: Previous
+defines: [Previous stable syntax remains executable.]
+`));
+  assert.equal(previous.syntax, firstStableMemorySyntax);
 
   assert.throws(() => parseMemoryEntity("concepts", parseMemoryYaml(`!concept
 name: Legacy
@@ -73,6 +82,60 @@ sections:
     name: Nested
     asserts: [Nested rule.]
 `)), /Unrecognized key.*syntax/);
+});
+
+test("current syntax scopes Role Binding and Permission Grant to Procedure and Artifact", () => {
+  const parsed = parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
+syntax: ${currentMemorySyntax}
+name: governed
+role_bindings:
+  reviewer: human
+flow:
+  - !action
+    action: Produce an Artifact.
+    artifact: !artifact
+      name: result
+      role_bindings:
+        reviewer: [human, agent]
+      permission_grants:
+        runner: [decision.decide]
+`));
+  assert.equal(parsed.tag, "!procedure");
+  if (parsed.tag !== "!procedure") return;
+  assert.deepEqual(parsed.roleBindings, { reviewer: ["human"] });
+  const action = parsed.flow[0];
+  assert.equal(action.tag, "!action");
+  if (action.tag !== "!action") return;
+  assert.deepEqual(action.artifact.roleBindings, { reviewer: ["human", "agent"] });
+  assert.deepEqual(action.artifact.permissionGrants, { runner: ["decision.decide"] });
+
+  assert.throws(() => parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
+syntax: ${firstStableMemorySyntax}
+name: old-governed
+role_bindings: { reviewer: human }
+flow: []
+`)), /Unrecognized key.*role_bindings/);
+
+  assert.throws(() => parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
+syntax: ${currentMemorySyntax}
+name: misplaced
+flow:
+  - !action
+    action: Invalid placement.
+    role_bindings: { reviewer: human }
+    artifact: !artifact { name: result }
+`)), /Unrecognized key.*role_bindings/);
+
+  assert.throws(() => parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
+syntax: ${currentMemorySyntax}
+name: invalid-grant
+flow:
+  - !action
+    action: Invalid grant.
+    artifact: !artifact
+      name: result
+      permission_grants: { runner: decision.decide }
+`)), /Expected array/);
 });
 
 test("Memory syntax registries reject duplicate definitions", () => {

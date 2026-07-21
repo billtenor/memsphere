@@ -1,5 +1,5 @@
 !concept
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - Schema
   - 图式记忆
@@ -27,7 +27,7 @@ defines:
     format: yaml
     asserts:
       - 根节点必须使用 !schema 标签。
-      - "必须声明 syntax: memsphere-20260719-stable。"
+      - "必须声明 syntax: memsphere-20260721-stable。"
       - 顶层 Schema 必须声明非空 names，或使用非空 name 作为单值简写。
     fields:
       - !schema

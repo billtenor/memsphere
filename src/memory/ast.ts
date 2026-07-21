@@ -12,6 +12,9 @@ export type ArtifactFormatSpec = {
   options: Readonly<Record<string, unknown>>;
 };
 
+export type RoleBindings = Record<string, string[]>;
+export type PermissionGrants = Record<string, string[]>;
+
 export const stepActors = ["agent", "human"] as const;
 export type StepActor = (typeof stepActors)[number];
 
@@ -66,6 +69,8 @@ export type ArtifactNode = {
   format: ArtifactFormatSpec;
   schema?: string | SchemaNode;
   final?: boolean;
+  roleBindings?: RoleBindings;
+  permissionGrants?: PermissionGrants;
 };
 
 export type ActionNode = {
@@ -102,6 +107,7 @@ export type ProcedureNode = CommonMemoryNode & {
   tag: "!procedure";
   asserts?: string[];
   goals: string[];
+  roleBindings?: RoleBindings;
   flow: FlowNode[];
 };
 

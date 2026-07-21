@@ -100,6 +100,7 @@ const entities: MemoryEntity[] = [
     defines: [],
     asserts: ["Global procedure contracts survive."],
     goals: ["Exercise every flow tag."],
+    roleBindings: { reviewer: ["review_agent"] },
     flow: [
       {
         tag: "!if",
@@ -123,7 +124,14 @@ const entities: MemoryEntity[] = [
           {
             tag: "!action",
             action: "Write markdown.",
-            artifact: { tag: "!artifact", name: "note", type: "string", format: { name: "markdown", options: {} } }
+            artifact: {
+              tag: "!artifact",
+              name: "note",
+              type: "string",
+              format: { name: "markdown", options: {} },
+              roleBindings: { reviewer: ["human_reviewer", "review_agent"] },
+              permissionGrants: { runner: ["artifact.submit"] }
+            }
           }
         ]
       }
@@ -136,7 +144,12 @@ for (const entity of entities) {
     const source = serializeMemoryYaml(entity);
     assert(source.startsWith(`${entity.tag}\n`));
     assert(!/^tag:/m.test(source));
-    if (entity.tag === "!procedure") assert.doesNotMatch(source, /type: string/);
+    if (entity.tag === "!procedure") {
+      assert.doesNotMatch(source, /type: string/);
+      assert.match(source, /role_bindings:/);
+      assert.match(source, /permission_grants:/);
+      assert.doesNotMatch(source, /roleBindings|permissionGrants/);
+    }
     const parsed = parseMemoryYaml(source);
     const kind = entity.tag === "!concept"
       ? "concepts"
@@ -191,7 +204,13 @@ test("memory node serializers preserve tagged fragments and copyable text refere
     node_ref: "action:Result",
     node_type: "Action" as const,
     context: {
-      root: { tag: "!procedure", names: ["Flow"], defines: [], goals: ["Finish."] },
+      root: {
+        tag: "!procedure",
+        names: ["Flow"],
+        defines: [],
+        goals: ["Finish."],
+        roleBindings: { reviewer: ["review_agent"] }
+      },
       ancestors: []
     },
     fragment: {
@@ -201,12 +220,16 @@ test("memory node serializers preserve tagged fragments and copyable text refere
         tag: "!artifact",
         name: "Result",
         type: "string",
-        format: { name: "markdown", options: {} }
+        format: { name: "markdown", options: {} },
+        permissionGrants: { runner: ["artifact.submit"] }
       }
     }
   };
   const yaml = serializeMemoryNodeReadYaml(result);
   assert.match(yaml, /root: !procedure/);
   assert.match(yaml, /fragment: !action/);
+  assert.match(yaml, /role_bindings:/);
+  assert.match(yaml, /permission_grants:/);
+  assert.doesNotMatch(yaml, /roleBindings|permissionGrants/);
   assert.deepEqual(JSON.parse(serializeMemoryNodeReadJson(result)), result);
 });

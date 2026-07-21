@@ -56,3 +56,47 @@ test("readConfigAt resolves an explicit archiveRoot", async () => {
     assert.equal(config.archiveRoot, "/shared/memsphere/archives");
   });
 });
+
+test("readConfigAt resolves strict control_plane configuration", async () => {
+  await withTempDir(async (dir) => {
+    const configPath = join(dir, "config.json");
+    await writeFile(configPath, JSON.stringify({
+      memoryRoot: "memory",
+      control_plane: {
+        identities: {
+          reviewer: { kind: "human", name: "Reviewer" }
+        },
+        roles: {
+          runner: { name: "Runner", permissions: ["artifact.submit"] },
+          reviewer: {
+            name: "Reviewer",
+            permissions: ["artifact.read", "decision.assess"],
+            system_prompt: "Review the Artifact."
+          }
+        }
+      }
+    }));
+
+    const config = await readConfigAt(configPath);
+    assert.deepEqual(config.controlPlane?.roles.runner.permissions, ["artifact.submit"]);
+    assert.equal(config.controlPlane?.roles.reviewer.systemPrompt, "Review the Artifact.");
+  });
+});
+
+test("readConfigAt rejects unknown top-level and control_plane fields", async () => {
+  await withTempDir(async (dir) => {
+    const configPath = join(dir, "config.json");
+    await writeFile(configPath, JSON.stringify({ memoryRoot: "memory", unknown: true }));
+    await assert.rejects(readConfigAt(configPath), /Unrecognized key.*unknown/);
+
+    await writeFile(configPath, JSON.stringify({
+      memoryRoot: "memory",
+      control_plane: {
+        identities: {},
+        roles: { runner: { name: "Runner", permissions: [] } },
+        permissions: []
+      }
+    }));
+    await assert.rejects(readConfigAt(configPath), /Unrecognized key.*permissions/);
+  });
+});

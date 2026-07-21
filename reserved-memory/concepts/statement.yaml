@@ -1,5 +1,5 @@
 !concept
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - Statement
   - 陈述记忆
@@ -34,7 +34,7 @@ defines:
     format: yaml
     asserts:
       - 根节点必须使用 !statement 标签，不得使用独立的 type 字段。
-      - "必须声明 syntax: memsphere-20260719-stable。"
+      - "必须声明 syntax: memsphere-20260721-stable。"
       - 顶层 Statement 必须声明非空 names，或使用非空 name 作为单值简写。
       - asserts、suggests 和 sections 均为可选非空数组，每个 Statement 节点必须至少包含其中一个。
       - sections 的成员必须是带 !statement tag 和非空 names 的 Statement，同级成员的规范名称不得重复。

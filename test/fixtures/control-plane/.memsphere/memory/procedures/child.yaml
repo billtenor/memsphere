@@ -1,0 +1,14 @@
+!procedure
+syntax: memsphere-20260721-stable
+name: control-plane-child
+role_bindings:
+  reviewer: review_agent
+goals:
+  - Exercise callee Procedure binding precedence.
+flow:
+  - !action
+    action: Produce the child Artifact.
+    artifact: !artifact
+      name: child result
+      permission_grants:
+        runner: [artifact.submit]
