@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createArtifactReviewAssignments,
+  artifactReviewOpinionReferencesImplementation,
   evaluateArtifactReviewRound,
+  repeatedArtifactReviewAdvisories,
+  type ArtifactReview,
   type ArtifactReviewRound
 } from "../src/artifact-review.js";
 import {
@@ -168,4 +171,56 @@ test("unanimous fails when a Human decider requests changes", () => {
     }]
   };
   assert.equal(evaluateArtifactReviewRound(round, "2026-07-21T00:02:00.000Z")?.status, "changes_requested");
+});
+
+test("repeated advisory comments aggregate across review rounds", () => {
+  const advisory = (sequence: number): ArtifactReviewRound => ({
+    id: `round-${sequence}`,
+    sequence,
+    submissionId: `submission-${sequence}`,
+    status: "changes_requested",
+    revision: 1,
+    createdAt: "2026-07-21T00:00:00.000Z",
+    assignments: [{
+      identityId: "advisor",
+      identityName: "Advisor",
+      roleIds: ["advisor"],
+      permissions: ["artifact.read", "decision.assess"],
+      binding: "advisory",
+      status: "submitted",
+      draft: { comments: [] },
+      submitted: {
+        comments: [{
+          id: `comment-${sequence}`,
+          body: sequence === 1 ? "Validate the retry path." : "  validate   the retry path. ",
+          severity: "risk",
+          createdAt: "2026-07-21T00:00:00.000Z",
+          updatedAt: "2026-07-21T00:00:00.000Z"
+        }],
+        vote: "request_changes",
+        submittedAt: "2026-07-21T00:00:00.000Z",
+        authorization: {} as never
+      }
+    }],
+    votes: []
+  });
+  const review = { rounds: [advisory(1), advisory(2)] } as ArtifactReview;
+  assert.deepEqual(repeatedArtifactReviewAdvisories(review), [{
+    severity: "risk",
+    body: "Validate the retry path.",
+    count: 2,
+    rounds: [1, 2]
+  }]);
+});
+
+test("submitted opinions expose whether implementation evidence was referenced", () => {
+  const opinion = {
+    comments: [],
+    vote: "approve" as const,
+    summary: "Reviewed src/run/store.ts and the implementation diff.",
+    submittedAt: "2026-07-21T00:00:00.000Z",
+    authorization: {} as never
+  };
+  assert.equal(artifactReviewOpinionReferencesImplementation(opinion), true);
+  assert.equal(artifactReviewOpinionReferencesImplementation({ ...opinion, summary: "The requirement text is clear." }), false);
 });

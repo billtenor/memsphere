@@ -5,6 +5,11 @@ import MarkdownIt from "markdown-it";
 import { ZodError, type ZodIssue } from "zod";
 import { archiveReview, archiveRun } from "../archive/store.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
+import {
+  artifactReviewFailureCategory,
+  artifactReviewOpinionReferencesImplementation,
+  repeatedArtifactReviewAdvisories
+} from "../artifact-review.js";
 import { type MemsphereConfig, readConfig } from "../config.js";
 import { authorizeArtifactOperation } from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
@@ -36,6 +41,7 @@ import {
   readArtifactReviewForIdentity,
   readRun,
   retryArtifactReviewAgentAssignment,
+  resolveArtifactReviewComment,
   submitArtifactReviewAssignment,
   updateArtifactReviewDraft,
   type ArtifactReviewDraftInput,
@@ -275,6 +281,36 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       });
       await dispatchArtifactReviewAgents({ config, run: context.run });
       sendJson(response, 200, await artifactReviewContextPayload(runsRoot, context));
+    } catch (error) {
+      sendArtifactReviewError(response, error);
+    }
+    return;
+  }
+
+  const artifactReviewResolveMatch = url.pathname.match(
+    /^\/api\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)\/comments\/([^/]+)\/resolve$/
+  );
+  if (request.method === "POST" && artifactReviewResolveMatch) {
+    try {
+      const body = await readJsonBody<{
+        disposition?: unknown;
+        note?: unknown;
+        validationSummary?: unknown;
+      }>(request);
+      const dispositions = ["accepted-fixed", "accepted-followup", "rejected-out-of-scope", "rejected-not-blocking", "rejected-invalid"] as const;
+      if (!dispositions.includes(body.disposition as typeof dispositions[number])) {
+        throw new Error("invalid Artifact Review Comment disposition");
+      }
+      const context = await resolveArtifactReviewComment({
+        runsRoot,
+        reviewId: decodeURIComponent(artifactReviewResolveMatch[1]),
+        roundId: decodeURIComponent(artifactReviewResolveMatch[2]),
+        commentId: decodeURIComponent(artifactReviewResolveMatch[3]),
+        disposition: body.disposition as typeof dispositions[number],
+        note: typeof body.note === "string" ? body.note : undefined,
+        validationSummary: typeof body.validationSummary === "string" ? body.validationSummary : undefined
+      });
+      sendJson(response, 200, { review: artifactReviewSummary(context.review, context.run.controlPlane) });
     } catch (error) {
       sendArtifactReviewError(response, error);
     }
@@ -756,6 +792,20 @@ function artifactReviewSummary(
 ): unknown {
   const round = review.rounds.find((candidate) => candidate.id === review.currentRoundId);
   const runnerVote = round?.votes.find((vote) => vote.subject.kind === "runner");
+  const submission = review.submissions.find((candidate) => candidate.id === round?.submissionId);
+  const advisoryComments = (round?.assignments ?? [])
+    .filter((assignment) => assignment.binding === "advisory")
+    .flatMap((assignment) => assignment.submitted?.comments ?? []);
+  const resolvedCommentIds = new Set((round?.commentDispositions ?? []).map((item) => item.commentId));
+  const severity = {
+    blocking: advisoryComments.filter((comment) => comment.severity === "blocking").length,
+    risk: advisoryComments.filter((comment) => comment.severity === "risk").length,
+    suggestion: advisoryComments.filter((comment) => comment.severity === "suggestion").length,
+    unspecified: advisoryComments.filter((comment) => !comment.severity).length
+  };
+  const failures = (round?.assignments ?? []).flatMap((assignment) => assignment.attempts ?? [])
+    .filter((attempt) => attempt.status === "failed" && attempt.failure)
+    .map((attempt) => ({ attempt: attempt.sequence, ...attempt.failure!, category: artifactReviewFailureCategory(attempt.failure!) }));
   const runnerCanDecide = authorizeArtifactOperation({
     controlPlane: review.controlPlane,
     subject: { kind: "runner" },
@@ -774,6 +824,13 @@ function artifactReviewSummary(
       status: round.status,
       submitted: round.assignments.filter((assignment) => assignment.status === "submitted").length,
       total: round.assignments.length,
+      decisionReady: round.assignments.every((assignment) => assignment.status === "submitted"),
+      severity,
+      unresolvedBlocking: advisoryComments.filter((comment) => comment.severity === "blocking" && !resolvedCommentIds.has(comment.id)).length,
+      failures,
+      evidence: submission?.package?.requirements ?? [],
+      repeatedAdvisories: repeatedArtifactReviewAdvisories(review),
+      commentDispositions: round.commentDispositions ?? [],
       assignments: round.assignments.map((assignment) => ({
         id: assignment.id,
         identityId: assignment.identityId,
@@ -782,7 +839,10 @@ function artifactReviewSummary(
         identityKind: assignment.identityKind ?? "human",
         binding: assignment.binding,
         status: assignment.status,
-        attempt: assignment.attempts?.at(-1)
+        attempt: assignment.attempts?.at(-1),
+        vote: assignment.submitted?.vote,
+        summary: assignment.submitted?.summary,
+        implementationEvidenceReferenced: artifactReviewOpinionReferencesImplementation(assignment.submitted)
       })),
       runner: runnerCanDecide || runnerVote ? {
         roleName: controlPlane?.roles.runner?.name ?? "Runner",
@@ -807,6 +867,10 @@ async function artifactReviewContextPayload(runsRoot: string, context: ArtifactR
     renderedContentType?: string;
   };
   await hydrateArtifactContent(runsRoot, context.run.id, artifact);
+  const reviewPackage = submission.package ? structuredClone(submission.package) : undefined;
+  for (const evidence of reviewPackage?.evidence ?? []) {
+    await hydrateArtifactContent(runsRoot, context.run.id, evidence.artifact);
+  }
   return {
     review: artifactReviewSummary(context.review, context.run.controlPlane),
     submission: {
@@ -814,6 +878,7 @@ async function artifactReviewContextPayload(runsRoot: string, context: ArtifactR
       digest: submission.digest,
       createdAt: submission.createdAt,
       artifact,
+      package: reviewPackage,
       revisionSummary: submission.revisionSummary
     },
     assignment: {
@@ -837,6 +902,7 @@ async function artifactReviewContextPayload(runsRoot: string, context: ArtifactR
         binding: assignment.binding,
         status: assignment.status,
         submitted: assignment.submitted,
+        implementationEvidenceReferenced: artifactReviewOpinionReferencesImplementation(assignment.submitted),
         draft: (assignment.identityKind ?? "human") === "agent" ? assignment.draft : undefined,
         attempts: assignment.attempts
       })),
@@ -1010,6 +1076,10 @@ function normalizeArtifactReviewDraft(input: { vote?: unknown; comments?: unknow
     }
     const comment = value as Record<string, unknown>;
     if (typeof comment.body !== "string") throw new Error("Artifact Review comment body must be a string");
+    const severity = comment.severity;
+    if (severity !== undefined && severity !== "blocking" && severity !== "risk" && severity !== "suggestion") {
+      throw new Error("Artifact Review comment severity must be blocking, risk, or suggestion");
+    }
     let anchor: ArtifactReviewDraftInput["comments"][number]["anchor"];
     if (comment.anchor !== undefined) {
       if (!comment.anchor || typeof comment.anchor !== "object" || Array.isArray(comment.anchor)) {
@@ -1028,6 +1098,7 @@ function normalizeArtifactReviewDraft(input: { vote?: unknown; comments?: unknow
     return {
       id: typeof comment.id === "string" ? comment.id : undefined,
       body: comment.body,
+      severity: severity as ArtifactReviewDraftInput["comments"][number]["severity"],
       anchor
     };
   });

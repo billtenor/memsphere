@@ -24,6 +24,8 @@ export type AgentReviewContract = {
     schema?: RunSchemaContract;
     final: boolean;
     review?: string;
+    reviewRole?: string;
+    reviewRequires?: string[];
   };
 };
 
@@ -50,7 +52,9 @@ export function buildAgentReviewContract(context: ArtifactReviewContext): AgentR
       format: step.format,
       schema: step.schema,
       final: step.final ?? false,
-      review: step.reviewPolicy
+      review: step.reviewPolicy,
+      reviewRole: step.reviewRole,
+      reviewRequires: step.reviewRequires
     }
   };
 }

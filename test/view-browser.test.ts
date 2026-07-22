@@ -86,6 +86,10 @@ test("Artifact Review renders Agent progress and exposes retry only for failed A
   assert.match(browserHtml, /assignment\.status === "failed" && context\.review\.status === "pending"/);
   assert.match(browserHtml, /retryArtifactReviewAgent\(context\)/);
   assert.match(browserHtml, /attempt\.failure\.code \+ ": " \+ attempt\.failure\.message/);
+  assert.match(browserHtml, /state\.artifactReviewRetries/);
+  assert.match(browserHtml, /repeated advisory groups/);
+  assert.match(browserHtml, /Decision intent: /);
+  assert.match(browserHtml, /Implementation evidence: /);
 });
 
 test("Artifact Review identity controls use Role names and an anchored custom menu", () => {

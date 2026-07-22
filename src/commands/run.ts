@@ -1,9 +1,21 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { ArtifactReview, ArtifactReviewRound } from "../artifact-review.js";
+import {
+  artifactReviewFailureCategory,
+  artifactReviewOpinionReferencesImplementation,
+  repeatedArtifactReviewAdvisories,
+  type ArtifactReview,
+  type ArtifactReviewRound
+} from "../artifact-review.js";
 import { tryRunArtifactReviewAgents } from "../acp/debug.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
-import { requestAgentReviewBridge } from "../acp/review-bridge.js";
+import {
+  addBoundAgentReviewComment,
+  agentReviewArtifactContractPayload,
+  agentReviewArtifactPayload,
+  agentReviewAssignmentDetailPayload,
+  submitBoundAgentReview
+} from "../acp/review-session.js";
 import { readConfig } from "../config.js";
 import {
   authorizeArtifactOperation,
@@ -22,6 +34,8 @@ import {
   listRuns,
   readRun,
   repeatRun,
+  resolveArtifactReviewComment,
+  retryArtifactReviewAgentAssignment,
   reportRun,
   skipRun,
   startRun,
@@ -43,6 +57,7 @@ type RunStartOptions = {
 
 type ReviewWaitOptions = {
   review?: string;
+  verbose?: boolean;
 };
 
 type ReviewVoteOptions = {
@@ -51,6 +66,19 @@ type ReviewVoteOptions = {
   vote?: string;
   comment?: string;
   commentFile?: string;
+};
+
+type ReviewRetryOptions = OutputOptions & { review?: string; assignment?: string };
+
+type ReviewResolveOptions = OutputOptions & {
+  review?: string;
+  round?: string;
+  comment?: string;
+  disposition?: "accepted-fixed" | "accepted-followup" | "rejected-out-of-scope" | "rejected-not-blocking" | "rejected-invalid";
+  note?: string;
+  noteFile?: string;
+  validationSummary?: string;
+  validationSummaryFile?: string;
 };
 
 type RunIdOptions = {
@@ -76,6 +104,7 @@ type AgentReviewCommentOptions = AgentReviewAssignmentOptions & {
   target?: string;
   location?: string;
   sourceHash?: string;
+  severity?: "blocking" | "risk" | "suggestion";
 };
 
 type AgentReviewSubmitOptions = AgentReviewAssignmentOptions & {
@@ -127,7 +156,7 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
   const located = await findArtifactReview({ runsRoot: config.runsRoot, reviewId });
   await dispatchArtifactReviewAgents({ config, run: located.run });
   const context = await waitForArtifactReview({ runsRoot: config.runsRoot, reviewId });
-  printArtifactReviewSummary(context.review, context.round);
+  printArtifactReviewSummary(context.review, context.round, options.verbose);
   console.log("");
   if (context.review.status === "passed") {
     printRunState(context.run);
@@ -177,6 +206,63 @@ export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<
   );
 }
 
+export async function runReviewRetryCommand(options: ReviewRetryOptions): Promise<void> {
+  const reviewId = options.review?.trim();
+  const assignment = options.assignment?.trim();
+  if (!reviewId) throw new Error("--review <id> is required");
+  if (!assignment) throw new Error("--assignment <identity-or-assignment-id> is required");
+  const config = await readConfig();
+  const located = await findArtifactReview({ runsRoot: config.runsRoot, reviewId });
+  const context = await retryArtifactReviewAgentAssignment({
+    runsRoot: config.runsRoot,
+    reviewId,
+    roundId: located.review.currentRoundId,
+    identityId: assignment
+  });
+  await dispatchArtifactReviewAgents({ config, run: context.run });
+  printStructured({
+    reviewId,
+    roundId: context.round.id,
+    assignmentId: context.assignment.id,
+    identityId: context.assignment.identityId,
+    status: context.assignment.status,
+    attempt: context.attempt
+  }, options.output);
+}
+
+export async function runReviewResolveCommand(options: ReviewResolveOptions): Promise<void> {
+  const reviewId = options.review?.trim();
+  const roundId = options.round?.trim();
+  const commentId = options.comment?.trim();
+  if (!reviewId) throw new Error("--review <id> is required");
+  if (!roundId) throw new Error("--round <id> is required");
+  if (!commentId) throw new Error("--comment <id> is required");
+  if (!options.disposition) throw new Error("--disposition is required");
+  if (options.note !== undefined && options.noteFile !== undefined) throw new Error("use only one of --note or --note-file");
+  if (options.validationSummary !== undefined && options.validationSummaryFile !== undefined) {
+    throw new Error("use only one of --validation-summary or --validation-summary-file");
+  }
+  const note = options.noteFile ? await readFile(options.noteFile, "utf8") : options.note;
+  const validationSummary = options.validationSummaryFile
+    ? await readFile(options.validationSummaryFile, "utf8")
+    : options.validationSummary;
+  const config = await readConfig();
+  const context = await resolveArtifactReviewComment({
+    runsRoot: config.runsRoot,
+    reviewId,
+    roundId,
+    commentId,
+    disposition: options.disposition,
+    note,
+    validationSummary
+  });
+  printStructured({
+    reviewId,
+    roundId,
+    disposition: context.round.commentDispositions?.find((item) => item.commentId === commentId)
+  }, options.output);
+}
+
 export async function runShowCommand(options: RunShowOptions): Promise<void> {
   const runId = requireRunId(options.run);
   const config = await readConfig();
@@ -213,7 +299,7 @@ export async function runArtifactShowCommand(options: RunArtifactShowOptions): P
   if (options.assignment) {
     if (options.run || options.step) throw new Error("use --assignment or --run with --step, not both");
     requireBoundAssignment(options.assignment);
-    const value = await requestAgentReviewBridge({ operation: "artifact_show" });
+    const value = await agentReviewArtifactPayload();
     printStructured(value, options.output);
     return;
   }
@@ -229,7 +315,7 @@ export async function runArtifactContractShowCommand(options: RunArtifactShowOpt
   if (options.assignment) {
     if (options.run || options.step) throw new Error("use --assignment or --run with --step, not both");
     requireBoundAssignment(options.assignment);
-    const value = await requestAgentReviewBridge({ operation: "artifact_contract_show" });
+    const value = await agentReviewArtifactContractPayload();
     printStructured(value, options.output);
     return;
   }
@@ -243,7 +329,7 @@ export async function runArtifactContractShowCommand(options: RunArtifactShowOpt
 
 export async function runReviewAssignmentShowCommand(options: AgentReviewAssignmentOptions): Promise<void> {
   requireBoundAssignment(options.assignment);
-  const value = await requestAgentReviewBridge({ operation: "assignment_show" });
+  const value = await agentReviewAssignmentDetailPayload();
   printStructured(value, options.output);
 }
 
@@ -254,13 +340,14 @@ export async function runReviewCommentCommand(options: AgentReviewCommentOptions
   }
   const body = options.bodyFile ? await readFile(options.bodyFile, "utf8") : options.body;
   if (!body?.trim()) throw new Error("--body or --body-file is required");
+  if (!options.severity) throw new Error("--severity is required");
   const hasAnchor = options.target !== undefined || options.location !== undefined || options.sourceHash !== undefined;
   if (hasAnchor && (!options.target || !options.sourceHash)) {
     throw new Error("anchored comments require --target and --source-hash");
   }
-  const value = await requestAgentReviewBridge({
-    operation: "comment",
+  const value = await addBoundAgentReviewComment({
     body,
+    severity: options.severity,
     anchor: hasAnchor ? {
       target: options.target!,
       location: options.location,
@@ -279,8 +366,7 @@ export async function runReviewSubmitCommand(options: AgentReviewSubmitOptions):
     throw new Error("use only one of --summary or --summary-file");
   }
   const summary = options.summaryFile ? await readFile(options.summaryFile, "utf8") : options.summary;
-  const value = await requestAgentReviewBridge({
-    operation: "submit",
+  const value = await submitBoundAgentReview({
     vote: options.vote as "approve" | "request_changes" | "abstain",
     summary
   });
@@ -481,7 +567,8 @@ export function printRunState(run: RunState): void {
 
 export function printArtifactReviewSummary(
   review: ArtifactReview<RunState["events"][number]["artifact"]>,
-  round: ArtifactReviewRound
+  round: ArtifactReviewRound,
+  verbose = false
 ): void {
   const submitted = round.assignments.filter((assignment) => assignment.status === "submitted").length;
   console.log("Artifact Review:");
@@ -490,6 +577,23 @@ export function printArtifactReviewSummary(
   console.log(`- round: ${round.sequence}`);
   console.log(`- status: ${review.status}`);
   console.log(`- submitted: ${submitted}/${round.assignments.length}`);
+  const advisoryComments = round.assignments
+    .filter((assignment) => assignment.binding === "advisory")
+    .flatMap((assignment) => assignment.submitted?.comments ?? []);
+  const resolved = new Set((round.commentDispositions ?? []).map((item) => item.commentId));
+  const unresolvedBlocking = advisoryComments.filter((comment) => comment.severity === "blocking" && !resolved.has(comment.id));
+  const failedAttempts = round.assignments.flatMap((assignment) => assignment.attempts ?? [])
+    .filter((attempt) => attempt.status === "failed" && attempt.failure);
+  console.log(`- decision_ready: ${round.assignments.every((assignment) => assignment.status === "submitted")}`);
+  console.log(`- advisory: blocking=${advisoryComments.filter((comment) => comment.severity === "blocking").length}; risk=${advisoryComments.filter((comment) => comment.severity === "risk").length}; suggestion=${advisoryComments.filter((comment) => comment.severity === "suggestion").length}; unresolved_blocking=${unresolvedBlocking.length}`);
+  console.log(`- agent_failures: environment=${failedAttempts.filter((attempt) => attempt.failure && artifactReviewFailureCategory(attempt.failure) === "environment").length}; provider=${failedAttempts.filter((attempt) => attempt.failure && artifactReviewFailureCategory(attempt.failure) === "provider").length}; reviewer=${failedAttempts.filter((attempt) => attempt.failure && artifactReviewFailureCategory(attempt.failure) === "reviewer").length}; unknown=${failedAttempts.filter((attempt) => attempt.failure && artifactReviewFailureCategory(attempt.failure) === "unknown").length}`);
+  const submission = review.submissions.find((candidate) => candidate.id === round.submissionId);
+  for (const requirement of submission?.package?.requirements ?? []) {
+    console.log(`- evidence: ${requirement.role}=${requirement.status}${requirement.reason ? `; ${requirement.reason}` : ""}`);
+  }
+  for (const repeated of repeatedArtifactReviewAdvisories(review)) {
+    console.log(`- repeated_advisory: [${repeated.severity}] x${repeated.count} rounds=${repeated.rounds.join(",")} ${repeated.body}`);
+  }
   console.log("Participants:");
   for (const assignment of round.assignments) {
     const vote = assignment.submitted?.vote ?? "pending";
@@ -500,9 +604,19 @@ export function printArtifactReviewSummary(
       const attempt = assignment.attempts?.at(-1);
       console.log(`  - status: ${assignment.status}`);
       if (attempt) console.log(`  - attempt: ${attempt.sequence}; provider: ${attempt.provider}`);
-      if (attempt?.failure) console.log(`  - failure: ${attempt.failure.code}: ${attempt.failure.message}`);
+      if (attempt?.failure) console.log(`  - failure: ${artifactReviewFailureCategory(attempt.failure)}/${attempt.failure.code}${verbose ? `: ${attempt.failure.message}` : ""}`);
     }
-    for (const comment of assignment.submitted?.comments ?? []) console.log(`  - comment: ${comment.body}`);
+    if (assignment.binding === "decision" && assignment.submitted?.summary) {
+      console.log(`  - decision_intent: ${assignment.submitted.summary}`);
+    }
+    if (assignment.submitted) {
+      console.log(`  - implementation_evidence_referenced: ${artifactReviewOpinionReferencesImplementation(assignment.submitted)}`);
+    }
+    if (verbose) {
+      for (const comment of assignment.submitted?.comments ?? []) {
+        console.log(`  - comment [${comment.severity ?? "unspecified"}]: ${comment.body}`);
+      }
+    }
   }
   const runnerVote = round.votes.find((candidate) => candidate.subject.kind === "runner");
   const runnerCanDecide = Boolean(runnerVote) || authorizeArtifactOperation({

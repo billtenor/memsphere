@@ -491,7 +491,7 @@ async function staleRoundWithBobDraft(
       vote: context.assignment.draft.vote || "abstain",
       comments: [
         ...(context.assignment.draft.comments || []),
-        { id: `bob-stale-${Date.now()}-${Math.random().toString(36).slice(2)}`, body }
+        { id: `bob-stale-${Date.now()}-${Math.random().toString(36).slice(2)}`, body, severity: "risk" }
       ]
     })
   });

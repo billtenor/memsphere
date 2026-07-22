@@ -3,8 +3,6 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
-export const agentReviewCliProtocolVersion = 1;
-
 export type CliRuntimeDescriptor = {
   nodeExecutable: string;
   cliEntrypoint: string;

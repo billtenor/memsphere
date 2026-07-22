@@ -487,6 +487,7 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewRequest: 0,
       artifactReviewConflict: "",
       artifactReviewDrafts: {},
+      artifactReviewRetries: {},
       inlineCommentDraft: null,
       taskPollingRenderPending: false,
       artifactReviewHistoryRoundId: null,
@@ -2471,6 +2472,8 @@ export const browserHtml = String.raw`<!doctype html>
           schema: inlineSchema,
           final: Boolean(step.artifact.final),
           review: step.artifact.review || "",
+          reviewRole: step.artifact.reviewRole || step.artifact.review_role || "",
+          reviewRequires: step.artifact.reviewRequires || step.artifact.review_requires || [],
           roleBindings: step.artifact.roleBindings || {}
         };
       }
@@ -2481,6 +2484,8 @@ export const browserHtml = String.raw`<!doctype html>
         schema: step?.schema,
         final: Boolean(step?.final),
         review: step?.reviewPolicy || "",
+        reviewRole: step?.reviewRole || "",
+        reviewRequires: step?.reviewRequires || [],
         roleBindings: step?.roleBindings || {}
       };
     }
@@ -2877,6 +2882,7 @@ export const browserHtml = String.raw`<!doctype html>
         const comment = {
           id: commentId,
           body,
+          severity: "risk",
           anchor: {
             target: String(target || "").trim(),
             location: String(location?.anchor || ""),
@@ -3044,6 +3050,7 @@ export const browserHtml = String.raw`<!doctype html>
         comments: (draft.comments || []).map(comment => ({
           id: comment.id,
           body: comment.body,
+          severity: comment.severity,
           anchor: comment.anchor
         }))
       };
@@ -3153,6 +3160,7 @@ export const browserHtml = String.raw`<!doctype html>
         byId.set(localComment.id, {
           id: localComment.id,
           body: localComment.body,
+          severity: localComment.severity,
           anchor: localComment.anchor
         });
       }
@@ -3169,6 +3177,7 @@ export const browserHtml = String.raw`<!doctype html>
         comments: (draft.comments || []).map(comment => ({
           id: comment.id,
           body: comment.body,
+          severity: comment.severity,
           anchor: comment.anchor
         }))
       };
@@ -3496,6 +3505,18 @@ export const browserHtml = String.raw`<!doctype html>
         controls.append(role);
       }
 
+      const reviewSummary = document.createElement("div");
+      reviewSummary.className = "artifact-review-message" + (review.round.unresolvedBlocking ? " warn" : "");
+      const severity = review.round.severity || {};
+      const evidence = (review.round.evidence || []).map(item => item.role + ": " + item.status).join(" · ");
+      reviewSummary.textContent = (review.round.decisionReady ? "Decision ready" : "Waiting for reviewers")
+        + " · blocking " + (severity.blocking || 0)
+        + " · unresolved " + (review.round.unresolvedBlocking || 0)
+        + " · environment failures " + (review.round.failures || []).filter(item => item.category === "environment").length
+        + " · repeated advisory groups " + (review.round.repeatedAdvisories || []).length
+        + (evidence ? " · " + evidence : "");
+      controls.append(reviewSummary);
+
       controls.append(blockTitle(t("participants")), renderArtifactReviewProgress(review, context));
       if (context?.rounds?.length > 1) controls.append(renderArtifactReviewHistorySelector(context));
       el.reviews.append(controls);
@@ -3542,6 +3563,20 @@ export const browserHtml = String.raw`<!doctype html>
         type.textContent = (assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote"))
           + (assignment.identityKind === "agent" ? " · Agent" : "");
         main.append(name, type);
+        const decisionIntent = submitted?.summary || assignment.summary;
+        if (assignment.binding === "decision" && decisionIntent) {
+          const intent = document.createElement("span");
+          intent.className = "muted";
+          intent.textContent = "Decision intent: " + decisionIntent;
+          main.append(intent);
+        }
+        if (submitted || assignment.status === "submitted") {
+          const evidenceReference = document.createElement("span");
+          evidenceReference.className = "muted";
+          evidenceReference.textContent = "Implementation evidence: "
+            + ((submitted?.implementationEvidenceReferenced ?? assignment.implementationEvidenceReferenced) ? "referenced" : "not referenced");
+          main.append(evidenceReference);
+        }
         const status = document.createElement("span");
         status.className = "artifact-review-progress";
         status.textContent = submitted
@@ -3813,6 +3848,10 @@ export const browserHtml = String.raw`<!doctype html>
         return;
       }
 
+      if (context.submission?.package) {
+        el.comments.append(renderArtifactReviewEvidencePackage(context.submission.package));
+      }
+
       const assignment = context.assignment;
       if (assignment.identityKind === "agent") {
         renderArtifactReviewAgentWorkspace(context, selectedRound);
@@ -3834,17 +3873,47 @@ export const browserHtml = String.raw`<!doctype html>
       renderArtifactReviewRoundSummary(context, selectedRound, false);
     }
 
+    function renderArtifactReviewEvidencePackage(reviewPackage) {
+      const wrap = document.createElement("section");
+      wrap.className = "artifact-review-controls";
+      wrap.append(blockTitle(displayLanguage === "zh" ? "评审证据包" : "Review package"));
+      for (const requirement of reviewPackage.requirements || []) {
+        const row = document.createElement("div");
+        row.className = "artifact-review-message" + (requirement.status === "present" ? "" : " warn");
+        row.textContent = requirement.role + " · " + requirement.status + (requirement.reason ? " · " + requirement.reason : "");
+        wrap.append(row);
+      }
+      for (const evidence of reviewPackage.evidence || []) {
+        const details = document.createElement("details");
+        const summary = document.createElement("summary");
+        summary.textContent = evidence.role + " · " + (evidence.artifact?.name || evidence.stepId);
+        details.append(summary, renderArtifactValue(evidence.artifact));
+        wrap.append(details);
+      }
+      return wrap;
+    }
+
     function renderArtifactReviewAgentWorkspace(context, selectedRound) {
       const assignment = context.assignment;
       const attempt = assignment.attempts?.[assignment.attempts.length - 1];
       const status = document.createElement("div");
       status.className = "artifact-review-agent-status";
       status.append(blockTitle(t("agentReviewer")));
+      const retryKey = context.review.id + ":" + assignment.identityId;
+      const retryState = state.artifactReviewRetries[retryKey];
       const progress = document.createElement("div");
       progress.className = "artifact-review-message" + (assignment.status === "failed" ? " warn" : "");
-      progress.textContent = artifactReviewAssignmentStatusLabel(assignment.status, "agent")
-        + (attempt ? " · " + (attempt.provider || "Agent") + " · " + t("attempt") + " " + attempt.sequence : "");
+      progress.textContent = retryState
+        ? retryState.status + " · " + t("attempt") + " " + retryState.attempt
+        : artifactReviewAssignmentStatusLabel(assignment.status, "agent")
+          + (attempt ? " · " + (attempt.provider || "Agent") + " · " + t("attempt") + " " + attempt.sequence : "");
       status.append(progress);
+      if (retryState?.error) {
+        const retryError = document.createElement("div");
+        retryError.className = "muted artifact-review-id";
+        retryError.textContent = retryState.error;
+        status.append(retryError);
+      }
       if (attempt?.failure?.message) {
         const failure = document.createElement("div");
         failure.className = "muted artifact-review-id";
@@ -3855,7 +3924,7 @@ export const browserHtml = String.raw`<!doctype html>
         const retry = document.createElement("button");
         retry.className = "btn";
         retry.textContent = t("retry");
-        retry.addEventListener("click", () => runButtonAction(retry, () => retryArtifactReviewAgent(context)));
+        retry.addEventListener("click", () => retryArtifactReviewAgent(context));
         status.append(retry);
       }
       el.comments.append(status);
@@ -3867,10 +3936,27 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function retryArtifactReviewAgent(context) {
-      const response = await fetch(artifactReviewAssignmentUrl(context, "retry"), { method: "POST" });
-      if (!response.ok) throw new Error(await response.text());
-      state.artifactReviewContext = await response.json();
-      await loadRuns();
+      const key = context.review.id + ":" + context.assignment.identityId;
+      const nextAttempt = (context.assignment.attempts?.at(-1)?.sequence || 0) + 1;
+      state.artifactReviewRetries[key] = { status: "queued", attempt: nextAttempt };
+      renderAll();
+      try {
+        const response = await fetch(artifactReviewAssignmentUrl(context, "retry"), { method: "POST" });
+        if (!response.ok) throw new Error(await response.text());
+        state.artifactReviewContext = await response.json();
+        const attempt = state.artifactReviewContext.assignment?.attempts?.at(-1);
+        state.artifactReviewRetries[key] = {
+          status: state.artifactReviewContext.assignment?.status || "queued",
+          attempt: attempt?.sequence || nextAttempt
+        };
+        await loadRuns();
+      } catch (error) {
+        state.artifactReviewRetries[key] = {
+          status: "failed",
+          attempt: nextAttempt,
+          error: error instanceof Error ? error.message : String(error)
+        };
+      }
       renderAll();
     }
 
@@ -3885,10 +3971,22 @@ export const browserHtml = String.raw`<!doctype html>
           heading.className = "artifact-review-message";
           heading.textContent = artifactReviewRoleName(entry.assignment) + " · "
             + (entry.assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote")) + " · "
-            + artifactReviewVoteLabel(entry.opinion.vote, entry.assignment.binding);
+            + artifactReviewVoteLabel(entry.opinion.vote, entry.assignment.binding) + " · Implementation evidence: "
+            + (entry.assignment.implementationEvidenceReferenced ? "referenced" : "not referenced");
           el.comments.append(heading);
+          if (entry.opinion.summary) {
+            const summary = document.createElement("div");
+            summary.className = "muted";
+            summary.textContent = entry.opinion.summary;
+            el.comments.append(summary);
+          }
           for (const comment of entry.opinion.comments || []) {
-            el.comments.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(entry.assignment), false));
+            el.comments.append(renderArtifactReviewCommentCard(
+              comment,
+              artifactReviewRoleName(entry.assignment),
+              false,
+              entry.assignment.binding === "advisory"
+            ));
           }
         }
       }
@@ -3940,6 +4038,15 @@ export const browserHtml = String.raw`<!doctype html>
         }
       });
       textarea.disabled = state.artifactReviewSaving;
+      const severity = document.createElement("select");
+      severity.className = "artifact-review-select";
+      for (const value of ["blocking", "risk", "suggestion"]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        option.selected = value === "risk";
+        severity.append(option);
+      }
       const add = document.createElement("button");
       add.className = "btn";
       add.textContent = displayLanguage === "zh" ? "添加意见" : "Add comment";
@@ -3952,7 +4059,7 @@ export const browserHtml = String.raw`<!doctype html>
           const commentId = activeEntry?.pendingComposerCommentId || uuid();
           if (activeEntry) activeEntry.pendingComposerCommentId = commentId;
           const draft = artifactReviewEffectiveDraft(context);
-          const comment = { id: commentId, body };
+          const comment = { id: commentId, body, severity: severity.value };
           const result = await saveArtifactReviewDraft({
             ...draft,
             comments: draft.comments.some(existing => existing.id === comment.id)
@@ -3963,18 +4070,20 @@ export const browserHtml = String.raw`<!doctype html>
           return result.ok;
         });
       });
-      wrap.append(textarea, add);
+      wrap.append(textarea, severity, add);
       return wrap;
     }
 
-    function renderArtifactReviewCommentCard(comment, identityName, editable) {
+    function renderArtifactReviewCommentCard(comment, identityName, editable, advisory = false) {
       const card = document.createElement("article");
       card.className = "comment-card";
       const title = document.createElement("b");
       title.textContent = identityName + (comment.anchor?.target ? " · " + comment.anchor.target : "");
       const body = document.createElement("p");
       body.textContent = comment.body;
-      card.append(title, body);
+      card.append(title);
+      if (comment.severity) card.append(pill(comment.severity, false, comment.severity === "blocking" ? "outdated" : "warn"));
+      card.append(body);
       if (comment.anchor?.location) {
         const go = document.createElement("button");
         go.className = "btn";
@@ -3991,8 +4100,36 @@ export const browserHtml = String.raw`<!doctype html>
         remove.textContent = displayLanguage === "zh" ? "删除" : "Remove";
         remove.addEventListener("click", () => runButtonAction(remove, () => removeComment(comment.id)));
         card.append(remove);
+      } else if (advisory && comment.id && activeArtifactReviewSummary()?.status === "awaiting_runner_vote") {
+        const resolve = document.createElement("button");
+        resolve.className = "btn";
+        resolve.textContent = displayLanguage === "zh" ? "处置" : "Resolve";
+        resolve.addEventListener("click", () => runButtonAction(resolve, () => resolveArtifactReviewCommentInView(comment)));
+        card.append(resolve);
       }
       return card;
+    }
+
+    async function resolveArtifactReviewCommentInView(comment) {
+      const context = state.artifactReviewContext;
+      if (!context) return;
+      const disposition = prompt("Disposition: accepted-fixed / accepted-followup / rejected-out-of-scope / rejected-not-blocking / rejected-invalid", "rejected-not-blocking");
+      if (!disposition) return false;
+      const note = prompt("Disposition note", "") || "";
+      if (!note.trim()) return false;
+      const validationSummary = disposition === "accepted-fixed" ? (prompt("Validation summary", "") || "") : undefined;
+      const response = await fetch("/api/artifact-reviews/" + encodeURIComponent(context.review.id)
+        + "/rounds/" + encodeURIComponent(context.review.currentRoundId)
+        + "/comments/" + encodeURIComponent(comment.id) + "/resolve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ disposition, note, validationSummary })
+      });
+      if (!response.ok) throw new Error(await response.text());
+      await loadRuns();
+      await loadArtifactReviewContext(context.review.id, context.review.currentRoundId, context.assignment.identityId);
+      renderAll();
+      return true;
     }
 
     function renderArtifactReviewRoundSummary(context, round, history) {

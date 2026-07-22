@@ -42,7 +42,14 @@ const app = acp
         await sendProgress(client, params.sessionId, index++);
       }
     }
-    if (mode === "approve" || mode === "request_changes") completeReview(mode);
+    if (mode === "approve" || mode === "request_changes") {
+      try {
+        completeReview(mode);
+      } catch (error) {
+        process.stderr.write(`fake reviewer completion failed: ${error?.stack || error}\n`);
+        throw error;
+      }
+    }
     return { stopReason: "end_turn" };
   })
   .onNotification(acp.methods.agent.session.cancel, () => undefined);
@@ -62,7 +69,7 @@ function completeReview(vote) {
   ]);
   invoke(cli, ["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]);
   if (vote === "request_changes") {
-    invoke(cli, ["run", "review", "comment", "--assignment", assignment, "--body", "Fake blocking finding", "--output", "json"]);
+    invoke(cli, ["run", "review", "comment", "--assignment", assignment, "--severity", "blocking", "--body", "Fake blocking finding", "--output", "json"]);
   }
   invoke(cli, [
     "run", "review", "submit", "--assignment", assignment,

@@ -129,6 +129,8 @@ const entities: MemoryEntity[] = [
               name: "note",
               type: "string",
               format: { name: "markdown", options: {} },
+              reviewRole: "review-material",
+              reviewRequires: ["implementation", "validation"],
               roleBindings: { reviewer: ["human_reviewer", "review_agent"] },
               permissionGrants: { runner: ["artifact.submit"] }
             }
@@ -148,6 +150,8 @@ for (const entity of entities) {
       assert.doesNotMatch(source, /type: string/);
       assert.match(source, /role_bindings:/);
       assert.match(source, /permission_grants:/);
+      assert.match(source, /review_role: review-material/);
+      assert.match(source, /review_requires:/);
       assert.doesNotMatch(source, /roleBindings|permissionGrants/);
     }
     const parsed = parseMemoryYaml(source);

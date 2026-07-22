@@ -49,8 +49,6 @@ export async function writeAgentReviewDebugArtifacts(input: {
     if (!attempt) throw new Error(`agent_attempt_missing: ${assignment.identityId}`);
     const assignmentId = artifactReviewAssignmentId(assignment);
     const sessionEnv = {
-      MEMSPHERE_REVIEW_ENDPOINT: "<runtime-generated-local-socket>",
-      MEMSPHERE_REVIEW_CAPABILITY: "<redacted-runtime-secret>",
       MEMSPHERE_REVIEW_RUN_ID: input.run.id,
       MEMSPHERE_REVIEW_ASSIGNMENT_ID: assignmentId,
       MEMSPHERE_CONFIG_PATH: input.config.configPath,

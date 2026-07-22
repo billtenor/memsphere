@@ -23,6 +23,8 @@ import {
   runRepeatCommand,
   runReportCommand,
   runReviewCommentCommand,
+  runReviewResolveCommand,
+  runReviewRetryCommand,
   runReviewAssignmentShowCommand,
   runReviewSubmitCommand,
   runReviewVoteCommand,
@@ -216,6 +218,7 @@ runReview
   .command("wait")
   .description("Wait until assigned reviews are submitted or the current round is decided.")
   .requiredOption("--review <id>", "artifact review id")
+  .option("--verbose", "include complete comments and failure messages")
   .action(runReviewWaitCommand);
 
 runReview
@@ -227,6 +230,34 @@ runReview
   .option("--comment <text>", "Runner decision comment")
   .option("--comment-file <path>", "read the Runner decision comment from a file")
   .action(runReviewVoteCommand);
+
+runReview
+  .command("retry")
+  .description("Retry one failed Agent Assignment in the current Review round.")
+  .requiredOption("--review <id>", "artifact review id")
+  .requiredOption("--assignment <identity-or-assignment-id>", "agent identity or assignment id")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runReviewRetryCommand);
+
+runReview
+  .command("resolve")
+  .description("Record the Runner disposition for an advisory comment.")
+  .requiredOption("--review <id>", "artifact review id")
+  .requiredOption("--round <id>", "artifact review round id")
+  .requiredOption("--comment <id>", "advisory comment id")
+  .addOption(new Option("--disposition <value>", "Runner disposition").choices([
+    "accepted-fixed",
+    "accepted-followup",
+    "rejected-out-of-scope",
+    "rejected-not-blocking",
+    "rejected-invalid"
+  ]).makeOptionMandatory())
+  .option("--note <text>", "disposition note")
+  .option("--note-file <path>", "read disposition note from file")
+  .option("--validation-summary <text>", "validation performed for accepted-fixed")
+  .option("--validation-summary-file <path>", "read validation summary from file")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runReviewResolveCommand);
 
 const runReviewAssignment = runReview
   .command("assignment")
@@ -245,6 +276,7 @@ runReview
   .requiredOption("--assignment <id>", "artifact review assignment id")
   .option("--body <text>", "comment body")
   .option("--body-file <path>", "read comment body from file")
+  .addOption(new Option("--severity <severity>", "comment severity").choices(["blocking", "risk", "suggestion"]).makeOptionMandatory())
   .option("--target <target>", "comment anchor target")
   .option("--location <location>", "comment anchor location")
   .option("--source-hash <hash>", "comment anchor source hash")

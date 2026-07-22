@@ -146,8 +146,8 @@ flow:
 - `runner` 是当前 Run 执行上下文隐式承担的保留 Role，不得显式绑定 Identity。
 - `!action` 不允许直接声明 `role_bindings` 或 `permission_grants`，两个字段必须写在其 `artifact` 中。
 - Runner 在 `run report` 前应阅读 CLI 输出的权限说明；成功或拒绝结果中的权限、来源和自然语言说明均来自 Run 启动时保存的控制平面快照。
-- `!artifact.review` 如出现必须引用内置 Decision Policy。确定性校验通过后，Run 会返回稳定的 `review_id` 和 `memsphere run review wait --review <review_id>`；Review 通过前当前 Action 不推进。全部评审意见收齐后，如 CLI 提示等待 Runner 投票，必须先阅读全部意见，再显式执行 `memsphere run review vote`。
-- 绑定到当前 Artifact 的 Agent Identity 会由 Memsphere 通过 ACP 自动启动。初始 Prompt 会给出精炼的 Review contract；Agent Reviewer 使用 Session 注入的 `MEMSPHERE_CLI`：`run show` 查看 Run 导航摘要，`run step show` 查看单步详情，`run artifact show --assignment` 查看候选产物，`run artifact contract show --assignment` 查看冻结在 Run 中的完整契约，`run review assignment show/comment/submit` 只操作自己的 Assignment。普通 ACP 文本回复不构成 Comment 或 Vote。Agent 失败会阻塞当前轮次，由 human 在 View 查看原因并显式重试。
+- `!artifact.review` 如出现必须引用内置 Decision Policy。`review_role` 标记需求、实现、验证或评审材料，`review_requires` 声明当前 Review 必须携带的自包含证据。确定性校验通过后，Run 会返回稳定的 `review_id` 和 `memsphere run review wait --review <review_id>`；Review 通过前当前 Action 不推进。全部评审意见收齐后，如 CLI 提示等待 Runner 投票，必须先阅读摘要和 blocking 意见，逐条执行 `memsphere run review resolve`，再显式执行 `memsphere run review vote`。
+- 绑定到当前 Artifact 的 Agent Identity 会由 Memsphere 通过 ACP 自动启动。初始 Prompt 会给出精炼的 Review contract 和证据包；Agent Reviewer 使用 Session 注入、固定当前 Node 与 CLI entrypoint 的 `MEMSPHERE_CLI`，直接通过 Store 操作自己的 Assignment，不创建或监听 Review bridge/socket。`run review comment` 必须声明 severity，并优先用 `--body-file`；提交摘要优先用 `--summary-file`。普通 ACP 文本回复不构成 Comment 或 Vote。Agent 失败时可用 `memsphere run review retry --review <id> --assignment <identity-or-assignment-id>` 显式重试。
 - 调试 Agent 启动时，可设置 `debug.agent_review: true` 禁止后台真实派发，再显式执行 `memsphere run try-run --run <run_id>` 生成 `launch.json` 和 `prompt.md`。该命令不 claim Assignment、不启动 ACP，也不修改 Run；View 轮询不会自动生成调试文件。
 
 当 Artifact 使用 `type: object`、`format.name: markdown` 和 `layout: outline` 时，Schema 的 `fields` 可以使用 mapping 形式的 `!repeat`，把非空 `body` 中的一组字符串或 `!schema` 字段整体重复。`limit.min/max` 如出现必须是非负整数且 `min <= max`。首版不允许 Repeat 嵌套，也不允许把 Repeat 放在 table、defines、flow 或其他位置：

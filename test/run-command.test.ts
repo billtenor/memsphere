@@ -416,7 +416,8 @@ test("Artifact Review output emphasizes votes, comments, and an actionable concl
 
   const output = lines.join("\n");
   assert.match(output, /- submitted: 2\/2/);
-  assert.match(output, /- Advisor \(advisory\)\n  - vote: request_changes\n  - comment: Clarify the conclusion\./);
+  assert.match(output, /- Advisor \(advisory\)\n  - vote: request_changes/);
+  assert.doesNotMatch(output, /Clarify the conclusion/);
   assert.match(output, /- Runner \(decision, automatic\)\n  - vote: approve/);
   assert.match(output, /unanimous approval was not reached: 1\/2 decision votes approved/);
   assert.match(output, /Conclusion:\n- This review round did not pass because unanimous approval was not reached; revise the Artifact/);

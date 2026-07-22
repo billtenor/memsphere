@@ -60,7 +60,7 @@ test("ACP Agent Reviewer completes its bound Assignment through the Session CLI"
     assert.match(completedAssignment.attempts?.[0]?.sessionId ?? "", /^fake-/);
     assert.equal(completedAssignment.attempts?.[0]?.protocolVersion, 1);
     assert(completedAssignment.attempts?.[0]?.cliReadyAt);
-    assert.equal(completedAssignment.attempts?.[0]?.stopReason, "submitted");
+    assert.equal(completedAssignment.attempts?.[0]?.stopReason, "end_turn");
     assert.equal(completed.status, "awaiting_runner_vote");
   });
 });
@@ -128,10 +128,12 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     assert.equal(launch.processStarted, false);
     assert.equal(launch.identityId, "reviewer-agent");
     assert.equal(launch.provider, "traex");
-    assert.deepEqual((launch.args as string[]).slice(0, 4), ["--sandbox", "read-only", "--ask-for-approval", "never"]);
+    assert.deepEqual((launch.args as string[]).slice(0, 4), ["--sandbox", "workspace-write", "--ask-for-approval", "never"]);
     assert.match(prompt, /# Memsphere Artifact Reviewer/);
     assert.match(prompt, /## Role\nCheck the candidate independently\./);
     assert.match(prompt, /## Overview/);
+    assert.match(prompt, /Role is a review lens, not a limit on scope/);
+    assert.match(prompt, /do not treat the candidate summary, prior validation report, or another reviewer's conclusion as proof/);
     assert.match(prompt, /## Review contract/);
     assert.match(prompt, /### Action\nProduce a reviewed Artifact\./);
     assert.match(prompt, /### Procedure assertions\n- Keep the review evidence traceable\./);
@@ -143,11 +145,15 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     assert.match(prompt, /run artifact show --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID"/);
     assert.match(prompt, /run artifact contract show --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID"/);
     assert.match(prompt, /run review assignment show --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID"/);
-    assert.match(prompt, /Check every assertion in the frozen Review contract before voting/);
+    assert.match(prompt, /Check every assertion in the frozen Review contract and the complete Review package before voting/);
     assert.match(prompt, /For each unmet assertion, preserve at least one concrete comment/);
+    assert.match(prompt, /## Review method/);
+    assert.match(prompt, /commands personally executed/);
+    assert.match(prompt, /Do not invent a finding merely to avoid an empty comment list/);
+    assert.doesNotMatch(JSON.stringify(launch), /MEMSPHERE_REVIEW_ENDPOINT|MEMSPHERE_REVIEW_CAPABILITY|bridge\.sock/);
     assert.match(prompt, /run step show --run "\$MEMSPHERE_REVIEW_RUN_ID" --step "<step-ref>"/);
     assert.doesNotMatch(prompt, /Identity:|Binding:|Decision policy:|Candidate Artifact and contract|Required workflow/);
-    assert.doesNotMatch(prompt, /reviewer-agent|review-|round-|assignment-/);
+    assert.doesNotMatch(prompt, /reviewer-agent|round-|assignment-/);
     await assert.rejects(
       tryRunArtifactReviewAgents({
         config: { ...config, debug: { agentReview: false, root: debugRoot } },
@@ -192,7 +198,7 @@ test("Agent Review CLI launcher rejects commands outside the Session allowlist",
   }
 });
 
-test("Traex Provider fixes the ACP process to read-only non-interactive execution", () => {
+test("Traex Provider fixes the ACP process to workspace-write non-interactive execution", () => {
   const provider = getAgentReviewProvider("traex");
   const launch = provider.buildLaunch({
     identity: agentIdentity("traex", ["acp", "serve"], { model: "review-model" }),
@@ -200,7 +206,7 @@ test("Traex Provider fixes the ACP process to read-only non-interactive executio
     sessionEnv: { MEMSPHERE_CLI: "/tmp/memsphere-review" }
   });
   assert.deepEqual(launch.args, [
-    "--sandbox", "read-only",
+    "--sandbox", "workspace-write",
     "--ask-for-approval", "never",
     "--model", "review-model",
     "acp", "serve"
