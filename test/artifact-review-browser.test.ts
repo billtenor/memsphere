@@ -91,6 +91,15 @@ flow:
     await identity.waitFor();
     assert.equal(await page.getByRole("button", { name: "Create Review", exact: true }).isVisible(), false);
 
+    await identity.click();
+    const identityMenu = page.locator(".artifact-review-identity-select .artifact-review-select-menu");
+    const identityTriggerBox = await identity.boundingBox();
+    const identityMenuBox = await identityMenu.boundingBox();
+    assert(identityTriggerBox && identityMenuBox);
+    assert(identityMenuBox.y >= identityTriggerBox.y + identityTriggerBox.height);
+    assert.match(await identityMenu.locator('[data-identity-id="alice"]').innerText(), /^Decider ·/);
+    assert.match(await identityMenu.locator('[data-identity-id="bob"]').innerText(), /^Advisor ·/);
+
     await selectIdentity(page, identity, "alice");
     await page.getByText("Visible only after identity authorization.", { exact: true }).waitFor();
     assert.equal(await page.getByText("decider", { exact: true }).count(), 0);
@@ -227,7 +236,8 @@ async function selectIdentity(
     && response.url().includes(`identity_id=${identityId}`)
     && response.request().method() === "GET"
   );
-  await select.selectOption(identityId);
+  if (await select.getAttribute("aria-expanded") !== "true") await select.click();
+  await page.locator(`.artifact-review-identity-select .artifact-review-select-option[data-identity-id="${identityId}"]`).click();
   await loaded;
   await page.waitForTimeout(20);
 }

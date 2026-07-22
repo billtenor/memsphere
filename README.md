@@ -50,6 +50,7 @@ memsphere memory read "Repository rules" --node "statement:Testing"
 memsphere view start
 memsphere view status
 memsphere run start <procedure-name>
+memsphere run start --file ./path/to/procedure.yaml
 memsphere migrate syntax --check
 memsphere migrate artifact-contract-v2 --check
 ```
@@ -107,8 +108,15 @@ The config file stores roots relative to the `.memsphere` directory by default:
         "kind": "agent",
         "name": "Review Agent",
         "agent": {
-          "command": "codex",
-          "args": ["acp"]
+          "provider": "traex",
+          "command": "traex",
+          "args": ["acp", "serve"],
+          "cwd": ".",
+          "model": "review-model",
+          "prompt_version": "artifact-review-v1",
+          "startup_timeout_ms": 60000,
+          "idle_timeout_ms": 120000,
+          "max_runtime_ms": null
         }
       }
     },
@@ -130,7 +138,9 @@ The config file stores roots relative to the `.memsphere` directory by default:
 
 Set `archiveRoot` to an absolute path when multiple scopes should share archived runs and reviews.
 
-`control_plane` is optional. When present, it defines Identity and Role records; the `runner` Role is required and is carried implicitly by the current Run executor. Permission and Decision Policy catalogs are built into memsphere and cannot be redefined in config. Agent identities accept only `command` and `args`; credentials, environment variables, and secrets are not control-plane fields.
+`control_plane` is optional. When present, it defines Identity and Role records; the `runner` Role is required and is carried implicitly by the current Run executor. Permission and Decision Policy catalogs are built into memsphere and cannot be redefined in config. Agent identities currently support the built-in `traex` ACP provider plus `command`, `args`, optional workspace-relative `cwd`, `model`, `prompt_version`, `startup_timeout_ms`, `idle_timeout_ms`, and `max_runtime_ms`. Startup timeout covers process and ACP Session initialization. Idle timeout resets whenever ACP reports progress or invokes a client capability. Maximum runtime is an absolute ceiling; omitting `max_runtime_ms` or setting it to `null` means no ceiling. Legacy `timeout_ms` remains readable as `max_runtime_ms` but cannot be combined with it. Credentials, arbitrary environment variables, API keys, and secrets are not control-plane fields: the configured ACP Agent uses its own existing login and provider configuration.
+
+Memsphere owns the Agent Reviewer's safety arguments. The Traex Provider always launches `acp serve` with a read-only sandbox and no interactive approval fallback; do not put sandbox, approval-bypass, or another subcommand in `args`. An explicit `model` is forwarded by the Provider, and `cwd` must remain inside the current workspace.
 
 ### Bundled memory installation
 
@@ -246,7 +256,11 @@ Built-in types are `boolean`, `number`, `string`, `object`, and `array`. Omitted
 
 Schema is optional for JSON/YAML object and array Artifacts, and required for structured Markdown. `asserts` and `suggests` remain natural-language contracts; executable report validation is performed by the registered type, format, and Schema validators.
 
-`review` is an optional Decision Policy id. When present, a validated report creates a persistent Artifact Review instead of immediately advancing the Run. Reviewers work in View, while the Runner waits with `memsphere run review wait --review <review_id>`. After all assigned reviews are submitted, a Runner with `decision.decide` must explicitly vote with `memsphere run review vote --review <review_id> --round <review_round_id> --vote approve|request_changes`; requesting changes also requires `--comment` or `--comment-file`. A rejected round is revised with the original artifact option plus `--revision-summary-file <path>`. The built-in `artifact_acceptance.unanimous` policy waits for every assignment and counts only votes authorized by `decision.decide`; assess-only votes remain advisory.
+`review` is an optional Decision Policy id. When present, a validated report creates a persistent Artifact Review instead of immediately advancing the Run. Human reviewers work in View. Agent reviewers are dispatched in the background through ACP stdio and receive a read-only workspace session. Their Session-bound CLI separates navigation from detail: `run show` lists Run steps and Artifact summaries, `run step show` expands one step, `run artifact show --assignment` loads the candidate, `run artifact contract show --assignment` loads the complete frozen Review contract, and `run review assignment show/comment/submit` manages only the current Assignment. The initial Prompt includes a concise human-readable Review contract so the Agent immediately knows the Action, assertions, suggestions, Artifact metadata, and Schema summary. Memsphere injects a temporary `MEMSPHERE_CLI` launcher for the same installation that started the worker; it uses the installed CLI in normal use and the current build during development, without requiring a global command or a user-configured launcher path. Agent natural-language output never counts as a Vote.
+
+The Runner waits with `memsphere run review wait --review <review_id>`. Agent startup, protocol, timeout, CLI-handshake, or missing-submit failures block the round and are shown in View with an explicit Retry action. After every Assignment is submitted, a Runner with `decision.decide` must explicitly vote with `memsphere run review vote --review <review_id> --round <review_round_id> --vote approve|request_changes`; requesting changes also requires `--comment` or `--comment-file`. A rejected round is revised with the original artifact option plus `--revision-summary-file <path>`. The built-in `artifact_acceptance.unanimous` policy waits for every assignment and counts only votes authorized by `decision.decide`; assess-only votes remain advisory.
+
+For local Agent launch inspection, set `debug.agent_review` to `true`. This is a safety gate: background dispatch remains disabled, but no files are generated automatically. Run `memsphere run try-run --run <run_id>` explicitly to create each queued Agent Assignment's `launch.json` and `prompt.md` under `.memsphere/debug/agent-review/` without claiming the Assignment or starting an ACP process.
 
 Adding `review` is a compatible extension of `memsphere-20260721-stable`: existing Memories that omit it retain their prior interpretation and require no migration. Syntax advances only when a change forces existing Memory YAML to be rewritten; such incompatible releases must provide an explicit migration path.
 

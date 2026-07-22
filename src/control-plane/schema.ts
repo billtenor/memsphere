@@ -17,9 +17,70 @@ const agentIdentitySchema = z.object({
   kind: z.literal("agent"),
   name: nonEmptyString,
   agent: z.object({
+    provider: z.literal("traex").optional(),
     command: nonEmptyString,
-    args: z.array(z.string())
-  }).strict()
+    args: z.array(z.string()),
+    cwd: nonEmptyString.optional(),
+    model: nonEmptyString.optional(),
+    prompt_version: nonEmptyString.optional(),
+    startup_timeout_ms: z.number().int().positive().optional(),
+    idle_timeout_ms: z.number().int().positive().optional(),
+    max_runtime_ms: z.number().int().positive().nullable().optional(),
+    timeout_ms: z.number().int().positive().optional()
+  }).strict().superRefine((agent, context) => {
+    if (agent.timeout_ms !== undefined && agent.max_runtime_ms !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["max_runtime_ms"],
+        message: "max_runtime_ms cannot be combined with legacy timeout_ms"
+      });
+    }
+  }).transform((agent) => ({
+    provider: agent.provider,
+    command: agent.command,
+    args: [...agent.args],
+    cwd: agent.cwd,
+    model: agent.model,
+    promptVersion: agent.prompt_version,
+    startupTimeoutMs: agent.startup_timeout_ms,
+    idleTimeoutMs: agent.idle_timeout_ms,
+    maxRuntimeMs: agent.max_runtime_ms !== undefined ? agent.max_runtime_ms : agent.timeout_ms
+  }))
+}).strict();
+
+const snapshotAgentIdentitySchema = z.object({
+  kind: z.literal("agent"),
+  name: nonEmptyString,
+  agent: z.object({
+    provider: nonEmptyString.optional(),
+    command: nonEmptyString,
+    args: z.array(z.string()),
+    cwd: nonEmptyString.optional(),
+    model: nonEmptyString.optional(),
+    promptVersion: nonEmptyString.optional(),
+    startupTimeoutMs: z.number().int().positive().optional(),
+    idleTimeoutMs: z.number().int().positive().optional(),
+    maxRuntimeMs: z.number().int().positive().nullable().optional(),
+    timeoutMs: z.number().int().positive().optional()
+  }).strict().superRefine((agent, context) => {
+    if (agent.timeoutMs !== undefined && agent.maxRuntimeMs !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["maxRuntimeMs"],
+        message: "maxRuntimeMs cannot be combined with legacy timeoutMs"
+      });
+    }
+  }).transform((agent) => ({
+    provider: agent.provider,
+    command: agent.command,
+    args: [...agent.args],
+    cwd: agent.cwd,
+    model: agent.model,
+    promptVersion: agent.promptVersion,
+    startupTimeoutMs: agent.startupTimeoutMs,
+    idleTimeoutMs: agent.idleTimeoutMs,
+    maxRuntimeMs: agent.maxRuntimeMs !== undefined ? agent.maxRuntimeMs : agent.timeoutMs
+  }))
 }).strict();
 
 const controlPlaneIdentitySchema = z.discriminatedUnion("kind", [humanIdentitySchema, agentIdentitySchema]);
@@ -129,7 +190,7 @@ export const controlPlaneSnapshotSchema: z.ZodType<ControlPlaneSnapshot, z.ZodTy
       resolution: z.literal("unanimous")
     }).strict())
   }).strict(),
-  identities: z.record(controlPlaneIdentitySchema),
+  identities: z.record(z.discriminatedUnion("kind", [humanIdentitySchema, snapshotAgentIdentitySchema])),
   roles: z.record(snapshotRoleSchema)
 }).strict();
 

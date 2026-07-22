@@ -14,6 +14,9 @@ export const configSchema = z.object({
     host: z.string().min(1),
     port: z.number().int().min(0).max(65535)
   }).strict().optional(),
+  debug: z.object({
+    agent_review: z.boolean().optional()
+  }).strict().optional(),
   control_plane: controlPlaneConfigSchema.optional()
 }).strict();
 
@@ -27,6 +30,10 @@ export type MemsphereConfig = {
   runsRoot: string;
   archiveRoot: string;
   controlPlane?: ControlPlaneConfig;
+  debug: {
+    agentReview: boolean;
+    root: string;
+  };
   view: {
     host: string;
     port: number;
@@ -105,6 +112,10 @@ export async function readConfigAt(configPath: string): Promise<MemsphereConfig>
     runsRoot: resolveConfigPath(config.runsRoot ?? "runs", scopeRoot),
     archiveRoot: resolveConfigPath(config.archiveRoot ?? "archives", scopeRoot),
     controlPlane: config.control_plane,
+    debug: {
+      agentReview: config.debug?.agent_review ?? false,
+      root: resolveConfigPath("debug", scopeRoot)
+    },
     view: config.view ?? { host: "127.0.0.1", port: 0 }
   };
 }

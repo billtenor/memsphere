@@ -1,0 +1,27 @@
+!procedure
+syntax: memsphere-20260721-stable
+names:
+  - Traex ACP 代码事实评审测试流程
+  - traex-code-fact-review-smoke
+defines:
+  - 用一份需要核对当前工作区源码的技术调查报告，验证 Traex Agent Reviewer 会主动读取代码，而不是只根据候选 Artifact 的表述投票。
+role_bindings:
+  development_engineer: traex1
+  test_engineer: traex2
+  system_architect: human
+flow:
+  - !action
+    action: 根据当前工作区源码回答 Agent Reviewer 实现行为的七个问题，并提供可复核的代码证据。
+    asserts:
+      - 报告必须依次回答 Provider 重复注册、Provider 默认配置、Assignment 初始状态、Round 完成条件、Artifact 查询来源、Review Contract 内容、Worker 终态记录七个问题，不得遗漏或合并。
+      - 每个回答必须给出明确结论，并引用当前工作区中真实存在的源码文件、符号和准确行号范围。
+      - 每项引用的源码必须直接支持对应结论，不得引用无关代码、反向证据或不存在的符号。
+      - 所有结论必须与当前工作区实际执行语义一致；不能只根据函数名、Prompt 文案、测试名称或候选 Artifact 自己的描述推断。
+      - 对于默认值、状态转换和分支行为，必须说明代码采取的是跳过、排队、返回未完成、读取哪项数据、记录终态还是抛错，不得使用含糊表述。
+    suggests:
+      - Reviewer 应独立读取候选报告引用的源码及其必要上下文；发现错误时，评论应给出正确行为和可定位的源码证据。
+      - 只核对当前工作区版本，不使用外部文档或历史版本替代源码事实。
+    artifact: !artifact
+      name: Agent Reviewer 代码事实核查报告
+      format: markdown
+      review: artifact_acceptance.unanimous

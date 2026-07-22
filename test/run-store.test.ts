@@ -85,6 +85,85 @@ test("startRun skips unrelated invalid procedures when resolving the target proc
   });
 });
 
+test("startRun loads a root Procedure file outside memoryRoot", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    const fixtureRoot = join(dir, "fixtures");
+    const procedureFile = join(fixtureRoot, "external-procedure.yaml");
+    await mkdir(proceduresRoot, { recursive: true });
+    await mkdir(fixtureRoot, { recursive: true });
+
+    await writeFile(join(proceduresRoot, "invalid.yaml"), invalidProcedure);
+    await writeFile(procedureFile, validProcedure.replace("target-procedure", "external-procedure"));
+
+    const run = await startRun({ memoryRoot, runsRoot, procedureFile });
+
+    assert.equal(run.status, "running");
+    assert.equal(run.procedureName, "external-procedure");
+    assert.equal(run.memoryRoot, memoryRoot);
+    assert.equal(run.stack[0].memoryName, "external-procedure");
+    assert.equal(run.stack[0].steps[0].instruction, "Capture result.");
+  });
+});
+
+test("startRun requires exactly one Procedure source", async () => {
+  await withTempDir(async (dir) => {
+    const base = { memoryRoot: join(dir, "memory"), runsRoot: join(dir, "runs") };
+    await assert.rejects(startRun(base), /provide a procedure name or procedure file/);
+    await assert.rejects(
+      startRun({ ...base, procedureName: "installed", procedureFile: join(dir, "external.yaml") }),
+      /use either a procedure name or procedure file, not both/
+    );
+  });
+});
+
+test("Agent Review smoke Procedures start directly from test fixture files", async () => {
+  await withTempDir(async (dir) => {
+    const controlPlane = parseControlPlaneConfig({
+      identities: {
+        traex1: { kind: "agent", name: "Traex reviewer 1", agent: { provider: "traex", command: "traex", args: [] } },
+        traex2: { kind: "agent", name: "Traex reviewer 2", agent: { provider: "traex", command: "traex", args: [] } },
+        human: { kind: "human", name: "Human reviewer" }
+      },
+      roles: {
+        runner: { name: "Runner", permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+        development_engineer: { name: "Development engineer", permissions: ["artifact.read", "decision.assess"] },
+        test_engineer: { name: "Test engineer", permissions: ["artifact.read", "decision.decide"] },
+        system_architect: { name: "System architect", permissions: ["artifact.read", "decision.decide"] }
+      }
+    });
+    const fixtureRoot = join(
+      process.cwd(),
+      "test",
+      "fixtures",
+      "agent-review",
+      ".memsphere",
+      "memory",
+      "procedures"
+    );
+    const cases = [
+      ["traex-artifact-review-smoke.yaml", "Traex ACP 四方评审测试流程"],
+      ["traex-code-fact-review-smoke.yaml", "Traex ACP 代码事实评审测试流程"]
+    ] as const;
+
+    for (const [fileName, procedureName] of cases) {
+      const run = await startRun({
+        memoryRoot: join(dir, "memory"),
+        runsRoot: join(dir, "runs"),
+        procedureFile: join(fixtureRoot, fileName),
+        controlPlane
+      });
+      assert.equal(run.procedureName, procedureName);
+      assert.equal(run.status, "running");
+      assert.equal(run.stack[0].roleBindings?.development_engineer?.identityIds[0], "traex1");
+      assert.equal(run.stack[0].roleBindings?.test_engineer?.identityIds[0], "traex2");
+      assert.equal(run.stack[0].roleBindings?.system_architect?.identityIds[0], "human");
+    }
+  });
+});
+
 test("startRun routes an unversioned Procedure to store validation without parsing legacy content", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
@@ -1050,7 +1129,7 @@ flow:
     const controlPlane = parseControlPlaneConfig({
       identities: {
         human: { kind: "human", name: "Human" },
-        agent: { kind: "agent", name: "Agent", agent: { command: "codex", args: ["acp"] } }
+        agent: { kind: "agent", name: "Agent", agent: { command: "traecli", args: ["acp"] } }
       },
       roles: {
         runner: {
@@ -1242,7 +1321,7 @@ flow:
     const controlPlane = parseControlPlaneConfig({
       identities: {
         human: { kind: "human", name: "Human" },
-        agent: { kind: "agent", name: "Agent", agent: { command: "codex", args: [] } }
+        agent: { kind: "agent", name: "Agent", agent: { command: "traecli", args: [] } }
       },
       roles: {
         runner: { name: "Runner", permissions: ["artifact.submit"] },

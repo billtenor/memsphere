@@ -144,6 +144,8 @@ flow:
 - `!action` 不允许直接声明 `role_bindings` 或 `permission_grants`，两个字段必须写在其 `artifact` 中。
 - Runner 在 `run report` 前应阅读 CLI 输出的权限说明；成功或拒绝结果中的权限、来源和自然语言说明均来自 Run 启动时保存的控制平面快照。
 - `!artifact.review` 如出现必须引用内置 Decision Policy。确定性校验通过后，Run 会返回稳定的 `review_id` 和 `memsphere run review wait --review <review_id>`；Review 通过前当前 Action 不推进。全部评审意见收齐后，如 CLI 提示等待 Runner 投票，必须先阅读全部意见，再显式执行 `memsphere run review vote`。
+- 绑定到当前 Artifact 的 Agent Identity 会由 Memsphere 通过 ACP 自动启动。初始 Prompt 会给出精炼的 Review contract；Agent Reviewer 使用 Session 注入的 `MEMSPHERE_CLI`：`run show` 查看 Run 导航摘要，`run step show` 查看单步详情，`run artifact show --assignment` 查看候选产物，`run artifact contract show --assignment` 查看冻结在 Run 中的完整契约，`run review assignment show/comment/submit` 只操作自己的 Assignment。普通 ACP 文本回复不构成 Comment 或 Vote。Agent 失败会阻塞当前轮次，由 human 在 View 查看原因并显式重试。
+- 调试 Agent 启动时，可设置 `debug.agent_review: true` 禁止后台真实派发，再显式执行 `memsphere run try-run --run <run_id>` 生成 `launch.json` 和 `prompt.md`。该命令不 claim Assignment、不启动 ACP，也不修改 Run；View 轮询不会自动生成调试文件。
 
 当 Artifact 使用 `type: object`、`format.name: markdown` 和 `layout: outline` 时，Schema 的 `fields` 可以使用 mapping 形式的 `!repeat`，把非空 `body` 中的一组字符串或 `!schema` 字段整体重复。`limit.min/max` 如出现必须是非负整数且 `min <= max`。首版不允许 Repeat 嵌套，也不允许把 Repeat 放在 table、defines、flow 或其他位置：
 
@@ -197,6 +199,14 @@ memsphere 使用 Run 记录和控制一次 Procedure 的执行过程，保证 Ag
 memsphere run start "<Procedure 名称>"
 ```
 
+需要直接运行尚未安装到当前 `memoryRoot` 的 Procedure YAML 时，可以指定文件路径：
+
+```bash
+memsphere run start --file "<Procedure YAML 路径>"
+```
+
+名称参数与 `--file` 必须二选一。文件中的根 Procedure 会在启动时写入 Run 快照；外部 `!call` 和外部 Schema 仍从当前项目配置的 `memoryRoot` 解析。
+
 命令会返回 Run ID 和第一个待执行步骤。后续命令都使用这个 Run ID，不要再次启动同一个流程。
 
 #### 理解当前步骤
@@ -237,6 +247,8 @@ memsphere run report --run <Run ID> --artifact-file <文件路径>
 ```bash
 memsphere run review wait --review <Review ID>
 ```
+
+wait 如果返回 Agent Assignment 失败，当前轮次仍未决，Runner 不得绕过或自行代投。把 View 中显示的 Provider、Attempt 和错误信息告知 human，等待 human 在 View 中执行重试，然后继续使用同一个 `review_id` 等待。
 
 如果 wait 返回 `awaiting_runner_vote`，当前执行本 Run 的 Agent 就是 Runner；先阅读全部参与者的 Comment 和 Vote，再由自己明确决定接纳或修改。接纳才会推进 Run：
 

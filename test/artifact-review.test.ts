@@ -49,20 +49,27 @@ function fixture(input?: { runnerDecides?: boolean; humanDecides?: boolean }) {
   return { snapshot, controlPlane };
 }
 
-test("Artifact Review merges Human roles and records Runner decision authority", () => {
+test("Artifact Review merges roles and creates Human and Agent assignments", () => {
   const { snapshot, controlPlane } = fixture();
   const result = createArtifactReviewAssignments({
     snapshot,
     controlPlane,
     now: "2026-07-21T00:00:00.000Z"
   });
-  assert.equal(result.assignments.length, 1);
-  assert.deepEqual(result.assignments[0].roleIds, ["reader", "reviewer"]);
-  assert.equal(result.assignments[0].binding, "decision");
+  assert.equal(result.assignments.length, 2);
+  const human = result.assignments.find((assignment) => assignment.identityId === "alice");
+  const agent = result.assignments.find((assignment) => assignment.identityId === "bot");
+  assert.deepEqual(human?.roleIds, ["reader", "reviewer"]);
+  assert.equal(human?.binding, "decision");
+  assert.equal(human?.status, "draft");
+  assert.equal(agent?.identityKind, "agent");
+  assert.equal(agent?.status, "queued");
+  assert.equal(agent?.attempts?.[0]?.status, "queued");
+  assert.match(agent?.id ?? "", /^assignment-/);
   assert.equal(result.runnerCanDecide, true);
 });
 
-test("Artifact Review rejects missing Human assignments and missing deciders", () => {
+test("Artifact Review rejects missing Reviewer assignments and missing deciders", () => {
   const { snapshot, controlPlane } = fixture({ runnerDecides: false, humanDecides: false });
   assert.throws(() => createArtifactReviewAssignments({
     snapshot,
@@ -75,7 +82,7 @@ test("Artifact Review rejects missing Human assignments and missing deciders", (
     snapshot,
     controlPlane,
     now: "2026-07-21T00:00:00.000Z"
-  }), /Human assignment/);
+  }), /Reviewer assignment/);
 });
 
 test("unanimous waits for all Humans and ignores advisory rejection", () => {

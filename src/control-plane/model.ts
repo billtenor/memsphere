@@ -13,8 +13,15 @@ export type AgentIdentity = {
   kind: "agent";
   name: string;
   agent: {
+    provider?: string;
     command: string;
     args: string[];
+    cwd?: string;
+    model?: string;
+    promptVersion?: string;
+    startupTimeoutMs?: number;
+    idleTimeoutMs?: number;
+    maxRuntimeMs?: number | null;
   };
 };
 

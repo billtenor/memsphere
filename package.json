@@ -24,6 +24,7 @@
     "validate": "npm run build"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^1.2.1",
     "commander": "^12.1.0",
     "markdown-it": "^14.3.0",
     "yaml": "^2.5.1",

@@ -18,15 +18,24 @@ import {
 import { memoryKinds } from "./memory/kinds.js";
 import {
   runEnterSchemaCommand,
+  runArtifactContractShowCommand,
+  runArtifactShowCommand,
   runRepeatCommand,
   runReportCommand,
+  runReviewCommentCommand,
+  runReviewAssignmentShowCommand,
+  runReviewSubmitCommand,
   runReviewVoteCommand,
   runReviewWaitCommand,
+  runShowCommand,
   runStartCommand,
-  runStatusCommand
+  runStepShowCommand,
+  runStatusCommand,
+  runTryRunCommand
 } from "./commands/run.js";
 import { skillInitCommand } from "./commands/skill.js";
 import { validateCommand } from "./commands/validate.js";
+import { runArtifactReviewAgentWorker } from "./acp/review-worker.js";
 import {
   viewRestartCommand,
   viewServeCommand,
@@ -134,8 +143,9 @@ const run = program
 run
   .command("start")
   .description("Start a run from a procedure.")
-  .argument("<procedure-name>", "procedure primary name or alias")
-  .action(runStartCommand);
+  .argument("[procedure-name]", "procedure primary name or alias")
+  .option("--file <path>", "start from a Procedure YAML file without installing it")
+  .action((procedureName, options) => runStartCommand(procedureName, options));
 
 run
   .command("report")
@@ -145,6 +155,57 @@ run
   .option("--artifact-file <path>", "read artifact value from file")
   .option("--revision-summary-file <path>", "read the revision summary from file")
   .action(runReportCommand);
+
+run
+  .command("show")
+  .description("Show a concise Run outline with its steps and Artifact summaries.")
+  .requiredOption("--run <id>", "run id")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runShowCommand);
+
+run
+  .command("try-run")
+  .description("Generate Agent Review launch and Prompt evidence without starting ACP Agents.")
+  .requiredOption("--run <id>", "run id")
+  .action(runTryRunCommand);
+
+const runStep = run
+  .command("step")
+  .description("Inspect one Run step.");
+
+runStep
+  .command("show")
+  .description("Show the detailed contract and instructions for one Run step.")
+  .requiredOption("--run <id>", "run id")
+  .requiredOption("--step <ref>", "step ref from run show")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runStepShowCommand);
+
+const runArtifact = run
+  .command("artifact")
+  .description("Inspect a reported or reviewed Artifact.");
+
+runArtifact
+  .command("show")
+  .description("Show a reported or reviewed Artifact value.")
+  .option("--assignment <id>", "Artifact Review Assignment bound to the active ACP Session")
+  .option("--run <id>", "run id")
+  .option("--step <ref>", "step ref from run show")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runArtifactShowCommand);
+
+const runArtifactContract = runArtifact
+  .command("contract")
+  .description("Inspect the frozen contract for an Artifact.");
+
+runArtifactContract
+  .command("show")
+  .description("Show the complete frozen Action and Artifact contract.")
+  .option("--assignment <id>", "Artifact Review Assignment bound to the active ACP Session")
+  .option("--run <id>", "run id")
+  .option("--step <ref>", "step ref from run show")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runArtifactContractShowCommand);
 
 const runReview = run
   .command("review")
@@ -165,6 +226,50 @@ runReview
   .option("--comment <text>", "Runner decision comment")
   .option("--comment-file <path>", "read the Runner decision comment from a file")
   .action(runReviewVoteCommand);
+
+const runReviewAssignment = runReview
+  .command("assignment")
+  .description("Inspect the Agent Assignment bound to the active ACP Session.");
+
+runReviewAssignment
+  .command("show")
+  .description("Show this Agent's Assignment status, role, permissions, and own draft.")
+  .requiredOption("--assignment <id>", "artifact review assignment id")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runReviewAssignmentShowCommand);
+
+runReview
+  .command("comment")
+  .description("Add a structured comment to this Agent Assignment.")
+  .requiredOption("--assignment <id>", "artifact review assignment id")
+  .option("--body <text>", "comment body")
+  .option("--body-file <path>", "read comment body from file")
+  .option("--target <target>", "comment anchor target")
+  .option("--location <location>", "comment anchor location")
+  .option("--source-hash <hash>", "comment anchor source hash")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runReviewCommentCommand);
+
+runReview
+  .command("submit")
+  .description("Submit the Vote and complete this Agent Assignment.")
+  .requiredOption("--assignment <id>", "artifact review assignment id")
+  .addOption(new Option("--vote <vote>", "review vote").choices(["approve", "request_changes", "abstain"]).makeOptionMandatory())
+  .option("--summary <text>", "overall review summary")
+  .option("--summary-file <path>", "read overall review summary from file")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runReviewSubmitCommand);
+
+runReview
+  .command("agent-worker", { hidden: true })
+  .description("Run one internal ACP Agent Review worker.")
+  .requiredOption("--config <path>", "config file path")
+  .requiredOption("--review <id>", "artifact review id")
+  .requiredOption("--round <id>", "artifact review round id")
+  .requiredOption("--assignment <id>", "artifact review assignment id")
+  .requiredOption("--node-executable <path>", "Node executable path")
+  .requiredOption("--cli-entrypoint <path>", "CLI entrypoint path")
+  .action(runArtifactReviewAgentWorker);
 
 run
   .command("enter-schema")

@@ -23,6 +23,18 @@ test("readConfigAt defaults archiveRoot within the scope", async () => {
 
     assert.equal(config.archiveRoot, join(dir, "archives"));
     assert.deepEqual(config.view, { host: "127.0.0.1", port: 0 });
+    assert.deepEqual(config.debug, { agentReview: false, root: join(dir, "debug") });
+  });
+});
+
+test("readConfigAt enables Agent Review debug dispatch explicitly", async () => {
+  await withTempDir(async (dir) => {
+    const configPath = join(dir, "config.json");
+    await writeFile(configPath, JSON.stringify({ memoryRoot: "memory", debug: { agent_review: true } }));
+
+    const config = await readConfigAt(configPath);
+
+    assert.deepEqual(config.debug, { agentReview: true, root: join(dir, "debug") });
   });
 });
 

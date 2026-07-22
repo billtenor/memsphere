@@ -36,18 +36,50 @@ export type ArtifactReviewDraft = {
 export type ArtifactReviewSubmittedOpinion = {
   comments: ArtifactReviewComment[];
   vote: ArtifactReviewVoteValue;
+  summary?: string;
   submittedAt: string;
   authorization: AuthorizationDecision;
 };
 
+export type ArtifactReviewAgentAttemptStatus = "queued" | "running" | "submitted" | "failed" | "cancelled";
+
+export type ArtifactReviewAgentFailure = {
+  stage: "spawn" | "initialize" | "auth" | "session" | "mode" | "cli" | "prompt" | "permission" | "timeout" | "protocol" | "process";
+  code: string;
+  message: string;
+};
+
+export type ArtifactReviewAgentAttempt = {
+  id: string;
+  sequence: number;
+  status: ArtifactReviewAgentAttemptStatus;
+  provider: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  workerPid?: number;
+  cliReadyAt?: string;
+  promptVersion?: string;
+  sessionId?: string;
+  protocolVersion?: number;
+  agentName?: string;
+  agentVersion?: string;
+  model?: string;
+  stopReason?: string;
+  failure?: ArtifactReviewAgentFailure;
+};
+
 export type ArtifactReviewAssignment = {
+  id?: string;
   identityId: string;
   identityName: string;
+  identityKind?: "human" | "agent";
   roleIds: string[];
   permissions: PermissionId[];
   binding: ArtifactReviewBinding;
-  status: "draft" | "submitted";
+  status: "draft" | "queued" | "running" | "submitted" | "failed";
   draft: ArtifactReviewDraft;
+  attempts?: ArtifactReviewAgentAttempt[];
   submitted?: ArtifactReviewSubmittedOpinion;
 };
 
@@ -80,8 +112,8 @@ export type ArtifactReviewSubmission<TArtifact = unknown> = {
 export type ArtifactReviewRoundResult = {
   status: "passed" | "changes_requested";
   completedAt: string;
-  humanSubmitted: number;
-  humanTotal: number;
+  submitted: number;
+  total: number;
   decisionApprove: number;
   decisionTotal: number;
   advisoryTotal: number;
@@ -142,7 +174,7 @@ export function createArtifactReviewAssignments(input: {
     if (!rolePermissions) continue;
     for (const identityId of binding.identityIds) {
       const identity = input.snapshot.identities[identityId];
-      if (!identity || identity.kind !== "human") continue;
+      if (!identity) continue;
       const existing = byIdentity.get(identityId) ?? {
         identityName: identity.name,
         roleIds: new Set<string>(),
@@ -160,14 +192,27 @@ export function createArtifactReviewAssignments(input: {
     const canDecide = merged.permissions.has("decision.decide");
     const canAssess = merged.permissions.has("decision.assess");
     if (!canDecide && !canAssess) continue;
+    const identity = input.snapshot.identities[identityId];
+    const isAgent = identity?.kind === "agent";
     assignments.push({
+      id: makeReviewEntityId("assignment", input.now),
       identityId,
       identityName: merged.identityName,
+      identityKind: identity?.kind ?? "human",
       roleIds: [...merged.roleIds].sort(),
       permissions: [...merged.permissions].sort(),
       binding: canDecide ? "decision" : "advisory",
-      status: "draft",
-      draft: { comments: [] }
+      status: isAgent ? "queued" : "draft",
+      draft: { comments: [] },
+      attempts: isAgent ? [{
+        id: makeReviewEntityId("attempt", input.now),
+        sequence: 1,
+        status: "queued",
+        provider: identity.agent.provider ?? "unconfigured",
+        createdAt: input.now,
+        promptVersion: identity.agent.promptVersion,
+        model: identity.agent.model
+      }] : undefined
     });
   }
 
@@ -179,7 +224,7 @@ export function createArtifactReviewAssignments(input: {
   const runnerCanDecide = runnerAuthorization.allowed;
 
   if (assignments.length === 0) {
-    throw new Error("Artifact Review requires at least one Human assignment");
+    throw new Error("Artifact Review requires at least one Reviewer assignment");
   }
   if (!runnerCanDecide && !assignments.some((assignment) => assignment.binding === "decision")) {
     throw new Error("Artifact Review requires at least one decision.decide subject");
@@ -220,8 +265,8 @@ export function evaluateArtifactReviewRound(round: ArtifactReviewRound, now: str
   return {
     status: passed ? "passed" : "changes_requested",
     completedAt: now,
-    humanSubmitted: submitted.length,
-    humanTotal: round.assignments.length,
+    submitted: submitted.length,
+    total: round.assignments.length,
     decisionApprove: decisionVotes.filter((vote) => vote.value === "approve").length,
     decisionTotal: decisionVotes.length,
     advisoryTotal: advisoryVotes.length
@@ -244,7 +289,11 @@ export function submittedAssignmentVote(
   };
 }
 
-export function makeReviewEntityId(prefix: "review" | "submission" | "round" | "comment" | "vote", iso: string): string {
+export function artifactReviewAssignmentId(assignment: ArtifactReviewAssignment): string {
+  return assignment.id ?? assignment.identityId;
+}
+
+export function makeReviewEntityId(prefix: "review" | "submission" | "round" | "assignment" | "comment" | "vote" | "attempt", iso: string): string {
   const stamp = iso.replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z").replace("T", "-").toLowerCase();
   return `${prefix}-${stamp}-${randomUUID().slice(0, 8)}`;
 }

@@ -1,5 +1,9 @@
 import { readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import type { ArtifactReview, ArtifactReviewRound } from "../artifact-review.js";
+import { tryRunArtifactReviewAgents } from "../acp/debug.js";
+import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
+import { requestAgentReviewBridge } from "../acp/review-bridge.js";
 import { readConfig } from "../config.js";
 import {
   authorizeArtifactOperation,
@@ -14,6 +18,7 @@ import {
   currentStep,
   enterSchema,
   finalArtifacts,
+  findArtifactReview,
   listRuns,
   readRun,
   repeatRun,
@@ -29,6 +34,10 @@ type ReportOptions = {
   artifact?: string;
   artifactFile?: string;
   revisionSummaryFile?: string;
+};
+
+type RunStartOptions = {
+  file?: string;
 };
 
 type ReviewWaitOptions = {
@@ -47,12 +56,45 @@ type RunIdOptions = {
   run?: string;
 };
 
-export async function runStartCommand(procedureName: string): Promise<void> {
+type OutputOptions = { output?: "json" | "text" };
+
+type RunShowOptions = RunIdOptions & OutputOptions;
+
+type RunStepShowOptions = RunShowOptions & { step?: string };
+
+type RunArtifactShowOptions = RunShowOptions & {
+  assignment?: string;
+  step?: string;
+};
+
+type AgentReviewAssignmentOptions = OutputOptions & { assignment?: string };
+
+type AgentReviewCommentOptions = AgentReviewAssignmentOptions & {
+  body?: string;
+  bodyFile?: string;
+  target?: string;
+  location?: string;
+  sourceHash?: string;
+};
+
+type AgentReviewSubmitOptions = AgentReviewAssignmentOptions & {
+  vote?: string;
+  summary?: string;
+  summaryFile?: string;
+};
+
+export async function runStartCommand(procedureName: string | undefined, options: RunStartOptions = {}): Promise<void> {
+  const name = procedureName?.trim();
+  const procedureFile = options.file?.trim();
+  if (!name && !procedureFile) throw new Error("provide a procedure name or --file <path>");
+  if (name && procedureFile) throw new Error("use either a procedure name or --file <path>, not both");
+
   const config = await readConfig();
   const run = await startRun({
     memoryRoot: config.memoryRoot,
     runsRoot: config.runsRoot,
-    procedureName,
+    procedureName: name,
+    procedureFile,
     controlPlane: config.controlPlane
   });
   printRunState(run);
@@ -72,6 +114,7 @@ export async function runReportCommand(options: ReportOptions): Promise<void> {
     revisionSummary,
     locale: permissionLocale()
   });
+  await dispatchArtifactReviewAgents({ config, run });
   printLatestReportAuthorization(run);
   printRunState(run);
 }
@@ -80,6 +123,8 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
   const reviewId = options.review?.trim();
   if (!reviewId) throw new Error("--review <id> is required");
   const config = await readConfig();
+  const located = await findArtifactReview({ runsRoot: config.runsRoot, reviewId });
+  await dispatchArtifactReviewAgents({ config, run: located.run });
   const context = await waitForArtifactReview({ runsRoot: config.runsRoot, reviewId });
   printArtifactReviewSummary(context.review, context.round);
   console.log("");
@@ -129,6 +174,116 @@ export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<
   console.log(
     `memsphere run report --run ${context.run.id} --artifact-file <path> --revision-summary-file <path>`
   );
+}
+
+export async function runShowCommand(options: RunShowOptions): Promise<void> {
+  const runId = requireRunId(options.run);
+  const config = await readConfig();
+  const run = await readRun(config.runsRoot, runId);
+  printStructured(buildRunOverview(run), options.output);
+}
+
+export async function runTryRunCommand(options: RunIdOptions): Promise<void> {
+  const runId = requireRunId(options.run);
+  const config = await readConfig();
+  const run = await readRun(config.runsRoot, runId);
+  const generated = await tryRunArtifactReviewAgents({ config, run });
+  if (!generated.length) {
+    console.log(`No queued Agent Review Assignments found for run ${runId}.`);
+    return;
+  }
+  console.log(`Agent Review try-run generated ${generated.length} Assignment${generated.length === 1 ? "" : "s"}:`);
+  for (const artifact of generated) {
+    console.log(`- ${artifact.assignmentId}`);
+    console.log(`  prompt: ${artifact.promptPath}`);
+    console.log(`  launch: ${artifact.launchPath}`);
+  }
+}
+
+export async function runStepShowCommand(options: RunStepShowOptions): Promise<void> {
+  const runId = requireRunId(options.run);
+  const stepRef = requireStepRef(options.step);
+  const config = await readConfig();
+  const run = await readRun(config.runsRoot, runId);
+  printStructured(buildRunStepDetail(run, stepRef), options.output);
+}
+
+export async function runArtifactShowCommand(options: RunArtifactShowOptions): Promise<void> {
+  if (options.assignment) {
+    if (options.run || options.step) throw new Error("use --assignment or --run with --step, not both");
+    requireBoundAssignment(options.assignment);
+    const value = await requestAgentReviewBridge({ operation: "artifact_show" });
+    printStructured(value, options.output);
+    return;
+  }
+
+  const runId = requireRunId(options.run);
+  const stepRef = requireStepRef(options.step);
+  const config = await readConfig();
+  const run = await readRun(config.runsRoot, runId);
+  printStructured(await buildRunArtifactDetail(config.runsRoot, run, stepRef), options.output);
+}
+
+export async function runArtifactContractShowCommand(options: RunArtifactShowOptions): Promise<void> {
+  if (options.assignment) {
+    if (options.run || options.step) throw new Error("use --assignment or --run with --step, not both");
+    requireBoundAssignment(options.assignment);
+    const value = await requestAgentReviewBridge({ operation: "artifact_contract_show" });
+    printStructured(value, options.output);
+    return;
+  }
+
+  const runId = requireRunId(options.run);
+  const stepRef = requireStepRef(options.step);
+  const config = await readConfig();
+  const run = await readRun(config.runsRoot, runId);
+  printStructured(buildRunArtifactContractDetail(run, stepRef), options.output);
+}
+
+export async function runReviewAssignmentShowCommand(options: AgentReviewAssignmentOptions): Promise<void> {
+  requireBoundAssignment(options.assignment);
+  const value = await requestAgentReviewBridge({ operation: "assignment_show" });
+  printStructured(value, options.output);
+}
+
+export async function runReviewCommentCommand(options: AgentReviewCommentOptions): Promise<void> {
+  requireBoundAssignment(options.assignment);
+  if (options.body !== undefined && options.bodyFile !== undefined) {
+    throw new Error("use only one of --body or --body-file");
+  }
+  const body = options.bodyFile ? await readFile(options.bodyFile, "utf8") : options.body;
+  if (!body?.trim()) throw new Error("--body or --body-file is required");
+  const hasAnchor = options.target !== undefined || options.location !== undefined || options.sourceHash !== undefined;
+  if (hasAnchor && (!options.target || !options.sourceHash)) {
+    throw new Error("anchored comments require --target and --source-hash");
+  }
+  const value = await requestAgentReviewBridge({
+    operation: "comment",
+    body,
+    anchor: hasAnchor ? {
+      target: options.target!,
+      location: options.location,
+      sourceHash: options.sourceHash!
+    } : undefined
+  });
+  printStructured(value, options.output);
+}
+
+export async function runReviewSubmitCommand(options: AgentReviewSubmitOptions): Promise<void> {
+  requireBoundAssignment(options.assignment);
+  if (!options.vote || !["approve", "request_changes", "abstain"].includes(options.vote)) {
+    throw new Error("--vote must be approve, request_changes, or abstain");
+  }
+  if (options.summary !== undefined && options.summaryFile !== undefined) {
+    throw new Error("use only one of --summary or --summary-file");
+  }
+  const summary = options.summaryFile ? await readFile(options.summaryFile, "utf8") : options.summary;
+  const value = await requestAgentReviewBridge({
+    operation: "submit",
+    vote: options.vote as "approve" | "request_changes" | "abstain",
+    summary
+  });
+  printStructured(value, options.output);
 }
 
 export async function runEnterSchemaCommand(schemaName: string | undefined, options: RunIdOptions): Promise<void> {
@@ -191,6 +346,12 @@ function requireRunId(value: string | undefined): string {
     throw new Error("--run <id> is required");
   }
   return runId;
+}
+
+function requireStepRef(value: string | undefined): string {
+  const stepRef = value?.trim();
+  if (!stepRef) throw new Error("--step <ref> is required");
+  return stepRef;
 }
 
 export function printRunState(run: RunState): void {
@@ -321,8 +482,15 @@ export function printArtifactReviewSummary(
   console.log("Participants:");
   for (const assignment of round.assignments) {
     const vote = assignment.submitted?.vote ?? "pending";
-    console.log(`- ${assignment.identityName} (${assignment.binding})`);
+    const identityKind = assignment.identityKind === "agent" ? ", agent" : "";
+    console.log(`- ${assignment.identityName} (${assignment.binding}${identityKind})`);
     console.log(`  - vote: ${vote}`);
+    if (assignment.identityKind === "agent") {
+      const attempt = assignment.attempts?.at(-1);
+      console.log(`  - status: ${assignment.status}`);
+      if (attempt) console.log(`  - attempt: ${attempt.sequence}; provider: ${attempt.provider}`);
+      if (attempt?.failure) console.log(`  - failure: ${attempt.failure.code}: ${attempt.failure.message}`);
+    }
     for (const comment of assignment.submitted?.comments ?? []) console.log(`  - comment: ${comment.body}`);
   }
   const runnerVote = round.votes.find((candidate) => candidate.subject.kind === "runner");
@@ -364,6 +532,13 @@ export function printArtifactReviewSummary(
     console.log(unanimous
       ? "- This review round passed unanimously, so the reviewed Artifact was accepted and the Run advanced to the next step."
       : "- This review round did not pass because unanimous approval was not reached; revise the Artifact using the comments above, provide a revision summary, and report the new Artifact to start the next round.");
+    return;
+  }
+  const failed = round.assignments.filter((assignment) => assignment.status === "failed");
+  if (failed.length) {
+    console.log(`- Review is blocked because ${failed.length} Agent Assignment${failed.length === 1 ? " has" : "s have"} failed.`);
+    console.log("Conclusion:");
+    console.log("- The Artifact has not been accepted and the Run has not advanced. Inspect the failure in View, then retry the failed Agent Assignment.");
     return;
   }
   const remaining = round.assignments.length - submitted;
@@ -445,6 +620,240 @@ export function printLatestReportAuthorization(run: RunState): void {
 
 function permissionLocale(): PermissionLocale {
   return process.env.LANG?.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+}
+
+function requireBoundAssignment(value: string | undefined): string {
+  const assignmentId = value?.trim();
+  if (!assignmentId) throw new Error("--assignment <id> is required");
+  const bound = process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID;
+  if (!bound) throw new Error("Agent Review CLI requires an active ACP Review Session");
+  if (assignmentId !== bound) throw new Error("review assignment does not match this Session");
+  return assignmentId;
+}
+
+function printStructured(value: unknown, output: "json" | "text" | undefined): void {
+  if ((output ?? "text") === "json") {
+    console.log(JSON.stringify(value));
+    return;
+  }
+  console.log(JSON.stringify(value, null, 2));
+}
+
+type LocatedRunStep = {
+  memoryName: string;
+  step: NonNullable<RunState["plan"]>[number];
+  parentRef?: string;
+  relation?: "truthy" | "falsy" | "loop";
+};
+
+export function buildRunOverview(run: RunState): unknown {
+  const frame = currentFrame(run);
+  const step = currentStep(run);
+  const currentRef = frame && step ? `${frame.memoryName}#${step.id}` : undefined;
+  const reportedStepIds = new Set(run.events.map((event) => event.stepId));
+  const reviewsByStep = new Map((run.artifactReviews ?? []).map((review) => [review.stepId, review]));
+  const steps = runStepLocations(run);
+  return {
+    id: run.id,
+    procedureName: run.procedureName,
+    status: run.status,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+    totalSteps: steps.length,
+    currentStepRef: currentRef,
+    steps: steps.map((located) => ({
+      ref: locatedStepRef(located),
+      procedureName: located.memoryName,
+      id: located.step.id,
+      kind: located.step.kind ?? "action",
+      actor: located.step.actor ?? "agent",
+      instruction: located.step.instruction,
+      parentRef: located.parentRef,
+      relation: located.relation,
+      current: locatedStepRef(located) === currentRef,
+      artifactState: located.step.artifact
+        ? runArtifactState(reportedStepIds.has(located.step.id), reviewsByStep.get(located.step.id)?.status)
+        : undefined,
+      artifact: artifactContractSummary(located.step)
+    }))
+  };
+}
+
+export function buildRunStepDetail(run: RunState, reference: string): unknown {
+  return stepDetail(run, findRunStep(run, reference));
+}
+
+function runArtifactState(
+  reported: boolean,
+  reviewStatus: ArtifactReview<RunState["events"][number]["artifact"]>["status"] | undefined
+): "not_reported" | "under_review" | "revision_requested" | "reported" {
+  if (reported || reviewStatus === "passed") return "reported";
+  if (reviewStatus === "awaiting_revision") return "revision_requested";
+  if (reviewStatus === "pending" || reviewStatus === "awaiting_runner_vote") return "under_review";
+  return "not_reported";
+}
+
+function stepDetail(run: RunState, located: LocatedRunStep): unknown {
+  const frame = currentFrame(run);
+  const active = currentStep(run);
+  const currentRef = frame && active ? `${frame.memoryName}#${active.id}` : undefined;
+  return {
+    ref: locatedStepRef(located),
+    procedureName: located.memoryName,
+    current: locatedStepRef(located) === currentRef,
+    procedureAsserts: procedureAssertsFor(run, located.memoryName),
+    step: {
+      id: located.step.id,
+      kind: located.step.kind ?? "action",
+      actor: located.step.actor ?? "agent",
+      instruction: located.step.instruction,
+      asserts: located.step.asserts ?? [],
+      suggests: located.step.suggests ?? [],
+      details: located.step.details ?? [],
+      artifact: artifactContractDetail(located.step)
+    }
+  };
+}
+
+export async function buildRunArtifactDetail(runsRoot: string, run: RunState, reference: string): Promise<unknown> {
+  const located = findRunStep(run, reference);
+  const review = [...(run.artifactReviews ?? [])].reverse()
+    .find((candidate) => candidate.stepId === located.step.id);
+  const round = review?.rounds.find((candidate) => candidate.id === review.currentRoundId);
+  const submission = round
+    ? review?.submissions.find((candidate) => candidate.id === round.submissionId)
+    : undefined;
+  const event = [...run.events].reverse().find((candidate) => candidate.stepId === located.step.id);
+  const artifact = submission?.artifact ?? event?.artifact;
+  return {
+    stepRef: locatedStepRef(located),
+    source: submission ? "review_submission" : event ? "run_event" : "not_reported",
+    artifact: artifact ? await artifactForDisplay(runsRoot, artifact) : null,
+    revisionSummary: submission?.revisionSummary
+  };
+}
+
+export function buildRunArtifactContractDetail(run: RunState, reference: string): unknown {
+  const located = findRunStep(run, reference);
+  return {
+    stepRef: locatedStepRef(located),
+    procedure: {
+      name: located.memoryName,
+      asserts: procedureAssertsFor(run, located.memoryName)
+    },
+    action: {
+      instruction: located.step.instruction,
+      asserts: located.step.asserts ?? [],
+      suggests: located.step.suggests ?? [],
+      details: located.step.details ?? []
+    },
+    artifact: artifactContractDetail(located.step)
+  };
+}
+
+function procedureAssertsFor(run: RunState, memoryName: string): string[] {
+  const template = Object.values(run.procedureSnapshots ?? {})
+    .find((candidate) => candidate.memoryName === memoryName);
+  return template?.asserts ?? (memoryName === run.procedureName ? run.asserts ?? [] : []);
+}
+
+async function artifactForDisplay(
+  runsRoot: string,
+  artifact: RunState["events"][number]["artifact"]
+): Promise<unknown> {
+  const value = artifact.storage === "file" && artifact.path
+    ? await readFile(join(runsRoot, artifact.path), "utf8")
+    : artifact.value;
+  return {
+    name: artifact.name,
+    type: artifact.type,
+    format: artifact.format,
+    final: artifact.final,
+    storage: artifact.storage ?? (artifact.path ? "file" : "inline"),
+    value,
+    fields: artifact.fields,
+    fileName: artifact.fileName,
+    filePath: artifact.path ? resolve(runsRoot, artifact.path) : undefined,
+    contentType: artifact.contentType,
+    validation: artifact.validation
+  };
+}
+
+function artifactContractSummary(step: LocatedRunStep["step"]): unknown {
+  if (!step.artifact) return undefined;
+  return {
+    name: step.artifact,
+    type: step.type,
+    format: step.format,
+    final: step.final ?? false
+  };
+}
+
+function artifactContractDetail(step: LocatedRunStep["step"]): unknown {
+  if (!step.artifact) return undefined;
+  return {
+    name: step.artifact,
+    type: step.type,
+    format: step.format,
+    schema: step.schema,
+    final: step.final ?? false,
+    review: step.reviewPolicy
+  };
+}
+
+function findRunStep(run: RunState, reference: string): LocatedRunStep {
+  const locations = runStepLocations(run);
+  const separator = reference.lastIndexOf("#");
+  const matches = separator >= 0
+    ? locations.filter((candidate) => (
+      candidate.memoryName === reference.slice(0, separator)
+      && candidate.step.id === reference.slice(separator + 1)
+    ))
+    : locations.filter((candidate) => candidate.step.id === reference);
+  if (matches.length === 1) return matches[0];
+  if (!matches.length) throw new Error(`Run step not found: ${reference}`);
+  throw new Error(`Run step reference is ambiguous; use one of: ${matches.map(locatedStepRef).join(", ")}`);
+}
+
+function runStepLocations(run: RunState): LocatedRunStep[] {
+  const procedures = new Map<string, RunState["plan"]>();
+  if (run.plan) procedures.set(run.procedureName, run.plan);
+  for (const template of Object.values(run.procedureSnapshots ?? {})) {
+    if (!procedures.has(template.memoryName)) procedures.set(template.memoryName, template.steps);
+  }
+  for (const frame of run.stack) {
+    if (frame.type === "procedure" && !procedures.has(frame.memoryName)) {
+      procedures.set(frame.memoryName, frame.steps);
+    }
+  }
+  const locations: LocatedRunStep[] = [];
+  for (const [memoryName, steps] of procedures) {
+    collectRunStepLocations(memoryName, steps ?? [], locations);
+  }
+  return locations;
+}
+
+function collectRunStepLocations(
+  memoryName: string,
+  steps: NonNullable<RunState["plan"]>,
+  output: LocatedRunStep[],
+  parentRef?: string,
+  relation?: LocatedRunStep["relation"]
+): void {
+  for (const step of steps) {
+    const located = { memoryName, step, parentRef, relation } satisfies LocatedRunStep;
+    output.push(located);
+    const nextParent = locatedStepRef(located);
+    if (step.branches) {
+      collectRunStepLocations(memoryName, step.branches.truthy, output, nextParent, "truthy");
+      collectRunStepLocations(memoryName, step.branches.falsy, output, nextParent, "falsy");
+    }
+    if (step.loop) collectRunStepLocations(memoryName, step.loop.body, output, nextParent, "loop");
+  }
+}
+
+function locatedStepRef(located: LocatedRunStep): string {
+  return `${located.memoryName}#${located.step.id}`;
 }
 
 function formatDisplay(format: NonNullable<ReturnType<typeof currentStep>>["format"]): string {

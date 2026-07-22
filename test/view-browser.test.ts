@@ -66,6 +66,22 @@ test("review mutations use button action guards", () => {
   assert.match(browserHtml, /runButtonAction\(save, \(\) => updateComment\(comment\.id, body\)\)/);
 });
 
+test("Artifact Review renders Agent progress and exposes retry only for failed Agents", () => {
+  assert.match(browserHtml, /assignment\.identityKind === "agent"/);
+  assert.match(browserHtml, /renderArtifactReviewAgentWorkspace\(context, selectedRound\)/);
+  assert.match(browserHtml, /assignment\.status === "failed" && context\.review\.status === "pending"/);
+  assert.match(browserHtml, /retryArtifactReviewAgent\(context\)/);
+  assert.match(browserHtml, /attempt\.failure\.code \+ ": " \+ attempt\.failure\.message/);
+});
+
+test("Artifact Review identity controls use Role names and an anchored custom menu", () => {
+  assert.match(browserHtml, /function artifactReviewRoleName\(assignment\)/);
+  assert.match(browserHtml, /artifact-review-identity-select/);
+  assert.match(browserHtml, /option\.textContent = artifactReviewRoleName\(assignment\)/);
+  assert.match(browserHtml, /name\.textContent = artifactReviewRoleName\(assignment\)/);
+  assert.match(browserHtml, /\.artifact-review-select-menu \{ position: absolute; top: calc\(100% \+ 4px\); right: 0; left: 0;/);
+});
+
 test("markdown artifacts use rendered markdown content when available", () => {
   assert.equal(shouldRenderMarkdownArtifact({ format: "markdown", renderedContent: "<h1>Title</h1>" }), true);
   assert.equal(shouldRenderMarkdownArtifact({ format: "markdown" }), false);

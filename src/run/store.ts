@@ -10,6 +10,8 @@ import {
   makeReviewEntityId,
   submittedAssignmentVote,
   type ArtifactReview,
+  type ArtifactReviewAgentAttempt,
+  type ArtifactReviewAgentFailure,
   type ArtifactReviewAnchor,
   type ArtifactReviewAssignment,
   type ArtifactReviewComment,
@@ -365,13 +367,39 @@ const artifactReviewCommentSchema = z.object({
   updatedAt: z.string()
 }).strict();
 
+const artifactReviewAgentAttemptSchema = z.object({
+  id: z.string(),
+  sequence: z.number().int().positive(),
+  status: z.enum(["queued", "running", "submitted", "failed", "cancelled"]),
+  provider: z.string(),
+  createdAt: z.string(),
+  startedAt: z.string().optional(),
+  completedAt: z.string().optional(),
+  workerPid: z.number().int().positive().optional(),
+  cliReadyAt: z.string().optional(),
+  promptVersion: z.string().optional(),
+  sessionId: z.string().optional(),
+  protocolVersion: z.number().int().optional(),
+  agentName: z.string().optional(),
+  agentVersion: z.string().optional(),
+  model: z.string().optional(),
+  stopReason: z.string().optional(),
+  failure: z.object({
+    stage: z.enum(["spawn", "initialize", "auth", "session", "mode", "cli", "prompt", "permission", "timeout", "protocol", "process"]),
+    code: z.string(),
+    message: z.string()
+  }).strict().optional()
+}).strict();
+
 const artifactReviewAssignmentSchema = z.object({
+  id: z.string().optional(),
   identityId: z.string(),
   identityName: z.string(),
+  identityKind: z.enum(["human", "agent"]).default("human"),
   roleIds: z.array(z.string()),
   permissions: z.array(z.enum(permissionIds)),
   binding: z.enum(["decision", "advisory"]),
-  status: z.enum(["draft", "submitted"]),
+  status: z.enum(["draft", "queued", "running", "submitted", "failed"]),
   draft: z.object({
     comments: z.array(artifactReviewCommentSchema),
     vote: z.enum(artifactReviewVoteValues).optional(),
@@ -380,9 +408,11 @@ const artifactReviewAssignmentSchema = z.object({
   submitted: z.object({
     comments: z.array(artifactReviewCommentSchema),
     vote: z.enum(artifactReviewVoteValues),
+    summary: z.string().optional(),
     submittedAt: z.string(),
     authorization: authorizationDecisionSchema
-  }).strict().optional()
+  }).strict().optional(),
+  attempts: z.array(artifactReviewAgentAttemptSchema).default([])
 }).strict();
 
 const artifactReviewVoteSchema = z.object({
@@ -399,7 +429,17 @@ const artifactReviewVoteSchema = z.object({
   submittedAt: z.string()
 }).strict();
 
-const artifactReviewResultSchema = z.object({
+const currentArtifactReviewResultSchema = z.object({
+  status: z.enum(["passed", "changes_requested"]),
+  completedAt: z.string(),
+  submitted: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  decisionApprove: z.number().int().nonnegative(),
+  decisionTotal: z.number().int().nonnegative(),
+  advisoryTotal: z.number().int().nonnegative()
+}).strict();
+
+const legacyArtifactReviewResultSchema = z.object({
   status: z.enum(["passed", "changes_requested"]),
   completedAt: z.string(),
   humanSubmitted: z.number().int().nonnegative(),
@@ -407,7 +447,20 @@ const artifactReviewResultSchema = z.object({
   decisionApprove: z.number().int().nonnegative(),
   decisionTotal: z.number().int().nonnegative(),
   advisoryTotal: z.number().int().nonnegative()
-}).strict();
+}).strict().transform((result) => ({
+  status: result.status,
+  completedAt: result.completedAt,
+  submitted: result.humanSubmitted,
+  total: result.humanTotal,
+  decisionApprove: result.decisionApprove,
+  decisionTotal: result.decisionTotal,
+  advisoryTotal: result.advisoryTotal
+}));
+
+const artifactReviewResultSchema = z.union([
+  currentArtifactReviewResultSchema,
+  legacyArtifactReviewResultSchema
+]);
 
 const artifactReviewRoundSchema = z.object({
   id: z.string(),
@@ -512,13 +565,21 @@ export async function ensureRunDirectory(runsRoot: string): Promise<string> {
 export async function startRun(input: {
   memoryRoot: string;
   runsRoot: string;
-  procedureName: string;
+  procedureName?: string;
+  procedureFile?: string;
   controlPlane?: ControlPlaneConfig;
 }): Promise<RunState> {
+  const procedureName = input.procedureName?.trim();
+  const procedureFile = input.procedureFile?.trim();
+  if (!procedureName && !procedureFile) throw new Error("provide a procedure name or procedure file");
+  if (procedureName && procedureFile) throw new Error("use either a procedure name or procedure file, not both");
+
   await ensureRunDirectory(input.runsRoot);
-  const procedure = await findMemoryByName(input.memoryRoot, "procedures", input.procedureName);
+  const procedure = procedureFile
+    ? await readMemoryFile("procedures", resolve(procedureFile))
+    : await findMemoryByName(input.memoryRoot, "procedures", procedureName!);
   if (!procedure) {
-    throw new Error(`procedure not found: ${input.procedureName}`);
+    throw new Error(`procedure not found: ${procedureName}`);
   }
 
   const procedureMemory = procedure.entity as ProcedureMemory;
@@ -529,7 +590,7 @@ export async function startRun(input: {
   const instantiated = instantiateProcedureTemplate(rootTemplate, {}, controlPlane);
   const steps = instantiated.steps;
   if (!steps.length) {
-    throw new Error(`procedure has no flow steps: ${input.procedureName}`);
+    throw new Error(`procedure has no flow steps: ${procedureMemory.names[0]}`);
   }
 
   const now = new Date().toISOString();
@@ -836,6 +897,10 @@ export type ArtifactReviewContext = {
   assignment: ArtifactReviewAssignment;
 };
 
+export type ArtifactReviewAgentContext = ArtifactReviewContext & {
+  attempt: ArtifactReviewAgentAttempt;
+};
+
 export function currentArtifactReview(run: RunState): ArtifactReview<RunEvent["artifact"]> | undefined {
   return run.artifactReviews?.find((review) => review.status !== "passed" && currentStep(run)?.id === review.stepId);
 }
@@ -896,6 +961,7 @@ export async function waitForArtifactReview(input: {
   while (true) {
     if (input.signal?.aborted) throw input.signal.reason ?? new Error("Artifact Review wait aborted");
     const context = await readArtifactReviewForRunner(input);
+    if (context.round.assignments.some((assignment) => assignment.status === "failed")) return context;
     if (context.review.status !== "pending") return context;
     await sleep(interval, input.signal);
   }
@@ -922,6 +988,9 @@ export async function updateArtifactReviewDraft(input: {
     }
     const assignment = requireArtifactReviewAssignment(round, input.identityId);
     if (assignment.status === "submitted") return { run, review, round, assignment };
+    if ((assignment.identityKind ?? "human") === "agent") {
+      throw new Error(`Agent Artifact Review assignment cannot use the Human draft API: ${assignment.identityId}`);
+    }
     const permission = assignment.binding === "decision" ? "decision.decide" : "decision.assess";
     const authorization = authorizeArtifactReviewIdentity({
       controlPlane: review.controlPlane,
@@ -964,6 +1033,9 @@ export async function submitArtifactReviewAssignment(input: {
     const round = requireArtifactReviewRound(review, input.roundId);
     const assignment = requireArtifactReviewAssignment(round, input.identityId);
     if (assignment.status === "submitted") return { run, review, round, assignment };
+    if ((assignment.identityKind ?? "human") === "agent") {
+      throw new Error(`Agent Artifact Review assignment cannot use the Human submit API: ${assignment.identityId}`);
+    }
     if (review.status !== "pending" || round.status !== "pending") {
       throw new Error(`Artifact Review Round is read-only: ${round.id}`);
     }
@@ -1000,6 +1072,254 @@ export async function submitArtifactReviewAssignment(input: {
       run.updatedAt = now;
       await writeRun(input.runsRoot, run);
       return { run, review, round, assignment };
+    } catch (error) {
+      await removeArtifactFiles(createdArtifactFiles);
+      throw error;
+    }
+  });
+}
+
+export async function claimArtifactReviewAgentAssignment(input: {
+  runsRoot: string;
+  reviewId: string;
+  roundId: string;
+  identityId: string;
+  workerPid: number;
+}): Promise<ArtifactReviewAgentContext | undefined> {
+  const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
+  return withRunWriteLock(input.runsRoot, located.run.id, async () => {
+    const run = await readRun(input.runsRoot, located.run.id);
+    const review = requireArtifactReview(run, input.reviewId);
+    if (review.currentRoundId !== input.roundId || review.status !== "pending") return undefined;
+    const round = requireArtifactReviewRound(review, input.roundId);
+    const assignment = requireArtifactReviewAssignment(round, input.identityId);
+    requireAgentReviewAssignment(assignment);
+    if (assignment.status !== "queued") return undefined;
+    const attempt = requireQueuedAgentAttempt(assignment);
+    const now = new Date().toISOString();
+    assignment.status = "running";
+    attempt.status = "running";
+    attempt.startedAt = now;
+    attempt.workerPid = input.workerPid;
+    round.revision += 1;
+    review.updatedAt = now;
+    run.updatedAt = now;
+    await writeRun(input.runsRoot, run);
+    return { run, review, round, assignment, attempt };
+  });
+}
+
+export async function markArtifactReviewAgentCliReady(input: {
+  runsRoot: string;
+  reviewId: string;
+  roundId: string;
+  identityId: string;
+  attemptId: string;
+  protocolVersion?: number;
+  sessionId?: string;
+  agentName?: string;
+  agentVersion?: string;
+}): Promise<ArtifactReviewAgentContext> {
+  return mutateArtifactReviewAgentAttempt(input, async (context) => {
+    const now = new Date().toISOString();
+    context.attempt.cliReadyAt ??= now;
+    if (input.protocolVersion !== undefined) context.attempt.protocolVersion = input.protocolVersion;
+    if (input.sessionId !== undefined) context.attempt.sessionId = input.sessionId;
+    if (input.agentName !== undefined) context.attempt.agentName = input.agentName;
+    if (input.agentVersion !== undefined) context.attempt.agentVersion = input.agentVersion;
+  });
+}
+
+export async function recordArtifactReviewAgentSession(input: {
+  runsRoot: string;
+  reviewId: string;
+  roundId: string;
+  identityId: string;
+  attemptId: string;
+  protocolVersion: number;
+  sessionId: string;
+  agentName?: string;
+  agentVersion?: string;
+}): Promise<ArtifactReviewAgentContext> {
+  return mutateArtifactReviewAgentAttempt(input, async (context) => {
+    context.attempt.protocolVersion = input.protocolVersion;
+    context.attempt.sessionId = input.sessionId;
+    context.attempt.agentName = input.agentName;
+    context.attempt.agentVersion = input.agentVersion;
+  });
+}
+
+export async function recordArtifactReviewAgentStop(input: {
+  runsRoot: string;
+  reviewId: string;
+  roundId: string;
+  identityId: string;
+  attemptId: string;
+  stopReason: string;
+}): Promise<ArtifactReviewAgentContext> {
+  return mutateArtifactReviewAgentAttempt(input, async (context) => {
+    context.attempt.stopReason = input.stopReason;
+  });
+}
+
+export async function failArtifactReviewAgentAssignment(input: {
+  runsRoot: string;
+  reviewId: string;
+  roundId: string;
+  identityId: string;
+  attemptId: string;
+  failure: ArtifactReviewAgentFailure;
+  stopReason?: string;
+}): Promise<ArtifactReviewAgentContext> {
+  return mutateArtifactReviewAgentAttempt(input, async (context) => {
+    if (context.assignment.status === "submitted") return;
+    const now = new Date().toISOString();
+    context.assignment.status = "failed";
+    context.attempt.status = "failed";
+    context.attempt.failure = structuredClone(input.failure);
+    context.attempt.stopReason = input.stopReason;
+    context.attempt.completedAt = now;
+  });
+}
+
+export async function retryArtifactReviewAgentAssignment(input: {
+  runsRoot: string;
+  reviewId: string;
+  roundId: string;
+  identityId: string;
+}): Promise<ArtifactReviewAgentContext> {
+  const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
+  return withRunWriteLock(input.runsRoot, located.run.id, async () => {
+    const run = await readRun(input.runsRoot, located.run.id);
+    const review = requireArtifactReview(run, input.reviewId);
+    if (review.currentRoundId !== input.roundId || review.status !== "pending") {
+      throw new Error(`Artifact Review Round is read-only: ${input.roundId}`);
+    }
+    const round = requireArtifactReviewRound(review, input.roundId);
+    const assignment = requireArtifactReviewAssignment(round, input.identityId);
+    requireAgentReviewAssignment(assignment);
+    if (assignment.status !== "failed") {
+      throw new Error(`Agent Artifact Review assignment is not failed: ${assignment.identityId}`);
+    }
+    const attempts = (assignment.attempts ??= []);
+    const now = new Date().toISOString();
+    const previous = attempts.at(-1);
+    const attempt: ArtifactReviewAgentAttempt = {
+      id: makeReviewEntityId("attempt", now),
+      sequence: (previous?.sequence ?? 0) + 1,
+      status: "queued",
+      provider: previous?.provider ?? "unconfigured",
+      createdAt: now,
+      promptVersion: previous?.promptVersion,
+      model: previous?.model
+    };
+    attempts.push(attempt);
+    assignment.status = "queued";
+    assignment.draft = { comments: [] };
+    round.revision += 1;
+    review.updatedAt = now;
+    run.updatedAt = now;
+    await writeRun(input.runsRoot, run);
+    return { run, review, round, assignment, attempt };
+  });
+}
+
+export async function appendArtifactReviewAgentComment(input: {
+  runsRoot: string;
+  reviewId: string;
+  roundId: string;
+  identityId: string;
+  attemptId: string;
+  body: string;
+  anchor?: ArtifactReviewAnchor;
+}): Promise<ArtifactReviewAgentContext> {
+  const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
+  return withRunWriteLock(input.runsRoot, located.run.id, async () => {
+    const context = requireRunningAgentContext(await readRun(input.runsRoot, located.run.id), input);
+    const authorization = authorizeArtifactReviewIdentity({
+      controlPlane: context.review.controlPlane,
+      assignment: context.assignment,
+      permission: context.assignment.binding === "decision" ? "decision.decide" : "decision.assess"
+    });
+    if (!authorization.allowed) throw new ArtifactAuthorizationFailure(authorization, []);
+    const submission = reviewSubmission(context.review, context.round.submissionId);
+    const now = new Date().toISOString();
+    context.assignment.draft = {
+      ...context.assignment.draft,
+      comments: normalizeArtifactReviewComments(
+        [...context.assignment.draft.comments, { body: input.body, anchor: input.anchor }],
+        submission.digest,
+        now,
+        context.assignment.draft.comments
+      ),
+      updatedAt: now
+    };
+    context.round.revision += 1;
+    context.review.updatedAt = now;
+    context.run.updatedAt = now;
+    await writeRun(input.runsRoot, context.run);
+    return context;
+  });
+}
+
+export async function submitArtifactReviewAgentAssignment(input: {
+  runsRoot: string;
+  reviewId: string;
+  roundId: string;
+  identityId: string;
+  attemptId: string;
+  vote: ArtifactReviewVoteValue;
+  summary?: string;
+}): Promise<ArtifactReviewAgentContext> {
+  const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
+  return withRunWriteLock(input.runsRoot, located.run.id, async () => {
+    const run = await readRun(input.runsRoot, located.run.id);
+    const review = requireArtifactReview(run, input.reviewId);
+    const round = requireArtifactReviewRound(review, input.roundId);
+    const assignment = requireArtifactReviewAssignment(round, input.identityId);
+    requireAgentReviewAssignment(assignment);
+    const attempt = requireArtifactReviewAgentAttempt(assignment, input.attemptId);
+    const summary = input.summary?.trim() || undefined;
+    if (assignment.status === "submitted" && assignment.submitted) {
+      if (assignment.submitted.vote === input.vote && assignment.submitted.summary === summary) {
+        return { run, review, round, assignment, attempt };
+      }
+      throw new Error(`Agent Artifact Review assignment is already submitted: ${assignment.identityId}`);
+    }
+    const context = requireRunningAgentContext(run, input);
+    if (!context.attempt.cliReadyAt) throw new Error("Agent Review CLI handshake is required before submit");
+    if (input.vote === "request_changes" && context.assignment.draft.comments.length === 0) {
+      throw new Error("request_changes requires at least one Comment");
+    }
+    const permission = context.assignment.binding === "decision" ? "decision.decide" : "decision.assess";
+    const authorization = authorizeArtifactReviewIdentity({
+      controlPlane: context.review.controlPlane,
+      assignment: context.assignment,
+      permission
+    });
+    if (!authorization.allowed) throw new ArtifactAuthorizationFailure(authorization, []);
+    const now = new Date().toISOString();
+    context.assignment.draft.vote = input.vote;
+    context.assignment.draft.updatedAt = now;
+    context.assignment.status = "submitted";
+    context.assignment.submitted = {
+      comments: structuredClone(context.assignment.draft.comments),
+      vote: input.vote,
+      summary,
+      submittedAt: now,
+      authorization
+    };
+    context.attempt.status = "submitted";
+    context.attempt.completedAt = now;
+    context.round.votes.push(submittedAssignmentVote(context.assignment, authorization));
+    context.round.revision += 1;
+    context.review.updatedAt = now;
+    const createdArtifactFiles: string[] = [];
+    try {
+      await settleArtifactReviewRound(input.runsRoot, context.run, context.review, context.round, createdArtifactFiles, now);
+      context.run.updatedAt = now;
+      await writeRun(input.runsRoot, context.run);
+      return context;
     } catch (error) {
       await removeArtifactFiles(createdArtifactFiles);
       throw error;
@@ -1092,10 +1412,10 @@ async function settleArtifactReviewRound(
 ): Promise<void> {
   if (round.assignments.some((assignment) => assignment.status !== "submitted")) return;
 
-  const humanDecisionVotes = round.votes.filter(
+  const identityDecisionVotes = round.votes.filter(
     (vote) => vote.subject.kind === "identity" && vote.binding === "decision"
   );
-  const humanDecisionRejected = humanDecisionVotes.some((vote) => vote.value !== "approve");
+  const identityDecisionRejected = identityDecisionVotes.some((vote) => vote.value !== "approve");
   const runnerAuthorization = authorizeArtifactOperation({
     controlPlane: review.controlPlane,
     subject: { kind: "runner" },
@@ -1105,7 +1425,7 @@ async function settleArtifactReviewRound(
     (vote) => vote.subject.kind === "runner" && vote.binding === "decision"
   );
 
-  if (!humanDecisionRejected && runnerAuthorization.allowed && !runnerVote) {
+  if (!identityDecisionRejected && runnerAuthorization.allowed && !runnerVote) {
     round.status = "awaiting_runner_vote";
     review.status = "awaiting_runner_vote";
     return;
@@ -1202,10 +1522,86 @@ function requireArtifactReviewRound(
   return round;
 }
 
-function requireArtifactReviewAssignment(round: ArtifactReviewRound, identityId: string): ArtifactReviewAssignment {
-  const assignment = round.assignments.find((candidate) => candidate.identityId === identityId);
-  if (!assignment) throw new Error(`Identity is not assigned to Artifact Review Round: ${identityId}`);
+function requireArtifactReviewAssignment(round: ArtifactReviewRound, assignmentId: string): ArtifactReviewAssignment {
+  const assignment = round.assignments.find((candidate) =>
+    candidate.id === assignmentId || candidate.identityId === assignmentId
+  );
+  if (!assignment) throw new Error(`Artifact Review Assignment not found: ${assignmentId}`);
   return assignment;
+}
+
+function requireAgentReviewAssignment(assignment: ArtifactReviewAssignment): void {
+  if ((assignment.identityKind ?? "human") !== "agent") {
+    throw new Error(`Artifact Review assignment is not an Agent assignment: ${assignment.identityId}`);
+  }
+}
+
+function requireArtifactReviewAgentAttempt(
+  assignment: ArtifactReviewAssignment,
+  attemptId: string
+): ArtifactReviewAgentAttempt {
+  const attempt = assignment.attempts?.find((candidate) => candidate.id === attemptId);
+  if (!attempt) throw new Error(`Artifact Review Agent Attempt not found: ${attemptId}`);
+  return attempt;
+}
+
+function requireQueuedAgentAttempt(assignment: ArtifactReviewAssignment): ArtifactReviewAgentAttempt {
+  const attempt = assignment.attempts?.at(-1);
+  if (!attempt || attempt.status !== "queued") {
+    throw new Error(`Agent Artifact Review assignment has no queued Attempt: ${assignment.identityId}`);
+  }
+  return attempt;
+}
+
+function requireRunningAgentContext(
+  run: RunState,
+  input: { reviewId: string; roundId: string; identityId: string; attemptId: string }
+): ArtifactReviewAgentContext {
+  const review = requireArtifactReview(run, input.reviewId);
+  if (review.currentRoundId !== input.roundId || review.status !== "pending") {
+    throw new Error(`Artifact Review Round is read-only: ${input.roundId}`);
+  }
+  const round = requireArtifactReviewRound(review, input.roundId);
+  if (round.status !== "pending") throw new Error(`Artifact Review Round is read-only: ${round.id}`);
+  const assignment = requireArtifactReviewAssignment(round, input.identityId);
+  requireAgentReviewAssignment(assignment);
+  if (assignment.status !== "running") {
+    throw new Error(`Agent Artifact Review assignment is not running: ${assignment.identityId}`);
+  }
+  const attempt = requireArtifactReviewAgentAttempt(assignment, input.attemptId);
+  if (attempt.status !== "running") {
+    throw new Error(`Artifact Review Agent Attempt is not running: ${attempt.id}`);
+  }
+  return { run, review, round, assignment, attempt };
+}
+
+async function mutateArtifactReviewAgentAttempt(
+  input: {
+    runsRoot: string;
+    reviewId: string;
+    roundId: string;
+    identityId: string;
+    attemptId: string;
+  },
+  mutate: (context: ArtifactReviewAgentContext) => Promise<void>
+): Promise<ArtifactReviewAgentContext> {
+  const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
+  return withRunWriteLock(input.runsRoot, located.run.id, async () => {
+    const run = await readRun(input.runsRoot, located.run.id);
+    const review = requireArtifactReview(run, input.reviewId);
+    const round = requireArtifactReviewRound(review, input.roundId);
+    const assignment = requireArtifactReviewAssignment(round, input.identityId);
+    requireAgentReviewAssignment(assignment);
+    const attempt = requireArtifactReviewAgentAttempt(assignment, input.attemptId);
+    const context = { run, review, round, assignment, attempt };
+    await mutate(context);
+    const now = new Date().toISOString();
+    round.revision += 1;
+    review.updatedAt = now;
+    run.updatedAt = now;
+    await writeRun(input.runsRoot, run);
+    return context;
+  });
 }
 
 function activeReviewForStep(

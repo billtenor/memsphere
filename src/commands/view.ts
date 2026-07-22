@@ -4,6 +4,7 @@ import { join, relative, resolve, sep } from "node:path";
 import MarkdownIt from "markdown-it";
 import { ZodError, type ZodIssue } from "zod";
 import { archiveReview, archiveRun } from "../archive/store.js";
+import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
 import { type MemsphereConfig, readConfig } from "../config.js";
 import { authorizeArtifactOperation } from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
@@ -34,6 +35,7 @@ import {
   parseRunState,
   readArtifactReviewForIdentity,
   readRun,
+  retryArtifactReviewAgentAssignment,
   submitArtifactReviewAssignment,
   updateArtifactReviewDraft,
   type ArtifactReviewDraftInput,
@@ -196,7 +198,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   }
 
   if (request.method === "GET" && url.pathname === "/api/runs") {
-    sendJson(response, 200, { runs: await loadRunPayload(runsRoot) });
+    sendJson(response, 200, { runs: await loadRunPayload(config) });
     return;
   }
 
@@ -259,6 +261,25 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     return;
   }
 
+  const artifactReviewRetryMatch = url.pathname.match(
+    /^\/api\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)\/assignments\/([^/]+)\/retry$/
+  );
+  if (request.method === "POST" && artifactReviewRetryMatch) {
+    try {
+      const context = await retryArtifactReviewAgentAssignment({
+        runsRoot,
+        reviewId: decodeURIComponent(artifactReviewRetryMatch[1]),
+        roundId: decodeURIComponent(artifactReviewRetryMatch[2]),
+        identityId: decodeURIComponent(artifactReviewRetryMatch[3])
+      });
+      await dispatchArtifactReviewAgents({ config, run: context.run });
+      sendJson(response, 200, await artifactReviewContextPayload(runsRoot, context));
+    } catch (error) {
+      sendArtifactReviewError(response, error);
+    }
+    return;
+  }
+
   const reviewSnapshotMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)\/snapshot$/);
   if (request.method === "GET" && reviewSnapshotMatch) {
     const id = decodeURIComponent(reviewSnapshotMatch[1]);
@@ -275,7 +296,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)$/);
   if (request.method === "GET" && runMatch) {
     const run = await readRun(runsRoot, decodeURIComponent(runMatch[1]));
-    sendJson(response, 200, { run: await toViewRunPayload(runsRoot, run) });
+    await dispatchArtifactReviewAgents({ config, run });
+    sendJson(response, 200, { run: await toViewRunPayload(runsRoot, await readRun(runsRoot, run.id)) });
     return;
   }
 
@@ -706,9 +728,11 @@ async function loadReservedMemoryPayload(scopeRoot: string, memoryRoot: string):
   });
 }
 
-async function loadRunPayload(runsRoot: string): Promise<unknown[]> {
-  const runs = await listRuns(runsRoot);
-  return Promise.all(runs.map((run) => toViewRunPayload(runsRoot, run)));
+async function loadRunPayload(config: MemsphereConfig): Promise<unknown[]> {
+  const runs = await listRuns(config.runsRoot);
+  await Promise.all(runs.map((run) => dispatchArtifactReviewAgents({ config, run })));
+  const refreshed = await listRuns(config.runsRoot);
+  return Promise.all(refreshed.map((run) => toViewRunPayload(config.runsRoot, run)));
 }
 
 async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknown> {
@@ -717,11 +741,14 @@ async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknow
   const review = currentArtifactReview(hydrated);
   return {
     ...publicRun,
-    artifactReview: review ? artifactReviewSummary(review) : undefined
+    artifactReview: review ? artifactReviewSummary(review, hydrated.controlPlane) : undefined
   };
 }
 
-function artifactReviewSummary(review: NonNullable<RunState["artifactReviews"]>[number]): unknown {
+function artifactReviewSummary(
+  review: NonNullable<RunState["artifactReviews"]>[number],
+  controlPlane: RunState["controlPlane"]
+): unknown {
   const round = review.rounds.find((candidate) => candidate.id === review.currentRoundId);
   const runnerVote = round?.votes.find((vote) => vote.subject.kind === "runner");
   const runnerCanDecide = authorizeArtifactOperation({
@@ -743,12 +770,17 @@ function artifactReviewSummary(review: NonNullable<RunState["artifactReviews"]>[
       submitted: round.assignments.filter((assignment) => assignment.status === "submitted").length,
       total: round.assignments.length,
       assignments: round.assignments.map((assignment) => ({
+        id: assignment.id,
         identityId: assignment.identityId,
         identityName: assignment.identityName,
+        roleNames: artifactReviewRoleNames(controlPlane, assignment.roleIds),
+        identityKind: assignment.identityKind ?? "human",
         binding: assignment.binding,
-        status: assignment.status
+        status: assignment.status,
+        attempt: assignment.attempts?.at(-1)
       })),
       runner: runnerCanDecide || runnerVote ? {
+        roleName: controlPlane?.roles.runner?.name ?? "Runner",
         binding: "decision",
         status: runnerVote ? "submitted" : "pending",
         vote: runnerVote?.value,
@@ -771,7 +803,7 @@ async function artifactReviewContextPayload(runsRoot: string, context: ArtifactR
   };
   await hydrateArtifactContent(runsRoot, context.run.id, artifact);
   return {
-    review: artifactReviewSummary(context.review),
+    review: artifactReviewSummary(context.review, context.run.controlPlane),
     submission: {
       id: submission.id,
       digest: submission.digest,
@@ -779,7 +811,10 @@ async function artifactReviewContextPayload(runsRoot: string, context: ArtifactR
       artifact,
       revisionSummary: submission.revisionSummary
     },
-    assignment: structuredClone(context.assignment),
+    assignment: {
+      ...structuredClone(context.assignment),
+      roleNames: artifactReviewRoleNames(context.run.controlPlane, context.assignment.roleIds)
+    },
     rounds: context.review.rounds.map((round) => ({
       id: round.id,
       sequence: round.sequence,
@@ -788,18 +823,27 @@ async function artifactReviewContextPayload(runsRoot: string, context: ArtifactR
       revision: round.revision,
       createdAt: round.createdAt,
       assignments: round.assignments.map((assignment) => ({
+        id: assignment.id,
         identityId: assignment.identityId,
         identityName: assignment.identityName,
+        roleNames: artifactReviewRoleNames(context.run.controlPlane, assignment.roleIds),
+        identityKind: assignment.identityKind ?? "human",
         roleIds: assignment.roleIds,
         binding: assignment.binding,
         status: assignment.status,
-        submitted: assignment.submitted
+        submitted: assignment.submitted,
+        draft: (assignment.identityKind ?? "human") === "agent" ? assignment.draft : undefined,
+        attempts: assignment.attempts
       })),
       votes: round.votes,
       result: round.result,
       revisionSummary: context.review.submissions.find((submission) => submission.id === round.submissionId)?.revisionSummary
     }))
   };
+}
+
+function artifactReviewRoleNames(controlPlane: RunState["controlPlane"], roleIds: string[]): string[] {
+  return roleIds.map((roleId) => controlPlane?.roles[roleId]?.name ?? roleId);
 }
 
 export async function hydrateRunArtifactContent(runsRoot: string, run: RunState): Promise<RunState> {

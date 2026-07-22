@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { printArtifactReviewSummary, printLatestReportAuthorization, printRunState } from "../src/commands/run.js";
+import {
+  buildRunArtifactContractDetail,
+  buildRunArtifactDetail,
+  buildRunOverview,
+  buildRunStepDetail,
+  printArtifactReviewSummary,
+  printLatestReportAuthorization,
+  printRunState
+} from "../src/commands/run.js";
 import type { ArtifactReview, ArtifactReviewRound } from "../src/artifact-review.js";
 import {
   authorizeArtifactOperation,
@@ -9,6 +17,106 @@ import {
   resolveArtifactControlPlane
 } from "../src/control-plane/index.js";
 import type { RunState } from "../src/run/store.js";
+
+test("Run inspection separates navigation, step detail, and Artifact content", async () => {
+  const steps: NonNullable<RunState["plan"]> = [{
+    id: "flow[1]",
+    kind: "action",
+    instruction: "Produce the summary.",
+    actor: "agent",
+    artifact: "summary",
+    type: "object",
+    format: { name: "json", options: {} },
+    schema: {
+      kind: "inline",
+      id: "summary-contract",
+      node: {
+        tag: "!schema",
+        names: ["Summary contract"],
+        defines: [],
+        type: "object",
+        format: { name: "json", options: {} },
+        fields: [{
+          tag: "!schema",
+          names: ["summary"],
+          defines: [],
+          type: "string"
+        }]
+      }
+    },
+    asserts: ["The summary is concrete."],
+    suggests: ["Keep it short."]
+  }, {
+    id: "flow[2]",
+    kind: "action",
+    instruction: "Produce the conclusion.",
+    actor: "agent",
+    artifact: "conclusion",
+    type: "string",
+    format: { name: "plain", options: {} }
+  }];
+  const run: RunState = {
+    contractVersion: 3,
+    id: "run-inspection",
+    status: "running",
+    procedureName: "CLI inspection",
+    memoryRoot: "/memory",
+    createdAt: "2026-07-21T00:00:00.000Z",
+    updatedAt: "2026-07-21T00:01:00.000Z",
+    plan: steps,
+    stack: [{ type: "procedure", memoryName: "CLI inspection", steps, index: 1 }],
+    events: [{
+      at: "2026-07-21T00:00:30.000Z",
+      frame: "procedure",
+      stepId: "flow[1]",
+      artifact: {
+        name: "summary",
+        type: "object",
+        format: { name: "json", options: {} },
+        storage: "inline",
+        value: { summary: "Candidate summary" }
+      }
+    }]
+  };
+
+  const overview = buildRunOverview(run) as Record<string, unknown> & {
+    totalSteps: number;
+    currentStepRef: string;
+    steps: Array<Record<string, unknown>>;
+  };
+  assert.equal(overview.totalSteps, 2);
+  assert.equal(overview.currentStepRef, "CLI inspection#flow[2]");
+  assert.equal(overview.steps[0].artifactState, "reported");
+  assert.equal(overview.steps[1].current, true);
+  assert.equal("stack" in overview, false);
+  assert.equal("events" in overview, false);
+  assert.equal("controlPlane" in overview, false);
+
+  const detail = buildRunStepDetail(run, "CLI inspection#flow[1]") as {
+    step: { asserts: string[]; suggests: string[] };
+  };
+  assert.deepEqual(detail.step.asserts, ["The summary is concrete."]);
+  assert.deepEqual(detail.step.suggests, ["Keep it short."]);
+
+  const artifact = await buildRunArtifactDetail("/runs", run, "CLI inspection#flow[1]") as {
+    source: string;
+    artifact: { value: unknown };
+  };
+  assert.equal(artifact.source, "run_event");
+  assert.deepEqual(artifact.artifact.value, { summary: "Candidate summary" });
+  assert.equal((artifact.artifact as { storage?: string }).storage, "inline");
+  assert.equal((artifact.artifact as { filePath?: string }).filePath, undefined);
+  assert.equal("contract" in artifact, false);
+
+  const contract = buildRunArtifactContractDetail(run, "CLI inspection#flow[1]") as {
+    action: { instruction: string; asserts: string[] };
+    artifact: { schema: { kind: string; node: { fields: unknown[] } } };
+  };
+  assert.equal(contract.action.instruction, "Produce the summary.");
+  assert.deepEqual(contract.action.asserts, ["The summary is concrete."]);
+  assert.equal(contract.artifact.schema.kind, "inline");
+  assert.equal(contract.artifact.schema.node.fields.length, 1);
+});
 
 test("run output separates Procedure assertions from Action assertions", () => {
   const run: RunState = {

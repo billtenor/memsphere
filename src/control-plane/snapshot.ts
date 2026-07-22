@@ -34,7 +34,17 @@ function normalizeIdentity(identity: ControlPlaneIdentity): ControlPlaneIdentity
     : {
         kind: "agent",
         name: identity.name,
-        agent: { command: identity.agent.command, args: [...identity.agent.args] }
+        agent: {
+          provider: identity.agent.provider,
+          command: identity.agent.command,
+          args: [...identity.agent.args],
+          cwd: identity.agent.cwd,
+          model: identity.agent.model,
+          promptVersion: identity.agent.promptVersion,
+          startupTimeoutMs: identity.agent.startupTimeoutMs,
+          idleTimeoutMs: identity.agent.idleTimeoutMs,
+          maxRuntimeMs: identity.agent.maxRuntimeMs
+        }
       };
 }
 

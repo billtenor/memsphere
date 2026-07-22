@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   authorizeArtifactOperation,
+  controlPlaneSnapshotSchema,
   createControlPlaneSnapshot,
   listDecisionPolicyDefinitions,
   listPermissionDefinitions,
@@ -16,7 +17,21 @@ import {
 const rawConfig = {
   identities: {
     human: { kind: "human", name: "Human" },
-    agent: { kind: "agent", name: "Agent", agent: { command: "codex", args: ["acp"] } }
+    agent: {
+      kind: "agent",
+      name: "Agent",
+      agent: {
+        provider: "traex",
+        command: "traecli",
+        args: [],
+        cwd: ".",
+        model: "review-model",
+        prompt_version: "artifact-review-v1",
+        startup_timeout_ms: 10000,
+        idle_timeout_ms: 30000,
+        max_runtime_ms: null
+      }
+    }
   },
   roles: {
     runner: {
@@ -48,6 +63,61 @@ test("control plane config is strict and rejects credentials and invalid permiss
   const parsed = parseControlPlaneConfig(rawConfig);
   assert.deepEqual(parsed.roles.runner.grantablePermissions, ["decision.decide"]);
   assert.equal(parsed.roles.reviewer.systemPrompt, "Review independently.");
+  assert.deepEqual(parsed.identities.agent.kind === "agent" ? parsed.identities.agent.agent : undefined, {
+    provider: "traex",
+    command: "traecli",
+    args: [],
+    cwd: ".",
+    model: "review-model",
+    promptVersion: "artifact-review-v1",
+    startupTimeoutMs: 10000,
+    idleTimeoutMs: 30000,
+    maxRuntimeMs: null
+  });
+
+  const legacy = parseControlPlaneConfig({
+    ...rawConfig,
+    identities: {
+      ...rawConfig.identities,
+      agent: {
+        ...rawConfig.identities.agent,
+        agent: {
+          provider: "traex",
+          command: "traecli",
+          args: [],
+          timeout_ms: 45000
+        }
+      }
+    }
+  });
+  assert.equal(legacy.identities.agent.kind === "agent" ? legacy.identities.agent.agent.maxRuntimeMs : undefined, 45000);
+  assert.throws(() => parseControlPlaneConfig({
+    ...rawConfig,
+    identities: {
+      ...rawConfig.identities,
+      agent: {
+        ...rawConfig.identities.agent,
+        agent: {
+          provider: "traex",
+          command: "traecli",
+          args: [],
+          timeout_ms: 45000,
+          max_runtime_ms: null
+        }
+      }
+    }
+  }), /cannot be combined/);
+
+  assert.throws(() => parseControlPlaneConfig({
+    ...rawConfig,
+    identities: {
+      ...rawConfig.identities,
+      agent: {
+        ...rawConfig.identities.agent,
+        agent: { ...rawConfig.identities.agent.agent, provider: "codex" }
+      }
+    }
+  }), /traex/);
 
   assert.throws(() => parseControlPlaneConfig({ ...rawConfig, roles: { reviewer: rawConfig.roles.reviewer } }), /reserved runner/);
   assert.throws(() => parseControlPlaneConfig({
@@ -56,7 +126,7 @@ test("control plane config is strict and rejects credentials and invalid permiss
       agent: {
         kind: "agent",
         name: "Agent",
-        agent: { command: "codex", args: [], env: { API_KEY: "secret" } }
+        agent: { command: "traecli", args: [], env: { API_KEY: "secret" } }
       }
     }
   }), /Unrecognized key.*env/);
@@ -90,6 +160,19 @@ test("control plane snapshots and revisions are deterministic", () => {
   assert.match(first.revision, /^sha256:[a-f0-9]{64}$/);
   assert.equal(first.roles.reviewer.systemPrompt, "Review independently.");
   assert.equal(JSON.stringify(first).includes("API_KEY"), false);
+
+  const legacy = structuredClone(first);
+  const legacyAgent = legacy.identities.agent;
+  assert.equal(legacyAgent.kind, "agent");
+  if (legacyAgent.kind === "agent") {
+    legacyAgent.agent.provider = "codex";
+    const legacyTimeout = legacyAgent.agent as unknown as Record<string, unknown>;
+    delete legacyTimeout.maxRuntimeMs;
+    legacyTimeout.timeoutMs = 30000;
+  }
+  const parsedLegacy = controlPlaneSnapshotSchema.parse(legacy);
+  assert.equal(parsedLegacy.identities.agent.kind === "agent" ? parsedLegacy.identities.agent.agent.provider : undefined, "codex");
+  assert.equal(parsedLegacy.identities.agent.kind === "agent" ? parsedLegacy.identities.agent.agent.maxRuntimeMs : undefined, 30000);
 });
 
 test("Artifact binding overrides and grants produce default-deny authorization and guidance", () => {

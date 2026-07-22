@@ -261,6 +261,8 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-candidate { border-left-color: var(--accent); }
     .artifact-review-candidate .section-body { display: block; }
     .artifact-review-progress { font-variant-numeric: tabular-nums; }
+    .artifact-review-agent-status { display: grid; gap: 8px; }
+    .artifact-review-agent-status .btn { justify-self: start; }
     .artifact-review-id { overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
     dialog.artifact-review-dialog { width: min(460px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 8px; padding: 0; color: var(--text); box-shadow: 0 20px 60px rgba(25, 30, 35, .24); }
     dialog.artifact-review-dialog::backdrop { background: rgba(22, 28, 30, .34); }
@@ -451,7 +453,13 @@ export const browserHtml = String.raw`<!doctype html>
       passed: { zh: "已通过", yaml: "Passed" },
       changesRequested: { zh: "需修改", yaml: "Changes requested" },
       awaitingRunnerVote: { zh: "等待 Runner 投票", yaml: "Awaiting Runner vote" },
-      pendingVote: { zh: "待投票", yaml: "Pending vote" }
+      pendingVote: { zh: "待投票", yaml: "Pending vote" },
+      agentReviewer: { zh: "Agent 评审", yaml: "Agent reviewer" },
+      queued: { zh: "等待启动", yaml: "Queued" },
+      running: { zh: "评审中", yaml: "Running" },
+      failed: { zh: "执行失败", yaml: "Failed" },
+      retry: { zh: "重试", yaml: "Retry" },
+      attempt: { zh: "尝试", yaml: "Attempt" }
     };
     const state = {
       viewMode: localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
@@ -2831,7 +2839,7 @@ export const browserHtml = String.raw`<!doctype html>
             comments.push({
               ...comment,
               _mineDraft: false,
-              _identityName: assignment.identityName,
+              _identityName: artifactReviewRoleName(assignment),
               _binding: assignment.binding,
               _round: round.sequence
             });
@@ -2935,7 +2943,7 @@ export const browserHtml = String.raw`<!doctype html>
         title.textContent = t("submitArtifactReview");
         const summary = document.createElement("div");
         const vote = artifactReviewVoteLabel(context.assignment.draft.vote, context.assignment.binding);
-        summary.textContent = context.assignment.identityName + " · "
+        summary.textContent = artifactReviewRoleName(context.assignment) + " · "
           + t("round") + " " + context.review.round.sequence + " · "
           + (context.assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote")) + " · "
           + vote + " · " + context.assignment.draft.comments.length + " comment(s)";
@@ -3084,37 +3092,7 @@ export const browserHtml = String.raw`<!doctype html>
       const controls = document.createElement("section");
       controls.className = "panel artifact-review-stack";
       const identityLabel = blockTitle(t("identity"));
-      const identitySelect = document.createElement("select");
-      identitySelect.className = "artifact-review-select";
-      identitySelect.setAttribute("aria-label", t("identity"));
-      const placeholder = document.createElement("option");
-      placeholder.value = "";
-      placeholder.textContent = t("selectIdentity");
-      identitySelect.append(placeholder);
-      for (const assignment of review.round.assignments || []) {
-        const option = document.createElement("option");
-        option.value = assignment.identityId;
-        option.textContent = assignment.identityName + " · "
-          + (assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote"));
-        identitySelect.append(option);
-      }
-      identitySelect.value = context?.assignment?.identityId || state.artifactReviewIdentityByReview[review.id] || "";
-      identitySelect.disabled = state.artifactReviewSaving;
-      identitySelect.addEventListener("change", async () => {
-        const identityId = identitySelect.value;
-        if (!identityId) {
-          delete state.artifactReviewIdentityByReview[review.id];
-          state.artifactReviewContext = null;
-          writeStoredObject(artifactReviewIdentityKey, state.artifactReviewIdentityByReview);
-          renderAll();
-          return;
-        }
-        state.artifactReviewIdentityByReview[review.id] = identityId;
-        writeStoredObject(artifactReviewIdentityKey, state.artifactReviewIdentityByReview);
-        await loadArtifactReviewContext(review.id, review.currentRoundId, identityId);
-        renderAll();
-      });
-      controls.append(identityLabel, identitySelect);
+      controls.append(identityLabel, renderArtifactReviewIdentitySelector(review, context));
 
       if (context) {
         const role = document.createElement("div");
@@ -3147,11 +3125,13 @@ export const browserHtml = String.raw`<!doctype html>
       }
 
       const disabledReason = artifactReviewSubmitDisabledReason();
+      const agentManaged = context?.assignment?.identityKind === "agent";
+      el.submitReview.hidden = Boolean(agentManaged);
       el.submitReview.textContent = context?.assignment?.status === "submitted" ? t("submitted") : t("submitArtifactReview");
-      el.submitReview.disabled = Boolean(disabledReason);
+      el.submitReview.disabled = agentManaged || Boolean(disabledReason);
       el.submitReview.title = disabledReason;
       el.commentSummary.textContent = context
-        ? context.assignment.identityName + " · " + context.review.id
+        ? artifactReviewRoleName(context.assignment) + " · " + context.review.id
         : review.id;
     }
 
@@ -3166,16 +3146,17 @@ export const browserHtml = String.raw`<!doctype html>
         const main = document.createElement("div");
         main.className = "artifact-review-row-main";
         const name = document.createElement("span");
-        name.textContent = assignment.identityName;
+        name.textContent = artifactReviewRoleName(assignment);
         const type = document.createElement("span");
         type.className = "muted";
-        type.textContent = assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote");
+        type.textContent = (assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote"))
+          + (assignment.identityKind === "agent" ? " · Agent" : "");
         main.append(name, type);
         const status = document.createElement("span");
         status.className = "artifact-review-progress";
         status.textContent = submitted
           ? artifactReviewVoteLabel(submitted.vote, assignment.binding)
-          : assignment.status === "submitted" ? t("submitted") : t("draft");
+          : artifactReviewAssignmentStatusLabel(assignment.status, assignment.identityKind);
         row.append(main, status);
         list.append(row);
       }
@@ -3185,7 +3166,8 @@ export const browserHtml = String.raw`<!doctype html>
         const main = document.createElement("div");
         main.className = "artifact-review-row-main";
         const name = document.createElement("span");
-        name.textContent = "Runner" + (review.round.runner.automatic ? " · " + t("automatic") : "");
+        name.textContent = (review.round.runner.roleName || "Runner")
+          + (review.round.runner.automatic ? " · " + t("automatic") : "");
         const type = document.createElement("span");
         type.className = "muted";
         type.textContent = t("decisionVote");
@@ -3199,6 +3181,107 @@ export const browserHtml = String.raw`<!doctype html>
         list.append(row);
       }
       return list;
+    }
+
+    function renderArtifactReviewIdentitySelector(review, context) {
+      const assignments = review.round.assignments || [];
+      const selectedIdentityId = context?.assignment?.identityId || state.artifactReviewIdentityByReview[review.id] || "";
+      const selectedAssignment = assignments.find(assignment => assignment.identityId === selectedIdentityId);
+      const chooser = document.createElement("div");
+      chooser.className = "artifact-review-round-select artifact-review-identity-select";
+      const trigger = document.createElement("button");
+      trigger.type = "button";
+      trigger.className = "artifact-review-select artifact-review-select-trigger";
+      trigger.setAttribute("role", "combobox");
+      trigger.setAttribute("aria-label", t("identity"));
+      trigger.setAttribute("aria-haspopup", "listbox");
+      trigger.setAttribute("aria-expanded", "false");
+      trigger.disabled = state.artifactReviewSaving;
+      const triggerText = document.createElement("span");
+      triggerText.textContent = selectedAssignment ? artifactReviewRoleName(selectedAssignment) : t("selectIdentity");
+      const caret = document.createElement("span");
+      caret.className = "artifact-review-select-caret";
+      caret.setAttribute("aria-hidden", "true");
+      caret.textContent = "⌄";
+      trigger.append(triggerText, caret);
+      const menu = document.createElement("div");
+      menu.className = "artifact-review-select-menu";
+      menu.setAttribute("role", "listbox");
+      menu.setAttribute("aria-label", t("identity"));
+      menu.hidden = true;
+
+      const setOpen = open => {
+        menu.hidden = !open;
+        trigger.setAttribute("aria-expanded", String(open));
+      };
+      const focusOption = offset => {
+        const options = [...menu.querySelectorAll(".artifact-review-select-option")];
+        if (!options.length) return;
+        const focusedIndex = options.indexOf(document.activeElement);
+        const selectedIndex = options.findIndex(option => option.getAttribute("aria-selected") === "true");
+        const start = focusedIndex >= 0 ? focusedIndex : selectedIndex >= 0 ? selectedIndex : 0;
+        options[(start + offset + options.length) % options.length].focus();
+      };
+      for (const assignment of assignments) {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "artifact-review-select-option";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", String(assignment.identityId === selectedIdentityId));
+        option.dataset.identityId = assignment.identityId;
+        option.textContent = artifactReviewRoleName(assignment) + " · "
+          + (assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote"));
+        option.addEventListener("click", async () => {
+          setOpen(false);
+          state.artifactReviewIdentityByReview[review.id] = assignment.identityId;
+          writeStoredObject(artifactReviewIdentityKey, state.artifactReviewIdentityByReview);
+          await loadArtifactReviewContext(review.id, review.currentRoundId, assignment.identityId);
+          renderAll();
+        });
+        menu.append(option);
+      }
+      trigger.addEventListener("click", () => setOpen(menu.hidden));
+      trigger.addEventListener("keydown", event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          setOpen(true);
+          focusOption(event.key === "ArrowDown" ? 1 : -1);
+        } else if (event.key === "Escape") {
+          event.stopPropagation();
+          setOpen(false);
+        }
+      });
+      menu.addEventListener("keydown", event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          focusOption(event.key === "ArrowDown" ? 1 : -1);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+          trigger.focus();
+        }
+      });
+      chooser.addEventListener("focusout", () => {
+        setTimeout(() => {
+          if (!chooser.contains(document.activeElement)) setOpen(false);
+        }, 0);
+      });
+      trigger.addEventListener("click", () => {
+        if (menu.hidden) return;
+        setTimeout(() => {
+          document.addEventListener("pointerdown", event => {
+            if (!chooser.contains(event.target)) setOpen(false);
+          }, { once: true });
+        }, 0);
+      });
+      chooser.append(trigger, menu);
+      return chooser;
+    }
+
+    function artifactReviewRoleName(assignment) {
+      const names = assignment?.roleNames || assignment?.roleIds || [];
+      return names.length ? names.join(" / ") : assignment?.identityName || "";
     }
 
     function renderArtifactReviewHistorySelector(context) {
@@ -3327,6 +3410,10 @@ export const browserHtml = String.raw`<!doctype html>
       }
 
       const assignment = context.assignment;
+      if (assignment.identityKind === "agent") {
+        renderArtifactReviewAgentWorkspace(context, selectedRound);
+        return;
+      }
       const readOnly = assignment.status === "submitted" || context.review.status !== "pending";
       const controls = document.createElement("div");
       controls.className = "artifact-review-controls";
@@ -3337,10 +3424,50 @@ export const browserHtml = String.raw`<!doctype html>
 
       const draftComments = assignment.draft?.comments || [];
       if (draftComments.length) {
-        for (const comment of draftComments) el.comments.append(renderArtifactReviewCommentCard(comment, assignment.identityName, true));
+        for (const comment of draftComments) el.comments.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(assignment), true));
       }
       renderArtifactReviewSubmittedOpinions(selectedRound);
       renderArtifactReviewRoundSummary(context, selectedRound, false);
+    }
+
+    function renderArtifactReviewAgentWorkspace(context, selectedRound) {
+      const assignment = context.assignment;
+      const attempt = assignment.attempts?.[assignment.attempts.length - 1];
+      const status = document.createElement("div");
+      status.className = "artifact-review-agent-status";
+      status.append(blockTitle(t("agentReviewer")));
+      const progress = document.createElement("div");
+      progress.className = "artifact-review-message" + (assignment.status === "failed" ? " warn" : "");
+      progress.textContent = artifactReviewAssignmentStatusLabel(assignment.status, "agent")
+        + (attempt ? " · " + (attempt.provider || "Agent") + " · " + t("attempt") + " " + attempt.sequence : "");
+      status.append(progress);
+      if (attempt?.failure?.message) {
+        const failure = document.createElement("div");
+        failure.className = "muted artifact-review-id";
+        failure.textContent = attempt.failure.code + ": " + attempt.failure.message;
+        status.append(failure);
+      }
+      if (assignment.status === "failed" && context.review.status === "pending") {
+        const retry = document.createElement("button");
+        retry.className = "btn";
+        retry.textContent = t("retry");
+        retry.addEventListener("click", () => runButtonAction(retry, () => retryArtifactReviewAgent(context)));
+        status.append(retry);
+      }
+      el.comments.append(status);
+      for (const comment of assignment.draft?.comments || []) {
+        el.comments.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(assignment), false));
+      }
+      renderArtifactReviewSubmittedOpinions(selectedRound);
+      renderArtifactReviewRoundSummary(context, selectedRound, false);
+    }
+
+    async function retryArtifactReviewAgent(context) {
+      const response = await fetch(artifactReviewAssignmentUrl(context, "retry"), { method: "POST" });
+      if (!response.ok) throw new Error(await response.text());
+      state.artifactReviewContext = await response.json();
+      await loadRuns();
+      renderAll();
     }
 
     function renderArtifactReviewSubmittedOpinions(round) {
@@ -3352,12 +3479,12 @@ export const browserHtml = String.raw`<!doctype html>
         for (const entry of submitted) {
           const heading = document.createElement("div");
           heading.className = "artifact-review-message";
-          heading.textContent = entry.assignment.identityName + " · "
+          heading.textContent = artifactReviewRoleName(entry.assignment) + " · "
             + (entry.assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote")) + " · "
             + artifactReviewVoteLabel(entry.opinion.vote, entry.assignment.binding);
           el.comments.append(heading);
           for (const comment of entry.opinion.comments || []) {
-            el.comments.append(renderArtifactReviewCommentCard(comment, entry.assignment.identityName, false));
+            el.comments.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(entry.assignment), false));
           }
         }
       }
@@ -3471,6 +3598,15 @@ export const browserHtml = String.raw`<!doctype html>
       if (value === "request_changes") return t("requestChanges");
       if (value === "abstain") return t("abstain");
       return t("draft");
+    }
+
+    function artifactReviewAssignmentStatusLabel(status, identityKind) {
+      if (status === "submitted") return t("submitted");
+      if (identityKind !== "agent") return t("draft");
+      if (status === "queued") return t("queued");
+      if (status === "running") return t("running");
+      if (status === "failed") return t("failed");
+      return status;
     }
 
     function artifactReviewRoundStatusLabel(status) {
