@@ -13,16 +13,20 @@ import {
 import {
   activeProcedureAsserts,
   type ArtifactReportSource,
+  buildSchemaWritingSnapshot,
   currentArtifactReview,
   currentFrame,
+  currentSchemaFinalization,
   currentStep,
   enterSchema,
+  ensureCurrentSchemaDraft,
   finalArtifacts,
   findArtifactReview,
   listRuns,
   readRun,
   repeatRun,
   reportRun,
+  type SchemaWritingSnapshot,
   skipRun,
   startRun,
   submitArtifactReviewRunnerVote,
@@ -63,6 +67,8 @@ type RunShowOptions = RunIdOptions & OutputOptions;
 
 type RunStepShowOptions = RunShowOptions & { step?: string };
 
+type RunSchemaShowOptions = RunShowOptions;
+
 type RunArtifactShowOptions = RunShowOptions & {
   assignment?: string;
   step?: string;
@@ -98,7 +104,7 @@ export async function runStartCommand(procedureName: string | undefined, options
     procedureFile,
     controlPlane: config.controlPlane
   });
-  printRunState(run);
+  printRunState(run, config.runsRoot);
 }
 
 export async function runReportCommand(options: ReportOptions): Promise<void> {
@@ -117,7 +123,7 @@ export async function runReportCommand(options: ReportOptions): Promise<void> {
   });
   await dispatchArtifactReviewAgents({ config, run });
   printLatestReportAuthorization(run);
-  printRunState(run);
+  printRunState(run, config.runsRoot);
 }
 
 export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<void> {
@@ -130,7 +136,7 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
   printArtifactReviewSummary(context.review, context.round);
   console.log("");
   if (context.review.status === "passed") {
-    printRunState(context.run);
+    printRunState(context.run, config.runsRoot);
     return;
   }
   if (context.review.status === "awaiting_runner_vote") {
@@ -168,7 +174,7 @@ export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<
   printArtifactReviewSummary(context.review, context.round);
   console.log("");
   if (context.review.status === "passed") {
-    printRunState(context.run);
+    printRunState(context.run, config.runsRoot);
     return;
   }
   console.log("Then:");
@@ -296,7 +302,22 @@ export async function runEnterSchemaCommand(schemaName: string | undefined, opti
     runId,
     schemaName
   });
-  printRunState(run);
+  const snapshot = buildSchemaWritingSnapshot(config.runsRoot, run);
+  if (snapshot) printSchemaWritingOverview(snapshot);
+  printRunState(run, config.runsRoot);
+}
+
+export async function runSchemaShowCommand(options: RunSchemaShowOptions): Promise<void> {
+  const runId = requireRunId(options.run);
+  const config = await readConfig();
+  const run = await ensureCurrentSchemaDraft(config.runsRoot, await readRun(config.runsRoot, runId));
+  const snapshot = buildSchemaWritingSnapshot(config.runsRoot, run);
+  if (!snapshot) throw new Error(`run has no active Schema writing context: ${runId}`);
+  if ((options.output ?? "text") === "json") {
+    console.log(JSON.stringify(snapshot));
+    return;
+  }
+  printSchemaWritingOverview(snapshot);
 }
 
 export async function runRepeatCommand(countValue: string, options: RunIdOptions): Promise<void> {
@@ -310,20 +331,21 @@ export async function runRepeatCommand(countValue: string, options: RunIdOptions
   }
   const config = await readConfig();
   const run = await repeatRun({ runsRoot: config.runsRoot, runId, count });
-  printRunState(run);
+  printRunState(run, config.runsRoot);
 }
 
 export async function runSkipCommand(options: RunIdOptions): Promise<void> {
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await skipRun({ runsRoot: config.runsRoot, runId });
-  printRunState(run);
+  printRunState(run, config.runsRoot);
 }
 
 export async function runStatusCommand(options: RunIdOptions): Promise<void> {
   const config = await readConfig();
   if (options.run) {
-    printRunState(await readRun(config.runsRoot, options.run));
+    const run = await ensureCurrentSchemaDraft(config.runsRoot, await readRun(config.runsRoot, options.run));
+    printRunState(run, config.runsRoot);
     return;
   }
 
@@ -362,7 +384,7 @@ function requireStepRef(value: string | undefined): string {
   return stepRef;
 }
 
-export function printRunState(run: RunState): void {
+export function printRunState(run: RunState, runsRoot?: string): void {
   console.log(`run ${run.id}`);
 
   if (run.status === "done") {
@@ -373,6 +395,39 @@ export function printRunState(run: RunState): void {
       console.log("Final Artifacts:");
       for (const artifact of finals) console.log(`- ${artifact.name}${artifact.path ? `: ${artifact.path}` : ""}`);
     }
+    return;
+  }
+
+  const procedureAsserts = activeProcedureAsserts(run);
+  if (procedureAsserts.length) {
+    console.log("");
+    console.log("Procedure Asserts:");
+    for (const value of procedureAsserts) console.log(`- ${value}`);
+  }
+
+  const schemaFinalization = currentSchemaFinalization(run);
+  if (schemaFinalization) {
+    const draftPath = runsRoot
+      ? resolve(runsRoot, schemaFinalization.draft.path)
+      : schemaFinalization.draft.path;
+    console.log("");
+    console.log("Schema Finalization:");
+    console.log(`- status: awaiting global adjustment`);
+    console.log(`- artifact: ${schemaFinalization.parentStep.artifact}`);
+    console.log(`- progress: ${schemaFinalization.draft.completed}/${schemaFinalization.draft.total}`);
+    console.log(`- managed draft: ${draftPath}`);
+    if (schemaFinalization.draft.validation) {
+      console.log(`- contract validation: ${schemaFinalization.draft.validation.status}`);
+      for (const issue of schemaFinalization.draft.validation.issues) {
+        console.log(`  - ${issue.message}`);
+      }
+    }
+    console.log("");
+    console.log("Do:");
+    console.log("Read the complete managed draft, edit it directly as needed, then submit that same file.");
+    console.log("");
+    console.log("Then:");
+    console.log(`memsphere run report --run ${run.id} --artifact-file ${shellQuote(draftPath)}`);
     return;
   }
 
@@ -398,13 +453,6 @@ export function printRunState(run: RunState): void {
   if (!frame || !step || !step.artifact || !step.format) {
     console.log("done");
     return;
-  }
-
-  const procedureAsserts = activeProcedureAsserts(run);
-  if (procedureAsserts.length) {
-    console.log("");
-    console.log("Procedure Asserts:");
-    for (const value of procedureAsserts) console.log(`- ${value}`);
   }
 
   const artifactReview = currentArtifactReview(run);
@@ -450,6 +498,27 @@ export function printRunState(run: RunState): void {
     }
   }
 
+  if (frame.type === "schema") {
+    const snapshot = buildSchemaWritingSnapshot(runsRoot ?? ".", run);
+    if (snapshot) {
+      console.log("");
+      console.log("Schema Progress:");
+      console.log(`- field: ${snapshot.progress.current ?? step.artifact}`);
+      console.log(`- completed: ${snapshot.progress.completed}/${snapshot.progress.total}`);
+      console.log(`- remaining: ${snapshot.progress.remaining}`);
+      if (snapshot.progress.pendingRepeatControls) {
+        console.log(`- repeat controls pending: ${snapshot.progress.pendingRepeatControls}`);
+      }
+      for (const source of snapshot.currentField?.sources ?? []) {
+        console.log(`- constraint source: ${source.path} (${source.type} · ${formatDisplay(source.format)})`);
+        for (const value of source.defines ?? []) console.log(`  - defines: ${value}`);
+        for (const value of source.asserts ?? []) console.log(`  - asserts: ${value}`);
+      }
+      if (snapshot.draft) console.log(`- managed draft: ${snapshot.draft.filePath}`);
+      console.log(`- full overview: memsphere run schema show --run ${run.id}`);
+    }
+  }
+
   console.log("");
   console.log("Artifact:");
   console.log(`${step.artifact} (${step.type ?? "unknown"} · ${formatDisplay(step.format)})`);
@@ -457,7 +526,7 @@ export function printRunState(run: RunState): void {
     console.log("Report the artifact value provided by the human.");
   }
 
-  printPermissionGuidance(run, step);
+  if (frame.type !== "schema") printPermissionGuidance(run, step);
 
   console.log("");
   if (artifactReview?.status === "awaiting_revision") {
@@ -471,12 +540,45 @@ export function printRunState(run: RunState): void {
       console.log(`memsphere run enter-schema ${step.schema.name} --run ${run.id}`);
     }
   } else {
-  console.log("Then:");
-  console.log(`memsphere run report --run ${run.id} --artifact <value>`);
-  if (step.optional === true) {
-    console.log(`memsphere run skip --run ${run.id}`);
+    console.log("Then:");
+    console.log(`memsphere run report --run ${run.id} --artifact <value>`);
+    if (step.optional === true) {
+      console.log(`memsphere run skip --run ${run.id}`);
+    }
   }
 }
+
+export function printSchemaWritingOverview(snapshot: SchemaWritingSnapshot): void {
+  console.log("Schema Overview:");
+  console.log(`- procedure: ${snapshot.procedureName}`);
+  console.log(`- action: ${snapshot.action.instruction}`);
+  for (const value of snapshot.action.asserts) console.log(`  - action assert: ${value}`);
+  for (const value of snapshot.action.suggests) console.log(`  - action suggest: ${value}`);
+  console.log(`- artifact: ${snapshot.artifact.name}`);
+  if (snapshot.artifact.type) console.log(`- type: ${snapshot.artifact.type}`);
+  if (snapshot.artifact.format) console.log(`- format: ${formatDisplay(snapshot.artifact.format)}`);
+  if (snapshot.artifact.schema) {
+    console.log(`- schema: ${snapshot.artifact.schema.kind === "external" ? snapshot.artifact.schema.name : snapshot.artifact.schema.id}`);
+  }
+  console.log(`- final artifact: ${snapshot.artifact.final ? "yes" : "no"}`);
+  console.log(`- progress: ${snapshot.progress.completed}/${snapshot.progress.total}`);
+  if (snapshot.progress.pendingRepeatControls) {
+    console.log(`- repeat controls pending: ${snapshot.progress.pendingRepeatControls}`);
+  }
+  console.log("- workflow: report each field to update one managed draft; after all fields, read and edit the complete draft before explicitly submitting that same file.");
+  console.log("Fields:");
+  for (const field of snapshot.progress.fields) console.log(`- ${field.path}: ${field.status}`);
+  if (snapshot.draft) {
+    console.log("Draft:");
+    console.log(`- status: ${snapshot.draft.status}`);
+    console.log(`- file: ${snapshot.draft.filePath}`);
+    if (snapshot.draft.validation) console.log(`- contract validation: ${snapshot.draft.validation.status}`);
+  }
+}
+
+function shellQuote(value: string): string {
+  if (/^[a-zA-Z0-9_./:-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 export function printArtifactReviewSummary(

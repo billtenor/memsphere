@@ -271,7 +271,13 @@ Review 要求修改时，先修改 Artifact，再把本轮修改摘要写入文�
 memsphere run report --run <Run ID> --artifact-file <文件路径> --revision-summary-file <摘要文件路径>
 ```
 
-带 Schema 的 Markdown 结构化产物可以按照 CLI 提示进入 Schema 填写流程。不要自己猜测下一条命令，以当前 CLI 输出的 `Then` 为准。
+带 Schema 的 Markdown 结构化产物可以按照 CLI 提示进入 Schema 填写流程。进入后先阅读整体概览，再逐个上报字段；需要重新查看完整结构、字段状态、约束来源和累计草稿路径时执行：
+
+```bash
+memsphere run schema show --run <Run ID>
+```
+
+字段提示只提供产出当前内容所需的父 Action、父 Artifact 契约、Schema 约束与进度，不包含后续 Review 的参与者、权限或决策信息。每个字段 report 后，Run 会原位更新同一份受管草稿；不得把字段 Event 或中途草稿当作已经接纳的父 Artifact。
 
 当 Schema Run 到达 `!repeat` 控制步骤时，CLI 不要求 Artifact，而会提示一次提交总重复次数：
 
@@ -288,6 +294,14 @@ memsphere run skip --run <Run ID>
 ```
 
 只能跳过当前可选字段；必填字段不得 skip。跳过后 Run 会记录 skipped 事件，最终组装的结构化 Artifact 中省略该字段内容。
+
+全部字段完成后，Run 不会自动推进，而会返回 `Schema Finalization`、结构与契约校验结果、受管草稿的绝对路径和精确提交命令。Runner 必须阅读完整草稿，可直接编辑该文件，然后严格执行返回的命令显式提交同一文件：
+
+```bash
+memsphere run report --run <Run ID> --artifact-file <受管草稿绝对路径>
+```
+
+提交时会读取文件最新内容并重新校验。失败时继续留在全局调整状态，修订同一文件后重试；成功后由 Run 按父 Artifact 契约决定直接接纳还是进入 Artifact Review。Runner 不需要也不应自行判断何时发起 Review，只继续执行每次 CLI 返回的 `Then`。
 
 上报成功后，CLI 会返回下一个待执行步骤；继续执行和上报，直到显示 `done`。
 

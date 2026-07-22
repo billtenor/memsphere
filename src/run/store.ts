@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
   artifactReviewVoteValues,
@@ -96,6 +96,37 @@ export class ArtifactAuthorizationFailure extends Error {
 export type RunStatus = "running" | "done";
 export type FrameType = "procedure" | "schema";
 
+export type SchemaConstraintSource = {
+  path: string;
+  type: string;
+  format: ArtifactFormatSpec;
+  defines?: string[];
+  asserts?: string[];
+};
+
+export type SchemaStepContext = {
+  rootName: string;
+  path: string;
+  sources: SchemaConstraintSource[];
+};
+
+export type SchemaDraftState = {
+  stepId: string;
+  schemaName: string;
+  status: "writing" | "awaiting_finalization" | "submitted" | "accepted";
+  path: string;
+  fileName: string;
+  contentType: "text/markdown";
+  completed: number;
+  total: number;
+  pendingRepeatControls?: number;
+  assembledDigest?: string;
+  submittedDigest?: string;
+  validation?: ArtifactValidationResult;
+  acceptedArtifactPath?: string;
+  updatedAt: string;
+};
+
 export type RunFrame = {
   type: FrameType;
   memoryName: string;
@@ -124,6 +155,7 @@ export type RunStep = {
   asserts?: string[];
   suggests?: string[];
   details?: string[];
+  schemaContext?: SchemaStepContext;
   roleBindings?: RoleBindings;
   permissionGrants?: MemoryPermissionGrants;
   controlPlane?: ArtifactControlPlane;
@@ -193,6 +225,7 @@ export type RunState = {
   controlPlane?: ControlPlaneSnapshot;
   procedureSnapshots?: Record<string, RunProcedureTemplate>;
   artifactReviews?: ArtifactReview<RunEvent["artifact"]>[];
+  schemaDrafts?: Record<string, SchemaDraftState>;
 };
 
 const artifactFormatSpecSchema = z.object({
@@ -228,6 +261,37 @@ const validationResultSchema: z.ZodType<ArtifactValidationResult> = z.object({
     message: z.string()
   }))
 });
+
+const schemaConstraintSourceSchema: z.ZodType<SchemaConstraintSource> = z.object({
+  path: z.string(),
+  type: z.string(),
+  format: artifactFormatSpecSchema,
+  defines: z.array(z.string()).optional(),
+  asserts: z.array(z.string()).optional()
+}).strict();
+
+const schemaStepContextSchema: z.ZodType<SchemaStepContext> = z.object({
+  rootName: z.string(),
+  path: z.string(),
+  sources: z.array(schemaConstraintSourceSchema)
+}).strict();
+
+const schemaDraftStateSchema: z.ZodType<SchemaDraftState> = z.object({
+  stepId: z.string(),
+  schemaName: z.string(),
+  status: z.enum(["writing", "awaiting_finalization", "submitted", "accepted"]),
+  path: z.string(),
+  fileName: z.string(),
+  contentType: z.literal("text/markdown"),
+  completed: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  pendingRepeatControls: z.number().int().nonnegative().optional(),
+  assembledDigest: z.string().optional(),
+  submittedDigest: z.string().optional(),
+  validation: validationResultSchema.optional(),
+  acceptedArtifactPath: z.string().optional(),
+  updatedAt: z.string()
+}).strict();
 
 const roleBindingsSchema = z.record(z.array(z.string().min(1)));
 const resolvedRoleBindingsSchema = z.record(z.object({
@@ -283,6 +347,7 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
     asserts: z.array(z.string()).optional(),
     suggests: z.array(z.string()).optional(),
     details: z.array(z.string()).optional(),
+    schemaContext: schemaStepContextSchema.optional(),
     roleBindings: roleBindingsSchema.optional(),
     permissionGrants: roleBindingsSchema.optional(),
     controlPlane: artifactControlPlaneSchema.optional(),
@@ -346,7 +411,8 @@ const runStateSchema: z.ZodType<RunState> = z.object({
       contentType: z.string().optional(),
       authorization: authorizationDecisionSchema.optional()
     })
-  }))
+  })),
+  schemaDrafts: z.record(schemaDraftStateSchema).optional()
 });
 
 const runProcedureTemplateSchema: z.ZodType<RunProcedureTemplate> = z.object({
@@ -557,7 +623,8 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
   }).strict()),
   controlPlane: controlPlaneSnapshotSchema.optional(),
   procedureSnapshots: z.record(runProcedureTemplateSchema),
-  artifactReviews: z.array(artifactReviewSchema).optional()
+  artifactReviews: z.array(artifactReviewSchema).optional(),
+  schemaDrafts: z.record(schemaDraftStateSchema).optional()
 }).strict();
 
 export async function ensureRunDirectory(runsRoot: string): Promise<string> {
@@ -690,6 +757,11 @@ async function reportRunUnlocked(input: {
     throw new Error(`run is already done: ${input.runId}`);
   }
 
+  const schemaFinalization = currentSchemaFinalization(run);
+  if (schemaFinalization) {
+    return reportSchemaFinalArtifact(input, run, schemaFinalization);
+  }
+
   const frame = currentFrame(run);
   const step = currentStep(run);
   if (step?.kind === "repeat") {
@@ -715,8 +787,30 @@ async function reportRunUnlocked(input: {
   const validation = await artifactValidatorRegistry.execute(plan, { contract, candidate, context });
   if (validation.status !== "passed") throw new ArtifactValidationFailure(validation);
 
+  return acceptPreparedArtifact(input, run, step, candidate, validation, authorization);
+}
+
+async function acceptPreparedArtifact(
+  input: {
+    runsRoot: string;
+    runId: string;
+    artifact: ArtifactReportSource;
+    revisionSummary?: string;
+    locale?: "zh-CN" | "en";
+  },
+  run: RunState,
+  step: RunStep,
+  candidate: PreparedArtifactCandidate,
+  validation: ArtifactValidationResult,
+  authorization?: AuthorizationDecision
+): Promise<RunState> {
   if (step.reviewPolicy) {
     return reportReviewedArtifact(input, run, step, candidate, validation, authorization);
+  }
+
+  const frame = currentFrame(run);
+  if (!frame || currentStep(run)?.id !== step.id) {
+    throw new Error(`Artifact current Step changed before acceptance: ${step.id}`);
   }
 
   const createdArtifactFiles: string[] = [];
@@ -741,6 +835,7 @@ async function reportRunUnlocked(input: {
 
     frame.index += 1;
     applyControlStep(frame, step, controlValue);
+    markSchemaDraftAccepted(run, step.id, artifact.path);
     await collapseCompletedFrames(input.runsRoot, run, createdArtifactFiles);
     await expandAutoCallSteps(run);
     run.updatedAt = new Date().toISOString();
@@ -874,6 +969,13 @@ async function reportReviewedArtifact(
         submissions: [submission],
         rounds: [round]
       });
+    }
+    const schemaDraft = run.schemaDrafts?.[step.id];
+    if (schemaDraft) {
+      schemaDraft.status = "submitted";
+      schemaDraft.submittedDigest = digest;
+      schemaDraft.validation = validation;
+      schemaDraft.updatedAt = now;
     }
     run.updatedAt = now;
     await writeRun(input.runsRoot, run);
@@ -1470,6 +1572,7 @@ async function acceptArtifactReviewSubmission(
     : undefined;
   frame.index += 1;
   applyControlStep(frame, step, controlValue);
+  markSchemaDraftAccepted(run, step.id, submission.artifact.path);
   await collapseCompletedFrames(runsRoot, run, createdArtifactFiles);
   await expandAutoCallSteps(run);
   review.status = "passed";
@@ -1757,7 +1860,7 @@ async function repeatRunUnlocked(input: { runsRoot: string; runId: string; count
 
   const createdArtifactFiles: string[] = [];
   try {
-    const expanded = compileRepeatBody(step.repeat, input.count, step.controlPlane);
+    const expanded = compileRepeatBody(step.repeat, input.count, step.controlPlane, step.schemaContext);
     frame.steps.splice(frame.index, 1, ...expanded);
     await collapseCompletedFrames(input.runsRoot, run, createdArtifactFiles);
     await expandAutoCallSteps(run);
@@ -1856,6 +1959,256 @@ export function finalArtifacts(run: RunState): RunEvent["artifact"][] {
   return run.events.filter((event) => event.artifact.final).map((event) => event.artifact);
 }
 
+type SchemaParentContext = {
+  schemaFrame: RunFrame;
+  parentFrame: RunFrame;
+  parentStep: RunStep;
+};
+
+export type SchemaFinalizationContext = SchemaParentContext & {
+  draft: SchemaDraftState;
+};
+
+export type SchemaWritingSnapshot = {
+  runId: string;
+  procedureName: string;
+  parentStepId: string;
+  action: {
+    instruction: string;
+    asserts: string[];
+    suggests: string[];
+  };
+  artifact: {
+    name: string;
+    type?: string;
+    format?: ArtifactFormatSpec;
+    schema?: RunSchemaContract;
+    final: boolean;
+  };
+  progress: {
+    completed: number;
+    total: number;
+    remaining: number;
+    pendingRepeatControls: number;
+    current?: string;
+    fields: Array<{
+      id: string;
+      path: string;
+      status: "completed" | "current" | "remaining";
+    }>;
+  };
+  currentField?: {
+    id: string;
+    path: string;
+    type?: string;
+    format?: ArtifactFormatSpec;
+    sources: SchemaConstraintSource[];
+  };
+  draft?: SchemaDraftState & { filePath: string };
+};
+
+export function currentSchemaFinalization(run: RunState): SchemaFinalizationContext | undefined {
+  const context = currentSchemaParentContext(run);
+  if (!context || context.schemaFrame.index < context.schemaFrame.steps.length) return undefined;
+  const draft = run.schemaDrafts?.[context.parentStep.id];
+  if (!draft || draft.status !== "awaiting_finalization") return undefined;
+  return { ...context, draft };
+}
+
+export function buildSchemaWritingSnapshot(runsRoot: string, run: RunState): SchemaWritingSnapshot | undefined {
+  const context = currentSchemaParentContext(run);
+  if (!context) return undefined;
+  const events = run.events.slice(context.schemaFrame.eventStartIndex ?? 0);
+  const completedIds = new Set(events.map((event) => event.stepId));
+  const fieldSteps = context.schemaFrame.steps.filter((step) => step.artifact && step.kind !== "repeat");
+  const current = currentStep(run);
+  const draft = run.schemaDrafts?.[context.parentStep.id];
+  return {
+    runId: run.id,
+    procedureName: context.parentFrame.memoryName,
+    parentStepId: context.parentStep.id,
+    action: {
+      instruction: context.parentStep.instruction,
+      asserts: [...(context.parentStep.asserts ?? [])],
+      suggests: [...(context.parentStep.suggests ?? [])]
+    },
+    artifact: {
+      name: context.parentStep.artifact!,
+      type: context.parentStep.type,
+      format: context.parentStep.format ? structuredClone(context.parentStep.format) : undefined,
+      schema: context.parentStep.schema ? structuredClone(context.parentStep.schema) : undefined,
+      final: context.parentStep.final === true
+    },
+    progress: {
+      completed: fieldSteps.filter((step) => completedIds.has(step.id)).length,
+      total: fieldSteps.length,
+      remaining: fieldSteps.filter((step) => !completedIds.has(step.id)).length,
+      pendingRepeatControls: context.schemaFrame.steps.filter((step) => step.kind === "repeat").length,
+      current: current?.schemaContext?.path ?? current?.artifact,
+      fields: fieldSteps.map((step) => ({
+        id: step.id,
+        path: step.schemaContext?.path ?? step.artifact!,
+        status: completedIds.has(step.id)
+          ? "completed" as const
+          : current?.id === step.id
+            ? "current" as const
+            : "remaining" as const
+      }))
+    },
+    currentField: current?.artifact && current.kind !== "repeat"
+      ? {
+          id: current.id,
+          path: current.schemaContext?.path ?? current.artifact,
+          type: current.type,
+          format: current.format ? structuredClone(current.format) : undefined,
+          sources: structuredClone(current.schemaContext?.sources ?? [])
+        }
+      : undefined,
+    draft: draft ? { ...structuredClone(draft), filePath: resolve(runsRoot, draft.path) } : undefined
+  };
+}
+
+export async function ensureCurrentSchemaDraft(runsRoot: string, run: RunState): Promise<RunState> {
+  const context = currentSchemaParentContext(run);
+  if (!context) return run;
+  const progress = schemaFrameProgress(run, context.schemaFrame);
+  if (progress.completed === 0) return run;
+  const draft = run.schemaDrafts?.[context.parentStep.id];
+  const path = draft ? resolve(runsRoot, draft.path) : undefined;
+  const missing = !path || !(await fileExists(path));
+  if (!missing) return run;
+
+  await refreshSchemaDraft(
+    runsRoot,
+    run,
+    context,
+    progress,
+    context.schemaFrame.index >= context.schemaFrame.steps.length
+  );
+  run.updatedAt = new Date().toISOString();
+  await writeRun(runsRoot, run);
+  return run;
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function currentSchemaParentContext(run: RunState): SchemaParentContext | undefined {
+  const schemaFrame = currentFrame(run);
+  if (!schemaFrame || schemaFrame.type !== "schema") return undefined;
+  const parentFrame = run.stack.at(-2);
+  const parentStep = parentFrame?.steps[parentFrame.index];
+  if (
+    !parentFrame ||
+    !parentStep ||
+    !parentStep.artifact ||
+    !parentStep.schema ||
+    schemaFrame.sourceStepId !== parentStep.id
+  ) return undefined;
+  return { schemaFrame, parentFrame, parentStep };
+}
+
+async function reportSchemaFinalArtifact(
+  input: {
+    runsRoot: string;
+    runId: string;
+    artifact: ArtifactReportSource;
+    revisionSummary?: string;
+    locale?: "zh-CN" | "en";
+  },
+  run: RunState,
+  finalization: SchemaFinalizationContext
+): Promise<RunState> {
+  if (input.revisionSummary !== undefined) {
+    throw new Error("--revision-summary-file is only allowed after an Artifact Review requests changes");
+  }
+  await assertManagedSchemaDraftSource(input.runsRoot, run.id, finalization.draft, input.artifact);
+
+  const step = finalization.parentStep;
+  const authorization = authorizeRunnerForReport(run, step, input.locale ?? "en");
+  const contract = await contractForStep(run, step);
+  const context = {
+    runId: run.id,
+    stepId: step.id,
+    artifactPath: step.id,
+    attemptId: randomUUID()
+  };
+
+  let candidate: PreparedArtifactCandidate;
+  let validation: ArtifactValidationResult;
+  try {
+    candidate = await prepareArtifactCandidate(contract, input.artifact, context);
+    const plan = step.validationPlan ?? artifactValidatorRegistry.resolvePlan(contract);
+    validation = await artifactValidatorRegistry.execute(plan, { contract, candidate, context });
+  } catch (error) {
+    if (error instanceof ArtifactValidationFailure) {
+      await persistSchemaDraftValidation(input.runsRoot, run, finalization.draft, error.result);
+    }
+    throw error;
+  }
+  if (validation.status !== "passed") {
+    await persistSchemaDraftValidation(input.runsRoot, run, finalization.draft, validation);
+    throw new ArtifactValidationFailure(validation);
+  }
+
+  const popped = run.stack.pop();
+  if (popped !== finalization.schemaFrame || currentFrame(run) !== finalization.parentFrame) {
+    throw new Error(`Schema frame changed before final submission: ${step.id}`);
+  }
+  finalization.draft.status = "submitted";
+  finalization.draft.submittedDigest = digestBytes(candidate.raw);
+  finalization.draft.validation = validation;
+  finalization.draft.updatedAt = new Date().toISOString();
+  return acceptPreparedArtifact(input, run, step, candidate, validation, authorization);
+}
+
+async function assertManagedSchemaDraftSource(
+  runsRoot: string,
+  runId: string,
+  draft: SchemaDraftState,
+  source: ArtifactReportSource
+): Promise<void> {
+  if (source.kind !== "file") {
+    throw new Error("Schema finalization requires --artifact-file with the managed draft path");
+  }
+  const expected = resolve(runsRoot, draft.path);
+  if (resolve(source.path) !== expected) {
+    throw new Error(`Schema finalization requires the managed draft file: ${expected}`);
+  }
+  const artifactRoot = resolve(runArtifactDirectory(runsRoot, runId));
+  const actual = await realpath(source.path);
+  const root = await realpath(artifactRoot);
+  assertInsideRunArtifactDirectory(actual, root);
+  if (actual !== expected) throw new Error(`managed Schema draft must not be a symbolic link: ${expected}`);
+}
+
+async function persistSchemaDraftValidation(
+  runsRoot: string,
+  run: RunState,
+  draft: SchemaDraftState,
+  validation: ArtifactValidationResult
+): Promise<void> {
+  draft.validation = validation;
+  draft.updatedAt = new Date().toISOString();
+  run.updatedAt = draft.updatedAt;
+  await writeRun(runsRoot, run);
+}
+
+function markSchemaDraftAccepted(run: RunState, stepId: string, acceptedArtifactPath?: string): void {
+  const draft = run.schemaDrafts?.[stepId];
+  if (!draft) return;
+  draft.status = "accepted";
+  draft.acceptedArtifactPath = acceptedArtifactPath;
+  draft.updatedAt = new Date().toISOString();
+}
+
 async function collapseCompletedFrames(
   runsRoot: string,
   run: RunState,
@@ -1863,49 +2216,24 @@ async function collapseCompletedFrames(
 ): Promise<void> {
   while (run.stack.length > 0) {
     const frame = currentFrame(run);
-    if (!frame || frame.index < frame.steps.length) break;
-    const completed = run.stack.pop();
-    const parent = currentFrame(run);
-    const parentStep = parent ? parent.steps[parent.index] : undefined;
-    if (
-      completed?.type === "schema" &&
-      parent &&
-      parentStep &&
-      parentStep.artifact &&
-      parentStep.schema &&
-      completed.sourceStepId === parentStep.id
-    ) {
-      const contract = await contractForStep(run, parentStep);
-      const assembled = await assembleSchemaArtifact(runsRoot, run, completed);
-      const context = {
-        runId: run.id,
-        stepId: parentStep.id,
-        artifactPath: parentStep.id,
-        attemptId: randomUUID()
-      };
-      const candidate = await prepareArtifactCandidate(contract, {
-        kind: "inline",
-        value: assembled
-      }, context);
-      const plan = parentStep.validationPlan ?? artifactValidatorRegistry.resolvePlan(contract);
-      const validation = await artifactValidatorRegistry.execute(plan, { contract, candidate, context });
-      if (validation.status !== "passed") throw new ArtifactValidationFailure(validation);
-      const artifact = await buildRunEventArtifact(
-        runsRoot,
-        run,
-        parentStep,
-        candidate,
-        validation,
-        createdArtifactFiles
-      );
-      run.events.push({
-        at: new Date().toISOString(),
-        frame: parent.type,
-        stepId: parentStep.id,
-        artifact
-      });
-      parent.index += 1;
+    if (!frame) break;
+
+    if (frame.type === "schema") {
+      const context = currentSchemaParentContext(run);
+      if (!context) throw new Error(`Schema frame has no parent Artifact: ${frame.memoryName}`);
+      const progress = schemaFrameProgress(run, frame);
+      if (progress.completed > 0) {
+        const existing = run.schemaDrafts?.[context.parentStep.id];
+        if (frame.index < frame.steps.length || existing?.status !== "awaiting_finalization") {
+          await refreshSchemaDraft(runsRoot, run, context, progress, frame.index >= frame.steps.length);
+        }
+      }
+      if (frame.index < frame.steps.length) break;
+      break;
     }
+
+    if (frame.index < frame.steps.length) break;
+    run.stack.pop();
   }
   if (run.stack.length === 0) {
     run.status = "done";
@@ -2205,6 +2533,7 @@ function cloneStep(step: RunStep): RunStep {
     asserts: step.asserts ? [...step.asserts] : undefined,
     suggests: step.suggests ? [...step.suggests] : undefined,
     details: step.details ? [...step.details] : undefined,
+    schemaContext: step.schemaContext ? structuredClone(step.schemaContext) : undefined,
     roleBindings: step.roleBindings ? structuredClone(step.roleBindings) : undefined,
     permissionGrants: step.permissionGrants ? structuredClone(step.permissionGrants) : undefined,
     controlPlane: step.controlPlane ? structuredClone(step.controlPlane) : undefined,
@@ -2432,7 +2761,7 @@ function compileSchemaSteps(
   controlPlane?: ArtifactControlPlane
 ): RunStep[] {
   const steps: RunStep[] = [];
-  walkSchema(schema, rootName, steps, parentContract, controlPlane);
+  walkSchema(schema, rootName, steps, parentContract, controlPlane, rootName, []);
   return steps;
 }
 
@@ -2455,9 +2784,12 @@ function walkSchema(
   path: string,
   steps: RunStep[],
   parentContract: CompiledArtifactContract,
-  controlPlane?: ArtifactControlPlane
+  controlPlane: ArtifactControlPlane | undefined,
+  rootName: string,
+  ancestors: SchemaConstraintSource[]
 ): void {
   const contract = schemaStepContract(node, parentContract, path);
+  const sources = [...ancestors, schemaConstraintSource(node, path, contract)];
   steps.push(compileSchemaValueStep({
     id: `schema:${path}`,
     instruction: `Write ${path}`,
@@ -2466,6 +2798,7 @@ function walkSchema(
     controlPlane,
     details: definitionDetails(node.defines)
       .concat((node.asserts ?? []).map((value) => `asserts: ${value}`)),
+    schemaContext: { rootName, path, sources },
     optional: node.optional === true
   }));
 
@@ -2475,19 +2808,34 @@ function walkSchema(
 
   for (const [fieldIndex, child] of (node.fields ?? []).entries()) {
     if (typeof child === "string") {
-      steps.push(compileStringSchemaStep(`${path}.${child}`, contract, controlPlane));
+      const childPath = `${path}.${child}`;
+      steps.push(compileStringSchemaStep(
+        childPath,
+        contract,
+        controlPlane,
+        stringSchemaStepContext(rootName, childPath, contract, sources)
+      ));
       continue;
     }
     if (child.tag === "!repeat") {
-      steps.push(compileRepeatStep(child, path, fieldIndex, controlPlane));
+      steps.push(compileRepeatStep(child, path, fieldIndex, controlPlane, {
+        rootName,
+        path: `${path}.fields[${fieldIndex + 1}].repeat`,
+        sources
+      }));
       continue;
     }
     const childSchema = assertSchemaNode(child, `${path}.fields[${fieldIndex}]`);
-    walkSchema(childSchema, `${path}.${childSchema.names[0]}`, steps, contract, controlPlane);
+    walkSchema(childSchema, `${path}.${childSchema.names[0]}`, steps, contract, controlPlane, rootName, sources);
   }
 }
 
-function compileStringSchemaStep(path: string, parent: CompiledArtifactContract, controlPlane?: ArtifactControlPlane): RunStep {
+function compileStringSchemaStep(
+  path: string,
+  parent: CompiledArtifactContract,
+  controlPlane?: ArtifactControlPlane,
+  schemaContext?: SchemaStepContext
+): RunStep {
   return compileSchemaValueStep({
     id: `schema:${path}`,
     instruction: `Write ${path}`,
@@ -2498,7 +2846,8 @@ function compileStringSchemaStep(path: string, parent: CompiledArtifactContract,
       type: "string",
       format: inheritSchemaFormat(parent.format, "string"),
       final: false
-    }
+    },
+    schemaContext
   });
 }
 
@@ -2508,6 +2857,7 @@ function compileSchemaValueStep(input: {
   artifact: string;
   contract: CompiledArtifactContract;
   details?: string[];
+  schemaContext?: SchemaStepContext;
   controlPlane?: ArtifactControlPlane;
   optional?: boolean;
 }): RunStep {
@@ -2521,12 +2871,19 @@ function compileSchemaValueStep(input: {
     format: contract.format,
     validationPlan: artifactValidatorRegistry.resolvePlan(contract),
     details: input.details,
+    schemaContext: input.schemaContext ? structuredClone(input.schemaContext) : undefined,
     controlPlane: input.controlPlane ? structuredClone(input.controlPlane) : undefined,
     optional: input.optional || undefined
   };
 }
 
-function compileRepeatStep(node: RepeatNode, parentPath: string, fieldIndex: number, controlPlane?: ArtifactControlPlane): RunStep {
+function compileRepeatStep(
+  node: RepeatNode,
+  parentPath: string,
+  fieldIndex: number,
+  controlPlane?: ArtifactControlPlane,
+  schemaContext?: SchemaStepContext
+): RunStep {
   const min = node.limit?.min ?? 0;
   const max = node.limit?.max;
   return {
@@ -2539,6 +2896,7 @@ function compileRepeatStep(node: RepeatNode, parentPath: string, fieldIndex: num
       `max: ${max === undefined ? "unbounded" : max}`,
       `body fields: ${node.body.length}`
     ],
+    schemaContext: schemaContext ? structuredClone(schemaContext) : undefined,
     controlPlane: controlPlane ? structuredClone(controlPlane) : undefined,
     repeat: {
       parentPath,
@@ -2553,18 +2911,31 @@ function compileRepeatStep(node: RepeatNode, parentPath: string, fieldIndex: num
 function compileRepeatBody(
   repeat: NonNullable<RunStep["repeat"]>,
   count: number,
-  controlPlane?: ArtifactControlPlane
+  controlPlane?: ArtifactControlPlane,
+  schemaContext?: SchemaStepContext
 ): RunStep[] {
   const steps: RunStep[] = [];
   for (let iteration = 1; iteration <= count; iteration += 1) {
     for (const child of repeat.body) {
       if (typeof child === "string") {
-        steps.push(compileStringSchemaStep(`${repeat.parentPath}.${child}[${iteration}]`, {
+        const childPath = `${repeat.parentPath}.${child}[${iteration}]`;
+        const parentContract = {
           name: repeat.parentPath,
           type: "object",
           format: { name: "markdown", options: { layout: "outline" } },
           final: false
-        }, controlPlane));
+        } satisfies CompiledArtifactContract;
+        steps.push(compileStringSchemaStep(
+          childPath,
+          parentContract,
+          controlPlane,
+          stringSchemaStepContext(
+            schemaContext?.rootName ?? repeat.parentPath,
+            childPath,
+            parentContract,
+            schemaContext?.sources ?? []
+          )
+        ));
       } else {
         const childSchema = assertSchemaNode(child, `${repeat.parentPath}.repeat[${iteration}]`);
         walkSchema(childSchema, `${repeat.parentPath}.${childSchema.names[0]}[${iteration}]`, steps, {
@@ -2572,11 +2943,43 @@ function compileRepeatBody(
           type: "object",
           format: { name: "markdown", options: { layout: "outline" } },
           final: false
-        }, controlPlane);
+        }, controlPlane, schemaContext?.rootName ?? repeat.parentPath, schemaContext?.sources ?? []);
       }
     }
   }
   return steps;
+}
+
+function schemaConstraintSource(
+  node: SchemaNode,
+  path: string,
+  contract: CompiledArtifactContract
+): SchemaConstraintSource {
+  const defines = definitionDetails(node.defines);
+  return {
+    path,
+    type: contract.type,
+    format: structuredClone(contract.format),
+    defines: defines.length ? defines : undefined,
+    asserts: node.asserts?.length ? [...node.asserts] : undefined
+  };
+}
+
+function stringSchemaStepContext(
+  rootName: string,
+  path: string,
+  parent: CompiledArtifactContract,
+  ancestors: SchemaConstraintSource[]
+): SchemaStepContext {
+  return {
+    rootName,
+    path,
+    sources: [...ancestors, {
+      path,
+      type: "string",
+      format: inheritSchemaFormat(parent.format, "string")
+    }]
+  };
 }
 
 function cloneSchema(schema: SchemaNode): SchemaNode {
@@ -2752,19 +3155,122 @@ function schemaHasRepeat(schema: SchemaNode): boolean {
     (schema.items ?? []).some((item) => item.tag === "!schema" && schemaHasRepeat(item));
 }
 
-async function assembleSchemaArtifact(runsRoot: string, run: RunState, frame: RunFrame): Promise<string> {
+type SchemaFrameProgress = {
+  completed: number;
+  total: number;
+  pendingRepeatControls: number;
+};
+
+function schemaFrameProgress(run: RunState, frame: RunFrame): SchemaFrameProgress {
+  const events = run.events.slice(frame.eventStartIndex ?? 0);
+  const artifactSteps = frame.steps.filter((step) => step.artifact && step.kind !== "repeat");
+  return {
+    completed: artifactSteps.filter((step) => events.some((event) => event.stepId === step.id)).length,
+    total: artifactSteps.length,
+    pendingRepeatControls: frame.steps.filter((step) => step.kind === "repeat").length
+  };
+}
+
+async function refreshSchemaDraft(
+  runsRoot: string,
+  run: RunState,
+  context: SchemaParentContext,
+  progress: SchemaFrameProgress,
+  completed: boolean
+): Promise<SchemaDraftState> {
+  const existing = run.schemaDrafts?.[context.parentStep.id];
+  const fileName = existing?.fileName ?? schemaDraftFileName(context.parentStep);
+  const relativePath = existing?.path ?? join(run.id, "artifacts", "drafts", fileName);
+  const assembled = await assembleSchemaArtifact(runsRoot, run, context.schemaFrame, !completed);
+  await writeManagedSchemaDraft(runsRoot, run.id, relativePath, assembled);
+
+  let validation: ArtifactValidationResult | undefined;
+  if (completed) {
+    const contract = await contractForStep(run, context.parentStep);
+    const validationContext = {
+      runId: run.id,
+      stepId: context.parentStep.id,
+      artifactPath: context.parentStep.id,
+      attemptId: randomUUID()
+    };
+    try {
+      const candidate = await prepareArtifactCandidate(contract, { kind: "inline", value: assembled }, validationContext);
+      const plan = context.parentStep.validationPlan ?? artifactValidatorRegistry.resolvePlan(contract);
+      validation = await artifactValidatorRegistry.execute(plan, {
+        contract,
+        candidate,
+        context: validationContext
+      });
+    } catch (error) {
+      if (error instanceof ArtifactValidationFailure) validation = error.result;
+      else throw error;
+    }
+  }
+
+  const now = new Date().toISOString();
+  const draft: SchemaDraftState = {
+    stepId: context.parentStep.id,
+    schemaName: context.schemaFrame.memoryName,
+    status: completed ? "awaiting_finalization" : "writing",
+    path: relativePath,
+    fileName,
+    contentType: "text/markdown",
+    completed: progress.completed,
+    total: progress.total,
+    pendingRepeatControls: progress.pendingRepeatControls || undefined,
+    assembledDigest: digestText(assembled),
+    validation,
+    updatedAt: now
+  };
+  (run.schemaDrafts ??= {})[context.parentStep.id] = draft;
+  return draft;
+}
+
+function schemaDraftFileName(step: RunStep): string {
+  const slug = slugify(step.artifact ?? step.id) || "artifact";
+  const identity = createHash("sha256").update(step.id).digest("hex").slice(0, 8);
+  return `${slug}-${identity}.draft.md`;
+}
+
+async function writeManagedSchemaDraft(
+  runsRoot: string,
+  runId: string,
+  relativePath: string,
+  content: string
+): Promise<void> {
+  const artifactRoot = await ensureRunArtifactDirectory(runsRoot, runId);
+  const target = resolve(runsRoot, relativePath);
+  assertInsideRunArtifactDirectory(target, artifactRoot);
+  await mkdir(dirname(target), { recursive: true });
+  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, content, "utf8");
+    await rename(temporary, target);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+async function assembleSchemaArtifact(
+  runsRoot: string,
+  run: RunState,
+  frame: RunFrame,
+  includePending = false
+): Promise<string> {
   const events = run.events.slice(frame.eventStartIndex ?? 0);
   const chunks: string[] = [];
   for (const step of frame.steps) {
     if (!step.artifact || step.kind === "repeat") continue;
     const event = events.find((candidate) => candidate.stepId === step.id);
-    if (!event) continue;
-    if (event.artifact.fields?.skipped === true) continue;
-    const value = event.artifact.storage === "file" && event.artifact.path
+    if (!event && !includePending) continue;
+    if (event?.artifact.fields?.skipped === true) continue;
+    const value = event?.artifact.storage === "file" && event.artifact.path
       ? await readFile(join(runsRoot, event.artifact.path), "utf8")
-      : String(event.artifact.value ?? "");
+      : String(event?.artifact.value ?? "");
+    const pending = event ? undefined : `<!-- memsphere:pending field=${step.artifact} -->`;
     if (step.artifact === frame.memoryName) {
       if (value.trim()) chunks.push(value.trim());
+      else if (pending) chunks.push(pending);
       continue;
     }
     const relativePath = step.artifact.startsWith(`${frame.memoryName}.`)
@@ -2775,6 +3281,7 @@ async function assembleSchemaArtifact(runsRoot: string, run: RunState, frame: Ru
     const headingLevel = Math.min(6, segments.length + 1);
     chunks.push(`${"#".repeat(headingLevel)} ${title}`);
     if (value.trim()) chunks.push(value.trim());
+    else if (pending) chunks.push(pending);
   }
   return `${chunks.join("\n\n")}\n`;
 }

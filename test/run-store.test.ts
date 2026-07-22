@@ -12,14 +12,20 @@ import {
   activeProcedureAsserts,
   ArtifactAuthorizationFailure,
   artifactSchemaName,
+  buildSchemaWritingSnapshot,
+  claimArtifactReviewAgentAssignment,
   currentArtifactReview,
+  currentSchemaFinalization,
   currentStep,
   enterSchema,
+  ensureCurrentSchemaDraft,
   finalArtifacts,
+  markArtifactReviewAgentCliReady,
   readRun,
   repeatRun,
   reportRun,
   submitArtifactReviewAssignment,
+  submitArtifactReviewAgentAssignment,
   submitArtifactReviewRunnerVote,
   skipRun,
   startRun,
@@ -43,6 +49,17 @@ async function writeFile(path: string, data: string): Promise<void> {
     ? data.replace(/^(!(?:concept|statement|schema|procedure))\n/, `$1\nsyntax: ${currentMemorySyntax}\n`)
     : data;
   await writeRawFile(path, versioned);
+}
+
+async function submitManagedSchemaDraft(runsRoot: string, runId: string) {
+  const run = await readRun(runsRoot, runId);
+  const finalization = currentSchemaFinalization(run);
+  assert(finalization, "expected Schema to await finalization");
+  return reportRun({
+    runsRoot,
+    runId,
+    artifact: { kind: "file", path: join(runsRoot, finalization.draft.path) }
+  });
 }
 
 const validProcedure = `!procedure
@@ -449,8 +466,15 @@ fields: [owner]
     await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery\n" } });
     await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "ready" } });
     await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "Detail" } });
-    const done = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "Ada" } });
+    const awaitingFinalization = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "Ada" }
+    });
 
+    assert.equal(awaitingFinalization.status, "running");
+    assert(currentSchemaFinalization(awaitingFinalization));
+    const done = await submitManagedSchemaDraft(runsRoot, started.id);
     assert.equal(done.status, "done");
     const delivery = done.events.find((event) => event.artifact.name === "delivery")?.artifact;
     assert(delivery?.path);
@@ -496,7 +520,13 @@ flow:
     assert.equal(entered.stack.at(-1)?.memoryName, inlineSchemaId);
     assert.equal(entered.stack.at(-1)?.steps[0]?.artifact, inlineSchemaId);
     await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery\n" } });
-    const done = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "finished" } });
+    const awaitingFinalization = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "finished" }
+    });
+    assert(currentSchemaFinalization(awaitingFinalization));
+    const done = await submitManagedSchemaDraft(runsRoot, started.id);
     assert.equal(done.status, "done");
     assert.equal(finalArtifacts(done).length, 1);
     const delivery = finalArtifacts(done)[0];
@@ -541,18 +571,20 @@ flow:
     assert.deepEqual(schemaSteps[1]?.format, { name: "markdown", options: { layout: "table" } });
 
     await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery" } });
-    const done = await reportRun({
+    const awaitingFinalization = await reportRun({
       runsRoot,
       runId: started.id,
       artifact: { kind: "inline", value: "| ID | Summary |\n| --- | --- |\n| R-1 | First |\n" }
     });
+    assert(currentSchemaFinalization(awaitingFinalization));
+    const done = await submitManagedSchemaDraft(runsRoot, started.id);
     assert.equal(done.status, "done");
     assert.equal(done.events.filter((event) => event.frame === "schema").length, 2);
     assert.match(await readFile(join(runsRoot, done.events.at(-1)?.artifact.path ?? ""), "utf8"), /## Requirements/);
   });
 });
 
-test("enter-schema parent validation failure leaves Run state and managed artifacts unchanged", async () => {
+test("Schema parent validation failure preserves field progress and supports whole-draft repair", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
     const proceduresRoot = join(memoryRoot, "procedures");
@@ -582,22 +614,35 @@ flow:
     await enterSchema({ memoryRoot, runsRoot, runId: started.id });
     await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery" } });
 
-    const runPath = join(runsRoot, started.id, `${started.id}.json`);
-    const artifactRoot = join(runsRoot, started.id, "artifacts");
-    const runBefore = await readFile(runPath, "utf8");
-    const artifactsBefore = (await readdir(artifactRoot)).sort();
+    const awaitingFinalization = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "| ID |\n| --- |\n| R-1 |\n" }
+    });
+    const finalization = currentSchemaFinalization(awaitingFinalization);
+    assert(finalization);
+    assert.equal(finalization.draft.validation?.status, "failed");
+    assert.match(finalization.draft.validation?.issues[0]?.message ?? "", /missing column Summary/);
+    assert.equal(awaitingFinalization.events.filter((event) => event.frame === "schema").length, 2);
 
+    const draftPath = join(runsRoot, finalization.draft.path);
     await assert.rejects(
-      reportRun({
-        runsRoot,
-        runId: started.id,
-        artifact: { kind: "inline", value: "| ID |\n| --- |\n| R-1 |\n" }
-      }),
+      reportRun({ runsRoot, runId: started.id, artifact: { kind: "file", path: draftPath } }),
       /missing column Summary/
     );
+    assert(currentSchemaFinalization(await readRun(runsRoot, started.id)));
 
-    assert.equal(await readFile(runPath, "utf8"), runBefore);
-    assert.deepEqual((await readdir(artifactRoot)).sort(), artifactsBefore);
+    await writeRawFile(
+      draftPath,
+      "# Delivery\n\n## Requirements\n\n| ID | Summary |\n| --- | --- |\n| R-1 | First |\n"
+    );
+    const done = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "file", path: draftPath }
+    });
+    assert.equal(done.status, "done");
+    assert.equal(done.events.at(-1)?.artifact.name, "delivery");
   });
 });
 
@@ -670,11 +715,13 @@ defines:
 
     const run = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
     await enterSchema({ memoryRoot, runsRoot, runId: run.id, schemaName: "demo-schema" });
-    const updated = await reportRun({
+    const awaitingFinalization = await reportRun({
       runsRoot,
       runId: run.id,
       artifact: { kind: "inline", value: "schema field value" }
     });
+    assert(currentSchemaFinalization(awaitingFinalization));
+    const updated = await submitManagedSchemaDraft(runsRoot, run.id);
 
     const artifact = updated.events.at(-1)?.artifact;
     assert.equal(artifact?.name, "schema result");
@@ -1045,12 +1092,308 @@ fields:
 
     const skipped = await skipRun({ runsRoot, runId: started.id });
     assert.equal(skipped.events.find((event) => event.stepId === "schema:optional-schema.notes")?.artifact.fields?.skipped, true);
-    assert.equal(skipped.status, "done");
-    const assembledArtifact = skipped.events.find((event) => event.artifact.name === "schema result")?.artifact;
+    assert.equal(skipped.status, "running");
+    assert(currentSchemaFinalization(skipped));
+    const done = await submitManagedSchemaDraft(runsRoot, started.id);
+    assert.equal(done.status, "done");
+    const assembledArtifact = done.events.find((event) => event.artifact.name === "schema result")?.artifact;
     assert(assembledArtifact?.path);
     const assembled = await readFile(join(runsRoot, assembledArtifact.path), "utf8");
     assert.match(assembled, /## required/);
     assert.doesNotMatch(assembled, /notes/);
+  });
+});
+
+test("Schema writing updates one stable draft, rebuilds it, and submits the edited whole document", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "draft.yaml"), `!procedure
+name: schema-draft
+flow:
+  - !action
+    action: Produce a complete delivery.
+    asserts: [Keep the document coherent.]
+    suggests: [Prefer concise sections.]
+    artifact: !artifact
+      name: delivery
+      type: object
+      format: { name: markdown, layout: outline }
+      schema: !schema
+        names: [Delivery]
+        asserts: [Every section belongs to this delivery.]
+        fields: [summary, details]
+`);
+
+    const started = await startRun({ memoryRoot, runsRoot, procedureName: "schema-draft" });
+    const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id });
+    const overview = buildSchemaWritingSnapshot(runsRoot, entered);
+    assert(overview);
+    assert.deepEqual(overview.action.asserts, ["Keep the document coherent."]);
+    assert.equal(overview.progress.total, 3);
+    assert.equal(overview.progress.current, "inline:flow[1]:delivery");
+    assert.equal(overview.draft, undefined);
+
+    const rootReported = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "# Delivery" }
+    });
+    const firstDraft = rootReported.schemaDrafts?.["flow[1]"];
+    assert(firstDraft);
+    const draftPath = join(runsRoot, firstDraft.path);
+    assert.match(await readFile(draftPath, "utf8"), /memsphere:pending field=.*summary/);
+
+    const summaryReported = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "A concise summary." }
+    });
+    assert.equal(summaryReported.schemaDrafts?.["flow[1]"]?.path, firstDraft.path);
+    assert.match(await readFile(draftPath, "utf8"), /A concise summary\./);
+    assert.match(await readFile(draftPath, "utf8"), /memsphere:pending field=.*details/);
+
+    await rm(draftPath);
+    const restored = await ensureCurrentSchemaDraft(runsRoot, await readRun(runsRoot, started.id));
+    assert.equal(restored.schemaDrafts?.["flow[1]"]?.path, firstDraft.path);
+    assert.match(await readFile(draftPath, "utf8"), /A concise summary\./);
+
+    const awaitingFinalization = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "Implementation details." }
+    });
+    assert.equal(awaitingFinalization.schemaDrafts?.["flow[1]"]?.path, firstDraft.path);
+    assert.equal(awaitingFinalization.schemaDrafts?.["flow[1]"]?.status, "awaiting_finalization");
+    assert.equal(awaitingFinalization.events.some((event) => event.stepId === "flow[1]"), false);
+
+    await writeRawFile(draftPath, `${await readFile(draftPath, "utf8")}\nGlobal adjustment.\n`);
+    const done = await submitManagedSchemaDraft(runsRoot, started.id);
+    assert.equal(done.status, "done");
+    const accepted = done.events.find((event) => event.stepId === "flow[1]")?.artifact;
+    assert(accepted?.path);
+    assert.match(await readFile(join(runsRoot, accepted.path), "utf8"), /Global adjustment\./);
+    assert.equal(done.schemaDrafts?.["flow[1]"]?.status, "accepted");
+  });
+});
+
+test("reviewed Schema Artifacts enter Review only after explicit whole-draft submission", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const schemasRoot = join(memoryRoot, "schemas");
+    const runsRoot = join(dir, "runs");
+    const fixtureRoot = join(process.cwd(), "test", "fixtures", "schema-artifact-composition-review");
+    await mkdir(proceduresRoot, { recursive: true });
+    await mkdir(schemasRoot, { recursive: true });
+    await writeRawFile(
+      join(proceduresRoot, "procedure.yaml"),
+      await readFile(join(fixtureRoot, "procedure.yaml"), "utf8")
+    );
+    await writeRawFile(
+      join(schemasRoot, "schema.yaml"),
+      await readFile(join(fixtureRoot, "schema.yaml"), "utf8")
+    );
+    const controlPlane = parseControlPlaneConfig({
+      identities: {
+        agent: {
+          kind: "agent",
+          name: "Agent",
+          agent: { provider: "traex", command: "traecli", args: [] }
+        },
+        human: { kind: "human", name: "Human" }
+      },
+      roles: {
+        runner: {
+          name: "Runner",
+          permissions: ["artifact.read", "artifact.submit", "decision.decide"]
+        },
+        agent_reviewer: {
+          name: "Agent reviewer",
+          permissions: ["artifact.read", "decision.decide"]
+        },
+        human_reviewer: {
+          name: "Human reviewer",
+          permissions: ["artifact.read", "decision.decide"]
+        }
+      }
+    });
+
+    const started = await startRun({
+      memoryRoot,
+      runsRoot,
+      procedureName: "schema-artifact-composition-review",
+      controlPlane
+    });
+    const entered = await enterSchema({
+      memoryRoot,
+      runsRoot,
+      runId: started.id,
+      schemaName: "Reviewed delivery"
+    });
+    const productionContext = JSON.stringify(buildSchemaWritingSnapshot(runsRoot, entered));
+    assert.doesNotMatch(productionContext, /artifact_acceptance|roleBindings|controlPlane|permission|reviewer/i);
+
+    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Reviewed delivery" } });
+    await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "Implementation summary." }
+    });
+    const awaitingFinalization = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "Initial verification evidence." }
+    });
+    assert(currentSchemaFinalization(awaitingFinalization));
+    assert.equal(awaitingFinalization.artifactReviews, undefined);
+    assert.equal(awaitingFinalization.events.some((event) => event.stepId === "flow[1]"), false);
+
+    const submitted = await submitManagedSchemaDraft(runsRoot, started.id);
+    const review = currentArtifactReview(submitted);
+    assert(review);
+    assert.equal(submitted.events.some((event) => event.stepId === "flow[1]"), false);
+    assert.equal(currentStep(submitted)?.id, "flow[1]");
+    assert.equal(submitted.schemaDrafts?.["flow[1]"]?.status, "submitted");
+
+    const round = review.rounds[0];
+    const agentAssignment = round.assignments.find((assignment) => assignment.identityKind === "agent");
+    const humanAssignment = round.assignments.find((assignment) => assignment.identityKind === "human");
+    assert(agentAssignment);
+    assert(humanAssignment);
+    assert.equal(round.assignments.length, 2);
+    const claimed = await claimArtifactReviewAgentAssignment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: round.id,
+      identityId: agentAssignment.identityId,
+      workerPid: process.pid
+    });
+    assert(claimed);
+    await markArtifactReviewAgentCliReady({
+      runsRoot,
+      reviewId: review.id,
+      roundId: round.id,
+      identityId: agentAssignment.identityId,
+      attemptId: claimed.attempt.id,
+      protocolVersion: 1,
+      sessionId: "agent-round-1"
+    });
+    const agentSubmitted = await submitArtifactReviewAgentAssignment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: round.id,
+      identityId: agentAssignment.identityId,
+      attemptId: claimed.attempt.id,
+      vote: "approve",
+      summary: "Agent approves the first candidate."
+    });
+    assert.equal(agentSubmitted.review.status, "pending");
+    assert.equal(agentSubmitted.run.events.some((event) => event.stepId === "flow[1]"), false);
+
+    const firstDraft = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: review.id,
+      roundId: round.id,
+      identityId: humanAssignment.identityId,
+      expectedRevision: agentSubmitted.round.revision,
+      draft: {
+        vote: "request_changes",
+        comments: [{ body: "Strengthen the verification evidence." }]
+      }
+    });
+    await submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: round.id,
+      identityId: humanAssignment.identityId,
+      expectedRevision: firstDraft.round.revision
+    });
+    const requested = await waitForArtifactReview({ runsRoot, reviewId: review.id, pollIntervalMs: 1 });
+    assert.equal(requested.review.status, "awaiting_revision");
+    assert.equal(requested.run.events.some((event) => event.stepId === "flow[1]"), false);
+
+    const draftPath = join(runsRoot, requested.run.schemaDrafts!["flow[1]"].path);
+    await writeRawFile(draftPath, `${await readFile(draftPath, "utf8")}\nAdditional verification evidence.\n`);
+    const revised = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "file", path: draftPath },
+      revisionSummary: "Strengthened the verification evidence."
+    });
+    const revisedReview = currentArtifactReview(revised);
+    assert(revisedReview);
+    assert.equal(revisedReview.rounds.length, 2);
+    const secondRound = revisedReview.rounds[1];
+    const secondAgent = secondRound.assignments.find((assignment) => assignment.identityKind === "agent");
+    const secondHuman = secondRound.assignments.find((assignment) => assignment.identityKind === "human");
+    assert(secondAgent);
+    assert(secondHuman);
+    assert.equal(secondAgent.status, "queued");
+    assert.equal(secondHuman.status, "draft");
+    assert.equal(secondRound.votes.length, 0);
+
+    const secondClaim = await claimArtifactReviewAgentAssignment({
+      runsRoot,
+      reviewId: revisedReview.id,
+      roundId: secondRound.id,
+      identityId: secondAgent.identityId,
+      workerPid: process.pid
+    });
+    assert(secondClaim);
+    await markArtifactReviewAgentCliReady({
+      runsRoot,
+      reviewId: revisedReview.id,
+      roundId: secondRound.id,
+      identityId: secondAgent.identityId,
+      attemptId: secondClaim.attempt.id,
+      protocolVersion: 1,
+      sessionId: "agent-round-2"
+    });
+    const secondAgentSubmitted = await submitArtifactReviewAgentAssignment({
+      runsRoot,
+      reviewId: revisedReview.id,
+      roundId: secondRound.id,
+      identityId: secondAgent.identityId,
+      attemptId: secondClaim.attempt.id,
+      vote: "approve",
+      summary: "Agent approves the revised candidate."
+    });
+    assert.equal(secondAgentSubmitted.review.status, "pending");
+    assert.equal(secondAgentSubmitted.run.events.some((event) => event.stepId === "flow[1]"), false);
+
+    const secondDraft = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: revisedReview.id,
+      roundId: secondRound.id,
+      identityId: secondHuman.identityId,
+      expectedRevision: secondAgentSubmitted.round.revision,
+      draft: { vote: "approve", comments: [] }
+    });
+    await submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: revisedReview.id,
+      roundId: secondRound.id,
+      identityId: secondHuman.identityId,
+      expectedRevision: secondDraft.round.revision
+    });
+    const secondWaiting = await waitForArtifactReview({
+      runsRoot,
+      reviewId: revisedReview.id,
+      pollIntervalMs: 1
+    });
+    assert.equal(secondWaiting.review.status, "awaiting_runner_vote");
+    const accepted = await submitArtifactReviewRunnerVote({
+      runsRoot,
+      reviewId: revisedReview.id,
+      roundId: secondRound.id,
+      vote: "approve"
+    });
+    assert.equal(currentStep(accepted.run)?.id, "flow[2]");
+    assert.equal(accepted.run.events.filter((event) => event.stepId === "flow[1]").length, 1);
+    assert.equal(accepted.run.schemaDrafts?.["flow[1]"]?.status, "accepted");
   });
 });
 

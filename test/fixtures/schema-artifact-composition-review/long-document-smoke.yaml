@@ -1,0 +1,41 @@
+!procedure
+syntax: memsphere-20260721-stable
+name: Schema Artifact 长文档 ACP Review Smoke
+role_bindings:
+  development_engineer: traex2
+flow:
+  - !action
+    action: 产出一份基于当前 Workspace 事实的 Schema Artifact 长文档兼容性评估。
+    asserts:
+      - 文档中的包版本必须与当前 Workspace 的 package.json 一致。
+      - 文档必须根据当前 Workspace 源码判断 run schema show 命令是否已经注册。
+      - 总结、实现事实、验证证据和最终结论之间不得相互矛盾。
+    suggests:
+      - Reviewer 应使用 Memsphere CLI 查阅最终 Artifact 与 Run，并直接读取 Workspace 文件核对事实。
+    artifact: !artifact
+      name: Workspace 兼容性评估
+      type: object
+      format:
+        name: markdown
+        layout: outline
+      schema: !schema
+        name: Workspace 兼容性评估
+        type: object
+        format:
+          name: markdown
+          layout: outline
+        defines:
+          - 汇总 Schema 增量写作实现对当前 Workspace 的影响和验证证据。
+        fields:
+          - 执行摘要
+          - 当前包版本
+          - CLI 实现事实
+          - Schema 草稿生命周期
+          - Review 门禁行为
+          - 自动化验证
+          - 最终结论
+      review: artifact_acceptance.unanimous
+  - !action
+    action: 记录 Smoke 已完成。
+    artifact: !artifact
+      name: Smoke 结果

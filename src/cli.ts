@@ -27,6 +27,7 @@ import {
   runReviewSubmitCommand,
   runReviewVoteCommand,
   runReviewWaitCommand,
+  runSchemaShowCommand,
   runShowCommand,
   runSkipCommand,
   runStartCommand,
@@ -207,6 +208,17 @@ runArtifactContract
   .option("--step <ref>", "step ref from run show")
   .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
   .action(runArtifactContractShowCommand);
+
+const runSchema = run
+  .command("schema")
+  .description("Inspect the active Schema writing context and managed draft.");
+
+runSchema
+  .command("show")
+  .description("Show Schema progress, production constraints, and the managed draft path.")
+  .requiredOption("--run <id>", "run id")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runSchemaShowCommand);
 
 const runReview = run
   .command("review")

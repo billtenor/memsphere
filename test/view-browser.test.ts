@@ -53,6 +53,16 @@ test("browser renders Schema Repeat structure and its Run control command", () =
   assert.match(browserHtml, /const isRepeat = step\.kind === "repeat" && step\.repeat/);
 });
 
+test("task view renders Schema progress, managed draft, and global adjustment state", () => {
+  assert.match(browserHtml, /function renderSchemaWriting\(run, step\)/);
+  assert.match(browserHtml, /snapshot\.progress\.completed \+ "\/" \+ snapshot\.progress\.total/);
+  assert.match(browserHtml, /snapshot\.currentField\?\.sources/);
+  assert.match(browserHtml, /snapshot\.draft\.filePath/);
+  assert.match(browserHtml, /snapshot\.draft\.renderedContent/);
+  assert.match(browserHtml, /snapshot\.draft\.status === "awaiting_finalization"/);
+  assert.match(browserHtml, /run\.schemaWriting\?\.parentStepId/);
+});
+
 test("task step artifact area is hidden when no event exists", () => {
   assert.equal(shouldRenderTaskStepArtifact(undefined), false);
   assert.equal(shouldRenderTaskStepArtifact(null), false);

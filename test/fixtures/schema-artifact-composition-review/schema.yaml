@@ -1,0 +1,14 @@
+!schema
+syntax: memsphere-20260721-stable
+name: Reviewed delivery
+type: object
+format:
+  name: markdown
+  layout: outline
+defines:
+  - A complete implementation and verification delivery reviewed as one Artifact.
+asserts:
+  - The summary and verification evidence must describe the same implementation.
+fields:
+  - summary
+  - verification evidence

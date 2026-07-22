@@ -17,6 +17,9 @@ defines:
       - CLI 返回的 Actor 表示步骤由 agent 还是 human 执行，Do 或 Ask human to do 表示当前动作，Details 提供补充上下文，Artifact 规定步骤产物及其格式，Then 给出下一条命令。
       - 每个 Action 都必须产生明确的 Artifact；Actor 为 human 时，Agent 必须等待 human 提供结果后再上报和继续。
       - 短内容使用 memsphere run report 的 --artifact 上报，文件产物使用 --artifact-file 上报；带 Schema 的结构化 Markdown 产物可以按照 Then 提示进入 Schema 填写流程。
+      - 进入 Schema 填写流程后，首次概览和 run schema show 提供父 Action、父 Artifact 内容契约、完整字段进度与约束来源；这些生产提示不得混入 Review 参与者、权限、投票或轮次信息。
+      - Schema 字段每次 report 都会更新同一份受管累计草稿；全部字段完成后 Run 必须停在全局调整状态，由 Runner 阅读并直接编辑 CLI 返回的草稿路径，再使用 --artifact-file 显式提交同一文件。
+      - Schema 最终文件显式提交并通过结构与契约校验后，Run 才按照父 Artifact 契约决定直接接纳或进入 Artifact Review；执行者只需继续遵循 CLI 返回的 Then，不得自行提前发起或跳过 Review。
       - 配置 control_plane 后，每个 Artifact 都必须通过 Runner 的 artifact.submit 鉴权；执行者必须在 report 前阅读 CLI 的自然语言权限说明，拒绝不会改变 Run 状态或写入 Artifact。
       - 完成当前步骤后，必须按照 CLI 返回的 Then 命令上报 Artifact；Run 显示 done 后才能汇报流程完成和最终产物。
   - !ref

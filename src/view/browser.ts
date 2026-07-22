@@ -182,6 +182,13 @@ export const browserHtml = String.raw`<!doctype html>
     .task-step-spotlight { animation: taskStepSpotlight 1600ms ease-out; box-shadow: 0 0 0 3px rgba(40, 108, 103, .18), var(--shadow); }
     .task-result { margin-top: 8px; }
     .task-result .pre { margin-top: 6px; }
+    .schema-writing { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 2px; }
+    .schema-writing-progress { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .schema-writing-source { margin-top: 10px; padding-left: 12px; border-left: 2px solid var(--line); }
+    .schema-writing-source .text-list { margin-top: 4px; }
+    .schema-draft-preview { margin-top: 10px; }
+    .schema-draft-preview > summary { cursor: pointer; color: var(--accent); font-weight: 700; }
+    .schema-draft-path { margin-top: 7px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
     .pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f3f5f0; border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin: 8px 0 0; }
     .markdown-body { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; background: #f3f5f0; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin: 8px 0 0; line-height: 1.55; }
     .markdown-body > :first-child { margin-top: 0; }
@@ -395,6 +402,13 @@ export const browserHtml = String.raw`<!doctype html>
       human: { zh: "人", yaml: "human" },
       artifact: { zh: "产物", yaml: "artifact" },
       schema: { zh: "图式", yaml: "schema" },
+      schemaWriting: { zh: "图式写作", yaml: "Schema writing" },
+      schemaProgress: { zh: "字段进度", yaml: "Field progress" },
+      managedDraft: { zh: "累计草稿", yaml: "Managed draft" },
+      globalAdjustment: { zh: "等待全局调整", yaml: "Awaiting global adjustment" },
+      contractValidation: { zh: "结构与契约校验", yaml: "Contract validation" },
+      remaining: { zh: "剩余", yaml: "remaining" },
+      constraintSource: { zh: "约束来源", yaml: "Constraint source" },
       inlineSchema: { zh: "内嵌图式", yaml: "inline schema" },
       type: { zh: "类型", yaml: "type" },
       fields: { zh: "字段", yaml: "fields" },
@@ -1266,6 +1280,7 @@ export const browserHtml = String.raw`<!doctype html>
       item.append(renderFlowHead(t("step"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
       appendOptional(item, renderActionContracts(step, run));
       appendOptional(item, renderInlineSchemaDetails(step, Boolean(isActive)));
+      appendOptional(item, renderSchemaWriting(run, step));
       appendOptional(item, renderTaskStepResult(step, event, run));
       return item;
     }
@@ -1435,8 +1450,105 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function currentRunStep(run) {
+      if (run.schemaWriting?.parentStepId) {
+        return findRunStepById(run.plan || [], run.schemaWriting.parentStepId);
+      }
       const frame = currentRunFrame(run);
       return frame ? frame.steps[frame.index] : null;
+    }
+
+    function findRunStepById(steps, id) {
+      for (const step of steps || []) {
+        if (step.id === id) return step;
+        const branch = findRunStepById(step.branches?.truthy, id)
+          || findRunStepById(step.branches?.falsy, id)
+          || findRunStepById(step.loop?.body, id);
+        if (branch) return branch;
+      }
+      return null;
+    }
+
+    function renderSchemaWriting(run, step) {
+      const snapshot = run.schemaWriting;
+      if (!snapshot || snapshot.parentStepId !== step.id) return null;
+      const wrap = document.createElement("div");
+      wrap.className = "schema-writing";
+      wrap.append(blockTitle(t("schemaWriting")));
+
+      const progress = document.createElement("div");
+      progress.className = "schema-writing-progress";
+      progress.append(pill(t("schemaProgress") + " " + snapshot.progress.completed + "/" + snapshot.progress.total));
+      progress.append(pill(t("remaining") + " " + snapshot.progress.remaining));
+      if (snapshot.draft?.status === "awaiting_finalization") {
+        progress.append(pill(t("globalAdjustment"), false, "warn"));
+      }
+      if (snapshot.currentField?.path) progress.append(pill(snapshot.currentField.path, false, "strong"));
+      wrap.append(progress);
+
+      for (const source of snapshot.currentField?.sources || []) {
+        const section = document.createElement("div");
+        section.className = "schema-writing-source";
+        const heading = document.createElement("div");
+        heading.textContent = t("constraintSource") + " · " + source.path;
+        section.append(heading);
+        const values = [];
+        for (const value of source.defines || []) values.push("defines: " + value);
+        for (const value of source.asserts || []) values.push("asserts: " + value);
+        if (values.length) {
+          const list = document.createElement("ul");
+          list.className = "text-list";
+          for (const value of values) {
+            const item = document.createElement("li");
+            item.textContent = value;
+            list.append(item);
+          }
+          section.append(list);
+        }
+        wrap.append(section);
+      }
+
+      if (snapshot.draft) {
+        const preview = document.createElement("details");
+        preview.className = "schema-draft-preview";
+        preview.open = snapshot.draft.status === "awaiting_finalization";
+        const summary = document.createElement("summary");
+        summary.textContent = t("managedDraft");
+        preview.append(summary);
+        const path = document.createElement("div");
+        path.className = "schema-draft-path mono";
+        path.textContent = snapshot.draft.filePath;
+        preview.append(path);
+        if (snapshot.draft.validation) {
+          const validation = document.createElement("div");
+          validation.className = "meta";
+          validation.append(pill(
+            t("contractValidation") + " · " + snapshot.draft.validation.status,
+            false,
+            snapshot.draft.validation.status === "passed" ? "done" : "warn"
+          ));
+          preview.append(validation);
+        }
+        if (typeof snapshot.draft.renderedContent === "string") {
+          const content = document.createElement("div");
+          content.className = "markdown-body";
+          content.innerHTML = snapshot.draft.renderedContent;
+          preview.append(content);
+        } else if (snapshot.draft.contentError) {
+          const error = document.createElement("div");
+          error.className = "muted";
+          error.textContent = snapshot.draft.contentError;
+          preview.append(error);
+        }
+        if (snapshot.draft.status === "awaiting_finalization") {
+          const command = document.createElement("div");
+          command.className = "pre mono";
+          command.textContent = "memsphere run report --run " + shellQuote(run.id)
+            + " --artifact-file " + shellQuote(snapshot.draft.filePath);
+          preview.append(command);
+        }
+        wrap.append(preview);
+      }
+      return wrap;
     }
 
     function blockTitle(text) {

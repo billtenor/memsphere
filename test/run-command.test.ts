@@ -7,7 +7,8 @@ import {
   buildRunStepDetail,
   printArtifactReviewSummary,
   printLatestReportAuthorization,
-  printRunState
+  printRunState,
+  printSchemaWritingOverview
 } from "../src/commands/run.js";
 import type { ArtifactReview, ArtifactReviewRound } from "../src/artifact-review.js";
 import {
@@ -16,7 +17,7 @@ import {
   parseControlPlaneConfig,
   resolveArtifactControlPlane
 } from "../src/control-plane/index.js";
-import type { RunState } from "../src/run/store.js";
+import type { RunState, SchemaWritingSnapshot } from "../src/run/store.js";
 
 test("Run inspection separates navigation, step detail, and Artifact content", async () => {
   const steps: NonNullable<RunState["plan"]> = [{
@@ -196,6 +197,203 @@ test("run output presents Repeat as control without an Artifact", () => {
   assert.match(output, /allowed count: 1\.\.3/);
   assert.match(output, /memsphere run repeat <count> --run run-repeat/);
   assert.doesNotMatch(output, /Artifact:/);
+});
+
+test("Schema field output shows production constraints and progress without permission guidance", () => {
+  const parentStep: NonNullable<RunState["plan"]>[number] = {
+    id: "flow[1]",
+    kind: "action",
+    instruction: "Produce the delivery.",
+    artifact: "delivery",
+    type: "object",
+    format: { name: "markdown", options: { layout: "outline" } },
+    schema: { kind: "inline", id: "Delivery", node: { tag: "!schema", names: ["Delivery"], defines: [] } },
+    asserts: ["Keep the delivery coherent."]
+  };
+  const fieldStep: NonNullable<RunState["plan"]>[number] = {
+    id: "schema:Delivery.summary",
+    instruction: "Write Delivery.summary",
+    artifact: "Delivery.summary",
+    type: "string",
+    format: { name: "markdown", options: {} },
+    schemaContext: {
+      rootName: "Delivery",
+      path: "Delivery.summary",
+      sources: [{
+        path: "Delivery",
+        type: "object",
+        format: { name: "markdown", options: { layout: "outline" } },
+        defines: ["A complete delivery."],
+        asserts: ["Include every required section."]
+      }]
+    }
+  };
+  const run: RunState = {
+    contractVersion: 3,
+    id: "run-schema-writing",
+    status: "running",
+    procedureName: "schema-writing",
+    memoryRoot: "/memory",
+    createdAt: "2026-07-22T00:00:00.000Z",
+    updatedAt: "2026-07-22T00:00:00.000Z",
+    plan: [parentStep],
+    stack: [
+      { type: "procedure", memoryName: "schema-writing", steps: [parentStep], index: 0 },
+      {
+        type: "schema",
+        memoryName: "Delivery",
+        sourceStepId: "flow[1]",
+        eventStartIndex: 0,
+        steps: [fieldStep],
+        index: 0
+      }
+    ],
+    events: []
+  };
+
+  const lines: string[] = [];
+  const originalLog = console.log;
+  console.log = (...values: unknown[]) => lines.push(values.join(" "));
+  try {
+    printRunState(run, "/runs");
+  } finally {
+    console.log = originalLog;
+  }
+  const output = lines.join("\n");
+  assert.match(output, /Schema Progress:/);
+  assert.match(output, /field: Delivery\.summary/);
+  assert.match(output, /constraint source: Delivery \(object · markdown \(layout: outline\)\)/);
+  assert.match(output, /defines: A complete delivery\./);
+  assert.match(output, /full overview: memsphere run schema show --run run-schema-writing/);
+  assert.doesNotMatch(output, /Permission Guidance|Control Plane|Review/);
+});
+
+test("Schema overview includes the parent production contract without Review control data", () => {
+  const snapshot = {
+    runId: "run-schema-overview",
+    procedureName: "delivery-procedure",
+    parentStepId: "flow[1]",
+    action: {
+      instruction: "Produce a complete delivery.",
+      asserts: ["Keep the document coherent."],
+      suggests: ["Prefer concise sections."]
+    },
+    artifact: {
+      name: "delivery",
+      type: "object",
+      format: { name: "markdown", options: { layout: "outline" } },
+      schema: {
+        kind: "inline",
+        id: "Delivery",
+        node: { tag: "!schema", names: ["Delivery"], defines: [] }
+      },
+      final: true
+    },
+    progress: {
+      completed: 0,
+      total: 2,
+      remaining: 2,
+      pendingRepeatControls: 0,
+      current: "Delivery",
+      fields: [
+        { id: "schema:Delivery", path: "Delivery", status: "current" },
+        { id: "schema:Delivery.summary", path: "Delivery.summary", status: "remaining" }
+      ]
+    },
+    currentField: {
+      id: "schema:Delivery",
+      path: "Delivery",
+      type: "object",
+      format: { name: "markdown", options: { layout: "outline" } },
+      sources: []
+    }
+  } satisfies SchemaWritingSnapshot;
+
+  const lines: string[] = [];
+  const originalLog = console.log;
+  console.log = (...values: unknown[]) => lines.push(values.join(" "));
+  try {
+    printSchemaWritingOverview(snapshot);
+  } finally {
+    console.log = originalLog;
+  }
+  const output = lines.join("\n");
+  assert.match(output, /action assert: Keep the document coherent\./);
+  assert.match(output, /action suggest: Prefer concise sections\./);
+  assert.match(output, /schema: Delivery/);
+  assert.match(output, /final artifact: yes/);
+  assert.match(output, /report each field to update one managed draft/);
+  assert.doesNotMatch(output, /Review|Role Binding|Permission|Vote|Decision/);
+});
+
+test("Schema finalization output points to the managed draft and exact report command", () => {
+  const parentStep: NonNullable<RunState["plan"]>[number] = {
+    id: "flow[1]",
+    instruction: "Produce the delivery.",
+    artifact: "delivery",
+    type: "object",
+    format: { name: "markdown", options: { layout: "outline" } },
+    schema: { kind: "inline", id: "Delivery", node: { tag: "!schema", names: ["Delivery"], defines: [] } }
+  };
+  const fieldStep: NonNullable<RunState["plan"]>[number] = {
+    id: "schema:Delivery",
+    instruction: "Write Delivery",
+    artifact: "Delivery",
+    type: "object",
+    format: { name: "markdown", options: { layout: "outline" } }
+  };
+  const run: RunState = {
+    contractVersion: 3,
+    id: "run-schema-final",
+    status: "running",
+    procedureName: "schema-final",
+    memoryRoot: "/memory",
+    createdAt: "2026-07-22T00:00:00.000Z",
+    updatedAt: "2026-07-22T00:00:00.000Z",
+    plan: [parentStep],
+    stack: [
+      { type: "procedure", memoryName: "schema-final", steps: [parentStep], index: 0 },
+      {
+        type: "schema",
+        memoryName: "Delivery",
+        sourceStepId: "flow[1]",
+        eventStartIndex: 0,
+        steps: [fieldStep],
+        index: 1
+      }
+    ],
+    events: [],
+    schemaDrafts: {
+      "flow[1]": {
+        stepId: "flow[1]",
+        schemaName: "Delivery",
+        status: "awaiting_finalization",
+        path: "run-schema-final/artifacts/drafts/delivery.draft.md",
+        fileName: "delivery.draft.md",
+        contentType: "text/markdown",
+        completed: 1,
+        total: 1,
+        validation: { status: "passed", correctable: false, issues: [] },
+        updatedAt: "2026-07-22T00:00:00.000Z"
+      }
+    }
+  };
+
+  const lines: string[] = [];
+  const originalLog = console.log;
+  console.log = (...values: unknown[]) => lines.push(values.join(" "));
+  try {
+    printRunState(run, "/runs");
+  } finally {
+    console.log = originalLog;
+  }
+  const output = lines.join("\n");
+  assert.match(output, /Schema Finalization:/);
+  assert.match(output, /managed draft: \/runs\/run-schema-final\/artifacts\/drafts\/delivery\.draft\.md/);
+  assert.match(output, /contract validation: passed/);
+  assert.match(output, /Read the complete managed draft, edit it directly as needed/);
+  assert.match(output, /memsphere run report --run run-schema-final --artifact-file \/runs\/run-schema-final\/artifacts\/drafts\/delivery\.draft\.md/);
+  assert.doesNotMatch(output, /Review|Permission Guidance/);
 });
 
 test("run output explains effective runner permissions before report", () => {
