@@ -385,6 +385,20 @@ When a Schema Run reaches Repeat, choose the total count once. This control acti
 memsphere run repeat 2 --run <run-id>
 ```
 
+Entering a Schema writing flow first prints the owning Action and Artifact contract plus the complete field order. During writing, `run status` stays concise and shows the current field, progress, active constraint sources, and the managed draft path. Use the dedicated query for the complete production view:
+
+```bash
+memsphere run schema show --run <run-id>
+```
+
+Every field report updates the same managed Markdown draft. After the final field, the Run remains on the owning Action in `Schema Finalization`; it does not accept the parent Artifact or start Artifact Review yet. Read and edit the absolute draft path printed by the CLI, then submit that same file with the exact returned command:
+
+```bash
+memsphere run report --run <run-id> --artifact-file <managed-draft-path>
+```
+
+Final submission rereads the latest bytes and reruns the parent Artifact validators. A failure keeps the Run in finalization so the whole draft can be repaired. A successful submission then follows the ordinary parent Artifact contract: it advances directly when no Review is configured, or creates Artifact Review and waits when `review` is present.
+
 For an array Schema, `item: !schema` defines one element contract and `items` defines a union of at least two candidate contracts. Every array element must satisfy `item`, or at least one `items` candidate. `item` and `items` are mutually exclusive and require an explicit `type: array`; omitting both validates only the array container. Array Schemas do not declare `fields` directly. Structured rows put `fields` under an object `item/items` Schema. The old `element_types` field and string-valued legacy `items` syntax require migration.
 
 A nested Schema can override the inherited representation. This example validates a Markdown table only inside the `需求清单` heading subtree:

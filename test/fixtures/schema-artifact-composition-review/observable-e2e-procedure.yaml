@@ -1,0 +1,22 @@
+!procedure
+syntax: memsphere-20260721-stable
+name: Schema 逐步撰写可观察验收流程
+flow:
+  - !action
+    action: 逐步产出一份完整的架构方案评估文档，用于观察 Schema 写作和 Artifact Review 的端到端过程。
+    asserts:
+      - 最终文档必须覆盖 Schema 中的全部必填区块。
+      - 最终文档中的事实、风险、验证和结论必须保持一致。
+    suggests:
+      - 每次只完成当前 Schema 节点，上报后检查稳定草稿和剩余进度。
+    artifact: !artifact
+      name: Schema 逐步撰写端到端验收文档
+      type: object
+      format:
+        name: markdown
+        layout: outline
+      schema: Schema 逐步撰写端到端验收文档
+      review: artifact_acceptance.unanimous
+      role_bindings:
+        system_architect: traex4
+        senior_system_architect: human

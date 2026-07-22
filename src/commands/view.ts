@@ -35,7 +35,9 @@ import {
 import {
   ArtifactAuthorizationFailure,
   ArtifactReviewConflictError,
+  buildSchemaWritingSnapshot,
   currentArtifactReview,
+  ensureCurrentSchemaDraft,
   listRuns,
   parseRunState,
   readArtifactReviewForIdentity,
@@ -773,17 +775,46 @@ async function loadRunPayload(config: MemsphereConfig): Promise<unknown[]> {
   const runs = await listRuns(config.runsRoot);
   await Promise.all(runs.map((run) => dispatchArtifactReviewAgents({ config, run })));
   const refreshed = await listRuns(config.runsRoot);
-  return Promise.all(refreshed.map((run) => toViewRunPayload(config.runsRoot, run)));
+  const restored = await Promise.all(
+    refreshed.map((run) => ensureCurrentSchemaDraft(config.runsRoot, run))
+  );
+  return Promise.all(restored.map((run) => toViewRunPayload(config.runsRoot, run)));
 }
 
 async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknown> {
   const hydrated = await hydrateRunArtifactContent(runsRoot, run);
   const { artifactReviews: _privateArtifactReviews, ...publicRun } = hydrated;
   const review = currentArtifactReview(hydrated);
+  const schemaWriting = await schemaWritingPayload(runsRoot, hydrated);
   return {
     ...publicRun,
-    artifactReview: review ? artifactReviewSummary(review, hydrated.controlPlane) : undefined
+    artifactReview: review ? artifactReviewSummary(review, hydrated.controlPlane) : undefined,
+    schemaWriting
   };
+}
+
+async function schemaWritingPayload(runsRoot: string, run: RunState): Promise<unknown> {
+  const snapshot = buildSchemaWritingSnapshot(runsRoot, run);
+  if (!snapshot?.draft) return snapshot;
+  try {
+    const content = await readFile(snapshot.draft.filePath, "utf8");
+    return {
+      ...snapshot,
+      draft: {
+        ...snapshot.draft,
+        content,
+        renderedContent: renderMarkdownContent(content)
+      }
+    };
+  } catch (error) {
+    return {
+      ...snapshot,
+      draft: {
+        ...snapshot.draft,
+        contentError: error instanceof Error ? error.message : String(error)
+      }
+    };
+  }
 }
 
 function artifactReviewSummary(

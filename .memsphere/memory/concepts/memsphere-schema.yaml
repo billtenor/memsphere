@@ -22,5 +22,9 @@ defines:
       - 数组 Schema 未声明 item/items 时只校验数组容器，不约束成员类型。
       - Schema 的 type 不继承父层；显式声明优先，省略时有 fields 推断为 object、无 fields 推断为 string。
       - Schema 的 format 省略时继承父层；Markdown layout 只由兼容的 object outline 或 array table 结构节点保留，标量字段不继承 layout。
+      - Schema 增量填写开始时必须先展示父 Action、父 Artifact 内容契约和完整字段结构；具体字段提示必须保留根、祖先与当前 Schema 约束的来源，并提供已完成、当前与剩余进度。
+      - Schema 字段 Event 是可追溯的中间结果，不是父 Artifact 的已接纳结果；每次字段上报后都应从已持久化 Event 更新同一路径的受管累计草稿。
+      - 全部字段完成后必须先保留完整草稿和父 Artifact 结构与契约校验结果，等待 Runner 全局阅读、直接编辑并显式提交；即使父校验失败，也不得丢弃已经通过字段级校验的结果。
+      - Runner 显式提交受管草稿时必须读取文件最新内容并重新校验；只有提交成功后才能按父 Artifact 的 review 契约进入统一接纳或 Artifact Review 流程。
   - !ref
     target: schemas/Schema Schema
