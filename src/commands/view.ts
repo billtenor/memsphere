@@ -65,6 +65,7 @@ type ViewServeOptions = {
 type MemoryPayload = {
   memoryRoot: string;
   systemMemoryPaths: string[];
+  roleNames: Record<string, string>;
   memories: Array<{
     id: string;
     kind: string;
@@ -173,7 +174,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   }
 
   if (request.method === "GET" && url.pathname === "/api/memories") {
-    const payload = await loadMemoryPayload(memoryRoot);
+    const payload = await loadMemoryPayload(config);
     sendJson(response, 200, payload);
     return;
   }
@@ -689,9 +690,13 @@ async function findMemoryFileById(memoryRoot: string, memoryId: string): Promise
   return undefined;
 }
 
-async function loadMemoryPayload(memoryRoot: string): Promise<MemoryPayload> {
+async function loadMemoryPayload(config: MemsphereConfig): Promise<MemoryPayload> {
+  const { memoryRoot } = config;
   const memories: MemoryPayload["memories"] = [];
   const systemMemoryPaths = (await readReservedMemoryManifest()).system_memory.install;
+  const roleNames = Object.fromEntries(
+    Object.entries(config.controlPlane?.roles ?? {}).map(([roleId, role]) => [roleId, role.name])
+  );
 
   for (const kind of memoryKinds) {
     const paths = await listMemoryFiles(memoryRoot, kind);
@@ -700,7 +705,7 @@ async function loadMemoryPayload(memoryRoot: string): Promise<MemoryPayload> {
     }
   }
 
-  return { memoryRoot, systemMemoryPaths, memories };
+  return { memoryRoot, systemMemoryPaths, roleNames, memories };
 }
 
 async function loadReservedMemoryPayload(scopeRoot: string, memoryRoot: string): Promise<MemoryPayload["memories"]> {

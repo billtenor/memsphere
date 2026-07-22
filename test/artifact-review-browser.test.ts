@@ -28,7 +28,6 @@ test("Human Artifact Review completes in View with private drafts and distinct v
 name: browser-review
 role_bindings:
   decider: alice
-  advisor: bob
 flow:
   - !action
     action: 产出需要人工评审的结果。
@@ -36,6 +35,8 @@ flow:
       name: 人工评审结果
       format: markdown
       review: artifact_acceptance.unanimous
+      role_bindings:
+        advisor: bob
 `));
   const controlPlane = parseControlPlaneConfig({
     identities: {
@@ -86,6 +87,12 @@ flow:
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     await page.goto(`http://127.0.0.1:${address.port}`);
+    const memoryArtifact = page.locator(".artifact-row").first();
+    await memoryArtifact.getByText("评审", { exact: true }).waitFor();
+    assert.equal(await memoryArtifact.getByText("Decider", { exact: true }).count(), 1);
+    assert.equal(await memoryArtifact.getByText("Advisor", { exact: true }).count(), 1);
+    assert.equal(await memoryArtifact.getByText("decider", { exact: true }).count(), 0);
+    assert.equal(await memoryArtifact.getByText("advisor", { exact: true }).count(), 0);
     await page.getByRole("button", { name: "Task", exact: true }).click();
     let identity = page.getByRole("combobox", { name: "评审身份" });
     await identity.waitFor();

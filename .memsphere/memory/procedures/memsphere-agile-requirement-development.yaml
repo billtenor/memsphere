@@ -1,5 +1,5 @@
 !procedure
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - 敏捷需求开发流程
   - 需求敏捷开发流程
@@ -24,29 +24,10 @@ flow:
     artifact: !artifact
       name: 当前迭代需求契约
       format: markdown
-
-  - !while
-    condition: !action
-      action: 请 human 判断当前迭代需求契约是否仍需修正；需要时返回 true，确认后返回 false。
-      actor: human
-      artifact: !artifact
-        name: 当前迭代需求契约是否仍需修正
-        type: boolean
-    do:
-      - !action
-        action: 请 human 说明需要修正的内容。
-        actor: human
-        artifact: !artifact
-          name: 当前迭代需求契约修正反馈
-          format: markdown
-      - !action
-        action: 根据反馈补充调查并完整修正当前迭代需求契约。
-        actor: agent
-        asserts:
-          - 范围或规范领域变化时，补充读取相关 Statement。
-        artifact: !artifact
-          name: 修正后的当前迭代需求契约
-          format: markdown
+      review: artifact_acceptance.unanimous
+      role_bindings:
+        product_manager: traex1
+        senior_system_architect: human
 
   - !action
     action: 基于已确认的需求契约调查代码，形成实施与验证方案。
@@ -57,37 +38,11 @@ flow:
     artifact: !artifact
       name: 实施与验证方案
       format: markdown
-
-  - !if
-    condition: !action
-      action: 判断实施与验证方案是否需要 human 确认。
-      actor: agent
-      asserts:
-        - 需求复杂或 human 明确要求审阅方案时，必须返回 true。
-      artifact: !artifact
-        name: 实施与验证方案是否需要 Human 确认
-        type: boolean
-    then:
-      - !while
-        condition: !action
-          action: 请 human 判断实施与验证方案是否仍需修正；需要时返回 true，确认后返回 false。
-          actor: human
-          artifact: !artifact
-            name: 实施与验证方案是否仍需修正
-            type: boolean
-        do:
-          - !action
-            action: 请 human 说明需要修正的内容。
-            actor: human
-            artifact: !artifact
-              name: 实施与验证方案修正反馈
-              format: markdown
-          - !action
-            action: 根据反馈修正实施与验证方案。
-            actor: agent
-            artifact: !artifact
-              name: 修正后的实施与验证方案
-              format: markdown
+      review: artifact_acceptance.unanimous
+      role_bindings:
+        development_engineer: traex2
+        test_engineer: traex3
+        senior_system_architect: human
 
   - !action
     action: 基于已确认的实施与验证方案产出开发计划或 Task List。
@@ -119,6 +74,24 @@ flow:
     artifact: !artifact
       name: 初始验证报告
       format: markdown
+
+  - !action
+    action: 汇总功能实现摘要、初始验证报告和当前代码改动，发起实现与验证成果验收。
+    actor: agent
+    asserts:
+      - Review 的验收对象是前序功能实现摘要、初始验证报告和当前工作区代码改动组成的完整实现成果。
+      - Reviewer 必须以已确认的需求契约和实施与验证方案为基准，主动查阅完整 Run 产物和 Workspace 实际改动，不得只检查本步骤的汇总文本。
+      - 只有当前迭代范围已正确实现、验收标准已有充分验证证据且不存在阻塞交付的问题或风险时，才能通过 Review。
+      - 要求修改时，应指出实现、验证或代码改动中的具体问题及预期修正结果。
+    artifact: !artifact
+      name: 实现与验证验收材料
+      format: markdown
+      review: artifact_acceptance.unanimous
+      role_bindings:
+        development_engineer: traex2
+        test_engineer: traex3
+        system_architect: traex4
+        senior_system_architect: human
 
   - !while
     condition: !action
@@ -162,6 +135,11 @@ flow:
         artifact: !artifact
           name: 验收反馈修正与复测报告
           format: markdown
+          review: artifact_acceptance.unanimous
+          role_bindings:
+            development_engineer: traex2
+            test_engineer: traex3
+            system_architect: traex4
       - !action
         action: 请 human 重新完成提需方验收。
         actor: human

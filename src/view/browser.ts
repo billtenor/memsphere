@@ -172,7 +172,8 @@ export const browserHtml = String.raw`<!doctype html>
     .flow-branch-row .flow-children { margin-left: 0; }
     .flow-else { display: grid; gap: 8px; margin-top: 10px; }
     .flow-action { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
-    .artifact-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-end; min-width: 260px; color: var(--muted); }
+    .artifact-row { display: grid; gap: 6px; align-items: start; justify-items: start; justify-content: start; min-width: 260px; color: var(--muted); }
+    .artifact-meta-line { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-start; min-width: 0; }
     .artifact-label { color: var(--muted); font-size: 12px; font-weight: 700; }
     .call-link { color: var(--accent); text-decoration: none; font-weight: 700; }
     .call-link:hover { text-decoration: underline; }
@@ -432,6 +433,7 @@ export const browserHtml = String.raw`<!doctype html>
       legacyReadOnly: { zh: "旧版只读", yaml: "v1 read-only" },
       validated: { zh: "校验通过", yaml: "validated" },
       artifactReview: { zh: "产物评审", yaml: "Artifact Review" },
+      reviewers: { zh: "评审", yaml: "Review" },
       pendingReview: { zh: "待评审", yaml: "Pending review" },
       reviewedArtifact: { zh: "待评审产物", yaml: "Artifact under review" },
       identity: { zh: "评审身份", yaml: "Review identity" },
@@ -468,6 +470,7 @@ export const browserHtml = String.raw`<!doctype html>
       viewMode: localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
       payload: null,
       memories: [],
+      roleNames: {},
       systemMemoryPaths: new Set(),
       reservedMemories: [],
       filtered: [],
@@ -590,6 +593,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (!response.ok) throw new Error(await response.text());
       state.payload = await response.json();
       state.memories = state.payload.memories;
+      state.roleNames = state.payload.roleNames || {};
       state.systemMemoryPaths = new Set(state.payload.systemMemoryPaths || []);
       state.byName = new Map();
       for (const memory of state.memories) {
@@ -2234,18 +2238,22 @@ export const browserHtml = String.raw`<!doctype html>
     function renderArtifactRow(step, status) {
       const row = document.createElement("div");
       row.className = "artifact-row";
+      const artifactLine = document.createElement("div");
+      artifactLine.className = "artifact-meta-line";
       if (stepActor(step) === "human") {
         const actorLabel = document.createElement("span");
         actorLabel.className = "artifact-label";
         actorLabel.textContent = t("actor");
-        row.append(actorLabel, actorPill("human"));
+        artifactLine.append(actorLabel, actorPill("human"));
       }
       const label = document.createElement("span");
       label.className = "artifact-label";
       label.textContent = t("artifact");
-      row.append(label);
-      appendArtifactMeta(row, step);
-      if (status) row.append(pill(status, false, status === t("currentStep") ? "processing" : status === t("completed") ? "done" : ""));
+      artifactLine.append(label);
+      appendArtifactMeta(artifactLine, step);
+      if (status) artifactLine.append(pill(status, false, status === t("currentStep") ? "processing" : status === t("completed") ? "done" : ""));
+      row.append(artifactLine);
+      appendArtifactReviewRoles(row, step);
       return row;
     }
 
@@ -2264,6 +2272,37 @@ export const browserHtml = String.raw`<!doctype html>
         appendFormatMeta(target, artifact.format, artifact.schema?.kind === "external" ? artifact.schema.name : undefined, false);
       }
       if (artifact.final) target.append(pill(t("final"), false, "done"));
+    }
+
+    function appendArtifactReviewRoles(target, step) {
+      const artifact = artifactSpec(step);
+      if (!artifact.review) return;
+      const bindings = effectiveArtifactReviewBindings(step, artifact);
+      const roleIds = Object.keys(bindings);
+      if (!roleIds.length) return;
+
+      const reviewLine = document.createElement("div");
+      reviewLine.className = "artifact-meta-line artifact-review-line";
+      const label = document.createElement("span");
+      label.className = "artifact-label";
+      label.textContent = t("reviewers");
+      reviewLine.append(label);
+      for (const roleId of roleIds) reviewLine.append(pill(artifactReviewRoleDisplayName(roleId)));
+      target.append(reviewLine);
+    }
+
+    function effectiveArtifactReviewBindings(step, artifact) {
+      if (state.viewMode === "task" && step?.controlPlane?.bindings) return step.controlPlane.bindings;
+      const memory = selectedMemory();
+      const procedureBindings = memory?.entity?.tag === "!procedure" ? memory.entity.roleBindings || {} : {};
+      return { ...procedureBindings, ...(artifact.roleBindings || {}) };
+    }
+
+    function artifactReviewRoleDisplayName(roleId) {
+      if (state.viewMode === "task") {
+        return selectedTask()?.controlPlane?.roles?.[roleId]?.name || state.roleNames[roleId] || roleId;
+      }
+      return state.roleNames[roleId] || roleId;
     }
 
     function inlineSchemaTogglePill(schema) {
@@ -2423,7 +2462,9 @@ export const browserHtml = String.raw`<!doctype html>
           type: step.artifact.type || "",
           format: step.artifact.format || { name: "plain", options: {} },
           schema: inlineSchema,
-          final: Boolean(step.artifact.final)
+          final: Boolean(step.artifact.final),
+          review: step.artifact.review || "",
+          roleBindings: step.artifact.roleBindings || {}
         };
       }
       return {
@@ -2431,7 +2472,9 @@ export const browserHtml = String.raw`<!doctype html>
         type: step?.type || "",
         format: step?.format || { name: "plain", options: {} },
         schema: step?.schema,
-        final: Boolean(step?.final)
+        final: Boolean(step?.final),
+        review: step?.reviewPolicy || "",
+        roleBindings: step?.roleBindings || {}
       };
     }
 

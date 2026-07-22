@@ -96,6 +96,19 @@ test("Artifact Review identity controls use Role names and an anchored custom me
   assert.match(browserHtml, /\.artifact-review-select-menu \{ position: absolute; top: calc\(100% \+ 4px\); right: 0; left: 0;/);
 });
 
+test("memory and task artifacts show participating Review Role names", () => {
+  assert.match(browserHtml, /reviewers: \{ zh: "评审", yaml: "Review" \}/);
+  assert.match(browserHtml, /state\.roleNames = state\.payload\.roleNames \|\| \{\}/);
+  assert.match(browserHtml, /appendArtifactReviewRoles\(row, step\)/);
+  assert.match(browserHtml, /artifactLine\.className = "artifact-meta-line"/);
+  assert.match(browserHtml, /reviewLine\.className = "artifact-meta-line artifact-review-line"/);
+  assert.match(browserHtml, /\.artifact-row \{ display: grid;[^}]*justify-items: start;[^}]*justify-content: start;/);
+  assert.match(browserHtml, /\.artifact-meta-line \{ display: flex;[^}]*justify-content: flex-start;/);
+  assert.match(browserHtml, /return \{ \.\.\.procedureBindings, \.\.\.\(artifact\.roleBindings \|\| \{\}\) \}/);
+  assert.match(browserHtml, /if \(state\.viewMode === "task"\) \{\s*return selectedTask\(\)\?\.controlPlane\?\.roles\?\.\[roleId\]\?\.name \|\| state\.roleNames\[roleId\] \|\| roleId;/);
+  assert.match(browserHtml, /return state\.roleNames\[roleId\] \|\| roleId;/);
+});
+
 test("markdown artifacts use rendered markdown content when available", () => {
   assert.equal(shouldRenderMarkdownArtifact({ format: "markdown", renderedContent: "<h1>Title</h1>" }), true);
   assert.equal(shouldRenderMarkdownArtifact({ format: "markdown" }), false);
