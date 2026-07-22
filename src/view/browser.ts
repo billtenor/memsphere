@@ -486,6 +486,8 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewSaving: false,
       artifactReviewRequest: 0,
       artifactReviewConflict: "",
+      artifactReviewDrafts: {},
+      inlineCommentDraft: null,
       taskPollingRenderPending: false,
       artifactReviewHistoryRoundId: null,
       artifactReviewIdentityByReview: readStoredObject(artifactReviewIdentityKey),
@@ -693,23 +695,27 @@ export const browserHtml = String.raw`<!doctype html>
       const requestId = ++state.artifactReviewRequest;
       state.artifactReviewLoading = true;
       try {
-        const response = await fetch(
-          "/api/artifact-reviews/" + encodeURIComponent(reviewId)
-          + "/rounds/" + encodeURIComponent(roundId)
-          + "?identity_id=" + encodeURIComponent(identityId)
-        );
-        if (!response.ok) throw new Error(await response.text());
-        const context = await response.json();
+        const context = await fetchArtifactReviewContext(reviewId, roundId, identityId);
         if (requestId !== state.artifactReviewRequest) return;
         const previousRoundId = state.artifactReviewContext?.review?.currentRoundId;
         if (previousRoundId && previousRoundId !== context.review?.currentRoundId) {
           state.artifactReviewHistoryRoundId = null;
         }
         state.artifactReviewContext = context;
-        state.artifactReviewConflict = "";
+        if (!artifactReviewLocalEntry(context)?.dirty) state.artifactReviewConflict = "";
       } finally {
         if (requestId === state.artifactReviewRequest) state.artifactReviewLoading = false;
       }
+    }
+
+    async function fetchArtifactReviewContext(reviewId, roundId, identityId) {
+      const response = await fetch(
+        "/api/artifact-reviews/" + encodeURIComponent(reviewId)
+        + "/rounds/" + encodeURIComponent(roundId)
+        + "?identity_id=" + encodeURIComponent(identityId)
+      );
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
     }
 
     function renderAll() {
@@ -726,12 +732,14 @@ export const browserHtml = String.raw`<!doctype html>
         renderTaskNav();
         renderSelectedTask();
         renderReview();
+        restoreOpenInlineEditor();
         return;
       }
       updateMemoryCount();
       renderNav();
       renderSelected();
       renderReview();
+      restoreOpenInlineEditor();
     }
 
     async function setViewMode(mode) {
@@ -1566,7 +1574,6 @@ export const browserHtml = String.raw`<!doctype html>
           context
           && context.review?.status === "pending"
           && context.assignment?.status === "draft"
-          && !state.artifactReviewConflict
         );
       }
       const status = selectedReview()?.status;
@@ -2581,13 +2588,31 @@ export const browserHtml = String.raw`<!doctype html>
       return button;
     }
 
-    function openInlineEditor(host, target, snapshot, location, context = {}, insertAtStart = false) {
+    function openInlineEditor(host, target, snapshot, location, context = {}, insertAtStart = false, initialBody = "") {
       if (!canComment() || !host) return;
       closeInlineEditors();
+      const artifactReviewScope = currentArtifactReviewDraftScope();
+      state.inlineCommentDraft = artifactReviewScope
+        ? {
+          target,
+          snapshot,
+          location,
+          context,
+          insertAtStart,
+          body: initialBody,
+          artifactReviewScope
+        }
+        : null;
       const editor = document.createElement("div");
       editor.className = "inline-comment-editor";
       const textarea = document.createElement("textarea");
       textarea.placeholder = "What should change here?";
+      textarea.value = initialBody;
+      textarea.addEventListener("input", () => {
+        if (state.inlineCommentDraft && state.inlineCommentDraft.location?.anchor === location?.anchor) {
+          state.inlineCommentDraft.body = textarea.value;
+        }
+      });
       const actions = document.createElement("div");
       actions.className = "comment-actions";
       const save = document.createElement("button");
@@ -2606,16 +2631,56 @@ export const browserHtml = String.raw`<!doctype html>
         }
         runButtonAction(save, async () => {
           const comment = await addComment(target, snapshot, body, location, context);
-          editor.remove();
-          if (comment) scrollToComment(comment);
+          if (comment) {
+            state.inlineCommentDraft = null;
+            editor.remove();
+            scrollToComment(comment);
+            return true;
+          }
+          return false;
         });
       });
-      cancel.addEventListener("click", () => editor.remove());
+      cancel.addEventListener("click", () => {
+        state.inlineCommentDraft = null;
+        if (isArtifactReviewMode()) {
+          discardArtifactReviewPendingComment(state.artifactReviewContext, context.pendingCommentId);
+          delete context.pendingCommentId;
+        }
+        editor.remove();
+      });
       actions.append(save, cancel);
       editor.append(textarea, actions);
       if (insertAtStart) host.prepend(editor);
       else host.append(editor);
       textarea.focus();
+    }
+
+    function restoreOpenInlineEditor() {
+      const draft = state.inlineCommentDraft;
+      if (!draft?.artifactReviewScope || !canComment()) return;
+      if (!sameArtifactReviewDraftScope(draft.artifactReviewScope, currentArtifactReviewDraftScope())) return;
+      const host = document.getElementById(domIdForAnchor(draft.location?.anchor));
+      if (!host || host.querySelector(".inline-comment-editor")) return;
+      openInlineEditor(host, draft.target, draft.snapshot, draft.location, draft.context || {}, draft.insertAtStart, draft.body);
+    }
+
+    function currentArtifactReviewDraftScope() {
+      if (!isArtifactReviewMode()) return null;
+      const context = state.artifactReviewContext;
+      if (!context) return null;
+      return {
+        reviewId: context.review.id,
+        roundId: context.review.currentRoundId,
+        identityId: context.assignment.identityId
+      };
+    }
+
+    function sameArtifactReviewDraftScope(left, right) {
+      if (!left && !right) return true;
+      if (!left || !right) return false;
+      return left.reviewId === right.reviewId
+        && left.roundId === right.roundId
+        && left.identityId === right.identityId;
     }
 
     function nextLocation(anchor) {
@@ -2807,8 +2872,10 @@ export const browserHtml = String.raw`<!doctype html>
       if (isArtifactReviewMode()) {
         const reviewContext = state.artifactReviewContext;
         if (!reviewContext || !canComment()) return;
+        const commentId = context.pendingCommentId || uuid();
+        context.pendingCommentId = commentId;
         const comment = {
-          id: uuid(),
+          id: commentId,
           body,
           anchor: {
             target: String(target || "").trim(),
@@ -2817,11 +2884,15 @@ export const browserHtml = String.raw`<!doctype html>
           },
           _mineDraft: true
         };
-        await saveArtifactReviewDraft({
-          ...reviewContext.assignment.draft,
-          comments: reviewContext.assignment.draft.comments.concat(comment)
-        });
-        return comment;
+        const draft = artifactReviewEffectiveDraft(reviewContext);
+        const result = await saveArtifactReviewDraft({
+          ...draft,
+          comments: draft.comments.some(existing => existing.id === comment.id)
+            ? draft.comments.map(existing => existing.id === comment.id ? comment : existing)
+            : draft.comments.concat(comment)
+        }, { changedCommentIds: [comment.id] });
+        if (result.ok) delete context.pendingCommentId;
+        return result.ok ? comment : null;
       }
       const review = selectedReview();
       const subject = currentReviewSubject();
@@ -2851,11 +2922,12 @@ export const browserHtml = String.raw`<!doctype html>
       if (isArtifactReviewMode()) {
         const context = state.artifactReviewContext;
         if (!context || !canComment()) return;
-        await saveArtifactReviewDraft({
-          ...context.assignment.draft,
-          comments: context.assignment.draft.comments.filter(comment => comment.id !== id)
-        });
-        return;
+        const draft = artifactReviewEffectiveDraft(context);
+        const result = await saveArtifactReviewDraft({
+          ...draft,
+          comments: draft.comments.filter(comment => comment.id !== id)
+        }, { deletedCommentIds: [id] });
+        return result.ok;
       }
       const review = selectedReview();
       if (!review || !canComment()) return;
@@ -2909,11 +2981,12 @@ export const browserHtml = String.raw`<!doctype html>
       if (isArtifactReviewMode()) {
         const context = state.artifactReviewContext;
         if (!context || !canComment()) return;
-        await saveArtifactReviewDraft({
-          ...context.assignment.draft,
-          comments: context.assignment.draft.comments.map(comment => comment.id === id ? { ...comment, body } : comment)
-        });
-        return;
+        const draft = artifactReviewEffectiveDraft(context);
+        const result = await saveArtifactReviewDraft({
+          ...draft,
+          comments: draft.comments.map(comment => comment.id === id ? { ...comment, body } : comment)
+        }, { changedCommentIds: [id] });
+        return result.ok;
       }
       const review = selectedReview();
       if (!review || !canComment()) return;
@@ -2935,7 +3008,8 @@ export const browserHtml = String.raw`<!doctype html>
     function artifactReviewVisibleComments() {
       const context = state.artifactReviewContext;
       if (!context) return [];
-      const comments = (context.assignment?.draft?.comments || []).map(comment => ({ ...comment, _mineDraft: true }));
+      const draft = artifactReviewEffectiveDraft(context);
+      const comments = (draft.comments || []).map(comment => ({ ...comment, _mineDraft: true }));
       const selectedRoundId = state.artifactReviewHistoryRoundId || context.review.currentRoundId;
       const selectedRounds = (context.rounds || []).filter(round => round.id === selectedRoundId);
       for (const round of selectedRounds) {
@@ -2954,35 +3028,231 @@ export const browserHtml = String.raw`<!doctype html>
       return comments;
     }
 
-    async function saveArtifactReviewDraft(draft) {
+    function artifactReviewDraftKey(context) {
+      if (!context?.review || !context?.assignment) return "";
+      return [context.review.id, context.review.currentRoundId, context.assignment.identityId].join(":");
+    }
+
+    function artifactReviewLocalEntry(context) {
+      const key = artifactReviewDraftKey(context);
+      return key ? state.artifactReviewDrafts[key] : null;
+    }
+
+    function normalizeArtifactReviewDraftForClient(draft = {}) {
+      return {
+        vote: draft.vote,
+        comments: (draft.comments || []).map(comment => ({
+          id: comment.id,
+          body: comment.body,
+          anchor: comment.anchor
+        }))
+      };
+    }
+
+    function artifactReviewServerDraft(context) {
+      return normalizeArtifactReviewDraftForClient(context?.assignment?.draft || {});
+    }
+
+    function artifactReviewEffectiveDraft(context) {
+      const entry = artifactReviewLocalEntry(context);
+      return entry?.dirty ? entry.draft : artifactReviewServerDraft(context);
+    }
+
+    function ensureArtifactReviewLocalEntry(context) {
+      const key = artifactReviewDraftKey(context);
+      if (!key) return null;
+      const entry = state.artifactReviewDrafts[key] ||= {
+        draft: artifactReviewServerDraft(context),
+        dirty: false,
+        voteDirty: false,
+        changedCommentIds: {},
+        deletedCommentIds: {},
+        composerText: "",
+        pendingComposerCommentId: "",
+        status: "",
+        warning: ""
+      };
+      if (!entry.dirty) entry.draft = artifactReviewServerDraft(context);
+      return entry;
+    }
+
+    function setArtifactReviewLocalDraft(context, draft, change = {}) {
+      const entry = ensureArtifactReviewLocalEntry(context);
+      if (!entry) return artifactReviewServerDraft(context);
+      entry.draft = normalizeArtifactReviewDraftForClient(draft);
+      entry.dirty = true;
+      entry.status = "";
+      entry.warning = "";
+      for (const id of change.changedCommentIds || []) {
+        if (id) {
+          entry.changedCommentIds[id] = true;
+          delete entry.deletedCommentIds[id];
+        }
+      }
+      for (const id of change.deletedCommentIds || []) {
+        if (id) {
+          entry.deletedCommentIds[id] = true;
+          delete entry.changedCommentIds[id];
+        }
+      }
+      if (change.voteDirty) entry.voteDirty = true;
+      return entry.draft;
+    }
+
+    function clearArtifactReviewLocalDraft(context) {
+      const key = artifactReviewDraftKey(context);
+      if (key) delete state.artifactReviewDrafts[key];
+    }
+
+    function discardArtifactReviewPendingComment(context, commentId) {
+      const entry = artifactReviewLocalEntry(context);
+      if (!entry || !commentId) return;
+      entry.draft = {
+        ...entry.draft,
+        comments: (entry.draft.comments || []).filter(comment => comment.id !== commentId)
+      };
+      delete entry.changedCommentIds[commentId];
+      delete entry.deletedCommentIds[commentId];
+      entry.dirty = Boolean(
+        entry.voteDirty
+        || Object.keys(entry.changedCommentIds || {}).length
+        || Object.keys(entry.deletedCommentIds || {}).length
+      );
+      if (!entry.dirty) entry.draft = artifactReviewServerDraft(context);
+    }
+
+    function completeArtifactReviewLocalDraft(context, clearComposer = false) {
+      const key = artifactReviewDraftKey(context);
+      if (!key) return;
+      const entry = state.artifactReviewDrafts[key];
+      if (!entry) return;
+      if (!clearComposer && entry.composerText) {
+        state.artifactReviewDrafts[key] = {
+          draft: artifactReviewServerDraft(context),
+          dirty: false,
+          voteDirty: false,
+          changedCommentIds: {},
+          deletedCommentIds: {},
+          composerText: entry.composerText,
+          pendingComposerCommentId: entry.pendingComposerCommentId || "",
+          status: "",
+          warning: ""
+        };
+        return;
+      }
+      delete state.artifactReviewDrafts[key];
+    }
+
+    function mergeArtifactReviewDraft(serverDraft, entry) {
+      if (!entry?.dirty) return normalizeArtifactReviewDraftForClient(serverDraft);
+      const merged = normalizeArtifactReviewDraftForClient(serverDraft);
+      const byId = new Map((merged.comments || []).map(comment => [comment.id, comment]));
+      for (const id of Object.keys(entry.deletedCommentIds || {})) byId.delete(id);
+      for (const localComment of entry.draft.comments || []) {
+        if (!entry.changedCommentIds?.[localComment.id]) continue;
+        byId.set(localComment.id, {
+          id: localComment.id,
+          body: localComment.body,
+          anchor: localComment.anchor
+        });
+      }
+      return {
+        vote: entry.voteDirty ? entry.draft.vote : merged.vote,
+        comments: Array.from(byId.values())
+      };
+    }
+
+    function artifactReviewDraftPayload(context, draft) {
+      return {
+        expectedRevision: context.review.round.revision,
+        vote: draft.vote,
+        comments: (draft.comments || []).map(comment => ({
+          id: comment.id,
+          body: comment.body,
+          anchor: comment.anchor
+        }))
+      };
+    }
+
+    async function saveArtifactReviewDraft(draft, change = {}) {
       const context = state.artifactReviewContext;
-      if (!context || context.assignment.status !== "draft" || state.artifactReviewSaving) return;
+      if (!context || context.assignment.status !== "draft" || state.artifactReviewSaving) return { ok: false };
+      const entry = ensureArtifactReviewLocalEntry(context);
+      const pendingDraft = setArtifactReviewLocalDraft(context, draft, change);
       state.artifactReviewSaving = true;
+      entry.status = displayLanguage === "zh" ? "正在保存评审草稿" : "Saving review draft";
+      entry.warning = "";
+      state.artifactReviewConflict = "";
       setArtifactReviewControlsBusy(true);
       try {
         const response = await fetch(artifactReviewAssignmentUrl(context, "draft"), {
           method: "PATCH",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            expectedRevision: context.review.round.revision,
-            vote: draft.vote,
-            comments: (draft.comments || []).map(comment => ({
-              id: comment.id,
-              body: comment.body,
-              anchor: comment.anchor
-            }))
-          })
+          body: JSON.stringify(artifactReviewDraftPayload(context, pendingDraft))
         });
         if (response.status === 409) {
-          state.artifactReviewConflict = t("round") + " " + t("changesRequested") + ": " + response.statusText;
-          throw new Error(t("round") + " revision conflict; your text is still in this page");
+          entry.status = displayLanguage === "zh" ? "评审轮次已更新，正在同步你的草稿" : "The review round changed; syncing your draft";
+          try {
+            const latestContext = await fetchArtifactReviewContext(context.review.id, context.review.currentRoundId, context.assignment.identityId);
+            state.artifactReviewContext = latestContext;
+            const latestDraft = artifactReviewServerDraft(latestContext);
+            const mergedDraft = mergeArtifactReviewDraft(latestDraft, entry);
+            entry.draft = mergedDraft;
+            const retry = await fetch(artifactReviewAssignmentUrl(latestContext, "draft"), {
+              method: "PATCH",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(artifactReviewDraftPayload(latestContext, mergedDraft))
+            });
+            if (!retry.ok) {
+              const retryText = retry.status === 409 ? "" : await retry.text();
+              throw new Error(retryText || "retry failed");
+            }
+            state.artifactReviewContext = await retry.json();
+            completeArtifactReviewLocalDraft(state.artifactReviewContext, change.clearComposerOnSuccess);
+            state.artifactReviewConflict = "";
+            state.artifactReviewSaving = false;
+            setArtifactReviewControlsBusy(false);
+            renderAll();
+            return { ok: true, recovered: true };
+          } catch (_error) {
+            entry.warning = displayLanguage === "zh"
+              ? "评审轮次又被更新了，你的草稿已保留，请稍后重试"
+              : "The review round changed again. Your draft is preserved; retry shortly.";
+            entry.status = "";
+            state.artifactReviewConflict = entry.warning;
+            if (hasOpenInlineEditor()) syncArtifactReviewStatusMessage(state.artifactReviewContext || context);
+            else {
+              state.artifactReviewSaving = false;
+              setArtifactReviewControlsBusy(false);
+              renderAll();
+            }
+            return { ok: false, conflict: true };
+          }
         }
-        if (!response.ok) throw new Error(await response.text());
+        if (!response.ok) {
+          entry.warning = await response.text();
+          entry.status = "";
+          state.artifactReviewConflict = entry.warning;
+          if (hasOpenInlineEditor()) syncArtifactReviewStatusMessage(state.artifactReviewContext || context);
+          else {
+            state.artifactReviewSaving = false;
+            setArtifactReviewControlsBusy(false);
+            renderAll();
+          }
+          return { ok: false };
+        }
         state.artifactReviewContext = await response.json();
+        completeArtifactReviewLocalDraft(state.artifactReviewContext, change.clearComposerOnSuccess);
         state.artifactReviewConflict = "";
-      } finally {
         state.artifactReviewSaving = false;
+        setArtifactReviewControlsBusy(false);
         renderAll();
+        return { ok: true, recovered: false };
+      } finally {
+        const activeEntry = artifactReviewLocalEntry(state.artifactReviewContext || context);
+        if (activeEntry) activeEntry.status = "";
+        state.artifactReviewSaving = false;
+        setArtifactReviewControlsBusy(false);
       }
     }
 
@@ -3006,9 +3276,10 @@ export const browserHtml = String.raw`<!doctype html>
       if (state.artifactReviewConflict) return state.artifactReviewConflict;
       if (context.review.status !== "pending") return t("round") + " " + context.review.status;
       if (context.assignment.status === "submitted") return t("submitted");
-      const vote = context.assignment.draft.vote;
+      const draft = artifactReviewEffectiveDraft(context);
+      const vote = draft.vote;
       if (!vote) return displayLanguage === "zh" ? "请先选择投票结果" : "Select a vote first";
-      if (vote === "request_changes" && !(context.assignment.draft.comments || []).length) {
+      if (vote === "request_changes" && !(draft.comments || []).length) {
         return displayLanguage === "zh" ? "选择修改时，至少需要一条意见" : "Requesting changes requires at least one comment";
       }
       return "";
@@ -3016,16 +3287,28 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function submitArtifactReview() {
       const context = state.artifactReviewContext;
+      if (!context) return;
+      const entry = artifactReviewLocalEntry(context);
+      if (entry?.dirty) {
+        const saved = await saveArtifactReviewDraft(entry.draft);
+        if (!saved.ok) return;
+      }
+      const latestContext = state.artifactReviewContext || context;
       const disabledReason = artifactReviewSubmitDisabledReason();
-      if (!context || disabledReason) return;
-      const confirmed = await confirmArtifactReviewSubmit(context);
+      if (!latestContext || disabledReason) return;
+      const confirmed = await confirmArtifactReviewSubmit(latestContext);
       if (!confirmed) return;
-      const response = await fetch(artifactReviewAssignmentUrl(context, "submit"), {
+      const response = await fetch(artifactReviewAssignmentUrl(latestContext, "submit"), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ expectedRevision: context.review.round.revision })
+        body: JSON.stringify({ expectedRevision: latestContext.review.round.revision })
       });
       if (response.status === 409) {
+        try {
+          state.artifactReviewContext = await fetchArtifactReviewContext(latestContext.review.id, latestContext.review.currentRoundId, latestContext.assignment.identityId);
+        } catch (_error) {
+          // Keep the visible draft state when the refresh also fails.
+        }
         state.artifactReviewConflict = displayLanguage === "zh"
           ? "评审轮次已更新；当前页面中的未提交文本仍然保留，请刷新本轮后再操作。"
           : "The review round changed. Your local text is preserved; refresh before submitting.";
@@ -3047,11 +3330,12 @@ export const browserHtml = String.raw`<!doctype html>
         const title = document.createElement("h3");
         title.textContent = t("submitArtifactReview");
         const summary = document.createElement("div");
-        const vote = artifactReviewVoteLabel(context.assignment.draft.vote, context.assignment.binding);
+        const draft = artifactReviewEffectiveDraft(context);
+        const vote = artifactReviewVoteLabel(draft.vote, context.assignment.binding);
         summary.textContent = artifactReviewRoleName(context.assignment) + " · "
           + t("round") + " " + context.review.round.sequence + " · "
           + (context.assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote")) + " · "
-          + vote + " · " + context.assignment.draft.comments.length + " comment(s)";
+          + vote + " · " + draft.comments.length + " comment(s)";
         const warning = document.createElement("div");
         warning.className = "artifact-review-message warn";
         warning.textContent = displayLanguage === "zh" ? "提交后，本轮评审不可修改。" : "This round cannot be edited after submission.";
@@ -3094,7 +3378,8 @@ export const browserHtml = String.raw`<!doctype html>
     async function runButtonAction(button, action) {
       button.disabled = true;
       try {
-        await action();
+        const result = await action();
+        if (result === false) button.disabled = false;
       } catch (error) {
         alert(error instanceof Error ? error.message : String(error));
         button.disabled = false;
@@ -3490,11 +3775,19 @@ export const browserHtml = String.raw`<!doctype html>
       return wrap;
     }
 
-    function renderArtifactReviewWorkspace(context) {
-      if (state.artifactReviewConflict) {
-        const conflict = document.createElement("div");
-        conflict.className = "artifact-review-message warn";
-        conflict.textContent = state.artifactReviewConflict;
+    function syncArtifactReviewStatusMessage(context) {
+      const existing = el.comments.querySelector("[data-artifact-review-status-message]");
+      if (existing) existing.remove();
+      const entry = artifactReviewLocalEntry(context);
+      const statusMessage = entry?.status || state.artifactReviewConflict || entry?.warning || "";
+      if (!statusMessage) return;
+      const region = document.createElement("div");
+      region.dataset.artifactReviewStatusMessage = "true";
+      const conflict = document.createElement("div");
+      conflict.className = "artifact-review-message" + (entry?.status ? "" : " warn");
+      conflict.textContent = statusMessage;
+      region.append(conflict);
+      if (!entry?.status) {
         const refresh = document.createElement("button");
         refresh.className = "btn";
         refresh.textContent = displayLanguage === "zh" ? "刷新当前轮次" : "Refresh round";
@@ -3502,8 +3795,14 @@ export const browserHtml = String.raw`<!doctype html>
           await syncArtifactReviewContext(true);
           renderAll();
         });
-        el.comments.append(conflict, refresh);
+        region.append(refresh);
       }
+      el.comments.prepend(region);
+    }
+
+    function renderArtifactReviewWorkspace(context) {
+      syncArtifactReviewStatusMessage(context);
+      const entry = artifactReviewLocalEntry(context);
       const selectedRoundId = state.artifactReviewHistoryRoundId || context.review.currentRoundId;
       const selectedRound = context.rounds.find(round => round.id === selectedRoundId)
         || context.rounds.find(round => round.id === context.review.currentRoundId);
@@ -3527,7 +3826,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (!readOnly) controls.append(renderArtifactReviewCommentComposer(context));
       el.comments.append(controls);
 
-      const draftComments = assignment.draft?.comments || [];
+      const draftComments = artifactReviewEffectiveDraft(context).comments || [];
       if (draftComments.length) {
         for (const comment of draftComments) el.comments.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(assignment), true));
       }
@@ -3600,7 +3899,8 @@ export const browserHtml = String.raw`<!doctype html>
       group.className = "artifact-review-vote";
       group.setAttribute("role", "radiogroup");
       group.setAttribute("aria-label", context.assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote"));
-      const current = context.assignment.submitted?.vote || context.assignment.draft?.vote;
+      const draft = artifactReviewEffectiveDraft(context);
+      const current = context.assignment.submitted?.vote || draft.vote;
       for (const value of ["approve", "request_changes", "abstain"]) {
         const button = document.createElement("button");
         button.type = "button";
@@ -3610,9 +3910,9 @@ export const browserHtml = String.raw`<!doctype html>
         button.setAttribute("aria-checked", String(current === value));
         button.disabled = readOnly || state.artifactReviewSaving;
         button.addEventListener("click", () => saveArtifactReviewDraft({
-          ...context.assignment.draft,
+          ...draft,
           vote: value
-        }));
+        }, { voteDirty: true }));
         group.append(button);
       }
       return group;
@@ -3621,8 +3921,24 @@ export const browserHtml = String.raw`<!doctype html>
     function renderArtifactReviewCommentComposer(context) {
       const wrap = document.createElement("div");
       wrap.className = "artifact-review-comment";
+      const entry = ensureArtifactReviewLocalEntry(context);
       const textarea = document.createElement("textarea");
       textarea.placeholder = displayLanguage === "zh" ? "补充整体评审意见" : "Add an overall review comment";
+      textarea.value = entry?.composerText || "";
+      textarea.addEventListener("input", () => {
+        const activeEntry = ensureArtifactReviewLocalEntry(context);
+        if (activeEntry) {
+          const pendingId = activeEntry.pendingComposerCommentId;
+          const pending = pendingId
+            ? activeEntry.draft.comments.find(comment => comment.id === pendingId)
+            : null;
+          if (pending && pending.body !== textarea.value.trim()) {
+            discardArtifactReviewPendingComment(context, pendingId);
+            activeEntry.pendingComposerCommentId = "";
+          }
+          activeEntry.composerText = textarea.value;
+        }
+      });
       textarea.disabled = state.artifactReviewSaving;
       const add = document.createElement("button");
       add.className = "btn";
@@ -3632,10 +3948,19 @@ export const browserHtml = String.raw`<!doctype html>
         const body = textarea.value.trim();
         if (!body) return textarea.focus();
         runButtonAction(add, async () => {
-          await saveArtifactReviewDraft({
-            ...context.assignment.draft,
-            comments: context.assignment.draft.comments.concat({ id: uuid(), body })
-          });
+          const activeEntry = ensureArtifactReviewLocalEntry(context);
+          const commentId = activeEntry?.pendingComposerCommentId || uuid();
+          if (activeEntry) activeEntry.pendingComposerCommentId = commentId;
+          const draft = artifactReviewEffectiveDraft(context);
+          const comment = { id: commentId, body };
+          const result = await saveArtifactReviewDraft({
+            ...draft,
+            comments: draft.comments.some(existing => existing.id === comment.id)
+              ? draft.comments.map(existing => existing.id === comment.id ? comment : existing)
+              : draft.comments.concat(comment)
+          }, { changedCommentIds: [comment.id], clearComposerOnSuccess: true });
+          if (result.ok && activeEntry) activeEntry.pendingComposerCommentId = "";
+          return result.ok;
         });
       });
       wrap.append(textarea, add);

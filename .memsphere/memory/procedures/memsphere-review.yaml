@@ -9,6 +9,8 @@ defines:
   - task/run artifacts 只用于理解 comment，review 的修改目标仍是 Memory。
 asserts:
   - memory review 必须修改 review.memoryRoot 下的当前 Memory；task review 必须根据 snapshot 定位并修改当前工程 memoryRoot 中对应的 Memory。
+  - 在 View 中处理 Artifact Review 草稿保存冲突时，必须保留本地输入并优先自动刷新、合并和重试；不得把浏览器 alert 作为可接受的冲突恢复路径。
+  - View Review 操作变更必须验证不丢失用户未提交文本、不覆盖其他 reviewer 的新状态，且 stale revision 不应提交旧草稿。
   - snapshot、target、location 和 hash 只用于定位和理解 comment，不是盲目修改依据。
   - 不得修改 review comments、task/run artifacts 或与 comments 无关的 Memory 内容。
   - 只有 submitted 或 processing review 可以处理；draft 和 done review 不得应用 comments 或修改目标 Memory。
