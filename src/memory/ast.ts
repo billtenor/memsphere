@@ -76,6 +76,8 @@ export type ArtifactNode = {
   schema?: string | SchemaNode | MemoryRefNode;
   final?: boolean;
   review?: string;
+  reviewRole?: "requirement" | "implementation" | "validation" | "review-material";
+  reviewRequires?: Array<"requirement" | "implementation" | "validation" | "review-material">;
   roleBindings?: RoleBindings;
   permissionGrants?: PermissionGrants;
 };

@@ -102,6 +102,10 @@ test("Artifact Review renders Agent progress and exposes retry only for failed A
   assert.match(browserHtml, /assignment\.status === "failed" && context\.review\.status === "pending"/);
   assert.match(browserHtml, /retryArtifactReviewAgent\(context\)/);
   assert.match(browserHtml, /attempt\.failure\.code \+ ": " \+ attempt\.failure\.message/);
+  assert.match(browserHtml, /state\.artifactReviewRetries/);
+  assert.match(browserHtml, /repeated advisory groups/);
+  assert.match(browserHtml, /Decision intent: /);
+  assert.match(browserHtml, /Implementation evidence: /);
 });
 
 test("Artifact Review identity controls use Role names and an anchored custom menu", () => {
@@ -287,8 +291,34 @@ test("comment freshness compares the saved source snapshot instead of rendered c
 
 test("saving a comment restores its expanded, anchored location", () => {
   assert.match(browserHtml, /const comment = await addComment\(target, snapshot, body, location, context\);/);
-  assert.match(browserHtml, /if \(comment\) scrollToComment\(comment\);/);
+  assert.match(browserHtml, /if \(comment\) \{\s*state\.inlineCommentDraft = null;\s*editor\.remove\(\);\s*scrollToComment\(comment\);/);
   assert.match(browserHtml, /node\.dataset\.commentSnapshot \?\? node\.querySelector\("\.commentable-body"\)\?\.dataset\.commentSnapshot/);
+});
+
+test("Artifact Review draft conflicts recover without surfacing alert errors", () => {
+  assert.match(browserHtml, /artifactReviewDrafts: \{\}/);
+  assert.match(browserHtml, /function mergeArtifactReviewDraft\(serverDraft, entry\)/);
+  assert.match(browserHtml, /response\.status === 409/);
+  assert.match(browserHtml, /fetchArtifactReviewContext\(context\.review\.id, context\.review\.currentRoundId, context\.assignment\.identityId\)/);
+  assert.match(browserHtml, /const retry = await fetch\(artifactReviewAssignmentUrl\(latestContext, "draft"\)/);
+  assert.match(browserHtml, /function syncArtifactReviewStatusMessage\(context\)/);
+  assert.match(browserHtml, /if \(hasOpenInlineEditor\(\)\) syncArtifactReviewStatusMessage\(state\.artifactReviewContext \|\| context\);/);
+  assert.doesNotMatch(browserHtml, /throw new Error\(t\("round"\) \+ " revision conflict; your text is still in this page"\)/);
+});
+
+test("Artifact Review keeps local draft text across conflict recovery renders", () => {
+  assert.match(browserHtml, /composerText: ""/);
+  assert.match(browserHtml, /textarea\.value = entry\?\.composerText \|\| "";/);
+  assert.match(browserHtml, /activeEntry\.composerText = textarea\.value/);
+  assert.match(browserHtml, /completeArtifactReviewLocalDraft\(context, clearComposer = false\)/);
+  assert.match(browserHtml, /clearComposerOnSuccess: true/);
+  assert.match(browserHtml, /const artifactReviewScope = currentArtifactReviewDraftScope\(\);/);
+  assert.match(browserHtml, /state\.inlineCommentDraft = artifactReviewScope\s*\?\s*\{\s*target,\s*snapshot,\s*location,\s*context,\s*insertAtStart,\s*body: initialBody,\s*artifactReviewScope\s*\}\s*: null;/);
+  assert.match(browserHtml, /textarea\.addEventListener\("input", \(\) => \{[\s\S]*?state\.inlineCommentDraft\.body = textarea\.value;/);
+  assert.match(browserHtml, /if \(comment\) \{\s*state\.inlineCommentDraft = null;\s*editor\.remove\(\);\s*scrollToComment\(comment\);/);
+  assert.match(browserHtml, /function restoreOpenInlineEditor\(\)/);
+  assert.match(browserHtml, /if \(!draft\?\.artifactReviewScope \|\| !canComment\(\)\) return;/);
+  assert.match(browserHtml, /sameArtifactReviewDraftScope\(draft\.artifactReviewScope, currentArtifactReviewDraftScope\(\)\)/);
 });
 
 test("initial loading validates the saved review only after its subject data is available", () => {

@@ -88,6 +88,11 @@ flow:
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     page.setDefaultTimeout(3_000);
     page.on("pageerror", (error) => console.error("browser page error", error));
+    const dialogs: string[] = [];
+    page.on("dialog", async (dialog) => {
+      dialogs.push(dialog.message());
+      await dialog.dismiss();
+    });
     await page.goto(`http://127.0.0.1:${address.port}`);
     const memoryArtifact = page.locator(".artifact-row").first();
     await memoryArtifact.getByText("评审", { exact: true }).waitFor();
@@ -126,8 +131,165 @@ flow:
     assert.equal((await anchoredSaved).status(), 200);
     await reviewModal.locator(".comment-card .artifact-review-markdown")
       .getByText("Heading needs revision.", { exact: true }).waitFor();
+
+    await reviewModal.locator(".inline-plus").first().click();
+    let inlineEditor = reviewModal.locator(".inline-comment-editor").first();
+    let inlineTextarea = inlineEditor.getByPlaceholder("What should change here?");
+    let inlineSave = inlineEditor.getByRole("button", { name: "Add comment", exact: true });
+    await inlineTextarea.fill("Inline text before add survives refresh");
+    await page.locator("#refresh").evaluate((button) => {
+      if (button instanceof HTMLButtonElement) button.click();
+    });
+    inlineEditor = reviewModal.locator(".inline-comment-editor").first();
+    inlineTextarea = inlineEditor.getByPlaceholder("What should change here?");
+    inlineSave = inlineEditor.getByRole("button", { name: "Add comment", exact: true });
+    await expectInlineValue(inlineTextarea, "Inline text before add survives refresh");
+    await selectIdentity(page, identity, "bob");
+    assert.equal(await page.getByText("Inline text before add survives refresh", { exact: true }).count(), 0);
+    assert.equal(await reviewModal.locator(".inline-comment-editor").count(), 0);
+    await selectIdentity(page, identity, "alice");
+    inlineEditor = reviewModal.locator(".inline-comment-editor").first();
+    inlineTextarea = inlineEditor.getByPlaceholder("What should change here?");
+    inlineSave = inlineEditor.getByRole("button", { name: "Add comment", exact: true });
+    await expectInlineValue(inlineTextarea, "Inline text before add survives refresh");
+    await inlineEditor.getByRole("button", { name: "Cancel", exact: true }).click();
+
+    await reviewModal.locator(".inline-plus").first().click();
+    inlineEditor = reviewModal.locator(".inline-comment-editor").first();
+    inlineTextarea = inlineEditor.getByPlaceholder("What should change here?");
+    inlineSave = inlineEditor.getByRole("button", { name: "Add comment", exact: true });
+    await inlineTextarea.fill("Inline canceled after failed save");
+    let failNextDraftSave = true;
+    await page.route("**/draft", async (route) => {
+      if (failNextDraftSave && route.request().method() === "PATCH") {
+        failNextDraftSave = false;
+        await route.fulfill({ status: 503, body: "inline canceled outage" });
+        return;
+      }
+      await route.continue();
+    });
+    await inlineSave.click();
+    await page.getByText("inline canceled outage", { exact: true }).waitFor();
+    await page.unroute("**/draft");
+    await inlineEditor.getByRole("button", { name: "Cancel", exact: true }).click();
+
+    await reviewModal.locator(".inline-plus").first().click();
+    inlineEditor = reviewModal.locator(".inline-comment-editor").first();
+    inlineTextarea = inlineEditor.getByPlaceholder("What should change here?");
+    inlineSave = inlineEditor.getByRole("button", { name: "Add comment", exact: true });
+    await inlineTextarea.fill("Inline text survives a failed save");
+    failNextDraftSave = true;
+    await page.route("**/draft", async (route) => {
+      if (failNextDraftSave && route.request().method() === "PATCH") {
+        failNextDraftSave = false;
+        await route.fulfill({ status: 503, body: "inline draft outage" });
+        return;
+      }
+      await route.continue();
+    });
+    await inlineSave.click();
+    await page.getByText("inline draft outage", { exact: true }).waitFor();
+    assert.equal(await inlineTextarea.inputValue(), "Inline text survives a failed save");
+    assert.equal(await inlineSave.isEnabled(), true);
+    await page.unroute("**/draft");
+    await page.waitForTimeout(50);
+    const inlineRetrySaved = page.waitForResponse((response) =>
+      response.url().endsWith("/draft") && response.request().method() === "PATCH"
+    );
+    await inlineSave.evaluate((button) => {
+      if (button instanceof HTMLButtonElement) button.click();
+    });
+    assert.equal((await inlineRetrySaved).status(), 200);
+    let afterFailedInlineRetry = await readRun(runsRoot, started.id);
+    let aliceAssignment = currentArtifactReview(afterFailedInlineRetry)?.rounds[0]?.assignments.find((assignment) => assignment.identityId === "alice");
+    assert.equal(
+      aliceAssignment?.draft.comments.filter((comment) => comment.body === "Inline text survives a failed save").length,
+      1
+    );
+
     const composer = reviewModal.getByPlaceholder("补充整体评审意见");
+    await composer.fill("Composer text replaced after failed save");
+    failNextDraftSave = true;
+    await page.route("**/draft", async (route) => {
+      if (failNextDraftSave && route.request().method() === "PATCH") {
+        failNextDraftSave = false;
+        await route.fulfill({ status: 503, body: "composer replaced outage" });
+        return;
+      }
+      await route.continue();
+    });
+    await reviewModal.getByRole("button", { name: "添加意见", exact: true }).click();
+    await page.getByText("composer replaced outage", { exact: true }).waitFor();
+    assert.equal(await composer.isEnabled(), true);
+    await page.unroute("**/draft");
+    await composer.fill("Composer replacement that should wait for add");
+
+    await composer.fill("Alice text survives a failed save");
+    failNextDraftSave = true;
+    await page.route("**/draft", async (route) => {
+      if (failNextDraftSave && route.request().method() === "PATCH") {
+        failNextDraftSave = false;
+        await route.fulfill({ status: 503, body: "temporary draft outage" });
+        return;
+      }
+      await route.continue();
+    });
+    await reviewModal.getByRole("button", { name: "添加意见", exact: true }).click();
+    await page.getByText("temporary draft outage", { exact: true }).waitFor();
+    assert.equal(await composer.inputValue(), "Alice text survives a failed save");
+    assert.equal(await composer.isEnabled(), true);
+    await page.unroute("**/draft");
+    await clickAndWaitForDraftSave(page, reviewModal.getByRole("button", { name: "添加意见", exact: true }));
+    assert.equal(await composer.isEnabled(), true);
+    let afterFailedComposerRetry = await readRun(runsRoot, started.id);
+    aliceAssignment = currentArtifactReview(afterFailedComposerRetry)?.rounds[0]?.assignments.find((assignment) => assignment.identityId === "alice");
+    assert.equal(
+      aliceAssignment?.draft.comments.filter((comment) => comment.body === "Alice text survives a failed save").length,
+      1
+    );
+    assert.equal(
+      aliceAssignment?.draft.comments.filter((comment) => comment.body === "Inline canceled after failed save").length,
+      0
+    );
+    assert.equal(
+      aliceAssignment?.draft.comments.filter((comment) => comment.body === "Composer text replaced after failed save").length,
+      0
+    );
+    assert.equal(
+      aliceAssignment?.draft.comments.filter((comment) => comment.body === "Composer replacement that should wait for add").length,
+      0
+    );
     await composer.fill("Alice private draft");
+    await staleRoundWithBobDraft(address.port, firstReview.id, firstReview.currentRoundId, "Bob stale update before Alice add");
+    const aliceAddRecovery = waitForDraftRecovery(page);
+    await reviewModal.getByRole("button", { name: "添加意见", exact: true }).click();
+    await aliceAddRecovery;
+    await page.getByText("Alice private draft", { exact: true }).waitFor();
+    assert.equal(await page.getByPlaceholder("补充整体评审意见").isEnabled(), true);
+    assert.deepEqual(dialogs, []);
+    let afterAliceAdd = await readRun(runsRoot, started.id);
+    aliceAssignment = currentArtifactReview(afterAliceAdd)?.rounds[0]?.assignments.find((assignment) => assignment.identityId === "alice");
+    assert.equal(aliceAssignment?.draft.comments.some((comment) => comment.body === "Alice private draft"), true);
+
+    await staleRoundWithBobDraft(address.port, firstReview.id, firstReview.currentRoundId, "Bob stale update before Alice vote");
+    const aliceVoteRecovery = waitForDraftRecovery(page);
+    await reviewModal.getByRole("radio", { name: "修改", exact: true }).click();
+    await aliceVoteRecovery;
+    assert.equal(await reviewModal.getByRole("radio", { name: "修改", exact: true }).getAttribute("aria-checked"), "true");
+    afterAliceAdd = await readRun(runsRoot, started.id);
+    aliceAssignment = currentArtifactReview(afterAliceAdd)?.rounds[0]?.assignments.find((assignment) => assignment.identityId === "alice");
+    assert.equal(aliceAssignment?.draft.vote, "request_changes");
+
+    await staleRoundWithBobDraft(address.port, firstReview.id, firstReview.currentRoundId, "Bob stale update before Alice delete");
+    const aliceDeleteRecovery = waitForDraftRecovery(page);
+    await reviewModal.locator(".comment-card").filter({ hasText: "Alice private draft" }).getByRole("button", { name: "删除", exact: true }).click();
+    await aliceDeleteRecovery;
+    assert.equal(await page.getByText("Alice private draft", { exact: true }).count(), 0);
+    afterAliceAdd = await readRun(runsRoot, started.id);
+    aliceAssignment = currentArtifactReview(afterAliceAdd)?.rounds[0]?.assignments.find((assignment) => assignment.identityId === "alice");
+    assert.equal(aliceAssignment?.draft.comments.some((comment) => comment.body === "Alice private draft"), false);
+
+    await reviewModal.getByPlaceholder("补充整体评审意见").fill("Alice private draft");
     await reviewModal.getByRole("button", { name: "添加意见", exact: true }).click();
     await reviewModal.getByText("Alice private draft", { exact: true }).waitFor();
 
@@ -314,6 +476,7 @@ async function submitThroughConfirmation(page: import("playwright").Page): Promi
   await dialog.getByRole("button", { name: "提交评审", exact: true }).click();
   const response = await submitted;
   assert.equal(response.status(), 200);
+  await dialog.waitFor({ state: "detached" });
 }
 
 async function selectIdentity(
@@ -322,29 +485,35 @@ async function selectIdentity(
   identityId: string
 ): Promise<void> {
   const select = page.locator("#artifact-review-modal").getByRole("combobox", { name: "评审身份" });
-  if (await select.getAttribute("aria-expanded") !== "true") await select.click();
-  const option = page.locator(`.artifact-review-identity-select .artifact-review-select-option[data-identity-id="${identityId}"]`);
-  await option.waitFor({ state: "visible" });
+  let option = page.locator(`.artifact-review-identity-select .artifact-review-select-menu:not([hidden]) .artifact-review-select-option[data-identity-id="${identityId}"]`);
+  if (!await option.isVisible().catch(() => false)) {
+    await select.waitFor({ state: "visible" });
+    await select.evaluate((element) => {
+      if (element instanceof HTMLElement) element.focus();
+    });
+    await select.click();
+    option = page.locator(`.artifact-review-identity-select .artifact-review-select-menu:not([hidden]) .artifact-review-select-option[data-identity-id="${identityId}"]`);
+    await option.waitFor({ state: "visible" });
+  }
   if (await option.getAttribute("aria-selected") === "true") {
     await select.click();
     await page.waitForTimeout(20);
     return;
   }
-  const loaded = page.waitForResponse((response) =>
-    response.url().includes("/api/artifact-reviews/")
-    && response.url().includes(`identity_id=${identityId}`)
-    && response.request().method() === "GET"
-  ).catch(() => undefined);
+  const loaded = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/artifact-reviews/")
+      && response.url().includes(`identity_id=${identityId}`)
+      && response.request().method() === "GET",
+    { timeout: 5_000 }
+  ).catch(() => null);
   await option.click();
-  await Promise.race([
-    loaded,
-    page.waitForFunction(
-      ({ id }) => document.querySelector(
-        `.artifact-review-identity-select [data-identity-id="${id}"][aria-selected="true"]`
-      ) !== null,
-      { id: identityId }
-    )
-  ]);
+  const expectedLabel = identityId === "alice" ? "Decider" : identityId === "bob" ? "Advisor" : identityId;
+  await page.waitForFunction((label) => {
+    const trigger = document.querySelector(".artifact-review-identity-select .artifact-review-select-trigger");
+    return Boolean(trigger?.textContent?.includes(label));
+  }, expectedLabel);
+  await loaded;
   await page.waitForTimeout(20);
 }
 
@@ -358,4 +527,58 @@ async function clickAndWaitForDraftSave(
   await button.click();
   const response = await saved;
   assert.equal(response.status(), 200);
+}
+
+async function waitForDraftRecovery(page: import("playwright").Page): Promise<void> {
+  const conflict = page.waitForResponse((response) =>
+    response.url().endsWith("/draft")
+    && response.request().method() === "PATCH"
+    && response.status() === 409
+  );
+  const recovered = page.waitForResponse((response) =>
+    response.url().endsWith("/draft")
+    && response.request().method() === "PATCH"
+    && response.status() === 200
+  );
+  await conflict;
+  await recovered;
+}
+
+async function expectInlineValue(locator: import("playwright").Locator, expected: string): Promise<void> {
+  await locator.page().waitForFunction(
+    ({ selector, value }) => {
+      const textarea = document.querySelector(selector);
+      return textarea instanceof HTMLTextAreaElement && textarea.value === value;
+    },
+    { selector: ".inline-comment-editor textarea", value: expected }
+  );
+  assert.equal(await locator.inputValue(), expected);
+}
+
+async function staleRoundWithBobDraft(
+  port: number,
+  reviewId: string,
+  roundId: string,
+  body: string
+): Promise<void> {
+  const baseUrl = `http://127.0.0.1:${port}/api/artifact-reviews/${encodeURIComponent(reviewId)}/rounds/${encodeURIComponent(roundId)}`;
+  const contextResponse = await fetch(`${baseUrl}?identity_id=bob`);
+  assert.equal(contextResponse.status, 200);
+  const context = await contextResponse.json() as {
+    review: { round: { revision: number } };
+    assignment: { draft: { vote?: string; comments?: Array<{ id: string; body: string; anchor?: unknown }> } };
+  };
+  const draftResponse = await fetch(`${baseUrl}/assignments/bob/draft`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      expectedRevision: context.review.round.revision,
+      vote: context.assignment.draft.vote || "abstain",
+      comments: [
+        ...(context.assignment.draft.comments || []),
+        { id: `bob-stale-${Date.now()}-${Math.random().toString(36).slice(2)}`, body, severity: "risk" }
+      ]
+    })
+  });
+  assert.equal(draftResponse.status, 200);
 }

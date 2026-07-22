@@ -25,6 +25,7 @@ import {
   readRun,
   repeatRun,
   reportRun,
+  resolveArtifactReviewComment,
   submitArtifactReviewAssignment,
   submitArtifactReviewAgentAssignment,
   submitArtifactReviewRunnerVote,
@@ -2145,5 +2146,111 @@ flow:
     const waitedAfterVote = await waitForArtifactReview({ runsRoot, reviewId: review.id, pollIntervalMs: 0 });
     assert.equal(waitedAfterVote.review.status, "passed");
     assert.equal(waitedAfterVote.round.id, thirdReview.currentRoundId);
+  });
+});
+
+test("Artifact Review snapshots implementation evidence and requires blocking dispositions", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeRawFile(join(proceduresRoot, "package.yaml"), `!procedure
+syntax: ${currentMemorySyntax}
+name: package-review
+role_bindings:
+  advisor: advisor
+flow:
+  - !action
+    action: Record implementation.
+    artifact: !artifact
+      name: implementation
+      format: markdown
+      review_role: implementation
+  - !action
+    action: Record validation.
+    artifact: !artifact
+      name: validation
+      format: markdown
+      review_role: validation
+  - !action
+    action: Review delivery package.
+    artifact: !artifact
+      name: review material
+      format: markdown
+      review_role: review-material
+      review_requires: [implementation, validation]
+      review: artifact_acceptance.unanimous
+`);
+    const controlPlane = parseControlPlaneConfig({
+      identities: { advisor: { kind: "human", name: "Advisor" } },
+      roles: {
+        runner: { name: "Runner", permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+        advisor: { name: "Advisor", permissions: ["artifact.read", "decision.assess"] }
+      }
+    });
+    let run = await startRun({ memoryRoot, runsRoot, procedureName: "package-review", controlPlane });
+    run = await reportRun({ runsRoot, runId: run.id, artifact: { kind: "inline", value: "# Implementation\nChanged src/a.ts." } });
+    run = await reportRun({ runsRoot, runId: run.id, artifact: { kind: "inline", value: "# Validation\nnpm test passed." } });
+    run = await reportRun({ runsRoot, runId: run.id, artifact: { kind: "inline", value: "# Review material\nReady." } });
+    const review = currentArtifactReview(run);
+    assert(review);
+    const submission = review.submissions[0];
+    assert.deepEqual(submission.package?.requirements.map((item) => [item.role, item.status]), [
+      ["implementation", "present"],
+      ["validation", "present"]
+    ]);
+    assert.equal(submission.package?.evidence.length, 2);
+    for (const evidence of submission.package?.evidence ?? []) {
+      assert.match(evidence.artifact.path ?? "", /artifacts\/reviews\/review-.*\/submission-.*\/evidence\//);
+      assert.equal(typeof await readFile(join(runsRoot, evidence.artifact.path!), "utf8"), "string");
+    }
+
+    const draft = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      identityId: "advisor",
+      expectedRevision: 1,
+      draft: {
+        vote: "request_changes",
+        comments: [{ body: "Fix the implementation issue.", severity: "blocking" }]
+      }
+    });
+    const awaitingRunner = await submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      identityId: "advisor",
+      expectedRevision: draft.round.revision
+    });
+    const commentId = awaitingRunner.assignment.submitted?.comments[0].id;
+    assert(commentId);
+    await assert.rejects(
+      submitArtifactReviewRunnerVote({
+        runsRoot,
+        reviewId: review.id,
+        roundId: review.currentRoundId,
+        vote: "approve"
+      }),
+      /requires dispositions for 1 blocking/
+    );
+    await resolveArtifactReviewComment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      commentId,
+      disposition: "accepted-fixed",
+      note: "Applied the focused fix.",
+      validationSummary: "Focused regression passed."
+    });
+    const approved = await submitArtifactReviewRunnerVote({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      vote: "approve"
+    });
+    assert.equal(approved.review.status, "passed");
+    assert.equal(approved.round.commentDispositions?.[0].disposition, "accepted-fixed");
   });
 });

@@ -156,7 +156,7 @@ flow:
     const bobDraft = await mutate(`${roundPath}/assignments/bob/draft`, "PATCH", {
       expectedRevision: bobContext.review.round.revision,
       vote: "request_changes",
-      comments: [{ body: "Advisory suggestion\\n\\nSecond paragraph" }]
+      comments: [{ body: "Advisory suggestion\\n\\nSecond paragraph", severity: "suggestion" }]
     });
     assert.equal(bobDraft.status, 200);
     const bobDraftContext = await bobDraft.json() as ReviewContext;

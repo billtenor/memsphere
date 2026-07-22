@@ -9,6 +9,17 @@ import type { PermissionId } from "./control-plane/catalog.js";
 
 export const artifactReviewVoteValues = ["approve", "request_changes", "abstain"] as const;
 export type ArtifactReviewVoteValue = (typeof artifactReviewVoteValues)[number];
+export const artifactReviewSeverityValues = ["blocking", "risk", "suggestion"] as const;
+export type ArtifactReviewSeverity = (typeof artifactReviewSeverityValues)[number];
+export const artifactReviewDispositionValues = [
+  "accepted-fixed",
+  "accepted-followup",
+  "rejected-out-of-scope",
+  "rejected-not-blocking",
+  "rejected-invalid"
+] as const;
+export type ArtifactReviewDispositionValue = (typeof artifactReviewDispositionValues)[number];
+export type ArtifactReviewEvidenceRole = "requirement" | "implementation" | "validation" | "review-material";
 export type ArtifactReviewBinding = "decision" | "advisory";
 export type ArtifactReviewStatus = "pending" | "awaiting_runner_vote" | "awaiting_revision" | "passed";
 export type ArtifactReviewRoundStatus = "pending" | "awaiting_runner_vote" | "passed" | "changes_requested";
@@ -28,6 +39,7 @@ export type ArtifactReviewAgentAnchorInput = Omit<ArtifactReviewAnchor, "submiss
 export type ArtifactReviewComment = {
   id: string;
   body: string;
+  severity?: ArtifactReviewSeverity;
   anchor?: ArtifactReviewAnchor;
   createdAt: string;
   updatedAt: string;
@@ -47,12 +59,63 @@ export type ArtifactReviewSubmittedOpinion = {
   authorization: AuthorizationDecision;
 };
 
+export function artifactReviewOpinionReferencesImplementation(
+  opinion: ArtifactReviewSubmittedOpinion | undefined
+): boolean {
+  if (!opinion) return false;
+  const source = [
+    opinion.summary,
+    ...opinion.comments.flatMap((comment) => [
+      comment.body,
+      comment.anchor?.target,
+      comment.anchor?.location
+    ])
+  ].filter((value): value is string => Boolean(value)).join("\n");
+  return /\bimplementation\b|\b(?:src|test|tests)\/[^\s`]+|\bcode path\b|\bdiff\b/i.test(source);
+}
+
 export type ArtifactReviewAgentAttemptStatus = "queued" | "running" | "submitted" | "failed" | "cancelled";
 
 export type ArtifactReviewAgentFailure = {
   stage: "spawn" | "initialize" | "auth" | "session" | "mode" | "cli" | "prompt" | "permission" | "timeout" | "protocol" | "process";
   code: string;
   message: string;
+  category?: "environment" | "provider" | "reviewer" | "unknown";
+};
+
+export function artifactReviewFailureCategory(
+  failure: ArtifactReviewAgentFailure
+): NonNullable<ArtifactReviewAgentFailure["category"]> {
+  if (failure.category) return failure.category;
+  if (/listen EPERM|EACCES|ENOENT|timeout/i.test(failure.message)) return "environment";
+  if (failure.stage === "spawn" || failure.stage === "initialize" || failure.stage === "protocol") return "provider";
+  if (failure.stage === "cli" || failure.stage === "prompt" || failure.stage === "permission") return "reviewer";
+  return "unknown";
+}
+
+export type ArtifactReviewCommentDisposition = {
+  commentId: string;
+  disposition: ArtifactReviewDispositionValue;
+  note?: string;
+  validationSummary?: string;
+  updatedAt: string;
+};
+
+export type ArtifactReviewEvidence<TArtifact = unknown> = {
+  stepId: string;
+  role: ArtifactReviewEvidenceRole;
+  artifact: TArtifact;
+};
+
+export type ArtifactReviewEvidenceRequirement = {
+  role: ArtifactReviewEvidenceRole;
+  status: "present" | "missing" | "insufficient";
+  reason?: string;
+};
+
+export type ArtifactReviewPackage<TArtifact = unknown> = {
+  evidence: ArtifactReviewEvidence<TArtifact>[];
+  requirements: ArtifactReviewEvidenceRequirement[];
 };
 
 export type ArtifactReviewAgentAttempt = {
@@ -112,6 +175,7 @@ export type ArtifactReviewSubmission<TArtifact = unknown> = {
   digest: string;
   createdAt: string;
   artifact: TArtifact;
+  package?: ArtifactReviewPackage<TArtifact>;
   revisionSummary?: ArtifactReviewRevisionSummary;
 };
 
@@ -134,6 +198,7 @@ export type ArtifactReviewRound = {
   createdAt: string;
   assignments: ArtifactReviewAssignment[];
   votes: ArtifactReviewVote[];
+  commentDispositions?: ArtifactReviewCommentDisposition[];
   result?: ArtifactReviewRoundResult;
 };
 
@@ -158,6 +223,45 @@ export type ArtifactReview<TArtifact = unknown> = {
   rounds: ArtifactReviewRound[];
   outcome?: ArtifactReviewOutcome;
 };
+
+export type ArtifactReviewRepeatedAdvisory = {
+  severity: ArtifactReviewSeverity | "unspecified";
+  body: string;
+  count: number;
+  rounds: number[];
+};
+
+export function repeatedArtifactReviewAdvisories<TArtifact>(
+  review: ArtifactReview<TArtifact>
+): ArtifactReviewRepeatedAdvisory[] {
+  const groups = new Map<string, ArtifactReviewRepeatedAdvisory & { roundSet: Set<number> }>();
+  for (const round of review.rounds) {
+    for (const assignment of round.assignments) {
+      if (assignment.binding !== "advisory") continue;
+      for (const comment of assignment.submitted?.comments ?? []) {
+        const body = comment.body.trim();
+        const normalizedBody = body.replace(/\s+/g, " ").toLocaleLowerCase();
+        if (!normalizedBody) continue;
+        const severity = comment.severity ?? "unspecified";
+        const key = `${severity}\u0000${normalizedBody}`;
+        const group = groups.get(key) ?? {
+          severity,
+          body,
+          count: 0,
+          rounds: [],
+          roundSet: new Set<number>()
+        };
+        group.count += 1;
+        group.roundSet.add(round.sequence);
+        groups.set(key, group);
+      }
+    }
+  }
+  return [...groups.values()]
+    .filter((group) => group.count > 1)
+    .map(({ roundSet, ...group }) => ({ ...group, rounds: [...roundSet].sort((left, right) => left - right) }))
+    .sort((left, right) => right.count - left.count || left.body.localeCompare(right.body));
+}
 
 export type ArtifactReviewAssignmentSet = {
   assignments: ArtifactReviewAssignment[];

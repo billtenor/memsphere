@@ -674,11 +674,16 @@ export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> 
     delete (baseInput as Record<string, unknown>).role_bindings;
     delete (baseInput as Record<string, unknown>).permission_grants;
     delete (baseInput as Record<string, unknown>).review;
+    delete (baseInput as Record<string, unknown>).review_role;
+    delete (baseInput as Record<string, unknown>).review_requires;
   }
   const base = legacyArtifactNodeSchema.safeParse(baseInput);
   const roleBindings = roleBindingsInputSchema.optional().safeParse(source?.role_bindings);
   const permissionGrants = permissionGrantsInputSchema.optional().safeParse(source?.permission_grants);
   const review = decisionPolicyIdSchema.optional().safeParse(source?.review);
+  const reviewRoleSchema = z.enum(["requirement", "implementation", "validation", "review-material"]);
+  const reviewRole = reviewRoleSchema.optional().safeParse(source?.review_role);
+  const reviewRequires = z.array(reviewRoleSchema).min(1).optional().safeParse(source?.review_requires);
   if (!base.success) {
     for (const issue of base.error.issues) context.addIssue(issue);
   }
@@ -691,10 +696,18 @@ export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> 
   if (!review.success) {
     for (const issue of review.error.issues) context.addIssue({ ...issue, path: ["review", ...issue.path] });
   }
-  if (!base.success || !roleBindings.success || !permissionGrants.success || !review.success) return z.NEVER;
+  if (!reviewRole.success) {
+    for (const issue of reviewRole.error.issues) context.addIssue({ ...issue, path: ["review_role", ...issue.path] });
+  }
+  if (!reviewRequires.success) {
+    for (const issue of reviewRequires.error.issues) context.addIssue({ ...issue, path: ["review_requires", ...issue.path] });
+  }
+  if (!base.success || !roleBindings.success || !permissionGrants.success || !review.success || !reviewRole.success || !reviewRequires.success) return z.NEVER;
   return {
     ...base.data,
     ...(review.data ? { review: review.data } : {}),
+    ...(reviewRole.data ? { reviewRole: reviewRole.data } : {}),
+    ...(reviewRequires.data ? { reviewRequires: [...new Set(reviewRequires.data)] } : {}),
     ...(roleBindings.data ? { roleBindings: roleBindings.data } : {}),
     ...(permissionGrants.data ? { permissionGrants: permissionGrants.data } : {})
   };

@@ -1059,7 +1059,7 @@ sections:
                       final: true
                     ```
                 asserts:
-                  - "!artifact 只允许 name、type、format、schema、review、final、role_bindings 和 permission_grants 字段。"
+                  - "!artifact 只允许 name、type、format、schema、review、review_role、review_requires、final、role_bindings 和 permission_grants 字段。"
                   - name 必须是非空字符串，用于描述当前 Action 的交付物。
                   - type 省略时默认为 string；format 省略时默认为 plain。
                   - schema 可以是外部 Schema 的名称引用，或一个 inline !schema；string、number 和 boolean Artifact 不得声明 schema。
@@ -1072,6 +1072,8 @@ sections:
                   - "array + markdown 必须声明 layout: table 并提供 schema。"
                   - inline Schema 根节点解析后的 type 和 format 必须与 Artifact 契约完全一致。
                   - review 如出现必须引用已注册 Decision Policy；确定性校验通过后进入 Review，通过前不得接纳 Artifact 或推进 Action。
+                  - review_role 如出现必须是 requirement、implementation、validation 或 review-material，用于把已上报 Artifact 纳入后续 Review 的自包含证据包。
+                  - review_requires 如出现必须是由上述 review role 组成的非空 sequence；缺失或不足的 required evidence 必须在 Review 中明确展示，并阻止 Runner 批准。
                   - Artifact.role_bindings 覆盖当前调用链中同名 Role 的 Procedure Binding，未声明 Role 继续继承。
                   - Artifact.permission_grants 只能从目标 Role 的 grantable_permissions 中临时追加权限，并且只对当前 Artifact 生效。
 

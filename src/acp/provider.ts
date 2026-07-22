@@ -73,7 +73,7 @@ registerAgentReviewProvider({
     const configured = normalizeTraexArgs(input.identity.agent.args);
     const modelArgs = input.identity.agent.model ? ["--model", input.identity.agent.model] : [];
     const args = [
-      "--sandbox", "read-only",
+      "--sandbox", "workspace-write",
       "--ask-for-approval", "never",
       ...modelArgs,
       ...configured,

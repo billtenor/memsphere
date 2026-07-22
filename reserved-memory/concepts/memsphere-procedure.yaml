@@ -6,6 +6,7 @@ names:
 defines:
   - memsphere 中用于描述一个任务从开始到结束如何执行的 Memory。
   - Procedure 通过 goals 描述目标，通过 asserts 声明全局约束，通过可选 role_bindings 提供 Artifact Review 默认角色绑定，并通过 flow 安排有序 Action、分支、循环和对子流程的调用。
+  - Artifact 可以通过 review_role 标记需求、实现、验证或评审材料，并通过 review_requires 声明后续 Artifact Review 必须携带的自包含证据。
   - 同一个 Procedure 可以被多次执行，每次执行形成相互独立的 Run；Run 记录当前步骤、步骤产物和最终交付物。
   - !statement
     asserts:
