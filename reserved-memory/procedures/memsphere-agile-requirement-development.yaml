@@ -3,7 +3,7 @@ syntax: memsphere-20260721-stable
 names:
   - 敏捷需求开发流程
   - 需求敏捷开发流程
-  - agile-requirement-development
+  - memsphere-agile-requirement-development
 defines:
   - 通过 human 与 agent 的迭代协作，把软件需求推进到当前迭代实现、验证和验收完成。
 asserts:

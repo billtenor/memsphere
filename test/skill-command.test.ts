@@ -44,7 +44,7 @@ test("unified skill and reserved memories keep the same bootstrap contract", asy
     "memsphere run start",
     "memsphere run report",
     "--artifact-file",
-    "通用流程",
+    "memsphere-general-task-execution",
     "Procedure Asserts",
     "Actor",
     "Ask human to do",

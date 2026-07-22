@@ -86,6 +86,76 @@ test("schema validators report stable field paths", async () => {
   assert.equal(result.issues[0]?.fieldPath, "date");
 });
 
+test("schema optional fields may be omitted across object, outline, and table formats", async () => {
+  const registry = createBuiltInArtifactValidatorRegistry();
+  const objectContract = compileArtifactContract(artifactNodeSchema.parse({
+    tag: "!artifact",
+    name: "release",
+    type: "object",
+    format: "json",
+    schema: {
+      tag: "!schema",
+      names: [],
+      defines: [],
+      fields: [
+        "version",
+        { tag: "!schema", names: ["notes"], defines: [], optional: true }
+      ]
+    }
+  }));
+  const objectCandidate = await prepareArtifactCandidate(objectContract, { kind: "inline", value: '{"version":"1.0"}' }, context);
+  assert.equal((await registry.execute(registry.resolvePlan(objectContract), { contract: objectContract, candidate: objectCandidate, context })).status, "passed");
+
+  const outlineContract = compileArtifactContract(artifactNodeSchema.parse({
+    tag: "!artifact",
+    name: "doc",
+    type: "object",
+    format: { name: "markdown", layout: "outline" },
+    schema: {
+      tag: "!schema",
+      names: [],
+      defines: [],
+      type: "object",
+      format: { name: "markdown", layout: "outline" },
+      fields: [
+        "Title",
+        { tag: "!schema", names: ["Notes"], defines: [], optional: true }
+      ]
+    }
+  }));
+  const outlineCandidate = await prepareArtifactCandidate(outlineContract, { kind: "inline", value: "## Title\nDone\n" }, context);
+  assert.equal((await registry.execute(registry.resolvePlan(outlineContract), { contract: outlineContract, candidate: outlineCandidate, context })).status, "passed");
+
+  const tableContract = compileArtifactContract(artifactNodeSchema.parse({
+    tag: "!artifact",
+    name: "rows",
+    type: "array",
+    format: { name: "markdown", layout: "table" },
+    schema: {
+      tag: "!schema",
+      names: [],
+      defines: [],
+      type: "array",
+      format: { name: "markdown", layout: "table" },
+      item: {
+        tag: "!schema",
+        names: [],
+        defines: [],
+        type: "object",
+        fields: [
+          "ID",
+          { tag: "!schema", names: ["Notes"], defines: [], optional: true }
+        ]
+      }
+    }
+  }));
+  const tableCandidate = await prepareArtifactCandidate(tableContract, {
+    kind: "inline",
+    value: "| ID |\n| --- |\n| 1 |\n"
+  }, context);
+  assert.equal((await registry.execute(registry.resolvePlan(tableContract), { contract: tableContract, candidate: tableCandidate, context })).status, "passed");
+});
+
 test("decoder failures are format issues", async () => {
   const contract = compileArtifactContract(artifactNodeSchema.parse({
     tag: "!artifact",

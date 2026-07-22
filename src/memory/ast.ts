@@ -18,7 +18,12 @@ export type PermissionGrants = Record<string, string[]>;
 export const stepActors = ["agent", "human"] as const;
 export type StepActor = (typeof stepActors)[number];
 
-export type DefinitionPart = string | StatementNode | SchemaNode;
+export type MemoryRefNode = {
+  tag: "!ref";
+  target: string;
+};
+
+export type DefinitionPart = string | StatementNode | SchemaNode | MemoryRefNode;
 
 export type CommonMemoryNode = {
   names: string[];
@@ -42,7 +47,7 @@ export type RepeatLimitNode = {
   max?: number;
 };
 
-export type StaticSchemaField = string | SchemaNode;
+export type StaticSchemaField = string | SchemaNode | MemoryRefNode;
 
 export type RepeatNode = {
   tag: "!repeat";
@@ -55,11 +60,12 @@ export type SchemaField = StaticSchemaField | RepeatNode;
 export type SchemaNode = CommonMemoryNode & {
   tag: "!schema";
   asserts?: string[];
+  optional?: boolean;
   type?: ArtifactType;
   format?: ArtifactFormatSpec;
   fields?: SchemaField[];
-  item?: SchemaNode;
-  items?: SchemaNode[];
+  item?: SchemaNode | MemoryRefNode;
+  items?: Array<SchemaNode | MemoryRefNode>;
 };
 
 export type ArtifactNode = {
@@ -67,7 +73,7 @@ export type ArtifactNode = {
   name: string;
   type: ArtifactType;
   format: ArtifactFormatSpec;
-  schema?: string | SchemaNode;
+  schema?: string | SchemaNode | MemoryRefNode;
   final?: boolean;
   review?: string;
   roleBindings?: RoleBindings;

@@ -1,0 +1,77 @@
+!schema
+syntax: memsphere-20260721-stable
+names:
+  - Procedure Schema
+  - memsphere-procedure-schema
+format: yaml
+defines:
+  - 定义 memsphere !procedure Memory 的合法内容结构和字段要求。
+asserts:
+  - 根节点必须使用 !procedure 标签，只允许 syntax、name/names、defines、asserts、goals、role_bindings 和 flow 字段。
+  - "syntax 必须填写 memsphere-20260721-stable。"
+  - name 与 names 必须且只能使用一个；name 必须是非空字符串，names 必须是非空且成员不重复的字符串数组，首项为规范名称。
+  - defines 可以包含非空字符串、!ref、匿名 !statement 或匿名 !schema；嵌套结构必须携带 YAML tag，全部成员共同生效。
+  - Procedure.asserts 如出现，其中每一项都在整个 Procedure 及其调用链执行期间持续生效。
+  - role_bindings 如出现，必须引用 control_plane 中存在的 Role 与 Identity，且不得显式绑定保留的 runner Role。
+  - flow 的每个成员必须使用 !action、!if、!while 或 !call tag，并满足对应节点规则。
+fields:
+  - !schema
+    name: syntax
+    type: string
+    defines:
+      - 当前 Procedure 使用的不可变语法版本。
+  - !schema
+    name: name
+    optional: true
+    type: string
+    defines:
+      - Procedure 只有一个名称时使用的简写。
+  - !schema
+    name: names
+    optional: true
+    type: array
+    item: !schema
+      type: string
+    defines:
+      - Procedure 的规范名称与别名，首项为规范名称。
+  - !schema
+    name: defines
+    optional: true
+    type: array
+    items:
+      - !schema
+        type: string
+      - !schema
+        type: object
+    defines:
+      - Procedure 的含义、用途、适用边界，以及可选的外部 Memory 引用。
+  - !schema
+    name: asserts
+    optional: true
+    type: array
+    item: !schema
+      type: string
+    defines:
+      - 选择和执行整个 Procedure 时持续生效的全局约束。
+  - !schema
+    name: goals
+    optional: true
+    type: array
+    item: !schema
+      type: string
+    defines:
+      - Procedure 要达成的目标。
+  - !schema
+    name: role_bindings
+    optional: true
+    type: object
+    defines:
+      - 为当前 Procedure 的 Artifact 提供默认 Role Binding；被调用 Procedure 和当前 Artifact 可以按同名 Role 覆盖。
+  - !schema
+    name: flow
+    optional: true
+    type: array
+    item: !schema
+      type: object
+    defines:
+      - 由 Action、If、While 或 Call 组成的有序执行流程。

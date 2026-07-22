@@ -140,6 +140,7 @@ flow:
     await identity.waitFor();
     const reviewPanel = page.locator("#review-panel");
     const reviewResizer = page.getByRole("separator", { name: "调整产物与评审区域宽度" });
+    await page.waitForTimeout(220);
     const panelBeforeResize = await reviewPanel.boundingBox();
     const resizerBox = await reviewResizer.boundingBox();
     assert(panelBeforeResize && resizerBox);
@@ -231,13 +232,19 @@ async function selectIdentity(
   select: import("playwright").Locator,
   identityId: string
 ): Promise<void> {
+  if (await select.getAttribute("aria-expanded") !== "true") await select.click();
+  const option = page.locator(`.artifact-review-identity-select .artifact-review-select-option[data-identity-id="${identityId}"]`);
+  if (await option.getAttribute("aria-selected") === "true") {
+    await select.click();
+    await page.waitForTimeout(20);
+    return;
+  }
   const loaded = page.waitForResponse((response) =>
     response.url().includes("/api/artifact-reviews/")
     && response.url().includes(`identity_id=${identityId}`)
     && response.request().method() === "GET"
   );
-  if (await select.getAttribute("aria-expanded") !== "true") await select.click();
-  await page.locator(`.artifact-review-identity-select .artifact-review-select-option[data-identity-id="${identityId}"]`).click();
+  await option.click();
   await loaded;
   await page.waitForTimeout(20);
 }

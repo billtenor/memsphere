@@ -23,6 +23,7 @@ import {
   readRun,
   repeatRun,
   reportRun,
+  skipRun,
   startRun,
   submitArtifactReviewRunnerVote,
   waitForArtifactReview,
@@ -312,6 +313,13 @@ export async function runRepeatCommand(countValue: string, options: RunIdOptions
   printRunState(run);
 }
 
+export async function runSkipCommand(options: RunIdOptions): Promise<void> {
+  const runId = requireRunId(options.run);
+  const config = await readConfig();
+  const run = await skipRun({ runsRoot: config.runsRoot, runId });
+  printRunState(run);
+}
+
 export async function runStatusCommand(options: RunIdOptions): Promise<void> {
   const config = await readConfig();
   if (options.run) {
@@ -463,9 +471,12 @@ export function printRunState(run: RunState): void {
       console.log(`memsphere run enter-schema ${step.schema.name} --run ${run.id}`);
     }
   } else {
-    console.log("Then:");
-    console.log(`memsphere run report --run ${run.id} --artifact <value>`);
+  console.log("Then:");
+  console.log(`memsphere run report --run ${run.id} --artifact <value>`);
+  if (step.optional === true) {
+    console.log(`memsphere run skip --run ${run.id}`);
   }
+}
 }
 
 export function printArtifactReviewSummary(

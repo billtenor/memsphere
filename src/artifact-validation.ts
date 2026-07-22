@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import MarkdownIt from "markdown-it";
 import { parse as parseYaml } from "yaml";
-import type { ArtifactFormatSpec, ArtifactNode, SchemaField, SchemaNode } from "./memory/ast.js";
+import type { ArtifactFormatSpec, ArtifactNode, MemoryRefNode, SchemaField, SchemaNode, StaticSchemaField } from "./memory/ast.js";
 import { inferSchemaType, inheritSchemaFormat, resolveSchemaContract } from "./memory/schema.js";
 
 export type ArtifactValidationStage = "type" | "format" | "schema";
@@ -29,7 +29,7 @@ export type CompiledArtifactContract = {
   name: string;
   type: string;
   format: ArtifactFormatSpec;
-  schema?: string | SchemaNode;
+  schema?: string | SchemaNode | MemoryRefNode;
   final: boolean;
 };
 
@@ -129,7 +129,10 @@ export class ArtifactValidatorRegistry {
     this.#appendPlanTarget(plan, "type", contract.type, "artifact");
     this.#appendPlanTarget(plan, "format", contract.format.name, "artifact");
 
-    if (typeof contract.schema === "object") {
+    if (isMemoryRefNode(contract.schema)) {
+      throw new Error(`unresolved Memory reference in Artifact schema: ${contract.schema.target}`);
+    }
+    if (isSchemaNode(contract.schema)) {
       this.#compileSchemaPlan(plan, contract.schema, contract, "schema", true);
     }
     return plan;
@@ -146,6 +149,9 @@ export class ArtifactValidatorRegistry {
     });
     if (root.status !== "passed") return root;
     if (typeof request.contract.schema !== "object") return root;
+    if (isMemoryRefNode(request.contract.schema)) {
+      throw new Error(`unresolved Memory reference in Artifact schema: ${request.contract.schema.target}`);
+    }
 
     return this.#executeSchemaNode(
       plan,
@@ -211,19 +217,19 @@ export class ArtifactValidatorRegistry {
             this.#appendPlanTarget(plan, "type", bodyContract.type, bodyPath);
             this.#appendPlanTarget(plan, "format", bodyContract.format.name, bodyPath);
           } else {
-            this.#compileSchemaPlan(plan, bodyField, contract, bodyPath, false);
+            this.#compileSchemaPlan(plan, assertSchemaNode(bodyField, bodyPath), contract, bodyPath, false);
           }
         }
       } else {
-        this.#compileSchemaPlan(plan, field, contract, fieldPath, false);
+        this.#compileSchemaPlan(plan, assertSchemaNode(field, fieldPath), contract, fieldPath, false);
       }
     }
 
     if (schema.item) {
-      this.#compileSchemaPlan(plan, schema.item, contract, `${path}.item`, false);
+      this.#compileSchemaPlan(plan, assertSchemaNode(schema.item, `${path}.item`), contract, `${path}.item`, false);
     }
     for (const [index, item] of (schema.items ?? []).entries()) {
-      this.#compileSchemaPlan(plan, item, contract, `${path}.items[${index}]`, false);
+      this.#compileSchemaPlan(plan, assertSchemaNode(item, `${path}.items[${index}]`), contract, `${path}.items[${index}]`, false);
     }
   }
 
@@ -266,9 +272,10 @@ export class ArtifactValidatorRegistry {
         );
         if (result.status !== "passed") return result;
       } else {
+        const childSchema = assertSchemaNode(child.field, child.contractPath);
         const result = await this.#executeSchemaNode(
           plan,
-          child.field,
+          childSchema,
           contract,
           child.candidate,
           rootContext,
@@ -296,12 +303,13 @@ export class ArtifactValidatorRegistry {
     for (const [index, element] of value.entries()) {
       const elementPath = `${fieldPath || ""}[${index}]`;
       if (schema.item) {
-        const itemContract = schemaContract(schema.item, contract);
+        const itemSchema = assertSchemaNode(schema.item, `${contractPath}.item`);
+        const itemContract = schemaContract(itemSchema, contract);
         const result = await this.#executeSchemaNode(
           plan,
-          schema.item,
+          itemSchema,
           contract,
-          candidateFromStructuredValue(candidate, element, itemContract, schema.item.format !== undefined),
+          candidateFromStructuredValue(candidate, element, itemContract, itemSchema.format !== undefined),
           rootContext,
           `${contractPath}.item`,
           elementPath
@@ -313,12 +321,13 @@ export class ArtifactValidatorRegistry {
       const failures: ArtifactValidationResult[] = [];
       let matched = false;
       for (const [candidateIndex, itemSchema] of (schema.items ?? []).entries()) {
-        const itemContract = schemaContract(itemSchema, contract);
+        const resolvedItemSchema = assertSchemaNode(itemSchema, `${contractPath}.items[${candidateIndex}]`);
+        const itemContract = schemaContract(resolvedItemSchema, contract);
         const result = await this.#executeSchemaNode(
           plan,
-          itemSchema,
+          resolvedItemSchema,
           contract,
-          candidateFromStructuredValue(candidate, element, itemContract, itemSchema.format !== undefined),
+          candidateFromStructuredValue(candidate, element, itemContract, resolvedItemSchema.format !== undefined),
           rootContext,
           `${contractPath}.items[${candidateIndex}]`,
           elementPath
@@ -330,7 +339,7 @@ export class ArtifactValidatorRegistry {
         failures.push(result);
       }
       if (!matched) {
-        const expected = (schema.items ?? []).map((item) => schemaContract(item, contract).type);
+        const expected = (schema.items ?? []).map((item, itemIndex) => schemaContract(assertSchemaNode(item, `${contractPath}.items[${itemIndex}]`), contract).type);
         return {
           status: "failed",
           correctable: failures.every((failure) => failure.correctable),
@@ -629,17 +638,17 @@ class MarkdownTableSchemaValidator implements ArtifactValidator {
         message: "Markdown Artifact must contain a GFM table"
       });
     }
-    const missing = columns.groups.find((aliases) => !aliases.some((name) => headers.includes(name)));
+    const missing = columns.groups.find((group) => !group.optional && !group.aliases.some((name) => headers.includes(name)));
     if (missing) return failedResult({
       code: "artifact.schema.markdown_table.missing_column",
       stage: "schema",
       validatorId: "builtin.schema.markdown-table",
       artifactPath: request.context.artifactPath,
       contractPath: validationContractPath(request, columns.contractSuffix),
-      fieldPath: joinFieldPath(request.context.fieldPath ?? "", missing[0]),
+      fieldPath: joinFieldPath(request.context.fieldPath ?? "", missing.aliases[0]),
       actual: headers,
-      expected: missing,
-      message: `Markdown table is missing column ${missing[0]}`
+      expected: missing.aliases,
+      message: `Markdown table is missing column ${missing.aliases[0]}`
     });
     return passedResult();
   }
@@ -685,11 +694,28 @@ function actualType(value: unknown): string {
 }
 
 type DerivedSchemaChild = {
-  field: string | SchemaNode;
+  field: StaticSchemaField;
   contractPath: string;
   fieldPath: string;
   candidate: PreparedArtifactCandidate;
 };
+
+function isSchemaNode(value: unknown): value is SchemaNode {
+  return Boolean(value && typeof value === "object" && (value as { tag?: unknown }).tag === "!schema");
+}
+
+function isMemoryRefNode(value: unknown): value is MemoryRefNode {
+  return Boolean(value && typeof value === "object" && (value as { tag?: unknown }).tag === "!ref");
+}
+
+function assertSchemaNode(value: SchemaNode | MemoryRefNode, path: string): SchemaNode {
+  if (isSchemaNode(value)) return value;
+  throw new Error(`unresolved Memory reference at ${path}: ${value.target}`);
+}
+
+function isOptionalField(field: StaticSchemaField): boolean {
+  return isSchemaNode(field) && field.optional === true;
+}
 
 function deriveSchemaChildren(
   schema: SchemaNode,
@@ -766,7 +792,7 @@ function deriveMarkdownOutlineChildren(
 }
 
 function derivedMarkdownChild(
-  field: string | SchemaNode,
+  field: StaticSchemaField,
   contractPath: string,
   fieldPath: string,
   parentContract: CompiledArtifactContract,
@@ -774,7 +800,7 @@ function derivedMarkdownChild(
   headings: readonly MarkdownHeading[],
   heading: MarkdownHeading
 ): DerivedSchemaChild {
-  const contract = typeof field === "string" ? stringFieldContract(field, parentContract) : schemaContract(field, parentContract);
+  const contract = typeof field === "string" ? stringFieldContract(field, parentContract) : schemaContract(assertSchemaNode(field, contractPath), parentContract);
   return {
     field,
     contractPath,
@@ -865,7 +891,7 @@ function deriveRecordChildren(
     if (!key) continue;
     const path = `${contractPath}.fields[${index}]`;
     const childPath = joinFieldPath(fieldPath, primaryFieldName(field));
-    const childContract = typeof field === "string" ? stringFieldContract(field, contract) : schemaContract(field, contract);
+    const childContract = typeof field === "string" ? stringFieldContract(field, contract) : schemaContract(assertSchemaNode(field, path), contract);
     children.push({
       field,
       contractPath: path,
@@ -874,7 +900,7 @@ function deriveRecordChildren(
         parentCandidate,
         record[key],
         childContract,
-        typeof field === "object" && field.format !== undefined
+        isSchemaNode(field) && field.format !== undefined
       )
     });
   }
@@ -939,7 +965,10 @@ function validationContractPath(request: ArtifactValidationRequest, suffix: stri
 }
 
 function requireInlineSchema(request: ArtifactValidationRequest): SchemaNode | undefined {
-  return typeof request.contract.schema === "object" ? request.contract.schema : undefined;
+  if (isMemoryRefNode(request.contract.schema)) {
+    throw new Error(`unresolved Memory reference in Artifact schema: ${request.contract.schema.target}`);
+  }
+  return isSchemaNode(request.contract.schema) ? request.contract.schema : undefined;
 }
 
 function validateObjectFields(
@@ -967,6 +996,7 @@ function validateObjectFields(
     const names = fieldNames(field);
     const name = names.find((candidate) => Object.hasOwn(record, candidate)) ?? names[0];
     if (!names.some((candidate) => Object.hasOwn(record, candidate))) {
+      if (isOptionalField(field)) continue;
       const fieldPath = joinFieldPath(request.context.fieldPath ?? "", name);
       return failedResult({
         code: "artifact.schema.object.missing_field",
@@ -1075,12 +1105,13 @@ function validateOutlineFields(
     const match = findOutlineHeading(headings, field, cursor, range.end, range.parentIndex);
     const path = [...range.path, primaryFieldName(field)];
     if (!match) {
+      if (isOptionalField(field)) continue;
       issues.push(outlineIssue(request, "schema.format.outline.expected_heading", path, {
         actual: headings.slice(cursor, range.end).map((heading) => heading.text),
         expected: fieldNames(field),
         message: `Markdown outline is missing heading ${path.join(" / ")}`
       }));
-      if (typeof field === "object" && inheritsMarkdownOutline(field)) {
+      if (isSchemaNode(field) && inheritsMarkdownOutline(field)) {
         reportChildrenUnderMissingParent(request, field, headings, { ...range, start: cursor }, path, issues);
       }
       continue;
@@ -1093,7 +1124,7 @@ function validateOutlineFields(
       }));
     }
     cursor = Math.max(cursor, match.index + 1);
-    if (typeof field === "object" && inheritsMarkdownOutline(field)) {
+    if (isSchemaNode(field) && inheritsMarkdownOutline(field)) {
       const childEnd = subtreeEnd(headings, match, range.end);
       validateOutlineFields(request, field.fields ?? [], headings, {
         start: match.index + 1,
@@ -1137,12 +1168,13 @@ function validateOutlineRepeat(
       const path = [...range.path, `${primaryFieldName(field)}[${iteration}]`];
       const match = repeatedHeadings[groupOffset + bodyIndex];
       if (!match) {
+        if (isOptionalField(field)) continue;
         issues.push(outlineIssue(request, "schema.format.outline.expected_heading", path, {
           actual: headings.slice(groupStart, groupEnd).map((heading) => heading.text),
           expected: fieldNames(field),
           message: `Markdown outline is missing heading ${path.join(" / ")}`
         }));
-        if (typeof field === "object" && inheritsMarkdownOutline(field)) {
+        if (isSchemaNode(field) && inheritsMarkdownOutline(field)) {
           reportChildrenUnderMissingParent(request, field, headings, {
             start: groupStart,
             end: groupEnd,
@@ -1153,7 +1185,7 @@ function validateOutlineRepeat(
         continue;
       }
       cursor = Math.max(cursor, match.index + 1);
-      if (typeof field === "object" && inheritsMarkdownOutline(field)) {
+      if (isSchemaNode(field) && inheritsMarkdownOutline(field)) {
         validateOutlineFields(request, field.fields ?? [], headings, {
           start: match.index + 1,
           end: subtreeEnd(headings, match, groupEnd),
@@ -1213,7 +1245,7 @@ function reportChildrenUnderMissingParent(
 
 function findOutlineHeading(
   headings: readonly MarkdownHeading[],
-  field: string | SchemaNode,
+  field: StaticSchemaField,
   start: number,
   end: number,
   parentIndex: number | undefined,
@@ -1225,7 +1257,7 @@ function findOutlineHeading(
   return candidates.find((heading) => heading.parentIndex === parentIndex) ?? candidates[0];
 }
 
-function headingMatches(heading: MarkdownHeading, field: string | SchemaNode, iteration: number | undefined): boolean {
+function headingMatches(heading: MarkdownHeading, field: StaticSchemaField, iteration: number | undefined): boolean {
   return fieldNames(field).some((name) =>
     heading.text === name ||
     heading.text === `${name} ${iteration}` ||
@@ -1233,7 +1265,7 @@ function headingMatches(heading: MarkdownHeading, field: string | SchemaNode, it
   );
 }
 
-function firstConcreteField(fields: readonly SchemaField[]): string | SchemaNode | undefined {
+function firstConcreteField(fields: readonly SchemaField[]): StaticSchemaField | undefined {
   for (const field of fields) {
     if (typeof field === "object" && field.tag === "!repeat") {
       if (field.body[0]) return field.body[0];
@@ -1263,8 +1295,9 @@ function inferOutlineParentIndex(
   )[0]?.[0];
 }
 
-function primaryFieldName(field: string | SchemaNode): string {
-  return typeof field === "string" ? field : field.names[0];
+function primaryFieldName(field: StaticSchemaField): string {
+  if (typeof field === "string") return field;
+  return field.tag === "!ref" ? field.target : field.names[0];
 }
 
 function subtreeEnd(headings: readonly MarkdownHeading[], heading: MarkdownHeading, limit: number): number {
@@ -1307,33 +1340,40 @@ function extractMarkdownTableHeaders(tokens: readonly MarkdownToken[]): string[]
     .map((token) => token.content.trim());
 }
 
-function schemaFieldNameGroups(fields: readonly SchemaField[]): string[][] {
+type TableColumnGroup = {
+  aliases: string[];
+  optional: boolean;
+};
+
+function schemaFieldNameGroups(fields: readonly SchemaField[]): TableColumnGroup[] {
   return fields.flatMap((field) => {
-    if (typeof field === "string") return [[field]];
-    if (field.tag === "!repeat") return field.body.map((bodyField) => fieldNames(bodyField));
-    return [fieldNames(field)];
+    if (typeof field === "string") return [{ aliases: [field], optional: false }];
+    if (field.tag === "!repeat") return field.body.map((bodyField) => ({ aliases: fieldNames(bodyField), optional: isOptionalField(bodyField) }));
+    return [{ aliases: fieldNames(field), optional: isOptionalField(field) }];
   });
 }
 
-function tableSchemaColumns(schema: SchemaNode): { names: string[]; groups: string[][]; contractSuffix: string } {
+function tableSchemaColumns(schema: SchemaNode): { names: string[]; groups: TableColumnGroup[]; contractSuffix: string } {
   if (schema.item) {
-    const groups = schemaFieldNameGroups(schema.item.fields ?? []);
-    return { names: groups.map(([name]) => name), groups, contractSuffix: "item.fields" };
+    const item = assertSchemaNode(schema.item, "schema.item");
+    const groups = schemaFieldNameGroups(item.fields ?? []);
+    return { names: groups.map((group) => group.aliases[0]), groups, contractSuffix: "item.fields" };
   }
   if (schema.items?.length) {
-    const groups = schema.items.flatMap((item) => schemaFieldNameGroups(item.fields ?? []));
+    const groups = schema.items.flatMap((item, index) => schemaFieldNameGroups(assertSchemaNode(item, `schema.items[${index}]`).fields ?? []));
     return {
-      names: [...new Set(groups.map(([name]) => name))],
+      names: [...new Set(groups.map((group) => group.aliases[0]))],
       groups,
       contractSuffix: "items"
     };
   }
   const groups = schemaFieldNameGroups(schema.fields ?? []);
-  return { names: groups.map(([name]) => name), groups, contractSuffix: "fields" };
+  return { names: groups.map((group) => group.aliases[0]), groups, contractSuffix: "fields" };
 }
 
-function fieldNames(field: string | SchemaNode): string[] {
-  return typeof field === "string" ? [field] : field.names;
+function fieldNames(field: StaticSchemaField): string[] {
+  if (typeof field === "string") return [field];
+  return field.tag === "!ref" ? [field.target] : field.names;
 }
 
 function passedResult(): ArtifactValidationResult {

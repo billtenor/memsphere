@@ -147,6 +147,54 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
   });
 });
 
+test("validate checks Memory references by target kind and dependency cycles", async () => {
+  await withScope(async ({ nested, memoryRoot }) => {
+    await writeFile(
+      join(memoryRoot, "concepts", "concept.yaml"),
+      withCurrentMemorySyntax("!concept\nnames: [Concept A]\ndefines:\n  - !ref\n    target: schemas/Schema A\n")
+    );
+    await writeFile(
+      join(memoryRoot, "schemas", "schema.yaml"),
+      withCurrentMemorySyntax("!schema\nnames: [Schema A]\ndefines:\n  - !ref\n    target: concepts/Concept A\n")
+    );
+
+    const cycle = await runCli(nested, ["validate"]);
+    assert.equal(cycle.code, 1);
+    assert.match(cycle.stderr, /Memory reference cycle detected/);
+
+    await writeFile(
+      join(memoryRoot, "concepts", "concept.yaml"),
+      withCurrentMemorySyntax("!concept\nnames: [Concept A]\ndefines:\n  - !ref\n    target: schemas/Schema A\n")
+    );
+    await writeFile(
+      join(memoryRoot, "schemas", "schema.yaml"),
+      withCurrentMemorySyntax("!schema\nnames: [Schema A]\nfields:\n  - !ref\n    target: concepts/Concept A\n")
+    );
+
+    const wrongKind = await runCli(nested, ["validate"]);
+    assert.equal(wrongKind.code, 1);
+    assert.match(wrongKind.stderr, /expected schemas/);
+
+    await writeFile(
+      join(memoryRoot, "schemas", "schema.yaml"),
+      withCurrentMemorySyntax("!schema\nnames: [Schema A]\ndefines:\n  - !ref\n    target: schemas/Missing\n")
+    );
+
+    const missing = await runCli(nested, ["validate"]);
+    assert.equal(missing.code, 1);
+    assert.match(missing.stderr, /schemas\/Missing.*was not found/);
+
+    await writeFile(
+      join(memoryRoot, "schemas", "schema.yaml"),
+      withCurrentMemorySyntax("!schema\nnames: [Schema A]\noptional: true\nfields: [summary]\n")
+    );
+
+    const invalidOptional = await runCli(nested, ["validate"]);
+    assert.equal(invalidOptional.code, 1);
+    assert.match(invalidOptional.stderr, /optional is only allowed on named Schema fields/);
+  });
+});
+
 test("memory CLI reads recursive Statement sections without flattening them", async () => {
   await withScope(async ({ nested, memoryRoot }) => {
     await writeFile(join(memoryRoot, "statements", "repository-rules.yaml"), withCurrentMemorySyntax(`!statement

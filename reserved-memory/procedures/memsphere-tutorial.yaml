@@ -1,0 +1,170 @@
+!procedure
+syntax: memsphere-20260721-stable
+names:
+  - "memsphere tutorial 流程"
+  - memsphere-tutorial
+defines:
+  - 面向首次使用 memsphere 的用户，在真实工程中完成基础配置确认，并通过一次引导式 Run 了解主要用户功能。
+  - 适用于已经安装 memsphere npm 包与 memsphere skill，并已由用户执行 memsphere init 的工程。
+  - 需要 human 操作的界面、选择和 init 命令由 human 完成；agent 可执行的 CLI 操作由 agent 完成并向 human 解释。
+asserts:
+  - 启动本流程前必须已经完成 memsphere init；未初始化时必须先提示 human 执行，不能启动本流程代替初始化。
+  - 必须使用当前真实工程 scope，不创建练习目录。
+  - 不得修改 System Memory 或覆盖已有用户 Memory；写操作必须说明目标和影响。
+  - migrate --write、归档和其他维护写操作只能在 human 明确要求时执行，教程默认只介绍其用途。
+goals:
+  - 确认当前工程的 memsphere scope、基础配置和校验状态。
+  - 让用户理解 Memory、Reserved Memory、View、Run 与 Review 的基本使用方式。
+  - 让用户知道 Memory 创建维护、迁移和归档功能应在什么场景使用。
+flow:
+  - !action
+    action: 检查 memsphere 版本、当前 scope、config、Memory Store 和 validate 结果，并向 human 说明各目录与 View 配置。
+    actor: agent
+    asserts:
+      - 必须使用 memsphere CLI 和当前工程 config 获取信息，不得依据默认值猜测实际配置。
+    artifact: !artifact
+      name: 当前工程配置说明
+      format: markdown
+  - !action
+    action: 确认当前 memory、reviews、runs、archive 路径以及 View host/port 是否满足使用需要，并说明需要调整的配置。
+    actor: human
+    artifact: !artifact
+      name: 基础配置决定
+      format: markdown
+  - !if
+    condition: !action
+      action: 判断 human 是否要求修改 memory、reviews、runs 或 archive root 路径。
+      actor: agent
+      artifact: !artifact
+        name: 是否需要修改 root 路径
+        type: boolean
+    then:
+      - !action
+        action: 根据 human 的配置决定生成准确的 memsphere init --force 命令，并说明 root 路径变更影响。
+        actor: agent
+        artifact: !artifact
+          name: Root 路径修改指引
+          format: markdown
+      - !action
+        action: 执行 agent 提供的 memsphere init --force 命令。
+        actor: human
+        artifact: !artifact
+          name: Root 路径修改结果
+          format: markdown
+  - !if
+    condition: !action
+      action: 判断 human 是否要求修改 View host 或 port。
+      actor: agent
+      artifact: !artifact
+        name: 是否需要修改 View 配置
+        type: boolean
+    then:
+      - !action
+        action: 按 human 已确认的值更新当前 scope config 中的 View host 或 port，并保持其他配置不变。
+        actor: agent
+        artifact: !artifact
+          name: View 配置修改结果
+          format: markdown
+  - !action
+    action: 运行 memsphere validate，确认配置与 Memory 均可用，并解释校验结果。
+    actor: agent
+    asserts:
+      - validate 未通过时不得声称基础配置已经可用。
+    artifact: !artifact
+      name: 基础配置校验结果
+      format: markdown
+  - !while
+    condition: !action
+      action: 重新运行 memsphere validate，判断当前 scope 是否仍未通过校验。
+      actor: agent
+      artifact: !artifact
+        name: 基础配置是否仍未通过校验
+        type: boolean
+    do:
+      - !action
+        action: 分析校验失败原因，说明可安全修复的内容以及需要 human 决定或执行的操作。
+        actor: agent
+        artifact: !artifact
+          name: 基础配置校验修复方案
+          format: markdown
+      - !action
+        action: 完成修复方案中必须由 human 决定或执行的操作，并说明结果。
+        actor: human
+        artifact: !artifact
+          name: Human 校验修复结果
+          format: markdown
+      - !action
+        action: 根据已确认方案完成剩余的安全修复，不得覆盖已有用户 Memory。
+        actor: agent
+        artifact: !artifact
+          name: Agent 校验修复结果
+          format: markdown
+  - !action
+    action: 使用 memory list、memory read 和按 Node 读取演示 Memory 的发现与理解，并介绍 Concept、Statement、Schema、Procedure 及 System、Reserved、用户 Memory 的区别。
+    actor: agent
+    asserts:
+      - 必须读取当前工程中的真实 Memory 进行演示，不得编造 list、reference 或 node_ref。
+      - 必须说明 list 用于发现，执行前仍需 read 完整 Memory 或相关 Node。
+    artifact: !artifact
+      name: Memory 使用说明
+      format: markdown
+  - !action
+    action: 启动或检查 memsphere View，向 human 提供访问地址并说明浏览、搜索、展开 Memory 和导入 Reserved Memory 的入口。
+    actor: agent
+    artifact: !artifact
+      name: View 使用指引
+      format: markdown
+  - !action
+    action: 在 View 中浏览 Memory；如存在适合的 Reserved Memory，导入一条，并报告操作结果。
+    actor: human
+    asserts:
+      - 不得编辑 System Memory。
+    artifact: !artifact
+      name: View 浏览与 Reserved Memory 导入结果
+      format: markdown
+  - !action
+    action: 检查当前 Tutorial Run 的 status 和已产出 Artifact，向 human 解释 Procedure、Run、逐步上报、Schema Artifact、Repeat 和人机协同如何工作。
+    actor: agent
+    artifact: !artifact
+      name: Procedure 与 Run 使用说明
+      format: markdown
+  - !if
+    condition: !action
+      action: 判断当前工程是否已有适合创建 Review 的用户 Memory。
+      actor: agent
+      artifact: !artifact
+        name: 是否可以体验 Review
+        type: boolean
+    then:
+      - !action
+        action: 在 View 中选择一条用户 Memory，创建 comment 并提交 Review。
+        actor: human
+        asserts:
+          - 不得选择 System Memory 作为修改目标。
+        artifact: !artifact
+          name: Review 创建结果
+          format: markdown
+      - !call
+        target: memsphere-review
+    else:
+      - !action
+        action: 说明 Review 的创建、提交、processing、done 和应用流程，以及当前无法实际体验的原因。
+        actor: agent
+        artifact: !artifact
+          name: Review 功能说明
+          format: markdown
+  - !action
+    action: 说明如何通过适用 Procedure 请求 Agent 创建、修改和 review Memory，并介绍 validate、migrate、archive 与 View 管理命令的用途和使用边界。
+    actor: agent
+    asserts:
+      - 不得在教程中执行 migrate --write 或归档当前 Tutorial Run。
+    artifact: !artifact
+      name: Memory 维护与后续功能说明
+      format: markdown
+  - !action
+    action: 汇总当前 scope、配置与校验状态、已完成的体验、产生的 Memory 或 Review，以及推荐的下一步。
+    actor: agent
+    artifact: !artifact
+      name: memsphere Tutorial 完成摘要
+      format: markdown
+      final: true

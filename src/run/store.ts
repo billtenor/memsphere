@@ -57,6 +57,7 @@ import {
   type DefinitionPart,
   type FlowNode,
   type IfNode,
+  type MemoryRefNode,
   type ProcedureMemory,
   type PermissionGrants as MemoryPermissionGrants,
   type RoleBindings,
@@ -119,6 +120,7 @@ export type RunStep = {
   validationPlan?: ArtifactValidationPlan;
   final?: boolean;
   reviewPolicy?: string;
+  optional?: boolean;
   asserts?: string[];
   suggests?: string[];
   details?: string[];
@@ -277,6 +279,7 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
     validationPlan: z.array(validationPlanEntrySchema).optional(),
     final: z.boolean().optional(),
     reviewPolicy: z.string().optional(),
+    optional: z.boolean().optional(),
     asserts: z.array(z.string()).optional(),
     suggests: z.array(z.string()).optional(),
     details: z.array(z.string()).optional(),
@@ -1682,6 +1685,52 @@ export async function repeatRun(input: { runsRoot: string; runId: string; count:
   return withRunWriteLock(input.runsRoot, input.runId, () => repeatRunUnlocked(input));
 }
 
+export async function skipRun(input: { runsRoot: string; runId: string }): Promise<RunState> {
+  return withRunWriteLock(input.runsRoot, input.runId, () => skipRunUnlocked(input));
+}
+
+async function skipRunUnlocked(input: { runsRoot: string; runId: string }): Promise<RunState> {
+  const run = await readRun(input.runsRoot, input.runId);
+  if (run.contractVersion === 1 || run.readOnly) {
+    throw new Error(`v1 run is read-only and cannot skip after the Artifact Contract v2 upgrade: ${input.runId}`);
+  }
+  if (run.status === "done") throw new Error(`run is already done: ${input.runId}`);
+
+  const frame = currentFrame(run);
+  const step = currentStep(run);
+  if (step?.kind === "repeat") {
+    throw new Error(`current step is Repeat control; use memsphere run repeat <count> --run ${input.runId}`);
+  }
+  if (!frame || !step || !step.artifact || !step.type || !step.format) {
+    throw new Error(`run has no skippable current step: ${input.runId}`);
+  }
+  if (step.optional !== true) {
+    throw new Error(`current step is required and cannot be skipped: ${step.id}`);
+  }
+
+  run.events.push({
+    at: new Date().toISOString(),
+    frame: frame.type,
+    stepId: step.id,
+    artifact: {
+      name: step.artifact,
+      type: step.type,
+      format: step.format,
+      fields: { skipped: true },
+      schema: step.schema,
+      storage: "inline",
+      value: ""
+    }
+  });
+
+  frame.index += 1;
+  await collapseCompletedFrames(input.runsRoot, run);
+  await expandAutoCallSteps(run);
+  run.updatedAt = new Date().toISOString();
+  await writeRun(input.runsRoot, run);
+  return run;
+}
+
 async function repeatRunUnlocked(input: { runsRoot: string; runId: string; count: number }): Promise<RunState> {
   const run = await readRun(input.runsRoot, input.runId);
   if (run.contractVersion === 1 || run.readOnly) {
@@ -2056,20 +2105,30 @@ function compileArtifactStep(
   const contract = compileArtifactContract(artifact);
   const schema = typeof artifact.schema === "string"
     ? { kind: "external" as const, name: artifact.schema }
-    : typeof artifact.schema === "object"
+    : artifact.schema?.tag === "!schema"
       ? { kind: "inline" as const, id: `inline:${id}:${slugify(artifact.name) || "artifact"}`, node: cloneSchema(artifact.schema) }
+      : artifact.schema?.tag === "!ref"
+        ? { kind: "external" as const, name: artifact.schema.target }
       : undefined;
+  const validationPlan = artifactSchemaNeedsResolution(artifact.schema)
+    ? undefined
+    : artifactValidatorRegistry.resolvePlan(contract);
   return {
     artifact: artifact.name,
     type: contract.type,
     format: contract.format,
     schema,
-    validationPlan: artifactValidatorRegistry.resolvePlan(contract),
+    validationPlan,
     final: artifact.final || undefined,
     reviewPolicy: artifact.review,
     roleBindings: artifact.roleBindings ? structuredClone(artifact.roleBindings) : undefined,
     permissionGrants: artifact.permissionGrants ? structuredClone(artifact.permissionGrants) : undefined
   };
+}
+
+function assertSchemaNode(value: SchemaNode | MemoryRefNode, path: string): SchemaNode {
+  if (value.tag === "!schema") return value;
+  throw new Error(`unresolved Memory reference at ${path}: ${value.target}`);
 }
 
 function compileIfStep(node: IfNode, id: string): RunStep {
@@ -2406,7 +2465,8 @@ function walkSchema(
     contract,
     controlPlane,
     details: definitionDetails(node.defines)
-      .concat((node.asserts ?? []).map((value) => `asserts: ${value}`))
+      .concat((node.asserts ?? []).map((value) => `asserts: ${value}`)),
+    optional: node.optional === true
   }));
 
   if (!(contract.type === "object" && contract.format.name === "markdown" && contract.format.options.layout === "outline")) {
@@ -2422,7 +2482,8 @@ function walkSchema(
       steps.push(compileRepeatStep(child, path, fieldIndex, controlPlane));
       continue;
     }
-    walkSchema(child, `${path}.${child.names[0]}`, steps, contract, controlPlane);
+    const childSchema = assertSchemaNode(child, `${path}.fields[${fieldIndex}]`);
+    walkSchema(childSchema, `${path}.${childSchema.names[0]}`, steps, contract, controlPlane);
   }
 }
 
@@ -2448,6 +2509,7 @@ function compileSchemaValueStep(input: {
   contract: CompiledArtifactContract;
   details?: string[];
   controlPlane?: ArtifactControlPlane;
+  optional?: boolean;
 }): RunStep {
   const contract = input.contract;
   return {
@@ -2459,7 +2521,8 @@ function compileSchemaValueStep(input: {
     format: contract.format,
     validationPlan: artifactValidatorRegistry.resolvePlan(contract),
     details: input.details,
-    controlPlane: input.controlPlane ? structuredClone(input.controlPlane) : undefined
+    controlPlane: input.controlPlane ? structuredClone(input.controlPlane) : undefined,
+    optional: input.optional || undefined
   };
 }
 
@@ -2503,7 +2566,8 @@ function compileRepeatBody(
           final: false
         }, controlPlane));
       } else {
-        walkSchema(child, `${repeat.parentPath}.${child.names[0]}[${iteration}]`, steps, {
+        const childSchema = assertSchemaNode(child, `${repeat.parentPath}.repeat[${iteration}]`);
+        walkSchema(childSchema, `${repeat.parentPath}.${childSchema.names[0]}[${iteration}]`, steps, {
           name: repeat.parentPath,
           type: "object",
           format: { name: "markdown", options: { layout: "outline" } },
@@ -2530,6 +2594,10 @@ function definitionDetails(defines: DefinitionPart[]): string[] {
       details.push(...statementDefinitionDetails(definition));
       continue;
     }
+    if (definition.tag === "!ref") {
+      details.push(`ref: ${definition.target}`);
+      continue;
+    }
     details.push(...definitionDetails(definition.defines));
     details.push(...(definition.asserts ?? []).map((value) => `asserts: ${value}`));
   }
@@ -2551,9 +2619,16 @@ function statementDefinitionDetails(statement: StatementNode, path: string[] = [
 async function snapshotExternalSchemas(memoryRoot: string, steps: RunStep[]): Promise<void> {
   for (const step of steps) {
     if (step.schema?.kind === "external" && !step.schema.node) {
-      const memory = await findMemoryByName(memoryRoot, "schemas", step.schema.name);
+      const memory = await findSchemaMemory(memoryRoot, step.schema.name);
       if (!memory) throw new Error(`schema not found: ${step.schema.name}`);
-      step.schema.node = cloneSchema(schemaNodeFromMemory(memory.entity as SchemaMemory));
+      step.schema.node = await resolveSchemaReferences(
+        memoryRoot,
+        schemaNodeFromMemory(memory.entity as SchemaMemory),
+        [memoryReference(memory)]
+      );
+    }
+    if (step.schema?.kind === "inline") {
+      step.schema.node = await resolveSchemaReferences(memoryRoot, step.schema.node, [`inline:${step.schema.id}`]);
     }
     if (step.schema?.node && step.artifact && step.type && step.format) {
       step.validationPlan = artifactValidatorRegistry.resolvePlan(stepContract(step));
@@ -2573,11 +2648,108 @@ async function snapshotExternalSchemas(memoryRoot: string, steps: RunStep[]): Pr
   }
 }
 
+function artifactSchemaNeedsResolution(schema: ActionNode["artifact"]["schema"]): boolean {
+  if (!schema || typeof schema === "string") return false;
+  if (schema.tag === "!ref") return true;
+  return schemaHasRef(schema);
+}
+
+async function resolveSchemaReferences(memoryRoot: string, schema: SchemaNode, stack: string[]): Promise<SchemaNode> {
+  const resolved = cloneSchema(schema);
+  if (resolved.fields) {
+    resolved.fields = await Promise.all(resolved.fields.map((field, index) =>
+      resolveSchemaField(memoryRoot, field, `${stack.at(-1) ?? "schema"}.fields[${index}]`, stack)
+    ));
+  }
+  if (resolved.item) {
+    resolved.item = await resolveSchemaItem(memoryRoot, resolved.item, `${stack.at(-1) ?? "schema"}.item`, stack);
+  }
+  if (resolved.items) {
+    resolved.items = await Promise.all(resolved.items.map((item, index) =>
+      resolveSchemaItem(memoryRoot, item, `${stack.at(-1) ?? "schema"}.items[${index}]`, stack)
+    ));
+  }
+  return resolved;
+}
+
+async function resolveSchemaField(
+  memoryRoot: string,
+  field: StaticSchemaField | RepeatNode,
+  path: string,
+  stack: string[]
+): Promise<StaticSchemaField | RepeatNode> {
+  if (typeof field === "object" && field.tag === "!repeat") {
+    return {
+      ...field,
+      body: await Promise.all(field.body.map((bodyField, index) =>
+        resolveStaticSchemaField(memoryRoot, bodyField, `${path}.body[${index}]`, stack)
+      ))
+    };
+  }
+  return resolveStaticSchemaField(memoryRoot, field, path, stack);
+}
+
+async function resolveStaticSchemaField(
+  memoryRoot: string,
+  field: StaticSchemaField,
+  path: string,
+  stack: string[]
+): Promise<StaticSchemaField> {
+  if (typeof field === "string") return field;
+  if (field.tag === "!ref") return resolveSchemaRef(memoryRoot, field, path, stack);
+  return resolveSchemaReferences(memoryRoot, field, [...stack, `inline:${path}`]);
+}
+
+async function resolveSchemaItem(
+  memoryRoot: string,
+  item: SchemaNode | MemoryRefNode,
+  path: string,
+  stack: string[]
+): Promise<SchemaNode> {
+  if (item.tag === "!ref") return resolveSchemaRef(memoryRoot, item, path, stack);
+  return resolveSchemaReferences(memoryRoot, item, [...stack, `inline:${path}`]);
+}
+
+async function resolveSchemaRef(
+  memoryRoot: string,
+  ref: MemoryRefNode,
+  path: string,
+  stack: string[]
+): Promise<SchemaNode> {
+  if (!ref.target.startsWith("schemas/")) {
+    throw new Error(`schema reference at ${path} must target schemas/*, got ${ref.target}`);
+  }
+  if (stack.includes(ref.target)) {
+    throw new Error(`Schema reference cycle detected: ${[...stack, ref.target].join(" -> ")}`);
+  }
+  const memory = await findSchemaMemory(memoryRoot, ref.target);
+  if (!memory) throw new Error(`schema not found: ${ref.target}`);
+  return resolveSchemaReferences(memoryRoot, schemaNodeFromMemory(memory.entity as SchemaMemory), [...stack, ref.target]);
+}
+
+function schemaHasRef(schema: SchemaNode): boolean {
+  return (schema.fields ?? []).some((field) => schemaFieldHasRef(field)) ||
+    (schema.item ? staticSchemaFieldHasRef(schema.item) : false) ||
+    (schema.items ?? []).some((item) => staticSchemaFieldHasRef(item));
+}
+
+function schemaFieldHasRef(field: StaticSchemaField | RepeatNode): boolean {
+  if (typeof field !== "object") return false;
+  if (field.tag === "!repeat") return field.body.some((bodyField) => staticSchemaFieldHasRef(bodyField));
+  return staticSchemaFieldHasRef(field);
+}
+
+function staticSchemaFieldHasRef(field: StaticSchemaField): boolean {
+  if (typeof field !== "object") return false;
+  if (field.tag === "!ref") return true;
+  return schemaHasRef(field);
+}
+
 function schemaHasRepeat(schema: SchemaNode): boolean {
   return (schema.fields ?? []).some((field) =>
-    typeof field === "object" && (field.tag === "!repeat" || schemaHasRepeat(field))
-  ) || (schema.item !== undefined && schemaHasRepeat(schema.item)) ||
-    (schema.items ?? []).some((item) => schemaHasRepeat(item));
+    typeof field === "object" && (field.tag === "!repeat" || (field.tag === "!schema" && schemaHasRepeat(field)))
+  ) || (schema.item?.tag === "!schema" && schemaHasRepeat(schema.item)) ||
+    (schema.items ?? []).some((item) => item.tag === "!schema" && schemaHasRepeat(item));
 }
 
 async function assembleSchemaArtifact(runsRoot: string, run: RunState, frame: RunFrame): Promise<string> {
@@ -2587,6 +2759,7 @@ async function assembleSchemaArtifact(runsRoot: string, run: RunState, frame: Ru
     if (!step.artifact || step.kind === "repeat") continue;
     const event = events.find((candidate) => candidate.stepId === step.id);
     if (!event) continue;
+    if (event.artifact.fields?.skipped === true) continue;
     const value = event.artifact.storage === "file" && event.artifact.path
       ? await readFile(join(runsRoot, event.artifact.path), "utf8")
       : String(event.artifact.value ?? "");
@@ -2604,6 +2777,43 @@ async function assembleSchemaArtifact(runsRoot: string, run: RunState, frame: Ru
     if (value.trim()) chunks.push(value.trim());
   }
   return `${chunks.join("\n\n")}\n`;
+}
+
+async function findSchemaMemory(memoryRoot: string, referenceOrName: string): Promise<MemoryFile | undefined> {
+  if (referenceOrName.startsWith("schemas/")) {
+    return findMemoryByReference(memoryRoot, "schemas", referenceOrName);
+  }
+  return findMemoryByName(memoryRoot, "schemas", referenceOrName);
+}
+
+async function findMemoryByReference(memoryRoot: string, kind: "schemas", reference: string): Promise<MemoryFile | undefined> {
+  const paths = await listMemoryFiles(memoryRoot, kind);
+  let hasInvalidMemory = false;
+
+  for (const path of paths) {
+    let file: MemoryFile;
+    try {
+      file = await readMemoryFile(kind, path);
+    } catch {
+      hasInvalidMemory = true;
+      continue;
+    }
+    if (memoryReference(file) === reference) {
+      return file;
+    }
+  }
+
+  if (hasInvalidMemory) {
+    throw new Error(
+      `schema ${reference} could not be resolved because the Memory store ` +
+      "contains invalid Memory YAML; run memsphere validate"
+    );
+  }
+  return undefined;
+}
+
+function memoryReference(file: MemoryFile): string {
+  return `${file.kind}/${file.entity.names[0] ?? ""}`;
 }
 
 async function findMemoryByName(memoryRoot: string, kind: "procedures" | "schemas", name: string): Promise<MemoryFile | undefined> {

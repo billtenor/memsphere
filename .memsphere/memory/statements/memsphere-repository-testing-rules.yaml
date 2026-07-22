@@ -1,0 +1,40 @@
+!statement
+syntax: memsphere-20260719-stable
+names:
+  - memsphere 代码仓库测试规范
+  - memsphere-repository-testing-rules
+defines:
+  - 规定 memsphere 代码与 Memory 变更交付前的最低测试和校验要求。
+asserts:
+  - 交付前必须通过 npm run typecheck、npm test、npm run build 和 memsphere validate；存在失败时不得声称交付完成。
+  - 必须记录实际执行的测试命令、结果和未执行项，不得用历史结果代替当前变更验证。
+  - npm run validate 当前只执行构建，不得替代 memsphere validate。
+sections:
+  - !statement
+    names:
+      - 单元测试
+    asserts:
+      - 修改代码行为时必须补充或更新覆盖该行为的单元测试，并先运行受影响测试文件；修复 bug 必须增加能够复现原问题的回归测试。
+      - 完成针对性测试后必须运行 npm test 全量回归，不得通过删除、跳过或弱化既有断言使测试通过。
+      - 修改 CLI、Memory、Run、Artifact、Review、View、Reserved Store、Archive 或 Migration 时，测试必须覆盖成功路径以及本次变更涉及的失败或边界路径。
+  - !statement
+    names:
+      - Memory Store 校验
+    asserts:
+      - 新建、修改、移动或删除 .memsphere/memory 中的任意 Concept、Statement、Procedure 或 Schema 后，必须运行 memsphere validate。
+      - memsphere validate 必须确认 config 与各 root 可用、四类当前 Memory 均可解析、syntax 与字段结构合法，并检查规范名称和别名等 catalog 冲突。
+      - memsphere validate 不验证自然语言 asserts 是否成立、Procedure 是否能按预期运行、Artifact 内容是否符合业务语义，也不直接校验 reserved-memory 源目录；这些必须由针对性测试或实际运行验证。
+  - !statement
+    names:
+      - System 与 Reserved Memory
+    asserts:
+      - 修改 reserved-memory 中的 Memory、manifest 或安装行为时，必须运行 test/reserved-store.test.ts，验证 System Memory 安装、Reserved Memory 保留或导入、旧路径清理和重复 init 行为。
+      - 修改 System Memory 后必须执行 memsphere init 刷新当前工程安装副本，再运行 memsphere validate；源文件与安装副本不得出现非预期差异。
+  - !statement
+    names:
+      - 针对性验证
+    asserts:
+      - 修改 Memory YAML 语法、实体 schema、解析或序列化时，必须运行 memory-schema、memory-syntax 和 memory-serializer 相关测试。
+      - 修改 Schema 或 Artifact 契约、格式解析和 validator 时，必须运行 artifact-validation、artifact-format-fixtures 及相关 migration 测试，并同时覆盖合法与非法 Artifact。
+      - 修改 Procedure Run、分支、循环、Call、Schema 填写或 Repeat 时，必须运行 run-store 和 run-command 相关测试；修改具体 Procedure Memory 时还必须至少验证其能够被读取和启动。
+      - 修改 Review、View 或归档行为时，必须运行对应的 review-store、view 或 archive-store 测试。

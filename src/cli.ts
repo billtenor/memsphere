@@ -28,6 +28,7 @@ import {
   runReviewVoteCommand,
   runReviewWaitCommand,
   runShowCommand,
+  runSkipCommand,
   runStartCommand,
   runStepShowCommand,
   runStatusCommand,
@@ -284,6 +285,12 @@ run
   .argument("<count>", "non-negative repeat count within the Schema limit")
   .requiredOption("--run <id>", "run id")
   .action(runRepeatCommand);
+
+run
+  .command("skip")
+  .description("Skip the current optional Schema field step.")
+  .requiredOption("--run <id>", "run id")
+  .action(runSkipCommand);
 
 run
   .command("status")

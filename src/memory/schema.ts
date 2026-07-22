@@ -14,6 +14,7 @@ import {
   type DefinitionPart,
   type FlowNode,
   type IfNode,
+  type MemoryRefNode,
   type MemoryEntity,
   type ProcedureMemory,
   type ProcedureNode,
@@ -109,6 +110,23 @@ let legacyIfNodeSchema: z.ZodType<IfNode, z.ZodTypeDef, unknown>;
 
 const definesSchema = z.lazy(() => z.array(definitionPartSchema)).default([]);
 
+const logicalMemoryReferenceSchema = nonEmptyString.superRefine((value, context) => {
+  const separator = value.indexOf("/");
+  const kind = separator > 0 ? value.slice(0, separator) : "";
+  const name = separator > 0 ? value.slice(separator + 1).trim() : "";
+  if (!separator || separator <= 0 || !["concepts", "statements", "schemas", "procedures"].includes(kind) || !name) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Memory reference target must be a logical reference such as schemas/Name"
+    });
+  }
+});
+
+const memoryRefNodeSchema: z.ZodType<MemoryRefNode, z.ZodTypeDef, unknown> = z.object({
+  tag: z.literal("!ref"),
+  target: logicalMemoryReferenceSchema
+}).strict();
+
 const formatInputSchema = z.union([
   nonEmptyString.transform((name) => ({ name, options: {} })),
   z.object({ name: nonEmptyString }).catchall(z.unknown()).transform((value) => {
@@ -168,11 +186,12 @@ const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(()
     names: namesSchema,
     defines: definesSchema,
     asserts: z.array(nonEmptyString).optional(),
+    optional: z.boolean().optional(),
     type: nonEmptyString.optional(),
     format: schemaFormatInputSchema,
     fields: z.lazy(() => z.array(schemaFieldSchema)).optional(),
-    item: schemaNodeSchema.optional(),
-    items: z.array(schemaNodeSchema).min(2).optional()
+    item: z.lazy(() => z.union([schemaNodeSchema, memoryRefNodeSchema])).optional(),
+    items: z.array(z.lazy(() => z.union([schemaNodeSchema, memoryRefNodeSchema]))).min(2).optional()
   }).strict().superRefine((node, context) => {
     if (
       node.names.length === 0 &&
@@ -193,10 +212,11 @@ const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(()
   }))
 );
 
-definitionPartSchema = z.lazy(() => z.union([nonEmptyString, statementNodeSchema, schemaNodeSchema]));
+definitionPartSchema = z.lazy(() => z.union([nonEmptyString, statementNodeSchema, schemaNodeSchema, memoryRefNodeSchema]));
 
 staticSchemaFieldSchema = z.lazy(() => z.union([
   nonEmptyString,
+  memoryRefNodeSchema,
   schemaNodeSchema.superRefine((field, context) => {
     if (field.names.length === 0) {
       context.addIssue({
@@ -230,10 +250,10 @@ const repeatLimitSchema = z.object({
 function schemaContainsRepeat(node: SchemaNode): boolean {
   return (node.fields ?? []).some((field) =>
     typeof field === "object" && (
-      field.tag === "!repeat" || schemaContainsRepeat(field)
+      field.tag === "!repeat" || (field.tag === "!schema" && schemaContainsRepeat(field))
     )
-  ) || (node.item !== undefined && schemaContainsRepeat(node.item)) ||
-    (node.items ?? []).some((item) => schemaContainsRepeat(item));
+  ) || (node.item?.tag === "!schema" && schemaContainsRepeat(node.item)) ||
+    (node.items ?? []).some((item) => item.tag === "!schema" && schemaContainsRepeat(item));
 }
 
 export function inferSchemaType(node: SchemaNode): string {
@@ -332,7 +352,7 @@ function validateSchemaLocalContract(node: SchemaNode, context: z.RefinementCtx)
     });
   }
 
-  if (node.item && schemaContainsRepeat(node.item)) {
+  if (node.item?.tag === "!schema" && schemaContainsRepeat(node.item)) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["item"],
@@ -340,7 +360,7 @@ function validateSchemaLocalContract(node: SchemaNode, context: z.RefinementCtx)
     });
   }
   for (const [index, item] of (node.items ?? []).entries()) {
-    if (!schemaContainsRepeat(item)) continue;
+    if (item.tag !== "!schema" || !schemaContainsRepeat(item)) continue;
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["items", index],
@@ -365,7 +385,7 @@ function sameFormat(left: ArtifactFormatSpec, right: ArtifactFormatSpec): boolea
 }
 
 const repeatBodyFieldSchema = z.lazy(() => staticSchemaFieldSchema.superRefine((field, context) => {
-  if (typeof field === "object" && schemaContainsRepeat(field)) {
+  if (typeof field === "object" && field.tag === "!schema" && schemaContainsRepeat(field)) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       message: "Repeat body must not contain a nested Repeat"
@@ -386,7 +406,7 @@ const legacyArtifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> =
   name: nonEmptyString,
   type: nonEmptyString.default("string"),
   format: artifactFormatInputSchema,
-  schema: z.lazy(() => z.union([nonEmptyString, schemaNodeSchema])).optional(),
+  schema: z.lazy(() => z.union([nonEmptyString, schemaNodeSchema, memoryRefNodeSchema])).optional(),
   final: z.boolean().optional()
 }).strict().superRefine((artifact, context) => {
   const formatName = artifact.format.name;
@@ -464,7 +484,7 @@ const legacyArtifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> =
     });
   }
 
-  if (typeof artifact.schema === "object") {
+  if (typeof artifact.schema === "object" && artifact.schema.tag === "!schema") {
     const rootContract = resolveSchemaContract(artifact.schema, artifact.format);
     if (rootContract.type !== artifact.type || !sameFormat(rootContract.format, artifact.format)) {
       context.addIssue({
@@ -477,6 +497,7 @@ const legacyArtifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> =
 
   if (
     typeof artifact.schema === "object" &&
+    artifact.schema.tag === "!schema" &&
     schemaContainsRepeat(artifact.schema) &&
     !(artifact.type === "object" && formatName === "markdown" && layout === "outline")
   ) {
@@ -770,6 +791,7 @@ export {
   definitionPartSchema,
   flowNodeSchema,
   ifNodeSchema,
+  memoryRefNodeSchema,
   repeatNodeSchema,
   schemaFieldSchema,
   schemaNodeSchema,

@@ -1,8 +1,8 @@
 !statement
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - Memory 访问规则
-  - Memory discovery and read rules
+  - memsphere-memory-access-rules
 defines:
   - 规定 Agent 如何通过 memsphere CLI 发现和读取当前工程中的 Memory。
 asserts:

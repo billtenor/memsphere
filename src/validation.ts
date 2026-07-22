@@ -16,6 +16,7 @@ import type { FlowNode, PermissionGrants, ProcedureMemory } from "./memory/ast.j
 import { analyzeMemoryDescriptors } from "./memory/catalog.js";
 import { memoryKinds, type MemoryKind } from "./memory/kinds.js";
 import type { ProviderMemoryDescriptor } from "./memory/provider.js";
+import { validateMemoryReferences } from "./memory/references.js";
 import { listMemoryFiles, pathExists, readMemoryFile, type MemoryFile } from "./memory/store.js";
 import { currentMemorySyntax, readMemorySyntax } from "./memory/syntax.js";
 import { parseMemoryYaml } from "./memory/yaml.js";
@@ -115,7 +116,9 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
       continue;
     }
 
-    descriptors.push(...await validateKindDirectory(memoryRoot, kind, issues, validFiles));
+    const result = await validateKindDirectory(memoryRoot, kind, issues);
+    descriptors.push(...result.descriptors);
+    validFiles.push(...result.files);
   }
 
   const catalogIssues = analyzeMemoryDescriptors(descriptors);
@@ -126,6 +129,9 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
     });
   }
 
+  for (const issue of validateMemoryReferences(validFiles)) {
+    issues.push(issue);
+  }
   validateControlPlaneMemories(validFiles, config.controlPlane ? createControlPlaneSnapshot(config.controlPlane) : undefined, issues);
 
   return {
@@ -140,9 +146,8 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
 async function validateKindDirectory(
   memoryRoot: string,
   kind: MemoryKind,
-  issues: ValidationIssue[],
-  validFiles: MemoryFile[]
-): Promise<ProviderMemoryDescriptor[]> {
+  issues: ValidationIssue[]
+): Promise<{ descriptors: ProviderMemoryDescriptor[]; files: MemoryFile[] }> {
   let filePaths: string[];
 
   try {
@@ -152,14 +157,15 @@ async function validateKindDirectory(
       path: join(memoryRoot, kind),
       message: formatError(error)
     });
-    return [];
+    return { descriptors: [], files: [] };
   }
 
   const descriptors: ProviderMemoryDescriptor[] = [];
+  const files: MemoryFile[] = [];
   for (const filePath of filePaths) {
     try {
       const file = await readMemoryFile(kind, filePath);
-      validFiles.push(file);
+      files.push(file);
       descriptors.push({
         id: filePath,
         kind,
@@ -174,7 +180,7 @@ async function validateKindDirectory(
       });
     }
   }
-  return descriptors;
+  return { descriptors, files };
 }
 
 function configIssuePath(configPath: string, path: PropertyKey[]): string {
