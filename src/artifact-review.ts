@@ -14,9 +14,15 @@ export type ArtifactReviewStatus = "pending" | "awaiting_runner_vote" | "awaitin
 export type ArtifactReviewRoundStatus = "pending" | "awaiting_runner_vote" | "passed" | "changes_requested";
 
 export type ArtifactReviewAnchor = {
+  submissionId: string;
   target: string;
   location?: string;
   sourceHash: string;
+  context?: string;
+};
+
+export type ArtifactReviewAgentAnchorInput = Omit<ArtifactReviewAnchor, "submissionId"> & {
+  submissionId?: string;
 };
 
 export type ArtifactReviewComment = {

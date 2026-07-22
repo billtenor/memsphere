@@ -31,6 +31,7 @@ export const browserHtml = String.raw`<!doctype html>
       --ok: #23744d;
       --shadow: 0 1px 2px rgba(25, 30, 35, .08);
       --review-width: 380px;
+      --artifact-review-left: 58%;
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -139,6 +140,7 @@ export const browserHtml = String.raw`<!doctype html>
     .review-active .commentable:hover .inline-plus, .review-active .field-table th:hover .inline-plus, .review-active .inline-plus:focus, .review-active .section-header:hover .target-add, .review-active .schema-field-content:hover .target-add, .review-active .target-add:focus { opacity: 1; }
     .inline-plus:hover, .target-add:hover { border-color: var(--accent); color: var(--accent); }
     body:not(.review-active) .target-add, body:not(.review-active) .inline-plus { display: none; }
+    body.artifact-review-modal-open .content .target-add, body.artifact-review-modal-open .content .inline-plus { display: none !important; }
     body:not(.review-active) .section-header { grid-template-columns: 22px minmax(0, 1fr) auto; }
     body:not(.review-active) .schema-field-content { grid-template-columns: minmax(0, 1fr) auto; }
     .inline-comment-editor { grid-column: 2; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 10px; box-shadow: var(--shadow); margin-top: 8px; width: 100%; }
@@ -220,6 +222,14 @@ export const browserHtml = String.raw`<!doctype html>
     .comment-card { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; }
     .comment-card b { display: block; overflow-wrap: anywhere; }
     .comment-card p { margin: 6px 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .artifact-review-markdown { overflow-wrap: anywhere; }
+    .artifact-review-markdown > :first-child { margin-top: 0; }
+    .artifact-review-markdown > :last-child { margin-bottom: 0; }
+    .artifact-review-markdown p { margin: 6px 0 8px; }
+    .artifact-review-markdown ul, .artifact-review-markdown ol { margin: 6px 0 8px; padding-left: 22px; }
+    .artifact-review-markdown code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 12px; background: #e9ece6; border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; }
+    .artifact-review-markdown pre { overflow-x: auto; background: #e9ece6; border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; }
+    .artifact-review-markdown pre code { background: none; border: 0; padding: 0; white-space: pre; }
     .inline-thread {
       grid-column: 2;
       border-left: 3px solid var(--accent);
@@ -252,7 +262,11 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
     .artifact-review-row:last-child { border-bottom: 0; }
     .artifact-review-row-main { min-width: 0; display: grid; gap: 3px; }
+    .artifact-review-participant-link { width: fit-content; max-width: 100%; border: 0; padding: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
+    .artifact-review-participant-link:hover, .artifact-review-participant-link:focus-visible { color: var(--accent); text-decoration-color: currentColor; outline: 0; }
     .artifact-review-controls { display: grid; gap: 8px; }
+    .artifact-review-time-range { display: grid; gap: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+    .artifact-review-time-value { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
     .artifact-review-select { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); padding: 8px 9px; }
     .artifact-review-round-select { position: relative; min-width: 0; }
     .artifact-review-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; cursor: pointer; }
@@ -268,6 +282,11 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-vote .btn.active { background: var(--accent-soft); border-color: var(--accent); color: #173f3c; font-weight: 700; }
     .artifact-review-message { border-left: 3px solid var(--accent); background: #f2f8f6; padding: 8px 10px; color: #315653; }
     .artifact-review-message.warn { border-left-color: var(--warn); background: #fbf7f0; color: #71471f; }
+    .artifact-review-opinion { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); scroll-margin-top: 16px; transition: background 140ms ease, box-shadow 140ms ease; }
+    .artifact-review-opinion-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+    .artifact-review-opinion-head time { flex: 0 0 auto; font-size: 12px; font-variant-numeric: tabular-nums; }
+    .artifact-review-opinion .block-title { margin-top: 2px; }
+    .artifact-review-opinion-located { background: #edf6f3; box-shadow: 0 0 0 3px rgba(40, 108, 103, .2); }
     .artifact-review-comment { display: grid; gap: 6px; }
     .artifact-review-candidate { border-left-color: var(--accent); }
     .artifact-review-candidate .section-body { display: block; }
@@ -280,6 +299,29 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-dialog-body { padding: 18px; display: grid; gap: 12px; }
     .artifact-review-dialog-body h3 { margin: 0; font-size: 18px; }
     .artifact-review-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    dialog.artifact-review-modal { width: calc(100vw - 32px); max-width: 1680px; height: calc(100vh - 32px); max-height: 1120px; border: 1px solid var(--line); border-radius: 8px; padding: 0; color: var(--text); background: var(--bg); box-shadow: 0 24px 80px rgba(25, 30, 35, .28); overflow: hidden; }
+    dialog.artifact-review-modal::backdrop { background: rgba(22, 28, 30, .42); }
+    .artifact-review-modal-shell { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+    .artifact-review-modal-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 16px 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .artifact-review-modal-head h2 { margin: 0; font-size: 20px; letter-spacing: 0; }
+    .artifact-review-modal-heading { min-width: 0; display: grid; gap: 5px; }
+    .artifact-review-modal-subtitle { color: var(--muted); overflow-wrap: anywhere; }
+    .artifact-review-modal-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .artifact-review-modal-body { min-height: 0; display: grid; grid-template-columns: minmax(320px, var(--artifact-review-left)) 8px minmax(320px, 1fr); }
+    .artifact-review-modal-pane { min-width: 0; min-height: 0; overflow: auto; padding: 16px 18px 28px; }
+    .artifact-review-modal-pane.review-pane { background: #fbfbf8; }
+    .artifact-review-modal-resizer { position: relative; min-width: 8px; background: #fbfbf8; cursor: col-resize; touch-action: none; outline: none; }
+    .artifact-review-modal-resizer::before { content: ""; position: absolute; inset: 0 auto 0 3px; width: 1px; background: var(--line); }
+    .artifact-review-modal-resizer:hover::before, .artifact-review-modal-resizer:focus-visible::before, body.artifact-review-resizing .artifact-review-modal-resizer::before { width: 2px; background: var(--accent); }
+    .artifact-review-mobile-tabs { display: none; }
+    .artifact-review-artifact-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 10px; }
+    .artifact-review-artifact-head h3 { margin: 0; font-size: 16px; }
+    .artifact-review-artifact-content { min-width: 0; }
+    .artifact-review-target { border-radius: 6px; transition: background 140ms ease, box-shadow 140ms ease; }
+    .artifact-review-target-located { background: #edf6f3; box-shadow: 0 0 0 3px rgba(40, 108, 103, .2); }
+    .artifact-review-locate-failure { margin-bottom: 10px; }
+    .artifact-review-comment-context { margin-top: 7px; padding: 7px 8px; border-left: 2px solid var(--line); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .artifact-review-readonly { color: var(--muted); font-size: 12px; }
     code { background: var(--soft); border-radius: 4px; padding: 1px 4px; }
     body.task-mode .search, body.task-mode #expand, body.task-mode #collapse { display: none; }
     body.review-drawer-open .shell { grid-template-columns: 300px minmax(0, 1fr) 8px var(--review-width); }
@@ -307,6 +349,15 @@ export const browserHtml = String.raw`<!doctype html>
       .toolbar { flex-direction: column; }
       body.review-drawer-open .sidebar, body.review-drawer-open .content { display: none; }
       body.review-drawer-open .review { min-height: 100vh; border-left: 0; }
+      dialog.artifact-review-modal { width: 100vw; height: 100dvh; max-height: none; border: 0; border-radius: 0; }
+      .artifact-review-modal-head { padding: 12px 14px; }
+      .artifact-review-modal-body { display: block; }
+      .artifact-review-modal-resizer { display: none; }
+      .artifact-review-mobile-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--surface); }
+      .artifact-review-modal-shell { grid-template-rows: auto auto minmax(0, 1fr); }
+      .artifact-review-modal-pane { height: 100%; padding: 14px 14px 24px; }
+      .artifact-review-modal[data-mobile-pane="artifact"] .review-pane { display: none; }
+      .artifact-review-modal[data-mobile-pane="review"] .artifact-pane { display: none; }
     }
   </style>
 </head>
@@ -365,6 +416,40 @@ export const browserHtml = String.raw`<!doctype html>
     </aside>
   </main>
 
+  <dialog class="artifact-review-modal" id="artifact-review-modal" aria-labelledby="artifact-review-modal-title">
+    <div class="artifact-review-modal-shell">
+      <header class="artifact-review-modal-head">
+        <div class="artifact-review-modal-heading">
+          <h2 id="artifact-review-modal-title">Artifact Review</h2>
+          <div class="artifact-review-modal-subtitle" id="artifact-review-modal-subtitle"></div>
+          <div class="artifact-review-modal-meta" id="artifact-review-modal-meta"></div>
+        </div>
+        <button class="btn" id="artifact-review-modal-close" type="button">Close</button>
+      </header>
+      <div class="artifact-review-mobile-tabs" id="artifact-review-mobile-tabs">
+        <button class="view-tab active" id="artifact-review-artifact-tab" type="button">Artifact</button>
+        <button class="view-tab" id="artifact-review-review-tab" type="button">Review</button>
+      </div>
+      <div class="artifact-review-modal-body">
+        <section class="artifact-review-modal-pane artifact-pane" id="artifact-review-artifact-pane">
+          <div class="artifact-review-artifact-head"><h3 id="artifact-review-artifact-title">Artifact</h3><span class="artifact-review-readonly" id="artifact-review-round-mode"></span></div>
+          <div id="artifact-review-artifact-content" class="artifact-review-artifact-content"></div>
+        </section>
+        <div class="artifact-review-modal-resizer" id="artifact-review-modal-resizer" role="separator" aria-controls="artifact-review-artifact-pane artifact-review-review-pane" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="75" aria-valuenow="58" tabindex="0"></div>
+        <aside class="artifact-review-modal-pane review-pane" id="artifact-review-review-pane">
+          <div id="artifact-review-modal-controls" class="review-list"></div>
+          <section class="panel">
+            <div class="toolbar" style="margin-bottom: 10px;">
+              <div><div class="block-title" id="artifact-review-comments-title" style="margin-top: 0;">Comments</div><div class="muted" id="artifact-review-comment-summary"></div></div>
+              <button class="btn primary" id="artifact-review-submit">Submit</button>
+            </div>
+            <div id="artifact-review-modal-comments" class="comment-list"></div>
+          </section>
+        </aside>
+      </div>
+    </div>
+  </dialog>
+
   <script>
     const kindOrder = ["procedures", "schemas", "concepts", "statements"];
     const selectedReviewKey = "memsphere.selectedReview.v2";
@@ -374,6 +459,10 @@ export const browserHtml = String.raw`<!doctype html>
     const hideSystemMemoriesKey = "memsphere.hideSystemMemories.v1";
     const artifactReviewIdentityKey = "memsphere.artifactReviewIdentity.v1";
     const artifactReviewOpenedKey = "memsphere.artifactReviewOpened.v1";
+    const artifactReviewSelectedKey = "memsphere.artifactReviewSelected.v1";
+    const artifactReviewRoundKey = "memsphere.artifactReviewRound.v1";
+    const artifactReviewMobilePaneKey = "memsphere.artifactReviewMobilePane.v1";
+    const artifactReviewSplitKey = "memsphere.artifactReviewSplit.v1";
     const reviewPanelWidthKey = "memsphere.reviewPanelWidth.v1";
     const displayLanguage = localStorage.getItem(displayLanguageKey) === "yaml" ? "yaml" : "zh";
     const vocabulary = {
@@ -447,6 +536,10 @@ export const browserHtml = String.raw`<!doctype html>
       legacyReadOnly: { zh: "旧版只读", yaml: "v1 read-only" },
       validated: { zh: "校验通过", yaml: "validated" },
       artifactReview: { zh: "产物评审", yaml: "Artifact Review" },
+      reviewArtifact: { zh: "评审产物", yaml: "Reviewed artifact" },
+      artifactPane: { zh: "产物", yaml: "Artifact" },
+      reviewPane: { zh: "评审", yaml: "Review" },
+      close: { zh: "关闭", yaml: "Close" },
       reviewers: { zh: "评审", yaml: "Review" },
       pendingReview: { zh: "待评审", yaml: "Pending review" },
       reviewedArtifact: { zh: "待评审产物", yaml: "Artifact under review" },
@@ -461,6 +554,11 @@ export const browserHtml = String.raw`<!doctype html>
       roundSummary: { zh: "本轮汇总", yaml: "Round summary" },
       myDraft: { zh: "我的草稿", yaml: "My draft" },
       submittedOpinions: { zh: "已提交意见", yaml: "Submitted opinions" },
+      reviewComments: { zh: "评审意见", yaml: "Review comments" },
+      voteSummary: { zh: "投票摘要", yaml: "Vote summary" },
+      noReviewComments: { zh: "无单独评审意见", yaml: "No separate review comments" },
+      reviewTime: { zh: "评审时间", yaml: "Review time" },
+      inProgress: { zh: "进行中", yaml: "In progress" },
       automatic: { zh: "自动", yaml: "Automatic" },
       round: { zh: "轮次", yaml: "Round" },
       revisionSummary: { zh: "修改摘要", yaml: "Revision summary" },
@@ -504,6 +602,16 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewHistoryRoundId: null,
       artifactReviewIdentityByReview: readStoredObject(artifactReviewIdentityKey),
       artifactReviewOpenedRounds: readStoredObject(artifactReviewOpenedKey),
+      artifactReviewSelectedByRun: readStoredObject(artifactReviewSelectedKey),
+      artifactReviewRoundByReview: readStoredObject(artifactReviewRoundKey),
+      artifactReviewModalOpen: false,
+      artifactReviewMobilePane: localStorage.getItem(artifactReviewMobilePaneKey) === "review" ? "review" : "artifact",
+      artifactReviewSplit: Number.parseFloat(localStorage.getItem(artifactReviewSplitKey) || "") || 58,
+      artifactReviewLocateFailure: "",
+      artifactReviewOpenSelect: "",
+      artifactReviewReturnScrollY: null,
+      artifactReviewReturnFocus: "",
+      artifactReviewReturnFocusTop: null,
       reviewSnapshots: new Map(),
       loadingSnapshots: new Set(),
       reviewDrawerOpen: false,
@@ -535,6 +643,22 @@ export const browserHtml = String.raw`<!doctype html>
       sidebar: document.querySelector(".sidebar"),
       reviewToggle: document.getElementById("review-toggle"),
       reviewClose: document.getElementById("review-close"),
+      artifactReviewModal: document.getElementById("artifact-review-modal"),
+      artifactReviewModalTitle: document.getElementById("artifact-review-modal-title"),
+      artifactReviewModalSubtitle: document.getElementById("artifact-review-modal-subtitle"),
+      artifactReviewModalMeta: document.getElementById("artifact-review-modal-meta"),
+      artifactReviewModalClose: document.getElementById("artifact-review-modal-close"),
+      artifactReviewModalControls: document.getElementById("artifact-review-modal-controls"),
+      artifactReviewModalComments: document.getElementById("artifact-review-modal-comments"),
+      artifactReviewCommentsTitle: document.getElementById("artifact-review-comments-title"),
+      artifactReviewCommentSummary: document.getElementById("artifact-review-comment-summary"),
+      artifactReviewSubmit: document.getElementById("artifact-review-submit"),
+      artifactReviewArtifactTitle: document.getElementById("artifact-review-artifact-title"),
+      artifactReviewArtifactContent: document.getElementById("artifact-review-artifact-content"),
+      artifactReviewRoundMode: document.getElementById("artifact-review-round-mode"),
+      artifactReviewModalResizer: document.getElementById("artifact-review-modal-resizer"),
+      artifactReviewArtifactTab: document.getElementById("artifact-review-artifact-tab"),
+      artifactReviewReviewTab: document.getElementById("artifact-review-review-tab"),
       memoryTab: document.getElementById("memory-tab"),
       taskTab: document.getElementById("task-tab")
     };
@@ -543,16 +667,29 @@ export const browserHtml = String.raw`<!doctype html>
     document.getElementById("collapse").addEventListener("click", () => setAllSections(false));
     document.getElementById("refresh").addEventListener("click", () => loadAll().catch(renderFatalError));
     el.createReview.addEventListener("click", () => runButtonAction(el.createReview, createReview));
-    el.reviewToggle.addEventListener("click", () => setReviewDrawer(!state.reviewDrawerOpen));
+    el.reviewToggle.addEventListener("click", () => handleReviewToggle().catch(error => alert(error instanceof Error ? error.message : String(error))));
     el.reviewClose.addEventListener("click", () => setReviewDrawer(false));
     el.reviewResizer.addEventListener("pointerdown", beginReviewResize);
     el.reviewResizer.addEventListener("keydown", resizeReviewWithKeyboard);
     el.reviewResizer.addEventListener("dblclick", () => setReviewPanelWidth(380, true));
     el.reviewResizer.setAttribute("aria-label", t("resizeReview"));
     el.reviewResizer.title = t("resizeReview") + " · " + t("resetReviewWidth");
+    el.artifactReviewModalResizer.setAttribute("aria-label", t("resizeReview"));
+    el.artifactReviewModalResizer.title = t("resizeReview") + " · " + t("resetReviewWidth");
     el.memoryTab.addEventListener("click", () => setViewMode("memory"));
     el.taskTab.addEventListener("click", () => setViewMode("task"));
     el.submitReview.addEventListener("click", () => runButtonAction(el.submitReview, submitReview));
+    el.artifactReviewModalClose.addEventListener("click", closeArtifactReviewModal);
+    el.artifactReviewSubmit.addEventListener("click", () => runButtonAction(el.artifactReviewSubmit, submitArtifactReview));
+    el.artifactReviewModalResizer.addEventListener("pointerdown", beginArtifactReviewModalResize);
+    el.artifactReviewModalResizer.addEventListener("keydown", resizeArtifactReviewModalWithKeyboard);
+    el.artifactReviewModalResizer.addEventListener("dblclick", () => setArtifactReviewSplit(58, true));
+    el.artifactReviewArtifactTab.addEventListener("click", () => setArtifactReviewMobilePane("artifact"));
+    el.artifactReviewReviewTab.addEventListener("click", () => setArtifactReviewMobilePane("review"));
+    el.artifactReviewModal.addEventListener("cancel", event => {
+      event.preventDefault();
+      closeArtifactReviewModal();
+    });
     el.search.addEventListener("input", () => {
       applyFilter();
       renderNav();
@@ -676,13 +813,20 @@ export const browserHtml = String.raw`<!doctype html>
     async function syncArtifactReviewContext(force = false) {
       if (state.viewMode !== "task") return;
       const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
-      const review = run?.artifactReview;
+      const reviews = artifactReviewSummariesForRun(run);
+      let reviewId = run && state.artifactReviewModalOpen ? state.artifactReviewSelectedByRun[run.id] : "";
+      let review = reviews.find(candidate => candidate.id === reviewId);
+      if (!review) review = defaultArtifactReviewSummary(run);
       if (!review?.round) {
         state.artifactReviewContext = null;
         state.artifactReviewConflict = "";
         return;
       }
-      const assignments = review.round.assignments || [];
+      if (run) {
+        state.artifactReviewSelectedByRun[run.id] = review.id;
+        writeStoredObject(artifactReviewSelectedKey, state.artifactReviewSelectedByRun);
+      }
+      const assignments = (review.round.assignments || []).filter(assignment => assignment.identityKind !== "agent");
       let identityId = state.artifactReviewIdentityByReview[review.id] || "";
       if (!assignments.some(assignment => assignment.identityId === identityId)) {
         identityId = assignments.length === 1 ? assignments[0].identityId : "";
@@ -692,14 +836,17 @@ export const browserHtml = String.raw`<!doctype html>
         writeStoredObject(artifactReviewIdentityKey, state.artifactReviewIdentityByReview);
       }
       if (identityId && (force || !hasOpenInlineEditor())) {
-        await loadArtifactReviewContext(review.id, review.currentRoundId, identityId);
+        const requestedRoundId = state.artifactReviewRoundByReview[review.id] || review.currentRoundId;
+        try {
+          await loadArtifactReviewContext(review.id, requestedRoundId, identityId);
+        } catch (error) {
+          if (requestedRoundId === review.currentRoundId) throw error;
+          state.artifactReviewRoundByReview[review.id] = review.currentRoundId;
+          writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
+          await loadArtifactReviewContext(review.id, review.currentRoundId, identityId);
+        }
       } else if (!identityId) {
         state.artifactReviewContext = null;
-      }
-      if (!state.artifactReviewOpenedRounds[review.currentRoundId]) {
-        state.reviewDrawerOpen = true;
-        state.artifactReviewOpenedRounds[review.currentRoundId] = true;
-        writeStoredObject(artifactReviewOpenedKey, state.artifactReviewOpenedRounds);
       }
     }
 
@@ -715,11 +862,10 @@ export const browserHtml = String.raw`<!doctype html>
         if (!response.ok) throw new Error(await response.text());
         const context = await response.json();
         if (requestId !== state.artifactReviewRequest) return;
-        const previousRoundId = state.artifactReviewContext?.review?.currentRoundId;
-        if (previousRoundId && previousRoundId !== context.review?.currentRoundId) {
-          state.artifactReviewHistoryRoundId = null;
-        }
         state.artifactReviewContext = context;
+        state.artifactReviewRoundByReview[reviewId] = roundId;
+        state.artifactReviewHistoryRoundId = roundId;
+        writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
         state.artifactReviewConflict = "";
       } finally {
         if (requestId === state.artifactReviewRequest) state.artifactReviewLoading = false;
@@ -729,23 +875,152 @@ export const browserHtml = String.raw`<!doctype html>
     function renderAll() {
       document.body.classList.toggle("task-mode", state.viewMode === "task");
       document.body.classList.toggle("review-active", canComment());
-      const artifactReview = activeArtifactReviewSummary();
+      document.body.classList.toggle("artifact-review-modal-open", state.artifactReviewModalOpen);
+      const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
+      const artifactReview = state.viewMode === "task" ? defaultArtifactReviewSummary(run) : null;
       el.reviewToggle.textContent = artifactReview?.round
         ? t("artifactReview") + " " + artifactReview.round.submitted + "/" + artifactReview.round.total
         : "Review";
+      el.reviewToggle.setAttribute("aria-controls", state.viewMode === "task" && artifactReviewSummariesForRun(run).length
+        ? "artifact-review-modal"
+        : "review-panel");
       syncReviewDrawer();
+      syncArtifactReviewModalState();
       el.memoryTab.classList.toggle("active", state.viewMode === "memory");
       el.taskTab.classList.toggle("active", state.viewMode === "task");
       if (state.viewMode === "task") {
         renderTaskNav();
         renderSelectedTask();
         renderReview();
+        if (state.artifactReviewModalOpen) renderArtifactReviewPanel();
         return;
       }
       updateMemoryCount();
       renderNav();
       renderSelected();
       renderReview();
+    }
+
+    async function handleReviewToggle() {
+      if (state.viewMode === "task" && artifactReviewSummariesForRun().length) {
+        if (state.artifactReviewModalOpen) closeArtifactReviewModal();
+        else await openArtifactReviewModal();
+        return;
+      }
+      setReviewDrawer(!state.reviewDrawerOpen);
+    }
+
+    async function openArtifactReviewModal(reviewId) {
+      const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
+      if (!run) return;
+      const reviews = artifactReviewSummariesForRun(run);
+      const selected = reviews.find(review => review.id === reviewId)
+        || defaultArtifactReviewSummary(run);
+      if (!selected) return;
+      if (!state.artifactReviewModalOpen) {
+        state.artifactReviewReturnScrollY = window.scrollY;
+        const active = document.activeElement;
+        state.artifactReviewReturnFocus = active?.id
+          || (active?.dataset?.artifactReviewId ? "review:" + active.dataset.artifactReviewId : "");
+        state.artifactReviewReturnFocusTop = active instanceof HTMLElement
+          ? active.getBoundingClientRect().top
+          : null;
+      }
+      state.artifactReviewSelectedByRun[run.id] = selected.id;
+      writeStoredObject(artifactReviewSelectedKey, state.artifactReviewSelectedByRun);
+      if (!state.artifactReviewOpenedRounds[selected.currentRoundId]) {
+        state.artifactReviewRoundByReview[selected.id] = selected.currentRoundId;
+        state.artifactReviewOpenedRounds[selected.currentRoundId] = true;
+        writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
+        writeStoredObject(artifactReviewOpenedKey, state.artifactReviewOpenedRounds);
+      }
+      state.reviewDrawerOpen = false;
+      state.artifactReviewModalOpen = true;
+      state.artifactReviewLocateFailure = "";
+      await syncArtifactReviewContext(true);
+      if (!el.artifactReviewModal.open) el.artifactReviewModal.showModal();
+      renderAll();
+    }
+
+    function closeArtifactReviewModal() {
+      const returnScrollY = state.artifactReviewReturnScrollY;
+      const returnFocus = state.artifactReviewReturnFocus;
+      const returnFocusTop = state.artifactReviewReturnFocusTop;
+      state.artifactReviewModalOpen = false;
+      state.artifactReviewLocateFailure = "";
+      state.artifactReviewReturnScrollY = null;
+      state.artifactReviewReturnFocus = "";
+      state.artifactReviewReturnFocusTop = null;
+      if (el.artifactReviewModal.open) el.artifactReviewModal.close();
+      renderAll();
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const focusTarget = returnFocus.startsWith("review:")
+            ? document.querySelector('[data-artifact-review-id="' + CSS.escape(returnFocus.slice(7)) + '"]')
+            : returnFocus ? document.getElementById(returnFocus) : null;
+          focusTarget?.focus({ preventScroll: true });
+          if (focusTarget instanceof HTMLElement && Number.isFinite(returnFocusTop)) {
+            window.scrollBy(0, focusTarget.getBoundingClientRect().top - returnFocusTop);
+          } else if (Number.isFinite(returnScrollY)) {
+            window.scrollTo(0, returnScrollY);
+          }
+        });
+      });
+    }
+
+    function syncArtifactReviewModalState() {
+      el.artifactReviewModal.dataset.mobilePane = state.artifactReviewMobilePane;
+      el.artifactReviewArtifactTab.classList.toggle("active", state.artifactReviewMobilePane === "artifact");
+      el.artifactReviewReviewTab.classList.toggle("active", state.artifactReviewMobilePane === "review");
+      document.documentElement.style.setProperty("--artifact-review-left", state.artifactReviewSplit + "%");
+      el.artifactReviewModalResizer.setAttribute("aria-valuenow", String(state.artifactReviewSplit));
+      el.reviewToggle.setAttribute("aria-expanded", String(state.artifactReviewModalOpen || state.reviewDrawerOpen));
+    }
+
+    function setArtifactReviewMobilePane(pane) {
+      state.artifactReviewMobilePane = pane === "review" ? "review" : "artifact";
+      localStorage.setItem(artifactReviewMobilePaneKey, state.artifactReviewMobilePane);
+      syncArtifactReviewModalState();
+    }
+
+    function setArtifactReviewSplit(value, persist) {
+      state.artifactReviewSplit = Math.min(75, Math.max(30, Math.round(value)));
+      document.documentElement.style.setProperty("--artifact-review-left", state.artifactReviewSplit + "%");
+      el.artifactReviewModalResizer.setAttribute("aria-valuenow", String(state.artifactReviewSplit));
+      if (persist) localStorage.setItem(artifactReviewSplitKey, String(state.artifactReviewSplit));
+    }
+
+    function beginArtifactReviewModalResize(event) {
+      if (!state.artifactReviewModalOpen || window.innerWidth <= 760 || event.button !== 0) return;
+      event.preventDefault();
+      const pointerId = event.pointerId;
+      const body = el.artifactReviewModal.querySelector(".artifact-review-modal-body");
+      const bounds = body.getBoundingClientRect();
+      document.body.classList.add("artifact-review-resizing");
+      el.artifactReviewModalResizer.setPointerCapture(pointerId);
+      const move = moveEvent => setArtifactReviewSplit(((moveEvent.clientX - bounds.left) / bounds.width) * 100, false);
+      const finish = () => {
+        if (el.artifactReviewModalResizer.hasPointerCapture(pointerId)) el.artifactReviewModalResizer.releasePointerCapture(pointerId);
+        el.artifactReviewModalResizer.removeEventListener("pointermove", move);
+        el.artifactReviewModalResizer.removeEventListener("pointerup", finish);
+        el.artifactReviewModalResizer.removeEventListener("pointercancel", finish);
+        document.body.classList.remove("artifact-review-resizing");
+        setArtifactReviewSplit(state.artifactReviewSplit, true);
+      };
+      el.artifactReviewModalResizer.addEventListener("pointermove", move);
+      el.artifactReviewModalResizer.addEventListener("pointerup", finish);
+      el.artifactReviewModalResizer.addEventListener("pointercancel", finish);
+      move(event);
+    }
+
+    function resizeArtifactReviewModalWithKeyboard(event) {
+      const step = event.shiftKey ? 8 : 3;
+      if (event.key === "ArrowLeft") setArtifactReviewSplit(state.artifactReviewSplit - step, true);
+      else if (event.key === "ArrowRight") setArtifactReviewSplit(state.artifactReviewSplit + step, true);
+      else if (event.key === "Home") setArtifactReviewSplit(30, true);
+      else if (event.key === "End") setArtifactReviewSplit(75, true);
+      else return;
+      event.preventDefault();
     }
 
     async function setViewMode(mode) {
@@ -1026,7 +1301,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function selectedTask() {
       const snapshot = currentReviewSnapshot("task");
-      if (snapshot?.run && !activeArtifactReviewSummary()) return snapshot.run;
+      if (snapshot?.run && !state.artifactReviewModalOpen) return snapshot.run;
       return state.runs.find(run => run.id === state.selectedTaskId) || state.runs[0] || null;
     }
 
@@ -1078,11 +1353,12 @@ export const browserHtml = String.raw`<!doctype html>
       meta.append(pill("updated " + formatTime(run.updatedAt)));
       if (run.artifactReview?.round) {
         const reviewStatus = artifactReviewRoundStatusLabel(run.artifactReview.round.status);
-        meta.append(pill(
-          reviewStatus + " " + run.artifactReview.round.submitted + "/" + run.artifactReview.round.total,
-          false,
-          run.artifactReview.status === "awaiting_revision" ? "warn" : "processing"
-        ));
+        const reviewButton = document.createElement("button");
+        reviewButton.type = "button";
+        reviewButton.className = "pill strong " + (run.artifactReview.status === "awaiting_revision" ? "warn" : "processing");
+        reviewButton.textContent = reviewStatus + " " + run.artifactReview.round.submitted + "/" + run.artifactReview.round.total;
+        reviewButton.addEventListener("click", () => openArtifactReviewModal(run.artifactReview.id));
+        meta.append(reviewButton);
       }
       const activeStep = currentRunStep(run);
       if (activeStep && run.plan && run.plan.length) meta.append(currentStepJumpButton(run));
@@ -1359,35 +1635,44 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderTaskStepResult(step, event, run) {
       const reviewContext = artifactReviewContextForStep(run, step);
-      if (!shouldRenderTaskStepArtifact(event) && !reviewContext) return null;
+      const reviewSummary = artifactReviewForStep(run, step);
+      if (!shouldRenderTaskStepArtifact(event) && !reviewContext && !reviewSummary) return null;
       const box = document.createElement("div");
       box.className = "task-result";
       const title = document.createElement("div");
       title.className = "block-title";
       title.textContent = reviewContext ? t("reviewedArtifact") : t("artifactContent");
-      const artifact = reviewContext ? reviewContext.submission.artifact : event.artifact;
-      const artifactValue = artifactDisplayValue(artifact);
-      const artifactContent = renderArtifactValue(artifact);
-      const value = commentable(
-        artifactContent,
-        artifact.name,
-        artifactValue,
-        taskAnchor(run, step, reviewContext ? "artifact-review" : "artifact"),
-        { run, step, event, artifactReview: reviewContext, commentKind: "artifact" }
-      );
-      if (reviewContext) {
+      const artifact = reviewContext ? reviewContext.submission.artifact : event?.artifact;
+      const value = artifact ? renderArtifactValue(artifact) : null;
+      if (reviewSummary) {
         const meta = document.createElement("div");
         meta.className = "meta";
         meta.append(pill(
-          artifactReviewRoundStatusLabel(reviewContext.review.round.status),
+          artifactReviewRoundStatusLabel(reviewSummary.round.status),
           false,
-          reviewContext.review.status === "awaiting_revision" ? "warn" : "processing"
+          reviewSummary.status === "awaiting_revision" ? "warn" : reviewSummary.status === "passed" ? "done" : "processing"
         ));
-        meta.append(pill(t("round") + " " + reviewContext.review.round.sequence));
+        meta.append(pill(t("round") + " " + reviewSummary.round.sequence));
+        meta.append(openArtifactReviewButton(reviewSummary));
         box.append(meta);
       }
-      box.append(title, value);
+      box.append(title);
+      if (value) box.append(value);
       return box;
+    }
+
+    function artifactReviewForStep(run, step) {
+      return artifactReviewSummariesForRun(run).find(review => review.stepId === step.id) || null;
+    }
+
+    function openArtifactReviewButton(review) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "pill current-step-jump";
+      button.textContent = t("artifactReview");
+      button.dataset.artifactReviewId = review.id;
+      button.addEventListener("click", () => openArtifactReviewModal(review.id));
+      return button;
     }
 
     function artifactReviewContextForStep(run, step) {
@@ -1594,8 +1879,34 @@ export const browserHtml = String.raw`<!doctype html>
       return run?.artifactReview || null;
     }
 
+    function artifactReviewSummariesForRun(run) {
+      const selectedRun = run || (state.viewMode === "task"
+        ? state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null
+        : null);
+      return selectedRun?.artifactReviewSummaries || (selectedRun?.artifactReview ? [selectedRun.artifactReview] : []);
+    }
+
+    function defaultArtifactReviewSummary(run) {
+      if (!run) return null;
+      if (run.artifactReview) return run.artifactReview;
+      return artifactReviewSummariesForRun(run).reduce((latest, review) => {
+        if (!latest) return review;
+        const latestTime = new Date(latest.updatedAt || latest.createdAt || 0).getTime();
+        const reviewTime = new Date(review.updatedAt || review.createdAt || 0).getTime();
+        return reviewTime >= latestTime ? review : latest;
+      }, null);
+    }
+
+    function selectedArtifactReviewSummary() {
+      const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
+      if (!run) return null;
+      const reviews = artifactReviewSummariesForRun(run);
+      const reviewId = state.artifactReviewSelectedByRun[run.id];
+      return reviews.find(review => review.id === reviewId) || defaultArtifactReviewSummary(run);
+    }
+
     function isArtifactReviewMode() {
-      return Boolean(activeArtifactReviewSummary());
+      return Boolean(state.artifactReviewModalOpen && state.artifactReviewContext);
     }
 
     function filteredReviews() {
@@ -2763,7 +3074,11 @@ export const browserHtml = String.raw`<!doctype html>
       if (isArtifactReviewMode()) {
         return artifactReviewVisibleComments().filter(comment => {
           const candidate = comment.anchor;
-          if (!candidate || candidate.sourceHash !== state.artifactReviewContext?.submission?.digest) return false;
+          if (
+            !candidate
+            || candidate.submissionId !== state.artifactReviewContext?.submission?.id
+            || candidate.sourceHash !== state.artifactReviewContext?.submission?.digest
+          ) return false;
           return candidate.location === anchor || candidate.target === anchor || (legacyAnchor && candidate.location === legacyAnchor);
         });
       }
@@ -2923,9 +3238,11 @@ export const browserHtml = String.raw`<!doctype html>
           id: uuid(),
           body,
           anchor: {
+            submissionId: reviewContext.submission.id,
             target: String(target || "").trim(),
             location: String(location?.anchor || ""),
-            sourceHash: reviewContext.submission.digest
+            sourceHash: reviewContext.submission.digest,
+            context: String(snapshot ?? "").trim().slice(0, 500) || undefined
           },
           _mineDraft: true
         };
@@ -3047,8 +3364,10 @@ export const browserHtml = String.raw`<!doctype html>
     function artifactReviewVisibleComments() {
       const context = state.artifactReviewContext;
       if (!context) return [];
-      const comments = (context.assignment?.draft?.comments || []).map(comment => ({ ...comment, _mineDraft: true }));
-      const selectedRoundId = state.artifactReviewHistoryRoundId || context.review.currentRoundId;
+      const selectedRoundId = state.artifactReviewRoundByReview[context.review.id] || context.review.currentRoundId;
+      const comments = selectedRoundId === context.review.currentRoundId && context.assignment?.status === "draft"
+        ? (context.assignment?.draft?.comments || []).map(comment => ({ ...comment, _mineDraft: true }))
+        : [];
       const selectedRounds = (context.rounds || []).filter(round => round.id === selectedRoundId);
       for (const round of selectedRounds) {
         for (const assignment of round.assignments || []) {
@@ -3099,7 +3418,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function setArtifactReviewControlsBusy(busy) {
-      for (const control of el.reviewPanel.querySelectorAll(".artifact-review-vote button, .artifact-review-comment button, .artifact-review-select, #submit-review")) {
+      for (const control of el.artifactReviewModal.querySelectorAll(".artifact-review-vote button, .artifact-review-comment button, .artifact-review-select, #artifact-review-submit")) {
         control.disabled = busy;
       }
     }
@@ -3120,8 +3439,10 @@ export const browserHtml = String.raw`<!doctype html>
       if (context.assignment.status === "submitted") return t("submitted");
       const vote = context.assignment.draft.vote;
       if (!vote) return displayLanguage === "zh" ? "请先选择投票结果" : "Select a vote first";
-      if (vote === "request_changes" && !(context.assignment.draft.comments || []).length) {
-        return displayLanguage === "zh" ? "选择修改时，至少需要一条意见" : "Requesting changes requires at least one comment";
+      if ((vote === "request_changes" || vote === "abstain") && !(context.assignment.draft.comments || []).length) {
+        return displayLanguage === "zh"
+          ? (vote === "abstain" ? "选择弃权时，至少需要一条原因说明" : "选择修改时，至少需要一条意见")
+          : (vote === "abstain" ? "Abstaining requires at least one reason" : "Requesting changes requires at least one comment");
       }
       return "";
     }
@@ -3214,10 +3535,6 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderReview() {
-      if (isArtifactReviewMode()) {
-        renderArtifactReviewPanel();
-        return;
-      }
       const review = selectedReview();
       el.reviewHeading.textContent = "Review";
       el.createReview.hidden = false;
@@ -3291,23 +3608,46 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderArtifactReviewPanel() {
-      const review = activeArtifactReviewSummary();
+      const review = selectedArtifactReviewSummary();
       const context = state.artifactReviewContext;
-      el.reviewHeading.textContent = t("artifactReview");
-      el.createReview.hidden = true;
-      el.submitReview.hidden = false;
-      el.reviews.innerHTML = "";
-      el.comments.innerHTML = "";
+      el.artifactReviewModalControls.innerHTML = "";
+      el.artifactReviewModalComments.innerHTML = "";
+      el.artifactReviewArtifactContent.innerHTML = "";
+      el.artifactReviewModalMeta.innerHTML = "";
       if (!review?.round) {
-        el.reviewLabel.textContent = "";
-        el.commentSummary.textContent = "";
-        el.submitReview.disabled = true;
+        el.artifactReviewModalTitle.textContent = t("artifactReview");
+        el.artifactReviewModalSubtitle.textContent = "";
+        el.artifactReviewCommentSummary.textContent = "";
+        el.artifactReviewSubmit.disabled = true;
         return;
       }
 
-      el.reviewLabel.textContent = review.artifactName + " · " + t("round") + " " + review.round.sequence;
+      const selectedRound = context?.rounds?.find(round => round.submissionId === context.submission?.id);
+      const selectedSequence = selectedRound?.sequence || review.round.sequence;
+      const viewingHistory = Boolean(selectedRound && selectedRound.id !== review.currentRoundId);
+      el.artifactReviewModalTitle.textContent = t("artifactReview");
+      el.artifactReviewModalClose.textContent = t("close");
+      el.artifactReviewCommentsTitle.textContent = t("reviewComments");
+      el.artifactReviewArtifactTab.textContent = t("artifactPane");
+      el.artifactReviewReviewTab.textContent = t("reviewPane");
+      el.artifactReviewModalSubtitle.textContent = review.artifactName + " · " + review.id;
+      el.artifactReviewModalMeta.append(
+        pill(artifactReviewRoundStatusLabel(review.round.status), false, review.status === "passed" ? "done" : review.status === "awaiting_revision" ? "warn" : "processing"),
+        pill(review.policyId),
+        pill(t("round") + " " + review.round.sequence + " · " + review.round.submitted + "/" + review.round.total),
+        pill((displayLanguage === "zh" ? "所选轮次 " : "Selected round ") + selectedSequence)
+      );
+      el.artifactReviewArtifactTitle.textContent = context?.submission?.artifact?.name || review.artifactName;
+      el.artifactReviewRoundMode.textContent = viewingHistory
+        ? (displayLanguage === "zh" ? "历史轮次 · 只读" : "Historical round · read-only")
+        : (displayLanguage === "zh" ? "当前轮次" : "Current round");
       const controls = document.createElement("section");
       controls.className = "panel artifact-review-stack";
+      controls.append(blockTitle(t("reviewArtifact")), renderArtifactReviewSelector(review));
+      if (context) {
+        controls.append(renderArtifactReviewRoundTimeline(context));
+        controls.append(renderArtifactReviewHistorySelector(context));
+      }
       const identityLabel = blockTitle(t("identity"));
       controls.append(identityLabel, renderArtifactReviewIdentitySelector(review, context));
 
@@ -3324,45 +3664,197 @@ export const browserHtml = String.raw`<!doctype html>
       }
 
       controls.append(blockTitle(t("participants")), renderArtifactReviewProgress(review, context));
-      if (context?.rounds?.length > 1) controls.append(renderArtifactReviewHistorySelector(context));
-      el.reviews.append(controls);
+      el.artifactReviewModalControls.append(controls);
 
       if (state.artifactReviewLoading) {
         const loading = document.createElement("div");
         loading.className = "muted";
         loading.textContent = "Loading...";
-        el.comments.append(loading);
+        el.artifactReviewModalComments.append(loading);
+        el.artifactReviewArtifactContent.append(loading.cloneNode(true));
       } else if (!context) {
         const empty = document.createElement("div");
         empty.className = "artifact-review-message";
         empty.textContent = t("selectIdentity");
-        el.comments.append(empty);
+        el.artifactReviewModalComments.append(empty);
       } else {
+        el.artifactReviewArtifactContent.append(renderArtifactReviewSubmission(context));
         renderArtifactReviewWorkspace(context);
       }
 
       const disabledReason = artifactReviewSubmitDisabledReason();
       const agentManaged = context?.assignment?.identityKind === "agent";
-      el.submitReview.hidden = Boolean(agentManaged);
-      el.submitReview.textContent = context?.assignment?.status === "submitted" ? t("submitted") : t("submitArtifactReview");
-      el.submitReview.disabled = agentManaged || Boolean(disabledReason);
-      el.submitReview.title = disabledReason;
-      el.commentSummary.textContent = context
+      el.artifactReviewSubmit.hidden = Boolean(agentManaged);
+      el.artifactReviewSubmit.textContent = context?.assignment?.status === "submitted" ? t("submitted") : t("submitArtifactReview");
+      el.artifactReviewSubmit.disabled = agentManaged || Boolean(disabledReason);
+      el.artifactReviewSubmit.title = disabledReason;
+      el.artifactReviewCommentSummary.textContent = context
         ? artifactReviewRoleName(context.assignment) + " · " + context.review.id
         : review.id;
+    }
+
+    function renderArtifactReviewSubmission(context) {
+      const wrap = document.createElement("div");
+      const artifact = context.submission.artifact;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      if (artifact.type) meta.append(pill(artifact.type));
+      appendFormatMeta(meta, artifact.format, artifactSchemaName(artifact), artifact.schema?.kind === "inline");
+      appendArtifactStorageMeta(meta, artifact);
+      meta.append(pill(formatTime(context.submission.createdAt)));
+      wrap.append(meta);
+      if (state.artifactReviewLocateFailure) {
+        const failure = document.createElement("div");
+        failure.className = "artifact-review-message warn artifact-review-locate-failure";
+        failure.textContent = state.artifactReviewLocateFailure;
+        wrap.append(failure);
+      }
+      const content = renderArtifactValue(artifact);
+      if (shouldRenderMarkdownArtifact(artifact)) {
+        const blocks = [...content.children];
+        blocks.forEach((block, index) => {
+          const next = block.nextSibling;
+          const target = "markdown:" + block.tagName.toLowerCase() + ":" + index;
+          const snapshot = String(block.textContent || "").trim();
+          const commentTarget = commentable(block, target, snapshot, target, { artifactReview: context, commentKind: "artifact" });
+          commentTarget.classList.add("artifact-review-target");
+          content.insertBefore(commentTarget, next);
+        });
+        wrap.append(content);
+      } else {
+        const snapshot = artifactDisplayValue(artifact);
+        const target = commentable(content, "artifact:root", snapshot, "artifact:root", { artifactReview: context, commentKind: "artifact" });
+        target.classList.add("artifact-review-target");
+        wrap.append(target);
+      }
+      return wrap;
+    }
+
+    function selectedArtifactReviewRound(context) {
+      const selectedId = state.artifactReviewRoundByReview[context.review.id] || context.review.currentRoundId;
+      return context.rounds.find(round => round.id === selectedId)
+        || context.rounds.find(round => round.id === context.review.currentRoundId)
+        || context.rounds[context.rounds.length - 1];
+    }
+
+    function renderArtifactReviewRoundTimeline(context) {
+      const round = selectedArtifactReviewRound(context);
+      const wrap = document.createElement("div");
+      wrap.className = "artifact-review-time-range";
+      const label = blockTitle(t("reviewTime"));
+      label.style.marginTop = "0";
+      const value = document.createElement("div");
+      value.className = "artifact-review-time-value";
+      const timestamps = [
+        ...(round?.assignments || []).map(assignment => assignment.submitted?.submittedAt),
+        ...(round?.votes || []).map(vote => vote.submittedAt)
+      ].filter(Boolean).map(timestamp => new Date(timestamp).getTime()).filter(Number.isFinite);
+      const end = timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : "";
+      const terminal = round?.status === "passed" || round?.status === "changes_requested";
+      value.textContent = formatTime(round?.createdAt) + " – " + (terminal && end ? formatTime(end) : t("inProgress"));
+      wrap.append(label, value);
+      return wrap;
+    }
+
+    function renderArtifactReviewSelector(selectedReview) {
+      const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
+      const reviews = artifactReviewSummariesForRun(run);
+      const chooser = document.createElement("div");
+      chooser.className = "artifact-review-round-select artifact-review-artifact-select";
+      const trigger = document.createElement("button");
+      trigger.type = "button";
+      trigger.className = "artifact-review-select artifact-review-select-trigger";
+      trigger.setAttribute("role", "combobox");
+      trigger.setAttribute("aria-label", t("reviewArtifact"));
+      trigger.setAttribute("aria-haspopup", "listbox");
+      trigger.setAttribute("aria-expanded", "false");
+      const triggerText = document.createElement("span");
+      triggerText.textContent = selectedReview.artifactName;
+      const caret = document.createElement("span");
+      caret.className = "artifact-review-select-caret";
+      caret.setAttribute("aria-hidden", "true");
+      caret.textContent = "⌄";
+      trigger.append(triggerText, caret);
+
+      const menu = document.createElement("div");
+      menu.className = "artifact-review-select-menu";
+      menu.setAttribute("role", "listbox");
+      menu.setAttribute("aria-label", t("reviewArtifact"));
+      menu.hidden = true;
+      const setOpen = open => {
+        menu.hidden = !open;
+        trigger.setAttribute("aria-expanded", String(open));
+        state.artifactReviewOpenSelect = open && run ? "artifact:" + run.id : "";
+      };
+      for (const review of reviews) {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "artifact-review-select-option";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", String(review.id === selectedReview.id));
+        option.textContent = review.artifactName + " · " + t("round") + " " + review.roundCount
+          + " · " + artifactReviewRoundStatusLabel(review.round?.status);
+        option.addEventListener("click", async () => {
+          setOpen(false);
+          if (!run || review.id === selectedReview.id) return;
+          state.artifactReviewSelectedByRun[run.id] = review.id;
+          state.artifactReviewRoundByReview[review.id] = review.currentRoundId;
+          state.artifactReviewContext = null;
+          writeStoredObject(artifactReviewSelectedKey, state.artifactReviewSelectedByRun);
+          writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
+          await syncArtifactReviewContext(true);
+          renderAll();
+        });
+        menu.append(option);
+      }
+      trigger.addEventListener("click", () => setOpen(menu.hidden));
+      trigger.addEventListener("keydown", event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          setOpen(true);
+          const options = [...menu.querySelectorAll(".artifact-review-select-option")];
+          const selectedIndex = options.findIndex(option => option.getAttribute("aria-selected") === "true");
+          options[Math.max(0, selectedIndex)]?.focus();
+        } else if (event.key === "Escape") {
+          event.stopPropagation();
+          setOpen(false);
+        }
+      });
+      chooser.addEventListener("focusout", () => {
+        setTimeout(() => {
+          if (chooser.isConnected && !chooser.contains(document.activeElement)) setOpen(false);
+        }, 0);
+      });
+      trigger.addEventListener("click", () => {
+        if (menu.hidden) return;
+        setTimeout(() => {
+          document.addEventListener("pointerdown", event => {
+            if (!chooser.contains(event.target)) setOpen(false);
+          }, { once: true });
+        }, 0);
+      });
+      chooser.append(trigger, menu);
+      if (run && state.artifactReviewOpenSelect === "artifact:" + run.id) setOpen(true);
+      return chooser;
     }
 
     function renderArtifactReviewProgress(review, context) {
       const list = document.createElement("div");
       list.className = "artifact-review-grid";
-      const currentRound = context?.rounds?.find(round => round.id === review.currentRoundId);
-      for (const assignment of review.round.assignments || []) {
-        const submitted = currentRound?.assignments?.find(item => item.identityId === assignment.identityId)?.submitted;
+      const selectedRound = context ? selectedArtifactReviewRound(context) : null;
+      const assignments = selectedRound?.assignments || review.round.assignments || [];
+      for (const assignment of assignments) {
+        const submitted = assignment.submitted;
         const row = document.createElement("div");
         row.className = "artifact-review-row";
         const main = document.createElement("div");
         main.className = "artifact-review-row-main";
-        const name = document.createElement("span");
+        const name = document.createElement(submitted ? "button" : "span");
+        if (submitted) {
+          name.type = "button";
+          name.className = "artifact-review-participant-link";
+          name.addEventListener("click", () => scrollToArtifactReviewParticipant(assignment));
+        }
         name.textContent = artifactReviewRoleName(assignment);
         const type = document.createElement("span");
         type.className = "muted";
@@ -3374,25 +3866,43 @@ export const browserHtml = String.raw`<!doctype html>
         status.textContent = submitted
           ? artifactReviewVoteLabel(submitted.vote, assignment.binding)
           : artifactReviewAssignmentStatusLabel(assignment.status, assignment.identityKind);
-        row.append(main, status);
+        const actions = document.createElement("div");
+        actions.className = "comment-actions";
+        actions.append(status);
+        if (assignment.identityKind === "agent" && assignment.status === "failed" && review.status === "pending") {
+          const retry = document.createElement("button");
+          retry.type = "button";
+          retry.className = "btn";
+          retry.textContent = t("retry");
+          retry.addEventListener("click", () => runButtonAction(retry, () => retryArtifactReviewAgentAssignment(review, assignment)));
+          actions.append(retry);
+        }
+        row.append(main, actions);
         list.append(row);
       }
-      if (review.round.runner) {
+      const selectedRunnerVote = selectedRound?.votes?.find(vote => vote.subject?.kind === "runner");
+      const runnerSummary = selectedRound?.id === review.currentRoundId ? review.round.runner : null;
+      if (selectedRunnerVote || runnerSummary) {
         const row = document.createElement("div");
         row.className = "artifact-review-row";
         const main = document.createElement("div");
         main.className = "artifact-review-row-main";
-        const name = document.createElement("span");
-        name.textContent = (review.round.runner.roleName || "Runner")
-          + (review.round.runner.automatic ? " · " + t("automatic") : "");
+        const name = document.createElement(selectedRunnerVote ? "button" : "span");
+        const runnerName = runnerSummary?.roleName || "Runner";
+        name.textContent = runnerName + (runnerSummary?.automatic ? " · " + t("automatic") : "");
+        if (selectedRunnerVote) {
+          name.type = "button";
+          name.className = "artifact-review-participant-link";
+          name.addEventListener("click", () => scrollToArtifactReviewParticipant({ identityId: "runner" }));
+        }
         const type = document.createElement("span");
         type.className = "muted";
         type.textContent = t("decisionVote");
         main.append(name, type);
         const status = document.createElement("span");
         status.className = "artifact-review-progress";
-        status.textContent = review.round.runner.status === "submitted"
-          ? artifactReviewVoteLabel(review.round.runner.vote, "decision")
+        status.textContent = selectedRunnerVote || runnerSummary?.status === "submitted"
+          ? artifactReviewVoteLabel(selectedRunnerVote?.value || runnerSummary?.vote, "decision")
           : t("pendingVote");
         row.append(main, status);
         list.append(row);
@@ -3400,8 +3910,34 @@ export const browserHtml = String.raw`<!doctype html>
       return list;
     }
 
+    function artifactReviewParticipantDomId(assignment) {
+      return "artifact-review-participant-" + String(assignment.identityId || "runner").replace(/[^a-zA-Z0-9_-]/g, "-");
+    }
+
+    function scrollToArtifactReviewParticipant(assignment) {
+      const target = document.getElementById(artifactReviewParticipantDomId(assignment));
+      if (!target) return;
+      target.scrollIntoView({ block: "start", behavior: "smooth" });
+      target.classList.remove("artifact-review-opinion-located");
+      setTimeout(() => target.classList.add("artifact-review-opinion-located"), 20);
+      setTimeout(() => target.classList.remove("artifact-review-opinion-located"), 1800);
+    }
+
+    async function retryArtifactReviewAgentAssignment(review, assignment) {
+      const response = await fetch(
+        "/api/artifact-reviews/" + encodeURIComponent(review.id)
+        + "/rounds/" + encodeURIComponent(review.currentRoundId)
+        + "/assignments/" + encodeURIComponent(assignment.identityId)
+        + "/retry",
+        { method: "POST" }
+      );
+      if (!response.ok) throw new Error(await response.text());
+      await loadRuns();
+      renderAll();
+    }
+
     function renderArtifactReviewIdentitySelector(review, context) {
-      const assignments = review.round.assignments || [];
+      const assignments = (review.round.assignments || []).filter(assignment => assignment.identityKind !== "agent");
       const selectedIdentityId = context?.assignment?.identityId || state.artifactReviewIdentityByReview[review.id] || "";
       const selectedAssignment = assignments.find(assignment => assignment.identityId === selectedIdentityId);
       const chooser = document.createElement("div");
@@ -3430,6 +3966,7 @@ export const browserHtml = String.raw`<!doctype html>
       const setOpen = open => {
         menu.hidden = !open;
         trigger.setAttribute("aria-expanded", String(open));
+        state.artifactReviewOpenSelect = open ? "identity:" + review.id : "";
       };
       const focusOption = offset => {
         const options = [...menu.querySelectorAll(".artifact-review-select-option")];
@@ -3452,7 +3989,8 @@ export const browserHtml = String.raw`<!doctype html>
           setOpen(false);
           state.artifactReviewIdentityByReview[review.id] = assignment.identityId;
           writeStoredObject(artifactReviewIdentityKey, state.artifactReviewIdentityByReview);
-          await loadArtifactReviewContext(review.id, review.currentRoundId, assignment.identityId);
+          const roundId = state.artifactReviewRoundByReview[review.id] || review.currentRoundId;
+          await loadArtifactReviewContext(review.id, roundId, assignment.identityId);
           renderAll();
         });
         menu.append(option);
@@ -3481,7 +4019,7 @@ export const browserHtml = String.raw`<!doctype html>
       });
       chooser.addEventListener("focusout", () => {
         setTimeout(() => {
-          if (!chooser.contains(document.activeElement)) setOpen(false);
+          if (chooser.isConnected && !chooser.contains(document.activeElement)) setOpen(false);
         }, 0);
       });
       trigger.addEventListener("click", () => {
@@ -3493,6 +4031,7 @@ export const browserHtml = String.raw`<!doctype html>
         }, 0);
       });
       chooser.append(trigger, menu);
+      if (state.artifactReviewOpenSelect === "identity:" + review.id) setOpen(true);
       return chooser;
     }
 
@@ -3505,7 +4044,7 @@ export const browserHtml = String.raw`<!doctype html>
       const wrap = document.createElement("div");
       wrap.className = "artifact-review-controls";
       wrap.append(blockTitle(t("round")));
-      const currentId = state.artifactReviewHistoryRoundId || context.review.currentRoundId;
+      const currentId = state.artifactReviewRoundByReview[context.review.id] || context.review.currentRoundId;
       const selectedId = context.rounds.some(round => round.id === currentId)
         ? currentId
         : context.review.currentRoundId;
@@ -3536,6 +4075,7 @@ export const browserHtml = String.raw`<!doctype html>
       const setOpen = open => {
         menu.hidden = !open;
         trigger.setAttribute("aria-expanded", String(open));
+        state.artifactReviewOpenSelect = open ? "round:" + context.review.id : "";
       };
       const focusOption = offset => {
         const options = [...menu.querySelectorAll(".artifact-review-select-option")];
@@ -3553,9 +4093,12 @@ export const browserHtml = String.raw`<!doctype html>
         option.setAttribute("aria-selected", String(round.id === selectedId));
         option.dataset.roundId = round.id;
         option.textContent = t("round") + " " + round.sequence + " · " + artifactReviewRoundStatusLabel(round.status);
-        option.addEventListener("click", () => {
+        option.addEventListener("click", async () => {
+          state.artifactReviewRoundByReview[context.review.id] = round.id;
           state.artifactReviewHistoryRoundId = round.id;
+          writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
           setOpen(false);
+          await loadArtifactReviewContext(context.review.id, round.id, context.assignment.identityId);
           renderAll();
         });
         menu.append(option);
@@ -3586,7 +4129,7 @@ export const browserHtml = String.raw`<!doctype html>
       });
       chooser.addEventListener("focusout", () => {
         setTimeout(() => {
-          if (!chooser.contains(document.activeElement)) setOpen(false);
+          if (chooser.isConnected && !chooser.contains(document.activeElement)) setOpen(false);
         }, 0);
       });
       trigger.addEventListener("click", () => {
@@ -3598,6 +4141,7 @@ export const browserHtml = String.raw`<!doctype html>
         }, 0);
       });
       chooser.append(trigger, menu);
+      if (state.artifactReviewOpenSelect === "round:" + context.review.id) setOpen(true);
       wrap.append(chooser);
       return wrap;
     }
@@ -3614,15 +4158,15 @@ export const browserHtml = String.raw`<!doctype html>
           await syncArtifactReviewContext(true);
           renderAll();
         });
-        el.comments.append(conflict, refresh);
+        el.artifactReviewModalComments.append(conflict, refresh);
       }
-      const selectedRoundId = state.artifactReviewHistoryRoundId || context.review.currentRoundId;
+      const selectedRoundId = state.artifactReviewRoundByReview[context.review.id] || context.review.currentRoundId;
       const selectedRound = context.rounds.find(round => round.id === selectedRoundId)
         || context.rounds.find(round => round.id === context.review.currentRoundId);
       const viewingHistory = selectedRound?.id !== context.review.currentRoundId;
+      renderArtifactReviewRoundSummary(context, selectedRound, viewingHistory);
       if (viewingHistory) {
         renderArtifactReviewSubmittedOpinions(selectedRound);
-        renderArtifactReviewRoundSummary(context, selectedRound, true);
         return;
       }
 
@@ -3637,14 +4181,13 @@ export const browserHtml = String.raw`<!doctype html>
       controls.append(blockTitle(readOnly ? t("submitted") : t("myDraft")));
       controls.append(renderArtifactVoteControl(context, readOnly));
       if (!readOnly) controls.append(renderArtifactReviewCommentComposer(context));
-      el.comments.append(controls);
+      el.artifactReviewModalComments.append(controls);
 
       const draftComments = assignment.draft?.comments || [];
       if (draftComments.length) {
-        for (const comment of draftComments) el.comments.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(assignment), true));
+        for (const comment of draftComments) el.artifactReviewModalComments.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(assignment), true));
       }
       renderArtifactReviewSubmittedOpinions(selectedRound);
-      renderArtifactReviewRoundSummary(context, selectedRound, false);
     }
 
     function renderArtifactReviewAgentWorkspace(context, selectedRound) {
@@ -3671,12 +4214,11 @@ export const browserHtml = String.raw`<!doctype html>
         retry.addEventListener("click", () => runButtonAction(retry, () => retryArtifactReviewAgent(context)));
         status.append(retry);
       }
-      el.comments.append(status);
+      el.artifactReviewModalComments.append(status);
       for (const comment of assignment.draft?.comments || []) {
-        el.comments.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(assignment), false));
+        el.artifactReviewModalComments.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(assignment), false));
       }
       renderArtifactReviewSubmittedOpinions(selectedRound);
-      renderArtifactReviewRoundSummary(context, selectedRound, false);
     }
 
     async function retryArtifactReviewAgent(context) {
@@ -3688,23 +4230,93 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderArtifactReviewSubmittedOpinions(round) {
-      const submitted = (round?.assignments || [])
+      const entries = (round?.assignments || [])
         .filter(assignment => assignment.submitted)
-        .map(assignment => ({ assignment, opinion: assignment.submitted }));
-      if (submitted.length) {
-        el.comments.append(blockTitle(t("submittedOpinions")));
-        for (const entry of submitted) {
-          const heading = document.createElement("div");
-          heading.className = "artifact-review-message";
-          heading.textContent = artifactReviewRoleName(entry.assignment) + " · "
-            + (entry.assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote")) + " · "
-            + artifactReviewVoteLabel(entry.opinion.vote, entry.assignment.binding);
-          el.comments.append(heading);
-          for (const comment of entry.opinion.comments || []) {
-            el.comments.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(entry.assignment), false));
-          }
-        }
+        .map(assignment => ({
+          kind: "assignment",
+          submittedAt: assignment.submitted.submittedAt,
+          assignment,
+          opinion: assignment.submitted
+        }));
+      for (const vote of round?.votes || []) {
+        if (vote.subject?.kind === "runner") entries.push({ kind: "runner", submittedAt: vote.submittedAt, vote });
       }
+      entries.sort((left, right) => new Date(right.submittedAt || 0).getTime() - new Date(left.submittedAt || 0).getTime());
+      if (!entries.length) return;
+      el.artifactReviewModalComments.append(blockTitle(t("submittedOpinions")));
+      for (const entry of entries) {
+        el.artifactReviewModalComments.append(entry.kind === "runner"
+          ? renderArtifactReviewRunnerOpinion(entry.vote)
+          : renderArtifactReviewAssignmentOpinion(entry.assignment, entry.opinion));
+      }
+    }
+
+    function renderArtifactReviewAssignmentOpinion(assignment, opinion) {
+      const section = artifactReviewOpinionSection(
+        assignment,
+        artifactReviewRoleName(assignment),
+        opinion.submittedAt
+      );
+      section.append(blockTitle(t("voteSummary")));
+      const voteSummary = document.createElement("div");
+      voteSummary.className = "artifact-review-message" + (opinion.vote === "request_changes" ? " warn" : "");
+      voteSummary.textContent = (assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote"))
+        + " · " + artifactReviewVoteLabel(opinion.vote, assignment.binding);
+      section.append(voteSummary);
+      if (opinion.summary) {
+        const summary = document.createElement("div");
+        summary.className = "artifact-review-markdown";
+        if (opinion.renderedSummary) summary.innerHTML = opinion.renderedSummary;
+        else summary.textContent = opinion.summary;
+        section.append(summary);
+      }
+      section.append(blockTitle(t("reviewComments")));
+      const comments = opinion.comments || [];
+      if (comments.length) {
+        for (const comment of comments) {
+          section.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(assignment), false));
+        }
+      } else {
+        const empty = document.createElement("div");
+        empty.className = "muted";
+        empty.textContent = t("noReviewComments");
+        section.append(empty);
+      }
+      return section;
+    }
+
+    function renderArtifactReviewRunnerOpinion(vote) {
+      const section = artifactReviewOpinionSection({ identityId: "runner" }, "Runner", vote.submittedAt);
+      section.append(blockTitle(t("voteSummary")));
+      const summary = document.createElement("div");
+      summary.className = "artifact-review-message" + (vote.value === "request_changes" ? " warn" : "");
+      summary.textContent = t("decisionVote") + " · " + artifactReviewVoteLabel(vote.value, "decision");
+      section.append(summary);
+      if (vote.comment) {
+        const comment = document.createElement("div");
+        comment.className = "artifact-review-markdown";
+        if (vote.renderedComment) comment.innerHTML = vote.renderedComment;
+        else comment.textContent = vote.comment;
+        section.append(comment);
+      }
+      return section;
+    }
+
+    function artifactReviewOpinionSection(subject, roleName, submittedAtValue) {
+      const section = document.createElement("article");
+      section.className = "artifact-review-opinion";
+      section.id = artifactReviewParticipantDomId(subject);
+      const header = document.createElement("header");
+      header.className = "artifact-review-opinion-head";
+      const role = document.createElement("strong");
+      role.textContent = roleName;
+      const submittedAt = document.createElement("time");
+      submittedAt.className = "muted";
+      submittedAt.dateTime = submittedAtValue || "";
+      submittedAt.textContent = formatTime(submittedAtValue);
+      header.append(role, submittedAt);
+      section.append(header);
+      return section;
     }
 
     function renderArtifactVoteControl(context, readOnly) {
@@ -3759,17 +4371,22 @@ export const browserHtml = String.raw`<!doctype html>
       card.className = "comment-card";
       const title = document.createElement("b");
       title.textContent = identityName + (comment.anchor?.target ? " · " + comment.anchor.target : "");
-      const body = document.createElement("p");
-      body.textContent = comment.body;
+      const body = document.createElement("div");
+      body.className = "artifact-review-markdown";
+      if (comment.renderedBody) body.innerHTML = comment.renderedBody;
+      else body.textContent = comment.body;
       card.append(title, body);
-      if (comment.anchor?.location) {
+      if (comment.anchor?.context) {
+        const context = document.createElement("div");
+        context.className = "artifact-review-comment-context";
+        context.textContent = comment.anchor.context;
+        card.append(context);
+      }
+      if (comment.anchor?.target) {
         const go = document.createElement("button");
         go.className = "btn";
         go.textContent = displayLanguage === "zh" ? "定位" : "Go to";
-        go.addEventListener("click", () => {
-          const target = document.querySelector('[data-anchor="' + CSS.escape(comment.anchor.location) + '"]');
-          if (target) target.scrollIntoView({ block: "center", behavior: "smooth" });
-        });
+        go.addEventListener("click", () => runButtonAction(go, () => locateArtifactReviewComment(comment)));
         card.append(go);
       }
       if (editable) {
@@ -3782,31 +4399,73 @@ export const browserHtml = String.raw`<!doctype html>
       return card;
     }
 
+    async function locateArtifactReviewComment(comment) {
+      const context = state.artifactReviewContext;
+      if (!context || !comment.anchor) return;
+      const targetRound = context.rounds.find(round => round.submissionId === comment.anchor.submissionId);
+      if (!targetRound) {
+        state.artifactReviewLocateFailure = displayLanguage === "zh"
+          ? "无法找到该意见对应的评审轮次，已保留原始定位引用。"
+          : "The review round for this comment is unavailable; the original reference is preserved.";
+        renderAll();
+        return;
+      }
+      if (context.submission.id !== comment.anchor.submissionId) {
+        state.artifactReviewRoundByReview[context.review.id] = targetRound.id;
+        writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
+        await loadArtifactReviewContext(context.review.id, targetRound.id, context.assignment.identityId);
+        renderAll();
+      }
+      const anchor = comment.anchor.location || comment.anchor.target;
+      const target = el.artifactReviewArtifactContent.querySelector('[data-anchor="' + CSS.escape(anchor) + '"]')
+        || el.artifactReviewArtifactContent.querySelector('[data-anchor="' + CSS.escape(comment.anchor.target) + '"]');
+      if (!target) {
+        state.artifactReviewLocateFailure = (displayLanguage === "zh" ? "无法精确定位：" : "Unable to locate: ")
+          + comment.anchor.target;
+        renderAll();
+        return;
+      }
+      state.artifactReviewLocateFailure = "";
+      setArtifactReviewMobilePane("artifact");
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.classList.remove("artifact-review-target-located");
+      setTimeout(() => target.classList.add("artifact-review-target-located"), 20);
+      setTimeout(() => target.classList.remove("artifact-review-target-located"), 1800);
+    }
+
     function renderArtifactReviewRoundSummary(context, round, history) {
       if (!round) return;
-      el.comments.append(blockTitle(t("roundSummary")));
+      el.artifactReviewModalComments.append(blockTitle(t("roundSummary")));
       const summary = document.createElement("div");
       summary.className = "artifact-review-message" + (round.status === "changes_requested" ? " warn" : "");
       const result = round.result;
-      summary.textContent = result
-        ? t("round") + " " + round.sequence + " · " + artifactReviewRoundStatusLabel(round.status)
-          + " · " + result.decisionApprove + "/" + result.decisionTotal + " " + t("approve")
-        : t("round") + " " + round.sequence + " · "
+      if (result) {
+        const decisionText = result.decisionApprove + "/" + result.decisionTotal;
+        summary.textContent = displayLanguage === "zh"
+          ? (round.status === "passed"
+              ? "本轮已通过：" + decisionText + " 张决策票通过；另记录 " + result.advisoryTotal + " 张建议票。"
+              : "本轮要求修改：" + decisionText + " 张决策票通过，未达到当前决策规则；另记录 " + result.advisoryTotal + " 张建议票。")
+          : (round.status === "passed"
+              ? "This round passed: " + decisionText + " decision votes approved; " + result.advisoryTotal + " advisory votes were recorded."
+              : "This round requested changes: " + decisionText + " decision votes approved, which did not satisfy the policy; " + result.advisoryTotal + " advisory votes were recorded.");
+      } else {
+        summary.textContent = t("round") + " " + round.sequence + " · "
           + (round.assignments || []).filter(assignment => assignment.status === "submitted").length
           + "/" + (round.assignments || []).length + " " + t("submitted");
-      el.comments.append(summary);
+      }
+      el.artifactReviewModalComments.append(summary);
       if (history) {
         const id = document.createElement("div");
         id.className = "muted artifact-review-id";
         id.textContent = round.id;
-        el.comments.append(id);
+        el.artifactReviewModalComments.append(id);
       }
       if (round.revisionSummary?.body) {
-        el.comments.append(blockTitle(t("revisionSummary")));
+        el.artifactReviewModalComments.append(blockTitle(t("revisionSummary")));
         const revision = document.createElement("div");
         revision.className = "pre";
         revision.textContent = round.revisionSummary.body;
-        el.comments.append(revision);
+        el.artifactReviewModalComments.append(revision);
       }
     }
 

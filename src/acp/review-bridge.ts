@@ -3,7 +3,7 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { createServer, createConnection, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ArtifactReviewAnchor, ArtifactReviewVoteValue } from "../artifact-review.js";
+import type { ArtifactReviewAgentAnchorInput, ArtifactReviewVoteValue } from "../artifact-review.js";
 import {
   appendArtifactReviewAgentComment,
   markArtifactReviewAgentCliReady,
@@ -38,7 +38,7 @@ type BridgeRequest = {
     workspaceRoot: string;
   };
   body?: string;
-  anchor?: ArtifactReviewAnchor;
+  anchor?: ArtifactReviewAgentAnchorInput;
   vote?: ArtifactReviewVoteValue;
   summary?: string;
 };

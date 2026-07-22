@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Readable } from "node:stream";
 import test from "node:test";
 import {
   buildRunArtifactContractDetail,
@@ -8,7 +9,9 @@ import {
   printArtifactReviewSummary,
   printLatestReportAuthorization,
   printRunState,
-  printSchemaWritingOverview
+  printSchemaWritingOverview,
+  resolveReviewCommentBody,
+  validateInlineReviewCommentBody
 } from "../src/commands/run.js";
 import type { ArtifactReview, ArtifactReviewRound } from "../src/artifact-review.js";
 import {
@@ -18,6 +21,28 @@ import {
   resolveArtifactControlPlane
 } from "../src/control-plane/index.js";
 import type { RunState, SchemaWritingSnapshot } from "../src/run/store.js";
+
+test("inline Artifact Review comments reject escaped multiline Markdown", () => {
+  assert.doesNotThrow(() => validateInlineReviewCommentBody("A short comment about `\\n`."));
+  assert.throws(
+    () => validateInlineReviewCommentBody("First paragraph\\n\\nSecond paragraph"),
+    /multiline Markdown must use --body-stdin/
+  );
+});
+
+test("Artifact Review comments accept multiline Markdown from standard input", async () => {
+  assert.equal(
+    await resolveReviewCommentBody(
+      { bodyStdin: true },
+      Readable.from(["First paragraph\n", "\nSecond paragraph\n"])
+    ),
+    "First paragraph\n\nSecond paragraph\n"
+  );
+  await assert.rejects(
+    resolveReviewCommentBody({ body: "inline", bodyStdin: true }, Readable.from([])),
+    /use only one of --body or --body-stdin/
+  );
+});
 
 test("Run inspection separates navigation, step detail, and Artifact content", async () => {
   const steps: NonNullable<RunState["plan"]> = [{

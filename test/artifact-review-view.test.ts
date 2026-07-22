@@ -39,7 +39,8 @@ flow:
   const controlPlane = parseControlPlaneConfig({
     identities: {
       alice: { kind: "human", name: "Alice" },
-      bob: { kind: "human", name: "Bob" }
+      bob: { kind: "human", name: "Bob" },
+      mallory: { kind: "human", name: "Mallory" }
     },
     roles: {
       runner: {
@@ -64,6 +65,31 @@ flow:
   });
   const review = currentArtifactReview(pending);
   assert(review);
+  const privateAttempt = review.rounds[0].assignments.find((assignment) => assignment.identityId === "bob");
+  assert(privateAttempt);
+  privateAttempt.attempts = [{
+    id: "attempt-private",
+    sequence: 1,
+    status: "failed",
+    provider: "traex",
+    createdAt: "2026-07-22T00:00:00.000Z",
+    startedAt: "2026-07-22T00:00:01.000Z",
+    completedAt: "2026-07-22T00:00:02.000Z",
+    workerPid: 4242,
+    cliReadyAt: "2026-07-22T00:00:01.500Z",
+    promptVersion: "private-prompt",
+    sessionId: "private-session",
+    protocolVersion: 9,
+    agentName: "private-agent",
+    agentVersion: "private-version",
+    model: "private-model",
+    stopReason: "private-stop",
+    failure: { stage: "session", code: "review_failed", message: "Visible retry reason" }
+  }];
+  await writeFile(
+    join(runsRoot, started.id, `${started.id}.json`),
+    `${JSON.stringify(pending, null, 2)}\n`
+  );
 
   const config: MemsphereConfig = {
     configPath: join(dir, "config.json"),
@@ -87,14 +113,24 @@ flow:
     assert.equal(publicRuns.status, 200);
     const publicSource = await publicRuns.text();
     assert.match(publicSource, /"artifactReview"/);
+    assert.match(publicSource, /"artifactReviewSummaries"/);
+    assert.match(publicSource, /"provider":\s*"traex"/);
+    assert.match(publicSource, /Visible retry reason/);
     assert.doesNotMatch(publicSource, /artifactReviews|Private candidate/);
+    assert.doesNotMatch(publicSource, /attempt-private|workerPid|cliReadyAt|private-prompt|private-session|protocolVersion|private-agent|private-version|private-model|private-stop/);
 
     const roundPath = `${base}/api/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
     const aliceInitial = await fetch(`${roundPath}?identity_id=alice`);
     assert.equal(aliceInitial.status, 200);
-    const aliceContext = await aliceInitial.json() as ReviewContext;
+    const aliceInitialSource = await aliceInitial.text();
+    assert.match(aliceInitialSource, /"provider":\s*"traex"/);
+    assert.match(aliceInitialSource, /Visible retry reason/);
+    assert.doesNotMatch(aliceInitialSource, /attempt-private|workerPid|cliReadyAt|private-prompt|private-session|protocolVersion|private-agent|private-version|private-model|private-stop|"authorization"/);
+    const aliceContext = JSON.parse(aliceInitialSource) as ReviewContext;
     assert.equal(aliceContext.submission.artifact.content, "# Private candidate\n");
     assert.equal(aliceContext.assignment.identityId, "alice");
+    const unassigned = await fetch(`${roundPath}?identity_id=mallory`);
+    assert.equal(unassigned.status, 403);
 
     const aliceDraft = await mutate(`${roundPath}/assignments/alice/draft`, "PATCH", {
       expectedRevision: aliceContext.review.round.revision,
@@ -120,7 +156,7 @@ flow:
     const bobDraft = await mutate(`${roundPath}/assignments/bob/draft`, "PATCH", {
       expectedRevision: bobContext.review.round.revision,
       vote: "request_changes",
-      comments: [{ body: "Advisory suggestion" }]
+      comments: [{ body: "Advisory suggestion\\n\\nSecond paragraph" }]
     });
     assert.equal(bobDraft.status, 200);
     const bobDraftContext = await bobDraft.json() as ReviewContext;
@@ -135,6 +171,9 @@ flow:
     const aliceRefreshedContext = await aliceRefresh.json() as ReviewContext;
     assert.equal(aliceRefreshedContext.assignment.draft.comments[0]?.body, "Alice private draft");
     assert.match(JSON.stringify(aliceRefreshedContext.rounds), /Advisory suggestion/);
+    for (const round of aliceRefreshedContext.rounds as Array<{ assignments: Array<Record<string, unknown>> }>) {
+      for (const assignment of round.assignments) assert.equal("draft" in assignment, false);
+    }
     const aliceSubmit = await mutate(`${roundPath}/assignments/alice/submit`, "POST", {
       expectedRevision: aliceRefreshedContext.review.round.revision
     });
@@ -156,6 +195,40 @@ flow:
     assert.equal(completed.events[0]?.artifact.content, undefined);
     assert.equal(completed.artifactReviews?.[0]?.rounds[0]?.result?.decisionApprove, 2);
     assert.equal(completed.artifactReviews?.[0]?.rounds[0]?.result?.advisoryTotal, 1);
+
+    const completedRunsResponse = await fetch(`${base}/api/runs`);
+    assert.equal(completedRunsResponse.status, 200);
+    const completedRuns = await completedRunsResponse.json() as {
+      runs: Array<{
+        id: string;
+        artifactReview?: unknown;
+        artifactReviewSummaries?: Array<{
+          id: string;
+          status: string;
+          createdAt?: string;
+          updatedAt?: string;
+        }>;
+      }>;
+    };
+    const completedRun = completedRuns.runs.find((candidate) => candidate.id === started.id);
+    assert(completedRun);
+    assert.equal(completedRun.artifactReview, undefined);
+    assert.equal(completedRun.artifactReviewSummaries?.length, 1);
+    assert.equal(completedRun.artifactReviewSummaries?.[0]?.id, review.id);
+    assert.equal(completedRun.artifactReviewSummaries?.[0]?.status, "passed");
+    assert.equal(typeof completedRun.artifactReviewSummaries?.[0]?.createdAt, "string");
+    assert.equal(typeof completedRun.artifactReviewSummaries?.[0]?.updatedAt, "string");
+
+    const completedEvidence = await fetch(`${roundPath}?identity_id=alice`);
+    assert.equal(completedEvidence.status, 200);
+    const completedEvidenceContext = await completedEvidence.json() as ReviewContext;
+    assert.equal(completedEvidenceContext.submission.artifact.content, "# Private candidate\n");
+    assert.match(JSON.stringify(completedEvidenceContext.rounds), /Advisory suggestion/);
+    const advisory = completedEvidenceContext.rounds[0]?.assignments.find(
+      (assignment) => assignment.identityId === "bob"
+    )?.submitted?.comments[0];
+    assert.equal(advisory?.body, "Advisory suggestion\\n\\nSecond paragraph");
+    assert.match(advisory?.renderedBody ?? "", /<p>Advisory suggestion<\/p>\s*<p>Second paragraph<\/p>/);
   } finally {
     server.close();
     await once(server, "close");
@@ -174,7 +247,12 @@ type ReviewContext = {
     identityId: string;
     draft: { comments: Array<{ body: string }> };
   };
-  rounds: unknown[];
+  rounds: Array<{
+    assignments: Array<{
+      identityId: string;
+      submitted?: { comments: Array<{ body: string; renderedBody?: string }> };
+    }>;
+  }>;
 };
 
 function mutate(url: string, method: "PATCH" | "POST", body: unknown): Promise<Response> {

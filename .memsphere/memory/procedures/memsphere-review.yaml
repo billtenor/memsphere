@@ -1,5 +1,5 @@
 !procedure
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - memsphere review 流程
   - memsphere-review
@@ -7,10 +7,12 @@ defines:
   - 应用 Memsphere review comments，更新目标 Memory、review 状态和处理摘要。
   - 适用于 Concept、Statement、Schema 与 Procedure 的 memory review，也适用于以 task/run artifacts 提供补充上下文的 task review。
   - task/run artifacts 只用于理解 comment，review 的修改目标仍是 Memory。
+  - 本流程不处理 Artifact Review Comment；Artifact Review Comment 绑定 Run 中不可变的 Artifact Submission 与 Round，只作为该次 Artifact Review 的评审证据保存和展示。
 asserts:
   - memory review 必须修改 review.memoryRoot 下的当前 Memory；task review 必须根据 snapshot 定位并修改当前工程 memoryRoot 中对应的 Memory。
   - snapshot、target、location 和 hash 只用于定位和理解 comment，不是盲目修改依据。
   - 不得修改 review comments、task/run artifacts 或与 comments 无关的 Memory 内容。
+  - 不得把 Artifact Review Comment 导入 Memory Review，也不得用本流程改写 Artifact Review 的 Submission、Round、Vote 或 Result。
   - 只有 submitted 或 processing review 可以处理；draft 和 done review 不得应用 comments 或修改目标 Memory。
   - submitted review 必须在修改 Memory 前更新为 processing。
   - 只有全部 comments 已安全处理且 memsphere validate 通过，才能将 review 标记为 done；否则保持 processing 并记录原因。

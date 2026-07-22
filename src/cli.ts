@@ -255,11 +255,13 @@ runReview
   .command("comment")
   .description("Add a structured comment to this Agent Assignment.")
   .requiredOption("--assignment <id>", "artifact review assignment id")
-  .option("--body <text>", "comment body")
-  .option("--body-file <path>", "read comment body from file")
+  .option("--body <text>", "single-line Markdown comment body")
+  .option("--body-stdin", "read a multiline Markdown comment body from standard input")
   .option("--target <target>", "comment anchor target")
   .option("--location <location>", "comment anchor location")
   .option("--source-hash <hash>", "comment anchor source hash")
+  .option("--submission-id <id>", "comment anchor submission id")
+  .option("--context <text>", "comment anchor context excerpt")
   .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
   .action(runReviewCommentCommand);
 

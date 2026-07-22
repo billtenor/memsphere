@@ -13,9 +13,11 @@ import {
   type ArtifactReviewAgentAttempt,
   type ArtifactReviewAgentFailure,
   type ArtifactReviewAnchor,
+  type ArtifactReviewAgentAnchorInput,
   type ArtifactReviewAssignment,
   type ArtifactReviewComment,
   type ArtifactReviewRound,
+  type ArtifactReviewSubmission,
   type ArtifactReviewVoteValue
 } from "../artifact-review.js";
 import {
@@ -423,9 +425,11 @@ const runProcedureTemplateSchema: z.ZodType<RunProcedureTemplate> = z.object({
 }).strict();
 
 const artifactReviewAnchorSchema = z.object({
+  submissionId: z.string(),
   target: z.string(),
   location: z.string().optional(),
-  sourceHash: z.string()
+  sourceHash: z.string(),
+  context: z.string().optional()
 }).strict();
 
 const artifactReviewCommentSchema = z.object({
@@ -1107,7 +1111,7 @@ export async function updateArtifactReviewDraft(input: {
     const now = new Date().toISOString();
     const comments = normalizeArtifactReviewComments(
       input.draft.comments,
-      submission.digest,
+      submission,
       now,
       assignment.draft.comments
     );
@@ -1149,8 +1153,8 @@ export async function submitArtifactReviewAssignment(input: {
     }
     const vote = assignment.draft.vote;
     if (!vote) throw new Error("Artifact Review vote is required before Submit Review");
-    if (vote === "request_changes" && assignment.draft.comments.length === 0) {
-      throw new Error("request_changes requires at least one Comment");
+    if ((vote === "request_changes" || vote === "abstain") && assignment.draft.comments.length === 0) {
+      throw new Error(`${vote} requires at least one Comment`);
     }
     const permission = assignment.binding === "decision" ? "decision.decide" : "decision.assess";
     const authorization = authorizeArtifactReviewIdentity({
@@ -1336,7 +1340,7 @@ export async function appendArtifactReviewAgentComment(input: {
   identityId: string;
   attemptId: string;
   body: string;
-  anchor?: ArtifactReviewAnchor;
+  anchor?: ArtifactReviewAgentAnchorInput;
 }): Promise<ArtifactReviewAgentContext> {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
@@ -1349,11 +1353,14 @@ export async function appendArtifactReviewAgentComment(input: {
     if (!authorization.allowed) throw new ArtifactAuthorizationFailure(authorization, []);
     const submission = reviewSubmission(context.review, context.round.submissionId);
     const now = new Date().toISOString();
+    const anchor = input.anchor
+      ? { ...input.anchor, submissionId: input.anchor.submissionId ?? submission.id }
+      : undefined;
     context.assignment.draft = {
       ...context.assignment.draft,
       comments: normalizeArtifactReviewComments(
-        [...context.assignment.draft.comments, { body: input.body, anchor: input.anchor }],
-        submission.digest,
+        [...context.assignment.draft.comments, { body: input.body, anchor }],
+        submission,
         now,
         context.assignment.draft.comments
       ),
@@ -1393,8 +1400,12 @@ export async function submitArtifactReviewAgentAssignment(input: {
     }
     const context = requireRunningAgentContext(run, input);
     if (!context.attempt.cliReadyAt) throw new Error("Agent Review CLI handshake is required before submit");
-    if (input.vote === "request_changes" && context.assignment.draft.comments.length === 0) {
-      throw new Error("request_changes requires at least one Comment");
+    if (
+      (input.vote === "request_changes" || input.vote === "abstain")
+      && context.assignment.draft.comments.length === 0
+      && !summary
+    ) {
+      throw new Error(`${input.vote} requires at least one Comment or Summary`);
     }
     const permission = context.assignment.binding === "decision" ? "decision.decide" : "decision.assess";
     const authorization = authorizeArtifactReviewIdentity({
@@ -1588,7 +1599,7 @@ async function acceptArtifactReviewSubmission(
 
 function normalizeArtifactReviewComments(
   comments: ArtifactReviewDraftInput["comments"],
-  submissionDigest: string,
+  submission: Pick<ArtifactReviewSubmission, "id" | "digest">,
   now: string,
   existingComments: readonly ArtifactReviewComment[] = []
 ): ArtifactReviewComment[] {
@@ -1597,8 +1608,24 @@ function normalizeArtifactReviewComments(
   return comments.map((comment) => {
     const body = comment.body.trim();
     if (!body) throw new Error("Artifact Review Comment body must not be empty");
-    if (comment.anchor && comment.anchor.sourceHash !== submissionDigest) {
-      throw new Error("Artifact Review Comment anchor does not match the current Submission");
+    let anchor: ArtifactReviewAnchor | undefined;
+    if (comment.anchor) {
+      if (comment.anchor.submissionId !== submission.id || comment.anchor.sourceHash !== submission.digest) {
+        throw new Error("Artifact Review Comment anchor does not match the current Submission");
+      }
+      const target = comment.anchor.target.trim();
+      if (!target) throw new Error("Artifact Review Comment anchor target must not be empty");
+      const context = comment.anchor.context?.trim();
+      if (context && context.length > 500) {
+        throw new Error("Artifact Review Comment anchor context must not exceed 500 characters");
+      }
+      anchor = {
+        submissionId: submission.id,
+        sourceHash: submission.digest,
+        target,
+        location: comment.anchor.location?.trim() || undefined,
+        context: context || undefined
+      };
     }
     const id = comment.id?.trim() || makeReviewEntityId("comment", now);
     if (ids.has(id)) throw new Error(`Duplicate Artifact Review Comment id: ${id}`);
@@ -1606,7 +1633,7 @@ function normalizeArtifactReviewComments(
     return {
       id,
       body,
-      anchor: comment.anchor ? structuredClone(comment.anchor) : undefined,
+      anchor,
       createdAt: existingById.get(id)?.createdAt ?? now,
       updatedAt: now
     };

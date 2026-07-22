@@ -143,6 +143,9 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     assert.match(prompt, /run artifact show --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID"/);
     assert.match(prompt, /run artifact contract show --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID"/);
     assert.match(prompt, /run review assignment show --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID"/);
+    assert.match(prompt, /Comment bodies use Markdown/);
+    assert.match(prompt, /run review comment --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --body-stdin --output json <<'MEMSPHERE_COMMENT'/);
+    assert.match(prompt, /Do not encode line breaks as literal `\\n` sequences/);
     assert.match(prompt, /Check every assertion in the frozen Review contract before voting/);
     assert.match(prompt, /For each unmet assertion, preserve at least one concrete comment/);
     assert.match(prompt, /run step show --run "\$MEMSPHERE_REVIEW_RUN_ID" --step "<step-ref>"/);

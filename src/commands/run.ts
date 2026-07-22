@@ -78,10 +78,12 @@ type AgentReviewAssignmentOptions = OutputOptions & { assignment?: string };
 
 type AgentReviewCommentOptions = AgentReviewAssignmentOptions & {
   body?: string;
-  bodyFile?: string;
+  bodyStdin?: boolean;
   target?: string;
   location?: string;
   sourceHash?: string;
+  submissionId?: string;
+  context?: string;
 };
 
 type AgentReviewSubmitOptions = AgentReviewAssignmentOptions & {
@@ -255,12 +257,12 @@ export async function runReviewAssignmentShowCommand(options: AgentReviewAssignm
 
 export async function runReviewCommentCommand(options: AgentReviewCommentOptions): Promise<void> {
   requireBoundAssignment(options.assignment);
-  if (options.body !== undefined && options.bodyFile !== undefined) {
-    throw new Error("use only one of --body or --body-file");
-  }
-  const body = options.bodyFile ? await readFile(options.bodyFile, "utf8") : options.body;
-  if (!body?.trim()) throw new Error("--body or --body-file is required");
-  const hasAnchor = options.target !== undefined || options.location !== undefined || options.sourceHash !== undefined;
+  const body = await resolveReviewCommentBody(options);
+  const hasAnchor = options.target !== undefined
+    || options.location !== undefined
+    || options.sourceHash !== undefined
+    || options.submissionId !== undefined
+    || options.context !== undefined;
   if (hasAnchor && (!options.target || !options.sourceHash)) {
     throw new Error("anchored comments require --target and --source-hash");
   }
@@ -270,10 +272,39 @@ export async function runReviewCommentCommand(options: AgentReviewCommentOptions
     anchor: hasAnchor ? {
       target: options.target!,
       location: options.location,
-      sourceHash: options.sourceHash!
+      sourceHash: options.sourceHash!,
+      submissionId: options.submissionId,
+      context: options.context
     } : undefined
   });
   printStructured(value, options.output);
+}
+
+export function validateInlineReviewCommentBody(body: string): void {
+  if (!body.includes("\n") && (body.includes("\\n\\n") || body.includes("\\r\\n\\r\\n"))) {
+    throw new Error("multiline Markdown must use --body-stdin; do not encode line breaks as literal \\n sequences");
+  }
+}
+
+export async function resolveReviewCommentBody(
+  options: Pick<AgentReviewCommentOptions, "body" | "bodyStdin">,
+  input: AsyncIterable<unknown> = process.stdin
+): Promise<string> {
+  if (options.body !== undefined && options.bodyStdin) {
+    throw new Error("use only one of --body or --body-stdin");
+  }
+  if (options.body === undefined && !options.bodyStdin) {
+    throw new Error("--body or --body-stdin is required");
+  }
+  if (options.body !== undefined) {
+    if (!options.body.trim()) throw new Error("comment body must not be empty");
+    validateInlineReviewCommentBody(options.body);
+    return options.body;
+  }
+  let body = "";
+  for await (const chunk of input) body += String(chunk);
+  if (!body.trim()) throw new Error("standard input comment body must not be empty");
+  return body;
 }
 
 export async function runReviewSubmitCommand(options: AgentReviewSubmitOptions): Promise<void> {

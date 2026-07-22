@@ -5,6 +5,11 @@ import MarkdownIt from "markdown-it";
 import { ZodError, type ZodIssue } from "zod";
 import { archiveReview, archiveRun } from "../archive/store.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
+import type {
+  ArtifactReviewAgentAttempt,
+  ArtifactReviewSubmittedOpinion,
+  ArtifactReviewVote
+} from "../artifact-review.js";
 import { type MemsphereConfig, readConfig } from "../config.js";
 import { authorizeArtifactOperation } from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
@@ -219,6 +224,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         roundId: decodeURIComponent(artifactReviewRoundMatch[2]),
         identityId
       });
+      if ((context.assignment.identityKind ?? "human") !== "human") {
+        throw new Error(`Agent Artifact Review assignment is not assigned to the Human View API: ${identityId}`);
+      }
       sendJson(response, 200, await artifactReviewContextPayload(runsRoot, context));
     } catch (error) {
       sendArtifactReviewError(response, error);
@@ -753,6 +761,9 @@ async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknow
   return {
     ...publicRun,
     artifactReview: review ? artifactReviewSummary(review, hydrated.controlPlane) : undefined,
+    artifactReviewSummaries: (hydrated.artifactReviews ?? []).map((candidate) =>
+      artifactReviewSummary(candidate, hydrated.controlPlane)
+    ),
     schemaWriting
   };
 }
@@ -794,10 +805,20 @@ function artifactReviewSummary(
   }).allowed;
   return {
     id: review.id,
+    stepId: review.stepId,
     artifactName: review.artifactName,
     policyId: review.policyId,
     status: review.status,
     currentRoundId: review.currentRoundId,
+    createdAt: review.createdAt,
+    updatedAt: review.updatedAt,
+    roundCount: review.rounds.length,
+    outcome: review.outcome ? {
+      status: review.outcome.status,
+      submissionId: review.outcome.submissionId,
+      roundId: review.outcome.roundId,
+      completedAt: review.outcome.completedAt
+    } : undefined,
     round: round ? {
       id: round.id,
       sequence: round.sequence,
@@ -813,7 +834,7 @@ function artifactReviewSummary(
         identityKind: assignment.identityKind ?? "human",
         binding: assignment.binding,
         status: assignment.status,
-        attempt: assignment.attempts?.at(-1)
+        attempt: publicArtifactReviewAttempt(assignment.attempts?.at(-1))
       })),
       runner: runnerCanDecide || runnerVote ? {
         roleName: controlPlane?.roles.runner?.name ?? "Runner",
@@ -838,17 +859,29 @@ async function artifactReviewContextPayload(runsRoot: string, context: ArtifactR
     renderedContentType?: string;
   };
   await hydrateArtifactContent(runsRoot, context.run.id, artifact);
+  const { authorization: _authorization, ...publicArtifact } = artifact;
   return {
     review: artifactReviewSummary(context.review, context.run.controlPlane),
     submission: {
       id: submission.id,
       digest: submission.digest,
       createdAt: submission.createdAt,
-      artifact,
+      artifact: publicArtifact,
       revisionSummary: submission.revisionSummary
     },
     assignment: {
-      ...structuredClone(context.assignment),
+      id: context.assignment.id,
+      identityId: context.assignment.identityId,
+      identityName: context.assignment.identityName,
+      identityKind: context.assignment.identityKind ?? "human",
+      roleIds: context.assignment.roleIds,
+      binding: context.assignment.binding,
+      status: context.assignment.status,
+      draft: (context.assignment.identityKind ?? "human") === "agent"
+        ? undefined
+        : structuredClone(context.assignment.draft),
+      submitted: publicArtifactReviewOpinion(context.assignment.submitted),
+      attempts: context.assignment.attempts?.map(publicArtifactReviewAttempt),
       roleNames: artifactReviewRoleNames(context.run.controlPlane, context.assignment.roleIds)
     },
     rounds: context.review.rounds.map((round) => ({
@@ -867,15 +900,61 @@ async function artifactReviewContextPayload(runsRoot: string, context: ArtifactR
         roleIds: assignment.roleIds,
         binding: assignment.binding,
         status: assignment.status,
-        submitted: assignment.submitted,
-        draft: (assignment.identityKind ?? "human") === "agent" ? assignment.draft : undefined,
-        attempts: assignment.attempts
+        submitted: publicArtifactReviewOpinion(assignment.submitted),
+        attempts: assignment.attempts?.map(publicArtifactReviewAttempt)
       })),
-      votes: round.votes,
+      votes: round.votes.map(publicArtifactReviewVote),
       result: round.result,
       revisionSummary: context.review.submissions.find((submission) => submission.id === round.submissionId)?.revisionSummary
     }))
   };
+}
+
+function publicArtifactReviewAttempt(attempt: ArtifactReviewAgentAttempt | undefined): unknown {
+  if (!attempt) return undefined;
+  return {
+    sequence: attempt.sequence,
+    status: attempt.status,
+    provider: attempt.provider,
+    failure: attempt.failure ? {
+      stage: attempt.failure.stage,
+      code: attempt.failure.code,
+      message: attempt.failure.message
+    } : undefined
+  };
+}
+
+function publicArtifactReviewOpinion(opinion: ArtifactReviewSubmittedOpinion | undefined): unknown {
+  if (!opinion) return undefined;
+  return {
+    comments: opinion.comments.map((comment) => ({
+      ...structuredClone(comment),
+      renderedBody: renderArtifactReviewMarkdown(comment.body)
+    })),
+    vote: opinion.vote,
+    summary: opinion.summary,
+    renderedSummary: opinion.summary ? renderArtifactReviewMarkdown(opinion.summary) : undefined,
+    submittedAt: opinion.submittedAt
+  };
+}
+
+function publicArtifactReviewVote(vote: ArtifactReviewVote): unknown {
+  return {
+    subject: vote.subject,
+    binding: vote.binding,
+    value: vote.value,
+    automatic: vote.automatic,
+    comment: vote.comment,
+    renderedComment: vote.comment ? renderArtifactReviewMarkdown(vote.comment) : undefined,
+    submittedAt: vote.submittedAt
+  };
+}
+
+function renderArtifactReviewMarkdown(value: string): string {
+  const normalized = !value.includes("\n") && value.includes("\\n\\n")
+    ? value.replace(/\\r\\n|\\n/g, "\n")
+    : value;
+  return renderMarkdownContent(normalized);
 }
 
 function artifactReviewRoleNames(controlPlane: RunState["controlPlane"], roleIds: string[]): string[] {
@@ -1047,13 +1126,19 @@ function normalizeArtifactReviewDraft(input: { vote?: unknown; comments?: unknow
         throw new Error("invalid Artifact Review comment anchor");
       }
       const candidate = comment.anchor as Record<string, unknown>;
-      if (typeof candidate.target !== "string" || typeof candidate.sourceHash !== "string") {
-        throw new Error("Artifact Review comment anchor requires target and sourceHash");
+      if (
+        typeof candidate.submissionId !== "string"
+        || typeof candidate.target !== "string"
+        || typeof candidate.sourceHash !== "string"
+      ) {
+        throw new Error("Artifact Review comment anchor requires submissionId, target, and sourceHash");
       }
       anchor = {
+        submissionId: candidate.submissionId,
         target: candidate.target,
         sourceHash: candidate.sourceHash,
-        location: typeof candidate.location === "string" ? candidate.location : undefined
+        location: typeof candidate.location === "string" ? candidate.location : undefined,
+        context: typeof candidate.context === "string" ? candidate.context : undefined
       };
     }
     return {

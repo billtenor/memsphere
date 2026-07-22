@@ -10,6 +10,7 @@ import { memoryKinds } from "../src/memory/kinds.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 import {
   activeProcedureAsserts,
+  appendArtifactReviewAgentComment,
   ArtifactAuthorizationFailure,
   artifactSchemaName,
   buildSchemaWritingSnapshot,
@@ -1281,6 +1282,52 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       protocolVersion: 1,
       sessionId: "agent-round-1"
     });
+    await assert.rejects(
+      submitArtifactReviewAgentAssignment({
+        runsRoot,
+        reviewId: review.id,
+        roundId: round.id,
+        identityId: agentAssignment.identityId,
+        attemptId: claimed.attempt.id,
+        vote: "abstain"
+      }),
+      /abstain requires at least one Comment or Summary/
+    );
+    await assert.rejects(
+      appendArtifactReviewAgentComment({
+        runsRoot,
+        reviewId: review.id,
+        roundId: round.id,
+        identityId: agentAssignment.identityId,
+        attemptId: claimed.attempt.id,
+        body: "This anchor uses the wrong digest.",
+        anchor: {
+          sourceHash: "digest-wrong",
+          target: "artifact:root"
+        }
+      }),
+      /does not match the current Submission/
+    );
+    const agentCommented = await appendArtifactReviewAgentComment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: round.id,
+      identityId: agentAssignment.identityId,
+      attemptId: claimed.attempt.id,
+      body: "The candidate is traceable.",
+      anchor: {
+        sourceHash: review.submissions[0].digest,
+        target: " artifact:root ",
+        context: " Reviewed delivery "
+      }
+    });
+    assert.deepEqual(agentCommented.assignment.draft.comments[0]?.anchor, {
+      submissionId: review.submissions[0].id,
+      sourceHash: review.submissions[0].digest,
+      target: "artifact:root",
+      location: undefined,
+      context: "Reviewed delivery"
+    });
     const agentSubmitted = await submitArtifactReviewAgentAssignment({
       runsRoot,
       reviewId: review.id,
@@ -1905,16 +1952,70 @@ flow:
       /is in progress; wait/
     );
 
-    const draft = await updateArtifactReviewDraft({
+    await assert.rejects(
+      updateArtifactReviewDraft({
+        runsRoot,
+        reviewId: review.id,
+        roundId: review.currentRoundId,
+        identityId: "human",
+        expectedRevision: 1,
+        draft: {
+          vote: "approve",
+          comments: [{
+            body: "Wrong submission.",
+            anchor: {
+              submissionId: "submission-wrong",
+              sourceHash: review.submissions[0].digest,
+              target: "markdown:h1:0"
+            }
+          }]
+        }
+      }),
+      /does not match the current Submission/
+    );
+    const abstainDraft = await updateArtifactReviewDraft({
       runsRoot,
       reviewId: review.id,
       roundId: review.currentRoundId,
       identityId: "human",
       expectedRevision: 1,
+      draft: { vote: "abstain", comments: [] }
+    });
+    await assert.rejects(
+      submitArtifactReviewAssignment({
+        runsRoot,
+        reviewId: review.id,
+        roundId: review.currentRoundId,
+        identityId: "human",
+        expectedRevision: abstainDraft.round.revision
+      }),
+      /abstain requires at least one Comment/
+    );
+    const draft = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      identityId: "human",
+      expectedRevision: abstainDraft.round.revision,
       draft: {
         vote: "request_changes",
-        comments: [{ body: "Please revise the candidate." }]
+        comments: [{
+          body: "Please revise the candidate.",
+          anchor: {
+            submissionId: review.submissions[0].id,
+            sourceHash: review.submissions[0].digest,
+            target: " markdown:h1:0 ",
+            context: " First candidate "
+          }
+        }]
       }
+    });
+    assert.deepEqual(draft.assignment.draft.comments[0]?.anchor, {
+      submissionId: review.submissions[0].id,
+      sourceHash: review.submissions[0].digest,
+      target: "markdown:h1:0",
+      location: undefined,
+      context: "First candidate"
     });
     const rejected = await submitArtifactReviewAssignment({
       runsRoot,
@@ -1945,6 +2046,23 @@ flow:
     assert.equal(secondReview.id, review.id);
     assert.equal(secondReview.rounds.length, 2);
     assert.equal(secondReview.submissions[1].revisionSummary?.previousSubmissionId, secondReview.submissions[0].id);
+    await assert.rejects(
+      updateArtifactReviewDraft({
+        runsRoot,
+        reviewId: review.id,
+        roundId: secondReview.currentRoundId,
+        identityId: "human",
+        expectedRevision: 1,
+        draft: {
+          vote: "approve",
+          comments: [{
+            body: "Stale anchor.",
+            anchor: draft.assignment.draft.comments[0]!.anchor
+          }]
+        }
+      }),
+      /does not match the current Submission/
+    );
 
     const approvedDraft = await updateArtifactReviewDraft({
       runsRoot,

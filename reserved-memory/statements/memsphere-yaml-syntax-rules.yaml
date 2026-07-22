@@ -381,7 +381,9 @@ sections:
           - review 只允许出现在 !artifact，值必须是已注册的非空 Decision Policy id。
           - 省略 review 时，Artifact 在 type、format 和 schema 校验通过后按既有行为立即被接纳并推进 Run。
           - 配置 review 时，Artifact 校验通过后必须创建 Artifact Review；Review 通过前不得把候选 Artifact 加入 Run events 或推进当前 Action。
-          - 当前内置 artifact_acceptance.unanimous 要求全部 Human Assignment 提交；只有具有 decision.decide 的 Vote 参与一致通过判定，只有 decision.assess 的 Vote 作为建议保存。
+          - 当前内置 artifact_acceptance.unanimous 要求全部 Human 与 Agent Reviewer Assignment 提交；只有具有 decision.decide 的 Vote 参与一致通过判定，只有 decision.assess 的 Vote 作为建议保存；Reviewer 完成后仍需 Runner 显式投票。
+          - View 按 Review 与 Round 展示每轮不可变 Artifact Submission、正式 Comment、Vote、Result 和 Revision Summary；历史 Round 只读，完成后的 Review 仍可从对应 Run 步骤重新打开。
+          - Artifact Review 定位 Comment 只能绑定创建时的 Submission、digest 和 Renderer target，不得锚定 Memory 或 Workspace 文件，也不得自动迁移到下一轮。
 
       - !statement
         names:

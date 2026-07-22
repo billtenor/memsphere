@@ -9,6 +9,12 @@ test("embedded browser script is valid JavaScript", () => {
   assert.doesNotThrow(() => new Function(script));
 });
 
+test("Artifact Review opinions render the server-provided Markdown projection", () => {
+  assert.match(browserHtml, /if \(opinion\.renderedSummary\) summary\.innerHTML = opinion\.renderedSummary/);
+  assert.match(browserHtml, /if \(vote\.renderedComment\) comment\.innerHTML = vote\.renderedComment/);
+  assert.match(browserHtml, /if \(comment\.renderedBody\) body\.innerHTML = comment\.renderedBody/);
+});
+
 test("memory view recognizes only tagged actions and renders recursive typed structures", () => {
   assert.match(browserHtml, /syntax: \{ zh: "语法版本", yaml: "syntax" \}/);
   assert.match(browserHtml, /memory\.entity\.syntax/);
@@ -104,6 +110,47 @@ test("Artifact Review identity controls use Role names and an anchored custom me
   assert.match(browserHtml, /option\.textContent = artifactReviewRoleName\(assignment\)/);
   assert.match(browserHtml, /name\.textContent = artifactReviewRoleName\(assignment\)/);
   assert.match(browserHtml, /\.artifact-review-select-menu \{ position: absolute; top: calc\(100% \+ 4px\); right: 0; left: 0;/);
+});
+
+test("Artifact Review uses a resizable evidence modal with stable Submission targets", () => {
+  assert.match(browserHtml, /<dialog class="artifact-review-modal" id="artifact-review-modal"/);
+  assert.match(browserHtml, /role="separator" aria-controls="artifact-review-artifact-pane artifact-review-review-pane"/);
+  assert.match(browserHtml, /artifact-review-mobile-tabs/);
+  assert.match(browserHtml, /state\.artifactReviewOpenSelect = open \? "identity:" \+ review\.id : ""/);
+  assert.match(browserHtml, /submissionId: reviewContext\.submission\.id/);
+  assert.match(browserHtml, /sourceHash: reviewContext\.submission\.digest/);
+  assert.match(browserHtml, /context: String\(snapshot \?\? ""\)\.trim\(\)\.slice\(0, 500\)/);
+  assert.match(browserHtml, /context\.rounds\.find\(round => round\.submissionId === comment\.anchor\.submissionId\)/);
+  assert.match(browserHtml, /artifact-review-target-located/);
+  assert.match(browserHtml, /Unable to locate:/);
+  assert.match(browserHtml, /artifactReviewSummariesForRun\(run\)\.find\(review => review\.stepId === step\.id\)/);
+  assert.match(browserHtml, /controls\.append\(renderArtifactReviewRoundTimeline\(context\)\)/);
+  assert.match(browserHtml, /controls\.append\(renderArtifactReviewHistorySelector\(context\)\)/);
+  assert.match(browserHtml, /blockTitle\(t\("voteSummary"\)\)/);
+  assert.match(browserHtml, /blockTitle\(t\("reviewComments"\)\)/);
+  assert.match(browserHtml, /scrollToArtifactReviewParticipant\(assignment\)/);
+  assert.match(browserHtml, /artifact-review-opinion-located/);
+  assert.match(browserHtml, /renderArtifactReviewSelector\(review\)/);
+  assert.match(browserHtml, /state\.artifactReviewSelectedByRun\[run\.id\] = review\.id/);
+  assert.match(browserHtml, /const artifactReview = state\.viewMode === "task" \? defaultArtifactReviewSummary\(run\) : null/);
+  assert.match(browserHtml, /if \(run\.artifactReview\) return run\.artifactReview/);
+  assert.match(browserHtml, /new Date\(review\.updatedAt \|\| review\.createdAt \|\| 0\)\.getTime\(\)/);
+  assert.match(browserHtml, /run && state\.artifactReviewModalOpen \? state\.artifactReviewSelectedByRun\[run\.id\] : ""/);
+  assert.match(browserHtml, /button\.className = "pill current-step-jump";/);
+  assert.match(browserHtml, /button\.dataset\.artifactReviewId = review\.id;/);
+  assert.match(browserHtml, /state\.artifactReviewReturnScrollY = window\.scrollY;/);
+  assert.match(browserHtml, /state\.artifactReviewReturnFocusTop = active instanceof HTMLElement/);
+  assert.match(browserHtml, /focusTarget\?\.focus\(\{ preventScroll: true \}\);/);
+  assert.match(browserHtml, /window\.scrollBy\(0, focusTarget\.getBoundingClientRect\(\)\.top - returnFocusTop\);/);
+  assert.match(browserHtml, /window\.scrollTo\(0, returnScrollY\);/);
+  assert.doesNotMatch(browserHtml, /artifact-review-action-button/);
+  assert.match(browserHtml, /renderArtifactReviewRoundSummary\(context, selectedRound, viewingHistory\);/);
+  assert.match(browserHtml, /entries\.sort\(\(left, right\) => new Date\(right\.submittedAt \|\| 0\)\.getTime\(\) - new Date\(left\.submittedAt \|\| 0\)\.getTime\(\)\)/);
+  assert.ok(
+    browserHtml.indexOf("renderArtifactReviewRoundSummary(context, selectedRound, viewingHistory);")
+      < browserHtml.indexOf("renderArtifactReviewSubmittedOpinions(selectedRound);"),
+    "round summary should render before the opinion timeline"
+  );
 });
 
 test("memory and task artifacts show participating Review Role names", () => {
