@@ -3,14 +3,31 @@ id: 20260720-agent-semantic-artifact-validation
 status: todo
 type: feature
 created: 2026-07-20
-run_id:
+run_id: run-20260720-155634z-7f1b7846
 ---
 
-# ACP Agent 语义 Artifact 审阅与决策需求
+# Artifact Review Epic
 
 ## 需求管理摘要
 
-当前代码只实现了确定性的 Artifact type、format 和 schema validator，尚未实现 Agent Reviewer、Identity/Role/Permission、Decision Policy、申辩和最终决策链路，因此当前状态为 todo。
+当前代码只实现了确定性的 Artifact type、format 和 schema validator，尚未实现 Artifact Review Loop、Agent Reviewer、Identity/Role/Permission、Decision Policy、申辩、完整 View 和最终决策链路，因此当前状态为 todo。
+
+本需求已经拆分为六个可独立验收、严格串行推进的子 Change。本文件保留总体目标、领域约束和历史设计基线，不再作为一次开发迭代直接实施；具体范围和验收以当前阶段的子 Change 为准。
+
+## 串行子需求
+
+1. [`20260720-artifact-review-control-plane`](../20260720-artifact-review-control-plane/change.md)：配置与 Role Binding、解析鉴权、脱敏快照。
+2. [`20260720-artifact-review-human-loop`](../20260720-artifact-review-human-loop/change.md)：Human-only Review Loop、`review wait` 和多轮修改闭环。
+3. [`20260720-artifact-review-agent-acp`](../20260720-artifact-review-agent-acp/change.md)：ACP Agent Reviewer、专用 CLI 和混合审阅。
+4. [`20260720-artifact-review-decision-governance`](../20260720-artifact-review-decision-governance/change.md)：Decision Policy、Challenge、Decision、Override 和完整权限治理。
+5. [`20260720-artifact-review-evidence-view`](../20260720-artifact-review-evidence-view/change.md)：多轮 Review Evidence View 与 Git 无关 Workspace diff。
+6. [`20260720-artifact-review-compatibility-hardening`](../20260720-artifact-review-compatibility-hardening/change.md)：syntax/data migration、旧 Task Review 退役、Memory Review 回归和可靠性收口。
+
+后一个子 Change 只有在前一个完成开发、验证并达到可接受状态后才进入开发。六个子 Change 全部满足验收标准后，才对本 Epic 做整体验收并进入 accepting。
+
+## 需求
+
+建设由 `run report` 自动触发的 Artifact Review 核心能力，让重要 Artifact 通过 Human/Agent 多轮审阅、投票、修改和决策后再推进 Run；同时具备完整控制平面、ACP Reviewer、Human View、Review Evidence、Workspace 变化证据、迁移和可靠性保障。具体实施边界以六个串行子 Change 为准。
 
 ## 背景
 
@@ -18,7 +35,7 @@ Artifact Contract v2 已通过代码 Validator 校验 `type -> format -> schema`
 
 需要在 `memsphere run report` 中引入独立 Reviewer，对 Artifact 进行语义检查并提供有依据的改进建议。Reviewer 可以是 Agent 或 human，也可以同时存在多个。
 
-## 当前迭代需求契约
+## 总体设计基线
 
 ### 整体目标
 
@@ -411,3 +428,15 @@ Run 必须快照：
 - 多 Reviewer 的结果严格按照快照的 Decision Policy 合成。
 - 拒绝和 unknown 不会推进 Run；合法决定通过后只产生一次 Artifact Event。
 - View 可以查看身份、角色、权限依据、评价、申辩和最终决定。
+
+## 技术与测试方案
+
+由六个串行子 Change 在各自开发前补充。本 Epic 只维护跨阶段不变量和最终端到端验收，不重复维护实现方案。
+
+## 开发任务
+
+按“串行子需求”顺序逐项开发；当前六个子 Change 均为 todo，尚未开始。
+
+## 验收结果
+
+尚未开始。六个子 Change 全部完成并通过回归后，再记录本 Epic 的整体验收结果。
