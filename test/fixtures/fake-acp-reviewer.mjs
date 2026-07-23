@@ -44,6 +44,7 @@ const app = acp
     }
     if (mode === "approve" || mode === "request_changes") {
       try {
+        await sendReviewActivity(client, params.sessionId);
         completeReview(mode);
       } catch (error) {
         process.stderr.write(`fake reviewer completion failed: ${error?.stack || error}\n`);
@@ -100,5 +101,53 @@ async function sendProgress(client, sessionId, index) {
   } catch (error) {
     process.stderr.write(`progress update failed: ${error?.stack || error}\n`);
     throw error;
+  }
+}
+
+async function sendReviewActivity(client, sessionId) {
+  await client.notify(acp.methods.client.session.update, {
+    sessionId,
+    update: {
+      sessionUpdate: "agent_message_chunk",
+      messageId: "fake-review-message",
+      content: { type: "text", text: "Reviewing implementation evidence." }
+    }
+  });
+  await client.notify(acp.methods.client.session.update, {
+    sessionId,
+    update: {
+      sessionUpdate: "tool_call",
+      toolCallId: "fake-test-tool",
+      title: "Run focused tests",
+      kind: "execute",
+      status: "in_progress",
+      rawInput: { private: true }
+    }
+  });
+  await client.notify(acp.methods.client.session.update, {
+    sessionId,
+    update: {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "fake-test-tool",
+      status: "completed",
+      rawOutput: { private: true }
+    }
+  });
+  await client.notify(acp.methods.client.session.update, {
+    sessionId,
+    update: {
+      sessionUpdate: "plan",
+      entries: [{ content: "Inspect and submit", priority: "high", status: "completed" }]
+    }
+  });
+  for (let index = 0; index < 36; index += 1) {
+    await client.notify(acp.methods.client.session.update, {
+      sessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: `fake-detail-${index}`,
+        content: { type: "text", text: `Inspected implementation detail ${index}.` }
+      }
+    });
   }
 }

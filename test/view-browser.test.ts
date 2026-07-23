@@ -105,7 +105,51 @@ test("Artifact Review renders Agent progress and exposes retry only for failed A
   assert.match(browserHtml, /state\.artifactReviewRetries/);
   assert.match(browserHtml, /repeated advisory groups/);
   assert.match(browserHtml, /Decision intent: /);
-  assert.match(browserHtml, /Implementation evidence: /);
+  assert.match(browserHtml, /"实现证据：" \+ \(referenced \? "已引用" : "未引用"\)/);
+});
+
+test("Artifact Review comment severity belongs to the card header", () => {
+  assert.match(browserHtml, /header\.className = "artifact-review-comment-head"/);
+  assert.match(browserHtml, /header\.append\(pill\(comment\.severity/);
+  assert.match(browserHtml, /card\.append\(header, body\)/);
+  assert.match(browserHtml, /\.artifact-review-comment-head \{ display: flex; justify-content: space-between;/);
+});
+
+test("Artifact Review evidence is selected in the artifact pane", () => {
+  assert.match(browserHtml, /artifactReviewMaterialBySubmission: \{\}/);
+  assert.match(browserHtml, /function renderArtifactReviewMaterialSelector\(context, selectedMaterial\)/);
+  assert.match(browserHtml, /context\.submission\.package\?\.evidence/);
+  assert.match(browserHtml, /commentable: false/);
+  assert.doesNotMatch(browserHtml, /function renderArtifactReviewEvidencePackage/);
+});
+
+test("Artifact Review exposes read-only Agent Activity inside participant rows", () => {
+  assert.match(browserHtml, /artifactReviewActivities: \{\}/);
+  assert.match(browserHtml, /function syncArtifactReviewActivities\(force = false\)/);
+  assert.match(browserHtml, /function renderAgentActivity\(review, round, assignment, entry\)/);
+  assert.match(browserHtml, /toggle\.setAttribute\("aria-expanded"/);
+  assert.match(browserHtml, /row\.append\(renderAgentActivity\(review, selectedRound, assignment, activity\)\)/);
+  assert.match(browserHtml, /entry\.pinnedToBottom = distance < 20/);
+  assert.match(browserHtml, /entry\.events = \[\.\.\.byId\.values\(\)\]/);
+  assert.match(browserHtml, /const assignments = \(review\.round\.assignments \|\| \[\]\)\.filter\(assignment => assignment\.identityKind !== "agent"\)/);
+  assert.match(browserHtml, /\.artifact-review-activity \{ grid-column: 1 \/ -1;/);
+  assert.match(browserHtml, /artifact-review-attempt-select/);
+  assert.match(browserHtml, /artifact-review-agent-summary-row/);
+  assert.match(browserHtml, /artifact-review-activity-toggle/);
+  assert.match(browserHtml, /displayLanguage === "zh" \? "查看详情" : "View details"/);
+  assert.match(browserHtml, /trigger\.setAttribute\("aria-label", displayLanguage === "zh" \? "选择 Attempt" : "Select attempt"\)/);
+  assert.match(browserHtml, /existing\.querySelector\("\.artifact-review-select-menu:not\(\[hidden\]\)"\)/);
+  assert.match(browserHtml, /message: "消息"/);
+  assert.match(browserHtml, /tool: "工具调用"/);
+  assert.match(browserHtml, /plan: "执行计划"/);
+  assert.match(browserHtml, /thought: "分析"/);
+  assert.match(browserHtml, /lifecycle: "运行状态"/);
+  assert.match(browserHtml, /head\.append\(kind, time\)/);
+  assert.match(browserHtml, /row\.append\(head, title\)/);
+  assert.match(browserHtml, /\.artifact-review-activity-event-head time \{ flex: 0 0 auto; white-space: nowrap;/);
+  assert.match(browserHtml, /event\.status && event\.status !== "completed"/);
+  assert.match(browserHtml, /in_progress: "进行中"/);
+  assert.doesNotMatch(browserHtml, /artifact-review-activity-head select/);
 });
 
 test("Artifact Review identity controls use Role names and an anchored custom menu", () => {
@@ -327,10 +371,13 @@ test("initial loading validates the saved review only after its subject data is 
 });
 
 test("task polling does not replace active editors or open Artifact Review selectors", () => {
-  assert.match(browserHtml, /state\.viewMode === "task" && !hasActiveTaskInteraction\(\)/);
+  assert.match(browserHtml, /if \(hasActiveTaskInteraction\(\)\) \{\s*syncArtifactReviewActivities\(\)\.catch\(console\.error\);\s*\} else \{/);
   assert.match(browserHtml, /loadRuns\(\)\.then\(\(\) => \{[\s\S]*if \(hasActiveTaskInteraction\(\)\) \{[\s\S]*taskPollingRenderPending = true/);
+  assert.match(browserHtml, /function refreshAgentActivityDom\([\s\S]*existing\.replaceWith\(renderAgentActivity/);
   assert.match(browserHtml, /artifact-review-select-menu:not\(\[hidden\]\)/);
   assert.match(browserHtml, /document\.activeElement\?\.matches\?\.\("\.artifact-review-select"\)/);
+  assert.match(browserHtml, /Object\.values\(state\.artifactReviewActivities\)\.some\(entry => entry\.expanded && !entry\.pinnedToBottom\)/);
+  assert.match(browserHtml, /if \(nextCursor !== cursor \|\| entry\.error !== error \|\| entry\.loaded !== loaded\) \{\s*refreshAgentActivityDom/);
 });
 
 test("section title comments render inline in the expanded node", () => {
@@ -437,4 +484,12 @@ test("memory details render names as a field while retaining the primary name as
   assert.match(browserHtml, /names: \{ zh: "名称", yaml: "names" \}/);
   assert.match(browserHtml, /appendList\(target, t\("names"\), node\.names, "names"\)/);
   assert.match(browserHtml, /el\.title\.textContent = primaryName\(memory\.entity\);/);
+});
+
+test("Artifact Review chooses comment severity before entering the comment", () => {
+  assert.match(browserHtml, /severity\.className = "artifact-review-round-select artifact-review-severity-select"/);
+  assert.match(browserHtml, /severityTrigger\.setAttribute\("role", "combobox"\)/);
+  assert.match(browserHtml, /severityMenu\.setAttribute\("role", "listbox"\)/);
+  assert.match(browserHtml, /wrap\.append\(severity, textarea, add\)/);
+  assert.doesNotMatch(browserHtml, /wrap\.append\(textarea, severity, add\)/);
 });

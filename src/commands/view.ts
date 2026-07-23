@@ -1,11 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { access, readFile } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import MarkdownIt from "markdown-it";
 import { ZodError, type ZodIssue } from "zod";
 import { archiveReview, archiveRun } from "../archive/store.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
+import { agentActivityDelta, readAgentActivitySnapshot } from "../acp/activity.js";
 import {
+  artifactReviewAssignmentId,
   artifactReviewFailureCategory,
   artifactReviewOpinionReferencesImplementation,
   repeatedArtifactReviewAdvisories,
@@ -41,6 +43,7 @@ import {
   buildSchemaWritingSnapshot,
   currentArtifactReview,
   ensureCurrentSchemaDraft,
+  findArtifactReview,
   listRuns,
   parseRunState,
   readArtifactReviewForIdentity,
@@ -232,6 +235,43 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         throw new Error(`Agent Artifact Review assignment is not assigned to the Human View API: ${identityId}`);
       }
       sendJson(response, 200, await artifactReviewContextPayload(runsRoot, context));
+    } catch (error) {
+      sendArtifactReviewError(response, error);
+    }
+    return;
+  }
+
+  const artifactReviewActivityMatch = url.pathname.match(
+    /^\/api\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)\/assignments\/([^/]+)\/attempts\/(\d+)\/activity$/
+  );
+  if (request.method === "GET" && artifactReviewActivityMatch) {
+    try {
+      const reviewId = decodeURIComponent(artifactReviewActivityMatch[1]);
+      const roundId = decodeURIComponent(artifactReviewActivityMatch[2]);
+      const identityId = decodeURIComponent(artifactReviewActivityMatch[3]);
+      const sequence = Number(artifactReviewActivityMatch[4]);
+      const cursor = normalizeActivityInteger(url.searchParams.get("cursor"), 0, "cursor");
+      const limit = normalizeActivityInteger(url.searchParams.get("limit"), 500, "limit");
+      const located = await findViewArtifactReview(config, reviewId);
+      const round = located.review.rounds.find((candidate) => candidate.id === roundId);
+      if (!round) throw new Error(`Artifact Review Round not found: ${roundId}`);
+      const assignment = round.assignments.find((candidate) => candidate.identityId === identityId);
+      if (!assignment) throw new Error(`Identity is not assigned to Artifact Review Round: ${identityId}`);
+      if ((assignment.identityKind ?? "human") !== "agent") {
+        throw new Error(`Artifact Review Activity is read-only for Agent assignments: ${identityId}`);
+      }
+      const attempt = assignment.attempts?.find((candidate) => candidate.sequence === sequence);
+      if (!attempt) throw new Error(`Agent Review attempt not found: ${sequence}`);
+      const snapshot = await readAgentActivitySnapshot({
+        runsRoot: located.runsRoot,
+        runId: located.run.id,
+        reviewId,
+        roundId,
+        assignmentId: artifactReviewAssignmentId(assignment),
+        attemptId: attempt.id,
+        workspaceRoot: dirname(config.scopeRoot)
+      });
+      sendJson(response, 200, agentActivityDelta(snapshot, cursor, limit));
     } catch (error) {
       sendArtifactReviewError(response, error);
     }
@@ -905,6 +945,32 @@ function artifactReviewSummary(
       result: round.result
     } : undefined
   };
+}
+
+async function findViewArtifactReview(
+  config: MemsphereConfig,
+  reviewId: string
+): Promise<{ runsRoot: string; run: RunState; review: NonNullable<RunState["artifactReviews"]>[number] }> {
+  const roots = [config.runsRoot, join(config.archiveRoot, "runs")];
+  for (const runsRoot of roots) {
+    try {
+      await access(runsRoot);
+      const located = await findArtifactReview({ runsRoot, reviewId });
+      return { runsRoot, ...located };
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") continue;
+      if (error instanceof Error && /Artifact Review not found/.test(error.message)) continue;
+      throw error;
+    }
+  }
+  throw new Error(`Artifact Review not found: ${reviewId}`);
+}
+
+function normalizeActivityInteger(value: string | null, fallback: number, name: string): number {
+  if (value === null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`invalid Agent Activity ${name}`);
+  return parsed;
 }
 
 async function artifactReviewContextPayload(runsRoot: string, context: ArtifactReviewContext): Promise<unknown> {

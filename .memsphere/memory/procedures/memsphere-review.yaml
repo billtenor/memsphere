@@ -12,6 +12,9 @@ asserts:
   - memory review 必须修改 review.memoryRoot 下的当前 Memory；task review 必须根据 snapshot 定位并修改当前工程 memoryRoot 中对应的 Memory。
   - 在 View 中处理 Artifact Review 草稿保存冲突时，必须保留本地输入并优先自动刷新、合并和重试；不得把浏览器 alert 作为可接受的冲突恢复路径。
   - View Review 操作变更必须验证不丢失用户未提交文本、不覆盖其他 reviewer 的新状态，且 stale revision 不应提交旧草稿。
+  - View 中的 Agent Reviewer 只能作为参与者展示状态、最近活动和按 attempt 隔离的只读运行记录，不得作为 Human 评审身份进入评论或投票编辑器。
+  - Run 必须按 attempt 以 JSONL 完整保留实际发送的 ACP prompt、ACP session.update 和 Memsphere 生命周期事件，并将 JSONL 作为 Agent Activity 的唯一事实来源；View 只能读取经过过滤、容量受控且可按 JSONL 源进度校验与重建的投影缓存，不得暴露 prompt、thought 正文、工具原始输入输出或 Provider 私有字段。
+  - Artifact Review 的候选产物和 requirement、implementation、validation 等证据 Artifact 必须在左侧材料区域选择查看；证据快照只读，右侧只承载评审状态、意见和投票操作。
   - snapshot、target、location 和 hash 只用于定位和理解 comment，不是盲目修改依据。
   - 不得修改 review comments、task/run artifacts 或与 comments 无关的 Memory 内容。
   - 不得把 Artifact Review Comment 导入 Memory Review，也不得用本流程改写 Artifact Review 的 Submission、Round、Vote 或 Result。

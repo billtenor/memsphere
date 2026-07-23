@@ -222,6 +222,9 @@ export const browserHtml = String.raw`<!doctype html>
     .comment-card { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; }
     .comment-card b { display: block; overflow-wrap: anywhere; }
     .comment-card p { margin: 6px 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .artifact-review-comment-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 6px; }
+    .artifact-review-comment-head > b { min-width: 0; }
+    .artifact-review-comment-head > .pill { flex: 0 0 auto; }
     .artifact-review-markdown { overflow-wrap: anywhere; }
     .artifact-review-markdown > :first-child { margin-top: 0; }
     .artifact-review-markdown > :last-child { margin-bottom: 0; }
@@ -293,6 +296,24 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-progress { font-variant-numeric: tabular-nums; }
     .artifact-review-agent-status { display: grid; gap: 8px; }
     .artifact-review-agent-status .btn { justify-self: start; }
+    .artifact-review-agent-summary { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .artifact-review-agent-summary-row { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+    .artifact-review-activity-toggle { flex: 0 0 auto; border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+    .artifact-review-activity-toggle:hover, .artifact-review-activity-toggle:focus-visible { text-decoration: underline; text-underline-offset: 2px; }
+    .artifact-review-activity { grid-column: 1 / -1; min-width: 0; display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: #fbfbf8; }
+    .artifact-review-activity-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+    .artifact-review-attempt-select { width: min(100%, 260px); }
+    .artifact-review-activity-log { min-width: 0; max-height: 300px; overflow: auto; display: grid; gap: 6px; padding-right: 2px; overscroll-behavior: contain; }
+    .artifact-review-activity-event { min-width: 0; display: grid; gap: 3px; padding: 7px 8px; border-left: 3px solid var(--line); background: var(--surface); overflow-wrap: anywhere; }
+    .artifact-review-activity-event[data-kind="tool"] { border-left-color: var(--accent); }
+    .artifact-review-activity-event[data-kind="plan"] { border-left-color: var(--warn); }
+    .artifact-review-activity-event-head { min-width: 0; display: flex; flex-wrap: nowrap; gap: 8px; justify-content: space-between; align-items: center; }
+    .artifact-review-activity-event-head time { flex: 0 0 auto; white-space: nowrap; }
+    .artifact-review-activity-event-title { min-width: 0; display: block; overflow-wrap: anywhere; }
+    .artifact-review-activity-kind { flex: 0 0 auto; }
+    .artifact-review-activity-event-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .artifact-review-activity-locations { overflow-x: auto; white-space: nowrap; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .artifact-review-activity-plan { margin: 2px 0 0; padding-left: 20px; }
     .artifact-review-id { overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
     dialog.artifact-review-dialog { width: min(460px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 8px; padding: 0; color: var(--text); box-shadow: 0 20px 60px rgba(25, 30, 35, .24); }
     dialog.artifact-review-dialog::backdrop { background: rgba(22, 28, 30, .34); }
@@ -314,8 +335,10 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-modal-resizer::before { content: ""; position: absolute; inset: 0 auto 0 3px; width: 1px; background: var(--line); }
     .artifact-review-modal-resizer:hover::before, .artifact-review-modal-resizer:focus-visible::before, body.artifact-review-resizing .artifact-review-modal-resizer::before { width: 2px; background: var(--accent); }
     .artifact-review-mobile-tabs { display: none; }
-    .artifact-review-artifact-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 10px; }
+    .artifact-review-artifact-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; margin-bottom: 10px; }
+    .artifact-review-artifact-heading { min-width: 0; display: grid; gap: 8px; width: min(100%, 520px); }
     .artifact-review-artifact-head h3 { margin: 0; font-size: 16px; }
+    .artifact-review-material-select { width: min(100%, 520px); }
     .artifact-review-artifact-content { min-width: 0; }
     .artifact-review-target { border-radius: 6px; transition: background 140ms ease, box-shadow 140ms ease; }
     .artifact-review-target-located { background: #edf6f3; box-shadow: 0 0 0 3px rgba(40, 108, 103, .2); }
@@ -432,7 +455,7 @@ export const browserHtml = String.raw`<!doctype html>
       </div>
       <div class="artifact-review-modal-body">
         <section class="artifact-review-modal-pane artifact-pane" id="artifact-review-artifact-pane">
-          <div class="artifact-review-artifact-head"><h3 id="artifact-review-artifact-title">Artifact</h3><span class="artifact-review-readonly" id="artifact-review-round-mode"></span></div>
+          <div class="artifact-review-artifact-head"><div class="artifact-review-artifact-heading"><h3 id="artifact-review-artifact-title">Artifact</h3><div id="artifact-review-material-selector"></div></div><span class="artifact-review-readonly" id="artifact-review-round-mode"></span></div>
           <div id="artifact-review-artifact-content" class="artifact-review-artifact-content"></div>
         </section>
         <div class="artifact-review-modal-resizer" id="artifact-review-modal-resizer" role="separator" aria-controls="artifact-review-artifact-pane artifact-review-review-pane" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="75" aria-valuenow="58" tabindex="0"></div>
@@ -600,6 +623,8 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewConflict: "",
       artifactReviewDrafts: {},
       artifactReviewRetries: {},
+      artifactReviewActivities: {},
+      artifactReviewMaterialBySubmission: {},
       inlineCommentDraft: null,
       taskPollingRenderPending: false,
       artifactReviewHistoryRoundId: null,
@@ -624,6 +649,11 @@ export const browserHtml = String.raw`<!doctype html>
 
     function t(key) {
       return vocabulary[key]?.[displayLanguage] || key;
+    }
+
+    function artifactReviewImplementationEvidenceLabel(referenced) {
+      if (displayLanguage === "zh") return "实现证据：" + (referenced ? "已引用" : "未引用");
+      return "Implementation evidence: " + (referenced ? "referenced" : "not referenced");
     }
 
     const el = {
@@ -657,6 +687,7 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewCommentSummary: document.getElementById("artifact-review-comment-summary"),
       artifactReviewSubmit: document.getElementById("artifact-review-submit"),
       artifactReviewArtifactTitle: document.getElementById("artifact-review-artifact-title"),
+      artifactReviewMaterialSelector: document.getElementById("artifact-review-material-selector"),
       artifactReviewArtifactContent: document.getElementById("artifact-review-artifact-content"),
       artifactReviewRoundMode: document.getElementById("artifact-review-round-mode"),
       artifactReviewModalResizer: document.getElementById("artifact-review-modal-resizer"),
@@ -711,7 +742,10 @@ export const browserHtml = String.raw`<!doctype html>
 
     loadAll().catch(renderFatalError);
     setInterval(() => {
-      if (state.viewMode === "task" && !hasActiveTaskInteraction()) {
+      if (state.viewMode !== "task") return;
+      if (hasActiveTaskInteraction()) {
+        syncArtifactReviewActivities().catch(console.error);
+      } else {
         loadRuns().then(() => {
           if (hasActiveTaskInteraction()) {
             state.taskPollingRenderPending = true;
@@ -811,6 +845,7 @@ export const browserHtml = String.raw`<!doctype html>
         saveSelectedTask();
       }
       await syncArtifactReviewContext();
+      await syncArtifactReviewActivities();
     }
 
     async function syncArtifactReviewContext(force = false) {
@@ -947,6 +982,7 @@ export const browserHtml = String.raw`<!doctype html>
       state.artifactReviewModalOpen = true;
       state.artifactReviewLocateFailure = "";
       await syncArtifactReviewContext(true);
+      await syncArtifactReviewActivities(true);
       if (!el.artifactReviewModal.open) el.artifactReviewModal.showModal();
       renderAll();
     }
@@ -3266,6 +3302,7 @@ export const browserHtml = String.raw`<!doctype html>
     function hasActiveTaskInteraction() {
       if (hasOpenInlineEditor()) return true;
       if (document.querySelector(".artifact-review-select-menu:not([hidden])")) return true;
+      if (Object.values(state.artifactReviewActivities).some(entry => entry.expanded && !entry.pinnedToBottom)) return true;
       return Boolean(document.activeElement?.matches?.(".artifact-review-select"));
     }
 
@@ -3506,6 +3543,7 @@ export const browserHtml = String.raw`<!doctype html>
         changedCommentIds: {},
         deletedCommentIds: {},
         composerText: "",
+        composerSeverity: "risk",
         pendingComposerCommentId: "",
         status: "",
         warning: ""
@@ -3572,6 +3610,7 @@ export const browserHtml = String.raw`<!doctype html>
           changedCommentIds: {},
           deletedCommentIds: {},
           composerText: entry.composerText,
+          composerSeverity: entry.composerSeverity || "risk",
           pendingComposerCommentId: entry.pendingComposerCommentId || "",
           status: "",
           warning: ""
@@ -3907,6 +3946,7 @@ export const browserHtml = String.raw`<!doctype html>
       el.artifactReviewModalControls.innerHTML = "";
       el.artifactReviewModalComments.innerHTML = "";
       el.artifactReviewArtifactContent.innerHTML = "";
+      el.artifactReviewMaterialSelector.innerHTML = "";
       el.artifactReviewModalMeta.innerHTML = "";
       if (!review?.round) {
         el.artifactReviewModalTitle.textContent = t("artifactReview");
@@ -3931,7 +3971,11 @@ export const browserHtml = String.raw`<!doctype html>
         pill(t("round") + " " + review.round.sequence + " · " + review.round.submitted + "/" + review.round.total),
         pill((displayLanguage === "zh" ? "所选轮次 " : "Selected round ") + selectedSequence)
       );
-      el.artifactReviewArtifactTitle.textContent = context?.submission?.artifact?.name || review.artifactName;
+      const selectedMaterial = context ? selectedArtifactReviewMaterial(context) : null;
+      el.artifactReviewArtifactTitle.textContent = displayLanguage === "zh" ? "评审材料" : "Review material";
+      if (context && selectedMaterial) {
+        el.artifactReviewMaterialSelector.append(renderArtifactReviewMaterialSelector(context, selectedMaterial));
+      }
       el.artifactReviewRoundMode.textContent = viewingHistory
         ? (displayLanguage === "zh" ? "历史轮次 · 只读" : "Historical round · read-only")
         : (displayLanguage === "zh" ? "当前轮次" : "Current round");
@@ -3984,7 +4028,7 @@ export const browserHtml = String.raw`<!doctype html>
         empty.textContent = t("selectIdentity");
         el.artifactReviewModalComments.append(empty);
       } else {
-        el.artifactReviewArtifactContent.append(renderArtifactReviewSubmission(context));
+        el.artifactReviewArtifactContent.append(renderArtifactReviewSubmission(context, selectedMaterial));
         renderArtifactReviewWorkspace(context);
       }
 
@@ -3999,11 +4043,105 @@ export const browserHtml = String.raw`<!doctype html>
         : review.id;
     }
 
-    function renderArtifactReviewSubmission(context) {
+    function artifactReviewEvidenceRoleLabel(role) {
+      if (displayLanguage !== "zh") return role;
+      return ({ requirement: "需求", implementation: "实现", validation: "验证", "review-material": "验收材料" })[role] || role;
+    }
+
+    function artifactReviewMaterials(context) {
+      return [
+        {
+          key: "candidate",
+          label: displayLanguage === "zh" ? "待评审产物" : "Artifact under review",
+          artifact: context.submission.artifact,
+          commentable: true
+        },
+        ...((context.submission.package?.evidence || []).map((evidence, index) => ({
+          key: "evidence:" + index,
+          label: artifactReviewEvidenceRoleLabel(evidence.role),
+          artifact: evidence.artifact,
+          commentable: false
+        })))
+      ];
+    }
+
+    function selectedArtifactReviewMaterial(context) {
+      const materials = artifactReviewMaterials(context);
+      const selectedKey = state.artifactReviewMaterialBySubmission[context.submission.id] || "candidate";
+      return materials.find(material => material.key === selectedKey) || materials[0];
+    }
+
+    function renderArtifactReviewMaterialSelector(context, selectedMaterial) {
+      const chooser = document.createElement("div");
+      chooser.className = "artifact-review-round-select artifact-review-material-select";
+      const trigger = document.createElement("button");
+      trigger.type = "button";
+      trigger.className = "artifact-review-select artifact-review-select-trigger";
+      trigger.setAttribute("role", "combobox");
+      trigger.setAttribute("aria-label", displayLanguage === "zh" ? "选择评审材料" : "Select review material");
+      trigger.setAttribute("aria-haspopup", "listbox");
+      trigger.setAttribute("aria-expanded", "false");
+      const triggerText = document.createElement("span");
+      triggerText.textContent = selectedMaterial.label + " · " + selectedMaterial.artifact.name;
+      const caret = document.createElement("span");
+      caret.className = "artifact-review-select-caret";
+      caret.setAttribute("aria-hidden", "true");
+      caret.textContent = "⌄";
+      trigger.append(triggerText, caret);
+      const menu = document.createElement("div");
+      menu.className = "artifact-review-select-menu";
+      menu.setAttribute("role", "listbox");
+      menu.setAttribute("aria-label", displayLanguage === "zh" ? "选择评审材料" : "Select review material");
+      menu.hidden = true;
+      const setOpen = open => {
+        menu.hidden = !open;
+        trigger.setAttribute("aria-expanded", String(open));
+        state.artifactReviewOpenSelect = open ? "material:" + context.submission.id : "";
+      };
+      for (const material of artifactReviewMaterials(context)) {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "artifact-review-select-option";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", String(material.key === selectedMaterial.key));
+        option.textContent = material.label + " · " + material.artifact.name;
+        option.addEventListener("click", () => {
+          state.artifactReviewMaterialBySubmission[context.submission.id] = material.key;
+          setOpen(false);
+          renderArtifactReviewMaterialPane(context);
+        });
+        menu.append(option);
+      }
+      trigger.addEventListener("click", () => setOpen(menu.hidden));
+      trigger.addEventListener("keydown", event => {
+        if (event.key === "Escape") setOpen(false);
+      });
+      chooser.addEventListener("focusout", () => {
+        setTimeout(() => {
+          if (chooser.isConnected && !chooser.contains(document.activeElement)) setOpen(false);
+        }, 0);
+      });
+      chooser.append(trigger, menu);
+      if (state.artifactReviewOpenSelect === "material:" + context.submission.id) setOpen(true);
+      return chooser;
+    }
+
+    function renderArtifactReviewMaterialPane(context) {
+      const selectedMaterial = selectedArtifactReviewMaterial(context);
+      el.artifactReviewMaterialSelector.innerHTML = "";
+      el.artifactReviewArtifactContent.innerHTML = "";
+      el.artifactReviewMaterialSelector.append(renderArtifactReviewMaterialSelector(context, selectedMaterial));
+      el.artifactReviewArtifactContent.append(renderArtifactReviewSubmission(context, selectedMaterial));
+    }
+
+    function renderArtifactReviewSubmission(context, selectedMaterial) {
       const wrap = document.createElement("div");
-      const artifact = context.submission.artifact;
+      const material = selectedMaterial || selectedArtifactReviewMaterial(context);
+      const artifact = material.artifact;
       const meta = document.createElement("div");
       meta.className = "meta";
+      meta.append(pill(material.label, true));
+      if (!material.commentable) meta.append(pill(displayLanguage === "zh" ? "只读快照" : "Read-only snapshot"));
       if (artifact.type) meta.append(pill(artifact.type));
       appendFormatMeta(meta, artifact.format, artifactSchemaName(artifact), artifact.schema?.kind === "inline");
       appendArtifactStorageMeta(meta, artifact);
@@ -4016,6 +4154,10 @@ export const browserHtml = String.raw`<!doctype html>
         wrap.append(failure);
       }
       const content = renderArtifactValue(artifact);
+      if (!material.commentable) {
+        wrap.append(content);
+        return wrap;
+      }
       if (shouldRenderMarkdownArtifact(artifact)) {
         const blocks = [...content.children];
         blocks.forEach((block, index) => {
@@ -4147,12 +4289,15 @@ export const browserHtml = String.raw`<!doctype html>
     function renderArtifactReviewProgress(review, context) {
       const list = document.createElement("div");
       list.className = "artifact-review-grid";
-      const selectedRound = context ? selectedArtifactReviewRound(context) : null;
+      const selectedRound = context ? selectedArtifactReviewRound(context) : review.round;
       const assignments = selectedRound?.assignments || review.round.assignments || [];
       for (const assignment of assignments) {
         const submitted = assignment.submitted;
         const row = document.createElement("div");
         row.className = "artifact-review-row";
+        if (assignment.identityKind === "agent") {
+          row.id = agentActivityRowDomId(review, selectedRound, assignment);
+        }
         const main = document.createElement("div");
         main.className = "artifact-review-row-main";
         const name = document.createElement(submitted ? "button" : "span");
@@ -4167,6 +4312,41 @@ export const browserHtml = String.raw`<!doctype html>
         type.textContent = (assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote"))
           + (assignment.identityKind === "agent" ? " · Agent" : "");
         main.append(name, type);
+        if (assignment.identityKind === "agent") {
+          const activity = agentActivityEntry(review, selectedRound, assignment);
+          const summaryRow = document.createElement("div");
+          summaryRow.className = "artifact-review-agent-summary-row";
+          const summary = document.createElement("span");
+          summary.className = "artifact-review-agent-summary";
+          summary.textContent = activity?.summary
+            ? activity.summary.text + " · " + formatTime(activity.summary.at)
+            : (displayLanguage === "zh" ? "等待 Agent 活动" : "Waiting for Agent activity");
+          summaryRow.append(summary);
+          if (latestAgentAttempt(assignment)) {
+            const toggle = document.createElement("button");
+            toggle.type = "button";
+            toggle.className = "artifact-review-activity-toggle";
+            toggle.textContent = activity?.expanded
+              ? (displayLanguage === "zh" ? "收起详情" : "Hide details")
+              : (displayLanguage === "zh" ? "查看详情" : "View details");
+            toggle.setAttribute("aria-expanded", String(Boolean(activity?.expanded)));
+            toggle.setAttribute("aria-controls", agentActivityDomId(review, selectedRound, assignment));
+            toggle.addEventListener("click", async () => {
+              if (!activity) return;
+              activity.expanded = !activity.expanded;
+              if (activity.expanded && !activity.loaded) {
+                activity.cursor = 0;
+                activity.events = [];
+                activity.loading = true;
+                renderAll();
+                await fetchAgentActivity(review, selectedRound, assignment, activity, true);
+              }
+              renderAll();
+            });
+            summaryRow.append(toggle);
+          }
+          main.append(summaryRow);
+        }
         const decisionIntent = submitted?.summary || assignment.summary;
         if (assignment.binding === "decision" && decisionIntent) {
           const intent = document.createElement("span");
@@ -4177,8 +4357,9 @@ export const browserHtml = String.raw`<!doctype html>
         if (submitted || assignment.status === "submitted") {
           const evidenceReference = document.createElement("span");
           evidenceReference.className = "muted";
-          evidenceReference.textContent = "Implementation evidence: "
-            + ((submitted?.implementationEvidenceReferenced ?? assignment.implementationEvidenceReferenced) ? "referenced" : "not referenced");
+          evidenceReference.textContent = artifactReviewImplementationEvidenceLabel(
+            submitted?.implementationEvidenceReferenced ?? assignment.implementationEvidenceReferenced
+          );
           main.append(evidenceReference);
         }
         const status = document.createElement("span");
@@ -4198,6 +4379,10 @@ export const browserHtml = String.raw`<!doctype html>
           actions.append(retry);
         }
         row.append(main, actions);
+        if (assignment.identityKind === "agent") {
+          const activity = agentActivityEntry(review, selectedRound, assignment);
+          if (activity?.expanded) row.append(renderAgentActivity(review, selectedRound, assignment, activity));
+        }
         list.append(row);
       }
       const selectedRunnerVote = selectedRound?.votes?.find(vote => vote.subject?.kind === "runner");
@@ -4228,6 +4413,359 @@ export const browserHtml = String.raw`<!doctype html>
         list.append(row);
       }
       return list;
+    }
+
+    function agentActivityKey(review, round, assignment) {
+      return [review.id, round?.id || review.currentRoundId, assignment.identityId].join(":");
+    }
+
+    function agentActivityDomId(review, round, assignment) {
+      return "agent-activity-" + agentActivityKey(review, round, assignment).replace(/[^a-zA-Z0-9_-]/g, "-");
+    }
+
+    function agentActivityRowDomId(review, round, assignment) {
+      return agentActivityDomId(review, round, assignment) + "-row";
+    }
+
+    function latestAgentAttempt(assignment) {
+      return assignment.attempts?.at(-1) || assignment.attempt;
+    }
+
+    function agentActivityEntry(review, round, assignment) {
+      const attempt = latestAgentAttempt(assignment);
+      if (!attempt || !round) return null;
+      const key = agentActivityKey(review, round, assignment);
+      let entry = state.artifactReviewActivities[key];
+      if (!entry) {
+        entry = state.artifactReviewActivities[key] = {
+          selectedAttempt: attempt.sequence,
+          followLatest: true,
+          cursor: 0,
+          summaryCursor: 0,
+          events: [],
+          summary: null,
+          expanded: false,
+          loaded: false,
+          loading: false,
+          pinnedToBottom: true,
+          scrollTop: 0,
+          error: "",
+          truncated: false,
+          droppedCount: 0
+        };
+      }
+      if (entry.followLatest && entry.selectedAttempt !== attempt.sequence) {
+        entry.selectedAttempt = attempt.sequence;
+        entry.summary = null;
+        entry.summaryCursor = 0;
+        resetAgentActivityTimeline(entry);
+      } else if (!(assignment.attempts || [attempt]).some(candidate => candidate.sequence === entry.selectedAttempt)) {
+        entry.selectedAttempt = attempt.sequence;
+        entry.followLatest = true;
+        entry.summary = null;
+        entry.summaryCursor = 0;
+        resetAgentActivityTimeline(entry);
+      }
+      return entry;
+    }
+
+    function resetAgentActivityTimeline(entry) {
+      entry.cursor = 0;
+      entry.events = [];
+      entry.loaded = false;
+      entry.error = "";
+      entry.scrollTop = 0;
+      entry.pinnedToBottom = true;
+    }
+
+    async function syncArtifactReviewActivities(force = false) {
+      if (!state.artifactReviewModalOpen) return;
+      const review = selectedArtifactReviewSummary();
+      if (!review) return;
+      const round = state.artifactReviewContext
+        ? selectedArtifactReviewRound(state.artifactReviewContext)
+        : review.round;
+      if (!round) return;
+      const agents = (round.assignments || []).filter(assignment => assignment.identityKind === "agent");
+      await Promise.all(agents.map(async assignment => {
+        const entry = agentActivityEntry(review, round, assignment);
+        if (!entry || entry.loading) return;
+        const cursor = entry.expanded ? entry.cursor : entry.summaryCursor;
+        const error = entry.error;
+        const loaded = entry.loaded;
+        await fetchAgentActivity(review, round, assignment, entry, Boolean(entry.expanded));
+        const nextCursor = entry.expanded ? entry.cursor : entry.summaryCursor;
+        if (nextCursor !== cursor || entry.error !== error || entry.loaded !== loaded) {
+          refreshAgentActivityDom(review, round, assignment, entry);
+        }
+      }));
+    }
+
+    function refreshAgentActivityDom(review, round, assignment, entry) {
+      const row = document.getElementById(agentActivityRowDomId(review, round, assignment));
+      if (!row) return;
+      const summary = row.querySelector(".artifact-review-agent-summary");
+      if (summary) {
+        summary.textContent = entry.summary
+          ? entry.summary.text + " · " + formatTime(entry.summary.at)
+          : (displayLanguage === "zh" ? "等待 Agent 活动" : "Waiting for Agent activity");
+      }
+      const existing = document.getElementById(agentActivityDomId(review, round, assignment));
+      const interacting = existing && (
+        existing.querySelector(".artifact-review-select-menu:not([hidden])")
+        || existing.contains(document.activeElement)
+      );
+      if (existing && entry.expanded && !interacting) {
+        existing.replaceWith(renderAgentActivity(review, round, assignment, entry));
+      }
+    }
+
+    async function fetchAgentActivity(review, round, assignment, entry, includeEvents) {
+      entry.loading = true;
+      const cursor = includeEvents ? entry.cursor : entry.summaryCursor;
+      const limit = includeEvents ? 500 : 0;
+      try {
+        const response = await fetch(
+          "/api/artifact-reviews/" + encodeURIComponent(review.id)
+          + "/rounds/" + encodeURIComponent(round.id)
+          + "/assignments/" + encodeURIComponent(assignment.identityId)
+          + "/attempts/" + encodeURIComponent(entry.selectedAttempt)
+          + "/activity?cursor=" + encodeURIComponent(cursor)
+          + "&limit=" + limit
+        );
+        if (!response.ok) throw new Error(await response.text());
+        const payload = await response.json();
+        entry.summary = payload.summary || entry.summary;
+        entry.summaryCursor = payload.nextCursor;
+        entry.truncated = Boolean(payload.truncated);
+        entry.droppedCount = payload.droppedCount || 0;
+        if (includeEvents) {
+          const byId = new Map(entry.events.map(event => [event.id, event]));
+          for (const event of payload.events || []) byId.set(event.id, event);
+          entry.events = [...byId.values()].sort((left, right) => left.updatedRevision - right.updatedRevision);
+          entry.cursor = payload.nextCursor;
+          entry.loaded = true;
+        }
+        entry.error = "";
+      } catch (error) {
+        entry.error = error instanceof Error ? error.message : String(error);
+      } finally {
+        entry.loading = false;
+      }
+    }
+
+    function renderAgentActivity(review, round, assignment, entry) {
+      const wrap = document.createElement("section");
+      wrap.id = agentActivityDomId(review, round, assignment);
+      wrap.className = "artifact-review-activity";
+      const head = document.createElement("div");
+      head.className = "artifact-review-activity-head";
+      const title = document.createElement("b");
+      title.textContent = displayLanguage === "zh" ? "运行记录" : "Activity";
+      const attempts = assignment.attempts || [assignment.attempt].filter(Boolean);
+      const chooser = document.createElement("div");
+      chooser.className = "artifact-review-round-select artifact-review-attempt-select";
+      const trigger = document.createElement("button");
+      trigger.type = "button";
+      trigger.className = "artifact-review-select artifact-review-select-trigger";
+      trigger.setAttribute("role", "combobox");
+      trigger.setAttribute("aria-label", displayLanguage === "zh" ? "选择 Attempt" : "Select attempt");
+      trigger.setAttribute("aria-haspopup", "listbox");
+      trigger.setAttribute("aria-expanded", "false");
+      const selectedAttempt = attempts.find(attempt => attempt.sequence === entry.selectedAttempt);
+      const triggerText = document.createElement("span");
+      triggerText.textContent = selectedAttempt
+        ? t("attempt") + " " + selectedAttempt.sequence + " · " + selectedAttempt.status
+        : t("attempt");
+      const caret = document.createElement("span");
+      caret.className = "artifact-review-select-caret";
+      caret.setAttribute("aria-hidden", "true");
+      caret.textContent = "⌄";
+      trigger.append(triggerText, caret);
+      const menu = document.createElement("div");
+      menu.className = "artifact-review-select-menu";
+      menu.setAttribute("role", "listbox");
+      menu.setAttribute("aria-label", displayLanguage === "zh" ? "选择 Attempt" : "Select attempt");
+      menu.hidden = true;
+      const setOpen = open => {
+        menu.hidden = !open;
+        trigger.setAttribute("aria-expanded", String(open));
+      };
+      const focusOption = offset => {
+        const options = [...menu.querySelectorAll(".artifact-review-select-option")];
+        if (!options.length) return;
+        const focusedIndex = options.indexOf(document.activeElement);
+        const selectedIndex = options.findIndex(option => option.getAttribute("aria-selected") === "true");
+        const start = focusedIndex >= 0 ? focusedIndex : selectedIndex >= 0 ? selectedIndex : 0;
+        options[(start + offset + options.length) % options.length].focus();
+      };
+      for (const attempt of attempts) {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "artifact-review-select-option";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", String(attempt.sequence === entry.selectedAttempt));
+        option.textContent = t("attempt") + " " + attempt.sequence + " · " + attempt.status;
+        option.addEventListener("click", async () => {
+          setOpen(false);
+          if (attempt.sequence === entry.selectedAttempt) return trigger.focus();
+          entry.selectedAttempt = attempt.sequence;
+          entry.followLatest = false;
+          entry.summary = null;
+          entry.summaryCursor = 0;
+          resetAgentActivityTimeline(entry);
+          entry.loading = true;
+          renderAll();
+          await fetchAgentActivity(review, round, assignment, entry, true);
+          renderAll();
+        });
+        menu.append(option);
+      }
+      trigger.addEventListener("click", () => setOpen(menu.hidden));
+      trigger.addEventListener("keydown", event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          setOpen(true);
+          focusOption(event.key === "ArrowDown" ? 1 : -1);
+        } else if (event.key === "Escape") {
+          event.stopPropagation();
+          setOpen(false);
+        }
+      });
+      menu.addEventListener("keydown", event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          focusOption(event.key === "ArrowDown" ? 1 : -1);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+          trigger.focus();
+        }
+      });
+      chooser.addEventListener("focusout", () => {
+        setTimeout(() => {
+          if (chooser.isConnected && !chooser.contains(document.activeElement)) setOpen(false);
+        }, 0);
+      });
+      trigger.addEventListener("click", () => {
+        if (menu.hidden) return;
+        setTimeout(() => {
+          document.addEventListener("pointerdown", event => {
+            if (!chooser.contains(event.target)) setOpen(false);
+          }, { once: true });
+        }, 0);
+      });
+      chooser.append(trigger, menu);
+      head.append(title, chooser);
+      wrap.append(head);
+      if (entry.truncated) {
+        const truncated = document.createElement("div");
+        truncated.className = "artifact-review-message warn";
+        truncated.textContent = (displayLanguage === "zh" ? "较早活动已截断" : "Earlier activity was truncated")
+          + " · " + entry.droppedCount;
+        wrap.append(truncated);
+      }
+      if (entry.error) {
+        const error = document.createElement("div");
+        error.className = "artifact-review-message warn";
+        error.textContent = entry.error;
+        wrap.append(error);
+      }
+      const log = document.createElement("div");
+      log.className = "artifact-review-activity-log";
+      if (entry.loading && !entry.loaded) {
+        const loading = document.createElement("div");
+        loading.className = "muted";
+        loading.textContent = "Loading...";
+        log.append(loading);
+      } else if (!entry.events.length) {
+        const empty = document.createElement("div");
+        empty.className = "muted";
+        empty.textContent = displayLanguage === "zh" ? "等待 Agent 活动" : "Waiting for Agent activity";
+        log.append(empty);
+      } else {
+        for (const event of entry.events) log.append(renderAgentActivityEvent(event));
+      }
+      log.addEventListener("scroll", () => {
+        const distance = log.scrollHeight - log.clientHeight - log.scrollTop;
+        entry.pinnedToBottom = distance < 20;
+        entry.scrollTop = log.scrollTop;
+      });
+      requestAnimationFrame(() => {
+        if (!log.isConnected) return;
+        log.scrollTop = entry.pinnedToBottom ? log.scrollHeight : entry.scrollTop;
+      });
+      wrap.append(log);
+      return wrap;
+    }
+
+    function renderAgentActivityEvent(event) {
+      const row = document.createElement("article");
+      row.className = "artifact-review-activity-event";
+      row.dataset.kind = event.kind;
+      const head = document.createElement("div");
+      head.className = "artifact-review-activity-event-head";
+      const kind = pill(agentActivityKindLabel(event.kind), true, "artifact-review-activity-kind");
+      const time = document.createElement("time");
+      time.className = "muted";
+      time.textContent = formatTime(event.updatedAt);
+      head.append(kind, time);
+      const title = document.createElement("b");
+      title.className = "artifact-review-activity-event-title";
+      title.textContent = event.title;
+      row.append(head, title);
+      if (event.status && event.status !== "completed") {
+        row.append(pill(agentActivityStatusLabel(event.status), false, event.status === "failed" ? "outdated" : ""));
+      }
+      if (event.body) {
+        const body = document.createElement("p");
+        body.className = "artifact-review-activity-event-body";
+        body.textContent = event.body;
+        row.append(body);
+      }
+      if (event.plan?.length) {
+        const plan = document.createElement("ol");
+        plan.className = "artifact-review-activity-plan";
+        for (const item of event.plan) {
+          const line = document.createElement("li");
+          line.textContent = item.content + " · " + agentActivityStatusLabel(item.status);
+          plan.append(line);
+        }
+        row.append(plan);
+      }
+      if (event.locations?.length) {
+        const locations = document.createElement("div");
+        locations.className = "artifact-review-activity-locations";
+        locations.textContent = event.locations.join(" · ");
+        row.append(locations);
+      }
+      return row;
+    }
+
+    function agentActivityKindLabel(kind) {
+      if (displayLanguage !== "zh") return kind;
+      return ({
+        message: "消息",
+        tool: "工具调用",
+        plan: "执行计划",
+        thought: "分析",
+        lifecycle: "运行状态"
+      })[kind] || kind;
+    }
+
+    function agentActivityStatusLabel(status) {
+      if (displayLanguage !== "zh") return status;
+      return ({
+        pending: "等待中",
+        in_progress: "进行中",
+        running: "运行中",
+        connected: "已连接",
+        completed: "已完成",
+        submitted: "已提交",
+        stopped: "已停止",
+        failed: "失败"
+      })[status] || status;
     }
 
     function artifactReviewParticipantDomId(assignment) {
@@ -4503,10 +5041,6 @@ export const browserHtml = String.raw`<!doctype html>
         return;
       }
 
-      if (context.submission?.package) {
-        el.artifactReviewModalComments.append(renderArtifactReviewEvidencePackage(context.submission.package));
-      }
-
       const assignment = context.assignment;
       if (assignment.identityKind === "agent") {
         renderArtifactReviewAgentWorkspace(context, selectedRound);
@@ -4525,26 +5059,6 @@ export const browserHtml = String.raw`<!doctype html>
         for (const comment of draftComments) el.artifactReviewModalComments.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(assignment), true));
       }
       renderArtifactReviewSubmittedOpinions(selectedRound);
-    }
-
-    function renderArtifactReviewEvidencePackage(reviewPackage) {
-      const wrap = document.createElement("section");
-      wrap.className = "artifact-review-controls";
-      wrap.append(blockTitle(displayLanguage === "zh" ? "评审证据包" : "Review package"));
-      for (const requirement of reviewPackage.requirements || []) {
-        const row = document.createElement("div");
-        row.className = "artifact-review-message" + (requirement.status === "present" ? "" : " warn");
-        row.textContent = requirement.role + " · " + requirement.status + (requirement.reason ? " · " + requirement.reason : "");
-        wrap.append(row);
-      }
-      for (const evidence of reviewPackage.evidence || []) {
-        const details = document.createElement("details");
-        const summary = document.createElement("summary");
-        summary.textContent = evidence.role + " · " + (evidence.artifact?.name || evidence.stepId);
-        details.append(summary, renderArtifactValue(evidence.artifact));
-        wrap.append(details);
-      }
-      return wrap;
     }
 
     function renderArtifactReviewAgentWorkspace(context, selectedRound) {
@@ -4649,8 +5163,9 @@ export const browserHtml = String.raw`<!doctype html>
       section.append(voteSummary);
       const implementationEvidence = document.createElement("div");
       implementationEvidence.className = "muted";
-      implementationEvidence.textContent = "Implementation evidence · "
-        + (assignment.implementationEvidenceReferenced ? "referenced" : "not referenced");
+      implementationEvidence.textContent = artifactReviewImplementationEvidenceLabel(
+        assignment.implementationEvidenceReferenced
+      );
       section.append(implementationEvidence);
       if (opinion.summary) {
         const summary = document.createElement("div");
@@ -4759,15 +5274,97 @@ export const browserHtml = String.raw`<!doctype html>
         }
       });
       textarea.disabled = state.artifactReviewSaving;
-      const severity = document.createElement("select");
-      severity.className = "artifact-review-select";
+      let selectedSeverity = entry?.composerSeverity || "risk";
+      const severity = document.createElement("div");
+      severity.className = "artifact-review-round-select artifact-review-severity-select";
+      const severityTrigger = document.createElement("button");
+      severityTrigger.type = "button";
+      severityTrigger.className = "artifact-review-select artifact-review-select-trigger";
+      severityTrigger.setAttribute("role", "combobox");
+      severityTrigger.setAttribute("aria-label", displayLanguage === "zh" ? "意见分类" : "Comment severity");
+      severityTrigger.setAttribute("aria-haspopup", "listbox");
+      severityTrigger.setAttribute("aria-expanded", "false");
+      severityTrigger.disabled = state.artifactReviewSaving;
+      const severityText = document.createElement("span");
+      severityText.textContent = selectedSeverity;
+      const severityCaret = document.createElement("span");
+      severityCaret.className = "artifact-review-select-caret";
+      severityCaret.setAttribute("aria-hidden", "true");
+      severityCaret.textContent = "⌄";
+      severityTrigger.append(severityText, severityCaret);
+      const severityMenu = document.createElement("div");
+      severityMenu.className = "artifact-review-select-menu";
+      severityMenu.setAttribute("role", "listbox");
+      severityMenu.setAttribute("aria-label", displayLanguage === "zh" ? "意见分类" : "Comment severity");
+      severityMenu.hidden = true;
+      const setSeverityOpen = open => {
+        severityMenu.hidden = !open;
+        severityTrigger.setAttribute("aria-expanded", String(open));
+      };
+      const focusSeverityOption = offset => {
+        const options = [...severityMenu.querySelectorAll(".artifact-review-select-option")];
+        if (!options.length) return;
+        const focusedIndex = options.indexOf(document.activeElement);
+        const selectedIndex = options.findIndex(option => option.getAttribute("aria-selected") === "true");
+        const start = focusedIndex >= 0 ? focusedIndex : selectedIndex >= 0 ? selectedIndex : 0;
+        options[(start + offset + options.length) % options.length].focus();
+      };
       for (const value of ["blocking", "risk", "suggestion"]) {
-        const option = document.createElement("option");
-        option.value = value;
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "artifact-review-select-option";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", String(value === selectedSeverity));
         option.textContent = value;
-        option.selected = value === "risk";
-        severity.append(option);
+        option.addEventListener("click", () => {
+          selectedSeverity = value;
+          severityText.textContent = value;
+          for (const item of severityMenu.querySelectorAll(".artifact-review-select-option")) {
+            item.setAttribute("aria-selected", String(item === option));
+          }
+          const activeEntry = ensureArtifactReviewLocalEntry(context);
+          if (activeEntry) activeEntry.composerSeverity = value;
+          setSeverityOpen(false);
+          severityTrigger.focus();
+        });
+        severityMenu.append(option);
       }
+      severityTrigger.addEventListener("click", () => {
+        setSeverityOpen(severityMenu.hidden);
+        if (!severityMenu.hidden) {
+          setTimeout(() => {
+            document.addEventListener("pointerdown", event => {
+              if (!severity.contains(event.target)) setSeverityOpen(false);
+            }, { once: true });
+          }, 0);
+        }
+      });
+      severityTrigger.addEventListener("keydown", event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          setSeverityOpen(true);
+          focusSeverityOption(event.key === "ArrowDown" ? 1 : -1);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          setSeverityOpen(false);
+        }
+      });
+      severityMenu.addEventListener("keydown", event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          focusSeverityOption(event.key === "ArrowDown" ? 1 : -1);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          setSeverityOpen(false);
+          severityTrigger.focus();
+        }
+      });
+      severity.addEventListener("focusout", () => {
+        setTimeout(() => {
+          if (severity.isConnected && !severity.contains(document.activeElement)) setSeverityOpen(false);
+        }, 0);
+      });
+      severity.append(severityTrigger, severityMenu);
       const add = document.createElement("button");
       add.className = "btn";
       add.textContent = displayLanguage === "zh" ? "添加意见" : "Add comment";
@@ -4780,7 +5377,7 @@ export const browserHtml = String.raw`<!doctype html>
           const commentId = activeEntry?.pendingComposerCommentId || uuid();
           if (activeEntry) activeEntry.pendingComposerCommentId = commentId;
           const draft = artifactReviewEffectiveDraft(context);
-          const comment = { id: commentId, body, severity: severity.value };
+          const comment = { id: commentId, body, severity: selectedSeverity };
           const result = await saveArtifactReviewDraft({
             ...draft,
             comments: draft.comments.some(existing => existing.id === comment.id)
@@ -4791,22 +5388,26 @@ export const browserHtml = String.raw`<!doctype html>
           return result.ok;
         });
       });
-      wrap.append(textarea, severity, add);
+      wrap.append(severity, textarea, add);
       return wrap;
     }
 
     function renderArtifactReviewCommentCard(comment, identityName, editable, advisory = false) {
       const card = document.createElement("article");
       card.className = "comment-card";
+      const header = document.createElement("header");
+      header.className = "artifact-review-comment-head";
       const title = document.createElement("b");
       title.textContent = identityName + (comment.anchor?.target ? " · " + comment.anchor.target : "");
+      header.append(title);
+      if (comment.severity) {
+        header.append(pill(comment.severity, false, comment.severity === "blocking" ? "outdated" : "warn"));
+      }
       const body = document.createElement("div");
       body.className = "artifact-review-markdown";
       if (comment.renderedBody) body.innerHTML = comment.renderedBody;
       else body.textContent = comment.body;
-      card.append(title);
-      if (comment.severity) card.append(pill(comment.severity, false, comment.severity === "blocking" ? "outdated" : "warn"));
-      card.append(body);
+      card.append(header, body);
       if (comment.anchor?.context) {
         const context = document.createElement("div");
         context.className = "artifact-review-comment-context";

@@ -9,6 +9,7 @@ import {
   recordArtifactReviewAgentStop
 } from "../run/store.js";
 import { runAgentReviewAcpSession } from "./client.js";
+import { AgentActivityRecorder } from "./activity.js";
 import { createAgentReviewCliRuntime } from "./cli-runtime.js";
 import { buildArtifactReviewerPrompt, buildArtifactReviewerReminder } from "./prompt.js";
 import { getAgentReviewProvider, type AgentReviewProvider } from "./provider.js";
@@ -47,6 +48,17 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     identityId,
     attemptId: claimed.attempt.id
   };
+  const activity = new AgentActivityRecorder({
+    ...common,
+    runId: claimed.run.id,
+    assignmentId: artifactReviewAssignmentId(claimed.assignment),
+    workspaceRoot: dirname(config.scopeRoot),
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`Agent Activity recording failed: ${message.slice(0, 2_000)}\n`);
+    }
+  });
+  activity.recordLifecycle("running", "Agent worker started");
   let cliRuntime: Awaited<ReturnType<typeof createAgentReviewCliRuntime>> | undefined;
   try {
     const identity = claimed.run.controlPlane?.identities[identityId];
@@ -83,16 +95,25 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
         });
         return current.assignment.status === "submitted";
       },
-      onSession: (metadata) => recordArtifactReviewAgentSession({ ...common, ...metadata }).then(() => undefined)
+      onSession: async (metadata) => {
+        await recordArtifactReviewAgentSession({ ...common, ...metadata });
+        activity.recordLifecycle("connected", "ACP session connected");
+      },
+      onUpdate: (update) => activity.recordSessionUpdate(update),
+      onPrompt: (kind, text) => activity.recordPrompt(kind, text)
     });
+    activity.recordLifecycle(result.stopReason === "submitted" ? "submitted" : "stopped", "Agent review stopped");
     await recordArtifactReviewAgentStop({ ...common, stopReason: result.stopReason });
   } catch (error) {
+    const failure = classifyAgentFailure(error);
+    activity.recordLifecycle("failed", `Agent review failed: ${failure.code}`);
     await failArtifactReviewAgentAssignment({
       ...common,
-      failure: classifyAgentFailure(error),
+      failure,
       stopReason: "worker_error"
     });
   } finally {
+    await activity.close();
     await cliRuntime?.cleanup().catch(() => undefined);
   }
 }

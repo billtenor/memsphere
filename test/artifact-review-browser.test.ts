@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { chromium } from "playwright";
 import { createViewServer } from "../src/commands/view.js";
@@ -16,6 +17,14 @@ import {
   submitArtifactReviewRunnerVote
 } from "../src/run/store.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
+import { artifactReviewAssignmentId } from "../src/artifact-review.js";
+import { runArtifactReviewAgentWorker } from "../src/acp/review-worker.js";
+import type { AgentReviewProvider } from "../src/acp/provider.js";
+import { agentActivityPath, readAgentActivitySnapshot } from "../src/acp/activity.js";
+
+const browserTestDirectory = dirname(fileURLToPath(import.meta.url));
+const browserFakeReviewer = join(browserTestDirectory, "fixtures", "fake-acp-reviewer.mjs");
+const browserFakeCli = join(browserTestDirectory, "fixtures", "fake-review-cli.mjs");
 
 test("Human Artifact Review completes in View with private drafts and distinct vote roles", async () => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-artifact-review-browser-"));
@@ -131,6 +140,13 @@ flow:
     assert.equal((await anchoredSaved).status(), 200);
     await reviewModal.locator(".comment-card .artifact-review-markdown")
       .getByText("Heading needs revision.", { exact: true }).waitFor();
+    const firstComment = reviewModal.locator(".comment-card").filter({ hasText: "Heading needs revision." });
+    const commentHeader = firstComment.locator(".artifact-review-comment-head");
+    const commentTitleBox = await commentHeader.locator("b").boundingBox();
+    const severityBox = await commentHeader.locator(".pill").boundingBox();
+    assert(commentTitleBox && severityBox);
+    assert(severityBox.x > commentTitleBox.x);
+    assert(Math.abs(severityBox.y - commentTitleBox.y) < 12);
 
     await reviewModal.locator(".inline-plus").first().click();
     let inlineEditor = reviewModal.locator(".inline-comment-editor").first();
@@ -208,6 +224,18 @@ flow:
     );
 
     const composer = reviewModal.getByPlaceholder("补充整体评审意见");
+    const composerBounds = await composer.boundingBox();
+    const severitySelect = composer.locator("..").getByRole("combobox", { name: "意见分类" });
+    const severityBounds = await severitySelect.boundingBox();
+    assert(composerBounds && severityBounds);
+    assert(severityBounds.y < composerBounds.y);
+    assert(severityBounds.height < composerBounds.height);
+    assert.equal(await composer.locator("..").locator("select").count(), 0);
+    await severitySelect.click();
+    const severityMenu = composer.locator("..").getByRole("listbox", { name: "意见分类" });
+    assert.equal(await severityMenu.isVisible(), true);
+    await severityMenu.getByRole("option", { name: "blocking", exact: true }).click();
+    assert.equal(await severitySelect.textContent(), "blocking⌄");
     await composer.fill("Composer text replaced after failed save");
     failNextDraftSave = true;
     await page.route("**/draft", async (route) => {
@@ -458,6 +486,268 @@ flow:
         path: join(process.env.MEMSPHERE_SCREENSHOT_DIR, "artifact-review-mobile.png")
       });
     }
+  } finally {
+    await browser.close();
+    server.close();
+    await once(server, "close");
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Agent Activity expands in the participant row without disrupting Human review", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-agent-activity-browser-"));
+  const scopeRoot = join(dir, ".memsphere");
+  const memoryRoot = join(scopeRoot, "memory");
+  const runsRoot = join(scopeRoot, "runs");
+  const reviewsRoot = join(scopeRoot, "reviews");
+  const configPath = join(scopeRoot, "config.json");
+  await mkdir(join(memoryRoot, "procedures"), { recursive: true });
+  await mkdir(reviewsRoot, { recursive: true });
+  await writeFile(join(memoryRoot, "procedures", "activity-review.yaml"), withCurrentMemorySyntax(`!procedure
+name: agent-activity-browser
+role_bindings:
+  decider: alice
+flow:
+  - !action
+    action: Record requirement evidence.
+    artifact: !artifact
+      name: current requirement
+      format: markdown
+      review_role: requirement
+  - !action
+    action: Record implementation evidence.
+    artifact: !artifact
+      name: implementation summary
+      format: markdown
+      review_role: implementation
+  - !action
+    action: Record validation evidence.
+    artifact: !artifact
+      name: validation report
+      format: markdown
+      review_role: validation
+  - !action
+    action: Produce an Artifact with visible Agent activity.
+    artifact: !artifact
+      name: activity candidate
+      format: markdown
+      review_role: review-material
+      review_requires: [implementation, validation]
+      review: artifact_acceptance.unanimous
+      role_bindings:
+        advisor: reviewer-agent
+`));
+  const controlPlane = parseControlPlaneConfig({
+    identities: {
+      alice: { kind: "human", name: "Alice" },
+      "reviewer-agent": {
+        kind: "agent",
+        name: "Activity Agent",
+        agent: { provider: "traex", command: process.execPath, args: [browserFakeReviewer, "approve"] }
+      }
+    },
+    roles: {
+      runner: { name: "Runner", permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      decider: { name: "Decider", permissions: ["artifact.read", "decision.decide"] },
+      advisor: { name: "Advisor", permissions: ["artifact.read", "decision.assess"] }
+    }
+  });
+  await writeFile(configPath, `${JSON.stringify({
+    memoryRoot: "memory",
+    reviewsRoot: "reviews",
+    runsRoot: "runs",
+    archiveRoot: "archives",
+    control_plane: {
+      identities: {
+        alice: { kind: "human", name: "Alice" },
+        "reviewer-agent": {
+          kind: "agent",
+          name: "Activity Agent",
+          agent: { provider: "traex", command: process.execPath, args: [browserFakeReviewer, "approve"] }
+        }
+      },
+      roles: {
+        runner: { name: "Runner", permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+        decider: { name: "Decider", permissions: ["artifact.read", "decision.decide"] },
+        advisor: { name: "Advisor", permissions: ["artifact.read", "decision.assess"] }
+      }
+    }
+  }, null, 2)}\n`);
+  const started = await startRun({ memoryRoot, runsRoot, procedureName: "agent-activity-browser", controlPlane });
+  await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Current requirement\n\nKeep Activity visible.\n" } });
+  await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Implementation summary\n\nImplemented Activity projection.\n" } });
+  await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Validation report\n\nFocused tests passed.\n" } });
+  const pending = await reportRun({
+    runsRoot,
+    runId: started.id,
+    artifact: { kind: "inline", value: "# Activity candidate\n\nReview this implementation.\n" }
+  });
+  const review = currentArtifactReview(pending);
+  assert(review);
+  const round = review.rounds[0];
+  const agent = round.assignments.find((assignment) => assignment.identityId === "reviewer-agent");
+  assert(agent);
+  const provider: AgentReviewProvider = {
+    id: "fake-browser-provider",
+    buildLaunch({ identity, workspaceRoot, sessionEnv }) {
+      return {
+        provider: "fake-browser-provider",
+        command: identity.agent.command,
+        args: [...identity.agent.args],
+        cwd: workspaceRoot,
+        env: { ...process.env, ...sessionEnv },
+        startupTimeoutMs: 10_000,
+        idleTimeoutMs: 10_000,
+        maxRuntimeMs: 20_000,
+        promptVersion: "artifact-review-v1"
+      };
+    }
+  };
+  await runArtifactReviewAgentWorker({
+    config: configPath,
+    review: review.id,
+    round: round.id,
+    assignment: artifactReviewAssignmentId(agent),
+    nodeExecutable: process.execPath,
+    cliEntrypoint: browserFakeCli,
+    providerResolver: () => provider
+  });
+  const completedAgentRun = await readRun(runsRoot, started.id);
+  const completedAgent = currentArtifactReview(completedAgentRun)?.rounds[0].assignments.find(
+    (assignment) => assignment.identityId === "reviewer-agent"
+  );
+  assert(completedAgent?.attempts?.[0]);
+
+  const config: MemsphereConfig = {
+    configPath,
+    scopeRoot,
+    memoryRoot,
+    reviewsRoot,
+    runsRoot,
+    archiveRoot: join(scopeRoot, "archives"),
+    view: { host: "127.0.0.1", port: 0 },
+    controlPlane
+  };
+  const server = createViewServer(config);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address === "object");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.goto(`http://127.0.0.1:${address.port}`);
+    await page.getByRole("button", { name: "Task", exact: true }).click();
+    await page.getByRole("button", { name: /^产物评审 1\/2$/ }).click();
+    const modal = page.locator("#artifact-review-modal");
+    let materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
+    await materialChooser.click();
+    await modal.getByRole("option", { name: "需求 · current requirement", exact: true }).click();
+    await modal.getByText("Keep Activity visible.", { exact: true }).waitFor();
+    assert.equal(await modal.locator("#artifact-review-artifact-pane .artifact-review-target").count(), 0);
+    materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
+    await materialChooser.click();
+    await modal.getByRole("option", { name: "待评审产物 · activity candidate", exact: true }).click();
+    await modal.getByText("Review this implementation.", { exact: true }).waitFor();
+    assert((await modal.locator("#artifact-review-artifact-pane .artifact-review-target").count()) > 0);
+    assert.equal(await modal.getByText("评审证据包", { exact: true }).count(), 0);
+    const composer = modal.getByPlaceholder("补充整体评审意见");
+    await composer.fill("Human draft remains visible");
+    materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
+    await materialChooser.click();
+    await modal.getByRole("option", { name: "验证 · validation report", exact: true }).click();
+    await modal.getByText("Focused tests passed.", { exact: true }).waitFor();
+    assert.equal(await composer.inputValue(), "Human draft remains visible");
+    materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
+    await materialChooser.click();
+    await modal.getByRole("option", { name: "待评审产物 · activity candidate", exact: true }).click();
+    const agentRow = modal.locator(".artifact-review-row").filter({ hasText: "Advisor" }).first();
+    const detailToggle = agentRow.getByRole("button", { name: "查看详情", exact: true });
+    assert.equal(await detailToggle.locator("xpath=ancestor::*[contains(@class, 'artifact-review-row-main')]").count(), 1);
+    assert.equal(await agentRow.locator(".comment-actions").getByRole("button", { name: "查看详情", exact: true }).count(), 0);
+    await detailToggle.click();
+    await agentRow.getByRole("button", { name: "收起详情", exact: true }).waitFor();
+    await agentRow.getByText("Reviewing implementation evidence.", { exact: true }).waitFor();
+    const activity = agentRow.locator(".artifact-review-activity");
+    await activity.getByText("消息", { exact: true }).first().waitFor();
+    await activity.getByText("工具调用", { exact: true }).waitFor();
+    await activity.getByText("执行计划", { exact: true }).waitFor();
+    await activity.getByText("运行状态", { exact: true }).first().waitFor();
+    const completedTool = activity.locator('.artifact-review-activity-event[data-kind="tool"]');
+    await completedTool.waitFor();
+    assert.equal(await completedTool.getByText("已完成", { exact: true }).count(), 0);
+    const toolKindBox = await completedTool.locator(".artifact-review-activity-kind").boundingBox();
+    const toolTimeBox = await completedTool.locator("time").boundingBox();
+    const toolTitleBox = await completedTool.locator(".artifact-review-activity-event-title").boundingBox();
+    assert(toolKindBox && toolTimeBox && toolTitleBox);
+    assert(toolTimeBox.x > toolKindBox.x);
+    assert(Math.abs(toolTimeBox.y - toolKindBox.y) < 8);
+    assert(toolTitleBox.y >= toolKindBox.y + toolKindBox.height);
+    await agentRow.getByText(/^实现证据：(已引用|未引用)$/).waitFor();
+    assert.equal(await composer.inputValue(), "Human draft remains visible");
+    const attemptChooser = agentRow.getByRole("combobox", { name: "选择 Attempt" });
+    assert.equal(await attemptChooser.evaluate((element) => element.tagName), "BUTTON");
+    assert.equal(await attemptChooser.evaluate((element) => element.getBoundingClientRect().width <= 260), true);
+    await attemptChooser.click();
+    const currentAttempt = agentRow.getByRole("option", { name: /尝试 1 · submitted/ });
+    await currentAttempt.waitFor();
+    await currentAttempt.click();
+    await composer.focus();
+    const log = agentRow.locator(".artifact-review-activity-log");
+    assert.equal(await log.evaluate((element) => element.scrollHeight > element.clientHeight), true);
+    await log.evaluate((element) => {
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event("scroll"));
+    });
+
+    const location = {
+      runsRoot,
+      runId: started.id,
+      reviewId: review.id,
+      roundId: round.id,
+      assignmentId: artifactReviewAssignmentId(agent),
+      attemptId: completedAgent.attempts[0].id
+    };
+    const snapshot = await readAgentActivitySnapshot(location);
+    const revision = snapshot.revision + 1;
+    snapshot.revision = revision;
+    snapshot.events.push({
+      id: "message:browser-late-update",
+      sequence: Math.max(...snapshot.events.map((event) => event.sequence)) + 1,
+      updatedRevision: revision,
+      kind: "message",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      title: "Agent message",
+      body: "Late activity must not steal scroll position."
+    });
+    const activityPolled = page.waitForResponse((response) =>
+      response.url().includes(`/attempts/${completedAgent.attempts?.[0]?.sequence}/activity`)
+      && response.request().method() === "GET"
+    );
+    await writeFile(agentActivityPath(location), `${JSON.stringify(snapshot, null, 2)}\n`);
+    const activityResponse = await activityPolled;
+    assert.equal(activityResponse.status(), 200);
+    const activityPayload = await activityResponse.json() as { events: Array<{ body?: string }> };
+    assert.equal(activityPayload.events.some((event) => event.body === "Late activity must not steal scroll position."), true);
+    await agentRow.getByText("Late activity must not steal scroll position.", { exact: true }).waitFor();
+    assert.equal(await log.evaluate((element) => element.scrollTop < 4), true);
+    assert.equal(await composer.inputValue(), "Human draft remains visible");
+    await log.evaluate((element) => {
+      element.dataset.stabilityMarker = "preserved";
+    });
+    const settledScrollTop = await log.evaluate((element) => element.scrollTop);
+    await page.waitForTimeout(4_500);
+    assert.equal(await log.getAttribute("data-stability-marker"), "preserved");
+    assert.equal(await log.evaluate((element) => element.scrollTop), settledScrollTop);
+
+    await page.setViewportSize({ width: 720, height: 900 });
+    await modal.locator("#artifact-review-review-tab").click();
+    await agentRow.getByText("Late activity must not steal scroll position.", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+    const identity = modal.getByRole("combobox", { name: "评审身份" });
+    await identity.click();
+    assert.equal(await modal.getByRole("option", { name: /Activity Agent/ }).count(), 0);
   } finally {
     await browser.close();
     server.close();

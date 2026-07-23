@@ -22,6 +22,8 @@ export async function runAgentReviewAcpSession(input: {
   isSubmitted(): Promise<boolean>;
   waitForSubmission?(): Promise<void>;
   onSession(metadata: Omit<AgentReviewAcpSession, "stopReason" | "stderr">): Promise<void>;
+  onUpdate?(update: acp.SessionUpdate): void | Promise<void>;
+  onPrompt?(kind: "initial" | "reminder", prompt: string): void | Promise<void>;
 }): Promise<AgentReviewAcpSession> {
   const process = spawnAgent(input.launch);
   let stderr = "";
@@ -61,7 +63,10 @@ export async function runAgentReviewAcpSession(input: {
         markActivity();
         return rejectPermission(params.options);
       })
-      .onNotification(acp.methods.client.session.update, () => markActivity())
+      .onNotification(acp.methods.client.session.update, async ({ params }) => {
+        markActivity();
+        await input.onUpdate?.(params.update);
+      })
       .onRequest(acp.methods.client.fs.readTextFile, ({ params }) => {
         markActivity();
         return readWorkspaceTextFile(input.workspaceRoot, params);
@@ -93,12 +98,26 @@ export async function runAgentReviewAcpSession(input: {
           };
           await input.onSession(metadata);
           idleTimeout.touch();
-          let outcome = await promptUntilSubmission(session, input.prompt, runtimeSignal, input.waitForSubmission);
+          let outcome = await promptUntilSubmission(
+            session,
+            input.prompt,
+            "initial",
+            runtimeSignal,
+            input.waitForSubmission,
+            input.onPrompt
+          );
           if (outcome.submitted) return { ...metadata, stopReason: "submitted" };
           let response = outcome.response;
           if (!(await input.isSubmitted())) {
             idleTimeout.touch();
-            outcome = await promptUntilSubmission(session, input.reminder, runtimeSignal, input.waitForSubmission);
+            outcome = await promptUntilSubmission(
+              session,
+              input.reminder,
+              "reminder",
+              runtimeSignal,
+              input.waitForSubmission,
+              input.onPrompt
+            );
             if (outcome.submitted) return { ...metadata, stopReason: "submitted" };
             response = outcome.response;
           }
@@ -177,9 +196,12 @@ async function promptTurn(
 async function promptUntilSubmission(
   session: acp.ActiveSession,
   prompt: string,
+  kind: "initial" | "reminder",
   timeoutSignal: AbortSignal,
-  waitForSubmission: (() => Promise<void>) | undefined
+  waitForSubmission: (() => Promise<void>) | undefined,
+  onPrompt: ((kind: "initial" | "reminder", prompt: string) => void | Promise<void>) | undefined
 ): Promise<{ submitted: true } | { submitted: false; response: acp.PromptResponse }> {
+  await onPrompt?.(kind, prompt);
   if (!waitForSubmission) {
     return { submitted: false, response: await promptTurn(session, prompt, timeoutSignal) };
   }

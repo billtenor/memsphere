@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -16,10 +17,12 @@ import {
   type AgentReviewProviderLaunch
 } from "../src/acp/provider.js";
 import { runAgentReviewAcpSession } from "../src/acp/client.js";
+import { agentActivityRawPath, readAgentActivitySnapshot } from "../src/acp/activity.js";
 import { tryRunArtifactReviewAgents } from "../src/acp/debug.js";
 import { dispatchArtifactReviewAgents } from "../src/acp/dispatcher.js";
 import type { AgentIdentity } from "../src/control-plane/index.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
+import { createViewServer } from "../src/commands/view.js";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
 const fakeReviewer = join(testDirectory, "fixtures", "fake-acp-reviewer.mjs");
@@ -62,6 +65,47 @@ test("ACP Agent Reviewer completes its bound Assignment through the Session CLI"
     assert(completedAssignment.attempts?.[0]?.cliReadyAt);
     assert.equal(completedAssignment.attempts?.[0]?.stopReason, "end_turn");
     assert.equal(completed.status, "awaiting_runner_vote");
+    const activityLocation = {
+      runsRoot,
+      runId,
+      reviewId: review.id,
+      roundId: round.id,
+      assignmentId: artifactReviewAssignmentId(assignment),
+      attemptId: completedAssignment.attempts?.[0]?.id ?? ""
+    };
+    const activity = await readAgentActivitySnapshot(activityLocation);
+    assert.equal(activity.events.some((event) => event.kind === "message"), true);
+    assert.equal(activity.events.find((event) => event.kind === "tool")?.status, "completed");
+    assert.equal(activity.events.some((event) => event.kind === "plan"), true);
+    assert.doesNotMatch(JSON.stringify(activity), /rawInput|rawOutput|private/);
+    const rawRecords = (await readFile(agentActivityRawPath(activityLocation), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { prompt?: { kind: string; text: string } });
+    assert.deepEqual(rawRecords.filter((record) => record.prompt).map((record) => record.prompt?.kind), ["initial"]);
+    assert.match(rawRecords.find((record) => record.prompt)?.prompt?.text ?? "", /# Memsphere Artifact Reviewer/);
+    assert.doesNotMatch(JSON.stringify(activity), /# Memsphere Artifact Reviewer/);
+
+    const config = await readConfig(configPath);
+    const server = createViewServer(config);
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    try {
+      const address = server.address();
+      assert(address && typeof address === "object");
+      const activityUrl = `http://127.0.0.1:${address.port}/api/artifact-reviews/${review.id}`
+        + `/rounds/${round.id}/assignments/${assignment.identityId}/attempts/1/activity`;
+      const response = await fetch(`${activityUrl}?cursor=0&limit=500`);
+      assert.equal(response.status, 200);
+      const payload = await response.json() as { events: Array<{ kind: string }>; summary?: { text: string } };
+      assert.equal(payload.events.some((event) => event.kind === "tool"), true);
+      assert(payload.summary?.text);
+      assert.equal((await fetch(activityUrl.replace("/attempts/1/", "/attempts/99/"))).status, 404);
+      assert.equal((await fetch(`${activityUrl}?cursor=-1`)).status, 400);
+    } finally {
+      server.close();
+      await once(server, "close");
+    }
   });
 });
 
@@ -89,6 +133,21 @@ test("ACP Agent Reviewer failure is visible and can be requeued explicitly", asy
     const failed = failedReview.rounds[0].assignments[0];
     assert.equal(failed.status, "failed");
     assert.equal(failed.attempts?.[0]?.failure?.code, "agent_submission_missing");
+    const rawRecords = (await readFile(agentActivityRawPath({
+      runsRoot,
+      runId,
+      reviewId: review.id,
+      roundId: round.id,
+      assignmentId: artifactReviewAssignmentId(assignment),
+      attemptId: failed.attempts?.[0]?.id ?? ""
+    }), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { prompt?: { kind: string; text: string } });
+    assert.deepEqual(
+      rawRecords.filter((record) => record.prompt).map((record) => record.prompt?.kind),
+      ["initial", "reminder"]
+    );
 
     const retried = await retryArtifactReviewAgentAssignment({
       runsRoot,
@@ -326,6 +385,7 @@ test("ACP Client separates startup, idle, and maximum runtime timeouts", async (
     onSession: async () => undefined
   }), /agent_idle_timeout: no ACP activity for 40ms/);
 
+  const progressUpdates: string[] = [];
   const activeWithoutMaximum = await runAgentReviewAcpSession({
     launch: fakeClientLaunch("progress", {
       startupTimeoutMs: 1_000,
@@ -336,9 +396,12 @@ test("ACP Client separates startup, idle, and maximum runtime timeouts", async (
     reminder: "Submit",
     workspaceRoot: tmpdir(),
     isSubmitted: async () => true,
-    onSession: async () => undefined
+    onSession: async () => undefined,
+    onUpdate: (update) => progressUpdates.push(update.sessionUpdate)
   });
   assert.equal(activeWithoutMaximum.stopReason, "end_turn");
+  assert.equal(progressUpdates.length, 8);
+  assert.equal(progressUpdates.every((update) => update === "agent_message_chunk"), true);
 
   await assert.rejects(runAgentReviewAcpSession({
     launch: fakeClientLaunch("progress-hang", {
