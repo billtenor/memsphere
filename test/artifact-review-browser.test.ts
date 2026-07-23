@@ -21,6 +21,7 @@ import { artifactReviewAssignmentId } from "../src/artifact-review.js";
 import { runArtifactReviewAgentWorker } from "../src/acp/review-worker.js";
 import type { AgentReviewProvider } from "../src/acp/provider.js";
 import { agentActivityPath, readAgentActivitySnapshot } from "../src/acp/activity.js";
+import { reviewConfiguration } from "./helpers/review.js";
 
 const browserTestDirectory = dirname(fileURLToPath(import.meta.url));
 const browserFakeReviewer = join(browserTestDirectory, "fixtures", "fake-acp-reviewer.mjs");
@@ -35,39 +36,41 @@ test("Human Artifact Review completes in View with private drafts and distinct v
   await mkdir(reviewsRoot, { recursive: true });
   await writeFile(join(memoryRoot, "procedures", "reviewed.yaml"), withCurrentMemorySyntax(`!procedure
 name: browser-review
-role_bindings:
-  decider: alice
 flow:
   - !action
     action: 产出需要人工评审的结果。
     artifact: !artifact
       name: 人工评审结果
       format: markdown
-      review: artifact_acceptance.unanimous
-      role_bindings:
-        advisor: bob
+      review: [Decider, Advisor]
 `));
   const controlPlane = parseControlPlaneConfig({
-    identities: {
-      alice: { kind: "human", name: "Alice" },
-      bob: { kind: "human", name: "Bob" }
+    runner: {
+      permissions: ["artifact.read", "artifact.submit", "decision.decide"]
     },
-    roles: {
-      runner: {
-        name: "Runner",
-        permissions: ["artifact.read", "artifact.submit", "decision.decide"]
-      },
-      decider: {
+    actors: {
+      alice: {
+        kind: "human",
         name: "Decider",
         permissions: ["artifact.read", "decision.decide"]
       },
-      advisor: {
+      bob: {
+        kind: "human",
         name: "Advisor",
         permissions: ["artifact.read", "decision.assess"]
       }
     }
   });
-  const started = await startRun({ memoryRoot, runsRoot, procedureName: "browser-review", controlPlane });
+  const started = await startRun({
+    memoryRoot,
+    runsRoot,
+    procedureName: "browser-review",
+    controlPlane,
+    reviewConfiguration: reviewConfiguration({
+      procedure: "browser-review",
+      slots: { Decider: ["alice"], Advisor: ["bob"] }
+    })
+  });
   const pending = await reportRun({
     runsRoot,
     runId: started.id,
@@ -127,13 +130,13 @@ flow:
     assert.equal(await page.getByRole("button", { name: "Create Review", exact: true }).isVisible(), false);
 
     await identity.click();
-    const identityMenu = page.locator(".artifact-review-identity-select .artifact-review-select-menu");
+    const identityMenu = page.locator(".artifact-review-actor-select .artifact-review-select-menu");
     const identityTriggerBox = await identity.boundingBox();
     const identityMenuBox = await identityMenu.boundingBox();
     assert(identityTriggerBox && identityMenuBox);
     assert(identityMenuBox.y >= identityTriggerBox.y + identityTriggerBox.height);
-    assert.match(await identityMenu.locator('[data-identity-id="alice"]').innerText(), /^Decider ·/);
-    assert.match(await identityMenu.locator('[data-identity-id="bob"]').innerText(), /^Advisor ·/);
+    assert.match(await identityMenu.locator('[data-actor-id="alice"]').innerText(), /^Decider ·/);
+    assert.match(await identityMenu.locator('[data-actor-id="bob"]').innerText(), /^Advisor ·/);
     await reviewModal.getByText("Visible only after identity authorization.", { exact: true }).waitFor();
     const publicScope = await reviewModal.locator("#artifact-review-scope-panel").innerText();
     const publicProgress = await reviewModal.locator("#artifact-review-progress-panel").innerText();
@@ -238,7 +241,7 @@ flow:
     });
     assert.equal((await inlineRetrySaved).status(), 200);
     let afterFailedInlineRetry = await readRun(runsRoot, started.id);
-    let aliceAssignment = currentArtifactReview(afterFailedInlineRetry)?.rounds[0]?.assignments.find((assignment) => assignment.identityId === "alice");
+    let aliceAssignment = currentArtifactReview(afterFailedInlineRetry)?.rounds[0]?.assignments.find((assignment) => assignment.actorId === "alice");
     assert.equal(
       aliceAssignment?.draft.comments.filter((comment) => comment.body === "Inline text survives a failed save").length,
       1
@@ -291,7 +294,7 @@ flow:
     await clickAndWaitForDraftSave(page, reviewModal.getByRole("button", { name: "添加意见", exact: true }));
     assert.equal(await composer.isEnabled(), true);
     let afterFailedComposerRetry = await readRun(runsRoot, started.id);
-    aliceAssignment = currentArtifactReview(afterFailedComposerRetry)?.rounds[0]?.assignments.find((assignment) => assignment.identityId === "alice");
+    aliceAssignment = currentArtifactReview(afterFailedComposerRetry)?.rounds[0]?.assignments.find((assignment) => assignment.actorId === "alice");
     assert.equal(
       aliceAssignment?.draft.comments.filter((comment) => comment.body === "Alice text survives a failed save").length,
       1
@@ -317,7 +320,7 @@ flow:
     assert.equal(await page.getByPlaceholder("补充整体评审意见").isEnabled(), true);
     assert.deepEqual(dialogs, []);
     let afterAliceAdd = await readRun(runsRoot, started.id);
-    aliceAssignment = currentArtifactReview(afterAliceAdd)?.rounds[0]?.assignments.find((assignment) => assignment.identityId === "alice");
+    aliceAssignment = currentArtifactReview(afterAliceAdd)?.rounds[0]?.assignments.find((assignment) => assignment.actorId === "alice");
     assert.equal(aliceAssignment?.draft.comments.some((comment) => comment.body === "Alice private draft"), true);
 
     await staleRoundWithBobDraft(address.port, firstReview.id, firstReview.currentRoundId, "Bob stale update before Alice vote");
@@ -326,7 +329,7 @@ flow:
     await aliceVoteRecovery;
     assert.equal(await reviewModal.getByRole("radio", { name: "修改", exact: true }).getAttribute("aria-checked"), "true");
     afterAliceAdd = await readRun(runsRoot, started.id);
-    aliceAssignment = currentArtifactReview(afterAliceAdd)?.rounds[0]?.assignments.find((assignment) => assignment.identityId === "alice");
+    aliceAssignment = currentArtifactReview(afterAliceAdd)?.rounds[0]?.assignments.find((assignment) => assignment.actorId === "alice");
     assert.equal(aliceAssignment?.draft.vote, "request_changes");
 
     await staleRoundWithBobDraft(address.port, firstReview.id, firstReview.currentRoundId, "Bob stale update before Alice delete");
@@ -335,7 +338,7 @@ flow:
     await aliceDeleteRecovery;
     assert.equal(await page.getByText("Alice private draft", { exact: true }).count(), 0);
     afterAliceAdd = await readRun(runsRoot, started.id);
-    aliceAssignment = currentArtifactReview(afterAliceAdd)?.rounds[0]?.assignments.find((assignment) => assignment.identityId === "alice");
+    aliceAssignment = currentArtifactReview(afterAliceAdd)?.rounds[0]?.assignments.find((assignment) => assignment.actorId === "alice");
     assert.equal(aliceAssignment?.draft.comments.some((comment) => comment.body === "Alice private draft"), false);
 
     await reviewModal.getByPlaceholder("补充整体评审意见").fill("Alice private draft");
@@ -552,36 +555,34 @@ test("Artifact Review without a Human Assignment keeps the public workspace visi
   await mkdir(reviewsRoot, { recursive: true });
   await writeFile(join(memoryRoot, "procedures", "agent-only.yaml"), withCurrentMemorySyntax(`!procedure
 name: agent-only-review-browser
-role_bindings:
-  advisor: reviewer-agent
 flow:
   - !action
     action: Produce an Agent-only reviewed Artifact.
     artifact: !artifact
       name: agent-only candidate
       format: markdown
-      review: artifact_acceptance.unanimous
-      role_bindings:
-        advisor: reviewer-agent
+      review: [Advisor]
 `));
   const controlPlane = parseControlPlaneConfig({
-    identities: {
+    runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+    actors: {
       "reviewer-agent": {
         kind: "agent",
-        name: "Agent Reviewer",
+        name: "Advisor",
+        permissions: ["artifact.read", "decision.assess"],
         agent: { provider: "traex", command: process.execPath, args: [] }
       }
-    },
-    roles: {
-      runner: { name: "Runner", permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
-      advisor: { name: "Advisor", permissions: ["artifact.read", "decision.assess"] }
     }
   });
   const started = await startRun({
     memoryRoot,
     runsRoot,
     procedureName: "agent-only-review-browser",
-    controlPlane
+    controlPlane,
+    reviewConfiguration: reviewConfiguration({
+      procedure: "agent-only-review-browser",
+      slots: { Advisor: ["reviewer-agent"] }
+    })
   });
   const pending = await reportRun({
     runsRoot,
@@ -650,51 +651,43 @@ test("Agent Activity expands in the participant row without disrupting Human rev
   await mkdir(reviewsRoot, { recursive: true });
   await writeFile(join(memoryRoot, "procedures", "activity-review.yaml"), withCurrentMemorySyntax(`!procedure
 name: agent-activity-browser
-role_bindings:
-  decider: alice
 flow:
   - !action
     action: Record requirement evidence.
     artifact: !artifact
       name: current requirement
       format: markdown
-      review_role: requirement
   - !action
     action: Record implementation evidence.
     artifact: !artifact
       name: implementation summary
       format: markdown
-      review_role: implementation
   - !action
     action: Record validation evidence.
     artifact: !artifact
       name: validation report
       format: markdown
-      review_role: validation
   - !action
     action: Produce an Artifact with visible Agent activity.
     artifact: !artifact
       name: activity candidate
       format: markdown
-      review_role: review-material
-      review_requires: [implementation, validation]
-      review: artifact_acceptance.unanimous
-      role_bindings:
-        advisor: reviewer-agent
+      review: [Decider, Advisor]
 `));
   const controlPlane = parseControlPlaneConfig({
-    identities: {
-      alice: { kind: "human", name: "Alice" },
+    runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+    actors: {
+      alice: {
+        kind: "human",
+        name: "Decider",
+        permissions: ["artifact.read", "decision.decide"]
+      },
       "reviewer-agent": {
         kind: "agent",
-        name: "Activity Agent",
+        name: "Advisor",
+        permissions: ["artifact.read", "decision.assess"],
         agent: { provider: "traex", command: process.execPath, args: [browserFakeReviewer, "approve"] }
       }
-    },
-    roles: {
-      runner: { name: "Runner", permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
-      decider: { name: "Decider", permissions: ["artifact.read", "decision.decide"] },
-      advisor: { name: "Advisor", permissions: ["artifact.read", "decision.assess"] }
     }
   });
   await writeFile(configPath, `${JSON.stringify({
@@ -703,22 +696,33 @@ flow:
     runsRoot: "runs",
     archiveRoot: "archives",
     control_plane: {
-      identities: {
-        alice: { kind: "human", name: "Alice" },
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        alice: {
+          kind: "human",
+          name: "Decider",
+          permissions: ["artifact.read", "decision.decide"]
+        },
         "reviewer-agent": {
           kind: "agent",
-          name: "Activity Agent",
+          name: "Advisor",
+          permissions: ["artifact.read", "decision.assess"],
           agent: { provider: "traex", command: process.execPath, args: [browserFakeReviewer, "approve"] }
         }
-      },
-      roles: {
-        runner: { name: "Runner", permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
-        decider: { name: "Decider", permissions: ["artifact.read", "decision.decide"] },
-        advisor: { name: "Advisor", permissions: ["artifact.read", "decision.assess"] }
       }
     }
   }, null, 2)}\n`);
-  const started = await startRun({ memoryRoot, runsRoot, procedureName: "agent-activity-browser", controlPlane });
+  const started = await startRun({
+    memoryRoot,
+    runsRoot,
+    procedureName: "agent-activity-browser",
+    controlPlane,
+    reviewConfiguration: reviewConfiguration({
+      procedure: "agent-activity-browser",
+      flowIndexes: [4],
+      slots: { Decider: ["alice"], Advisor: ["reviewer-agent"] }
+    })
+  });
   await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Current requirement\n\nKeep Activity visible.\n" } });
   await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Implementation summary\n\nImplemented Activity projection.\n" } });
   await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Validation report\n\nFocused tests passed.\n" } });
@@ -730,15 +734,15 @@ flow:
   const review = currentArtifactReview(pending);
   assert(review);
   const round = review.rounds[0];
-  const agent = round.assignments.find((assignment) => assignment.identityId === "reviewer-agent");
+  const agent = round.assignments.find((assignment) => assignment.actorId === "reviewer-agent");
   assert(agent);
   const provider: AgentReviewProvider = {
     id: "fake-browser-provider",
-    buildLaunch({ identity, workspaceRoot, sessionEnv }) {
+    buildLaunch({ actor, workspaceRoot, sessionEnv }) {
       return {
         provider: "fake-browser-provider",
-        command: identity.agent.command,
-        args: [...identity.agent.args],
+        command: actor.agent.command,
+        args: [...actor.agent.args],
         cwd: workspaceRoot,
         env: { ...process.env, ...sessionEnv },
         startupTimeoutMs: 10_000,
@@ -759,7 +763,7 @@ flow:
   });
   const completedAgentRun = await readRun(runsRoot, started.id);
   const completedAgent = currentArtifactReview(completedAgentRun)?.rounds[0].assignments.find(
-    (assignment) => assignment.identityId === "reviewer-agent"
+    (assignment) => assignment.actorId === "reviewer-agent"
   );
   assert(completedAgent?.attempts?.[0]);
 
@@ -787,7 +791,7 @@ flow:
     const modal = page.locator("#artifact-review-modal");
     let materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
     await materialChooser.click();
-    await modal.getByRole("option", { name: "需求 · current requirement", exact: true }).click();
+    await modal.getByRole("option", { name: "前序产物 · current requirement", exact: true }).click();
     await modal.getByText("Keep Activity visible.", { exact: true }).waitFor();
     assert.equal(await modal.locator("#artifact-review-artifact-pane .artifact-review-target").count(), 0);
     materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
@@ -800,7 +804,11 @@ flow:
     await composer.fill("Human draft remains visible");
     materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
     await materialChooser.click();
-    await modal.getByRole("option", { name: "验证 · validation report", exact: true }).click();
+    await modal.getByRole("option", { name: "冻结契约 · Frozen Review Contract", exact: true }).click();
+    await modal.getByText(/Produce an Artifact with visible Agent activity\./).waitFor();
+    materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
+    await materialChooser.click();
+    await modal.getByRole("option", { name: "前序产物 · validation report", exact: true }).click();
     await modal.getByText("Focused tests passed.", { exact: true }).waitFor();
     assert.equal(await composer.inputValue(), "Human draft remains visible");
     materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
@@ -917,17 +925,17 @@ async function submitThroughConfirmation(page: import("playwright").Page): Promi
 async function selectIdentity(
   page: import("playwright").Page,
   _select: import("playwright").Locator,
-  identityId: string
+  actorId: string
 ): Promise<void> {
   const select = page.locator("#artifact-review-modal").getByRole("combobox", { name: "评审身份" });
-  let option = page.locator(`.artifact-review-identity-select .artifact-review-select-menu:not([hidden]) .artifact-review-select-option[data-identity-id="${identityId}"]`);
+  let option = page.locator(`.artifact-review-actor-select .artifact-review-select-menu:not([hidden]) .artifact-review-select-option[data-actor-id="${actorId}"]`);
   if (!await option.isVisible().catch(() => false)) {
     await select.waitFor({ state: "visible" });
     await select.evaluate((element) => {
       if (element instanceof HTMLElement) element.focus();
     });
     await select.click();
-    option = page.locator(`.artifact-review-identity-select .artifact-review-select-menu:not([hidden]) .artifact-review-select-option[data-identity-id="${identityId}"]`);
+    option = page.locator(`.artifact-review-actor-select .artifact-review-select-menu:not([hidden]) .artifact-review-select-option[data-actor-id="${actorId}"]`);
     await option.waitFor({ state: "visible" });
   }
   if (await option.getAttribute("aria-selected") === "true") {
@@ -938,14 +946,14 @@ async function selectIdentity(
   const loaded = page.waitForResponse(
     (response) =>
       response.url().includes("/api/artifact-reviews/")
-      && response.url().includes(`identity_id=${identityId}`)
+      && response.url().includes(`actor_id=${actorId}`)
       && response.request().method() === "GET",
     { timeout: 5_000 }
   ).catch(() => null);
   await option.click();
-  const expectedLabel = identityId === "alice" ? "Decider" : identityId === "bob" ? "Advisor" : identityId;
+  const expectedLabel = actorId === "alice" ? "Decider" : actorId === "bob" ? "Advisor" : actorId;
   await page.waitForFunction((label) => {
-    const trigger = document.querySelector(".artifact-review-identity-select .artifact-review-select-trigger");
+    const trigger = document.querySelector(".artifact-review-actor-select .artifact-review-select-trigger");
     return Boolean(trigger?.textContent?.includes(label));
   }, expectedLabel);
   await loaded;
@@ -997,7 +1005,7 @@ async function staleRoundWithBobDraft(
   body: string
 ): Promise<void> {
   const baseUrl = `http://127.0.0.1:${port}/api/artifact-reviews/${encodeURIComponent(reviewId)}/rounds/${encodeURIComponent(roundId)}`;
-  const contextResponse = await fetch(`${baseUrl}?identity_id=bob`);
+  const contextResponse = await fetch(`${baseUrl}?actor_id=bob`);
   assert.equal(contextResponse.status, 200);
   const context = await contextResponse.json() as {
     review: { round: { revision: number } };

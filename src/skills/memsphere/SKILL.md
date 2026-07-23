@@ -119,14 +119,12 @@ artifact: !artifact
 - 不要使用已删除的 `element_types`；旧版字符串 `items` 必须迁移为带 `!schema` tag 的 `item/items`。
 - `asserts` 和 `suggests` 是自然语言契约，不会被代码 validator 猜测执行。
 
-Procedure 和 Artifact 可以声明 Artifact Review 控制平面字段。`role_bindings` 把 `.memsphere/config.json` 中的 Role 绑定到 Identity；`permission_grants` 只在当前 Artifact 临时追加 Role 被允许授予的 Permission：
+Artifact 可以使用 `review` 声明当前 Procedure 内的 Review Slot。Procedure 不引用 `.memsphere/config.json` 中的 Actor，也不选择 Decision Policy：
 
 ```yaml
 !procedure
 syntax: memsphere-20260721-stable
 name: 受控交付流程
-role_bindings:
-  reviewer: review_agent
 goals:
   - 交付受控产物。
 flow:
@@ -134,20 +132,18 @@ flow:
     action: 生成受控产物。
     artifact: !artifact
       name: 受控产物
-      review: artifact_acceptance.unanimous
-      role_bindings:
-        reviewer: [human_reviewer, review_agent]
-      permission_grants:
-        runner: [artifact.submit]
+      review: [产品, 资深架构]
 ```
 
-- `!procedure.role_bindings` 是默认绑定；调用方 Procedure、被调用 Procedure、当前 Artifact 依次覆盖同名 Role，未声明 Role 继续继承。
-- `!artifact.role_bindings` 只覆盖当前 Artifact；`!artifact.permission_grants` 只能使用目标 Role 的 `grantable_permissions`，且只对当前 Artifact 生效。
-- `runner` 是当前 Run 执行上下文隐式承担的保留 Role，不得显式绑定 Identity。
-- `!action` 不允许直接声明 `role_bindings` 或 `permission_grants`，两个字段必须写在其 `artifact` 中。
+- `review` 是不重复的非空 Slot 名称数组。Slot 只表达 Procedure 本地评审视角，不是 Actor id。
+- `.memsphere/config.json` 的 `control_plane.actors` 定义可参与 Review 的 Human 或 Agent Actor；Runner 权限由 `control_plane.runner` 定义。
+- `memsphere run start` 会先列出所有 Review scope、Slot、可用 Actor 和内置 Decision Policy。把预检示例保存并调整后，使用 `--review-config <path>` 启动。
+- Review 配置必须为每个 scope 选择 Policy，并为每个 Slot 绑定 Actor 或显式 `skip`；一个 Actor 绑定多个 Slot 时只产生一个 Assignment 和 Vote。
+- `permission_grants` 只存在于 Run Review 配置的 scope 中，并受 Runner/Actor 的 `grantable_permissions` 限制。Memory YAML 不允许 `role_bindings` 或 `permission_grants`。
+- `runner` 是当前 Run 执行上下文，不需要 Slot Binding。
 - Runner 在 `run report` 前应阅读 CLI 输出的权限说明；成功或拒绝结果中的权限、来源和自然语言说明均来自 Run 启动时保存的控制平面快照。
-- `!artifact.review` 如出现必须引用内置 Decision Policy。`review_role` 标记需求、实现、验证或评审材料，`review_requires` 声明当前 Review 必须携带的自包含证据。确定性校验通过后，Run 会返回稳定的 `review_id` 和 `memsphere run review wait --review <review_id>`；Review 通过前当前 Action 不推进。全部评审意见收齐后，如 CLI 提示等待 Runner 投票，必须先阅读摘要和 blocking 意见，逐条执行 `memsphere run review resolve`，再显式执行 `memsphere run review vote`。
-- 绑定到当前 Artifact 的 Agent Identity 会由 Memsphere 通过 ACP 自动启动。初始 Prompt 会给出精炼的 Review contract 和证据包；Agent Reviewer 使用 Session 注入、固定当前 Node 与 CLI entrypoint 的 `MEMSPHERE_CLI`，直接通过 Store 操作自己的 Assignment，不创建或监听 Review bridge/socket。`run review comment` 必须声明 severity；短意见使用 `--body`，多行 Markdown 使用 `--body-stdin`。提交摘要可使用 `--summary-file`。普通 ACP 文本回复不构成 Comment 或 Vote。Agent 失败时可用 `memsphere run review retry --review <id> --assignment <identity-or-assignment-id>` 显式重试。
+- 确定性校验通过后，Run 会返回稳定的 `review_id` 和 `memsphere run review wait --review <review_id>`；Review 通过前当前 Action 不推进。Review Submission 自动冻结当前候选之前已经上报的全部 Artifact，Reviewer 根据当前 Artifact 与要求按需追溯。全部评审意见收齐后，如 CLI 提示等待 Runner 投票，必须先阅读摘要和 blocking 意见，逐条执行 `memsphere run review resolve`，再显式执行 `memsphere run review vote`。
+- 绑定到当前 Slot 的 Agent Actor 会由 Memsphere 通过 ACP 自动启动。初始 Prompt 会给出精炼的 Review contract 和前序 Artifact 索引；Agent Reviewer 使用 Session 注入、固定当前 Node 与 CLI entrypoint 的 `MEMSPHERE_CLI`，直接通过 Store 操作自己的 Assignment，不创建或监听 Review bridge/socket。`run review comment` 必须声明 severity；短意见使用 `--body`，多行 Markdown 使用 `--body-stdin`。提交摘要可使用 `--summary-file`。普通 ACP 文本回复不构成 Comment 或 Vote。Agent 失败时可用 `memsphere run review retry --review <id> --assignment <actor-or-assignment-id>` 显式重试。
 - Human 使用 View 中的大尺寸 Artifact Review 浮窗操作本人 Assignment：按 Round 查看当时的不可变 Submission、正式 Comment、Vote、Result 与 Revision Summary，在当前轮添加整体或定位 Comment、选择 Vote 并 Submit。历史 Round 只读，完成后的 Review 仍可从对应 Run 步骤重新打开。
 - Artifact Review Comment 只绑定当前 Artifact Submission；定位 Comment 保存 Submission、digest、Renderer target 和短上下文，不评论 Memory 或 Workspace 文件，也不会自动迁移到下一轮。独立 Memory Review 继续使用原有 Review 抽屉和处理流程。
 - 调试 Agent 启动时，可设置 `debug.agent_review: true` 禁止后台真实派发，再显式执行 `memsphere run try-run --run <run_id>` 生成 `launch.json` 和 `prompt.md`。该命令不 claim Assignment、不启动 ACP，也不修改 Run；View 轮询不会自动生成调试文件。

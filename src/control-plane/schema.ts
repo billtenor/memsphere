@@ -1,89 +1,11 @@
 import { z } from "zod";
 import { isPermissionId, type PermissionId } from "./catalog.js";
-import type { ControlPlaneConfig, ControlPlaneRole, ControlPlaneSnapshot } from "./model.js";
+import type { ControlPlaneActor, ControlPlaneConfig, ControlPlaneSnapshot, RunnerAuthority } from "./model.js";
 
 const idPattern = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 const nonEmptyString = z.string().trim().min(1);
 
-const identityIdSchema = nonEmptyString.regex(idPattern, "Identity id must contain only letters, numbers, dots, underscores, or hyphens");
-const roleIdSchema = nonEmptyString.regex(idPattern, "Role id must contain only letters, numbers, dots, underscores, or hyphens");
-
-const humanIdentitySchema = z.object({
-  kind: z.literal("human"),
-  name: nonEmptyString
-}).strict();
-
-const agentIdentitySchema = z.object({
-  kind: z.literal("agent"),
-  name: nonEmptyString,
-  agent: z.object({
-    provider: z.literal("traex").optional(),
-    command: nonEmptyString,
-    args: z.array(z.string()),
-    cwd: nonEmptyString.optional(),
-    model: nonEmptyString.optional(),
-    prompt_version: nonEmptyString.optional(),
-    startup_timeout_ms: z.number().int().positive().optional(),
-    idle_timeout_ms: z.number().int().positive().optional(),
-    max_runtime_ms: z.number().int().positive().nullable().optional(),
-    timeout_ms: z.number().int().positive().optional()
-  }).strict().superRefine((agent, context) => {
-    if (agent.timeout_ms !== undefined && agent.max_runtime_ms !== undefined) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["max_runtime_ms"],
-        message: "max_runtime_ms cannot be combined with legacy timeout_ms"
-      });
-    }
-  }).transform((agent) => ({
-    provider: agent.provider,
-    command: agent.command,
-    args: [...agent.args],
-    cwd: agent.cwd,
-    model: agent.model,
-    promptVersion: agent.prompt_version,
-    startupTimeoutMs: agent.startup_timeout_ms,
-    idleTimeoutMs: agent.idle_timeout_ms,
-    maxRuntimeMs: agent.max_runtime_ms !== undefined ? agent.max_runtime_ms : agent.timeout_ms
-  }))
-}).strict();
-
-const snapshotAgentIdentitySchema = z.object({
-  kind: z.literal("agent"),
-  name: nonEmptyString,
-  agent: z.object({
-    provider: nonEmptyString.optional(),
-    command: nonEmptyString,
-    args: z.array(z.string()),
-    cwd: nonEmptyString.optional(),
-    model: nonEmptyString.optional(),
-    promptVersion: nonEmptyString.optional(),
-    startupTimeoutMs: z.number().int().positive().optional(),
-    idleTimeoutMs: z.number().int().positive().optional(),
-    maxRuntimeMs: z.number().int().positive().nullable().optional(),
-    timeoutMs: z.number().int().positive().optional()
-  }).strict().superRefine((agent, context) => {
-    if (agent.timeoutMs !== undefined && agent.maxRuntimeMs !== undefined) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["maxRuntimeMs"],
-        message: "maxRuntimeMs cannot be combined with legacy timeoutMs"
-      });
-    }
-  }).transform((agent) => ({
-    provider: agent.provider,
-    command: agent.command,
-    args: [...agent.args],
-    cwd: agent.cwd,
-    model: agent.model,
-    promptVersion: agent.promptVersion,
-    startupTimeoutMs: agent.startupTimeoutMs,
-    idleTimeoutMs: agent.idleTimeoutMs,
-    maxRuntimeMs: agent.maxRuntimeMs !== undefined ? agent.maxRuntimeMs : agent.timeoutMs
-  }))
-}).strict();
-
-const controlPlaneIdentitySchema = z.discriminatedUnion("kind", [humanIdentitySchema, agentIdentitySchema]);
+const actorIdSchema = nonEmptyString.regex(idPattern, "Actor id must contain only letters, numbers, dots, underscores, or hyphens");
 
 const permissionSchema = z.string().superRefine((value, context) => {
   if (!isPermissionId(value)) {
@@ -107,16 +29,60 @@ const permissionListSchema = z.array(permissionSchema).superRefine((values, cont
   }
 });
 
-const roleInputSchema = z.object({
-  name: nonEmptyString,
-  permissions: permissionListSchema,
-  grantable_permissions: permissionListSchema.optional(),
-  system_prompt: z.string().superRefine((value, context) => {
-    if (!value.trim()) context.addIssue({ code: z.ZodIssueCode.custom, message: "system_prompt must not be blank" });
-  }).optional()
-}).strict().superRefine((role, context) => {
-  const base = new Set(role.permissions);
-  for (const [index, permission] of (role.grantable_permissions ?? []).entries()) {
+const systemPromptSchema = z.string().superRefine((value, context) => {
+  if (!value.trim()) context.addIssue({ code: z.ZodIssueCode.custom, message: "system_prompt must not be blank" });
+}).optional();
+
+const agentRuntimeInputSchema = z.object({
+  provider: z.literal("traex").optional(),
+  command: nonEmptyString,
+  args: z.array(z.string()),
+  cwd: nonEmptyString.optional(),
+  model: nonEmptyString.optional(),
+  prompt_version: nonEmptyString.optional(),
+  startup_timeout_ms: z.number().int().positive().optional(),
+  idle_timeout_ms: z.number().int().positive().optional(),
+  max_runtime_ms: z.number().int().positive().nullable().optional(),
+  timeout_ms: z.number().int().positive().optional()
+}).strict().superRefine((agent, context) => {
+  if (agent.timeout_ms !== undefined && agent.max_runtime_ms !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["max_runtime_ms"],
+      message: "max_runtime_ms cannot be combined with legacy timeout_ms"
+    });
+  }
+}).transform((agent) => ({
+  provider: agent.provider,
+  command: agent.command,
+  args: [...agent.args],
+  cwd: agent.cwd,
+  model: agent.model,
+  promptVersion: agent.prompt_version,
+  startupTimeoutMs: agent.startup_timeout_ms,
+  idleTimeoutMs: agent.idle_timeout_ms,
+  maxRuntimeMs: agent.max_runtime_ms !== undefined ? agent.max_runtime_ms : agent.timeout_ms
+}));
+
+const actorInputSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("human"),
+    name: nonEmptyString,
+    permissions: permissionListSchema,
+    grantable_permissions: permissionListSchema.optional(),
+    system_prompt: systemPromptSchema
+  }).strict(),
+  z.object({
+    kind: z.literal("agent"),
+    name: nonEmptyString,
+    permissions: permissionListSchema,
+    grantable_permissions: permissionListSchema.optional(),
+    system_prompt: systemPromptSchema,
+    agent: agentRuntimeInputSchema
+  }).strict()
+]).superRefine((actor, context) => {
+  const base = new Set(actor.permissions);
+  for (const [index, permission] of (actor.grantable_permissions ?? []).entries()) {
     if (!base.has(permission)) continue;
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -124,11 +90,24 @@ const roleInputSchema = z.object({
       message: `Permission ${permission} is already granted by permissions`
     });
   }
-}).transform((role): ControlPlaneRole => ({
-  name: role.name,
-  permissions: [...role.permissions],
-  grantablePermissions: [...(role.grantable_permissions ?? [])],
-  systemPrompt: role.system_prompt
+}).transform((actor): ControlPlaneActor => {
+  const authority = {
+    name: actor.name,
+    permissions: [...actor.permissions],
+    grantablePermissions: [...(actor.grantable_permissions ?? [])],
+    systemPrompt: actor.system_prompt
+  };
+  return actor.kind === "agent"
+    ? { kind: "agent", ...authority, agent: actor.agent }
+    : { kind: "human", ...authority };
+});
+
+const runnerInputSchema = z.object({
+  permissions: permissionListSchema,
+  grantable_permissions: permissionListSchema.optional()
+}).strict().transform((runner): RunnerAuthority => ({
+  permissions: [...runner.permissions],
+  grantablePermissions: [...(runner.grantable_permissions ?? [])]
 }));
 
 function recordWithValidatedKeys<T>(
@@ -147,24 +126,45 @@ function recordWithValidatedKeys<T>(
 }
 
 export const controlPlaneConfigSchema: z.ZodType<ControlPlaneConfig, z.ZodTypeDef, unknown> = z.object({
-  identities: recordWithValidatedKeys(identityIdSchema, controlPlaneIdentitySchema),
-  roles: recordWithValidatedKeys(roleIdSchema, roleInputSchema)
-}).strict().superRefine((controlPlane, context) => {
-  if (!("runner" in controlPlane.roles)) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["roles", "runner"],
-      message: "control_plane must define the reserved runner Role"
-    });
-  }
-});
+  runner: runnerInputSchema,
+  actors: recordWithValidatedKeys(actorIdSchema, actorInputSchema)
+}).strict();
 
-const snapshotRoleSchema = z.object({
+const snapshotAgentRuntimeSchema = z.object({
+  provider: nonEmptyString.optional(),
+  command: nonEmptyString,
+  args: z.array(z.string()),
+  cwd: nonEmptyString.optional(),
+  model: nonEmptyString.optional(),
+  promptVersion: nonEmptyString.optional(),
+  startupTimeoutMs: z.number().int().positive().optional(),
+  idleTimeoutMs: z.number().int().positive().optional(),
+  maxRuntimeMs: z.number().int().positive().nullable().optional()
+}).strict();
+
+const snapshotActorSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("human"),
+    name: nonEmptyString,
+    permissions: permissionListSchema,
+    grantablePermissions: permissionListSchema,
+    systemPrompt: z.string().optional()
+  }).strict(),
+  z.object({
+    kind: z.literal("agent"),
+    name: nonEmptyString,
+    permissions: permissionListSchema,
+    grantablePermissions: permissionListSchema,
+    systemPrompt: z.string().optional(),
+    agent: snapshotAgentRuntimeSchema
+  }).strict()
+]);
+
+const snapshotRunnerSchema = z.object({
   name: nonEmptyString,
   permissions: permissionListSchema,
-  grantablePermissions: permissionListSchema,
-  systemPrompt: z.string().optional()
-}).strict();
+  grantablePermissions: permissionListSchema
+}).omit({ name: true }).strict();
 
 export const controlPlaneSnapshotSchema: z.ZodType<ControlPlaneSnapshot, z.ZodTypeDef, unknown> = z.object({
   contractVersion: z.literal(1),
@@ -190,8 +190,8 @@ export const controlPlaneSnapshotSchema: z.ZodType<ControlPlaneSnapshot, z.ZodTy
       resolution: z.literal("unanimous")
     }).strict())
   }).strict(),
-  identities: z.record(z.discriminatedUnion("kind", [humanIdentitySchema, snapshotAgentIdentitySchema])),
-  roles: z.record(snapshotRoleSchema)
+  runner: snapshotRunnerSchema,
+  actors: z.record(snapshotActorSchema)
 }).strict();
 
 export function parseControlPlaneConfig(value: unknown): ControlPlaneConfig {

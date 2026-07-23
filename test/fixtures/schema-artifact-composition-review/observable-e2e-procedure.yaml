@@ -16,7 +16,4 @@ flow:
         name: markdown
         layout: outline
       schema: Schema 逐步撰写端到端验收文档
-      review: artifact_acceptance.unanimous
-      role_bindings:
-        system_architect: traex4
-        senior_system_architect: human
+      review: [system_architect, senior_system_architect]

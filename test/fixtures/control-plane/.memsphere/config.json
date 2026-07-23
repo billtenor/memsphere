@@ -3,31 +3,25 @@
   "reviewsRoot": "reviews",
   "runsRoot": "runs",
   "control_plane": {
-    "identities": {
+    "runner": {
+      "permissions": ["artifact.read", "artifact.submit"]
+    },
+    "actors": {
       "human_reviewer": {
         "kind": "human",
-        "name": "Human Reviewer"
+        "name": "Human Reviewer",
+        "permissions": ["artifact.read", "decision.assess"]
       },
       "review_agent": {
         "kind": "agent",
         "name": "Review Agent",
+        "permissions": ["artifact.read", "decision.assess"],
+        "system_prompt": "Review the Artifact independently.",
         "agent": {
-          "command": "codex",
+          "provider": "traex",
+          "command": "traecli",
           "args": ["acp"]
         }
-      }
-    },
-    "roles": {
-      "runner": {
-        "name": "Runner",
-        "permissions": ["artifact.read"],
-        "grantable_permissions": ["artifact.submit"]
-      },
-      "reviewer": {
-        "name": "Reviewer",
-        "permissions": ["artifact.read", "decision.assess"],
-        "grantable_permissions": ["decision.challenge"],
-        "system_prompt": "Review the Artifact independently."
       }
     }
   }

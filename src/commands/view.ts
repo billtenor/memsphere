@@ -46,7 +46,7 @@ import {
   findArtifactReview,
   listRuns,
   parseRunState,
-  readArtifactReviewForIdentity,
+  readArtifactReviewForActor,
   readRun,
   retryArtifactReviewAgentAssignment,
   resolveArtifactReviewComment,
@@ -79,7 +79,7 @@ type ViewServeOptions = {
 type MemoryPayload = {
   memoryRoot: string;
   systemMemoryPaths: string[];
-  roleNames: Record<string, string>;
+  actorNames: Record<string, string>;
   memories: Array<{
     id: string;
     kind: string;
@@ -219,19 +219,19 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 
   const artifactReviewRoundMatch = url.pathname.match(/^\/api\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)$/);
   if (request.method === "GET" && artifactReviewRoundMatch) {
-    const identityId = url.searchParams.get("identity_id")?.trim();
+    const actorId = url.searchParams.get("actor_id")?.trim();
     try {
       const reviewId = decodeURIComponent(artifactReviewRoundMatch[1]);
       const roundId = decodeURIComponent(artifactReviewRoundMatch[2]);
-      if (identityId) {
-        const context = await readArtifactReviewForIdentity({
+      if (actorId) {
+        const context = await readArtifactReviewForActor({
           runsRoot,
           reviewId,
           roundId,
-          identityId
+          actorId
         });
-        if ((context.assignment.identityKind ?? "human") !== "human") {
-          throw new Error(`Agent Artifact Review assignment is not assigned to the Human View API: ${identityId}`);
+        if ((context.assignment.actorKind ?? "human") !== "human") {
+          throw new Error(`Agent Artifact Review assignment is not assigned to the Human View API: ${actorId}`);
         }
         sendJson(response, 200, await artifactReviewContextPayload(runsRoot, context));
       } else {
@@ -257,17 +257,17 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     try {
       const reviewId = decodeURIComponent(artifactReviewActivityMatch[1]);
       const roundId = decodeURIComponent(artifactReviewActivityMatch[2]);
-      const identityId = decodeURIComponent(artifactReviewActivityMatch[3]);
+      const actorId = decodeURIComponent(artifactReviewActivityMatch[3]);
       const sequence = Number(artifactReviewActivityMatch[4]);
       const cursor = normalizeActivityInteger(url.searchParams.get("cursor"), 0, "cursor");
       const limit = normalizeActivityInteger(url.searchParams.get("limit"), 500, "limit");
       const located = await findViewArtifactReview(config, reviewId);
       const round = located.review.rounds.find((candidate) => candidate.id === roundId);
       if (!round) throw new Error(`Artifact Review Round not found: ${roundId}`);
-      const assignment = round.assignments.find((candidate) => candidate.identityId === identityId);
-      if (!assignment) throw new Error(`Identity is not assigned to Artifact Review Round: ${identityId}`);
-      if ((assignment.identityKind ?? "human") !== "agent") {
-        throw new Error(`Artifact Review Activity is read-only for Agent assignments: ${identityId}`);
+      const assignment = round.assignments.find((candidate) => candidate.actorId === actorId);
+      if (!assignment) throw new Error(`Actor is not assigned to Artifact Review Round: ${actorId}`);
+      if ((assignment.actorKind ?? "human") !== "agent") {
+        throw new Error(`Artifact Review Activity is read-only for Agent assignments: ${actorId}`);
       }
       const attempt = assignment.attempts?.find((candidate) => candidate.sequence === sequence);
       if (!attempt) throw new Error(`Agent Review attempt not found: ${sequence}`);
@@ -293,7 +293,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   if (artifactReviewAssignmentMatch && ["PATCH", "POST"].includes(request.method ?? "")) {
     const reviewId = decodeURIComponent(artifactReviewAssignmentMatch[1]);
     const roundId = decodeURIComponent(artifactReviewAssignmentMatch[2]);
-    const identityId = decodeURIComponent(artifactReviewAssignmentMatch[3]);
+    const actorId = decodeURIComponent(artifactReviewAssignmentMatch[3]);
     const operation = artifactReviewAssignmentMatch[4];
     try {
       const body = await readJsonBody<{
@@ -307,7 +307,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             runsRoot,
             reviewId,
             roundId,
-            identityId,
+            actorId,
             expectedRevision,
             draft: normalizeArtifactReviewDraft(body)
           })
@@ -315,7 +315,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             runsRoot,
             reviewId,
             roundId,
-            identityId,
+            actorId,
             expectedRevision
           });
       sendJson(response, 200, await artifactReviewContextPayload(runsRoot, context));
@@ -334,7 +334,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         runsRoot,
         reviewId: decodeURIComponent(artifactReviewRetryMatch[1]),
         roundId: decodeURIComponent(artifactReviewRetryMatch[2]),
-        identityId: decodeURIComponent(artifactReviewRetryMatch[3])
+        actorId: decodeURIComponent(artifactReviewRetryMatch[3])
       });
       await dispatchArtifactReviewAgents({ config, run: context.run });
       sendJson(response, 200, await artifactReviewContextPayload(runsRoot, context));
@@ -787,8 +787,8 @@ async function loadMemoryPayload(config: MemsphereConfig): Promise<MemoryPayload
   const { memoryRoot } = config;
   const memories: MemoryPayload["memories"] = [];
   const systemMemoryPaths = (await readReservedMemoryManifest()).system_memory.install;
-  const roleNames = Object.fromEntries(
-    Object.entries(config.controlPlane?.roles ?? {}).map(([roleId, role]) => [roleId, role.name])
+  const actorNames = Object.fromEntries(
+    Object.entries(config.controlPlane?.actors ?? {}).map(([actorId, actor]) => [actorId, actor.name])
   );
 
   for (const kind of memoryKinds) {
@@ -798,7 +798,7 @@ async function loadMemoryPayload(config: MemsphereConfig): Promise<MemoryPayload
     }
   }
 
-  return { memoryRoot, systemMemoryPaths, roleNames, memories };
+  return { memoryRoot, systemMemoryPaths, actorNames, memories };
 }
 
 async function loadReservedMemoryPayload(scopeRoot: string, memoryRoot: string): Promise<MemoryPayload["memories"]> {
@@ -927,15 +927,15 @@ function artifactReviewSummary(
       severity,
       unresolvedBlocking: advisoryComments.filter((comment) => comment.severity === "blocking" && !resolvedCommentIds.has(comment.id)).length,
       failures,
-      evidence: submission?.package?.requirements ?? [],
+      contextArtifactCount: submission?.contextArtifacts.length ?? 0,
       repeatedAdvisories: repeatedArtifactReviewAdvisories(review),
       commentDispositions: round.commentDispositions ?? [],
       assignments: round.assignments.map((assignment) => ({
         id: assignment.id,
-        identityId: assignment.identityId,
-        identityName: assignment.identityName,
-        roleNames: artifactReviewRoleNames(controlPlane, assignment.roleIds),
-        identityKind: assignment.identityKind ?? "human",
+        actorId: assignment.actorId,
+        actorName: assignment.actorName,
+        slotNames: artifactReviewSlotNames(assignment.slotIds),
+        actorKind: assignment.actorKind ?? "human",
         binding: assignment.binding,
         status: assignment.status,
         attempt: publicArtifactReviewAttempt(assignment.attempts?.at(-1)),
@@ -944,7 +944,7 @@ function artifactReviewSummary(
         implementationEvidenceReferenced: artifactReviewOpinionReferencesImplementation(assignment.submitted)
       })),
       runner: runnerCanDecide || runnerVote ? {
-        roleName: controlPlane?.roles.runner?.name ?? "Runner",
+        actorName: "Runner",
         binding: "decision",
         status: runnerVote ? "submitted" : "pending",
         vote: runnerVote?.value,
@@ -996,11 +996,38 @@ async function artifactReviewContextPayload(
   };
   await hydrateArtifactContent(runsRoot, context.run.id, artifact);
   const { authorization: _authorization, ...publicArtifact } = artifact;
-  const reviewPackage = submission.package ? structuredClone(submission.package) : undefined;
-  for (const evidence of reviewPackage?.evidence ?? []) {
-    await hydrateArtifactContent(runsRoot, context.run.id, evidence.artifact);
-    const { authorization: _authorization, ...publicEvidenceArtifact } = evidence.artifact;
-    evidence.artifact = publicEvidenceArtifact as typeof evidence.artifact;
+  const reviewStep = findReviewStep(context.run, context.review.stepId);
+  const contractArtifact = {
+    name: "Frozen Review Contract",
+    type: "object",
+    format: { name: "json", options: {} },
+    storage: "inline",
+    value: {
+      procedure: {
+        name: context.run.procedureName,
+        asserts: context.run.asserts ?? []
+      },
+      action: {
+        instruction: reviewStep?.instruction ?? "",
+        asserts: reviewStep?.asserts ?? [],
+        suggests: reviewStep?.suggests ?? [],
+        details: reviewStep?.details ?? []
+      },
+      artifact: {
+        name: reviewStep?.artifact ?? context.review.artifactName,
+        type: reviewStep?.type,
+        format: reviewStep?.format,
+        schema: reviewStep?.schema,
+        final: reviewStep?.final ?? false,
+        review: reviewStep?.reviewSlots ?? []
+      }
+    }
+  };
+  const contextArtifacts = structuredClone(submission.contextArtifacts);
+  for (const item of contextArtifacts) {
+    await hydrateArtifactContent(runsRoot, context.run.id, item.artifact);
+    const { authorization: _authorization, ...publicContextArtifact } = item.artifact;
+    item.artifact = publicContextArtifact as typeof item.artifact;
   }
   return {
     review: artifactReviewSummary(context.review, context.run.controlPlane),
@@ -1009,23 +1036,24 @@ async function artifactReviewContextPayload(
       digest: submission.digest,
       createdAt: submission.createdAt,
       artifact: publicArtifact,
-      package: reviewPackage,
+      contractArtifact,
+      contextArtifacts,
       revisionSummary: submission.revisionSummary
     },
     assignment: context.assignment ? {
       id: context.assignment.id,
-      identityId: context.assignment.identityId,
-      identityName: context.assignment.identityName,
-      identityKind: context.assignment.identityKind ?? "human",
-      roleIds: context.assignment.roleIds,
+      actorId: context.assignment.actorId,
+      actorName: context.assignment.actorName,
+      actorKind: context.assignment.actorKind ?? "human",
+      slotIds: context.assignment.slotIds,
       binding: context.assignment.binding,
       status: context.assignment.status,
-      draft: (context.assignment.identityKind ?? "human") === "agent"
+      draft: (context.assignment.actorKind ?? "human") === "agent"
         ? undefined
         : structuredClone(context.assignment.draft),
       submitted: publicArtifactReviewOpinion(context.assignment.submitted),
       attempts: context.assignment.attempts?.map(publicArtifactReviewAttempt),
-      roleNames: artifactReviewRoleNames(context.run.controlPlane, context.assignment.roleIds)
+      slotNames: artifactReviewSlotNames(context.assignment.slotIds)
     } : undefined,
     rounds: context.review.rounds.map((round) => ({
       id: round.id,
@@ -1036,11 +1064,11 @@ async function artifactReviewContextPayload(
       createdAt: round.createdAt,
       assignments: round.assignments.map((assignment) => ({
         id: assignment.id,
-        identityId: assignment.identityId,
-        identityName: assignment.identityName,
-        roleNames: artifactReviewRoleNames(context.run.controlPlane, assignment.roleIds),
-        identityKind: assignment.identityKind ?? "human",
-        roleIds: assignment.roleIds,
+        actorId: assignment.actorId,
+        actorName: assignment.actorName,
+        slotNames: artifactReviewSlotNames(assignment.slotIds),
+        actorKind: assignment.actorKind ?? "human",
+        slotIds: assignment.slotIds,
         binding: assignment.binding,
         status: assignment.status,
         submitted: publicArtifactReviewOpinion(assignment.submitted),
@@ -1053,6 +1081,22 @@ async function artifactReviewContextPayload(
       revisionSummary: context.review.submissions.find((submission) => submission.id === round.submissionId)?.revisionSummary
     }))
   };
+}
+
+function findReviewStep(run: RunState, stepId: string): RunStep | undefined {
+  const visit = (steps: readonly RunStep[]): RunStep | undefined => {
+    for (const step of steps) {
+      if (step.id === stepId) return step;
+      const nested = step.branches
+        ? visit([...step.branches.truthy, ...step.branches.falsy])
+        : step.loop
+          ? visit(step.loop.body)
+          : undefined;
+      if (nested) return nested;
+    }
+    return undefined;
+  };
+  return visit(run.plan ?? []) ?? [...run.stack].reverse().map((frame) => visit(frame.steps)).find(Boolean);
 }
 
 function publicArtifactReviewAttempt(attempt: ArtifactReviewAgentAttempt | undefined): unknown {
@@ -1103,8 +1147,8 @@ function renderArtifactReviewMarkdown(value: string): string {
   return renderMarkdownContent(normalized);
 }
 
-function artifactReviewRoleNames(controlPlane: RunState["controlPlane"], roleIds: string[]): string[] {
-  return roleIds.map((roleId) => controlPlane?.roles[roleId]?.name ?? roleId);
+function artifactReviewSlotNames(slotIds: string[]): string[] {
+  return slotIds.map((slotId) => slotId.includes("::") ? slotId.slice(slotId.lastIndexOf("::") + 2) : slotId);
 }
 
 export async function hydrateRunArtifactContent(runsRoot: string, run: RunState): Promise<RunState> {

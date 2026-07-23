@@ -35,6 +35,7 @@ import {
   waitForArtifactReview
 } from "../src/run/store.js";
 import { validateMemoryStore } from "../src/validation.js";
+import { reviewConfiguration } from "./helpers/review.js";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-test-"));
@@ -142,17 +143,26 @@ test("startRun requires exactly one Procedure source", async () => {
 test("Agent Review smoke Procedures start directly from test fixture files", async () => {
   await withTempDir(async (dir) => {
     const controlPlane = parseControlPlaneConfig({
-      identities: {
-        traex1: { kind: "agent", name: "Traex reviewer 1", agent: { provider: "traex", command: "traex", args: [] } },
-        traex2: { kind: "agent", name: "Traex reviewer 2", agent: { provider: "traex", command: "traex", args: [] } },
-        human: { kind: "human", name: "Human reviewer" }
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        traex1: {
+          kind: "agent",
+          name: "Development engineer",
+          permissions: ["artifact.read", "decision.assess"],
+          agent: { provider: "traex", command: "traex", args: [] }
+        },
+        traex2: {
+          kind: "agent",
+          name: "Test engineer",
+          permissions: ["artifact.read", "decision.decide"],
+          agent: { provider: "traex", command: "traex", args: [] }
+        },
+        human: {
+          kind: "human",
+          name: "System architect",
+          permissions: ["artifact.read", "decision.decide"]
+        }
       },
-      roles: {
-        runner: { name: "Runner", permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
-        development_engineer: { name: "Development engineer", permissions: ["artifact.read", "decision.assess"] },
-        test_engineer: { name: "Test engineer", permissions: ["artifact.read", "decision.decide"] },
-        system_architect: { name: "System architect", permissions: ["artifact.read", "decision.decide"] }
-      }
     });
     const fixtureRoot = join(
       process.cwd(),
@@ -173,13 +183,21 @@ test("Agent Review smoke Procedures start directly from test fixture files", asy
         memoryRoot: join(dir, "memory"),
         runsRoot: join(dir, "runs"),
         procedureFile: join(fixtureRoot, fileName),
-        controlPlane
+        controlPlane,
+        reviewConfiguration: reviewConfiguration({
+          procedure: procedureName,
+          slots: {
+            development_engineer: ["traex1"],
+            test_engineer: ["traex2"],
+            system_architect: ["human"]
+          }
+        })
       });
       assert.equal(run.procedureName, procedureName);
       assert.equal(run.status, "running");
-      assert.equal(run.stack[0].roleBindings?.development_engineer?.identityIds[0], "traex1");
-      assert.equal(run.stack[0].roleBindings?.test_engineer?.identityIds[0], "traex2");
-      assert.equal(run.stack[0].roleBindings?.system_architect?.identityIds[0], "human");
+      assert.equal(currentStep(run)?.controlPlane?.bindings[`${procedureName}::development_engineer`]?.actorIds[0], "traex1");
+      assert.equal(currentStep(run)?.controlPlane?.bindings[`${procedureName}::test_engineer`]?.actorIds[0], "traex2");
+      assert.equal(currentStep(run)?.controlPlane?.bindings[`${procedureName}::system_architect`]?.actorIds[0], "human");
     }
   });
 });
@@ -1199,24 +1217,18 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       await readFile(join(fixtureRoot, "schema.yaml"), "utf8")
     );
     const controlPlane = parseControlPlaneConfig({
-      identities: {
+      runner: {
+        permissions: ["artifact.read", "artifact.submit", "decision.decide"]
+      },
+      actors: {
         agent: {
           kind: "agent",
-          name: "Agent",
+          name: "Agent reviewer",
+          permissions: ["artifact.read", "decision.decide"],
           agent: { provider: "traex", command: "traecli", args: [] }
         },
-        human: { kind: "human", name: "Human" }
-      },
-      roles: {
-        runner: {
-          name: "Runner",
-          permissions: ["artifact.read", "artifact.submit", "decision.decide"]
-        },
-        agent_reviewer: {
-          name: "Agent reviewer",
-          permissions: ["artifact.read", "decision.decide"]
-        },
-        human_reviewer: {
+        human: {
+          kind: "human",
           name: "Human reviewer",
           permissions: ["artifact.read", "decision.decide"]
         }
@@ -1227,7 +1239,14 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       memoryRoot,
       runsRoot,
       procedureName: "schema-artifact-composition-review",
-      controlPlane
+      controlPlane,
+      reviewConfiguration: reviewConfiguration({
+        procedure: "schema-artifact-composition-review",
+        slots: {
+          agent_reviewer: ["agent"],
+          human_reviewer: ["human"]
+        }
+      })
     });
     const entered = await enterSchema({
       memoryRoot,
@@ -1261,8 +1280,8 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
     assert.equal(submitted.schemaDrafts?.["flow[1]"]?.status, "submitted");
 
     const round = review.rounds[0];
-    const agentAssignment = round.assignments.find((assignment) => assignment.identityKind === "agent");
-    const humanAssignment = round.assignments.find((assignment) => assignment.identityKind === "human");
+    const agentAssignment = round.assignments.find((assignment) => assignment.actorKind === "agent");
+    const humanAssignment = round.assignments.find((assignment) => assignment.actorKind === "human");
     assert(agentAssignment);
     assert(humanAssignment);
     assert.equal(round.assignments.length, 2);
@@ -1270,7 +1289,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       runsRoot,
       reviewId: review.id,
       roundId: round.id,
-      identityId: agentAssignment.identityId,
+      actorId: agentAssignment.actorId,
       workerPid: process.pid
     });
     assert(claimed);
@@ -1278,7 +1297,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       runsRoot,
       reviewId: review.id,
       roundId: round.id,
-      identityId: agentAssignment.identityId,
+      actorId: agentAssignment.actorId,
       attemptId: claimed.attempt.id,
       protocolVersion: 1,
       sessionId: "agent-round-1"
@@ -1288,7 +1307,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
         runsRoot,
         reviewId: review.id,
         roundId: round.id,
-        identityId: agentAssignment.identityId,
+        actorId: agentAssignment.actorId,
         attemptId: claimed.attempt.id,
         vote: "abstain"
       }),
@@ -1299,7 +1318,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
         runsRoot,
         reviewId: review.id,
         roundId: round.id,
-        identityId: agentAssignment.identityId,
+        actorId: agentAssignment.actorId,
         attemptId: claimed.attempt.id,
         body: "This anchor uses the wrong digest.",
         anchor: {
@@ -1313,7 +1332,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       runsRoot,
       reviewId: review.id,
       roundId: round.id,
-      identityId: agentAssignment.identityId,
+      actorId: agentAssignment.actorId,
       attemptId: claimed.attempt.id,
       body: "The candidate is traceable.",
       anchor: {
@@ -1333,7 +1352,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       runsRoot,
       reviewId: review.id,
       roundId: round.id,
-      identityId: agentAssignment.identityId,
+      actorId: agentAssignment.actorId,
       attemptId: claimed.attempt.id,
       vote: "approve",
       summary: "Agent approves the first candidate."
@@ -1345,7 +1364,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       runsRoot,
       reviewId: review.id,
       roundId: round.id,
-      identityId: humanAssignment.identityId,
+      actorId: humanAssignment.actorId,
       expectedRevision: agentSubmitted.round.revision,
       draft: {
         vote: "request_changes",
@@ -1356,7 +1375,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       runsRoot,
       reviewId: review.id,
       roundId: round.id,
-      identityId: humanAssignment.identityId,
+      actorId: humanAssignment.actorId,
       expectedRevision: firstDraft.round.revision
     });
     const requested = await waitForArtifactReview({ runsRoot, reviewId: review.id, pollIntervalMs: 1 });
@@ -1375,8 +1394,8 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
     assert(revisedReview);
     assert.equal(revisedReview.rounds.length, 2);
     const secondRound = revisedReview.rounds[1];
-    const secondAgent = secondRound.assignments.find((assignment) => assignment.identityKind === "agent");
-    const secondHuman = secondRound.assignments.find((assignment) => assignment.identityKind === "human");
+    const secondAgent = secondRound.assignments.find((assignment) => assignment.actorKind === "agent");
+    const secondHuman = secondRound.assignments.find((assignment) => assignment.actorKind === "human");
     assert(secondAgent);
     assert(secondHuman);
     assert.equal(secondAgent.status, "queued");
@@ -1387,7 +1406,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       runsRoot,
       reviewId: revisedReview.id,
       roundId: secondRound.id,
-      identityId: secondAgent.identityId,
+      actorId: secondAgent.actorId,
       workerPid: process.pid
     });
     assert(secondClaim);
@@ -1395,7 +1414,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       runsRoot,
       reviewId: revisedReview.id,
       roundId: secondRound.id,
-      identityId: secondAgent.identityId,
+      actorId: secondAgent.actorId,
       attemptId: secondClaim.attempt.id,
       protocolVersion: 1,
       sessionId: "agent-round-2"
@@ -1404,7 +1423,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       runsRoot,
       reviewId: revisedReview.id,
       roundId: secondRound.id,
-      identityId: secondAgent.identityId,
+      actorId: secondAgent.actorId,
       attemptId: secondClaim.attempt.id,
       vote: "approve",
       summary: "Agent approves the revised candidate."
@@ -1416,7 +1435,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       runsRoot,
       reviewId: revisedReview.id,
       roundId: secondRound.id,
-      identityId: secondHuman.identityId,
+      actorId: secondHuman.actorId,
       expectedRevision: secondAgentSubmitted.round.revision,
       draft: { vote: "approve", comments: [] }
     });
@@ -1424,7 +1443,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       runsRoot,
       reviewId: revisedReview.id,
       roundId: secondRound.id,
-      identityId: secondHuman.identityId,
+      actorId: secondHuman.actorId,
       expectedRevision: secondDraft.round.revision
     });
     const secondWaiting = await waitForArtifactReview({
@@ -1610,7 +1629,7 @@ flow:
   });
 });
 
-test("Run v3 snapshots control-plane bindings, grants, and report authorization", async () => {
+test("Run v3 snapshots Actor bindings, grants, and report authorization", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
     const proceduresRoot = join(memoryRoot, "procedures");
@@ -1618,57 +1637,68 @@ test("Run v3 snapshots control-plane bindings, grants, and report authorization"
     await mkdir(proceduresRoot, { recursive: true });
     await writeFile(join(proceduresRoot, "governed.yaml"), `!procedure
 name: governed
-role_bindings:
-  reviewer: human
 flow:
   - !action
     action: Produce a governed Artifact.
     artifact: !artifact
       name: governed result
-      role_bindings:
-        reviewer: [human, agent]
-      permission_grants:
-        runner: [decision.decide]
+      review: [reviewer]
 `);
     const controlPlane = parseControlPlaneConfig({
-      identities: {
-        human: { kind: "human", name: "Human" },
-        agent: { kind: "agent", name: "Agent", agent: { command: "traecli", args: ["acp"] } }
+      runner: {
+        permissions: ["artifact.read", "artifact.submit"],
+        grantable_permissions: ["decision.decide"]
       },
-      roles: {
-        runner: {
-          name: "Runner",
-          permissions: ["artifact.read", "artifact.submit"],
-          grantable_permissions: ["decision.decide"]
+      actors: {
+        human: {
+          kind: "human",
+          name: "Human",
+          permissions: ["artifact.read", "decision.decide"]
         },
-        reviewer: { name: "Reviewer", permissions: ["artifact.read", "decision.assess"] }
+        agent: {
+          kind: "agent",
+          name: "Agent",
+          permissions: ["artifact.read", "decision.assess"],
+          agent: { command: "traecli", args: ["acp"] }
+        }
       }
     });
 
-    const run = await startRun({ memoryRoot, runsRoot, procedureName: "governed", controlPlane });
+    const run = await startRun({
+      memoryRoot,
+      runsRoot,
+      procedureName: "governed",
+      controlPlane,
+      reviewConfiguration: reviewConfiguration({
+        procedure: "governed",
+        slots: { reviewer: ["human", "agent"] },
+        permissionGrants: { runner: ["decision.decide"] }
+      })
+    });
     assert.equal(run.contractVersion, 3);
     assert(run.controlPlane);
     assert(run.procedureSnapshots?.governed);
-    assert.deepEqual(currentStep(run)?.controlPlane?.bindings.reviewer.identityIds, ["human", "agent"]);
+    assert.deepEqual(currentStep(run)?.controlPlane?.bindings["governed::reviewer"].actorIds, ["human", "agent"]);
     assert.deepEqual(currentStep(run)?.controlPlane?.permissions.runner.effective, [
       "artifact.read",
       "artifact.submit",
       "decision.decide"
     ]);
 
-    const completed = await reportRun({
+    const pending = await reportRun({
       runsRoot,
       runId: run.id,
       artifact: { kind: "inline", value: "done" }
     });
-    assert.equal(completed.events[0].artifact.authorization?.allowed, true);
-    assert.equal(completed.events[0].artifact.authorization?.permission, "artifact.submit");
-    assert.equal(completed.events[0].artifact.authorization?.artifactScope, "governed#flow[1]");
-    assert.equal(completed.events[0].artifact.authorization?.grantSource, "artifact:governed#flow[1]");
+    const submission = currentArtifactReview(pending)?.submissions[0];
+    assert.equal(submission?.artifact.authorization?.allowed, true);
+    assert.equal(submission?.artifact.authorization?.permission, "artifact.submit");
+    assert.equal(submission?.artifact.authorization?.artifactScope, "governed#flow[1]");
+    assert.equal(submission?.artifact.authorization?.grantSource, "run:governed#flow[1]");
   });
 });
 
-test("control-plane fixture validates and runs through caller and callee precedence", async () => {
+test("control-plane fixture validates and freezes reachable called Procedures", async () => {
   await withTempDir(async (dir) => {
     const fixtureRoot = join(process.cwd(), "test", "fixtures", "control-plane", ".memsphere");
     const config = await readConfigAt(join(fixtureRoot, "config.json"));
@@ -1681,10 +1711,8 @@ test("control-plane fixture validates and runs through caller and callee precede
       procedureName: "control-plane-caller",
       controlPlane: config.controlPlane
     });
-    assert.deepEqual(currentStep(run)?.controlPlane?.bindings.reviewer.identityIds, [
-      "human_reviewer",
-      "review_agent"
-    ]);
+    assert(run.controlPlane);
+    assert(run.procedureSnapshots?.["control-plane-child"]);
 
     const child = await reportRun({
       runsRoot: join(dir, "runs"),
@@ -1692,7 +1720,7 @@ test("control-plane fixture validates and runs through caller and callee precede
       artifact: { kind: "inline", value: "caller" }
     });
     assert.equal(currentStep(child)?.instruction, "Produce the child Artifact.");
-    assert.deepEqual(currentStep(child)?.controlPlane?.bindings.reviewer.identityIds, ["review_agent"]);
+    assert(currentStep(child)?.controlPlane);
   });
 });
 
@@ -1704,18 +1732,14 @@ test("report authorization denial leaves Run and Artifact files unchanged", asyn
     await mkdir(proceduresRoot, { recursive: true });
     await writeFile(join(proceduresRoot, "governed.yaml"), `!procedure
 name: governed
-role_bindings: { reviewer: human }
 flow:
   - !action
     action: Produce a governed Artifact.
     artifact: !artifact { name: result }
 `);
     const controlPlane = parseControlPlaneConfig({
-      identities: { human: { kind: "human", name: "Human" } },
-      roles: {
-        runner: { name: "Runner", permissions: ["artifact.read"] },
-        reviewer: { name: "Reviewer", permissions: ["artifact.read"] }
-      }
+      runner: { permissions: ["artifact.read"] },
+      actors: {}
     });
     const run = await startRun({ memoryRoot, runsRoot, procedureName: "governed", controlPlane });
     const runPath = join(runsRoot, run.id, `${run.id}.json`);
@@ -1749,10 +1773,8 @@ flow:
     artifact: !artifact { name: result }
 `);
     const controlPlane = parseControlPlaneConfig({
-      identities: {},
-      roles: {
-        runner: { name: "Runner", permissions: ["artifact.read"] }
-      }
+      runner: { permissions: ["artifact.read"] },
+      actors: {}
     });
     const run = await startRun({ memoryRoot, runsRoot, procedureName: "plain", controlPlane });
     assert(currentStep(run)?.controlPlane);
@@ -1764,7 +1786,7 @@ flow:
   });
 });
 
-test("Artifact grants can supply runner artifact.submit within the configured ceiling", async () => {
+test("Run Review configuration can grant runner artifact.submit within the configured ceiling", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
     const proceduresRoot = join(memoryRoot, "procedures");
@@ -1777,23 +1799,29 @@ flow:
     action: Produce a granted Artifact.
     artifact: !artifact
       name: result
-      permission_grants:
-        runner: [artifact.submit]
+      review: [optional_reviewer]
 `);
     const controlPlane = parseControlPlaneConfig({
-      identities: {},
-      roles: {
-        runner: {
-          name: "Runner",
-          permissions: ["artifact.read"],
-          grantable_permissions: ["artifact.submit"]
-        }
-      }
+      runner: {
+        permissions: ["artifact.read"],
+        grantable_permissions: ["artifact.submit"]
+      },
+      actors: {}
     });
-    const run = await startRun({ memoryRoot, runsRoot, procedureName: "granted", controlPlane });
+    const run = await startRun({
+      memoryRoot,
+      runsRoot,
+      procedureName: "granted",
+      controlPlane,
+      reviewConfiguration: reviewConfiguration({
+        procedure: "granted",
+        slots: { optional_reviewer: "skip" },
+        permissionGrants: { runner: ["artifact.submit"] }
+      })
+    });
     const completed = await reportRun({ runsRoot, runId: run.id, artifact: { kind: "inline", value: "allowed" } });
     assert.equal(completed.events[0].artifact.authorization?.allowed, true);
-    assert.equal(completed.events[0].artifact.authorization?.grantSource, "artifact:granted#flow[1]");
+    assert.equal(completed.events[0].artifact.authorization?.grantSource, "run:granted#flow[1]");
   });
 });
 
@@ -1805,7 +1833,6 @@ test("reachable called Procedures are frozen before the Run advances into them",
     await mkdir(proceduresRoot, { recursive: true });
     await writeFile(join(proceduresRoot, "caller.yaml"), `!procedure
 name: caller
-role_bindings: { reviewer: human }
 flow:
   - !action
     action: Before call.
@@ -1816,27 +1843,19 @@ flow:
     const childPath = join(proceduresRoot, "child.yaml");
     await writeFile(childPath, `!procedure
 name: child
-role_bindings: { reviewer: agent }
 flow:
   - !action
     action: Original child instruction.
     artifact: !artifact { name: child result }
 `);
     const controlPlane = parseControlPlaneConfig({
-      identities: {
-        human: { kind: "human", name: "Human" },
-        agent: { kind: "agent", name: "Agent", agent: { command: "traecli", args: [] } }
-      },
-      roles: {
-        runner: { name: "Runner", permissions: ["artifact.submit"] },
-        reviewer: { name: "Reviewer", permissions: ["artifact.read"] }
-      }
+      runner: { permissions: ["artifact.submit"] },
+      actors: {}
     });
     const run = await startRun({ memoryRoot, runsRoot, procedureName: "caller", controlPlane });
 
     await writeFile(childPath, `!procedure
 name: child
-role_bindings: { reviewer: human }
 flow:
   - !action
     action: Mutated child instruction.
@@ -1845,7 +1864,7 @@ flow:
     const enteredChild = await reportRun({ runsRoot, runId: run.id, artifact: { kind: "inline", value: "first" } });
     assert.equal(currentStep(enteredChild)?.instruction, "Original child instruction.");
     assert.equal(currentStep(enteredChild)?.artifact, "child result");
-    assert.deepEqual(currentStep(enteredChild)?.controlPlane?.bindings.reviewer.identityIds, ["agent"]);
+    assert.deepEqual(currentStep(enteredChild)?.controlPlane?.bindings, {});
   });
 });
 
@@ -1857,32 +1876,67 @@ test("Artifact Review prerequisites fail before a Run is persisted", async () =>
     await mkdir(proceduresRoot, { recursive: true });
     await writeFile(join(proceduresRoot, "reviewed.yaml"), `!procedure
 name: reviewed-prerequisites
-role_bindings:
-  reviewer: human
 flow:
   - !action
     action: Produce a reviewed Artifact.
     artifact: !artifact
       name: reviewed result
-      review: artifact_acceptance.unanimous
+      review: [reviewer]
 `);
 
     await assert.rejects(
       startRun({ memoryRoot, runsRoot, procedureName: "reviewed-prerequisites" }),
-      /control_plane config is required for Artifact Review/
+      /Review configuration is required/
     );
     assert.deepEqual(await readdir(runsRoot), []);
 
     const noDecider = parseControlPlaneConfig({
-      identities: { human: { kind: "human", name: "Human" } },
-      roles: {
-        runner: { name: "Runner", permissions: ["artifact.read", "artifact.submit"] },
-        reviewer: { name: "Reviewer", permissions: ["artifact.read", "decision.assess"] }
+      runner: { permissions: ["artifact.read", "artifact.submit"] },
+      actors: {
+        human: {
+          kind: "human",
+          name: "Human",
+          permissions: ["artifact.read", "decision.assess"]
+        }
       }
     });
     await assert.rejects(
-      startRun({ memoryRoot, runsRoot, procedureName: "reviewed-prerequisites", controlPlane: noDecider }),
+      startRun({
+        memoryRoot,
+        runsRoot,
+        procedureName: "reviewed-prerequisites",
+        controlPlane: noDecider,
+        reviewConfiguration: reviewConfiguration({
+          procedure: "reviewed-prerequisites",
+          slots: { reviewer: ["human"] }
+        })
+      }),
       /requires at least one decision\.decide subject/
+    );
+    assert.deepEqual(await readdir(runsRoot), []);
+
+    const duplicateActor = parseControlPlaneConfig({
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        human: {
+          kind: "human",
+          name: "Human",
+          permissions: ["artifact.read", "decision.assess"]
+        }
+      }
+    });
+    await assert.rejects(
+      startRun({
+        memoryRoot,
+        runsRoot,
+        procedureName: "reviewed-prerequisites",
+        controlPlane: duplicateActor,
+        reviewConfiguration: reviewConfiguration({
+          procedure: "reviewed-prerequisites",
+          slots: { reviewer: ["human", "human"] }
+        })
+      }),
+      /slots\.reviewed-prerequisites::reviewer\.actors\[1\]: duplicate Actor id human/
     );
     assert.deepEqual(await readdir(runsRoot), []);
   });
@@ -1896,37 +1950,41 @@ test("Artifact Review requests a revision and accepts only the approved Submissi
     await mkdir(proceduresRoot, { recursive: true });
     await writeFile(join(proceduresRoot, "reviewed.yaml"), `!procedure
 name: reviewed
-role_bindings:
-  reviewer: human
 flow:
   - !action
     action: Produce a reviewed Artifact.
     artifact: !artifact
       name: reviewed result
       format: markdown
-      review: artifact_acceptance.unanimous
+      review: [reviewer]
   - !action
     action: Continue after review.
     artifact: !artifact
       name: continuation
 `);
     const controlPlane = parseControlPlaneConfig({
-      identities: {
-        human: { kind: "human", name: "Human" }
+      runner: {
+        permissions: ["artifact.read", "artifact.submit", "decision.decide"]
       },
-      roles: {
-        runner: {
-          name: "Runner",
-          permissions: ["artifact.read", "artifact.submit", "decision.decide"]
-        },
-        reviewer: {
+      actors: {
+        human: {
+          kind: "human",
           name: "Reviewer",
           permissions: ["artifact.read", "decision.decide"]
         }
       }
     });
 
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "reviewed", controlPlane });
+    const started = await startRun({
+      memoryRoot,
+      runsRoot,
+      procedureName: "reviewed",
+      controlPlane,
+      reviewConfiguration: reviewConfiguration({
+        procedure: "reviewed",
+        slots: { reviewer: ["human"] }
+      })
+    });
     const first = await reportRun({
       runsRoot,
       runId: started.id,
@@ -1958,7 +2016,7 @@ flow:
         runsRoot,
         reviewId: review.id,
         roundId: review.currentRoundId,
-        identityId: "human",
+        actorId: "human",
         expectedRevision: 1,
         draft: {
           vote: "approve",
@@ -1978,7 +2036,7 @@ flow:
       runsRoot,
       reviewId: review.id,
       roundId: review.currentRoundId,
-      identityId: "human",
+      actorId: "human",
       expectedRevision: 1,
       draft: { vote: "abstain", comments: [] }
     });
@@ -1987,7 +2045,7 @@ flow:
         runsRoot,
         reviewId: review.id,
         roundId: review.currentRoundId,
-        identityId: "human",
+        actorId: "human",
         expectedRevision: abstainDraft.round.revision
       }),
       /abstain requires at least one Comment/
@@ -1996,7 +2054,7 @@ flow:
       runsRoot,
       reviewId: review.id,
       roundId: review.currentRoundId,
-      identityId: "human",
+      actorId: "human",
       expectedRevision: abstainDraft.round.revision,
       draft: {
         vote: "request_changes",
@@ -2022,7 +2080,7 @@ flow:
       runsRoot,
       reviewId: review.id,
       roundId: review.currentRoundId,
-      identityId: "human",
+      actorId: "human",
       expectedRevision: draft.round.revision
     });
     assert.equal(rejected.review.status, "awaiting_revision");
@@ -2052,7 +2110,7 @@ flow:
         runsRoot,
         reviewId: review.id,
         roundId: secondReview.currentRoundId,
-        identityId: "human",
+        actorId: "human",
         expectedRevision: 1,
         draft: {
           vote: "approve",
@@ -2069,7 +2127,7 @@ flow:
       runsRoot,
       reviewId: review.id,
       roundId: secondReview.currentRoundId,
-      identityId: "human",
+      actorId: "human",
       expectedRevision: 1,
       draft: { vote: "approve", comments: [] }
     });
@@ -2077,7 +2135,7 @@ flow:
       runsRoot,
       reviewId: review.id,
       roundId: secondReview.currentRoundId,
-      identityId: "human",
+      actorId: "human",
       expectedRevision: approvedDraft.round.revision
     });
     assert.equal(awaitingRunner.review.status, "awaiting_runner_vote");
@@ -2122,7 +2180,7 @@ flow:
       runsRoot,
       reviewId: review.id,
       roundId: thirdReview.currentRoundId,
-      identityId: "human",
+      actorId: "human",
       expectedRevision: 1,
       draft: { vote: "approve", comments: [] }
     });
@@ -2130,7 +2188,7 @@ flow:
       runsRoot,
       reviewId: review.id,
       roundId: thirdReview.currentRoundId,
-      identityId: "human",
+      actorId: "human",
       expectedRevision: thirdDraft.round.revision
     });
     const approved = await submitArtifactReviewRunnerVote({
@@ -2149,7 +2207,7 @@ flow:
   });
 });
 
-test("Artifact Review snapshots implementation evidence and requires blocking dispositions", async () => {
+test("Artifact Review snapshots every prior Artifact and requires blocking dispositions", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
     const proceduresRoot = join(memoryRoot, "procedures");
@@ -2158,59 +2216,65 @@ test("Artifact Review snapshots implementation evidence and requires blocking di
     await writeRawFile(join(proceduresRoot, "package.yaml"), `!procedure
 syntax: ${currentMemorySyntax}
 name: package-review
-role_bindings:
-  advisor: advisor
 flow:
   - !action
     action: Record implementation.
     artifact: !artifact
       name: implementation
       format: markdown
-      review_role: implementation
   - !action
     action: Record validation.
     artifact: !artifact
       name: validation
       format: markdown
-      review_role: validation
   - !action
     action: Review delivery package.
     artifact: !artifact
       name: review material
       format: markdown
-      review_role: review-material
-      review_requires: [implementation, validation]
-      review: artifact_acceptance.unanimous
+      review: [advisor]
 `);
     const controlPlane = parseControlPlaneConfig({
-      identities: { advisor: { kind: "human", name: "Advisor" } },
-      roles: {
-        runner: { name: "Runner", permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
-        advisor: { name: "Advisor", permissions: ["artifact.read", "decision.assess"] }
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        advisor: {
+          kind: "human",
+          name: "Advisor",
+          permissions: ["artifact.read", "decision.assess"]
+        }
       }
     });
-    let run = await startRun({ memoryRoot, runsRoot, procedureName: "package-review", controlPlane });
+    let run = await startRun({
+      memoryRoot,
+      runsRoot,
+      procedureName: "package-review",
+      controlPlane,
+      reviewConfiguration: reviewConfiguration({
+        procedure: "package-review",
+        flowIndexes: [3],
+        slots: { advisor: ["advisor"] }
+      })
+    });
     run = await reportRun({ runsRoot, runId: run.id, artifact: { kind: "inline", value: "# Implementation\nChanged src/a.ts." } });
     run = await reportRun({ runsRoot, runId: run.id, artifact: { kind: "inline", value: "# Validation\nnpm test passed." } });
     run = await reportRun({ runsRoot, runId: run.id, artifact: { kind: "inline", value: "# Review material\nReady." } });
     const review = currentArtifactReview(run);
     assert(review);
     const submission = review.submissions[0];
-    assert.deepEqual(submission.package?.requirements.map((item) => [item.role, item.status]), [
-      ["implementation", "present"],
-      ["validation", "present"]
+    assert.deepEqual(submission.contextArtifacts.map((item) => [item.stepId, item.artifact.name]), [
+      ["flow[1]", "implementation"],
+      ["flow[2]", "validation"]
     ]);
-    assert.equal(submission.package?.evidence.length, 2);
-    for (const evidence of submission.package?.evidence ?? []) {
-      assert.match(evidence.artifact.path ?? "", /artifacts\/reviews\/review-.*\/submission-.*\/evidence\//);
-      assert.equal(typeof await readFile(join(runsRoot, evidence.artifact.path!), "utf8"), "string");
+    for (const item of submission.contextArtifacts) {
+      assert.match(item.artifact.path ?? "", /artifacts\/reviews\/review-.*\/submission-.*\/context\//);
+      assert.equal(typeof await readFile(join(runsRoot, item.artifact.path!), "utf8"), "string");
     }
 
     const draft = await updateArtifactReviewDraft({
       runsRoot,
       reviewId: review.id,
       roundId: review.currentRoundId,
-      identityId: "advisor",
+      actorId: "advisor",
       expectedRevision: 1,
       draft: {
         vote: "request_changes",
@@ -2221,7 +2285,7 @@ flow:
       runsRoot,
       reviewId: review.id,
       roundId: review.currentRoundId,
-      identityId: "advisor",
+      actorId: "advisor",
       expectedRevision: draft.round.revision
     });
     const commentId = awaitingRunner.assignment.submitted?.comments[0].id;

@@ -117,25 +117,20 @@ test("validateMemoryStore reports precise control_plane config paths", async () 
     await writeFile(configPath, JSON.stringify({
       memoryRoot: "memory",
       control_plane: {
-        identities: {},
-        roles: {
-          runner: {
-            name: "Runner",
-            permissions: ["artifact.delete"]
-          }
-        }
+        runner: { permissions: ["artifact.delete"] },
+        actors: {}
       }
     }));
 
     const result = await validateMemoryStore(configPath);
     assert(result.issues.some((issue) =>
-      issue.path === `${configPath}#control_plane.roles.runner.permissions[0]` &&
+      issue.path === `${configPath}#control_plane.runner.permissions[0]` &&
       issue.message.includes("Unknown Permission")
     ));
   });
 });
 
-test("validateMemoryStore joins Procedure and Artifact governance with control_plane", async () => {
+test("validateMemoryStore rejects removed Procedure governance fields", async () => {
   await withTempDir(async (dir) => {
     const configPath = join(dir, "config.json");
     const memoryRoot = join(dir, "memory");
@@ -147,11 +142,8 @@ test("validateMemoryStore joins Procedure and Artifact governance with control_p
       reviewsRoot: "reviews",
       runsRoot: "runs",
       control_plane: {
-        identities: { human: { kind: "human", name: "Human" } },
-        roles: {
-          runner: { name: "Runner", permissions: ["artifact.submit"] },
-          reviewer: { name: "Reviewer", permissions: ["artifact.read"] }
-        }
+        runner: { permissions: ["artifact.submit"] },
+        actors: {}
       }
     }));
     const procedurePath = join(memoryRoot, "procedures", "governed.yaml");
@@ -164,20 +156,17 @@ flow:
     action: Produce a result.
     artifact: !artifact
       name: result
-      role_bindings:
-        reviewer: missing-identity
-      permission_grants:
-        runner: [decision.decide]
+      review: [reviewer]
 `));
 
     const result = await validateMemoryStore(configPath);
-    assert(result.issues.some((issue) => issue.path.endsWith("#root.role_bindings.missing-role") && issue.message === "unknown Role id"));
-    assert(result.issues.some((issue) => issue.path.endsWith("#flow[0].artifact.role_bindings.reviewer[0]") && issue.message.includes("missing-identity")));
-    assert(result.issues.some((issue) => issue.path.endsWith("#flow[0].artifact.permission_grants.runner[0]") && issue.message.includes("exceeds grantable_permissions")));
+    assert(result.issues.some((issue) =>
+      issue.path.endsWith("governed.yaml") && issue.message.includes("role_bindings")
+    ));
   });
 });
 
-test("validateMemoryStore requires control_plane only when governance syntax is used", async () => {
+test("validateMemoryStore accepts Review Slots without control_plane", async () => {
   await withTempDir(async (dir) => {
     const configPath = join(dir, "config.json");
     const memoryRoot = join(dir, "memory");
@@ -187,13 +176,15 @@ test("validateMemoryStore requires control_plane only when governance syntax is 
     await writeFile(configPath, JSON.stringify({ memoryRoot: "memory", reviewsRoot: "reviews", runsRoot: "runs" }));
     await writeFile(join(memoryRoot, "procedures", "governed.yaml"), withCurrentMemorySyntax(`!procedure
 name: governed
-role_bindings: { reviewer: human }
-flow: []
+flow:
+  - !action
+    action: Produce.
+    artifact: !artifact
+      name: result
+      review: [reviewer]
 `));
 
     const result = await validateMemoryStore(configPath);
-    assert(result.issues.some((issue) =>
-      issue.path.endsWith("governed.yaml#root") && issue.message.includes("control_plane config is required")
-    ));
+    assert.equal(result.issues.length, 0);
   });
 });

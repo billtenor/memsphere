@@ -1,5 +1,7 @@
 import { isAbsolute, relative, resolve } from "node:path";
-import type { AgentIdentity } from "../control-plane/index.js";
+import type { ControlPlaneActor } from "../control-plane/index.js";
+
+type AgentActor = Extract<ControlPlaneActor, { kind: "agent" }>;
 
 export type AgentReviewProviderLaunch = {
   provider: string;
@@ -17,7 +19,7 @@ export type AgentReviewProviderLaunch = {
 export type AgentReviewProvider = {
   id: string;
   buildLaunch(input: {
-    identity: AgentIdentity;
+    actor: AgentActor;
     workspaceRoot: string;
     sessionEnv: Record<string, string>;
   }): AgentReviewProviderLaunch;
@@ -31,7 +33,7 @@ export function registerAgentReviewProvider(provider: AgentReviewProvider): void
 }
 
 export function getAgentReviewProvider(id: string | undefined): AgentReviewProvider {
-  if (!id) throw new Error("agent_provider_missing: Agent Identity must configure agent.provider");
+  if (!id) throw new Error("agent_provider_missing: Agent Actor must configure agent.provider");
   const provider = providers.get(id);
   if (!provider) throw new Error(`agent_provider_unsupported: ${id}`);
   return provider;
@@ -43,7 +45,7 @@ function commonLaunch(
   args: string[],
   providerEnv: Record<string, string>
 ): AgentReviewProviderLaunch {
-  const agent = input.identity.agent;
+  const agent = input.actor.agent;
   const cwd = agent.cwd ? resolve(input.workspaceRoot, agent.cwd) : resolve(input.workspaceRoot);
   const relativeCwd = relative(resolve(input.workspaceRoot), cwd);
   if (relativeCwd.startsWith("..") || isAbsolute(relativeCwd)) {
@@ -70,8 +72,8 @@ function commonLaunch(
 registerAgentReviewProvider({
   id: "traex",
   buildLaunch(input) {
-    const configured = normalizeTraexArgs(input.identity.agent.args);
-    const modelArgs = input.identity.agent.model ? ["--model", input.identity.agent.model] : [];
+    const configured = normalizeTraexArgs(input.actor.agent.args);
+    const modelArgs = input.actor.agent.model ? ["--model", input.actor.agent.model] : [];
     const args = [
       "--sandbox", "workspace-write",
       "--ask-for-approval", "never",

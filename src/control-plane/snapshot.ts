@@ -5,7 +5,7 @@ import {
   listPermissionDefinitions,
   permissionCatalogVersion
 } from "./catalog.js";
-import type { ControlPlaneConfig, ControlPlaneIdentity, ControlPlaneRole, ControlPlaneSnapshot } from "./model.js";
+import type { ControlPlaneActor, ControlPlaneConfig, ControlPlaneSnapshot } from "./model.js";
 
 export function createControlPlaneSnapshot(config: ControlPlaneConfig): ControlPlaneSnapshot {
   const payload = {
@@ -17,8 +17,11 @@ export function createControlPlaneSnapshot(config: ControlPlaneConfig): ControlP
       version: decisionPolicyCatalogVersion,
       definitions: listDecisionPolicyDefinitions().sort((left, right) => left.id.localeCompare(right.id))
     },
-    identities: sortRecord(config.identities, normalizeIdentity),
-    roles: sortRecord(config.roles, normalizeRole)
+    runner: {
+      permissions: [...new Set(config.runner.permissions)].sort(),
+      grantablePermissions: [...new Set(config.runner.grantablePermissions)].sort()
+    },
+    actors: sortRecord(config.actors, normalizeActor)
   };
   const canonical = JSON.stringify(canonicalize(payload));
   return {
@@ -28,33 +31,30 @@ export function createControlPlaneSnapshot(config: ControlPlaneConfig): ControlP
   };
 }
 
-function normalizeIdentity(identity: ControlPlaneIdentity): ControlPlaneIdentity {
-  return identity.kind === "human"
-    ? { kind: "human", name: identity.name }
+function normalizeActor(actor: ControlPlaneActor): ControlPlaneActor {
+  const authority = {
+    name: actor.name,
+    permissions: [...new Set(actor.permissions)].sort(),
+    grantablePermissions: [...new Set(actor.grantablePermissions)].sort(),
+    systemPrompt: actor.systemPrompt
+  };
+  return actor.kind === "human"
+    ? { kind: "human", ...authority }
     : {
         kind: "agent",
-        name: identity.name,
+        ...authority,
         agent: {
-          provider: identity.agent.provider,
-          command: identity.agent.command,
-          args: [...identity.agent.args],
-          cwd: identity.agent.cwd,
-          model: identity.agent.model,
-          promptVersion: identity.agent.promptVersion,
-          startupTimeoutMs: identity.agent.startupTimeoutMs,
-          idleTimeoutMs: identity.agent.idleTimeoutMs,
-          maxRuntimeMs: identity.agent.maxRuntimeMs
+          provider: actor.agent.provider,
+          command: actor.agent.command,
+          args: [...actor.agent.args],
+          cwd: actor.agent.cwd,
+          model: actor.agent.model,
+          promptVersion: actor.agent.promptVersion,
+          startupTimeoutMs: actor.agent.startupTimeoutMs,
+          idleTimeoutMs: actor.agent.idleTimeoutMs,
+          maxRuntimeMs: actor.agent.maxRuntimeMs
         }
       };
-}
-
-function normalizeRole(role: ControlPlaneRole): ControlPlaneRole {
-  return {
-    name: role.name,
-    permissions: [...new Set(role.permissions)].sort(),
-    grantablePermissions: [...new Set(role.grantablePermissions)].sort(),
-    systemPrompt: role.systemPrompt
-  };
 }
 
 function sortRecord<T, U>(record: Record<string, T>, normalize: (value: T) => U): Record<string, U> {

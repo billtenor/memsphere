@@ -4,14 +4,12 @@ export type PermissionLocale = "zh-CN" | "en";
 
 export type LocalizedPermissionText = Readonly<Record<PermissionLocale, string>>;
 
-export type HumanIdentity = {
+export type HumanActorRuntime = {
   kind: "human";
-  name: string;
 };
 
-export type AgentIdentity = {
+export type AgentActorRuntime = {
   kind: "agent";
-  name: string;
   agent: {
     provider?: string;
     command: string;
@@ -25,21 +23,24 @@ export type AgentIdentity = {
   };
 };
 
-export type ControlPlaneIdentity = HumanIdentity | AgentIdentity;
-
-export type ControlPlaneRole = {
+export type ControlPlaneActor = (HumanActorRuntime | AgentActorRuntime) & {
   name: string;
   permissions: PermissionId[];
   grantablePermissions: PermissionId[];
   systemPrompt?: string;
 };
 
-export type ControlPlaneConfig = {
-  identities: Record<string, ControlPlaneIdentity>;
-  roles: Record<string, ControlPlaneRole>;
+export type RunnerAuthority = {
+  permissions: PermissionId[];
+  grantablePermissions: PermissionId[];
 };
 
-export type RoleBindings = Record<string, string[]>;
+export type ControlPlaneConfig = {
+  runner: RunnerAuthority;
+  actors: Record<string, ControlPlaneActor>;
+};
+
+export type SlotBindings = Record<string, { actorIds: string[]; source: string; skipped?: boolean }>;
 export type PermissionGrants = Record<string, PermissionId[]>;
 
 export type PermissionDefinitionSnapshot = {
@@ -67,35 +68,29 @@ export type ControlPlaneSnapshot = {
     version: string;
     definitions: DecisionPolicyDefinitionSnapshot[];
   };
-  identities: Record<string, ControlPlaneIdentity>;
-  roles: Record<string, ControlPlaneRole>;
+  runner: RunnerAuthority;
+  actors: Record<string, ControlPlaneActor>;
 };
 
-export type ResolvedRoleBinding = {
-  identityIds: string[];
-  source: string;
-};
-
-export type ResolvedRoleBindings = Record<string, ResolvedRoleBinding>;
-
-export type ResolvedRolePermissions = {
+export type ResolvedActorPermissions = {
   base: PermissionId[];
   grants: PermissionId[];
   effective: PermissionId[];
-  roleSource: string;
+  authoritySource: string;
   grantSource?: string;
 };
 
 export type ArtifactControlPlane = {
   revision: string;
   artifactScope: string;
-  bindings: ResolvedRoleBindings;
-  permissions: Record<string, ResolvedRolePermissions>;
+  policyId: string;
+  bindings: SlotBindings;
+  permissions: Record<string, ResolvedActorPermissions>;
 };
 
 export type AuthorizationSubject =
   | { kind: "runner" }
-  | { kind: "identity"; identityId: string; roleId: string };
+  | { kind: "actor"; actorId: string };
 
 export type AuthorizationDecision = {
   allowed: boolean;
@@ -103,13 +98,13 @@ export type AuthorizationDecision = {
   subject: AuthorizationSubject;
   artifactScope: string;
   revision: string;
-  roleId: string;
-  roleSource: string;
+  actorId: string;
+  authoritySource: string;
   grantSource?: string;
   basePermissions: PermissionId[];
   grantedPermissions: PermissionId[];
   effectivePermissions: PermissionId[];
-  reason: "allowed" | "role_not_found" | "identity_not_bound" | "permission_missing";
+  reason: "allowed" | "actor_not_found" | "actor_not_bound" | "permission_missing";
 };
 
 export type PermissionGuidance = {
@@ -117,4 +112,12 @@ export type PermissionGuidance = {
   locale: PermissionLocale;
   lines: string[];
   permissionIds: PermissionId[];
+};
+
+export type RunReviewConfiguration = {
+  reviews: Record<string, {
+    policy: string;
+    permissionGrants: PermissionGrants;
+  }>;
+  slots: Record<string, { actorIds: string[] } | { skip: true }>;
 };

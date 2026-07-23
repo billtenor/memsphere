@@ -5,10 +5,6 @@ names:
   - traex-artifact-review-smoke
 defines:
   - 用一份包含多项独立验收约束的发布方案，验证两个 Traex Agent、一个 Human 和 Runner 共同参与的 Artifact Review。
-role_bindings:
-  development_engineer: traex1
-  test_engineer: traex2
-  system_architect: human
 flow:
   - !action
     action: 产出 Memsphere v2.4.0 发布方案，用于验证 Reviewer 能否逐项核对 Artifact 契约。
@@ -24,4 +20,4 @@ flow:
     artifact: !artifact
       name: Memsphere v2.4.0 发布方案
       format: markdown
-      review: artifact_acceptance.unanimous
+      review: [development_engineer, test_engineer, system_architect]

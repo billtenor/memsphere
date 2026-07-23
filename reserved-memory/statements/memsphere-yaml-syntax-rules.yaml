@@ -23,7 +23,8 @@ sections:
           - 省略 syntax 时必须按 start 解析，不得按运行时最新版本解释。
           - stable 版本中已经存在的关键字、结构、缺省值和校验语义不得做不兼容修改。
           - 最新版 parser 可以在当前 stable syntax 下增加不改变旧 Memory 解释结果的可选关键字或能力；这种向前兼容扩展不递进 syntax，也不要求旧 Memory 迁移。
-          - 删除或重命名既有字段、改变既有值或缺省值的语义，或其他要求旧 Memory 改写后才能继续解析和执行的变化，必须发布新 syntax 并提供显式 migrate 路径。
+          - 已形成兼容承诺的 stable 语法删除或重命名既有字段、改变既有值或缺省值语义时，必须发布新 syntax 并提供显式 migrate 路径。
+          - 尚未形成兼容承诺的当前开发版本，经 human 明确确认后可以在当前 stable 内原地纠正，不要求为已废弃的内部模型创建新 syntax 或 migrate。
           - draft 与 stable 都是不可变的完整版本标识，不得把 stable 当作动态指向最新版的别名。
         suggests:
           - "兼容扩展示例：为 !artifact 增加可选 review 字段；未声明该字段的旧 Memory 仍保持原行为，因此沿用当前 syntax。"
@@ -323,64 +324,25 @@ sections:
 
       - !statement
         names:
-          - role_bindings
-        defines:
-          - 在 Procedure 或 Artifact 作用域把配置中的 Role 绑定到一个或多个 Identity。
-          - |-
-            单个 Identity 可以使用字符串简写，多个 Identity 使用 YAML sequence：
-            ```yaml
-            role_bindings:
-              reviewer:
-                - human_reviewer
-                - review_agent
-              decider: release_owner
-            ```
-        asserts:
-          - role_bindings 的值必须是 YAML mapping；每个 key 是非空 Role id，每个 value 是一个非空 Identity id，或由不重复非空 Identity id 组成的非空 YAML sequence。
-          - role_bindings 只允许出现在 !procedure 和 !artifact；!action、!if、!while、!call 及其他区块不得直接声明。
-          - runner 是当前 Run 执行上下文隐式承担的保留 Role，不得出现在 role_bindings 中。
-          - Role 与 Identity 必须存在于当前 control_plane 配置中；悬空引用必须被 validate 拒绝。
-          - 调用链中的绑定按调用方 Procedure、被调用 Procedure、当前 Artifact 从低到高覆盖；高优先级作用域声明同一 Role 时整体替换，未声明的 Role 继续继承。
-
-      - !statement
-        names:
-          - permission_grants
-        defines:
-          - 为当前 Artifact 中的指定 Role 临时追加一组 Permission。
-          - |-
-            每个 Grant 都必须落在对应 Role 配置的 `grantable_permissions` 上限内：
-            ```yaml
-            permission_grants:
-              runner:
-                - artifact.submit
-              reviewer:
-                - decision.challenge
-            ```
-        asserts:
-          - permission_grants 的值必须是 YAML mapping；每个 key 是非空 Role id，每个 value 是由不重复非空 Permission id 组成的非空 YAML sequence。
-          - permission_grants 只允许出现在 !artifact，不得出现在 !procedure、!action 或其他区块。
-          - Role 和 Permission 必须存在，且每个 Permission 必须列在该 Role 的 grantable_permissions 中；Grant 不能撤销基础 Permission，也不能越过配置上限。
-          - Grant 仅对当前 Artifact 生效，不传播到后续 Artifact 或被调用 Procedure 的其他 Artifact。
-
-      - !statement
-        names:
           - review
         defines:
-          - 声明当前 Artifact 在确定性校验通过后必须进入的内置 Decision Policy。
+          - 声明当前 Artifact 在确定性校验通过后需要参与 Review 的 Procedure 本地 Slot。
           - |-
-            `review` 使用 Decision Policy id；角色和身份仍由 Procedure 或 Artifact 的 `role_bindings` 提供：
+            `review` 是不重复的 Slot 名称数组；Decision Policy 与 Slot 到 Actor 的 Binding 在创建 Run 时选择：
             ```yaml
             artifact: !artifact
               name: 需求文档
               format: markdown
-              review: artifact_acceptance.unanimous
-              role_bindings:
-                reviewer: human_reviewer
+              review:
+                - 产品
+                - 资深架构
             ```
         asserts:
-          - review 只允许出现在 !artifact，值必须是已注册的非空 Decision Policy id。
+          - review 只允许出现在 !artifact，值必须是由不重复非空 Slot 名称组成的非空 YAML sequence。
+          - Slot 只表达当前 Procedure 内的评审视角，不引用 Actor、Permission、Decision Policy、system_prompt 或 Agent 配置。
           - 省略 review 时，Artifact 在 type、format 和 schema 校验通过后按既有行为立即被接纳并推进 Run。
-          - 配置 review 时，Artifact 校验通过后必须创建 Artifact Review；Review 通过前不得把候选 Artifact 加入 Run events 或推进当前 Action。
+          - Procedure 含 Review 时，创建 Run 前必须为每个 Review scope 选择 Decision Policy，并把所有 Slot 绑定到 Actor 或显式跳过；结果冻结在 Run v3。
+          - Artifact 校验通过后按 Run 中冻结的配置创建 Artifact Review；Review 通过前不得把候选 Artifact 加入 Run events 或推进当前 Action。
           - 当前内置 artifact_acceptance.unanimous 要求全部 Human 与 Agent Reviewer Assignment 提交；只有具有 decision.decide 的 Vote 参与一致通过判定，只有 decision.assess 的 Vote 作为建议保存；Reviewer 完成后仍需 Runner 显式投票。
           - View 按 Review 与 Round 展示每轮不可变 Artifact Submission、正式 Comment、Vote、Result 和 Revision Summary；历史 Round 只读，完成后的 Review 仍可从对应 Run 步骤重新打开。
           - Artifact Review 定位 Comment 只能绑定创建时的 Submission、digest 和 Renderer target，不得锚定 Memory 或 Workspace 文件，也不得自动迁移到下一轮。
@@ -1003,11 +965,10 @@ sections:
                   format: markdown
             ```
         asserts:
-          - "!procedure 根节点允许 name/names、defines、asserts、goals、role_bindings 和 flow 字段。"
+          - "!procedure 根节点允许 name/names、defines、asserts、goals 和 flow 字段。"
           - Procedure.asserts 如出现，必须是非空字符串数组，并在当前 Procedure 及其调用链执行期间持续生效。
           - goals 必须是字符串数组，用于声明流程目标。
           - flow 必须是由 !action、!if、!while 或 !call 节点组成的有序数组。
-          - role_bindings 如出现，为当前 Procedure 中所有 Artifact 提供默认 Role Binding；被调用 Procedure 对同名 Role 的声明覆盖调用方默认值。
         sections:
           - !statement
             names:
@@ -1029,7 +990,7 @@ sections:
                     format: markdown
                 ```
             asserts:
-              - "!action 只允许 action、actor、asserts、suggests 和 artifact 字段；role_bindings 与 permission_grants 必须写入 artifact，而不是 Action。"
+              - "!action 只允许 action、actor、asserts、suggests 和 artifact 字段。"
               - action 必须是非空字符串，描述当前步骤要完成的动作。
               - actor 只允许 agent 或 human，省略时默认为 agent。
               - Action.asserts 如出现，必须是非空字符串数组，只约束当前步骤。
@@ -1055,11 +1016,12 @@ sections:
                         fields:
                           - 结果
                           - 证据
-                      review: artifact_acceptance.unanimous
+                      review:
+                        - 验收
                       final: true
                     ```
                 asserts:
-                  - "!artifact 只允许 name、type、format、schema、review、review_role、review_requires、final、role_bindings 和 permission_grants 字段。"
+                  - "!artifact 只允许 name、type、format、schema、review 和 final 字段。"
                   - name 必须是非空字符串，用于描述当前 Action 的交付物。
                   - type 省略时默认为 string；format 省略时默认为 plain。
                   - schema 可以是外部 Schema 的名称引用，或一个 inline !schema；string、number 和 boolean Artifact 不得声明 schema。
@@ -1071,11 +1033,7 @@ sections:
                   - "object + markdown 必须声明 layout: outline 并提供 schema。"
                   - "array + markdown 必须声明 layout: table 并提供 schema。"
                   - inline Schema 根节点解析后的 type 和 format 必须与 Artifact 契约完全一致。
-                  - review 如出现必须引用已注册 Decision Policy；确定性校验通过后进入 Review，通过前不得接纳 Artifact 或推进 Action。
-                  - review_role 如出现必须是 requirement、implementation、validation 或 review-material，用于把已上报 Artifact 纳入后续 Review 的自包含证据包。
-                  - review_requires 如出现必须是由上述 review role 组成的非空 sequence；缺失或不足的 required evidence 必须在 Review 中明确展示，并阻止 Runner 批准。
-                  - Artifact.role_bindings 覆盖当前调用链中同名 Role 的 Procedure Binding，未声明 Role 继续继承。
-                  - Artifact.permission_grants 只能从目标 Role 的 grantable_permissions 中临时追加权限，并且只对当前 Artifact 生效。
+                  - review 如出现必须是非空且不重复的 Review Slot 名称 sequence；Decision Policy、Actor Binding 与 Permission Grant 属于 Run 创建配置。
 
           - !statement
             names:

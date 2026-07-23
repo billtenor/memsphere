@@ -10,7 +10,7 @@ import { readConfig } from "../config.js";
 import {
   appendArtifactReviewAgentComment,
   markArtifactReviewAgentCliReady,
-  readArtifactReviewForIdentity,
+  readArtifactReviewForActor,
   readRun,
   submitArtifactReviewAgentAssignment,
   type ArtifactReviewAgentContext,
@@ -22,7 +22,7 @@ type BoundAgentReviewSession = {
   runsRoot: string;
   reviewId: string;
   roundId: string;
-  identityId: string;
+  actorId: string;
   assignmentId: string;
   attemptId: string;
 };
@@ -34,14 +34,10 @@ export async function agentReviewArtifactPayload(): Promise<unknown> {
   if (!submission) throw new Error(`Artifact Review Submission not found: ${context.round.submissionId}`);
   return {
     artifact: await expandArtifact(binding.runsRoot, submission.artifact),
-    package: submission.package ? {
-      requirements: submission.package.requirements,
-      evidence: await Promise.all(submission.package.evidence.map(async (item) => ({
-        stepId: item.stepId,
-        role: item.role,
-        artifact: await expandArtifact(binding.runsRoot, item.artifact)
-      })))
-    } : undefined,
+    contextArtifacts: await Promise.all(submission.contextArtifacts.map(async (item) => ({
+      stepId: item.stepId,
+      artifact: await expandArtifact(binding.runsRoot, item.artifact)
+    }))),
     revisionSummary: submission.revisionSummary
   };
 }
@@ -57,7 +53,7 @@ export async function agentReviewAssignmentDetailPayload(): Promise<unknown> {
   return {
     status: context.assignment.status,
     binding: context.assignment.binding,
-    roles: context.assignment.roleIds.map((roleId) => context.run.controlPlane?.roles[roleId]?.name ?? roleId),
+    slots: [...context.assignment.slotIds],
     permissions: context.assignment.permissions,
     comments: context.assignment.submitted?.comments ?? context.assignment.draft.comments,
     vote: context.assignment.submitted?.vote,
@@ -102,14 +98,14 @@ async function boundAgentReviewSession(): Promise<BoundAgentReviewSession> {
       runsRoot: config.runsRoot,
       reviewId: review.id,
       roundId: round.id,
-      identityId: assignment.identityId,
+      actorId: assignment.actorId,
       attemptId: attempt.id
     });
     return {
       runsRoot: config.runsRoot,
       reviewId: review.id,
       roundId: round.id,
-      identityId: assignment.identityId,
+      actorId: assignment.actorId,
       assignmentId,
       attemptId: attempt.id
     };
@@ -118,7 +114,7 @@ async function boundAgentReviewSession(): Promise<BoundAgentReviewSession> {
 }
 
 async function readBoundContext(binding: BoundAgentReviewSession): Promise<ArtifactReviewAgentContext> {
-  const context = await readArtifactReviewForIdentity(binding);
+  const context = await readArtifactReviewForActor(binding);
   const attempt = context.assignment.attempts?.find((candidate) => candidate.id === binding.attemptId);
   if (!attempt) throw new Error(`Agent Review attempt not found: ${binding.attemptId}`);
   return { ...context, attempt };
@@ -133,7 +129,6 @@ async function expandArtifact(runsRoot: string, artifact: RunEvent["artifact"]):
     type: artifact.type,
     format: artifact.format,
     final: artifact.final,
-    reviewRole: artifact.reviewRole,
     storage: artifact.storage ?? (artifact.path ? "file" : "inline"),
     value,
     fields: artifact.fields,

@@ -19,7 +19,6 @@ export const artifactReviewDispositionValues = [
   "rejected-invalid"
 ] as const;
 export type ArtifactReviewDispositionValue = (typeof artifactReviewDispositionValues)[number];
-export type ArtifactReviewEvidenceRole = "requirement" | "implementation" | "validation" | "review-material";
 export type ArtifactReviewBinding = "decision" | "advisory";
 export type ArtifactReviewStatus = "pending" | "awaiting_runner_vote" | "awaiting_revision" | "passed";
 export type ArtifactReviewRoundStatus = "pending" | "awaiting_runner_vote" | "passed" | "changes_requested";
@@ -101,21 +100,9 @@ export type ArtifactReviewCommentDisposition = {
   updatedAt: string;
 };
 
-export type ArtifactReviewEvidence<TArtifact = unknown> = {
+export type ArtifactReviewContextArtifact<TArtifact = unknown> = {
   stepId: string;
-  role: ArtifactReviewEvidenceRole;
   artifact: TArtifact;
-};
-
-export type ArtifactReviewEvidenceRequirement = {
-  role: ArtifactReviewEvidenceRole;
-  status: "present" | "missing" | "insufficient";
-  reason?: string;
-};
-
-export type ArtifactReviewPackage<TArtifact = unknown> = {
-  evidence: ArtifactReviewEvidence<TArtifact>[];
-  requirements: ArtifactReviewEvidenceRequirement[];
 };
 
 export type ArtifactReviewAgentAttempt = {
@@ -140,10 +127,10 @@ export type ArtifactReviewAgentAttempt = {
 
 export type ArtifactReviewAssignment = {
   id?: string;
-  identityId: string;
-  identityName: string;
-  identityKind?: "human" | "agent";
-  roleIds: string[];
+  actorId: string;
+  actorName: string;
+  actorKind?: "human" | "agent";
+  slotIds: string[];
   permissions: PermissionId[];
   binding: ArtifactReviewBinding;
   status: "draft" | "queued" | "running" | "submitted" | "failed";
@@ -154,7 +141,7 @@ export type ArtifactReviewAssignment = {
 
 export type ArtifactReviewVote = {
   id: string;
-  subject: { kind: "runner" } | { kind: "identity"; identityId: string };
+  subject: { kind: "runner" } | { kind: "actor"; actorId: string };
   binding: ArtifactReviewBinding;
   value: ArtifactReviewVoteValue;
   automatic: boolean;
@@ -175,7 +162,7 @@ export type ArtifactReviewSubmission<TArtifact = unknown> = {
   digest: string;
   createdAt: string;
   artifact: TArtifact;
-  package?: ArtifactReviewPackage<TArtifact>;
+  contextArtifacts: ArtifactReviewContextArtifact<TArtifact>[];
   revisionSummary?: ArtifactReviewRevisionSummary;
 };
 
@@ -273,43 +260,43 @@ export function createArtifactReviewAssignments(input: {
   controlPlane: ArtifactControlPlane;
   now: string;
 }): ArtifactReviewAssignmentSet {
-  const byIdentity = new Map<string, {
-    identityName: string;
-    roleIds: Set<string>;
+  const byActor = new Map<string, {
+    actorName: string;
+    slotIds: Set<string>;
     permissions: Set<PermissionId>;
   }>();
 
-  for (const [roleId, binding] of Object.entries(input.controlPlane.bindings)) {
-    const rolePermissions = input.controlPlane.permissions[roleId];
-    if (!rolePermissions) continue;
-    for (const identityId of binding.identityIds) {
-      const identity = input.snapshot.identities[identityId];
-      if (!identity) continue;
-      const existing = byIdentity.get(identityId) ?? {
-        identityName: identity.name,
-        roleIds: new Set<string>(),
+  for (const [slotId, binding] of Object.entries(input.controlPlane.bindings)) {
+    if (binding.skipped) continue;
+    for (const actorId of binding.actorIds) {
+      const actor = input.snapshot.actors[actorId];
+      const actorPermissions = input.controlPlane.permissions[actorId];
+      if (!actor || !actorPermissions) continue;
+      const existing = byActor.get(actorId) ?? {
+        actorName: actor.name,
+        slotIds: new Set<string>(),
         permissions: new Set<PermissionId>()
       };
-      existing.roleIds.add(roleId);
-      for (const permission of rolePermissions.effective) existing.permissions.add(permission);
-      byIdentity.set(identityId, existing);
+      existing.slotIds.add(slotId);
+      for (const permission of actorPermissions.effective) existing.permissions.add(permission);
+      byActor.set(actorId, existing);
     }
   }
 
   const assignments: ArtifactReviewAssignment[] = [];
-  for (const [identityId, merged] of [...byIdentity.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+  for (const [actorId, merged] of [...byActor.entries()].sort(([left], [right]) => left.localeCompare(right))) {
     if (!merged.permissions.has("artifact.read")) continue;
     const canDecide = merged.permissions.has("decision.decide");
     const canAssess = merged.permissions.has("decision.assess");
     if (!canDecide && !canAssess) continue;
-    const identity = input.snapshot.identities[identityId];
-    const isAgent = identity?.kind === "agent";
+    const actor = input.snapshot.actors[actorId];
+    const isAgent = actor?.kind === "agent";
     assignments.push({
       id: makeReviewEntityId("assignment", input.now),
-      identityId,
-      identityName: merged.identityName,
-      identityKind: identity?.kind ?? "human",
-      roleIds: [...merged.roleIds].sort(),
+      actorId,
+      actorName: merged.actorName,
+      actorKind: actor?.kind ?? "human",
+      slotIds: [...merged.slotIds].sort(),
       permissions: [...merged.permissions].sort(),
       binding: canDecide ? "decision" : "advisory",
       status: isAgent ? "queued" : "draft",
@@ -318,10 +305,10 @@ export function createArtifactReviewAssignments(input: {
         id: makeReviewEntityId("attempt", input.now),
         sequence: 1,
         status: "queued",
-        provider: identity.agent.provider ?? "unconfigured",
+        provider: actor.agent.provider ?? "unconfigured",
         createdAt: input.now,
-        promptVersion: identity.agent.promptVersion,
-        model: identity.agent.model
+        promptVersion: actor.agent.promptVersion,
+        model: actor.agent.model
       }] : undefined
     });
   }
@@ -343,23 +330,14 @@ export function createArtifactReviewAssignments(input: {
   return { assignments, runnerCanDecide };
 }
 
-export function authorizeArtifactReviewIdentity(input: {
+export function authorizeArtifactReviewActor(input: {
   controlPlane: ArtifactControlPlane;
   assignment: ArtifactReviewAssignment;
   permission: "artifact.read" | "decision.assess" | "decision.decide";
 }): AuthorizationDecision {
-  for (const roleId of input.assignment.roleIds) {
-    const decision = authorizeArtifactOperation({
-      controlPlane: input.controlPlane,
-      subject: { kind: "identity", identityId: input.assignment.identityId, roleId },
-      permission: input.permission
-    });
-    if (decision.allowed) return decision;
-  }
-  const roleId = input.assignment.roleIds[0] ?? "";
   return authorizeArtifactOperation({
     controlPlane: input.controlPlane,
-    subject: { kind: "identity", identityId: input.assignment.identityId, roleId },
+    subject: { kind: "actor", actorId: input.assignment.actorId },
     permission: input.permission
   });
 }
@@ -387,10 +365,10 @@ export function submittedAssignmentVote(
   assignment: ArtifactReviewAssignment,
   authorization: AuthorizationDecision
 ): ArtifactReviewVote {
-  if (!assignment.submitted) throw new Error(`Artifact Review assignment is not submitted: ${assignment.identityId}`);
+  if (!assignment.submitted) throw new Error(`Artifact Review assignment is not submitted: ${assignment.actorId}`);
   return {
     id: makeReviewEntityId("vote", assignment.submitted.submittedAt),
-    subject: { kind: "identity", identityId: assignment.identityId },
+    subject: { kind: "actor", actorId: assignment.actorId },
     binding: assignment.binding,
     value: assignment.submitted.vote,
     automatic: false,
@@ -400,7 +378,7 @@ export function submittedAssignmentVote(
 }
 
 export function artifactReviewAssignmentId(assignment: ArtifactReviewAssignment): string {
-  return assignment.id ?? assignment.identityId;
+  return assignment.id ?? assignment.actorId;
 }
 
 export function makeReviewEntityId(prefix: "review" | "submission" | "round" | "assignment" | "comment" | "vote" | "attempt", iso: string): string {

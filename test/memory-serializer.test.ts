@@ -100,7 +100,6 @@ const entities: MemoryEntity[] = [
     defines: [],
     asserts: ["Global procedure contracts survive."],
     goals: ["Exercise every flow tag."],
-    roleBindings: { reviewer: ["review_agent"] },
     flow: [
       {
         tag: "!if",
@@ -129,10 +128,7 @@ const entities: MemoryEntity[] = [
               name: "note",
               type: "string",
               format: { name: "markdown", options: {} },
-              reviewRole: "review-material",
-              reviewRequires: ["implementation", "validation"],
-              roleBindings: { reviewer: ["human_reviewer", "review_agent"] },
-              permissionGrants: { runner: ["artifact.submit"] }
+              review: ["human_reviewer", "review_agent"]
             }
           }
         ]
@@ -148,11 +144,8 @@ for (const entity of entities) {
     assert(!/^tag:/m.test(source));
     if (entity.tag === "!procedure") {
       assert.doesNotMatch(source, /type: string/);
-      assert.match(source, /role_bindings:/);
-      assert.match(source, /permission_grants:/);
-      assert.match(source, /review_role: review-material/);
-      assert.match(source, /review_requires:/);
-      assert.doesNotMatch(source, /roleBindings|permissionGrants/);
+      assert.match(source, /review:/);
+      assert.doesNotMatch(source, /roleBindings|permissionGrants|role_bindings|permission_grants/);
     }
     const parsed = parseMemoryYaml(source);
     const kind = entity.tag === "!concept"
@@ -212,8 +205,7 @@ test("memory node serializers preserve tagged fragments and copyable text refere
         tag: "!procedure",
         names: ["Flow"],
         defines: [],
-        goals: ["Finish."],
-        roleBindings: { reviewer: ["review_agent"] }
+        goals: ["Finish."]
       },
       ancestors: []
     },
@@ -225,17 +217,16 @@ test("memory node serializers preserve tagged fragments and copyable text refere
         name: "Result",
         type: "string",
         format: { name: "markdown", options: {} },
-        review: "artifact_acceptance.unanimous",
-        permissionGrants: { runner: ["artifact.submit"] }
+        review: ["review_agent"]
       }
     }
   };
   const yaml = serializeMemoryNodeReadYaml(result);
   assert.match(yaml, /root: !procedure/);
   assert.match(yaml, /fragment: !action/);
-  assert.match(yaml, /role_bindings:/);
-  assert.match(yaml, /permission_grants:/);
-  assert.match(yaml, /review: artifact_acceptance\.unanimous/);
+  assert.match(yaml, /review:/);
+  assert.match(yaml, /review_agent/);
+  assert.doesNotMatch(yaml, /role_bindings|permission_grants/);
   assert.doesNotMatch(yaml, /roleBindings|permissionGrants/);
   assert.deepEqual(JSON.parse(serializeMemoryNodeReadJson(result)), result);
 });

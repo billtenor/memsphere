@@ -20,6 +20,7 @@ import { readConfig } from "../config.js";
 import {
   authorizeArtifactOperation,
   renderPermissionGuidance,
+  type RunReviewConfiguration,
   type PermissionLocale
 } from "../control-plane/index.js";
 import {
@@ -39,6 +40,7 @@ import {
   repeatRun,
   resolveArtifactReviewComment,
   retryArtifactReviewAgentAssignment,
+  RunReviewConfigurationRequired,
   reportRun,
   type SchemaWritingSnapshot,
   skipRun,
@@ -57,6 +59,7 @@ type ReportOptions = {
 
 type RunStartOptions = {
   file?: string;
+  reviewConfig?: string;
 };
 
 type ReviewWaitOptions = {
@@ -128,14 +131,77 @@ export async function runStartCommand(procedureName: string | undefined, options
   if (name && procedureFile) throw new Error("use either a procedure name or --file <path>, not both");
 
   const config = await readConfig();
-  const run = await startRun({
-    memoryRoot: config.memoryRoot,
-    runsRoot: config.runsRoot,
-    procedureName: name,
-    procedureFile,
-    controlPlane: config.controlPlane
-  });
+  const reviewConfiguration = options.reviewConfig
+    ? parseRunReviewConfiguration(JSON.parse(await readFile(options.reviewConfig, "utf8")))
+    : undefined;
+  let run: RunState;
+  try {
+    run = await startRun({
+      memoryRoot: config.memoryRoot,
+      runsRoot: config.runsRoot,
+      procedureName: name,
+      procedureFile,
+      controlPlane: config.controlPlane,
+      reviewConfiguration
+    });
+  } catch (error) {
+    if (!(error instanceof RunReviewConfigurationRequired)) throw error;
+    console.log("Review configuration is required before this Run can start.");
+    console.log(JSON.stringify(error.preflight, null, 2));
+    console.log("");
+    console.log("Save the example object as JSON, adjust its Policy and Slot bindings, then run:");
+    console.log("memsphere run start <procedure> --review-config <path>");
+    return;
+  }
   printRunState(run, config.runsRoot);
+}
+
+function parseRunReviewConfiguration(value: unknown): RunReviewConfiguration {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Review configuration must be a JSON object");
+  }
+  const input = value as Record<string, unknown>;
+  const reviewInput = input.reviews;
+  const slotInput = input.slots;
+  if (!reviewInput || typeof reviewInput !== "object" || Array.isArray(reviewInput)) {
+    throw new Error("Review configuration reviews must be an object");
+  }
+  if (!slotInput || typeof slotInput !== "object" || Array.isArray(slotInput)) {
+    throw new Error("Review configuration slots must be an object");
+  }
+  const reviews: RunReviewConfiguration["reviews"] = {};
+  for (const [scope, raw] of Object.entries(reviewInput as Record<string, unknown>)) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`reviews.${scope} must be an object`);
+    const entry = raw as Record<string, unknown>;
+    if (typeof entry.policy !== "string" || !entry.policy.trim()) throw new Error(`reviews.${scope}.policy is required`);
+    const grants = entry.permission_grants ?? {};
+    if (!grants || typeof grants !== "object" || Array.isArray(grants)) {
+      throw new Error(`reviews.${scope}.permission_grants must be an object`);
+    }
+    reviews[scope] = {
+      policy: entry.policy,
+      permissionGrants: Object.fromEntries(Object.entries(grants as Record<string, unknown>).map(([actorId, permissions]) => {
+        if (!Array.isArray(permissions) || permissions.some((permission) => typeof permission !== "string")) {
+          throw new Error(`reviews.${scope}.permission_grants.${actorId} must be a string array`);
+        }
+        return [actorId, permissions];
+      })) as RunReviewConfiguration["reviews"][string]["permissionGrants"]
+    };
+  }
+  const slots: RunReviewConfiguration["slots"] = {};
+  for (const [key, raw] of Object.entries(slotInput as Record<string, unknown>)) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`slots.${key} must be an object`);
+    const entry = raw as Record<string, unknown>;
+    if (entry.skip === true) {
+      slots[key] = { skip: true };
+      continue;
+    }
+    if (!Array.isArray(entry.actors) || entry.actors.some((actor) => typeof actor !== "string")) {
+      throw new Error(`slots.${key}.actors must be a string array or skip must be true`);
+    }
+    slots[key] = { actorIds: entry.actors as string[] };
+  }
+  return { reviews, slots };
 }
 
 export async function runReportCommand(options: ReportOptions): Promise<void> {
@@ -218,21 +284,21 @@ export async function runReviewRetryCommand(options: ReviewRetryOptions): Promis
   const reviewId = options.review?.trim();
   const assignment = options.assignment?.trim();
   if (!reviewId) throw new Error("--review <id> is required");
-  if (!assignment) throw new Error("--assignment <identity-or-assignment-id> is required");
+  if (!assignment) throw new Error("--assignment <actor-or-assignment-id> is required");
   const config = await readConfig();
   const located = await findArtifactReview({ runsRoot: config.runsRoot, reviewId });
   const context = await retryArtifactReviewAgentAssignment({
     runsRoot: config.runsRoot,
     reviewId,
     roundId: located.review.currentRoundId,
-    identityId: assignment
+    actorId: assignment
   });
   await dispatchArtifactReviewAgents({ config, run: context.run });
   printStructured({
     reviewId,
     roundId: context.round.id,
     assignmentId: context.assignment.id,
-    identityId: context.assignment.identityId,
+    actorId: context.assignment.actorId,
     status: context.assignment.status,
     attempt: context.attempt
   }, options.output);
@@ -721,19 +787,17 @@ export function printArtifactReviewSummary(
   console.log(`- advisory: blocking=${advisoryComments.filter((comment) => comment.severity === "blocking").length}; risk=${advisoryComments.filter((comment) => comment.severity === "risk").length}; suggestion=${advisoryComments.filter((comment) => comment.severity === "suggestion").length}; unresolved_blocking=${unresolvedBlocking.length}`);
   console.log(`- agent_failures: environment=${failedAttempts.filter((attempt) => attempt.failure && artifactReviewFailureCategory(attempt.failure) === "environment").length}; provider=${failedAttempts.filter((attempt) => attempt.failure && artifactReviewFailureCategory(attempt.failure) === "provider").length}; reviewer=${failedAttempts.filter((attempt) => attempt.failure && artifactReviewFailureCategory(attempt.failure) === "reviewer").length}; unknown=${failedAttempts.filter((attempt) => attempt.failure && artifactReviewFailureCategory(attempt.failure) === "unknown").length}`);
   const submission = review.submissions.find((candidate) => candidate.id === round.submissionId);
-  for (const requirement of submission?.package?.requirements ?? []) {
-    console.log(`- evidence: ${requirement.role}=${requirement.status}${requirement.reason ? `; ${requirement.reason}` : ""}`);
-  }
+  console.log(`- earlier_artifacts: ${submission?.contextArtifacts.length ?? 0}`);
   for (const repeated of repeatedArtifactReviewAdvisories(review)) {
     console.log(`- repeated_advisory: [${repeated.severity}] x${repeated.count} rounds=${repeated.rounds.join(",")} ${repeated.body}`);
   }
   console.log("Participants:");
   for (const assignment of round.assignments) {
     const vote = assignment.submitted?.vote ?? "pending";
-    const identityKind = assignment.identityKind === "agent" ? ", agent" : "";
-    console.log(`- ${assignment.identityName} (${assignment.binding}${identityKind})`);
+    const actorKind = assignment.actorKind === "agent" ? ", agent" : "";
+    console.log(`- ${assignment.actorName} (${assignment.binding}${actorKind})`);
     console.log(`  - vote: ${vote}`);
-    if (assignment.identityKind === "agent") {
+    if (assignment.actorKind === "agent") {
       const attempt = assignment.attempts?.at(-1);
       console.log(`  - status: ${assignment.status}`);
       if (attempt) console.log(`  - attempt: ${attempt.sequence}; provider: ${attempt.provider}`);
@@ -765,7 +829,7 @@ export function printArtifactReviewSummary(
   console.log("Decision:");
   if (review.status === "awaiting_runner_vote") {
     const participantDecisionVotes = round.votes.filter(
-      (vote) => vote.subject.kind === "identity" && vote.binding === "decision"
+      (vote) => vote.subject.kind === "actor" && vote.binding === "decision"
     );
     const approved = participantDecisionVotes.filter((vote) => vote.value === "approve").length;
     const advisoryTotal = round.votes.filter((vote) => vote.binding === "advisory").length;
@@ -822,7 +886,7 @@ function printPermissionGuidance(run: RunState, step: NonNullable<ReturnType<typ
   if (!permissions) return;
   const guidance = renderPermissionGuidance({
     snapshot: run.controlPlane,
-    roleId: "runner",
+    actorId: "runner",
     permissions,
     artifactScope: step.controlPlane.artifactScope,
     locale: permissionLocale()
@@ -834,9 +898,8 @@ function printPermissionGuidance(run: RunState, step: NonNullable<ReturnType<typ
   console.log("- runner: current run context");
   console.log(`- permission catalog: ${run.controlPlane.permissionCatalog.version}`);
   console.log(`- decision policy catalog: ${run.controlPlane.decisionPolicyCatalog.version}`);
-  for (const [roleId, binding] of Object.entries(step.controlPlane.bindings)) {
-    const prompt = run.controlPlane.roles[roleId]?.systemPrompt ? "; system_prompt: present" : "";
-    console.log(`- ${roleId}: ${binding.identityIds.join(", ")} (${binding.source}${prompt})`);
+  for (const [slotId, binding] of Object.entries(step.controlPlane.bindings)) {
+    console.log(`- ${slotId}: ${binding.skipped ? "skipped" : binding.actorIds.join(", ")} (${binding.source})`);
   }
   console.log(`- runner base permissions: ${permissions.base.join(", ") || "none"}`);
   console.log(`- runner grants: ${permissions.grants.join(", ") || "none"}`);
@@ -851,19 +914,19 @@ export function printLatestReportAuthorization(run: RunState): void {
   if (!authorization) return;
   console.log("Report Authorization:");
   console.log(`- allowed: ${authorization.permission}`);
-  console.log(`- role: ${authorization.roleId}`);
+  console.log(`- actor: ${authorization.actorId}`);
   console.log(`- artifact: ${authorization.artifactScope}`);
   console.log(`- revision: ${authorization.revision}`);
   if (run.controlPlane) {
     const locale = permissionLocale();
     const guidance = renderPermissionGuidance({
       snapshot: run.controlPlane,
-      roleId: authorization.roleId,
+      actorId: authorization.actorId,
       permissions: {
         base: authorization.basePermissions,
         grants: authorization.grantedPermissions,
         effective: authorization.effectivePermissions,
-        roleSource: authorization.roleSource,
+        authoritySource: authorization.authoritySource,
         grantSource: authorization.grantSource
       },
       artifactScope: authorization.artifactScope,

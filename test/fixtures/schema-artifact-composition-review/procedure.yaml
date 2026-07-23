@@ -1,9 +1,6 @@
 !procedure
 syntax: memsphere-20260721-stable
 name: schema-artifact-composition-review
-role_bindings:
-  agent_reviewer: agent
-  human_reviewer: human
 flow:
   - !action
     action: Produce a complete delivery from an external Schema.
@@ -18,7 +15,7 @@ flow:
         name: markdown
         layout: outline
       schema: Reviewed delivery
-      review: artifact_acceptance.unanimous
+      review: [agent_reviewer, human_reviewer]
   - !action
     action: Continue only after the complete delivery is accepted.
     artifact: !artifact

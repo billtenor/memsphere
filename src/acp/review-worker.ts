@@ -4,7 +4,7 @@ import { readConfig } from "../config.js";
 import {
   claimArtifactReviewAgentAssignment,
   failArtifactReviewAgentAssignment,
-  readArtifactReviewForIdentity,
+  readArtifactReviewForActor,
   recordArtifactReviewAgentSession,
   recordArtifactReviewAgentStop
 } from "../run/store.js";
@@ -35,17 +35,17 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     runsRoot: config.runsRoot,
     reviewId,
     roundId,
-    identityId: assignmentId,
+    actorId: assignmentId,
     workerPid: process.pid
   });
   if (!claimed) return;
 
-  const { identityId } = claimed.assignment;
+  const { actorId } = claimed.assignment;
   const common = {
     runsRoot: config.runsRoot,
     reviewId,
     roundId,
-    identityId,
+    actorId,
     attemptId: claimed.attempt.id
   };
   const activity = new AgentActivityRecorder({
@@ -61,13 +61,13 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
   activity.recordLifecycle("running", "Agent worker started");
   let cliRuntime: Awaited<ReturnType<typeof createAgentReviewCliRuntime>> | undefined;
   try {
-    const identity = claimed.run.controlPlane?.identities[identityId];
-    if (!identity || identity.kind !== "agent") throw new Error(`agent_identity_missing: ${identityId}`);
+    const actor = claimed.run.controlPlane?.actors[actorId];
+    if (!actor || actor.kind !== "agent") throw new Error(`agent_actor_missing: ${actorId}`);
     cliRuntime = await createAgentReviewCliRuntime({ nodeExecutable, cliEntrypoint });
     const workspaceRoot = dirname(config.scopeRoot);
-    const provider = (options.providerResolver ?? getAgentReviewProvider)(identity.agent.provider);
+    const provider = (options.providerResolver ?? getAgentReviewProvider)(actor.agent.provider);
     const launch = provider.buildLaunch({
-      identity,
+      actor,
       workspaceRoot,
       sessionEnv: {
         MEMSPHERE_CLI: cliRuntime.launcherPath,
@@ -87,11 +87,11 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
       reminder: buildArtifactReviewerReminder(),
       workspaceRoot,
       isSubmitted: async () => {
-        const current = await readArtifactReviewForIdentity({
+        const current = await readArtifactReviewForActor({
           runsRoot: config.runsRoot,
           reviewId,
           roundId,
-          identityId
+          actorId
         });
         return current.assignment.status === "submitted";
       },

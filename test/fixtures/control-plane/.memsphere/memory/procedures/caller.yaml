@@ -1,8 +1,6 @@
 !procedure
 syntax: memsphere-20260721-stable
 name: control-plane-caller
-role_bindings:
-  reviewer: human_reviewer
 goals:
   - Exercise Procedure and Artifact control-plane resolution.
 flow:
@@ -10,9 +8,5 @@ flow:
     action: Produce the caller Artifact.
     artifact: !artifact
       name: caller result
-      role_bindings:
-        reviewer: [human_reviewer, review_agent]
-      permission_grants:
-        runner: [artifact.submit]
   - !call
     target: control-plane-child

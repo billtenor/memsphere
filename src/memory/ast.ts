@@ -12,9 +12,6 @@ export type ArtifactFormatSpec = {
   options: Readonly<Record<string, unknown>>;
 };
 
-export type RoleBindings = Record<string, string[]>;
-export type PermissionGrants = Record<string, string[]>;
-
 export const stepActors = ["agent", "human"] as const;
 export type StepActor = (typeof stepActors)[number];
 
@@ -75,11 +72,7 @@ export type ArtifactNode = {
   format: ArtifactFormatSpec;
   schema?: string | SchemaNode | MemoryRefNode;
   final?: boolean;
-  review?: string;
-  reviewRole?: "requirement" | "implementation" | "validation" | "review-material";
-  reviewRequires?: Array<"requirement" | "implementation" | "validation" | "review-material">;
-  roleBindings?: RoleBindings;
-  permissionGrants?: PermissionGrants;
+  review?: string[];
 };
 
 export type ActionNode = {
@@ -116,7 +109,6 @@ export type ProcedureNode = CommonMemoryNode & {
   tag: "!procedure";
   asserts?: string[];
   goals: string[];
-  roleBindings?: RoleBindings;
   flow: FlowNode[];
 };
 

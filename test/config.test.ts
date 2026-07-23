@@ -75,12 +75,10 @@ test("readConfigAt resolves strict control_plane configuration", async () => {
     await writeFile(configPath, JSON.stringify({
       memoryRoot: "memory",
       control_plane: {
-        identities: {
-          reviewer: { kind: "human", name: "Reviewer" }
-        },
-        roles: {
-          runner: { name: "Runner", permissions: ["artifact.submit"] },
+        runner: { permissions: ["artifact.submit"] },
+        actors: {
           reviewer: {
+            kind: "human",
             name: "Reviewer",
             permissions: ["artifact.read", "decision.assess"],
             system_prompt: "Review the Artifact."
@@ -90,8 +88,8 @@ test("readConfigAt resolves strict control_plane configuration", async () => {
     }));
 
     const config = await readConfigAt(configPath);
-    assert.deepEqual(config.controlPlane?.roles.runner.permissions, ["artifact.submit"]);
-    assert.equal(config.controlPlane?.roles.reviewer.systemPrompt, "Review the Artifact.");
+    assert.deepEqual(config.controlPlane?.runner.permissions, ["artifact.submit"]);
+    assert.equal(config.controlPlane?.actors.reviewer.systemPrompt, "Review the Artifact.");
   });
 });
 
@@ -104,8 +102,8 @@ test("readConfigAt rejects unknown top-level and control_plane fields", async ()
     await writeFile(configPath, JSON.stringify({
       memoryRoot: "memory",
       control_plane: {
-        identities: {},
-        roles: { runner: { name: "Runner", permissions: [] } },
+        runner: { permissions: [] },
+        actors: {},
         permissions: []
       }
     }));

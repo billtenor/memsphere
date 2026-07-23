@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { requireDecisionPolicyDefinition } from "../control-plane/catalog.js";
 import type { MemoryKind } from "./kinds.js";
 import {
   builtInArtifactFormats,
@@ -635,81 +634,26 @@ const uniqueNonEmptyStringArray = z.array(nonEmptyString).min(1).superRefine((va
   }
 });
 
-const roleBindingsInputSchema = z.record(z.union([
-  nonEmptyString.transform((value) => [value]),
-  uniqueNonEmptyStringArray
-])).superRefine((bindings, context) => {
-  for (const roleId of Object.keys(bindings)) {
-    if (!roleId.trim()) {
-      context.addIssue({ code: z.ZodIssueCode.custom, path: [roleId], message: "Role id must not be empty" });
-    }
-  }
-});
-
-const permissionGrantsInputSchema = z.record(uniqueNonEmptyStringArray).superRefine((grants, context) => {
-  for (const roleId of Object.keys(grants)) {
-    if (!roleId.trim()) {
-      context.addIssue({ code: z.ZodIssueCode.custom, path: [roleId], message: "Role id must not be empty" });
-    }
-  }
-});
-
-const decisionPolicyIdSchema = nonEmptyString.superRefine((value, context) => {
-  try {
-    requireDecisionPolicyDefinition(value);
-  } catch {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: `Unknown Decision Policy id: ${value}`
-    });
-  }
-});
-
 export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> = z.unknown().transform((value, context) => {
   const source = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
   const baseInput = source ? { ...source } : value;
   if (source) {
-    delete (baseInput as Record<string, unknown>).role_bindings;
-    delete (baseInput as Record<string, unknown>).permission_grants;
     delete (baseInput as Record<string, unknown>).review;
-    delete (baseInput as Record<string, unknown>).review_role;
-    delete (baseInput as Record<string, unknown>).review_requires;
   }
   const base = legacyArtifactNodeSchema.safeParse(baseInput);
-  const roleBindings = roleBindingsInputSchema.optional().safeParse(source?.role_bindings);
-  const permissionGrants = permissionGrantsInputSchema.optional().safeParse(source?.permission_grants);
-  const review = decisionPolicyIdSchema.optional().safeParse(source?.review);
-  const reviewRoleSchema = z.enum(["requirement", "implementation", "validation", "review-material"]);
-  const reviewRole = reviewRoleSchema.optional().safeParse(source?.review_role);
-  const reviewRequires = z.array(reviewRoleSchema).min(1).optional().safeParse(source?.review_requires);
+  const review = uniqueNonEmptyStringArray.optional().safeParse(source?.review);
   if (!base.success) {
     for (const issue of base.error.issues) context.addIssue(issue);
-  }
-  if (!roleBindings.success) {
-    for (const issue of roleBindings.error.issues) context.addIssue({ ...issue, path: ["role_bindings", ...issue.path] });
-  }
-  if (!permissionGrants.success) {
-    for (const issue of permissionGrants.error.issues) context.addIssue({ ...issue, path: ["permission_grants", ...issue.path] });
   }
   if (!review.success) {
     for (const issue of review.error.issues) context.addIssue({ ...issue, path: ["review", ...issue.path] });
   }
-  if (!reviewRole.success) {
-    for (const issue of reviewRole.error.issues) context.addIssue({ ...issue, path: ["review_role", ...issue.path] });
-  }
-  if (!reviewRequires.success) {
-    for (const issue of reviewRequires.error.issues) context.addIssue({ ...issue, path: ["review_requires", ...issue.path] });
-  }
-  if (!base.success || !roleBindings.success || !permissionGrants.success || !review.success || !reviewRole.success || !reviewRequires.success) return z.NEVER;
+  if (!base.success || !review.success) return z.NEVER;
   return {
     ...base.data,
-    ...(review.data ? { review: review.data } : {}),
-    ...(reviewRole.data ? { reviewRole: reviewRole.data } : {}),
-    ...(reviewRequires.data ? { reviewRequires: [...new Set(reviewRequires.data)] } : {}),
-    ...(roleBindings.data ? { roleBindings: roleBindings.data } : {}),
-    ...(permissionGrants.data ? { permissionGrants: permissionGrants.data } : {})
+    ...(review.data ? { review: [...review.data] } : {})
   };
 });
 
@@ -790,12 +734,8 @@ const procedureNodeSchema: z.ZodType<ProcedureNode, z.ZodTypeDef, unknown> = req
     defines: definesSchema,
     asserts: z.array(nonEmptyString).min(1).optional(),
     goals: stringArray,
-    role_bindings: roleBindingsInputSchema.optional(),
     flow: z.array(flowNodeSchema).default([])
-  }).strict().transform((procedure) => {
-    const { role_bindings, ...base } = procedure;
-    return { ...base, ...(role_bindings ? { roleBindings: role_bindings } : {}) };
-  }))
+  }).strict())
 );
 
 export const procedureMemorySchema: z.ZodType<ProcedureMemory, z.ZodTypeDef, unknown> = withRootSyntax(procedureNodeSchema);

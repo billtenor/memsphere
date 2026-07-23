@@ -5,10 +5,6 @@ names:
   - traex-code-fact-review-smoke
 defines:
   - 用一份需要核对当前工作区源码的技术调查报告，验证 Traex Agent Reviewer 会主动读取代码，而不是只根据候选 Artifact 的表述投票。
-role_bindings:
-  development_engineer: traex1
-  test_engineer: traex2
-  system_architect: human
 flow:
   - !action
     action: 根据当前工作区源码回答 Agent Reviewer 实现行为的七个问题，并提供可复核的代码证据。
@@ -24,4 +20,4 @@ flow:
     artifact: !artifact
       name: Agent Reviewer 代码事实核查报告
       format: markdown
-      review: artifact_acceptance.unanimous
+      review: [development_engineer, test_engineer, system_architect]

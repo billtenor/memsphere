@@ -42,11 +42,11 @@ export async function writeAgentReviewDebugArtifacts(input: {
   const workspaceRoot = dirname(input.config.scopeRoot);
   const generated: AgentReviewTryRunArtifact[] = [];
   for (const assignment of input.round.assignments) {
-    if ((assignment.identityKind ?? "human") !== "agent" || assignment.status !== "queued") continue;
-    const identity = input.run.controlPlane?.identities[assignment.identityId];
-    if (!identity || identity.kind !== "agent") throw new Error(`agent_identity_missing: ${assignment.identityId}`);
+    if ((assignment.actorKind ?? "human") !== "agent" || assignment.status !== "queued") continue;
+    const actor = input.run.controlPlane?.actors[assignment.actorId];
+    if (!actor || actor.kind !== "agent") throw new Error(`agent_actor_missing: ${assignment.actorId}`);
     const attempt = assignment.attempts?.at(-1);
-    if (!attempt) throw new Error(`agent_attempt_missing: ${assignment.identityId}`);
+    if (!attempt) throw new Error(`agent_attempt_missing: ${assignment.actorId}`);
     const assignmentId = artifactReviewAssignmentId(assignment);
     const sessionEnv = {
       MEMSPHERE_REVIEW_RUN_ID: input.run.id,
@@ -55,8 +55,8 @@ export async function writeAgentReviewDebugArtifacts(input: {
       MEMSPHERE_WORKSPACE_ROOT: workspaceRoot,
       MEMSPHERE_CLI: "<runtime-generated-session-cli>"
     };
-    const provider = getAgentReviewProvider(identity.agent.provider);
-    const launch = provider.buildLaunch({ identity, workspaceRoot, sessionEnv });
+    const provider = getAgentReviewProvider(actor.agent.provider);
+    const launch = provider.buildLaunch({ actor, workspaceRoot, sessionEnv });
     const context: ArtifactReviewAgentContext = {
       run: input.run,
       review: input.review,
@@ -85,9 +85,9 @@ export async function writeAgentReviewDebugArtifacts(input: {
       reviewId: input.review.id,
       roundId: input.round.id,
       assignmentId,
-      identityId: assignment.identityId,
-      identityName: assignment.identityName,
-      roles: assignment.roleIds,
+      actorId: assignment.actorId,
+      actorName: assignment.actorName,
+      slots: assignment.slotIds,
       binding: assignment.binding,
       provider: launch.provider,
       command: launch.command,

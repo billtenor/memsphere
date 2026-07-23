@@ -84,32 +84,23 @@ sections:
 `)), /Unrecognized key.*syntax/);
 });
 
-test("current syntax scopes Role Binding and Permission Grant to Procedure and Artifact", () => {
+test("current syntax declares Review Slots and rejects removed governance fields", () => {
   const parsed = parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
 syntax: ${currentMemorySyntax}
 name: governed
-role_bindings:
-  reviewer: human
 flow:
   - !action
     action: Produce an Artifact.
     artifact: !artifact
       name: result
-      review: artifact_acceptance.unanimous
-      role_bindings:
-        reviewer: [human, agent]
-      permission_grants:
-        runner: [decision.decide]
+      review: [human_reviewer, agent_reviewer]
 `));
   assert.equal(parsed.tag, "!procedure");
   if (parsed.tag !== "!procedure") return;
-  assert.deepEqual(parsed.roleBindings, { reviewer: ["human"] });
   const action = parsed.flow[0];
   assert.equal(action.tag, "!action");
   if (action.tag !== "!action") return;
-  assert.deepEqual(action.artifact.roleBindings, { reviewer: ["human", "agent"] });
-  assert.deepEqual(action.artifact.permissionGrants, { runner: ["decision.decide"] });
-  assert.equal(action.artifact.review, "artifact_acceptance.unanimous");
+  assert.deepEqual(action.artifact.review, ["human_reviewer", "agent_reviewer"]);
 
   assert.throws(() => parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
 syntax: ${firstStableMemorySyntax}
@@ -120,25 +111,25 @@ flow: []
 
   assert.throws(() => parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
 syntax: ${firstStableMemorySyntax}
-name: old-reviewed
+name: invalid-old-governance
 flow:
   - !action
     action: Produce.
     artifact: !artifact
       name: result
-      review: artifact_acceptance.unanimous
-`)), /Unrecognized key.*review/);
+      permission_grants: { runner: [decision.decide] }
+`)), /Unrecognized key.*permission_grants/);
 
   assert.throws(() => parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
 syntax: ${currentMemorySyntax}
-name: unknown-policy
+name: invalid-review
 flow:
   - !action
     action: Produce.
     artifact: !artifact
       name: result
-      review: artifact_acceptance.missing
-`)), /Unknown Decision Policy id/);
+      review: reviewer
+`)), /Expected array/);
 
   assert.throws(() => parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
 syntax: ${currentMemorySyntax}
@@ -150,16 +141,19 @@ flow:
     artifact: !artifact { name: result }
 `)), /Unrecognized key.*role_bindings/);
 
-  assert.throws(() => parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
+  for (const removed of ["review_role: implementation", "review_requires: [implementation]"]) {
+    assert.throws(() => parseMemoryEntity("procedures", parseMemoryYaml(`!procedure
 syntax: ${currentMemorySyntax}
-name: invalid-grant
+name: removed-artifact-review-field
 flow:
   - !action
-    action: Invalid grant.
+    action: Produce.
     artifact: !artifact
       name: result
-      permission_grants: { runner: decision.decide }
-`)), /Expected array/);
+      ${removed}
+`)), /Unrecognized key.*review_/);
+  }
+
 });
 
 test("Memory syntax registries reject duplicate definitions", () => {

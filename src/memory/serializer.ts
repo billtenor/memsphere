@@ -63,22 +63,6 @@ function prepareMemoryForYaml(value: unknown): unknown {
   const record = value as Record<string, unknown>;
   const prepared: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(record)) {
-    if ((record.tag === "!procedure" || record.tag === "!artifact") && key === "roleBindings") {
-      prepared.role_bindings = prepareMemoryForYaml(item);
-      continue;
-    }
-    if (record.tag === "!artifact" && key === "permissionGrants") {
-      prepared.permission_grants = prepareMemoryForYaml(item);
-      continue;
-    }
-    if (record.tag === "!artifact" && key === "reviewRole") {
-      prepared.review_role = prepareMemoryForYaml(item);
-      continue;
-    }
-    if (record.tag === "!artifact" && key === "reviewRequires") {
-      prepared.review_requires = prepareMemoryForYaml(item);
-      continue;
-    }
     if (record.tag === "!artifact" && key === "type" && item === "string") continue;
     if ((record.tag === "!artifact" || record.tag === "!schema") && key === "format" && isFormatSpec(item)) {
       const optionEntries = Object.entries(item.options);

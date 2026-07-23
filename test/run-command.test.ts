@@ -423,14 +423,13 @@ test("Schema finalization output points to the managed draft and exact report co
 
 test("run output explains effective runner permissions before report", () => {
   const snapshot = createControlPlaneSnapshot(parseControlPlaneConfig({
-    identities: { human: { kind: "human", name: "Human" } },
-    roles: {
-      runner: {
-        name: "Runner",
-        permissions: ["artifact.read", "artifact.submit"],
-        grantable_permissions: ["decision.decide"]
-      },
-      reviewer: {
+    runner: {
+      permissions: ["artifact.read", "artifact.submit"],
+      grantable_permissions: ["decision.decide"]
+    },
+    actors: {
+      human: {
+        kind: "human",
         name: "Reviewer",
         permissions: ["artifact.read"],
         system_prompt: "Review carefully."
@@ -439,11 +438,11 @@ test("run output explains effective runner permissions before report", () => {
   }));
   const controlPlane = resolveArtifactControlPlane({
     snapshot,
-    procedureBindings: { reviewer: { identityIds: ["human"], source: "procedure:governed" } },
+    slotBindings: { "governed::reviewer": { actorIds: ["human"], source: "run:governed::reviewer" } },
     permissionGrants: { runner: ["decision.decide"] },
     artifactScope: "flow[1]",
-    artifactBindingSource: "artifact:flow[1]",
-    artifactGrantSource: "artifact:flow[1]"
+    policyId: "artifact_acceptance.unanimous",
+    grantSource: "run:flow[1]"
   });
   const run: RunState = {
     contractVersion: 3,
@@ -487,7 +486,7 @@ test("run output explains effective runner permissions before report", () => {
   const output = lines.join("\n");
   assert.match(output, /Control Plane:\n- mode: enabled/);
   assert.match(output, /runner grants: decision\.decide/);
-  assert.match(output, /reviewer: human \(procedure:governed; system_prompt: present\)/);
+  assert.match(output, /governed::reviewer: human \(run:governed::reviewer\)/);
   assert.match(output, /Permission Guidance:/);
   assert.match(output, /artifact\.submit: You may submit the current Artifact/);
   assert(output.indexOf("Permission Guidance:") < output.indexOf("Then:"));
@@ -495,22 +494,19 @@ test("run output explains effective runner permissions before report", () => {
 
 test("successful report output explains the permission in natural language", () => {
   const snapshot = createControlPlaneSnapshot(parseControlPlaneConfig({
-    identities: {},
-    roles: {
-      runner: {
-        name: "Runner",
-        permissions: ["artifact.read"],
-        grantable_permissions: ["artifact.submit"]
-      }
-    }
+    runner: {
+      permissions: ["artifact.read"],
+      grantable_permissions: ["artifact.submit"]
+    },
+    actors: {}
   }));
   const controlPlane = resolveArtifactControlPlane({
     snapshot,
-    procedureBindings: {},
+    slotBindings: {},
     permissionGrants: { runner: ["artifact.submit"] },
     artifactScope: "flow[1]",
-    artifactBindingSource: "artifact:flow[1]",
-    artifactGrantSource: "artifact:flow[1]"
+    policyId: "artifact_acceptance.unanimous",
+    grantSource: "run:flow[1]"
   });
   const decision = authorizeArtifactOperation({
     controlPlane,
@@ -556,7 +552,7 @@ test("successful report output explains the permission in natural language", () 
   const output = lines.join("\n");
   assert.match(output, /Allowed: this operation uses the artifact\.submit permission/);
   assert.match(output, /artifact\.submit \(grant\): You may submit the current Artifact/);
-  assert.match(output, /grant: artifact:flow\[1\]/);
+  assert.match(output, /grant: run:flow\[1\]/);
 });
 
 test("Artifact Review output emphasizes votes, comments, and an actionable conclusion", () => {
@@ -568,9 +564,9 @@ test("Artifact Review output emphasizes votes, comments, and an actionable concl
     revision: 3,
     createdAt: "2026-07-21T00:00:00.000Z",
     assignments: [{
-      identityId: "advisor",
-      identityName: "Advisor",
-      roleIds: ["advisor"],
+      actorId: "advisor",
+      actorName: "Advisor",
+      slotIds: ["advisor"],
       permissions: ["artifact.read", "decision.assess"],
       binding: "advisory",
       status: "submitted",
@@ -582,9 +578,9 @@ test("Artifact Review output emphasizes votes, comments, and an actionable concl
         authorization: {} as never
       }
     }, {
-      identityId: "decider",
-      identityName: "Decider",
-      roleIds: ["decider"],
+      actorId: "decider",
+      actorName: "Decider",
+      slotIds: ["decider"],
       permissions: ["artifact.read", "decision.decide"],
       binding: "decision",
       status: "submitted",
@@ -649,20 +645,17 @@ test("Artifact Review output emphasizes votes, comments, and an actionable concl
 
 test("Artifact Review output asks the Runner to decide after assigned reviews complete", () => {
   const snapshot = createControlPlaneSnapshot(parseControlPlaneConfig({
-    identities: {},
-    roles: {
-      runner: {
-        name: "Runner",
-        permissions: ["artifact.read", "artifact.submit", "decision.decide"]
-      }
-    }
+    runner: {
+      permissions: ["artifact.read", "artifact.submit", "decision.decide"]
+    },
+    actors: {}
   }));
   const controlPlane = resolveArtifactControlPlane({
     snapshot,
-    procedureBindings: {},
+    slotBindings: {},
     artifactScope: "flow[1]",
-    artifactBindingSource: "artifact:flow[1]",
-    artifactGrantSource: "artifact:flow[1]"
+    policyId: "artifact_acceptance.unanimous",
+    grantSource: "run:flow[1]"
   });
   const round: ArtifactReviewRound = {
     id: "round-2",
@@ -672,9 +665,9 @@ test("Artifact Review output asks the Runner to decide after assigned reviews co
     revision: 4,
     createdAt: "2026-07-21T00:00:00.000Z",
     assignments: [{
-      identityId: "advisor",
-      identityName: "Advisor",
-      roleIds: ["advisor"],
+      actorId: "advisor",
+      actorName: "Advisor",
+      slotIds: ["advisor"],
       permissions: ["artifact.read", "decision.assess"],
       binding: "advisory",
       status: "submitted",
@@ -686,9 +679,9 @@ test("Artifact Review output asks the Runner to decide after assigned reviews co
         authorization: {} as never
       }
     }, {
-      identityId: "decider",
-      identityName: "Decider",
-      roleIds: ["decider"],
+      actorId: "decider",
+      actorName: "Decider",
+      slotIds: ["decider"],
       permissions: ["artifact.read", "decision.decide"],
       binding: "decision",
       status: "submitted",
@@ -702,7 +695,7 @@ test("Artifact Review output asks the Runner to decide after assigned reviews co
     }],
     votes: [{
       id: "vote-advisor",
-      subject: { kind: "identity", identityId: "advisor" },
+      subject: { kind: "actor", actorId: "advisor" },
       binding: "advisory",
       value: "request_changes",
       automatic: false,
@@ -710,7 +703,7 @@ test("Artifact Review output asks the Runner to decide after assigned reviews co
       submittedAt: "2026-07-21T00:01:00.000Z"
     }, {
       id: "vote-decider",
-      subject: { kind: "identity", identityId: "decider" },
+      subject: { kind: "actor", actorId: "decider" },
       binding: "decision",
       value: "approve",
       automatic: false,

@@ -24,11 +24,9 @@ flow:
     artifact: !artifact
       name: 当前迭代需求契约
       format: markdown
-      review_role: requirement
-      review: artifact_acceptance.unanimous
-      role_bindings:
-        product_manager: traex1
-        senior_system_architect: human
+      review:
+        - 产品
+        - 资深架构
 
   - !action
     action: 基于已确认的需求契约调查代码，形成实施与验证方案。
@@ -39,11 +37,10 @@ flow:
     artifact: !artifact
       name: 实施与验证方案
       format: markdown
-      review: artifact_acceptance.unanimous
-      role_bindings:
-        development_engineer: traex2
-        test_engineer: traex3
-        senior_system_architect: human
+      review:
+        - 研发
+        - 测试
+        - 资深架构
 
   - !action
     action: 基于已确认的实施与验证方案产出开发计划或 Task List。
@@ -65,7 +62,6 @@ flow:
     artifact: !artifact
       name: 功能实现摘要
       format: markdown
-      review_role: implementation
 
   - !action
     action: 按验证方案执行测试和验收标准检查。
@@ -77,7 +73,6 @@ flow:
     artifact: !artifact
       name: 初始验证报告
       format: markdown
-      review_role: validation
 
   - !action
     action: 汇总功能实现摘要、初始验证报告和当前代码改动，发起实现与验证成果验收。
@@ -92,16 +87,11 @@ flow:
     artifact: !artifact
       name: 实现与验证验收材料
       format: markdown
-      review_role: review-material
-      review_requires:
-        - implementation
-        - validation
-      review: artifact_acceptance.unanimous
-      role_bindings:
-        development_engineer: traex2
-        test_engineer: traex3
-        system_architect: traex4
-        senior_system_architect: human
+      review:
+        - 研发
+        - 测试
+        - 架构
+        - 资深架构
 
   - !while
     condition: !action
@@ -145,15 +135,10 @@ flow:
         artifact: !artifact
           name: 验收反馈修正与复测报告
           format: markdown
-          review_role: review-material
-          review_requires:
-            - implementation
-            - validation
-          review: artifact_acceptance.unanimous
-          role_bindings:
-            development_engineer: traex2
-            test_engineer: traex3
-            system_architect: traex4
+          review:
+            - 研发
+            - 测试
+            - 架构
       - !action
         action: 请 human 重新完成提需方验收。
         actor: human

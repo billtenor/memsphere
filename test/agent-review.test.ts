@@ -20,9 +20,10 @@ import { runAgentReviewAcpSession } from "../src/acp/client.js";
 import { agentActivityRawPath, readAgentActivitySnapshot } from "../src/acp/activity.js";
 import { tryRunArtifactReviewAgents } from "../src/acp/debug.js";
 import { dispatchArtifactReviewAgents } from "../src/acp/dispatcher.js";
-import type { AgentIdentity } from "../src/control-plane/index.js";
+import type { ControlPlaneActor } from "../src/control-plane/index.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 import { createViewServer } from "../src/commands/view.js";
+import { reviewConfiguration } from "./helpers/review.js";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
 const fakeReviewer = join(testDirectory, "fixtures", "fake-acp-reviewer.mjs");
@@ -35,7 +36,7 @@ test("ACP Agent Reviewer completes its bound Assignment through the Session CLI"
     assert(review);
     const round = review.rounds[0];
     const assignment = round.assignments[0];
-    assert.equal(assignment.identityKind, "agent");
+    assert.equal(assignment.actorKind, "agent");
     assert.equal(assignment.status, "queued");
 
     await runArtifactReviewAgentWorker({
@@ -94,7 +95,7 @@ test("ACP Agent Reviewer completes its bound Assignment through the Session CLI"
       const address = server.address();
       assert(address && typeof address === "object");
       const activityUrl = `http://127.0.0.1:${address.port}/api/artifact-reviews/${review.id}`
-        + `/rounds/${round.id}/assignments/${assignment.identityId}/attempts/1/activity`;
+        + `/rounds/${round.id}/assignments/${assignment.actorId}/attempts/1/activity`;
       const response = await fetch(`${activityUrl}?cursor=0&limit=500`);
       assert.equal(response.status, 200);
       const payload = await response.json() as { events: Array<{ kind: string }>; summary?: { text: string } };
@@ -153,7 +154,7 @@ test("ACP Agent Reviewer failure is visible and can be requeued explicitly", asy
       runsRoot,
       reviewId: failedReview.id,
       roundId: failedReview.currentRoundId,
-      identityId: artifactReviewAssignmentId(failed)
+      actorId: artifactReviewAssignmentId(failed)
     });
     assert.equal(retried.assignment.status, "queued");
     assert.equal(retried.assignment.attempts?.length, 2);
@@ -185,7 +186,7 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     const launch = JSON.parse(await readFile(join(directory, "launch.json"), "utf8")) as Record<string, unknown>;
     const prompt = await readFile(join(directory, "prompt.md"), "utf8");
     assert.equal(launch.processStarted, false);
-    assert.equal(launch.identityId, "reviewer-agent");
+    assert.equal(launch.actorId, "reviewer-agent");
     assert.equal(launch.provider, "traex");
     assert.deepEqual((launch.args as string[]).slice(0, 4), ["--sandbox", "workspace-write", "--ask-for-approval", "never"]);
     assert.match(prompt, /# Memsphere Artifact Reviewer/);
@@ -202,15 +203,18 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     assert.match(prompt, /- Schema: Inline; type object; format json; 1 top-level field/);
     assert.doesNotMatch(prompt, /## Artifact\n```json/);
     assert.match(prompt, /run artifact show --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID"/);
+    assert.match(prompt, /run artifact show --run "\$MEMSPHERE_REVIEW_RUN_ID" --step "<step-ref>"/);
     assert.match(prompt, /run artifact contract show --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID"/);
     assert.match(prompt, /run review assignment show --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID"/);
     assert.match(prompt, /Comment bodies use Markdown/);
     assert.match(prompt, /run review comment --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --severity <blocking\|risk\|suggestion> --body-stdin --output json <<'MEMSPHERE_COMMENT'/);
     assert.match(prompt, /Do not encode line breaks as literal `\\n` sequences/);
-    assert.match(prompt, /Check every assertion in the frozen Review contract and the complete Review package before voting/);
+    assert.match(prompt, /## Earlier Artifacts\n- flow\[1\]: prior context/);
+    assert.match(prompt, /trace backward through Artifacts already produced in this Run/);
+    assert.match(prompt, /Check every assertion in the frozen Review contract before voting/);
     assert.match(prompt, /For each unmet assertion, preserve at least one concrete comment/);
     assert.match(prompt, /## Review method/);
-    assert.match(prompt, /commands personally executed/);
+    assert.match(prompt, /explain the basis for the vote and any residual risks/);
     assert.match(prompt, /Do not stop after finding the first issue/);
     assert.match(prompt, /complete a coverage pass across every contract assertion/);
     assert.match(prompt, /same defect pattern and adjacent boundary cases/);
@@ -267,7 +271,7 @@ test("Agent Review CLI launcher rejects commands outside the Session allowlist",
 test("Traex Provider fixes the ACP process to workspace-write non-interactive execution", () => {
   const provider = getAgentReviewProvider("traex");
   const launch = provider.buildLaunch({
-    identity: agentIdentity("traex", ["acp", "serve"], { model: "review-model" }),
+    actor: agentIdentity("traex", ["acp", "serve"], { model: "review-model" }),
     workspaceRoot: "/workspace",
     sessionEnv: { MEMSPHERE_CLI: "/tmp/memsphere-review" }
   });
@@ -286,7 +290,7 @@ test("Traex Provider fixes the ACP process to workspace-write non-interactive ex
   assert.equal(launch.maxRuntimeMs, null);
 
   const unlimited = provider.buildLaunch({
-    identity: agentIdentity("traex", [], {
+    actor: agentIdentity("traex", [], {
       startupTimeoutMs: 5_000,
       idleTimeoutMs: 15_000,
       maxRuntimeMs: null
@@ -299,17 +303,17 @@ test("Traex Provider fixes the ACP process to workspace-write non-interactive ex
   assert.equal(unlimited.maxRuntimeMs, null);
 
   assert.throws(() => provider.buildLaunch({
-    identity: agentIdentity("traex", ["--sandbox=danger-full-access"]),
+    actor: agentIdentity("traex", ["--sandbox=danger-full-access"]),
     workspaceRoot: "/workspace",
     sessionEnv: {}
   }), /managed security argument/);
   assert.throws(() => provider.buildLaunch({
-    identity: agentIdentity("traex", ["exec"]),
+    actor: agentIdentity("traex", ["exec"]),
     workspaceRoot: "/workspace",
     sessionEnv: {}
   }), /cannot launch the 'exec' subcommand/);
   assert.throws(() => provider.buildLaunch({
-    identity: agentIdentity("traex", [], { cwd: "../outside" }),
+    actor: agentIdentity("traex", [], { cwd: "../outside" }),
     workspaceRoot: "/workspace",
     sessionEnv: {}
   }), /cwd must stay inside the workspace/);
@@ -434,11 +438,14 @@ async function withAgentReviewFixture(
     await mkdir(join(memoryRoot, "procedures"), { recursive: true });
     await writeFile(join(memoryRoot, "procedures", "agent-review.yaml"), withCurrentMemorySyntax(`!procedure
 name: agent-review-fixture
-role_bindings:
-  reviewer: reviewer-agent
 asserts:
   - Keep the review evidence traceable.
 flow:
+  - !action
+    action: Produce prior context.
+    artifact: !artifact
+      name: prior context
+      format: markdown
   - !action
     action: Produce a reviewed Artifact.
     asserts:
@@ -457,28 +464,22 @@ flow:
           - !schema
             name: summary
             type: string
-      review: artifact_acceptance.unanimous
+      review: [reviewer]
 `));
     await writeFile(configPath, `${JSON.stringify({
       memoryRoot: "memory",
       runsRoot: "runs",
       control_plane: {
-        identities: {
+        runner: {
+          permissions: ["artifact.read", "artifact.submit", "decision.decide"]
+        },
+        actors: {
           "reviewer-agent": {
             kind: "agent",
             name: "Fake Reviewer",
-            agent: { provider: "traex", command: process.execPath, args: [fakeReviewer, mode], timeout_ms: 10_000 }
-          }
-        },
-        roles: {
-          runner: {
-            name: "Runner",
-            permissions: ["artifact.read", "artifact.submit", "decision.decide"]
-          },
-          reviewer: {
-            name: "Reviewer",
             permissions: ["artifact.read", "decision.decide"],
-            system_prompt: "Check the candidate independently."
+            system_prompt: "Check the candidate independently.",
+            agent: { provider: "traex", command: process.execPath, args: [fakeReviewer, mode], timeout_ms: 10_000 }
           }
         }
       }
@@ -488,7 +489,17 @@ flow:
       memoryRoot: config.memoryRoot,
       runsRoot: config.runsRoot,
       procedureName: "agent-review-fixture",
-      controlPlane: config.controlPlane
+      controlPlane: config.controlPlane,
+      reviewConfiguration: reviewConfiguration({
+        procedure: "agent-review-fixture",
+        flowIndexes: [2],
+        slots: { reviewer: ["reviewer-agent"] }
+      })
+    });
+    await reportRun({
+      runsRoot: config.runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "# Prior context\nRelevant background." }
     });
     await reportRun({
       runsRoot: config.runsRoot,
@@ -504,29 +515,31 @@ flow:
 function agentIdentity(
   provider: "traex",
   args: string[],
-  overrides: Partial<Extract<AgentIdentity, { kind: "agent" }>["agent"]> = {}
-): Extract<AgentIdentity, { kind: "agent" }> {
+  overrides: Partial<Extract<ControlPlaneActor, { kind: "agent" }>["agent"]> = {}
+): Extract<ControlPlaneActor, { kind: "agent" }> {
   return {
     kind: "agent",
     name: "Reviewer",
+    permissions: ["artifact.read", "decision.assess"],
+    grantablePermissions: [],
     agent: { provider, command: "traecli", args, ...overrides }
   };
 }
 
 const fakeAgentReviewProvider: AgentReviewProvider = {
   id: "fake-test-provider",
-  buildLaunch({ identity, workspaceRoot, sessionEnv }) {
+  buildLaunch({ actor, workspaceRoot, sessionEnv }) {
     return {
       provider: "fake-test-provider",
-      command: identity.agent.command,
-      args: [...identity.agent.args],
+      command: actor.agent.command,
+      args: [...actor.agent.args],
       cwd: workspaceRoot,
       env: { ...process.env, ...sessionEnv },
-      startupTimeoutMs: identity.agent.startupTimeoutMs ?? 10_000,
-      idleTimeoutMs: identity.agent.idleTimeoutMs ?? 10_000,
-      maxRuntimeMs: identity.agent.maxRuntimeMs ?? null,
-      promptVersion: identity.agent.promptVersion ?? "artifact-review-v1",
-      model: identity.agent.model
+      startupTimeoutMs: actor.agent.startupTimeoutMs ?? 10_000,
+      idleTimeoutMs: actor.agent.idleTimeoutMs ?? 10_000,
+      maxRuntimeMs: actor.agent.maxRuntimeMs ?? null,
+      promptVersion: actor.agent.promptVersion ?? "artifact-review-v1",
+      model: actor.agent.model
     };
   }
 };

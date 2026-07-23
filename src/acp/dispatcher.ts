@@ -20,7 +20,7 @@ export async function dispatchArtifactReviewAgents(input: {
     const round = review.rounds.find((candidate) => candidate.id === review.currentRoundId);
     if (!round || round.status !== "pending") return [];
     return round.assignments
-      .filter((assignment) => (assignment.identityKind ?? "human") === "agent" && assignment.status === "queued")
+      .filter((assignment) => (assignment.actorKind ?? "human") === "agent" && assignment.status === "queued")
       .map((assignment) => ({ review, round, assignment }));
   });
   if (queued.length === 0) return 0;
@@ -53,7 +53,7 @@ export async function dispatchArtifactReviewAgents(input: {
         runsRoot: input.config.runsRoot,
         reviewId: review.id,
         roundId: round.id,
-        identityId: artifactReviewAssignmentId(assignment),
+        actorId: artifactReviewAssignmentId(assignment),
         workerPid: process.pid
       });
       if (!claimed) return;
@@ -62,7 +62,7 @@ export async function dispatchArtifactReviewAgents(input: {
         runsRoot: input.config.runsRoot,
         reviewId: review.id,
         roundId: round.id,
-        identityId: assignment.identityId,
+        actorId: assignment.actorId,
         attemptId: claimed.attempt.id,
         failure: { stage: "spawn", code: "worker_spawn_failed", message }
       });

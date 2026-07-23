@@ -626,7 +626,7 @@ export const browserHtml = String.raw`<!doctype html>
       viewMode: localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
       payload: null,
       memories: [],
-      roleNames: {},
+      actorNames: {},
       systemMemoryPaths: new Set(),
       reservedMemories: [],
       filtered: [],
@@ -808,7 +808,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (!response.ok) throw new Error(await response.text());
       state.payload = await response.json();
       state.memories = state.payload.memories;
-      state.roleNames = state.payload.roleNames || {};
+      state.actorNames = state.payload.actorNames || {};
       state.systemMemoryPaths = new Set(state.payload.systemMemoryPaths || []);
       state.byName = new Map();
       for (const memory of state.memories) {
@@ -891,33 +891,33 @@ export const browserHtml = String.raw`<!doctype html>
         state.artifactReviewSelectedByRun[run.id] = review.id;
         writeStoredObject(artifactReviewSelectedKey, state.artifactReviewSelectedByRun);
       }
-      const assignments = (review.round.assignments || []).filter(assignment => assignment.identityKind !== "agent");
-      let identityId = state.artifactReviewIdentityByReview[review.id] || "";
-      if (!assignments.some(assignment => assignment.identityId === identityId)) {
-        identityId = assignments.length === 1 ? assignments[0].identityId : "";
+      const assignments = (review.round.assignments || []).filter(assignment => assignment.actorKind !== "agent");
+      let actorId = state.artifactReviewIdentityByReview[review.id] || "";
+      if (!assignments.some(assignment => assignment.actorId === actorId)) {
+        actorId = assignments.length === 1 ? assignments[0].actorId : "";
       }
-      if (identityId) {
-        state.artifactReviewIdentityByReview[review.id] = identityId;
+      if (actorId) {
+        state.artifactReviewIdentityByReview[review.id] = actorId;
         writeStoredObject(artifactReviewIdentityKey, state.artifactReviewIdentityByReview);
       }
       if (force || !hasOpenInlineEditor()) {
         const requestedRoundId = state.artifactReviewRoundByReview[review.id] || review.currentRoundId;
         try {
-          await loadArtifactReviewContext(review.id, requestedRoundId, identityId);
+          await loadArtifactReviewContext(review.id, requestedRoundId, actorId);
         } catch (error) {
           if (requestedRoundId === review.currentRoundId) throw error;
           state.artifactReviewRoundByReview[review.id] = review.currentRoundId;
           writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
-          await loadArtifactReviewContext(review.id, review.currentRoundId, identityId);
+          await loadArtifactReviewContext(review.id, review.currentRoundId, actorId);
         }
       }
     }
 
-    async function loadArtifactReviewContext(reviewId, roundId, identityId) {
+    async function loadArtifactReviewContext(reviewId, roundId, actorId) {
       const requestId = ++state.artifactReviewRequest;
       state.artifactReviewLoading = true;
       try {
-        const context = await fetchArtifactReviewContext(reviewId, roundId, identityId);
+        const context = await fetchArtifactReviewContext(reviewId, roundId, actorId);
         if (requestId !== state.artifactReviewRequest) return;
         state.artifactReviewContext = context;
         state.artifactReviewRoundByReview[reviewId] = roundId;
@@ -929,11 +929,11 @@ export const browserHtml = String.raw`<!doctype html>
       }
     }
 
-    async function fetchArtifactReviewContext(reviewId, roundId, identityId) {
+    async function fetchArtifactReviewContext(reviewId, roundId, actorId) {
       const response = await fetch(
         "/api/artifact-reviews/" + encodeURIComponent(reviewId)
         + "/rounds/" + encodeURIComponent(roundId)
-        + (identityId ? "?identity_id=" + encodeURIComponent(identityId) : "")
+        + (actorId ? "?actor_id=" + encodeURIComponent(actorId) : "")
       );
       if (!response.ok) throw new Error(await response.text());
       return response.json();
@@ -2771,8 +2771,8 @@ export const browserHtml = String.raw`<!doctype html>
       const artifact = artifactSpec(step);
       if (!artifact.review) return;
       const bindings = effectiveArtifactReviewBindings(step, artifact);
-      const roleIds = Object.keys(bindings);
-      if (!roleIds.length) return;
+      const slotIds = Object.keys(bindings);
+      if (!slotIds.length) return;
 
       const reviewLine = document.createElement("div");
       reviewLine.className = "artifact-meta-line artifact-review-line";
@@ -2780,22 +2780,21 @@ export const browserHtml = String.raw`<!doctype html>
       label.className = "artifact-label";
       label.textContent = t("reviewers");
       reviewLine.append(label);
-      for (const roleId of roleIds) reviewLine.append(pill(artifactReviewRoleDisplayName(roleId)));
+      for (const roleId of slotIds) reviewLine.append(pill(artifactReviewRoleDisplayName(roleId)));
       target.append(reviewLine);
     }
 
     function effectiveArtifactReviewBindings(step, artifact) {
       if (state.viewMode === "task" && step?.controlPlane?.bindings) return step.controlPlane.bindings;
-      const memory = selectedMemory();
-      const procedureBindings = memory?.entity?.tag === "!procedure" ? memory.entity.roleBindings || {} : {};
-      return { ...procedureBindings, ...(artifact.roleBindings || {}) };
+      const slots = Array.isArray(artifact.review) ? artifact.review : [];
+      return Object.fromEntries(slots.map(slot => [slot, { actorIds: [] }]));
     }
 
     function artifactReviewRoleDisplayName(roleId) {
       if (state.viewMode === "task") {
-        return selectedTask()?.controlPlane?.roles?.[roleId]?.name || state.roleNames[roleId] || roleId;
+        return roleId.includes("::") ? roleId.slice(roleId.lastIndexOf("::") + 2) : roleId;
       }
-      return state.roleNames[roleId] || roleId;
+      return roleId.includes("::") ? roleId.slice(roleId.lastIndexOf("::") + 2) : roleId;
     }
 
     function inlineSchemaTogglePill(schema) {
@@ -2923,7 +2922,8 @@ export const browserHtml = String.raw`<!doctype html>
         if (artifact.contentError) return "Unable to read artifact file: " + artifact.contentError;
         return artifact.path ? "File artifact: " + artifact.path : "";
       }
-      return artifact.value ?? "";
+      const value = artifact.value;
+      return value !== null && typeof value === "object" ? JSON.stringify(value, null, 2) : value ?? "";
     }
 
     function shouldRenderMarkdownArtifact(artifact) {
@@ -2956,10 +2956,7 @@ export const browserHtml = String.raw`<!doctype html>
           format: step.artifact.format || { name: "plain", options: {} },
           schema: inlineSchema,
           final: Boolean(step.artifact.final),
-          review: step.artifact.review || "",
-          reviewRole: step.artifact.reviewRole || step.artifact.review_role || "",
-          reviewRequires: step.artifact.reviewRequires || step.artifact.review_requires || [],
-          roleBindings: step.artifact.roleBindings || {}
+          review: step.artifact.review || []
         };
       }
       return {
@@ -2968,10 +2965,7 @@ export const browserHtml = String.raw`<!doctype html>
         format: step?.format || { name: "plain", options: {} },
         schema: step?.schema,
         final: Boolean(step?.final),
-        review: step?.reviewPolicy || "",
-        reviewRole: step?.reviewRole || "",
-        reviewRequires: step?.reviewRequires || [],
-        roleBindings: step?.roleBindings || {}
+        review: step?.reviewPolicy || ""
       };
     }
 
@@ -3161,7 +3155,7 @@ export const browserHtml = String.raw`<!doctype html>
       return {
         reviewId: context.review.id,
         roundId: context.review.currentRoundId,
-        identityId: context.assignment.identityId
+        actorId: context.assignment.actorId
       };
     }
 
@@ -3170,7 +3164,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (!left || !right) return false;
       return left.reviewId === right.reviewId
         && left.roundId === right.roundId
-        && left.identityId === right.identityId;
+        && left.actorId === right.actorId;
     }
 
     function nextLocation(anchor) {
@@ -3518,7 +3512,7 @@ export const browserHtml = String.raw`<!doctype html>
             comments.push({
               ...comment,
               _mineDraft: false,
-              _identityName: artifactReviewRoleName(assignment),
+              _actorName: artifactReviewRoleName(assignment),
               _binding: assignment.binding,
               _round: round.sequence
             });
@@ -3530,7 +3524,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function artifactReviewDraftKey(context) {
       if (!context?.review || !context?.assignment) return "";
-      return [context.review.id, context.review.currentRoundId, context.assignment.identityId].join(":");
+      return [context.review.id, context.review.currentRoundId, context.assignment.actorId].join(":");
     }
 
     function artifactReviewLocalEntry(context) {
@@ -3698,7 +3692,7 @@ export const browserHtml = String.raw`<!doctype html>
         if (response.status === 409) {
           entry.status = displayLanguage === "zh" ? "评审轮次已更新，正在同步你的草稿" : "The review round changed; syncing your draft";
           try {
-            const latestContext = await fetchArtifactReviewContext(context.review.id, context.review.currentRoundId, context.assignment.identityId);
+            const latestContext = await fetchArtifactReviewContext(context.review.id, context.review.currentRoundId, context.assignment.actorId);
             state.artifactReviewContext = latestContext;
             const latestDraft = artifactReviewServerDraft(latestContext);
             const mergedDraft = mergeArtifactReviewDraft(latestDraft, entry);
@@ -3770,7 +3764,7 @@ export const browserHtml = String.raw`<!doctype html>
     function artifactReviewAssignmentUrl(context, operation) {
       return "/api/artifact-reviews/" + encodeURIComponent(context.review.id)
         + "/rounds/" + encodeURIComponent(context.review.currentRoundId)
-        + "/assignments/" + encodeURIComponent(context.assignment.identityId)
+        + "/assignments/" + encodeURIComponent(context.assignment.actorId)
         + "/" + operation;
     }
 
@@ -3812,7 +3806,7 @@ export const browserHtml = String.raw`<!doctype html>
       });
       if (response.status === 409) {
         try {
-          state.artifactReviewContext = await fetchArtifactReviewContext(latestContext.review.id, latestContext.review.currentRoundId, latestContext.assignment.identityId);
+          state.artifactReviewContext = await fetchArtifactReviewContext(latestContext.review.id, latestContext.review.currentRoundId, latestContext.assignment.actorId);
         } catch (_error) {
           // Keep the visible draft state when the refresh also fails.
         }
@@ -4028,7 +4022,7 @@ export const browserHtml = String.raw`<!doctype html>
       );
       controls.append(scopeMeta);
       if (context) controls.append(renderArtifactReviewHistorySelector(context));
-      const humanAssignments = (review.round.assignments || []).filter(assignment => assignment.identityKind !== "agent");
+      const humanAssignments = (review.round.assignments || []).filter(assignment => assignment.actorKind !== "agent");
       if (humanAssignments.length) {
         const identityLabel = blockTitle(t("identity"));
         el.artifactReviewMyContent.append(identityLabel, renderArtifactReviewIdentitySelector(review, context));
@@ -4068,7 +4062,7 @@ export const browserHtml = String.raw`<!doctype html>
       }
 
       const disabledReason = artifactReviewSubmitDisabledReason();
-      const agentManaged = context?.assignment?.identityKind === "agent";
+      const agentManaged = context?.assignment?.actorKind === "agent";
       const readOnly = !context?.assignment || viewingHistory || context.assignment.status === "submitted" || context.review.status !== "pending";
       el.artifactReviewSubmitArea.hidden = Boolean(agentManaged || readOnly);
       el.artifactReviewSubmit.textContent = context?.assignment?.status === "submitted" ? t("submitted") : t("submitArtifactReview");
@@ -4130,11 +4124,6 @@ export const browserHtml = String.raw`<!doctype html>
         .length;
     }
 
-    function artifactReviewEvidenceRoleLabel(role) {
-      if (displayLanguage !== "zh") return role;
-      return ({ requirement: "需求", implementation: "实现", validation: "验证", "review-material": "验收材料" })[role] || role;
-    }
-
     function artifactReviewMaterials(context) {
       return [
         {
@@ -4143,10 +4132,16 @@ export const browserHtml = String.raw`<!doctype html>
           artifact: context.submission.artifact,
           commentable: true
         },
-        ...((context.submission.package?.evidence || []).map((evidence, index) => ({
-          key: "evidence:" + index,
-          label: artifactReviewEvidenceRoleLabel(evidence.role),
-          artifact: evidence.artifact,
+        {
+          key: "contract",
+          label: displayLanguage === "zh" ? "冻结契约" : "Frozen contract",
+          artifact: context.submission.contractArtifact,
+          commentable: false
+        },
+        ...((context.submission.contextArtifacts || []).map((item, index) => ({
+          key: "context:" + index,
+          label: displayLanguage === "zh" ? "前序产物" : "Earlier Artifact",
+          artifact: item.artifact,
           commentable: false
         })))
       ];
@@ -4383,7 +4378,7 @@ export const browserHtml = String.raw`<!doctype html>
         const submitted = assignment.submitted;
         const row = document.createElement("div");
         row.className = "artifact-review-row";
-        if (assignment.identityKind === "agent") {
+        if (assignment.actorKind === "agent") {
           row.id = agentActivityRowDomId(review, selectedRound, assignment);
         }
         const main = document.createElement("div");
@@ -4398,9 +4393,9 @@ export const browserHtml = String.raw`<!doctype html>
         const type = document.createElement("span");
         type.className = "muted";
         type.textContent = (assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote"))
-          + (assignment.identityKind === "agent" ? " · Agent" : "");
+          + (assignment.actorKind === "agent" ? " · Agent" : "");
         main.append(name, type);
-        if (assignment.identityKind === "agent") {
+        if (assignment.actorKind === "agent") {
           const activity = agentActivityEntry(review, selectedRound, assignment);
           const attempt = latestAgentAttempt(assignment);
           const summaryRow = document.createElement("div");
@@ -4463,13 +4458,13 @@ export const browserHtml = String.raw`<!doctype html>
         status.className = "artifact-review-progress";
         status.textContent = submitted
           ? artifactReviewVoteLabel(submitted.vote, assignment.binding)
-          : artifactReviewAssignmentStatusLabel(assignment.status, assignment.identityKind);
+          : artifactReviewAssignmentStatusLabel(assignment.status, assignment.actorKind);
         const actions = document.createElement("div");
         actions.className = "comment-actions";
         actions.append(status);
         if (
           currentRoundSelected
-          && assignment.identityKind === "agent"
+          && assignment.actorKind === "agent"
           && assignment.status === "failed"
           && review.status === "pending"
         ) {
@@ -4481,7 +4476,7 @@ export const browserHtml = String.raw`<!doctype html>
           actions.append(retry);
         }
         row.append(main, actions);
-        if (assignment.identityKind === "agent") {
+        if (assignment.actorKind === "agent") {
           const activity = agentActivityEntry(review, selectedRound, assignment);
           if (activity?.expanded) row.append(renderAgentActivity(review, selectedRound, assignment, activity));
         }
@@ -4495,12 +4490,12 @@ export const browserHtml = String.raw`<!doctype html>
         const main = document.createElement("div");
         main.className = "artifact-review-row-main";
         const name = document.createElement(selectedRunnerVote ? "button" : "span");
-        const runnerName = runnerSummary?.roleName || "Runner";
+        const runnerName = runnerSummary?.actorName || "Runner";
         name.textContent = runnerName + (runnerSummary?.automatic ? " · " + t("automatic") : "");
         if (selectedRunnerVote) {
           name.type = "button";
           name.className = "artifact-review-participant-link";
-          name.addEventListener("click", () => scrollToArtifactReviewParticipant({ identityId: "runner" }));
+          name.addEventListener("click", () => scrollToArtifactReviewParticipant({ actorId: "runner" }));
         }
         const type = document.createElement("span");
         type.className = "muted";
@@ -4518,7 +4513,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function agentActivityKey(review, round, assignment) {
-      return [review.id, round?.id || review.currentRoundId, assignment.identityId].join(":");
+      return [review.id, round?.id || review.currentRoundId, assignment.actorId].join(":");
     }
 
     function agentActivityDomId(review, round, assignment) {
@@ -4588,7 +4583,7 @@ export const browserHtml = String.raw`<!doctype html>
         ? selectedArtifactReviewRound(state.artifactReviewContext)
         : review.round;
       if (!round) return;
-      const agents = (round.assignments || []).filter(assignment => assignment.identityKind === "agent");
+      const agents = (round.assignments || []).filter(assignment => assignment.actorKind === "agent");
       await Promise.all(agents.map(async assignment => {
         const entry = agentActivityEntry(review, round, assignment);
         if (!entry || entry.loading) return;
@@ -4630,7 +4625,7 @@ export const browserHtml = String.raw`<!doctype html>
         const response = await fetch(
           "/api/artifact-reviews/" + encodeURIComponent(review.id)
           + "/rounds/" + encodeURIComponent(round.id)
-          + "/assignments/" + encodeURIComponent(assignment.identityId)
+          + "/assignments/" + encodeURIComponent(assignment.actorId)
           + "/attempts/" + encodeURIComponent(entry.selectedAttempt)
           + "/activity?cursor=" + encodeURIComponent(cursor)
           + "&limit=" + limit
@@ -4871,7 +4866,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function artifactReviewParticipantDomId(assignment) {
-      return "artifact-review-participant-" + String(assignment.identityId || "runner").replace(/[^a-zA-Z0-9_-]/g, "-");
+      return "artifact-review-participant-" + String(assignment.actorId || "runner").replace(/[^a-zA-Z0-9_-]/g, "-");
     }
 
     function scrollToArtifactReviewParticipant(assignment) {
@@ -4887,7 +4882,7 @@ export const browserHtml = String.raw`<!doctype html>
       const response = await fetch(
         "/api/artifact-reviews/" + encodeURIComponent(review.id)
         + "/rounds/" + encodeURIComponent(review.currentRoundId)
-        + "/assignments/" + encodeURIComponent(assignment.identityId)
+        + "/assignments/" + encodeURIComponent(assignment.actorId)
         + "/retry",
         { method: "POST" }
       );
@@ -4897,11 +4892,11 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderArtifactReviewIdentitySelector(review, context) {
-      const assignments = (review.round.assignments || []).filter(assignment => assignment.identityKind !== "agent");
-      const selectedIdentityId = context?.assignment?.identityId || state.artifactReviewIdentityByReview[review.id] || "";
-      const selectedAssignment = assignments.find(assignment => assignment.identityId === selectedIdentityId);
+      const assignments = (review.round.assignments || []).filter(assignment => assignment.actorKind !== "agent");
+      const selectedIdentityId = context?.assignment?.actorId || state.artifactReviewIdentityByReview[review.id] || "";
+      const selectedAssignment = assignments.find(assignment => assignment.actorId === selectedIdentityId);
       const chooser = document.createElement("div");
-      chooser.className = "artifact-review-round-select artifact-review-identity-select";
+      chooser.className = "artifact-review-round-select artifact-review-actor-select";
       const trigger = document.createElement("button");
       trigger.type = "button";
       trigger.className = "artifact-review-select artifact-review-select-trigger";
@@ -4941,16 +4936,16 @@ export const browserHtml = String.raw`<!doctype html>
         option.type = "button";
         option.className = "artifact-review-select-option";
         option.setAttribute("role", "option");
-        option.setAttribute("aria-selected", String(assignment.identityId === selectedIdentityId));
-        option.dataset.identityId = assignment.identityId;
+        option.setAttribute("aria-selected", String(assignment.actorId === selectedIdentityId));
+        option.dataset.actorId = assignment.actorId;
         option.textContent = artifactReviewRoleName(assignment) + " · "
           + (assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote"));
         option.addEventListener("click", async () => {
           setOpen(false);
-          state.artifactReviewIdentityByReview[review.id] = assignment.identityId;
+          state.artifactReviewIdentityByReview[review.id] = assignment.actorId;
           writeStoredObject(artifactReviewIdentityKey, state.artifactReviewIdentityByReview);
           const roundId = state.artifactReviewRoundByReview[review.id] || review.currentRoundId;
-          await loadArtifactReviewContext(review.id, roundId, assignment.identityId);
+          await loadArtifactReviewContext(review.id, roundId, assignment.actorId);
           renderAll();
         });
         menu.append(option);
@@ -4996,8 +4991,8 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function artifactReviewRoleName(assignment) {
-      const names = assignment?.roleNames || assignment?.roleIds || [];
-      return names.length ? names.join(" / ") : assignment?.identityName || "";
+      const names = assignment?.slotNames || assignment?.slotIds || [];
+      return names.length ? names.join(" / ") : assignment?.actorName || "";
     }
 
     function renderArtifactReviewHistorySelector(context) {
@@ -5058,7 +5053,7 @@ export const browserHtml = String.raw`<!doctype html>
           state.artifactReviewHistoryRoundId = round.id;
           writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
           setOpen(false);
-          await loadArtifactReviewContext(context.review.id, round.id, context.assignment?.identityId || "");
+          await loadArtifactReviewContext(context.review.id, round.id, context.assignment?.actorId || "");
           renderAll();
         });
         menu.append(option);
@@ -5158,7 +5153,7 @@ export const browserHtml = String.raw`<!doctype html>
         renderArtifactReviewSubmittedOpinions(selectedRound, el.artifactReviewModalComments, false);
         return;
       }
-      if (assignment.identityKind === "agent") {
+      if (assignment.actorKind === "agent") {
         renderArtifactReviewAgentWorkspace(context, selectedRound);
         return;
       }
@@ -5223,7 +5218,7 @@ export const browserHtml = String.raw`<!doctype html>
       const status = document.createElement("div");
       status.className = "artifact-review-agent-status";
       status.append(blockTitle(t("agentReviewer")));
-      const retryKey = context.review.id + ":" + assignment.identityId;
+      const retryKey = context.review.id + ":" + assignment.actorId;
       const retryState = state.artifactReviewRetries[retryKey];
       const progress = document.createElement("div");
       progress.className = "artifact-review-message" + (assignment.status === "failed" ? " warn" : "");
@@ -5263,7 +5258,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function retryArtifactReviewAgent(context) {
-      const key = context.review.id + ":" + context.assignment.identityId;
+      const key = context.review.id + ":" + context.assignment.actorId;
       const nextAttempt = (context.assignment.attempts?.at(-1)?.sequence || 0) + 1;
       state.artifactReviewRetries[key] = { status: "queued", attempt: nextAttempt };
       renderAll();
@@ -5367,7 +5362,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderArtifactReviewRunnerOpinion(vote) {
-      const section = artifactReviewOpinionSection({ identityId: "runner" }, "Runner", vote.submittedAt);
+      const section = artifactReviewOpinionSection({ actorId: "runner" }, "Runner", vote.submittedAt);
       section.append(blockTitle(t("voteSummary")));
       const summary = document.createElement("div");
       summary.className = "artifact-review-message" + (vote.value === "request_changes" ? " warn" : "");
@@ -5383,14 +5378,14 @@ export const browserHtml = String.raw`<!doctype html>
       return section;
     }
 
-    function artifactReviewOpinionSection(subject, roleName, submittedAtValue) {
+    function artifactReviewOpinionSection(subject, actorName, submittedAtValue) {
       const section = document.createElement("article");
       section.className = "artifact-review-opinion";
       section.id = artifactReviewParticipantDomId(subject);
       const header = document.createElement("header");
       header.className = "artifact-review-opinion-head";
       const role = document.createElement("strong");
-      role.textContent = roleName;
+      role.textContent = actorName;
       const submittedAt = document.createElement("time");
       submittedAt.className = "muted";
       submittedAt.dateTime = submittedAtValue || "";
@@ -5566,7 +5561,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderArtifactReviewCommentCard(
       comment,
-      identityName,
+      actorName,
       editable,
       advisory = false,
       disposition = null,
@@ -5577,7 +5572,7 @@ export const browserHtml = String.raw`<!doctype html>
       const header = document.createElement("header");
       header.className = "artifact-review-comment-head";
       const title = document.createElement("b");
-      title.textContent = identityName + (comment.anchor?.target ? " · " + comment.anchor.target : "");
+      title.textContent = actorName + (comment.anchor?.target ? " · " + comment.anchor.target : "");
       header.append(title);
       if (comment.severity) {
         header.append(pill(artifactReviewSeverityLabel(comment.severity), false, comment.severity === "blocking" ? "outdated" : "warn"));
@@ -5669,7 +5664,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (context.submission.id !== comment.anchor.submissionId) {
         state.artifactReviewRoundByReview[context.review.id] = targetRound.id;
         writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
-        await loadArtifactReviewContext(context.review.id, targetRound.id, context.assignment?.identityId || "");
+        await loadArtifactReviewContext(context.review.id, targetRound.id, context.assignment?.actorId || "");
         renderAll();
       }
       const anchor = comment.anchor.location || comment.anchor.target;
@@ -5706,7 +5701,7 @@ export const browserHtml = String.raw`<!doctype html>
       });
       if (!response.ok) throw new Error(await response.text());
       await loadRuns();
-      await loadArtifactReviewContext(context.review.id, context.review.currentRoundId, context.assignment?.identityId || "");
+      await loadArtifactReviewContext(context.review.id, context.review.currentRoundId, context.assignment?.actorId || "");
       renderAll();
       return true;
     }
@@ -5761,9 +5756,9 @@ export const browserHtml = String.raw`<!doctype html>
       return ({ blocking: "阻塞问题", risk: "风险", suggestion: "建议" })[value] || value;
     }
 
-    function artifactReviewAssignmentStatusLabel(status, identityKind) {
+    function artifactReviewAssignmentStatusLabel(status, actorKind) {
       if (status === "submitted") return t("submitted");
-      if (identityKind !== "agent") return t("draft");
+      if (actorKind !== "agent") return t("draft");
       if (status === "queued") return t("queued");
       if (status === "running") return t("running");
       if (status === "failed") return t("failed");

@@ -97,10 +97,10 @@ test("review mutations use button action guards", () => {
 });
 
 test("Artifact Review renders Agent progress and exposes retry only for failed Agents", () => {
-  assert.match(browserHtml, /assignment\.identityKind === "agent"/);
+  assert.match(browserHtml, /assignment\.actorKind === "agent"/);
   assert.match(browserHtml, /renderArtifactReviewAgentWorkspace\(context, selectedRound\)/);
   assert.match(browserHtml, /const currentRoundSelected = selectedRound\?\.id === review\.currentRoundId/);
-  assert.match(browserHtml, /currentRoundSelected\s*&& assignment\.identityKind === "agent"\s*&& assignment\.status === "failed"\s*&& review\.status === "pending"/);
+  assert.match(browserHtml, /currentRoundSelected\s*&& assignment\.actorKind === "agent"\s*&& assignment\.status === "failed"\s*&& review\.status === "pending"/);
   assert.match(browserHtml, /retryArtifactReviewAgent\(context\)/);
   assert.match(browserHtml, /attempt\.failure\.code \+ ": " \+ attempt\.failure\.message/);
   assert.match(browserHtml, /state\.artifactReviewRetries/);
@@ -119,7 +119,8 @@ test("Artifact Review comment severity belongs to the card header", () => {
 test("Artifact Review evidence is selected in the artifact pane", () => {
   assert.match(browserHtml, /artifactReviewMaterialBySubmission: \{\}/);
   assert.match(browserHtml, /function renderArtifactReviewMaterialSelector\(context, selectedMaterial\)/);
-  assert.match(browserHtml, /context\.submission\.package\?\.evidence/);
+  assert.match(browserHtml, /artifact: context\.submission\.contractArtifact/);
+  assert.match(browserHtml, /context\.submission\.contextArtifacts/);
   assert.match(browserHtml, /commentable: false/);
   assert.doesNotMatch(browserHtml, /function renderArtifactReviewEvidencePackage/);
 });
@@ -132,7 +133,7 @@ test("Artifact Review exposes read-only Agent Activity inside participant rows",
   assert.match(browserHtml, /row\.append\(renderAgentActivity\(review, selectedRound, assignment, activity\)\)/);
   assert.match(browserHtml, /entry\.pinnedToBottom = distance < 20/);
   assert.match(browserHtml, /entry\.events = \[\.\.\.byId\.values\(\)\]/);
-  assert.match(browserHtml, /const assignments = \(review\.round\.assignments \|\| \[\]\)\.filter\(assignment => assignment\.identityKind !== "agent"\)/);
+  assert.match(browserHtml, /const assignments = \(review\.round\.assignments \|\| \[\]\)\.filter\(assignment => assignment\.actorKind !== "agent"\)/);
   assert.match(browserHtml, /\.artifact-review-activity \{ grid-column: 1 \/ -1;/);
   assert.match(browserHtml, /artifact-review-attempt-select/);
   assert.match(browserHtml, /artifact-review-agent-summary-row/);
@@ -155,7 +156,7 @@ test("Artifact Review exposes read-only Agent Activity inside participant rows",
 
 test("Artifact Review identity controls use Role names and an anchored custom menu", () => {
   assert.match(browserHtml, /function artifactReviewRoleName\(assignment\)/);
-  assert.match(browserHtml, /artifact-review-identity-select/);
+  assert.match(browserHtml, /artifact-review-actor-select/);
   assert.match(browserHtml, /option\.textContent = artifactReviewRoleName\(assignment\)/);
   assert.match(browserHtml, /name\.textContent = artifactReviewRoleName\(assignment\)/);
   assert.match(browserHtml, /\.artifact-review-select-menu \{ position: absolute; top: calc\(100% \+ 4px\); right: 0; left: 0;/);
@@ -224,17 +225,17 @@ test("Artifact Review uses a resizable evidence modal with stable Submission tar
   );
 });
 
-test("memory and task artifacts show participating Review Role names", () => {
+test("memory and task artifacts show participating Review Slot names", () => {
   assert.match(browserHtml, /reviewers: \{ zh: "评审", yaml: "Review" \}/);
-  assert.match(browserHtml, /state\.roleNames = state\.payload\.roleNames \|\| \{\}/);
+  assert.match(browserHtml, /state\.actorNames = state\.payload\.actorNames \|\| \{\}/);
   assert.match(browserHtml, /appendArtifactReviewRoles\(row, step\)/);
   assert.match(browserHtml, /artifactLine\.className = "artifact-meta-line"/);
   assert.match(browserHtml, /reviewLine\.className = "artifact-meta-line artifact-review-line"/);
   assert.match(browserHtml, /\.artifact-row \{ display: grid;[^}]*justify-items: start;[^}]*justify-content: start;/);
   assert.match(browserHtml, /\.artifact-meta-line \{ display: flex;[^}]*justify-content: flex-start;/);
-  assert.match(browserHtml, /return \{ \.\.\.procedureBindings, \.\.\.\(artifact\.roleBindings \|\| \{\}\) \}/);
-  assert.match(browserHtml, /if \(state\.viewMode === "task"\) \{\s*return selectedTask\(\)\?\.controlPlane\?\.roles\?\.\[roleId\]\?\.name \|\| state\.roleNames\[roleId\] \|\| roleId;/);
-  assert.match(browserHtml, /return state\.roleNames\[roleId\] \|\| roleId;/);
+  assert.match(browserHtml, /const slots = Array\.isArray\(artifact\.review\) \? artifact\.review : \[\]/);
+  assert.match(browserHtml, /return Object\.fromEntries\(slots\.map\(slot => \[slot, \{ actorIds: \[\] \}\]\)\)/);
+  assert.match(browserHtml, /roleId\.includes\("::"\) \? roleId\.slice\(roleId\.lastIndexOf\("::"\) \+ 2\) : roleId/);
 });
 
 test("markdown artifacts use rendered markdown content when available", () => {
@@ -366,7 +367,7 @@ test("Artifact Review draft conflicts recover without surfacing alert errors", (
   assert.match(browserHtml, /artifactReviewDrafts: \{\}/);
   assert.match(browserHtml, /function mergeArtifactReviewDraft\(serverDraft, entry\)/);
   assert.match(browserHtml, /response\.status === 409/);
-  assert.match(browserHtml, /fetchArtifactReviewContext\(context\.review\.id, context\.review\.currentRoundId, context\.assignment\.identityId\)/);
+  assert.match(browserHtml, /fetchArtifactReviewContext\(context\.review\.id, context\.review\.currentRoundId, context\.assignment\.actorId\)/);
   assert.match(browserHtml, /const retry = await fetch\(artifactReviewAssignmentUrl\(latestContext, "draft"\)/);
   assert.match(browserHtml, /function syncArtifactReviewStatusMessage\(context\)/);
   assert.match(browserHtml, /if \(hasOpenInlineEditor\(\)\) syncArtifactReviewStatusMessage\(state\.artifactReviewContext \|\| context\);/);

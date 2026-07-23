@@ -16,43 +16,41 @@ import {
 
 function fixture(input?: { runnerDecides?: boolean; humanDecides?: boolean }) {
   const config: ControlPlaneConfig = {
-    identities: {
-      alice: { kind: "human", name: "Alice" },
-      bot: { kind: "agent", name: "Bot", agent: { command: "bot", args: [] } }
+    runner: {
+      permissions: ["artifact.read", "artifact.submit", ...(input?.runnerDecides === false ? [] : ["decision.decide"] as const)],
+      grantablePermissions: []
     },
-    roles: {
-      runner: {
-        name: "Runner",
-        permissions: ["artifact.read", "artifact.submit", ...(input?.runnerDecides === false ? [] : ["decision.decide"] as const)],
+    actors: {
+      alice: {
+        kind: "human",
+        name: "Alice",
+        permissions: ["artifact.read", "decision.assess", ...(input?.humanDecides === false ? [] : ["decision.decide"] as const)],
         grantablePermissions: []
       },
-      reader: {
-        name: "Reader",
-        permissions: ["artifact.read"],
-        grantablePermissions: []
-      },
-      reviewer: {
-        name: "Reviewer",
-        permissions: ["decision.assess", ...(input?.humanDecides === false ? [] : ["decision.decide"] as const)],
-        grantablePermissions: []
+      bot: {
+        kind: "agent",
+        name: "Bot",
+        permissions: ["artifact.read", "decision.assess"],
+        grantablePermissions: [],
+        agent: { command: "bot", args: [] }
       }
     }
   };
   const snapshot = createControlPlaneSnapshot(config);
   const controlPlane = resolveArtifactControlPlane({
     snapshot,
-    procedureBindings: {
-      reader: { identityIds: ["alice", "bot"], source: "procedure" },
-      reviewer: { identityIds: ["alice", "bot"], source: "procedure" }
+    slotBindings: {
+      "fixture::reader": { actorIds: ["alice", "bot"], source: "run:fixture::reader" },
+      "fixture::reviewer": { actorIds: ["alice", "bot"], source: "run:fixture::reviewer" }
     },
     artifactScope: "fixture#flow[1]",
-    artifactBindingSource: "artifact",
-    artifactGrantSource: "artifact"
+    policyId: "artifact_acceptance.unanimous",
+    grantSource: "run:fixture#flow[1]"
   });
   return { snapshot, controlPlane };
 }
 
-test("Artifact Review merges roles and creates Human and Agent assignments", () => {
+test("Artifact Review merges Slots and creates Human and Agent assignments", () => {
   const { snapshot, controlPlane } = fixture();
   const result = createArtifactReviewAssignments({
     snapshot,
@@ -60,12 +58,12 @@ test("Artifact Review merges roles and creates Human and Agent assignments", () 
     now: "2026-07-21T00:00:00.000Z"
   });
   assert.equal(result.assignments.length, 2);
-  const human = result.assignments.find((assignment) => assignment.identityId === "alice");
-  const agent = result.assignments.find((assignment) => assignment.identityId === "bot");
-  assert.deepEqual(human?.roleIds, ["reader", "reviewer"]);
+  const human = result.assignments.find((assignment) => assignment.actorId === "alice");
+  const agent = result.assignments.find((assignment) => assignment.actorId === "bot");
+  assert.deepEqual(human?.slotIds, ["fixture::reader", "fixture::reviewer"]);
   assert.equal(human?.binding, "decision");
   assert.equal(human?.status, "draft");
-  assert.equal(agent?.identityKind, "agent");
+  assert.equal(agent?.actorKind, "agent");
   assert.equal(agent?.status, "queued");
   assert.equal(agent?.attempts?.[0]?.status, "queued");
   assert.match(agent?.id ?? "", /^assignment-/);
@@ -97,9 +95,9 @@ test("unanimous waits for all Humans and ignores advisory rejection", () => {
     revision: 1,
     createdAt: "2026-07-21T00:00:00.000Z",
     assignments: [{
-      identityId: "advisor",
-      identityName: "Advisor",
-      roleIds: ["advisor"],
+      actorId: "advisor",
+      actorName: "Advisor",
+      slotIds: ["advisor"],
       permissions: ["artifact.read", "decision.assess"],
       binding: "advisory",
       status: "submitted",
@@ -121,7 +119,7 @@ test("unanimous waits for all Humans and ignores advisory rejection", () => {
       submittedAt: "2026-07-21T00:00:00.000Z"
     }, {
       id: "vote-advisor",
-      subject: { kind: "identity", identityId: "advisor" },
+      subject: { kind: "actor", actorId: "advisor" },
       binding: "advisory",
       value: "request_changes",
       automatic: false,
@@ -132,9 +130,9 @@ test("unanimous waits for all Humans and ignores advisory rejection", () => {
   assert.equal(evaluateArtifactReviewRound(round, "2026-07-21T00:02:00.000Z")?.status, "passed");
 
   round.assignments.push({
-    identityId: "decider",
-    identityName: "Decider",
-    roleIds: ["decider"],
+    actorId: "decider",
+    actorName: "Decider",
+    slotIds: ["decider"],
     permissions: ["artifact.read", "decision.decide"],
     binding: "decision",
     status: "draft",
@@ -162,7 +160,7 @@ test("unanimous fails when a Human decider requests changes", () => {
       submittedAt: "2026-07-21T00:00:00.000Z"
     }, {
       id: "vote-human",
-      subject: { kind: "identity", identityId: "human" },
+      subject: { kind: "actor", actorId: "human" },
       binding: "decision",
       value: "request_changes",
       automatic: false,
@@ -182,9 +180,9 @@ test("repeated advisory comments aggregate across review rounds", () => {
     revision: 1,
     createdAt: "2026-07-21T00:00:00.000Z",
     assignments: [{
-      identityId: "advisor",
-      identityName: "Advisor",
-      roleIds: ["advisor"],
+      actorId: "advisor",
+      actorName: "Advisor",
+      slotIds: ["advisor"],
       permissions: ["artifact.read", "decision.assess"],
       binding: "advisory",
       status: "submitted",

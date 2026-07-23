@@ -6,7 +6,7 @@ import {
   artifactReviewDispositionValues,
   artifactReviewSeverityValues,
   artifactReviewVoteValues,
-  authorizeArtifactReviewIdentity,
+  authorizeArtifactReviewActor,
   createArtifactReviewAssignments,
   evaluateArtifactReviewRound,
   makeReviewEntityId,
@@ -19,7 +19,6 @@ import {
   type ArtifactReviewAssignment,
   type ArtifactReviewComment,
   type ArtifactReviewDispositionValue,
-  type ArtifactReviewEvidenceRole,
   type ArtifactReviewRound,
   type ArtifactReviewSubmission,
   type ArtifactReviewVoteValue
@@ -40,17 +39,16 @@ import {
   authorizeArtifactOperation,
   controlPlaneSnapshotSchema,
   createControlPlaneSnapshot,
-  mergeRoleBindings,
   permissionIds,
   renderPermissionGuidance,
   resolveArtifactControlPlane,
-  validateControlPlaneReferences,
+  validateActorGrants,
   type ArtifactControlPlane,
   type AuthorizationDecision,
   type ControlPlaneConfig,
   type ControlPlaneSnapshot,
-  type PermissionGrants as ControlPlanePermissionGrants,
-  type ResolvedRoleBindings
+  type RunReviewConfiguration,
+  type SlotBindings
 } from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
 import { currentMemorySyntax, type MemorySyntaxVersion } from "../memory/syntax.js";
@@ -65,8 +63,6 @@ import {
   type IfNode,
   type MemoryRefNode,
   type ProcedureMemory,
-  type PermissionGrants as MemoryPermissionGrants,
-  type RoleBindings,
   schemaNodeFromMemory,
   type RepeatNode,
   type SchemaMemory,
@@ -142,7 +138,6 @@ export type RunFrame = {
   returnTo?: string;
   sourceStepId?: string;
   eventStartIndex?: number;
-  roleBindings?: ResolvedRoleBindings;
 };
 
 export type RunStep = {
@@ -156,16 +151,13 @@ export type RunStep = {
   schema?: RunSchemaContract;
   validationPlan?: ArtifactValidationPlan;
   final?: boolean;
+  reviewSlots?: string[];
   reviewPolicy?: string;
-  reviewRole?: ArtifactReviewEvidenceRole;
-  reviewRequires?: ArtifactReviewEvidenceRole[];
   optional?: boolean;
   asserts?: string[];
   suggests?: string[];
   details?: string[];
   schemaContext?: SchemaStepContext;
-  roleBindings?: RoleBindings;
-  permissionGrants?: MemoryPermissionGrants;
   controlPlane?: ArtifactControlPlane;
   target?: string;
   branches?: {
@@ -206,14 +198,12 @@ export type RunEvent = {
     fileName?: string;
     contentType?: string;
     authorization?: AuthorizationDecision;
-    reviewRole?: ArtifactReviewEvidenceRole;
   };
 };
 
 export type RunProcedureTemplate = {
   memoryName: string;
   asserts?: string[];
-  roleBindings?: RoleBindings;
   steps: RunStep[];
 };
 
@@ -232,10 +222,41 @@ export type RunState = {
   stack: RunFrame[];
   events: RunEvent[];
   controlPlane?: ControlPlaneSnapshot;
+  reviewConfiguration?: RunReviewConfiguration;
   procedureSnapshots?: Record<string, RunProcedureTemplate>;
   artifactReviews?: ArtifactReview<RunEvent["artifact"]>[];
   schemaDrafts?: Record<string, SchemaDraftState>;
 };
+
+export type RunReviewPreflight = {
+  reviews: Array<{
+    scope: string;
+    artifact: string;
+    slots: string[];
+    policies: string[];
+  }>;
+  slots: Array<{
+    key: string;
+    procedure: string;
+    name: string;
+  }>;
+  actors: Array<{
+    id: string;
+    name: string;
+    kind: "human" | "agent";
+    permissions: string[];
+  }>;
+  example: {
+    reviews: Record<string, { policy: string; permission_grants: Record<string, string[]> }>;
+    slots: Record<string, { actors: string[] } | { skip: true }>;
+  };
+};
+
+export class RunReviewConfigurationRequired extends Error {
+  constructor(readonly preflight: RunReviewPreflight) {
+    super(`Review configuration is required:\n${JSON.stringify(preflight, null, 2)}`);
+  }
+}
 
 const artifactFormatSpecSchema = z.object({
   name: z.string().min(1),
@@ -302,27 +323,28 @@ const schemaDraftStateSchema: z.ZodType<SchemaDraftState> = z.object({
   updatedAt: z.string()
 }).strict();
 
-const roleBindingsSchema = z.record(z.array(z.string().min(1)));
-const resolvedRoleBindingsSchema = z.record(z.object({
-  identityIds: z.array(z.string()),
-  source: z.string()
+const slotBindingsSchema = z.record(z.object({
+  actorIds: z.array(z.string()),
+  source: z.string(),
+  skipped: z.boolean().optional()
 }).strict());
 const resolvedRolePermissionsSchema = z.object({
   base: z.array(z.string()),
   grants: z.array(z.string()),
   effective: z.array(z.string()),
-  roleSource: z.string(),
+  authoritySource: z.string(),
   grantSource: z.string().optional()
 }).strict();
 const artifactControlPlaneSchema: z.ZodType<ArtifactControlPlane> = z.object({
   revision: z.string(),
   artifactScope: z.string(),
-  bindings: resolvedRoleBindingsSchema,
+  policyId: z.string(),
+  bindings: slotBindingsSchema,
   permissions: z.record(resolvedRolePermissionsSchema)
-}).strict() as z.ZodType<ArtifactControlPlane>;
+}).strict() as unknown as z.ZodType<ArtifactControlPlane>;
 const authorizationSubjectSchema = z.union([
   z.object({ kind: z.literal("runner") }).strict(),
-  z.object({ kind: z.literal("identity"), identityId: z.string(), roleId: z.string() }).strict()
+  z.object({ kind: z.literal("actor"), actorId: z.string() }).strict()
 ]);
 const authorizationDecisionSchema: z.ZodType<AuthorizationDecision> = z.object({
   allowed: z.boolean(),
@@ -330,14 +352,14 @@ const authorizationDecisionSchema: z.ZodType<AuthorizationDecision> = z.object({
   subject: authorizationSubjectSchema,
   artifactScope: z.string(),
   revision: z.string(),
-  roleId: z.string(),
-  roleSource: z.string(),
+  actorId: z.string(),
+  authoritySource: z.string(),
   grantSource: z.string().optional(),
   basePermissions: z.array(z.string()),
   grantedPermissions: z.array(z.string()),
   effectivePermissions: z.array(z.string()),
-  reason: z.enum(["allowed", "role_not_found", "identity_not_bound", "permission_missing"])
-}).strict() as z.ZodType<AuthorizationDecision>;
+  reason: z.enum(["allowed", "actor_not_found", "actor_not_bound", "permission_missing"])
+}).strict() as unknown as z.ZodType<AuthorizationDecision>;
 
 const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
   z.object({
@@ -351,16 +373,13 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
     schema: runSchemaContractSchema.optional(),
     validationPlan: z.array(validationPlanEntrySchema).optional(),
     final: z.boolean().optional(),
+    reviewSlots: z.array(z.string()).optional(),
     reviewPolicy: z.string().optional(),
-    reviewRole: z.enum(["requirement", "implementation", "validation", "review-material"]).optional(),
-    reviewRequires: z.array(z.enum(["requirement", "implementation", "validation", "review-material"])).optional(),
     optional: z.boolean().optional(),
     asserts: z.array(z.string()).optional(),
     suggests: z.array(z.string()).optional(),
     details: z.array(z.string()).optional(),
     schemaContext: schemaStepContextSchema.optional(),
-    roleBindings: roleBindingsSchema.optional(),
-    permissionGrants: roleBindingsSchema.optional(),
     controlPlane: artifactControlPlaneSchema.optional(),
     target: z.string().optional(),
     branches: z.object({
@@ -401,7 +420,6 @@ const runStateSchema: z.ZodType<RunState> = z.object({
     returnTo: z.string().optional(),
     sourceStepId: z.string().optional(),
     eventStartIndex: z.number().int().nonnegative().optional(),
-    roleBindings: resolvedRoleBindingsSchema.optional()
   })),
   events: z.array(z.object({
     at: z.string(),
@@ -420,8 +438,7 @@ const runStateSchema: z.ZodType<RunState> = z.object({
       path: z.string().optional(),
       fileName: z.string().optional(),
       contentType: z.string().optional(),
-      authorization: authorizationDecisionSchema.optional(),
-      reviewRole: z.enum(["requirement", "implementation", "validation", "review-material"]).optional()
+      authorization: authorizationDecisionSchema.optional()
     })
   })),
   schemaDrafts: z.record(schemaDraftStateSchema).optional()
@@ -430,7 +447,6 @@ const runStateSchema: z.ZodType<RunState> = z.object({
 const runProcedureTemplateSchema: z.ZodType<RunProcedureTemplate> = z.object({
   memoryName: z.string(),
   asserts: z.array(z.string()).optional(),
-  roleBindings: roleBindingsSchema.optional(),
   steps: z.array(runStepSchema)
 }).strict();
 
@@ -478,10 +494,10 @@ const artifactReviewAgentAttemptSchema = z.object({
 
 const artifactReviewAssignmentSchema = z.object({
   id: z.string().optional(),
-  identityId: z.string(),
-  identityName: z.string(),
-  identityKind: z.enum(["human", "agent"]).default("human"),
-  roleIds: z.array(z.string()),
+  actorId: z.string(),
+  actorName: z.string(),
+  actorKind: z.enum(["human", "agent"]).default("human"),
+  slotIds: z.array(z.string()),
   permissions: z.array(z.enum(permissionIds)),
   binding: z.enum(["decision", "advisory"]),
   status: z.enum(["draft", "queued", "running", "submitted", "failed"]),
@@ -504,7 +520,7 @@ const artifactReviewVoteSchema = z.object({
   id: z.string(),
   subject: z.union([
     z.object({ kind: z.literal("runner") }).strict(),
-    z.object({ kind: z.literal("identity"), identityId: z.string() }).strict()
+    z.object({ kind: z.literal("actor"), actorId: z.string() }).strict()
   ]),
   binding: z.enum(["decision", "advisory"]),
   value: z.enum(artifactReviewVoteValues),
@@ -579,8 +595,7 @@ const runEventArtifactSchema = z.object({
   path: z.string().optional(),
   fileName: z.string().optional(),
   contentType: z.string().optional(),
-  authorization: authorizationDecisionSchema.optional(),
-  reviewRole: z.enum(["requirement", "implementation", "validation", "review-material"]).optional()
+  authorization: authorizationDecisionSchema.optional()
 }).strict();
 
 const artifactReviewSubmissionSchema = z.object({
@@ -588,18 +603,10 @@ const artifactReviewSubmissionSchema = z.object({
   digest: z.string(),
   createdAt: z.string(),
   artifact: runEventArtifactSchema,
-  package: z.object({
-    evidence: z.array(z.object({
-      stepId: z.string(),
-      role: z.enum(["requirement", "implementation", "validation", "review-material"]),
-      artifact: runEventArtifactSchema
-    }).strict()),
-    requirements: z.array(z.object({
-      role: z.enum(["requirement", "implementation", "validation", "review-material"]),
-      status: z.enum(["present", "missing", "insufficient"]),
-      reason: z.string().optional()
-    }).strict())
-  }).strict().optional(),
+  contextArtifacts: z.array(z.object({
+    stepId: z.string(),
+    artifact: runEventArtifactSchema
+  }).strict()),
   revisionSummary: z.object({
     body: z.string(),
     digest: z.string(),
@@ -648,8 +655,7 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
     index: z.number(),
     returnTo: z.string().optional(),
     sourceStepId: z.string().optional(),
-    eventStartIndex: z.number().int().nonnegative().optional(),
-    roleBindings: resolvedRoleBindingsSchema.optional()
+    eventStartIndex: z.number().int().nonnegative().optional()
   }).strict()),
   events: z.array(z.object({
     at: z.string(),
@@ -658,6 +664,16 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
     artifact: runEventArtifactSchema
   }).strict()),
   controlPlane: controlPlaneSnapshotSchema.optional(),
+  reviewConfiguration: z.object({
+    reviews: z.record(z.object({
+      policy: z.string(),
+      permissionGrants: z.record(z.array(z.enum(permissionIds)))
+    }).strict()),
+    slots: z.record(z.union([
+      z.object({ actorIds: z.array(z.string()).min(1) }).strict(),
+      z.object({ skip: z.literal(true) }).strict()
+    ]))
+  }).strict().optional(),
   procedureSnapshots: z.record(runProcedureTemplateSchema),
   artifactReviews: z.array(artifactReviewSchema).optional(),
   schemaDrafts: z.record(schemaDraftStateSchema).optional()
@@ -674,6 +690,7 @@ export async function startRun(input: {
   procedureName?: string;
   procedureFile?: string;
   controlPlane?: ControlPlaneConfig;
+  reviewConfiguration?: RunReviewConfiguration;
 }): Promise<RunState> {
   const procedureName = input.procedureName?.trim();
   const procedureFile = input.procedureFile?.trim();
@@ -693,8 +710,16 @@ export async function startRun(input: {
   const rootTemplate = procedureSnapshots[procedureMemory.names[0]];
   if (!rootTemplate) throw new Error(`procedure snapshot missing: ${procedureMemory.names[0]}`);
   const controlPlane = input.controlPlane ? createControlPlaneSnapshot(input.controlPlane) : undefined;
-  const instantiated = instantiateProcedureTemplate(rootTemplate, {}, controlPlane);
-  const steps = instantiated.steps;
+  const preflight = buildRunReviewPreflight(procedureSnapshots, controlPlane);
+  if (preflight.reviews.length && !input.reviewConfiguration) {
+    throw new RunReviewConfigurationRequired(preflight);
+  }
+  const reviewConfiguration = validateRunReviewConfiguration(
+    preflight,
+    input.reviewConfiguration,
+    controlPlane
+  );
+  const steps = instantiateProcedureTemplate(rootTemplate, controlPlane, reviewConfiguration);
   if (!steps.length) {
     throw new Error(`procedure has no flow steps: ${procedureMemory.names[0]}`);
   }
@@ -716,11 +741,11 @@ export async function startRun(input: {
       memoryName: procedure.entity.names[0],
       asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
       steps,
-      index: 0,
-      roleBindings: instantiated.roleBindings
+      index: 0
     }],
     events: [],
     controlPlane,
+    reviewConfiguration,
     procedureSnapshots
   };
 
@@ -959,10 +984,9 @@ async function reportReviewedArtifact(
         fileName: `${slugify(step.artifact) || "artifact"}${extensionForFormat(step.format ?? { name: "plain", options: {} })}`
       }
     );
-    const reviewPackage = await buildArtifactReviewPackage(
+    const contextArtifacts = await buildArtifactReviewContextArtifacts(
       input.runsRoot,
       run,
-      step,
       reviewId,
       submissionId,
       createdArtifactFiles
@@ -973,7 +997,7 @@ async function reportReviewedArtifact(
       digest,
       createdAt: now,
       artifact,
-      package: reviewPackage,
+      contextArtifacts,
       revisionSummary: existing && previousSubmission
         ? {
             body: input.revisionSummary!.trim(),
@@ -1067,18 +1091,18 @@ export async function findArtifactReview(input: {
   throw new Error(`Artifact Review not found: ${input.reviewId}`);
 }
 
-export async function readArtifactReviewForIdentity(input: {
+export async function readArtifactReviewForActor(input: {
   runsRoot: string;
   reviewId: string;
   roundId: string;
-  identityId: string;
+  actorId: string;
 }): Promise<ArtifactReviewContext> {
   const { run, review } = await findArtifactReview(input);
   const round = review.rounds.find((candidate) => candidate.id === input.roundId);
   if (!round) throw new Error(`Artifact Review Round not found: ${input.roundId}`);
-  const assignment = round.assignments.find((candidate) => candidate.identityId === input.identityId);
-  if (!assignment) throw new Error(`Identity is not assigned to Artifact Review Round: ${input.identityId}`);
-  const authorization = authorizeArtifactReviewIdentity({
+  const assignment = round.assignments.find((candidate) => candidate.actorId === input.actorId);
+  if (!assignment) throw new Error(`Actor is not assigned to Artifact Review Round: ${input.actorId}`);
+  const authorization = authorizeArtifactReviewActor({
     controlPlane: review.controlPlane,
     assignment,
     permission: "artifact.read"
@@ -1122,7 +1146,7 @@ export async function updateArtifactReviewDraft(input: {
   runsRoot: string;
   reviewId: string;
   roundId: string;
-  identityId: string;
+  actorId: string;
   expectedRevision: number;
   draft: ArtifactReviewDraftInput;
 }): Promise<ArtifactReviewContext> {
@@ -1137,13 +1161,13 @@ export async function updateArtifactReviewDraft(input: {
     if (round.revision !== input.expectedRevision) {
       throw new ArtifactReviewConflictError(round.id, round.revision);
     }
-    const assignment = requireArtifactReviewAssignment(round, input.identityId);
+    const assignment = requireArtifactReviewAssignment(round, input.actorId);
     if (assignment.status === "submitted") return { run, review, round, assignment };
-    if ((assignment.identityKind ?? "human") === "agent") {
-      throw new Error(`Agent Artifact Review assignment cannot use the Human draft API: ${assignment.identityId}`);
+    if ((assignment.actorKind ?? "human") === "agent") {
+      throw new Error(`Agent Artifact Review assignment cannot use the Human draft API: ${assignment.actorId}`);
     }
     const permission = assignment.binding === "decision" ? "decision.decide" : "decision.assess";
-    const authorization = authorizeArtifactReviewIdentity({
+    const authorization = authorizeArtifactReviewActor({
       controlPlane: review.controlPlane,
       assignment,
       permission
@@ -1177,7 +1201,7 @@ export async function submitArtifactReviewAssignment(input: {
   runsRoot: string;
   reviewId: string;
   roundId: string;
-  identityId: string;
+  actorId: string;
   expectedRevision: number;
 }): Promise<ArtifactReviewContext> {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
@@ -1185,10 +1209,10 @@ export async function submitArtifactReviewAssignment(input: {
     const run = await readRun(input.runsRoot, located.run.id);
     const review = requireArtifactReview(run, input.reviewId);
     const round = requireArtifactReviewRound(review, input.roundId);
-    const assignment = requireArtifactReviewAssignment(round, input.identityId);
+    const assignment = requireArtifactReviewAssignment(round, input.actorId);
     if (assignment.status === "submitted") return { run, review, round, assignment };
-    if ((assignment.identityKind ?? "human") === "agent") {
-      throw new Error(`Agent Artifact Review assignment cannot use the Human submit API: ${assignment.identityId}`);
+    if ((assignment.actorKind ?? "human") === "agent") {
+      throw new Error(`Agent Artifact Review assignment cannot use the Human submit API: ${assignment.actorId}`);
     }
     if (review.status !== "pending" || round.status !== "pending") {
       throw new Error(`Artifact Review Round is read-only: ${round.id}`);
@@ -1202,7 +1226,7 @@ export async function submitArtifactReviewAssignment(input: {
       throw new Error(`${vote} requires at least one Comment`);
     }
     const permission = assignment.binding === "decision" ? "decision.decide" : "decision.assess";
-    const authorization = authorizeArtifactReviewIdentity({
+    const authorization = authorizeArtifactReviewActor({
       controlPlane: review.controlPlane,
       assignment,
       permission
@@ -1237,7 +1261,7 @@ export async function claimArtifactReviewAgentAssignment(input: {
   runsRoot: string;
   reviewId: string;
   roundId: string;
-  identityId: string;
+  actorId: string;
   workerPid: number;
 }): Promise<ArtifactReviewAgentContext | undefined> {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
@@ -1246,7 +1270,7 @@ export async function claimArtifactReviewAgentAssignment(input: {
     const review = requireArtifactReview(run, input.reviewId);
     if (review.currentRoundId !== input.roundId || review.status !== "pending") return undefined;
     const round = requireArtifactReviewRound(review, input.roundId);
-    const assignment = requireArtifactReviewAssignment(round, input.identityId);
+    const assignment = requireArtifactReviewAssignment(round, input.actorId);
     requireAgentReviewAssignment(assignment);
     if (assignment.status !== "queued") return undefined;
     const attempt = requireQueuedAgentAttempt(assignment);
@@ -1267,7 +1291,7 @@ export async function markArtifactReviewAgentCliReady(input: {
   runsRoot: string;
   reviewId: string;
   roundId: string;
-  identityId: string;
+  actorId: string;
   attemptId: string;
   protocolVersion?: number;
   sessionId?: string;
@@ -1288,7 +1312,7 @@ export async function recordArtifactReviewAgentSession(input: {
   runsRoot: string;
   reviewId: string;
   roundId: string;
-  identityId: string;
+  actorId: string;
   attemptId: string;
   protocolVersion: number;
   sessionId: string;
@@ -1307,7 +1331,7 @@ export async function recordArtifactReviewAgentStop(input: {
   runsRoot: string;
   reviewId: string;
   roundId: string;
-  identityId: string;
+  actorId: string;
   attemptId: string;
   stopReason: string;
 }): Promise<ArtifactReviewAgentContext> {
@@ -1320,7 +1344,7 @@ export async function failArtifactReviewAgentAssignment(input: {
   runsRoot: string;
   reviewId: string;
   roundId: string;
-  identityId: string;
+  actorId: string;
   attemptId: string;
   failure: ArtifactReviewAgentFailure;
   stopReason?: string;
@@ -1340,7 +1364,7 @@ export async function retryArtifactReviewAgentAssignment(input: {
   runsRoot: string;
   reviewId: string;
   roundId: string;
-  identityId: string;
+  actorId: string;
 }): Promise<ArtifactReviewAgentContext> {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
@@ -1350,10 +1374,10 @@ export async function retryArtifactReviewAgentAssignment(input: {
       throw new Error(`Artifact Review Round is read-only: ${input.roundId}`);
     }
     const round = requireArtifactReviewRound(review, input.roundId);
-    const assignment = requireArtifactReviewAssignment(round, input.identityId);
+    const assignment = requireArtifactReviewAssignment(round, input.actorId);
     requireAgentReviewAssignment(assignment);
     if (assignment.status !== "failed") {
-      throw new Error(`Agent Artifact Review assignment is not failed: ${assignment.identityId}`);
+      throw new Error(`Agent Artifact Review assignment is not failed: ${assignment.actorId}`);
     }
     const attempts = (assignment.attempts ??= []);
     const now = new Date().toISOString();
@@ -1382,7 +1406,7 @@ export async function appendArtifactReviewAgentComment(input: {
   runsRoot: string;
   reviewId: string;
   roundId: string;
-  identityId: string;
+  actorId: string;
   attemptId: string;
   body: string;
   severity: (typeof artifactReviewSeverityValues)[number];
@@ -1391,7 +1415,7 @@ export async function appendArtifactReviewAgentComment(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const context = requireRunningAgentContext(await readRun(input.runsRoot, located.run.id), input);
-    const authorization = authorizeArtifactReviewIdentity({
+    const authorization = authorizeArtifactReviewActor({
       controlPlane: context.review.controlPlane,
       assignment: context.assignment,
       permission: context.assignment.binding === "decision" ? "decision.decide" : "decision.assess"
@@ -1424,7 +1448,7 @@ export async function submitArtifactReviewAgentAssignment(input: {
   runsRoot: string;
   reviewId: string;
   roundId: string;
-  identityId: string;
+  actorId: string;
   attemptId: string;
   vote: ArtifactReviewVoteValue;
   summary?: string;
@@ -1434,7 +1458,7 @@ export async function submitArtifactReviewAgentAssignment(input: {
     const run = await readRun(input.runsRoot, located.run.id);
     const review = requireArtifactReview(run, input.reviewId);
     const round = requireArtifactReviewRound(review, input.roundId);
-    const assignment = requireArtifactReviewAssignment(round, input.identityId);
+    const assignment = requireArtifactReviewAssignment(round, input.actorId);
     requireAgentReviewAssignment(assignment);
     const attempt = requireArtifactReviewAgentAttempt(assignment, input.attemptId);
     const summary = input.summary?.trim() || undefined;
@@ -1442,7 +1466,7 @@ export async function submitArtifactReviewAgentAssignment(input: {
       if (assignment.submitted.vote === input.vote && assignment.submitted.summary === summary) {
         return { run, review, round, assignment, attempt };
       }
-      throw new Error(`Agent Artifact Review assignment is already submitted: ${assignment.identityId}`);
+      throw new Error(`Agent Artifact Review assignment is already submitted: ${assignment.actorId}`);
     }
     const context = requireRunningAgentContext(run, input);
     if (!context.attempt.cliReadyAt) throw new Error("Agent Review CLI handshake is required before submit");
@@ -1454,7 +1478,7 @@ export async function submitArtifactReviewAgentAssignment(input: {
       throw new Error(`${input.vote} requires at least one Comment or Summary`);
     }
     const permission = context.assignment.binding === "decision" ? "decision.decide" : "decision.assess";
-    const authorization = authorizeArtifactReviewIdentity({
+    const authorization = authorizeArtifactReviewActor({
       controlPlane: context.review.controlPlane,
       assignment: context.assignment,
       permission
@@ -1587,11 +1611,6 @@ export async function submitArtifactReviewRunnerVote(input: {
       if (unresolvedBlocking.length > 0) {
         throw new Error(`Runner approve requires dispositions for ${unresolvedBlocking.length} blocking advisory Comment(s)`);
       }
-      const submission = reviewSubmission(review, round.submissionId);
-      const incomplete = submission.package?.requirements.filter((item) => item.status !== "present") ?? [];
-      if (incomplete.length > 0) {
-        throw new Error(`Runner approve requires complete Review evidence: ${incomplete.map((item) => `${item.role}=${item.status}`).join(", ")}`);
-      }
     }
     const authorization = authorizeArtifactOperation({
       controlPlane: review.controlPlane,
@@ -1644,7 +1663,7 @@ async function settleArtifactReviewRound(
   if (round.assignments.some((assignment) => assignment.status !== "submitted")) return;
 
   const identityDecisionVotes = round.votes.filter(
-    (vote) => vote.subject.kind === "identity" && vote.binding === "decision"
+    (vote) => vote.subject.kind === "actor" && vote.binding === "decision"
   );
   const identityDecisionRejected = identityDecisionVotes.some((vote) => vote.value !== "approve");
   const runnerAuthorization = authorizeArtifactOperation({
@@ -1774,15 +1793,15 @@ function requireArtifactReviewRound(
 
 function requireArtifactReviewAssignment(round: ArtifactReviewRound, assignmentId: string): ArtifactReviewAssignment {
   const assignment = round.assignments.find((candidate) =>
-    candidate.id === assignmentId || candidate.identityId === assignmentId
+    candidate.id === assignmentId || candidate.actorId === assignmentId
   );
   if (!assignment) throw new Error(`Artifact Review Assignment not found: ${assignmentId}`);
   return assignment;
 }
 
 function requireAgentReviewAssignment(assignment: ArtifactReviewAssignment): void {
-  if ((assignment.identityKind ?? "human") !== "agent") {
-    throw new Error(`Artifact Review assignment is not an Agent assignment: ${assignment.identityId}`);
+  if ((assignment.actorKind ?? "human") !== "agent") {
+    throw new Error(`Artifact Review assignment is not an Agent assignment: ${assignment.actorId}`);
   }
 }
 
@@ -1798,14 +1817,14 @@ function requireArtifactReviewAgentAttempt(
 function requireQueuedAgentAttempt(assignment: ArtifactReviewAssignment): ArtifactReviewAgentAttempt {
   const attempt = assignment.attempts?.at(-1);
   if (!attempt || attempt.status !== "queued") {
-    throw new Error(`Agent Artifact Review assignment has no queued Attempt: ${assignment.identityId}`);
+    throw new Error(`Agent Artifact Review assignment has no queued Attempt: ${assignment.actorId}`);
   }
   return attempt;
 }
 
 function requireRunningAgentContext(
   run: RunState,
-  input: { reviewId: string; roundId: string; identityId: string; attemptId: string }
+  input: { reviewId: string; roundId: string; actorId: string; attemptId: string }
 ): ArtifactReviewAgentContext {
   const review = requireArtifactReview(run, input.reviewId);
   if (review.currentRoundId !== input.roundId || review.status !== "pending") {
@@ -1813,10 +1832,10 @@ function requireRunningAgentContext(
   }
   const round = requireArtifactReviewRound(review, input.roundId);
   if (round.status !== "pending") throw new Error(`Artifact Review Round is read-only: ${round.id}`);
-  const assignment = requireArtifactReviewAssignment(round, input.identityId);
+  const assignment = requireArtifactReviewAssignment(round, input.actorId);
   requireAgentReviewAssignment(assignment);
   if (assignment.status !== "running") {
-    throw new Error(`Agent Artifact Review assignment is not running: ${assignment.identityId}`);
+    throw new Error(`Agent Artifact Review assignment is not running: ${assignment.actorId}`);
   }
   const attempt = requireArtifactReviewAgentAttempt(assignment, input.attemptId);
   if (attempt.status !== "running") {
@@ -1830,7 +1849,7 @@ async function mutateArtifactReviewAgentAttempt(
     runsRoot: string;
     reviewId: string;
     roundId: string;
-    identityId: string;
+    actorId: string;
     attemptId: string;
   },
   mutate: (context: ArtifactReviewAgentContext) => Promise<void>
@@ -1840,7 +1859,7 @@ async function mutateArtifactReviewAgentAttempt(
     const run = await readRun(input.runsRoot, located.run.id);
     const review = requireArtifactReview(run, input.reviewId);
     const round = requireArtifactReviewRound(review, input.roundId);
-    const assignment = requireArtifactReviewAssignment(round, input.identityId);
+    const assignment = requireArtifactReviewAssignment(round, input.actorId);
     requireAgentReviewAssignment(assignment);
     const attempt = requireArtifactReviewAgentAttempt(assignment, input.attemptId);
     const context = { run, review, round, assignment, attempt };
@@ -1915,11 +1934,11 @@ function authorizeRunnerForReport(
     base: [],
     grants: [],
     effective: [],
-    roleSource: "config:control_plane.roles.runner"
+    authoritySource: "config:control_plane.runner"
   };
   const guidance = renderPermissionGuidance({
     snapshot: run.controlPlane,
-    roleId: "runner",
+    actorId: "runner",
     permissions: runnerPermissions,
     artifactScope: step.controlPlane.artifactScope,
     locale,
@@ -2401,7 +2420,6 @@ async function snapshotReachableProcedureTemplates(
     const template: RunProcedureTemplate = {
       memoryName: canonicalName,
       asserts: procedure.asserts ? [...procedure.asserts] : undefined,
-      roleBindings: procedure.roleBindings ? structuredClone(procedure.roleBindings) : undefined,
       steps
     };
     for (const name of procedure.names) snapshots[name] = template;
@@ -2430,10 +2448,123 @@ function collectCallTargets(steps: readonly RunStep[]): string[] {
   return [...new Set(targets)];
 }
 
+function buildRunReviewPreflight(
+  procedureSnapshots: Record<string, RunProcedureTemplate>,
+  snapshot: ControlPlaneSnapshot | undefined
+): RunReviewPreflight {
+  const templates = [...new Map(
+    Object.values(procedureSnapshots).map((template) => [template.memoryName, template])
+  ).values()];
+  const reviews: RunReviewPreflight["reviews"] = [];
+  const slots = new Map<string, RunReviewPreflight["slots"][number]>();
+  const policies = snapshot?.decisionPolicyCatalog.definitions.map((policy) => policy.id) ?? [];
+  for (const template of templates) {
+    for (const step of flattenRunSteps(template.steps)) {
+      if (!step.artifact || !step.reviewSlots?.length) continue;
+      const scope = `${template.memoryName}#${step.id}`;
+      reviews.push({ scope, artifact: step.artifact, slots: [...step.reviewSlots], policies });
+      for (const name of step.reviewSlots) {
+        const key = `${template.memoryName}::${name}`;
+        slots.set(key, { key, procedure: template.memoryName, name });
+      }
+    }
+  }
+  const actors = Object.entries(snapshot?.actors ?? {}).map(([id, actor]) => ({
+    id,
+    name: actor.name,
+    kind: actor.kind,
+    permissions: [...actor.permissions]
+  }));
+  const defaultPolicy = policies[0] ?? "artifact_acceptance.unanimous";
+  const defaultActor = actors[0]?.id;
+  return {
+    reviews: reviews.sort((left, right) => left.scope.localeCompare(right.scope)),
+    slots: [...slots.values()].sort((left, right) => left.key.localeCompare(right.key)),
+    actors,
+    example: {
+      reviews: Object.fromEntries(reviews.map((review) => [
+        review.scope,
+        { policy: defaultPolicy, permission_grants: {} }
+      ])),
+      slots: Object.fromEntries([...slots.keys()].map((key) => [
+        key,
+        defaultActor ? { actors: [defaultActor] } : { skip: true }
+      ]))
+    }
+  };
+}
+
+function validateRunReviewConfiguration(
+  preflight: RunReviewPreflight,
+  configuration: RunReviewConfiguration | undefined,
+  snapshot: ControlPlaneSnapshot | undefined
+): RunReviewConfiguration | undefined {
+  if (!preflight.reviews.length) return undefined;
+  if (!configuration || !snapshot) throw new RunReviewConfigurationRequired(preflight);
+  const issues: string[] = [];
+  const requiredReviews = new Set(preflight.reviews.map((review) => review.scope));
+  const requiredSlots = new Set(preflight.slots.map((slot) => slot.key));
+  for (const scope of requiredReviews) {
+    const review = configuration.reviews[scope];
+    if (!review) {
+      issues.push(`reviews.${scope}: required`);
+      continue;
+    }
+    if (!snapshot.decisionPolicyCatalog.definitions.some((policy) => policy.id === review.policy)) {
+      issues.push(`reviews.${scope}.policy: unknown Decision Policy id ${review.policy}`);
+    }
+    issues.push(...validateActorGrants({
+      snapshot,
+      permissionGrants: review.permissionGrants,
+      path: `reviews.${scope}`
+    }).map((issue) => `${issue.path}: ${issue.message}`));
+  }
+  for (const scope of Object.keys(configuration.reviews)) {
+    if (!requiredReviews.has(scope)) issues.push(`reviews.${scope}: unknown Review scope`);
+  }
+  for (const key of requiredSlots) {
+    const binding = configuration.slots[key];
+    if (!binding) {
+      issues.push(`slots.${key}: bind actors or set skip`);
+      continue;
+    }
+    if ("actorIds" in binding) {
+      if (!binding.actorIds.length) issues.push(`slots.${key}.actors: at least one Actor is required`);
+      const seenActorIds = new Set<string>();
+      for (const [index, actorId] of binding.actorIds.entries()) {
+        if (seenActorIds.has(actorId)) {
+          issues.push(`slots.${key}.actors[${index}]: duplicate Actor id ${actorId}`);
+          continue;
+        }
+        seenActorIds.add(actorId);
+        if (!snapshot.actors[actorId]) issues.push(`slots.${key}.actors: unknown Actor id ${actorId}`);
+      }
+    }
+  }
+  for (const key of Object.keys(configuration.slots)) {
+    if (!requiredSlots.has(key)) issues.push(`slots.${key}: unknown Review Slot`);
+  }
+  if (issues.length) throw new Error(`Invalid Review configuration:\n- ${issues.join("\n- ")}`);
+  return structuredClone(configuration);
+}
+
+function flattenRunSteps(steps: readonly RunStep[]): RunStep[] {
+  const flattened: RunStep[] = [];
+  for (const step of steps) {
+    flattened.push(step);
+    if (step.branches) {
+      flattened.push(...flattenRunSteps(step.branches.truthy));
+      flattened.push(...flattenRunSteps(step.branches.falsy));
+    }
+    if (step.loop) flattened.push(...flattenRunSteps(step.loop.body));
+  }
+  return flattened;
+}
+
 function containsArtifactReview(steps: readonly RunStep[]): boolean {
   return steps.some((step) =>
     Boolean(
-      step.reviewPolicy ||
+      step.reviewSlots?.length ||
         (step.branches &&
           (containsArtifactReview(step.branches.truthy) || containsArtifactReview(step.branches.falsy))) ||
         (step.loop && containsArtifactReview(step.loop.body))
@@ -2443,59 +2574,69 @@ function containsArtifactReview(steps: readonly RunStep[]): boolean {
 
 function instantiateProcedureTemplate(
   template: RunProcedureTemplate,
-  parentBindings: ResolvedRoleBindings,
-  snapshot: ControlPlaneSnapshot | undefined
-): { steps: RunStep[]; roleBindings: ResolvedRoleBindings } {
+  snapshot: ControlPlaneSnapshot | undefined,
+  reviewConfiguration: RunReviewConfiguration | undefined
+): RunStep[] {
   if (!snapshot && containsArtifactReview(template.steps)) {
     throw new Error(`control_plane config is required for Artifact Review: procedure:${template.memoryName}`);
   }
-  assertGovernanceReferences(
-    snapshot,
-    template.roleBindings,
-    undefined,
-    `procedure:${template.memoryName}`
-  );
-  const roleBindings = mergeRoleBindings(
-    parentBindings,
-    template.roleBindings,
-    `procedure:${template.memoryName}`
-  );
   const steps = cloneSteps(template.steps);
-  applyControlPlaneToSteps(steps, roleBindings, snapshot, template.memoryName);
-  return { steps, roleBindings };
+  applyControlPlaneToSteps(steps, snapshot, reviewConfiguration, template.memoryName);
+  return steps;
 }
 
 function applyControlPlaneToSteps(
   steps: RunStep[],
-  procedureBindings: ResolvedRoleBindings,
   snapshot: ControlPlaneSnapshot | undefined,
+  reviewConfiguration: RunReviewConfiguration | undefined,
   procedureName: string
 ): void {
   for (const step of steps) {
     if (step.artifact) {
       const artifactScope = `${procedureName}#${step.id}`;
-      if (step.reviewPolicy && !snapshot) {
+      if (step.reviewSlots?.length && !snapshot) {
         throw new Error(`control_plane config is required for Artifact Review: ${artifactScope}`);
       }
-      assertGovernanceReferences(snapshot, step.roleBindings, step.permissionGrants, `artifact:${artifactScope}`);
-      if (snapshot) {
+      if (snapshot && step.reviewSlots?.length) {
+        const review = reviewConfiguration?.reviews[artifactScope];
+        if (!review) throw new Error(`Missing Review configuration: ${artifactScope}`);
+        const slotBindings: SlotBindings = Object.fromEntries(step.reviewSlots.map((slot) => {
+          const key = `${procedureName}::${slot}`;
+          const binding = reviewConfiguration?.slots[key];
+          if (!binding) throw new Error(`Missing Review Slot configuration: ${key}`);
+          return [key, "skip" in binding
+            ? { actorIds: [], source: `run:${key}`, skipped: true }
+            : { actorIds: [...binding.actorIds], source: `run:${key}` }];
+        }));
         step.controlPlane = resolveArtifactControlPlane({
           snapshot,
-          procedureBindings,
-          artifactBindings: step.roleBindings,
-          permissionGrants: step.permissionGrants as ControlPlanePermissionGrants | undefined,
+          slotBindings,
+          permissionGrants: review.permissionGrants,
           artifactScope,
-          artifactBindingSource: `artifact:${artifactScope}`,
-          artifactGrantSource: `artifact:${artifactScope}`
+          policyId: review.policy,
+          grantSource: `run:${artifactScope}`
         });
-        if (step.reviewPolicy) assertArtifactReviewCanStart(snapshot, step.controlPlane, step.reviewPolicy);
+        if (Object.values(slotBindings).some((binding) => !binding.skipped)) {
+          step.reviewPolicy = review.policy;
+          assertArtifactReviewCanStart(snapshot, step.controlPlane, step.reviewPolicy);
+        } else {
+          step.reviewPolicy = undefined;
+        }
+      } else if (snapshot) {
+        step.controlPlane = resolveArtifactControlPlane({
+          snapshot,
+          slotBindings: {},
+          artifactScope,
+          policyId: "",
+          grantSource: `run:${artifactScope}`
+        });
       }
     }
     if (step.branches) {
-      applyControlPlaneToSteps(step.branches.truthy, procedureBindings, snapshot, procedureName);
-      applyControlPlaneToSteps(step.branches.falsy, procedureBindings, snapshot, procedureName);
+      applyControlPlaneToSteps(step.branches.truthy, snapshot, reviewConfiguration, procedureName);
+      applyControlPlaneToSteps(step.branches.falsy, snapshot, reviewConfiguration, procedureName);
     }
-    if (step.loop) applyControlPlaneToSteps(step.loop.body, procedureBindings, snapshot, procedureName);
+    if (step.loop) applyControlPlaneToSteps(step.loop.body, snapshot, reviewConfiguration, procedureName);
   }
 }
 
@@ -2517,18 +2658,6 @@ function assertArtifactReviewCanStart(
     controlPlane,
     now: "1970-01-01T00:00:00.000Z"
   });
-}
-
-function assertGovernanceReferences(
-  snapshot: ControlPlaneSnapshot | undefined,
-  roleBindings: RoleBindings | undefined,
-  permissionGrants: MemoryPermissionGrants | undefined,
-  path: string
-): void {
-  if (!roleBindings && !permissionGrants) return;
-  if (!snapshot) throw new Error(`control_plane config is required for ${path}`);
-  const issues = validateControlPlaneReferences({ snapshot, roleBindings, permissionGrants, path });
-  if (issues.length) throw new Error(issues.map((issue) => `${issue.path}: ${issue.message}`).join("; "));
 }
 
 function compileProcedureSteps(procedure: ProcedureMemory): RunStep[] {
@@ -2573,7 +2702,7 @@ function compileActionStep(node: ActionNode, id: string): RunStep {
 function compileArtifactStep(
   artifact: ActionNode["artifact"],
   id: string
-): Pick<RunStep, "artifact" | "type" | "format" | "schema" | "validationPlan" | "final" | "reviewPolicy" | "reviewRole" | "reviewRequires" | "roleBindings" | "permissionGrants"> {
+): Pick<RunStep, "artifact" | "type" | "format" | "schema" | "validationPlan" | "final" | "reviewSlots"> {
   const contract = compileArtifactContract(artifact);
   const schema = typeof artifact.schema === "string"
     ? { kind: "external" as const, name: artifact.schema }
@@ -2592,11 +2721,7 @@ function compileArtifactStep(
     schema,
     validationPlan,
     final: artifact.final || undefined,
-    reviewPolicy: artifact.review,
-    reviewRole: artifact.reviewRole,
-    reviewRequires: artifact.reviewRequires ? [...artifact.reviewRequires] : undefined,
-    roleBindings: artifact.roleBindings ? structuredClone(artifact.roleBindings) : undefined,
-    permissionGrants: artifact.permissionGrants ? structuredClone(artifact.permissionGrants) : undefined
+    reviewSlots: artifact.review ? [...artifact.review] : undefined
   };
 }
 
@@ -2675,13 +2800,12 @@ function cloneStep(step: RunStep): RunStep {
     format: step.format ? { name: step.format.name, options: structuredClone(step.format.options) } : undefined,
     schema: step.schema ? structuredClone(step.schema) : undefined,
     validationPlan: step.validationPlan ? structuredClone(step.validationPlan) : undefined,
+    reviewSlots: step.reviewSlots ? [...step.reviewSlots] : undefined,
     reviewPolicy: step.reviewPolicy,
     asserts: step.asserts ? [...step.asserts] : undefined,
     suggests: step.suggests ? [...step.suggests] : undefined,
     details: step.details ? [...step.details] : undefined,
     schemaContext: step.schemaContext ? structuredClone(step.schemaContext) : undefined,
-    roleBindings: step.roleBindings ? structuredClone(step.roleBindings) : undefined,
-    permissionGrants: step.permissionGrants ? structuredClone(step.permissionGrants) : undefined,
     controlPlane: step.controlPlane ? structuredClone(step.controlPlane) : undefined,
     branches: step.branches
       ? {
@@ -2711,15 +2835,14 @@ async function expandAutoCallSteps(run: RunState): Promise<void> {
     if (run.contractVersion === 3) {
       const template = run.procedureSnapshots?.[step.target];
       if (!template) throw new Error(`procedure snapshot not found: ${step.target}`);
-      const instantiated = instantiateProcedureTemplate(template, frame.roleBindings ?? {}, run.controlPlane);
+      const steps = instantiateProcedureTemplate(template, run.controlPlane, run.reviewConfiguration);
       run.stack.push({
         type: "procedure",
         memoryName: template.memoryName,
         asserts: template.asserts ? [...template.asserts] : undefined,
-        steps: instantiated.steps,
+        steps,
         index: 0,
-        returnTo: step.id,
-        roleBindings: instantiated.roleBindings
+        returnTo: step.id
       });
       continue;
     }
@@ -2761,8 +2884,7 @@ async function buildRunEventArtifact(
     schema: step.schema,
     validation,
     final: step.final,
-    authorization,
-    reviewRole: step.reviewRole
+    authorization
   };
 
   if (!shouldStoreArtifactAsFile(step.format)) {
@@ -2793,60 +2915,34 @@ async function buildRunEventArtifact(
   });
 }
 
-async function buildArtifactReviewPackage(
+async function buildArtifactReviewContextArtifacts(
   runsRoot: string,
   run: RunState,
-  step: RunStep,
   reviewId: string,
   submissionId: string,
   createdArtifactFiles: string[]
-): Promise<NonNullable<ArtifactReview<RunEvent["artifact"]>["submissions"][number]["package"]>> {
-  const evidenceEvents = run.events.filter((event) => event.artifact.reviewRole);
-  const evidence = [] as NonNullable<ArtifactReview<RunEvent["artifact"]>["submissions"][number]["package"]>["evidence"];
+): Promise<ArtifactReview<RunEvent["artifact"]>["submissions"][number]["contextArtifacts"]> {
+  const contextArtifacts: ArtifactReview<RunEvent["artifact"]>["submissions"][number]["contextArtifacts"] = [];
   const artifactRoot = await ensureRunArtifactDirectory(runsRoot, run.id);
-  const evidenceDirectory = resolve(artifactRoot, "reviews", reviewId, submissionId, "evidence");
+  const contextDirectory = resolve(artifactRoot, "reviews", reviewId, submissionId, "context");
 
-  for (const [index, event] of evidenceEvents.entries()) {
-    const role = event.artifact.reviewRole!;
+  for (const [index, event] of run.events.entries()) {
     const snapshot = structuredClone(event.artifact);
     if (snapshot.storage === "file" && snapshot.path) {
-      await mkdir(evidenceDirectory, { recursive: true });
+      await mkdir(contextDirectory, { recursive: true });
       const sourcePath = resolve(runsRoot, snapshot.path);
       const extension = snapshot.fileName?.match(/(\.[^.]+)$/)?.[1] ?? extensionForFormat(snapshot.format);
-      const fileName = `${String(index + 1).padStart(3, "0")}-${role}${extension}`;
-      const targetPath = resolve(evidenceDirectory, fileName);
+      const fileName = `${String(index + 1).padStart(3, "0")}-${slugify(snapshot.name) || "artifact"}${extension}`;
+      const targetPath = resolve(contextDirectory, fileName);
       assertInsideRunArtifactDirectory(targetPath, artifactRoot);
       await writeFile(targetPath, await readFile(sourcePath));
       createdArtifactFiles.push(targetPath);
-      snapshot.path = join(run.id, "artifacts", "reviews", reviewId, submissionId, "evidence", fileName);
+      snapshot.path = join(run.id, "artifacts", "reviews", reviewId, submissionId, "context", fileName);
       snapshot.fileName = fileName;
     }
-    evidence.push({ stepId: event.stepId, role, artifact: snapshot });
+    contextArtifacts.push({ stepId: event.stepId, artifact: snapshot });
   }
-
-  const availableRoles = new Set(evidence.map((item) => item.role));
-  if (step.reviewRole) availableRoles.add(step.reviewRole);
-  const requirements = (step.reviewRequires ?? []).map((role) => {
-    if (!availableRoles.has(role)) {
-      return { role, status: "missing" as const, reason: `Review package is missing ${role} evidence.` };
-    }
-    const matching = evidence.filter((item) => item.role === role);
-    const insufficient = matching.length > 0 && matching.every((item) => artifactReviewEvidenceIsEmpty(item.artifact));
-    return insufficient
-      ? { role, status: "insufficient" as const, reason: `${role} evidence is empty.` }
-      : { role, status: "present" as const };
-  });
-  return { evidence, requirements };
-}
-
-function artifactReviewEvidenceIsEmpty(artifact: RunEvent["artifact"]): boolean {
-  if (artifact.validation && artifact.validation.status !== "passed") return true;
-  if (artifact.storage === "file") return !artifact.path;
-  if (artifact.value === undefined || artifact.value === null) return true;
-  if (typeof artifact.value === "string") return artifact.value.trim().length === 0;
-  if (Array.isArray(artifact.value)) return artifact.value.length === 0;
-  if (typeof artifact.value === "object") return Object.keys(artifact.value).length === 0;
-  return false;
+  return contextArtifacts;
 }
 
 async function removeArtifactFiles(paths: readonly string[]): Promise<void> {
