@@ -17,7 +17,7 @@
     "reserved-memory"
   ],
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node -e \"require('node:fs').cpSync('src/skills','dist/skills',{recursive:true})\"",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node -e \"const fs=require('node:fs'); fs.chmodSync('dist/cli.js',0o755); fs.cpSync('src/skills','dist/skills',{recursive:true})\"",
     "dev": "tsx src/cli.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
