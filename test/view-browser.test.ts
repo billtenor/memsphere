@@ -99,18 +99,19 @@ test("review mutations use button action guards", () => {
 test("Artifact Review renders Agent progress and exposes retry only for failed Agents", () => {
   assert.match(browserHtml, /assignment\.identityKind === "agent"/);
   assert.match(browserHtml, /renderArtifactReviewAgentWorkspace\(context, selectedRound\)/);
-  assert.match(browserHtml, /assignment\.status === "failed" && context\.review\.status === "pending"/);
+  assert.match(browserHtml, /const currentRoundSelected = selectedRound\?\.id === review\.currentRoundId/);
+  assert.match(browserHtml, /currentRoundSelected\s*&& assignment\.identityKind === "agent"\s*&& assignment\.status === "failed"\s*&& review\.status === "pending"/);
   assert.match(browserHtml, /retryArtifactReviewAgent\(context\)/);
   assert.match(browserHtml, /attempt\.failure\.code \+ ": " \+ attempt\.failure\.message/);
   assert.match(browserHtml, /state\.artifactReviewRetries/);
-  assert.match(browserHtml, /repeated advisory groups/);
+  assert.match(browserHtml, /Repeated advisory groups/);
   assert.match(browserHtml, /Decision intent: /);
   assert.match(browserHtml, /"实现证据：" \+ \(referenced \? "已引用" : "未引用"\)/);
 });
 
 test("Artifact Review comment severity belongs to the card header", () => {
   assert.match(browserHtml, /header\.className = "artifact-review-comment-head"/);
-  assert.match(browserHtml, /header\.append\(pill\(comment\.severity/);
+  assert.match(browserHtml, /header\.append\(pill\(artifactReviewSeverityLabel\(comment\.severity\)/);
   assert.match(browserHtml, /card\.append\(header, body\)/);
   assert.match(browserHtml, /\.artifact-review-comment-head \{ display: flex; justify-content: space-between;/);
 });
@@ -164,6 +165,23 @@ test("Artifact Review uses a resizable evidence modal with stable Submission tar
   assert.match(browserHtml, /<dialog class="artifact-review-modal" id="artifact-review-modal"/);
   assert.match(browserHtml, /role="separator" aria-controls="artifact-review-artifact-pane artifact-review-review-pane"/);
   assert.match(browserHtml, /artifact-review-mobile-tabs/);
+  assert.match(browserHtml, /id="artifact-review-scope-panel"/);
+  assert.match(browserHtml, /id="artifact-review-my-panel"/);
+  assert.match(browserHtml, /id="artifact-review-progress-panel"/);
+  assert.match(browserHtml, /id="artifact-review-record-panel"/);
+  assert.doesNotMatch(browserHtml, /id="artifact-review-modal-meta"/);
+  assert.doesNotMatch(browserHtml, /id="artifact-review-round-mode"/);
+  assert.match(browserHtml, /controls\.append\(renderArtifactReviewRoundTimeline\(context\)\)/);
+  assert.match(browserHtml, /scopeMeta\.append\(\s*pill\(/);
+  assert.match(browserHtml, /pill\(review\.policyId\)/);
+  assert.match(browserHtml, /artifactReviewProgressSummary\(scopeRound\)/);
+  assert.match(browserHtml, /id="artifact-review-submit-area" class="artifact-review-operation-group artifact-review-submit-area"/);
+  assert.match(browserHtml, /const voteGroup = artifactReviewOperationGroup\(/);
+  assert.match(browserHtml, /const commentGroup = artifactReviewOperationGroup\(/);
+  assert.match(
+    browserHtml,
+    /const commentGroup = artifactReviewOperationGroup\([\s\S]*el\.artifactReviewMyContent\.append\(commentGroup\);[\s\S]*const voteGroup = artifactReviewOperationGroup\([\s\S]*el\.artifactReviewMyContent\.append\(voteGroup\);/
+  );
   assert.match(browserHtml, /state\.artifactReviewOpenSelect = open \? "identity:" \+ review\.id : ""/);
   assert.match(browserHtml, /submissionId: reviewContext\.submission\.id/);
   assert.match(browserHtml, /sourceHash: reviewContext\.submission\.digest/);
@@ -187,16 +205,21 @@ test("Artifact Review uses a resizable evidence modal with stable Submission tar
   assert.match(browserHtml, /button\.className = "pill current-step-jump";/);
   assert.match(browserHtml, /button\.dataset\.artifactReviewId = review\.id;/);
   assert.match(browserHtml, /state\.artifactReviewReturnScrollY = window\.scrollY;/);
+  assert.match(browserHtml, /html\.artifact-review-modal-open, body\.artifact-review-modal-open \{ overflow: hidden; overscroll-behavior: none; \}/);
+  assert.match(browserHtml, /\.artifact-review-modal-pane \{[^}]*overscroll-behavior: contain;/);
+  assert.match(browserHtml, /document\.documentElement\.classList\.toggle\("artifact-review-modal-open", state\.artifactReviewModalOpen\);/);
   assert.match(browserHtml, /state\.artifactReviewReturnFocusTop = active instanceof HTMLElement/);
   assert.match(browserHtml, /focusTarget\?\.focus\(\{ preventScroll: true \}\);/);
   assert.match(browserHtml, /window\.scrollBy\(0, focusTarget\.getBoundingClientRect\(\)\.top - returnFocusTop\);/);
   assert.match(browserHtml, /window\.scrollTo\(0, returnScrollY\);/);
   assert.doesNotMatch(browserHtml, /artifact-review-action-button/);
-  assert.match(browserHtml, /renderArtifactReviewRoundSummary\(context, selectedRound, viewingHistory\);/);
+  assert.match(browserHtml, /renderArtifactReviewRoundSummary\(context, selectedRound, viewingHistory, el\.artifactReviewModalComments\);/);
+  assert.match(browserHtml, /renderArtifactReviewSubmittedOpinions\(selectedRound, el\.artifactReviewModalComments, false\)/);
+  assert.match(browserHtml, /allowDisposition\s*&& advisory\s*&& comment\.id/);
   assert.match(browserHtml, /entries\.sort\(\(left, right\) => new Date\(right\.submittedAt \|\| 0\)\.getTime\(\) - new Date\(left\.submittedAt \|\| 0\)\.getTime\(\)\)/);
   assert.ok(
-    browserHtml.indexOf("renderArtifactReviewRoundSummary(context, selectedRound, viewingHistory);")
-      < browserHtml.indexOf("renderArtifactReviewSubmittedOpinions(selectedRound);"),
+    browserHtml.indexOf("renderArtifactReviewRoundSummary(context, selectedRound, viewingHistory, el.artifactReviewModalComments);")
+      < browserHtml.indexOf("renderArtifactReviewSubmittedOpinions("),
     "round summary should render before the opinion timeline"
   );
 });

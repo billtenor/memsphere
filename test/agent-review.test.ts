@@ -211,6 +211,10 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     assert.match(prompt, /For each unmet assertion, preserve at least one concrete comment/);
     assert.match(prompt, /## Review method/);
     assert.match(prompt, /commands personally executed/);
+    assert.match(prompt, /Do not stop after finding the first issue/);
+    assert.match(prompt, /complete a coverage pass across every contract assertion/);
+    assert.match(prompt, /same defect pattern and adjacent boundary cases/);
+    assert.match(prompt, /every substantiated finding discovered in this round has been recorded/);
     assert.match(prompt, /Do not invent a finding merely to avoid an empty comment list/);
     assert.doesNotMatch(JSON.stringify(launch), /MEMSPHERE_REVIEW_ENDPOINT|MEMSPHERE_REVIEW_CAPABILITY|bridge\.sock/);
     assert.match(prompt, /run step show --run "\$MEMSPHERE_REVIEW_RUN_ID" --step "<step-ref>"/);

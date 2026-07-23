@@ -114,6 +114,14 @@ flow:
     await page.getByRole("button", { name: /^产物评审 0\/2$/ }).click();
     const reviewModal = page.locator("#artifact-review-modal");
     await reviewModal.waitFor();
+    for (const heading of ["评审范围", "我的评审", "参与进度", "评审记录"]) {
+      await reviewModal.getByRole("heading", { name: heading, exact: true }).waitFor();
+    }
+    const scopePanel = reviewModal.locator("#artifact-review-scope-panel");
+    await scopePanel.getByText("artifact_acceptance.unanimous", { exact: true }).waitFor();
+    assert.equal(await reviewModal.locator(".artifact-review-modal-header").getByText("artifact_acceptance.unanimous", { exact: true }).count(), 0);
+    assert.equal(await scopePanel.getByRole("combobox", { name: "评审产物", exact: true }).count(), 1);
+    assert.equal(await scopePanel.getByText("当前轮次", { exact: true }).count(), 1);
     let identity = page.getByRole("combobox", { name: "评审身份" });
     await identity.waitFor();
     assert.equal(await page.getByRole("button", { name: "Create Review", exact: true }).isVisible(), false);
@@ -126,9 +134,22 @@ flow:
     assert(identityMenuBox.y >= identityTriggerBox.y + identityTriggerBox.height);
     assert.match(await identityMenu.locator('[data-identity-id="alice"]').innerText(), /^Decider ·/);
     assert.match(await identityMenu.locator('[data-identity-id="bob"]').innerText(), /^Advisor ·/);
+    await reviewModal.getByText("Visible only after identity authorization.", { exact: true }).waitFor();
+    const publicScope = await reviewModal.locator("#artifact-review-scope-panel").innerText();
+    const publicProgress = await reviewModal.locator("#artifact-review-progress-panel").innerText();
+    const publicRecord = await reviewModal.locator("#artifact-review-record-panel").innerText();
 
     await selectIdentity(page, identity, "alice");
+    await reviewModal.getByRole("heading", { name: "投票", exact: true }).waitFor();
+    await reviewModal.getByRole("heading", { name: "评审意见", exact: true }).waitFor();
+    await reviewModal.getByRole("heading", { name: "提交评审", exact: true }).waitFor();
+    const operationHeadings = (await reviewModal.locator("#artifact-review-my-panel h4").allTextContents())
+      .filter((heading) => ["评审意见", "投票", "提交评审"].includes(heading));
+    assert.deepEqual(operationHeadings, ["评审意见", "投票", "提交评审"]);
     await reviewModal.getByText("Visible only after identity authorization.", { exact: true }).waitFor();
+    assert.equal(await reviewModal.locator("#artifact-review-scope-panel").innerText(), publicScope);
+    assert.equal(await reviewModal.locator("#artifact-review-progress-panel").innerText(), publicProgress);
+    assert.equal(await reviewModal.locator("#artifact-review-record-panel").innerText(), publicRecord);
     assert.equal(await reviewModal.getByText("decider", { exact: true }).count(), 0);
     const candidateTarget = reviewModal.locator(".artifact-review-target").filter({ hasText: "Candidate" }).first();
     const anchoredSaved = page.waitForResponse((response) =>
@@ -234,8 +255,8 @@ flow:
     await severitySelect.click();
     const severityMenu = composer.locator("..").getByRole("listbox", { name: "意见分类" });
     assert.equal(await severityMenu.isVisible(), true);
-    await severityMenu.getByRole("option", { name: "blocking", exact: true }).click();
-    assert.equal(await severitySelect.textContent(), "blocking⌄");
+    await severityMenu.getByRole("option", { name: "阻塞问题", exact: true }).click();
+    assert.equal(await severitySelect.textContent(), "阻塞问题⌄");
     await composer.fill("Composer text replaced after failed save");
     failNextDraftSave = true;
     await page.route("**/draft", async (route) => {
@@ -400,6 +421,7 @@ flow:
     assert.equal(await roundSelector.getAttribute("data-polling-sentinel"), "preserved");
     assert.equal(await roundMenu.isVisible(), true);
     await roundMenu.locator(`[data-round-id="${firstReview.currentRoundId}"]`).click();
+    await scopePanel.getByText("历史轮次 · 只读", { exact: true }).waitFor();
     await reviewModal.getByText("Alice private draft", { exact: true }).waitFor();
     await reviewModal.getByText("Keep the accepted result concise.", { exact: true }).waitFor();
     const anchoredCard = reviewModal.locator(".comment-card").filter({ hasText: "Heading needs revision." });
@@ -407,6 +429,7 @@ flow:
     await reviewModal.locator(".artifact-review-target-located").waitFor();
     await roundSelector.click();
     await roundMenu.locator(`[data-round-id="${secondReview.currentRoundId}"]`).click();
+    await scopePanel.getByText("当前轮次", { exact: true }).waitFor();
     await reviewModal.getByText("The first-round comments were addressed.", { exact: true }).waitFor();
     assert.equal(await reviewModal.getByText("Alice private draft", { exact: true }).count(), 0);
     assert.equal(await reviewModal.getByText("Keep the accepted result concise.", { exact: true }).count(), 0);
@@ -419,6 +442,12 @@ flow:
 
     const beforeRunnerVote = await readRun(runsRoot, started.id);
     assert.equal(currentArtifactReview(beforeRunnerVote)?.status, "awaiting_runner_vote");
+    await roundSelector.click();
+    await roundMenu.locator(`[data-round-id="${firstReview.currentRoundId}"]`).click();
+    await reviewModal.getByText("Keep the accepted result concise.", { exact: true }).waitFor();
+    assert.equal(await reviewModal.getByRole("button", { name: "处置", exact: true }).count(), 0);
+    await roundSelector.click();
+    await roundMenu.locator(`[data-round-id="${secondReview.currentRoundId}"]`).click();
     await submitArtifactReviewRunnerVote({
       runsRoot,
       reviewId: secondReview.id,
@@ -445,6 +474,26 @@ flow:
     });
     await page.locator(".task-result").getByRole("button", { name: "产物评审", exact: true }).click();
     await reviewModal.waitFor();
+    const lockedScrollY = await page.evaluate(() => window.scrollY);
+    assert.equal(await page.locator("html").getAttribute("class"), "artifact-review-modal-open");
+    assert.match(await page.locator("body").getAttribute("class") || "", /\bartifact-review-modal-open\b/);
+    await page.mouse.move(2, 2);
+    await page.mouse.wheel(0, 1200);
+    await page.waitForTimeout(50);
+    assert.equal(await page.evaluate(() => window.scrollY), lockedScrollY);
+    const reviewPane = page.locator("#artifact-review-review-pane");
+    await reviewPane.evaluate((pane) => {
+      pane.scrollTop = pane.scrollHeight;
+    });
+    const reviewPaneBox = await reviewPane.boundingBox();
+    assert(reviewPaneBox);
+    await page.mouse.move(
+      reviewPaneBox.x + reviewPaneBox.width / 2,
+      reviewPaneBox.y + reviewPaneBox.height / 2
+    );
+    await page.mouse.wheel(0, 1200);
+    await page.waitForTimeout(50);
+    assert.equal(await page.evaluate(() => window.scrollY), lockedScrollY);
     const completedRoundSelector = reviewModal.getByRole("button", { name: "轮次", exact: true });
     await completedRoundSelector.click();
     await reviewModal.getByRole("listbox", { name: "轮次" })
@@ -486,6 +535,102 @@ flow:
         path: join(process.env.MEMSPHERE_SCREENSHOT_DIR, "artifact-review-mobile.png")
       });
     }
+  } finally {
+    await browser.close();
+    server.close();
+    await once(server, "close");
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Artifact Review without a Human Assignment keeps the public workspace visible", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-agent-only-review-browser-"));
+  const memoryRoot = join(dir, "memory");
+  const runsRoot = join(dir, "runs");
+  const reviewsRoot = join(dir, "reviews");
+  await mkdir(join(memoryRoot, "procedures"), { recursive: true });
+  await mkdir(reviewsRoot, { recursive: true });
+  await writeFile(join(memoryRoot, "procedures", "agent-only.yaml"), withCurrentMemorySyntax(`!procedure
+name: agent-only-review-browser
+role_bindings:
+  advisor: reviewer-agent
+flow:
+  - !action
+    action: Produce an Agent-only reviewed Artifact.
+    artifact: !artifact
+      name: agent-only candidate
+      format: markdown
+      review: artifact_acceptance.unanimous
+      role_bindings:
+        advisor: reviewer-agent
+`));
+  const controlPlane = parseControlPlaneConfig({
+    identities: {
+      "reviewer-agent": {
+        kind: "agent",
+        name: "Agent Reviewer",
+        agent: { provider: "traex", command: process.execPath, args: [] }
+      }
+    },
+    roles: {
+      runner: { name: "Runner", permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      advisor: { name: "Advisor", permissions: ["artifact.read", "decision.assess"] }
+    }
+  });
+  const started = await startRun({
+    memoryRoot,
+    runsRoot,
+    procedureName: "agent-only-review-browser",
+    controlPlane
+  });
+  const pending = await reportRun({
+    runsRoot,
+    runId: started.id,
+    artifact: { kind: "inline", value: "# Agent-only candidate\n\nPublic review material remains visible.\n" }
+  });
+  const agentOnlyReview = currentArtifactReview(pending);
+  assert(agentOnlyReview);
+  assert.equal(agentOnlyReview.rounds[0]?.assignments.length, 1);
+  const config: MemsphereConfig = {
+    configPath: join(dir, "config.json"),
+    scopeRoot: dir,
+    memoryRoot,
+    reviewsRoot,
+    runsRoot,
+    archiveRoot: join(dir, "archives"),
+    view: { host: "127.0.0.1", port: 0 },
+    debug: { agentReview: true, root: join(dir, "debug") },
+    controlPlane
+  };
+  const server = createViewServer(config);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address === "object");
+  const runsResponse = await fetch(`http://127.0.0.1:${address.port}/api/runs`);
+  const runsSource = await runsResponse.text();
+  assert.equal(runsResponse.status, 200, runsSource);
+  const runsPayload = JSON.parse(runsSource) as { runs: Array<{ artifactReview?: unknown; artifactReviewSummaries?: unknown[] }> };
+  assert.equal(runsPayload.runs[0]?.artifactReviewSummaries?.length, 1);
+  assert(runsPayload.runs[0]?.artifactReview);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.goto(`http://127.0.0.1:${address.port}`);
+    await page.getByRole("button", { name: "Task", exact: true }).click();
+    const reviewToggle = page.locator("#review-toggle");
+    await page.waitForFunction(() =>
+      document.getElementById("review-toggle")?.getAttribute("aria-controls") === "artifact-review-modal"
+    );
+    assert.equal(await reviewToggle.getAttribute("aria-controls"), "artifact-review-modal");
+    await reviewToggle.click();
+    const modal = page.locator("#artifact-review-modal");
+    await modal.getByText("Public review material remains visible.", { exact: true }).waitFor();
+    await modal.locator("#artifact-review-my-panel").getByText("无需评审", { exact: true }).waitFor();
+    assert.equal(await modal.getByRole("combobox", { name: "评审身份" }).count(), 0);
+    await modal.locator("#artifact-review-scope-panel").getByText("artifact_acceptance.unanimous", { exact: true }).waitFor();
+    await modal.locator("#artifact-review-progress-panel").getByText("Advisor", { exact: true }).waitFor();
+    await modal.locator("#artifact-review-record-panel").getByText("本轮汇总", { exact: true }).waitFor();
   } finally {
     await browser.close();
     server.close();

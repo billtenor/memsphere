@@ -11,6 +11,7 @@ import {
   currentArtifactReview,
   readRun,
   reportRun,
+  resolveArtifactReviewComment,
   startRun,
   submitArtifactReviewRunnerVote
 } from "../src/run/store.js";
@@ -84,7 +85,7 @@ flow:
     agentVersion: "private-version",
     model: "private-model",
     stopReason: "private-stop",
-    failure: { stage: "session", code: "review_failed", message: "Visible retry reason" }
+    failure: { stage: "session", code: "review_failed", message: "listen EPERM: Visible retry reason" }
   }];
   await writeFile(
     join(runsRoot, started.id, `${started.id}.json`),
@@ -116,15 +117,24 @@ flow:
     assert.match(publicSource, /"artifactReviewSummaries"/);
     assert.match(publicSource, /"provider":\s*"traex"/);
     assert.match(publicSource, /Visible retry reason/);
+    assert.match(publicSource, /"category":\s*"environment"/);
     assert.doesNotMatch(publicSource, /artifactReviews|Private candidate/);
     assert.doesNotMatch(publicSource, /attempt-private|workerPid|cliReadyAt|private-prompt|private-session|protocolVersion|private-agent|private-version|private-model|private-stop/);
 
     const roundPath = `${base}/api/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
+    const publicInitial = await fetch(roundPath);
+    assert.equal(publicInitial.status, 200);
+    const publicContext = await publicInitial.json() as ReviewContext;
+    assert.equal(publicContext.assignment, undefined);
+    assert.equal(publicContext.submission.artifact.content, "# Private candidate\n");
+    assert.equal(publicContext.rounds[0]?.assignments.length, 2);
+
     const aliceInitial = await fetch(`${roundPath}?identity_id=alice`);
     assert.equal(aliceInitial.status, 200);
     const aliceInitialSource = await aliceInitial.text();
     assert.match(aliceInitialSource, /"provider":\s*"traex"/);
     assert.match(aliceInitialSource, /Visible retry reason/);
+    assert.match(aliceInitialSource, /"category":\s*"environment"/);
     assert.doesNotMatch(aliceInitialSource, /attempt-private|workerPid|cliReadyAt|private-prompt|private-session|protocolVersion|private-agent|private-version|private-model|private-stop|"authorization"/);
     const aliceContext = JSON.parse(aliceInitialSource) as ReviewContext;
     assert.equal(aliceContext.submission.artifact.content, "# Private candidate\n");
@@ -166,11 +176,31 @@ flow:
     assert.equal(bobSubmit.status, 200);
     const afterBob = await bobSubmit.json() as ReviewContext;
     assert.equal(afterBob.review.status, "pending");
+    const advisoryCommentId = afterBob.rounds[0]?.assignments.find(
+      (assignment) => assignment.identityId === "bob"
+    )?.submitted?.comments[0]?.id;
+    assert(advisoryCommentId);
+    await resolveArtifactReviewComment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      commentId: advisoryCommentId,
+      disposition: "accepted-fixed",
+      note: "Applied the advisory suggestion.",
+      validationSummary: "Verified in the revised candidate."
+    });
 
     const aliceRefresh = await fetch(`${roundPath}?identity_id=alice`);
     const aliceRefreshedContext = await aliceRefresh.json() as ReviewContext;
     assert.equal(aliceRefreshedContext.assignment.draft.comments[0]?.body, "Alice private draft");
     assert.match(JSON.stringify(aliceRefreshedContext.rounds), /Advisory suggestion/);
+    assert.deepEqual(aliceRefreshedContext.rounds[0]?.commentDispositions?.[0], {
+      commentId: advisoryCommentId,
+      disposition: "accepted-fixed",
+      note: "Applied the advisory suggestion.",
+      validationSummary: "Verified in the revised candidate.",
+      updatedAt: aliceRefreshedContext.rounds[0]?.commentDispositions?.[0]?.updatedAt
+    });
     for (const round of aliceRefreshedContext.rounds as Array<{ assignments: Array<Record<string, unknown>> }>) {
       for (const assignment of round.assignments) assert.equal("draft" in assignment, false);
     }
@@ -243,14 +273,21 @@ type ReviewContext = {
     round: { revision: number };
   };
   submission: { artifact: { content?: string } };
-  assignment: {
+  assignment?: {
     identityId: string;
     draft: { comments: Array<{ body: string }> };
   };
   rounds: Array<{
+    commentDispositions?: Array<{
+      commentId: string;
+      disposition: string;
+      note?: string;
+      validationSummary?: string;
+      updatedAt: string;
+    }>;
     assignments: Array<{
       identityId: string;
-      submitted?: { comments: Array<{ body: string; renderedBody?: string }> };
+      submitted?: { comments: Array<{ id: string; body: string; renderedBody?: string }> };
     }>;
   }>;
 };

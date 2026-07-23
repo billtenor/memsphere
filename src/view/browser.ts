@@ -140,6 +140,7 @@ export const browserHtml = String.raw`<!doctype html>
     .review-active .commentable:hover .inline-plus, .review-active .field-table th:hover .inline-plus, .review-active .inline-plus:focus, .review-active .section-header:hover .target-add, .review-active .schema-field-content:hover .target-add, .review-active .target-add:focus { opacity: 1; }
     .inline-plus:hover, .target-add:hover { border-color: var(--accent); color: var(--accent); }
     body:not(.review-active) .target-add, body:not(.review-active) .inline-plus { display: none; }
+    html.artifact-review-modal-open, body.artifact-review-modal-open { overflow: hidden; overscroll-behavior: none; }
     body.artifact-review-modal-open .content .target-add, body.artifact-review-modal-open .content .inline-plus { display: none !important; }
     body:not(.review-active) .section-header { grid-template-columns: 22px minmax(0, 1fr) auto; }
     body:not(.review-active) .schema-field-content { grid-template-columns: minmax(0, 1fr) auto; }
@@ -261,6 +262,14 @@ export const browserHtml = String.raw`<!doctype html>
     }
     .review-sub { margin: 4px 0 14px; font-size: 13px; }
     .artifact-review-stack { display: grid; gap: 10px; }
+    .artifact-review-panel { display: grid; gap: 10px; align-content: start; }
+    .artifact-review-panel > h3 { margin: 0; font-size: 15px; letter-spacing: 0; }
+    .artifact-review-panel-content { min-width: 0; display: grid; gap: 10px; }
+    .artifact-review-operation-group { min-width: 0; display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .artifact-review-operation-group:first-child { padding-top: 0; border-top: 0; }
+    .artifact-review-operation-group h4 { margin: 0; font-size: 13px; letter-spacing: 0; }
+    .artifact-review-operation-help { margin: 0; color: var(--muted); font-size: 12px; }
+    .artifact-review-submit-area .btn { justify-self: stretch; }
     .artifact-review-grid { display: grid; gap: 8px; }
     .artifact-review-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
     .artifact-review-row:last-child { border-bottom: 0; }
@@ -272,6 +281,7 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-time-value { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
     .artifact-review-select { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); padding: 8px 9px; }
     .artifact-review-round-select { position: relative; min-width: 0; }
+    .artifact-review-severity-select { width: 100%; }
     .artifact-review-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; cursor: pointer; }
     .artifact-review-select-trigger[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
     .artifact-review-select-caret { color: var(--muted); font-size: 13px; line-height: 1; }
@@ -320,17 +330,16 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-dialog-body { padding: 18px; display: grid; gap: 12px; }
     .artifact-review-dialog-body h3 { margin: 0; font-size: 18px; }
     .artifact-review-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
-    dialog.artifact-review-modal { width: calc(100vw - 32px); max-width: 1680px; height: calc(100vh - 32px); max-height: 1120px; border: 1px solid var(--line); border-radius: 8px; padding: 0; color: var(--text); background: var(--bg); box-shadow: 0 24px 80px rgba(25, 30, 35, .28); overflow: hidden; }
+    dialog.artifact-review-modal { width: calc(100vw - 32px); max-width: 1680px; height: calc(100vh - 32px); max-height: 1120px; border: 1px solid var(--line); border-radius: 8px; padding: 0; color: var(--text); background: var(--bg); box-shadow: 0 24px 80px rgba(25, 30, 35, .28); overflow: hidden; overscroll-behavior: none; }
     dialog.artifact-review-modal::backdrop { background: rgba(22, 28, 30, .42); }
     .artifact-review-modal-shell { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
     .artifact-review-modal-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 16px 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
     .artifact-review-modal-head h2 { margin: 0; font-size: 20px; letter-spacing: 0; }
     .artifact-review-modal-heading { min-width: 0; display: grid; gap: 5px; }
     .artifact-review-modal-subtitle { color: var(--muted); overflow-wrap: anywhere; }
-    .artifact-review-modal-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .artifact-review-modal-body { min-height: 0; display: grid; grid-template-columns: minmax(320px, var(--artifact-review-left)) 8px minmax(320px, 1fr); }
-    .artifact-review-modal-pane { min-width: 0; min-height: 0; overflow: auto; padding: 16px 18px 28px; }
-    .artifact-review-modal-pane.review-pane { background: #fbfbf8; }
+    .artifact-review-modal-pane { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 16px 18px 28px; }
+    .artifact-review-modal-pane.review-pane { display: grid; gap: 12px; align-content: start; background: #fbfbf8; }
     .artifact-review-modal-resizer { position: relative; min-width: 8px; background: #fbfbf8; cursor: col-resize; touch-action: none; outline: none; }
     .artifact-review-modal-resizer::before { content: ""; position: absolute; inset: 0 auto 0 3px; width: 1px; background: var(--line); }
     .artifact-review-modal-resizer:hover::before, .artifact-review-modal-resizer:focus-visible::before, body.artifact-review-resizing .artifact-review-modal-resizer::before { width: 2px; background: var(--accent); }
@@ -344,7 +353,6 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-target-located { background: #edf6f3; box-shadow: 0 0 0 3px rgba(40, 108, 103, .2); }
     .artifact-review-locate-failure { margin-bottom: 10px; }
     .artifact-review-comment-context { margin-top: 7px; padding: 7px 8px; border-left: 2px solid var(--line); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
-    .artifact-review-readonly { color: var(--muted); font-size: 12px; }
     code { background: var(--soft); border-radius: 4px; padding: 1px 4px; }
     body.task-mode .search, body.task-mode #expand, body.task-mode #collapse { display: none; }
     body.review-drawer-open .shell { grid-template-columns: 300px minmax(0, 1fr) 8px var(--review-width); }
@@ -445,7 +453,6 @@ export const browserHtml = String.raw`<!doctype html>
         <div class="artifact-review-modal-heading">
           <h2 id="artifact-review-modal-title">Artifact Review</h2>
           <div class="artifact-review-modal-subtitle" id="artifact-review-modal-subtitle"></div>
-          <div class="artifact-review-modal-meta" id="artifact-review-modal-meta"></div>
         </div>
         <button class="btn" id="artifact-review-modal-close" type="button">Close</button>
       </header>
@@ -455,17 +462,31 @@ export const browserHtml = String.raw`<!doctype html>
       </div>
       <div class="artifact-review-modal-body">
         <section class="artifact-review-modal-pane artifact-pane" id="artifact-review-artifact-pane">
-          <div class="artifact-review-artifact-head"><div class="artifact-review-artifact-heading"><h3 id="artifact-review-artifact-title">Artifact</h3><div id="artifact-review-material-selector"></div></div><span class="artifact-review-readonly" id="artifact-review-round-mode"></span></div>
+          <div class="artifact-review-artifact-head"><div class="artifact-review-artifact-heading"><h3 id="artifact-review-artifact-title">Artifact</h3><div id="artifact-review-material-selector"></div></div></div>
           <div id="artifact-review-artifact-content" class="artifact-review-artifact-content"></div>
         </section>
         <div class="artifact-review-modal-resizer" id="artifact-review-modal-resizer" role="separator" aria-controls="artifact-review-artifact-pane artifact-review-review-pane" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="75" aria-valuenow="58" tabindex="0"></div>
         <aside class="artifact-review-modal-pane review-pane" id="artifact-review-review-pane">
-          <div id="artifact-review-modal-controls" class="review-list"></div>
-          <section class="panel">
-            <div class="toolbar" style="margin-bottom: 10px;">
-              <div><div class="block-title" id="artifact-review-comments-title" style="margin-top: 0;">Comments</div><div class="muted" id="artifact-review-comment-summary"></div></div>
-              <button class="btn primary" id="artifact-review-submit">Submit</button>
+          <section class="panel artifact-review-panel" id="artifact-review-scope-panel">
+            <h3 id="artifact-review-scope-title">Review scope</h3>
+            <div id="artifact-review-modal-controls" class="artifact-review-panel-content"></div>
+          </section>
+          <section class="panel artifact-review-panel" id="artifact-review-my-panel">
+            <h3 id="artifact-review-my-title">My review</h3>
+            <div class="muted" id="artifact-review-comment-summary"></div>
+            <div id="artifact-review-my-content" class="artifact-review-panel-content"></div>
+            <div id="artifact-review-submit-area" class="artifact-review-operation-group artifact-review-submit-area">
+              <h4 id="artifact-review-submit-title">Submit review</h4>
+              <p class="artifact-review-operation-help" id="artifact-review-submit-summary"></p>
+              <button class="btn primary" id="artifact-review-submit">Submit review</button>
             </div>
+          </section>
+          <section class="panel artifact-review-panel" id="artifact-review-progress-panel">
+            <h3 id="artifact-review-progress-title">Participation progress</h3>
+            <div id="artifact-review-progress-content" class="artifact-review-panel-content"></div>
+          </section>
+          <section class="panel artifact-review-panel" id="artifact-review-record-panel">
+            <h3 id="artifact-review-record-title">Review record</h3>
             <div id="artifact-review-modal-comments" class="comment-list"></div>
           </section>
         </aside>
@@ -679,17 +700,23 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewModal: document.getElementById("artifact-review-modal"),
       artifactReviewModalTitle: document.getElementById("artifact-review-modal-title"),
       artifactReviewModalSubtitle: document.getElementById("artifact-review-modal-subtitle"),
-      artifactReviewModalMeta: document.getElementById("artifact-review-modal-meta"),
       artifactReviewModalClose: document.getElementById("artifact-review-modal-close"),
       artifactReviewModalControls: document.getElementById("artifact-review-modal-controls"),
+      artifactReviewMyContent: document.getElementById("artifact-review-my-content"),
+      artifactReviewProgressContent: document.getElementById("artifact-review-progress-content"),
       artifactReviewModalComments: document.getElementById("artifact-review-modal-comments"),
-      artifactReviewCommentsTitle: document.getElementById("artifact-review-comments-title"),
+      artifactReviewScopeTitle: document.getElementById("artifact-review-scope-title"),
+      artifactReviewMyTitle: document.getElementById("artifact-review-my-title"),
+      artifactReviewProgressTitle: document.getElementById("artifact-review-progress-title"),
+      artifactReviewRecordTitle: document.getElementById("artifact-review-record-title"),
       artifactReviewCommentSummary: document.getElementById("artifact-review-comment-summary"),
+      artifactReviewSubmitArea: document.getElementById("artifact-review-submit-area"),
+      artifactReviewSubmitTitle: document.getElementById("artifact-review-submit-title"),
+      artifactReviewSubmitSummary: document.getElementById("artifact-review-submit-summary"),
       artifactReviewSubmit: document.getElementById("artifact-review-submit"),
       artifactReviewArtifactTitle: document.getElementById("artifact-review-artifact-title"),
       artifactReviewMaterialSelector: document.getElementById("artifact-review-material-selector"),
       artifactReviewArtifactContent: document.getElementById("artifact-review-artifact-content"),
-      artifactReviewRoundMode: document.getElementById("artifact-review-round-mode"),
       artifactReviewModalResizer: document.getElementById("artifact-review-modal-resizer"),
       artifactReviewArtifactTab: document.getElementById("artifact-review-artifact-tab"),
       artifactReviewReviewTab: document.getElementById("artifact-review-review-tab"),
@@ -873,7 +900,7 @@ export const browserHtml = String.raw`<!doctype html>
         state.artifactReviewIdentityByReview[review.id] = identityId;
         writeStoredObject(artifactReviewIdentityKey, state.artifactReviewIdentityByReview);
       }
-      if (identityId && (force || !hasOpenInlineEditor())) {
+      if (force || !hasOpenInlineEditor()) {
         const requestedRoundId = state.artifactReviewRoundByReview[review.id] || review.currentRoundId;
         try {
           await loadArtifactReviewContext(review.id, requestedRoundId, identityId);
@@ -883,8 +910,6 @@ export const browserHtml = String.raw`<!doctype html>
           writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
           await loadArtifactReviewContext(review.id, review.currentRoundId, identityId);
         }
-      } else if (!identityId) {
-        state.artifactReviewContext = null;
       }
     }
 
@@ -908,7 +933,7 @@ export const browserHtml = String.raw`<!doctype html>
       const response = await fetch(
         "/api/artifact-reviews/" + encodeURIComponent(reviewId)
         + "/rounds/" + encodeURIComponent(roundId)
-        + "?identity_id=" + encodeURIComponent(identityId)
+        + (identityId ? "?identity_id=" + encodeURIComponent(identityId) : "")
       );
       if (!response.ok) throw new Error(await response.text());
       return response.json();
@@ -918,6 +943,7 @@ export const browserHtml = String.raw`<!doctype html>
       document.body.classList.toggle("task-mode", state.viewMode === "task");
       document.body.classList.toggle("review-active", canComment());
       document.body.classList.toggle("artifact-review-modal-open", state.artifactReviewModalOpen);
+      document.documentElement.classList.toggle("artifact-review-modal-open", state.artifactReviewModalOpen);
       const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
       const artifactReview = state.viewMode === "task" ? defaultArtifactReviewSummary(run) : null;
       el.reviewToggle.textContent = artifactReview?.round
@@ -3131,7 +3157,7 @@ export const browserHtml = String.raw`<!doctype html>
     function currentArtifactReviewDraftScope() {
       if (!isArtifactReviewMode()) return null;
       const context = state.artifactReviewContext;
-      if (!context) return null;
+      if (!context?.assignment) return null;
       return {
         reviewId: context.review.id,
         roundId: context.review.currentRoundId,
@@ -3655,7 +3681,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function saveArtifactReviewDraft(draft, change = {}) {
       const context = state.artifactReviewContext;
-      if (!context || context.assignment.status !== "draft" || state.artifactReviewSaving) return { ok: false };
+      if (!context?.assignment || context.assignment.status !== "draft" || state.artifactReviewSaving) return { ok: false };
       const entry = ensureArtifactReviewLocalEntry(context);
       const pendingDraft = setArtifactReviewLocalDraft(context, draft, change);
       state.artifactReviewSaving = true;
@@ -3750,7 +3776,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function artifactReviewSubmitDisabledReason() {
       const context = state.artifactReviewContext;
-      if (!context) return t("selectIdentity");
+      if (!context?.assignment) return displayLanguage === "zh" ? "无需评审" : "No review required";
       if (state.artifactReviewSaving) return displayLanguage === "zh" ? "正在保存评审草稿" : "Saving review draft";
       if (state.artifactReviewConflict) return state.artifactReviewConflict;
       if (context.review.status !== "pending") return t("round") + " " + context.review.status;
@@ -3768,7 +3794,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function submitArtifactReview() {
       const context = state.artifactReviewContext;
-      if (!context) return;
+      if (!context?.assignment) return;
       const entry = artifactReviewLocalEntry(context);
       if (entry?.dirty) {
         const saved = await saveArtifactReviewDraft(entry.draft);
@@ -3944,52 +3970,71 @@ export const browserHtml = String.raw`<!doctype html>
       const review = selectedArtifactReviewSummary();
       const context = state.artifactReviewContext;
       el.artifactReviewModalControls.innerHTML = "";
+      el.artifactReviewMyContent.innerHTML = "";
+      el.artifactReviewProgressContent.innerHTML = "";
       el.artifactReviewModalComments.innerHTML = "";
       el.artifactReviewArtifactContent.innerHTML = "";
       el.artifactReviewMaterialSelector.innerHTML = "";
-      el.artifactReviewModalMeta.innerHTML = "";
+      el.artifactReviewScopeTitle.textContent = displayLanguage === "zh" ? "评审范围" : "Review scope";
+      el.artifactReviewMyTitle.textContent = displayLanguage === "zh" ? "我的评审" : "My review";
+      el.artifactReviewProgressTitle.textContent = displayLanguage === "zh" ? "参与进度" : "Participation progress";
+      el.artifactReviewRecordTitle.textContent = displayLanguage === "zh" ? "评审记录" : "Review record";
+      el.artifactReviewSubmitTitle.textContent = displayLanguage === "zh" ? "提交评审" : "Submit review";
       if (!review?.round) {
         el.artifactReviewModalTitle.textContent = t("artifactReview");
         el.artifactReviewModalSubtitle.textContent = "";
         el.artifactReviewCommentSummary.textContent = "";
+        el.artifactReviewSubmitArea.hidden = true;
         el.artifactReviewSubmit.disabled = true;
         return;
       }
 
-      const selectedRound = context?.rounds?.find(round => round.submissionId === context.submission?.id);
+      const selectedRound = context ? selectedArtifactReviewRound(context) : review.round;
       const selectedSequence = selectedRound?.sequence || review.round.sequence;
       const viewingHistory = Boolean(selectedRound && selectedRound.id !== review.currentRoundId);
       el.artifactReviewModalTitle.textContent = t("artifactReview");
       el.artifactReviewModalClose.textContent = t("close");
-      el.artifactReviewCommentsTitle.textContent = t("reviewComments");
       el.artifactReviewArtifactTab.textContent = t("artifactPane");
       el.artifactReviewReviewTab.textContent = t("reviewPane");
       el.artifactReviewModalSubtitle.textContent = review.artifactName + " · " + review.id;
-      el.artifactReviewModalMeta.append(
-        pill(artifactReviewRoundStatusLabel(review.round.status), false, review.status === "passed" ? "done" : review.status === "awaiting_revision" ? "warn" : "processing"),
-        pill(review.policyId),
-        pill(t("round") + " " + review.round.sequence + " · " + review.round.submitted + "/" + review.round.total),
-        pill((displayLanguage === "zh" ? "所选轮次 " : "Selected round ") + selectedSequence)
-      );
       const selectedMaterial = context ? selectedArtifactReviewMaterial(context) : null;
       el.artifactReviewArtifactTitle.textContent = displayLanguage === "zh" ? "评审材料" : "Review material";
       if (context && selectedMaterial) {
         el.artifactReviewMaterialSelector.append(renderArtifactReviewMaterialSelector(context, selectedMaterial));
       }
-      el.artifactReviewRoundMode.textContent = viewingHistory
-        ? (displayLanguage === "zh" ? "历史轮次 · 只读" : "Historical round · read-only")
-        : (displayLanguage === "zh" ? "当前轮次" : "Current round");
-      const controls = document.createElement("section");
-      controls.className = "panel artifact-review-stack";
-      controls.append(blockTitle(t("reviewArtifact")), renderArtifactReviewSelector(review));
+      const controls = el.artifactReviewModalControls;
       if (context) {
         controls.append(renderArtifactReviewRoundTimeline(context));
-        controls.append(renderArtifactReviewHistorySelector(context));
       }
-      const identityLabel = blockTitle(t("identity"));
-      controls.append(identityLabel, renderArtifactReviewIdentitySelector(review, context));
+      controls.append(renderArtifactReviewSelector(review));
+      const scopeRound = selectedRound || review.round;
+      const scopeSubmitted = scopeRound.submitted
+        ?? (scopeRound.assignments || []).filter(assignment => assignment.status === "submitted").length;
+      const scopeTotal = scopeRound.total ?? scopeRound.assignments?.length ?? 0;
+      const scopeMeta = document.createElement("div");
+      scopeMeta.className = "meta";
+      scopeMeta.style.margin = "0";
+      scopeMeta.append(
+        pill(
+          artifactReviewRoundStatusLabel(scopeRound.status),
+          false,
+          scopeRound.status === "passed" ? "done" : scopeRound.status === "changes_requested" ? "warn" : "processing"
+        ),
+        pill(review.policyId),
+        pill(t("round") + " " + selectedSequence + " · " + scopeSubmitted + "/" + scopeTotal),
+        pill(viewingHistory
+          ? (displayLanguage === "zh" ? "历史轮次 · 只读" : "Historical round · read-only")
+          : (displayLanguage === "zh" ? "当前轮次" : "Current round"))
+      );
+      controls.append(scopeMeta);
+      if (context) controls.append(renderArtifactReviewHistorySelector(context));
+      const humanAssignments = (review.round.assignments || []).filter(assignment => assignment.identityKind !== "agent");
+      if (humanAssignments.length) {
+        const identityLabel = blockTitle(t("identity"));
+        el.artifactReviewMyContent.append(identityLabel, renderArtifactReviewIdentitySelector(review, context));
+      }
 
-      if (context) {
+      if (context?.assignment) {
         const role = document.createElement("div");
         role.className = "meta";
         role.style.margin = "0";
@@ -3998,35 +4043,25 @@ export const browserHtml = String.raw`<!doctype html>
           false,
           context.assignment.binding === "decision" ? "strong" : "warn"
         ));
-        controls.append(role);
+        el.artifactReviewMyContent.append(role);
       }
 
       const reviewSummary = document.createElement("div");
-      reviewSummary.className = "artifact-review-message" + (review.round.unresolvedBlocking ? " warn" : "");
-      const severity = review.round.severity || {};
-      const evidence = (review.round.evidence || []).map(item => item.role + ": " + item.status).join(" · ");
-      reviewSummary.textContent = (review.round.decisionReady ? "Decision ready" : "Waiting for reviewers")
-        + " · blocking " + (severity.blocking || 0)
-        + " · unresolved " + (review.round.unresolvedBlocking || 0)
-        + " · environment failures " + (review.round.failures || []).filter(item => item.category === "environment").length
-        + " · repeated advisory groups " + (review.round.repeatedAdvisories || []).length
-        + (evidence ? " · " + evidence : "");
-      controls.append(reviewSummary);
-
-      controls.append(blockTitle(t("participants")), renderArtifactReviewProgress(review, context));
-      el.artifactReviewModalControls.append(controls);
+      reviewSummary.className = "artifact-review-message" + (artifactReviewUnresolvedBlocking(scopeRound) ? " warn" : "");
+      reviewSummary.textContent = artifactReviewProgressSummary(scopeRound);
+      el.artifactReviewProgressContent.append(reviewSummary, renderArtifactReviewProgress(review, context));
 
       if (state.artifactReviewLoading) {
         const loading = document.createElement("div");
         loading.className = "muted";
-        loading.textContent = "Loading...";
-        el.artifactReviewModalComments.append(loading);
+        loading.textContent = displayLanguage === "zh" ? "加载中..." : "Loading...";
+        el.artifactReviewMyContent.append(loading);
         el.artifactReviewArtifactContent.append(loading.cloneNode(true));
       } else if (!context) {
         const empty = document.createElement("div");
         empty.className = "artifact-review-message";
         empty.textContent = t("selectIdentity");
-        el.artifactReviewModalComments.append(empty);
+        el.artifactReviewMyContent.append(empty);
       } else {
         el.artifactReviewArtifactContent.append(renderArtifactReviewSubmission(context, selectedMaterial));
         renderArtifactReviewWorkspace(context);
@@ -4034,13 +4069,65 @@ export const browserHtml = String.raw`<!doctype html>
 
       const disabledReason = artifactReviewSubmitDisabledReason();
       const agentManaged = context?.assignment?.identityKind === "agent";
-      el.artifactReviewSubmit.hidden = Boolean(agentManaged);
+      const readOnly = !context?.assignment || viewingHistory || context.assignment.status === "submitted" || context.review.status !== "pending";
+      el.artifactReviewSubmitArea.hidden = Boolean(agentManaged || readOnly);
       el.artifactReviewSubmit.textContent = context?.assignment?.status === "submitted" ? t("submitted") : t("submitArtifactReview");
       el.artifactReviewSubmit.disabled = agentManaged || Boolean(disabledReason);
       el.artifactReviewSubmit.title = disabledReason;
-      el.artifactReviewCommentSummary.textContent = context
+      el.artifactReviewCommentSummary.textContent = context?.assignment
         ? artifactReviewRoleName(context.assignment) + " · " + context.review.id
-        : review.id;
+        : "";
+      if (context?.assignment && !agentManaged) {
+        const draft = artifactReviewEffectiveDraft(context);
+        const vote = context.assignment.submitted?.vote || draft.vote;
+        const comments = draft.comments?.length || 0;
+        el.artifactReviewSubmitSummary.textContent = displayLanguage === "zh"
+          ? "当前投票：" + artifactReviewVoteLabel(vote, context.assignment.binding) + " · 草稿意见：" + comments + " 条"
+          : "Current vote: " + artifactReviewVoteLabel(vote, context.assignment.binding) + " · Draft comments: " + comments;
+      } else {
+        el.artifactReviewSubmitSummary.textContent = "";
+      }
+    }
+
+    function artifactReviewProgressSummary(round) {
+      const comments = (round.assignments || []).flatMap(assignment => assignment.submitted?.comments || []);
+      const severity = round.severity || comments.reduce((counts, comment) => {
+        if (comment.severity) counts[comment.severity] = (counts[comment.severity] || 0) + 1;
+        return counts;
+      }, {});
+      const submitted = round.submitted
+        ?? (round.assignments || []).filter(assignment => assignment.status === "submitted").length;
+      const total = round.total ?? round.assignments?.length ?? 0;
+      const decisionReady = round.decisionReady
+        ?? ["passed", "changes_requested"].includes(round.status);
+      const failures = round.failures || (round.assignments || [])
+        .map(assignment => assignment.attempts?.at(-1)?.failure)
+        .filter(Boolean);
+      const environmentFailures = failures.filter(item => item.category === "environment").length;
+      const unresolvedBlocking = artifactReviewUnresolvedBlocking(round);
+      if (displayLanguage === "zh") {
+        return "已提交 " + submitted + "/" + total
+          + " · " + (decisionReady ? "决策票已就绪" : "仍在等待评审")
+          + " · 阻塞意见 " + (severity.blocking || 0)
+          + " · 未处置 " + unresolvedBlocking
+          + " · 环境失败 " + environmentFailures
+          + " · 重复建议组 " + (round.repeatedAdvisories || []).length;
+      }
+      return submitted + "/" + total + " submitted"
+        + " · " + (decisionReady ? "Decision votes are ready" : "Waiting for reviews")
+        + " · Blocking comments " + (severity.blocking || 0)
+        + " · Unresolved " + unresolvedBlocking
+        + " · Environment failures " + environmentFailures
+        + " · Repeated advisory groups " + (round.repeatedAdvisories || []).length;
+    }
+
+    function artifactReviewUnresolvedBlocking(round) {
+      if (round.unresolvedBlocking !== undefined) return round.unresolvedBlocking;
+      const resolved = new Set((round.commentDispositions || []).map(item => item.commentId));
+      return (round.assignments || [])
+        .flatMap(assignment => assignment.submitted?.comments || [])
+        .filter(comment => comment.severity === "blocking" && !resolved.has(comment.id))
+        .length;
     }
 
     function artifactReviewEvidenceRoleLabel(role) {
@@ -4290,6 +4377,7 @@ export const browserHtml = String.raw`<!doctype html>
       const list = document.createElement("div");
       list.className = "artifact-review-grid";
       const selectedRound = context ? selectedArtifactReviewRound(context) : review.round;
+      const currentRoundSelected = selectedRound?.id === review.currentRoundId;
       const assignments = selectedRound?.assignments || review.round.assignments || [];
       for (const assignment of assignments) {
         const submitted = assignment.submitted;
@@ -4314,6 +4402,7 @@ export const browserHtml = String.raw`<!doctype html>
         main.append(name, type);
         if (assignment.identityKind === "agent") {
           const activity = agentActivityEntry(review, selectedRound, assignment);
+          const attempt = latestAgentAttempt(assignment);
           const summaryRow = document.createElement("div");
           summaryRow.className = "artifact-review-agent-summary-row";
           const summary = document.createElement("span");
@@ -4346,6 +4435,14 @@ export const browserHtml = String.raw`<!doctype html>
             summaryRow.append(toggle);
           }
           main.append(summaryRow);
+          if (attempt?.failure?.message) {
+            const failure = document.createElement("span");
+            failure.className = "muted";
+            failure.textContent = displayLanguage === "zh"
+              ? "失败：" + attempt.failure.message
+              : "Failure: " + attempt.failure.message;
+            main.append(failure);
+          }
         }
         const decisionIntent = submitted?.summary || assignment.summary;
         if (assignment.binding === "decision" && decisionIntent) {
@@ -4370,7 +4467,12 @@ export const browserHtml = String.raw`<!doctype html>
         const actions = document.createElement("div");
         actions.className = "comment-actions";
         actions.append(status);
-        if (assignment.identityKind === "agent" && assignment.status === "failed" && review.status === "pending") {
+        if (
+          currentRoundSelected
+          && assignment.identityKind === "agent"
+          && assignment.status === "failed"
+          && review.status === "pending"
+        ) {
           const retry = document.createElement("button");
           retry.type = "button";
           retry.className = "btn";
@@ -4956,7 +5058,7 @@ export const browserHtml = String.raw`<!doctype html>
           state.artifactReviewHistoryRoundId = round.id;
           writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
           setOpen(false);
-          await loadArtifactReviewContext(context.review.id, round.id, context.assignment.identityId);
+          await loadArtifactReviewContext(context.review.id, round.id, context.assignment?.identityId || "");
           renderAll();
         });
         menu.append(option);
@@ -5005,7 +5107,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function syncArtifactReviewStatusMessage(context) {
-      const existing = el.artifactReviewModalComments.querySelector("[data-artifact-review-status-message]");
+      const existing = el.artifactReviewMyContent.querySelector("[data-artifact-review-status-message]");
       if (existing) existing.remove();
       const entry = artifactReviewLocalEntry(context);
       const statusMessage = entry?.status || state.artifactReviewConflict || entry?.warning || "";
@@ -5026,7 +5128,7 @@ export const browserHtml = String.raw`<!doctype html>
         });
         region.append(refresh);
       }
-      el.artifactReviewModalComments.prepend(region);
+      el.artifactReviewMyContent.prepend(region);
     }
 
     function renderArtifactReviewWorkspace(context) {
@@ -5035,30 +5137,84 @@ export const browserHtml = String.raw`<!doctype html>
       const selectedRound = context.rounds.find(round => round.id === selectedRoundId)
         || context.rounds.find(round => round.id === context.review.currentRoundId);
       const viewingHistory = selectedRound?.id !== context.review.currentRoundId;
-      renderArtifactReviewRoundSummary(context, selectedRound, viewingHistory);
+      renderArtifactReviewRoundSummary(context, selectedRound, viewingHistory, el.artifactReviewModalComments);
       if (viewingHistory) {
-        renderArtifactReviewSubmittedOpinions(selectedRound);
+        const history = document.createElement("div");
+        history.className = "artifact-review-message";
+        history.textContent = displayLanguage === "zh"
+          ? "历史轮次仅供查看，不能投票、添加意见或重新提交。"
+          : "Historical rounds are read-only; voting, commenting, and resubmission are unavailable.";
+        el.artifactReviewMyContent.append(history);
+        renderArtifactReviewSubmittedOpinions(selectedRound, el.artifactReviewModalComments, false);
         return;
       }
 
       const assignment = context.assignment;
+      if (!assignment) {
+        const noReview = document.createElement("div");
+        noReview.className = "artifact-review-message";
+        noReview.textContent = displayLanguage === "zh" ? "无需评审" : "No review required";
+        el.artifactReviewMyContent.append(noReview);
+        renderArtifactReviewSubmittedOpinions(selectedRound, el.artifactReviewModalComments, false);
+        return;
+      }
       if (assignment.identityKind === "agent") {
         renderArtifactReviewAgentWorkspace(context, selectedRound);
         return;
       }
       const readOnly = assignment.status === "submitted" || context.review.status !== "pending";
-      const controls = document.createElement("div");
-      controls.className = "artifact-review-controls";
-      controls.append(blockTitle(readOnly ? t("submitted") : t("myDraft")));
-      controls.append(renderArtifactVoteControl(context, readOnly));
-      if (!readOnly) controls.append(renderArtifactReviewCommentComposer(context));
-      el.artifactReviewModalComments.append(controls);
+      if (readOnly) {
+        const submitted = document.createElement("div");
+        submitted.className = "artifact-review-message";
+        const vote = assignment.submitted?.vote;
+        submitted.textContent = displayLanguage === "zh"
+          ? "已提交评审 · " + artifactReviewVoteLabel(vote, assignment.binding)
+          : "Review submitted · " + artifactReviewVoteLabel(vote, assignment.binding);
+        const jump = document.createElement("button");
+        jump.className = "btn";
+        jump.textContent = displayLanguage === "zh" ? "查看正式意见" : "View submitted opinion";
+        jump.addEventListener("click", () => scrollToArtifactReviewParticipant(assignment));
+        el.artifactReviewMyContent.append(submitted, jump);
+      } else {
+        const commentGroup = artifactReviewOperationGroup(
+          displayLanguage === "zh" ? "评审意见" : "Review comments",
+          displayLanguage === "zh"
+            ? "记录具体问题或建议。添加意见只保存草稿，不会提交整份评审。"
+            : "Record specific issues or suggestions. Adding a comment saves a draft; it does not submit the review."
+        );
+        commentGroup.append(renderArtifactReviewCommentComposer(context));
+        const draftComments = artifactReviewEffectiveDraft(context).comments || [];
+        for (const comment of draftComments) {
+          commentGroup.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(assignment), true));
+        }
+        el.artifactReviewMyContent.append(commentGroup);
 
-      const draftComments = artifactReviewEffectiveDraft(context).comments || [];
-      if (draftComments.length) {
-        for (const comment of draftComments) el.artifactReviewModalComments.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(assignment), true));
+        const voteGroup = artifactReviewOperationGroup(
+          displayLanguage === "zh" ? "投票" : "Vote",
+          displayLanguage === "zh"
+            ? "根据上述评审意见，选择你对本轮产物的最终立场。"
+            : "Based on the review comments above, choose your final position on this Artifact."
+        );
+        voteGroup.append(renderArtifactVoteControl(context, false));
+        el.artifactReviewMyContent.append(voteGroup);
       }
-      renderArtifactReviewSubmittedOpinions(selectedRound);
+      renderArtifactReviewSubmittedOpinions(
+        selectedRound,
+        el.artifactReviewModalComments,
+        selectedRound?.id === context.review.currentRoundId && context.review.status === "awaiting_runner_vote"
+      );
+    }
+
+    function artifactReviewOperationGroup(titleText, helpText) {
+      const section = document.createElement("section");
+      section.className = "artifact-review-operation-group";
+      const title = document.createElement("h4");
+      title.textContent = titleText;
+      const help = document.createElement("p");
+      help.className = "artifact-review-operation-help";
+      help.textContent = helpText;
+      section.append(title, help);
+      return section;
     }
 
     function renderArtifactReviewAgentWorkspace(context, selectedRound) {
@@ -5095,11 +5251,15 @@ export const browserHtml = String.raw`<!doctype html>
         retry.addEventListener("click", () => retryArtifactReviewAgent(context));
         status.append(retry);
       }
-      el.artifactReviewModalComments.append(status);
+      el.artifactReviewProgressContent.append(status);
       for (const comment of assignment.draft?.comments || []) {
-        el.artifactReviewModalComments.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(assignment), false));
+        el.artifactReviewProgressContent.append(renderArtifactReviewCommentCard(comment, artifactReviewRoleName(assignment), false));
       }
-      renderArtifactReviewSubmittedOpinions(selectedRound);
+      renderArtifactReviewSubmittedOpinions(
+        selectedRound,
+        el.artifactReviewModalComments,
+        selectedRound?.id === context.review.currentRoundId && context.review.status === "awaiting_runner_vote"
+      );
     }
 
     async function retryArtifactReviewAgent(context) {
@@ -5127,7 +5287,11 @@ export const browserHtml = String.raw`<!doctype html>
       renderAll();
     }
 
-    function renderArtifactReviewSubmittedOpinions(round) {
+    function renderArtifactReviewSubmittedOpinions(
+      round,
+      target = el.artifactReviewModalComments,
+      allowDisposition = false
+    ) {
       const entries = (round?.assignments || [])
         .filter(assignment => assignment.submitted)
         .map(assignment => ({
@@ -5141,15 +5305,20 @@ export const browserHtml = String.raw`<!doctype html>
       }
       entries.sort((left, right) => new Date(right.submittedAt || 0).getTime() - new Date(left.submittedAt || 0).getTime());
       if (!entries.length) return;
-      el.artifactReviewModalComments.append(blockTitle(t("submittedOpinions")));
+      target.append(blockTitle(t("submittedOpinions")));
       for (const entry of entries) {
-        el.artifactReviewModalComments.append(entry.kind === "runner"
+        target.append(entry.kind === "runner"
           ? renderArtifactReviewRunnerOpinion(entry.vote)
-          : renderArtifactReviewAssignmentOpinion(entry.assignment, entry.opinion));
+          : renderArtifactReviewAssignmentOpinion(
+            entry.assignment,
+            entry.opinion,
+            round?.commentDispositions || [],
+            allowDisposition
+          ));
       }
     }
 
-    function renderArtifactReviewAssignmentOpinion(assignment, opinion) {
+    function renderArtifactReviewAssignmentOpinion(assignment, opinion, dispositions = [], allowDisposition = false) {
       const section = artifactReviewOpinionSection(
         assignment,
         artifactReviewRoleName(assignment),
@@ -5178,11 +5347,14 @@ export const browserHtml = String.raw`<!doctype html>
       const comments = opinion.comments || [];
       if (comments.length) {
         for (const comment of comments) {
+          const disposition = dispositions.find(item => item.commentId === comment.id);
           section.append(renderArtifactReviewCommentCard(
             comment,
             artifactReviewRoleName(assignment),
             false,
-            assignment.binding === "advisory"
+            assignment.binding === "advisory",
+            disposition,
+            allowDisposition
           ));
         }
       } else {
@@ -5286,7 +5458,7 @@ export const browserHtml = String.raw`<!doctype html>
       severityTrigger.setAttribute("aria-expanded", "false");
       severityTrigger.disabled = state.artifactReviewSaving;
       const severityText = document.createElement("span");
-      severityText.textContent = selectedSeverity;
+      severityText.textContent = artifactReviewSeverityLabel(selectedSeverity);
       const severityCaret = document.createElement("span");
       severityCaret.className = "artifact-review-select-caret";
       severityCaret.setAttribute("aria-hidden", "true");
@@ -5315,10 +5487,10 @@ export const browserHtml = String.raw`<!doctype html>
         option.className = "artifact-review-select-option";
         option.setAttribute("role", "option");
         option.setAttribute("aria-selected", String(value === selectedSeverity));
-        option.textContent = value;
+        option.textContent = artifactReviewSeverityLabel(value);
         option.addEventListener("click", () => {
           selectedSeverity = value;
-          severityText.textContent = value;
+          severityText.textContent = artifactReviewSeverityLabel(value);
           for (const item of severityMenu.querySelectorAll(".artifact-review-select-option")) {
             item.setAttribute("aria-selected", String(item === option));
           }
@@ -5392,7 +5564,14 @@ export const browserHtml = String.raw`<!doctype html>
       return wrap;
     }
 
-    function renderArtifactReviewCommentCard(comment, identityName, editable, advisory = false) {
+    function renderArtifactReviewCommentCard(
+      comment,
+      identityName,
+      editable,
+      advisory = false,
+      disposition = null,
+      allowDisposition = false
+    ) {
       const card = document.createElement("article");
       card.className = "comment-card";
       const header = document.createElement("header");
@@ -5401,7 +5580,7 @@ export const browserHtml = String.raw`<!doctype html>
       title.textContent = identityName + (comment.anchor?.target ? " · " + comment.anchor.target : "");
       header.append(title);
       if (comment.severity) {
-        header.append(pill(comment.severity, false, comment.severity === "blocking" ? "outdated" : "warn"));
+        header.append(pill(artifactReviewSeverityLabel(comment.severity), false, comment.severity === "blocking" ? "outdated" : "warn"));
       }
       const body = document.createElement("div");
       body.className = "artifact-review-markdown";
@@ -5413,6 +5592,21 @@ export const browserHtml = String.raw`<!doctype html>
         context.className = "artifact-review-comment-context";
         context.textContent = comment.anchor.context;
         card.append(context);
+      }
+      if (disposition) {
+        const resolution = document.createElement("div");
+        resolution.className = "artifact-review-message";
+        resolution.textContent = (displayLanguage === "zh" ? "处置：" : "Disposition: ")
+          + artifactReviewDispositionLabel(disposition.disposition)
+          + (disposition.note ? " · " + disposition.note : "");
+        card.append(resolution);
+        if (disposition.validationSummary) {
+          const validation = document.createElement("div");
+          validation.className = "muted";
+          validation.textContent = (displayLanguage === "zh" ? "验证：" : "Validation: ")
+            + disposition.validationSummary;
+          card.append(validation);
+        }
       }
       if (comment.anchor?.location || comment.anchor?.target) {
         const go = document.createElement("button");
@@ -5427,7 +5621,12 @@ export const browserHtml = String.raw`<!doctype html>
         remove.textContent = displayLanguage === "zh" ? "删除" : "Remove";
         remove.addEventListener("click", () => runButtonAction(remove, () => removeComment(comment.id)));
         card.append(remove);
-      } else if (advisory && comment.id && activeArtifactReviewSummary()?.status === "awaiting_runner_vote") {
+      } else if (
+        allowDisposition
+        && advisory
+        && comment.id
+        && activeArtifactReviewSummary()?.status === "awaiting_runner_vote"
+      ) {
         const resolve = document.createElement("button");
         resolve.className = "btn";
         resolve.textContent = displayLanguage === "zh" ? "处置" : "Resolve";
@@ -5435,6 +5634,25 @@ export const browserHtml = String.raw`<!doctype html>
         card.append(resolve);
       }
       return card;
+    }
+
+    function artifactReviewDispositionLabel(value) {
+      if (displayLanguage !== "zh") {
+        return ({
+          "accepted-fixed": "Accepted and fixed",
+          "accepted-followup": "Accepted for follow-up",
+          "rejected-out-of-scope": "Out of scope",
+          "rejected-not-blocking": "Not blocking",
+          "rejected-invalid": "Invalid"
+        })[value] || value;
+      }
+      return ({
+        "accepted-fixed": "已接受并修复",
+        "accepted-followup": "已接受，后续处理",
+        "rejected-out-of-scope": "超出范围",
+        "rejected-not-blocking": "不构成阻塞",
+        "rejected-invalid": "无效意见"
+      })[value] || value;
     }
 
     async function locateArtifactReviewComment(comment) {
@@ -5451,7 +5669,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (context.submission.id !== comment.anchor.submissionId) {
         state.artifactReviewRoundByReview[context.review.id] = targetRound.id;
         writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
-        await loadArtifactReviewContext(context.review.id, targetRound.id, context.assignment.identityId);
+        await loadArtifactReviewContext(context.review.id, targetRound.id, context.assignment?.identityId || "");
         renderAll();
       }
       const anchor = comment.anchor.location || comment.anchor.target;
@@ -5488,14 +5706,14 @@ export const browserHtml = String.raw`<!doctype html>
       });
       if (!response.ok) throw new Error(await response.text());
       await loadRuns();
-      await loadArtifactReviewContext(context.review.id, context.review.currentRoundId, context.assignment.identityId);
+      await loadArtifactReviewContext(context.review.id, context.review.currentRoundId, context.assignment?.identityId || "");
       renderAll();
       return true;
     }
 
-    function renderArtifactReviewRoundSummary(context, round, history) {
+    function renderArtifactReviewRoundSummary(context, round, history, target = el.artifactReviewModalComments) {
       if (!round) return;
-      el.artifactReviewModalComments.append(blockTitle(t("roundSummary")));
+      target.append(blockTitle(t("roundSummary")));
       const summary = document.createElement("div");
       summary.className = "artifact-review-message" + (round.status === "changes_requested" ? " warn" : "");
       const result = round.result;
@@ -5513,19 +5731,19 @@ export const browserHtml = String.raw`<!doctype html>
           + (round.assignments || []).filter(assignment => assignment.status === "submitted").length
           + "/" + (round.assignments || []).length + " " + t("submitted");
       }
-      el.artifactReviewModalComments.append(summary);
+      target.append(summary);
       if (history) {
         const id = document.createElement("div");
         id.className = "muted artifact-review-id";
         id.textContent = round.id;
-        el.artifactReviewModalComments.append(id);
+        target.append(id);
       }
       if (round.revisionSummary?.body) {
-        el.artifactReviewModalComments.append(blockTitle(t("revisionSummary")));
+        target.append(blockTitle(t("revisionSummary")));
         const revision = document.createElement("div");
         revision.className = "pre";
         revision.textContent = round.revisionSummary.body;
-        el.artifactReviewModalComments.append(revision);
+        target.append(revision);
       }
     }
 
@@ -5534,6 +5752,13 @@ export const browserHtml = String.raw`<!doctype html>
       if (value === "request_changes") return t("requestChanges");
       if (value === "abstain") return t("abstain");
       return t("draft");
+    }
+
+    function artifactReviewSeverityLabel(value) {
+      if (displayLanguage !== "zh") {
+        return ({ blocking: "Blocking", risk: "Risk", suggestion: "Suggestion" })[value] || value;
+      }
+      return ({ blocking: "阻塞问题", risk: "风险", suggestion: "建议" })[value] || value;
     }
 
     function artifactReviewAssignmentStatusLabel(status, identityKind) {

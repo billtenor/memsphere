@@ -220,21 +220,30 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   const artifactReviewRoundMatch = url.pathname.match(/^\/api\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)$/);
   if (request.method === "GET" && artifactReviewRoundMatch) {
     const identityId = url.searchParams.get("identity_id")?.trim();
-    if (!identityId) {
-      sendJson(response, 400, { error: "identity_id is required" });
-      return;
-    }
     try {
-      const context = await readArtifactReviewForIdentity({
-        runsRoot,
-        reviewId: decodeURIComponent(artifactReviewRoundMatch[1]),
-        roundId: decodeURIComponent(artifactReviewRoundMatch[2]),
-        identityId
-      });
-      if ((context.assignment.identityKind ?? "human") !== "human") {
-        throw new Error(`Agent Artifact Review assignment is not assigned to the Human View API: ${identityId}`);
+      const reviewId = decodeURIComponent(artifactReviewRoundMatch[1]);
+      const roundId = decodeURIComponent(artifactReviewRoundMatch[2]);
+      if (identityId) {
+        const context = await readArtifactReviewForIdentity({
+          runsRoot,
+          reviewId,
+          roundId,
+          identityId
+        });
+        if ((context.assignment.identityKind ?? "human") !== "human") {
+          throw new Error(`Agent Artifact Review assignment is not assigned to the Human View API: ${identityId}`);
+        }
+        sendJson(response, 200, await artifactReviewContextPayload(runsRoot, context));
+      } else {
+        const located = await findViewArtifactReview(config, reviewId);
+        const round = located.review.rounds.find((candidate) => candidate.id === roundId);
+        if (!round) throw new Error(`Artifact Review Round not found: ${roundId}`);
+        sendJson(response, 200, await artifactReviewContextPayload(located.runsRoot, {
+          run: located.run,
+          review: located.review,
+          round
+        }));
       }
-      sendJson(response, 200, await artifactReviewContextPayload(runsRoot, context));
     } catch (error) {
       sendArtifactReviewError(response, error);
     }
@@ -973,7 +982,10 @@ function normalizeActivityInteger(value: string | null, fallback: number, name: 
   return parsed;
 }
 
-async function artifactReviewContextPayload(runsRoot: string, context: ArtifactReviewContext): Promise<unknown> {
+async function artifactReviewContextPayload(
+  runsRoot: string,
+  context: Omit<ArtifactReviewContext, "assignment"> & { assignment?: ArtifactReviewContext["assignment"] }
+): Promise<unknown> {
   const submission = context.review.submissions.find((candidate) => candidate.id === context.round.submissionId);
   if (!submission) throw new Error(`Artifact Review Submission not found: ${context.round.submissionId}`);
   const artifact = structuredClone(submission.artifact) as RunState["events"][number]["artifact"] & {
@@ -1000,7 +1012,7 @@ async function artifactReviewContextPayload(runsRoot: string, context: ArtifactR
       package: reviewPackage,
       revisionSummary: submission.revisionSummary
     },
-    assignment: {
+    assignment: context.assignment ? {
       id: context.assignment.id,
       identityId: context.assignment.identityId,
       identityName: context.assignment.identityName,
@@ -1014,7 +1026,7 @@ async function artifactReviewContextPayload(runsRoot: string, context: ArtifactR
       submitted: publicArtifactReviewOpinion(context.assignment.submitted),
       attempts: context.assignment.attempts?.map(publicArtifactReviewAttempt),
       roleNames: artifactReviewRoleNames(context.run.controlPlane, context.assignment.roleIds)
-    },
+    } : undefined,
     rounds: context.review.rounds.map((round) => ({
       id: round.id,
       sequence: round.sequence,
@@ -1037,6 +1049,7 @@ async function artifactReviewContextPayload(runsRoot: string, context: ArtifactR
       })),
       votes: round.votes.map(publicArtifactReviewVote),
       result: round.result,
+      commentDispositions: structuredClone(round.commentDispositions ?? []),
       revisionSummary: context.review.submissions.find((submission) => submission.id === round.submissionId)?.revisionSummary
     }))
   };
@@ -1051,7 +1064,8 @@ function publicArtifactReviewAttempt(attempt: ArtifactReviewAgentAttempt | undef
     failure: attempt.failure ? {
       stage: attempt.failure.stage,
       code: attempt.failure.code,
-      message: attempt.failure.message
+      message: attempt.failure.message,
+      category: artifactReviewFailureCategory(attempt.failure)
     } : undefined
   };
 }

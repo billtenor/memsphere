@@ -15,6 +15,10 @@ asserts:
   - View 中的 Agent Reviewer 只能作为参与者展示状态、最近活动和按 attempt 隔离的只读运行记录，不得作为 Human 评审身份进入评论或投票编辑器。
   - Run 必须按 attempt 以 JSONL 完整保留实际发送的 ACP prompt、ACP session.update 和 Memsphere 生命周期事件，并将 JSONL 作为 Agent Activity 的唯一事实来源；View 只能读取经过过滤、容量受控且可按 JSONL 源进度校验与重建的投影缓存，不得暴露 prompt、thought 正文、工具原始输入输出或 Provider 私有字段。
   - Artifact Review 的候选产物和 requirement、implementation、validation 等证据 Artifact 必须在左侧材料区域选择查看；证据快照只读，右侧只承载评审状态、意见和投票操作。
+  - Artifact Review 的右侧交互区必须稳定区分评审范围、我的评审、参与进度和评审记录；私有草稿只进入我的评审，正式意见和处置结果只进入评审记录。
+  - Artifact Review 的材料、评审范围、参与进度和评审记录属于 Review 公共上下文，不得依赖 Human 评审身份；身份选择只改变“我的评审”，无 Human Assignment 时显示“无需评审”。
+  - Human Artifact Review 必须按照评审意见、投票、提交评审的顺序明确分组：先记录 Comment 草稿，再据此表达本轮立场，最后提交当前 Vote 与全部草稿意见。
+  - Artifact Review 浮窗打开期间，背景页面必须保持不可操作且不可滚动；浮窗内部滚动到边界后不得把滚动传递给背景页面。
   - snapshot、target、location 和 hash 只用于定位和理解 comment，不是盲目修改依据。
   - 不得修改 review comments、task/run artifacts 或与 comments 无关的 Memory 内容。
   - 不得把 Artifact Review Comment 导入 Memory Review，也不得用本流程改写 Artifact Review 的 Submission、Round、Vote 或 Result。
