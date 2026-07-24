@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { ZodError } from "zod";
 import {
   configSchema,
+  parseConfigFile,
   readConfigAt,
   resolveConfigPath,
   type MemsphereConfig,
@@ -79,7 +80,7 @@ export class ConfigRevisionConflictError extends Error {
 export async function readConfigDocument(configPath: string): Promise<ConfigDocument> {
   const source = await readFile(configPath, "utf8");
   const parsed = parseConfigSource(source);
-  configSchema.parse(parsed);
+  parseConfigFile(parsed);
   const raw = structuredClone(parsed) as MemsphereConfigFile;
   const resolved = await readConfigAt(configPath);
 

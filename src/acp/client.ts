@@ -28,9 +28,20 @@ export async function runAgentReviewAcpSession(input: {
   const process = spawnAgent(input.launch);
   let stderr = "";
   let idleTimeout: TimeoutWatchdog | undefined;
+  let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
   const terminate = () => {
-    if (process.exitCode === null && !process.killed) process.kill("SIGTERM");
+    if (process.exitCode !== null) return;
+    process.kill("SIGTERM");
+    if (!forceKillTimer) {
+      forceKillTimer = setTimeout(() => {
+        if (process.exitCode === null) process.kill("SIGKILL");
+      }, 1_000);
+    }
   };
+  process.once("exit", () => {
+    if (forceKillTimer) clearTimeout(forceKillTimer);
+    forceKillTimer = undefined;
+  });
   const startupTimeout = createTimeoutWatchdog(
     input.launch.startupTimeoutMs,
     "agent_startup_timeout",
@@ -61,7 +72,7 @@ export async function runAgentReviewAcpSession(input: {
       .client({ name: "memsphere" })
       .onRequest(acp.methods.client.session.requestPermission, ({ params }) => {
         markActivity();
-        return rejectPermission(params.options);
+        return approveAgentPermission(params.options);
       })
       .onNotification(acp.methods.client.session.update, async ({ params }) => {
         markActivity();
@@ -273,11 +284,11 @@ function timeoutReason(...watchdogs: Array<TimeoutWatchdog | undefined>): AgentT
   return undefined;
 }
 
-function rejectPermission(options: acp.PermissionOption[]): acp.RequestPermissionResponse {
-  const reject = options.find((option) => option.kind === "reject_always")
-    ?? options.find((option) => option.kind === "reject_once");
-  return reject
-    ? { outcome: { outcome: "selected", optionId: reject.optionId } }
+export function approveAgentPermission(options: acp.PermissionOption[]): acp.RequestPermissionResponse {
+  const allow = options.find((option) => option.kind === "allow_always")
+    ?? options.find((option) => option.kind === "allow_once");
+  return allow
+    ? { outcome: { outcome: "selected", optionId: allow.optionId } }
     : { outcome: { outcome: "cancelled" } };
 }
 

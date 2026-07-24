@@ -1,7 +1,11 @@
-import { isAbsolute, relative, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { ControlPlaneActor } from "../control-plane/index.js";
+import type { AcpProviderType } from "./catalog.js";
+import { validateAcpProviderConfiguration } from "./validation.js";
 
 type AgentActor = Extract<ControlPlaneActor, { kind: "agent" }>;
+
+export const currentAgentReviewPromptVersion = "artifact-review-v1";
 
 export type AgentReviewProviderLaunch = {
   provider: string;
@@ -17,7 +21,7 @@ export type AgentReviewProviderLaunch = {
 };
 
 export type AgentReviewProvider = {
-  id: string;
+  id: AcpProviderType;
   buildLaunch(input: {
     actor: AgentActor;
     workspaceRoot: string;
@@ -40,48 +44,96 @@ export function getAgentReviewProvider(id: string | undefined): AgentReviewProvi
 }
 
 function commonLaunch(
-  provider: string,
+  provider: AcpProviderType,
   input: Parameters<AgentReviewProvider["buildLaunch"]>[0],
   args: string[],
-  providerEnv: Record<string, string>
+  providerEnv: Record<string, string> = {}
 ): AgentReviewProviderLaunch {
   const agent = input.actor.agent;
-  const cwd = agent.cwd ? resolve(input.workspaceRoot, agent.cwd) : resolve(input.workspaceRoot);
-  const relativeCwd = relative(resolve(input.workspaceRoot), cwd);
-  if (relativeCwd.startsWith("..") || isAbsolute(relativeCwd)) {
-    throw new Error(`agent_provider_invalid: Agent cwd must stay inside the workspace: ${agent.cwd}`);
-  }
   return {
     provider,
     command: agent.command,
     args,
-    cwd,
+    cwd: resolve(input.workspaceRoot),
     env: {
       ...safeProviderEnvironment(process.env),
+      ...agent.env,
       ...providerEnv,
       ...input.sessionEnv
     },
-    startupTimeoutMs: agent.startupTimeoutMs ?? 60_000,
-    idleTimeoutMs: agent.idleTimeoutMs ?? 2 * 60_000,
-    maxRuntimeMs: agent.maxRuntimeMs ?? null,
-    promptVersion: agent.promptVersion ?? "artifact-review-v1",
+    startupTimeoutMs: agent.startupTimeoutMs,
+    idleTimeoutMs: agent.idleTimeoutMs,
+    maxRuntimeMs: agent.maxRuntimeMs,
+    promptVersion: currentAgentReviewPromptVersion,
     model: agent.model
   };
+}
+
+function configuredArgs(
+  provider: AcpProviderType,
+  input: Parameters<AgentReviewProvider["buildLaunch"]>[0]
+): string[] {
+  return validateAcpProviderConfiguration({
+    type: provider,
+    command: input.actor.agent.command,
+    args: input.actor.agent.args
+  });
 }
 
 registerAgentReviewProvider({
   id: "traex",
   buildLaunch(input) {
-    const configured = normalizeTraexArgs(input.actor.agent.args);
+    const configured = configuredArgs("traex", input);
     const modelArgs = input.actor.agent.model ? ["--model", input.actor.agent.model] : [];
-    const args = [
+    return commonLaunch("traex", input, [
       "--sandbox", "workspace-write",
       "--ask-for-approval", "never",
       ...modelArgs,
       ...configured,
       "acp", "serve"
-    ];
-    return commonLaunch("traex", input, args, traexNetworkEnvironment(process.env));
+    ], traexNetworkEnvironment(process.env));
+  }
+});
+
+registerAgentReviewProvider({
+  id: "qwen",
+  buildLaunch(input) {
+    const configured = configuredArgs("qwen", input);
+    const modelArgs = input.actor.agent.model ? ["--model", input.actor.agent.model] : [];
+    return commonLaunch("qwen", input, [
+      ...modelArgs,
+      "--approval-mode=auto",
+      ...configured,
+      "--acp"
+    ]);
+  }
+});
+
+registerAgentReviewProvider({
+  id: "kimi",
+  buildLaunch(input) {
+    const configured = configuredArgs("kimi", input);
+    const modelArgs = input.actor.agent.model ? ["--model", input.actor.agent.model] : [];
+    return commonLaunch("kimi", input, [
+      ...modelArgs,
+      "--auto",
+      ...configured,
+      "acp"
+    ]);
+  }
+});
+
+registerAgentReviewProvider({
+  id: "codex",
+  buildLaunch(input) {
+    const configured = configuredArgs("codex", input);
+    return commonLaunch("codex", input, configured, {
+      NO_BROWSER: "1",
+      INITIAL_AGENT_MODE: "read-only",
+      ...(input.actor.agent.model
+        ? { CODEX_CONFIG: JSON.stringify({ model: input.actor.agent.model }) }
+        : {})
+    });
   }
 });
 
@@ -104,43 +156,6 @@ function mergeNoProxyEntries(
     .map((entry) => entry.trim())
     .filter(Boolean);
   return [...new Set(entries)].join(",");
-}
-
-function normalizeTraexArgs(configuredArgs: readonly string[]): string[] {
-  const args = [...configuredArgs];
-  const acpIndex = args.indexOf("acp");
-  if (acpIndex >= 0) {
-    if (args[acpIndex + 1] !== "serve") {
-      throw new Error("agent_provider_invalid: Traex Agent Review only supports the 'acp serve' subcommand");
-    }
-    args.splice(acpIndex, 2);
-  } else if (args.includes("serve")) {
-    throw new Error("agent_provider_invalid: Traex Agent Review only supports the 'acp serve' subcommand");
-  }
-
-  const otherSubcommands = new Set([
-    "exec", "review", "login", "update", "logout", "mcp", "plugin", "mcp-server",
-    "app-server", "remote-control", "completion", "sandbox", "debug", "models", "apply",
-    "resume", "fork", "archive", "delete", "unarchive", "exec-server", "features", "doctor", "migrate"
-  ]);
-  const subcommand = args[0] && otherSubcommands.has(args[0]) ? args[0] : undefined;
-  if (subcommand) {
-    throw new Error(`agent_provider_invalid: Traex Agent Review cannot launch the '${subcommand}' subcommand`);
-  }
-
-  const managed = [
-    "--sandbox", "-s",
-    "--ask-for-approval", "-a",
-    "--permission-mode",
-    "--yolo", "-y",
-    "--dangerously-bypass-approvals-and-sandbox",
-    "--dangerously-bypass-hook-trust"
-  ];
-  const unsafe = args.find((arg) => managed.some((name) => arg === name || arg.startsWith(`${name}=`)));
-  if (unsafe) {
-    throw new Error(`agent_provider_invalid: Traex Agent Review does not allow managed security argument '${unsafe}'`);
-  }
-  return args;
 }
 
 function safeProviderEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

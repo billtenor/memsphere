@@ -386,6 +386,7 @@ export const browserHtml = String.raw`<!doctype html>
     .settings-field > label, .settings-label { color: #4f5a5c; font-size: 12px; font-weight: 700; }
     .settings-input, .settings-select { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); padding: 8px 10px; outline: none; }
     .settings-input:focus, .settings-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(40, 108, 103, .12); }
+    .settings-input:disabled { border-style: dashed; background: var(--soft); color: var(--muted); cursor: not-allowed; opacity: 1; }
     .settings-select-wrap { position: relative; min-width: 0; }
     .settings-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; cursor: pointer; }
     .settings-select-trigger[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(40, 108, 103, .12); }
@@ -403,7 +404,11 @@ export const browserHtml = String.raw`<!doctype html>
     .settings-error { color: var(--danger); }
     .settings-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     .settings-participants { border-top: 1px solid var(--line); }
+    .settings-providers { border-top: 1px solid var(--line); }
+    .settings-provider-status { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+    .settings-provider-preview { margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); overflow-wrap: anywhere; }
     .settings-participant { border-bottom: 1px solid var(--line); }
+    .settings-provider { border-bottom: 1px solid var(--line); }
     .settings-participant > summary { list-style: none; }
     .settings-participant > summary::-webkit-details-marker { display: none; }
     .settings-participant-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; min-height: 58px; padding: 10px 4px; cursor: pointer; }
@@ -763,6 +768,10 @@ export const browserHtml = String.raw`<!doctype html>
       settingsToken: sessionStorage.getItem(settingsTokenKey) || "",
       settingsTokenError: "",
       settingsExpandedParticipants: [],
+      settingsExpandedProviders: [],
+      settingsProviderDetection: {},
+      settingsProviderDetecting: false,
+      settingsProviderAutoDetectionAttemptedRevision: "",
       renderLine: 0
     };
 
@@ -1062,6 +1071,7 @@ export const browserHtml = String.raw`<!doctype html>
         if (!response.ok) throw new Error(await response.text());
         state.settingsData = await response.json();
         state.settingsDraft = cloneSettingsValue(state.settingsData.config);
+        restoreSettingsProviderDetection();
         state.settingsTokenError = "";
         if (state.settingsToken) sessionStorage.setItem(settingsTokenKey, state.settingsToken);
         state.settingsErrors = [];
@@ -1090,6 +1100,7 @@ export const browserHtml = String.raw`<!doctype html>
         ["overview", "概览"],
         ["storage", "存储"],
         ["view", "View 服务"],
+        ["providers", "ACP Provider"],
         ["participants", "参与者配置"]
       ];
       for (const [id, label] of modules) {
@@ -1142,6 +1153,7 @@ export const browserHtml = String.raw`<!doctype html>
       }
       if (state.settingsModule === "storage") layout.append(renderStorageSettings());
       else if (state.settingsModule === "view") layout.append(renderViewSettings());
+      else if (state.settingsModule === "providers") layout.append(renderProviderSettings());
       else if (state.settingsModule === "participants") layout.append(renderParticipantSettings());
       else layout.append(renderSettingsOverview());
       if (state.settingsModule !== "overview") layout.append(renderSettingsActions());
@@ -1282,7 +1294,7 @@ export const browserHtml = String.raw`<!doctype html>
       title.textContent = "参与者配置";
       const subtitle = document.createElement("p");
       subtitle.className = "settings-section-subtitle";
-      subtitle.textContent = "按参与者展开编辑权限和 Agent 运行参数。";
+      subtitle.textContent = "按参与者展开编辑权限；Agent 只选择 ACP Provider 与 Model。";
       headingCopy.append(title, subtitle);
       if (!state.settingsDraft.control_plane) {
         const message = document.createElement("p");
@@ -1293,7 +1305,7 @@ export const browserHtml = String.raw`<!doctype html>
         enable.className = "btn";
         enable.textContent = "启用参与者配置";
         enable.addEventListener("click", () => {
-          state.settingsDraft.control_plane = { runner: { permissions: [] }, actors: {} };
+          state.settingsDraft.control_plane = { runner: { permissions: [] }, acp_providers: {}, actors: {} };
           renderAll();
         });
         heading.append(headingCopy);
@@ -1326,6 +1338,175 @@ export const browserHtml = String.raw`<!doctype html>
       heading.append(headingCopy, add);
       section.append(heading, list);
       return section;
+    }
+
+    function renderProviderSettings() {
+      const section = document.createElement("section");
+      section.className = "settings-section";
+      const heading = document.createElement("div");
+      heading.className = "settings-section-head";
+      const headingCopy = document.createElement("div");
+      const title = document.createElement("h3");
+      title.textContent = "ACP Provider";
+      const subtitle = document.createElement("p");
+      subtitle.className = "settings-section-subtitle";
+      subtitle.textContent = "管理 Agent CLI、启动参数与安装检测；认证仍由各 Provider 自身管理。";
+      headingCopy.append(title, subtitle);
+      if (!state.settingsDraft.control_plane) {
+        const enable = document.createElement("button");
+        enable.type = "button";
+        enable.className = "btn";
+        enable.textContent = "启用 ACP Provider 配置";
+        enable.addEventListener("click", () => {
+          state.settingsDraft.control_plane = { runner: { permissions: [] }, acp_providers: {}, actors: {} };
+          renderAll();
+        });
+        heading.append(headingCopy, enable);
+        section.append(heading);
+        return section;
+      }
+      const actions = document.createElement("div");
+      actions.className = "settings-provider-status";
+      const detect = document.createElement("button");
+      detect.type = "button";
+      detect.className = "btn";
+      detect.textContent = state.settingsProviderDetecting ? "检测中..." : "自动检测";
+      detect.disabled = state.settingsProviderDetecting;
+      detect.addEventListener("click", () => detectSettingsProviders().catch(showSettingsFailure));
+      actions.append(detect);
+      heading.append(headingCopy, actions);
+
+      const list = document.createElement("div");
+      list.className = "settings-providers";
+      for (const entry of settingsProviderEntries()) list.append(renderSettingsProvider(entry));
+      section.append(heading, list);
+      if (
+        !Object.keys(state.settingsProviderDetection).length
+        && !state.settingsProviderDetecting
+        && state.settingsProviderAutoDetectionAttemptedRevision !== state.settingsData.diskRevision
+      ) {
+        state.settingsProviderAutoDetectionAttemptedRevision = state.settingsData.diskRevision;
+        queueMicrotask(() => detectSettingsProviders().catch(showSettingsFailure));
+      }
+      return section;
+    }
+
+    function renderSettingsProvider(entry) {
+      const item = document.createElement("details");
+      item.className = "settings-provider settings-participant";
+      item.dataset.providerId = entry.id;
+      item.open = state.settingsExpandedProviders.includes(entry.id);
+      item.addEventListener("toggle", () => {
+        const expanded = new Set(state.settingsExpandedProviders);
+        if (item.open) expanded.add(entry.id);
+        else expanded.delete(entry.id);
+        state.settingsExpandedProviders = [...expanded];
+      });
+      const summary = document.createElement("summary");
+      summary.className = "settings-participant-summary";
+      const main = document.createElement("div");
+      main.className = "settings-participant-summary-main";
+      const heading = document.createElement("div");
+      heading.className = "settings-participant-title";
+      const name = document.createElement("strong");
+      name.textContent = entry.id;
+      heading.append(name, pill(entry.definition.name), providerDetectionPill(entry.id));
+      const refs = settingsProviderReferences(entry.id);
+      const meta = document.createElement("div");
+      meta.className = "settings-participant-summary-meta";
+      const detection = state.settingsProviderDetection[entry.id];
+      meta.textContent = [
+        detection?.path,
+        detection?.version || detection?.reason || "尚未检测",
+        refs.length + " 个参与者引用"
+      ].filter(Boolean).join(" · ");
+      main.append(heading, meta);
+      summary.append(main);
+
+      const body = document.createElement("div");
+      body.className = "settings-participant-body";
+      const bodyActions = document.createElement("div");
+      bodyActions.className = "settings-participant-actions";
+      const resetOrDelete = document.createElement("button");
+      resetOrDelete.type = "button";
+      resetOrDelete.className = "btn" + (entry.builtin ? "" : " danger");
+      resetOrDelete.textContent = entry.builtin ? "恢复默认值" : "删除";
+      resetOrDelete.disabled = entry.builtin ? !entry.explicit : refs.length > 0;
+      resetOrDelete.title = !entry.builtin && refs.length
+        ? "以下参与者仍在引用：" + refs.join("、")
+        : entry.builtin && !entry.explicit ? "当前正在使用系统默认值" : "";
+      resetOrDelete.addEventListener("click", () => {
+        delete state.settingsDraft.control_plane.acp_providers?.[entry.id];
+        state.settingsProviderDetection[entry.id] = { status: "pending_redetect" };
+        renderAll();
+      });
+      const markProviderExplicit = () => {
+        if (!entry.builtin) return;
+        resetOrDelete.disabled = false;
+        resetOrDelete.title = "";
+      };
+      bodyActions.append(resetOrDelete);
+      body.append(bodyActions);
+      if (detection && (detection.status === "missing" || detection.status === "failed")) {
+        const guidance = document.createElement("div");
+        guidance.className = "settings-error";
+        guidance.setAttribute("role", "alert");
+        guidance.textContent = [detection.reason, detection.installHelp].filter(Boolean).join(" ");
+        body.append(guidance);
+      }
+
+      const provider = entry.value;
+      const grid = document.createElement("div");
+      grid.className = "settings-grid settings-participant-basic";
+      grid.append(
+        settingsTextField("Command", provider.command || entry.definition.defaultCommand, () => {}, {
+          disabled: true,
+          wide: true
+        })
+      );
+      body.append(grid);
+
+      const timeoutGrid = document.createElement("div");
+      timeoutGrid.className = "settings-grid settings-participant-basic";
+      timeoutGrid.append(
+        settingsTextField("Startup timeout (ms)", String(provider.startup_timeout_ms ?? 60000), value => {
+          ensureSettingsProvider(entry.id, provider.type).startup_timeout_ms = Number(value);
+          markProviderExplicit();
+          invalidateSettingsProviderDetection(entry.id);
+        }, { type: "number", min: 1 }),
+        settingsTextField("Idle timeout (ms)", String(provider.idle_timeout_ms ?? 120000), value => {
+          ensureSettingsProvider(entry.id, provider.type).idle_timeout_ms = Number(value);
+          markProviderExplicit();
+          invalidateSettingsProviderDetection(entry.id);
+        }, { type: "number", min: 1 }),
+        settingsTextField("Max runtime (ms)", provider.max_runtime_ms == null ? "" : String(provider.max_runtime_ms), value => {
+          ensureSettingsProvider(entry.id, provider.type).max_runtime_ms = value.trim() ? Number(value) : null;
+          markProviderExplicit();
+          invalidateSettingsProviderDetection(entry.id);
+        }, { type: "number", min: 1 })
+      );
+      body.append(timeoutGrid);
+      body.append(
+        settingsTextArea("Args（每行一个）", (provider.args || []).join("\n"), value => {
+          ensureSettingsProvider(entry.id, provider.type).args = value.split(/\r?\n/).filter(line => line.length > 0);
+          markProviderExplicit();
+          invalidateSettingsProviderDetection(entry.id);
+        }, "control_plane.acp_providers." + entry.id + ".args"),
+        settingsTextArea("Env（每行 KEY=VALUE，不允许凭据）", Object.entries(provider.env || {})
+          .map(([key, value]) => key + "=" + value).join("\n"), value => {
+          ensureSettingsProvider(entry.id, provider.type).env = Object.fromEntries(value.split(/\r?\n/)
+            .filter(line => line.includes("="))
+            .map(line => [line.slice(0, line.indexOf("=")).trim(), line.slice(line.indexOf("=") + 1)]));
+          markProviderExplicit();
+          invalidateSettingsProviderDetection(entry.id);
+        }, "control_plane.acp_providers." + entry.id + ".env")
+      );
+      const preview = document.createElement("div");
+      preview.className = "settings-provider-preview mono";
+      preview.textContent = "实际启动：" + settingsProviderLaunchPreview(provider);
+      body.append(preview);
+      item.append(summary, body);
+      return item;
     }
 
     function renderSettingsParticipant(id, actor, runner) {
@@ -1438,8 +1619,12 @@ export const browserHtml = String.raw`<!doctype html>
       title.textContent = "Agent 运行";
       const grid = document.createElement("div");
       grid.className = "settings-grid settings-compact-grid";
+      const providerOptions = settingsProviderEntries().map(entry => {
+        const status = settingsProviderStatusLabel(state.settingsProviderDetection[entry.id]);
+        return [entry.id, entry.id + " · " + entry.definition.name + " · " + status];
+      });
       grid.append(
-        settingsSelectField("Provider", runtime.provider || "traex", [["traex", "Traex"]], value => {
+        settingsSelectField("ACP Provider", runtime.provider || "traex", providerOptions, value => {
           runtime.provider = value;
         }),
         settingsTextField("Model", runtime.model || "", value => setOptionalValue(runtime, "model", value), {
@@ -1836,6 +2021,191 @@ export const browserHtml = String.raw`<!doctype html>
       return {
         provider: "traex"
       };
+    }
+
+    function defaultSettingsProvider(type) {
+      const definition = (state.settingsData?.acpProviderCatalog || [])
+        .find(candidate => candidate.type === type);
+      const instance = definition?.defaultInstance || {
+        type,
+        command: definition?.defaultCommand || type,
+        args: [],
+        env: {},
+        startupTimeoutMs: 60000,
+        idleTimeoutMs: 120000,
+        maxRuntimeMs: null
+      };
+      return {
+        type: instance.type,
+        command: instance.command,
+        args: [...(instance.args || [])],
+        env: { ...(instance.env || {}) },
+        startup_timeout_ms: instance.startupTimeoutMs ?? 60000,
+        idle_timeout_ms: instance.idleTimeoutMs ?? 120000,
+        max_runtime_ms: instance.maxRuntimeMs ?? null
+      };
+    }
+
+    function settingsProviderEntries() {
+      if (!state.settingsDraft?.control_plane) return [];
+      const explicit = state.settingsDraft.control_plane.acp_providers || {};
+      const catalog = state.settingsData?.acpProviderCatalog || [];
+      return catalog.map(definition => ({
+        id: definition.type,
+        builtin: true,
+        explicit: Boolean(explicit[definition.type]),
+        definition,
+        value: {
+          ...defaultSettingsProvider(definition.type),
+          ...(explicit[definition.type] || {}),
+          type: definition.type,
+          command: definition.defaultCommand
+        }
+      }));
+    }
+
+    function ensureSettingsProvider(id) {
+      const providers = state.settingsDraft.control_plane.acp_providers ||= {};
+      if (!providers[id]) {
+        const defaults = defaultSettingsProvider(id);
+        providers[id] = {
+          args: [...defaults.args],
+          env: { ...defaults.env },
+          startup_timeout_ms: defaults.startup_timeout_ms,
+          idle_timeout_ms: defaults.idle_timeout_ms,
+          max_runtime_ms: defaults.max_runtime_ms
+        };
+      }
+      return providers[id];
+    }
+
+    function settingsProviderReferences(providerId) {
+      return Object.entries(state.settingsDraft.control_plane?.actors || {})
+        .filter(([, actor]) => actor.kind === "agent" && (actor.agent?.provider || "traex") === providerId)
+        .map(([id, actor]) => actor.name || id);
+    }
+
+    function invalidateSettingsProviderDetection(id) {
+      state.settingsProviderDetection[id] = { status: "pending_redetect" };
+      for (const item of document.querySelectorAll(".settings-provider")) {
+        if (item.dataset.providerId !== id) continue;
+        const status = item.querySelector(".settings-provider-detection");
+        if (status) status.textContent = "待重新检测";
+        const preview = item.querySelector(".settings-provider-preview");
+        const provider = settingsProviderEntries().find(entry => entry.id === id)?.value;
+        if (preview && provider) preview.textContent = "实际启动：" + settingsProviderLaunchPreview(provider);
+      }
+    }
+
+    function settingsProviderLaunchPreview(provider) {
+      const args = [provider.command];
+      if (provider.type === "traex") {
+        args.push("--sandbox", "workspace-write", "--ask-for-approval", "never", "--model", "<参与者模型>");
+      } else if (provider.type === "qwen") {
+        args.push("--model", "<参与者模型>", "--approval-mode=auto");
+      } else if (provider.type === "kimi") {
+        args.push("--model", "<参与者模型>", "--auto");
+      } else if (provider.type === "codex") {
+        args.unshift(
+          "CODEX_CONFIG={\"model\":\"<参与者模型>\"}",
+          "NO_BROWSER=1",
+          "INITIAL_AGENT_MODE=read-only"
+        );
+      }
+      args.push(...(provider.args || []));
+      if (provider.type === "traex") args.push("acp", "serve");
+      else if (provider.type === "qwen") args.push("--acp");
+      else if (provider.type === "kimi") args.push("acp");
+      return args.map(settingsShellArgument).join(" ");
+    }
+
+    function settingsShellArgument(value) {
+      const text = String(value);
+      return /^[A-Za-z0-9_./:=+-]+$/.test(text)
+        ? text
+        : "'" + text.replace(/'/g, "'\\''") + "'";
+    }
+
+    function settingsProviderStatusLabel(result) {
+      if (!result) return "待检测";
+      return {
+        installed: "已安装",
+        version_unknown: "版本未知",
+        missing: "未安装",
+        failed: "检测失败",
+        pending_redetect: "待重新检测"
+      }[result.status] || "待检测";
+    }
+
+    function providerDetectionPill(id) {
+      const result = state.settingsProviderDetection[id];
+      const label = settingsProviderStatusLabel(result);
+      const tone = result?.status === "installed"
+        ? "done"
+        : result?.status === "missing" || result?.status === "failed" ? "warn" : "";
+      const status = pill(label, false, tone);
+      status.classList.add("settings-provider-detection");
+      return status;
+    }
+
+    async function detectSettingsProviders() {
+      state.settingsProviderDetecting = true;
+      state.settingsNotice = "";
+      renderAll();
+      try {
+        const response = await settingsFetch("/api/settings/acp-providers/detect", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            expectedRevision: state.settingsData.diskRevision,
+            config: state.settingsDraft
+          })
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          state.settingsErrors = payload.errors || [{ path: "", message: payload.error || "ACP Provider 检测失败" }];
+          return;
+        }
+        state.settingsProviderDetection = Object.fromEntries(
+          (payload.results || []).map(result => [result.id, result])
+        );
+        persistSettingsProviderDetection();
+        state.settingsNotice = "ACP Provider 检测完成。";
+      } finally {
+        state.settingsProviderDetecting = false;
+        renderAll();
+      }
+    }
+
+    function settingsProviderDetectionStorageKey() {
+      return "memsphere.settings.acp-provider-detection";
+    }
+
+    function persistSettingsProviderDetection() {
+      if (!state.settingsData?.diskRevision) return;
+      localStorage.setItem(settingsProviderDetectionStorageKey(), JSON.stringify({
+        diskRevision: state.settingsData.diskRevision,
+        providerConfig: JSON.stringify(state.settingsDraft.control_plane?.acp_providers || {}),
+        detectedAt: Date.now(),
+        results: state.settingsProviderDetection
+      }));
+    }
+
+    function restoreSettingsProviderDetection() {
+      const cached = readStoredObject(settingsProviderDetectionStorageKey(), {});
+      const fresh = Number.isFinite(cached.detectedAt)
+        && Date.now() - cached.detectedAt < 24 * 60 * 60 * 1000;
+      const providerConfig = JSON.stringify(state.settingsDraft?.control_plane?.acp_providers || {});
+      if (
+        cached.diskRevision === state.settingsData?.diskRevision
+        && cached.providerConfig === providerConfig
+        && fresh
+        && cached.results
+      ) {
+        state.settingsProviderDetection = cached.results;
+      } else {
+        state.settingsProviderDetection = {};
+      }
     }
 
     function setSettingsPermission(list, permission, enabled) {

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, parse, resolve } from "node:path";
-import { z } from "zod";
+import { z, ZodError } from "zod";
 import { controlPlaneConfigSchema, type ControlPlaneConfig } from "./control-plane/index.js";
 
 export const configSchema = z.object({
@@ -101,7 +101,7 @@ export async function readConfig(configPath?: string): Promise<MemsphereConfig> 
 export async function readConfigAt(configPath: string): Promise<MemsphereConfig> {
   const raw = await readFile(configPath, "utf8");
   const parsed: unknown = JSON.parse(raw);
-  const config = configSchema.parse(parsed);
+  const config = parseConfigFile(parsed);
   const scopeRoot = dirname(configPath);
 
   return {
@@ -118,6 +118,23 @@ export async function readConfigAt(configPath: string): Promise<MemsphereConfig>
     },
     view: config.view ?? { host: "127.0.0.1", port: 0 }
   };
+}
+
+export function parseConfigFile(value: unknown): z.infer<typeof configSchema> {
+  try {
+    return configSchema.parse(value);
+  } catch (error) {
+    if (error instanceof ZodError && hasLegacyActorRuntimeFields(error)) {
+      throw new Error(
+        "ACP Provider configuration is incompatible with this Memsphere version. "
+        + "Move args, env, and timeout settings into the matching fixed control_plane.acp_providers entry; "
+        + "Provider type and command are managed by Memsphere. "
+        + "Agent actors may only select provider and model. Reconfigure the ACP Provider section in View Settings.",
+        { cause: error }
+      );
+    }
+    throw error;
+  }
 }
 
 export async function writeConfig(
@@ -147,4 +164,25 @@ async function pathExists(path: string): Promise<boolean> {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return false;
     throw error;
   }
+}
+
+function hasLegacyActorRuntimeFields(error: ZodError): boolean {
+  const legacy = new Set([
+    "command",
+    "args",
+    "env",
+    "cwd",
+    "prompt_version",
+    "timeout_ms",
+    "startup_timeout_ms",
+    "idle_timeout_ms",
+    "max_runtime_ms"
+  ]);
+  return error.issues.some((issue) =>
+    issue.code === "unrecognized_keys"
+    && issue.path[0] === "control_plane"
+    && issue.path[1] === "actors"
+    && issue.path[3] === "agent"
+    && issue.keys.some((key) => legacy.has(key))
+  );
 }

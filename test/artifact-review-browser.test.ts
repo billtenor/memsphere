@@ -604,7 +604,7 @@ flow:
         kind: "agent",
         name: "Advisor",
         permissions: ["artifact.read", "decision.assess"],
-        agent: { provider: "traex", command: process.execPath, args: [] }
+        agent: { provider: "traex" }
       }
     }
   });
@@ -720,10 +720,14 @@ flow:
         kind: "agent",
         name: "Advisor",
         permissions: ["artifact.read", "decision.assess"],
-        agent: { provider: "traex", command: process.execPath, args: [browserFakeReviewer, "approve"] }
+        agent: { provider: "traex" }
       }
     }
   });
+  const reviewer = controlPlane.actors["reviewer-agent"];
+  if (!reviewer || reviewer.kind !== "agent") throw new Error("missing reviewer fixture");
+  reviewer.agent.command = process.execPath;
+  reviewer.agent.args = [browserFakeReviewer, "approve"];
   await writeFile(configPath, `${JSON.stringify({
     memoryRoot: "memory",
     reviewsRoot: "reviews",
@@ -741,7 +745,7 @@ flow:
           kind: "agent",
           name: "Advisor",
           permissions: ["artifact.read", "decision.assess"],
-          agent: { provider: "traex", command: process.execPath, args: [browserFakeReviewer, "approve"] }
+          agent: { provider: "traex" }
         }
       }
     }
@@ -771,7 +775,7 @@ flow:
   const agent = round.assignments.find((assignment) => assignment.actorId === "reviewer-agent");
   assert(agent);
   const provider: AgentReviewProvider = {
-    id: "fake-browser-provider",
+    id: "traex",
     buildLaunch({ actor, workspaceRoot, sessionEnv }) {
       return {
         provider: "fake-browser-provider",

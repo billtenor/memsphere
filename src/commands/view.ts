@@ -7,6 +7,12 @@ import { ZodError, type ZodIssue } from "zod";
 import { archiveReview, archiveRun } from "../archive/store.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
 import { agentActivityDelta, readAgentActivitySnapshot } from "../acp/activity.js";
+import { detectAcpProviderInstances } from "../acp/detection.js";
+import {
+  defaultAcpProviderInstance,
+  defaultAcpProviderInstances,
+  listAcpProviderDefinitions
+} from "../acp/catalog.js";
 import {
   artifactReviewAssignmentId,
   artifactReviewFailureCategory,
@@ -16,7 +22,7 @@ import {
   type ArtifactReviewSubmittedOpinion,
   type ArtifactReviewVote
 } from "../artifact-review.js";
-import { type MemsphereConfig, readConfig } from "../config.js";
+import { configSchema, type MemsphereConfig, readConfig } from "../config.js";
 import {
   ConfigDraftValidationError,
   ConfigRevisionConflictError,
@@ -261,6 +267,41 @@ async function handleRequest(
       runningRevision: options.runningRevision ?? document.revision,
       restartRequired: document.revision !== (options.runningRevision ?? document.revision)
         || validation.changes.length > 0
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/settings/acp-providers/detect" && request.method === "POST") {
+    if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+    const body = await readJsonBody<{ expectedRevision?: unknown; config?: unknown }>(request, 128 * 1024);
+    if (typeof body.expectedRevision !== "string" || !body.config || typeof body.config !== "object") {
+      sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
+      return;
+    }
+    const document = await readConfigDocument(config.configPath);
+    if (document.revision !== body.expectedRevision) {
+      sendJson(response, 409, {
+        code: "revision_conflict",
+        error: "config file changed on disk",
+        expectedRevision: body.expectedRevision,
+        actualRevision: document.revision
+      });
+      return;
+    }
+    const validation = validateConfigDraft(document, body.config as EditableConfigDraft);
+    if (!validation.valid || !validation.candidate) {
+      sendJson(response, 422, {
+        code: "config_invalid",
+        error: "Provider configuration is invalid",
+        errors: validation.errors
+      });
+      return;
+    }
+    const parsed = configSchema.parse(validation.candidate);
+    const providers = parsed.control_plane?.acpProviders ?? defaultAcpProviderInstances();
+    sendJson(response, 200, {
+      detectedAt: new Date().toISOString(),
+      results: await detectAcpProviderInstances(providers)
     });
     return;
   }
@@ -1417,7 +1458,11 @@ function settingsPayload(
       view: { host: "127.0.0.1", port: 0 }
     },
     permissionCatalog: listPermissionDefinitions()
-      .filter((definition) => !hiddenSettingsPermissionIds.has(definition.id))
+      .filter((definition) => !hiddenSettingsPermissionIds.has(definition.id)),
+    acpProviderCatalog: listAcpProviderDefinitions().map((definition) => ({
+      ...definition,
+      defaultInstance: defaultAcpProviderInstance(definition.type)
+    }))
   };
 }
 

@@ -1,4 +1,5 @@
 import type { PermissionId } from "./catalog.js";
+import type { AcpProviderInstance, AcpProviderType } from "../acp/catalog.js";
 
 export type PermissionLocale = "zh-CN" | "en";
 
@@ -11,15 +12,15 @@ export type HumanActorRuntime = {
 export type AgentActorRuntime = {
   kind: "agent";
   agent: {
-    provider?: string;
+    provider: string;
+    providerType: AcpProviderType;
     command: string;
     args: string[];
-    cwd?: string;
+    env: Record<string, string>;
     model?: string;
-    promptVersion?: string;
-    startupTimeoutMs?: number;
-    idleTimeoutMs?: number;
-    maxRuntimeMs?: number | null;
+    startupTimeoutMs: number;
+    idleTimeoutMs: number;
+    maxRuntimeMs: number | null;
   };
 };
 
@@ -35,6 +36,7 @@ export type RunnerAuthority = {
 
 export type ControlPlaneConfig = {
   runner: RunnerAuthority;
+  acpProviders: Record<string, AcpProviderInstance>;
   actors: Record<string, ControlPlaneActor>;
 };
 

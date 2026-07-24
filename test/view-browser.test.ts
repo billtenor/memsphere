@@ -9,7 +9,7 @@ test("embedded browser script is valid JavaScript", () => {
   assert.doesNotThrow(() => new Function(script));
 });
 
-test("Settings is a stable four-module configuration workspace", () => {
+test("Settings is a stable five-module configuration workspace", () => {
   assert.match(browserHtml, /id="settings-tab"/);
   assert.match(browserHtml, /class="brand-settings"/);
   assert.match(browserHtml, /class="sidebar-tools"[\s\S]*id="settings-tab"[\s\S]*<div class="brand">[\s\S]*<h1>memsphere<\/h1>/);
@@ -17,6 +17,7 @@ test("Settings is a stable four-module configuration workspace", () => {
   assert.match(browserHtml, /\["overview", "概览"\]/);
   assert.match(browserHtml, /\["storage", "存储"\]/);
   assert.match(browserHtml, /\["view", "View 服务"\]/);
+  assert.match(browserHtml, /\["providers", "ACP Provider"\]/);
   assert.match(browserHtml, /\["participants", "参与者配置"\]/);
   assert.match(browserHtml, /执行者/);
   assert.doesNotMatch(browserHtml, /Runner 不能删除/);
@@ -29,16 +30,16 @@ test("Settings is a stable four-module configuration workspace", () => {
   assert.doesNotMatch(browserHtml, /当前运行地址/);
   assert.doesNotMatch(browserHtml, /保存并重启后地址/);
   assert.match(browserHtml, /没有未保存修改/);
-  assert.match(browserHtml, /"Provider"/);
+  assert.match(browserHtml, /"ACP Provider"/);
   assert.match(browserHtml, /\.settings-select-menu \{ position: absolute; top: calc\(100% \+ 4px\); right: 0; left: 0;/);
   assert.doesNotMatch(browserHtml, /document\.createElement\("select"\)/);
   assert.match(browserHtml, /document\.createElement\("details"\)/);
-  assert.match(browserHtml, /按参与者展开编辑权限和 Agent 运行参数/);
+  assert.match(browserHtml, /Agent 只选择 ACP Provider 与 Model/);
   assert.match(browserHtml, /permissionCount \+ " 项权限"/);
   assert.doesNotMatch(browserHtml, /直接授予/);
   assert.doesNotMatch(browserHtml, /可授予/);
   assert.match(browserHtml, /configurablePermissionIds/);
-  assert.doesNotMatch(browserHtml, /Prompt version|Startup timeout|Idle timeout|Max runtime|Args（每行一个）|Working directory/);
+  assert.doesNotMatch(browserHtml, /Prompt version|Working directory/);
   assert.doesNotMatch(browserHtml, />Debug</);
 });
 

@@ -1,4 +1,15 @@
 import { z } from "zod";
+import {
+  acpProviderTypes,
+  defaultAcpProviderInstance,
+  defaultAcpProviderInstances,
+  type AcpProviderInstance,
+  type AcpProviderType
+} from "../acp/catalog.js";
+import {
+  AcpProviderConfigurationError,
+  validateAcpProviderConfiguration
+} from "../acp/validation.js";
 import { isPermissionId, type PermissionId } from "./catalog.js";
 import type { ControlPlaneActor, ControlPlaneConfig, ControlPlaneSnapshot, RunnerAuthority } from "./model.js";
 
@@ -33,36 +44,98 @@ const systemPromptSchema = z.string().superRefine((value, context) => {
   if (!value.trim()) context.addIssue({ code: z.ZodIssueCode.custom, message: "system_prompt must not be blank" });
 }).optional();
 
-const agentRuntimeInputSchema = z.object({
-  provider: z.literal("traex").optional(),
-  command: nonEmptyString.optional(),
+const providerIdSchema = nonEmptyString.regex(
+  idPattern,
+  "ACP Provider id must contain only letters, numbers, dots, underscores, or hyphens"
+);
+const providerTypeSchema = z.enum(acpProviderTypes);
+const providerEnvironmentSchema = z.record(z.string()).superRefine((environment, context) => {
+  for (const name of Object.keys(environment)) {
+    const normalizedName = name.toUpperCase();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: [name], message: "Invalid environment variable name" });
+      continue;
+    }
+    if (
+      name.startsWith("MEMSPHERE_")
+      || /(?:TOKEN|SECRET|PASSWORD|COOKIE|AUTHORIZATION|API_?KEY|CREDENTIAL)/i.test(name)
+      || [
+        "PATH",
+        "PATHEXT",
+        "HOME",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "CODEX_HOME",
+        "TRAE_HOME",
+        "KIMI_HOME",
+        "QWEN_HOME",
+        "CODEX_CONFIG",
+        "NO_BROWSER",
+        "INITIAL_AGENT_MODE",
+        "NODE_OPTIONS",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH"
+      ].includes(normalizedName)
+      || normalizedName.startsWith("XDG_")
+      || normalizedName.startsWith("DYLD_")
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [name],
+        message: `ACP Provider environment variable is reserved or sensitive: ${name}`
+      });
+    }
+  }
+});
+
+function providerInstanceInputSchema(type: AcpProviderType) {
+  return z.object({
   args: z.array(z.string()).optional(),
-  cwd: nonEmptyString.optional(),
-  model: nonEmptyString.optional(),
-  prompt_version: nonEmptyString.optional(),
+  env: providerEnvironmentSchema.optional(),
   startup_timeout_ms: z.number().int().positive().optional(),
   idle_timeout_ms: z.number().int().positive().optional(),
-  max_runtime_ms: z.number().int().positive().nullable().optional(),
-  timeout_ms: z.number().int().positive().optional()
-}).strict().superRefine((agent, context) => {
-  if (agent.timeout_ms !== undefined && agent.max_runtime_ms !== undefined) {
+  max_runtime_ms: z.number().int().positive().nullable().optional()
+}).strict().superRefine((input, context) => {
+  const defaults = defaultAcpProviderInstance(type);
+  try {
+    validateAcpProviderConfiguration({
+      type,
+      command: defaults.command,
+      args: input.args ?? defaults.args
+    });
+  } catch (error) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      path: ["max_runtime_ms"],
-      message: "max_runtime_ms cannot be combined with legacy timeout_ms"
+      path: [error instanceof AcpProviderConfigurationError ? error.field : "args"],
+      message: error instanceof Error ? error.message : String(error)
     });
   }
-}).transform((agent) => ({
-  provider: agent.provider ?? "traex",
-  command: agent.command ?? "traecli",
-  args: [...(agent.args ?? [])],
-  cwd: agent.cwd,
-  model: agent.model,
-  promptVersion: agent.prompt_version,
-  startupTimeoutMs: agent.startup_timeout_ms,
-  idleTimeoutMs: agent.idle_timeout_ms,
-  maxRuntimeMs: agent.max_runtime_ms !== undefined ? agent.max_runtime_ms : agent.timeout_ms
-}));
+}).transform((input): AcpProviderInstance => {
+  const defaults = defaultAcpProviderInstance(type);
+  return {
+    type,
+    command: defaults.command,
+    args: [...(input.args ?? defaults.args)],
+    env: { ...(input.env ?? defaults.env) },
+    startupTimeoutMs: input.startup_timeout_ms ?? defaults.startupTimeoutMs,
+    idleTimeoutMs: input.idle_timeout_ms ?? defaults.idleTimeoutMs,
+    maxRuntimeMs: input.max_runtime_ms === undefined ? defaults.maxRuntimeMs : input.max_runtime_ms
+  };
+});
+}
+
+const providerInstancesInputSchema = z.object({
+  traex: providerInstanceInputSchema("traex").optional(),
+  qwen: providerInstanceInputSchema("qwen").optional(),
+  kimi: providerInstanceInputSchema("kimi").optional(),
+  codex: providerInstanceInputSchema("codex").optional()
+}).strict();
+
+const agentRuntimeInputSchema = z.object({
+  provider: providerIdSchema.optional(),
+  model: nonEmptyString.optional()
+}).strict();
 
 const actorInputSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -78,16 +151,39 @@ const actorInputSchema = z.discriminatedUnion("kind", [
     system_prompt: systemPromptSchema,
     agent: agentRuntimeInputSchema
   }).strict()
-]).transform((actor): ControlPlaneActor => {
+]);
+
+type ActorInput = z.infer<typeof actorInputSchema>;
+
+function resolveActor(
+  actor: ActorInput,
+  providers: Record<string, AcpProviderInstance>
+): ControlPlaneActor {
   const authority = {
     name: actor.name,
     permissions: [...actor.permissions],
     systemPrompt: actor.system_prompt
   };
-  return actor.kind === "agent"
-    ? { kind: "agent", ...authority, agent: actor.agent }
-    : { kind: "human", ...authority };
-});
+  if (actor.kind === "human") return { kind: "human", ...authority };
+  const provider = actor.agent.provider ?? "traex";
+  const instance = providers[provider];
+  if (!instance) throw new Error(`Unknown ACP Provider id: ${provider}`);
+  return {
+    kind: "agent",
+    ...authority,
+    agent: {
+      provider,
+      providerType: instance.type,
+      command: instance.command,
+      args: [...instance.args],
+      env: { ...instance.env },
+      model: actor.agent.model,
+      startupTimeoutMs: instance.startupTimeoutMs,
+      idleTimeoutMs: instance.idleTimeoutMs,
+      maxRuntimeMs: instance.maxRuntimeMs
+    }
+  };
+}
 
 const runnerInputSchema = z.object({
   permissions: permissionListSchema
@@ -110,22 +206,64 @@ function recordWithValidatedKeys<T>(
   });
 }
 
-export const controlPlaneConfigSchema: z.ZodType<ControlPlaneConfig, z.ZodTypeDef, unknown> = z.object({
+const controlPlaneInputSchema = z.object({
   runner: runnerInputSchema,
+  acp_providers: providerInstancesInputSchema.optional(),
   actors: recordWithValidatedKeys(actorIdSchema, actorInputSchema)
-}).strict();
+}).strict().superRefine((controlPlane, context) => {
+  const providers = { ...defaultAcpProviderInstances(), ...(controlPlane.acp_providers ?? {}) };
+  for (const [actorId, actor] of Object.entries(controlPlane.actors)) {
+    if (actor.kind !== "agent") continue;
+    const provider = actor.agent.provider ?? "traex";
+    if (!Object.hasOwn(providers, provider)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["actors", actorId, "agent", "provider"],
+        message: `Unknown ACP Provider id: ${provider}`
+      });
+    }
+  }
+}).transform((controlPlane): ControlPlaneConfig => {
+  const acpProviders = { ...defaultAcpProviderInstances(), ...(controlPlane.acp_providers ?? {}) };
+  return {
+    runner: controlPlane.runner,
+    acpProviders,
+    actors: Object.fromEntries(
+      Object.entries(controlPlane.actors).map(([id, actor]) => [id, resolveActor(actor, acpProviders)])
+    )
+  };
+});
+
+export const controlPlaneConfigSchema: z.ZodType<ControlPlaneConfig, z.ZodTypeDef, unknown> =
+  controlPlaneInputSchema;
 
 const snapshotAgentRuntimeSchema = z.object({
   provider: nonEmptyString.optional(),
+  providerType: providerTypeSchema.optional(),
   command: nonEmptyString,
   args: z.array(z.string()),
+  env: z.record(z.string()).optional(),
   cwd: nonEmptyString.optional(),
   model: nonEmptyString.optional(),
   promptVersion: nonEmptyString.optional(),
   startupTimeoutMs: z.number().int().positive().optional(),
   idleTimeoutMs: z.number().int().positive().optional(),
   maxRuntimeMs: z.number().int().positive().nullable().optional()
-}).strict();
+}).strict().transform((agent) => ({
+  provider: agent.provider ?? "traex",
+  providerType: agent.providerType ?? (
+    acpProviderTypes.includes(agent.provider as AcpProviderType)
+      ? agent.provider as AcpProviderType
+      : "traex"
+  ),
+  command: agent.command,
+  args: [...agent.args],
+  env: { ...(agent.env ?? {}) },
+  model: agent.model,
+  startupTimeoutMs: agent.startupTimeoutMs ?? 60_000,
+  idleTimeoutMs: agent.idleTimeoutMs ?? 120_000,
+  maxRuntimeMs: agent.maxRuntimeMs ?? null
+}));
 
 const snapshotActorSchema = z.discriminatedUnion("kind", [
   z.object({

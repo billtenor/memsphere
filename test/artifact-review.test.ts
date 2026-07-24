@@ -10,12 +10,12 @@ import {
 } from "../src/artifact-review.js";
 import {
   createControlPlaneSnapshot,
+  parseControlPlaneConfig,
   resolveArtifactControlPlane,
-  type ControlPlaneConfig
 } from "../src/control-plane/index.js";
 
 function fixture(input?: { runnerDecides?: boolean; humanDecides?: boolean }) {
-  const config: ControlPlaneConfig = {
+  const config = parseControlPlaneConfig({
     runner: {
       permissions: ["artifact.read", "artifact.submit", ...(input?.runnerDecides === false ? [] : ["decision.decide"] as const)]
     },
@@ -29,10 +29,10 @@ function fixture(input?: { runnerDecides?: boolean; humanDecides?: boolean }) {
         kind: "agent",
         name: "Bot",
         permissions: ["artifact.read", "decision.assess"],
-        agent: { command: "bot", args: [] }
+        agent: { provider: "traex" }
       }
     }
-  };
+  });
   const snapshot = createControlPlaneSnapshot(config);
   const controlPlane = resolveArtifactControlPlane({
     snapshot,

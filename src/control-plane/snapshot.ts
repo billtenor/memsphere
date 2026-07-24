@@ -43,11 +43,11 @@ function normalizeActor(actor: ControlPlaneActor): ControlPlaneActor {
         ...authority,
         agent: {
           provider: actor.agent.provider,
+          providerType: actor.agent.providerType,
           command: actor.agent.command,
           args: [...actor.agent.args],
-          cwd: actor.agent.cwd,
+          env: { ...actor.agent.env },
           model: actor.agent.model,
-          promptVersion: actor.agent.promptVersion,
           startupTimeoutMs: actor.agent.startupTimeoutMs,
           idleTimeoutMs: actor.agent.idleTimeoutMs,
           maxRuntimeMs: actor.agent.maxRuntimeMs

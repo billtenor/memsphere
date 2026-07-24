@@ -9,4 +9,6 @@ defines:
   - Agent 通过 memsphere memory list 发现 Memory，通过 memsphere memory read 完整读取或按 Node 读取相关内容，而不依赖 Memory 当前使用文件还是其他存储后端。
   - memsphere init 由用户执行，并安装或更新当前工程的预置 Memory；实际使用时，Agent 不区分一份 Memory 是预置安装还是用户创建。
   - 需要遵循 Memory 完成任务时，Agent 必须先选择适用的 Procedure；没有专用 Procedure 时使用 memsphere-general-task-execution，再根据当前步骤按需读取 Concept、Statement 和 Schema。
-  - View 的设置工作区只维护当前进程加载的 config.json，按概览、存储、View 服务和参与者配置组织字段；保存前执行服务端校验和差异确认，磁盘 revision 与运行 revision 不一致时由操作者手动执行 memsphere view restart。
+  - View 的设置工作区只维护当前进程加载的 config.json，按概览、存储、View 服务、ACP Provider 和参与者配置组织字段；保存前执行服务端校验和差异确认，磁盘 revision 与运行 revision 不一致时由操作者手动执行 memsphere view restart。
+  - ACP Provider 配置与内置类型同名，负责可选参数、非敏感环境变量和超时；会改变可执行解析、用户或配置目录、动态加载、凭据及 Memsphere 托管行为的环境变量不可配置。Agent CLI command 与 ACP 入口由 traex、qwen、kimi、codex 四种内置类型固定，配置中心自动检测 CLI 路径与版本，安装、认证和模型账户仍由 Provider 自身管理。
+  - Agent Actor 只引用 ACP Provider 实例并可选择 model；工作目录、托管安全参数和 Prompt version 由 Memsphere 固定。旧的 Actor 内 command、args、env、cwd、Prompt version 和 timeout 配置不兼容，不自动迁移。

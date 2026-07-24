@@ -149,13 +149,13 @@ test("Agent Review smoke Procedures start directly from test fixture files", asy
           kind: "agent",
           name: "Development engineer",
           permissions: ["artifact.read", "decision.assess"],
-          agent: { provider: "traex", command: "traex", args: [] }
+          agent: { provider: "traex" }
         },
         traex2: {
           kind: "agent",
           name: "Test engineer",
           permissions: ["artifact.read", "decision.decide"],
-          agent: { provider: "traex", command: "traex", args: [] }
+          agent: { provider: "traex" }
         },
         human: {
           kind: "human",
@@ -1225,7 +1225,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
           kind: "agent",
           name: "Agent reviewer",
           permissions: ["artifact.read", "decision.decide"],
-          agent: { provider: "traex", command: "traecli", args: [] }
+          agent: { provider: "traex" }
         },
         human: {
           kind: "human",
@@ -1658,7 +1658,7 @@ flow:
           kind: "agent",
           name: "Agent",
           permissions: ["artifact.read", "decision.assess"],
-          agent: { command: "traecli", args: ["acp"] }
+          agent: { provider: "traex" }
         }
       }
     });

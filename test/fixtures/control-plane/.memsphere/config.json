@@ -18,9 +18,7 @@
         "permissions": ["artifact.read", "decision.assess"],
         "system_prompt": "Review the Artifact independently.",
         "agent": {
-          "provider": "traex",
-          "command": "traecli",
-          "args": ["acp"]
+          "provider": "traex"
         }
       }
     }

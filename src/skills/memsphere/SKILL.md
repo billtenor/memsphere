@@ -137,7 +137,8 @@ flow:
 
 - `review` 是不重复的非空 Slot 名称数组。Slot 只表达 Procedure 本地评审视角，不是 Actor id。
 - `.memsphere/config.json` 的 `control_plane.actors` 定义可参与 Review 的 Human 或 Agent Actor；Runner 权限由 `control_plane.runner` 定义。
-- Agent Actor 只配置 ACP `provider` 和可选 `model`；启动命令、参数、工作目录、超时与 Prompt version 由 Provider 和 Memsphere 管理。
+- `control_plane.acp_providers` 定义与内置类型同名的 ACP Provider 配置。首批固定支持 `traex`、`qwen`、`kimi`、`codex`；CLI command 和 ACP 入口由类型固定，配置维护非托管 args、非敏感 env 和启动/空闲/总运行超时。配置中心可自动检测可执行文件路径和版本，但 Provider 自己负责安装、认证和模型账户配置。
+- Agent Actor 只配置 ACP Provider 实例 id `provider` 和可选 `model`；工作目录、托管安全参数与 Prompt version 由 Memsphere 管理。旧的 Actor 内 `command`、`args`、`env`、`cwd`、Prompt version 和 timeout 字段不兼容，也不会被自动迁移。
 - `memsphere run start` 会先列出所有 Review scope、Slot、可用 Actor 和内置 Decision Policy。把预检示例保存并调整后，使用 `--review-config <path>` 启动。
 - Review 配置必须为每个 scope 选择 Policy，并为每个 Slot 绑定 Actor 或显式 `skip`；一个 Actor 绑定多个 Slot 时只产生一个 Assignment 和 Vote。
 - Permission 只在 Runner/Actor 的 `permissions` 中配置；Run Review 配置不追加临时权限。Memory YAML 不允许 `role_bindings` 或 `permission_grants`。
@@ -151,7 +152,7 @@ flow:
 
 ### 维护当前配置
 
-View 的“设置”入口提供概览、存储、View 服务和参与者配置四个模块，只编辑当前 View 实际加载的 `.memsphere/config.json`。页面会在服务端校验并展示修改差异，确认后才原子写入；磁盘配置与运行配置不一致时，需要手动执行：
+View 的“设置”入口提供概览、存储、View 服务、ACP Provider 和参与者配置五个模块，只编辑当前 View 实际加载的 `.memsphere/config.json`。ACP Provider 模块固定展示四种 Provider，Command 只读，负责共享参数、CLI 自动检测和 Actor 引用；参与者中的 Agent 只选择 Provider 与 Model。页面会在服务端校验并展示修改差异，确认后才原子写入；磁盘配置与运行配置不一致时，需要手动执行：
 
 ```bash
 memsphere view restart

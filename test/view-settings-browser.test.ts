@@ -92,15 +92,15 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await participant.getByRole("combobox", { name: "类型", exact: true }).click();
     await participant.getByRole("option", { name: "Agent", exact: true }).click();
     participant = page.locator(".settings-participant").last();
-    assert.equal(await participant.getByText("Provider", { exact: true }).count(), 1);
+    assert.equal(await participant.getByText("ACP Provider", { exact: true }).count(), 1);
     assert.equal(await participant.getByText("Model", { exact: true }).count(), 1);
     assert.equal(await participant.getByText("Prompt version", { exact: true }).count(), 0);
     assert.equal(await participant.getByText("Command", { exact: true }).count(), 0);
     assert.equal(await participant.getByText("Args（每行一个）", { exact: true }).count(), 0);
-    const provider = participant.getByRole("combobox", { name: "Provider", exact: true });
-    assert.equal((await provider.textContent())?.trim(), "Traex⌄");
+    const provider = participant.getByRole("combobox", { name: "ACP Provider", exact: true });
+    assert.equal((await provider.textContent())?.trim(), "traex · Traex · 待检测⌄");
     await provider.click();
-    const providerMenu = participant.getByRole("listbox", { name: "Provider", exact: true });
+    const providerMenu = participant.getByRole("listbox", { name: "ACP Provider", exact: true });
     const providerBox = await provider.boundingBox();
     const providerMenuBox = await providerMenu.boundingBox();
     assert.ok(providerBox && providerMenuBox);
@@ -118,6 +118,41 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.ok(Math.abs(idBox.y - nameBox.y) < 2);
     assert.ok(promptBox && promptBox.width > idBox.width * 2);
     await page.setViewportSize({ width: 390, height: 844 });
+
+    await page.getByRole("button", { name: "ACP Provider", exact: true }).click();
+    let traexProvider = page.locator(".settings-provider").filter({ hasText: "traex" }).first();
+    await traexProvider.locator("summary").click();
+    assert.equal(await page.getByRole("button", { name: "添加 Provider", exact: true }).count(), 0);
+    assert.equal(await traexProvider.getByLabel("ID", { exact: true }).count(), 0);
+    assert.equal(await traexProvider.getByRole("combobox", { name: "类型", exact: true }).count(), 0);
+    const providerCommand = traexProvider.getByLabel("Command", { exact: true });
+    assert.equal(await providerCommand.inputValue(), "traecli");
+    assert.equal(await providerCommand.isDisabled(), true);
+    await traexProvider.getByLabel("Args（每行一个）", { exact: true }).fill("--verbose");
+    traexProvider = page.locator(".settings-provider").filter({ hasText: "traex" }).first();
+    const resetProvider = traexProvider.getByRole("button", { name: "恢复默认值", exact: true });
+    assert.equal(await resetProvider.isDisabled(), false);
+    assert.match(await traexProvider.locator("summary").textContent() ?? "", /待重新检测/);
+    await page.getByRole("button", { name: "自动检测", exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "自动检测", exact: true }).count(), 1);
+    assert.equal(await page.getByRole("button", { name: "重新检测", exact: true }).count(), 0);
+    assert.equal(
+      await traexProvider.locator(".settings-provider-preview").textContent(),
+      "实际启动：traecli --sandbox workspace-write --ask-for-approval never --model '<参与者模型>' --verbose acp serve"
+    );
+    await resetProvider.click();
+    traexProvider = page.locator(".settings-provider").filter({ hasText: "traex" }).first();
+    assert.equal(await traexProvider.evaluate(element => (element as HTMLDetailsElement).open), true);
+    assert.equal(await traexProvider.getByRole("button", { name: "恢复默认值", exact: true }).isDisabled(), true);
+    assert.match(await traexProvider.locator("summary").textContent() ?? "", /待重新检测/);
+
+    const codexProvider = page.locator(".settings-provider").filter({ hasText: "codex" }).first();
+    await codexProvider.locator("summary").click();
+    assert.equal(
+      await codexProvider.locator(".settings-provider-preview").textContent(),
+      "实际启动：'CODEX_CONFIG={\"model\":\"<参与者模型>\"}' NO_BROWSER=1 "
+        + "INITIAL_AGENT_MODE=read-only codex-acp"
+    );
 
     await page.getByRole("button", { name: "View 服务", exact: true }).click();
     const portInputBox = await page.getByLabel("Port", { exact: true }).boundingBox();

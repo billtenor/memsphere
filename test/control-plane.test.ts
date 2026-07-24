@@ -16,6 +16,14 @@ const rawConfig = {
   runner: {
     permissions: ["artifact.read", "artifact.submit", "decision.decide"]
   },
+  acp_providers: {
+    traex: {
+      args: [],
+      startup_timeout_ms: 10000,
+      idle_timeout_ms: 30000,
+      max_runtime_ms: null
+    }
+  },
   actors: {
     human: {
       kind: "human",
@@ -29,14 +37,7 @@ const rawConfig = {
       system_prompt: "Review independently.",
       agent: {
         provider: "traex",
-        command: "traecli",
-        args: [],
-        cwd: ".",
-        model: "review-model",
-        prompt_version: "artifact-review-v1",
-        startup_timeout_ms: 10000,
-        idle_timeout_ms: 30000,
-        max_runtime_ms: null
+        model: "review-model"
       }
     }
   }
@@ -60,11 +61,11 @@ test("control plane config parses Runner and Actors strictly", () => {
   assert.equal(parsed.actors.agent.systemPrompt, "Review independently.");
   assert.deepEqual(parsed.actors.agent.kind === "agent" ? parsed.actors.agent.agent : undefined, {
     provider: "traex",
+    providerType: "traex",
     command: "traecli",
     args: [],
-    cwd: ".",
+    env: {},
     model: "review-model",
-    promptVersion: "artifact-review-v1",
     startupTimeoutMs: 10000,
     idleTimeoutMs: 30000,
     maxRuntimeMs: null
@@ -79,10 +80,36 @@ test("control plane config parses Runner and Actors strictly", () => {
     actors: {
       agent: {
         ...rawConfig.actors.agent,
-        agent: { command: "traecli", args: [], env: { API_KEY: "secret" } }
+        agent: { provider: "traex", command: "traecli" }
       }
     }
-  }), /Unrecognized key.*env/);
+  }), /Unrecognized key.*command/);
+  assert.throws(() => parseControlPlaneConfig({
+    ...rawConfig,
+    acp_providers: {
+      traex: {
+        env: { API_KEY: "secret" }
+      }
+    }
+  }), /reserved or sensitive/);
+  for (const name of [
+    "PATH",
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "CODEX_HOME",
+    "INITIAL_AGENT_MODE",
+    "NODE_OPTIONS",
+    "LD_PRELOAD"
+  ]) {
+    assert.throws(() => parseControlPlaneConfig({
+      ...rawConfig,
+      acp_providers: {
+        traex: {
+          env: { [name]: "override" }
+        }
+      }
+    }), new RegExp(`reserved or sensitive: ${name}`));
+  }
   assert.throws(() => parseControlPlaneConfig({
     ...rawConfig,
     runner: { permissions: ["artifact.delete"] }
@@ -107,22 +134,69 @@ test("Agent configuration defaults Provider-owned runtime details", () => {
   });
   assert.deepEqual(parsed.actors.reviewer.kind === "agent" ? parsed.actors.reviewer.agent : undefined, {
     provider: "traex",
+    providerType: "traex",
     command: "traecli",
     args: [],
-    cwd: undefined,
+    env: {},
     model: "review-model",
-    promptVersion: undefined,
-    startupTimeoutMs: undefined,
-    idleTimeoutMs: undefined,
-    maxRuntimeMs: undefined
+    startupTimeoutMs: 60000,
+    idleTimeoutMs: 120000,
+    maxRuntimeMs: null
   });
+});
+
+test("ACP Provider configuration has fixed ids and immutable launch ownership", () => {
+  assert.throws(() => parseControlPlaneConfig({
+    runner: { permissions: [] },
+    acp_providers: {
+      qwen: {
+        args: ["--acp"]
+      }
+    },
+    actors: {}
+  }), /Qwen.*managed argument '--acp'/);
+
+  assert.throws(() => parseControlPlaneConfig({
+    runner: { permissions: [] },
+    acp_providers: {
+      kimi: {
+        args: ["login"]
+      }
+    },
+    actors: {}
+  }), /Kimi.*cannot launch the 'login' subcommand/);
+
+  assert.throws(() => parseControlPlaneConfig({
+    runner: { permissions: [] },
+    acp_providers: {
+      review: {}
+    },
+    actors: {}
+  }), /Unrecognized key.*review/);
+
+  assert.throws(() => parseControlPlaneConfig({
+    runner: { permissions: [] },
+    acp_providers: {
+      codex: { command: "npx" }
+    },
+    actors: {}
+  }), /Unrecognized key.*command/);
+
+  assert.throws(() => parseControlPlaneConfig({
+    runner: { permissions: [] },
+    acp_providers: {
+      traex: { type: "qwen" }
+    },
+    actors: {}
+  }), /Unrecognized key.*type/);
 });
 
 test("control plane snapshots and revisions are deterministic", () => {
   const first = createControlPlaneSnapshot(parseControlPlaneConfig(rawConfig));
   const second = createControlPlaneSnapshot(parseControlPlaneConfig({
     actors: { agent: rawConfig.actors.agent, human: rawConfig.actors.human },
-    runner: rawConfig.runner
+    runner: rawConfig.runner,
+    acp_providers: rawConfig.acp_providers
   }));
   assert.equal(first.revision, second.revision);
   assert.match(first.revision, /^sha256:[a-f0-9]{64}$/);

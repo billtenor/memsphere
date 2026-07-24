@@ -55,7 +55,7 @@ export async function writeAgentReviewDebugArtifacts(input: {
       MEMSPHERE_WORKSPACE_ROOT: workspaceRoot,
       MEMSPHERE_CLI: "<runtime-generated-session-cli>"
     };
-    const provider = getAgentReviewProvider(actor.agent.provider);
+    const provider = getAgentReviewProvider(actor.agent.providerType);
     const launch = provider.buildLaunch({ actor, workspaceRoot, sessionEnv });
     const context: ArtifactReviewAgentContext = {
       run: input.run,

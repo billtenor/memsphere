@@ -42,8 +42,15 @@ test("loopback Settings validates same-origin JSON and rejects cross-origin requ
     assert.equal(settings.status, 200);
     const payload = await settings.json() as {
       diskRevision: string;
-      config: unknown;
+      config: {
+        control_plane?: {
+          runner?: unknown;
+          actors?: unknown;
+          acp_providers?: Record<string, unknown>;
+        };
+      };
       permissionCatalog: Array<{ id: string }>;
+      acpProviderCatalog: Array<{ type: string; defaultInstance: { command: string } }>;
     };
     assert.deepEqual(payload.permissionCatalog.map((definition) => definition.id), [
       "artifact.read",
@@ -52,6 +59,41 @@ test("loopback Settings validates same-origin JSON and rejects cross-origin requ
       "decision.assess",
       "decision.decide"
     ]);
+    assert.deepEqual(payload.acpProviderCatalog.map((definition) => definition.type), [
+      "traex",
+      "qwen",
+      "kimi",
+      "codex"
+    ]);
+
+    payload.config.control_plane = {
+      ...payload.config.control_plane,
+      acp_providers: {
+        traex: {}
+      }
+    };
+    const detected = await fetch(`${origin}/api/settings/acp-providers/detect`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin,
+        "sec-fetch-site": "same-origin"
+      },
+      body: JSON.stringify({ expectedRevision: payload.diskRevision, config: payload.config })
+    });
+    assert.equal(detected.status, 200);
+    const detection = await detected.json() as {
+      results: Array<{ id: string; status: string; path?: string; version?: string }>;
+    };
+    assert.deepEqual(detection.results.map((result) => result.id), [
+      "traex",
+      "qwen",
+      "kimi",
+      "codex"
+    ]);
+    assert(detection.results.every((result) =>
+      ["installed", "version_unknown", "missing", "failed"].includes(result.status)
+    ));
 
     const missingOrigin = await fetch(`${origin}/api/settings/validate`, {
       method: "POST",

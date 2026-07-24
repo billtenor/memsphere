@@ -13,6 +13,7 @@ import { AgentActivityRecorder } from "./activity.js";
 import { createAgentReviewCliRuntime } from "./cli-runtime.js";
 import { buildArtifactReviewerPrompt, buildArtifactReviewerReminder } from "./prompt.js";
 import { getAgentReviewProvider, type AgentReviewProvider } from "./provider.js";
+import { AcpProviderConfigurationError } from "./validation.js";
 
 export type AgentReviewWorkerOptions = {
   config?: string;
@@ -65,7 +66,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     if (!actor || actor.kind !== "agent") throw new Error(`agent_actor_missing: ${actorId}`);
     cliRuntime = await createAgentReviewCliRuntime({ nodeExecutable, cliEntrypoint });
     const workspaceRoot = dirname(config.scopeRoot);
-    const provider = (options.providerResolver ?? getAgentReviewProvider)(actor.agent.provider);
+    const provider = (options.providerResolver ?? getAgentReviewProvider)(actor.agent.providerType);
     const launch = provider.buildLaunch({
       actor,
       workspaceRoot,
@@ -120,6 +121,16 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
 
 function classifyAgentFailure(error: unknown): ArtifactReviewAgentFailure {
   const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof AcpProviderConfigurationError) {
+    return {
+      stage: "spawn",
+      code: error.field === "args"
+        ? "agent_provider_arguments_invalid"
+        : "agent_provider_command_invalid",
+      message,
+      category: "provider"
+    };
+  }
   if (/listen EPERM|EACCES/i.test(message)) {
     return { stage: "session", code: "agent_environment_failed", message, category: "environment" };
   }
@@ -132,7 +143,16 @@ function classifyAgentFailure(error: unknown): ArtifactReviewAgentFailure {
   if (message.startsWith("agent_provider") || message.startsWith("agent_identity")) {
     return { stage: "spawn", code: message.split(":", 1)[0], message, category: "provider" };
   }
-  if (message.startsWith("agent_process") || message.includes("ENOENT")) {
+  if ((message.startsWith("agent_process_spawn") || message.includes("ENOENT")) && /ENOENT|not found/i.test(message)) {
+    return { stage: "spawn", code: "agent_provider_not_installed", message, category: "provider" };
+  }
+  if (/not authenticated|authentication required|unauthorized|please log[ -]?in|login required/i.test(message)) {
+    return { stage: "session", code: "agent_provider_auth_required", message, category: "provider" };
+  }
+  if (/unknown model|model .*not found|invalid model|unsupported model/i.test(message)) {
+    return { stage: "session", code: "agent_provider_model_invalid", message, category: "provider" };
+  }
+  if (message.startsWith("agent_process")) {
     return { stage: "process", code: "agent_process_failed", message, category: "environment" };
   }
   if (message.startsWith("agent_submission_missing")) return { stage: "prompt", code: "agent_submission_missing", message, category: "reviewer" };

@@ -88,7 +88,7 @@ test("config draft preserves hidden debug configuration", async () => {
   assert.deepEqual(written.raw.debug, { agent_review: true });
 });
 
-test("editable Agent configuration exposes only provider and model", async () => {
+test("legacy Actor-owned ACP process configuration is rejected", async () => {
   const { configPath } = await fixtureConfig();
   const source = JSON.parse(await readFile(configPath, "utf8")) as {
     control_plane: { actors: Record<string, unknown> };
@@ -110,23 +110,10 @@ test("editable Agent configuration exposes only provider and model", async () =>
     }
   };
   await writeFile(configPath, `${JSON.stringify(source, null, 2)}\n`);
-  const document = await readConfigDocument(configPath);
-  const draft = editableConfigDraft(document);
-  const controlPlane = draft.control_plane as {
-    actors: Record<string, { agent?: Record<string, unknown> }>;
-  };
-
-  assert.deepEqual(controlPlane.actors.legacy_agent?.agent, {
-    provider: "traex",
-    model: "review-model"
-  });
-  const validation = validateConfigDraft(document, draft);
-  assert.equal(validation.valid, true);
-  assert.deepEqual(
-    validation.candidate?.control_plane?.actors.legacy_agent?.agent,
-    { provider: "traex", model: "review-model" }
+  await assert.rejects(
+    readConfigDocument(configPath),
+    /Move args, env, and timeout settings into the matching fixed control_plane\.acp_providers entry/
   );
-  assert.doesNotMatch(validation.normalizedJson ?? "", /prompt_version|startup_timeout_ms|command|args|cwd/);
 });
 
 test("config draft rejects removed grantable permissions", async () => {
@@ -139,6 +126,34 @@ test("config draft rejects removed grantable permissions", async () => {
   const validation = validateConfigDraft(document, draft);
   assert.equal(validation.valid, false);
   assert.match(validation.errors[0]?.message ?? "", /Unrecognized key/);
+});
+
+test("config draft reports ACP Provider argument errors at the edited field", async () => {
+  const { configPath } = await fixtureConfig();
+  const document = await readConfigDocument(configPath);
+  const draft = editableConfigDraft(document);
+  const controlPlane = draft.control_plane as {
+    acp_providers?: Record<string, unknown>;
+  };
+  controlPlane.acp_providers = {
+    qwen: {
+      args: ["--acp"]
+    },
+    codex: {
+      command: "npx"
+    }
+  };
+
+  const validation = validateConfigDraft(document, draft);
+  assert.equal(validation.valid, false);
+  assert(validation.errors.some((error) =>
+    error.path === "control_plane.acp_providers.qwen.args"
+    && /Qwen.*managed argument '--acp'/.test(error.message)
+  ));
+  assert(validation.errors.some((error) =>
+    error.path === "control_plane.acp_providers.codex"
+    && /Unrecognized key/.test(error.message)
+  ));
 });
 
 test("config write rejects stale revisions without overwriting the newer file", async () => {

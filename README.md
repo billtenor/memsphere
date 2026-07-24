@@ -102,6 +102,13 @@ The config file stores roots relative to the `.memsphere` directory by default:
     "runner": {
       "permissions": ["artifact.read", "artifact.write", "artifact.submit"]
     },
+    "acp_providers": {
+      "qwen": {
+        "startup_timeout_ms": 60000,
+        "idle_timeout_ms": 120000,
+        "max_runtime_ms": null
+      }
+    },
     "actors": {
       "human_reviewer": {
         "kind": "human",
@@ -114,7 +121,7 @@ The config file stores roots relative to the `.memsphere` directory by default:
         "permissions": ["artifact.read", "decision.assess", "decision.challenge"],
         "system_prompt": "Review the Artifact independently.",
         "agent": {
-          "provider": "traex",
+          "provider": "qwen",
           "model": "review-model"
         }
       }
@@ -125,11 +132,13 @@ The config file stores roots relative to the `.memsphere` directory by default:
 
 Set `archiveRoot` to an absolute path when multiple scopes should share archived runs and reviews.
 
-`control_plane` is optional. When present, it defines the Runner authority and Human/Agent Actors. Permission and Decision Policy catalogs are built into memsphere and cannot be redefined in config. Agent Actors select a built-in ACP `provider` and may select a `model`. Process commands, arguments, working directories, timeouts, Prompt versions, credentials, environment variables, API keys, and secrets belong to Memsphere or the Provider implementation and are not Actor configuration.
+`control_plane` is optional. When present, it defines the Runner authority, ACP Provider settings, and Human/Agent Actors. Permission and Decision Policy catalogs are built into memsphere and cannot be redefined in config. The fixed ACP Provider ids are `traex`, `qwen`, `kimi`, and `codex`; their types, CLI commands, and ACP entry points are owned by memsphere. `control_plane.acp_providers` may only override optional arguments, non-secret environment values, and startup/idle/maximum runtime limits for those four ids. Environment values that alter executable resolution, user/config homes, dynamic loading, credentials, or Memsphere-managed runtime behavior are rejected. Agent Actors only select a Provider and may select a model. Working directories, Prompt versions, credentials, API keys, and secrets are not Actor or Provider configuration.
 
-View exposes a Settings workspace with Overview, Storage, View Service, and Participants modules. It edits the exact `config.json` loaded by the running View, validates and previews semantic changes before an atomic save, and distinguishes the disk revision from the active process revision. Saving never restarts View automatically; run `memsphere view restart` when the page reports pending changes. A non-loopback View protects Settings with the operator token printed by `view start`, `view restart`, or `view status`.
+View exposes a Settings workspace with Overview, Storage, View Service, ACP Provider, and Participants modules. The ACP Provider module detects executable paths and versions, reports missing installations, and protects Provider instances that are still referenced by Actors. It edits the exact `config.json` loaded by the running View, validates and previews semantic changes before an atomic save, and distinguishes the disk revision from the active process revision. Saving never restarts View automatically; run `memsphere view restart` when the page reports pending changes. A non-loopback View protects Settings with the operator token printed by `view start`, `view restart`, or `view status`.
 
-Memsphere owns the Agent Reviewer's launch command, safety arguments, workspace, timeouts, and Prompt protocol. The Traex Provider launches `acp serve` with the required sandbox and approval policy; an explicit Actor `model` is forwarded by the Provider.
+Memsphere owns the Agent Reviewer's safety arguments, workspace, and Prompt protocol. Provider adapters normalize the configured process into the supported ACP entry point: Traex uses `acp serve`, Qwen Code uses `--acp`, Kimi Code CLI uses `acp`, and Codex uses the `codex-acp` adapter. An explicit Actor model is forwarded through the selected adapter.
+
+Actor-owned `command`, `args`, `env`, `cwd`, Prompt version, or timeout fields are intentionally rejected. Move only supported `args`, non-secret `env`, and timeout overrides to the matching fixed ACP Provider before starting View or a Run; Provider `type` and `command` cannot be configured. This change is not migrated or interpreted as a compatibility fallback.
 
 ### Bundled memory installation
 

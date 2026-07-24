@@ -16,7 +16,7 @@ import {
   type AgentReviewProvider,
   type AgentReviewProviderLaunch
 } from "../src/acp/provider.js";
-import { runAgentReviewAcpSession } from "../src/acp/client.js";
+import { approveAgentPermission, runAgentReviewAcpSession } from "../src/acp/client.js";
 import { agentActivityRawPath, readAgentActivitySnapshot } from "../src/acp/activity.js";
 import { tryRunArtifactReviewAgents } from "../src/acp/debug.js";
 import { dispatchArtifactReviewAgents } from "../src/acp/dispatcher.js";
@@ -159,6 +159,43 @@ test("ACP Agent Reviewer failure is visible and can be requeued explicitly", asy
     assert.equal(retried.assignment.status, "queued");
     assert.equal(retried.assignment.attempts?.length, 2);
     assert.equal(retried.attempt.status, "queued");
+  });
+});
+
+test("ACP Agent Reviewer preserves invalid Provider argument failures", async () => {
+  await withAgentReviewFixture("approve", async ({ configPath, runsRoot, runId }) => {
+    const before = await readRun(runsRoot, runId);
+    const review = currentArtifactReview(before);
+    assert(review);
+    const round = review.rounds[0];
+    const assignment = round.assignments[0];
+
+    await runArtifactReviewAgentWorker({
+      config: configPath,
+      review: review.id,
+      round: round.id,
+      assignment: artifactReviewAssignmentId(assignment),
+      nodeExecutable: process.execPath,
+      cliEntrypoint: fakeCli,
+      providerResolver: () => ({
+        id: "qwen",
+        buildLaunch(input) {
+          const actor = structuredClone(input.actor);
+          actor.agent.providerType = "qwen";
+          actor.agent.command = "qwen";
+          actor.agent.args = ["--acp"];
+          return getAgentReviewProvider("qwen").buildLaunch({ ...input, actor });
+        }
+      })
+    });
+
+    const failedReview = currentArtifactReview(await readRun(runsRoot, runId));
+    assert(failedReview);
+    const failed = failedReview.rounds[0].assignments[0];
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.attempts?.[0]?.failure?.code, "agent_provider_arguments_invalid");
+    assert.equal(failed.attempts?.[0]?.failure?.category, "provider");
+    assert.match(failed.attempts?.[0]?.failure?.message ?? "", /does not allow managed argument '--acp'/);
   });
 });
 
@@ -306,17 +343,43 @@ test("Traex Provider fixes the ACP process to workspace-write non-interactive ex
     actor: agentIdentity("traex", ["--sandbox=danger-full-access"]),
     workspaceRoot: "/workspace",
     sessionEnv: {}
-  }), /managed security argument/);
+  }), /does not allow managed argument/);
   assert.throws(() => provider.buildLaunch({
     actor: agentIdentity("traex", ["exec"]),
     workspaceRoot: "/workspace",
     sessionEnv: {}
   }), /cannot launch the 'exec' subcommand/);
-  assert.throws(() => provider.buildLaunch({
-    actor: agentIdentity("traex", [], { cwd: "../outside" }),
+});
+
+test("Qwen, Kimi, and Codex Providers build their managed ACP launches", () => {
+  const qwen = getAgentReviewProvider("qwen").buildLaunch({
+    actor: agentIdentity("qwen", ["--profile", "review"], { model: "qwen3-coder" }),
     workspaceRoot: "/workspace",
     sessionEnv: {}
-  }), /cwd must stay inside the workspace/);
+  });
+  assert.deepEqual(qwen.args, [
+    "--model", "qwen3-coder",
+    "--approval-mode=auto",
+    "--profile", "review",
+    "--acp"
+  ]);
+
+  const kimi = getAgentReviewProvider("kimi").buildLaunch({
+    actor: agentIdentity("kimi", ["--thinking"], { model: "kimi-k2" }),
+    workspaceRoot: "/workspace",
+    sessionEnv: {}
+  });
+  assert.deepEqual(kimi.args, ["--model", "kimi-k2", "--auto", "--thinking", "acp"]);
+
+  const codex = getAgentReviewProvider("codex").buildLaunch({
+    actor: agentIdentity("codex", [], { model: "gpt-5.5" }),
+    workspaceRoot: "/workspace",
+    sessionEnv: {}
+  });
+  assert.deepEqual(codex.args, []);
+  assert.equal(codex.env.NO_BROWSER, "1");
+  assert.equal(codex.env.INITIAL_AGENT_MODE, "read-only");
+  assert.deepEqual(JSON.parse(codex.env.CODEX_CONFIG ?? "{}"), { model: "gpt-5.5" });
 });
 
 test("ACP Client reports a missing Provider executable as a process startup failure", async () => {
@@ -363,6 +426,27 @@ test("ACP Client preserves Provider stderr when a Session request fails", async 
     assert.match(error.message, /Internal error/);
     assert.match(error.message, /Agent stderr:\nprovider diagnostic: reconnecting/);
     return true;
+  });
+});
+
+test("ACP Client approves Provider tool requests for the Agent-managed sandbox", () => {
+  const response = approveAgentPermission([
+    { optionId: "reject-always", name: "Reject always", kind: "reject_always" },
+    { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
+    { optionId: "allow-always", name: "Allow always", kind: "allow_always" }
+  ]);
+  assert.deepEqual(response, {
+    outcome: { outcome: "selected", optionId: "allow-always" }
+  });
+  assert.deepEqual(approveAgentPermission([
+    { optionId: "allow-once", name: "Allow once", kind: "allow_once" }
+  ]), {
+    outcome: { outcome: "selected", optionId: "allow-once" }
+  });
+  assert.deepEqual(approveAgentPermission([
+    { optionId: "reject-once", name: "Reject once", kind: "reject_once" }
+  ]), {
+    outcome: { outcome: "cancelled" }
   });
 });
 
@@ -479,12 +563,19 @@ flow:
             name: "Fake Reviewer",
             permissions: ["artifact.read", "decision.decide"],
             system_prompt: "Check the candidate independently.",
-            agent: { provider: "traex", command: process.execPath, args: [fakeReviewer, mode], timeout_ms: 10_000 }
+            agent: { provider: "traex" }
           }
         }
       }
     }, null, 2)}\n`);
     const config = await readConfig(configPath);
+    const reviewer = config.controlPlane?.actors["reviewer-agent"];
+    if (!reviewer || reviewer.kind !== "agent") throw new Error("missing reviewer fixture");
+    reviewer.agent.command = process.execPath;
+    reviewer.agent.args = [fakeReviewer, mode];
+    reviewer.agent.startupTimeoutMs = 10_000;
+    reviewer.agent.idleTimeoutMs = 10_000;
+    reviewer.agent.maxRuntimeMs = null;
     const started = await startRun({
       memoryRoot: config.memoryRoot,
       runsRoot: config.runsRoot,
@@ -513,7 +604,7 @@ flow:
 }
 
 function agentIdentity(
-  provider: "traex",
+  providerType: "traex" | "qwen" | "kimi" | "codex",
   args: string[],
   overrides: Partial<Extract<ControlPlaneActor, { kind: "agent" }>["agent"]> = {}
 ): Extract<ControlPlaneActor, { kind: "agent" }> {
@@ -521,12 +612,22 @@ function agentIdentity(
     kind: "agent",
     name: "Reviewer",
     permissions: ["artifact.read", "decision.assess"],
-    agent: { provider, command: "traecli", args, ...overrides }
+    agent: {
+      provider: providerType,
+      providerType,
+      command: providerType === "codex" ? "codex-acp" : providerType,
+      args,
+      env: {},
+      startupTimeoutMs: 60_000,
+      idleTimeoutMs: 120_000,
+      maxRuntimeMs: null,
+      ...overrides
+    }
   };
 }
 
 const fakeAgentReviewProvider: AgentReviewProvider = {
-  id: "fake-test-provider",
+  id: "traex",
   buildLaunch({ actor, workspaceRoot, sessionEnv }) {
     return {
       provider: "fake-test-provider",
@@ -534,10 +635,10 @@ const fakeAgentReviewProvider: AgentReviewProvider = {
       args: [...actor.agent.args],
       cwd: workspaceRoot,
       env: { ...process.env, ...sessionEnv },
-      startupTimeoutMs: actor.agent.startupTimeoutMs ?? 10_000,
-      idleTimeoutMs: actor.agent.idleTimeoutMs ?? 10_000,
-      maxRuntimeMs: actor.agent.maxRuntimeMs ?? null,
-      promptVersion: actor.agent.promptVersion ?? "artifact-review-v1",
+      startupTimeoutMs: actor.agent.startupTimeoutMs,
+      idleTimeoutMs: actor.agent.idleTimeoutMs,
+      maxRuntimeMs: actor.agent.maxRuntimeMs,
+      promptVersion: "artifact-review-v1",
       model: actor.agent.model
     };
   }
