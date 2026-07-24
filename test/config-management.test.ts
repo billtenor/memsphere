@@ -99,7 +99,7 @@ test("legacy Actor-owned ACP process configuration is rejected", async () => {
     permissions: ["artifact.read"],
     agent: {
       provider: "traex",
-      command: "/opt/traecli",
+      command: "/opt/traex",
       args: ["acp", "serve"],
       cwd: ".",
       model: "review-model",

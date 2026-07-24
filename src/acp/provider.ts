@@ -84,7 +84,9 @@ registerAgentReviewProvider({
   id: "traex",
   buildLaunch(input) {
     const configured = configuredArgs("traex", input);
-    const modelArgs = input.actor.agent.model ? ["--model", input.actor.agent.model] : [];
+    const modelArgs = input.actor.agent.model
+      ? ["-c", `model=${JSON.stringify(input.actor.agent.model)}`]
+      : [];
     return commonLaunch("traex", input, [
       "--sandbox", "workspace-write",
       "--ask-for-approval", "never",

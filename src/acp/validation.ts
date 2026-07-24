@@ -60,7 +60,7 @@ function normalizeTraexArgs(configuredArgs: readonly string[]): string[] {
     "resume", "fork", "archive", "delete", "unarchive", "exec-server", "features", "doctor", "migrate"
   ], "Traex");
   rejectManagedArgs(args, [
-    "--model", "-m", "--sandbox", "-s", "--ask-for-approval", "-a", "--permission-mode",
+    "--model", "-m", "--config", "-c", "--sandbox", "-s", "--ask-for-approval", "-a", "--permission-mode",
     "--yolo", "-y", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"
   ], "Traex");
   return args;

@@ -315,7 +315,7 @@ test("Traex Provider fixes the ACP process to workspace-write non-interactive ex
   assert.deepEqual(launch.args, [
     "--sandbox", "workspace-write",
     "--ask-for-approval", "never",
-    "--model", "review-model",
+    "-c", "model=\"review-model\"",
     "acp", "serve"
   ]);
   assert.equal(launch.env.MEMSPHERE_CLI, "/tmp/memsphere-review");
@@ -341,6 +341,11 @@ test("Traex Provider fixes the ACP process to workspace-write non-interactive ex
 
   assert.throws(() => provider.buildLaunch({
     actor: agentIdentity("traex", ["--sandbox=danger-full-access"]),
+    workspaceRoot: "/workspace",
+    sessionEnv: {}
+  }), /does not allow managed argument/);
+  assert.throws(() => provider.buildLaunch({
+    actor: agentIdentity("traex", ["-c", "model=\"overridden-model\""]),
     workspaceRoot: "/workspace",
     sessionEnv: {}
   }), /does not allow managed argument/);

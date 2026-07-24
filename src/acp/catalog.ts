@@ -24,7 +24,7 @@ const definitions: Record<AcpProviderType, AcpProviderDefinition> = {
   traex: {
     type: "traex",
     name: "Traex",
-    defaultCommand: "traecli",
+    defaultCommand: "traex",
     versionArgs: ["--version"],
     installHelp: "Install and authenticate Traex CLI before using this Provider."
   },

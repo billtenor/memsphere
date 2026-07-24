@@ -156,6 +156,14 @@ async function openTaskPage(browser: Browser, url: string, width: number): Promi
   return page;
 }
 
+async function openMemoryPage(browser: Browser, url: string, width: number): Promise<Page> {
+  const page = await browser.newPage({ viewport: { width, height: 900 } });
+  await page.goto(url);
+  await page.getByRole("button", { name: "Memory", exact: true }).click();
+  await page.getByRole("button", { name: "Reviewable schema", exact: true }).click();
+  return page;
+}
+
 async function assertPageDoesNotOverflow(page: Page): Promise<void> {
   const layout = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
@@ -203,7 +211,6 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
     const widePage = await openTaskPage(browser, url, 1600);
     try {
       await assertPageDoesNotOverflow(widePage);
-      await assertReviewPanelCanResizeLayout(widePage);
     } finally {
       await widePage.close();
     }
@@ -212,11 +219,6 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
     try {
       await assertPageDoesNotOverflow(compactPage);
       assert(await compactPage.evaluate(() => document.documentElement.scrollHeight > window.innerHeight));
-      await assertReviewPanelCanResizeLayout(compactPage);
-      const reviewToggle = compactPage.getByRole("button", { name: "Review", exact: true });
-      await reviewToggle.click();
-      await compactPage.getByRole("button", { name: "Close", exact: true }).click();
-      assert.equal(await reviewToggle.getAttribute("aria-expanded"), "false");
     } finally {
       await compactPage.close();
     }
@@ -236,6 +238,17 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
       await assertPageDoesNotOverflow(narrowPage);
     } finally {
       await narrowPage.close();
+    }
+  });
+});
+
+test("Memory Review panel can resize the content layout", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await openMemoryPage(browser, url, 1366);
+    try {
+      await assertReviewPanelCanResizeLayout(page);
+    } finally {
+      await page.close();
     }
   });
 });
@@ -331,37 +344,17 @@ test("procedure action contract fields can receive review comments", async () =>
   });
 });
 
-test("task procedure assertions and call steps can receive review comments", async () => {
+test("Task pages do not expose the retired Task Review entry or inline comments", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
     page.setDefaultTimeout(5_000);
     try {
       await page.goto(url);
       await page.getByRole("button", { name: "Task", exact: true }).click();
-      await page.getByRole("button", { name: "Review", exact: true }).click();
-      await page.getByRole("button", { name: "Create Review", exact: true }).click();
-      await page.waitForFunction(() => document.body.classList.contains("review-active"));
-
-      const procedureAssert = page.locator('[data-anchor="task:' + runId + ':procedure:asserts[1]"] .inline-plus');
-      await procedureAssert.click({ force: true });
-      await page.getByPlaceholder("What should change here?").fill("Review the task-level contract.");
-      await page.getByRole("button", { name: "Add comment", exact: true }).click();
-      await page.waitForFunction(() => document.querySelectorAll(".comment-card").length === 1);
-
-      const taskCall = page.locator('[data-anchor="task:' + runId + ':flow[2]:call"] .inline-plus');
-      await taskCall.click({ force: true });
-      await page.getByPlaceholder("What should change here?").fill("Review the called procedure.");
-      await page.getByRole("button", { name: "Add comment", exact: true }).click();
-
-      await page.waitForFunction(() => document.querySelectorAll(".comment-card").length === 2);
-      assert.equal(await page.locator(".pill.outdated").count(), 0);
-      await page.reload();
-      await page.waitForFunction(() => document.querySelectorAll(".comment-card").length === 2);
-      assert.equal(await page.locator(".pill.outdated").count(), 0);
-
-      await page.locator('[data-anchor="task:' + runId + ':flow[2]:call"] .call-link').click();
-      await page.getByRole("button", { name: "Reviewable procedure", exact: true }).waitFor();
-      assert.equal(await page.getByRole("button", { name: "Memory", exact: true }).getAttribute("class").then(value => value?.includes("active")), true);
+      await page.locator(".task-card-main").first().click();
+      assert.equal(await page.getByRole("button", { name: "Review", exact: true }).count(), 0);
+      assert.equal(await page.locator('[data-anchor^="task:"] .inline-plus:visible').count(), 0);
+      assert.equal(await page.locator(".review-drawer.open").count(), 0);
     } finally {
       await page.close();
     }

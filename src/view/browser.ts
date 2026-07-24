@@ -6,10 +6,6 @@ export function shouldRenderMarkdownArtifact(artifact: { format?: string; render
   return artifact?.format === "markdown" && typeof artifact.renderedContent === "string";
 }
 
-export function canCreateTaskReview(status: string | undefined): boolean {
-  return status === "done";
-}
-
 export const browserHtml = String.raw`<!doctype html>
 <html lang="en">
 <head>
@@ -53,6 +49,7 @@ export const browserHtml = String.raw`<!doctype html>
     .brand-settings.active { border-color: #b8cbc7; background: var(--accent-soft); color: #173f3c; font-weight: 700; }
     .review-actions { display: flex; gap: 8px; align-items: flex-start; }
     .review-toggle, .review-close { display: inline-flex; }
+    .review-toggle[hidden] { display: none; }
     .brand h1, .review-head h2, .title { margin: 0; letter-spacing: 0; }
     .brand h1 { font-size: 18px; }
     .view-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 14px; }
@@ -2100,7 +2097,7 @@ export const browserHtml = String.raw`<!doctype html>
     function settingsProviderLaunchPreview(provider) {
       const args = [provider.command];
       if (provider.type === "traex") {
-        args.push("--sandbox", "workspace-write", "--ask-for-approval", "never", "--model", "<参与者模型>");
+        args.push("--sandbox", "workspace-write", "--ask-for-approval", "never", "-c", "model=\"<参与者模型>\"");
       } else if (provider.type === "qwen") {
         args.push("--model", "<参与者模型>", "--approval-mode=auto");
       } else if (provider.type === "kimi") {
@@ -2276,12 +2273,13 @@ export const browserHtml = String.raw`<!doctype html>
       document.documentElement.classList.toggle("artifact-review-modal-open", state.artifactReviewModalOpen);
       const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
       const artifactReview = state.viewMode === "task" ? defaultArtifactReviewSummary(run) : null;
-      el.reviewToggle.textContent = artifactReview?.round
+      const taskHasArtifactReview = state.viewMode === "task" && Boolean(artifactReview?.round);
+      el.reviewToggle.hidden = state.viewMode === "task" ? !taskHasArtifactReview : false;
+      el.reviewToggle.textContent = taskHasArtifactReview
         ? t("artifactReview") + " " + artifactReview.round.submitted + "/" + artifactReview.round.total
         : "Review";
-      el.reviewToggle.setAttribute("aria-controls", state.viewMode === "task" && artifactReviewSummariesForRun(run).length
-        ? "artifact-review-modal"
-        : "review-panel");
+      el.reviewToggle.setAttribute("aria-controls", taskHasArtifactReview ? "artifact-review-modal" : "review-panel");
+      if (state.viewMode === "task") state.reviewDrawerOpen = false;
       syncReviewDrawer();
       syncArtifactReviewModalState();
       el.memoryTab.classList.toggle("active", state.viewMode === "memory");
@@ -2297,7 +2295,6 @@ export const browserHtml = String.raw`<!doctype html>
       if (state.viewMode === "task") {
         renderTaskNav();
         renderSelectedTask();
-        renderReview();
         if (state.artifactReviewModalOpen) renderArtifactReviewPanel();
         restoreOpenInlineEditor();
         return;
@@ -2310,7 +2307,8 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function handleReviewToggle() {
-      if (state.viewMode === "task" && artifactReviewSummariesForRun().length) {
+      if (state.viewMode === "task") {
+        if (!artifactReviewSummariesForRun().length) return;
         if (state.artifactReviewModalOpen) closeArtifactReviewModal();
         else await openArtifactReviewModal();
         return;
@@ -2436,8 +2434,10 @@ export const browserHtml = String.raw`<!doctype html>
       state.viewMode = mode;
       localStorage.setItem(viewModeKey, mode);
       ensureSelectedReview();
-      if (mode === "settings") {
+      if (mode === "settings" || mode === "task") {
         state.reviewDrawerOpen = false;
+      }
+      if (mode === "settings") {
         renderAll();
         if (!state.settingsMeta || (!state.settingsData && !state.settingsLoading)) {
           await loadSettings();
@@ -2718,25 +2718,10 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function selectedTask() {
-      const snapshot = currentReviewSnapshot("task");
-      if (snapshot?.run && !state.artifactReviewModalOpen) return snapshot.run;
       return state.runs.find(run => run.id === state.selectedTaskId) || state.runs[0] || null;
     }
 
     function renderSelectedTask() {
-      const review = selectedReview();
-      if (review && !review.snapshots?.some(snapshot => snapshot.kind === "task")) {
-        renderInvalidReview(review, "Task review has no task snapshot.");
-        return;
-      }
-      if (review && !currentReviewSnapshot("task")) {
-        ensureReviewSnapshot("task");
-        el.title.textContent = "Tasks";
-        el.subtitle.textContent = review.id;
-        el.detail.className = "empty";
-        el.detail.textContent = "Loading review snapshot...";
-        return;
-      }
       const run = selectedTask();
       if (!run) {
         el.title.textContent = "Tasks";
@@ -2747,7 +2732,7 @@ export const browserHtml = String.raw`<!doctype html>
       }
 
       state.selectedTaskId = run.id;
-      if (!currentReviewSnapshot("task")) saveSelectedTask();
+      saveSelectedTask();
       el.title.textContent = run.procedureName;
       el.subtitle.textContent = run.id;
       el.detail.className = "task-summary";
@@ -3334,15 +3319,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function reviewListSubject() {
-      if (state.viewMode === "task") {
-        const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
-        if (!run) return null;
-        return {
-          source: "task",
-          id: "task/" + run.id,
-          runId: run.id
-        };
-      }
+      if (state.viewMode !== "memory") return null;
       const memory = state.memories.find((item) => item.id === state.selectedId) || state.filtered[0];
       if (!memory) return null;
       return {
@@ -3357,15 +3334,8 @@ export const browserHtml = String.raw`<!doctype html>
 
       if (review.target) {
         if (review.target.source !== subject.source) return false;
-        if (subject.source === "task") {
-          return review.target.runId === subject.runId || review.target.id === subject.id;
-        }
         if (review.target.path && subject.path) return review.target.path === subject.path;
         return review.target.id === subject.id;
-      }
-
-      if (subject.source === "task") {
-        return review.snapshots?.some(snapshot => snapshot.kind === "task" && snapshot.label === subject.runId + ".json");
       }
 
       return review.snapshots?.some(snapshot => snapshot.kind === "memory" && snapshot.label === subject.path)
@@ -3373,22 +3343,12 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function reviewSource(review) {
-      if (review.source === "task" || review.source === "memory") return review.source;
+      if (review.source === "memory") return review.source;
       return "invalid";
     }
 
     function currentReviewSubject() {
-      if (state.viewMode === "task") {
-        const run = selectedTask();
-        if (!run) return null;
-        return {
-          source: "task",
-          id: "task/" + run.id,
-          kind: "tasks",
-          name: run.procedureName,
-          runId: run.id
-        };
-      }
+      if (state.viewMode !== "memory") return null;
       const memory = selectedMemory();
       if (!memory) return null;
       return {
@@ -3416,18 +3376,14 @@ export const browserHtml = String.raw`<!doctype html>
     function canCreateReview() {
       const subject = currentReviewSubject();
       if (!subject) return false;
-      if (subject.source === "memory" && selectedMemory()?.source === "reserved") return false;
-      return subject.source !== "task" || selectedTask()?.status === "done";
+      return selectedMemory()?.source !== "reserved";
     }
 
     function reviewCreationDisabledReason() {
       const subject = currentReviewSubject();
-      if (!subject) return "Select a Memory or Task before creating a review";
-      if (subject.source === "memory" && selectedMemory()?.source === "reserved") {
+      if (!subject) return "Select a Memory before creating a review";
+      if (selectedMemory()?.source === "reserved") {
         return "Import reserved memory before creating a review";
-      }
-      if (subject.source === "task" && selectedTask()?.status !== "done") {
-        return "Only done tasks can create a review";
       }
       return "";
     }
@@ -4680,20 +4636,16 @@ export const browserHtml = String.raw`<!doctype html>
     async function createReview() {
       if (!canCreateReview()) return;
       const subject = currentReviewSubject();
-      const title = subject
-        ? (subject.source === "task" ? "Task review · " : "Memory review · ") + subject.name
-        : undefined;
+      const title = subject ? "Memory review · " + subject.name : undefined;
       const response = await fetch("/api/reviews", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           title,
-          source: subject?.source || (state.viewMode === "task" ? "task" : "memory"),
-          memoryId: subject?.source === "memory" ? subject.id : undefined,
-          memoryName: subject?.source === "memory" ? subject.name : undefined,
-          memoryPath: subject?.source === "memory" ? subject.path : undefined,
-          runId: subject?.source === "task" ? subject.runId : undefined,
-          runName: subject?.source === "task" ? subject.name : undefined
+          source: "memory",
+          memoryId: subject?.id,
+          memoryName: subject?.name,
+          memoryPath: subject?.path
         })
       });
       if (!response.ok) throw new Error(await response.text());
@@ -4742,10 +4694,6 @@ export const browserHtml = String.raw`<!doctype html>
         memoryId: subject.id,
         memoryName: subject.name,
         kind: subject.kind,
-        runId: subject.source === "task" ? subject.runId : undefined,
-        runName: subject.source === "task" ? subject.name : undefined,
-        stepId: subject.source === "task" ? context.step?.id : undefined,
-        artifactName: subject.source === "task" ? context.event?.artifact?.name || String(target || "").trim() : undefined,
         target: String(target || "").trim(),
         location,
         snapshot: snapshot === undefined ? undefined : String(snapshot),
@@ -4781,7 +4729,6 @@ export const browserHtml = String.raw`<!doctype html>
       const response = await fetch("/api/reviews/" + encodeURIComponent(id), { method: "DELETE" });
       if (!response.ok) throw new Error(await response.text());
       state.reviewSnapshots.delete(id + ":memory");
-      state.reviewSnapshots.delete(id + ":task");
       await loadReviews();
       ensureSelectedReview();
       renderAll();
@@ -4807,7 +4754,6 @@ export const browserHtml = String.raw`<!doctype html>
       const response = await fetch("/api/archive/reviews/" + encodeURIComponent(review.id), { method: "POST" });
       if (!response.ok) throw new Error(await response.text());
       state.reviewSnapshots.delete(review.id + ":memory");
-      state.reviewSnapshots.delete(review.id + ":task");
       if (state.selectedReviewId === review.id) {
         state.selectedReviewId = null;
         saveSelectedReview();
@@ -7148,8 +7094,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function commentMetaText(comment) {
       if (isCommentOutdated(comment)) return "";
-      const base = comment.source === "task" ? "Task" : "Memory";
-      return base + (comment.location?.line ? " · Line " + comment.location.line : " · Unanchored");
+      return "Memory" + (comment.location?.line ? " · Line " + comment.location.line : " · Unanchored");
     }
 
     function isCommentOutdated(comment) {
@@ -7171,22 +7116,11 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function commentTitle(comment) {
-      const prefix = comment.source === "task" ? "Task" : "Memory";
       const target = comment.artifactName || comment.target;
-      return prefix + " · " + comment.memoryName + (target ? " · " + target : "");
+      return "Memory · " + comment.memoryName + (target ? " · " + target : "");
     }
 
     function selectCommentSubject(comment) {
-      if (comment.source === "task" || comment.kind === "tasks") {
-        state.viewMode = "task";
-        localStorage.setItem(viewModeKey, "task");
-        const runId = comment.runId || String(comment.memoryId || "").replace(/^task\//, "");
-        if (runId) {
-          state.selectedTaskId = runId;
-          saveSelectedTask();
-        }
-        return;
-      }
       state.viewMode = "memory";
       localStorage.setItem(viewModeKey, "memory");
       state.selectedId = comment.memoryId;

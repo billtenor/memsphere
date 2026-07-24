@@ -126,7 +126,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.equal(await traexProvider.getByLabel("ID", { exact: true }).count(), 0);
     assert.equal(await traexProvider.getByRole("combobox", { name: "类型", exact: true }).count(), 0);
     const providerCommand = traexProvider.getByLabel("Command", { exact: true });
-    assert.equal(await providerCommand.inputValue(), "traecli");
+    assert.equal(await providerCommand.inputValue(), "traex");
     assert.equal(await providerCommand.isDisabled(), true);
     await traexProvider.getByLabel("Args（每行一个）", { exact: true }).fill("--verbose");
     traexProvider = page.locator(".settings-provider").filter({ hasText: "traex" }).first();
@@ -138,7 +138,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.equal(await page.getByRole("button", { name: "重新检测", exact: true }).count(), 0);
     assert.equal(
       await traexProvider.locator(".settings-provider-preview").textContent(),
-      "实际启动：traecli --sandbox workspace-write --ask-for-approval never --model '<参与者模型>' --verbose acp serve"
+      "实际启动：traex --sandbox workspace-write --ask-for-approval never -c 'model=\"<参与者模型>\"' --verbose acp serve"
     );
     await resetProvider.click();
     traexProvider = page.locator(".settings-provider").filter({ hasText: "traex" }).first();

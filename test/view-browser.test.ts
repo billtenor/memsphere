@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderMarkdownContent } from "../src/commands/view.js";
-import { browserHtml, canCreateTaskReview, shouldRenderMarkdownArtifact, shouldRenderTaskStepArtifact } from "../src/view/browser.js";
+import { browserHtml, shouldRenderMarkdownArtifact, shouldRenderTaskStepArtifact } from "../src/view/browser.js";
 
 test("embedded browser script is valid JavaScript", () => {
   const script = browserHtml.match(/<script>([\s\S]*)<\/script>/)?.[1];
@@ -112,10 +112,11 @@ test("task step artifact area is shown when an event exists", () => {
   assert.equal(shouldRenderTaskStepArtifact({ stepId: "flow-1", artifact: { value: "done" } }), true);
 });
 
-test("only done tasks enable task review creation", () => {
-  assert.equal(canCreateTaskReview("done"), true);
-  assert.equal(canCreateTaskReview("running"), false);
-  assert.match(browserHtml, /Only done tasks can create a review/);
+test("Task view exposes only Artifact Review and never falls back to Task Review", () => {
+  assert.match(browserHtml, /el\.reviewToggle\.hidden = state\.viewMode === "task" \? !taskHasArtifactReview : false/);
+  assert.match(browserHtml, /if \(!artifactReviewSummariesForRun\(\)\.length\) return/);
+  assert.doesNotMatch(browserHtml, /Only done tasks can create a review/);
+  assert.doesNotMatch(browserHtml, /Task review ·/);
 });
 
 test("reserved memories must be imported before review creation", () => {

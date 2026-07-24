@@ -62,7 +62,7 @@ test("control plane config parses Runner and Actors strictly", () => {
   assert.deepEqual(parsed.actors.agent.kind === "agent" ? parsed.actors.agent.agent : undefined, {
     provider: "traex",
     providerType: "traex",
-    command: "traecli",
+    command: "traex",
     args: [],
     env: {},
     model: "review-model",
@@ -80,7 +80,7 @@ test("control plane config parses Runner and Actors strictly", () => {
     actors: {
       agent: {
         ...rawConfig.actors.agent,
-        agent: { provider: "traex", command: "traecli" }
+        agent: { provider: "traex", command: "traex" }
       }
     }
   }), /Unrecognized key.*command/);
@@ -135,7 +135,7 @@ test("Agent configuration defaults Provider-owned runtime details", () => {
   assert.deepEqual(parsed.actors.reviewer.kind === "agent" ? parsed.actors.reviewer.agent : undefined, {
     provider: "traex",
     providerType: "traex",
-    command: "traecli",
+    command: "traex",
     args: [],
     env: {},
     model: "review-model",

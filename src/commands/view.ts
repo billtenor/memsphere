@@ -34,7 +34,7 @@ import {
   type EditableConfigDraft
 } from "../config-management.js";
 import { authorizeArtifactOperation, listPermissionDefinitions } from "../control-plane/index.js";
-import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
+import { listMemoryFiles, readMemoryFile } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
 import {
@@ -368,7 +368,8 @@ async function handleRequest(
   }
 
   if (request.method === "GET" && url.pathname === "/api/reviews") {
-    sendJson(response, 200, { reviews: await listReviews(reviewsRoot) });
+    const reviews = (await listReviews(reviewsRoot)).filter((review) => review.source !== "task");
+    sendJson(response, 200, { reviews });
     return;
   }
 
@@ -537,8 +538,11 @@ async function handleRequest(
   const reviewSnapshotMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)\/snapshot$/);
   if (request.method === "GET" && reviewSnapshotMatch) {
     const id = decodeURIComponent(reviewSnapshotMatch[1]);
-    const kind = url.searchParams.get("kind") === "task" ? "task" : url.searchParams.get("kind") === "memory" ? "memory" : undefined;
-    const snapshot = await readReviewSnapshot(reviewsRoot, id, kind);
+    if (url.searchParams.get("kind") === "task") {
+      sendJson(response, 410, { error: "task reviews have been removed; use Artifact Review" });
+      return;
+    }
+    const snapshot = await readReviewSnapshot(reviewsRoot, id, "memory");
     if (!snapshot) {
       sendJson(response, 404, { error: "snapshot not found" });
       return;
@@ -567,46 +571,24 @@ async function handleRequest(
   }
 
   if (request.method === "POST" && url.pathname === "/api/reviews") {
-    const body = await readJsonBody<{ title?: unknown; source?: unknown; memoryId?: unknown; memoryName?: unknown; memoryPath?: unknown; runId?: unknown; runName?: unknown }>(request);
+    const body = await readJsonBody<{ title?: unknown; source?: unknown; memoryId?: unknown; memoryName?: unknown; memoryPath?: unknown }>(request);
+    if (body.source === "task") {
+      sendJson(response, 410, { error: "task reviews have been removed; configure Artifact Review on the Artifact instead" });
+      return;
+    }
     const title = typeof body.title === "string" ? body.title : undefined;
-    const source = body.source === "task" ? "task" : "memory";
     const memoryId = typeof body.memoryId === "string" ? body.memoryId : undefined;
     const memoryName = typeof body.memoryName === "string" ? body.memoryName : undefined;
     const memoryPath = typeof body.memoryPath === "string" ? body.memoryPath : undefined;
-    const runId = typeof body.runId === "string" ? body.runId : undefined;
-    const runName = typeof body.runName === "string" ? body.runName : undefined;
-    let taskRun: RunState | undefined;
-    if (source === "task") {
-      if (!runId) {
-        sendJson(response, 400, { error: "task review requires a run id" });
-        return;
-      }
-      try {
-        taskRun = await readRun(runsRoot, runId);
-      } catch {
-        sendJson(response, 404, { error: "task run not found" });
-        return;
-      }
-      if (!canCreateTaskReview(taskRun.status)) {
-        sendJson(response, 409, { error: "only done tasks can create a review" });
-        return;
-      }
-    }
     const snapshotFiles = await resolveReviewSnapshotFiles({
       memoryRoot,
-      runsRoot,
-      source,
       memoryId,
-      memoryPath,
-      runId,
-      run: taskRun
+      memoryPath
     });
     const review = await createReview({
       title,
-      source,
-      target: source === "task"
-        ? { source, id: runId ? `task/${runId}` : "", runId, name: runName }
-        : { source, id: memoryId ?? "", path: memoryPath, name: memoryName },
+      source: "memory",
+      target: { source: "memory", id: memoryId ?? "", path: memoryPath, name: memoryName },
       memoryRoot,
       reviewsRoot,
       snapshotFiles
@@ -673,13 +655,6 @@ async function handleRequest(
 }
 
 async function snapshotPayload(input: { snapshot: { label: string; path: string; kind: "memory" | "task"; createdAt: string }; content: string; snapshotRoot: string }): Promise<unknown> {
-  if (input.snapshot.kind === "task") {
-    return {
-      snapshot: input.snapshot,
-      run: await toViewRunPayload(input.snapshotRoot, JSON.parse(input.content) as RunState)
-    };
-  }
-
   const entity = parseMemoryYaml(input.content);
   const kind = memoryKindFromSnapshot(input.snapshot.label, entity);
   const primaryName = entity && typeof entity === "object" && Array.isArray((entity as { names?: unknown }).names)
@@ -709,39 +684,9 @@ function memoryKindFromSnapshot(label: string, entity: unknown): string {
 
 async function resolveReviewSnapshotFiles(input: {
   memoryRoot: string;
-  runsRoot: string;
-  source: "memory" | "task";
   memoryId?: string;
   memoryPath?: string;
-  runId?: string;
-  run?: RunState;
-}): Promise<Array<{ label: string; path: string; kind: "memory" | "task"; directory?: boolean; entryPath?: string; rewriteRunMemoryRoot?: string; snapshotPath?: string; snapshotDirectoryPath?: string }>> {
-  if (input.source === "task") {
-    if (!input.runId) return [];
-    const runPath = await resolveRunSnapshotPath(input.runsRoot, input.runId);
-    const runDirectory = join(input.runsRoot, input.runId);
-    try {
-      await access(runDirectory);
-      const taskSnapshot = {
-        label: `${input.runId}.json`,
-        path: runDirectory,
-        kind: "task",
-        directory: true,
-        entryPath: relative(runDirectory, runPath),
-        rewriteRunMemoryRoot: "snapshots/memory",
-        snapshotDirectoryPath: join("runs", input.runId)
-      } as const;
-      return [taskSnapshot, ...(await resolveTaskMemorySnapshotFiles(input.memoryRoot, input.run))];
-    } catch {
-      // Legacy root-level run JSON files have no run directory to snapshot.
-    }
-    return [{
-      label: `${input.runId}.json`,
-      path: runPath,
-      kind: "task"
-    }];
-  }
-
+}): Promise<Array<{ label: string; path: string; kind: "memory" }>> {
   if (!input.memoryId) return [];
 
   if (input.memoryPath) {
@@ -760,160 +705,6 @@ async function resolveReviewSnapshotFiles(input: {
     path: file.path,
     kind: "memory"
   }];
-}
-
-async function resolveTaskMemorySnapshotFiles(memoryRoot: string, run?: RunState): Promise<Array<{ label: string; path: string; kind: "memory"; snapshotPath: string }>> {
-  if (!run) return [];
-  const references = collectRunMemoryReferences(run);
-  const index = await indexMemoryFiles(memoryRoot);
-  expandMemoryReferenceClosure(references, index);
-  const snapshots: Array<{ label: string; path: string; kind: "memory"; snapshotPath: string }> = [];
-
-  for (const kind of memoryKinds) {
-    const files = new Map<string, MemoryFile>();
-    for (const name of references[kind]) {
-      for (const memory of index[kind].get(name) ?? []) {
-        files.set(memory.path, memory);
-      }
-    }
-    for (const memory of files.values()) {
-      const relativePath = relative(memoryRoot, memory.path);
-      snapshots.push({
-        label: relativePath,
-        path: memory.path,
-        kind: "memory",
-        snapshotPath: join("memory", relativePath)
-      });
-    }
-  }
-  return snapshots;
-}
-
-async function indexMemoryFiles(memoryRoot: string): Promise<Record<MemoryKind, Map<string, MemoryFile[]>>> {
-  const index = Object.fromEntries(memoryKinds.map((kind) => [kind, new Map<string, MemoryFile[]>()])) as Record<MemoryKind, Map<string, MemoryFile[]>>;
-  for (const kind of memoryKinds) {
-    for (const path of await listMemoryFiles(memoryRoot, kind)) {
-      try {
-        const memory = await readMemoryFile(kind, path);
-        for (const name of memory.entity.names) {
-          const matches = index[kind].get(name) ?? [];
-          matches.push(memory);
-          index[kind].set(name, matches);
-        }
-      } catch {
-        // Invalid memories cannot participate in a structured dependency closure.
-      }
-    }
-  }
-  return index;
-}
-
-function expandMemoryReferenceClosure(
-  references: Record<MemoryKind, Set<string>>,
-  index: Record<MemoryKind, Map<string, MemoryFile[]>>
-): void {
-  const visited = new Set<string>();
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const kind of memoryKinds) {
-      for (const name of references[kind]) {
-        for (const memory of index[kind].get(name) ?? []) {
-          const key = `${kind}:${memory.path}`;
-          if (visited.has(key)) continue;
-          visited.add(key);
-          if (collectMemoryEntityReferences(kind, memory, references)) changed = true;
-        }
-      }
-    }
-  }
-}
-
-function collectMemoryEntityReferences(
-  kind: MemoryKind,
-  memory: MemoryFile,
-  references: Record<MemoryKind, Set<string>>
-): boolean {
-  const entity = memory.entity as Record<string, unknown>;
-  if (kind === "concepts") {
-    return addMemoryReferences(references.concepts, entity.extends);
-  }
-  if (kind === "procedures") {
-    return collectStructuredMemoryReferences(entity.flow, references);
-  }
-  return false;
-}
-
-function collectStructuredMemoryReferences(value: unknown, references: Record<MemoryKind, Set<string>>): boolean {
-  if (Array.isArray(value)) return value.reduce((changed, item) => collectStructuredMemoryReferences(item, references) || changed, false);
-  if (!value || typeof value !== "object") return false;
-  const record = value as Record<string, unknown>;
-  let changed = false;
-  if (record.tag === "!call" && typeof record.target === "string") {
-    changed = addMemoryReference(references.procedures, record.target) || changed;
-  }
-  const artifact = record.artifact;
-  if (artifact && typeof artifact === "object" && !Array.isArray(artifact)) {
-    const spec = artifact as Record<string, unknown>;
-    if (typeof spec.schema === "string") {
-      changed = addMemoryReference(references.schemas, spec.schema) || changed;
-    }
-  }
-  for (const child of Object.values(record)) {
-    changed = collectStructuredMemoryReferences(child, references) || changed;
-  }
-  return changed;
-}
-
-function addMemoryReferences(target: Set<string>, values: unknown): boolean {
-  if (!Array.isArray(values)) return false;
-  return values.reduce((changed, value) => typeof value === "string" ? addMemoryReference(target, value) || changed : changed, false);
-}
-
-function addMemoryReference(target: Set<string>, value: string): boolean {
-  if (!value || target.has(value)) return false;
-  target.add(value);
-  return true;
-}
-
-function collectRunMemoryReferences(run: RunState): Record<MemoryKind, Set<string>> {
-  const references = Object.fromEntries(memoryKinds.map((kind) => [kind, new Set<string>()])) as Record<MemoryKind, Set<string>>;
-  references.procedures.add(run.procedureName);
-  for (const frame of run.stack) {
-    if (frame.type === "procedure") {
-      references.procedures.add(frame.memoryName);
-    } else if (!frame.memoryName.startsWith("inline:")) {
-      references.schemas.add(frame.memoryName);
-    }
-    collectStepMemoryReferences(frame.steps, references);
-  }
-  collectStepMemoryReferences(run.plan ?? [], references);
-  for (const event of run.events) {
-    if (event.artifact.schema?.kind === "external") references.schemas.add(event.artifact.schema.name);
-  }
-  return references;
-}
-
-function collectStepMemoryReferences(steps: RunStep[], references: Record<MemoryKind, Set<string>>): void {
-  for (const step of steps) {
-    if (step.target) references.procedures.add(step.target);
-    if (step.schema?.kind === "external") references.schemas.add(step.schema.name);
-    if (step.branches) {
-      collectStepMemoryReferences(step.branches.truthy, references);
-      collectStepMemoryReferences(step.branches.falsy, references);
-    }
-    if (step.loop) collectStepMemoryReferences(step.loop.body, references);
-  }
-}
-
-async function resolveRunSnapshotPath(runsRoot: string, runId: string): Promise<string> {
-  const current = join(runsRoot, runId, `${runId}.json`);
-  try {
-    await access(current);
-    return current;
-  } catch {
-    return join(runsRoot, `${runId}.json`);
-  }
 }
 
 function resolveMemoryPath(memoryRoot: string, memoryPath: string): string {
@@ -1349,10 +1140,6 @@ async function hydrateArtifactContent(
       artifact.renderedContentType = "text/html";
     }
   }
-}
-
-export function canCreateTaskReview(status: RunState["status"]): boolean {
-  return status === "done";
 }
 
 export function renderMarkdownContent(value: string): string {
