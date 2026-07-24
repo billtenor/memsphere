@@ -1,9 +1,9 @@
 ---
 id: 20260720-artifact-review-compatibility-hardening
-status: todo
 type: feature
 created: 2026-07-20
 run_id: run-20260720-155527z-b6301fb6
+cancelled_at: 2026-07-25
 ---
 
 # Artifact Review 兼容迁移与可靠性收口
@@ -73,3 +73,11 @@ run_id: run-20260720-155527z-b6301fb6
 ## 验收结果
 
 尚未开始。
+
+## 取消记录
+
+- 取消日期：2026-07-25。
+- 取消原因：原需求把语法迁移、旧 Task Review、Decision Governance、Agent 生命周期、性能、安全和完整 Smoke 捆绑为一个收口迭代；后续产品决策与实现已经拆解或废弃这些前提，继续按本文开发会重复甚至冲突。
+- Artifact Review 采用向前兼容语法后不再需要本文假设的新 syntax migration；Challenge/Override 治理需求已取消；旧 Task Review 已由提交 `417879e` 退役；Actor/Slot、Evidence View、Agent Runtime 和独立 Dispatcher 分别由专门 Change 管理。
+- 大 Workspace 性能、安全测试和崩溃恢复等仍有价值，但应在对应运行时需求中以当前模型重新定义，不能把本文未执行的旧验收标准视为已完成。
+- 关联 Run `run-20260720-155527z-b6301fb6` 已完成并归档；该 Run 只形成了需求记录，没有交付本文完整范围。

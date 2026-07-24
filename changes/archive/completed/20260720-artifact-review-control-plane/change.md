@@ -1,9 +1,9 @@
 ---
 id: 20260720-artifact-review-control-plane
-status: done
 type: feature
 created: 2026-07-20
 run_id: run-20260721-024550z-9073bd0f
+completed_at: 2026-07-25
 ---
 
 # Artifact Review 控制平面基础
@@ -105,3 +105,6 @@ run_id: run-20260721-024550z-9073bd0f
 - 使用构建后的真实 CLI 运行 caller -> child fixture：Runner 在 report 前看到中文权限 Guidance，report 成功记录 `artifact.submit` 鉴权依据，随后进入 child；两个 Artifact 作用域分别稳定解析为 `control-plane-caller#flow[1]` 与 `control-plane-child#flow[1]`。
 - 拒绝零写入、旧 syntax/v2/v1 兼容、快照冻结、Binding 覆盖、Grant 上限和脱敏边界均由自动化测试覆盖；本轮无已知阻塞项。
 - 提需方于 2026-07-21 确认验收通过。
+- 关联 Run `run-20260721-024550z-9073bd0f` 已完成并归档；核心实现由提交 `6d48a69 feat: add artifact review control plane` 交付。
+- 后续 `20260723-run-review-role-binding` 已将本需求首版 Identity/Role/Memory Binding 模型演进为 Actor 与 Run 创建期 Slot Binding；该演进不改变本需求作为控制平面首期交付的完成结论。
+- 2026-07-25 归档复核执行 `npm test`，318 项全部通过；`npm run typecheck` 与 `npm run build` 均通过。

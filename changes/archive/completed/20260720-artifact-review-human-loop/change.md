@@ -1,9 +1,9 @@
 ---
 id: 20260720-artifact-review-human-loop
-status: doing
 type: feature
 created: 2026-07-20
 run_id: run-20260721-060413z-6e9a7be9
+completed_at: 2026-07-25
 ---
 
 # Human Artifact Review Loop
@@ -104,8 +104,12 @@ run_id: run-20260721-060413z-6e9a7be9
 - [x] 增加 Task 待评审入口、中间候选展示、右侧 Human Review 操作与多轮摘要。
 - [x] 更新语法预置记忆、已安装记忆、Skill 和 README 的兼容演进规则与 Review 用法。
 - [x] 增加领域、Run、API 和 Playwright 自动化测试。
-- [ ] 完成全量门禁、可复现 smoke 和提需方人工验收。
+- [x] 完成全量门禁、可复现 smoke 和提需方人工验收。
 
 ## 验收结果
 
-尚未开始。
+- 关联 Run `run-20260721-060413z-6e9a7be9` 已完成并归档；核心实现由提交 `920a16e feat: add human artifact review loop` 交付。
+- Human Comment、Vote、Submit、Runner 显式 Vote、`review wait`、多轮返修、Revision Summary、私有草稿和单次推进均已完成端到端使用与提需方验收。
+- 后续 Artifact Review Evidence View 和交互重构继续改善展示体验，不改变本需求 Human Review 状态机已经交付的结论。
+- 2026-07-25 归档复核执行 `npm test`，318 项全部通过，其中 Human Artifact Review、View API、草稿隔离、统一投票和多轮结算回归均通过；`npm run typecheck` 与 `npm run build` 均通过。
+- 当前无阻止 completed 归档的已知问题。

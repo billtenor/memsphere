@@ -61,7 +61,7 @@ run_id:
 ## 关联需求
 
 - 前置：`20260720-artifact-review-agent-acp`。
-- 关联：`20260720-artifact-review-compatibility-hardening`；本需求聚焦真实 Agent Reviewer 暴露出的运行时问题，兼容迁移与全局可靠性收口仍由后者负责。
+- 原关联 `20260720-artifact-review-compatibility-hardening` 已取消；本需求保留仍然独立成立的 Agent Reviewer 运行时问题，开发前必须按当前 Actor、Provider 和 Agent 自主管理沙箱的模型重新确认范围。
 - 基线 Review：`review-20260722-013526z-201e5d88`。
 
 ## 技术与测试方案

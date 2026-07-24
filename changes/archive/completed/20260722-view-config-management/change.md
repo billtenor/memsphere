@@ -1,9 +1,9 @@
 ---
 id: 20260722-view-config-management
-status: doing
 type: feature
 created: 2026-07-22
 run_id: run-20260723-124143z-c1583a7f
+completed_at: 2026-07-25
 ---
 
 # View 配置管理中心
@@ -112,4 +112,8 @@ run_id: run-20260723-124143z-c1583a7f
 
 ## 验收结果
 
-进行中。
+- 关联敏捷开发 Run `run-20260723-124143z-c1583a7f` 已完成，最终状态为 `done`。
+- 实现已由提交 `6f73c60 feat(view): add configuration center` 交付，并在后续验收反馈中完成设置入口、四模块信息架构、存储默认值、View 配置、Actor 编辑、权限选择、操作令牌和响应式布局修正。
+- 配置服务、Settings API、revision 乐观锁、原子写入、非 loopback 操作令牌和浏览器交互均有自动化覆盖；提需方已完成页面验收。
+- 2026-07-25 归档复核执行 `npm test`，318 项全部通过，其中包含配置管理、Settings API、令牌错误、响应式布局和 View 服务测试；`npm run typecheck` 与 `npm run build` 均通过。
+- 后续 ACP Provider 扩展属于独立需求 `20260724-acp-provider-support`，不影响本需求完成结论。

@@ -1,9 +1,9 @@
 ---
 id: 20260723-run-review-role-binding
-status: doing
 type: feature
 created: 2026-07-23
 run_id: run-20260723-073532z-cfc523f5
+completed_at: 2026-07-25
 ---
 
 # Run 创建期 Review Slot 与 Actor Binding
@@ -268,4 +268,8 @@ memsphere run start "<procedure>" --review-config <path>
 
 ## 验收结果
 
-尚未开始。
+- 关联敏捷开发 Run `run-20260723-073532z-cfc523f5` 已完成，最终状态为 `done`。
+- 实现已由提交 `bfb6f57 feat: bind review slots at run start` 交付：Procedure Review Slot 与 Actor 解耦，Run 创建期完成 Policy 和 Slot Binding 预检并冻结到 Run v3。
+- 当前代码已使用 `runner + actors` 控制面，预置敏捷流程只声明 Review Slot；旧 Identity/Role Binding、`review_role` 和 `review_requires` 已退出当前运行路径。
+- 2026-07-25 归档复核执行 `npm test`，318 项全部通过；`npm run typecheck` 与 `npm run build` 均通过。
+- 提需方已完成该需求的功能验收并要求创建提交；不存在阻止归档的已知问题。

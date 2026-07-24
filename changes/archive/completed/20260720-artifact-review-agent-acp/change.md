@@ -1,9 +1,9 @@
 ---
 id: 20260720-artifact-review-agent-acp
-status: active
 type: feature
 created: 2026-07-20
 run_id: run-20260721-122000z-c1fdcff4
+completed_at: 2026-07-25
 ---
 
 # Agent Reviewer ACP
@@ -90,3 +90,6 @@ run_id: run-20260721-122000z-c1fdcff4
 - 本机 `traecli 0.200.18` 以 `--sandbox read-only --ask-for-approval never acp serve` 完成 ACP v1 `initialize` 和 `session/new`，返回真实 `traex-acp` Agent 信息与 Session ID。首次 Session 初始化较慢，但在默认十分钟 Worker 超时内完成。
 - Codex ACP 不属于本期交付范围；配置和内置 Provider 不暴露未完成真实验证的 Codex 选项。
 - 本 worktree View 在 `0.0.0.0:30002` 启动成功；无浏览器 console/page error，Agent 状态、失败信息和 Retry 入口有静态回归覆盖。
+- 关联敏捷开发 Run `run-20260721-122000z-c1fdcff4` 已完成并归档，最终状态为 `done`；提需方已完成端到端验收。
+- 核心实现由提交 `fa73865 feat: add Traex ACP artifact reviewers` 交付。后续 Actor 模型、Provider 配置中心、Qwen/Kimi/Codex Provider 和 `traex` 默认命令由独立需求继续演进，不属于本需求重复交付。
+- 2026-07-25 归档复核执行 `npm test`，318 项全部通过，其中 Agent Review、ACP Client、Assignment、Retry、权限和 Provider 回归均通过；`npm run typecheck` 与 `npm run build` 均通过。

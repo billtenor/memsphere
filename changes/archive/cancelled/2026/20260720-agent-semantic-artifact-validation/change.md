@@ -1,9 +1,9 @@
 ---
 id: 20260720-agent-semantic-artifact-validation
-status: todo
 type: feature
 created: 2026-07-20
 run_id: run-20260720-155634z-7f1b7846
+cancelled_at: 2026-07-25
 ---
 
 # Artifact Review Epic
@@ -16,12 +16,12 @@ run_id: run-20260720-155634z-7f1b7846
 
 ## 串行子需求
 
-1. [`20260720-artifact-review-control-plane`](../20260720-artifact-review-control-plane/change.md)：配置与 Role Binding、解析鉴权、脱敏快照。
-2. [`20260720-artifact-review-human-loop`](../20260720-artifact-review-human-loop/change.md)：Human-only Review Loop、`review wait` 和多轮修改闭环。
-3. [`20260720-artifact-review-agent-acp`](../20260720-artifact-review-agent-acp/change.md)：ACP Agent Reviewer、专用 CLI 和混合审阅。
-4. [`20260720-artifact-review-decision-governance`](../20260720-artifact-review-decision-governance/change.md)：Decision Policy、Challenge、Decision、Override 和完整权限治理。
-5. [`20260720-artifact-review-evidence-view`](../20260720-artifact-review-evidence-view/change.md)：多轮 Review Evidence View 与 Git 无关 Workspace diff。
-6. [`20260720-artifact-review-compatibility-hardening`](../20260720-artifact-review-compatibility-hardening/change.md)：syntax/data migration、旧 Task Review 退役、Memory Review 回归和可靠性收口。
+1. [`20260720-artifact-review-control-plane`](../../../completed/20260720-artifact-review-control-plane/change.md)：已完成；配置与 Role Binding、解析鉴权、脱敏快照。
+2. [`20260720-artifact-review-human-loop`](../../../completed/20260720-artifact-review-human-loop/change.md)：已完成；Human-only Review Loop、`review wait` 和多轮修改闭环。
+3. [`20260720-artifact-review-agent-acp`](../../../completed/20260720-artifact-review-agent-acp/change.md)：已完成；ACP Agent Reviewer、专用 CLI 和混合审阅。
+4. [`20260720-artifact-review-decision-governance`](../20260720-artifact-review-decision-governance/change.md)：已取消；Decision Policy、Challenge、Decision、Override 和完整权限治理。
+5. [`20260720-artifact-review-evidence-view`](../../../completed/20260720-artifact-review-evidence-view/change.md)：已完成；多轮 Review Evidence View。
+6. [`20260720-artifact-review-compatibility-hardening`](../20260720-artifact-review-compatibility-hardening/change.md)：已取消；原 syntax/data migration、旧 Task Review 退役和全局可靠性收口需求。
 
 后一个子 Change 只有在前一个完成开发、验证并达到可接受状态后才进入开发。六个子 Change 全部满足验收标准后，才对本 Epic 做整体验收并进入 accepting。
 
@@ -440,3 +440,11 @@ Run 必须快照：
 ## 验收结果
 
 尚未开始。六个子 Change 全部完成并通过回归后，再记录本 Epic 的整体验收结果。
+
+## 取消记录
+
+- 取消日期：2026-07-25。
+- 取消原因：本文件在需求澄清后被拆分为多个可独立验收的子 Change，本身不再作为开发迭代执行，继续保留在 active 会与子需求重复追踪。
+- 已交付的控制平面、Human Review、ACP Agent Reviewer 和 Evidence View 分别由对应子 Change 记录并归档；Decision Governance 已由提需方明确取消。
+- 尚需推进的兼容、运行时与 Eval 能力由当前独立 Change 继续管理，不以本 Epic 的旧 Identity/Role、Challenge/Override 或 Workspace diff 契约约束后续实现。
+- 关联 Run `run-20260720-155634z-7f1b7846` 已完成并归档；该 Run 完成的是需求拆分和设计梳理，不代表原始大范围 Epic 整体交付。
