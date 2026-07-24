@@ -521,7 +521,6 @@ function agentIdentity(
     kind: "agent",
     name: "Reviewer",
     permissions: ["artifact.read", "decision.assess"],
-    grantablePermissions: [],
     agent: { provider, command: "traecli", args, ...overrides }
   };
 }

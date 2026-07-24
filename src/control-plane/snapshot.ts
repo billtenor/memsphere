@@ -18,8 +18,7 @@ export function createControlPlaneSnapshot(config: ControlPlaneConfig): ControlP
       definitions: listDecisionPolicyDefinitions().sort((left, right) => left.id.localeCompare(right.id))
     },
     runner: {
-      permissions: [...new Set(config.runner.permissions)].sort(),
-      grantablePermissions: [...new Set(config.runner.grantablePermissions)].sort()
+      permissions: [...new Set(config.runner.permissions)].sort()
     },
     actors: sortRecord(config.actors, normalizeActor)
   };
@@ -35,7 +34,6 @@ function normalizeActor(actor: ControlPlaneActor): ControlPlaneActor {
   const authority = {
     name: actor.name,
     permissions: [...new Set(actor.permissions)].sort(),
-    grantablePermissions: [...new Set(actor.grantablePermissions)].sort(),
     systemPrompt: actor.systemPrompt
   };
   return actor.kind === "human"

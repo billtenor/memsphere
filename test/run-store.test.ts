@@ -1629,7 +1629,7 @@ flow:
   });
 });
 
-test("Run v3 snapshots Actor bindings, grants, and report authorization", async () => {
+test("Run v3 snapshots Actor bindings, permissions, and report authorization", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
     const proceduresRoot = join(memoryRoot, "procedures");
@@ -1646,8 +1646,7 @@ flow:
 `);
     const controlPlane = parseControlPlaneConfig({
       runner: {
-        permissions: ["artifact.read", "artifact.submit"],
-        grantable_permissions: ["decision.decide"]
+        permissions: ["artifact.read", "artifact.submit", "decision.decide"]
       },
       actors: {
         human: {
@@ -1671,8 +1670,7 @@ flow:
       controlPlane,
       reviewConfiguration: reviewConfiguration({
         procedure: "governed",
-        slots: { reviewer: ["human", "agent"] },
-        permissionGrants: { runner: ["decision.decide"] }
+        slots: { reviewer: ["human", "agent"] }
       })
     });
     assert.equal(run.contractVersion, 3);
@@ -1694,7 +1692,7 @@ flow:
     assert.equal(submission?.artifact.authorization?.allowed, true);
     assert.equal(submission?.artifact.authorization?.permission, "artifact.submit");
     assert.equal(submission?.artifact.authorization?.artifactScope, "governed#flow[1]");
-    assert.equal(submission?.artifact.authorization?.grantSource, "run:governed#flow[1]");
+    assert.equal(submission?.artifact.authorization?.grantSource, undefined);
   });
 });
 
@@ -1786,7 +1784,7 @@ flow:
   });
 });
 
-test("Run Review configuration can grant runner artifact.submit within the configured ceiling", async () => {
+test("Run Review uses the runner permissions configured in the control plane", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
     const proceduresRoot = join(memoryRoot, "procedures");
@@ -1803,8 +1801,7 @@ flow:
 `);
     const controlPlane = parseControlPlaneConfig({
       runner: {
-        permissions: ["artifact.read"],
-        grantable_permissions: ["artifact.submit"]
+        permissions: ["artifact.read", "artifact.submit"]
       },
       actors: {}
     });
@@ -1815,13 +1812,12 @@ flow:
       controlPlane,
       reviewConfiguration: reviewConfiguration({
         procedure: "granted",
-        slots: { optional_reviewer: "skip" },
-        permissionGrants: { runner: ["artifact.submit"] }
+        slots: { optional_reviewer: "skip" }
       })
     });
     const completed = await reportRun({ runsRoot, runId: run.id, artifact: { kind: "inline", value: "allowed" } });
     assert.equal(completed.events[0].artifact.authorization?.allowed, true);
-    assert.equal(completed.events[0].artifact.authorization?.grantSource, "run:granted#flow[1]");
+    assert.equal(completed.events[0].artifact.authorization?.grantSource, undefined);
   });
 });
 

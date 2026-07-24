@@ -137,9 +137,10 @@ flow:
 
 - `review` 是不重复的非空 Slot 名称数组。Slot 只表达 Procedure 本地评审视角，不是 Actor id。
 - `.memsphere/config.json` 的 `control_plane.actors` 定义可参与 Review 的 Human 或 Agent Actor；Runner 权限由 `control_plane.runner` 定义。
+- Agent Actor 只配置 ACP `provider` 和可选 `model`；启动命令、参数、工作目录、超时与 Prompt version 由 Provider 和 Memsphere 管理。
 - `memsphere run start` 会先列出所有 Review scope、Slot、可用 Actor 和内置 Decision Policy。把预检示例保存并调整后，使用 `--review-config <path>` 启动。
 - Review 配置必须为每个 scope 选择 Policy，并为每个 Slot 绑定 Actor 或显式 `skip`；一个 Actor 绑定多个 Slot 时只产生一个 Assignment 和 Vote。
-- `permission_grants` 只存在于 Run Review 配置的 scope 中，并受 Runner/Actor 的 `grantable_permissions` 限制。Memory YAML 不允许 `role_bindings` 或 `permission_grants`。
+- Permission 只在 Runner/Actor 的 `permissions` 中配置；Run Review 配置不追加临时权限。Memory YAML 不允许 `role_bindings` 或 `permission_grants`。
 - `runner` 是当前 Run 执行上下文，不需要 Slot Binding。
 - Runner 在 `run report` 前应阅读 CLI 输出的权限说明；成功或拒绝结果中的权限、来源和自然语言说明均来自 Run 启动时保存的控制平面快照。
 - 确定性校验通过后，Run 会返回稳定的 `review_id` 和 `memsphere run review wait --review <review_id>`；Review 通过前当前 Action 不推进。Review Submission 自动冻结当前候选之前已经上报的全部 Artifact，Reviewer 根据当前 Artifact 与要求按需追溯。全部评审意见收齐后，如 CLI 提示等待 Runner 投票，必须先阅读摘要和 blocking 意见，逐条执行 `memsphere run review resolve`，再显式执行 `memsphere run review vote`。
@@ -147,6 +148,16 @@ flow:
 - Human 使用 View 中的大尺寸 Artifact Review 浮窗操作本人 Assignment：按 Round 查看当时的不可变 Submission、正式 Comment、Vote、Result 与 Revision Summary，在当前轮添加整体或定位 Comment、选择 Vote 并 Submit。历史 Round 只读，完成后的 Review 仍可从对应 Run 步骤重新打开。
 - Artifact Review Comment 只绑定当前 Artifact Submission；定位 Comment 保存 Submission、digest、Renderer target 和短上下文，不评论 Memory 或 Workspace 文件，也不会自动迁移到下一轮。独立 Memory Review 继续使用原有 Review 抽屉和处理流程。
 - 调试 Agent 启动时，可设置 `debug.agent_review: true` 禁止后台真实派发，再显式执行 `memsphere run try-run --run <run_id>` 生成 `launch.json` 和 `prompt.md`。该命令不 claim Assignment、不启动 ACP，也不修改 Run；View 轮询不会自动生成调试文件。
+
+### 维护当前配置
+
+View 的“设置”入口提供概览、存储、View 服务和参与者配置四个模块，只编辑当前 View 实际加载的 `.memsphere/config.json`。页面会在服务端校验并展示修改差异，确认后才原子写入；磁盘配置与运行配置不一致时，需要手动执行：
+
+```bash
+memsphere view restart
+```
+
+Runner 与 Human/Agent Actor 在参与者列表中维护。Permission 必须来自系统 Catalog，并统一保存在 `permissions`。`debug`、Secret、配置回滚和 View 远程启停不属于配置中心。
 
 当 Artifact 使用 `type: object`、`format.name: markdown` 和 `layout: outline` 时，Schema 的 `fields` 可以使用 mapping 形式的 `!repeat`，把非空 `body` 中的一组字符串或 `!schema` 字段整体重复。`limit.min/max` 如出现必须是非负整数且 `min <= max`。首版不允许 Repeat 嵌套，也不允许把 Repeat 放在 table、defines、flow 或其他位置：
 

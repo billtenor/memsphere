@@ -155,6 +155,21 @@ flow:
     assert.equal(await reviewModal.locator("#artifact-review-record-panel").innerText(), publicRecord);
     assert.equal(await reviewModal.getByText("decider", { exact: true }).count(), 0);
     const candidateTarget = reviewModal.locator(".artifact-review-target").filter({ hasText: "Candidate" }).first();
+    const candidateSpacing = await candidateTarget.evaluate((target) => {
+      const body = target.querySelector(".commentable-body");
+      const targetStyle = getComputedStyle(target);
+      const bodyStyle = body ? getComputedStyle(body) : null;
+      return {
+        marginBlockStart: targetStyle.marginBlockStart,
+        marginBlockEnd: targetStyle.marginBlockEnd,
+        whiteSpace: bodyStyle?.whiteSpace
+      };
+    });
+    assert.deepEqual(candidateSpacing, {
+      marginBlockStart: "0px",
+      marginBlockEnd: "0px",
+      whiteSpace: "normal"
+    });
     const anchoredSaved = page.waitForResponse((response) =>
       response.url().endsWith("/draft") && response.request().method() === "PATCH"
     );
@@ -518,6 +533,25 @@ flow:
     assert(Math.abs(restoredPosition.top - reviewOpenPosition.top) < 2, JSON.stringify({ reviewOpenPosition, restoredPosition }));
     await page.locator(".task-result").getByRole("button", { name: "产物评审", exact: true }).click();
     await reviewModal.waitFor();
+
+    await page.setViewportSize({ width: 2560, height: 1080 });
+    const desktopLayout = await reviewModal.evaluate((modal) => {
+      const artifactPane = modal.querySelector<HTMLElement>("#artifact-review-artifact-pane");
+      const reviewPane = modal.querySelector<HTMLElement>("#artifact-review-review-pane");
+      const bounds = modal.getBoundingClientRect();
+      return {
+        width: bounds.width,
+        height: bounds.height,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        artifactOverflowX: artifactPane ? getComputedStyle(artifactPane).overflowX : "",
+        reviewOverflowX: reviewPane ? getComputedStyle(reviewPane).overflowX : ""
+      };
+    });
+    assert(Math.abs(desktopLayout.width - desktopLayout.viewportWidth * 0.9) < 3, JSON.stringify(desktopLayout));
+    assert(Math.abs(desktopLayout.height - desktopLayout.viewportHeight * 0.9) < 3, JSON.stringify(desktopLayout));
+    assert.equal(desktopLayout.artifactOverflowX, "hidden");
+    assert.equal(desktopLayout.reviewOverflowX, "hidden");
 
     await page.setViewportSize({ width: 390, height: 844 });
     const artifactPane = page.locator("#artifact-review-artifact-pane");

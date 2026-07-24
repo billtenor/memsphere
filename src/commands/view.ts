@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import MarkdownIt from "markdown-it";
@@ -16,7 +17,17 @@ import {
   type ArtifactReviewVote
 } from "../artifact-review.js";
 import { type MemsphereConfig, readConfig } from "../config.js";
-import { authorizeArtifactOperation } from "../control-plane/index.js";
+import {
+  ConfigDraftValidationError,
+  ConfigRevisionConflictError,
+  editableConfigDraft,
+  readConfigDocument,
+  validateConfigDraft,
+  writeConfigDraft,
+  type ConfigDocument,
+  type EditableConfigDraft
+} from "../config-management.js";
+import { authorizeArtifactOperation, listPermissionDefinitions } from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
@@ -62,6 +73,8 @@ import {
   clearViewServiceState,
   getViewServiceStatus,
   restartViewService,
+  createSettingsToken,
+  isLoopbackHost,
   startViewService,
   stopViewService,
   viewServiceStatePath,
@@ -101,6 +114,7 @@ export async function viewStartCommand(): Promise<void> {
   const state = await startViewService(config);
   console.log(`memsphere view running at ${viewServiceUrl(state)}`);
   console.log(`pid: ${state.pid}`);
+  if (state.settingsToken) console.log(`settings token: ${state.settingsToken}`);
 }
 
 export async function viewStopCommand(): Promise<void> {
@@ -114,6 +128,7 @@ export async function viewRestartCommand(): Promise<void> {
   const state = await restartViewService(config);
   console.log(`memsphere view restarted at ${viewServiceUrl(state)}`);
   console.log(`pid: ${state.pid}`);
+  if (state.settingsToken) console.log(`settings token: ${state.settingsToken}`);
 }
 
 export async function viewStatusCommand(): Promise<void> {
@@ -126,6 +141,7 @@ export async function viewStatusCommand(): Promise<void> {
   console.log(`memsphere view running at ${viewServiceUrl(status.state)}`);
   console.log(`pid: ${status.state.pid}`);
   console.log(`started: ${status.state.startedAt}`);
+  if (status.state.settingsToken) console.log(`settings token: ${status.state.settingsToken}`);
 }
 
 export async function viewServeCommand(options: ViewServeOptions): Promise<void> {
@@ -133,8 +149,14 @@ export async function viewServeCommand(options: ViewServeOptions): Promise<void>
   const host = config.view.host;
   const port = config.view.port;
   const statePath = options.state ?? viewServiceStatePath(config);
-
-  const server = createViewServer(config);
+  const runningDocument = await readConfigDocument(config.configPath);
+  const settingsToken = isLoopbackHost(host)
+    ? undefined
+    : createSettingsToken();
+  const server = createViewServer(config, {
+    runningRevision: runningDocument.revision,
+    settingsToken
+  });
 
   server.on("error", async (error) => {
     await clearViewServiceState(statePath, process.pid);
@@ -151,7 +173,8 @@ export async function viewServeCommand(options: ViewServeOptions): Promise<void>
       host,
       port: actualPort,
       startedAt: new Date().toISOString(),
-      configPath: config.configPath
+      configPath: config.configPath,
+      settingsToken
     });
     console.log(`memsphere view running at http://${host}:${actualPort}`);
     console.log(`memoryRoot: ${config.memoryRoot}`);
@@ -166,10 +189,15 @@ export async function viewServeCommand(options: ViewServeOptions): Promise<void>
   process.once("SIGINT", () => void close());
 }
 
-export function createViewServer(config: MemsphereConfig) {
+type ViewServerOptions = {
+  runningRevision?: string;
+  settingsToken?: string;
+};
+
+export function createViewServer(config: MemsphereConfig, options: ViewServerOptions = {}) {
   return createServer(async (request, response) => {
     try {
-      await handleRequest(request, response, config);
+      await handleRequest(request, response, config, options);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       sendJson(response, 500, { error: message });
@@ -177,13 +205,104 @@ export function createViewServer(config: MemsphereConfig) {
   });
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, config: MemsphereConfig): Promise<void> {
+async function handleRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  config: MemsphereConfig,
+  options: ViewServerOptions
+): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   const { memoryRoot, reviewsRoot, runsRoot } = config;
   const archiveRoot = config.archiveRoot;
 
   if (request.method === "GET" && url.pathname === "/") {
     sendHtml(response, browserHtml);
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/settings/meta") {
+    sendJson(response, 200, {
+      requiresToken: !isLoopbackHost(config.view.host),
+      host: config.view.host,
+      port: config.view.port
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/settings" && request.method === "GET") {
+    if (!authorizeSettingsRequest(request, response, config, options)) return;
+    const document = await readConfigDocument(config.configPath);
+    sendJson(response, 200, settingsPayload(document, options.runningRevision ?? document.revision, config.view));
+    return;
+  }
+
+  if (url.pathname === "/api/settings/validate" && request.method === "POST") {
+    if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+    const body = await readJsonBody<{ expectedRevision?: unknown; config?: unknown }>(request, 128 * 1024);
+    if (typeof body.expectedRevision !== "string" || !body.config || typeof body.config !== "object") {
+      sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
+      return;
+    }
+    const document = await readConfigDocument(config.configPath);
+    if (document.revision !== body.expectedRevision) {
+      sendJson(response, 409, {
+        code: "revision_conflict",
+        error: "config file changed on disk",
+        expectedRevision: body.expectedRevision,
+        actualRevision: document.revision
+      });
+      return;
+    }
+    const validation = validateConfigDraft(document, body.config as EditableConfigDraft);
+    const { candidate: _candidate, ...publicValidation } = validation;
+    sendJson(response, validation.valid ? 200 : 422, {
+      ...publicValidation,
+      expectedRevision: document.revision,
+      runningRevision: options.runningRevision ?? document.revision,
+      restartRequired: document.revision !== (options.runningRevision ?? document.revision)
+        || validation.changes.length > 0
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/settings" && request.method === "PUT") {
+    if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+    const body = await readJsonBody<{ expectedRevision?: unknown; config?: unknown }>(request, 128 * 1024);
+    if (typeof body.expectedRevision !== "string" || !body.config || typeof body.config !== "object") {
+      sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
+      return;
+    }
+    const document = await readConfigDocument(config.configPath);
+    try {
+      const saved = await writeConfigDraft({
+        document,
+        expectedRevision: body.expectedRevision,
+        draft: body.config as EditableConfigDraft
+      });
+      sendJson(response, 200, {
+        ...settingsPayload(saved, options.runningRevision ?? document.revision, config.view),
+        saved: true
+      });
+    } catch (error) {
+      if (error instanceof ConfigDraftValidationError) {
+        sendJson(response, 422, {
+          code: "config_invalid",
+          error: error.message,
+          errors: error.errors
+        });
+        return;
+      }
+      if (error instanceof ConfigRevisionConflictError) {
+        sendJson(response, 409, {
+          code: "revision_conflict",
+          error: error.message,
+          expectedRevision: error.expectedRevision,
+          actualRevision: error.actualRevision
+        });
+        return;
+      }
+      throw error;
+    }
     return;
   }
 
@@ -1270,14 +1389,112 @@ async function loadMemoryListItem(memoryRoot: string, kind: MemoryKind, path: st
   }
 }
 
-async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
+function settingsPayload(
+  document: ConfigDocument,
+  runningRevision: string,
+  runningView: MemsphereConfig["view"]
+): Record<string, unknown> {
+  return {
+    configPath: document.configPath,
+    scopeRoot: document.scopeRoot,
+    runningRevision,
+    runningView,
+    diskRevision: document.revision,
+    restartRequired: runningRevision !== document.revision,
+    explicit: document.explicit,
+    config: editableConfigDraft(document),
+    resolvedPaths: {
+      memoryRoot: document.resolved.memoryRoot,
+      reviewsRoot: document.resolved.reviewsRoot,
+      runsRoot: document.resolved.runsRoot,
+      archiveRoot: document.resolved.archiveRoot
+    },
+    defaults: {
+      memoryRoot: "memory",
+      reviewsRoot: "reviews",
+      runsRoot: "runs",
+      archiveRoot: "archives",
+      view: { host: "127.0.0.1", port: 0 }
+    },
+    permissionCatalog: listPermissionDefinitions()
+      .filter((definition) => !hiddenSettingsPermissionIds.has(definition.id))
+  };
+}
+
+function authorizeSettingsRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  config: MemsphereConfig,
+  options: ViewServerOptions,
+  verifyOrigin = false
+): boolean {
+  if (verifyOrigin) {
+    const rejection = settingsOriginRejection(request, config);
+    if (rejection) {
+      sendJson(response, 403, { code: "request_origin_rejected", error: rejection });
+      return false;
+    }
+  }
+
+  if (isLoopbackHost(config.view.host)) return true;
+  const expected = options.settingsToken;
+  const authorization = request.headers.authorization;
+  const provided = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
+  if (!expected || !constantTimeEqual(provided, expected)) {
+    sendJson(response, 401, { code: "unauthorized", error: "Settings operator token is required" });
+    return false;
+  }
+  return true;
+}
+
+function settingsOriginRejection(request: IncomingMessage, config: MemsphereConfig): string | undefined {
+  const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
+  if (contentType !== "application/json") return "Settings requests must use application/json";
+
+  const originHeader = request.headers.origin;
+  const hostHeader = request.headers.host;
+  if (!originHeader || !hostHeader) return "Settings requests require Origin and Host headers";
+
+  let origin: URL;
+  try {
+    origin = new URL(originHeader);
+  } catch {
+    return "Settings request Origin is invalid";
+  }
+  if (!["http:", "https:"].includes(origin.protocol) || origin.host.toLowerCase() !== hostHeader.toLowerCase()) {
+    return "Settings request Origin must match the current View origin";
+  }
+
+  const fetchSite = request.headers["sec-fetch-site"];
+  if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") {
+    return "Cross-site Settings requests are not allowed";
+  }
+
+  if (isLoopbackHost(config.view.host) && !isLoopbackRequestHost(origin.hostname)) {
+    return "Loopback Settings requests must use a loopback hostname";
+  }
+  return undefined;
+}
+
+function isLoopbackRequestHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
+}
+
+function constantTimeEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+async function readJsonBody<T>(request: IncomingMessage, limit = 512 * 1024): Promise<T> {
   const chunks: Buffer[] = [];
   let total = 0;
 
   for await (const chunk of request) {
     const buffer = chunk as Buffer;
     total += buffer.length;
-    if (total > 512 * 1024) {
+    if (total > limit) {
       throw new Error("request body is too large");
     }
     chunks.push(buffer);
@@ -1509,3 +1726,4 @@ function sendText(response: ServerResponse, status: number, body: string): void 
   });
   response.end(body);
 }
+const hiddenSettingsPermissionIds = new Set(["decision.challenge", "decision.override"]);

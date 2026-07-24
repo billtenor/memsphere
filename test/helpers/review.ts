@@ -4,15 +4,13 @@ export function reviewConfiguration(input: {
   procedure: string;
   flowIndexes?: number[];
   slots: Record<string, string[] | "skip">;
-  permissionGrants?: Record<string, string[]>;
   policy?: string;
 }): RunReviewConfiguration {
   const policy = input.policy ?? "artifact_acceptance.unanimous";
-  const permissionGrants = input.permissionGrants ?? {};
   return {
     reviews: Object.fromEntries((input.flowIndexes ?? [1]).map((index) => [
       `${input.procedure}#flow[${index}]`,
-      { policy, permissionGrants }
+      { policy }
     ])),
     slots: Object.fromEntries(Object.entries(input.slots).map(([slot, actors]) => [
       `${input.procedure}::${slot}`,

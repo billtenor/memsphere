@@ -20,8 +20,7 @@ export function renderPermissionGuidance(input: {
   const lines = input.permissions.effective.map((permission) => {
     const definition = definitions.get(permission);
     const description = definition?.descriptions[locale] ?? definition?.descriptions.en ?? permission;
-    const granted = input.permissions.grants.includes(permission);
-    return `- ${permission}${granted ? " (grant)" : ""}: ${description}`;
+    return `- ${permission}: ${description}`;
   });
 
   if (!lines.length) {
@@ -41,8 +40,8 @@ export function renderPermissionGuidance(input: {
   }
 
   lines.unshift(locale === "zh-CN"
-    ? `当前 Artifact：${input.artifactScope}；Actor：${input.actorId}；权限依据：${input.permissions.authoritySource}${input.permissions.grantSource ? `，Grant：${input.permissions.grantSource}` : ""}。`
-    : `Current Artifact: ${input.artifactScope}; Actor: ${input.actorId}; authority: ${input.permissions.authoritySource}${input.permissions.grantSource ? `; grant: ${input.permissions.grantSource}` : ""}.`);
+    ? `当前 Artifact：${input.artifactScope}；Actor：${input.actorId}；权限依据：${input.permissions.authoritySource}。`
+    : `Current Artifact: ${input.artifactScope}; Actor: ${input.actorId}; authority: ${input.permissions.authoritySource}.`);
 
   return {
     allowed: input.decision?.allowed ?? true,

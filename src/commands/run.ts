@@ -174,18 +174,8 @@ function parseRunReviewConfiguration(value: unknown): RunReviewConfiguration {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`reviews.${scope} must be an object`);
     const entry = raw as Record<string, unknown>;
     if (typeof entry.policy !== "string" || !entry.policy.trim()) throw new Error(`reviews.${scope}.policy is required`);
-    const grants = entry.permission_grants ?? {};
-    if (!grants || typeof grants !== "object" || Array.isArray(grants)) {
-      throw new Error(`reviews.${scope}.permission_grants must be an object`);
-    }
     reviews[scope] = {
-      policy: entry.policy,
-      permissionGrants: Object.fromEntries(Object.entries(grants as Record<string, unknown>).map(([actorId, permissions]) => {
-        if (!Array.isArray(permissions) || permissions.some((permission) => typeof permission !== "string")) {
-          throw new Error(`reviews.${scope}.permission_grants.${actorId} must be a string array`);
-        }
-        return [actorId, permissions];
-      })) as RunReviewConfiguration["reviews"][string]["permissionGrants"]
+      policy: entry.policy
     };
   }
   const slots: RunReviewConfiguration["slots"] = {};
@@ -901,9 +891,7 @@ function printPermissionGuidance(run: RunState, step: NonNullable<ReturnType<typ
   for (const [slotId, binding] of Object.entries(step.controlPlane.bindings)) {
     console.log(`- ${slotId}: ${binding.skipped ? "skipped" : binding.actorIds.join(", ")} (${binding.source})`);
   }
-  console.log(`- runner base permissions: ${permissions.base.join(", ") || "none"}`);
-  console.log(`- runner grants: ${permissions.grants.join(", ") || "none"}`);
-  console.log(`- runner effective permissions: ${permissions.effective.join(", ") || "none"}`);
+  console.log(`- runner permissions: ${permissions.effective.join(", ") || "none"}`);
   console.log("");
   console.log(permissionLocale() === "zh-CN" ? "权限说明:" : "Permission Guidance:");
   for (const line of guidance.lines) console.log(line);

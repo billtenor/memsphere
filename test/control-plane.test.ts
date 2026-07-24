@@ -14,8 +14,7 @@ import {
 
 const rawConfig = {
   runner: {
-    permissions: ["artifact.read", "artifact.submit"],
-    grantable_permissions: ["decision.decide"]
+    permissions: ["artifact.read", "artifact.submit", "decision.decide"]
   },
   actors: {
     human: {
@@ -57,7 +56,7 @@ test("built-in control plane catalogs are complete and reject unknown ids", () =
 
 test("control plane config parses Runner and Actors strictly", () => {
   const parsed = parseControlPlaneConfig(rawConfig);
-  assert.deepEqual(parsed.runner.grantablePermissions, ["decision.decide"]);
+  assert.deepEqual(parsed.runner.permissions, ["artifact.read", "artifact.submit", "decision.decide"]);
   assert.equal(parsed.actors.agent.systemPrompt, "Review independently.");
   assert.deepEqual(parsed.actors.agent.kind === "agent" ? parsed.actors.agent.agent : undefined, {
     provider: "traex",
@@ -94,6 +93,31 @@ test("control plane config parses Runner and Actors strictly", () => {
   }), /Duplicate Permission/);
 });
 
+test("Agent configuration defaults Provider-owned runtime details", () => {
+  const parsed = parseControlPlaneConfig({
+    runner: { permissions: [] },
+    actors: {
+      reviewer: {
+        kind: "agent",
+        name: "Reviewer",
+        permissions: ["artifact.read"],
+        agent: { provider: "traex", model: "review-model" }
+      }
+    }
+  });
+  assert.deepEqual(parsed.actors.reviewer.kind === "agent" ? parsed.actors.reviewer.agent : undefined, {
+    provider: "traex",
+    command: "traecli",
+    args: [],
+    cwd: undefined,
+    model: "review-model",
+    promptVersion: undefined,
+    startupTimeoutMs: undefined,
+    idleTimeoutMs: undefined,
+    maxRuntimeMs: undefined
+  });
+});
+
 test("control plane snapshots and revisions are deterministic", () => {
   const first = createControlPlaneSnapshot(parseControlPlaneConfig(rawConfig));
   const second = createControlPlaneSnapshot(parseControlPlaneConfig({
@@ -106,21 +130,19 @@ test("control plane snapshots and revisions are deterministic", () => {
   assert.equal(JSON.stringify(first).includes("API_KEY"), false);
 });
 
-test("Slot bindings and Actor grants produce default-deny authorization and guidance", () => {
+test("Slot bindings and Actor permissions produce default-deny authorization and guidance", () => {
   const snapshot = createControlPlaneSnapshot(parseControlPlaneConfig(rawConfig));
   const controlPlane = resolveArtifactControlPlane({
     snapshot,
     slotBindings: {
       "fixture::reviewer": { actorIds: ["human", "agent"], source: "run:fixture::reviewer" }
     },
-    permissionGrants: { human: ["decision.assess"] },
     artifactScope: "fixture#flow[1]",
-    policyId: "artifact_acceptance.unanimous",
-    grantSource: "run:fixture#flow[1]"
+    policyId: "artifact_acceptance.unanimous"
   });
 
   assert.deepEqual(controlPlane.bindings["fixture::reviewer"].actorIds, ["human", "agent"]);
-  assert.deepEqual(controlPlane.permissions.human.effective, ["artifact.read", "decision.assess", "decision.decide"]);
+  assert.deepEqual(controlPlane.permissions.human.effective, ["artifact.read", "decision.decide"]);
 
   const allowed = authorizeArtifactOperation({
     controlPlane,

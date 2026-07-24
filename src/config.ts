@@ -6,7 +6,7 @@ import { z } from "zod";
 import { controlPlaneConfigSchema, type ControlPlaneConfig } from "./control-plane/index.js";
 
 export const configSchema = z.object({
-  memoryRoot: z.string().min(1),
+  memoryRoot: z.string().min(1).optional(),
   reviewsRoot: z.string().min(1).optional(),
   runsRoot: z.string().min(1).optional(),
   archiveRoot: z.string().min(1).optional(),
@@ -107,7 +107,7 @@ export async function readConfigAt(configPath: string): Promise<MemsphereConfig>
   return {
     configPath,
     scopeRoot,
-    memoryRoot: resolveConfigPath(config.memoryRoot, scopeRoot),
+    memoryRoot: resolveConfigPath(config.memoryRoot ?? "memory", scopeRoot),
     reviewsRoot: resolveConfigPath(config.reviewsRoot ?? "reviews", scopeRoot),
     runsRoot: resolveConfigPath(config.runsRoot ?? "runs", scopeRoot),
     archiveRoot: resolveConfigPath(config.archiveRoot ?? "archives", scopeRoot),
@@ -134,7 +134,7 @@ export async function writeConfig(
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
-function resolveConfigPath(input: string, scopeRoot: string): string {
+export function resolveConfigPath(input: string, scopeRoot: string): string {
   const expanded = expandHome(input);
   return isAbsolute(expanded) ? resolve(expanded) : resolve(scopeRoot, expanded);
 }

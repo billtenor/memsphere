@@ -17,21 +17,18 @@ import {
 function fixture(input?: { runnerDecides?: boolean; humanDecides?: boolean }) {
   const config: ControlPlaneConfig = {
     runner: {
-      permissions: ["artifact.read", "artifact.submit", ...(input?.runnerDecides === false ? [] : ["decision.decide"] as const)],
-      grantablePermissions: []
+      permissions: ["artifact.read", "artifact.submit", ...(input?.runnerDecides === false ? [] : ["decision.decide"] as const)]
     },
     actors: {
       alice: {
         kind: "human",
         name: "Alice",
-        permissions: ["artifact.read", "decision.assess", ...(input?.humanDecides === false ? [] : ["decision.decide"] as const)],
-        grantablePermissions: []
+        permissions: ["artifact.read", "decision.assess", ...(input?.humanDecides === false ? [] : ["decision.decide"] as const)]
       },
       bot: {
         kind: "agent",
         name: "Bot",
         permissions: ["artifact.read", "decision.assess"],
-        grantablePermissions: [],
         agent: { command: "bot", args: [] }
       }
     }
@@ -44,8 +41,7 @@ function fixture(input?: { runnerDecides?: boolean; humanDecides?: boolean }) {
       "fixture::reviewer": { actorIds: ["alice", "bot"], source: "run:fixture::reviewer" }
     },
     artifactScope: "fixture#flow[1]",
-    policyId: "artifact_acceptance.unanimous",
-    grantSource: "run:fixture#flow[1]"
+    policyId: "artifact_acceptance.unanimous"
   });
   return { snapshot, controlPlane };
 }

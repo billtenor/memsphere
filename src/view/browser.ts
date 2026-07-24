@@ -47,11 +47,15 @@ export const browserHtml = String.raw`<!doctype html>
     .review-resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--line); transition: background 120ms ease, width 120ms ease; }
     .review-resizer:hover::before, .review-resizer:focus-visible::before, body.review-resizing .review-resizer::before { width: 2px; background: var(--accent); }
     .brand, .review-head, .toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .sidebar-tools { display: flex; justify-content: flex-end; min-height: 30px; margin-bottom: 6px; }
+    .brand-settings { border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); padding: 4px 7px; }
+    .brand-settings:hover { background: var(--soft); color: var(--text); }
+    .brand-settings.active { border-color: #b8cbc7; background: var(--accent-soft); color: #173f3c; font-weight: 700; }
     .review-actions { display: flex; gap: 8px; align-items: flex-start; }
     .review-toggle, .review-close { display: inline-flex; }
     .brand h1, .review-head h2, .title { margin: 0; letter-spacing: 0; }
     .brand h1 { font-size: 18px; }
-    .view-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 14px; }
+    .view-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 14px; }
     .view-tab { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); padding: 7px 8px; }
     .view-tab.active { border-color: #b8cbc7; background: var(--accent-soft); color: #173f3c; font-weight: 700; }
     .count, .muted, .subtitle, .review-sub { color: var(--muted); }
@@ -232,8 +236,8 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-markdown p { margin: 6px 0 8px; }
     .artifact-review-markdown ul, .artifact-review-markdown ol { margin: 6px 0 8px; padding-left: 22px; }
     .artifact-review-markdown code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 12px; background: #e9ece6; border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; }
-    .artifact-review-markdown pre { overflow-x: auto; background: #e9ece6; border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; }
-    .artifact-review-markdown pre code { background: none; border: 0; padding: 0; white-space: pre; }
+    .artifact-review-markdown pre { overflow-x: hidden; background: #e9ece6; border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; }
+    .artifact-review-markdown pre code { background: none; border: 0; padding: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
     .inline-thread {
       grid-column: 2;
       border-left: 3px solid var(--accent);
@@ -313,7 +317,7 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-activity { grid-column: 1 / -1; min-width: 0; display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: #fbfbf8; }
     .artifact-review-activity-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
     .artifact-review-attempt-select { width: min(100%, 260px); }
-    .artifact-review-activity-log { min-width: 0; max-height: 300px; overflow: auto; display: grid; gap: 6px; padding-right: 2px; overscroll-behavior: contain; }
+    .artifact-review-activity-log { min-width: 0; max-height: 300px; overflow-x: hidden; overflow-y: auto; display: grid; gap: 6px; padding-right: 2px; overscroll-behavior: contain; }
     .artifact-review-activity-event { min-width: 0; display: grid; gap: 3px; padding: 7px 8px; border-left: 3px solid var(--line); background: var(--surface); overflow-wrap: anywhere; }
     .artifact-review-activity-event[data-kind="tool"] { border-left-color: var(--accent); }
     .artifact-review-activity-event[data-kind="plan"] { border-left-color: var(--warn); }
@@ -322,7 +326,7 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-activity-event-title { min-width: 0; display: block; overflow-wrap: anywhere; }
     .artifact-review-activity-kind { flex: 0 0 auto; }
     .artifact-review-activity-event-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .artifact-review-activity-locations { overflow-x: auto; white-space: nowrap; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .artifact-review-activity-locations { white-space: normal; overflow-wrap: anywhere; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .artifact-review-activity-plan { margin: 2px 0 0; padding-left: 20px; }
     .artifact-review-id { overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
     dialog.artifact-review-dialog { width: min(460px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 8px; padding: 0; color: var(--text); box-shadow: 0 20px 60px rgba(25, 30, 35, .24); }
@@ -330,7 +334,7 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-dialog-body { padding: 18px; display: grid; gap: 12px; }
     .artifact-review-dialog-body h3 { margin: 0; font-size: 18px; }
     .artifact-review-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
-    dialog.artifact-review-modal { width: calc(100vw - 32px); max-width: 1680px; height: calc(100vh - 32px); max-height: 1120px; border: 1px solid var(--line); border-radius: 8px; padding: 0; color: var(--text); background: var(--bg); box-shadow: 0 24px 80px rgba(25, 30, 35, .28); overflow: hidden; overscroll-behavior: none; }
+    dialog.artifact-review-modal { width: 90vw; max-width: none; height: 90dvh; max-height: none; margin: auto; border: 1px solid var(--line); border-radius: 8px; padding: 0; color: var(--text); background: var(--bg); box-shadow: 0 24px 80px rgba(25, 30, 35, .28); overflow: hidden; overscroll-behavior: none; }
     dialog.artifact-review-modal::backdrop { background: rgba(22, 28, 30, .42); }
     .artifact-review-modal-shell { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
     .artifact-review-modal-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 16px 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
@@ -338,7 +342,10 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-modal-heading { min-width: 0; display: grid; gap: 5px; }
     .artifact-review-modal-subtitle { color: var(--muted); overflow-wrap: anywhere; }
     .artifact-review-modal-body { min-height: 0; display: grid; grid-template-columns: minmax(320px, var(--artifact-review-left)) 8px minmax(320px, 1fr); }
-    .artifact-review-modal-pane { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 16px 18px 28px; }
+    .artifact-review-modal-pane { min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 16px 18px 28px; }
+    .artifact-review-modal-pane > *, .artifact-review-modal-pane .panel, .artifact-review-modal-pane .section, .artifact-review-modal-pane .task-result { min-width: 0; max-width: 100%; }
+    .artifact-review-modal-pane .markdown-body pre { overflow-x: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .artifact-review-modal-pane .markdown-body pre code { white-space: inherit; overflow-wrap: inherit; }
     .artifact-review-modal-pane.review-pane { display: grid; gap: 12px; align-content: start; background: #fbfbf8; }
     .artifact-review-modal-resizer { position: relative; min-width: 8px; background: #fbfbf8; cursor: col-resize; touch-action: none; outline: none; }
     .artifact-review-modal-resizer::before { content: ""; position: absolute; inset: 0 auto 0 3px; width: 1px; background: var(--line); }
@@ -349,10 +356,76 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-artifact-head h3 { margin: 0; font-size: 16px; }
     .artifact-review-material-select { width: min(100%, 520px); }
     .artifact-review-artifact-content { min-width: 0; }
+    .artifact-review-artifact-content .commentable { margin-block: 0; }
+    .artifact-review-artifact-content .commentable-body { white-space: normal; }
+    .artifact-review-artifact-content .markdown-body > .commentable:first-child .commentable-body > :first-child { margin-top: 0; }
+    .artifact-review-artifact-content .markdown-body > .commentable:last-child .commentable-body > :last-child { margin-bottom: 0; }
     .artifact-review-target { border-radius: 6px; transition: background 140ms ease, box-shadow 140ms ease; }
     .artifact-review-target-located { background: #edf6f3; box-shadow: 0 0 0 3px rgba(40, 108, 103, .2); }
     .artifact-review-locate-failure { margin-bottom: 10px; }
     .artifact-review-comment-context { margin-top: 7px; padding: 7px 8px; border-left: 2px solid var(--line); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .settings-nav { display: grid; gap: 4px; margin-top: 18px; }
+    .settings-nav .memory-button { font-weight: 600; }
+    .settings-layout { display: grid; gap: 16px; max-width: 1120px; }
+    .settings-status { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .settings-section { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 18px; }
+    .settings-section h3 { margin: 0; font-size: 17px; }
+    .settings-section > h3 { margin-bottom: 14px; }
+    .settings-section h4 { margin: 18px 0 8px; font-size: 14px; }
+    .settings-section-head { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .settings-section-subtitle { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+    .settings-compact-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 360px)); justify-content: start; }
+    .settings-compact-grid > .settings-field:not(.wide) { width: 100%; max-width: 360px; }
+    .settings-compact-grid > .settings-field.wide { grid-column: 1 / -1; }
+    .settings-participant-basic { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .settings-field { display: grid; gap: 6px; min-width: 0; }
+    .settings-path-field { align-content: start; }
+    .settings-path-field > .settings-field { grid-template-rows: auto auto minmax(34px, auto); }
+    .settings-field.wide { grid-column: 1 / -1; }
+    .settings-field > label, .settings-label { color: #4f5a5c; font-size: 12px; font-weight: 700; }
+    .settings-input, .settings-select { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); padding: 8px 10px; outline: none; }
+    .settings-input:focus, .settings-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(40, 108, 103, .12); }
+    .settings-select-wrap { position: relative; min-width: 0; }
+    .settings-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; cursor: pointer; }
+    .settings-select-trigger[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(40, 108, 103, .12); }
+    .settings-select-caret { flex: 0 0 auto; color: var(--muted); font-size: 13px; line-height: 1; }
+    .settings-select-menu { position: absolute; top: calc(100% + 4px); right: 0; left: 0; z-index: 40; display: grid; gap: 2px; max-height: 240px; overflow-y: auto; padding: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); box-shadow: 0 10px 28px rgba(25, 30, 35, .16); }
+    .settings-select-menu[hidden] { display: none; }
+    .settings-select-option { width: 100%; border: 0; border-radius: 4px; background: transparent; color: var(--text); padding: 7px 8px; text-align: left; cursor: pointer; }
+    .settings-select-option:hover, .settings-select-option:focus-visible { outline: 0; background: var(--soft); }
+    .settings-select-option[aria-selected="true"] { background: var(--accent-soft); color: #173f3c; }
+    .settings-check { display: flex; gap: 8px; align-items: flex-start; color: var(--text); }
+    .settings-check input { width: 16px; height: 16px; margin-top: 2px; accent-color: var(--accent); }
+    .settings-default-toggle { margin-top: 14px; }
+    .settings-help, .settings-error { font-size: 12px; overflow-wrap: anywhere; }
+    .settings-help { color: var(--muted); }
+    .settings-error { color: var(--danger); }
+    .settings-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .settings-participants { border-top: 1px solid var(--line); }
+    .settings-participant { border-bottom: 1px solid var(--line); }
+    .settings-participant > summary { list-style: none; }
+    .settings-participant > summary::-webkit-details-marker { display: none; }
+    .settings-participant-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; min-height: 58px; padding: 10px 4px; cursor: pointer; }
+    .settings-participant-summary:hover { background: #f7f8f5; }
+    .settings-participant-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .settings-participant-summary::after { content: "›"; color: var(--muted); font-size: 20px; transform: rotate(90deg); transition: transform 120ms ease; }
+    .settings-participant[open] .settings-participant-summary::after { transform: rotate(-90deg); }
+    .settings-participant-summary-main { min-width: 0; display: grid; gap: 5px; }
+    .settings-participant-summary-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .settings-participant-body { padding: 2px 4px 18px; }
+    .settings-participant-actions { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+    .settings-participant-title { display: flex; gap: 8px; align-items: center; min-width: 0; }
+    .settings-permissions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin-top: 8px; }
+    .settings-permission { border-left: 2px solid var(--line); padding-left: 9px; }
+    .settings-permission .settings-check { font-weight: 600; }
+    .settings-permission p { margin: 3px 0 0 24px; color: var(--muted); font-size: 12px; }
+    .settings-code { width: 100%; max-width: 100%; max-height: 440px; overflow: auto; white-space: pre; background: #f3f5f0; border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+    .settings-field > .mono { white-space: normal; overflow-wrap: anywhere; }
+    .settings-change-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+    .settings-change-list li { border-left: 3px solid var(--accent); padding: 7px 10px; background: #f3f5f0; overflow-wrap: anywhere; }
+    .settings-token { max-width: 520px; }
+    body.settings-mode .search, body.settings-mode #expand, body.settings-mode #collapse, body.settings-mode #review-toggle { display: none; }
     code { background: var(--soft); border-radius: 4px; padding: 1px 4px; }
     body.task-mode .search, body.task-mode #expand, body.task-mode #collapse { display: none; }
     body.review-drawer-open .shell { grid-template-columns: 300px minmax(0, 1fr) 8px var(--review-width); }
@@ -389,13 +462,23 @@ export const browserHtml = String.raw`<!doctype html>
       .artifact-review-modal-pane { height: 100%; padding: 14px 14px 24px; }
       .artifact-review-modal[data-mobile-pane="artifact"] .review-pane { display: none; }
       .artifact-review-modal[data-mobile-pane="review"] .artifact-pane { display: none; }
+      .settings-grid, .settings-compact-grid, .settings-participant-basic, .settings-permissions { grid-template-columns: minmax(0, 1fr); }
+      .settings-section { padding: 14px; }
+      .settings-section-head { align-items: flex-start; }
+      .settings-participant-summary { grid-template-columns: minmax(0, 1fr) auto; }
     }
   </style>
 </head>
 <body>
   <main class="shell">
     <aside class="sidebar">
-      <div class="brand"><h1>memsphere</h1><span class="count" id="count">Loading</span></div>
+      <div class="sidebar-tools">
+        <button class="brand-settings" id="settings-tab" type="button" aria-label="设置" title="设置">设置</button>
+      </div>
+      <div class="brand">
+        <h1>memsphere</h1>
+        <span class="count" id="count">Loading</span>
+      </div>
       <div class="view-tabs">
         <button class="view-tab active" id="memory-tab" type="button">Memory</button>
         <button class="view-tab" id="task-tab" type="button">Task</button>
@@ -508,6 +591,7 @@ export const browserHtml = String.raw`<!doctype html>
     const artifactReviewMobilePaneKey = "memsphere.artifactReviewMobilePane.v1";
     const artifactReviewSplitKey = "memsphere.artifactReviewSplit.v1";
     const reviewPanelWidthKey = "memsphere.reviewPanelWidth.v1";
+    const settingsTokenKey = "memsphere.settingsToken.v1";
     const displayLanguage = localStorage.getItem(displayLanguageKey) === "yaml" ? "yaml" : "zh";
     const vocabulary = {
       procedures: { zh: "流程", yaml: "procedures" },
@@ -604,6 +688,7 @@ export const browserHtml = String.raw`<!doctype html>
       reviewTime: { zh: "评审时间", yaml: "Review time" },
       inProgress: { zh: "进行中", yaml: "In progress" },
       automatic: { zh: "自动", yaml: "Automatic" },
+      runner: { zh: "执行者", yaml: "Runner" },
       round: { zh: "轮次", yaml: "Round" },
       revisionSummary: { zh: "修改摘要", yaml: "Revision summary" },
       selectIdentity: { zh: "请选择评审身份", yaml: "Select a review identity" },
@@ -613,7 +698,7 @@ export const browserHtml = String.raw`<!doctype html>
       draft: { zh: "草稿", yaml: "Draft" },
       passed: { zh: "已通过", yaml: "Passed" },
       changesRequested: { zh: "需修改", yaml: "Changes requested" },
-      awaitingRunnerVote: { zh: "等待 Runner 投票", yaml: "Awaiting Runner vote" },
+      awaitingRunnerVote: { zh: "等待执行者投票", yaml: "Awaiting Runner vote" },
       pendingVote: { zh: "待投票", yaml: "Pending vote" },
       agentReviewer: { zh: "Agent 评审", yaml: "Agent reviewer" },
       queued: { zh: "等待启动", yaml: "Queued" },
@@ -623,7 +708,9 @@ export const browserHtml = String.raw`<!doctype html>
       attempt: { zh: "尝试", yaml: "Attempt" }
     };
     const state = {
-      viewMode: localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
+      viewMode: ["memory", "task", "settings"].includes(localStorage.getItem(viewModeKey))
+        ? localStorage.getItem(viewModeKey)
+        : "memory",
       payload: null,
       memories: [],
       actorNames: {},
@@ -665,6 +752,17 @@ export const browserHtml = String.raw`<!doctype html>
       loadingSnapshots: new Set(),
       reviewDrawerOpen: false,
       reviewPanelWidth: Number.parseFloat(localStorage.getItem(reviewPanelWidthKey) || "") || 380,
+      settingsMeta: null,
+      settingsData: null,
+      settingsDraft: null,
+      settingsErrors: [],
+      settingsModule: "overview",
+      settingsConfirm: null,
+      settingsLoading: false,
+      settingsNotice: "",
+      settingsToken: sessionStorage.getItem(settingsTokenKey) || "",
+      settingsTokenError: "",
+      settingsExpandedParticipants: [],
       renderLine: 0
     };
 
@@ -721,7 +819,8 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewArtifactTab: document.getElementById("artifact-review-artifact-tab"),
       artifactReviewReviewTab: document.getElementById("artifact-review-review-tab"),
       memoryTab: document.getElementById("memory-tab"),
-      taskTab: document.getElementById("task-tab")
+      taskTab: document.getElementById("task-tab"),
+      settingsTab: document.getElementById("settings-tab")
     };
 
     document.getElementById("expand").addEventListener("click", () => setAllSections(true));
@@ -739,6 +838,7 @@ export const browserHtml = String.raw`<!doctype html>
     el.artifactReviewModalResizer.title = t("resizeReview") + " · " + t("resetReviewWidth");
     el.memoryTab.addEventListener("click", () => setViewMode("memory"));
     el.taskTab.addEventListener("click", () => setViewMode("task"));
+    el.settingsTab.addEventListener("click", () => setViewMode("settings"));
     el.submitReview.addEventListener("click", () => runButtonAction(el.submitReview, submitReview));
     el.artifactReviewModalClose.addEventListener("click", closeArtifactReviewModal);
     el.artifactReviewSubmit.addEventListener("click", () => runButtonAction(el.artifactReviewSubmit, submitArtifactReview));
@@ -769,6 +869,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     loadAll().catch(renderFatalError);
     setInterval(() => {
+      if (state.viewMode === "settings") return;
       if (state.viewMode !== "task") return;
       if (hasActiveTaskInteraction()) {
         syncArtifactReviewActivities().catch(console.error);
@@ -785,7 +886,9 @@ export const browserHtml = String.raw`<!doctype html>
     }, 4000);
 
     async function loadAll() {
-      await Promise.all([loadMemories(), loadReservedMemories(), loadReviews(), loadRuns()]);
+      const requests = [loadMemories(), loadReservedMemories(), loadReviews(), loadRuns()];
+      if (state.viewMode === "settings") requests.push(loadSettings());
+      await Promise.all(requests);
       ensureSelectedReview();
       renderAll();
     }
@@ -939,8 +1042,865 @@ export const browserHtml = String.raw`<!doctype html>
       return response.json();
     }
 
+    async function loadSettings() {
+      state.settingsLoading = true;
+      state.settingsNotice = "";
+      try {
+        const metaResponse = await fetch("/api/settings/meta");
+        if (!metaResponse.ok) throw new Error(await metaResponse.text());
+        state.settingsMeta = await metaResponse.json();
+        const response = await settingsFetch("/api/settings");
+        if (response.status === 401) {
+          state.settingsData = null;
+          state.settingsDraft = null;
+          state.settingsTokenError = state.settingsToken
+            ? "操作令牌不正确，请检查后重试。"
+            : "";
+          sessionStorage.removeItem(settingsTokenKey);
+          return;
+        }
+        if (!response.ok) throw new Error(await response.text());
+        state.settingsData = await response.json();
+        state.settingsDraft = cloneSettingsValue(state.settingsData.config);
+        state.settingsTokenError = "";
+        if (state.settingsToken) sessionStorage.setItem(settingsTokenKey, state.settingsToken);
+        state.settingsErrors = [];
+        state.settingsConfirm = null;
+      } finally {
+        state.settingsLoading = false;
+      }
+    }
+
+    function settingsFetch(url, options = {}) {
+      const headers = new Headers(options.headers || {});
+      if (state.settingsToken) headers.set("authorization", "Bearer " + state.settingsToken);
+      return fetch(url, { ...options, headers });
+    }
+
+    function cloneSettingsValue(value) {
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    function renderSettingsNav() {
+      el.nav.innerHTML = "";
+      el.count.textContent = "";
+      const nav = document.createElement("div");
+      nav.className = "settings-nav";
+      const modules = [
+        ["overview", "概览"],
+        ["storage", "存储"],
+        ["view", "View 服务"],
+        ["participants", "参与者配置"]
+      ];
+      for (const [id, label] of modules) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "memory-button" + (state.settingsModule === id ? " active" : "");
+        button.textContent = label;
+        button.addEventListener("click", () => {
+          state.settingsModule = id;
+          state.settingsConfirm = null;
+          renderAll();
+        });
+        nav.append(button);
+      }
+      el.nav.append(nav);
+    }
+
+    function renderSettings() {
+      el.title.textContent = "配置中心";
+      el.subtitle.textContent = state.settingsData?.configPath || "管理当前 View 使用的配置";
+      el.detail.className = "";
+      el.detail.innerHTML = "";
+      const layout = document.createElement("div");
+      layout.className = "settings-layout";
+      el.detail.append(layout);
+
+      if (state.settingsLoading) {
+        layout.append(settingsEmpty("正在读取配置..."));
+        return;
+      }
+      if (state.settingsMeta?.requiresToken && !state.settingsData) {
+        layout.append(renderSettingsToken());
+        return;
+      }
+      if (!state.settingsData || !state.settingsDraft) {
+        layout.append(settingsEmpty("配置尚未加载。"));
+        return;
+      }
+
+      layout.append(renderSettingsStatus());
+      if (state.settingsNotice) {
+        const notice = document.createElement("div");
+        notice.className = "artifact-review-message";
+        notice.textContent = state.settingsNotice;
+        layout.append(notice);
+      }
+      if (state.settingsConfirm) {
+        layout.append(renderSettingsConfirmation());
+        return;
+      }
+      if (state.settingsModule === "storage") layout.append(renderStorageSettings());
+      else if (state.settingsModule === "view") layout.append(renderViewSettings());
+      else if (state.settingsModule === "participants") layout.append(renderParticipantSettings());
+      else layout.append(renderSettingsOverview());
+      if (state.settingsModule !== "overview") layout.append(renderSettingsActions());
+    }
+
+    function settingsInlineCode(value) {
+      const code = document.createElement("code");
+      code.textContent = value;
+      return code;
+    }
+
+    function renderSettingsToken() {
+      const section = document.createElement("section");
+      section.className = "settings-section settings-token";
+      const title = document.createElement("h3");
+      title.textContent = "验证配置操作权限";
+      const field = settingsTextField("操作令牌", state.settingsToken, value => {
+        state.settingsToken = value.trim();
+        state.settingsTokenError = "";
+        field.querySelector(".settings-error")?.remove();
+        const input = field.querySelector("input");
+        input?.removeAttribute("aria-invalid");
+        input?.removeAttribute("aria-describedby");
+      }, { type: "password" });
+      if (state.settingsTokenError) {
+        const input = field.querySelector("input");
+        input?.setAttribute("aria-invalid", "true");
+        const error = settingsErrorElement(state.settingsTokenError);
+        error.id = "settings-token-error";
+        error.setAttribute("role", "alert");
+        input?.setAttribute("aria-describedby", error.id);
+        field.append(error);
+      }
+      const help = document.createElement("div");
+      help.className = "settings-help";
+      help.append(
+        document.createTextNode("不知道令牌？请在启动 View 的工作区执行 "),
+        settingsInlineCode("memsphere view status"),
+        document.createTextNode("。")
+      );
+      field.append(help);
+      const action = document.createElement("button");
+      action.type = "button";
+      action.className = "btn primary";
+      action.textContent = "进入配置中心";
+      action.addEventListener("click", () => {
+        loadSettings().then(renderAll).catch(renderFatalError);
+      });
+      section.append(title, field, action);
+      return section;
+    }
+
+    function renderSettingsStatus() {
+      const status = document.createElement("div");
+      status.id = "settings-status";
+      status.className = "settings-status";
+      status.append(pill("磁盘配置 " + shortRevision(state.settingsData.diskRevision), false, "strong"));
+      status.append(pill("运行配置 " + shortRevision(state.settingsData.runningRevision)));
+      status.append(pill(state.settingsData.restartRequired ? "待重启生效" : "已生效", false, state.settingsData.restartRequired ? "warn" : "done"));
+      status.append(pill(settingsIsDirty() ? "未保存修改" : "没有未保存修改", false, settingsIsDirty() ? "warn" : "done"));
+      status.append(pill("错误 " + state.settingsErrors.length, false, state.settingsErrors.length ? "warn" : ""));
+      return status;
+    }
+
+    function renderSettingsOverview() {
+      const section = document.createElement("section");
+      section.className = "settings-section";
+      const title = document.createElement("h3");
+      title.textContent = "概览";
+      const grid = document.createElement("div");
+      grid.className = "settings-grid";
+      grid.append(
+        settingsReadOnly("配置文件", state.settingsData.configPath),
+        settingsReadOnly("配置作用域", state.settingsData.scopeRoot)
+      );
+      section.append(title, grid);
+      return section;
+    }
+
+    function renderStorageSettings() {
+      const section = document.createElement("section");
+      section.className = "settings-section";
+      const title = document.createElement("h3");
+      title.textContent = "存储";
+      const grid = document.createElement("div");
+      grid.className = "settings-grid";
+      for (const [key, label] of [
+        ["memoryRoot", "Memory 根目录"],
+        ["reviewsRoot", "Review 根目录"],
+        ["runsRoot", "Run 根目录"],
+        ["archiveRoot", "Archive 根目录"]
+      ]) {
+        grid.append(settingsOptionalPathField(key, label));
+      }
+      section.append(title, grid);
+      return section;
+    }
+
+    function renderViewSettings() {
+      const section = document.createElement("section");
+      section.className = "settings-section";
+      const title = document.createElement("h3");
+      title.textContent = "View 服务";
+      const explicit = Boolean(state.settingsDraft.view);
+      const view = state.settingsDraft.view || cloneSettingsValue(state.settingsData.defaults.view);
+      const grid = document.createElement("div");
+      grid.className = "settings-grid";
+      grid.append(
+        settingsTextField("Host", view.host, value => {
+          state.settingsDraft.view ||= cloneSettingsValue(state.settingsData.defaults.view);
+          state.settingsDraft.view.host = value;
+        }, { path: "view.host", disabled: !explicit }),
+        settingsTextField("Port", String(view.port), value => {
+          state.settingsDraft.view ||= cloneSettingsValue(state.settingsData.defaults.view);
+          state.settingsDraft.view.port = Number(value);
+        }, { path: "view.port", type: "number", min: 0, max: 65535, disabled: !explicit })
+      );
+      const useDefault = settingsPermissionCheck("使用默认 View 配置", !explicit, checked => {
+        if (checked) delete state.settingsDraft.view;
+        else state.settingsDraft.view = cloneSettingsValue(state.settingsData.defaults.view);
+        renderAll();
+      });
+      useDefault.classList.add("settings-default-toggle");
+      const help = document.createElement("p");
+      help.className = "settings-help";
+      help.textContent = "保存后执行 memsphere view restart，使 Host 与 Port 配置生效。";
+      section.append(title, grid, useDefault, help);
+      return section;
+    }
+
+    function renderParticipantSettings() {
+      const section = document.createElement("section");
+      section.className = "settings-section";
+      const heading = document.createElement("div");
+      heading.className = "settings-section-head";
+      const headingCopy = document.createElement("div");
+      const title = document.createElement("h3");
+      title.textContent = "参与者配置";
+      const subtitle = document.createElement("p");
+      subtitle.className = "settings-section-subtitle";
+      subtitle.textContent = "按参与者展开编辑权限和 Agent 运行参数。";
+      headingCopy.append(title, subtitle);
+      if (!state.settingsDraft.control_plane) {
+        const message = document.createElement("p");
+        message.className = "muted";
+        message.textContent = "当前未启用参与者控制平面。";
+        const enable = document.createElement("button");
+        enable.type = "button";
+        enable.className = "btn";
+        enable.textContent = "启用参与者配置";
+        enable.addEventListener("click", () => {
+          state.settingsDraft.control_plane = { runner: { permissions: [] }, actors: {} };
+          renderAll();
+        });
+        heading.append(headingCopy);
+        section.append(heading, message, enable);
+        return section;
+      }
+      const list = document.createElement("div");
+      list.className = "settings-participants";
+      list.append(renderSettingsParticipant(
+        "runner",
+        state.settingsDraft.control_plane.runner,
+        true
+      ));
+      for (const [id, actor] of Object.entries(state.settingsDraft.control_plane.actors || {})) {
+        list.append(renderSettingsParticipant(id, actor, false));
+      }
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "btn";
+      add.textContent = "添加参与者";
+      add.addEventListener("click", () => {
+        const actors = state.settingsDraft.control_plane.actors;
+        let index = Object.keys(actors).length + 1;
+        let id = "actor" + index;
+        while (actors[id]) id = "actor" + (++index);
+        actors[id] = { kind: "human", name: "新参与者", permissions: [] };
+        state.settingsExpandedParticipants.push(id);
+        renderAll();
+      });
+      heading.append(headingCopy, add);
+      section.append(heading, list);
+      return section;
+    }
+
+    function renderSettingsParticipant(id, actor, runner) {
+      const item = document.createElement("details");
+      item.className = "settings-participant";
+      const key = runner ? "runner" : id;
+      item.open = state.settingsExpandedParticipants.includes(key);
+      item.addEventListener("toggle", () => {
+        const expanded = new Set(state.settingsExpandedParticipants);
+        if (item.open) expanded.add(key);
+        else expanded.delete(key);
+        state.settingsExpandedParticipants = [...expanded];
+      });
+      const summary = document.createElement("summary");
+      summary.className = "settings-participant-summary";
+      const summaryMain = document.createElement("div");
+      summaryMain.className = "settings-participant-summary-main";
+      const heading = document.createElement("div");
+      heading.className = "settings-participant-title";
+      const name = document.createElement("strong");
+      name.textContent = runner ? t("runner") : (actor.name || id);
+      heading.append(name, pill(runner ? "runner" : actor.kind));
+      const meta = document.createElement("div");
+      meta.className = "settings-participant-summary-meta";
+      const configurablePermissionIds = new Set(
+        (state.settingsData.permissionCatalog || []).map(definition => definition.id)
+      );
+      const permissionCount = (actor.permissions || [])
+        .filter(permission => configurablePermissionIds.has(permission)).length;
+      const runtimeSummary = actor.kind === "agent"
+        ? " · " + (actor.agent?.provider || "traex") + (actor.agent?.model ? " · " + actor.agent.model : "")
+        : "";
+      meta.textContent = permissionCount + " 项权限" + runtimeSummary;
+      summaryMain.append(heading, meta);
+      summary.append(summaryMain);
+
+      const body = document.createElement("div");
+      body.className = "settings-participant-body";
+      const actions = document.createElement("div");
+      actions.className = "settings-participant-actions";
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "btn danger";
+      remove.textContent = "删除";
+      remove.disabled = runner;
+      remove.title = runner ? t("runner") + "不能删除" : "";
+      remove.addEventListener("click", () => {
+        delete state.settingsDraft.control_plane.actors[id];
+        state.settingsExpandedParticipants = state.settingsExpandedParticipants.filter(value => value !== id);
+        renderAll();
+      });
+      actions.append(remove);
+      body.append(actions);
+
+      if (!runner) {
+        const basic = document.createElement("div");
+        basic.className = "settings-grid settings-compact-grid settings-participant-basic";
+        basic.append(
+          settingsTextField("ID", id, value => renameSettingsActor(id, value), {
+            path: "control_plane.actors." + id,
+            commitOnChange: true
+          }),
+          settingsSelectField("类型", actor.kind, [["human", "Human"], ["agent", "Agent"]], value => {
+            actor.kind = value;
+            if (value === "agent" && !actor.agent) actor.agent = defaultSettingsAgent();
+            if (value === "human") delete actor.agent;
+          }),
+          settingsTextField("名称", actor.name || "", value => { actor.name = value; }, { path: "control_plane.actors." + id + ".name" }),
+          settingsTextArea("System prompt", actor.system_prompt || "", value => {
+            if (value.trim()) actor.system_prompt = value;
+            else delete actor.system_prompt;
+          }, "control_plane.actors." + id + ".system_prompt")
+        );
+        body.append(basic);
+      }
+
+      body.append(renderSettingsPermissions(actor, runner ? "control_plane.runner" : "control_plane.actors." + id));
+      if (!runner && actor.kind === "agent") body.append(renderSettingsAgentRuntime(actor.agent, id));
+      item.append(summary, body);
+      return item;
+    }
+
+    function renderSettingsPermissions(actor, path) {
+      const permissions = actor.permissions || [];
+      const wrap = document.createElement("div");
+      const title = document.createElement("h4");
+      title.textContent = "权限";
+      const grid = document.createElement("div");
+      grid.className = "settings-permissions";
+      for (const definition of state.settingsData.permissionCatalog || []) {
+        const row = document.createElement("div");
+        row.className = "settings-permission";
+        row.append(settingsPermissionCheck(definition.id, permissions.includes(definition.id), checked => {
+          updateSettingsPermission(actor, "permissions", definition.id, checked);
+          renderAll();
+        }));
+        const description = document.createElement("p");
+        description.textContent = definition.descriptions?.["zh-CN"] || definition.id;
+        row.append(description);
+        grid.append(row);
+      }
+      wrap.append(title, grid);
+      return wrap;
+    }
+
+    function renderSettingsAgentRuntime(agent, id) {
+      const runtime = agent || defaultSettingsAgent();
+      const wrap = document.createElement("div");
+      const title = document.createElement("h4");
+      title.textContent = "Agent 运行";
+      const grid = document.createElement("div");
+      grid.className = "settings-grid settings-compact-grid";
+      grid.append(
+        settingsSelectField("Provider", runtime.provider || "traex", [["traex", "Traex"]], value => {
+          runtime.provider = value;
+        }),
+        settingsTextField("Model", runtime.model || "", value => setOptionalValue(runtime, "model", value), {
+          path: "control_plane.actors." + id + ".agent.model"
+        })
+      );
+      wrap.append(title, grid);
+      return wrap;
+    }
+
+    function renderSettingsActions() {
+      const actions = document.createElement("div");
+      actions.className = "settings-actions";
+      const reload = document.createElement("button");
+      reload.type = "button";
+      reload.className = "btn";
+      reload.textContent = "重新读取";
+      reload.addEventListener("click", () => loadSettings().then(renderAll).catch(renderFatalError));
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "btn primary";
+      save.textContent = "保存";
+      save.addEventListener("click", () => validateSettings().catch(showSettingsFailure));
+      actions.append(reload, save);
+      return actions;
+    }
+
+    async function validateSettings() {
+      state.settingsErrors = [];
+      state.settingsNotice = "";
+      const response = await settingsFetch("/api/settings/validate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedRevision: state.settingsData.diskRevision,
+          config: state.settingsDraft
+        })
+      });
+      const payload = await response.json();
+      if (response.status === 409) {
+        state.settingsNotice = "配置文件已在磁盘上发生变化，请重新读取后再编辑。";
+        renderAll();
+        return;
+      }
+      if (!response.ok || !payload.valid) {
+        state.settingsErrors = payload.errors || [{ path: "", message: payload.error || "配置校验失败" }];
+        renderAll();
+        return;
+      }
+      state.settingsConfirm = payload;
+      renderAll();
+    }
+
+    function renderSettingsConfirmation() {
+      const section = document.createElement("section");
+      section.className = "settings-section";
+      const title = document.createElement("h3");
+      title.textContent = "确认配置变更";
+      const changes = document.createElement("ul");
+      changes.className = "settings-change-list";
+      for (const change of state.settingsConfirm.changes || []) {
+        const item = document.createElement("li");
+        item.textContent = change.path + " · " + settingsChangeLabel(change.kind)
+          + " · " + compactSettingsValue(change.before) + " → " + compactSettingsValue(change.after);
+        changes.append(item);
+      }
+      if (!changes.children.length) {
+        const item = document.createElement("li");
+        item.textContent = "没有配置变化。";
+        changes.append(item);
+      }
+      const code = document.createElement("pre");
+      code.className = "settings-code mono";
+      code.textContent = settingsJsonDiff(
+        JSON.stringify(state.settingsData.config, null, 2) + "\n",
+        state.settingsConfirm.normalizedJson || JSON.stringify(state.settingsDraft, null, 2) + "\n"
+      );
+      const diffTitle = document.createElement("h4");
+      diffTitle.textContent = "JSON diff";
+      const actions = document.createElement("div");
+      actions.className = "settings-actions";
+      const back = document.createElement("button");
+      back.type = "button";
+      back.className = "btn";
+      back.textContent = "返回编辑";
+      back.addEventListener("click", () => {
+        state.settingsConfirm = null;
+        renderAll();
+      });
+      const confirm = document.createElement("button");
+      confirm.type = "button";
+      confirm.className = "btn primary";
+      confirm.textContent = "确认保存";
+      confirm.disabled = !state.settingsConfirm.changes?.length;
+      confirm.addEventListener("click", () => saveSettings().catch(showSettingsFailure));
+      actions.append(back, confirm);
+      section.append(title, changes, diffTitle, code, actions);
+      return section;
+    }
+
+    async function saveSettings() {
+      const response = await settingsFetch("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedRevision: state.settingsData.diskRevision,
+          config: state.settingsDraft
+        })
+      });
+      const payload = await response.json();
+      if (response.status === 409) {
+        state.settingsConfirm = null;
+        state.settingsNotice = "保存失败：配置文件已被其他进程修改，请重新读取。";
+        renderAll();
+        return;
+      }
+      if (!response.ok) {
+        state.settingsConfirm = null;
+        state.settingsErrors = payload.errors || [{ path: "", message: payload.error || "保存失败" }];
+        renderAll();
+        return;
+      }
+      state.settingsData = payload;
+      state.settingsDraft = cloneSettingsValue(payload.config);
+      state.settingsConfirm = null;
+      state.settingsErrors = [];
+      state.settingsNotice = payload.restartRequired
+        ? "配置已保存。请执行 memsphere view restart；重启后地址："
+          + settingsViewUrl(payload.config.view || payload.defaults.view) + "。"
+        : "配置已保存并生效。";
+      renderAll();
+    }
+
+    function showSettingsFailure(error) {
+      state.settingsNotice = error instanceof Error ? error.message : String(error);
+      renderAll();
+    }
+
+    function settingsViewUrl(view) {
+      const host = view?.host || "127.0.0.1";
+      const port = Number(view?.port || 0);
+      return "http://" + host + ":" + port;
+    }
+
+    function settingsOptionalPathField(key, label) {
+      const wrap = document.createElement("div");
+      wrap.className = "settings-field settings-path-field";
+      const useDefault = state.settingsDraft[key] === undefined;
+      const check = settingsPermissionCheck("使用默认值", useDefault, checked => {
+        if (checked) delete state.settingsDraft[key];
+        else state.settingsDraft[key] = state.settingsData.defaults[key];
+        renderAll();
+      });
+      const field = settingsTextField(label, useDefault ? state.settingsData.defaults[key] : state.settingsDraft[key], value => {
+        state.settingsDraft[key] = value;
+      }, {
+        path: key,
+        disabled: useDefault,
+        help: state.settingsData.resolvedPaths[key]
+      });
+      wrap.append(field, check);
+      return wrap;
+    }
+
+    function settingsTextField(label, value, onInput, options = {}) {
+      const field = document.createElement("div");
+      field.className = "settings-field" + (options.wide ? " wide" : "");
+      const labelElement = document.createElement("label");
+      labelElement.textContent = label;
+      const input = document.createElement("input");
+      const inputId = "settings-input-" + uuid();
+      labelElement.htmlFor = inputId;
+      input.id = inputId;
+      input.className = "settings-input";
+      input.type = options.type || "text";
+      input.value = value ?? "";
+      input.disabled = Boolean(options.disabled);
+      if (options.min !== undefined) input.min = String(options.min);
+      if (options.max !== undefined) input.max = String(options.max);
+      input.addEventListener(options.commitOnChange ? "change" : "input", () => {
+        onInput(input.value);
+        state.settingsConfirm = null;
+        clearSettingsErrors(options.path);
+        refreshSettingsStatus();
+      });
+      field.append(labelElement, input);
+      if (options.help) {
+        const help = document.createElement("div");
+        help.className = "settings-help";
+        help.textContent = options.help;
+        field.append(help);
+      }
+      const error = settingsErrorFor(options.path);
+      if (error) field.append(settingsErrorElement(error));
+      return field;
+    }
+
+    function settingsTextArea(label, value, onInput, path, options = {}) {
+      const field = document.createElement("div");
+      field.className = "settings-field" + (options.wide === false ? "" : " wide");
+      const labelElement = document.createElement("label");
+      labelElement.textContent = label;
+      const textarea = document.createElement("textarea");
+      const textareaId = "settings-textarea-" + uuid();
+      labelElement.htmlFor = textareaId;
+      textarea.id = textareaId;
+      textarea.value = value;
+      textarea.addEventListener("input", () => {
+        onInput(textarea.value);
+        state.settingsConfirm = null;
+        clearSettingsErrors(path);
+        refreshSettingsStatus();
+      });
+      field.append(labelElement, textarea);
+      const error = settingsErrorFor(path);
+      if (error) field.append(settingsErrorElement(error));
+      return field;
+    }
+
+    function settingsSelectField(label, value, options, onChange) {
+      const field = document.createElement("div");
+      field.className = "settings-field";
+      const labelElement = document.createElement("div");
+      labelElement.className = "settings-label";
+      labelElement.textContent = label;
+      const wrap = document.createElement("div");
+      wrap.className = "settings-select-wrap";
+      const trigger = document.createElement("button");
+      trigger.type = "button";
+      trigger.className = "settings-select settings-select-trigger";
+      trigger.setAttribute("role", "combobox");
+      trigger.setAttribute("aria-label", label);
+      trigger.setAttribute("aria-haspopup", "listbox");
+      trigger.setAttribute("aria-expanded", "false");
+      const selectedLabel = document.createElement("span");
+      selectedLabel.textContent = options.find(([optionValue]) => optionValue === value)?.[1] || value;
+      const caret = document.createElement("span");
+      caret.className = "settings-select-caret";
+      caret.setAttribute("aria-hidden", "true");
+      caret.textContent = "⌄";
+      trigger.append(selectedLabel, caret);
+      const menu = document.createElement("div");
+      menu.className = "settings-select-menu";
+      menu.setAttribute("role", "listbox");
+      menu.setAttribute("aria-label", label);
+      menu.hidden = true;
+      const setOpen = open => {
+        if (open) {
+          for (const other of document.querySelectorAll(".settings-select-menu:not([hidden])")) {
+            if (other !== menu) {
+              other.hidden = true;
+              other.previousElementSibling?.setAttribute("aria-expanded", "false");
+            }
+          }
+        }
+        menu.hidden = !open;
+        trigger.setAttribute("aria-expanded", String(open));
+        if (open) {
+          queueMicrotask(() => {
+            const close = event => {
+              if (!wrap.contains(event.target)) setOpen(false);
+            };
+            document.addEventListener("pointerdown", close, { once: true });
+          });
+        }
+      };
+      for (const [optionValue, optionLabel] of options) {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "settings-select-option";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", String(optionValue === value));
+        option.textContent = optionLabel;
+        option.addEventListener("click", () => {
+          onChange(optionValue);
+          state.settingsConfirm = null;
+          renderAll();
+        });
+        menu.append(option);
+      }
+      trigger.addEventListener("click", () => setOpen(menu.hidden));
+      trigger.addEventListener("keydown", event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(true);
+          const choices = [...menu.querySelectorAll(".settings-select-option")];
+          const selected = choices.find(option => option.getAttribute("aria-selected") === "true");
+          (selected || choices[0])?.focus();
+        } else if (event.key === "Escape") {
+          event.stopPropagation();
+          setOpen(false);
+        }
+      });
+      menu.addEventListener("keydown", event => {
+        const choices = [...menu.querySelectorAll(".settings-select-option")];
+        const index = choices.indexOf(document.activeElement);
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          event.stopPropagation();
+          const offset = event.key === "ArrowDown" ? 1 : -1;
+          choices[(index + offset + choices.length) % choices.length]?.focus();
+        } else if (event.key === "Escape") {
+          event.stopPropagation();
+          setOpen(false);
+          trigger.focus();
+        }
+      });
+      wrap.append(trigger, menu);
+      field.append(labelElement, wrap);
+      return field;
+    }
+
+    function settingsPermissionCheck(label, checked, onChange) {
+      const labelElement = document.createElement("label");
+      labelElement.className = "settings-check";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = checked;
+      input.addEventListener("change", () => onChange(input.checked));
+      const text = document.createElement("span");
+      text.textContent = label;
+      labelElement.append(input, text);
+      return labelElement;
+    }
+
+    function settingsReadOnly(label, value) {
+      const field = document.createElement("div");
+      field.className = "settings-field";
+      const heading = document.createElement("div");
+      heading.className = "settings-label";
+      heading.textContent = label;
+      const content = document.createElement("div");
+      content.className = "mono";
+      content.textContent = value;
+      field.append(heading, content);
+      return field;
+    }
+
+    function settingsEmpty(message) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = message;
+      return empty;
+    }
+
+    function settingsErrorFor(path) {
+      if (!path) return state.settingsErrors.find(error => !error.path)?.message || "";
+      return state.settingsErrors.find(error => error.path === path || error.path?.startsWith(path + "."))?.message || "";
+    }
+
+    function settingsErrorElement(message) {
+      const error = document.createElement("div");
+      error.className = "settings-error";
+      error.textContent = message;
+      return error;
+    }
+
+    function settingsIsDirty() {
+      return JSON.stringify(state.settingsDraft) !== JSON.stringify(state.settingsData.config);
+    }
+
+    function refreshSettingsStatus() {
+      const current = document.querySelector("#settings-status");
+      if (current) current.replaceWith(renderSettingsStatus());
+    }
+
+    function clearSettingsErrors(path) {
+      if (!path) return;
+      state.settingsErrors = state.settingsErrors.filter(error =>
+        error.path !== path
+        && !error.path?.startsWith(path + ".")
+        && !path.startsWith((error.path || "") + ".")
+      );
+    }
+
+    function renameSettingsActor(currentId, nextId) {
+      const clean = nextId.trim();
+      if (!clean || clean === currentId) return;
+      const actors = state.settingsDraft.control_plane.actors;
+      if (actors[clean]) {
+        state.settingsNotice = "参与者 ID 已存在：" + clean;
+        return;
+      }
+      actors[clean] = actors[currentId];
+      delete actors[currentId];
+      state.settingsExpandedParticipants = state.settingsExpandedParticipants.map(value =>
+        value === currentId ? clean : value
+      );
+      renderAll();
+    }
+
+    function defaultSettingsAgent() {
+      return {
+        provider: "traex"
+      };
+    }
+
+    function setSettingsPermission(list, permission, enabled) {
+      const index = list.indexOf(permission);
+      if (enabled && index < 0) list.push(permission);
+      if (!enabled && index >= 0) list.splice(index, 1);
+    }
+
+    function updateSettingsPermission(actor, key, permission, enabled) {
+      const list = actor[key] ? [...actor[key]] : [];
+      setSettingsPermission(list, permission, enabled);
+      if (key === "permissions" || list.length) actor[key] = list;
+      else delete actor[key];
+    }
+
+    function setOptionalValue(target, key, value) {
+      if (value.trim()) target[key] = value;
+      else delete target[key];
+    }
+
+    function setOptionalNumber(target, key, value) {
+      if (value === "") delete target[key];
+      else target[key] = Number(value);
+    }
+
+    function optionalNumber(value) {
+      return value === undefined ? "" : String(value);
+    }
+
+    function shortRevision(value) {
+      return typeof value === "string" ? value.replace(/^sha256:/, "").slice(0, 8) : "unknown";
+    }
+
+    function compactSettingsValue(value) {
+      if (value === undefined) return "未设置";
+      const text = typeof value === "string" ? value : JSON.stringify(value);
+      return text.length > 90 ? text.slice(0, 87) + "..." : text;
+    }
+
+    function settingsJsonDiff(beforeText, afterText) {
+      const before = beforeText.trimEnd().split("\n");
+      const after = afterText.trimEnd().split("\n");
+      let prefix = 0;
+      while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix += 1;
+      let suffix = 0;
+      while (
+        suffix < before.length - prefix
+        && suffix < after.length - prefix
+        && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+      ) suffix += 1;
+      return [
+        ...before.slice(0, prefix).map(line => "  " + line),
+        ...before.slice(prefix, before.length - suffix).map(line => "- " + line),
+        ...after.slice(prefix, after.length - suffix).map(line => "+ " + line),
+        ...before.slice(before.length - suffix).map(line => "  " + line)
+      ].join("\n");
+    }
+
+    function settingsChangeLabel(kind) {
+      return ({ added: "新增", removed: "移除", changed: "修改" })[kind] || kind;
+    }
+
     function renderAll() {
       document.body.classList.toggle("task-mode", state.viewMode === "task");
+      document.body.classList.toggle("settings-mode", state.viewMode === "settings");
       document.body.classList.toggle("review-active", canComment());
       document.body.classList.toggle("artifact-review-modal-open", state.artifactReviewModalOpen);
       document.documentElement.classList.toggle("artifact-review-modal-open", state.artifactReviewModalOpen);
@@ -956,6 +1916,14 @@ export const browserHtml = String.raw`<!doctype html>
       syncArtifactReviewModalState();
       el.memoryTab.classList.toggle("active", state.viewMode === "memory");
       el.taskTab.classList.toggle("active", state.viewMode === "task");
+      el.settingsTab.classList.toggle("active", state.viewMode === "settings");
+      if (state.viewMode === "settings") {
+        state.reviewDrawerOpen = false;
+        syncReviewDrawer();
+        renderSettingsNav();
+        renderSettings();
+        return;
+      }
       if (state.viewMode === "task") {
         renderTaskNav();
         renderSelectedTask();
@@ -1098,6 +2066,15 @@ export const browserHtml = String.raw`<!doctype html>
       state.viewMode = mode;
       localStorage.setItem(viewModeKey, mode);
       ensureSelectedReview();
+      if (mode === "settings") {
+        state.reviewDrawerOpen = false;
+        renderAll();
+        if (!state.settingsMeta || (!state.settingsData && !state.settingsLoading)) {
+          await loadSettings();
+          renderAll();
+        }
+        return;
+      }
       renderAll();
       if (mode === "task") {
         await syncArtifactReviewContext();
@@ -4490,7 +5467,7 @@ export const browserHtml = String.raw`<!doctype html>
         const main = document.createElement("div");
         main.className = "artifact-review-row-main";
         const name = document.createElement(selectedRunnerVote ? "button" : "span");
-        const runnerName = runnerSummary?.actorName || "Runner";
+        const runnerName = t("runner");
         name.textContent = runnerName + (runnerSummary?.automatic ? " · " + t("automatic") : "");
         if (selectedRunnerVote) {
           name.type = "button";
@@ -5362,7 +6339,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderArtifactReviewRunnerOpinion(vote) {
-      const section = artifactReviewOpinionSection({ actorId: "runner" }, "Runner", vote.submittedAt);
+      const section = artifactReviewOpinionSection({ actorId: "runner" }, t("runner"), vote.submittedAt);
       section.append(blockTitle(t("voteSummary")));
       const summary = document.createElement("div");
       summary.className = "artifact-review-message" + (vote.value === "request_changes" ? " warn" : "");

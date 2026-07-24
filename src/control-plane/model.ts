@@ -26,13 +26,11 @@ export type AgentActorRuntime = {
 export type ControlPlaneActor = (HumanActorRuntime | AgentActorRuntime) & {
   name: string;
   permissions: PermissionId[];
-  grantablePermissions: PermissionId[];
   systemPrompt?: string;
 };
 
 export type RunnerAuthority = {
   permissions: PermissionId[];
-  grantablePermissions: PermissionId[];
 };
 
 export type ControlPlaneConfig = {
@@ -41,7 +39,6 @@ export type ControlPlaneConfig = {
 };
 
 export type SlotBindings = Record<string, { actorIds: string[]; source: string; skipped?: boolean }>;
-export type PermissionGrants = Record<string, PermissionId[]>;
 
 export type PermissionDefinitionSnapshot = {
   id: PermissionId;
@@ -117,7 +114,6 @@ export type PermissionGuidance = {
 export type RunReviewConfiguration = {
   reviews: Record<string, {
     policy: string;
-    permissionGrants: PermissionGrants;
   }>;
   slots: Record<string, { actorIds: string[] } | { skip: true }>;
 };

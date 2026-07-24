@@ -9,6 +9,39 @@ test("embedded browser script is valid JavaScript", () => {
   assert.doesNotThrow(() => new Function(script));
 });
 
+test("Settings is a stable four-module configuration workspace", () => {
+  assert.match(browserHtml, /id="settings-tab"/);
+  assert.match(browserHtml, /class="brand-settings"/);
+  assert.match(browserHtml, /class="sidebar-tools"[\s\S]*id="settings-tab"[\s\S]*<div class="brand">[\s\S]*<h1>memsphere<\/h1>/);
+  assert.doesNotMatch(browserHtml, /class="view-tab" id="settings-tab"/);
+  assert.match(browserHtml, /\["overview", "概览"\]/);
+  assert.match(browserHtml, /\["storage", "存储"\]/);
+  assert.match(browserHtml, /\["view", "View 服务"\]/);
+  assert.match(browserHtml, /\["participants", "参与者配置"\]/);
+  assert.match(browserHtml, /执行者/);
+  assert.doesNotMatch(browserHtml, /Runner 不能删除/);
+  assert.match(browserHtml, /save\.textContent = "保存"/);
+  assert.match(browserHtml, /state\.settingsModule !== "overview"[\s\S]*renderSettingsActions/);
+  assert.doesNotMatch(browserHtml, /检查并保存/);
+  assert.match(browserHtml, /settingsPermissionCheck\("使用默认值"/);
+  assert.match(browserHtml, /确认配置变更/);
+  assert.match(browserHtml, /memsphere view restart/);
+  assert.doesNotMatch(browserHtml, /当前运行地址/);
+  assert.doesNotMatch(browserHtml, /保存并重启后地址/);
+  assert.match(browserHtml, /没有未保存修改/);
+  assert.match(browserHtml, /"Provider"/);
+  assert.match(browserHtml, /\.settings-select-menu \{ position: absolute; top: calc\(100% \+ 4px\); right: 0; left: 0;/);
+  assert.doesNotMatch(browserHtml, /document\.createElement\("select"\)/);
+  assert.match(browserHtml, /document\.createElement\("details"\)/);
+  assert.match(browserHtml, /按参与者展开编辑权限和 Agent 运行参数/);
+  assert.match(browserHtml, /permissionCount \+ " 项权限"/);
+  assert.doesNotMatch(browserHtml, /直接授予/);
+  assert.doesNotMatch(browserHtml, /可授予/);
+  assert.match(browserHtml, /configurablePermissionIds/);
+  assert.doesNotMatch(browserHtml, /Prompt version|Startup timeout|Idle timeout|Max runtime|Args（每行一个）|Working directory/);
+  assert.doesNotMatch(browserHtml, />Debug</);
+});
+
 test("Artifact Review opinions render the server-provided Markdown projection", () => {
   assert.match(browserHtml, /if \(opinion\.renderedSummary\) summary\.innerHTML = opinion\.renderedSummary/);
   assert.match(browserHtml, /if \(vote\.renderedComment\) comment\.innerHTML = vote\.renderedComment/);
@@ -164,6 +197,8 @@ test("Artifact Review identity controls use Role names and an anchored custom me
 
 test("Artifact Review uses a resizable evidence modal with stable Submission targets", () => {
   assert.match(browserHtml, /<dialog class="artifact-review-modal" id="artifact-review-modal"/);
+  assert.match(browserHtml, /dialog\.artifact-review-modal \{[^}]*width: 90vw;[^}]*max-width: none;[^}]*height: 90dvh;[^}]*max-height: none;/);
+  assert.match(browserHtml, /\.artifact-review-modal-pane \{[^}]*overflow-x: hidden;[^}]*overflow-y: auto;/);
   assert.match(browserHtml, /role="separator" aria-controls="artifact-review-artifact-pane artifact-review-review-pane"/);
   assert.match(browserHtml, /artifact-review-mobile-tabs/);
   assert.match(browserHtml, /id="artifact-review-scope-panel"/);
@@ -295,6 +330,19 @@ test("markdown body resets inherited pre-wrap whitespace", () => {
   assert.match(browserHtml, /\.markdown-body \{[^}]*white-space: normal;/);
 });
 
+test("artifact review comment targets preserve the shared markdown spacing", () => {
+  assert.match(browserHtml, /\.artifact-review-artifact-content \.commentable \{ margin-block: 0; \}/);
+  assert.match(browserHtml, /\.artifact-review-artifact-content \.commentable-body \{ white-space: normal; \}/);
+  assert.match(
+    browserHtml,
+    /\.artifact-review-artifact-content \.markdown-body > \.commentable:first-child \.commentable-body > :first-child \{ margin-top: 0; \}/
+  );
+  assert.match(
+    browserHtml,
+    /\.artifact-review-artifact-content \.markdown-body > \.commentable:last-child \.commentable-body > :last-child \{ margin-bottom: 0; \}/
+  );
+});
+
 test("markdown tables use a horizontal scrolling container", () => {
   assert.match(browserHtml, /\.markdown-table-scroll \{[^}]*max-width: 100%;[^}]*overflow-x: auto;/);
   assert.match(browserHtml, /\.markdown-body table \{[^}]*width: max-content;[^}]*min-width: 100%;/);
@@ -390,7 +438,7 @@ test("Artifact Review keeps local draft text across conflict recovery renders", 
 });
 
 test("initial loading validates the saved review only after its subject data is available", () => {
-  assert.match(browserHtml, /await Promise\.all\(\[loadMemories\(\), loadReservedMemories\(\), loadReviews\(\), loadRuns\(\)\]\);\s*ensureSelectedReview\(\);/);
+  assert.match(browserHtml, /const requests = \[loadMemories\(\), loadReservedMemories\(\), loadReviews\(\), loadRuns\(\)\];\s*if \(state\.viewMode === "settings"\) requests\.push\(loadSettings\(\)\);\s*await Promise\.all\(requests\);\s*ensureSelectedReview\(\);/);
   assert.doesNotMatch(browserHtml, /async function loadReviews\(\) \{[\s\S]*?state\.reviews =[^}]*ensureSelectedReview\(\);/);
 });
 

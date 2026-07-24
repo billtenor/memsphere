@@ -99,37 +99,24 @@ The config file stores roots relative to the `.memsphere` directory by default:
     "port": 30000
   },
   "control_plane": {
-    "identities": {
+    "runner": {
+      "permissions": ["artifact.read", "artifact.write", "artifact.submit"]
+    },
+    "actors": {
       "human_reviewer": {
         "kind": "human",
-        "name": "Human Reviewer"
+        "name": "Human Reviewer",
+        "permissions": ["artifact.read", "decision.assess", "decision.decide"]
       },
       "review_agent": {
         "kind": "agent",
         "name": "Review Agent",
+        "permissions": ["artifact.read", "decision.assess", "decision.challenge"],
+        "system_prompt": "Review the Artifact independently.",
         "agent": {
           "provider": "traex",
-          "command": "traex",
-          "args": ["acp", "serve"],
-          "cwd": ".",
-          "model": "review-model",
-          "prompt_version": "artifact-review-v1",
-          "startup_timeout_ms": 60000,
-          "idle_timeout_ms": 120000,
-          "max_runtime_ms": null
+          "model": "review-model"
         }
-      }
-    },
-    "roles": {
-      "runner": {
-        "name": "Runner",
-        "permissions": ["artifact.read", "artifact.write", "artifact.submit"]
-      },
-      "reviewer": {
-        "name": "Reviewer",
-        "permissions": ["artifact.read", "decision.assess"],
-        "grantable_permissions": ["decision.challenge"],
-        "system_prompt": "Review the Artifact independently."
       }
     }
   }
@@ -138,9 +125,11 @@ The config file stores roots relative to the `.memsphere` directory by default:
 
 Set `archiveRoot` to an absolute path when multiple scopes should share archived runs and reviews.
 
-`control_plane` is optional. When present, it defines Identity and Role records; the `runner` Role is required and is carried implicitly by the current Run executor. Permission and Decision Policy catalogs are built into memsphere and cannot be redefined in config. Agent identities currently support the built-in `traex` ACP provider plus `command`, `args`, optional workspace-relative `cwd`, `model`, `prompt_version`, `startup_timeout_ms`, `idle_timeout_ms`, and `max_runtime_ms`. Startup timeout covers process and ACP Session initialization. Idle timeout resets whenever ACP reports progress or invokes a client capability. Maximum runtime is an absolute ceiling; omitting `max_runtime_ms` or setting it to `null` means no ceiling. Legacy `timeout_ms` remains readable as `max_runtime_ms` but cannot be combined with it. Credentials, arbitrary environment variables, API keys, and secrets are not control-plane fields: the configured ACP Agent uses its own existing login and provider configuration.
+`control_plane` is optional. When present, it defines the Runner authority and Human/Agent Actors. Permission and Decision Policy catalogs are built into memsphere and cannot be redefined in config. Agent Actors select a built-in ACP `provider` and may select a `model`. Process commands, arguments, working directories, timeouts, Prompt versions, credentials, environment variables, API keys, and secrets belong to Memsphere or the Provider implementation and are not Actor configuration.
 
-Memsphere owns the Agent Reviewer's safety arguments. The Traex Provider always launches `acp serve` with a read-only sandbox and no interactive approval fallback; do not put sandbox, approval-bypass, or another subcommand in `args`. An explicit `model` is forwarded by the Provider, and `cwd` must remain inside the current workspace.
+View exposes a Settings workspace with Overview, Storage, View Service, and Participants modules. It edits the exact `config.json` loaded by the running View, validates and previews semantic changes before an atomic save, and distinguishes the disk revision from the active process revision. Saving never restarts View automatically; run `memsphere view restart` when the page reports pending changes. A non-loopback View protects Settings with the operator token printed by `view start`, `view restart`, or `view status`.
+
+Memsphere owns the Agent Reviewer's launch command, safety arguments, workspace, timeouts, and Prompt protocol. The Traex Provider launches `acp serve` with the required sandbox and approval policy; an explicit Actor `model` is forwarded by the Provider.
 
 ### Bundled memory installation
 

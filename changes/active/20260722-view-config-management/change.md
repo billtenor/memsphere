@@ -1,118 +1,115 @@
 ---
 id: 20260722-view-config-management
-status: todo
+status: doing
 type: feature
 created: 2026-07-22
-run_id: run-20260722-052625z-0d5f7c40
+run_id: run-20260723-124143z-c1583a7f
 ---
 
-# View 配置管理面板
+# View 配置管理中心
 
 ## 需求
 
-随着存储路径、View 后台服务、调试开关、Identity、Role、Permission 和 Agent 运行参数陆续进入 `.memsphere/config.json`，直接编辑 JSON 已经难以维护，也无法直观 review 配置来源、默认值、字段关系和修改影响。
+`.memsphere/config.json` 已包含存储目录、View 服务和 Review 参与者等配置，直接维护 JSON 的成本和误操作风险持续上升。View 需要提供一个稳定、完整的配置工作区，让操作者看清当前实际加载的配置，在结构化表单中完成修改，并在写入前检查校验结果和语义差异。
 
-在 Memsphere View 中提供面向操作者的配置管理面板，让用户能够看清当前 View 实际加载的配置，在结构化表单中维护现有配置，保存前完成校验和差异确认，并清楚知道修改是否已经生效、是否需要重启 View。面板应降低日常配置成本，但不能把高风险配置写入变成匿名远程操作入口。
+配置中心只维护当前 View 启动时加载的精确 `configPath`，继续使用单一 `config.json`，不拆分配置文件，也不建设 Secret、备份恢复或远程服务控制系统。
 
 ## 用户场景
 
-- 用户进入配置面板后，能立即确认当前编辑的是项目/worktree 配置还是全局配置，以及对应的 `config.json` 和 scope 路径。
-- 用户不需要记忆 JSON 字段名、枚举值和默认值，就能配置存储目录、View、调试、Identity、Role、Permission 和 Agent 运行参数。
-- 用户新增或调整 Agent Reviewer 时，能通过表单完成 Identity 与 Role 配置，并在保存前发现非法 ID、缺少 `runner` Role、未知或重复 Permission、冲突超时参数等问题。
-- 用户保存前能 review 本次修改；多人或多个进程同时修改配置时，不会静默覆盖较新的文件。
-- 用户修改 host、port 或其他启动时配置后，能清楚选择仅保存或保存并重启，并能判断新配置是否真正生效。
-- 配置写错或 View 重启失败时，用户能够看到可操作的错误，并恢复到最近一次可工作的配置。
+- 操作者从 View 的稳定“设置”入口进入配置中心，立即看见当前配置文件、scope、磁盘 revision、运行 revision 和待重启状态。
+- 操作者无需记忆 JSON 字段名，即可维护存储目录、View host/port、Runner 和 Human/Agent Actor。
+- 操作者可以从系统 Permission Catalog 选择权限、理解权限含义，并在保存前发现未知或重复权限。
+- 操作者配置 Agent 时只维护 Provider 与 Model；命令、参数、工作目录和超时由 Provider 管理，Prompt version 属于系统内部协议，不向配置中心暴露。
+- 操作者点击“保存”后查看语义差异；磁盘文件已被其他进程修改时，页面不会覆盖较新版本。
+- View 监听局域网地址时，匿名访问者不能读取或修改配置；持有本进程操作令牌的用户可以完成配置操作。
 
 ## 范围
 
-### 面板入口与信息架构
+### 信息架构
 
-- View 提供稳定、易发现的“配置 / Settings”入口，进入独立配置页面或等价的完整工作区，不把复杂表单塞入 Memory、Task 或 Artifact Review 侧栏。
-- 面板按“存储”“View 服务”“调试”“身份”“角色与权限”等领域分组；组内使用适合字段语义的输入控件，而不是直接暴露一整块可编辑 JSON。
-- 界面文案跟随 View 当前语言；字段 ID、命令、路径和枚举值保留原始字面值，并提供中文/英文说明。
-- 提供只读的规范化 JSON 预览，便于复制和人工 review；第一版不把原始 JSON 编辑器作为主要编辑入口。
+配置中心与 Memory、Task 同级，包含且只包含四个模块：
 
-### 配置来源与值语义
+1. **概览**：只读展示配置文件、配置作用域、磁盘/运行 revision，以及已生效或待重启状态；不重复展示存储路径或完整配置，不提供重新读取和保存操作。
+2. **存储**：`memoryRoot`、`reviewsRoot`、`runsRoot`、`archiveRoot`；同时展示原始值和解析后的绝对路径，可选目录可恢复系统默认。
+3. **View 服务**：`view.host` 与 `view.port`；保存后仅提示手动执行 `memsphere view restart`，网页不提供 start/stop/restart 操作。
+4. **参与者配置**：Runner 与 `control_plane.actors` 使用同一列表和权限编辑方式。Runner 不能删除；Human/Agent Actor 可新增、编辑和删除。
 
-- 显示当前 View 启动时加载的 `configPath`、scope root 和配置 revision；只编辑这份配置，不隐式切换到全局或其他 worktree 配置。
-- 区分“文件中显式配置的值”和“系统默认值”，可将可选项恢复为默认状态，不能因为打开并保存面板就把所有默认值无意义地写回文件。
-- 路径字段同时显示原始配置值和基于当前 scope 解析后的绝对路径，明确相对路径、`~` 与绝对路径的含义。
-- 保存和重新加载后，配置的业务语义必须与 CLI 通过 `readConfigAt` 读取的结果一致。
+`debug` 不在界面展示或编辑，但保存其他配置时必须原样保留。
 
-### 结构化编辑能力
+### 参与者配置
 
-- 支持维护当前 config schema 中的全部用户配置：
-  - `memoryRoot`、`reviewsRoot`、`runsRoot`、`archiveRoot`。
-  - `view.host`、`view.port`。
-  - `debug.agent_review`。
-  - `control_plane.identities` 中 Human/Agent Identity 的 ID、名称和对应字段。
-  - Agent 的 provider、command、args、cwd、model、prompt version、startup/idle/max runtime 等参数；`max_runtime_ms` 未配置或为 `null` 时明确展示为无限运行。
-  - `control_plane.roles` 中 Role ID、名称、permissions、grantable permissions 和可选 system prompt。
-- Identity 和非保留 Role 支持新增、编辑、删除；删除或修改 ID 时必须展示影响，并阻止保存明显失效的引用。
-- `runner` Role 是系统保留项，允许编辑合法字段但不能删除或改名为其他 ID。
-- Permission 只能从系统内置 Catalog 选择，并显示自然语言说明；不能输入或保存未知 Permission，也不能在基础权限和可授予权限中重复配置。
-- 动态列表提供稳定的增删、排序和空值处理，键盘操作与窄屏布局可用，不因长路径、命令或 system prompt 造成内容重叠。
+- Runner 使用单一 `permissions` 列表。
+- Actor 支持 ID、`kind`、`name`、权限和可选 `system_prompt`。
+- Agent Actor 在配置中心只额外展示 Provider 与 Model。
+- `command`、`args`、`cwd`、`prompt_version` 和各类 timeout 属于 Provider 或 Memsphere 内部运行配置，不在参与者配置中展示，也不写入新的 Actor 配置。旧配置中的这些 Provider 运行字段可以读取，用户保存后规范化为 `provider + model`。
+- Permission 只能从系统内置 Catalog 选择，并展示自然语言说明。
+- 不区分直接权限与可授予权限，也不通过 Run Review 配置追加临时权限。`grantable_permissions` 已从当前配置语法移除，不提供兼容读取。
+- `decision.challenge` 与 `decision.override` 暂不在配置中心展示；底层兼容能力不在本需求中删除。
+- 不增加 Runner 的隐式权限，不在 UI 中引入 Identity、Role 或 Secret 模型。
 
-### 校验、Review 与保存
+### 校验与保存
 
-- 编辑过程提供就近的字段校验；保存前必须在服务端使用与 CLI 相同的 config schema 做完整校验和跨字段校验，前端校验不能替代服务端校验。
-- 错误信息定位到具体配置路径和控件，并保留用户草稿；校验失败时不得改写现有 `config.json`。
-- 保存前展示语义化修改摘要和 JSON diff，至少明确新增、删除、修改、恢复默认和需要重启的配置；用户确认后才写入。
-- 加载配置时记录 revision。保存时执行乐观并发检查；若磁盘文件已被其他进程修改，阻止覆盖，并提供重新加载及比较入口。
-- 写入使用临时文件和原子替换，避免进程中断留下半份 JSON；覆盖前至少保留一个可恢复的上一版本，并在面板中提供明确的恢复动作。
-- 配置保存、恢复和重启操作返回明确结果，不把“文件已保存”误报成“运行中服务已应用”。
+- GET 返回当前配置的显式值、默认值、解析路径和 revision；不把默认值无意义地写回文件。
+- 保存前调用服务端校验，使用与 CLI 相同的 config schema 和跨字段规则。
+- 错误定位到配置路径，界面保留草稿；校验失败不得写文件。
+- 点击“保存”后展示语义变更列表和 JSON diff，用户二次确认后才写入。
+- 保存使用 revision 乐观锁。磁盘 revision 改变时返回冲突并要求重新读取。
+- 写入采用同目录临时文件、fsync 和原子 rename；写入前后均检查 revision。
+- 不提供备份、回滚或配置文件拆分。
 
-### 生效与 View 重启
+### 生效语义
 
-- 面板明确标记当前运行配置 revision、磁盘最新 revision 和是否存在待生效修改。当前 View 进程仍使用启动时配置时，应显示“待重启”。
-- 用户可以选择“保存”或“保存并重启 View”。重启期间页面展示连接状态并自动尝试恢复连接。
-- host 或 port 改变时，重启前展示新访问地址和影响；重启成功后引导到新地址，不能在旧地址无提示地失联。
-- 新配置导致端口占用、进程启动失败或健康检查失败时，不得留下含糊的成功状态；应给出原因，并允许恢复上一配置和原有 View 服务。
+- View 进程保存启动时的 running revision，配置文件读取结果为 disk revision。
+- 两者不一致时展示“待重启生效”；页面不宣称磁盘保存已经应用到运行进程。
+- host/port 或其他配置保存后，由操作者手动执行 `memsphere view restart`。
 
 ### 安全边界
 
-- 配置写接口只能修改当前 View 已加载的精确 `configPath`，不能接受任意文件路径，也不能演变为通用文件读写接口。
-- 由于 Agent `command`、`args` 和 `cwd` 会影响本机进程执行，当 View 监听非 loopback 地址时，查看敏感配置、保存、恢复和重启必须经过明确的操作者授权；不得向局域网匿名访客开放写能力。
-- 授权机制必须适用于当前局域网访问方式，不能简单依赖请求来源 IP；具体凭据和会话方案在技术设计阶段确定。
-- 写请求具备基本的来源校验、请求大小限制和审计信息；错误响应、日志和 diff 不泄露未来可能进入配置的敏感值。
+- 配置 API 固定操作当前 View 的 `configPath`，不接受任意路径。
+- loopback View 可直接使用配置中心；非 loopback View 需要进程启动时生成的高熵操作令牌。
+- 令牌只保存在 mode `0600` 的 View state 文件和浏览器 `sessionStorage`，不进入 `config.json`。
+- 非 loopback GET 需要 Bearer token；POST/PUT 还必须使用 `application/json`，Origin 与 Host 完全匹配，且拒绝 cross-site 请求。
+- 请求体设大小上限；响应不暴露未纳入配置中心的 debug 内容。
 
 ## 不做事项
 
-- 不自动移动或复制 `memoryRoot`、`reviewsRoot`、`runsRoot`、`archiveRoot` 中的现有数据；修改路径只改变配置指向，并在界面提示影响。
-- 不在本面板编辑 Memory 中的 `role_bindings`、`permission_grants`、Procedure 或 Artifact Contract。
-- 不允许用户自定义系统 Permission Catalog 或 Decision Policy Catalog。
-- 不建设通用文件浏览器、任意 JSON 编辑器或多文件配置中心。
-- 不负责修复已经导致 View 无法启动的损坏配置；此时仍通过 CLI 或文本编辑恢复。
-- 不在第一版引入多级审批、远程配置同步或云端密钥管理。
+- 不拆分 `config.json`。
+- 不建设 Secret、凭据或环境变量管理。
+- 不展示或编辑 `debug`。
+- 不提供配置备份、回滚、远程同步或审计中心。
+- 不在网页中启动、停止或重启 View。
+- 不移动现有 Memory、Review、Run 或 Archive 数据。
+- 不修改 Memory YAML syntax。
 
 ## 验收标准
 
-- 从项目/worktree 启动 View 后，配置面板准确展示当前 `configPath`、scope、运行中 revision、磁盘 revision、显式值、默认值和路径解析结果；不会误编辑全局配置。
-- 面板能够无损读取、编辑并保存当前 schema 的全部配置字段；保存后 `readConfigAt` 的结果与面板确认内容一致，未修改字段和可选字段语义不丢失。
-- Human/Agent Identity、Role 和 Permission 的增删改可完成；保留 `runner`、ID 规则、Catalog 选择、重复 Permission、grantable 冲突及 Agent timeout 组合均按现有 schema 正确校验。
-- 任一非法字段或联合约束失败时，界面定位错误并保留草稿，磁盘配置字节不被修改。
-- 每次保存前都能看到准确的修改摘要与 diff；未确认不会写入。磁盘配置 revision 变化时，旧页面保存被拒绝，不会覆盖外部修改。
-- 保存采用原子替换并保留可恢复上一版本；模拟写入中断后，原配置仍可读取，恢复后 CLI 与 View 都能加载恢复版本。
-- 保存后界面正确区分“已保存”和“已生效”。需要重启时显示待重启；保存并重启成功后展示新的运行 revision 和地址。
-- 模拟端口占用或启动失败时，界面不报告成功，能够展示原因并恢复上一配置及可访问的 View 服务。
-- View 监听 `0.0.0.0` 时，未授权请求不能读取受保护配置、保存、恢复或重启；授权操作者可以完成完整流程，且接口不能写入 `configPath` 之外的文件。
-- 配置 API、config schema、并发冲突、原子写入/恢复、View 重启失败和权限边界有自动化测试；现有 Memory、Task、Artifact Review、归档与 View 后台服务回归通过。
-- 桌面和窄屏下表单、diff、错误提示及重启状态不重叠、不横向溢出，长路径、命令和 system prompt 可完整查看和编辑。
-
-## 关联需求
-
-- 强关联：`20260720-artifact-review-control-plane`，其 Identity、Role、Permission 与 Agent 配置是本面板的主要复杂配置来源。
-- 复用现有能力：View 后台服务的 start/stop/restart/status 与 `config.json` 中的 host/port 配置。
-- 重复需求：无。
+- 设置入口稳定可见，四个模块在桌面和窄屏均无横向溢出或控件重叠。
+- 页面准确展示当前 `configPath`、scope、运行/磁盘 revision、待重启状态、显式/默认语义和解析路径。
+- 存储、View、Runner、Human/Agent Actor 可无损读取、编辑和保存；Agent 只编辑 Provider 与 Model，旧 Provider 运行字段在保存时收敛为 Provider 内置配置。
+- Runner 与 Actor 使用一致的参与者和权限表达；Runner 删除键不可用。
+- `debug` 不在页面/API 可编辑配置中出现，保存后磁盘原值保持不变。
+- 非法字段和跨字段冲突返回具体路径，保留草稿，原配置字节不被修改。
+- 每次写入前展示准确差异；未确认不写入；过期 revision 保存返回 409 且不覆盖外部修改。
+- 写入采用原子替换；保存后正确区分“已保存”和“已生效”，需要时提示 `memsphere view restart`。
+- 非 loopback 未授权读取/写入被拒绝；合法令牌和同源请求可以完成操作。
+- 配置服务、权限校验、并发冲突、原子写入、View state 权限、浏览器脚本和响应式布局有自动化或浏览器验证。
 
 ## 技术与测试方案
 
-待开发前补充。
+- 新增独立 config-management service，负责精确来源、可编辑投影、默认语义、校验、diff、revision 和原子写入。
+- View 暴露 `meta/get/validate/put` 四个 Settings API；写接口统一执行 JSON、Origin、Host、Fetch Site 和 body size 检查。
+- 后台 View 对非 loopback 生成进程级 token，并通过私有 state 文件交给操作者。
+- 浏览器使用四模块结构化表单、字段错误、确认页和 session token，不直接编辑原始 JSON。
+- 使用 Node test 覆盖配置服务与 API，并用 Playwright 检查桌面/移动布局和核心交互。
 
 ## 开发任务
 
-尚未开始。
+- [x] 配置服务、默认语义、跨字段校验、乐观锁与原子写入。
+- [x] Settings API、非 loopback token 与同源写保护。
+- [x] 四模块 Settings 工作区、参与者编辑、差异确认和生效提示。
+- [x] 更新公开文档、System Memory 与 Skill。
+- [x] 执行完整测试、Validate 和浏览器验收。
 
 ## 验收结果
 
-尚未开始。
+进行中。

@@ -42,7 +42,6 @@ import {
   permissionIds,
   renderPermissionGuidance,
   resolveArtifactControlPlane,
-  validateActorGrants,
   type ArtifactControlPlane,
   type AuthorizationDecision,
   type ControlPlaneConfig,
@@ -247,7 +246,7 @@ export type RunReviewPreflight = {
     permissions: string[];
   }>;
   example: {
-    reviews: Record<string, { policy: string; permission_grants: Record<string, string[]> }>;
+    reviews: Record<string, { policy: string }>;
     slots: Record<string, { actors: string[] } | { skip: true }>;
   };
 };
@@ -667,8 +666,8 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
   reviewConfiguration: z.object({
     reviews: z.record(z.object({
       policy: z.string(),
-      permissionGrants: z.record(z.array(z.enum(permissionIds)))
-    }).strict()),
+      permissionGrants: z.record(z.array(z.enum(permissionIds))).optional()
+    }).strict().transform(({ permissionGrants: _legacy, ...review }) => review)),
     slots: z.record(z.union([
       z.object({ actorIds: z.array(z.string()).min(1) }).strict(),
       z.object({ skip: z.literal(true) }).strict()
@@ -2484,7 +2483,7 @@ function buildRunReviewPreflight(
     example: {
       reviews: Object.fromEntries(reviews.map((review) => [
         review.scope,
-        { policy: defaultPolicy, permission_grants: {} }
+        { policy: defaultPolicy }
       ])),
       slots: Object.fromEntries([...slots.keys()].map((key) => [
         key,
@@ -2513,11 +2512,6 @@ function validateRunReviewConfiguration(
     if (!snapshot.decisionPolicyCatalog.definitions.some((policy) => policy.id === review.policy)) {
       issues.push(`reviews.${scope}.policy: unknown Decision Policy id ${review.policy}`);
     }
-    issues.push(...validateActorGrants({
-      snapshot,
-      permissionGrants: review.permissionGrants,
-      path: `reviews.${scope}`
-    }).map((issue) => `${issue.path}: ${issue.message}`));
   }
   for (const scope of Object.keys(configuration.reviews)) {
     if (!requiredReviews.has(scope)) issues.push(`reviews.${scope}: unknown Review scope`);
@@ -2611,10 +2605,8 @@ function applyControlPlaneToSteps(
         step.controlPlane = resolveArtifactControlPlane({
           snapshot,
           slotBindings,
-          permissionGrants: review.permissionGrants,
           artifactScope,
-          policyId: review.policy,
-          grantSource: `run:${artifactScope}`
+          policyId: review.policy
         });
         if (Object.values(slotBindings).some((binding) => !binding.skipped)) {
           step.reviewPolicy = review.policy;
@@ -2627,8 +2619,7 @@ function applyControlPlaneToSteps(
           snapshot,
           slotBindings: {},
           artifactScope,
-          policyId: "",
-          grantSource: `run:${artifactScope}`
+          policyId: ""
         });
       }
     }

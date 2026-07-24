@@ -35,8 +35,8 @@ const systemPromptSchema = z.string().superRefine((value, context) => {
 
 const agentRuntimeInputSchema = z.object({
   provider: z.literal("traex").optional(),
-  command: nonEmptyString,
-  args: z.array(z.string()),
+  command: nonEmptyString.optional(),
+  args: z.array(z.string()).optional(),
   cwd: nonEmptyString.optional(),
   model: nonEmptyString.optional(),
   prompt_version: nonEmptyString.optional(),
@@ -53,9 +53,9 @@ const agentRuntimeInputSchema = z.object({
     });
   }
 }).transform((agent) => ({
-  provider: agent.provider,
-  command: agent.command,
-  args: [...agent.args],
+  provider: agent.provider ?? "traex",
+  command: agent.command ?? "traecli",
+  args: [...(agent.args ?? [])],
   cwd: agent.cwd,
   model: agent.model,
   promptVersion: agent.prompt_version,
@@ -69,32 +69,19 @@ const actorInputSchema = z.discriminatedUnion("kind", [
     kind: z.literal("human"),
     name: nonEmptyString,
     permissions: permissionListSchema,
-    grantable_permissions: permissionListSchema.optional(),
     system_prompt: systemPromptSchema
   }).strict(),
   z.object({
     kind: z.literal("agent"),
     name: nonEmptyString,
     permissions: permissionListSchema,
-    grantable_permissions: permissionListSchema.optional(),
     system_prompt: systemPromptSchema,
     agent: agentRuntimeInputSchema
   }).strict()
-]).superRefine((actor, context) => {
-  const base = new Set(actor.permissions);
-  for (const [index, permission] of (actor.grantable_permissions ?? []).entries()) {
-    if (!base.has(permission)) continue;
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["grantable_permissions", index],
-      message: `Permission ${permission} is already granted by permissions`
-    });
-  }
-}).transform((actor): ControlPlaneActor => {
+]).transform((actor): ControlPlaneActor => {
   const authority = {
     name: actor.name,
     permissions: [...actor.permissions],
-    grantablePermissions: [...(actor.grantable_permissions ?? [])],
     systemPrompt: actor.system_prompt
   };
   return actor.kind === "agent"
@@ -103,11 +90,9 @@ const actorInputSchema = z.discriminatedUnion("kind", [
 });
 
 const runnerInputSchema = z.object({
-  permissions: permissionListSchema,
-  grantable_permissions: permissionListSchema.optional()
+  permissions: permissionListSchema
 }).strict().transform((runner): RunnerAuthority => ({
-  permissions: [...runner.permissions],
-  grantablePermissions: [...(runner.grantable_permissions ?? [])]
+  permissions: [...runner.permissions]
 }));
 
 function recordWithValidatedKeys<T>(
@@ -147,14 +132,14 @@ const snapshotActorSchema = z.discriminatedUnion("kind", [
     kind: z.literal("human"),
     name: nonEmptyString,
     permissions: permissionListSchema,
-    grantablePermissions: permissionListSchema,
+    grantablePermissions: permissionListSchema.optional(),
     systemPrompt: z.string().optional()
   }).strict(),
   z.object({
     kind: z.literal("agent"),
     name: nonEmptyString,
     permissions: permissionListSchema,
-    grantablePermissions: permissionListSchema,
+    grantablePermissions: permissionListSchema.optional(),
     systemPrompt: z.string().optional(),
     agent: snapshotAgentRuntimeSchema
   }).strict()
@@ -163,10 +148,10 @@ const snapshotActorSchema = z.discriminatedUnion("kind", [
 const snapshotRunnerSchema = z.object({
   name: nonEmptyString,
   permissions: permissionListSchema,
-  grantablePermissions: permissionListSchema
+  grantablePermissions: permissionListSchema.optional()
 }).omit({ name: true }).strict();
 
-export const controlPlaneSnapshotSchema: z.ZodType<ControlPlaneSnapshot, z.ZodTypeDef, unknown> = z.object({
+export const controlPlaneSnapshotSchema = z.object({
   contractVersion: z.literal(1),
   revision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   permissionCatalog: z.object({
@@ -192,7 +177,7 @@ export const controlPlaneSnapshotSchema: z.ZodType<ControlPlaneSnapshot, z.ZodTy
   }).strict(),
   runner: snapshotRunnerSchema,
   actors: z.record(snapshotActorSchema)
-}).strict();
+}).strict() as unknown as z.ZodType<ControlPlaneSnapshot, z.ZodTypeDef, unknown>;
 
 export function parseControlPlaneConfig(value: unknown): ControlPlaneConfig {
   return controlPlaneConfigSchema.parse(value);

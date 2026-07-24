@@ -424,8 +424,7 @@ test("Schema finalization output points to the managed draft and exact report co
 test("run output explains effective runner permissions before report", () => {
   const snapshot = createControlPlaneSnapshot(parseControlPlaneConfig({
     runner: {
-      permissions: ["artifact.read", "artifact.submit"],
-      grantable_permissions: ["decision.decide"]
+      permissions: ["artifact.read", "artifact.submit", "decision.decide"]
     },
     actors: {
       human: {
@@ -439,10 +438,8 @@ test("run output explains effective runner permissions before report", () => {
   const controlPlane = resolveArtifactControlPlane({
     snapshot,
     slotBindings: { "governed::reviewer": { actorIds: ["human"], source: "run:governed::reviewer" } },
-    permissionGrants: { runner: ["decision.decide"] },
     artifactScope: "flow[1]",
-    policyId: "artifact_acceptance.unanimous",
-    grantSource: "run:flow[1]"
+    policyId: "artifact_acceptance.unanimous"
   });
   const run: RunState = {
     contractVersion: 3,
@@ -485,7 +482,7 @@ test("run output explains effective runner permissions before report", () => {
 
   const output = lines.join("\n");
   assert.match(output, /Control Plane:\n- mode: enabled/);
-  assert.match(output, /runner grants: decision\.decide/);
+  assert.match(output, /runner permissions: artifact\.read, artifact\.submit, decision\.decide/);
   assert.match(output, /governed::reviewer: human \(run:governed::reviewer\)/);
   assert.match(output, /Permission Guidance:/);
   assert.match(output, /artifact\.submit: You may submit the current Artifact/);
@@ -495,18 +492,15 @@ test("run output explains effective runner permissions before report", () => {
 test("successful report output explains the permission in natural language", () => {
   const snapshot = createControlPlaneSnapshot(parseControlPlaneConfig({
     runner: {
-      permissions: ["artifact.read"],
-      grantable_permissions: ["artifact.submit"]
+      permissions: ["artifact.read", "artifact.submit"]
     },
     actors: {}
   }));
   const controlPlane = resolveArtifactControlPlane({
     snapshot,
     slotBindings: {},
-    permissionGrants: { runner: ["artifact.submit"] },
     artifactScope: "flow[1]",
-    policyId: "artifact_acceptance.unanimous",
-    grantSource: "run:flow[1]"
+    policyId: "artifact_acceptance.unanimous"
   });
   const decision = authorizeArtifactOperation({
     controlPlane,
@@ -551,8 +545,8 @@ test("successful report output explains the permission in natural language", () 
 
   const output = lines.join("\n");
   assert.match(output, /Allowed: this operation uses the artifact\.submit permission/);
-  assert.match(output, /artifact\.submit \(grant\): You may submit the current Artifact/);
-  assert.match(output, /grant: run:flow\[1\]/);
+  assert.match(output, /artifact\.submit: You may submit the current Artifact/);
+  assert.doesNotMatch(output, /grant:/);
 });
 
 test("Artifact Review output emphasizes votes, comments, and an actionable conclusion", () => {
