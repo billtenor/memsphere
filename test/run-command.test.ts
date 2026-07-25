@@ -6,9 +6,7 @@ import {
   buildRunArtifactDetail,
   buildRunOverview,
   buildRunStepDetail,
-  printArtifactReviewSummary,
-  printLatestReportAuthorization,
-  printRunState,
+  printRunOutput,
   printSchemaWritingOverview,
   resolveReviewCommentBody,
   validateInlineReviewCommentBody
@@ -22,8 +20,11 @@ import {
 } from "../src/control-plane/index.js";
 import type { RunState, SchemaWritingSnapshot } from "../src/run/store.js";
 import {
-  buildArtifactReviewNextActionPromptModel
+  buildArtifactReviewNextActionPromptModel,
+  buildArtifactReviewSummaryPromptModel,
+  buildRunReviewVoteReceiptPromptModel
 } from "../src/prompts/review.js";
+import { renderPrompt } from "../src/prompts/renderer.js";
 
 test("inline Artifact Review comments reject escaped multiline Markdown", () => {
   assert.doesNotThrow(() => validateInlineReviewCommentBody("A short comment about `\\n`."));
@@ -180,7 +181,7 @@ test("run output separates Procedure assertions from Action assertions", () => {
   const originalLog = console.log;
   console.log = (...values: unknown[]) => lines.push(values.join(" "));
   try {
-    printRunState(run);
+    printRunOutput({ kind: "status", run });
   } finally {
     console.log = originalLog;
   }
@@ -191,7 +192,7 @@ test("run output separates Procedure assertions from Action assertions", () => {
   assert(output.indexOf("Procedure Asserts:") < output.indexOf("\nAsserts:"));
 });
 
-test("Run output defaults to Chinese and ignores LANG when no language is frozen", () => {
+test("run start and status omit the redundant Agent actor and permission list", () => {
   const run: RunState = {
     contractVersion: 3,
     id: "run-default-language",
@@ -216,22 +217,65 @@ test("Run output defaults to Chinese and ignores LANG when no language is frozen
     }],
     events: []
   };
-  const lines: string[] = [];
   const originalLog = console.log;
   const originalLang = process.env.LANG;
   process.env.LANG = "en_US.UTF-8";
-  console.log = (...values: unknown[]) => lines.push(values.join(" "));
   try {
-    printRunState(run);
+    for (const kind of ["start", "status"] as const) {
+      const lines: string[] = [];
+      console.log = (...values: unknown[]) => lines.push(values.join(" "));
+      printRunOutput({ kind, run });
+      const output = lines.join("\n");
+      assert.match(output, /请执行：/);
+      assert.match(output, /下一步：/);
+      assert.doesNotMatch(output, /执行者：|可用权限：/);
+      assert.doesNotMatch(output, /\nActor:\n|\nThen:\n|Available Permissions:/);
+    }
   } finally {
     console.log = originalLog;
     if (originalLang === undefined) delete process.env.LANG;
     else process.env.LANG = originalLang;
   }
+});
+
+test("run current-step output keeps an explicit Human handoff", () => {
+  const run: RunState = {
+    contractVersion: 3,
+    language: "zh-CN",
+    id: "run-human-step",
+    status: "running",
+    procedureName: "human-step",
+    memoryRoot: "/memory",
+    createdAt: "2026-07-25T00:00:00.000Z",
+    updatedAt: "2026-07-25T00:00:00.000Z",
+    stack: [{
+      type: "procedure",
+      memoryName: "human-step",
+      steps: [{
+        id: "flow[1]",
+        kind: "action",
+        instruction: "确认是否接受结果。",
+        actor: "human",
+        artifact: "验收反馈",
+        type: "string",
+        format: { name: "plain", options: {} }
+      }],
+      index: 0
+    }],
+    events: []
+  };
+  const lines: string[] = [];
+  const originalLog = console.log;
+  console.log = (...values: unknown[]) => lines.push(values.join(" "));
+  try {
+    printRunOutput({ kind: "status", run });
+  } finally {
+    console.log = originalLog;
+  }
   const output = lines.join("\n");
-  assert.match(output, /执行者：/);
-  assert.match(output, /下一步：/);
-  assert.doesNotMatch(output, /\nActor:\n|\nThen:\n/);
+  assert.match(output, /请 Human 执行：\n确认是否接受结果。/);
+  assert.match(output, /请上报 Human 提供的产物值。/);
+  assert.doesNotMatch(output, /执行者：|可用权限：/);
 });
 
 test("run output presents Repeat as control without an Artifact", () => {
@@ -261,7 +305,7 @@ test("run output presents Repeat as control without an Artifact", () => {
   const originalLog = console.log;
   console.log = (...values: unknown[]) => lines.push(values.join(" "));
   try {
-    printRunState(run);
+    printRunOutput({ kind: "status", run });
   } finally {
     console.log = originalLog;
   }
@@ -297,7 +341,15 @@ test("Schema field output shows production constraints and progress without perm
         type: "object",
         format: { name: "markdown", options: { layout: "outline" } },
         defines: ["A complete delivery."],
-        asserts: ["Include every required section."]
+        asserts: ["Include every required section."],
+        suggests: ["Keep the complete delivery concise."]
+      }, {
+        path: "Delivery.summary",
+        type: "string",
+        format: { name: "markdown", options: {} },
+        defines: ["Summarize the delivery."],
+        asserts: ["Describe the delivered result."],
+        suggests: ["Use one sentence."]
       }]
     }
   };
@@ -329,17 +381,92 @@ test("Schema field output shows production constraints and progress without perm
   const originalLog = console.log;
   console.log = (...values: unknown[]) => lines.push(values.join(" "));
   try {
-    printRunState(run, "/runs");
+    printRunOutput({ kind: "status", run, runsRoot: "/runs" });
   } finally {
     console.log = originalLog;
   }
   const output = lines.join("\n");
-  assert.match(output, /Schema Progress:/);
-  assert.match(output, /field: Delivery\.summary/);
-  assert.match(output, /constraint source: Delivery \(object · markdown \(layout: outline\)\)/);
-  assert.match(output, /defines: A complete delivery\./);
-  assert.match(output, /full overview: memsphere run schema show --run run-schema-writing/);
+  assert.match(output, /Current Procedure Step:/);
+  assert.match(output, /Schema Writing:/);
+  assert.match(output, /current field: summary/);
+  assert.match(output, /workflow: report each field to update one managed draft/);
+  assert.match(output, /field contract: string · markdown/);
+  assert.match(output, /Field Definition:\n- A complete delivery\.\n- Summarize the delivery\./);
+  assert.match(output, /Field Asserts:\n- Include every required section\.\n- Describe the delivered result\./);
+  assert.match(output, /Field Suggests:\n- Keep the complete delivery concise\.\n- Use one sentence\./);
+  assert.match(output, /View the complete Schema:\nmemsphere run schema show --run run-schema-writing/);
+  assert.doesNotMatch(output, /Delivery\.summary|constraint source/);
   assert.doesNotMatch(output, /Permission Guidance|Control Plane|Review/);
+});
+
+test("Schema root output uses a readable label instead of its internal node path", () => {
+  const parentStep: NonNullable<RunState["plan"]>[number] = {
+    id: "flow[1]",
+    kind: "action",
+    instruction: "按 Schema 编写功能说明。",
+    artifact: "小型功能说明",
+    type: "object",
+    format: { name: "markdown", options: { layout: "outline" } },
+    schema: {
+      kind: "inline",
+      id: "inline:flow[1]:artifact",
+      node: { tag: "!schema", names: ["小型功能说明"], defines: [] }
+    }
+  };
+  const rootStep: NonNullable<RunState["plan"]>[number] = {
+    id: "schema:inline:flow[1]:artifact",
+    instruction: "Write inline:flow[1]:artifact",
+    artifact: "inline:flow[1]:artifact",
+    type: "object",
+    format: { name: "markdown", options: { layout: "outline" } },
+    schemaContext: {
+      rootName: "inline:flow[1]:artifact",
+      path: "inline:flow[1]:artifact",
+      sources: [{
+        path: "inline:flow[1]:artifact",
+        type: "object",
+        format: { name: "markdown", options: { layout: "outline" } }
+      }]
+    }
+  };
+  const run: RunState = {
+    contractVersion: 3,
+    language: "zh-CN",
+    id: "run-schema-root",
+    status: "running",
+    procedureName: "Schema 小型流程",
+    memoryRoot: "/memory",
+    createdAt: "2026-07-25T00:00:00.000Z",
+    updatedAt: "2026-07-25T00:00:00.000Z",
+    plan: [parentStep],
+    stack: [
+      { type: "procedure", memoryName: "Schema 小型流程", steps: [parentStep], index: 0 },
+      {
+        type: "schema",
+        memoryName: "inline:flow[1]:artifact",
+        sourceStepId: "flow[1]",
+        eventStartIndex: 0,
+        steps: [rootStep],
+        index: 0
+      }
+    ],
+    events: []
+  };
+
+  const lines: string[] = [];
+  const originalLog = console.log;
+  console.log = (...values: unknown[]) => lines.push(values.join(" "));
+  try {
+    printRunOutput({ kind: "status", run, runsRoot: "/runs" });
+  } finally {
+    console.log = originalLog;
+  }
+
+  const output = lines.join("\n");
+  assert.match(output, /当前字段：文档标题与概述/);
+  assert.match(output, /工作方式：逐字段上报以更新同一份托管草稿/);
+  assert.match(output, /请填写：\n文档标题与概述/);
+  assert.doesNotMatch(output, /Write inline:flow\[1\]:artifact/);
 });
 
 test("Schema overview includes the parent production contract without Review control data", () => {
@@ -458,7 +585,7 @@ test("Schema finalization output points to the managed draft and exact report co
   const originalLog = console.log;
   console.log = (...values: unknown[]) => lines.push(values.join(" "));
   try {
-    printRunState(run, "/runs");
+    printRunOutput({ kind: "status", run, runsRoot: "/runs" });
   } finally {
     console.log = originalLog;
   }
@@ -471,7 +598,7 @@ test("Schema finalization output points to the managed draft and exact report co
   assert.doesNotMatch(output, /Review|Permission Guidance/);
 });
 
-test("run output explains effective runner permissions before report", () => {
+test("run current-step output does not expose effective runner permissions", () => {
   const snapshot = createControlPlaneSnapshot(parseControlPlaneConfig({
     runner: {
       permissions: ["artifact.read", "artifact.submit", "decision.decide"]
@@ -524,7 +651,7 @@ test("run output explains effective runner permissions before report", () => {
   process.env.LANG = "en_US.UTF-8";
   console.log = (...values: unknown[]) => lines.push(values.join(" "));
   try {
-    printRunState(run);
+    printRunOutput({ kind: "status", run });
   } finally {
     console.log = originalLog;
     if (originalLang === undefined) delete process.env.LANG;
@@ -532,15 +659,15 @@ test("run output explains effective runner permissions before report", () => {
   }
 
   const output = lines.join("\n");
-  assert.match(output, /Control Plane:\n- mode: enabled/);
-  assert.match(output, /runner permissions: artifact\.read, artifact\.submit, decision\.decide/);
-  assert.match(output, /governed::reviewer: human \(run:governed::reviewer\)/);
-  assert.match(output, /Permission Guidance:/);
-  assert.match(output, /artifact\.submit: You may submit the current Artifact/);
-  assert(output.indexOf("Permission Guidance:") < output.indexOf("Then:"));
+  assert.match(output, /Do:\nProduce the result\./);
+  assert.match(output, /Then:/);
+  assert.doesNotMatch(
+    output,
+    /Actor:|Available Permissions:|artifact\.submit|Control Plane|runner permissions|governed::reviewer|revision|authority source/
+  );
 });
 
-test("successful report output explains the permission in natural language", () => {
+test("successful report output is a receipt followed by the completed state", () => {
   const snapshot = createControlPlaneSnapshot(parseControlPlaneConfig({
     runner: {
       permissions: ["artifact.read", "artifact.submit"]
@@ -588,7 +715,7 @@ test("successful report output explains the permission in natural language", () 
   process.env.LANG = "en_US.UTF-8";
   console.log = (...values: unknown[]) => lines.push(values.join(" "));
   try {
-    printLatestReportAuthorization(run);
+    printRunOutput({ kind: "report", run });
   } finally {
     console.log = originalLog;
     if (originalLang === undefined) delete process.env.LANG;
@@ -596,9 +723,9 @@ test("successful report output explains the permission in natural language", () 
   }
 
   const output = lines.join("\n");
-  assert.match(output, /Allowed: this operation uses the artifact\.submit permission/);
-  assert.match(output, /artifact\.submit: You may submit the current Artifact/);
-  assert.doesNotMatch(output, /grant:/);
+  assert.match(output, /Report succeeded:\n- Run: run-report-guidance\n- Artifact: result/);
+  assert.match(output, /Run run-report-guidance[\s\S]*Done/);
+  assert.doesNotMatch(output, /Allowed:|Permission Guidance|grant:/);
 });
 
 test("Artifact Review output emphasizes votes, comments, and an actionable conclusion", () => {
@@ -674,7 +801,11 @@ test("Artifact Review output emphasizes votes, comments, and an actionable concl
   const originalLog = console.log;
   console.log = (...values: unknown[]) => lines.push(values.join(" "));
   try {
-    printArtifactReviewSummary(review, round);
+    console.log(renderPrompt(
+      "run.review-summary",
+      "en",
+      buildArtifactReviewSummaryPromptModel(review, round, "en")
+    ));
   } finally {
     console.log = originalLog;
   }
@@ -683,7 +814,7 @@ test("Artifact Review output emphasizes votes, comments, and an actionable concl
   assert.match(output, /- submitted: 2\/2/);
   assert.match(output, /- Advisor \(advisory\)\n  - vote: request_changes/);
   assert.match(output, /comment \[unspecified\]: Clarify the conclusion/);
-  assert.match(output, /- Runner \(decision, automatic\)\n  - vote: approve/);
+  assert.doesNotMatch(output, /- Runner \(/);
   assert.match(output, /unanimous approval was not reached: 1\/2 decision votes approved/);
   assert.match(output, /Conclusion:\n- This review round did not pass because unanimous approval was not reached; revise the Artifact/);
   assert.doesNotMatch(output, /Human submitted|; submitted;|formal votes|advisory votes|result:/);
@@ -774,19 +905,92 @@ test("Artifact Review output asks the Runner to decide after assigned reviews co
   const originalLog = console.log;
   console.log = (...values: unknown[]) => lines.push(values.join(" "));
   try {
-    printArtifactReviewSummary(review, round);
+    console.log(renderPrompt(
+      "run.review-summary",
+      "en",
+      buildArtifactReviewSummaryPromptModel(review, round, "en")
+    ));
   } finally {
     console.log = originalLog;
   }
 
   const output = lines.join("\n");
-  assert.match(output, /- Runner \(decision\)\n  - vote: pending/);
+  assert.match(output, /^Review opinions collected\. Review information:/);
+  assert.doesNotMatch(output, /- Runner \(/);
   assert.match(output, /All assigned reviews are submitted: 1\/1 decision votes approved; 1 advisory vote was recorded/);
   assert.doesNotMatch(output, /Human review|Human decision/);
-  assert.match(output, /You are the Runner for this Run, and your decision vote is pending/);
-  assert.match(output, /As the Runner, review every comment above, then cast your vote explicitly/);
-  assert.match(output, /The Artifact has not been accepted and the Run has not advanced/);
+  assert.match(output, /All decision votes approved; only advisory reviewers requested changes\. You have final decision authority/);
+  assert.match(output, /Review every opinion above, then cast your vote explicitly/);
+  assert.doesNotMatch(output, /The Artifact has not been accepted and the Run has not advanced/);
+  assert.doesNotMatch(output, /policy can still reach unanimous approval/);
   assert.doesNotMatch(output, /passed unanimously|Run advanced/);
+
+  round.votes[0]!.value = "approve";
+  const approvedAdvisoryOutput = renderPrompt(
+    "run.review-summary",
+    "en",
+    buildArtifactReviewSummaryPromptModel(review, round, "en")
+  );
+  assert.match(approvedAdvisoryOutput, /All decision votes approved\. You have final decision authority/);
+  assert.doesNotMatch(approvedAdvisoryOutput, /only advisory reviewers requested changes/);
+
+  review.status = "awaiting_revision";
+  round.status = "changes_requested";
+  const voteOutput: string[] = [];
+  console.log = (...values: unknown[]) => voteOutput.push(values.join(" "));
+  try {
+    printRunOutput({
+      kind: "review_vote",
+      run: {
+        contractVersion: 3,
+        language: "en",
+        id: "run-vote-receipt",
+        status: "running",
+        procedureName: "reviewed",
+        memoryRoot: "/memory",
+        createdAt: "2026-07-21T00:00:00.000Z",
+        updatedAt: "2026-07-21T00:02:00.000Z",
+        stack: [{
+          type: "procedure",
+          memoryName: "reviewed",
+          steps: [{
+            id: "flow[1]",
+            instruction: "Submit a candidate.",
+            artifact: "candidate",
+            type: "string",
+            format: { name: "plain", options: {} }
+          }],
+          index: 0
+        }],
+        events: [],
+        artifactReviews: [review]
+      },
+      review,
+      round,
+      vote: "request_changes"
+    });
+  } finally {
+    console.log = originalLog;
+  }
+  const renderedVoteOutput = voteOutput.join("\n");
+  assert.match(renderedVoteOutput, /^Vote submitted: request_changes/);
+  assert.match(renderedVoteOutput, /Next, revise the Artifact according to the review opinions above/);
+  assert.match(
+    renderedVoteOutput,
+    /memsphere run report --run run-vote-receipt --artifact <value> --revision-summary <text>/
+  );
+  assert.match(
+    renderedVoteOutput,
+    /memsphere run report --run run-vote-receipt --artifact-file <path> --revision-summary-file <path>/
+  );
+  assert.doesNotMatch(renderedVoteOutput, /Participants:|Advisor|Decider|Review information/);
+
+  const approveReceipt = renderPrompt(
+    "run.review-vote-receipt",
+    "en",
+    buildRunReviewVoteReceiptPromptModel("approve", "en")
+  );
+  assert.equal(approveReceipt, "Vote submitted: approve");
 });
 
 test("report output does not expose background reviewer failures", () => {
@@ -860,7 +1064,31 @@ test("report output does not expose background reviewer failures", () => {
     const originalLog = console.log;
     console.log = (...values: unknown[]) => lines.push(values.join(" "));
     try {
-      printArtifactReviewSummary(review, round, "zh-CN");
+      const run: RunState = {
+        contractVersion: 3,
+        language: "zh-CN",
+        id: "run-report-failed-reviewer",
+        status: "running",
+        procedureName: "reviewed",
+        memoryRoot: "/memory",
+        createdAt: "2026-07-25T00:00:00.000Z",
+        updatedAt: "2026-07-25T00:00:01.000Z",
+        stack: [{
+          type: "procedure",
+          memoryName: "reviewed",
+          steps: [{
+            id: "flow[1]",
+            instruction: "提交候选产物。",
+            artifact: "candidate",
+            type: "string",
+            format: { name: "plain", options: {} }
+          }],
+          index: 0
+        }],
+        events: [],
+        artifactReviews: [review]
+      };
+      printRunOutput({ kind: "report", run });
     } finally {
       console.log = originalLog;
     }
@@ -868,8 +1096,8 @@ test("report output does not expose background reviewer failures", () => {
   };
 
   const normal = capture();
-  assert.match(normal, /上报结果：成功，产物已进入评审/);
-  assert.doesNotMatch(normal, /Agent 失败|Provider|ACP connection closed|Agent Assignment|重试/);
+  assert.match(normal, /上报成功：\n- Run：run-report-failed-reviewer\n- 产物：candidate/);
+  assert.doesNotMatch(normal, /评审汇总|Agent 失败|Provider|ACP connection closed|Agent Assignment|重试/);
   assert.deepEqual(
     buildArtifactReviewNextActionPromptModel(review, round, "run-1"),
     { kind: "none" }

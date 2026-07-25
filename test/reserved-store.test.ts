@@ -116,7 +116,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     ["memsphere-concept-schema", ["syntax", "name", "names", "defines", "extends"]],
     ["memsphere-statement-schema", ["syntax", "name", "names", "defines", "asserts", "suggests", "sections"]],
     ["memsphere-procedure-schema", ["syntax", "name", "names", "defines", "asserts", "goals", "flow"]],
-    ["memsphere-schema-schema", ["syntax", "name", "names", "defines", "asserts", "optional", "type", "format", "fields", "item", "items"]]
+    ["memsphere-schema-schema", ["syntax", "name", "names", "defines", "asserts", "suggests", "optional", "type", "format", "fields", "item", "items"]]
   ] as const) {
     const entitySchema = files.find((file) => file.entity.names.includes(entitySchemaName));
     assert(entitySchema?.entity.tag === "!schema");

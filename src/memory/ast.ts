@@ -57,6 +57,7 @@ export type SchemaField = StaticSchemaField | RepeatNode;
 export type SchemaNode = CommonMemoryNode & {
   tag: "!schema";
   asserts?: string[];
+  suggests?: string[];
   optional?: boolean;
   type?: ArtifactType;
   format?: ArtifactFormatSpec;

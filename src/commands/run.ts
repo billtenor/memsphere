@@ -18,11 +18,8 @@ import {
   type RunReviewConfiguration
 } from "../control-plane/index.js";
 import {
-  buildArtifactReviewSummaryPromptModel,
-  buildArtifactReviewNextActionPromptModel,
-  buildReportAuthorizationPromptModel,
-  buildRunStatePromptModel,
   buildSchemaOverviewPromptModel,
+  renderRunOutput,
   renderPrompt,
   resolvePromptLocale,
   type PromptLocale
@@ -55,6 +52,7 @@ type ReportOptions = {
   run?: string;
   artifact?: string;
   artifactFile?: string;
+  revisionSummary?: string;
   revisionSummaryFile?: string;
 };
 
@@ -152,7 +150,7 @@ export async function runStartCommand(procedureName: string | undefined, options
     ));
     return;
   }
-  printRunState(run, config.runsRoot);
+  printRunOutput({ kind: "start", run, runsRoot: config.runsRoot });
 }
 
 function parseRunReviewConfiguration(value: unknown): RunReviewConfiguration {
@@ -196,9 +194,12 @@ function parseRunReviewConfiguration(value: unknown): RunReviewConfiguration {
 export async function runReportCommand(options: ReportOptions): Promise<void> {
   const runId = requireRunId(options.run);
   const artifact = readArtifactOption(options);
+  if (options.revisionSummary !== undefined && options.revisionSummaryFile !== undefined) {
+    throw new Error("use only one of --revision-summary or --revision-summary-file");
+  }
   const revisionSummary = options.revisionSummaryFile
     ? await readFile(options.revisionSummaryFile, "utf8")
-    : undefined;
+    : options.revisionSummary;
   const config = await readConfig();
   const run = await reportRun({
     runsRoot: config.runsRoot,
@@ -207,8 +208,7 @@ export async function runReportCommand(options: ReportOptions): Promise<void> {
     revisionSummary
   });
   await dispatchArtifactReviewAgents({ config, run });
-  printLatestReportAuthorization(run);
-  printRunState(run, config.runsRoot);
+  printRunOutput({ kind: "report", run, runsRoot: config.runsRoot });
 }
 
 export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<void> {
@@ -218,21 +218,13 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
   const located = await findArtifactReview({ runsRoot: config.runsRoot, reviewId });
   await dispatchArtifactReviewAgents({ config, run: located.run });
   const context = await waitForArtifactReview({ runsRoot: config.runsRoot, reviewId });
-  printArtifactReviewSummary(
-    context.review,
-    context.round,
-    resolvePromptLocale(context.run.language)
-  );
-  console.log("");
-  if (context.review.status === "passed") {
-    printRunState(context.run, config.runsRoot);
-    return;
-  }
-  console.log(renderPrompt(
-    "run.review-next-action",
-    resolvePromptLocale(context.run.language),
-    buildArtifactReviewNextActionPromptModel(context.review, context.round, context.run.id)
-  ));
+  printRunOutput({
+    kind: "review",
+    run: context.run,
+    review: context.review,
+    round: context.round,
+    runsRoot: config.runsRoot
+  });
 }
 
 export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<void> {
@@ -257,21 +249,14 @@ export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<
     vote: options.vote,
     comment
   });
-  printArtifactReviewSummary(
-    context.review,
-    context.round,
-    resolvePromptLocale(context.run.language)
-  );
-  console.log("");
-  if (context.review.status === "passed") {
-    printRunState(context.run, config.runsRoot);
-    return;
-  }
-  console.log(renderPrompt(
-    "run.review-next-action",
-    resolvePromptLocale(context.run.language),
-    buildArtifactReviewNextActionPromptModel(context.review, context.round, context.run.id)
-  ));
+  printRunOutput({
+    kind: "review_vote",
+    run: context.run,
+    review: context.review,
+    round: context.round,
+    vote: options.vote,
+    runsRoot: config.runsRoot
+  });
 }
 
 export async function runReviewRetryCommand(options: ReviewRetryOptions): Promise<void> {
@@ -480,8 +465,13 @@ export async function runEnterSchemaCommand(schemaName: string | undefined, opti
     schemaName
   });
   const snapshot = buildSchemaWritingSnapshot(config.runsRoot, run);
-  if (snapshot) printSchemaWritingOverview(snapshot, resolvePromptLocale(run.language));
-  printRunState(run, config.runsRoot);
+  if (!snapshot) throw new Error(`run has no active Schema writing context: ${runId}`);
+  printRunOutput({
+    kind: "enter_schema",
+    run,
+    snapshot,
+    runsRoot: config.runsRoot
+  });
 }
 
 export async function runSchemaShowCommand(options: RunSchemaShowOptions): Promise<void> {
@@ -508,21 +498,21 @@ export async function runRepeatCommand(countValue: string, options: RunIdOptions
   }
   const config = await readConfig();
   const run = await repeatRun({ runsRoot: config.runsRoot, runId, count });
-  printRunState(run, config.runsRoot);
+  printRunOutput({ kind: "repeat", run, runsRoot: config.runsRoot });
 }
 
 export async function runSkipCommand(options: RunIdOptions): Promise<void> {
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await skipRun({ runsRoot: config.runsRoot, runId });
-  printRunState(run, config.runsRoot);
+  printRunOutput({ kind: "skip", run, runsRoot: config.runsRoot });
 }
 
 export async function runStatusCommand(options: RunIdOptions): Promise<void> {
   const config = await readConfig();
   if (options.run) {
     const run = await ensureCurrentSchemaDraft(config.runsRoot, await readRun(config.runsRoot, options.run));
-    printRunState(run, config.runsRoot);
+    printRunOutput({ kind: "status", run, runsRoot: config.runsRoot });
     return;
   }
 
@@ -561,13 +551,8 @@ function requireStepRef(value: string | undefined): string {
   return stepRef;
 }
 
-export function printRunState(run: RunState, runsRoot?: string): void {
-  const locale = resolvePromptLocale(run.language);
-  console.log(renderPrompt(
-    "run.state",
-    locale,
-    buildRunStatePromptModel(run, locale, runsRoot)
-  ));
+export function printRunOutput(scene: Parameters<typeof renderRunOutput>[0]): void {
+  console.log(renderRunOutput(scene, resolvePromptLocale(scene.run.language)));
 }
 
 export function printSchemaWritingOverview(
@@ -579,26 +564,6 @@ export function printSchemaWritingOverview(
     locale,
     buildSchemaOverviewPromptModel(snapshot)
   ));
-}
-
-export function printArtifactReviewSummary(
-  review: ArtifactReview<RunState["events"][number]["artifact"]>,
-  round: ArtifactReviewRound,
-  locale: PromptLocale = "en"
-): void {
-  console.log(renderPrompt(
-    "run.review-summary",
-    locale,
-    buildArtifactReviewSummaryPromptModel(review, round)
-  ));
-}
-
-export function printLatestReportAuthorization(run: RunState): void {
-  const locale = resolvePromptLocale(run.language);
-  const model = buildReportAuthorizationPromptModel(run, locale);
-  if (!model) return;
-  console.log(renderPrompt("run.report-authorization", locale, model));
-  console.log("");
 }
 
 function requireBoundAssignment(value: string | undefined): string {

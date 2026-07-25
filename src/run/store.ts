@@ -104,6 +104,7 @@ export type SchemaConstraintSource = {
   format: ArtifactFormatSpec;
   defines?: string[];
   asserts?: string[];
+  suggests?: string[];
 };
 
 export type SchemaStepContext = {
@@ -298,7 +299,8 @@ const schemaConstraintSourceSchema: z.ZodType<SchemaConstraintSource> = z.object
   type: z.string(),
   format: artifactFormatSpecSchema,
   defines: z.array(z.string()).optional(),
-  asserts: z.array(z.string()).optional()
+  asserts: z.array(z.string()).optional(),
+  suggests: z.array(z.string()).optional()
 }).strict();
 
 const schemaStepContextSchema: z.ZodType<SchemaStepContext> = z.object({
@@ -955,7 +957,7 @@ async function reportReviewedArtifact(
     throw new Error(`Artifact Review is already passed: ${existing.id}`);
   }
   if (existing?.status === "awaiting_revision" && !input.revisionSummary?.trim()) {
-    throw new Error(`Artifact Review ${existing.id} requires --revision-summary-file before the next report`);
+    throw new Error(`Artifact Review ${existing.id} requires a revision summary before the next report`);
   }
   if (!existing && input.revisionSummary !== undefined) {
     throw new Error("--revision-summary-file is only allowed after an Artifact Review requests changes");
@@ -1602,16 +1604,6 @@ export async function submitArtifactReviewRunnerVote(input: {
     }
     if (input.vote === "request_changes" && !comment) {
       throw new Error("Runner request_changes requires --comment or --comment-file");
-    }
-    if (input.vote === "approve") {
-      const resolved = new Set((round.commentDispositions ?? []).map((item) => item.commentId));
-      const unresolvedBlocking = round.assignments
-        .filter((assignment) => assignment.binding === "advisory")
-        .flatMap((assignment) => assignment.submitted?.comments ?? [])
-        .filter((reviewComment) => reviewComment.severity === "blocking" && !resolved.has(reviewComment.id));
-      if (unresolvedBlocking.length > 0) {
-        throw new Error(`Runner approve requires dispositions for ${unresolvedBlocking.length} blocking advisory Comment(s)`);
-      }
     }
     const authorization = authorizeArtifactOperation({
       controlPlane: review.controlPlane,
@@ -3089,7 +3081,8 @@ function walkSchema(
     contract,
     controlPlane,
     details: definitionDetails(node.defines)
-      .concat((node.asserts ?? []).map((value) => `asserts: ${value}`)),
+      .concat((node.asserts ?? []).map((value) => `asserts: ${value}`))
+      .concat((node.suggests ?? []).map((value) => `suggests: ${value}`)),
     schemaContext: { rootName, path, sources },
     optional: node.optional === true
   }));
@@ -3253,7 +3246,8 @@ function schemaConstraintSource(
     type: contract.type,
     format: structuredClone(contract.format),
     defines: defines.length ? defines : undefined,
-    asserts: node.asserts?.length ? [...node.asserts] : undefined
+    asserts: node.asserts?.length ? [...node.asserts] : undefined,
+    suggests: node.suggests?.length ? [...node.suggests] : undefined
   };
 }
 

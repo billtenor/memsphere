@@ -3206,6 +3206,7 @@ export const browserHtml = String.raw`<!doctype html>
         const values = [];
         for (const value of source.defines || []) values.push("defines: " + value);
         for (const value of source.asserts || []) values.push("asserts: " + value);
+        for (const value of source.suggests || []) values.push("suggests: " + value);
         if (values.length) {
           const list = document.createElement("ul");
           list.className = "text-list";
@@ -4151,6 +4152,7 @@ export const browserHtml = String.raw`<!doctype html>
         if (layout) parts.push(t("layout") + ": " + layout);
       }
       if (schema.asserts?.length) parts.push(schema.asserts.length + " " + t("asserts"));
+      if (schema.suggests?.length) parts.push(schema.suggests.length + " " + t("suggests"));
       if (schema.fields?.length) parts.push(schema.fields.length + " " + t("fields"));
       if (schema.item) parts.push("1 " + t("item"));
       if (schema.items?.length) parts.push(schema.items.length + " " + t("items"));

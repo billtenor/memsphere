@@ -1,4 +1,4 @@
-当前 Artifact：{{artifactScope}}；Actor：{{actorId}}；权限依据：{{authoritySource}}。
+当前 Artifact：{{artifactScope}}；Actor：{{actorId}}。
 {{#if decision}}
 {{#if decision.allowed}}允许：当前操作使用 {{decision.permission}} 权限。{{else}}拒绝：当前操作需要 {{decision.permission}}，但 Actor {{actorId}} 不具备该权限。{{/if}}
 {{/if}}

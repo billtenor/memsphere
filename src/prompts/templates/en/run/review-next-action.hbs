@@ -9,5 +9,6 @@ memsphere run review vote --review {{reviewId}} --round {{roundId}} --vote appro
 memsphere run review vote --review {{reviewId}} --round {{roundId}} --vote request_changes --comment <text>
 {{/ifEq}}
 {{#ifEq kind "revision"}}
+memsphere run report --run {{runId}} --artifact <value> --revision-summary <text>
 memsphere run report --run {{runId}} --artifact-file <path> --revision-summary-file <path>
 {{/ifEq}}

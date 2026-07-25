@@ -791,12 +791,12 @@ sections:
                   - 风险必须说明影响范围。
             ```
         asserts:
-          - "!schema 节点允许 name/names、defines、asserts、optional、type、format、fields、item 和 items 字段。"
+          - "!schema 节点允许 name/names、defines、asserts、suggests、optional、type、format、fields、item 和 items 字段。"
           - 顶层 !schema 与 fields 中作为具名字段使用的 !schema 必须具有非空 names 或非空 name。
-          - defines 与 item/items 中的匿名 !schema 可以省略 names 和 name，但必须至少具有非空 defines、asserts、type、format、fields、item 或 items 中的一项。
+          - defines 与 item/items 中的匿名 !schema 可以省略 names 和 name，但必须至少具有非空 defines、asserts、suggests、type、format、fields、item 或 items 中的一项。
           - fields、item、items 和 Artifact.schema 中的 !ref 必须指向 Schema Memory，解析后按目标 Schema 约束当前值。
           - Schema.asserts 如出现，必须是字符串数组，用于表达代码无法自动推导的内容或业务约束。
-          - Schema 不支持 suggests；非强制结构建议应写入相关 Statement 或 Procedure Action。
+          - Schema.suggests 如出现，必须是非空字符串数组，用于表达不影响结构合法性的字段书写建议；Schema 写作时会与继承到当前字段的 asserts 分开展示。
         sections:
           - !statement
             names:
@@ -858,7 +858,7 @@ sections:
               - "fields 表达 object 值内部由字段名索引的子值约束；除 optional: true 的详细字段外，列表中的每一项都是必需结构字段，额外字段当前允许存在。"
               - fields 成员可以是字符串简写、指向 Schema 的 !ref、带 !schema tag 的详细字段，或满足适用条件的 !repeat 控制节点。
               - 字符串字段是仅声明字段名的最简写法，等价于省略显式 type 的 string 叶子 Schema，并继承所在结构的兼容格式上下文。
-              - 带 !schema tag 的字段用于声明该字段的定义、断言、显式类型、显式格式或递归子结构。
+              - 带 !schema tag 的字段用于声明该字段的定义、断言、建议、显式类型、显式格式或递归子结构。
               - "optional: true 只能用于 fields 中的具名 !schema 字段；字符串简写和 !ref 字段本身不携带 optional。"
               - array Schema 不允许直接使用 fields；对象元素的字段必须放在 item 或 items 的 object Schema 中。
 

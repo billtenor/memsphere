@@ -185,6 +185,7 @@ const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(()
     names: namesSchema,
     defines: definesSchema,
     asserts: z.array(nonEmptyString).optional(),
+    suggests: z.array(nonEmptyString).min(1).optional(),
     optional: z.boolean().optional(),
     type: nonEmptyString.optional(),
     format: schemaFormatInputSchema,
@@ -196,6 +197,7 @@ const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(()
       node.names.length === 0 &&
       node.defines.length === 0 &&
       (node.asserts?.length ?? 0) === 0 &&
+      (node.suggests?.length ?? 0) === 0 &&
       node.type === undefined &&
       node.format === undefined &&
       (node.fields?.length ?? 0) === 0 &&
@@ -204,7 +206,7 @@ const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(()
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "anonymous Schema must define defines, asserts, type, format, fields, item, or items"
+        message: "anonymous Schema must define defines, asserts, suggests, type, format, fields, item, or items"
       });
     }
     validateSchemaLocalContract(node, context);

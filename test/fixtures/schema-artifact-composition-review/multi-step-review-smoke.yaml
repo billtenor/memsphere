@@ -1,0 +1,94 @@
+!procedure
+syntax: memsphere-20260721-stable
+name: Schema 小型多步骤评审流程
+defines:
+  - 用于验证小型 Schema Artifact、普通后续步骤和最终 Artifact Review 可以在同一 Run 中顺序工作。
+flow:
+  - !action
+    action: 按 Schema 逐步编写一份简短的功能说明。
+    asserts:
+      - 必须依次填写 Schema 定义的全部字段，不得跳过必填字段。
+    suggests:
+      - 每个字段使用一到两句话即可。
+    artifact: !artifact
+      name: 小型功能说明
+      type: object
+      format:
+        name: markdown
+        layout: outline
+      schema: !schema
+        name: 小型功能说明
+        type: object
+        format:
+          name: markdown
+          layout: outline
+        asserts:
+          - 功能说明必须完整覆盖全部字段，且各字段内容相互一致。
+        suggests:
+          - 文档标题与概述应简短说明这份功能说明解决什么问题。
+        fields:
+          - !schema
+            name: 功能名称
+            asserts:
+              - 必须给出清晰且可识别的功能名称。
+            suggests:
+              - 名称尽量控制在二十个汉字以内。
+          - !schema
+            name: 目标
+            asserts:
+              - 必须说明该功能带来的用户可感知结果。
+            suggests:
+              - 优先使用一句话描述核心目标。
+          - !schema
+            name: 输入
+            asserts:
+              - 必须说明使用该功能所需的输入信息。
+            suggests:
+              - 没有外部输入时应明确写明“无”。
+          - !schema
+            name: 输出
+            asserts:
+              - 必须说明功能完成后可观察到的输出。
+            suggests:
+              - 输出描述应与目标保持对应。
+          - !schema
+            name: 验收标准
+            asserts:
+              - 必须给出可以实际执行和判断结果的验收条件。
+            suggests:
+              - 优先使用“当……时，应……”的句式。
+
+  - !action
+    action: 检查前一步功能说明的五个字段是否完整且相互一致，并记录一段简短结论。
+    asserts:
+      - 必须逐项检查功能名称、目标、输入、输出和验收标准。
+      - 必须明确指出是否存在缺失或相互矛盾的内容。
+    suggests:
+      - 结论优先使用简短的检查清单表达。
+    artifact: !artifact
+      name: 功能说明完整性检查
+      format: markdown
+
+  - !action
+    action: 根据功能说明设计一个最小验证用例，写明操作、预期结果和实际判断。
+    asserts:
+      - 验证用例必须能够覆盖功能说明中的验收标准。
+      - 必须分别写明操作步骤、预期结果和实际判断。
+    suggests:
+      - 优先选择无需额外环境即可执行的最小用例。
+    artifact: !artifact
+      name: 最小验证用例
+      format: markdown
+
+  - !action
+    action: 汇总功能说明、完整性检查和最小验证用例，形成最终验收结论。
+    asserts:
+      - 必须明确引用前三步 Artifact 的结论。
+      - 必须给出通过或不通过的明确判断及理由。
+    suggests:
+      - 先写最终判断，再补充关键依据。
+    artifact: !artifact
+      name: 小型 Schema 流程验收结论
+      format: markdown
+      review: [test_reviewer, senior_architect]
+      final: true

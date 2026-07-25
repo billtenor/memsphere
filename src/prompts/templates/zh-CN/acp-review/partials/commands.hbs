@@ -1,9 +1,9 @@
 ## 可用的 Memsphere 命令
 - 读取完整候选产物：
   "$MEMSPHERE_CLI" run artifact show --assignment "$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --output json
-- 读取完整冻结评审契约，包括完整 Schema 快照：
+- 读取完整评审契约，包括完整 Schema 快照：
   "$MEMSPHERE_CLI" run artifact contract show --assignment "$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --output json
-- 查看本 Assignment 的状态、评审席位、权限和自己的意见：
+- 查看本次评审的状态、权限和自己的意见：
   "$MEMSPHERE_CLI" run review assignment show --assignment "$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --output json
 - 查看 Run 大纲，包括所有步骤、产物摘要和当前步骤：
   "$MEMSPHERE_CLI" run show --run "$MEMSPHERE_REVIEW_RUN_ID" --output json
@@ -23,5 +23,5 @@
     <多行 Markdown 意见>
     MEMSPHERE_COMMENT
   - 不要把换行编码为字面量 `\n`。
-- 提交最终投票：
+- 提交最终投票和总结：
   "$MEMSPHERE_CLI" run review submit --assignment "$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --vote <approve|request_changes|abstain> --summary-file <path> --output json

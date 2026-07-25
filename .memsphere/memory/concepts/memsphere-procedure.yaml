@@ -16,7 +16,7 @@ defines:
       - 启动 Run 后必须保存 run id；后续 run report、run enter-schema 和 run repeat 必须显式传入该 id，不得凭名称猜测或混用其他 Run。
       - Run 启动时会冻结当前 config.json 的工作语言；后续状态、下一步命令、权限说明和 Review 反馈均按该语言输出，修改配置只影响之后创建的 Run。
       - CLI 返回的 Procedure Asserts 是当前调用链中持续生效的全局约束，Asserts 是当前步骤必须满足的要求，Suggests 是执行时可以参考但不强制满足的建议。
-      - CLI 返回的 Actor 表示步骤由 agent 还是 human 执行，Do 或 Ask human to do 表示当前动作，Details 提供补充上下文，Artifact 规定步骤产物及其格式，Then 给出下一条命令。
+      - 当前步骤提示中的 Do 表示 Agent 当前动作，Agent 步骤不重复展示执行者；Ask human to do 表示必须暂停并等待 Human 操作。Details 提供补充上下文，Artifact 规定步骤产物及其格式，Then 给出下一条命令。
       - 每个 Action 都必须产生明确的 Artifact；Actor 为 human 时，Agent 必须等待 human 提供结果后再上报和继续。
       - 短内容使用 memsphere run report 的 --artifact 上报，文件产物使用 --artifact-file 上报；带 Schema 的结构化 Markdown 产物可以按照 Then 提示进入 Schema 填写流程。
       - 进入 Schema 填写流程后，首次概览和 run schema show 提供父 Action、父 Artifact 内容契约、完整字段进度与约束来源；这些生产提示不得混入 Review 参与者、权限、投票或轮次信息。
@@ -25,7 +25,8 @@ defines:
       - Human 在 View 的 Artifact Review 浮窗中按 Round 查看不可变 Submission、正式 Comment、Vote、Result 与 Revision Summary；只有当前 Round 的本人 Assignment 可编辑，历史 Round 只读，完成后仍可从对应步骤重新打开评审证据。
       - Agent Reviewer 在同一 Artifact Review 浮窗的参与者行中展示状态、最近活动及按 attempt 隔离的只读运行记录；Agent 不进入 Human 身份选择器，实际发送的 prompt、ACP update 和生命周期以 JSONL 事实来源随 Run 留存，View 只读取不含 prompt 正文的可校验、可重建过滤投影。
       - Artifact Review 的定位 Comment 必须绑定创建时的 Submission 与 digest；它不评论 Memory 或 Workspace 文件，也不会自动迁移到下一轮 Submission。
-      - 配置 control_plane 后，每个 Artifact 都必须通过 Runner 的 artifact.submit 鉴权；执行者必须在 report 前阅读 CLI 的自然语言权限说明，拒绝不会改变 Run 状态或写入 Artifact。
-      - 完成当前步骤后，必须按照 CLI 返回的 Then 命令上报 Artifact；Run 显示 done 后才能汇报流程完成和最终产物。
+      - 配置 control_plane 后，每个 Artifact 都必须通过 Runner 的 artifact.submit 鉴权；正常的当前步骤提示不展开权限清单，权限不足时只说明被拒绝的操作、所需权限和处理方式；拒绝不会改变 Run 状态或写入 Artifact。
+      - run report 成功后先返回只确认本次 Run、Artifact 和可选 Review 标识的上报回执；触发 Review 时再返回等待或投票指令，不在 report 阶段提前输出 Review 汇总。run review wait 负责返回当前轮次汇总及投票指令；run review vote 只确认投票结果并返回推进后的下一步，不重复完整汇总。
+      - 完成当前步骤后，必须按照 CLI 返回的 Then 命令上报 Artifact；只有 CLI 明确返回 Run 完成状态后才能汇报流程完成和最终产物。
   - !ref
     target: schemas/Procedure Schema

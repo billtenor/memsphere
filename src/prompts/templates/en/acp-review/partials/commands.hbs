@@ -1,9 +1,9 @@
 ## Available Memsphere commands
 - Read the complete candidate Artifact:
   "$MEMSPHERE_CLI" run artifact show --assignment "$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --output json
-- Read the complete frozen Review contract, including the full Schema snapshot:
+- Read the complete Review contract, including the full Schema snapshot:
   "$MEMSPHERE_CLI" run artifact contract show --assignment "$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --output json
-- Check this Assignment's status, Review Slots, permissions, and your own comments:
+- Check this review's status, permissions, and your own comments:
   "$MEMSPHERE_CLI" run review assignment show --assignment "$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --output json
 - View the Run outline, including every step, its Artifact summary, and the current step:
   "$MEMSPHERE_CLI" run show --run "$MEMSPHERE_REVIEW_RUN_ID" --output json
@@ -23,5 +23,5 @@
     <multiline Markdown comment>
     MEMSPHERE_COMMENT
   - Do not encode line breaks as literal `\n` sequences.
-- Submit the final vote:
+- Submit the final vote and summary:
   "$MEMSPHERE_CLI" run review submit --assignment "$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --vote <approve|request_changes|abstain> --summary-file <path> --output json

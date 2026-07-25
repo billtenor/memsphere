@@ -158,6 +158,7 @@ run
   .requiredOption("--run <id>", "run id")
   .option("--artifact <value>", "artifact value")
   .option("--artifact-file <path>", "read artifact value from file")
+  .option("--revision-summary <text>", "revision summary")
   .option("--revision-summary-file <path>", "read the revision summary from file")
   .action(runReportCommand);
 

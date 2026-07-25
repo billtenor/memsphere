@@ -10,45 +10,30 @@ import {
   type RunState,
   type SchemaWritingSnapshot
 } from "../run/store.js";
-import { buildPermissionGuidancePromptModel } from "../control-plane/guidance.js";
 import type { PromptLocale } from "./locale.js";
 import type {
-  ReportAuthorizationPromptModel,
-  RunStatePromptModel,
+  RunCompletedPromptModel,
+  RunCurrentStepPromptModel,
+  RunReportReceiptPromptModel,
   SchemaOverviewPromptModel
 } from "./models.js";
-import {
-  buildArtifactReviewNextActionPromptModel,
-  buildArtifactReviewSummaryPromptModel
-} from "./review.js";
 
-export function buildRunStatePromptModel(
+export function buildRunCurrentStepPromptModel(
   run: RunState,
   locale: PromptLocale,
   runsRoot?: string
-): RunStatePromptModel {
+): RunCurrentStepPromptModel | undefined {
   const common = {
     runId: run.id,
     procedureAsserts: activeProcedureAsserts(run)
   };
-  if (run.status === "done") {
-    return {
-      ...common,
-      state: {
-        kind: "done",
-        finalArtifacts: finalArtifacts(run).map((artifact) => ({
-          name: artifact.name,
-          path: artifact.path
-        }))
-      }
-    };
-  }
+  if (run.status === "done") return undefined;
 
   const schemaFinalization = currentSchemaFinalization(run);
   if (schemaFinalization) {
     return {
       ...common,
-      state: {
+      step: {
         kind: "schema_finalization",
         artifactName: schemaFinalization.parentStep.artifact ?? "unknown",
         completed: schemaFinalization.draft.completed,
@@ -72,7 +57,7 @@ export function buildRunStatePromptModel(
   if (frame && step?.kind === "repeat" && step.repeat) {
     return {
       ...common,
-      state: {
+      step: {
         kind: "repeat",
         instruction: step.instruction,
         min: step.repeat.min,
@@ -81,87 +66,100 @@ export function buildRunStatePromptModel(
       }
     };
   }
-  if (!frame || !step || !step.artifact || !step.format) {
-    return { ...common, state: { kind: "done", finalArtifacts: [] } };
-  }
+  if (!frame || !step || !step.artifact || !step.format) return undefined;
 
   const review = currentArtifactReview(run);
-  if (review?.status === "pending" || review?.status === "awaiting_runner_vote") {
-    const round = review.rounds.find((candidate) => candidate.id === review.currentRoundId);
-    if (!round) throw new Error(`Artifact Review Round not found: ${review.currentRoundId}`);
-    return {
-      ...common,
-      state: {
-        kind: "review",
-        review: buildArtifactReviewSummaryPromptModel(review, round),
-        next: buildArtifactReviewNextActionPromptModel(review, round, run.id)
-      }
-    };
-  }
+  if (review?.status === "pending" || review?.status === "awaiting_runner_vote") return undefined;
 
   const schemaSnapshot = frame.type === "schema"
     ? buildSchemaWritingSnapshot(runsRoot ?? ".", run)
     : undefined;
-  const permissions = run.controlPlane && step.controlPlane
-    ? step.controlPlane.permissions.runner
-    : undefined;
-  const controlPlane = run.controlPlane && step.controlPlane && permissions ? {
-    revision: run.controlPlane.revision,
-    permissionCatalogVersion: run.controlPlane.permissionCatalog.version,
-    decisionPolicyCatalogVersion: run.controlPlane.decisionPolicyCatalog.version,
-    bindings: Object.entries(step.controlPlane.bindings).map(([slotId, binding]) => ({
-      slotId,
-      actors: binding.skipped ? "skipped" : binding.actorIds.join(", "),
-      source: binding.source
-    })),
-    runnerPermissions: permissions.effective,
-    guidance: buildPermissionGuidancePromptModel({
-      snapshot: run.controlPlane,
-      actorId: "runner",
-      permissions,
-      artifactScope: step.controlPlane.artifactScope,
-      locale
-    })
-  } : undefined;
+  const schemaSources = schemaSnapshot?.currentField?.sources ?? [];
+  const currentSchemaSource = schemaSources.at(-1);
+  const content = {
+    actor: step.actor === "human" ? "human" as const : "agent" as const,
+    instruction: step.instruction,
+    asserts: step.asserts ?? [],
+    suggests: step.suggests ?? [],
+    details: step.details ?? [],
+    artifact: {
+      name: step.artifact,
+      type: step.type ?? "unknown",
+      format: formatDisplay(step.format)
+    },
+    next: review?.status === "awaiting_revision"
+      ? { kind: "revision" as const }
+      : step.format.name === "markdown" && step.schema
+        ? step.schema.kind === "inline"
+          ? { kind: "inline_schema" as const }
+          : { kind: "external_schema" as const, schemaName: step.schema.name }
+        : { kind: "report" as const, optional: step.optional === true }
+  };
 
   return {
     ...common,
-    state: {
-      kind: "action",
-      actor: step.actor === "human" ? "human" : "agent",
-      instruction: step.instruction,
-      asserts: step.asserts ?? [],
-      suggests: step.suggests ?? [],
-      details: step.details ?? [],
-      schemaProgress: schemaSnapshot ? {
-        field: schemaSnapshot.progress.current ?? step.artifact,
+    step: schemaSnapshot ? {
+      ...content,
+      kind: "schema_current_field",
+      schemaWriting: {
+        procedureName: schemaSnapshot.procedureName,
+        actionInstruction: schemaSnapshot.action.instruction,
+        actionAsserts: schemaSnapshot.action.asserts,
+        actionSuggests: schemaSnapshot.action.suggests,
+        artifactName: schemaSnapshot.artifact.name
+      },
+      progress: {
+        field: schemaFieldLabel(schemaSnapshot, locale),
         completed: schemaSnapshot.progress.completed,
         total: schemaSnapshot.progress.total,
         remaining: schemaSnapshot.progress.remaining,
         pendingRepeatControls: schemaSnapshot.progress.pendingRepeatControls,
-        sources: (schemaSnapshot.currentField?.sources ?? []).map((source) => ({
-          path: source.path,
-          type: source.type,
-          format: formatDisplay(source.format),
-          defines: source.defines ?? [],
-          asserts: source.asserts ?? []
-        })),
+        contract: {
+          type: currentSchemaSource?.type ?? step.type ?? "unknown",
+          format: currentSchemaSource ? formatDisplay(currentSchemaSource.format) : formatDisplay(step.format)
+        },
+        defines: uniqueSchemaGuidance(schemaSources.flatMap((source) => source.defines ?? [])),
+        asserts: uniqueSchemaGuidance(schemaSources.flatMap((source) => source.asserts ?? [])),
+        suggests: uniqueSchemaGuidance(schemaSources.flatMap((source) => source.suggests ?? [])),
         draftPath: schemaSnapshot.draft?.filePath
-      } : undefined,
-      artifact: {
-        name: step.artifact,
-        type: step.type ?? "unknown",
-        format: formatDisplay(step.format)
-      },
-      controlPlane,
-      next: review?.status === "awaiting_revision"
-        ? { kind: "revision" }
-        : step.format.name === "markdown" && step.schema
-          ? step.schema.kind === "inline"
-            ? { kind: "inline_schema" }
-            : { kind: "external_schema", schemaName: step.schema.name }
-          : { kind: "report", optional: step.optional === true }
+      }
+    } : {
+      ...content,
+      kind: "action"
     }
+  };
+}
+
+function uniqueSchemaGuidance(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+export function buildRunCompletedPromptModel(run: RunState): RunCompletedPromptModel | undefined {
+  if (run.status !== "done") return undefined;
+  return {
+    runId: run.id,
+    procedureAsserts: activeProcedureAsserts(run),
+    finalArtifacts: finalArtifacts(run).map((artifact) => ({
+      name: artifact.name,
+      path: artifact.path
+    }))
+  };
+}
+
+export function buildRunReportReceiptPromptModel(run: RunState): RunReportReceiptPromptModel {
+  const review = currentArtifactReview(run);
+  const event = run.events.at(-1);
+  const artifactName = review?.artifactName ?? event?.artifact.name;
+  if (!artifactName) throw new Error(`Run has no reported Artifact: ${run.id}`);
+  const round = review?.rounds.find((candidate) => candidate.id === review.currentRoundId);
+  return {
+    runId: run.id,
+    artifactName,
+    review: review && round ? {
+      reviewId: review.id,
+      roundId: round.id,
+      round: round.sequence
+    } : undefined
   };
 }
 
@@ -203,35 +201,6 @@ export function buildSchemaOverviewPromptModel(
   };
 }
 
-export function buildReportAuthorizationPromptModel(
-  run: RunState,
-  locale: PromptLocale
-): ReportAuthorizationPromptModel | undefined {
-  const authorization = [...run.events].reverse()
-    .find((event) => event.artifact.authorization)?.artifact.authorization;
-  if (!authorization) return undefined;
-  return {
-    permission: authorization.permission,
-    actorId: authorization.actorId,
-    artifactScope: authorization.artifactScope,
-    revision: authorization.revision,
-    guidance: run.controlPlane ? buildPermissionGuidancePromptModel({
-      snapshot: run.controlPlane,
-      actorId: authorization.actorId,
-      permissions: {
-        base: authorization.basePermissions,
-        grants: authorization.grantedPermissions,
-        effective: authorization.effectivePermissions,
-        authoritySource: authorization.authoritySource,
-        grantSource: authorization.grantSource
-      },
-      artifactScope: authorization.artifactScope,
-      locale,
-      decision: authorization
-    }) : undefined
-  };
-}
-
 function formatDisplay(format: { name: string; options: Record<string, unknown> }): string {
   const options = Object.entries(format.options).map(([name, value]) => `${name}: ${String(value)}`);
   return options.length ? `${format.name} (${options.join(", ")})` : format.name;
@@ -239,4 +208,15 @@ function formatDisplay(format: { name: string; options: Record<string, unknown> 
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function schemaFieldLabel(snapshot: SchemaWritingSnapshot, locale: PromptLocale): string {
+  const current = snapshot.currentField?.path ?? snapshot.progress.current;
+  if (!current) return snapshot.artifact.name;
+  const root = snapshot.currentField?.sources[0]?.path;
+  if (root && current === root) {
+    return locale === "zh-CN" ? "文档标题与概述" : "document title and overview";
+  }
+  if (root && current.startsWith(`${root}.`)) return current.slice(root.length + 1);
+  return current.split(".").at(-1) ?? current;
 }

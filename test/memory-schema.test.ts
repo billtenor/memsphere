@@ -146,6 +146,39 @@ unknown: value
 `), /unknown/);
 });
 
+test("Schema supports independent assertion and suggestion collections", () => {
+  const schema = parseSchema(`!schema
+name: Delivery
+asserts:
+  - Every required field must be present.
+suggests:
+  - Prefer concise field values.
+fields:
+  - !schema
+    name: Summary
+    asserts:
+      - The summary must describe the result.
+    suggests:
+      - Keep the summary to one sentence.
+`);
+
+  assert.deepEqual(schema.asserts, ["Every required field must be present."]);
+  assert.deepEqual(schema.suggests, ["Prefer concise field values."]);
+  const summary = schema.fields?.[0];
+  assert(summary && typeof summary !== "string" && summary.tag === "!schema");
+  assert.deepEqual(summary.asserts, ["The summary must describe the result."]);
+  assert.deepEqual(summary.suggests, ["Keep the summary to one sentence."]);
+
+  assert.throws(() => parseSchema(`!schema
+name: Invalid
+suggests: [1]
+`), /suggests/);
+  assert.throws(() => parseSchema(`!schema
+name: Invalid
+suggests: []
+`), /suggests/);
+});
+
 test("Statement sections organize recursive and mixed rule nodes", () => {
   const entity = parseStatement(`!statement
 names: [Repository rules]

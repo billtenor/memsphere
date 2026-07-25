@@ -20,6 +20,8 @@ asserts:
   - Human Artifact Review 必须按照评审意见、投票、提交评审的顺序明确分组：先记录 Comment 草稿，再据此表达本轮立场，最后提交当前 Vote 与全部草稿意见。
   - Artifact Review 浮窗打开期间，背景页面必须保持不可操作且不可滚动；浮窗内部滚动到边界后不得把滚动传递给背景页面。
   - Agent Reviewer 的初始 Prompt、补交提醒、权限说明和 Review CLI 反馈必须使用 Run 启动时冻结的工作语言；两种语言必须表达相同契约事实、命令和决策语义。
+  - Agent Reviewer Prompt 应以角色目标、当前 Review contract、精简前序 Artifact 索引、可查询命令和提交方式组织；无内容的断言或建议章节不得输出占位文本，不得把 Assignment、ACP 等内部实现术语当作任务说明。
+  - Agent Reviewer 必须逐条覆盖契约并尽可能在一轮内汇总所有有证据的问题；CLI 参数可以使用稳定的 assignment 标识，但自然语言应称为“本次评审”。只有 run review submit 成功才算完成正式评审。
   - snapshot、target、location 和 hash 只用于定位和理解 comment，不是盲目修改依据。
   - 不得修改 review comments、task/run artifacts 或与 comments 无关的 Memory 内容。
   - 不得把 Artifact Review Comment 导入 Memory Review，也不得用本流程改写 Artifact Review 的 Submission、Round、Vote 或 Result。

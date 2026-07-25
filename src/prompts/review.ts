@@ -4,34 +4,39 @@ import {
   type ArtifactReview,
   type ArtifactReviewRound
 } from "../artifact-review.js";
-import { authorizeArtifactOperation } from "../control-plane/index.js";
 import type { RunState } from "../run/store.js";
+import type { PromptLocale } from "./locale.js";
 import type {
   ArtifactReviewSummaryPromptModel,
+  RunReviewVoteReceiptPromptModel,
   ReviewNextActionPromptModel
 } from "./models.js";
 
+export function buildRunReviewVoteReceiptPromptModel(
+  vote: "approve" | "request_changes",
+  locale: PromptLocale
+): RunReviewVoteReceiptPromptModel {
+  return {
+    vote: localize(locale, vote),
+    requiresRevision: vote === "request_changes"
+  };
+}
+
 export function buildArtifactReviewSummaryPromptModel(
   review: ArtifactReview<RunState["events"][number]["artifact"]>,
-  round: ArtifactReviewRound
+  round: ArtifactReviewRound,
+  locale: PromptLocale = "en"
 ): ArtifactReviewSummaryPromptModel {
   const submitted = round.assignments.filter((assignment) => assignment.status === "submitted").length;
   const advisoryComments = round.assignments
     .filter((assignment) => assignment.binding === "advisory")
     .flatMap((assignment) => assignment.submitted?.comments ?? []);
   const resolved = new Set((round.commentDispositions ?? []).map((item) => item.commentId));
-  const runnerVote = round.votes.find((candidate) => candidate.subject.kind === "runner");
-  const runnerCanDecide = Boolean(runnerVote) || authorizeArtifactOperation({
-    controlPlane: review.controlPlane,
-    subject: { kind: "runner" },
-    permission: "decision.decide"
-  }).allowed;
-
   return {
     reviewId: review.id,
     roundId: round.id,
     round: round.sequence,
-    status: review.status,
+    status: localize(locale, review.status),
     submitted,
     total: round.assignments.length,
     decisionReady: round.assignments.every((assignment) => assignment.status === "submitted"),
@@ -46,7 +51,7 @@ export function buildArtifactReviewSummaryPromptModel(
     earlierArtifacts: review.submissions.find((candidate) => candidate.id === round.submissionId)
       ?.contextArtifacts.length ?? 0,
     repeatedAdvisories: repeatedArtifactReviewAdvisories(review).map((item) => ({
-      severity: item.severity,
+      severity: localize(locale, item.severity),
       count: item.count,
       rounds: item.rounds.join(","),
       body: item.body
@@ -54,25 +59,39 @@ export function buildArtifactReviewSummaryPromptModel(
     participants: round.assignments.map((assignment) => {
       return {
         actorName: assignment.actorName,
-        binding: assignment.binding,
-        vote: assignment.submitted?.vote ?? "pending",
+        binding: localize(locale, assignment.binding),
+        vote: localize(locale, assignment.submitted?.vote ?? "pending"),
         decisionIntent: assignment.binding === "decision" ? assignment.submitted?.summary : undefined,
         implementationEvidenceReferenced: assignment.submitted
           ? artifactReviewOpinionReferencesImplementation(assignment.submitted)
           : undefined,
         comments: (assignment.submitted?.comments ?? []).map((comment) => ({
-          severity: comment.severity ?? "unspecified",
+          severity: localize(locale, comment.severity ?? "unspecified"),
           body: comment.body
         }))
       };
     }),
-    runner: runnerVote || runnerCanDecide ? {
-      automatic: runnerVote?.automatic ?? false,
-      vote: runnerVote?.value ?? "pending",
-      comment: runnerVote?.comment
-    } : undefined,
     decision: buildDecision(review, round, submitted)
   };
+}
+
+function localize(locale: PromptLocale, value: string): string {
+  if (locale === "en") return value;
+  return {
+    pending: "待提交",
+    awaiting_runner_vote: "等待 Runner 投票",
+    awaiting_revision: "等待修改",
+    passed: "已通过",
+    approve: "通过",
+    request_changes: "要求修改",
+    abstain: "弃权",
+    advisory: "建议",
+    decision: "决策",
+    blocking: "阻塞",
+    risk: "风险",
+    suggestion: "建议",
+    unspecified: "未指定"
+  }[value] ?? value;
 }
 
 export function buildArtifactReviewNextActionPromptModel(
@@ -103,11 +122,13 @@ function buildDecision(
     const decisionVotes = round.votes.filter(
       (vote) => vote.subject.kind === "actor" && vote.binding === "decision"
     );
+    const advisoryVotes = round.votes.filter((vote) => vote.binding === "advisory");
     return {
       kind: "awaiting_runner",
       approved: decisionVotes.filter((vote) => vote.value === "approve").length,
       decisionTotal: decisionVotes.length,
-      advisoryTotal: round.votes.filter((vote) => vote.binding === "advisory").length
+      advisoryTotal: advisoryVotes.length,
+      advisoryRequestChanges: advisoryVotes.filter((vote) => vote.value === "request_changes").length
     };
   }
   if (round.result) {

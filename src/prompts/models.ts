@@ -5,10 +5,12 @@ export type PromptInputMap = {
   "acp.artifact-review.reminder": Record<string, never>;
   "control-plane.permission-guidance": PermissionGuidancePromptModel;
   "control-plane.permission-description": PermissionDescriptionPromptModel;
+  "run.current-step": RunCurrentStepPromptModel;
+  "run.completed": RunCompletedPromptModel;
+  "run.report-receipt": RunReportReceiptPromptModel;
+  "run.review-vote-receipt": RunReviewVoteReceiptPromptModel;
   "run.review-summary": ArtifactReviewSummaryPromptModel;
-  "run.state": RunStatePromptModel;
   "run.schema-overview": SchemaOverviewPromptModel;
-  "run.report-authorization": ReportAuthorizationPromptModel;
   "run.review-next-action": ReviewNextActionPromptModel;
   "run.review-configuration-required": ReviewConfigurationRequiredPromptModel;
 };
@@ -46,7 +48,6 @@ export type PermissionGuidancePromptModel = {
   locale: PromptLocale;
   artifactScope: string;
   actorId: string;
-  authoritySource: string;
   decision?: {
     allowed: boolean;
     permission: string;
@@ -59,6 +60,11 @@ export type PermissionGuidancePromptModel = {
 
 export type PermissionDescriptionPromptModel = {
   id: string;
+};
+
+export type RunReviewVoteReceiptPromptModel = {
+  vote: string;
+  requiresRevision: boolean;
 };
 
 export type ArtifactReviewSummaryPromptModel = {
@@ -93,17 +99,13 @@ export type ArtifactReviewSummaryPromptModel = {
       body: string;
     }>;
   }>;
-  runner?: {
-    automatic: boolean;
-    vote: string;
-    comment?: string;
-  };
   decision:
     | {
         kind: "awaiting_runner";
         approved: number;
         decisionTotal: number;
         advisoryTotal: number;
+        advisoryRequestChanges: number;
       }
     | {
         kind: "result";
@@ -122,14 +124,10 @@ export type ArtifactReviewSummaryPromptModel = {
       };
 };
 
-export type RunStatePromptModel = {
+export type RunCurrentStepPromptModel = {
   runId: string;
   procedureAsserts: string[];
-  state:
-    | {
-        kind: "done";
-        finalArtifacts: Array<{ name: string; path?: string }>;
-      }
+  step:
     | {
         kind: "schema_finalization";
         artifactName: string;
@@ -150,30 +148,50 @@ export type RunStatePromptModel = {
         bodyFields: number;
       }
     | {
-        kind: "review";
-        review: ArtifactReviewSummaryPromptModel;
-        next: ReviewNextActionPromptModel;
-      }
-    | {
         kind: "action";
         actor: "human" | "agent";
         instruction: string;
         asserts: string[];
         suggests: string[];
         details: string[];
-        schemaProgress?: {
+        artifact: {
+          name: string;
+          type: string;
+          format: string;
+        };
+        next:
+          | { kind: "revision" }
+          | { kind: "inline_schema" }
+          | { kind: "external_schema"; schemaName: string }
+          | { kind: "report"; optional: boolean };
+      }
+    | {
+        kind: "schema_current_field";
+        actor: "human" | "agent";
+        instruction: string;
+        asserts: string[];
+        suggests: string[];
+        details: string[];
+        schemaWriting: {
+          procedureName: string;
+          actionInstruction: string;
+          actionAsserts: string[];
+          actionSuggests: string[];
+          artifactName: string;
+        };
+        progress: {
           field: string;
           completed: number;
           total: number;
           remaining: number;
           pendingRepeatControls: number;
-          sources: Array<{
-            path: string;
+          contract: {
             type: string;
             format: string;
-            defines: string[];
-            asserts: string[];
-          }>;
+          };
+          defines: string[];
+          asserts: string[];
+          suggests: string[];
           draftPath?: string;
         };
         artifact: {
@@ -181,24 +199,28 @@ export type RunStatePromptModel = {
           type: string;
           format: string;
         };
-        controlPlane?: {
-          revision: string;
-          permissionCatalogVersion: string;
-          decisionPolicyCatalogVersion: string;
-          bindings: Array<{
-            slotId: string;
-            actors: string;
-            source: string;
-          }>;
-          runnerPermissions: string[];
-          guidance: PermissionGuidancePromptModel;
-        };
         next:
           | { kind: "revision" }
           | { kind: "inline_schema" }
           | { kind: "external_schema"; schemaName: string }
           | { kind: "report"; optional: boolean };
       };
+};
+
+export type RunCompletedPromptModel = {
+  runId: string;
+  procedureAsserts: string[];
+  finalArtifacts: Array<{ name: string; path?: string }>;
+};
+
+export type RunReportReceiptPromptModel = {
+  runId: string;
+  artifactName: string;
+  review?: {
+    reviewId: string;
+    roundId: string;
+    round: number;
+  };
 };
 
 export type SchemaOverviewPromptModel = {
@@ -226,14 +248,6 @@ export type SchemaOverviewPromptModel = {
     filePath: string;
     validationStatus?: string;
   };
-};
-
-export type ReportAuthorizationPromptModel = {
-  permission: string;
-  actorId: string;
-  artifactScope: string;
-  revision: string;
-  guidance?: PermissionGuidancePromptModel;
 };
 
 export type ReviewNextActionPromptModel =

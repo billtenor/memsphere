@@ -5,7 +5,10 @@ import {
   renderPrompt,
   validatePromptAssets
 } from "../src/prompts/renderer.js";
-import { listPromptTemplateIds } from "../src/prompts/registry.js";
+import {
+  listPromptTemplateIds,
+  promptDefinition
+} from "../src/prompts/registry.js";
 
 const acpModel = {
   rolePrompts: ["Focus on correctness."],
@@ -34,6 +37,12 @@ const acpModel = {
 test("Prompt registry has paired assets for every supported locale", () => {
   assert(listPromptTemplateIds().length >= 9);
   assert.doesNotThrow(() => validatePromptAssets());
+  for (const id of listPromptTemplateIds()) {
+    assert(promptDefinition(id).audience);
+    assert(promptDefinition(id).purpose);
+  }
+  assert(!listPromptTemplateIds().includes("run.state" as never));
+  assert(!listPromptTemplateIds().includes("run.report-authorization" as never));
 });
 
 test("Prompt rendering fails with a diagnosable id and locale when input is incomplete", () => {
@@ -60,11 +69,11 @@ test("run Prompt schemas reject invalid discriminators and field types at input"
       input: { kind: "wait", reviewId: 123 }
     },
     {
-      id: "run.state" as const,
+      id: "run.current-step" as const,
       input: {
         runId: "run-invalid",
         procedureAsserts: [],
-        state: { kind: "bogus" }
+        step: { kind: "bogus" }
       }
     },
     {
@@ -122,22 +131,13 @@ test("run Prompt schemas reject malformed nested models", () => {
   );
 
   assert.throws(
-    () => renderPrompt("run.report-authorization", "en", {
-      permission: "artifact.submit",
-      actorId: "runner",
-      artifactScope: "current",
-      revision: "revision",
-      guidance: {
-        locale: "en",
-        artifactScope: "current",
-        actorId: "runner",
-        authoritySource: "run",
-        permissions: [{ id: "artifact.submit" }]
-      }
+    () => renderPrompt("run.report-receipt", "en", {
+      runId: "run",
+      artifactName: 42
     } as never),
     (error: unknown) => {
       assert(error instanceof PromptRenderError);
-      assert.equal(error.templateId, "run.report-authorization");
+      assert.equal(error.templateId, "run.report-receipt");
       assert.equal(error.locale, "en");
       assert.equal(error.stage, "input");
       return true;
@@ -158,8 +158,23 @@ test("ACP reviewer templates preserve the same contract facts and commands in bo
   }
   assert.match(english, /# Memsphere Artifact Reviewer/);
   assert.match(chinese, /# Memsphere 产物评审员/);
-  assert.match(renderPrompt("acp.artifact-review.reminder", "en", {}), /without a formal Artifact Review submission/);
-  assert.match(renderPrompt("acp.artifact-review.reminder", "zh-CN", {}), /尚未正式提交产物评审/);
+  assert.match(renderPrompt("acp.artifact-review.reminder", "en", {}), /without a formal review submission/);
+  assert.match(renderPrompt("acp.artifact-review.reminder", "zh-CN", {}), /尚未正式提交评审/);
+});
+
+test("ACP reviewer omits empty contract sections and implementation terminology", () => {
+  const output = renderPrompt("acp.artifact-review.initial", "zh-CN", {
+    ...acpModel,
+    contract: {
+      ...acpModel.contract,
+      procedureAsserts: [],
+      actionAsserts: [],
+      suggestions: []
+    }
+  });
+  assert.doesNotMatch(output, /Procedure 断言|Action 断言|### 建议|本次 Assignment|完成 Assignment|ACP 自然语言/);
+  assert.match(output, /本次评审/);
+  assert.match(output, /--assignment/);
 });
 
 test("permission descriptions remain localized Prompt assets", () => {

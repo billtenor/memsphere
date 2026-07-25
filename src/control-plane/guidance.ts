@@ -32,7 +32,6 @@ export function buildPermissionGuidancePromptModel(
     locale,
     artifactScope: input.artifactScope,
     actorId: input.actorId,
-    authoritySource: input.permissions.authoritySource,
     decision: input.decision ? {
       allowed: input.decision.allowed,
       permission: input.decision.permission

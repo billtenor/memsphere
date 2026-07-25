@@ -1,0 +1,168 @@
+Run {{runId}}
+{{#each procedureAsserts}}
+{{#if @first}}
+
+Procedure Asserts:
+{{/if}}
+- {{this}}
+{{/each}}
+{{#ifEq step.kind "schema_finalization"}}
+
+Schema Finalization:
+- status: awaiting global adjustment
+- artifact: {{step.artifactName}}
+- progress: {{step.completed}}/{{step.total}}
+- managed draft: {{step.draftPath}}
+{{#if step.validation}}
+- contract validation: {{step.validation.status}}
+{{#each step.validation.issues}}
+  - {{this}}
+{{/each}}
+{{/if}}
+
+Do:
+Read the complete managed draft, edit it directly as needed, then submit that same file.
+
+Then:
+memsphere run report --run {{runId}} --artifact-file {{step.draftPathArgument}}
+{{/ifEq}}
+{{#ifEq step.kind "repeat"}}
+
+Do:
+{{step.instruction}}
+
+Details:
+- allowed count: {{step.min}}..{{#if step.max}}{{step.max}}{{else}}unbounded{{/if}}
+- body fields: {{step.bodyFields}}
+
+Then:
+memsphere run repeat <count> --run {{runId}}
+{{/ifEq}}
+{{#ifEq step.kind "action"}}
+
+{{#ifEq step.actor "human"}}Ask human to do:{{else}}Do:{{/ifEq}}
+{{step.instruction}}
+{{#each step.asserts}}
+{{#if @first}}
+
+Asserts:
+{{/if}}
+- {{this}}
+{{/each}}
+{{#each step.suggests}}
+{{#if @first}}
+
+Suggests:
+{{/if}}
+- {{this}}
+{{/each}}
+{{#each step.details}}
+{{#if @first}}
+
+Details:
+{{/if}}
+- {{this}}
+{{/each}}
+
+Artifact:
+{{step.artifact.name}} ({{step.artifact.type}} · {{step.artifact.format}})
+{{#ifEq step.actor "human"}}
+Report the artifact value provided by the human.
+{{/ifEq}}
+
+Then:
+{{#ifEq step.next.kind "revision"}}
+memsphere run report --run {{runId}} --artifact <value> --revision-summary <text>
+memsphere run report --run {{runId}} --artifact-file <path> --revision-summary-file <path>
+{{/ifEq}}
+{{#ifEq step.next.kind "inline_schema"}}
+memsphere run enter-schema --run {{runId}}
+{{/ifEq}}
+{{#ifEq step.next.kind "external_schema"}}
+memsphere run enter-schema {{step.next.schemaName}} --run {{runId}}
+{{/ifEq}}
+{{#ifEq step.next.kind "report"}}
+memsphere run report --run {{runId}} --artifact <value>
+{{#if step.next.optional}}
+memsphere run skip --run {{runId}}
+{{/if}}
+{{/ifEq}}
+{{/ifEq}}
+{{#ifEq step.kind "schema_current_field"}}
+
+Current Procedure Step:
+{{step.schemaWriting.actionInstruction}}
+{{#each step.schemaWriting.actionAsserts}}
+{{#if @first}}
+
+Step Asserts:
+{{/if}}
+- {{this}}
+{{/each}}
+{{#each step.schemaWriting.actionSuggests}}
+{{#if @first}}
+
+Step Suggests:
+{{/if}}
+- {{this}}
+{{/each}}
+
+Schema Writing:
+- artifact: {{step.schemaWriting.artifactName}}
+- current field: {{step.progress.field}}
+- progress: {{step.progress.completed}}/{{step.progress.total}}
+- remaining: {{step.progress.remaining}}
+- workflow: report each field to update one managed draft; after all fields are complete, read and edit the full draft before explicitly submitting that same file.
+{{#if step.progress.pendingRepeatControls}}
+- repeat controls pending: {{step.progress.pendingRepeatControls}}
+{{/if}}
+- field contract: {{step.progress.contract.type}} · {{step.progress.contract.format}}
+{{#if step.progress.draftPath}}
+- managed draft: {{step.progress.draftPath}}
+{{/if}}
+
+{{#ifEq step.actor "human"}}Ask the Human to fill:{{else}}Fill:{{/ifEq}}
+{{step.progress.field}}
+{{#each step.progress.defines}}
+{{#if @first}}
+
+Field Definition:
+{{/if}}
+- {{this}}
+{{/each}}
+{{#each step.progress.asserts}}
+{{#if @first}}
+
+Field Asserts:
+{{/if}}
+- {{this}}
+{{/each}}
+{{#each step.progress.suggests}}
+{{#if @first}}
+
+Field Suggests:
+{{/if}}
+- {{this}}
+{{/each}}
+
+Submit:
+{{#ifEq step.next.kind "revision"}}
+memsphere run report --run {{runId}} --artifact <value> --revision-summary <text>
+memsphere run report --run {{runId}} --artifact-file <path> --revision-summary-file <path>
+{{/ifEq}}
+{{#ifEq step.next.kind "inline_schema"}}
+memsphere run enter-schema --run {{runId}}
+{{/ifEq}}
+{{#ifEq step.next.kind "external_schema"}}
+memsphere run enter-schema {{step.next.schemaName}} --run {{runId}}
+{{/ifEq}}
+{{#ifEq step.next.kind "report"}}
+memsphere run report --run {{runId}} --artifact <value>
+{{#if step.next.optional}}
+memsphere run skip --run {{runId}}
+{{/if}}
+{{/ifEq}}
+
+View the complete Schema:
+memsphere run schema show --run {{runId}}
+{{/ifEq}}

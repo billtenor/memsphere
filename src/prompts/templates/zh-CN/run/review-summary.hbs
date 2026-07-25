@@ -1,5 +1,4 @@
-产物评审：
-- 上报结果：成功，产物已进入评审
+{{#ifDecision decision "awaiting_runner"}}评审意见收集完成，评审信息：{{else}}产物评审信息：{{/ifDecision}}
 - review_id：{{reviewId}}
 - review_round_id：{{roundId}}
 - 轮次：{{round}}
@@ -25,19 +24,16 @@
   - 意见 [{{severity}}]：{{body}}
 {{/each}}
 {{/each}}
-{{#if runner}}
-- Runner（决策票{{#if runner.automatic}}，自动{{/if}}）
-  - 投票：{{runner.vote}}
-{{#if runner.comment}}
-  - 意见：{{runner.comment}}
-{{/if}}
-{{/if}}
 决策：
 {{#ifDecision decision "awaiting_runner"}}
 - 所有分配的评审均已提交：{{decision.approved}}/{{decision.decisionTotal}} 张决策票通过；已记录 {{decision.advisoryTotal}} 张建议票。
-- 当前策略仍可达成全票通过。你就是本 Run 的 Runner，尚需提交自己的决策票。
+{{#if decision.advisoryRequestChanges}}
+- 当前决策票均已通过，仅建议者要求修改。你拥有最终决定权。
+{{else}}
+- 当前决策票均已通过。你拥有最终决定权。
+{{/if}}
 结论：
-- 产物尚未被接受，Run 也未推进。请作为 Runner 阅读以上全部意见，然后明确投票。
+- 请阅读以上全部意见，然后明确投票。
 {{/ifDecision}}
 {{#ifDecision decision "result"}}
 - {{#if decision.passed}}已{{else}}未{{/if}}达成全票通过：{{decision.approved}}/{{decision.decisionTotal}} 张决策票通过；已记录 {{decision.advisoryTotal}} 张不影响决策的建议票。
@@ -50,7 +46,7 @@
 {{/ifDecision}}
 {{#ifDecision decision "failed"}}
 结论：
-- 产物已成功上报并进入评审。
+- 本轮评审尚未形成可执行结论。
 {{/ifDecision}}
 {{#ifDecision decision "pending"}}
 - 尚未形成决策；还剩 {{decision.remaining}} 份评审未提交。

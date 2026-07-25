@@ -25,7 +25,6 @@ import {
   readRun,
   repeatRun,
   reportRun,
-  resolveArtifactReviewComment,
   submitArtifactReviewAssignment,
   submitArtifactReviewAgentAssignment,
   submitArtifactReviewRunnerVote,
@@ -1165,7 +1164,13 @@ flow:
       schema: !schema
         names: [Delivery]
         asserts: [Every section belongs to this delivery.]
-        fields: [summary, details]
+        suggests: [Keep the whole document focused.]
+        fields:
+          - !schema
+            name: summary
+            asserts: [The summary must describe the result.]
+            suggests: [Use one sentence.]
+          - details
 `);
 
     const started = await startRun({ memoryRoot, runsRoot, procedureName: "schema-draft" });
@@ -1173,6 +1178,7 @@ flow:
     const overview = buildSchemaWritingSnapshot(runsRoot, entered);
     assert(overview);
     assert.deepEqual(overview.action.asserts, ["Keep the document coherent."]);
+    assert.deepEqual(overview.currentField?.sources[0]?.suggests, ["Keep the whole document focused."]);
     assert.equal(overview.progress.total, 3);
     assert.equal(overview.progress.current, "inline:flow[1]:delivery");
     assert.equal(overview.draft, undefined);
@@ -1182,6 +1188,14 @@ flow:
       runId: started.id,
       artifact: { kind: "inline", value: "# Delivery" }
     });
+    assert.deepEqual(
+      buildSchemaWritingSnapshot(runsRoot, rootReported)?.currentField?.sources.flatMap((source) => source.asserts ?? []),
+      ["Every section belongs to this delivery.", "The summary must describe the result."]
+    );
+    assert.deepEqual(
+      buildSchemaWritingSnapshot(runsRoot, rootReported)?.currentField?.sources.flatMap((source) => source.suggests ?? []),
+      ["Keep the whole document focused.", "Use one sentence."]
+    );
     const firstDraft = rootReported.schemaDrafts?.["flow[1]"];
     assert(firstDraft);
     const draftPath = join(runsRoot, firstDraft.path);
@@ -2114,7 +2128,7 @@ flow:
         runId: started.id,
         artifact: { kind: "inline", value: "# Second candidate\n" }
       }),
-      /requires --revision-summary-file/
+      /requires a revision summary/
     );
 
     const second = await reportRun({
@@ -2230,7 +2244,7 @@ flow:
   });
 });
 
-test("Artifact Review snapshots every prior Artifact and requires blocking dispositions", async () => {
+test("Artifact Review snapshots every prior Artifact without giving blocking advisories veto power", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
     const proceduresRoot = join(memoryRoot, "procedures");
@@ -2311,26 +2325,7 @@ flow:
       actorId: "advisor",
       expectedRevision: draft.round.revision
     });
-    const commentId = awaitingRunner.assignment.submitted?.comments[0].id;
-    assert(commentId);
-    await assert.rejects(
-      submitArtifactReviewRunnerVote({
-        runsRoot,
-        reviewId: review.id,
-        roundId: review.currentRoundId,
-        vote: "approve"
-      }),
-      /requires dispositions for 1 blocking/
-    );
-    await resolveArtifactReviewComment({
-      runsRoot,
-      reviewId: review.id,
-      roundId: review.currentRoundId,
-      commentId,
-      disposition: "accepted-fixed",
-      note: "Applied the focused fix.",
-      validationSummary: "Focused regression passed."
-    });
+    assert.equal(awaitingRunner.assignment.submitted?.comments[0].severity, "blocking");
     const approved = await submitArtifactReviewRunnerVote({
       runsRoot,
       reviewId: review.id,
@@ -2338,6 +2333,6 @@ flow:
       vote: "approve"
     });
     assert.equal(approved.review.status, "passed");
-    assert.equal(approved.round.commentDispositions?.[0].disposition, "accepted-fixed");
+    assert.equal(approved.round.commentDispositions, undefined);
   });
 });

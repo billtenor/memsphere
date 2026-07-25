@@ -117,6 +117,7 @@ artifact: !artifact
 - array Schema 使用 `item: !schema` 表示唯一元素契约，或使用至少两个 `!schema` 组成的 `items` 表示联合元素契约；每个元素必须满足至少一个候选。二者互斥且要求显式 `type: array`。
 - `schema`、Schema `fields`、`item` 和 `items` 中可以使用 `!ref` 引用外部 Schema Memory；这些位置的 `target` 必须指向 `schemas/...`，运行和校验时会按目标 Schema 展开。
 - `fields` 中的具名 `!schema` 字段可以声明 `optional: true`；缺失时自动校验放行，存在时仍完整校验。字符串简写字段和未声明 optional 的字段仍为必填。
+- `!schema` 可以分别声明 `asserts` 与 `suggests`：前者表达必须满足的内容约束，后者表达不影响结构合法性的书写建议；Schema 写作 Prompt 会汇总根到当前字段的两类约束并分开展示。
 - array Schema 不允许直接声明 `fields`。对象元素应在 `item` 或 `items` 的 `type: object` Schema 中声明 `fields`；省略 `item/items` 时只校验数组容器。
 - 不要使用已删除的 `element_types`；旧版字符串 `items` 必须迁移为带 `!schema` tag 的 `item/items`。
 - `asserts` 和 `suggests` 是自然语言契约，不会被代码 validator 猜测执行。
@@ -146,7 +147,7 @@ flow:
 - Permission 只在 Runner/Actor 的 `permissions` 中配置；Run Review 配置不追加临时权限。Memory YAML 不允许 `role_bindings` 或 `permission_grants`。
 - `runner` 是当前 Run 执行上下文，不需要 Slot Binding。
 - Runner 在 `run report` 前应阅读 CLI 输出的权限说明；成功或拒绝结果中的权限、来源和自然语言说明均来自 Run 启动时保存的控制平面快照。
-- 确定性校验通过后，Run 会返回稳定的 `review_id` 和 `memsphere run review wait --review <review_id>`；Review 通过前当前 Action 不推进。Review Submission 自动冻结当前候选之前已经上报的全部 Artifact，Reviewer 根据当前 Artifact 与要求按需追溯。全部评审意见收齐后，如 CLI 提示等待 Runner 投票，必须先阅读摘要和 blocking 意见，逐条执行 `memsphere run review resolve`，再显式执行 `memsphere run review vote`。
+- 确定性校验通过后，Run 会返回稳定的 `review_id` 和 `memsphere run review wait --review <review_id>`；Review 通过前当前 Action 不推进。Review Submission 自动冻结当前候选之前已经上报的全部 Artifact，Reviewer 根据当前 Artifact 与要求按需追溯。全部评审意见收齐后，如 CLI 提示等待 Runner 投票，应先阅读摘要和 blocking 意见，再显式执行 `memsphere run review vote`。Runner 拥有最终决定权；建议意见和 blocking 严重级别不会形成额外否决权。需要留下审计记录时，可在投票前使用 `memsphere run review resolve` 记录意见的接受、延期或驳回原因。
 - 绑定到当前 Slot 的 Agent Actor 会由 Memsphere 通过 ACP 自动启动。初始 Prompt 会给出精炼的 Review contract 和前序 Artifact 索引；Agent Reviewer 使用 Session 注入、固定当前 Node 与 CLI entrypoint 的 `MEMSPHERE_CLI`，直接通过 Store 操作自己的 Assignment，不创建或监听 Review bridge/socket。`run review comment` 必须声明 severity；短意见使用 `--body`，多行 Markdown 使用 `--body-stdin`。提交摘要可使用 `--summary-file`。普通 ACP 文本回复不构成 Comment 或 Vote。Agent 失败时可用 `memsphere run review retry --review <id> --assignment <actor-or-assignment-id>` 显式重试。
 - Human 使用 View 中的大尺寸 Artifact Review 浮窗操作本人 Assignment：按 Round 查看当时的不可变 Submission、正式 Comment、Vote、Result 与 Revision Summary，在当前轮添加整体或定位 Comment、选择 Vote 并 Submit。历史 Round 只读，完成后的 Review 仍可从对应 Run 步骤重新打开。
 - Artifact Review Comment 只绑定当前 Artifact Submission；定位 Comment 保存 Submission、digest、Renderer target 和短上下文，不评论 Memory 或 Workspace 文件，也不会自动迁移到下一轮。独立 Memory Review 继续使用原有 Review 抽屉和处理流程。
@@ -226,18 +227,18 @@ memsphere run start --file "<Procedure YAML 路径>"
 
 #### 理解当前步骤
 
-每次启动或上报后，CLI 都会返回当前步骤的提示：
+启动、状态查询或流程推进后，CLI 会按当前场景返回当前步骤、Review 下一步或完成状态：
 
 - `Procedure Asserts` 是当前调用链中全部 Procedure 必须持续满足的全局约束。
-- `Actor` 表示当前步骤由 agent 还是 human 执行。
-- `Do` 或 `Ask human to do` 表示当前步骤需要完成的事情。
+- `Do` 表示当前 Agent 步骤需要完成的事情；Agent 步骤不重复展示执行者。
+- `Ask human to do` 表示当前步骤需要 Human 操作，Agent 必须暂停并等待 Human 提供结果。
 - `Asserts` 是当前步骤必须满足的要求。
 - `Suggests` 是执行时可以参考的建议。
 - `Details` 是理解和执行当前步骤所需的补充上下文。
       - `Artifact` 表示当前步骤需要产出的内容、业务类型、编码格式和可选 Schema。
 - `Then` 给出完成当前步骤后应执行的下一条 memsphere 命令。
 
-启用控制平面的步骤还会在 `Then` 前显示 `Control Plane` 和 `Permission Guidance`（中文环境显示“权限说明”）。执行者必须先理解当前 Artifact 下的有效 Permission、临时 Grant 和来源，再执行 `run report`；不得把 Memsphere Permission 误解为任意操作系统文件、进程或网络权限。
+正常的当前步骤提示不展开权限清单。权限不足时，CLI 只说明被拒绝的操作、所需权限和处理方式；不得把 Memsphere Permission 误解为任意操作系统文件、进程或网络权限。
 
 只执行当前返回的步骤，不提前执行尚未返回的后续步骤。
 
@@ -257,13 +258,13 @@ memsphere run report --run <Run ID> --artifact "<产物内容>"
 memsphere run report --run <Run ID> --artifact-file <文件路径>
 ```
 
-如果 report 触发 Artifact Review，执行 CLI 返回的等待命令，不要继续执行后续步骤：
+report 成功后会先返回本次 Run 与 Artifact 的上报回执。如果触发 Artifact Review，回执还包含稳定的 Review 标识，并紧接着返回等待命令；不要继续执行后续步骤：
 
 ```bash
 memsphere run review wait --review <Review ID>
 ```
 
-wait 如果返回 Agent Assignment 失败，当前轮次仍未决，Runner 不得绕过或自行代投。把 View 中显示的 Provider、Attempt 和错误信息告知 human，等待 human 在 View 中执行重试，然后继续使用同一个 `review_id` 等待。
+wait 如果显示 Agent Reviewer 失败，当前轮次仍未决，Runner 不得绕过或自行代投。把 View 中显示的 Provider、Attempt 和错误信息告知 human，等待 human 在 View 中执行重试，然后继续使用同一个 `review_id` 等待。
 
 如果 wait 返回 `awaiting_runner_vote`，当前执行本 Run 的 Agent 就是 Runner；先阅读全部参与者的 Comment 和 Vote，再由自己明确决定接纳或修改。接纳才会推进 Run：
 
@@ -315,12 +316,12 @@ memsphere run report --run <Run ID> --artifact-file <受管草稿绝对路径>
 
 提交时会读取文件最新内容并重新校验。失败时继续留在全局调整状态，修订同一文件后重试；成功后由 Run 按父 Artifact 契约决定直接接纳还是进入 Artifact Review。Runner 不需要也不应自行判断何时发起 Review，只继续执行每次 CLI 返回的 `Then`。
 
-上报成功后，CLI 会返回下一个待执行步骤；继续执行和上报，直到显示 `done`。
+未触发 Review 的上报回执后会继续显示下一个待执行步骤或 Run 完成状态。完整 Review 汇总由 `run review wait` 返回；`run review vote` 只确认投票结果并给出推进后的下一动作，不重复刚刚展示的意见。不应从 report 回执推断评审结果。继续执行和上报，直到 CLI 明确显示完成。
 
 #### 人机协同
 
 当 `Actor` 为 `human` 时，暂停 Agent 执行，把 `Ask human to do`、相关要求和产物格式清楚地告知用户，并等待用户提供结果。不要代替用户完成 human 步骤，也不要在用户回复前继续推进。
 
-收到用户结果后，将它作为当前步骤产物按 `Then` 命令上报，再继续处理 CLI 返回的新步骤。Run 显示 `done` 时，向用户汇报流程完成情况和最终产物。
+收到用户结果后，将它作为当前步骤产物按 `Then` 命令上报，再继续处理 CLI 返回的新步骤。CLI 明确返回 Run 完成状态时，向用户汇报流程完成情况和最终产物。
 
 旧 Memory 若未声明 `syntax`，先执行 `memsphere migrate syntax --check`；若仍使用 `format: boolean/string/number/schema`，执行 `memsphere migrate artifact-contract-v2 --check`；若使用 `element_types`、字符串形式的旧 `items`、array 直接声明 `fields`，或旧式 Schema `format: outline/table`，再执行 `memsphere migrate schema-contract-v2 --check`。未经 human 明确确认，不对真实 Memory Store 执行 `--write`。旧语法不能启动新 Run，v1 running Run 不得跨版本继续，done Run 与 Review snapshot 仅只读展示。
