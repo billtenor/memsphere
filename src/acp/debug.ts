@@ -6,6 +6,7 @@ import type { ArtifactReviewAgentContext, RunState } from "../run/store.js";
 import { agentReviewCliSource, currentCliRuntimeDescriptor } from "./cli-runtime.js";
 import { buildArtifactReviewerPrompt } from "./prompt.js";
 import { getAgentReviewProvider } from "./provider.js";
+import { resolvePromptLocale } from "../prompts/index.js";
 
 export type AgentReviewTryRunArtifact = {
   assignmentId: string;
@@ -66,7 +67,8 @@ export async function writeAgentReviewDebugArtifacts(input: {
     };
     const prompt = await buildArtifactReviewerPrompt({
       context,
-      promptVersion: launch.promptVersion
+      promptVersion: launch.promptVersion,
+      locale: resolvePromptLocale(input.run.language)
     });
     const directory = join(
       input.config.debug.root,

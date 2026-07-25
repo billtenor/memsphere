@@ -14,6 +14,7 @@ import { createAgentReviewCliRuntime } from "./cli-runtime.js";
 import { buildArtifactReviewerPrompt, buildArtifactReviewerReminder } from "./prompt.js";
 import { getAgentReviewProvider, type AgentReviewProvider } from "./provider.js";
 import { AcpProviderConfigurationError } from "./validation.js";
+import { resolvePromptLocale } from "../prompts/index.js";
 
 export type AgentReviewWorkerOptions = {
   config?: string;
@@ -80,12 +81,13 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     });
     const prompt = await buildArtifactReviewerPrompt({
       context: claimed,
-      promptVersion: launch.promptVersion
+      promptVersion: launch.promptVersion,
+      locale: resolvePromptLocale(claimed.run.language)
     });
     const result = await runAgentReviewAcpSession({
       launch,
       prompt,
-      reminder: buildArtifactReviewerReminder(),
+      reminder: buildArtifactReviewerReminder(resolvePromptLocale(claimed.run.language)),
       workspaceRoot,
       isSubmitted: async () => {
         const current = await readArtifactReviewForActor({

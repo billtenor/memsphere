@@ -1238,6 +1238,7 @@ function settingsPayload(
       archiveRoot: document.resolved.archiveRoot
     },
     defaults: {
+      language: "zh-CN",
       memoryRoot: "memory",
       reviewsRoot: "reviews",
       runsRoot: "runs",

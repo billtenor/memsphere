@@ -4,8 +4,10 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, parse, resolve } from "node:path";
 import { z, ZodError } from "zod";
 import { controlPlaneConfigSchema, type ControlPlaneConfig } from "./control-plane/index.js";
+import { defaultPromptLocale, promptLocales, type PromptLocale } from "./prompts/locale.js";
 
 export const configSchema = z.object({
+  language: z.enum(promptLocales).optional(),
   memoryRoot: z.string().min(1).optional(),
   reviewsRoot: z.string().min(1).optional(),
   runsRoot: z.string().min(1).optional(),
@@ -25,6 +27,7 @@ export type MemsphereConfigFile = z.input<typeof configSchema>;
 export type MemsphereConfig = {
   configPath: string;
   scopeRoot: string;
+  language: PromptLocale;
   memoryRoot: string;
   reviewsRoot: string;
   runsRoot: string;
@@ -107,6 +110,7 @@ export async function readConfigAt(configPath: string): Promise<MemsphereConfig>
   return {
     configPath,
     scopeRoot,
+    language: config.language ?? defaultPromptLocale,
     memoryRoot: resolveConfigPath(config.memoryRoot ?? "memory", scopeRoot),
     reviewsRoot: resolveConfigPath(config.reviewsRoot ?? "reviews", scopeRoot),
     runsRoot: resolveConfigPath(config.runsRoot ?? "runs", scopeRoot),

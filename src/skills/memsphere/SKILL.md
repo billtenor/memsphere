@@ -7,6 +7,8 @@ description: Use memsphere to discover, read, interpret, and apply project Memor
 
 memsphere 定义了一套维护记忆、检索记忆和遵循记忆的框架。通过 memsphere CLI，可以在执行任务时读取当前工程积累的知识和流程，并按照这些历史经验完成任务。
 
+`.memsphere/config.json` 的 `language` 控制面向 Agent 的工作语言，支持 `zh-CN` 和 `en`，省略时固定为 `zh-CN`。Run 启动后会冻结该语言，因此修改配置只影响后续创建的 Run。
+
 ## Memsphere 如何组织记忆
 
 memsphere 将 Memory 分为四类：
@@ -152,7 +154,7 @@ flow:
 
 ### 维护当前配置
 
-View 的“设置”入口提供概览、存储、View 服务、ACP Provider 和参与者配置五个模块，只编辑当前 View 实际加载的 `.memsphere/config.json`。ACP Provider 模块固定展示四种 Provider，Command 只读，负责共享参数、CLI 自动检测和 Actor 引用；参与者中的 Agent 只选择 Provider 与 Model。页面会在服务端校验并展示修改差异，确认后才原子写入；磁盘配置与运行配置不一致时，需要手动执行：
+View 的“设置”入口提供概览、常规、存储、View 服务、ACP Provider 和参与者配置六个模块，只编辑当前 View 实际加载的 `.memsphere/config.json`。常规模块选择后续 Run 使用的工作语言。ACP Provider 模块固定展示四种 Provider，Command 只读，负责共享参数、CLI 自动检测和 Actor 引用；参与者中的 Agent 只选择 Provider 与 Model。页面会在服务端校验并展示修改差异，确认后才原子写入；磁盘配置与运行配置不一致时，需要手动执行：
 
 ```bash
 memsphere view restart

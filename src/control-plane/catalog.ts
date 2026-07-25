@@ -1,8 +1,8 @@
 import type {
   DecisionPolicyDefinitionSnapshot,
-  LocalizedPermissionText,
   PermissionDefinitionSnapshot
 } from "./model.js";
+import { renderPrompt } from "../prompts/renderer.js";
 
 export const permissionIds = [
   "artifact.read",
@@ -19,41 +19,13 @@ export type PermissionId = (typeof permissionIds)[number];
 export const permissionCatalogVersion = "memsphere-permissions-20260721";
 export const decisionPolicyCatalogVersion = "memsphere-decision-policies-20260721";
 
-const descriptions: Readonly<Record<PermissionId, LocalizedPermissionText>> = {
-  "artifact.read": {
-    "zh-CN": "你可以通过 Memsphere 读取当前 Artifact 及其 Review 上下文。",
-    en: "You may read the current Artifact and its review context through Memsphere."
-  },
-  "artifact.write": {
-    "zh-CN": "你可以通过 Memsphere 写入当前 Artifact 的候选内容；这不代表任意操作系统文件写权限。",
-    en: "You may write candidate content for the current Artifact through Memsphere; this does not grant arbitrary operating-system file access."
-  },
-  "artifact.submit": {
-    "zh-CN": "你可以通过 run report 提交当前 Artifact。",
-    en: "You may submit the current Artifact through run report."
-  },
-  "decision.assess": {
-    "zh-CN": "你可以对当前 Artifact 提交评估意见。",
-    en: "You may submit an assessment of the current Artifact."
-  },
-  "decision.challenge": {
-    "zh-CN": "你可以要求当前 Artifact 进入下一轮修改。",
-    en: "You may require the current Artifact to enter another revision round."
-  },
-  "decision.decide": {
-    "zh-CN": "你可以按当前 Review Policy 对 Artifact 作出正式决定。",
-    en: "You may make a formal decision on the Artifact under the active review policy."
-  },
-  "decision.override": {
-    "zh-CN": "你可以在 Review Policy 允许的入口覆盖既有决定。",
-    en: "You may override an existing decision through an entry point allowed by the review policy."
-  }
-};
-
 const permissionDefinitions = permissionIds.map((id): PermissionDefinitionSnapshot => deepFreeze({
   id,
   version: "1",
-  descriptions: { ...descriptions[id] }
+  descriptions: {
+    "zh-CN": renderPrompt("control-plane.permission-description", "zh-CN", { id }),
+    en: renderPrompt("control-plane.permission-description", "en", { id })
+  }
 }));
 
 const permissionDefinitionsById = new Map(permissionDefinitions.map((definition) => [definition.id, definition]));

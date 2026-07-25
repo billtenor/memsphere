@@ -1,0 +1,16 @@
+{{#ifEq kind "none"}}{{else}}
+下一步：
+{{/ifEq}}
+{{#ifEq kind "wait"}}
+memsphere run review wait --review {{reviewId}}
+{{/ifEq}}
+{{#ifEq kind "runner_vote"}}
+memsphere run review vote --review {{reviewId}} --round {{roundId}} --vote approve
+memsphere run review vote --review {{reviewId}} --round {{roundId}} --vote request_changes --comment <text>
+{{/ifEq}}
+{{#ifEq kind "revision"}}
+memsphere run report --run {{runId}} --artifact-file <path> --revision-summary-file <path>
+{{/ifEq}}
+{{#ifEq kind "retry"}}
+memsphere run review retry --review {{reviewId}} --assignment {{assignmentId}}
+{{/ifEq}}

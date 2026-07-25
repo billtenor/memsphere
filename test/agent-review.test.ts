@@ -556,6 +556,7 @@ flow:
       review: [reviewer]
 `));
     await writeFile(configPath, `${JSON.stringify({
+      language: "en",
       memoryRoot: "memory",
       runsRoot: "runs",
       control_plane: {
@@ -584,6 +585,7 @@ flow:
     const started = await startRun({
       memoryRoot: config.memoryRoot,
       runsRoot: config.runsRoot,
+      language: config.language,
       procedureName: "agent-review-fixture",
       controlPlane: config.controlPlane,
       reviewConfiguration: reviewConfiguration({

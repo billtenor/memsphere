@@ -14,6 +14,7 @@ defines:
       - 存在适用的专用 Procedure 时必须优先使用；没有适用的专用 Procedure 时使用 memsphere-general-task-execution。
       - Agent 必须使用 memsphere run start 启动 Procedure，并只执行 CLI 当前返回的步骤，不得提前执行尚未返回的步骤。
       - 启动 Run 后必须保存 run id；后续 run report、run enter-schema 和 run repeat 必须显式传入该 id，不得凭名称猜测或混用其他 Run。
+      - Run 启动时会冻结当前 config.json 的工作语言；后续状态、下一步命令、权限说明和 Review 反馈均按该语言输出，修改配置只影响之后创建的 Run。
       - CLI 返回的 Procedure Asserts 是当前调用链中持续生效的全局约束，Asserts 是当前步骤必须满足的要求，Suggests 是执行时可以参考但不强制满足的建议。
       - CLI 返回的 Actor 表示步骤由 agent 还是 human 执行，Do 或 Ask human to do 表示当前动作，Details 提供补充上下文，Artifact 规定步骤产物及其格式，Then 给出下一条命令。
       - 每个 Action 都必须产生明确的 Artifact；Actor 为 human 时，Agent 必须等待 human 提供结果后再上报和继续。

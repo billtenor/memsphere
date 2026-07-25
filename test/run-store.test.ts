@@ -106,6 +106,27 @@ test("startRun skips unrelated invalid procedures when resolving the target proc
   });
 });
 
+test("startRun freezes and persists the configured work language", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "target.yaml"), validProcedure);
+
+    const started = await startRun({
+      memoryRoot,
+      runsRoot,
+      procedureName: "target-procedure",
+      language: "en"
+    });
+    const persisted = await readRun(runsRoot, started.id);
+
+    assert.equal(started.language, "en");
+    assert.equal(persisted.language, "en");
+  });
+});
+
 test("startRun loads a root Procedure file outside memoryRoot", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
@@ -1739,7 +1760,13 @@ flow:
       runner: { permissions: ["artifact.read"] },
       actors: {}
     });
-    const run = await startRun({ memoryRoot, runsRoot, procedureName: "governed", controlPlane });
+    const run = await startRun({
+      memoryRoot,
+      runsRoot,
+      procedureName: "governed",
+      controlPlane,
+      language: "en"
+    });
     const runPath = join(runsRoot, run.id, `${run.id}.json`);
     const before = await readFile(runPath, "utf8");
 

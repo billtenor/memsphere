@@ -1,0 +1,69 @@
+产物评审：
+- review_id：{{reviewId}}
+- review_round_id：{{roundId}}
+- 轮次：{{round}}
+- 状态：{{status}}
+- 已提交：{{submitted}}/{{total}}
+- 可决策：{{decisionReady}}
+- 建议意见：阻塞={{advisory.blocking}}；风险={{advisory.risk}}；建议={{advisory.suggestion}}；未处置阻塞={{advisory.unresolvedBlocking}}
+- Agent 失败：环境={{failures.environment}}；Provider={{failures.provider}}；Reviewer={{failures.reviewer}}；未知={{failures.unknown}}
+- 前序产物：{{earlierArtifacts}}
+{{#each repeatedAdvisories}}
+- 重复建议：[{{severity}}] x{{count}} 轮次={{rounds}} {{body}}
+{{/each}}
+参与者：
+{{#each participants}}
+- {{actorName}}（{{binding}}{{#if agent}}，Agent{{/if}}）
+  - 投票：{{vote}}
+{{#if agent}}
+  - 状态：{{status}}
+{{#if attempt}}
+  - 尝试：{{attempt}}；Provider：{{provider}}
+{{/if}}
+{{#if failure}}
+  - 失败：{{failure}}
+{{/if}}
+{{/if}}
+{{#if decisionIntent}}
+  - 决策说明：{{decisionIntent}}
+{{/if}}
+{{#unlessNil implementationEvidenceReferenced}}
+  - 已引用实现证据：{{implementationEvidenceReferenced}}
+{{/unlessNil}}
+{{#each comments}}
+  - 意见 [{{severity}}]：{{body}}
+{{/each}}
+{{/each}}
+{{#if runner}}
+- Runner（决策票{{#if runner.automatic}}，自动{{/if}}）
+  - 投票：{{runner.vote}}
+{{#if runner.comment}}
+  - 意见：{{runner.comment}}
+{{/if}}
+{{/if}}
+决策：
+{{#ifDecision decision "awaiting_runner"}}
+- 所有分配的评审均已提交：{{decision.approved}}/{{decision.decisionTotal}} 张决策票通过；已记录 {{decision.advisoryTotal}} 张建议票。
+- 当前策略仍可达成全票通过。你就是本 Run 的 Runner，尚需提交自己的决策票。
+结论：
+- 产物尚未被接受，Run 也未推进。请作为 Runner 阅读以上全部意见，然后明确投票。
+{{/ifDecision}}
+{{#ifDecision decision "result"}}
+- {{#if decision.passed}}已{{else}}未{{/if}}达成全票通过：{{decision.approved}}/{{decision.decisionTotal}} 张决策票通过；已记录 {{decision.advisoryTotal}} 张不影响决策的建议票。
+结论：
+{{#if decision.passed}}
+- 本轮评审全票通过，产物已被接受，Run 已推进到下一步骤。
+{{else}}
+- 本轮未达成全票通过。请根据以上意见修改产物，提供修订摘要并重新上报以启动下一轮。
+{{/if}}
+{{/ifDecision}}
+{{#ifDecision decision "failed"}}
+- 评审被阻塞：{{decision.failedAssignments}} 个 Agent Assignment 失败。
+结论：
+- 产物尚未被接受，Run 也未推进。请在 View 中检查失败原因，然后重试失败的 Agent Assignment。
+{{/ifDecision}}
+{{#ifDecision decision "pending"}}
+- 尚未形成决策；还剩 {{decision.remaining}} 份评审未提交。
+结论：
+- 本轮评审仍在进行。请使用相同的 review_id 继续等待，直到所有评审者提交。
+{{/ifDecision}}

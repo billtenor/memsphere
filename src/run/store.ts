@@ -52,6 +52,7 @@ import {
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
 import { currentMemorySyntax, type MemorySyntaxVersion } from "../memory/syntax.js";
 import { inheritSchemaFormat, resolveSchemaContract } from "../memory/schema.js";
+import { resolvePromptLocale, type PromptLocale } from "../prompts/locale.js";
 import {
   builtInArtifactFormats,
   stepActors,
@@ -208,6 +209,7 @@ export type RunProcedureTemplate = {
 
 export type RunState = {
   contractVersion: 1 | 2 | 3;
+  language?: PromptLocale;
   readOnly?: boolean;
   memorySyntax?: MemorySyntaxVersion;
   id: string;
@@ -636,6 +638,7 @@ const artifactReviewSchema: z.ZodType<ArtifactReview<RunEvent["artifact"]>, z.Zo
 
 const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
   contractVersion: z.literal(3),
+  language: z.enum(["zh-CN", "en"]).default("zh-CN"),
   readOnly: z.boolean().optional(),
   memorySyntax: z.string().optional(),
   id: z.string(),
@@ -686,6 +689,7 @@ export async function ensureRunDirectory(runsRoot: string): Promise<string> {
 export async function startRun(input: {
   memoryRoot: string;
   runsRoot: string;
+  language?: PromptLocale;
   procedureName?: string;
   procedureFile?: string;
   controlPlane?: ControlPlaneConfig;
@@ -726,6 +730,7 @@ export async function startRun(input: {
   const now = new Date().toISOString();
   const run: RunState = {
     contractVersion: 3,
+    language: resolvePromptLocale(input.language),
     memorySyntax: procedure.entity.syntax,
     id: makeRunId(now),
     status: "running",
@@ -797,7 +802,6 @@ export async function reportRun(input: {
   runId: string;
   artifact: ArtifactReportSource;
   revisionSummary?: string;
-  locale?: "zh-CN" | "en";
 }): Promise<RunState> {
   return withRunWriteLock(input.runsRoot, input.runId, () => reportRunUnlocked(input));
 }
@@ -807,7 +811,6 @@ async function reportRunUnlocked(input: {
   runId: string;
   artifact: ArtifactReportSource;
   revisionSummary?: string;
-  locale?: "zh-CN" | "en";
 }): Promise<RunState> {
   const run = await readRun(input.runsRoot, input.runId);
   if (run.contractVersion === 1 || run.readOnly) {
@@ -834,7 +837,7 @@ async function reportRunUnlocked(input: {
     throw new Error(`run has no current step: ${input.runId}`);
   }
 
-  const authorization = authorizeRunnerForReport(run, step, input.locale ?? "en");
+  const authorization = authorizeRunnerForReport(run, step, resolvePromptLocale(run.language));
   const contract = await contractForStep(run, step);
   const context = {
     runId: run.id,
@@ -856,7 +859,6 @@ async function acceptPreparedArtifact(
     runId: string;
     artifact: ArtifactReportSource;
     revisionSummary?: string;
-    locale?: "zh-CN" | "en";
   },
   run: RunState,
   step: RunStep,

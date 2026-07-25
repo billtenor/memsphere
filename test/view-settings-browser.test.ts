@@ -50,6 +50,12 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.equal(await overview.getByText("Reviews", { exact: true }).count(), 0);
     assert.equal(await overview.getByText("Runs", { exact: true }).count(), 0);
     assert.equal(await overview.getByText("Archives", { exact: true }).count(), 0);
+    await page.getByRole("button", { name: "常规", exact: true }).click();
+    assert.equal(await page.getByText("工作语言", { exact: true }).count(), 1);
+    await page.getByRole("combobox", { name: "工作语言" }).click();
+    await page.getByRole("option", { name: "English", exact: true }).click();
+    assert.match(await page.locator("#settings-status").textContent() ?? "", /未保存修改/);
+    await page.getByRole("button", { name: "重新读取", exact: true }).click();
     await page.getByRole("button", { name: "存储", exact: true }).click();
     assert.equal(await page.getByRole("checkbox", { name: "使用默认值" }).count(), 4);
     await page.getByRole("button", { name: "概览", exact: true }).click();

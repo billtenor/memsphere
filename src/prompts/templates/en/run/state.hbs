@@ -1,0 +1,150 @@
+run {{runId}}
+{{#each procedureAsserts}}
+{{#if @first}}
+
+Procedure Asserts:
+{{/if}}
+- {{this}}
+{{/each}}
+{{#ifEq state.kind "done"}}
+done
+{{#each state.finalArtifacts}}
+{{#if @first}}
+
+Final Artifacts:
+{{/if}}
+- {{name}}{{#if path}}: {{path}}{{/if}}
+{{/each}}
+{{/ifEq}}
+{{#ifEq state.kind "schema_finalization"}}
+
+Schema Finalization:
+- status: awaiting global adjustment
+- artifact: {{state.artifactName}}
+- progress: {{state.completed}}/{{state.total}}
+- managed draft: {{state.draftPath}}
+{{#if state.validation}}
+- contract validation: {{state.validation.status}}
+{{#each state.validation.issues}}
+  - {{this}}
+{{/each}}
+{{/if}}
+
+Do:
+Read the complete managed draft, edit it directly as needed, then submit that same file.
+
+Then:
+memsphere run report --run {{runId}} --artifact-file {{state.draftPathArgument}}
+{{/ifEq}}
+{{#ifEq state.kind "repeat"}}
+
+Actor:
+agent
+
+Do:
+{{state.instruction}}
+
+Details:
+- allowed count: {{state.min}}..{{#if state.max}}{{state.max}}{{else}}unbounded{{/if}}
+- body fields: {{state.bodyFields}}
+
+Then:
+memsphere run repeat <count> --run {{runId}}
+{{/ifEq}}
+{{#ifEq state.kind "review"}}
+
+{{> run/review-summary state.review}}
+
+{{> run/review-next-action state.next}}
+{{/ifEq}}
+{{#ifEq state.kind "action"}}
+
+Actor:
+{{state.actor}}
+
+{{#ifEq state.actor "human"}}Ask human to do:{{else}}Do:{{/ifEq}}
+{{state.instruction}}
+{{#each state.asserts}}
+{{#if @first}}
+
+Asserts:
+{{/if}}
+- {{this}}
+{{/each}}
+{{#each state.suggests}}
+{{#if @first}}
+
+Suggests:
+{{/if}}
+- {{this}}
+{{/each}}
+{{#each state.details}}
+{{#if @first}}
+
+Details:
+{{/if}}
+- {{this}}
+{{/each}}
+{{#if state.schemaProgress}}
+
+Schema Progress:
+- field: {{state.schemaProgress.field}}
+- completed: {{state.schemaProgress.completed}}/{{state.schemaProgress.total}}
+- remaining: {{state.schemaProgress.remaining}}
+{{#if state.schemaProgress.pendingRepeatControls}}
+- repeat controls pending: {{state.schemaProgress.pendingRepeatControls}}
+{{/if}}
+{{#each state.schemaProgress.sources}}
+- constraint source: {{path}} ({{type}} · {{format}})
+{{#each defines}}
+  - defines: {{this}}
+{{/each}}
+{{#each asserts}}
+  - asserts: {{this}}
+{{/each}}
+{{/each}}
+{{#if state.schemaProgress.draftPath}}
+- managed draft: {{state.schemaProgress.draftPath}}
+{{/if}}
+- full overview: memsphere run schema show --run {{runId}}
+{{/if}}
+
+Artifact:
+{{state.artifact.name}} ({{state.artifact.type}} · {{state.artifact.format}})
+{{#ifEq state.actor "human"}}
+Report the artifact value provided by the human.
+{{/ifEq}}
+{{#if state.controlPlane}}
+
+Control Plane:
+- mode: enabled
+- revision: {{state.controlPlane.revision}}
+- runner: current run context
+- permission catalog: {{state.controlPlane.permissionCatalogVersion}}
+- decision policy catalog: {{state.controlPlane.decisionPolicyCatalogVersion}}
+{{#each state.controlPlane.bindings}}
+- {{slotId}}: {{actors}} ({{source}})
+{{/each}}
+- runner permissions: {{#each state.controlPlane.runnerPermissions}}{{#unless @first}}, {{/unless}}{{this}}{{else}}none{{/each}}
+
+Permission Guidance:
+{{> control-plane/permission-guidance state.controlPlane.guidance}}
+{{/if}}
+
+Then:
+{{#ifEq state.next.kind "revision"}}
+memsphere run report --run {{runId}} --artifact-file <path> --revision-summary-file <path>
+{{/ifEq}}
+{{#ifEq state.next.kind "inline_schema"}}
+memsphere run enter-schema --run {{runId}}
+{{/ifEq}}
+{{#ifEq state.next.kind "external_schema"}}
+memsphere run enter-schema {{state.next.schemaName}} --run {{runId}}
+{{/ifEq}}
+{{#ifEq state.next.kind "report"}}
+memsphere run report --run {{runId}} --artifact <value>
+{{#if state.next.optional}}
+memsphere run skip --run {{runId}}
+{{/if}}
+{{/ifEq}}
+{{/ifEq}}

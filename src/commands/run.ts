@@ -1,9 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
-  artifactReviewFailureCategory,
-  artifactReviewOpinionReferencesImplementation,
-  repeatedArtifactReviewAdvisories,
   type ArtifactReview,
   type ArtifactReviewRound
 } from "../artifact-review.js";
@@ -18,22 +15,26 @@ import {
 } from "../acp/review-session.js";
 import { readConfig } from "../config.js";
 import {
-  authorizeArtifactOperation,
-  renderPermissionGuidance,
-  type RunReviewConfiguration,
-  type PermissionLocale
+  type RunReviewConfiguration
 } from "../control-plane/index.js";
 import {
-  activeProcedureAsserts,
+  buildArtifactReviewSummaryPromptModel,
+  buildArtifactReviewNextActionPromptModel,
+  buildReportAuthorizationPromptModel,
+  buildRunStatePromptModel,
+  buildSchemaOverviewPromptModel,
+  renderPrompt,
+  resolvePromptLocale,
+  type PromptLocale
+} from "../prompts/index.js";
+import {
   type ArtifactReportSource,
   buildSchemaWritingSnapshot,
   currentArtifactReview,
   currentFrame,
-  currentSchemaFinalization,
   currentStep,
   enterSchema,
   ensureCurrentSchemaDraft,
-  finalArtifacts,
   findArtifactReview,
   listRuns,
   readRun,
@@ -139,6 +140,7 @@ export async function runStartCommand(procedureName: string | undefined, options
     run = await startRun({
       memoryRoot: config.memoryRoot,
       runsRoot: config.runsRoot,
+      language: config.language,
       procedureName: name,
       procedureFile,
       controlPlane: config.controlPlane,
@@ -146,11 +148,11 @@ export async function runStartCommand(procedureName: string | undefined, options
     });
   } catch (error) {
     if (!(error instanceof RunReviewConfigurationRequired)) throw error;
-    console.log("Review configuration is required before this Run can start.");
-    console.log(JSON.stringify(error.preflight, null, 2));
-    console.log("");
-    console.log("Save the example object as JSON, adjust its Policy and Slot bindings, then run:");
-    console.log("memsphere run start <procedure> --review-config <path>");
+    console.log(renderPrompt(
+      "run.review-configuration-required",
+      config.language,
+      { preflightJson: JSON.stringify(error.preflight, null, 2) }
+    ));
     return;
   }
   printRunState(run, config.runsRoot);
@@ -205,8 +207,7 @@ export async function runReportCommand(options: ReportOptions): Promise<void> {
     runsRoot: config.runsRoot,
     runId,
     artifact,
-    revisionSummary,
-    locale: permissionLocale()
+    revisionSummary
   });
   await dispatchArtifactReviewAgents({ config, run });
   printLatestReportAuthorization(run);
@@ -220,20 +221,22 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
   const located = await findArtifactReview({ runsRoot: config.runsRoot, reviewId });
   await dispatchArtifactReviewAgents({ config, run: located.run });
   const context = await waitForArtifactReview({ runsRoot: config.runsRoot, reviewId });
-  printArtifactReviewSummary(context.review, context.round, options.verbose);
+  printArtifactReviewSummary(
+    context.review,
+    context.round,
+    options.verbose,
+    resolvePromptLocale(context.run.language)
+  );
   console.log("");
   if (context.review.status === "passed") {
     printRunState(context.run, config.runsRoot);
     return;
   }
-  if (context.review.status === "awaiting_runner_vote") {
-    printRunnerVoteCommands(context.review, context.round);
-    return;
-  }
-  console.log("Then:");
-  console.log(
-    `memsphere run report --run ${context.run.id} --artifact-file <path> --revision-summary-file <path>`
-  );
+  console.log(renderPrompt(
+    "run.review-next-action",
+    resolvePromptLocale(context.run.language),
+    buildArtifactReviewNextActionPromptModel(context.review, context.round, context.run.id)
+  ));
 }
 
 export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<void> {
@@ -258,16 +261,22 @@ export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<
     vote: options.vote,
     comment
   });
-  printArtifactReviewSummary(context.review, context.round);
+  printArtifactReviewSummary(
+    context.review,
+    context.round,
+    false,
+    resolvePromptLocale(context.run.language)
+  );
   console.log("");
   if (context.review.status === "passed") {
     printRunState(context.run, config.runsRoot);
     return;
   }
-  console.log("Then:");
-  console.log(
-    `memsphere run report --run ${context.run.id} --artifact-file <path> --revision-summary-file <path>`
-  );
+  console.log(renderPrompt(
+    "run.review-next-action",
+    resolvePromptLocale(context.run.language),
+    buildArtifactReviewNextActionPromptModel(context.review, context.round, context.run.id)
+  ));
 }
 
 export async function runReviewRetryCommand(options: ReviewRetryOptions): Promise<void> {
@@ -476,7 +485,7 @@ export async function runEnterSchemaCommand(schemaName: string | undefined, opti
     schemaName
   });
   const snapshot = buildSchemaWritingSnapshot(config.runsRoot, run);
-  if (snapshot) printSchemaWritingOverview(snapshot);
+  if (snapshot) printSchemaWritingOverview(snapshot, resolvePromptLocale(run.language));
   printRunState(run, config.runsRoot);
 }
 
@@ -490,7 +499,7 @@ export async function runSchemaShowCommand(options: RunSchemaShowOptions): Promi
     console.log(JSON.stringify(snapshot));
     return;
   }
-  printSchemaWritingOverview(snapshot);
+  printSchemaWritingOverview(snapshot, resolvePromptLocale(run.language));
 }
 
 export async function runRepeatCommand(countValue: string, options: RunIdOptions): Promise<void> {
@@ -558,377 +567,44 @@ function requireStepRef(value: string | undefined): string {
 }
 
 export function printRunState(run: RunState, runsRoot?: string): void {
-  console.log(`run ${run.id}`);
-
-  if (run.status === "done") {
-    console.log("done");
-    const finals = finalArtifacts(run);
-    if (finals.length) {
-      console.log("");
-      console.log("Final Artifacts:");
-      for (const artifact of finals) console.log(`- ${artifact.name}${artifact.path ? `: ${artifact.path}` : ""}`);
-    }
-    return;
-  }
-
-  const procedureAsserts = activeProcedureAsserts(run);
-  if (procedureAsserts.length) {
-    console.log("");
-    console.log("Procedure Asserts:");
-    for (const value of procedureAsserts) console.log(`- ${value}`);
-  }
-
-  const schemaFinalization = currentSchemaFinalization(run);
-  if (schemaFinalization) {
-    const draftPath = runsRoot
-      ? resolve(runsRoot, schemaFinalization.draft.path)
-      : schemaFinalization.draft.path;
-    console.log("");
-    console.log("Schema Finalization:");
-    console.log(`- status: awaiting global adjustment`);
-    console.log(`- artifact: ${schemaFinalization.parentStep.artifact}`);
-    console.log(`- progress: ${schemaFinalization.draft.completed}/${schemaFinalization.draft.total}`);
-    console.log(`- managed draft: ${draftPath}`);
-    if (schemaFinalization.draft.validation) {
-      console.log(`- contract validation: ${schemaFinalization.draft.validation.status}`);
-      for (const issue of schemaFinalization.draft.validation.issues) {
-        console.log(`  - ${issue.message}`);
-      }
-    }
-    console.log("");
-    console.log("Do:");
-    console.log("Read the complete managed draft, edit it directly as needed, then submit that same file.");
-    console.log("");
-    console.log("Then:");
-    console.log(`memsphere run report --run ${run.id} --artifact-file ${shellQuote(draftPath)}`);
-    return;
-  }
-
-  const frame = currentFrame(run);
-  const step = currentStep(run);
-  if (frame && step?.kind === "repeat" && step.repeat) {
-    const max = step.repeat.max === undefined ? "unbounded" : String(step.repeat.max);
-    console.log("");
-    console.log("Actor:");
-    console.log("agent");
-    console.log("");
-    console.log("Do:");
-    console.log(step.instruction);
-    console.log("");
-    console.log("Details:");
-    console.log(`- allowed count: ${step.repeat.min}..${max}`);
-    console.log(`- body fields: ${step.repeat.body.length}`);
-    console.log("");
-    console.log("Then:");
-    console.log(`memsphere run repeat <count> --run ${run.id}`);
-    return;
-  }
-  if (!frame || !step || !step.artifact || !step.format) {
-    console.log("done");
-    return;
-  }
-
-  const artifactReview = currentArtifactReview(run);
-  if (artifactReview?.status === "pending" || artifactReview?.status === "awaiting_runner_vote") {
-    const round = artifactReview.rounds.find((candidate) => candidate.id === artifactReview.currentRoundId);
-    if (!round) throw new Error(`Artifact Review Round not found: ${artifactReview.currentRoundId}`);
-    printArtifactReviewSummary(artifactReview, round);
-    console.log("");
-    if (artifactReview.status === "pending") {
-      console.log("Then:");
-      console.log(`memsphere run review wait --review ${artifactReview.id}`);
-    } else {
-      printRunnerVoteCommands(artifactReview, round);
-    }
-    return;
-  }
-
-  console.log("");
-  console.log("Actor:");
-  console.log(step.actor === "human" ? "human" : "agent");
-
-  console.log("");
-  console.log(step.actor === "human" ? "Ask human to do:" : "Do:");
-  console.log(step.instruction);
-
-  if (step.asserts?.length) {
-    console.log("");
-    console.log("Asserts:");
-    for (const value of step.asserts) console.log(`- ${value}`);
-  }
-
-  if (step.suggests?.length) {
-    console.log("");
-    console.log("Suggests:");
-    for (const value of step.suggests) console.log(`- ${value}`);
-  }
-
-  if (step.details?.length) {
-    console.log("");
-    console.log("Details:");
-    for (const detail of step.details) {
-      console.log(`- ${detail}`);
-    }
-  }
-
-  if (frame.type === "schema") {
-    const snapshot = buildSchemaWritingSnapshot(runsRoot ?? ".", run);
-    if (snapshot) {
-      console.log("");
-      console.log("Schema Progress:");
-      console.log(`- field: ${snapshot.progress.current ?? step.artifact}`);
-      console.log(`- completed: ${snapshot.progress.completed}/${snapshot.progress.total}`);
-      console.log(`- remaining: ${snapshot.progress.remaining}`);
-      if (snapshot.progress.pendingRepeatControls) {
-        console.log(`- repeat controls pending: ${snapshot.progress.pendingRepeatControls}`);
-      }
-      for (const source of snapshot.currentField?.sources ?? []) {
-        console.log(`- constraint source: ${source.path} (${source.type} · ${formatDisplay(source.format)})`);
-        for (const value of source.defines ?? []) console.log(`  - defines: ${value}`);
-        for (const value of source.asserts ?? []) console.log(`  - asserts: ${value}`);
-      }
-      if (snapshot.draft) console.log(`- managed draft: ${snapshot.draft.filePath}`);
-      console.log(`- full overview: memsphere run schema show --run ${run.id}`);
-    }
-  }
-
-  console.log("");
-  console.log("Artifact:");
-  console.log(`${step.artifact} (${step.type ?? "unknown"} · ${formatDisplay(step.format)})`);
-  if (step.actor === "human") {
-    console.log("Report the artifact value provided by the human.");
-  }
-
-  if (frame.type !== "schema") printPermissionGuidance(run, step);
-
-  console.log("");
-  if (artifactReview?.status === "awaiting_revision") {
-    console.log("Then:");
-    console.log(`memsphere run report --run ${run.id} --artifact-file <path> --revision-summary-file <path>`);
-  } else if (step.format.name === "markdown" && step.schema) {
-    console.log("Then:");
-    if (step.schema.kind === "inline") {
-      console.log(`memsphere run enter-schema --run ${run.id}`);
-    } else {
-      console.log(`memsphere run enter-schema ${step.schema.name} --run ${run.id}`);
-    }
-  } else {
-    console.log("Then:");
-    console.log(`memsphere run report --run ${run.id} --artifact <value>`);
-    if (step.optional === true) {
-      console.log(`memsphere run skip --run ${run.id}`);
-    }
-  }
+  const locale = resolvePromptLocale(run.language);
+  console.log(renderPrompt(
+    "run.state",
+    locale,
+    buildRunStatePromptModel(run, locale, runsRoot)
+  ));
 }
 
-export function printSchemaWritingOverview(snapshot: SchemaWritingSnapshot): void {
-  console.log("Schema Overview:");
-  console.log(`- procedure: ${snapshot.procedureName}`);
-  console.log(`- action: ${snapshot.action.instruction}`);
-  for (const value of snapshot.action.asserts) console.log(`  - action assert: ${value}`);
-  for (const value of snapshot.action.suggests) console.log(`  - action suggest: ${value}`);
-  console.log(`- artifact: ${snapshot.artifact.name}`);
-  if (snapshot.artifact.type) console.log(`- type: ${snapshot.artifact.type}`);
-  if (snapshot.artifact.format) console.log(`- format: ${formatDisplay(snapshot.artifact.format)}`);
-  if (snapshot.artifact.schema) {
-    console.log(`- schema: ${snapshot.artifact.schema.kind === "external" ? snapshot.artifact.schema.name : snapshot.artifact.schema.id}`);
-  }
-  console.log(`- final artifact: ${snapshot.artifact.final ? "yes" : "no"}`);
-  console.log(`- progress: ${snapshot.progress.completed}/${snapshot.progress.total}`);
-  if (snapshot.progress.pendingRepeatControls) {
-    console.log(`- repeat controls pending: ${snapshot.progress.pendingRepeatControls}`);
-  }
-  console.log("- workflow: report each field to update one managed draft; after all fields, read and edit the complete draft before explicitly submitting that same file.");
-  console.log("Fields:");
-  for (const field of snapshot.progress.fields) console.log(`- ${field.path}: ${field.status}`);
-  if (snapshot.draft) {
-    console.log("Draft:");
-    console.log(`- status: ${snapshot.draft.status}`);
-    console.log(`- file: ${snapshot.draft.filePath}`);
-    if (snapshot.draft.validation) console.log(`- contract validation: ${snapshot.draft.validation.status}`);
-  }
-}
-
-function shellQuote(value: string): string {
-  if (/^[a-zA-Z0-9_./:-]+$/.test(value)) return value;
-  return `'${value.replaceAll("'", `'\\''`)}'`;
+export function printSchemaWritingOverview(
+  snapshot: SchemaWritingSnapshot,
+  locale: PromptLocale = "en"
+): void {
+  console.log(renderPrompt(
+    "run.schema-overview",
+    locale,
+    buildSchemaOverviewPromptModel(snapshot)
+  ));
 }
 
 export function printArtifactReviewSummary(
   review: ArtifactReview<RunState["events"][number]["artifact"]>,
   round: ArtifactReviewRound,
-  verbose = false
+  verbose = false,
+  locale: PromptLocale = "en"
 ): void {
-  const submitted = round.assignments.filter((assignment) => assignment.status === "submitted").length;
-  console.log("Artifact Review:");
-  console.log(`- review_id: ${review.id}`);
-  console.log(`- review_round_id: ${round.id}`);
-  console.log(`- round: ${round.sequence}`);
-  console.log(`- status: ${review.status}`);
-  console.log(`- submitted: ${submitted}/${round.assignments.length}`);
-  const advisoryComments = round.assignments
-    .filter((assignment) => assignment.binding === "advisory")
-    .flatMap((assignment) => assignment.submitted?.comments ?? []);
-  const resolved = new Set((round.commentDispositions ?? []).map((item) => item.commentId));
-  const unresolvedBlocking = advisoryComments.filter((comment) => comment.severity === "blocking" && !resolved.has(comment.id));
-  const failedAttempts = round.assignments.flatMap((assignment) => assignment.attempts ?? [])
-    .filter((attempt) => attempt.status === "failed" && attempt.failure);
-  console.log(`- decision_ready: ${round.assignments.every((assignment) => assignment.status === "submitted")}`);
-  console.log(`- advisory: blocking=${advisoryComments.filter((comment) => comment.severity === "blocking").length}; risk=${advisoryComments.filter((comment) => comment.severity === "risk").length}; suggestion=${advisoryComments.filter((comment) => comment.severity === "suggestion").length}; unresolved_blocking=${unresolvedBlocking.length}`);
-  console.log(`- agent_failures: environment=${failedAttempts.filter((attempt) => attempt.failure && artifactReviewFailureCategory(attempt.failure) === "environment").length}; provider=${failedAttempts.filter((attempt) => attempt.failure && artifactReviewFailureCategory(attempt.failure) === "provider").length}; reviewer=${failedAttempts.filter((attempt) => attempt.failure && artifactReviewFailureCategory(attempt.failure) === "reviewer").length}; unknown=${failedAttempts.filter((attempt) => attempt.failure && artifactReviewFailureCategory(attempt.failure) === "unknown").length}`);
-  const submission = review.submissions.find((candidate) => candidate.id === round.submissionId);
-  console.log(`- earlier_artifacts: ${submission?.contextArtifacts.length ?? 0}`);
-  for (const repeated of repeatedArtifactReviewAdvisories(review)) {
-    console.log(`- repeated_advisory: [${repeated.severity}] x${repeated.count} rounds=${repeated.rounds.join(",")} ${repeated.body}`);
-  }
-  console.log("Participants:");
-  for (const assignment of round.assignments) {
-    const vote = assignment.submitted?.vote ?? "pending";
-    const actorKind = assignment.actorKind === "agent" ? ", agent" : "";
-    console.log(`- ${assignment.actorName} (${assignment.binding}${actorKind})`);
-    console.log(`  - vote: ${vote}`);
-    if (assignment.actorKind === "agent") {
-      const attempt = assignment.attempts?.at(-1);
-      console.log(`  - status: ${assignment.status}`);
-      if (attempt) console.log(`  - attempt: ${attempt.sequence}; provider: ${attempt.provider}`);
-      if (attempt?.failure) console.log(`  - failure: ${artifactReviewFailureCategory(attempt.failure)}/${attempt.failure.code}${verbose ? `: ${attempt.failure.message}` : ""}`);
-    }
-    if (assignment.binding === "decision" && assignment.submitted?.summary) {
-      console.log(`  - decision_intent: ${assignment.submitted.summary}`);
-    }
-    if (assignment.submitted) {
-      console.log(`  - implementation_evidence_referenced: ${artifactReviewOpinionReferencesImplementation(assignment.submitted)}`);
-    }
-    if (verbose) {
-      for (const comment of assignment.submitted?.comments ?? []) {
-        console.log(`  - comment [${comment.severity ?? "unspecified"}]: ${comment.body}`);
-      }
-    }
-  }
-  const runnerVote = round.votes.find((candidate) => candidate.subject.kind === "runner");
-  const runnerCanDecide = Boolean(runnerVote) || authorizeArtifactOperation({
-    controlPlane: review.controlPlane,
-    subject: { kind: "runner" },
-    permission: "decision.decide"
-  }).allowed;
-  if (runnerVote || runnerCanDecide) {
-    console.log(`- Runner (decision${runnerVote?.automatic ? ", automatic" : ""})`);
-    console.log(`  - vote: ${runnerVote?.value ?? "pending"}`);
-    if (runnerVote?.comment) console.log(`  - comment: ${runnerVote.comment}`);
-  }
-  console.log("Decision:");
-  if (review.status === "awaiting_runner_vote") {
-    const participantDecisionVotes = round.votes.filter(
-      (vote) => vote.subject.kind === "actor" && vote.binding === "decision"
-    );
-    const approved = participantDecisionVotes.filter((vote) => vote.value === "approve").length;
-    const advisoryTotal = round.votes.filter((vote) => vote.binding === "advisory").length;
-    console.log(
-      `- All assigned reviews are submitted: ${approved}/${participantDecisionVotes.length} decision votes approved; `
-      + `${advisoryTotal} advisory vote${advisoryTotal === 1 ? " was" : "s were"} recorded.`
-    );
-    console.log("- The policy can still reach unanimous approval. You are the Runner for this Run, and your decision vote is pending.");
-    console.log("Conclusion:");
-    console.log("- The Artifact has not been accepted and the Run has not advanced. As the Runner, review every comment above, then cast your vote explicitly.");
-    return;
-  }
-  if (round.result) {
-    const unanimous = round.result.status === "passed";
-    const advisory = round.result.advisoryTotal === 1 ? "1 advisory vote was" : `${round.result.advisoryTotal} advisory votes were`;
-    console.log(
-      `- unanimous approval ${unanimous ? "was reached" : "was not reached"}: `
-      + `${round.result.decisionApprove}/${round.result.decisionTotal} decision votes approved; `
-      + `${advisory} recorded and did not affect the decision.`
-    );
-    console.log("Conclusion:");
-    console.log(unanimous
-      ? "- This review round passed unanimously, so the reviewed Artifact was accepted and the Run advanced to the next step."
-      : "- This review round did not pass because unanimous approval was not reached; revise the Artifact using the comments above, provide a revision summary, and report the new Artifact to start the next round.");
-    return;
-  }
-  const failed = round.assignments.filter((assignment) => assignment.status === "failed");
-  if (failed.length) {
-    console.log(`- Review is blocked because ${failed.length} Agent Assignment${failed.length === 1 ? " has" : "s have"} failed.`);
-    console.log("Conclusion:");
-    console.log("- The Artifact has not been accepted and the Run has not advanced. Inspect the failure in View, then retry the failed Agent Assignment.");
-    return;
-  }
-  const remaining = round.assignments.length - submitted;
-  console.log(`- No decision has been reached; ${remaining} review submission${remaining === 1 ? "" : "s"} remain.`);
-  console.log("Conclusion:");
-  console.log("- This review round is still in progress; keep waiting with the same review_id until every assigned reviewer submits.");
-}
-
-function printRunnerVoteCommands(
-  review: ArtifactReview<RunState["events"][number]["artifact"]>,
-  round: ArtifactReviewRound
-): void {
-  console.log("Then:");
-  console.log(`memsphere run review vote --review ${review.id} --round ${round.id} --vote approve`);
-  console.log(
-    `memsphere run review vote --review ${review.id} --round ${round.id} --vote request_changes --comment <text>`
-  );
-}
-
-function printPermissionGuidance(run: RunState, step: NonNullable<ReturnType<typeof currentStep>>): void {
-  if (!run.controlPlane || !step.controlPlane) return;
-  const permissions = step.controlPlane.permissions.runner;
-  if (!permissions) return;
-  const guidance = renderPermissionGuidance({
-    snapshot: run.controlPlane,
-    actorId: "runner",
-    permissions,
-    artifactScope: step.controlPlane.artifactScope,
-    locale: permissionLocale()
-  });
-  console.log("");
-  console.log("Control Plane:");
-  console.log("- mode: enabled");
-  console.log(`- revision: ${run.controlPlane.revision}`);
-  console.log("- runner: current run context");
-  console.log(`- permission catalog: ${run.controlPlane.permissionCatalog.version}`);
-  console.log(`- decision policy catalog: ${run.controlPlane.decisionPolicyCatalog.version}`);
-  for (const [slotId, binding] of Object.entries(step.controlPlane.bindings)) {
-    console.log(`- ${slotId}: ${binding.skipped ? "skipped" : binding.actorIds.join(", ")} (${binding.source})`);
-  }
-  console.log(`- runner permissions: ${permissions.effective.join(", ") || "none"}`);
-  console.log("");
-  console.log(permissionLocale() === "zh-CN" ? "权限说明:" : "Permission Guidance:");
-  for (const line of guidance.lines) console.log(line);
+  console.log(renderPrompt(
+    "run.review-summary",
+    locale,
+    buildArtifactReviewSummaryPromptModel(review, round, verbose)
+  ));
 }
 
 export function printLatestReportAuthorization(run: RunState): void {
-  const authorization = [...run.events].reverse().find((event) => event.artifact.authorization)?.artifact.authorization;
-  if (!authorization) return;
-  console.log("Report Authorization:");
-  console.log(`- allowed: ${authorization.permission}`);
-  console.log(`- actor: ${authorization.actorId}`);
-  console.log(`- artifact: ${authorization.artifactScope}`);
-  console.log(`- revision: ${authorization.revision}`);
-  if (run.controlPlane) {
-    const locale = permissionLocale();
-    const guidance = renderPermissionGuidance({
-      snapshot: run.controlPlane,
-      actorId: authorization.actorId,
-      permissions: {
-        base: authorization.basePermissions,
-        grants: authorization.grantedPermissions,
-        effective: authorization.effectivePermissions,
-        authoritySource: authorization.authoritySource,
-        grantSource: authorization.grantSource
-      },
-      artifactScope: authorization.artifactScope,
-      locale,
-      decision: authorization
-    });
-    console.log(locale === "zh-CN" ? "权限说明:" : "Permission Guidance:");
-    for (const line of guidance.lines) console.log(line);
-  }
+  const locale = resolvePromptLocale(run.language);
+  const model = buildReportAuthorizationPromptModel(run, locale);
+  if (!model) return;
+  console.log(renderPrompt("run.report-authorization", locale, model));
   console.log("");
-}
-
-function permissionLocale(): PermissionLocale {
-  return process.env.LANG?.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
 }
 
 function requireBoundAssignment(value: string | undefined): string {
@@ -1163,10 +839,4 @@ function collectRunStepLocations(
 
 function locatedStepRef(located: LocatedRunStep): string {
   return `${located.memoryName}#${located.step.id}`;
-}
-
-function formatDisplay(format: NonNullable<ReturnType<typeof currentStep>>["format"]): string {
-  if (!format) return "unknown";
-  const options = Object.entries(format.options).map(([name, value]) => `${name}: ${String(value)}`);
-  return options.length ? `${format.name} (${options.join(", ")})` : format.name;
 }

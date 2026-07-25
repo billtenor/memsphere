@@ -1,0 +1,69 @@
+Artifact Review:
+- review_id: {{reviewId}}
+- review_round_id: {{roundId}}
+- round: {{round}}
+- status: {{status}}
+- submitted: {{submitted}}/{{total}}
+- decision_ready: {{decisionReady}}
+- advisory: blocking={{advisory.blocking}}; risk={{advisory.risk}}; suggestion={{advisory.suggestion}}; unresolved_blocking={{advisory.unresolvedBlocking}}
+- agent_failures: environment={{failures.environment}}; provider={{failures.provider}}; reviewer={{failures.reviewer}}; unknown={{failures.unknown}}
+- earlier_artifacts: {{earlierArtifacts}}
+{{#each repeatedAdvisories}}
+- repeated_advisory: [{{severity}}] x{{count}} rounds={{rounds}} {{body}}
+{{/each}}
+Participants:
+{{#each participants}}
+- {{actorName}} ({{binding}}{{#if agent}}, agent{{/if}})
+  - vote: {{vote}}
+{{#if agent}}
+  - status: {{status}}
+{{#if attempt}}
+  - attempt: {{attempt}}; provider: {{provider}}
+{{/if}}
+{{#if failure}}
+  - failure: {{failure}}
+{{/if}}
+{{/if}}
+{{#if decisionIntent}}
+  - decision_intent: {{decisionIntent}}
+{{/if}}
+{{#unlessNil implementationEvidenceReferenced}}
+  - implementation_evidence_referenced: {{implementationEvidenceReferenced}}
+{{/unlessNil}}
+{{#each comments}}
+  - comment [{{severity}}]: {{body}}
+{{/each}}
+{{/each}}
+{{#if runner}}
+- Runner (decision{{#if runner.automatic}}, automatic{{/if}})
+  - vote: {{runner.vote}}
+{{#if runner.comment}}
+  - comment: {{runner.comment}}
+{{/if}}
+{{/if}}
+Decision:
+{{#ifDecision decision "awaiting_runner"}}
+- All assigned reviews are submitted: {{decision.approved}}/{{decision.decisionTotal}} decision votes approved; {{decision.advisoryTotal}} advisory vote{{#unlessOne decision.advisoryTotal}}s{{/unlessOne}} {{#ifOne decision.advisoryTotal}}was{{else}}were{{/ifOne}} recorded.
+- The policy can still reach unanimous approval. You are the Runner for this Run, and your decision vote is pending.
+Conclusion:
+- The Artifact has not been accepted and the Run has not advanced. As the Runner, review every comment above, then cast your vote explicitly.
+{{/ifDecision}}
+{{#ifDecision decision "result"}}
+- unanimous approval {{#if decision.passed}}was reached{{else}}was not reached{{/if}}: {{decision.approved}}/{{decision.decisionTotal}} decision votes approved; {{decision.advisoryTotal}} advisory vote{{#unlessOne decision.advisoryTotal}}s{{/unlessOne}} {{#ifOne decision.advisoryTotal}}was{{else}}were{{/ifOne}} recorded and did not affect the decision.
+Conclusion:
+{{#if decision.passed}}
+- This review round passed unanimously, so the reviewed Artifact was accepted and the Run advanced to the next step.
+{{else}}
+- This review round did not pass because unanimous approval was not reached; revise the Artifact using the comments above, provide a revision summary, and report the new Artifact to start the next round.
+{{/if}}
+{{/ifDecision}}
+{{#ifDecision decision "failed"}}
+- Review is blocked because {{decision.failedAssignments}} Agent Assignment{{#unlessOne decision.failedAssignments}}s have{{else}} has{{/unlessOne}} failed.
+Conclusion:
+- The Artifact has not been accepted and the Run has not advanced. Inspect the failure in View, then retry the failed Agent Assignment.
+{{/ifDecision}}
+{{#ifDecision decision "pending"}}
+- No decision has been reached; {{decision.remaining}} review submission{{#unlessOne decision.remaining}}s{{/unlessOne}} remain.
+Conclusion:
+- This review round is still in progress; keep waiting with the same review_id until every assigned reviewer submits.
+{{/ifDecision}}

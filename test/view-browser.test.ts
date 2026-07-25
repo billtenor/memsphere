@@ -9,12 +9,13 @@ test("embedded browser script is valid JavaScript", () => {
   assert.doesNotThrow(() => new Function(script));
 });
 
-test("Settings is a stable five-module configuration workspace", () => {
+test("Settings is a stable six-module configuration workspace", () => {
   assert.match(browserHtml, /id="settings-tab"/);
   assert.match(browserHtml, /class="brand-settings"/);
   assert.match(browserHtml, /class="sidebar-tools"[\s\S]*id="settings-tab"[\s\S]*<div class="brand">[\s\S]*<h1>memsphere<\/h1>/);
   assert.doesNotMatch(browserHtml, /class="view-tab" id="settings-tab"/);
   assert.match(browserHtml, /\["overview", "概览"\]/);
+  assert.match(browserHtml, /\["general", "常规"\]/);
   assert.match(browserHtml, /\["storage", "存储"\]/);
   assert.match(browserHtml, /\["view", "View 服务"\]/);
   assert.match(browserHtml, /\["providers", "ACP Provider"\]/);

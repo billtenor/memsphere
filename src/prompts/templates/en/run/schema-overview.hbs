@@ -1,0 +1,27 @@
+Schema Overview:
+- procedure: {{procedureName}}
+- action: {{action.instruction}}
+{{#each action.asserts}}
+  - action assert: {{this}}
+{{/each}}
+{{#each action.suggests}}
+  - action suggest: {{this}}
+{{/each}}
+- artifact: {{artifact.name}}
+{{#if artifact.type}}- type: {{artifact.type}}{{/if}}
+{{#if artifact.format}}- format: {{artifact.format}}{{/if}}
+{{#if artifact.schema}}- schema: {{artifact.schema}}{{/if}}
+- final artifact: {{#if artifact.final}}yes{{else}}no{{/if}}
+- progress: {{progress.completed}}/{{progress.total}}
+{{#if progress.pendingRepeatControls}}- repeat controls pending: {{progress.pendingRepeatControls}}{{/if}}
+- workflow: report each field to update one managed draft; after all fields, read and edit the complete draft before explicitly submitting that same file.
+Fields:
+{{#each progress.fields}}
+- {{path}}: {{status}}
+{{/each}}
+{{#if draft}}
+Draft:
+- status: {{draft.status}}
+- file: {{draft.filePath}}
+{{#if draft.validationStatus}}- contract validation: {{draft.validationStatus}}{{/if}}
+{{/if}}

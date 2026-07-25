@@ -6,42 +6,48 @@ import type {
   PermissionLocale,
   ResolvedActorPermissions
 } from "./model.js";
+import type { PermissionGuidancePromptModel } from "../prompts/models.js";
+import { renderPrompt } from "../prompts/renderer.js";
 
-export function renderPermissionGuidance(input: {
+type PermissionGuidanceInput = {
   snapshot: ControlPlaneSnapshot;
   actorId: string;
   permissions: ResolvedActorPermissions;
   artifactScope: string;
   locale?: PermissionLocale;
   decision?: AuthorizationDecision;
-}): PermissionGuidance {
+};
+
+export function buildPermissionGuidancePromptModel(
+  input: PermissionGuidanceInput
+): PermissionGuidancePromptModel {
   const locale = input.locale ?? "en";
   const definitions = new Map(input.snapshot.permissionCatalog.definitions.map((definition) => [definition.id, definition]));
-  const lines = input.permissions.effective.map((permission) => {
+  const permissions = input.permissions.effective.map((permission) => {
     const definition = definitions.get(permission);
     const description = definition?.descriptions[locale] ?? definition?.descriptions.en ?? permission;
-    return `- ${permission}: ${description}`;
+    return { id: permission, description };
   });
+  return {
+    locale,
+    artifactScope: input.artifactScope,
+    actorId: input.actorId,
+    authoritySource: input.permissions.authoritySource,
+    decision: input.decision ? {
+      allowed: input.decision.allowed,
+      permission: input.decision.permission
+    } : undefined,
+    permissions
+  };
+}
 
-  if (!lines.length) {
-    lines.push(locale === "zh-CN"
-      ? "- 当前 Actor 在此 Artifact 下没有可执行的受控操作。"
-      : "- This Actor has no permitted controlled operations for the current Artifact.");
-  }
-
-  if (input.decision && !input.decision.allowed) {
-    lines.unshift(locale === "zh-CN"
-      ? `拒绝：当前操作需要 ${input.decision.permission}，但 Actor ${input.actorId} 不具备该权限。`
-      : `Denied: this operation requires ${input.decision.permission}, which Actor ${input.actorId} does not have.`);
-  } else if (input.decision?.allowed) {
-    lines.unshift(locale === "zh-CN"
-      ? `允许：当前操作使用 ${input.decision.permission} 权限。`
-      : `Allowed: this operation uses the ${input.decision.permission} permission.`);
-  }
-
-  lines.unshift(locale === "zh-CN"
-    ? `当前 Artifact：${input.artifactScope}；Actor：${input.actorId}；权限依据：${input.permissions.authoritySource}。`
-    : `Current Artifact: ${input.artifactScope}; Actor: ${input.actorId}; authority: ${input.permissions.authoritySource}.`);
+export function renderPermissionGuidance(input: PermissionGuidanceInput): PermissionGuidance {
+  const locale = input.locale ?? "en";
+  const lines = renderPrompt(
+    "control-plane.permission-guidance",
+    locale,
+    buildPermissionGuidancePromptModel(input)
+  ).split("\n");
 
   return {
     allowed: input.decision?.allowed ?? true,

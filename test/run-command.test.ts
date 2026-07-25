@@ -147,6 +147,7 @@ test("Run inspection separates navigation, step detail, and Artifact content", a
 test("run output separates Procedure assertions from Action assertions", () => {
   const run: RunState = {
     contractVersion: 2,
+    language: "en",
     id: "run-contract",
     status: "running",
     procedureName: "guarded-procedure",
@@ -187,9 +188,53 @@ test("run output separates Procedure assertions from Action assertions", () => {
   assert(output.indexOf("Procedure Asserts:") < output.indexOf("\nAsserts:"));
 });
 
+test("Run output defaults to Chinese and ignores LANG when no language is frozen", () => {
+  const run: RunState = {
+    contractVersion: 3,
+    id: "run-default-language",
+    status: "running",
+    procedureName: "default-language",
+    memoryRoot: "/memory",
+    createdAt: "2026-07-25T00:00:00.000Z",
+    updatedAt: "2026-07-25T00:00:00.000Z",
+    stack: [{
+      type: "procedure",
+      memoryName: "default-language",
+      steps: [{
+        id: "flow[1]",
+        kind: "action",
+        instruction: "Produce the result.",
+        actor: "agent",
+        artifact: "result",
+        type: "string",
+        format: { name: "plain", options: {} }
+      }],
+      index: 0
+    }],
+    events: []
+  };
+  const lines: string[] = [];
+  const originalLog = console.log;
+  const originalLang = process.env.LANG;
+  process.env.LANG = "en_US.UTF-8";
+  console.log = (...values: unknown[]) => lines.push(values.join(" "));
+  try {
+    printRunState(run);
+  } finally {
+    console.log = originalLog;
+    if (originalLang === undefined) delete process.env.LANG;
+    else process.env.LANG = originalLang;
+  }
+  const output = lines.join("\n");
+  assert.match(output, /执行者：/);
+  assert.match(output, /下一步：/);
+  assert.doesNotMatch(output, /\nActor:\n|\nThen:\n/);
+});
+
 test("run output presents Repeat as control without an Artifact", () => {
   const run: RunState = {
     contractVersion: 2,
+    language: "en",
     id: "run-repeat",
     status: "running",
     procedureName: "repeat-procedure",
@@ -255,6 +300,7 @@ test("Schema field output shows production constraints and progress without perm
   };
   const run: RunState = {
     contractVersion: 3,
+    language: "en",
     id: "run-schema-writing",
     status: "running",
     procedureName: "schema-writing",
@@ -369,6 +415,7 @@ test("Schema finalization output points to the managed draft and exact report co
   };
   const run: RunState = {
     contractVersion: 3,
+    language: "en",
     id: "run-schema-final",
     status: "running",
     procedureName: "schema-final",
@@ -417,7 +464,7 @@ test("Schema finalization output points to the managed draft and exact report co
   assert.match(output, /managed draft: \/runs\/run-schema-final\/artifacts\/drafts\/delivery\.draft\.md/);
   assert.match(output, /contract validation: passed/);
   assert.match(output, /Read the complete managed draft, edit it directly as needed/);
-  assert.match(output, /memsphere run report --run run-schema-final --artifact-file \/runs\/run-schema-final\/artifacts\/drafts\/delivery\.draft\.md/);
+  assert.match(output, /memsphere run report --run run-schema-final --artifact-file '\/runs\/run-schema-final\/artifacts\/drafts\/delivery\.draft\.md'/);
   assert.doesNotMatch(output, /Review|Permission Guidance/);
 });
 
@@ -443,6 +490,7 @@ test("run output explains effective runner permissions before report", () => {
   });
   const run: RunState = {
     contractVersion: 3,
+    language: "en",
     id: "run-governed",
     status: "running",
     procedureName: "governed",
@@ -509,6 +557,7 @@ test("successful report output explains the permission in natural language", () 
   });
   const run: RunState = {
     contractVersion: 3,
+    language: "en",
     id: "run-report-guidance",
     status: "done",
     procedureName: "governed",

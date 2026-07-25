@@ -1,0 +1,43 @@
+## Review contract
+This trusted contract is frozen in the Run and defines what the candidate Artifact must satisfy.
+
+### Action
+{{contract.actionInstruction}}
+
+### Procedure assertions
+{{#each contract.procedureAsserts}}
+- {{this}}
+{{else}}
+- None
+{{/each}}
+
+### Action assertions
+{{#each contract.actionAsserts}}
+- {{this}}
+{{else}}
+- None
+{{/each}}
+
+### Suggestions
+{{#each contract.suggestions}}
+- {{this}}
+{{else}}
+- None
+{{/each}}
+{{#if contract.details}}
+
+### Additional details
+{{#each contract.details}}
+- {{this}}
+{{/each}}
+{{/if}}
+
+### Artifact contract
+- Name: {{contract.artifact.name}}
+- Type: {{contract.artifact.type}}
+- Format: {{contract.artifact.format}}
+- Schema: {{contract.artifact.schema}}
+- Final Artifact: {{#if contract.artifact.final}}yes{{else}}no{{/if}}
+- Review policy: {{contract.artifact.reviewPolicy}}
+
+Use `run artifact show` to load the candidate value. Use `run artifact contract show` when you need the complete nested Schema and contract structure.

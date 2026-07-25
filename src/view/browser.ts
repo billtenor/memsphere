@@ -1095,6 +1095,7 @@ export const browserHtml = String.raw`<!doctype html>
       nav.className = "settings-nav";
       const modules = [
         ["overview", "概览"],
+        ["general", "常规"],
         ["storage", "存储"],
         ["view", "View 服务"],
         ["providers", "ACP Provider"],
@@ -1148,7 +1149,8 @@ export const browserHtml = String.raw`<!doctype html>
         layout.append(renderSettingsConfirmation());
         return;
       }
-      if (state.settingsModule === "storage") layout.append(renderStorageSettings());
+      if (state.settingsModule === "general") layout.append(renderGeneralSettings());
+      else if (state.settingsModule === "storage") layout.append(renderStorageSettings());
       else if (state.settingsModule === "view") layout.append(renderViewSettings());
       else if (state.settingsModule === "providers") layout.append(renderProviderSettings());
       else if (state.settingsModule === "participants") layout.append(renderParticipantSettings());
@@ -1226,6 +1228,28 @@ export const browserHtml = String.raw`<!doctype html>
         settingsReadOnly("配置文件", state.settingsData.configPath),
         settingsReadOnly("配置作用域", state.settingsData.scopeRoot)
       );
+      section.append(title, grid);
+      return section;
+    }
+
+    function renderGeneralSettings() {
+      const section = document.createElement("section");
+      section.className = "settings-section";
+      const title = document.createElement("h3");
+      title.textContent = "常规";
+      const grid = document.createElement("div");
+      grid.className = "settings-grid";
+      grid.append(settingsSelectField(
+        "工作语言",
+        state.settingsDraft.language || "zh-CN",
+        [
+          ["zh-CN", "中文"],
+          ["en", "English"]
+        ],
+        value => {
+          state.settingsDraft.language = value;
+        }
+      ));
       section.append(title, grid);
       return section;
     }

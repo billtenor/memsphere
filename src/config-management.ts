@@ -24,6 +24,7 @@ export type ConfigChange = {
 };
 
 export type ConfigExplicitFields = {
+  language: boolean;
   memoryRoot: boolean;
   reviewsRoot: boolean;
   runsRoot: boolean;
@@ -43,6 +44,7 @@ export type ConfigDocument = {
 };
 
 export type EditableConfigDraft = {
+  language?: "zh-CN" | "en";
   memoryRoot?: string;
   reviewsRoot?: string;
   runsRoot?: string;
@@ -92,6 +94,7 @@ export async function readConfigDocument(configPath: string): Promise<ConfigDocu
     raw,
     resolved,
     explicit: {
+      language: Object.hasOwn(raw, "language"),
       memoryRoot: Object.hasOwn(raw, "memoryRoot"),
       reviewsRoot: Object.hasOwn(raw, "reviewsRoot"),
       runsRoot: Object.hasOwn(raw, "runsRoot"),
@@ -108,6 +111,7 @@ export function editableConfigDraft(document: ConfigDocument): EditableConfigDra
 
 function editableConfigFromRaw(raw: MemsphereConfigFile): EditableConfigDraft {
   return {
+    ...(raw.language === undefined ? {} : { language: raw.language }),
     ...(raw.memoryRoot === undefined ? {} : { memoryRoot: raw.memoryRoot }),
     ...(raw.reviewsRoot === undefined ? {} : { reviewsRoot: raw.reviewsRoot }),
     ...(raw.runsRoot === undefined ? {} : { runsRoot: raw.runsRoot }),
@@ -212,6 +216,7 @@ function mergeEditableConfig(
   draft: EditableConfigDraft
 ): MemsphereConfigFile {
   return {
+    ...(draft.language === undefined ? {} : { language: draft.language }),
     ...(draft.memoryRoot === undefined ? {} : { memoryRoot: draft.memoryRoot }),
     ...(draft.reviewsRoot === undefined ? {} : { reviewsRoot: draft.reviewsRoot }),
     ...(draft.runsRoot === undefined ? {} : { runsRoot: draft.runsRoot }),

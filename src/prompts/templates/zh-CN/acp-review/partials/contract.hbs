@@ -1,0 +1,43 @@
+## 评审契约
+这是冻结在 Run 中的可信契约，定义候选产物必须满足的要求。
+
+### 当前动作
+{{contract.actionInstruction}}
+
+### Procedure 断言
+{{#each contract.procedureAsserts}}
+- {{this}}
+{{else}}
+- 无
+{{/each}}
+
+### Action 断言
+{{#each contract.actionAsserts}}
+- {{this}}
+{{else}}
+- 无
+{{/each}}
+
+### 建议
+{{#each contract.suggestions}}
+- {{this}}
+{{else}}
+- 无
+{{/each}}
+{{#if contract.details}}
+
+### 补充说明
+{{#each contract.details}}
+- {{this}}
+{{/each}}
+{{/if}}
+
+### 产物契约
+- 名称：{{contract.artifact.name}}
+- 类型：{{contract.artifact.type}}
+- 格式：{{contract.artifact.format}}
+- Schema：{{contract.artifact.schema}}
+- 最终产物：{{#if contract.artifact.final}}是{{else}}否{{/if}}
+- 评审策略：{{contract.artifact.reviewPolicy}}
+
+使用 `run artifact show` 读取候选值。需要完整嵌套 Schema 和契约结构时，使用 `run artifact contract show`。
