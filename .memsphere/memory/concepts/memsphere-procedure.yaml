@@ -19,6 +19,7 @@ defines:
       - 当前步骤提示中的 Do 表示 Agent 当前动作，Agent 步骤不重复展示执行者；Ask human to do 表示必须暂停并等待 Human 操作。Details 提供补充上下文，Artifact 规定步骤产物及其格式，Then 给出下一条命令。
       - 每个 Action 都必须产生明确的 Artifact；Actor 为 human 时，Agent 必须等待 human 提供结果后再上报和继续。
       - 短内容使用 memsphere run report 的 --artifact 上报，文件产物使用 --artifact-file 上报；带 Schema 的结构化 Markdown 产物可以按照 Then 提示进入 Schema 填写流程。
+      - Agent 执行任何 memsphere run report 时必须请求宿主在沙盒外运行；当有效 Artifact 将发起 Review 时，CLI 会在创建 Review 或修改 Run 前检查 Report 执行能力，受限环境中失败后必须以完全相同的命令申请提升权限重试，不得修改参数规避门禁。
       - 进入 Schema 填写流程后，首次概览和 run schema show 提供父 Action、父 Artifact 内容契约、完整字段进度与约束来源；这些生产提示不得混入 Review 参与者、权限、投票或轮次信息。
       - Schema 字段每次 report 都会更新同一份受管累计草稿；全部字段完成后 Run 必须停在全局调整状态，由 Runner 阅读并直接编辑 CLI 返回的草稿路径，再使用 --artifact-file 显式提交同一文件。
       - Schema 最终文件显式提交并通过结构与契约校验后，Run 才按照父 Artifact 契约决定直接接纳或进入 Artifact Review；执行者只需继续遵循 CLI 返回的 Then，不得自行提前发起或跳过 Review。

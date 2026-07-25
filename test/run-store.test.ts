@@ -1653,11 +1653,16 @@ flow:
       startedAt: "2026-01-01T00:00:00.000Z"
     })}\n`);
 
+    let reviewChecks = 0;
     const completed = await reportRun({
       runsRoot,
       runId: started.id,
-      artifact: { kind: "inline", value: "done" }
+      artifact: { kind: "inline", value: "done" },
+      beforeArtifactReview: async () => {
+        reviewChecks += 1;
+      }
     });
+    assert.equal(reviewChecks, 0);
     assert.equal(completed.status, "done");
     assert.deepEqual(await readdir(lockRoot), []);
     assert.equal((await readdir(join(runsRoot, started.id))).some((name) => name.endsWith(".tmp")), false);
@@ -1718,11 +1723,32 @@ flow:
       "decision.decide"
     ]);
 
+    const blocked = new Error("review execution unavailable");
+    await assert.rejects(
+      reportRun({
+        runsRoot,
+        runId: run.id,
+        artifact: { kind: "inline", value: "done" },
+        beforeArtifactReview: async () => {
+          throw blocked;
+        }
+      }),
+      (error) => error === blocked
+    );
+    const unchanged = await readRun(runsRoot, run.id);
+    assert.equal(unchanged.artifactReviews, undefined);
+    assert.equal(currentStep(unchanged)?.id, currentStep(run)?.id);
+
+    let reviewChecks = 0;
     const pending = await reportRun({
       runsRoot,
       runId: run.id,
-      artifact: { kind: "inline", value: "done" }
+      artifact: { kind: "inline", value: "done" },
+      beforeArtifactReview: async () => {
+        reviewChecks += 1;
+      }
     });
+    assert.equal(reviewChecks, 1);
     const submission = currentArtifactReview(pending)?.submissions[0];
     assert.equal(submission?.artifact.authorization?.allowed, true);
     assert.equal(submission?.artifact.authorization?.permission, "artifact.submit");
@@ -2022,11 +2048,17 @@ flow:
         slots: { reviewer: ["human"] }
       })
     });
+    let reviewChecks = 0;
+    const beforeArtifactReview = async () => {
+      reviewChecks += 1;
+    };
     const first = await reportRun({
       runsRoot,
       runId: started.id,
-      artifact: { kind: "inline", value: "# First candidate\n" }
+      artifact: { kind: "inline", value: "# First candidate\n" },
+      beforeArtifactReview
     });
+    assert.equal(reviewChecks, 1);
     const review = currentArtifactReview(first);
     assert(review);
     assert.equal(first.events.length, 0);
@@ -2036,17 +2068,21 @@ flow:
     const duplicate = await reportRun({
       runsRoot,
       runId: started.id,
-      artifact: { kind: "inline", value: "# First candidate\n" }
+      artifact: { kind: "inline", value: "# First candidate\n" },
+      beforeArtifactReview
     });
+    assert.equal(reviewChecks, 1);
     assert.equal(currentArtifactReview(duplicate)?.rounds.length, 1);
     await assert.rejects(
       reportRun({
         runsRoot,
         runId: started.id,
-        artifact: { kind: "inline", value: "# Conflicting candidate\n" }
+        artifact: { kind: "inline", value: "# Conflicting candidate\n" },
+        beforeArtifactReview
       }),
       /is in progress; wait/
     );
+    assert.equal(reviewChecks, 1);
 
     await assert.rejects(
       updateArtifactReviewDraft({
@@ -2126,17 +2162,21 @@ flow:
       reportRun({
         runsRoot,
         runId: started.id,
-        artifact: { kind: "inline", value: "# Second candidate\n" }
+        artifact: { kind: "inline", value: "# Second candidate\n" },
+        beforeArtifactReview
       }),
       /requires a revision summary/
     );
+    assert.equal(reviewChecks, 1);
 
     const second = await reportRun({
       runsRoot,
       runId: started.id,
       artifact: { kind: "inline", value: "# Second candidate\n" },
-      revisionSummary: "Addressed the Human comment."
+      revisionSummary: "Addressed the Human comment.",
+      beforeArtifactReview
     });
+    assert.equal(reviewChecks, 2);
     const secondReview = currentArtifactReview(second);
     assert(secondReview);
     assert.equal(secondReview.id, review.id);

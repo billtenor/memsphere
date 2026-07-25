@@ -804,6 +804,7 @@ export async function reportRun(input: {
   runId: string;
   artifact: ArtifactReportSource;
   revisionSummary?: string;
+  beforeArtifactReview?: () => Promise<unknown>;
 }): Promise<RunState> {
   return withRunWriteLock(input.runsRoot, input.runId, () => reportRunUnlocked(input));
 }
@@ -813,6 +814,7 @@ async function reportRunUnlocked(input: {
   runId: string;
   artifact: ArtifactReportSource;
   revisionSummary?: string;
+  beforeArtifactReview?: () => Promise<unknown>;
 }): Promise<RunState> {
   const run = await readRun(input.runsRoot, input.runId);
   if (run.contractVersion === 1 || run.readOnly) {
@@ -861,6 +863,7 @@ async function acceptPreparedArtifact(
     runId: string;
     artifact: ArtifactReportSource;
     revisionSummary?: string;
+    beforeArtifactReview?: () => Promise<unknown>;
   },
   run: RunState,
   step: RunStep,
@@ -918,6 +921,7 @@ async function reportReviewedArtifact(
     artifact: ArtifactReportSource;
     revisionSummary?: string;
     locale?: "zh-CN" | "en";
+    beforeArtifactReview?: () => Promise<unknown>;
   },
   run: RunState,
   step: RunStep,
@@ -963,6 +967,7 @@ async function reportReviewedArtifact(
     throw new Error("--revision-summary-file is only allowed after an Artifact Review requests changes");
   }
 
+  await input.beforeArtifactReview?.();
   const now = new Date().toISOString();
   const reviewId = existing?.id ?? makeReviewEntityId("review", now);
   const submissionId = makeReviewEntityId("submission", now);
@@ -2278,6 +2283,7 @@ async function reportSchemaFinalArtifact(
     artifact: ArtifactReportSource;
     revisionSummary?: string;
     locale?: "zh-CN" | "en";
+    beforeArtifactReview?: () => Promise<unknown>;
   },
   run: RunState,
   finalization: SchemaFinalizationContext

@@ -246,6 +246,8 @@ memsphere run start --file "<Procedure YAML 路径>"
 
 完成当前步骤后，检查产物是否满足 `Procedure Asserts`、步骤提示、`Asserts` 和 `Artifact` 格式，然后执行 CLI 在 `Then` 中给出的命令。
 
+Agent 执行任何 `memsphere run report` 命令时，必须请求宿主在沙盒外执行。如果 CLI 拒绝受限环境中的 Report，使用完全相同的命令申请提升或非沙盒执行权限后重试；不要修改参数规避检查。
+
 普通产物通常使用 `memsphere run report` 上报。内容较短时直接上报：
 
 ```bash

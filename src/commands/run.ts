@@ -47,6 +47,7 @@ import {
   waitForArtifactReview,
   type RunState
 } from "../run/store.js";
+import { assertReportExecutionCapability } from "../report-execution.js";
 
 type ReportOptions = {
   run?: string;
@@ -205,7 +206,8 @@ export async function runReportCommand(options: ReportOptions): Promise<void> {
     runsRoot: config.runsRoot,
     runId,
     artifact,
-    revisionSummary
+    revisionSummary,
+    beforeArtifactReview: assertReportExecutionCapability
   });
   await dispatchArtifactReviewAgents({ config, run });
   printRunOutput({ kind: "report", run, runsRoot: config.runsRoot });
