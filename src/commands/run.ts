@@ -63,10 +63,7 @@ type RunStartOptions = {
   reviewConfig?: string;
 };
 
-type ReviewWaitOptions = {
-  review?: string;
-  verbose?: boolean;
-};
+type ReviewWaitOptions = { review?: string };
 
 type ReviewVoteOptions = {
   review?: string;
@@ -224,7 +221,6 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
   printArtifactReviewSummary(
     context.review,
     context.round,
-    options.verbose,
     resolvePromptLocale(context.run.language)
   );
   console.log("");
@@ -264,7 +260,6 @@ export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<
   printArtifactReviewSummary(
     context.review,
     context.round,
-    false,
     resolvePromptLocale(context.run.language)
   );
   console.log("");
@@ -589,13 +584,12 @@ export function printSchemaWritingOverview(
 export function printArtifactReviewSummary(
   review: ArtifactReview<RunState["events"][number]["artifact"]>,
   round: ArtifactReviewRound,
-  verbose = false,
   locale: PromptLocale = "en"
 ): void {
   console.log(renderPrompt(
     "run.review-summary",
     locale,
-    buildArtifactReviewSummaryPromptModel(review, round, verbose)
+    buildArtifactReviewSummaryPromptModel(review, round)
   ));
 }
 

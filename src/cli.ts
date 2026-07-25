@@ -231,7 +231,6 @@ runReview
   .command("wait")
   .description("Wait until assigned reviews are submitted or the current round is decided.")
   .requiredOption("--review <id>", "artifact review id")
-  .option("--verbose", "include complete comments and failure messages")
   .action(runReviewWaitCommand);
 
 runReview

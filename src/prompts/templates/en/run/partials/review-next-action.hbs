@@ -11,6 +11,3 @@ memsphere run review vote --review {{reviewId}} --round {{roundId}} --vote reque
 {{#ifEq kind "revision"}}
 memsphere run report --run {{runId}} --artifact-file <path> --revision-summary-file <path>
 {{/ifEq}}
-{{#ifEq kind "retry"}}
-memsphere run review retry --review {{reviewId}} --assignment {{assignmentId}}
-{{/ifEq}}

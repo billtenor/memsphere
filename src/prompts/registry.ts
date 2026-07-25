@@ -26,12 +26,7 @@ const permissionGuidanceSchema = z.object({
 const reviewParticipantSchema = z.object({
   actorName: z.string(),
   binding: z.string(),
-  agent: z.boolean(),
   vote: z.string(),
-  status: z.string().optional(),
-  attempt: z.number().int().nonnegative().optional(),
-  provider: z.string().optional(),
-  failure: z.string().optional(),
   decisionIntent: z.string().optional(),
   implementationEvidenceReferenced: z.boolean().optional(),
   comments: z.array(z.object({
@@ -78,12 +73,6 @@ const reviewSummarySchema = z.object({
     suggestion: z.number().int().nonnegative(),
     unresolvedBlocking: z.number().int().nonnegative()
   }).strict(),
-  failures: z.object({
-    environment: z.number().int().nonnegative(),
-    provider: z.number().int().nonnegative(),
-    reviewer: z.number().int().nonnegative(),
-    unknown: z.number().int().nonnegative()
-  }).strict(),
   earlierArtifacts: z.number().int().nonnegative(),
   repeatedAdvisories: z.array(z.object({
     severity: z.string(),
@@ -113,11 +102,6 @@ const reviewNextActionSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("revision"),
     runId: z.string()
-  }).strict(),
-  z.object({
-    kind: z.literal("retry"),
-    reviewId: z.string(),
-    assignmentId: z.string()
   }).strict(),
   z.object({
     kind: z.literal("none")

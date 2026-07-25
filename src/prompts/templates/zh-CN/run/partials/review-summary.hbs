@@ -1,4 +1,5 @@
 产物评审：
+- 上报结果：成功，产物已进入评审
 - review_id：{{reviewId}}
 - review_round_id：{{roundId}}
 - 轮次：{{round}}
@@ -6,24 +7,14 @@
 - 已提交：{{submitted}}/{{total}}
 - 可决策：{{decisionReady}}
 - 建议意见：阻塞={{advisory.blocking}}；风险={{advisory.risk}}；建议={{advisory.suggestion}}；未处置阻塞={{advisory.unresolvedBlocking}}
-- Agent 失败：环境={{failures.environment}}；Provider={{failures.provider}}；Reviewer={{failures.reviewer}}；未知={{failures.unknown}}
 - 前序产物：{{earlierArtifacts}}
 {{#each repeatedAdvisories}}
 - 重复建议：[{{severity}}] x{{count}} 轮次={{rounds}} {{body}}
 {{/each}}
 参与者：
 {{#each participants}}
-- {{actorName}}（{{binding}}{{#if agent}}，Agent{{/if}}）
+- {{actorName}}（{{binding}}）
   - 投票：{{vote}}
-{{#if agent}}
-  - 状态：{{status}}
-{{#if attempt}}
-  - 尝试：{{attempt}}；Provider：{{provider}}
-{{/if}}
-{{#if failure}}
-  - 失败：{{failure}}
-{{/if}}
-{{/if}}
 {{#if decisionIntent}}
   - 决策说明：{{decisionIntent}}
 {{/if}}
@@ -58,9 +49,8 @@
 {{/if}}
 {{/ifDecision}}
 {{#ifDecision decision "failed"}}
-- 评审被阻塞：{{decision.failedAssignments}} 个 Agent Assignment 失败。
 结论：
-- 产物尚未被接受，Run 也未推进。请在 View 中检查失败原因，然后重试失败的 Agent Assignment。
+- 产物已成功上报并进入评审。
 {{/ifDecision}}
 {{#ifDecision decision "pending"}}
 - 尚未形成决策；还剩 {{decision.remaining}} 份评审未提交。

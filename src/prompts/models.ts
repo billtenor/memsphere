@@ -75,12 +75,6 @@ export type ArtifactReviewSummaryPromptModel = {
     suggestion: number;
     unresolvedBlocking: number;
   };
-  failures: {
-    environment: number;
-    provider: number;
-    reviewer: number;
-    unknown: number;
-  };
   earlierArtifacts: number;
   repeatedAdvisories: Array<{
     severity: string;
@@ -91,12 +85,7 @@ export type ArtifactReviewSummaryPromptModel = {
   participants: Array<{
     actorName: string;
     binding: string;
-    agent: boolean;
     vote: string;
-    status?: string;
-    attempt?: number;
-    provider?: string;
-    failure?: string;
     decisionIntent?: string;
     implementationEvidenceReferenced?: boolean;
     comments: Array<{
@@ -251,7 +240,6 @@ export type ReviewNextActionPromptModel =
   | { kind: "wait"; reviewId: string }
   | { kind: "runner_vote"; reviewId: string; roundId: string }
   | { kind: "revision"; runId: string }
-  | { kind: "retry"; reviewId: string; assignmentId: string }
   | { kind: "none" };
 
 export type ReviewConfigurationRequiredPromptModel = {

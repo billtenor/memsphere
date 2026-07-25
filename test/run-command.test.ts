@@ -21,6 +21,9 @@ import {
   resolveArtifactControlPlane
 } from "../src/control-plane/index.js";
 import type { RunState, SchemaWritingSnapshot } from "../src/run/store.js";
+import {
+  buildArtifactReviewNextActionPromptModel
+} from "../src/prompts/review.js";
 
 test("inline Artifact Review comments reject escaped multiline Markdown", () => {
   assert.doesNotThrow(() => validateInlineReviewCommentBody("A short comment about `\\n`."));
@@ -679,7 +682,7 @@ test("Artifact Review output emphasizes votes, comments, and an actionable concl
   const output = lines.join("\n");
   assert.match(output, /- submitted: 2\/2/);
   assert.match(output, /- Advisor \(advisory\)\n  - vote: request_changes/);
-  assert.doesNotMatch(output, /Clarify the conclusion/);
+  assert.match(output, /comment \[unspecified\]: Clarify the conclusion/);
   assert.match(output, /- Runner \(decision, automatic\)\n  - vote: approve/);
   assert.match(output, /unanimous approval was not reached: 1\/2 decision votes approved/);
   assert.match(output, /Conclusion:\n- This review round did not pass because unanimous approval was not reached; revise the Artifact/);
@@ -784,4 +787,92 @@ test("Artifact Review output asks the Runner to decide after assigned reviews co
   assert.match(output, /As the Runner, review every comment above, then cast your vote explicitly/);
   assert.match(output, /The Artifact has not been accepted and the Run has not advanced/);
   assert.doesNotMatch(output, /passed unanimously|Run advanced/);
+});
+
+test("report output does not expose background reviewer failures", () => {
+  const snapshot = createControlPlaneSnapshot(parseControlPlaneConfig({
+    runner: {
+      permissions: ["artifact.read"]
+    },
+    actors: {
+      reviewer: {
+        kind: "agent",
+        name: "Reviewer",
+        permissions: ["artifact.read", "decision.assess"],
+        agent: { provider: "traex" }
+      }
+    }
+  }));
+  const controlPlane = resolveArtifactControlPlane({
+    snapshot,
+    slotBindings: { reviewer: { actorIds: ["reviewer"], source: "run:reviewer" } },
+    artifactScope: "flow[1]",
+    policyId: "artifact_acceptance.unanimous"
+  });
+  const round: ArtifactReviewRound = {
+    id: "round-failed",
+    sequence: 1,
+    submissionId: "submission-failed",
+    status: "pending",
+    revision: 1,
+    createdAt: "2026-07-25T00:00:00.000Z",
+    assignments: [{
+      id: "assignment-failed",
+      actorId: "reviewer",
+      actorName: "Reviewer",
+      actorKind: "agent",
+      slotIds: ["reviewer"],
+      permissions: ["artifact.read", "decision.assess"],
+      binding: "advisory",
+      status: "failed",
+      draft: { comments: [] },
+      attempts: [{
+        id: "attempt-failed",
+        sequence: 1,
+        status: "failed",
+        provider: "traex",
+        createdAt: "2026-07-25T00:00:00.000Z",
+        completedAt: "2026-07-25T00:00:01.000Z",
+        failure: {
+          stage: "protocol",
+          code: "acp_protocol_error",
+          message: "ACP connection closed"
+        }
+      }]
+    }],
+    votes: []
+  };
+  const review: ArtifactReview<RunState["events"][number]["artifact"]> = {
+    id: "review-failed",
+    stepId: "flow[1]",
+    artifactName: "candidate",
+    policyId: "artifact_acceptance.unanimous",
+    controlPlane,
+    status: "pending",
+    currentRoundId: round.id,
+    createdAt: "2026-07-25T00:00:00.000Z",
+    updatedAt: "2026-07-25T00:00:01.000Z",
+    submissions: [],
+    rounds: [round]
+  };
+  const capture = (): string => {
+    const lines: string[] = [];
+    const originalLog = console.log;
+    console.log = (...values: unknown[]) => lines.push(values.join(" "));
+    try {
+      printArtifactReviewSummary(review, round, "zh-CN");
+    } finally {
+      console.log = originalLog;
+    }
+    return lines.join("\n");
+  };
+
+  const normal = capture();
+  assert.match(normal, /上报结果：成功，产物已进入评审/);
+  assert.doesNotMatch(normal, /Agent 失败|Provider|ACP connection closed|Agent Assignment|重试/);
+  assert.deepEqual(
+    buildArtifactReviewNextActionPromptModel(review, round, "run-1"),
+    { kind: "none" }
+  );
+
 });

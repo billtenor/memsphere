@@ -1,4 +1,5 @@
 Artifact Review:
+- report: succeeded; the Artifact entered Review
 - review_id: {{reviewId}}
 - review_round_id: {{roundId}}
 - round: {{round}}
@@ -6,24 +7,14 @@ Artifact Review:
 - submitted: {{submitted}}/{{total}}
 - decision_ready: {{decisionReady}}
 - advisory: blocking={{advisory.blocking}}; risk={{advisory.risk}}; suggestion={{advisory.suggestion}}; unresolved_blocking={{advisory.unresolvedBlocking}}
-- agent_failures: environment={{failures.environment}}; provider={{failures.provider}}; reviewer={{failures.reviewer}}; unknown={{failures.unknown}}
 - earlier_artifacts: {{earlierArtifacts}}
 {{#each repeatedAdvisories}}
 - repeated_advisory: [{{severity}}] x{{count}} rounds={{rounds}} {{body}}
 {{/each}}
 Participants:
 {{#each participants}}
-- {{actorName}} ({{binding}}{{#if agent}}, agent{{/if}})
+- {{actorName}} ({{binding}})
   - vote: {{vote}}
-{{#if agent}}
-  - status: {{status}}
-{{#if attempt}}
-  - attempt: {{attempt}}; provider: {{provider}}
-{{/if}}
-{{#if failure}}
-  - failure: {{failure}}
-{{/if}}
-{{/if}}
 {{#if decisionIntent}}
   - decision_intent: {{decisionIntent}}
 {{/if}}
@@ -58,9 +49,8 @@ Conclusion:
 {{/if}}
 {{/ifDecision}}
 {{#ifDecision decision "failed"}}
-- Review is blocked because {{decision.failedAssignments}} Agent Assignment{{#unlessOne decision.failedAssignments}}s have{{else}} has{{/unlessOne}} failed.
 Conclusion:
-- The Artifact has not been accepted and the Run has not advanced. Inspect the failure in View, then retry the failed Agent Assignment.
+- The Artifact was reported successfully and entered Review.
 {{/ifDecision}}
 {{#ifDecision decision "pending"}}
 - No decision has been reached; {{decision.remaining}} review submission{{#unlessOne decision.remaining}}s{{/unlessOne}} remain.

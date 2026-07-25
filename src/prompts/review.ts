@@ -1,5 +1,4 @@
 import {
-  artifactReviewFailureCategory,
   artifactReviewOpinionReferencesImplementation,
   repeatedArtifactReviewAdvisories,
   type ArtifactReview,
@@ -14,20 +13,13 @@ import type {
 
 export function buildArtifactReviewSummaryPromptModel(
   review: ArtifactReview<RunState["events"][number]["artifact"]>,
-  round: ArtifactReviewRound,
-  verbose = false
+  round: ArtifactReviewRound
 ): ArtifactReviewSummaryPromptModel {
   const submitted = round.assignments.filter((assignment) => assignment.status === "submitted").length;
   const advisoryComments = round.assignments
     .filter((assignment) => assignment.binding === "advisory")
     .flatMap((assignment) => assignment.submitted?.comments ?? []);
   const resolved = new Set((round.commentDispositions ?? []).map((item) => item.commentId));
-  const failedAttempts = round.assignments.flatMap((assignment) => assignment.attempts ?? [])
-    .filter((attempt) => attempt.status === "failed" && attempt.failure);
-  const countFailure = (category: "environment" | "provider" | "reviewer" | "unknown") =>
-    failedAttempts.filter((attempt) =>
-      attempt.failure && artifactReviewFailureCategory(attempt.failure) === category
-    ).length;
   const runnerVote = round.votes.find((candidate) => candidate.subject.kind === "runner");
   const runnerCanDecide = Boolean(runnerVote) || authorizeArtifactOperation({
     controlPlane: review.controlPlane,
@@ -51,12 +43,6 @@ export function buildArtifactReviewSummaryPromptModel(
         (comment) => comment.severity === "blocking" && !resolved.has(comment.id)
       ).length
     },
-    failures: {
-      environment: countFailure("environment"),
-      provider: countFailure("provider"),
-      reviewer: countFailure("reviewer"),
-      unknown: countFailure("unknown")
-    },
     earlierArtifacts: review.submissions.find((candidate) => candidate.id === round.submissionId)
       ?.contextArtifacts.length ?? 0,
     repeatedAdvisories: repeatedArtifactReviewAdvisories(review).map((item) => ({
@@ -66,29 +52,18 @@ export function buildArtifactReviewSummaryPromptModel(
       body: item.body
     })),
     participants: round.assignments.map((assignment) => {
-      const attempt = assignment.attempts?.at(-1);
       return {
         actorName: assignment.actorName,
         binding: assignment.binding,
-        agent: assignment.actorKind === "agent",
         vote: assignment.submitted?.vote ?? "pending",
-        status: assignment.actorKind === "agent" ? assignment.status : undefined,
-        attempt: attempt?.sequence,
-        provider: attempt?.provider,
-        failure: attempt?.failure
-          ? `${artifactReviewFailureCategory(attempt.failure)}/${attempt.failure.code}`
-            + `${verbose ? `: ${attempt.failure.message}` : ""}`
-          : undefined,
         decisionIntent: assignment.binding === "decision" ? assignment.submitted?.summary : undefined,
         implementationEvidenceReferenced: assignment.submitted
           ? artifactReviewOpinionReferencesImplementation(assignment.submitted)
           : undefined,
-        comments: verbose
-          ? (assignment.submitted?.comments ?? []).map((comment) => ({
-              severity: comment.severity ?? "unspecified",
-              body: comment.body
-            }))
-          : []
+        comments: (assignment.submitted?.comments ?? []).map((comment) => ({
+          severity: comment.severity ?? "unspecified",
+          body: comment.body
+        }))
       };
     }),
     runner: runnerVote || runnerCanDecide ? {
@@ -115,13 +90,7 @@ export function buildArtifactReviewNextActionPromptModel(
   }
   if (review.status === "awaiting_revision") return { kind: "revision", runId };
   const failed = round.assignments.find((assignment) => assignment.status === "failed");
-  if (failed) {
-    return {
-      kind: "retry",
-      reviewId: review.id,
-      assignmentId: failed.id ?? failed.actorId
-    };
-  }
+  if (failed) return { kind: "none" };
   return { kind: "wait", reviewId: review.id };
 }
 
