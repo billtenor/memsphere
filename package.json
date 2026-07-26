@@ -21,7 +21,9 @@
     "dev": "tsx src/cli.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "validate": "npm run build"
+    "validate": "npm run build",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm test"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.2.1",
