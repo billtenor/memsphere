@@ -1,0 +1,19 @@
+title = "Memsphere security rules"
+
+[[rules]]
+id = "home-absolute-path"
+description = "Personal absolute filesystem path under /home"
+regex = '''/home/[A-Za-z0-9._-]+/'''
+tags = ["privacy", "path"]
+
+[[rules]]
+id = "users-absolute-path"
+description = "Personal absolute filesystem path under /Users"
+regex = '''/Users/[A-Za-z0-9._-]+/'''
+tags = ["privacy", "path"]
+
+[[rules]]
+id = "corporate-email"
+description = "Corporate email address"
+regex = '''[A-Za-z0-9._%+-]+@bytedance\.com'''
+tags = ["privacy", "email"]
