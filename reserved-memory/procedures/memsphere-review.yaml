@@ -1,33 +1,16 @@
 !procedure
 syntax: memsphere-20260721-stable
 names:
-  - memsphere review 流程
+  - memsphere 记忆 review 流程
   - memsphere-review
 defines:
-  - 应用 Memsphere review comments，更新目标 Memory、review 状态和处理摘要。
-  - 适用于 Concept、Statement、Schema 与 Procedure 的 memory review，也适用于以 task/run artifacts 提供补充上下文的 task review。
-  - task/run artifacts 只用于理解 comment，review 的修改目标仍是 Memory。
+  - 应用 Memsphere Memory review comments，更新目标 Memory、review 状态和处理摘要。
+  - 适用于 Concept、Statement、Schema 与 Procedure 的 Memory Review。
   - 本流程不处理 Artifact Review Comment；Artifact Review Comment 绑定 Run 中不可变的 Artifact Submission 与 Round，只作为该次 Artifact Review 的评审证据保存和展示。
 asserts:
-  - memory review 必须修改 review.memoryRoot 下的当前 Memory；task review 必须根据 snapshot 定位并修改当前工程 memoryRoot 中对应的 Memory。
-  - 在 View 中处理 Artifact Review 草稿保存冲突时，必须保留本地输入并优先自动刷新、合并和重试；不得把浏览器 alert 作为可接受的冲突恢复路径。
-  - View Review 操作变更必须验证不丢失用户未提交文本、不覆盖其他 reviewer 的新状态，且 stale revision 不应提交旧草稿。
-  - View 中的 Agent Reviewer 只能作为参与者展示状态、最近活动和按 attempt 隔离的只读运行记录，不得作为 Human 评审身份进入评论或投票编辑器。
-  - Run 必须按 attempt 以 JSONL 完整保留实际发送的 ACP prompt、ACP session.update 和 Memsphere 生命周期事件，并将 JSONL 作为 Agent Activity 的唯一事实来源；View 只能读取经过过滤、容量受控且可按 JSONL 源进度校验与重建的投影缓存，不得暴露 prompt、thought 正文、工具原始输入输出或 Provider 私有字段。
-  - Artifact Review 的候选产物和 requirement、implementation、validation 等证据 Artifact 必须在左侧材料区域选择查看；证据快照只读，右侧只承载评审状态、意见和投票操作。
-  - Artifact Review 的右侧交互区必须稳定区分评审范围、我的评审、参与进度和评审记录；私有草稿只进入我的评审，正式意见和处置结果只进入评审记录。
-  - Artifact Review 的材料、评审范围、参与进度和评审记录属于 Review 公共上下文，不得依赖 Human 评审身份；身份选择只改变“我的评审”，无 Human Assignment 时显示“无需评审”。
-  - Human Artifact Review 必须按照评审意见、投票、提交评审的顺序明确分组：先记录 Comment 草稿，再据此表达本轮立场，最后提交当前 Vote 与全部草稿意见。
-  - Artifact Review 浮窗打开期间，背景页面必须保持不可操作且不可滚动；浮窗内部滚动到边界后不得把滚动传递给背景页面。
-  - Agent Reviewer 的初始 Prompt、补交提醒、权限说明和 Review CLI 反馈必须使用 Run 启动时冻结的工作语言；两种语言必须表达相同契约事实、命令和决策语义。
-  - Agent Reviewer Prompt 应以角色目标、当前 Review contract、精简前序 Artifact 索引、可查询命令和提交方式组织；无内容的断言或建议章节不得输出占位文本，不得把 Assignment、ACP 等内部实现术语当作任务说明。
-  - Agent Reviewer 必须逐条覆盖契约并尽可能在一轮内汇总所有有证据的问题；CLI 参数可以使用稳定的 assignment 标识，但自然语言应称为“本次评审”。只有 run review submit 成功才算完成正式评审。
-  - snapshot、target、location 和 hash 只用于定位和理解 comment，不是盲目修改依据。
-  - 不得修改 review comments、task/run artifacts 或与 comments 无关的 Memory 内容。
-  - 不得把 Artifact Review Comment 导入 Memory Review，也不得用本流程改写 Artifact Review 的 Submission、Round、Vote 或 Result。
   - 只有 submitted 或 processing review 可以处理；draft 和 done review 不得应用 comments 或修改目标 Memory。
-  - submitted review 必须在修改 Memory 前更新为 processing。
-  - 只有全部 comments 已安全处理且 memsphere validate 通过，才能将 review 标记为 done；否则保持 processing 并记录原因。
+  - 不得修改 review comments、snapshot、Artifact Review 数据或与 comments 无关的 Memory 内容。
+  - 只有全部 comments 已安全处理且 memsphere validate 通过，才能将 review 标记为 done。
 goals:
   - 安全应用 review comments，并保持无关内容不变。
   - 准确维护 review 生命周期和 agent.summary。
@@ -44,6 +27,7 @@ flow:
     actor: agent
     asserts:
       - 必须保留 comment id、body、snapshot、location 等原始内容。
+      - review status 必须为 submitted 或 processing；其他状态交由下一步等待 human 调整。
     artifact: !artifact
       name: Review 上下文与状态
       format: markdown
@@ -64,15 +48,16 @@ flow:
   - !action
     action: 将 submitted review 更新为 processing 并刷新 updatedAt；review 已为 processing 时保持当前状态。
     actor: agent
+    asserts:
+      - 必须在修改目标 Memory 前完成状态更新。
     artifact: !artifact
       name: Review processing 状态
       format: markdown
   - !action
-    action: 按目标 Memory 对 comments 分组，读取当前 Memory YAML；task review 还必须读取相关 task/run snapshots 和 artifacts。
+    action: 按目标 Memory 对 comments 分组，根据 target.path 定位并读取当前工程 memoryRoot 中的当前 Memory YAML。
     actor: agent
     asserts:
-      - task review 必须从当前工程 memoryRoot 读取待修改 Memory，不得把 review snapshot 当作修改目标。
-      - task/run artifacts 只能作为补充上下文，不得被 review 流程修改。
+      - snapshot、target、location 和 hash 只用于定位和理解 comment，不得把 snapshot 当作修改目标。
       - 必须确认每条 comment 指向的当前内容，不能把结构化视图行号当作 YAML 源文件行号。
     artifact: !artifact
       name: Comment 分组与目标上下文
@@ -87,39 +72,44 @@ flow:
     artifact: !artifact
       name: Memory 修改与 Comment 处理记录
       format: markdown
-  - !action
-    action: 运行 memsphere validate，并修正由本次修改引入且可以安全解决的问题，直至通过或确认存在阻塞。
-    actor: agent
-    asserts:
-      - 校验未通过时不得声称 review 已完成。
-    artifact: !artifact
-      name: Review 校验结果
-      format: markdown
-  - !if
+  - !while
     condition: !action
-      action: 判断是否所有 comments 均已安全处理且 memsphere validate 已通过。
+      action: 重新检查 comment 处理结果并运行 memsphere validate；仍有未安全处理的 comment 或校验未通过时返回 true，否则返回 false。
       actor: agent
       artifact: !artifact
-        name: Review 是否可以完成
+        name: Review 是否仍未达到完成条件
         type: boolean
-    then:
+    do:
+      - !if
+        condition: !action
+          action: 判断当前问题是否需要 human 补充意图、处理冲突或决定无法安全推断的事项。
+          actor: agent
+          artifact: !artifact
+            name: 是否需要 Human 决定
+            type: boolean
+        then:
+          - !action
+            action: 根据未处理 comment、内容冲突或校验阻塞提供处理决定。
+            actor: human
+            artifact: !artifact
+              name: Human Review 处理决定
+              format: markdown
       - !action
-        action: 将 review 标记为 done，写入 doneAt、updatedAt 和简短的 agent.summary。
+        action: 根据 comment、校验结果和已有 human 决定继续安全修改目标 Memory，并记录本轮处理结果。
         actor: agent
+        asserts:
+          - 不得通过删除 comment、降低约束或修改无关内容制造完成结果。
         artifact: !artifact
-          name: 更新后的 Review YAML
-          type: object
-          format: yaml
-          final: true
-    else:
-      - !action
-        action: 保持 review 为 processing，更新 updatedAt，并在 agent.summary 中记录未处理 comment、阻塞或校验失败。
-        actor: agent
-        artifact: !artifact
-          name: 更新后的 Review YAML
-          type: object
-          format: yaml
-          final: true
+          name: Review 修正结果
+          format: markdown
+  - !action
+    action: 将 review 标记为 done，写入 doneAt、updatedAt 和简短的 agent.summary。
+    actor: agent
+    artifact: !artifact
+      name: 更新后的 Review YAML
+      type: object
+      format: yaml
+      final: true
   - !action
     action: 向 human 简要说明 review 文件路径、最终状态、Memory 修改、未处理事项和校验结果。
     actor: agent

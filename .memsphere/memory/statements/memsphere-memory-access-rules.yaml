@@ -1,6 +1,7 @@
 !statement
 syntax: memsphere-20260721-stable
 names:
+  - memsphere 记忆访问规则
   - Memory 访问规则
   - memsphere-memory-access-rules
 defines:

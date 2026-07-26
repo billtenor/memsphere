@@ -1,5 +1,5 @@
 !procedure
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - memsphere bug 修复流程
   - MemsphereBugFix
@@ -24,32 +24,8 @@ flow:
     artifact: !artifact
       name: bug 理解摘要
       format: markdown
-
-  - !while
-    condition: !action
-      action: 判断 human 与 agent 是否尚未达成 bug 理解一致。
-      actor: human
-      artifact: !artifact
-        name: bug 理解是否仍需澄清
-        type: boolean
-    do:
-      - !action
-        action: 针对当前理解差异提出一个澄清问题或请求补充证据。
-        actor: agent
-        artifact: !artifact
-          name: bug 澄清追问
-      - !action
-        action: 回答澄清问题或补充截图、日志、命令输出、复现信息等证据。
-        actor: human
-        artifact: !artifact
-          name: bug 补充信息
-          format: markdown
-      - !action
-        action: 根据补充信息更新 bug 理解摘要。
-        actor: agent
-        artifact: !artifact
-          name: 更新后的 bug 理解摘要
-          format: markdown
+      review:
+        - 提需方
 
   - !action
     action: 分析 bug 的代码原因或流程原因。
@@ -66,39 +42,15 @@ flow:
       format: markdown
 
   - !action
-    action: 形成代码修复方案。
+    action: 形成代码与测试修复方案；测试优先自动化，自动化不可行时说明手工验证 case 及测试文档沉淀方式。
     actor: agent
     artifact: !artifact
-      name: 代码修复方案
+      name: Bug 修复方案
       format: markdown
-
-  - !action
-    action: 形成测试修复方案，优先自动化测试；如果自动化不可行，说明手工验证 case 及测试文档沉淀方式。
-    actor: agent
-    artifact: !artifact
-      name: 测试修复方案
-      format: markdown
-
-  - !while
-    condition: !action
-      action: 判断 human 是否仍不认可当前修复方案。
-      actor: human
-      artifact: !artifact
-        name: 修复方案是否仍需调整
-        type: boolean
-    do:
-      - !action
-        action: 提供修复方案调整意见。
-        actor: human
-        artifact: !artifact
-          name: 修复方案调整意见
-          format: markdown
-      - !action
-        action: 根据调整意见更新代码修复方案和测试修复方案。
-        actor: agent
-        artifact: !artifact
-          name: 更新后的修复方案
-          format: markdown
+      review:
+        - 研发工程师
+        - 测试工程师
+        - 提需方
 
   - !action
     action: 实施代码修复。
@@ -127,3 +79,6 @@ flow:
     artifact: !artifact
       name: 验证摘要
       format: markdown
+      review:
+        - 研发工程师
+        - 测试工程师

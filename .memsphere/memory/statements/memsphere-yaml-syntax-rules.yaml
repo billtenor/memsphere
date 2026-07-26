@@ -93,7 +93,7 @@ sections:
                   - Release workflow
                 ```
             asserts:
-              - names、defines、asserts、suggests、sections、fields、items 和 flow 等复数字段按照各自关键字规则使用 YAML sequence。
+              - names、defines、asserts、suggests、sections、fields、items、review 和 flow 等复数字段按照各自关键字规则使用 YAML sequence。
               - YAML sequence 的成员类型、是否允许为空以及顺序是否具有语义，由当前关键字及所在区块共同决定。
               - "Schema 或 Artifact 中的 type: array 约束其描述的目标值，不表示 Memory YAML 中出现的每个 YAML sequence 都是 array 类型的交付值。"
 
@@ -326,23 +326,25 @@ sections:
         names:
           - review
         defines:
-          - 声明当前 Artifact 在确定性校验通过后需要参与 Review 的 Procedure 本地 Slot。
+          - 声明当前 Artifact 在确定性校验通过后需要进入 Review，并列出该 Review 的 Procedure 本地 Reviewer Slot。
           - |-
-            `review` 是不重复的 Slot 名称数组；Decision Policy 与 Slot 到 Actor 的 Binding 在创建 Run 时选择：
+            `review` 是不重复的评审人席位名称数组；Decision Policy 与 Slot 到 Actor 的 Binding 在创建 Run 时选择：
             ```yaml
             artifact: !artifact
               name: 需求文档
               format: markdown
               review:
-                - 产品
-                - 资深架构
+                - 产品负责人
+                - 资深架构师
             ```
         asserts:
           - review 只允许出现在 !artifact，值必须是由不重复非空 Slot 名称组成的非空 YAML sequence。
-          - Slot 只表达当前 Procedure 内的评审视角，不引用 Actor、Permission、Decision Policy、system_prompt 或 Agent 配置。
+          - 每个 Slot 表示一个评审人席位，名称应使用可以自然指代评审人的角色称呼，例如产品负责人、测试工程师或流程设计者；不得使用验收、质量、架构设计等评审事项名称代替评审人称呼。
+          - Slot 只声明当前 Procedure 需要哪类评审人，不直接引用 Actor、Permission、Decision Policy、system_prompt 或 Agent 配置。
           - 省略 review 时，Artifact 在 type、format 和 schema 校验通过后按既有行为立即被接纳并推进 Run。
           - Procedure 含 Review 时，创建 Run 前必须为每个 Review scope 选择 Decision Policy，并把所有 Slot 绑定到 Actor 或显式跳过；结果冻结在 Run v3。
           - Artifact 校验通过后按 Run 中冻结的配置创建 Artifact Review；Review 通过前不得把候选 Artifact 加入 Run events 或推进当前 Action。
+          - Review 要求修改时，Runner 修改并重新提交同一个 Artifact，系统创建新的 Review Round；通常不需要在 Procedure 中另写 !while 表达该 Artifact 的评审返工。
           - 当前内置 artifact_acceptance.unanimous 要求全部 Human 与 Agent Reviewer Assignment 提交；只有具有 decision.decide 的 Vote 参与一致通过判定，只有 decision.assess 的 Vote 作为建议保存；Reviewer 完成后仍需 Runner 显式投票。
           - View 按 Review 与 Round 展示每轮不可变 Artifact Submission、正式 Comment、Vote、Result 和 Revision Summary；历史 Round 只读，完成后的 Review 仍可从对应 Run 步骤重新打开。
           - Artifact Review 定位 Comment 只能绑定创建时的 Submission、digest 和 Renderer target，不得锚定 Memory 或 Workspace 文件，也不得自动迁移到下一轮。
@@ -1017,7 +1019,7 @@ sections:
                           - 结果
                           - 证据
                       review:
-                        - 验收
+                        - 验收负责人
                       final: true
                     ```
                 asserts:
@@ -1033,7 +1035,7 @@ sections:
                   - "object + markdown 必须声明 layout: outline 并提供 schema。"
                   - "array + markdown 必须声明 layout: table 并提供 schema。"
                   - inline Schema 根节点解析后的 type 和 format 必须与 Artifact 契约完全一致。
-                  - review 如出现必须是非空且不重复的 Review Slot 名称 sequence；Decision Policy、Actor Binding 与 Permission Grant 属于 Run 创建配置。
+                  - review 如出现必须是非空且不重复的 Reviewer Slot 名称 sequence；每个名称必须表达评审人席位，Decision Policy、Actor Binding 与 Permission Grant 属于 Run 创建配置。
 
           - !statement
             names:

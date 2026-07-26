@@ -13,6 +13,10 @@ asserts:
   - defines 可以包含非空字符串、!ref、匿名 !statement 或匿名 !schema；嵌套结构必须携带 YAML tag，全部成员共同生效。
   - Procedure.asserts 如出现，其中每一项都在整个 Procedure 及其调用链执行期间持续生效。
   - flow 的每个成员必须使用 !action、!if、!while 或 !call tag，并满足对应节点规则。
+  - "!action 只允许 action、actor、asserts、suggests 和 artifact；artifact 必须使用 !artifact tag，并只允许 name、type、format、schema、review 和 final。"
+  - Artifact.review 如出现，必须是非空且成员不重复的 Reviewer Slot 名称数组；Slot 应使用评审人称呼，Actor Binding 与 Decision Policy 在创建 Run 时配置。
+  - "!if 使用 condition、then、可选 elseif 和可选 else；!while 使用 condition 和 do；condition 必须是产出 boolean Artifact 的 !action。"
+  - "!call 只允许 target，且 target 必须指向可解析的 Procedure。"
 fields:
   - !schema
     name: syntax
@@ -67,4 +71,4 @@ fields:
     item: !schema
       type: object
     defines:
-      - 由 Action、If、While 或 Call 组成的有序执行流程。
+      - 由 Action、If、While 或 Call 组成的有序执行流程；Action Artifact 可以通过 review 声明 Reviewer Slot。

@@ -1,6 +1,7 @@
 !procedure
 syntax: memsphere-20260721-stable
 names:
+  - memsphere Procedure记忆提取流程
   - Procedure 提取流程
   - memsphere-procedure-construction
 defines:
@@ -67,6 +68,7 @@ flow:
       - 避免按单次执行时间线照抄对话、工具调用、探索过程和偶发重试，应提取稳定且可复用的任务逻辑。
       - 避免把同一 actor 可以连续完成且没有新输入或独立交付价值的工作拆成多个 Action。
       - 避免用 !if 判断后再用 !while 重复判断同一条件；需要反复处理时直接使用 !while。
+      - Artifact 需要根据评审意见反复修改时，优先声明 artifact.review，由 Artifact Review 管理意见、决策和修订轮次；重复执行本身具有流程语义时仍可使用 !while。
       - 避免为了满足语法而创建后续步骤和 human 都不会使用的确认结果、候选清单或检查 Artifact。
       - 避免要求 human 重复已有信息，或确认 agent 能依据证据自行判断的事项。
       - 避免把局部约束提升为 Procedure asserts，或把可选做法写成强制要求。
@@ -89,7 +91,7 @@ flow:
       format: yaml
 
   - !action
-    action: 对目标文件运行 memsphere validate，检查语义和执行连贯性，并修正问题直至通过或明确报告无法解决的阻塞。
+    action: 对目标文件运行 memsphere validate，修正可安全解决的问题，并提交完整 Procedure 供 Review。
     actor: agent
     asserts:
       - 必须检查步骤输入与 Artifact 衔接、actor 归属、约束作用域、分支完整性、循环终止和最终交付物。
@@ -99,6 +101,8 @@ flow:
       name: 已验证的 Procedure Memory
       type: object
       format: yaml
+      review:
+        - 流程设计者
       final: true
 
   - !action

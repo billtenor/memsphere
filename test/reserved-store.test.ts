@@ -63,19 +63,21 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "memsphere-procedure-schema",
     "Schema Schema",
     "memsphere-schema-schema",
+    "memsphere 记忆访问规则",
     "Memory 访问规则",
     "memsphere-memory-access-rules",
     "Memsphere YAML 语法规则",
     "memsphere-yaml-syntax-rules",
     "敏捷需求开发流程",
-    "需求敏捷开发流程",
     "memsphere-agile-requirement-development",
+    "memsphere Procedure记忆提取流程",
     "Procedure 提取流程",
     "memsphere-procedure-construction",
-    "memsphere review 流程",
+    "memsphere 记忆 review 流程",
     "memsphere-review",
     "memsphere tutorial 流程",
     "memsphere-tutorial",
+    "memsphere 通用流程",
     "通用流程",
     "兜底流程",
     "memsphere-general-task-execution"
@@ -177,9 +179,9 @@ test("init installs system memory and keeps other bundled memory reserved", asyn
     assert.equal((await readAllMemoryFiles(memoryRoot, "concepts")).length, 6);
     const catalog = await new DefaultMemoryCatalog(new FileMemoryProvider(memoryRoot)).list();
     assert(catalog.memories.some((item) => item.reference === "concepts/Memory"));
-    assert(catalog.memories.some((item) => item.reference === "procedures/通用流程"));
-    assert(catalog.memories.some((item) => item.reference === "procedures/Procedure 提取流程"));
-    assert(catalog.memories.some((item) => item.reference === "procedures/memsphere review 流程"));
+    assert(catalog.memories.some((item) => item.reference === "procedures/memsphere 通用流程"));
+    assert(catalog.memories.some((item) => item.reference === "procedures/memsphere Procedure记忆提取流程"));
+    assert(catalog.memories.some((item) => item.reference === "procedures/memsphere 记忆 review 流程"));
     assert(catalog.memories.some((item) => item.reference === "procedures/memsphere tutorial 流程"));
     assert.equal(catalog.memories.some((item) => item.reference === "procedures/敏捷需求开发流程"), false);
     assert(catalog.memories.some((item) => item.reference === "schemas/Concept Schema"));

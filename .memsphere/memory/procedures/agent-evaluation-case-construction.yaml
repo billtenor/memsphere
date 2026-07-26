@@ -1,5 +1,5 @@
 !procedure
-syntax: memsphere-20260719-stable
+syntax: memsphere-20260721-stable
 names:
   - Agent 测试任务建设流程
   - 创建 Agent 测试任务流程
@@ -46,26 +46,8 @@ flow:
     artifact: !artifact
       name: Agent 测试 case 建设方案
       format: markdown
-  - !while
-    condition: !action
-      action: 判断 human 是否尚未认可当前 case 建设方案。
-      actor: agent
-      artifact: !artifact
-        name: human 是否尚未认可 case 建设方案
-        type: boolean
-    do:
-      - !action
-        action: 审阅 case 建设方案并指出需要保留、删除、简化或调整的内容。
-        actor: human
-        artifact: !artifact
-          name: case 建设方案反馈
-          format: markdown
-      - !action
-        action: 根据 human 反馈修订 case 建设方案，并明确本轮最终建设清单。
-        actor: agent
-        artifact: !artifact
-          name: 修订后的 Agent 测试 case 建设方案
-          format: markdown
+      review:
+        - 测试设计者
   - !action
     action: 删除已被 human 否决且仍残留在测试组源码目录中的旧 case，保留已认可 case 和历史运行证据。
     actor: agent
@@ -126,31 +108,16 @@ flow:
           name: 当前 case 静态校验结果
           format: markdown
       - !action
-        action: 逐项建立 evaluation.md 要求到 task.md、fixture 或测试组规则的来源映射，并检查是否意外考察了非目标能力。
+        action: 逐项建立 evaluation.md 要求到 task.md、fixture 或测试组规则的来源映射，修正发现的静态问题，并提交当前 case 供 Review。
         actor: agent
+        asserts:
+          - 必须检查语法错误、规则无来源、提示泄漏、输入歧义和能力点混杂，并优先消除隐含规则与无关难度。
+          - 修订 task.md、fixture、evaluation.md 或 case 契约后，必须重新准备隔离基线并执行受影响的静态校验。
         artifact: !artifact
           name: 当前 case 自洽性审计
           format: markdown
-      - !while
-        condition: !action
-          action: 判断当前 case 是否仍存在语法错误、规则无来源、提示泄漏、输入歧义或能力点混杂。
-          actor: agent
-          artifact: !artifact
-            name: 当前 case 是否仍存在静态问题
-            type: boolean
-        do:
-          - !action
-            action: 根据静态问题修订 task.md、fixture、evaluation.md 或 case 契约，优先消除隐含规则和无关难度。
-            actor: agent
-            artifact: !artifact
-              name: 当前 case 修订内容
-              format: markdown
-          - !action
-            action: 重新准备隔离基线并重复静态校验与自洽性审计。
-            actor: agent
-            artifact: !artifact
-              name: 当前 case 复验结果
-              format: markdown
+          review:
+            - 测试工程师
       - !action
         action: 将通过静态验收的 case 登记到测试组清单和说明文档中。
         actor: agent
@@ -158,25 +125,15 @@ flow:
           name: 更新后的测试组文档
           format: markdown
   - !action
-    action: 对本批 case 执行跨 case 审计，检查编号、命名、难度梯度、重复覆盖、fixture 一致性和测试组通过策略。
+    action: 对本批 case 执行跨 case 审计，修正编号、命名、难度梯度、重复覆盖、fixture 一致性和测试组通过策略问题，并提交本批 case 供 Review。
     actor: agent
+    asserts:
+      - 修订后必须对受影响 case 重新执行基线准备、静态校验和自洽性审计。
     artifact: !artifact
       name: 本批 case 跨 case 审计结果
       format: markdown
-  - !while
-    condition: !action
-      action: 判断跨 case 审计是否仍发现需要修复的问题。
-      actor: agent
-      artifact: !artifact
-        name: 跨 case 审计是否仍有问题
-        type: boolean
-    do:
-      - !action
-        action: 修复跨 case 不一致，并对受影响 case 重新执行基线准备、静态校验和自洽性审计。
-        actor: agent
-        artifact: !artifact
-          name: 跨 case 问题修复与复验结果
-          format: markdown
+      review:
+        - 测试工程师
   - !action
     action: 向 human 汇报最终 case 清单、文件位置、静态校验、自洽性结论、未运行说明和后续可执行命令。
     actor: agent

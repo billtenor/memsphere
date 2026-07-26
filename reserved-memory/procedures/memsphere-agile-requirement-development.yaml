@@ -2,7 +2,6 @@
 syntax: memsphere-20260721-stable
 names:
   - 敏捷需求开发流程
-  - 需求敏捷开发流程
   - memsphere-agile-requirement-development
 defines:
   - 通过 human 与 agent 的迭代协作，把软件需求推进到当前迭代实现、验证和验收完成。
@@ -19,28 +18,29 @@ flow:
     action: 调查需求、相关实现和仓库规范，形成当前迭代需求契约。
     actor: agent
     asserts:
-      - 读取与需求和验收相关的适用 Statement；在契约中列出采用项，未找到则记“无”并继续。
-      - 需求契约必须包含整体目标、当前迭代范围、后续范围、交付物、验收标准和待确认项。
+      - 读取与需求和验收相关的适用 Statement 记忆；在契约中列出采用项，未找到则记“无”并继续。
+      - 需求契约必须包含整体目标、当前迭代范围、后续范围、交付物、验收标准、兼容性要求和待确认项。
     artifact: !artifact
       name: 当前迭代需求契约
       format: markdown
       review:
-        - 产品
-        - 资深架构
+        - 产品负责人
+        - 项目负责人
 
   - !action
     action: 基于已确认的需求契约调查代码，形成实施与验证方案。
     actor: agent
     asserts:
-      - 读取与设计、开发和测试相关的适用 Statement；在方案中列出采用项，未找到则记“无”并继续。
+      - 读取与设计、开发和测试相关的适用 Statement 记忆；在方案中列出采用项，未找到则记“无”并继续。
       - 方案必须基于实际代码，说明实现方式、影响范围、开发任务和验证方式；待决问题先与 human 对齐。
     artifact: !artifact
       name: 实施与验证方案
       format: markdown
       review:
-        - 研发
-        - 测试
-        - 资深架构
+        - 研发工程师
+        - 架构师
+        - 测试工程师
+        - 项目负责人
 
   - !action
     action: 基于已确认的实施与验证方案产出开发计划或 Task List。
@@ -53,7 +53,7 @@ flow:
     action: 按需求契约、实施与验证方案和开发计划完成开发。
     actor: agent
     asserts:
-      - 开发前读取适用的开发规范 Statement；在摘要中列出采用项，未找到则记“无”并继续。
+      - 开发前读取适用的开发规范 Statement 记忆；在摘要中列出采用项，未找到则记“无”并继续。
       - 实施必须与需求契约、实施与验证方案和开发计划一致；方案变更必须先完成同等确认。
       - 实现需求涉及的代码、文档、Skill 或 Memory 时，保持相关内容一致。
       - 摘要必须列出本轮修改文件、关键代码路径和主要 diff、需求映射、行为与兼容性影响、已执行测试结果和未验证项。
@@ -67,7 +67,7 @@ flow:
     action: 按验证方案执行测试和验收标准检查。
     actor: agent
     asserts:
-      - 验证前读取适用的测试规范 Statement；未找到则按无额外规范继续。
+      - 验证前读取适用的测试规范 Statement 记忆；未找到则按无额外规范继续。
       - 必须实际执行首次验证，记录执行内容、结果和未执行项。
       - 必须区分本轮失败、历史失败和环境阻塞。
     artifact: !artifact
@@ -75,7 +75,7 @@ flow:
       format: markdown
 
   - !action
-    action: 汇总功能实现摘要、初始验证报告和当前代码改动，发起实现与验证成果验收。
+    action: 汇总功能实现摘要、初始验证报告和当前代码改动，提交实现与验证成果；Review 要求修改时，完成修正和受影响验证后重新提交。
     actor: agent
     asserts:
       - Review 的验收对象是前序功能实现摘要、初始验证报告和当前工作区代码改动组成的完整实现成果。
@@ -84,73 +84,21 @@ flow:
       - Reviewer 的最终摘要必须区分亲自检查的代码与测试、仅引用但未复跑的验证，以及仍然存在的残余风险；发现可行动的非阻塞问题时也应以 risk 或 suggestion 留下意见，不得只记录 blocking。
       - 只有当前迭代范围已正确实现、验收标准已有充分验证证据且不存在阻塞交付的问题或风险时，才能通过 Review。
       - 要求修改时，应指出实现、验证或代码改动中的具体问题及预期修正结果。
+      - 修订不得降低验收标准或缩小已确认范围；涉及需求契约变化或新增需求时，必须先取得 human 确认。
     artifact: !artifact
       name: 实现与验证验收材料
       format: markdown
       review:
-        - 研发
-        - 测试
-        - 架构
-        - 资深架构
-
-  - !while
-    condition: !action
-      action: 判断是否仍有阻止提需方验收的未解决问题；存在时返回 true，否则返回 false。
-      actor: agent
-      artifact: !artifact
-        name: 是否仍有验收前未解决问题
-        type: boolean
-    do:
-      - !action
-        action: 分类并解决验收前问题，重新执行受影响验证。
-        actor: agent
-        asserts:
-          - 不得通过降低标准或缩小已确认范围制造通过结果。
-          - 需要调整需求契约时，必须先取得 human 确认。
-        artifact: !artifact
-          name: 验收前修复与复测报告
-          format: markdown
-
-  - !action
-    action: 请 human 基于需求契约、实际功能和验证结果完成提需方验收。
-    actor: human
-    artifact: !artifact
-      name: 提需方验收反馈
-      format: markdown
-
-  - !while
-    condition: !action
-      action: 判断是否仍需根据最新验收反馈修正；需要时返回 true，已通过时返回 false。
-      actor: agent
-      artifact: !artifact
-        name: 是否仍需根据验收反馈修正
-        type: boolean
-    do:
-      - !action
-        action: 分类验收反馈，完成当前迭代范围内的修正和验证。
-        actor: agent
-        asserts:
-          - 区分本轮缺陷、新增需求和无关问题；新增需求不得静默并入当前迭代。
-          - 新增需求需要纳入本轮时，先更新需求契约并取得 human 确认。
-        artifact: !artifact
-          name: 验收反馈修正与复测报告
-          format: markdown
-          review:
-            - 研发
-            - 测试
-            - 架构
-      - !action
-        action: 请 human 重新完成提需方验收。
-        actor: human
-        artifact: !artifact
-          name: 提需方复验反馈
-          format: markdown
+        - 研发工程师
+        - 测试工程师
+        - 架构师
+        - 项目负责人
 
   - !action
     action: 复核实际改动、验证结果和验收结论，形成交付报告。
     actor: agent
     asserts:
-      - 读取适用的交付规范 Statement；未找到则按无额外规范继续。
+      - 读取适用的交付规范 Statement 记忆；未找到则按无额外规范继续。
       - 报告必须包含交付内容、验证结果、验收结论、后续范围和残留问题。
     artifact: !artifact
       name: 敏捷需求开发交付报告
@@ -169,7 +117,7 @@ flow:
         action: 按当前迭代范围检查改动并创建 Git commit。
         actor: agent
         asserts:
-          - 读取适用的 Git 规范 Statement；未找到则继续。
+          - 读取适用的 Git 规范 Statement 记忆；未找到则继续。
           - 只允许提交当前迭代产生的改动，不得暂存或提交其他工作区内容。
         artifact: !artifact
           name: 本轮 Commit 结果
