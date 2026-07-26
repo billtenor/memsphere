@@ -73,10 +73,10 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "memsphere Procedure记忆提取流程",
     "Procedure 提取流程",
     "memsphere-procedure-construction",
-    "memsphere 记忆 review 流程",
+    "memsphere 记忆 review 处理流程",
     "memsphere-review",
-    "memsphere tutorial 流程",
-    "memsphere-tutorial",
+    "memsphere 教学流程-第一章",
+    "memsphere-tutorial-chapter-01",
     "memsphere 通用流程",
     "通用流程",
     "兜底流程",
@@ -155,7 +155,8 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "procedures/general-task-execution.yaml",
     "procedures/procedure-construction.yaml",
     "procedures/dialogic-procedure-construction.yaml",
-    "procedures/memsphere-review-application.yaml"
+    "procedures/memsphere-review-application.yaml",
+    "procedures/memsphere-tutorial.yaml"
   ]);
 });
 
@@ -172,7 +173,7 @@ test("init installs system memory and keeps other bundled memory reserved", asyn
     assert.equal(items.some((item) => item.path === "schemas/memsphere-concept-schema.yaml"), false);
     assert.equal(items.some((item) => item.path === "procedures/memsphere-procedure-construction.yaml"), false);
     assert.equal(items.some((item) => item.path === "procedures/memsphere-review.yaml"), false);
-    assert.equal(items.some((item) => item.path === "procedures/memsphere-tutorial.yaml"), false);
+    assert.equal(items.some((item) => item.path === "procedures/memsphere-tutorial-chapter-01.yaml"), false);
     assert(items.length > 0);
     assert(items.every((item) => item.error === undefined));
     assert(items.every((item) => item.imported === false));
@@ -181,8 +182,8 @@ test("init installs system memory and keeps other bundled memory reserved", asyn
     assert(catalog.memories.some((item) => item.reference === "concepts/Memory"));
     assert(catalog.memories.some((item) => item.reference === "procedures/memsphere 通用流程"));
     assert(catalog.memories.some((item) => item.reference === "procedures/memsphere Procedure记忆提取流程"));
-    assert(catalog.memories.some((item) => item.reference === "procedures/memsphere 记忆 review 流程"));
-    assert(catalog.memories.some((item) => item.reference === "procedures/memsphere tutorial 流程"));
+    assert(catalog.memories.some((item) => item.reference === "procedures/memsphere 记忆 review 处理流程"));
+    assert(catalog.memories.some((item) => item.reference === "procedures/memsphere 教学流程-第一章"));
     assert.equal(catalog.memories.some((item) => item.reference === "procedures/敏捷需求开发流程"), false);
     assert(catalog.memories.some((item) => item.reference === "schemas/Concept Schema"));
     assert(catalog.memories.some((item) => item.reference === "schemas/Statement Schema"));

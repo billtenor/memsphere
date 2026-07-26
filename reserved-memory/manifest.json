@@ -18,7 +18,7 @@
       "procedures/memsphere-general-task-execution.yaml",
       "procedures/memsphere-procedure-construction.yaml",
       "procedures/memsphere-review.yaml",
-      "procedures/memsphere-tutorial.yaml"
+      "procedures/memsphere-tutorial-chapter-01.yaml"
     ],
     "remove": [
       "concepts/memory.yaml",
@@ -40,7 +40,8 @@
       "procedures/general-task-execution.yaml",
       "procedures/procedure-construction.yaml",
       "procedures/dialogic-procedure-construction.yaml",
-      "procedures/memsphere-review-application.yaml"
+      "procedures/memsphere-review-application.yaml",
+      "procedures/memsphere-tutorial.yaml"
     ]
   }
 }
