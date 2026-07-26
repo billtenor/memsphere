@@ -17,7 +17,7 @@ Memsphere 使用 Schema 将复杂 Artifact 拆成可逐项上报的字段，并�
 
 本需求要补齐 Schema 增量写作所需的全局上下文，并让最终组装 Artifact 与普通 Artifact 复用同一套提交、确定性校验和 Artifact Review 接纳语义。系统不尝试用代码判断自然语言是否正确，也不新建一套与 Artifact Review 重叠的 Semantic Review。
 
-原始用户反馈保存在 [`assets/user-feedback.md`](./assets/user-feedback.md)。附件中的状态名、命令和解决方案只作为问题线索；本需求以 Memsphere 现有 Artifact Validator、Run 和 Artifact Review 架构为准。
+原始反馈已归纳为以下用户心声；本需求以 Memsphere 现有 Artifact Validator、Run 和 Artifact Review 架构为准。
 
 ## 用户心声
 

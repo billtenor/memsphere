@@ -24,8 +24,8 @@ run_id: run-20260722-105244z-b43a1863
 
 详细证据见：
 
-- `changes/archive/completed/20260722-artifact-review-process-usability/asserts/review-run-evidence.md`
-- `changes/archive/completed/20260722-artifact-review-process-usability/asserts/review-experience-analysis.md`
+- [`review-run-evidence.md`](./asserts/review-run-evidence.md)
+- [`review-experience-analysis.md`](./asserts/review-experience-analysis.md)
 
 ### ACP Agent 启动失败根因
 
