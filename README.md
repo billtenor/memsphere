@@ -212,3 +212,8 @@ concepts/ -> !concept
 statements/ -> !statement
 schemas/ -> !schema
 ```
+
+## License
+
+This project is licensed under the Apache License, Version 2.0. See
+[LICENSE](LICENSE) for details.

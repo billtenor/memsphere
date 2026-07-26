@@ -2,15 +2,28 @@
   "name": "vibe-mem",
   "version": "0.1.0",
   "description": "A local YAML-backed memory CLI for AI runtimes.",
+  "license": "Apache-2.0",
+  "author": "Yanjun Liu <billtenor.thu@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/billtenor/memsphere.git"
+  },
+  "homepage": "https://github.com/billtenor/memsphere#readme",
+  "bugs": {
+    "url": "https://github.com/billtenor/memsphere/issues"
+  },
   "type": "module",
   "bin": {
     "vibe-mem": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && node -e \"const fs=require('node:fs'); fs.rmSync('dist/skills',{recursive:true,force:true}); fs.cpSync('src/skills','dist/skills',{recursive:true});\"",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node -e \"require('node:fs').cpSync('src/skills','dist/skills',{recursive:true})\"",
     "dev": "tsx src/cli.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
