@@ -14,7 +14,8 @@ test("npm package preserves the memsphere first-use bootstrap contract", async (
     "reserved-memory",
     "LICENSE",
     "NOTICE",
-    "README.md"
+    "README.md",
+    "THIRD_PARTY_NOTICES.md"
   ]);
   assert.equal(packageJson.scripts?.prepack, "npm run build");
   assert.equal(packageJson.scripts?.prepublishOnly, "npm test");
