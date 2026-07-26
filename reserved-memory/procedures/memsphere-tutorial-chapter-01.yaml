@@ -23,7 +23,7 @@ flow:
       asserts:
         - 必须已经安装 memsphere npm 包与 memsphere skill，并由 human 在准备使用的真实工程或练习目录中执行 memsphere init。
         - 当前 scope 的 config 与 Memory Store 必须可用，且 memsphere validate 必须通过。
-        - memsphere View 必须使用 127.0.0.1 和一个可用端口成功启动，且 agent 已确认访问地址可用；首次配置时端口可以由 agent 随机选择。
+        - memsphere View 必须使用当前环境可访问的 Host 和一个可用端口成功启动，且 agent 已确认访问地址可用；首次配置时端口可以由 agent 随机选择。
         - 必须实际检查 memsphere CLI 与 skill、当前 scope、config、Memory Store 和 memsphere validate 结果，不得依据默认值或历史结果推断。
         - 任一准入项无法确认时，必须判定为尚未满足。
       artifact: !artifact
@@ -35,7 +35,7 @@ flow:
         actor: agent
         asserts:
           - 不得代替 human 执行 memsphere init，不得为通过准入而修改 System Memory、覆盖用户 Memory 或降低校验标准。
-          - View 尚不可用时，agent 必须选择可用端口、将 host 设置为 127.0.0.1、启动或重启 View，并实际确认访问地址可用。
+          - View 尚不可用时，agent 必须根据当前环境选择 Host 和可用端口、启动或重启 View，并实际确认访问地址可用。
         artifact: !artifact
           name: 教学准入处理结果
           format: markdown
@@ -189,14 +189,13 @@ flow:
     do:
       - !action
         action: |-
-          介绍四类 Memory 如何协作，以及 Procedure 是 Agent 遵循经验记忆完成任务的唯一入口；使用当前工程的真实 Memory 演示加载过程。首次进入时可以这样表述：
+          介绍四类 Memory 如何协作，以及 Procedure 是 Agent 遵循经验记忆完成任务的唯一入口。首次进入时可以这样表述：
           “四类 Memory 并不是彼此孤立的。Concept 提供一致的理解，Statement 提供判断准则，Schema 约束过程和最终产物，Procedure 把这些经验组织成一次完整执行。
           当你让我‘处理这笔 6000 元的报销’时，Agent 会先选择适用的报销 Procedure，再在执行过程中加载‘大额报销’Concept、审批 Statement 和报销单 Schema。你不需要自己逐条指定这些记忆。
           因此，Procedure 是 Agent 遵循经验记忆完成任务的唯一入口；Agent 总是先选择流程，再按当前步骤需要加载其他 Memory。”
           后续轮次根据 human 的问题继续讨论。
         actor: agent
         asserts:
-          - 必须使用 memsphere memory list 和 memory read 获取当前工程的真实 Memory，不得编造名称或逻辑引用。
           - 只介绍用户需要理解的加载原则，不展开 Node 局部读取等 CLI 细节。
         artifact: !artifact
           name: Memory 协作与加载入口说明
@@ -244,10 +243,10 @@ flow:
     do:
       - !action
         action: |-
-          提供已经通过准入检查的 View 访问地址，介绍 View 的定位和主要入口；必须把实际地址输出为可点击的 Markdown 链接，不得保留端口占位符。首次进入时可以这样表述：
+          提供已经通过准入检查的 View 访问地址，介绍 View 的定位和主要入口；必须把实际地址输出为可点击的 Markdown 链接，不得保留 Host 或端口占位符。首次进入时可以这样表述：
           “View 是人使用 memsphere 的主要界面。顶部的 Memory 页面用于浏览和搜索 Memory，也可以了解并导入 Reserved Memory；Task 页面用于查看正在执行或已经完成的 Run，以及每一步产生的 Artifact。
           Memory Review 也从 View 发起和提交。设置页面则用于维护存储位置、View 服务和参与评审的人或 Agent。
-          我已经启动了当前工程的 View，你可以点击 [打开 memsphere View](http://127.0.0.1:<实际端口>) 实际浏览；导入 Reserved Memory 或修改设置都由你自行决定。”
+          我已经启动了当前工程的 View，你可以点击 [打开 memsphere View](<实际 View 访问地址>) 实际浏览；导入 Reserved Memory 或修改设置都由你自行决定。”
           后续轮次根据 human 的问题继续讨论。
         actor: agent
         artifact: !artifact

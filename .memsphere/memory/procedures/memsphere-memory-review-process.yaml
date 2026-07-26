@@ -2,7 +2,7 @@
 syntax: memsphere-20260721-stable
 names:
   - memsphere 记忆 review 处理流程
-  - memsphere-review
+  - memsphere-memory-review-process
 defines:
   - 应用 Memsphere Memory review comments，更新目标 Memory、review 状态和处理摘要。
   - 适用于 Concept、Statement、Schema 与 Procedure 的 Memory Review。
