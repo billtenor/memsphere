@@ -1,0 +1,43 @@
+## 评审契约
+以下要求定义当前产物应满足的条件。
+
+### 当前动作
+{{contract.actionInstruction}}
+
+{{#if contract.procedureAsserts}}
+### Procedure 断言
+{{#each contract.procedureAsserts}}
+- {{this}}
+{{/each}}
+{{/if}}
+
+{{#if contract.actionAsserts}}
+### Action 断言
+{{#each contract.actionAsserts}}
+- {{this}}
+{{/each}}
+{{/if}}
+
+{{#if contract.suggestions}}
+### 建议
+{{#each contract.suggestions}}
+- {{this}}
+{{/each}}
+{{/if}}
+{{#if contract.details}}
+
+### 补充说明
+{{#each contract.details}}
+- {{this}}
+{{/each}}
+{{/if}}
+
+### 产物契约
+- 名称：{{contract.artifact.name}}
+- 类型：{{contract.artifact.type}}
+- 格式：{{contract.artifact.format}}
+- Schema：{{contract.artifact.schema}}
+- 最终产物：{{#if contract.artifact.final}}是{{else}}否{{/if}}
+- 评审策略：{{contract.artifact.reviewPolicy}}
+
+使用下面的命令读取候选值；需要完整嵌套 Schema 时再读取完整契约。

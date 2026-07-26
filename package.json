@@ -1,6 +1,6 @@
 {
-  "name": "vibe-mem",
-  "version": "0.1.0",
+  "name": "memsphere",
+  "version": "0.1.1",
   "description": "A local YAML-backed memory CLI for AI runtimes.",
   "license": "Apache-2.0",
   "author": "Yanjun Liu <billtenor.thu@gmail.com>",
@@ -14,28 +14,42 @@
   },
   "type": "module",
   "bin": {
-    "vibe-mem": "./dist/cli.js"
+    "memsphere": "./dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./artifact-validation": "./dist/artifact-validation.js",
+    "./control-plane": "./dist/control-plane.js",
+    "./run": "./dist/run/store.js"
   },
   "files": [
     "dist",
+    "reserved-memory",
     "LICENSE",
     "NOTICE",
     "README.md"
   ],
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node -e \"require('node:fs').cpSync('src/skills','dist/skills',{recursive:true})\"",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node -e \"const fs=require('node:fs'); fs.chmodSync('dist/cli.js',0o755); fs.cpSync('src/skills','dist/skills',{recursive:true}); fs.cpSync('src/prompts/templates','dist/prompts/templates',{recursive:true})\"",
     "dev": "tsx src/cli.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "validate": "npm run build"
+    "validate": "npm run build",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm test"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^1.2.1",
     "commander": "^12.1.0",
+    "handlebars": "^4.7.9",
+    "markdown-it": "^14.3.0",
     "yaml": "^2.5.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.5.4",
+    "playwright": "^1.55.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2"
   },

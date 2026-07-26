@@ -1,0 +1,119 @@
+!procedure
+syntax: memsphere-20260721-stable
+names:
+  - memsphere 记忆 review 处理流程
+  - memsphere-memory-review-process
+defines:
+  - 应用 Memsphere Memory review comments，更新目标 Memory、review 状态和处理摘要。
+  - 适用于 Concept、Statement、Schema 与 Procedure 的 Memory Review。
+  - 本流程不处理 Artifact Review Comment；Artifact Review Comment 绑定 Run 中不可变的 Artifact Submission 与 Round，只作为该次 Artifact Review 的评审证据保存和展示。
+asserts:
+  - 只有 submitted 或 processing review 可以处理；draft 和 done review 不得应用 comments 或修改目标 Memory。
+  - 不得修改 review comments、snapshot、Artifact Review 数据或与 comments 无关的 Memory 内容。
+  - 只有全部 comments 已安全处理且 memsphere validate 通过，才能将 review 标记为 done。
+goals:
+  - 安全应用 review comments，并保持无关内容不变。
+  - 准确维护 review 生命周期和 agent.summary。
+  - 交付更新后的 review YAML 与简要处理摘要。
+flow:
+  - !action
+    action: 提供需要处理的 review id 或 review 文件路径。
+    actor: human
+    artifact: !artifact
+      name: Review 处理请求
+      format: markdown
+  - !action
+    action: 根据当前工程 reviewsRoot 定位并读取 review YAML，确认 source、target、memoryRoot、snapshots、comments 和 status。
+    actor: agent
+    asserts:
+      - 必须保留 comment id、body、snapshot、location 等原始内容。
+      - review status 必须为 submitted 或 processing；其他状态交由下一步等待 human 调整。
+    artifact: !artifact
+      name: Review 上下文与状态
+      format: markdown
+  - !while
+    condition: !action
+      action: 重新读取 review YAML，判断 status 是否仍不是 submitted 或 processing。
+      actor: agent
+      artifact: !artifact
+        name: Review 是否仍不可处理
+        type: boolean
+    do:
+      - !action
+        action: 将 review status 调整为 submitted 或 processing。
+        actor: human
+        artifact: !artifact
+          name: Review status 调整结果
+          format: markdown
+  - !action
+    action: 将 submitted review 更新为 processing 并刷新 updatedAt；review 已为 processing 时保持当前状态。
+    actor: agent
+    asserts:
+      - 必须在修改目标 Memory 前完成状态更新。
+    artifact: !artifact
+      name: Review processing 状态
+      format: markdown
+  - !action
+    action: 按目标 Memory 对 comments 分组，根据 target.path 定位并读取当前工程 memoryRoot 中的当前 Memory YAML。
+    actor: agent
+    asserts:
+      - snapshot、target、location 和 hash 只用于定位和理解 comment，不得把 snapshot 当作修改目标。
+      - 必须确认每条 comment 指向的当前内容，不能把结构化视图行号当作 YAML 源文件行号。
+    artifact: !artifact
+      name: Comment 分组与目标上下文
+      format: markdown
+  - !action
+    action: 逐条理解并应用 comments，记录每条 comment 的处理结果。
+    actor: agent
+    asserts:
+      - 必须结合 body、target、anchor、snapshot、hash 和当前 YAML 判断修改意图。
+      - anchor 或 snapshot 已过期时不得按原位置盲目修改；无法安全判断的 comment 必须保持目标内容不变并记录原因。
+      - 必须保持 YAML tag、合法结构和无关内容不变。
+    artifact: !artifact
+      name: Memory 修改与 Comment 处理记录
+      format: markdown
+  - !while
+    condition: !action
+      action: 重新检查 comment 处理结果并运行 memsphere validate；仍有未安全处理的 comment 或校验未通过时返回 true，否则返回 false。
+      actor: agent
+      artifact: !artifact
+        name: Review 是否仍未达到完成条件
+        type: boolean
+    do:
+      - !if
+        condition: !action
+          action: 判断当前问题是否需要 human 补充意图、处理冲突或决定无法安全推断的事项。
+          actor: agent
+          artifact: !artifact
+            name: 是否需要 Human 决定
+            type: boolean
+        then:
+          - !action
+            action: 根据未处理 comment、内容冲突或校验阻塞提供处理决定。
+            actor: human
+            artifact: !artifact
+              name: Human Review 处理决定
+              format: markdown
+      - !action
+        action: 根据 comment、校验结果和已有 human 决定继续安全修改目标 Memory，并记录本轮处理结果。
+        actor: agent
+        asserts:
+          - 不得通过删除 comment、降低约束或修改无关内容制造完成结果。
+        artifact: !artifact
+          name: Review 修正结果
+          format: markdown
+  - !action
+    action: 将 review 标记为 done，写入 doneAt、updatedAt 和简短的 agent.summary。
+    actor: agent
+    artifact: !artifact
+      name: 更新后的 Review YAML
+      type: object
+      format: yaml
+      final: true
+  - !action
+    action: 向 human 简要说明 review 文件路径、最终状态、Memory 修改、未处理事项和校验结果。
+    actor: agent
+    artifact: !artifact
+      name: Review 处理摘要
+      format: markdown
+      final: true

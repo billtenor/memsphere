@@ -1,0 +1,141 @@
+!procedure
+syntax: memsphere-20260719-stable
+names:
+  - memsphere-harness-smoke
+  - harness-smoke
+defines:
+  - 用于手动验证 memsphere run harness 的最小流程。
+goals:
+  - 验证 procedure step 可以通过 artifact report 顺序推进。
+  - 验证 branch 可以根据 boolean artifact 选择后续步骤。
+  - 验证 loop 可以通过 boolean artifact 决定继续或退出。
+  - 验证 markdown artifact 会写入 run artifacts 目录，并可在 view 中显示文件内容。
+  - 验证 format 为 schema 的 artifact 可以进入 schema 深度优先编写流程。
+  - 验证 Action 的断言和建议、内嵌图式与最终交付物可以贯通 Run 和 View。
+  - 验证 Schema 合约继承，以及 outline 标题子树中的局部 Markdown table 校验。
+flow:
+  - !if
+    condition: !action
+      action: 判断当前输入是否足够开始 smoke test。
+      artifact: !artifact
+        name: 当前输入是否足够开始测试
+        type: boolean
+    then:
+      - !action
+        action: 记录当前输入已足够开始 smoke test。
+        artifact: !artifact
+          name: Smoke 测试输入确认
+          format: markdown
+    else:
+      - !action
+        action: 记录当前输入暂不足以开始 smoke test 的原因。
+        artifact: !artifact
+          name: Smoke 测试输入不足原因
+          format: markdown
+  - !if
+    condition: !action
+      action: 请用户确认是否允许继续执行 smoke test。
+      actor: human
+      artifact: !artifact
+        name: 用户是否允许继续执行测试
+        type: boolean
+    then:
+      - !action
+        action: 记录用户已允许继续执行 smoke test。
+        artifact: !artifact
+          name: Smoke 测试授权确认
+          format: markdown
+    else:
+      - !action
+        action: 记录用户暂不允许继续执行 smoke test。
+        artifact: !artifact
+          name: Smoke 测试未授权原因
+          format: markdown
+  - !if
+    condition: !action
+      action: 判断是否需要先补充测试目标。
+      artifact: !artifact
+        name: 是否需要补充测试目标
+        type: boolean
+    then:
+      - !action
+        action: 写出缺失的测试目标，要求只用一句话。
+        artifact: !artifact
+          name: 缺失的测试目标
+          format: markdown
+    elseif: !if
+      condition: !action
+        action: 判断是否需要记录目标已经充分的原因。
+        artifact: !artifact
+          name: 是否需要记录目标充分的原因
+          type: boolean
+      then:
+        - !action
+          action: 写出当前测试目标已经充分的原因。
+          artifact: !artifact
+            name: 测试目标已经充分的原因
+            format: markdown
+    else:
+      - !action
+        action: 确认当前测试目标已经足够。
+        artifact: !artifact
+          name: 测试目标充分确认
+          format: markdown
+  - !while
+    condition: !action
+      action: 判断是否还需要继续补充 smoke test 观察点。
+      artifact: !artifact
+        name: 是否需要继续补充观察点
+        type: boolean
+    do:
+      - !action
+        action: 补充一个新的观察点，要求具体说明你想验证什么。
+        artifact: !artifact
+          name: 新增观察点
+          format: markdown
+  - !action
+    action: 用一句话总结本次 smoke test 的目的。
+    artifact: !artifact
+      name: 本次测试目的总结
+      format: markdown
+  - !call
+    target: memsphere-harness-child
+  - !action
+    action: 编写一份最小 harness note artifact。
+    artifact: !artifact
+      name: 最小 Harness 记录
+      format:
+        name: markdown
+        layout: outline
+      schema: memsphere-harness-note
+      type: object
+  - !action
+    action: 产出一份用于验证 Action 与 Artifact 契约的最终交付物。
+    asserts:
+      - 交付物必须包含摘要字段。
+    suggests:
+      - 摘要优先保持简洁。
+    artifact: !artifact
+      name: 契约验收交付物
+      format:
+        name: markdown
+        layout: outline
+      schema: !schema
+        asserts:
+          - 所有字段均应可审计。
+        fields:
+          - 摘要
+          - !schema
+            names:
+              - 验证项
+            type: array
+            format:
+              name: markdown
+              layout: table
+            item: !schema
+              type: object
+              fields:
+                - ID
+                - 结果
+      final: true
+      type: object

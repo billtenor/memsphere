@@ -1,0 +1,12 @@
+!statement
+syntax: memsphere-20260719-stable
+names:
+  - 客户故障告知规则
+  - customer incident notice rules
+defines:
+  - 适用于面向客户说明已恢复线上故障的告知内容。
+asserts:
+  - 客户故障告知必须保存到 artifacts/customer-incident-notice.md。
+  - 告知必须包含故障开始时间、恢复时间和已确认的量化影响。
+  - 面向客户的告知不得出现内部服务代号。
+  - 告知只能陈述已确认事实，不得补充未经确认的根因。

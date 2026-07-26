@@ -1,0 +1,168 @@
+Run {{runId}}
+{{#each procedureAsserts}}
+{{#if @first}}
+
+流程断言：
+{{/if}}
+- {{this}}
+{{/each}}
+{{#ifEq step.kind "schema_finalization"}}
+
+图式收尾：
+- 状态：等待整体调整
+- 产物：{{step.artifactName}}
+- 进度：{{step.completed}}/{{step.total}}
+- 托管草稿：{{step.draftPath}}
+{{#if step.validation}}
+- 契约校验：{{step.validation.status}}
+{{#each step.validation.issues}}
+  - {{this}}
+{{/each}}
+{{/if}}
+
+请执行：
+完整阅读托管草稿，按需直接编辑，然后提交同一个文件。
+
+下一步：
+memsphere run report --run {{runId}} --artifact-file {{step.draftPathArgument}}
+{{/ifEq}}
+{{#ifEq step.kind "repeat"}}
+
+请执行：
+{{step.instruction}}
+
+详情：
+- 允许数量：{{step.min}}..{{#if step.max}}{{step.max}}{{else}}不限{{/if}}
+- 正文字段：{{step.bodyFields}}
+
+下一步：
+memsphere run repeat <count> --run {{runId}}
+{{/ifEq}}
+{{#ifEq step.kind "action"}}
+
+{{#ifEq step.actor "human"}}请 Human 执行：{{else}}请执行：{{/ifEq}}
+{{step.instruction}}
+{{#each step.asserts}}
+{{#if @first}}
+
+断言：
+{{/if}}
+- {{this}}
+{{/each}}
+{{#each step.suggests}}
+{{#if @first}}
+
+建议：
+{{/if}}
+- {{this}}
+{{/each}}
+{{#each step.details}}
+{{#if @first}}
+
+详情：
+{{/if}}
+- {{this}}
+{{/each}}
+
+产物：
+{{step.artifact.name}}（{{step.artifact.type}} · {{step.artifact.format}}）
+{{#ifEq step.actor "human"}}
+请上报 Human 提供的产物值。
+{{/ifEq}}
+
+下一步：
+{{#ifEq step.next.kind "revision"}}
+memsphere run report --run {{runId}} --artifact <value> --revision-summary <text>
+memsphere run report --run {{runId}} --artifact-file <path> --revision-summary-file <path>
+{{/ifEq}}
+{{#ifEq step.next.kind "inline_schema"}}
+memsphere run enter-schema --run {{runId}}
+{{/ifEq}}
+{{#ifEq step.next.kind "external_schema"}}
+memsphere run enter-schema {{step.next.schemaName}} --run {{runId}}
+{{/ifEq}}
+{{#ifEq step.next.kind "report"}}
+memsphere run report --run {{runId}} --artifact <value>
+{{#if step.next.optional}}
+memsphere run skip --run {{runId}}
+{{/if}}
+{{/ifEq}}
+{{/ifEq}}
+{{#ifEq step.kind "schema_current_field"}}
+
+当前流程步骤：
+{{step.schemaWriting.actionInstruction}}
+{{#each step.schemaWriting.actionAsserts}}
+{{#if @first}}
+
+步骤断言：
+{{/if}}
+- {{this}}
+{{/each}}
+{{#each step.schemaWriting.actionSuggests}}
+{{#if @first}}
+
+步骤建议：
+{{/if}}
+- {{this}}
+{{/each}}
+
+Schema 写作：
+- 产物：{{step.schemaWriting.artifactName}}
+- 当前字段：{{step.progress.field}}
+- 进度：{{step.progress.completed}}/{{step.progress.total}}
+- 剩余：{{step.progress.remaining}}
+- 工作方式：逐字段上报以更新同一份托管草稿；全部字段完成后，先完整阅读并编辑草稿，再明确提交同一个文件。
+{{#if step.progress.pendingRepeatControls}}
+- 待处理 repeat 控制：{{step.progress.pendingRepeatControls}}
+{{/if}}
+- 字段契约：{{step.progress.contract.type}} · {{step.progress.contract.format}}
+{{#if step.progress.draftPath}}
+- 托管草稿：{{step.progress.draftPath}}
+{{/if}}
+
+{{#ifEq step.actor "human"}}请 Human 填写：{{else}}请填写：{{/ifEq}}
+{{step.progress.field}}
+{{#each step.progress.defines}}
+{{#if @first}}
+
+字段定义：
+{{/if}}
+- {{this}}
+{{/each}}
+{{#each step.progress.asserts}}
+{{#if @first}}
+
+字段断言：
+{{/if}}
+- {{this}}
+{{/each}}
+{{#each step.progress.suggests}}
+{{#if @first}}
+
+字段建议：
+{{/if}}
+- {{this}}
+{{/each}}
+
+提交：
+{{#ifEq step.next.kind "revision"}}
+memsphere run report --run {{runId}} --artifact <value> --revision-summary <text>
+memsphere run report --run {{runId}} --artifact-file <path> --revision-summary-file <path>
+{{/ifEq}}
+{{#ifEq step.next.kind "inline_schema"}}
+memsphere run enter-schema --run {{runId}}
+{{/ifEq}}
+{{#ifEq step.next.kind "external_schema"}}
+memsphere run enter-schema {{step.next.schemaName}} --run {{runId}}
+{{/ifEq}}
+{{#ifEq step.next.kind "report"}}
+memsphere run report --run {{runId}} --artifact <value>
+{{#if step.next.optional}}
+memsphere run skip --run {{runId}}
+{{/if}}
+{{/ifEq}}
+
+查看完整 Schema：
+memsphere run schema show --run {{runId}}
+{{/ifEq}}

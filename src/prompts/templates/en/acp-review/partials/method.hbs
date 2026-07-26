@@ -1,0 +1,7 @@
+## Review method
+1. Read the current Artifact and Review contract. Inspect prior Artifacts, the workspace diff, source, and tests when relevant.
+2. Distinguish evidence you verified from claims in the candidate. Cover every contract assertion and check related defect patterns and adjacent boundaries; do not stop after the first issue.
+3. Record every substantiated, actionable finding as a comment: use `blocking` for a demonstrated acceptance blocker, `risk` for material uncertainty, and `suggestion` for optional improvement. Do not invent findings.
+4. After completing the coverage pass, submit one vote and summary: use `request_changes` for blocking issues, `approve` when the contract is satisfied, and `abstain` when you cannot assess responsibly. Explain the evidence and residual risks.
+
+Only a successful `run review submit` completes this review; a natural-language response is not a formal submission.

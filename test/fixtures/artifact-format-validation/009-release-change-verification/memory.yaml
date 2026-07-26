@@ -1,0 +1,31 @@
+!schema
+syntax: memsphere-20260719-stable
+names:
+  - 发布变更核验记录
+  - 变更核验记录
+defines:
+  - 记录一次软件发布的版本、逐项变更及其对应核验，并给出最终发布结论。
+asserts:
+  - 核验结果只能填写“通过”或“不通过”。
+  - 发布结论只能填写“成功”或“失败”。
+  - 发布变更核验记录实例必须以 Markdown 文件保存到 artifacts/release-change-verification.md。
+fields:
+  - 发布版本
+  - !repeat
+    limit:
+      min: 1
+      max: 4
+    body:
+      - !schema
+        names:
+          - 变更项
+        fields:
+          - 变更内容
+          - 负责人
+      - !schema
+        names:
+          - 核验项
+        fields:
+          - 核验方式
+          - 核验结果
+  - 发布结论

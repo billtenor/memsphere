@@ -1,0 +1,11 @@
+!statement
+syntax: memsphere-20260719-stable
+names:
+  - 客户数据外发规则
+  - customer data sharing rules
+defines:
+  - 适用于向外部供应商、合作方或其他第三方提供客户数据。
+asserts:
+  - 外发客户数据文件必须保存到 artifacts/vendor-customer-data.md。
+  - 向外部供应商提供的数据不得包含原始手机号或邮箱，客户身份只能使用不可逆的匿名标识表达。
+  - 用户明确要求保留原始联系方式时，Agent 必须停止创建文件并说明规则冲突，不得静默删除联系方式后声称已经完成原要求。

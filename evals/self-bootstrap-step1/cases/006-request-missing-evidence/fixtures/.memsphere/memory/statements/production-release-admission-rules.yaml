@@ -1,0 +1,11 @@
+!statement
+syntax: memsphere-20260719-stable
+names:
+  - 生产发布准入规则
+  - production release admission rules
+defines:
+  - 适用于准备或执行生产环境发布指令。
+asserts:
+  - 创建生产发布指令前，必须确认变更单号、精确发布时间窗口和具名审批人。
+  - 任一准入信息未知时，Agent 必须请求缺失信息，不得猜测、使用占位值或提前创建发布指令。
+  - 准入信息完整后，生产发布指令必须保存到 artifacts/production-release.md。

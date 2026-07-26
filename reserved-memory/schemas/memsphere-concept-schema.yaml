@@ -1,0 +1,53 @@
+!schema
+syntax: memsphere-20260721-stable
+names:
+  - Concept Schema
+  - memsphere-concept-schema
+format: yaml
+defines:
+  - 定义 memsphere !concept Memory 的合法内容结构和字段要求。
+asserts:
+  - 根节点必须使用 !concept 标签，只允许 syntax、name/names、defines 和 extends 字段。
+  - "syntax 必须填写 memsphere-20260721-stable。"
+  - name 与 names 必须且只能使用一个；name 必须是非空字符串，names 必须是非空且成员不重复的字符串数组，首项为规范名称。
+  - defines 可以包含非空字符串、!ref、匿名 !statement 或匿名 !schema；嵌套结构必须携带 YAML tag，全部成员共同生效。
+  - extends 如出现，其中每一项必须引用一个上位 Concept。
+fields:
+  - !schema
+    name: syntax
+    type: string
+    defines:
+      - 当前 Concept 使用的不可变语法版本。
+  - !schema
+    name: name
+    optional: true
+    type: string
+    defines:
+      - Concept 只有一个名称时使用的简写。
+  - !schema
+    name: names
+    optional: true
+    type: array
+    item: !schema
+      type: string
+    defines:
+      - Concept 的规范名称与别名，首项为规范名称。
+  - !schema
+    name: defines
+    optional: true
+    type: array
+    items:
+      - !schema
+        type: string
+      - !schema
+        type: object
+    defines:
+      - 对概念语义的文本定义、外部 Memory 引用，以及用于补充规则或结构的匿名 Statement、Schema。
+  - !schema
+    name: extends
+    optional: true
+    type: array
+    item: !schema
+      type: string
+    defines:
+      - Concept 所继承的上位概念。

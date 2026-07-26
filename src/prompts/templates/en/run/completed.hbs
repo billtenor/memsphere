@@ -1,0 +1,17 @@
+Run {{runId}}
+{{#each procedureAsserts}}
+{{#if @first}}
+
+Procedure Asserts:
+{{/if}}
+- {{this}}
+{{/each}}
+
+Done
+{{#each finalArtifacts}}
+{{#if @first}}
+
+Final Artifacts:
+{{/if}}
+- {{name}}{{#if path}}: {{path}}{{/if}}
+{{/each}}

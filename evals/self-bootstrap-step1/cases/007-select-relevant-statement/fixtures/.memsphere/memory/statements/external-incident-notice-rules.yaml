@@ -1,0 +1,10 @@
+!statement
+syntax: memsphere-20260719-stable
+names:
+  - 外部故障告知规则
+  - external incident notice rules
+defines:
+  - 适用于发送给客户、公众或外部合作方的故障告知。
+asserts:
+  - 外部故障告知必须保存到 artifacts/external-incident-notice.md。
+  - 外部故障告知不得包含内部组件名称或内部负责人姓名。

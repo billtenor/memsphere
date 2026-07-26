@@ -1,10 +1,48 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { join, relative, resolve, sep } from "node:path";
+import { timingSafeEqual } from "node:crypto";
+import { access, readFile } from "node:fs/promises";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import MarkdownIt from "markdown-it";
 import { ZodError, type ZodIssue } from "zod";
-import { type VibeMemConfig, readConfig } from "../config.js";
+import { archiveReview, archiveRun } from "../archive/store.js";
+import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
+import { agentActivityDelta, readAgentActivitySnapshot } from "../acp/activity.js";
+import { detectAcpProviderInstances } from "../acp/detection.js";
+import {
+  defaultAcpProviderInstance,
+  defaultAcpProviderInstances,
+  listAcpProviderDefinitions
+} from "../acp/catalog.js";
+import {
+  artifactReviewAssignmentId,
+  artifactReviewFailureCategory,
+  artifactReviewOpinionReferencesImplementation,
+  repeatedArtifactReviewAdvisories,
+  type ArtifactReviewAgentAttempt,
+  type ArtifactReviewSubmittedOpinion,
+  type ArtifactReviewVote
+} from "../artifact-review.js";
+import { configSchema, type MemsphereConfig, readConfig } from "../config.js";
+import {
+  ConfigDraftValidationError,
+  ConfigRevisionConflictError,
+  editableConfigDraft,
+  readConfigDocument,
+  validateConfigDraft,
+  writeConfigDraft,
+  type ConfigDocument,
+  type EditableConfigDraft
+} from "../config-management.js";
+import { authorizeArtifactOperation, listPermissionDefinitions } from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
+import {
+  assertSafeReservedRelativePath,
+  importReservedMemory,
+  listReservedMemories,
+  readReservedMemoryManifest
+} from "../reserved/store.js";
 import {
   createReview,
   getReview,
@@ -16,20 +54,57 @@ import {
   type ReviewComment,
   type ReviewStatus
 } from "../review/store.js";
-import { listRuns, readRun } from "../run/store.js";
+import {
+  ArtifactAuthorizationFailure,
+  ArtifactReviewConflictError,
+  buildSchemaWritingSnapshot,
+  currentArtifactReview,
+  ensureCurrentSchemaDraft,
+  findArtifactReview,
+  listRuns,
+  parseRunState,
+  readArtifactReviewForActor,
+  readRun,
+  retryArtifactReviewAgentAssignment,
+  resolveArtifactReviewComment,
+  submitArtifactReviewAssignment,
+  updateArtifactReviewDraft,
+  type ArtifactReviewDraftInput,
+  type ArtifactReviewContext,
+  type RunState,
+  type RunStep
+} from "../run/store.js";
 import { browserHtml } from "../view/browser.js";
+import {
+  clearViewServiceState,
+  getViewServiceStatus,
+  restartViewService,
+  createSettingsToken,
+  isLoopbackHost,
+  startViewService,
+  stopViewService,
+  viewServiceStatePath,
+  viewServiceUrl,
+  writeViewServiceState
+} from "../view/service.js";
 
-type ViewOptions = {
-  host?: string;
-  port?: string;
+const markdown = createMarkdownRenderer();
+
+type ViewServeOptions = {
+  config?: string;
+  state?: string;
 };
 
 type MemoryPayload = {
   memoryRoot: string;
+  systemMemoryPaths: string[];
+  actorNames: Record<string, string>;
   memories: Array<{
     id: string;
     kind: string;
     path: string;
+    source?: "memory" | "reserved";
+    imported?: boolean;
     entity?: unknown;
     error?: MemoryLoadError;
   }>;
@@ -40,91 +115,447 @@ type MemoryLoadError = {
   issues: string[];
 };
 
-export async function viewCommand(options: ViewOptions): Promise<void> {
-  const host = options.host ?? "127.0.0.1";
-  const port = parsePort(options.port);
+export async function viewStartCommand(): Promise<void> {
   const config = await readConfig();
+  const state = await startViewService(config);
+  console.log(`memsphere view running at ${viewServiceUrl(state)}`);
+  console.log(`pid: ${state.pid}`);
+  if (state.settingsToken) console.log(`settings token: ${state.settingsToken}`);
+}
 
-  const server = createServer(async (request, response) => {
+export async function viewStopCommand(): Promise<void> {
+  const config = await readConfig();
+  const status = await stopViewService(config);
+  console.log(status.running ? "memsphere view is still running" : "memsphere view stopped");
+}
+
+export async function viewRestartCommand(): Promise<void> {
+  const config = await readConfig();
+  const state = await restartViewService(config);
+  console.log(`memsphere view restarted at ${viewServiceUrl(state)}`);
+  console.log(`pid: ${state.pid}`);
+  if (state.settingsToken) console.log(`settings token: ${state.settingsToken}`);
+}
+
+export async function viewStatusCommand(): Promise<void> {
+  const config = await readConfig();
+  const status = await getViewServiceStatus(config);
+  if (!status.running || !status.state) {
+    console.log("memsphere view stopped");
+    return;
+  }
+  console.log(`memsphere view running at ${viewServiceUrl(status.state)}`);
+  console.log(`pid: ${status.state.pid}`);
+  console.log(`started: ${status.state.startedAt}`);
+  if (status.state.settingsToken) console.log(`settings token: ${status.state.settingsToken}`);
+}
+
+export async function viewServeCommand(options: ViewServeOptions): Promise<void> {
+  const config = await readConfig(options.config);
+  const host = config.view.host;
+  const port = config.view.port;
+  const statePath = options.state ?? viewServiceStatePath(config);
+  const runningDocument = await readConfigDocument(config.configPath);
+  const settingsToken = isLoopbackHost(host)
+    ? undefined
+    : createSettingsToken();
+  const server = createViewServer(config, {
+    runningRevision: runningDocument.revision,
+    settingsToken
+  });
+
+  server.on("error", async (error) => {
+    await clearViewServiceState(statePath, process.pid);
+    console.error(`error: failed to start view server: ${error.message}`);
+    process.exitCode = 1;
+  });
+
+  server.listen(port, host, async () => {
+    const address = server.address();
+    const actualPort = typeof address === "object" && address ? address.port : port;
+    await clearViewServiceState(statePath);
+    await writeViewServiceState(statePath, {
+      pid: process.pid,
+      host,
+      port: actualPort,
+      startedAt: new Date().toISOString(),
+      configPath: config.configPath,
+      settingsToken
+    });
+    console.log(`memsphere view running at http://${host}:${actualPort}`);
+    console.log(`memoryRoot: ${config.memoryRoot}`);
+    console.log(`reviewsRoot: ${config.reviewsRoot}`);
+  });
+
+  const close = async () => {
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    await clearViewServiceState(statePath, process.pid);
+  };
+  process.once("SIGTERM", () => void close());
+  process.once("SIGINT", () => void close());
+}
+
+type ViewServerOptions = {
+  runningRevision?: string;
+  settingsToken?: string;
+};
+
+export function createViewServer(config: MemsphereConfig, options: ViewServerOptions = {}) {
+  return createServer(async (request, response) => {
     try {
-      await handleRequest(request, response, config);
+      await handleRequest(request, response, config, options);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       sendJson(response, 500, { error: message });
     }
   });
-
-  server.on("error", (error) => {
-    console.error(`error: failed to start view server: ${error.message}`);
-    process.exitCode = 1;
-  });
-
-  server.listen(port, host, () => {
-    const address = server.address();
-    const actualPort = typeof address === "object" && address ? address.port : port;
-    console.log(`vibe-mem view running at http://${host}:${actualPort}`);
-    console.log(`memoryRoot: ${config.memoryRoot}`);
-    console.log(`reviewsRoot: ${config.reviewsRoot}`);
-    console.log("Press Ctrl+C to stop.");
-  });
 }
 
-function parsePort(value: string | undefined): number {
-  if (!value) {
-    return 0;
-  }
-
-  const port = Number(value);
-
-  if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    throw new Error(`invalid port: ${value}`);
-  }
-
-  return port;
-}
-
-async function handleRequest(request: IncomingMessage, response: ServerResponse, config: VibeMemConfig): Promise<void> {
+async function handleRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  config: MemsphereConfig,
+  options: ViewServerOptions
+): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   const { memoryRoot, reviewsRoot, runsRoot } = config;
+  const archiveRoot = config.archiveRoot;
 
   if (request.method === "GET" && url.pathname === "/") {
     sendHtml(response, browserHtml);
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/settings/meta") {
+    sendJson(response, 200, {
+      requiresToken: !isLoopbackHost(config.view.host),
+      host: config.view.host,
+      port: config.view.port
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/settings" && request.method === "GET") {
+    if (!authorizeSettingsRequest(request, response, config, options)) return;
+    const document = await readConfigDocument(config.configPath);
+    sendJson(response, 200, settingsPayload(document, options.runningRevision ?? document.revision, config.view));
+    return;
+  }
+
+  if (url.pathname === "/api/settings/validate" && request.method === "POST") {
+    if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+    const body = await readJsonBody<{ expectedRevision?: unknown; config?: unknown }>(request, 128 * 1024);
+    if (typeof body.expectedRevision !== "string" || !body.config || typeof body.config !== "object") {
+      sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
+      return;
+    }
+    const document = await readConfigDocument(config.configPath);
+    if (document.revision !== body.expectedRevision) {
+      sendJson(response, 409, {
+        code: "revision_conflict",
+        error: "config file changed on disk",
+        expectedRevision: body.expectedRevision,
+        actualRevision: document.revision
+      });
+      return;
+    }
+    const validation = validateConfigDraft(document, body.config as EditableConfigDraft);
+    const { candidate: _candidate, ...publicValidation } = validation;
+    sendJson(response, validation.valid ? 200 : 422, {
+      ...publicValidation,
+      expectedRevision: document.revision,
+      runningRevision: options.runningRevision ?? document.revision,
+      restartRequired: document.revision !== (options.runningRevision ?? document.revision)
+        || validation.changes.length > 0
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/settings/acp-providers/detect" && request.method === "POST") {
+    if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+    const body = await readJsonBody<{ expectedRevision?: unknown; config?: unknown }>(request, 128 * 1024);
+    if (typeof body.expectedRevision !== "string" || !body.config || typeof body.config !== "object") {
+      sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
+      return;
+    }
+    const document = await readConfigDocument(config.configPath);
+    if (document.revision !== body.expectedRevision) {
+      sendJson(response, 409, {
+        code: "revision_conflict",
+        error: "config file changed on disk",
+        expectedRevision: body.expectedRevision,
+        actualRevision: document.revision
+      });
+      return;
+    }
+    const validation = validateConfigDraft(document, body.config as EditableConfigDraft);
+    if (!validation.valid || !validation.candidate) {
+      sendJson(response, 422, {
+        code: "config_invalid",
+        error: "Provider configuration is invalid",
+        errors: validation.errors
+      });
+      return;
+    }
+    const parsed = configSchema.parse(validation.candidate);
+    const providers = parsed.control_plane?.acpProviders ?? defaultAcpProviderInstances();
+    sendJson(response, 200, {
+      detectedAt: new Date().toISOString(),
+      results: await detectAcpProviderInstances(providers)
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/settings" && request.method === "PUT") {
+    if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+    const body = await readJsonBody<{ expectedRevision?: unknown; config?: unknown }>(request, 128 * 1024);
+    if (typeof body.expectedRevision !== "string" || !body.config || typeof body.config !== "object") {
+      sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
+      return;
+    }
+    const document = await readConfigDocument(config.configPath);
+    try {
+      const saved = await writeConfigDraft({
+        document,
+        expectedRevision: body.expectedRevision,
+        draft: body.config as EditableConfigDraft
+      });
+      sendJson(response, 200, {
+        ...settingsPayload(saved, options.runningRevision ?? document.revision, config.view),
+        saved: true
+      });
+    } catch (error) {
+      if (error instanceof ConfigDraftValidationError) {
+        sendJson(response, 422, {
+          code: "config_invalid",
+          error: error.message,
+          errors: error.errors
+        });
+        return;
+      }
+      if (error instanceof ConfigRevisionConflictError) {
+        sendJson(response, 409, {
+          code: "revision_conflict",
+          error: error.message,
+          expectedRevision: error.expectedRevision,
+          actualRevision: error.actualRevision
+        });
+        return;
+      }
+      throw error;
+    }
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/memories") {
-    const payload = await loadMemoryPayload(memoryRoot);
+    const payload = await loadMemoryPayload(config);
     sendJson(response, 200, payload);
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/reserved-memories") {
+    sendJson(response, 200, { memories: await loadReservedMemoryPayload(config.scopeRoot, memoryRoot) });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/reserved-memories/import") {
+    const body = await readJsonBody<{ path?: unknown }>(request);
+    const path = typeof body.path === "string" ? body.path : "";
+    assertSafeReservedRelativePath(path);
+    await importReservedMemory(config.scopeRoot, memoryRoot, path);
+    sendJson(response, 200, { memories: await loadReservedMemoryPayload(config.scopeRoot, memoryRoot) });
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/reviews") {
-    sendJson(response, 200, { reviews: await listReviews(reviewsRoot) });
+    const reviews = (await listReviews(reviewsRoot)).filter((review) => review.source !== "task");
+    sendJson(response, 200, { reviews });
     return;
   }
 
   if (request.method === "GET" && url.pathname === "/api/runs") {
-    sendJson(response, 200, { runs: await listRuns(runsRoot) });
+    sendJson(response, 200, { runs: await loadRunPayload(config) });
+    return;
+  }
+
+  const artifactReviewRoundMatch = url.pathname.match(/^\/api\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)$/);
+  if (request.method === "GET" && artifactReviewRoundMatch) {
+    const actorId = url.searchParams.get("actor_id")?.trim();
+    try {
+      const reviewId = decodeURIComponent(artifactReviewRoundMatch[1]);
+      const roundId = decodeURIComponent(artifactReviewRoundMatch[2]);
+      if (actorId) {
+        const context = await readArtifactReviewForActor({
+          runsRoot,
+          reviewId,
+          roundId,
+          actorId
+        });
+        if ((context.assignment.actorKind ?? "human") !== "human") {
+          throw new Error(`Agent Artifact Review assignment is not assigned to the Human View API: ${actorId}`);
+        }
+        sendJson(response, 200, await artifactReviewContextPayload(runsRoot, context));
+      } else {
+        const located = await findViewArtifactReview(config, reviewId);
+        const round = located.review.rounds.find((candidate) => candidate.id === roundId);
+        if (!round) throw new Error(`Artifact Review Round not found: ${roundId}`);
+        sendJson(response, 200, await artifactReviewContextPayload(located.runsRoot, {
+          run: located.run,
+          review: located.review,
+          round
+        }));
+      }
+    } catch (error) {
+      sendArtifactReviewError(response, error);
+    }
+    return;
+  }
+
+  const artifactReviewActivityMatch = url.pathname.match(
+    /^\/api\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)\/assignments\/([^/]+)\/attempts\/(\d+)\/activity$/
+  );
+  if (request.method === "GET" && artifactReviewActivityMatch) {
+    try {
+      const reviewId = decodeURIComponent(artifactReviewActivityMatch[1]);
+      const roundId = decodeURIComponent(artifactReviewActivityMatch[2]);
+      const actorId = decodeURIComponent(artifactReviewActivityMatch[3]);
+      const sequence = Number(artifactReviewActivityMatch[4]);
+      const cursor = normalizeActivityInteger(url.searchParams.get("cursor"), 0, "cursor");
+      const limit = normalizeActivityInteger(url.searchParams.get("limit"), 500, "limit");
+      const located = await findViewArtifactReview(config, reviewId);
+      const round = located.review.rounds.find((candidate) => candidate.id === roundId);
+      if (!round) throw new Error(`Artifact Review Round not found: ${roundId}`);
+      const assignment = round.assignments.find((candidate) => candidate.actorId === actorId);
+      if (!assignment) throw new Error(`Actor is not assigned to Artifact Review Round: ${actorId}`);
+      if ((assignment.actorKind ?? "human") !== "agent") {
+        throw new Error(`Artifact Review Activity is read-only for Agent assignments: ${actorId}`);
+      }
+      const attempt = assignment.attempts?.find((candidate) => candidate.sequence === sequence);
+      if (!attempt) throw new Error(`Agent Review attempt not found: ${sequence}`);
+      const snapshot = await readAgentActivitySnapshot({
+        runsRoot: located.runsRoot,
+        runId: located.run.id,
+        reviewId,
+        roundId,
+        assignmentId: artifactReviewAssignmentId(assignment),
+        attemptId: attempt.id,
+        workspaceRoot: dirname(config.scopeRoot)
+      });
+      sendJson(response, 200, agentActivityDelta(snapshot, cursor, limit));
+    } catch (error) {
+      sendArtifactReviewError(response, error);
+    }
+    return;
+  }
+
+  const artifactReviewAssignmentMatch = url.pathname.match(
+    /^\/api\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)\/assignments\/([^/]+)\/(draft|submit)$/
+  );
+  if (artifactReviewAssignmentMatch && ["PATCH", "POST"].includes(request.method ?? "")) {
+    const reviewId = decodeURIComponent(artifactReviewAssignmentMatch[1]);
+    const roundId = decodeURIComponent(artifactReviewAssignmentMatch[2]);
+    const actorId = decodeURIComponent(artifactReviewAssignmentMatch[3]);
+    const operation = artifactReviewAssignmentMatch[4];
+    try {
+      const body = await readJsonBody<{
+        expectedRevision?: unknown;
+        vote?: unknown;
+        comments?: unknown;
+      }>(request);
+      const expectedRevision = normalizeExpectedRevision(body.expectedRevision);
+      const context = operation === "draft"
+        ? await updateArtifactReviewDraft({
+            runsRoot,
+            reviewId,
+            roundId,
+            actorId,
+            expectedRevision,
+            draft: normalizeArtifactReviewDraft(body)
+          })
+        : await submitArtifactReviewAssignment({
+            runsRoot,
+            reviewId,
+            roundId,
+            actorId,
+            expectedRevision
+          });
+      sendJson(response, 200, await artifactReviewContextPayload(runsRoot, context));
+    } catch (error) {
+      sendArtifactReviewError(response, error);
+    }
+    return;
+  }
+
+  const artifactReviewRetryMatch = url.pathname.match(
+    /^\/api\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)\/assignments\/([^/]+)\/retry$/
+  );
+  if (request.method === "POST" && artifactReviewRetryMatch) {
+    try {
+      const context = await retryArtifactReviewAgentAssignment({
+        runsRoot,
+        reviewId: decodeURIComponent(artifactReviewRetryMatch[1]),
+        roundId: decodeURIComponent(artifactReviewRetryMatch[2]),
+        actorId: decodeURIComponent(artifactReviewRetryMatch[3])
+      });
+      await dispatchArtifactReviewAgents({ config, run: context.run });
+      sendJson(response, 200, await artifactReviewContextPayload(runsRoot, context));
+    } catch (error) {
+      sendArtifactReviewError(response, error);
+    }
+    return;
+  }
+
+  const artifactReviewResolveMatch = url.pathname.match(
+    /^\/api\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)\/comments\/([^/]+)\/resolve$/
+  );
+  if (request.method === "POST" && artifactReviewResolveMatch) {
+    try {
+      const body = await readJsonBody<{
+        disposition?: unknown;
+        note?: unknown;
+        validationSummary?: unknown;
+      }>(request);
+      const dispositions = ["accepted-fixed", "accepted-followup", "rejected-out-of-scope", "rejected-not-blocking", "rejected-invalid"] as const;
+      if (!dispositions.includes(body.disposition as typeof dispositions[number])) {
+        throw new Error("invalid Artifact Review Comment disposition");
+      }
+      const context = await resolveArtifactReviewComment({
+        runsRoot,
+        reviewId: decodeURIComponent(artifactReviewResolveMatch[1]),
+        roundId: decodeURIComponent(artifactReviewResolveMatch[2]),
+        commentId: decodeURIComponent(artifactReviewResolveMatch[3]),
+        disposition: body.disposition as typeof dispositions[number],
+        note: typeof body.note === "string" ? body.note : undefined,
+        validationSummary: typeof body.validationSummary === "string" ? body.validationSummary : undefined
+      });
+      sendJson(response, 200, { review: artifactReviewSummary(context.review, context.run.controlPlane) });
+    } catch (error) {
+      sendArtifactReviewError(response, error);
+    }
     return;
   }
 
   const reviewSnapshotMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)\/snapshot$/);
   if (request.method === "GET" && reviewSnapshotMatch) {
     const id = decodeURIComponent(reviewSnapshotMatch[1]);
-    const kind = url.searchParams.get("kind") === "task" ? "task" : url.searchParams.get("kind") === "memory" ? "memory" : undefined;
-    const snapshot = await readReviewSnapshot(reviewsRoot, id, kind);
+    if (url.searchParams.get("kind") === "task") {
+      sendJson(response, 410, { error: "task reviews have been removed; use Artifact Review" });
+      return;
+    }
+    const snapshot = await readReviewSnapshot(reviewsRoot, id, "memory");
     if (!snapshot) {
       sendJson(response, 404, { error: "snapshot not found" });
       return;
     }
-    sendJson(response, 200, snapshotPayload(snapshot));
+    sendJson(response, 200, await snapshotPayload(snapshot));
     return;
   }
 
   const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)$/);
   if (request.method === "GET" && runMatch) {
     const run = await readRun(runsRoot, decodeURIComponent(runMatch[1]));
-    sendJson(response, 200, { run });
+    await dispatchArtifactReviewAgents({ config, run });
+    sendJson(response, 200, { run: await toViewRunPayload(runsRoot, await readRun(runsRoot, run.id)) });
     return;
   }
 
@@ -140,28 +571,24 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   }
 
   if (request.method === "POST" && url.pathname === "/api/reviews") {
-    const body = await readJsonBody<{ title?: unknown; source?: unknown; memoryId?: unknown; memoryName?: unknown; memoryPath?: unknown; runId?: unknown; runName?: unknown }>(request);
+    const body = await readJsonBody<{ title?: unknown; source?: unknown; memoryId?: unknown; memoryName?: unknown; memoryPath?: unknown }>(request);
+    if (body.source === "task") {
+      sendJson(response, 410, { error: "task reviews have been removed; configure Artifact Review on the Artifact instead" });
+      return;
+    }
     const title = typeof body.title === "string" ? body.title : undefined;
-    const source = body.source === "task" ? "task" : "memory";
     const memoryId = typeof body.memoryId === "string" ? body.memoryId : undefined;
     const memoryName = typeof body.memoryName === "string" ? body.memoryName : undefined;
     const memoryPath = typeof body.memoryPath === "string" ? body.memoryPath : undefined;
-    const runId = typeof body.runId === "string" ? body.runId : undefined;
-    const runName = typeof body.runName === "string" ? body.runName : undefined;
     const snapshotFiles = await resolveReviewSnapshotFiles({
       memoryRoot,
-      runsRoot,
-      source,
       memoryId,
-      memoryPath,
-      runId
+      memoryPath
     });
     const review = await createReview({
       title,
-      source,
-      target: source === "task"
-        ? { source, id: runId ? `task/${runId}` : "", runId, name: runName }
-        : { source, id: memoryId ?? "", path: memoryPath, name: memoryName },
+      source: "memory",
+      target: { source: "memory", id: memoryId ?? "", path: memoryPath, name: memoryName },
       memoryRoot,
       reviewsRoot,
       snapshotFiles
@@ -197,6 +624,28 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     return;
   }
 
+  const archiveReviewMatch = url.pathname.match(/^\/api\/archive\/reviews\/([^/]+)$/);
+  if (request.method === "POST" && archiveReviewMatch) {
+    const entry = await archiveReview({
+      archiveRoot,
+      reviewsRoot,
+      id: decodeURIComponent(archiveReviewMatch[1])
+    });
+    sendJson(response, 200, { archived: entry });
+    return;
+  }
+
+  const archiveRunMatch = url.pathname.match(/^\/api\/archive\/runs\/([^/]+)$/);
+  if (request.method === "POST" && archiveRunMatch) {
+    const entry = await archiveRun({
+      archiveRoot,
+      runsRoot,
+      id: decodeURIComponent(archiveRunMatch[1])
+    });
+    sendJson(response, 200, { archived: entry });
+    return;
+  }
+
   if (!["GET", "POST", "PATCH", "DELETE"].includes(request.method ?? "")) {
     sendText(response, 405, "Method Not Allowed");
     return;
@@ -205,14 +654,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   sendText(response, 404, "Not Found");
 }
 
-function snapshotPayload(input: { snapshot: { label: string; path: string; kind: "memory" | "task"; createdAt: string }; content: string }): unknown {
-  if (input.snapshot.kind === "task") {
-    return {
-      snapshot: input.snapshot,
-      run: JSON.parse(input.content)
-    };
-  }
-
+async function snapshotPayload(input: { snapshot: { label: string; path: string; kind: "memory" | "task"; createdAt: string }; content: string; snapshotRoot: string }): Promise<unknown> {
   const entity = parseMemoryYaml(input.content);
   const kind = memoryKindFromSnapshot(input.snapshot.label, entity);
   const primaryName = entity && typeof entity === "object" && Array.isArray((entity as { names?: unknown }).names)
@@ -242,21 +684,9 @@ function memoryKindFromSnapshot(label: string, entity: unknown): string {
 
 async function resolveReviewSnapshotFiles(input: {
   memoryRoot: string;
-  runsRoot: string;
-  source: "memory" | "task";
   memoryId?: string;
   memoryPath?: string;
-  runId?: string;
-}): Promise<Array<{ label: string; path: string; kind: "memory" | "task" }>> {
-  if (input.source === "task") {
-    if (!input.runId) return [];
-    return [{
-      label: `${input.runId}.json`,
-      path: join(input.runsRoot, `${input.runId}.json`),
-      kind: "task"
-    }];
-  }
-
+}): Promise<Array<{ label: string; path: string; kind: "memory" }>> {
   if (!input.memoryId) return [];
 
   if (input.memoryPath) {
@@ -304,8 +734,13 @@ async function findMemoryFileById(memoryRoot: string, memoryId: string): Promise
   return undefined;
 }
 
-async function loadMemoryPayload(memoryRoot: string): Promise<MemoryPayload> {
+async function loadMemoryPayload(config: MemsphereConfig): Promise<MemoryPayload> {
+  const { memoryRoot } = config;
   const memories: MemoryPayload["memories"] = [];
+  const systemMemoryPaths = (await readReservedMemoryManifest()).system_memory.install;
+  const actorNames = Object.fromEntries(
+    Object.entries(config.controlPlane?.actors ?? {}).map(([actorId, actor]) => [actorId, actor.name])
+  );
 
   for (const kind of memoryKinds) {
     const paths = await listMemoryFiles(memoryRoot, kind);
@@ -314,7 +749,451 @@ async function loadMemoryPayload(memoryRoot: string): Promise<MemoryPayload> {
     }
   }
 
-  return { memoryRoot, memories };
+  return { memoryRoot, systemMemoryPaths, actorNames, memories };
+}
+
+async function loadReservedMemoryPayload(scopeRoot: string, memoryRoot: string): Promise<MemoryPayload["memories"]> {
+  const items = await listReservedMemories(scopeRoot, memoryRoot);
+  return items.map((item) => {
+    if (item.file) {
+      const primaryName = Array.isArray(item.file.entity.names) ? item.file.entity.names[0] : item.path;
+      return {
+        id: `reserved/${item.kind}/${primaryName}`,
+        kind: item.kind,
+        path: item.path,
+        source: "reserved" as const,
+        imported: item.imported,
+        entity: item.file.entity
+      };
+    }
+    return {
+      id: `reserved/${item.kind}/${item.path}`,
+      kind: item.kind,
+      path: item.path,
+      source: "reserved" as const,
+      imported: item.imported,
+      error: formatMemoryLoadError(item.error)
+    };
+  });
+}
+
+async function loadRunPayload(config: MemsphereConfig): Promise<unknown[]> {
+  const runs = await listRuns(config.runsRoot);
+  await Promise.all(runs.map((run) => dispatchArtifactReviewAgents({ config, run })));
+  const refreshed = await listRuns(config.runsRoot);
+  const restored = await Promise.all(
+    refreshed.map((run) => ensureCurrentSchemaDraft(config.runsRoot, run))
+  );
+  return Promise.all(restored.map((run) => toViewRunPayload(config.runsRoot, run)));
+}
+
+async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknown> {
+  const hydrated = await hydrateRunArtifactContent(runsRoot, run);
+  const { artifactReviews: _privateArtifactReviews, ...publicRun } = hydrated;
+  const review = currentArtifactReview(hydrated);
+  const schemaWriting = await schemaWritingPayload(runsRoot, hydrated);
+  return {
+    ...publicRun,
+    artifactReview: review ? artifactReviewSummary(review, hydrated.controlPlane) : undefined,
+    artifactReviewSummaries: (hydrated.artifactReviews ?? []).map((candidate) =>
+      artifactReviewSummary(candidate, hydrated.controlPlane)
+    ),
+    schemaWriting
+  };
+}
+
+async function schemaWritingPayload(runsRoot: string, run: RunState): Promise<unknown> {
+  const snapshot = buildSchemaWritingSnapshot(runsRoot, run);
+  if (!snapshot?.draft) return snapshot;
+  try {
+    const content = await readFile(snapshot.draft.filePath, "utf8");
+    return {
+      ...snapshot,
+      draft: {
+        ...snapshot.draft,
+        content,
+        renderedContent: renderMarkdownContent(content)
+      }
+    };
+  } catch (error) {
+    return {
+      ...snapshot,
+      draft: {
+        ...snapshot.draft,
+        contentError: error instanceof Error ? error.message : String(error)
+      }
+    };
+  }
+}
+
+function artifactReviewSummary(
+  review: NonNullable<RunState["artifactReviews"]>[number],
+  controlPlane: RunState["controlPlane"]
+): unknown {
+  const round = review.rounds.find((candidate) => candidate.id === review.currentRoundId);
+  const runnerVote = round?.votes.find((vote) => vote.subject.kind === "runner");
+  const submission = review.submissions.find((candidate) => candidate.id === round?.submissionId);
+  const advisoryComments = (round?.assignments ?? [])
+    .filter((assignment) => assignment.binding === "advisory")
+    .flatMap((assignment) => assignment.submitted?.comments ?? []);
+  const resolvedCommentIds = new Set((round?.commentDispositions ?? []).map((item) => item.commentId));
+  const severity = {
+    blocking: advisoryComments.filter((comment) => comment.severity === "blocking").length,
+    risk: advisoryComments.filter((comment) => comment.severity === "risk").length,
+    suggestion: advisoryComments.filter((comment) => comment.severity === "suggestion").length,
+    unspecified: advisoryComments.filter((comment) => !comment.severity).length
+  };
+  const failures = (round?.assignments ?? []).flatMap((assignment) => assignment.attempts ?? [])
+    .filter((attempt) => attempt.status === "failed" && attempt.failure)
+    .map((attempt) => ({ attempt: attempt.sequence, ...attempt.failure!, category: artifactReviewFailureCategory(attempt.failure!) }));
+  const runnerCanDecide = authorizeArtifactOperation({
+    controlPlane: review.controlPlane,
+    subject: { kind: "runner" },
+    permission: "decision.decide"
+  }).allowed;
+  return {
+    id: review.id,
+    stepId: review.stepId,
+    artifactName: review.artifactName,
+    policyId: review.policyId,
+    status: review.status,
+    currentRoundId: review.currentRoundId,
+    createdAt: review.createdAt,
+    updatedAt: review.updatedAt,
+    roundCount: review.rounds.length,
+    outcome: review.outcome ? {
+      status: review.outcome.status,
+      submissionId: review.outcome.submissionId,
+      roundId: review.outcome.roundId,
+      completedAt: review.outcome.completedAt
+    } : undefined,
+    round: round ? {
+      id: round.id,
+      sequence: round.sequence,
+      revision: round.revision,
+      status: round.status,
+      submitted: round.assignments.filter((assignment) => assignment.status === "submitted").length,
+      total: round.assignments.length,
+      decisionReady: round.assignments.every((assignment) => assignment.status === "submitted"),
+      severity,
+      unresolvedBlocking: advisoryComments.filter((comment) => comment.severity === "blocking" && !resolvedCommentIds.has(comment.id)).length,
+      failures,
+      contextArtifactCount: submission?.contextArtifacts.length ?? 0,
+      repeatedAdvisories: repeatedArtifactReviewAdvisories(review),
+      commentDispositions: round.commentDispositions ?? [],
+      assignments: round.assignments.map((assignment) => ({
+        id: assignment.id,
+        actorId: assignment.actorId,
+        actorName: assignment.actorName,
+        slotNames: artifactReviewSlotNames(assignment.slotIds),
+        actorKind: assignment.actorKind ?? "human",
+        binding: assignment.binding,
+        status: assignment.status,
+        attempt: publicArtifactReviewAttempt(assignment.attempts?.at(-1)),
+        vote: assignment.submitted?.vote,
+        summary: assignment.submitted?.summary,
+        implementationEvidenceReferenced: artifactReviewOpinionReferencesImplementation(assignment.submitted)
+      })),
+      runner: runnerCanDecide || runnerVote ? {
+        actorName: "Runner",
+        binding: "decision",
+        status: runnerVote ? "submitted" : "pending",
+        vote: runnerVote?.value,
+        automatic: runnerVote?.automatic ?? false,
+        comment: runnerVote?.comment
+      } : undefined,
+      result: round.result
+    } : undefined
+  };
+}
+
+async function findViewArtifactReview(
+  config: MemsphereConfig,
+  reviewId: string
+): Promise<{ runsRoot: string; run: RunState; review: NonNullable<RunState["artifactReviews"]>[number] }> {
+  const roots = [config.runsRoot, join(config.archiveRoot, "runs")];
+  for (const runsRoot of roots) {
+    try {
+      await access(runsRoot);
+      const located = await findArtifactReview({ runsRoot, reviewId });
+      return { runsRoot, ...located };
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") continue;
+      if (error instanceof Error && /Artifact Review not found/.test(error.message)) continue;
+      throw error;
+    }
+  }
+  throw new Error(`Artifact Review not found: ${reviewId}`);
+}
+
+function normalizeActivityInteger(value: string | null, fallback: number, name: string): number {
+  if (value === null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`invalid Agent Activity ${name}`);
+  return parsed;
+}
+
+async function artifactReviewContextPayload(
+  runsRoot: string,
+  context: Omit<ArtifactReviewContext, "assignment"> & { assignment?: ArtifactReviewContext["assignment"] }
+): Promise<unknown> {
+  const submission = context.review.submissions.find((candidate) => candidate.id === context.round.submissionId);
+  if (!submission) throw new Error(`Artifact Review Submission not found: ${context.round.submissionId}`);
+  const artifact = structuredClone(submission.artifact) as RunState["events"][number]["artifact"] & {
+    content?: string;
+    contentError?: string;
+    renderedContent?: string;
+    renderedContentType?: string;
+  };
+  await hydrateArtifactContent(runsRoot, context.run.id, artifact);
+  const { authorization: _authorization, ...publicArtifact } = artifact;
+  const reviewStep = findReviewStep(context.run, context.review.stepId);
+  const contractArtifact = {
+    name: "Frozen Review Contract",
+    type: "object",
+    format: { name: "json", options: {} },
+    storage: "inline",
+    value: {
+      procedure: {
+        name: context.run.procedureName,
+        asserts: context.run.asserts ?? []
+      },
+      action: {
+        instruction: reviewStep?.instruction ?? "",
+        asserts: reviewStep?.asserts ?? [],
+        suggests: reviewStep?.suggests ?? [],
+        details: reviewStep?.details ?? []
+      },
+      artifact: {
+        name: reviewStep?.artifact ?? context.review.artifactName,
+        type: reviewStep?.type,
+        format: reviewStep?.format,
+        schema: reviewStep?.schema,
+        final: reviewStep?.final ?? false,
+        review: reviewStep?.reviewSlots ?? []
+      }
+    }
+  };
+  const contextArtifacts = structuredClone(submission.contextArtifacts);
+  for (const item of contextArtifacts) {
+    await hydrateArtifactContent(runsRoot, context.run.id, item.artifact);
+    const { authorization: _authorization, ...publicContextArtifact } = item.artifact;
+    item.artifact = publicContextArtifact as typeof item.artifact;
+  }
+  return {
+    review: artifactReviewSummary(context.review, context.run.controlPlane),
+    submission: {
+      id: submission.id,
+      digest: submission.digest,
+      createdAt: submission.createdAt,
+      artifact: publicArtifact,
+      contractArtifact,
+      contextArtifacts,
+      revisionSummary: submission.revisionSummary
+    },
+    assignment: context.assignment ? {
+      id: context.assignment.id,
+      actorId: context.assignment.actorId,
+      actorName: context.assignment.actorName,
+      actorKind: context.assignment.actorKind ?? "human",
+      slotIds: context.assignment.slotIds,
+      binding: context.assignment.binding,
+      status: context.assignment.status,
+      draft: (context.assignment.actorKind ?? "human") === "agent"
+        ? undefined
+        : structuredClone(context.assignment.draft),
+      submitted: publicArtifactReviewOpinion(context.assignment.submitted),
+      attempts: context.assignment.attempts?.map(publicArtifactReviewAttempt),
+      slotNames: artifactReviewSlotNames(context.assignment.slotIds)
+    } : undefined,
+    rounds: context.review.rounds.map((round) => ({
+      id: round.id,
+      sequence: round.sequence,
+      submissionId: round.submissionId,
+      status: round.status,
+      revision: round.revision,
+      createdAt: round.createdAt,
+      assignments: round.assignments.map((assignment) => ({
+        id: assignment.id,
+        actorId: assignment.actorId,
+        actorName: assignment.actorName,
+        slotNames: artifactReviewSlotNames(assignment.slotIds),
+        actorKind: assignment.actorKind ?? "human",
+        slotIds: assignment.slotIds,
+        binding: assignment.binding,
+        status: assignment.status,
+        submitted: publicArtifactReviewOpinion(assignment.submitted),
+        implementationEvidenceReferenced: artifactReviewOpinionReferencesImplementation(assignment.submitted),
+        attempts: assignment.attempts?.map(publicArtifactReviewAttempt)
+      })),
+      votes: round.votes.map(publicArtifactReviewVote),
+      result: round.result,
+      commentDispositions: structuredClone(round.commentDispositions ?? []),
+      revisionSummary: context.review.submissions.find((submission) => submission.id === round.submissionId)?.revisionSummary
+    }))
+  };
+}
+
+function findReviewStep(run: RunState, stepId: string): RunStep | undefined {
+  const visit = (steps: readonly RunStep[]): RunStep | undefined => {
+    for (const step of steps) {
+      if (step.id === stepId) return step;
+      const nested = step.branches
+        ? visit([...step.branches.truthy, ...step.branches.falsy])
+        : step.loop
+          ? visit(step.loop.body)
+          : undefined;
+      if (nested) return nested;
+    }
+    return undefined;
+  };
+  return visit(run.plan ?? []) ?? [...run.stack].reverse().map((frame) => visit(frame.steps)).find(Boolean);
+}
+
+function publicArtifactReviewAttempt(attempt: ArtifactReviewAgentAttempt | undefined): unknown {
+  if (!attempt) return undefined;
+  return {
+    sequence: attempt.sequence,
+    status: attempt.status,
+    provider: attempt.provider,
+    failure: attempt.failure ? {
+      stage: attempt.failure.stage,
+      code: attempt.failure.code,
+      message: attempt.failure.message,
+      category: artifactReviewFailureCategory(attempt.failure)
+    } : undefined
+  };
+}
+
+function publicArtifactReviewOpinion(opinion: ArtifactReviewSubmittedOpinion | undefined): unknown {
+  if (!opinion) return undefined;
+  return {
+    comments: opinion.comments.map((comment) => ({
+      ...structuredClone(comment),
+      renderedBody: renderArtifactReviewMarkdown(comment.body)
+    })),
+    vote: opinion.vote,
+    summary: opinion.summary,
+    renderedSummary: opinion.summary ? renderArtifactReviewMarkdown(opinion.summary) : undefined,
+    submittedAt: opinion.submittedAt
+  };
+}
+
+function publicArtifactReviewVote(vote: ArtifactReviewVote): unknown {
+  return {
+    subject: vote.subject,
+    binding: vote.binding,
+    value: vote.value,
+    automatic: vote.automatic,
+    comment: vote.comment,
+    renderedComment: vote.comment ? renderArtifactReviewMarkdown(vote.comment) : undefined,
+    submittedAt: vote.submittedAt
+  };
+}
+
+function renderArtifactReviewMarkdown(value: string): string {
+  const normalized = !value.includes("\n") && value.includes("\\n\\n")
+    ? value.replace(/\\r\\n|\\n/g, "\n")
+    : value;
+  return renderMarkdownContent(normalized);
+}
+
+function artifactReviewSlotNames(slotIds: string[]): string[] {
+  return slotIds.map((slotId) => slotId.includes("::") ? slotId.slice(slotId.lastIndexOf("::") + 2) : slotId);
+}
+
+export async function hydrateRunArtifactContent(runsRoot: string, run: RunState): Promise<RunState> {
+  const hydrated = parseRunState(JSON.parse(JSON.stringify(run)));
+  for (const event of hydrated.events) {
+    const artifact = event.artifact as RunState["events"][number]["artifact"] & {
+      content?: string;
+      contentError?: string;
+      renderedContent?: string;
+      renderedContentType?: string;
+    };
+    await hydrateArtifactContent(runsRoot, hydrated.id, artifact);
+  }
+  return hydrated;
+}
+
+async function hydrateArtifactContent(
+  runsRoot: string,
+  runId: string,
+  artifact: RunState["events"][number]["artifact"] & {
+    content?: string;
+    contentError?: string;
+    renderedContent?: string;
+    renderedContentType?: string;
+  }
+): Promise<void> {
+  if (artifact.storage === "file" && artifact.path && isTextArtifactFormat(artifact.format.name)) {
+    try {
+      artifact.content = await readFile(resolveRunArtifactPath(runsRoot, runId, artifact.path), "utf8");
+    } catch (error) {
+      artifact.contentError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  if (artifact.format.name === "markdown") {
+    const value = artifact.content ?? artifact.value;
+    if (typeof value === "string") {
+      artifact.renderedContent = renderMarkdownContent(value);
+      artifact.renderedContentType = "text/html";
+    }
+  }
+}
+
+export function renderMarkdownContent(value: string): string {
+  try {
+    return markdown.render(value).trim();
+  } catch {
+    return "";
+  }
+}
+
+function createMarkdownRenderer(): MarkdownIt {
+  const renderer = new MarkdownIt({
+    html: false,
+    linkify: false,
+    breaks: true
+  });
+  renderer.enable(["table"]);
+  renderer.validateLink = (url: string) => /^(https?:|mailto:)/i.test(url.trim());
+  const defaultLinkOpen = renderer.renderer.rules.link_open;
+  renderer.renderer.rules.link_open = (tokens, index, options, env, self) => {
+    tokens[index]?.attrSet("target", "_blank");
+    tokens[index]?.attrSet("rel", "noopener noreferrer nofollow");
+    return defaultLinkOpen
+      ? defaultLinkOpen(tokens, index, options, env, self)
+      : self.renderToken(tokens, index, options);
+  };
+  const defaultTableOpen = renderer.renderer.rules.table_open;
+  renderer.renderer.rules.table_open = (tokens, index, options, env, self) => {
+    const table = defaultTableOpen
+      ? defaultTableOpen(tokens, index, options, env, self)
+      : self.renderToken(tokens, index, options);
+    return `<div class="markdown-table-scroll">${table}`;
+  };
+  const defaultTableClose = renderer.renderer.rules.table_close;
+  renderer.renderer.rules.table_close = (tokens, index, options, env, self) => {
+    const table = defaultTableClose
+      ? defaultTableClose(tokens, index, options, env, self)
+      : self.renderToken(tokens, index, options);
+    return `${table}</div>`;
+  };
+  return renderer;
+}
+
+function isTextArtifactFormat(format: string): boolean {
+  return ["markdown", "yaml", "json", "schema", "string"].includes(format);
+}
+
+function resolveRunArtifactPath(runsRoot: string, runId: string, artifactPath: string): string {
+  const artifactRoot = resolve(runsRoot, runId, "artifacts");
+  const path = resolve(runsRoot, artifactPath);
+  if (path !== artifactRoot && !path.startsWith(artifactRoot + sep)) {
+    throw new Error(`invalid artifact path: ${artifactPath}`);
+  }
+  return path;
 }
 
 async function loadMemoryListItem(memoryRoot: string, kind: MemoryKind, path: string): Promise<MemoryPayload["memories"][number]> {
@@ -338,14 +1217,117 @@ async function loadMemoryListItem(memoryRoot: string, kind: MemoryKind, path: st
   }
 }
 
-async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
+function settingsPayload(
+  document: ConfigDocument,
+  runningRevision: string,
+  runningView: MemsphereConfig["view"]
+): Record<string, unknown> {
+  return {
+    configPath: document.configPath,
+    scopeRoot: document.scopeRoot,
+    runningRevision,
+    runningView,
+    diskRevision: document.revision,
+    restartRequired: runningRevision !== document.revision,
+    explicit: document.explicit,
+    config: editableConfigDraft(document),
+    resolvedPaths: {
+      memoryRoot: document.resolved.memoryRoot,
+      reviewsRoot: document.resolved.reviewsRoot,
+      runsRoot: document.resolved.runsRoot,
+      archiveRoot: document.resolved.archiveRoot
+    },
+    defaults: {
+      language: "zh-CN",
+      memoryRoot: "memory",
+      reviewsRoot: "reviews",
+      runsRoot: "runs",
+      archiveRoot: "archives",
+      view: { host: "127.0.0.1", port: 0 }
+    },
+    permissionCatalog: listPermissionDefinitions()
+      .filter((definition) => !hiddenSettingsPermissionIds.has(definition.id)),
+    acpProviderCatalog: listAcpProviderDefinitions().map((definition) => ({
+      ...definition,
+      defaultInstance: defaultAcpProviderInstance(definition.type)
+    }))
+  };
+}
+
+function authorizeSettingsRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  config: MemsphereConfig,
+  options: ViewServerOptions,
+  verifyOrigin = false
+): boolean {
+  if (verifyOrigin) {
+    const rejection = settingsOriginRejection(request, config);
+    if (rejection) {
+      sendJson(response, 403, { code: "request_origin_rejected", error: rejection });
+      return false;
+    }
+  }
+
+  if (isLoopbackHost(config.view.host)) return true;
+  const expected = options.settingsToken;
+  const authorization = request.headers.authorization;
+  const provided = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
+  if (!expected || !constantTimeEqual(provided, expected)) {
+    sendJson(response, 401, { code: "unauthorized", error: "Settings operator token is required" });
+    return false;
+  }
+  return true;
+}
+
+function settingsOriginRejection(request: IncomingMessage, config: MemsphereConfig): string | undefined {
+  const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
+  if (contentType !== "application/json") return "Settings requests must use application/json";
+
+  const originHeader = request.headers.origin;
+  const hostHeader = request.headers.host;
+  if (!originHeader || !hostHeader) return "Settings requests require Origin and Host headers";
+
+  let origin: URL;
+  try {
+    origin = new URL(originHeader);
+  } catch {
+    return "Settings request Origin is invalid";
+  }
+  if (!["http:", "https:"].includes(origin.protocol) || origin.host.toLowerCase() !== hostHeader.toLowerCase()) {
+    return "Settings request Origin must match the current View origin";
+  }
+
+  const fetchSite = request.headers["sec-fetch-site"];
+  if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") {
+    return "Cross-site Settings requests are not allowed";
+  }
+
+  if (isLoopbackHost(config.view.host) && !isLoopbackRequestHost(origin.hostname)) {
+    return "Loopback Settings requests must use a loopback hostname";
+  }
+  return undefined;
+}
+
+function isLoopbackRequestHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
+}
+
+function constantTimeEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+async function readJsonBody<T>(request: IncomingMessage, limit = 512 * 1024): Promise<T> {
   const chunks: Buffer[] = [];
   let total = 0;
 
   for await (const chunk of request) {
     const buffer = chunk as Buffer;
     total += buffer.length;
-    if (total > 512 * 1024) {
+    if (total > limit) {
       throw new Error("request body is too large");
     }
     chunks.push(buffer);
@@ -356,6 +1338,79 @@ async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
   }
 
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
+}
+
+function normalizeExpectedRevision(value: unknown): number {
+  if (!Number.isInteger(value) || Number(value) < 0) {
+    throw new Error("expectedRevision must be a non-negative integer");
+  }
+  return Number(value);
+}
+
+function normalizeArtifactReviewDraft(input: { vote?: unknown; comments?: unknown }): ArtifactReviewDraftInput {
+  const vote = input.vote === undefined
+    ? undefined
+    : input.vote === "approve" || input.vote === "request_changes" || input.vote === "abstain"
+      ? input.vote
+      : (() => { throw new Error("invalid Artifact Review vote"); })();
+  if (!Array.isArray(input.comments)) throw new Error("Artifact Review comments must be an array");
+  const comments = input.comments.map((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("invalid Artifact Review comment");
+    }
+    const comment = value as Record<string, unknown>;
+    if (typeof comment.body !== "string") throw new Error("Artifact Review comment body must be a string");
+    const severity = comment.severity;
+    if (severity !== undefined && severity !== "blocking" && severity !== "risk" && severity !== "suggestion") {
+      throw new Error("Artifact Review comment severity must be blocking, risk, or suggestion");
+    }
+    let anchor: ArtifactReviewDraftInput["comments"][number]["anchor"];
+    if (comment.anchor !== undefined) {
+      if (!comment.anchor || typeof comment.anchor !== "object" || Array.isArray(comment.anchor)) {
+        throw new Error("invalid Artifact Review comment anchor");
+      }
+      const candidate = comment.anchor as Record<string, unknown>;
+      if (
+        typeof candidate.submissionId !== "string"
+        || typeof candidate.target !== "string"
+        || typeof candidate.sourceHash !== "string"
+      ) {
+        throw new Error("Artifact Review comment anchor requires submissionId, target, and sourceHash");
+      }
+      anchor = {
+        submissionId: candidate.submissionId,
+        target: candidate.target,
+        sourceHash: candidate.sourceHash,
+        location: typeof candidate.location === "string" ? candidate.location : undefined,
+        context: typeof candidate.context === "string" ? candidate.context : undefined
+      };
+    }
+    return {
+      id: typeof comment.id === "string" ? comment.id : undefined,
+      body: comment.body,
+      severity: severity as ArtifactReviewDraftInput["comments"][number]["severity"],
+      anchor
+    };
+  });
+  return { vote, comments };
+}
+
+function sendArtifactReviewError(response: ServerResponse, error: unknown): void {
+  if (error instanceof ArtifactReviewConflictError) {
+    sendJson(response, 409, {
+      error: error.message,
+      roundId: error.roundId,
+      actualRevision: error.actualRevision
+    });
+    return;
+  }
+  if (error instanceof ArtifactAuthorizationFailure) {
+    sendJson(response, 403, { error: error.message, decision: error.decision });
+    return;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  const status = /not found/i.test(message) ? 404 : /not assigned|read-only/i.test(message) ? 403 : 400;
+  sendJson(response, status, { error: message });
 }
 
 function normalizeReviewStatus(value: unknown): ReviewStatus | undefined {
@@ -375,7 +1430,7 @@ function formatMemoryLoadError(error: unknown): MemoryLoadError {
   if (error instanceof ZodError) {
     const issues = summarizeZodIssues(error.issues);
     return {
-      message: "This memory does not match the current vibe-mem YAML model.",
+      message: "This memory does not match the current memsphere YAML model.",
       issues
     };
   }
@@ -400,7 +1455,7 @@ function summarizeZodIssues(issues: ZodIssue[]): string[] {
 
   const omitted = issues.length - summary.length;
   if (omitted > 0) {
-    summary.push(`还有 ${omitted} 个类似问题，建议先运行 vibe-mem validate 查看完整列表。`);
+    summary.push(`还有 ${omitted} 个类似问题，建议先运行 memsphere validate 查看完整列表。`);
   }
 
   return summary;
@@ -504,3 +1559,4 @@ function sendText(response: ServerResponse, status: number, body: string): void 
   });
   response.end(body);
 }
+const hiddenSettingsPermissionIds = new Set(["decision.challenge", "decision.override"]);

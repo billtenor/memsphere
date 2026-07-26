@@ -1,100 +1,758 @@
 import { z } from "zod";
 import type { MemoryKind } from "./kinds.js";
+import {
+  builtInArtifactFormats,
+  builtInArtifactTypes,
+  stepActors,
+  type ActionNode,
+  type ArtifactFormatSpec,
+  type ArtifactNode,
+  type CallNode,
+  type ConceptNode,
+  type ConceptMemory,
+  type DefinitionPart,
+  type FlowNode,
+  type IfNode,
+  type MemoryRefNode,
+  type MemoryEntity,
+  type ProcedureMemory,
+  type ProcedureNode,
+  type RepeatNode,
+  type SchemaField,
+  type SchemaMemory,
+  type SchemaNode,
+  type StaticSchemaField,
+  type StatementMemory,
+  type StatementNode,
+  type WhileNode
+} from "./ast.js";
+import {
+  assertMemorySyntaxIdentifier,
+  controlPlaneMemorySyntax,
+  firstStableMemorySyntax,
+  MemorySyntaxRegistry,
+  type MemorySyntaxVersion
+} from "./syntax.js";
 
-const stringArray = z.array(z.string()).default([]);
-const nonEmptyStringArray = z.array(z.string().min(1)).min(1);
-const schemaFormatSchema = z.enum(["section", "field", "table", "list", "template"]);
-const artifactFormatSchema = z.enum(["string", "int", "boolean", "markdown", "json", "yaml", "schema"]);
-const stepActorSchema = z.enum(["agent", "human"]);
+const nonEmptyString = z.string().min(1);
+const stringArray = z.array(nonEmptyString).default([]);
+const namesSchema = z.array(nonEmptyString).superRefine((names, context) => {
+  const seen = new Map<string, number>();
+  for (const [index, name] of names.entries()) {
+    const previous = seen.get(name);
+    if (previous !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [index],
+        message: `Memory names must be unique; first used at names[${previous}]`
+      });
+      continue;
+    }
+    seen.set(name, index);
+  }
+}).default([]);
 
-export type FlowStep = Record<string, unknown>;
-export type SchemaFormat = z.infer<typeof schemaFormatSchema>;
+function normalizeNameShorthand(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const source = value as Record<string, unknown>;
+  if (!("name" in source) || "names" in source) return value;
+  const normalized: Record<string, unknown> = { ...source, names: [source.name] };
+  delete normalized.name;
+  return normalized;
+}
 
-export type SchemaMemory = {
-  tag: "!schema";
-  names: string[];
-  format?: SchemaFormat;
-  defines: string[];
-  asserts?: string[];
-  fields?: SchemaMemory[];
-};
-
-const baseMemorySchema = z.object({
-  names: nonEmptyStringArray,
-  defines: stringArray
+const memorySyntaxValueSchema = z.string().superRefine((value, context) => {
+  try {
+    assertMemorySyntaxIdentifier(value);
+  } catch (error) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: error instanceof Error ? error.message : String(error)
+    });
+  }
 });
 
-const stepArtifactSchema = z.object({
-  name: z.string().min(1),
-  format: artifactFormatSchema,
-  schema: z.string().min(1).optional()
+function withRootSyntax<T extends { tag: string }>(
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>
+): z.ZodType<T & { syntax: MemorySyntaxVersion }, z.ZodTypeDef, unknown> {
+  return z.unknown().transform((value, context) => {
+    const source = value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : value;
+    const syntaxInput = source && typeof source === "object" && !Array.isArray(source)
+      ? (source as Record<string, unknown>).syntax
+      : undefined;
+    const nodeInput = source && typeof source === "object" && !Array.isArray(source)
+      ? Object.fromEntries(Object.entries(source).filter(([key]) => key !== "syntax"))
+      : source;
+    const syntax = memorySyntaxValueSchema.safeParse(syntaxInput);
+    const node = schema.safeParse(nodeInput);
+
+    if (!syntax.success) {
+      for (const issue of syntax.error.issues) context.addIssue({ ...issue, path: ["syntax", ...issue.path] });
+    }
+    if (!node.success) {
+      for (const issue of node.error.issues) context.addIssue(issue);
+    }
+    if (!syntax.success || !node.success) return z.NEVER;
+
+    const { tag, ...fields } = node.data;
+    return { tag, syntax: syntax.data, ...fields } as T & { syntax: MemorySyntaxVersion };
+  });
+}
+
+let definitionPartSchema: z.ZodType<DefinitionPart, z.ZodTypeDef, unknown>;
+let staticSchemaFieldSchema: z.ZodType<StaticSchemaField, z.ZodTypeDef, unknown>;
+let schemaFieldSchema: z.ZodType<SchemaField, z.ZodTypeDef, unknown>;
+let legacyFlowNodeSchema: z.ZodType<FlowNode, z.ZodTypeDef, unknown>;
+let legacyIfNodeSchema: z.ZodType<IfNode, z.ZodTypeDef, unknown>;
+
+const definesSchema = z.lazy(() => z.array(definitionPartSchema)).default([]);
+
+const logicalMemoryReferenceSchema = nonEmptyString.superRefine((value, context) => {
+  const separator = value.indexOf("/");
+  const kind = separator > 0 ? value.slice(0, separator) : "";
+  const name = separator > 0 ? value.slice(separator + 1).trim() : "";
+  if (!separator || separator <= 0 || !["concepts", "statements", "schemas", "procedures"].includes(kind) || !name) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Memory reference target must be a logical reference such as schemas/Name"
+    });
+  }
+});
+
+const memoryRefNodeSchema: z.ZodType<MemoryRefNode, z.ZodTypeDef, unknown> = z.object({
+  tag: z.literal("!ref"),
+  target: logicalMemoryReferenceSchema
 }).strict();
 
-const procedureRunnableStepSchema = z.object({
-  action: z.string().min(1),
-  actor: stepActorSchema.optional(),
-  artifact: stepArtifactSchema
-}).strict();
-
-const procedureFlowStepSchema: z.ZodType<FlowStep> = z.lazy(() =>
-  z.union([
-    procedureRunnableStepSchema,
-    z.object({
-      tag: z.literal("!call"),
-      target: z.string().min(1)
-    }).strict(),
-    z.object({
-      tag: z.literal("!if"),
-      condition: procedureRunnableStepSchema,
-      then: z.array(procedureFlowStepSchema).min(1),
-      elseif: z.array(z.object({
-        condition: procedureRunnableStepSchema,
-        then: z.array(procedureFlowStepSchema).min(1)
-      }).strict()).optional(),
-      else: z.array(procedureFlowStepSchema).optional()
-    }).strict(),
-    z.object({
-      tag: z.literal("!while"),
-      condition: procedureRunnableStepSchema,
-      do: z.array(procedureFlowStepSchema).min(1)
-    }).strict()
-  ])
-);
-
-const schemaMemorySchema: z.ZodType<SchemaMemory, z.ZodTypeDef, unknown> = z.lazy(() =>
-  baseMemorySchema
-    .extend({
-      tag: z.literal("!schema"),
-      format: schemaFormatSchema.optional(),
-      asserts: stringArray.optional(),
-      fields: z.array(schemaMemorySchema).optional()
-    })
-    .strict()
-);
-
-export const procedureMemorySchema = baseMemorySchema
-  .extend({
-    tag: z.literal("!procedure"),
-    goals: stringArray,
-    flow: z.array(procedureFlowStepSchema).default([])
+const formatInputSchema = z.union([
+  nonEmptyString.transform((name) => ({ name, options: {} })),
+  z.object({ name: nonEmptyString }).catchall(z.unknown()).transform((value) => {
+    const { name, ...options } = value;
+    return { name, options };
   })
-  .strict();
+]);
 
-export const conceptMemorySchema = baseMemorySchema
-  .extend({
-    tag: z.literal("!concept"),
-    extends: stringArray.optional()
-  })
-  .strict();
+const artifactFormatInputSchema = formatInputSchema.optional().transform((value) => value ?? { name: "plain", options: {} });
+const schemaFormatInputSchema = formatInputSchema.optional();
 
-export const statementMemorySchema = baseMemorySchema
-  .extend({
+const statementNodeSchema: z.ZodType<StatementNode, z.ZodTypeDef, unknown> = z.lazy(() =>
+  z.preprocess(normalizeNameShorthand, z.object({
     tag: z.literal("!statement"),
-    asserts: stringArray
-  })
-  .strict();
+    names: namesSchema,
+    defines: definesSchema,
+    asserts: z.array(nonEmptyString).min(1).optional(),
+    suggests: z.array(nonEmptyString).min(1).optional(),
+    sections: z.array(statementNodeSchema).min(1).optional()
+  }).strict().superRefine((node, context) => {
+    if (!node.asserts?.length && !node.suggests?.length && !node.sections?.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Statement must define asserts, suggests, or sections"
+      });
+    }
 
-export { schemaMemorySchema };
+    const sectionNames = new Map<string, number>();
+    for (const [index, section] of (node.sections ?? []).entries()) {
+      const canonicalName = section.names[0]?.trim();
+      if (!canonicalName) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sections", index, "names"],
+          message: "Statement section must have a non-empty names list"
+        });
+        continue;
+      }
+
+      const previousIndex = sectionNames.get(canonicalName);
+      if (previousIndex !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sections", index, "names", 0],
+          message: `Statement section canonical name must be unique among siblings; first used at sections[${previousIndex}]`
+        });
+        continue;
+      }
+      sectionNames.set(canonicalName, index);
+    }
+  }))
+);
+
+const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(() =>
+  z.preprocess(normalizeNameShorthand, z.object({
+    tag: z.literal("!schema"),
+    names: namesSchema,
+    defines: definesSchema,
+    asserts: z.array(nonEmptyString).optional(),
+    suggests: z.array(nonEmptyString).min(1).optional(),
+    optional: z.boolean().optional(),
+    type: nonEmptyString.optional(),
+    format: schemaFormatInputSchema,
+    fields: z.lazy(() => z.array(schemaFieldSchema)).optional(),
+    item: z.lazy(() => z.union([schemaNodeSchema, memoryRefNodeSchema])).optional(),
+    items: z.array(z.lazy(() => z.union([schemaNodeSchema, memoryRefNodeSchema]))).min(2).optional()
+  }).strict().superRefine((node, context) => {
+    if (
+      node.names.length === 0 &&
+      node.defines.length === 0 &&
+      (node.asserts?.length ?? 0) === 0 &&
+      (node.suggests?.length ?? 0) === 0 &&
+      node.type === undefined &&
+      node.format === undefined &&
+      (node.fields?.length ?? 0) === 0 &&
+      node.item === undefined &&
+      (node.items?.length ?? 0) === 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "anonymous Schema must define defines, asserts, suggests, type, format, fields, item, or items"
+      });
+    }
+    validateSchemaLocalContract(node, context);
+  }))
+);
+
+definitionPartSchema = z.lazy(() => z.union([nonEmptyString, statementNodeSchema, schemaNodeSchema, memoryRefNodeSchema]));
+
+staticSchemaFieldSchema = z.lazy(() => z.union([
+  nonEmptyString,
+  memoryRefNodeSchema,
+  schemaNodeSchema.superRefine((field, context) => {
+    if (field.names.length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["names"],
+        message: "Schema used in fields must have a non-empty names list"
+      });
+    }
+  })
+]));
+
+const repeatLimitSchema = z.object({
+  min: z.number().int().nonnegative().optional(),
+  max: z.number().int().nonnegative().optional()
+}).strict().superRefine((limit, context) => {
+  if (limit.min === undefined && limit.max === undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Repeat limit must define min or max"
+    });
+  }
+  if (limit.min !== undefined && limit.max !== undefined && limit.min > limit.max) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["max"],
+      message: "Repeat limit max must be greater than or equal to min"
+    });
+  }
+});
+
+function schemaContainsRepeat(node: SchemaNode): boolean {
+  return (node.fields ?? []).some((field) =>
+    typeof field === "object" && (
+      field.tag === "!repeat" || (field.tag === "!schema" && schemaContainsRepeat(field))
+    )
+  ) || (node.item?.tag === "!schema" && schemaContainsRepeat(node.item)) ||
+    (node.items ?? []).some((item) => item.tag === "!schema" && schemaContainsRepeat(item));
+}
+
+export function inferSchemaType(node: SchemaNode): string {
+  return node.type ?? (node.fields !== undefined ? "object" : "string");
+}
+
+export function inheritSchemaFormat(parent: ArtifactFormatSpec, type: string): ArtifactFormatSpec {
+  const options = { ...parent.options };
+  if (parent.name === "markdown") {
+    const layout = options.layout;
+    const compatibleLayout =
+      (layout === "outline" && type === "object") ||
+      (layout === "table" && type === "array");
+    if (!compatibleLayout) delete options.layout;
+  }
+  return {
+    name: parent.name,
+    options
+  };
+}
+
+export function resolveSchemaContract(
+  node: SchemaNode,
+  parentFormat: ArtifactFormatSpec
+): { type: string; format: ArtifactFormatSpec } {
+  const type = inferSchemaType(node);
+  return {
+    type,
+    format: node.format ?? inheritSchemaFormat(parentFormat, type)
+  };
+}
+
+function validateSchemaLocalContract(node: SchemaNode, context: z.RefinementCtx): void {
+  const type = inferSchemaType(node);
+  const formatName = node.format?.name;
+  const layout = node.format?.options.layout;
+  const knownType = builtInArtifactTypes.includes(type as (typeof builtInArtifactTypes)[number]);
+  const knownFormat = formatName !== undefined && builtInArtifactFormats.includes(formatName as (typeof builtInArtifactFormats)[number]);
+
+  if (formatName !== undefined && knownFormat && formatName !== "markdown" && layout !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["format", "layout"],
+      message: "layout is only allowed for markdown Schema format"
+    });
+  }
+  if (knownFormat && formatName === "markdown" && layout !== undefined && layout !== "outline" && layout !== "table") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["format", "layout"],
+      message: "markdown layout must be outline or table"
+    });
+  }
+
+  if (knownType && knownFormat && formatName !== undefined) {
+    const validCombination =
+      (["boolean", "number", "string"].includes(type) && formatName === "plain") ||
+      (["boolean", "number", "string"].includes(type) && formatName === "markdown" && layout === undefined) ||
+      (["boolean", "number", "string", "object", "array"].includes(type) && ["json", "yaml"].includes(formatName)) ||
+      (type === "object" && formatName === "markdown" && layout === "outline") ||
+      (type === "array" && formatName === "markdown" && layout === "table");
+    if (!validCombination) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: formatName === "markdown" ? ["format", "layout"] : ["format"],
+        message: formatName === "markdown" && type === "object"
+          ? "object markdown Schema requires layout: outline"
+          : formatName === "markdown" && type === "array"
+            ? "array markdown Schema requires layout: table"
+            : `Schema type ${type} does not support format ${formatName}`
+      });
+    }
+  }
+
+  if (["boolean", "number", "string", "array"].includes(type) && node.fields !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["fields"],
+      message: `Schema type ${type} does not support fields`
+    });
+  }
+
+  if (node.item !== undefined && node.items !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["items"],
+      message: "Schema item and items are mutually exclusive"
+    });
+  }
+
+  if ((node.item !== undefined || node.items !== undefined) && node.type !== "array") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [node.item !== undefined ? "item" : "items"],
+      message: "Schema item and items require an explicit type: array"
+    });
+  }
+
+  if (node.item?.tag === "!schema" && schemaContainsRepeat(node.item)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["item"],
+      message: "Schema Repeat is not allowed under array item"
+    });
+  }
+  for (const [index, item] of (node.items ?? []).entries()) {
+    if (item.tag !== "!schema" || !schemaContainsRepeat(item)) continue;
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["items", index],
+      message: "Schema Repeat is not allowed under array items"
+    });
+  }
+
+  if (
+    schemaContainsRepeat(node) &&
+    (type !== "object" || (node.format !== undefined && !(formatName === "markdown" && layout === "outline")))
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["fields"],
+      message: "Schema Repeat requires object + markdown + layout: outline"
+    });
+  }
+}
+
+function sameFormat(left: ArtifactFormatSpec, right: ArtifactFormatSpec): boolean {
+  return left.name === right.name && JSON.stringify(left.options) === JSON.stringify(right.options);
+}
+
+const repeatBodyFieldSchema = z.lazy(() => staticSchemaFieldSchema.superRefine((field, context) => {
+  if (typeof field === "object" && field.tag === "!schema" && schemaContainsRepeat(field)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Repeat body must not contain a nested Repeat"
+    });
+  }
+}));
+
+const repeatNodeSchema: z.ZodType<RepeatNode, z.ZodTypeDef, unknown> = z.object({
+  tag: z.literal("!repeat"),
+  limit: repeatLimitSchema.optional(),
+  body: z.array(repeatBodyFieldSchema).min(1)
+}).strict();
+
+schemaFieldSchema = z.lazy(() => z.union([staticSchemaFieldSchema, repeatNodeSchema]));
+
+const legacyArtifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> = z.object({
+  tag: z.literal("!artifact"),
+  name: nonEmptyString,
+  type: nonEmptyString.default("string"),
+  format: artifactFormatInputSchema,
+  schema: z.lazy(() => z.union([nonEmptyString, schemaNodeSchema, memoryRefNodeSchema])).optional(),
+  final: z.boolean().optional()
+}).strict().superRefine((artifact, context) => {
+  const formatName = artifact.format.name;
+  const layout = (artifact.format.options as Record<string, unknown>).layout;
+  const knownType = builtInArtifactTypes.includes(artifact.type as (typeof builtInArtifactTypes)[number]);
+  const knownFormat = builtInArtifactFormats.includes(formatName as (typeof builtInArtifactFormats)[number]);
+
+  if (!knownType || !knownFormat) return;
+
+  if (formatName !== "markdown" && layout !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["format", "layout"],
+      message: "layout is only allowed for markdown Artifact format"
+    });
+  }
+
+  if (formatName === "markdown" && layout !== undefined && layout !== "outline" && layout !== "table") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["format", "layout"],
+      message: "markdown layout must be outline or table"
+    });
+  }
+
+  const validCombination =
+    (["boolean", "number", "string"].includes(artifact.type) && formatName === "plain") ||
+    (artifact.type === "string" && formatName === "markdown") ||
+    (["object", "array"].includes(artifact.type) && ["json", "yaml", "markdown"].includes(formatName));
+  if (!validCombination) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["format"],
+      message: `Artifact type ${artifact.type} does not support format ${formatName}`
+    });
+  }
+
+  if (artifact.type === "string" && formatName === "markdown" && layout !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["format", "layout"],
+      message: "string markdown Artifact must not declare layout"
+    });
+  }
+
+  if (formatName === "markdown" && artifact.type === "object" && layout !== "outline") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["format", "layout"],
+      message: "object markdown Artifact requires layout: outline"
+    });
+  }
+
+  if (formatName === "markdown" && artifact.type === "array" && layout !== "table") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["format", "layout"],
+      message: "array markdown Artifact requires layout: table"
+    });
+  }
+
+  if (formatName === "markdown" && ["object", "array"].includes(artifact.type) && !artifact.schema) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["schema"],
+      message: "structured markdown Artifact requires schema"
+    });
+  }
+
+  if (["boolean", "number", "string"].includes(artifact.type) && artifact.schema) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["schema"],
+      message: `Artifact type ${artifact.type} does not support schema`
+    });
+  }
+
+  if (typeof artifact.schema === "object" && artifact.schema.tag === "!schema") {
+    const rootContract = resolveSchemaContract(artifact.schema, artifact.format);
+    if (rootContract.type !== artifact.type || !sameFormat(rootContract.format, artifact.format)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["schema"],
+        message: "root Schema inferred type and effective format must match its Artifact contract"
+      });
+    }
+  }
+
+  if (
+    typeof artifact.schema === "object" &&
+    artifact.schema.tag === "!schema" &&
+    schemaContainsRepeat(artifact.schema) &&
+    !(artifact.type === "object" && formatName === "markdown" && layout === "outline")
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["schema", "fields"],
+      message: "Schema Repeat is only supported by object markdown Artifacts with layout: outline"
+    });
+  }
+});
+
+const legacyActionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = z.object({
+  tag: z.literal("!action"),
+  action: nonEmptyString,
+  actor: z.enum(stepActors).optional(),
+  asserts: z.array(nonEmptyString).min(1).optional(),
+  suggests: z.array(nonEmptyString).min(1).optional(),
+  artifact: legacyArtifactNodeSchema
+}).strict();
+
+const legacyPlainActionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = legacyActionNodeSchema.superRefine((node, context) => {
+  if (node.artifact.type === "boolean") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["artifact", "type"],
+      message: "boolean Artifact type is only allowed for If or While conditions"
+    });
+  }
+});
+
+const callNodeSchema: z.ZodType<CallNode, z.ZodTypeDef, unknown> = z.object({
+  tag: z.literal("!call"),
+  target: nonEmptyString
+}).strict();
+
+const legacyWhileNodeSchema: z.ZodType<WhileNode, z.ZodTypeDef, unknown> = z.lazy(() =>
+  z.object({
+    tag: z.literal("!while"),
+    condition: legacyActionNodeSchema,
+    do: z.array(legacyFlowNodeSchema).min(1)
+  }).strict().superRefine((node, context) => {
+    if (node.condition.artifact.type !== "boolean") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["condition", "artifact", "type"],
+        message: "While condition Artifact type must be boolean"
+      });
+    }
+  })
+);
+
+legacyIfNodeSchema = z.lazy(() =>
+  z.object({
+    tag: z.literal("!if"),
+    condition: legacyActionNodeSchema,
+    then: z.array(legacyFlowNodeSchema).min(1),
+    elseif: legacyIfNodeSchema.optional(),
+    else: z.array(legacyFlowNodeSchema).optional()
+  }).strict().superRefine((node, context) => {
+    if (node.condition.artifact.type !== "boolean") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["condition", "artifact", "type"],
+        message: "If condition Artifact type must be boolean"
+      });
+    }
+    if (node.elseif?.else !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["elseif", "else"],
+        message: "else is only allowed on the root If in an elseif chain"
+      });
+    }
+  })
+);
+
+legacyFlowNodeSchema = z.lazy(() => z.union([
+  legacyPlainActionNodeSchema,
+  legacyIfNodeSchema,
+  legacyWhileNodeSchema,
+  callNodeSchema
+]));
+
+function requireTopLevelName<T extends { names: string[] }>(schema: z.ZodType<T, z.ZodTypeDef, unknown>): z.ZodType<T, z.ZodTypeDef, unknown> {
+  return schema.superRefine((node, context) => {
+    if (node.names.length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["names"],
+        message: "top-level memory must have a non-empty names list"
+      });
+    }
+  });
+}
+
+const conceptNodeSchema: z.ZodType<ConceptNode, z.ZodTypeDef, unknown> = requireTopLevelName(
+  z.preprocess(normalizeNameShorthand, z.object({
+    tag: z.literal("!concept"),
+    names: namesSchema,
+    defines: definesSchema,
+    extends: stringArray.optional()
+  }).strict())
+);
+
+export const conceptMemorySchema: z.ZodType<ConceptMemory, z.ZodTypeDef, unknown> = withRootSyntax(conceptNodeSchema);
+export const statementMemorySchema: z.ZodType<StatementMemory, z.ZodTypeDef, unknown> = withRootSyntax(requireTopLevelName(statementNodeSchema));
+export const schemaMemorySchema: z.ZodType<SchemaMemory, z.ZodTypeDef, unknown> = withRootSyntax(requireTopLevelName(schemaNodeSchema));
+
+const legacyProcedureNodeSchema: z.ZodType<ProcedureNode, z.ZodTypeDef, unknown> = requireTopLevelName(
+  z.preprocess(normalizeNameShorthand, z.object({
+    tag: z.literal("!procedure"),
+    names: namesSchema,
+    defines: definesSchema,
+    asserts: z.array(nonEmptyString).min(1).optional(),
+    goals: stringArray,
+    flow: z.array(legacyFlowNodeSchema).default([])
+  }).strict())
+);
+
+const legacyProcedureMemorySchema: z.ZodType<ProcedureMemory, z.ZodTypeDef, unknown> = withRootSyntax(legacyProcedureNodeSchema);
+
+const uniqueNonEmptyStringArray = z.array(nonEmptyString).min(1).superRefine((values, context) => {
+  const seen = new Map<string, number>();
+  for (const [index, value] of values.entries()) {
+    const previous = seen.get(value);
+    if (previous !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [index],
+        message: `value must be unique; first used at index ${previous}`
+      });
+    } else {
+      seen.set(value, index);
+    }
+  }
+});
+
+export const artifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> = z.unknown().transform((value, context) => {
+  const source = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+  const baseInput = source ? { ...source } : value;
+  if (source) {
+    delete (baseInput as Record<string, unknown>).review;
+  }
+  const base = legacyArtifactNodeSchema.safeParse(baseInput);
+  const review = uniqueNonEmptyStringArray.optional().safeParse(source?.review);
+  if (!base.success) {
+    for (const issue of base.error.issues) context.addIssue(issue);
+  }
+  if (!review.success) {
+    for (const issue of review.error.issues) context.addIssue({ ...issue, path: ["review", ...issue.path] });
+  }
+  if (!base.success || !review.success) return z.NEVER;
+  return {
+    ...base.data,
+    ...(review.data ? { review: [...review.data] } : {})
+  };
+});
+
+export const actionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = z.object({
+  tag: z.literal("!action"),
+  action: nonEmptyString,
+  actor: z.enum(stepActors).optional(),
+  asserts: z.array(nonEmptyString).min(1).optional(),
+  suggests: z.array(nonEmptyString).min(1).optional(),
+  artifact: artifactNodeSchema
+}).strict();
+
+const plainActionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = actionNodeSchema.superRefine((node, context) => {
+  if (node.artifact.type === "boolean") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["artifact", "type"],
+      message: "boolean Artifact type is only allowed for If or While conditions"
+    });
+  }
+});
+
+let ifNodeSchema: z.ZodType<IfNode, z.ZodTypeDef, unknown>;
+let flowNodeSchema: z.ZodType<FlowNode, z.ZodTypeDef, unknown>;
+
+const whileNodeSchema: z.ZodType<WhileNode, z.ZodTypeDef, unknown> = z.lazy(() =>
+  z.object({
+    tag: z.literal("!while"),
+    condition: actionNodeSchema,
+    do: z.array(flowNodeSchema).min(1)
+  }).strict().superRefine((node, context) => {
+    if (node.condition.artifact.type !== "boolean") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["condition", "artifact", "type"],
+        message: "While condition Artifact type must be boolean"
+      });
+    }
+  })
+);
+
+ifNodeSchema = z.lazy(() =>
+  z.object({
+    tag: z.literal("!if"),
+    condition: actionNodeSchema,
+    then: z.array(flowNodeSchema).min(1),
+    elseif: ifNodeSchema.optional(),
+    else: z.array(flowNodeSchema).optional()
+  }).strict().superRefine((node, context) => {
+    if (node.condition.artifact.type !== "boolean") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["condition", "artifact", "type"],
+        message: "If condition Artifact type must be boolean"
+      });
+    }
+    if (node.elseif?.else !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["elseif", "else"],
+        message: "else is only allowed on the root If in an elseif chain"
+      });
+    }
+  })
+);
+
+flowNodeSchema = z.lazy(() => z.union([
+  plainActionNodeSchema,
+  ifNodeSchema,
+  whileNodeSchema,
+  callNodeSchema
+]));
+
+const procedureNodeSchema: z.ZodType<ProcedureNode, z.ZodTypeDef, unknown> = requireTopLevelName(
+  z.preprocess(normalizeNameShorthand, z.object({
+    tag: z.literal("!procedure"),
+    names: namesSchema,
+    defines: definesSchema,
+    asserts: z.array(nonEmptyString).min(1).optional(),
+    goals: stringArray,
+    flow: z.array(flowNodeSchema).default([])
+  }).strict())
+);
+
+export const procedureMemorySchema: z.ZodType<ProcedureMemory, z.ZodTypeDef, unknown> = withRootSyntax(procedureNodeSchema);
+
+export {
+  definitionPartSchema,
+  flowNodeSchema,
+  ifNodeSchema,
+  memoryRefNodeSchema,
+  repeatNodeSchema,
+  schemaFieldSchema,
+  schemaNodeSchema,
+  statementNodeSchema,
+  staticSchemaFieldSchema
+};
 
 export const memorySchemas = {
   procedures: procedureMemorySchema,
@@ -103,7 +761,15 @@ export const memorySchemas = {
   schemas: schemaMemorySchema
 } as const satisfies Record<MemoryKind, z.ZodTypeAny>;
 
-export type ProcedureMemory = z.infer<typeof procedureMemorySchema>;
-export type ConceptMemory = z.infer<typeof conceptMemorySchema>;
-export type StatementMemory = z.infer<typeof statementMemorySchema>;
-export type MemoryEntity = ProcedureMemory | ConceptMemory | StatementMemory | SchemaMemory;
+const legacyMemorySchemas = {
+  procedures: legacyProcedureMemorySchema,
+  concepts: conceptMemorySchema,
+  statements: statementMemorySchema,
+  schemas: schemaMemorySchema
+} as const satisfies Record<MemoryKind, z.ZodTypeAny>;
+
+export const memorySyntaxRegistry = new MemorySyntaxRegistry();
+memorySyntaxRegistry.register({ version: firstStableMemorySyntax, schemas: legacyMemorySchemas });
+memorySyntaxRegistry.register({ version: controlPlaneMemorySyntax, schemas: memorySchemas });
+
+export type { MemoryEntity };

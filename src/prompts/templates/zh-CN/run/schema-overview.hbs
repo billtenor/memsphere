@@ -1,0 +1,27 @@
+图式概览：
+- 流程：{{procedureName}}
+- 动作：{{action.instruction}}
+{{#each action.asserts}}
+  - 动作断言：{{this}}
+{{/each}}
+{{#each action.suggests}}
+  - 动作建议：{{this}}
+{{/each}}
+- 产物：{{artifact.name}}
+{{#if artifact.type}}- 类型：{{artifact.type}}{{/if}}
+{{#if artifact.format}}- 格式：{{artifact.format}}{{/if}}
+{{#if artifact.schema}}- 图式：{{artifact.schema}}{{/if}}
+- 最终产物：{{#if artifact.final}}是{{else}}否{{/if}}
+- 进度：{{progress.completed}}/{{progress.total}}
+{{#if progress.pendingRepeatControls}}- 待处理 repeat 控制：{{progress.pendingRepeatControls}}{{/if}}
+- 工作方式：逐字段上报以更新同一份托管草稿；全部字段完成后，先完整阅读并编辑草稿，再明确提交同一个文件。
+字段：
+{{#each progress.fields}}
+- {{path}}：{{status}}
+{{/each}}
+{{#if draft}}
+草稿：
+- 状态：{{draft.status}}
+- 文件：{{draft.filePath}}
+{{#if draft.validationStatus}}- 契约校验：{{draft.validationStatus}}{{/if}}
+{{/if}}

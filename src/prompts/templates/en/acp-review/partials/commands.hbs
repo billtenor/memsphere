@@ -1,0 +1,27 @@
+## Available Memsphere commands
+- Read the complete candidate Artifact:
+  "$MEMSPHERE_CLI" run artifact show --assignment "$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --output json
+- Read the complete Review contract, including the full Schema snapshot:
+  "$MEMSPHERE_CLI" run artifact contract show --assignment "$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --output json
+- Check this review's status, permissions, and your own comments:
+  "$MEMSPHERE_CLI" run review assignment show --assignment "$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --output json
+- View the Run outline, including every step, its Artifact summary, and the current step:
+  "$MEMSPHERE_CLI" run show --run "$MEMSPHERE_REVIEW_RUN_ID" --output json
+- Inspect one step from that outline:
+  "$MEMSPHERE_CLI" run step show --run "$MEMSPHERE_REVIEW_RUN_ID" --step "<step-ref>" --output json
+- Read a prior Artifact from the outline when it is relevant:
+  "$MEMSPHERE_CLI" run artifact show --run "$MEMSPHERE_REVIEW_RUN_ID" --step "<step-ref>" --output json
+- Discover and read project Memory:
+  "$MEMSPHERE_CLI" memory list --output json
+  "$MEMSPHERE_CLI" memory read <reference> --output json
+- Add a concrete review comment. Comment bodies use Markdown:
+  - Choose an explicit severity: `blocking`, `risk`, or `suggestion`.
+  - For a short single-line comment:
+    "$MEMSPHERE_CLI" run review comment --assignment "$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --severity <blocking|risk|suggestion> --body <text> --output json
+  - For a multiline comment, send the Markdown through standard input:
+    "$MEMSPHERE_CLI" run review comment --assignment "$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --severity <blocking|risk|suggestion> --body-stdin --output json <<'MEMSPHERE_COMMENT'
+    <multiline Markdown comment>
+    MEMSPHERE_COMMENT
+  - Do not encode line breaks as literal `\n` sequences.
+- Submit the final vote and summary:
+  "$MEMSPHERE_CLI" run review submit --assignment "$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --vote <approve|request_changes|abstain> --summary-file <path> --output json

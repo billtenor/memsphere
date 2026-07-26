@@ -1,0 +1,119 @@
+!procedure
+syntax: memsphere-20260719-stable
+names:
+  - Agent 评测与协同修复流程
+  - Agent 测试、判分与修复流程
+  - agent-evaluation-and-collaborative-remediation
+defines:
+  - 发起隔离测试，独立判分并分析问题；经 human 确认后完成修复、复测和汇报。
+asserts:
+  - 子 Agent 必须在独立 workspace、HOME 和干净上下文中执行，不得接触 evaluation、参考答案或其他禁止内容。
+  - 判分必须检查日志、实际 Artifact、Run 状态和 Memory 完整性，不得只采信 Agent 的声明。
+  - 只执行可追溯要求；参考答案不是唯一答案，应接受合规的自由发挥和等待 human 补充信息的正常暂停。
+  - 所有问题处理方式须经 human 确认；首次运行、纠错重试和修复后复测必须分别保存和报告。
+goals:
+  - 得到可信的评测结论，并在人机确认后完成必要修复与复测。
+  - 保留证据，汇报首次表现、修复后结果和残留问题。
+flow:
+  - !action
+    action: 准备测试。读取测试组说明和 case，确认 Agent、模型、范围、代码与 CLI 版本、评测模式和重试规则；为每个 case 生成独立 Trial，并检查 Memory、Skill、隔离边界和 Artifact 验收条件。
+    actor: agent
+    asserts:
+      - 使用 human 指定的 Agent、模型和范围，不得静默替换。
+      - 每个 case 必须在仓库根目录执行 `TRIAL="$(./evals/prepare-case.sh "<suite-id>/<case-id>")"`，且不得复用其他 case 的 Trial。
+      - 必须检查 `$TRIAL/metadata.txt` 和 `$TRIAL/setup.log`，确认 case、CLI、版本和准备过程正确。
+      - 阻止有效测试的环境问题必须记录为 blocker，不得通过临时修改 case 或 Memory 掩盖。
+    suggests:
+      - 可用 `cat "$TRIAL/metadata.txt"`、`cat "$TRIAL/setup.log"` 和 `cat "$TRIAL/prompt.md"` 检查准备结果。
+      - 可先执行 `./evals/run-codex-agent.sh --dry-run "$TRIAL"` 或 `./evals/run-traex-agent.sh --dry-run "$TRIAL"` 检查运行目录。
+      - 需要指定本地可执行文件时，可使用 `MEMSPHERE_BIN`、`CODEX_BIN` 或 `TRAEX_BIN` 覆盖默认命令。
+    artifact: !artifact
+      name: 测试准备结果
+      format: markdown
+
+  - !action
+    action: 运行测试。按已确认的配置执行所有可运行 case，等待子 Agent 结束并保存完整证据；无法有效运行的 case 记为 blocked。
+    actor: agent
+    asserts:
+      - 测试 Codex 时必须执行 `RUN_DIR="$(./evals/run-codex-agent.sh --model "<model>" "$TRIAL")"`；测试 TraeX 时必须执行 `RUN_DIR="$(./evals/run-traex-agent.sh --model "<model>" "$TRIAL")"`。
+      - 每个 case 使用新的子 Agent、workspace 和 HOME；不得追加契约外提示。
+      - 必须等待 runner 结束，并从 `$RUN_DIR` 保存 metadata、事件、stderr、最终回复、workspace Artifact、Run 状态和 token 使用。
+      - 启用 Artifact 纠错时，只能向同一 Agent 返回 validator 产生的最小错误，并保留首次与每次重试。
+    suggests:
+      - 多个 case 可在资源允许且证据不会混淆时并行运行。
+      - 模型也可通过 `CODEX_MODEL` 或 `TRAEX_MODEL` 指定，但命令行 `--model` 更直观。
+    artifact: !artifact
+      name: 初始评测运行记录
+      format: markdown
+
+  - !action
+    action: 独立检查每个 case 的任务、规则、日志和实际产物，给出证据与结论。
+    actor: agent
+    asserts:
+      - pass：全部可追溯要求成立，且没有无效条件。
+      - fail：case 未满足通过条件；无论问题来自 Agent、题目、评分或 harness，均先记为失败，再分析根因。
+      - invalid：存在上下文污染、非法读取或 Memory 被修改等情况；首次结论不得被重试覆盖。
+      - blocked：环境前提阻止有效执行，不计为模型失败。
+      - 每个非 pass 结论必须引用具体证据并说明判定依据。
+      - Artifact 必须打开检查；文件存在、Agent 自检或 Run done 均不等于内容合格。
+    artifact: !artifact
+      name: 初始逐 Case 评分
+      format: markdown
+
+  - !while
+    condition: !action
+      action: 判断是否仍有未 pass 且未获 human 允许跳过的 case；存在则返回 true，否则返回 false。
+      actor: agent
+      asserts:
+        - 只有 human 可以允许跳过，Agent 不得自行跳过 case。
+      artifact: !artifact
+        name: 是否仍有未通过且未获准跳过的 Case
+        type: boolean
+    do:
+      - !action
+        action: 整理未通过 case 的根因和处理方案。区分 Agent、环境、harness、case、评分标准、Memory、Skill、Procedure、CLI 和产品代码问题，并判断属于本轮可修复问题还是需要功能迭代的需求。
+        actor: agent
+        asserts:
+          - 修复真实的问题层级，不得把 case、评分或环境问题包装成模型失败。
+          - 根因归类前必须核对判定依据、实际执行链路和机制输出；目标对象未实际进入某机制时，不得归因为该机制漏检。
+          - 不得通过堆叠提示或禁止项压缩 Agent 的合理判断空间。
+          - 对本轮可修复问题说明修改、影响和复测范围；对迭代需求说明背景、目标和验收方向。
+          - 本步骤只提出方案，不得修改文件。
+        suggests:
+          - 涉及 Artifact 校验时，依次检查 Schema 定义、Procedure Artifact 契约、report 实际输入和 validator 结果。
+        artifact: !artifact
+          name: 根因与分类处理方案
+          format: markdown
+
+      - !action
+        action: 审阅根因和处理方案，确认本轮修复范围、需要记录的迭代需求，以及允许跳过的 case。
+        actor: human
+        artifact: !artifact
+          name: Human 确认结果
+          format: markdown
+
+      - !action
+        action: 按 human 决定处理。本轮可修复问题完成修改与校验，并以新 trial 复测；需要功能迭代的问题在 docs/ 创建需求文档，不在本流程中实现；记录获准跳过的 case。
+        actor: agent
+        asserts:
+          - 不得修改未确认内容或破坏无关工作区改动。
+          - 迭代需求文档必须说明背景、问题证据、期望能力、范围和验收标准，并交由后续开发者处理。
+          - task 不得泄露答案；评分只保留可追溯要求；harness 应独立检查 Artifact；Memory 与 Skill 的冗余描述应一致。
+          - 如实记录已执行和未执行的验证，不得通过降低标准、更换模型或未经 human 允许跳过 case 掩盖失败。
+          - 保留每轮证据和结果，不得覆盖首次评分或历史记录。
+        artifact: !artifact
+          name: 本轮修复与复测结果
+          format: markdown
+
+  - !action
+    action: 按修改影响执行必要回归并向 human 汇报。报告逐 Case 结论、根因、human 决定、实际修改、复测结果、跳过项、需求文档、证据路径、token 使用和残留问题。
+    actor: agent
+    asserts:
+      - 区分首次表现、harness 纠错后表现和评测系统修复后的新结果。
+      - 分别统计 pass、fail、invalid 和 blocked，并单列 human 允许跳过的 case；跳过项、invalid 与 blocked 不得混入有效 case 通过率。
+      - 共享 runner、CLI、Skill 或 Memory 发生变化时，应扩大回归范围。
+      - 不得声称未执行的测试已经通过。
+    artifact: !artifact
+      name: Agent 评测与协同修复报告
+      format: markdown
+      final: true

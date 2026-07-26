@@ -1,0 +1,14 @@
+!statement
+syntax: memsphere-20260719-stable
+names:
+  - 客户回复规则
+  - customer reply rules
+defines:
+  - 适用于回复受到线上故障影响的客户。
+asserts:
+  - 客户回复必须保存到 artifacts/customer-reply.md。
+  - 回复只能陈述已经确认的故障状态和补偿状态。
+  - 补偿方案未确定时，不得承诺任何具体补偿。
+suggests:
+  - 优先使用项目符号组织回复。
+  - 可以用致歉语开场。

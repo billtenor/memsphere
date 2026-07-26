@@ -1,0 +1,22 @@
+!schema
+syntax: memsphere-20260719-stable
+names:
+  - 客户反馈汇总表
+  - 客户反馈汇总
+  - 反馈汇总
+defines:
+  - 将多条客户反馈按日期、渠道、反馈内容和处理状态汇总成表。
+asserts:
+  - 日期必须使用 YYYY-MM-DD 格式。
+  - 客户反馈汇总表实例必须以 Markdown 文件保存到 artifacts/customer-feedback-summary.md。
+type: array
+format:
+  name: markdown
+  layout: table
+item: !schema
+  type: object
+  fields:
+    - 日期
+    - 渠道
+    - 反馈内容
+    - 处理状态

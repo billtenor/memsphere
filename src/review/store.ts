@@ -1,6 +1,6 @@
-import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { basename, extname, isAbsolute, join, normalize } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, normalize } from "node:path";
 import { parse, stringify } from "yaml";
 import { z } from "zod";
 
@@ -119,6 +119,11 @@ type CreateReviewInput = {
     label: string;
     path: string;
     kind: "memory" | "task";
+    directory?: boolean;
+    entryPath?: string;
+    rewriteRunMemoryRoot?: string;
+    snapshotPath?: string;
+    snapshotDirectoryPath?: string;
   }>;
 };
 
@@ -166,14 +171,14 @@ export async function readReviewSnapshot(
   reviewsRoot: string,
   id: string,
   kind?: "memory" | "task"
-): Promise<{ snapshot: ReviewSnapshot; content: string } | undefined> {
+): Promise<{ snapshot: ReviewSnapshot; content: string; snapshotRoot: string } | undefined> {
   const review = await getReview(reviewsRoot, id);
   if (!review) return undefined;
   const snapshot = review.snapshots.find((item) => !kind || item.kind === kind);
   if (!snapshot) return undefined;
   const safePath = safeRelativePath(snapshot.path);
   const content = await readFile(join(reviewsRoot, id, safePath), "utf8");
-  return { snapshot, content };
+  return { snapshot, content, snapshotRoot: snapshotArtifactRoot(reviewsRoot, id, snapshot, safePath) };
 }
 
 export async function createReview(input: CreateReviewInput): Promise<ReviewFile> {
@@ -188,7 +193,7 @@ export async function createReview(input: CreateReviewInput): Promise<ReviewFile
     status: "draft",
     createdAt: now,
     updatedAt: now,
-    memoryRoot: input.memoryRoot,
+    memoryRoot: input.source === "task" ? "snapshots/memory" : "snapshots",
     snapshots: await createSnapshots(input.reviewsRoot, id, input.snapshotFiles ?? [], now),
     comments: []
   };
@@ -259,12 +264,36 @@ async function createSnapshots(
 
   for (const [index, file] of files.entries()) {
     if (!(await pathExists(file.path))) continue;
+    const source = await stat(file.path);
     const snapshotName = `${String(index + 1).padStart(2, "0")}-${safeSnapshotName(file.label || basename(file.path), file.path)}`;
     const snapshotPath = join(snapshotsDir, snapshotName);
-    await copyFile(file.path, snapshotPath);
+    let storedPath = `snapshots/${snapshotName}`;
+
+    if (file.directory && source.isDirectory()) {
+      const directoryPath = file.snapshotDirectoryPath
+        ? safeRelativePath(file.snapshotDirectoryPath)
+        : safeSnapshotDirectoryName(basename(file.path));
+      const snapshotDirectory = join(snapshotsDir, directoryPath);
+      await cp(file.path, snapshotDirectory, { recursive: true });
+      storedPath = `snapshots/${directoryPath}/${file.entryPath ?? ""}`;
+      if (file.kind === "task" && file.entryPath) {
+        await rewriteRunMemoryRoot(join(snapshotDirectory, file.entryPath), file.rewriteRunMemoryRoot ?? "snapshots/memory");
+      }
+    } else {
+      if (file.snapshotPath) {
+        const safePath = safeRelativePath(file.snapshotPath);
+        const nestedSnapshotPath = join(snapshotsDir, safePath);
+        await mkdir(dirname(nestedSnapshotPath), { recursive: true });
+        await copyFile(file.path, nestedSnapshotPath);
+        storedPath = `snapshots/${safePath}`;
+      } else {
+        await copyFile(file.path, snapshotPath);
+      }
+    }
+
     snapshots.push({
       label: file.label,
-      path: `snapshots/${snapshotName}`,
+      path: storedPath,
       kind: file.kind,
       createdAt
     });
@@ -282,12 +311,31 @@ function safeSnapshotName(label: string, sourcePath: string): string {
   return `${base}${ext || ".txt"}`;
 }
 
+function safeSnapshotDirectoryName(name: string): string {
+  return name.trim().replace(/[^a-zA-Z0-9\u4e00-\u9fa5]+/g, "-").replace(/^-+|-+$/g, "") || "snapshot";
+}
+
+async function rewriteRunMemoryRoot(path: string, memoryRoot: string): Promise<void> {
+  const raw = await readFile(path, "utf8");
+  const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+  await writeFile(path, `${JSON.stringify({ ...parsed, memoryRoot }, null, 2)}\n`, "utf8");
+}
+
 function safeRelativePath(path: string): string {
   const normalized = normalize(path);
   if (isAbsolute(normalized) || normalized.startsWith("..")) {
     throw new Error(`invalid snapshot path: ${path}`);
   }
   return normalized;
+}
+
+function snapshotArtifactRoot(reviewsRoot: string, reviewId: string, snapshot: ReviewSnapshot, safePath: string): string {
+  const runsPrefix = join("snapshots", "runs") + "/";
+  if (snapshot.kind === "task" && safePath.replace(/\\/g, "/").startsWith(runsPrefix)) {
+    return join(reviewsRoot, reviewId, "snapshots", "runs");
+  }
+  return join(reviewsRoot, reviewId, "snapshots");
 }
 
 async function pathExists(path: string): Promise<boolean> {

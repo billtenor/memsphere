@@ -1,0 +1,16 @@
+!schema
+syntax: memsphere-20260719-stable
+names:
+  - 上线检查记录
+  - 发布检查记录
+defines:
+  - 记录待上线版本的数据库迁移、接口冒烟和回滚版本检查结果。
+asserts:
+  - 版本和回滚版本必须写成以小写字母 v 开头的三段式版本号。
+  - 数据库迁移检查和接口冒烟检查只能填写“通过”或“不通过”。
+  - 上线检查记录实例必须以 Markdown 文件保存到 artifacts/release-check.md。
+fields:
+  - 版本
+  - 数据库迁移检查
+  - 接口冒烟检查
+  - 回滚版本

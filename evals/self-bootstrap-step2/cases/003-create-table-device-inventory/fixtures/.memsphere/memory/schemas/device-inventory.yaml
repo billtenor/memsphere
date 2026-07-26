@@ -1,0 +1,22 @@
+!schema
+syntax: memsphere-20260719-stable
+names:
+  - 设备盘点表
+  - 设备清单
+defines:
+  - 汇总多台设备的资产编号、设备类型、当前归属、状态和位置。
+asserts:
+  - 状态只能填写“使用中”“闲置”或“维修中”。
+  - 设备盘点表实例必须以 Markdown 文件保存到 artifacts/device-inventory.md。
+type: array
+format:
+  name: markdown
+  layout: table
+item: !schema
+  type: object
+  fields:
+    - 资产编号
+    - 设备
+    - 归属人
+    - 状态
+    - 位置

@@ -1,0 +1,23 @@
+!procedure
+syntax: memsphere-20260721-stable
+names:
+  - Traex ACP 四方评审测试流程
+  - traex-artifact-review-smoke
+defines:
+  - 用一份包含多项独立验收约束的发布方案，验证两个 Traex Agent、一个 Human 和 Runner 共同参与的 Artifact Review。
+flow:
+  - !action
+    action: 产出 Memsphere v2.4.0 发布方案，用于验证 Reviewer 能否逐项核对 Artifact 契约。
+    asserts:
+      - 一级标题必须精确写为“# Memsphere v2.4.0 发布方案”。
+      - 必须依次包含“## 发布目标”“## 变更清单”“## 风险控制”“## 验证计划”四个二级章节，不得缺少或改名。
+      - “变更清单”必须使用 Markdown 表格，列名依次为“编号”“变更内容”“负责人”“验收方式”，并完整包含 C-01、C-02、C-03 三行，每个单元格均不得为空。
+      - “风险控制”必须分别列出 R-01 和 R-02；每项风险都必须明确写出触发条件、影响、缓解措施和回滚动作。
+      - “验证计划”必须逐项列出 `npm test`、`npm run typecheck`、`npm run build` 三条命令及各自的预期结果。
+      - 全文不得出现 TODO、TBD、“待补充”或其他占位内容。
+    suggests:
+      - 评论应尽量引用违反的具体约束和对应 Artifact 内容，便于 Runner 定位修改。
+    artifact: !artifact
+      name: Memsphere v2.4.0 发布方案
+      format: markdown
+      review: [development_engineer, test_engineer, system_architect]

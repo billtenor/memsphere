@@ -1,0 +1,23 @@
+!concept
+syntax: memsphere-20260719-stable
+names:
+  - 报销申请
+  - 报销
+defines:
+  - 一份报销申请用于请求组织返还因工作事项而由个人先行支付的费用。
+  - !statement
+    asserts:
+      - 只有因工作事项发生且由个人先行支付的费用可以申请报销。
+      - 报销金额必须大于零。
+      - 发生日期必须使用 YYYY-MM-DD 格式。
+      - 凭证编号不能为空。
+      - 报销申请实例必须以 Markdown 文件保存到 artifacts/reimbursement.md。
+  - !schema
+    asserts:
+      - 发生日期、费用内容、金额、业务用途和凭证编号均不能为空。
+    fields:
+      - 发生日期
+      - 费用内容
+      - 金额
+      - 业务用途
+      - 凭证编号

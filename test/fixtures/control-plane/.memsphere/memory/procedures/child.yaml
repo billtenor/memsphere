@@ -1,0 +1,10 @@
+!procedure
+syntax: memsphere-20260721-stable
+name: control-plane-child
+goals:
+  - Exercise callee Procedure binding precedence.
+flow:
+  - !action
+    action: Produce the child Artifact.
+    artifact: !artifact
+      name: child result

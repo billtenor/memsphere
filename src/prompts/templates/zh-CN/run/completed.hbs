@@ -1,0 +1,17 @@
+Run {{runId}}
+{{#each procedureAsserts}}
+{{#if @first}}
+
+流程断言：
+{{/if}}
+- {{this}}
+{{/each}}
+
+已完成
+{{#each finalArtifacts}}
+{{#if @first}}
+
+最终产物：
+{{/if}}
+- {{name}}{{#if path}}：{{path}}{{/if}}
+{{/each}}

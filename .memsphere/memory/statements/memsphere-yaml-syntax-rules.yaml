@@ -1,0 +1,1104 @@
+!statement
+syntax: memsphere-20260721-stable
+names:
+  - Memsphere YAML 语法规则
+  - memsphere-yaml-syntax-rules
+defines:
+  - 定义 memsphere Memory YAML DSL 的节点、字段、缺省值、组合约束和树状关系，作为语法设计与实现的一致性基线。
+  - 本记忆描述当前稳定版本 memsphere-20260721-stable 支持的 Memsphere YAML 语法。
+asserts:
+  - 语法实现、Reserved Memory、技能文档、迁移工具和示例必须以本规则树中评审通过的规则为共同依据。
+sections:
+  - !statement
+    names:
+      - 基础语法
+    sections:
+      - !statement
+        names:
+          - 语法版本
+        defines:
+          - 每份顶层 Memory 使用 syntax 声明其 Memsphere YAML 语法版本；版本标识采用 memsphere-YYYYMMDD-draft 或 memsphere-YYYYMMDD-stable 格式。
+          - start 是历史未版本化 Memory 的缺省迁移起点，不是正式发布版本；当前正式版本是 memsphere-20260721-stable。
+        asserts:
+          - 省略 syntax 时必须按 start 解析，不得按运行时最新版本解释。
+          - stable 版本中已经存在的关键字、结构、缺省值和校验语义不得做不兼容修改。
+          - 最新版 parser 可以在当前 stable syntax 下增加不改变旧 Memory 解释结果的可选关键字或能力；这种向前兼容扩展不递进 syntax，也不要求旧 Memory 迁移。
+          - 已形成兼容承诺的 stable 语法删除或重命名既有字段、改变既有值或缺省值语义时，必须发布新 syntax 并提供显式 migrate 路径。
+          - 尚未形成兼容承诺的当前开发版本，经 human 明确确认后可以在当前 stable 内原地纠正，不要求为已废弃的内部模型创建新 syntax 或 migrate。
+          - draft 与 stable 都是不可变的完整版本标识，不得把 stable 当作动态指向最新版的别名。
+        suggests:
+          - "兼容扩展示例：为 !artifact 增加可选 review 字段；未声明该字段的旧 Memory 仍保持原行为，因此沿用当前 syntax。"
+          - "不兼容升级示例：删除既有字段或改变其默认值，导致旧 Memory 必须改写；此时应发布新 syntax，并让 migrate 逐版本转换。"
+
+      - !statement
+        names:
+          - 标签
+        defines:
+          - |-
+            根 Memory 通过 YAML tag 声明自己的区块类型：
+            ```yaml
+            !statement
+            syntax: memsphere-20260721-stable
+            names:
+              - 发布规则
+            asserts:
+              - 发布前必须通过校验。
+            ```
+        asserts:
+          - 每份 Memory YAML 文档必须只包含一个顶层 YAML mapping。
+          - 顶层 YAML mapping 必须使用 !concept、!statement、!schema 或 !procedure 中的一个 YAML tag 声明 Memory 类型；!schema.type 和 !artifact.type 仅声明值契约。
+          - "嵌套区块也必须显式写出自己的 YAML tag。例如交付物必须写成 artifact: !artifact，不能只写一个包含 name、type 或 format 的普通 YAML mapping。"
+          - 未被对应节点语法声明的字段必须被拒绝，不得静默忽略。
+
+      - !statement
+        names:
+          - 通用结构
+        defines:
+          - Memsphere Memory YAML 使用 YAML mapping（键值对象）、YAML sequence（有序列表）和 YAML scalar（单个字面量）组成一棵树；字段连接树中的值，YAML tag 将特定结构的 YAML mapping 声明为 Memsphere 区块。
+          - 本章节说明这些 YAML 基础结构在 Memsphere 中各自承担什么职责，以及区块规则与关键字规则如何共同约束一份 Memory。
+        asserts:
+          - 必须区分 Memory YAML 的书写结构与 Schema、Artifact 所描述的值契约；YAML 的键值对象和有序列表不等同于 type 的 object 和 array。
+        sections:
+          - !statement
+            names:
+              - YAML mapping 的作用
+            defines:
+              - YAML mapping 是由若干 key-value 字段组成的对象，也是 Memsphere 表达一个结构节点的基础形式。
+              - |-
+                `artifact` 的值是带 tag 的 YAML mapping，`format` 的值是该区块允许的普通 YAML mapping：
+                ```yaml
+                artifact: !artifact
+                  name: 需求文档
+                  type: object
+                  format:
+                    name: markdown
+                    layout: outline
+                  schema: 需求文档
+                ```
+            asserts:
+              - 带 Memsphere YAML tag 的 YAML mapping 表示一个区块，tag 决定区块类型及其允许出现的关键字。
+              - 无 tag 的 YAML mapping 只能用于区块规则明确允许的配置值，例如 format 的展开配置或 !repeat.limit，不得代替 !concept、!statement、!schema、!procedure、!action 或 !artifact 等区块。
+              - "Schema 或 Artifact 中的 type: object 约束其描述的目标值，不表示 Memory YAML 中所有 YAML mapping 都具有 object 值契约。"
+
+          - !statement
+            names:
+              - YAML sequence 的作用
+            defines:
+              - YAML sequence 是由零个或多个成员组成的有序列表，用于承载一个关键字下的多个值或多个子区块。
+              - |-
+                `names` 使用 YAML sequence 同时保存规范名称和别名：
+                ```yaml
+                names:
+                  - 发布流程
+                  - Release workflow
+                ```
+            asserts:
+              - names、defines、asserts、suggests、sections、fields、items、review 和 flow 等复数字段按照各自关键字规则使用 YAML sequence。
+              - YAML sequence 的成员类型、是否允许为空以及顺序是否具有语义，由当前关键字及所在区块共同决定。
+              - "Schema 或 Artifact 中的 type: array 约束其描述的目标值，不表示 Memory YAML 中出现的每个 YAML sequence 都是 array 类型的交付值。"
+
+          - !statement
+            names:
+              - YAML scalar 的作用
+            defines:
+              - YAML scalar 是单个字符串、数字或 boolean 字面量，用于表达名称、描述、枚举值、开关和数值配置。
+              - |-
+                下例分别使用字符串和 boolean YAML scalar：
+                ```yaml
+                actor: human
+                final: true
+                ```
+            asserts:
+              - 每个关键字的规则决定其是否接受 YAML scalar、接受哪一种 YAML scalar，以及允许哪些枚举值。
+              - 需要多个值的关键字必须使用 YAML sequence，不得用单个 YAML scalar 冒充列表。
+
+          - !statement
+            names:
+              - YAML 字段的作用
+            defines:
+              - 字段是 YAML mapping 中的一组 key-value；key 是关键字，value 可以是 YAML scalar、YAML sequence、普通 YAML mapping 或带 tag 的区块。
+            asserts:
+              - 关键字章节定义字段名称的通用语义和值结构，区块章节定义该关键字可以出现在哪些区块、是否必填以及与其他字段如何组合。
+              - 同一个关键字在不同区块中保持相同的核心语义，但并不因此成为所有区块都允许使用的通用字段。
+              - 未被当前区块声明为允许的关键字必须被拒绝，不得静默忽略。
+
+          - !statement
+            names:
+              - 区块与关键字如何配合
+            defines:
+              - 区块提供节点边界和结构，关键字为区块填写属性或连接子值；两者组合后才构成完整语法。
+              - |-
+                例如：
+                ```yaml
+                !procedure
+                syntax: memsphere-20260721-stable
+                names:
+                  - 示例流程
+                flow:
+                  - !action
+                    action: 生成摘要。
+                    artifact: !artifact
+                      name: 摘要
+                      type: string
+                      format: markdown
+                ```
+            asserts:
+              - 读取一个节点时，必须先根据 YAML tag 确定区块，再检查区块允许和要求的关键字，随后按关键字规则检查字段值，并递归处理字段中的子区块。
+              - 示例中的 !procedure、!action 和 !artifact 是区块；names、flow、action、artifact、name、type 和 format 是关键字；flow 的值是包含子区块的 YAML sequence。
+              - 顶层 Memory 必须具有非空 names，或使用非空 name 作为 names 的单值简写；嵌套节点是否必须具有名称由所在区块决定。
+              - defines 中的匿名 !statement 和 !schema 可以省略 names 和 name，但必须分别满足自身的最小有效内容要求；!ref 是结构化外部 Memory 引用，不会被解析为普通文本定义。
+
+  - !statement
+    names:
+      - 类型与格式
+    asserts:
+      - type 只允许 boolean、number、string、object 和 array。
+      - format 只允许 plain、markdown、json 和 yaml。
+      - type、format 和 schema 声明的结构规则会在交付物提交时自动检查。
+      - asserts 和 suggests 表达自然语言语义，系统无法只根据语法自动判断是否满足，执行者必须在提交交付物前理解并检查。
+
+  - !statement
+    names:
+      - 关键字
+    defines:
+      - 汇总 Memory YAML mapping 中可以直接书写的字段名称及其语义；YAML tag 及其结构关系由区块语法说明。
+    sections:
+      - !statement
+        names:
+          - syntax
+        defines:
+          - 声明整份顶层 Memory 文档采用的 Memsphere YAML 语法版本。
+          - |-
+            正式 Memory 应显式声明稳定版本：
+            ```yaml
+            !schema
+            syntax: memsphere-20260721-stable
+            name: 发布记录
+            type: object
+            ```
+        asserts:
+          - syntax 只能出现在顶层 !concept、!statement、!schema 或 !procedure，不能出现在嵌套区块。
+          - syntax 必须是 start，或符合 memsphere-YYYYMMDD-draft、memsphere-YYYYMMDD-stable 格式的字符串。
+          - "未声明 syntax 等价于 syntax: start；正式版本的 Memory 必须通过迁移显式写入版本。"
+
+      - !statement
+        names:
+          - names
+        defines:
+          - 声明当前节点可被识别和引用的规范名称与别名。
+          - |-
+            第一项是规范名称，后续项是别名：
+            ```yaml
+            names:
+              - 需求文档
+              - Requirement document
+            ```
+        asserts:
+          - names 的值必须是非空字符串数组，第一项是规范名称，其余项是别名。
+          - names 中不得包含空字符串，规范名称与别名不得重复。
+        sections:
+          - !statement
+            names:
+              - name
+              - name（names 简写）
+            defines:
+              - 声明当前对象的单一名称；在支持 names 的节点中，作为 names 的单值简写。
+              - |-
+                单值简写：
+                ```yaml
+                name: 需求文档
+                ```
+                等价于：
+                ```yaml
+                names:
+                  - 需求文档
+                ```
+            asserts:
+              - name 必须是非空字符串。
+              - "在支持 names 的节点中，name 与 names 必须互斥，name 的解析结果等价于 names: [name]。"
+              - name 简写只能声明规范名称，不能同时声明别名；需要别名时必须使用 names。
+
+      - !statement
+        names:
+          - defines
+        defines:
+          - 定义当前节点的含义、用途和边界。
+          - |-
+            `defines` 可以同时包含自然语言和匿名结构：
+            ```yaml
+            defines:
+              - 发布是将已验证版本交付给用户的过程。
+              - !statement
+                asserts:
+                  - 发布前必须完成验收。
+            ```
+        asserts:
+          - defines 的值必须是由非空字符串、!ref、匿名 !statement 或匿名 !schema 组成的数组。
+          - defines 中的全部成员共同定义当前节点并同时生效，不得被解释为互斥候选。
+
+      - !statement
+        names:
+          - "!ref"
+          - Memory 引用
+        defines:
+          - 通过稳定逻辑引用连接外部 Concept、Statement 或 Schema Memory，使定义和结构可以复用而不复制内嵌内容。
+          - |-
+            ```yaml
+            defines:
+              - !ref
+                target: schemas/Concept Schema
+            ```
+        asserts:
+          - "!ref 只能使用 mapping 形式，且必须声明非空 target。"
+          - target 必须是 Memory 逻辑引用，形如 concepts/名称、statements/名称 或 schemas/名称；不得只写普通名称。
+          - defines 中的 !ref 可以指向 Concept、Statement 或 Schema；Schema fields、item、items 和 Artifact.schema 中的 !ref 只能指向 Schema。
+          - validate 必须拒绝不存在、目标类型不允许和形成循环依赖的 !ref。
+          - memory read 与 View 必须展示 !ref 及其 target，但默认不得递归内联目标内容。
+
+      - !statement
+        names:
+          - asserts
+        defines:
+          - 声明当前节点必须成立或需要被验证的断言。
+          - |-
+            每个 YAML sequence 成员独立表达一条强制规则：
+            ```yaml
+            asserts:
+              - 标题不能为空。
+              - 发布前必须通过测试。
+            ```
+        asserts:
+          - asserts 如出现必须是非空字符串数组，每一项独立表达一条断言。
+          - asserts 不得被 suggests 削弱或替代。
+          - asserts 是自然语言断言，不等同于 type、format 和 schema 声明的可自动检查结构规则。
+
+      - !statement
+        names:
+          - suggests
+        defines:
+          - 声明当前节点可以参考但不强制满足的建议。
+          - |-
+            建议与断言分开书写：
+            ```yaml
+            suggests:
+              - 标题尽量保持简洁。
+            ```
+        asserts:
+          - suggests 如出现必须是非空字符串数组。
+          - suggests 不得覆盖、削弱或替代任何适用的 asserts。
+
+      - !statement
+        names:
+          - sections
+        defines:
+          - 递归组织有名称的子章节，形成可按 Node 导航的内容树。
+          - |-
+            每个子章节都是带 `!statement` tag 的区块：
+            ```yaml
+            sections:
+              - !statement
+                names:
+                  - 准备阶段
+                asserts:
+                  - 开始前必须确认输入完整。
+            ```
+        asserts:
+          - sections 如出现必须是由 !statement 节点组成的非空数组。
+          - sections 的每个成员必须声明非空 names 或非空 name；同级成员的规范名称不得重复。
+          - sections 只负责组织内容，不改变相关规则的生效语义。
+
+      - !statement
+        names:
+          - extends
+        defines:
+          - 声明当前节点继承的一个或多个上位对象。
+          - |-
+            `extends` 使用 YAML sequence 引用上位对象：
+            ```yaml
+            extends:
+              - 可追踪对象
+              - 可审计对象
+            ```
+        asserts:
+          - extends 如出现必须是字符串数组，每一项都是非空的可解析名称或引用。
+
+      - !statement
+        names:
+          - review
+        defines:
+          - 声明当前 Artifact 在确定性校验通过后需要进入 Review，并列出该 Review 的 Procedure 本地 Reviewer Slot。
+          - |-
+            `review` 是不重复的评审人席位名称数组；Decision Policy 与 Slot 到 Actor 的 Binding 在创建 Run 时选择：
+            ```yaml
+            artifact: !artifact
+              name: 需求文档
+              format: markdown
+              review:
+                - 产品负责人
+                - 资深架构师
+            ```
+        asserts:
+          - review 只允许出现在 !artifact，值必须是由不重复非空 Slot 名称组成的非空 YAML sequence。
+          - 每个 Slot 表示一个评审人席位，名称应使用可以自然指代评审人的角色称呼，例如产品负责人、测试工程师或流程设计者；不得使用验收、质量、架构设计等评审事项名称代替评审人称呼。
+          - Slot 只声明当前 Procedure 需要哪类评审人，不直接引用 Actor、Permission、Decision Policy、system_prompt 或 Agent 配置。
+          - 省略 review 时，Artifact 在 type、format 和 schema 校验通过后按既有行为立即被接纳并推进 Run。
+          - Procedure 含 Review 时，创建 Run 前必须为每个 Review scope 选择 Decision Policy，并把所有 Slot 绑定到 Actor 或显式跳过；结果冻结在 Run v3。
+          - Artifact 校验通过后按 Run 中冻结的配置创建 Artifact Review；Review 通过前不得把候选 Artifact 加入 Run events 或推进当前 Action。
+          - Review 要求修改时，Runner 修改并重新提交同一个 Artifact，系统创建新的 Review Round；通常不需要在 Procedure 中另写 !while 表达该 Artifact 的评审返工。
+          - 当前内置 artifact_acceptance.unanimous 要求全部 Human 与 Agent Reviewer Assignment 提交；只有具有 decision.decide 的 Vote 参与一致通过判定，只有 decision.assess 的 Vote 作为建议保存；Reviewer 完成后仍需 Runner 显式投票。
+          - View 按 Review 与 Round 展示每轮不可变 Artifact Submission、正式 Comment、Vote、Result 和 Revision Summary；历史 Round 只读，完成后的 Review 仍可从对应 Run 步骤重新打开。
+          - Artifact Review 定位 Comment 只能绑定创建时的 Submission、digest 和 Renderer target，不得锚定 Memory 或 Workspace 文件，也不得自动迁移到下一轮。
+
+      - !statement
+        names:
+          - type
+        defines:
+          - 声明当前值的数据类型。
+          - |-
+            `type` 写在 `!schema` 或 `!artifact` 区块中，约束其描述的值：
+            ```yaml
+            !schema
+            names:
+              - 是否通过
+            type: boolean
+            ```
+        asserts:
+          - type 如出现只允许 boolean、number、string、object 或 array。
+          - type 只约束当前值，不得隐式改变子值的类型。
+        sections:
+          - !statement
+            names:
+              - boolean
+            defines:
+              - 表示只有 true 和 false 两种取值的逻辑类型。
+            asserts:
+              - boolean 值只能是 true 或 false，不得把任意非空内容视为 true。
+
+          - !statement
+            names:
+              - number
+            defines:
+              - 表示有限数值的数字类型。
+            asserts:
+              - number 值必须是有限数值，不接受空值、NaN 或 Infinity。
+
+          - !statement
+            names:
+              - string
+            defines:
+              - 表示文本内容的字符串类型。
+            asserts:
+              - string 值必须是文本。
+
+          - !statement
+            names:
+              - object
+            defines:
+              - 表示由具名键映射到子值的对象类型。
+            asserts:
+              - object 值必须是非 null、非 array 的键值对象。
+
+          - !statement
+            names:
+              - array
+            defines:
+              - 表示由零个或多个有序元素组成的数组类型。
+            asserts:
+              - array 值必须是有序元素列表。
+
+      - !statement
+        names:
+          - format
+        defines:
+          - 声明当前值的编码与呈现格式。
+          - |-
+            不需要附加配置时可以使用字符串简写：
+            ```yaml
+            format: markdown
+            ```
+          - |-
+            需要附加配置时使用 YAML mapping 展开形式，其中 name 是格式名称，其余字段是该格式支持的配置：
+            ```yaml
+            format:
+              name: markdown
+              layout: outline
+            ```
+        asserts:
+          - format 的字符串简写等价于只包含同名 name、且没有附加配置的 YAML mapping。
+          - format YAML mapping 必须包含非空 name，只允许 plain、markdown、json 或 yaml。
+          - name 以外的字段必须是当前格式明确支持的附加配置。
+        sections:
+          - !statement
+            names:
+              - plain
+            defines:
+              - 表示不包含额外结构语法的纯文本编码格式。
+            asserts:
+              - plain 不支持附加配置，内容按目标 type 解释为 boolean、number 或 string。
+
+          - !statement
+            names:
+              - markdown
+            defines:
+              - 表示使用 Markdown 语法编码和呈现的文本或结构化内容格式。
+            asserts:
+              - markdown 当前只支持 layout 这一项附加配置。
+              - string + markdown 不需要 layout；结构化 markdown 必须使用与 type 兼容的 layout。
+            sections:
+              - !statement
+                names:
+                  - layout
+                defines:
+                  - 声明 markdown 结构化内容的布局方式。
+                asserts:
+                  - layout 如出现只允许 outline 或 table。
+                  - object + markdown 使用 outline，array + markdown 使用 table，string + markdown 不得声明 layout。
+                sections:
+                  - !statement
+                    names:
+                      - outline
+                    defines:
+                      - 使用 Markdown 标题层级表示 object 及其递归字段结构。
+                      - |-
+                        `outline` 与 `object` 配合使用：
+                        ```yaml
+                        type: object
+                        format:
+                          name: markdown
+                          layout: outline
+                        ```
+                    asserts:
+                      - outline 必须将 Schema.fields 的具名字段呈现为符合嵌套关系的 Markdown 标题。
+
+                  - !statement
+                    names:
+                      - table
+                    defines:
+                      - 使用 Markdown 表格表示 array，其中每一行对应一个数组元素。
+                      - |-
+                        `table` 与 `array` 配合使用：
+                        ```yaml
+                        type: array
+                        format:
+                          name: markdown
+                          layout: table
+                        ```
+                    asserts:
+                      - table 必须将元素 object 的具名字段呈现为表格列。
+
+          - !statement
+            names:
+              - json
+            defines:
+              - 表示使用 JSON 语法编码结构化值的格式。
+            asserts:
+              - json 不支持附加配置，内容必须能够被完整解析为 JSON 值。
+
+          - !statement
+            names:
+              - yaml
+            defines:
+              - 表示使用 YAML 语法编码结构化值的格式。
+            asserts:
+              - yaml 不支持附加配置，内容必须能够被完整解析为 YAML 值。
+
+      - !statement
+        names:
+          - schema
+        defines:
+          - 为当前值绑定外部 Schema 引用、!ref 或 inline !schema，形成结构校验契约。
+          - |-
+            引用已经命名的外部 Schema：
+            ```yaml
+            schema: 需求文档
+            ```
+          - |-
+            使用逻辑引用指向外部 Schema：
+            ```yaml
+            schema: !ref
+              target: schemas/需求文档
+            ```
+          - |-
+            直接内嵌一个匿名 Schema：
+            ```yaml
+            schema: !schema
+              type: object
+              fields:
+                - 摘要
+                - 结论
+            ```
+        asserts:
+          - schema 如出现必须是非空 Schema 名称引用、指向 schemas/* 的 !ref，或带 !schema tag 的 YAML mapping。
+          - schema 的根值契约必须与其约束的值契约一致。
+
+      - !statement
+        names:
+          - fields
+        defines:
+          - 声明当前 object 值内部由字段名索引的子值约束。
+          - |-
+            字符串是最简字段，`!schema` 用于描述具有更多约束的字段：
+            ```yaml
+            fields:
+              - 标题
+              - !schema
+                names:
+                  - 优先级
+                type: number
+            ```
+        asserts:
+          - fields 如出现必须是由字符串、指向 schemas/* 的 !ref、带 !schema tag 的字段或合法 !repeat 组成的数组。
+          - "字符串成员是 type: string 字段的最简写法；详细字段 Schema 必须声明非空 names 或非空 name。"
+          - "带 optional: true 的详细字段缺失时可以通过校验；字符串简写字段和未声明 optional 的详细字段仍为必填。"
+          - fields 中的每一项约束一个具名子值，不得用于表达匿名数组元素。
+
+      - !statement
+        names:
+          - optional
+        defines:
+          - 声明 fields 中的具名 Schema 字段是否可以缺失。
+        asserts:
+          - optional 只能出现在 fields 中作为字段使用的具名 !schema 节点上，不得出现在顶层 Schema、defines、item 或 items 中。
+          - optional 如出现必须是 boolean；省略或 false 表示字段必填。
+          - 可选字段缺失时 JSON/YAML object、Markdown outline 和 Markdown table 校验均应放行；字段存在时仍必须完整满足其类型、format 和嵌套 Schema。
+          - Schema Run 可以显式 skip 当前可选字段；必填字段不得 skip。
+
+      - !statement
+        names:
+          - item
+        defines:
+          - 声明当前 array 值唯一允许使用的元素契约。
+          - |-
+            对象数组可以使用一个匿名 `item` Schema 约束全部元素：
+            ```yaml
+            type: array
+            item: !schema
+              type: object
+              fields:
+                - 标题
+                - 状态
+            ```
+        asserts:
+          - item 只允许用于显式声明 type 为 array 的 Schema。
+          - item 的值必须是单个匿名 !schema 或指向 schemas/* 的 !ref，数组中的每个元素都必须满足该 Schema。
+          - item 与 items 不得同时出现。
+
+      - !statement
+        names:
+          - items
+        defines:
+          - 声明当前 array 值允许使用的多个候选元素契约。
+          - |-
+            `items` 使用 YAML sequence 列出多个可接受类型或结构：
+            ```yaml
+            type: array
+            items:
+              - !schema
+                type: string
+              - !schema
+                type: number
+            ```
+        asserts:
+          - items 只允许用于显式声明 type 为 array 的 Schema。
+          - items 的值必须是由至少两个匿名 !schema 或指向 schemas/* 的 !ref 组成的 YAML sequence。
+          - 数组中的每个元素都必须满足 items 中至少一个候选 Schema；不同元素可以满足不同候选。
+          - items 表达联合成员约束，不表达按位置匹配的 tuple。
+          - items 与 item 不得同时出现。
+
+      - !statement
+        names:
+          - final
+        defines:
+          - 标记当前交付物是否属于一次执行的最终交付物。
+        asserts:
+          - final 如出现必须是 boolean。
+          - "final: true 的 Artifact 必须纳入 Run 的最终交付物汇总；省略或 false 不纳入汇总。"
+
+      - !statement
+        names:
+          - goals
+        defines:
+          - 声明当前流程预期达成的业务或执行目标。
+        asserts:
+          - goals 如出现必须是非空字符串数组，每一项独立表达一个目标。
+
+      - !statement
+        names:
+          - flow
+        defines:
+          - 声明按顺序执行的流程节点。
+        asserts:
+          - flow 如出现必须是由已注册流程区块组成的数组。
+
+      - !statement
+        names:
+          - action
+        defines:
+          - 描述当前步骤需要完成的动作。
+        asserts:
+          - action 必须是非空字符串，并清楚表达执行对象和预期结果。
+
+      - !statement
+        names:
+          - actor
+        defines:
+          - 声明当前步骤的执行者。
+        asserts:
+          - actor 如出现只允许 agent 或 human。
+          - actor 省略时默认为 agent。
+
+      - !statement
+        names:
+          - artifact
+        defines:
+          - 声明当前步骤必须产出的交付物契约。
+        asserts:
+          - artifact 必须是带 !artifact tag 的 YAML mapping，不得使用无 tag 的 YAML mapping。
+
+      - !statement
+        names:
+          - condition
+        defines:
+          - 声明用于决定控制流的条件步骤。
+        asserts:
+          - condition 的值必须是产出 boolean Artifact 的 !action。
+
+      - !statement
+        names:
+          - then
+        defines:
+          - 声明条件为 true 时执行的流程分支。
+        asserts:
+          - then 必须是由已注册流程区块组成的非空数组。
+
+      - !statement
+        names:
+          - elseif
+        defines:
+          - 声明前置条件不成立时继续判断的单个递归条件分支。
+          - |-
+            `elseif` 的值是单个嵌套 `!if`，不是 YAML sequence：
+            ```yaml
+            elseif: !if
+              condition: !action
+                action: 判断是否允许降级发布。
+                artifact: !artifact
+                  name: 是否允许降级发布
+                  type: boolean
+              then:
+                - !call
+                  target: 降级发布流程
+            ```
+        asserts:
+          - elseif 如出现必须是单个 !if 区块，不得使用数组或 !elseif tag。
+
+      - !statement
+        names:
+          - else
+        defines:
+          - 声明所有关联条件均不成立时执行的兜底流程分支。
+        asserts:
+          - else 如出现必须是由已注册流程区块组成的数组。
+
+      - !statement
+        names:
+          - do
+        defines:
+          - 声明条件为 true 时重复执行的循环体。
+        asserts:
+          - do 必须是由已注册流程区块组成的非空数组。
+
+      - !statement
+        names:
+          - target
+        defines:
+          - 声明当前调用要进入的目标名称或可解析引用。
+        asserts:
+          - target 必须是非空字符串，并且能够解析到兼容的目标对象。
+
+  - !statement
+    names:
+      - 区块
+    sections:
+      - !statement
+        names:
+          - "!concept"
+        defines:
+          - |-
+            一个 Concept 可以声明定义和上位概念：
+            ```yaml
+            !concept
+            names:
+              - 工作项
+              - Work item
+            defines:
+              - 需要被跟踪、执行或验收的工作对象。
+            extends:
+              - 可追踪对象
+            ```
+        asserts:
+          - "!concept 根节点允许 name/names、defines 和 extends 字段。"
+          - extends 如出现，必须是字符串数组，用于列出当前 Concept 的上位概念。
+          - Concept 用于定义稳定词汇或领域抽象；独立规则和内容结构应分别写入 Statement 和 Schema。
+
+      - !statement
+        names:
+          - "!statement"
+        defines:
+          - |-
+            Statement 可以用 `sections` 递归组织规则：
+            ```yaml
+            !statement
+            names:
+              - 发布规则
+            asserts:
+              - 发布前必须通过验收。
+            sections:
+              - !statement
+                names:
+                  - 回滚要求
+                asserts:
+                  - 发布前必须准备回滚方案。
+            ```
+        asserts:
+          - "!statement 节点允许 name/names、defines、asserts、suggests 和 sections 字段。"
+          - asserts 如出现，必须是非空字符串数组，每一项都是必须成立或需要被验证的规则、事实或约束。
+          - suggests 如出现，必须是非空字符串数组，每一项都是可参考但不强制满足的建议，且不得削弱 asserts。
+          - sections 如出现，必须是由带 !statement tag 的节点组成的非空数组，用于递归组织规则树。
+          - sections 的每个成员必须具有非空 names 或非空 name；同一父节点下各成员的规范名称不得重复。
+          - 每个 Statement 节点必须至少包含非空 asserts、suggests 或 sections 中的一项；defines 不能单独构成有效 Statement。
+          - sections 只负责组织规则，不改变规则的生效语义；读取整份 Statement 时，与任务相关的全部节点共同生效。
+
+      - !statement
+        names:
+          - "!schema"
+        defines:
+          - 一个 Schema 节点约束一个值节点，包括该值的名称、类型、表示格式、递归结构和自然语言要求；根值和数组元素不一定具有业务字段名。
+          - |-
+            下例约束一份使用 Markdown 标题层级呈现的对象：
+            ```yaml
+            !schema
+            names:
+              - 发布记录
+            type: object
+            format:
+              name: markdown
+              layout: outline
+            fields:
+              - 版本
+              - !schema
+                names:
+                  - 风险
+                asserts:
+                  - 风险必须说明影响范围。
+            ```
+        asserts:
+          - "!schema 节点允许 name/names、defines、asserts、suggests、optional、type、format、fields、item 和 items 字段。"
+          - 顶层 !schema 与 fields 中作为具名字段使用的 !schema 必须具有非空 names 或非空 name。
+          - defines 与 item/items 中的匿名 !schema 可以省略 names 和 name，但必须至少具有非空 defines、asserts、suggests、type、format、fields、item 或 items 中的一项。
+          - fields、item、items 和 Artifact.schema 中的 !ref 必须指向 Schema Memory，解析后按目标 Schema 约束当前值。
+          - Schema.asserts 如出现，必须是字符串数组，用于表达代码无法自动推导的内容或业务约束。
+          - Schema.suggests 如出现，必须是非空字符串数组，用于表达不影响结构合法性的字段书写建议；Schema 写作时会与继承到当前字段的 asserts 分开展示。
+        sections:
+          - !statement
+            names:
+              - type 推断
+            defines:
+              - |-
+                省略 `type` 且存在 `fields` 时推断为 object；字符串字段推断为 string：
+                ```yaml
+                !schema
+                names:
+                  - 需求文档
+                fields:
+                  - 标题
+                  - 摘要
+                ```
+            asserts:
+              - Schema.type 只约束当前值节点，不继承父 Schema 或所属 Artifact 的 type。
+              - Schema 显式声明 type 时以声明值为准。
+              - Schema 省略 type 且存在 fields 字段时，当前实现推断为 object；省略 type 且不存在 fields 时推断为 string。
+              - number、boolean 和当前实现中的 array Schema 必须显式声明 type。
+              - boolean、number 和 string 等标量 Schema 不得包含有实际成员的 fields。
+
+          - !statement
+            names:
+              - format 解析与继承
+            defines:
+              - |-
+                子字段省略 `format` 时继承父 Schema 的格式上下文；标量字段不会继承 `layout`：
+                ```yaml
+                !schema
+                names:
+                  - 需求文档
+                type: object
+                format:
+                  name: markdown
+                  layout: outline
+                fields:
+                  - !schema
+                    names:
+                      - 摘要
+                    type: string
+                ```
+            suggests:
+              - 独立顶层 Schema 建议显式声明 format，为整棵 Schema 树建立默认格式上下文。
+              - 子 Schema 与父层格式一致时建议省略 format；只有格式或兼容 layout 与父层不同时再显式覆盖。
+            asserts:
+              - Schema.format 显式声明时以本层声明为准，省略时继承父 Schema 或所属 Artifact 的格式上下文。
+              - 格式继承不得改变当前 Schema 的 type。
+              - Markdown layout 只由兼容的结构节点保留；object 只保留 outline，array 只保留 table，标量节点继承 markdown 格式但不继承 layout。
+              - boolean、number 和 string Schema 支持 plain、无 layout 的 markdown，以及作为父结构表示上下文的 json 或 yaml。
+              - "object Schema 的 markdown 格式必须使用 layout: outline；array Schema 的 markdown 格式必须使用 layout: table。"
+              - object 和 array Schema 支持 json 与 yaml 格式。
+              - 作为 Artifact 根契约的 Schema，其解析后的 type 和 format 必须与所属 Artifact 完全一致。
+
+          - !statement
+            names:
+              - fields
+            asserts:
+              - "fields 表达 object 值内部由字段名索引的子值约束；除 optional: true 的详细字段外，列表中的每一项都是必需结构字段，额外字段当前允许存在。"
+              - fields 成员可以是字符串简写、指向 Schema 的 !ref、带 !schema tag 的详细字段，或满足适用条件的 !repeat 控制节点。
+              - 字符串字段是仅声明字段名的最简写法，等价于省略显式 type 的 string 叶子 Schema，并继承所在结构的兼容格式上下文。
+              - 带 !schema tag 的字段用于声明该字段的定义、断言、建议、显式类型、显式格式或递归子结构。
+              - "optional: true 只能用于 fields 中的具名 !schema 字段；字符串简写和 !ref 字段本身不携带 optional。"
+              - array Schema 不允许直接使用 fields；对象元素的字段必须放在 item 或 items 的 object Schema 中。
+
+          - !statement
+            names:
+              - array 与 item/items
+            defines:
+              - item 或 items 用于约束 array 中匿名、重复出现的元素值。
+              - item 表示唯一元素契约；items 表示多个可接受类型或结构组成的候选契约集合。
+            asserts:
+              - "type: array 同时省略 item 和 items 时只校验数组容器，不约束元素类型。"
+              - item 与 items 互斥；任意一个出现时，所在 Schema 都必须显式声明 type 为 array。
+              - item 的值是单个匿名 Schema 或指向 Schema 的 !ref，数组中的每个元素都必须满足该 Schema。
+              - items 的值是由至少两个匿名 Schema 或指向 Schema 的 !ref 组成的 YAML sequence，数组中的每个元素必须至少满足一个候选 Schema，不同元素可以满足不同候选。
+              - items 表达联合成员约束，不表达按位置匹配的 tuple。
+              - item 和 items 中的 Schema 约束数组元素值而不是 object 字段，因此可以省略 names 和 name；存在名称时只作为元素约束名称，不产生字段键。
+              - "type: array 不应直接声明 fields；只有一种对象元素结构时，应写成 item 下 type: object 且包含 fields 的 Schema。"
+              - "数组的 collection layout 属于数组整体；item 和 items 中的 Schema 继承 format.name 等兼容表示上下文，但不继承 array 的 layout: table。"
+              - "旧版 array + fields 必须迁移为 array + item，其中 item 是 type: object 且保留原 fields 的 Schema；可使用 schema-contract-v2 迁移命令完成转换。"
+
+          - !statement
+            names:
+              - "!repeat"
+            defines:
+              - 在 Schema.fields 中将一组字段作为整体重复的结构控制区块。
+              - |-
+                `!repeat` 必须放在 outline Schema 的 `fields` 中：
+                ```yaml
+                !schema
+                names:
+                  - 迭代记录
+                type: object
+                format:
+                  name: markdown
+                  layout: outline
+                fields:
+                  - !repeat
+                    limit:
+                      min: 1
+                      max: 3
+                    body:
+                      - 目标
+                      - 验证结果
+                ```
+            asserts:
+              - "!repeat 只能作为有效 object + markdown + layout: outline Schema 的 fields 成员，用于将 body 中的一组字段整体重复。"
+              - "!repeat 允许 limit 和 body 字段，不允许其他字段。"
+              - "!repeat 不得用于 table Schema、defines、Procedure.flow、array.item、array.items 或其他非 outline fields 位置。"
+            sections:
+              - !statement
+                names:
+                  - limit
+                defines:
+                  - 声明当前重复区块执行次数的可选上下界。
+                asserts:
+                  - limit 如出现必须是只包含 min 和 max 的 YAML mapping，并至少声明其中一项。
+                sections:
+                  - !statement
+                    names:
+                      - min
+                    defines:
+                      - 声明当前重复区块允许执行的最少次数。
+                    asserts:
+                      - min 如出现必须是非负整数。
+                      - min 省略时按 0 处理；与 max 同时存在时不得大于 max。
+
+                  - !statement
+                    names:
+                      - max
+                    defines:
+                      - 声明当前重复区块允许执行的最多次数。
+                    asserts:
+                      - max 如出现必须是非负整数。
+                      - max 省略时表示没有业务上限；与 min 同时存在时不得小于 min。
+
+              - !statement
+                names:
+                  - body
+                defines:
+                  - 声明当前重复区块每一轮整体重复的一组 Schema 字段。
+                asserts:
+                  - body 必须是由字符串字段或带 !schema tag 的字段组成的非空数组。
+                  - body 的直接字段按每轮位置和字段数量匹配 Markdown 标题，不校验标题文本是否等于字段 names；字段内部的嵌套 fields 仍按名称和层级校验。
+                  - body 不得直接包含 !repeat，也不得通过 body 内的 Schema 嵌套 !repeat。
+
+      - !statement
+        names:
+          - "!procedure"
+        defines:
+          - |-
+            Procedure 使用 `flow` 按顺序组织可执行区块：
+            ```yaml
+            !procedure
+            names:
+              - 文档交付流程
+            goals:
+              - 交付一份经过验收的文档。
+            flow:
+              - !action
+                action: 编写文档。
+                artifact: !artifact
+                  name: 文档
+                  type: string
+                  format: markdown
+            ```
+        asserts:
+          - "!procedure 根节点允许 name/names、defines、asserts、goals 和 flow 字段。"
+          - Procedure.asserts 如出现，必须是非空字符串数组，并在当前 Procedure 及其调用链执行期间持续生效。
+          - goals 必须是字符串数组，用于声明流程目标。
+          - flow 必须是由 !action、!if、!while 或 !call 节点组成的有序数组。
+        sections:
+          - !statement
+            names:
+              - "!action"
+            defines:
+              - |-
+                Action 同时声明动作、执行者、自然语言要求和交付物：
+                ```yaml
+                - !action
+                  action: 编写发布摘要。
+                  actor: agent
+                  asserts:
+                    - 摘要必须包含版本号。
+                  suggests:
+                    - 摘要尽量保持简洁。
+                  artifact: !artifact
+                    name: 发布摘要
+                    type: string
+                    format: markdown
+                ```
+            asserts:
+              - "!action 只允许 action、actor、asserts、suggests 和 artifact 字段。"
+              - action 必须是非空字符串，描述当前步骤要完成的动作。
+              - actor 只允许 agent 或 human，省略时默认为 agent。
+              - Action.asserts 如出现，必须是非空字符串数组，只约束当前步骤。
+              - Action.suggests 如出现，必须是非空字符串数组，只为当前步骤提供非强制建议。
+              - "每个 !action 必须包含 artifact: !artifact；不得使用无 tag 的 YAML mapping 代替 Artifact。"
+              - 普通 flow 中的 Action 不得产出 boolean Artifact；boolean Artifact 仅允许作为 !if 或 !while 的 condition 结果。
+            sections:
+              - !statement
+                names:
+                  - "!artifact"
+                defines:
+                  - |-
+                    结构化 Artifact 可以绑定 inline Schema，并标记为最终交付物：
+                    ```yaml
+                    artifact: !artifact
+                      name: 验收报告
+                      type: object
+                      format:
+                        name: markdown
+                        layout: outline
+                      schema: !schema
+                        type: object
+                        fields:
+                          - 结果
+                          - 证据
+                      review:
+                        - 验收负责人
+                      final: true
+                    ```
+                asserts:
+                  - "!artifact 只允许 name、type、format、schema、review 和 final 字段。"
+                  - name 必须是非空字符串，用于描述当前 Action 的交付物。
+                  - type 省略时默认为 string；format 省略时默认为 plain。
+                  - schema 可以是外部 Schema 的名称引用，或一个 inline !schema；string、number 和 boolean Artifact 不得声明 schema。
+                  - "final 如出现必须是 boolean；final: true 表示该 Artifact 纳入 Run 的最终交付物汇总。"
+                  - boolean Artifact 只支持 plain，且仅允许用于 !if 或 !while condition。
+                  - number Artifact 只支持 plain。
+                  - string Artifact 支持 plain 或不带 layout 的 markdown。
+                  - object 和 array Artifact 支持 json 或 yaml，schema 可选。
+                  - "object + markdown 必须声明 layout: outline 并提供 schema。"
+                  - "array + markdown 必须声明 layout: table 并提供 schema。"
+                  - inline Schema 根节点解析后的 type 和 format 必须与 Artifact 契约完全一致。
+                  - review 如出现必须是非空且不重复的 Reviewer Slot 名称 sequence；每个名称必须表达评审人席位，Decision Policy、Actor Binding 与 Permission Grant 属于 Run 创建配置。
+
+          - !statement
+            names:
+              - "!if"
+            defines:
+              - |-
+                `condition` 是产出 boolean Artifact 的 Action，`then` 和 `else` 是流程分支：
+                ```yaml
+                - !if
+                  condition: !action
+                    action: 判断是否可以发布。
+                    artifact: !artifact
+                      name: 是否可以发布
+                      type: boolean
+                  then:
+                    - !call
+                      target: 发布流程
+                  else:
+                    - !call
+                      target: 修复流程
+                ```
+            asserts:
+              - "!if 只允许 condition、then、elseif 和 else 字段。"
+              - condition 必须是产出 boolean Artifact 的 !action。
+              - then 必须是由合法 flow 节点组成的非空数组。
+              - elseif 如出现，必须是单个嵌套 !if，不得使用数组或 !elseif tag。
+              - 一个 elseif 链只允许最外层 !if 声明 else，嵌套 elseif 节点不得声明 else。
+              - else 如出现，必须是由合法 flow 节点组成的数组。
+
+          - !statement
+            names:
+              - "!while"
+            defines:
+              - |-
+                `condition` 为 true 时重复执行 `do`：
+                ```yaml
+                - !while
+                  condition: !action
+                    action: 判断是否仍有未解决问题。
+                    artifact: !artifact
+                      name: 是否仍有未解决问题
+                      type: boolean
+                  do:
+                    - !call
+                      target: 问题处理流程
+                ```
+            asserts:
+              - "!while 只允许 condition 和 do 字段。"
+              - condition 必须是产出 boolean Artifact 的 !action。
+              - do 必须是由合法 flow 节点组成的非空数组。
+              - 每次循环必须重新执行并上报 condition Action，condition 为 true 时执行 do，为 false 时退出循环。
+
+          - !statement
+            names:
+              - "!call"
+            defines:
+              - |-
+                `!call` 通过 `target` 调用另一个 Procedure：
+                ```yaml
+                - !call
+                  target: 文档评审流程
+                ```
+            asserts:
+              - "!call 只允许 target 字段，target 必须是被调用 Procedure 的非空名称或可解析引用。"
+              - "!call 必须使用 YAML mapping 形式，不支持 YAML scalar 形式的 !call 简写。"
+              - "!call 不声明 actor、artifact、format 或分支字段；被调用 Procedure 自行定义执行者和交付物。"

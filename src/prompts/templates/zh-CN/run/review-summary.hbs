@@ -1,0 +1,55 @@
+{{#ifDecision decision "awaiting_runner"}}评审意见收集完成，评审信息：{{else}}产物评审信息：{{/ifDecision}}
+- review_id：{{reviewId}}
+- review_round_id：{{roundId}}
+- 轮次：{{round}}
+- 状态：{{status}}
+- 已提交：{{submitted}}/{{total}}
+- 可决策：{{decisionReady}}
+- 建议意见：阻塞={{advisory.blocking}}；风险={{advisory.risk}}；建议={{advisory.suggestion}}；未处置阻塞={{advisory.unresolvedBlocking}}
+- 前序产物：{{earlierArtifacts}}
+{{#each repeatedAdvisories}}
+- 重复建议：[{{severity}}] x{{count}} 轮次={{rounds}} {{body}}
+{{/each}}
+参与者：
+{{#each participants}}
+- {{actorName}}（{{binding}}）
+  - 投票：{{vote}}
+{{#if decisionIntent}}
+  - 决策说明：{{decisionIntent}}
+{{/if}}
+{{#unlessNil implementationEvidenceReferenced}}
+  - 已引用实现证据：{{implementationEvidenceReferenced}}
+{{/unlessNil}}
+{{#each comments}}
+  - 意见 [{{severity}}]：{{body}}
+{{/each}}
+{{/each}}
+决策：
+{{#ifDecision decision "awaiting_runner"}}
+- 所有分配的评审均已提交：{{decision.approved}}/{{decision.decisionTotal}} 张决策票通过；已记录 {{decision.advisoryTotal}} 张建议票。
+{{#if decision.advisoryRequestChanges}}
+- 当前决策票均已通过，仅建议者要求修改。你拥有最终决定权。
+{{else}}
+- 当前决策票均已通过。你拥有最终决定权。
+{{/if}}
+结论：
+- 请阅读以上全部意见，然后明确投票。
+{{/ifDecision}}
+{{#ifDecision decision "result"}}
+- {{#if decision.passed}}已{{else}}未{{/if}}达成全票通过：{{decision.approved}}/{{decision.decisionTotal}} 张决策票通过；已记录 {{decision.advisoryTotal}} 张不影响决策的建议票。
+结论：
+{{#if decision.passed}}
+- 本轮评审全票通过，产物已被接受，Run 已推进到下一步骤。
+{{else}}
+- 本轮未达成全票通过。请根据以上意见修改产物，提供修订摘要并重新上报以启动下一轮。
+{{/if}}
+{{/ifDecision}}
+{{#ifDecision decision "failed"}}
+结论：
+- 本轮评审尚未形成可执行结论。
+{{/ifDecision}}
+{{#ifDecision decision "pending"}}
+- 尚未形成决策；还剩 {{decision.remaining}} 份评审未提交。
+结论：
+- 本轮评审仍在进行。请使用相同的 review_id 继续等待，直到所有评审者提交。
+{{/ifDecision}}

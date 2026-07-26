@@ -1,0 +1,55 @@
+{{#ifDecision decision "awaiting_runner"}}Review opinions collected. Review information:{{else}}Artifact Review information:{{/ifDecision}}
+- review_id: {{reviewId}}
+- review_round_id: {{roundId}}
+- round: {{round}}
+- status: {{status}}
+- submitted: {{submitted}}/{{total}}
+- decision_ready: {{decisionReady}}
+- advisory: blocking={{advisory.blocking}}; risk={{advisory.risk}}; suggestion={{advisory.suggestion}}; unresolved_blocking={{advisory.unresolvedBlocking}}
+- earlier_artifacts: {{earlierArtifacts}}
+{{#each repeatedAdvisories}}
+- repeated_advisory: [{{severity}}] x{{count}} rounds={{rounds}} {{body}}
+{{/each}}
+Participants:
+{{#each participants}}
+- {{actorName}} ({{binding}})
+  - vote: {{vote}}
+{{#if decisionIntent}}
+  - decision_intent: {{decisionIntent}}
+{{/if}}
+{{#unlessNil implementationEvidenceReferenced}}
+  - implementation_evidence_referenced: {{implementationEvidenceReferenced}}
+{{/unlessNil}}
+{{#each comments}}
+  - comment [{{severity}}]: {{body}}
+{{/each}}
+{{/each}}
+Decision:
+{{#ifDecision decision "awaiting_runner"}}
+- All assigned reviews are submitted: {{decision.approved}}/{{decision.decisionTotal}} decision votes approved; {{decision.advisoryTotal}} advisory vote{{#unlessOne decision.advisoryTotal}}s{{/unlessOne}} {{#ifOne decision.advisoryTotal}}was{{else}}were{{/ifOne}} recorded.
+{{#if decision.advisoryRequestChanges}}
+- All decision votes approved; only advisory reviewers requested changes. You have final decision authority.
+{{else}}
+- All decision votes approved. You have final decision authority.
+{{/if}}
+Conclusion:
+- Review every opinion above, then cast your vote explicitly.
+{{/ifDecision}}
+{{#ifDecision decision "result"}}
+- unanimous approval {{#if decision.passed}}was reached{{else}}was not reached{{/if}}: {{decision.approved}}/{{decision.decisionTotal}} decision votes approved; {{decision.advisoryTotal}} advisory vote{{#unlessOne decision.advisoryTotal}}s{{/unlessOne}} {{#ifOne decision.advisoryTotal}}was{{else}}were{{/ifOne}} recorded and did not affect the decision.
+Conclusion:
+{{#if decision.passed}}
+- This review round passed unanimously, so the reviewed Artifact was accepted and the Run advanced to the next step.
+{{else}}
+- This review round did not pass because unanimous approval was not reached; revise the Artifact using the comments above, provide a revision summary, and report the new Artifact to start the next round.
+{{/if}}
+{{/ifDecision}}
+{{#ifDecision decision "failed"}}
+Conclusion:
+- This review round has not produced an actionable result.
+{{/ifDecision}}
+{{#ifDecision decision "pending"}}
+- No decision has been reached; {{decision.remaining}} review submission{{#unlessOne decision.remaining}}s{{/unlessOne}} remain.
+Conclusion:
+- This review round is still in progress; keep waiting with the same review_id until every assigned reviewer submits.
+{{/ifDecision}}

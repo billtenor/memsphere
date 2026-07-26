@@ -1,0 +1,70 @@
+!schema
+syntax: memsphere-20260721-stable
+names:
+  - Statement Schema
+  - memsphere-statement-schema
+format: yaml
+defines:
+  - 定义 memsphere !statement Memory 的合法内容结构和递归章节规则。
+asserts:
+  - 根节点必须使用 !statement 标签，只允许 syntax、name/names、defines、asserts、suggests 和 sections 字段。
+  - "syntax 必须填写 memsphere-20260721-stable；嵌套 Statement 不得声明 syntax。"
+  - name 与 names 必须且只能使用一个；name 必须是非空字符串，names 必须是非空且成员不重复的字符串数组，首项为规范名称。
+  - defines 可以包含非空字符串、!ref、匿名 !statement 或匿名 !schema；嵌套结构必须携带 YAML tag，全部成员共同生效。
+  - 每个 Statement 节点必须至少包含 asserts、suggests 或 sections 中的一项；suggests 不得削弱或替代 asserts。
+  - sections 的成员必须使用 !statement tag 和非空名称，同级规范名称不得重复，并递归遵循本 Schema。
+fields:
+  - !schema
+    name: syntax
+    type: string
+    defines:
+      - 当前顶层 Statement 使用的不可变语法版本。
+  - !schema
+    name: name
+    optional: true
+    type: string
+    defines:
+      - Statement 只有一个名称时使用的简写。
+  - !schema
+    name: names
+    optional: true
+    type: array
+    item: !schema
+      type: string
+    defines:
+      - Statement 的规范名称与别名，首项为规范名称。
+  - !schema
+    name: defines
+    optional: true
+    type: array
+    items:
+      - !schema
+        type: string
+      - !schema
+        type: object
+    defines:
+      - 对陈述主题的文本说明、外部 Memory 引用，以及用于补充规则或结构的匿名 Statement、Schema。
+  - !schema
+    name: asserts
+    optional: true
+    type: array
+    item: !schema
+      type: string
+    defines:
+      - 必须成立或需要被验证的事实、规则和约束。
+  - !schema
+    name: suggests
+    optional: true
+    type: array
+    item: !schema
+      type: string
+    defines:
+      - 执行时可以参考但不强制满足的建议。
+  - !schema
+    name: sections
+    optional: true
+    type: array
+    item: !schema
+      type: object
+    defines:
+      - 用有名称的内嵌 Statement 节点递归组织规则。

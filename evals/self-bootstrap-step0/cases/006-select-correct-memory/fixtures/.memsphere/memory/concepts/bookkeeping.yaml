@@ -1,0 +1,21 @@
+!concept
+syntax: memsphere-20260719-stable
+names:
+  - 记账
+  - 记账记录
+defines:
+  - 一条记账记录表示一次收入或支出的发生情况，用于个人或团队后续汇总和核对资金变化。
+  - !statement
+    asserts:
+      - 记账实例必须以 Markdown 文件保存到 artifacts/bookkeeping.md。
+  - !schema
+    format:
+      name: markdown
+      layout: outline
+    fields:
+      - 日期
+      - 类型
+      - 金额
+      - 分类
+      - 备注
+    type: object

@@ -1,0 +1,95 @@
+!schema
+syntax: memsphere-20260721-stable
+name: Schema 逐步撰写端到端验收文档
+type: object
+format:
+  name: markdown
+  layout: outline
+defines:
+  - 用于观察复杂 Schema Artifact 从逐字段填写、稳定草稿、全局调整到正式 Review 的完整过程。
+asserts:
+  - 各区块应围绕同一个架构方案，事实、风险、验证和结论之间不得相互矛盾。
+fields:
+  - !schema
+    name: 执行概览
+    type: object
+    defines:
+      - 提供无需阅读全文即可理解的方案概览。
+    fields:
+      - 文档标题
+      - 执行摘要
+      - 当前结论
+
+  - !schema
+    name: 背景与目标
+    type: object
+    defines:
+      - 说明方案要解决的问题及本轮边界。
+    fields:
+      - 业务背景
+      - 当前问题
+      - 本轮目标
+      - 非目标
+
+  - !schema
+    name: 方案设计
+    type: object
+    asserts:
+      - 模块职责、数据流和接口设计应相互一致。
+    fields:
+      - 核心思路
+      - 模块职责
+      - 数据流
+      - 关键接口
+      - 兼容策略
+
+  - !schema
+    name: 风险清单
+    type: array
+    format:
+      name: markdown
+      layout: table
+    defines:
+      - 记录影响交付或后续演进的主要风险及应对方式。
+    item: !schema
+      type: object
+      fields:
+        - 风险
+        - 影响
+        - 缓解措施
+        - 负责人
+
+  - !schema
+    name: 验证计划
+    type: object
+    fields:
+      - 自动化验证
+      - 端到端验证
+      - 人工检查
+      - 通过标准
+
+  - !schema
+    name: 发布与回滚
+    type: object
+    fields:
+      - 发布前检查
+      - 发布步骤
+      - 观测指标
+      - 回滚条件
+      - 回滚方案
+
+  - !schema
+    name: 决策记录
+    type: array
+    format:
+      name: markdown
+      layout: table
+    item: !schema
+      type: object
+      fields:
+        - 决策
+        - 选择理由
+        - 放弃的方案
+        - 后续动作
+
+  - 最终结论

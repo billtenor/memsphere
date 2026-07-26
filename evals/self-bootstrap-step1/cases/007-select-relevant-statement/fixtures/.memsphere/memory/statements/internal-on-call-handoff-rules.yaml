@@ -1,0 +1,11 @@
+!statement
+syntax: memsphere-20260719-stable
+names:
+  - 内部值班交接规则
+  - internal on-call handoff rules
+defines:
+  - 适用于写给接班同事或内部值班人员的故障交接。
+asserts:
+  - 内部值班交接必须保存到 artifacts/on-call-handoff.md。
+  - 值班交接必须包含内部组件名称、故障时段、当前状态和负责人。
+  - 值班交接必须说明下一步动作及其完成期限。

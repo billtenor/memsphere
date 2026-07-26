@@ -1,0 +1,43 @@
+## Review contract
+These requirements define what the current Artifact must satisfy.
+
+### Action
+{{contract.actionInstruction}}
+
+{{#if contract.procedureAsserts}}
+### Procedure assertions
+{{#each contract.procedureAsserts}}
+- {{this}}
+{{/each}}
+{{/if}}
+
+{{#if contract.actionAsserts}}
+### Action assertions
+{{#each contract.actionAsserts}}
+- {{this}}
+{{/each}}
+{{/if}}
+
+{{#if contract.suggestions}}
+### Suggestions
+{{#each contract.suggestions}}
+- {{this}}
+{{/each}}
+{{/if}}
+{{#if contract.details}}
+
+### Additional details
+{{#each contract.details}}
+- {{this}}
+{{/each}}
+{{/if}}
+
+### Artifact contract
+- Name: {{contract.artifact.name}}
+- Type: {{contract.artifact.type}}
+- Format: {{contract.artifact.format}}
+- Schema: {{contract.artifact.schema}}
+- Final Artifact: {{#if contract.artifact.final}}yes{{else}}no{{/if}}
+- Review policy: {{contract.artifact.reviewPolicy}}
+
+Use the commands below to read the candidate value; load the complete contract only when you need the nested Schema.

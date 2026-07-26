@@ -1,0 +1,12 @@
+!procedure
+syntax: memsphere-20260721-stable
+name: control-plane-caller
+goals:
+  - Exercise Procedure and Artifact control-plane resolution.
+flow:
+  - !action
+    action: Produce the caller Artifact.
+    artifact: !artifact
+      name: caller result
+  - !call
+    target: control-plane-child

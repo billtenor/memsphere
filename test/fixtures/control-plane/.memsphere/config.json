@@ -1,0 +1,26 @@
+{
+  "memoryRoot": "memory",
+  "reviewsRoot": "reviews",
+  "runsRoot": "runs",
+  "control_plane": {
+    "runner": {
+      "permissions": ["artifact.read", "artifact.submit"]
+    },
+    "actors": {
+      "human_reviewer": {
+        "kind": "human",
+        "name": "Human Reviewer",
+        "permissions": ["artifact.read", "decision.assess"]
+      },
+      "review_agent": {
+        "kind": "agent",
+        "name": "Review Agent",
+        "permissions": ["artifact.read", "decision.assess"],
+        "system_prompt": "Review the Artifact independently.",
+        "agent": {
+          "provider": "traex"
+        }
+      }
+    }
+  }
+}

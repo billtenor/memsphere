@@ -1,0 +1,10 @@
+!statement
+syntax: memsphere-20260719-stable
+names:
+  - 故障事实表达规则
+  - incident fact expression rules
+defines:
+  - 适用于同时包含已确认事实和原因推测的故障或安全事件记录。
+asserts:
+  - 事件记录必须明确区分已确认事实和未经证实的推测。
+  - 未经证实的推测不得表述为已经确认的根因。

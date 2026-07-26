@@ -1,0 +1,11 @@
+!statement
+syntax: memsphere-20260719-stable
+names:
+  - 安全事件记录规则
+  - security incident record rules
+defines:
+  - 适用于包含账号、认证或安全标识的事件记录。
+asserts:
+  - 安全事件记录必须保存到 artifacts/security-incident-record.md。
+  - 事件记录中的账号标识必须脱敏，只能保留末四位字符。
+  - 事件记录不得包含原始登录令牌或访问令牌值。

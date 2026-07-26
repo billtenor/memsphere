@@ -1,0 +1,9 @@
+Current Artifact: {{artifactScope}}; Actor: {{actorId}}.
+{{#if decision}}
+{{#if decision.allowed}}Allowed: this operation uses the {{decision.permission}} permission.{{else}}Denied: this operation requires {{decision.permission}}, which Actor {{actorId}} does not have.{{/if}}
+{{/if}}
+{{#each permissions}}
+- {{id}}: {{description}}
+{{else}}
+- This Actor has no permitted controlled operations for the current Artifact.
+{{/each}}
