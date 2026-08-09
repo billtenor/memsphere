@@ -318,9 +318,8 @@ test("Traex Provider fixes the ACP process to workspace-write non-interactive ex
     "acp", "serve"
   ]);
   assert.equal(launch.env.MEMSPHERE_CLI, "/tmp/memsphere-review");
-  assert.match(launch.env.NO_PROXY ?? "", /(?:^|,)bytedance\.net(?:,|$)/);
-  assert.match(launch.env.NO_PROXY ?? "", /(?:^|,)trae\.com\.cn(?:,|$)/);
-  assert.equal(launch.env.no_proxy, launch.env.NO_PROXY);
+  assert.equal(launch.env.NO_PROXY, process.env.NO_PROXY);
+  assert.equal(launch.env.no_proxy, process.env.no_proxy);
   assert.equal(launch.startupTimeoutMs, 60_000);
   assert.equal(launch.idleTimeoutMs, 120_000);
   assert.equal(launch.maxRuntimeMs, null);
