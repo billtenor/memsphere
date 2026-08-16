@@ -1,1 +1,1 @@
-npm run security:check -- --staged
+npm run security:check

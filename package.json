@@ -36,7 +36,9 @@
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "validate": "npm run build",
-    "security:check": "sh scripts/security-check.sh",
+    "security:check": "sh scripts/security-check.sh --staged",
+    "security:audit": "sh scripts/security-check.sh --all",
+    "security:range": "sh scripts/security-check.sh --range",
     "security:setup": "sh scripts/security-setup.sh",
     "prepack": "npm run build",
     "prepublishOnly": "npm test"

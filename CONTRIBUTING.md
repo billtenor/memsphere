@@ -27,7 +27,11 @@ npm run security:check
 ```
 
 Setup records the repository-local identity and enables `user.useConfigOnly`.
-Husky then runs the staged version of the same check before each commit. Set
+Husky then checks staged content before each commit. Pull requests and pushes are
+checked by GitHub Actions across the newly introduced commits. Run
+`npm run security:audit` before the first public release, after importing refs or
+rewriting history, and periodically to scan every local branch and tag. To check
+a commit range locally, run `npm run security:range -- origin/master..HEAD`. Set
 `GITLEAKS_BIN` when the executable is not available as `gitleaks` on `PATH`.
 
 ## License
