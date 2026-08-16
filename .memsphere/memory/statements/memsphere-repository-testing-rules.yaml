@@ -28,7 +28,7 @@ sections:
     names:
       - System 与 Reserved Memory
     asserts:
-      - 修改 reserved-memory 中的 Memory、manifest 或安装行为时，必须运行 test/reserved-store.test.ts，验证 Managed Project bootstrap、System Memory 安装、Reserved Memory 保留或导入，以及重复创建时的拒绝行为。
+      - 修改 reserved-memory 中的 Memory、manifest 或安装行为时，必须运行 test/reserved-store.test.ts，验证 Managed Project bootstrap、System Memory manifest 完整性和受控更新契约，以及重复创建时的拒绝行为。
       - 修改 System Memory 后必须同步当前开发 Project 的 Memory 副本，再运行 memsphere validate；源文件与安装副本不得出现非预期差异。
   - !statement
     names:

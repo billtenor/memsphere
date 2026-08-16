@@ -45,7 +45,7 @@ sections:
         names:
           - Project 创建与预置安装
         asserts:
-          - 修改 Project create、全局或 Project config、Workspace Binding、Reserved Memory 导入或 System Memory bootstrap 行为时，必须更新 memsphere-framework 和 Skill 的 Project 使用说明。
+          - 修改 Project create、全局或 Project config、Workspace Binding、System Memory bootstrap/受控更新或 Project Catalog 读取行为时，必须更新 memsphere-framework 和 Skill 的 Project 使用说明。
           - 修改 System Memory 清单或安装路径时，必须更新 manifest、Reserved Store 测试和当前开发 Project 的 Memory 副本；受控 Managed Store 的更新必须通过 ChangeSet 发布。
   - !statement
     names:
