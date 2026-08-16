@@ -325,6 +325,7 @@ async function writeProjectMetadata(root: string, name: string, config: ProjectC
     mkdir(paths.runsRoot, { recursive: true }),
     mkdir(paths.reviewsRoot, { recursive: true }),
     mkdir(paths.archiveRoot, { recursive: true }),
+    mkdir(paths.evalsRoot, { recursive: true }),
     mkdir(paths.runtimeRoot, { recursive: true })
   ]);
   await atomicWriteJson(paths.manifestPath, { format_version: 1, name, created_at: new Date().toISOString() });

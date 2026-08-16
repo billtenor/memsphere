@@ -66,6 +66,7 @@ Windows: %LOCALAPPDATA%\memsphere
         ├── runs/
         ├── reviews/
         ├── archives/
+        ├── evals/
         └── .runtime/
 ```
 
@@ -261,8 +262,8 @@ Git working tree == clean
 
 ## 关联需求
 
-- 强关联：`changes/active/20260716-reserved-memory-self-bootstrap/change.md`。其中 `memsphere init`、当前 Scope 和单一标准 Memory Store 的建设方案必须按本次不兼容升级重新收敛，不能继续实现相冲突的旧入口。
-- 关联：`changes/active/20260718-eval-cli-and-view/change.md`。其隔离 `.memsphere` Scope 和 View 数据来源需要适配 Project，但 Eval 产品能力仍由原 Change 管理。
+- 强关联：`changes/active/20260716-reserved-memory-self-bootstrap/change.md`。该 Change 已收敛为 Managed Project bootstrap、受控更新和 Project Memory Catalog，不再把已删除的 init 或目录 Scope 作为未来入口。
+- 关联：`changes/active/20260718-eval-cli-and-view/change.md`。该 Change 已将 Eval Store 和隔离执行环境收敛到 Primary Project；Eval 产品能力仍由原 Change 管理。
 - 关联：其他依赖 `.memsphere/config.json`、`memoryRoot/runsRoot/reviewsRoot/archiveRoot` 或 cwd Scope 发现的 active Change，开发前必须逐项确认适配影响。
 - 重复需求：无。
 
@@ -293,8 +294,8 @@ Git working tree == clean
 - [x] 删除 init、旧 Scope/Root 配置和旧格式兼容入口，更新 Skill、预置 Memory、帮助和核心文档。
 - [x] 在旧 CLI 环境下完成当前存量数据清点、一次性本地转换脚本、切换验证和备份记录。
 - [x] 适配现有 Run、Review、Archive、Eval 和测试夹具的 Project Root 解析。
-- [ ] 补齐自动化测试、三平台 Smoke、回归摘要和人工验收证据（本地自动化已完成，等待远端 macOS/Windows CI 与提需方验收）。
+- [x] 补齐自动化测试、三平台 Smoke 和回归摘要；人工验收证据由提需方在最终验收步骤确认。
 
 ## 验收结果
 
-功能实现与本地自动化验证已完成，当前等待流程内实现 Review、最终验收测试和提需方验收。Linux 本地 Smoke 已通过；macOS/Windows Smoke 已配置为 GitHub Actions 门禁，需以远端 CI 运行结果作为对应平台证据。
+功能实现与自动化验证已完成，当前等待流程内复审、最终验收测试和提需方验收。本地 `npm run typecheck`、`npm test`（348/348）、`npm run build`、`npm run smoke:project`、`npm run security:check` 和 `memsphere validate` 全部通过。GitHub PR #2 的最新 CI 中，Linux 完整回归与 Project Smoke、macOS Project Smoke、Windows Project Smoke、Gitleaks 四项检查全部通过；三平台持久化修复由 commit `b8fc88c` 承载。

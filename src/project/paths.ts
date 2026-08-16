@@ -12,6 +12,7 @@ export function projectPaths(root: string): ProjectPaths {
     runsRoot: resolve(absolute, "runs"),
     reviewsRoot: resolve(absolute, "reviews"),
     archiveRoot: resolve(absolute, "archives"),
+    evalsRoot: resolve(absolute, "evals"),
     runtimeRoot: resolve(absolute, ".runtime")
   };
 }

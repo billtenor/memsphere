@@ -120,9 +120,9 @@ test("Task view exposes only Artifact Review and never falls back to Task Review
   assert.doesNotMatch(browserHtml, /Task review ·/);
 });
 
-test("reserved memories must be imported before review creation", () => {
-  assert.match(browserHtml, /selectedMemory\(\)\?\.source === "reserved"/);
-  assert.match(browserHtml, /Import reserved memory before creating a review/);
+test("Memory review creation has no Reserved source branch", () => {
+  assert.doesNotMatch(browserHtml, /selectedMemory\(\)\?\.source === "reserved"/);
+  assert.doesNotMatch(browserHtml, /Import reserved memory before creating a review/);
 });
 
 test("review mutations use button action guards", () => {
@@ -441,7 +441,7 @@ test("Artifact Review keeps local draft text across conflict recovery renders", 
 });
 
 test("initial loading validates the saved review only after its subject data is available", () => {
-  assert.match(browserHtml, /const requests = \[loadMemories\(\), loadReservedMemories\(\), loadReviews\(\), loadRuns\(\)\];\s*if \(state\.viewMode === "settings"\) requests\.push\(loadSettings\(\)\);\s*await Promise\.all\(requests\);\s*ensureSelectedReview\(\);/);
+  assert.match(browserHtml, /const requests = \[loadMemories\(\), loadReviews\(\), loadRuns\(\)\];\s*if \(state\.viewMode === "settings"\) requests\.push\(loadSettings\(\)\);\s*await Promise\.all\(requests\);\s*ensureSelectedReview\(\);/);
   assert.doesNotMatch(browserHtml, /async function loadReviews\(\) \{[\s\S]*?state\.reviews =[^}]*ensureSelectedReview\(\);/);
 });
 
@@ -470,20 +470,18 @@ test("comment cards label their navigation action as Go to", () => {
   assert.doesNotMatch(browserHtml, /open\.textContent = "Open"/);
 });
 
-test("browser exposes reserved memory controls", () => {
-  assert.match(browserHtml, /\/api\/reserved-memories/);
-  assert.match(browserHtml, /\/api\/reserved-memories\/import/);
-  assert.match(browserHtml, /Reserved/);
-  assert.match(browserHtml, /Import/);
-  assert.match(browserHtml, /Imported/);
+test("browser does not expose Reserved Memory as a second runtime source", () => {
+  assert.doesNotMatch(browserHtml, /\/api\/reserved-memories/);
+  assert.doesNotMatch(browserHtml, /loadReservedMemories/);
+  assert.doesNotMatch(browserHtml, /filteredReservedMemories/);
+  assert.doesNotMatch(browserHtml, /importReservedMemory/);
 });
 
-test("browser hides installed system memory without hiding reserved memory", () => {
+test("browser can hide installed system memory from the Project Catalog", () => {
   assert.match(browserHtml, /hideSystemMemoriesKey = "memsphere\.hideSystemMemories\.v1"/);
   assert.match(browserHtml, /hideSystemMemories: localStorage\.getItem\(hideSystemMemoriesKey\) !== "false"/);
   assert.match(browserHtml, /if \(state\.hideSystemMemories && isSystemMemory\(memory\)\) return false;/);
-  assert.match(browserHtml, /memory\?\.source !== "reserved" && state\.systemMemoryPaths\.has\(memory\.path\)/);
-  assert.match(browserHtml, /function filteredReservedMemories\(\)/);
+  assert.match(browserHtml, /state\.systemMemoryPaths\.has\(memory\?\.path\)/);
   assert.match(browserHtml, /text\.textContent = t\("hideSystemMemories"\)/);
 });
 

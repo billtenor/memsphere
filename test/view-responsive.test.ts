@@ -283,7 +283,7 @@ test("a newly added memory comment is current until its source text changes", as
   });
 });
 
-test("Memory nav hides installed system memory but keeps non-system reserved memory visible", async () => {
+test("Memory nav only shows the Project Catalog and can hide installed system memory", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
     page.setDefaultTimeout(5_000);
@@ -293,18 +293,13 @@ test("Memory nav hides installed system memory but keeps non-system reserved mem
       const hideSystem = page.getByLabel("隐藏系统记忆");
       assert.equal(await hideSystem.isChecked(), true);
       await page.locator(".memory-button", { hasText: "User note" }).waitFor();
-      await page.locator(".memory-button", { hasText: "Reserved tip" }).waitFor();
       assert.equal(await page.locator(".memory-button", { hasText: "Memory" }).count(), 0);
+      assert.equal(await page.locator(".memory-button", { hasText: "Reserved tip" }).count(), 0);
       await hideSystem.uncheck();
       await page.locator(".memory-button", { hasText: "Memory" }).waitFor();
       await hideSystem.check();
       assert.equal(await page.locator(".memory-button", { hasText: "Memory" }).count(), 0);
-      assert.equal(await page.locator(".memory-button", { hasText: "Reserved tip" }).count(), 1);
-      await page.locator(".memory-button", { hasText: "Reserved tip" }).click();
-      await page.getByRole("button", { name: "Review", exact: true }).click();
-      const createReview = page.getByRole("button", { name: "Create Review", exact: true });
-      assert.equal(await createReview.isDisabled(), true);
-      assert.equal(await createReview.getAttribute("title"), "Import reserved memory before creating a review");
+      assert.equal(await page.locator(".memory-button", { hasText: "Reserved tip" }).count(), 0);
     } finally {
       await page.close();
     }

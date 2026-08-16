@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -43,6 +43,15 @@ test("Project lifecycle keeps creation separate from Workspace binding", async (
     assert.deepEqual(registry.workspaces[identity.key]?.mounted, []);
 
     const primary = registry.projects.primary;
+    await Promise.all([
+      "memory",
+      "changes",
+      "runs",
+      "reviews",
+      "archives",
+      "evals",
+      ".runtime"
+    ].map((directory) => access(join(primary.root, directory))));
     const projectConfig = JSON.parse(await readFile(join(primary.root, "config.json"), "utf8")) as {
       store: { published_revision: string };
     };

@@ -47,6 +47,7 @@ export type ProjectPaths = {
   runsRoot: string;
   reviewsRoot: string;
   archiveRoot: string;
+  evalsRoot: string;
   runtimeRoot: string;
 };
 
