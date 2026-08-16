@@ -20,7 +20,7 @@ Schema 的 format 字段被移除。inline Schema 的旧 layout 上移到 Artifa
 
 1. 停止 View 和新的 Run/Review 写入。
 2. 完成、归档或放弃 running v1 Run。
-3. 备份 config 指向的 memoryRoot、runsRoot、reviewsRoot 和 archiveRoot。
+3. 备份目标 Project Root；Memory、Run、Review 与 Archive 都从该 Project 的固定子目录解析。
 4. 执行只读检查：
 
 ```bash
@@ -33,6 +33,8 @@ memsphere migrate artifact-contract-v2 --check
 ```bash
 memsphere migrate artifact-contract-v2 --write
 ```
+
+`--write` 只用于 Embedded Store。Managed Store 必须通过 ChangeSet 提交迁移结果，不能直接修改正式工作树。
 
 7. 运行 validate、测试和 smoke，再恢复 View。
 

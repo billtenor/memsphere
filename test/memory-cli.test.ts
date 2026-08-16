@@ -9,6 +9,7 @@ import { parse } from "yaml";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
+import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cliPath = join(projectRoot, "src", "cli.ts");
@@ -22,19 +23,34 @@ type CommandResult = {
 
 async function withScope(fn: (scope: { root: string; nested: string; memoryRoot: string }) => Promise<void>): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "memsphere-cli-test-"));
-  const scopeRoot = join(root, ".memsphere");
-  const memoryRoot = join(scopeRoot, "memory");
+  const home = join(root, "home");
+  const project = join(home, "projects", "test-project");
+  const memoryRoot = join(root, "memory");
   const nested = join(root, "work", "nested");
+  const previousHome = process.env.MEMSPHERE_HOME;
   try {
     await mkdir(nested, { recursive: true });
-    await mkdir(join(scopeRoot, "reviews"), { recursive: true });
-    await mkdir(join(scopeRoot, "runs"), { recursive: true });
+    await mkdir(project, { recursive: true });
+    await mkdir(join(project, "reviews"), { recursive: true });
+    await mkdir(join(project, "runs"), { recursive: true });
+    await mkdir(join(project, "archives"), { recursive: true });
+    await mkdir(join(project, "changes"), { recursive: true });
     for (const kind of ["concepts", "statements", "schemas", "procedures"]) {
       await mkdir(join(memoryRoot, kind), { recursive: true });
     }
-    await writeFile(join(scopeRoot, "config.json"), `${JSON.stringify({ memoryRoot: "memory" })}\n`);
+    await writeFile(join(project, "project.json"), `${JSON.stringify({ format_version: 1, name: "test-project", created_at: new Date().toISOString() })}\n`);
+    await writeFile(join(project, "config.json"), `${JSON.stringify({ store: { type: "embedded", memory_path: memoryRoot } })}\n`);
+    process.env.MEMSPHERE_HOME = home;
+    const workspace = await resolveWorkspaceIdentity(nested);
+    await writeFile(join(home, "registry.json"), `${JSON.stringify({
+      format_version: 1,
+      projects: { "test-project": { root: project } },
+      workspaces: { [workspace.key]: { primary: "test-project", mounted: [] } }
+    })}\n`);
     await fn({ root, nested, memoryRoot });
   } finally {
+    if (previousHome === undefined) delete process.env.MEMSPHERE_HOME;
+    else process.env.MEMSPHERE_HOME = previousHome;
     await rm(root, { recursive: true, force: true });
   }
 }
@@ -43,7 +59,7 @@ async function runCli(cwd: string, args: string[], home?: string): Promise<Comma
   return new Promise((resolveResult, reject) => {
     const child = spawn(process.execPath, ["--import", tsxLoaderPath, cliPath, ...args], {
       cwd,
-      env: { ...process.env, ...(home ? { HOME: home } : {}) },
+      env: { ...process.env, ...(home ? { MEMSPHERE_HOME: home } : {}) },
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
@@ -331,7 +347,7 @@ test("memory CLI reports ambiguity and other failures only on stderr", async () 
     const ambiguous = await runCli(nested, ["memory", "read", "Shared"]);
     assert.notEqual(ambiguous.code, 0);
     assert.equal(ambiguous.stdout, "");
-    assert.match(ambiguous.stderr, /concepts\/Shared, statements\/Shared/);
+    assert.match(ambiguous.stderr, /test-project:concepts\/Shared, test-project:statements\/Shared/);
 
     const resolved = await runCli(nested, ["memory", "read", "Shared", "--kind", "concepts", "--output", "json"]);
     assert.equal(resolved.code, 0, resolved.stderr);
@@ -372,7 +388,7 @@ test("memory CLI rejects malformed stores, uninitialized scopes, and the removed
       const uninitialized = await runCli(outside, ["memory", "list"], isolatedHome);
       assert.notEqual(uninitialized.code, 0);
       assert.equal(uninitialized.stdout, "");
-      assert.match(uninitialized.stderr, /Run memsphere init/);
+      assert.match(uninitialized.stderr, /not bound to a Primary Project/);
     } finally {
       await rm(isolatedRoot, { recursive: true, force: true });
     }

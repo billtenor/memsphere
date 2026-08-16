@@ -11,6 +11,9 @@ export type MemoryDescriptor = {
     statement?: number;
     schema?: number;
   };
+  project_name?: string;
+  revision?: string;
+  frozen?: string;
 };
 
 export type MemoryListQuery = {
@@ -59,7 +62,14 @@ export class MemoryNotFoundError extends Error {
 
 export class MemoryAmbiguityError extends Error {
   constructor(readonly input: string, readonly candidates: string[]) {
-    super(`memory "${input}" is ambiguous. Candidates: ${candidates.join(", ")}. Read a logical reference or narrow the search with --kind.`);
+    const projects = new Set(candidates.flatMap((candidate) => {
+      const separator = candidate.indexOf(":");
+      return separator > 0 ? [candidate.slice(0, separator)] : [];
+    }));
+    const guidance = projects.size > 1
+      ? "Select one Project with --project <name>."
+      : "Read a logical reference or narrow the search with --kind.";
+    super(`memory "${input}" is ambiguous. Candidates: ${candidates.join(", ")}. ${guidance}`);
     this.name = "MemoryAmbiguityError";
   }
 }
@@ -104,6 +114,7 @@ export class DefaultMemoryCatalog implements MemoryCatalog {
   async read(referenceOrName: string, query: MemoryResolveQuery = {}): Promise<MemoryEntity> {
     const index = await this.#loadIndex(query.kind);
     const entry = resolveEntry(index.entries, referenceOrName, query);
+    if (entry.descriptor.frozen) throw new MemoryFrozenError(entry.descriptor.reference, entry.descriptor.frozen);
     try {
       return await this.#provider.read(entry.providerId);
     } catch {
@@ -122,6 +133,13 @@ export class DefaultMemoryCatalog implements MemoryCatalog {
     const fatalIssue = index.issues.find((issue) => issue.message.startsWith("invalid "));
     if (fatalIssue) throw new MemoryCatalogDataError(fatalIssue.message);
     return index;
+  }
+}
+
+export class MemoryFrozenError extends Error {
+  constructor(readonly reference: string, readonly reason: string) {
+    super(`memory "${reference}" is frozen: ${reason}`);
+    this.name = "MemoryFrozenError";
   }
 }
 
@@ -183,7 +201,10 @@ function buildCatalogIndex(descriptors: ProviderMemoryDescriptor[]): CatalogInde
         reference,
         kind: source.kind,
         names,
-        ...definitionSummary
+        ...definitionSummary,
+        ...(source.project_name ? { project_name: source.project_name } : {}),
+        ...(source.revision ? { revision: source.revision } : {}),
+        ...(source.frozen ? { frozen: source.frozen } : {})
       }
     });
   }
@@ -260,7 +281,7 @@ function resolveEntry(
   if (matches.length > 1) {
     throw new MemoryAmbiguityError(
       input,
-      matches.map((entry) => entry.descriptor.reference).sort(compareStrings)
+      matches.map((entry) => `${entry.descriptor.project_name ? `${entry.descriptor.project_name}:` : ""}${entry.descriptor.reference}`).sort(compareStrings)
     );
   }
   return matches[0];
@@ -289,7 +310,7 @@ function duplicateValues(values: string[]): string[] {
 }
 
 function compareDescriptors(a: MemoryDescriptor, b: MemoryDescriptor): number {
-  return compareStrings(a.reference, b.reference);
+  return compareStrings(`${a.reference}\0${a.project_name ?? ""}`, `${b.reference}\0${b.project_name ?? ""}`);
 }
 
 function compareStrings(a: string, b: string): number {

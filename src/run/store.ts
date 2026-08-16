@@ -50,6 +50,7 @@ import {
   type SlotBindings
 } from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
+import { MemoryNotFoundError, type MemoryCatalog } from "../memory/catalog.js";
 import { currentMemorySyntax, type MemorySyntaxVersion } from "../memory/syntax.js";
 import { inheritSchemaFormat, resolveSchemaContract } from "../memory/schema.js";
 import { resolvePromptLocale, type PromptLocale } from "../prompts/locale.js";
@@ -218,6 +219,10 @@ export type RunState = {
   procedureName: string;
   asserts?: string[];
   memoryRoot: string;
+  memoryProjects?: {
+    primary: { name: string; revision: string };
+    mounted: Array<{ name: string; revision: string }>;
+  };
   createdAt: string;
   updatedAt: string;
   plan?: RunStep[];
@@ -411,6 +416,10 @@ const runStateSchema: z.ZodType<RunState> = z.object({
   procedureName: z.string(),
   asserts: z.array(z.string()).optional(),
   memoryRoot: z.string(),
+  memoryProjects: z.object({
+    primary: z.object({ name: z.string(), revision: z.string() }).strict(),
+    mounted: z.array(z.object({ name: z.string(), revision: z.string() }).strict())
+  }).strict().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   plan: z.array(runStepSchema).optional(),
@@ -648,6 +657,10 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
   procedureName: z.string(),
   asserts: z.array(z.string()).optional(),
   memoryRoot: z.string(),
+  memoryProjects: z.object({
+    primary: z.object({ name: z.string(), revision: z.string() }).strict(),
+    mounted: z.array(z.object({ name: z.string(), revision: z.string() }).strict())
+  }).strict().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   plan: z.array(runStepSchema).optional(),
@@ -696,6 +709,9 @@ export async function startRun(input: {
   procedureFile?: string;
   controlPlane?: ControlPlaneConfig;
   reviewConfiguration?: RunReviewConfiguration;
+  memoryProjects?: RunState["memoryProjects"];
+  memoryCatalog?: MemoryCatalog;
+  projectMemoryCatalogs?: Record<string, MemoryCatalog>;
 }): Promise<RunState> {
   const procedureName = input.procedureName?.trim();
   const procedureFile = input.procedureFile?.trim();
@@ -703,15 +719,31 @@ export async function startRun(input: {
   if (procedureName && procedureFile) throw new Error("use either a procedure name or procedure file, not both");
 
   await ensureRunDirectory(input.runsRoot);
-  const procedure = procedureFile
-    ? await readMemoryFile("procedures", resolve(procedureFile))
-    : await findMemoryByName(input.memoryRoot, "procedures", procedureName!);
+  let lookup: RunMemoryLookup | undefined;
+  let procedure: MemoryFile | undefined;
+  if (procedureFile) {
+    procedure = await readMemoryFile("procedures", resolve(procedureFile));
+  } else if (input.memoryCatalog) {
+    const descriptor = await input.memoryCatalog.resolve(procedureName!, { kind: "procedures" });
+    const catalog = descriptor.project_name
+      ? input.projectMemoryCatalogs?.[descriptor.project_name]
+      : input.memoryCatalog;
+    if (!catalog) throw new Error(`Run Memory source is unavailable: ${descriptor.project_name}`);
+    procedure = {
+      kind: "procedures",
+      path: descriptor.reference,
+      entity: await catalog.read(descriptor.reference, { kind: "procedures" })
+    };
+    lookup = catalogLookup(catalog);
+  } else {
+    procedure = await findMemoryByName(input.memoryRoot, "procedures", procedureName!);
+  }
   if (!procedure) {
     throw new Error(`procedure not found: ${procedureName}`);
   }
 
   const procedureMemory = procedure.entity as ProcedureMemory;
-  const procedureSnapshots = await snapshotReachableProcedureTemplates(input.memoryRoot, procedureMemory);
+  const procedureSnapshots = await snapshotReachableProcedureTemplates(input.memoryRoot, procedureMemory, lookup);
   const rootTemplate = procedureSnapshots[procedureMemory.names[0]];
   if (!rootTemplate) throw new Error(`procedure snapshot missing: ${procedureMemory.names[0]}`);
   const controlPlane = input.controlPlane ? createControlPlaneSnapshot(input.controlPlane) : undefined;
@@ -739,6 +771,7 @@ export async function startRun(input: {
     procedureName: procedure.entity.names[0],
     asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
     memoryRoot: input.memoryRoot,
+    memoryProjects: input.memoryProjects,
     createdAt: now,
     updatedAt: now,
     plan: cloneSteps(steps),
@@ -2404,7 +2437,8 @@ async function collapseCompletedFrames(
 
 async function snapshotReachableProcedureTemplates(
   memoryRoot: string,
-  root: ProcedureMemory
+  root: ProcedureMemory,
+  lookup?: RunMemoryLookup
 ): Promise<Record<string, RunProcedureTemplate>> {
   const snapshots: Record<string, RunProcedureTemplate> = {};
   const visited = new Set<string>();
@@ -2415,7 +2449,7 @@ async function snapshotReachableProcedureTemplates(
     visited.add(canonicalName);
 
     const steps = compileProcedureSteps(procedure);
-    await snapshotExternalSchemas(memoryRoot, steps);
+    await snapshotExternalSchemas(memoryRoot, steps, lookup);
     const template: RunProcedureTemplate = {
       memoryName: canonicalName,
       asserts: procedure.asserts ? [...procedure.asserts] : undefined,
@@ -2424,7 +2458,9 @@ async function snapshotReachableProcedureTemplates(
     for (const name of procedure.names) snapshots[name] = template;
 
     for (const target of collectCallTargets(steps)) {
-      const called = await findMemoryByName(memoryRoot, "procedures", target);
+      const called = lookup
+        ? await lookup("procedures", target)
+        : await findMemoryByName(memoryRoot, "procedures", target);
       if (!called) throw new Error(`procedure not found: ${target}`);
       await visit(called.entity as ProcedureMemory);
     }
@@ -3311,19 +3347,47 @@ function statementDefinitionDetails(statement: StatementNode, path: string[] = [
   return details;
 }
 
-async function snapshotExternalSchemas(memoryRoot: string, steps: RunStep[]): Promise<void> {
+type RunMemoryLookup = (
+  kind: "procedures" | "schemas",
+  referenceOrName: string
+) => Promise<MemoryFile | undefined>;
+
+function catalogLookup(catalog: MemoryCatalog): RunMemoryLookup {
+  return async (kind, referenceOrName) => {
+    try {
+      const descriptor = await catalog.resolve(referenceOrName, { kind });
+      return {
+        kind,
+        path: descriptor.reference,
+        entity: await catalog.read(descriptor.reference, { kind })
+      };
+    } catch (error) {
+      if (error instanceof MemoryNotFoundError) return undefined;
+      throw error;
+    }
+  };
+}
+
+async function snapshotExternalSchemas(
+  memoryRoot: string,
+  steps: RunStep[],
+  lookup?: RunMemoryLookup
+): Promise<void> {
   for (const step of steps) {
     if (step.schema?.kind === "external" && !step.schema.node) {
-      const memory = await findSchemaMemory(memoryRoot, step.schema.name);
+      const memory = lookup
+        ? await lookup("schemas", step.schema.name)
+        : await findSchemaMemory(memoryRoot, step.schema.name);
       if (!memory) throw new Error(`schema not found: ${step.schema.name}`);
       step.schema.node = await resolveSchemaReferences(
         memoryRoot,
         schemaNodeFromMemory(memory.entity as SchemaMemory),
-        [memoryReference(memory)]
+        [memoryReference(memory)],
+        lookup
       );
     }
     if (step.schema?.kind === "inline") {
-      step.schema.node = await resolveSchemaReferences(memoryRoot, step.schema.node, [`inline:${step.schema.id}`]);
+      step.schema.node = await resolveSchemaReferences(memoryRoot, step.schema.node, [`inline:${step.schema.id}`], lookup);
     }
     if (step.schema?.node && step.artifact && step.type && step.format) {
       step.validationPlan = artifactValidatorRegistry.resolvePlan(stepContract(step));
@@ -3336,10 +3400,10 @@ async function snapshotExternalSchemas(memoryRoot: string, steps: RunStep[]): Pr
       throw new Error(`Schema Repeat is only supported by object markdown Artifacts with layout: outline: ${step.id}`);
     }
     if (step.branches) {
-      await snapshotExternalSchemas(memoryRoot, step.branches.truthy);
-      await snapshotExternalSchemas(memoryRoot, step.branches.falsy);
+      await snapshotExternalSchemas(memoryRoot, step.branches.truthy, lookup);
+      await snapshotExternalSchemas(memoryRoot, step.branches.falsy, lookup);
     }
-    if (step.loop) await snapshotExternalSchemas(memoryRoot, step.loop.body);
+    if (step.loop) await snapshotExternalSchemas(memoryRoot, step.loop.body, lookup);
   }
 }
 
@@ -3349,19 +3413,24 @@ function artifactSchemaNeedsResolution(schema: ActionNode["artifact"]["schema"])
   return schemaHasRef(schema);
 }
 
-async function resolveSchemaReferences(memoryRoot: string, schema: SchemaNode, stack: string[]): Promise<SchemaNode> {
+async function resolveSchemaReferences(
+  memoryRoot: string,
+  schema: SchemaNode,
+  stack: string[],
+  lookup?: RunMemoryLookup
+): Promise<SchemaNode> {
   const resolved = cloneSchema(schema);
   if (resolved.fields) {
     resolved.fields = await Promise.all(resolved.fields.map((field, index) =>
-      resolveSchemaField(memoryRoot, field, `${stack.at(-1) ?? "schema"}.fields[${index}]`, stack)
+      resolveSchemaField(memoryRoot, field, `${stack.at(-1) ?? "schema"}.fields[${index}]`, stack, lookup)
     ));
   }
   if (resolved.item) {
-    resolved.item = await resolveSchemaItem(memoryRoot, resolved.item, `${stack.at(-1) ?? "schema"}.item`, stack);
+    resolved.item = await resolveSchemaItem(memoryRoot, resolved.item, `${stack.at(-1) ?? "schema"}.item`, stack, lookup);
   }
   if (resolved.items) {
     resolved.items = await Promise.all(resolved.items.map((item, index) =>
-      resolveSchemaItem(memoryRoot, item, `${stack.at(-1) ?? "schema"}.items[${index}]`, stack)
+      resolveSchemaItem(memoryRoot, item, `${stack.at(-1) ?? "schema"}.items[${index}]`, stack, lookup)
     ));
   }
   return resolved;
@@ -3371,45 +3440,49 @@ async function resolveSchemaField(
   memoryRoot: string,
   field: StaticSchemaField | RepeatNode,
   path: string,
-  stack: string[]
+  stack: string[],
+  lookup?: RunMemoryLookup
 ): Promise<StaticSchemaField | RepeatNode> {
   if (typeof field === "object" && field.tag === "!repeat") {
     return {
       ...field,
       body: await Promise.all(field.body.map((bodyField, index) =>
-        resolveStaticSchemaField(memoryRoot, bodyField, `${path}.body[${index}]`, stack)
+        resolveStaticSchemaField(memoryRoot, bodyField, `${path}.body[${index}]`, stack, lookup)
       ))
     };
   }
-  return resolveStaticSchemaField(memoryRoot, field, path, stack);
+  return resolveStaticSchemaField(memoryRoot, field, path, stack, lookup);
 }
 
 async function resolveStaticSchemaField(
   memoryRoot: string,
   field: StaticSchemaField,
   path: string,
-  stack: string[]
+  stack: string[],
+  lookup?: RunMemoryLookup
 ): Promise<StaticSchemaField> {
   if (typeof field === "string") return field;
-  if (field.tag === "!ref") return resolveSchemaRef(memoryRoot, field, path, stack);
-  return resolveSchemaReferences(memoryRoot, field, [...stack, `inline:${path}`]);
+  if (field.tag === "!ref") return resolveSchemaRef(memoryRoot, field, path, stack, lookup);
+  return resolveSchemaReferences(memoryRoot, field, [...stack, `inline:${path}`], lookup);
 }
 
 async function resolveSchemaItem(
   memoryRoot: string,
   item: SchemaNode | MemoryRefNode,
   path: string,
-  stack: string[]
+  stack: string[],
+  lookup?: RunMemoryLookup
 ): Promise<SchemaNode> {
-  if (item.tag === "!ref") return resolveSchemaRef(memoryRoot, item, path, stack);
-  return resolveSchemaReferences(memoryRoot, item, [...stack, `inline:${path}`]);
+  if (item.tag === "!ref") return resolveSchemaRef(memoryRoot, item, path, stack, lookup);
+  return resolveSchemaReferences(memoryRoot, item, [...stack, `inline:${path}`], lookup);
 }
 
 async function resolveSchemaRef(
   memoryRoot: string,
   ref: MemoryRefNode,
   path: string,
-  stack: string[]
+  stack: string[],
+  lookup?: RunMemoryLookup
 ): Promise<SchemaNode> {
   if (!ref.target.startsWith("schemas/")) {
     throw new Error(`schema reference at ${path} must target schemas/*, got ${ref.target}`);
@@ -3417,9 +3490,16 @@ async function resolveSchemaRef(
   if (stack.includes(ref.target)) {
     throw new Error(`Schema reference cycle detected: ${[...stack, ref.target].join(" -> ")}`);
   }
-  const memory = await findSchemaMemory(memoryRoot, ref.target);
+  const memory = lookup
+    ? await lookup("schemas", ref.target)
+    : await findSchemaMemory(memoryRoot, ref.target);
   if (!memory) throw new Error(`schema not found: ${ref.target}`);
-  return resolveSchemaReferences(memoryRoot, schemaNodeFromMemory(memory.entity as SchemaMemory), [...stack, ref.target]);
+  return resolveSchemaReferences(
+    memoryRoot,
+    schemaNodeFromMemory(memory.entity as SchemaMemory),
+    [...stack, ref.target],
+    lookup
+  );
 }
 
 function schemaHasRef(schema: SchemaNode): boolean {

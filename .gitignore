@@ -35,6 +35,7 @@ temp/
 .memsphere/*
 !.memsphere/memory/
 !.memsphere/memory/**
+.memsphere-work/
 
 # AI/runtime artifacts
 .openai/

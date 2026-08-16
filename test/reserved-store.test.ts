@@ -3,7 +3,6 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import test from "node:test";
-import { initCommand } from "../src/commands/init.js";
 import { DefaultMemoryCatalog } from "../src/memory/catalog.js";
 import { FileMemoryProvider } from "../src/memory/file-provider.js";
 import { readAllMemoryFiles } from "../src/memory/store.js";
@@ -163,12 +162,11 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   ]);
 });
 
-test("init installs system memory and keeps other bundled memory reserved", async () => {
+test("reserved installation installs system memory and keeps other bundled memory reserved", async () => {
   await withTempDir(async (dir) => {
-    await initCommand({ folder: dir });
-
-    const scopeRoot = join(dir, ".memsphere");
+    const scopeRoot = join(dir, "project");
     const memoryRoot = join(scopeRoot, "memory");
+    await installReservedMemories(scopeRoot, { memoryRoot });
     const items = await listReservedMemories(scopeRoot, memoryRoot);
 
     assert(items.some((item) => item.path === "procedures/memsphere-agile-requirement-development.yaml"));
@@ -210,38 +208,24 @@ test("reserved memory install rebuilds managed files", async () => {
   });
 });
 
-test("repeated init preserves config and rebuilds the installed reserved memory cache", async () => {
+test("repeated reserved installation rebuilds the selected Memory cache", async () => {
   await withTempDir(async (dir) => {
-    await initCommand({ folder: dir, memoryRoot: "custom-memory" });
-
-    const scopeRoot = join(dir, ".memsphere");
-    const configPath = join(scopeRoot, "config.json");
-    const originalConfig = await readFile(configPath, "utf8");
+    const scopeRoot = join(dir, "project");
+    const memoryRoot = join(scopeRoot, "custom-memory");
+    await installReservedMemories(scopeRoot, { memoryRoot });
     const target = join(reservedMemoryRoot(scopeRoot), "procedures", "memsphere-agile-requirement-development.yaml");
     const stale = join(reservedMemoryRoot(scopeRoot), "concepts", "stale.yaml");
-    const systemTarget = join(scopeRoot, "custom-memory", "concepts", "memsphere-concept.yaml");
+    const systemTarget = join(memoryRoot, "concepts", "memsphere-concept.yaml");
     await writeFile(target, "!procedure\nnames: [local reserved]\ndefines: [local edit]\n");
     await writeFile(systemTarget, "!concept\nnames: [local system]\ndefines: [local edit]\n");
     await writeFile(stale, "!concept\nnames: [stale]\n");
 
-    await initCommand({ folder: dir });
+    await installReservedMemories(scopeRoot, { memoryRoot });
 
-    assert.equal(await readFile(configPath, "utf8"), originalConfig);
     assert.doesNotMatch(await readFile(target, "utf8"), /local edit/);
     assert.doesNotMatch(await readFile(systemTarget, "utf8"), /local edit/);
     await assert.rejects(readFile(stale, "utf8"), /ENOENT/);
-    assert.equal((await readAllMemoryFiles(join(scopeRoot, "custom-memory"), "concepts")).length, 6);
-  });
-});
-
-test("repeated init requires force only when changing configured paths", async () => {
-  await withTempDir(async (dir) => {
-    await initCommand({ folder: dir });
-
-    await assert.rejects(
-      initCommand({ folder: dir, memoryRoot: "other-memory" }),
-      /Use --force to change its configured paths/
-    );
+    assert.equal((await readAllMemoryFiles(memoryRoot, "concepts")).length, 6);
   });
 });
 

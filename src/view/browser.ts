@@ -475,6 +475,7 @@ export const browserHtml = String.raw`<!doctype html>
   <main class="shell">
     <aside class="sidebar">
       <div class="sidebar-tools">
+        <select id="project-select" class="search" aria-label="Project" title="Project"></select>
         <button class="brand-settings" id="settings-tab" type="button" aria-label="设置" title="设置">设置</button>
       </div>
       <div class="brand">
@@ -769,7 +770,9 @@ export const browserHtml = String.raw`<!doctype html>
       settingsProviderDetection: {},
       settingsProviderDetecting: false,
       settingsProviderAutoDetectionAttemptedRevision: "",
-      renderLine: 0
+      renderLine: 0,
+      projects: [],
+      currentProject: ""
     };
 
     function t(key) {
@@ -826,7 +829,8 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewReviewTab: document.getElementById("artifact-review-review-tab"),
       memoryTab: document.getElementById("memory-tab"),
       taskTab: document.getElementById("task-tab"),
-      settingsTab: document.getElementById("settings-tab")
+      settingsTab: document.getElementById("settings-tab"),
+      projectSelect: document.getElementById("project-select")
     };
 
     document.getElementById("expand").addEventListener("click", () => setAllSections(true));
@@ -845,6 +849,7 @@ export const browserHtml = String.raw`<!doctype html>
     el.memoryTab.addEventListener("click", () => setViewMode("memory"));
     el.taskTab.addEventListener("click", () => setViewMode("task"));
     el.settingsTab.addEventListener("click", () => setViewMode("settings"));
+    el.projectSelect.addEventListener("change", () => selectProject(el.projectSelect.value).catch(renderFatalError));
     el.submitReview.addEventListener("click", () => runButtonAction(el.submitReview, submitReview));
     el.artifactReviewModalClose.addEventListener("click", closeArtifactReviewModal);
     el.artifactReviewSubmit.addEventListener("click", () => runButtonAction(el.artifactReviewSubmit, submitArtifactReview));
@@ -892,11 +897,42 @@ export const browserHtml = String.raw`<!doctype html>
     }, 4000);
 
     async function loadAll() {
+      await loadProjects();
       const requests = [loadMemories(), loadReservedMemories(), loadReviews(), loadRuns()];
       if (state.viewMode === "settings") requests.push(loadSettings());
       await Promise.all(requests);
       ensureSelectedReview();
       renderAll();
+    }
+
+    async function loadProjects() {
+      const response = await fetch("/api/projects");
+      if (!response.ok) throw new Error(await response.text());
+      const payload = await response.json();
+      state.projects = (payload.projects || []).filter(project => !project.missing);
+      state.currentProject = payload.current || "";
+      el.projectSelect.innerHTML = "";
+      for (const project of state.projects) {
+        const option = document.createElement("option");
+        option.value = project.name;
+        option.textContent = project.name;
+        option.selected = project.name === state.currentProject;
+        el.projectSelect.append(option);
+      }
+    }
+
+    async function selectProject(name) {
+      const response = await fetch("/api/projects/select", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      if (!response.ok) throw new Error(await response.text());
+      state.selectedId = null;
+      state.selectedTaskId = null;
+      state.selectedReviewId = null;
+      state.reviewSnapshots.clear();
+      await loadAll();
     }
 
     function renderFatalError(error) {
@@ -1225,8 +1261,9 @@ export const browserHtml = String.raw`<!doctype html>
       const grid = document.createElement("div");
       grid.className = "settings-grid";
       grid.append(
-        settingsReadOnly("配置文件", state.settingsData.configPath),
-        settingsReadOnly("配置作用域", state.settingsData.scopeRoot)
+        settingsReadOnly("Project", state.settingsData.projectName || "-"),
+        settingsReadOnly("Project 配置", state.settingsData.configPath),
+        settingsReadOnly("全局配置", state.settingsData.globalConfigPath)
       );
       section.append(title, grid);
       return section;
@@ -1259,6 +1296,9 @@ export const browserHtml = String.raw`<!doctype html>
       section.className = "settings-section";
       const title = document.createElement("h3");
       title.textContent = "存储";
+      const help = document.createElement("p");
+      help.className = "settings-section-subtitle";
+      help.textContent = "Project 存储目录由 Memsphere 固定管理，可随 Project Root 整体移动或备份。";
       const grid = document.createElement("div");
       grid.className = "settings-grid";
       for (const [key, label] of [
@@ -1267,9 +1307,9 @@ export const browserHtml = String.raw`<!doctype html>
         ["runsRoot", "Run 根目录"],
         ["archiveRoot", "Archive 根目录"]
       ]) {
-        grid.append(settingsOptionalPathField(key, label));
+        grid.append(settingsReadOnly(label, state.settingsData.resolvedPaths[key]));
       }
-      section.append(title, grid);
+      section.append(title, help, grid);
       return section;
     }
 
@@ -1326,7 +1366,7 @@ export const browserHtml = String.raw`<!doctype html>
         enable.className = "btn";
         enable.textContent = "启用参与者配置";
         enable.addEventListener("click", () => {
-          state.settingsDraft.control_plane = { runner: { permissions: [] }, acp_providers: {}, actors: {} };
+          state.settingsDraft.control_plane = { runner: { permissions: [] }, actors: {} };
           renderAll();
         });
         heading.append(headingCopy);
@@ -1373,19 +1413,6 @@ export const browserHtml = String.raw`<!doctype html>
       subtitle.className = "settings-section-subtitle";
       subtitle.textContent = "管理 Agent CLI、启动参数与安装检测；认证仍由各 Provider 自身管理。";
       headingCopy.append(title, subtitle);
-      if (!state.settingsDraft.control_plane) {
-        const enable = document.createElement("button");
-        enable.type = "button";
-        enable.className = "btn";
-        enable.textContent = "启用 ACP Provider 配置";
-        enable.addEventListener("click", () => {
-          state.settingsDraft.control_plane = { runner: { permissions: [] }, acp_providers: {}, actors: {} };
-          renderAll();
-        });
-        heading.append(headingCopy, enable);
-        section.append(heading);
-        return section;
-      }
       const actions = document.createElement("div");
       actions.className = "settings-provider-status";
       const detect = document.createElement("button");
@@ -1457,7 +1484,7 @@ export const browserHtml = String.raw`<!doctype html>
         ? "以下参与者仍在引用：" + refs.join("、")
         : entry.builtin && !entry.explicit ? "当前正在使用系统默认值" : "";
       resetOrDelete.addEventListener("click", () => {
-        delete state.settingsDraft.control_plane.acp_providers?.[entry.id];
+        delete state.settingsDraft.acp_providers?.[entry.id];
         state.settingsProviderDetection[entry.id] = { status: "pending_redetect" };
         renderAll();
       });
@@ -1512,7 +1539,7 @@ export const browserHtml = String.raw`<!doctype html>
           ensureSettingsProvider(entry.id, provider.type).args = value.split(/\r?\n/).filter(line => line.length > 0);
           markProviderExplicit();
           invalidateSettingsProviderDetection(entry.id);
-        }, "control_plane.acp_providers." + entry.id + ".args"),
+        }, "acp_providers." + entry.id + ".args"),
         settingsTextArea("Env（每行 KEY=VALUE，不允许凭据）", Object.entries(provider.env || {})
           .map(([key, value]) => key + "=" + value).join("\n"), value => {
           ensureSettingsProvider(entry.id, provider.type).env = Object.fromEntries(value.split(/\r?\n/)
@@ -1520,7 +1547,7 @@ export const browserHtml = String.raw`<!doctype html>
             .map(line => [line.slice(0, line.indexOf("=")).trim(), line.slice(line.indexOf("=") + 1)]));
           markProviderExplicit();
           invalidateSettingsProviderDetection(entry.id);
-        }, "control_plane.acp_providers." + entry.id + ".env")
+        }, "acp_providers." + entry.id + ".env")
       );
       const preview = document.createElement("div");
       preview.className = "settings-provider-preview mono";
@@ -2068,8 +2095,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function settingsProviderEntries() {
-      if (!state.settingsDraft?.control_plane) return [];
-      const explicit = state.settingsDraft.control_plane.acp_providers || {};
+      const explicit = state.settingsDraft?.acp_providers || {};
       const catalog = state.settingsData?.acpProviderCatalog || [];
       return catalog.map(definition => ({
         id: definition.type,
@@ -2086,7 +2112,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function ensureSettingsProvider(id) {
-      const providers = state.settingsDraft.control_plane.acp_providers ||= {};
+      const providers = state.settingsDraft.acp_providers ||= {};
       if (!providers[id]) {
         const defaults = defaultSettingsProvider(id);
         providers[id] = {
@@ -2206,7 +2232,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (!state.settingsData?.diskRevision) return;
       localStorage.setItem(settingsProviderDetectionStorageKey(), JSON.stringify({
         diskRevision: state.settingsData.diskRevision,
-        providerConfig: JSON.stringify(state.settingsDraft.control_plane?.acp_providers || {}),
+        providerConfig: JSON.stringify(state.settingsDraft.acp_providers || {}),
         detectedAt: Date.now(),
         results: state.settingsProviderDetection
       }));
@@ -2216,7 +2242,7 @@ export const browserHtml = String.raw`<!doctype html>
       const cached = readStoredObject(settingsProviderDetectionStorageKey(), {});
       const fresh = Number.isFinite(cached.detectedAt)
         && Date.now() - cached.detectedAt < 24 * 60 * 60 * 1000;
-      const providerConfig = JSON.stringify(state.settingsDraft?.control_plane?.acp_providers || {});
+      const providerConfig = JSON.stringify(state.settingsDraft?.acp_providers || {});
       if (
         cached.diskRevision === state.settingsData?.diskRevision
         && cached.providerConfig === providerConfig

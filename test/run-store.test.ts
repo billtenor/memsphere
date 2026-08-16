@@ -4,7 +4,6 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile as writeRawFile } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { readConfigAt } from "../src/config.js";
 import { parseControlPlaneConfig } from "../src/control-plane/index.js";
 import { memoryKinds } from "../src/memory/kinds.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
@@ -33,7 +32,7 @@ import {
   updateArtifactReviewDraft,
   waitForArtifactReview
 } from "../src/run/store.js";
-import { validateMemoryStore } from "../src/validation.js";
+import { validateMemoryRoot } from "../src/validation.js";
 import { reviewConfiguration } from "./helpers/review.js";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
@@ -238,23 +237,17 @@ test("startRun routes an unversioned Procedure to store validation without parsi
 
 test("validateMemoryStore still reports unrelated invalid procedures", async () => {
   await withTempDir(async (dir) => {
-    const configPath = join(dir, "config.json");
     const memoryRoot = join(dir, "memory");
     const proceduresRoot = join(memoryRoot, "procedures");
     const invalidPath = join(proceduresRoot, "a-invalid.yaml");
     await mkdir(memoryRoot);
-    await mkdir(join(dir, "reviews"));
-    await mkdir(join(dir, "runs"));
-
     for (const kind of memoryKinds) {
       await mkdir(join(memoryRoot, kind));
     }
 
     await writeFile(invalidPath, invalidProcedure);
     await writeFile(join(proceduresRoot, "z-target.yaml"), validProcedure);
-    await writeFile(configPath, `${JSON.stringify({ memoryRoot: "memory", reviewsRoot: "reviews", runsRoot: "runs" })}\n`);
-
-    const result = await validateMemoryStore(configPath);
+    const result = await validateMemoryRoot(memoryRoot);
 
     assert(result.issues.some((issue) =>
       issue.path === invalidPath &&
@@ -1760,15 +1753,19 @@ flow:
 test("control-plane fixture validates and freezes reachable called Procedures", async () => {
   await withTempDir(async (dir) => {
     const fixtureRoot = join(process.cwd(), "test", "fixtures", "control-plane", ".memsphere");
-    const config = await readConfigAt(join(fixtureRoot, "config.json"));
-    const validation = await validateMemoryStore(join(fixtureRoot, "config.json"));
+    const fixtureConfig = JSON.parse(await readFile(join(fixtureRoot, "config.json"), "utf8")) as {
+      control_plane: unknown;
+    };
+    const memoryRoot = join(fixtureRoot, "memory");
+    const controlPlane = parseControlPlaneConfig(fixtureConfig.control_plane);
+    const validation = await validateMemoryRoot(memoryRoot);
     assert.deepEqual(validation.issues, []);
 
     const run = await startRun({
-      memoryRoot: config.memoryRoot,
+      memoryRoot,
       runsRoot: join(dir, "runs"),
       procedureName: "control-plane-caller",
-      controlPlane: config.controlPlane
+      controlPlane
     });
     assert(run.controlPlane);
     assert(run.procedureSnapshots?.["control-plane-child"]);

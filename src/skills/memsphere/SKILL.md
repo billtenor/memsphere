@@ -5,9 +5,9 @@ description: Use memsphere to discover, read, interpret, and apply project Memor
 
 # Memsphere
 
-memsphere 定义了一套维护记忆、检索记忆和遵循记忆的框架。通过 memsphere CLI，可以在执行任务时读取当前工程积累的知识和流程，并按照这些历史经验完成任务。
+memsphere 定义了一套维护记忆、检索记忆和遵循记忆的框架。通过 memsphere CLI，可以读取当前 Workspace 的 Primary 与 Mounted Project 中积累的知识和流程，并按照这些历史经验完成任务。
 
-`.memsphere/config.json` 的 `language` 控制面向 Agent 的工作语言，支持 `zh-CN` 和 `en`，省略时固定为 `zh-CN`。Run 启动后会冻结该语言，因此修改配置只影响后续创建的 Run。
+Memsphere Home 的 `config.json` 中，`language` 控制面向 Agent 的工作语言，支持 `zh-CN` 和 `en`，省略时固定为 `zh-CN`。Run 启动后会冻结该语言，因此修改配置只影响后续创建的 Run。
 
 ## Memsphere 如何组织记忆
 
@@ -72,7 +72,9 @@ memsphere memory read memsphere-procedure
 memsphere memory read memsphere-schema
 ```
 
-如果命令提示当前工程尚未初始化，告知用户需要执行 `memsphere init`，等待用户完成初始化后再重试。
+如果命令提示当前 Workspace 未绑定 Primary Project，告知用户使用 `memsphere project list` 查看 Project，并执行 `memsphere project bind <project-name>`；只需临时访问一个 Project 时使用全局 `--project <project-name>`，不得自行猜测目标。
+
+列表同时包含 Primary 与 Mounted Project 时，使用返回的 `project_name` 和 Revision 判断来源。跨 Project 出现同名 Memory 时必须使用 `--project` 明确选择；Mounted Project 在组合上下文中严格只读。
 
 ## Memsphere 记忆语法规则
 
@@ -122,7 +124,7 @@ artifact: !artifact
 - 不要使用已删除的 `element_types`；旧版字符串 `items` 必须迁移为带 `!schema` tag 的 `item/items`。
 - `asserts` 和 `suggests` 是自然语言契约，不会被代码 validator 猜测执行。
 
-Artifact 可以使用 `review` 声明当前 Procedure 内的 Review Slot。Procedure 不引用 `.memsphere/config.json` 中的 Actor，也不选择 Decision Policy：
+Artifact 可以使用 `review` 声明当前 Procedure 内的 Review Slot。Procedure 不引用 Project `config.json` 中的 Actor，也不选择 Decision Policy：
 
 ```yaml
 !procedure
@@ -139,8 +141,8 @@ flow:
 ```
 
 - `review` 是不重复的非空 Slot 名称数组。Slot 只表达 Procedure 本地评审视角，不是 Actor id。
-- `.memsphere/config.json` 的 `control_plane.actors` 定义可参与 Review 的 Human 或 Agent Actor；Runner 权限由 `control_plane.runner` 定义。
-- `control_plane.acp_providers` 定义与内置类型同名的 ACP Provider 配置。首批固定支持 `traex`、`qwen`、`kimi`、`codex`；CLI command 和 ACP 入口由类型固定，配置维护非托管 args、非敏感 env 和启动/空闲/总运行超时。配置中心可自动检测可执行文件路径和版本，但 Provider 自己负责安装、认证和模型账户配置。
+- 当前 Project `config.json` 的 `control_plane.actors` 定义可参与 Review 的 Human 或 Agent Actor；Runner 权限由 `control_plane.runner` 定义。
+- Memsphere Home `config.json` 的 `acp_providers` 定义与内置类型同名的 ACP Provider 配置。首批固定支持 `traex`、`qwen`、`kimi`、`codex`；CLI command 和 ACP 入口由类型固定，配置维护非托管 args、非敏感 env 和启动/空闲/总运行超时。配置中心可自动检测可执行文件路径和版本，但 Provider 自己负责安装、认证和模型账户配置。
 - Agent Actor 只配置 ACP Provider 实例 id `provider` 和可选 `model`；工作目录、托管安全参数与 Prompt version 由 Memsphere 管理。旧的 Actor 内 `command`、`args`、`env`、`cwd`、Prompt version 和 timeout 字段不兼容，也不会被自动迁移。
 - `memsphere run start` 会先列出所有 Review scope、Slot、可用 Actor 和内置 Decision Policy。把预检示例保存并调整后，使用 `--review-config <path>` 启动。
 - Review 配置必须为每个 scope 选择 Policy，并为每个 Slot 绑定 Actor 或显式 `skip`；一个 Actor 绑定多个 Slot 时只产生一个 Assignment 和 Vote。
@@ -155,7 +157,7 @@ flow:
 
 ### 维护当前配置
 
-View 的“设置”入口提供概览、常规、存储、View 服务、ACP Provider 和参与者配置六个模块，只编辑当前 View 实际加载的 `.memsphere/config.json`。常规模块选择后续 Run 使用的工作语言。ACP Provider 模块固定展示四种 Provider，Command 只读，负责共享参数、CLI 自动检测和 Actor 引用；参与者中的 Agent 只选择 Provider 与 Model。页面会在服务端校验并展示修改差异，确认后才原子写入；磁盘配置与运行配置不一致时，需要手动执行：
+View 是 Memsphere Home 级单一服务，可从 Project 选择器切换当前展示内容。全局设置保存语言、View 服务、ACP Provider 和 Debug 等本机配置；当前 Project 设置保存 Control Plane、Actor 与 Review 策略。页面会在服务端校验并展示修改差异，确认后才原子写入；磁盘配置与运行配置不一致时，需要手动执行：
 
 ```bash
 memsphere view restart
@@ -215,13 +217,13 @@ memsphere 使用 Run 记录和控制一次 Procedure 的执行过程，保证 Ag
 memsphere run start "<Procedure 名称>"
 ```
 
-需要直接运行尚未安装到当前 `memoryRoot` 的 Procedure YAML 时，可以指定文件路径：
+需要直接运行尚未安装到当前 Primary Project Memory Store 的 Procedure YAML 时，可以指定文件路径：
 
 ```bash
 memsphere run start --file "<Procedure YAML 路径>"
 ```
 
-名称参数与 `--file` 必须二选一。文件中的根 Procedure 会在启动时写入 Run 快照；外部 `!call` 和外部 Schema 仍从当前项目配置的 `memoryRoot` 解析。
+名称参数与 `--file` 必须二选一。文件中的根 Procedure 会在启动时写入 Run 快照；外部 `!call` 和外部 Schema 从 Run 启动时冻结的 Project Memory Revision 解析。
 
 命令会返回 Run ID 和第一个待执行步骤。后续命令都使用这个 Run ID，不要再次启动同一个流程。
 
@@ -326,4 +328,4 @@ memsphere run report --run <Run ID> --artifact-file <受管草稿绝对路径>
 
 收到用户结果后，将它作为当前步骤产物按 `Then` 命令上报，再继续处理 CLI 返回的新步骤。CLI 明确返回 Run 完成状态时，向用户汇报流程完成情况和最终产物。
 
-旧 Memory 若未声明 `syntax`，先执行 `memsphere migrate syntax --check`；若仍使用 `format: boolean/string/number/schema`，执行 `memsphere migrate artifact-contract-v2 --check`；若使用 `element_types`、字符串形式的旧 `items`、array 直接声明 `fields`，或旧式 Schema `format: outline/table`，再执行 `memsphere migrate schema-contract-v2 --check`。未经 human 明确确认，不对真实 Memory Store 执行 `--write`。旧语法不能启动新 Run，v1 running Run 不得跨版本继续，done Run 与 Review snapshot 仅只读展示。
+旧 Memory 若未声明 `syntax`，先执行 `memsphere migrate syntax --check`；若仍使用 `format: boolean/string/number/schema`，执行 `memsphere migrate artifact-contract-v2 --check`；若使用 `element_types`、字符串形式的旧 `items`、array 直接声明 `fields`，或旧式 Schema `format: outline/table`，再执行 `memsphere migrate schema-contract-v2 --check`。`--write` 只允许 Embedded Store；Managed Store 必须把迁移结果作为 ChangeSet 候选正常 Publish。未经 human 明确确认，不对真实 Memory Store 执行迁移。旧语法不能启动新 Run，v1 running Run 不得跨版本继续，done Run 与 Review snapshot 仅只读展示。

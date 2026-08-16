@@ -1,11 +1,22 @@
-import { validateMemoryStore } from "../validation.js";
+import { resolve } from "node:path";
+import { validateMemoryRoot, validateMemoryStore } from "../validation.js";
+import { checkpointWorkspaceChanges } from "../memory/changeset.js";
 
-export async function validateCommand(): Promise<void> {
-  const result = await validateMemoryStore();
+export async function validateCommand(options: { memoryRoot?: string; format?: "text" | "json" } = {}): Promise<void> {
+  if (!options.memoryRoot) await checkpointWorkspaceChanges();
+  const result = options.memoryRoot
+    ? { configPath: "(stateless)", ...(await validateMemoryRoot(resolve(options.memoryRoot))), reviewsRoot: undefined, runsRoot: undefined }
+    : await validateMemoryStore();
+
+  if (options.format === "json") {
+    process.stdout.write(`${JSON.stringify({ valid: result.issues.length === 0, ...result }, null, 2)}\n`);
+    if (result.issues.length > 0) process.exitCode = 1;
+    return;
+  }
 
   if (result.issues.length === 0) {
     console.log("memsphere validation passed");
-    console.log(`config: ${result.configPath}`);
+    if (!options.memoryRoot) console.log(`config: ${result.configPath}`);
 
     if (result.memoryRoot) {
       console.log(`memoryRoot: ${result.memoryRoot}`);
@@ -25,7 +36,7 @@ export async function validateCommand(): Promise<void> {
   console.error("memsphere validation failed");
 
   for (const issue of result.issues) {
-    console.error(`- ${issue.path}: ${issue.message}`);
+    console.error(`- ${issue.path}${issue.line ? `:${issue.line}:${issue.column ?? 1}` : ""}: ${issue.message}`);
   }
 
   if (result.issues.some((issue) => issue.migration === "syntax")) {

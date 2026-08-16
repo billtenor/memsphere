@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import type { MemsphereConfig } from "../src/config.js";
 import {
   ConfigRevisionConflictError,
   editableConfigDraft,
@@ -11,17 +12,23 @@ import {
   writeConfigDraft
 } from "../src/config-management.js";
 
-async function fixtureConfig(): Promise<{ dir: string; configPath: string }> {
+async function fixtureConfig() {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-config-management-"));
-  const configPath = join(dir, "config.json");
-  await writeFile(configPath, `${JSON.stringify({
-    memoryRoot: "memory",
+  const home = join(dir, "home");
+  const projectRoot = join(home, "projects", "demo");
+  const globalConfigPath = join(home, "config.json");
+  const configPath = join(projectRoot, "config.json");
+  const memoryRoot = join(projectRoot, "memory");
+  await mkdir(memoryRoot, { recursive: true });
+  await writeFile(globalConfigPath, `${JSON.stringify({
+    language: "zh-CN",
     debug: { agent_review: true },
-    view: { host: "127.0.0.1", port: 30002 },
+    view: { host: "127.0.0.1", port: 30002 }
+  }, null, 2)}\n`);
+  await writeFile(configPath, `${JSON.stringify({
+    store: { type: "managed", branch: "master", published_revision: "abc123" },
     control_plane: {
-      runner: {
-        permissions: ["artifact.read", "decision.decide"]
-      },
+      runner: { permissions: ["artifact.read", "decision.decide"] },
       actors: {
         human: {
           kind: "human",
@@ -31,142 +38,96 @@ async function fixtureConfig(): Promise<{ dir: string; configPath: string }> {
       }
     }
   }, null, 2)}\n`);
-  return { dir, configPath };
+  const resolved: MemsphereConfig = {
+    configPath,
+    scopeRoot: projectRoot,
+    homeRoot: home,
+    language: "zh-CN",
+    memoryRoot,
+    reviewsRoot: join(projectRoot, "reviews"),
+    runsRoot: join(projectRoot, "runs"),
+    archiveRoot: join(projectRoot, "archives"),
+    debug: { agentReview: true, root: join(home, ".runtime", "debug") },
+    view: { host: "127.0.0.1", port: 30002 },
+    project: {
+      name: "demo",
+      revision: "abc123",
+      store: { type: "managed", branch: "master", published_revision: "abc123" },
+      mounted: []
+    }
+  };
+  const document = await readConfigDocument(configPath, { globalConfigPath, resolved });
+  return { dir, home, configPath, globalConfigPath, resolved, document };
 }
 
-test("config document preserves explicit values and resolves defaults", async () => {
-  const { dir, configPath } = await fixtureConfig();
-  const document = await readConfigDocument(configPath);
-
-  assert.equal(document.raw.memoryRoot, "memory");
-  assert.equal(document.explicit.memoryRoot, true);
-  assert.equal(document.explicit.reviewsRoot, false);
-  assert.equal(document.explicit.view, true);
-  assert.equal(document.resolved.memoryRoot, join(dir, "memory"));
-  assert.equal(document.resolved.reviewsRoot, join(dir, "reviews"));
-  assert.match(document.revision, /^sha256:[a-f0-9]{64}$/);
+test("config document separates global machine settings from Project control plane", async () => {
+  const fixture = await fixtureConfig();
+  try {
+    assert.equal(fixture.document.globalRaw.language, "zh-CN");
+    assert.equal(fixture.document.projectRaw.store.type, "managed");
+    assert.equal(fixture.document.explicit.acpProviders, false);
+    assert.equal(fixture.document.explicit.controlPlane, true);
+    assert.match(fixture.document.revision, /^sha256:[a-f0-9]{64}$/);
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
 });
 
-test("memory root can use the scoped default", async () => {
-  const { dir, configPath } = await fixtureConfig();
-  const document = await readConfigDocument(configPath);
-  const draft = editableConfigDraft(document);
-  delete draft.memoryRoot;
-
-  const validation = validateConfigDraft(document, draft);
-  assert.equal(validation.valid, true);
-  assert.equal(validation.candidate?.memoryRoot, undefined);
-  assert.equal(validation.resolvedPaths?.memoryRoot, join(dir, "memory"));
-
-  const written = await writeConfigDraft({
-    document,
-    expectedRevision: document.revision,
-    draft
-  });
-  assert.equal(written.raw.memoryRoot, undefined);
-  assert.equal(written.resolved.memoryRoot, join(dir, "memory"));
+test("config draft writes providers globally and actors inside the Project", async () => {
+  const fixture = await fixtureConfig();
+  try {
+    const draft = editableConfigDraft(fixture.document);
+    draft.acp_providers = { codex: { idle_timeout_ms: 90000 } };
+    const validation = validateConfigDraft(fixture.document, draft);
+    assert.equal(validation.valid, true);
+    assert.equal(validation.resolvedPaths?.memoryRoot, fixture.resolved.memoryRoot);
+    const written = await writeConfigDraft({
+      document: fixture.document,
+      expectedRevision: fixture.document.revision,
+      draft
+    });
+    const global = JSON.parse(await readFile(fixture.globalConfigPath, "utf8"));
+    const project = JSON.parse(await readFile(fixture.configPath, "utf8"));
+    assert.equal(global.acp_providers.codex.idle_timeout_ms, 90000);
+    assert.equal(global.debug.agent_review, true);
+    assert.equal(project.control_plane.actors.human.name, "Architect");
+    assert.equal(project.acp_providers, undefined);
+    assert.notEqual(written.revision, fixture.document.revision);
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
 });
 
-test("config draft preserves hidden debug configuration", async () => {
-  const { configPath } = await fixtureConfig();
-  const document = await readConfigDocument(configPath);
-  const draft = editableConfigDraft(document);
-  draft.memoryRoot = "new-memory";
-
-  const validation = validateConfigDraft(document, draft);
-  assert.equal(validation.valid, true);
-  assert.deepEqual(validation.candidate?.debug, { agent_review: true });
-  assert.doesNotMatch(validation.normalizedJson ?? "", /"debug"/);
-  assert.deepEqual(validation.changes.map((change) => change.path), ["memoryRoot"]);
-
-  const written = await writeConfigDraft({
-    document,
-    expectedRevision: document.revision,
-    draft
-  });
-  assert.equal(written.raw.memoryRoot, "new-memory");
-  assert.deepEqual(written.raw.debug, { agent_review: true });
+test("Project Actor references are validated against global ACP Providers", async () => {
+  const fixture = await fixtureConfig();
+  try {
+    const draft = editableConfigDraft(fixture.document);
+    draft.control_plane!.actors.agent = {
+      kind: "agent",
+      name: "Agent",
+      permissions: ["artifact.read"],
+      agent: { provider: "private-provider" }
+    };
+    const validation = validateConfigDraft(fixture.document, draft);
+    assert.equal(validation.valid, false);
+    assert.match(validation.errors[0]?.message ?? "", /Unknown ACP Provider/);
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
 });
 
-test("legacy Actor-owned ACP process configuration is rejected", async () => {
-  const { configPath } = await fixtureConfig();
-  const source = JSON.parse(await readFile(configPath, "utf8")) as {
-    control_plane: { actors: Record<string, unknown> };
-  };
-  source.control_plane.actors.legacy_agent = {
-    kind: "agent",
-    name: "Legacy Agent",
-    permissions: ["artifact.read"],
-    agent: {
-      provider: "traex",
-      command: "/opt/traex",
-      args: ["acp", "serve"],
-      cwd: ".",
-      model: "review-model",
-      prompt_version: "artifact-review-v1",
-      startup_timeout_ms: 60000,
-      idle_timeout_ms: 120000,
-      max_runtime_ms: null
-    }
-  };
-  await writeFile(configPath, `${JSON.stringify(source, null, 2)}\n`);
-  await assert.rejects(
-    readConfigDocument(configPath),
-    /Move args, env, and timeout settings into the matching fixed control_plane\.acp_providers entry/
-  );
-});
-
-test("config draft rejects removed grantable permissions", async () => {
-  const { configPath } = await fixtureConfig();
-  const document = await readConfigDocument(configPath);
-  const draft = editableConfigDraft(document);
-  const controlPlane = draft.control_plane as { runner: Record<string, unknown> };
-  controlPlane.runner.grantable_permissions = ["artifact.read"];
-
-  const validation = validateConfigDraft(document, draft);
-  assert.equal(validation.valid, false);
-  assert.match(validation.errors[0]?.message ?? "", /Unrecognized key/);
-});
-
-test("config draft reports ACP Provider argument errors at the edited field", async () => {
-  const { configPath } = await fixtureConfig();
-  const document = await readConfigDocument(configPath);
-  const draft = editableConfigDraft(document);
-  const controlPlane = draft.control_plane as {
-    acp_providers?: Record<string, unknown>;
-  };
-  controlPlane.acp_providers = {
-    qwen: {
-      args: ["--acp"]
-    },
-    codex: {
-      command: "npx"
-    }
-  };
-
-  const validation = validateConfigDraft(document, draft);
-  assert.equal(validation.valid, false);
-  assert(validation.errors.some((error) =>
-    error.path === "control_plane.acp_providers.qwen.args"
-    && /Qwen.*managed argument '--acp'/.test(error.message)
-  ));
-  assert(validation.errors.some((error) =>
-    error.path === "control_plane.acp_providers.codex"
-    && /Unrecognized key/.test(error.message)
-  ));
-});
-
-test("config write rejects stale revisions without overwriting the newer file", async () => {
-  const { configPath } = await fixtureConfig();
-  const document = await readConfigDocument(configPath);
-  const draft = editableConfigDraft(document);
-  draft.memoryRoot = "candidate";
-  await writeFile(configPath, `${JSON.stringify({ memoryRoot: "external" }, null, 2)}\n`);
-
-  await assert.rejects(
-    writeConfigDraft({ document, expectedRevision: document.revision, draft }),
-    ConfigRevisionConflictError
-  );
-  assert.match(await readFile(configPath, "utf8"), /"external"/);
-  assert.doesNotMatch(await readFile(configPath, "utf8"), /"candidate"/);
+test("config write rejects stale global or Project revisions", async () => {
+  const fixture = await fixtureConfig();
+  try {
+    const draft = editableConfigDraft(fixture.document);
+    draft.language = "en";
+    await writeFile(fixture.globalConfigPath, JSON.stringify({ language: "en" }));
+    await assert.rejects(
+      writeConfigDraft({ document: fixture.document, expectedRevision: fixture.document.revision, draft }),
+      ConfigRevisionConflictError
+    );
+    assert.equal(JSON.parse(await readFile(fixture.configPath, "utf8")).store.published_revision, "abc123");
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
 });

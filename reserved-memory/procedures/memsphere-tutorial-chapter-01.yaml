@@ -4,7 +4,7 @@ names:
   - memsphere 教学流程-第一章
   - memsphere-tutorial-chapter-01
 defines:
-  - 面向首次使用 memsphere 的用户，在已初始化的工程或练习 Scope 中逐步理解经验记忆、四类 Memory 及主要用户功能。
+  - 面向首次使用 memsphere 的用户，在已绑定 Project 的真实 Workspace 或练习目录中逐步理解经验记忆、四类 Memory 及主要用户功能。
   - 每个教学主题都允许 human 留在当前步骤继续讨论，明确选择进入下一步后才继续。
   - 必须由 human 完成的操作交给 human；agent 可以完成的操作由 agent 执行并说明结果。
 asserts:
@@ -21,10 +21,10 @@ flow:
       action: 检查教学准入要求，判断是否仍有任何一项未满足。
       actor: agent
       asserts:
-        - 必须已经安装 memsphere npm 包与 memsphere skill，并由 human 在准备使用的真实工程或练习目录中执行 memsphere init。
-        - 当前 scope 的 config 与 Memory Store 必须可用，且 memsphere validate 必须通过。
+        - 必须已经安装 memsphere npm 包与 memsphere skill，并存在可用 Project；当前 Workspace 必须绑定 Primary Project。
+        - 当前 Project 的 config 与 Memory Store 必须可用，且 memsphere validate 必须通过。
         - memsphere View 必须使用当前环境可访问的 Host 和一个可用端口成功启动，且 agent 已确认访问地址可用；首次配置时端口可以由 agent 随机选择。
-        - 必须实际检查 memsphere CLI 与 skill、当前 scope、config、Memory Store 和 memsphere validate 结果，不得依据默认值或历史结果推断。
+        - 必须实际检查 memsphere CLI 与 skill、Project Binding、config、Memory Store 和 memsphere validate 结果，不得依据默认值或历史结果推断。
         - 任一准入项无法确认时，必须判定为尚未满足。
       artifact: !artifact
         name: 是否仍有未满足的教学准入要求
@@ -34,7 +34,7 @@ flow:
         action: 定位未满足的准入项，完成 agent 可以安全处理的事项，并为必须由 human 完成的事项给出最小操作和影响说明。
         actor: agent
         asserts:
-          - 不得代替 human 执行 memsphere init，不得为通过准入而修改 System Memory、覆盖用户 Memory 或降低校验标准。
+          - 不得替 human 猜测 Primary Project；需要新建或绑定时说明 `memsphere project create <name> --bind` 或 `memsphere project bind <name>` 的影响。
           - View 尚不可用时，agent 必须根据当前环境选择 Host 和可用端口、启动或重启 View，并实际确认访问地址可用。
         artifact: !artifact
           name: 教学准入处理结果
@@ -218,7 +218,7 @@ flow:
       - !action
         action: |-
           介绍三种 Memory 来源。首次进入时可以这样表述：
-          “System Memory 是 memsphere 正常运行和自举所需的内置记忆，会在 init 时安装和更新，不应由用户编辑。
+          “System Memory 是 memsphere 正常运行和自举所需的内置记忆，创建 Managed Project 时会通过首笔 ChangeSet 安装；正式 Store 不应被直接编辑，后续更新也必须通过合法 ChangeSet 发布。
           Reserved Memory 是随 memsphere 提供但默认不生效的可选记忆。你可以先了解它的内容，再决定是否导入当前工程。
           用户 Memory 是当前工程自己积累和维护的经验。导入的 Reserved Memory 也会成为用户 Memory，之后可以按项目需要修改。”
           后续轮次根据 human 的问题继续讨论。

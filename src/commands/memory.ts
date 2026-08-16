@@ -14,6 +14,7 @@ import {
   serializeMemoryYaml
 } from "../memory/serializer.js";
 import { MemoryNavigation, type MemoryIdentity } from "../memory/navigation.js";
+import { editMemories, publishMemoryChange, pushMemory, recoverMemory, renameMemory, resumeMemoryChange, syncMemory } from "../memory/changeset.js";
 
 const listOutputs = ["yaml", "json", "text"] as const;
 const readOutputs = ["yaml", "json"] as const;
@@ -99,6 +100,69 @@ export async function memoryReadCommand(
   const entity = await catalog.read(reference, { kind });
   const value = output === "json" ? serializeMemoryJson(entity) : serializeMemoryYaml(entity);
   dependencies.writeStdout(value);
+}
+
+export async function memoryEditCommand(references: string[], options: { change?: string } = {}): Promise<void> {
+  const result = await editMemories({ references, changeId: options.change });
+  console.log(`ChangeSet: ${result.change.id}`);
+  console.log(`Candidate Root: ${result.candidateRoot}`);
+}
+
+export async function memoryDeleteCommand(references: string[], options: { change?: string } = {}): Promise<void> {
+  const result = await editMemories({ references, changeId: options.change, operation: "delete" });
+  console.log(`ChangeSet: ${result.change.id}`);
+  console.log(`Candidate Root: ${result.candidateRoot}`);
+}
+
+export async function memoryRenameCommand(reference: string, newName: string, options: { change?: string } = {}): Promise<void> {
+  const result = await renameMemory({ reference, newName, changeId: options.change });
+  console.log(`ChangeSet: ${result.change.id}`);
+  console.log(`Candidate Root: ${result.candidateRoot}`);
+}
+
+export async function memoryPublishCommand(options: { change?: string; message?: string }): Promise<void> {
+  if (!options.change) throw new Error("--change <id> is required");
+  const change = await publishMemoryChange(options.change, options.message);
+  console.log(`Published ChangeSet: ${change.id}`);
+  console.log(`Revision: ${change.published_revision}`);
+}
+
+export async function memoryChangeResumeCommand(changeId: string): Promise<void> {
+  console.log(`Candidate Root: ${await resumeMemoryChange(changeId)}`);
+}
+
+export async function memoryRecoverCommand(reference: string, options: { restore?: boolean; createChange?: boolean }): Promise<void> {
+  if (options.restore === options.createChange) throw new Error("choose exactly one of --restore or --create-change");
+  const result = await recoverMemory(reference, options.restore ? "restore" : "create-change");
+  if (result.change) {
+    console.log(`ChangeSet: ${result.change.id}`);
+    console.log(`Candidate Root: ${result.candidateRoot}`);
+  } else {
+    console.log(`Restored Memory: ${reference}`);
+  }
+}
+
+export async function memoryPushCommand(): Promise<void> {
+  await pushMemory();
+  console.log("Pushed Managed Memory branch.");
+}
+
+export async function memorySyncCommand(): Promise<void> {
+  const result = await syncMemory();
+  if (result.change) {
+    console.log(`Sync ChangeSet: ${result.change.id}`);
+    console.log(`Candidate Root: ${result.candidateRoot}`);
+  } else {
+    console.log(`Synchronized Revision: ${result.revision}`);
+  }
+}
+
+export async function memorySyncPublishCommand(options: { change?: string; message?: string }): Promise<void> {
+  if (!options.change) throw new Error("--change <id> is required");
+  const change = await publishMemoryChange(options.change, options.message);
+  if (!change.merge_parent) throw new Error(`ChangeSet ${change.id} is not a Sync ChangeSet`);
+  console.log(`Published Sync ChangeSet: ${change.id}`);
+  console.log(`Revision: ${change.published_revision}`);
 }
 
 function toIdentity(descriptor: { reference: string; kind: MemoryKind; names: string[] }): MemoryIdentity {

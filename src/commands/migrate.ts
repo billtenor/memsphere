@@ -12,11 +12,12 @@ import {
   writeMemorySyntaxMigration
 } from "../migration/memory-syntax.js";
 
-export async function migrateArtifactContractV2Command(options: { check?: boolean; write?: boolean; config?: string }): Promise<void> {
+export async function migrateArtifactContractV2Command(options: { check?: boolean; write?: boolean }): Promise<void> {
   if (Boolean(options.check) === Boolean(options.write)) {
     throw new Error("choose exactly one of --check or --write");
   }
-  const config = await readConfig(options.config);
+  const config = await readConfig();
+  assertMigrationWriteAllowed(config, options.write);
   const manifest = options.write
     ? await writeArtifactContractV2Migration(config)
     : (await checkArtifactContractV2Migration(config)).manifest;
@@ -24,11 +25,12 @@ export async function migrateArtifactContractV2Command(options: { check?: boolea
   if (manifest.status === "blocked") process.exitCode = 1;
 }
 
-export async function migrateSchemaContractV2Command(options: { check?: boolean; write?: boolean; config?: string }): Promise<void> {
+export async function migrateSchemaContractV2Command(options: { check?: boolean; write?: boolean }): Promise<void> {
   if (Boolean(options.check) === Boolean(options.write)) {
     throw new Error("choose exactly one of --check or --write");
   }
-  const config = await readConfig(options.config);
+  const config = await readConfig();
+  assertMigrationWriteAllowed(config, options.write);
   const manifest = options.write
     ? await writeSchemaContractV2Migration(config)
     : (await checkSchemaContractV2Migration(config)).manifest;
@@ -39,16 +41,25 @@ export async function migrateSchemaContractV2Command(options: { check?: boolean;
 export async function migrateMemorySyntaxCommand(options: {
   check?: boolean;
   write?: boolean;
-  config?: string;
   to?: string;
 }): Promise<void> {
   if (Boolean(options.check) === Boolean(options.write)) {
     throw new Error("choose exactly one of --check or --write");
   }
-  const config = await readConfig(options.config);
+  const config = await readConfig();
+  assertMigrationWriteAllowed(config, options.write);
   const manifest = options.write
     ? await writeMemorySyntaxMigration(config, options.to)
     : (await checkMemorySyntaxMigration(config, options.to)).manifest;
   console.log(JSON.stringify(manifest, null, 2));
   if (manifest.status === "blocked") process.exitCode = 1;
+}
+
+function assertMigrationWriteAllowed(
+  config: Awaited<ReturnType<typeof readConfig>>,
+  write: boolean | undefined
+): void {
+  if (write && config.project?.store?.type === "managed") {
+    throw new Error("Migration --write cannot modify a Managed Memory Store directly; apply the migration through a ChangeSet.");
+  }
 }

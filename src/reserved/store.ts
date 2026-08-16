@@ -184,7 +184,9 @@ export async function installReservedMemories(
 
 export async function importReservedMemory(scopeRoot: string, memoryRoot: string, relativePath: string): Promise<string> {
   assertSafeReservedRelativePath(relativePath);
-  const sourcePath = resolveReservedMemoryPath(scopeRoot, relativePath);
+  const scopedRoot = reservedMemoryRoot(scopeRoot);
+  const sourceRoot = await pathExists(scopedRoot) ? scopedRoot : bundledReservedMemoryRoot();
+  const sourcePath = resolveMemoryPath(sourceRoot, relativePath);
   const targetPath = resolveUserMemoryPath(memoryRoot, relativePath);
   if (!(await pathExists(sourcePath))) {
     throw new Error(`reserved memory not found: ${relativePath}`);
@@ -198,7 +200,8 @@ export async function importReservedMemory(scopeRoot: string, memoryRoot: string
 }
 
 export async function listReservedMemories(scopeRoot: string, memoryRoot?: string, kind?: MemoryKind): Promise<ReservedMemoryListItem[]> {
-  const root = reservedMemoryRoot(scopeRoot);
+  const scopedRoot = reservedMemoryRoot(scopeRoot);
+  const root = await pathExists(scopedRoot) ? scopedRoot : bundledReservedMemoryRoot();
   const kinds = kind ? [kind] : memoryKinds;
   const items: ReservedMemoryListItem[] = [];
 

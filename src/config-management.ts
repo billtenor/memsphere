@@ -1,20 +1,18 @@
 import { createHash } from "node:crypto";
-import { open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { ZodError } from "zod";
+import { ZodError, type z } from "zod";
+import { globalConfigSchema, type MemsphereConfig } from "./config.js";
 import {
-  configSchema,
-  parseConfigFile,
-  readConfigAt,
-  resolveConfigPath,
-  type MemsphereConfig,
-  type MemsphereConfigFile
-} from "./config.js";
+  resolveProjectControlPlane,
+  type AcpProviderConfigFile,
+  type ProjectControlPlaneConfigFile
+} from "./control-plane/index.js";
+import { homePaths } from "./home.js";
+import { atomicWriteJson, withFileLock } from "./persistence.js";
+import { projectConfigSchema, type ProjectConfigFile } from "./project/model.js";
 
-export type ConfigFieldError = {
-  path: string;
-  message: string;
-};
+export type ConfigFieldError = { path: string; message: string };
 
 export type ConfigChange = {
   path: string;
@@ -23,43 +21,41 @@ export type ConfigChange = {
   kind: "added" | "removed" | "changed";
 };
 
+type GlobalConfigFile = z.infer<typeof globalConfigSchema>;
+
 export type ConfigExplicitFields = {
   language: boolean;
-  memoryRoot: boolean;
-  reviewsRoot: boolean;
-  runsRoot: boolean;
-  archiveRoot: boolean;
   view: boolean;
+  acpProviders: boolean;
   controlPlane: boolean;
 };
 
 export type ConfigDocument = {
   configPath: string;
+  globalConfigPath: string;
   scopeRoot: string;
   revision: string;
-  source: string;
-  raw: MemsphereConfigFile;
+  globalRevision: string;
+  projectRevision: string;
+  globalSource: string;
+  projectSource: string;
+  globalRaw: GlobalConfigFile;
+  projectRaw: ProjectConfigFile;
   resolved: MemsphereConfig;
   explicit: ConfigExplicitFields;
 };
 
 export type EditableConfigDraft = {
   language?: "zh-CN" | "en";
-  memoryRoot?: string;
-  reviewsRoot?: string;
-  runsRoot?: string;
-  archiveRoot?: string;
-  view?: {
-    host: string;
-    port: number;
-  };
-  control_plane?: unknown;
+  view?: { host: string; port: number };
+  acp_providers?: AcpProviderConfigFile;
+  control_plane?: ProjectControlPlaneConfigFile;
 };
 
 export type ConfigDraftValidation = {
   valid: boolean;
   errors: ConfigFieldError[];
-  candidate?: MemsphereConfigFile;
+  candidate?: { global: GlobalConfigFile; project: ProjectConfigFile };
   normalizedJson?: string;
   changes: ConfigChange[];
   resolvedPaths?: {
@@ -71,53 +67,58 @@ export type ConfigDraftValidation = {
 };
 
 export class ConfigRevisionConflictError extends Error {
-  constructor(
-    readonly expectedRevision: string,
-    readonly actualRevision: string
-  ) {
+  constructor(readonly expectedRevision: string, readonly actualRevision: string) {
     super(`config revision conflict: expected ${expectedRevision}; current revision is ${actualRevision}`);
   }
 }
 
-export async function readConfigDocument(configPath: string): Promise<ConfigDocument> {
-  const source = await readFile(configPath, "utf8");
-  const parsed = parseConfigSource(source);
-  parseConfigFile(parsed);
-  const raw = structuredClone(parsed) as MemsphereConfigFile;
-  const resolved = await readConfigAt(configPath);
+export async function readConfigDocument(
+  projectConfigPath: string,
+  options: { globalConfigPath?: string; resolved: MemsphereConfig }
+): Promise<ConfigDocument> {
+  const globalConfigPath = options.globalConfigPath
+    ?? homePaths(options.resolved.homeRoot).configPath;
+  const [globalSource, projectSource] = await Promise.all([
+    readOptionalConfig(globalConfigPath),
+    readFile(projectConfigPath, "utf8")
+  ]);
+  const globalRaw = parseGlobalConfigSource(globalSource);
+  const projectRaw = parseProjectConfigSource(projectSource);
+  validateCombinedConfig(globalRaw, projectRaw);
+  const globalRevision = configRevision(globalSource);
+  const projectRevision = configRevision(projectSource);
 
   return {
-    configPath,
-    scopeRoot: dirname(configPath),
-    revision: configRevision(source),
-    source,
-    raw,
-    resolved,
+    configPath: projectConfigPath,
+    globalConfigPath,
+    scopeRoot: dirname(projectConfigPath),
+    revision: combinedRevision(globalRevision, projectRevision),
+    globalRevision,
+    projectRevision,
+    globalSource,
+    projectSource,
+    globalRaw,
+    projectRaw,
+    resolved: options.resolved,
     explicit: {
-      language: Object.hasOwn(raw, "language"),
-      memoryRoot: Object.hasOwn(raw, "memoryRoot"),
-      reviewsRoot: Object.hasOwn(raw, "reviewsRoot"),
-      runsRoot: Object.hasOwn(raw, "runsRoot"),
-      archiveRoot: Object.hasOwn(raw, "archiveRoot"),
-      view: Object.hasOwn(raw, "view"),
-      controlPlane: Object.hasOwn(raw, "control_plane")
+      language: Object.hasOwn(globalRaw, "language"),
+      view: Object.hasOwn(globalRaw, "view"),
+      acpProviders: Object.hasOwn(globalRaw, "acp_providers"),
+      controlPlane: Object.hasOwn(projectRaw, "control_plane")
     }
   };
 }
 
 export function editableConfigDraft(document: ConfigDocument): EditableConfigDraft {
-  return editableConfigFromRaw(document.raw);
-}
-
-function editableConfigFromRaw(raw: MemsphereConfigFile): EditableConfigDraft {
   return {
-    ...(raw.language === undefined ? {} : { language: raw.language }),
-    ...(raw.memoryRoot === undefined ? {} : { memoryRoot: raw.memoryRoot }),
-    ...(raw.reviewsRoot === undefined ? {} : { reviewsRoot: raw.reviewsRoot }),
-    ...(raw.runsRoot === undefined ? {} : { runsRoot: raw.runsRoot }),
-    ...(raw.archiveRoot === undefined ? {} : { archiveRoot: raw.archiveRoot }),
-    ...(raw.view === undefined ? {} : { view: structuredClone(raw.view) }),
-    ...(raw.control_plane === undefined ? {} : { control_plane: serializeControlPlaneInput(raw.control_plane) })
+    ...(document.globalRaw.language === undefined ? {} : { language: document.globalRaw.language }),
+    ...(document.globalRaw.view === undefined ? {} : { view: structuredClone(document.globalRaw.view) }),
+    ...(document.globalRaw.acp_providers === undefined
+      ? {}
+      : { acp_providers: structuredClone(document.globalRaw.acp_providers) }),
+    ...(document.projectRaw.control_plane === undefined
+      ? {}
+      : { control_plane: structuredClone(document.projectRaw.control_plane) })
   };
 }
 
@@ -125,29 +126,37 @@ export function validateConfigDraft(
   document: ConfigDocument,
   draft: EditableConfigDraft
 ): ConfigDraftValidation {
-  const candidate = mergeEditableConfig(document.raw, draft);
+  const globalCandidate = {
+    ...(draft.language === undefined ? {} : { language: draft.language }),
+    ...(draft.view === undefined ? {} : { view: structuredClone(draft.view) }),
+    ...(document.globalRaw.debug === undefined ? {} : { debug: structuredClone(document.globalRaw.debug) }),
+    ...(draft.acp_providers === undefined ? {} : { acp_providers: structuredClone(draft.acp_providers) })
+  };
+  const projectCandidate = {
+    store: structuredClone(document.projectRaw.store),
+    ...(draft.control_plane === undefined ? {} : { control_plane: structuredClone(draft.control_plane) })
+  };
+
   try {
-    configSchema.parse(candidate);
-    const normalizedJson = `${JSON.stringify(editableConfigFromRaw(candidate), null, 2)}\n`;
+    const global = globalConfigSchema.parse(globalCandidate);
+    const project = projectConfigSchema.parse(projectCandidate);
+    validateCombinedConfig(global, project);
+    const normalized = normalizeDraft(global, project);
     return {
       valid: true,
       errors: [],
-      candidate,
-      normalizedJson,
-      changes: diffConfig(document.raw, candidate),
+      candidate: { global, project },
+      normalizedJson: `${JSON.stringify(normalized, null, 2)}\n`,
+      changes: diffConfig(editableConfigDraft(document), normalized),
       resolvedPaths: {
-        memoryRoot: resolveConfigPath(candidate.memoryRoot ?? "memory", document.scopeRoot),
-        reviewsRoot: resolveConfigPath(candidate.reviewsRoot ?? "reviews", document.scopeRoot),
-        runsRoot: resolveConfigPath(candidate.runsRoot ?? "runs", document.scopeRoot),
-        archiveRoot: resolveConfigPath(candidate.archiveRoot ?? "archives", document.scopeRoot)
+        memoryRoot: document.resolved.memoryRoot,
+        reviewsRoot: document.resolved.reviewsRoot,
+        runsRoot: document.resolved.runsRoot,
+        archiveRoot: document.resolved.archiveRoot
       }
     };
   } catch (error) {
-    return {
-      valid: false,
-      errors: configFieldErrors(error),
-      changes: []
-    };
+    return { valid: false, errors: configFieldErrors(error), changes: [] };
   }
 }
 
@@ -156,49 +165,26 @@ export async function writeConfigDraft(input: {
   expectedRevision: string;
   draft: EditableConfigDraft;
 }): Promise<ConfigDocument> {
-  const latest = await readConfigDocument(input.document.configPath);
-  if (latest.revision !== input.expectedRevision) {
-    throw new ConfigRevisionConflictError(input.expectedRevision, latest.revision);
-  }
-
-  const validation = validateConfigDraft(latest, input.draft);
-  if (!validation.valid || !validation.candidate) {
-    throw new ConfigDraftValidationError(validation.errors);
-  }
-  const serializedConfig = `${JSON.stringify(validation.candidate, null, 2)}\n`;
-
-  const fileStat = await stat(latest.configPath);
-  const temporaryPath = join(
-    dirname(latest.configPath),
-    `.${latest.configPath.split("/").at(-1)}.${process.pid}.${Date.now()}.tmp`
-  );
-
-  try {
-    await writeFile(temporaryPath, serializedConfig, { encoding: "utf8", mode: fileStat.mode });
-    const handle = await open(temporaryPath, "r");
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
+  const lockPath = join(dirname(input.document.globalConfigPath), ".runtime", "settings.lock");
+  return withFileLock(lockPath, async () => {
+    const latest = await readConfigDocument(input.document.configPath, {
+      globalConfigPath: input.document.globalConfigPath,
+      resolved: input.document.resolved
+    });
+    if (latest.revision !== input.expectedRevision) {
+      throw new ConfigRevisionConflictError(input.expectedRevision, latest.revision);
     }
-
-    const beforeRename = await readConfigDocument(latest.configPath);
-    if (beforeRename.revision !== input.expectedRevision) {
-      throw new ConfigRevisionConflictError(input.expectedRevision, beforeRename.revision);
+    const validation = validateConfigDraft(latest, input.draft);
+    if (!validation.valid || !validation.candidate) {
+      throw new ConfigDraftValidationError(validation.errors);
     }
-    await rename(temporaryPath, latest.configPath);
-    const directory = await open(dirname(latest.configPath), "r");
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
-    }
-  } catch (error) {
-    await unlink(temporaryPath).catch(() => undefined);
-    throw error;
-  }
-
-  return readConfigDocument(latest.configPath);
+    await atomicWriteJson(latest.globalConfigPath, validation.candidate.global);
+    await atomicWriteJson(latest.configPath, validation.candidate.project);
+    return readConfigDocument(latest.configPath, {
+      globalConfigPath: latest.globalConfigPath,
+      resolved: latest.resolved
+    });
+  });
 }
 
 export class ConfigDraftValidationError extends Error {
@@ -211,42 +197,62 @@ export function configRevision(source: string | Buffer): string {
   return `sha256:${createHash("sha256").update(source).digest("hex")}`;
 }
 
-function mergeEditableConfig(
-  current: MemsphereConfigFile,
-  draft: EditableConfigDraft
-): MemsphereConfigFile {
+function combinedRevision(globalRevision: string, projectRevision: string): string {
+  return configRevision(`${globalRevision}\n${projectRevision}`);
+}
+
+async function readOptionalConfig(path: string): Promise<string> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (isCode(error, "ENOENT")) return "{}\n";
+    throw error;
+  }
+}
+
+function parseGlobalConfigSource(source: string): GlobalConfigFile {
+  try {
+    return globalConfigSchema.parse(JSON.parse(source));
+  } catch (error) {
+    throw parseConfigError(error);
+  }
+}
+
+function parseProjectConfigSource(source: string): ProjectConfigFile {
+  try {
+    return projectConfigSchema.parse(JSON.parse(source));
+  } catch (error) {
+    throw parseConfigError(error);
+  }
+}
+
+function validateCombinedConfig(global: GlobalConfigFile, project: ProjectConfigFile): void {
+  if (project.control_plane) {
+    resolveProjectControlPlane(project.control_plane, global.acp_providers);
+  }
+}
+
+function normalizeDraft(global: GlobalConfigFile, project: ProjectConfigFile): EditableConfigDraft {
   return {
-    ...(draft.language === undefined ? {} : { language: draft.language }),
-    ...(draft.memoryRoot === undefined ? {} : { memoryRoot: draft.memoryRoot }),
-    ...(draft.reviewsRoot === undefined ? {} : { reviewsRoot: draft.reviewsRoot }),
-    ...(draft.runsRoot === undefined ? {} : { runsRoot: draft.runsRoot }),
-    ...(draft.archiveRoot === undefined ? {} : { archiveRoot: draft.archiveRoot }),
-    ...(draft.view === undefined ? {} : { view: structuredClone(draft.view) }),
-    ...(current.debug === undefined ? {} : { debug: structuredClone(current.debug) }),
-    ...(draft.control_plane === undefined ? {} : {
-      control_plane: structuredClone(draft.control_plane) as MemsphereConfigFile["control_plane"]
-    })
+    ...(global.language === undefined ? {} : { language: global.language }),
+    ...(global.view === undefined ? {} : { view: structuredClone(global.view) }),
+    ...(global.acp_providers === undefined ? {} : { acp_providers: structuredClone(global.acp_providers) }),
+    ...(project.control_plane === undefined ? {} : { control_plane: structuredClone(project.control_plane) })
   };
 }
 
-function parseConfigSource(source: string): unknown {
-  try {
-    return JSON.parse(source);
-  } catch (error) {
-    throw new ConfigDraftValidationError([{
-      path: "",
-      message: error instanceof Error ? error.message : String(error)
-    }]);
+function parseConfigError(error: unknown): Error {
+  if (error instanceof ConfigDraftValidationError) return error;
+  if (error instanceof SyntaxError) {
+    return new ConfigDraftValidationError([{ path: "", message: error.message }]);
   }
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function configFieldErrors(error: unknown): ConfigFieldError[] {
   if (error instanceof ConfigDraftValidationError) return error.errors;
   if (error instanceof ZodError) {
-    return error.issues.map((issue) => ({
-      path: issue.path.join("."),
-      message: issue.message
-    }));
+    return error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message }));
   }
   return [{ path: "", message: error instanceof Error ? error.message : String(error) }];
 }
@@ -279,15 +285,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function serializeControlPlaneInput(value: unknown): unknown {
-  const controlPlane = structuredClone(value);
-  if (!isRecord(controlPlane) || !isRecord(controlPlane.actors)) return controlPlane;
-  for (const actor of Object.values(controlPlane.actors)) {
-    if (!isRecord(actor) || actor.kind !== "agent" || !isRecord(actor.agent)) continue;
-    actor.agent = {
-      provider: typeof actor.agent.provider === "string" ? actor.agent.provider : "traex",
-      ...(typeof actor.agent.model === "string" ? { model: actor.agent.model } : {})
-    };
-  }
-  return controlPlane;
+function isCode(error: unknown, code: string): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === code);
 }

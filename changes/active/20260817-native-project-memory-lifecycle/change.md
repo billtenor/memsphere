@@ -1,9 +1,9 @@
 ---
 id: 20260817-native-project-memory-lifecycle
-status: todo
+status: doing
 type: feature
 created: 2026-08-17
-run_id: run-20260816-161312z-7874110d
+run_id: run-20260816-163437z-67d3cdbd
 ---
 
 # Memsphere 原生 Project 分域与 Memory 生命周期
@@ -12,7 +12,7 @@ run_id: run-20260816-161312z-7874110d
 
 Memsphere 当前通过不同代码目录中的 `.memsphere` 实现数据分域，运行数据会随临时 Git worktree 分散和丢失，也无法自然支持个人 Memory、仓库 Memory 与跨仓库共享 Memory。本需求以不兼容升级引入独立 Project、Workspace Binding、Managed/Embedded Memory Store、只读 Mounted Project 和完整 ChangeSet 生命周期，并将 View 改为全局多 Project 服务。
 
-当前尚未开发，状态为 `todo`。
+当前已启动敏捷需求开发流程，状态为 `doing`。
 
 ## 需求
 
@@ -37,7 +37,7 @@ Memsphere 需要原生 Project 分域。Project 是 Memory、ChangeSet、Run、R
 - Git Workspace 按 Git common dir 绑定，因此同一仓库的 linked worktree 共享 Primary 和 Mounted 配置；非 Git Workspace 按规范化目录路径绑定。
 - Binding 保存在全局 Registry，不修改业务仓库。
 - Registry 按 Workspace 保存 `Primary Project + Mounted Projects[]`。
-- 替换 Primary 必须显式使用 `project bind <name> --replace`，并清空原 Mounted 列表。
+- 已有 Primary 时，绑定其他 Project 直接报错；用户必须先显式解绑并自行处理 Mounted 列表，不提供替换捷径。
 - 日常命令根据 Binding 解析 Primary；`--project <name>` 只对本次命令临时选择目标，不修改 Binding。
 
 ### Memsphere Home 与 Project Root
@@ -201,8 +201,15 @@ Git working tree == clean
 
 - 新版本不读取旧 `.memsphere` 分散目录，不提供 `project migrate`、`attach`、`import` 或兼容层。
 - 旧 Memory 通过新 Project 的正常 ChangeSet 批量创建和 Publish。
-- 旧 Run、Review 和 Archive 默认保留为离线备份；确需迁入时仅针对当前存量数据编写一次性本地脚本，不进入产品 CLI。
+- 新版本生效前清点当前用户需要继续访问的 Memory、Config、Run、Review、Archive 和脚本；仅针对当前存量数据编写一次性本地转换脚本，完成转换和校验后再切换 CLI，该脚本不进入产品 CLI。
+- 不再需要迁入的数据和已结束历史目录由需求方明确确认后保留为离线备份。
 - Memsphere 不删除或修改旧目录。
+
+## 向前兼容
+
+结论：不需要向前兼容。
+
+本轮是 Memsphere 正式对外发布前的主动不兼容升级，当前使用者只有需求方本人。旧 CLI 保持可用期间，必须先清点存量 Memory、Config、Run、Review、Archive、脚本和活动任务；通过一次性本地脚本转换全部需要继续访问的数据，结束或明确放弃不再需要的活动任务，并验证新 Project 可读取和执行。只有完成该切换门禁后，才能启用新 CLI 并删除旧 `memsphere init`、cwd Scope 自动发现、分散 Root 配置和旧 `.memsphere` 运行时读取。这样变更生效时不存在仍依赖旧行为的数据或任务，不产生用户使用中断；一次性脚本不进入产品 CLI，旧目录继续作为备份保留。
 
 ## 验收标准
 
@@ -212,7 +219,7 @@ Git working tree == clean
 4. `project clone` 能处理本地及远端非空 Git 仓库、个人分支和组织上游；空仓库与非法 Memory Store 不留下可用 Project。
 5. `create/clone/register` 默认不修改 Binding，`--bind` 行为一致；已有 Primary 时在产生副作用前拒绝。
 6. Git common dir 下所有 linked worktree 解析到同一 Primary 与 Mounted 列表；非 Git Workspace 使用规范化路径隔离。
-7. bind、replace、unbind、mount、unmount、register 和 prune 满足本文的数据保留与拒绝规则，任何命令都不会物理删除 Project Root。
+7. bind、unbind、mount、unmount、register 和 prune 满足本文的数据保留与拒绝规则，冲突直接报错，任何命令都不会物理删除 Project Root。
 8. Primary 与多个 Mounted 的搜索结果标注来源；唯一命中正常返回，同名命中稳定报歧义；跨 Project `!ref` 校验失败。
 9. Run 启动后完整冻结 Primary 和全部 Mounted Revision，后续发布或挂载变化不改变已启动 Run 的读取结果。
 10. Managed ChangeSet 支持多 Memory create/update、动态追加、delete 和 rename；任一候选失败时正式 Store 完全不变。
@@ -226,7 +233,7 @@ Git working tree == clean
 18. Embedded Store 不创建嵌套 Git 和 Managed ChangeSet；同仓库 worktree 可用，跨仓库共享被拒绝并提示使用 Managed Project。
 19. `memsphere validate --memory-root` 在没有 Home、Registry 或 Binding 的隔离 CI 环境中完成全量校验，文本和 JSON 输出、退出码符合契约。
 20. 全局 View 能列出并切换至少两个 Project；切换后 Memory、Run、Review 和 Archive 不残留前一个 Project 数据；同一 Home 不启动第二套服务。
-21. `memsphere init`、旧 Root 拆分配置和旧 Scope 发现路径已从 CLI、帮助、Skill、预置 Memory 和文档中移除，不提供兼容提示。
+21. 在旧 CLI 仍可用时完成存量数据和活动任务清点、一次性本地转换、脚本更新及新 Project 读取/执行校验；完成后才切换当前 CLI。随后 `memsphere init`、旧 Root 拆分配置和旧 Scope 发现路径从 CLI、帮助、Skill、预置 Memory 和文档中移除，不提供兼容提示。
 22. 自动化测试覆盖 Registry 并发写、Project 锁、路径越界、符号链接逃逸、非法名称、missing Root、STW、Publish 失败恢复和多 Project 数据隔离。
 23. 完成实现后执行 `npm run typecheck`、全量 `npm test`、`npm run build`、Memory Store 校验及 Linux/macOS/Windows CLI smoke，并给出测试摘要。
 24. 提需方依据 CLI、View 和测试摘要确认需求验收通过后，才允许归档到 `changes/archive/completed/`。
@@ -261,25 +268,33 @@ Git working tree == clean
 
 ## 技术与测试方案
 
-待开发前补充。方案需要按 Registry/Project Resolver、Managed Git Store、ChangeSet/Publish、View API/前端和不兼容清理分阶段设计，并明确跨进程锁、原子文件更新、Git 失败补偿、Windows 路径与进程行为，以及新旧测试夹具替换顺序。
+实现按六层收敛：平台 Home 与持久化原语；Project Registry、Workspace Binding 与解析器；Managed/Embedded Git Store；ChangeSet、Publish、STW、Recover 与远端同步；Run/Validate/View 的 Project 化；最后删除旧入口并完成一次性数据切换。Registry、Project 创建和 Publish 使用跨进程锁，JSON 使用原子替换；候选文件限制在 Workspace changes 目录且拒绝路径穿越和符号链接；Managed 发布以目标 blob CAS 和受控分支不变量保证原子性，Run 使用启动时的 Project Revision 快照。
 
-测试方案至少覆盖验收标准中的单元测试、CLI 集成、Git 并发/失败注入、View 多 Project 隔离、CI 无状态校验和三平台 Smoke。正式开发前应把每项验收标准映射到可执行测试或明确的人工观察步骤。
+测试映射如下：
+
+- Home、名称、Registry、Binding、Git common dir、并发锁、路径和符号链接由 `home`、`project-registry`、`project-command` 测试覆盖。
+- Managed/Embedded、组合读取、歧义、跨 Project 引用、ChangeSet、Publish、STW、Recover、Push/Sync 由 `project-memory-provider`、`memory-changeset`、`memory-sync` 测试覆盖。
+- Run Revision 冻结、无状态 CI 校验和诊断位置由 Run Store、`validate-command` 与 validation 测试覆盖。
+- View Project 切换、数据隔离和配置分层由 `view-project-switch`、View Settings 的单元与 Playwright 测试覆盖。
+- 发布入口和实际编译产物由全量 `npm test`、`npm run typecheck`、`npm run build` 与 `npm run smoke:project` 覆盖；GitHub Actions 在 Linux、macOS、Windows 分别执行同一门禁。
+- 当前旧数据使用一次性本地脚本切换，脚本不进入产品；切换后用正式 CLI 验证 Project、Binding、Memory、Validate 和活动 Run，旧目录保持不变。
 
 ## 开发任务
 
-- [ ] 设计并实现跨平台 Memsphere Home、Registry、Project Root、配置分层和 Project Resolver。
-- [ ] 实现 project create/clone/register/list/show/bind/unbind/mount/unmount/prune 命令及锁和原子更新。
-- [ ] 实现 Managed/Embedded Store、Git Revision、受控分支和 Git 身份规则。
-- [ ] 实现 Managed ChangeSet 的 create/update/delete/rename、候选恢复副本、resume 和原子 Publish。
-- [ ] 实现正式 Store 不变量检测、STW 和两种 recover 路径。
-- [ ] 实现分布式 Managed Store 的 push、merge sync 和 Sync ChangeSet。
-- [ ] 改造 Run 的多 Project Revision 冻结与读取解析。
-- [ ] 改造 `memsphere validate` 的 Project 模式、候选保存和无状态 `--memory-root` CI 模式。
-- [ ] 将 View 改造为 Home 级单服务、Project 路由和单 Project 切换界面。
-- [ ] 删除 init、旧 Scope/Root 配置和旧格式兼容入口，更新 Skill、预置 Memory、帮助和核心文档。
-- [ ] 适配现有 Run、Review、Archive、Eval 和测试夹具的 Project Root 解析。
-- [ ] 补齐自动化测试、三平台 Smoke、回归摘要和人工验收证据。
+- [x] 设计并实现跨平台 Memsphere Home、Registry、Project Root、配置分层和 Project Resolver。
+- [x] 实现 project create/clone/register/list/show/bind/unbind/mount/unmount/prune 命令及锁和原子更新。
+- [x] 实现 Managed/Embedded Store、Git Revision、受控分支和 Git 身份规则。
+- [x] 实现 Managed ChangeSet 的 create/update/delete/rename、候选恢复副本、resume 和原子 Publish。
+- [x] 实现正式 Store 不变量检测、STW 和两种 recover 路径。
+- [x] 实现分布式 Managed Store 的 push、merge sync 和 Sync ChangeSet。
+- [x] 改造 Run 的多 Project Revision 冻结与读取解析。
+- [x] 改造 `memsphere validate` 的 Project 模式、候选保存和无状态 `--memory-root` CI 模式。
+- [x] 将 View 改造为 Home 级单服务、Project 路由和单 Project 切换界面。
+- [x] 删除 init、旧 Scope/Root 配置和旧格式兼容入口，更新 Skill、预置 Memory、帮助和核心文档。
+- [x] 在旧 CLI 环境下完成当前存量数据清点、一次性本地转换脚本、切换验证和备份记录。
+- [x] 适配现有 Run、Review、Archive、Eval 和测试夹具的 Project Root 解析。
+- [ ] 补齐自动化测试、三平台 Smoke、回归摘要和人工验收证据（本地自动化已完成，等待远端 macOS/Windows CI 与提需方验收）。
 
 ## 验收结果
 
-尚未开始。
+功能实现与本地自动化验证已完成，当前等待流程内实现 Review、最终验收测试和提需方验收。Linux 本地 Smoke 已通过；macOS/Windows Smoke 已配置为 GitHub Actions 门禁，需以远端 CI 运行结果作为对应平台证据。

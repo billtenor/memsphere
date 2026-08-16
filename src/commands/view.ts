@@ -22,7 +22,9 @@ import {
   type ArtifactReviewSubmittedOpinion,
   type ArtifactReviewVote
 } from "../artifact-review.js";
-import { configSchema, type MemsphereConfig, readConfig } from "../config.js";
+import { type MemsphereConfig, readConfig, readProjectConfig } from "../config.js";
+import { homePaths, resolveMemsphereHome } from "../home.js";
+import { listRegisteredProjects } from "../project/registry.js";
 import {
   ConfigDraftValidationError,
   ConfigRevisionConflictError,
@@ -33,7 +35,7 @@ import {
   type ConfigDocument,
   type EditableConfigDraft
 } from "../config-management.js";
-import { authorizeArtifactOperation, listPermissionDefinitions } from "../control-plane/index.js";
+import { authorizeArtifactOperation, controlPlaneConfigSchema, listPermissionDefinitions } from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
@@ -116,7 +118,7 @@ type MemoryLoadError = {
 };
 
 export async function viewStartCommand(): Promise<void> {
-  const config = await readConfig();
+  const config = await readViewStartupConfig();
   const state = await startViewService(config);
   console.log(`memsphere view running at ${viewServiceUrl(state)}`);
   console.log(`pid: ${state.pid}`);
@@ -124,13 +126,13 @@ export async function viewStartCommand(): Promise<void> {
 }
 
 export async function viewStopCommand(): Promise<void> {
-  const config = await readConfig();
+  const config = await readViewServiceConfig();
   const status = await stopViewService(config);
   console.log(status.running ? "memsphere view is still running" : "memsphere view stopped");
 }
 
 export async function viewRestartCommand(): Promise<void> {
-  const config = await readConfig();
+  const config = await readViewStartupConfig();
   const state = await restartViewService(config);
   console.log(`memsphere view restarted at ${viewServiceUrl(state)}`);
   console.log(`pid: ${state.pid}`);
@@ -138,7 +140,7 @@ export async function viewRestartCommand(): Promise<void> {
 }
 
 export async function viewStatusCommand(): Promise<void> {
-  const config = await readConfig();
+  const config = await readViewServiceConfig();
   const status = await getViewServiceStatus(config);
   if (!status.running || !status.state) {
     console.log("memsphere view stopped");
@@ -155,7 +157,7 @@ export async function viewServeCommand(options: ViewServeOptions): Promise<void>
   const host = config.view.host;
   const port = config.view.port;
   const statePath = options.state ?? viewServiceStatePath(config);
-  const runningDocument = await readConfigDocument(config.configPath);
+  const runningDocument = await readSettingsDocument(config);
   const settingsToken = isLoopbackHost(host)
     ? undefined
     : createSettingsToken();
@@ -221,6 +223,24 @@ async function handleRequest(
   const { memoryRoot, reviewsRoot, runsRoot } = config;
   const archiveRoot = config.archiveRoot;
 
+  if (request.method === "GET" && url.pathname === "/api/projects") {
+    const projects = await listRegisteredProjects(config.homeRoot ?? resolveMemsphereHome());
+    sendJson(response, 200, { current: config.project?.name, projects });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/projects/select") {
+    const body = await readJsonBody<{ name?: unknown }>(request);
+    if (typeof body.name !== "string" || !body.name.trim()) {
+      sendJson(response, 400, { error: "Project name is required" });
+      return;
+    }
+    const selected = await readProjectConfig(body.name.trim());
+    Object.assign(config, selected);
+    sendJson(response, 200, { current: selected.project?.name });
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/") {
     sendHtml(response, browserHtml);
     return;
@@ -237,7 +257,7 @@ async function handleRequest(
 
   if (url.pathname === "/api/settings" && request.method === "GET") {
     if (!authorizeSettingsRequest(request, response, config, options)) return;
-    const document = await readConfigDocument(config.configPath);
+    const document = await readSettingsDocument(config);
     sendJson(response, 200, settingsPayload(document, options.runningRevision ?? document.revision, config.view));
     return;
   }
@@ -249,7 +269,7 @@ async function handleRequest(
       sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
       return;
     }
-    const document = await readConfigDocument(config.configPath);
+    const document = await readSettingsDocument(config);
     if (document.revision !== body.expectedRevision) {
       sendJson(response, 409, {
         code: "revision_conflict",
@@ -278,7 +298,7 @@ async function handleRequest(
       sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
       return;
     }
-    const document = await readConfigDocument(config.configPath);
+    const document = await readSettingsDocument(config);
     if (document.revision !== body.expectedRevision) {
       sendJson(response, 409, {
         code: "revision_conflict",
@@ -297,8 +317,13 @@ async function handleRequest(
       });
       return;
     }
-    const parsed = configSchema.parse(validation.candidate);
-    const providers = parsed.control_plane?.acpProviders ?? defaultAcpProviderInstances();
+    const providers = controlPlaneConfigSchema.parse({
+      runner: { permissions: [] },
+      actors: {},
+      ...(validation.candidate.global.acp_providers
+        ? { acp_providers: validation.candidate.global.acp_providers }
+        : {})
+    }).acpProviders ?? defaultAcpProviderInstances();
     sendJson(response, 200, {
       detectedAt: new Date().toISOString(),
       results: await detectAcpProviderInstances(providers)
@@ -313,7 +338,7 @@ async function handleRequest(
       sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
       return;
     }
-    const document = await readConfigDocument(config.configPath);
+    const document = await readSettingsDocument(config);
     try {
       const saved = await writeConfigDraft({
         document,
@@ -359,6 +384,12 @@ async function handleRequest(
   }
 
   if (request.method === "POST" && url.pathname === "/api/reserved-memories/import") {
+    if (config.project?.store?.type === "managed") {
+      sendJson(response, 409, {
+        error: "Managed Memory must be imported through a ChangeSet; use memsphere memory edit and publish."
+      });
+      return;
+    }
     const body = await readJsonBody<{ path?: unknown }>(request);
     const path = typeof body.path === "string" ? body.path : "";
     assertSafeReservedRelativePath(path);
@@ -652,6 +683,36 @@ async function handleRequest(
   }
 
   sendText(response, 404, "Not Found");
+}
+
+async function readViewStartupConfig(): Promise<MemsphereConfig> {
+  try {
+    return await readConfig();
+  } catch (error) {
+    const first = (await listRegisteredProjects(resolveMemsphereHome())).find((project) => !project.missing);
+    if (!first) throw error;
+    return readProjectConfig(first.name);
+  }
+}
+
+async function readViewServiceConfig(): Promise<MemsphereConfig> {
+  try {
+    return await readViewStartupConfig();
+  } catch {
+    const home = resolveMemsphereHome();
+    return {
+      configPath: join(home, "config.json"),
+      scopeRoot: home,
+      homeRoot: home,
+      language: "zh-CN",
+      memoryRoot: join(home, "projects"),
+      reviewsRoot: join(home, "projects"),
+      runsRoot: join(home, "projects"),
+      archiveRoot: join(home, "projects"),
+      debug: { agentReview: false, root: join(home, ".runtime", "debug") },
+      view: { host: "127.0.0.1", port: 0 }
+    };
+  }
 }
 
 async function snapshotPayload(input: { snapshot: { label: string; path: string; kind: "memory" | "task"; createdAt: string }; content: string; snapshotRoot: string }): Promise<unknown> {
@@ -1224,6 +1285,8 @@ function settingsPayload(
 ): Record<string, unknown> {
   return {
     configPath: document.configPath,
+    globalConfigPath: document.globalConfigPath,
+    projectName: document.resolved.project?.name,
     scopeRoot: document.scopeRoot,
     runningRevision,
     runningView,
@@ -1239,10 +1302,6 @@ function settingsPayload(
     },
     defaults: {
       language: "zh-CN",
-      memoryRoot: "memory",
-      reviewsRoot: "reviews",
-      runsRoot: "runs",
-      archiveRoot: "archives",
       view: { host: "127.0.0.1", port: 0 }
     },
     permissionCatalog: listPermissionDefinitions()
@@ -1252,6 +1311,13 @@ function settingsPayload(
       defaultInstance: defaultAcpProviderInstance(definition.type)
     }))
   };
+}
+
+function readSettingsDocument(config: MemsphereConfig): Promise<ConfigDocument> {
+  return readConfigDocument(config.configPath, {
+    globalConfigPath: homePaths(config.homeRoot).configPath,
+    resolved: config
+  });
 }
 
 function authorizeSettingsRequest(

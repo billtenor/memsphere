@@ -5,23 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { chromium } from "playwright";
-import { readConfigAt } from "../src/config.js";
+import type { MemsphereConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
 
 test("Settings browser preserves omitted sections and stays responsive", async () => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-settings-browser-"));
-  const configPath = join(dir, "config.json");
-  await writeFile(configPath, `${JSON.stringify({ memoryRoot: "memory" }, null, 2)}\n`);
-  await Promise.all([
-    mkdir(join(dir, "memory", "procedures"), { recursive: true }),
-    mkdir(join(dir, "memory", "schemas"), { recursive: true }),
-    mkdir(join(dir, "memory", "concepts"), { recursive: true }),
-    mkdir(join(dir, "memory", "statements"), { recursive: true }),
-    mkdir(join(dir, "reviews"), { recursive: true }),
-    mkdir(join(dir, "runs"), { recursive: true })
-  ]);
-
-  const config = await readConfigAt(configPath);
+  const config = await settingsConfigFixture(dir, "127.0.0.1");
   const server = createViewServer(config);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -43,8 +32,8 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await page.getByRole("button", { name: "参与者配置", exact: true }).click();
     await page.getByRole("button", { name: "概览", exact: true }).click();
     const overview = page.locator(".settings-section").last();
-    assert.equal(await overview.getByText("配置文件", { exact: true }).count(), 1);
-    assert.equal(await overview.getByText("配置作用域", { exact: true }).count(), 1);
+    assert.equal(await overview.getByText("Project 配置", { exact: true }).count(), 1);
+    assert.equal(await overview.getByText("全局配置", { exact: true }).count(), 1);
     assert.equal(await overview.getByText("当前可管理配置", { exact: true }).count(), 0);
     assert.equal(await overview.getByText("Memory", { exact: true }).count(), 0);
     assert.equal(await overview.getByText("Reviews", { exact: true }).count(), 0);
@@ -57,7 +46,8 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.match(await page.locator("#settings-status").textContent() ?? "", /未保存修改/);
     await page.getByRole("button", { name: "重新读取", exact: true }).click();
     await page.getByRole("button", { name: "存储", exact: true }).click();
-    assert.equal(await page.getByRole("checkbox", { name: "使用默认值" }).count(), 4);
+    assert.equal(await page.getByRole("checkbox", { name: "使用默认值" }).count(), 0);
+    assert.equal(await page.locator(".settings-section .settings-field").count(), 4);
     await page.getByRole("button", { name: "概览", exact: true }).click();
     assert.equal(await page.getByRole("button", { name: "重新读取", exact: true }).count(), 0);
     assert.equal(await page.getByRole("button", { name: "保存", exact: true }).count(), 0);
@@ -185,21 +175,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
 
 test("Settings browser shows an inline error for an invalid operator token", async () => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-settings-token-browser-"));
-  const configPath = join(dir, "config.json");
-  await writeFile(configPath, `${JSON.stringify({
-    memoryRoot: "memory",
-    view: { host: "0.0.0.0", port: 30002 }
-  }, null, 2)}\n`);
-  await Promise.all([
-    mkdir(join(dir, "memory", "procedures"), { recursive: true }),
-    mkdir(join(dir, "memory", "schemas"), { recursive: true }),
-    mkdir(join(dir, "memory", "concepts"), { recursive: true }),
-    mkdir(join(dir, "memory", "statements"), { recursive: true }),
-    mkdir(join(dir, "reviews"), { recursive: true }),
-    mkdir(join(dir, "runs"), { recursive: true })
-  ]);
-
-  const config = await readConfigAt(configPath);
+  const config = await settingsConfigFixture(dir, "0.0.0.0");
   const settingsToken = "correct-settings-token";
   const server = createViewServer(config, { settingsToken });
   await new Promise<void>((resolve, reject) => {
@@ -247,3 +223,43 @@ test("Settings browser shows an inline error for an invalid operator token", asy
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+async function settingsConfigFixture(dir: string, host: string): Promise<MemsphereConfig> {
+  const home = join(dir, "home");
+  const projectRoot = join(home, "projects", "demo");
+  const memoryRoot = join(projectRoot, "memory");
+  await Promise.all([
+    mkdir(join(memoryRoot, "procedures"), { recursive: true }),
+    mkdir(join(memoryRoot, "schemas"), { recursive: true }),
+    mkdir(join(memoryRoot, "concepts"), { recursive: true }),
+    mkdir(join(memoryRoot, "statements"), { recursive: true }),
+    mkdir(join(projectRoot, "reviews"), { recursive: true }),
+    mkdir(join(projectRoot, "runs"), { recursive: true }),
+    mkdir(join(projectRoot, "archives"), { recursive: true })
+  ]);
+  await writeFile(join(home, "config.json"), `${JSON.stringify(
+    host === "127.0.0.1" ? {} : { view: { host, port: 30002 } },
+    null,
+    2
+  )}\n`);
+  await writeFile(join(projectRoot, "config.json"), `${JSON.stringify({
+    store: { type: "managed", branch: "master", published_revision: "abc123" }
+  }, null, 2)}\n`);
+  return {
+    configPath: join(projectRoot, "config.json"),
+    scopeRoot: projectRoot,
+    homeRoot: home,
+    language: "zh-CN",
+    memoryRoot,
+    reviewsRoot: join(projectRoot, "reviews"),
+    runsRoot: join(projectRoot, "runs"),
+    archiveRoot: join(projectRoot, "archives"),
+    debug: { agentReview: false, root: join(home, ".runtime", "debug") },
+    view: { host, port: 30002 },
+    project: {
+      name: "demo",
+      store: { type: "managed", branch: "master", published_revision: "abc123" },
+      mounted: []
+    }
+  };
+}
