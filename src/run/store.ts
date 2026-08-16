@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
@@ -2381,7 +2381,9 @@ async function assertManagedSchemaDraftSource(
   const actual = await realpath(source.path);
   const root = await realpath(artifactRoot);
   assertInsideRunArtifactDirectory(actual, root);
-  if (actual !== expected) throw new Error(`managed Schema draft must not be a symbolic link: ${expected}`);
+  if ((await lstat(expected)).isSymbolicLink()) {
+    throw new Error(`managed Schema draft must not be a symbolic link: ${expected}`);
+  }
 }
 
 async function persistSchemaDraftValidation(

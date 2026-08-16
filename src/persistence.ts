@@ -14,11 +14,13 @@ export async function atomicWriteFile(path: string, content: string, mode = 0o60
     await handle.close();
     await rename(temporaryPath, path);
     moved = true;
-    const directory = await open(dirname(path), "r");
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
+    if (process.platform !== "win32") {
+      const directory = await open(dirname(path), "r");
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
     }
   } finally {
     await handle.close().catch(() => undefined);
