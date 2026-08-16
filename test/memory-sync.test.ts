@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { memorySyncPublishCommand } from "../src/commands/memory.js";
 import { projectCloneCommand } from "../src/commands/project.js";
 import { editMemories, publishMemoryChange, syncMemory } from "../src/memory/changeset.js";
 import { runGit } from "../src/git.js";
@@ -45,7 +46,23 @@ test("Memory sync creates merge commits and isolates conflicts in a Sync ChangeS
     process.chdir(workspace);
     await projectCloneCommand(remote, { name: "shared", branch: "users/test", upstream: "origin/master", bind: true });
     const registry = await readProjectRegistry(home);
-    const memoryRoot = join(registry.projects.shared.root, "memory");
+    const projectRoot = registry.projects.shared.root;
+    const memoryRoot = join(projectRoot, "memory");
+
+    const ordinary = await editMemories({ references: ["Rules"] });
+    const headBeforeRejectedPublish = (await runGit(["rev-parse", "HEAD"], { cwd: memoryRoot })).stdout;
+    const configBeforeRejectedPublish = await readFile(join(projectRoot, "config.json"), "utf8");
+    await assert.rejects(
+      memorySyncPublishCommand({ change: ordinary.change.id }),
+      /is not a Sync ChangeSet/
+    );
+    assert.equal((await runGit(["rev-parse", "HEAD"], { cwd: memoryRoot })).stdout, headBeforeRejectedPublish);
+    assert.equal(await readFile(join(projectRoot, "config.json"), "utf8"), configBeforeRejectedPublish);
+    const rejectedChange = JSON.parse(
+      await readFile(join(projectRoot, "changes", ordinary.change.id, "change.json"), "utf8")
+    ) as { status: string; published_revision?: string };
+    assert.equal(rejectedChange.status, "draft");
+    assert.equal(rejectedChange.published_revision, undefined);
 
     await writeFile(join(organization, "statements", "fixture.yaml"), (await readFile(join(organization, "statements", "fixture.yaml"), "utf8")).replace("Base", "Organization"));
     await runGit(["add", "-A"], { cwd: organization });

@@ -122,7 +122,7 @@ export async function memoryRenameCommand(reference: string, newName: string, op
 
 export async function memoryPublishCommand(options: { change?: string; message?: string }): Promise<void> {
   if (!options.change) throw new Error("--change <id> is required");
-  const change = await publishMemoryChange(options.change, options.message);
+  const change = await publishMemoryChange(options.change, options.message, { expectedKind: "regular" });
   console.log(`Published ChangeSet: ${change.id}`);
   console.log(`Revision: ${change.published_revision}`);
 }
@@ -159,8 +159,7 @@ export async function memorySyncCommand(): Promise<void> {
 
 export async function memorySyncPublishCommand(options: { change?: string; message?: string }): Promise<void> {
   if (!options.change) throw new Error("--change <id> is required");
-  const change = await publishMemoryChange(options.change, options.message);
-  if (!change.merge_parent) throw new Error(`ChangeSet ${change.id} is not a Sync ChangeSet`);
+  const change = await publishMemoryChange(options.change, options.message, { expectedKind: "sync" });
   console.log(`Published Sync ChangeSet: ${change.id}`);
   console.log(`Revision: ${change.published_revision}`);
 }

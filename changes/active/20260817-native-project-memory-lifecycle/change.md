@@ -298,4 +298,4 @@ Git working tree == clean
 
 ## 验收结果
 
-功能实现与自动化验证已完成，当前等待流程内复审、最终验收测试和提需方验收。本地 `npm run typecheck`、`npm test`（348/348）、`npm run build`、`npm run smoke:project`、`npm run security:check` 和 `memsphere validate` 全部通过。GitHub PR #2 的最新 CI 中，Linux 完整回归与 Project Smoke、macOS Project Smoke、Windows Project Smoke、Gitleaks 四项检查全部通过；三平台持久化修复由 commit `b8fc88c` 承载。
+功能实现与自动化验证已完成，当前等待流程内复审、最终验收测试和提需方验收。本地 `npm run typecheck`、`npm test`（338/338）、`npm run build`、`npm run smoke:project`、`npm run security:check` 和 `memsphere validate` 全部通过。测试集从早期检查点收敛为 338 项，是因为删除了验证已淘汰 Reserved Scope 安装与导入行为的十个用例，并改由 Project bootstrap、Project Catalog 和禁止旧入口回归测试覆盖。GitHub PR #2 的最新 CI 中，Linux 完整回归与 Project Smoke、macOS Project Smoke、Windows Project Smoke、Gitleaks 四项检查全部通过；三平台持久化修复由 commit `b8fc88c` 承载。

@@ -144,12 +144,22 @@ export async function resumeMemoryChange(changeId: string): Promise<string> {
   return candidate;
 }
 
-export async function publishMemoryChange(changeId: string, message?: string): Promise<MemoryChangeSet> {
+export async function publishMemoryChange(
+  changeId: string,
+  message?: string,
+  options: { expectedKind?: "regular" | "sync" } = {}
+): Promise<MemoryChangeSet> {
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   assertManaged(context.primary);
   const workspace = await resolveWorkspaceIdentity();
   const change = await readChange(context.primary, changeId);
   assertDraftOwner(change, context.primary.name, workspace.key);
+  if (options.expectedKind === "sync" && !change.merge_parent) {
+    throw new Error(`ChangeSet ${change.id} is not a Sync ChangeSet`);
+  }
+  if (options.expectedKind === "regular" && change.merge_parent) {
+    throw new Error(`ChangeSet ${change.id} is a Sync ChangeSet; use memsphere memory sync publish`);
+  }
   const candidateRoot = workspaceCandidateRoot(workspace.path, changeId);
   if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
   const lock = join(context.primary.paths.runtimeRoot, "memory-publish.lock");
