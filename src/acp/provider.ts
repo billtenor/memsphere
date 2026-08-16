@@ -93,7 +93,7 @@ registerAgentReviewProvider({
       ...modelArgs,
       ...configured,
       "acp", "serve"
-    ], traexNetworkEnvironment(process.env));
+    ]);
   }
 });
 
@@ -138,27 +138,6 @@ registerAgentReviewProvider({
     });
   }
 });
-
-function traexNetworkEnvironment(source: NodeJS.ProcessEnv): Record<string, string> {
-  const entries = mergeNoProxyEntries(source.NO_PROXY, source.no_proxy, [
-    "bytedance.net",
-    ".bytedance.net",
-    "trae.com.cn",
-    ".trae.com.cn"
-  ]);
-  return { NO_PROXY: entries, no_proxy: entries };
-}
-
-function mergeNoProxyEntries(
-  upper: string | undefined,
-  lower: string | undefined,
-  required: readonly string[]
-): string {
-  const entries = [...(upper ?? "").split(","), ...(lower ?? "").split(","), ...required]
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-  return [...new Set(entries)].join(",");
-}
 
 function safeProviderEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const exact = new Set([

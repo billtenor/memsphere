@@ -306,11 +306,23 @@ test("Agent Review CLI launcher rejects commands outside the Session allowlist",
 
 test("Traex Provider fixes the ACP process to workspace-write non-interactive execution", () => {
   const provider = getAgentReviewProvider("traex");
-  const launch = provider.buildLaunch({
-    actor: agentIdentity("traex", ["acp", "serve"], { model: "review-model" }),
-    workspaceRoot: "/workspace",
-    sessionEnv: { MEMSPHERE_CLI: "/tmp/memsphere-review" }
-  });
+  const originalNoProxy = process.env.NO_PROXY;
+  const originalNoProxyLower = process.env.no_proxy;
+  process.env.NO_PROXY = "localhost,upper.example.test";
+  process.env.no_proxy = "localhost,lower.example.test";
+  let launch;
+  try {
+    launch = provider.buildLaunch({
+      actor: agentIdentity("traex", ["acp", "serve"], { model: "review-model" }),
+      workspaceRoot: "/workspace",
+      sessionEnv: { MEMSPHERE_CLI: "/tmp/memsphere-review" }
+    });
+  } finally {
+    if (originalNoProxy === undefined) delete process.env.NO_PROXY;
+    else process.env.NO_PROXY = originalNoProxy;
+    if (originalNoProxyLower === undefined) delete process.env.no_proxy;
+    else process.env.no_proxy = originalNoProxyLower;
+  }
   assert.deepEqual(launch.args, [
     "--sandbox", "workspace-write",
     "--ask-for-approval", "never",
@@ -318,9 +330,8 @@ test("Traex Provider fixes the ACP process to workspace-write non-interactive ex
     "acp", "serve"
   ]);
   assert.equal(launch.env.MEMSPHERE_CLI, "/tmp/memsphere-review");
-  assert.match(launch.env.NO_PROXY ?? "", /(?:^|,)bytedance\.net(?:,|$)/);
-  assert.match(launch.env.NO_PROXY ?? "", /(?:^|,)trae\.com\.cn(?:,|$)/);
-  assert.equal(launch.env.no_proxy, launch.env.NO_PROXY);
+  assert.equal(launch.env.NO_PROXY, "localhost,upper.example.test");
+  assert.equal(launch.env.no_proxy, "localhost,lower.example.test");
   assert.equal(launch.startupTimeoutMs, 60_000);
   assert.equal(launch.idleTimeoutMs, 120_000);
   assert.equal(launch.maxRuntimeMs, null);

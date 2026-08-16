@@ -1,0 +1,34 @@
+title = "Memsphere security rules"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "home-absolute-path"
+description = "Personal absolute filesystem path under /home"
+regex = '''/home/[A-Za-z0-9._-]+/'''
+tags = ["privacy", "path"]
+
+[[rules]]
+id = "users-absolute-path"
+description = "Personal absolute filesystem path under /Users"
+regex = '''/Users/[A-Za-z0-9._-]+/'''
+tags = ["privacy", "path"]
+
+[[rules]]
+id = "corporate-email"
+description = "Corporate email address"
+regex = '''[A-Za-z0-9._%+-]+@bytedance\.com'''
+tags = ["privacy", "email"]
+
+[[rules]]
+id = "private-ipv4-address"
+description = "Private IPv4 address"
+regex = '''(?:10(?:\.[0-9]{1,3}){3}|172\.(?:1[6-9]|2[0-9]|3[01])(?:\.[0-9]{1,3}){2}|192\.168(?:\.[0-9]{1,3}){2})'''
+tags = ["privacy", "network"]
+
+[[rules]]
+id = "corporate-internal-hostname"
+description = "Corporate internal hostname"
+regex = '''(?:[A-Za-z0-9-]+\.)+(?:bytedance\.net|byted\.org)'''
+tags = ["privacy", "network"]

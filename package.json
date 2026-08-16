@@ -36,6 +36,10 @@
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "validate": "npm run build",
+    "security:check": "sh scripts/security-check.sh --staged",
+    "security:audit": "sh scripts/security-check.sh --all",
+    "security:range": "sh scripts/security-check.sh --range",
+    "security:setup": "sh scripts/security-setup.sh",
     "prepack": "npm run build",
     "prepublishOnly": "npm test"
   },
@@ -50,7 +54,8 @@
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.5.4",
-    "playwright": "^1.55.0",
+    "husky": "^9.1.7",
+    "playwright": "^1.55.1",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2"
   },
