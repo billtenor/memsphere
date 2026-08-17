@@ -1,8 +1,8 @@
 ---
 id: 20260817-native-project-memory-lifecycle
-status: doing
 type: feature
 created: 2026-08-17
+completed_at: 2026-08-17
 run_id: run-20260816-163437z-67d3cdbd
 ---
 
@@ -12,7 +12,7 @@ run_id: run-20260816-163437z-67d3cdbd
 
 Memsphere 当前通过不同代码目录中的 `.memsphere` 实现数据分域，运行数据会随临时 Git worktree 分散和丢失，也无法自然支持个人 Memory、仓库 Memory 与跨仓库共享 Memory。本需求以不兼容升级引入独立 Project、Workspace Binding、Managed/Embedded Memory Store、只读 Mounted Project 和完整 ChangeSet 生命周期，并将 View 改为全局多 Project 服务。
 
-当前已启动敏捷需求开发流程，状态为 `doing`。
+敏捷需求开发流程已完成，需求进入 completed 归档。
 
 ## 需求
 
@@ -298,4 +298,6 @@ Git working tree == clean
 
 ## 验收结果
 
-功能实现与自动化验证已完成，当前等待流程内复审、最终验收测试和提需方验收。本地 `npm run typecheck`、`npm test`（338/338）、`npm run build`、`npm run smoke:project`、`npm run security:check` 和 `memsphere validate` 全部通过。测试集从早期检查点收敛为 338 项，是因为删除了验证已淘汰 Reserved Scope 安装与导入行为的十个用例，并改由 Project bootstrap、Project Catalog 和禁止旧入口回归测试覆盖。GitHub PR #2 的最新 CI 中，Linux 完整回归与 Project Smoke、macOS Project Smoke、Windows Project Smoke、Gitleaks 四项检查全部通过；三平台持久化修复由 commit `b8fc88c` 承载。
+功能实现、自动化验证和流程内七轮实现 Review 已完成，最终一轮产品、研发、测试与架构 Reviewer 全部通过，无阻塞意见；敏捷需求开发 Run `run-20260816-163437z-67d3cdbd` 已完成。提需方确认创建本轮 Git commit，并在独立功能分支和 PR 中完成交付归档。
+
+本地 `npm run typecheck`、`npm test`（338/338）、`npm run build`、`npm run smoke:project`、`npm run security:check` 和 `memsphere validate` 全部通过。测试集从早期检查点收敛为 338 项，是因为删除了验证已淘汰 Reserved Scope 安装与导入行为的十个用例，并改由 Project bootstrap、Project Catalog 和禁止旧入口回归测试覆盖。原交付分支的 Linux 完整回归与 Project Smoke、macOS Project Smoke、Windows Project Smoke、Gitleaks 均通过；拆分后的独立 PR 继续执行同一 CI 门禁。
