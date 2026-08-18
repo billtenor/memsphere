@@ -28,12 +28,20 @@ import { listRegisteredProjects } from "../project/registry.js";
 import {
   ConfigDraftValidationError,
   ConfigRevisionConflictError,
-  editableConfigDraft,
-  readConfigDocument,
-  validateConfigDraft,
-  writeConfigDraft,
-  type ConfigDocument,
-  type EditableConfigDraft
+  editableGlobalConfigDraft,
+  editableProjectConfigDraft,
+  parseProjectConfigSource,
+  readGlobalConfigDocument,
+  readProjectConfigDocument,
+  validateGlobalConfigDraft,
+  validateProjectConfigDraft,
+  writeGlobalConfigDraft,
+  writeProjectConfigDraft,
+  type EditableGlobalConfigDraft,
+  type EditableProjectConfigDraft,
+  type GlobalConfigDocument,
+  type ProjectConfigDocument,
+  type ProjectConfigReference
 } from "../config-management.js";
 import { authorizeArtifactOperation, controlPlaneConfigSchema, listPermissionDefinitions } from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile } from "../memory/store.js";
@@ -150,7 +158,7 @@ export async function viewServeCommand(options: ViewServeOptions): Promise<void>
   const host = config.view.host;
   const port = config.view.port;
   const statePath = options.state ?? viewServiceStatePath(config);
-  const runningDocument = await readSettingsDocument(config);
+  const runningDocument = await readGlobalSettingsDocument(config);
   const settingsToken = isLoopbackHost(host)
     ? undefined
     : createSettingsToken();
@@ -228,7 +236,7 @@ async function handleRequest(
       sendJson(response, 400, { error: "Project name is required" });
       return;
     }
-    const selected = await readProjectConfig(body.name.trim());
+    const selected = await readProjectConfig(body.name.trim(), config.homeRoot);
     Object.assign(config, selected);
     sendJson(response, 200, { current: selected.project?.name });
     return;
@@ -248,21 +256,27 @@ async function handleRequest(
     return;
   }
 
-  if (url.pathname === "/api/settings" && request.method === "GET") {
+  if (url.pathname === "/api/settings/global" && request.method === "GET") {
     if (!authorizeSettingsRequest(request, response, config, options)) return;
-    const document = await readSettingsDocument(config);
-    sendJson(response, 200, settingsPayload(document, options.runningRevision ?? document.revision, config.view));
+    const document = await readGlobalSettingsDocument(config);
+    const projects = await readRegisteredProjectConfigs(config.homeRoot);
+    sendJson(response, 200, globalSettingsPayload(
+      document,
+      options.runningRevision ?? document.revision,
+      config.view,
+      projects
+    ));
     return;
   }
 
-  if (url.pathname === "/api/settings/validate" && request.method === "POST") {
+  if (url.pathname === "/api/settings/global/validate" && request.method === "POST") {
     if (!authorizeSettingsRequest(request, response, config, options, true)) return;
     const body = await readJsonBody<{ expectedRevision?: unknown; config?: unknown }>(request, 128 * 1024);
     if (typeof body.expectedRevision !== "string" || !body.config || typeof body.config !== "object") {
       sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
       return;
     }
-    const document = await readSettingsDocument(config);
+    const document = await readGlobalSettingsDocument(config);
     if (document.revision !== body.expectedRevision) {
       sendJson(response, 409, {
         code: "revision_conflict",
@@ -272,7 +286,11 @@ async function handleRequest(
       });
       return;
     }
-    const validation = validateConfigDraft(document, body.config as EditableConfigDraft);
+    const validation = validateGlobalConfigDraft(
+      document,
+      body.config as EditableGlobalConfigDraft,
+      await readRegisteredProjectConfigs(config.homeRoot)
+    );
     const { candidate: _candidate, ...publicValidation } = validation;
     sendJson(response, validation.valid ? 200 : 422, {
       ...publicValidation,
@@ -284,14 +302,14 @@ async function handleRequest(
     return;
   }
 
-  if (url.pathname === "/api/settings/acp-providers/detect" && request.method === "POST") {
+  if (url.pathname === "/api/settings/global/acp-providers/detect" && request.method === "POST") {
     if (!authorizeSettingsRequest(request, response, config, options, true)) return;
     const body = await readJsonBody<{ expectedRevision?: unknown; config?: unknown }>(request, 128 * 1024);
     if (typeof body.expectedRevision !== "string" || !body.config || typeof body.config !== "object") {
       sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
       return;
     }
-    const document = await readSettingsDocument(config);
+    const document = await readGlobalSettingsDocument(config);
     if (document.revision !== body.expectedRevision) {
       sendJson(response, 409, {
         code: "revision_conflict",
@@ -301,7 +319,11 @@ async function handleRequest(
       });
       return;
     }
-    const validation = validateConfigDraft(document, body.config as EditableConfigDraft);
+    const validation = validateGlobalConfigDraft(
+      document,
+      body.config as EditableGlobalConfigDraft,
+      await readRegisteredProjectConfigs(config.homeRoot)
+    );
     if (!validation.valid || !validation.candidate) {
       sendJson(response, 422, {
         code: "config_invalid",
@@ -313,8 +335,8 @@ async function handleRequest(
     const providers = controlPlaneConfigSchema.parse({
       runner: { permissions: [] },
       actors: {},
-      ...(validation.candidate.global.acp_providers
-        ? { acp_providers: validation.candidate.global.acp_providers }
+      ...(validation.candidate.acp_providers
+        ? { acp_providers: validation.candidate.acp_providers }
         : {})
     }).acpProviders ?? defaultAcpProviderInstances();
     sendJson(response, 200, {
@@ -324,24 +346,121 @@ async function handleRequest(
     return;
   }
 
-  if (url.pathname === "/api/settings" && request.method === "PUT") {
+  if (url.pathname === "/api/settings/global" && request.method === "PUT") {
     if (!authorizeSettingsRequest(request, response, config, options, true)) return;
     const body = await readJsonBody<{ expectedRevision?: unknown; config?: unknown }>(request, 128 * 1024);
     if (typeof body.expectedRevision !== "string" || !body.config || typeof body.config !== "object") {
       sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
       return;
     }
-    const document = await readSettingsDocument(config);
+    const document = await readGlobalSettingsDocument(config);
     try {
-      const saved = await writeConfigDraft({
+      const saved = await writeGlobalConfigDraft({
         document,
         expectedRevision: body.expectedRevision,
-        draft: body.config as EditableConfigDraft
+        draft: body.config as EditableGlobalConfigDraft,
+        projects: () => readRegisteredProjectConfigs(config.homeRoot)
       });
       sendJson(response, 200, {
-        ...settingsPayload(saved, options.runningRevision ?? document.revision, config.view),
+        ...globalSettingsPayload(
+          saved,
+          options.runningRevision ?? document.revision,
+          config.view,
+          await readRegisteredProjectConfigs(config.homeRoot)
+        ),
         saved: true
       });
+    } catch (error) {
+      if (error instanceof ConfigDraftValidationError) {
+        sendJson(response, 422, {
+          code: "config_invalid",
+          error: error.message,
+          errors: error.errors
+        });
+        return;
+      }
+      if (error instanceof ConfigRevisionConflictError) {
+        sendJson(response, 409, {
+          code: "revision_conflict",
+          error: error.message,
+          expectedRevision: error.expectedRevision,
+          actualRevision: error.actualRevision
+        });
+        return;
+      }
+      throw error;
+    }
+    return;
+  }
+
+  if (url.pathname === "/api/settings/project" && request.method === "GET") {
+    if (!authorizeSettingsRequest(request, response, config, options)) return;
+    const document = await readCurrentProjectSettingsDocument(config);
+    if (!document) {
+      sendJson(response, 404, { code: "project_unavailable", error: "No Project is currently selected" });
+      return;
+    }
+    sendJson(response, 200, projectSettingsPayload(document));
+    return;
+  }
+
+  if (url.pathname === "/api/settings/project/validate" && request.method === "POST") {
+    if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+    const body = await readJsonBody<{ expectedRevision?: unknown; config?: unknown }>(request, 128 * 1024);
+    if (typeof body.expectedRevision !== "string" || !body.config || typeof body.config !== "object") {
+      sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
+      return;
+    }
+    const document = await readCurrentProjectSettingsDocument(config);
+    if (!document) {
+      sendJson(response, 404, { code: "project_unavailable", error: "No Project is currently selected" });
+      return;
+    }
+    if (document.revision !== body.expectedRevision) {
+      sendJson(response, 409, {
+        code: "revision_conflict",
+        error: "Project config file changed on disk",
+        expectedRevision: body.expectedRevision,
+        actualRevision: document.revision
+      });
+      return;
+    }
+    const global = await readGlobalSettingsDocument(config);
+    const validation = validateProjectConfigDraft(
+      document,
+      body.config as EditableProjectConfigDraft,
+      global.raw
+    );
+    const { candidate: _candidate, ...publicValidation } = validation;
+    sendJson(response, validation.valid ? 200 : 422, {
+      ...publicValidation,
+      expectedRevision: document.revision,
+      restartRequired: false
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/settings/project" && request.method === "PUT") {
+    if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+    const body = await readJsonBody<{ expectedRevision?: unknown; config?: unknown }>(request, 128 * 1024);
+    if (typeof body.expectedRevision !== "string" || !body.config || typeof body.config !== "object") {
+      sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
+      return;
+    }
+    const document = await readCurrentProjectSettingsDocument(config);
+    if (!document) {
+      sendJson(response, 404, { code: "project_unavailable", error: "No Project is currently selected" });
+      return;
+    }
+    try {
+      const global = await readGlobalSettingsDocument(config);
+      const saved = await writeProjectConfigDraft({
+        document,
+        expectedRevision: body.expectedRevision,
+        draft: body.config as EditableProjectConfigDraft,
+        globalConfigPath: global.configPath
+      });
+      sendJson(response, 200, { ...projectSettingsPayload(saved), saved: true });
     } catch (error) {
       if (error instanceof ConfigDraftValidationError) {
         sendJson(response, 422, {
@@ -1226,46 +1345,93 @@ async function loadMemoryListItem(memoryRoot: string, kind: MemoryKind, path: st
   }
 }
 
-function settingsPayload(
-  document: ConfigDocument,
+function globalSettingsPayload(
+  document: GlobalConfigDocument,
   runningRevision: string,
-  runningView: MemsphereConfig["view"]
+  runningView: MemsphereConfig["view"],
+  projects: ProjectConfigReference[]
 ): Record<string, unknown> {
   return {
     configPath: document.configPath,
-    globalConfigPath: document.globalConfigPath,
-    projectName: document.resolved.project?.name,
     scopeRoot: document.scopeRoot,
     runningRevision,
     runningView,
     diskRevision: document.revision,
     restartRequired: runningRevision !== document.revision,
-    explicit: document.explicit,
-    config: editableConfigDraft(document),
+    explicit: {
+      language: Object.hasOwn(document.raw, "language"),
+      view: Object.hasOwn(document.raw, "view"),
+      acpProviders: Object.hasOwn(document.raw, "acp_providers")
+    },
+    config: editableGlobalConfigDraft(document),
+    defaults: {
+      language: "zh-CN",
+      view: { host: "127.0.0.1", port: 0 }
+    },
+    acpProviderCatalog: listAcpProviderDefinitions().map((definition) => ({
+      ...definition,
+      defaultInstance: defaultAcpProviderInstance(definition.type)
+    })),
+    providerReferences: providerReferenceMap(projects)
+  };
+}
+
+function projectSettingsPayload(document: ProjectConfigDocument): Record<string, unknown> {
+  return {
+    configPath: document.configPath,
+    projectName: document.resolved.project?.name,
+    scopeRoot: document.scopeRoot,
+    diskRevision: document.revision,
+    restartRequired: false,
+    explicit: { controlPlane: Object.hasOwn(document.raw, "control_plane") },
+    config: editableProjectConfigDraft(document),
+    store: document.raw.store,
     resolvedPaths: {
       memoryRoot: document.resolved.memoryRoot,
       reviewsRoot: document.resolved.reviewsRoot,
       runsRoot: document.resolved.runsRoot,
       archiveRoot: document.resolved.archiveRoot
     },
-    defaults: {
-      language: "zh-CN",
-      view: { host: "127.0.0.1", port: 0 }
-    },
     permissionCatalog: listPermissionDefinitions()
-      .filter((definition) => !hiddenSettingsPermissionIds.has(definition.id)),
-    acpProviderCatalog: listAcpProviderDefinitions().map((definition) => ({
-      ...definition,
-      defaultInstance: defaultAcpProviderInstance(definition.type)
-    }))
+      .filter((definition) => !hiddenSettingsPermissionIds.has(definition.id))
   };
 }
 
-function readSettingsDocument(config: MemsphereConfig): Promise<ConfigDocument> {
-  return readConfigDocument(config.configPath, {
-    globalConfigPath: homePaths(config.homeRoot).configPath,
-    resolved: config
-  });
+function readGlobalSettingsDocument(config: MemsphereConfig): Promise<GlobalConfigDocument> {
+  return readGlobalConfigDocument(homePaths(config.homeRoot).configPath);
+}
+
+function readCurrentProjectSettingsDocument(config: MemsphereConfig): Promise<ProjectConfigDocument | undefined> {
+  if (!config.project?.name) return Promise.resolve(undefined);
+  return readProjectConfigDocument(config.configPath, config);
+}
+
+async function readRegisteredProjectConfigs(home?: string): Promise<ProjectConfigReference[]> {
+  const projects = (await listRegisteredProjects(home)).filter((project) => !project.missing);
+  return Promise.all(projects.map(async (project) => ({
+    name: project.name,
+    config: parseProjectConfigSource(await readFile(join(project.root, "config.json"), "utf8"))
+  })));
+}
+
+function providerReferenceMap(projects: ProjectConfigReference[]): Record<string, Array<{
+  projectName: string;
+  actorId: string;
+  actorName?: string;
+}>> {
+  const references: Record<string, Array<{ projectName: string; actorId: string; actorName?: string }>> = {};
+  for (const project of projects) {
+    for (const [actorId, actor] of Object.entries(project.config.control_plane?.actors ?? {})) {
+      if (actor.kind !== "agent" || !actor.agent?.provider) continue;
+      const reference = {
+        projectName: project.name,
+        actorId,
+        ...(actor.name ? { actorName: actor.name } : {})
+      };
+      (references[actor.agent.provider] ??= []).push(reference);
+    }
+  }
+  return references;
 }
 
 function authorizeSettingsRequest(

@@ -8,7 +8,6 @@ import {
   type AcpProviderConfigFile,
   type ProjectControlPlaneConfigFile
 } from "./control-plane/index.js";
-import { homePaths } from "./home.js";
 import { atomicWriteJson, withFileLock } from "./persistence.js";
 import { projectConfigSchema, type ProjectConfigFile } from "./project/model.js";
 
@@ -23,39 +22,50 @@ export type ConfigChange = {
 
 type GlobalConfigFile = z.infer<typeof globalConfigSchema>;
 
-export type ConfigExplicitFields = {
-  language: boolean;
-  view: boolean;
-  acpProviders: boolean;
-  controlPlane: boolean;
-};
-
-export type ConfigDocument = {
+export type GlobalConfigDocument = {
   configPath: string;
-  globalConfigPath: string;
   scopeRoot: string;
   revision: string;
-  globalRevision: string;
-  projectRevision: string;
-  globalSource: string;
-  projectSource: string;
-  globalRaw: GlobalConfigFile;
-  projectRaw: ProjectConfigFile;
-  resolved: MemsphereConfig;
-  explicit: ConfigExplicitFields;
+  source: string;
+  raw: GlobalConfigFile;
 };
 
-export type EditableConfigDraft = {
+export type ProjectConfigDocument = {
+  configPath: string;
+  scopeRoot: string;
+  revision: string;
+  source: string;
+  raw: ProjectConfigFile;
+  resolved: MemsphereConfig;
+};
+
+export type EditableGlobalConfigDraft = {
   language?: "zh-CN" | "en";
   view?: { host: string; port: number };
   acp_providers?: AcpProviderConfigFile;
+};
+
+export type EditableProjectConfigDraft = {
   control_plane?: ProjectControlPlaneConfigFile;
 };
 
-export type ConfigDraftValidation = {
+export type ProjectConfigReference = {
+  name: string;
+  config: ProjectConfigFile;
+};
+
+export type GlobalConfigDraftValidation = {
   valid: boolean;
   errors: ConfigFieldError[];
-  candidate?: { global: GlobalConfigFile; project: ProjectConfigFile };
+  candidate?: GlobalConfigFile;
+  normalizedJson?: string;
+  changes: ConfigChange[];
+};
+
+export type ProjectConfigDraftValidation = {
+  valid: boolean;
+  errors: ConfigFieldError[];
+  candidate?: ProjectConfigFile;
   normalizedJson?: string;
   changes: ConfigChange[];
   resolvedPaths?: {
@@ -72,82 +82,103 @@ export class ConfigRevisionConflictError extends Error {
   }
 }
 
-export async function readConfigDocument(
-  projectConfigPath: string,
-  options: { globalConfigPath?: string; resolved: MemsphereConfig }
-): Promise<ConfigDocument> {
-  const globalConfigPath = options.globalConfigPath
-    ?? homePaths(options.resolved.homeRoot).configPath;
-  const [globalSource, projectSource] = await Promise.all([
-    readOptionalConfig(globalConfigPath),
-    readFile(projectConfigPath, "utf8")
-  ]);
-  const globalRaw = parseGlobalConfigSource(globalSource);
-  const projectRaw = parseProjectConfigSource(projectSource);
-  validateCombinedConfig(globalRaw, projectRaw);
-  const globalRevision = configRevision(globalSource);
-  const projectRevision = configRevision(projectSource);
+export class ConfigDraftValidationError extends Error {
+  constructor(readonly errors: ConfigFieldError[]) {
+    super("config draft is invalid");
+  }
+}
 
+export async function readGlobalConfigDocument(configPath: string): Promise<GlobalConfigDocument> {
+  const source = await readOptionalConfig(configPath);
   return {
-    configPath: projectConfigPath,
-    globalConfigPath,
-    scopeRoot: dirname(projectConfigPath),
-    revision: combinedRevision(globalRevision, projectRevision),
-    globalRevision,
-    projectRevision,
-    globalSource,
-    projectSource,
-    globalRaw,
-    projectRaw,
-    resolved: options.resolved,
-    explicit: {
-      language: Object.hasOwn(globalRaw, "language"),
-      view: Object.hasOwn(globalRaw, "view"),
-      acpProviders: Object.hasOwn(globalRaw, "acp_providers"),
-      controlPlane: Object.hasOwn(projectRaw, "control_plane")
-    }
+    configPath,
+    scopeRoot: dirname(configPath),
+    revision: configRevision(source),
+    source,
+    raw: parseGlobalConfigSource(source)
   };
 }
 
-export function editableConfigDraft(document: ConfigDocument): EditableConfigDraft {
+export async function readProjectConfigDocument(
+  configPath: string,
+  resolved: MemsphereConfig
+): Promise<ProjectConfigDocument> {
+  const source = await readFile(configPath, "utf8");
   return {
-    ...(document.globalRaw.language === undefined ? {} : { language: document.globalRaw.language }),
-    ...(document.globalRaw.view === undefined ? {} : { view: structuredClone(document.globalRaw.view) }),
-    ...(document.globalRaw.acp_providers === undefined
-      ? {}
-      : { acp_providers: structuredClone(document.globalRaw.acp_providers) }),
-    ...(document.projectRaw.control_plane === undefined
-      ? {}
-      : { control_plane: structuredClone(document.projectRaw.control_plane) })
+    configPath,
+    scopeRoot: dirname(configPath),
+    revision: configRevision(source),
+    source,
+    raw: parseProjectConfigSource(source),
+    resolved
   };
 }
 
-export function validateConfigDraft(
-  document: ConfigDocument,
-  draft: EditableConfigDraft
-): ConfigDraftValidation {
-  const globalCandidate = {
+export function editableGlobalConfigDraft(document: GlobalConfigDocument): EditableGlobalConfigDraft {
+  return {
+    ...(document.raw.language === undefined ? {} : { language: document.raw.language }),
+    ...(document.raw.view === undefined ? {} : { view: structuredClone(document.raw.view) }),
+    ...(document.raw.acp_providers === undefined
+      ? {}
+      : { acp_providers: structuredClone(document.raw.acp_providers) })
+  };
+}
+
+export function editableProjectConfigDraft(document: ProjectConfigDocument): EditableProjectConfigDraft {
+  return document.raw.control_plane === undefined
+    ? {}
+    : { control_plane: structuredClone(document.raw.control_plane) };
+}
+
+export function validateGlobalConfigDraft(
+  document: GlobalConfigDocument,
+  draft: EditableGlobalConfigDraft,
+  projects: ProjectConfigReference[] = []
+): GlobalConfigDraftValidation {
+  const candidateInput = {
     ...(draft.language === undefined ? {} : { language: draft.language }),
     ...(draft.view === undefined ? {} : { view: structuredClone(draft.view) }),
-    ...(document.globalRaw.debug === undefined ? {} : { debug: structuredClone(document.globalRaw.debug) }),
+    ...(document.raw.debug === undefined ? {} : { debug: structuredClone(document.raw.debug) }),
     ...(draft.acp_providers === undefined ? {} : { acp_providers: structuredClone(draft.acp_providers) })
   };
-  const projectCandidate = {
-    store: structuredClone(document.projectRaw.store),
+
+  try {
+    const candidate = globalConfigSchema.parse(candidateInput);
+    const referenceErrors = validateProjectReferences(document.raw, candidate, projects);
+    if (referenceErrors.length) return { valid: false, errors: referenceErrors, changes: [] };
+    const normalized = normalizeGlobalDraft(candidate);
+    return {
+      valid: true,
+      errors: [],
+      candidate,
+      normalizedJson: `${JSON.stringify(normalized, null, 2)}\n`,
+      changes: diffConfig(editableGlobalConfigDraft(document), normalized)
+    };
+  } catch (error) {
+    return { valid: false, errors: configFieldErrors(error), changes: [] };
+  }
+}
+
+export function validateProjectConfigDraft(
+  document: ProjectConfigDocument,
+  draft: EditableProjectConfigDraft,
+  global: GlobalConfigFile
+): ProjectConfigDraftValidation {
+  const candidateInput = {
+    store: structuredClone(document.raw.store),
     ...(draft.control_plane === undefined ? {} : { control_plane: structuredClone(draft.control_plane) })
   };
 
   try {
-    const global = globalConfigSchema.parse(globalCandidate);
-    const project = projectConfigSchema.parse(projectCandidate);
-    validateCombinedConfig(global, project);
-    const normalized = normalizeDraft(global, project);
+    const candidate = projectConfigSchema.parse(candidateInput);
+    if (candidate.control_plane) resolveProjectControlPlane(candidate.control_plane, global.acp_providers);
+    const normalized = normalizeProjectDraft(candidate);
     return {
       valid: true,
       errors: [],
-      candidate: { global, project },
+      candidate,
       normalizedJson: `${JSON.stringify(normalized, null, 2)}\n`,
-      changes: diffConfig(editableConfigDraft(document), normalized),
+      changes: diffConfig(editableProjectConfigDraft(document), normalized),
       resolvedPaths: {
         memoryRoot: document.resolved.memoryRoot,
         reviewsRoot: document.resolved.reviewsRoot,
@@ -160,45 +191,84 @@ export function validateConfigDraft(
   }
 }
 
-export async function writeConfigDraft(input: {
-  document: ConfigDocument;
+export async function writeGlobalConfigDraft(input: {
+  document: GlobalConfigDocument;
   expectedRevision: string;
-  draft: EditableConfigDraft;
-}): Promise<ConfigDocument> {
-  const lockPath = join(dirname(input.document.globalConfigPath), ".runtime", "settings.lock");
+  draft: EditableGlobalConfigDraft;
+  projects?: ProjectConfigReference[] | (() => Promise<ProjectConfigReference[]>);
+}): Promise<GlobalConfigDocument> {
+  const lockPath = join(dirname(input.document.configPath), ".runtime", "settings.lock");
   return withFileLock(lockPath, async () => {
-    const latest = await readConfigDocument(input.document.configPath, {
-      globalConfigPath: input.document.globalConfigPath,
-      resolved: input.document.resolved
-    });
-    if (latest.revision !== input.expectedRevision) {
-      throw new ConfigRevisionConflictError(input.expectedRevision, latest.revision);
-    }
-    const validation = validateConfigDraft(latest, input.draft);
-    if (!validation.valid || !validation.candidate) {
-      throw new ConfigDraftValidationError(validation.errors);
-    }
-    await atomicWriteJson(latest.globalConfigPath, validation.candidate.global);
-    await atomicWriteJson(latest.configPath, validation.candidate.project);
-    return readConfigDocument(latest.configPath, {
-      globalConfigPath: latest.globalConfigPath,
-      resolved: latest.resolved
-    });
+    const latest = await readGlobalConfigDocument(input.document.configPath);
+    assertExpectedRevision(input.expectedRevision, latest.revision);
+    const projects = typeof input.projects === "function" ? await input.projects() : input.projects;
+    const validation = validateGlobalConfigDraft(latest, input.draft, projects);
+    if (!validation.valid || !validation.candidate) throw new ConfigDraftValidationError(validation.errors);
+    await atomicWriteJson(latest.configPath, validation.candidate);
+    return readGlobalConfigDocument(latest.configPath);
   });
 }
 
-export class ConfigDraftValidationError extends Error {
-  constructor(readonly errors: ConfigFieldError[]) {
-    super("config draft is invalid");
-  }
+export async function writeProjectConfigDraft(input: {
+  document: ProjectConfigDocument;
+  expectedRevision: string;
+  draft: EditableProjectConfigDraft;
+  globalConfigPath: string;
+}): Promise<ProjectConfigDocument> {
+  const globalLockPath = join(dirname(input.globalConfigPath), ".runtime", "settings.lock");
+  const projectLockPath = join(input.document.scopeRoot, ".runtime", "settings.lock");
+  return withFileLock(globalLockPath, () => withFileLock(projectLockPath, async () => {
+    const [latest, global] = await Promise.all([
+      readProjectConfigDocument(input.document.configPath, input.document.resolved),
+      readGlobalConfigDocument(input.globalConfigPath)
+    ]);
+    assertExpectedRevision(input.expectedRevision, latest.revision);
+    const validation = validateProjectConfigDraft(latest, input.draft, global.raw);
+    if (!validation.valid || !validation.candidate) throw new ConfigDraftValidationError(validation.errors);
+    await atomicWriteJson(latest.configPath, validation.candidate);
+    return readProjectConfigDocument(latest.configPath, latest.resolved);
+  }));
 }
 
 export function configRevision(source: string | Buffer): string {
   return `sha256:${createHash("sha256").update(source).digest("hex")}`;
 }
 
-function combinedRevision(globalRevision: string, projectRevision: string): string {
-  return configRevision(`${globalRevision}\n${projectRevision}`);
+function assertExpectedRevision(expected: string, actual: string): void {
+  if (expected !== actual) throw new ConfigRevisionConflictError(expected, actual);
+}
+
+function validateProjectReferences(
+  previous: GlobalConfigFile,
+  candidate: GlobalConfigFile,
+  projects: ProjectConfigReference[]
+): ConfigFieldError[] {
+  const errors = projects.flatMap(({ name, config }) => {
+    if (!config.control_plane) return [];
+    try {
+      resolveProjectControlPlane(config.control_plane, candidate.acp_providers);
+      return [];
+    } catch (error) {
+      return [{
+        path: `projects.${name}.control_plane`,
+        message: `Project "${name}": ${error instanceof Error ? error.message : String(error)}`
+      }];
+    }
+  });
+  const removed = Object.keys(previous.acp_providers ?? {})
+    .filter((provider) => !Object.hasOwn(candidate.acp_providers ?? {}, provider));
+  for (const provider of removed) {
+    for (const project of projects) {
+      for (const [actorId, actor] of Object.entries(project.config.control_plane?.actors ?? {})) {
+        if (actor.kind !== "agent" || actor.agent?.provider !== provider) continue;
+        errors.push({
+          path: `acp_providers.${provider}`,
+          message: `ACP Provider "${provider}" is referenced by Project "${project.name}" Actor "${actorId}"`
+        });
+      }
+    }
+  }
+  return errors;
 }
 
 async function readOptionalConfig(path: string): Promise<string> {
@@ -218,7 +288,7 @@ function parseGlobalConfigSource(source: string): GlobalConfigFile {
   }
 }
 
-function parseProjectConfigSource(source: string): ProjectConfigFile {
+export function parseProjectConfigSource(source: string): ProjectConfigFile {
   try {
     return projectConfigSchema.parse(JSON.parse(source));
   } catch (error) {
@@ -226,19 +296,18 @@ function parseProjectConfigSource(source: string): ProjectConfigFile {
   }
 }
 
-function validateCombinedConfig(global: GlobalConfigFile, project: ProjectConfigFile): void {
-  if (project.control_plane) {
-    resolveProjectControlPlane(project.control_plane, global.acp_providers);
-  }
-}
-
-function normalizeDraft(global: GlobalConfigFile, project: ProjectConfigFile): EditableConfigDraft {
+function normalizeGlobalDraft(global: GlobalConfigFile): EditableGlobalConfigDraft {
   return {
     ...(global.language === undefined ? {} : { language: global.language }),
     ...(global.view === undefined ? {} : { view: structuredClone(global.view) }),
-    ...(global.acp_providers === undefined ? {} : { acp_providers: structuredClone(global.acp_providers) }),
-    ...(project.control_plane === undefined ? {} : { control_plane: structuredClone(project.control_plane) })
+    ...(global.acp_providers === undefined ? {} : { acp_providers: structuredClone(global.acp_providers) })
   };
+}
+
+function normalizeProjectDraft(project: ProjectConfigFile): EditableProjectConfigDraft {
+  return project.control_plane === undefined
+    ? {}
+    : { control_plane: structuredClone(project.control_plane) };
 }
 
 function parseConfigError(error: unknown): Error {

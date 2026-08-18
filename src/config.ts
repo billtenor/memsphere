@@ -69,13 +69,17 @@ export const globalConfigSchema = z.object({
   debug: z.object({ agent_review: z.boolean().optional() }).strict().optional()
 }).strict();
 
-async function readProjectExecutionConfig(options: { projectConfigPath?: string } = {}): Promise<MemsphereConfig> {
-  const home = resolveMemsphereHome();
+async function readProjectExecutionConfig(options: {
+  projectConfigPath?: string;
+  home?: string;
+  project?: string;
+} = {}): Promise<MemsphereConfig> {
+  const home = options.home ?? resolveMemsphereHome();
   const global = await readGlobalConfig(homePaths(home).configPath);
   const explicitRoot = options.projectConfigPath ? dirname(options.projectConfigPath) : undefined;
   const context = explicitRoot
     ? await resolveContextByRoot(home, explicitRoot)
-    : await resolveProjectContext({ home, project: process.env.MEMSPHERE_PROJECT });
+    : await resolveProjectContext({ home, project: options.project ?? process.env.MEMSPHERE_PROJECT });
   const revision = await storeRevision(context.primary.memoryRoot, context.primary.config.store.type);
   const mounted = await Promise.all(context.mounted.map(async (project) => ({
     name: project.name,
@@ -101,15 +105,8 @@ async function readProjectExecutionConfig(options: { projectConfigPath?: string 
   };
 }
 
-export async function readProjectConfig(project: string): Promise<MemsphereConfig> {
-  const previous = process.env.MEMSPHERE_PROJECT;
-  try {
-    process.env.MEMSPHERE_PROJECT = project;
-    return await readProjectExecutionConfig();
-  } finally {
-    if (previous === undefined) delete process.env.MEMSPHERE_PROJECT;
-    else process.env.MEMSPHERE_PROJECT = previous;
-  }
+export async function readProjectConfig(project: string, home?: string): Promise<MemsphereConfig> {
+  return readProjectExecutionConfig({ project, home });
 }
 
 async function readGlobalConfig(path: string): Promise<z.infer<typeof globalConfigSchema>> {

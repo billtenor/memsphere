@@ -70,7 +70,7 @@ test("View switches Projects without retaining the previous Project Memory data"
       });
       assert.equal(selected.status, 200);
       assert.deepEqual(await memoryNames(origin), ["beta-memory"]);
-      const settings = await (await fetch(`${origin}/api/settings`)).json() as {
+      const settings = await (await fetch(`${origin}/api/settings/project`)).json() as {
         projectName: string;
         configPath: string;
       };

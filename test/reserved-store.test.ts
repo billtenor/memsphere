@@ -162,6 +162,29 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   assert.doesNotMatch(tutorial, /导入 Reserved Memory|Imported|not imported|了解并导入 Reserved Memory/);
 });
 
+test("framework Memory and Skill describe scoped Settings consistently", async () => {
+  const reservedFramework = await readFile(
+    join(bundledReservedMemoryRoot(), "concepts", "memsphere-framework.yaml"),
+    "utf8"
+  );
+  const projectFramework = await readFile(
+    join(process.cwd(), ".memsphere", "memory", "concepts", "memsphere-framework.yaml"),
+    "utf8"
+  );
+  const skill = await readFile(join(process.cwd(), "src", "skills", "memsphere", "SKILL.md"), "utf8");
+
+  for (const memory of [reservedFramework, projectFramework]) {
+    assert.match(memory, /左侧分组导航直接进入 Memsphere 全局设置或当前 Project 设置/);
+    assert.match(memory, /右侧只展示当前配置内容/);
+    assert.match(memory, /独立的草稿、Revision、校验和保存生命周期/);
+    assert.match(memory, /全部已注册 Project/);
+  }
+  assert.match(skill, /左侧分组导航直接进入 Memsphere 或当前 Project 设置/);
+  assert.match(skill, /右侧只展示当前配置内容/);
+  assert.match(skill, /切换 Project 不清除全局草稿/);
+  assert.match(skill, /任一已注册 Project/);
+});
+
 test("manifest rejects unsafe, duplicate, overlapping, and unknown values", () => {
   for (const manifest of [
     { version: 1, system_memory: { install: ["../concepts/x.yaml"], remove: [] } },
