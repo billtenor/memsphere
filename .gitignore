@@ -32,9 +32,6 @@ pnpm-debug.log*
 .tmp/
 tmp/
 temp/
-.memsphere/*
-!.memsphere/memory/
-!.memsphere/memory/**
 .memsphere-work/
 
 # AI/runtime artifacts

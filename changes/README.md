@@ -10,7 +10,7 @@ Active 状态只有三种：
 
 验收标准全部通过、项目回归测试完成并由提需方确认后，将整个目录移动到 `archive/completed/`。取消的需求移动到 `archive/cancelled/<YYYY>/`，并在文档中记录原因。
 
-`.memsphere/runs/` 保存详细流程产物；`change.md` 保存需要长期追踪的需求、方案、任务和验收摘要，并可通过 `run_id` 关联对应 Run。
+Project 根目录下的 `runs/` 保存详细流程产物；`change.md` 保存需要长期追踪的需求、方案、任务和验收摘要，并可通过 `run_id` 关联对应 Run。
 
 最小文档头：
 
