@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,6 +70,55 @@ async function runCli(cwd: string, args: string[], home?: string): Promise<Comma
     child.on("close", (code) => resolveResult({ code, stdout, stderr }));
   });
 }
+
+test("memory change validate checks the effective Store without expanding a sparse candidate", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-change-cli-test-"));
+  const home = join(root, "home");
+  const workspace = join(root, "workspace");
+  const gitConfig = join(root, "gitconfig");
+  const previousGitConfig = process.env.GIT_CONFIG_GLOBAL;
+  try {
+    await mkdir(workspace);
+    await writeFile(gitConfig, "[user]\n\tname = Test User\n\temail = test@example.com\n");
+    process.env.GIT_CONFIG_GLOBAL = gitConfig;
+    const createdProject = await runCli(workspace, ["project", "create", "project", "--bind"], home);
+    assert.equal(createdProject.code, 0, createdProject.stderr);
+
+    const edited = await runCli(workspace, ["memory", "edit", "concepts/Shared"], home);
+    assert.equal(edited.code, 0, edited.stderr);
+    const changeId = /^ChangeSet: (.+)$/m.exec(edited.stdout)?.[1];
+    const candidateRoot = /^Candidate Root: (.+)$/m.exec(edited.stdout)?.[1];
+    assert(changeId && candidateRoot);
+    assert.deepEqual(await readdir(candidateRoot), ["concepts"]);
+    const candidate = join(candidateRoot, "concepts", "shared.yaml");
+    await writeFile(candidate, (await readFile(candidate, "utf8")).replace("defines: []", "defines: [Shared concept]"));
+
+    const textResult = await runCli(workspace, ["memory", "change", "validate", changeId], home);
+    assert.equal(textResult.code, 0, textResult.stderr);
+    assert.match(textResult.stdout, /ChangeSet validation passed/);
+    assert.match(textResult.stdout, new RegExp(`ChangeSet: ${changeId}`));
+    assert.deepEqual(await readdir(candidateRoot), ["concepts"]);
+
+    const jsonResult = await runCli(workspace, ["memory", "change", "validate", changeId, "--format", "json"], home);
+    assert.equal(jsonResult.code, 0, jsonResult.stderr);
+    const validPayload = JSON.parse(jsonResult.stdout);
+    assert.equal(validPayload.valid, true);
+    assert.equal(validPayload.changeId, changeId);
+    assert.deepEqual(validPayload.issues, []);
+
+    await writeFile(candidate, "!concept\nnames: [Broken\n");
+    const invalidResult = await runCli(workspace, ["memory", "change", "validate", changeId, "--format", "json"], home);
+    assert.equal(invalidResult.code, 1);
+    assert.equal(invalidResult.stderr, "");
+    const invalidPayload = JSON.parse(invalidResult.stdout);
+    assert.equal(invalidPayload.valid, false);
+    assert(invalidPayload.issues.some((issue: { path: string }) => issue.path === candidate));
+  } finally {
+    if (previousGitConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = previousGitConfig;
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("validate suggests syntax migration only for outdated Memory YAML", async () => {
   await withScope(async ({ nested, memoryRoot }) => {

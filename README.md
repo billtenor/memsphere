@@ -32,6 +32,17 @@ memsphere project show
 memsphere validate
 ```
 
+Managed Project 中修改 Memory 时，先创建 ChangeSet，再校验 ChangeSet 应用到正式 Store 后的完整结果，最后发布：
+
+```bash
+memsphere memory edit concepts/Example
+# 编辑命令输出的 Candidate Root 中的 YAML
+memsphere memory change validate <change-id>
+memsphere memory publish --change <change-id>
+```
+
+ChangeSet candidate 是只包含目标文件的稀疏目录，不应直接传给 `memsphere validate --memory-root`；该参数仍用于校验包含四类目录的完整 Memory Store。
+
 新建一个 Agent 会话，然后告诉 Agent：
 
 ```text

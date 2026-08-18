@@ -9,7 +9,7 @@ import { memoryKinds, type MemoryKind } from "./kinds.js";
 import { readAllMemoryFiles } from "./store.js";
 import { currentMemorySyntax } from "./syntax.js";
 import { serializeMemoryYaml } from "./serializer.js";
-import { validateMemoryRoot } from "../validation.js";
+import { validateMemoryRoot, type ValidationIssue } from "../validation.js";
 import { resolveProjectContext, type ResolvedProject } from "../project/resolver.js";
 import { resolveWorkspaceIdentity } from "../project/workspace.js";
 import { projectConfigSchema } from "../project/model.js";
@@ -40,6 +40,13 @@ export const memoryChangeSetSchema = z.object({
 
 export type MemoryChangeSet = z.infer<typeof memoryChangeSetSchema>;
 export type MemoryChangeOperation = z.infer<typeof changeTargetSchema>["operation"];
+
+export type MemoryChangeValidationResult = {
+  changeId: string;
+  memoryRoot: string;
+  candidateRoot: string;
+  issues: ValidationIssue[];
+};
 
 export async function editMemories(input: {
   references: string[];
@@ -166,6 +173,25 @@ export async function publishMemoryChange(
   return withFileLock(lock, () => publishLocked(context.primary, change, candidateRoot, message));
 }
 
+export async function validateMemoryChange(changeId: string): Promise<MemoryChangeValidationResult> {
+  const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  assertManaged(context.primary);
+  const workspace = await resolveWorkspaceIdentity();
+  const change = await readChange(context.primary, changeId);
+  assertDraftOwner(change, context.primary.name, workspace.key);
+  const candidateRoot = workspaceCandidateRoot(workspace.path, changeId);
+  if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
+  await assertManagedHealthy(context.primary);
+  await assertChangeTargetsCurrent(context.primary, change);
+  const issues = await validateEffectiveMemoryChange(context.primary, change, candidateRoot);
+  return {
+    changeId: change.id,
+    memoryRoot: context.primary.memoryRoot,
+    candidateRoot,
+    issues
+  };
+}
+
 export async function recoverMemory(
   reference: string,
   mode: "restore" | "create-change"
@@ -276,6 +302,35 @@ async function publishLocked(project: ResolvedProject, change: MemoryChangeSet, 
   await assertManagedHealthy(project);
   assertManaged(project);
   const publishedRevision = project.config.store.published_revision;
+  await assertChangeTargetsCurrent(project, change);
+  const issues = await validateEffectiveMemoryChange(project, change, candidateRoot);
+  if (issues.length > 0) {
+    throw new Error(`ChangeSet validation failed:\n${issues.map((issue) => `- ${issue.path}: ${issue.message}`).join("\n")}`);
+  }
+
+  try {
+    if (change.merge_parent) {
+      await runGit(["merge", "--no-ff", "--no-commit", change.merge_parent], { cwd: project.memoryRoot }).catch(() => undefined);
+    }
+    await applyTargets(project.memoryRoot, candidateRoot, change.targets);
+    await runGit(["add", "-A"], { cwd: project.memoryRoot });
+    const formalValidation = await validateMemoryRoot(project.memoryRoot);
+    if (formalValidation.issues.length > 0) throw new Error(`ChangeSet validation failed after merge: ${formalValidation.issues[0].message}`);
+    await runGit(["commit", "-m", message?.trim() || `Publish Memsphere ChangeSet ${change.id}`], { cwd: project.memoryRoot });
+  } catch (error) {
+    await runGit(["reset", "--hard", publishedRevision], { cwd: project.memoryRoot }).catch(() => undefined);
+    await runGit(["clean", "-fd"], { cwd: project.memoryRoot }).catch(() => undefined);
+    throw error;
+  }
+  const revision = await updatePublishedRevision(project);
+  change.status = "published";
+  change.published_revision = revision;
+  change.updated_at = new Date().toISOString();
+  await writeChange(project, change);
+  return change;
+}
+
+async function assertChangeTargetsCurrent(project: ResolvedProject, change: MemoryChangeSet): Promise<void> {
   for (const target of change.targets) {
     const current = join(project.memoryRoot, target.path);
     if (target.operation === "create") {
@@ -286,39 +341,46 @@ async function publishLocked(project: ResolvedProject, change: MemoryChangeSet, 
     const digest = await gitBlobDigest(project.memoryRoot, target.path);
     if (digest !== target.base_digest) throw new Error(`Memory edit conflict: ${target.reference}`);
   }
+}
 
+async function validateEffectiveMemoryChange(
+  project: ResolvedProject,
+  change: MemoryChangeSet,
+  candidateRoot: string
+): Promise<ValidationIssue[]> {
   const staging = await mkdtemp(join(tmpdir(), "memsphere-publish-"));
   try {
     await copyWorkingTree(project.memoryRoot, staging);
     await applyTargets(staging, candidateRoot, change.targets);
     const validation = await validateMemoryRoot(staging);
-    if (validation.issues.length > 0) {
-      throw new Error(`ChangeSet validation failed:\n${validation.issues.map((issue) => `- ${issue.path}: ${issue.message}`).join("\n")}`);
-    }
-
-    try {
-      if (change.merge_parent) {
-        await runGit(["merge", "--no-ff", "--no-commit", change.merge_parent], { cwd: project.memoryRoot }).catch(() => undefined);
-      }
-      await applyTargets(project.memoryRoot, candidateRoot, change.targets);
-      await runGit(["add", "-A"], { cwd: project.memoryRoot });
-      const formalValidation = await validateMemoryRoot(project.memoryRoot);
-      if (formalValidation.issues.length > 0) throw new Error(`ChangeSet validation failed after merge: ${formalValidation.issues[0].message}`);
-      await runGit(["commit", "-m", message?.trim() || `Publish Memsphere ChangeSet ${change.id}`], { cwd: project.memoryRoot });
-    } catch (error) {
-      await runGit(["reset", "--hard", publishedRevision], { cwd: project.memoryRoot }).catch(() => undefined);
-      await runGit(["clean", "-fd"], { cwd: project.memoryRoot }).catch(() => undefined);
-      throw error;
-    }
-    const revision = await updatePublishedRevision(project);
-    change.status = "published";
-    change.published_revision = revision;
-    change.updated_at = new Date().toISOString();
-    await writeChange(project, change);
-    return change;
+    return validation.issues.map((issue) => mapEffectiveValidationIssue(
+      issue,
+      staging,
+      project.memoryRoot,
+      candidateRoot,
+      change.targets
+    ));
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
+}
+
+function mapEffectiveValidationIssue(
+  issue: ValidationIssue,
+  stagingRoot: string,
+  memoryRoot: string,
+  candidateRoot: string,
+  targets: MemoryChangeSet["targets"]
+): ValidationIssue {
+  const effectivePath = relative(stagingRoot, issue.path).replaceAll("\\", "/");
+  if (effectivePath === "" || effectivePath.startsWith("../") || effectivePath === "..") return issue;
+  const target = targets.find((item) => (item.destination_path ?? item.path) === effectivePath);
+  return {
+    ...issue,
+    path: target && target.operation !== "delete"
+      ? join(candidateRoot, target.path)
+      : join(memoryRoot, effectivePath)
+  };
 }
 
 async function updatePublishedRevision(project: ResolvedProject): Promise<string> {

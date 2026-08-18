@@ -91,12 +91,12 @@ flow:
       format: yaml
 
   - !action
-    action: 对候选运行 memsphere validate，修正可安全解决的问题，完成 Review 后使用 memsphere memory publish 发布 ChangeSet。
+    action: Managed Project 使用 memsphere memory change validate <change-id> 校验候选叠加到正式 Store 后的完整结果，Embedded Project 使用 memsphere validate；修正可安全解决的问题，完成 Review 后使用 memsphere memory publish 发布 Managed ChangeSet。
     actor: agent
     asserts:
       - 必须检查步骤输入与 Artifact 衔接、actor 归属、约束作用域、分支完整性、循环终止和最终交付物。
       - 必须删除重复、无执行价值或可由其他已读取 Memory 提供的内容。
-      - 未通过 memsphere validate 时不得声称 Procedure 已完成。
+      - 未通过当前 Project 类型对应的校验命令时不得声称 Procedure 已完成；不得把稀疏 ChangeSet candidate 直接传给 memsphere validate --memory-root。
     artifact: !artifact
       name: 已验证的 Procedure Memory
       type: object

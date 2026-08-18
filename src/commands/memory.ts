@@ -14,7 +14,16 @@ import {
   serializeMemoryYaml
 } from "../memory/serializer.js";
 import { MemoryNavigation, type MemoryIdentity } from "../memory/navigation.js";
-import { editMemories, publishMemoryChange, pushMemory, recoverMemory, renameMemory, resumeMemoryChange, syncMemory } from "../memory/changeset.js";
+import {
+  editMemories,
+  publishMemoryChange,
+  pushMemory,
+  recoverMemory,
+  renameMemory,
+  resumeMemoryChange,
+  syncMemory,
+  validateMemoryChange
+} from "../memory/changeset.js";
 
 const listOutputs = ["yaml", "json", "text"] as const;
 const readOutputs = ["yaml", "json"] as const;
@@ -129,6 +138,30 @@ export async function memoryPublishCommand(options: { change?: string; message?:
 
 export async function memoryChangeResumeCommand(changeId: string): Promise<void> {
   console.log(`Candidate Root: ${await resumeMemoryChange(changeId)}`);
+}
+
+export async function memoryChangeValidateCommand(
+  changeId: string,
+  options: { format?: string } = {}
+): Promise<void> {
+  const format = parseOutput(options.format ?? "text", ["text", "json"] as const, "memory change validate");
+  const result = await validateMemoryChange(changeId);
+  if (format === "json") {
+    process.stdout.write(`${JSON.stringify({ valid: result.issues.length === 0, ...result }, null, 2)}\n`);
+    if (result.issues.length > 0) process.exitCode = 1;
+    return;
+  }
+  if (result.issues.length === 0) {
+    console.log("ChangeSet validation passed");
+    console.log(`ChangeSet: ${result.changeId}`);
+    console.log(`memoryRoot: ${result.memoryRoot}`);
+    return;
+  }
+  console.error("ChangeSet validation failed");
+  for (const issue of result.issues) {
+    console.error(`- ${issue.path}${issue.line ? `:${issue.line}:${issue.column ?? 1}` : ""}: ${issue.message}`);
+  }
+  process.exitCode = 1;
 }
 
 export async function memoryRecoverCommand(reference: string, options: { restore?: boolean; createChange?: boolean }): Promise<void> {
