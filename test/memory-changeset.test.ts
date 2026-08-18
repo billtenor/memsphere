@@ -36,9 +36,53 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     const registry = await readProjectRegistry(home);
     const memoryRoot = join(registry.projects.project.root, "memory");
 
+    const explicit = await editMemories({
+      references: ["concepts/Explicit Path"],
+      createPaths: new Map([["concepts/Explicit Path", "concepts/human-readable.yaml"]])
+    });
+    assert.equal(explicit.change.targets[0]?.path, "concepts/human-readable.yaml");
+    assert.match(await readFile(join(explicit.candidateRoot, "concepts", "human-readable.yaml"), "utf8"), /Explicit Path/);
+    await publishMemoryChange(explicit.change.id);
+    await assert.rejects(
+      editMemories({
+        references: ["concepts/Occupied Path"],
+        createPaths: new Map([["concepts/Occupied Path", "concepts/human-readable.yaml"]])
+      }),
+      /explicit create path already exists/
+    );
+    await assert.rejects(
+      editMemories({
+        references: ["concepts/Unsafe"],
+        createPaths: new Map([["concepts/Unsafe", "../concepts/unsafe.yaml"]])
+      }),
+      /invalid or escaping Memory path/
+    );
+    await assert.rejects(
+      editMemories({
+        references: ["concepts/Wrong Kind"],
+        createPaths: new Map([["concepts/Wrong Kind", "procedures/wrong-kind.yaml"]])
+      }),
+      /kind does not match/
+    );
+    await assert.rejects(
+      editMemories({
+        references: ["concepts/First Path Owner", "concepts/Second Path Owner"],
+        createPaths: new Map([
+          ["concepts/First Path Owner", "concepts/shared-target.yaml"],
+          ["concepts/Second Path Owner", "concepts/shared-target.yaml"]
+        ])
+      }),
+      /path is targeted by multiple references/
+    );
+
     const created = await editMemories({ references: ["concepts/Shared", "concepts/Other"] });
     const candidate = join(created.candidateRoot, "concepts", "shared.yaml");
     await writeFile(candidate, (await readFile(candidate, "utf8")).replace("defines: []", "defines: [Initial]"));
+    const otherCandidate = join(created.candidateRoot, "concepts", "other.yaml");
+    await writeFile(otherCandidate, (await readFile(otherCandidate, "utf8")).replace(
+      "  - \"Other\"\n",
+      "  - \"Other\"\n  - \"Other Alias\"\n"
+    ));
     const candidateBeforeValidation = await readFile(candidate, "utf8");
     const changePath = join(registry.projects.project.root, "changes", created.change.id, "change.json");
     const changeBeforeValidation = await readFile(changePath, "utf8");
@@ -70,12 +114,28 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     const deleteValidation = await validateMemoryChange(deleted.change.id);
     assert(deleteValidation.issues.some((issue) => issue.message.includes("was not found")));
 
-    const renamed = await renameMemory({ reference: "Other", newName: "Renamed Other" });
+    const renamed = await renameMemory({ reference: "concepts/Other Alias", newName: "Other Alias" });
+    assert.equal(renamed.change.targets[0]?.path, "concepts/other.yaml");
+    assert.equal(renamed.change.targets[0]?.destination_path, undefined);
     assert.deepEqual((await validateMemoryChange(renamed.change.id)).issues, []);
     const renamedCandidate = join(renamed.candidateRoot, renamed.change.targets[0].path);
-    await writeFile(renamedCandidate, "!concept\nnames: [Broken\n");
-    const invalidRename = await validateMemoryChange(renamed.change.id);
-    assert(invalidRename.issues.some((issue) => issue.path === renamedCandidate));
+    const renamedSource = await readFile(renamedCandidate, "utf8");
+    assert.match(renamedSource, /- Other Alias\n  - Other\n/);
+    assert.equal((renamedSource.match(/Other Alias/g) ?? []).length, 1);
+    await publishMemoryChange(renamed.change.id);
+    assert.equal(await readFile(join(memoryRoot, "concepts", "other.yaml"), "utf8"), renamedSource);
+    await assert.rejects(readFile(join(memoryRoot, "concepts", "other-alias.yaml")), /ENOENT/);
+
+    const invalidRenameChange = await renameMemory({ reference: "Other", newName: "Renamed Other" });
+    const invalidRenameCandidate = join(invalidRenameChange.candidateRoot, invalidRenameChange.change.targets[0].path);
+    await writeFile(invalidRenameCandidate, "!concept\nnames: [Broken\n");
+    const invalidRename = await validateMemoryChange(invalidRenameChange.change.id);
+    assert(invalidRename.issues.some((issue) => issue.path === invalidRenameCandidate));
+
+    const conflictingRename = await renameMemory({ reference: "Other Alias", newName: "Shared" });
+    const conflictingValidation = await validateMemoryChange(conflictingRename.change.id);
+    assert(conflictingValidation.issues.some((issue) => issue.message.includes("conflicts within concepts")));
+    await assert.rejects(publishMemoryChange(conflictingRename.change.id), /ChangeSet validation failed/);
 
     const duplicate = await editMemories({ references: ["concepts/Duplicate"] });
     const duplicatePath = join(duplicate.candidateRoot, duplicate.change.targets[0].path);
@@ -113,7 +173,7 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     const listed = await catalog.list();
     assert.deepEqual(listed.memories.filter((item) => item.frozen).map((item) => item.names[0]).sort(), ["Dependent", "Shared"]);
     await assert.rejects(catalog.read("Shared"), MemoryFrozenError);
-    assert.equal((await catalog.read("Other")).names[0], "Other");
+    assert.equal((await catalog.read("Other")).names[0], "Other Alias");
 
     const recovered = await recoverMemory("Shared", "create-change");
     assert(recovered.change && recovered.candidateRoot);

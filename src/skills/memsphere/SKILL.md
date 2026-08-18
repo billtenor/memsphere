@@ -40,7 +40,7 @@ memsphere memory list
 memsphere memory list --kind procedures
 ```
 
-list 结果中的 `names` 是规范名称和别名，`defines` 是简要定义。list 只用于发现候选，不能替代 read；确定候选后，必须完整读取 Memory，或按 Node 读取完成任务所需的内容。
+list 结果中的 `names` 首项是规范名称，其余项是别名，`defines` 是简要定义。显式逻辑引用使用 `<kind>/<name>`，name 可以是规范名称或同 kind 下无冲突的别名；解析后以当前规范引用为准。Memory 文件路径只是 Provider 存储细节，不能代替逻辑引用。list 只用于发现候选，不能替代 read；确定候选后，必须完整读取 Memory，或按 Node 读取完成任务所需的内容。
 
 当一份 Statement、Schema 或 Procedure 较长时，可以先列出它的直接子 Node：
 
@@ -93,6 +93,7 @@ defines:
 - `!concept`、`!statement`、`!procedure`、`!schema` 分别表示四种 Memory。
 - 顶层 Memory 使用 `syntax` 声明不可变的语法版本；当前稳定版本是 `memsphere-20260721-stable`。省略时固定按历史起点 `start` 解释，不得按最新版猜测。
 - `names` 的第一项是规范名称，其余项是别名。
+- 规范名称受控修改时，旧规范名称默认保留为别名，旧显式引用继续可解析；普通 rename 不自动移动 File Provider 中的 Memory 文件。
 - 原本允许 `names` 的节点也允许写单个 `name`，其解析结果等价于 `names: [name]`；二者不能同时出现。
 - `defines` 用于定义这份 Memory；其中的全部成员共同生效。
 - `defines` 可以包含 `!ref` 外部 Memory 引用；`target` 必须是 `concepts/...`、`statements/...` 或 `schemas/...` 形式的逻辑引用，不接受只写普通名称。

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import test from "node:test";
 import {
   projectBindCommand,
@@ -16,6 +16,8 @@ import { runGit } from "../src/git.js";
 import { readProjectRegistry } from "../src/project/registry.js";
 import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
+import { readAllMemoryFiles } from "../src/memory/store.js";
+import { readReservedMemoryManifest } from "../src/reserved/store.js";
 
 test("Project lifecycle keeps creation separate from Workspace binding", async () => {
   const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-command-"));
@@ -60,6 +62,12 @@ test("Project lifecycle keeps creation separate from Workspace binding", async (
       await runGit(["log", "--reverse", "--format=%s"], { cwd: join(primary.root, "memory") })
         .then((result) => result.stdout.split("\n")),
       ["Initialize Memsphere Memory Store", "Bootstrap Memsphere system Memory"]
+    );
+    assert.deepEqual(
+      (await readAllMemoryFiles(join(primary.root, "memory")))
+        .map((file) => relative(join(primary.root, "memory"), file.path).replaceAll("\\", "/"))
+        .sort(),
+      [...(await readReservedMemoryManifest()).system_memory.install].sort()
     );
 
     await projectMountCommand("career");

@@ -14,6 +14,7 @@ import { resolveProjectContext, type ResolvedProject } from "../project/resolver
 import { resolveWorkspaceIdentity } from "../project/workspace.js";
 import { projectConfigSchema } from "../project/model.js";
 import { GitRevisionMemoryProvider } from "./git-provider.js";
+import { normalizeMemoryName, parseLogicalMemoryReference } from "./logical-reference.js";
 
 const changeTargetSchema = z.object({
   operation: z.enum(["create", "update", "delete", "rename"]),
@@ -52,11 +53,39 @@ export async function editMemories(input: {
   references: string[];
   changeId?: string;
   operation?: "edit" | "delete";
+  /** Internal-only storage paths for callers, such as bootstrap, that already own a stable path. */
+  createPaths?: ReadonlyMap<string, string>;
 }): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
   if (input.references.length === 0) throw new Error("provide at least one Memory reference");
+  if (input.createPaths) {
+    if (input.operation === "delete") throw new Error("explicit create paths cannot be used when deleting Memory");
+    const references = new Set(input.references);
+    for (const [reference, path] of input.createPaths) {
+      if (!references.has(reference)) throw new Error(`explicit create path has no matching Memory reference: ${reference}`);
+      assertSafeCreatePath(reference, path);
+    }
+  }
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   assertManaged(context.primary);
   const workspace = await resolveWorkspaceIdentity();
+  const targets: Array<z.infer<typeof changeTargetSchema>> = [];
+  for (const reference of input.references) {
+    const createPath = input.createPaths?.get(reference);
+    targets.push(await resolveTarget(
+      context.primary,
+      reference,
+      input.operation === "delete" ? "delete" : "edit",
+      createPath
+    ));
+  }
+  const targetReferencesByPath = new Map<string, string>();
+  for (const target of targets) {
+    const existingReference = targetReferencesByPath.get(target.path);
+    if (existingReference !== undefined && existingReference !== target.reference) {
+      throw new Error(`Memory path is targeted by multiple references: ${target.path}`);
+    }
+    targetReferencesByPath.set(target.path, target.reference);
+  }
   const change = input.changeId
     ? await readChange(context.primary, input.changeId)
     : await createChange(context.primary, workspace.key);
@@ -64,9 +93,14 @@ export async function editMemories(input: {
   const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
   await mkdir(candidateRoot, { recursive: true });
 
-  for (const reference of input.references) {
-    const target = await resolveTarget(context.primary, reference, input.operation === "delete" ? "delete" : "edit");
-    if (change.targets.some((current) => current.path === target.path)) continue;
+  for (const target of targets) {
+    const existingTarget = change.targets.find((current) => current.path === target.path);
+    if (existingTarget) {
+      if (existingTarget.reference !== target.reference) {
+        throw new Error(`Memory path is already targeted by ChangeSet: ${target.path}`);
+      }
+      continue;
+    }
     change.targets.push(target);
     const source = join(context.primary.memoryRoot, target.path);
     const candidate = join(candidateRoot, target.path);
@@ -91,13 +125,12 @@ export async function renameMemory(input: {
   assertDraftOwner(change, context.primary.name, workspace.key);
   const target = await resolveTarget(context.primary, input.reference, "rename");
   if (change.targets.some((current) => current.path === target.path)) throw new Error(`Memory is already targeted by ChangeSet: ${input.reference}`);
-  const destination = posix.join(posix.dirname(target.path), safeFileName(input.newName));
-  if (await exists(join(context.primary.memoryRoot, destination))) throw new Error(`rename destination already exists: ${destination}`);
-  target.destination_path = destination;
   change.targets.push(target);
   const file = (await readAllMemoryFiles(context.primary.memoryRoot)).find((item) => relative(context.primary.memoryRoot, item.path) === target.path);
   if (!file) throw new Error(`Memory was not found: ${input.reference}`);
-  file.entity.names[0] = input.newName.trim();
+  const newName = input.newName.trim();
+  if (!newName) throw new Error("new Memory name is required");
+  file.entity.names = [...new Set([newName, ...file.entity.names])];
   const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
   const candidate = join(candidateRoot, target.path);
   await mkdir(dirname(candidate), { recursive: true });
@@ -201,7 +234,7 @@ export async function recoverMemory(
   const project = context.primary;
   const provider = new GitRevisionMemoryProvider(project.memoryRoot, project.config.store.published_revision);
   const descriptors = await provider.list();
-  const logical = parseReference(reference);
+  const logical = parseLogicalMemoryReference(reference);
   const matches = descriptors.filter((descriptor) => {
     if (logical && descriptor.kind !== logical.kind) return false;
     return descriptor.names.includes(logical?.name ?? reference.trim());
@@ -429,11 +462,12 @@ async function createChange(project: ResolvedProject, workspaceKey: string): Pro
 async function resolveTarget(
   project: ResolvedProject,
   referenceInput: string,
-  operation: "edit" | "delete" | "rename"
+  operation: "edit" | "delete" | "rename",
+  createPath?: string
 ): Promise<z.infer<typeof changeTargetSchema>> {
-  const reference = referenceInput.trim();
+  const reference = normalizeMemoryName(referenceInput);
   const files = await readAllMemoryFiles(project.memoryRoot);
-  const logical = parseReference(reference);
+  const logical = parseLogicalMemoryReference(reference);
   const found = files.filter((file) => {
     if (logical && file.kind !== logical.kind) return false;
     const wanted = logical?.name ?? reference;
@@ -443,13 +477,18 @@ async function resolveTarget(
   const revision = project.config.store.type === "managed" ? project.config.store.published_revision : "embedded";
   if (found.length === 0) {
     if (operation !== "edit" || !logical) throw new Error(`Memory was not found: ${reference}`);
+    if (createPath !== undefined) assertSafeCreatePath(reference, createPath);
+    if (createPath !== undefined && await exists(join(project.memoryRoot, createPath))) {
+      throw new Error(`explicit create path already exists: ${createPath}`);
+    }
     return {
       operation: "create",
       reference: `${logical.kind}/${logical.name}`,
-      path: posix.join(logical.kind, safeFileName(logical.name)),
+      path: createPath ?? posix.join(logical.kind, safeFileName(logical.name)),
       added_revision: revision
     };
   }
+  if (createPath !== undefined) throw new Error(`explicit create path requires a new Memory: ${reference}`);
   const file = found[0];
   const path = relative(project.memoryRoot, file.path).replaceAll("\\", "/");
   return {
@@ -475,7 +514,9 @@ async function applyTargets(root: string, candidates: string, targets: MemoryCha
     await assertRegularFileInside(candidates, target.path);
     await mkdir(dirname(destination), { recursive: true });
     await cp(candidate, destination);
-    if (target.operation === "rename") await rm(join(root, target.path), { force: true });
+    if (target.operation === "rename" && target.destination_path && target.destination_path !== target.path) {
+      await rm(join(root, target.path), { force: true });
+    }
   }
 }
 
@@ -490,6 +531,15 @@ function isSafeMemoryPath(path: string): boolean {
 
 function assertSafeMemoryPath(path: string): void {
   if (!isSafeMemoryPath(path)) throw new Error(`invalid or escaping Memory path: ${path}`);
+}
+
+function assertSafeCreatePath(reference: string, path: string): void {
+  assertSafeMemoryPath(path);
+  const logical = parseLogicalMemoryReference(reference);
+  if (!logical) throw new Error(`explicit create path requires a logical reference: ${reference}`);
+  if (!path.startsWith(`${logical.kind}/`)) {
+    throw new Error(`explicit create path kind does not match Memory reference: ${reference}`);
+  }
 }
 
 async function assertRegularFileInside(root: string, path: string): Promise<void> {
@@ -563,16 +613,6 @@ function changeId(): string {
   return `change-${new Date().toISOString().replace(/[-:.]/g, "").replace("T", "-").replace("Z", "z")}-${randomBytes(4).toString("hex")}`;
 }
 
-function parseReference(reference: string): { kind: MemoryKind; name: string } | undefined {
-  const slash = reference.indexOf("/");
-  if (slash <= 0) return undefined;
-  const kind = reference.slice(0, slash);
-  if (!(memoryKinds as readonly string[]).includes(kind)) throw new Error(`unknown Memory kind: ${kind}`);
-  const name = reference.slice(slash + 1).trim();
-  if (!name) throw new Error("Memory reference name is required");
-  return { kind: kind as MemoryKind, name };
-}
-
 function safeFileName(name: string): string {
   const normalized = name.trim().toLowerCase();
   const slug = normalized.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -582,7 +622,7 @@ function safeFileName(name: string): string {
 }
 
 function newMemoryTemplate(reference: string): string {
-  const parsed = parseReference(reference);
+  const parsed = parseLogicalMemoryReference(reference);
   if (!parsed) throw new Error(`new Memory requires a logical reference: ${reference}`);
   const tag = `!${parsed.kind.slice(0, -1)}`;
   const body = parsed.kind === "statements" ? "asserts: []" : parsed.kind === "procedures" ? "flow: []" : "defines: []";

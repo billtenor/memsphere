@@ -190,7 +190,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
     assert.deepEqual(filteredPage.memories[0].defines, ["A managed memory."]);
     assert.deepEqual(filteredPage.memories[0].structured_defines, { statement: 1 });
 
-    for (const reference of ["concepts/Memory", "Memory", "记忆"]) {
+    for (const reference of ["concepts/Memory", "concepts/记忆", "Memory", "记忆"]) {
       const read = await runCli(nested, ["memory", "read", reference]);
       assert.equal(read.code, 0, read.stderr);
       assert.equal(read.stderr, "");
@@ -216,11 +216,11 @@ test("validate checks Memory references by target kind and dependency cycles", a
   await withScope(async ({ nested, memoryRoot }) => {
     await writeFile(
       join(memoryRoot, "concepts", "concept.yaml"),
-      withCurrentMemorySyntax("!concept\nnames: [Concept A]\ndefines:\n  - !ref\n    target: schemas/Schema A\n")
+      withCurrentMemorySyntax("!concept\nnames: [Concept A, Concept Alias]\ndefines:\n  - !ref\n    target: schemas/Schema Alias\n")
     );
     await writeFile(
       join(memoryRoot, "schemas", "schema.yaml"),
-      withCurrentMemorySyntax("!schema\nnames: [Schema A]\ndefines:\n  - !ref\n    target: concepts/Concept A\n")
+      withCurrentMemorySyntax("!schema\nnames: [Schema A, Schema Alias]\ndefines:\n  - !ref\n    target: concepts/Concept Alias\n")
     );
 
     const cycle = await runCli(nested, ["validate"]);

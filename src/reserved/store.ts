@@ -2,7 +2,8 @@ import { lstat, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { memoryKinds } from "../memory/kinds.js";
+import { isMemoryKind, memoryKinds, type MemoryKind } from "../memory/kinds.js";
+import { readMemoryFile } from "../memory/store.js";
 import { currentMemorySyntax } from "../memory/syntax.js";
 
 export const reservedMemoryDirectoryName = "reserved-memory";
@@ -63,6 +64,13 @@ export const reservedMemoryManifestSchema = z.discriminatedUnion("version", [
 
 export type ReservedMemoryManifest = z.infer<typeof reservedMemoryManifestSchema>;
 
+export type BundledSystemMemoryDescriptor = {
+  path: string;
+  kind: MemoryKind;
+  reference: string;
+  names: string[];
+};
+
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(moduleDir, "../..");
 
@@ -90,6 +98,19 @@ export async function readReservedMemoryManifest(sourceRoot = bundledReservedMem
   }
 
   return manifest;
+}
+
+export async function readBundledSystemMemories(
+  sourceRoot = bundledReservedMemoryRoot()
+): Promise<BundledSystemMemoryDescriptor[]> {
+  const manifest = await readReservedMemoryManifest(sourceRoot);
+  return Promise.all(manifest.system_memory.install.map(async (path) => {
+    const kind = path.split("/", 1)[0];
+    if (!isMemoryKind(kind)) throw new Error(`invalid system Memory kind: ${path}`);
+    const file = await readMemoryFile(kind, resolveMemoryPath(sourceRoot, path));
+    const names = [...file.entity.names];
+    return { path, kind, reference: `${kind}/${names[0]}`, names };
+  }));
 }
 
 function assertSafeMemoryRelativePath(relativePath: string): void {

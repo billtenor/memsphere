@@ -62,6 +62,7 @@ test("View switches Projects without retaining the previous Project Memory data"
       assert.equal(projects.current, "alpha");
       assert.deepEqual(projects.projects.map((project) => project.name), ["alpha", "beta"]);
       assert.deepEqual(await memoryNames(origin), ["alpha-memory"]);
+      assert.deepEqual(await memorySystemFlags(origin), [{ name: "alpha-memory", system: false }]);
 
       const selected = await fetch(`${origin}/api/projects/select`, {
         method: "POST",
@@ -70,6 +71,7 @@ test("View switches Projects without retaining the previous Project Memory data"
       });
       assert.equal(selected.status, 200);
       assert.deepEqual(await memoryNames(origin), ["beta-memory"]);
+      assert.deepEqual(await memorySystemFlags(origin), [{ name: "beta-memory", system: false }]);
       const settings = await (await fetch(`${origin}/api/settings/project`)).json() as {
         projectName: string;
         configPath: string;
@@ -114,4 +116,17 @@ async function memoryNames(origin: string): Promise<string[]> {
   };
   assert.equal(response.status, 200, payload.error);
   return payload.memories.flatMap((memory) => memory.entity?.names?.slice(0, 1) ?? []);
+}
+
+async function memorySystemFlags(origin: string): Promise<Array<{ name: string; system: boolean }>> {
+  const response = await fetch(`${origin}/api/memories`);
+  const payload = await response.json() as {
+    memories: Array<{ system: boolean; entity?: { names?: string[] } }>;
+    error?: string;
+  };
+  assert.equal(response.status, 200, payload.error);
+  return payload.memories.flatMap((memory) => {
+    const name = memory.entity?.names?.[0];
+    return name ? [{ name, system: memory.system }] : [];
+  });
 }

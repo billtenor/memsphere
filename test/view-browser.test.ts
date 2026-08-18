@@ -491,7 +491,8 @@ test("browser can hide installed system memory from the Project Catalog", () => 
   assert.match(browserHtml, /hideSystemMemoriesKey = "memsphere\.hideSystemMemories\.v1"/);
   assert.match(browserHtml, /hideSystemMemories: localStorage\.getItem\(hideSystemMemoriesKey\) !== "false"/);
   assert.match(browserHtml, /if \(state\.hideSystemMemories && isSystemMemory\(memory\)\) return false;/);
-  assert.match(browserHtml, /state\.systemMemoryPaths\.has\(memory\?\.path\)/);
+  assert.match(browserHtml, /return memory\?\.system === true;/);
+  assert.doesNotMatch(browserHtml, /systemMemoryPaths/);
   assert.match(browserHtml, /text\.textContent = t\("hideSystemMemories"\)/);
 });
 

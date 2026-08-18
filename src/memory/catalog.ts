@@ -1,5 +1,10 @@
 import type { DefinitionPart, MemoryEntity } from "./ast.js";
-import { isMemoryKind, type MemoryKind } from "./kinds.js";
+import type { MemoryKind } from "./kinds.js";
+import {
+  canonicalMemoryReference,
+  normalizeMemoryName,
+  parseLogicalMemoryReference
+} from "./logical-reference.js";
 import type { MemoryProvider, ProviderMemoryDescriptor } from "./provider.js";
 
 export type MemoryDescriptor = {
@@ -97,7 +102,7 @@ export class DefaultMemoryCatalog implements MemoryCatalog {
 
   async list(query: MemoryListQuery = {}): Promise<MemoryListPage> {
     const index = await this.#loadIndex(query.kind);
-    const normalizedQuery = query.query === undefined ? undefined : normalizeName(query.query);
+    const normalizedQuery = query.query === undefined ? undefined : normalizeMemoryName(query.query);
     const memories = index.entries
       .filter((entry) => normalizedQuery === undefined || entry.descriptor.names.includes(normalizedQuery))
       .map((entry) => entry.descriptor)
@@ -163,7 +168,7 @@ function buildCatalogIndex(descriptors: ProviderMemoryDescriptor[]): CatalogInde
     }
     providerIds.add(source.id);
 
-    const names = source.names.map(normalizeName);
+    const names = source.names.map(normalizeMemoryName);
     const canonicalName = names[0];
     if (!canonicalName) {
       issues.push({
@@ -174,7 +179,7 @@ function buildCatalogIndex(descriptors: ProviderMemoryDescriptor[]): CatalogInde
       continue;
     }
 
-    const reference = `${source.kind}/${canonicalName}`;
+    const reference = canonicalMemoryReference(source.kind, canonicalName)!;
     const emptyAlias = names.findIndex((name, index) => index > 0 && name.length === 0);
     if (emptyAlias !== -1) {
       issues.push({
@@ -265,15 +270,17 @@ function resolveEntry(
   referenceOrName: string,
   query: MemoryResolveQuery
 ): IndexedMemory {
-  const input = normalizeName(referenceOrName);
-  const explicit = parseLogicalReference(input);
+  const input = normalizeMemoryName(referenceOrName);
+  const explicit = parseLogicalMemoryReference(input);
   if (explicit && query.kind && explicit.kind !== query.kind) {
     throw new MemoryReferenceKindError(explicit.kind, query.kind);
   }
 
   const matches = entries.filter((entry) => {
     if (query.kind && entry.descriptor.kind !== query.kind) return false;
-    if (explicit) return entry.descriptor.reference === `${explicit.kind}/${explicit.name}`;
+    if (explicit) {
+      return entry.descriptor.kind === explicit.kind && entry.descriptor.names.includes(explicit.name);
+    }
     return entry.descriptor.names.includes(input);
   });
 
@@ -285,18 +292,6 @@ function resolveEntry(
     );
   }
   return matches[0];
-}
-
-function parseLogicalReference(input: string): { kind: MemoryKind; name: string } | undefined {
-  const separator = input.indexOf("/");
-  if (separator <= 0) return undefined;
-  const kind = input.slice(0, separator);
-  if (!isMemoryKind(kind)) return undefined;
-  return { kind, name: normalizeName(input.slice(separator + 1)) };
-}
-
-function normalizeName(value: string): string {
-  return value.trim();
 }
 
 function duplicateValues(values: string[]): string[] {

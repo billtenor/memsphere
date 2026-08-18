@@ -7,6 +7,7 @@ import { readAllMemoryFiles } from "../src/memory/store.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 import {
   bundledReservedMemoryRoot,
+  readBundledSystemMemories,
   readReservedMemoryManifest,
   reservedMemoryManifestSchema
 } from "../src/reserved/store.js";
@@ -24,6 +25,7 @@ async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
 test("bundled memory contains a valid self-bootstrap chain and manifest", async () => {
   const files = await readAllMemoryFiles(bundledReservedMemoryRoot());
   const manifest = await readReservedMemoryManifest();
+  const systemMemories = await readBundledSystemMemories();
   const names = new Map<string, string>();
 
   for (const file of files) {
@@ -130,6 +132,9 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   assert.equal(manifest.version, 2);
   assert.equal("memory_syntax" in manifest ? manifest.memory_syntax : undefined, currentMemorySyntax);
   assert.equal(manifest.system_memory.install.length, 17);
+  assert.deepEqual(systemMemories.map((memory) => memory.path), manifest.system_memory.install);
+  assert(systemMemories.every((memory) => memory.reference === `${memory.kind}/${memory.names[0]}`));
+  assert(systemMemories.every((memory) => memory.names.length > 0));
   assert.deepEqual(manifest.system_memory.remove, [
     "concepts/memory.yaml",
     "concepts/memsphere.yaml",

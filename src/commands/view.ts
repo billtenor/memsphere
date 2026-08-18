@@ -47,7 +47,7 @@ import { authorizeArtifactOperation, controlPlaneConfigSchema, listPermissionDef
 import { listMemoryFiles, readMemoryFile } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
-import { readReservedMemoryManifest } from "../reserved/store.js";
+import { readBundledSystemMemories } from "../reserved/store.js";
 import {
   createReview,
   getReview,
@@ -102,12 +102,12 @@ type ViewServeOptions = {
 
 type MemoryPayload = {
   memoryRoot: string;
-  systemMemoryPaths: string[];
   actorNames: Record<string, string>;
   memories: Array<{
     id: string;
     kind: string;
     path: string;
+    system: boolean;
     entity?: unknown;
     error?: MemoryLoadError;
   }>;
@@ -890,7 +890,11 @@ async function findMemoryFileById(memoryRoot: string, memoryId: string): Promise
 async function loadMemoryPayload(config: MemsphereConfig): Promise<MemoryPayload> {
   const { memoryRoot } = config;
   const memories: MemoryPayload["memories"] = [];
-  const systemMemoryPaths = (await readReservedMemoryManifest()).system_memory.install;
+  const systemReferences = new Set(
+    (await readBundledSystemMemories()).flatMap((memory) =>
+      memory.names.map((name) => `${memory.kind}/${name}`)
+    )
+  );
   const actorNames = Object.fromEntries(
     Object.entries(config.controlPlane?.actors ?? {}).map(([actorId, actor]) => [actorId, actor.name])
   );
@@ -898,11 +902,11 @@ async function loadMemoryPayload(config: MemsphereConfig): Promise<MemoryPayload
   for (const kind of memoryKinds) {
     const paths = await listMemoryFiles(memoryRoot, kind);
     for (const path of paths) {
-      memories.push(await loadMemoryListItem(memoryRoot, kind, path));
+      memories.push(await loadMemoryListItem(memoryRoot, kind, path, systemReferences));
     }
   }
 
-  return { memoryRoot, systemMemoryPaths, actorNames, memories };
+  return { memoryRoot, actorNames, memories };
 }
 
 async function loadRunPayload(config: MemsphereConfig): Promise<unknown[]> {
@@ -1324,7 +1328,12 @@ function resolveRunArtifactPath(runsRoot: string, runId: string, artifactPath: s
   return path;
 }
 
-async function loadMemoryListItem(memoryRoot: string, kind: MemoryKind, path: string): Promise<MemoryPayload["memories"][number]> {
+async function loadMemoryListItem(
+  memoryRoot: string,
+  kind: MemoryKind,
+  path: string,
+  systemReferences: ReadonlySet<string>
+): Promise<MemoryPayload["memories"][number]> {
   const relativePath = relative(memoryRoot, path);
   try {
     const file = await readMemoryFile(kind, path);
@@ -1333,6 +1342,7 @@ async function loadMemoryListItem(memoryRoot: string, kind: MemoryKind, path: st
       id: `${file.kind}/${primaryName}`,
       kind: file.kind,
       path: relativePath,
+      system: file.entity.names.some((name) => systemReferences.has(`${file.kind}/${name}`)),
       entity: file.entity
     };
   } catch (error) {
@@ -1340,6 +1350,7 @@ async function loadMemoryListItem(memoryRoot: string, kind: MemoryKind, path: st
       id: `${kind}/${relativePath}`,
       kind,
       path: relativePath,
+      system: false,
       error: formatMemoryLoadError(error)
     };
   }

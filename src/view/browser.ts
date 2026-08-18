@@ -746,7 +746,6 @@ export const browserHtml = String.raw`<!doctype html>
       payload: null,
       memories: [],
       actorNames: {},
-      systemMemoryPaths: new Set(),
       filtered: [],
       hideSystemMemories: localStorage.getItem(hideSystemMemoriesKey) !== "false",
       selectedId: null,
@@ -1054,7 +1053,6 @@ export const browserHtml = String.raw`<!doctype html>
       state.payload = await response.json();
       state.memories = state.payload.memories;
       state.actorNames = state.payload.actorNames || {};
-      state.systemMemoryPaths = new Set(state.payload.systemMemoryPaths || []);
       state.byName = new Map();
       for (const memory of state.memories) {
         if (!memory.entity) continue;
@@ -2852,7 +2850,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function isSystemMemory(memory) {
-      return state.systemMemoryPaths.has(memory?.path);
+      return memory?.system === true;
     }
 
     function updateMemoryCount() {

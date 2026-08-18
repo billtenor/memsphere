@@ -28,7 +28,7 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     mkdir(join(runDir, "artifacts"), { recursive: true })
   ]);
 
-  await writeFile(join(memoryRoot, "concepts", "memsphere-memory.yaml"), [
+  await writeFile(join(memoryRoot, "concepts", "memory-8aaf6c34fc49.yaml"), [
     "!concept",
     `syntax: ${currentMemorySyntax}`,
     "names: [ Memory, memsphere-memory ]",
@@ -303,6 +303,23 @@ test("Memory nav only shows the Project Catalog and can hide installed system me
     } finally {
       await page.close();
     }
+  });
+});
+
+test("Memory API identifies installed system memory independently of its file path", async () => {
+  await withResponsiveView(async (_browser, url) => {
+    const response = await fetch(`${url}/api/memories`);
+    const payload = await response.json() as {
+      memories: Array<{ path: string; system: boolean; entity?: { names?: string[] } }>;
+      systemMemoryPaths?: unknown;
+    };
+    assert.equal(response.status, 200);
+    assert.equal(Object.hasOwn(payload, "systemMemoryPaths"), false);
+    const systemMemory = payload.memories.find((memory) => memory.entity?.names?.[0] === "Memory");
+    assert.equal(systemMemory?.path, "concepts/memory-8aaf6c34fc49.yaml");
+    assert.equal(systemMemory?.system, true);
+    const userMemory = payload.memories.find((memory) => memory.entity?.names?.[0] === "User note");
+    assert.equal(userMemory?.system, false);
   });
 });
 

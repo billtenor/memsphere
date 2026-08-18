@@ -10,9 +10,7 @@ import { listRegisteredProjects, pathExists, readProjectRegistry, updateProjectR
 import { resolveRegisteredProject } from "../project/resolver.js";
 import { resolveWorkspaceIdentity } from "../project/workspace.js";
 import { editMemories, publishMemoryChange } from "../memory/changeset.js";
-import { bundledReservedMemoryRoot, readReservedMemoryManifest } from "../reserved/store.js";
-import { readMemoryFile } from "../memory/store.js";
-import { isMemoryKind } from "../memory/kinds.js";
+import { bundledReservedMemoryRoot, readBundledSystemMemories } from "../reserved/store.js";
 
 type BindOption = { bind?: boolean };
 type OutputOption = { output?: "text" | "json" };
@@ -52,18 +50,15 @@ export async function projectCreateCommand(
 }
 
 async function bootstrapManagedSystemMemory(projectName: string): Promise<void> {
-  const manifest = await readReservedMemoryManifest();
   const sourceRoot = bundledReservedMemoryRoot();
-  const memories = await Promise.all(manifest.system_memory.install.map(async (path) => {
-    const kind = path.split("/", 1)[0];
-    if (!isMemoryKind(kind)) throw new Error(`invalid system Memory kind: ${path}`);
-    const file = await readMemoryFile(kind, resolve(sourceRoot, path));
-    return { path, reference: `${kind}/${file.entity.names[0]}` };
-  }));
+  const memories = await readBundledSystemMemories(sourceRoot);
   const previous = process.env.MEMSPHERE_PROJECT;
   try {
     process.env.MEMSPHERE_PROJECT = projectName;
-    const result = await editMemories({ references: memories.map((memory) => memory.reference) });
+    const result = await editMemories({
+      references: memories.map((memory) => memory.reference),
+      createPaths: new Map(memories.map((memory) => [memory.reference, memory.path]))
+    });
     for (const memory of memories) {
       const target = result.change.targets.find((candidate) => candidate.reference === memory.reference);
       if (!target) throw new Error(`bootstrap ChangeSet target is missing: ${memory.reference}`);
