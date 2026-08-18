@@ -10,6 +10,7 @@ import {
 } from "./commands/archive.js";
 import {
   memoryChangeResumeCommand,
+  memoryChangeValidateCommand,
   memoryDeleteCommand,
   memoryEditCommand,
   memoryListCommand,
@@ -196,6 +197,12 @@ const memoryChange = memory.command("change").description("Manage Managed Memory
 memoryChange.command("resume")
   .argument("<change-id>", "ChangeSet id")
   .action(memoryChangeResumeCommand);
+
+memoryChange.command("validate")
+  .description("Validate a Managed ChangeSet against its effective Memory Store.")
+  .argument("<change-id>", "ChangeSet id")
+  .addOption(new Option("--format <format>", "diagnostic output format").choices(["text", "json"]).default("text"))
+  .action(memoryChangeValidateCommand);
 
 const view = program
   .command("view")

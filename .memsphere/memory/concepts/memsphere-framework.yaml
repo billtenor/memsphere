@@ -8,7 +8,7 @@ defines:
   - memsphere Skill 提供与预置 Memory 一致的快速入口和冗余摘要；Memory 承载完整知识与流程，CLI 提供稳定的发现、读取和 Run 执行能力。
   - Agent 通过 memsphere memory list 发现 Memory，通过 memsphere memory read 完整读取或按 Node 读取相关内容，而不依赖 Memory 当前使用文件还是其他存储后端。
   - Project 是 Memory、ChangeSet、Run、Review 与 Archive 的持久数据空间；Workspace 只通过全局 Registry 绑定一个 Primary Project，并可挂载只读 Mounted Project。
-  - Managed Memory 的修改必须先使用 memsphere memory edit 创建 Workspace 内候选，再用 memsphere validate 保存恢复副本并校验，最后使用 memsphere memory publish 原子提交；Agent 不直接修改正式 Memory 工作树。
+  - Managed Memory 的修改必须先使用 memsphere memory edit 创建 Workspace 内稀疏候选；使用 memsphere validate 保存恢复副本并校验当前 Project，再使用 memsphere memory change validate <change-id> 校验候选叠加到正式 Store 后的完整结果，最后使用 memsphere memory publish 原子提交。ChangeSet candidate 不是完整 Memory Root，不得直接传给 memsphere validate --memory-root；Agent 不直接修改正式 Memory 工作树。
   - 需要遵循 Memory 完成任务时，Agent 必须先选择适用的 Procedure；没有专用 Procedure 时使用 memsphere-general-task-execution，再根据当前步骤按需读取 Concept、Statement 和 Schema。
   - 一个 Memsphere Home 只运行一个 View 服务；View 从 Registry 读取 Project，并且任意时刻只展示一个 Project，切换 Project 后所有 Memory、Run、Review 与 Archive 数据都来自新选择。
   - Home config.json 的 language 选择 Memsphere 面向 Agent 的工作语言，支持 zh-CN 和 en，省略时固定使用 zh-CN，不读取进程 LANG 猜测；Run 启动时冻结该语言，后续 CLI 指令、权限说明、Artifact Review 摘要和 ACP Reviewer Prompt 始终使用同一语言。

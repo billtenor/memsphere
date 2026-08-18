@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { projectCreateCommand } from "../src/commands/project.js";
 import { runGit } from "../src/git.js";
-import { checkpointWorkspaceChanges, editMemories, memoryChangeSetSchema, publishMemoryChange, recoverMemory, resumeMemoryChange } from "../src/memory/changeset.js";
+import {
+  checkpointWorkspaceChanges,
+  editMemories,
+  memoryChangeSetSchema,
+  publishMemoryChange,
+  recoverMemory,
+  renameMemory,
+  resumeMemoryChange,
+  validateMemoryChange
+} from "../src/memory/changeset.js";
 import { readProjectRegistry } from "../src/project/registry.js";
 import { DefaultMemoryCatalog, MemoryFrozenError } from "../src/memory/catalog.js";
 import { ProjectMemoryProvider } from "../src/memory/project-provider.js";
@@ -30,6 +39,15 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     const created = await editMemories({ references: ["concepts/Shared", "concepts/Other"] });
     const candidate = join(created.candidateRoot, "concepts", "shared.yaml");
     await writeFile(candidate, (await readFile(candidate, "utf8")).replace("defines: []", "defines: [Initial]"));
+    const candidateBeforeValidation = await readFile(candidate, "utf8");
+    const changePath = join(registry.projects.project.root, "changes", created.change.id, "change.json");
+    const changeBeforeValidation = await readFile(changePath, "utf8");
+    const initialValidation = await validateMemoryChange(created.change.id);
+    assert.deepEqual(initialValidation.issues, []);
+    assert.deepEqual(await readdir(created.candidateRoot), ["concepts"]);
+    assert.equal(await readFile(candidate, "utf8"), candidateBeforeValidation);
+    assert.equal(await readFile(changePath, "utf8"), changeBeforeValidation);
+    assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
     assert.equal(await checkpointWorkspaceChanges(), 1);
     await rm(created.candidateRoot, { recursive: true, force: true });
     assert.equal(await resumeMemoryChange(created.change.id), created.candidateRoot);
@@ -41,13 +59,43 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     const dependent = await editMemories({ references: ["concepts/Dependent"] });
     const dependentPath = join(dependent.candidateRoot, "concepts", "dependent.yaml");
     await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("defines: []", "defines:\n  - !ref\n    target: concepts/Shared"));
+    assert.deepEqual((await validateMemoryChange(dependent.change.id)).issues, []);
+    await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("concepts/Shared", "concepts/Missing"));
+    const missingReference = await validateMemoryChange(dependent.change.id);
+    assert(missingReference.issues.some((issue) => issue.path === dependentPath && issue.message.includes("was not found")));
+    await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("concepts/Missing", "concepts/Shared"));
     await publishMemoryChange(dependent.change.id);
+
+    const deleted = await editMemories({ references: ["Shared"], operation: "delete" });
+    const deleteValidation = await validateMemoryChange(deleted.change.id);
+    assert(deleteValidation.issues.some((issue) => issue.message.includes("was not found")));
+
+    const renamed = await renameMemory({ reference: "Other", newName: "Renamed Other" });
+    assert.deepEqual((await validateMemoryChange(renamed.change.id)).issues, []);
+    const renamedCandidate = join(renamed.candidateRoot, renamed.change.targets[0].path);
+    await writeFile(renamedCandidate, "!concept\nnames: [Broken\n");
+    const invalidRename = await validateMemoryChange(renamed.change.id);
+    assert(invalidRename.issues.some((issue) => issue.path === renamedCandidate));
+
+    const duplicate = await editMemories({ references: ["concepts/Duplicate"] });
+    const duplicatePath = join(duplicate.candidateRoot, duplicate.change.targets[0].path);
+    await writeFile(
+      duplicatePath,
+      (await readFile(duplicatePath, "utf8")).replace("Duplicate", "Shared").replace("defines: []", "defines: [Duplicate name]")
+    );
+    assert((await validateMemoryChange(duplicate.change.id)).issues.some((issue) => issue.message.includes("conflicts within concepts")));
+
+    const missingCandidate = await editMemories({ references: ["concepts/Missing Candidate"] });
+    await rm(join(missingCandidate.candidateRoot, missingCandidate.change.targets[0].path));
+    await assert.rejects(validateMemoryChange(missingCandidate.change.id), /candidate file is missing/);
 
     const first = await editMemories({ references: ["Shared"] });
     const second = await editMemories({ references: ["Shared"] });
     await writeFile(join(first.candidateRoot, "concepts", "shared.yaml"), (await readFile(join(first.candidateRoot, "concepts", "shared.yaml"), "utf8")).replace("Initial", "First"));
     await writeFile(join(second.candidateRoot, "concepts", "shared.yaml"), (await readFile(join(second.candidateRoot, "concepts", "shared.yaml"), "utf8")).replace("Initial", "Second"));
+    assert.deepEqual((await validateMemoryChange(first.change.id)).issues, []);
     await publishMemoryChange(first.change.id);
+    await assert.rejects(validateMemoryChange(second.change.id), /edit conflict/);
     await assert.rejects(publishMemoryChange(second.change.id), /edit conflict/);
     assert.match(await readFile(join(memoryRoot, "concepts", "shared.yaml"), "utf8"), /First/);
     assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
