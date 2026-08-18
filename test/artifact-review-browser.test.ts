@@ -122,6 +122,34 @@ flow:
     }
     const scopePanel = reviewModal.locator("#artifact-review-scope-panel");
     await scopePanel.getByText("artifact_acceptance.unanimous", { exact: true }).waitFor();
+    await page.waitForFunction(() => location.pathname.includes("/artifact-reviews/") && location.search.includes("round="));
+    const deepReviewUrl = page.url();
+    assert.match(new URL(deepReviewUrl).pathname, new RegExp(`^/tasks/${started.id}/artifact-reviews/`));
+    const reopenedReview = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await reopenedReview.goto(deepReviewUrl);
+    const reopenedModal = reopenedReview.locator("#artifact-review-modal[open]");
+    await reopenedModal.waitFor();
+    await reopenedModal.getByText("Visible only after identity authorization.", { exact: true }).waitFor();
+    await reopenedReview.close();
+    const staleReviewUrl = new URL(deepReviewUrl);
+    const currentRoundId = staleReviewUrl.searchParams.get("round");
+    staleReviewUrl.searchParams.set("round", "round-missing");
+    staleReviewUrl.searchParams.set("material", "material-missing");
+    const staleReview = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await staleReview.goto(staleReviewUrl.toString());
+    await staleReview.locator("#artifact-review-modal[open]").waitFor();
+    await staleReview.waitForFunction(expectedRound => {
+      const params = new URLSearchParams(location.search);
+      return params.get("round") === expectedRound && !params.has("material");
+    }, currentRoundId);
+    await staleReview.close();
+    const material = reviewModal.getByRole("combobox", { name: "选择评审材料", exact: true });
+    await material.click();
+    await reviewModal.getByRole("option", { name: /^冻结契约/ }).click();
+    await page.waitForFunction(() => new URLSearchParams(location.search).get("material") === "contract");
+    await material.click();
+    await reviewModal.getByRole("option", { name: /^待评审产物/ }).click();
+    await page.waitForFunction(() => !new URLSearchParams(location.search).has("material"));
     assert.equal(await reviewModal.locator(".artifact-review-modal-header").getByText("artifact_acceptance.unanimous", { exact: true }).count(), 0);
     assert.equal(await scopePanel.getByRole("combobox", { name: "评审产物", exact: true }).count(), 1);
     assert.equal(await scopePanel.getByText("当前轮次", { exact: true }).count(), 1);
@@ -387,6 +415,8 @@ flow:
     assert.equal(secondReview.rounds.length, 2);
 
     await page.reload();
+    await page.locator("#artifact-review-modal[open]").waitFor();
+    await page.locator("#artifact-review-modal-close").click();
     await page.getByRole("button", { name: "Task", exact: true }).click();
     await page.getByRole("button", { name: /^产物评审 0\/2$/ }).click();
     identity = page.getByRole("combobox", { name: "评审身份" });

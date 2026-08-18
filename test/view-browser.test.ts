@@ -1,12 +1,39 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderMarkdownContent } from "../src/commands/view.js";
+import { isViewPagePath, renderMarkdownContent } from "../src/commands/view.js";
 import { browserHtml, shouldRenderMarkdownArtifact, shouldRenderTaskStepArtifact } from "../src/view/browser.js";
 
 test("embedded browser script is valid JavaScript", () => {
   const script = browserHtml.match(/<script>([\s\S]*)<\/script>/)?.[1];
   assert(script);
   assert.doesNotThrow(() => new Function(script));
+});
+
+test("View page routes are explicit and never absorb API or unknown paths", () => {
+  for (const path of [
+    "/",
+    "/memories",
+    "/memories/concepts/Memory",
+    "/tasks",
+    "/tasks/run-1",
+    "/tasks/run-1/artifact-reviews/review-1",
+    "/settings/overview",
+    "/settings/participants",
+    "/memory-reviews/review-1"
+  ]) assert.equal(isViewPagePath(path), true, path);
+  for (const path of ["/api/memories", "/api/unknown", "/unknown", "/tasks/run-1/other/review-1"]) {
+    assert.equal(isViewPagePath(path), false, path);
+  }
+});
+
+test("browser script includes URL parsing, canonical history, and popstate restoration", () => {
+  assert.match(browserHtml, /function parseBrowserRoute\(locationLike\)/);
+  assert.match(browserHtml, /function currentBrowserUrl\(\)/);
+  assert.match(browserHtml, /history\[method\]\(null, "", next\)/);
+  assert.match(browserHtml, /window\.addEventListener\("popstate"/);
+  assert.match(browserHtml, /\/memory-reviews\//);
+  assert.match(browserHtml, /\/artifact-reviews\//);
+  assert.match(browserHtml, /pendingArtifactMaterial/);
 });
 
 test("Settings separates the global and Project configuration workspaces", () => {
@@ -451,7 +478,7 @@ test("Artifact Review keeps local draft text across conflict recovery renders", 
 });
 
 test("initial loading validates the saved review only after its subject data is available", () => {
-  assert.match(browserHtml, /const requests = \[loadMemories\(\), loadReviews\(\), loadRuns\(\)\];\s*if \(state\.viewMode === "settings"\) requests\.push\(loadSettings\(\)\);\s*await Promise\.all\(requests\);\s*ensureSelectedReview\(\);/);
+  assert.match(browserHtml, /const requests = \[loadMemories\(\), loadReviews\(\), loadRuns\(\)\];\s*if \(state\.viewMode === "settings"\) requests\.push\(loadSettings\(\)\);\s*await Promise\.all\(requests\);[\s\S]*?ensureSelectedReview\(\);/);
   assert.doesNotMatch(browserHtml, /async function loadReviews\(\) \{[\s\S]*?state\.reviews =[^}]*ensureSelectedReview\(\);/);
 });
 

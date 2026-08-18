@@ -11,6 +11,7 @@ defines:
   - Managed Memory 的修改必须先使用 memsphere memory edit 创建 Workspace 内稀疏候选；使用 memsphere validate 保存恢复副本并校验当前 Project，再使用 memsphere memory change validate <change-id> 校验候选叠加到正式 Store 后的完整结果，最后使用 memsphere memory publish 原子提交。ChangeSet candidate 不是完整 Memory Root，不得直接传给 memsphere validate --memory-root；Agent 不直接修改正式 Memory 工作树。
   - 需要遵循 Memory 完成任务时，Agent 必须先选择适用的 Procedure；没有专用 Procedure 时使用 memsphere-general-task-execution，再根据当前步骤按需读取 Concept、Statement 和 Schema。
   - 一个 Memsphere Home 只运行一个 View 服务；View 从 Registry 读取 Project，并且任意时刻只展示一个 Project，切换 Project 后所有 Memory、Run、Review 与 Archive 数据都来自新选择。
+  - View 的主要可重开界面必须使用稳定 URL：Memory、Run、全局或 Project 设置、Memory Review 与 Artifact Review 均可通过地址直接恢复；Artifact Review 的 Round 与 Material 由查询参数定位。临时身份、设置草稿、编辑内容和布局状态不得写入 URL，URL 也不跨 Project 携带上下文。
   - View 配置中心通过左侧分组导航直接进入 Memsphere 全局设置或当前 Project 设置，右侧只展示当前配置内容：全局设置维护 language、View 服务和 ACP Provider，Project 设置维护 Store 概览与 Control Plane；两个 Scope 使用独立的草稿、Revision、校验和保存生命周期，保存时只写各自配置文件。
   - 全局 ACP Provider 配置对同一 Home 中全部已注册 Project 负责；重置或删除仍被任一 Project Actor 引用的 Provider 必须拒绝，并返回可定位的 Project 与 Actor 引用。
   - Home config.json 的 language 选择 Memsphere 面向 Agent 的工作语言，支持 zh-CN 和 en，省略时固定使用 zh-CN，不读取进程 LANG 猜测；Run 启动时冻结该语言，后续 CLI 指令、权限说明、Artifact Review 摘要和 ACP Reviewer Prompt 始终使用同一语言。
