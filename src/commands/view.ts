@@ -242,7 +242,7 @@ async function handleRequest(
     return;
   }
 
-  if (request.method === "GET" && url.pathname === "/") {
+  if (request.method === "GET" && isViewPagePath(url.pathname)) {
     sendHtml(response, browserHtml);
     return;
   }
@@ -1737,6 +1737,15 @@ function sendHtml(response: ServerResponse, body: string): void {
     "cache-control": "no-store"
   });
   response.end(body);
+}
+
+export function isViewPagePath(pathname: string): boolean {
+  if (["/", "/memories", "/tasks"].includes(pathname)) return true;
+  if (/^\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
+  if (/^\/tasks\/[^/]+$/.test(pathname)) return true;
+  if (/^\/tasks\/[^/]+\/artifact-reviews\/[^/]+$/.test(pathname)) return true;
+  if (/^\/settings\/[^/]+$/.test(pathname)) return true;
+  return /^\/memory-reviews\/[^/]+$/.test(pathname);
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {

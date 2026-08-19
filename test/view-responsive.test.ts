@@ -379,3 +379,53 @@ test("Task pages do not expose the retired Task Review entry or inline comments"
     }
   });
 });
+
+test("View deep links restore Memory, Task, Memory Review, and browser history", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+    page.setDefaultTimeout(5_000);
+    try {
+      await page.goto(`${url}/memories/concepts/Memory`);
+      await page.getByRole("heading", { name: "Memory", exact: true }).waitFor();
+      assert.match(await page.locator("#detail").textContent() ?? "", /A system memory fixture/);
+      assert.equal(new URL(page.url()).pathname, "/memories/concepts/Memory");
+
+      await page.goto(`${url}/memories/schemas/${encodeURIComponent("Reviewable schema")}`);
+      await page.getByRole("heading", { name: "Reviewable schema", exact: true }).waitFor();
+      assert.equal(new URL(page.url()).pathname, "/memories/schemas/Reviewable%20schema");
+
+      await page.getByRole("button", { name: "Review", exact: true }).click();
+      await page.getByRole("button", { name: "Create Review", exact: true }).click();
+      await page.waitForFunction(() => location.pathname.startsWith("/memory-reviews/"));
+      const reviewPath = new URL(page.url()).pathname;
+      const reopenedReview = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+      await reopenedReview.goto(url + reviewPath);
+      await reopenedReview.waitForFunction(() => document.body.classList.contains("review-drawer-open"));
+      assert.equal(new URL(reopenedReview.url()).pathname, reviewPath);
+      await reopenedReview.close();
+
+      await page.getByRole("button", { name: "Task", exact: true }).click();
+      assert.equal(new URL(page.url()).pathname, "/tasks");
+      await page.locator(".task-card-main").first().click();
+      assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
+      await page.goBack();
+      await page.waitForURL(url + "/tasks");
+      assert.equal(new URL(page.url()).pathname, "/tasks");
+      await page.goForward();
+      await page.waitForURL(url + `/tasks/${runId}`);
+      await page.getByRole("heading", { name: "Responsive browser fixture", exact: true }).waitFor();
+      assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
+
+      const missing = await browser.newPage();
+      await missing.goto(`${url}/memories/concepts/${encodeURIComponent("Missing memory")}`);
+      await missing.getByRole("heading", { name: "Not found", exact: true }).waitFor();
+      assert.match(await missing.locator("#detail").textContent() ?? "", /Memory not found/);
+      await missing.close();
+
+      assert.equal((await fetch(`${url}/unknown-page`)).status, 404);
+      assert.equal((await fetch(`${url}/api/unknown-page`)).status, 404);
+    } finally {
+      await page.close();
+    }
+  });
+});

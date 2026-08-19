@@ -7,6 +7,7 @@ import test from "node:test";
 import { chromium } from "playwright";
 import type { MemsphereConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
+import { currentMemorySyntax } from "../src/memory/syntax.js";
 
 test("Settings browser preserves omitted sections and stays responsive", async () => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-settings-browser-"));
@@ -40,6 +41,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.ok(Math.abs(projectMenuBox.width - projectSelectBox.width) < 2);
     await page.keyboard.press("Escape");
     await page.click("#settings-tab");
+    assert.equal(new URL(page.url()).pathname, "/settings/overview");
     assert.equal(await page.locator(".view-tabs").isVisible(), false);
     assert.equal(await page.locator("#settings-tab").getAttribute("aria-label"), "退出设置");
     await page.click("#settings-tab");
@@ -58,12 +60,28 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.equal(await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).isVisible(), true);
     assert.equal(await page.getByRole("heading", { name: "Memsphere 设置", exact: true }).count(), 1);
     await globalSettingsNav.getByRole("button", { name: "View 服务", exact: true }).click();
+    assert.equal(new URL(page.url()).pathname, "/settings/view");
     assert.equal(await page.getByText("当前运行地址").count(), 0);
     assert.equal(await page.getByText("保存并重启后地址").count(), 0);
     await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
+    assert.equal(new URL(page.url()).pathname, "/settings/overview");
     const overview = page.locator(".settings-section").last();
     assert.equal(await overview.getByText("全局配置", { exact: true }).count(), 1);
     assert.equal(await overview.getByText("Project 配置", { exact: true }).count(), 0);
+    await demoSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
+    assert.equal(new URL(page.url()).pathname, "/settings/project");
+    await demoSettingsNav.getByRole("button", { name: "参与者配置", exact: true }).click();
+    assert.equal(new URL(page.url()).pathname, "/settings/participants");
+    await page.goBack();
+    await page.getByRole("heading", { name: "demo 项目设置", exact: true }).waitFor();
+    assert.equal(new URL(page.url()).pathname, "/settings/project");
+    await page.goForward();
+    await demoSettingsNav.getByRole("button", { name: "参与者配置", exact: true }).waitFor();
+    assert.equal(new URL(page.url()).pathname, "/settings/participants");
+    const directSettings = await browser.newPage();
+    await directSettings.goto(`http://127.0.0.1:${port}/settings/project`, { waitUntil: "networkidle" });
+    await directSettings.getByRole("heading", { name: "demo 项目设置", exact: true }).waitFor();
+    await directSettings.close();
     await globalSettingsNav.getByRole("button", { name: "常规", exact: true }).click();
     assert.equal(await page.getByText("工作语言", { exact: true }).count(), 1);
     await page.getByRole("combobox", { name: "工作语言" }).click();
@@ -227,6 +245,33 @@ test("Settings browser preserves omitted sections and stays responsive", async (
   }
 });
 
+test("switching Projects replaces an entity URL with the new Project landing page", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-project-route-browser-"));
+  const config = await settingsConfigFixture(dir, "127.0.0.1");
+  const server = createViewServer(config);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const port = (server.address() as AddressInfo).port;
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.goto(`http://127.0.0.1:${port}/memories/concepts/Demo%20memory`, { waitUntil: "networkidle" });
+    await page.getByRole("heading", { name: "Demo memory", exact: true }).waitFor();
+    await page.locator("#project-select").click();
+    await page.getByRole("option", { name: "beta", exact: true }).click();
+    await page.waitForURL(`http://127.0.0.1:${port}/memories`);
+    assert.equal((await page.locator("#project-select-value").textContent())?.trim(), "beta");
+    assert.equal(new URL(page.url()).pathname, "/memories");
+  } finally {
+    await browser.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("Settings browser shows an inline error for an invalid operator token", async () => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-settings-token-browser-"));
   const config = await settingsConfigFixture(dir, "0.0.0.0");
@@ -307,6 +352,12 @@ async function settingsConfigFixture(dir: string, host: string): Promise<Memsphe
   await writeFile(join(projectRoot, "config.json"), `${JSON.stringify({
     store: { type: "managed", branch: "master", published_revision: "abc123" }
   }, null, 2)}\n`);
+  await writeFile(join(memoryRoot, "concepts", "demo-memory.yaml"), [
+    "!concept",
+    `syntax: ${currentMemorySyntax}`,
+    "names: [ Demo memory ]",
+    "defines: [ A Project route fixture. ]"
+  ].join("\n"));
   await Promise.all([
     writeFile(join(projectRoot, "project.json"), `${JSON.stringify({
       format_version: 1,
