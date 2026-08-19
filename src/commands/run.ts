@@ -27,6 +27,7 @@ import {
 } from "../prompts/index.js";
 import {
   type ArtifactReportSource,
+  buildRunBindingSnapshot,
   buildSchemaWritingSnapshot,
   currentArtifactReview,
   currentFrame,
@@ -47,6 +48,7 @@ import {
   skipRun,
   startRun,
   submitArtifactReviewRunnerVote,
+  updateRunSlotBinding,
   waitForArtifactReview,
   type RunState
 } from "../run/store.js";
@@ -100,6 +102,14 @@ type RunShowOptions = RunIdOptions & OutputOptions;
 type RunStepShowOptions = RunShowOptions & { step?: string };
 
 type RunSchemaShowOptions = RunShowOptions;
+
+type RunBindingShowOptions = RunShowOptions;
+
+type RunBindingUpdateOptions = RunShowOptions & {
+  slot?: string;
+  actor?: string[];
+  skip?: boolean;
+};
 
 type RunArtifactShowOptions = RunShowOptions & {
   assignment?: string;
@@ -339,6 +349,31 @@ export async function runShowCommand(options: RunShowOptions): Promise<void> {
   const config = await readConfig();
   const run = await readRun(config.runsRoot, runId);
   printStructured(buildRunOverview(run), options.output);
+}
+
+export async function runBindingShowCommand(options: RunBindingShowOptions): Promise<void> {
+  const runId = requireRunId(options.run);
+  const config = await readConfig();
+  const run = await readRun(config.runsRoot, runId);
+  printStructured(buildRunBindingSnapshot(run), options.output);
+}
+
+export async function runBindingUpdateCommand(options: RunBindingUpdateOptions): Promise<void> {
+  const runId = requireRunId(options.run);
+  const slot = options.slot?.trim();
+  if (!slot) throw new Error("--slot <procedure::slot> is required");
+  const actorIds = options.actor?.map((actor) => actor.trim()).filter(Boolean);
+  if (options.skip && actorIds?.length) throw new Error("use --actor or --skip, not both");
+  if (!options.skip && !actorIds?.length) throw new Error("provide at least one --actor <id> or use --skip");
+  const config = await readConfig();
+  const result = await updateRunSlotBinding({
+    runsRoot: config.runsRoot,
+    runId,
+    slot,
+    actorIds: options.skip ? undefined : actorIds,
+    skip: options.skip
+  });
+  printStructured({ change: result.change, bindings: result.snapshot }, options.output);
 }
 
 export async function runTryRunCommand(options: RunIdOptions): Promise<void> {

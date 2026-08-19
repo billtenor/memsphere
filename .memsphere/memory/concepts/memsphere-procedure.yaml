@@ -7,6 +7,7 @@ defines:
   - memsphere 中用于描述一个任务从开始到结束如何执行的 Memory。
   - Procedure 通过 goals 描述目标，通过 asserts 声明全局约束，并通过 flow 安排有序 Action、分支、循环和对子流程的调用；需要 Review 的 Artifact 只声明 Procedure 本地 Slot，Actor Binding 与 Decision Policy 在创建 Run 时选择。
   - Artifact Review 自动冻结当前候选之前已经上报的全部 Artifact；Reviewer 可以根据当前 Artifact 与要求按需向前追溯，不需要 Procedure 作者分类或声明证据。
+  - Run 启动时冻结可用 Actor、权限、Agent 运行配置和初始 Slot Binding；Runner 可以通过显式、受校验且带审计记录的运行期换绑操作修改未来尚未创建的 Review，已经创建的 Review、Round 和 Assignment 始终保留创建时的 Binding。
   - 同一个 Procedure 可以被多次执行，每次执行形成相互独立的 Run；创建者必须为每个新 Run 提供本次执行的名称，Run 同时记录 Procedure 名称、当前步骤、步骤产物和最终交付物。
   - !statement
     asserts:
@@ -27,6 +28,7 @@ defines:
       - Agent Reviewer 在同一 Artifact Review 浮窗的参与者行中展示状态、最近活动及按 attempt 隔离的只读运行记录；Agent 不进入 Human 身份选择器，实际发送的 prompt、ACP update 和生命周期以 JSONL 事实来源随 Run 留存，View 只读取不含 prompt 正文的可校验、可重建过滤投影。
       - Agent Reviewer 必须在发起当前 Run/Review 的 Workspace 或 worktree 中运行；受限 memsphere-review 会话命令自动绑定当前 Run 与 Assignment。短意见使用 --body，多行 Markdown 使用 --body-file，最终总结使用 --summary-file，不得要求 Agent 使用某一种 shell 的环境变量或 heredoc 语法。
       - Artifact Review 的定位 Comment 必须绑定创建时的 Submission 与 digest；它不评论 Memory 或 Workspace 文件，也不会自动迁移到下一轮 Submission。
+      - Human 完成前序流程后若不再参与后续 Review，Runner 可以先用 memsphere run binding show 查看冻结 Actor 与当前 Binding，再用 memsphere run binding update 为完整 Slot key 选择一个或多个 --actor，或使用 --skip；只能选择 Run 启动时冻结的 Actor，换绑只影响尚未创建的 Review。
       - 配置 control_plane 后，每个 Artifact 都必须通过 Runner 的 artifact.submit 鉴权；正常的当前步骤提示不展开权限清单，权限不足时只说明被拒绝的操作、所需权限和处理方式；拒绝不会改变 Run 状态或写入 Artifact。
       - run report 成功后先返回只确认本次 Run、Artifact 和可选 Review 标识的上报回执；触发 Review 时再返回等待或投票指令，不在 report 阶段提前输出 Review 汇总。run review wait 负责返回当前轮次汇总及投票指令；run review vote 只确认投票结果并返回推进后的下一步，不重复完整汇总。
       - 完成当前步骤后，必须按照 CLI 返回的 Then 命令上报 Artifact；只有 CLI 明确返回 Run 完成状态后才能汇报流程完成和最终产物。

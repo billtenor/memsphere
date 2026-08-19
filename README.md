@@ -64,6 +64,24 @@ Windows Terminal 是终端宿主，可以选择上述任一 shell。MSYS2、Cygw
 
 View 使用当前 Windows 原生 `node.exe` 在后台运行，不需要从 Git Bash 启动。ACP 不统一 Agent 的命令 shell，因此 Agent Review 使用 shell-neutral 的受限 `memsphere-review` 会话命令。Provider 的“已安装”检测与 Windows 支持等级是两类信息；只有真实 Windows ACP 端到端验证完成后才会标记为 `supported`。
 
+## 运行期更换 Review 参与者
+
+如果 Human 已完成前序流程、不再参与后续 Artifact Review，可以查看当前 Run 冻结的 Actor 和 Slot Binding：
+
+```bash
+memsphere run binding show --run <run-id>
+```
+
+把未来尚未创建 Review 的 Slot 换绑到 Agent：
+
+```bash
+memsphere run binding update --run <run-id> \
+  --slot '<procedure-name>::<slot-name>' \
+  --actor <agent-actor-id>
+```
+
+可重复传入 `--actor` 绑定多人，或使用 `--skip` 跳过未来该 Slot。换绑只能使用 Run 启动时冻结的 Actor，并保留审计记录；已经创建的 Review、Round 和 Assignment 不会改变。
+
 ## License
 
 This project is licensed under the Apache License, Version 2.0. See
