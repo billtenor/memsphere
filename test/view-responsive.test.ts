@@ -166,11 +166,23 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
 
 async function openTaskPage(browser: Browser, url: string, width: number): Promise<Page> {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
-  await page.goto(url);
+  await gotoViewAndWaitForRuns(page, url);
   await page.getByRole("button", { name: "Task", exact: true }).click();
   await page.locator(".task-card-main").first().click();
   await page.locator(".markdown-table-scroll").first().waitFor();
   return page;
+}
+
+async function gotoViewAndWaitForRuns(page: Page, url: string): Promise<void> {
+  const runsLoaded = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/runs"
+      && response.request().method() === "GET"
+      && response.ok(),
+    { timeout: 10_000 }
+  );
+  await page.goto(url);
+  await runsLoaded;
 }
 
 async function openMemoryPage(browser: Browser, url: string, width: number): Promise<Page> {
@@ -266,7 +278,7 @@ test("Task titles fall back to the Procedure name for historical Runs", async ()
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1024, height: 900 } });
     try {
-      await page.goto(url);
+      await gotoViewAndWaitForRuns(page, url);
       await page.getByRole("button", { name: "Task", exact: true }).click();
       const legacy = page.locator(".task-card-main", { hasText: "Legacy procedure fallback" });
       await legacy.click();

@@ -29,10 +29,13 @@ type Workflow = {
 
 test("CI bounds and supersedes Ubuntu browser installation runs", async () => {
   const workflow = parse(await readFile(".github/workflows/ci.yml", "utf8")) as Workflow;
+  const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
+    scripts?: Record<string, string>;
+  };
   const testJob = workflow.jobs?.test;
   const steps = testJob?.steps ?? [];
   const browserInstall = steps.find((step) => step.name === "Install Playwright Chromium");
-  const npmTest = steps.find((step) => step.run === "npm test");
+  const npmTest = steps.find((step) => step.run === "npm run test:ci");
 
   assert.equal(
     workflow.concurrency?.group,
@@ -53,4 +56,5 @@ test("CI bounds and supersedes Ubuntu browser installation runs", async () => {
     false
   );
   assert.equal(npmTest?.if, "runner.os == 'Linux'");
+  assert.equal(packageJson.scripts?.["test:ci"], "tsx --test --test-concurrency=1 test/*.test.ts");
 });
