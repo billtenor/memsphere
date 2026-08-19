@@ -8,6 +8,7 @@ import {
   buildRunStepDetail,
   printRunOutput,
   printSchemaWritingOverview,
+  runStartCommand,
   resolveReviewCommentBody,
   validateInlineReviewCommentBody
 } from "../src/commands/run.js";
@@ -25,6 +26,65 @@ import {
   buildRunReviewVoteReceiptPromptModel
 } from "../src/prompts/review.js";
 import { renderPrompt } from "../src/prompts/renderer.js";
+
+test("run start command rejects missing, blank, and control-character names", async () => {
+  await assert.rejects(runStartCommand("procedure"), /run name is required/);
+  await assert.rejects(runStartCommand("procedure", { name: "   " }), /run name is required/);
+  await assert.rejects(
+    runStartCommand("procedure", { name: "line one\nline two" }),
+    /run name must not contain control characters/
+  );
+});
+
+test("single-Run status shows the Run name and Procedure name with historical fallback", () => {
+  const base: RunState = {
+    contractVersion: 3,
+    language: "en",
+    id: "run-named",
+    name: "Release candidate verification",
+    status: "running",
+    procedureName: "release-procedure",
+    memoryRoot: "/memory",
+    createdAt: "2026-08-19T00:00:00.000Z",
+    updatedAt: "2026-08-19T00:00:00.000Z",
+    stack: [{
+      type: "procedure",
+      memoryName: "release-procedure",
+      steps: [{
+        id: "flow[1]",
+        kind: "action",
+        instruction: "Verify the release.",
+        artifact: "result",
+        type: "string",
+        format: { name: "plain", options: {} }
+      }],
+      index: 0
+    }],
+    events: [],
+    procedureSnapshots: {}
+  };
+  const lines: string[] = [];
+  const originalLog = console.log;
+  console.log = (...values: unknown[]) => lines.push(values.join(" "));
+  try {
+    printRunOutput({ kind: "status", run: base });
+    printRunOutput({
+      kind: "status",
+      run: { ...base, contractVersion: 2, id: "run-legacy", name: undefined }
+    });
+    printRunOutput({
+      kind: "status",
+      run: { ...base, id: "run-completed", status: "done", stack: [] }
+    });
+  } finally {
+    console.log = originalLog;
+  }
+
+  const output = lines.join("\n");
+  assert.match(output, /Run run-named\nName: Release candidate verification\nProcedure: release-procedure/);
+  assert.match(output, /Run run-legacy\nName: release-procedure\nProcedure: release-procedure/);
+  assert.match(output, /Run run-completed\nName: Release candidate verification\nProcedure: release-procedure/);
+});
 
 test("inline Artifact Review comments reject escaped multiline Markdown", () => {
   assert.doesNotThrow(() => validateInlineReviewCommentBody("A short comment about `\\n`."));
@@ -88,6 +148,7 @@ test("Run inspection separates navigation, step detail, and Artifact content", a
   const run: RunState = {
     contractVersion: 3,
     id: "run-inspection",
+    name: "Inspection run",
     status: "running",
     procedureName: "CLI inspection",
     memoryRoot: "/memory",
@@ -115,6 +176,8 @@ test("Run inspection separates navigation, step detail, and Artifact content", a
     steps: Array<Record<string, unknown>>;
   };
   assert.equal(overview.totalSteps, 2);
+  assert.equal(overview.name, "Inspection run");
+  assert.equal(overview.procedureName, "CLI inspection");
   assert.equal(overview.currentStepRef, "CLI inspection#flow[2]");
   assert.equal(overview.steps[0].artifactState, "reported");
   assert.equal(overview.steps[1].current, true);

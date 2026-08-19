@@ -80,6 +80,7 @@ flow:
       new DefaultMemoryCatalog(new ProjectMemoryProvider([source]))
     ]));
     const run = await startRun({
+      name: "Project-scoped delivery",
       memoryRoot: primary,
       runsRoot,
       procedureName: "deliver",
