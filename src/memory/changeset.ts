@@ -126,7 +126,9 @@ export async function renameMemory(input: {
   const target = await resolveTarget(context.primary, input.reference, "rename");
   if (change.targets.some((current) => current.path === target.path)) throw new Error(`Memory is already targeted by ChangeSet: ${input.reference}`);
   change.targets.push(target);
-  const file = (await readAllMemoryFiles(context.primary.memoryRoot)).find((item) => relative(context.primary.memoryRoot, item.path) === target.path);
+  const file = (await readAllMemoryFiles(context.primary.memoryRoot)).find((item) => (
+    relative(context.primary.memoryRoot, item.path).replaceAll("\\", "/") === target.path
+  ));
   if (!file) throw new Error(`Memory was not found: ${input.reference}`);
   const newName = input.newName.trim();
   if (!newName) throw new Error("new Memory name is required");
