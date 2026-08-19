@@ -884,17 +884,13 @@ export async function listRuns(runsRoot: string): Promise<RunState[]> {
 }
 
 export function buildRunBindingSnapshot(run: RunState): RunBindingSnapshot {
-  const scopesBySlot = runReviewScopesBySlot(run);
+  const scopesBySlot = futureRunReviewScopesBySlot(run);
   const reviewsBySlot = new Map<string, string[]>();
-  const createdScopesBySlot = new Map<string, Set<string>>();
   for (const review of run.artifactReviews ?? []) {
     for (const slot of Object.keys(review.controlPlane.bindings)) {
       const ids = reviewsBySlot.get(slot) ?? [];
       ids.push(review.id);
       reviewsBySlot.set(slot, ids);
-      const scopes = createdScopesBySlot.get(slot) ?? new Set<string>();
-      scopes.add(review.controlPlane.artifactScope);
-      createdScopesBySlot.set(slot, scopes);
     }
   }
   return {
@@ -910,7 +906,7 @@ export function buildRunBindingSnapshot(run: RunState): RunBindingSnapshot {
     slots: Object.entries(run.reviewConfiguration?.slots ?? {}).map(([key, binding]) => ({
       key,
       binding: cloneRunSlotBinding(binding),
-      reviewScopes: (scopesBySlot.get(key) ?? []).filter((scope) => !createdScopesBySlot.get(key)?.has(scope)),
+      reviewScopes: scopesBySlot.get(key) ?? [],
       reviewIds: [...new Set(reviewsBySlot.get(key) ?? [])]
     })).sort((left, right) => left.key.localeCompare(right.key)),
     changes: structuredClone(run.bindingChanges ?? [])
@@ -951,16 +947,11 @@ export async function updateRunSlotBinding(input: {
 
     const candidate = structuredClone(run.reviewConfiguration);
     candidate.slots[slot] = cloneRunSlotBinding(after);
-    const resolvedStepsByScope = resolvedReviewStepsByScope(run, candidate);
+    const affectedReviewScopes = futureRunReviewScopesBySlot(run).get(slot) ?? [];
+    const resolvedStepsByScope = resolvedReviewStepsByScope(run, candidate, new Set(affectedReviewScopes));
     const preservedReviewIds = (run.artifactReviews ?? [])
       .filter((review) => slot in review.controlPlane.bindings)
       .map((review) => review.id);
-    const preservedReviewScopes = new Set((run.artifactReviews ?? [])
-      .filter((review) => slot in review.controlPlane.bindings)
-      .map((review) => review.controlPlane.artifactScope));
-    const affectedReviewScopes = [...(runReviewScopesBySlot(run).get(slot) ?? [])]
-      .filter((scope) => !preservedReviewScopes.has(scope))
-      .sort();
 
     run.reviewConfiguration = candidate;
     updateStoredRunReviewSteps(run, affectedReviewScopes, resolvedStepsByScope);
@@ -2736,24 +2727,59 @@ function validateRunReviewConfiguration(
   return structuredClone(configuration);
 }
 
-function runReviewScopesBySlot(run: RunState): Map<string, string[]> {
-  const result = new Map<string, string[]>();
-  const templates = [...new Map(
-    Object.values(run.procedureSnapshots ?? {}).map((template) => [template.memoryName, template])
-  ).values()];
-  for (const template of templates) {
-    for (const step of flattenRunSteps(template.steps)) {
-      if (!step.artifact || !step.reviewSlots?.length) continue;
-      const scope = `${template.memoryName}#${step.id}`;
-      for (const slotName of step.reviewSlots) {
-        const slot = `${template.memoryName}::${slotName}`;
-        const scopes = result.get(slot) ?? [];
-        if (!scopes.includes(scope)) scopes.push(scope);
-        result.set(slot, scopes);
-      }
+function futureRunReviewScopesBySlot(run: RunState): Map<string, string[]> {
+  const scopesBySlot = new Map<string, Set<string>>();
+
+  const addOwnScope = (step: RunStep, procedureName: string): void => {
+    if (!step.artifact || !step.reviewSlots?.length) return;
+    const scope = `${procedureName}#${step.id}`;
+    for (const slotName of step.reviewSlots) {
+      const slot = `${procedureName}::${slotName}`;
+      const scopes = scopesBySlot.get(slot) ?? new Set<string>();
+      scopes.add(scope);
+      scopesBySlot.set(slot, scopes);
+    }
+  };
+
+  const visitSteps = (
+    steps: readonly RunStep[],
+    procedureName: string,
+    callStack: ReadonlySet<string>
+  ): void => {
+    for (const step of steps) visitStep(step, procedureName, true, callStack);
+  };
+
+  const visitStep = (
+    step: RunStep,
+    procedureName: string,
+    includeOwnScope: boolean,
+    callStack: ReadonlySet<string>
+  ): void => {
+    if (includeOwnScope || step.kind === "loop") addOwnScope(step, procedureName);
+    if (step.branches) {
+      visitSteps(step.branches.truthy, procedureName, callStack);
+      visitSteps(step.branches.falsy, procedureName, callStack);
+    }
+    if (step.loop) visitSteps(step.loop.body, procedureName, callStack);
+    if (step.kind === "call" && step.target) {
+      const template = run.procedureSnapshots?.[step.target];
+      if (!template || callStack.has(template.memoryName)) return;
+      const nestedStack = new Set(callStack);
+      nestedStack.add(template.memoryName);
+      visitSteps(template.steps, template.memoryName, nestedStack);
+    }
+  };
+
+  for (const frame of run.stack) {
+    if (frame.type !== "procedure") continue;
+    for (let index = frame.index; index < frame.steps.length; index += 1) {
+      const step = frame.steps[index];
+      const isCurrentFrozenReview = index === frame.index && activeReviewForStep(run, step) !== undefined;
+      visitStep(step, frame.memoryName, !isCurrentFrozenReview, new Set([frame.memoryName]));
     }
   }
-  return result;
+
+  return new Map([...scopesBySlot.entries()].map(([slot, scopes]) => [slot, [...scopes].sort()]));
 }
 
 function validateRunSlotActors(run: RunState, slot: string, actorIds: string[]): { actorIds: string[] } {
@@ -2780,7 +2806,8 @@ function sameRunSlotBinding(left: RunSlotBindingValue, right: RunSlotBindingValu
 
 function resolvedReviewStepsByScope(
   run: RunState,
-  configuration: RunReviewConfiguration
+  configuration: RunReviewConfiguration,
+  validationScopes: ReadonlySet<string>
 ): Map<string, RunStep> {
   if (!run.controlPlane) throw new Error(`Run control-plane snapshot missing: ${run.id}`);
   const resolved = new Map<string, RunStep>();
@@ -2788,7 +2815,7 @@ function resolvedReviewStepsByScope(
     Object.values(run.procedureSnapshots ?? {}).map((template) => [template.memoryName, template])
   ).values()];
   for (const template of templates) {
-    const steps = instantiateProcedureTemplate(template, run.controlPlane, configuration);
+    const steps = instantiateProcedureTemplate(template, run.controlPlane, configuration, validationScopes);
     for (const step of flattenRunSteps(steps)) {
       if (step.artifact && step.reviewSlots?.length) {
         resolved.set(`${template.memoryName}#${step.id}`, step);
@@ -2847,13 +2874,14 @@ function containsArtifactReview(steps: readonly RunStep[]): boolean {
 function instantiateProcedureTemplate(
   template: RunProcedureTemplate,
   snapshot: ControlPlaneSnapshot | undefined,
-  reviewConfiguration: RunReviewConfiguration | undefined
+  reviewConfiguration: RunReviewConfiguration | undefined,
+  validationScopes?: ReadonlySet<string>
 ): RunStep[] {
   if (!snapshot && containsArtifactReview(template.steps)) {
     throw new Error(`control_plane config is required for Artifact Review: procedure:${template.memoryName}`);
   }
   const steps = cloneSteps(template.steps);
-  applyControlPlaneToSteps(steps, snapshot, reviewConfiguration, template.memoryName);
+  applyControlPlaneToSteps(steps, snapshot, reviewConfiguration, template.memoryName, validationScopes);
   return steps;
 }
 
@@ -2861,7 +2889,8 @@ function applyControlPlaneToSteps(
   steps: RunStep[],
   snapshot: ControlPlaneSnapshot | undefined,
   reviewConfiguration: RunReviewConfiguration | undefined,
-  procedureName: string
+  procedureName: string,
+  validationScopes?: ReadonlySet<string>
 ): void {
   for (const step of steps) {
     if (step.artifact) {
@@ -2888,7 +2917,9 @@ function applyControlPlaneToSteps(
         });
         if (Object.values(slotBindings).some((binding) => !binding.skipped)) {
           step.reviewPolicy = review.policy;
-          assertArtifactReviewCanStart(snapshot, step.controlPlane, step.reviewPolicy);
+          if (validationScopes === undefined || validationScopes.has(artifactScope)) {
+            assertArtifactReviewCanStart(snapshot, step.controlPlane, step.reviewPolicy);
+          }
         } else {
           step.reviewPolicy = undefined;
         }
@@ -2902,10 +2933,10 @@ function applyControlPlaneToSteps(
       }
     }
     if (step.branches) {
-      applyControlPlaneToSteps(step.branches.truthy, snapshot, reviewConfiguration, procedureName);
-      applyControlPlaneToSteps(step.branches.falsy, snapshot, reviewConfiguration, procedureName);
+      applyControlPlaneToSteps(step.branches.truthy, snapshot, reviewConfiguration, procedureName, validationScopes);
+      applyControlPlaneToSteps(step.branches.falsy, snapshot, reviewConfiguration, procedureName, validationScopes);
     }
-    if (step.loop) applyControlPlaneToSteps(step.loop.body, snapshot, reviewConfiguration, procedureName);
+    if (step.loop) applyControlPlaneToSteps(step.loop.body, snapshot, reviewConfiguration, procedureName, validationScopes);
   }
 }
 

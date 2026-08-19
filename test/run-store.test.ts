@@ -1860,6 +1860,210 @@ flow:
   });
 });
 
+test("Run binding update reaches a future loop iteration that reuses an existing Review scope", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "loop-handoff.yaml"), `!procedure
+name: loop-handoff
+flow:
+  - !while
+    condition: !action
+      action: Continue?
+      artifact: !artifact
+        name: continue
+        type: boolean
+    do:
+      - !action
+        action: Review this iteration.
+        artifact: !artifact
+          name: iteration
+          review: [owner]
+`);
+    const controlPlane = parseControlPlaneConfig({
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] },
+        agent: {
+          kind: "agent",
+          name: "Agent",
+          permissions: ["artifact.read", "decision.assess"],
+          agent: { provider: "traex" }
+        }
+      }
+    });
+    const started = await startRun({
+      memoryRoot,
+      runsRoot,
+      procedureName: "loop-handoff",
+      controlPlane,
+      reviewConfiguration: {
+        reviews: { "loop-handoff#flow[1].do[1]": { policy: "artifact_acceptance.unanimous" } },
+        slots: { "loop-handoff::owner": { actorIds: ["human"] } }
+      }
+    });
+    const firstBody = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "true" }
+    });
+    assert.equal(currentStep(firstBody)?.id, "flow[1].do[1]");
+    const firstPending = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "first iteration" }
+    });
+    const firstReview = currentArtifactReview(firstPending);
+    assert(firstReview);
+    const firstRound = firstReview.rounds[0];
+    const firstDraft = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: firstReview.id,
+      roundId: firstRound.id,
+      actorId: "human",
+      expectedRevision: firstRound.revision,
+      draft: { vote: "approve", comments: [] }
+    });
+    await submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: firstReview.id,
+      roundId: firstRound.id,
+      actorId: "human",
+      expectedRevision: firstDraft.round.revision
+    });
+    const firstApproved = await submitArtifactReviewRunnerVote({
+      runsRoot,
+      reviewId: firstReview.id,
+      roundId: firstRound.id,
+      vote: "approve"
+    });
+    assert.equal(currentStep(firstApproved.run)?.id, "flow[1]");
+
+    const changed = await updateRunSlotBinding({
+      runsRoot,
+      runId: started.id,
+      slot: "loop-handoff::owner",
+      actorIds: ["agent"]
+    });
+    assert.deepEqual(changed.change.affectedReviewScopes, ["loop-handoff#flow[1].do[1]"]);
+    assert.deepEqual(changed.change.preservedReviewIds, [firstReview.id]);
+    assert.deepEqual(buildRunBindingSnapshot(changed.run).slots[0].reviewScopes, ["loop-handoff#flow[1].do[1]"]);
+
+    const secondBody = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "true" }
+    });
+    assert.equal(currentStep(secondBody)?.id, "flow[1].do[1]");
+    const secondPending = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "second iteration" }
+    });
+    const reviews = secondPending.artifactReviews ?? [];
+    assert.equal(reviews.length, 2);
+    assert.deepEqual(reviews[0].rounds[0].assignments.map((assignment) => assignment.actorId), ["human"]);
+    assert.deepEqual(reviews[1].rounds[0].assignments.map((assignment) => assignment.actorId), ["agent"]);
+  });
+});
+
+test("Run binding update validates future scopes without revalidating frozen historical scopes", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "scoped-validation.yaml"), `!procedure
+name: scoped-validation
+flow:
+  - !action
+    action: Complete the historical review.
+    artifact: !artifact
+      name: historical
+      review: [owner]
+  - !action
+    action: Complete the future review.
+    artifact: !artifact
+      name: future
+      review: [owner, approver]
+`);
+    const controlPlane = parseControlPlaneConfig({
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] },
+        agent: {
+          kind: "agent",
+          name: "Agent",
+          permissions: ["artifact.read", "decision.assess"],
+          agent: { provider: "traex" }
+        },
+        approver: { kind: "human", name: "Approver", permissions: ["artifact.read", "decision.decide"] }
+      }
+    });
+    const started = await startRun({
+      memoryRoot,
+      runsRoot,
+      procedureName: "scoped-validation",
+      controlPlane,
+      reviewConfiguration: reviewConfiguration({
+        procedure: "scoped-validation",
+        flowIndexes: [1, 2],
+        slots: { owner: ["human"], approver: ["approver"] }
+      })
+    });
+    const historicalPending = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "historical" }
+    });
+    const historicalReview = currentArtifactReview(historicalPending);
+    assert(historicalReview);
+    const historicalRound = historicalReview.rounds[0];
+    const historicalDraft = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: historicalReview.id,
+      roundId: historicalRound.id,
+      actorId: "human",
+      expectedRevision: historicalRound.revision,
+      draft: { vote: "approve", comments: [] }
+    });
+    await submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: historicalReview.id,
+      roundId: historicalRound.id,
+      actorId: "human",
+      expectedRevision: historicalDraft.round.revision
+    });
+    await submitArtifactReviewRunnerVote({
+      runsRoot,
+      reviewId: historicalReview.id,
+      roundId: historicalRound.id,
+      vote: "approve"
+    });
+
+    const changed = await updateRunSlotBinding({
+      runsRoot,
+      runId: started.id,
+      slot: "scoped-validation::owner",
+      actorIds: ["agent"]
+    });
+    assert.deepEqual(changed.change.affectedReviewScopes, ["scoped-validation#flow[2]"]);
+    assert.deepEqual(changed.change.preservedReviewIds, [historicalReview.id]);
+    const futurePending = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "future" }
+    });
+    assert.deepEqual(
+      currentArtifactReview(futurePending)?.rounds[0].assignments.map((assignment) => assignment.actorId).sort(),
+      ["agent", "approver"].sort()
+    );
+    assert.deepEqual(historicalReview.controlPlane.bindings["scoped-validation::owner"].actorIds, ["human"]);
+  });
+});
+
 test("Run binding update rejects invalid mutations without changing persisted state", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");

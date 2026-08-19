@@ -232,3 +232,10 @@ completed_at: 2026-08-19T11:51:11+08:00
 - Runner 已于 2026-08-19 接受验收结论；需求契约中的运行期换绑、历史冻结、原子校验、审计、CLI、View 与兼容性标准均满足。
 - 非阻塞后续建议：补充 run-command 级 CLI 专项覆盖，直接断言 `run binding show/update` 的参数解析、text/JSON 输出和错误路径。
 - 已披露残留：未使用真实生产 ACP Provider 做人工端到端操作，也未新增独立视觉快照；现有 fake ACP、API、浏览器脚本与全量回归已覆盖本轮交付路径。
+
+## PR 复核后的缺陷修复
+
+- Bug Fix Run：`run-20260819-090151z-7cbdb3dc`。
+- 修复静态 scope 与 Review 实例混淆：循环未来迭代即使复用已有 Review 的 scope，也会使用新的 Slot Binding；历史 Review 仍保持冻结。
+- 修复候选 Binding 过度校验：Decision Policy 只对当前 stack 中未来会使用新 Binding 的 scopes 校验，已经完成且不会再次执行的历史 scope 不再阻止合法换绑。
+- 新增循环复用 scope 与历史/未来 scope 权限差异两个回归测试；修复后 Run store 47/47、全量 359/359、typecheck 与 build 通过。
