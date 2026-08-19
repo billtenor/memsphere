@@ -608,6 +608,7 @@ flow:
     reviewer.agent.idleTimeoutMs = 10_000;
     reviewer.agent.maxRuntimeMs = null;
     const started = await startRun({
+      name: "Test run",
       memoryRoot: config.memoryRoot,
       runsRoot: config.runsRoot,
       language: config.language,

@@ -6,6 +6,7 @@ names:
 format: yaml
 defines:
   - 定义 memsphere !schema Memory 的合法内容结构、值契约和组合约束。
+  - Schema 的 name/names 标识值契约或字段，不是 Procedure 的单次 Run 名称。
 asserts:
   - 根节点必须使用 !schema 标签，只允许 syntax、name/names、defines、asserts、suggests、optional、type、format、fields、item 和 items 字段。
   - "syntax 必须填写 memsphere-20260721-stable。"
@@ -28,7 +29,7 @@ fields:
     optional: true
     type: string
     defines:
-      - Schema 只有一个名称时使用的简写。
+      - Schema 只有一个值契约名称时使用的简写，不是单次执行的 Run 名称。
   - !schema
     name: names
     optional: true
@@ -36,7 +37,7 @@ fields:
     item: !schema
       type: string
     defines:
-      - Schema 的规范名称与别名，首项为规范名称。
+      - Schema 值契约的规范名称与别名，首项为规范名称；Run 实例名称不属于 Schema YAML。
   - !schema
     name: defines
     optional: true

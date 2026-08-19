@@ -62,6 +62,7 @@ flow:
     }
   });
   const started = await startRun({
+    name: "Test run",
     memoryRoot,
     runsRoot,
     procedureName: "browser-review",
@@ -639,6 +640,7 @@ flow:
     }
   });
   const started = await startRun({
+    name: "Test run",
     memoryRoot,
     runsRoot,
     procedureName: "agent-only-review-browser",
@@ -794,6 +796,7 @@ flow:
     }
   }, null, 2)}\n`);
   const started = await startRun({
+    name: "Test run",
     memoryRoot,
     runsRoot,
     procedureName: "agent-activity-browser",

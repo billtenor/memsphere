@@ -215,6 +215,7 @@ export type RunState = {
   readOnly?: boolean;
   memorySyntax?: MemorySyntaxVersion;
   id: string;
+  name?: string;
   status: RunStatus;
   procedureName: string;
   asserts?: string[];
@@ -412,6 +413,7 @@ const runStateSchema: z.ZodType<RunState> = z.object({
   readOnly: z.boolean().optional(),
   memorySyntax: z.string().optional(),
   id: z.string(),
+  name: z.string().optional(),
   status: z.enum(["running", "done"]),
   procedureName: z.string(),
   asserts: z.array(z.string()).optional(),
@@ -653,6 +655,7 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
   readOnly: z.boolean().optional(),
   memorySyntax: z.string().optional(),
   id: z.string(),
+  name: z.string().optional(),
   status: z.enum(["running", "done"]),
   procedureName: z.string(),
   asserts: z.array(z.string()).optional(),
@@ -704,6 +707,7 @@ export async function ensureRunDirectory(runsRoot: string): Promise<string> {
 export async function startRun(input: {
   memoryRoot: string;
   runsRoot: string;
+  name: string;
   language?: PromptLocale;
   procedureName?: string;
   procedureFile?: string;
@@ -713,6 +717,7 @@ export async function startRun(input: {
   memoryCatalog?: MemoryCatalog;
   projectMemoryCatalogs?: Record<string, MemoryCatalog>;
 }): Promise<RunState> {
+  const runName = normalizeRunName(input.name);
   const procedureName = input.procedureName?.trim();
   const procedureFile = input.procedureFile?.trim();
   if (!procedureName && !procedureFile) throw new Error("provide a procedure name or procedure file");
@@ -767,6 +772,7 @@ export async function startRun(input: {
     language: resolvePromptLocale(input.language),
     memorySyntax: procedure.entity.syntax,
     id: makeRunId(now),
+    name: runName,
     status: "running",
     procedureName: procedure.entity.names[0],
     asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
@@ -791,6 +797,21 @@ export async function startRun(input: {
   await expandAutoCallSteps(run);
   await writeRun(input.runsRoot, run);
   return run;
+}
+
+export function normalizeRunName(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("run name is required");
+  }
+  const name = value.trim();
+  if (/[\u0000-\u001f\u007f-\u009f]/u.test(name)) {
+    throw new Error("run name must not contain control characters");
+  }
+  return name;
+}
+
+export function runDisplayName(run: Pick<RunState, "name" | "procedureName">): string {
+  return run.name?.trim() || run.procedureName;
 }
 
 export async function readRun(runsRoot: string, id: string): Promise<RunState> {
@@ -3853,6 +3874,7 @@ function normalizeLegacyRun(value: unknown): RunState {
     contractVersion: 1,
     readOnly: true,
     id: String(legacy.id ?? ""),
+    name: typeof legacy.name === "string" ? legacy.name : undefined,
     status: legacy.status === "done" ? "done" : "running",
     procedureName: String(legacy.procedureName ?? ""),
     asserts: stringList(legacy.asserts),

@@ -11,6 +11,8 @@ import { currentMemorySyntax } from "../src/memory/syntax.js";
 import type { RunState } from "../src/run/store.js";
 
 const runId = "run-responsive-view";
+const legacyRunId = "run-responsive-legacy";
+const runName = `本次Run名称-${"x".repeat(120)}`;
 
 async function withResponsiveView(fn: (browser: Browser, url: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-responsive-view-"));
@@ -19,13 +21,15 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
   const reviewsRoot = join(dir, "reviews");
   const runsRoot = join(dir, "runs");
   const runDir = join(runsRoot, runId);
+  const legacyRunDir = join(runsRoot, legacyRunId);
   await Promise.all([
     mkdir(join(memoryRoot, "concepts"), { recursive: true }),
     mkdir(join(memoryRoot, "procedures"), { recursive: true }),
     mkdir(join(memoryRoot, "schemas"), { recursive: true }),
     mkdir(join(reservedRoot, "concepts"), { recursive: true }),
     mkdir(reviewsRoot, { recursive: true }),
-    mkdir(join(runDir, "artifacts"), { recursive: true })
+    mkdir(join(runDir, "artifacts"), { recursive: true }),
+    mkdir(legacyRunDir, { recursive: true })
   ]);
 
   await writeFile(join(memoryRoot, "concepts", "memory-8aaf6c34fc49.yaml"), [
@@ -88,6 +92,7 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     contractVersion: 2,
     memorySyntax: currentMemorySyntax,
     id: runId,
+    name: runName,
     status: "done",
     procedureName: "Responsive browser fixture",
     memoryRoot,
@@ -121,6 +126,18 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     }]
   };
   await writeFile(join(runDir, `${runId}.json`), `${JSON.stringify(run)}\n`);
+  await writeFile(join(legacyRunDir, `${legacyRunId}.json`), `${JSON.stringify({
+    contractVersion: 2,
+    memorySyntax: currentMemorySyntax,
+    id: legacyRunId,
+    status: "done",
+    procedureName: "Legacy procedure fallback",
+    memoryRoot,
+    createdAt: "2026-07-18T00:00:00.000Z",
+    updatedAt: "2026-07-18T00:00:00.000Z",
+    stack: [],
+    events: []
+  })}\n`);
 
   const config: MemsphereConfig = {
     configPath: join(dir, "config.json"),
@@ -225,6 +242,9 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
 
     const narrowPage = await openTaskPage(browser, url, 1024);
     try {
+      assert.equal(await narrowPage.locator("#title").textContent(), runName);
+      assert.equal(await narrowPage.locator(".task-card-main b").first().textContent(), runName);
+      await narrowPage.locator(".meta .pill", { hasText: "流程: Responsive browser fixture" }).waitFor();
       await assertPageDoesNotOverflow(narrowPage);
       assert.equal(await narrowPage.locator(".flow-head").first().evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length), 1);
       const scrollBox = narrowPage.locator(".markdown-table-scroll").first();
@@ -238,6 +258,23 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
       await assertPageDoesNotOverflow(narrowPage);
     } finally {
       await narrowPage.close();
+    }
+  });
+});
+
+test("Task titles fall back to the Procedure name for historical Runs", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1024, height: 900 } });
+    try {
+      await page.goto(url);
+      await page.getByRole("button", { name: "Task", exact: true }).click();
+      const legacy = page.locator(".task-card-main", { hasText: "Legacy procedure fallback" });
+      await legacy.click();
+      assert.equal(await page.locator("#title").textContent(), "Legacy procedure fallback");
+      await page.locator(".meta .pill", { hasText: "流程: Legacy procedure fallback" }).waitFor();
+      await assertPageDoesNotOverflow(page);
+    } finally {
+      await page.close();
     }
   });
 });
@@ -406,7 +443,7 @@ test("View deep links restore Memory, Task, Memory Review, and browser history",
       assert.equal(new URL(page.url()).pathname, "/tasks");
       await page.goForward();
       await page.waitForURL(url + `/tasks/${runId}`);
-      await page.getByRole("heading", { name: "Responsive browser fixture", exact: true }).waitFor();
+      await page.getByRole("heading", { name: runName, exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
 
       const missing = await browser.newPage();
