@@ -62,6 +62,7 @@ flow:
     }
   });
   const started = await startRun({
+    name: "Test run",
     memoryRoot,
     runsRoot,
     procedureName: "browser-review",
@@ -645,6 +646,7 @@ flow:
     }
   });
   const started = await startRun({
+    name: "Test run",
     memoryRoot,
     runsRoot,
     procedureName: "agent-only-review-browser",
@@ -800,6 +802,7 @@ flow:
     }
   }, null, 2)}\n`);
   const started = await startRun({
+    name: "Test run",
     memoryRoot,
     runsRoot,
     procedureName: "agent-activity-browser",
@@ -1064,15 +1067,19 @@ async function clickAndWaitForDraftSave(
 }
 
 async function waitForDraftRecovery(page: import("playwright").Page): Promise<void> {
-  const conflict = page.waitForResponse((response) =>
-    response.url().endsWith("/draft")
-    && response.request().method() === "PATCH"
-    && response.status() === 409
+  const conflict = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/draft")
+      && response.request().method() === "PATCH"
+      && response.status() === 409,
+    { timeout: 10_000 }
   );
-  const recovered = page.waitForResponse((response) =>
-    response.url().endsWith("/draft")
-    && response.request().method() === "PATCH"
-    && response.status() === 200
+  const recovered = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/draft")
+      && response.request().method() === "PATCH"
+      && response.status() === 200,
+    { timeout: 10_000 }
   );
   await conflict;
   await recovered;

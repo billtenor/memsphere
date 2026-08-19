@@ -35,10 +35,12 @@ import {
   ensureCurrentSchemaDraft,
   findArtifactReview,
   listRuns,
+  normalizeRunName,
   readRun,
   repeatRun,
   resolveArtifactReviewComment,
   retryArtifactReviewAgentAssignment,
+  runDisplayName,
   RunReviewConfigurationRequired,
   reportRun,
   type SchemaWritingSnapshot,
@@ -60,6 +62,7 @@ type ReportOptions = {
 
 type RunStartOptions = {
   file?: string;
+  name?: string;
   reviewConfig?: string;
 };
 
@@ -124,10 +127,11 @@ type AgentReviewSubmitOptions = AgentReviewAssignmentOptions & {
 };
 
 export async function runStartCommand(procedureName: string | undefined, options: RunStartOptions = {}): Promise<void> {
-  const name = procedureName?.trim();
+  const procedure = procedureName?.trim();
   const procedureFile = options.file?.trim();
-  if (!name && !procedureFile) throw new Error("provide a procedure name or --file <path>");
-  if (name && procedureFile) throw new Error("use either a procedure name or --file <path>, not both");
+  if (!procedure && !procedureFile) throw new Error("provide a procedure name or --file <path>");
+  if (procedure && procedureFile) throw new Error("use either a procedure name or --file <path>, not both");
+  const runName = normalizeRunName(options.name);
 
   const config = await readConfig();
   const memoryCatalog = createMemoryCatalogForConfig(config);
@@ -139,8 +143,9 @@ export async function runStartCommand(procedureName: string | undefined, options
     run = await startRun({
       memoryRoot: config.memoryRoot,
       runsRoot: config.runsRoot,
+      name: runName,
       language: config.language,
-      procedureName: name,
+      procedureName: procedure,
       procedureFile,
       controlPlane: config.controlPlane,
       reviewConfiguration,
@@ -543,7 +548,7 @@ export async function runStatusCommand(options: RunIdOptions): Promise<void> {
   }
 
   for (const run of runs) {
-    console.log(`${run.id} ${run.status} ${run.procedureName}`);
+    console.log(`${run.id} ${run.status} ${runDisplayName(run)} · ${run.procedureName}`);
   }
 }
 
@@ -619,6 +624,7 @@ export function buildRunOverview(run: RunState): unknown {
   const steps = runStepLocations(run);
   return {
     id: run.id,
+    name: run.name,
     procedureName: run.procedureName,
     status: run.status,
     createdAt: run.createdAt,

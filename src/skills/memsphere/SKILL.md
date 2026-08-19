@@ -146,7 +146,7 @@ flow:
 - Memsphere Home `config.json` 的 `acp_providers` 定义与内置类型同名的 ACP Provider 配置。首批固定支持 `traex`、`qwen`、`kimi`、`codex`；CLI command 和 ACP 入口由类型固定，配置维护非托管 args、非敏感 env 和启动/空闲/总运行超时。配置中心可自动检测可执行文件路径和版本，但 Provider 自己负责安装、认证和模型账户配置。
 - Agent Actor 只配置 ACP Provider 实例 id `provider` 和可选 `model`；工作目录、托管安全参数与 Prompt version 由 Memsphere 管理。旧的 Actor 内 `command`、`args`、`env`、`cwd`、Prompt version 和 timeout 字段不兼容，也不会被自动迁移。
 - 原生 Windows 要求 Windows Node.js 与 Git for Windows；用户和 Agent CLI 支持 Windows PowerShell 5.1、PowerShell 7、CMD、Git for Windows 随附的 Git Bash。WSL 按独立 Linux 环境处理，MSYS2/Cygwin 不在当前支持范围。Provider 的安装检测与 Windows 支持等级分别展示。
-- `memsphere run start` 会先列出所有 Review scope、Slot、可用 Actor 和内置 Decision Policy。把预检示例保存并调整后，使用 `--review-config <path>` 启动。
+- `memsphere run start` 必须通过 `--name` 指定本次 Run 的非空名称，并会先列出所有 Review scope、Slot、可用 Actor 和内置 Decision Policy。把预检示例保存并调整后，使用相同的 `--name` 和 `--review-config <path>` 启动。
 - Review 配置必须为每个 scope 选择 Policy，并为每个 Slot 绑定 Actor 或显式 `skip`；一个 Actor 绑定多个 Slot 时只产生一个 Assignment 和 Vote。
 - Permission 只在 Runner/Actor 的 `permissions` 中配置；Run Review 配置不追加临时权限。Memory YAML 不允许 `role_bindings` 或 `permission_grants`。
 - `runner` 是当前 Run 执行上下文，不需要 Slot Binding。
@@ -216,16 +216,16 @@ memsphere 使用 Run 记录和控制一次 Procedure 的执行过程，保证 Ag
 读取执行所需的 Procedure 内容后，使用它的名称启动一次 Run：
 
 ```bash
-memsphere run start "<Procedure 名称>"
+memsphere run start "<Procedure 名称>" --name "<本次 Run 名称>"
 ```
 
 需要直接运行尚未安装到当前 Primary Project Memory Store 的 Procedure YAML 时，可以指定文件路径：
 
 ```bash
-memsphere run start --file "<Procedure YAML 路径>"
+memsphere run start --file "<Procedure YAML 路径>" --name "<本次 Run 名称>"
 ```
 
-名称参数与 `--file` 必须二选一。文件中的根 Procedure 会在启动时写入 Run 快照；外部 `!call` 和外部 Schema 从 Run 启动时冻结的 Project Memory Revision 解析。
+Procedure 名称参数与 `--file` 必须二选一；两种方式都必须通过 `--name` 指定本次 Run 的名称。文件中的根 Procedure 会在启动时写入 Run 快照；外部 `!call` 和外部 Schema 从 Run 启动时冻结的 Project Memory Revision 解析。
 
 命令会返回 Run ID 和第一个待执行步骤。后续命令都使用这个 Run ID，不要再次启动同一个流程。
 
