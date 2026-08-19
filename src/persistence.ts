@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+
+const inProcessLocks = new Map<string, Promise<void>>();
 
 export async function atomicWriteFile(path: string, content: string, mode = 0o600): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
@@ -49,6 +51,28 @@ export async function withFileLock<T>(
   lockPath: string,
   action: () => Promise<T>,
   options: { timeoutMs?: number; staleMs?: number } = {}
+): Promise<T> {
+  const key = resolve(lockPath);
+  const previous = inProcessLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolveCurrent) => {
+    release = resolveCurrent;
+  });
+  const tail = previous.then(() => current);
+  inProcessLocks.set(key, tail);
+  await previous;
+  try {
+    return await withFilesystemLock(lockPath, action, options);
+  } finally {
+    release();
+    if (inProcessLocks.get(key) === tail) inProcessLocks.delete(key);
+  }
+}
+
+async function withFilesystemLock<T>(
+  lockPath: string,
+  action: () => Promise<T>,
+  options: { timeoutMs?: number; staleMs?: number }
 ): Promise<T> {
   const timeoutMs = options.timeoutMs ?? 10_000;
   const staleMs = options.staleMs ?? 60_000;

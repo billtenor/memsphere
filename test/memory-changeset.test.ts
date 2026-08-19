@@ -110,6 +110,7 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     ]);
     assert.match(await readFile(join(memoryRoot, concurrentA.change.targets[0].path), "utf8"), /Concurrent A/);
     assert.match(await readFile(join(memoryRoot, concurrentB.change.targets[0].path), "utf8"), /Concurrent B/);
+    assert.deepEqual((await readMemoryFile("concepts", join(memoryRoot, "concepts", "other.yaml"))).entity.names, ["Other", "Other Alias"]);
     assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
 
     const dependent = await editMemories({ references: ["concepts/Dependent"] });
@@ -121,6 +122,7 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     assert(missingReference.issues.some((issue) => issue.path === dependentPath && issue.message.includes("was not found")));
     await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("concepts/Missing", "concepts/Shared"));
     await publishMemoryChange(dependent.change.id);
+    assert.deepEqual((await readMemoryFile("concepts", join(memoryRoot, "concepts", "other.yaml"))).entity.names, ["Other", "Other Alias"]);
 
     const deleted = await editMemories({ references: ["Shared"], operation: "delete" });
     const deleteValidation = await validateMemoryChange(deleted.change.id);
