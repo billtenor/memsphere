@@ -8,9 +8,8 @@ const workspace = process.cwd();
 const project = resolve(workspace, ".ci windows project");
 const cli = resolve(workspace, ".ci-install", "node_modules", ".bin", "memsphere.cmd");
 
-run(cli, ["init", "--folder", project]);
-await mkdir(resolve(project, ".memsphere", "memory", "procedures"), { recursive: true });
-await writeFile(resolve(project, ".memsphere", "memory", "procedures", "windows-ci-smoke.yaml"), `!procedure
+await mkdir(resolve(project, "procedures"), { recursive: true });
+await writeFile(resolve(project, "procedures", "windows-ci-smoke.yaml"), `!procedure
 syntax: memsphere-20260721-stable
 name: Windows CI smoke
 goals:
@@ -22,6 +21,7 @@ flow:
       name: Windows smoke result
       format: markdown
 `, "utf8");
+run(cli, ["project", "create", "windows-ci", "--embedded", project, "--bind"]);
 
 run(cli, ["validate"], project);
 run(cli, ["memory", "list", "--kind", "procedures", "--output", "json"], project);

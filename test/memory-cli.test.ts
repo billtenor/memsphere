@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -9,6 +9,7 @@ import { parse } from "yaml";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
+import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cliPath = join(projectRoot, "src", "cli.ts");
@@ -22,19 +23,34 @@ type CommandResult = {
 
 async function withScope(fn: (scope: { root: string; nested: string; memoryRoot: string }) => Promise<void>): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "memsphere-cli-test-"));
-  const scopeRoot = join(root, ".memsphere");
-  const memoryRoot = join(scopeRoot, "memory");
+  const home = join(root, "home");
+  const project = join(home, "projects", "test-project");
+  const memoryRoot = join(root, "memory");
   const nested = join(root, "work", "nested");
+  const previousHome = process.env.MEMSPHERE_HOME;
   try {
     await mkdir(nested, { recursive: true });
-    await mkdir(join(scopeRoot, "reviews"), { recursive: true });
-    await mkdir(join(scopeRoot, "runs"), { recursive: true });
+    await mkdir(project, { recursive: true });
+    await mkdir(join(project, "reviews"), { recursive: true });
+    await mkdir(join(project, "runs"), { recursive: true });
+    await mkdir(join(project, "archives"), { recursive: true });
+    await mkdir(join(project, "changes"), { recursive: true });
     for (const kind of ["concepts", "statements", "schemas", "procedures"]) {
       await mkdir(join(memoryRoot, kind), { recursive: true });
     }
-    await writeFile(join(scopeRoot, "config.json"), `${JSON.stringify({ memoryRoot: "memory" })}\n`);
+    await writeFile(join(project, "project.json"), `${JSON.stringify({ format_version: 1, name: "test-project", created_at: new Date().toISOString() })}\n`);
+    await writeFile(join(project, "config.json"), `${JSON.stringify({ store: { type: "embedded", memory_path: memoryRoot } })}\n`);
+    process.env.MEMSPHERE_HOME = home;
+    const workspace = await resolveWorkspaceIdentity(nested);
+    await writeFile(join(home, "registry.json"), `${JSON.stringify({
+      format_version: 1,
+      projects: { "test-project": { root: project } },
+      workspaces: { [workspace.key]: { primary: "test-project", mounted: [] } }
+    })}\n`);
     await fn({ root, nested, memoryRoot });
   } finally {
+    if (previousHome === undefined) delete process.env.MEMSPHERE_HOME;
+    else process.env.MEMSPHERE_HOME = previousHome;
     await rm(root, { recursive: true, force: true });
   }
 }
@@ -48,7 +64,7 @@ async function runCli(cwd: string, args: string[], home?: string): Promise<Comma
       ...args
     ], {
       cwd,
-      env: { ...process.env, ...(home ? { HOME: home } : {}) },
+      env: { ...process.env, ...(home ? { MEMSPHERE_HOME: home } : {}) },
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
@@ -59,6 +75,55 @@ async function runCli(cwd: string, args: string[], home?: string): Promise<Comma
     child.on("close", (code) => resolveResult({ code, stdout, stderr }));
   });
 }
+
+test("memory change validate checks the effective Store without expanding a sparse candidate", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-change-cli-test-"));
+  const home = join(root, "home");
+  const workspace = join(root, "workspace");
+  const gitConfig = join(root, "gitconfig");
+  const previousGitConfig = process.env.GIT_CONFIG_GLOBAL;
+  try {
+    await mkdir(workspace);
+    await writeFile(gitConfig, "[user]\n\tname = Test User\n\temail = test@example.com\n");
+    process.env.GIT_CONFIG_GLOBAL = gitConfig;
+    const createdProject = await runCli(workspace, ["project", "create", "project", "--bind"], home);
+    assert.equal(createdProject.code, 0, createdProject.stderr);
+
+    const edited = await runCli(workspace, ["memory", "edit", "concepts/Shared"], home);
+    assert.equal(edited.code, 0, edited.stderr);
+    const changeId = /^ChangeSet: (.+)$/m.exec(edited.stdout)?.[1];
+    const candidateRoot = /^Candidate Root: (.+)$/m.exec(edited.stdout)?.[1];
+    assert(changeId && candidateRoot);
+    assert.deepEqual(await readdir(candidateRoot), ["concepts"]);
+    const candidate = join(candidateRoot, "concepts", "shared.yaml");
+    await writeFile(candidate, (await readFile(candidate, "utf8")).replace("defines: []", "defines: [Shared concept]"));
+
+    const textResult = await runCli(workspace, ["memory", "change", "validate", changeId], home);
+    assert.equal(textResult.code, 0, textResult.stderr);
+    assert.match(textResult.stdout, /ChangeSet validation passed/);
+    assert.match(textResult.stdout, new RegExp(`ChangeSet: ${changeId}`));
+    assert.deepEqual(await readdir(candidateRoot), ["concepts"]);
+
+    const jsonResult = await runCli(workspace, ["memory", "change", "validate", changeId, "--format", "json"], home);
+    assert.equal(jsonResult.code, 0, jsonResult.stderr);
+    const validPayload = JSON.parse(jsonResult.stdout);
+    assert.equal(validPayload.valid, true);
+    assert.equal(validPayload.changeId, changeId);
+    assert.deepEqual(validPayload.issues, []);
+
+    await writeFile(candidate, "!concept\nnames: [Broken\n");
+    const invalidResult = await runCli(workspace, ["memory", "change", "validate", changeId, "--format", "json"], home);
+    assert.equal(invalidResult.code, 1);
+    assert.equal(invalidResult.stderr, "");
+    const invalidPayload = JSON.parse(invalidResult.stdout);
+    assert.equal(invalidPayload.valid, false);
+    assert(invalidPayload.issues.some((issue: { path: string }) => issue.path === candidate));
+  } finally {
+    if (previousGitConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = previousGitConfig;
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("validate suggests syntax migration only for outdated Memory YAML", async () => {
   await withScope(async ({ nested, memoryRoot }) => {
@@ -130,7 +195,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
     assert.deepEqual(filteredPage.memories[0].defines, ["A managed memory."]);
     assert.deepEqual(filteredPage.memories[0].structured_defines, { statement: 1 });
 
-    for (const reference of ["concepts/Memory", "Memory", "记忆"]) {
+    for (const reference of ["concepts/Memory", "concepts/记忆", "Memory", "记忆"]) {
       const read = await runCli(nested, ["memory", "read", reference]);
       assert.equal(read.code, 0, read.stderr);
       assert.equal(read.stderr, "");
@@ -156,11 +221,11 @@ test("validate checks Memory references by target kind and dependency cycles", a
   await withScope(async ({ nested, memoryRoot }) => {
     await writeFile(
       join(memoryRoot, "concepts", "concept.yaml"),
-      withCurrentMemorySyntax("!concept\nnames: [Concept A]\ndefines:\n  - !ref\n    target: schemas/Schema A\n")
+      withCurrentMemorySyntax("!concept\nnames: [Concept A, Concept Alias]\ndefines:\n  - !ref\n    target: schemas/Schema Alias\n")
     );
     await writeFile(
       join(memoryRoot, "schemas", "schema.yaml"),
-      withCurrentMemorySyntax("!schema\nnames: [Schema A]\ndefines:\n  - !ref\n    target: concepts/Concept A\n")
+      withCurrentMemorySyntax("!schema\nnames: [Schema A, Schema Alias]\ndefines:\n  - !ref\n    target: concepts/Concept Alias\n")
     );
 
     const cycle = await runCli(nested, ["validate"]);
@@ -336,7 +401,7 @@ test("memory CLI reports ambiguity and other failures only on stderr", async () 
     const ambiguous = await runCli(nested, ["memory", "read", "Shared"]);
     assert.notEqual(ambiguous.code, 0);
     assert.equal(ambiguous.stdout, "");
-    assert.match(ambiguous.stderr, /concepts\/Shared, statements\/Shared/);
+    assert.match(ambiguous.stderr, /test-project:concepts\/Shared, test-project:statements\/Shared/);
 
     const resolved = await runCli(nested, ["memory", "read", "Shared", "--kind", "concepts", "--output", "json"]);
     assert.equal(resolved.code, 0, resolved.stderr);
@@ -377,7 +442,7 @@ test("memory CLI rejects malformed stores, uninitialized scopes, and the removed
       const uninitialized = await runCli(outside, ["memory", "list"], isolatedHome);
       assert.notEqual(uninitialized.code, 0);
       assert.equal(uninitialized.stdout, "");
-      assert.match(uninitialized.stderr, /Run memsphere init/);
+      assert.match(uninitialized.stderr, /not bound to a Primary Project/);
     } finally {
       await rm(isolatedRoot, { recursive: true, force: true });
     }

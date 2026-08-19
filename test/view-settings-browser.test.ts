@@ -5,23 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { chromium } from "playwright";
-import { readConfigAt } from "../src/config.js";
+import type { MemsphereConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
 
 test("Settings browser preserves omitted sections and stays responsive", async () => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-settings-browser-"));
-  const configPath = join(dir, "config.json");
-  await writeFile(configPath, `${JSON.stringify({ memoryRoot: "memory" }, null, 2)}\n`);
-  await Promise.all([
-    mkdir(join(dir, "memory", "procedures"), { recursive: true }),
-    mkdir(join(dir, "memory", "schemas"), { recursive: true }),
-    mkdir(join(dir, "memory", "concepts"), { recursive: true }),
-    mkdir(join(dir, "memory", "statements"), { recursive: true }),
-    mkdir(join(dir, "reviews"), { recursive: true }),
-    mkdir(join(dir, "runs"), { recursive: true })
-  ]);
-
-  const config = await readConfigAt(configPath);
+  const config = await settingsConfigFixture(dir, "127.0.0.1");
   const server = createViewServer(config);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -35,33 +24,68 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     await page.goto(`http://127.0.0.1:${port}`, { waitUntil: "networkidle" });
+    const brandBox = await page.locator(".brand").boundingBox();
+    const settingsButtonBox = await page.locator("#settings-tab").boundingBox();
+    const projectSelectBox = await page.locator("#project-select").boundingBox();
+    assert.ok(brandBox && settingsButtonBox && projectSelectBox);
+    assert.equal(Math.round(settingsButtonBox.width), 34);
+    assert.equal(Math.round(settingsButtonBox.height), 34);
+    assert.equal(Math.round(projectSelectBox.height), 38);
+    assert.ok(projectSelectBox.y >= brandBox.y + brandBox.height + 12);
+    assert.equal(await page.locator("#settings-tab").getAttribute("aria-label"), "设置");
+    await page.locator("#project-select").click();
+    const projectMenuBox = await page.locator("#project-select-menu").boundingBox();
+    assert.ok(projectMenuBox);
+    assert.ok(projectMenuBox.y >= projectSelectBox.y + projectSelectBox.height);
+    assert.ok(Math.abs(projectMenuBox.width - projectSelectBox.width) < 2);
+    await page.keyboard.press("Escape");
+    await page.click("#settings-tab");
+    assert.equal(await page.locator(".view-tabs").isVisible(), false);
+    assert.equal(await page.locator("#settings-tab").getAttribute("aria-label"), "退出设置");
+    await page.click("#settings-tab");
+    assert.equal(await page.locator(".view-tabs").isVisible(), true);
+    assert.equal(await page.locator("#memory-tab").getAttribute("class"), "view-tab active");
     await page.click("#settings-tab");
 
-    await page.getByRole("button", { name: "View 服务", exact: true }).click();
+    const globalSettingsNav = page.getByRole("group", { name: "Memsphere", exact: true });
+    const demoSettingsNav = page.getByRole("group", { name: "Project · demo", exact: true });
+    assert.equal(await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).getAttribute("aria-current"), "page");
+    assert.equal(await demoSettingsNav.count(), 1);
+    const globalSettingsToggle = globalSettingsNav.getByRole("button", { name: "Memsphere", exact: true });
+    await globalSettingsToggle.click();
+    assert.equal(await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).isVisible(), false);
+    await globalSettingsToggle.click();
+    assert.equal(await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).isVisible(), true);
+    assert.equal(await page.getByRole("heading", { name: "Memsphere 设置", exact: true }).count(), 1);
+    await globalSettingsNav.getByRole("button", { name: "View 服务", exact: true }).click();
     assert.equal(await page.getByText("当前运行地址").count(), 0);
     assert.equal(await page.getByText("保存并重启后地址").count(), 0);
-    await page.getByRole("button", { name: "参与者配置", exact: true }).click();
-    await page.getByRole("button", { name: "概览", exact: true }).click();
+    await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
     const overview = page.locator(".settings-section").last();
-    assert.equal(await overview.getByText("配置文件", { exact: true }).count(), 1);
-    assert.equal(await overview.getByText("配置作用域", { exact: true }).count(), 1);
-    assert.equal(await overview.getByText("当前可管理配置", { exact: true }).count(), 0);
-    assert.equal(await overview.getByText("Memory", { exact: true }).count(), 0);
-    assert.equal(await overview.getByText("Reviews", { exact: true }).count(), 0);
-    assert.equal(await overview.getByText("Runs", { exact: true }).count(), 0);
-    assert.equal(await overview.getByText("Archives", { exact: true }).count(), 0);
-    await page.getByRole("button", { name: "常规", exact: true }).click();
+    assert.equal(await overview.getByText("全局配置", { exact: true }).count(), 1);
+    assert.equal(await overview.getByText("Project 配置", { exact: true }).count(), 0);
+    await globalSettingsNav.getByRole("button", { name: "常规", exact: true }).click();
     assert.equal(await page.getByText("工作语言", { exact: true }).count(), 1);
     await page.getByRole("combobox", { name: "工作语言" }).click();
     await page.getByRole("option", { name: "English", exact: true }).click();
     assert.match(await page.locator("#settings-status").textContent() ?? "", /未保存修改/);
+    await demoSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
+    assert.equal(await page.getByRole("heading", { name: "demo 项目设置", exact: true }).count(), 1);
+    assert.equal(await page.getByRole("checkbox", { name: "使用默认值" }).count(), 0);
+    assert.equal(await page.getByText("存储位置", { exact: true }).count(), 1);
+    assert.equal(await page.locator(".settings-section .settings-field").count(), 8);
+    assert.equal(await page.getByRole("button", { name: "保存", exact: true }).count(), 0);
+    await globalSettingsNav.getByRole("button", { name: "常规", exact: true }).click();
+    assert.equal((await page.getByRole("combobox", { name: "工作语言" }).textContent())?.trim(), "English⌄");
+    assert.match(await page.locator("#settings-status").textContent() ?? "", /未保存修改/);
     await page.getByRole("button", { name: "重新读取", exact: true }).click();
-    await page.getByRole("button", { name: "存储", exact: true }).click();
-    assert.equal(await page.getByRole("checkbox", { name: "使用默认值" }).count(), 4);
-    await page.getByRole("button", { name: "概览", exact: true }).click();
+    await demoSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
+    const projectOverview = page.locator(".settings-section").last();
+    assert.equal(await projectOverview.getByText("Project 配置", { exact: true }).count(), 1);
+    assert.equal(await projectOverview.getByText("全局配置", { exact: true }).count(), 0);
     assert.equal(await page.getByRole("button", { name: "重新读取", exact: true }).count(), 0);
     assert.equal(await page.getByRole("button", { name: "保存", exact: true }).count(), 0);
-    await page.getByRole("button", { name: "存储", exact: true }).click();
+    await demoSettingsNav.getByRole("button", { name: "参与者配置", exact: true }).click();
     await page.getByRole("button", { name: "保存", exact: true }).click();
 
     await page.getByRole("heading", { name: "确认配置变更" }).waitFor();
@@ -71,7 +95,6 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.match(await page.locator("#settings-status").textContent() ?? "", /没有未保存修改/);
     assert.match(await page.locator("#settings-status").textContent() ?? "", /错误 0/);
 
-    await page.getByRole("button", { name: "参与者配置", exact: true }).click();
     await page.getByRole("button", { name: "启用参与者配置" }).click();
     assert.equal(await page.getByText("执行者", { exact: true }).count(), 1);
     assert.equal(await page.getByText("Runner", { exact: true }).count(), 0);
@@ -125,7 +148,25 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.ok(promptBox && promptBox.width > idBox.width * 2);
     await page.setViewportSize({ width: 390, height: 844 });
 
-    await page.getByRole("button", { name: "ACP Provider", exact: true }).click();
+    await globalSettingsNav.getByRole("button", { name: "常规", exact: true }).click();
+    await page.getByRole("combobox", { name: "工作语言" }).click();
+    await page.getByRole("option", { name: "English", exact: true }).click();
+    await demoSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
+    page.once("dialog", async dialog => {
+      assert.match(dialog.message(), /未保存修改/);
+      await dialog.dismiss();
+    });
+    await page.locator("#project-select").click();
+    await page.getByRole("option", { name: "beta", exact: true }).click();
+    assert.equal((await page.locator("#project-select-value").textContent())?.trim(), "demo");
+    page.once("dialog", dialog => dialog.accept());
+    await page.locator("#project-select").click();
+    await page.getByRole("option", { name: "beta", exact: true }).click();
+    await page.getByRole("group", { name: "Project · beta", exact: true }).waitFor();
+    await globalSettingsNav.getByRole("button", { name: "常规", exact: true }).click();
+    assert.equal((await page.getByRole("combobox", { name: "工作语言" }).textContent())?.trim(), "English⌄");
+
+    await globalSettingsNav.getByRole("button", { name: "ACP Provider", exact: true }).click();
     let traexProvider = page.locator(".settings-provider").filter({ hasText: "traex" }).first();
     await traexProvider.locator("summary").click();
     assert.equal(await page.getByRole("button", { name: "添加 Provider", exact: true }).count(), 0);
@@ -154,6 +195,9 @@ test("Settings browser preserves omitted sections and stays responsive", async (
 
     const codexProvider = page.locator(".settings-provider").filter({ hasText: "codex" }).first();
     await codexProvider.locator("summary").click();
+    const codexReset = codexProvider.getByRole("button", { name: "恢复默认值", exact: true });
+    assert.equal(await codexReset.isDisabled(), true);
+    assert.match(await codexReset.getAttribute("title") ?? "", /beta.*Beta reviewer/);
     assert.equal(
       await codexProvider.locator(".settings-provider-preview").textContent(),
       "实际启动：'CODEX_CONFIG={\"model\":\"<参与者模型>\"}' NO_BROWSER=1 "
@@ -185,21 +229,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
 
 test("Settings browser shows an inline error for an invalid operator token", async () => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-settings-token-browser-"));
-  const configPath = join(dir, "config.json");
-  await writeFile(configPath, `${JSON.stringify({
-    memoryRoot: "memory",
-    view: { host: "0.0.0.0", port: 30002 }
-  }, null, 2)}\n`);
-  await Promise.all([
-    mkdir(join(dir, "memory", "procedures"), { recursive: true }),
-    mkdir(join(dir, "memory", "schemas"), { recursive: true }),
-    mkdir(join(dir, "memory", "concepts"), { recursive: true }),
-    mkdir(join(dir, "memory", "statements"), { recursive: true }),
-    mkdir(join(dir, "reviews"), { recursive: true }),
-    mkdir(join(dir, "runs"), { recursive: true })
-  ]);
-
-  const config = await readConfigAt(configPath);
+  const config = await settingsConfigFixture(dir, "0.0.0.0");
   const settingsToken = "correct-settings-token";
   const server = createViewServer(config, { settingsToken });
   await new Promise<void>((resolve, reject) => {
@@ -247,3 +277,82 @@ test("Settings browser shows an inline error for an invalid operator token", asy
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+async function settingsConfigFixture(dir: string, host: string): Promise<MemsphereConfig> {
+  const home = join(dir, "home");
+  const projectRoot = join(home, "projects", "demo");
+  const betaRoot = join(home, "projects", "beta");
+  const memoryRoot = join(projectRoot, "memory");
+  await Promise.all([
+    mkdir(join(memoryRoot, "procedures"), { recursive: true }),
+    mkdir(join(memoryRoot, "schemas"), { recursive: true }),
+    mkdir(join(memoryRoot, "concepts"), { recursive: true }),
+    mkdir(join(memoryRoot, "statements"), { recursive: true }),
+    mkdir(join(projectRoot, "reviews"), { recursive: true }),
+    mkdir(join(projectRoot, "runs"), { recursive: true }),
+    mkdir(join(projectRoot, "archives"), { recursive: true }),
+    mkdir(join(betaRoot, "memory", "concepts"), { recursive: true }),
+    mkdir(join(betaRoot, "reviews"), { recursive: true }),
+    mkdir(join(betaRoot, "runs"), { recursive: true }),
+    mkdir(join(betaRoot, "archives"), { recursive: true })
+  ]);
+  await writeFile(join(home, "config.json"), `${JSON.stringify(
+    {
+      ...(host === "127.0.0.1" ? {} : { view: { host, port: 30002 } }),
+      acp_providers: { codex: { idle_timeout_ms: 90000 } }
+    },
+    null,
+    2
+  )}\n`);
+  await writeFile(join(projectRoot, "config.json"), `${JSON.stringify({
+    store: { type: "managed", branch: "master", published_revision: "abc123" }
+  }, null, 2)}\n`);
+  await Promise.all([
+    writeFile(join(projectRoot, "project.json"), `${JSON.stringify({
+      format_version: 1,
+      name: "demo",
+      created_at: "2026-08-18T00:00:00.000Z"
+    }, null, 2)}\n`),
+    writeFile(join(betaRoot, "project.json"), `${JSON.stringify({
+      format_version: 1,
+      name: "beta",
+      created_at: "2026-08-18T00:00:00.000Z"
+    }, null, 2)}\n`),
+    writeFile(join(betaRoot, "config.json"), `${JSON.stringify({
+      store: { type: "managed", branch: "master", published_revision: "beta123" },
+      control_plane: {
+        runner: { permissions: [] },
+        actors: {
+          reviewer: {
+            kind: "agent",
+            name: "Beta reviewer",
+            permissions: ["artifact.read"],
+            agent: { provider: "codex" }
+          }
+        }
+      }
+    }, null, 2)}\n`),
+    writeFile(join(home, "registry.json"), `${JSON.stringify({
+      format_version: 1,
+      projects: { demo: { root: projectRoot }, beta: { root: betaRoot } },
+      workspaces: {}
+    }, null, 2)}\n`)
+  ]);
+  return {
+    configPath: join(projectRoot, "config.json"),
+    scopeRoot: projectRoot,
+    homeRoot: home,
+    language: "zh-CN",
+    memoryRoot,
+    reviewsRoot: join(projectRoot, "reviews"),
+    runsRoot: join(projectRoot, "runs"),
+    archiveRoot: join(projectRoot, "archives"),
+    debug: { agentReview: false, root: join(home, ".runtime", "debug") },
+    view: { host, port: 30002 },
+    project: {
+      name: "demo",
+      store: { type: "managed", branch: "master", published_revision: "abc123" },
+      mounted: []
+    }
+  };
+}

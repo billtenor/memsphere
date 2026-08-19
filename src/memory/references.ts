@@ -11,7 +11,11 @@ import type {
   StaticSchemaField,
   StatementNode
 } from "./ast.js";
-import { isMemoryKind, type MemoryKind } from "./kinds.js";
+import {
+  canonicalMemoryReference,
+  normalizeMemoryName,
+  parseLogicalMemoryReference
+} from "./logical-reference.js";
 import type { MemoryFile } from "./store.js";
 
 export type MemoryReferenceIssue = {
@@ -31,17 +35,24 @@ type ReferenceEdge = {
 
 export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryReferenceIssue[] {
   const issues: MemoryReferenceIssue[] = [];
-  const byReference = new Map<string, MemoryFile>();
+  const byReference = new Map<string, Set<string>>();
   const edges: ReferenceEdge[] = [];
 
   for (const file of files) {
-    const reference = memoryReference(file.kind, file.entity);
+    const reference = canonicalMemoryReference(file.kind, file.entity.names[0] ?? "");
     if (!reference) continue;
-    byReference.set(reference, file);
+    for (const rawName of file.entity.names) {
+      const name = normalizeMemoryName(rawName);
+      if (!name) continue;
+      const aliasReference = canonicalMemoryReference(file.kind, name)!;
+      const matches = byReference.get(aliasReference) ?? new Set<string>();
+      matches.add(reference);
+      byReference.set(aliasReference, matches);
+    }
   }
 
   for (const file of files) {
-    const source = memoryReference(file.kind, file.entity);
+    const source = canonicalMemoryReference(file.kind, file.entity.names[0] ?? "");
     if (!source) continue;
     edges.push(...collectReferenceEdges(file.entity, source, file.path));
   }
@@ -55,7 +66,7 @@ export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryRe
       });
       continue;
     }
-    const parsed = parseLogicalReference(edge.target);
+    const parsed = parseLogicalMemoryReference(edge.target);
     if (!parsed) {
       issues.push({
         path: edge.filePath,
@@ -70,15 +81,20 @@ export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryRe
       });
       continue;
     }
-    if (!byReference.has(edge.target)) {
+    const targetReference = canonicalMemoryReference(parsed.kind, parsed.name)!;
+    const targets = byReference.get(targetReference);
+    if (!targets || targets.size === 0) {
       issues.push({
         path: edge.filePath,
         message: `${edge.sourcePath}: !ref target "${edge.target}" was not found`
       });
       continue;
     }
+    // Catalog validation reports the conflicting name. Do not choose an
+    // arbitrary canonical target and derive misleading dependency cycles.
+    if (targets.size > 1) continue;
     const outgoing = graph.get(edge.source) ?? [];
-    outgoing.push(edge);
+    outgoing.push({ ...edge, target: [...targets][0] });
     graph.set(edge.source, outgoing);
   }
 
@@ -304,18 +320,4 @@ function detectReferenceCycles(graph: ReadonlyMap<string, readonly ReferenceEdge
 
   for (const reference of graph.keys()) visit(reference);
   return issues;
-}
-
-function memoryReference(kind: MemoryKind, entity: MemoryEntity): string | undefined {
-  const name = entity.names[0]?.trim();
-  return name ? `${kind}/${name}` : undefined;
-}
-
-function parseLogicalReference(input: string): { kind: MemoryKind; name: string } | undefined {
-  const separator = input.indexOf("/");
-  if (separator <= 0) return undefined;
-  const kind = input.slice(0, separator);
-  const name = input.slice(separator + 1).trim();
-  if (!isMemoryKind(kind) || !name) return undefined;
-  return { kind, name };
 }

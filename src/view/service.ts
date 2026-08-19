@@ -36,7 +36,7 @@ export type ViewServiceDependencies = {
 };
 
 export function viewServiceStatePath(config: MemsphereConfig): string {
-  return join(config.scopeRoot, stateFileName);
+  return join(config.homeRoot ?? config.scopeRoot, ".runtime", stateFileName);
 }
 
 export async function readViewServiceState(statePath: string): Promise<ViewServiceState | undefined> {

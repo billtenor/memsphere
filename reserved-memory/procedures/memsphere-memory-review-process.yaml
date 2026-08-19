@@ -23,7 +23,7 @@ flow:
       name: Review 处理请求
       format: markdown
   - !action
-    action: 根据当前工程 reviewsRoot 定位并读取 review YAML，确认 source、target、memoryRoot、snapshots、comments 和 status。
+    action: 根据当前 Primary Project 的 reviews 目录定位并读取 review YAML，确认 source、target、Memory 快照、comments 和 status。
     actor: agent
     asserts:
       - 必须保留 comment id、body、snapshot、location 等原始内容。
@@ -54,7 +54,7 @@ flow:
       name: Review processing 状态
       format: markdown
   - !action
-    action: 按目标 Memory 对 comments 分组，根据 target.path 定位并读取当前工程 memoryRoot 中的当前 Memory YAML。
+    action: 按目标 Memory 对 comments 分组，根据 target.path 定位当前 Primary Project 的 Memory；Managed Project 必须先创建 ChangeSet 并读取 Workspace 候选 YAML。
     actor: agent
     asserts:
       - snapshot、target、location 和 hash 只用于定位和理解 comment，不得把 snapshot 当作修改目标。

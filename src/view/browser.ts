@@ -43,10 +43,25 @@ export const browserHtml = String.raw`<!doctype html>
     .review-resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--line); transition: background 120ms ease, width 120ms ease; }
     .review-resizer:hover::before, .review-resizer:focus-visible::before, body.review-resizing .review-resizer::before { width: 2px; background: var(--accent); }
     .brand, .review-head, .toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-    .sidebar-tools { display: flex; justify-content: flex-end; min-height: 30px; margin-bottom: 6px; }
-    .brand-settings { border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); padding: 4px 7px; }
+    .brand { align-items: center; min-width: 0; }
+    .brand-settings { display: inline-grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); padding: 0; font-size: 20px; line-height: 1; }
     .brand-settings:hover { background: var(--soft); color: var(--text); }
+    .brand-settings:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .brand-settings.active { border-color: #b8cbc7; background: var(--accent-soft); color: #173f3c; font-weight: 700; }
+    .project-switcher { display: grid; gap: 6px; min-width: 0; margin-top: 14px; }
+    .project-label { color: var(--muted); font-size: 11px; font-weight: 700; }
+    .project-select-wrap { position: relative; min-width: 0; }
+    .project-select { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; min-width: 0; height: 38px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); padding: 0 10px; outline: none; text-align: left; }
+    .project-select:hover { border-color: #b8cbc7; background: #f7f8f4; }
+    .project-select:focus-visible, .project-select[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(40, 108, 103, .12); }
+    .project-select-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .project-select-caret { width: 7px; height: 7px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg) translate(-1px, 1px); transform-origin: center; transition: transform 120ms ease; }
+    .project-select[aria-expanded="true"] .project-select-caret { transform: rotate(225deg) translate(-1px, 1px); }
+    .project-select-menu { position: absolute; z-index: 30; top: calc(100% + 4px); right: 0; left: 0; max-height: 240px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); box-shadow: var(--shadow); padding: 4px; }
+    .project-select-menu[hidden] { display: none; }
+    .project-select-option { display: block; width: 100%; border: 0; border-radius: 4px; background: transparent; color: var(--text); padding: 8px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+    .project-select-option:hover, .project-select-option:focus-visible { background: var(--soft); outline: none; }
+    .project-select-option[aria-selected="true"] { background: var(--accent-soft); color: #173f3c; font-weight: 700; }
     .review-actions { display: flex; gap: 8px; align-items: flex-start; }
     .review-toggle, .review-close { display: inline-flex; }
     .review-toggle[hidden] { display: none; }
@@ -63,13 +78,9 @@ export const browserHtml = String.raw`<!doctype html>
     .search:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(40, 108, 103, .12); }
     .kind { margin: 14px 0 6px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
     .memory-list, .review-list, .comment-list, .flow, .task-list, .event-list { display: grid; gap: 8px; }
-    .memory-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
     .memory-button, .review-card, .task-card { width: 100%; text-align: left; border: 0; border-radius: 6px; background: transparent; color: var(--text); padding: 8px 9px; }
     .memory-button:hover, .review-card:hover, .task-card:hover { background: #eceee8; }
     .memory-button.active, .review-card.active, .task-card.active { background: var(--accent-soft); color: #173f3c; font-weight: 700; }
-    .memory-toggle { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); padding: 4px 7px; font-size: 12px; line-height: 1.2; min-width: 52px; }
-    .memory-toggle:hover { border-color: var(--accent); color: var(--accent); }
-    .memory-toggle.imported { color: var(--ok); border-color: #b8d8c5; background: #edf6f0; }
     .memory-options { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; }
     .memory-option { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
     .memory-option input { width: 15px; height: 15px; accent-color: var(--accent); }
@@ -361,7 +372,17 @@ export const browserHtml = String.raw`<!doctype html>
     .artifact-review-target-located { background: #edf6f3; box-shadow: 0 0 0 3px rgba(40, 108, 103, .2); }
     .artifact-review-locate-failure { margin-bottom: 10px; }
     .artifact-review-comment-context { margin-top: 7px; padding: 7px 8px; border-left: 2px solid var(--line); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
-    .settings-nav { display: grid; gap: 4px; margin-top: 18px; }
+    .settings-nav { display: grid; gap: 10px; margin-top: 18px; }
+    .settings-nav-group { overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .settings-nav-group.active { border-color: #b8cbc7; }
+    .settings-nav-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 0; background: var(--soft); color: var(--muted); padding: 9px 10px; font-size: 11px; font-weight: 700; overflow-wrap: anywhere; text-align: left; text-transform: uppercase; }
+    .settings-nav-heading:hover { background: #eceee8; color: var(--text); }
+    .settings-nav-heading:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .settings-nav-group.active .settings-nav-heading { color: #173f3c; }
+    .settings-nav-caret { width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg) translate(-1px, 1px); transform-origin: center; transition: transform 120ms ease; }
+    .settings-nav-heading[aria-expanded="true"] .settings-nav-caret { transform: rotate(225deg) translate(-1px, 1px); }
+    .settings-nav-items { display: grid; gap: 2px; padding: 4px; }
+    .settings-nav-items[hidden] { display: none; }
     .settings-nav .memory-button { font-weight: 600; }
     .settings-layout { display: grid; gap: 16px; max-width: 1120px; }
     .settings-status { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -427,7 +448,7 @@ export const browserHtml = String.raw`<!doctype html>
     .settings-change-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
     .settings-change-list li { border-left: 3px solid var(--accent); padding: 7px 10px; background: #f3f5f0; overflow-wrap: anywhere; }
     .settings-token { max-width: 520px; }
-    body.settings-mode .search, body.settings-mode #expand, body.settings-mode #collapse, body.settings-mode #review-toggle { display: none; }
+    body.settings-mode .view-tabs, body.settings-mode .search, body.settings-mode #expand, body.settings-mode #collapse, body.settings-mode #review-toggle { display: none; }
     code { background: var(--soft); border-radius: 4px; padding: 1px 4px; }
     body.task-mode .search, body.task-mode #expand, body.task-mode #collapse { display: none; }
     body.review-drawer-open .shell { grid-template-columns: 300px minmax(0, 1fr) 8px var(--review-width); }
@@ -474,13 +495,21 @@ export const browserHtml = String.raw`<!doctype html>
 <body>
   <main class="shell">
     <aside class="sidebar">
-      <div class="sidebar-tools">
-        <button class="brand-settings" id="settings-tab" type="button" aria-label="设置" title="设置">设置</button>
-      </div>
       <div class="brand">
         <h1>memsphere</h1>
-        <span class="count" id="count">Loading</span>
+        <button class="brand-settings" id="settings-tab" type="button" aria-label="设置" title="设置">&#9881;</button>
       </div>
+      <div class="project-switcher">
+        <span class="project-label" id="project-select-label">Project</span>
+        <div class="project-select-wrap">
+          <button id="project-select" class="project-select" type="button" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="project-select-label project-select-value">
+            <span class="project-select-value" id="project-select-value">Loading</span>
+            <span class="project-select-caret" aria-hidden="true"></span>
+          </button>
+          <div id="project-select-menu" class="project-select-menu" role="listbox" aria-labelledby="project-select-label" hidden></div>
+        </div>
+      </div>
+      <span class="count" id="count">Loading</span>
       <div class="view-tabs">
         <button class="view-tab active" id="memory-tab" type="button">Memory</button>
         <button class="view-tab" id="task-tab" type="button">Task</button>
@@ -713,11 +742,10 @@ export const browserHtml = String.raw`<!doctype html>
       viewMode: ["memory", "task", "settings"].includes(localStorage.getItem(viewModeKey))
         ? localStorage.getItem(viewModeKey)
         : "memory",
+      lastContentViewMode: localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
       payload: null,
       memories: [],
       actorNames: {},
-      systemMemoryPaths: new Set(),
-      reservedMemories: [],
       filtered: [],
       hideSystemMemories: localStorage.getItem(hideSystemMemoriesKey) !== "false",
       selectedId: null,
@@ -755,6 +783,12 @@ export const browserHtml = String.raw`<!doctype html>
       reviewDrawerOpen: false,
       reviewPanelWidth: Number.parseFloat(localStorage.getItem(reviewPanelWidthKey) || "") || 380,
       settingsMeta: null,
+      settingsScope: "global",
+      settingsModules: { global: "overview", project: "overview" },
+      settingsScopes: {
+        global: { data: null, draft: null, errors: [], confirm: null, notice: "", loading: false },
+        project: { data: null, draft: null, errors: [], confirm: null, notice: "", loading: false }
+      },
       settingsData: null,
       settingsDraft: null,
       settingsErrors: [],
@@ -769,7 +803,10 @@ export const browserHtml = String.raw`<!doctype html>
       settingsProviderDetection: {},
       settingsProviderDetecting: false,
       settingsProviderAutoDetectionAttemptedRevision: "",
-      renderLine: 0
+      renderLine: 0,
+      projects: [],
+      currentProject: "",
+      settingsNavExpanded: { global: true, project: true }
     };
 
     function t(key) {
@@ -826,7 +863,10 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewReviewTab: document.getElementById("artifact-review-review-tab"),
       memoryTab: document.getElementById("memory-tab"),
       taskTab: document.getElementById("task-tab"),
-      settingsTab: document.getElementById("settings-tab")
+      settingsTab: document.getElementById("settings-tab"),
+      projectSelect: document.getElementById("project-select"),
+      projectSelectValue: document.getElementById("project-select-value"),
+      projectSelectMenu: document.getElementById("project-select-menu")
     };
 
     document.getElementById("expand").addEventListener("click", () => setAllSections(true));
@@ -844,7 +884,11 @@ export const browserHtml = String.raw`<!doctype html>
     el.artifactReviewModalResizer.title = t("resizeReview") + " · " + t("resetReviewWidth");
     el.memoryTab.addEventListener("click", () => setViewMode("memory"));
     el.taskTab.addEventListener("click", () => setViewMode("task"));
-    el.settingsTab.addEventListener("click", () => setViewMode("settings"));
+    el.settingsTab.addEventListener("click", () => {
+      setViewMode(state.viewMode === "settings" ? state.lastContentViewMode : "settings");
+    });
+    el.projectSelect.addEventListener("click", toggleProjectMenu);
+    el.projectSelect.addEventListener("keydown", handleProjectSelectKeydown);
     el.submitReview.addEventListener("click", () => runButtonAction(el.submitReview, submitReview));
     el.artifactReviewModalClose.addEventListener("click", closeArtifactReviewModal);
     el.artifactReviewSubmit.addEventListener("click", () => runButtonAction(el.artifactReviewSubmit, submitArtifactReview));
@@ -862,7 +906,11 @@ export const browserHtml = String.raw`<!doctype html>
       renderNav();
     });
     document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeProjectMenu();
       if (event.key === "Escape" && state.reviewDrawerOpen) setReviewDrawer(false);
+    });
+    document.addEventListener("click", (event) => {
+      if (!(event.target instanceof Element) || !event.target.closest(".project-select-wrap")) closeProjectMenu();
     });
     document.addEventListener("focusout", () => {
       setTimeout(() => {
@@ -892,11 +940,98 @@ export const browserHtml = String.raw`<!doctype html>
     }, 4000);
 
     async function loadAll() {
-      const requests = [loadMemories(), loadReservedMemories(), loadReviews(), loadRuns()];
+      await loadProjects();
+      const requests = [loadMemories(), loadReviews(), loadRuns()];
       if (state.viewMode === "settings") requests.push(loadSettings());
       await Promise.all(requests);
       ensureSelectedReview();
       renderAll();
+    }
+
+    async function loadProjects() {
+      const response = await fetch("/api/projects");
+      if (!response.ok) throw new Error(await response.text());
+      const payload = await response.json();
+      state.projects = (payload.projects || []).filter(project => !project.missing);
+      state.currentProject = payload.current || "";
+      el.projectSelectValue.textContent = state.currentProject || "No Project";
+      el.projectSelect.title = state.currentProject || "No Project";
+      el.projectSelectMenu.innerHTML = "";
+      for (const project of state.projects) {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "project-select-option";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", String(project.name === state.currentProject));
+        option.dataset.projectName = project.name;
+        option.textContent = project.name;
+        option.title = project.name;
+        option.addEventListener("click", () => {
+          closeProjectMenu();
+          if (project.name !== state.currentProject) selectProject(project.name).catch(renderFatalError);
+        });
+        el.projectSelectMenu.append(option);
+      }
+      el.projectSelect.disabled = state.projects.length === 0;
+    }
+
+    function toggleProjectMenu() {
+      if (el.projectSelect.disabled) return;
+      if (el.projectSelect.getAttribute("aria-expanded") === "true") closeProjectMenu();
+      else openProjectMenu();
+    }
+
+    function openProjectMenu(focusSelected = false) {
+      el.projectSelect.setAttribute("aria-expanded", "true");
+      el.projectSelectMenu.hidden = false;
+      if (!focusSelected) return;
+      const selected = el.projectSelectMenu.querySelector('[aria-selected="true"]')
+        || el.projectSelectMenu.querySelector(".project-select-option");
+      selected?.focus();
+    }
+
+    function closeProjectMenu() {
+      el.projectSelect.setAttribute("aria-expanded", "false");
+      el.projectSelectMenu.hidden = true;
+    }
+
+    function handleProjectSelectKeydown(event) {
+      if (!["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      openProjectMenu(true);
+    }
+
+    async function selectProject(name) {
+      stashSettingsScope();
+      const projectScope = state.settingsScopes.project;
+      const projectDirty = Boolean(
+        projectScope.data
+        && projectScope.draft
+        && JSON.stringify(projectScope.draft) !== JSON.stringify(projectScope.data.config)
+      );
+      if (projectDirty && !window.confirm("当前 Project 设置有未保存修改。放弃修改并切换 Project？")) {
+        return;
+      }
+      const response = await fetch("/api/projects/select", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      if (!response.ok) throw new Error(await response.text());
+      state.selectedId = null;
+      state.selectedTaskId = null;
+      state.selectedReviewId = null;
+      state.reviewSnapshots.clear();
+      state.settingsScopes.project = {
+        data: null,
+        draft: null,
+        errors: [],
+        confirm: null,
+        notice: "",
+        loading: false
+      };
+      if (state.settingsScope === "project") applySettingsScope("project");
+      await loadAll();
     }
 
     function renderFatalError(error) {
@@ -918,7 +1053,6 @@ export const browserHtml = String.raw`<!doctype html>
       state.payload = await response.json();
       state.memories = state.payload.memories;
       state.actorNames = state.payload.actorNames || {};
-      state.systemMemoryPaths = new Set(state.payload.systemMemoryPaths || []);
       state.byName = new Map();
       for (const memory of state.memories) {
         if (!memory.entity) continue;
@@ -926,12 +1060,6 @@ export const browserHtml = String.raw`<!doctype html>
       }
       applyFilter();
       if (!state.selectedId && state.filtered[0]) state.selectedId = state.filtered[0].id;
-    }
-
-    async function loadReservedMemories() {
-      const response = await fetch("/api/reserved-memories");
-      if (!response.ok) throw new Error(await response.text());
-      state.reservedMemories = (await response.json()).memories || [];
     }
 
     async function loadReviews() {
@@ -1048,34 +1176,97 @@ export const browserHtml = String.raw`<!doctype html>
       return response.json();
     }
 
-    async function loadSettings() {
+    async function loadSettings(options = {}) {
+      stashSettingsScope();
       state.settingsLoading = true;
       state.settingsNotice = "";
       try {
         const metaResponse = await fetch("/api/settings/meta");
         if (!metaResponse.ok) throw new Error(await metaResponse.text());
         state.settingsMeta = await metaResponse.json();
-        const response = await settingsFetch("/api/settings");
-        if (response.status === 401) {
-          state.settingsData = null;
-          state.settingsDraft = null;
-          state.settingsTokenError = state.settingsToken
-            ? "操作令牌不正确，请检查后重试。"
-            : "";
-          sessionStorage.removeItem(settingsTokenKey);
-          return;
+
+        const globalScope = state.settingsScopes.global;
+        if (!globalScope.data || options.forceScope === "global") {
+          const response = await settingsFetch("/api/settings/global");
+          if (response.status === 401) {
+            globalScope.data = null;
+            globalScope.draft = null;
+            state.settingsScopes.project.data = null;
+            state.settingsScopes.project.draft = null;
+            state.settingsTokenError = state.settingsToken
+              ? "操作令牌不正确，请检查后重试。"
+              : "";
+            sessionStorage.removeItem(settingsTokenKey);
+            applySettingsScope(state.settingsScope);
+            return;
+          }
+          if (!response.ok) throw new Error(await response.text());
+          globalScope.data = await response.json();
+          globalScope.draft = cloneSettingsValue(globalScope.data.config);
+          globalScope.errors = [];
+          globalScope.confirm = null;
+          globalScope.notice = "";
         }
-        if (!response.ok) throw new Error(await response.text());
-        state.settingsData = await response.json();
-        state.settingsDraft = cloneSettingsValue(state.settingsData.config);
-        restoreSettingsProviderDetection();
+
+        const projectScope = state.settingsScopes.project;
+        const projectChanged = projectScope.data?.projectName !== state.currentProject;
+        if (!state.currentProject) {
+          Object.assign(projectScope, { data: null, draft: null, errors: [], confirm: null, notice: "" });
+        } else if (!projectScope.data || projectChanged || options.forceScope === "project") {
+          const response = await settingsFetch("/api/settings/project");
+          if (response.status === 404) {
+            Object.assign(projectScope, { data: null, draft: null, errors: [], confirm: null, notice: "" });
+          } else {
+            if (!response.ok) throw new Error(await response.text());
+            projectScope.data = await response.json();
+            projectScope.draft = cloneSettingsValue(projectScope.data.config);
+            projectScope.errors = [];
+            projectScope.confirm = null;
+            projectScope.notice = "";
+          }
+        }
+
         state.settingsTokenError = "";
         if (state.settingsToken) sessionStorage.setItem(settingsTokenKey, state.settingsToken);
-        state.settingsErrors = [];
-        state.settingsConfirm = null;
+        applySettingsScope(state.settingsScope);
+        if (state.settingsScope === "global") restoreSettingsProviderDetection();
       } finally {
         state.settingsLoading = false;
       }
+    }
+
+    function stashSettingsScope() {
+      const scope = state.settingsScopes[state.settingsScope];
+      scope.data = state.settingsData;
+      scope.draft = state.settingsDraft;
+      scope.errors = state.settingsErrors;
+      scope.confirm = state.settingsConfirm;
+      scope.notice = state.settingsNotice;
+      scope.loading = state.settingsLoading;
+      state.settingsModules[state.settingsScope] = state.settingsModule;
+    }
+
+    function applySettingsScope(scopeName) {
+      const scope = state.settingsScopes[scopeName];
+      state.settingsScope = scopeName;
+      state.settingsData = scope.data;
+      state.settingsDraft = scope.draft;
+      state.settingsErrors = scope.errors;
+      state.settingsConfirm = scope.confirm;
+      state.settingsNotice = scope.notice;
+      state.settingsModule = state.settingsModules[scopeName];
+    }
+
+    function activateSettingsDestination(scopeName, moduleName) {
+      if (scopeName !== state.settingsScope) {
+        stashSettingsScope();
+        applySettingsScope(scopeName);
+      }
+      state.settingsModule = moduleName;
+      state.settingsModules[scopeName] = moduleName;
+      state.settingsNavExpanded[scopeName] = true;
+      state.settingsConfirm = null;
+      renderAll();
     }
 
     function settingsFetch(url, options = {}) {
@@ -1093,32 +1284,57 @@ export const browserHtml = String.raw`<!doctype html>
       el.count.textContent = "";
       const nav = document.createElement("div");
       nav.className = "settings-nav";
-      const modules = [
-        ["overview", "概览"],
-        ["general", "常规"],
-        ["storage", "存储"],
-        ["view", "View 服务"],
-        ["providers", "ACP Provider"],
-        ["participants", "参与者配置"]
+      const groups = [
+        ["global", "Memsphere", [["overview", "概览"], ["general", "常规"], ["view", "View 服务"], ["providers", "ACP Provider"]]],
+        ["project", "Project · " + state.currentProject, [["overview", "概览"], ["participants", "参与者配置"]]]
       ];
-      for (const [id, label] of modules) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "memory-button" + (state.settingsModule === id ? " active" : "");
-        button.textContent = label;
-        button.addEventListener("click", () => {
-          state.settingsModule = id;
-          state.settingsConfirm = null;
-          renderAll();
+      for (const [scopeName, headingText, modules] of groups) {
+        if (scopeName === "project" && !state.currentProject) continue;
+        const group = document.createElement("div");
+        group.className = "settings-nav-group" + (state.settingsScope === scopeName ? " active" : "");
+        group.setAttribute("role", "group");
+        const heading = document.createElement("button");
+        heading.type = "button";
+        heading.className = "settings-nav-heading";
+        heading.id = "settings-nav-" + scopeName;
+        heading.setAttribute("aria-expanded", String(state.settingsNavExpanded[scopeName]));
+        const headingLabel = document.createElement("span");
+        headingLabel.textContent = headingText;
+        const caret = document.createElement("span");
+        caret.className = "settings-nav-caret";
+        caret.setAttribute("aria-hidden", "true");
+        heading.append(headingLabel, caret);
+        group.setAttribute("aria-labelledby", heading.id);
+        const items = document.createElement("div");
+        items.className = "settings-nav-items";
+        items.hidden = !state.settingsNavExpanded[scopeName];
+        heading.addEventListener("click", () => {
+          state.settingsNavExpanded[scopeName] = !state.settingsNavExpanded[scopeName];
+          renderSettingsNav();
         });
-        nav.append(button);
+        for (const [id, label] of modules) {
+          const button = document.createElement("button");
+          button.type = "button";
+          const active = state.settingsScope === scopeName && state.settingsModule === id;
+          button.className = "memory-button" + (active ? " active" : "");
+          button.textContent = label;
+          if (active) button.setAttribute("aria-current", "page");
+          button.addEventListener("click", () => activateSettingsDestination(scopeName, id));
+          items.append(button);
+        }
+        group.append(heading, items);
+        nav.append(group);
       }
       el.nav.append(nav);
     }
 
     function renderSettings() {
-      el.title.textContent = "配置中心";
-      el.subtitle.textContent = state.settingsData?.configPath || "管理当前 View 使用的配置";
+      el.title.textContent = state.settingsScope === "global"
+        ? "Memsphere 设置"
+        : state.currentProject ? state.currentProject + " 项目设置" : "Project 设置";
+      el.subtitle.textContent = state.settingsScope === "global"
+        ? "管理 Memsphere Home 全局配置"
+        : state.currentProject ? "管理当前 Project 配置" : "当前没有可管理的 Project";
       el.detail.className = "";
       el.detail.innerHTML = "";
       const layout = document.createElement("div");
@@ -1129,12 +1345,14 @@ export const browserHtml = String.raw`<!doctype html>
         layout.append(settingsEmpty("正在读取配置..."));
         return;
       }
-      if (state.settingsMeta?.requiresToken && !state.settingsData) {
+      if (state.settingsMeta?.requiresToken && !state.settingsScopes.global.data) {
         layout.append(renderSettingsToken());
         return;
       }
       if (!state.settingsData || !state.settingsDraft) {
-        layout.append(settingsEmpty("配置尚未加载。"));
+        layout.append(settingsEmpty(state.settingsScope === "project"
+          ? "当前没有可管理的 Project。Memsphere 全局设置仍然可用。"
+          : "配置尚未加载。"));
         return;
       }
 
@@ -1150,12 +1368,13 @@ export const browserHtml = String.raw`<!doctype html>
         return;
       }
       if (state.settingsModule === "general") layout.append(renderGeneralSettings());
-      else if (state.settingsModule === "storage") layout.append(renderStorageSettings());
       else if (state.settingsModule === "view") layout.append(renderViewSettings());
       else if (state.settingsModule === "providers") layout.append(renderProviderSettings());
       else if (state.settingsModule === "participants") layout.append(renderParticipantSettings());
       else layout.append(renderSettingsOverview());
-      if (state.settingsModule !== "overview") layout.append(renderSettingsActions());
+      if (["general", "view", "providers", "participants"].includes(state.settingsModule)) {
+        layout.append(renderSettingsActions());
+      }
     }
 
     function settingsInlineCode(value) {
@@ -1210,8 +1429,12 @@ export const browserHtml = String.raw`<!doctype html>
       status.id = "settings-status";
       status.className = "settings-status";
       status.append(pill("磁盘配置 " + shortRevision(state.settingsData.diskRevision), false, "strong"));
-      status.append(pill("运行配置 " + shortRevision(state.settingsData.runningRevision)));
-      status.append(pill(state.settingsData.restartRequired ? "待重启生效" : "已生效", false, state.settingsData.restartRequired ? "warn" : "done"));
+      if (state.settingsScope === "global") {
+        status.append(pill("运行配置 " + shortRevision(state.settingsData.runningRevision)));
+        status.append(pill(state.settingsData.restartRequired ? "待重启生效" : "已生效", false, state.settingsData.restartRequired ? "warn" : "done"));
+      } else {
+        status.append(pill("Project 配置", false, "done"));
+      }
       status.append(pill(settingsIsDirty() ? "未保存修改" : "没有未保存修改", false, settingsIsDirty() ? "warn" : "done"));
       status.append(pill("错误 " + state.settingsErrors.length, false, state.settingsErrors.length ? "warn" : ""));
       return status;
@@ -1224,11 +1447,38 @@ export const browserHtml = String.raw`<!doctype html>
       title.textContent = "概览";
       const grid = document.createElement("div");
       grid.className = "settings-grid";
-      grid.append(
-        settingsReadOnly("配置文件", state.settingsData.configPath),
-        settingsReadOnly("配置作用域", state.settingsData.scopeRoot)
-      );
+      if (state.settingsScope === "global") {
+        const projectCount = state.projects.length;
+        grid.append(
+          settingsReadOnly("Scope", "Memsphere Home"),
+          settingsReadOnly("全局配置", state.settingsData.configPath),
+          settingsReadOnly("已注册 Project", String(projectCount)),
+          settingsReadOnly("ACP Provider", String(state.settingsData.acpProviderCatalog?.length || 0))
+        );
+      } else {
+        grid.append(
+          settingsReadOnly("Project", state.settingsData.projectName || "-"),
+          settingsReadOnly("Project 配置", state.settingsData.configPath),
+          settingsReadOnly("Store 类型", state.settingsData.store?.type || "-"),
+          settingsReadOnly("Store", JSON.stringify(state.settingsData.store || {}))
+        );
+      }
       section.append(title, grid);
+      if (state.settingsScope === "project") {
+        const storageTitle = document.createElement("h4");
+        storageTitle.textContent = "存储位置";
+        const storageGrid = document.createElement("div");
+        storageGrid.className = "settings-grid";
+        for (const [key, label] of [
+          ["memoryRoot", "Memory 根目录"],
+          ["reviewsRoot", "Review 根目录"],
+          ["runsRoot", "Run 根目录"],
+          ["archiveRoot", "Archive 根目录"]
+        ]) {
+          storageGrid.append(settingsReadOnly(label, state.settingsData.resolvedPaths[key]));
+        }
+        section.append(storageTitle, storageGrid);
+      }
       return section;
     }
 
@@ -1250,25 +1500,6 @@ export const browserHtml = String.raw`<!doctype html>
           state.settingsDraft.language = value;
         }
       ));
-      section.append(title, grid);
-      return section;
-    }
-
-    function renderStorageSettings() {
-      const section = document.createElement("section");
-      section.className = "settings-section";
-      const title = document.createElement("h3");
-      title.textContent = "存储";
-      const grid = document.createElement("div");
-      grid.className = "settings-grid";
-      for (const [key, label] of [
-        ["memoryRoot", "Memory 根目录"],
-        ["reviewsRoot", "Review 根目录"],
-        ["runsRoot", "Run 根目录"],
-        ["archiveRoot", "Archive 根目录"]
-      ]) {
-        grid.append(settingsOptionalPathField(key, label));
-      }
       section.append(title, grid);
       return section;
     }
@@ -1326,7 +1557,7 @@ export const browserHtml = String.raw`<!doctype html>
         enable.className = "btn";
         enable.textContent = "启用参与者配置";
         enable.addEventListener("click", () => {
-          state.settingsDraft.control_plane = { runner: { permissions: [] }, acp_providers: {}, actors: {} };
+          state.settingsDraft.control_plane = { runner: { permissions: [] }, actors: {} };
           renderAll();
         });
         heading.append(headingCopy);
@@ -1373,19 +1604,6 @@ export const browserHtml = String.raw`<!doctype html>
       subtitle.className = "settings-section-subtitle";
       subtitle.textContent = "管理 Agent CLI、启动参数与安装检测；认证仍由各 Provider 自身管理。";
       headingCopy.append(title, subtitle);
-      if (!state.settingsDraft.control_plane) {
-        const enable = document.createElement("button");
-        enable.type = "button";
-        enable.className = "btn";
-        enable.textContent = "启用 ACP Provider 配置";
-        enable.addEventListener("click", () => {
-          state.settingsDraft.control_plane = { runner: { permissions: [] }, acp_providers: {}, actors: {} };
-          renderAll();
-        });
-        heading.append(headingCopy, enable);
-        section.append(heading);
-        return section;
-      }
       const actions = document.createElement("div");
       actions.className = "settings-provider-status";
       const detect = document.createElement("button");
@@ -1459,19 +1677,19 @@ export const browserHtml = String.raw`<!doctype html>
       resetOrDelete.type = "button";
       resetOrDelete.className = "btn" + (entry.builtin ? "" : " danger");
       resetOrDelete.textContent = entry.builtin ? "恢复默认值" : "删除";
-      resetOrDelete.disabled = entry.builtin ? !entry.explicit : refs.length > 0;
-      resetOrDelete.title = !entry.builtin && refs.length
+      resetOrDelete.disabled = refs.length > 0 || (entry.builtin && !entry.explicit);
+      resetOrDelete.title = refs.length
         ? "以下参与者仍在引用：" + refs.join("、")
         : entry.builtin && !entry.explicit ? "当前正在使用系统默认值" : "";
       resetOrDelete.addEventListener("click", () => {
-        delete state.settingsDraft.control_plane.acp_providers?.[entry.id];
+        delete state.settingsDraft.acp_providers?.[entry.id];
         state.settingsProviderDetection[entry.id] = { status: "pending_redetect" };
         renderAll();
       });
       const markProviderExplicit = () => {
         if (!entry.builtin) return;
-        resetOrDelete.disabled = false;
-        resetOrDelete.title = "";
+        resetOrDelete.disabled = refs.length > 0;
+        resetOrDelete.title = refs.length ? "以下参与者仍在引用：" + refs.join("、") : "";
       };
       bodyActions.append(resetOrDelete);
       body.append(bodyActions);
@@ -1519,7 +1737,7 @@ export const browserHtml = String.raw`<!doctype html>
           ensureSettingsProvider(entry.id, provider.type).args = value.split(/\r?\n/).filter(line => line.length > 0);
           markProviderExplicit();
           invalidateSettingsProviderDetection(entry.id);
-        }, "control_plane.acp_providers." + entry.id + ".args"),
+        }, "acp_providers." + entry.id + ".args"),
         settingsTextArea("Env（每行 KEY=VALUE，不允许凭据）", Object.entries(provider.env || {})
           .map(([key, value]) => key + "=" + value).join("\n"), value => {
           ensureSettingsProvider(entry.id, provider.type).env = Object.fromEntries(value.split(/\r?\n/)
@@ -1527,7 +1745,7 @@ export const browserHtml = String.raw`<!doctype html>
             .map(line => [line.slice(0, line.indexOf("=")).trim(), line.slice(line.indexOf("=") + 1)]));
           markProviderExplicit();
           invalidateSettingsProviderDetection(entry.id);
-        }, "control_plane.acp_providers." + entry.id + ".env")
+        }, "acp_providers." + entry.id + ".env")
       );
       const preview = document.createElement("div");
       preview.className = "settings-provider-preview mono";
@@ -1670,7 +1888,7 @@ export const browserHtml = String.raw`<!doctype html>
       reload.type = "button";
       reload.className = "btn";
       reload.textContent = "重新读取";
-      reload.addEventListener("click", () => loadSettings().then(renderAll).catch(renderFatalError));
+      reload.addEventListener("click", () => loadSettings({ forceScope: state.settingsScope }).then(renderAll).catch(renderFatalError));
       const save = document.createElement("button");
       save.type = "button";
       save.className = "btn primary";
@@ -1683,7 +1901,7 @@ export const browserHtml = String.raw`<!doctype html>
     async function validateSettings() {
       state.settingsErrors = [];
       state.settingsNotice = "";
-      const response = await settingsFetch("/api/settings/validate", {
+      const response = await settingsFetch("/api/settings/" + state.settingsScope + "/validate", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -1754,7 +1972,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function saveSettings() {
-      const response = await settingsFetch("/api/settings", {
+      const response = await settingsFetch("/api/settings/" + state.settingsScope, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -1783,6 +2001,7 @@ export const browserHtml = String.raw`<!doctype html>
         ? "配置已保存。请执行 memsphere view restart；重启后地址："
           + settingsViewUrl(payload.config.view || payload.defaults.view) + "。"
         : "配置已保存并生效。";
+      stashSettingsScope();
       renderAll();
     }
 
@@ -2052,7 +2271,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function defaultSettingsProvider(type) {
-      const definition = (state.settingsData?.acpProviderCatalog || [])
+      const definition = (state.settingsScopes.global.data?.acpProviderCatalog || [])
         .find(candidate => candidate.type === type);
       const instance = definition?.defaultInstance || {
         type,
@@ -2075,9 +2294,8 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function settingsProviderEntries() {
-      if (!state.settingsDraft?.control_plane) return [];
-      const explicit = state.settingsDraft.control_plane.acp_providers || {};
-      const catalog = state.settingsData?.acpProviderCatalog || [];
+      const explicit = state.settingsScopes.global.draft?.acp_providers || {};
+      const catalog = state.settingsScopes.global.data?.acpProviderCatalog || [];
       return catalog.map(definition => ({
         id: definition.type,
         builtin: true,
@@ -2093,7 +2311,8 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function ensureSettingsProvider(id) {
-      const providers = state.settingsDraft.control_plane.acp_providers ||= {};
+      const globalDraft = state.settingsScopes.global.draft;
+      const providers = globalDraft.acp_providers ||= {};
       if (!providers[id]) {
         const defaults = defaultSettingsProvider(id);
         providers[id] = {
@@ -2108,9 +2327,8 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function settingsProviderReferences(providerId) {
-      return Object.entries(state.settingsDraft.control_plane?.actors || {})
-        .filter(([, actor]) => actor.kind === "agent" && (actor.agent?.provider || "traex") === providerId)
-        .map(([id, actor]) => actor.name || id);
+      return (state.settingsScopes.global.data?.providerReferences?.[providerId] || [])
+        .map(reference => reference.projectName + " / " + (reference.actorName || reference.actorId));
     }
 
     function invalidateSettingsProviderDetection(id) {
@@ -2181,12 +2399,13 @@ export const browserHtml = String.raw`<!doctype html>
       state.settingsNotice = "";
       renderAll();
       try {
-        const response = await settingsFetch("/api/settings/acp-providers/detect", {
+        const globalScope = state.settingsScopes.global;
+        const response = await settingsFetch("/api/settings/global/acp-providers/detect", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            expectedRevision: state.settingsData.diskRevision,
-            config: state.settingsDraft
+            expectedRevision: globalScope.data.diskRevision,
+            config: globalScope.draft
           })
         });
         const payload = await response.json();
@@ -2210,10 +2429,11 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function persistSettingsProviderDetection() {
-      if (!state.settingsData?.diskRevision) return;
+      const globalScope = state.settingsScopes.global;
+      if (!globalScope.data?.diskRevision) return;
       localStorage.setItem(settingsProviderDetectionStorageKey(), JSON.stringify({
-        diskRevision: state.settingsData.diskRevision,
-        providerConfig: JSON.stringify(state.settingsDraft.control_plane?.acp_providers || {}),
+        diskRevision: globalScope.data.diskRevision,
+        providerConfig: JSON.stringify(globalScope.draft.acp_providers || {}),
         detectedAt: Date.now(),
         results: state.settingsProviderDetection
       }));
@@ -2223,9 +2443,10 @@ export const browserHtml = String.raw`<!doctype html>
       const cached = readStoredObject(settingsProviderDetectionStorageKey(), {});
       const fresh = Number.isFinite(cached.detectedAt)
         && Date.now() - cached.detectedAt < 24 * 60 * 60 * 1000;
-      const providerConfig = JSON.stringify(state.settingsDraft?.control_plane?.acp_providers || {});
+      const globalScope = state.settingsScopes.global;
+      const providerConfig = JSON.stringify(globalScope.draft?.acp_providers || {});
       if (
-        cached.diskRevision === state.settingsData?.diskRevision
+        cached.diskRevision === globalScope.data?.diskRevision
         && cached.providerConfig === providerConfig
         && fresh
         && cached.results
@@ -2316,6 +2537,10 @@ export const browserHtml = String.raw`<!doctype html>
       el.memoryTab.classList.toggle("active", state.viewMode === "memory");
       el.taskTab.classList.toggle("active", state.viewMode === "task");
       el.settingsTab.classList.toggle("active", state.viewMode === "settings");
+      el.settingsTab.setAttribute("aria-pressed", String(state.viewMode === "settings"));
+      el.settingsTab.setAttribute("aria-label", state.viewMode === "settings" ? "退出设置" : "设置");
+      el.settingsTab.title = state.viewMode === "settings" ? "退出设置" : "设置";
+      el.settingsTab.textContent = state.viewMode === "settings" ? "\u2190" : "\u2699";
       if (state.viewMode === "settings") {
         state.reviewDrawerOpen = false;
         syncReviewDrawer();
@@ -2463,6 +2688,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function setViewMode(mode) {
       state.viewMode = mode;
+      if (mode === "memory" || mode === "task") state.lastContentViewMode = mode;
       localStorage.setItem(viewModeKey, mode);
       ensureSelectedReview();
       if (mode === "settings" || mode === "task") {
@@ -2606,38 +2832,6 @@ export const browserHtml = String.raw`<!doctype html>
         }
         el.nav.append(list);
       }
-      for (const kind of kindOrder) {
-        const reserved = filteredReservedMemories().filter((memory) => memory.kind === kind);
-        if (!reserved.length) continue;
-        const label = document.createElement("div");
-        label.className = "kind";
-        label.textContent = "Reserved / " + t(kind);
-        el.nav.append(label);
-        const list = document.createElement("div");
-        list.className = "memory-list";
-        for (const memory of reserved) {
-          const row = document.createElement("div");
-          row.className = "memory-row";
-          const button = document.createElement("button");
-          button.className = "memory-button" + (memory.id === state.selectedId ? " active" : "");
-          button.textContent = memory.error ? invalidMemoryName(memory) : primaryName(memory.entity);
-          button.title = memory.path;
-          button.addEventListener("click", () => {
-            state.selectedId = memory.id;
-            renderAll();
-          });
-          const toggle = document.createElement("button");
-          toggle.type = "button";
-          toggle.className = "memory-toggle" + (memory.imported ? " imported" : "");
-          toggle.textContent = memory.imported ? "Imported" : "Import";
-          toggle.title = memory.imported ? "Already imported into memory" : "Import reserved memory";
-          toggle.disabled = Boolean(memory.imported);
-          toggle.addEventListener("click", () => importReservedMemory(memory, toggle));
-          row.append(button, toggle);
-          list.append(row);
-        }
-        el.nav.append(list);
-      }
       renderSystemMemoryToggle();
     }
 
@@ -2663,34 +2857,11 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function isSystemMemory(memory) {
-      return memory?.source !== "reserved" && state.systemMemoryPaths.has(memory.path);
+      return memory?.system === true;
     }
 
     function updateMemoryCount() {
       el.count.textContent = state.filtered.length + " memories";
-    }
-
-    function filteredReservedMemories() {
-      const q = el.search.value.trim().toLowerCase();
-      return state.reservedMemories.filter((memory) => {
-        if (!q) return true;
-        return [memory.kind, memory.path, errorText(memory.error), ...(memory.entity?.names || [])].join(" ").toLowerCase().includes(q);
-      });
-    }
-
-    async function importReservedMemory(memory, button) {
-      await runButtonAction(button, async () => {
-        const response = await fetch("/api/reserved-memories/import", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ path: memory.path })
-        });
-        if (!response.ok) throw new Error(await response.text());
-        await Promise.all([loadMemories(), loadReservedMemories()]);
-        const current = state.reservedMemories.find((item) => item.path === memory.path);
-        state.selectedId = current?.id || memory.id;
-        renderAll();
-      });
     }
 
     function renderTaskNav() {
@@ -3299,9 +3470,7 @@ export const browserHtml = String.raw`<!doctype html>
       const snapshot = currentReviewSnapshot("memory");
       if (snapshot?.memory) return snapshot.memory;
       return state.filtered.find((item) => item.id === state.selectedId)
-        || filteredReservedMemories().find((item) => item.id === state.selectedId)
-        || state.filtered[0]
-        || filteredReservedMemories()[0];
+        || state.filtered[0];
     }
 
     function selectedReview() {
@@ -3407,16 +3576,12 @@ export const browserHtml = String.raw`<!doctype html>
 
     function canCreateReview() {
       const subject = currentReviewSubject();
-      if (!subject) return false;
-      return selectedMemory()?.source !== "reserved";
+      return Boolean(subject);
     }
 
     function reviewCreationDisabledReason() {
       const subject = currentReviewSubject();
       if (!subject) return "Select a Memory before creating a review";
-      if (selectedMemory()?.source === "reserved") {
-        return "Import reserved memory before creating a review";
-      }
       return "";
     }
 
@@ -3523,10 +3688,6 @@ export const browserHtml = String.raw`<!doctype html>
       meta.className = "meta";
       meta.append(pill(memory.entity.tag || memory.kind, true));
       if (memory.entity.syntax) meta.append(pill(t("syntax") + ": " + memory.entity.syntax));
-      if (memory.source === "reserved") {
-        meta.append(pill("reserved", true));
-        meta.append(pill(memory.imported ? "imported" : "not imported", false, memory.imported ? "done" : ""));
-      }
       if (memory.entity.format) meta.append(pill("format: " + memory.entity.format));
       const review = selectedReview();
       const commentCount = review ? review.comments.filter(c => c.memoryId === memory.id).length : 0;
@@ -3779,13 +3940,13 @@ export const browserHtml = String.raw`<!doctype html>
     function memoryByReference(reference) {
       const value = String(reference || "");
       if (!value) return null;
-      const direct = [...state.memories, ...state.reservedMemories].find(memory => memory.id === value);
+      const direct = state.memories.find(memory => memory.id === value);
       if (direct) return direct;
       const separator = value.indexOf("/");
       if (separator > 0) {
         const kind = value.slice(0, separator);
         const name = value.slice(separator + 1);
-        return [...state.memories, ...state.reservedMemories].find(memory =>
+        return state.memories.find(memory =>
           memory.kind === kind && memory.entity?.names?.includes(name)
         ) || null;
       }

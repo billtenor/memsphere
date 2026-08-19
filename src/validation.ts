@@ -1,7 +1,7 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ZodError } from "zod";
-import { configSchema, findConfigPath, readConfigAt, type MemsphereConfig } from "./config.js";
+import { readConfig, readConfigAt, type MemsphereConfig } from "./config.js";
 import { analyzeMemoryDescriptors } from "./memory/catalog.js";
 import { memoryKinds, type MemoryKind } from "./memory/kinds.js";
 import type { ProviderMemoryDescriptor } from "./memory/provider.js";
@@ -15,6 +15,8 @@ export type ValidationIssue = {
   path: string;
   message: string;
   migration?: "syntax";
+  line?: number;
+  column?: number;
 };
 
 export type ValidationResult = {
@@ -47,14 +49,7 @@ function formatError(error: unknown): string {
 
 export async function validateMemoryStore(configPath?: string): Promise<ValidationResult> {
   const issues: ValidationIssue[] = [];
-  const resolvedConfigPath = configPath ?? await findConfigPath();
-
-  if (!resolvedConfigPath || !(await pathExists(resolvedConfigPath))) {
-    return {
-      configPath: resolvedConfigPath ?? "(not found)",
-      issues: [{ path: resolvedConfigPath ?? "(not found)", message: "config file does not exist. Run memsphere init." }]
-    };
-  }
+  const resolvedConfigPath = configPath;
 
   let memoryRoot: string | undefined;
   let reviewsRoot: string | undefined;
@@ -62,24 +57,14 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
   let config: MemsphereConfig;
 
   try {
-    const parsedConfig = configSchema.safeParse(JSON.parse(await readFile(resolvedConfigPath, "utf8")));
-    if (!parsedConfig.success) {
-      return {
-        configPath: resolvedConfigPath,
-        issues: parsedConfig.error.issues.map((issue) => ({
-          path: configIssuePath(resolvedConfigPath, issue.path),
-          message: issue.message
-        }))
-      };
-    }
-    config = await readConfigAt(resolvedConfigPath);
+    config = resolvedConfigPath ? await readConfigAt(resolvedConfigPath) : await readConfig();
     memoryRoot = config.memoryRoot;
     reviewsRoot = config.reviewsRoot;
     runsRoot = config.runsRoot;
   } catch (error) {
     return {
-      configPath: resolvedConfigPath,
-      issues: [{ path: resolvedConfigPath, message: formatError(error) }]
+      configPath: resolvedConfigPath ?? "(Project Context)",
+      issues: [{ path: resolvedConfigPath ?? "(Project Context)", message: formatError(error) }]
     };
   }
 
@@ -95,6 +80,22 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
     issues.push({ path: runsRoot, message: "runs root does not exist" });
   }
 
+  issues.push(...(await validateMemoryRoot(memoryRoot)).issues);
+
+  return {
+    configPath: resolvedConfigPath ?? config.configPath,
+    memoryRoot,
+    reviewsRoot,
+    runsRoot,
+    issues
+  };
+}
+
+export async function validateMemoryRoot(memoryRoot: string): Promise<{ memoryRoot: string; issues: ValidationIssue[] }> {
+  const issues: ValidationIssue[] = [];
+  if (!(await pathExists(memoryRoot))) {
+    return { memoryRoot, issues: [{ path: memoryRoot, message: "memory root does not exist" }] };
+  }
   const descriptors: ProviderMemoryDescriptor[] = [];
   const validFiles: MemoryFile[] = [];
   for (const kind of memoryKinds) {
@@ -122,13 +123,7 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
     issues.push(issue);
   }
 
-  return {
-    configPath: resolvedConfigPath,
-    memoryRoot,
-    reviewsRoot,
-    runsRoot,
-    issues
-  };
+  return { memoryRoot, issues };
 }
 
 async function validateKindDirectory(
@@ -161,9 +156,11 @@ async function validateKindDirectory(
         defines: structuredClone(file.entity.defines)
       });
     } catch (error) {
+      const location = await errorLocation(filePath, error);
       issues.push({
         path: filePath,
         message: formatError(error),
+        ...location,
         migration: await usesMigratableSyntax(filePath) ? "syntax" : undefined
       });
     }
@@ -171,12 +168,19 @@ async function validateKindDirectory(
   return { descriptors, files };
 }
 
-function configIssuePath(configPath: string, path: PropertyKey[]): string {
-  let suffix = "";
-  for (const part of path) {
-    suffix += typeof part === "number" ? `[${part}]` : `${suffix ? "." : ""}${String(part)}`;
-  }
-  return suffix ? `${configPath}#${suffix}` : configPath;
+async function errorLocation(
+  filePath: string,
+  error: unknown
+): Promise<{ line?: number; column?: number }> {
+  const offset = error && typeof error === "object" && "pos" in error
+    && Array.isArray(error.pos) && typeof error.pos[0] === "number"
+    ? error.pos[0]
+    : undefined;
+  if (offset === undefined) return {};
+  const source = await readFile(filePath, "utf8").catch(() => "");
+  const before = source.slice(0, Math.max(0, offset));
+  const lines = before.split(/\r?\n/);
+  return { line: lines.length, column: (lines.at(-1)?.length ?? 0) + 1 };
 }
 
 async function usesMigratableSyntax(filePath: string): Promise<boolean> {

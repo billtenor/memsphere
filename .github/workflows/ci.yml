@@ -3,8 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches:
-      - master
+    branches: [master]
   workflow_dispatch:
 
 permissions:
@@ -20,10 +19,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - name: Install Playwright Chromium
@@ -31,29 +30,19 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - name: Validate an isolated Project
-        shell: bash
-        run: |
-          node dist/cli.js init --folder .ci-project
-          cd .ci-project
-          node ../dist/cli.js validate
-      - name: Exercise managed View lifecycle
-        shell: bash
-        run: |
-          cd .ci-project
-          node ../dist/cli.js view start
-          node ../dist/cli.js view status
-          node ../dist/cli.js view restart
-          node ../dist/cli.js view stop
+      - run: npm run smoke:project
 
   windows-package-smoke:
     name: Windows packaged CLI shells
     runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      MEMSPHERE_HOME: ${{ github.workspace }}\.ci-memsphere-home
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run build

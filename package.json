@@ -34,6 +34,7 @@
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node -e \"const fs=require('node:fs'); fs.chmodSync('dist/cli.js',0o755); fs.cpSync('src/skills','dist/skills',{recursive:true}); fs.cpSync('src/prompts/templates','dist/prompts/templates',{recursive:true})\"",
     "dev": "tsx src/cli.ts",
     "test": "node scripts/run-tests.mjs",
+    "smoke:project": "node scripts/project-smoke.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "validate": "npm run build",
     "security:check": "sh scripts/security-check.sh --staged",

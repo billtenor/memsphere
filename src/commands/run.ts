@@ -14,6 +14,7 @@ import {
   submitBoundAgentReview
 } from "../acp/review-session.js";
 import { readConfig } from "../config.js";
+import { createMemoryCatalogForConfig, createProjectMemoryCatalogs } from "../memory/factory.js";
 import {
   type RunReviewConfiguration
 } from "../control-plane/index.js";
@@ -129,6 +130,7 @@ export async function runStartCommand(procedureName: string | undefined, options
   if (name && procedureFile) throw new Error("use either a procedure name or --file <path>, not both");
 
   const config = await readConfig();
+  const memoryCatalog = createMemoryCatalogForConfig(config);
   const reviewConfiguration = options.reviewConfig
     ? parseRunReviewConfiguration(JSON.parse(await readFile(options.reviewConfig, "utf8")))
     : undefined;
@@ -141,7 +143,15 @@ export async function runStartCommand(procedureName: string | undefined, options
       procedureName: name,
       procedureFile,
       controlPlane: config.controlPlane,
-      reviewConfiguration
+      reviewConfiguration,
+      memoryProjects: config.project?.revision ? {
+        primary: { name: config.project.name, revision: config.project.revision },
+        mounted: config.project.mounted.flatMap((project) => project.revision
+          ? [{ name: project.name, revision: project.revision }]
+          : [])
+      } : undefined,
+      memoryCatalog,
+      projectMemoryCatalogs: createProjectMemoryCatalogs(config)
     });
   } catch (error) {
     if (!(error instanceof RunReviewConfigurationRequired)) throw error;
@@ -613,6 +623,7 @@ export function buildRunOverview(run: RunState): unknown {
     status: run.status,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
+    memoryProjects: run.memoryProjects,
     totalSteps: steps.length,
     currentStepRef: currentRef,
     steps: steps.map((located) => ({

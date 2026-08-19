@@ -1,6 +1,7 @@
-import { delimiter, resolve } from "node:path";
+import { delimiter } from "node:path";
 import { artifactReviewAssignmentId, type ArtifactReviewAgentFailure } from "../artifact-review.js";
-import { findGitRoot, readConfig } from "../config.js";
+import { readConfig } from "../config.js";
+import { resolveWorkspaceIdentity } from "../project/workspace.js";
 import {
   claimArtifactReviewAgentAssignment,
   failArtifactReviewAgentAssignment,
@@ -51,7 +52,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     actorId,
     attemptId: claimed.attempt.id
   };
-  const workspaceRoot = await findGitRoot() ?? resolve(process.cwd());
+  const workspaceRoot = (await resolveWorkspaceIdentity()).path;
   const activity = new AgentActivityRecorder({
     ...common,
     runId: claimed.run.id,

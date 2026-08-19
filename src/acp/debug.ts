@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, join } from "node:path";
 import { artifactReviewAssignmentId, type ArtifactReview, type ArtifactReviewRound } from "../artifact-review.js";
-import { findGitRoot, type MemsphereConfig } from "../config.js";
+import type { MemsphereConfig } from "../config.js";
+import { resolveWorkspaceIdentity } from "../project/workspace.js";
 import type { ArtifactReviewAgentContext, RunState } from "../run/store.js";
 import { agentReviewCliSource, currentCliRuntimeDescriptor } from "./cli-runtime.js";
 import { buildArtifactReviewerPrompt } from "./prompt.js";
@@ -40,7 +41,7 @@ export async function writeAgentReviewDebugArtifacts(input: {
 }): Promise<AgentReviewTryRunArtifact[]> {
   const runtime = currentCliRuntimeDescriptor();
   const cliSource = agentReviewCliSource(runtime);
-  const workspaceRoot = await findGitRoot() ?? resolve(process.cwd());
+  const workspaceRoot = (await resolveWorkspaceIdentity()).path;
   const generated: AgentReviewTryRunArtifact[] = [];
   for (const assignment of input.round.assignments) {
     if ((assignment.actorKind ?? "human") !== "agent" || assignment.status !== "queued") continue;
