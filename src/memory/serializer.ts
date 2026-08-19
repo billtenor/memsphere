@@ -23,9 +23,10 @@ export function serializeMemoryListText(page: MemoryListPage): string {
   if (page.memories.length === 0) return "";
   return `${page.memories.map((memory) => {
     const aliases = memory.names.slice(1);
-    return aliases.length > 0
+    const identity = aliases.length > 0
       ? `${memory.reference} (${aliases.join(", ")})`
       : memory.reference;
+    return memory.project_name ? `${identity}\t${memory.project_name}@${memory.revision ?? "unknown"}` : identity;
   }).join("\n")}\n`;
 }
 

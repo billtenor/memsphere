@@ -123,6 +123,34 @@ flow:
     }
     const scopePanel = reviewModal.locator("#artifact-review-scope-panel");
     await scopePanel.getByText("artifact_acceptance.unanimous", { exact: true }).waitFor();
+    await page.waitForFunction(() => location.pathname.includes("/artifact-reviews/") && location.search.includes("round="));
+    const deepReviewUrl = page.url();
+    assert.match(new URL(deepReviewUrl).pathname, new RegExp(`^/tasks/${started.id}/artifact-reviews/`));
+    const reopenedReview = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await reopenedReview.goto(deepReviewUrl);
+    const reopenedModal = reopenedReview.locator("#artifact-review-modal[open]");
+    await reopenedModal.waitFor();
+    await reopenedModal.getByText("Visible only after identity authorization.", { exact: true }).waitFor();
+    await reopenedReview.close();
+    const staleReviewUrl = new URL(deepReviewUrl);
+    const currentRoundId = staleReviewUrl.searchParams.get("round");
+    staleReviewUrl.searchParams.set("round", "round-missing");
+    staleReviewUrl.searchParams.set("material", "material-missing");
+    const staleReview = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await staleReview.goto(staleReviewUrl.toString());
+    await staleReview.locator("#artifact-review-modal[open]").waitFor();
+    await staleReview.waitForFunction(expectedRound => {
+      const params = new URLSearchParams(location.search);
+      return params.get("round") === expectedRound && !params.has("material");
+    }, currentRoundId);
+    await staleReview.close();
+    const material = reviewModal.getByRole("combobox", { name: "选择评审材料", exact: true });
+    await material.click();
+    await reviewModal.getByRole("option", { name: /^冻结契约/ }).click();
+    await page.waitForFunction(() => new URLSearchParams(location.search).get("material") === "contract");
+    await material.click();
+    await reviewModal.getByRole("option", { name: /^待评审产物/ }).click();
+    await page.waitForFunction(() => !new URLSearchParams(location.search).has("material"));
     assert.equal(await reviewModal.locator(".artifact-review-modal-header").getByText("artifact_acceptance.unanimous", { exact: true }).count(), 0);
     assert.equal(await scopePanel.getByRole("combobox", { name: "评审产物", exact: true }).count(), 1);
     assert.equal(await scopePanel.getByText("当前轮次", { exact: true }).count(), 1);
@@ -388,6 +416,8 @@ flow:
     assert.equal(secondReview.rounds.length, 2);
 
     await page.reload();
+    await page.locator("#artifact-review-modal[open]").waitFor();
+    await page.locator("#artifact-review-modal-close").click();
     await page.getByRole("button", { name: "Task", exact: true }).click();
     await page.getByRole("button", { name: /^产物评审 0\/2$/ }).click();
     identity = page.getByRole("combobox", { name: "评审身份" });
@@ -678,11 +708,14 @@ flow:
 
 test("Agent Activity expands in the participant row without disrupting Human review", async () => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-agent-activity-browser-"));
-  const scopeRoot = join(dir, ".memsphere");
+  const previousHome = process.env.MEMSPHERE_HOME;
+  const home = join(dir, "home");
+  const scopeRoot = join(home, "projects", "activity-fixture");
   const memoryRoot = join(scopeRoot, "memory");
   const runsRoot = join(scopeRoot, "runs");
   const reviewsRoot = join(scopeRoot, "reviews");
   const configPath = join(scopeRoot, "config.json");
+  process.env.MEMSPHERE_HOME = home;
   await mkdir(join(memoryRoot, "procedures"), { recursive: true });
   await mkdir(reviewsRoot, { recursive: true });
   await writeFile(join(memoryRoot, "procedures", "activity-review.yaml"), withCurrentMemorySyntax(`!procedure
@@ -730,11 +763,21 @@ flow:
   if (!reviewer || reviewer.kind !== "agent") throw new Error("missing reviewer fixture");
   reviewer.agent.command = process.execPath;
   reviewer.agent.args = [browserFakeReviewer, "approve"];
+  await writeFile(join(scopeRoot, "project.json"), `${JSON.stringify({
+    format_version: 1,
+    name: "activity-fixture",
+    created_at: new Date().toISOString()
+  }, null, 2)}\n`);
+  await writeFile(join(home, "registry.json"), `${JSON.stringify({
+    format_version: 1,
+    projects: { "activity-fixture": { root: scopeRoot } },
+    workspaces: {}
+  }, null, 2)}\n`);
+  await writeFile(join(home, "config.json"), `${JSON.stringify({
+    acp_providers: { traex: {} }
+  }, null, 2)}\n`);
   await writeFile(configPath, `${JSON.stringify({
-    memoryRoot: "memory",
-    reviewsRoot: "reviews",
-    runsRoot: "runs",
-    archiveRoot: "archives",
+    store: { type: "embedded", memory_path: memoryRoot },
     control_plane: {
       runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
       actors: {
@@ -946,6 +989,8 @@ flow:
     await browser.close();
     server.close();
     await once(server, "close");
+    if (previousHome === undefined) delete process.env.MEMSPHERE_HOME;
+    else process.env.MEMSPHERE_HOME = previousHome;
     await rm(dir, { recursive: true, force: true });
   }
 });

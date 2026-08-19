@@ -8,7 +8,7 @@ Schema Contract v2 为 Schema 增加可选 `type` 与 `format`，删除 `element
 
 ## 升级前检查
 
-1. 停止修改目标 Memory Store，并确认 `config.json` 指向正确的 `memoryRoot`。
+1. 停止修改目标 Project 的 Memory Store，并用 `memsphere project show` 确认目标 Project。
 2. 运行只读检查：
 
 ```bash
@@ -30,9 +30,11 @@ memsphere migrate schema-contract-v2 --check
 memsphere migrate schema-contract-v2 --write
 ```
 
+`--write` 只用于 Embedded Store。Managed Store 必须通过 ChangeSet 提交迁移结果，不能直接修改正式工作树。
+
 命令会在 `.memsphere/migrations/schema-contract-v2/<timestamp>/` 下生成完整 staging、变更文件 backup 和 manifest，先验证 staging，再原子替换真实文件并复验 Memory Root。写入失败时自动从 backup 恢复已替换文件。
 
-如需人工回滚，停止写入后按 manifest 的 `backupRoot` 将对应文件恢复到 `memoryRoot`，随后运行 `memsphere validate`。
+如需人工回滚，停止写入后按 manifest 的 `backupRoot` 将对应文件恢复到目标 Project Memory Store，随后运行 `memsphere validate`。
 
 ## 升级后验证
 

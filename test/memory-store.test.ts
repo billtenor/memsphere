@@ -5,7 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { memoryKinds, type MemoryKind } from "../src/memory/kinds.js";
 import { listMemoryFiles } from "../src/memory/store.js";
-import { validateMemoryStore } from "../src/validation.js";
+import { projectConfigSchema } from "../src/project/model.js";
+import { validateMemoryRoot } from "../src/validation.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
@@ -49,18 +50,14 @@ test("listMemoryFiles keeps yaml filtering and sorting for existing directories"
 
 test("validateMemoryStore reports kind-scoped canonical and alias conflicts", async () => {
   await withTempDir(async (dir) => {
-    const configPath = join(dir, "config.json");
     const memoryRoot = join(dir, "memory");
-    await mkdir(join(dir, "reviews"));
-    await mkdir(join(dir, "runs"));
     for (const kind of memoryKinds) await mkdir(join(memoryRoot, kind), { recursive: true });
-    await writeFile(configPath, `${JSON.stringify({ memoryRoot: "memory", reviewsRoot: "reviews", runsRoot: "runs" })}\n`);
     await writeFile(join(memoryRoot, "concepts", "one.yaml"), withCurrentMemorySyntax("!concept\nnames: [Memory, shared]\ndefines: []\n"));
     await writeFile(join(memoryRoot, "concepts", "two.yaml"), withCurrentMemorySyntax("!concept\nnames: [Other, shared]\ndefines: []\n"));
     await writeFile(join(memoryRoot, "concepts", "three.yaml"), withCurrentMemorySyntax("!concept\nnames: [Memory]\ndefines: []\n"));
     await writeFile(join(memoryRoot, "statements", "same-name.yaml"), withCurrentMemorySyntax("!statement\nnames: [Memory]\nasserts: [valid]\n"));
 
-    const result = await validateMemoryStore(configPath);
+    const result = await validateMemoryRoot(memoryRoot);
     assert(result.issues.some((issue) => issue.message.includes('memory name "shared" conflicts within concepts')));
     assert(result.issues.some((issue) => issue.message.includes('memory name "Memory" conflicts within concepts')));
     assert(!result.issues.some((issue) => issue.message.includes("conflicts within statements")));
@@ -69,16 +66,12 @@ test("validateMemoryStore reports kind-scoped canonical and alias conflicts", as
 
 test("validateMemoryStore reports normalized empty and repeated names with parse errors", async () => {
   await withTempDir(async (dir) => {
-    const configPath = join(dir, "config.json");
     const memoryRoot = join(dir, "memory");
-    await mkdir(join(dir, "reviews"));
-    await mkdir(join(dir, "runs"));
     for (const kind of memoryKinds) await mkdir(join(memoryRoot, kind), { recursive: true });
-    await writeFile(configPath, `${JSON.stringify({ memoryRoot: "memory", reviewsRoot: "reviews", runsRoot: "runs" })}\n`);
     await writeFile(join(memoryRoot, "concepts", "names.yaml"), withCurrentMemorySyntax("!concept\nnames: [' Memory ', Memory, ' ']\ndefines: []\n"));
     await writeFile(join(memoryRoot, "schemas", "broken.yaml"), withCurrentMemorySyntax("!schema\nnames: [Broken\n"));
 
-    const result = await validateMemoryStore(configPath);
+    const result = await validateMemoryRoot(memoryRoot);
     assert(result.issues.some((issue) => issue.message.includes('repeats the normalized name "Memory"')));
     assert(result.issues.some((issue) => issue.message.includes("alias at names[2] is empty")));
     assert(result.issues.some((issue) => issue.path.endsWith("broken.yaml")));
@@ -88,11 +81,8 @@ test("validateMemoryStore reports normalized empty and repeated names with parse
 for (const missingKind of memoryKinds) {
   test(`validateMemoryStore still reports missing ${missingKind} directory`, async () => {
     await withTempDir(async (dir) => {
-      const configPath = join(dir, "config.json");
       const memoryRoot = join(dir, "memory");
       await mkdir(memoryRoot);
-      await mkdir(join(dir, "reviews"));
-      await mkdir(join(dir, "runs"));
 
       for (const kind of memoryKinds) {
         if (kind !== missingKind) {
@@ -100,9 +90,7 @@ for (const missingKind of memoryKinds) {
         }
       }
 
-      await writeFile(configPath, `${JSON.stringify({ memoryRoot: "memory", reviewsRoot: "reviews", runsRoot: "runs" })}\n`);
-
-      const result = await validateMemoryStore(configPath);
+      const result = await validateMemoryRoot(memoryRoot);
       assert(result.issues.some((issue) =>
         issue.path === join(memoryRoot, missingKind as MemoryKind) &&
         issue.message === "memory kind directory does not exist"
@@ -112,40 +100,26 @@ for (const missingKind of memoryKinds) {
 }
 
 test("validateMemoryStore reports precise control_plane config paths", async () => {
-  await withTempDir(async (dir) => {
-    const configPath = join(dir, "config.json");
-    await writeFile(configPath, JSON.stringify({
-      memoryRoot: "memory",
-      control_plane: {
-        runner: { permissions: ["artifact.delete"] },
-        actors: {}
-      }
-    }));
-
-    const result = await validateMemoryStore(configPath);
-    assert(result.issues.some((issue) =>
-      issue.path === `${configPath}#control_plane.runner.permissions[0]` &&
+  const result = projectConfigSchema.safeParse({
+    store: { type: "embedded", memory_path: "memory" },
+    control_plane: {
+      runner: { permissions: ["artifact.delete"] },
+      actors: {}
+    }
+  });
+  assert.equal(result.success, false);
+  if (!result.success) {
+    assert(result.error.issues.some((issue) =>
+      issue.path.join(".") === "control_plane.runner.permissions.0" &&
       issue.message.includes("Unknown Permission")
     ));
-  });
+  }
 });
 
 test("validateMemoryStore rejects removed Procedure governance fields", async () => {
   await withTempDir(async (dir) => {
-    const configPath = join(dir, "config.json");
     const memoryRoot = join(dir, "memory");
-    await mkdir(join(dir, "reviews"));
-    await mkdir(join(dir, "runs"));
     for (const kind of memoryKinds) await mkdir(join(memoryRoot, kind), { recursive: true });
-    await writeFile(configPath, JSON.stringify({
-      memoryRoot: "memory",
-      reviewsRoot: "reviews",
-      runsRoot: "runs",
-      control_plane: {
-        runner: { permissions: ["artifact.submit"] },
-        actors: {}
-      }
-    }));
     const procedurePath = join(memoryRoot, "procedures", "governed.yaml");
     await writeFile(procedurePath, withCurrentMemorySyntax(`!procedure
 name: governed
@@ -159,7 +133,7 @@ flow:
       review: [reviewer]
 `));
 
-    const result = await validateMemoryStore(configPath);
+    const result = await validateMemoryRoot(memoryRoot);
     assert(result.issues.some((issue) =>
       issue.path.endsWith("governed.yaml") && issue.message.includes("role_bindings")
     ));
@@ -168,12 +142,8 @@ flow:
 
 test("validateMemoryStore accepts Review Slots without control_plane", async () => {
   await withTempDir(async (dir) => {
-    const configPath = join(dir, "config.json");
     const memoryRoot = join(dir, "memory");
-    await mkdir(join(dir, "reviews"));
-    await mkdir(join(dir, "runs"));
     for (const kind of memoryKinds) await mkdir(join(memoryRoot, kind), { recursive: true });
-    await writeFile(configPath, JSON.stringify({ memoryRoot: "memory", reviewsRoot: "reviews", runsRoot: "runs" }));
     await writeFile(join(memoryRoot, "procedures", "governed.yaml"), withCurrentMemorySyntax(`!procedure
 name: governed
 flow:
@@ -184,7 +154,7 @@ flow:
       review: [reviewer]
 `));
 
-    const result = await validateMemoryStore(configPath);
+    const result = await validateMemoryRoot(memoryRoot);
     assert.equal(result.issues.length, 0);
   });
 });

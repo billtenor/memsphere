@@ -89,7 +89,7 @@ const providerEnvironmentSchema = z.record(z.string()).superRefine((environment,
   }
 });
 
-function providerInstanceInputSchema(type: AcpProviderType) {
+function providerInstanceFileSchema(type: AcpProviderType) {
   return z.object({
   args: z.array(z.string()).optional(),
   env: providerEnvironmentSchema.optional(),
@@ -111,7 +111,11 @@ function providerInstanceInputSchema(type: AcpProviderType) {
       message: error instanceof Error ? error.message : String(error)
     });
   }
-}).transform((input): AcpProviderInstance => {
+});
+}
+
+function providerInstanceInputSchema(type: AcpProviderType) {
+  return providerInstanceFileSchema(type).transform((input): AcpProviderInstance => {
   const defaults = defaultAcpProviderInstance(type);
   return {
     type,
@@ -122,8 +126,15 @@ function providerInstanceInputSchema(type: AcpProviderType) {
     idleTimeoutMs: input.idle_timeout_ms ?? defaults.idleTimeoutMs,
     maxRuntimeMs: input.max_runtime_ms === undefined ? defaults.maxRuntimeMs : input.max_runtime_ms
   };
-});
+  });
 }
+
+export const acpProviderConfigSchema = z.object({
+  traex: providerInstanceFileSchema("traex").optional(),
+  qwen: providerInstanceFileSchema("qwen").optional(),
+  kimi: providerInstanceFileSchema("kimi").optional(),
+  codex: providerInstanceFileSchema("codex").optional()
+}).strict();
 
 const providerInstancesInputSchema = z.object({
   traex: providerInstanceInputSchema("traex").optional(),
@@ -185,9 +196,11 @@ function resolveActor(
   };
 }
 
-const runnerInputSchema = z.object({
+const runnerFileSchema = z.object({
   permissions: permissionListSchema
-}).strict().transform((runner): RunnerAuthority => ({
+}).strict();
+
+const runnerInputSchema = runnerFileSchema.transform((runner): RunnerAuthority => ({
   permissions: [...runner.permissions]
 }));
 
@@ -236,6 +249,24 @@ const controlPlaneInputSchema = z.object({
 
 export const controlPlaneConfigSchema: z.ZodType<ControlPlaneConfig, z.ZodTypeDef, unknown> =
   controlPlaneInputSchema;
+
+export const projectControlPlaneConfigSchema = z.object({
+  runner: runnerFileSchema,
+  actors: recordWithValidatedKeys(actorIdSchema, actorInputSchema)
+}).strict();
+
+export type ProjectControlPlaneConfigFile = z.infer<typeof projectControlPlaneConfigSchema>;
+export type AcpProviderConfigFile = z.infer<typeof acpProviderConfigSchema>;
+
+export function resolveProjectControlPlane(
+  project: ProjectControlPlaneConfigFile,
+  providers: AcpProviderConfigFile | undefined
+): ControlPlaneConfig {
+  return controlPlaneConfigSchema.parse({
+    ...project,
+    ...(providers ? { acp_providers: providers } : {})
+  });
+}
 
 const snapshotAgentRuntimeSchema = z.object({
   provider: nonEmptyString.optional(),

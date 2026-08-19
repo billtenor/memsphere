@@ -6,6 +6,9 @@ export type ProviderMemoryDescriptor = {
   kind: MemoryKind;
   names: string[];
   defines: DefinitionPart[];
+  project_name?: string;
+  revision?: string;
+  frozen?: string;
 };
 
 export type MemoryProviderQuery = {

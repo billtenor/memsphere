@@ -27,7 +27,7 @@ memsphere 已经建设 `self-bootstrap-step0`、`self-bootstrap-step1` 和 `self
 - 一批 Case 先被准备为 Batch。
 - 每个 Case 被准备成 Trial。
 - 每个 Trial 下再产生 Agent Run。
-- Agent 执行 Procedure 后，Trial 的 `.memsphere/runs` 中还会产生 Procedure Run。
+- Agent 执行 Procedure 后，Trial 的隔离 Project 中还会产生 Procedure Run。
 - Batch、Trial 和 Agent Run 分别保存 metadata、status、logs 和 results，存在重复状态文件。
 
 因此，人或父 Agent 为了理解一次批量评测，必须先理解临时目录中的多层 `runs/`、`baseline/`、`workspace/`、`home/` 和 `trial`。`/tmp` 中的随机目录同时承担执行环境、结果索引和调试入口，既不是稳定的产品模型，也不适合直接交给 View 展示。
@@ -59,9 +59,9 @@ memsphere 已经建设 `self-bootstrap-step0`、`self-bootstrap-step1` 和 `self
 2. 使用 Batch 表达一次批量执行；Batch 中每个 Case 只对应一个独立子 Agent 执行。
 3. Eval CLI 只提供批量执行和证据读取两项面向 Agent 的原子能力。
 4. 由 Procedure 负责语义判分、问题归因、human 确认、修复决策和复测编排。
-5. 将规范化评测证据持久化到当前 scope 的 `.memsphere/evals`，不以临时目录作为可信结果源。
+5. 将规范化评测证据持久化到当前 Primary Project 的 `evals/`，不以临时目录作为可信结果源。
 6. 在 View 中按“评测会话 -> Batch -> Case”展示进度、证据、判断和修复历史。
-7. 保持 Case 之间的 workspace、HOME、Memsphere scope 和 Agent 上下文相互隔离。
+7. 保持 Case 之间的 workspace、HOME、Memsphere Project 和 Agent 上下文相互隔离。
 8. 允许 Artifact Harness 在同一个 Case Execution 内向同一子 Agent 反馈并重新验证，而不引入用户可见的 Attempt 层。
 
 ## 非目标
@@ -120,7 +120,7 @@ View 从 Eval Store 和关联的 Procedure Run 读取数据，把执行事实、
 
 ### 临时环境与可信证据分离
 
-`/tmp` 只用于运行中的隔离 workspace、HOME 和 Memsphere scope。运行完成后，CLI 把需要复查的内容规范化归档到 Eval Store。View 只依赖 Eval Store，不解析随机临时目录。
+`/tmp` 只用于运行中的隔离 workspace、HOME 和临时 Memsphere Project。运行完成后，CLI 把需要复查的内容规范化归档到 Primary Project 的 Eval Store。View 只依赖 Eval Store，不解析随机临时目录。
 
 ## 领域模型
 
@@ -246,11 +246,11 @@ memsphere eval read <batch-id> [--case <case-id>]
 
 `run` 必须一次完成：
 
-1. 读取当前 scope 配置并定位 `evals/<suite-id>`。
+1. 解析当前 Workspace 的 Primary Project，并定位 Workspace 仓库中的 `evals/<suite-id>` Suite 源码。
 2. 校验 Suite、所选 Case 和机器配置。
-3. 校验 `--run` 指向当前 scope 中可用的 Procedure Run。
+3. 校验 `--run` 指向当前 Primary Project 中可用的 Procedure Run。
 4. 创建 Batch 记录并在启动子 Agent 前输出 Batch ID。
-5. 为每个 Case 创建独立的临时 Memsphere scope、workspace 和 HOME。
+5. 为每个 Case 创建独立的临时 Memsphere Home、Project 和绑定 Workspace。
 6. 安装本轮需要的 Skill、Memory 和 fixture。
 7. 按 Suite 默认值或参数限制并发执行；每个 Case 使用独立 Agent 会话。
 8. 持续写入 Batch 和 Case Execution 状态，使 View 可以在运行中刷新。
@@ -405,15 +405,15 @@ CLI 可以在系统临时目录中创建如下内部结构：
 
 ```text
 /tmp/memsphere-eval-runtime/<batch-id>/<case-id>/
-  .memsphere/
+  memsphere-home/
   workspace/
-  home/
+  agent-home/
 ```
 
 - 被测 Agent 的 cwd 和允许直接访问范围是 `workspace/`。
-- Case 专属 `.memsphere/` 位于 `workspace/` 的父目录，Agent 可以通过 CLI 的向上发现机制使用 Memory，但无需直接浏览 Store。
+- Case 使用独立 `MEMSPHERE_HOME`，其中创建并绑定专属 Project；Agent 通过 Workspace Binding 使用 Memory，无需直接浏览 Store。
 - `evaluation.md`、参考答案、validator 实现和父级结果目录不得位于被测 Agent 的允许读取范围。
-- 每个 Case 拥有独立 `.memsphere/`、workspace、HOME 和 Agent 上下文，不共享前一个 Case 的 Procedure Run 或会话状态。
+- 每个 Case 拥有独立 Memsphere Home、Project、workspace、Agent HOME 和上下文，不共享前一个 Case 的 Procedure Run 或会话状态。
 - 同一 Case 的 Validation Round 复用原 workspace 和原 Agent 会话。
 
 ### 临时环境保留
@@ -437,10 +437,10 @@ adapter 不包含某个 Suite、Case、Memory 或评分标准的专用逻辑。C
 
 ### 配置与位置
 
-当前 scope 配置增加可选 `evalsRoot`，默认值为 `.memsphere` 内的 `evals` 目录，与 `memoryRoot`、`runsRoot` 的解析方式一致：
+Eval Store 固定属于当前 Primary Project，不增加 `evalsRoot` 或其他可拆分 Root 配置：
 
 ```text
-<scope>/.memsphere/evals/
+<project-root>/evals/
 ```
 
 Suite 源码仍位于项目的 `evals/`，进入 Git；Eval Store 是运行数据，默认不进入 Git。
@@ -448,7 +448,7 @@ Suite 源码仍位于项目的 `evals/`，进入 Git；Eval Store 是运行数�
 ### 持久化结构
 
 ```text
-.memsphere/evals/
+<project-root>/evals/
   batches/
     <batch-id>/
       batch.json
@@ -473,7 +473,7 @@ Suite 源码仍位于项目的 `evals/`，进入 Git；Eval Store 是运行数�
 - `result.json` 保存规范化 Case Execution、Harness、usage 和证据清单。
 - `workspace-output/` 保存去除 `.git`、Skill 安装缓存和 HOME 数据后的工作区结果快照。
 - `validations/` 保存每一轮 validator 结果、反馈和 Artifact diff。
-- `procedure-runs/` 保存或引用被测 Agent 在 Case scope 中创建的 Procedure Run 证据。
+- `procedure-runs/` 保存或引用被测 Agent 在 Case 专属 Project 中创建的 Procedure Run 证据。
 
 Procedure Agent 的判分和 human 决策仍由父 Procedure Run Store 负责；Eval Batch 通过 `procedure_run_id` 关联，不复制两份可变结论。
 
@@ -643,7 +643,7 @@ View 在现有服务中增加 Eval Store API 和 `Eval` 页面，但不应把 Ev
 ### CLI 与批量执行
 
 1. Agent 在一个 Procedure Run 中只需执行一次 `memsphere eval run <suite>`，即可运行 Suite 的全部 Case。
-2. 一个包含至少六个 Case 的 Suite 能按配置并发执行，每个 Case 使用独立 Agent、workspace、HOME 和 Memsphere scope。
+2. 一个包含至少六个 Case 的 Suite 能按配置并发执行，每个 Case 使用独立 Agent、workspace、HOME 和 Memsphere Project。
 3. `run --case A --case B` 只执行指定 Case，并创建新的 Batch。
 4. CLI 在启动子 Agent 前产生并持久化 Batch ID；运行中 View 可以读取进度。
 5. 一个 Case 超时或退出异常不会终止其他 Case，也不会丢失已经收集的证据。
@@ -652,7 +652,7 @@ View 在现有服务中增加 Eval Store API 和 `Eval` 页面，但不应把 Ev
 
 ### 隔离与证据
 
-8. 每个 Case 的子 Agent 只能在自己的 workspace 中执行任务，并通过 CLI 使用父级 Case scope 中的 Memory。
+8. 每个 Case 的子 Agent 只能在自己的 workspace 中执行任务，并通过 CLI 使用绑定到该 Workspace 的 Case Project Memory。
 9. 被测 Agent 无法在允许范围内读取 `evaluation.md`、参考答案、其他 Case 结果或 validator 实现。
 10. Memory 执行前后哈希、最终回答、events、stderr、工作区输出、usage 和子 Procedure Run 均进入规范化证据。
 11. 临时运行目录被删除后，`eval read` 和 View 仍可完整展示归档结果。

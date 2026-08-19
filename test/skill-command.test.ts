@@ -42,7 +42,7 @@ test("unified skill and reserved memories keep the same bootstrap contract", asy
     "context",
     "fragment",
     "condition_artifact",
-    "memsphere init",
+    "memsphere project bind",
     "memsphere run start",
     "--name",
     "memsphere run report",
