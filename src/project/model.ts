@@ -4,6 +4,8 @@ import { projectControlPlaneConfigSchema } from "../control-plane/schema.js";
 export const projectNamePattern = /^[a-z0-9._-]+$/;
 export const projectNameSchema = z.string().min(1).regex(projectNamePattern, {
   message: "project name may only contain lowercase ASCII letters, digits, '.', '_' and '-'"
+}).refine(isPortableProjectName, {
+  message: "project name must be a portable directory name and not a Windows reserved device name"
 });
 
 export const projectManifestSchema = z.object({
@@ -53,4 +55,10 @@ export type ProjectPaths = {
 
 export function assertProjectName(name: string): string {
   return projectNameSchema.parse(name);
+}
+
+function isPortableProjectName(name: string): boolean {
+  if (name === "." || name === ".." || name.endsWith(".")) return false;
+  const windowsBaseName = name.split(".", 1)[0];
+  return !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/.test(windowsBaseName);
 }

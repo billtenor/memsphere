@@ -350,17 +350,36 @@ async function publishLocked(project: ResolvedProject, change: MemoryChangeSet, 
     const formalValidation = await validateMemoryRoot(project.memoryRoot);
     if (formalValidation.issues.length > 0) throw new Error(`ChangeSet validation failed after merge: ${formalValidation.issues[0].message}`);
     await runGit(["commit", "-m", message?.trim() || `Publish Memsphere ChangeSet ${change.id}`], { cwd: project.memoryRoot });
+    const revision = await updatePublishedRevision(project);
+    const published = memoryChangeSetSchema.parse({
+      ...change,
+      status: "published",
+      published_revision: revision,
+      updated_at: new Date().toISOString()
+    });
+    await writeChange(project, published);
+    return published;
   } catch (error) {
-    await runGit(["reset", "--hard", publishedRevision], { cwd: project.memoryRoot }).catch(() => undefined);
-    await runGit(["clean", "-fd"], { cwd: project.memoryRoot }).catch(() => undefined);
+    const rollbackErrors: unknown[] = [];
+    await runGit(["reset", "--hard", publishedRevision], { cwd: project.memoryRoot }).catch((rollbackError) => rollbackErrors.push(rollbackError));
+    await runGit(["clean", "-fd"], { cwd: project.memoryRoot }).catch((rollbackError) => rollbackErrors.push(rollbackError));
+    await restoreJsonIfChanged(project.paths.configPath, project.config).catch((rollbackError) => rollbackErrors.push(rollbackError));
+    await restoreJsonIfChanged(changePath(project, change.id), change).catch((rollbackError) => rollbackErrors.push(rollbackError));
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError([error, ...rollbackErrors], "Memory publish failed and rollback was incomplete");
+    }
     throw error;
   }
-  const revision = await updatePublishedRevision(project);
-  change.status = "published";
-  change.published_revision = revision;
-  change.updated_at = new Date().toISOString();
-  await writeChange(project, change);
-  return change;
+}
+
+async function restoreJsonIfChanged(path: string, value: unknown): Promise<void> {
+  const expected = `${JSON.stringify(value, null, 2)}\n`;
+  try {
+    if (await readFile(path, "utf8") === expected) return;
+  } catch (error) {
+    if (!isCode(error, "ENOENT")) throw error;
+  }
+  await atomicWriteJson(path, value);
 }
 
 async function assertChangeTargetsCurrent(project: ResolvedProject, change: MemoryChangeSet): Promise<void> {

@@ -1,9 +1,9 @@
 ---
 id: 20260818-view-settings-scope
-status: in_progress
 type: feature
 created: 2026-08-18
 run_id: run-20260818-083235z-a7f9a6e1
+completed_at: 2026-08-19
 ---
 
 # View Project 切换与双 Scope 配置中心
@@ -72,4 +72,9 @@ View 侧栏当前把 Project 选择框复用为搜索框样式，并和文字“
 
 ## 验收结果
 
-开发中。
+- 已完成侧栏 Project 选择器、配置中心进入/退出、双 Scope 分组导航及全局与 Project 配置独立保存生命周期，并由提需方完成真实 View 验收。
+- Artifact Review `review-20260818-092150z-51a81be9` 第一轮收齐 4/4 份评审，负责人决策票及研发、测试、架构建议票均为通过，Runner 已确认通过。
+- 2026-08-19 执行全量回归：`npm test` 348 项全部通过；`npm run typecheck`、`npm run build`、`npm run smoke:project`、`memsphere validate` 和 `git diff --check` 均通过。
+- 后续范围不包含 Project 生命周期管理 UI、Store 模式转换、Secret 管理、View 远程启停和跨 Project 聚合能力。
+- 残留非阻塞风险：某个已注册 Project 的 `config.json` 损坏时，全局 Provider 引用扫描可能阻断 Global Settings；本轮实现符合扫描全部有效 Project 的需求，后续可单独增加坏 Project 降级与提示能力。
+- 当前无阻止 completed 归档的已知问题。

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { projectCreateCommand } from "../src/commands/project.js";
-import { runGit } from "../src/git.js";
+import { gitOutput, runGit } from "../src/git.js";
 import {
   checkpointWorkspaceChanges,
   editMemories,
@@ -184,6 +184,48 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     await recoverMemory("Shared", "restore");
     assert.match(await readFile(join(memoryRoot, "concepts", "shared.yaml"), "utf8"), /Outside/);
     assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
+
+    if (process.platform !== "win32") {
+      const failed = await editMemories({ references: ["concepts/Atomic Failure"] });
+      const projectRoot = registry.projects.project.root;
+      const configPath = join(projectRoot, "config.json");
+      const revisionBefore = JSON.parse(await readFile(configPath, "utf8")).store.published_revision as string;
+      await chmod(projectRoot, 0o555);
+      try {
+        await assert.rejects(publishMemoryChange(failed.change.id), /EACCES|permission denied/);
+      } finally {
+        await chmod(projectRoot, 0o755);
+      }
+      const revisionAfter = JSON.parse(await readFile(configPath, "utf8")).store.published_revision as string;
+      const savedChange = JSON.parse(await readFile(
+        join(projectRoot, "changes", failed.change.id, "change.json"),
+        "utf8"
+      )) as { status: string; published_revision?: string };
+      assert.equal(await gitOutput(["rev-parse", "HEAD"], memoryRoot), revisionBefore);
+      assert.equal(revisionAfter, revisionBefore);
+      assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
+      assert.equal(savedChange.status, "draft");
+      assert.equal(savedChange.published_revision, undefined);
+
+      const auditFailed = await editMemories({ references: ["concepts/Audit Failure"] });
+      const auditChangeRoot = join(projectRoot, "changes", auditFailed.change.id);
+      await chmod(auditChangeRoot, 0o555);
+      try {
+        await assert.rejects(publishMemoryChange(auditFailed.change.id), /EACCES|permission denied/);
+      } finally {
+        await chmod(auditChangeRoot, 0o755);
+      }
+      const configAfterAuditFailure = JSON.parse(await readFile(configPath, "utf8")).store.published_revision as string;
+      const savedAuditChange = JSON.parse(await readFile(
+        join(auditChangeRoot, "change.json"),
+        "utf8"
+      )) as { status: string; published_revision?: string };
+      assert.equal(await gitOutput(["rev-parse", "HEAD"], memoryRoot), revisionBefore);
+      assert.equal(configAfterAuditFailure, revisionBefore);
+      assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
+      assert.equal(savedAuditChange.status, "draft");
+      assert.equal(savedAuditChange.published_revision, undefined);
+    }
   } finally {
     process.chdir(previous.cwd);
     if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;
