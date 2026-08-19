@@ -26,8 +26,9 @@ run_id: run-20260819-044429z-54cc1d68
 
 - 针对性 Run output 与 Prompt 测试：26/26 通过。
 - `npm run typecheck`：通过。
-- `npm test`：347/347 通过。
+- `npm test`：360/360 通过。
 - `npm run build`：通过。
+- `npm run smoke:project`：通过。
 - `memsphere validate`：通过。
 - `memsphere --project memorybase validate`：通过。
 - 当前 worktree `.memsphere/memory` 使用显式临时配置执行仓库 validator：0 issues；5 份对应文件与 `reserved-memory` 源逐字一致。
@@ -49,4 +50,3 @@ run_id: run-20260819-044429z-54cc1d68
 ## 残留问题
 
 - 提需方尚需在实际 View 中确认视觉层级和文案偏好；自动化测试已覆盖结构、回退和窄屏溢出。
-- Git commit 由后续 Human 步骤决定，本记录归档不代表已提交代码。
