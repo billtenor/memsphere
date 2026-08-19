@@ -1,8 +1,8 @@
 !statement
 syntax: memsphere-20260721-stable
 names:
-  - 通用需求规范
   - memsphere-general-requirement-rules
+  - 通用需求规范
 defines:
   - 规定软件需求进入开发前必须明确的内容和兼容性决策。
 asserts:

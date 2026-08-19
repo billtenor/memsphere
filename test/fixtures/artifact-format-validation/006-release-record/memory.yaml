@@ -1,6 +1,7 @@
 !schema
 syntax: memsphere-20260719-stable
 names:
+  - release-record
   - 发布记录
   - 版本发布记录
 defines:

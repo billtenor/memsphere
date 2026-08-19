@@ -12,8 +12,8 @@ import type {
   StatementNode
 } from "./ast.js";
 import {
+  canonicalMemoryNameIssue,
   canonicalMemoryReference,
-  normalizeMemoryName,
   parseLogicalMemoryReference
 } from "./logical-reference.js";
 import type { MemoryFile } from "./store.js";
@@ -23,12 +23,13 @@ export type MemoryReferenceIssue = {
   message: string;
 };
 
-type ExpectedKind = "concepts" | "statements" | "schemas";
+type ExpectedKind = "concepts" | "statements" | "schemas" | "procedures";
 
 type ReferenceEdge = {
   source: string;
   sourcePath: string;
   target: string;
+  form: "logical-reference" | "canonical-name";
   expected: readonly ExpectedKind[];
   filePath: string;
 };
@@ -41,14 +42,9 @@ export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryRe
   for (const file of files) {
     const reference = canonicalMemoryReference(file.kind, file.entity.names[0] ?? "");
     if (!reference) continue;
-    for (const rawName of file.entity.names) {
-      const name = normalizeMemoryName(rawName);
-      if (!name) continue;
-      const aliasReference = canonicalMemoryReference(file.kind, name)!;
-      const matches = byReference.get(aliasReference) ?? new Set<string>();
-      matches.add(reference);
-      byReference.set(aliasReference, matches);
-    }
+    const matches = byReference.get(reference) ?? new Set<string>();
+    matches.add(reference);
+    byReference.set(reference, matches);
   }
 
   for (const file of files) {
@@ -66,27 +62,41 @@ export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryRe
       });
       continue;
     }
-    const parsed = parseLogicalMemoryReference(edge.target);
-    if (!parsed) {
-      issues.push({
-        path: edge.filePath,
-        message: `${edge.sourcePath}: invalid !ref target "${edge.target}"; expected logical reference`
-      });
-      continue;
+    let targetReference: string | undefined;
+    if (edge.form === "logical-reference") {
+      const parsed = parseLogicalMemoryReference(edge.target);
+      if (!parsed) {
+        issues.push({
+          path: edge.filePath,
+          message: `${edge.sourcePath}: invalid !ref target "${edge.target}"; expected canonical logical reference`
+        });
+        continue;
+      }
+      if (!edge.expected.includes(parsed.kind as ExpectedKind)) {
+        issues.push({
+          path: edge.filePath,
+          message: `${edge.sourcePath}: !ref target "${edge.target}" has kind ${parsed.kind}; expected ${edge.expected.join(" or ")}`
+        });
+        continue;
+      }
+      targetReference = canonicalMemoryReference(parsed.kind, parsed.name);
+    } else {
+      const nameIssue = canonicalMemoryNameIssue(edge.target);
+      if (nameIssue) {
+        issues.push({
+          path: edge.filePath,
+          message: `${edge.sourcePath}: invalid canonical Memory target "${edge.target}": ${nameIssue}`
+        });
+        continue;
+      }
+      targetReference = canonicalMemoryReference(edge.expected[0], edge.target);
     }
-    if (!edge.expected.includes(parsed.kind as ExpectedKind)) {
-      issues.push({
-        path: edge.filePath,
-        message: `${edge.sourcePath}: !ref target "${edge.target}" has kind ${parsed.kind}; expected ${edge.expected.join(" or ")}`
-      });
-      continue;
-    }
-    const targetReference = canonicalMemoryReference(parsed.kind, parsed.name)!;
+    if (!targetReference) continue;
     const targets = byReference.get(targetReference);
     if (!targets || targets.size === 0) {
       issues.push({
         path: edge.filePath,
-        message: `${edge.sourcePath}: !ref target "${edge.target}" was not found`
+        message: `${edge.sourcePath}: Memory target "${edge.target}" was not found`
       });
       continue;
     }
@@ -108,6 +118,9 @@ function collectReferenceEdges(entity: MemoryEntity, source: string, filePath: s
 
   switch (entity.tag) {
     case "!concept":
+      for (const [index, target] of (entity.extends ?? []).entries()) {
+        edges.push(canonicalNameEdge(source, filePath, `extends[${index}]`, target, "concepts"));
+      }
       break;
     case "!statement":
       collectStatementSections(entity.sections ?? [], source, filePath, "sections", edges);
@@ -177,6 +190,7 @@ function collectSchemaRefs(
       source,
       sourcePath: `${path}.optional`,
       target: "__invalid_optional_context__",
+      form: "canonical-name",
       expected: ["schemas"],
       filePath
     });
@@ -248,6 +262,7 @@ function collectFlowRefs(
         collectFlowRefs(node.do, source, filePath, `${childPath}.do`, edges);
         break;
       case "!call":
+        edges.push(canonicalNameEdge(source, filePath, `${childPath}.target`, node.target, "procedures"));
         break;
     }
   }
@@ -270,7 +285,11 @@ function collectArtifactRefs(
   path: string,
   edges: ReferenceEdge[]
 ): void {
-  if (!artifact.schema || typeof artifact.schema === "string") return;
+  if (!artifact.schema) return;
+  if (typeof artifact.schema === "string") {
+    edges.push(canonicalNameEdge(source, filePath, `${path}.schema`, artifact.schema, "schemas"));
+    return;
+  }
   if (artifact.schema.tag === "!ref") {
     edges.push(referenceEdge(source, filePath, `${path}.schema`, artifact.schema, ["schemas"]));
     return;
@@ -285,7 +304,17 @@ function referenceEdge(
   ref: MemoryRefNode,
   expected: readonly ExpectedKind[]
 ): ReferenceEdge {
-  return { source, sourcePath, target: ref.target, expected, filePath };
+  return { source, sourcePath, target: ref.target, form: "logical-reference", expected, filePath };
+}
+
+function canonicalNameEdge(
+  source: string,
+  filePath: string,
+  sourcePath: string,
+  target: string,
+  expected: ExpectedKind
+): ReferenceEdge {
+  return { source, sourcePath, target, form: "canonical-name", expected: [expected], filePath };
 }
 
 function detectReferenceCycles(graph: ReadonlyMap<string, readonly ReferenceEdge[]>): MemoryReferenceIssue[] {

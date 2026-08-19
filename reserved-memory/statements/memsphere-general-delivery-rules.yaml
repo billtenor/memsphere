@@ -1,8 +1,8 @@
 !statement
 syntax: memsphere-20260721-stable
 names:
-  - 通用交付规范
   - memsphere-general-delivery-rules
+  - 通用交付规范
 defines:
   - 规定软件需求完成后的通用交付与归档要求。
 asserts:

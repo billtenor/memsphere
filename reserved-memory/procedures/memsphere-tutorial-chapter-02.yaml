@@ -1,8 +1,8 @@
 !procedure
 syntax: memsphere-20260721-stable
 names:
-  - memsphere 教学流程-第二章
   - memsphere-tutorial-chapter-02
+  - memsphere 教学流程-第二章
 defines:
   - 面向已经完成第一章的用户，介绍 Artifact、Artifact Review、评审席位、参与者及其配置方式。
   - 本章只帮助用户理解相关功能并完成当前环境支持的配置，不发起真实 Artifact Review。

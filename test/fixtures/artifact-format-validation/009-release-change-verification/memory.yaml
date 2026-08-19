@@ -1,6 +1,7 @@
 !schema
 syntax: memsphere-20260719-stable
 names:
+  - release-change-verification
   - 发布变更核验记录
   - 变更核验记录
 defines:
