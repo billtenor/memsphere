@@ -623,6 +623,15 @@ export const browserHtml = String.raw`<!doctype html>
     const artifactReviewSplitKey = "memsphere.artifactReviewSplit.v1";
     const reviewPanelWidthKey = "memsphere.reviewPanelWidth.v1";
     const settingsTokenKey = "memsphere.settingsToken.v1";
+    const settingsRouteDestinations = {
+      overview: { scope: "global", module: "overview" },
+      general: { scope: "global", module: "general" },
+      view: { scope: "global", module: "view" },
+      providers: { scope: "global", module: "providers" },
+      project: { scope: "project", module: "overview" },
+      participants: { scope: "project", module: "participants" }
+    };
+    const initialBrowserRoute = parseBrowserRoute(window.location);
     const displayLanguage = localStorage.getItem(displayLanguageKey) === "yaml" ? "yaml" : "zh";
     const vocabulary = {
       procedures: { zh: "流程", yaml: "procedures" },
@@ -739,18 +748,22 @@ export const browserHtml = String.raw`<!doctype html>
       attempt: { zh: "尝试", yaml: "Attempt" }
     };
     const state = {
-      viewMode: ["memory", "task", "settings"].includes(localStorage.getItem(viewModeKey))
-        ? localStorage.getItem(viewModeKey)
-        : "memory",
-      lastContentViewMode: localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
+      viewMode: routeViewMode(initialBrowserRoute),
+      lastContentViewMode: ["task", "artifact-review"].includes(initialBrowserRoute.page)
+        ? "task"
+        : localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
       payload: null,
       memories: [],
       actorNames: {},
       filtered: [],
       hideSystemMemories: localStorage.getItem(hideSystemMemoriesKey) !== "false",
-      selectedId: null,
-      selectedTaskId: localStorage.getItem(selectedTaskKey) || null,
-      selectedReviewId: localStorage.getItem(selectedReviewKey) || null,
+      selectedId: initialBrowserRoute.page === "memory"
+        ? initialBrowserRoute.kind + "/" + initialBrowserRoute.name
+        : null,
+      selectedTaskId: initialBrowserRoute.runId || localStorage.getItem(selectedTaskKey) || null,
+      selectedReviewId: initialBrowserRoute.page === "memory-review"
+        ? initialBrowserRoute.reviewId
+        : localStorage.getItem(selectedReviewKey) || null,
       byName: new Map(),
       reviews: [],
       runs: [],
@@ -770,7 +783,7 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewOpenedRounds: readStoredObject(artifactReviewOpenedKey),
       artifactReviewSelectedByRun: readStoredObject(artifactReviewSelectedKey),
       artifactReviewRoundByReview: readStoredObject(artifactReviewRoundKey),
-      artifactReviewModalOpen: false,
+      artifactReviewModalOpen: initialBrowserRoute.page === "artifact-review",
       artifactReviewMobilePane: localStorage.getItem(artifactReviewMobilePaneKey) === "review" ? "review" : "artifact",
       artifactReviewSplit: Number.parseFloat(localStorage.getItem(artifactReviewSplitKey) || "") || 58,
       artifactReviewLocateFailure: "",
@@ -780,10 +793,10 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewReturnFocusTop: null,
       reviewSnapshots: new Map(),
       loadingSnapshots: new Set(),
-      reviewDrawerOpen: false,
+      reviewDrawerOpen: initialBrowserRoute.page === "memory-review",
       reviewPanelWidth: Number.parseFloat(localStorage.getItem(reviewPanelWidthKey) || "") || 380,
       settingsMeta: null,
-      settingsScope: "global",
+      settingsScope: initialBrowserRoute.settings?.scope || "global",
       settingsModules: { global: "overview", project: "overview" },
       settingsScopes: {
         global: { data: null, draft: null, errors: [], confirm: null, notice: "", loading: false },
@@ -792,7 +805,7 @@ export const browserHtml = String.raw`<!doctype html>
       settingsData: null,
       settingsDraft: null,
       settingsErrors: [],
-      settingsModule: "overview",
+      settingsModule: initialBrowserRoute.settings?.module || "overview",
       settingsConfirm: null,
       settingsLoading: false,
       settingsNotice: "",
@@ -806,8 +819,96 @@ export const browserHtml = String.raw`<!doctype html>
       renderLine: 0,
       projects: [],
       currentProject: "",
-      settingsNavExpanded: { global: true, project: true }
+      settingsNavExpanded: { global: true, project: true },
+      routeReady: false,
+      routeApplying: false,
+      routeReplaceNext: true,
+      routeError: "",
+      pendingRoute: initialBrowserRoute,
+      pendingArtifactMaterial: initialBrowserRoute.material || "",
+      pendingFragment: initialBrowserRoute.fragment || "",
+      routeLanding: ["root", "memories"].includes(initialBrowserRoute.page)
+        ? "memories"
+        : initialBrowserRoute.page === "tasks" ? "tasks" : ""
     };
+
+    state.settingsModules[state.settingsScope] = state.settingsModule;
+    if (initialBrowserRoute.page === "artifact-review") {
+      state.artifactReviewSelectedByRun[initialBrowserRoute.runId] = initialBrowserRoute.reviewId;
+      if (initialBrowserRoute.roundId) {
+        state.artifactReviewRoundByReview[initialBrowserRoute.reviewId] = initialBrowserRoute.roundId;
+      }
+    }
+
+    function parseBrowserRoute(locationLike) {
+      const pathname = locationLike.pathname || "/";
+      const parts = pathname.split("/").filter(Boolean);
+      const search = new URLSearchParams(locationLike.search || "");
+      const fragment = locationLike.hash || "";
+      const decoded = value => {
+        try {
+          return decodeURIComponent(value);
+        } catch {
+          return null;
+        }
+      };
+      if (pathname === "/") return { page: "root", fragment };
+      if (pathname === "/memories") return { page: "memories", fragment };
+      if (parts[0] === "memories" && parts.length === 3) {
+        const kind = decoded(parts[1]);
+        const name = decoded(parts[2]);
+        return kind && name
+          ? { page: "memory", kind, name, fragment }
+          : { page: "invalid", mode: "memory", error: "Invalid Memory URL.", fragment };
+      }
+      if (pathname === "/tasks") return { page: "tasks", fragment };
+      if (parts[0] === "tasks" && parts.length === 2) {
+        const runId = decoded(parts[1]);
+        return runId
+          ? { page: "task", runId, fragment }
+          : { page: "invalid", mode: "task", error: "Invalid Task URL.", fragment };
+      }
+      if (parts[0] === "tasks" && parts[2] === "artifact-reviews" && parts.length === 4) {
+        const runId = decoded(parts[1]);
+        const reviewId = decoded(parts[3]);
+        return runId && reviewId
+          ? {
+              page: "artifact-review",
+              runId,
+              reviewId,
+              roundId: search.get("round") || "",
+              material: search.get("material") || "",
+              fragment
+            }
+          : { page: "invalid", mode: "task", error: "Invalid Artifact Review URL.", fragment };
+      }
+      if (parts[0] === "settings" && parts.length === 2) {
+        const moduleName = decoded(parts[1]);
+        const settings = moduleName ? settingsRouteDestinations[moduleName] : null;
+        return settings
+          ? { page: "settings", publicModule: moduleName, settings, fragment }
+          : { page: "invalid", mode: "settings", error: "Settings page not found: " + (moduleName || parts[1]), fragment };
+      }
+      if (parts[0] === "memory-reviews" && parts.length === 2) {
+        const reviewId = decoded(parts[1]);
+        return reviewId
+          ? { page: "memory-review", reviewId, fragment }
+          : { page: "invalid", mode: "memory", error: "Invalid Memory Review URL.", fragment };
+      }
+      return { page: "invalid", mode: "memory", error: "Page not found: " + pathname, fragment };
+    }
+
+    function routeViewMode(route) {
+      if (route.page === "settings" || route.mode === "settings") return "settings";
+      if (["tasks", "task", "artifact-review"].includes(route.page) || route.mode === "task") return "task";
+      if (["root", "memories", "memory", "memory-review"].includes(route.page)) return "memory";
+      const stored = localStorage.getItem(viewModeKey);
+      return ["memory", "task", "settings"].includes(stored) ? stored : "memory";
+    }
+
+    function encodeRoutePart(value) {
+      return encodeURIComponent(String(value || ""));
+    }
 
     function t(key) {
       return vocabulary[key]?.[displayLanguage] || key;
@@ -882,8 +983,8 @@ export const browserHtml = String.raw`<!doctype html>
     el.reviewResizer.title = t("resizeReview") + " · " + t("resetReviewWidth");
     el.artifactReviewModalResizer.setAttribute("aria-label", t("resizeReview"));
     el.artifactReviewModalResizer.title = t("resizeReview") + " · " + t("resetReviewWidth");
-    el.memoryTab.addEventListener("click", () => setViewMode("memory"));
-    el.taskTab.addEventListener("click", () => setViewMode("task"));
+    el.memoryTab.addEventListener("click", () => setViewMode("memory", { landing: true }));
+    el.taskTab.addEventListener("click", () => setViewMode("task", { landing: true }));
     el.settingsTab.addEventListener("click", () => {
       setViewMode(state.viewMode === "settings" ? state.lastContentViewMode : "settings");
     });
@@ -920,6 +1021,9 @@ export const browserHtml = String.raw`<!doctype html>
       }, 0);
     });
     window.addEventListener("resize", () => syncReviewDrawer());
+    window.addEventListener("popstate", () => {
+      applyBrowserRoute(parseBrowserRoute(window.location), { render: true }).catch(renderFatalError);
+    });
 
     loadAll().catch(renderFatalError);
     setInterval(() => {
@@ -944,6 +1048,10 @@ export const browserHtml = String.raw`<!doctype html>
       const requests = [loadMemories(), loadReviews(), loadRuns()];
       if (state.viewMode === "settings") requests.push(loadSettings());
       await Promise.all(requests);
+      if (!state.routeReady) {
+        await applyBrowserRoute(state.pendingRoute, { render: false });
+        state.routeReady = true;
+      }
       ensureSelectedReview();
       renderAll();
     }
@@ -1104,7 +1212,8 @@ export const browserHtml = String.raw`<!doctype html>
       const response = await fetch("/api/runs");
       if (!response.ok) throw new Error(await response.text());
       state.runs = (await response.json()).runs || [];
-      if (!state.runs.some(run => run.id === state.selectedTaskId)) {
+      const explicitRunRoute = !state.routeReady && ["task", "artifact-review"].includes(state.pendingRoute?.page);
+      if (!explicitRunRoute && !state.runs.some(run => run.id === state.selectedTaskId)) {
         state.selectedTaskId = state.runs[0]?.id || null;
         saveSelectedTask();
       }
@@ -1160,6 +1269,12 @@ export const browserHtml = String.raw`<!doctype html>
         state.artifactReviewRoundByReview[reviewId] = roundId;
         state.artifactReviewHistoryRoundId = roundId;
         writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
+        if (state.pendingArtifactMaterial) {
+          const materials = artifactReviewMaterials(context);
+          const material = materials.find(item => item.key === state.pendingArtifactMaterial);
+          state.artifactReviewMaterialBySubmission[context.submission.id] = material?.key || "candidate";
+          state.pendingArtifactMaterial = "";
+        }
         if (!artifactReviewLocalEntry(context)?.dirty) state.artifactReviewConflict = "";
       } finally {
         if (requestId === state.artifactReviewRequest) state.artifactReviewLoading = false;
@@ -1258,6 +1373,8 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function activateSettingsDestination(scopeName, moduleName) {
+      state.routeError = "";
+      state.routeLanding = "";
       if (scopeName !== state.settingsScope) {
         stashSettingsScope();
         applySettingsScope(scopeName);
@@ -2510,6 +2627,196 @@ export const browserHtml = String.raw`<!doctype html>
       return ({ added: "新增", removed: "移除", changed: "修改" })[kind] || kind;
     }
 
+    function memoryForRoute(kind, name) {
+      return state.memories.find(memory =>
+        memory.kind === kind
+        && (memory.id === kind + "/" + name || memory.entity?.names?.includes(name))
+      ) || null;
+    }
+
+    function memoryForReview(review) {
+      const target = review?.target;
+      const comment = review?.comments?.[0];
+      const snapshot = review?.snapshots?.find(item => item.kind === "memory");
+      return state.memories.find(memory => {
+        if (target?.path && memory.path === target.path) return true;
+        if (target?.id && memory.id === target.id) return true;
+        if (comment?.memoryId && memory.id === comment.memoryId) return true;
+        return Boolean(snapshot?.label && memory.path === snapshot.label);
+      }) || null;
+    }
+
+    async function applyBrowserRoute(route, options = {}) {
+      state.routeApplying = true;
+      state.pendingRoute = route;
+      state.pendingFragment = route.fragment || "";
+      state.routeError = "";
+      state.routeLanding = "";
+      state.reviewDrawerOpen = false;
+      state.artifactReviewModalOpen = false;
+      if (el.artifactReviewModal.open) el.artifactReviewModal.close();
+      try {
+        if (route.page === "invalid") {
+          state.viewMode = route.mode || "memory";
+          state.routeError = route.error || "Page not found.";
+        } else if (["root", "memories"].includes(route.page)) {
+          state.viewMode = "memory";
+          state.routeLanding = "memories";
+        } else if (route.page === "memory") {
+          state.viewMode = "memory";
+          const memory = memoryForRoute(route.kind, route.name);
+          if (memory) state.selectedId = memory.id;
+          else {
+            state.selectedId = null;
+            state.routeError = "Memory not found: " + route.kind + "/" + route.name;
+          }
+        } else if (route.page === "memory-review") {
+          state.viewMode = "memory";
+          const review = state.reviews.find(item => item.id === route.reviewId);
+          const memory = memoryForReview(review);
+          if (!review) state.routeError = "Memory Review not found: " + route.reviewId;
+          else if (!memory) state.routeError = "The Memory for this review is unavailable.";
+          else {
+            state.selectedId = memory.id;
+            state.selectedReviewId = review.id;
+            state.reviewDrawerOpen = true;
+            saveSelectedReview();
+          }
+        } else if (route.page === "tasks") {
+          state.viewMode = "task";
+          state.routeLanding = "tasks";
+        } else if (route.page === "task" || route.page === "artifact-review") {
+          state.viewMode = "task";
+          const run = state.runs.find(item => item.id === route.runId);
+          if (!run) {
+            state.selectedTaskId = null;
+            state.routeError = "Task not found: " + route.runId;
+          } else {
+            state.selectedTaskId = run.id;
+            saveSelectedTask();
+            if (route.page === "artifact-review") {
+              const review = artifactReviewSummariesForRun(run).find(item => item.id === route.reviewId);
+              if (!review) state.routeError = "Artifact Review not found: " + route.reviewId;
+              else {
+                state.artifactReviewSelectedByRun[run.id] = review.id;
+                state.artifactReviewRoundByReview[review.id] = route.roundId || review.currentRoundId;
+                state.pendingArtifactMaterial = route.material || "";
+                state.artifactReviewModalOpen = true;
+                writeStoredObject(artifactReviewSelectedKey, state.artifactReviewSelectedByRun);
+                writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
+                await syncArtifactReviewContext(true);
+                if (!el.artifactReviewModal.open) el.artifactReviewModal.showModal();
+              }
+            }
+          }
+        } else if (route.page === "settings") {
+          state.viewMode = "settings";
+          const { scope, module } = route.settings;
+          state.settingsModules[scope] = module;
+          if (scope !== state.settingsScope) {
+            stashSettingsScope();
+            applySettingsScope(scope);
+          }
+          state.settingsModule = module;
+          state.settingsModules[scope] = module;
+          if (!state.settingsMeta || (!state.settingsScopes.global.data && !state.settingsLoading)) {
+            await loadSettings();
+          }
+        }
+        if (state.viewMode === "memory" || state.viewMode === "task") state.lastContentViewMode = state.viewMode;
+        localStorage.setItem(viewModeKey, state.viewMode);
+        if (options.render) renderAll();
+      } finally {
+        state.routeApplying = false;
+      }
+      if (options.render && !state.routeError) {
+        state.routeReplaceNext = true;
+        syncBrowserUrl();
+      }
+      restoreRouteFragment();
+    }
+
+    function settingsPublicModule(scope, module) {
+      return Object.entries(settingsRouteDestinations)
+        .find(([, destination]) => destination.scope === scope && destination.module === module)?.[0]
+        || "overview";
+    }
+
+    function currentBrowserUrl() {
+      let path = "/memories";
+      let search = "";
+      if (state.viewMode === "settings") {
+        path = "/settings/" + settingsPublicModule(state.settingsScope, state.settingsModule);
+      } else if (state.viewMode === "task") {
+        if (state.routeLanding === "tasks") return "/tasks";
+        const run = state.runs.find(item => item.id === state.selectedTaskId) || null;
+        if (!run) path = "/tasks";
+        else if (state.artifactReviewModalOpen) {
+          const review = selectedArtifactReviewSummary();
+          if (review) {
+            path = "/tasks/" + encodeRoutePart(run.id) + "/artifact-reviews/" + encodeRoutePart(review.id);
+            const params = new URLSearchParams();
+            const roundId = state.artifactReviewRoundByReview[review.id] || review.currentRoundId;
+            if (roundId) params.set("round", roundId);
+            const submissionId = state.artifactReviewContext?.submission?.id;
+            const material = submissionId ? state.artifactReviewMaterialBySubmission[submissionId] : "";
+            if (material && material !== "candidate") params.set("material", material);
+            search = params.toString() ? "?" + params.toString() : "";
+          } else path = "/tasks/" + encodeRoutePart(run.id);
+        } else path = "/tasks/" + encodeRoutePart(run.id);
+      } else if (state.reviewDrawerOpen && state.selectedReviewId) {
+        path = "/memory-reviews/" + encodeRoutePart(state.selectedReviewId);
+      } else {
+        if (state.routeLanding === "memories") return "/memories";
+        const memory = state.memories.find(item => item.id === state.selectedId) || null;
+        path = memory?.entity
+          ? "/memories/" + encodeRoutePart(memory.kind) + "/" + encodeRoutePart(primaryName(memory.entity))
+          : "/memories";
+      }
+      const currentBase = window.location.pathname + window.location.search;
+      const nextBase = path + search;
+      const hash = currentBase === nextBase ? window.location.hash : "";
+      return nextBase + hash;
+    }
+
+    function syncBrowserUrl() {
+      if (!state.routeReady || state.routeApplying || state.routeError) return;
+      const next = currentBrowserUrl();
+      const current = window.location.pathname + window.location.search + window.location.hash;
+      if (next === current) {
+        state.routeReplaceNext = false;
+        return;
+      }
+      const method = state.routeReplaceNext ? "replaceState" : "pushState";
+      history[method](null, "", next);
+      state.routeReplaceNext = false;
+    }
+
+    function restoreRouteFragment() {
+      if (!state.pendingFragment) return;
+      const raw = state.pendingFragment.replace(/^#/, "");
+      let id = raw;
+      try { id = decodeURIComponent(raw); } catch { /* Preserve the raw fragment. */ }
+      requestAnimationFrame(() => {
+        const target = document.getElementById(id);
+        if (!target) return;
+        state.pendingFragment = "";
+        target.scrollIntoView({ block: "center" });
+      });
+    }
+
+    function renderRouteError() {
+      el.title.textContent = "Not found";
+      el.subtitle.textContent = window.location.pathname;
+      el.detail.className = "empty";
+      el.detail.textContent = state.routeError;
+    }
+
+    function finishRouteRender() {
+      syncBrowserUrl();
+      restoreRouteFragment();
+    }
+
     function renderAll() {
       document.body.classList.toggle("task-mode", state.viewMode === "task");
       document.body.classList.toggle("settings-mode", state.viewMode === "settings");
@@ -2538,21 +2845,29 @@ export const browserHtml = String.raw`<!doctype html>
         state.reviewDrawerOpen = false;
         syncReviewDrawer();
         renderSettingsNav();
-        renderSettings();
+        if (state.routeError) renderRouteError();
+        else renderSettings();
+        finishRouteRender();
         return;
       }
       if (state.viewMode === "task") {
         renderTaskNav();
-        renderSelectedTask();
-        if (state.artifactReviewModalOpen) renderArtifactReviewPanel();
+        if (state.routeError) renderRouteError();
+        else {
+          renderSelectedTask();
+          if (state.artifactReviewModalOpen) renderArtifactReviewPanel();
+        }
         restoreOpenInlineEditor();
+        finishRouteRender();
         return;
       }
       updateMemoryCount();
       renderNav();
-      renderSelected();
+      if (state.routeError) renderRouteError();
+      else renderSelected();
       renderReview();
       restoreOpenInlineEditor();
+      finishRouteRender();
     }
 
     async function handleReviewToggle() {
@@ -2568,6 +2883,7 @@ export const browserHtml = String.raw`<!doctype html>
     async function openArtifactReviewModal(reviewId) {
       const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
       if (!run) return;
+      state.routeLanding = "";
       const reviews = artifactReviewSummariesForRun(run);
       const selected = reviews.find(review => review.id === reviewId)
         || defaultArtifactReviewSummary(run);
@@ -2679,7 +2995,10 @@ export const browserHtml = String.raw`<!doctype html>
       event.preventDefault();
     }
 
-    async function setViewMode(mode) {
+    async function setViewMode(mode, options = {}) {
+      state.routeError = "";
+      if (options.landing) state.routeLanding = mode === "task" ? "tasks" : mode === "memory" ? "memories" : "";
+      else if (mode === "settings") state.routeLanding = "";
       state.viewMode = mode;
       if (mode === "memory" || mode === "task") state.lastContentViewMode = mode;
       localStorage.setItem(viewModeKey, mode);
@@ -2779,6 +3098,7 @@ export const browserHtml = String.raw`<!doctype html>
     function setReviewDrawer(open) {
       state.reviewDrawerOpen = Boolean(open);
       syncReviewDrawer();
+      syncBrowserUrl();
       if (state.reviewDrawerOpen) requestAnimationFrame(() => el.reviewClose.focus());
       else el.reviewToggle.focus();
     }
@@ -2818,6 +3138,8 @@ export const browserHtml = String.raw`<!doctype html>
           button.textContent = memory.error ? invalidMemoryName(memory) : primaryName(memory.entity);
           button.title = memory.error ? errorText(memory.error) : primaryName(memory.entity);
           button.addEventListener("click", () => {
+            state.routeError = "";
+            state.routeLanding = "";
             state.selectedId = memory.id;
             renderAll();
           });
@@ -2896,6 +3218,8 @@ export const browserHtml = String.raw`<!doctype html>
           }
           button.append(title, meta);
           button.addEventListener("click", async () => {
+            state.routeError = "";
+            state.routeLanding = "";
             const changedTask = state.selectedTaskId !== run.id;
             state.selectedTaskId = run.id;
             saveSelectedTask();
@@ -3462,7 +3786,7 @@ export const browserHtml = String.raw`<!doctype html>
     function selectedMemory() {
       const snapshot = currentReviewSnapshot("memory");
       if (snapshot?.memory) return snapshot.memory;
-      return state.filtered.find((item) => item.id === state.selectedId)
+      return state.memories.find((item) => item.id === state.selectedId)
         || state.filtered[0];
     }
 
@@ -3949,6 +4273,8 @@ export const browserHtml = String.raw`<!doctype html>
     function openMemoryReference(reference) {
       const target = memoryByReference(reference);
       if (!target) return;
+      state.routeError = "";
+      state.routeLanding = "";
       state.viewMode = "memory";
       localStorage.setItem(viewModeKey, "memory");
       state.selectedId = target.id;
@@ -4095,6 +4421,8 @@ export const browserHtml = String.raw`<!doctype html>
       link.addEventListener("click", (event) => {
         event.preventDefault();
         if (target) {
+          state.routeError = "";
+          state.routeLanding = "";
           state.viewMode = "memory";
           localStorage.setItem(viewModeKey, "memory");
           state.selectedId = target.id;
@@ -4348,6 +4676,8 @@ export const browserHtml = String.raw`<!doctype html>
         event.stopPropagation();
         const target = state.byName.get(schemaName);
         if (target) {
+          state.routeError = "";
+          state.routeLanding = "";
           state.viewMode = "memory";
           localStorage.setItem(viewModeKey, "memory");
           state.selectedId = target.id;
@@ -5694,6 +6024,7 @@ export const browserHtml = String.raw`<!doctype html>
       el.artifactReviewArtifactContent.innerHTML = "";
       el.artifactReviewMaterialSelector.append(renderArtifactReviewMaterialSelector(context, selectedMaterial));
       el.artifactReviewArtifactContent.append(renderArtifactReviewSubmission(context, selectedMaterial));
+      syncBrowserUrl();
     }
 
     function renderArtifactReviewSubmission(context, selectedMaterial) {
@@ -7332,6 +7663,8 @@ export const browserHtml = String.raw`<!doctype html>
         meta.append(pill(review.comments.length + " comments"));
         button.append(title, meta);
         button.addEventListener("click", () => {
+          state.routeError = "";
+          state.routeLanding = "";
           state.selectedReviewId = state.selectedReviewId === review.id ? null : review.id;
           saveSelectedReview();
           renderAll();
