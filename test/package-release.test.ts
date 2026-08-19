@@ -23,7 +23,7 @@ test("npm package preserves the memsphere first-use bootstrap contract", async (
   for (const instruction of [
     "npm install -g memsphere",
     "memsphere skill init --global",
-    "memsphere init",
+    "memsphere project create my-project --bind",
     "memsphere 教学流程-第一章"
   ]) {
     assert.match(readme, new RegExp(instruction));

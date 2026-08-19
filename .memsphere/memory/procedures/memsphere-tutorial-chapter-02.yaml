@@ -22,10 +22,10 @@ flow:
       action: 检查教学准入要求，判断是否仍有任何一项未满足。
       actor: agent
       asserts:
-        - 必须已经安装 memsphere npm 包与 memsphere skill，并由 human 在准备使用的真实工程或练习目录中执行 memsphere init。
-        - 当前 scope 的 config 与 Memory Store 必须可用，且 memsphere validate 必须通过。
+        - 必须已经安装 memsphere npm 包与 memsphere skill，并存在可用 Project；当前 Workspace 必须绑定 Primary Project。
+        - 当前 Project 的 config 与 Memory Store 必须可用，且 memsphere validate 必须通过。
         - memsphere View 必须使用当前环境可访问的 Host 和一个可用端口成功启动，且 agent 已确认访问地址可用；首次配置时端口可以由 agent 随机选择。
-        - 必须实际检查 memsphere CLI 与 skill、当前 scope、config、Memory Store 和 memsphere validate 结果，不得依据默认值或历史结果推断。
+        - 必须实际检查 memsphere CLI 与 skill、Project Binding、config、Memory Store 和 memsphere validate 结果，不得依据默认值或历史结果推断。
         - 任一准入项无法确认时，必须判定为尚未满足。
       artifact: !artifact
         name: 是否仍有未满足的教学准入要求
@@ -35,7 +35,7 @@ flow:
         action: 定位未满足的准入项，完成 agent 可以安全处理的事项，并为必须由 human 完成的事项给出最小操作和影响说明。
         actor: agent
         asserts:
-          - 不得代替 human 执行 memsphere init，不得为通过准入而修改 System Memory、覆盖用户 Memory 或降低校验标准。
+          - 不得替 human 猜测 Primary Project；需要新建或绑定时说明 `memsphere project create <name> --bind` 或 `memsphere project bind <name>` 的影响。
           - View 尚不可用时，agent 必须根据当前环境选择 Host 和可用端口、启动或重启 View，并实际确认访问地址可用。
         artifact: !artifact
           name: 教学准入处理结果
@@ -213,9 +213,9 @@ flow:
           - Agent 参与者只能选择已支持的 Provider 和可选模型；Provider 自身要求的认证必须由 human 完成。
           - 修改后必须运行 memsphere validate；View 运行配置尚未生效时必须执行 memsphere view restart。
         suggests:
-          - 可先运行 memsphere validate 确认当前 scope 的 config 路径，再读取并只修改 control_plane。
+          - 可先运行 memsphere project show 与 memsphere validate 确认当前 Project，再读取并只修改 Project config 中的 control_plane。
           - Human 参与者写入 control_plane.actors，kind 使用 human，并配置 name 与 permissions。
-          - Agent 参与者写入 control_plane.actors，kind 使用 agent，并在 agent 中配置 provider 与可选 model；Provider 的非敏感参数和超时写入 control_plane.acp_providers。
+          - Agent 参与者写入 Project config.json 的 control_plane.actors，kind 使用 agent，并在 agent 中配置 provider 与可选 model；Provider 的非敏感参数和超时写入 Memsphere Home config.json 的 acp_providers。
           - 可使用 View 的 Provider 检测结果了解 CLI 是否已安装；Agent 可以安全完成的安装与检查由 Agent 执行，认证和账户配置交给 human。
           - |-
             仅配置一名 Human 评审者时，可以把下面的 control_plane 合并进现有 config.json：

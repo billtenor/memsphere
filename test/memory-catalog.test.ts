@@ -113,6 +113,7 @@ test("catalog resolve never reads and catalog read fetches only the unique candi
   const catalog = new DefaultMemoryCatalog(provider);
 
   assert.equal((await catalog.resolve("记忆")).reference, "concepts/Memory");
+  assert.equal((await catalog.resolve("concepts/记忆")).reference, "concepts/Memory");
   assert.deepEqual(provider.readCalls, []);
   assert.deepEqual(await catalog.read("concepts/Memory"), entity);
   assert.deepEqual(provider.readCalls, ["opaque-1"]);
@@ -153,7 +154,7 @@ test("catalog rejects missing memories and conflicting explicit kinds without re
 
   await assert.rejects(catalog.read("missing"), MemoryNotFoundError);
   await assert.rejects(catalog.read("concepts/Memory", { kind: "schemas" }), MemoryReferenceKindError);
-  await assert.rejects(catalog.read("concepts/记忆"), MemoryNotFoundError);
+  await assert.rejects(catalog.read("concepts/unknown"), MemoryNotFoundError);
   assert.deepEqual(provider.readCalls, []);
 });
 

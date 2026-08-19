@@ -1,5 +1,10 @@
 import type { DefinitionPart, MemoryEntity } from "./ast.js";
-import { isMemoryKind, type MemoryKind } from "./kinds.js";
+import type { MemoryKind } from "./kinds.js";
+import {
+  canonicalMemoryReference,
+  normalizeMemoryName,
+  parseLogicalMemoryReference
+} from "./logical-reference.js";
 import type { MemoryProvider, ProviderMemoryDescriptor } from "./provider.js";
 
 export type MemoryDescriptor = {
@@ -11,6 +16,9 @@ export type MemoryDescriptor = {
     statement?: number;
     schema?: number;
   };
+  project_name?: string;
+  revision?: string;
+  frozen?: string;
 };
 
 export type MemoryListQuery = {
@@ -59,7 +67,14 @@ export class MemoryNotFoundError extends Error {
 
 export class MemoryAmbiguityError extends Error {
   constructor(readonly input: string, readonly candidates: string[]) {
-    super(`memory "${input}" is ambiguous. Candidates: ${candidates.join(", ")}. Read a logical reference or narrow the search with --kind.`);
+    const projects = new Set(candidates.flatMap((candidate) => {
+      const separator = candidate.indexOf(":");
+      return separator > 0 ? [candidate.slice(0, separator)] : [];
+    }));
+    const guidance = projects.size > 1
+      ? "Select one Project with --project <name>."
+      : "Read a logical reference or narrow the search with --kind.";
+    super(`memory "${input}" is ambiguous. Candidates: ${candidates.join(", ")}. ${guidance}`);
     this.name = "MemoryAmbiguityError";
   }
 }
@@ -87,7 +102,7 @@ export class DefaultMemoryCatalog implements MemoryCatalog {
 
   async list(query: MemoryListQuery = {}): Promise<MemoryListPage> {
     const index = await this.#loadIndex(query.kind);
-    const normalizedQuery = query.query === undefined ? undefined : normalizeName(query.query);
+    const normalizedQuery = query.query === undefined ? undefined : normalizeMemoryName(query.query);
     const memories = index.entries
       .filter((entry) => normalizedQuery === undefined || entry.descriptor.names.includes(normalizedQuery))
       .map((entry) => entry.descriptor)
@@ -104,6 +119,7 @@ export class DefaultMemoryCatalog implements MemoryCatalog {
   async read(referenceOrName: string, query: MemoryResolveQuery = {}): Promise<MemoryEntity> {
     const index = await this.#loadIndex(query.kind);
     const entry = resolveEntry(index.entries, referenceOrName, query);
+    if (entry.descriptor.frozen) throw new MemoryFrozenError(entry.descriptor.reference, entry.descriptor.frozen);
     try {
       return await this.#provider.read(entry.providerId);
     } catch {
@@ -122,6 +138,13 @@ export class DefaultMemoryCatalog implements MemoryCatalog {
     const fatalIssue = index.issues.find((issue) => issue.message.startsWith("invalid "));
     if (fatalIssue) throw new MemoryCatalogDataError(fatalIssue.message);
     return index;
+  }
+}
+
+export class MemoryFrozenError extends Error {
+  constructor(readonly reference: string, readonly reason: string) {
+    super(`memory "${reference}" is frozen: ${reason}`);
+    this.name = "MemoryFrozenError";
   }
 }
 
@@ -145,7 +168,7 @@ function buildCatalogIndex(descriptors: ProviderMemoryDescriptor[]): CatalogInde
     }
     providerIds.add(source.id);
 
-    const names = source.names.map(normalizeName);
+    const names = source.names.map(normalizeMemoryName);
     const canonicalName = names[0];
     if (!canonicalName) {
       issues.push({
@@ -156,7 +179,7 @@ function buildCatalogIndex(descriptors: ProviderMemoryDescriptor[]): CatalogInde
       continue;
     }
 
-    const reference = `${source.kind}/${canonicalName}`;
+    const reference = canonicalMemoryReference(source.kind, canonicalName)!;
     const emptyAlias = names.findIndex((name, index) => index > 0 && name.length === 0);
     if (emptyAlias !== -1) {
       issues.push({
@@ -183,7 +206,10 @@ function buildCatalogIndex(descriptors: ProviderMemoryDescriptor[]): CatalogInde
         reference,
         kind: source.kind,
         names,
-        ...definitionSummary
+        ...definitionSummary,
+        ...(source.project_name ? { project_name: source.project_name } : {}),
+        ...(source.revision ? { revision: source.revision } : {}),
+        ...(source.frozen ? { frozen: source.frozen } : {})
       }
     });
   }
@@ -244,15 +270,17 @@ function resolveEntry(
   referenceOrName: string,
   query: MemoryResolveQuery
 ): IndexedMemory {
-  const input = normalizeName(referenceOrName);
-  const explicit = parseLogicalReference(input);
+  const input = normalizeMemoryName(referenceOrName);
+  const explicit = parseLogicalMemoryReference(input);
   if (explicit && query.kind && explicit.kind !== query.kind) {
     throw new MemoryReferenceKindError(explicit.kind, query.kind);
   }
 
   const matches = entries.filter((entry) => {
     if (query.kind && entry.descriptor.kind !== query.kind) return false;
-    if (explicit) return entry.descriptor.reference === `${explicit.kind}/${explicit.name}`;
+    if (explicit) {
+      return entry.descriptor.kind === explicit.kind && entry.descriptor.names.includes(explicit.name);
+    }
     return entry.descriptor.names.includes(input);
   });
 
@@ -260,22 +288,10 @@ function resolveEntry(
   if (matches.length > 1) {
     throw new MemoryAmbiguityError(
       input,
-      matches.map((entry) => entry.descriptor.reference).sort(compareStrings)
+      matches.map((entry) => `${entry.descriptor.project_name ? `${entry.descriptor.project_name}:` : ""}${entry.descriptor.reference}`).sort(compareStrings)
     );
   }
   return matches[0];
-}
-
-function parseLogicalReference(input: string): { kind: MemoryKind; name: string } | undefined {
-  const separator = input.indexOf("/");
-  if (separator <= 0) return undefined;
-  const kind = input.slice(0, separator);
-  if (!isMemoryKind(kind)) return undefined;
-  return { kind, name: normalizeName(input.slice(separator + 1)) };
-}
-
-function normalizeName(value: string): string {
-  return value.trim();
 }
 
 function duplicateValues(values: string[]): string[] {
@@ -289,7 +305,7 @@ function duplicateValues(values: string[]): string[] {
 }
 
 function compareDescriptors(a: MemoryDescriptor, b: MemoryDescriptor): number {
-  return compareStrings(a.reference, b.reference);
+  return compareStrings(`${a.reference}\0${a.project_name ?? ""}`, `${b.reference}\0${b.project_name ?? ""}`);
 }
 
 function compareStrings(a: string, b: string): number {

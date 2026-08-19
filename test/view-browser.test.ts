@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderMarkdownContent } from "../src/commands/view.js";
+import { isViewPagePath, renderMarkdownContent } from "../src/commands/view.js";
 import { browserHtml, shouldRenderMarkdownArtifact, shouldRenderTaskStepArtifact } from "../src/view/browser.js";
 
 test("embedded browser script is valid JavaScript", () => {
@@ -9,21 +9,58 @@ test("embedded browser script is valid JavaScript", () => {
   assert.doesNotThrow(() => new Function(script));
 });
 
-test("Settings is a stable six-module configuration workspace", () => {
+test("View page routes are explicit and never absorb API or unknown paths", () => {
+  for (const path of [
+    "/",
+    "/memories",
+    "/memories/concepts/Memory",
+    "/tasks",
+    "/tasks/run-1",
+    "/tasks/run-1/artifact-reviews/review-1",
+    "/settings/overview",
+    "/settings/participants",
+    "/memory-reviews/review-1"
+  ]) assert.equal(isViewPagePath(path), true, path);
+  for (const path of ["/api/memories", "/api/unknown", "/unknown", "/tasks/run-1/other/review-1"]) {
+    assert.equal(isViewPagePath(path), false, path);
+  }
+});
+
+test("browser script includes URL parsing, canonical history, and popstate restoration", () => {
+  assert.match(browserHtml, /function parseBrowserRoute\(locationLike\)/);
+  assert.match(browserHtml, /function currentBrowserUrl\(\)/);
+  assert.match(browserHtml, /history\[method\]\(null, "", next\)/);
+  assert.match(browserHtml, /window\.addEventListener\("popstate"/);
+  assert.match(browserHtml, /\/memory-reviews\//);
+  assert.match(browserHtml, /\/artifact-reviews\//);
+  assert.match(browserHtml, /pendingArtifactMaterial/);
+});
+
+test("Settings separates the global and Project configuration workspaces", () => {
   assert.match(browserHtml, /id="settings-tab"/);
   assert.match(browserHtml, /class="brand-settings"/);
-  assert.match(browserHtml, /class="sidebar-tools"[\s\S]*id="settings-tab"[\s\S]*<div class="brand">[\s\S]*<h1>memsphere<\/h1>/);
+  assert.match(browserHtml, /<div class="brand">[\s\S]*<h1>memsphere<\/h1>[\s\S]*id="settings-tab"[\s\S]*&#9881;/);
+  assert.match(browserHtml, /class="project-switcher"[\s\S]*id="project-select-label">Project<\/span>[\s\S]*class="project-select"[\s\S]*role="listbox"/);
+  assert.doesNotMatch(browserHtml, /id="project-select" class="search"/);
+  assert.match(browserHtml, /body\.settings-mode \.view-tabs/);
+  assert.match(browserHtml, /state\.viewMode === "settings" \? state\.lastContentViewMode : "settings"/);
   assert.doesNotMatch(browserHtml, /class="view-tab" id="settings-tab"/);
+  assert.match(browserHtml, /\["global", "Memsphere", \[\["overview", "概览"\]/);
+  assert.match(browserHtml, /\["project", "Project · " \+ state\.currentProject, \[\["overview", "概览"\]/);
+  assert.match(browserHtml, /className = "settings-nav-group"/);
+  assert.doesNotMatch(browserHtml, /className = "settings-scope"/);
   assert.match(browserHtml, /\["overview", "概览"\]/);
   assert.match(browserHtml, /\["general", "常规"\]/);
-  assert.match(browserHtml, /\["storage", "存储"\]/);
+  assert.doesNotMatch(browserHtml, /\["storage", "存储"\]/);
+  assert.match(browserHtml, /storageTitle\.textContent = "存储位置"/);
   assert.match(browserHtml, /\["view", "View 服务"\]/);
   assert.match(browserHtml, /\["providers", "ACP Provider"\]/);
   assert.match(browserHtml, /\["participants", "参与者配置"\]/);
   assert.match(browserHtml, /执行者/);
   assert.doesNotMatch(browserHtml, /Runner 不能删除/);
   assert.match(browserHtml, /save\.textContent = "保存"/);
-  assert.match(browserHtml, /state\.settingsModule !== "overview"[\s\S]*renderSettingsActions/);
+  assert.match(browserHtml, /\["general", "view", "providers", "participants"\]\.includes\(state\.settingsModule\)/);
+  assert.match(browserHtml, /heading\.setAttribute\("aria-expanded"/);
   assert.doesNotMatch(browserHtml, /检查并保存/);
   assert.match(browserHtml, /settingsPermissionCheck\("使用默认值"/);
   assert.match(browserHtml, /确认配置变更/);
@@ -120,9 +157,9 @@ test("Task view exposes only Artifact Review and never falls back to Task Review
   assert.doesNotMatch(browserHtml, /Task review ·/);
 });
 
-test("reserved memories must be imported before review creation", () => {
-  assert.match(browserHtml, /selectedMemory\(\)\?\.source === "reserved"/);
-  assert.match(browserHtml, /Import reserved memory before creating a review/);
+test("Memory review creation has no Reserved source branch", () => {
+  assert.doesNotMatch(browserHtml, /selectedMemory\(\)\?\.source === "reserved"/);
+  assert.doesNotMatch(browserHtml, /Import reserved memory before creating a review/);
 });
 
 test("review mutations use button action guards", () => {
@@ -452,7 +489,7 @@ test("Artifact Review keeps local draft text across conflict recovery renders", 
 });
 
 test("initial loading validates the saved review only after its subject data is available", () => {
-  assert.match(browserHtml, /const requests = \[loadMemories\(\), loadReservedMemories\(\), loadReviews\(\), loadRuns\(\)\];\s*if \(state\.viewMode === "settings"\) requests\.push\(loadSettings\(\)\);\s*await Promise\.all\(requests\);\s*ensureSelectedReview\(\);/);
+  assert.match(browserHtml, /const requests = \[loadMemories\(\), loadReviews\(\), loadRuns\(\)\];\s*if \(state\.viewMode === "settings"\) requests\.push\(loadSettings\(\)\);\s*await Promise\.all\(requests\);[\s\S]*?ensureSelectedReview\(\);/);
   assert.doesNotMatch(browserHtml, /async function loadReviews\(\) \{[\s\S]*?state\.reviews =[^}]*ensureSelectedReview\(\);/);
 });
 
@@ -481,20 +518,19 @@ test("comment cards label their navigation action as Go to", () => {
   assert.doesNotMatch(browserHtml, /open\.textContent = "Open"/);
 });
 
-test("browser exposes reserved memory controls", () => {
-  assert.match(browserHtml, /\/api\/reserved-memories/);
-  assert.match(browserHtml, /\/api\/reserved-memories\/import/);
-  assert.match(browserHtml, /Reserved/);
-  assert.match(browserHtml, /Import/);
-  assert.match(browserHtml, /Imported/);
+test("browser does not expose Reserved Memory as a second runtime source", () => {
+  assert.doesNotMatch(browserHtml, /\/api\/reserved-memories/);
+  assert.doesNotMatch(browserHtml, /loadReservedMemories/);
+  assert.doesNotMatch(browserHtml, /filteredReservedMemories/);
+  assert.doesNotMatch(browserHtml, /importReservedMemory/);
 });
 
-test("browser hides installed system memory without hiding reserved memory", () => {
+test("browser can hide installed system memory from the Project Catalog", () => {
   assert.match(browserHtml, /hideSystemMemoriesKey = "memsphere\.hideSystemMemories\.v1"/);
   assert.match(browserHtml, /hideSystemMemories: localStorage\.getItem\(hideSystemMemoriesKey\) !== "false"/);
   assert.match(browserHtml, /if \(state\.hideSystemMemories && isSystemMemory\(memory\)\) return false;/);
-  assert.match(browserHtml, /memory\?\.source !== "reserved" && state\.systemMemoryPaths\.has\(memory\.path\)/);
-  assert.match(browserHtml, /function filteredReservedMemories\(\)/);
+  assert.match(browserHtml, /return memory\?\.system === true;/);
+  assert.doesNotMatch(browserHtml, /systemMemoryPaths/);
   assert.match(browserHtml, /text\.textContent = t\("hideSystemMemories"\)/);
 });
 

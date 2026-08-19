@@ -28,7 +28,7 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     mkdir(join(runDir, "artifacts"), { recursive: true })
   ]);
 
-  await writeFile(join(memoryRoot, "concepts", "memsphere-memory.yaml"), [
+  await writeFile(join(memoryRoot, "concepts", "memory-8aaf6c34fc49.yaml"), [
     "!concept",
     `syntax: ${currentMemorySyntax}`,
     "names: [ Memory, memsphere-memory ]",
@@ -283,7 +283,7 @@ test("a newly added memory comment is current until its source text changes", as
   });
 });
 
-test("Memory nav hides installed system memory but keeps non-system reserved memory visible", async () => {
+test("Memory nav only shows the Project Catalog and can hide installed system memory", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
     page.setDefaultTimeout(5_000);
@@ -293,21 +293,33 @@ test("Memory nav hides installed system memory but keeps non-system reserved mem
       const hideSystem = page.getByLabel("隐藏系统记忆");
       assert.equal(await hideSystem.isChecked(), true);
       await page.locator(".memory-button", { hasText: "User note" }).waitFor();
-      await page.locator(".memory-button", { hasText: "Reserved tip" }).waitFor();
       assert.equal(await page.locator(".memory-button", { hasText: "Memory" }).count(), 0);
+      assert.equal(await page.locator(".memory-button", { hasText: "Reserved tip" }).count(), 0);
       await hideSystem.uncheck();
       await page.locator(".memory-button", { hasText: "Memory" }).waitFor();
       await hideSystem.check();
       assert.equal(await page.locator(".memory-button", { hasText: "Memory" }).count(), 0);
-      assert.equal(await page.locator(".memory-button", { hasText: "Reserved tip" }).count(), 1);
-      await page.locator(".memory-button", { hasText: "Reserved tip" }).click();
-      await page.getByRole("button", { name: "Review", exact: true }).click();
-      const createReview = page.getByRole("button", { name: "Create Review", exact: true });
-      assert.equal(await createReview.isDisabled(), true);
-      assert.equal(await createReview.getAttribute("title"), "Import reserved memory before creating a review");
+      assert.equal(await page.locator(".memory-button", { hasText: "Reserved tip" }).count(), 0);
     } finally {
       await page.close();
     }
+  });
+});
+
+test("Memory API identifies installed system memory independently of its file path", async () => {
+  await withResponsiveView(async (_browser, url) => {
+    const response = await fetch(`${url}/api/memories`);
+    const payload = await response.json() as {
+      memories: Array<{ path: string; system: boolean; entity?: { names?: string[] } }>;
+      systemMemoryPaths?: unknown;
+    };
+    assert.equal(response.status, 200);
+    assert.equal(Object.hasOwn(payload, "systemMemoryPaths"), false);
+    const systemMemory = payload.memories.find((memory) => memory.entity?.names?.[0] === "Memory");
+    assert.equal(systemMemory?.path, "concepts/memory-8aaf6c34fc49.yaml");
+    assert.equal(systemMemory?.system, true);
+    const userMemory = payload.memories.find((memory) => memory.entity?.names?.[0] === "User note");
+    assert.equal(userMemory?.system, false);
   });
 });
 
@@ -355,6 +367,56 @@ test("Task pages do not expose the retired Task Review entry or inline comments"
       assert.equal(await page.getByRole("button", { name: "Review", exact: true }).count(), 0);
       assert.equal(await page.locator('[data-anchor^="task:"] .inline-plus:visible').count(), 0);
       assert.equal(await page.locator(".review-drawer.open").count(), 0);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+test("View deep links restore Memory, Task, Memory Review, and browser history", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+    page.setDefaultTimeout(5_000);
+    try {
+      await page.goto(`${url}/memories/concepts/Memory`);
+      await page.getByRole("heading", { name: "Memory", exact: true }).waitFor();
+      assert.match(await page.locator("#detail").textContent() ?? "", /A system memory fixture/);
+      assert.equal(new URL(page.url()).pathname, "/memories/concepts/Memory");
+
+      await page.goto(`${url}/memories/schemas/${encodeURIComponent("Reviewable schema")}`);
+      await page.getByRole("heading", { name: "Reviewable schema", exact: true }).waitFor();
+      assert.equal(new URL(page.url()).pathname, "/memories/schemas/Reviewable%20schema");
+
+      await page.getByRole("button", { name: "Review", exact: true }).click();
+      await page.getByRole("button", { name: "Create Review", exact: true }).click();
+      await page.waitForFunction(() => location.pathname.startsWith("/memory-reviews/"));
+      const reviewPath = new URL(page.url()).pathname;
+      const reopenedReview = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+      await reopenedReview.goto(url + reviewPath);
+      await reopenedReview.waitForFunction(() => document.body.classList.contains("review-drawer-open"));
+      assert.equal(new URL(reopenedReview.url()).pathname, reviewPath);
+      await reopenedReview.close();
+
+      await page.getByRole("button", { name: "Task", exact: true }).click();
+      assert.equal(new URL(page.url()).pathname, "/tasks");
+      await page.locator(".task-card-main").first().click();
+      assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
+      await page.goBack();
+      await page.waitForURL(url + "/tasks");
+      assert.equal(new URL(page.url()).pathname, "/tasks");
+      await page.goForward();
+      await page.waitForURL(url + `/tasks/${runId}`);
+      await page.getByRole("heading", { name: "Responsive browser fixture", exact: true }).waitFor();
+      assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
+
+      const missing = await browser.newPage();
+      await missing.goto(`${url}/memories/concepts/${encodeURIComponent("Missing memory")}`);
+      await missing.getByRole("heading", { name: "Not found", exact: true }).waitFor();
+      assert.match(await missing.locator("#detail").textContent() ?? "", /Memory not found/);
+      await missing.close();
+
+      assert.equal((await fetch(`${url}/unknown-page`)).status, 404);
+      assert.equal((await fetch(`${url}/api/unknown-page`)).status, 404);
     } finally {
       await page.close();
     }

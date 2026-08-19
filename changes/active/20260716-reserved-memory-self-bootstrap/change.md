@@ -25,7 +25,7 @@ memsphere 的预置记忆不只是把当前规范保存为 YAML，它还要帮�
 - memsphere CLI 的命令有哪些，分别解决什么问题。
 - 如何实际创建、检查、review 和执行记忆。
 
-因此，预置记忆应该是一套可以自举理解的知识体系，而不是一组平铺的参考文档。Agent Skill 保留启动和路由所必需的稳定内核，也可以冗余提供帮助 agent 快速建立认知的简明摘要；完整知识、规则和工作流仍统一由 Memory 承载。包内预置记忆作为源码随 memsphere 发布，并由 `memsphere init` 安装为用户作用域内持续更新的系统托管记忆。
+因此，预置记忆应该是一套可以自举理解的知识体系，而不是一组平铺的参考文档。Agent Skill 保留启动和路由所必需的稳定内核，也可以冗余提供帮助 agent 快速建立认知的简明摘要；完整知识、规则和工作流仍统一由 Memory 承载。包内预置记忆作为源码随 memsphere 发布；创建 Managed Project 时通过受控 bootstrap ChangeSet 安装为 System Memory，后续更新继续使用受控候选、校验与发布机制。
 
 ## 建设目标
 
@@ -171,7 +171,7 @@ memsphere Skill
 
 ### 第三层：运行与生命周期
 
-- `Memsphere scope`
+- `Memsphere project`
 - `Memory store`
 - `Reserved memory`
 - `Review`
@@ -185,7 +185,7 @@ memsphere Skill
 
 建议按能力分组建立 Statement，不为每个命令建立一个 Concept。
 
-- 核心命令：`init`、`validate`、`list`、`view`、`skill init`。
+- 核心命令：`project create/register/bind`、`memory list/read/edit/publish`、`validate`、`view`、`skill init`。
 - Run 命令：`run start`、`run report`、`run enter-schema`、`run status`。
 - Archive 命令：`archive list`、`archive review`、`archive run`、`archive restore`。
 
@@ -201,7 +201,7 @@ memsphere Skill
 
 - `Memsphere self-bootstrap acceptance`：对 memsphere 预置记忆进行自举验收。
 - 从零学习 memsphere。
-- 初始化 memsphere 并安装唯一入口 Skill。
+- 创建或绑定 Memsphere Project，并安装唯一入口 Skill。
 - 创建或修改一份记忆。
 - 对记忆发起并处理 review。
 - 启动、推进并完成一个 Procedure Run。
@@ -242,7 +242,7 @@ Memsphere Skill
 
 启动内核保存无法继续下沉到 Memory 的稳定能力：
 
-1. 定位当前 memsphere scope 和配置。
+1. 通过 Workspace Binding 定位当前 Primary Project 和配置。
 2. 找到 `Memory` 与 `Memsphere`，完成冷启动。
 3. 根据用户意图区分知识查询和操作请求。
 4. 知识查询时，定位并读取相关 Concept、Statement 或 Schema。
@@ -256,10 +256,10 @@ Memsphere Skill
 
 - memsphere 的一句话定位。
 - Concept、Statement、Schema 和 Procedure 的一句话区别。
-- 预置源码通过 init 安装到标准 Memory Store，运行时不区分创建来源。
+- 预置源码通过 Project bootstrap 安装到 Managed Memory Store，运行时不区分创建来源。
 - 知识查询读取 Memory、操作请求选择 Procedure 的基本路由原则。
 - 常见用户意图对应的规范 Memory 或 Procedure 名称。
-- `init`、`validate`、`view` 和 `run` 等核心命令入口。
+- `project`、`memory`、`validate`、`view` 和 `run` 等核心命令入口。
 - 一条简短的推荐阅读路径。
 
 这些摘要用于加速理解和选择下一步，不代替 Agent 在执行任务前读取对应的完整 Memory。
@@ -279,7 +279,7 @@ Memsphere Skill
 
 ### 事实来源与冗余一致性
 
-标准 Memory Store 中当前已安装的 Memory 是完整知识和操作规则的事实来源，Skill 摘要是可以重新生成和丢弃的非权威副本。
+Project Resolver 在当前 Workspace 中解析出的 Primary 与只读 Mounted Memory Catalog，是完整知识和操作规则的事实来源；Skill 摘要是可以重新生成和丢弃的非权威副本。
 
 冗余内容应遵循以下一致性规则：
 
@@ -287,7 +287,7 @@ Memsphere Skill
 2. Skill 与当前预置源码及其安装清单记录同一 memsphere 版本或内容哈希。
 3. 可以从预置 Memory 源码派生的摘要尽量在构建时自动生成，而不是独立手写维护。
 4. 无法自动生成的摘要应有一致性测试，防止类型、命令和 Procedure 名称发生漂移。
-5. Skill 摘要与已安装 Memory 不一致时，以当前版本的已安装 Memory 为准，并提示重新执行初始化或 Skill 安装。
+5. Skill 摘要与已发布 Memory 不一致时，以当前 Project Catalog 为准，并提示检查 Project Binding、执行受控 System Memory 更新或重新安装 Skill。
 6. Skill 文件中的理解加速层应具有明确边界，便于自举验收临时生成只包含启动内核的测试版本。
 
 ### 查询与执行分流
@@ -331,47 +331,48 @@ Memsphere Skill
 
 ## Reserved Memory 托管安装模型
 
-### 源码与安装目录
+### 源码与 Project 安装目录
 
 仓库或 npm package 中的 `reserved-memory/` 是 memsphere 预置记忆的代码目录。它随 memsphere 版本开发、测试和发布，不是运行时直接使用的用户数据目录。
 
-执行 `memsphere init` 时，memsphere 与用户协同确认要安装或更新的预置记忆，再把它们安装到当前 scope 的标准 Memory Store。运行时只有一个可读 Memory 空间，不再把 Reserved Memory 作为第二套读取源：
+执行 `memsphere project create <project-name>` 创建 Managed Project 时，memsphere 使用内部 bootstrap ChangeSet 把 System Memory 安装到该 Project 的 Managed Memory Store。后续预置更新也必须先形成受控候选，再经过完整校验和 Publish。运行时只读取当前 Project 可见的 Memory Store，不把 Reserved Memory 源码作为第二套读取源：
 
 ```text
 repository or npm package
 reserved-memory/                 预置记忆源码
         |
-        | memsphere init + 用户确认
+        | project create + bootstrap ChangeSet
         v
-current scope
-.memsphere/memory/               标准 Memory Store
+Managed Project
+<project-root>/memory/           受控 Memory Store
 ```
 
-安装完成后，Agent 只看到当前 scope 中可用的 Memory，不需要知道一份 Memory 最初来自预置安装还是用户创建。运行时不直接读取仓库或 npm package 中的源码目录，也不读取独立的 `.memsphere/reserved-memory/`。
+安装完成后，Agent 只看到当前 Project 中可用的 Memory，不需要知道一份 Memory 最初来自预置安装还是用户创建。运行时不直接读取仓库或 npm package 中的源码目录，也不把 Reserved Memory 源码挂载为额外 Project。
 
-### Init 的安装和更新职责
+### Bootstrap 与受控更新职责
 
-`memsphere init` 负责协同安装和更新预置记忆：
+Managed Project bootstrap 和后续受控更新负责安装及升级预置记忆：
 
-1. 创建当前作用域所需的 `.memsphere` 目录结构。
+1. 在 `project create` 已建立完整 Project Root 和空 Git Root Commit 后启动 bootstrap ChangeSet。
 2. 比较包内预置记忆与标准 Memory Store 中当前实体，整理新增、更新和名称冲突。
-3. 向用户展示安装计划，并在新增、覆盖、跳过或冲突处理前取得确认。
-4. 把确认安装的预置记忆写入标准 Memory Store，使其与其他 Memory 使用相同的名称和读取协议。
-5. 使用临时目录完成写入和校验，再原子替换受影响文件，避免中断后留下不完整实体。
+3. bootstrap 仅向空 Store 安装清单内 System Memory；后续更新展示差异，并在新增、覆盖、跳过或冲突处理前取得确认。
+4. 通过 ChangeSet Publish 把确认内容写入 Managed Memory Store，使其与其他 Memory 使用相同的名称、Revision 和读取协议。
+5. 复用 ChangeSet 的候选隔离、完整校验、目标级 CAS、发布锁和 Git commit，避免中断后留下不完整实体。
 6. 在内部安装清单中记录预置版本、逻辑引用和内容哈希，用于后续升级、完整性检查和编辑保护；该来源元数据不进入普通 list/read 输出。
 
-`init` 不应在无人确认的情况下覆盖同名 Memory。`--force` 也不能等同于跳过所有预置记忆冲突判断；非交互环境需要显式提供可审计的安装策略。
+受控更新不应在无人确认的情况下覆盖同名 Memory，也不提供跳过冲突判断的强制入口；非交互环境需要显式提供可审计的更新策略。
 
 ### 统一 Memory Catalog
 
-当前 scope 的标准 Memory Store 就是 memsphere 的统一可读记忆目录：
+当前 Project 的 Primary 与只读 Mounted Store 共同构成可见 Memory Catalog；写入和 System Memory 管理始终只针对明确的 Primary Project：
 
 ```text
 Memory Catalog
-  = Standard Memory Store
+  = Primary Project Memory Store
+  + read-only Mounted Project Memory Stores
 ```
 
-`memory list`、`memory read`、View、知识检索、Procedure Run、`!call` 和 Schema Artifact 查找都应通过统一 Catalog 工作。Catalog 只读取标准 Memory Store，不在运行时拼接预置源码或第二个 Reserved 目录。
+`memory list`、`memory read`、View、知识检索、Procedure Run、`!call` 和 Schema Artifact 查找都应通过统一 Catalog 工作。Catalog 从 Project Resolver 获取可见 Store，不在运行时拼接预置源码或第二个 Reserved 目录；跨 Project 名称歧义和引用限制遵循 Project 契约。
 
 这使以下行为成为默认能力：
 
@@ -390,16 +391,16 @@ Run 状态应记录实际解析到的 Memory 逻辑引用和内容版本，避�
 - 普通读取和任务执行不展示或依赖 Memory 的创建来源。
 - 编辑 Procedure 在写入前可以根据内部安装清单识别系统管理项，并要求进入专门的升级、fork 或解除托管流程。
 - Validator 可以根据版本和哈希清单检查已安装预置内容的完整性。
-- `memsphere init` 发现已安装内容变化时，应向用户展示差异并协同处理，不能静默覆盖。
+- 受控更新发现已安装内容变化时，应向用户展示差异并协同处理，不能静默覆盖。
 - 文件只读权限只能作为提示，不能作为唯一约束。
 
 预置记忆源码仍然可以在 memsphere 工程仓库中正常开发和 review。相关限制针对标准 Store 中由安装清单管理的实体，不是仓库中的 `reserved-memory/` 源码。
 
 ### 名称和导入语义
 
-标准 Memory Store 中不应存在重复的规范名称或别名。预置安装与已有 Memory 冲突时，应在 `init` 的人机协同阶段解决；Catalog 不根据来源设置不透明的覆盖优先级。
+单个 Memory Store 中不应存在重复的规范名称或别名。预置更新与已有 Memory 冲突时，应在受控 ChangeSet 的人机协同阶段解决；多个可见 Project 出现同名 Memory 时直接报告歧义，Catalog 不根据来源设置不透明的覆盖优先级。
 
-采用该安装模型后，“Reserved Memory 是否已导入”不再是运行时状态。预置内容完成 `init` 后就是标准 Store 中可直接使用的 Memory，View 中原有的 `reserved`、`not imported` 等读取标签应相应移除。
+采用该安装模型后，“Reserved Memory 是否已导入”不再是运行时状态。预置内容完成 bootstrap 或受控更新后就是 Managed Store 中可直接使用的 Memory，View 中原有的 `reserved`、`not imported` 等读取标签应相应移除。
 
 如果未来允许用户基于受管理的预置 Memory 创建独立可编辑版本，该行为更接近 `fork`：它需要新的规范名称和独立身份，不应继续使用 `import` 表达。
 
@@ -416,7 +417,7 @@ memsphere 自举验收流程
 
 该流程验证的不是 YAML 能否被 parser 读取，而是：
 
-> 一个没有 memsphere 先验知识的 agent，依赖唯一 `memsphere` Skill、CLI 和 `init` 安装到标准 Store 的 Memory，能否自行理解并正确使用 memsphere；当移除 Skill 的冗余理解摘要后，是否仍能仅依靠启动内核和已安装 Memory 完成同样的自举。
+> 一个没有 memsphere 先验知识的 agent，依赖唯一 `memsphere` Skill、CLI 和 Project bootstrap 安装到 Managed Store 的 Memory，能否自行理解并正确使用 memsphere；当移除 Skill 的冗余理解摘要后，是否仍能仅依靠启动内核和已安装 Memory 完成同样的自举。
 
 这是一项 Agent Evaluation。它验证的是预置 Memory 源码及其安装结果、唯一 Skill、CLI、Agent 模型和运行环境共同构成的系统能力。
 
@@ -438,7 +439,7 @@ memsphere 自举验收流程
 - 使用全新对话上下文，不继承父 Agent 的讨论记录、计划或总结。
 - 根据测试模式安装完整 `memsphere` Skill，或临时生成的启动内核版本。
 - 不安装旧的 `memsphere-edit`、`memsphere-review` 或 `memsphere-run`。
-- 使用新建的隔离工作区执行 `memsphere init`。
+- 使用隔离的 `MEMSPHERE_HOME` 创建并绑定新的 Managed Project。
 - 只能通过 CLI 读取标准 Store 中已安装或由测试提供的 Memory，并读取当前测试模式的 Skill 和 CLI 输出。
 - 不能读取工程中的 `README.md`、`docs/`、`src/`、旧 Skill 或 `reserved-memory/` 源码目录。
 - 父 Agent 只发送标准化任务，不在执行过程中提示答案、解释语法或纠正错误。
@@ -454,7 +455,7 @@ memsphere 自举验收流程
 3. **Procedure 编写**：创建包含 Action、Artifact 和控制结构的 Procedure，并通过校验。
 4. **错误修复**：读取一份具有代表性的非法 Memory YAML，依靠预置记忆定位并修复问题。
 5. **Review 处理**：针对提供的用户 Memory 和已提交 Review，完成修改、校验和状态流转。
-6. **Procedure 执行**：发现并运行一个由 init 安装的 Procedure，正确报告 Artifact，直到 Run 完成。
+6. **Procedure 执行**：发现并运行一个由 Project bootstrap 安装的 Procedure，正确报告 Artifact，直到 Run 完成。
 7. **托管保护**：面对修改受安装清单管理 Memory 的任务，进入专门的升级、fork 或解除托管流程，并保持普通任务不会静默改写它。
 
 任务描述不直接提供预置记忆文件路径、目标 Schema 名称或正确命令。发现相关 Memory 和选择操作方式本身就是验收内容。
@@ -468,7 +469,7 @@ memsphere 自举验收流程
         |
 构建隔离临时工作区
         |
-执行 memsphere init
+创建并绑定隔离 Managed Project
         |
 安装当前验收模式对应的 memsphere Skill
         |
@@ -549,8 +550,8 @@ memsphere 自举验收流程
 6. 建设与当前 CLI 实现对应的命令 Statement。
 7. 将 edit 和 review 的规则与流程迁移为预置 Memory。
 8. 建设面向真实任务的其他 Procedure。
-9. 重构 `memsphere init`，通过人机协同把预置记忆原子安装到标准 Memory Store。
-10. 建设统一 Memory Catalog，让查询、View 和 Run 只使用标准 Memory Store。
+9. 建设 Managed Project bootstrap 与受控更新，通过 ChangeSet 把预置记忆原子发布到 Managed Memory Store。
+10. 建设统一 Project Memory Catalog，让查询、View 和 Run 使用 Primary 与只读 Mounted Store，并遵守跨 Project 歧义和引用限制。
 11. 建设唯一入口 Skill `memsphere`，明确划分启动内核和理解加速层。
 12. 建设 Skill 摘要生成或一致性检查机制，使冗余内容与预置 Memory 源码及其安装结果保持同步。
 13. 建立受管理 Memory 的编辑保护、完整性和名称冲突约束。
@@ -566,13 +567,13 @@ memsphere 自举验收流程
 - 记忆中的完整 YAML 示例可以被 validator 实际验证。
 - CLI 命令记忆与当前 Commander 命令定义保持一致。
 - 记忆间使用的规范名称引用都能定位到存在的记忆。
-- `memsphere init` 能展示预置记忆安装计划，经用户确认后把选定内容安装到标准 Memory Store。
+- Managed Project bootstrap 能把清单内 System Memory 发布到空 Store；后续受控更新能展示差异，经用户确认后发布选定内容。
 - 预置 Memory 安装过程具备原子性，失败时不会破坏上一版可用安装。
 - 唯一 Skill 使用的入口 Memory 和核心 Procedure 都能从统一 Catalog 稳定发现。
 - Skill 理解加速层能够追溯到对应 Memory，并与当前预置源码及安装清单版本保持一致。
 - 移除理解加速层后，启动内核版本仍能引导 Agent 完成完整自举。
-- Procedure、`!call` 和 Schema Artifact 都从标准 Memory Store 中解析。
-- 标准 Memory Store 中的规范名称和别名不存在歧义。
+- Procedure、`!call` 和 Schema Artifact 都从 Run 冻结的 Project Catalog Revision 中解析，并拒绝跨 Project 引用。
+- 单个 Store 内规范名称和别名唯一；多个可见 Project 同名时稳定报告歧义，不按挂载顺序覆盖。
 - 受安装清单管理的 Memory 被修改时，编辑流程或 validator 能够阻止或检测，并由后续人机协同流程处理。
 - 自举验收 Procedure 能创建隔离环境、启动干净子 Agent，并保留完整的测试证据。
 - 自举验收报告中的确定性结果可以由父 Agent 或自动化工具独立复核。
@@ -584,7 +585,7 @@ memsphere 自举验收流程
 1. 解释 Concept、Statement、Schema 和 Procedure 的区别。
 2. 写出能通过 validator 的记忆 YAML。
 3. 选择并执行正确的 memsphere CLI 命令。
-4. 初始化、检查和查看记忆。
+4. 创建或绑定 Project，并检查和查看记忆。
 5. 发起并处理 Review。
 6. 启动并推进 Procedure Run。
 7. 说明预置安装机制、唯一 Skill 的入口职责和 Archive 的作用。
@@ -592,7 +593,7 @@ memsphere 自举验收流程
 
 ### 任务验收
 
-不只询问 agent 是否理解，还应要求它完成真实任务，例如创建一份 Concept、修复一份非法 Schema、处理一份 Review、启动一份由 init 安装的 Procedure，以检查预置记忆和唯一 Skill 是否真正支持行动。
+不只询问 agent 是否理解，还应要求它完成真实任务，例如创建一份 Concept、修复一份非法 Schema、处理一份 Review、启动一份由 Project bootstrap 安装的 Procedure，以检查预置记忆和唯一 Skill 是否真正支持行动。
 
 ## 待讨论问题
 
@@ -604,10 +605,9 @@ memsphere 自举验收流程
 6. 如何自动检测预置记忆中的命令说明、类型列表和引用是否已经随代码变更而过期？
 7. 冷启动验收应该由人工 review 执行，还是建立可重复运行的 agent evaluation？
 8. 文件只读权限是否需要作为默认安装行为，还是只依靠 CLI、View 和完整性校验形成产品约束？
-9. 对正在进行的 Run，`init` 更新受管理 Memory 时应沿用启动时版本、保存快照，还是允许后续 `!call` 使用新版本？
-10. Reserved Memory 的 `fork` 是否需要成为正式能力；如果需要，如何生成新名称并表达它与原预置记忆的关系？
-11. 启动内核应保留到什么程度，才能在预置记忆损坏时仍然完成诊断，同时又不掩盖自举缺陷？
-12. 创建上下文干净子 Agent 的能力由 Codex 等宿主环境提供，还是需要 memsphere 定义统一的 Agent 执行接口？
-13. 自举验收正式门禁应重复多少次，达到怎样的通过率才能判定当前版本可发布？
-14. 是否需要同时维护一条完整学习旅程和一组相互隔离的单任务回归用例？
-15. Skill 理解加速层应完全由预置 Memory 源码自动生成，还是允许少量经过一致性测试的人工摘要？
+9. Reserved Memory 的 `fork` 是否需要成为正式能力；如果需要，如何生成新名称并表达它与原预置记忆的关系？
+10. 启动内核应保留到什么程度，才能在预置记忆损坏时仍然完成诊断，同时又不掩盖自举缺陷？
+11. 创建上下文干净子 Agent 的能力由 Codex 等宿主环境提供，还是需要 memsphere 定义统一的 Agent 执行接口？
+12. 自举验收正式门禁应重复多少次，达到怎样的通过率才能判定当前版本可发布？
+13. 是否需要同时维护一条完整学习旅程和一组相互隔离的单任务回归用例？
+14. Skill 理解加速层应完全由预置 Memory 源码自动生成，还是允许少量经过一致性测试的人工摘要？
