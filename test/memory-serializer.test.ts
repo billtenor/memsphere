@@ -22,7 +22,7 @@ const entities: MemoryEntity[] = [
   {
     tag: "!concept",
     syntax: currentMemorySyntax,
-    names: ["Memory: core", "记忆 #1"],
+    names: ["memory-core", "记忆 #1"],
     defines: [
       "A multiline\ndefinition",
       {
@@ -38,7 +38,7 @@ const entities: MemoryEntity[] = [
   {
     tag: "!statement",
     syntax: currentMemorySyntax,
-    names: ["Suggestion"],
+    names: ["suggestion"],
     defines: [],
     asserts: ["Statements assert."],
     suggests: ["Statements may suggest."],
@@ -54,7 +54,7 @@ const entities: MemoryEntity[] = [
   {
     tag: "!schema",
     syntax: currentMemorySyntax,
-    names: ["Record"],
+    names: ["record"],
     defines: [],
     format: { name: "markdown", options: { layout: "outline" } },
     fields: [
@@ -96,7 +96,7 @@ const entities: MemoryEntity[] = [
   {
     tag: "!procedure",
     syntax: currentMemorySyntax,
-    names: ["Nested procedure"],
+    names: ["nested-procedure"],
     defines: [],
     asserts: ["Global procedure contracts survive."],
     goals: ["Exercise every flow tag."],
@@ -166,21 +166,21 @@ for (const entity of entities) {
 test("list serializers produce structured machine output and compact text", () => {
   const page = {
     memories: [
-      { reference: "concepts/Memory", kind: "concepts" as const, names: ["Memory", "记忆"], defines: ["A memory."] },
-      { reference: "schemas/Record", kind: "schemas" as const, names: ["Record"], defines: [] }
+      { reference: "concepts/memory", kind: "concepts" as const, names: ["memory", "记忆"], defines: ["A memory."] },
+      { reference: "schemas/record", kind: "schemas" as const, names: ["record"], defines: [] }
     ],
     next_cursor: null
   };
 
   assert.deepEqual(parse(serializeMemoryListYaml(page)), page);
   assert.deepEqual(JSON.parse(serializeMemoryListJson(page)), page);
-  assert.equal(serializeMemoryListText(page), "concepts/Memory (记忆)\nschemas/Record\n");
+  assert.equal(serializeMemoryListText(page), "concepts/memory (记忆)\nschemas/record\n");
   assert.equal(serializeMemoryListText({ memories: [], next_cursor: null }), "");
 });
 
 test("memory node serializers preserve tagged fragments and copyable text references", () => {
   const page = {
-    memory: { reference: "procedures/Flow", kind: "procedures" as const, names: ["Flow"] },
+    memory: { reference: "procedures/flow", kind: "procedures" as const, names: ["flow"] },
     nodes: [{
       node_ref: "action:Result",
       type: "Action" as const,
@@ -203,7 +203,7 @@ test("memory node serializers preserve tagged fragments and copyable text refere
     context: {
       root: {
         tag: "!procedure",
-        names: ["Flow"],
+        names: ["flow"],
         defines: [],
         goals: ["Finish."]
       },

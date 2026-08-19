@@ -19,21 +19,21 @@ test("file provider lists summaries and reads only ids from the current list", a
   await withTempDir(async (memoryRoot) => {
     const path = join(memoryRoot, "concepts", "unrelated-file-name.yaml");
     await mkdir(join(memoryRoot, "concepts"), { recursive: true });
-    await writeFile(path, withCurrentMemorySyntax("!concept\nnames: [Memory, 记忆]\ndefines: [original]\n"));
+    await writeFile(path, withCurrentMemorySyntax("!concept\nnames: [memory, 记忆]\ndefines: [original]\n"));
 
     const provider = new FileMemoryProvider(memoryRoot);
     const descriptors = await provider.list({ kind: "concepts" });
 
-    assert.deepEqual(descriptors, [{ id: path, kind: "concepts", names: ["Memory", "记忆"], defines: ["original"] }]);
+    assert.deepEqual(descriptors, [{ id: path, kind: "concepts", names: ["memory", "记忆"], defines: ["original"] }]);
     await assert.rejects(provider.read(join(memoryRoot, "concepts", "other.yaml")), /not returned by the current list/);
 
-    await writeFile(path, withCurrentMemorySyntax("!concept\nnames: [Changed]\ndefines: [changed]\n"));
-    assert.equal((await provider.read(path)).names[0], "Memory");
+    await writeFile(path, withCurrentMemorySyntax("!concept\nnames: [changed]\ndefines: [changed]\n"));
+    assert.equal((await provider.read(path)).names[0], "memory");
 
     const nextProvider = new FileMemoryProvider(memoryRoot);
     const nextDescriptors = await nextProvider.list({ kind: "concepts" });
-    assert.deepEqual(nextDescriptors[0].names, ["Changed"]);
-    assert.equal((await nextProvider.read(path)).names[0], "Changed");
+    assert.deepEqual(nextDescriptors[0].names, ["changed"]);
+    assert.equal((await nextProvider.read(path)).names[0], "changed");
   });
 });
 
@@ -43,14 +43,14 @@ test("file provider clears ids that were not returned by its latest list", async
     const schemaPath = join(memoryRoot, "schemas", "two.yaml");
     await mkdir(join(memoryRoot, "concepts"), { recursive: true });
     await mkdir(join(memoryRoot, "schemas"), { recursive: true });
-    await writeFile(conceptPath, withCurrentMemorySyntax("!concept\nnames: [One]\ndefines: []\n"));
-    await writeFile(schemaPath, withCurrentMemorySyntax("!schema\nnames: [Two]\ndefines: []\n"));
+    await writeFile(conceptPath, withCurrentMemorySyntax("!concept\nnames: [one]\ndefines: []\n"));
+    await writeFile(schemaPath, withCurrentMemorySyntax("!schema\nnames: [two]\ndefines: []\n"));
 
     const provider = new FileMemoryProvider(memoryRoot);
     await provider.list({ kind: "concepts" });
-    assert.equal((await provider.read(conceptPath)).names[0], "One");
+    assert.equal((await provider.read(conceptPath)).names[0], "one");
     await provider.list({ kind: "schemas" });
     await assert.rejects(provider.read(conceptPath), /not returned by the current list/);
-    assert.equal((await provider.read(schemaPath)).names[0], "Two");
+    assert.equal((await provider.read(schemaPath)).names[0], "two");
   });
 });

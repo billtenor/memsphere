@@ -1,8 +1,8 @@
 !procedure
 syntax: memsphere-20260721-stable
 names:
-  - memsphere 教学流程-第一章
   - memsphere-tutorial-chapter-01
+  - memsphere 教学流程-第一章
 defines:
   - 面向首次使用 memsphere 的用户，在已绑定 Project 的真实 Workspace 或练习目录中逐步理解经验记忆、四类 Memory 及主要用户功能。
   - 每个教学主题都允许 human 留在当前步骤继续讨论，明确选择进入下一步后才继续。

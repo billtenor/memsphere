@@ -1,8 +1,8 @@
 !procedure
 syntax: memsphere-20260721-stable
 names:
-  - Traex ACP 四方评审测试流程
   - traex-artifact-review-smoke
+  - Traex ACP 四方评审测试流程
 defines:
   - 用一份包含多项独立验收约束的发布方案，验证两个 Traex Agent、一个 Human 和 Runner 共同参与的 Artifact Review。
 flow:

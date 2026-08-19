@@ -1,8 +1,8 @@
 !procedure
 syntax: memsphere-20260721-stable
 names:
-  - Traex ACP 代码事实评审测试流程
   - traex-code-fact-review-smoke
+  - Traex ACP 代码事实评审测试流程
 defines:
   - 用一份需要核对当前工作区源码的技术调查报告，验证 Traex Agent Reviewer 会主动读取代码，而不是只根据候选 Artifact 的表述投票。
 flow:

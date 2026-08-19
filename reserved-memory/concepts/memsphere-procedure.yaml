@@ -1,8 +1,8 @@
 !concept
 syntax: memsphere-20260721-stable
 names:
-  - Procedure
   - memsphere-procedure
+  - Procedure
 defines:
   - memsphere 中用于描述一个任务从开始到结束如何执行的 Memory。
   - Procedure 通过 goals 描述目标，通过 asserts 声明全局约束，并通过 flow 安排有序 Action、分支、循环和对子流程的调用；需要 Review 的 Artifact 只声明 Procedure 本地 Slot，Actor Binding 与 Decision Policy 在创建 Run 时选择。
@@ -33,4 +33,4 @@ defines:
       - run report 成功后先返回只确认本次 Run、Artifact 和可选 Review 标识的上报回执；触发 Review 时再返回等待或投票指令，不在 report 阶段提前输出 Review 汇总。run review wait 负责返回当前轮次汇总及投票指令；run review vote 只确认投票结果并返回推进后的下一步，不重复完整汇总。
       - 完成当前步骤后，必须按照 CLI 返回的 Then 命令上报 Artifact；只有 CLI 明确返回 Run 完成状态后才能汇报流程完成和最终产物。
   - !ref
-    target: schemas/Procedure Schema
+    target: schemas/memsphere-procedure-schema

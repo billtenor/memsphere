@@ -144,7 +144,7 @@ const memory = program
 memory
   .command("list")
   .description("List memory entities or the direct child nodes of one memory.")
-  .argument("[reference]", "memory logical reference, canonical name, or alias")
+  .argument("[reference]", "canonical logical reference, or bare canonical name or alias")
   .addOption(new Option("--kind <kind>", "filter or narrow resolution by memory kind").choices([...memoryKinds]))
   .option("--query <text>", "match a top-level canonical name or alias")
   .option("--node <node-ref>", "list direct children of a memory node")
@@ -153,8 +153,8 @@ memory
 
 memory
   .command("read")
-  .description("Read one memory entity by logical reference, canonical name, or alias.")
-  .argument("<reference>", "logical reference, canonical name, or alias")
+  .description("Read one memory entity by canonical logical reference, or bare canonical name or alias.")
+  .argument("<reference>", "canonical logical reference, or bare canonical name or alias")
   .addOption(new Option("--kind <kind>", "narrow name resolution by memory kind").choices([...memoryKinds]))
   .option("--node <node-ref>", "read one memory node with its required context")
   .addOption(new Option("--output <format>", "output format").choices(["yaml", "json"]).default("yaml"))
@@ -162,7 +162,7 @@ memory
 
 memory.command("edit")
   .description("Create or extend a Managed Memory ChangeSet.")
-  .argument("<references...>", "existing names or new logical references")
+  .argument("<references...>", "existing bare selectors or canonical logical references")
   .option("--change <id>", "append targets to an existing ChangeSet")
   .action(memoryEditCommand);
 
@@ -173,7 +173,7 @@ memory.command("delete")
 
 memory.command("rename")
   .argument("<reference>", "existing Memory reference")
-  .argument("<new-name>", "new canonical name")
+  .argument("<new-name>", "new lowercase ASCII kebab-case canonical name")
   .option("--change <id>", "append target to an existing ChangeSet")
   .action(memoryRenameCommand);
 
