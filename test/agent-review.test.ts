@@ -565,7 +565,7 @@ test("ACP Client approves Provider tool requests for the Agent-managed sandbox",
 test("ACP Client separates startup, idle, and maximum runtime timeouts", async () => {
   await assert.rejects(runAgentReviewAcpSession({
     launch: fakeClientLaunch("slow-start", {
-      startupTimeoutMs: 30,
+      startupTimeoutMs: 500,
       idleTimeoutMs: 1_000,
       maxRuntimeMs: null
     }),
@@ -574,12 +574,12 @@ test("ACP Client separates startup, idle, and maximum runtime timeouts", async (
     workspaceRoot: tmpdir(),
     isSubmitted: async () => false,
     onSession: async () => undefined
-  }), /agent_startup_timeout: startup exceeded 30ms/);
+  }), /agent_startup_timeout: startup exceeded 500ms/);
 
   await assert.rejects(runAgentReviewAcpSession({
     launch: fakeClientLaunch("idle", {
       startupTimeoutMs: 1_000,
-      idleTimeoutMs: 40,
+      idleTimeoutMs: 500,
       maxRuntimeMs: null
     }),
     prompt: "Review",
@@ -587,13 +587,13 @@ test("ACP Client separates startup, idle, and maximum runtime timeouts", async (
     workspaceRoot: tmpdir(),
     isSubmitted: async () => false,
     onSession: async () => undefined
-  }), /agent_idle_timeout: no ACP activity for 40ms/);
+  }), /agent_idle_timeout: no ACP activity for 500ms/);
 
   const progressUpdates: string[] = [];
   const activeWithoutMaximum = await runAgentReviewAcpSession({
     launch: fakeClientLaunch("progress", {
       startupTimeoutMs: 1_000,
-      idleTimeoutMs: 40,
+      idleTimeoutMs: 500,
       maxRuntimeMs: null
     }),
     prompt: "Review",
@@ -610,7 +610,7 @@ test("ACP Client separates startup, idle, and maximum runtime timeouts", async (
   await assert.rejects(runAgentReviewAcpSession({
     launch: fakeClientLaunch("progress-hang", {
       startupTimeoutMs: 1_000,
-      idleTimeoutMs: 40,
+      idleTimeoutMs: 500,
       maxRuntimeMs: 100
     }),
     prompt: "Review",

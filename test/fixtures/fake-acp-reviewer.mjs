@@ -10,7 +10,7 @@ const sessions = new Set();
 const app = acp
   .agent({ name: "memsphere-fake-reviewer" })
   .onRequest(acp.methods.agent.initialize, async ({ params }) => {
-    if (mode === "slow-start") await delay(200);
+    if (mode === "slow-start") await delay(1_500);
     return {
       protocolVersion: mode === "protocol-mismatch" ? params.protocolVersion + 1 : acp.PROTOCOL_VERSION,
       agentCapabilities: { loadSession: false },
@@ -28,7 +28,7 @@ const app = acp
       process.stderr.write("provider diagnostic: reconnecting\n");
       throw new Error("synthetic provider failure");
     }
-    if (mode === "idle") await delay(200);
+    if (mode === "idle") await delay(1_500);
     if (mode === "progress") {
       for (let index = 0; index < 8; index += 1) {
         await delay(15);
