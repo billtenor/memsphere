@@ -1,0 +1,97 @@
+!procedure
+syntax: memsphere-20260721-stable
+names:
+  - GitHub PR 评论持续修复流程
+  - GitHub PR Review Comment 循环处理流程
+  - github-pr-continuous-comment-remediation
+defines:
+  - 面向一个 GitHub Pull Request，在同一个 Run 中持续发现和处理新增或更新且尚未处理的 review feedback，直到 PR merged 或 closed。
+  - Human 与 Agent 提交的 review comment 和 thread reply 使用同一套判断、修复与回复规则，不按作者身份区别处理。
+  - 合理意见经过修改和验证后通过正常 commit 与 push 交付，从而自然形成持续评审流程可观察的新 PR head；不合理或无需修改的意见在原 thread 中说明依据。
+asserts:
+  - 必须使用 GitHub thread-aware 数据读取 review thread、comment、回复关系、代码位置、isResolved 和 isOutdated；不得把扁平评论列表当作完整线程状态。
+  - 必须发现并读取当前工程中与评论和变更范围相关的 Concept、Statement、Schema 和 Procedure Memory，并结合完整代码行为判断反馈是否合理。
+  - 所有来源的 review feedback 必须使用相同标准处理；不得因为作者是 Human、Agent、机器人或特定角色而直接接受或拒绝。
+  - 每条进入本流程处理的 review feedback 都必须在原 GitHub thread 中回复实际处置结果；不得只在 Memsphere Artifact 中记录而不回复 GitHub。
+  - 只有实际存在代码变更时才允许 commit 和 push；不得为解释、拒绝或维持循环而制造空 commit。
+  - 只使用 GitHub 原生 PR、commit、review、comment 和 thread 标识以及当前 Run 的处理记录避免重复处理，不得创建外部共享的协作事件或额外 ID。
+goals:
+  - 持续处理 PR 中来自 Human 或 Agent 的新增和更新 review feedback。
+  - 对每条反馈形成有证据的判断，实施合理修改并验证，对拒绝或待澄清意见给出清楚回复。
+  - 通过正常 commit、push 和 thread reply 形成完整、可追溯的修复记录。
+flow:
+  - !action
+    action: 提供需要持续处理 review feedback 的 GitHub Pull Request，并说明已知的修复范围或限制。
+    actor: human
+    artifact: !artifact
+      name: GitHub PR 评论持续修复请求
+      format: markdown
+  - !while
+    condition: !action
+      action: 查询目标 PR，判断其是否仍处于可继续处理 feedback 的 open 状态。
+      actor: agent
+      artifact: !artifact
+        name: PR 是否仍可继续修复
+        type: boolean
+    do:
+      - !action
+        action: 观察目标 PR 的 review threads，首次扫描现有未处理 feedback；此后等待新增或更新且未被当前 Run 处理的 feedback，或等待 PR merged/closed，并记录观察到的原生状态。
+        actor: agent
+        asserts:
+          - 等待可以由 GitHub 原生通知、轮询或宿主提供的唤醒机制实现；不得把 Run 的持久状态误认为后台监听服务已经存在。
+          - 不得仅因暂时没有新 comment 而结束 Run。
+          - 修复 Agent 自己已经提交的处置回复不得仅因是新 comment 而再次成为相同修复任务；回复中出现新的实质性 review feedback 时仍应处理。
+        artifact: !artifact
+          name: PR Review Feedback 观察结果
+          format: markdown
+      - !if
+        condition: !action
+          action: 判断观察结果是否包含新增或更新且尚未处理的实质性 review feedback。
+          actor: agent
+          artifact: !artifact
+            name: 是否发现待处理 Review Feedback
+            type: boolean
+        then:
+          - !action
+            action: 读取相关 thread 的完整上下文、目标代码、PR 当前 head、相关测试和适用工程 Memory，逐条判断 feedback 应接受、拒绝还是请求澄清，并形成可追溯的处置计划。
+            actor: agent
+            asserts:
+              - 接受必须说明问题为何成立和预期修改；拒绝必须说明反馈为何不成立或不适用并提供代码或规则依据；证据不足时必须请求澄清，不得猜测修改。
+              - 必须识别并合并指向同一根因的意见，但仍保留每个 GitHub thread/comment 的独立回复义务。
+              - 已 resolved、已 outdated、纯信息说明或普通处置回复不得被强行转化为代码修改；如其包含新的实质性要求，应按新 feedback 处理。
+            artifact: !artifact
+              name: PR Review Feedback 处置计划
+              format: markdown
+          - !action
+            action: 对接受的 feedback 实施代码修改，运行适用工程 Memory 和变更范围要求的测试与检查；确认本地基线未被并发 push 取代后，仅在存在实际修改时 commit 并 push。
+            actor: agent
+            asserts:
+              - 如果 PR head 在修改期间发生变化，必须重新同步并复核处置计划，禁止覆盖或忽略他人的新提交。
+              - 测试或 push 失败时不得声称意见已经修复，必须保留实际失败证据供回复和后续处理。
+              - 一组相关意见可以由同一提交修复，但修复记录必须能够追溯到每个相关 thread/comment。
+            artifact: !artifact
+              name: PR Feedback 修复与验证记录
+              format: markdown
+          - !action
+            action: 根据实际修改、测试、commit 和 push 结果，在每个已处理 feedback 的原 GitHub thread 中回复接受并修复、拒绝、请求澄清或处理失败的结论与证据，并记录 GitHub 原生引用。
+            actor: agent
+            asserts:
+              - 接受并修复的回复必须说明改动与验证结果，并在存在已推送提交时引用对应 commit；拒绝必须给出技术或工程规则依据。
+              - 不得在修改未完成、测试未得到所述结果或 push 未成功时回复为已经修复。
+              - 是否 resolve thread 必须遵循仓库权限和协作规则；回复完成不自动等价于有权关闭 thread。
+            artifact: !artifact
+              name: GitHub Review Feedback 回复记录
+              format: markdown
+          - !action
+            action: 记录本次处理的 GitHub thread/comment ID、判断、代码变更、验证、commit/push 和回复结果，作为后续观察时避免重复处理的基线。
+            actor: agent
+            artifact: !artifact
+              name: PR Review Feedback 处理记录
+              format: markdown
+  - !action
+    action: 汇总 PR 生命周期内处理的 review feedback、接受与拒绝依据、代码提交、验证结果、GitHub 回复和结束状态。
+    actor: agent
+    artifact: !artifact
+      name: GitHub PR 评论持续修复总结
+      format: markdown
+      final: true
