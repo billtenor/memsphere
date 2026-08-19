@@ -7,8 +7,9 @@ const testFiles = (await readdir(testDirectory))
   .filter((name) => name.endsWith(".test.ts"))
   .sort()
   .map((name) => fileURLToPath(new URL(name, testDirectory)));
+const testRunnerArguments = process.argv.slice(2);
 
-const result = spawnSync(process.execPath, ["--import", "tsx", "--test", ...testFiles], {
+const result = spawnSync(process.execPath, ["--import", "tsx", "--test", ...testRunnerArguments, ...testFiles], {
   stdio: "inherit"
 });
 

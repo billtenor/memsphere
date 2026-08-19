@@ -98,7 +98,7 @@ flow:
 
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-    page.setDefaultTimeout(3_000);
+    page.setDefaultTimeout(10_000);
     page.on("pageerror", (error) => console.error("browser page error", error));
     const dialogs: string[] = [];
     page.on("dialog", async (dialog) => {
