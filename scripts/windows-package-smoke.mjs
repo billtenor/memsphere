@@ -31,7 +31,11 @@ run(cli, ["validate"], project);
 run(cli, ["memory", "list", "--kind", "procedures", "--output", "json"], project);
 run(cli, ["memory", "read", "Windows CI smoke", "--output", "json"], project);
 
-const started = run(cli, ["run", "start", "Windows CI smoke"], project);
+const started = run(
+  cli,
+  ["run", "start", "Windows CI smoke", "--name", "Windows packaged smoke"],
+  project
+);
 const runId = started.match(/\b(run-[a-z0-9-]+)\b/i)?.[1];
 if (!runId) throw new Error(`Could not read Run id from output:\n${started}`);
 run(cli, ["run", "report", "--run", runId, "--artifact", "Windows packaged CLI passed."], project);

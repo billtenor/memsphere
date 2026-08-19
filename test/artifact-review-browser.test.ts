@@ -106,7 +106,10 @@ flow:
       dialogs.push(dialog.message());
       await dialog.dismiss();
     });
-    await page.goto(`http://127.0.0.1:${address.port}`);
+    await page.goto(`http://127.0.0.1:${address.port}`, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000
+    });
     const memoryArtifact = page.locator(".artifact-row").first();
     await memoryArtifact.getByText("评审", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Review", exact: true }).waitFor();

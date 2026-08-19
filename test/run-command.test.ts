@@ -83,7 +83,7 @@ test("single-Run status shows the Run name and Procedure name with historical fa
     console.log = originalLog;
   }
 
-  const output = lines.join("\n");
+  const output = lines.join("\n").replaceAll("\r\n", "\n");
   assert.match(output, /Run run-named\nName: Release candidate verification\nProcedure: release-procedure/);
   assert.match(output, /Run run-legacy\nName: release-procedure\nProcedure: release-procedure/);
   assert.match(output, /Run run-completed\nName: Release candidate verification\nProcedure: release-procedure/);
