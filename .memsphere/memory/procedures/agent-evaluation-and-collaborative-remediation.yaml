@@ -1,9 +1,9 @@
 !procedure
 syntax: memsphere-20260719-stable
 names:
+  - agent-evaluation-and-collaborative-remediation
   - Agent 评测与协同修复流程
   - Agent 测试、判分与修复流程
-  - agent-evaluation-and-collaborative-remediation
 defines:
   - 发起隔离测试，独立判分并分析问题；经 human 确认后完成修复、复测和汇报。
 asserts:

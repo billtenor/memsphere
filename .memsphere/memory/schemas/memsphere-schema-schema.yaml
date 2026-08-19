@@ -1,8 +1,8 @@
 !schema
 syntax: memsphere-20260721-stable
 names:
-  - Schema Schema
   - memsphere-schema-schema
+  - Schema Schema
 format: yaml
 defines:
   - 定义 memsphere !schema Memory 的合法内容结构、值契约和组合约束。
@@ -11,7 +11,7 @@ asserts:
   - 根节点必须使用 !schema 标签，只允许 syntax、name/names、defines、asserts、suggests、optional、type、format、fields、item 和 items 字段。
   - "syntax 必须填写 memsphere-20260721-stable。"
   - 顶层 Schema 必须使用非空 name 或 names；fields 中的详细 Schema 字段也必须具有名称，defines 与 item/items 中的匿名 Schema 可以省略名称。
-  - name 与 names 互斥；names 必须是非空且成员不重复的字符串数组，首项为规范名称。
+  - name 与 names 互斥；顶层规范名称必须是 1–120 字符的小写 ASCII kebab-case。names 的后续成员是别名，可以使用 Unicode 和内部空格，但不得包含首尾空白、控制字符或 `/`，且全部名称不得重复。
   - defines 可以包含非空字符串、!ref、匿名 !statement 或匿名 !schema；嵌套结构必须携带 YAML tag，全部成员共同生效。
   - optional 只能在 fields 中的具名 !schema 字段上取 true；省略或 false 表示字段必填。
   - type 不继承父层；显式声明优先，省略时有 fields 推断为 object、无 fields 推断为 string。
@@ -37,7 +37,7 @@ fields:
     item: !schema
       type: string
     defines:
-      - Schema 值契约的规范名称与别名，首项为规范名称；Run 实例名称不属于 Schema YAML。
+      - Schema 值契约的 canonical name 与别名；顶层首项必须满足 canonical name 规则，嵌套字段名称不受该规则限制；Run 实例名称不属于 Schema YAML。
   - !schema
     name: defines
     optional: true

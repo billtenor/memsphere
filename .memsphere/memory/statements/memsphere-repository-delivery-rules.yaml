@@ -1,8 +1,8 @@
 !statement
 syntax: memsphere-20260719-stable
 names:
-  - memsphere 代码仓库交付规范
   - memsphere-repository-delivery-rules
+  - memsphere 代码仓库交付规范
 defines:
   - 约束 memsphere 代码仓库中已完成需求的交付收尾。
 asserts:
