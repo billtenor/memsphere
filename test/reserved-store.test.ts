@@ -30,7 +30,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
 
   for (const file of files) {
     assert.match(basename(file.path), /^memsphere-/);
-    assert.equal(file.entity.names.at(-1), basename(file.path, ".yaml"));
+    assert.equal(file.entity.names[0], basename(file.path, ".yaml"));
     for (const name of file.entity.names) {
       assert.equal(names.has(name), false, `duplicate reserved memory name: ${name}`);
       names.set(name, file.path);
@@ -95,10 +95,10 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   const memory = files.find((file) => file.entity.names.includes("memsphere-memory"));
   assert(memory);
   for (const [conceptName, schemaReference] of [
-    ["memsphere-concept", "schemas/Concept Schema"],
-    ["memsphere-statement", "schemas/Statement Schema"],
-    ["memsphere-procedure", "schemas/Procedure Schema"],
-    ["memsphere-schema", "schemas/Schema Schema"]
+    ["memsphere-concept", "schemas/memsphere-concept-schema"],
+    ["memsphere-statement", "schemas/memsphere-statement-schema"],
+    ["memsphere-procedure", "schemas/memsphere-procedure-schema"],
+    ["memsphere-schema", "schemas/memsphere-schema-schema"]
   ]) {
     const concept = files.find((file) => file.entity.names.includes(conceptName));
     assert(concept?.entity.tag === "!concept");

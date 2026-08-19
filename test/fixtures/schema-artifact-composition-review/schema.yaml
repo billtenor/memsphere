@@ -1,6 +1,6 @@
 !schema
 syntax: memsphere-20260721-stable
-name: Reviewed delivery
+names: [reviewed-delivery, Reviewed delivery]
 type: object
 format:
   name: markdown

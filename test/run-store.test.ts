@@ -262,8 +262,8 @@ test("Agent Review smoke Procedures start directly from test fixture files", asy
       "procedures"
     );
     const cases = [
-      ["traex-artifact-review-smoke.yaml", "Traex ACP 四方评审测试流程"],
-      ["traex-code-fact-review-smoke.yaml", "Traex ACP 代码事实评审测试流程"]
+      ["traex-artifact-review-smoke.yaml", "traex-artifact-review-smoke"],
+      ["traex-code-fact-review-smoke.yaml", "traex-code-fact-review-smoke"]
     ] as const;
 
     for (const [fileName, procedureName] of cases) {
@@ -535,35 +535,35 @@ flow:
       type: object
       format: { name: markdown, layout: outline }
       schema: !ref
-        target: schemas/Delivery Schema
+        target: schemas/delivery-schema
 `);
     await writeFile(join(schemasRoot, "delivery.yaml"), `!schema
-names: [Delivery Schema]
+names: [delivery-schema, Delivery Schema]
 fields:
   - summary
   - !ref
-    target: schemas/Detail Schema
+    target: schemas/detail-schema
 `);
     await writeFile(join(schemasRoot, "detail.yaml"), `!schema
-names: [Detail Schema]
+names: [detail-schema, Detail Schema]
 fields: [owner]
 `);
 
     const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "schema-ref-procedure" });
     const step = started.stack[0].steps[0];
     assert.equal(step.schema?.kind, "external");
-    assert.equal(step.schema?.name, "schemas/Delivery Schema");
+    assert.equal(step.schema?.name, "schemas/delivery-schema");
     assert.deepEqual(step.schema?.node?.fields?.map((field) => typeof field === "string" ? field : field.names[0]), [
       "summary",
-      "Detail Schema"
+      "detail-schema"
     ]);
 
-    const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id, schemaName: "schemas/Delivery Schema" });
+    const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id, schemaName: "schemas/delivery-schema" });
     assert.deepEqual(entered.stack.at(-1)?.steps.map((schemaStep) => schemaStep.artifact), [
-      "schemas/Delivery Schema",
-      "schemas/Delivery Schema.summary",
-      "schemas/Delivery Schema.Detail Schema",
-      "schemas/Delivery Schema.Detail Schema.owner"
+      "schemas/delivery-schema",
+      "schemas/delivery-schema.summary",
+      "schemas/delivery-schema.detail-schema",
+      "schemas/delivery-schema.detail-schema.owner"
     ]);
 
     await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery\n" } });
@@ -581,7 +581,53 @@ fields: [owner]
     assert.equal(done.status, "done");
     const delivery = done.events.find((event) => event.artifact.name === "delivery")?.artifact;
     assert(delivery?.path);
-    assert.match(await readFile(join(runsRoot, delivery.path), "utf8"), /## Detail Schema\n\nDetail\n\n### owner\n\nAda/);
+    assert.match(await readFile(join(runsRoot, delivery.path), "utf8"), /## detail-schema\n\nDetail\n\n### owner\n\nAda/);
+  });
+});
+
+test("Run persistent dependencies reject kebab-case aliases", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const schemasRoot = join(memoryRoot, "schemas");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await mkdir(schemasRoot, { recursive: true });
+
+    await writeFile(join(schemasRoot, "real-schema.yaml"), `!schema
+names: [real-schema, alias-schema]
+fields: [summary]
+`);
+    await writeFile(join(proceduresRoot, "schema-alias.yaml"), `!procedure
+names: [schema-alias-consumer]
+flow:
+  - !action
+    action: Produce a result.
+    artifact: !artifact
+      name: result
+      type: object
+      format: { name: markdown, layout: outline }
+      schema: alias-schema
+`);
+    await assert.rejects(
+      startRun({ name: "Schema alias", memoryRoot, runsRoot, procedureName: "schema-alias-consumer" }),
+      /schema not found: alias-schema/
+    );
+
+    await writeFile(join(proceduresRoot, "canonical-child.yaml"), `!procedure
+names: [canonical-child, alias-child]
+flow: []
+`);
+    await writeFile(join(proceduresRoot, "call-alias.yaml"), `!procedure
+names: [call-alias-consumer]
+flow:
+  - !call
+    target: alias-child
+`);
+    await assert.rejects(
+      startRun({ name: "Call alias", memoryRoot, runsRoot, procedureName: "call-alias-consumer" }),
+      /procedure not found: alias-child/
+    );
   });
 });
 
@@ -1351,7 +1397,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       memoryRoot,
       runsRoot,
       runId: started.id,
-      schemaName: "Reviewed delivery"
+      schemaName: "reviewed-delivery"
     });
     const productionContext = JSON.stringify(buildSchemaWritingSnapshot(runsRoot, entered));
     assert.doesNotMatch(productionContext, /artifact_acceptance|roleBindings|controlPlane|permission|reviewer/i);

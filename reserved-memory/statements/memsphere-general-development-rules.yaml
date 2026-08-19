@@ -1,8 +1,8 @@
 !statement
 syntax: memsphere-20260721-stable
 names:
-  - 通用开发规范
   - memsphere-general-development-rules
+  - 通用开发规范
 defines:
   - 规定软件需求实施过程中的通用开发要求。
 asserts:

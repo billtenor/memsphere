@@ -2478,12 +2478,12 @@ async function snapshotReachableProcedureTemplates(
       asserts: procedure.asserts ? [...procedure.asserts] : undefined,
       steps
     };
-    for (const name of procedure.names) snapshots[name] = template;
+    snapshots[canonicalName] = template;
 
     for (const target of collectCallTargets(steps)) {
       const called = lookup
-        ? await lookup("procedures", target)
-        : await findMemoryByName(memoryRoot, "procedures", target);
+        ? await lookup("procedures", `procedures/${target}`)
+        : await findMemoryByName(memoryRoot, "procedures", target, true);
       if (!called) throw new Error(`procedure not found: ${target}`);
       await visit(called.entity as ProcedureMemory);
     }
@@ -2896,7 +2896,7 @@ async function expandAutoCallSteps(run: RunState): Promise<void> {
       });
       continue;
     }
-    const procedure = await findMemoryByName(run.memoryRoot, "procedures", step.target);
+    const procedure = await findMemoryByName(run.memoryRoot, "procedures", step.target, true);
     if (!procedure) throw new Error(`procedure not found: ${step.target}`);
     const procedureMemory = procedure.entity as ProcedureMemory;
     const steps = compileProcedureSteps(procedureMemory);
@@ -3399,7 +3399,7 @@ async function snapshotExternalSchemas(
   for (const step of steps) {
     if (step.schema?.kind === "external" && !step.schema.node) {
       const memory = lookup
-        ? await lookup("schemas", step.schema.name)
+        ? await lookup("schemas", `schemas/${step.schema.name}`)
         : await findSchemaMemory(memoryRoot, step.schema.name);
       if (!memory) throw new Error(`schema not found: ${step.schema.name}`);
       step.schema.node = await resolveSchemaReferences(
@@ -3685,7 +3685,7 @@ async function findSchemaMemory(memoryRoot: string, referenceOrName: string): Pr
   if (referenceOrName.startsWith("schemas/")) {
     return findMemoryByReference(memoryRoot, "schemas", referenceOrName);
   }
-  return findMemoryByName(memoryRoot, "schemas", referenceOrName);
+  return findMemoryByName(memoryRoot, "schemas", referenceOrName, true);
 }
 
 async function findMemoryByReference(memoryRoot: string, kind: "schemas", reference: string): Promise<MemoryFile | undefined> {
@@ -3718,7 +3718,12 @@ function memoryReference(file: MemoryFile): string {
   return `${file.kind}/${file.entity.names[0] ?? ""}`;
 }
 
-async function findMemoryByName(memoryRoot: string, kind: "procedures" | "schemas", name: string): Promise<MemoryFile | undefined> {
+async function findMemoryByName(
+  memoryRoot: string,
+  kind: "procedures" | "schemas",
+  name: string,
+  canonicalOnly = false
+): Promise<MemoryFile | undefined> {
   const paths = await listMemoryFiles(memoryRoot, kind);
   let hasInvalidMemory = false;
 
@@ -3731,7 +3736,7 @@ async function findMemoryByName(memoryRoot: string, kind: "procedures" | "schema
       hasInvalidMemory = true;
       continue;
     }
-    if (file.entity.names.includes(name)) {
+    if (canonicalOnly ? file.entity.names[0] === name : file.entity.names.includes(name)) {
       return file;
     }
   }

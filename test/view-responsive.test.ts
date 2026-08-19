@@ -35,19 +35,19 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
   await writeFile(join(memoryRoot, "concepts", "memory-8aaf6c34fc49.yaml"), [
     "!concept",
     `syntax: ${currentMemorySyntax}`,
-    "names: [ Memory, memsphere-memory ]",
+    "names: [ memsphere-memory, Memory ]",
     "defines: [ A system memory fixture. ]"
   ].join("\n"));
   await writeFile(join(memoryRoot, "concepts", "user-note.yaml"), [
     "!concept",
     `syntax: ${currentMemorySyntax}`,
-    "names: [ User note ]",
+    "names: [ user-note, User note ]",
     "defines: [ A user memory fixture. ]"
   ].join("\n"));
   await writeFile(join(memoryRoot, "procedures", "reviewable-procedure.yaml"), [
     "!procedure",
     `syntax: ${currentMemorySyntax}`,
-    "names: [ Reviewable procedure ]",
+    "names: [ reviewable-procedure, Reviewable procedure ]",
     "defines: [ A procedure fixture for inline task field review. ]",
     "goals:",
     "  - Verify comments on action fields.",
@@ -63,14 +63,14 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
   await writeFile(join(reservedRoot, "concepts", "reserved-tip.yaml"), [
     "!concept",
     `syntax: ${currentMemorySyntax}`,
-    "names: [ Reserved tip ]",
+    "names: [ reserved-tip, Reserved tip ]",
     "defines: [ A non-system reserved memory fixture. ]"
   ].join("\n"));
 
   await writeFile(join(memoryRoot, "schemas", "reviewable-schema.yaml"), [
     "!schema",
     `syntax: ${currentMemorySyntax}`,
-    "names: [ Reviewable schema ]",
+    "names: [ reviewable-schema, Reviewable schema ]",
     "defines: [ A schema fixture for inline review. ]",
     "asserts:",
     "  - A newly added comment must remain current.",
@@ -104,7 +104,7 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
       id: `flow[${index + 1}]`,
       kind: (index === 1 ? "call" : "action") as "action" | "call",
       instruction: `A deliberately long instruction ${index + 1} verifies that the flow header can shrink inside its column.`,
-      target: index === 1 ? "Reviewable procedure" : undefined,
+      target: index === 1 ? "reviewable-procedure" : undefined,
       asserts: index === 0 ? ["The task action contract remains reviewable."] : undefined,
       artifact: index === 0 ? "wide table" : `result ${index + 1}`,
       type: "string",
@@ -189,7 +189,7 @@ async function openMemoryPage(browser: Browser, url: string, width: number): Pro
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   await page.goto(url);
   await page.getByRole("button", { name: "Memory", exact: true }).click();
-  await page.getByRole("button", { name: "Reviewable schema", exact: true }).click();
+  await page.getByRole("button", { name: "reviewable-schema", exact: true }).click();
   return page;
 }
 
@@ -309,7 +309,7 @@ test("a newly added memory comment is current until its source text changes", as
     try {
       await page.goto(url);
       await page.getByRole("button", { name: "Memory", exact: true }).click();
-      await page.getByRole("button", { name: "Reviewable schema", exact: true }).click();
+      await page.getByRole("button", { name: "reviewable-schema", exact: true }).click();
       const fieldHeader = page.locator(".section-header").filter({ hasText: "Background" }).first();
       const title = fieldHeader.locator(".node-title");
       assert.equal(await fieldHeader.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length), 3);
@@ -320,7 +320,7 @@ test("a newly added memory comment is current until its source text changes", as
       await page.waitForFunction(() => document.body.classList.contains("review-active"));
       assert.equal(await fieldHeader.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length), 4);
       assert((await title.boundingBox())!.width > 100);
-      const assertComment = page.locator('[data-anchor="Reviewable schema.asserts[1]"] .inline-plus, [data-legacy-anchor="asserts[1]"] .inline-plus').first();
+      const assertComment = page.locator('[data-anchor="reviewable-schema.asserts[1]"] .inline-plus, [data-legacy-anchor="asserts[1]"] .inline-plus').first();
       await assertComment.click({ force: true });
       await page.getByPlaceholder("What should change here?").fill("Keep this comment current.");
       await page.getByRole("button", { name: "Add comment", exact: true }).click();
@@ -341,14 +341,14 @@ test("Memory nav only shows the Project Catalog and can hide installed system me
       await page.getByRole("button", { name: "Memory", exact: true }).click();
       const hideSystem = page.getByLabel("隐藏系统记忆");
       assert.equal(await hideSystem.isChecked(), true);
-      await page.locator(".memory-button", { hasText: "User note" }).waitFor();
-      assert.equal(await page.locator(".memory-button", { hasText: "Memory" }).count(), 0);
-      assert.equal(await page.locator(".memory-button", { hasText: "Reserved tip" }).count(), 0);
+      await page.locator(".memory-button", { hasText: "user-note" }).waitFor();
+      assert.equal(await page.locator(".memory-button", { hasText: "memsphere-memory" }).count(), 0);
+      assert.equal(await page.locator(".memory-button", { hasText: "reserved-tip" }).count(), 0);
       await hideSystem.uncheck();
-      await page.locator(".memory-button", { hasText: "Memory" }).waitFor();
+      await page.locator(".memory-button", { hasText: "memsphere-memory" }).waitFor();
       await hideSystem.check();
-      assert.equal(await page.locator(".memory-button", { hasText: "Memory" }).count(), 0);
-      assert.equal(await page.locator(".memory-button", { hasText: "Reserved tip" }).count(), 0);
+      assert.equal(await page.locator(".memory-button", { hasText: "memsphere-memory" }).count(), 0);
+      assert.equal(await page.locator(".memory-button", { hasText: "reserved-tip" }).count(), 0);
     } finally {
       await page.close();
     }
@@ -364,10 +364,10 @@ test("Memory API identifies installed system memory independently of its file pa
     };
     assert.equal(response.status, 200);
     assert.equal(Object.hasOwn(payload, "systemMemoryPaths"), false);
-    const systemMemory = payload.memories.find((memory) => memory.entity?.names?.[0] === "Memory");
+    const systemMemory = payload.memories.find((memory) => memory.entity?.names?.[0] === "memsphere-memory");
     assert.equal(systemMemory?.path, "concepts/memory-8aaf6c34fc49.yaml");
     assert.equal(systemMemory?.system, true);
-    const userMemory = payload.memories.find((memory) => memory.entity?.names?.[0] === "User note");
+    const userMemory = payload.memories.find((memory) => memory.entity?.names?.[0] === "user-note");
     assert.equal(userMemory?.system, false);
   });
 });
@@ -379,7 +379,7 @@ test("procedure action contract fields can receive review comments", async () =>
     try {
       await page.goto(url);
       await page.getByRole("button", { name: "Memory", exact: true }).click();
-      await page.getByRole("button", { name: "Reviewable procedure", exact: true }).click();
+      await page.getByRole("button", { name: "reviewable-procedure", exact: true }).click();
       await page.getByRole("button", { name: "Review", exact: true }).click();
       await page.getByRole("button", { name: "Create Review", exact: true }).click();
       await page.waitForFunction(() => document.body.classList.contains("review-active"));
@@ -427,14 +427,14 @@ test("View deep links restore Memory, Task, Memory Review, and browser history",
     const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
     page.setDefaultTimeout(5_000);
     try {
-      await page.goto(`${url}/memories/concepts/Memory`);
-      await page.getByRole("heading", { name: "Memory", exact: true }).waitFor();
+      await page.goto(`${url}/memories/concepts/memsphere-memory`);
+      await page.getByRole("heading", { name: "memsphere-memory", exact: true }).waitFor();
       assert.match(await page.locator("#detail").textContent() ?? "", /A system memory fixture/);
-      assert.equal(new URL(page.url()).pathname, "/memories/concepts/Memory");
+      assert.equal(new URL(page.url()).pathname, "/memories/concepts/memsphere-memory");
 
-      await page.goto(`${url}/memories/schemas/${encodeURIComponent("Reviewable schema")}`);
-      await page.getByRole("heading", { name: "Reviewable schema", exact: true }).waitFor();
-      assert.equal(new URL(page.url()).pathname, "/memories/schemas/Reviewable%20schema");
+      await page.goto(`${url}/memories/schemas/reviewable-schema`);
+      await page.getByRole("heading", { name: "reviewable-schema", exact: true }).waitFor();
+      assert.equal(new URL(page.url()).pathname, "/memories/schemas/reviewable-schema");
 
       await page.getByRole("button", { name: "Review", exact: true }).click();
       await page.getByRole("button", { name: "Create Review", exact: true }).click();

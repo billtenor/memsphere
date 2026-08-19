@@ -1,6 +1,6 @@
 !schema
 syntax: memsphere-20260721-stable
-name: Schema 逐步撰写端到端验收文档
+names: [schema-observable-e2e-document, Schema 逐步撰写端到端验收文档]
 type: object
 format:
   name: markdown

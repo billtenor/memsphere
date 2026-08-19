@@ -1,8 +1,8 @@
 !statement
 syntax: memsphere-20260721-stable
 names:
-  - 通用测试规范
   - memsphere-general-testing-rules
+  - 通用测试规范
 defines:
   - 规定软件变更交付前的通用测试和验证要求。
 asserts:

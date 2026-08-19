@@ -1,14 +1,14 @@
 !concept
 syntax: memsphere-20260721-stable
 names:
-  - Memory
   - memsphere-memory
+  - Memory
 defines:
   - memsphere 中为了跨越单次对话或运行而被有意沉淀，并可供 agent 重复理解、引用或执行的语义实体。
   - Memory 是各种具体记忆类型的抽象上位概念。
   - Concept、Statement、Procedure 和 Schema 是 memsphere 当前提供的四种具体 Memory 类型。
   - 一段信息只有在被有意沉淀以供后续复用时，才成为 Memory；单次任务产物、临时对话或运行状态不会因此自动成为 Memory。
-  - memsphere 使用带 YAML tag 的 mapping 描述 Memory；根节点 tag 表示具体 Memory 类型，names 的首项是规范名称，其余项是别名，defines 中的全部成员共同定义该 Memory。
+  - memsphere 使用带 YAML tag 的 mapping 描述 Memory；根节点 tag 表示具体 Memory 类型。顶层 names 首项是 1–120 字符的小写 ASCII kebab-case canonical name，其余项是可使用自然语言的别名；defines 中的全部成员共同定义该 Memory。
   - 每份正式 Memory 使用顶层 syntax 字段声明不可变的 Memsphere YAML 语法版本；未声明时固定按历史迁移起点 start 解释。
   - 初次理解 memsphere 时，应从 Memory 开始，依次读取 Concept、Statement、Procedure 和 Schema。
   - !statement

@@ -28,21 +28,21 @@ test("Memory sync creates merge commits and isolates conflicts in a Sync ChangeS
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     await runGit(["init", "-b", "master"], { cwd: seed });
     for (const [kind, source] of Object.entries({
-      concepts: withCurrentMemorySyntax("!concept\nnames: [Shared]\ndefines: [Base]\n"),
-      statements: withCurrentMemorySyntax("!statement\nnames: [Rules]\nasserts: [Base]\n"),
-      schemas: withCurrentMemorySyntax("!schema\nnames: [Shape]\ndefines: []\n"),
-      procedures: withCurrentMemorySyntax("!procedure\nnames: [Flow]\nflow: []\n")
+      concepts: withCurrentMemorySyntax("!concept\nnames: [shared, Shared]\ndefines: [Base]\n"),
+      statements: withCurrentMemorySyntax("!statement\nnames: [rules, Rules]\nasserts: [Base]\n"),
+      schemas: withCurrentMemorySyntax("!schema\nnames: [shape, Shape]\ndefines: []\n"),
+      procedures: withCurrentMemorySyntax("!procedure\nnames: [flow, Flow]\nflow: []\n")
     })) {
       await mkdir(join(seed, kind));
       await writeFile(join(seed, kind, "fixture.yaml"), source);
     }
     await writeFile(
       join(seed, "statements", "retained.yaml"),
-      withCurrentMemorySyntax("!statement\nnames: [Retained Rules]\nasserts: [Retained]\n")
+      withCurrentMemorySyntax("!statement\nnames: [retained-rules, Retained Rules]\nasserts: [Retained]\n")
     );
     await writeFile(
       join(seed, "schemas", "retained.yaml"),
-      withCurrentMemorySyntax("!schema\nnames: [Retained Shape]\ndefines: []\n")
+      withCurrentMemorySyntax("!schema\nnames: [retained-shape, Retained Shape]\ndefines: []\n")
     );
     await runGit(["add", "-A"], { cwd: seed });
     await runGit(["commit", "-m", "seed"], { cwd: seed });
@@ -116,7 +116,7 @@ test("Memory sync creates merge commits and isolates conflicts in a Sync ChangeS
     assert(conflict.change?.merge_parent && conflict.candidateRoot);
     const conflictPath = join(conflict.candidateRoot, "concepts", "fixture.yaml");
     assert.match(await readFile(conflictPath, "utf8"), /<<<<<<<|>>>>>>>/);
-    await writeFile(conflictPath, withCurrentMemorySyntax("!concept\nnames: [Shared]\ndefines: [Merged]\n"));
+    await writeFile(conflictPath, withCurrentMemorySyntax("!concept\nnames: [shared, Shared]\ndefines: [Merged]\n"));
     const resolved = await publishMemoryChange(conflict.change.id, "Resolve Memory sync");
     assert(resolved.published_revision);
     assert.equal((await runGit(["rev-list", "--parents", "-n", "1", resolved.published_revision], { cwd: memoryRoot })).stdout.split(" ").length, 3);
