@@ -44,6 +44,8 @@ import {
   runEnterSchemaCommand,
   runArtifactContractShowCommand,
   runArtifactShowCommand,
+  runBindingShowCommand,
+  runBindingUpdateCommand,
   runRepeatCommand,
   runReportCommand,
   runReviewCommentCommand,
@@ -276,6 +278,27 @@ run
   .requiredOption("--run <id>", "run id")
   .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
   .action(runShowCommand);
+
+const runBinding = run
+  .command("binding")
+  .description("Inspect or update future Review Slot bindings for a running Run.");
+
+runBinding
+  .command("show")
+  .description("Show frozen Actors, current Slot bindings, affected scopes, and binding history.")
+  .requiredOption("--run <id>", "run id")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runBindingShowCommand);
+
+runBinding
+  .command("update")
+  .description("Replace one Slot binding for Reviews that have not been created yet.")
+  .requiredOption("--run <id>", "run id")
+  .requiredOption("--slot <procedure::slot>", "fully qualified Review Slot key")
+  .option("--actor <id>", "bind a frozen Actor; repeat for multiple Actors", (value, previous: string[]) => [...previous, value], [])
+  .option("--skip", "explicitly skip this Slot for future Reviews")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runBindingUpdateCommand);
 
 run
   .command("try-run")
