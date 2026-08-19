@@ -271,6 +271,94 @@ flow:
   }
 });
 
+test("View API reads and updates future Run Slot bindings", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-run-binding-view-"));
+  const memoryRoot = join(dir, "memory");
+  const runsRoot = join(dir, "runs");
+  const reviewsRoot = join(dir, "reviews");
+  await mkdir(join(memoryRoot, "procedures"), { recursive: true });
+  await mkdir(reviewsRoot, { recursive: true });
+  await writeFile(join(memoryRoot, "procedures", "handoff.yaml"), withCurrentMemorySyntax(`!procedure
+name: view-handoff
+flow:
+  - !action
+    action: Produce it.
+    artifact: !artifact
+      name: result
+      review: [owner]
+`));
+  const controlPlane = parseControlPlaneConfig({
+    runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+    actors: {
+      human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] },
+      agent: {
+        kind: "agent",
+        name: "Agent",
+        permissions: ["artifact.read", "decision.assess"],
+        agent: { provider: "traex" }
+      }
+    }
+  });
+  const started = await startRun({
+    name: "View binding handoff",
+    memoryRoot,
+    runsRoot,
+    procedureName: "view-handoff",
+    controlPlane,
+    reviewConfiguration: reviewConfiguration({ procedure: "view-handoff", slots: { owner: ["human"] } })
+  });
+  const config: MemsphereConfig = {
+    configPath: join(dir, "config.json"),
+    scopeRoot: dir,
+    memoryRoot,
+    reviewsRoot,
+    runsRoot,
+    archiveRoot: join(dir, "archives"),
+    view: { host: "127.0.0.1", port: 0 },
+    controlPlane
+  };
+  const server = createViewServer(config);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const address = server.address();
+    assert(address && typeof address === "object");
+    const endpoint = `http://127.0.0.1:${address.port}/api/runs/${started.id}/bindings`;
+    const initial = await fetch(endpoint);
+    assert.equal(initial.status, 200);
+    assert.deepEqual((await initial.json() as { slots: Array<{ binding: unknown }> }).slots[0].binding, { actorIds: ["human"] });
+
+    const rejectedOrigin = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slot: "view-handoff::owner", actorIds: ["agent"] })
+    });
+    assert.equal(rejectedOrigin.status, 403);
+
+    const updated = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: new URL(endpoint).origin },
+      body: JSON.stringify({ slot: "view-handoff::owner", actorIds: ["agent"] })
+    });
+    assert.equal(updated.status, 200);
+    const payload = await updated.json() as { change: { before: unknown; after: unknown } };
+    assert.deepEqual(payload.change.before, { actorIds: ["human"] });
+    assert.deepEqual(payload.change.after, { actorIds: ["agent"] });
+
+    const invalid = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: new URL(endpoint).origin },
+      body: JSON.stringify({ slot: "view-handoff::owner", actorIds: ["missing"] })
+    });
+    assert.equal(invalid.status, 400);
+    assert.match(await invalid.text(), /unknown frozen Actor/);
+  } finally {
+    server.close();
+    await once(server, "close");
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 type ReviewContext = {
   review: {
     id: string;
