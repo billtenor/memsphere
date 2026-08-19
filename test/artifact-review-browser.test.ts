@@ -676,11 +676,14 @@ flow:
 
 test("Agent Activity expands in the participant row without disrupting Human review", async () => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-agent-activity-browser-"));
-  const scopeRoot = join(dir, ".memsphere");
+  const previousHome = process.env.MEMSPHERE_HOME;
+  const home = join(dir, "home");
+  const scopeRoot = join(home, "projects", "activity-fixture");
   const memoryRoot = join(scopeRoot, "memory");
   const runsRoot = join(scopeRoot, "runs");
   const reviewsRoot = join(scopeRoot, "reviews");
   const configPath = join(scopeRoot, "config.json");
+  process.env.MEMSPHERE_HOME = home;
   await mkdir(join(memoryRoot, "procedures"), { recursive: true });
   await mkdir(reviewsRoot, { recursive: true });
   await writeFile(join(memoryRoot, "procedures", "activity-review.yaml"), withCurrentMemorySyntax(`!procedure
@@ -728,11 +731,21 @@ flow:
   if (!reviewer || reviewer.kind !== "agent") throw new Error("missing reviewer fixture");
   reviewer.agent.command = process.execPath;
   reviewer.agent.args = [browserFakeReviewer, "approve"];
+  await writeFile(join(scopeRoot, "project.json"), `${JSON.stringify({
+    format_version: 1,
+    name: "activity-fixture",
+    created_at: new Date().toISOString()
+  }, null, 2)}\n`);
+  await writeFile(join(home, "registry.json"), `${JSON.stringify({
+    format_version: 1,
+    projects: { "activity-fixture": { root: scopeRoot } },
+    workspaces: {}
+  }, null, 2)}\n`);
+  await writeFile(join(home, "config.json"), `${JSON.stringify({
+    acp_providers: { traex: {} }
+  }, null, 2)}\n`);
   await writeFile(configPath, `${JSON.stringify({
-    memoryRoot: "memory",
-    reviewsRoot: "reviews",
-    runsRoot: "runs",
-    archiveRoot: "archives",
+    store: { type: "embedded", memory_path: memoryRoot },
     control_plane: {
       runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
       actors: {
@@ -943,6 +956,8 @@ flow:
     await browser.close();
     server.close();
     await once(server, "close");
+    if (previousHome === undefined) delete process.env.MEMSPHERE_HOME;
+    else process.env.MEMSPHERE_HOME = previousHome;
     await rm(dir, { recursive: true, force: true });
   }
 });

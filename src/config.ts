@@ -1,32 +1,20 @@
-import { existsSync } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, isAbsolute, join, parse, resolve } from "node:path";
-import { z, ZodError } from "zod";
-import { controlPlaneConfigSchema, type ControlPlaneConfig } from "./control-plane/index.js";
+import { readFile, stat } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { z } from "zod";
+import {
+  acpProviderConfigSchema,
+  resolveProjectControlPlane,
+  type ControlPlaneConfig
+} from "./control-plane/index.js";
 import { defaultPromptLocale, promptLocales, type PromptLocale } from "./prompts/locale.js";
-
-export const configSchema = z.object({
-  language: z.enum(promptLocales).optional(),
-  memoryRoot: z.string().min(1).optional(),
-  reviewsRoot: z.string().min(1).optional(),
-  runsRoot: z.string().min(1).optional(),
-  archiveRoot: z.string().min(1).optional(),
-  view: z.object({
-    host: z.string().min(1),
-    port: z.number().int().min(0).max(65535)
-  }).strict().optional(),
-  debug: z.object({
-    agent_review: z.boolean().optional()
-  }).strict().optional(),
-  control_plane: controlPlaneConfigSchema.optional()
-}).strict();
-
-export type MemsphereConfigFile = z.input<typeof configSchema>;
+import { homePaths, resolveMemsphereHome } from "./home.js";
+import { resolveProjectContext } from "./project/resolver.js";
+import { projectConfigSchema } from "./project/model.js";
 
 export type MemsphereConfig = {
   configPath: string;
   scopeRoot: string;
+  homeRoot?: string;
   language: PromptLocale;
   memoryRoot: string;
   reviewsRoot: string;
@@ -41,123 +29,108 @@ export type MemsphereConfig = {
     host: string;
     port: number;
   };
+  project?: {
+    name: string;
+    revision?: string;
+    store?: import("./project/model.js").ProjectConfigFile["store"];
+    mounted: Array<{
+      name: string;
+      memoryRoot: string;
+      revision?: string;
+      store: import("./project/model.js").ProjectConfigFile["store"];
+    }>;
+  };
 };
 
-export const defaultConfigPath = join(homedir(), ".memsphere", "config.json");
-export const defaultMemoryRoot = join(homedir(), ".memsphere", "memory");
-export const defaultReviewsRoot = join(homedir(), ".memsphere", "reviews");
-export const defaultRunsRoot = join(homedir(), ".memsphere", "runs");
-export const scopeDirectoryName = ".memsphere";
-export const configFileName = "config.json";
-
-export function expandHome(input: string): string {
-  if (input === "~") {
-    return homedir();
-  }
-
-  if (input.startsWith("~/")) {
-    return join(homedir(), input.slice(2));
-  }
-
-  return input;
-}
-
-export function resolvePath(input: string): string {
-  return resolve(expandHome(input));
-}
-
-export async function findConfigPath(cwd = process.cwd()): Promise<string | undefined> {
-  let current = resolve(cwd);
-  const root = parse(current).root;
-
-  while (true) {
-    const candidate = join(current, scopeDirectoryName, configFileName);
-    if (await pathExists(candidate)) return candidate;
-    if (current === root) break;
-    current = dirname(current);
-  }
-
-  if (await pathExists(defaultConfigPath)) return defaultConfigPath;
-  return undefined;
-}
-
-export async function findGitRoot(cwd = process.cwd()): Promise<string | undefined> {
-  let current = resolve(cwd);
-  const root = parse(current).root;
-
-  while (true) {
-    if (await pathExists(join(current, ".git"))) return current;
-    if (current === root) return undefined;
-    current = dirname(current);
-  }
-}
-
 export async function readConfig(configPath?: string): Promise<MemsphereConfig> {
-  const resolvedConfigPath = configPath ? resolvePath(configPath) : await findConfigPath();
-  if (!resolvedConfigPath) {
-    throw new Error("config file does not exist. Run memsphere init.");
-  }
-
-  return readConfigAt(resolvedConfigPath);
+  if (configPath) return readConfigAt(resolve(configPath));
+  return readProjectExecutionConfig();
 }
 
 export async function readConfigAt(configPath: string): Promise<MemsphereConfig> {
-  const raw = await readFile(configPath, "utf8");
-  const parsed: unknown = JSON.parse(raw);
-  const config = parseConfigFile(parsed);
-  const scopeRoot = dirname(configPath);
+  const resolvedConfigPath = resolve(configPath);
+  const projectManifestPath = join(dirname(resolvedConfigPath), "project.json");
+  if (!(await pathExists(projectManifestPath))) {
+    throw new Error(
+      `legacy Scope config is not supported: ${resolvedConfigPath}; register or create a Project instead`
+    );
+  }
+  projectConfigSchema.parse(JSON.parse(await readFile(resolvedConfigPath, "utf8")));
+  return readProjectExecutionConfig({ projectConfigPath: resolvedConfigPath });
+}
 
+export const globalConfigSchema = z.object({
+  language: z.enum(promptLocales).optional(),
+  acp_providers: acpProviderConfigSchema.optional(),
+  view: z.object({
+    host: z.string().min(1),
+    port: z.number().int().min(0).max(65535)
+  }).strict().optional(),
+  debug: z.object({ agent_review: z.boolean().optional() }).strict().optional()
+}).strict();
+
+async function readProjectExecutionConfig(options: {
+  projectConfigPath?: string;
+  home?: string;
+  project?: string;
+} = {}): Promise<MemsphereConfig> {
+  const home = options.home ?? resolveMemsphereHome();
+  const global = await readGlobalConfig(homePaths(home).configPath);
+  const explicitRoot = options.projectConfigPath ? dirname(options.projectConfigPath) : undefined;
+  const context = explicitRoot
+    ? await resolveContextByRoot(home, explicitRoot)
+    : await resolveProjectContext({ home, project: options.project ?? process.env.MEMSPHERE_PROJECT });
+  const revision = await storeRevision(context.primary.memoryRoot, context.primary.config.store.type);
+  const mounted = await Promise.all(context.mounted.map(async (project) => ({
+    name: project.name,
+    memoryRoot: project.memoryRoot,
+    revision: await storeRevision(project.memoryRoot, project.config.store.type),
+    store: project.config.store
+  })));
   return {
-    configPath,
-    scopeRoot,
-    language: config.language ?? defaultPromptLocale,
-    memoryRoot: resolveConfigPath(config.memoryRoot ?? "memory", scopeRoot),
-    reviewsRoot: resolveConfigPath(config.reviewsRoot ?? "reviews", scopeRoot),
-    runsRoot: resolveConfigPath(config.runsRoot ?? "runs", scopeRoot),
-    archiveRoot: resolveConfigPath(config.archiveRoot ?? "archives", scopeRoot),
-    controlPlane: config.control_plane,
-    debug: {
-      agentReview: config.debug?.agent_review ?? false,
-      root: resolveConfigPath("debug", scopeRoot)
-    },
-    view: config.view ?? { host: "127.0.0.1", port: 0 }
+    configPath: context.primary.paths.configPath,
+    scopeRoot: context.primary.paths.root,
+    homeRoot: home,
+    language: global.language ?? defaultPromptLocale,
+    memoryRoot: context.primary.memoryRoot,
+    reviewsRoot: context.primary.paths.reviewsRoot,
+    runsRoot: context.primary.paths.runsRoot,
+    archiveRoot: context.primary.paths.archiveRoot,
+    controlPlane: context.primary.config.control_plane
+      ? resolveProjectControlPlane(context.primary.config.control_plane, global.acp_providers)
+      : undefined,
+    debug: { agentReview: global.debug?.agent_review ?? false, root: join(homePaths(home).runtimeRoot, "debug") },
+    view: global.view ?? { host: "127.0.0.1", port: 0 },
+    project: { name: context.primary.name, revision, store: context.primary.config.store, mounted }
   };
 }
 
-export function parseConfigFile(value: unknown): z.infer<typeof configSchema> {
+export async function readProjectConfig(project: string, home?: string): Promise<MemsphereConfig> {
+  return readProjectExecutionConfig({ project, home });
+}
+
+async function readGlobalConfig(path: string): Promise<z.infer<typeof globalConfigSchema>> {
   try {
-    return configSchema.parse(value);
+    return globalConfigSchema.parse(JSON.parse(await readFile(path, "utf8")));
   } catch (error) {
-    if (error instanceof ZodError && hasLegacyActorRuntimeFields(error)) {
-      throw new Error(
-        "ACP Provider configuration is incompatible with this Memsphere version. "
-        + "Move args, env, and timeout settings into the matching fixed control_plane.acp_providers entry; "
-        + "Provider type and command are managed by Memsphere. "
-        + "Agent actors may only select provider and model. Reconfigure the ACP Provider section in View Settings.",
-        { cause: error }
-      );
-    }
-    throw error;
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return {};
+    throw new Error(`invalid global config: ${path}`, { cause: error });
   }
 }
 
-export async function writeConfig(
-  config: MemsphereConfigFile,
-  options: { configPath?: string; force?: boolean } = {}
-): Promise<void> {
-  const configPath = options.configPath ?? defaultConfigPath;
-
-  if (existsSync(configPath) && !options.force) {
-    throw new Error(`${configPath} already exists. Use --force to overwrite it.`);
-  }
-
-  await mkdir(dirname(configPath), { recursive: true });
-  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+async function resolveContextByRoot(home: string, root: string) {
+  const manifest = JSON.parse(await readFile(join(root, "project.json"), "utf8")) as { name?: unknown };
+  if (typeof manifest.name !== "string") throw new Error(`invalid Project manifest: ${join(root, "project.json")}`);
+  return resolveProjectContext({ home, project: manifest.name });
 }
 
-export function resolveConfigPath(input: string, scopeRoot: string): string {
-  const expanded = expandHome(input);
-  return isAbsolute(expanded) ? resolve(expanded) : resolve(scopeRoot, expanded);
+async function storeRevision(memoryRoot: string, type: "managed" | "embedded"): Promise<string | undefined> {
+  try {
+    const { gitOutput } = await import("./git.js");
+    return await gitOutput(["rev-parse", "HEAD"], memoryRoot);
+  } catch {
+    return type === "managed" ? undefined : "uncommitted";
+  }
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -168,25 +141,4 @@ async function pathExists(path: string): Promise<boolean> {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return false;
     throw error;
   }
-}
-
-function hasLegacyActorRuntimeFields(error: ZodError): boolean {
-  const legacy = new Set([
-    "command",
-    "args",
-    "env",
-    "cwd",
-    "prompt_version",
-    "timeout_ms",
-    "startup_timeout_ms",
-    "idle_timeout_ms",
-    "max_runtime_ms"
-  ]);
-  return error.issues.some((issue) =>
-    issue.code === "unrecognized_keys"
-    && issue.path[0] === "control_plane"
-    && issue.path[1] === "actors"
-    && issue.path[3] === "agent"
-    && issue.keys.some((key) => legacy.has(key))
-  );
 }

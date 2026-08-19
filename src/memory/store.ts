@@ -44,6 +44,11 @@ export async function listMemoryFiles(memoryRoot: string, kind: MemoryKind): Pro
     throw error;
   }
 
+  const symbolicLink = entries.find((entry) => entry.isSymbolicLink());
+  if (symbolicLink) {
+    throw new Error(`symbolic links are not allowed in a Memory kind directory: ${join(dir, symbolicLink.name)}`);
+  }
+
   return entries
     .filter((entry) => entry.isFile() && [".yaml", ".yml"].some((suffix) => entry.name.endsWith(suffix)))
     .map((entry) => join(dir, entry.name))

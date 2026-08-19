@@ -8,8 +8,32 @@ import {
   archiveReviewCommand,
   archiveRunCommand
 } from "./commands/archive.js";
-import { initCommand } from "./commands/init.js";
-import { memoryListCommand, memoryReadCommand } from "./commands/memory.js";
+import {
+  memoryChangeResumeCommand,
+  memoryChangeValidateCommand,
+  memoryDeleteCommand,
+  memoryEditCommand,
+  memoryListCommand,
+  memoryPublishCommand,
+  memoryPushCommand,
+  memoryRecoverCommand,
+  memoryReadCommand,
+  memoryRenameCommand,
+  memorySyncCommand,
+  memorySyncPublishCommand
+} from "./commands/memory.js";
+import {
+  projectBindCommand,
+  projectCloneCommand,
+  projectCreateCommand,
+  projectListCommand,
+  projectMountCommand,
+  projectPruneCommand,
+  projectRegisterCommand,
+  projectShowCommand,
+  projectUnbindCommand,
+  projectUnmountCommand
+} from "./commands/project.js";
 import {
   migrateArtifactContractV2Command,
   migrateMemorySyntaxCommand,
@@ -55,23 +79,60 @@ const program = new Command();
 program
   .name("memsphere")
   .description("Manage local YAML-backed memory entities for AI runtimes.")
-  .version(version);
+  .version(version)
+  .option("--project <name>", "use one Project for this command without changing Workspace binding");
 
-program
-  .command("init")
-  .description("Create or refresh a memsphere scope and its reserved memory.")
-  .option("--global", "initialize the global ~/.memsphere scope")
-  .option("--folder <path>", "initialize a specific folder scope at <path>/.memsphere")
-  .option("--memory-root <path>", "memory root directory")
-  .option("--reviews-root <path>", "review files root directory")
-  .option("--runs-root <path>", "run state files root directory")
-  .option("--archive-root <path>", "archived review and run root directory")
-  .option("--force", "overwrite the existing config")
-  .action(initCommand);
+program.hook("preAction", () => {
+  const selected = program.opts<{ project?: string }>().project;
+  if (selected) process.env.MEMSPHERE_PROJECT = selected;
+});
+
+const project = program
+  .command("project")
+  .description("Manage persistent Memsphere Projects and Workspace bindings.");
+
+project.command("create")
+  .argument("<name>", "globally unique Project name")
+  .option("--embedded <memory-path>", "use Memory inside the current Git repository")
+  .option("--bind", "bind the current Workspace after creation")
+  .action(projectCreateCommand);
+
+project.command("clone")
+  .argument("<repository>", "Git URL or local repository")
+  .requiredOption("--name <name>", "globally unique Project name")
+  .option("--branch <branch>", "controlled local branch")
+  .option("--upstream <remote-branch>", "organization upstream, for example origin/master")
+  .option("--bind", "bind the current Workspace after cloning")
+  .action(projectCloneCommand);
+
+project.command("register")
+  .argument("<project-root>", "existing complete Project Root")
+  .option("--bind", "bind the current Workspace after registration")
+  .action(projectRegisterCommand);
+
+project.command("list")
+  .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
+  .action(projectListCommand);
+
+project.command("show")
+  .argument("[name]", "Project name; defaults to the current Primary")
+  .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
+  .action(projectShowCommand);
+
+project.command("bind")
+  .argument("<name>", "Project name")
+  .action(projectBindCommand);
+
+project.command("unbind").action(projectUnbindCommand);
+project.command("mount").argument("<name>", "read-only Project name").action(projectMountCommand);
+project.command("unmount").argument("<name>", "mounted Project name").action(projectUnmountCommand);
+project.command("prune").description("Remove missing registrations and their bindings.").action(projectPruneCommand);
 
 program
   .command("validate")
   .description("Validate config, memory directories, and YAML memory entities.")
+  .option("--memory-root <path>", "validate one Memory root without Home, Registry or Binding")
+  .addOption(new Option("--format <format>", "diagnostic output format").choices(["text", "json"]).default("text"))
   .action(validateCommand);
 
 const memory = program
@@ -96,6 +157,52 @@ memory
   .option("--node <node-ref>", "read one memory node with its required context")
   .addOption(new Option("--output <format>", "output format").choices(["yaml", "json"]).default("yaml"))
   .action((reference, options) => memoryReadCommand(reference, options));
+
+memory.command("edit")
+  .description("Create or extend a Managed Memory ChangeSet.")
+  .argument("<references...>", "existing names or new logical references")
+  .option("--change <id>", "append targets to an existing ChangeSet")
+  .action(memoryEditCommand);
+
+memory.command("delete")
+  .argument("<references...>", "existing Memory references")
+  .option("--change <id>", "append targets to an existing ChangeSet")
+  .action(memoryDeleteCommand);
+
+memory.command("rename")
+  .argument("<reference>", "existing Memory reference")
+  .argument("<new-name>", "new canonical name")
+  .option("--change <id>", "append target to an existing ChangeSet")
+  .action(memoryRenameCommand);
+
+memory.command("publish")
+  .requiredOption("--change <id>", "ChangeSet id")
+  .option("--message <text>", "Git commit message")
+  .action(memoryPublishCommand);
+
+memory.command("recover")
+  .argument("<reference>", "frozen Memory reference")
+  .option("--restore", "discard the external modification")
+  .option("--create-change", "save the external modification as a ChangeSet candidate, then restore")
+  .action(memoryRecoverCommand);
+
+memory.command("push").description("Push the controlled Managed Memory branch without force.").action(memoryPushCommand);
+const memorySync = memory.command("sync").description("Merge the configured organization upstream.").action(memorySyncCommand);
+memorySync.command("publish")
+  .requiredOption("--change <id>", "Sync ChangeSet id")
+  .option("--message <text>", "merge commit message")
+  .action(memorySyncPublishCommand);
+
+const memoryChange = memory.command("change").description("Manage Managed Memory ChangeSet candidates.");
+memoryChange.command("resume")
+  .argument("<change-id>", "ChangeSet id")
+  .action(memoryChangeResumeCommand);
+
+memoryChange.command("validate")
+  .description("Validate a Managed ChangeSet against its effective Memory Store.")
+  .argument("<change-id>", "ChangeSet id")
+  .addOption(new Option("--format <format>", "diagnostic output format").choices(["text", "json"]).default("text"))
+  .action(memoryChangeValidateCommand);
 
 const view = program
   .command("view")
@@ -355,7 +462,6 @@ migrate
   .option("--check", "scan and print a read-only migration manifest")
   .option("--write", "stage, validate, back up, and apply the migration")
   .option("--to <syntax>", "target syntax; defaults to the current stable syntax")
-  .option("--config <path>", "config file path")
   .action(migrateMemorySyntaxCommand);
 
 migrate
@@ -363,7 +469,6 @@ migrate
   .description("Migrate Memory Artifact contracts to type, format, and schema v2.")
   .option("--check", "scan and print a read-only migration manifest")
   .option("--write", "stage, validate, back up, and apply the migration")
-  .option("--config <path>", "config file path")
   .action(migrateArtifactContractV2Command);
 
 migrate
@@ -371,7 +476,6 @@ migrate
   .description("Migrate Schema contracts to inferred types and inherited formats v2.")
   .option("--check", "scan and print a read-only migration manifest")
   .option("--write", "stage, validate, back up, and apply the migration")
-  .option("--config <path>", "config file path")
   .action(migrateSchemaContractV2Command);
 
 const archive = program
@@ -412,7 +516,7 @@ restore
   .argument("<id>", "run id")
   .action(archiveRestoreRunCommand);
 
-program.parseAsync(process.argv).catch((error: unknown) => {
+await program.parseAsync(process.argv).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`error: ${message}`);
   process.exitCode = 1;

@@ -529,11 +529,14 @@ async function withAgentReviewFixture(
   run: (fixture: { configPath: string; runsRoot: string; runId: string }) => Promise<void>
 ): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "memsphere-agent-review-"));
+  const previousHome = process.env.MEMSPHERE_HOME;
   try {
-    const scopeRoot = join(root, ".memsphere");
-    const memoryRoot = join(scopeRoot, "memory");
-    const runsRoot = join(scopeRoot, "runs");
-    const configPath = join(scopeRoot, "config.json");
+    const home = join(root, "home");
+    const projectRoot = join(home, "projects", "review-fixture");
+    const memoryRoot = join(projectRoot, "memory");
+    const runsRoot = join(projectRoot, "runs");
+    const configPath = join(projectRoot, "config.json");
+    process.env.MEMSPHERE_HOME = home;
     await mkdir(join(memoryRoot, "procedures"), { recursive: true });
     await writeFile(join(memoryRoot, "procedures", "agent-review.yaml"), withCurrentMemorySyntax(`!procedure
 name: agent-review-fixture
@@ -565,10 +568,22 @@ flow:
             type: string
       review: [reviewer]
 `));
-    await writeFile(configPath, `${JSON.stringify({
+    await writeFile(join(projectRoot, "project.json"), `${JSON.stringify({
+      format_version: 1,
+      name: "review-fixture",
+      created_at: new Date().toISOString()
+    }, null, 2)}\n`);
+    await writeFile(join(home, "registry.json"), `${JSON.stringify({
+      format_version: 1,
+      projects: { "review-fixture": { root: projectRoot } },
+      workspaces: {}
+    }, null, 2)}\n`);
+    await writeFile(join(home, "config.json"), `${JSON.stringify({
       language: "en",
-      memoryRoot: "memory",
-      runsRoot: "runs",
+      acp_providers: { traex: {} }
+    }, null, 2)}\n`);
+    await writeFile(configPath, `${JSON.stringify({
+      store: { type: "embedded", memory_path: memoryRoot },
       control_plane: {
         runner: {
           permissions: ["artifact.read", "artifact.submit", "decision.decide"]
@@ -616,6 +631,8 @@ flow:
     });
     await run({ configPath, runsRoot, runId: started.id });
   } finally {
+    if (previousHome === undefined) delete process.env.MEMSPHERE_HOME;
+    else process.env.MEMSPHERE_HOME = previousHome;
     await rm(root, { recursive: true, force: true });
   }
 }
