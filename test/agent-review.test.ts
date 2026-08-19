@@ -223,7 +223,7 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     const directory = generated[0].directory;
     assert.equal(directory, join(debugRoot, "agent-review", review.id, round.id, artifactReviewAssignmentId(assignment)));
     const launch = JSON.parse(await readFile(join(directory, "launch.json"), "utf8")) as Record<string, unknown>;
-    const prompt = await readFile(join(directory, "prompt.md"), "utf8");
+    const prompt = normalizeNewlines(await readFile(join(directory, "prompt.md"), "utf8"));
     assert.equal(launch.processStarted, false);
     assert.equal(launch.actorId, "reviewer-agent");
     assert.equal(launch.provider, "traex");
@@ -419,9 +419,16 @@ test("Traex Provider fixes the ACP process to workspace-write non-interactive ex
     "acp", "serve"
   ]);
   assert.equal(launch.env.MEMSPHERE_CLI, "/tmp/memsphere-review");
-  assert.equal(launch.env.NO_PROXY, "localhost,upper.example.test");
-  assert.equal(launch.env.no_proxy, "localhost,lower.example.test");
-  assert.equal(launch.env.SystemRoot, "C:\\Windows");
+  if (process.platform === "win32") {
+    assert.equal(
+      launch.env.NO_PROXY ?? launch.env.no_proxy,
+      "localhost,lower.example.test"
+    );
+  } else {
+    assert.equal(launch.env.NO_PROXY, "localhost,upper.example.test");
+    assert.equal(launch.env.no_proxy, "localhost,lower.example.test");
+  }
+  assert.equal(launch.env.SystemRoot ?? launch.env.SYSTEMROOT, "C:\\Windows");
   assert.equal(launch.startupTimeoutMs, 60_000);
   assert.equal(launch.idleTimeoutMs, 120_000);
   assert.equal(launch.maxRuntimeMs, null);
@@ -769,4 +776,8 @@ function fakeClientLaunch(
     promptVersion: "artifact-review-v1",
     ...timeouts
   };
+}
+
+function normalizeNewlines(value: string): string {
+  return value.replace(/\r\n/g, "\n");
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import { readConfigAt } from "../src/config.js";
 
@@ -61,11 +61,12 @@ test("readConfigAt rejects an invalid View service port", async () => {
 test("readConfigAt resolves an explicit archiveRoot", async () => {
   await withTempDir(async (dir) => {
     const configPath = join(dir, "config.json");
-    await writeFile(configPath, JSON.stringify({ memoryRoot: "memory", archiveRoot: "/shared/memsphere/archives" }));
+    const archiveRoot = resolve(dir, "shared", "memsphere", "archives");
+    await writeFile(configPath, JSON.stringify({ memoryRoot: "memory", archiveRoot }));
 
     const config = await readConfigAt(configPath);
 
-    assert.equal(config.archiveRoot, "/shared/memsphere/archives");
+    assert.equal(config.archiveRoot, archiveRoot);
   });
 });
 

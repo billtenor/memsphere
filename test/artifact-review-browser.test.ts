@@ -357,7 +357,10 @@ flow:
     assert.equal(aliceAssignment?.draft.comments.some((comment) => comment.body === "Alice private draft"), false);
 
     await reviewModal.getByPlaceholder("补充整体评审意见").fill("Alice private draft");
-    await reviewModal.getByRole("button", { name: "添加意见", exact: true }).click();
+    await clickAndWaitForDraftSave(
+      page,
+      reviewModal.getByRole("button", { name: "添加意见", exact: true })
+    );
     await reviewModal.getByText("Alice private draft", { exact: true }).waitFor();
 
     await selectIdentity(page, identity, "bob");
@@ -370,7 +373,10 @@ flow:
     await selectIdentity(page, identity, "bob");
     await clickAndWaitForDraftSave(page, page.getByRole("radio", { name: "修改", exact: true }));
     await reviewModal.getByPlaceholder("补充整体评审意见").fill("Keep the accepted result concise.");
-    await reviewModal.getByRole("button", { name: "添加意见", exact: true }).click();
+    await clickAndWaitForDraftSave(
+      page,
+      reviewModal.getByRole("button", { name: "添加意见", exact: true })
+    );
     await reviewModal.getByText("Keep the accepted result concise.", { exact: true }).waitFor();
     await submitThroughConfirmation(page);
 
@@ -872,7 +878,9 @@ flow:
     const toolTitleBox = await completedTool.locator(".artifact-review-activity-event-title").boundingBox();
     assert(toolKindBox && toolTimeBox && toolTitleBox);
     assert(toolTimeBox.x > toolKindBox.x);
-    assert(Math.abs(toolTimeBox.y - toolKindBox.y) < 8);
+    assert(Math.abs(
+      (toolTimeBox.y + toolTimeBox.height / 2) - (toolKindBox.y + toolKindBox.height / 2)
+    ) < 3);
     assert(toolTitleBox.y >= toolKindBox.y + toolKindBox.height);
     await agentRow.getByText(/^实现证据：(已引用|未引用)$/).waitFor();
     assert.equal(await composer.inputValue(), "Human draft remains visible");

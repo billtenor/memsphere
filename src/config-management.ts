@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { ZodError } from "zod";
 import {
   configSchema,
@@ -170,7 +170,7 @@ export async function writeConfigDraft(input: {
   const fileStat = await stat(latest.configPath);
   const temporaryPath = join(
     dirname(latest.configPath),
-    `.${latest.configPath.split("/").at(-1)}.${process.pid}.${Date.now()}.tmp`
+    `.${basename(latest.configPath)}.${process.pid}.${Date.now()}.tmp`
   );
 
   try {
@@ -187,11 +187,13 @@ export async function writeConfigDraft(input: {
       throw new ConfigRevisionConflictError(input.expectedRevision, beforeRename.revision);
     }
     await rename(temporaryPath, latest.configPath);
-    const directory = await open(dirname(latest.configPath), "r");
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
+    if (process.platform !== "win32") {
+      const directory = await open(dirname(latest.configPath), "r");
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
     }
   } catch (error) {
     await unlink(temporaryPath).catch(() => undefined);

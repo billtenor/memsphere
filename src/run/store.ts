@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join, posix, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
   artifactReviewDispositionValues,
@@ -2345,10 +2345,16 @@ async function assertManagedSchemaDraftSource(
     throw new Error(`Schema finalization requires the managed draft file: ${expected}`);
   }
   const artifactRoot = resolve(runArtifactDirectory(runsRoot, runId));
+  const sourceStat = await lstat(source.path);
+  if (sourceStat.isSymbolicLink()) {
+    throw new Error(`managed Schema draft must not be a symbolic link: ${expected}`);
+  }
+  if (!sourceStat.isFile()) {
+    throw new Error(`managed Schema draft must be a regular file: ${expected}`);
+  }
   const actual = await realpath(source.path);
   const root = await realpath(artifactRoot);
   assertInsideRunArtifactDirectory(actual, root);
-  if (actual !== expected) throw new Error(`managed Schema draft must not be a symbolic link: ${expected}`);
 }
 
 async function persistSchemaDraftValidation(
@@ -2900,7 +2906,7 @@ async function buildRunEventArtifact(
   return compactArtifact({
     ...base,
     storage: "file",
-    path: join(run.id, "artifacts", storage?.relativeDirectory ?? "", fileName),
+    path: posix.join(run.id, "artifacts", storage?.relativeDirectory ?? "", fileName),
     fileName,
     contentType: contentTypeForFormat(step.format)
   });
@@ -2928,7 +2934,7 @@ async function buildArtifactReviewContextArtifacts(
       assertInsideRunArtifactDirectory(targetPath, artifactRoot);
       await writeFile(targetPath, await readFile(sourcePath));
       createdArtifactFiles.push(targetPath);
-      snapshot.path = join(run.id, "artifacts", "reviews", reviewId, submissionId, "context", fileName);
+      snapshot.path = posix.join(run.id, "artifacts", "reviews", reviewId, submissionId, "context", fileName);
       snapshot.fileName = fileName;
     }
     contextArtifacts.push({ stepId: event.stepId, artifact: snapshot });
@@ -3472,7 +3478,7 @@ async function refreshSchemaDraft(
 ): Promise<SchemaDraftState> {
   const existing = run.schemaDrafts?.[context.parentStep.id];
   const fileName = existing?.fileName ?? schemaDraftFileName(context.parentStep);
-  const relativePath = existing?.path ?? join(run.id, "artifacts", "drafts", fileName);
+  const relativePath = existing?.path ?? posix.join(run.id, "artifacts", "drafts", fileName);
   const assembled = await assembleSchemaArtifact(runsRoot, run, context.schemaFrame, !completed);
   await writeManagedSchemaDraft(runsRoot, run.id, relativePath, assembled);
 

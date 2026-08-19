@@ -15,7 +15,7 @@ test("skill init installs only the unified memsphere skill", async () => {
 
     assert.deepEqual(await readdir(dir), ["memsphere"]);
 
-    const source = await readFile(join(dir, "memsphere", "SKILL.md"), "utf8");
+    const source = (await readFile(join(dir, "memsphere", "SKILL.md"), "utf8")).replace(/\r\n/g, "\n");
     assert.match(source, /^---\nname: memsphere\n/);
     assert.match(source, /memsphere memory list/);
     assert.match(source, /memsphere memory read/);

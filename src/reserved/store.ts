@@ -205,7 +205,7 @@ export async function listReservedMemories(scopeRoot: string, memoryRoot?: strin
   for (const currentKind of kinds) {
     const paths = await listMemoryFiles(root, currentKind);
     for (const path of paths) {
-      const relativePath = relative(root, path);
+      const relativePath = relative(root, path).split(sep).join("/");
       const imported = memoryRoot ? await pathExists(resolveUserMemoryPath(memoryRoot, relativePath)) : false;
       try {
         const file = await readMemoryFile(currentKind, path);

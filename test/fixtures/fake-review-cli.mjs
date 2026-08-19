@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import "tsx/esm";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-await import(join(root, "src", "cli.ts"));
+await import(pathToFileURL(join(root, "src", "cli.ts")).href);

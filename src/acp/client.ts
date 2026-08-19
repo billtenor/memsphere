@@ -1,6 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { access, readFile } from "node:fs/promises";
+import { extname, isAbsolute, relative, resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import type { AgentReviewProviderLaunch } from "./provider.js";
@@ -26,6 +26,7 @@ export async function runAgentReviewAcpSession(input: {
   onUpdate?(update: acp.SessionUpdate): void | Promise<void>;
   onPrompt?(kind: "initial" | "reminder", prompt: string): void | Promise<void>;
 }): Promise<AgentReviewAcpSession> {
+  if (isAbsolute(input.launch.command)) await assertAbsoluteLaunchCommand(input.launch.command);
   const process = spawnAgent(input.launch);
   let stderr = "";
   let idleTimeout: TimeoutWatchdog | undefined;
@@ -161,6 +162,20 @@ export async function runAgentReviewAcpSession(input: {
     maxRuntimeTimeout?.dispose();
     terminate();
   }
+}
+
+async function assertAbsoluteLaunchCommand(command: string): Promise<void> {
+  const candidates = [command];
+  if (process.platform === "win32" && !extname(command)) {
+    const extensions = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
+      .split(";")
+      .filter(Boolean);
+    candidates.push(...extensions.map((extension) => `${command}${extension.toLowerCase()}`));
+  }
+  for (const candidate of candidates) {
+    if (await access(candidate).then(() => true, () => false)) return;
+  }
+  throw new Error(`agent_process_spawn: executable not found: ${command}`);
 }
 
 function withAgentStderr(message: string, stderr: string): string {
