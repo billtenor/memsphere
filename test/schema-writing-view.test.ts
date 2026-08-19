@@ -31,7 +31,7 @@ flow:
         fields: [summary]
 `));
 
-  const started = await startRun({ memoryRoot, runsRoot, procedureName: "schema-in-view" });
+  const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "schema-in-view" });
   await enterSchema({ memoryRoot, runsRoot, runId: started.id });
   await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery" } });
 

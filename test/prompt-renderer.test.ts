@@ -101,6 +101,13 @@ test("run Prompt schemas reject invalid discriminators and field types at input"
   }
 });
 
+test("Review configuration retry prompts require the Run name", () => {
+  for (const locale of ["en", "zh-CN"] as const) {
+    const output = renderPrompt("run.review-configuration-required", locale, { preflightJson: "{}" });
+    assert.match(output, /run start <procedure> --name <run-name> --review-config <path>/);
+  }
+});
+
 test("run Prompt schemas reject malformed nested models", () => {
   assert.throws(
     () => renderPrompt("run.schema-overview", "zh-CN", {

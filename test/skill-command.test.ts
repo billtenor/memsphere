@@ -20,6 +20,8 @@ test("skill init installs only the unified memsphere skill", async () => {
     assert.match(source, /memsphere memory list/);
     assert.match(source, /memsphere memory read/);
     assert.match(source, /memsphere run start/);
+    assert.match(source, /memsphere run start "<Procedure 名称>" --name "<本次 Run 名称>"/);
+    assert.match(source, /memsphere run start --file "<Procedure YAML 路径>" --name "<本次 Run 名称>"/);
     assert.match(source, /memsphere run repeat/);
     assert.doesNotMatch(source, /--output yaml/);
     assert.doesNotMatch(source, /\.memsphere\/memory\/concepts/);
@@ -42,6 +44,7 @@ test("unified skill and reserved memories keep the same bootstrap contract", asy
     "condition_artifact",
     "memsphere init",
     "memsphere run start",
+    "--name",
     "memsphere run report",
     "--artifact-file",
     "memsphere-general-task-execution",
