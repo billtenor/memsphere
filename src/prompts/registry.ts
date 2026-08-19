@@ -157,6 +157,8 @@ const currentStepContentSchema = z.object({
 
 const runCurrentStepSchema = z.object({
   runId: z.string(),
+  runName: z.string(),
+  procedureName: z.string(),
   procedureAsserts: z.array(z.string()),
   step: z.discriminatedUnion("kind", [
     z.object({
@@ -197,6 +199,8 @@ const runCurrentStepSchema = z.object({
 
 const runCompletedSchema = z.object({
   runId: z.string(),
+  runName: z.string(),
+  procedureName: z.string(),
   procedureAsserts: z.array(z.string()),
   finalArtifacts: z.array(z.object({
     name: z.string(),

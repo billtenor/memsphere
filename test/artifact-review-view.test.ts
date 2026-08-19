@@ -54,6 +54,7 @@ flow:
     }
   });
   const started = await startRun({
+    name: "Test run",
     memoryRoot,
     runsRoot,
     procedureName: "reviewed-in-view",
@@ -299,6 +300,7 @@ flow:
     }
   });
   const started = await startRun({
+    name: "View binding handoff",
     memoryRoot,
     runsRoot,
     procedureName: "view-handoff",

@@ -217,6 +217,7 @@ sections:
               - name 必须是非空字符串。
               - "在支持 names 的节点中，name 与 names 必须互斥，name 的解析结果等价于 names: [name]。"
               - name 简写只能声明规范名称，不能同时声明别名；需要别名时必须使用 names。
+              - Memory YAML 中的 name 只命名当前 Memory 或结构节点；run start 的 --name 命名单次 Run，属于运行时参数，不是 Memory YAML 关键字。
 
       - !statement
         names:

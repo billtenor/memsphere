@@ -542,6 +542,15 @@ test("browser exposes archive controls for done reviews and runs", () => {
   assert.match(browserHtml, /archiveDoneOnly/);
 });
 
+test("Task titles use the Run name and keep the Procedure name in details", () => {
+  assert.match(browserHtml, /function runDisplayName\(run\)/);
+  assert.match(browserHtml, /return run\?\.name\?\.trim\(\) \|\| run\?\.procedureName \|\| "";/);
+  assert.match(browserHtml, /title\.textContent = runDisplayName\(run\);/);
+  assert.match(browserHtml, /el\.title\.textContent = runDisplayName\(run\);/);
+  assert.match(browserHtml, /pill\(t\("procedureName"\) \+ ": " \+ run\.procedureName\)/);
+  assert.match(browserHtml, /run start &lt;procedure&gt; --name &lt;run-name&gt;/);
+});
+
 test("browser renders recursive Statement sections and keeps suggestions separate", () => {
   assert.match(browserHtml, /suggests: \{ zh: "建议", yaml: "suggests" \}/);
   assert.match(browserHtml, /sections: \{ zh: "章节", yaml: "sections" \}/);

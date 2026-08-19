@@ -98,7 +98,7 @@ export const browserHtml = String.raw`<!doctype html>
     .content { min-width: 0; padding: 22px 28px 48px; }
     .toolbar { margin-bottom: 18px; }
     .toolbar-actions, .comment-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .title { font-size: 26px; line-height: 1.2; }
+    .title { font-size: 26px; line-height: 1.2; overflow-wrap: anywhere; }
     .subtitle { margin-top: 7px; font-size: 13px; overflow-wrap: anywhere; }
     .btn { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); padding: 7px 10px; }
     .btn:not(:disabled):hover { border-color: var(--accent); }
@@ -114,7 +114,7 @@ export const browserHtml = String.raw`<!doctype html>
     .error-list { margin: 0; padding-left: 18px; }
     .error-list li { margin: 6px 0; overflow-wrap: anywhere; }
     .meta { display: flex; gap: 8px; flex-wrap: wrap; margin: 13px 0 18px; }
-    .pill { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 3px 8px; font-size: 12px; }
+    .pill { max-width: 100%; overflow-wrap: anywhere; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 3px 8px; font-size: 12px; }
     button.pill { cursor: pointer; }
     button.pill:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
     .archive-run-action { align-self: center; min-height: 30px; min-width: 52px; padding: 5px 10px; font-size: 12px; line-height: 1.45; color: #4f5a5c; background: var(--surface); border-color: #c7cfca; box-shadow: var(--shadow); }
@@ -649,6 +649,7 @@ export const browserHtml = String.raw`<!doctype html>
       defines: { zh: "定义", yaml: "defines" },
       asserts: { zh: "断言", yaml: "asserts" },
       procedureAsserts: { zh: "流程断言", yaml: "Procedure Asserts" },
+      procedureName: { zh: "流程", yaml: "Procedure" },
       suggests: { zh: "建议", yaml: "suggests" },
       sections: { zh: "章节", yaml: "sections" },
       goals: { zh: "目标", yaml: "goals" },
@@ -3212,7 +3213,7 @@ export const browserHtml = String.raw`<!doctype html>
           button.type = "button";
           button.className = "task-card-main";
           const title = document.createElement("b");
-          title.textContent = run.procedureName;
+          title.textContent = runDisplayName(run);
           const meta = document.createElement("span");
           meta.className = "muted";
           meta.textContent = shortRunId(run.id) + " · " + run.events.length + " artifact(s)";
@@ -3246,19 +3247,23 @@ export const browserHtml = String.raw`<!doctype html>
       return state.runs.find(run => run.id === state.selectedTaskId) || state.runs[0] || null;
     }
 
+    function runDisplayName(run) {
+      return run?.name?.trim() || run?.procedureName || "";
+    }
+
     function renderSelectedTask() {
       const run = selectedTask();
       if (!run) {
         el.title.textContent = "Tasks";
         el.subtitle.textContent = "No runs found.";
         el.detail.className = "empty";
-        el.detail.innerHTML = 'Start one with <code>memsphere run start &lt;procedure&gt;</code>.';
+        el.detail.innerHTML = 'Start one with <code>memsphere run start &lt;procedure&gt; --name &lt;run-name&gt;</code>.';
         return;
       }
 
       state.selectedTaskId = run.id;
       saveSelectedTask();
-      el.title.textContent = run.procedureName;
+      el.title.textContent = runDisplayName(run);
       el.subtitle.textContent = run.id;
       el.detail.className = "task-summary";
       el.detail.innerHTML = "";
@@ -3275,6 +3280,7 @@ export const browserHtml = String.raw`<!doctype html>
     function renderRunMeta(run) {
       const meta = document.createElement("div");
       meta.className = "meta";
+      meta.append(pill(t("procedureName") + ": " + run.procedureName));
       meta.append(pill(run.status, false, statusPillClass(run.status)));
       if (run.contractVersion === 1 || run.readOnly) meta.append(pill(t("legacyReadOnly"), false, "warn"));
       meta.append(pill(run.stack.length + " active frame(s)"));

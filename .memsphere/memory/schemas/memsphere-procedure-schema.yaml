@@ -6,6 +6,7 @@ names:
 format: yaml
 defines:
   - 定义 memsphere !procedure Memory 的合法内容结构和字段要求。
+  - Procedure 的 name/names 标识可复用的流程定义；单次执行的 Run 名称不属于 Memory YAML，通过 run start --name 提供。
 asserts:
   - 根节点必须使用 !procedure 标签，只允许 syntax、name/names、defines、asserts、goals 和 flow 字段。
   - "syntax 必须填写 memsphere-20260721-stable。"
@@ -28,7 +29,7 @@ fields:
     optional: true
     type: string
     defines:
-      - Procedure 只有一个名称时使用的简写。
+      - Procedure 只有一个流程定义名称时使用的简写，不是单次执行的 Run 名称。
   - !schema
     name: names
     optional: true
@@ -36,7 +37,7 @@ fields:
     item: !schema
       type: string
     defines:
-      - Procedure 的规范名称与别名，首项为规范名称。
+      - Procedure 流程定义的规范名称与别名，首项为规范名称；Run 实例名称由创建者另行提供。
   - !schema
     name: defines
     optional: true
