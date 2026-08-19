@@ -175,11 +175,13 @@ export async function writeConfigDraft(input: {
 
   try {
     await writeFile(temporaryPath, serializedConfig, { encoding: "utf8", mode: fileStat.mode });
-    const handle = await open(temporaryPath, "r");
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
+    if (process.platform !== "win32") {
+      const handle = await open(temporaryPath, "r");
+      try {
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
     }
 
     const beforeRename = await readConfigDocument(latest.configPath);
