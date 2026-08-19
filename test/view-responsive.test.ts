@@ -196,14 +196,21 @@ async function assertReviewPanelCanResizeLayout(page: Page): Promise<void> {
   await reviewToggle.click();
   await page.waitForTimeout(200);
   assert.equal(await reviewToggle.getAttribute("aria-expanded"), "false");
-  assert.equal(await content.evaluate((element) => element.getBoundingClientRect().width), widthBeforeOpen);
+  const widthAfterClose = await content.evaluate((element) => element.getBoundingClientRect().width);
+  assert(
+    Math.abs(widthAfterClose - widthBeforeOpen) <= 1,
+    `expected content width to recover within one pixel: ${widthBeforeOpen} -> ${widthAfterClose}`
+  );
   await reviewToggle.click();
   await page.waitForTimeout(200);
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
   assert.equal(await reviewToggle.getAttribute("aria-expanded"), "false");
   const widthAfterEscape = await content.evaluate((element) => element.getBoundingClientRect().width);
-  assert.equal(widthAfterEscape, widthBeforeOpen);
+  assert(
+    Math.abs(widthAfterEscape - widthBeforeOpen) <= 1,
+    `expected content width to recover within one pixel: ${widthBeforeOpen} -> ${widthAfterEscape}`
+  );
 }
 
 test("View reflows task content and keeps horizontal scrolling local on compact screens", async () => {

@@ -3673,9 +3673,24 @@ async function writeRun(runsRoot: string, run: RunState): Promise<void> {
   await mkdir(directory, { recursive: true });
   try {
     await writeFile(tempPath, `${JSON.stringify(run, null, 2)}\n`, "utf8");
-    await rename(tempPath, targetPath);
+    await replaceRunFile(tempPath, targetPath);
   } finally {
     await rm(tempPath, { force: true });
+  }
+}
+
+async function replaceRunFile(tempPath: string, targetPath: string): Promise<void> {
+  const retryableCodes = new Set(["EACCES", "EBUSY", "EPERM"]);
+  const attempts = process.platform === "win32" ? 20 : 1;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await rename(tempPath, targetPath);
+      return;
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+      if (!retryableCodes.has(String(code)) || attempt === attempts - 1) throw error;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10 * (attempt + 1)));
+    }
   }
 }
 

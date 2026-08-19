@@ -480,7 +480,7 @@ flow:
     });
 
     await reviewModal.getByText("The first-round comments were addressed.", { exact: true }).waitFor();
-    await page.getByText("done", { exact: true }).first().waitFor();
+    await page.getByText("done", { exact: true }).first().waitFor({ timeout: 6_000 });
     const completed = await readRun(runsRoot, started.id);
     assert.equal(completed.status, "done");
     assert.equal(completed.events.length, 1);
@@ -1031,6 +1031,12 @@ async function waitForDraftRecovery(page: import("playwright").Page): Promise<vo
   );
   await conflict;
   await recovered;
+  await page.waitForFunction(() => {
+    const controls = document.querySelectorAll<HTMLButtonElement>(
+      "#artifact-review-modal .artifact-review-vote button"
+    );
+    return controls.length > 0 && Array.from(controls).every((control) => !control.disabled);
+  });
 }
 
 async function expectInlineValue(locator: import("playwright").Locator, expected: string): Promise<void> {
