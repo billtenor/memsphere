@@ -189,21 +189,24 @@ export async function publishMemoryChange(
   message?: string,
   options: { expectedKind?: "regular" | "sync" } = {}
 ): Promise<MemoryChangeSet> {
-  const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  assertManaged(context.primary);
+  const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  assertManaged(initialContext.primary);
   const workspace = await resolveWorkspaceIdentity();
-  const change = await readChange(context.primary, changeId);
-  assertDraftOwner(change, context.primary.name, workspace.key);
-  if (options.expectedKind === "sync" && !change.merge_parent) {
-    throw new Error(`ChangeSet ${change.id} is not a Sync ChangeSet`);
-  }
-  if (options.expectedKind === "regular" && change.merge_parent) {
-    throw new Error(`ChangeSet ${change.id} is a Sync ChangeSet; use memsphere memory sync publish`);
-  }
-  const candidateRoot = workspaceCandidateRoot(workspace.path, changeId);
-  if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
-  const lock = join(context.primary.paths.runtimeRoot, "memory-publish.lock");
-  return withFileLock(lock, () => publishLocked(context.primary, change, candidateRoot, message));
+  return withFileLock(memoryMutationLock(initialContext.primary), async () => {
+    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    assertManaged(context.primary);
+    const change = await readChange(context.primary, changeId);
+    assertDraftOwner(change, context.primary.name, workspace.key);
+    if (options.expectedKind === "sync" && !change.merge_parent) {
+      throw new Error(`ChangeSet ${change.id} is not a Sync ChangeSet`);
+    }
+    if (options.expectedKind === "regular" && change.merge_parent) {
+      throw new Error(`ChangeSet ${change.id} is a Sync ChangeSet; use memsphere memory sync publish`);
+    }
+    const candidateRoot = workspaceCandidateRoot(workspace.path, changeId);
+    if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
+    return publishLocked(context.primary, change, candidateRoot, message);
+  });
 }
 
 export async function validateMemoryChange(changeId: string): Promise<MemoryChangeValidationResult> {
@@ -215,8 +218,9 @@ export async function validateMemoryChange(changeId: string): Promise<MemoryChan
   const candidateRoot = workspaceCandidateRoot(workspace.path, changeId);
   if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
   await assertManagedHealthy(context.primary);
-  await assertChangeTargetsCurrent(context.primary, change);
-  const issues = await validateEffectiveMemoryChange(context.primary, change, candidateRoot);
+  const effectiveChange = await resolveEffectiveSyncTargets(change, candidateRoot);
+  await assertChangeTargetsCurrent(context.primary, effectiveChange);
+  const issues = await validateEffectiveMemoryChange(context.primary, effectiveChange, candidateRoot);
   return {
     changeId: change.id,
     memoryRoot: context.primary.memoryRoot,
@@ -229,9 +233,20 @@ export async function recoverMemory(
   reference: string,
   mode: "restore" | "create-change"
 ): Promise<{ change?: MemoryChangeSet; candidateRoot?: string }> {
-  const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  assertManaged(context.primary);
-  const project = context.primary;
+  const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  assertManaged(initialContext.primary);
+  return withFileLock(memoryMutationLock(initialContext.primary), async () => {
+    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    assertManaged(context.primary);
+    return recoverMemoryLocked(context.primary, reference, mode);
+  });
+}
+
+async function recoverMemoryLocked(
+  project: ResolvedProject & { config: { store: { type: "managed"; branch: string; upstream?: string; published_revision: string } } },
+  reference: string,
+  mode: "restore" | "create-change"
+): Promise<{ change?: MemoryChangeSet; candidateRoot?: string }> {
   const provider = new GitRevisionMemoryProvider(project.memoryRoot, project.config.store.published_revision);
   const descriptors = await provider.list();
   const logical = parseLogicalMemoryReference(reference);
@@ -241,7 +256,7 @@ export async function recoverMemory(
   });
   if (matches.length > 1) throw new Error(`Memory reference is ambiguous: ${reference}`);
   const tracked = matches[0];
-  const path = tracked?.id ?? (logical ? join(logical.kind, safeFileName(logical.name)) : undefined);
+  const path = tracked?.id ?? (logical ? posix.join(logical.kind, safeFileName(logical.name)) : undefined);
   if (!path) throw new Error(`Memory was not found in the published revision: ${reference}`);
   const absolute = join(project.memoryRoot, path);
   const externalExists = await exists(absolute);
@@ -251,19 +266,46 @@ export async function recoverMemory(
     : externalExists;
   if (!differs) throw new Error(`Memory has no external modification to recover: ${reference}`);
 
+  let result: { change: MemoryChangeSet; candidateRoot: string } | undefined;
+  if (mode === "create-change") {
+    const workspace = await resolveWorkspaceIdentity();
+    const change = newChange(project, workspace.key);
+    const target: z.infer<typeof changeTargetSchema> = tracked
+      ? {
+          operation: externalExists ? "update" : "delete",
+          reference: logicalReferenceFromDescriptor(tracked),
+          path,
+          base_digest: await gitOutput(["rev-parse", `${project.config.store.published_revision}:${path}`], project.memoryRoot),
+          added_revision: project.config.store.published_revision
+        }
+      : {
+          operation: "create",
+          reference: `${logical!.kind}/${logical!.name}`,
+          path,
+          added_revision: project.config.store.published_revision
+        };
+    const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
+    try {
+      await mkdir(candidateRoot, { recursive: true });
+      if (external && target.operation !== "delete") {
+        const candidate = join(candidateRoot, target.path);
+        await mkdir(dirname(candidate), { recursive: true });
+        await writeFile(candidate, external);
+      }
+      change.targets.push(target);
+      change.updated_at = new Date().toISOString();
+      await writeChange(project, change);
+      result = { change, candidateRoot };
+    } catch (error) {
+      await rm(resolve(candidateRoot, ".."), { recursive: true, force: true }).catch(() => undefined);
+      await rm(dirname(changePath(project, change.id)), { recursive: true, force: true }).catch(() => undefined);
+      throw error;
+    }
+  }
+
   if (tracked) await runGit(["checkout", project.config.store.published_revision, "--", path], { cwd: project.memoryRoot });
   else await rm(absolute, { force: true });
-  if (mode === "restore") return {};
-
-  const result = tracked
-    ? await editMemories({ references: [logicalReferenceFromDescriptor(tracked)], operation: externalExists ? "edit" : "delete" })
-    : await editMemories({ references: [reference] });
-  if (external && result.change.targets[0]?.operation !== "delete") {
-    const candidate = join(result.candidateRoot, result.change.targets[0].path);
-    await mkdir(dirname(candidate), { recursive: true });
-    await writeFile(candidate, external);
-  }
-  return { change: result.change, candidateRoot: result.candidateRoot };
+  return result ?? {};
 }
 
 export async function pushMemory(): Promise<void> {
@@ -274,9 +316,21 @@ export async function pushMemory(): Promise<void> {
 }
 
 export async function syncMemory(): Promise<{ revision?: string; change?: MemoryChangeSet; candidateRoot?: string }> {
-  const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  const project = context.primary;
-  assertManaged(project);
+  const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  assertManaged(initialContext.primary);
+  const source = await prepareSync(initialContext.primary);
+  return withFileLock(memoryMutationLock(initialContext.primary), async () => {
+    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    assertManaged(context.primary);
+    return syncMemoryLocked(context.primary, source);
+  });
+}
+
+type PreparedSync = { upstream: string; mergeParent: string };
+
+async function prepareSync(
+  project: ResolvedProject & { config: { store: { type: "managed"; branch: string; upstream?: string; published_revision: string } } }
+): Promise<PreparedSync> {
   await assertManagedHealthy(project);
   const upstream = project.config.store.upstream;
   if (!upstream) throw new Error("Managed Project has no configured organization upstream");
@@ -285,7 +339,16 @@ export async function syncMemory(): Promise<{ revision?: string; change?: Memory
   const remote = upstream.slice(0, slash);
   const branch = upstream.slice(slash + 1);
   await runGit(["fetch", remote, branch], { cwd: project.memoryRoot });
-  const mergeParent = await gitOutput(["rev-parse", `${remote}/${branch}`], project.memoryRoot);
+  return { upstream, mergeParent: await gitOutput(["rev-parse", `${remote}/${branch}`], project.memoryRoot) };
+}
+
+async function syncMemoryLocked(
+  project: ResolvedProject & { config: { store: { type: "managed"; branch: string; upstream?: string; published_revision: string } } },
+  source: PreparedSync
+): Promise<{ revision?: string; change?: MemoryChangeSet; candidateRoot?: string }> {
+  await assertManagedHealthy(project);
+  if (project.config.store.upstream !== source.upstream) throw new Error("Managed Project upstream changed during sync; retry the command");
+  const { upstream, mergeParent } = source;
   if (await isAncestor(mergeParent, project.config.store.published_revision, project.memoryRoot)) {
     return { revision: project.config.store.published_revision };
   }
@@ -298,20 +361,31 @@ export async function syncMemory(): Promise<{ revision?: string; change?: Memory
       await abortMerge(project);
       throw error;
     }
-    const candidates = await Promise.all(conflicts.map(async (path) => ({ path, content: await readFile(join(project.memoryRoot, path)) })));
+    const candidates = await Promise.all(conflicts.map(async (path) => ({
+      path,
+      content: await readSyncConflictCandidate(project.memoryRoot, path)
+    })));
     await abortMerge(project);
-    const provider = new GitRevisionMemoryProvider(project.memoryRoot, project.config.store.published_revision);
-    const descriptors = await provider.list();
+    const [publishedDescriptors, upstreamDescriptors] = await Promise.all([
+      new GitRevisionMemoryProvider(project.memoryRoot, project.config.store.published_revision).list(),
+      new GitRevisionMemoryProvider(project.memoryRoot, mergeParent).list()
+    ]);
+    const createPaths = new Map<string, string>();
     const references = conflicts.map((path) => {
-      const descriptor = descriptors.find((candidate) => candidate.id === path);
+      const published = publishedDescriptors.find((candidate) => candidate.id === path);
+      const descriptor = published ?? upstreamDescriptors.find((candidate) => candidate.id === path);
       if (!descriptor) throw new Error(`Sync conflict is not an existing Memory: ${path}`);
-      return logicalReferenceFromDescriptor(descriptor);
+      const reference = logicalReferenceFromDescriptor(descriptor);
+      if (!published) createPaths.set(reference, path);
+      return reference;
     });
-    const result = await editMemories({ references });
+    const result = await editMemories({ references, createPaths });
     for (const candidate of candidates) {
       const target = result.change.targets.find((item) => item.path === candidate.path);
       if (!target) throw new Error(`Sync ChangeSet target is missing: ${candidate.path}`);
-      await writeFile(join(result.candidateRoot, target.path), candidate.content);
+      const candidatePath = join(result.candidateRoot, target.path);
+      if (candidate.content !== undefined) await writeFile(candidatePath, candidate.content);
+      else await rm(candidatePath, { force: true });
     }
     result.change.merge_parent = mergeParent;
     result.change.updated_at = new Date().toISOString();
@@ -326,33 +400,67 @@ export async function syncMemory(): Promise<{ revision?: string; change?: Memory
     const revision = await updatePublishedRevision(project);
     return { revision };
   } catch (error) {
-    await abortMerge(project);
+    const rollbackErrors: unknown[] = [];
+    await abortMerge(project).catch((rollbackError) => rollbackErrors.push(rollbackError));
+    await restoreJsonIfChanged(project.paths.configPath, project.config).catch((rollbackError) => rollbackErrors.push(rollbackError));
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError([error, ...rollbackErrors], "Memory sync failed and rollback was incomplete");
+    }
     throw error;
   }
+}
+
+async function readSyncConflictCandidate(root: string, path: string): Promise<Buffer | string | undefined> {
+  const stages = new Map<number, string>();
+  const unmerged = await gitOutput(["ls-files", "-u", "--", path], root);
+  for (const line of unmerged.split("\n").filter(Boolean)) {
+    const [metadata] = line.split("\t", 1);
+    const [, digest, stage] = metadata.split(" ");
+    if (digest && stage) stages.set(Number(stage), digest);
+  }
+  const ours = stages.get(2);
+  const theirs = stages.get(3);
+  if (ours && theirs) return readFile(join(root, path));
+  if (!ours && !theirs) {
+    return readFile(join(root, path)).catch((error) => {
+      if (isCode(error, "ENOENT")) return undefined;
+      throw error;
+    });
+  }
+  const oursContent = ours ? `${await gitOutput(["cat-file", "-p", ours], root)}\n` : "";
+  const theirsContent = theirs ? `${await gitOutput(["cat-file", "-p", theirs], root)}\n` : "";
+  return [
+    `<<<<<<< current${ours ? "" : " (deleted)"}\n`,
+    oursContent,
+    "=======\n",
+    theirsContent,
+    `>>>>>>> upstream${theirs ? "" : " (deleted)"}\n`
+  ].join("");
 }
 
 async function publishLocked(project: ResolvedProject, change: MemoryChangeSet, candidateRoot: string, message?: string): Promise<MemoryChangeSet> {
   await assertManagedHealthy(project);
   assertManaged(project);
   const publishedRevision = project.config.store.published_revision;
-  await assertChangeTargetsCurrent(project, change);
-  const issues = await validateEffectiveMemoryChange(project, change, candidateRoot);
+  const effectiveChange = await resolveEffectiveSyncTargets(change, candidateRoot);
+  await assertChangeTargetsCurrent(project, effectiveChange);
+  const issues = await validateEffectiveMemoryChange(project, effectiveChange, candidateRoot);
   if (issues.length > 0) {
     throw new Error(`ChangeSet validation failed:\n${issues.map((issue) => `- ${issue.path}: ${issue.message}`).join("\n")}`);
   }
 
   try {
-    if (change.merge_parent) {
-      await runGit(["merge", "--no-ff", "--no-commit", change.merge_parent], { cwd: project.memoryRoot }).catch(() => undefined);
+    if (effectiveChange.merge_parent) {
+      await runGit(["merge", "--no-ff", "--no-commit", effectiveChange.merge_parent], { cwd: project.memoryRoot }).catch(() => undefined);
     }
-    await applyTargets(project.memoryRoot, candidateRoot, change.targets);
+    await applyTargets(project.memoryRoot, candidateRoot, effectiveChange.targets);
     await runGit(["add", "-A"], { cwd: project.memoryRoot });
     const formalValidation = await validateMemoryRoot(project.memoryRoot);
     if (formalValidation.issues.length > 0) throw new Error(`ChangeSet validation failed after merge: ${formalValidation.issues[0].message}`);
-    await runGit(["commit", "-m", message?.trim() || `Publish Memsphere ChangeSet ${change.id}`], { cwd: project.memoryRoot });
+    await runGit(["commit", "-m", message?.trim() || `Publish Memsphere ChangeSet ${effectiveChange.id}`], { cwd: project.memoryRoot });
     const revision = await updatePublishedRevision(project);
     const published = memoryChangeSetSchema.parse({
-      ...change,
+      ...effectiveChange,
       status: "published",
       published_revision: revision,
       updated_at: new Date().toISOString()
@@ -372,6 +480,17 @@ async function publishLocked(project: ResolvedProject, change: MemoryChangeSet, 
   }
 }
 
+async function resolveEffectiveSyncTargets(change: MemoryChangeSet, candidateRoot: string): Promise<MemoryChangeSet> {
+  if (!change.merge_parent) return change;
+  const targets = await Promise.all(change.targets.map(async (target) => ({
+    ...target,
+    operation: await exists(join(candidateRoot, target.path))
+      ? target.base_digest ? "update" as const : "create" as const
+      : "delete" as const
+  })));
+  return memoryChangeSetSchema.parse({ ...change, targets });
+}
+
 async function restoreJsonIfChanged(path: string, value: unknown): Promise<void> {
   const expected = `${JSON.stringify(value, null, 2)}\n`;
   try {
@@ -386,6 +505,10 @@ async function assertChangeTargetsCurrent(project: ResolvedProject, change: Memo
   for (const target of change.targets) {
     const current = join(project.memoryRoot, target.path);
     if (target.operation === "create") {
+      if (await exists(current)) throw new Error(`Memory create conflict: ${target.reference}`);
+      continue;
+    }
+    if (target.operation === "delete" && !target.base_digest) {
       if (await exists(current)) throw new Error(`Memory create conflict: ${target.reference}`);
       continue;
     }
@@ -460,10 +583,16 @@ async function isAncestor(ancestor: string, descendant: string, cwd: string): Pr
 }
 
 async function createChange(project: ResolvedProject, workspaceKey: string): Promise<MemoryChangeSet> {
+  const change = newChange(project, workspaceKey);
+  await writeChange(project, change);
+  return change;
+}
+
+function newChange(project: ResolvedProject, workspaceKey: string): MemoryChangeSet {
   const id = changeId();
   const revision = project.config.store.type === "managed" ? project.config.store.published_revision : "embedded";
   const now = new Date().toISOString();
-  const change: MemoryChangeSet = {
+  return {
     format_version: 1,
     id,
     project: project.name,
@@ -474,8 +603,6 @@ async function createChange(project: ResolvedProject, workspaceKey: string): Pro
     updated_at: now,
     targets: []
   };
-  await writeChange(project, change);
-  return change;
 }
 
 async function resolveTarget(
@@ -593,6 +720,10 @@ async function assertManagedHealthy(project: ResolvedProject): Promise<void> {
 
 function assertManaged(project: ResolvedProject): asserts project is ResolvedProject & { config: { store: { type: "managed"; branch: string; upstream?: string; published_revision: string }; control_plane?: ResolvedProject["config"]["control_plane"] } } {
   if (project.config.store.type !== "managed") throw new Error("Managed Memory ChangeSets are not available for an Embedded Project");
+}
+
+function memoryMutationLock(project: ResolvedProject): string {
+  return join(project.paths.runtimeRoot, "memory-publish.lock");
 }
 
 async function readChange(project: ResolvedProject, id: string): Promise<MemoryChangeSet> {

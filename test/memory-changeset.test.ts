@@ -100,6 +100,16 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     assert.match(await readFile(join(memoryRoot, "concepts", "shared.yaml"), "utf8"), /Initial/);
     assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
 
+    const concurrentA = await editMemories({ references: ["concepts/Concurrent A"] });
+    const concurrentB = await editMemories({ references: ["concepts/Concurrent B"] });
+    await Promise.all([
+      publishMemoryChange(concurrentA.change.id),
+      publishMemoryChange(concurrentB.change.id)
+    ]);
+    assert.match(await readFile(join(memoryRoot, concurrentA.change.targets[0].path), "utf8"), /Concurrent A/);
+    assert.match(await readFile(join(memoryRoot, concurrentB.change.targets[0].path), "utf8"), /Concurrent B/);
+    assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
+
     const dependent = await editMemories({ references: ["concepts/Dependent"] });
     const dependentPath = join(dependent.candidateRoot, "concepts", "dependent.yaml");
     await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("defines: []", "defines:\n  - !ref\n    target: concepts/Shared"));
@@ -186,6 +196,20 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
 
     if (process.platform !== "win32") {
+      const workspaceChangesRoot = join(workspace, ".memsphere-work", "changes");
+      await writeFile(
+        join(memoryRoot, "concepts", "shared.yaml"),
+        (await readFile(join(memoryRoot, "concepts", "shared.yaml"), "utf8")).replace("Outside", "Recovery Failure")
+      );
+      await chmod(workspaceChangesRoot, 0o555);
+      try {
+        await assert.rejects(recoverMemory("Shared", "create-change"), /EACCES|permission denied/);
+      } finally {
+        await chmod(workspaceChangesRoot, 0o755);
+      }
+      assert.match(await readFile(join(memoryRoot, "concepts", "shared.yaml"), "utf8"), /Recovery Failure/);
+      await recoverMemory("Shared", "restore");
+
       const failed = await editMemories({ references: ["concepts/Atomic Failure"] });
       const projectRoot = registry.projects.project.root;
       const configPath = join(projectRoot, "config.json");
