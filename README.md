@@ -16,7 +16,7 @@ memsphere skill init --global
 memsphere project create my-project --bind
 ```
 
-Managed Project 数据保存在操作系统用户数据目录，不会随临时 Git worktree 删除，并通过首笔 ChangeSet 安装内置 System Memory。Git 是必需依赖；Windows 用户请安装 Git for Windows 并在 Git Bash 中使用 Memsphere。
+Managed Project 数据保存在操作系统用户数据目录，不会随临时 Git worktree 删除，并通过首笔 ChangeSet 安装内置 System Memory。Git 是必需依赖；Windows 用户请安装 Git for Windows，随后重新打开 PowerShell、CMD 或 Git Bash 等受支持 shell，确保 `git` 已在 `PATH` 中。运行 Memsphere 不要求先进入 Git Bash。
 
 代码仓库已经包含一套 Memory 时，可以把它登记为 Embedded Project：
 
