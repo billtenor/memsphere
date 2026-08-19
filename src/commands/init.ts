@@ -5,6 +5,7 @@ import { ensureRunDirectory } from "../run/store.js";
 import { ensureMemoryDirectories } from "../validation.js";
 import { join } from "node:path";
 import { access, mkdir } from "node:fs/promises";
+import { assertWindowsPrerequisites } from "../windows-prerequisites.js";
 
 type InitOptions = {
   memoryRoot?: string;
@@ -17,6 +18,7 @@ type InitOptions = {
 };
 
 export async function initCommand(options: InitOptions): Promise<void> {
+  await assertWindowsPrerequisites();
   if (options.global && options.folder) {
     throw new Error("--global and --folder cannot be used together");
   }

@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { artifactReviewAssignmentId, type ArtifactReview, type ArtifactReviewRound } from "../artifact-review.js";
-import type { MemsphereConfig } from "../config.js";
+import { findGitRoot, type MemsphereConfig } from "../config.js";
 import type { ArtifactReviewAgentContext, RunState } from "../run/store.js";
 import { agentReviewCliSource, currentCliRuntimeDescriptor } from "./cli-runtime.js";
 import { buildArtifactReviewerPrompt } from "./prompt.js";
@@ -40,7 +40,7 @@ export async function writeAgentReviewDebugArtifacts(input: {
 }): Promise<AgentReviewTryRunArtifact[]> {
   const runtime = currentCliRuntimeDescriptor();
   const cliSource = agentReviewCliSource(runtime);
-  const workspaceRoot = dirname(input.config.scopeRoot);
+  const workspaceRoot = await findGitRoot() ?? resolve(process.cwd());
   const generated: AgentReviewTryRunArtifact[] = [];
   for (const assignment of input.round.assignments) {
     if ((assignment.actorKind ?? "human") !== "agent" || assignment.status !== "queued") continue;
@@ -54,7 +54,8 @@ export async function writeAgentReviewDebugArtifacts(input: {
       MEMSPHERE_REVIEW_ASSIGNMENT_ID: assignmentId,
       MEMSPHERE_CONFIG_PATH: input.config.configPath,
       MEMSPHERE_WORKSPACE_ROOT: workspaceRoot,
-      MEMSPHERE_CLI: "<runtime-generated-session-cli>"
+      MEMSPHERE_CLI: "<runtime-generated-session-cli>",
+      PATH: ["<runtime-generated-session-directory>", process.env.PATH].filter(Boolean).join(delimiter)
     };
     const provider = getAgentReviewProvider(actor.agent.providerType);
     const launch = provider.buildLaunch({ actor, workspaceRoot, sessionEnv });
@@ -67,7 +68,7 @@ export async function writeAgentReviewDebugArtifacts(input: {
     };
     const prompt = await buildArtifactReviewerPrompt({
       context,
-      promptVersion: launch.promptVersion,
+      promptVersion: attempt.promptVersion ?? launch.promptVersion,
       locale: resolvePromptLocale(input.run.language)
     });
     const directory = join(
@@ -99,7 +100,7 @@ export async function writeAgentReviewDebugArtifacts(input: {
       startupTimeoutMs: launch.startupTimeoutMs,
       idleTimeoutMs: launch.idleTimeoutMs,
       maxRuntimeMs: launch.maxRuntimeMs,
-      promptVersion: launch.promptVersion,
+      promptVersion: attempt.promptVersion ?? launch.promptVersion,
       model: launch.model,
       cliSource,
       promptFile: "prompt.md"

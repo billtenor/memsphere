@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import crossSpawn from "cross-spawn";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
@@ -80,7 +80,7 @@ function completeReview(vote) {
 }
 
 function invoke(command, args) {
-  const result = spawnSync(command, args, { encoding: "utf8", env: process.env });
+  const result = crossSpawn.sync(command, args, { encoding: "utf8", env: process.env });
   if (result.status !== 0) throw new Error(`fake reviewer CLI failed: ${result.stderr || result.stdout}`);
   return result.stdout.trim();
 }

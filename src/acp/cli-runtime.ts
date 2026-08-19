@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { spawnCommand } from "../platform-process.js";
 
 export type CliRuntimeDescriptor = {
   nodeExecutable: string;
@@ -12,6 +12,7 @@ export type AgentReviewCliRuntime = {
   descriptor: CliRuntimeDescriptor;
   directory: string;
   launcherPath: string;
+  commandName: string;
   source: "installed" | "development";
   cleanup(): Promise<void>;
 };
@@ -28,7 +29,8 @@ export function currentCliRuntimeDescriptor(): CliRuntimeDescriptor {
 export async function createAgentReviewCliRuntime(descriptor: CliRuntimeDescriptor): Promise<AgentReviewCliRuntime> {
   assertCliRuntimeDescriptor(descriptor);
   const directory = await mkdtemp(join(tmpdir(), "memsphere-agent-review-"));
-  const launcherPath = join(directory, process.platform === "win32" ? "memsphere.cmd" : "memsphere");
+  const commandName = "memsphere-review";
+  const launcherPath = join(directory, process.platform === "win32" ? `${commandName}.cmd` : commandName);
   const guardPath = join(directory, "guard.mjs");
   const source = agentReviewCliSource(descriptor);
   await writeFile(guardPath, buildGuard(descriptor), "utf8");
@@ -36,7 +38,17 @@ export async function createAgentReviewCliRuntime(descriptor: CliRuntimeDescript
     ? `@echo off\r\n"${escapeWindows(descriptor.nodeExecutable)}" "${escapeWindows(guardPath)}" %*\r\n`
     : `#!/bin/sh\nexec ${shellQuote(descriptor.nodeExecutable)} ${shellQuote(guardPath)} "$@"\n`;
   await writeFile(launcherPath, launcher, "utf8");
-  if (process.platform !== "win32") await chmod(launcherPath, 0o700);
+  if (process.platform === "win32") {
+    const bashLauncherPath = join(directory, commandName);
+    await writeFile(
+      bashLauncherPath,
+      `#!/bin/sh\nexec ${shellQuote(descriptor.nodeExecutable)} ${shellQuote(guardPath)} "$@"\n`,
+      "utf8"
+    );
+    await chmod(bashLauncherPath, 0o700).catch(() => undefined);
+  } else {
+    await chmod(launcherPath, 0o700);
+  }
   try {
     await preflightLauncher(launcherPath);
   } catch (error) {
@@ -47,6 +59,7 @@ export async function createAgentReviewCliRuntime(descriptor: CliRuntimeDescript
     descriptor,
     directory,
     launcherPath,
+    commandName,
     source,
     cleanup: () => rm(directory, { recursive: true, force: true })
   };
@@ -62,19 +75,29 @@ function buildGuard(descriptor: CliRuntimeDescriptor): string {
   return `import { spawnSync } from "node:child_process";
 const args = process.argv.slice(2);
 const option = name => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined; };
-const boundRun = option("--run") === process.env.MEMSPHERE_REVIEW_RUN_ID;
-const boundAssignment = option("--assignment") === process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID;
 const reviewWrite = args[0] === "run" && args[1] === "review" && ["comment", "submit"].includes(args[2]);
 const assignmentShow = args[0] === "run" && args[1] === "review" && args[2] === "assignment" && args[3] === "show";
 const artifactShow = args[0] === "run" && args[1] === "artifact" && args[2] === "show";
 const artifactContractShow = args[0] === "run" && args[1] === "artifact" && args[2] === "contract" && args[3] === "show";
 const stepShow = args[0] === "run" && args[1] === "step" && args[2] === "show";
+const runShow = args[0] === "run" && args[1] === "show";
+const bind = (name, value) => {
+  const existing = option(name);
+  if (existing !== undefined) return existing === value;
+  if (!value) return false;
+  args.push(name, value);
+  return true;
+};
+const needsAssignment = assignmentShow || artifactContractShow || reviewWrite || (artifactShow && option("--step") === undefined);
+const needsRun = runShow || stepShow || (artifactShow && option("--step") !== undefined);
+const boundAssignment = !needsAssignment || bind("--assignment", process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID);
+const boundRun = !needsRun || bind("--run", process.env.MEMSPHERE_REVIEW_RUN_ID);
 const allowed = (args.length === 1 && args[0] === "--version")
   || (args[0] === "memory" && ["list", "read"].includes(args[1]))
-  || (args[0] === "run" && args[1] === "show" && boundRun)
+  || (runShow && boundRun)
   || (stepShow && boundRun)
-  || (artifactShow && (boundAssignment || boundRun))
-  || (artifactContractShow && (boundAssignment || boundRun))
+  || (artifactShow && boundAssignment && boundRun)
+  || (artifactContractShow && boundAssignment)
   || (assignmentShow && boundAssignment)
   || (reviewWrite && boundAssignment);
 if (!allowed) {
@@ -104,9 +127,9 @@ function assertCliRuntimeDescriptor(descriptor: CliRuntimeDescriptor): void {
 
 async function preflightLauncher(launcherPath: string): Promise<void> {
   await new Promise<void>((resolveProcess, rejectProcess) => {
-    const child = spawn(launcherPath, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawnCommand(launcherPath, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
     let stderr = "";
-    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+    child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
     child.once("error", (error) => rejectProcess(new Error(`cli_launcher_failed: ${error.message}`)));
     child.once("exit", (code) => {
       if (code === 0) resolveProcess();

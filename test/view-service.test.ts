@@ -143,6 +143,7 @@ test("managed start does not transport the Settings token through the child envi
     });
 
     assert.equal(spawnOptions?.env, undefined);
+    assert.equal(spawnOptions?.windowsHide, true);
     assert.equal(started.settingsToken, "a".repeat(43));
   });
 });

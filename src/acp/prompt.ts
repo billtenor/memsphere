@@ -11,7 +11,7 @@ export async function buildArtifactReviewerPrompt(input: {
   promptVersion: string;
   locale?: PromptLocale;
 }): Promise<string> {
-  if (input.promptVersion !== "artifact-review-v1") {
+  if (!["artifact-review-v1", "artifact-review-v2"].includes(input.promptVersion)) {
     throw new Error(`agent_prompt_version_unsupported: ${input.promptVersion}`);
   }
   const { run, review, round, assignment } = input.context;
@@ -30,7 +30,10 @@ export async function buildArtifactReviewerPrompt(input: {
         ?? (locale === "zh-CN" ? "本次产物评审已授予此权限。" : "Permission granted for this Artifact Review.")
     };
   });
-  return renderPrompt("acp.artifact-review.initial", locale, {
+  const promptId = input.promptVersion === "artifact-review-v1"
+    ? "acp.artifact-review.initial"
+    : "acp.artifact-review.initial-v2";
+  return renderPrompt(promptId, locale, {
     rolePrompts,
     contract: {
       actionInstruction: contract.action.instruction,
@@ -55,6 +58,15 @@ export async function buildArtifactReviewerPrompt(input: {
   });
 }
 
-export function buildArtifactReviewerReminder(locale: PromptLocale = "zh-CN"): string {
-  return renderPrompt("acp.artifact-review.reminder", locale, {});
+export function buildArtifactReviewerReminder(
+  locale: PromptLocale = "zh-CN",
+  promptVersion = "artifact-review-v2"
+): string {
+  return renderPrompt(
+    promptVersion === "artifact-review-v1"
+      ? "acp.artifact-review.reminder"
+      : "acp.artifact-review.reminder-v2",
+    locale,
+    {}
+  );
 }

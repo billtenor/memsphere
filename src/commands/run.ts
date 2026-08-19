@@ -106,6 +106,7 @@ type AgentReviewAssignmentOptions = OutputOptions & { assignment?: string };
 
 type AgentReviewCommentOptions = AgentReviewAssignmentOptions & {
   body?: string;
+  bodyFile?: string;
   bodyStdin?: boolean;
   target?: string;
   location?: string;
@@ -421,19 +422,26 @@ export function validateInlineReviewCommentBody(body: string): void {
 }
 
 export async function resolveReviewCommentBody(
-  options: Pick<AgentReviewCommentOptions, "body" | "bodyStdin">,
+  options: Pick<AgentReviewCommentOptions, "body" | "bodyFile" | "bodyStdin">,
   input: AsyncIterable<unknown> = process.stdin
 ): Promise<string> {
-  if (options.body !== undefined && options.bodyStdin) {
-    throw new Error("use only one of --body or --body-stdin");
+  const sources = [options.body !== undefined, options.bodyFile !== undefined, Boolean(options.bodyStdin)]
+    .filter(Boolean).length;
+  if (sources > 1) {
+    throw new Error("use only one of --body, --body-file, or --body-stdin");
   }
-  if (options.body === undefined && !options.bodyStdin) {
-    throw new Error("--body or --body-stdin is required");
+  if (sources === 0) {
+    throw new Error("--body, --body-file, or --body-stdin is required");
   }
   if (options.body !== undefined) {
     if (!options.body.trim()) throw new Error("comment body must not be empty");
     validateInlineReviewCommentBody(options.body);
     return options.body;
+  }
+  if (options.bodyFile !== undefined) {
+    const body = await readFile(options.bodyFile, "utf8");
+    if (!body.trim()) throw new Error("comment body file must not be empty");
+    return body;
   }
   let body = "";
   for await (const chunk of input) body += String(chunk);

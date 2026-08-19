@@ -13,6 +13,7 @@ summary; the license distributed with each package is authoritative.
 | --- | ---: | --- | --- |
 | `@agentclientprotocol/sdk` | 1.2.1 | Apache-2.0 | [agentclientprotocol/typescript-sdk](https://github.com/agentclientprotocol/typescript-sdk) |
 | `commander` | 12.1.0 | MIT | [tj/commander.js](https://github.com/tj/commander.js) |
+| `cross-spawn` | 7.0.6 | MIT | [moxystudio/node-cross-spawn](https://github.com/moxystudio/node-cross-spawn) |
 | `handlebars` | 4.7.9 | MIT | [handlebars-lang/handlebars.js](https://github.com/handlebars-lang/handlebars.js) |
 | `markdown-it` | 14.3.0 | MIT | [markdown-it/markdown-it](https://github.com/markdown-it/markdown-it) |
 | `yaml` | 2.9.0 | ISC | [eemeli/yaml](https://github.com/eemeli/yaml) |
@@ -30,6 +31,11 @@ summary; the license distributed with each package is authoritative.
 | `argparse` | 2.0.1 | Python-2.0 | `markdown-it` | [nodeca/argparse](https://github.com/nodeca/argparse) |
 | `entities` | 4.5.0 | BSD-2-Clause | `markdown-it` | [fb55/entities](https://github.com/fb55/entities) |
 | `linkify-it` | 5.0.2 | MIT | `markdown-it` | [markdown-it/linkify-it](https://github.com/markdown-it/linkify-it) |
+| `path-key` | 3.1.1 | MIT | `cross-spawn` | [sindresorhus/path-key](https://github.com/sindresorhus/path-key) |
+| `shebang-command` | 2.0.0 | MIT | `cross-spawn` | [kevva/shebang-command](https://github.com/kevva/shebang-command) |
+| `shebang-regex` | 3.0.0 | MIT | `shebang-command` | [sindresorhus/shebang-regex](https://github.com/sindresorhus/shebang-regex) |
+| `which` | 2.0.2 | ISC | `cross-spawn` | [npm/node-which](https://github.com/npm/node-which) |
+| `isexe` | 2.0.0 | ISC | `which` | [isaacs/isexe](https://github.com/isaacs/isexe) |
 | `mdurl` | 2.0.0 | MIT | `markdown-it` | [markdown-it/mdurl](https://github.com/markdown-it/mdurl) |
 | `punycode.js` | 2.3.1 | MIT | `markdown-it` | [mathiasbynens/punycode.js](https://github.com/mathiasbynens/punycode.js) |
 | `uc.micro` | 2.1.0 | MIT | `markdown-it` | [markdown-it/uc.micro](https://github.com/markdown-it/uc.micro) |

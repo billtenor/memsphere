@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import {
   buildRunArtifactContractDetail,
@@ -44,8 +47,22 @@ test("Artifact Review comments accept multiline Markdown from standard input", a
   );
   await assert.rejects(
     resolveReviewCommentBody({ body: "inline", bodyStdin: true }, Readable.from([])),
-    /use only one of --body or --body-stdin/
+    /use only one of --body, --body-file, or --body-stdin/
   );
+});
+
+test("Artifact Review comments accept multiline Markdown from a file", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-comment-"));
+  const path = join(root, "comment.md");
+  try {
+    await writeFile(path, "First paragraph\n\nSecond paragraph\n", "utf8");
+    assert.equal(
+      await resolveReviewCommentBody({ bodyFile: path }, Readable.from([])),
+      "First paragraph\n\nSecond paragraph\n"
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Run inspection separates navigation, step detail, and Artifact content", async () => {

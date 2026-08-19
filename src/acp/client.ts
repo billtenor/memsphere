@@ -1,9 +1,10 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import type { AgentReviewProviderLaunch } from "./provider.js";
+import { spawnCommand, terminateProcessTree } from "../platform-process.js";
 
 export type AgentReviewAcpSession = {
   protocolVersion: number;
@@ -31,10 +32,14 @@ export async function runAgentReviewAcpSession(input: {
   let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
   const terminate = () => {
     if (process.exitCode !== null) return;
-    process.kill("SIGTERM");
+    if (process.pid) void terminateProcessTree(process.pid, "SIGTERM").catch(() => process.kill("SIGTERM"));
+    else process.kill("SIGTERM");
     if (!forceKillTimer) {
       forceKillTimer = setTimeout(() => {
-        if (process.exitCode === null) process.kill("SIGKILL");
+        if (process.exitCode === null) {
+          if (process.pid) void terminateProcessTree(process.pid, "SIGKILL").catch(() => process.kill("SIGKILL"));
+          else process.kill("SIGKILL");
+        }
       }, 1_000);
     }
   };
@@ -164,11 +169,11 @@ function withAgentStderr(message: string, stderr: string): string {
 }
 
 function spawnAgent(launch: AgentReviewProviderLaunch): ChildProcessWithoutNullStreams {
-  return spawn(launch.command, launch.args, {
+  return spawnCommand(launch.command, launch.args, {
     cwd: launch.cwd,
     env: launch.env,
     stdio: ["pipe", "pipe", "pipe"]
-  });
+  }) as ChildProcessWithoutNullStreams;
 }
 
 async function waitForSpawn(process: ChildProcessWithoutNullStreams, signal: AbortSignal): Promise<void> {
