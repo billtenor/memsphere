@@ -342,7 +342,7 @@ sections:
           - 每个 Slot 表示一个评审人席位，名称应使用可以自然指代评审人的角色称呼，例如产品负责人、测试工程师或流程设计者；不得使用验收、质量、架构设计等评审事项名称代替评审人称呼。
           - Slot 只声明当前 Procedure 需要哪类评审人，不直接引用 Actor、Permission、Decision Policy、system_prompt 或 Agent 配置。
           - 省略 review 时，Artifact 在 type、format 和 schema 校验通过后按既有行为立即被接纳并推进 Run。
-          - Procedure 含 Review 时，创建 Run 前必须为每个 Review scope 选择 Decision Policy，并把所有 Slot 绑定到 Actor 或显式跳过；结果冻结在 Run v3。
+          - Procedure 含 Review 时，创建 Run 前必须为每个 Review scope 选择 Decision Policy，并把所有 Slot 绑定到 Actor 或显式跳过；Run v3 冻结 Actor、权限、Agent 运行配置和初始 Binding。Runner 只能通过显式、受校验且带审计记录的运行期操作修改未来尚未创建的 Review Binding，已经创建的 Review 保留原 Binding。
           - Artifact 校验通过后按 Run 中冻结的配置创建 Artifact Review；Review 通过前不得把候选 Artifact 加入 Run events 或推进当前 Action。
           - Review 要求修改时，Runner 修改并重新提交同一个 Artifact，系统创建新的 Review Round；通常不需要在 Procedure 中另写 !while 表达该 Artifact 的评审返工。
           - 当前内置 artifact_acceptance.unanimous 要求全部 Human 与 Agent Reviewer Assignment 提交；只有具有 decision.decide 的 Vote 参与一致通过判定，只有 decision.assess 的 Vote 作为建议保存；Reviewer 完成后仍需 Runner 显式投票。

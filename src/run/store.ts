@@ -208,6 +208,21 @@ export type RunProcedureTemplate = {
   steps: RunStep[];
 };
 
+export type RunSlotBindingValue =
+  | { actorIds: string[] }
+  | { skip: true };
+
+export type RunBindingChange = {
+  id: string;
+  changedAt: string;
+  subject: "runner";
+  slot: string;
+  before: RunSlotBindingValue;
+  after: RunSlotBindingValue;
+  affectedReviewScopes: string[];
+  preservedReviewIds: string[];
+};
+
 export type RunState = {
   contractVersion: 1 | 2 | 3;
   language?: PromptLocale;
@@ -227,7 +242,27 @@ export type RunState = {
   reviewConfiguration?: RunReviewConfiguration;
   procedureSnapshots?: Record<string, RunProcedureTemplate>;
   artifactReviews?: ArtifactReview<RunEvent["artifact"]>[];
+  bindingChanges?: RunBindingChange[];
   schemaDrafts?: Record<string, SchemaDraftState>;
+};
+
+export type RunBindingSnapshot = {
+  runId: string;
+  status: RunStatus;
+  readOnly: boolean;
+  actors: Array<{
+    id: string;
+    name: string;
+    kind: "human" | "agent";
+    permissions: string[];
+  }>;
+  slots: Array<{
+    key: string;
+    binding: RunSlotBindingValue;
+    reviewScopes: string[];
+    reviewIds: string[];
+  }>;
+  changes: RunBindingChange[];
 };
 
 export type RunReviewPreflight = {
@@ -680,6 +715,22 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
   }).strict().optional(),
   procedureSnapshots: z.record(runProcedureTemplateSchema),
   artifactReviews: z.array(artifactReviewSchema).optional(),
+  bindingChanges: z.array(z.object({
+    id: z.string(),
+    changedAt: z.string(),
+    subject: z.literal("runner"),
+    slot: z.string(),
+    before: z.union([
+      z.object({ actorIds: z.array(z.string()).min(1) }).strict(),
+      z.object({ skip: z.literal(true) }).strict()
+    ]),
+    after: z.union([
+      z.object({ actorIds: z.array(z.string()).min(1) }).strict(),
+      z.object({ skip: z.literal(true) }).strict()
+    ]),
+    affectedReviewScopes: z.array(z.string()),
+    preservedReviewIds: z.array(z.string())
+  }).strict()).optional(),
   schemaDrafts: z.record(schemaDraftStateSchema).optional()
 }).strict();
 
@@ -799,6 +850,105 @@ export async function listRuns(runsRoot: string): Promise<RunState[]> {
   return runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+export function buildRunBindingSnapshot(run: RunState): RunBindingSnapshot {
+  const scopesBySlot = runReviewScopesBySlot(run);
+  const reviewsBySlot = new Map<string, string[]>();
+  const createdScopesBySlot = new Map<string, Set<string>>();
+  for (const review of run.artifactReviews ?? []) {
+    for (const slot of Object.keys(review.controlPlane.bindings)) {
+      const ids = reviewsBySlot.get(slot) ?? [];
+      ids.push(review.id);
+      reviewsBySlot.set(slot, ids);
+      const scopes = createdScopesBySlot.get(slot) ?? new Set<string>();
+      scopes.add(review.controlPlane.artifactScope);
+      createdScopesBySlot.set(slot, scopes);
+    }
+  }
+  return {
+    runId: run.id,
+    status: run.status,
+    readOnly: run.readOnly === true,
+    actors: Object.entries(run.controlPlane?.actors ?? {}).map(([id, actor]) => ({
+      id,
+      name: actor.name,
+      kind: actor.kind,
+      permissions: [...actor.permissions]
+    })),
+    slots: Object.entries(run.reviewConfiguration?.slots ?? {}).map(([key, binding]) => ({
+      key,
+      binding: cloneRunSlotBinding(binding),
+      reviewScopes: (scopesBySlot.get(key) ?? []).filter((scope) => !createdScopesBySlot.get(key)?.has(scope)),
+      reviewIds: [...new Set(reviewsBySlot.get(key) ?? [])]
+    })).sort((left, right) => left.key.localeCompare(right.key)),
+    changes: structuredClone(run.bindingChanges ?? [])
+  };
+}
+
+export async function updateRunSlotBinding(input: {
+  runsRoot: string;
+  runId: string;
+  slot: string;
+  actorIds?: string[];
+  skip?: boolean;
+}): Promise<{ run: RunState; change: RunBindingChange; snapshot: RunBindingSnapshot }> {
+  return withRunWriteLock(input.runsRoot, input.runId, async () => {
+    const run = await readRun(input.runsRoot, input.runId);
+    if (run.contractVersion !== 3) throw new Error("Run binding update requires Run v3");
+    if (run.readOnly) throw new Error(`Run is read-only: ${run.id}`);
+    if (run.status !== "running") throw new Error(`Run is not running: ${run.id}`);
+    if (!run.controlPlane || !run.reviewConfiguration || !run.procedureSnapshots) {
+      throw new Error(`Run has no Review binding configuration: ${run.id}`);
+    }
+
+    const slot = input.slot.trim();
+    if (!slot || !(slot in run.reviewConfiguration.slots)) {
+      throw new Error(`Unknown Review Slot in Run: ${slot || "<empty>"}`);
+    }
+    if (input.skip === true && input.actorIds !== undefined) {
+      throw new Error("use either actorIds or skip, not both");
+    }
+    if (input.skip !== true && input.actorIds === undefined) {
+      throw new Error("provide actorIds or set skip");
+    }
+    const after: RunSlotBindingValue = input.skip === true
+      ? { skip: true }
+      : validateRunSlotActors(run, slot, input.actorIds ?? []);
+    const before = cloneRunSlotBinding(run.reviewConfiguration.slots[slot]);
+    if (sameRunSlotBinding(before, after)) throw new Error(`Review Slot binding is unchanged: ${slot}`);
+
+    const candidate = structuredClone(run.reviewConfiguration);
+    candidate.slots[slot] = cloneRunSlotBinding(after);
+    const resolvedStepsByScope = resolvedReviewStepsByScope(run, candidate);
+    const preservedReviewIds = (run.artifactReviews ?? [])
+      .filter((review) => slot in review.controlPlane.bindings)
+      .map((review) => review.id);
+    const preservedReviewScopes = new Set((run.artifactReviews ?? [])
+      .filter((review) => slot in review.controlPlane.bindings)
+      .map((review) => review.controlPlane.artifactScope));
+    const affectedReviewScopes = [...(runReviewScopesBySlot(run).get(slot) ?? [])]
+      .filter((scope) => !preservedReviewScopes.has(scope))
+      .sort();
+
+    run.reviewConfiguration = candidate;
+    updateStoredRunReviewSteps(run, affectedReviewScopes, resolvedStepsByScope);
+    const now = new Date().toISOString();
+    const change: RunBindingChange = {
+      id: makeBindingChangeId(now),
+      changedAt: now,
+      subject: "runner",
+      slot,
+      before,
+      after: cloneRunSlotBinding(after),
+      affectedReviewScopes,
+      preservedReviewIds
+    };
+    (run.bindingChanges ??= []).push(change);
+    run.updatedAt = now;
+    await writeRun(input.runsRoot, run);
+    return { run, change, snapshot: buildRunBindingSnapshot(run) };
+  });
+}
+
 export async function reportRun(input: {
   runsRoot: string;
   runId: string;
@@ -871,7 +1021,7 @@ async function acceptPreparedArtifact(
   validation: ArtifactValidationResult,
   authorization?: AuthorizationDecision
 ): Promise<RunState> {
-  if (step.reviewPolicy) {
+  if (step.reviewPolicy || activeReviewForStep(run, step)) {
     return reportReviewedArtifact(input, run, step, candidate, validation, authorization);
   }
 
@@ -929,16 +1079,19 @@ async function reportReviewedArtifact(
   validation: ArtifactValidationResult,
   authorization?: AuthorizationDecision
 ): Promise<RunState> {
-  if (run.contractVersion !== 3 || !run.controlPlane || !step.controlPlane || !step.reviewPolicy || !step.artifact) {
+  const existing = activeReviewForStep(run, step);
+  const reviewControlPlane = existing?.controlPlane ?? step.controlPlane;
+  const reviewPolicyId = existing?.policyId ?? step.reviewPolicy;
+  if (run.contractVersion !== 3 || !run.controlPlane || !reviewControlPlane || !reviewPolicyId || !step.artifact) {
     throw new Error(`Artifact Review requires a Run v3 control-plane snapshot: ${step.id}`);
   }
-  const policy = run.controlPlane.decisionPolicyCatalog.definitions.find((item) => item.id === step.reviewPolicy);
-  if (!policy) throw new Error(`Unknown Decision Policy id in Run snapshot: ${step.reviewPolicy}`);
+  const policy = run.controlPlane.decisionPolicyCatalog.definitions.find((item) => item.id === reviewPolicyId);
+  if (!policy) throw new Error(`Unknown Decision Policy id in Run snapshot: ${reviewPolicyId}`);
   if (policy.completion !== "all_assigned" || policy.resolution !== "unanimous") {
-    throw new Error(`Unsupported Decision Policy contract: ${step.reviewPolicy}`);
+    throw new Error(`Unsupported Decision Policy contract: ${reviewPolicyId}`);
   }
   const runnerRead = authorizeArtifactOperation({
-    controlPlane: step.controlPlane,
+    controlPlane: reviewControlPlane,
     subject: { kind: "runner" },
     permission: "artifact.read"
   });
@@ -949,7 +1102,6 @@ async function reportReviewedArtifact(
   }
 
   const digest = digestBytes(candidate.raw);
-  const existing = activeReviewForStep(run, step.id);
   if (existing?.status === "pending" || existing?.status === "awaiting_runner_vote") {
     const submission = reviewSubmission(existing, currentReviewRound(existing).submissionId);
     if (submission.digest === digest) return run;
@@ -974,7 +1126,7 @@ async function reportReviewedArtifact(
   const roundId = makeReviewEntityId("round", now);
   const assignmentSet = createArtifactReviewAssignments({
     snapshot: run.controlPlane,
-    controlPlane: step.controlPlane,
+    controlPlane: reviewControlPlane,
     now
   });
   const createdArtifactFiles: string[] = [];
@@ -1037,8 +1189,8 @@ async function reportReviewedArtifact(
         id: reviewId,
         stepId: step.id,
         artifactName: step.artifact,
-        policyId: step.reviewPolicy,
-        controlPlane: structuredClone(step.controlPlane),
+        policyId: reviewPolicyId,
+        controlPlane: structuredClone(reviewControlPlane),
         status: "pending",
         currentRoundId: roundId,
         createdAt: now,
@@ -1873,9 +2025,13 @@ async function mutateArtifactReviewAgentAttempt(
 
 function activeReviewForStep(
   run: RunState,
-  stepId: string
+  step: RunStep
 ): ArtifactReview<RunEvent["artifact"]> | undefined {
-  return run.artifactReviews?.find((review) => review.stepId === stepId && review.status !== "passed");
+  return run.artifactReviews?.find((review) => (
+    review.stepId === step.id
+    && review.status !== "passed"
+    && (!step.controlPlane || review.controlPlane.artifactScope === step.controlPlane.artifactScope)
+  ));
 }
 
 function currentReviewRound(review: ArtifactReview<RunEvent["artifact"]>): ArtifactReviewRound {
@@ -2540,6 +2696,90 @@ function validateRunReviewConfiguration(
   }
   if (issues.length) throw new Error(`Invalid Review configuration:\n- ${issues.join("\n- ")}`);
   return structuredClone(configuration);
+}
+
+function runReviewScopesBySlot(run: RunState): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+  const templates = [...new Map(
+    Object.values(run.procedureSnapshots ?? {}).map((template) => [template.memoryName, template])
+  ).values()];
+  for (const template of templates) {
+    for (const step of flattenRunSteps(template.steps)) {
+      if (!step.artifact || !step.reviewSlots?.length) continue;
+      const scope = `${template.memoryName}#${step.id}`;
+      for (const slotName of step.reviewSlots) {
+        const slot = `${template.memoryName}::${slotName}`;
+        const scopes = result.get(slot) ?? [];
+        if (!scopes.includes(scope)) scopes.push(scope);
+        result.set(slot, scopes);
+      }
+    }
+  }
+  return result;
+}
+
+function validateRunSlotActors(run: RunState, slot: string, actorIds: string[]): { actorIds: string[] } {
+  if (!actorIds.length) throw new Error(`Review Slot ${slot} requires at least one Actor`);
+  const seen = new Set<string>();
+  for (const [index, actorId] of actorIds.entries()) {
+    if (!actorId.trim()) throw new Error(`Review Slot ${slot} Actor ${index + 1} is empty`);
+    if (seen.has(actorId)) throw new Error(`Review Slot ${slot} has duplicate Actor id ${actorId}`);
+    seen.add(actorId);
+    if (!run.controlPlane?.actors[actorId]) throw new Error(`Review Slot ${slot} has unknown frozen Actor id ${actorId}`);
+  }
+  return { actorIds: [...actorIds] };
+}
+
+function cloneRunSlotBinding(binding: RunSlotBindingValue): RunSlotBindingValue {
+  return "skip" in binding ? { skip: true } : { actorIds: [...binding.actorIds] };
+}
+
+function sameRunSlotBinding(left: RunSlotBindingValue, right: RunSlotBindingValue): boolean {
+  if ("skip" in left || "skip" in right) return "skip" in left && "skip" in right;
+  return left.actorIds.length === right.actorIds.length
+    && left.actorIds.every((actorId, index) => actorId === right.actorIds[index]);
+}
+
+function resolvedReviewStepsByScope(
+  run: RunState,
+  configuration: RunReviewConfiguration
+): Map<string, RunStep> {
+  if (!run.controlPlane) throw new Error(`Run control-plane snapshot missing: ${run.id}`);
+  const resolved = new Map<string, RunStep>();
+  const templates = [...new Map(
+    Object.values(run.procedureSnapshots ?? {}).map((template) => [template.memoryName, template])
+  ).values()];
+  for (const template of templates) {
+    const steps = instantiateProcedureTemplate(template, run.controlPlane, configuration);
+    for (const step of flattenRunSteps(steps)) {
+      if (step.artifact && step.reviewSlots?.length) {
+        resolved.set(`${template.memoryName}#${step.id}`, step);
+      }
+    }
+  }
+  return resolved;
+}
+
+function updateStoredRunReviewSteps(
+  run: RunState,
+  scopes: string[],
+  resolved: Map<string, RunStep>
+): void {
+  const scopeSet = new Set(scopes);
+  const update = (steps: RunStep[], procedureName: string): void => {
+    for (const step of flattenRunSteps(steps)) {
+      const scope = `${procedureName}#${step.id}`;
+      if (!scopeSet.has(scope)) continue;
+      const replacement = resolved.get(scope);
+      if (!replacement) throw new Error(`Resolved Review step missing: ${scope}`);
+      step.controlPlane = replacement.controlPlane ? structuredClone(replacement.controlPlane) : undefined;
+      step.reviewPolicy = replacement.reviewPolicy;
+    }
+  };
+  if (run.plan) update(run.plan, run.procedureName);
+  for (const frame of run.stack) {
+    if (frame.type === "procedure") update(frame.steps, frame.memoryName);
+  }
 }
 
 function flattenRunSteps(steps: readonly RunStep[]): RunStep[] {
@@ -3744,6 +3984,11 @@ function processExists(pid: number): boolean {
 function makeRunId(iso: string): string {
   const stamp = iso.replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z").replace("T", "-").toLowerCase();
   return `run-${stamp}-${randomUUID().slice(0, 8)}`;
+}
+
+function makeBindingChangeId(iso: string): string {
+  const stamp = iso.replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z").replace("T", "-").toLowerCase();
+  return `binding-change-${stamp}-${randomUUID().slice(0, 8)}`;
 }
 
 function normalizeLegacyRun(value: unknown): RunState {

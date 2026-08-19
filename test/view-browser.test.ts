@@ -276,6 +276,17 @@ test("memory and task artifacts show participating Review Slot names", () => {
   assert.match(browserHtml, /roleId\.includes\("::"\) \? roleId\.slice\(roleId\.lastIndexOf\("::"\) \+ 2\) : roleId/);
 });
 
+test("task view supports audited runtime Review Slot rebinding", () => {
+  assert.match(browserHtml, /function renderRunBindings\(run\)/);
+  assert.match(browserHtml, /换绑只影响尚未创建的 Review/);
+  assert.match(browserHtml, /function updateRunBinding\(run, slot, skip, actorIds\)/);
+  assert.match(browserHtml, /settingsFetch\("\/api\/runs\/" \+ encodeURIComponent\(run\.id\) \+ "\/bindings/);
+  assert.match(browserHtml, /run\.bindingChanges/);
+  assert.match(browserHtml, /run\.bindingSnapshot\?\.slots/);
+  assert.match(browserHtml, /existing Reviews preserved/);
+  assert.match(browserHtml, /className = "run-binding-actors"/);
+});
+
 test("markdown artifacts use rendered markdown content when available", () => {
   assert.equal(shouldRenderMarkdownArtifact({ format: "markdown", renderedContent: "<h1>Title</h1>" }), true);
   assert.equal(shouldRenderMarkdownArtifact({ format: "markdown" }), false);
