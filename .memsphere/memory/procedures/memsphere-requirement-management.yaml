@@ -1,9 +1,9 @@
 !procedure
 syntax: memsphere-20260719-stable
 names:
+  - memsphere-requirement-management
   - memsphere 需求管理流程
   - Changes 需求管理流程
-  - memsphere-requirement-management
 defines:
   - 使用仓库根目录的 changes 管理单个需求的记录、状态更新、完成归档和取消归档。
   - 每个需求使用一个目录和一份 change.md；详细过程产物留在 .memsphere/runs，通过 run_id 关联。

@@ -611,10 +611,16 @@ test("task calls use task-scoped review anchors and navigate to Memory", () => {
   assert.match(browserHtml, /commentable\(content, "!call " \+ name, String\(name\), anchor, context\)/);
 });
 
-test("memory details render names as a field while retaining the primary name as the page title", () => {
+test("memory details render names as a field while using alias and reference in the page header", () => {
   assert.match(browserHtml, /names: \{ zh: "名称", yaml: "names" \}/);
   assert.match(browserHtml, /appendList\(target, t\("names"\), node\.names, "names"\)/);
-  assert.match(browserHtml, /el\.title\.textContent = primaryName\(memory\.entity\);/);
+  assert.match(browserHtml, /function memoryDisplayName\(entity\)/);
+  assert.match(browserHtml, /return entity\.names\[1\] \|\| entity\.names\[0\] \|\| "\(unnamed\)"/);
+  assert.match(browserHtml, /el\.title\.textContent = memoryDisplayName\(memory\.entity\);/);
+  assert.match(browserHtml, /el\.subtitle\.textContent = memory\.id;/);
+  assert.match(browserHtml, /button\.textContent = memory\.error \? invalidMemoryName\(memory\) : memoryDisplayName\(memory\.entity\);/);
+  assert.match(browserHtml, /button\.title = memory\.error \? errorText\(memory\.error\) : memory\.id;/);
+  assert.match(browserHtml, /const identity = memory\.error \? memory\.path : memory\.id;/);
 });
 
 test("Artifact Review chooses comment severity before entering the comment", () => {

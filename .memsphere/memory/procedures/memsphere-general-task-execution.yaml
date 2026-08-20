@@ -1,10 +1,10 @@
 !procedure
 syntax: memsphere-20260721-stable
 names:
+  - memsphere-general-task-execution
   - memsphere 通用流程
   - 通用流程
   - 兜底流程
-  - memsphere-general-task-execution
 defines:
   - 用于完成没有专用 Procedure 覆盖的一般任务。
 asserts:

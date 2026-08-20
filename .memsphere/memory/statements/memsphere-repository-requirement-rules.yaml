@@ -1,8 +1,8 @@
 !statement
 syntax: memsphere-20260721-stable
 names:
-  - memsphere 代码仓库需求规范
   - memsphere-repository-requirement-rules
+  - memsphere 代码仓库需求规范
 defines:
   - 规定 memsphere 代码仓库需求文档必须明确的需求决策。
 asserts:
