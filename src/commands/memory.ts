@@ -148,9 +148,9 @@ export async function memoryChangeValidateCommand(
 ): Promise<void> {
   const format = parseOutput(options.format ?? "text", ["text", "json"] as const, "memory change validate");
   const result = await validateMemoryChange(changeId);
-  const previewUrl = await memoryChangePreviewUrl(result.changeId);
+  const preview = await memoryChangePreview(result.changeId);
   if (format === "json") {
-    process.stdout.write(`${JSON.stringify({ valid: result.issues.length === 0, ...result, previewUrl }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ valid: result.issues.length === 0, ...result, previewUrl: preview.url }, null, 2)}\n`);
     if (result.issues.length > 0) process.exitCode = 1;
     return;
   }
@@ -168,15 +168,21 @@ export async function memoryChangeValidateCommand(
   console.log(`Base Revision: ${result.baseRevision}`);
   console.log(`Checkpoint: ${result.checkpointDigest}`);
   console.log(`memoryRoot: ${result.memoryRoot}`);
-  if (previewUrl) console.log(`Preview: ${previewUrl}`);
-  else console.log("Preview: start memsphere View, then open /memories?change=" + encodeURIComponent(result.changeId));
+  if (preview.url) console.log(`Preview: ${preview.url}`);
+  else console.log(`Preview: start memsphere View, then open ${preview.path}`);
 }
 
-async function memoryChangePreviewUrl(changeId: string): Promise<string | undefined> {
+async function memoryChangePreview(changeId: string): Promise<{ path: string; url?: string }> {
   const config = await readConfig();
+  if (!config.project?.name) throw new Error("No Project is currently selected");
+  const path = memoryChangePreviewPath(config.project.name, changeId);
   const status = await getViewServiceStatus(config);
-  if (!status.running || !status.state) return undefined;
-  return `${viewServiceUrl(status.state)}/memories?change=${encodeURIComponent(changeId)}`;
+  if (!status.running || !status.state) return { path };
+  return { path, url: `${viewServiceUrl(status.state)}${path}` };
+}
+
+export function memoryChangePreviewPath(project: string, changeId: string): string {
+  return `/projects/${encodeURIComponent(project)}/memories?change=${encodeURIComponent(changeId)}`;
 }
 
 export async function memoryRecoverCommand(reference: string, options: { restore?: boolean; createChange?: boolean }): Promise<void> {

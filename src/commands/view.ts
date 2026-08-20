@@ -1814,6 +1814,8 @@ function sendHtml(response: ServerResponse, body: string): void {
 export function isViewPagePath(pathname: string): boolean {
   if (["/", "/memories", "/tasks"].includes(pathname)) return true;
   if (/^\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
+  if (/^\/projects\/[^/]+\/memories$/.test(pathname)) return true;
+  if (/^\/projects\/[^/]+\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
   if (/^\/tasks\/[^/]+$/.test(pathname)) return true;
   if (/^\/tasks\/[^/]+\/artifact-reviews\/[^/]+$/.test(pathname)) return true;
   if (/^\/settings\/[^/]+$/.test(pathname)) return true;

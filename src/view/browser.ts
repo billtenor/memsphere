@@ -870,6 +870,20 @@ export const browserHtml = String.raw`<!doctype html>
           ? { page: "memory", kind, name, changeId, fragment }
           : { page: "invalid", mode: "memory", error: "Invalid Memory URL.", fragment };
       }
+      if (parts[0] === "projects" && parts[2] === "memories" && parts.length === 3) {
+        const project = decoded(parts[1]);
+        return project
+          ? { page: "memories", project, changeId, fragment }
+          : { page: "invalid", mode: "memory", error: "Invalid Project Memory URL.", fragment };
+      }
+      if (parts[0] === "projects" && parts[2] === "memories" && parts.length === 5) {
+        const project = decoded(parts[1]);
+        const kind = decoded(parts[3]);
+        const name = decoded(parts[4]);
+        return project && kind && name
+          ? { page: "memory", project, kind, name, changeId, fragment }
+          : { page: "invalid", mode: "memory", error: "Invalid Project Memory URL.", fragment };
+      }
       if (pathname === "/tasks") return { page: "tasks", fragment };
       if (parts[0] === "tasks" && parts.length === 2) {
         const runId = decoded(parts[1]);
@@ -1088,7 +1102,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function prepareBrowserRoute(route) {
-      if (route.page !== "memory-review") return route;
+      if (!route.project) return route;
       if (
         route.project !== state.currentProject
         && !state.projects.some(project => project.name === route.project)
@@ -2859,12 +2873,18 @@ export const browserHtml = String.raw`<!doctype html>
           : "/memories";
       } else {
         if (state.routeLanding === "memories") {
-          return "/memories" + (state.changeId ? "?change=" + encodeURIComponent(state.changeId) : "");
+          const base = state.changeId && state.currentProject
+            ? "/projects/" + encodeRoutePart(state.currentProject) + "/memories"
+            : "/memories";
+          return base + (state.changeId ? "?change=" + encodeURIComponent(state.changeId) : "");
         }
         const memory = state.memories.find(item => item.id === state.selectedId) || null;
-        path = memory?.entity
-          ? "/memories/" + encodeRoutePart(memory.kind) + "/" + encodeRoutePart(primaryName(memory.entity))
+        const memoryBase = state.changeId && state.currentProject
+          ? "/projects/" + encodeRoutePart(state.currentProject) + "/memories"
           : "/memories";
+        path = memory?.entity
+          ? memoryBase + "/" + encodeRoutePart(memory.kind) + "/" + encodeRoutePart(primaryName(memory.entity))
+          : memoryBase;
         if (state.changeId) search = "?change=" + encodeURIComponent(state.changeId);
       }
       const currentBase = window.location.pathname + window.location.search;
@@ -4143,8 +4163,16 @@ export const browserHtml = String.raw`<!doctype html>
       if (!memory) {
         el.title.textContent = "No memories";
         el.subtitle.textContent = "";
-        el.detail.className = "empty";
-        el.detail.textContent = "No memory entities found.";
+        el.detail.className = "";
+        el.detail.innerHTML = "";
+        const preview = renderPreviewMeta();
+        if (preview) el.detail.append(preview);
+        const diagnostics = renderPreviewIssues();
+        if (diagnostics) el.detail.append(diagnostics);
+        if (!diagnostics) {
+          el.detail.className = "empty";
+          el.detail.textContent = "No memory entities found.";
+        }
         return;
       }
       if (memory.error) {
@@ -4159,6 +4187,8 @@ export const browserHtml = String.raw`<!doctype html>
       el.detail.innerHTML = "";
       state.renderLine = 0;
       el.detail.append(renderMeta(memory));
+      const diagnostics = renderPreviewIssues();
+      if (diagnostics) el.detail.append(diagnostics);
       if (memory.kind === "schemas") el.detail.append(renderSchema(memory.entity, 0, primaryName(memory.entity)));
       else if (memory.kind === "statements") el.detail.append(renderStatement(memory.entity, 0, primaryName(memory.entity)));
       else if (memory.kind === "procedures") el.detail.append(renderProcedure(memory.entity));
@@ -4197,6 +4227,8 @@ export const browserHtml = String.raw`<!doctype html>
       el.detail.innerHTML = "";
       const preview = renderPreviewMeta();
       if (preview) el.detail.append(preview);
+      const diagnostics = renderPreviewIssues();
+      if (diagnostics) el.detail.append(diagnostics);
 
       const panel = document.createElement("section");
       panel.className = "error-panel";
@@ -4260,6 +4292,27 @@ export const browserHtml = String.raw`<!doctype html>
       if (source.baseRevision) meta.append(pill("Base: " + String(source.baseRevision).slice(0, 12)));
       meta.append(pill(source.valid === false ? "Validation failed" : "Validation passed", false, source.valid === false ? "warn" : ""));
       if (source.updatedAt) meta.append(pill("Updated: " + formatTime(source.updatedAt)));
+    }
+
+    function renderPreviewIssues() {
+      const source = state.payload?.source;
+      const issues = Array.isArray(source?.issues) ? source.issues : [];
+      if (source?.mode !== "changeset" || issues.length === 0) return null;
+      const panel = document.createElement("section");
+      panel.className = "error-panel";
+      const heading = document.createElement("h3");
+      heading.textContent = "Validation diagnostics";
+      const list = document.createElement("ul");
+      list.className = "error-list";
+      for (const issue of issues) {
+        const item = document.createElement("li");
+        const location = issue.path
+          + (issue.line ? ":" + issue.line + ":" + (issue.column || 1) : "");
+        item.textContent = location + ": " + issue.message;
+        list.append(item);
+      }
+      panel.append(heading, list);
+      return panel;
     }
 
     function pill(text, strong = false, extra = "") {

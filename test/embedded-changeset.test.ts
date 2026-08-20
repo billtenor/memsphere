@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
+import { chromium } from "playwright";
 import { projectCreateCommand } from "../src/commands/project.js";
 import { createViewServer } from "../src/commands/view.js";
 import { runGit } from "../src/git.js";
@@ -142,6 +143,25 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     };
     assert.equal(invalidChange.checkpoint.valid, false);
     assert(invalidChange.checkpoint.issues.some((issue) => issue.path === "concepts/shared.yaml"));
+
+    const invalidView = createViewServer(await readConfig());
+    await new Promise<void>((resolve, reject) => {
+      invalidView.once("error", reject);
+      invalidView.listen(0, "127.0.0.1", resolve);
+    });
+    const invalidOrigin = `http://127.0.0.1:${(invalidView.address() as AddressInfo).port}`;
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+      await page.goto(`${invalidOrigin}/projects/embedded/memories?change=${encodeURIComponent(first.changeId)}`);
+      await page.getByRole("heading", { name: "Validation diagnostics", exact: true }).waitFor();
+      assert.match(await page.locator(".error-panel").first().textContent() ?? "", /concepts\/shared\.yaml/);
+      assert.equal(new URL(page.url()).pathname, "/projects/embedded/memories");
+      await page.close();
+    } finally {
+      await browser.close();
+      await new Promise<void>((resolve) => invalidView.close(() => resolve()));
+    }
     await writeFile(join(linkedMemory, "concepts", "shared.yaml"), linkedSource);
     assert.deepEqual((await validateMemoryChange()).issues, []);
 
