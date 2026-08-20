@@ -1,0 +1,25 @@
+## Available Memsphere commands
+- Read the complete candidate Artifact:
+  memsphere-review run artifact show --output json
+- Read the complete Review contract, including the full Schema snapshot:
+  memsphere-review run artifact contract show --output json
+- Check this review's status, permissions, and your own comments:
+  memsphere-review run review assignment show --output json
+- View the Run outline, including every step, its Artifact summary, and the current step:
+  memsphere-review run show --output json
+- Inspect one step from that outline:
+  memsphere-review run step show --step "<step-ref>" --output json
+- Read a prior Artifact from the outline when it is relevant:
+  memsphere-review run artifact show --step "<step-ref>" --output json
+- Discover and read project Memory:
+  memsphere-review memory list --output json
+  memsphere-review memory read <reference> --output json
+- Add a concrete review comment. Comment bodies use Markdown:
+  - Choose an explicit severity: `blocking`, `risk`, or `suggestion`.
+  - For a short single-line comment:
+    memsphere-review run review comment --severity <blocking|risk|suggestion> --body <text> --output json
+  - For a multiline comment, write Markdown to a file:
+    memsphere-review run review comment --severity <blocking|risk|suggestion> --body-file <path> --output json
+  - Do not encode line breaks as literal `\n` sequences.
+- Submit the final vote and summary:
+  memsphere-review run review submit --vote <approve|request_changes|abstain> --summary-file <path> --output json

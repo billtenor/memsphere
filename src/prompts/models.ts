@@ -3,6 +3,8 @@ import type { PromptLocale } from "./locale.js";
 export type PromptInputMap = {
   "acp.artifact-review.initial": AcpArtifactReviewPromptModel;
   "acp.artifact-review.reminder": Record<string, never>;
+  "acp.artifact-review.initial-v2": AcpArtifactReviewPromptModel;
+  "acp.artifact-review.reminder-v2": Record<string, never>;
   "control-plane.permission-guidance": PermissionGuidancePromptModel;
   "control-plane.permission-description": PermissionDescriptionPromptModel;
   "run.current-step": RunCurrentStepPromptModel;

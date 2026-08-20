@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import crossSpawn from "cross-spawn";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
@@ -10,7 +10,7 @@ const sessions = new Set();
 const app = acp
   .agent({ name: "memsphere-fake-reviewer" })
   .onRequest(acp.methods.agent.initialize, async ({ params }) => {
-    if (mode === "slow-start") await delay(200);
+    if (mode === "slow-start") await delay(1_500);
     return {
       protocolVersion: mode === "protocol-mismatch" ? params.protocolVersion + 1 : acp.PROTOCOL_VERSION,
       agentCapabilities: { loadSession: false },
@@ -28,7 +28,7 @@ const app = acp
       process.stderr.write("provider diagnostic: reconnecting\n");
       throw new Error("synthetic provider failure");
     }
-    if (mode === "idle") await delay(200);
+    if (mode === "idle") await delay(1_500);
     if (mode === "progress") {
       for (let index = 0; index < 8; index += 1) {
         await delay(15);
@@ -80,7 +80,7 @@ function completeReview(vote) {
 }
 
 function invoke(command, args) {
-  const result = spawnSync(command, args, { encoding: "utf8", env: process.env });
+  const result = crossSpawn.sync(command, args, { encoding: "utf8", env: process.env });
   if (result.status !== 0) throw new Error(`fake reviewer CLI failed: ${result.stderr || result.stdout}`);
   return result.stdout.trim();
 }

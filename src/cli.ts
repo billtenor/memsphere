@@ -419,6 +419,7 @@ runReview
   .description("Add a structured comment to this Agent Assignment.")
   .requiredOption("--assignment <id>", "artifact review assignment id")
   .option("--body <text>", "single-line Markdown comment body")
+  .option("--body-file <path>", "read a multiline Markdown comment body from a file")
   .option("--body-stdin", "read a multiline Markdown comment body from standard input")
   .addOption(new Option("--severity <severity>", "comment severity").choices(["blocking", "risk", "suggestion"]).makeOptionMandatory())
   .option("--target <target>", "comment anchor target")

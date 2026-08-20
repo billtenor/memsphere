@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
-import { delimiter, isAbsolute, join, resolve } from "node:path";
-import { spawn } from "node:child_process";
+import { delimiter, extname, isAbsolute, join, resolve } from "node:path";
+import { spawnCommand } from "../platform-process.js";
 import {
   listAcpProviderDefinitions,
   type AcpProviderDefinition,
@@ -83,12 +83,12 @@ export async function detectAcpProviderInstance(
 }
 
 async function resolveExecutable(command: string, pathValue: string | undefined): Promise<string | undefined> {
-  if (isAbsolute(command) || command.includes("/")) {
+  if (isAbsolute(command) || command.includes("/") || command.includes("\\")) {
     const candidate = resolve(command);
     return await isExecutable(candidate) ? candidate : undefined;
   }
-  const extensions = process.platform === "win32"
-    ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";")
+  const extensions = process.platform === "win32" && !extname(command)
+    ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";").filter(Boolean)]
     : [""];
   for (const directory of (pathValue ?? "").split(delimiter).filter(Boolean)) {
     for (const extension of extensions) {
@@ -110,8 +110,7 @@ async function isExecutable(path: string): Promise<boolean> {
 
 function runVersionCommand(command: string, args: string[], timeoutMs: number): Promise<string> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, {
-      shell: false,
+    const child = spawnCommand(command, args, {
       stdio: ["ignore", "pipe", "pipe"],
       env: safeDetectionEnvironment(process.env)
     });
@@ -121,8 +120,8 @@ function runVersionCommand(command: string, args: string[], timeoutMs: number): 
       child.kill("SIGKILL");
       reject(new Error(`Version detection timed out after ${timeoutMs}ms`));
     }, timeoutMs);
-    child.stdout.on("data", (chunk) => { stdout = `${stdout}${String(chunk)}`.slice(0, 8_192); });
-    child.stderr.on("data", (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(0, 8_192); });
+    child.stdout?.on("data", (chunk) => { stdout = `${stdout}${String(chunk)}`.slice(0, 8_192); });
+    child.stderr?.on("data", (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(0, 8_192); });
     child.once("error", (error) => {
       clearTimeout(timer);
       reject(error);
@@ -142,8 +141,12 @@ function firstNonEmptyLine(value: string): string | undefined {
   return value.split(/\r?\n/).map((line) => line.trim()).find(Boolean)?.slice(0, 500);
 }
 
-function safeDetectionEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const allowed = new Set(["HOME", "PATH", "LANG", "LANGUAGE", "TMPDIR", "TEMP", "TMP", "SHELL"]);
+export function safeDetectionEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const allowed = new Set([
+    "HOME", "PATH", "LANG", "LANGUAGE", "TMPDIR", "TEMP", "TMP", "SHELL",
+    "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "COMSPEC", "ComSpec",
+    "SystemRoot", "SYSTEMROOT", "PATHEXT"
+  ]);
   return Object.fromEntries(Object.entries(source).filter(([name, value]) =>
     value !== undefined && (allowed.has(name) || name.startsWith("LC_"))
   ));

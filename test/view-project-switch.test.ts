@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -77,7 +77,7 @@ test("View switches Projects without retaining the previous Project Memory data"
         configPath: string;
       };
       assert.equal(settings.projectName, "beta");
-      assert.equal(settings.configPath, join(roots.beta, "config.json"));
+      assert.equal(settings.configPath, await realpath(join(roots.beta, "config.json")));
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

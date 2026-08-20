@@ -45,10 +45,29 @@ test("Report execution probe resolves the macOS user cache directory", async () 
   );
 });
 
+test("Report execution probe resolves the Windows local application data directory", async () => {
+  assert.equal(
+    await resolveReportExecutionProbePath({
+      platform: "win32",
+      env: { LOCALAPPDATA: "/windows/local" },
+      resolveHomeDirectory: () => "/windows/home"
+    }),
+    join("/windows/local", reportExecutionProbeRelativePath)
+  );
+  assert.equal(
+    await resolveReportExecutionProbePath({
+      platform: "win32",
+      env: {},
+      resolveHomeDirectory: () => "/windows/home"
+    }),
+    join("/windows/home", "AppData", "Local", reportExecutionProbeRelativePath)
+  );
+});
+
 test("Report execution probe rejects unsupported platforms", async () => {
   await assert.rejects(
-    resolveReportExecutionProbePath({ platform: "win32" }),
-    /unsupported operating system: win32/
+    resolveReportExecutionProbePath({ platform: "aix" }),
+    /unsupported operating system: aix/
   );
 });
 

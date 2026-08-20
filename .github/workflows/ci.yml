@@ -1,9 +1,10 @@
 name: CI
 
 on:
+  pull_request:
   push:
     branches: [master]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,24 +15,78 @@ concurrency:
 
 jobs:
   test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - if: runner.os == 'Linux'
-        name: Install Playwright Chromium
+      - name: Install Playwright Chromium
         run: npx playwright install chromium
       - run: npm run typecheck
-      - if: runner.os == 'Linux'
-        run: npm run test:ci
+      - run: npm run test:ci
       - run: npm run build
       - run: npm run smoke:project
+
+  windows-package-smoke:
+    name: Windows packaged CLI shells
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      MEMSPHERE_HOME: ${{ github.workspace }}\.ci-memsphere-home
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Pack and install
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .ci-pack, .ci-install | Out-Null
+          npm pack --pack-destination .ci-pack
+          $package = (Get-ChildItem .ci-pack\*.tgz | Select-Object -First 1).FullName
+          npm install --prefix .ci-install $package
+      - name: Packaged core Run and View lifecycle
+        shell: pwsh
+        run: node scripts/windows-package-smoke.mjs
+      - name: Windows PowerShell 5.1 smoke
+        shell: powershell
+        run: |
+          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --version
+          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --help
+          Push-Location ".ci windows project"
+          & "..\.ci-install\node_modules\.bin\memsphere.cmd" view status
+          Pop-Location
+      - name: PowerShell 7 smoke
+        shell: pwsh
+        run: |
+          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --version
+          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --help
+          Push-Location ".ci windows project"
+          & "..\.ci-install\node_modules\.bin\memsphere.cmd" view status
+          Pop-Location
+      - name: CMD smoke
+        shell: cmd
+        run: |
+          .ci-install\node_modules\.bin\memsphere.cmd --version
+          .ci-install\node_modules\.bin\memsphere.cmd --help
+          cd /d ".ci windows project"
+          ..\.ci-install\node_modules\.bin\memsphere.cmd view status
+      - name: Git Bash smoke
+        shell: bash
+        run: |
+          ./.ci-install/node_modules/.bin/memsphere --version
+          ./.ci-install/node_modules/.bin/memsphere --help
+          cd ".ci windows project"
+          ../.ci-install/node_modules/.bin/memsphere view status

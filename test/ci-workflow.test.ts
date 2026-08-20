@@ -27,8 +27,10 @@ type Workflow = {
   };
 };
 
-test("CI bounds and supersedes Ubuntu browser installation runs", async () => {
+test("CI bounds and supersedes cross-platform browser test runs", async () => {
   const workflow = parse(await readFile(".github/workflows/ci.yml", "utf8")) as Workflow;
+  const windowsPackageSmoke = await readFile("scripts/windows-package-smoke.mjs", "utf8");
+  const normalizedWindowsPackageSmoke = windowsPackageSmoke.replaceAll("\r\n", "\n");
   const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
     scripts?: Record<string, string>;
   };
@@ -49,12 +51,20 @@ test("CI bounds and supersedes Ubuntu browser installation runs", async () => {
     "windows-latest"
   ]);
 
-  assert.equal(browserInstall?.if, "runner.os == 'Linux'");
+  assert.equal(browserInstall?.if, undefined);
   assert.equal(browserInstall?.run, "npx playwright install chromium");
   assert.equal(
     steps.some((step) => step.run?.includes("playwright install --with-deps")),
     false
   );
-  assert.equal(npmTest?.if, "runner.os == 'Linux'");
-  assert.equal(packageJson.scripts?.["test:ci"], "tsx --test --test-concurrency=1 test/*.test.ts");
+  assert.equal(npmTest?.if, undefined);
+  assert.equal(packageJson.scripts?.["test:ci"], "node scripts/run-tests.mjs --test-concurrency=1");
+  assert.match(
+    normalizedWindowsPackageSmoke,
+    /names:\s*\n\s*- windows-ci-smoke\n\s*- Windows CI smoke/
+  );
+  assert.match(
+    normalizedWindowsPackageSmoke,
+    /\["run", "start", "Windows CI smoke", "--name", "Windows packaged smoke"\]/
+  );
 });

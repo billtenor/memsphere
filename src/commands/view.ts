@@ -873,7 +873,7 @@ async function resolveReviewSnapshotFiles(input: {
   if (input.memoryPath) {
     const path = resolveMemoryPath(input.memoryRoot, input.memoryPath);
     return [{
-      label: relative(input.memoryRoot, path),
+      label: portableRelative(input.memoryRoot, path),
       path,
       kind: "memory"
     }];
@@ -882,7 +882,7 @@ async function resolveReviewSnapshotFiles(input: {
   const file = await findMemoryFileById(input.memoryRoot, input.memoryId);
   if (!file) return [];
   return [{
-    label: relative(input.memoryRoot, file.path),
+    label: portableRelative(input.memoryRoot, file.path),
     path: file.path,
     kind: "memory"
   }];
@@ -1363,7 +1363,7 @@ async function loadMemoryListItem(
   path: string,
   systemReferences: ReadonlySet<string>
 ): Promise<MemoryPayload["memories"][number]> {
-  const relativePath = relative(memoryRoot, path);
+  const relativePath = portableRelative(memoryRoot, path);
   try {
     const file = await readMemoryFile(kind, path);
     const primaryName = Array.isArray(file.entity.names) ? file.entity.names[0] : file.path;
@@ -1383,6 +1383,10 @@ async function loadMemoryListItem(
       error: formatMemoryLoadError(error)
     };
   }
+}
+
+function portableRelative(root: string, path: string): string {
+  return relative(root, path).split(sep).join("/");
 }
 
 function globalSettingsPayload(

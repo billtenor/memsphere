@@ -1773,7 +1773,13 @@ export const browserHtml = String.raw`<!doctype html>
       heading.className = "settings-participant-title";
       const name = document.createElement("strong");
       name.textContent = entry.id;
-      heading.append(name, pill(entry.definition.name), providerDetectionPill(entry.id));
+      const windowsSupport = entry.definition.windowsSupport;
+      heading.append(
+        name,
+        pill(entry.definition.name),
+        providerDetectionPill(entry.id),
+        pill("Windows: " + (windowsSupport?.status || "unknown"))
+      );
       const refs = settingsProviderReferences(entry.id);
       const meta = document.createElement("div");
       meta.className = "settings-participant-summary-meta";
@@ -1781,6 +1787,7 @@ export const browserHtml = String.raw`<!doctype html>
       meta.textContent = [
         detection?.path,
         detection?.version || detection?.reason || "尚未检测",
+        windowsSupport?.reason,
         refs.length + " 个参与者引用"
       ].filter(Boolean).join(" · ");
       main.append(heading, meta);
@@ -3006,6 +3013,17 @@ export const browserHtml = String.raw`<!doctype html>
       state.routeError = "";
       if (options.landing) state.routeLanding = mode === "task" ? "tasks" : mode === "memory" ? "memories" : "";
       else if (mode === "settings") state.routeLanding = "";
+      if (!state.routeReady) {
+        if (mode === "task") state.pendingRoute = { page: "tasks", fragment: "" };
+        else if (mode === "memory") state.pendingRoute = { page: "memories", fragment: "" };
+        else if (mode === "settings") {
+          state.pendingRoute = {
+            page: "settings",
+            settings: { scope: state.settingsScope, module: state.settingsModule },
+            fragment: ""
+          };
+        }
+      }
       state.viewMode = mode;
       if (mode === "memory" || mode === "task") state.lastContentViewMode = mode;
       localStorage.setItem(viewModeKey, mode);

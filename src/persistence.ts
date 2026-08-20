@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+
+const inProcessLocks = new Map<string, Promise<void>>();
 
 export async function atomicWriteFile(path: string, content: string, mode = 0o600): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
@@ -10,9 +12,9 @@ export async function atomicWriteFile(path: string, content: string, mode = 0o60
   let moved = false;
   try {
     await handle.writeFile(content, "utf8");
-    await handle.sync();
+    if (process.platform !== "win32") await handle.sync();
     await handle.close();
-    await rename(temporaryPath, path);
+    await replaceFile(temporaryPath, path);
     moved = true;
     if (process.platform !== "win32") {
       const directory = await open(dirname(path), "r");
@@ -28,6 +30,19 @@ export async function atomicWriteFile(path: string, content: string, mode = 0o60
   }
 }
 
+async function replaceFile(temporaryPath: string, path: string): Promise<void> {
+  const attempts = process.platform === "win32" ? 20 : 1;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await rename(temporaryPath, path);
+      return;
+    } catch (error) {
+      if (!isReplaceRetryable(error) || attempt === attempts - 1) throw error;
+      await sleep(10 * (attempt + 1));
+    }
+  }
+}
+
 export async function atomicWriteJson(path: string, value: unknown): Promise<void> {
   await atomicWriteFile(path, `${JSON.stringify(value, null, 2)}\n`);
 }
@@ -36,6 +51,28 @@ export async function withFileLock<T>(
   lockPath: string,
   action: () => Promise<T>,
   options: { timeoutMs?: number; staleMs?: number } = {}
+): Promise<T> {
+  const key = resolve(lockPath);
+  const previous = inProcessLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolveCurrent) => {
+    release = resolveCurrent;
+  });
+  const tail = previous.then(() => current);
+  inProcessLocks.set(key, tail);
+  await previous;
+  try {
+    return await withFilesystemLock(lockPath, action, options);
+  } finally {
+    release();
+    if (inProcessLocks.get(key) === tail) inProcessLocks.delete(key);
+  }
+}
+
+async function withFilesystemLock<T>(
+  lockPath: string,
+  action: () => Promise<T>,
+  options: { timeoutMs?: number; staleMs?: number }
 ): Promise<T> {
   const timeoutMs = options.timeoutMs ?? 10_000;
   const staleMs = options.staleMs ?? 60_000;
@@ -100,4 +137,8 @@ function processExists(pid: number): boolean {
 
 function isCode(error: unknown, code: string): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === code);
+}
+
+function isReplaceRetryable(error: unknown): boolean {
+  return ["EACCES", "EBUSY", "EPERM"].some((code) => isCode(error, code));
 }

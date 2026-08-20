@@ -26,6 +26,7 @@ defines:
       - Schema 最终文件显式提交并通过结构与契约校验后，Run 才按照父 Artifact 契约决定直接接纳或进入 Artifact Review；执行者只需继续遵循 CLI 返回的 Then，不得自行提前发起或跳过 Review。
       - Human 在 View 的 Artifact Review 浮窗中按 Round 查看不可变 Submission、正式 Comment、Vote、Result 与 Revision Summary；只有当前 Round 的本人 Assignment 可编辑，历史 Round 只读，完成后仍可从对应步骤重新打开评审证据。
       - Agent Reviewer 在同一 Artifact Review 浮窗的参与者行中展示状态、最近活动及按 attempt 隔离的只读运行记录；Agent 不进入 Human 身份选择器，实际发送的 prompt、ACP update 和生命周期以 JSONL 事实来源随 Run 留存，View 只读取不含 prompt 正文的可校验、可重建过滤投影。
+      - Agent Reviewer 必须在发起当前 Run/Review 的 Workspace 或 worktree 中运行；受限 memsphere-review 会话命令自动绑定当前 Run 与 Assignment。短意见使用 --body，多行 Markdown 使用 --body-file，最终总结使用 --summary-file，不得要求 Agent 使用某一种 shell 的环境变量或 heredoc 语法。
       - Artifact Review 的定位 Comment 必须绑定创建时的 Submission 与 digest；它不评论 Memory 或 Workspace 文件，也不会自动迁移到下一轮 Submission。
       - Human 完成前序流程后若不再参与后续 Review，Runner 可以先用 memsphere run binding show 查看冻结 Actor 与当前 Binding，再用 memsphere run binding update 为完整 Slot key 选择一个或多个 --actor，或使用 --skip；只能选择 Run 启动时冻结的 Actor，换绑只影响尚未创建的 Review。
       - 配置 control_plane 后，每个 Artifact 都必须通过 Runner 的 artifact.submit 鉴权；正常的当前步骤提示不展开权限清单，权限不足时只说明被拒绝的操作、所需权限和处理方式；拒绝不会改变 Run 状态或写入 Artifact。

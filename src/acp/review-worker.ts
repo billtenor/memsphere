@@ -1,6 +1,7 @@
-import { dirname } from "node:path";
+import { delimiter } from "node:path";
 import { artifactReviewAssignmentId, type ArtifactReviewAgentFailure } from "../artifact-review.js";
 import { readConfig } from "../config.js";
+import { resolveWorkspaceIdentity } from "../project/workspace.js";
 import {
   claimArtifactReviewAgentAssignment,
   failArtifactReviewAgentAssignment,
@@ -15,6 +16,7 @@ import { buildArtifactReviewerPrompt, buildArtifactReviewerReminder } from "./pr
 import { getAgentReviewProvider, type AgentReviewProvider } from "./provider.js";
 import { AcpProviderConfigurationError } from "./validation.js";
 import { resolvePromptLocale } from "../prompts/index.js";
+import { assertWindowsPrerequisites } from "../windows-prerequisites.js";
 
 export type AgentReviewWorkerOptions = {
   config?: string;
@@ -50,11 +52,12 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     actorId,
     attemptId: claimed.attempt.id
   };
+  const workspaceRoot = (await resolveWorkspaceIdentity()).path;
   const activity = new AgentActivityRecorder({
     ...common,
     runId: claimed.run.id,
     assignmentId: artifactReviewAssignmentId(claimed.assignment),
-    workspaceRoot: dirname(config.scopeRoot),
+    workspaceRoot,
     onError: (error) => {
       const message = error instanceof Error ? error.message : String(error);
       process.stderr.write(`Agent Activity recording failed: ${message.slice(0, 2_000)}\n`);
@@ -63,10 +66,10 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
   activity.recordLifecycle("running", "Agent worker started");
   let cliRuntime: Awaited<ReturnType<typeof createAgentReviewCliRuntime>> | undefined;
   try {
+    await assertWindowsPrerequisites();
     const actor = claimed.run.controlPlane?.actors[actorId];
     if (!actor || actor.kind !== "agent") throw new Error(`agent_actor_missing: ${actorId}`);
     cliRuntime = await createAgentReviewCliRuntime({ nodeExecutable, cliEntrypoint });
-    const workspaceRoot = dirname(config.scopeRoot);
     const provider = (options.providerResolver ?? getAgentReviewProvider)(actor.agent.providerType);
     const launch = provider.buildLaunch({
       actor,
@@ -76,18 +79,22 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
         MEMSPHERE_REVIEW_RUN_ID: claimed.run.id,
         MEMSPHERE_REVIEW_ASSIGNMENT_ID: artifactReviewAssignmentId(claimed.assignment),
         MEMSPHERE_CONFIG_PATH: config.configPath,
-        MEMSPHERE_WORKSPACE_ROOT: workspaceRoot
+        MEMSPHERE_WORKSPACE_ROOT: workspaceRoot,
+        PATH: [cliRuntime.directory, process.env.PATH].filter(Boolean).join(delimiter)
       }
     });
     const prompt = await buildArtifactReviewerPrompt({
       context: claimed,
-      promptVersion: launch.promptVersion,
+      promptVersion: claimed.attempt.promptVersion ?? launch.promptVersion,
       locale: resolvePromptLocale(claimed.run.language)
     });
     const result = await runAgentReviewAcpSession({
       launch,
       prompt,
-      reminder: buildArtifactReviewerReminder(resolvePromptLocale(claimed.run.language)),
+      reminder: buildArtifactReviewerReminder(
+        resolvePromptLocale(claimed.run.language),
+        claimed.attempt.promptVersion ?? launch.promptVersion
+      ),
       workspaceRoot,
       isSubmitted: async () => {
         const current = await readArtifactReviewForActor({

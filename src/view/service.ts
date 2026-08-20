@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 import type { MemsphereConfig } from "../config.js";
+import { terminateProcessTree } from "../platform-process.js";
 
 const stateFileName = "view-service.json";
 const startupTimeoutMs = 10_000;
@@ -30,7 +31,7 @@ export type ViewServiceStatus = {
 export type ViewServiceDependencies = {
   spawnProcess?: typeof spawn;
   isProcessAlive?: (pid: number) => boolean;
-  killProcess?: (pid: number, signal?: NodeJS.Signals) => void;
+  killProcess?: (pid: number, signal?: NodeJS.Signals) => void | Promise<void>;
   sleep?: (milliseconds: number) => Promise<void>;
 };
 
@@ -117,7 +118,8 @@ export async function startViewService(
     {
       cwd: process.cwd(),
       detached: true,
-      stdio: "ignore"
+      stdio: "ignore",
+      windowsHide: true
     }
   );
   if (!child.pid) throw new Error("failed to start view service process");
@@ -207,18 +209,18 @@ async function terminateAndWait(
   const kill = dependencies.killProcess ?? terminateProcess;
   if (!isAlive(pid)) return;
 
-  kill(pid, "SIGTERM");
+  await kill(pid, "SIGTERM");
   let deadline = Date.now() + shutdownTimeoutMs;
   while (Date.now() < deadline && isAlive(pid)) await wait(pollIntervalMs);
   if (!isAlive(pid)) return;
 
-  kill(pid, "SIGKILL");
+  await kill(pid, "SIGKILL");
   deadline = Date.now() + shutdownTimeoutMs;
   while (Date.now() < deadline && isAlive(pid)) await wait(pollIntervalMs);
 }
 
-function terminateProcess(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
-  process.kill(pid, signal);
+async function terminateProcess(pid: number, signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
+  await terminateProcessTree(pid, signal);
 }
 
 function isMissingFileError(error: unknown): boolean {

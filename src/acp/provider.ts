@@ -5,7 +5,7 @@ import { validateAcpProviderConfiguration } from "./validation.js";
 
 type AgentActor = Extract<ControlPlaneActor, { kind: "agent" }>;
 
-export const currentAgentReviewPromptVersion = "artifact-review-v1";
+export const currentAgentReviewPromptVersion = "artifact-review-v2";
 
 export type AgentReviewProviderLaunch = {
   provider: string;
@@ -139,12 +139,13 @@ registerAgentReviewProvider({
   }
 });
 
-function safeProviderEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function safeProviderEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const exact = new Set([
     "HOME", "PATH", "LANG", "LANGUAGE", "TMPDIR", "TEMP", "TMP", "SHELL",
     "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR",
     "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
-    "NODE_EXTRA_CA_CERTS"
+    "NODE_EXTRA_CA_CERTS", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
+    "COMSPEC", "ComSpec", "SystemRoot", "SYSTEMROOT", "PATHEXT"
   ]);
   return Object.fromEntries(Object.entries(source).filter(([name, value]) =>
     value !== undefined && (exact.has(name) || name.startsWith("LC_"))

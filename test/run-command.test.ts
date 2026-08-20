@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import {
   buildRunArtifactContractDetail,
@@ -80,7 +83,7 @@ test("single-Run status shows the Run name and Procedure name with historical fa
     console.log = originalLog;
   }
 
-  const output = lines.join("\n");
+  const output = lines.join("\n").replaceAll("\r\n", "\n");
   assert.match(output, /Run run-named\nName: Release candidate verification\nProcedure: release-procedure/);
   assert.match(output, /Run run-legacy\nName: release-procedure\nProcedure: release-procedure/);
   assert.match(output, /Run run-completed\nName: Release candidate verification\nProcedure: release-procedure/);
@@ -104,8 +107,22 @@ test("Artifact Review comments accept multiline Markdown from standard input", a
   );
   await assert.rejects(
     resolveReviewCommentBody({ body: "inline", bodyStdin: true }, Readable.from([])),
-    /use only one of --body or --body-stdin/
+    /use only one of --body, --body-file, or --body-stdin/
   );
+});
+
+test("Artifact Review comments accept multiline Markdown from a file", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-comment-"));
+  const path = join(root, "comment.md");
+  try {
+    await writeFile(path, "First paragraph\n\nSecond paragraph\n", "utf8");
+    assert.equal(
+      await resolveReviewCommentBody({ bodyFile: path }, Readable.from([])),
+      "First paragraph\n\nSecond paragraph\n"
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Run inspection separates navigation, step detail, and Artifact content", async () => {
@@ -249,7 +266,7 @@ test("run output separates Procedure assertions from Action assertions", () => {
     console.log = originalLog;
   }
 
-  const output = lines.join("\n");
+  const output = normalizeNewlines(lines.join("\n"));
   assert.match(output, /Procedure Asserts:\n- Keep the global contract active\./);
   assert.match(output, /Asserts:\n- Check this step\./);
   assert(output.indexOf("Procedure Asserts:") < output.indexOf("\nAsserts:"));
@@ -288,7 +305,7 @@ test("run start and status omit the redundant Agent actor and permission list", 
       const lines: string[] = [];
       console.log = (...values: unknown[]) => lines.push(values.join(" "));
       printRunOutput({ kind, run });
-      const output = lines.join("\n");
+      const output = normalizeNewlines(lines.join("\n"));
       assert.match(output, /请执行：/);
       assert.match(output, /下一步：/);
       assert.doesNotMatch(output, /执行者：|可用权限：/);
@@ -335,7 +352,7 @@ test("run current-step output keeps an explicit Human handoff", () => {
   } finally {
     console.log = originalLog;
   }
-  const output = lines.join("\n");
+  const output = normalizeNewlines(lines.join("\n"));
   assert.match(output, /请 Human 执行：\n确认是否接受结果。/);
   assert.match(output, /请上报 Human 提供的产物值。/);
   assert.doesNotMatch(output, /执行者：|可用权限：/);
@@ -373,7 +390,7 @@ test("run output presents Repeat as control without an Artifact", () => {
     console.log = originalLog;
   }
 
-  const output = lines.join("\n");
+  const output = normalizeNewlines(lines.join("\n"));
   assert.match(output, /allowed count: 1\.\.3/);
   assert.match(output, /memsphere run repeat <count> --run run-repeat/);
   assert.doesNotMatch(output, /Artifact:/);
@@ -448,7 +465,7 @@ test("Schema field output shows production constraints and progress without perm
   } finally {
     console.log = originalLog;
   }
-  const output = lines.join("\n");
+  const output = normalizeNewlines(lines.join("\n"));
   assert.match(output, /Current Procedure Step:/);
   assert.match(output, /Schema Writing:/);
   assert.match(output, /current field: summary/);
@@ -525,7 +542,7 @@ test("Schema root output uses a readable label instead of its internal node path
     console.log = originalLog;
   }
 
-  const output = lines.join("\n");
+  const output = normalizeNewlines(lines.join("\n"));
   assert.match(output, /当前字段：文档标题与概述/);
   assert.match(output, /工作方式：逐字段上报以更新同一份托管草稿/);
   assert.match(output, /请填写：\n文档标题与概述/);
@@ -581,7 +598,7 @@ test("Schema overview includes the parent production contract without Review con
   } finally {
     console.log = originalLog;
   }
-  const output = lines.join("\n");
+  const output = normalizeNewlines(lines.join("\n"));
   assert.match(output, /action assert: Keep the document coherent\./);
   assert.match(output, /action suggest: Prefer concise sections\./);
   assert.match(output, /schema: Delivery/);
@@ -652,12 +669,14 @@ test("Schema finalization output points to the managed draft and exact report co
   } finally {
     console.log = originalLog;
   }
-  const output = lines.join("\n");
+  const output = normalizeNewlines(lines.join("\n"));
   assert.match(output, /Schema Finalization:/);
-  assert.match(output, /managed draft: \/runs\/run-schema-final\/artifacts\/drafts\/delivery\.draft\.md/);
+  const expectedDraftPath = resolve("/runs", "run-schema-final", "artifacts", "drafts", "delivery.draft.md");
+  assert(output.includes(`managed draft: ${expectedDraftPath}`));
   assert.match(output, /contract validation: passed/);
   assert.match(output, /Read the complete managed draft, edit it directly as needed/);
-  assert.match(output, /memsphere run report --run run-schema-final --artifact-file '\/runs\/run-schema-final\/artifacts\/drafts\/delivery\.draft\.md'/);
+  assert(output.includes("memsphere run report --run run-schema-final --artifact-file"));
+  assert(output.includes(expectedDraftPath));
   assert.doesNotMatch(output, /Review|Permission Guidance/);
 });
 
@@ -721,7 +740,7 @@ test("run current-step output does not expose effective runner permissions", () 
     else process.env.LANG = originalLang;
   }
 
-  const output = lines.join("\n");
+  const output = normalizeNewlines(lines.join("\n"));
   assert.match(output, /Do:\nProduce the result\./);
   assert.match(output, /Then:/);
   assert.doesNotMatch(
@@ -785,7 +804,7 @@ test("successful report output is a receipt followed by the completed state", ()
     else process.env.LANG = originalLang;
   }
 
-  const output = lines.join("\n");
+  const output = normalizeNewlines(lines.join("\n"));
   assert.match(output, /Report succeeded:\n- Run: run-report-guidance\n- Artifact: result/);
   assert.match(output, /Run run-report-guidance[\s\S]*Done/);
   assert.doesNotMatch(output, /Allowed:|Permission Guidance|grant:/);
@@ -873,7 +892,7 @@ test("Artifact Review output emphasizes votes, comments, and an actionable concl
     console.log = originalLog;
   }
 
-  const output = lines.join("\n");
+  const output = normalizeNewlines(lines.join("\n"));
   assert.match(output, /- submitted: 2\/2/);
   assert.match(output, /- Advisor \(advisory\)\n  - vote: request_changes/);
   assert.match(output, /comment \[unspecified\]: Clarify the conclusion/);
@@ -977,7 +996,7 @@ test("Artifact Review output asks the Runner to decide after assigned reviews co
     console.log = originalLog;
   }
 
-  const output = lines.join("\n");
+  const output = normalizeNewlines(lines.join("\n"));
   assert.match(output, /^Review opinions collected\. Review information:/);
   assert.doesNotMatch(output, /- Runner \(/);
   assert.match(output, /All assigned reviews are submitted: 1\/1 decision votes approved; 1 advisory vote was recorded/);
@@ -1155,7 +1174,7 @@ test("report output does not expose background reviewer failures", () => {
     } finally {
       console.log = originalLog;
     }
-    return lines.join("\n");
+    return normalizeNewlines(lines.join("\n"));
   };
 
   const normal = capture();
@@ -1167,3 +1186,7 @@ test("report output does not expose background reviewer failures", () => {
   );
 
 });
+
+function normalizeNewlines(value: string): string {
+  return value.replace(/\r\n/g, "\n");
+}

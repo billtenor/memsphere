@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { lstat, mkdir, open } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -12,6 +13,7 @@ type ReportExecutionProbeOptions = {
   env?: NodeJS.ProcessEnv;
   uid?: number;
   resolveDarwinCacheDirectory?: () => Promise<string>;
+  resolveHomeDirectory?: () => string;
   mkdir?: typeof mkdir;
   lstat?: typeof lstat;
   open?: typeof open;
@@ -29,6 +31,10 @@ export async function resolveReportExecutionProbePath(
       || resolveLinuxRuntimeDirectory(options.uid);
   } else if (platform === "darwin") {
     root = await (options.resolveDarwinCacheDirectory ?? resolveDarwinCacheDirectory)();
+  } else if (platform === "win32") {
+    const env = options.env ?? process.env;
+    root = env.LOCALAPPDATA?.trim()
+      || join((options.resolveHomeDirectory ?? homedir)(), "AppData", "Local");
   } else {
     throw new Error(`unsupported operating system: ${platform}`);
   }
