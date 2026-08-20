@@ -189,14 +189,7 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
 
 async function openTaskPage(browser: Browser, url: string, width: number): Promise<Page> {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
-  await gotoViewAndWaitForRuns(page, url);
-  await page.getByRole("button", { name: "Task", exact: true }).click();
-  await page.locator(".task-card-main").first().click();
-  await page.locator(".markdown-table-scroll").first().waitFor();
-  return page;
-}
-
-async function gotoViewAndWaitForRuns(page: Page, url: string): Promise<void> {
+  await page.goto(url);
   const runsLoaded = page.waitForResponse(
     (response) =>
       new URL(response.url()).pathname === "/api/runs"
@@ -204,8 +197,11 @@ async function gotoViewAndWaitForRuns(page: Page, url: string): Promise<void> {
       && response.ok(),
     { timeout: 10_000 }
   );
-  await page.goto(url);
+  await page.getByRole("button", { name: "Task", exact: true }).click();
   await runsLoaded;
+  await page.locator(".task-card-main").first().click();
+  await page.locator(".markdown-table-scroll").first().waitFor();
+  return page;
 }
 
 async function openMemoryPage(browser: Browser, url: string, width: number): Promise<Page> {
@@ -306,10 +302,28 @@ test("Task titles fall back to the Procedure name for historical Runs", async ()
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1024, height: 900 } });
     try {
-      await gotoViewAndWaitForRuns(page, url);
+      await page.goto(url);
+      const runsLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/runs" && response.ok(),
+        { timeout: 10_000 }
+      );
+      const initialDetailLoaded = page.waitForResponse(
+        (response) => /^\/api\/runs\/run-/.test(new URL(response.url()).pathname),
+        { timeout: 10_000 }
+      );
       await page.getByRole("button", { name: "Task", exact: true }).click();
+      await runsLoaded;
+      const initialDetailResponse = await initialDetailLoaded;
+      assert.equal(initialDetailResponse.status(), 200, await initialDetailResponse.text());
+      await page.locator(".meta .pill", { hasText: "流程: Responsive browser fixture" }).waitFor();
       const legacy = page.locator(".task-card-main", { hasText: "Legacy procedure fallback" });
+      const detailLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${legacyRunId}`,
+        { timeout: 10_000 }
+      );
       await legacy.click();
+      const detailResponse = await detailLoaded;
+      assert.equal(detailResponse.status(), 200, await detailResponse.text());
       assert.equal(await page.locator("#title").textContent(), "Legacy procedure fallback");
       await page.locator(".meta .pill", { hasText: "流程: Legacy procedure fallback" }).waitFor();
       await assertPageDoesNotOverflow(page);

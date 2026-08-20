@@ -252,6 +252,25 @@ export type RunState = {
   schemaDrafts?: Record<string, SchemaDraftState>;
 };
 
+export type RunListSummary = {
+  id: string;
+  name?: string;
+  status: RunStatus;
+  procedureName: string;
+  createdAt: string;
+  updatedAt: string;
+  readOnly: boolean;
+  eventCount: number;
+  reviewProgress?: {
+    id: string;
+    status: string;
+    currentRoundId: string;
+    updatedAt: string;
+    submitted: number;
+    total: number;
+  };
+};
+
 export type RunBindingSnapshot = {
   runId: string;
   status: RunStatus;
@@ -904,6 +923,104 @@ export async function listRuns(runsRoot: string): Promise<RunState[]> {
   return runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+export async function listRunSummaries(runsRoot: string): Promise<RunListSummary[]> {
+  await ensureRunDirectory(runsRoot);
+  const entries = await readdir(runsRoot, { withFileTypes: true });
+  const summariesById = new Map<string, RunListSummary>();
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      try {
+        const summary = await readRunSummary(runsRoot, entry.name);
+        summariesById.set(summary.id, summary);
+      } catch {
+        // Ignore directories that are not valid run roots.
+      }
+      continue;
+    }
+    if (entry.isFile() && entry.name.endsWith(".json")) {
+      const id = entry.name.slice(0, -".json".length);
+      if (summariesById.has(id)) continue;
+      try {
+        const summary = await readRunSummary(runsRoot, id);
+        summariesById.set(summary.id, summary);
+      } catch {
+        // Ignore files that are not valid runs.
+      }
+    }
+  }
+  return [...summariesById.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+async function readRunSummary(runsRoot: string, id: string): Promise<RunListSummary> {
+  const raw = JSON.parse(await readFile(await existingRunPath(runsRoot, id), "utf8")) as unknown;
+  if (!raw || typeof raw !== "object") throw new Error(`invalid Run summary: ${id}`);
+  const source = raw as Record<string, unknown>;
+  if (source.contractVersion !== 2 && source.contractVersion !== 3) {
+    return summarizeRun(await readRun(runsRoot, id));
+  }
+  const runId = requiredSummaryString(source.id, "id");
+  const status = source.status;
+  if (status !== "running" && status !== "done") throw new Error(`invalid Run summary status: ${runId}`);
+  const reviews = Array.isArray(source.artifactReviews)
+    ? source.artifactReviews.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+    : [];
+  const activeReview = [...reviews]
+    .filter((review) => review.status !== "passed")
+    .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")))[0];
+  return {
+    id: runId,
+    ...(typeof source.name === "string" && source.name.trim() ? { name: source.name } : {}),
+    status,
+    procedureName: requiredSummaryString(source.procedureName, "procedureName"),
+    createdAt: requiredSummaryString(source.createdAt, "createdAt"),
+    updatedAt: requiredSummaryString(source.updatedAt, "updatedAt"),
+    readOnly: source.readOnly === true,
+    eventCount: Array.isArray(source.events) ? source.events.length : 0,
+    ...(activeReview ? { reviewProgress: summarizeReviewProgress(activeReview) } : {})
+  };
+}
+
+function summarizeRun(run: RunState): RunListSummary {
+  const activeReview = [...(run.artifactReviews ?? [])]
+    .filter((review) => review.status !== "passed")
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  return {
+    id: run.id,
+    ...(run.name?.trim() ? { name: run.name } : {}),
+    status: run.status,
+    procedureName: run.procedureName,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+    readOnly: run.readOnly === true,
+    eventCount: run.events.length,
+    ...(activeReview ? { reviewProgress: summarizeReviewProgress(activeReview as unknown as Record<string, unknown>) } : {})
+  };
+}
+
+function summarizeReviewProgress(review: Record<string, unknown>): NonNullable<RunListSummary["reviewProgress"]> {
+  const rounds = Array.isArray(review.rounds)
+    ? review.rounds.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+    : [];
+  const currentRoundId = requiredSummaryString(review.currentRoundId, "artifactReview.currentRoundId");
+  const round = rounds.find((candidate) => candidate.id === currentRoundId);
+  const assignments = Array.isArray(round?.assignments) ? round.assignments : [];
+  return {
+    id: requiredSummaryString(review.id, "artifactReview.id"),
+    status: requiredSummaryString(review.status, "artifactReview.status"),
+    currentRoundId,
+    updatedAt: requiredSummaryString(review.updatedAt, "artifactReview.updatedAt"),
+    submitted: assignments.filter((assignment) => Boolean(
+      assignment && typeof assignment === "object" && (assignment as Record<string, unknown>).status === "submitted"
+    )).length,
+    total: assignments.length
+  };
+}
+
+function requiredSummaryString(value: unknown, name: string): string {
+  if (typeof value !== "string" || !value) throw new Error(`invalid Run summary ${name}`);
+  return value;
+}
+
 export function buildRunBindingSnapshot(run: RunState): RunBindingSnapshot {
   const scopesBySlot = futureRunReviewScopesBySlot(run);
   const reviewsBySlot = new Map<string, string[]>();
@@ -1303,6 +1420,16 @@ export async function readArtifactReviewForActor(input: {
   actorId: string;
 }): Promise<ArtifactReviewContext> {
   const { run, review } = await findArtifactReview(input);
+  return artifactReviewForActor({ run, review, roundId: input.roundId, actorId: input.actorId });
+}
+
+export function artifactReviewForActor(input: {
+  run: RunState;
+  review: ArtifactReview<RunEvent["artifact"]>;
+  roundId: string;
+  actorId: string;
+}): ArtifactReviewContext {
+  const { run, review } = input;
   const round = review.rounds.find((candidate) => candidate.id === input.roundId);
   if (!round) throw new Error(`Artifact Review Round not found: ${input.roundId}`);
   const assignment = round.assignments.find((candidate) => candidate.actorId === input.actorId);

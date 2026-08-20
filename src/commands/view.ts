@@ -44,7 +44,7 @@ import {
   type ProjectConfigReference
 } from "../config-management.js";
 import { authorizeArtifactOperation, controlPlaneConfigSchema, listPermissionDefinitions } from "../control-plane/index.js";
-import { listMemoryFiles, readMemoryFile } from "../memory/store.js";
+import { listMemoryFiles, readMemoryFile, readMemoryFileSummary } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
 import { readBundledSystemMemories } from "../reserved/store.js";
@@ -52,6 +52,7 @@ import {
   createReview,
   getReview,
   listReviews,
+  listReviewSummaries,
   readReviewSnapshot,
   reviewStatuses,
   updateReview,
@@ -62,12 +63,14 @@ import {
 import {
   ArtifactAuthorizationFailure,
   ArtifactReviewConflictError,
+  artifactReviewForActor,
   buildRunBindingSnapshot,
   buildSchemaWritingSnapshot,
   currentArtifactReview,
   ensureCurrentSchemaDraft,
   findArtifactReview,
   listRuns,
+  listRunSummaries,
   parseRunState,
   readArtifactReviewForActor,
   readRun,
@@ -487,18 +490,52 @@ async function handleRequest(
   }
 
   if (request.method === "GET" && url.pathname === "/api/memories") {
-    const payload = await loadMemoryPayload(config);
+    const payload = url.searchParams.get("representation") === "summary"
+      ? await loadMemorySummaryPayload(config)
+      : await loadMemoryPayload(config);
     sendJson(response, 200, payload);
     return;
   }
 
+  const memoryMatch = url.pathname.match(/^\/api\/memories\/([^/]+)\/([^/]+)$/);
+  if (request.method === "GET" && memoryMatch) {
+    const kind = decodeURIComponent(memoryMatch[1]) as MemoryKind;
+    const name = decodeURIComponent(memoryMatch[2]);
+    if (!memoryKinds.includes(kind)) {
+      sendJson(response, 404, { error: "memory not found" });
+      return;
+    }
+    const file = await findMemoryFileById(memoryRoot, `${kind}/${name}`);
+    if (!file) {
+      sendJson(response, 404, { error: "memory not found" });
+      return;
+    }
+    const systemReferences = await systemMemoryReferences();
+    sendJson(response, 200, {
+      memory: await loadMemoryListItem(memoryRoot, kind, file.path, systemReferences)
+    });
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/reviews") {
+    if (url.searchParams.get("representation") === "summary") {
+      const reviews = await listReviewSummaries(reviewsRoot, {
+        memoryId: url.searchParams.get("memory_id") ?? undefined,
+        memoryPath: url.searchParams.get("memory_path") ?? undefined
+      });
+      sendJson(response, 200, { reviews });
+      return;
+    }
     const reviews = (await listReviews(reviewsRoot)).filter((review) => review.source !== "task");
     sendJson(response, 200, { reviews });
     return;
   }
 
   if (request.method === "GET" && url.pathname === "/api/runs") {
+    if (url.searchParams.get("representation") === "summary") {
+      sendJson(response, 200, { runs: await listRunSummaries(config.runsRoot) });
+      return;
+    }
     sendJson(response, 200, { runs: await loadRunPayload(config) });
     return;
   }
@@ -553,6 +590,39 @@ async function handleRequest(
         sendJson(response, 200, await artifactReviewContextPayload(located.runsRoot, {
           run: located.run,
           review: located.review,
+          round
+        }));
+      }
+    } catch (error) {
+      sendArtifactReviewError(response, error);
+    }
+    return;
+  }
+
+  const directArtifactReviewRoundMatch = url.pathname.match(
+    /^\/api\/runs\/([^/]+)\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)$/
+  );
+  if (request.method === "GET" && directArtifactReviewRoundMatch) {
+    const actorId = url.searchParams.get("actor_id")?.trim();
+    try {
+      const runId = decodeURIComponent(directArtifactReviewRoundMatch[1]);
+      const reviewId = decodeURIComponent(directArtifactReviewRoundMatch[2]);
+      const roundId = decodeURIComponent(directArtifactReviewRoundMatch[3]);
+      const located = await readViewRunById(config, runId);
+      const review = located.run.artifactReviews?.find((candidate) => candidate.id === reviewId);
+      if (!review) throw new Error(`Artifact Review not found: ${reviewId}`);
+      const round = review.rounds.find((candidate) => candidate.id === roundId);
+      if (!round) throw new Error(`Artifact Review Round not found: ${roundId}`);
+      if (actorId) {
+        const context = artifactReviewForActor({ run: located.run, review, roundId, actorId });
+        if ((context.assignment.actorKind ?? "human") !== "human") {
+          throw new Error(`Agent Artifact Review assignment is not assigned to the Human View API: ${actorId}`);
+        }
+        sendJson(response, 200, await artifactReviewContextPayload(located.runsRoot, context));
+      } else {
+        sendJson(response, 200, await artifactReviewContextPayload(located.runsRoot, {
+          run: located.run,
+          review,
           round
         }));
       }
@@ -704,9 +774,14 @@ async function handleRequest(
 
   const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)$/);
   if (request.method === "GET" && runMatch) {
-    const run = await readRun(runsRoot, decodeURIComponent(runMatch[1]));
-    await dispatchArtifactReviewAgents({ config, run });
-    sendJson(response, 200, { run: await toViewRunPayload(runsRoot, await readRun(runsRoot, run.id)) });
+    const located = await readViewRunById(config, decodeURIComponent(runMatch[1]));
+    if (located.runsRoot === runsRoot) await dispatchArtifactReviewAgents({ config, run: located.run });
+    const run = located.runsRoot === runsRoot
+      ? await readRun(located.runsRoot, located.run.id)
+      : { ...located.run, readOnly: true as const };
+    sendJson(response, 200, {
+      run: await toViewRunPayload(located.runsRoot, run)
+    });
     return;
   }
 
@@ -902,8 +977,8 @@ async function findMemoryFileById(memoryRoot: string, memoryId: string): Promise
     const paths = await listMemoryFiles(memoryRoot, kind);
     for (const path of paths) {
       try {
-        const file = await readMemoryFile(kind, path);
-        const primaryName = Array.isArray(file.entity.names) ? file.entity.names[0] : file.path;
+        const file = await readMemoryFileSummary(kind, path);
+        const primaryName = file.names[0];
         if (`${file.kind}/${primaryName}` === memoryId) {
           return { kind: file.kind, path: file.path };
         }
@@ -918,11 +993,7 @@ async function findMemoryFileById(memoryRoot: string, memoryId: string): Promise
 async function loadMemoryPayload(config: MemsphereConfig): Promise<MemoryPayload> {
   const { memoryRoot } = config;
   const memories: MemoryPayload["memories"] = [];
-  const systemReferences = new Set(
-    (await readBundledSystemMemories()).flatMap((memory) =>
-      memory.names.map((name) => `${memory.kind}/${name}`)
-    )
-  );
+  const systemReferences = await systemMemoryReferences();
   const actorNames = Object.fromEntries(
     Object.entries(config.controlPlane?.actors ?? {}).map(([actorId, actor]) => [actorId, actor.name])
   );
@@ -935,6 +1006,49 @@ async function loadMemoryPayload(config: MemsphereConfig): Promise<MemoryPayload
   }
 
   return { memoryRoot, actorNames, memories };
+}
+
+async function loadMemorySummaryPayload(config: MemsphereConfig): Promise<unknown> {
+  const systemReferences = await systemMemoryReferences();
+  const memories: unknown[] = [];
+  for (const kind of memoryKinds) {
+    for (const path of await listMemoryFiles(config.memoryRoot, kind)) {
+      const relativePath = portableRelative(config.memoryRoot, path);
+      try {
+        const summary = await readMemoryFileSummary(kind, path);
+        memories.push({
+          id: `${kind}/${summary.names[0]}`,
+          kind,
+          path: relativePath,
+          system: summary.names.some((name) => systemReferences.has(`${kind}/${name}`)),
+          names: summary.names
+        });
+      } catch (error) {
+        memories.push({
+          id: `${kind}/${relativePath}`,
+          kind,
+          path: relativePath,
+          system: false,
+          error: formatMemoryLoadError(error)
+        });
+      }
+    }
+  }
+  return {
+    memoryRoot: config.memoryRoot,
+    actorNames: Object.fromEntries(
+      Object.entries(config.controlPlane?.actors ?? {}).map(([actorId, actor]) => [actorId, actor.name])
+    ),
+    memories
+  };
+}
+
+async function systemMemoryReferences(): Promise<Set<string>> {
+  return new Set(
+    (await readBundledSystemMemories()).flatMap((memory) =>
+      memory.names.map((name) => `${memory.kind}/${name}`)
+    )
+  );
 }
 
 async function loadRunPayload(config: MemsphereConfig): Promise<unknown[]> {
@@ -1085,6 +1199,27 @@ async function findViewArtifactReview(
     }
   }
   throw new Error(`Artifact Review not found: ${reviewId}`);
+}
+
+async function readViewRunById(
+  config: MemsphereConfig,
+  runId: string
+): Promise<{ runsRoot: string; run: RunState }> {
+  if (!/^run-[a-zA-Z0-9-]+$/.test(runId)) throw new Error(`Run not found: ${runId}`);
+  const archivedRunsRoot = join(config.archiveRoot, "runs");
+  for (const candidateRoot of [config.runsRoot, archivedRunsRoot]) {
+    try {
+      const run = await readRun(candidateRoot, runId);
+      return {
+        runsRoot: candidateRoot,
+        run: candidateRoot === archivedRunsRoot ? { ...run, readOnly: true } : run
+      };
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") continue;
+      throw error;
+    }
+  }
+  throw new Error(`Run not found: ${runId}`);
 }
 
 function normalizeActivityInteger(value: string | null, fallback: number, name: string): number {

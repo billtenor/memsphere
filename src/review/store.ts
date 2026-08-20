@@ -61,6 +61,18 @@ export type ReviewFile = {
   };
 };
 
+export type ReviewListSummary = {
+  id: string;
+  source: "memory" | "task";
+  title: string;
+  status: ReviewStatus;
+  target?: ReviewTarget;
+  createdAt: string;
+  updatedAt: string;
+  commentCount: number;
+  snapshotKinds: Array<"memory" | "task">;
+};
+
 const commentSchema = z.object({
   id: z.string(),
   source: z.enum(["memory", "task"]).optional(),
@@ -109,6 +121,29 @@ const reviewSchema = z.object({
   agent: z.object({ summary: z.string().optional() }).optional()
 });
 
+const reviewListSummarySchema: z.ZodType<ReviewListSummary> = z.object({
+  id: z.string(),
+  source: z.enum(["memory", "task"]),
+  title: z.string(),
+  status: z.enum(reviewStatuses),
+  target: z.object({
+    source: z.enum(["memory", "task"]),
+    id: z.string(),
+    name: z.string().optional(),
+    path: z.string().optional(),
+    runId: z.string().optional()
+  }).optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  commentCount: z.number().int().nonnegative(),
+  snapshotKinds: z.array(z.enum(["memory", "task"]))
+});
+
+const reviewSummaryCacheSchema = z.object({
+  source: z.object({ size: z.number().int().nonnegative(), mtimeMs: z.number().nonnegative() }),
+  summary: reviewListSummarySchema
+});
+
 type CreateReviewInput = {
   title?: string;
   source?: "memory" | "task";
@@ -153,6 +188,71 @@ export async function listReviews(reviewsRoot: string): Promise<ReviewFile[]> {
   }
 
   return reviews.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function listReviewSummaries(
+  reviewsRoot: string,
+  subject?: { memoryId?: string; memoryPath?: string }
+): Promise<ReviewListSummary[]> {
+  const dir = await ensureReviewDirectory(reviewsRoot);
+  const entries = await readdir(dir, { withFileTypes: true });
+  const summaries: ReviewListSummary[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const reviewPath = join(dir, entry.name, "review.yaml");
+    if (!(await pathExists(reviewPath))) continue;
+    const summary = await readReviewSummary(entry.name, reviewPath);
+    if (summary.target?.source !== "task") summaries.push(summary);
+  }
+  return summaries
+    .filter((review) => {
+      if (!subject?.memoryId && !subject?.memoryPath) return true;
+      if (subject.memoryPath && review.target?.path) return review.target.path === subject.memoryPath;
+      return Boolean(subject.memoryId && review.target?.id === subject.memoryId);
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+async function readReviewSummary(directoryName: string, reviewPath: string): Promise<ReviewListSummary> {
+  const source = await stat(reviewPath);
+  const cachePath = join(dirname(reviewPath), "summary.json");
+  try {
+    const cached = reviewSummaryCacheSchema.parse(JSON.parse(await readFile(cachePath, "utf8")));
+    if (
+      cached.summary.id === directoryName
+      && cached.source.size === source.size
+      && cached.source.mtimeMs === source.mtimeMs
+    ) return cached.summary;
+  } catch {
+    // Legacy or stale Review: rebuild the derived summary once from the canonical YAML.
+  }
+  const review = await readReviewByFile(reviewPath);
+  if (review.id !== directoryName) throw new Error(`review directory id does not match review.yaml: ${directoryName}`);
+  const summary = reviewSummary(review);
+  await writeReviewSummaryCache(cachePath, { size: source.size, mtimeMs: source.mtimeMs }, summary).catch(() => undefined);
+  return summary;
+}
+
+function reviewSummary(review: ReviewFile): ReviewListSummary {
+  const firstComment = review.comments[0];
+  const memorySnapshot = review.snapshots.find((snapshot) => snapshot.kind === "memory");
+  const target = review.target ?? (firstComment || memorySnapshot ? {
+    source: "memory" as const,
+    id: firstComment?.memoryId ?? "",
+    name: firstComment?.memoryName,
+    path: memorySnapshot?.label
+  } : undefined);
+  return {
+    id: review.id,
+    source: review.source ?? target?.source ?? "memory",
+    title: review.title,
+    status: review.status,
+    target,
+    createdAt: review.createdAt,
+    updatedAt: review.updatedAt,
+    commentCount: review.comments.length,
+    snapshotKinds: [...new Set(review.snapshots.map((snapshot) => snapshot.kind))]
+  };
 }
 
 export async function getReview(reviewsRoot: string, id: string): Promise<ReviewFile | undefined> {
@@ -245,7 +345,22 @@ async function writeReview(reviewsRoot: string, review: ReviewFile): Promise<voi
 async function writeReviewToDirectory(reviewsRoot: string, review: ReviewFile): Promise<void> {
   const reviewDir = join(reviewsRoot, review.id);
   await mkdir(reviewDir, { recursive: true });
-  await writeFile(join(reviewDir, "review.yaml"), stringify(review, { lineWidth: 0 }), "utf8");
+  const reviewPath = join(reviewDir, "review.yaml");
+  await writeFile(reviewPath, stringify(review, { lineWidth: 0 }), "utf8");
+  const source = await stat(reviewPath);
+  await writeReviewSummaryCache(
+    join(reviewDir, "summary.json"),
+    { size: source.size, mtimeMs: source.mtimeMs },
+    reviewSummary(review)
+  );
+}
+
+async function writeReviewSummaryCache(
+  cachePath: string,
+  source: { size: number; mtimeMs: number },
+  summary: ReviewListSummary
+): Promise<void> {
+  await writeFile(cachePath, `${JSON.stringify({ source, summary })}\n`, "utf8");
 }
 
 async function createSnapshots(

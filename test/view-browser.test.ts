@@ -45,6 +45,43 @@ test("browser script includes URL parsing, canonical history, and popstate resto
   assert.match(browserHtml, /pendingArtifactMaterial/);
 });
 
+test("browser loads summaries by route and fetches details on demand", () => {
+  assert.match(browserHtml, /fetch\("\/api\/memories\?representation=summary"\)/);
+  assert.match(browserHtml, /new URLSearchParams\(\{ representation: "summary", memory_id: subject\.id \}\)/);
+  assert.match(browserHtml, /fetch\("\/api\/runs\?representation=summary"\)/);
+  assert.match(browserHtml, /\/api\/memories\/" \+ encodeURIComponent\(summary\.kind\)/);
+  assert.match(browserHtml, /\/api\/runs\/" \+ encodeURIComponent\(id\)/);
+  assert.match(browserHtml, /\/artifact-reviews\/" \+ encodeURIComponent\(reviewId\)/);
+  assert.match(browserHtml, /if \(!changed\) return;/);
+  assert.doesNotMatch(browserHtml, /Promise\.all\(\[loadMemories\(\), loadReviews\(\), loadRuns\(\)\]\)/);
+});
+
+test("archived Run detail survives active summary refresh without joining Task navigation", () => {
+  assert.match(browserHtml, /selectedArchivedDetail\?\.readOnly === true/);
+  assert.match(browserHtml, /const activeRuns = state\.runs\.filter\(run => run\.archived !== true && run\.readOnly !== true\)/);
+});
+
+test("summary stores do not reuse full Memory or Review list readers", async () => {
+  const viewSource = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/commands/view.ts", import.meta.url), "utf8"));
+  const reviewSource = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/review/store.ts", import.meta.url), "utf8"));
+  const memorySummaryBody = viewSource.match(/async function loadMemorySummaryPayload[\s\S]*?\n}\n\nasync function systemMemoryReferences/)?.[0] || "";
+  const reviewSummaryBody = reviewSource.match(/export async function listReviewSummaries[\s\S]*?\n}\n\nasync function readReviewSummary/)?.[0] || "";
+  assert.match(memorySummaryBody, /readMemoryFileSummary/);
+  assert.doesNotMatch(memorySummaryBody, /loadMemoryPayload|readMemoryFile\(/);
+  assert.match(reviewSummaryBody, /readReviewSummary/);
+  assert.doesNotMatch(reviewSummaryBody, /listReviews\(/);
+});
+
+test("detail loaders ignore responses from a previous Project generation", () => {
+  assert.match(browserHtml, /projectGeneration: 0/);
+  assert.match(browserHtml, /function resetProjectState\(\) \{\s*state\.projectGeneration \+= 1;/);
+  for (const loader of ["loadMemoryDetail", "loadReviewDetail", "loadRunDetail"]) {
+    const body = browserHtml.match(new RegExp("async function " + loader + "[\\s\\S]*?\\n    }"))?.[0] || "";
+    assert.match(body, /const projectGeneration = state\.projectGeneration/);
+    assert.match(body, /if \(projectGeneration !== state\.projectGeneration\) return null;/);
+  }
+});
+
 test("Settings separates the global and Project configuration workspaces", () => {
   assert.match(browserHtml, /id="settings-tab"/);
   assert.match(browserHtml, /class="brand-settings"/);
@@ -498,13 +535,12 @@ test("Artifact Review keeps local draft text across conflict recovery renders", 
 });
 
 test("initial loading validates the saved review only after its subject data is available", () => {
-  assert.match(browserHtml, /const requests = \[loadMemories\(\), loadReviews\(\), loadRuns\(\)\];\s*if \(state\.viewMode === "settings"\) requests\.push\(loadSettings\(\)\);\s*await Promise\.all\(requests\);[\s\S]*?ensureSelectedReview\(\);/);
-  assert.doesNotMatch(browserHtml, /async function loadReviews\(\) \{[\s\S]*?state\.reviews =[^}]*ensureSelectedReview\(\);/);
+  assert.match(browserHtml, /if \(targetMode === "memory"\) await loadMemories\(\);\s*else if \(targetMode === "task"\) await loadRuns\(\{ loadDetail: false \}\);\s*else await loadSettings\(\);[\s\S]*?ensureSelectedReview\(\);/);
 });
 
 test("task polling does not replace active editors or open Artifact Review selectors", () => {
   assert.match(browserHtml, /if \(hasActiveTaskInteraction\(\)\) \{\s*syncArtifactReviewActivities\(\)\.catch\(console\.error\);\s*\} else \{/);
-  assert.match(browserHtml, /loadRuns\(\)\.then\(\(\) => \{[\s\S]*if \(hasActiveTaskInteraction\(\)\) \{[\s\S]*taskPollingRenderPending = true/);
+  assert.match(browserHtml, /loadRuns\(\)\.then\(changed => \{\s*if \(!changed\) return;[\s\S]*if \(hasActiveTaskInteraction\(\)\) \{[\s\S]*taskPollingRenderPending = true/);
   assert.match(browserHtml, /function refreshAgentActivityDom\([\s\S]*existing\.replaceWith\(renderAgentActivity/);
   assert.match(browserHtml, /artifact-review-select-menu:not\(\[hidden\]\)/);
   assert.match(browserHtml, /document\.activeElement\?\.matches\?\.\("\.artifact-review-select"\)/);
@@ -627,7 +663,7 @@ test("memory details render names as a field while using alias and reference in 
   assert.match(browserHtml, /return entity\.names\[1\] \|\| entity\.names\[0\] \|\| "\(unnamed\)"/);
   assert.match(browserHtml, /el\.title\.textContent = memoryDisplayName\(memory\.entity\);/);
   assert.match(browserHtml, /el\.subtitle\.textContent = memory\.id;/);
-  assert.match(browserHtml, /button\.textContent = memory\.error \? invalidMemoryName\(memory\) : memoryDisplayName\(memory\.entity\);/);
+  assert.match(browserHtml, /button\.textContent = memory\.error \? invalidMemoryName\(memory\) : memorySummaryName\(memory\);/);
   assert.match(browserHtml, /button\.title = memory\.error \? errorText\(memory\.error\) : memory\.id;/);
   assert.match(browserHtml, /const identity = memory\.error \? memory\.path : memory\.id;/);
 });
