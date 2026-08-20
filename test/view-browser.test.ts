@@ -19,9 +19,16 @@ test("View page routes are explicit and never absorb API or unknown paths", () =
     "/tasks/run-1/artifact-reviews/review-1",
     "/settings/overview",
     "/settings/participants",
-    "/memory-reviews/review-1"
+    "/projects/alpha/memories/concepts/Memory/reviews/review-1"
   ]) assert.equal(isViewPagePath(path), true, path);
-  for (const path of ["/api/memories", "/api/unknown", "/unknown", "/tasks/run-1/other/review-1"]) {
+  for (const path of [
+    "/api/memories",
+    "/api/unknown",
+    "/unknown",
+    "/tasks/run-1/other/review-1",
+    "/projects/alpha/memories/concepts/Memory/reviews",
+    "/memory-reviews/review-1"
+  ]) {
     assert.equal(isViewPagePath(path), false, path);
   }
 });
@@ -31,7 +38,9 @@ test("browser script includes URL parsing, canonical history, and popstate resto
   assert.match(browserHtml, /function currentBrowserUrl\(\)/);
   assert.match(browserHtml, /history\[method\]\(null, "", next\)/);
   assert.match(browserHtml, /window\.addEventListener\("popstate"/);
-  assert.match(browserHtml, /\/memory-reviews\//);
+  assert.doesNotMatch(browserHtml, /\/memory-reviews\//);
+  assert.match(browserHtml, /\/projects\/" \+ encodeRoutePart\(state\.currentProject\)/);
+  assert.match(browserHtml, /prepareBrowserRoute/);
   assert.match(browserHtml, /\/artifact-reviews\//);
   assert.match(browserHtml, /pendingArtifactMaterial/);
 });

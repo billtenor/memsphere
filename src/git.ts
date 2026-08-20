@@ -20,12 +20,7 @@ export async function runGit(
     return { stdout: result.stdout.trimEnd(), stderr: result.stderr.trim() };
   } catch (error) {
     if (isExecError(error) && "code" in error && error.code === "ENOENT") {
-      throw new Error(
-        process.platform === "win32"
-          ? "Git is required but was not found. Install Git for Windows and run Memsphere from Git Bash."
-          : "Git is required but was not found. Install Git and ensure it is available on PATH.",
-        { cause: error }
-      );
+      throw new Error(missingGitMessage(), { cause: error });
     }
     if (options.allowFailure && isExecError(error)) {
       return { stdout: String(error.stdout ?? "").trimEnd(), stderr: String(error.stderr ?? "").trim() };
@@ -33,6 +28,12 @@ export async function runGit(
     const detail = isExecError(error) ? String(error.stderr || error.message).trim() : String(error);
     throw new Error(`git ${args[0] ?? "command"} failed${detail ? `: ${detail}` : ""}`, { cause: error });
   }
+}
+
+export function missingGitMessage(platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32"
+    ? "Git is required but was not found. Install Git for Windows, reopen PowerShell, CMD, or Git Bash, and ensure git is available on PATH."
+    : "Git is required but was not found. Install Git and ensure it is available on PATH.";
 }
 
 export async function gitOutput(args: string[], cwd?: string): Promise<string> {

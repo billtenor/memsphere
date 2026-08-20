@@ -11,6 +11,7 @@ import { resolveRegisteredProject } from "../project/resolver.js";
 import { resolveWorkspaceIdentity } from "../project/workspace.js";
 import { editMemories, publishMemoryChange } from "../memory/changeset.js";
 import { bundledReservedMemoryRoot, readBundledSystemMemories } from "../reserved/store.js";
+import { assertWindowsPrerequisites } from "../windows-prerequisites.js";
 
 type BindOption = { bind?: boolean };
 type OutputOption = { output?: "text" | "json" };
@@ -277,6 +278,7 @@ export async function projectPruneCommand(): Promise<void> {
 }
 
 async function preflightNewProject(input: { home: string; name: string; root: string; bind?: boolean }): Promise<void> {
+  await assertWindowsPrerequisites();
   const registry = await readProjectRegistry(input.home);
   if (registry.projects[input.name]) throw new Error(`Project "${input.name}" is already registered`);
   if (await pathExists(input.root)) throw new Error(`Project Root already exists: ${input.root}`);

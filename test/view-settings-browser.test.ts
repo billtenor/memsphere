@@ -60,13 +60,16 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.equal(await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).isVisible(), true);
     assert.equal(await page.getByRole("heading", { name: "Memsphere 设置", exact: true }).count(), 1);
     await globalSettingsNav.getByRole("button", { name: "View 服务", exact: true }).click();
+    await page.getByRole("heading", { name: "View 服务", exact: true }).waitFor();
     assert.equal(new URL(page.url()).pathname, "/settings/view");
     assert.equal(await page.getByText("当前运行地址").count(), 0);
     assert.equal(await page.getByText("保存并重启后地址").count(), 0);
     await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
     assert.equal(new URL(page.url()).pathname, "/settings/overview");
     const overview = page.locator(".settings-section").last();
-    assert.equal(await overview.getByText("全局配置", { exact: true }).count(), 1);
+    const globalConfig = overview.getByText("全局配置", { exact: true });
+    await globalConfig.waitFor();
+    assert.equal(await globalConfig.count(), 1);
     assert.equal(await overview.getByText("Project 配置", { exact: true }).count(), 0);
     await demoSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
     assert.equal(new URL(page.url()).pathname, "/settings/project");
@@ -83,11 +86,13 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await directSettings.getByRole("heading", { name: "demo 项目设置", exact: true }).waitFor();
     await directSettings.close();
     await globalSettingsNav.getByRole("button", { name: "常规", exact: true }).click();
+    await page.getByText("工作语言", { exact: true }).waitFor();
     assert.equal(await page.getByText("工作语言", { exact: true }).count(), 1);
     await page.getByRole("combobox", { name: "工作语言" }).click();
     await page.getByRole("option", { name: "English", exact: true }).click();
     assert.match(await page.locator("#settings-status").textContent() ?? "", /未保存修改/);
     await demoSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
+    await page.getByRole("heading", { name: "demo 项目设置", exact: true }).waitFor();
     assert.equal(await page.getByRole("heading", { name: "demo 项目设置", exact: true }).count(), 1);
     assert.equal(await page.getByRole("checkbox", { name: "使用默认值" }).count(), 0);
     assert.equal(await page.getByText("存储位置", { exact: true }).count(), 1);
@@ -99,7 +104,9 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await page.getByRole("button", { name: "重新读取", exact: true }).click();
     await demoSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
     const projectOverview = page.locator(".settings-section").last();
-    assert.equal(await projectOverview.getByText("Project 配置", { exact: true }).count(), 1);
+    const projectConfig = projectOverview.getByText("Project 配置", { exact: true });
+    await projectConfig.waitFor();
+    assert.equal(await projectConfig.count(), 1);
     assert.equal(await projectOverview.getByText("全局配置", { exact: true }).count(), 0);
     assert.equal(await page.getByRole("button", { name: "重新读取", exact: true }).count(), 0);
     assert.equal(await page.getByRole("button", { name: "保存", exact: true }).count(), 0);
@@ -265,6 +272,45 @@ test("switching Projects replaces an entity URL with the new Project landing pag
     await page.waitForURL(`http://127.0.0.1:${port}/memories`);
     assert.equal((await page.locator("#project-select-value").textContent())?.trim(), "beta");
     assert.equal(new URL(page.url()).pathname, "/memories");
+  } finally {
+    await browser.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Memory Review deep links do not discard unsaved Project settings without confirmation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-project-route-dirty-browser-"));
+  const config = await settingsConfigFixture(dir, "127.0.0.1");
+  const server = createViewServer(config);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const port = (server.address() as AddressInfo).port;
+  const origin = `http://127.0.0.1:${port}`;
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.goto(`${origin}/settings/participants`, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "启用参与者配置" }).click();
+    assert.match(await page.locator("#settings-status").textContent() ?? "", /未保存修改/);
+
+    const dialogPromise = page.waitForEvent("dialog");
+    await page.evaluate(() => {
+      history.pushState(null, "", "/projects/beta/memories/concepts/beta-memory/reviews/review-1");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    const dialog = await dialogPromise;
+    assert.equal(dialog.message(), "当前 Project 设置有未保存修改。放弃修改并切换 Project？");
+    await dialog.dismiss();
+
+    await page.waitForURL(`${origin}/settings/participants`);
+    assert.equal((await page.locator("#project-select-value").textContent())?.trim(), "demo");
+    assert.match(await page.locator("#settings-status").textContent() ?? "", /未保存修改/);
+    const projects = await (await fetch(`${origin}/api/projects`)).json() as { current: string };
+    assert.equal(projects.current, "demo");
   } finally {
     await browser.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));

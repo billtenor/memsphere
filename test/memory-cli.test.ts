@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { parse } from "yaml";
@@ -57,7 +57,12 @@ async function withScope(fn: (scope: { root: string; nested: string; memoryRoot:
 
 async function runCli(cwd: string, args: string[], home?: string): Promise<CommandResult> {
   return new Promise((resolveResult, reject) => {
-    const child = spawn(process.execPath, ["--import", tsxLoaderPath, cliPath, ...args], {
+    const child = spawn(process.execPath, [
+      "--import",
+      pathToFileURL(tsxLoaderPath).href,
+      cliPath,
+      ...args
+    ], {
       cwd,
       env: { ...process.env, ...(home ? { MEMSPHERE_HOME: home } : {}) },
       stdio: ["ignore", "pipe", "pipe"]

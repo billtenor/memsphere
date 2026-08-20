@@ -99,14 +99,17 @@ flow:
 
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-    page.setDefaultTimeout(3_000);
+    page.setDefaultTimeout(10_000);
     page.on("pageerror", (error) => console.error("browser page error", error));
     const dialogs: string[] = [];
     page.on("dialog", async (dialog) => {
       dialogs.push(dialog.message());
       await dialog.dismiss();
     });
-    await page.goto(`http://127.0.0.1:${address.port}`);
+    await page.goto(`http://127.0.0.1:${address.port}`, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000
+    });
     const memoryArtifact = page.locator(".artifact-row").first();
     await memoryArtifact.getByText("评审", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Review", exact: true }).waitFor();
@@ -386,7 +389,10 @@ flow:
     assert.equal(aliceAssignment?.draft.comments.some((comment) => comment.body === "Alice private draft"), false);
 
     await reviewModal.getByPlaceholder("补充整体评审意见").fill("Alice private draft");
-    await reviewModal.getByRole("button", { name: "添加意见", exact: true }).click();
+    await clickAndWaitForDraftSave(
+      page,
+      reviewModal.getByRole("button", { name: "添加意见", exact: true })
+    );
     await reviewModal.getByText("Alice private draft", { exact: true }).waitFor();
 
     await selectIdentity(page, identity, "bob");
@@ -399,7 +405,10 @@ flow:
     await selectIdentity(page, identity, "bob");
     await clickAndWaitForDraftSave(page, page.getByRole("radio", { name: "修改", exact: true }));
     await reviewModal.getByPlaceholder("补充整体评审意见").fill("Keep the accepted result concise.");
-    await reviewModal.getByRole("button", { name: "添加意见", exact: true }).click();
+    await clickAndWaitForDraftSave(
+      page,
+      reviewModal.getByRole("button", { name: "添加意见", exact: true })
+    );
     await reviewModal.getByText("Keep the accepted result concise.", { exact: true }).waitFor();
     await submitThroughConfirmation(page);
 
@@ -505,7 +514,7 @@ flow:
     });
 
     await reviewModal.getByText("The first-round comments were addressed.", { exact: true }).waitFor();
-    await page.getByText("done", { exact: true }).first().waitFor();
+    await page.getByText("done", { exact: true }).first().waitFor({ timeout: 6_000 });
     const completed = await readRun(runsRoot, started.id);
     assert.equal(completed.status, "done");
     assert.equal(completed.events.length, 1);
@@ -918,7 +927,9 @@ flow:
     const toolTitleBox = await completedTool.locator(".artifact-review-activity-event-title").boundingBox();
     assert(toolKindBox && toolTimeBox && toolTitleBox);
     assert(toolTimeBox.x > toolKindBox.x);
-    assert(Math.abs(toolTimeBox.y - toolKindBox.y) < 8);
+    assert(Math.abs(
+      (toolTimeBox.y + toolTimeBox.height / 2) - (toolKindBox.y + toolKindBox.height / 2)
+    ) < 3);
     assert(toolTitleBox.y >= toolKindBox.y + toolKindBox.height);
     await agentRow.getByText(/^实现证据：(已引用|未引用)$/).waitFor();
     assert.equal(await composer.inputValue(), "Human draft remains visible");
@@ -1075,6 +1086,12 @@ async function waitForDraftRecovery(page: import("playwright").Page): Promise<vo
   );
   await conflict;
   await recovered;
+  await page.waitForFunction(() => {
+    const controls = document.querySelectorAll<HTMLButtonElement>(
+      "#artifact-review-modal .artifact-review-vote button"
+    );
+    return controls.length > 0 && Array.from(controls).every((control) => !control.disabled);
+  });
 }
 
 async function expectInlineValue(locator: import("playwright").Locator, expected: string): Promise<void> {

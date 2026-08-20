@@ -18,6 +18,10 @@ export type AcpProviderDefinition = {
   defaultCommand: string;
   versionArgs: string[];
   installHelp: string;
+  windowsSupport: {
+    status: "supported" | "experimental" | "unsupported";
+    reason: string;
+  };
 };
 
 const definitions: Record<AcpProviderType, AcpProviderDefinition> = {
@@ -26,28 +30,44 @@ const definitions: Record<AcpProviderType, AcpProviderDefinition> = {
     name: "Traex",
     defaultCommand: "traex",
     versionArgs: ["--version"],
-    installHelp: "Install and authenticate Traex CLI before using this Provider."
+    installHelp: "Install and authenticate Traex CLI before using this Provider.",
+    windowsSupport: {
+      status: "unsupported",
+      reason: "No verified native Windows ACP CLI and end-to-end evidence is available yet."
+    }
   },
   qwen: {
     type: "qwen",
     name: "Qwen Code",
     defaultCommand: "qwen",
     versionArgs: ["--version"],
-    installHelp: "Install Qwen Code and configure its model Provider before using this Provider."
+    installHelp: "Install Qwen Code and configure its model Provider before using this Provider.",
+    windowsSupport: {
+      status: "experimental",
+      reason: "Qwen Code supports native Windows shells, but Memsphere ACP end-to-end validation is pending."
+    }
   },
   kimi: {
     type: "kimi",
     name: "Kimi Code CLI",
     defaultCommand: "kimi",
     versionArgs: ["--version"],
-    installHelp: "Install and authenticate Kimi Code CLI before using this Provider."
+    installHelp: "Install and authenticate Kimi Code CLI before using this Provider.",
+    windowsSupport: {
+      status: "experimental",
+      reason: "Kimi Code CLI requires Git Bash on Windows; Memsphere ACP end-to-end validation is pending."
+    }
   },
   codex: {
     type: "codex",
     name: "Codex",
     defaultCommand: "codex-acp",
     versionArgs: ["--version"],
-    installHelp: "Install @agentclientprotocol/codex-acp and authenticate Codex before using this Provider."
+    installHelp: "Install @agentclientprotocol/codex-acp and authenticate Codex before using this Provider.",
+    windowsSupport: {
+      status: "experimental",
+      reason: "The Windows PowerShell launch path requires Memsphere ACP end-to-end validation."
+    }
   }
 };
 

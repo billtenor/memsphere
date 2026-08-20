@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   artifactReviewAssignmentId,
   type ArtifactReviewAgentAnchorInput,
@@ -86,7 +86,11 @@ async function boundAgentReviewSession(): Promise<BoundAgentReviewSession> {
   const runId = requiredEnv("MEMSPHERE_REVIEW_RUN_ID");
   const assignmentId = requiredEnv("MEMSPHERE_REVIEW_ASSIGNMENT_ID");
   const config = await readConfig(configPath);
-  if (resolve(dirname(config.scopeRoot)) !== workspaceRoot) throw new Error("cli_workspace_mismatch");
+  const currentDirectory = resolve(process.cwd());
+  const workspaceRelative = relative(workspaceRoot, currentDirectory);
+  if (workspaceRelative.startsWith("..") || isAbsolute(workspaceRelative)) {
+    throw new Error("cli_workspace_mismatch");
+  }
   const run = await readRun(config.runsRoot, runId);
   for (const review of run.artifactReviews ?? []) {
     const round = review.rounds.find((candidate) => candidate.id === review.currentRoundId);

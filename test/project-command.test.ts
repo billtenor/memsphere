@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import test from "node:test";
@@ -107,7 +107,7 @@ test("Embedded Project reuses the current repository without nested Git", async 
     await projectCreateCommand("embedded", { embedded: memoryRoot, bind: true });
     const registry = await readProjectRegistry(home);
     const config = JSON.parse(await readFile(join(registry.projects.embedded.root, "config.json"), "utf8"));
-    assert.deepEqual(config.store, { type: "embedded", memory_path: memoryRoot });
+    assert.deepEqual(config.store, { type: "embedded", memory_path: await realpath(memoryRoot) });
     await assert.rejects(readFile(join(memoryRoot, ".git")), /ENOENT/);
     const other = join(fixture, "other-workspace");
     await import("node:fs/promises").then(({ mkdir }) => mkdir(other));

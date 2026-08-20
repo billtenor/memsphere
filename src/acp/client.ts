@@ -1,9 +1,10 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { access, readFile } from "node:fs/promises";
+import { extname, isAbsolute, relative, resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import type { AgentReviewProviderLaunch } from "./provider.js";
+import { spawnCommand, terminateProcessTree } from "../platform-process.js";
 
 export type AgentReviewAcpSession = {
   protocolVersion: number;
@@ -25,16 +26,21 @@ export async function runAgentReviewAcpSession(input: {
   onUpdate?(update: acp.SessionUpdate): void | Promise<void>;
   onPrompt?(kind: "initial" | "reminder", prompt: string): void | Promise<void>;
 }): Promise<AgentReviewAcpSession> {
+  if (isAbsolute(input.launch.command)) await assertAbsoluteLaunchCommand(input.launch.command);
   const process = spawnAgent(input.launch);
   let stderr = "";
   let idleTimeout: TimeoutWatchdog | undefined;
   let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
   const terminate = () => {
     if (process.exitCode !== null) return;
-    process.kill("SIGTERM");
+    if (process.pid) void terminateProcessTree(process.pid, "SIGTERM").catch(() => process.kill("SIGTERM"));
+    else process.kill("SIGTERM");
     if (!forceKillTimer) {
       forceKillTimer = setTimeout(() => {
-        if (process.exitCode === null) process.kill("SIGKILL");
+        if (process.exitCode === null) {
+          if (process.pid) void terminateProcessTree(process.pid, "SIGKILL").catch(() => process.kill("SIGKILL"));
+          else process.kill("SIGKILL");
+        }
       }, 1_000);
     }
   };
@@ -158,17 +164,31 @@ export async function runAgentReviewAcpSession(input: {
   }
 }
 
+async function assertAbsoluteLaunchCommand(command: string): Promise<void> {
+  const candidates = [command];
+  if (process.platform === "win32" && !extname(command)) {
+    const extensions = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
+      .split(";")
+      .filter(Boolean);
+    candidates.push(...extensions.map((extension) => `${command}${extension.toLowerCase()}`));
+  }
+  for (const candidate of candidates) {
+    if (await access(candidate).then(() => true, () => false)) return;
+  }
+  throw new Error(`agent_process_spawn: executable not found: ${command}`);
+}
+
 function withAgentStderr(message: string, stderr: string): string {
   const diagnostic = stderr.trim();
   return diagnostic ? `${message}\nAgent stderr:\n${diagnostic}` : message;
 }
 
 function spawnAgent(launch: AgentReviewProviderLaunch): ChildProcessWithoutNullStreams {
-  return spawn(launch.command, launch.args, {
+  return spawnCommand(launch.command, launch.args, {
     cwd: launch.cwd,
     env: launch.env,
     stdio: ["pipe", "pipe", "pipe"]
-  });
+  }) as ChildProcessWithoutNullStreams;
 }
 
 async function waitForSpawn(process: ChildProcessWithoutNullStreams, signal: AbortSignal): Promise<void> {

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { SessionUpdate } from "@agentclientprotocol/sdk";
 import { z } from "zod";
 
@@ -447,7 +447,7 @@ function safeLocations(
     const path = isAbsolute(location.path) ? resolve(location.path) : resolve(workspaceRoot, location.path);
     const child = relative(workspaceRoot, path);
     if (child === "" || child.startsWith("..") || isAbsolute(child)) return [];
-    return [child];
+    return [child.split(sep).join("/")];
   }).slice(0, 20);
 }
 

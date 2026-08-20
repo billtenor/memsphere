@@ -307,7 +307,7 @@ export function createArtifactReviewAssignments(input: {
         status: "queued",
         provider: actor.agent.provider ?? "unconfigured",
         createdAt: input.now,
-        promptVersion: "artifact-review-v1",
+        promptVersion: "artifact-review-v2",
         model: actor.agent.model
       }] : undefined
     });
