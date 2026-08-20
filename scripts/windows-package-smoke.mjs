@@ -15,7 +15,9 @@ await Promise.all(
 );
 await writeFile(resolve(project, "procedures", "windows-ci-smoke.yaml"), `!procedure
 syntax: memsphere-20260721-stable
-name: Windows CI smoke
+names:
+  - windows-ci-smoke
+  - Windows CI smoke
 goals:
   - Verify the packaged Windows CLI Run path.
 flow:

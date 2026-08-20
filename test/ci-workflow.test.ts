@@ -60,6 +60,10 @@ test("CI bounds and supersedes cross-platform browser test runs", async () => {
   assert.equal(packageJson.scripts?.["test:ci"], "node scripts/run-tests.mjs --test-concurrency=1");
   assert.match(
     windowsPackageSmoke,
+    /names:\s*\n\s*- windows-ci-smoke\n\s*- Windows CI smoke/
+  );
+  assert.match(
+    windowsPackageSmoke,
     /\["run", "start", "Windows CI smoke", "--name", "Windows packaged smoke"\]/
   );
 });
