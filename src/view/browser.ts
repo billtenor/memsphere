@@ -3271,6 +3271,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function setViewMode(mode, options = {}) {
+      state.pageLoadGeneration += 1;
       state.routeError = "";
       if (options.landing) state.routeLanding = mode === "task" ? "tasks" : mode === "memory" ? "memories" : "";
       else if (mode === "settings") state.routeLanding = "";

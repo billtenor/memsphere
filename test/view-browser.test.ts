@@ -86,6 +86,10 @@ test("stale page loads cannot release the active route application guard", () =>
   assert.match(browserHtml, /finally \{\s*if \(isCurrentPageLoad\(options\)\) state\.routeApplying = false;/);
 });
 
+test("manual view switches supersede an in-flight page load", () => {
+  assert.match(browserHtml, /async function setViewMode\(mode, options = \{\}\) \{\s*state\.pageLoadGeneration \+= 1;/);
+});
+
 test("Settings separates the global and Project configuration workspaces", () => {
   assert.match(browserHtml, /id="settings-tab"/);
   assert.match(browserHtml, /class="brand-settings"/);

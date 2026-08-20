@@ -199,6 +199,7 @@ async function openTaskPage(browser: Browser, url: string, width: number): Promi
   );
   await page.getByRole("button", { name: "Task", exact: true }).click();
   await runsLoaded;
+  await page.locator("#task-tab.active").waitFor();
   await page.locator(".task-card-main").first().click();
   await page.locator(".markdown-table-scroll").first().waitFor();
   return page;
@@ -235,14 +236,20 @@ async function assertReviewPanelCanResizeLayout(page: Page): Promise<void> {
   assert.equal(await reviewToggle.getAttribute("aria-expanded"), "false");
   const widthBeforeOpen = await content.evaluate((element) => element.getBoundingClientRect().width);
   await reviewToggle.click();
-  await page.waitForTimeout(200);
+  await page.waitForFunction(
+    (width) => document.querySelector(".content")!.getBoundingClientRect().width < width - 1,
+    widthBeforeOpen
+  );
   assert.equal(await reviewToggle.getAttribute("aria-expanded"), "true");
   assert(await page.getByRole("button", { name: "Close", exact: true }).isVisible());
   assert(await page.getByRole("button", { name: "Create Review", exact: true }).isVisible());
   const widthWhileOpen = await content.evaluate((element) => element.getBoundingClientRect().width);
   assert(widthWhileOpen < widthBeforeOpen, `expected content width to shrink: ${widthBeforeOpen} -> ${widthWhileOpen}`);
   await reviewToggle.click();
-  await page.waitForTimeout(200);
+  await page.waitForFunction(
+    (width) => Math.abs(document.querySelector(".content")!.getBoundingClientRect().width - width) <= 1,
+    widthBeforeOpen
+  );
   assert.equal(await reviewToggle.getAttribute("aria-expanded"), "false");
   const widthAfterClose = await content.evaluate((element) => element.getBoundingClientRect().width);
   assert(
@@ -250,9 +257,15 @@ async function assertReviewPanelCanResizeLayout(page: Page): Promise<void> {
     `expected content width to recover within one pixel: ${widthBeforeOpen} -> ${widthAfterClose}`
   );
   await reviewToggle.click();
-  await page.waitForTimeout(200);
+  await page.waitForFunction(
+    (width) => document.querySelector(".content")!.getBoundingClientRect().width < width - 1,
+    widthBeforeOpen
+  );
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(200);
+  await page.waitForFunction(
+    (width) => Math.abs(document.querySelector(".content")!.getBoundingClientRect().width - width) <= 1,
+    widthBeforeOpen
+  );
   assert.equal(await reviewToggle.getAttribute("aria-expanded"), "false");
   const widthAfterEscape = await content.evaluate((element) => element.getBoundingClientRect().width);
   assert(
