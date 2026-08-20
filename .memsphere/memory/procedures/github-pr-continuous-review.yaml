@@ -1,9 +1,9 @@
 !procedure
 syntax: memsphere-20260721-stable
 names:
+  - github-pr-continuous-review
   - GitHub PR 持续评审流程
   - GitHub PR 多角色循环评审流程
-  - github-pr-continuous-review
 defines:
   - 面向一个 GitHub Pull Request，在同一个 Run 中评审初始版本，并在 PR head SHA 变化后持续评审新版本，直到 PR merged 或 closed。
   - Human 与 Agent 产生的 commit 和 push 使用相同的 GitHub 原生版本事实；本流程不创建额外轮次、协作事件或共享标识。

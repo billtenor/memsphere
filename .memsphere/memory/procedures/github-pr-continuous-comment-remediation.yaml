@@ -1,9 +1,9 @@
 !procedure
 syntax: memsphere-20260721-stable
 names:
+  - github-pr-continuous-comment-remediation
   - GitHub PR 评论持续修复流程
   - GitHub PR Review Comment 循环处理流程
-  - github-pr-continuous-comment-remediation
 defines:
   - 面向一个 GitHub Pull Request，在同一个 Run 中持续发现和处理新增或更新且尚未处理的 review feedback，直到 PR merged 或 closed。
   - Human 与 Agent 提交的 review comment 和 thread reply 使用同一套判断、修复与回复规则，不按作者身份区别处理。
