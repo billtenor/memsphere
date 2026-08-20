@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -32,6 +32,8 @@ test("Embedded Projects resolve workspace Memory for CLI and canonical Memory fo
     await runGit(["add", ".memsphere"], { cwd: main });
     await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "fixture"], { cwd: main });
     await runGit(["worktree", "add", "-b", "feature", linked], { cwd: main });
+    const canonicalMain = await realpath(main);
+    const canonicalLinked = await realpath(linked);
     await writeFile(
       join(linked, memoryRelative, "concepts", "source.yaml"),
       withCurrentMemorySyntax("!concept\nnames: [source]\ndefines: [linked]\n")
@@ -55,11 +57,11 @@ test("Embedded Projects resolve workspace Memory for CLI and canonical Memory fo
     })}\n`);
 
     const linkedContext = await resolveProjectContext({ home, cwd: linked });
-    assert.equal(linkedContext.primary.memoryRoot, join(linked, memoryRelative));
+    assert.equal(linkedContext.primary.memoryRoot, join(canonicalLinked, memoryRelative));
     assert.match(await readFile(join(linkedContext.primary.memoryRoot, "concepts", "source.yaml"), "utf8"), /linked/);
 
     const canonical = await readProjectConfig("embedded", home);
-    assert.equal(canonical.memoryRoot, join(main, memoryRelative));
+    assert.equal(canonical.memoryRoot, join(canonicalMain, memoryRelative));
     assert.match(await readFile(join(canonical.memoryRoot, "concepts", "source.yaml"), "utf8"), /main/);
 
     await writeFile(join(projectRoot, "config.json"), `${JSON.stringify({
@@ -74,7 +76,7 @@ test("Embedded Projects resolve workspace Memory for CLI and canonical Memory fo
     process.env.MEMSPHERE_HOME = home;
     process.chdir(linked);
     const edit = await editEmbeddedMemories(["concepts/linked-only"]);
-    assert.equal(edit.memoryRoot, join(linked, memoryRelative));
+    assert.equal(edit.memoryRoot, join(canonicalLinked, memoryRelative));
     assert.match(await readFile(join(linked, memoryRelative, "concepts", "linked-only.yaml"), "utf8"), /linked-only/);
     await assert.rejects(readFile(join(main, memoryRelative, "concepts", "linked-only.yaml")), /ENOENT/);
     process.chdir(previous.cwd);
@@ -88,7 +90,7 @@ test("Embedded Projects resolve workspace Memory for CLI and canonical Memory fo
     );
 
     await rm(join(linked, ".memsphere"), { recursive: true, force: true });
-    assert.equal((await resolveProjectContext({ home, cwd: linked })).primary.memoryRoot, join(linked, memoryRelative));
+    assert.equal((await resolveProjectContext({ home, cwd: linked })).primary.memoryRoot, join(canonicalLinked, memoryRelative));
 
     if (process.platform !== "win32") {
       const outside = join(fixture, "outside-memory");

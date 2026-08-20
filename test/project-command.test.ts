@@ -109,7 +109,7 @@ test("Embedded Project reuses the current repository without nested Git", async 
     const config = JSON.parse(await readFile(join(registry.projects.embedded.root, "config.json"), "utf8"));
     assert.deepEqual(config.store, {
       type: "embedded",
-      repository_path: workspace,
+      repository_path: await realpath(workspace),
       memory_path: ".memsphere/memory"
     });
     await assert.rejects(readFile(join(memoryRoot, ".git")), /ENOENT/);
@@ -150,7 +150,7 @@ test("Embedded Project created from a linked worktree records the main worktree"
     const config = JSON.parse(await readFile(join(registry.projects["linked-embedded"].root, "config.json"), "utf8"));
     assert.deepEqual(config.store, {
       type: "embedded",
-      repository_path: main,
+      repository_path: await realpath(main),
       memory_path: ".memsphere/memory"
     });
   } finally {

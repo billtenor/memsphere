@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -47,7 +47,7 @@ test("linked worktrees share a Workspace key", async (t) => {
       return;
     }
     assert.equal((await resolveWorkspaceIdentity(main)).key, (await resolveWorkspaceIdentity(linked)).key);
-    assert.equal(await resolveMainWorkspacePath(linked), main);
+    assert.equal(await resolveMainWorkspacePath(linked), await realpath(main));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
