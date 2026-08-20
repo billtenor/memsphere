@@ -1,9 +1,10 @@
 ---
 id: 20260819-memory-canonical-reference
-status: active
 type: breaking-change
 created: 2026-08-19
+completed_at: 2026-08-20
 run_id: run-20260819-101856z-2dd95792
+ui_run_id: run-20260820-061819z-48a56d91
 ---
 
 # Memory canonical reference 规范化
@@ -24,12 +25,14 @@ run_id: run-20260819-101856z-2dd95792
 - 新建 Memory 文件直接使用 `<canonical-name>.yaml`，不再使用 hash fallback。
 - 更新代码、Reserved Memory、System Memory 规则、内置 Skill、文档、示例、测试与 fixtures，使仓库内容满足新约束。
 - 保持 `memsphere-20260721-stable` syntax 标识不变。
+- View 左侧栏和标题以 `names[1]` 作为人类可读展示名并回退到 `names[0]`；副标题展示 canonical reference，不展示 LocalFile path。
+- View 搜索匹配 canonical reference 和全部 names；无效 Memory 仍以 Provider locator 提供诊断。
 
 ## 后续范围
 
-- 当前 Memsphere Home 中 Managed Memory Store 的数据调整不在本轮 Git 变更范围；下一步通过 Memory ChangeSet 调整并发布。
+- Managed Memory Store 的数据调整不进入 Git diff，已通过 Memory ChangeSet 调整并发布。
 - 本轮不提供自动迁移命令、兼容解析或旧 reference 回退。
-- 仓库开发/测试规范通常要求同步当前开发 Project 的 System Memory 副本并让当前 Project `memsphere validate` 通过；用户已明确覆盖该默认范围。本轮只保证 Git 中 Reserved Memory 使用当前构建可独立校验，当前 Managed Project 的同步与通过新规则的 validate 留到下一步 ChangeSet。
+- 当前 Embedded Project、Reserved Memory 和 Managed `memorybase` Project 均已完成同步与校验。
 
 ## 交付物
 
@@ -48,13 +51,14 @@ run_id: run-20260819-101856z-2dd95792
 - `!ref`、`!call`、Concept `extends` 和 Artifact 外部 Schema 字符串引用拒绝 alias 或非法 reference，并能解析 canonical target。
 - Reserved Memory、Skill、示例和测试使用 canonical slug；manifest 安装路径保持稳定。
 - `npm run typecheck`、针对性测试、`npm test`、`npm run build` 和仓库可执行的 Reserved Memory 校验通过。
-- 本轮不修改当前 Managed Memory Store。
+- Managed `memorybase` Store 已通过 ChangeSet 发布规范化后的 Memory。
+- View 左侧栏和标题展示首选 alias，副标题展示 canonical reference；canonical route、ID 与 reference lookup 保持不变。
 
 ## 向前兼容
 
 结论：不需要向前兼容。
 
-允许破坏旧 canonical name、`kind/alias`、alias 形式的持久引用和不规范顶层 Memory。现有 Managed Memory Store 在下一步通过 Memory ChangeSet 手工调整；本轮不提供 migration、兼容层或旧数据自动修复。
+允许破坏旧 canonical name、`kind/alias`、alias 形式的持久引用、不规范顶层 Memory，以及 View 展示 canonical name/LocalFile path 的旧行为。现有 Managed Memory Store 已通过 Memory ChangeSet 手工调整；本轮不提供 migration、兼容层或旧数据自动修复。
 
 ## 采用的规则
 
@@ -112,7 +116,7 @@ run_id: run-20260819-101856z-2dd95792
 - 针对性：`memory-schema`、`memory-syntax`、`memory-serializer`、`memory-catalog`、`memory-references`、`memory-changeset`、`memory-cli`、`run-store`、`run-command`、`reserved-store`。
 - 静态与构建：`npm run typecheck`、`npm run build`。
 - 全量：`npm test`、`npm run smoke:project`。
-- Memory：构建后执行 `node dist/cli.js validate --memory-root reserved-memory`，验证 Git 中全部 Reserved Memory；当前 Managed Memory Store 明确留到下一步 ChangeSet，不用本轮新规则直接修改，也不把当前 Project 在新规则下通过 `memsphere validate` 作为本轮验收条件。
+- Memory：构建后验证当前 Embedded Project、`.memsphere/memory` 与 `reserved-memory`；Managed `memorybase` Store 通过 ChangeSet 校验与发布。
 
 ### 采用的设计、开发与测试规则
 
@@ -123,3 +127,12 @@ run_id: run-20260819-101856z-2dd95792
 ### 待决问题
 
 无。实现边界已经由用户确认。
+
+## 最终交付
+
+- 顶层 canonical name、logical reference、文件命名、CLI create/rename、Catalog、持久引用和 Run 外部依赖已统一收紧为 canonical-only。
+- Embedded 与 Reserved System Memory 已同步；`memorybase` Managed Store 已通过 ChangeSet `change-20260819-160831675z-29de9d6b` 发布，Revision 为 `419f85017302f416add079eb005935769c580f8f`。
+- View 根 Memory 左侧栏与标题展示首选 alias，副标题与 tooltip 展示 canonical reference；正常 Memory 搜索不再依赖物理 path。
+- 无 alias、canonical route、三种搜索方式、Project 切换、深链接与无效 Memory locator 诊断均有自动化回归覆盖。
+- 最终验证：三个受影响 View 测试文件 72/72、全量测试 374/374、typecheck、build、真实 Embedded Project validate、Embedded/Reserved root validate 与 `git diff --check` 全部通过。
+- UI 敏捷迭代最终实现验收由产品、研发、测试、架构全部通过；非阻塞后续建议为 locale alias 选择与重复 alias 消歧。
