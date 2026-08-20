@@ -259,7 +259,7 @@ test("switching Projects replaces an entity URL with the new Project landing pag
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await page.goto(`http://127.0.0.1:${port}/memories/concepts/demo-memory`, { waitUntil: "networkidle" });
-    await page.getByRole("heading", { name: "demo-memory", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "Demo memory", exact: true }).waitFor();
     await page.locator("#project-select").click();
     await page.getByRole("option", { name: "beta", exact: true }).click();
     await page.waitForURL(`http://127.0.0.1:${port}/memories`);

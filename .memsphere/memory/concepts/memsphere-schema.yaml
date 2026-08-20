@@ -1,8 +1,8 @@
 !concept
 syntax: memsphere-20260721-stable
 names:
-  - Schema
   - memsphere-schema
+  - Schema
 defines:
   - memsphere 中用于定义文档、数据或协作产物内容结构的 Memory。
   - 用于让协作者按共同的结构填写或验证产物，不用于表达领域术语或独立事实。
@@ -27,4 +27,4 @@ defines:
       - 全部字段完成后必须先保留完整草稿和父 Artifact 结构与契约校验结果，等待 Runner 全局阅读、直接编辑并显式提交；即使父校验失败，也不得丢弃已经通过字段级校验的结果。
       - Runner 显式提交受管草稿时必须读取文件最新内容并重新校验；只有提交成功后才能按父 Artifact 的 review 契约进入统一接纳或 Artifact Review 流程。
   - !ref
-    target: schemas/Schema Schema
+    target: schemas/memsphere-schema-schema

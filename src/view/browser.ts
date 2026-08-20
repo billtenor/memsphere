@@ -3123,7 +3123,8 @@ export const browserHtml = String.raw`<!doctype html>
       state.filtered = state.memories.filter((memory) => {
         if (state.hideSystemMemories && isSystemMemory(memory)) return false;
         if (!q) return true;
-        return [memory.kind, memory.path, errorText(memory.error), ...(memory.entity?.names || [])].join(" ").toLowerCase().includes(q);
+        const identity = memory.error ? memory.path : memory.id;
+        return [memory.kind, identity, errorText(memory.error), ...(memory.entity?.names || [])].join(" ").toLowerCase().includes(q);
       });
       updateMemoryCount();
     }
@@ -3142,8 +3143,8 @@ export const browserHtml = String.raw`<!doctype html>
         for (const memory of group) {
           const button = document.createElement("button");
           button.className = "memory-button" + (memory.id === state.selectedId ? " active" : "");
-          button.textContent = memory.error ? invalidMemoryName(memory) : primaryName(memory.entity);
-          button.title = memory.error ? errorText(memory.error) : primaryName(memory.entity);
+          button.textContent = memory.error ? invalidMemoryName(memory) : memoryDisplayName(memory.entity);
+          button.title = memory.error ? errorText(memory.error) : memory.id;
           button.addEventListener("click", () => {
             state.routeError = "";
             state.routeLanding = "";
@@ -4051,8 +4052,8 @@ export const browserHtml = String.raw`<!doctype html>
         return;
       }
       if (!currentReviewSnapshot("memory")) state.selectedId = memory.id;
-      el.title.textContent = primaryName(memory.entity);
-      el.subtitle.textContent = memory.path;
+      el.title.textContent = memoryDisplayName(memory.entity);
+      el.subtitle.textContent = memory.id;
       el.detail.className = "";
       el.detail.innerHTML = "";
       state.renderLine = 0;
@@ -4072,6 +4073,11 @@ export const browserHtml = String.raw`<!doctype html>
 
     function primaryName(entity) {
       return entity && Array.isArray(entity.names) && entity.names.length ? entity.names[0] : "(unnamed)";
+    }
+
+    function memoryDisplayName(entity) {
+      if (!entity || !Array.isArray(entity.names)) return "(unnamed)";
+      return entity.names[1] || entity.names[0] || "(unnamed)";
     }
 
     function displayName(entity, fallback) {

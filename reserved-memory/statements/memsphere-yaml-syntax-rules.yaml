@@ -40,6 +40,7 @@ sections:
             !statement
             syntax: memsphere-20260721-stable
             names:
+              - release-rules
               - 发布规则
             asserts:
               - 发布前必须通过校验。
@@ -133,6 +134,7 @@ sections:
                 !procedure
                 syntax: memsphere-20260721-stable
                 names:
+                  - example-procedure
                   - 示例流程
                 flow:
                   - !action
@@ -173,7 +175,7 @@ sections:
             ```yaml
             !schema
             syntax: memsphere-20260721-stable
-            name: 发布记录
+            name: release-record
             type: object
             ```
         asserts:
@@ -363,6 +365,7 @@ sections:
             ```yaml
             !schema
             names:
+              - is-approved
               - 是否通过
             type: boolean
             ```
@@ -733,16 +736,17 @@ sections:
             ```yaml
             !concept
             names:
+              - work-item
               - 工作项
               - Work item
             defines:
               - 需要被跟踪、执行或验收的工作对象。
             extends:
-              - 可追踪对象
+              - traceable-object
             ```
         asserts:
           - "!concept 根节点允许 name/names、defines 和 extends 字段。"
-          - extends 如出现，必须是字符串数组，用于列出当前 Concept 的上位概念。
+          - extends 如出现，必须是字符串数组，用于列出当前 Concept 上位概念的 canonical name。
           - Concept 用于定义稳定词汇或领域抽象；独立规则和内容结构应分别写入 Statement 和 Schema。
 
       - !statement
@@ -754,6 +758,7 @@ sections:
             ```yaml
             !statement
             names:
+              - release-rules
               - 发布规则
             asserts:
               - 发布前必须通过验收。
@@ -783,6 +788,7 @@ sections:
             ```yaml
             !schema
             names:
+              - release-record
               - 发布记录
             type: object
             format:
@@ -813,6 +819,7 @@ sections:
                 ```yaml
                 !schema
                 names:
+                  - requirement-document
                   - 需求文档
                 fields:
                   - 标题
@@ -834,6 +841,7 @@ sections:
                 ```yaml
                 !schema
                 names:
+                  - requirement-document
                   - 需求文档
                 type: object
                 format:
@@ -895,6 +903,7 @@ sections:
                 ```yaml
                 !schema
                 names:
+                  - iteration-record
                   - 迭代记录
                 type: object
                 format:
@@ -959,6 +968,7 @@ sections:
             ```yaml
             !procedure
             names:
+              - document-delivery-process
               - 文档交付流程
             goals:
               - 交付一份经过验收的文档。

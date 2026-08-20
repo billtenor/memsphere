@@ -44,6 +44,16 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     "names: [ user-note, User note ]",
     "defines: [ A user memory fixture. ]"
   ].join("\n"));
+  await writeFile(join(memoryRoot, "concepts", "canonical-only.yaml"), [
+    "!concept",
+    `syntax: ${currentMemorySyntax}`,
+    "names: [ canonical-only ]",
+    "defines: [ A canonical-only memory fixture. ]"
+  ].join("\n"));
+  await writeFile(join(memoryRoot, "concepts", "broken-memory.yaml"), [
+    "!concept",
+    "names: ["
+  ].join("\n"));
   await writeFile(join(memoryRoot, "procedures", "reviewable-procedure.yaml"), [
     "!procedure",
     `syntax: ${currentMemorySyntax}`,
@@ -189,7 +199,7 @@ async function openMemoryPage(browser: Browser, url: string, width: number): Pro
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   await page.goto(url);
   await page.getByRole("button", { name: "Memory", exact: true }).click();
-  await page.getByRole("button", { name: "reviewable-schema", exact: true }).click();
+  await page.getByRole("button", { name: "Reviewable schema", exact: true }).click();
   return page;
 }
 
@@ -309,7 +319,7 @@ test("a newly added memory comment is current until its source text changes", as
     try {
       await page.goto(url);
       await page.getByRole("button", { name: "Memory", exact: true }).click();
-      await page.getByRole("button", { name: "reviewable-schema", exact: true }).click();
+      await page.getByRole("button", { name: "Reviewable schema", exact: true }).click();
       const fieldHeader = page.locator(".section-header").filter({ hasText: "Background" }).first();
       const title = fieldHeader.locator(".node-title");
       assert.equal(await fieldHeader.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length), 3);
@@ -341,14 +351,49 @@ test("Memory nav only shows the Project Catalog and can hide installed system me
       await page.getByRole("button", { name: "Memory", exact: true }).click();
       const hideSystem = page.getByLabel("隐藏系统记忆");
       assert.equal(await hideSystem.isChecked(), true);
-      await page.locator(".memory-button", { hasText: "user-note" }).waitFor();
-      assert.equal(await page.locator(".memory-button", { hasText: "memsphere-memory" }).count(), 0);
+      await page.locator(".memory-button", { hasText: "User note" }).waitFor();
+      const systemMemoryButton = page.locator(".memory-button").filter({ hasText: /^Memory$/ });
+      assert.equal(await systemMemoryButton.count(), 0);
       assert.equal(await page.locator(".memory-button", { hasText: "reserved-tip" }).count(), 0);
       await hideSystem.uncheck();
-      await page.locator(".memory-button", { hasText: "memsphere-memory" }).waitFor();
+      await systemMemoryButton.waitFor();
       await hideSystem.check();
-      assert.equal(await page.locator(".memory-button", { hasText: "memsphere-memory" }).count(), 0);
+      assert.equal(await systemMemoryButton.count(), 0);
       assert.equal(await page.locator(".memory-button", { hasText: "reserved-tip" }).count(), 0);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+test("Memory navigation uses aliases while the detail header exposes the canonical reference", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+    try {
+      await page.goto(url);
+      await page.getByRole("button", { name: "Memory", exact: true }).click();
+      await page.getByRole("button", { name: "User note", exact: true }).click();
+      assert.equal(await page.locator("#title").textContent(), "User note");
+      assert.equal(await page.locator("#subtitle").textContent(), "concepts/user-note");
+      assert.equal(new URL(page.url()).pathname, "/memories/concepts/user-note");
+
+      await page.getByPlaceholder("Search memories").fill("concepts/user-note");
+      await page.getByRole("button", { name: "User note", exact: true }).waitFor();
+      await page.getByPlaceholder("Search memories").fill("user-note");
+      await page.getByRole("button", { name: "User note", exact: true }).waitFor();
+      await page.getByPlaceholder("Search memories").fill("User note");
+      await page.getByRole("button", { name: "User note", exact: true }).waitFor();
+
+      await page.getByPlaceholder("Search memories").fill("canonical-only");
+      await page.getByRole("button", { name: "canonical-only", exact: true }).click();
+      assert.equal(await page.locator("#title").textContent(), "canonical-only");
+      assert.equal(await page.locator("#subtitle").textContent(), "concepts/canonical-only");
+
+      await page.getByPlaceholder("Search memories").fill("concepts/broken-memory.yaml");
+      await page.getByRole("button", { name: "broken-memory", exact: true }).click();
+      assert.equal(await page.locator("#title").textContent(), "broken-memory");
+      assert.equal(await page.locator("#subtitle").textContent(), "concepts / concepts/broken-memory.yaml");
+      assert.match(await page.locator("#detail").textContent() ?? "", /Invalid memory YAML/);
     } finally {
       await page.close();
     }
@@ -379,7 +424,7 @@ test("procedure action contract fields can receive review comments", async () =>
     try {
       await page.goto(url);
       await page.getByRole("button", { name: "Memory", exact: true }).click();
-      await page.getByRole("button", { name: "reviewable-procedure", exact: true }).click();
+      await page.getByRole("button", { name: "Reviewable procedure", exact: true }).click();
       await page.getByRole("button", { name: "Review", exact: true }).click();
       await page.getByRole("button", { name: "Create Review", exact: true }).click();
       await page.waitForFunction(() => document.body.classList.contains("review-active"));
@@ -428,12 +473,12 @@ test("View deep links restore Memory, Task, Memory Review, and browser history",
     page.setDefaultTimeout(5_000);
     try {
       await page.goto(`${url}/memories/concepts/memsphere-memory`);
-      await page.getByRole("heading", { name: "memsphere-memory", exact: true }).waitFor();
+      await page.getByRole("heading", { name: "Memory", exact: true }).waitFor();
       assert.match(await page.locator("#detail").textContent() ?? "", /A system memory fixture/);
       assert.equal(new URL(page.url()).pathname, "/memories/concepts/memsphere-memory");
 
       await page.goto(`${url}/memories/schemas/reviewable-schema`);
-      await page.getByRole("heading", { name: "reviewable-schema", exact: true }).waitFor();
+      await page.getByRole("heading", { name: "Reviewable schema", exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, "/memories/schemas/reviewable-schema");
 
       await page.getByRole("button", { name: "Review", exact: true }).click();
