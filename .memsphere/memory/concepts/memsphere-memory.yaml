@@ -6,6 +6,7 @@ names:
 defines:
   - memsphere 中为了跨越单次对话或运行而被有意沉淀，并可供 agent 重复理解、引用或执行的语义实体。
   - Memory 是各种具体记忆类型的抽象上位概念。
+  - Memory 的物理路径由 Project 的 Store Provider 解析；Embedded Project 的规范路径位于 repository_path 指向的主工作树，CLI 的有效路径可以位于同一仓库的当前 linked worktree，但物理路径差异不改变 Memory 的逻辑身份。
   - Concept、Statement、Procedure 和 Schema 是 memsphere 当前提供的四种具体 Memory 类型。
   - 一段信息只有在被有意沉淀以供后续复用时，才成为 Memory；单次任务产物、临时对话或运行状态不会因此自动成为 Memory。
   - memsphere 使用带 YAML tag 的 mapping 描述 Memory；根节点 tag 表示具体 Memory 类型，names 的首项是规范名称，其余项是别名，defines 中的全部成员共同定义该 Memory。

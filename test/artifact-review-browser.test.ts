@@ -22,6 +22,7 @@ import { runArtifactReviewAgentWorker } from "../src/acp/review-worker.js";
 import type { AgentReviewProvider } from "../src/acp/provider.js";
 import { agentActivityPath, readAgentActivitySnapshot } from "../src/acp/activity.js";
 import { reviewConfiguration } from "./helpers/review.js";
+import { runGit } from "../src/git.js";
 
 const browserTestDirectory = dirname(fileURLToPath(import.meta.url));
 const browserFakeReviewer = join(browserTestDirectory, "fixtures", "fake-acp-reviewer.mjs");
@@ -715,6 +716,7 @@ test("Agent Activity expands in the participant row without disrupting Human rev
   const configPath = join(scopeRoot, "config.json");
   process.env.MEMSPHERE_HOME = home;
   await mkdir(join(memoryRoot, "procedures"), { recursive: true });
+  await runGit(["init", "-b", "master"], { cwd: scopeRoot });
   await mkdir(reviewsRoot, { recursive: true });
   await writeFile(join(memoryRoot, "procedures", "activity-review.yaml"), withCurrentMemorySyntax(`!procedure
 name: agent-activity-browser
@@ -775,7 +777,7 @@ flow:
     acp_providers: { traex: {} }
   }, null, 2)}\n`);
   await writeFile(configPath, `${JSON.stringify({
-    store: { type: "embedded", memory_path: memoryRoot },
+    store: { type: "embedded", repository_path: scopeRoot, memory_path: "memory" },
     control_plane: {
       runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
       actors: {

@@ -107,13 +107,52 @@ test("Embedded Project reuses the current repository without nested Git", async 
     await projectCreateCommand("embedded", { embedded: memoryRoot, bind: true });
     const registry = await readProjectRegistry(home);
     const config = JSON.parse(await readFile(join(registry.projects.embedded.root, "config.json"), "utf8"));
-    assert.deepEqual(config.store, { type: "embedded", memory_path: memoryRoot });
+    assert.deepEqual(config.store, {
+      type: "embedded",
+      repository_path: workspace,
+      memory_path: ".memsphere/memory"
+    });
     await assert.rejects(readFile(join(memoryRoot, ".git")), /ENOENT/);
     const other = join(fixture, "other-workspace");
     await import("node:fs/promises").then(({ mkdir }) => mkdir(other));
     await runGit(["init", "-b", "master"], { cwd: other });
     process.chdir(other);
     await assert.rejects(projectBindCommand("embedded"), /only be used by worktrees of its own Git repository/);
+  } finally {
+    process.chdir(previous.cwd);
+    if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;
+    else process.env.MEMSPHERE_HOME = previous.home;
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("Embedded Project created from a linked worktree records the main worktree", async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-linked-embedded-"));
+  const home = join(fixture, "home");
+  const main = join(fixture, "main");
+  const linked = join(fixture, "linked");
+  const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME };
+  try {
+    await import("node:fs/promises").then(({ mkdir }) => mkdir(join(main, ".memsphere", "memory"), { recursive: true }));
+    await writeFile(join(main, ".memsphere", "memory", ".gitkeep"), "");
+    await runGit(["init", "-b", "master"], { cwd: main });
+    await runGit(["add", ".memsphere"], { cwd: main });
+    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "fixture"], { cwd: main });
+    await runGit(["worktree", "add", "-b", "feature", linked], { cwd: main });
+    process.env.MEMSPHERE_HOME = home;
+    process.chdir(linked);
+
+    await projectCreateCommand("linked-embedded", {
+      embedded: join(linked, ".memsphere", "memory"),
+      bind: true
+    });
+    const registry = await readProjectRegistry(home);
+    const config = JSON.parse(await readFile(join(registry.projects["linked-embedded"].root, "config.json"), "utf8"));
+    assert.deepEqual(config.store, {
+      type: "embedded",
+      repository_path: main,
+      memory_path: ".memsphere/memory"
+    });
   } finally {
     process.chdir(previous.cwd);
     if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;

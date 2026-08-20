@@ -10,6 +10,7 @@ import { parseMemoryYaml } from "../src/memory/yaml.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
+import { runGit } from "../src/git.js";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cliPath = join(projectRoot, "src", "cli.ts");
@@ -29,6 +30,7 @@ async function withScope(fn: (scope: { root: string; nested: string; memoryRoot:
   const nested = join(root, "work", "nested");
   const previousHome = process.env.MEMSPHERE_HOME;
   try {
+    await runGit(["init", "-b", "master"], { cwd: root });
     await mkdir(nested, { recursive: true });
     await mkdir(project, { recursive: true });
     await mkdir(join(project, "reviews"), { recursive: true });
@@ -39,7 +41,9 @@ async function withScope(fn: (scope: { root: string; nested: string; memoryRoot:
       await mkdir(join(memoryRoot, kind), { recursive: true });
     }
     await writeFile(join(project, "project.json"), `${JSON.stringify({ format_version: 1, name: "test-project", created_at: new Date().toISOString() })}\n`);
-    await writeFile(join(project, "config.json"), `${JSON.stringify({ store: { type: "embedded", memory_path: memoryRoot } })}\n`);
+    await writeFile(join(project, "config.json"), `${JSON.stringify({
+      store: { type: "embedded", repository_path: root, memory_path: "memory" }
+    })}\n`);
     process.env.MEMSPHERE_HOME = home;
     const workspace = await resolveWorkspaceIdentity(nested);
     await writeFile(join(home, "registry.json"), `${JSON.stringify({
@@ -118,6 +122,25 @@ test("memory change validate checks the effective Store without expanding a spar
     else process.env.GIT_CONFIG_GLOBAL = previousGitConfig;
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("memory edit uses the current Embedded worktree without a ChangeSet", async () => {
+  await withScope(async ({ nested, memoryRoot }) => {
+    const created = await runCli(nested, ["memory", "edit", "concepts/new-memory"]);
+    assert.equal(created.code, 0, created.stderr);
+    assert.match(created.stdout, /Store: embedded/);
+    assert.match(created.stdout, /Next: memsphere validate/);
+    assert(!created.stdout.includes("ChangeSet:"));
+    assert.match(await readFile(join(memoryRoot, "concepts", "new-memory.yaml"), "utf8"), /new-memory/);
+
+    const existing = await runCli(nested, ["memory", "edit", "concepts/new-memory"]);
+    assert.equal(existing.code, 0, existing.stderr);
+    assert.match(existing.stdout, /\tupdate\t/);
+
+    const rejected = await runCli(nested, ["memory", "edit", "concepts/new-memory", "--change", "change-demo"]);
+    assert.equal(rejected.code, 1);
+    assert.match(rejected.stderr, /only available for a Managed Project/);
+  });
 });
 
 test("validate suggests syntax migration only for outdated Memory YAML", async () => {

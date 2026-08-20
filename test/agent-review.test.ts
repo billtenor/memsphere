@@ -24,6 +24,7 @@ import type { ControlPlaneActor } from "../src/control-plane/index.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 import { createViewServer } from "../src/commands/view.js";
 import { reviewConfiguration } from "./helpers/review.js";
+import { runGit } from "../src/git.js";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
 const fakeReviewer = join(testDirectory, "fixtures", "fake-acp-reviewer.mjs");
@@ -538,6 +539,7 @@ async function withAgentReviewFixture(
     const configPath = join(projectRoot, "config.json");
     process.env.MEMSPHERE_HOME = home;
     await mkdir(join(memoryRoot, "procedures"), { recursive: true });
+    await runGit(["init", "-b", "master"], { cwd: projectRoot });
     await writeFile(join(memoryRoot, "procedures", "agent-review.yaml"), withCurrentMemorySyntax(`!procedure
 name: agent-review-fixture
 asserts:
@@ -583,7 +585,7 @@ flow:
       acp_providers: { traex: {} }
     }, null, 2)}\n`);
     await writeFile(configPath, `${JSON.stringify({
-      store: { type: "embedded", memory_path: memoryRoot },
+      store: { type: "embedded", repository_path: projectRoot, memory_path: "memory" },
       control_plane: {
         runner: {
           permissions: ["artifact.read", "artifact.submit", "decision.decide"]

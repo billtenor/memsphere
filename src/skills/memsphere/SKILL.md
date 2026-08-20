@@ -76,6 +76,8 @@ memsphere memory read memsphere-schema
 
 列表同时包含 Primary 与 Mounted Project 时，使用返回的 `project_name` 和 Revision 判断来源。跨 Project 出现同名 Memory 时必须使用 `--project` 明确选择；Mounted Project 在组合上下文中严格只读。
 
+Embedded Project 的配置使用 Git 主 worktree 绝对 `repository_path` 和仓库相对 `memory_path`。View 固定读取主 worktree；普通 CLI 根据当前命令所在 worktree 重映射 Memory Root，并拒绝其他仓库。使用 `memsphere memory edit <reference>` 时，Managed Project 编辑 CLI 返回的 ChangeSet Candidate；Embedded Project 编辑 CLI 返回的当前 worktree YAML 路径，修改后执行 `memsphere validate` 并通过普通 Git 工作流集成，不执行 `memsphere memory publish`。当前分支缺少 Memory Root 时不得回退读取主 worktree。
+
 ## Memsphere 记忆语法规则
 
 memsphere 使用带 YAML tag 的 mapping 描述一份 Memory。根节点的 tag 表示 Memory 类型：

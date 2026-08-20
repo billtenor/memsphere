@@ -42,6 +42,13 @@ export const memoryChangeSetSchema = z.object({
 export type MemoryChangeSet = z.infer<typeof memoryChangeSetSchema>;
 export type MemoryChangeOperation = z.infer<typeof changeTargetSchema>["operation"];
 
+export type EmbeddedMemoryEditResult = {
+  repositoryRoot: string;
+  workspaceRoot: string;
+  memoryRoot: string;
+  targets: Array<{ reference: string; path: string; operation: "create" | "update" }>;
+};
+
 export type MemoryChangeValidationResult = {
   changeId: string;
   memoryRoot: string;
@@ -111,6 +118,41 @@ export async function editMemories(input: {
   change.updated_at = new Date().toISOString();
   await writeChange(context.primary, change);
   return { change, candidateRoot };
+}
+
+export async function editEmbeddedMemories(references: string[]): Promise<EmbeddedMemoryEditResult> {
+  if (references.length === 0) throw new Error("provide at least one Memory reference");
+  const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  if (context.primary.config.store.type !== "embedded") {
+    throw new Error("Embedded Memory editing is only available for an Embedded Project");
+  }
+  const targets = await Promise.all(references.map(async (reference) => {
+    const target = await resolveTarget(context.primary, reference, "edit");
+    if (target.operation !== "create" && target.operation !== "update") {
+      throw new Error(`unsupported Embedded Memory edit operation: ${target.operation}`);
+    }
+    return { reference: target.reference, path: target.path, operation: target.operation };
+  }));
+  const seen = new Map<string, string>();
+  for (const target of targets) {
+    const existing = seen.get(target.path);
+    if (existing && existing !== target.reference) {
+      throw new Error(`Memory path is targeted by multiple references: ${target.path}`);
+    }
+    seen.set(target.path, target.reference);
+  }
+  for (const target of targets) {
+    if (target.operation !== "create") continue;
+    const destination = join(context.primary.memoryRoot, target.path);
+    await mkdir(dirname(destination), { recursive: true });
+    await writeFile(destination, newMemoryTemplate(target.reference), "utf8");
+  }
+  return {
+    repositoryRoot: context.primary.config.store.repository_path,
+    workspaceRoot: context.workspace.path,
+    memoryRoot: context.primary.memoryRoot,
+    targets
+  };
 }
 
 export async function renameMemory(input: {

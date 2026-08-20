@@ -20,6 +20,15 @@ export async function resolveWorkspaceIdentity(cwd = process.cwd()): Promise<Wor
   }
 }
 
+export async function resolveMainWorkspacePath(cwd = process.cwd()): Promise<string> {
+  const workspace = await resolveWorkspaceIdentity(cwd);
+  if (workspace.kind !== "git") throw new Error("Git main worktree is only available inside a Git repository");
+  const output = await gitOutput(["worktree", "list", "--porcelain"], workspace.path);
+  const first = output.split(/\r?\n/).find((line) => line.startsWith("worktree "));
+  if (!first) throw new Error("Git did not report a main worktree");
+  return realpath(first.slice("worktree ".length));
+}
+
 function normalizeKey(path: string): string {
   const normalized = resolve(path);
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;

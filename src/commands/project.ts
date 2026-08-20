@@ -1,5 +1,5 @@
 import { cp, mkdir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { homePaths, resolveMemsphereHome } from "../home.js";
 import { atomicWriteJson, withFileLock } from "../persistence.js";
 import { gitOutput, runGit } from "../git.js";
@@ -8,7 +8,7 @@ import { ensureMemoryDirectories } from "../validation.js";
 import { projectPaths } from "../project/paths.js";
 import { listRegisteredProjects, pathExists, readProjectRegistry, updateProjectRegistry } from "../project/registry.js";
 import { resolveRegisteredProject } from "../project/resolver.js";
-import { resolveWorkspaceIdentity } from "../project/workspace.js";
+import { resolveMainWorkspacePath, resolveWorkspaceIdentity } from "../project/workspace.js";
 import { editMemories, publishMemoryChange } from "../memory/changeset.js";
 import { bundledReservedMemoryRoot, readBundledSystemMemories } from "../reserved/store.js";
 
@@ -179,12 +179,22 @@ export async function projectShowCommand(nameInput: string | undefined, options:
   if (!name) throw new Error("provide a Project name or bind the current Workspace");
   const project = await resolveRegisteredProject(name, registry.projects);
   const health = await projectHealth(project.memoryRoot, project.config);
-  const result = { name, root: project.paths.root, store: project.config.store, health };
+  const effective = await resolveRegisteredProject(name, registry.projects, { workspace }).catch(() => undefined);
+  const result = {
+    name,
+    root: project.paths.root,
+    store: project.config.store,
+    canonical_memory_root: project.memoryRoot,
+    ...(effective ? { effective_memory_root: effective.memoryRoot } : {}),
+    health
+  };
   if (options.output === "json") process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   else {
     console.log(`Project: ${name}`);
     console.log(`Root: ${project.paths.root}`);
     console.log(`Store: ${project.config.store.type}`);
+    console.log(`Canonical Memory Root: ${project.memoryRoot}`);
+    if (effective) console.log(`Effective Memory Root: ${effective.memoryRoot}`);
     console.log(`Health: ${health.status}${health.detail ? ` (${health.detail})` : ""}`);
   }
 }
@@ -238,7 +248,7 @@ async function assertProjectWorkspaceCompatible(
   workspace: Awaited<ReturnType<typeof resolveWorkspaceIdentity>>
 ): Promise<void> {
   if (project.config.store.type !== "embedded") return;
-  const storeWorkspace = await resolveWorkspaceIdentity(project.memoryRoot);
+  const storeWorkspace = await resolveWorkspaceIdentity(project.config.store.repository_path);
   if (workspace.kind !== "git" || storeWorkspace.kind !== "git" || workspace.key !== storeWorkspace.key) {
     throw new Error(
       `Embedded Project "${project.name}" can only be used by worktrees of its own Git repository; use a Managed Project for cross-repository sharing`
@@ -307,10 +317,16 @@ async function createEmbeddedProject(root: string, memoryPathInput: string): Pro
   const current = await resolveWorkspaceIdentity();
   if (workspace.kind !== "git" || current.kind !== "git") throw new Error("Embedded Memory must be inside the current Git repository");
   if (workspace.key !== current.key) throw new Error("Embedded Memory must use the current Git repository; use a Managed Project for cross-repository sharing");
-  const rel = relative(workspace.path, memoryPath);
+  const rel = relative(current.path, memoryPath);
   if (rel.startsWith("..") || isAbsolute(rel)) throw new Error("Embedded Memory path escapes its Git Workspace");
+  const memoryRelativePath = (rel || ".").replaceAll("\\", "/");
+  const repositoryPath = await resolveMainWorkspacePath(current.path);
+  const canonicalMemoryPath = await realpath(resolve(repositoryPath, memoryRelativePath));
+  if (canonicalMemoryPath !== repositoryPath && !canonicalMemoryPath.startsWith(`${repositoryPath}${sep}`)) {
+    throw new Error("Embedded Memory path escapes the main Git worktree through a symbolic link");
+  }
   await mkdir(root, { recursive: true });
-  return { store: { type: "embedded", memory_path: memoryPath } };
+  return { store: { type: "embedded", repository_path: repositoryPath, memory_path: memoryRelativePath } };
 }
 
 async function writeProjectMetadata(root: string, name: string, config: ProjectConfigFile): Promise<void> {

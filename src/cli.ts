@@ -159,7 +159,7 @@ memory
   .action((reference, options) => memoryReadCommand(reference, options));
 
 memory.command("edit")
-  .description("Create or extend a Managed Memory ChangeSet.")
+  .description("Edit Memory in the current Embedded worktree or create a Managed ChangeSet.")
   .argument("<references...>", "existing names or new logical references")
   .option("--change <id>", "append targets to an existing ChangeSet")
   .action(memoryEditCommand);

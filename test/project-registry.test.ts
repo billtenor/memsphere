@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { assertProjectName } from "../src/project/model.js";
 import { readProjectRegistry, updateProjectRegistry } from "../src/project/registry.js";
-import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
+import { resolveMainWorkspacePath, resolveWorkspaceIdentity } from "../src/project/workspace.js";
 
 test("project names are readable stable identifiers", () => {
   for (const name of ["memsphere", "career-memory", "team.memory_1"]) assert.equal(assertProjectName(name), name);
@@ -47,6 +47,7 @@ test("linked worktrees share a Workspace key", async (t) => {
       return;
     }
     assert.equal((await resolveWorkspaceIdentity(main)).key, (await resolveWorkspaceIdentity(linked)).key);
+    assert.equal(await resolveMainWorkspacePath(linked), main);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
