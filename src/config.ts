@@ -47,6 +47,11 @@ export async function readConfig(configPath?: string): Promise<MemsphereConfig> 
   return readProjectExecutionConfig();
 }
 
+export async function readViewConfig(configPath?: string): Promise<MemsphereConfig> {
+  if (configPath) return readConfigAt(resolve(configPath));
+  return readProjectExecutionConfig({ memoryScope: "canonical" });
+}
+
 export async function readConfigAt(configPath: string): Promise<MemsphereConfig> {
   const resolvedConfigPath = resolve(configPath);
   const projectManifestPath = join(dirname(resolvedConfigPath), "project.json");

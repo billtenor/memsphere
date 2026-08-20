@@ -22,7 +22,7 @@ import {
   type ArtifactReviewSubmittedOpinion,
   type ArtifactReviewVote
 } from "../artifact-review.js";
-import { type MemsphereConfig, readConfig, readProjectConfig } from "../config.js";
+import { type MemsphereConfig, readProjectConfig, readViewConfig } from "../config.js";
 import { homePaths, resolveMemsphereHome } from "../home.js";
 import { listRegisteredProjects } from "../project/registry.js";
 import {
@@ -156,7 +156,7 @@ export async function viewStatusCommand(): Promise<void> {
 }
 
 export async function viewServeCommand(options: ViewServeOptions): Promise<void> {
-  const config = await readConfig(options.config);
+  const config = await readViewConfig(options.config);
   const host = config.view.host;
   const port = config.view.port;
   const statePath = options.state ?? viewServiceStatePath(config);
@@ -807,7 +807,7 @@ async function handleRequest(
 
 async function readViewStartupConfig(): Promise<MemsphereConfig> {
   try {
-    return await readConfig();
+    return await readViewConfig();
   } catch (error) {
     const first = (await listRegisteredProjects(resolveMemsphereHome())).find((project) => !project.missing);
     if (!first) throw error;

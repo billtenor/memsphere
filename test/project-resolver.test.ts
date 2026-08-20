@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { readProjectConfig } from "../src/config.js";
+import { readProjectConfig, readViewConfig } from "../src/config.js";
 import { runGit } from "../src/git.js";
 import { projectConfigSchema } from "../src/project/model.js";
 import { resolveProjectContext } from "../src/project/resolver.js";
@@ -75,6 +75,9 @@ test("Embedded Projects resolve workspace Memory for CLI and canonical Memory fo
 
     process.env.MEMSPHERE_HOME = home;
     process.chdir(linked);
+    const linkedViewConfig = await readViewConfig();
+    assert.equal(linkedViewConfig.memoryRoot, join(canonicalMain, memoryRelative));
+    assert.match(await readFile(join(linkedViewConfig.memoryRoot, "concepts", "source.yaml"), "utf8"), /main/);
     const edit = await editEmbeddedMemories(["concepts/linked-only"]);
     assert.equal(edit.memoryRoot, join(canonicalLinked, memoryRelative));
     assert.match(await readFile(join(linked, memoryRelative, "concepts", "linked-only.yaml"), "utf8"), /linked-only/);
