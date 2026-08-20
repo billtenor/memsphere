@@ -2981,7 +2981,7 @@ export const browserHtml = String.raw`<!doctype html>
         localStorage.setItem(viewModeKey, state.viewMode);
         if (options.render) renderAll();
       } finally {
-        state.routeApplying = false;
+        if (isCurrentPageLoad(options)) state.routeApplying = false;
       }
       if (options.render && !state.routeError) {
         state.routeReplaceNext = true;

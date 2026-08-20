@@ -82,6 +82,10 @@ test("detail loaders ignore responses from a previous Project generation", () =>
   }
 });
 
+test("stale page loads cannot release the active route application guard", () => {
+  assert.match(browserHtml, /finally \{\s*if \(isCurrentPageLoad\(options\)\) state\.routeApplying = false;/);
+});
+
 test("Settings separates the global and Project configuration workspaces", () => {
   assert.match(browserHtml, /id="settings-tab"/);
   assert.match(browserHtml, /class="brand-settings"/);

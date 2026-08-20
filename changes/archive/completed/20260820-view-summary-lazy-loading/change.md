@@ -57,5 +57,5 @@ View 应按当前路由先加载可渲染列表的最小摘要，仅在选择实
 - Review summary sidecar 写入改为 best-effort，派生缓存失败不再让已经持久化的 canonical Review mutation 返回失败。
 - Review summary 只复用 `updatedAt` 一致的 detail cache，避免其他页面或 Agent 更新后被旧详情覆盖。
 - 归档当前 Run 后保存下一条选择并立即加载详情，不再永久停留在 summary loading 状态。
-- page load generation 贯穿异步 route application，并使新导航失效旧 Artifact Review context 请求，避免延迟 history 请求覆盖最新页面。
+- page load generation 贯穿异步 route application 和 route guard 所有权，并使新导航失效旧 Artifact Review context 请求，避免延迟 history 请求覆盖最新页面或提前释放新导航的 URL 同步保护。
 - 新增 sidecar 写失败、外部 Review 更新、归档后下一 Task 详情和快速 history 导航竞态回归；定向测试 13/13、全量测试 388 项 0 失败、typecheck、build、validate 与 diff check 均通过。
