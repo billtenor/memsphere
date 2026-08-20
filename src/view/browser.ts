@@ -760,6 +760,7 @@ export const browserHtml = String.raw`<!doctype html>
         ? "task"
         : localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
       payload: null,
+      changeId: initialBrowserRoute.changeId || "",
       memories: [],
       actorNames: {},
       filtered: [],
@@ -859,13 +860,14 @@ export const browserHtml = String.raw`<!doctype html>
           return null;
         }
       };
-      if (pathname === "/") return { page: "root", fragment };
-      if (pathname === "/memories") return { page: "memories", fragment };
+      const changeId = search.get("change") || "";
+      if (pathname === "/") return { page: "root", changeId, fragment };
+      if (pathname === "/memories") return { page: "memories", changeId, fragment };
       if (parts[0] === "memories" && parts.length === 3) {
         const kind = decoded(parts[1]);
         const name = decoded(parts[2]);
         return kind && name
-          ? { page: "memory", kind, name, fragment }
+          ? { page: "memory", kind, name, changeId, fragment }
           : { page: "invalid", mode: "memory", error: "Invalid Memory URL.", fragment };
       }
       if (pathname === "/tasks") return { page: "tasks", fragment };
@@ -1158,6 +1160,7 @@ export const browserHtml = String.raw`<!doctype html>
       state.selectedId = null;
       state.selectedTaskId = null;
       state.selectedReviewId = null;
+      state.changeId = "";
       state.reviewSnapshots.clear();
       state.settingsScopes.project = {
         data: null,
@@ -1212,11 +1215,14 @@ export const browserHtml = String.raw`<!doctype html>
     async function loadMemories() {
       el.detail.className = "empty";
       el.detail.textContent = "Loading...";
-      const response = await fetch("/api/memories");
+      const params = new URLSearchParams();
+      if (state.changeId) params.set("change", state.changeId);
+      const response = await fetch("/api/memories" + (params.toString() ? "?" + params.toString() : ""));
       if (!response.ok) throw new Error(await response.text());
       state.payload = await response.json();
       state.memories = state.payload.memories;
       state.actorNames = state.payload.actorNames || {};
+      if (state.payload.source?.mode === "changeset") state.selectedReviewId = null;
       state.byName = new Map();
       for (const memory of state.memories) {
         if (!memory.entity) continue;
@@ -2719,6 +2725,13 @@ export const browserHtml = String.raw`<!doctype html>
       state.artifactReviewModalOpen = false;
       if (el.artifactReviewModal.open) el.artifactReviewModal.close();
       try {
+        const nextChangeId = route.changeId || "";
+        if (nextChangeId !== state.changeId) {
+          state.changeId = nextChangeId;
+          state.selectedId = null;
+          state.selectedReviewId = null;
+          await loadMemories();
+        }
         if (route.page === "invalid") {
           state.viewMode = route.mode || "memory";
           state.routeError = route.error || "Page not found.";
@@ -2845,11 +2858,14 @@ export const browserHtml = String.raw`<!doctype html>
             + "/reviews/" + encodeRoutePart(review.id)
           : "/memories";
       } else {
-        if (state.routeLanding === "memories") return "/memories";
+        if (state.routeLanding === "memories") {
+          return "/memories" + (state.changeId ? "?change=" + encodeURIComponent(state.changeId) : "");
+        }
         const memory = state.memories.find(item => item.id === state.selectedId) || null;
         path = memory?.entity
           ? "/memories/" + encodeRoutePart(memory.kind) + "/" + encodeRoutePart(primaryName(memory.entity))
           : "/memories";
+        if (state.changeId) search = "?change=" + encodeURIComponent(state.changeId);
       }
       const currentBase = window.location.pathname + window.location.search;
       const nextBase = path + search;
@@ -4071,6 +4087,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function currentReviewSubject() {
       if (state.viewMode !== "memory") return null;
+      if (state.payload?.source?.mode === "changeset") return null;
       const memory = selectedMemory();
       if (!memory) return null;
       return {
@@ -4083,6 +4100,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function canComment() {
+      if (state.payload?.source?.mode === "changeset") return false;
       if (isArtifactReviewMode()) {
         const context = state.artifactReviewContext;
         return Boolean(
@@ -4101,6 +4119,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function reviewCreationDisabledReason() {
+      if (state.payload?.source?.mode === "changeset") return "Memory Review is only available for formal Memory, not a ChangeSet preview";
       const subject = currentReviewSubject();
       if (!subject) return "Select a Memory before creating a review";
       return "";
@@ -4176,6 +4195,8 @@ export const browserHtml = String.raw`<!doctype html>
       el.subtitle.textContent = memory.kind + " / " + memory.path;
       el.detail.className = "";
       el.detail.innerHTML = "";
+      const preview = renderPreviewMeta();
+      if (preview) el.detail.append(preview);
 
       const panel = document.createElement("section");
       panel.className = "error-panel";
@@ -4212,6 +4233,7 @@ export const browserHtml = String.raw`<!doctype html>
     function renderMeta(memory) {
       const meta = document.createElement("div");
       meta.className = "meta";
+      appendPreviewMeta(meta);
       meta.append(pill(memory.entity.tag || memory.kind, true));
       if (memory.entity.syntax) meta.append(pill(t("syntax") + ": " + memory.entity.syntax));
       if (memory.entity.format) meta.append(pill("format: " + memory.entity.format));
@@ -4219,6 +4241,25 @@ export const browserHtml = String.raw`<!doctype html>
       const commentCount = review ? review.comments.filter(c => c.memoryId === memory.id).length : 0;
       if (commentCount) meta.append(pill(commentCount + " review comments", false, "warn"));
       return meta;
+    }
+
+    function renderPreviewMeta() {
+      if (state.payload?.source?.mode !== "changeset") return null;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      appendPreviewMeta(meta);
+      return meta;
+    }
+
+    function appendPreviewMeta(meta) {
+      const source = state.payload?.source;
+      if (source?.mode !== "changeset") return;
+      meta.append(pill("Draft Preview", true, source.valid === false ? "warn" : ""));
+      meta.append(pill("ChangeSet: " + source.changeId));
+      if (source.storeType) meta.append(pill("Store: " + source.storeType));
+      if (source.baseRevision) meta.append(pill("Base: " + String(source.baseRevision).slice(0, 12)));
+      meta.append(pill(source.valid === false ? "Validation failed" : "Validation passed", false, source.valid === false ? "warn" : ""));
+      if (source.updatedAt) meta.append(pill("Updated: " + formatTime(source.updatedAt)));
     }
 
     function pill(text, strong = false, extra = "") {

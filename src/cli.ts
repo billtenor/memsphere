@@ -195,14 +195,14 @@ memorySync.command("publish")
   .option("--message <text>", "merge commit message")
   .action(memorySyncPublishCommand);
 
-const memoryChange = memory.command("change").description("Manage Managed Memory ChangeSet candidates.");
+const memoryChange = memory.command("change").description("Manage Memory ChangeSet candidates.");
 memoryChange.command("resume")
   .argument("<change-id>", "ChangeSet id")
   .action(memoryChangeResumeCommand);
 
 memoryChange.command("validate")
-  .description("Validate a Managed ChangeSet against its effective Memory Store.")
-  .argument("<change-id>", "ChangeSet id")
+  .description("Capture and validate the current Managed or Embedded Working Change.")
+  .argument("[change-id]", "ChangeSet id; inferred when the current Working Change is unambiguous")
   .addOption(new Option("--format <format>", "diagnostic output format").choices(["text", "json"]).default("text"))
   .action(memoryChangeValidateCommand);
 

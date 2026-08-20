@@ -47,6 +47,7 @@ import { authorizeArtifactOperation, controlPlaneConfigSchema, listPermissionDef
 import { listMemoryFiles, readMemoryFile } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
+import { withMemoryChangePreview } from "../memory/changeset.js";
 import { readBundledSystemMemories } from "../reserved/store.js";
 import {
   createReview,
@@ -105,6 +106,15 @@ type ViewServeOptions = {
 type MemoryPayload = {
   memoryRoot: string;
   actorNames: Record<string, string>;
+  source: {
+    mode: "formal" | "changeset";
+    changeId?: string;
+    storeType?: "managed" | "embedded";
+    baseRevision?: string;
+    updatedAt?: string;
+    valid?: boolean;
+    issues?: Array<{ path: string; message: string; line?: number; column?: number }>;
+  };
   memories: Array<{
     id: string;
     kind: string;
@@ -487,8 +497,17 @@ async function handleRequest(
   }
 
   if (request.method === "GET" && url.pathname === "/api/memories") {
-    const payload = await loadMemoryPayload(config);
-    sendJson(response, 200, payload);
+    const changeId = url.searchParams.get("change")?.trim();
+    try {
+      const payload = await loadMemoryPayload(config, changeId || undefined);
+      sendJson(response, 200, payload);
+    } catch (error) {
+      const missing = Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");
+      sendJson(response, missing ? 404 : 400, {
+        code: missing ? "changeset_not_found" : "changeset_unavailable",
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
     return;
   }
 
@@ -915,8 +934,32 @@ async function findMemoryFileById(memoryRoot: string, memoryId: string): Promise
   return undefined;
 }
 
-async function loadMemoryPayload(config: MemsphereConfig): Promise<MemoryPayload> {
-  const { memoryRoot } = config;
+async function loadMemoryPayload(config: MemsphereConfig, changeId?: string): Promise<MemoryPayload> {
+  if (changeId) {
+    if (!config.project?.name) throw new Error("No Project is currently selected");
+    return withMemoryChangePreview({
+      home: config.homeRoot,
+      project: config.project.name,
+      changeId,
+      use: async ({ change, memoryRoot }) => loadMemoryPayloadFromRoot(config, memoryRoot, {
+        mode: "changeset",
+        changeId: change.id,
+        storeType: change.store_type ?? "managed",
+        baseRevision: change.checkpoint?.base_revision,
+        updatedAt: change.updated_at,
+        valid: change.checkpoint?.valid,
+        issues: change.checkpoint?.issues
+      })
+    });
+  }
+  return loadMemoryPayloadFromRoot(config, config.memoryRoot, { mode: "formal" });
+}
+
+async function loadMemoryPayloadFromRoot(
+  config: MemsphereConfig,
+  memoryRoot: string,
+  source: MemoryPayload["source"]
+): Promise<MemoryPayload> {
   const memories: MemoryPayload["memories"] = [];
   const systemReferences = new Set(
     (await readBundledSystemMemories()).flatMap((memory) =>
@@ -934,7 +977,7 @@ async function loadMemoryPayload(config: MemsphereConfig): Promise<MemoryPayload
     }
   }
 
-  return { memoryRoot, actorNames, memories };
+  return { memoryRoot: config.memoryRoot, actorNames, memories, source };
 }
 
 async function loadRunPayload(config: MemsphereConfig): Promise<unknown[]> {

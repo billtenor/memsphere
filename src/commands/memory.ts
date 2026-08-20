@@ -24,6 +24,8 @@ import {
   syncMemory,
   validateMemoryChange
 } from "../memory/changeset.js";
+import { readConfig } from "../config.js";
+import { getViewServiceStatus, viewServiceUrl } from "../view/service.js";
 
 const listOutputs = ["yaml", "json", "text"] as const;
 const readOutputs = ["yaml", "json"] as const;
@@ -141,27 +143,40 @@ export async function memoryChangeResumeCommand(changeId: string): Promise<void>
 }
 
 export async function memoryChangeValidateCommand(
-  changeId: string,
+  changeId: string | undefined,
   options: { format?: string } = {}
 ): Promise<void> {
   const format = parseOutput(options.format ?? "text", ["text", "json"] as const, "memory change validate");
   const result = await validateMemoryChange(changeId);
+  const previewUrl = await memoryChangePreviewUrl(result.changeId);
   if (format === "json") {
-    process.stdout.write(`${JSON.stringify({ valid: result.issues.length === 0, ...result }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ valid: result.issues.length === 0, ...result, previewUrl }, null, 2)}\n`);
     if (result.issues.length > 0) process.exitCode = 1;
     return;
   }
   if (result.issues.length === 0) {
     console.log("ChangeSet validation passed");
-    console.log(`ChangeSet: ${result.changeId}`);
-    console.log(`memoryRoot: ${result.memoryRoot}`);
-    return;
+  } else {
+    console.error("ChangeSet validation failed");
+    for (const issue of result.issues) {
+      console.error(`- ${issue.path}${issue.line ? `:${issue.line}:${issue.column ?? 1}` : ""}: ${issue.message}`);
+    }
+    process.exitCode = 1;
   }
-  console.error("ChangeSet validation failed");
-  for (const issue of result.issues) {
-    console.error(`- ${issue.path}${issue.line ? `:${issue.line}:${issue.column ?? 1}` : ""}: ${issue.message}`);
-  }
-  process.exitCode = 1;
+  console.log(`ChangeSet: ${result.changeId}`);
+  console.log(`Store: ${result.storeType}`);
+  console.log(`Base Revision: ${result.baseRevision}`);
+  console.log(`Checkpoint: ${result.checkpointDigest}`);
+  console.log(`memoryRoot: ${result.memoryRoot}`);
+  if (previewUrl) console.log(`Preview: ${previewUrl}`);
+  else console.log("Preview: start memsphere View, then open /memories?change=" + encodeURIComponent(result.changeId));
+}
+
+async function memoryChangePreviewUrl(changeId: string): Promise<string | undefined> {
+  const config = await readConfig();
+  const status = await getViewServiceStatus(config);
+  if (!status.running || !status.state) return undefined;
+  return `${viewServiceUrl(status.state)}/memories?change=${encodeURIComponent(changeId)}`;
 }
 
 export async function memoryRecoverCommand(reference: string, options: { restore?: boolean; createChange?: boolean }): Promise<void> {

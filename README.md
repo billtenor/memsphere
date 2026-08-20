@@ -32,16 +32,24 @@ memsphere project show
 memsphere validate
 ```
 
-Managed Project 中修改 Memory 时，先创建 ChangeSet，再校验 ChangeSet 应用到正式 Store 后的完整结果，最后发布：
+Managed Project 中修改 Memory 时，先创建 ChangeSet，再校验 ChangeSet 应用到正式 Store 后的完整结果，确认 View 预览后发布：
 
 ```bash
 memsphere memory edit concepts/Example
 # 编辑命令输出的 Candidate Root 中的 YAML
-memsphere memory change validate <change-id>
+memsphere memory change validate [change-id]
 memsphere memory publish --change <change-id>
 ```
 
-ChangeSet candidate 是只包含目标文件的稀疏目录，不应直接传给 `memsphere validate --memory-root`；该参数仍用于校验包含四类目录的完整 Memory Store。
+Embedded Project 直接修改当前 Git worktree 中的 Memory，然后执行同一个校验命令；它会依据当前 `HEAD` 捕获 Memory 差异，不会创建完整快照，也不会提交 Git：
+
+```bash
+memsphere memory change validate
+```
+
+两种 Project 都会在 Project 目录保存稀疏、内容寻址的校验 checkpoint。命令会输出 ChangeSet id 和 View 预览地址（或启动 View 后应打开的路径）；预览 URL 为 `/memories?change=<change-id>`，不改变 View 默认展示的正式版本。重复校验同一候选或同一 Embedded worktree/HEAD 会更新并复用当前 ChangeSet。普通 `memsphere validate` 只校验正式 Store，不创建 Embedded ChangeSet。
+
+ChangeSet candidate 和 checkpoint 都只包含目标文件，不应直接传给 `memsphere validate --memory-root`；该参数仍用于校验包含四类目录的完整 Memory Store。Managed 最终发布仍使用 `memsphere memory publish`；Embedded 最终发布仍使用普通 Git commit。
 
 新建一个 Agent 会话，然后告诉 Agent：
 
