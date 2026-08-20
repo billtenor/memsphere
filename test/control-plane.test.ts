@@ -95,6 +95,12 @@ test("control plane config parses Runner and Actors strictly", () => {
   for (const name of [
     "PATH",
     "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "COMSPEC",
+    "SystemRoot",
+    "PATHEXT",
     "XDG_CONFIG_HOME",
     "CODEX_HOME",
     "INITIAL_AGENT_MODE",

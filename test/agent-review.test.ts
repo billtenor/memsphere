@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import crossSpawn from "cross-spawn";
 import { once } from "node:events";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -25,10 +25,12 @@ import { withCurrentMemorySyntax } from "./helpers/memory.js";
 import { createViewServer } from "../src/commands/view.js";
 import { reviewConfiguration } from "./helpers/review.js";
 import { runGit } from "../src/git.js";
+import { assertWindowsPrerequisites } from "../src/windows-prerequisites.js";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
 const fakeReviewer = join(testDirectory, "fixtures", "fake-acp-reviewer.mjs");
 const fakeCli = join(testDirectory, "fixtures", "fake-review-cli.mjs");
+const fakeArgsCli = join(testDirectory, "fixtures", "fake-args-cli.mjs");
 
 test("ACP Agent Reviewer completes its bound Assignment through the Session CLI", async () => {
   await withAgentReviewFixture("approve", async ({ configPath, runsRoot, runId }) => {
@@ -222,7 +224,7 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     const directory = generated[0].directory;
     assert.equal(directory, join(debugRoot, "agent-review", review.id, round.id, artifactReviewAssignmentId(assignment)));
     const launch = JSON.parse(await readFile(join(directory, "launch.json"), "utf8")) as Record<string, unknown>;
-    const prompt = await readFile(join(directory, "prompt.md"), "utf8");
+    const prompt = normalizeNewlines(await readFile(join(directory, "prompt.md"), "utf8"));
     assert.equal(launch.processStarted, false);
     assert.equal(launch.actorId, "reviewer-agent");
     assert.equal(launch.provider, "traex");
@@ -240,12 +242,13 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     assert.match(prompt, /- Name: reviewed result/);
     assert.match(prompt, /- Schema: Inline; type object; format json; 1 top-level field/);
     assert.doesNotMatch(prompt, /## Artifact\n```json/);
-    assert.match(prompt, /run artifact show --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID"/);
-    assert.match(prompt, /run artifact show --run "\$MEMSPHERE_REVIEW_RUN_ID" --step "<step-ref>"/);
-    assert.match(prompt, /run artifact contract show --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID"/);
-    assert.match(prompt, /run review assignment show --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID"/);
+    assert.match(prompt, /memsphere-review run artifact show --output json/);
+    assert.match(prompt, /memsphere-review run artifact show --step "<step-ref>"/);
+    assert.match(prompt, /memsphere-review run artifact contract show --output json/);
+    assert.match(prompt, /memsphere-review run review assignment show --output json/);
     assert.match(prompt, /Comment bodies use Markdown/);
-    assert.match(prompt, /run review comment --assignment "\$MEMSPHERE_REVIEW_ASSIGNMENT_ID" --severity <blocking\|risk\|suggestion> --body-stdin --output json <<'MEMSPHERE_COMMENT'/);
+    assert.match(prompt, /memsphere-review run review comment --severity <blocking\|risk\|suggestion> --body-file <path>/);
+    assert.doesNotMatch(prompt, /MEMSPHERE_CLI|MEMSPHERE_REVIEW_|MEMSPHERE_COMMENT/);
     assert.match(prompt, /Do not encode line breaks as literal `\\n` sequences/);
     assert.match(prompt, /## Earlier Artifacts\n- flow\[1\]: prior context/);
     assert.match(prompt, /Inspect prior Run Artifacts when relevant/);
@@ -258,7 +261,7 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     assert.match(prompt, /After completing the coverage pass, submit one vote and summary/);
     assert.match(prompt, /Do not invent findings/);
     assert.doesNotMatch(JSON.stringify(launch), /MEMSPHERE_REVIEW_ENDPOINT|MEMSPHERE_REVIEW_CAPABILITY|bridge\.sock/);
-    assert.match(prompt, /run step show --run "\$MEMSPHERE_REVIEW_RUN_ID" --step "<step-ref>"/);
+    assert.match(prompt, /memsphere-review run step show --step "<step-ref>"/);
     assert.doesNotMatch(prompt, /Identity:|Binding:|Decision policy:|Candidate Artifact and contract|Required workflow/);
     assert.doesNotMatch(prompt, /reviewer-agent|round-|assignment-/);
     await assert.rejects(
@@ -274,32 +277,114 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
 test("Agent Review CLI launcher rejects commands outside the Session allowlist", async () => {
   const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: fakeCli });
   try {
-    const denied = spawnSync(runtime.launcherPath, ["run", "report", "--run", "other"], {
+    const denied = crossSpawn.sync(runtime.launcherPath, ["run", "report", "--run", "other"], {
       encoding: "utf8",
       env: process.env
     });
     assert.equal(denied.status, 2);
     assert.match(denied.stderr, /not allowed/);
 
-    const wrongRun = spawnSync(runtime.launcherPath, ["run", "show", "--run", "other"], {
+    const wrongRun = crossSpawn.sync(runtime.launcherPath, ["run", "show", "--run", "other"], {
       encoding: "utf8",
       env: { ...process.env, MEMSPHERE_REVIEW_RUN_ID: "bound-run" }
     });
     assert.equal(wrongRun.status, 2);
 
-    const wrongStepRun = spawnSync(runtime.launcherPath, ["run", "step", "show", "--run", "other", "--step", "flow[1]"], {
+    const wrongStepRun = crossSpawn.sync(runtime.launcherPath, ["run", "step", "show", "--run", "other", "--step", "flow[1]"], {
       encoding: "utf8",
       env: { ...process.env, MEMSPHERE_REVIEW_RUN_ID: "bound-run" }
     });
     assert.equal(wrongStepRun.status, 2);
 
-    const wrongAssignment = spawnSync(runtime.launcherPath, [
+    const wrongAssignment = crossSpawn.sync(runtime.launcherPath, [
       "run", "review", "assignment", "show", "--assignment", "other"
     ], {
       encoding: "utf8",
       env: { ...process.env, MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment" }
     });
     assert.equal(wrongAssignment.status, 2);
+
+    const wrongContractAssignment = crossSpawn.sync(runtime.launcherPath, [
+      "run", "artifact", "contract", "show", "--assignment", "other"
+    ], {
+      encoding: "utf8",
+      env: { ...process.env, MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment" }
+    });
+    assert.equal(wrongContractAssignment.status, 2);
+
+    const unboundEnv = { ...process.env };
+    delete unboundEnv.MEMSPHERE_REVIEW_RUN_ID;
+    delete unboundEnv.MEMSPHERE_REVIEW_ASSIGNMENT_ID;
+    const missingBinding = crossSpawn.sync(runtime.launcherPath, [
+      "run", "artifact", "show", "--output", "json"
+    ], { encoding: "utf8", env: unboundEnv });
+    assert.equal(missingBinding.status, 2);
+  } finally {
+    await runtime.cleanup();
+  }
+});
+
+test("Agent Review CLI launcher injects Session bindings without shell environment syntax", async () => {
+  const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: fakeArgsCli });
+  const env = {
+    ...process.env,
+    MEMSPHERE_REVIEW_RUN_ID: "bound-run",
+    MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment"
+  };
+  try {
+    const current = crossSpawn.sync(runtime.launcherPath, ["run", "artifact", "show", "--output", "json"], {
+      encoding: "utf8",
+      env
+    });
+    assert.equal(current.status, 0);
+    assert.deepEqual(JSON.parse(current.stdout.trim()), [
+      "run", "artifact", "show", "--output", "json", "--assignment", "bound-assignment"
+    ]);
+
+    const prior = crossSpawn.sync(runtime.launcherPath, [
+      "run", "artifact", "show", "--step", "flow[1]", "--output", "json"
+    ], { encoding: "utf8", env });
+    assert.equal(prior.status, 0);
+    assert.deepEqual(JSON.parse(prior.stdout.trim()), [
+      "run", "artifact", "show", "--step", "flow[1]", "--output", "json", "--run", "bound-run"
+    ]);
+  } finally {
+    await runtime.cleanup();
+  }
+});
+
+test("Windows PowerShell, CMD, and Git Bash execute Agent Review read, comment, and vote commands", {
+  skip: process.platform !== "win32"
+}, async () => {
+  const prerequisites = await assertWindowsPrerequisites();
+  assert(prerequisites);
+  const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: fakeArgsCli });
+  const env = {
+    ...process.env,
+    PATH: `${runtime.directory};${process.env.PATH ?? ""}`,
+    MEMSPHERE_REVIEW_RUN_ID: "bound-run",
+    MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment"
+  };
+  try {
+    const reviewCommands = [
+      "memsphere-review run artifact show --output json",
+      "memsphere-review run artifact contract show --output json",
+      "memsphere-review run review assignment show --output json",
+      "memsphere-review run review comment --severity suggestion --body shell-smoke --output json",
+      "memsphere-review run review submit --vote approve --summary shell-smoke --output json"
+    ];
+    for (const [command, prefix] of [
+      ["powershell.exe", ["-NoProfile", "-Command"]],
+      ["pwsh.exe", ["-NoProfile", "-Command"]],
+      ["cmd.exe", ["/d", "/s", "/c"]],
+      [prerequisites.gitBashPath, ["-lc"]]
+    ] as const) {
+      for (const reviewCommand of reviewCommands) {
+        const result = crossSpawn.sync(command, [...prefix, reviewCommand], { encoding: "utf8", env });
+        assert.equal(result.status, 0, `${command}: ${result.stderr || result.stdout}`);
+        assert.match(result.stdout, /bound-assignment/);
+      }
+    }
   } finally {
     await runtime.cleanup();
   }
@@ -311,6 +396,8 @@ test("Traex Provider fixes the ACP process to workspace-write non-interactive ex
   const originalNoProxyLower = process.env.no_proxy;
   process.env.NO_PROXY = "localhost,upper.example.test";
   process.env.no_proxy = "localhost,lower.example.test";
+  const originalSystemRoot = process.env.SystemRoot;
+  process.env.SystemRoot = "C:\\Windows";
   let launch;
   try {
     launch = provider.buildLaunch({
@@ -323,6 +410,8 @@ test("Traex Provider fixes the ACP process to workspace-write non-interactive ex
     else process.env.NO_PROXY = originalNoProxy;
     if (originalNoProxyLower === undefined) delete process.env.no_proxy;
     else process.env.no_proxy = originalNoProxyLower;
+    if (originalSystemRoot === undefined) delete process.env.SystemRoot;
+    else process.env.SystemRoot = originalSystemRoot;
   }
   assert.deepEqual(launch.args, [
     "--sandbox", "workspace-write",
@@ -331,8 +420,16 @@ test("Traex Provider fixes the ACP process to workspace-write non-interactive ex
     "acp", "serve"
   ]);
   assert.equal(launch.env.MEMSPHERE_CLI, "/tmp/memsphere-review");
-  assert.equal(launch.env.NO_PROXY, "localhost,upper.example.test");
-  assert.equal(launch.env.no_proxy, "localhost,lower.example.test");
+  if (process.platform === "win32") {
+    assert.equal(
+      launch.env.NO_PROXY ?? launch.env.no_proxy,
+      "localhost,lower.example.test"
+    );
+  } else {
+    assert.equal(launch.env.NO_PROXY, "localhost,upper.example.test");
+    assert.equal(launch.env.no_proxy, "localhost,lower.example.test");
+  }
+  assert.equal(launch.env.SystemRoot ?? launch.env.SYSTEMROOT, "C:\\Windows");
   assert.equal(launch.startupTimeoutMs, 60_000);
   assert.equal(launch.idleTimeoutMs, 120_000);
   assert.equal(launch.maxRuntimeMs, null);
@@ -469,7 +566,7 @@ test("ACP Client approves Provider tool requests for the Agent-managed sandbox",
 test("ACP Client separates startup, idle, and maximum runtime timeouts", async () => {
   await assert.rejects(runAgentReviewAcpSession({
     launch: fakeClientLaunch("slow-start", {
-      startupTimeoutMs: 30,
+      startupTimeoutMs: 500,
       idleTimeoutMs: 1_000,
       maxRuntimeMs: null
     }),
@@ -478,12 +575,12 @@ test("ACP Client separates startup, idle, and maximum runtime timeouts", async (
     workspaceRoot: tmpdir(),
     isSubmitted: async () => false,
     onSession: async () => undefined
-  }), /agent_startup_timeout: startup exceeded 30ms/);
+  }), /agent_startup_timeout: startup exceeded 500ms/);
 
   await assert.rejects(runAgentReviewAcpSession({
     launch: fakeClientLaunch("idle", {
       startupTimeoutMs: 1_000,
-      idleTimeoutMs: 40,
+      idleTimeoutMs: 500,
       maxRuntimeMs: null
     }),
     prompt: "Review",
@@ -491,13 +588,13 @@ test("ACP Client separates startup, idle, and maximum runtime timeouts", async (
     workspaceRoot: tmpdir(),
     isSubmitted: async () => false,
     onSession: async () => undefined
-  }), /agent_idle_timeout: no ACP activity for 40ms/);
+  }), /agent_idle_timeout: no ACP activity for 500ms/);
 
   const progressUpdates: string[] = [];
   const activeWithoutMaximum = await runAgentReviewAcpSession({
     launch: fakeClientLaunch("progress", {
       startupTimeoutMs: 1_000,
-      idleTimeoutMs: 40,
+      idleTimeoutMs: 500,
       maxRuntimeMs: null
     }),
     prompt: "Review",
@@ -514,7 +611,7 @@ test("ACP Client separates startup, idle, and maximum runtime timeouts", async (
   await assert.rejects(runAgentReviewAcpSession({
     launch: fakeClientLaunch("progress-hang", {
       startupTimeoutMs: 1_000,
-      idleTimeoutMs: 40,
+      idleTimeoutMs: 500,
       maxRuntimeMs: 100
     }),
     prompt: "Review",
@@ -610,6 +707,7 @@ flow:
     reviewer.agent.idleTimeoutMs = 10_000;
     reviewer.agent.maxRuntimeMs = null;
     const started = await startRun({
+      name: "Test run",
       memoryRoot: config.memoryRoot,
       runsRoot: config.runsRoot,
       language: config.language,
@@ -698,4 +796,8 @@ function fakeClientLaunch(
     promptVersion: "artifact-review-v1",
     ...timeouts
   };
+}
+
+function normalizeNewlines(value: string): string {
+  return value.replace(/\r\n/g, "\n");
 }

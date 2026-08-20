@@ -25,11 +25,11 @@ function parseStatement(source: string) {
 
 test("name is a canonical single-value shorthand for names", () => {
   const concept = conceptMemorySchema.parse(parseMemoryYaml(withCurrentMemorySyntax(`!concept
-name: Work item
+name: work-item
 defines: [A unit of work.]
 `)));
   const statement = parseStatement(`!statement
-name: Rules
+name: rules
 asserts: [A rule holds.]
 sections:
   - !statement
@@ -37,24 +37,61 @@ sections:
     asserts: [A nested rule holds.]
 `);
   const schema = parseSchema(`!schema
-name: Record
+name: record
 fields:
   - !schema
     name: title
 `);
   const procedure = parseProcedure(`!procedure
-name: Workflow
+name: workflow
 `);
 
-  assert.deepEqual(concept.names, ["Work item"]);
+  assert.deepEqual(concept.names, ["work-item"]);
   assert.deepEqual(statement.sections?.[0].names, ["Nested rule"]);
   assert.deepEqual(schema.fields?.[0].names, ["title"]);
-  assert.deepEqual(procedure.names, ["Workflow"]);
+  assert.deepEqual(procedure.names, ["workflow"]);
   assert.throws(() => parseSchema(`!schema
-name: Record
-names: [Record]
+name: record
+names: [record]
 fields: []
 `), /name/);
+});
+
+test("top-level canonical names are strict while aliases and nested names stay descriptive", () => {
+  const valid = conceptMemorySchema.parse(parseMemoryYaml(withCurrentMemorySyntax(`!concept
+names: [memorybase-review-rules, "MemoryBase 评审规则", "review rules"]
+defines:
+  - !statement
+    names: ["嵌套说明 / 可读名称"]
+    asserts: [Nested names remain descriptive.]
+`)));
+  assert.deepEqual(valid.names, ["memorybase-review-rules", "MemoryBase 评审规则", "review rules"]);
+
+  for (const invalid of [
+    "Uppercase",
+    "contains space",
+    "中文",
+    "under_score",
+    "has.dot",
+    "-leading",
+    "trailing-",
+    "repeated--hyphen",
+    `a${"b".repeat(120)}`
+  ]) {
+    assert.equal(conceptMemorySchema.safeParse(parseMemoryYaml(withCurrentMemorySyntax(`!concept
+names: [${JSON.stringify(invalid)}]
+defines: [invalid]
+`))).success, false, invalid);
+  }
+
+  for (const invalidAlias of [" leading", "trailing ", "has/slash", "line\nbreak"]) {
+    assert.equal(conceptMemorySchema.safeParse({
+      tag: "!concept",
+      syntax: valid.syntax,
+      names: ["valid-name", invalidAlias],
+      defines: ["invalid alias"]
+    }).success, false, JSON.stringify(invalidAlias));
+  }
 });
 
 test("defines accepts text, Memory refs, anonymous Statement, and anonymous Schema", () => {
@@ -63,7 +100,7 @@ names: [example]
 defines:
   - Text definition.
   - !ref
-    target: statements/External rule
+    target: statements/external-rule
   - !statement
     asserts:
       - A rule must hold.
@@ -87,7 +124,7 @@ fields:
     names: [nested]
 `);
 
-  assert.deepEqual(entity.defines[1], { tag: "!ref", target: "statements/External rule" });
+  assert.deepEqual(entity.defines[1], { tag: "!ref", target: "statements/external-rule" });
   const embeddedStatement = entity.defines[2];
   assert.equal(typeof embeddedStatement === "string" ? undefined : embeddedStatement.tag, "!statement");
   if (typeof embeddedStatement !== "string" && embeddedStatement.tag === "!statement") {
@@ -102,7 +139,7 @@ names: [example]
 defines:
   - !ref
     target: External rule
-`), /logical reference/);
+`), /lowercase-kebab-case-canonical-name/);
 });
 
 test("Statement supports independent assertion and suggestion collections", () => {
@@ -148,7 +185,7 @@ unknown: value
 
 test("Schema supports independent assertion and suggestion collections", () => {
   const schema = parseSchema(`!schema
-name: Delivery
+name: delivery
 asserts:
   - Every required field must be present.
 suggests:
@@ -170,18 +207,18 @@ fields:
   assert.deepEqual(summary.suggests, ["Keep the summary to one sentence."]);
 
   assert.throws(() => parseSchema(`!schema
-name: Invalid
+name: invalid
 suggests: [1]
 `), /suggests/);
   assert.throws(() => parseSchema(`!schema
-name: Invalid
+name: invalid
 suggests: []
 `), /suggests/);
 });
 
 test("Statement sections organize recursive and mixed rule nodes", () => {
   const entity = parseStatement(`!statement
-names: [Repository rules]
+names: [repository-rules]
 asserts: [All changes must be reviewed.]
 sections:
   - !statement
@@ -207,7 +244,7 @@ sections:
   assert.deepEqual(entity.sections?.[1].suggests, ["Prefer focused tests."]);
 
   const categoriesOnly = parseStatement(`!statement
-names: [Repository rules]
+names: [repository-rules]
 sections:
   - !statement
     names: [Testing]
@@ -222,22 +259,22 @@ test("Statement sections reject empty, unnamed, and duplicate nodes with precise
 names: [empty]
 `), /Statement must define asserts, suggests, or sections/);
   assert.throws(() => parseStatement(`!statement
-names: [empty sections]
+names: [empty-sections]
 sections: []
 `), /sections/);
   assert.throws(() => parseStatement(`!statement
-names: [untagged section]
+names: [untagged-section]
 sections:
   - names: [Testing]
     asserts: [A rule.]
 `), /tag/);
   assert.throws(() => parseStatement(`!statement
-names: [invalid section]
+names: [invalid-section]
 sections: [Testing]
 `), /sections/);
 
   const unnamed = statementMemorySchema.safeParse(parseMemoryYaml(withCurrentMemorySyntax(`!statement
-names: [Repository rules]
+names: [repository-rules]
 sections:
   - !statement
     asserts: [A rule.]
@@ -251,7 +288,7 @@ sections:
   }
 
   const duplicate = statementMemorySchema.safeParse(parseMemoryYaml(withCurrentMemorySyntax(`!statement
-names: [Repository rules]
+names: [repository-rules]
 sections:
   - !statement
     names: [Testing]
@@ -667,7 +704,7 @@ fields: [value]
   });
 
   const emptyObject = parseSchema(`!schema
-names: [empty object]
+names: [empty-object]
 fields: []
 `);
   assert.equal(inferSchemaType(emptyObject), "object");
@@ -683,7 +720,7 @@ fields: []
 
 test("Schema outline fields support mapping Repeat groups and limits", () => {
   const entity = parseSchema(`!schema
-names: [decision record]
+names: [decision-record]
 fields:
   - context
   - !repeat
@@ -723,7 +760,7 @@ test("Schema Repeat rejects invalid shape, limits, and nesting", () => {
   }
 
   assert.throws(() => parseSchema(`!schema
-names: [sequence repeat]
+names: [sequence-repeat]
 fields:
   - !repeat [value]
 `));

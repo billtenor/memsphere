@@ -1,8 +1,8 @@
 !statement
 syntax: memsphere-20260721-stable
 names:
-  - Memsphere YAML 语法规则
   - memsphere-yaml-syntax-rules
+  - Memsphere YAML 语法规则
 defines:
   - 定义 memsphere Memory YAML DSL 的节点、字段、缺省值、组合约束和树状关系，作为语法设计与实现的一致性基线。
   - 本记忆描述当前稳定版本 memsphere-20260721-stable 支持的 Memsphere YAML 语法。
@@ -40,6 +40,7 @@ sections:
             !statement
             syntax: memsphere-20260721-stable
             names:
+              - release-rules
               - 发布规则
             asserts:
               - 发布前必须通过校验。
@@ -73,7 +74,7 @@ sections:
                   format:
                     name: markdown
                     layout: outline
-                  schema: 需求文档
+                  schema: requirement-document
                 ```
             asserts:
               - 带 Memsphere YAML tag 的 YAML mapping 表示一个区块，tag 决定区块类型及其允许出现的关键字。
@@ -133,6 +134,7 @@ sections:
                 !procedure
                 syntax: memsphere-20260721-stable
                 names:
+                  - example-procedure
                   - 示例流程
                 flow:
                   - !action
@@ -173,7 +175,7 @@ sections:
             ```yaml
             !schema
             syntax: memsphere-20260721-stable
-            name: 发布记录
+            name: release-record
             type: object
             ```
         asserts:
@@ -190,12 +192,14 @@ sections:
             第一项是规范名称，后续项是别名：
             ```yaml
             names:
+              - requirement-document
               - 需求文档
-              - Requirement document
             ```
         asserts:
           - names 的值必须是非空字符串数组，第一项是规范名称，其余项是别名。
           - names 中不得包含空字符串，规范名称与别名不得重复。
+          - 顶层 Memory 的规范名称必须是 1–120 字符的小写 ASCII kebab-case；顶层别名可以使用 Unicode 和内部空格，但不得包含首尾空白、控制字符或 `/`。
+          - 嵌套 Statement、Schema field 等节点的名称用于自然语言结构，不适用顶层 canonical name 和 alias 字符约束。
         sections:
           - !statement
             names:
@@ -217,6 +221,8 @@ sections:
               - name 必须是非空字符串。
               - "在支持 names 的节点中，name 与 names 必须互斥，name 的解析结果等价于 names: [name]。"
               - name 简写只能声明规范名称，不能同时声明别名；需要别名时必须使用 names。
+              - 顶层 Memory 使用 name 简写时，该值同样必须满足 canonical name 规则；嵌套节点的 name 不受此规则限制。
+              - Memory YAML 中的 name 只命名当前 Memory 或结构节点；run start 的 --name 命名单次 Run，属于运行时参数，不是 Memory YAML 关键字。
 
       - !statement
         names:
@@ -246,11 +252,11 @@ sections:
             ```yaml
             defines:
               - !ref
-                target: schemas/Concept Schema
+                target: schemas/memsphere-concept-schema
             ```
         asserts:
           - "!ref 只能使用 mapping 形式，且必须声明非空 target。"
-          - target 必须是 Memory 逻辑引用，形如 concepts/名称、statements/名称 或 schemas/名称；不得只写普通名称。
+          - target 必须是 canonical Memory 逻辑引用，形如 concepts/canonical-name、statements/canonical-name 或 schemas/canonical-name；不得写普通名称或 alias。
           - defines 中的 !ref 可以指向 Concept、Statement 或 Schema；Schema fields、item、items 和 Artifact.schema 中的 !ref 只能指向 Schema。
           - validate 必须拒绝不存在、目标类型不允许和形成循环依赖的 !ref。
           - memory read 与 View 必须展示 !ref 及其 target，但默认不得递归内联目标内容。
@@ -316,11 +322,11 @@ sections:
             `extends` 使用 YAML sequence 引用上位对象：
             ```yaml
             extends:
-              - 可追踪对象
-              - 可审计对象
+              - traceable-object
+              - auditable-object
             ```
         asserts:
-          - extends 如出现必须是字符串数组，每一项都是非空的可解析名称或引用。
+          - extends 如出现必须是字符串数组，每一项都必须是可解析 Concept 的 canonical name。
 
       - !statement
         names:
@@ -342,7 +348,7 @@ sections:
           - 每个 Slot 表示一个评审人席位，名称应使用可以自然指代评审人的角色称呼，例如产品负责人、测试工程师或流程设计者；不得使用验收、质量、架构设计等评审事项名称代替评审人称呼。
           - Slot 只声明当前 Procedure 需要哪类评审人，不直接引用 Actor、Permission、Decision Policy、system_prompt 或 Agent 配置。
           - 省略 review 时，Artifact 在 type、format 和 schema 校验通过后按既有行为立即被接纳并推进 Run。
-          - Procedure 含 Review 时，创建 Run 前必须为每个 Review scope 选择 Decision Policy，并把所有 Slot 绑定到 Actor 或显式跳过；结果冻结在 Run v3。
+          - Procedure 含 Review 时，创建 Run 前必须为每个 Review scope 选择 Decision Policy，并把所有 Slot 绑定到 Actor 或显式跳过；Run v3 冻结 Actor、权限、Agent 运行配置和初始 Binding。Runner 只能通过显式、受校验且带审计记录的运行期操作修改未来尚未创建的 Review Binding，已经创建的 Review 保留原 Binding。
           - Artifact 校验通过后按 Run 中冻结的配置创建 Artifact Review；Review 通过前不得把候选 Artifact 加入 Run events 或推进当前 Action。
           - Review 要求修改时，Runner 修改并重新提交同一个 Artifact，系统创建新的 Review Round；通常不需要在 Procedure 中另写 !while 表达该 Artifact 的评审返工。
           - 当前内置 artifact_acceptance.unanimous 要求全部 Human 与 Agent Reviewer Assignment 提交；只有具有 decision.decide 的 Vote 参与一致通过判定，只有 decision.assess 的 Vote 作为建议保存；Reviewer 完成后仍需 Runner 显式投票。
@@ -359,6 +365,7 @@ sections:
             ```yaml
             !schema
             names:
+              - is-approved
               - 是否通过
             type: boolean
             ```
@@ -510,13 +517,13 @@ sections:
           - |-
             引用已经命名的外部 Schema：
             ```yaml
-            schema: 需求文档
+            schema: requirement-document
             ```
           - |-
             使用逻辑引用指向外部 Schema：
             ```yaml
             schema: !ref
-              target: schemas/需求文档
+              target: schemas/requirement-document
             ```
           - |-
             直接内嵌一个匿名 Schema：
@@ -528,7 +535,7 @@ sections:
                 - 结论
             ```
         asserts:
-          - schema 如出现必须是非空 Schema 名称引用、指向 schemas/* 的 !ref，或带 !schema tag 的 YAML mapping。
+          - schema 如出现必须是 Schema canonical name、指向 schemas/* canonical reference 的 !ref，或带 !schema tag 的 YAML mapping；外部 Schema alias 不可持久化在 schema 中。
           - schema 的根值契约必须与其约束的值契约一致。
 
       - !statement
@@ -687,7 +694,7 @@ sections:
                   type: boolean
               then:
                 - !call
-                  target: 降级发布流程
+                  target: fallback-release-process
             ```
         asserts:
           - elseif 如出现必须是单个 !if 区块，不得使用数组或 !elseif tag。
@@ -729,16 +736,17 @@ sections:
             ```yaml
             !concept
             names:
+              - work-item
               - 工作项
               - Work item
             defines:
               - 需要被跟踪、执行或验收的工作对象。
             extends:
-              - 可追踪对象
+              - traceable-object
             ```
         asserts:
           - "!concept 根节点允许 name/names、defines 和 extends 字段。"
-          - extends 如出现，必须是字符串数组，用于列出当前 Concept 的上位概念。
+          - extends 如出现，必须是字符串数组，用于列出当前 Concept 上位概念的 canonical name。
           - Concept 用于定义稳定词汇或领域抽象；独立规则和内容结构应分别写入 Statement 和 Schema。
 
       - !statement
@@ -750,6 +758,7 @@ sections:
             ```yaml
             !statement
             names:
+              - release-rules
               - 发布规则
             asserts:
               - 发布前必须通过验收。
@@ -779,6 +788,7 @@ sections:
             ```yaml
             !schema
             names:
+              - release-record
               - 发布记录
             type: object
             format:
@@ -809,6 +819,7 @@ sections:
                 ```yaml
                 !schema
                 names:
+                  - requirement-document
                   - 需求文档
                 fields:
                   - 标题
@@ -830,6 +841,7 @@ sections:
                 ```yaml
                 !schema
                 names:
+                  - requirement-document
                   - 需求文档
                 type: object
                 format:
@@ -891,6 +903,7 @@ sections:
                 ```yaml
                 !schema
                 names:
+                  - iteration-record
                   - 迭代记录
                 type: object
                 format:
@@ -955,6 +968,7 @@ sections:
             ```yaml
             !procedure
             names:
+              - document-delivery-process
               - 文档交付流程
             goals:
               - 交付一份经过验收的文档。
@@ -1052,10 +1066,10 @@ sections:
                       type: boolean
                   then:
                     - !call
-                      target: 发布流程
+                      target: release-process
                   else:
                     - !call
-                      target: 修复流程
+                      target: remediation-process
                 ```
             asserts:
               - "!if 只允许 condition、then、elseif 和 else 字段。"
@@ -1080,7 +1094,7 @@ sections:
                       type: boolean
                   do:
                     - !call
-                      target: 问题处理流程
+                      target: issue-handling-process
                 ```
             asserts:
               - "!while 只允许 condition 和 do 字段。"
@@ -1096,9 +1110,9 @@ sections:
                 `!call` 通过 `target` 调用另一个 Procedure：
                 ```yaml
                 - !call
-                  target: 文档评审流程
+                  target: document-review-process
                 ```
             asserts:
-              - "!call 只允许 target 字段，target 必须是被调用 Procedure 的非空名称或可解析引用。"
+              - "!call 只允许 target 字段，target 必须是被调用 Procedure 的 canonical name，不接受 alias。"
               - "!call 必须使用 YAML mapping 形式，不支持 YAML scalar 形式的 !call 简写。"
               - "!call 不声明 actor、artifact、format 或分支字段；被调用 Procedure 自行定义执行者和交付物。"

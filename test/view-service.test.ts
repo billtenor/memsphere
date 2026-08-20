@@ -57,7 +57,11 @@ test("View service state is private to the current user", async () => {
       ...state(config, 1234),
       settingsToken: "a".repeat(43)
     });
-    assert.equal((await stat(path)).mode & 0o777, 0o600);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(path)).mode & 0o777, 0o600);
+    } else {
+      assert.equal((await stat(path)).isFile(), true);
+    }
   });
 });
 
@@ -143,6 +147,7 @@ test("managed start does not transport the Settings token through the child envi
     });
 
     assert.equal(spawnOptions?.env, undefined);
+    assert.equal(spawnOptions?.windowsHide, true);
     assert.equal(started.settingsToken, "a".repeat(43));
   });
 });

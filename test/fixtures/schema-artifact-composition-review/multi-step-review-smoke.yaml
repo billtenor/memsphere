@@ -1,6 +1,6 @@
 !procedure
 syntax: memsphere-20260721-stable
-name: Schema 小型多步骤评审流程
+names: [schema-small-multi-step-review, Schema 小型多步骤评审流程]
 defines:
   - 用于验证小型 Schema Artifact、普通后续步骤和最终 Artifact Review 可以在同一 Run 中顺序工作。
 flow:

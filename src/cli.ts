@@ -44,6 +44,8 @@ import {
   runEnterSchemaCommand,
   runArtifactContractShowCommand,
   runArtifactShowCommand,
+  runBindingShowCommand,
+  runBindingUpdateCommand,
   runRepeatCommand,
   runReportCommand,
   runReviewCommentCommand,
@@ -142,7 +144,7 @@ const memory = program
 memory
   .command("list")
   .description("List memory entities or the direct child nodes of one memory.")
-  .argument("[reference]", "memory logical reference, canonical name, or alias")
+  .argument("[reference]", "canonical logical reference, or bare canonical name or alias")
   .addOption(new Option("--kind <kind>", "filter or narrow resolution by memory kind").choices([...memoryKinds]))
   .option("--query <text>", "match a top-level canonical name or alias")
   .option("--node <node-ref>", "list direct children of a memory node")
@@ -151,8 +153,8 @@ memory
 
 memory
   .command("read")
-  .description("Read one memory entity by logical reference, canonical name, or alias.")
-  .argument("<reference>", "logical reference, canonical name, or alias")
+  .description("Read one memory entity by canonical logical reference, or bare canonical name or alias.")
+  .argument("<reference>", "canonical logical reference, or bare canonical name or alias")
   .addOption(new Option("--kind <kind>", "narrow name resolution by memory kind").choices([...memoryKinds]))
   .option("--node <node-ref>", "read one memory node with its required context")
   .addOption(new Option("--output <format>", "output format").choices(["yaml", "json"]).default("yaml"))
@@ -160,7 +162,7 @@ memory
 
 memory.command("edit")
   .description("Edit Memory in the current Embedded worktree or create a Managed ChangeSet.")
-  .argument("<references...>", "existing names or new logical references")
+  .argument("<references...>", "existing bare selectors or canonical logical references")
   .option("--change <id>", "append targets to an existing ChangeSet")
   .action(memoryEditCommand);
 
@@ -171,7 +173,7 @@ memory.command("delete")
 
 memory.command("rename")
   .argument("<reference>", "existing Memory reference")
-  .argument("<new-name>", "new canonical name")
+  .argument("<new-name>", "new lowercase ASCII kebab-case canonical name")
   .option("--change <id>", "append target to an existing ChangeSet")
   .action(memoryRenameCommand);
 
@@ -255,6 +257,7 @@ run
   .command("start")
   .description("Start a run from a procedure.")
   .argument("[procedure-name]", "procedure primary name or alias")
+  .requiredOption("--name <name>", "name for this run")
   .option("--file <path>", "start from a Procedure YAML file without installing it")
   .option("--review-config <path>", "bind Review Slots to Actors and select Decision Policies")
   .action((procedureName, options) => runStartCommand(procedureName, options));
@@ -275,6 +278,27 @@ run
   .requiredOption("--run <id>", "run id")
   .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
   .action(runShowCommand);
+
+const runBinding = run
+  .command("binding")
+  .description("Inspect or update future Review Slot bindings for a running Run.");
+
+runBinding
+  .command("show")
+  .description("Show frozen Actors, current Slot bindings, affected scopes, and binding history.")
+  .requiredOption("--run <id>", "run id")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runBindingShowCommand);
+
+runBinding
+  .command("update")
+  .description("Replace one Slot binding for Reviews that have not been created yet.")
+  .requiredOption("--run <id>", "run id")
+  .requiredOption("--slot <procedure::slot>", "fully qualified Review Slot key")
+  .option("--actor <id>", "bind a frozen Actor; repeat for multiple Actors", (value, previous: string[]) => [...previous, value], [])
+  .option("--skip", "explicitly skip this Slot for future Reviews")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runBindingUpdateCommand);
 
 run
   .command("try-run")
@@ -395,6 +419,7 @@ runReview
   .description("Add a structured comment to this Agent Assignment.")
   .requiredOption("--assignment <id>", "artifact review assignment id")
   .option("--body <text>", "single-line Markdown comment body")
+  .option("--body-file <path>", "read a multiline Markdown comment body from a file")
   .option("--body-stdin", "read a multiline Markdown comment body from standard input")
   .addOption(new Option("--severity <severity>", "comment severity").choices(["blocking", "risk", "suggestion"]).makeOptionMandatory())
   .option("--target <target>", "comment anchor target")

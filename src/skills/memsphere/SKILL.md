@@ -40,7 +40,7 @@ memsphere memory list
 memsphere memory list --kind procedures
 ```
 
-list 结果中的 `names` 首项是规范名称，其余项是别名，`defines` 是简要定义。显式逻辑引用使用 `<kind>/<name>`，name 可以是规范名称或同 kind 下无冲突的别名；解析后以当前规范引用为准。Memory 文件路径只是 Provider 存储细节，不能代替逻辑引用。list 只用于发现候选，不能替代 read；确定候选后，必须完整读取 Memory，或按 Node 读取完成任务所需的内容。
+list 结果中的 `names` 首项是 canonical name，其余项是别名，`defines` 是简要定义。显式逻辑引用固定使用 `<kind>/<canonical-name>`，其中 canonical name 是 1–120 字符的小写 ASCII kebab-case；别名只能作为不带 kind 的 selector。Memory 文件路径只是 Provider 存储细节，不能代替逻辑引用。list 只用于发现候选，不能替代 read；确定候选后，必须完整读取 Memory，或按 Node 读取完成任务所需的内容。
 
 当一份 Statement、Schema 或 Procedure 较长时，可以先列出它的直接子 Node：
 
@@ -86,19 +86,19 @@ memsphere 使用带 YAML tag 的 mapping 描述一份 Memory。根节点的 tag 
 !concept
 syntax: memsphere-20260721-stable
 names:
+  - example-concept
   - 示例概念
-  - 示例别名
 defines:
   - 对这个概念的定义。
 ```
 
 - `!concept`、`!statement`、`!procedure`、`!schema` 分别表示四种 Memory。
 - 顶层 Memory 使用 `syntax` 声明不可变的语法版本；当前稳定版本是 `memsphere-20260721-stable`。省略时固定按历史起点 `start` 解释，不得按最新版猜测。
-- `names` 的第一项是规范名称，其余项是别名。
-- 规范名称受控修改时，旧规范名称默认保留为别名，旧显式引用继续可解析；普通 rename 不自动移动 File Provider 中的 Memory 文件。
+- 顶层 `names` 的第一项是 canonical name，必须是 1–120 字符的小写 ASCII kebab-case；其余项是别名，可以使用 Unicode 和内部空格，但不得包含首尾空白、控制字符或 `/`。嵌套节点名称不受顶层命名规则限制。
+- 显式 `<kind>/<name>`、`!ref target`、Procedure `!call target`、Concept `extends` 和 Artifact 的外部 `schema` 必须使用目标 canonical name，不接受 alias；普通 rename 不自动移动 File Provider 中的 Memory 文件。
 - 原本允许 `names` 的节点也允许写单个 `name`，其解析结果等价于 `names: [name]`；二者不能同时出现。
 - `defines` 用于定义这份 Memory；其中的全部成员共同生效。
-- `defines` 可以包含 `!ref` 外部 Memory 引用；`target` 必须是 `concepts/...`、`statements/...` 或 `schemas/...` 形式的逻辑引用，不接受只写普通名称。
+- `defines` 可以包含 `!ref` 外部 Memory 引用；`target` 必须是 `concepts/<canonical-name>`、`statements/<canonical-name>` 或 `schemas/<canonical-name>` 形式的逻辑引用，不接受普通名称或 alias。
 - 不同类型还拥有自己的字段。编写或解释某种 Memory 前，读取对应的 Concept Memory 了解完整语义和字段规则。
 
 Procedure 中每个 `!action` 的 `!artifact` 使用 `type -> format -> schema` 三层机器契约：
@@ -147,20 +147,22 @@ flow:
 - 当前 Project `config.json` 的 `control_plane.actors` 定义可参与 Review 的 Human 或 Agent Actor；Runner 权限由 `control_plane.runner` 定义。
 - Memsphere Home `config.json` 的 `acp_providers` 定义与内置类型同名的 ACP Provider 配置。首批固定支持 `traex`、`qwen`、`kimi`、`codex`；CLI command 和 ACP 入口由类型固定，配置维护非托管 args、非敏感 env 和启动/空闲/总运行超时。配置中心可自动检测可执行文件路径和版本，但 Provider 自己负责安装、认证和模型账户配置。
 - Agent Actor 只配置 ACP Provider 实例 id `provider` 和可选 `model`；工作目录、托管安全参数与 Prompt version 由 Memsphere 管理。旧的 Actor 内 `command`、`args`、`env`、`cwd`、Prompt version 和 timeout 字段不兼容，也不会被自动迁移。
-- `memsphere run start` 会先列出所有 Review scope、Slot、可用 Actor 和内置 Decision Policy。把预检示例保存并调整后，使用 `--review-config <path>` 启动。
+- 原生 Windows 要求 Windows Node.js 与 Git for Windows；用户和 Agent CLI 支持 Windows PowerShell 5.1、PowerShell 7、CMD、Git for Windows 随附的 Git Bash。WSL 按独立 Linux 环境处理，MSYS2/Cygwin 不在当前支持范围。Provider 的安装检测与 Windows 支持等级分别展示。
+- `memsphere run start` 必须通过 `--name` 指定本次 Run 的非空名称，并会先列出所有 Review scope、Slot、可用 Actor 和内置 Decision Policy。把预检示例保存并调整后，使用相同的 `--name` 和 `--review-config <path>` 启动。
 - Review 配置必须为每个 scope 选择 Policy，并为每个 Slot 绑定 Actor 或显式 `skip`；一个 Actor 绑定多个 Slot 时只产生一个 Assignment 和 Vote。
 - Permission 只在 Runner/Actor 的 `permissions` 中配置；Run Review 配置不追加临时权限。Memory YAML 不允许 `role_bindings` 或 `permission_grants`。
 - `runner` 是当前 Run 执行上下文，不需要 Slot Binding。
+- Human 完成前序流程后若不再参与后续 Review，Runner 可以执行 `memsphere run binding show --run <run_id>` 查看 Run 冻结的 Actor、当前 Slot Binding、影响 scope 和历史，再执行 `memsphere run binding update --run <run_id> --slot <procedure::slot> --actor <actor_id>` 换绑；多个 Actor 重复传 `--actor`，未来不需要该 Slot 时使用 `--skip`。只能选择 Run 启动时已经冻结的 Actor；更新只影响尚未创建的 Review，已经创建的 Review、Round、Assignment 和后续修订轮次保持原 Binding。
 - Runner 在 `run report` 前应阅读 CLI 输出的权限说明；成功或拒绝结果中的权限、来源和自然语言说明均来自 Run 启动时保存的控制平面快照。
 - 确定性校验通过后，Run 会返回稳定的 `review_id` 和 `memsphere run review wait --review <review_id>`；Review 通过前当前 Action 不推进。Review Submission 自动冻结当前候选之前已经上报的全部 Artifact，Reviewer 根据当前 Artifact 与要求按需追溯。全部评审意见收齐后，如 CLI 提示等待 Runner 投票，应先阅读摘要和 blocking 意见，再显式执行 `memsphere run review vote`。Runner 拥有最终决定权；建议意见和 blocking 严重级别不会形成额外否决权。需要留下审计记录时，可在投票前使用 `memsphere run review resolve` 记录意见的接受、延期或驳回原因。
-- 绑定到当前 Slot 的 Agent Actor 会由 Memsphere 通过 ACP 自动启动。初始 Prompt 会给出精炼的 Review contract 和前序 Artifact 索引；Agent Reviewer 使用 Session 注入、固定当前 Node 与 CLI entrypoint 的 `MEMSPHERE_CLI`，直接通过 Store 操作自己的 Assignment，不创建或监听 Review bridge/socket。`run review comment` 必须声明 severity；短意见使用 `--body`，多行 Markdown 使用 `--body-stdin`。提交摘要可使用 `--summary-file`。普通 ACP 文本回复不构成 Comment 或 Vote。Agent 失败时可用 `memsphere run review retry --review <id> --assignment <actor-or-assignment-id>` 显式重试。
+- 绑定到当前 Slot 的 Agent Actor 会由 Memsphere 通过 ACP 自动启动。初始 Prompt 会给出精炼的 Review contract 和前序 Artifact 索引；Agent Reviewer 在当前 Workspace/worktree 中使用 PATH 注入的受限 `memsphere-review` 会话命令，命令自动绑定当前 Run 与 Assignment，直接通过 Store 操作自己的 Assignment，不创建或监听 Review bridge/socket，也不依赖某一种 shell 的环境变量语法。`run review comment` 必须声明 severity；短意见使用 `--body`，多行 Markdown 使用 `--body-file`，历史 `--body-stdin` 仍兼容。提交摘要可使用 `--summary-file`。普通 ACP 文本回复不构成 Comment 或 Vote。Agent 失败时可用 `memsphere run review retry --review <id> --assignment <actor-or-assignment-id>` 显式重试。
 - Human 使用 View 中的大尺寸 Artifact Review 浮窗操作本人 Assignment：按 Round 查看当时的不可变 Submission、正式 Comment、Vote、Result 与 Revision Summary，在当前轮添加整体或定位 Comment、选择 Vote 并 Submit。历史 Round 只读，完成后的 Review 仍可从对应 Run 步骤重新打开。
 - Artifact Review Comment 只绑定当前 Artifact Submission；定位 Comment 保存 Submission、digest、Renderer target 和短上下文，不评论 Memory 或 Workspace 文件，也不会自动迁移到下一轮。独立 Memory Review 继续使用原有 Review 抽屉和处理流程。
 - 调试 Agent 启动时，可设置 `debug.agent_review: true` 禁止后台真实派发，再显式执行 `memsphere run try-run --run <run_id>` 生成 `launch.json` 和 `prompt.md`。该命令不 claim Assignment、不启动 ACP，也不修改 Run；View 轮询不会自动生成调试文件。
 
 ### 维护当前配置
 
-View 是 Memsphere Home 级单一服务，可从 Project 选择器切换当前展示内容。Memory、Run、设置、Memory Review 与 Artifact Review 的主要界面都有稳定 URL，可复制到另一窗口直接重开；Artifact Review 的 Round 与 Material 由查询参数定位，临时身份、草稿和布局不写入 URL，链接仍使用当前 Project。配置中心通过左侧分组导航直接进入 Memsphere 或当前 Project 设置，右侧只展示当前配置内容：全局设置维护语言、View 服务和 ACP Provider，Project 设置展示 Store 并维护 Control Plane 与 Actor。两个 Scope 分别保存草稿、Revision、校验结果和确认 diff，保存时只原子写入各自配置文件；切换 Project 不清除全局草稿，放弃未保存的 Project 草稿前必须确认。全局 ACP Provider 被任一已注册 Project 的 Actor 引用时不能重置或删除。磁盘 View 配置与运行配置不一致时，需要手动执行：
+View 是 Memsphere Home 级单一服务，可从 Project 选择器切换当前展示内容。Memory、Run、设置、Memory Review 与 Artifact Review 的主要界面都有稳定 URL，可复制到另一窗口直接重开；Memory Review 的规范 URL 显式包含 Project、Memory kind/name 与 Review id，打开时会先恢复正确 Project，不支持仅含 Review id 的旧短路径；Artifact Review 的 Round 与 Material 由查询参数定位，临时身份、草稿和布局不写入 URL。配置中心通过左侧分组导航直接进入 Memsphere 或当前 Project 设置，右侧只展示当前配置内容：全局设置维护语言、View 服务和 ACP Provider，Project 设置展示 Store 并维护 Control Plane 与 Actor。两个 Scope 分别保存草稿、Revision、校验结果和确认 diff，保存时只原子写入各自配置文件；切换 Project 不清除全局草稿，放弃未保存的 Project 草稿前必须确认。全局 ACP Provider 被任一已注册 Project 的 Actor 引用时不能重置或删除。磁盘 View 配置与运行配置不一致时，需要手动执行：
 
 ```bash
 memsphere view restart
@@ -217,16 +219,16 @@ memsphere 使用 Run 记录和控制一次 Procedure 的执行过程，保证 Ag
 读取执行所需的 Procedure 内容后，使用它的名称启动一次 Run：
 
 ```bash
-memsphere run start "<Procedure 名称>"
+memsphere run start "<Procedure 名称>" --name "<本次 Run 名称>"
 ```
 
 需要直接运行尚未安装到当前 Primary Project Memory Store 的 Procedure YAML 时，可以指定文件路径：
 
 ```bash
-memsphere run start --file "<Procedure YAML 路径>"
+memsphere run start --file "<Procedure YAML 路径>" --name "<本次 Run 名称>"
 ```
 
-名称参数与 `--file` 必须二选一。文件中的根 Procedure 会在启动时写入 Run 快照；外部 `!call` 和外部 Schema 从 Run 启动时冻结的 Project Memory Revision 解析。
+Procedure 名称参数与 `--file` 必须二选一；两种方式都必须通过 `--name` 指定本次 Run 的名称。文件中的根 Procedure 会在启动时写入 Run 快照；外部 `!call` 和外部 Schema 从 Run 启动时冻结的 Project Memory Revision 解析。
 
 命令会返回 Run ID 和第一个待执行步骤。后续命令都使用这个 Run ID，不要再次启动同一个流程。
 

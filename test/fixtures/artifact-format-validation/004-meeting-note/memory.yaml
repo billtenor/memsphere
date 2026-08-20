@@ -1,6 +1,7 @@
 !concept
 syntax: memsphere-20260719-stable
 names:
+  - meeting-note
   - 会议记录
 defines:
   - 一份会议记录沉淀一次会议讨论形成的主题、结论和后续行动，供参会者后续查阅与执行。

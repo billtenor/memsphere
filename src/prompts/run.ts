@@ -7,6 +7,7 @@ import {
   currentSchemaFinalization,
   currentStep,
   finalArtifacts,
+  runDisplayName,
   type RunState,
   type SchemaWritingSnapshot
 } from "../run/store.js";
@@ -25,6 +26,8 @@ export function buildRunCurrentStepPromptModel(
 ): RunCurrentStepPromptModel | undefined {
   const common = {
     runId: run.id,
+    runName: runDisplayName(run),
+    procedureName: run.procedureName,
     procedureAsserts: activeProcedureAsserts(run)
   };
   if (run.status === "done") return undefined;
@@ -138,6 +141,8 @@ export function buildRunCompletedPromptModel(run: RunState): RunCompletedPromptM
   if (run.status !== "done") return undefined;
   return {
     runId: run.id,
+    runName: runDisplayName(run),
+    procedureName: run.procedureName,
     procedureAsserts: activeProcedureAsserts(run),
     finalArtifacts: finalArtifacts(run).map((artifact) => ({
       name: artifact.name,
@@ -207,6 +212,7 @@ function formatDisplay(format: { name: string; options: Record<string, unknown> 
 }
 
 function shellQuote(value: string): string {
+  if (process.platform === "win32") return `"${value.replace(/"/g, '""')}"`;
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 

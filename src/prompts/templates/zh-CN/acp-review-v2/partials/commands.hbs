@@ -1,0 +1,25 @@
+## 可用的 Memsphere 命令
+- 读取完整候选产物：
+  memsphere-review run artifact show --output json
+- 读取完整评审契约，包括完整 Schema 快照：
+  memsphere-review run artifact contract show --output json
+- 查看本次评审的状态、权限和自己的意见：
+  memsphere-review run review assignment show --output json
+- 查看 Run 大纲，包括所有步骤、产物摘要和当前步骤：
+  memsphere-review run show --output json
+- 查看大纲中的某个步骤：
+  memsphere-review run step show --step "<step-ref>" --output json
+- 在相关时读取某个前序产物：
+  memsphere-review run artifact show --step "<step-ref>" --output json
+- 发现和读取项目 Memory：
+  memsphere-review memory list --output json
+  memsphere-review memory read <reference> --output json
+- 添加具体评审意见。Comment 正文使用 Markdown：
+  - 必须选择明确的严重程度：`blocking`、`risk` 或 `suggestion`。
+  - 单行意见：
+    memsphere-review run review comment --severity <blocking|risk|suggestion> --body <text> --output json
+  - 多行意见先写入 Markdown 文件：
+    memsphere-review run review comment --severity <blocking|risk|suggestion> --body-file <path> --output json
+  - 不要把换行编码为字面量 `\n`。
+- 提交最终投票和总结：
+  memsphere-review run review submit --vote <approve|request_changes|abstain> --summary-file <path> --output json

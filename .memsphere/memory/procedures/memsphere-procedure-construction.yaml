@@ -1,9 +1,9 @@
 !procedure
 syntax: memsphere-20260721-stable
 names:
+  - memsphere-procedure-construction
   - memsphere Procedure记忆提取流程
   - Procedure 提取流程
-  - memsphere-procedure-construction
 defines:
   - 从已完成任务、Run、产物、仓库证据或已经理清的执行思路中，提取可复用、可执行且可验证的 Procedure Memory。
   - 适用于新建 Procedure 或根据可靠实践更新已有 Procedure，不负责执行被提取的流程。
@@ -56,7 +56,7 @@ flow:
     action: 根据提取依据和补充信息提取可复用流程，并生成完整 !procedure YAML 草稿。
     actor: agent
     asserts:
-      - names、defines 和 goals 必须准确表达规范名称、用途、适用边界和预期结果。
+      - 顶层 names[0] 必须是准确且稳定的小写 ASCII kebab-case canonical name；alias、defines 和 goals 必须准确表达自然语言名称、用途、适用边界和预期结果。
       - 必须区分强制规范和可选建议；持续约束写入 Procedure asserts，局部约束写入 Action asserts，可选做法写入 suggests。
       - flow 只保留完成任务所必需的步骤；不得为展示思考过程而拆分中间 Action。
       - 每个 Action 必须职责单一、actor 准确并产出后续步骤或 human 实际需要的 Artifact。

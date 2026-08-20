@@ -19,9 +19,16 @@ test("View page routes are explicit and never absorb API or unknown paths", () =
     "/tasks/run-1/artifact-reviews/review-1",
     "/settings/overview",
     "/settings/participants",
-    "/memory-reviews/review-1"
+    "/projects/alpha/memories/concepts/Memory/reviews/review-1"
   ]) assert.equal(isViewPagePath(path), true, path);
-  for (const path of ["/api/memories", "/api/unknown", "/unknown", "/tasks/run-1/other/review-1"]) {
+  for (const path of [
+    "/api/memories",
+    "/api/unknown",
+    "/unknown",
+    "/tasks/run-1/other/review-1",
+    "/projects/alpha/memories/concepts/Memory/reviews",
+    "/memory-reviews/review-1"
+  ]) {
     assert.equal(isViewPagePath(path), false, path);
   }
 });
@@ -31,7 +38,9 @@ test("browser script includes URL parsing, canonical history, and popstate resto
   assert.match(browserHtml, /function currentBrowserUrl\(\)/);
   assert.match(browserHtml, /history\[method\]\(null, "", next\)/);
   assert.match(browserHtml, /window\.addEventListener\("popstate"/);
-  assert.match(browserHtml, /\/memory-reviews\//);
+  assert.doesNotMatch(browserHtml, /\/memory-reviews\//);
+  assert.match(browserHtml, /\/projects\/" \+ encodeRoutePart\(state\.currentProject\)/);
+  assert.match(browserHtml, /prepareBrowserRoute/);
   assert.match(browserHtml, /\/artifact-reviews\//);
   assert.match(browserHtml, /pendingArtifactMaterial/);
 });
@@ -313,6 +322,17 @@ test("memory and task artifacts show participating Review Slot names", () => {
   assert.match(browserHtml, /roleId\.includes\("::"\) \? roleId\.slice\(roleId\.lastIndexOf\("::"\) \+ 2\) : roleId/);
 });
 
+test("task view supports audited runtime Review Slot rebinding", () => {
+  assert.match(browserHtml, /function renderRunBindings\(run\)/);
+  assert.match(browserHtml, /换绑只影响尚未创建的 Review/);
+  assert.match(browserHtml, /function updateRunBinding\(run, slot, skip, actorIds\)/);
+  assert.match(browserHtml, /settingsFetch\("\/api\/runs\/" \+ encodeURIComponent\(run\.id\) \+ "\/bindings/);
+  assert.match(browserHtml, /run\.bindingChanges/);
+  assert.match(browserHtml, /run\.bindingSnapshot\?\.slots/);
+  assert.match(browserHtml, /existing Reviews preserved/);
+  assert.match(browserHtml, /className = "run-binding-actors"/);
+});
+
 test("markdown artifacts use rendered markdown content when available", () => {
   assert.equal(shouldRenderMarkdownArtifact({ format: "markdown", renderedContent: "<h1>Title</h1>" }), true);
   assert.equal(shouldRenderMarkdownArtifact({ format: "markdown" }), false);
@@ -531,6 +551,15 @@ test("browser exposes archive controls for done reviews and runs", () => {
   assert.match(browserHtml, /archiveDoneOnly/);
 });
 
+test("Task titles use the Run name and keep the Procedure name in details", () => {
+  assert.match(browserHtml, /function runDisplayName\(run\)/);
+  assert.match(browserHtml, /return run\?\.name\?\.trim\(\) \|\| run\?\.procedureName \|\| "";/);
+  assert.match(browserHtml, /title\.textContent = runDisplayName\(run\);/);
+  assert.match(browserHtml, /el\.title\.textContent = runDisplayName\(run\);/);
+  assert.match(browserHtml, /pill\(t\("procedureName"\) \+ ": " \+ run\.procedureName\)/);
+  assert.match(browserHtml, /run start &lt;procedure&gt; --name &lt;run-name&gt;/);
+});
+
 test("browser renders recursive Statement sections and keeps suggestions separate", () => {
   assert.match(browserHtml, /suggests: \{ zh: "建议", yaml: "suggests" \}/);
   assert.match(browserHtml, /sections: \{ zh: "章节", yaml: "sections" \}/);
@@ -591,10 +620,16 @@ test("task calls use task-scoped review anchors and navigate to Memory", () => {
   assert.match(browserHtml, /commentable\(content, "!call " \+ name, String\(name\), anchor, context\)/);
 });
 
-test("memory details render names as a field while retaining the primary name as the page title", () => {
+test("memory details render names as a field while using alias and reference in the page header", () => {
   assert.match(browserHtml, /names: \{ zh: "名称", yaml: "names" \}/);
   assert.match(browserHtml, /appendList\(target, t\("names"\), node\.names, "names"\)/);
-  assert.match(browserHtml, /el\.title\.textContent = primaryName\(memory\.entity\);/);
+  assert.match(browserHtml, /function memoryDisplayName\(entity\)/);
+  assert.match(browserHtml, /return entity\.names\[1\] \|\| entity\.names\[0\] \|\| "\(unnamed\)"/);
+  assert.match(browserHtml, /el\.title\.textContent = memoryDisplayName\(memory\.entity\);/);
+  assert.match(browserHtml, /el\.subtitle\.textContent = memory\.id;/);
+  assert.match(browserHtml, /button\.textContent = memory\.error \? invalidMemoryName\(memory\) : memoryDisplayName\(memory\.entity\);/);
+  assert.match(browserHtml, /button\.title = memory\.error \? errorText\(memory\.error\) : memory\.id;/);
+  assert.match(browserHtml, /const identity = memory\.error \? memory\.path : memory\.id;/);
 });
 
 test("Artifact Review chooses comment severity before entering the comment", () => {

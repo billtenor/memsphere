@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import test from "node:test";
@@ -180,7 +180,7 @@ test("Project clone accepts a valid non-empty Memory repository and rejects an e
       await mkdir(join(source, kind));
       await writeFile(join(source, kind, ".gitkeep"), "");
     }
-    await writeFile(join(source, "concepts", "valid.yaml"), withCurrentMemorySyntax("!concept\nnames: [Valid]\ndefines: []\n"));
+    await writeFile(join(source, "concepts", "valid.yaml"), withCurrentMemorySyntax("!concept\nnames: [valid]\ndefines: []\n"));
     await runGit(["init", "-b", "master"], { cwd: source });
     await runGit(["add", "-A"], { cwd: source });
     await runGit(["commit", "-m", "Memory Store"], { cwd: source });

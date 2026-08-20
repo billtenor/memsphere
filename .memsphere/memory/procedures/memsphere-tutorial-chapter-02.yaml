@@ -1,8 +1,8 @@
 !procedure
 syntax: memsphere-20260721-stable
 names:
-  - memsphere 教学流程-第二章
   - memsphere-tutorial-chapter-02
+  - memsphere 教学流程-第二章
 defines:
   - 面向已经完成第一章的用户，介绍 Artifact、Artifact Review、评审席位、参与者及其配置方式。
   - 本章只帮助用户理解相关功能并完成当前环境支持的配置，不发起真实 Artifact Review。
@@ -127,7 +127,7 @@ flow:
           “Human 参与者由真实用户完成评审。Artifact Review 开始后，Human 在 View 的 Task 页面打开对应 Run 和当前步骤，在 Artifact Review 浮窗中查看 Artifact，添加评论、选择投票并提交。
           Agent 参与者是由 memsphere 自动启动、承担评审工作的子 Agent。Artifact Review 开始后，memsphere 会把当前评审要求和 Artifact 上下文交给它；子 Agent 通过 memsphere 命令读取评审、提交评论和投票。
           要启动子 Agent，需要为 Agent 参与者选择 ACP Provider 和可选模型。ACP Provider 是 memsphere 连接并启动具体 Agent 产品的适配入口，不是另一个评审角色。
-          同一个评审席位在一次 Run 中可以绑定 Human，也可以绑定 Agent。选择哪一种参与者，取决于流程需要的人类判断、自动化程度和可用环境。”
+          同一个评审席位在一次 Run 中可以绑定 Human，也可以绑定 Agent。选择哪一种参与者，取决于流程需要的人类判断、自动化程度和可用环境。Run 启动后，如果 Human 完成前序流程并退出，Runner 还可以把该席位显式换绑给本次 Run 已冻结的 Agent；换绑只影响尚未创建的 Review，已有 Review 保持不变。”
           后续轮次根据 human 的问题继续讨论。
         actor: agent
         asserts:

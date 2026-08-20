@@ -62,6 +62,7 @@ import {
 import {
   ArtifactAuthorizationFailure,
   ArtifactReviewConflictError,
+  buildRunBindingSnapshot,
   buildSchemaWritingSnapshot,
   currentArtifactReview,
   ensureCurrentSchemaDraft,
@@ -73,6 +74,7 @@ import {
   retryArtifactReviewAgentAssignment,
   resolveArtifactReviewComment,
   submitArtifactReviewAssignment,
+  updateRunSlotBinding,
   updateArtifactReviewDraft,
   type ArtifactReviewDraftInput,
   type ArtifactReviewContext,
@@ -501,6 +503,32 @@ async function handleRequest(
     return;
   }
 
+  const runBindingsMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/bindings$/);
+  if (runBindingsMatch) {
+    const runId = decodeURIComponent(runBindingsMatch[1]);
+    try {
+      if (request.method === "GET") {
+        sendJson(response, 200, buildRunBindingSnapshot(await readRun(runsRoot, runId)));
+        return;
+      }
+      if (request.method === "POST") {
+        if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+        const body = await readJsonBody<{ slot?: unknown; actorIds?: unknown; skip?: unknown }>(request);
+        const slot = typeof body.slot === "string" ? body.slot : "";
+        const actorIds = Array.isArray(body.actorIds) && body.actorIds.every((actor) => typeof actor === "string")
+          ? body.actorIds as string[]
+          : undefined;
+        const skip = body.skip === true;
+        const result = await updateRunSlotBinding({ runsRoot, runId, slot, actorIds, skip });
+        sendJson(response, 200, { change: result.change, bindings: result.snapshot });
+        return;
+      }
+    } catch (error) {
+      sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+  }
+
   const artifactReviewRoundMatch = url.pathname.match(/^\/api\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)$/);
   if (request.method === "GET" && artifactReviewRoundMatch) {
     const actorId = url.searchParams.get("actor_id")?.trim();
@@ -845,7 +873,7 @@ async function resolveReviewSnapshotFiles(input: {
   if (input.memoryPath) {
     const path = resolveMemoryPath(input.memoryRoot, input.memoryPath);
     return [{
-      label: relative(input.memoryRoot, path),
+      label: portableRelative(input.memoryRoot, path),
       path,
       kind: "memory"
     }];
@@ -854,7 +882,7 @@ async function resolveReviewSnapshotFiles(input: {
   const file = await findMemoryFileById(input.memoryRoot, input.memoryId);
   if (!file) return [];
   return [{
-    label: relative(input.memoryRoot, file.path),
+    label: portableRelative(input.memoryRoot, file.path),
     path: file.path,
     kind: "memory"
   }];
@@ -926,6 +954,7 @@ async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknow
   const schemaWriting = await schemaWritingPayload(runsRoot, hydrated);
   return {
     ...publicRun,
+    bindingSnapshot: buildRunBindingSnapshot(hydrated),
     artifactReview: review ? artifactReviewSummary(review, hydrated.controlPlane) : undefined,
     artifactReviewSummaries: (hydrated.artifactReviews ?? []).map((candidate) =>
       artifactReviewSummary(candidate, hydrated.controlPlane)
@@ -1334,7 +1363,7 @@ async function loadMemoryListItem(
   path: string,
   systemReferences: ReadonlySet<string>
 ): Promise<MemoryPayload["memories"][number]> {
-  const relativePath = relative(memoryRoot, path);
+  const relativePath = portableRelative(memoryRoot, path);
   try {
     const file = await readMemoryFile(kind, path);
     const primaryName = Array.isArray(file.entity.names) ? file.entity.names[0] : file.path;
@@ -1354,6 +1383,10 @@ async function loadMemoryListItem(
       error: formatMemoryLoadError(error)
     };
   }
+}
+
+function portableRelative(root: string, path: string): string {
+  return relative(root, path).split(sep).join("/");
 }
 
 function globalSettingsPayload(
@@ -1741,7 +1774,7 @@ export function isViewPagePath(pathname: string): boolean {
   if (/^\/tasks\/[^/]+$/.test(pathname)) return true;
   if (/^\/tasks\/[^/]+\/artifact-reviews\/[^/]+$/.test(pathname)) return true;
   if (/^\/settings\/[^/]+$/.test(pathname)) return true;
-  return /^\/memory-reviews\/[^/]+$/.test(pathname);
+  return /^\/projects\/[^/]+\/memories\/[^/]+\/[^/]+\/reviews\/[^/]+$/.test(pathname);
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {

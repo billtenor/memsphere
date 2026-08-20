@@ -1,6 +1,7 @@
 !schema
 syntax: memsphere-20260719-stable
 names:
+  - release-check
   - 上线检查记录
   - 发布检查记录
 defines:

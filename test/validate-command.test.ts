@@ -11,7 +11,7 @@ test("stateless Memory validation does not require Home or Registry", async () =
   const root = await mkdtemp(join(tmpdir(), "memsphere-stateless-validation-"));
   try {
     for (const kind of memoryKinds) await mkdir(join(root, kind));
-    await writeFile(join(root, "concepts", "valid.yaml"), withCurrentMemorySyntax("!concept\nnames: [Valid]\ndefines: []\n"));
+    await writeFile(join(root, "concepts", "valid.yaml"), withCurrentMemorySyntax("!concept\nnames: [valid]\ndefines: []\n"));
     assert.deepEqual((await validateMemoryRoot(root)).issues, []);
     await writeFile(join(root, "concepts", "broken.yaml"), "!concept\nnames: [Broken\n");
     const broken = await validateMemoryRoot(root);
@@ -29,7 +29,7 @@ test("Memory validation rejects symbolic links", async () => {
   try {
     for (const kind of memoryKinds) await mkdir(join(root, kind));
     const outside = join(root, "outside.yaml");
-    await writeFile(outside, withCurrentMemorySyntax("!concept\nnames: [Outside]\ndefines: []\n"));
+    await writeFile(outside, withCurrentMemorySyntax("!concept\nnames: [outside]\ndefines: []\n"));
     await symlink(outside, join(root, "concepts", "linked.yaml"));
     const result = await validateMemoryRoot(root);
     assert.equal(result.issues.length, 1);

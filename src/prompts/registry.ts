@@ -22,6 +22,30 @@ const permissionSchema = z.object({
   description: z.string()
 }).strict();
 
+const acpArtifactReviewPromptSchema = z.object({
+  rolePrompts: z.array(z.string()),
+  contract: z.object({
+    actionInstruction: z.string(),
+    procedureAsserts: z.array(z.string()),
+    actionAsserts: z.array(z.string()),
+    suggestions: z.array(z.string()),
+    details: z.array(z.string()),
+    artifact: z.object({
+      name: z.string(),
+      type: z.string(),
+      format: z.string(),
+      schema: z.string(),
+      final: z.boolean(),
+      reviewPolicy: z.string()
+    }).strict()
+  }).strict(),
+  earlierArtifacts: z.array(z.object({
+    stepId: z.string(),
+    artifactName: z.string()
+  }).strict()),
+  permissions: z.array(permissionSchema)
+}).strict();
+
 const permissionGuidanceSchema = z.object({
   locale: z.enum(["zh-CN", "en"]),
   artifactScope: z.string(),
@@ -157,6 +181,8 @@ const currentStepContentSchema = z.object({
 
 const runCurrentStepSchema = z.object({
   runId: z.string(),
+  runName: z.string(),
+  procedureName: z.string(),
   procedureAsserts: z.array(z.string()),
   step: z.discriminatedUnion("kind", [
     z.object({
@@ -197,6 +223,8 @@ const runCurrentStepSchema = z.object({
 
 const runCompletedSchema = z.object({
   runId: z.string(),
+  runName: z.string(),
+  procedureName: z.string(),
   procedureAsserts: z.array(z.string()),
   finalArtifacts: z.array(z.object({
     name: z.string(),
@@ -249,32 +277,22 @@ const definitions = {
     path: "acp-review/initial.hbs",
     audience: "acp_reviewer",
     purpose: "instruction",
-    schema: z.object({
-      rolePrompts: z.array(z.string()),
-      contract: z.object({
-        actionInstruction: z.string(),
-        procedureAsserts: z.array(z.string()),
-        actionAsserts: z.array(z.string()),
-        suggestions: z.array(z.string()),
-        details: z.array(z.string()),
-        artifact: z.object({
-          name: z.string(),
-          type: z.string(),
-          format: z.string(),
-          schema: z.string(),
-          final: z.boolean(),
-          reviewPolicy: z.string()
-        }).strict()
-      }).strict(),
-      earlierArtifacts: z.array(z.object({
-        stepId: z.string(),
-        artifactName: z.string()
-      }).strict()),
-      permissions: z.array(permissionSchema)
-    }).strict()
+    schema: acpArtifactReviewPromptSchema
   },
   "acp.artifact-review.reminder": {
     path: "acp-review/reminder.hbs",
+    audience: "acp_reviewer",
+    purpose: "next_action",
+    schema: z.object({}).strict()
+  },
+  "acp.artifact-review.initial-v2": {
+    path: "acp-review-v2/initial.hbs",
+    audience: "acp_reviewer",
+    purpose: "instruction",
+    schema: acpArtifactReviewPromptSchema
+  },
+  "acp.artifact-review.reminder-v2": {
+    path: "acp-review-v2/reminder.hbs",
     audience: "acp_reviewer",
     purpose: "next_action",
     schema: z.object({}).strict()

@@ -1,8 +1,8 @@
 !concept
 syntax: memsphere-20260721-stable
 names:
-  - Statement
   - memsphere-statement
+  - Statement
 defines:
   - memsphere 中用于表达可被核查的事实、规则、约束和建议的 Memory。
   - Statement 通过 asserts 列出必须成立的断言，通过 suggests 列出执行时可以参考但不强制满足的建议，并通过 sections 在同一领域内按树状层级组织较大的规则集合。
@@ -30,4 +30,4 @@ defines:
           - 读取一份树状 Statement 后，其中与当前任务相关的全部节点共同生效，不得只读取或应用根节点规则。
           - 按 Node 局部读取时，返回的根级与祖先 context 和目标 fragment 必须共同生效；任务涉及其他节点时必须继续读取。
   - !ref
-    target: schemas/Statement Schema
+    target: schemas/memsphere-statement-schema

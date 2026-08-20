@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   analyzeMemoryDescriptors,
   DefaultMemoryCatalog,
+  InvalidMemoryReferenceError,
   MemoryAmbiguityError,
+  MemoryCatalogDataError,
   MemoryNotFoundError,
   MemoryReferenceKindError
 } from "../src/memory/catalog.js";
@@ -42,8 +44,8 @@ const concept = (name: string, ...aliases: string[]): MemoryEntity => ({
 test("catalog lists stable public descriptors without reading bodies", async () => {
   const provider = new FakeProvider(
     [
-      { id: "/private/z.yaml", kind: "statements", names: ["Zed", " Z "], defines: ["Z summary"] },
-      { id: "/private/a.yaml", kind: "concepts", names: [" Alpha ", "A"], defines: ["Alpha summary"] }
+      { id: "/private/z.yaml", kind: "statements", names: ["zed", "Z"], defines: ["Z summary"] },
+      { id: "/private/a.yaml", kind: "concepts", names: ["alpha", "A"], defines: ["Alpha summary"] }
     ],
     {}
   );
@@ -51,8 +53,8 @@ test("catalog lists stable public descriptors without reading bodies", async () 
 
   assert.deepEqual(await catalog.list(), {
     memories: [
-      { reference: "concepts/Alpha", kind: "concepts", names: ["Alpha", "A"], defines: ["Alpha summary"] },
-      { reference: "statements/Zed", kind: "statements", names: ["Zed", "Z"], defines: ["Z summary"] }
+      { reference: "concepts/alpha", kind: "concepts", names: ["alpha", "A"], defines: ["Alpha summary"] },
+      { reference: "statements/zed", kind: "statements", names: ["zed", "Z"], defines: ["Z summary"] }
     ],
     next_cursor: null
   });
@@ -65,7 +67,7 @@ test("catalog folds structured definitions into counts while preserving prose", 
     [{
       id: "one",
       kind: "concepts",
-      names: ["Memory"],
+      names: ["memory"],
       defines: [
         "A managed memory.",
         { tag: "!statement", names: [], defines: [], asserts: ["Required."] },
@@ -77,9 +79,9 @@ test("catalog folds structured definitions into counts while preserving prose", 
 
   assert.deepEqual(await new DefaultMemoryCatalog(provider).list(), {
     memories: [{
-      reference: "concepts/Memory",
+      reference: "concepts/memory",
       kind: "concepts",
-      names: ["Memory"],
+      names: ["memory"],
       defines: ["A managed memory."],
       structured_defines: { statement: 1, schema: 1 }
     }],
@@ -90,84 +92,100 @@ test("catalog folds structured definitions into counts while preserving prose", 
 test("catalog filters exact normalized names and passes kind to provider", async () => {
   const provider = new FakeProvider(
     [
-      { id: "one", kind: "concepts", names: ["Memory", "记忆"], defines: [] },
-      { id: "two", kind: "concepts", names: ["Memory Bank", "store"], defines: [] }
+      { id: "one", kind: "concepts", names: ["memory", "记忆"], defines: [] },
+      { id: "two", kind: "concepts", names: ["memory-bank", "store"], defines: [] }
     ],
     {}
   );
   const catalog = new DefaultMemoryCatalog(provider);
 
   assert.deepEqual((await catalog.list({ kind: "concepts", query: " 记忆 " })).memories.map((item) => item.reference), [
-    "concepts/Memory"
+    "concepts/memory"
   ]);
-  assert.deepEqual((await catalog.list({ query: "Memory" })).memories.map((item) => item.reference), ["concepts/Memory"]);
+  assert.deepEqual((await catalog.list({ query: "memory" })).memories.map((item) => item.reference), ["concepts/memory"]);
   assert.deepEqual(provider.listCalls[0], { kind: "concepts" });
 });
 
 test("catalog resolve never reads and catalog read fetches only the unique candidate", async () => {
-  const entity = concept("Memory", "记忆");
+  const entity = concept("memory", "记忆");
   const provider = new FakeProvider(
     [{ id: "opaque-1", kind: "concepts", names: entity.names, defines: entity.defines }],
     { "opaque-1": entity }
   );
   const catalog = new DefaultMemoryCatalog(provider);
 
-  assert.equal((await catalog.resolve("记忆")).reference, "concepts/Memory");
-  assert.equal((await catalog.resolve("concepts/记忆")).reference, "concepts/Memory");
+  assert.equal((await catalog.resolve("记忆")).reference, "concepts/memory");
+  await assert.rejects(catalog.resolve("concepts/记忆"), InvalidMemoryReferenceError);
   assert.deepEqual(provider.readCalls, []);
-  assert.deepEqual(await catalog.read("concepts/Memory"), entity);
+  assert.deepEqual(await catalog.read("concepts/memory"), entity);
   assert.deepEqual(provider.readCalls, ["opaque-1"]);
 });
 
 test("catalog reports cross-kind ambiguity without reading and kind disambiguates", async () => {
-  const conceptEntity = concept("Shared");
+  const conceptEntity = concept("shared");
   const statementEntity: MemoryEntity = {
     tag: "!statement",
-    names: ["Shared"],
+    names: ["shared"],
     defines: [],
     asserts: ["Shared is a statement."]
   };
   const provider = new FakeProvider(
     [
-      { id: "concept", kind: "concepts", names: ["Shared"], defines: conceptEntity.defines },
-      { id: "statement", kind: "statements", names: ["Shared"], defines: statementEntity.defines }
+      { id: "concept", kind: "concepts", names: ["shared"], defines: conceptEntity.defines },
+      { id: "statement", kind: "statements", names: ["shared"], defines: statementEntity.defines }
     ],
     { concept: conceptEntity, statement: statementEntity }
   );
   const catalog = new DefaultMemoryCatalog(provider);
 
   await assert.rejects(
-    catalog.read("Shared"),
-    (error: unknown) => error instanceof MemoryAmbiguityError && assert.deepEqual(error.candidates, ["concepts/Shared", "statements/Shared"]) === undefined
+    catalog.read("shared"),
+    (error: unknown) => error instanceof MemoryAmbiguityError && assert.deepEqual(error.candidates, ["concepts/shared", "statements/shared"]) === undefined
   );
   assert.deepEqual(provider.readCalls, []);
-  assert.deepEqual(await catalog.read("Shared", { kind: "concepts" }), conceptEntity);
+  assert.deepEqual(await catalog.read("shared", { kind: "concepts" }), conceptEntity);
   assert.deepEqual(provider.readCalls, ["concept"]);
 });
 
 test("catalog rejects missing memories and conflicting explicit kinds without reading", async () => {
   const provider = new FakeProvider(
-    [{ id: "one", kind: "concepts", names: ["Memory", "记忆"], defines: [] }],
-    { one: concept("Memory", "记忆") }
+    [{ id: "one", kind: "concepts", names: ["memory", "记忆"], defines: [] }],
+    { one: concept("memory", "记忆") }
   );
   const catalog = new DefaultMemoryCatalog(provider);
 
   await assert.rejects(catalog.read("missing"), MemoryNotFoundError);
-  await assert.rejects(catalog.read("concepts/Memory", { kind: "schemas" }), MemoryReferenceKindError);
+  await assert.rejects(catalog.read("concepts/memory", { kind: "schemas" }), MemoryReferenceKindError);
+  await assert.rejects(catalog.read("concepts/记忆"), InvalidMemoryReferenceError);
+  await assert.rejects(catalog.read(" concepts/memory "), InvalidMemoryReferenceError);
   await assert.rejects(catalog.read("concepts/unknown"), MemoryNotFoundError);
   assert.deepEqual(provider.readCalls, []);
 });
 
 test("catalog conflict analysis is kind-scoped and preserves duplicate references", () => {
   const issues = analyzeMemoryDescriptors([
-    { id: "a", kind: "concepts", names: ["Memory", "shared"], defines: [] },
-    { id: "b", kind: "concepts", names: ["Other", "shared"], defines: [] },
-    { id: "c", kind: "statements", names: ["Memory", "Memory"], defines: [] },
-    { id: "d", kind: "concepts", names: ["Memory"], defines: [] }
+    { id: "a", kind: "concepts", names: ["memory", "shared"], defines: [] },
+    { id: "b", kind: "concepts", names: ["other", "shared"], defines: [] },
+    { id: "c", kind: "statements", names: ["memory", "memory"], defines: [] },
+    { id: "d", kind: "concepts", names: ["memory"], defines: [] }
   ]);
 
-  assert(issues.some((issue) => issue.name === "shared" && issue.references.join("|") === "concepts/Memory|concepts/Other"));
-  assert(issues.some((issue) => issue.name === "Memory" && issue.references.join("|") === "concepts/Memory|concepts/Memory"));
-  assert(issues.some((issue) => issue.message.includes("statements/Memory repeats")));
+  assert(issues.some((issue) => issue.name === "shared" && issue.references.join("|") === "concepts/memory|concepts/other"));
+  assert(issues.some((issue) => issue.name === "memory" && issue.references.join("|") === "concepts/memory|concepts/memory"));
+  assert(issues.some((issue) => issue.message.includes("statements/memory repeats")));
   assert(!issues.some((issue) => issue.message.includes("conflicts within statements")));
+});
+
+test("catalog rejects invalid canonical names and aliases from providers", async () => {
+  const invalidCanonical = new DefaultMemoryCatalog(new FakeProvider(
+    [{ id: "one", kind: "concepts", names: ["Memory Name"], defines: [] }],
+    {}
+  ));
+  await assert.rejects(invalidCanonical.list(), MemoryCatalogDataError);
+
+  const invalidAlias = new DefaultMemoryCatalog(new FakeProvider(
+    [{ id: "one", kind: "concepts", names: ["memory", " schemas/memory"], defines: [] }],
+    {}
+  ));
+  await assert.rejects(invalidAlias.list(), MemoryCatalogDataError);
 });

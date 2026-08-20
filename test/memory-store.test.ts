@@ -52,19 +52,19 @@ test("validateMemoryStore reports kind-scoped canonical and alias conflicts", as
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
     for (const kind of memoryKinds) await mkdir(join(memoryRoot, kind), { recursive: true });
-    await writeFile(join(memoryRoot, "concepts", "one.yaml"), withCurrentMemorySyntax("!concept\nnames: [Memory, shared]\ndefines: []\n"));
-    await writeFile(join(memoryRoot, "concepts", "two.yaml"), withCurrentMemorySyntax("!concept\nnames: [Other, shared]\ndefines: []\n"));
-    await writeFile(join(memoryRoot, "concepts", "three.yaml"), withCurrentMemorySyntax("!concept\nnames: [Memory]\ndefines: []\n"));
-    await writeFile(join(memoryRoot, "statements", "same-name.yaml"), withCurrentMemorySyntax("!statement\nnames: [Memory]\nasserts: [valid]\n"));
+    await writeFile(join(memoryRoot, "concepts", "one.yaml"), withCurrentMemorySyntax("!concept\nnames: [memory, shared]\ndefines: []\n"));
+    await writeFile(join(memoryRoot, "concepts", "two.yaml"), withCurrentMemorySyntax("!concept\nnames: [other, shared]\ndefines: []\n"));
+    await writeFile(join(memoryRoot, "concepts", "three.yaml"), withCurrentMemorySyntax("!concept\nnames: [memory]\ndefines: []\n"));
+    await writeFile(join(memoryRoot, "statements", "same-name.yaml"), withCurrentMemorySyntax("!statement\nnames: [memory]\nasserts: [valid]\n"));
 
     const result = await validateMemoryRoot(memoryRoot);
     assert(result.issues.some((issue) => issue.message.includes('memory name "shared" conflicts within concepts')));
-    assert(result.issues.some((issue) => issue.message.includes('memory name "Memory" conflicts within concepts')));
+    assert(result.issues.some((issue) => issue.message.includes('memory name "memory" conflicts within concepts')));
     assert(!result.issues.some((issue) => issue.message.includes("conflicts within statements")));
   });
 });
 
-test("validateMemoryStore reports normalized empty and repeated names with parse errors", async () => {
+test("validateMemoryStore rejects non-canonical names and malformed aliases with parse errors", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");
     for (const kind of memoryKinds) await mkdir(join(memoryRoot, kind), { recursive: true });
@@ -72,8 +72,8 @@ test("validateMemoryStore reports normalized empty and repeated names with parse
     await writeFile(join(memoryRoot, "schemas", "broken.yaml"), withCurrentMemorySyntax("!schema\nnames: [Broken\n"));
 
     const result = await validateMemoryRoot(memoryRoot);
-    assert(result.issues.some((issue) => issue.message.includes('repeats the normalized name "Memory"')));
-    assert(result.issues.some((issue) => issue.message.includes("alias at names[2] is empty")));
+    assert(result.issues.some((issue) => issue.message.includes("canonical Memory name must use lowercase ASCII kebab-case")));
+    assert(result.issues.some((issue) => issue.message.includes("Memory alias must not contain leading or trailing whitespace")));
     assert(result.issues.some((issue) => issue.path.endsWith("broken.yaml")));
   });
 });

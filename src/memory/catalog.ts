@@ -1,7 +1,9 @@
 import type { DefinitionPart, MemoryEntity } from "./ast.js";
 import type { MemoryKind } from "./kinds.js";
 import {
+  canonicalMemoryNameIssue,
   canonicalMemoryReference,
+  memoryAliasIssue,
   normalizeMemoryName,
   parseLogicalMemoryReference
 } from "./logical-reference.js";
@@ -93,6 +95,13 @@ export class MemoryReferenceKindError extends Error {
   }
 }
 
+export class InvalidMemoryReferenceError extends Error {
+  constructor(readonly input: string) {
+    super(`invalid Memory reference "${input}"; expected <kind>/<lowercase-kebab-case-canonical-name>`);
+    this.name = "InvalidMemoryReferenceError";
+  }
+}
+
 export class DefaultMemoryCatalog implements MemoryCatalog {
   readonly #provider: MemoryProvider;
 
@@ -168,24 +177,27 @@ function buildCatalogIndex(descriptors: ProviderMemoryDescriptor[]): CatalogInde
     }
     providerIds.add(source.id);
 
-    const names = source.names.map(normalizeMemoryName);
-    const canonicalName = names[0];
-    if (!canonicalName) {
+    const names = [...source.names];
+    const canonicalName = names[0] ?? "";
+    const canonicalIssue = canonicalMemoryNameIssue(canonicalName);
+    if (canonicalIssue) {
       issues.push({
         kind: source.kind,
         references: [],
-        message: "invalid memory name: canonical name is empty after trimming"
+        message: `invalid canonical Memory name ${JSON.stringify(canonicalName)}: ${canonicalIssue}`
       });
       continue;
     }
 
     const reference = canonicalMemoryReference(source.kind, canonicalName)!;
-    const emptyAlias = names.findIndex((name, index) => index > 0 && name.length === 0);
-    if (emptyAlias !== -1) {
+    for (const [index, alias] of names.entries()) {
+      if (index === 0) continue;
+      const aliasIssue = memoryAliasIssue(alias);
+      if (!aliasIssue) continue;
       issues.push({
         kind: source.kind,
         references: [reference],
-        message: `invalid memory name: alias at names[${emptyAlias}] is empty after trimming`
+        message: `invalid Memory alias at names[${index}] for ${reference}: ${aliasIssue}`
       });
     }
 
@@ -271,7 +283,9 @@ function resolveEntry(
   query: MemoryResolveQuery
 ): IndexedMemory {
   const input = normalizeMemoryName(referenceOrName);
+  if (referenceOrName !== input && input.includes("/")) throw new InvalidMemoryReferenceError(referenceOrName);
   const explicit = parseLogicalMemoryReference(input);
+  if (!explicit && input.includes("/")) throw new InvalidMemoryReferenceError(input);
   if (explicit && query.kind && explicit.kind !== query.kind) {
     throw new MemoryReferenceKindError(explicit.kind, query.kind);
   }
@@ -279,11 +293,16 @@ function resolveEntry(
   const matches = entries.filter((entry) => {
     if (query.kind && entry.descriptor.kind !== query.kind) return false;
     if (explicit) {
-      return entry.descriptor.kind === explicit.kind && entry.descriptor.names.includes(explicit.name);
+      return entry.descriptor.reference === `${explicit.kind}/${explicit.name}`;
     }
     return entry.descriptor.names.includes(input);
   });
 
+  if (explicit && matches.length === 0 && entries.some((entry) =>
+    entry.descriptor.kind === explicit.kind && entry.descriptor.names.slice(1).includes(explicit.name)
+  )) {
+    throw new InvalidMemoryReferenceError(input);
+  }
   if (matches.length === 0) throw new MemoryNotFoundError(input, query.kind);
   if (matches.length > 1) {
     throw new MemoryAmbiguityError(

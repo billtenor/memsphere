@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { artifactReviewAssignmentId } from "../artifact-review.js";
 import type { MemsphereConfig } from "../config.js";
 import {
@@ -8,6 +7,7 @@ import {
   type RunState
 } from "../run/store.js";
 import { currentCliRuntimeDescriptor, type CliRuntimeDescriptor } from "./cli-runtime.js";
+import { spawnCommand } from "../platform-process.js";
 
 export async function dispatchArtifactReviewAgents(input: {
   config: MemsphereConfig;
@@ -37,10 +37,11 @@ export async function dispatchArtifactReviewAgents(input: {
       "--node-executable", runtime.nodeExecutable,
       "--cli-entrypoint", runtime.cliEntrypoint
     ];
-    const worker = spawn(runtime.nodeExecutable, args, {
+    const worker = spawnCommand(runtime.nodeExecutable, args, {
       cwd: process.cwd(),
       detached: true,
-      stdio: "ignore"
+      stdio: "ignore",
+      windowsHide: true
     });
     try {
       await new Promise<void>((resolveSpawn, rejectSpawn) => {

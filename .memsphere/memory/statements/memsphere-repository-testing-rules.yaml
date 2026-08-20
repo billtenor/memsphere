@@ -1,8 +1,8 @@
 !statement
 syntax: memsphere-20260719-stable
 names:
-  - memsphere 代码仓库测试规范
   - memsphere-repository-testing-rules
+  - memsphere 代码仓库测试规范
 defines:
   - 规定 memsphere 代码与 Memory 变更交付前的最低测试和校验要求。
 asserts:
