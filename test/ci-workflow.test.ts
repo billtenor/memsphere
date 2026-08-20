@@ -30,6 +30,7 @@ type Workflow = {
 test("CI bounds and supersedes cross-platform browser test runs", async () => {
   const workflow = parse(await readFile(".github/workflows/ci.yml", "utf8")) as Workflow;
   const windowsPackageSmoke = await readFile("scripts/windows-package-smoke.mjs", "utf8");
+  const normalizedWindowsPackageSmoke = windowsPackageSmoke.replaceAll("\r\n", "\n");
   const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
     scripts?: Record<string, string>;
   };
@@ -59,11 +60,11 @@ test("CI bounds and supersedes cross-platform browser test runs", async () => {
   assert.equal(npmTest?.if, undefined);
   assert.equal(packageJson.scripts?.["test:ci"], "node scripts/run-tests.mjs --test-concurrency=1");
   assert.match(
-    windowsPackageSmoke,
+    normalizedWindowsPackageSmoke,
     /names:\s*\n\s*- windows-ci-smoke\n\s*- Windows CI smoke/
   );
   assert.match(
-    windowsPackageSmoke,
+    normalizedWindowsPackageSmoke,
     /\["run", "start", "Windows CI smoke", "--name", "Windows packaged smoke"\]/
   );
 });
