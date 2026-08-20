@@ -62,6 +62,7 @@ import {
 import {
   ArtifactAuthorizationFailure,
   ArtifactReviewConflictError,
+  buildRunBindingSnapshot,
   buildSchemaWritingSnapshot,
   currentArtifactReview,
   ensureCurrentSchemaDraft,
@@ -73,6 +74,7 @@ import {
   retryArtifactReviewAgentAssignment,
   resolveArtifactReviewComment,
   submitArtifactReviewAssignment,
+  updateRunSlotBinding,
   updateArtifactReviewDraft,
   type ArtifactReviewDraftInput,
   type ArtifactReviewContext,
@@ -501,6 +503,32 @@ async function handleRequest(
     return;
   }
 
+  const runBindingsMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/bindings$/);
+  if (runBindingsMatch) {
+    const runId = decodeURIComponent(runBindingsMatch[1]);
+    try {
+      if (request.method === "GET") {
+        sendJson(response, 200, buildRunBindingSnapshot(await readRun(runsRoot, runId)));
+        return;
+      }
+      if (request.method === "POST") {
+        if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+        const body = await readJsonBody<{ slot?: unknown; actorIds?: unknown; skip?: unknown }>(request);
+        const slot = typeof body.slot === "string" ? body.slot : "";
+        const actorIds = Array.isArray(body.actorIds) && body.actorIds.every((actor) => typeof actor === "string")
+          ? body.actorIds as string[]
+          : undefined;
+        const skip = body.skip === true;
+        const result = await updateRunSlotBinding({ runsRoot, runId, slot, actorIds, skip });
+        sendJson(response, 200, { change: result.change, bindings: result.snapshot });
+        return;
+      }
+    } catch (error) {
+      sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+  }
+
   const artifactReviewRoundMatch = url.pathname.match(/^\/api\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)$/);
   if (request.method === "GET" && artifactReviewRoundMatch) {
     const actorId = url.searchParams.get("actor_id")?.trim();
@@ -926,6 +954,7 @@ async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknow
   const schemaWriting = await schemaWritingPayload(runsRoot, hydrated);
   return {
     ...publicRun,
+    bindingSnapshot: buildRunBindingSnapshot(hydrated),
     artifactReview: review ? artifactReviewSummary(review, hydrated.controlPlane) : undefined,
     artifactReviewSummaries: (hydrated.artifactReviews ?? []).map((candidate) =>
       artifactReviewSummary(candidate, hydrated.controlPlane)

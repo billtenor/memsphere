@@ -33,9 +33,18 @@ import {
   MemorySyntaxRegistry,
   type MemorySyntaxVersion
 } from "./syntax.js";
+import {
+  canonicalMemoryNameIssue,
+  memoryAliasIssue,
+  parseLogicalMemoryReference
+} from "./logical-reference.js";
 
 const nonEmptyString = z.string().min(1);
 const stringArray = z.array(nonEmptyString).default([]);
+const canonicalMemoryNameSchema = z.string().superRefine((value, context) => {
+  const issue = canonicalMemoryNameIssue(value);
+  if (issue) context.addIssue({ code: z.ZodIssueCode.custom, message: issue });
+});
 const namesSchema = z.array(nonEmptyString).superRefine((names, context) => {
   const seen = new Map<string, number>();
   for (const [index, name] of names.entries()) {
@@ -110,13 +119,10 @@ let legacyIfNodeSchema: z.ZodType<IfNode, z.ZodTypeDef, unknown>;
 const definesSchema = z.lazy(() => z.array(definitionPartSchema)).default([]);
 
 const logicalMemoryReferenceSchema = nonEmptyString.superRefine((value, context) => {
-  const separator = value.indexOf("/");
-  const kind = separator > 0 ? value.slice(0, separator) : "";
-  const name = separator > 0 ? value.slice(separator + 1).trim() : "";
-  if (!separator || separator <= 0 || !["concepts", "statements", "schemas", "procedures"].includes(kind) || !name) {
+  if (!parseLogicalMemoryReference(value)) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "Memory reference target must be a logical reference such as schemas/Name"
+      message: "Memory reference target must use <kind>/<lowercase-kebab-case-canonical-name>"
     });
   }
 });
@@ -407,7 +413,7 @@ const legacyArtifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> =
   name: nonEmptyString,
   type: nonEmptyString.default("string"),
   format: artifactFormatInputSchema,
-  schema: z.lazy(() => z.union([nonEmptyString, schemaNodeSchema, memoryRefNodeSchema])).optional(),
+  schema: z.lazy(() => z.union([canonicalMemoryNameSchema, schemaNodeSchema, memoryRefNodeSchema])).optional(),
   final: z.boolean().optional()
 }).strict().superRefine((artifact, context) => {
   const formatName = artifact.format.name;
@@ -531,7 +537,7 @@ const legacyPlainActionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> 
 
 const callNodeSchema: z.ZodType<CallNode, z.ZodTypeDef, unknown> = z.object({
   tag: z.literal("!call"),
-  target: nonEmptyString
+  target: canonicalMemoryNameSchema
 }).strict();
 
 const legacyWhileNodeSchema: z.ZodType<WhileNode, z.ZodTypeDef, unknown> = z.lazy(() =>
@@ -590,6 +596,25 @@ function requireTopLevelName<T extends { names: string[] }>(schema: z.ZodType<T,
         path: ["names"],
         message: "top-level memory must have a non-empty names list"
       });
+      return;
+    }
+    const canonicalIssue = canonicalMemoryNameIssue(node.names[0]);
+    if (canonicalIssue) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["names", 0],
+        message: canonicalIssue
+      });
+    }
+    for (const [index, alias] of node.names.entries()) {
+      if (index === 0) continue;
+      const aliasIssue = memoryAliasIssue(alias);
+      if (!aliasIssue) continue;
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["names", index],
+        message: aliasIssue
+      });
     }
   });
 }
@@ -599,7 +624,7 @@ const conceptNodeSchema: z.ZodType<ConceptNode, z.ZodTypeDef, unknown> = require
     tag: z.literal("!concept"),
     names: namesSchema,
     defines: definesSchema,
-    extends: stringArray.optional()
+    extends: z.array(canonicalMemoryNameSchema).default([]).optional()
   }).strict())
 );
 

@@ -50,32 +50,32 @@ test("Memory syntax migration availability comes from the migration graph", () =
 test("Memory syntax dispatch accepts registered stable versions and rejects nested syntax fields", () => {
   const current = parseMemoryEntity("concepts", parseMemoryYaml(`!concept
 syntax: ${currentMemorySyntax}
-name: Current
+name: current
 defines: [Current syntax.]
 `));
   assert.equal(current.syntax, currentMemorySyntax);
 
   const previous = parseMemoryEntity("concepts", parseMemoryYaml(`!concept
 syntax: ${firstStableMemorySyntax}
-name: Previous
+name: previous
 defines: [Previous stable syntax remains executable.]
 `));
   assert.equal(previous.syntax, firstStableMemorySyntax);
 
   assert.throws(() => parseMemoryEntity("concepts", parseMemoryYaml(`!concept
-name: Legacy
+name: legacy
 defines: [Legacy syntax.]
 `)), /Unsupported Memory syntax start/);
 
   assert.throws(() => parseMemoryEntity("concepts", parseMemoryYaml(`!concept
 syntax: memsphere-20990101-stable
-name: Future
+name: future
 defines: [Future syntax.]
 `)), /Unsupported Memory syntax/);
 
   assert.throws(() => parseMemoryEntity("statements", parseMemoryYaml(`!statement
 syntax: ${currentMemorySyntax}
-name: Root
+name: root
 sections:
   - !statement
     syntax: ${currentMemorySyntax}
@@ -170,7 +170,7 @@ test("Memory syntax migration upgrades start atomically and is idempotent", asyn
     for (const kind of memoryKinds) await mkdir(join(memoryRoot, kind), { recursive: true });
     const path = join(memoryRoot, "concepts", "Legacy.yaml");
     await writeFile(path, `!concept
-name: Legacy
+name: legacy
 defines: [Legacy syntax.]
 `);
     const config: MemsphereConfig = {
@@ -254,7 +254,7 @@ test("Memory syntax migration leaves stable files out of legacy contract migrati
     const memoryRoot = join(dir, "memory");
     for (const kind of memoryKinds) await mkdir(join(memoryRoot, kind), { recursive: true });
     await writeFile(join(memoryRoot, "concepts", "legacy.yaml"), `!concept
-name: Legacy
+name: legacy
 defines: [Legacy syntax.]
 `);
     const schemaPath = join(memoryRoot, "schemas", "stable-rows.yaml");

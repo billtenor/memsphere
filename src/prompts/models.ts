@@ -126,6 +126,8 @@ export type ArtifactReviewSummaryPromptModel = {
 
 export type RunCurrentStepPromptModel = {
   runId: string;
+  runName: string;
+  procedureName: string;
   procedureAsserts: string[];
   step:
     | {
@@ -209,6 +211,8 @@ export type RunCurrentStepPromptModel = {
 
 export type RunCompletedPromptModel = {
   runId: string;
+  runName: string;
+  procedureName: string;
   procedureAsserts: string[];
   finalArtifacts: Array<{ name: string; path?: string }>;
 };

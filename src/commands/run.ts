@@ -27,6 +27,7 @@ import {
 } from "../prompts/index.js";
 import {
   type ArtifactReportSource,
+  buildRunBindingSnapshot,
   buildSchemaWritingSnapshot,
   currentArtifactReview,
   currentFrame,
@@ -35,16 +36,19 @@ import {
   ensureCurrentSchemaDraft,
   findArtifactReview,
   listRuns,
+  normalizeRunName,
   readRun,
   repeatRun,
   resolveArtifactReviewComment,
   retryArtifactReviewAgentAssignment,
+  runDisplayName,
   RunReviewConfigurationRequired,
   reportRun,
   type SchemaWritingSnapshot,
   skipRun,
   startRun,
   submitArtifactReviewRunnerVote,
+  updateRunSlotBinding,
   waitForArtifactReview,
   type RunState
 } from "../run/store.js";
@@ -60,6 +64,7 @@ type ReportOptions = {
 
 type RunStartOptions = {
   file?: string;
+  name?: string;
   reviewConfig?: string;
 };
 
@@ -98,6 +103,14 @@ type RunStepShowOptions = RunShowOptions & { step?: string };
 
 type RunSchemaShowOptions = RunShowOptions;
 
+type RunBindingShowOptions = RunShowOptions;
+
+type RunBindingUpdateOptions = RunShowOptions & {
+  slot?: string;
+  actor?: string[];
+  skip?: boolean;
+};
+
 type RunArtifactShowOptions = RunShowOptions & {
   assignment?: string;
   step?: string;
@@ -123,10 +136,11 @@ type AgentReviewSubmitOptions = AgentReviewAssignmentOptions & {
 };
 
 export async function runStartCommand(procedureName: string | undefined, options: RunStartOptions = {}): Promise<void> {
-  const name = procedureName?.trim();
+  const procedure = procedureName?.trim();
   const procedureFile = options.file?.trim();
-  if (!name && !procedureFile) throw new Error("provide a procedure name or --file <path>");
-  if (name && procedureFile) throw new Error("use either a procedure name or --file <path>, not both");
+  if (!procedure && !procedureFile) throw new Error("provide a procedure name or --file <path>");
+  if (procedure && procedureFile) throw new Error("use either a procedure name or --file <path>, not both");
+  const runName = normalizeRunName(options.name);
 
   const config = await readConfig();
   const memoryCatalog = createMemoryCatalogForConfig(config);
@@ -138,8 +152,9 @@ export async function runStartCommand(procedureName: string | undefined, options
     run = await startRun({
       memoryRoot: config.memoryRoot,
       runsRoot: config.runsRoot,
+      name: runName,
       language: config.language,
-      procedureName: name,
+      procedureName: procedure,
       procedureFile,
       controlPlane: config.controlPlane,
       reviewConfiguration,
@@ -333,6 +348,31 @@ export async function runShowCommand(options: RunShowOptions): Promise<void> {
   const config = await readConfig();
   const run = await readRun(config.runsRoot, runId);
   printStructured(buildRunOverview(run), options.output);
+}
+
+export async function runBindingShowCommand(options: RunBindingShowOptions): Promise<void> {
+  const runId = requireRunId(options.run);
+  const config = await readConfig();
+  const run = await readRun(config.runsRoot, runId);
+  printStructured(buildRunBindingSnapshot(run), options.output);
+}
+
+export async function runBindingUpdateCommand(options: RunBindingUpdateOptions): Promise<void> {
+  const runId = requireRunId(options.run);
+  const slot = options.slot?.trim();
+  if (!slot) throw new Error("--slot <procedure::slot> is required");
+  const actorIds = options.actor?.map((actor) => actor.trim()).filter(Boolean);
+  if (options.skip && actorIds?.length) throw new Error("use --actor or --skip, not both");
+  if (!options.skip && !actorIds?.length) throw new Error("provide at least one --actor <id> or use --skip");
+  const config = await readConfig();
+  const result = await updateRunSlotBinding({
+    runsRoot: config.runsRoot,
+    runId,
+    slot,
+    actorIds: options.skip ? undefined : actorIds,
+    skip: options.skip
+  });
+  printStructured({ change: result.change, bindings: result.snapshot }, options.output);
 }
 
 export async function runTryRunCommand(options: RunIdOptions): Promise<void> {
@@ -535,7 +575,7 @@ export async function runStatusCommand(options: RunIdOptions): Promise<void> {
   }
 
   for (const run of runs) {
-    console.log(`${run.id} ${run.status} ${run.procedureName}`);
+    console.log(`${run.id} ${run.status} ${runDisplayName(run)} · ${run.procedureName}`);
   }
 }
 
@@ -611,6 +651,7 @@ export function buildRunOverview(run: RunState): unknown {
   const steps = runStepLocations(run);
   return {
     id: run.id,
+    name: run.name,
     procedureName: run.procedureName,
     status: run.status,
     createdAt: run.createdAt,

@@ -44,9 +44,16 @@ comments: []
 `);
 }
 
-async function writeRunFixture(runsRoot: string, id: string, status: "running" | "done", layout: "directory" | "legacy-file" = "directory"): Promise<void> {
+async function writeRunFixture(
+  runsRoot: string,
+  id: string,
+  status: "running" | "done",
+  layout: "directory" | "legacy-file" = "directory",
+  name?: string
+): Promise<void> {
   const payload = `${JSON.stringify({
     id,
+    ...(name ? { name } : {}),
     status,
     procedureName: "demo",
     memoryRoot: "/tmp/memory",
@@ -114,7 +121,7 @@ test("archives and restores done run directories", async () => {
     const archiveRoot = join(dir, "archives");
     const runsRoot = join(dir, "runs");
     const id = "run-done";
-    await writeRunFixture(runsRoot, id, "done");
+    await writeRunFixture(runsRoot, id, "done", "directory", "Archived delivery");
 
     await archiveRun({ archiveRoot, runsRoot, id });
 
@@ -125,6 +132,7 @@ test("archives and restores done run directories", async () => {
 
     assert.equal(restored.id, id);
     assert.equal(await pathExists(join(runsRoot, id, `${id}.json`)), true);
+    assert.match(await readFile(join(runsRoot, id, `${id}.json`), "utf8"), /"name": "Archived delivery"/);
   });
 });
 
@@ -144,6 +152,7 @@ test("archives and restores legacy root-level run files", async () => {
 
     assert.equal(await pathExists(join(runsRoot, `${id}.json`)), true);
     assert.match(await readFile(join(runsRoot, `${id}.json`), "utf8"), /"status": "done"/);
+    assert.doesNotMatch(await readFile(join(runsRoot, `${id}.json`), "utf8"), /"name"/);
   });
 });
 

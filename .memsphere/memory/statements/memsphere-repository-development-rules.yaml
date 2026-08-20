@@ -1,8 +1,8 @@
 !statement
 syntax: memsphere-20260719-stable
 names:
-  - memsphere 代码仓库开发规范
   - memsphere-repository-development-rules
+  - memsphere 代码仓库开发规范
 defines:
   - 规定 memsphere 代码仓库的开发要求，并按主题组织可扩展的规范章节。
 sections:

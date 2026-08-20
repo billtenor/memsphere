@@ -98,7 +98,7 @@ export const browserHtml = String.raw`<!doctype html>
     .content { min-width: 0; padding: 22px 28px 48px; }
     .toolbar { margin-bottom: 18px; }
     .toolbar-actions, .comment-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .title { font-size: 26px; line-height: 1.2; }
+    .title { font-size: 26px; line-height: 1.2; overflow-wrap: anywhere; }
     .subtitle { margin-top: 7px; font-size: 13px; overflow-wrap: anywhere; }
     .btn { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); padding: 7px 10px; }
     .btn:not(:disabled):hover { border-color: var(--accent); }
@@ -114,7 +114,7 @@ export const browserHtml = String.raw`<!doctype html>
     .error-list { margin: 0; padding-left: 18px; }
     .error-list li { margin: 6px 0; overflow-wrap: anywhere; }
     .meta { display: flex; gap: 8px; flex-wrap: wrap; margin: 13px 0 18px; }
-    .pill { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 3px 8px; font-size: 12px; }
+    .pill { max-width: 100%; overflow-wrap: anywhere; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 3px 8px; font-size: 12px; }
     button.pill { cursor: pointer; }
     button.pill:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
     .archive-run-action { align-self: center; min-height: 30px; min-width: 52px; padding: 5px 10px; font-size: 12px; line-height: 1.45; color: #4f5a5c; background: var(--surface); border-color: #c7cfca; box-shadow: var(--shadow); }
@@ -193,6 +193,12 @@ export const browserHtml = String.raw`<!doctype html>
     .call-link { color: var(--accent); text-decoration: none; font-weight: 700; }
     .call-link:hover { text-decoration: underline; }
     .task-summary { display: grid; gap: 12px; }
+    .run-binding-list { display: grid; gap: 10px; }
+    .run-binding-row { border: 1px solid var(--line); border-radius: 7px; padding: 10px; display: grid; gap: 8px; }
+    .run-binding-head, .run-binding-actions, .run-binding-actors { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .run-binding-head { justify-content: space-between; }
+    .run-binding-actor { display: inline-flex; gap: 5px; align-items: center; }
+    .run-binding-history { margin: 8px 0 0; padding-left: 18px; color: var(--muted); }
     .task-step { border-left: 4px solid var(--accent); }
     .task-step-spotlight { animation: taskStepSpotlight 1600ms ease-out; box-shadow: 0 0 0 3px rgba(40, 108, 103, .18), var(--shadow); }
     .task-result { margin-top: 8px; }
@@ -643,6 +649,7 @@ export const browserHtml = String.raw`<!doctype html>
       defines: { zh: "定义", yaml: "defines" },
       asserts: { zh: "断言", yaml: "asserts" },
       procedureAsserts: { zh: "流程断言", yaml: "Procedure Asserts" },
+      procedureName: { zh: "流程", yaml: "Procedure" },
       suggests: { zh: "建议", yaml: "suggests" },
       sections: { zh: "章节", yaml: "sections" },
       goals: { zh: "目标", yaml: "goals" },
@@ -3116,7 +3123,8 @@ export const browserHtml = String.raw`<!doctype html>
       state.filtered = state.memories.filter((memory) => {
         if (state.hideSystemMemories && isSystemMemory(memory)) return false;
         if (!q) return true;
-        return [memory.kind, memory.path, errorText(memory.error), ...(memory.entity?.names || [])].join(" ").toLowerCase().includes(q);
+        const identity = memory.error ? memory.path : memory.id;
+        return [memory.kind, identity, errorText(memory.error), ...(memory.entity?.names || [])].join(" ").toLowerCase().includes(q);
       });
       updateMemoryCount();
     }
@@ -3135,8 +3143,8 @@ export const browserHtml = String.raw`<!doctype html>
         for (const memory of group) {
           const button = document.createElement("button");
           button.className = "memory-button" + (memory.id === state.selectedId ? " active" : "");
-          button.textContent = memory.error ? invalidMemoryName(memory) : primaryName(memory.entity);
-          button.title = memory.error ? errorText(memory.error) : primaryName(memory.entity);
+          button.textContent = memory.error ? invalidMemoryName(memory) : memoryDisplayName(memory.entity);
+          button.title = memory.error ? errorText(memory.error) : memory.id;
           button.addEventListener("click", () => {
             state.routeError = "";
             state.routeLanding = "";
@@ -3206,7 +3214,7 @@ export const browserHtml = String.raw`<!doctype html>
           button.type = "button";
           button.className = "task-card-main";
           const title = document.createElement("b");
-          title.textContent = run.procedureName;
+          title.textContent = runDisplayName(run);
           const meta = document.createElement("span");
           meta.className = "muted";
           meta.textContent = shortRunId(run.id) + " · " + run.events.length + " artifact(s)";
@@ -3240,24 +3248,29 @@ export const browserHtml = String.raw`<!doctype html>
       return state.runs.find(run => run.id === state.selectedTaskId) || state.runs[0] || null;
     }
 
+    function runDisplayName(run) {
+      return run?.name?.trim() || run?.procedureName || "";
+    }
+
     function renderSelectedTask() {
       const run = selectedTask();
       if (!run) {
         el.title.textContent = "Tasks";
         el.subtitle.textContent = "No runs found.";
         el.detail.className = "empty";
-        el.detail.innerHTML = 'Start one with <code>memsphere run start &lt;procedure&gt;</code>.';
+        el.detail.innerHTML = 'Start one with <code>memsphere run start &lt;procedure&gt; --name &lt;run-name&gt;</code>.';
         return;
       }
 
       state.selectedTaskId = run.id;
       saveSelectedTask();
-      el.title.textContent = run.procedureName;
+      el.title.textContent = runDisplayName(run);
       el.subtitle.textContent = run.id;
       el.detail.className = "task-summary";
       el.detail.innerHTML = "";
       el.detail.append(renderRunMeta(run));
       appendOptional(el.detail, renderRunProcedureAsserts(run));
+      appendOptional(el.detail, renderRunBindings(run));
       if (run.plan && run.plan.length) {
         el.detail.append(renderRunFlow(run));
         el.detail.append(renderFinalArtifacts(run));
@@ -3268,6 +3281,7 @@ export const browserHtml = String.raw`<!doctype html>
     function renderRunMeta(run) {
       const meta = document.createElement("div");
       meta.className = "meta";
+      meta.append(pill(t("procedureName") + ": " + run.procedureName));
       meta.append(pill(run.status, false, statusPillClass(run.status)));
       if (run.contractVersion === 1 || run.readOnly) meta.append(pill(t("legacyReadOnly"), false, "warn"));
       meta.append(pill(run.stack.length + " active frame(s)"));
@@ -3289,6 +3303,114 @@ export const browserHtml = String.raw`<!doctype html>
       if (commentCount) meta.append(pill(commentCount + " review comments", false, "warn"));
       return meta;
     }
+
+    function renderRunBindings(run) {
+      const slots = Object.entries(run.reviewConfiguration?.slots || {});
+      const actors = Object.entries(run.controlPlane?.actors || {});
+      if (!slots.length || !actors.length) return null;
+      const panel = document.createElement("section");
+      panel.className = "panel run-bindings";
+      panel.append(blockTitle(displayLanguage === "zh" ? "运行期评审绑定" : "Runtime review bindings"));
+      const help = document.createElement("div");
+      help.className = "muted";
+      help.textContent = displayLanguage === "zh"
+        ? "换绑只影响尚未创建的 Review；已创建 Review 的参与者保持不变。"
+        : "Changes affect only Reviews that have not been created; existing Review participants stay frozen.";
+      panel.append(help);
+      const list = document.createElement("div");
+      list.className = "run-binding-list";
+      const bindingSnapshotSlots = new Map((run.bindingSnapshot?.slots || []).map(item => [item.key, item]));
+      for (const [slot, binding] of slots) {
+        const row = document.createElement("div");
+        row.className = "run-binding-row";
+        const head = document.createElement("div");
+        head.className = "run-binding-head";
+        const name = document.createElement("b");
+        name.textContent = artifactReviewRoleDisplayName(slot);
+        const bindingSnapshot = bindingSnapshotSlots.get(slot);
+        const scopeCount = bindingSnapshot?.reviewScopes?.length || 0;
+        head.append(name, pill(scopeCount + (displayLanguage === "zh" ? " 个 Review scope" : " Review scopes")));
+        if (bindingSnapshot?.reviewIds?.length) {
+          head.append(pill(bindingSnapshot.reviewIds.length + (displayLanguage === "zh" ? " 个既有 Review 保持不变" : " existing Reviews preserved"), false, "done"));
+        }
+        row.append(head);
+
+        const actorChoices = document.createElement("div");
+        actorChoices.className = "run-binding-actors";
+        const selected = new Set(binding.actorIds || []);
+        for (const [actorId, actor] of actors) {
+          const label = document.createElement("label");
+          label.className = "run-binding-actor";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.value = actorId;
+          checkbox.checked = selected.has(actorId);
+          checkbox.disabled = run.status !== "running" || run.readOnly || binding.skip === true;
+          label.append(checkbox, document.createTextNode(actor.name + " · " + actor.kind));
+          actorChoices.append(label);
+        }
+        row.append(actorChoices);
+
+        const actions = document.createElement("div");
+        actions.className = "run-binding-actions";
+        const skipLabel = document.createElement("label");
+        skipLabel.className = "run-binding-actor";
+        const skip = document.createElement("input");
+        skip.type = "checkbox";
+        skip.checked = binding.skip === true;
+        skip.disabled = run.status !== "running" || run.readOnly;
+        skip.addEventListener("change", () => {
+          for (const checkbox of actorChoices.querySelectorAll('input[type="checkbox"]')) checkbox.disabled = skip.checked;
+        });
+        skipLabel.append(skip, document.createTextNode(displayLanguage === "zh" ? "跳过未来评审" : "Skip future reviews"));
+        const save = document.createElement("button");
+        save.type = "button";
+        save.className = "btn primary";
+        save.textContent = displayLanguage === "zh" ? "更新绑定" : "Update binding";
+        save.disabled = run.status !== "running" || run.readOnly;
+        save.addEventListener("click", () => runButtonAction(save, async () => {
+          const actorIds = [...actorChoices.querySelectorAll('input[type="checkbox"]:checked')].map(input => input.value);
+          await updateRunBinding(run, slot, skip.checked, actorIds);
+        }));
+        actions.append(skipLabel, save);
+        row.append(actions);
+        list.append(row);
+      }
+      panel.append(list);
+      if (run.bindingChanges?.length) {
+        panel.append(blockTitle(displayLanguage === "zh" ? "换绑历史" : "Binding history"));
+        const history = document.createElement("ul");
+        history.className = "run-binding-history";
+        for (const change of [...run.bindingChanges].reverse()) {
+          const item = document.createElement("li");
+          item.textContent = formatTime(change.changedAt) + " · " + artifactReviewRoleDisplayName(change.slot)
+            + " · " + runBindingValueLabel(change.before, run) + " → " + runBindingValueLabel(change.after, run);
+          history.append(item);
+        }
+        panel.append(history);
+      }
+      return panel;
+    }
+
+    async function updateRunBinding(run, slot, skip, actorIds) {
+      const response = await settingsFetch("/api/runs/" + encodeURIComponent(run.id) + "/bindings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(skip ? { slot, skip: true } : { slot, actorIds })
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || await response.text());
+      }
+      await loadRuns();
+      renderAll();
+    }
+
+    function runBindingValueLabel(binding, run) {
+      if (binding?.skip) return displayLanguage === "zh" ? "跳过" : "skip";
+      return (binding?.actorIds || []).map(actorId => run.controlPlane?.actors?.[actorId]?.name || actorId).join(", ");
+    }
+
 
     function renderRunProcedureAsserts(run) {
       const values = activeRunProcedureAsserts(run);
@@ -3930,8 +4052,8 @@ export const browserHtml = String.raw`<!doctype html>
         return;
       }
       if (!currentReviewSnapshot("memory")) state.selectedId = memory.id;
-      el.title.textContent = primaryName(memory.entity);
-      el.subtitle.textContent = memory.path;
+      el.title.textContent = memoryDisplayName(memory.entity);
+      el.subtitle.textContent = memory.id;
       el.detail.className = "";
       el.detail.innerHTML = "";
       state.renderLine = 0;
@@ -3951,6 +4073,11 @@ export const browserHtml = String.raw`<!doctype html>
 
     function primaryName(entity) {
       return entity && Array.isArray(entity.names) && entity.names.length ? entity.names[0] : "(unnamed)";
+    }
+
+    function memoryDisplayName(entity) {
+      if (!entity || !Array.isArray(entity.names)) return "(unnamed)";
+      return entity.names[1] || entity.names[0] || "(unnamed)";
     }
 
     function displayName(entity, fallback) {

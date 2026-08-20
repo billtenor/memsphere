@@ -12,9 +12,11 @@ import {
   appendArtifactReviewAgentComment,
   ArtifactAuthorizationFailure,
   artifactSchemaName,
+  buildRunBindingSnapshot,
   buildSchemaWritingSnapshot,
   claimArtifactReviewAgentAssignment,
   currentArtifactReview,
+  currentFrame,
   currentSchemaFinalization,
   currentStep,
   enterSchema,
@@ -30,6 +32,7 @@ import {
   skipRun,
   startRun,
   updateArtifactReviewDraft,
+  updateRunSlotBinding,
   waitForArtifactReview
 } from "../src/run/store.js";
 import { validateMemoryRoot } from "../src/validation.js";
@@ -91,9 +94,10 @@ test("startRun skips unrelated invalid procedures when resolving the target proc
     await writeFile(join(proceduresRoot, "a-invalid.yaml"), invalidProcedure);
     await writeFile(join(proceduresRoot, "z-target.yaml"), validProcedure);
 
-    const run = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
+    const run = await startRun({ name: "  需求 A  ", memoryRoot, runsRoot, procedureName: "target-procedure" });
 
     assert.equal(run.status, "running");
+    assert.equal(run.name, "需求 A");
     assert.equal(run.memorySyntax, currentMemorySyntax);
     assert.equal(run.procedureName, "target-procedure");
     assert.deepEqual(run.asserts, ["Keep the procedure contract active."]);
@@ -113,6 +117,7 @@ test("startRun freezes and persists the configured work language", async () => {
     await writeFile(join(proceduresRoot, "target.yaml"), validProcedure);
 
     const started = await startRun({
+      name: "Test run",
       memoryRoot,
       runsRoot,
       procedureName: "target-procedure",
@@ -121,7 +126,73 @@ test("startRun freezes and persists the configured work language", async () => {
     const persisted = await readRun(runsRoot, started.id);
 
     assert.equal(started.language, "en");
+    assert.equal(started.name, "Test run");
     assert.equal(persisted.language, "en");
+    assert.equal(persisted.name, "Test run");
+  });
+});
+
+test("startRun requires a non-empty single-line name before creating runsRoot", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const runsRoot = join(dir, "runs");
+    for (const name of [undefined, "   ", "line one\nline two", `control${String.fromCharCode(127)}`]) {
+      await assert.rejects(
+        startRun({
+          name: name as unknown as string,
+          memoryRoot,
+          runsRoot,
+          procedureName: "target-procedure"
+        }),
+        name === undefined || !name.trim() ? /run name is required/ : /control characters/
+      );
+      await assert.rejects(readdir(runsRoot), (error: unknown) => (
+        Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT")
+      ));
+    }
+  });
+});
+
+test("invalid Run names do not modify an existing runsRoot", async () => {
+  await withTempDir(async (dir) => {
+    const runsRoot = join(dir, "runs");
+    await mkdir(join(runsRoot, "existing-run"), { recursive: true });
+    const before = await readdir(runsRoot);
+
+    await assert.rejects(
+      startRun({
+        name: "\t",
+        memoryRoot: join(dir, "memory"),
+        runsRoot,
+        procedureName: "target-procedure"
+      }),
+      /run name is required/
+    );
+
+    assert.deepEqual(await readdir(runsRoot), before);
+  });
+});
+
+test("Run names need not be unique and historical v3 Runs may omit them", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "target.yaml"), validProcedure);
+
+    const first = await startRun({ name: "同名执行", memoryRoot, runsRoot, procedureName: "target-procedure" });
+    const second = await startRun({ name: "同名执行", memoryRoot, runsRoot, procedureName: "target-procedure" });
+    assert.notEqual(first.id, second.id);
+    assert.equal(second.name, first.name);
+
+    const path = join(runsRoot, first.id, `${first.id}.json`);
+    const stored = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    delete stored.name;
+    await writeRawFile(path, `${JSON.stringify(stored, null, 2)}\n`);
+    const historical = await readRun(runsRoot, first.id);
+    assert.equal(historical.name, undefined);
+    assert.equal(historical.procedureName, "target-procedure");
   });
 });
 
@@ -138,8 +209,9 @@ test("startRun loads a root Procedure file outside memoryRoot", async () => {
     await writeFile(join(proceduresRoot, "invalid.yaml"), invalidProcedure);
     await writeFile(procedureFile, validProcedure.replace("target-procedure", "external-procedure"));
 
-    const run = await startRun({ memoryRoot, runsRoot, procedureFile });
+    const run = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureFile });
 
+    assert.equal(run.name, "Test run");
     assert.equal(run.status, "running");
     assert.equal(run.procedureName, "external-procedure");
     assert.equal(run.memoryRoot, memoryRoot);
@@ -150,10 +222,10 @@ test("startRun loads a root Procedure file outside memoryRoot", async () => {
 
 test("startRun requires exactly one Procedure source", async () => {
   await withTempDir(async (dir) => {
-    const base = { memoryRoot: join(dir, "memory"), runsRoot: join(dir, "runs") };
+    const base = { name: "Test run", memoryRoot: join(dir, "memory"), runsRoot: join(dir, "runs") };
     await assert.rejects(startRun(base), /provide a procedure name or procedure file/);
     await assert.rejects(
-      startRun({ ...base, procedureName: "installed", procedureFile: join(dir, "external.yaml") }),
+      startRun({ name: "Test run", ...base, procedureName: "installed", procedureFile: join(dir, "external.yaml") }),
       /use either a procedure name or procedure file, not both/
     );
   });
@@ -193,12 +265,13 @@ test("Agent Review smoke Procedures start directly from test fixture files", asy
       "procedures"
     );
     const cases = [
-      ["traex-artifact-review-smoke.yaml", "Traex ACP 四方评审测试流程"],
-      ["traex-code-fact-review-smoke.yaml", "Traex ACP 代码事实评审测试流程"]
+      ["traex-artifact-review-smoke.yaml", "traex-artifact-review-smoke"],
+      ["traex-code-fact-review-smoke.yaml", "traex-code-fact-review-smoke"]
     ] as const;
 
     for (const [fileName, procedureName] of cases) {
       const run = await startRun({
+        name: "Test run",
         memoryRoot: join(dir, "memory"),
         runsRoot: join(dir, "runs"),
         procedureFile: join(fixtureRoot, fileName),
@@ -229,7 +302,7 @@ test("startRun routes an unversioned Procedure to store validation without parsi
     await writeRawFile(join(proceduresRoot, "target.yaml"), validProcedure);
 
     await assert.rejects(
-      startRun({ memoryRoot, runsRoot: join(dir, "runs"), procedureName: "target-procedure" }),
+      startRun({ name: "Test run", memoryRoot, runsRoot: join(dir, "runs"), procedureName: "target-procedure" }),
       /Memory store contains invalid Memory YAML; run memsphere validate/
     );
   });
@@ -264,7 +337,7 @@ test("startRun writes run state inside the run root directory", async () => {
     await mkdir(proceduresRoot, { recursive: true });
     await writeFile(join(proceduresRoot, "target.yaml"), validProcedure);
 
-    const run = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
+    const run = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "target-procedure" });
     const raw = await readFile(join(runsRoot, run.id, `${run.id}.json`), "utf8");
     const persisted = JSON.parse(raw);
 
@@ -311,7 +384,7 @@ flow:
       format: markdown
 `);
 
-    const run = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
+    const run = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "target-procedure" });
     const updated = await reportRun({
       runsRoot,
       runId: run.id,
@@ -353,7 +426,7 @@ names: [demo-schema]
 fields: [summary]
 `);
 
-    const run = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
+    const run = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "target-procedure" });
     const updated = await reportRun({
       runsRoot,
       runId: run.id,
@@ -389,7 +462,7 @@ flow:
         fields: [summary]
 `);
 
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "atomic-report" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "atomic-report" });
     const runPath = join(runsRoot, started.id, `${started.id}.json`);
     const before = await readFile(runPath, "utf8");
     await assert.rejects(
@@ -432,7 +505,7 @@ flow:
 `);
     await writeFile(schemaPath, "!schema\nnames: [release-schema]\nfields: [summary]\n");
 
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "schema-snapshot" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "schema-snapshot" });
     assert.equal(started.stack[0]?.steps[0]?.schema?.kind, "external");
     assert.deepEqual(started.stack[0]?.steps[0]?.schema?.node?.fields, ["summary"]);
     await writeFile(schemaPath, "!schema\nnames: [release-schema]\nfields: [different]\n");
@@ -465,35 +538,35 @@ flow:
       type: object
       format: { name: markdown, layout: outline }
       schema: !ref
-        target: schemas/Delivery Schema
+        target: schemas/delivery-schema
 `);
     await writeFile(join(schemasRoot, "delivery.yaml"), `!schema
-names: [Delivery Schema]
+names: [delivery-schema, Delivery Schema]
 fields:
   - summary
   - !ref
-    target: schemas/Detail Schema
+    target: schemas/detail-schema
 `);
     await writeFile(join(schemasRoot, "detail.yaml"), `!schema
-names: [Detail Schema]
+names: [detail-schema, Detail Schema]
 fields: [owner]
 `);
 
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "schema-ref-procedure" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "schema-ref-procedure" });
     const step = started.stack[0].steps[0];
     assert.equal(step.schema?.kind, "external");
-    assert.equal(step.schema?.name, "schemas/Delivery Schema");
+    assert.equal(step.schema?.name, "schemas/delivery-schema");
     assert.deepEqual(step.schema?.node?.fields?.map((field) => typeof field === "string" ? field : field.names[0]), [
       "summary",
-      "Detail Schema"
+      "detail-schema"
     ]);
 
-    const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id, schemaName: "schemas/Delivery Schema" });
+    const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id, schemaName: "schemas/delivery-schema" });
     assert.deepEqual(entered.stack.at(-1)?.steps.map((schemaStep) => schemaStep.artifact), [
-      "schemas/Delivery Schema",
-      "schemas/Delivery Schema.summary",
-      "schemas/Delivery Schema.Detail Schema",
-      "schemas/Delivery Schema.Detail Schema.owner"
+      "schemas/delivery-schema",
+      "schemas/delivery-schema.summary",
+      "schemas/delivery-schema.detail-schema",
+      "schemas/delivery-schema.detail-schema.owner"
     ]);
 
     await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery\n" } });
@@ -511,7 +584,53 @@ fields: [owner]
     assert.equal(done.status, "done");
     const delivery = done.events.find((event) => event.artifact.name === "delivery")?.artifact;
     assert(delivery?.path);
-    assert.match(await readFile(join(runsRoot, delivery.path), "utf8"), /## Detail Schema\n\nDetail\n\n### owner\n\nAda/);
+    assert.match(await readFile(join(runsRoot, delivery.path), "utf8"), /## detail-schema\n\nDetail\n\n### owner\n\nAda/);
+  });
+});
+
+test("Run persistent dependencies reject kebab-case aliases", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const schemasRoot = join(memoryRoot, "schemas");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await mkdir(schemasRoot, { recursive: true });
+
+    await writeFile(join(schemasRoot, "real-schema.yaml"), `!schema
+names: [real-schema, alias-schema]
+fields: [summary]
+`);
+    await writeFile(join(proceduresRoot, "schema-alias.yaml"), `!procedure
+names: [schema-alias-consumer]
+flow:
+  - !action
+    action: Produce a result.
+    artifact: !artifact
+      name: result
+      type: object
+      format: { name: markdown, layout: outline }
+      schema: alias-schema
+`);
+    await assert.rejects(
+      startRun({ name: "Schema alias", memoryRoot, runsRoot, procedureName: "schema-alias-consumer" }),
+      /schema not found: alias-schema/
+    );
+
+    await writeFile(join(proceduresRoot, "canonical-child.yaml"), `!procedure
+names: [canonical-child, alias-child]
+flow: []
+`);
+    await writeFile(join(proceduresRoot, "call-alias.yaml"), `!procedure
+names: [call-alias-consumer]
+flow:
+  - !call
+    target: alias-child
+`);
+    await assert.rejects(
+      startRun({ name: "Call alias", memoryRoot, runsRoot, procedureName: "call-alias-consumer" }),
+      /procedure not found: alias-child/
+    );
   });
 });
 
@@ -540,7 +659,7 @@ flow:
         fields: [summary]
 `);
 
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "inline-contract" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "inline-contract" });
     const step = started.stack[0].steps[0];
     assert.deepEqual(step.asserts, ["Keep every required field."]);
     assert.deepEqual(step.suggests, ["Prefer short prose."]);
@@ -596,7 +715,7 @@ flow:
               fields: [ID, Summary]
 `);
 
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "table-contract" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "table-contract" });
     const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id });
     const schemaSteps = entered.stack.at(-1)?.steps ?? [];
     assert.equal(schemaSteps.length, 2);
@@ -643,7 +762,7 @@ flow:
               fields: [ID, Summary]
 `);
 
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "table-contract" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "table-contract" });
     await enterSchema({ memoryRoot, runsRoot, runId: started.id });
     await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery" } });
 
@@ -709,7 +828,7 @@ flow:
           type: string
           final: true
 `);
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "branch-final" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "branch-final" });
     const afterChoice = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "false" } });
     const done = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "false result" } });
     assert.equal(afterChoice.stack[0].steps[afterChoice.stack[0].index]?.artifact, "false result");
@@ -746,7 +865,7 @@ defines:
   - Demo schema.
 `);
 
-    const run = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
+    const run = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "target-procedure" });
     await enterSchema({ memoryRoot, runsRoot, runId: run.id, schemaName: "demo-schema" });
     const awaitingFinalization = await reportRun({
       runsRoot,
@@ -785,7 +904,7 @@ flow:
       format: markdown
 `);
 
-    const run = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
+    const run = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "target-procedure" });
     const updated = await reportRun({
       runsRoot,
       runId: run.id,
@@ -830,7 +949,7 @@ flow:
           type: string
 `);
 
-    const run = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
+    const run = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "target-procedure" });
     const updated = await reportRun({
       runsRoot,
       runId: run.id,
@@ -885,7 +1004,7 @@ flow:
           type: string
 `);
 
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "target-procedure" });
     assert.equal(started.stack[0].steps[started.stack[0].index].artifact, "A");
 
     const afterA = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "false" } });
@@ -933,7 +1052,7 @@ flow:
       type: string
 `);
 
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "parent" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "parent" });
     const enteredLoop = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "true" } });
     assert.equal(enteredLoop.stack[0].steps[enteredLoop.stack[0].index].artifact, "iteration");
 
@@ -999,7 +1118,7 @@ fields:
     names: [details]
 `);
 
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "target-procedure" });
     const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id, schemaName: "demo-schema" });
     const schemaFrame = entered.stack.at(-1);
     assert.deepEqual(schemaFrame?.steps.map((step) => step.artifact), [
@@ -1055,7 +1174,7 @@ fields:
   - summary
 `);
 
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "target-procedure" });
     await enterSchema({ memoryRoot, runsRoot, runId: started.id, schemaName: "repeat-schema" });
     await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Record" } });
     const waiting = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "context" } });
@@ -1114,7 +1233,7 @@ fields:
     optional: true
 `);
 
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "target-procedure" });
     await enterSchema({ memoryRoot, runsRoot, runId: started.id, schemaName: "optional-schema" });
     await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Record" } });
     await assert.rejects(skipRun({ runsRoot, runId: started.id }), /required/);
@@ -1166,7 +1285,7 @@ flow:
           - details
 `);
 
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "schema-draft" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "schema-draft" });
     const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id });
     const overview = buildSchemaWritingSnapshot(runsRoot, entered);
     assert(overview);
@@ -1264,6 +1383,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
     });
 
     const started = await startRun({
+      name: "Test run",
       memoryRoot,
       runsRoot,
       procedureName: "schema-artifact-composition-review",
@@ -1280,7 +1400,7 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       memoryRoot,
       runsRoot,
       runId: started.id,
-      schemaName: "Reviewed delivery"
+      schemaName: "reviewed-delivery"
     });
     const productionContext = JSON.stringify(buildSchemaWritingSnapshot(runsRoot, entered));
     assert.doesNotMatch(productionContext, /artifact_acceptance|roleBindings|controlPlane|permission|reviewer/i);
@@ -1575,7 +1695,7 @@ flow:
       format: markdown
 `);
 
-    const run = await startRun({ memoryRoot, runsRoot, procedureName: "target-procedure" });
+    const run = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "target-procedure" });
     await assert.rejects(
       reportRun({
         runsRoot,
@@ -1608,7 +1728,7 @@ flow:
     artifact: !artifact
       name: second
 `);
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "concurrent-report" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "concurrent-report" });
 
     await Promise.all([
       reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "A" } }),
@@ -1636,7 +1756,7 @@ flow:
     artifact: !artifact
       name: result
 `);
-    const started = await startRun({ memoryRoot, runsRoot, procedureName: "stale-lock" });
+    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "stale-lock" });
     const lockRoot = join(runsRoot, ".locks");
     const lockName = createHash("sha256").update(started.id).digest("hex");
     await mkdir(lockRoot, { recursive: true });
@@ -1697,6 +1817,7 @@ flow:
     });
 
     const run = await startRun({
+      name: "Test run",
       memoryRoot,
       runsRoot,
       procedureName: "governed",
@@ -1750,6 +1871,464 @@ flow:
   });
 });
 
+test("running Run can replace a future Slot binding without changing an existing Review", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "handoff.yaml"), `!procedure
+name: handoff
+flow:
+  - !action
+    action: Human reviews first.
+    artifact: !artifact
+      name: first
+      review: [owner]
+  - !action
+    action: Agent reviews second.
+    artifact: !artifact
+      name: second
+      review: [owner]
+`);
+    const controlPlane = parseControlPlaneConfig({
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        human: {
+          kind: "human",
+          name: "Human",
+          permissions: ["artifact.read", "decision.decide"]
+        },
+        agent: {
+          kind: "agent",
+          name: "Agent",
+          permissions: ["artifact.read", "decision.assess"],
+          agent: { provider: "traex" }
+        }
+      }
+    });
+    const started = await startRun({
+      name: "Runtime binding handoff",
+      memoryRoot,
+      runsRoot,
+      procedureName: "handoff",
+      controlPlane,
+      reviewConfiguration: reviewConfiguration({ procedure: "handoff", flowIndexes: [1, 2], slots: { owner: ["human"] } })
+    });
+    const firstPending = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "first result" }
+    });
+    const firstReview = currentArtifactReview(firstPending);
+    assert(firstReview);
+    const firstRound = firstReview.rounds[0];
+
+    const changed = await updateRunSlotBinding({
+      runsRoot,
+      runId: started.id,
+      slot: "handoff::owner",
+      actorIds: ["agent"]
+    });
+    assert.deepEqual(changed.change.before, { actorIds: ["human"] });
+    assert.deepEqual(changed.change.after, { actorIds: ["agent"] });
+    assert.deepEqual(changed.change.affectedReviewScopes, ["handoff#flow[2]"]);
+    assert.deepEqual(changed.change.preservedReviewIds, [firstReview.id]);
+    assert.deepEqual(buildRunBindingSnapshot(changed.run).slots[0], {
+      key: "handoff::owner",
+      binding: { actorIds: ["agent"] },
+      reviewScopes: ["handoff#flow[2]"],
+      reviewIds: [firstReview.id]
+    });
+    assert.deepEqual(changed.run.artifactReviews?.[0].rounds[0].assignments.map((assignment) => assignment.actorId), ["human"]);
+
+    const firstDraft = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: firstReview.id,
+      roundId: firstRound.id,
+      actorId: "human",
+      expectedRevision: firstRound.revision,
+      draft: { vote: "approve", comments: [] }
+    });
+    await submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: firstReview.id,
+      roundId: firstRound.id,
+      actorId: "human",
+      expectedRevision: firstDraft.round.revision
+    });
+    const firstApproved = await submitArtifactReviewRunnerVote({
+      runsRoot,
+      reviewId: firstReview.id,
+      roundId: firstRound.id,
+      vote: "approve"
+    });
+    assert.equal(currentStep(firstApproved.run)?.id, "flow[2]");
+
+    const secondPending = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "second result" }
+    });
+    const reviews = secondPending.artifactReviews ?? [];
+    assert.equal(reviews.length, 2);
+    assert.deepEqual(reviews[0].rounds[0].assignments.map((assignment) => assignment.actorId), ["human"]);
+    assert.deepEqual(reviews[1].rounds[0].assignments.map((assignment) => assignment.actorId), ["agent"]);
+    assert.deepEqual(reviews[0].controlPlane.bindings["handoff::owner"].actorIds, ["human"]);
+    assert.deepEqual(reviews[1].controlPlane.bindings["handoff::owner"].actorIds, ["agent"]);
+  });
+});
+
+test("Run binding update reaches a future loop iteration that reuses an existing Review scope", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "loop-handoff.yaml"), `!procedure
+name: loop-handoff
+flow:
+  - !while
+    condition: !action
+      action: Continue?
+      artifact: !artifact
+        name: continue
+        type: boolean
+    do:
+      - !action
+        action: Review this iteration.
+        artifact: !artifact
+          name: iteration
+          review: [owner]
+`);
+    const controlPlane = parseControlPlaneConfig({
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] },
+        agent: {
+          kind: "agent",
+          name: "Agent",
+          permissions: ["artifact.read", "decision.assess"],
+          agent: { provider: "traex" }
+        }
+      }
+    });
+    const started = await startRun({
+      name: "Loop binding handoff",
+      memoryRoot,
+      runsRoot,
+      procedureName: "loop-handoff",
+      controlPlane,
+      reviewConfiguration: {
+        reviews: { "loop-handoff#flow[1].do[1]": { policy: "artifact_acceptance.unanimous" } },
+        slots: { "loop-handoff::owner": { actorIds: ["human"] } }
+      }
+    });
+    const firstBody = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "true" }
+    });
+    assert.equal(currentStep(firstBody)?.id, "flow[1].do[1]");
+    const firstPending = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "first iteration" }
+    });
+    const firstReview = currentArtifactReview(firstPending);
+    assert(firstReview);
+    const firstRound = firstReview.rounds[0];
+    const firstDraft = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: firstReview.id,
+      roundId: firstRound.id,
+      actorId: "human",
+      expectedRevision: firstRound.revision,
+      draft: { vote: "approve", comments: [] }
+    });
+    await submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: firstReview.id,
+      roundId: firstRound.id,
+      actorId: "human",
+      expectedRevision: firstDraft.round.revision
+    });
+    const firstApproved = await submitArtifactReviewRunnerVote({
+      runsRoot,
+      reviewId: firstReview.id,
+      roundId: firstRound.id,
+      vote: "approve"
+    });
+    assert.equal(currentStep(firstApproved.run)?.id, "flow[1]");
+
+    const changed = await updateRunSlotBinding({
+      runsRoot,
+      runId: started.id,
+      slot: "loop-handoff::owner",
+      actorIds: ["agent"]
+    });
+    assert.deepEqual(changed.change.affectedReviewScopes, ["loop-handoff#flow[1].do[1]"]);
+    assert.deepEqual(changed.change.preservedReviewIds, [firstReview.id]);
+    assert.deepEqual(buildRunBindingSnapshot(changed.run).slots[0].reviewScopes, ["loop-handoff#flow[1].do[1]"]);
+
+    const secondBody = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "true" }
+    });
+    assert.equal(currentStep(secondBody)?.id, "flow[1].do[1]");
+    const secondPending = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "second iteration" }
+    });
+    const reviews = secondPending.artifactReviews ?? [];
+    assert.equal(reviews.length, 2);
+    assert.deepEqual(reviews[0].rounds[0].assignments.map((assignment) => assignment.actorId), ["human"]);
+    assert.deepEqual(reviews[1].rounds[0].assignments.map((assignment) => assignment.actorId), ["agent"]);
+  });
+});
+
+test("Run binding update validates future scopes without revalidating frozen historical scopes", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "scoped-validation.yaml"), `!procedure
+name: scoped-validation
+flow:
+  - !action
+    action: Complete the historical review.
+    artifact: !artifact
+      name: historical
+      review: [owner]
+  - !action
+    action: Complete the future review.
+    artifact: !artifact
+      name: future
+      review: [owner, approver]
+`);
+    const controlPlane = parseControlPlaneConfig({
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] },
+        agent: {
+          kind: "agent",
+          name: "Agent",
+          permissions: ["artifact.read", "decision.assess"],
+          agent: { provider: "traex" }
+        },
+        approver: { kind: "human", name: "Approver", permissions: ["artifact.read", "decision.decide"] }
+      }
+    });
+    const started = await startRun({
+      name: "Scoped binding validation",
+      memoryRoot,
+      runsRoot,
+      procedureName: "scoped-validation",
+      controlPlane,
+      reviewConfiguration: reviewConfiguration({
+        procedure: "scoped-validation",
+        flowIndexes: [1, 2],
+        slots: { owner: ["human"], approver: ["approver"] }
+      })
+    });
+    const historicalPending = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "historical" }
+    });
+    const historicalReview = currentArtifactReview(historicalPending);
+    assert(historicalReview);
+    const historicalRound = historicalReview.rounds[0];
+    const historicalDraft = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: historicalReview.id,
+      roundId: historicalRound.id,
+      actorId: "human",
+      expectedRevision: historicalRound.revision,
+      draft: { vote: "approve", comments: [] }
+    });
+    await submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: historicalReview.id,
+      roundId: historicalRound.id,
+      actorId: "human",
+      expectedRevision: historicalDraft.round.revision
+    });
+    await submitArtifactReviewRunnerVote({
+      runsRoot,
+      reviewId: historicalReview.id,
+      roundId: historicalRound.id,
+      vote: "approve"
+    });
+
+    const changed = await updateRunSlotBinding({
+      runsRoot,
+      runId: started.id,
+      slot: "scoped-validation::owner",
+      actorIds: ["agent"]
+    });
+    assert.deepEqual(changed.change.affectedReviewScopes, ["scoped-validation#flow[2]"]);
+    assert.deepEqual(changed.change.preservedReviewIds, [historicalReview.id]);
+    const futurePending = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "future" }
+    });
+    assert.deepEqual(
+      currentArtifactReview(futurePending)?.rounds[0].assignments.map((assignment) => assignment.actorId).sort(),
+      ["agent", "approver"].sort()
+    );
+    assert.deepEqual(historicalReview.controlPlane.bindings["scoped-validation::owner"].actorIds, ["human"]);
+  });
+});
+
+test("Run binding update rejects invalid mutations without changing persisted state", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "guarded.yaml"), `!procedure
+name: guarded
+flow:
+  - !action
+    action: Review it.
+    artifact: !artifact
+      name: result
+      review: [owner]
+`);
+    const controlPlane = parseControlPlaneConfig({
+      runner: { permissions: ["artifact.read", "artifact.submit"] },
+      actors: {
+        human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] },
+        agent: {
+          kind: "agent",
+          name: "Agent",
+          permissions: ["artifact.read", "decision.assess"],
+          agent: { provider: "traex" }
+        }
+      }
+    });
+    const started = await startRun({
+      name: "Invalid binding mutations",
+      memoryRoot,
+      runsRoot,
+      procedureName: "guarded",
+      controlPlane,
+      reviewConfiguration: reviewConfiguration({ procedure: "guarded", slots: { owner: ["human"] } })
+    });
+    const before = await readRun(runsRoot, started.id);
+    await assert.rejects(
+      updateRunSlotBinding({ runsRoot, runId: started.id, slot: "guarded::owner", actorIds: ["missing"] }),
+      /unknown frozen Actor/
+    );
+    await assert.rejects(
+      updateRunSlotBinding({ runsRoot, runId: started.id, slot: "missing::slot", skip: true }),
+      /Unknown Review Slot/
+    );
+    await assert.rejects(
+      updateRunSlotBinding({ runsRoot, runId: started.id, slot: "guarded::owner", actorIds: ["human", "human"] }),
+      /duplicate Actor/
+    );
+    await assert.rejects(
+      updateRunSlotBinding({ runsRoot, runId: started.id, slot: "guarded::owner", actorIds: ["agent"] }),
+      /decision|decid/i
+    );
+    const after = await readRun(runsRoot, started.id);
+    assert.deepEqual(after.reviewConfiguration, before.reviewConfiguration);
+    assert.equal(after.bindingChanges, undefined);
+
+    const skipped = await updateRunSlotBinding({
+      runsRoot,
+      runId: started.id,
+      slot: "guarded::owner",
+      skip: true
+    });
+    assert.deepEqual(skipped.change.after, { skip: true });
+    assert.equal(currentStep(skipped.run)?.reviewPolicy, undefined);
+    const done = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "accepted without a future reviewer" }
+    });
+    assert.equal(done.status, "done");
+    await assert.rejects(
+      updateRunSlotBinding({ runsRoot, runId: started.id, slot: "guarded::owner", actorIds: ["human"] }),
+      /not running/
+    );
+  });
+});
+
+test("Run binding update reaches a called Procedure before its frame is instantiated", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "parent.yaml"), `!procedure
+name: binding-parent
+flow:
+  - !action
+    action: Prepare the child.
+    artifact: !artifact
+      name: preparation
+  - !call
+    target: binding-child
+`);
+    await writeFile(join(proceduresRoot, "child.yaml"), `!procedure
+name: binding-child
+flow:
+  - !action
+    action: Review the child result.
+    artifact: !artifact
+      name: child result
+      review: [owner]
+`);
+    const controlPlane = parseControlPlaneConfig({
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] },
+        agent: {
+          kind: "agent",
+          name: "Agent",
+          permissions: ["artifact.read", "decision.assess"],
+          agent: { provider: "traex" }
+        }
+      }
+    });
+    const started = await startRun({
+      name: "Called Procedure binding",
+      memoryRoot,
+      runsRoot,
+      procedureName: "binding-parent",
+      controlPlane,
+      reviewConfiguration: reviewConfiguration({ procedure: "binding-child", slots: { owner: ["human"] } })
+    });
+    await updateRunSlotBinding({
+      runsRoot,
+      runId: started.id,
+      slot: "binding-child::owner",
+      actorIds: ["agent"]
+    });
+    const child = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "ready" }
+    });
+    assert.equal(currentFrame(child)?.memoryName, "binding-child");
+    assert.deepEqual(currentStep(child)?.controlPlane?.bindings["binding-child::owner"].actorIds, ["agent"]);
+    const pending = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "child result" }
+    });
+    assert.deepEqual(currentArtifactReview(pending)?.rounds[0].assignments.map((assignment) => assignment.actorId), ["agent"]);
+  });
+});
+
 test("control-plane fixture validates and freezes reachable called Procedures", async () => {
   await withTempDir(async (dir) => {
     const fixtureRoot = join(process.cwd(), "test", "fixtures", "control-plane", ".memsphere");
@@ -1762,6 +2341,7 @@ test("control-plane fixture validates and freezes reachable called Procedures", 
     assert.deepEqual(validation.issues, []);
 
     const run = await startRun({
+      name: "Test run",
       memoryRoot,
       runsRoot: join(dir, "runs"),
       procedureName: "control-plane-caller",
@@ -1798,6 +2378,7 @@ flow:
       actors: {}
     });
     const run = await startRun({
+      name: "Test run",
       memoryRoot,
       runsRoot,
       procedureName: "governed",
@@ -1838,7 +2419,7 @@ flow:
       runner: { permissions: ["artifact.read"] },
       actors: {}
     });
-    const run = await startRun({ memoryRoot, runsRoot, procedureName: "plain", controlPlane });
+    const run = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "plain", controlPlane });
     assert(currentStep(run)?.controlPlane);
 
     await assert.rejects(
@@ -1870,6 +2451,7 @@ flow:
       actors: {}
     });
     const run = await startRun({
+      name: "Test run",
       memoryRoot,
       runsRoot,
       procedureName: "granted",
@@ -1912,7 +2494,7 @@ flow:
       runner: { permissions: ["artifact.submit"] },
       actors: {}
     });
-    const run = await startRun({ memoryRoot, runsRoot, procedureName: "caller", controlPlane });
+    const run = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "caller", controlPlane });
 
     await writeFile(childPath, `!procedure
 name: child
@@ -1945,7 +2527,7 @@ flow:
 `);
 
     await assert.rejects(
-      startRun({ memoryRoot, runsRoot, procedureName: "reviewed-prerequisites" }),
+      startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "reviewed-prerequisites" }),
       /Review configuration is required/
     );
     assert.deepEqual(await readdir(runsRoot), []);
@@ -1962,6 +2544,7 @@ flow:
     });
     await assert.rejects(
       startRun({
+        name: "Test run",
         memoryRoot,
         runsRoot,
         procedureName: "reviewed-prerequisites",
@@ -1987,6 +2570,7 @@ flow:
     });
     await assert.rejects(
       startRun({
+        name: "Test run",
         memoryRoot,
         runsRoot,
         procedureName: "reviewed-prerequisites",
@@ -2036,6 +2620,7 @@ flow:
     });
 
     const started = await startRun({
+      name: "Test run",
       memoryRoot,
       runsRoot,
       procedureName: "reviewed",
@@ -2319,6 +2904,7 @@ flow:
       }
     });
     let run = await startRun({
+      name: "Test run",
       memoryRoot,
       runsRoot,
       procedureName: "package-review",

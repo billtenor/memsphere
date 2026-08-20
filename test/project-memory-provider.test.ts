@@ -17,20 +17,20 @@ test("Project Memory provider annotates sources and rejects cross-Project ambigu
     const mounted = join(root, "mounted");
     await mkdir(join(primary, "concepts"), { recursive: true });
     await mkdir(join(mounted, "concepts"), { recursive: true });
-    await writeFile(join(primary, "concepts", "shared.yaml"), memory("Shared"));
-    await writeFile(join(primary, "concepts", "local.yaml"), memory("Local"));
-    await writeFile(join(mounted, "concepts", "shared.yaml"), memory("Shared"));
+    await writeFile(join(primary, "concepts", "shared.yaml"), memory("shared"));
+    await writeFile(join(primary, "concepts", "local.yaml"), memory("local"));
+    await writeFile(join(mounted, "concepts", "shared.yaml"), memory("shared"));
     const catalog = new DefaultMemoryCatalog(new ProjectMemoryProvider([
       { name: "primary", memoryRoot: primary, revision: "aaa" },
       { name: "career", memoryRoot: mounted, revision: "bbb" }
     ]));
     const listed = await catalog.list({ kind: "concepts" });
     assert.deepEqual(listed.memories.map((item) => item.project_name), ["primary", "career", "primary"]);
-    assert.equal((await catalog.read("Local")).names[0], "Local");
-    await assert.rejects(catalog.read("Shared"), (error) => {
+    assert.equal((await catalog.read("local")).names[0], "local");
+    await assert.rejects(catalog.read("shared"), (error) => {
       assert(error instanceof MemoryAmbiguityError);
-      assert.match(error.message, /primary:concepts\/Shared/);
-      assert.match(error.message, /career:concepts\/Shared/);
+      assert.match(error.message, /primary:concepts\/shared/);
+      assert.match(error.message, /career:concepts\/shared/);
       assert.match(error.message, /--project/);
       return true;
     });
@@ -80,6 +80,7 @@ flow:
       new DefaultMemoryCatalog(new ProjectMemoryProvider([source]))
     ]));
     const run = await startRun({
+      name: "Project-scoped delivery",
       memoryRoot: primary,
       runsRoot,
       procedureName: "deliver",

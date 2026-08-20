@@ -1,6 +1,6 @@
 !procedure
 syntax: memsphere-20260721-stable
-name: Schema 逐步撰写可观察验收流程
+names: [schema-observable-e2e-procedure, Schema 逐步撰写可观察验收流程]
 flow:
   - !action
     action: 逐步产出一份完整的架构方案评估文档，用于观察 Schema 写作和 Artifact Review 的端到端过程。
@@ -15,5 +15,5 @@ flow:
       format:
         name: markdown
         layout: outline
-      schema: Schema 逐步撰写端到端验收文档
+      schema: schema-observable-e2e-document
       review: [system_architect, senior_system_architect]

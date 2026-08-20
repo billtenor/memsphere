@@ -1,6 +1,6 @@
 !procedure
 syntax: memsphere-20260721-stable
-name: Schema Artifact 长文档 ACP Review Smoke
+names: [schema-artifact-long-document-acp-review-smoke, Schema Artifact 长文档 ACP Review Smoke]
 flow:
   - !action
     action: 产出一份基于当前 Workspace 事实的 Schema Artifact 长文档兼容性评估。

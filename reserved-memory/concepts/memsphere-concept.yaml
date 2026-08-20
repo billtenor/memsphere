@@ -1,8 +1,8 @@
 !concept
 syntax: memsphere-20260721-stable
 names:
-  - Concept
   - memsphere-concept
+  - Concept
 defines:
   - memsphere 中用于解释一个可稳定复用的概念、词汇或领域抽象是什么的 Memory。
   - 用于统一记忆术语，使不同记忆和执行流程对同一概念形成一致理解。
@@ -16,6 +16,6 @@ defines:
       - 需要独立判断真假的事实、规则或约束应当使用 Statement 表达。
       - 文档、数据或协作产物的结构应当使用 Schema 表达。
   - !ref
-    target: schemas/Concept Schema
+    target: schemas/memsphere-concept-schema
 extends:
-  - Memory
+  - memsphere-memory

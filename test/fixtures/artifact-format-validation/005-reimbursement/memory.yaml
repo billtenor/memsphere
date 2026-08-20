@@ -1,6 +1,7 @@
 !concept
 syntax: memsphere-20260719-stable
 names:
+  - reimbursement-request
   - 报销申请
   - 报销
 defines:

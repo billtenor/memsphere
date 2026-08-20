@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, posix, relative, resolve, sep } from "node:path";
@@ -14,7 +14,11 @@ import { resolveProjectContext, type ResolvedProject } from "../project/resolver
 import { resolveWorkspaceIdentity } from "../project/workspace.js";
 import { projectConfigSchema } from "../project/model.js";
 import { GitRevisionMemoryProvider } from "./git-provider.js";
-import { normalizeMemoryName, parseLogicalMemoryReference } from "./logical-reference.js";
+import {
+  assertCanonicalMemoryName,
+  normalizeMemoryName,
+  parseLogicalMemoryReference
+} from "./logical-reference.js";
 
 const changeTargetSchema = z.object({
   operation: z.enum(["create", "update", "delete", "rename"]),
@@ -118,6 +122,7 @@ export async function renameMemory(input: {
   newName: string;
   changeId?: string;
 }): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
+  assertCanonicalMemoryName(input.newName);
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   assertManaged(context.primary);
   const workspace = await resolveWorkspaceIdentity();
@@ -128,8 +133,7 @@ export async function renameMemory(input: {
   change.targets.push(target);
   const file = (await readAllMemoryFiles(context.primary.memoryRoot)).find((item) => relative(context.primary.memoryRoot, item.path) === target.path);
   if (!file) throw new Error(`Memory was not found: ${input.reference}`);
-  const newName = input.newName.trim();
-  if (!newName) throw new Error("new Memory name is required");
+  const newName = input.newName;
   file.entity.names = [...new Set([newName, ...file.entity.names])];
   const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
   const candidate = join(candidateRoot, target.path);
@@ -612,13 +616,24 @@ async function resolveTarget(
   createPath?: string
 ): Promise<z.infer<typeof changeTargetSchema>> {
   const reference = normalizeMemoryName(referenceInput);
+  if (referenceInput !== reference && reference.includes("/")) {
+    throw new Error(`invalid Memory reference "${referenceInput}"; explicit references must not contain surrounding whitespace`);
+  }
   const files = await readAllMemoryFiles(project.memoryRoot);
   const logical = parseLogicalMemoryReference(reference);
+  if (!logical && reference.includes("/")) {
+    throw new Error(`invalid Memory reference "${reference}"; expected <kind>/<lowercase-kebab-case-canonical-name>`);
+  }
   const found = files.filter((file) => {
     if (logical && file.kind !== logical.kind) return false;
     const wanted = logical?.name ?? reference;
-    return file.entity.names.includes(wanted);
+    return logical ? file.entity.names[0] === wanted : file.entity.names.includes(wanted);
   });
+  if (logical && found.length === 0 && files.some((file) =>
+    file.kind === logical.kind && file.entity.names.slice(1).includes(logical.name)
+  )) {
+    throw new Error(`explicit Memory reference must use the canonical name: ${reference}`);
+  }
   if (found.length > 1) throw new Error(`Memory reference is ambiguous within Project: ${reference}`);
   const revision = project.config.store.type === "managed" ? project.config.store.published_revision : "embedded";
   if (found.length === 0) {
@@ -764,11 +779,8 @@ function changeId(): string {
 }
 
 function safeFileName(name: string): string {
-  const normalized = name.trim().toLowerCase();
-  const slug = normalized.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-  const digest = createHash("sha256").update(name).digest("hex").slice(0, 12);
-  const base = normalized === slug ? slug : `${slug || "memory"}-${digest}`;
-  return `${base}.yaml`;
+  assertCanonicalMemoryName(name);
+  return `${name}.yaml`;
 }
 
 function newMemoryTemplate(reference: string): string {
