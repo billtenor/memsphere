@@ -4,8 +4,10 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { chromium } from "playwright";
 import type { MemsphereConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
+import { createReview } from "../src/review/store.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
 test("View switches Projects without retaining the previous Project Memory data", async () => {
@@ -47,6 +49,25 @@ test("View switches Projects without retaining the previous Project Memory data"
     }, null, 2)}\n`);
     await writeFile(join(home, "config.json"), "{}\n");
 
+    const alphaMemoryPath = join(roots.alpha, "memory", "concepts", "alpha.yaml");
+    const review = await createReview({
+      title: "Alpha review",
+      source: "memory",
+      target: {
+        source: "memory",
+        id: "concepts/alpha-memory",
+        name: "alpha-memory",
+        path: "concepts/alpha.yaml"
+      },
+      memoryRoot: join(roots.alpha, "memory"),
+      reviewsRoot: join(roots.alpha, "reviews"),
+      snapshotFiles: [{
+        label: "concepts/alpha.yaml",
+        path: alphaMemoryPath,
+        kind: "memory"
+      }]
+    });
+
     const config = projectConfig(home, "alpha", roots.alpha);
     const server = createViewServer(config);
     await new Promise<void>((resolve, reject) => {
@@ -78,6 +99,22 @@ test("View switches Projects without retaining the previous Project Memory data"
       };
       assert.equal(settings.projectName, "beta");
       assert.equal(settings.configPath, await realpath(join(roots.beta, "config.json")));
+
+      const canonicalPath = `/projects/alpha/memories/concepts/alpha-memory/reviews/${review.id}`;
+      const browser = await chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+        await page.goto(origin + canonicalPath);
+        await page.waitForFunction(() => document.body.classList.contains("review-drawer-open"));
+        assert.equal(new URL(page.url()).pathname, canonicalPath);
+        assert.equal(await page.locator("#project-select-value").textContent(), "alpha");
+        await page.getByRole("heading", { name: "alpha-memory", exact: true }).waitFor();
+
+        await page.close();
+      } finally {
+        await browser.close();
+      }
+      assert.equal((await fetch(`${origin}/memory-reviews/${review.id}`)).status, 404);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

@@ -16,6 +16,7 @@ const runName = `本次Run名称-${"x".repeat(120)}`;
 
 async function withResponsiveView(fn: (browser: Browser, url: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-responsive-view-"));
+  const homeRoot = join(dir, "home");
   const memoryRoot = join(dir, "memory");
   const reservedRoot = join(dir, "reserved-memory");
   const reviewsRoot = join(dir, "reviews");
@@ -27,10 +28,16 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     mkdir(join(memoryRoot, "procedures"), { recursive: true }),
     mkdir(join(memoryRoot, "schemas"), { recursive: true }),
     mkdir(join(reservedRoot, "concepts"), { recursive: true }),
+    mkdir(homeRoot, { recursive: true }),
     mkdir(reviewsRoot, { recursive: true }),
     mkdir(join(runDir, "artifacts"), { recursive: true }),
     mkdir(legacyRunDir, { recursive: true })
   ]);
+  await writeFile(join(homeRoot, "registry.json"), `${JSON.stringify({
+    format_version: 1,
+    projects: { responsive: { root: dir } },
+    workspaces: {}
+  }, null, 2)}\n`);
 
   await writeFile(join(memoryRoot, "concepts", "memory-8aaf6c34fc49.yaml"), [
     "!concept",
@@ -152,11 +159,17 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
   const config: MemsphereConfig = {
     configPath: join(dir, "config.json"),
     scopeRoot: dir,
+    homeRoot,
     memoryRoot,
     reviewsRoot,
     runsRoot,
     archiveRoot: join(dir, "archives"),
-    view: { host: "127.0.0.1", port: 0 }
+    view: { host: "127.0.0.1", port: 0 },
+    project: {
+      name: "responsive",
+      store: { type: "managed", branch: "master", published_revision: "responsive-revision" },
+      mounted: []
+    }
   };
   const server = createViewServer(config);
   server.listen(0, "127.0.0.1");
@@ -488,7 +501,7 @@ test("View deep links restore Memory, Task, Memory Review, and browser history",
 
       await page.getByRole("button", { name: "Review", exact: true }).click();
       await page.getByRole("button", { name: "Create Review", exact: true }).click();
-      await page.waitForFunction(() => location.pathname.startsWith("/memory-reviews/"));
+      await page.waitForFunction(() => location.pathname.startsWith("/projects/responsive/memories/"));
       const reviewPath = new URL(page.url()).pathname;
       const reopenedReview = await browser.newPage({ viewport: { width: 1366, height: 900 } });
       await reopenedReview.goto(url + reviewPath);

@@ -279,6 +279,45 @@ test("switching Projects replaces an entity URL with the new Project landing pag
   }
 });
 
+test("Memory Review deep links do not discard unsaved Project settings without confirmation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-project-route-dirty-browser-"));
+  const config = await settingsConfigFixture(dir, "127.0.0.1");
+  const server = createViewServer(config);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const port = (server.address() as AddressInfo).port;
+  const origin = `http://127.0.0.1:${port}`;
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.goto(`${origin}/settings/participants`, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "启用参与者配置" }).click();
+    assert.match(await page.locator("#settings-status").textContent() ?? "", /未保存修改/);
+
+    const dialogPromise = page.waitForEvent("dialog");
+    await page.evaluate(() => {
+      history.pushState(null, "", "/projects/beta/memories/concepts/beta-memory/reviews/review-1");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    const dialog = await dialogPromise;
+    assert.equal(dialog.message(), "当前 Project 设置有未保存修改。放弃修改并切换 Project？");
+    await dialog.dismiss();
+
+    await page.waitForURL(`${origin}/settings/participants`);
+    assert.equal((await page.locator("#project-select-value").textContent())?.trim(), "demo");
+    assert.match(await page.locator("#settings-status").textContent() ?? "", /未保存修改/);
+    const projects = await (await fetch(`${origin}/api/projects`)).json() as { current: string };
+    assert.equal(projects.current, "demo");
+  } finally {
+    await browser.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("Settings browser shows an inline error for an invalid operator token", async () => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-settings-token-browser-"));
   const config = await settingsConfigFixture(dir, "0.0.0.0");

@@ -1774,7 +1774,7 @@ export function isViewPagePath(pathname: string): boolean {
   if (/^\/tasks\/[^/]+$/.test(pathname)) return true;
   if (/^\/tasks\/[^/]+\/artifact-reviews\/[^/]+$/.test(pathname)) return true;
   if (/^\/settings\/[^/]+$/.test(pathname)) return true;
-  return /^\/memory-reviews\/[^/]+$/.test(pathname);
+  return /^\/projects\/[^/]+\/memories\/[^/]+\/[^/]+\/reviews\/[^/]+$/.test(pathname);
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {

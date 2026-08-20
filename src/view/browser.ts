@@ -896,10 +896,18 @@ export const browserHtml = String.raw`<!doctype html>
           ? { page: "settings", publicModule: moduleName, settings, fragment }
           : { page: "invalid", mode: "settings", error: "Settings page not found: " + (moduleName || parts[1]), fragment };
       }
-      if (parts[0] === "memory-reviews" && parts.length === 2) {
-        const reviewId = decoded(parts[1]);
-        return reviewId
-          ? { page: "memory-review", reviewId, fragment }
+      if (
+        parts[0] === "projects"
+        && parts[2] === "memories"
+        && parts[5] === "reviews"
+        && parts.length === 7
+      ) {
+        const project = decoded(parts[1]);
+        const kind = decoded(parts[3]);
+        const name = decoded(parts[4]);
+        const reviewId = decoded(parts[6]);
+        return project && kind && name && reviewId
+          ? { page: "memory-review", project, kind, name, reviewId, fragment }
           : { page: "invalid", mode: "memory", error: "Invalid Memory Review URL.", fragment };
       }
       return { page: "invalid", mode: "memory", error: "Page not found: " + pathname, fragment };
@@ -1029,7 +1037,7 @@ export const browserHtml = String.raw`<!doctype html>
     });
     window.addEventListener("resize", () => syncReviewDrawer());
     window.addEventListener("popstate", () => {
-      applyBrowserRoute(parseBrowserRoute(window.location), { render: true }).catch(renderFatalError);
+      loadAll({ route: parseBrowserRoute(window.location), render: true }).catch(renderFatalError);
     });
 
     loadAll().catch(renderFatalError);
@@ -1050,17 +1058,47 @@ export const browserHtml = String.raw`<!doctype html>
       }
     }, 4000);
 
-    async function loadAll() {
+    async function loadAll(options = {}) {
       await loadProjects();
+      let route = options.route || (!state.routeReady ? state.pendingRoute : null);
+      if (route) {
+        route = await prepareBrowserRoute(route);
+        state.pendingRoute = route;
+        if (route.project && route.project !== state.currentProject) {
+          if (!confirmProjectSwitch()) {
+            state.routeReplaceNext = true;
+            syncBrowserUrl();
+            return;
+          }
+          await activateProject(route.project);
+          await loadProjects();
+        }
+      }
       const requests = [loadMemories(), loadReviews(), loadRuns()];
       if (state.viewMode === "settings") requests.push(loadSettings());
       await Promise.all(requests);
-      if (!state.routeReady) {
-        await applyBrowserRoute(state.pendingRoute, { render: false });
+      if (route) {
+        await applyBrowserRoute(route, { render: false });
         state.routeReady = true;
       }
       ensureSelectedReview();
-      renderAll();
+      if (options.render !== false) renderAll();
+    }
+
+    async function prepareBrowserRoute(route) {
+      if (route.page !== "memory-review") return route;
+      if (
+        route.project !== state.currentProject
+        && !state.projects.some(project => project.name === route.project)
+      ) {
+        return {
+          page: "invalid",
+          mode: "memory",
+          error: "Project not found: " + route.project,
+          fragment: route.fragment || ""
+        };
+      }
+      return route;
     }
 
     async function loadProjects() {
@@ -1116,23 +1154,7 @@ export const browserHtml = String.raw`<!doctype html>
       openProjectMenu(true);
     }
 
-    async function selectProject(name) {
-      stashSettingsScope();
-      const projectScope = state.settingsScopes.project;
-      const projectDirty = Boolean(
-        projectScope.data
-        && projectScope.draft
-        && JSON.stringify(projectScope.draft) !== JSON.stringify(projectScope.data.config)
-      );
-      if (projectDirty && !window.confirm("当前 Project 设置有未保存修改。放弃修改并切换 Project？")) {
-        return;
-      }
-      const response = await fetch("/api/projects/select", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name })
-      });
-      if (!response.ok) throw new Error(await response.text());
+    function resetProjectState() {
       state.selectedId = null;
       state.selectedTaskId = null;
       state.selectedReviewId = null;
@@ -1146,7 +1168,34 @@ export const browserHtml = String.raw`<!doctype html>
         loading: false
       };
       if (state.settingsScope === "project") applySettingsScope("project");
+    }
+
+    async function activateProject(name) {
+      stashSettingsScope();
+      const response = await fetch("/api/projects/select", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      if (!response.ok) throw new Error(await response.text());
+      resetProjectState();
+    }
+
+    async function selectProject(name) {
+      if (!confirmProjectSwitch()) return;
+      await activateProject(name);
       await loadAll();
+    }
+
+    function confirmProjectSwitch() {
+      stashSettingsScope();
+      const projectScope = state.settingsScopes.project;
+      const projectDirty = Boolean(
+        projectScope.data
+        && projectScope.draft
+        && JSON.stringify(projectScope.draft) !== JSON.stringify(projectScope.data.config)
+      );
+      return !projectDirty || window.confirm("当前 Project 设置有未保存修改。放弃修改并切换 Project？");
     }
 
     function renderFatalError(error) {
@@ -2688,8 +2737,16 @@ export const browserHtml = String.raw`<!doctype html>
           state.viewMode = "memory";
           const review = state.reviews.find(item => item.id === route.reviewId);
           const memory = memoryForReview(review);
-          if (!review) state.routeError = "Memory Review not found: " + route.reviewId;
+          const routeMemory = route.kind && route.name ? memoryForRoute(route.kind, route.name) : null;
+          if (route.project && route.project !== state.currentProject) {
+            state.routeError = "Project not found: " + route.project;
+          } else if (!review) state.routeError = "Memory Review not found: " + route.reviewId;
           else if (!memory) state.routeError = "The Memory for this review is unavailable.";
+          else if (route.kind && route.name && !routeMemory) {
+            state.routeError = "Memory not found: " + route.kind + "/" + route.name;
+          } else if (routeMemory && routeMemory.id !== memory.id) {
+            state.routeError = "The Memory Review target does not match the URL Memory.";
+          }
           else {
             state.selectedId = memory.id;
             state.selectedReviewId = review.id;
@@ -2779,7 +2836,14 @@ export const browserHtml = String.raw`<!doctype html>
           } else path = "/tasks/" + encodeRoutePart(run.id);
         } else path = "/tasks/" + encodeRoutePart(run.id);
       } else if (state.reviewDrawerOpen && state.selectedReviewId) {
-        path = "/memory-reviews/" + encodeRoutePart(state.selectedReviewId);
+        const review = state.reviews.find(item => item.id === state.selectedReviewId) || null;
+        const memory = memoryForReview(review);
+        path = review && memory?.entity && state.currentProject
+          ? "/projects/" + encodeRoutePart(state.currentProject)
+            + "/memories/" + encodeRoutePart(memory.kind)
+            + "/" + encodeRoutePart(primaryName(memory.entity))
+            + "/reviews/" + encodeRoutePart(review.id)
+          : "/memories";
       } else {
         if (state.routeLanding === "memories") return "/memories";
         const memory = state.memories.find(item => item.id === state.selectedId) || null;
