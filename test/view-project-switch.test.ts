@@ -7,7 +7,7 @@ import test from "node:test";
 import { chromium } from "playwright";
 import type { MemsphereConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
-import { createReview } from "../src/review/store.js";
+import { createReview, updateReview } from "../src/review/store.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
 test("View switches Projects without retaining the previous Project Memory data", async () => {
@@ -235,6 +235,18 @@ test("View switches Projects without retaining the previous Project Memory data"
         );
         await reviewSummaryCard.click();
         assert.equal((await reviewDetailLoaded).status(), 200);
+
+        await reviewSummaryCard.click();
+        await reviewPage.locator("#review-close").click();
+        await updateReview(join(roots.alpha, "reviews"), review.id, { status: "submitted" });
+        const refreshedReviewSummaries = reviewPage.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return url.pathname === "/api/reviews"
+            && url.searchParams.get("memory_id") === "concepts/alpha-memory";
+        });
+        await reviewPage.getByRole("button", { name: "Review", exact: true }).click();
+        assert.equal((await refreshedReviewSummaries).status(), 200);
+        await reviewSummaryCard.locator(".pill", { hasText: "submitted" }).waitFor();
         await reviewPage.close();
       } finally {
         await browser.close();

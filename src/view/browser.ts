@@ -1088,7 +1088,8 @@ export const browserHtml = String.raw`<!doctype html>
       else await loadSettings();
       if (generation !== state.pageLoadGeneration) return;
       if (route) {
-        await applyBrowserRoute(route, { render: false });
+        const applied = await applyBrowserRoute(route, { render: false, generation });
+        if (!applied || generation !== state.pageLoadGeneration) return;
         state.routeReady = true;
         if (targetMode === "memory" && route.page !== "memory" && route.page !== "memory-review") {
           await loadMemoryDetail(state.selectedId || state.memories[0]?.id);
@@ -1301,10 +1302,10 @@ export const browserHtml = String.raw`<!doctype html>
       if (projectGeneration !== state.projectGeneration) return false;
       const currentSubject = reviewListSubject();
       if (!currentSubject || currentSubject.id !== subject.id || currentSubject.path !== subject.path) return false;
-      state.reviews = (payload.reviews || []).map(review => ({
-        ...review,
-        ...(state.reviewDetails.get(review.id) || {})
-      }));
+      state.reviews = (payload.reviews || []).map(review => {
+        const detail = state.reviewDetails.get(review.id);
+        return detail?.updatedAt === review.updatedAt ? { ...review, ...detail } : review;
+      });
       return true;
     }
 
@@ -2869,6 +2870,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function applyBrowserRoute(route, options = {}) {
       state.routeApplying = true;
+      state.artifactReviewRequest += 1;
       state.pendingRoute = route;
       state.pendingFragment = route.fragment || "";
       state.routeError = "";
@@ -2889,6 +2891,7 @@ export const browserHtml = String.raw`<!doctype html>
           if (memory) {
             state.selectedId = memory.id;
             await loadMemoryDetail(memory.id);
+            if (!isCurrentPageLoad(options)) return false;
           }
           else {
             state.selectedId = null;
@@ -2900,8 +2903,11 @@ export const browserHtml = String.raw`<!doctype html>
           if (routeMemory) {
             state.selectedId = routeMemory.id;
             await loadMemoryDetail(routeMemory.id);
+            if (!isCurrentPageLoad(options)) return false;
             await loadReviews();
+            if (!isCurrentPageLoad(options)) return false;
             await loadReviewDetail(route.reviewId);
+            if (!isCurrentPageLoad(options)) return false;
           }
           const review = state.reviews.find(item => item.id === route.reviewId);
           const memory = memoryForReview(review);
@@ -2928,9 +2934,11 @@ export const browserHtml = String.raw`<!doctype html>
           let run = state.runs.find(item => item.id === route.runId);
           if (!run) {
             await loadRunDetail(route.runId);
+            if (!isCurrentPageLoad(options)) return false;
             run = state.runs.find(item => item.id === route.runId);
           } else {
             await loadRunDetail(run.id);
+            if (!isCurrentPageLoad(options)) return false;
             run = state.runs.find(item => item.id === route.runId);
           }
           if (!run) {
@@ -2950,6 +2958,7 @@ export const browserHtml = String.raw`<!doctype html>
                 writeStoredObject(artifactReviewSelectedKey, state.artifactReviewSelectedByRun);
                 writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
                 await syncArtifactReviewContext(true);
+                if (!isCurrentPageLoad(options)) return false;
                 if (!el.artifactReviewModal.open) el.artifactReviewModal.showModal();
               }
             }
@@ -2979,6 +2988,11 @@ export const browserHtml = String.raw`<!doctype html>
         syncBrowserUrl();
       }
       restoreRouteFragment();
+      return true;
+    }
+
+    function isCurrentPageLoad(options) {
+      return options.generation === undefined || options.generation === state.pageLoadGeneration;
     }
 
     function settingsPublicModule(scope, module) {
@@ -5678,6 +5692,8 @@ export const browserHtml = String.raw`<!doctype html>
       state.runDetails.delete(run.id);
       state.runs = state.runs.filter(item => item.id !== run.id);
       if (!state.selectedTaskId) state.selectedTaskId = state.runs[0]?.id || null;
+      saveSelectedTask();
+      if (state.selectedTaskId) await loadRunDetail(state.selectedTaskId);
       renderAll();
     }
 

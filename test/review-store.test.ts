@@ -126,6 +126,26 @@ test("View keeps Memory Review and rejects the removed Task Review API", async (
         review.id
       );
 
+      const summaryPath = join(reviewsRoot, review.id, "summary.json");
+      await rm(summaryPath, { force: true });
+      await mkdir(summaryPath);
+      const updatedWithoutCache = await fetch(`${url}/api/reviews/${review.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "submitted" })
+      });
+      assert.equal(updatedWithoutCache.status, 200, await updatedWithoutCache.text());
+      assert.match(await readFile(join(reviewsRoot, review.id, "review.yaml"), "utf8"), /status: submitted/);
+      await rm(summaryPath, { recursive: true });
+      const rebuiltAfterCacheFailure = await fetch(
+        `${url}/api/reviews?representation=summary&memory_id=${encodeURIComponent("statements/review-target")}`
+      );
+      assert.equal(rebuiltAfterCacheFailure.status, 200);
+      assert.equal(
+        ((await rebuiltAfterCacheFailure.json()) as { reviews: Array<{ status: string }> }).reviews[0]?.status,
+        "submitted"
+      );
+
       const reviewDetail = await fetch(`${url}/api/reviews/${review.id}`);
       assert.equal(reviewDetail.status, 200);
       assert.deepEqual((await reviewDetail.json() as { review: { comments: unknown[] } }).review.comments, []);

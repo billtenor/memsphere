@@ -62,8 +62,8 @@ test("archived Run detail survives active summary refresh without joining Task n
 });
 
 test("summary stores do not reuse full Memory or Review list readers", async () => {
-  const viewSource = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/commands/view.ts", import.meta.url), "utf8"));
-  const reviewSource = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/review/store.ts", import.meta.url), "utf8"));
+  const viewSource = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/commands/view.ts", import.meta.url), "utf8")).then(source => source.replace(/\r\n/g, "\n"));
+  const reviewSource = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/review/store.ts", import.meta.url), "utf8")).then(source => source.replace(/\r\n/g, "\n"));
   const memorySummaryBody = viewSource.match(/async function loadMemorySummaryPayload[\s\S]*?\n}\n\nasync function systemMemoryReferences/)?.[0] || "";
   const reviewSummaryBody = reviewSource.match(/export async function listReviewSummaries[\s\S]*?\n}\n\nasync function readReviewSummary/)?.[0] || "";
   assert.match(memorySummaryBody, /readMemoryFileSummary/);

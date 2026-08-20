@@ -352,7 +352,7 @@ async function writeReviewToDirectory(reviewsRoot: string, review: ReviewFile): 
     join(reviewDir, "summary.json"),
     { size: source.size, mtimeMs: source.mtimeMs },
     reviewSummary(review)
-  );
+  ).catch(() => undefined);
 }
 
 async function writeReviewSummaryCache(

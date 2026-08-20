@@ -333,6 +333,34 @@ test("Task titles fall back to the Procedure name for historical Runs", async ()
   });
 });
 
+test("archiving the selected Run loads the next Task detail", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await openTaskPage(browser, url, 1024);
+    try {
+      assert.equal(await page.locator("#title").textContent(), runName);
+      page.once("dialog", dialog => dialog.accept());
+      const archived = page.waitForResponse((response) =>
+        response.request().method() === "POST"
+        && new URL(response.url()).pathname === `/api/archive/runs/${runId}`
+      );
+      const nextDetail = page.waitForResponse((response) =>
+        new URL(response.url()).pathname === `/api/runs/${legacyRunId}`
+      );
+      await page.locator(".task-card.active .task-card-archive").click();
+      assert.equal((await archived).status(), 200);
+      assert.equal((await nextDetail).status(), 200);
+      await page.getByRole("heading", { name: "Legacy procedure fallback", exact: true }).waitFor();
+      assert.doesNotMatch(await page.locator("#detail").textContent() ?? "", /Loading task/);
+      assert.equal(
+        await page.evaluate(() => localStorage.getItem("memsphere.selectedTask.v1")),
+        legacyRunId
+      );
+    } finally {
+      await page.close();
+    }
+  });
+});
+
 test("Memory Review panel can resize the content layout", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await openMemoryPage(browser, url, 1366);
@@ -534,6 +562,43 @@ test("View deep links restore Memory, Task, Memory Review, and browser history",
       await page.waitForURL(url + `/tasks/${runId}`);
       await page.getByRole("heading", { name: runName, exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
+
+      let releaseStaleRunDetail!: () => void;
+      let captureStaleRunDetail!: () => void;
+      const staleRunDetailGate = new Promise<void>((resolve) => { releaseStaleRunDetail = resolve; });
+      const staleRunDetailCaptured = new Promise<void>((resolve) => { captureStaleRunDetail = resolve; });
+      let delayedRunDetail = false;
+      await page.route(`**/api/runs/${runId}`, async (route) => {
+        if (delayedRunDetail) return route.continue();
+        delayedRunDetail = true;
+        const response = await route.fetch();
+        captureStaleRunDetail();
+        await staleRunDetailGate;
+        await route.fulfill({ response });
+      });
+      const staleRunDetailResponse = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${runId}`
+      );
+      await page.evaluate((path) => {
+        history.pushState({}, "", path);
+        dispatchEvent(new PopStateEvent("popstate"));
+      }, `/tasks/${runId}`);
+      await staleRunDetailCaptured;
+
+      const latestRunDetailResponse = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${legacyRunId}`
+      );
+      await page.evaluate((path) => {
+        history.pushState({}, "", path);
+        dispatchEvent(new PopStateEvent("popstate"));
+      }, `/tasks/${legacyRunId}`);
+      assert.equal((await latestRunDetailResponse).status(), 200);
+      await page.getByRole("heading", { name: "Legacy procedure fallback", exact: true }).waitFor();
+      releaseStaleRunDetail();
+      assert.equal((await staleRunDetailResponse).status(), 200);
+      await page.waitForTimeout(100);
+      assert.equal(new URL(page.url()).pathname, `/tasks/${legacyRunId}`);
+      assert.equal(await page.locator("#title").textContent(), "Legacy procedure fallback");
 
       const missing = await browser.newPage();
       await missing.goto(`${url}/memories/concepts/${encodeURIComponent("Missing memory")}`);
