@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -137,7 +137,8 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
 
     await writeFile(join(linkedMemory, "concepts", "shared.yaml"), "!concept\nnames: [Broken\n");
     const invalid = await validateMemoryChange();
-    assert(invalid.issues.some((issue) => issue.path === join(linkedMemory, "concepts", "shared.yaml")));
+    const canonicalLinkedMemory = await realpath(linkedMemory);
+    assert(invalid.issues.some((issue) => issue.path === join(canonicalLinkedMemory, "concepts", "shared.yaml")));
     const invalidChange = JSON.parse(await readFile(join(project.root, "changes", first.changeId, "change.json"), "utf8")) as {
       checkpoint: { valid: boolean; issues: Array<{ path: string }> };
     };
