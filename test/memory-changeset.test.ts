@@ -164,6 +164,13 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("concepts/shared", "concepts/missing"));
     const missingReference = await validateMemoryChange(dependent.change.id);
     assert(missingReference.issues.some((issue) => issue.path === dependentPath && issue.message.includes("was not found")));
+    const persistedMissingReference = memoryChangeSetSchema.parse(JSON.parse(await readFile(
+      join(registry.projects.project.root, "changes", dependent.change.id, "change.json"),
+      "utf8"
+    )));
+    assert(persistedMissingReference.checkpoint?.issues.some((issue) => (
+      issue.path === "concepts/dependent.yaml" && issue.message.includes("was not found")
+    )));
     await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("concepts/missing", "concepts/shared"));
     await publishMemoryChange(dependent.change.id);
     assert.deepEqual((await readMemoryFile("concepts", join(memoryRoot, "concepts", "other.yaml"))).entity.names, ["other", "Other Alias"]);

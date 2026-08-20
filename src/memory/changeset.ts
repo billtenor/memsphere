@@ -310,7 +310,8 @@ export async function validateMemoryChange(changeId?: string): Promise<MemoryCha
           checkpointCandidate,
           context.primary.config.store.published_revision,
           issues,
-          context.primary.memoryRoot
+          context.primary.memoryRoot,
+          candidateRoot
         );
         return validationResult(
           effectiveChange,
@@ -409,7 +410,8 @@ async function persistValidatedCheckpoint(
   candidateRoot: string,
   baseRevision: string,
   issues: ValidationIssue[],
-  effectiveMemoryRoot: string
+  effectiveMemoryRoot: string,
+  issueCandidateRoot = candidateRoot
 ): Promise<string> {
   const digest = await checkpointDigest(change.targets, candidateRoot);
   const checkpoints = checkpointsRoot(project, change.id);
@@ -433,7 +435,7 @@ async function persistValidatedCheckpoint(
     base_revision: baseRevision,
     created_at: new Date().toISOString(),
     valid: issues.length === 0,
-    issues: issues.map((issue) => persistedValidationIssue(issue, effectiveMemoryRoot, candidateRoot))
+    issues: issues.map((issue) => persistedValidationIssue(issue, effectiveMemoryRoot, issueCandidateRoot))
   };
   change.updated_at = new Date().toISOString();
   await writeChange(project, change);
