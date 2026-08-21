@@ -75,6 +75,8 @@ flow:
         artifact: !artifact
           name: 分支评审意见处置结论
           format: markdown
+          review:
+            - 项目负责人
 
       - !action
         action: 修复已接受的评审问题并完成验证。
@@ -83,17 +85,27 @@ flow:
           - 必须实施必要修改并运行适用工程 Memory 和变更范围要求的测试与检查；只允许修改和提交本流程范围内的内容。
           - 如果目标分支 HEAD 在修复期间发生变化，必须先重新同步并复核处置结论，禁止覆盖或忽略他人的新提交。
           - 测试失败或环境阻塞时不得声称问题已经修复，必须记录实际结果和后续处理条件。
-          - 仅在存在实际代码改动且验证结果达到可提交条件时创建 commit，并记录 commit SHA；不得自动 push，除非 human 在请求中明确授权。
           - 每项修改和验证必须能追溯到对应的本地评审意见；拒绝、澄清和延期意见不得伪造成已修复。
         artifact: !artifact
           name: 分支问题修复与验证记录
           format: markdown
 
       - !action
+        action: 提交本轮修复的 Git commit。
+        actor: agent
+        asserts:
+          - 只允许提交本轮已接受评审问题产生的实际改动，不得暂存或提交其他工作区内容。
+          - 存在实际改动时，必须在适用验证达到可提交条件后创建 commit 并记录 commit SHA；没有实际改动时必须记录未创建 commit，不得制造空 commit。
+          - 不得自动 push，除非 human 在请求中明确授权。
+        artifact: !artifact
+          name: 分支修复 Commit 结果
+          format: markdown
+
+      - !action
         action: 记录本轮评审与修复结果。
         actor: agent
         asserts:
-          - 必须以文字记录目标 HEAD SHA、评审覆盖、全部意见及处置、代码改动、验证结果、commit、未解决问题和残余风险，作为下一轮避免遗漏和重复处理的基线。
+          - 必须以文字记录目标 HEAD SHA、评审覆盖、全部意见及处置、代码改动、验证结果、分支修复 Commit 结果、未解决问题和残余风险，作为下一轮避免遗漏和重复处理的基线。
           - 不得用 GitHub comment、review 或 thread 链接代替本地产物中的完整文字说明。
         artifact: !artifact
           name: 分支评审与修复轮次记录
