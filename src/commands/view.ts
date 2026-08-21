@@ -774,7 +774,17 @@ async function handleRequest(
 
   const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)$/);
   if (request.method === "GET" && runMatch) {
-    const located = await readViewRunById(config, decodeURIComponent(runMatch[1]));
+    const runId = decodeURIComponent(runMatch[1]);
+    let located: Awaited<ReturnType<typeof readViewRunById>>;
+    try {
+      located = await readViewRunById(config, runId);
+    } catch (error) {
+      if (error instanceof Error && error.message === `Run not found: ${runId}`) {
+        sendJson(response, 404, { error: "run not found" });
+        return;
+      }
+      throw error;
+    }
     if (located.runsRoot === runsRoot) await dispatchArtifactReviewAgents({ config, run: located.run });
     const run = located.runsRoot === runsRoot
       ? await readRun(located.runsRoot, located.run.id)

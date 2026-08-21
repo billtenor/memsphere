@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { memoryKinds, type MemoryKind } from "../src/memory/kinds.js";
-import { listMemoryFiles } from "../src/memory/store.js";
+import { listMemoryFiles, readMemoryFile, readMemoryFileSummary } from "../src/memory/store.js";
 import { projectConfigSchema } from "../src/project/model.js";
 import { validateMemoryRoot } from "../src/validation.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
@@ -45,6 +45,19 @@ test("listMemoryFiles keeps yaml filtering and sorting for existing directories"
       join(proceduresRoot, "a.yaml"),
       join(proceduresRoot, "b.yml")
     ]);
+  });
+});
+
+test("readMemoryFileSummary falls back to full parsing for quoted name keys", async () => {
+  await withTempDir(async (dir) => {
+    const path = join(dir, "quoted.yaml");
+    await writeFile(path, withCurrentMemorySyntax(`!concept
+"names": [quoted-memory, Quoted Memory]
+defines: [valid]
+`));
+
+    assert.deepEqual((await readMemoryFile("concepts", path)).entity.names, ["quoted-memory", "Quoted Memory"]);
+    assert.deepEqual((await readMemoryFileSummary("concepts", path)).names, ["quoted-memory", "Quoted Memory"]);
   });
 });
 

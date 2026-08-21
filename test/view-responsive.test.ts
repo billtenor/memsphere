@@ -346,6 +346,14 @@ test("Task titles fall back to the Procedure name for historical Runs", async ()
   });
 });
 
+test("missing Run detail is reported as not found", async () => {
+  await withResponsiveView(async (_browser, url) => {
+    const response = await fetch(`${url}/api/runs/run-missing`);
+    assert.equal(response.status, 404);
+    assert.match(await response.text(), /run not found/i);
+  });
+});
+
 test("archiving the selected Run loads the next Task detail", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await openTaskPage(browser, url, 1024);

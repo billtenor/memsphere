@@ -790,6 +790,7 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewMaterialBySubmission: {},
       inlineCommentDraft: null,
       taskPollingRenderPending: false,
+      taskDetailReloadPending: null,
       artifactReviewHistoryRoundId: null,
       artifactReviewIdentityByReview: readStoredObject(artifactReviewIdentityKey),
       artifactReviewOpenedRounds: readStoredObject(artifactReviewOpenedKey),
@@ -990,6 +991,8 @@ export const browserHtml = String.raw`<!doctype html>
       projectSelectMenu: document.getElementById("project-select-menu")
     };
 
+    let projectSwitchChain = Promise.resolve();
+
     document.getElementById("expand").addEventListener("click", () => setAllSections(true));
     document.getElementById("collapse").addEventListener("click", () => setAllSections(false));
     document.getElementById("refresh").addEventListener("click", () => loadAll().catch(renderFatalError));
@@ -1035,7 +1038,9 @@ export const browserHtml = String.raw`<!doctype html>
     });
     document.addEventListener("focusout", () => {
       setTimeout(() => {
-        if (!state.taskPollingRenderPending || hasActiveTaskInteraction()) return;
+        if (hasActiveTaskInteraction()) return;
+        if (flushPendingTaskDetail()) return;
+        if (!state.taskPollingRenderPending) return;
         state.taskPollingRenderPending = false;
         renderAll();
       }, 0);
@@ -1066,10 +1071,18 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function loadAll(options = {}) {
       const generation = ++state.pageLoadGeneration;
+      await projectSwitchChain;
+      if (generation !== state.pageLoadGeneration) return;
       await loadProjects();
+      if (generation !== state.pageLoadGeneration) return;
+      if (options.project && options.project !== state.currentProject) {
+        await switchProject(options.project);
+        if (generation !== state.pageLoadGeneration) return;
+      }
       let route = options.route || (!state.routeReady ? state.pendingRoute : null);
       if (route) {
         route = await prepareBrowserRoute(route);
+        if (generation !== state.pageLoadGeneration) return;
         state.pendingRoute = route;
         if (route.project && route.project !== state.currentProject) {
           if (!confirmProjectSwitch()) {
@@ -1077,8 +1090,8 @@ export const browserHtml = String.raw`<!doctype html>
             syncBrowserUrl();
             return;
           }
-          await activateProject(route.project);
-          await loadProjects();
+          await switchProject(route.project);
+          if (generation !== state.pageLoadGeneration) return;
         }
       }
       const targetMode = route ? routeViewMode(route) : state.viewMode;
@@ -1185,6 +1198,7 @@ export const browserHtml = String.raw`<!doctype html>
       state.memoryDetails.clear();
       state.reviewDetails.clear();
       state.runDetails.clear();
+      state.taskDetailReloadPending = null;
       state.reviewSnapshots.clear();
       state.settingsScopes.project = {
         data: null,
@@ -1208,10 +1222,20 @@ export const browserHtml = String.raw`<!doctype html>
       resetProjectState();
     }
 
+    function switchProject(name) {
+      const operation = projectSwitchChain.then(async () => {
+        await loadProjects();
+        if (name === state.currentProject) return;
+        await activateProject(name);
+        await loadProjects();
+      });
+      projectSwitchChain = operation.catch(() => undefined);
+      return operation;
+    }
+
     async function selectProject(name) {
       if (!confirmProjectSwitch()) return;
-      await activateProject(name);
-      await loadAll();
+      await loadAll({ project: name });
     }
 
     function confirmProjectSwitch() {
@@ -1388,8 +1412,15 @@ export const browserHtml = String.raw`<!doctype html>
         saveSelectedTask();
       }
       const selected = state.runs.find(run => run.id === state.selectedTaskId) || state.runs[0];
-      if (options.loadDetail !== false && selected && previous.get(selected.id) !== selected.updatedAt && !hasActiveTaskInteraction()) {
-        await loadRunDetail(selected.id);
+      if (options.loadDetail !== false && selected && previous.get(selected.id) !== selected.updatedAt) {
+        if (hasActiveTaskInteraction()) {
+          const detail = state.runDetails.get(selected.id);
+          if (detail) Object.assign(selected, detail, { eventCount: detail.events?.length || 0 });
+          state.taskDetailReloadPending = selected.id;
+        } else {
+          if (state.taskDetailReloadPending === selected.id) state.taskDetailReloadPending = null;
+          await loadRunDetail(selected.id);
+        }
       }
       if (state.artifactReviewModalOpen) {
         await syncArtifactReviewContext();
@@ -3271,7 +3302,9 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function setViewMode(mode, options = {}) {
-      state.pageLoadGeneration += 1;
+      const generation = ++state.pageLoadGeneration;
+      await projectSwitchChain;
+      if (generation !== state.pageLoadGeneration) return;
       state.routeError = "";
       if (options.landing) state.routeLanding = mode === "task" ? "tasks" : mode === "memory" ? "memories" : "";
       else if (mode === "settings") state.routeLanding = "";
@@ -5572,6 +5605,17 @@ export const browserHtml = String.raw`<!doctype html>
       if (document.querySelector(".artifact-review-select-menu:not([hidden])")) return true;
       if (Object.values(state.artifactReviewActivities).some(entry => entry.expanded && !entry.pinnedToBottom)) return true;
       return Boolean(document.activeElement?.matches?.(".artifact-review-select"));
+    }
+
+    function flushPendingTaskDetail() {
+      const id = state.taskDetailReloadPending;
+      if (!id || state.viewMode !== "task") return false;
+      state.taskDetailReloadPending = null;
+      state.taskPollingRenderPending = false;
+      loadRunDetail(id).then(() => {
+        if (state.selectedTaskId === id) renderAll();
+      }).catch(renderFatalError);
+      return true;
     }
 
     function setAllSections(open) {

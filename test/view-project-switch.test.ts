@@ -148,6 +148,48 @@ test("View switches Projects without retaining the previous Project Memory data"
         await page.getByRole("option", { name: "alpha", exact: true }).click();
         await page.getByRole("heading", { name: "alpha shared", exact: true }).waitFor();
 
+        let releaseBetaSelection!: () => void;
+        let captureBetaSelection!: () => void;
+        const betaSelectionGate = new Promise<void>((resolve) => { releaseBetaSelection = resolve; });
+        const betaSelectionCaptured = new Promise<void>((resolve) => { captureBetaSelection = resolve; });
+        let delayedBetaSelection = false;
+        await page.route("**/api/projects/select", async (route) => {
+          const body = route.request().postDataJSON() as { name?: string } | null;
+          if (body?.name !== "beta" || delayedBetaSelection) return route.continue();
+          delayedBetaSelection = true;
+          captureBetaSelection();
+          await betaSelectionGate;
+          await route.continue();
+        });
+        const betaSelected = page.waitForResponse((response) =>
+          response.request().method() === "POST"
+          && new URL(response.url()).pathname === "/api/projects/select"
+          && (response.request().postDataJSON() as { name?: string } | null)?.name === "beta"
+        );
+        await page.evaluate((path) => {
+          history.pushState({}, "", path);
+          dispatchEvent(new PopStateEvent("popstate"));
+        }, "/projects/beta/memories/concepts/beta-memory/reviews/review-missing");
+        await betaSelectionCaptured;
+
+        const alphaReselected = page.waitForResponse((response) =>
+          response.request().method() === "POST"
+          && new URL(response.url()).pathname === "/api/projects/select"
+          && (response.request().postDataJSON() as { name?: string } | null)?.name === "alpha"
+        );
+        await page.evaluate((path) => {
+          history.pushState({}, "", path);
+          dispatchEvent(new PopStateEvent("popstate"));
+        }, canonicalPath);
+        releaseBetaSelection();
+        assert.equal((await betaSelected).status(), 200);
+        assert.equal((await alphaReselected).status(), 200);
+        await page.waitForFunction((path) =>
+          location.pathname === path
+          && document.querySelector("#project-select-value")?.textContent === "alpha",
+        canonicalPath);
+        await page.getByRole("heading", { name: "alpha-memory", exact: true }).waitFor();
+
         await page.close();
 
         const reviewPage = await browser.newPage({ viewport: { width: 1366, height: 900 } });

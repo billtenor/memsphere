@@ -87,7 +87,7 @@ test("stale page loads cannot release the active route application guard", () =>
 });
 
 test("manual view switches supersede an in-flight page load", () => {
-  assert.match(browserHtml, /async function setViewMode\(mode, options = \{\}\) \{\s*state\.pageLoadGeneration \+= 1;/);
+  assert.match(browserHtml, /async function setViewMode\(mode, options = \{\}\) \{\s*const generation = \+\+state\.pageLoadGeneration;\s*await projectSwitchChain;\s*if \(generation !== state\.pageLoadGeneration\) return;/);
 });
 
 test("Settings separates the global and Project configuration workspaces", () => {
@@ -554,6 +554,8 @@ test("task polling does not replace active editors or open Artifact Review selec
   assert.match(browserHtml, /document\.activeElement\?\.matches\?\.\("\.artifact-review-select"\)/);
   assert.match(browserHtml, /Object\.values\(state\.artifactReviewActivities\)\.some\(entry => entry\.expanded && !entry\.pinnedToBottom\)/);
   assert.match(browserHtml, /if \(nextCursor !== cursor \|\| entry\.error !== error \|\| entry\.loaded !== loaded\) \{\s*refreshAgentActivityDom/);
+  assert.match(browserHtml, /if \(detail\) Object\.assign\(selected, detail, \{ eventCount: detail\.events\?\.length \|\| 0 \}\);\s*state\.taskDetailReloadPending = selected\.id;/);
+  assert.match(browserHtml, /function flushPendingTaskDetail\(\)[\s\S]*loadRunDetail\(id\)\.then/);
 });
 
 test("section title comments render inline in the expanded node", () => {

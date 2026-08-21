@@ -49,7 +49,11 @@ export async function readMemoryFileSummary(kind: MemoryKind, filePath: string):
       if (bytesRead === 0) source += decoder.end();
       const names = memoryNamesFromPrefix(source, bytesRead === 0);
       if (names) return { kind, path: filePath, names };
-      if (bytesRead === 0) throw new Error(`Memory names are missing: ${filePath}`);
+      if (bytesRead === 0) {
+        const entity = parseMemoryYaml(source);
+        assertExpectedTag(entity, kind, filePath);
+        return { kind, path: filePath, names: parseMemoryEntity(kind, entity).names };
+      }
     }
   } finally {
     await handle.close();
