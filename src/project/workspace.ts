@@ -4,6 +4,7 @@ import { gitOutput } from "../git.js";
 
 export type WorkspaceIdentity = {
   key: string;
+  instanceKey: string;
   path: string;
   kind: "git" | "directory";
 };
@@ -13,10 +14,18 @@ export async function resolveWorkspaceIdentity(cwd = process.cwd()): Promise<Wor
   try {
     const topLevel = await gitOutput(["rev-parse", "--show-toplevel"], path);
     const commonDirOutput = await gitOutput(["rev-parse", "--git-common-dir"], path);
+    const gitDirOutput = await gitOutput(["rev-parse", "--git-dir"], path);
     const commonDir = await realpath(isAbsolute(commonDirOutput) ? commonDirOutput : resolve(path, commonDirOutput));
-    return { key: `git:${normalizeKey(commonDir)}`, path: await realpath(topLevel), kind: "git" };
+    const gitDir = await realpath(isAbsolute(gitDirOutput) ? gitDirOutput : resolve(path, gitDirOutput));
+    return {
+      key: `git:${normalizeKey(commonDir)}`,
+      instanceKey: `git-worktree:${normalizeKey(gitDir)}`,
+      path: await realpath(topLevel),
+      kind: "git"
+    };
   } catch {
-    return { key: `dir:${normalizeKey(path)}`, path, kind: "directory" };
+    const key = `dir:${normalizeKey(path)}`;
+    return { key, instanceKey: key, path, kind: "directory" };
   }
 }
 

@@ -76,7 +76,19 @@ memsphere memory read memsphere-schema
 
 列表同时包含 Primary 与 Mounted Project 时，使用返回的 `project_name` 和 Revision 判断来源。跨 Project 出现同名 Memory 时必须使用 `--project` 明确选择；Mounted Project 在组合上下文中严格只读。
 
-Embedded Project 的配置使用 Git 主 worktree 绝对 `repository_path` 和仓库相对 `memory_path`。View 固定读取主 worktree；普通 CLI 根据当前命令所在 worktree 重映射 Memory Root，并拒绝其他仓库。使用 `memsphere memory edit <reference>` 时，Managed Project 编辑 CLI 返回的 ChangeSet Candidate；Embedded Project 编辑 CLI 返回的当前 worktree YAML 路径，修改后执行 `memsphere validate` 并通过普通 Git 工作流集成，不执行 `memsphere memory publish`。当前分支缺少 Memory Root 时不得回退读取主 worktree。
+Embedded Project 的配置使用 Git 主 worktree 绝对 `repository_path` 和仓库相对 `memory_path`。View 固定读取主 worktree；普通 CLI 根据当前命令所在 worktree 重映射 Memory Root，并拒绝其他仓库。使用 `memsphere memory edit <reference>` 时，Managed Project 编辑 CLI 返回的 ChangeSet Candidate；Embedded Project 编辑 CLI 返回的当前 worktree YAML 路径。当前分支缺少 Memory Root 时不得回退读取主 worktree。
+
+## Memsphere 如何校验尚未发布的 Memory
+
+Managed Project 先用 `memsphere memory edit` 创建稀疏候选；Embedded Project 直接修改当前 Git worktree 中的 Memory。两者统一执行：
+
+```bash
+memsphere memory change validate [change-id]
+```
+
+Managed 省略 id 时当前 Workspace 必须恰有一个草稿。Embedded 会按当前 worktree 与 `HEAD` 的 Memory 差异创建或复用 ChangeSet。命令在 Project 中保存稀疏、内容寻址的校验 checkpoint，并输出 ChangeSet id 与 View 预览入口；`/memories?change=<change-id>` 展示该 checkpoint 叠加到基线后的完整 Memory，默认 Memory 页面仍展示正式版本。重复 validate 同一内容不会生成一批完整快照。普通 `memsphere validate` 只校验正式 Store，不创建 Embedded ChangeSet。
+
+Managed 最终使用 `memsphere memory publish --change <change-id>` 发布；Embedded 仍使用普通 Git commit。ChangeSet candidate 与 checkpoint 都不是完整 Memory Root，不得传给 `memsphere validate --memory-root`。
 
 ## Memsphere 记忆语法规则
 

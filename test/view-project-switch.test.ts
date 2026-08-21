@@ -104,6 +104,11 @@ test("View switches Projects without retaining the previous Project Memory data"
       const browser = await chromium.launch({ headless: true });
       try {
         const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+        await page.goto(origin + "/projects/beta/memories");
+        await page.getByRole("heading", { name: "beta-memory", exact: true }).waitFor();
+        assert.equal(new URL(page.url()).pathname, "/memories");
+        assert.equal(await page.locator("#project-select-value").textContent(), "beta");
+
         await page.goto(origin + canonicalPath);
         await page.waitForFunction(() => document.body.classList.contains("review-drawer-open"));
         assert.equal(new URL(page.url()).pathname, canonicalPath);
