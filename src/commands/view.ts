@@ -853,7 +853,10 @@ async function handleRequest(
     }
     if (located.runsRoot === runsRoot) await dispatchArtifactReviewAgents({ config, run: located.run });
     const run = located.runsRoot === runsRoot
-      ? await readRun(located.runsRoot, located.run.id)
+      ? await ensureCurrentSchemaDraft(
+        located.runsRoot,
+        await readRun(located.runsRoot, located.run.id)
+      )
       : { ...located.run, readOnly: true as const };
     sendJson(response, 200, {
       run: await toViewRunPayload(located.runsRoot, run)
