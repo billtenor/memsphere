@@ -81,10 +81,11 @@ flow:
       format: yaml
 
   - !action
-    action: 使用 memsphere memory edit 为目标 Procedure 创建或追加 Managed ChangeSet，并将 Procedure Memory 草稿写入 CLI 返回的 Workspace 候选路径；Embedded Project 则写入仓库内的 Memory 路径。
+    action: 使用 memsphere memory edit 定位目标 Procedure；Managed Project 创建或追加 ChangeSet 并写入 CLI 返回的 Workspace 候选路径，Embedded Project 则写入 CLI 返回的当前 Git worktree Memory 路径。
     actor: agent
     asserts:
       - Managed Project 不得直接修改正式 Memory 工作树；必须保留 CLI 返回的 change id。
+      - Embedded Project 必须使用 CLI 返回的 Edit Path，不得根据主工作树规范路径自行推断编辑位置；修改通过正常 Git 提交合入，不使用 ChangeSet publish。
       - 新建时使用唯一且可识别的 YAML 文件名；更新时修改 ChangeSet 中复制出的候选文件。
     artifact: !artifact
       name: 初版 Procedure Memory

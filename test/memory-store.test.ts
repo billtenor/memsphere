@@ -132,7 +132,7 @@ for (const missingKind of memoryKinds) {
 
 test("validateMemoryStore reports precise control_plane config paths", async () => {
   const result = projectConfigSchema.safeParse({
-    store: { type: "embedded", memory_path: "memory" },
+    store: { type: "embedded", repository_path: "/repo", memory_path: "memory" },
     control_plane: {
       runner: { permissions: ["artifact.delete"] },
       actors: {}

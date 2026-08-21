@@ -9,7 +9,7 @@ import { projectCreateCommand } from "../src/commands/project.js";
 import { createViewServer } from "../src/commands/view.js";
 import { runGit } from "../src/git.js";
 import { validateCommand } from "../src/commands/validate.js";
-import { readConfig } from "../src/config.js";
+import { readViewConfig } from "../src/config.js";
 import { MemoryChangePreviewCache, validateMemoryChange, withMemoryChangePreview } from "../src/memory/changeset.js";
 import { readProjectRegistry } from "../src/project/registry.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
@@ -53,6 +53,9 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     process.chdir(main);
     await projectCreateCommand("embedded", { embedded: mainMemory, bind: true });
     await runGit(["worktree", "add", "-b", "linked", linked], { cwd: main });
+    for (const kind of ["concepts", "statements", "schemas", "procedures"]) {
+      await mkdir(join(linkedMemory, kind), { recursive: true });
+    }
 
     process.chdir(linked);
     const linkedSource = mainSource.replace("Published", "Linked preview");
@@ -101,7 +104,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     }
     await assert.rejects(realpath(cachedRoots[0]!));
 
-    const view = createViewServer(await readConfig());
+    const view = createViewServer(await readViewConfig());
     await new Promise<void>((resolve, reject) => {
       view.once("error", reject);
       view.listen(0, "127.0.0.1", resolve);
@@ -192,7 +195,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     assert.equal(invalidChange.checkpoint.valid, false);
     assert(invalidChange.checkpoint.issues.some((issue) => issue.path === "concepts/shared.yaml"));
 
-    const invalidView = createViewServer(await readConfig());
+    const invalidView = createViewServer(await readViewConfig());
     await new Promise<void>((resolve, reject) => {
       invalidView.once("error", reject);
       invalidView.listen(0, "127.0.0.1", resolve);
