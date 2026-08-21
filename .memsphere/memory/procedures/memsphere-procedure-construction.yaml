@@ -60,6 +60,7 @@ flow:
       - 必须区分强制规范和可选建议；持续约束写入 Procedure asserts，局部约束写入 Action asserts，可选做法写入 suggests。
       - flow 只保留完成任务所必需的步骤；不得为展示思考过程而拆分中间 Action。
       - 每个 Action 必须职责单一、actor 准确并产出后续步骤或 human 实际需要的 Artifact。
+      - 每个 Action 的 action 只描述当前步骤的核心任务并保持简洁；执行范围、强制条件和验收要求写入同级 asserts，可选做法写入 suggests，不得把要求堆叠在步骤描述中。
       - 只有真正改变控制流的判断和重复执行才使用 !if、!while；condition 必须产出 boolean，循环必须具有可判断的终止条件。
       - 只有可复用且已存在的独立 Procedure 才使用 !call。
       - 强制使用的命令或工具必须写入 action 或 asserts，可选做法写入 suggests。
