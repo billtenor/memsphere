@@ -87,12 +87,120 @@ export type MemoryChangePreview = {
   memoryRoot: string;
 };
 
+type PreparedMemoryChangePreview = {
+  cacheKey: string;
+  changeKey: string;
+  change: MemoryChangeSet;
+  project: ResolvedProject;
+  candidateRoot: string;
+};
+
+type CachedMemoryChangePreview = {
+  preview: MemoryChangePreview;
+  refs: number;
+  stale: boolean;
+  lastUsed: number;
+};
+
+export class MemoryChangePreviewCache {
+  readonly #entries = new Map<string, CachedMemoryChangePreview>();
+  readonly #pending = new Map<string, Promise<CachedMemoryChangePreview>>();
+
+  constructor(readonly maxEntries = 4) {}
+
+  async use<T>(input: {
+    home?: string;
+    project: string;
+    changeId: string;
+    use: (preview: MemoryChangePreview) => Promise<T>;
+  }): Promise<T> {
+    const prepared = await prepareMemoryChangePreview(input);
+    await this.#invalidateOlderVersions(prepared.changeKey, prepared.cacheKey);
+    let entry = this.#entries.get(prepared.cacheKey);
+    if (!entry) {
+      let pending = this.#pending.get(prepared.cacheKey);
+      if (!pending) {
+        pending = materializePreparedMemoryChangePreview(prepared).then((preview) => ({
+          preview,
+          refs: 0,
+          stale: false,
+          lastUsed: Date.now()
+        }));
+        this.#pending.set(prepared.cacheKey, pending);
+      }
+      try {
+        entry = await pending;
+        this.#entries.set(prepared.cacheKey, entry);
+      } finally {
+        if (this.#pending.get(prepared.cacheKey) === pending) this.#pending.delete(prepared.cacheKey);
+      }
+      await this.#evictOverflow();
+    }
+    entry.preview = { ...entry.preview, change: prepared.change };
+    entry.refs += 1;
+    entry.lastUsed = Date.now();
+    try {
+      return await input.use(entry.preview);
+    } finally {
+      entry.refs -= 1;
+      if (entry.stale && entry.refs === 0) await removeCachedMemoryChangePreview(entry);
+    }
+  }
+
+  async clear(): Promise<void> {
+    const entries = [...this.#entries.values()];
+    this.#entries.clear();
+    for (const entry of entries) {
+      entry.stale = true;
+      if (entry.refs === 0) await removeCachedMemoryChangePreview(entry);
+    }
+  }
+
+  async dispose(): Promise<void> {
+    await this.clear();
+  }
+
+  async #invalidateOlderVersions(changeKey: string, currentKey: string): Promise<void> {
+    for (const [key, entry] of this.#entries) {
+      if (key === currentKey || !key.startsWith(`${changeKey}\0`)) continue;
+      this.#entries.delete(key);
+      entry.stale = true;
+      if (entry.refs === 0) await removeCachedMemoryChangePreview(entry);
+    }
+  }
+
+  async #evictOverflow(): Promise<void> {
+    if (this.#entries.size <= this.maxEntries) return;
+    const candidates = [...this.#entries.entries()].sort((left, right) => left[1].lastUsed - right[1].lastUsed);
+    for (const [key, entry] of candidates) {
+      if (this.#entries.size <= this.maxEntries) break;
+      this.#entries.delete(key);
+      entry.stale = true;
+      if (entry.refs === 0) await removeCachedMemoryChangePreview(entry);
+    }
+  }
+}
+
 export async function withMemoryChangePreview<T>(input: {
   home?: string;
   project: string;
   changeId: string;
   use: (preview: MemoryChangePreview) => Promise<T>;
 }): Promise<T> {
+  const prepared = await prepareMemoryChangePreview(input);
+  const preview = await materializePreparedMemoryChangePreview(prepared);
+  try {
+    return await input.use(preview);
+  } finally {
+    await rm(preview.memoryRoot, { recursive: true, force: true });
+  }
+}
+
+async function prepareMemoryChangePreview(input: {
+  home?: string;
+  project: string;
+  changeId: string;
+}): Promise<PreparedMemoryChangePreview> {
   const context = await resolveProjectContext({ home: input.home, project: input.project });
   const change = await readChange(context.primary, input.changeId);
   if (change.project !== context.primary.name) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
@@ -102,20 +210,39 @@ export async function withMemoryChangePreview<T>(input: {
   if (await checkpointDigest(change.targets, candidateRoot) !== change.checkpoint.digest) {
     throw new Error(`ChangeSet checkpoint digest does not match: ${change.id}`);
   }
+  const changeKey = `${context.primary.memoryRoot}\0${change.id}`;
+  return {
+    cacheKey: `${changeKey}\0${change.checkpoint.digest}`,
+    changeKey,
+    change,
+    project: context.primary,
+    candidateRoot
+  };
+}
+
+async function materializePreparedMemoryChangePreview(
+  prepared: PreparedMemoryChangePreview
+): Promise<MemoryChangePreview> {
+  const { change, project, candidateRoot } = prepared;
   const staging = await mkdtemp(join(tmpdir(), "memsphere-view-change-"));
   try {
     if (changeStoreType(change) === "managed") {
-      await materializeGitMemoryRoot(context.primary.memoryRoot, change.checkpoint.base_revision, ".", staging);
+      await materializeGitMemoryRoot(project.memoryRoot, change.checkpoint!.base_revision, ".", staging);
     } else {
       const source = change.source_worktree;
       if (!source) throw new Error(`Embedded ChangeSet ${change.id} has no source metadata`);
-      await materializeGitMemoryRoot(source.repository_root, change.checkpoint.base_revision, source.memory_path, staging);
+      await materializeGitMemoryRoot(source.repository_root, change.checkpoint!.base_revision, source.memory_path, staging);
     }
     await applyTargets(staging, candidateRoot, change.targets);
-    return await input.use({ change, memoryRoot: staging });
-  } finally {
+    return { change, memoryRoot: staging };
+  } catch (error) {
     await rm(staging, { recursive: true, force: true });
+    throw error;
   }
+}
+
+async function removeCachedMemoryChangePreview(entry: CachedMemoryChangePreview): Promise<void> {
+  await rm(entry.preview.memoryRoot, { recursive: true, force: true });
 }
 
 export async function editMemories(input: {
