@@ -1,17 +1,17 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, posix, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { atomicWriteJson, withFileLock } from "../persistence.js";
-import { gitOutput, runGit } from "../git.js";
+import { gitOutput, gitOutputRaw, runGit } from "../git.js";
 import { memoryKinds, type MemoryKind } from "./kinds.js";
 import { readAllMemoryFiles } from "./store.js";
 import { currentMemorySyntax } from "./syntax.js";
 import { serializeMemoryYaml } from "./serializer.js";
 import { validateMemoryRoot, type ValidationIssue } from "../validation.js";
 import { resolveProjectContext, type ResolvedProject } from "../project/resolver.js";
-import { resolveWorkspaceIdentity } from "../project/workspace.js";
+import { resolveWorkspaceIdentity, type WorkspaceIdentity } from "../project/workspace.js";
 import { projectConfigSchema } from "../project/model.js";
 import { GitRevisionMemoryProvider } from "./git-provider.js";
 import {
@@ -29,6 +29,29 @@ const changeTargetSchema = z.object({
   added_revision: z.string().min(1)
 }).strict();
 
+const persistedValidationIssueSchema = z.object({
+  path: z.string(),
+  message: z.string(),
+  line: z.number().int().positive().optional(),
+  column: z.number().int().positive().optional(),
+  migration: z.string().optional()
+}).strict();
+
+const changeCheckpointSchema = z.object({
+  digest: z.string().min(1),
+  base_revision: z.string().min(1),
+  created_at: z.string().datetime(),
+  valid: z.boolean(),
+  issues: z.array(persistedValidationIssueSchema)
+}).strict();
+
+const sourceWorktreeSchema = z.object({
+  instance_key: z.string().min(1),
+  root: z.string().min(1),
+  repository_root: z.string().min(1),
+  memory_path: z.string().min(1)
+}).strict();
+
 export const memoryChangeSetSchema = z.object({
   format_version: z.literal(1),
   id: z.string().min(1),
@@ -40,6 +63,9 @@ export const memoryChangeSetSchema = z.object({
   updated_at: z.string().datetime(),
   published_revision: z.string().min(1).optional(),
   merge_parent: z.string().min(1).optional(),
+  store_type: z.enum(["managed", "embedded"]).optional(),
+  source_worktree: sourceWorktreeSchema.optional(),
+  checkpoint: changeCheckpointSchema.optional(),
   targets: z.array(changeTargetSchema)
 }).strict();
 
@@ -50,8 +76,47 @@ export type MemoryChangeValidationResult = {
   changeId: string;
   memoryRoot: string;
   candidateRoot: string;
+  storeType: "managed" | "embedded";
+  baseRevision: string;
+  checkpointDigest: string;
   issues: ValidationIssue[];
 };
+
+export type MemoryChangePreview = {
+  change: MemoryChangeSet;
+  memoryRoot: string;
+};
+
+export async function withMemoryChangePreview<T>(input: {
+  home?: string;
+  project: string;
+  changeId: string;
+  use: (preview: MemoryChangePreview) => Promise<T>;
+}): Promise<T> {
+  const context = await resolveProjectContext({ home: input.home, project: input.project });
+  const change = await readChange(context.primary, input.changeId);
+  if (change.project !== context.primary.name) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
+  if (!change.checkpoint) throw new Error(`ChangeSet ${change.id} has no validated checkpoint`);
+  const candidateRoot = checkpointMemoryRoot(context.primary, change.id, change.checkpoint.digest);
+  if (!await exists(candidateRoot)) throw new Error(`ChangeSet checkpoint is missing: ${change.id}`);
+  if (await checkpointDigest(change.targets, candidateRoot) !== change.checkpoint.digest) {
+    throw new Error(`ChangeSet checkpoint digest does not match: ${change.id}`);
+  }
+  const staging = await mkdtemp(join(tmpdir(), "memsphere-view-change-"));
+  try {
+    if (changeStoreType(change) === "managed") {
+      await materializeGitMemoryRoot(context.primary.memoryRoot, change.checkpoint.base_revision, ".", staging);
+    } else {
+      const source = change.source_worktree;
+      if (!source) throw new Error(`Embedded ChangeSet ${change.id} has no source metadata`);
+      await materializeGitMemoryRoot(source.repository_root, change.checkpoint.base_revision, source.memory_path, staging);
+    }
+    await applyTargets(staging, candidateRoot, change.targets);
+    return await input.use({ change, memoryRoot: staging });
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
 
 export async function editMemories(input: {
   references: string[];
@@ -215,24 +280,471 @@ export async function publishMemoryChange(
   });
 }
 
-export async function validateMemoryChange(changeId: string): Promise<MemoryChangeValidationResult> {
-  const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  assertManaged(context.primary);
+export async function validateMemoryChange(changeId?: string): Promise<MemoryChangeValidationResult> {
+  const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   const workspace = await resolveWorkspaceIdentity();
-  const change = await readChange(context.primary, changeId);
-  assertDraftOwner(change, context.primary.name, workspace.key);
-  const candidateRoot = workspaceCandidateRoot(workspace.path, changeId);
-  if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
-  await assertManagedHealthy(context.primary);
-  const effectiveChange = await resolveEffectiveSyncTargets(change, candidateRoot);
-  await assertChangeTargetsCurrent(context.primary, effectiveChange);
-  const issues = await validateEffectiveMemoryChange(context.primary, effectiveChange, candidateRoot);
+  return withFileLock(memoryMutationLock(initialContext.primary), async () => {
+    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    if (context.primary.config.store.type === "managed") {
+      await assertManagedHealthy(context.primary);
+      const resolvedId = changeId ?? await resolveSingleManagedDraft(context.primary, workspace);
+      const change = await readChange(context.primary, resolvedId);
+      assertDraftOwner(change, context.primary.name, workspace.key);
+      if (changeStoreType(change) !== "managed") throw new Error(`ChangeSet ${change.id} is not a Managed ChangeSet`);
+      const candidateRoot = workspaceCandidateRoot(workspace.path, resolvedId);
+      if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
+      const effectiveChange = await resolveEffectiveSyncTargets(change, candidateRoot);
+      await assertChangeTargetsCurrent(context.primary, effectiveChange);
+      const checkpointCandidate = await snapshotSparseCandidate(candidateRoot, effectiveChange.targets);
+      try {
+        const issues = await validateEffectiveMemoryChange(
+          context.primary,
+          effectiveChange,
+          checkpointCandidate,
+          candidateRoot
+        );
+        effectiveChange.store_type = "managed";
+        const checkpointRoot = await persistValidatedCheckpoint(
+          context.primary,
+          effectiveChange,
+          checkpointCandidate,
+          context.primary.config.store.published_revision,
+          issues,
+          context.primary.memoryRoot,
+          candidateRoot
+        );
+        return validationResult(
+          effectiveChange,
+          context.primary.memoryRoot,
+          candidateRoot,
+          checkpointRoot,
+          context.primary.config.store.published_revision,
+          issues
+        );
+      } finally {
+        await rm(resolve(checkpointCandidate, ".."), { recursive: true, force: true });
+      }
+    }
+
+    const captured = await captureEmbeddedWorkingChange(context.primary, workspace, changeId);
+    try {
+      const issues = await validateEmbeddedEffectiveMemory(captured.change, captured.candidateRoot);
+      const checkpointRoot = await persistValidatedCheckpoint(
+        context.primary,
+        captured.change,
+        captured.candidateRoot,
+        captured.change.base_revision,
+        issues,
+        captured.memoryRoot
+      );
+      return validationResult(
+        captured.change,
+        captured.memoryRoot,
+        checkpointRoot,
+        checkpointRoot,
+        captured.change.base_revision,
+        issues
+      );
+    } finally {
+      await rm(resolve(captured.candidateRoot, ".."), { recursive: true, force: true });
+    }
+  });
+}
+
+async function resolveSingleManagedDraft(project: ResolvedProject, workspace: WorkspaceIdentity): Promise<string> {
+  const root = resolve(workspace.path, ".memsphere-work", "changes");
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if (isCode(error, "ENOENT")) {
+      throw new Error("no Managed draft ChangeSet was found in the current Workspace; run memsphere memory edit or provide a change id");
+    }
+    throw error;
+  }
+  const ids: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^change-[a-zA-Z0-9-]+$/.test(entry.name)) continue;
+    const change = await readChange(project, entry.name).catch(() => undefined);
+    if (
+      change?.status === "draft"
+      && change.project === project.name
+      && change.workspace_key === workspace.key
+      && changeStoreType(change) === "managed"
+      && await exists(join(root, entry.name, "memory"))
+    ) ids.push(entry.name);
+  }
+  ids.sort();
+  if (ids.length === 1) return ids[0];
+  if (ids.length === 0) {
+    throw new Error("no Managed draft ChangeSet was found in the current Workspace; run memsphere memory edit or provide a change id");
+  }
+  throw new Error(`multiple Managed draft ChangeSets were found; provide one explicitly: ${ids.join(", ")}`);
+}
+
+async function snapshotSparseCandidate(
+  candidateRoot: string,
+  targets: MemoryChangeSet["targets"]
+): Promise<string> {
+  const temporary = await mkdtemp(join(tmpdir(), "memsphere-checkpoint-"));
+  const memoryRoot = join(temporary, "memory");
+  await mkdir(memoryRoot, { recursive: true });
+  for (const target of targets) {
+    if (target.operation === "delete") continue;
+    try {
+      await assertRegularFileInside(candidateRoot, target.path);
+    } catch (error) {
+      if (isCode(error, "ENOENT")) throw new Error(`candidate file is missing: ${target.path}`);
+      throw error;
+    }
+    const destination = join(memoryRoot, target.path);
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(join(candidateRoot, target.path), destination);
+  }
+  return memoryRoot;
+}
+
+async function persistValidatedCheckpoint(
+  project: ResolvedProject,
+  change: MemoryChangeSet,
+  candidateRoot: string,
+  baseRevision: string,
+  issues: ValidationIssue[],
+  effectiveMemoryRoot: string,
+  issueCandidateRoot = candidateRoot
+): Promise<string> {
+  const digest = await checkpointDigest(change.targets, candidateRoot);
+  const checkpoints = checkpointsRoot(project, change.id);
+  const revisionRoot = join(checkpoints, digest);
+  const finalMemoryRoot = join(revisionRoot, "memory");
+  if (!await exists(finalMemoryRoot)) {
+    await mkdir(checkpoints, { recursive: true });
+    const temporary = join(checkpoints, `.writing-${digest}-${process.pid}-${randomBytes(4).toString("hex")}`);
+    await rm(temporary, { recursive: true, force: true });
+    await mkdir(temporary, { recursive: true });
+    await cp(candidateRoot, join(temporary, "memory"), { recursive: true });
+    try {
+      await rename(temporary, revisionRoot);
+    } catch (error) {
+      if (!await exists(finalMemoryRoot)) throw error;
+      await rm(temporary, { recursive: true, force: true });
+    }
+  }
+  change.checkpoint = {
+    digest,
+    base_revision: baseRevision,
+    created_at: new Date().toISOString(),
+    valid: issues.length === 0,
+    issues: issues.map((issue) => persistedValidationIssue(issue, effectiveMemoryRoot, issueCandidateRoot))
+  };
+  change.updated_at = new Date().toISOString();
+  await writeChange(project, change);
+  for (const entry of await readdir(checkpoints, { withFileTypes: true })) {
+    if (entry.name === digest || !entry.isDirectory()) continue;
+    await rm(join(checkpoints, entry.name), { recursive: true, force: true });
+  }
+  return finalMemoryRoot;
+}
+
+async function checkpointDigest(targets: MemoryChangeSet["targets"], candidateRoot: string): Promise<string> {
+  const hash = createHash("sha256");
+  hash.update(JSON.stringify(targets));
+  for (const target of targets) {
+    hash.update(`\0${target.path}\0${target.destination_path ?? ""}\0`);
+    if (target.operation !== "delete") hash.update(await readFile(join(candidateRoot, target.path)));
+  }
+  return hash.digest("hex");
+}
+
+function persistedValidationIssue(
+  issue: ValidationIssue,
+  effectiveMemoryRoot: string,
+  candidateRoot: string
+): z.infer<typeof persistedValidationIssueSchema> {
+  const candidates = [
+    relative(candidateRoot, issue.path).replaceAll("\\", "/"),
+    relative(effectiveMemoryRoot, issue.path).replaceAll("\\", "/")
+  ];
+  const path = candidates.find((candidate) => candidate !== "" && candidate !== ".." && !candidate.startsWith("../"))
+    ?? issue.path;
+  return {
+    path,
+    message: issue.message,
+    ...(issue.line ? { line: issue.line } : {}),
+    ...(issue.column ? { column: issue.column } : {}),
+    ...(issue.migration ? { migration: issue.migration } : {})
+  };
+}
+
+function validationResult(
+  change: MemoryChangeSet,
+  memoryRoot: string,
+  candidateRoot: string,
+  _checkpointRoot: string,
+  baseRevision: string,
+  issues: ValidationIssue[]
+): MemoryChangeValidationResult {
+  if (!change.checkpoint) throw new Error(`ChangeSet ${change.id} checkpoint was not persisted`);
   return {
     changeId: change.id,
-    memoryRoot: context.primary.memoryRoot,
+    memoryRoot,
     candidateRoot,
+    storeType: changeStoreType(change),
+    baseRevision,
+    checkpointDigest: change.checkpoint.digest,
     issues
   };
+}
+
+type EmbeddedCapture = {
+  change: MemoryChangeSet;
+  candidateRoot: string;
+  memoryRoot: string;
+};
+
+async function captureEmbeddedWorkingChange(
+  project: ResolvedProject,
+  workspace: WorkspaceIdentity,
+  requestedId?: string
+): Promise<EmbeddedCapture> {
+  if (project.config.store.type !== "embedded") throw new Error("Embedded ChangeSet capture requires an Embedded Project");
+  if (workspace.kind !== "git") throw new Error("Embedded ChangeSet validation must run inside a Git worktree");
+  const configuredWorkspace = await resolveWorkspaceIdentity(project.config.store.memory_path);
+  if (configuredWorkspace.kind !== "git" || configuredWorkspace.key !== workspace.key) {
+    throw new Error(`Embedded Project "${project.name}" does not belong to the current Git repository`);
+  }
+  const relativeMemoryPath = relative(configuredWorkspace.path, resolve(project.config.store.memory_path)).replaceAll("\\", "/");
+  if (relativeMemoryPath === ".." || relativeMemoryPath.startsWith("../") || posix.isAbsolute(relativeMemoryPath)) {
+    throw new Error("Embedded Memory path cannot be resolved inside the current Git worktree");
+  }
+  const memoryPath = relativeMemoryPath || ".";
+  const memoryRoot = resolve(workspace.path, memoryPath);
+  if (relative(workspace.path, memoryRoot).startsWith("..")) throw new Error("Embedded Memory path escapes the current worktree");
+  if (!await exists(memoryRoot)) throw new Error(`Embedded Memory root is missing in the current worktree: ${memoryRoot}`);
+  const baseRevision = await gitOutput(["rev-parse", "HEAD"], workspace.path);
+  const source = {
+    instance_key: workspace.instanceKey,
+    root: workspace.path,
+    repository_root: configuredWorkspace.path,
+    memory_path: memoryPath
+  };
+  const captured = await captureEmbeddedTargets(workspace.path, memoryRoot, memoryPath, baseRevision);
+  if (captured.targets.length === 0) {
+    await rm(resolve(captured.candidateRoot, ".."), { recursive: true, force: true });
+    throw new Error("no Embedded Memory changes were found relative to the current HEAD");
+  }
+
+  let change: MemoryChangeSet;
+  if (requestedId) {
+    change = await readChange(project, requestedId);
+    assertDraftOwner(change, project.name, workspace.key);
+    if (changeStoreType(change) !== "embedded") throw new Error(`ChangeSet ${change.id} is not an Embedded ChangeSet`);
+    if (change.source_worktree?.instance_key !== workspace.instanceKey || change.base_revision !== baseRevision) {
+      throw new Error(`Embedded ChangeSet ${change.id} belongs to another worktree or HEAD`);
+    }
+  } else {
+    const matches = (await listProjectChanges(project)).filter((candidate) => (
+      candidate.status === "draft"
+      && changeStoreType(candidate) === "embedded"
+      && candidate.workspace_key === workspace.key
+      && candidate.source_worktree?.instance_key === workspace.instanceKey
+      && candidate.base_revision === baseRevision
+    ));
+    if (matches.length > 1) {
+      throw new Error(`multiple active Embedded ChangeSets were found; provide one explicitly: ${matches.map((item) => item.id).sort().join(", ")}`);
+    }
+    change = matches[0] ?? newChange(project, workspace.key);
+  }
+  change.store_type = "embedded";
+  change.base_revision = baseRevision;
+  change.source_worktree = source;
+  change.targets = captured.targets;
+  return { change, candidateRoot: captured.candidateRoot, memoryRoot };
+}
+
+async function captureEmbeddedTargets(
+  repositoryRoot: string,
+  memoryRoot: string,
+  memoryPath: string,
+  baseRevision: string
+): Promise<{ targets: MemoryChangeSet["targets"]; candidateRoot: string }> {
+  let changes = parseNameStatus(await gitOutput(
+    ["diff", "--name-status", "-z", "-M", "HEAD", "--", memoryPath],
+    repositoryRoot
+  ));
+  const untracked = (await gitOutput(
+    ["ls-files", "--others", "--exclude-standard", "-z", "--", memoryPath],
+    repositoryRoot
+  )).split("\0").filter(Boolean);
+  for (const path of untracked) changes.push({ status: "A", path });
+  changes = await coalesceUntrackedRenames(changes, repositoryRoot, baseRevision);
+  const temporary = await mkdtemp(join(tmpdir(), "memsphere-embedded-change-"));
+  const candidateRoot = join(temporary, "memory");
+  await mkdir(candidateRoot, { recursive: true });
+  const targets: MemoryChangeSet["targets"] = [];
+  for (const change of changes) {
+    const sourceRepoPath = change.oldPath ?? change.path;
+    const sourcePath = embeddedMemoryPath(memoryPath, sourceRepoPath);
+    const destinationPath = change.oldPath ? embeddedMemoryPath(memoryPath, change.path) : undefined;
+    const relevantPath = destinationPath ?? sourcePath;
+    if (!isSafeMemoryPath(relevantPath)) continue;
+    if (!isSafeMemoryPath(sourcePath)) throw new Error(`invalid Embedded Memory path: ${sourcePath}`);
+    if (change.status === "U" || change.status === "T") {
+      throw new Error(`unsupported Git status ${change.status} for Embedded Memory: ${relevantPath}`);
+    }
+    const operation = change.oldPath
+      ? "rename" as const
+      : change.status === "A" ? "create" as const
+        : change.status === "D" ? "delete" as const
+          : "update" as const;
+    const target: z.infer<typeof changeTargetSchema> = {
+      operation,
+      reference: fallbackReference(sourcePath),
+      path: sourcePath,
+      ...(destinationPath ? { destination_path: destinationPath } : {}),
+      ...(operation === "create" ? {} : {
+        base_digest: await gitOutput(["rev-parse", `${baseRevision}:${sourceRepoPath}`], repositoryRoot)
+      }),
+      added_revision: baseRevision
+    };
+    if (operation !== "delete") {
+      const livePath = join(memoryRoot, destinationPath ?? sourcePath);
+      await assertRegularFileInside(memoryRoot, destinationPath ?? sourcePath);
+      const candidate = join(candidateRoot, sourcePath);
+      await mkdir(dirname(candidate), { recursive: true });
+      await cp(livePath, candidate);
+    }
+    targets.push(target);
+  }
+  targets.sort((a, b) => a.path.localeCompare(b.path));
+  return { targets, candidateRoot };
+}
+
+async function coalesceUntrackedRenames(
+  changes: GitNameStatus[],
+  repositoryRoot: string,
+  baseRevision: string
+): Promise<GitNameStatus[]> {
+  const consumed = new Set<number>();
+  const renames: GitNameStatus[] = [];
+  for (const [deletedIndex, deleted] of changes.entries()) {
+    if (deleted.status !== "D") continue;
+    const deletedDigest = await gitOutput(["rev-parse", `${baseRevision}:${deleted.path}`], repositoryRoot);
+    for (const [addedIndex, added] of changes.entries()) {
+      if (consumed.has(addedIndex) || added.status !== "A") continue;
+      const addedDigest = await gitOutput(["hash-object", added.path], repositoryRoot);
+      if (addedDigest !== deletedDigest) continue;
+      consumed.add(deletedIndex);
+      consumed.add(addedIndex);
+      renames.push({ status: "R", oldPath: deleted.path, path: added.path });
+      break;
+    }
+  }
+  return [...changes.filter((_, index) => !consumed.has(index)), ...renames];
+}
+
+type GitNameStatus = { status: string; path: string; oldPath?: string };
+
+function parseNameStatus(output: string): GitNameStatus[] {
+  if (!output) return [];
+  const tokens = output.split("\0");
+  const result: GitNameStatus[] = [];
+  for (let index = 0; index < tokens.length;) {
+    const rawStatus = tokens[index++];
+    if (!rawStatus) continue;
+    const status = rawStatus[0];
+    if (status === "R" || status === "C") {
+      const oldPath = tokens[index++];
+      const path = tokens[index++];
+      if (!oldPath || !path) throw new Error("invalid Git rename status output");
+      result.push({ status: "R", oldPath, path });
+    } else {
+      const path = tokens[index++];
+      if (!path) throw new Error("invalid Git name-status output");
+      result.push({ status, path });
+    }
+  }
+  return result;
+}
+
+function embeddedMemoryPath(memoryPath: string, repositoryPath: string): string {
+  if (memoryPath === ".") return repositoryPath;
+  const normalizedRoot = memoryPath.replace(/^\.\//, "").replace(/\/$/, "");
+  const prefix = `${normalizedRoot}/`;
+  if (!repositoryPath.startsWith(prefix)) throw new Error(`Git path is outside the Embedded Memory root: ${repositoryPath}`);
+  return repositoryPath.slice(prefix.length);
+}
+
+function fallbackReference(path: string): string {
+  const [kind, file] = path.split("/");
+  return `${kind}/${file.replace(/\.ya?ml$/i, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "invalid"}`;
+}
+
+async function validateEmbeddedEffectiveMemory(
+  change: MemoryChangeSet,
+  candidateRoot: string
+): Promise<ValidationIssue[]> {
+  const source = change.source_worktree;
+  if (!source) throw new Error(`Embedded ChangeSet ${change.id} has no source worktree metadata`);
+  const staging = await mkdtemp(join(tmpdir(), "memsphere-embedded-effective-"));
+  try {
+    await materializeGitMemoryRoot(source.repository_root, change.base_revision, source.memory_path, staging);
+    await applyTargets(staging, candidateRoot, change.targets);
+    const validation = await validateMemoryRoot(staging);
+    return validation.issues.map((issue) => mapEffectiveValidationIssue(
+      issue,
+      staging,
+      join(source.root, source.memory_path),
+      join(source.root, source.memory_path),
+      change.targets,
+      true
+    ));
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
+
+async function materializeGitMemoryRoot(
+  repositoryRoot: string,
+  revision: string,
+  memoryPath: string,
+  destination: string
+): Promise<void> {
+  await Promise.all(memoryKinds.map((kind) => mkdir(join(destination, kind), { recursive: true })));
+  const normalizedRoot = memoryPath === "." ? "" : memoryPath.replace(/^\.\//, "").replace(/\/$/, "");
+  const output = await gitOutput(
+    ["ls-tree", "-r", "--name-only", revision, ...(normalizedRoot ? ["--", normalizedRoot] : [])],
+    repositoryRoot
+  );
+  for (const repositoryPath of output.split("\n").filter(Boolean)) {
+    const memoryRelative = normalizedRoot ? embeddedMemoryPath(normalizedRoot, repositoryPath) : repositoryPath;
+    if (!isSafeMemoryPath(memoryRelative)) continue;
+    const source = await gitOutputRaw(["show", `${revision}:${repositoryPath}`], repositoryRoot);
+    const path = join(destination, memoryRelative);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, source, "utf8");
+  }
+}
+
+async function listProjectChanges(project: ResolvedProject): Promise<MemoryChangeSet[]> {
+  let entries;
+  try {
+    entries = await readdir(project.paths.changesRoot, { withFileTypes: true });
+  } catch (error) {
+    if (isCode(error, "ENOENT")) return [];
+    throw error;
+  }
+  const changes: MemoryChangeSet[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^change-[a-zA-Z0-9-]+$/.test(entry.name)) continue;
+    const change = await readChange(project, entry.name).catch(() => undefined);
+    if (change) changes.push(change);
+  }
+  return changes;
+}
+
+function changeStoreType(change: MemoryChangeSet): "managed" | "embedded" {
+  return change.store_type ?? "managed";
 }
 
 export async function recoverMemory(
@@ -527,7 +1039,8 @@ async function assertChangeTargetsCurrent(project: ResolvedProject, change: Memo
 async function validateEffectiveMemoryChange(
   project: ResolvedProject,
   change: MemoryChangeSet,
-  candidateRoot: string
+  candidateRoot: string,
+  issueCandidateRoot = candidateRoot
 ): Promise<ValidationIssue[]> {
   const staging = await mkdtemp(join(tmpdir(), "memsphere-publish-"));
   try {
@@ -538,7 +1051,7 @@ async function validateEffectiveMemoryChange(
       issue,
       staging,
       project.memoryRoot,
-      candidateRoot,
+      issueCandidateRoot,
       change.targets
     ));
   } finally {
@@ -551,7 +1064,8 @@ function mapEffectiveValidationIssue(
   stagingRoot: string,
   memoryRoot: string,
   candidateRoot: string,
-  targets: MemoryChangeSet["targets"]
+  targets: MemoryChangeSet["targets"],
+  useEffectiveTargetPath = false
 ): ValidationIssue {
   const effectivePath = relative(stagingRoot, issue.path).replaceAll("\\", "/");
   if (effectivePath === "" || effectivePath.startsWith("../") || effectivePath === "..") return issue;
@@ -559,7 +1073,7 @@ function mapEffectiveValidationIssue(
   return {
     ...issue,
     path: target && target.operation !== "delete"
-      ? join(candidateRoot, target.path)
+      ? join(candidateRoot, useEffectiveTargetPath ? effectivePath : target.path)
       : join(memoryRoot, effectivePath)
   };
 }
@@ -765,6 +1279,16 @@ function changePath(project: ResolvedProject, id: string): string {
 function recoveryRoot(project: ResolvedProject, id: string): string {
   assertSafeId(id);
   return join(project.paths.changesRoot, id, "memory");
+}
+
+function checkpointsRoot(project: ResolvedProject, id: string): string {
+  assertSafeId(id);
+  return join(project.paths.changesRoot, id, "checkpoints");
+}
+
+function checkpointMemoryRoot(project: ResolvedProject, id: string, digest: string): string {
+  if (!/^[a-f0-9]{64}$/.test(digest)) throw new Error(`invalid ChangeSet checkpoint digest: ${digest}`);
+  return join(checkpointsRoot(project, id), digest, "memory");
 }
 
 function workspaceCandidateRoot(workspace: string, id: string): string {

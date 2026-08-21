@@ -107,12 +107,35 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     await writeFile(otherCandidate, serializeMemoryYaml(otherMemory.entity));
     const candidateBeforeValidation = await readFile(candidate, "utf8");
     const changePath = join(registry.projects.project.root, "changes", created.change.id, "change.json");
-    const changeBeforeValidation = await readFile(changePath, "utf8");
     const initialValidation = await validateMemoryChange(created.change.id);
     assert.deepEqual(initialValidation.issues, []);
     assert.deepEqual(await readdir(created.candidateRoot), ["concepts"]);
     assert.equal(await readFile(candidate, "utf8"), candidateBeforeValidation);
-    assert.equal(await readFile(changePath, "utf8"), changeBeforeValidation);
+    const validatedChange = memoryChangeSetSchema.parse(JSON.parse(await readFile(changePath, "utf8")));
+    assert.equal(validatedChange.store_type, "managed");
+    assert.equal(validatedChange.checkpoint?.valid, true);
+    assert.equal(validatedChange.checkpoint?.digest, initialValidation.checkpointDigest);
+    assert.equal(validatedChange.checkpoint?.base_revision, validatedChange.base_revision);
+    const checkpointRoot = join(
+      registry.projects.project.root,
+      "changes",
+      created.change.id,
+      "checkpoints",
+      initialValidation.checkpointDigest,
+      "memory"
+    );
+    assert.deepEqual(await readdir(checkpointRoot), ["concepts"]);
+    assert.deepEqual((await readdir(join(checkpointRoot, "concepts"))).sort(), ["other.yaml", "shared.yaml"]);
+    const repeatedValidation = await validateMemoryChange();
+    assert.equal(repeatedValidation.changeId, created.change.id);
+    assert.equal(repeatedValidation.checkpointDigest, initialValidation.checkpointDigest);
+    assert.deepEqual(await readdir(join(registry.projects.project.root, "changes", created.change.id, "checkpoints")), [
+      initialValidation.checkpointDigest
+    ]);
+    const competing = await editMemories({ references: ["concepts/competing-draft"] });
+    await assert.rejects(validateMemoryChange(), /multiple Managed draft ChangeSets.*provide one explicitly/);
+    await rm(join(competing.candidateRoot, ".."), { recursive: true, force: true });
+    await rm(join(registry.projects.project.root, "changes", competing.change.id), { recursive: true, force: true });
     assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
     assert.equal(await checkpointWorkspaceChanges(), 1);
     await rm(created.candidateRoot, { recursive: true, force: true });
@@ -141,6 +164,13 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("concepts/shared", "concepts/missing"));
     const missingReference = await validateMemoryChange(dependent.change.id);
     assert(missingReference.issues.some((issue) => issue.path === dependentPath && issue.message.includes("was not found")));
+    const persistedMissingReference = memoryChangeSetSchema.parse(JSON.parse(await readFile(
+      join(registry.projects.project.root, "changes", dependent.change.id, "change.json"),
+      "utf8"
+    )));
+    assert(persistedMissingReference.checkpoint?.issues.some((issue) => (
+      issue.path === "concepts/dependent.yaml" && issue.message.includes("was not found")
+    )));
     await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("concepts/missing", "concepts/shared"));
     await publishMemoryChange(dependent.change.id);
     assert.deepEqual((await readMemoryFile("concepts", join(memoryRoot, "concepts", "other.yaml"))).entity.names, ["other", "Other Alias"]);
