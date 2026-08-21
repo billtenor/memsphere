@@ -391,6 +391,10 @@ test("memory and task artifacts show participating Review Slot names", () => {
 
 test("task view supports audited runtime Review Slot rebinding", () => {
   assert.match(browserHtml, /function renderRunBindings\(run\)/);
+  assert.match(browserHtml, /className = "run-binding-toggle"/);
+  assert.match(browserHtml, /toggle\.setAttribute\("aria-expanded", String\(expanded\)\)/);
+  assert.match(browserHtml, /body\.hidden = !expanded/);
+  assert.match(browserHtml, /expandedRunBindings: new Set\(\)/);
   assert.match(browserHtml, /换绑只影响尚未创建的 Review/);
   assert.match(browserHtml, /function updateRunBinding\(run, slot, skip, actorIds\)/);
   assert.match(browserHtml, /settingsFetch\("\/api\/runs\/" \+ encodeURIComponent\(run\.id\) \+ "\/bindings/);
