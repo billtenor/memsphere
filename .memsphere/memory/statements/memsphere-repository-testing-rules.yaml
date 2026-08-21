@@ -19,6 +19,11 @@ sections:
       - 修改 CLI、Memory、Run、Artifact、Review、View、Reserved Store、Archive 或 Migration 时，测试必须覆盖成功路径以及本次变更涉及的失败或边界路径。
   - !statement
     names:
+      - 前端交互测试
+    asserts:
+      - 凡是进行了前端交互调整，交付前必须使用 playwright-cli 对受影响的交互进行实际操作测试，并确认交互行为正确。
+  - !statement
+    names:
       - Memory Store 校验
     asserts:
       - 新建、修改、移动或删除 .memsphere/memory 中的任意 Concept、Statement、Procedure 或 Schema 后，必须运行 memsphere validate。
