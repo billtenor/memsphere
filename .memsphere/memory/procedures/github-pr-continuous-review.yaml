@@ -67,7 +67,6 @@ flow:
               review:
                 - 架构师
                 - 测试工程师
-                - 项目负责人
           - !action
             action: 合并各角色意见，形成待发布评审结论。
             actor: agent
