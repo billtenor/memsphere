@@ -14,6 +14,8 @@ test("View page routes are explicit and never absorb API or unknown paths", () =
     "/",
     "/memories",
     "/memories/concepts/Memory",
+    "/projects/alpha/memories",
+    "/projects/alpha/memories/concepts/Memory",
     "/tasks",
     "/tasks/run-1",
     "/tasks/run-1/artifact-reviews/review-1",
@@ -41,12 +43,14 @@ test("browser script includes URL parsing, canonical history, and popstate resto
   assert.doesNotMatch(browserHtml, /\/memory-reviews\//);
   assert.match(browserHtml, /\/projects\/" \+ encodeRoutePart\(state\.currentProject\)/);
   assert.match(browserHtml, /prepareBrowserRoute/);
+  assert.match(browserHtml, /\{ page: "memories", project, changeId, fragment \}/);
+  assert.match(browserHtml, /memoryBase = state\.changeId && state\.currentProject/);
   assert.match(browserHtml, /\/artifact-reviews\//);
   assert.match(browserHtml, /pendingArtifactMaterial/);
 });
 
 test("browser loads summaries by route and fetches details on demand", () => {
-  assert.match(browserHtml, /fetch\("\/api\/memories\?representation=summary"\)/);
+  assert.match(browserHtml, /new URLSearchParams\(\{ representation: "summary" \}\)/);
   assert.match(browserHtml, /new URLSearchParams\(\{ representation: "summary", memory_id: subject\.id \}\)/);
   assert.match(browserHtml, /fetch\("\/api\/runs\?representation=summary"\)/);
   assert.match(browserHtml, /\/api\/memories\/" \+ encodeURIComponent\(summary\.kind\)/);
@@ -88,6 +92,13 @@ test("stale page loads cannot release the active route application guard", () =>
 
 test("manual view switches supersede an in-flight page load", () => {
   assert.match(browserHtml, /async function setViewMode\(mode, options = \{\}\) \{\s*const generation = \+\+state\.pageLoadGeneration;\s*await projectSwitchChain;\s*if \(generation !== state\.pageLoadGeneration\) return;/);
+});
+
+test("ChangeSet preview renders persisted validation diagnostics", () => {
+  assert.match(browserHtml, /function renderPreviewIssues\(\)/);
+  assert.match(browserHtml, /heading\.textContent = "Validation diagnostics"/);
+  assert.match(browserHtml, /const location = issue\.path/);
+  assert.match(browserHtml, /item\.textContent = location \+ ": " \+ issue\.message/);
 });
 
 test("Settings separates the global and Project configuration workspaces", () => {

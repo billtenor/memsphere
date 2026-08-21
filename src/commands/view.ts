@@ -47,6 +47,7 @@ import { authorizeArtifactOperation, controlPlaneConfigSchema, listPermissionDef
 import { listMemoryFiles, readMemoryFile, readMemoryFileSummary } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
+import { withMemoryChangePreview } from "../memory/changeset.js";
 import { readBundledSystemMemories } from "../reserved/store.js";
 import {
   createReview,
@@ -108,11 +109,21 @@ type ViewServeOptions = {
 type MemoryPayload = {
   memoryRoot: string;
   actorNames: Record<string, string>;
+  source: {
+    mode: "formal" | "changeset";
+    changeId?: string;
+    storeType?: "managed" | "embedded";
+    baseRevision?: string;
+    updatedAt?: string;
+    valid?: boolean;
+    issues?: Array<{ path: string; message: string; line?: number; column?: number }>;
+  };
   memories: Array<{
     id: string;
     kind: string;
     path: string;
     system: boolean;
+    names?: string[];
     entity?: unknown;
     error?: MemoryLoadError;
   }>;
@@ -490,10 +501,19 @@ async function handleRequest(
   }
 
   if (request.method === "GET" && url.pathname === "/api/memories") {
-    const payload = url.searchParams.get("representation") === "summary"
-      ? await loadMemorySummaryPayload(config)
-      : await loadMemoryPayload(config);
-    sendJson(response, 200, payload);
+    const changeId = url.searchParams.get("change")?.trim();
+    try {
+      const payload = url.searchParams.get("representation") === "summary"
+        ? await loadMemorySummaryPayload(config, changeId || undefined)
+        : await loadMemoryPayload(config, changeId || undefined);
+      sendJson(response, 200, payload);
+    } catch (error) {
+      const missing = Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");
+      sendJson(response, missing ? 404 : 400, {
+        code: missing ? "changeset_not_found" : "changeset_unavailable",
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
     return;
   }
 
@@ -505,15 +525,21 @@ async function handleRequest(
       sendJson(response, 404, { error: "memory not found" });
       return;
     }
-    const file = await findMemoryFileById(memoryRoot, `${kind}/${name}`);
-    if (!file) {
-      sendJson(response, 404, { error: "memory not found" });
-      return;
+    const changeId = url.searchParams.get("change")?.trim();
+    try {
+      const memory = await loadMemoryDetailPayload(config, kind, name, changeId || undefined);
+      if (!memory) {
+        sendJson(response, 404, { error: "memory not found" });
+        return;
+      }
+      sendJson(response, 200, { memory });
+    } catch (error) {
+      const missing = Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");
+      sendJson(response, missing ? 404 : 400, {
+        code: missing ? "changeset_not_found" : "changeset_unavailable",
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
-    const systemReferences = await systemMemoryReferences();
-    sendJson(response, 200, {
-      memory: await loadMemoryListItem(memoryRoot, kind, file.path, systemReferences)
-    });
     return;
   }
 
@@ -1000,8 +1026,42 @@ async function findMemoryFileById(memoryRoot: string, memoryId: string): Promise
   return undefined;
 }
 
-async function loadMemoryPayload(config: MemsphereConfig): Promise<MemoryPayload> {
-  const { memoryRoot } = config;
+async function loadMemoryPayload(config: MemsphereConfig, changeId?: string): Promise<MemoryPayload> {
+  return withMemoryPayloadRoot(config, changeId, (memoryRoot, source) =>
+    loadMemoryPayloadFromRoot(config, memoryRoot, source)
+  );
+}
+
+async function withMemoryPayloadRoot<T>(
+  config: MemsphereConfig,
+  changeId: string | undefined,
+  use: (memoryRoot: string, source: MemoryPayload["source"]) => Promise<T>
+): Promise<T> {
+  if (changeId) {
+    if (!config.project?.name) throw new Error("No Project is currently selected");
+    return withMemoryChangePreview({
+      home: config.homeRoot,
+      project: config.project.name,
+      changeId,
+      use: async ({ change, memoryRoot }) => use(memoryRoot, {
+        mode: "changeset",
+        changeId: change.id,
+        storeType: change.store_type ?? "managed",
+        baseRevision: change.checkpoint?.base_revision,
+        updatedAt: change.updated_at,
+        valid: change.checkpoint?.valid,
+        issues: change.checkpoint?.issues
+      })
+    });
+  }
+  return use(config.memoryRoot, { mode: "formal" });
+}
+
+async function loadMemoryPayloadFromRoot(
+  config: MemsphereConfig,
+  memoryRoot: string,
+  source: MemoryPayload["source"]
+): Promise<MemoryPayload> {
   const memories: MemoryPayload["memories"] = [];
   const systemReferences = await systemMemoryReferences();
   const actorNames = Object.fromEntries(
@@ -1015,15 +1075,25 @@ async function loadMemoryPayload(config: MemsphereConfig): Promise<MemoryPayload
     }
   }
 
-  return { memoryRoot, actorNames, memories };
+  return { memoryRoot: config.memoryRoot, actorNames, memories, source };
 }
 
-async function loadMemorySummaryPayload(config: MemsphereConfig): Promise<unknown> {
+async function loadMemorySummaryPayload(config: MemsphereConfig, changeId?: string): Promise<MemoryPayload> {
+  return withMemoryPayloadRoot(config, changeId, (memoryRoot, source) =>
+    loadMemorySummaryPayloadFromRoot(config, memoryRoot, source)
+  );
+}
+
+async function loadMemorySummaryPayloadFromRoot(
+  config: MemsphereConfig,
+  memoryRoot: string,
+  source: MemoryPayload["source"]
+): Promise<MemoryPayload> {
   const systemReferences = await systemMemoryReferences();
-  const memories: unknown[] = [];
+  const memories: MemoryPayload["memories"] = [];
   for (const kind of memoryKinds) {
-    for (const path of await listMemoryFiles(config.memoryRoot, kind)) {
-      const relativePath = portableRelative(config.memoryRoot, path);
+    for (const path of await listMemoryFiles(memoryRoot, kind)) {
+      const relativePath = portableRelative(memoryRoot, path);
       try {
         const summary = await readMemoryFileSummary(kind, path);
         memories.push({
@@ -1049,8 +1119,22 @@ async function loadMemorySummaryPayload(config: MemsphereConfig): Promise<unknow
     actorNames: Object.fromEntries(
       Object.entries(config.controlPlane?.actors ?? {}).map(([actorId, actor]) => [actorId, actor.name])
     ),
-    memories
+    memories,
+    source
   };
+}
+
+async function loadMemoryDetailPayload(
+  config: MemsphereConfig,
+  kind: MemoryKind,
+  name: string,
+  changeId?: string
+): Promise<MemoryPayload["memories"][number] | undefined> {
+  return withMemoryPayloadRoot(config, changeId, async (memoryRoot) => {
+    const file = await findMemoryFileById(memoryRoot, `${kind}/${name}`);
+    if (!file) return undefined;
+    return loadMemoryListItem(memoryRoot, kind, file.path, await systemMemoryReferences());
+  });
 }
 
 async function systemMemoryReferences(): Promise<Set<string>> {
@@ -1916,6 +2000,8 @@ function sendHtml(response: ServerResponse, body: string): void {
 export function isViewPagePath(pathname: string): boolean {
   if (["/", "/memories", "/tasks"].includes(pathname)) return true;
   if (/^\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
+  if (/^\/projects\/[^/]+\/memories$/.test(pathname)) return true;
+  if (/^\/projects\/[^/]+\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
   if (/^\/tasks\/[^/]+$/.test(pathname)) return true;
   if (/^\/tasks\/[^/]+\/artifact-reviews\/[^/]+$/.test(pathname)) return true;
   if (/^\/settings\/[^/]+$/.test(pathname)) return true;

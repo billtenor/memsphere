@@ -102,6 +102,10 @@ test("memory change validate checks the effective Store without expanding a spar
     assert.equal(textResult.code, 0, textResult.stderr);
     assert.match(textResult.stdout, /ChangeSet validation passed/);
     assert.match(textResult.stdout, new RegExp(`ChangeSet: ${changeId}`));
+    assert.match(
+      textResult.stdout,
+      new RegExp(`Preview: start memsphere View, then open /projects/project/memories\\?change=${changeId}`)
+    );
     assert.deepEqual(await readdir(candidateRoot), ["concepts"]);
 
     const jsonResult = await runCli(workspace, ["memory", "change", "validate", changeId, "--format", "json"], home);
