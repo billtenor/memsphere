@@ -1,0 +1,192 @@
+!procedure
+syntax: memsphere-20260721-stable
+names:
+  - memsphere-usage-issue-reporting
+  - Memsphere 使用体验问题上报流程
+  - Memsphere 问题上报流程
+defines:
+  - 当使用方遇到 Memsphere 的 bug、报错、异常行为、易用性障碍或文档与交互体验问题时，收集可用于复现和分诊的完整上下文，并在公开性与内容获得确认后提交 GitHub Issue。
+  - 本流程负责问题取证、信息补齐、敏感信息清理、重复 Issue 检索、Issue 草稿复核和提交结果确认；不负责根因定位、代码修复或修复排期承诺。
+asserts:
+  - 不得编造无法取得的环境、复现、日志或版本信息；无法取得的信息必须明确标记为未知、不可获得或未复现。
+  - 在任何将要对外展示或提交的 Artifact 中，必须移除或遮蔽凭证、Secret、个人信息、内部地址和其他不应公开的敏感内容，并保留脱敏说明。
+  - 疑似安全漏洞必须停止公开 GitHub Issue 路径，按照目标仓库安全政策交由 human 私下报告。
+  - 创建或更新 GitHub Issue 属于外部写操作；未取得 human 对目标仓库、标题和正文的明确提交授权时不得执行。
+goals:
+  - 形成内容完整、可复现、可分诊且已经脱敏的问题上下文。
+  - 识别安全问题与潜在重复 Issue，避免不当公开或无意义重复上报。
+  - 在 human 明确授权后提交 GitHub Issue，并返回可核验的提交结果；未提交时明确说明原因和后续动作。
+flow:
+  - !action
+    action: 描述遇到的 Memsphere 使用体验问题，并提供当前已有的现象、期望、影响和证据。
+    actor: human
+    artifact: !artifact
+      name: 问题初始描述
+      format: markdown
+
+  - !action
+    action: 从当前对话、Workspace、Memsphere Run 与 Artifact、命令输出、日志、截图、配置、版本信息和近期变更中收集与问题直接相关且可安全读取的证据，整理问题上下文。
+    actor: agent
+    asserts:
+      - 只收集与复现、影响判断和分诊直接相关的信息，不得为了追求完整而扩大到无关文件、账号或系统。
+      - 必须区分已观察事实、human 陈述、推断和未知信息，并为关键证据记录可追溯来源。
+    suggests:
+      - 优先复用当前对话和 Workspace 中已经存在的信息，避免要求 human 重复提供。
+      - 对能够安全执行且不会改变外部状态的诊断命令，可在记录命令和结果后主动执行。
+    artifact: !artifact
+      name: 问题上下文
+      type: object
+      format:
+        name: markdown
+        layout: outline
+      schema: !schema
+        fields:
+          - 问题摘要
+          - 实际行为
+          - 期望行为
+          - 影响范围与严重程度
+          - 发生时间与复现频率
+          - 复现步骤与最小复现
+          - 环境与版本
+          - 相关命令、参数与输入
+          - 日志、错误、截图与其他证据
+          - 已尝试措施及结果
+          - 相关配置与近期变更
+          - 信息来源、推断与未知项
+
+  - !while
+    condition: !action
+      action: 判断是否仍缺少会阻止安全分流、复现、影响判断或 GitHub Issue 分诊的必要上下文，且这些信息尚未明确标为不可获得。
+      actor: agent
+      artifact: !artifact
+        name: 是否仍缺少必要上下文
+        type: boolean
+    do:
+      - !action
+        action: 补充 agent 明确列出的必要上下文；无法提供时说明原因并将对应信息确认为未知或不可获得。
+        actor: human
+        artifact: !artifact
+          name: 问题补充信息
+          format: markdown
+      - !action
+        action: 合并新证据，更新问题上下文并重新检查事实、推断、未知项和敏感信息。
+        actor: agent
+        artifact: !artifact
+          name: 更新后的问题上下文
+          format: markdown
+
+  - !action
+    action: 从 human 指定、当前 Workspace Git remote、项目元数据和仓库文档中解析目标 GitHub 仓库，并读取其安全政策、贡献规范和 Issue 规则。
+    actor: agent
+    asserts:
+      - 无法唯一确定目标仓库时必须由 human 指定，不得凭猜测选择仓库。
+      - 无法读取仓库规则时必须明确说明，不得假设不存在安全或贡献约束。
+    artifact: !artifact
+      name: 目标仓库与上报规则
+      format: markdown
+
+  - !if
+    condition: !action
+      action: 根据问题上下文和已经读取的目标仓库安全政策，判断该问题是否疑似安全漏洞或包含不适合公开披露的安全细节。
+      actor: agent
+      artifact: !artifact
+        name: 是否需要私密安全上报
+        type: boolean
+    then:
+      - !action
+        action: 整理已脱敏的安全问题私密上报交接信息，指出目标仓库规定的私密渠道，并明确禁止创建公开 GitHub Issue。
+        actor: agent
+        artifact: !artifact
+          name: 安全问题私密上报交接
+          format: markdown
+    else:
+      - !action
+        action: 检索潜在重复或相关 Issue，记录检索条件、候选链接和判断依据，并从“新建 Issue”“补充已有 Issue”“停止公开上报”中推荐一项处理方式。
+        actor: agent
+        asserts:
+          - 没有权限或无法检索时必须明确说明，不得声称不存在重复 Issue。
+          - 推荐补充已有 Issue 时必须给出唯一目标 Issue URL；推荐停止公开上报时必须说明理由。
+        artifact: !artifact
+          name: 相关 Issue 调查与处理建议
+          format: markdown
+
+      - !action
+        action: 根据已经脱敏的问题上下文、仓库规则和处理建议生成公开上报草稿；新建时提供目标仓库、标题和正文，补充已有 Issue 时提供目标 Issue URL 和评论正文，停止时提供不执行写操作的理由。
+        actor: agent
+        asserts:
+          - 新建正文或补充评论必须保留足以复现和分诊的信息；未知项、未执行项、附件缺失和重复风险必须显式说明。
+          - 不得把未经验证的推断写成事实，不得包含流程全局约束禁止公开的敏感内容。
+          - 草稿必须明确声明动作类型为新建 Issue、补充已有 Issue 或停止公开上报之一，并提供该动作所需的完整目标和内容。
+        artifact: !artifact
+          name: GitHub 公开上报方案与草稿
+          type: object
+          format:
+            name: markdown
+            layout: outline
+          schema: !schema
+            fields:
+              - 动作类型与目标
+              - 标题或已有 Issue URL
+              - 问题摘要
+              - 实际行为
+              - 期望行为
+              - 影响范围与严重程度
+              - 复现步骤与最小复现
+              - 复现频率
+              - 环境与版本
+              - 相关命令、参数与输入
+              - 日志、错误、截图与其他证据
+              - 已尝试措施及结果
+              - 相关配置与近期变更
+              - 相关 Issue 与重复判断
+              - 脱敏说明
+              - 未知项与补充说明
+          review:
+            - 上报方
+
+      - !action
+        action: 在审阅动作类型、目标和完整公开内容后，明确选择新建 Issue、补充指定的已有 Issue 或停止公开上报，并说明是否授权 agent 立即执行所选 GitHub 写操作。
+        actor: human
+        artifact: !artifact
+          name: GitHub 公开上报决定与授权
+          format: markdown
+
+      - !if
+        condition: !action
+          action: 读取 human 的明确决定，判断其是否已授权立即执行新建 Issue 或补充指定已有 Issue；选择停止、未明确目标或未明确授权时返回 false。
+          actor: agent
+          artifact: !artifact
+            name: 是否已授权 GitHub 写操作
+            type: boolean
+        then:
+          - !action
+            action: 使用可用且已认证的 GitHub 能力执行 human 获准的动作；新建时提交获准的标题和正文，补充时只向获准的已有 Issue 提交获准的评论；随后回读目标 Issue 或评论，核对仓库、编号、URL 和实际内容。失败时保留草稿并记录可操作的失败原因，不得重复创建或重复评论。
+            actor: agent
+            artifact: !artifact
+              name: GitHub 上报执行结果
+              type: object
+              format:
+                name: markdown
+                layout: outline
+              schema: !schema
+                fields:
+                  - 执行动作与状态
+                  - 目标仓库
+                  - Issue 编号与 URL
+                  - 新建正文或补充评论核对结果
+                  - 失败原因与重试建议
+        else:
+          - !action
+            action: 保留已审阅的公开上报草稿，记录 human 选择停止或未授权 GitHub 写操作的原因和后续动作。
+            actor: agent
+            artifact: !artifact
+              name: 未执行 GitHub 写操作记录
+              format: markdown
+
+  - !action
+    action: 向 human 汇报本次问题的上下文完整性、安全与脱敏结论、重复调查、公开提交状态和后续动作；成功提交时必须包含可访问的 GitHub Issue URL。
+    actor: agent
+    artifact: !artifact
+      name: Memsphere 问题上报处理摘要
+      format: markdown
+      final: true
