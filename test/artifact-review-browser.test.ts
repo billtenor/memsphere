@@ -361,7 +361,7 @@ flow:
     );
     await composer.fill("Alice private draft");
     await staleRoundWithBobDraft(address.port, firstReview.id, firstReview.currentRoundId, "Bob stale update before Alice add");
-    const aliceAddRecovery = waitForDraftRecovery(page);
+    const aliceAddRecovery = waitForDraftSaveAfterExternalUpdate(page);
     await reviewModal.getByRole("button", { name: "添加意见", exact: true }).click();
     await aliceAddRecovery;
     await page.getByText("Alice private draft", { exact: true }).waitFor();
@@ -372,7 +372,7 @@ flow:
     assert.equal(aliceAssignment?.draft.comments.some((comment) => comment.body === "Alice private draft"), true);
 
     await staleRoundWithBobDraft(address.port, firstReview.id, firstReview.currentRoundId, "Bob stale update before Alice vote");
-    const aliceVoteRecovery = waitForDraftRecovery(page);
+    const aliceVoteRecovery = waitForDraftSaveAfterExternalUpdate(page);
     await reviewModal.getByRole("radio", { name: "修改", exact: true }).click();
     await aliceVoteRecovery;
     assert.equal(await reviewModal.getByRole("radio", { name: "修改", exact: true }).getAttribute("aria-checked"), "true");
@@ -381,7 +381,7 @@ flow:
     assert.equal(aliceAssignment?.draft.vote, "request_changes");
 
     await staleRoundWithBobDraft(address.port, firstReview.id, firstReview.currentRoundId, "Bob stale update before Alice delete");
-    const aliceDeleteRecovery = waitForDraftRecovery(page);
+    const aliceDeleteRecovery = waitForDraftSaveAfterExternalUpdate(page);
     await reviewModal.locator(".comment-card").filter({ hasText: "Alice private draft" }).getByRole("button", { name: "删除", exact: true }).click();
     await aliceDeleteRecovery;
     assert.equal(await page.getByText("Alice private draft", { exact: true }).count(), 0);
@@ -1071,23 +1071,18 @@ async function clickAndWaitForDraftSave(
   assert.equal(response.status(), 200);
 }
 
-async function waitForDraftRecovery(page: import("playwright").Page): Promise<void> {
-  const conflict = page.waitForResponse(
-    (response) =>
-      response.url().endsWith("/draft")
-      && response.request().method() === "PATCH"
-      && response.status() === 409,
-    { timeout: 10_000 }
-  );
-  const recovered = page.waitForResponse(
+async function waitForDraftSaveAfterExternalUpdate(page: import("playwright").Page): Promise<void> {
+  // Task polling can observe the external update before the click. In that case
+  // the first PATCH succeeds directly; otherwise conflict recovery retries it.
+  // Both valid paths finish with a successful PATCH and the same server state.
+  const saved = page.waitForResponse(
     (response) =>
       response.url().endsWith("/draft")
       && response.request().method() === "PATCH"
       && response.status() === 200,
     { timeout: 10_000 }
   );
-  await conflict;
-  await recovered;
+  await saved;
   await page.waitForFunction(() => {
     const controls = document.querySelectorAll<HTMLButtonElement>(
       "#artifact-review-modal .artifact-review-vote button"
