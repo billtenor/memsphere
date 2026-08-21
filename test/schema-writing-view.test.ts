@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createViewServer } from "../src/commands/view.js";
 import type { MemsphereConfig } from "../src/config.js";
-import { enterSchema, reportRun, startRun } from "../src/run/store.js";
+import { enterSchema, readRun, reportRun, startRun } from "../src/run/store.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
 test("View API exposes the active Schema production projection and managed draft", async () => {
@@ -34,6 +34,12 @@ flow:
   const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "schema-in-view" });
   await enterSchema({ memoryRoot, runsRoot, runId: started.id });
   await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery" } });
+  const persisted = await readRun(runsRoot, started.id);
+  const draft = Object.values(persisted.schemaDrafts ?? {})[0];
+  assert(draft);
+  const draftPath = join(runsRoot, draft.path);
+  await rm(draftPath);
+  await assert.rejects(readFile(draftPath, "utf8"), /ENOENT/);
 
   const config: MemsphereConfig = {
     configPath: join(dir, "config.json"),
@@ -51,6 +57,15 @@ flow:
   try {
     const address = server.address();
     assert(address && typeof address === "object");
+    const detailResponse = await fetch(`http://127.0.0.1:${address.port}/api/runs/${started.id}`);
+    assert.equal(detailResponse.status, 200);
+    const detail = await detailResponse.json() as {
+      run: { schemaWriting?: { draft?: { content?: string; contentError?: string } } };
+    };
+    assert.match(detail.run.schemaWriting?.draft?.content ?? "", /memsphere:pending field=.*summary/);
+    assert.equal(detail.run.schemaWriting?.draft?.contentError, undefined);
+    assert.match(await readFile(draftPath, "utf8"), /memsphere:pending field=.*summary/);
+
     const response = await fetch(`http://127.0.0.1:${address.port}/api/runs`);
     assert.equal(response.status, 200);
     const payload = await response.json() as {

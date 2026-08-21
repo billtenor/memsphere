@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -27,7 +27,15 @@ test("View keeps Memory Review and rejects the removed Task Review API", async (
     await mkdir(runsRoot, { recursive: true });
     await writeFile(
       join(memoryRoot, "statements", "review-target.yaml"),
-      withCurrentMemorySyntax("!statement\nnames: [Review target]\ndefines: [Keep Memory Review available.]\n")
+      withCurrentMemorySyntax("!statement\nnames: [review-target, Review target]\nasserts: [Keep Memory Review available.]\n")
+    );
+    await writeFile(
+      join(memoryRoot, "statements", "lazy-header.yaml"),
+      withCurrentMemorySyntax("!statement\nnames: [lazy-header, Lazy header]\nasserts: [\n  summary-must-not-parse-this-broken-body\n")
+    );
+    await writeFile(
+      join(memoryRoot, "statements", "other-target.yaml"),
+      withCurrentMemorySyntax("!statement\nnames: [other-target]\nasserts: [Other target.]\n")
     );
 
     const config: MemsphereConfig = {
@@ -61,19 +69,130 @@ test("View keeps Memory Review and rejects the removed Task Review API", async (
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           source: "memory",
-          memoryId: "statements/Review target",
+          memoryId: "statements/review-target",
           memoryName: "Review target",
           memoryPath: "statements/review-target.yaml"
         })
       });
       assert.equal(created.status, 201);
-      const review = (await created.json() as { review: { id: string; source: string } }).review;
+      const review = (await created.json() as { review: { id: string; source: string; updatedAt: string } }).review;
       assert.equal(review.source, "memory");
+      const otherCreated = await fetch(`${url}/api/reviews`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          source: "memory",
+          memoryId: "statements/other-target",
+          memoryName: "other-target",
+          memoryPath: "statements/other-target.yaml"
+        })
+      });
+      assert.equal(otherCreated.status, 201);
+      const otherReview = (await otherCreated.json() as { review: { id: string } }).review;
+      const persistedReviewSummary = JSON.parse(
+        await readFile(join(reviewsRoot, review.id, "summary.json"), "utf8")
+      ) as { summary: { id: string; commentCount: number; comments?: unknown } };
+      assert.equal(persistedReviewSummary.summary.id, review.id);
+      assert.equal(persistedReviewSummary.summary.commentCount, 0);
+      assert.equal(persistedReviewSummary.summary.comments, undefined);
+
+      const memorySummariesResponse = await fetch(`${url}/api/memories?representation=summary`);
+      assert.equal(memorySummariesResponse.status, 200);
+      const memorySummariesSource = await memorySummariesResponse.text();
+      const memorySummaries = JSON.parse(memorySummariesSource) as {
+        memories: Array<{ id: string; names?: string[]; entity?: unknown }>;
+      };
+      const memorySummary = memorySummaries.memories.find((memory) => memory.id === "statements/review-target");
+      assert(memorySummary, memorySummariesSource);
+      assert.deepEqual(memorySummary.names, ["review-target", "Review target"]);
+      assert.equal(memorySummary?.entity, undefined);
+      assert.doesNotMatch(memorySummariesSource, /Keep Memory Review available/);
+      const lazySummary = memorySummaries.memories.find((memory) => memory.id === "statements/lazy-header");
+      assert.deepEqual(lazySummary?.names, ["lazy-header", "Lazy header"]);
+      assert.doesNotMatch(memorySummariesSource, /summary-must-not-parse-this-broken-body/);
+
+      const memoryDetail = await fetch(`${url}/api/memories/statements/review-target`);
+      assert.equal(memoryDetail.status, 200);
+      assert.match(await memoryDetail.text(), /Keep Memory Review available/);
+      const lazyDetail = await fetch(`${url}/api/memories/statements/lazy-header`);
+      assert.equal(lazyDetail.status, 200);
+      assert.match(await lazyDetail.text(), /could not be loaded|Flow sequence/i);
+
+      const reviewSummariesResponse = await fetch(
+        `${url}/api/reviews?representation=summary&memory_id=${encodeURIComponent("statements/review-target")}`
+        + `&memory_path=${encodeURIComponent("statements/review-target.yaml")}`
+      );
+      assert.equal(reviewSummariesResponse.status, 200);
+      const reviewSummariesSource = await reviewSummariesResponse.text();
+      const reviewSummaries = JSON.parse(reviewSummariesSource) as {
+        reviews: Array<{ id: string; source: string; commentCount: number; comments?: unknown }>;
+      };
+      assert.equal(reviewSummaries.reviews[0]?.id, review.id);
+      assert.equal(reviewSummaries.reviews[0]?.source, "memory");
+      assert.equal(reviewSummaries.reviews[0]?.commentCount, 0);
+      assert.equal(reviewSummaries.reviews[0]?.comments, undefined);
+
+      await rm(join(reviewsRoot, otherReview.id, "summary.json"), { force: true });
+      await writeFile(join(reviewsRoot, otherReview.id, "review.yaml"), "not: [valid");
+      const indexedSubject = await fetch(
+        `${url}/api/reviews?representation=summary&memory_id=${encodeURIComponent("statements/review-target")}`
+      );
+      assert.equal(indexedSubject.status, 200, await indexedSubject.text());
+
+      await rm(join(reviewsRoot, review.id, "summary.json"), { force: true });
+      const legacySummary = await fetch(
+        `${url}/api/reviews?representation=summary&memory_id=${encodeURIComponent("statements/review-target")}`
+      );
+      assert.equal(legacySummary.status, 200);
+      assert.equal(
+        (JSON.parse(await readFile(join(reviewsRoot, review.id, "summary.json"), "utf8")) as { summary: { id: string } }).summary.id,
+        review.id
+      );
+
+      const summaryPath = join(reviewsRoot, review.id, "summary.json");
+      await rm(summaryPath, { force: true });
+      await mkdir(summaryPath);
+      const updatedWithoutCache = await fetch(`${url}/api/reviews/${review.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "submitted" })
+      });
+      const updatedWithoutCacheSource = await updatedWithoutCache.text();
+      assert.equal(updatedWithoutCache.status, 200, updatedWithoutCacheSource);
+      const submitted = (JSON.parse(updatedWithoutCacheSource) as { review: { updatedAt: string } }).review;
+      assert.match(await readFile(join(reviewsRoot, review.id, "review.yaml"), "utf8"), /status: submitted/);
+      const staleUpdate = await fetch(`${url}/api/reviews/${review.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "stale overwrite", expectedUpdatedAt: review.updatedAt })
+      });
+      assert.equal(staleUpdate.status, 409);
+      assert.equal((await staleUpdate.json() as { code: string }).code, "review_revision_conflict");
+      const currentUpdate = await fetch(`${url}/api/reviews/${review.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "current update", expectedUpdatedAt: submitted.updatedAt })
+      });
+      assert.equal(currentUpdate.status, 200, await currentUpdate.text());
+      assert.match(await readFile(join(reviewsRoot, review.id, "review.yaml"), "utf8"), /title: current update/);
+      await rm(summaryPath, { recursive: true });
+      const rebuiltAfterCacheFailure = await fetch(
+        `${url}/api/reviews?representation=summary&memory_id=${encodeURIComponent("statements/review-target")}`
+      );
+      assert.equal(rebuiltAfterCacheFailure.status, 200);
+      assert.equal(
+        ((await rebuiltAfterCacheFailure.json()) as { reviews: Array<{ status: string }> }).reviews[0]?.status,
+        "submitted"
+      );
+
+      const reviewDetail = await fetch(`${url}/api/reviews/${review.id}`);
+      assert.equal(reviewDetail.status, 200);
+      assert.deepEqual((await reviewDetail.json() as { review: { comments: unknown[] } }).review.comments, []);
 
       const snapshot = await fetch(`${url}/api/reviews/${review.id}/snapshot?kind=memory`);
       assert.equal(snapshot.status, 200);
       const payload = await snapshot.json() as { memory: { id: string } };
-      assert.equal(payload.memory.id, "statements/Review target");
+      assert.equal(payload.memory.id, "statements/review-target");
 
       const removedSnapshot = await fetch(`${url}/api/reviews/${review.id}/snapshot?kind=task`);
       assert.equal(removedSnapshot.status, 410);

@@ -10,7 +10,7 @@ import { createViewServer } from "../src/commands/view.js";
 import { runGit } from "../src/git.js";
 import { validateCommand } from "../src/commands/validate.js";
 import { readViewConfig } from "../src/config.js";
-import { validateMemoryChange, withMemoryChangePreview } from "../src/memory/changeset.js";
+import { MemoryChangePreviewCache, validateMemoryChange, withMemoryChangePreview } from "../src/memory/changeset.js";
 import { readProjectRegistry } from "../src/project/registry.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 
@@ -84,6 +84,26 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     });
     assert.match(previewSource, /Linked preview/);
 
+    const previewCache = new MemoryChangePreviewCache();
+    const cachedRoots: string[] = [];
+    try {
+      for (let index = 0; index < 2; index += 1) {
+        await previewCache.use({
+          home,
+          project: "embedded",
+          changeId: first.changeId,
+          use: async ({ memoryRoot }) => {
+            cachedRoots.push(memoryRoot);
+            assert.match(await readFile(join(memoryRoot, "concepts", "shared.yaml"), "utf8"), /Linked preview/);
+          }
+        });
+      }
+      assert.equal(cachedRoots[0], cachedRoots[1]);
+    } finally {
+      await previewCache.dispose();
+    }
+    await assert.rejects(realpath(cachedRoots[0]!));
+
     const view = createViewServer(await readViewConfig());
     await new Promise<void>((resolve, reject) => {
       view.once("error", reject);
@@ -111,6 +131,33 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       assert.equal(preview.source?.changeId, first.changeId);
       assert.equal(preview.source?.storeType, "embedded");
       assert.equal(preview.source?.valid, true);
+
+      const previewSummaryResponse = await fetch(
+        `${origin}/api/memories?representation=summary&change=${encodeURIComponent(first.changeId)}`
+      );
+      const previewSummarySource = await previewSummaryResponse.text();
+      const previewSummary = JSON.parse(previewSummarySource) as {
+        memories: Array<{ id: string; names?: string[]; entity?: unknown }>;
+        source?: { mode: string; changeId: string };
+      };
+      assert.equal(previewSummaryResponse.status, 200);
+      assert.equal(previewSummary.source?.mode, "changeset");
+      assert.equal(previewSummary.source?.changeId, first.changeId);
+      assert.deepEqual(
+        previewSummary.memories.find((memory) => memory.id === "concepts/shared")?.names,
+        ["shared"]
+      );
+      assert.equal(previewSummary.memories.some((memory) => memory.entity !== undefined), false);
+      assert.doesNotMatch(previewSummarySource, /Linked preview/);
+
+      const previewDetailResponse = await fetch(
+        `${origin}/api/memories/concepts/shared?change=${encodeURIComponent(first.changeId)}`
+      );
+      const previewDetail = await previewDetailResponse.json() as {
+        memory: { entity: { defines?: string[] } };
+      };
+      assert.equal(previewDetailResponse.status, 200);
+      assert.deepEqual(previewDetail.memory.entity.defines, ["Linked preview"]);
 
       const missing = await fetch(`${origin}/api/memories?change=change-missing`);
       assert.equal(missing.status, 404);
