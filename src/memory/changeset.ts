@@ -551,23 +551,18 @@ async function captureEmbeddedWorkingChange(
 ): Promise<EmbeddedCapture> {
   if (project.config.store.type !== "embedded") throw new Error("Embedded ChangeSet capture requires an Embedded Project");
   if (workspace.kind !== "git") throw new Error("Embedded ChangeSet validation must run inside a Git worktree");
-  const configuredWorkspace = await resolveWorkspaceIdentity(project.config.store.memory_path);
-  if (configuredWorkspace.kind !== "git" || configuredWorkspace.key !== workspace.key) {
+  const configuredRepository = await resolveWorkspaceIdentity(project.config.store.repository_path);
+  if (configuredRepository.kind !== "git" || configuredRepository.key !== workspace.key) {
     throw new Error(`Embedded Project "${project.name}" does not belong to the current Git repository`);
   }
-  const relativeMemoryPath = relative(configuredWorkspace.path, resolve(project.config.store.memory_path)).replaceAll("\\", "/");
-  if (relativeMemoryPath === ".." || relativeMemoryPath.startsWith("../") || posix.isAbsolute(relativeMemoryPath)) {
-    throw new Error("Embedded Memory path cannot be resolved inside the current Git worktree");
-  }
-  const memoryPath = relativeMemoryPath || ".";
-  const memoryRoot = resolve(workspace.path, memoryPath);
-  if (relative(workspace.path, memoryRoot).startsWith("..")) throw new Error("Embedded Memory path escapes the current worktree");
+  const memoryPath = project.config.store.memory_path;
+  const memoryRoot = project.memoryRoot;
   if (!await exists(memoryRoot)) throw new Error(`Embedded Memory root is missing in the current worktree: ${memoryRoot}`);
   const baseRevision = await gitOutput(["rev-parse", "HEAD"], workspace.path);
   const source = {
     instance_key: workspace.instanceKey,
     root: workspace.path,
-    repository_root: configuredWorkspace.path,
+    repository_root: configuredRepository.path,
     memory_path: memoryPath
   };
   const captured = await captureEmbeddedTargets(workspace.path, memoryRoot, memoryPath, baseRevision);
