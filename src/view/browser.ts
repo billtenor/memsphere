@@ -3445,8 +3445,11 @@ export const browserHtml = String.raw`<!doctype html>
       toggle.className = "run-binding-toggle";
       toggle.setAttribute("aria-expanded", String(expanded));
       toggle.setAttribute("aria-controls", bodyId);
+      const title = document.createElement("span");
+      title.className = "block-title";
+      title.textContent = displayLanguage === "zh" ? "运行期评审绑定" : "Runtime review bindings";
       toggle.append(
-        blockTitle(displayLanguage === "zh" ? "运行期评审绑定" : "Runtime review bindings"),
+        title,
         pill(slots.length + (displayLanguage === "zh" ? " 个槽位" : slots.length === 1 ? " slot" : " slots"))
       );
       const caret = document.createElement("span");

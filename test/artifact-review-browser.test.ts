@@ -127,6 +127,9 @@ flow:
     await bindingToggle.click();
     assert.equal(await bindingToggle.getAttribute("aria-expanded"), "true");
     await bindingBody.getByText("换绑只影响尚未创建的 Review；已创建 Review 的参与者保持不变。", { exact: true }).waitFor();
+    await bindingToggle.click();
+    assert.equal(await bindingToggle.getAttribute("aria-expanded"), "false");
+    assert.equal(await bindingBody.isVisible(), false);
     await page.getByRole("button", { name: /^产物评审 0\/2$/ }).click();
     const reviewModal = page.locator("#artifact-review-modal");
     await reviewModal.waitFor();
