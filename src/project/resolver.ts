@@ -88,7 +88,7 @@ async function resolveEmbeddedWorkspaceMemoryRoot(
   if (repository.key !== workspace.key) {
     throw new Error("Embedded Project can only be used by worktrees of its own Git repository");
   }
-  return resolveContainedMemoryRoot(workspace.path, store.memory_path);
+  return resolveContainedMemoryRoot(workspace.path, store.memory_path, { mustExist: true });
 }
 
 async function resolveEmbeddedRepository(repositoryPath: string): Promise<{ path: string; key: string }> {
@@ -102,7 +102,11 @@ async function resolveEmbeddedRepository(repositoryPath: string): Promise<{ path
   return { path: mainPath, key: repository.key };
 }
 
-async function resolveContainedMemoryRoot(workspacePath: string, memoryPath: string): Promise<string> {
+async function resolveContainedMemoryRoot(
+  workspacePath: string,
+  memoryPath: string,
+  options: { mustExist?: boolean } = {}
+): Promise<string> {
   const workspaceRoot = await realpath(workspacePath);
   const memoryRoot = resolve(workspaceRoot, memoryPath);
   assertWithin(workspaceRoot, memoryRoot, "Embedded Memory path escapes its Git Workspace");
@@ -115,6 +119,9 @@ async function resolveContainedMemoryRoot(workspacePath: string, memoryPath: str
         resolvedExistingPath,
         "Embedded Memory path escapes its Git Workspace through a symbolic link"
       );
+      if (options.mustExist && existingPath !== memoryRoot) {
+        throw new Error(`Embedded Memory root is missing in the current Git worktree: ${memoryRoot}`);
+      }
       return existingPath === memoryRoot ? resolvedExistingPath : memoryRoot;
     } catch (error) {
       if (!isMissing(error)) throw error;

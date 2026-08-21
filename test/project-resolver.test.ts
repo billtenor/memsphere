@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,6 +10,7 @@ import { resolveProjectContext } from "../src/project/resolver.js";
 import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 import { editEmbeddedMemories } from "../src/memory/changeset.js";
+import { memoryListCommand } from "../src/commands/memory.js";
 
 test("Embedded Projects resolve workspace Memory for CLI and canonical Memory for View", async () => {
   const fixture = await mkdtemp(join(tmpdir(), "memsphere-embedded-resolver-"));
@@ -93,7 +94,17 @@ test("Embedded Projects resolve workspace Memory for CLI and canonical Memory fo
     );
 
     await rm(join(linked, ".memsphere"), { recursive: true, force: true });
-    assert.equal((await resolveProjectContext({ home, cwd: linked })).primary.memoryRoot, join(canonicalLinked, memoryRelative));
+    process.chdir(linked);
+    await assert.rejects(
+      memoryListCommand(undefined, {}),
+      /Embedded Memory root is missing in the current Git worktree/
+    );
+    await assert.rejects(
+      editEmbeddedMemories(["concepts/missing-root"]),
+      /Embedded Memory root is missing in the current Git worktree/
+    );
+    await assert.rejects(stat(join(linked, ".memsphere")), /ENOENT/);
+    process.chdir(previous.cwd);
 
     if (process.platform !== "win32") {
       const outside = join(fixture, "outside-memory");
