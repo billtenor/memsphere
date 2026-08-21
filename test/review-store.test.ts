@@ -33,6 +33,10 @@ test("View keeps Memory Review and rejects the removed Task Review API", async (
       join(memoryRoot, "statements", "lazy-header.yaml"),
       withCurrentMemorySyntax("!statement\nnames: [lazy-header, Lazy header]\nasserts: [\n  summary-must-not-parse-this-broken-body\n")
     );
+    await writeFile(
+      join(memoryRoot, "statements", "other-target.yaml"),
+      withCurrentMemorySyntax("!statement\nnames: [other-target]\nasserts: [Other target.]\n")
+    );
 
     const config: MemsphereConfig = {
       configPath: join(dir, "config.json"),
@@ -71,8 +75,20 @@ test("View keeps Memory Review and rejects the removed Task Review API", async (
         })
       });
       assert.equal(created.status, 201);
-      const review = (await created.json() as { review: { id: string; source: string } }).review;
+      const review = (await created.json() as { review: { id: string; source: string; updatedAt: string } }).review;
       assert.equal(review.source, "memory");
+      const otherCreated = await fetch(`${url}/api/reviews`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          source: "memory",
+          memoryId: "statements/other-target",
+          memoryName: "other-target",
+          memoryPath: "statements/other-target.yaml"
+        })
+      });
+      assert.equal(otherCreated.status, 201);
+      const otherReview = (await otherCreated.json() as { review: { id: string } }).review;
       const persistedReviewSummary = JSON.parse(
         await readFile(join(reviewsRoot, review.id, "summary.json"), "utf8")
       ) as { summary: { id: string; commentCount: number; comments?: unknown } };
@@ -116,6 +132,13 @@ test("View keeps Memory Review and rejects the removed Task Review API", async (
       assert.equal(reviewSummaries.reviews[0]?.commentCount, 0);
       assert.equal(reviewSummaries.reviews[0]?.comments, undefined);
 
+      await rm(join(reviewsRoot, otherReview.id, "summary.json"), { force: true });
+      await writeFile(join(reviewsRoot, otherReview.id, "review.yaml"), "not: [valid");
+      const indexedSubject = await fetch(
+        `${url}/api/reviews?representation=summary&memory_id=${encodeURIComponent("statements/review-target")}`
+      );
+      assert.equal(indexedSubject.status, 200, await indexedSubject.text());
+
       await rm(join(reviewsRoot, review.id, "summary.json"), { force: true });
       const legacySummary = await fetch(
         `${url}/api/reviews?representation=summary&memory_id=${encodeURIComponent("statements/review-target")}`
@@ -134,8 +157,24 @@ test("View keeps Memory Review and rejects the removed Task Review API", async (
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ status: "submitted" })
       });
-      assert.equal(updatedWithoutCache.status, 200, await updatedWithoutCache.text());
+      const updatedWithoutCacheSource = await updatedWithoutCache.text();
+      assert.equal(updatedWithoutCache.status, 200, updatedWithoutCacheSource);
+      const submitted = (JSON.parse(updatedWithoutCacheSource) as { review: { updatedAt: string } }).review;
       assert.match(await readFile(join(reviewsRoot, review.id, "review.yaml"), "utf8"), /status: submitted/);
+      const staleUpdate = await fetch(`${url}/api/reviews/${review.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "stale overwrite", expectedUpdatedAt: review.updatedAt })
+      });
+      assert.equal(staleUpdate.status, 409);
+      assert.equal((await staleUpdate.json() as { code: string }).code, "review_revision_conflict");
+      const currentUpdate = await fetch(`${url}/api/reviews/${review.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "current update", expectedUpdatedAt: submitted.updatedAt })
+      });
+      assert.equal(currentUpdate.status, 200, await currentUpdate.text());
+      assert.match(await readFile(join(reviewsRoot, review.id, "review.yaml"), "utf8"), /title: current update/);
       await rm(summaryPath, { recursive: true });
       const rebuiltAfterCacheFailure = await fetch(
         `${url}/api/reviews?representation=summary&memory_id=${encodeURIComponent("statements/review-target")}`

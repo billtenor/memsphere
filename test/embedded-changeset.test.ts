@@ -10,7 +10,7 @@ import { createViewServer } from "../src/commands/view.js";
 import { runGit } from "../src/git.js";
 import { validateCommand } from "../src/commands/validate.js";
 import { readConfig } from "../src/config.js";
-import { validateMemoryChange, withMemoryChangePreview } from "../src/memory/changeset.js";
+import { MemoryChangePreviewCache, validateMemoryChange, withMemoryChangePreview } from "../src/memory/changeset.js";
 import { readProjectRegistry } from "../src/project/registry.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 
@@ -80,6 +80,26 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       }
     });
     assert.match(previewSource, /Linked preview/);
+
+    const previewCache = new MemoryChangePreviewCache();
+    const cachedRoots: string[] = [];
+    try {
+      for (let index = 0; index < 2; index += 1) {
+        await previewCache.use({
+          home,
+          project: "embedded",
+          changeId: first.changeId,
+          use: async ({ memoryRoot }) => {
+            cachedRoots.push(memoryRoot);
+            assert.match(await readFile(join(memoryRoot, "concepts", "shared.yaml"), "utf8"), /Linked preview/);
+          }
+        });
+      }
+      assert.equal(cachedRoots[0], cachedRoots[1]);
+    } finally {
+      await previewCache.dispose();
+    }
+    await assert.rejects(realpath(cachedRoots[0]!));
 
     const view = createViewServer(await readConfig());
     await new Promise<void>((resolve, reject) => {

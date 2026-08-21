@@ -2,7 +2,8 @@ import { open, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { parse } from "yaml";
-import { memoryKinds, type MemoryKind } from "./kinds.js";
+import { memoryKinds, memoryKindTags, type MemoryKind } from "./kinds.js";
+import { canonicalMemoryNameIssue, memoryAliasIssue } from "./logical-reference.js";
 import { memorySyntaxRegistry, type MemoryEntity } from "./schema.js";
 import { readMemorySyntax } from "./syntax.js";
 import { assertExpectedTag, parseMemoryYaml } from "./yaml.js";
@@ -47,7 +48,7 @@ export async function readMemoryFileSummary(kind: MemoryKind, filePath: string):
         position += bytesRead;
       }
       if (bytesRead === 0) source += decoder.end();
-      const names = memoryNamesFromPrefix(source, bytesRead === 0);
+      const names = memoryNamesFromPrefix(kind, source, bytesRead === 0);
       if (names) return { kind, path: filePath, names };
       if (bytesRead === 0) {
         const entity = parseMemoryYaml(source);
@@ -60,7 +61,7 @@ export async function readMemoryFileSummary(kind: MemoryKind, filePath: string):
   }
 }
 
-function memoryNamesFromPrefix(source: string, eof: boolean): string[] | undefined {
+function memoryNamesFromPrefix(kind: MemoryKind, source: string, eof: boolean): string[] | undefined {
   const lines = source.split(/\r?\n/);
   const headerIndex = lines.findIndex((line) => /^(?:names|name):(?:\s|$)/.test(line));
   if (headerIndex < 0) return undefined;
@@ -70,13 +71,13 @@ function memoryNamesFromPrefix(source: string, eof: boolean): string[] | undefin
   if (inline.slice(inline.indexOf(":") + 1).trim()) {
     try {
       const parsed = parse(inline) as Record<string, unknown>;
-      return normalizeSummaryNames(parsed[key]);
+      return validateSummaryHeader(kind, source, eof, normalizeSummaryNames(parsed[key]));
     } catch (error) {
       while (end < lines.length && (lines[end] === "" || /^\s/.test(lines[end]!) || /^\s*#/.test(lines[end]!))) end += 1;
       if (end === lines.length && !eof) return undefined;
       try {
         const parsed = parse(lines.slice(headerIndex, end).join("\n")) as Record<string, unknown>;
-        return normalizeSummaryNames(parsed[key]);
+        return validateSummaryHeader(kind, source, eof, normalizeSummaryNames(parsed[key]));
       } catch {
         throw error;
       }
@@ -85,7 +86,39 @@ function memoryNamesFromPrefix(source: string, eof: boolean): string[] | undefin
   while (end < lines.length && (lines[end] === "" || /^\s/.test(lines[end]!) || /^\s*#/.test(lines[end]!))) end += 1;
   if (end === lines.length && !eof) return undefined;
   const parsed = parse(lines.slice(headerIndex, end).join("\n")) as Record<string, unknown>;
-  return normalizeSummaryNames(parsed[key]);
+  return validateSummaryHeader(kind, source, eof, normalizeSummaryNames(parsed[key]));
+}
+
+function validateSummaryHeader(kind: MemoryKind, source: string, eof: boolean, names: string[]): string[] | undefined {
+  const tag = rootTagFromPrefix(source, eof);
+  if (!tag) return undefined;
+  const expectedTag = memoryKindTags[kind];
+  if (tag !== expectedTag) throw new Error(`Expected ${expectedTag} Memory tag, received ${tag}`);
+
+  const canonicalIssue = canonicalMemoryNameIssue(names[0]!);
+  if (canonicalIssue) throw new Error(canonicalIssue);
+  const seen = new Set<string>();
+  for (const [index, name] of names.entries()) {
+    if (seen.has(name)) throw new Error(`Memory names must be unique; duplicate at names[${index}]`);
+    seen.add(name);
+    if (index === 0) continue;
+    const aliasIssue = memoryAliasIssue(name);
+    if (aliasIssue) throw new Error(aliasIssue);
+  }
+  return names;
+}
+
+function rootTagFromPrefix(source: string, eof: boolean): string | undefined {
+  const lines = source.split(/\r?\n/);
+  for (const [index, line] of lines.entries()) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("%") || trimmed === "---") continue;
+    if (index === lines.length - 1 && !eof && !source.endsWith("\n")) return undefined;
+    const match = /^(?:---\s+)?(![A-Za-z][A-Za-z0-9_-]*)\s*(?:#.*)?$/.exec(trimmed);
+    if (!match) throw new Error("Memory root must declare a supported tag");
+    return match[1];
+  }
+  return eof ? "" : undefined;
 }
 
 function normalizeSummaryNames(value: unknown): string[] {

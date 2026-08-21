@@ -86,6 +86,17 @@ test("detail loaders ignore responses from a previous Project generation", () =>
   }
 });
 
+test("Review and Run detail loaders reject superseded requests and changed summary revisions", () => {
+  for (const [loader, requests] of [["loadReviewDetail", "reviewDetailRequests"], ["loadRunDetail", "runDetailRequests"]]) {
+    const body = browserHtml.match(new RegExp("async function " + loader + "[\\s\\S]*?\\n    }"))?.[0] || "";
+    assert.match(body, new RegExp("state\\." + requests + "\\.get\\(id\\) !== requestId"));
+    assert.match(body, /startingRevision/);
+    assert.match(body, /updatedAt/);
+  }
+  assert.match(browserHtml, /expectedUpdatedAt: current\?\.updatedAt/);
+  assert.match(browserHtml, /response\.status === 409/);
+});
+
 test("stale page loads cannot release the active route application guard", () => {
   assert.match(browserHtml, /finally \{\s*if \(isCurrentPageLoad\(options\)\) state\.routeApplying = false;/);
 });

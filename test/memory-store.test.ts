@@ -61,6 +61,24 @@ defines: [valid]
   });
 });
 
+test("readMemoryFileSummary validates the root tag and logical names without parsing the body", async () => {
+  await withTempDir(async (dir) => {
+    const wrongTag = join(dir, "wrong-tag.yaml");
+    const invalidCanonical = join(dir, "invalid-canonical.yaml");
+    const invalidAlias = join(dir, "invalid-alias.yaml");
+    const brokenBody = join(dir, "broken-body.yaml");
+    await writeFile(wrongTag, withCurrentMemorySyntax("!statement\nnames: [valid-name]\nasserts: [valid]\n"));
+    await writeFile(invalidCanonical, withCurrentMemorySyntax("!concept\nnames: [InvalidName]\ndefines: [valid]\n"));
+    await writeFile(invalidAlias, withCurrentMemorySyntax("!concept\nnames: [valid-name, ' bad ']\ndefines: [valid]\n"));
+    await writeFile(brokenBody, withCurrentMemorySyntax("!concept\nnames: [valid-name, Valid name]\ndefines: [\n"));
+
+    await assert.rejects(readMemoryFileSummary("concepts", wrongTag), /Expected !concept Memory tag/);
+    await assert.rejects(readMemoryFileSummary("concepts", invalidCanonical), /lowercase ASCII kebab-case/);
+    await assert.rejects(readMemoryFileSummary("concepts", invalidAlias), /leading or trailing whitespace/);
+    assert.deepEqual((await readMemoryFileSummary("concepts", brokenBody)).names, ["valid-name", "Valid name"]);
+  });
+});
+
 test("validateMemoryStore reports kind-scoped canonical and alias conflicts", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");

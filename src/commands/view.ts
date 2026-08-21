@@ -47,7 +47,7 @@ import { authorizeArtifactOperation, controlPlaneConfigSchema, listPermissionDef
 import { listMemoryFiles, readMemoryFile, readMemoryFileSummary } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
-import { withMemoryChangePreview } from "../memory/changeset.js";
+import { MemoryChangePreviewCache } from "../memory/changeset.js";
 import { readBundledSystemMemories } from "../reserved/store.js";
 import {
   createReview,
@@ -55,6 +55,7 @@ import {
   listReviews,
   listReviewSummaries,
   readReviewSnapshot,
+  ReviewRevisionConflictError,
   reviewStatuses,
   updateReview,
   deleteReview,
@@ -219,22 +220,60 @@ type ViewServerOptions = {
   settingsToken?: string;
 };
 
+class ViewMemoryCache {
+  readonly previews = new MemoryChangePreviewCache();
+  readonly #filesByRoot = new Map<string, Map<string, { kind: MemoryKind; path: string }>>();
+
+  replaceIndex(memoryRoot: string, files: Map<string, { kind: MemoryKind; path: string }>): void {
+    this.#filesByRoot.set(memoryRoot, files);
+  }
+
+  async find(memoryRoot: string, memoryId: string): Promise<{ kind: MemoryKind; path: string } | undefined> {
+    const cached = this.#filesByRoot.get(memoryRoot)?.get(memoryId);
+    if (cached) {
+      try {
+        const summary = await readMemoryFileSummary(cached.kind, cached.path);
+        if (`${summary.kind}/${summary.names[0]}` === memoryId) return cached;
+      } catch {
+        // Rebuild below if a formal Memory changed after its summary was loaded.
+      }
+    }
+    const rebuilt = await buildMemoryFileIndex(memoryRoot);
+    this.#filesByRoot.set(memoryRoot, rebuilt);
+    return rebuilt.get(memoryId);
+  }
+
+  async clear(): Promise<void> {
+    this.#filesByRoot.clear();
+    await this.previews.clear();
+  }
+
+  async dispose(): Promise<void> {
+    this.#filesByRoot.clear();
+    await this.previews.dispose();
+  }
+}
+
 export function createViewServer(config: MemsphereConfig, options: ViewServerOptions = {}) {
-  return createServer(async (request, response) => {
+  const viewCache = new ViewMemoryCache();
+  const server = createServer(async (request, response) => {
     try {
-      await handleRequest(request, response, config, options);
+      await handleRequest(request, response, config, options, viewCache);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       sendJson(response, 500, { error: message });
     }
   });
+  server.once("close", () => void viewCache.dispose());
+  return server;
 }
 
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   config: MemsphereConfig,
-  options: ViewServerOptions
+  options: ViewServerOptions,
+  viewCache: ViewMemoryCache
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   const { memoryRoot, reviewsRoot, runsRoot } = config;
@@ -253,6 +292,7 @@ async function handleRequest(
       return;
     }
     const selected = await readProjectConfig(body.name.trim(), config.homeRoot);
+    await viewCache.clear();
     Object.assign(config, selected);
     sendJson(response, 200, { current: selected.project?.name });
     return;
@@ -504,8 +544,8 @@ async function handleRequest(
     const changeId = url.searchParams.get("change")?.trim();
     try {
       const payload = url.searchParams.get("representation") === "summary"
-        ? await loadMemorySummaryPayload(config, changeId || undefined)
-        : await loadMemoryPayload(config, changeId || undefined);
+        ? await loadMemorySummaryPayload(config, viewCache, changeId || undefined)
+        : await loadMemoryPayload(config, viewCache, changeId || undefined);
       sendJson(response, 200, payload);
     } catch (error) {
       const missing = Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");
@@ -527,7 +567,7 @@ async function handleRequest(
     }
     const changeId = url.searchParams.get("change")?.trim();
     try {
-      const memory = await loadMemoryDetailPayload(config, kind, name, changeId || undefined);
+      const memory = await loadMemoryDetailPayload(config, viewCache, kind, name, changeId || undefined);
       if (!memory) {
         sendJson(response, 404, { error: "memory not found" });
         return;
@@ -845,7 +885,8 @@ async function handleRequest(
     const snapshotFiles = await resolveReviewSnapshotFiles({
       memoryRoot,
       memoryId,
-      memoryPath
+      memoryPath,
+      viewCache
     });
     const review = await createReview({
       title,
@@ -860,14 +901,29 @@ async function handleRequest(
   }
 
   if (request.method === "PATCH" && reviewMatch) {
-    const body = await readJsonBody<{ title?: unknown; status?: unknown; comments?: unknown }>(request);
+    const body = await readJsonBody<{ title?: unknown; status?: unknown; comments?: unknown; expectedUpdatedAt?: unknown }>(request);
     const status = normalizeReviewStatus(body.status);
     const comments = body.comments === undefined ? undefined : normalizeReviewComments(body.comments);
-    const review = await updateReview(reviewsRoot, decodeURIComponent(reviewMatch[1]), {
-      title: typeof body.title === "string" ? body.title : undefined,
-      status,
-      comments
-    });
+    let review;
+    try {
+      review = await updateReview(reviewsRoot, decodeURIComponent(reviewMatch[1]), {
+        title: typeof body.title === "string" ? body.title : undefined,
+        status,
+        comments,
+        expectedUpdatedAt: typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : undefined
+      });
+    } catch (error) {
+      if (error instanceof ReviewRevisionConflictError) {
+        sendJson(response, 409, {
+          code: "review_revision_conflict",
+          error: error.message,
+          expectedUpdatedAt: error.expectedUpdatedAt,
+          actualUpdatedAt: error.actualUpdatedAt
+        });
+        return;
+      }
+      throw error;
+    }
     if (!review) {
       sendJson(response, 404, { error: "review not found" });
       return;
@@ -978,6 +1034,7 @@ async function resolveReviewSnapshotFiles(input: {
   memoryRoot: string;
   memoryId?: string;
   memoryPath?: string;
+  viewCache: ViewMemoryCache;
 }): Promise<Array<{ label: string; path: string; kind: "memory" }>> {
   if (!input.memoryId) return [];
 
@@ -990,7 +1047,7 @@ async function resolveReviewSnapshotFiles(input: {
     }];
   }
 
-  const file = await findMemoryFileById(input.memoryRoot, input.memoryId);
+  const file = await input.viewCache.find(input.memoryRoot, input.memoryId);
   if (!file) return [];
   return [{
     label: portableRelative(input.memoryRoot, file.path),
@@ -1008,38 +1065,38 @@ function resolveMemoryPath(memoryRoot: string, memoryPath: string): string {
   return path;
 }
 
-async function findMemoryFileById(memoryRoot: string, memoryId: string): Promise<{ kind: MemoryKind; path: string } | undefined> {
+async function buildMemoryFileIndex(memoryRoot: string): Promise<Map<string, { kind: MemoryKind; path: string }>> {
+  const result = new Map<string, { kind: MemoryKind; path: string }>();
   for (const kind of memoryKinds) {
     const paths = await listMemoryFiles(memoryRoot, kind);
     for (const path of paths) {
       try {
         const file = await readMemoryFileSummary(kind, path);
         const primaryName = file.names[0];
-        if (`${file.kind}/${primaryName}` === memoryId) {
-          return { kind: file.kind, path: file.path };
-        }
+        result.set(`${file.kind}/${primaryName}`, { kind: file.kind, path: file.path });
       } catch {
         // Invalid memories should not block creating a review for another file.
       }
     }
   }
-  return undefined;
+  return result;
 }
 
-async function loadMemoryPayload(config: MemsphereConfig, changeId?: string): Promise<MemoryPayload> {
-  return withMemoryPayloadRoot(config, changeId, (memoryRoot, source) =>
-    loadMemoryPayloadFromRoot(config, memoryRoot, source)
+async function loadMemoryPayload(config: MemsphereConfig, viewCache: ViewMemoryCache, changeId?: string): Promise<MemoryPayload> {
+  return withMemoryPayloadRoot(config, viewCache, changeId, (memoryRoot, source) =>
+    loadMemoryPayloadFromRoot(config, viewCache, memoryRoot, source)
   );
 }
 
 async function withMemoryPayloadRoot<T>(
   config: MemsphereConfig,
+  viewCache: ViewMemoryCache,
   changeId: string | undefined,
   use: (memoryRoot: string, source: MemoryPayload["source"]) => Promise<T>
 ): Promise<T> {
   if (changeId) {
     if (!config.project?.name) throw new Error("No Project is currently selected");
-    return withMemoryChangePreview({
+    return viewCache.previews.use({
       home: config.homeRoot,
       project: config.project.name,
       changeId,
@@ -1059,10 +1116,12 @@ async function withMemoryPayloadRoot<T>(
 
 async function loadMemoryPayloadFromRoot(
   config: MemsphereConfig,
+  viewCache: ViewMemoryCache,
   memoryRoot: string,
   source: MemoryPayload["source"]
 ): Promise<MemoryPayload> {
   const memories: MemoryPayload["memories"] = [];
+  const fileIndex = new Map<string, { kind: MemoryKind; path: string }>();
   const systemReferences = await systemMemoryReferences();
   const actorNames = Object.fromEntries(
     Object.entries(config.controlPlane?.actors ?? {}).map(([actorId, actor]) => [actorId, actor.name])
@@ -1071,26 +1130,31 @@ async function loadMemoryPayloadFromRoot(
   for (const kind of memoryKinds) {
     const paths = await listMemoryFiles(memoryRoot, kind);
     for (const path of paths) {
-      memories.push(await loadMemoryListItem(memoryRoot, kind, path, systemReferences));
+      const memory = await loadMemoryListItem(memoryRoot, kind, path, systemReferences);
+      memories.push(memory);
+      if (!memory.error) fileIndex.set(memory.id, { kind, path });
     }
   }
 
+  viewCache.replaceIndex(memoryRoot, fileIndex);
   return { memoryRoot: config.memoryRoot, actorNames, memories, source };
 }
 
-async function loadMemorySummaryPayload(config: MemsphereConfig, changeId?: string): Promise<MemoryPayload> {
-  return withMemoryPayloadRoot(config, changeId, (memoryRoot, source) =>
-    loadMemorySummaryPayloadFromRoot(config, memoryRoot, source)
+async function loadMemorySummaryPayload(config: MemsphereConfig, viewCache: ViewMemoryCache, changeId?: string): Promise<MemoryPayload> {
+  return withMemoryPayloadRoot(config, viewCache, changeId, (memoryRoot, source) =>
+    loadMemorySummaryPayloadFromRoot(config, viewCache, memoryRoot, source)
   );
 }
 
 async function loadMemorySummaryPayloadFromRoot(
   config: MemsphereConfig,
+  viewCache: ViewMemoryCache,
   memoryRoot: string,
   source: MemoryPayload["source"]
 ): Promise<MemoryPayload> {
   const systemReferences = await systemMemoryReferences();
   const memories: MemoryPayload["memories"] = [];
+  const fileIndex = new Map<string, { kind: MemoryKind; path: string }>();
   for (const kind of memoryKinds) {
     for (const path of await listMemoryFiles(memoryRoot, kind)) {
       const relativePath = portableRelative(memoryRoot, path);
@@ -1103,6 +1167,7 @@ async function loadMemorySummaryPayloadFromRoot(
           system: summary.names.some((name) => systemReferences.has(`${kind}/${name}`)),
           names: summary.names
         });
+        fileIndex.set(`${kind}/${summary.names[0]}`, { kind, path });
       } catch (error) {
         memories.push({
           id: `${kind}/${relativePath}`,
@@ -1114,6 +1179,7 @@ async function loadMemorySummaryPayloadFromRoot(
       }
     }
   }
+  viewCache.replaceIndex(memoryRoot, fileIndex);
   return {
     memoryRoot: config.memoryRoot,
     actorNames: Object.fromEntries(
@@ -1126,12 +1192,13 @@ async function loadMemorySummaryPayloadFromRoot(
 
 async function loadMemoryDetailPayload(
   config: MemsphereConfig,
+  viewCache: ViewMemoryCache,
   kind: MemoryKind,
   name: string,
   changeId?: string
 ): Promise<MemoryPayload["memories"][number] | undefined> {
-  return withMemoryPayloadRoot(config, changeId, async (memoryRoot) => {
-    const file = await findMemoryFileById(memoryRoot, `${kind}/${name}`);
+  return withMemoryPayloadRoot(config, viewCache, changeId, async (memoryRoot) => {
+    const file = await viewCache.find(memoryRoot, `${kind}/${name}`);
     if (!file) return undefined;
     return loadMemoryListItem(memoryRoot, kind, file.path, await systemMemoryReferences());
   });

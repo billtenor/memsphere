@@ -1,8 +1,9 @@
 import { copyFile, cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, extname, isAbsolute, join, normalize } from "node:path";
 import { parse, stringify } from "yaml";
 import { z } from "zod";
+import { atomicWriteFile, withFileLock } from "../persistence.js";
 
 export const reviewStatuses = ["draft", "submitted", "processing", "done"] as const;
 export type ReviewStatus = (typeof reviewStatuses)[number];
@@ -144,6 +145,18 @@ const reviewSummaryCacheSchema = z.object({
   summary: reviewListSummarySchema
 });
 
+type ReviewSubjectIndex = {
+  rootMtimeMs: number;
+  builtAt: number;
+  summaries: Map<string, ReviewListSummary>;
+  byPath: Map<string, Set<string>>;
+  byId: Map<string, Set<string>>;
+  byIdWithoutPath: Map<string, Set<string>>;
+};
+
+const reviewSubjectIndexes = new Map<string, ReviewSubjectIndex>();
+const reviewSubjectIndexTtlMs = 5_000;
+
 type CreateReviewInput = {
   title?: string;
   source?: "memory" | "task";
@@ -166,10 +179,22 @@ type UpdateReviewInput = {
   title?: string;
   status?: ReviewStatus;
   comments?: ReviewComment[];
+  expectedUpdatedAt?: string;
 };
+
+export class ReviewRevisionConflictError extends Error {
+  constructor(
+    readonly expectedUpdatedAt: string,
+    readonly actualUpdatedAt: string
+  ) {
+    super("Review changed after it was loaded. Reload it before saving again.");
+    this.name = "ReviewRevisionConflictError";
+  }
+}
 
 export async function ensureReviewDirectory(reviewsRoot: string): Promise<string> {
   await mkdir(reviewsRoot, { recursive: true });
+  await mkdir(join(reviewsRoot, ".locks"), { recursive: true });
   return reviewsRoot;
 }
 
@@ -195,22 +220,81 @@ export async function listReviewSummaries(
   subject?: { memoryId?: string; memoryPath?: string }
 ): Promise<ReviewListSummary[]> {
   const dir = await ensureReviewDirectory(reviewsRoot);
-  const entries = await readdir(dir, { withFileTypes: true });
-  const summaries: ReviewListSummary[] = [];
-  for (const entry of entries) {
+  const index = await ensureReviewSubjectIndex(dir);
+  const ids = reviewIdsForSubject(index, subject);
+  const summaries = await Promise.all(ids.map(async (id) => {
+    const reviewPath = join(dir, id, "review.yaml");
+    if (!(await pathExists(reviewPath))) return undefined;
+    return readReviewSummary(id, reviewPath);
+  }));
+  return summaries
+    .filter((review): review is ReviewListSummary => Boolean(review && review.target?.source !== "task"))
+    .filter((review) => reviewMatchesSubject(review, subject))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+async function ensureReviewSubjectIndex(reviewsRoot: string): Promise<ReviewSubjectIndex> {
+  const rootMtimeMs = (await stat(reviewsRoot)).mtimeMs;
+  const cached = reviewSubjectIndexes.get(reviewsRoot);
+  if (cached?.rootMtimeMs === rootMtimeMs && Date.now() - cached.builtAt < reviewSubjectIndexTtlMs) return cached;
+  const index: ReviewSubjectIndex = {
+    rootMtimeMs,
+    builtAt: Date.now(),
+    summaries: new Map(),
+    byPath: new Map(),
+    byId: new Map(),
+    byIdWithoutPath: new Map()
+  };
+  for (const entry of await readdir(reviewsRoot, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    const reviewPath = join(dir, entry.name, "review.yaml");
+    const reviewPath = join(reviewsRoot, entry.name, "review.yaml");
     if (!(await pathExists(reviewPath))) continue;
     const summary = await readReviewSummary(entry.name, reviewPath);
-    if (summary.target?.source !== "task") summaries.push(summary);
+    if (summary.target?.source === "task") continue;
+    index.summaries.set(summary.id, summary);
+    addReviewSubjectIndex(index.byId, summary.target?.id, summary.id);
+    addReviewSubjectIndex(index.byPath, summary.target?.path, summary.id);
+    if (!summary.target?.path) addReviewSubjectIndex(index.byIdWithoutPath, summary.target?.id, summary.id);
   }
-  return summaries
-    .filter((review) => {
-      if (!subject?.memoryId && !subject?.memoryPath) return true;
-      if (subject.memoryPath && review.target?.path) return review.target.path === subject.memoryPath;
-      return Boolean(subject.memoryId && review.target?.id === subject.memoryId);
-    })
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  reviewSubjectIndexes.set(reviewsRoot, index);
+  return index;
+}
+
+function addReviewSubjectIndex(index: Map<string, Set<string>>, key: string | undefined, reviewId: string): void {
+  if (!key) return;
+  const ids = index.get(key) ?? new Set<string>();
+  ids.add(reviewId);
+  index.set(key, ids);
+}
+
+function reviewIdsForSubject(
+  index: ReviewSubjectIndex,
+  subject?: { memoryId?: string; memoryPath?: string }
+): string[] {
+  if (!subject?.memoryId && !subject?.memoryPath) return [...index.summaries.keys()];
+  const ids = new Set<string>();
+  if (subject.memoryPath) {
+    for (const id of index.byPath.get(subject.memoryPath) ?? []) ids.add(id);
+    if (subject.memoryId) {
+      for (const id of index.byIdWithoutPath.get(subject.memoryId) ?? []) ids.add(id);
+    }
+  } else if (subject.memoryId) {
+    for (const id of index.byId.get(subject.memoryId) ?? []) ids.add(id);
+  }
+  return [...ids];
+}
+
+function reviewMatchesSubject(
+  review: ReviewListSummary,
+  subject?: { memoryId?: string; memoryPath?: string }
+): boolean {
+  if (!subject?.memoryId && !subject?.memoryPath) return true;
+  if (subject.memoryPath && review.target?.path) return review.target.path === subject.memoryPath;
+  return Boolean(subject.memoryId && review.target?.id === subject.memoryId);
+}
+
+function invalidateReviewSubjectIndex(reviewsRoot: string): void {
+  reviewSubjectIndexes.delete(reviewsRoot);
 }
 
 async function readReviewSummary(directoryName: string, reviewPath: string): Promise<ReviewListSummary> {
@@ -298,34 +382,48 @@ export async function createReview(input: CreateReviewInput): Promise<ReviewFile
     comments: []
   };
   await writeReviewToDirectory(input.reviewsRoot, review);
+  invalidateReviewSubjectIndex(input.reviewsRoot);
   return review;
 }
 
 export async function updateReview(reviewsRoot: string, id: string, patch: UpdateReviewInput): Promise<ReviewFile | undefined> {
-  const review = await getReview(reviewsRoot, id);
-  if (!review) return undefined;
+  const lockKey = createHash("sha256").update(id).digest("hex");
+  return withFileLock(join(reviewsRoot, ".locks", `${lockKey}.lock`), async () => {
+    const review = await getReview(reviewsRoot, id);
+    if (!review) return undefined;
+    if (patch.expectedUpdatedAt && patch.expectedUpdatedAt !== review.updatedAt) {
+      throw new ReviewRevisionConflictError(patch.expectedUpdatedAt, review.updatedAt);
+    }
 
-  const now = new Date().toISOString();
-  if (typeof patch.title === "string" && patch.title.trim()) {
-    review.title = patch.title.trim();
-  }
-  if (patch.comments) {
-    review.comments = patch.comments;
-  }
-  if (patch.status && patch.status !== review.status) {
-    review.status = patch.status;
-    if (patch.status === "submitted") review.submittedAt = now;
-    if (patch.status === "done") review.doneAt = now;
-  }
-  review.updatedAt = now;
-  await writeReview(reviewsRoot, review);
-  return review;
+    const now = monotonicTimestamp(review.updatedAt);
+    if (typeof patch.title === "string" && patch.title.trim()) {
+      review.title = patch.title.trim();
+    }
+    if (patch.comments) {
+      review.comments = patch.comments;
+    }
+    if (patch.status && patch.status !== review.status) {
+      review.status = patch.status;
+      if (patch.status === "submitted") review.submittedAt = now;
+      if (patch.status === "done") review.doneAt = now;
+    }
+    review.updatedAt = now;
+    await writeReview(reviewsRoot, review);
+    return review;
+  });
+}
+
+function monotonicTimestamp(previous: string): string {
+  const now = Date.now();
+  const previousTime = Date.parse(previous);
+  return new Date(Number.isFinite(previousTime) ? Math.max(now, previousTime + 1) : now).toISOString();
 }
 
 export async function deleteReview(reviewsRoot: string, id: string): Promise<boolean> {
   const filePath = directoryReviewPath(reviewsRoot, id);
   if (!(await pathExists(filePath))) return false;
   await rm(join(reviewsRoot, id), { recursive: true, force: true });
+  invalidateReviewSubjectIndex(reviewsRoot);
   return true;
 }
 
@@ -346,7 +444,7 @@ async function writeReviewToDirectory(reviewsRoot: string, review: ReviewFile): 
   const reviewDir = join(reviewsRoot, review.id);
   await mkdir(reviewDir, { recursive: true });
   const reviewPath = join(reviewDir, "review.yaml");
-  await writeFile(reviewPath, stringify(review, { lineWidth: 0 }), "utf8");
+  await atomicWriteFile(reviewPath, stringify(review, { lineWidth: 0 }));
   const source = await stat(reviewPath);
   await writeReviewSummaryCache(
     join(reviewDir, "summary.json"),

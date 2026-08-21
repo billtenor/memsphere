@@ -778,6 +778,9 @@ export const browserHtml = String.raw`<!doctype html>
       memoryDetails: new Map(),
       reviewDetails: new Map(),
       runDetails: new Map(),
+      reviewDetailRequests: new Map(),
+      runDetailRequests: new Map(),
+      detailRequestSequence: 0,
       pageLoadGeneration: 0,
       projectGeneration: 0,
       artifactReviewContext: null,
@@ -1214,6 +1217,8 @@ export const browserHtml = String.raw`<!doctype html>
       state.memoryDetails.clear();
       state.reviewDetails.clear();
       state.runDetails.clear();
+      state.reviewDetailRequests.clear();
+      state.runDetailRequests.clear();
       state.taskDetailReloadPending = null;
       state.changeId = "";
       state.reviewSnapshots.clear();
@@ -1359,6 +1364,9 @@ export const browserHtml = String.raw`<!doctype html>
       const projectGeneration = state.projectGeneration;
       const subject = reviewListSubject();
       if (!subject) return null;
+      const startingRevision = state.reviews.find(review => review.id === id)?.updatedAt;
+      const requestId = ++state.detailRequestSequence;
+      state.reviewDetailRequests.set(id, requestId);
       const response = await fetch("/api/reviews/" + encodeURIComponent(id));
       if (!response.ok) {
         if (response.status === 404) return null;
@@ -1366,11 +1374,13 @@ export const browserHtml = String.raw`<!doctype html>
       }
       const detail = (await response.json()).review;
       if (projectGeneration !== state.projectGeneration) return null;
+      if (state.reviewDetailRequests.get(id) !== requestId) return null;
       const currentSubject = reviewListSubject();
       if (!currentSubject || currentSubject.id !== subject.id || currentSubject.path !== subject.path) return null;
       if (!reviewMatchesSubject(detail, subject)) return null;
       const summary = state.reviews.find(review => review.id === id);
       if (!summary) return null;
+      if (summary.updatedAt !== startingRevision || (detail.updatedAt && summary.updatedAt && detail.updatedAt < summary.updatedAt)) return null;
       state.reviewDetails.set(id, detail);
       Object.assign(summary, detail, { commentCount: detail.comments?.length || 0 });
       return detail;
@@ -1460,6 +1470,9 @@ export const browserHtml = String.raw`<!doctype html>
     async function loadRunDetail(id) {
       if (!id) return null;
       const projectGeneration = state.projectGeneration;
+      const startingRevision = state.runs.find(run => run.id === id)?.updatedAt;
+      const requestId = ++state.detailRequestSequence;
+      state.runDetailRequests.set(id, requestId);
       const response = await fetch("/api/runs/" + encodeURIComponent(id));
       if (!response.ok) {
         if (response.status === 404) return null;
@@ -1467,8 +1480,12 @@ export const browserHtml = String.raw`<!doctype html>
       }
       const detail = (await response.json()).run;
       if (projectGeneration !== state.projectGeneration) return null;
+      if (state.runDetailRequests.get(id) !== requestId) return null;
+      const currentSummary = state.runs.find(run => run.id === id);
+      if (currentSummary?.updatedAt !== startingRevision
+        || (detail.updatedAt && currentSummary?.updatedAt && detail.updatedAt < currentSummary.updatedAt)) return null;
       state.runDetails.set(id, detail);
-      const summary = state.runs.find(run => run.id === id);
+      const summary = currentSummary;
       if (summary) Object.assign(summary, detail, { eventCount: detail.events?.length || 0 });
       else state.runs.unshift({ ...detail, eventCount: detail.events?.length || 0, archived: detail.readOnly === true });
       return detail;
@@ -6254,16 +6271,25 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function patchReview(id, patch) {
+      const current = state.reviewDetails.get(id) || state.reviews.find(item => item.id === id);
       const response = await fetch("/api/reviews/" + encodeURIComponent(id), {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(patch)
+        body: JSON.stringify({ ...patch, expectedUpdatedAt: current?.updatedAt })
       });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) {
+        const message = await response.text();
+        if (response.status === 409) {
+          await loadReviews({ loadDetail: false });
+          await loadReviewDetail(id);
+          renderAll();
+        }
+        throw new Error(message);
+      }
       const review = (await response.json()).review;
       state.reviewDetails.set(review.id, review);
-      const current = state.reviews.find(item => item.id === review.id);
-      if (current) Object.assign(current, review, { commentCount: review.comments?.length || 0 });
+      const summary = state.reviews.find(item => item.id === review.id);
+      if (summary) Object.assign(summary, review, { commentCount: review.comments?.length || 0 });
       else state.reviews.unshift({ ...review, commentCount: review.comments?.length || 0 });
       renderAll();
     }
