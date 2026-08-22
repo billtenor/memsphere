@@ -12,7 +12,7 @@ asserts:
 goals:
   - 确认当前迭代的范围、交付物和验收标准。
   - 按仓库规范完成实现和验证。
-  - 通过提需方验收并形成交付报告。
+  - 通过提需方验收，提交当前迭代 commit，并由 human 决定是否创建 GitHub PR。
 flow:
   - !action
     action: 调查需求、相关实现和仓库规范，形成当前迭代需求契约。
@@ -25,7 +25,6 @@ flow:
       format: markdown
       review:
         - 产品负责人
-        - 项目负责人
 
   - !action
     action: 基于已确认的需求契约调查代码，形成实施与验证方案。
@@ -40,7 +39,6 @@ flow:
         - 研发工程师
         - 架构师
         - 测试工程师
-        - 项目负责人
 
   - !action
     action: 基于已确认的实施与验证方案产出开发计划或 Task List。
@@ -92,7 +90,6 @@ flow:
         - 研发工程师
         - 测试工程师
         - 架构师
-        - 项目负责人
 
   - !action
     action: 复核实际改动、验证结果和验收结论，形成交付报告。
@@ -103,23 +100,37 @@ flow:
     artifact: !artifact
       name: 敏捷需求开发交付报告
       format: markdown
+      review:
+        - 产品负责人
+      final: true
+
+  - !action
+    action: 按当前迭代范围检查改动并创建 Git commit。
+    actor: agent
+    asserts:
+      - 读取适用的 Git 规范 Statement 记忆；未找到则继续。
+      - 只允许提交当前迭代产生的改动，不得暂存或提交其他工作区内容。
+      - commit 前必须确认应交付的实现、测试和文档改动已完整纳入，并记录 commit SHA。
+    artifact: !artifact
+      name: 本轮 Commit 结果
+      format: markdown
       final: true
 
   - !if
     condition: !action
-      action: 请 human 判断是否需要 agent 创建本轮 Git commit。
+      action: 请 human 判断是否需要 agent 基于本轮 commit 创建 GitHub PR。
       actor: human
       artifact: !artifact
-        name: 是否需要创建本轮 Commit
+        name: 是否需要创建 GitHub PR
         type: boolean
     then:
       - !action
-        action: 按当前迭代范围检查改动并创建 Git commit。
+        action: 基于本轮 commit 创建 GitHub Pull Request。
         actor: agent
         asserts:
-          - 读取适用的 Git 规范 Statement 记忆；未找到则继续。
-          - 只允许提交当前迭代产生的改动，不得暂存或提交其他工作区内容。
+          - 创建前必须确认远端分支与目标分支，并遵循适用的仓库交付规范。
+          - PR 标题和描述必须准确概括当前迭代范围、验证结果与残留问题。
         artifact: !artifact
-          name: 本轮 Commit 结果
+          name: GitHub PR 创建结果
           format: markdown
           final: true
