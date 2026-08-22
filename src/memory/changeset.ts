@@ -72,6 +72,13 @@ export const memoryChangeSetSchema = z.object({
 export type MemoryChangeSet = z.infer<typeof memoryChangeSetSchema>;
 export type MemoryChangeOperation = z.infer<typeof changeTargetSchema>["operation"];
 
+export type EmbeddedMemoryEditResult = {
+  repositoryRoot: string;
+  workspaceRoot: string;
+  memoryRoot: string;
+  targets: Array<{ reference: string; path: string; operation: "create" | "update" }>;
+};
+
 export type MemoryChangeValidationResult = {
   changeId: string;
   memoryRoot: string;
@@ -87,12 +94,120 @@ export type MemoryChangePreview = {
   memoryRoot: string;
 };
 
+type PreparedMemoryChangePreview = {
+  cacheKey: string;
+  changeKey: string;
+  change: MemoryChangeSet;
+  project: ResolvedProject;
+  candidateRoot: string;
+};
+
+type CachedMemoryChangePreview = {
+  preview: MemoryChangePreview;
+  refs: number;
+  stale: boolean;
+  lastUsed: number;
+};
+
+export class MemoryChangePreviewCache {
+  readonly #entries = new Map<string, CachedMemoryChangePreview>();
+  readonly #pending = new Map<string, Promise<CachedMemoryChangePreview>>();
+
+  constructor(readonly maxEntries = 4) {}
+
+  async use<T>(input: {
+    home?: string;
+    project: string;
+    changeId: string;
+    use: (preview: MemoryChangePreview) => Promise<T>;
+  }): Promise<T> {
+    const prepared = await prepareMemoryChangePreview(input);
+    await this.#invalidateOlderVersions(prepared.changeKey, prepared.cacheKey);
+    let entry = this.#entries.get(prepared.cacheKey);
+    if (!entry) {
+      let pending = this.#pending.get(prepared.cacheKey);
+      if (!pending) {
+        pending = materializePreparedMemoryChangePreview(prepared).then((preview) => ({
+          preview,
+          refs: 0,
+          stale: false,
+          lastUsed: Date.now()
+        }));
+        this.#pending.set(prepared.cacheKey, pending);
+      }
+      try {
+        entry = await pending;
+        this.#entries.set(prepared.cacheKey, entry);
+      } finally {
+        if (this.#pending.get(prepared.cacheKey) === pending) this.#pending.delete(prepared.cacheKey);
+      }
+      await this.#evictOverflow();
+    }
+    entry.preview = { ...entry.preview, change: prepared.change };
+    entry.refs += 1;
+    entry.lastUsed = Date.now();
+    try {
+      return await input.use(entry.preview);
+    } finally {
+      entry.refs -= 1;
+      if (entry.stale && entry.refs === 0) await removeCachedMemoryChangePreview(entry);
+    }
+  }
+
+  async clear(): Promise<void> {
+    const entries = [...this.#entries.values()];
+    this.#entries.clear();
+    for (const entry of entries) {
+      entry.stale = true;
+      if (entry.refs === 0) await removeCachedMemoryChangePreview(entry);
+    }
+  }
+
+  async dispose(): Promise<void> {
+    await this.clear();
+  }
+
+  async #invalidateOlderVersions(changeKey: string, currentKey: string): Promise<void> {
+    for (const [key, entry] of this.#entries) {
+      if (key === currentKey || !key.startsWith(`${changeKey}\0`)) continue;
+      this.#entries.delete(key);
+      entry.stale = true;
+      if (entry.refs === 0) await removeCachedMemoryChangePreview(entry);
+    }
+  }
+
+  async #evictOverflow(): Promise<void> {
+    if (this.#entries.size <= this.maxEntries) return;
+    const candidates = [...this.#entries.entries()].sort((left, right) => left[1].lastUsed - right[1].lastUsed);
+    for (const [key, entry] of candidates) {
+      if (this.#entries.size <= this.maxEntries) break;
+      this.#entries.delete(key);
+      entry.stale = true;
+      if (entry.refs === 0) await removeCachedMemoryChangePreview(entry);
+    }
+  }
+}
+
 export async function withMemoryChangePreview<T>(input: {
   home?: string;
   project: string;
   changeId: string;
   use: (preview: MemoryChangePreview) => Promise<T>;
 }): Promise<T> {
+  const prepared = await prepareMemoryChangePreview(input);
+  const preview = await materializePreparedMemoryChangePreview(prepared);
+  try {
+    return await input.use(preview);
+  } finally {
+    await rm(preview.memoryRoot, { recursive: true, force: true });
+  }
+}
+
+async function prepareMemoryChangePreview(input: {
+  home?: string;
+  project: string;
+  changeId: string;
+}): Promise<PreparedMemoryChangePreview> {
   const context = await resolveProjectContext({ home: input.home, project: input.project });
   const change = await readChange(context.primary, input.changeId);
   if (change.project !== context.primary.name) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
@@ -102,20 +217,39 @@ export async function withMemoryChangePreview<T>(input: {
   if (await checkpointDigest(change.targets, candidateRoot) !== change.checkpoint.digest) {
     throw new Error(`ChangeSet checkpoint digest does not match: ${change.id}`);
   }
+  const changeKey = `${context.primary.memoryRoot}\0${change.id}`;
+  return {
+    cacheKey: `${changeKey}\0${change.checkpoint.digest}`,
+    changeKey,
+    change,
+    project: context.primary,
+    candidateRoot
+  };
+}
+
+async function materializePreparedMemoryChangePreview(
+  prepared: PreparedMemoryChangePreview
+): Promise<MemoryChangePreview> {
+  const { change, project, candidateRoot } = prepared;
   const staging = await mkdtemp(join(tmpdir(), "memsphere-view-change-"));
   try {
     if (changeStoreType(change) === "managed") {
-      await materializeGitMemoryRoot(context.primary.memoryRoot, change.checkpoint.base_revision, ".", staging);
+      await materializeGitMemoryRoot(project.memoryRoot, change.checkpoint!.base_revision, ".", staging);
     } else {
       const source = change.source_worktree;
       if (!source) throw new Error(`Embedded ChangeSet ${change.id} has no source metadata`);
-      await materializeGitMemoryRoot(source.repository_root, change.checkpoint.base_revision, source.memory_path, staging);
+      await materializeGitMemoryRoot(source.repository_root, change.checkpoint!.base_revision, source.memory_path, staging);
     }
     await applyTargets(staging, candidateRoot, change.targets);
-    return await input.use({ change, memoryRoot: staging });
-  } finally {
+    return { change, memoryRoot: staging };
+  } catch (error) {
     await rm(staging, { recursive: true, force: true });
+    throw error;
   }
+}
+
+async function removeCachedMemoryChangePreview(entry: CachedMemoryChangePreview): Promise<void> {
+  await rm(entry.preview.memoryRoot, { recursive: true, force: true });
 }
 
 export async function editMemories(input: {
@@ -180,6 +314,41 @@ export async function editMemories(input: {
   change.updated_at = new Date().toISOString();
   await writeChange(context.primary, change);
   return { change, candidateRoot };
+}
+
+export async function editEmbeddedMemories(references: string[]): Promise<EmbeddedMemoryEditResult> {
+  if (references.length === 0) throw new Error("provide at least one Memory reference");
+  const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  if (context.primary.config.store.type !== "embedded") {
+    throw new Error("Embedded Memory editing is only available for an Embedded Project");
+  }
+  const targets = await Promise.all(references.map(async (reference) => {
+    const target = await resolveTarget(context.primary, reference, "edit");
+    if (target.operation !== "create" && target.operation !== "update") {
+      throw new Error(`unsupported Embedded Memory edit operation: ${target.operation}`);
+    }
+    return { reference: target.reference, path: target.path, operation: target.operation };
+  }));
+  const seen = new Map<string, string>();
+  for (const target of targets) {
+    const existing = seen.get(target.path);
+    if (existing && existing !== target.reference) {
+      throw new Error(`Memory path is targeted by multiple references: ${target.path}`);
+    }
+    seen.set(target.path, target.reference);
+  }
+  for (const target of targets) {
+    if (target.operation !== "create") continue;
+    const destination = join(context.primary.memoryRoot, target.path);
+    await mkdir(dirname(destination), { recursive: true });
+    await writeFile(destination, newMemoryTemplate(target.reference), "utf8");
+  }
+  return {
+    repositoryRoot: context.primary.config.store.repository_path,
+    workspaceRoot: context.workspace.path,
+    memoryRoot: context.primary.memoryRoot,
+    targets
+  };
 }
 
 export async function renameMemory(input: {
@@ -509,23 +678,18 @@ async function captureEmbeddedWorkingChange(
 ): Promise<EmbeddedCapture> {
   if (project.config.store.type !== "embedded") throw new Error("Embedded ChangeSet capture requires an Embedded Project");
   if (workspace.kind !== "git") throw new Error("Embedded ChangeSet validation must run inside a Git worktree");
-  const configuredWorkspace = await resolveWorkspaceIdentity(project.config.store.memory_path);
-  if (configuredWorkspace.kind !== "git" || configuredWorkspace.key !== workspace.key) {
+  const configuredRepository = await resolveWorkspaceIdentity(project.config.store.repository_path);
+  if (configuredRepository.kind !== "git" || configuredRepository.key !== workspace.key) {
     throw new Error(`Embedded Project "${project.name}" does not belong to the current Git repository`);
   }
-  const relativeMemoryPath = relative(configuredWorkspace.path, resolve(project.config.store.memory_path)).replaceAll("\\", "/");
-  if (relativeMemoryPath === ".." || relativeMemoryPath.startsWith("../") || posix.isAbsolute(relativeMemoryPath)) {
-    throw new Error("Embedded Memory path cannot be resolved inside the current Git worktree");
-  }
-  const memoryPath = relativeMemoryPath || ".";
-  const memoryRoot = resolve(workspace.path, memoryPath);
-  if (relative(workspace.path, memoryRoot).startsWith("..")) throw new Error("Embedded Memory path escapes the current worktree");
+  const memoryPath = project.config.store.memory_path;
+  const memoryRoot = project.memoryRoot;
   if (!await exists(memoryRoot)) throw new Error(`Embedded Memory root is missing in the current worktree: ${memoryRoot}`);
   const baseRevision = await gitOutput(["rev-parse", "HEAD"], workspace.path);
   const source = {
     instance_key: workspace.instanceKey,
     root: workspace.path,
-    repository_root: configuredWorkspace.path,
+    repository_root: configuredRepository.path,
     memory_path: memoryPath
   };
   const captured = await captureEmbeddedTargets(workspace.path, memoryRoot, memoryPath, baseRevision);

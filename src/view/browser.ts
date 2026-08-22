@@ -193,6 +193,15 @@ export const browserHtml = String.raw`<!doctype html>
     .call-link { color: var(--accent); text-decoration: none; font-weight: 700; }
     .call-link:hover { text-decoration: underline; }
     .task-summary { display: grid; gap: 12px; }
+    .run-bindings { padding: 0; overflow: hidden; }
+    .run-binding-toggle { width: 100%; border: 0; background: transparent; color: var(--text); padding: 12px; display: flex; gap: 10px; align-items: center; text-align: left; }
+    .run-binding-toggle:hover { background: #f4f5f1; }
+    .run-binding-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .run-binding-toggle .block-title { flex: 1; margin: 0; }
+    .run-binding-toggle-caret { width: 7px; height: 7px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg) translate(-1px, 1px); transform-origin: center; transition: transform 120ms ease; }
+    .run-binding-toggle[aria-expanded="true"] .run-binding-toggle-caret { transform: rotate(225deg) translate(-1px, 1px); }
+    .run-binding-body { display: grid; gap: 10px; border-top: 1px solid var(--line); padding: 12px; }
+    .run-binding-body[hidden] { display: none; }
     .run-binding-list { display: grid; gap: 10px; }
     .run-binding-row { border: 1px solid var(--line); border-radius: 7px; padding: 10px; display: grid; gap: 8px; }
     .run-binding-head, .run-binding-actions, .run-binding-actors { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -775,6 +784,14 @@ export const browserHtml = String.raw`<!doctype html>
       byName: new Map(),
       reviews: [],
       runs: [],
+      memoryDetails: new Map(),
+      reviewDetails: new Map(),
+      runDetails: new Map(),
+      reviewDetailRequests: new Map(),
+      runDetailRequests: new Map(),
+      detailRequestSequence: 0,
+      pageLoadGeneration: 0,
+      projectGeneration: 0,
       artifactReviewContext: null,
       artifactReviewLoading: false,
       artifactReviewSaving: false,
@@ -785,7 +802,9 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewActivities: {},
       artifactReviewMaterialBySubmission: {},
       inlineCommentDraft: null,
+      expandedRunBindings: new Set(),
       taskPollingRenderPending: false,
+      taskDetailReloadPending: null,
       artifactReviewHistoryRoundId: null,
       artifactReviewIdentityByReview: readStoredObject(artifactReviewIdentityKey),
       artifactReviewOpenedRounds: readStoredObject(artifactReviewOpenedKey),
@@ -1001,6 +1020,8 @@ export const browserHtml = String.raw`<!doctype html>
       projectSelectMenu: document.getElementById("project-select-menu")
     };
 
+    let projectSwitchChain = Promise.resolve();
+
     document.getElementById("expand").addEventListener("click", () => setAllSections(true));
     document.getElementById("collapse").addEventListener("click", () => setAllSections(false));
     document.getElementById("refresh").addEventListener("click", () => loadAll().catch(renderFatalError));
@@ -1046,7 +1067,9 @@ export const browserHtml = String.raw`<!doctype html>
     });
     document.addEventListener("focusout", () => {
       setTimeout(() => {
-        if (!state.taskPollingRenderPending || hasActiveTaskInteraction()) return;
+        if (hasActiveTaskInteraction()) return;
+        if (flushPendingTaskDetail()) return;
+        if (!state.taskPollingRenderPending) return;
         state.taskPollingRenderPending = false;
         renderAll();
       }, 0);
@@ -1063,7 +1086,8 @@ export const browserHtml = String.raw`<!doctype html>
       if (hasActiveTaskInteraction()) {
         syncArtifactReviewActivities().catch(console.error);
       } else {
-        loadRuns().then(() => {
+        loadRuns().then(changed => {
+          if (!changed) return;
           if (hasActiveTaskInteraction()) {
             state.taskPollingRenderPending = true;
             return;
@@ -1075,10 +1099,19 @@ export const browserHtml = String.raw`<!doctype html>
     }, 4000);
 
     async function loadAll(options = {}) {
+      const generation = ++state.pageLoadGeneration;
+      await projectSwitchChain;
+      if (generation !== state.pageLoadGeneration) return;
       await loadProjects();
+      if (generation !== state.pageLoadGeneration) return;
+      if (options.project && options.project !== state.currentProject) {
+        await switchProject(options.project);
+        if (generation !== state.pageLoadGeneration) return;
+      }
       let route = options.route || (!state.routeReady ? state.pendingRoute : null);
       if (route) {
         route = await prepareBrowserRoute(route);
+        if (generation !== state.pageLoadGeneration) return;
         state.pendingRoute = route;
         if (route.project && route.project !== state.currentProject) {
           if (!confirmProjectSwitch()) {
@@ -1086,16 +1119,29 @@ export const browserHtml = String.raw`<!doctype html>
             syncBrowserUrl();
             return;
           }
-          await activateProject(route.project);
-          await loadProjects();
+          await switchProject(route.project);
+          if (generation !== state.pageLoadGeneration) return;
         }
       }
-      const requests = [loadMemories(), loadReviews(), loadRuns()];
-      if (state.viewMode === "settings") requests.push(loadSettings());
-      await Promise.all(requests);
+      const targetMode = route ? routeViewMode(route) : state.viewMode;
+      state.viewMode = targetMode;
+      if (targetMode === "memory") await loadMemories();
+      else if (targetMode === "task") await loadRuns({ loadDetail: false });
+      else await loadSettings();
+      if (generation !== state.pageLoadGeneration) return;
       if (route) {
-        await applyBrowserRoute(route, { render: false });
+        const applied = await applyBrowserRoute(route, { render: false, generation });
+        if (!applied || generation !== state.pageLoadGeneration) return;
         state.routeReady = true;
+        if (targetMode === "memory" && route.page !== "memory" && route.page !== "memory-review") {
+          await loadMemoryDetail(state.selectedId || state.memories[0]?.id);
+        } else if (targetMode === "task" && route.page === "tasks") {
+          await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
+        }
+      } else if (targetMode === "memory") {
+        await loadMemoryDetail(state.selectedId || state.memories[0]?.id);
+      } else if (targetMode === "task") {
+        await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
       }
       ensureSelectedReview();
       if (options.render !== false) renderAll();
@@ -1171,9 +1217,19 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function resetProjectState() {
+      state.projectGeneration += 1;
       state.selectedId = null;
       state.selectedTaskId = null;
       state.selectedReviewId = null;
+      state.memories = [];
+      state.reviews = [];
+      state.runs = [];
+      state.memoryDetails.clear();
+      state.reviewDetails.clear();
+      state.runDetails.clear();
+      state.reviewDetailRequests.clear();
+      state.runDetailRequests.clear();
+      state.taskDetailReloadPending = null;
       state.changeId = "";
       state.reviewSnapshots.clear();
       state.settingsScopes.project = {
@@ -1198,10 +1254,20 @@ export const browserHtml = String.raw`<!doctype html>
       resetProjectState();
     }
 
+    function switchProject(name) {
+      const operation = projectSwitchChain.then(async () => {
+        await loadProjects();
+        if (name === state.currentProject) return;
+        await activateProject(name);
+        await loadProjects();
+      });
+      projectSwitchChain = operation.catch(() => undefined);
+      return operation;
+    }
+
     async function selectProject(name) {
       if (!confirmProjectSwitch()) return;
-      await activateProject(name);
-      await loadAll();
+      await loadAll({ project: name });
     }
 
     function confirmProjectSwitch() {
@@ -1227,29 +1293,107 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function loadMemories() {
+      const projectGeneration = state.projectGeneration;
       el.detail.className = "empty";
       el.detail.textContent = "Loading...";
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ representation: "summary" });
       if (state.changeId) params.set("change", state.changeId);
-      const response = await fetch("/api/memories" + (params.toString() ? "?" + params.toString() : ""));
+      const response = await fetch("/api/memories?" + params.toString());
       if (!response.ok) throw new Error(await response.text());
-      state.payload = await response.json();
-      state.memories = state.payload.memories;
+      const payload = await response.json();
+      if (projectGeneration !== state.projectGeneration) return false;
+      state.payload = payload;
+      state.memories = (state.payload.memories || []).map(memory => ({
+        ...memory,
+        ...(state.memoryDetails.get(memory.id) || {})
+      }));
       state.actorNames = state.payload.actorNames || {};
       if (state.payload.source?.mode === "changeset") state.selectedReviewId = null;
       state.byName = new Map();
       for (const memory of state.memories) {
-        if (!memory.entity) continue;
-        for (const name of memory.entity.names || []) state.byName.set(name, memory);
+        for (const name of memory.entity?.names || memory.names || []) state.byName.set(name, memory);
       }
       applyFilter();
       if (!state.selectedId && state.filtered[0]) state.selectedId = state.filtered[0].id;
+      return true;
+    }
+
+    async function loadMemoryDetail(id) {
+      if (!id) return null;
+      const projectGeneration = state.projectGeneration;
+      const summary = state.memories.find(memory => memory.id === id);
+      if (!summary || summary.error) return null;
+      const names = summary.entity?.names || summary.names || [];
+      const canonicalName = names[0] || id.slice(id.indexOf("/") + 1);
+      const response = await fetch(
+        "/api/memories/" + encodeURIComponent(summary.kind) + "/" + encodeURIComponent(canonicalName)
+        + (state.changeId ? "?change=" + encodeURIComponent(state.changeId) : "")
+      );
+      if (!response.ok) throw new Error(await response.text());
+      const detail = (await response.json()).memory;
+      if (projectGeneration !== state.projectGeneration) return null;
+      state.memoryDetails.set(id, detail);
+      Object.assign(summary, detail);
+      for (const name of detail.entity?.names || []) state.byName.set(name, summary);
+      return summary;
+    }
+
+    async function loadMemorySelection(id) {
+      await loadMemoryDetail(id);
+      if (state.selectedId !== id || !state.reviewDrawerOpen) return;
+      await loadReviews();
+      if (state.selectedId !== id) return;
+      ensureSelectedReview();
+      if (state.selectedReviewId) await loadReviewDetail(state.selectedReviewId);
     }
 
     async function loadReviews() {
-      const response = await fetch("/api/reviews");
+      const projectGeneration = state.projectGeneration;
+      const subject = reviewListSubject();
+      if (!subject) {
+        state.reviews = [];
+        return;
+      }
+      const query = new URLSearchParams({ representation: "summary", memory_id: subject.id });
+      if (subject.path) query.set("memory_path", subject.path);
+      const response = await fetch("/api/reviews?" + query);
       if (!response.ok) throw new Error(await response.text());
-      state.reviews = (await response.json()).reviews || [];
+      const payload = await response.json();
+      if (projectGeneration !== state.projectGeneration) return false;
+      const currentSubject = reviewListSubject();
+      if (!currentSubject || currentSubject.id !== subject.id || currentSubject.path !== subject.path) return false;
+      state.reviews = (payload.reviews || []).map(review => {
+        const detail = state.reviewDetails.get(review.id);
+        return detail?.updatedAt === review.updatedAt ? { ...review, ...detail } : review;
+      });
+      return true;
+    }
+
+    async function loadReviewDetail(id) {
+      if (!id) return null;
+      const projectGeneration = state.projectGeneration;
+      const subject = reviewListSubject();
+      if (!subject) return null;
+      const startingRevision = state.reviews.find(review => review.id === id)?.updatedAt;
+      const requestId = ++state.detailRequestSequence;
+      state.reviewDetailRequests.set(id, requestId);
+      const response = await fetch("/api/reviews/" + encodeURIComponent(id));
+      if (!response.ok) {
+        if (response.status === 404) return null;
+        throw new Error(await response.text());
+      }
+      const detail = (await response.json()).review;
+      if (projectGeneration !== state.projectGeneration) return null;
+      if (state.reviewDetailRequests.get(id) !== requestId) return null;
+      const currentSubject = reviewListSubject();
+      if (!currentSubject || currentSubject.id !== subject.id || currentSubject.path !== subject.path) return null;
+      if (!reviewMatchesSubject(detail, subject)) return null;
+      const summary = state.reviews.find(review => review.id === id);
+      if (!summary) return null;
+      if (summary.updatedAt !== startingRevision || (detail.updatedAt && summary.updatedAt && detail.updatedAt < summary.updatedAt)) return null;
+      state.reviewDetails.set(id, detail);
+      Object.assign(summary, detail, { commentCount: detail.comments?.length || 0 });
+      return detail;
     }
 
     async function ensureReviewSnapshot(kind) {
@@ -1284,21 +1428,84 @@ export const browserHtml = String.raw`<!doctype html>
       return state.reviewSnapshots.get(review.id + ":" + kind) || null;
     }
 
-    async function loadRuns() {
-      const response = await fetch("/api/runs");
+    async function loadRuns(options = {}) {
+      const projectGeneration = state.projectGeneration;
+      const previousSignature = runSummarySignature(state.runs);
+      const previous = new Map(state.runs.map(run => [run.id, run.updatedAt]));
+      const response = await fetch("/api/runs?representation=summary");
       if (!response.ok) throw new Error(await response.text());
-      state.runs = (await response.json()).runs || [];
+      const payload = await response.json();
+      if (projectGeneration !== state.projectGeneration) return false;
+      const selectedArchivedDetail = state.selectedTaskId
+        ? state.runDetails.get(state.selectedTaskId)
+        : null;
+      const activeRuns = (payload.runs || []).map(run => {
+        const detail = state.runDetails.get(run.id);
+        return detail && detail.updatedAt === run.updatedAt ? { ...run, ...detail } : run;
+      });
+      state.runs = selectedArchivedDetail?.readOnly === true
+        && !activeRuns.some(run => run.id === selectedArchivedDetail.id)
+        ? [{ ...selectedArchivedDetail, eventCount: selectedArchivedDetail.events?.length || 0, archived: true }, ...activeRuns]
+        : activeRuns;
       const explicitRunRoute = !state.routeReady && ["task", "artifact-review"].includes(state.pendingRoute?.page);
       if (!explicitRunRoute && !state.runs.some(run => run.id === state.selectedTaskId)) {
         state.selectedTaskId = state.runs[0]?.id || null;
         saveSelectedTask();
       }
-      await syncArtifactReviewContext();
-      await syncArtifactReviewActivities();
+      const selected = state.runs.find(run => run.id === state.selectedTaskId) || state.runs[0];
+      if (options.loadDetail !== false && selected && previous.get(selected.id) !== selected.updatedAt) {
+        if (hasActiveTaskInteraction()) {
+          const detail = state.runDetails.get(selected.id);
+          if (detail) Object.assign(selected, detail, { eventCount: detail.events?.length || 0 });
+          state.taskDetailReloadPending = selected.id;
+        } else {
+          if (state.taskDetailReloadPending === selected.id) state.taskDetailReloadPending = null;
+          await loadRunDetail(selected.id);
+        }
+      }
+      if (state.artifactReviewModalOpen) {
+        await syncArtifactReviewContext();
+        await syncArtifactReviewActivities();
+      }
+      return previousSignature !== runSummarySignature(state.runs);
+    }
+
+    function runSummarySignature(runs) {
+      return runs.map(run => [run.id, run.updatedAt, run.status, run.eventCount,
+        run.reviewProgress?.status, run.reviewProgress?.submitted, run.reviewProgress?.total].join(":"))
+        .sort()
+        .join("|");
+    }
+
+    async function loadRunDetail(id) {
+      if (!id) return null;
+      const projectGeneration = state.projectGeneration;
+      const startingRevision = state.runs.find(run => run.id === id)?.updatedAt;
+      const requestId = ++state.detailRequestSequence;
+      state.runDetailRequests.set(id, requestId);
+      const response = await fetch("/api/runs/" + encodeURIComponent(id));
+      if (!response.ok) {
+        if (response.status === 404) return null;
+        throw new Error(await response.text());
+      }
+      const detail = (await response.json()).run;
+      if (projectGeneration !== state.projectGeneration) return null;
+      if (state.runDetailRequests.get(id) !== requestId) return null;
+      const currentSummary = state.runs.find(run => run.id === id);
+      if (currentSummary?.updatedAt !== startingRevision
+        || (detail.updatedAt && currentSummary?.updatedAt && detail.updatedAt < currentSummary.updatedAt)) return null;
+      state.runDetails.set(id, detail);
+      const summary = currentSummary;
+      if (summary) Object.assign(summary, detail, { eventCount: detail.events?.length || 0 });
+      else state.runs.unshift({ ...detail, eventCount: detail.events?.length || 0, archived: detail.readOnly === true });
+      return detail;
     }
 
     async function syncArtifactReviewContext(force = false) {
-      if (state.viewMode !== "task") return;
+      if (state.viewMode !== "task" || !state.artifactReviewModalOpen) {
+        state.artifactReviewContext = null;
+        return;
+      }
       const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
       const reviews = artifactReviewSummariesForRun(run);
       let reviewId = run && state.artifactReviewModalOpen ? state.artifactReviewSelectedByRun[run.id] : "";
@@ -1358,8 +1565,11 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function fetchArtifactReviewContext(reviewId, roundId, actorId) {
+      const runId = state.selectedTaskId;
+      if (!runId) throw new Error("No task selected for Artifact Review");
       const response = await fetch(
-        "/api/artifact-reviews/" + encodeURIComponent(reviewId)
+        "/api/runs/" + encodeURIComponent(runId)
+        + "/artifact-reviews/" + encodeURIComponent(reviewId)
         + "/rounds/" + encodeURIComponent(roundId)
         + (actorId ? "?actor_id=" + encodeURIComponent(actorId) : "")
       );
@@ -2713,8 +2923,16 @@ export const browserHtml = String.raw`<!doctype html>
     function memoryForRoute(kind, name) {
       return state.memories.find(memory =>
         memory.kind === kind
-        && (memory.id === kind + "/" + name || memory.entity?.names?.includes(name))
+        && (memory.id === kind + "/" + name || memoryNames(memory).includes(name))
       ) || null;
+    }
+
+    function memoryNames(memory) {
+      return memory?.entity?.names || memory?.names || [];
+    }
+
+    function memorySummaryName(memory) {
+      return memoryDisplayName(memory.entity || { names: memoryNames(memory) });
     }
 
     function memoryForReview(review) {
@@ -2731,6 +2949,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function applyBrowserRoute(route, options = {}) {
       state.routeApplying = true;
+      state.artifactReviewRequest += 1;
       state.pendingRoute = route;
       state.pendingFragment = route.fragment || "";
       state.routeError = "";
@@ -2744,6 +2963,11 @@ export const browserHtml = String.raw`<!doctype html>
           state.changeId = nextChangeId;
           state.selectedId = null;
           state.selectedReviewId = null;
+          state.memories = [];
+          state.memoryDetails.clear();
+          state.reviews = [];
+          state.reviewDetails.clear();
+          state.reviewSnapshots.clear();
           await loadMemories();
         }
         if (route.page === "invalid") {
@@ -2755,16 +2979,29 @@ export const browserHtml = String.raw`<!doctype html>
         } else if (route.page === "memory") {
           state.viewMode = "memory";
           const memory = memoryForRoute(route.kind, route.name);
-          if (memory) state.selectedId = memory.id;
+          if (memory) {
+            state.selectedId = memory.id;
+            await loadMemoryDetail(memory.id);
+            if (!isCurrentPageLoad(options)) return false;
+          }
           else {
             state.selectedId = null;
             state.routeError = "Memory not found: " + route.kind + "/" + route.name;
           }
         } else if (route.page === "memory-review") {
           state.viewMode = "memory";
+          const routeMemory = route.kind && route.name ? memoryForRoute(route.kind, route.name) : null;
+          if (routeMemory) {
+            state.selectedId = routeMemory.id;
+            await loadMemoryDetail(routeMemory.id);
+            if (!isCurrentPageLoad(options)) return false;
+            await loadReviews();
+            if (!isCurrentPageLoad(options)) return false;
+            await loadReviewDetail(route.reviewId);
+            if (!isCurrentPageLoad(options)) return false;
+          }
           const review = state.reviews.find(item => item.id === route.reviewId);
           const memory = memoryForReview(review);
-          const routeMemory = route.kind && route.name ? memoryForRoute(route.kind, route.name) : null;
           if (route.project && route.project !== state.currentProject) {
             state.routeError = "Project not found: " + route.project;
           } else if (!review) state.routeError = "Memory Review not found: " + route.reviewId;
@@ -2785,7 +3022,16 @@ export const browserHtml = String.raw`<!doctype html>
           state.routeLanding = "tasks";
         } else if (route.page === "task" || route.page === "artifact-review") {
           state.viewMode = "task";
-          const run = state.runs.find(item => item.id === route.runId);
+          let run = state.runs.find(item => item.id === route.runId);
+          if (!run) {
+            await loadRunDetail(route.runId);
+            if (!isCurrentPageLoad(options)) return false;
+            run = state.runs.find(item => item.id === route.runId);
+          } else {
+            await loadRunDetail(run.id);
+            if (!isCurrentPageLoad(options)) return false;
+            run = state.runs.find(item => item.id === route.runId);
+          }
           if (!run) {
             state.selectedTaskId = null;
             state.routeError = "Task not found: " + route.runId;
@@ -2803,6 +3049,7 @@ export const browserHtml = String.raw`<!doctype html>
                 writeStoredObject(artifactReviewSelectedKey, state.artifactReviewSelectedByRun);
                 writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
                 await syncArtifactReviewContext(true);
+                if (!isCurrentPageLoad(options)) return false;
                 if (!el.artifactReviewModal.open) el.artifactReviewModal.showModal();
               }
             }
@@ -2825,13 +3072,18 @@ export const browserHtml = String.raw`<!doctype html>
         localStorage.setItem(viewModeKey, state.viewMode);
         if (options.render) renderAll();
       } finally {
-        state.routeApplying = false;
+        if (isCurrentPageLoad(options)) state.routeApplying = false;
       }
       if (options.render && !state.routeError) {
         state.routeReplaceNext = true;
         syncBrowserUrl();
       }
       restoreRouteFragment();
+      return true;
+    }
+
+    function isCurrentPageLoad(options) {
+      return options.generation === undefined || options.generation === state.pageLoadGeneration;
     }
 
     function settingsPublicModule(scope, module) {
@@ -2865,10 +3117,11 @@ export const browserHtml = String.raw`<!doctype html>
       } else if (state.reviewDrawerOpen && state.selectedReviewId) {
         const review = state.reviews.find(item => item.id === state.selectedReviewId) || null;
         const memory = memoryForReview(review);
-        path = review && memory?.entity && state.currentProject
+        const memoryName = memoryNames(memory)[0];
+        path = review && memoryName && state.currentProject
           ? "/projects/" + encodeRoutePart(state.currentProject)
             + "/memories/" + encodeRoutePart(memory.kind)
-            + "/" + encodeRoutePart(primaryName(memory.entity))
+            + "/" + encodeRoutePart(memoryName)
             + "/reviews/" + encodeRoutePart(review.id)
           : "/memories";
       } else {
@@ -2879,11 +3132,12 @@ export const browserHtml = String.raw`<!doctype html>
           return base + (state.changeId ? "?change=" + encodeURIComponent(state.changeId) : "");
         }
         const memory = state.memories.find(item => item.id === state.selectedId) || null;
+        const memoryName = memoryNames(memory)[0];
         const memoryBase = state.changeId && state.currentProject
           ? "/projects/" + encodeRoutePart(state.currentProject) + "/memories"
           : "/memories";
-        path = memory?.entity
-          ? memoryBase + "/" + encodeRoutePart(memory.kind) + "/" + encodeRoutePart(primaryName(memory.entity))
+        path = memoryName
+          ? memoryBase + "/" + encodeRoutePart(memory.kind) + "/" + encodeRoutePart(memoryName)
           : memoryBase;
         if (state.changeId) search = "?change=" + encodeURIComponent(state.changeId);
       }
@@ -2991,7 +3245,14 @@ export const browserHtml = String.raw`<!doctype html>
         else await openArtifactReviewModal();
         return;
       }
-      setReviewDrawer(!state.reviewDrawerOpen);
+      const open = !state.reviewDrawerOpen;
+      setReviewDrawer(open);
+      if (open) {
+        await loadReviews();
+        ensureSelectedReview();
+        if (state.selectedReviewId) await loadReviewDetail(state.selectedReviewId);
+        renderAll();
+      }
     }
 
     async function openArtifactReviewModal(reviewId) {
@@ -3110,6 +3371,9 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function setViewMode(mode, options = {}) {
+      const generation = ++state.pageLoadGeneration;
+      await projectSwitchChain;
+      if (generation !== state.pageLoadGeneration) return;
       state.routeError = "";
       if (options.landing) state.routeLanding = mode === "task" ? "tasks" : mode === "memory" ? "memories" : "";
       else if (mode === "settings") state.routeLanding = "";
@@ -3131,19 +3395,22 @@ export const browserHtml = String.raw`<!doctype html>
       if (mode === "settings" || mode === "task") {
         state.reviewDrawerOpen = false;
       }
+      renderAll();
       if (mode === "settings") {
-        renderAll();
         if (!state.settingsMeta || (!state.settingsData && !state.settingsLoading)) {
           await loadSettings();
           renderAll();
         }
         return;
       }
-      renderAll();
-      if (mode === "task") {
-        await syncArtifactReviewContext();
-        renderAll();
+      if (mode === "memory") {
+        await loadMemories();
+        await loadMemoryDetail(state.selectedId || state.memories[0]?.id);
+      } else if (mode === "task") {
+        await loadRuns({ loadDetail: false });
+        await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
       }
+      renderAll();
     }
 
     function syncReviewDrawer() {
@@ -3242,7 +3509,7 @@ export const browserHtml = String.raw`<!doctype html>
         if (state.hideSystemMemories && isSystemMemory(memory)) return false;
         if (!q) return true;
         const identity = memory.error ? memory.path : memory.id;
-        return [memory.kind, identity, errorText(memory.error), ...(memory.entity?.names || [])].join(" ").toLowerCase().includes(q);
+        return [memory.kind, identity, errorText(memory.error), ...memoryNames(memory)].join(" ").toLowerCase().includes(q);
       });
       updateMemoryCount();
     }
@@ -3261,12 +3528,16 @@ export const browserHtml = String.raw`<!doctype html>
         for (const memory of group) {
           const button = document.createElement("button");
           button.className = "memory-button" + (memory.id === state.selectedId ? " active" : "");
-          button.textContent = memory.error ? invalidMemoryName(memory) : memoryDisplayName(memory.entity);
+          button.textContent = memory.error ? invalidMemoryName(memory) : memorySummaryName(memory);
           button.title = memory.error ? errorText(memory.error) : memory.id;
-          button.addEventListener("click", () => {
+          button.addEventListener("click", async () => {
             state.routeError = "";
             state.routeLanding = "";
             state.selectedId = memory.id;
+            state.selectedReviewId = null;
+            if (state.reviewDrawerOpen) state.reviews = [];
+            renderAll();
+            await loadMemorySelection(memory.id);
             renderAll();
           });
           list.append(button);
@@ -3307,8 +3578,9 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderTaskNav() {
       el.nav.innerHTML = "";
-      el.count.textContent = state.runs.length + " tasks";
-      if (!state.runs.length) {
+      const activeRuns = state.runs.filter(run => run.archived !== true && run.readOnly !== true);
+      el.count.textContent = activeRuns.length + " tasks";
+      if (!activeRuns.length) {
         const empty = document.createElement("div");
         empty.className = "muted";
         empty.textContent = "No task runs yet.";
@@ -3317,7 +3589,7 @@ export const browserHtml = String.raw`<!doctype html>
       }
 
       for (const status of ["running", "done"]) {
-        const group = state.runs.filter(run => run.status === status);
+        const group = activeRuns.filter(run => run.status === status);
         if (!group.length) continue;
         const label = document.createElement("div");
         label.className = "kind";
@@ -3335,11 +3607,12 @@ export const browserHtml = String.raw`<!doctype html>
           title.textContent = runDisplayName(run);
           const meta = document.createElement("span");
           meta.className = "muted";
-          meta.textContent = shortRunId(run.id) + " · " + run.events.length + " artifact(s)";
-          if (run.artifactReview?.round) {
+          meta.textContent = shortRunId(run.id) + " · " + (run.eventCount ?? run.events?.length ?? 0) + " artifact(s)";
+          const reviewProgress = run.artifactReview?.round || run.reviewProgress;
+          if (reviewProgress) {
             meta.append(
               " · ",
-              t("pendingReview") + " " + run.artifactReview.round.submitted + "/" + run.artifactReview.round.total
+              t("pendingReview") + " " + reviewProgress.submitted + "/" + reviewProgress.total
             );
           }
           button.append(title, meta);
@@ -3352,7 +3625,7 @@ export const browserHtml = String.raw`<!doctype html>
             if (changedTask) state.artifactReviewContext = null;
             renderAll();
             if (changedTask) scrollTaskDetailToTop();
-            await syncArtifactReviewContext();
+            await loadRunDetail(run.id);
             renderAll();
           });
           card.append(button, archiveRunButton(run, "task-card-archive"));
@@ -3384,6 +3657,11 @@ export const browserHtml = String.raw`<!doctype html>
       saveSelectedTask();
       el.title.textContent = runDisplayName(run);
       el.subtitle.textContent = run.id;
+      if (!Array.isArray(run.stack) || !Array.isArray(run.events)) {
+        el.detail.className = "empty";
+        el.detail.textContent = "Loading task...";
+        return;
+      }
       el.detail.className = "task-summary";
       el.detail.innerHTML = "";
       el.detail.append(renderRunMeta(run));
@@ -3428,13 +3706,42 @@ export const browserHtml = String.raw`<!doctype html>
       if (!slots.length || !actors.length) return null;
       const panel = document.createElement("section");
       panel.className = "panel run-bindings";
-      panel.append(blockTitle(displayLanguage === "zh" ? "运行期评审绑定" : "Runtime review bindings"));
+      const expanded = state.expandedRunBindings.has(run.id);
+      const bodyId = "run-binding-body-" + String(run.id).replace(/[^a-zA-Z0-9_-]/g, "-");
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "run-binding-toggle";
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.setAttribute("aria-controls", bodyId);
+      const title = document.createElement("span");
+      title.className = "block-title";
+      title.textContent = displayLanguage === "zh" ? "运行期评审绑定" : "Runtime review bindings";
+      toggle.append(
+        title,
+        pill(slots.length + (displayLanguage === "zh" ? " 个槽位" : slots.length === 1 ? " slot" : " slots"))
+      );
+      const caret = document.createElement("span");
+      caret.className = "run-binding-toggle-caret";
+      caret.setAttribute("aria-hidden", "true");
+      toggle.append(caret);
+      const body = document.createElement("div");
+      body.id = bodyId;
+      body.className = "run-binding-body";
+      body.hidden = !expanded;
+      toggle.addEventListener("click", () => {
+        const open = toggle.getAttribute("aria-expanded") !== "true";
+        toggle.setAttribute("aria-expanded", String(open));
+        body.hidden = !open;
+        if (open) state.expandedRunBindings.add(run.id);
+        else state.expandedRunBindings.delete(run.id);
+      });
+      panel.append(toggle, body);
       const help = document.createElement("div");
       help.className = "muted";
       help.textContent = displayLanguage === "zh"
         ? "换绑只影响尚未创建的 Review；已创建 Review 的参与者保持不变。"
         : "Changes affect only Reviews that have not been created; existing Review participants stay frozen.";
-      panel.append(help);
+      body.append(help);
       const list = document.createElement("div");
       list.className = "run-binding-list";
       const bindingSnapshotSlots = new Map((run.bindingSnapshot?.slots || []).map(item => [item.key, item]));
@@ -3494,9 +3801,9 @@ export const browserHtml = String.raw`<!doctype html>
         row.append(actions);
         list.append(row);
       }
-      panel.append(list);
+      body.append(list);
       if (run.bindingChanges?.length) {
-        panel.append(blockTitle(displayLanguage === "zh" ? "换绑历史" : "Binding history"));
+        body.append(blockTitle(displayLanguage === "zh" ? "换绑历史" : "Binding history"));
         const history = document.createElement("ul");
         history.className = "run-binding-history";
         for (const change of [...run.bindingChanges].reverse()) {
@@ -3505,7 +3812,7 @@ export const browserHtml = String.raw`<!doctype html>
             + " · " + runBindingValueLabel(change.before, run) + " → " + runBindingValueLabel(change.after, run);
           history.append(item);
         }
-        panel.append(history);
+        body.append(history);
       }
       return panel;
     }
@@ -4147,6 +4454,13 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderSelected() {
       const review = selectedReview();
+      if (review && !Array.isArray(review.comments)) {
+        el.title.textContent = "Review";
+        el.subtitle.textContent = review.id;
+        el.detail.className = "empty";
+        el.detail.textContent = "Loading review...";
+        return;
+      }
       if (review && !review.snapshots?.some(snapshot => snapshot.kind === "memory")) {
         renderInvalidReview(review, "Memory review has no memory snapshot.");
         return;
@@ -4173,6 +4487,13 @@ export const browserHtml = String.raw`<!doctype html>
           el.detail.className = "empty";
           el.detail.textContent = "No memory entities found.";
         }
+        return;
+      }
+      if (!memory.entity && !memory.error) {
+        el.title.textContent = memorySummaryName(memory);
+        el.subtitle.textContent = memory.id;
+        el.detail.className = "empty";
+        el.detail.textContent = "Loading...";
         return;
       }
       if (memory.error) {
@@ -4567,7 +4888,7 @@ export const browserHtml = String.raw`<!doctype html>
         const kind = value.slice(0, separator);
         const name = value.slice(separator + 1);
         return state.memories.find(memory =>
-          memory.kind === kind && memory.entity?.names?.includes(name)
+          memory.kind === kind && memoryNames(memory).includes(name)
         ) || null;
       }
       return state.byName.get(value) || null;
@@ -4581,7 +4902,10 @@ export const browserHtml = String.raw`<!doctype html>
       state.viewMode = "memory";
       localStorage.setItem(viewModeKey, "memory");
       state.selectedId = target.id;
+      state.selectedReviewId = null;
+      if (state.reviewDrawerOpen) state.reviews = [];
       renderAll();
+      loadMemorySelection(target.id).then(renderAll).catch(renderFatalError);
     }
 
     function renderDefinitionItem(section) {
@@ -4719,17 +5043,12 @@ export const browserHtml = String.raw`<!doctype html>
       const link = document.createElement("a");
       link.className = "call-link";
       link.href = "#";
-      link.textContent = target ? primaryName(target.entity) : (name || "(missing target)");
+      link.textContent = target ? memoryNames(target)[0] : (name || "(missing target)");
       link.title = target ? "Open called memory" : "Called memory not found";
       link.addEventListener("click", (event) => {
         event.preventDefault();
         if (target) {
-          state.routeError = "";
-          state.routeLanding = "";
-          state.viewMode = "memory";
-          localStorage.setItem(viewModeKey, "memory");
-          state.selectedId = target.id;
-          renderAll();
+          openMemoryReference(target.id);
         }
       });
       const head = document.createElement("div");
@@ -4979,12 +5298,7 @@ export const browserHtml = String.raw`<!doctype html>
         event.stopPropagation();
         const target = state.byName.get(schemaName);
         if (target) {
-          state.routeError = "";
-          state.routeLanding = "";
-          state.viewMode = "memory";
-          localStorage.setItem(viewModeKey, "memory");
-          state.selectedId = target.id;
-          renderAll();
+          openMemoryReference(target.id);
         }
       });
       return link;
@@ -5449,6 +5763,17 @@ export const browserHtml = String.raw`<!doctype html>
       return Boolean(document.activeElement?.matches?.(".artifact-review-select"));
     }
 
+    function flushPendingTaskDetail() {
+      const id = state.taskDetailReloadPending;
+      if (!id || state.viewMode !== "task") return false;
+      state.taskDetailReloadPending = null;
+      state.taskPollingRenderPending = false;
+      loadRunDetail(id).then(() => {
+        if (state.selectedTaskId === id) renderAll();
+      }).catch(renderFatalError);
+      return true;
+    }
+
     function setAllSections(open) {
       for (const section of el.detail.querySelectorAll(".section")) section.classList.toggle("open", open);
     }
@@ -5470,6 +5795,7 @@ export const browserHtml = String.raw`<!doctype html>
       });
       if (!response.ok) throw new Error(await response.text());
       const review = (await response.json()).review;
+      state.reviewDetails.set(review.id, review);
       state.reviews.unshift(review);
       state.selectedReviewId = review.id;
       saveSelectedReview();
@@ -5549,7 +5875,8 @@ export const browserHtml = String.raw`<!doctype html>
       const response = await fetch("/api/reviews/" + encodeURIComponent(id), { method: "DELETE" });
       if (!response.ok) throw new Error(await response.text());
       state.reviewSnapshots.delete(id + ":memory");
-      await loadReviews();
+      state.reviewDetails.delete(id);
+      state.reviews = state.reviews.filter(item => item.id !== id);
       ensureSelectedReview();
       renderAll();
     }
@@ -5563,7 +5890,11 @@ export const browserHtml = String.raw`<!doctype html>
         state.selectedTaskId = null;
         saveSelectedTask();
       }
-      await loadRuns();
+      state.runDetails.delete(run.id);
+      state.runs = state.runs.filter(item => item.id !== run.id);
+      if (!state.selectedTaskId) state.selectedTaskId = state.runs[0]?.id || null;
+      saveSelectedTask();
+      if (state.selectedTaskId) await loadRunDetail(state.selectedTaskId);
       renderAll();
     }
 
@@ -5578,7 +5909,8 @@ export const browserHtml = String.raw`<!doctype html>
         state.selectedReviewId = null;
         saveSelectedReview();
       }
-      await loadReviews();
+      state.reviewDetails.delete(review.id);
+      state.reviews = state.reviews.filter(item => item.id !== review.id);
       renderAll();
     }
 
@@ -5978,14 +6310,26 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function patchReview(id, patch) {
+      const current = state.reviewDetails.get(id) || state.reviews.find(item => item.id === id);
       const response = await fetch("/api/reviews/" + encodeURIComponent(id), {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(patch)
+        body: JSON.stringify({ ...patch, expectedUpdatedAt: current?.updatedAt })
       });
-      if (!response.ok) throw new Error(await response.text());
-      await response.json();
-      await loadReviews();
+      if (!response.ok) {
+        const message = await response.text();
+        if (response.status === 409) {
+          await loadReviews({ loadDetail: false });
+          await loadReviewDetail(id);
+          renderAll();
+        }
+        throw new Error(message);
+      }
+      const review = (await response.json()).review;
+      state.reviewDetails.set(review.id, review);
+      const summary = state.reviews.find(item => item.id === review.id);
+      if (summary) Object.assign(summary, review, { commentCount: review.comments?.length || 0 });
+      else state.reviews.unshift({ ...review, commentCount: review.comments?.length || 0 });
       renderAll();
     }
 
@@ -7963,13 +8307,14 @@ export const browserHtml = String.raw`<!doctype html>
         meta.className = "meta";
         meta.style.margin = "0";
         meta.append(pill(review.status, false, statusPillClass(review.status)));
-        meta.append(pill(review.comments.length + " comments"));
+        meta.append(pill((review.commentCount ?? review.comments?.length ?? 0) + " comments"));
         button.append(title, meta);
-        button.addEventListener("click", () => {
+        button.addEventListener("click", async () => {
           state.routeError = "";
           state.routeLanding = "";
           state.selectedReviewId = state.selectedReviewId === review.id ? null : review.id;
           saveSelectedReview();
+          if (state.selectedReviewId) await loadReviewDetail(state.selectedReviewId);
           renderAll();
         });
         const del = document.createElement("button");
