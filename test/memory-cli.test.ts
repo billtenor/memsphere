@@ -108,7 +108,7 @@ test("memory change validate checks the effective Store without expanding a spar
     assert.match(textResult.stdout, new RegExp(`ChangeSet: ${changeId}`));
     assert.match(
       textResult.stdout,
-      new RegExp(`Preview: start memsphere View, then open /projects/project/memories\\?change=${changeId}`)
+      new RegExp(`Preview: start memsphere View, then open /projects/project/changes/${changeId}`)
     );
     assert.deepEqual(await readdir(candidateRoot), ["concepts"]);
 
@@ -138,7 +138,7 @@ test("memory edit uses the current Embedded worktree without a ChangeSet", async
     const created = await runCli(nested, ["memory", "edit", "concepts/new-memory"]);
     assert.equal(created.code, 0, created.stderr);
     assert.match(created.stdout, /Store: embedded/);
-    assert.match(created.stdout, /Next: memsphere validate/);
+    assert.match(created.stdout, /Next: memsphere memory change validate/);
     assert(!created.stdout.includes("ChangeSet:"));
     assert.match(await readFile(join(memoryRoot, "concepts", "new-memory.yaml"), "utf8"), /new-memory/);
 

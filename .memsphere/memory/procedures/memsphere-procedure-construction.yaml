@@ -93,12 +93,12 @@ flow:
       format: yaml
 
   - !action
-    action: Managed 与 Embedded Project 统一使用 memsphere memory change validate [change-id] 校验本轮修改并生成可供 View 展示的稀疏 checkpoint；修正可安全解决的问题并在 View 的 change 预览中确认，完成 Review 后由 Managed 使用 memsphere memory publish、Embedded 使用普通 Git commit 发布。
+    action: Managed 与 Embedded Project 统一使用 memsphere memory change validate [change-id] 校验本轮修改并更新可供 View Changes 页面展示的单一当前验证内容；修正可安全解决的问题并在稳定 ChangeSet 页面中确认，完成 Review 后由 Managed 使用 memsphere memory publish、Embedded 使用普通 Git commit 发布。
     actor: agent
     asserts:
       - 必须检查步骤输入与 Artifact 衔接、actor 归属、约束作用域、分支完整性、循环终止和最终交付物。
       - 必须删除重复、无执行价值或可由其他已读取 Memory 提供的内容。
-      - 未通过 change validate 时不得声称 Procedure 已完成；普通 memsphere validate 不代替 Embedded ChangeSet 捕获，也不得把稀疏 ChangeSet candidate 或 checkpoint 直接传给 memsphere validate --memory-root。
+      - 未通过 change validate 时不得声称 Procedure 已完成；普通 memsphere validate 不代替 Embedded ChangeSet 捕获，也不得把稀疏 ChangeSet candidate 或当前验证内容直接传给 memsphere validate --memory-root。
     artifact: !artifact
       name: 已验证的 Procedure Memory
       type: object

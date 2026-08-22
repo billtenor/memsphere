@@ -16,6 +16,9 @@ test("View page routes are explicit and never absorb API or unknown paths", () =
     "/memories/concepts/Memory",
     "/projects/alpha/memories",
     "/projects/alpha/memories/concepts/Memory",
+    "/projects/alpha/changes",
+    "/projects/alpha/changes/change-1",
+    "/projects/alpha/changes/change-1/reviews/review-1",
     "/tasks",
     "/tasks/run-1",
     "/tasks/run-1/artifact-reviews/review-1",
@@ -51,7 +54,8 @@ test("browser script includes URL parsing, canonical history, and popstate resto
 
 test("browser loads summaries by route and fetches details on demand", () => {
   assert.match(browserHtml, /new URLSearchParams\(\{ representation: "summary" \}\)/);
-  assert.match(browserHtml, /new URLSearchParams\(\{ representation: "summary", memory_id: subject\.id \}\)/);
+  assert.match(browserHtml, /query\.set\("memory_id", subject\.id\)/);
+  assert.match(browserHtml, /query\.set\("change_id", state\.selectedChangeId\)/);
   assert.match(browserHtml, /fetch\("\/api\/runs\?representation=summary"\)/);
   assert.match(browserHtml, /\/api\/memories\/" \+ encodeURIComponent\(summary\.kind\)/);
   assert.match(browserHtml, /\/api\/runs\/" \+ encodeURIComponent\(id\)/);
@@ -263,6 +267,21 @@ test("Artifact Review comment severity belongs to the card header", () => {
   assert.match(browserHtml, /header\.append\(pill\(artifactReviewSeverityLabel\(comment\.severity\)/);
   assert.match(browserHtml, /card\.append\(header, body\)/);
   assert.match(browserHtml, /\.artifact-review-comment-head \{ display: flex; justify-content: space-between;/);
+});
+
+test("Changes is a first-class route with immutable ChangeSet Review snapshots", () => {
+  assert.match(browserHtml, /id="changes-tab"/);
+  assert.match(browserHtml, /\/projects\/" \+ encodeRoutePart\(state\.currentProject\) \+ "\/changes"/);
+  assert.match(browserHtml, /\/api\/changes\/" \+ encodeURIComponent\(changeId\)/);
+  assert.match(browserHtml, /kind === "changeset"/);
+  assert.match(browserHtml, /\/snapshots"/);
+  assert.match(browserHtml, /Loading immutable Review snapshot/);
+  assert.match(browserHtml, /Historical Review snapshot/);
+  assert.match(browserHtml, /detail\.targetMemories/);
+  assert.match(browserHtml, /comment\.source === "changeset" \? "changes" : "memory"/);
+  assert.match(browserHtml, /review\.source !== "changeset" && !review\.comments\.length/);
+  assert.match(browserHtml, /change\.valid !== true/);
+  assert.match(browserHtml, /Fix the validation diagnostics and run memory change validate again/);
 });
 
 test("Artifact Review evidence is selected in the artifact pane", () => {
@@ -569,7 +588,7 @@ test("Artifact Review keeps local draft text across conflict recovery renders", 
 });
 
 test("initial loading validates the saved review only after its subject data is available", () => {
-  assert.match(browserHtml, /if \(targetMode === "memory"\) await loadMemories\(\);\s*else if \(targetMode === "task"\) await loadRuns\(\{ loadDetail: false \}\);\s*else await loadSettings\(\);[\s\S]*?ensureSelectedReview\(\);/);
+  assert.match(browserHtml, /if \(targetMode === "memory"\) await loadMemories\(\);\s*else if \(targetMode === "task"\) await loadRuns\(\{ loadDetail: false \}\);\s*else if \(targetMode === "changes"\) await loadChanges\(\);\s*else await loadSettings\(\);[\s\S]*?ensureSelectedReview\(\);/);
 });
 
 test("task polling does not replace active editors or open Artifact Review selectors", () => {

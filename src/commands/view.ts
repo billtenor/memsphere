@@ -47,7 +47,13 @@ import { authorizeArtifactOperation, controlPlaneConfigSchema, listPermissionDef
 import { listMemoryFiles, readMemoryFile, readMemoryFileSummary } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
-import { MemoryChangePreviewCache } from "../memory/changeset.js";
+import {
+  MemoryChangePreviewCache,
+  listMemoryChanges,
+  readMemoryChange,
+  withMemoryChangeReviewSnapshot,
+  type MemoryChangeSet
+} from "../memory/changeset.js";
 import { readBundledSystemMemories } from "../reserved/store.js";
 import {
   createReview,
@@ -55,11 +61,15 @@ import {
   listReviews,
   listReviewSummaries,
   readReviewSnapshot,
+  readReviewSnapshots,
   ReviewRevisionConflictError,
   reviewStatuses,
   updateReview,
   deleteReview,
+  withChangeSetReviewCreationLock,
   type ReviewComment,
+  type ReviewFile,
+  type ReviewSource,
   type ReviewStatus
 } from "../review/store.js";
 import {
@@ -557,6 +567,82 @@ async function handleRequest(
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/changes") {
+    if (!config.project?.name) {
+      sendJson(response, 200, { changes: [] });
+      return;
+    }
+    const [changes, reviews] = await Promise.all([
+      listMemoryChanges({ home: config.homeRoot, project: config.project.name }),
+      listReviews(reviewsRoot)
+    ]);
+    sendJson(response, 200, {
+      changes: changes.map((change) => memoryChangeSummary(change, reviews))
+    });
+    return;
+  }
+
+  const changeMatch = url.pathname.match(/^\/api\/changes\/([^/]+)$/);
+  if (request.method === "GET" && changeMatch) {
+    if (!config.project?.name) {
+      sendJson(response, 404, { error: "No Project is currently selected" });
+      return;
+    }
+    const changeId = decodeURIComponent(changeMatch[1]);
+    let change: MemoryChangeSet;
+    try {
+      change = await readMemoryChange({ home: config.homeRoot, project: config.project.name, changeId });
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        sendJson(response, 404, { code: "changeset_not_found", error: `ChangeSet not found: ${changeId}` });
+        return;
+      }
+      throw error;
+    }
+    const reviews = (await listReviews(reviewsRoot)).filter((review) => (
+      review.source === "changeset" && review.target?.id === change.id
+    ));
+    const source: MemoryPayload["source"] = {
+        mode: "changeset",
+        changeId: change.id,
+        storeType: change.store_type ?? "managed",
+        baseRevision: change.checkpoint?.base_revision,
+        updatedAt: change.updated_at,
+        valid: change.checkpoint?.valid,
+        issues: change.checkpoint?.issues
+    };
+    const payload = change.checkpoint
+      ? await viewCache.previews.use({
+        home: config.homeRoot,
+        project: config.project.name,
+        changeId,
+        use: ({ memoryRoot: previewRoot }) => loadMemoryPayloadFromRoot(config, viewCache, previewRoot, source)
+      })
+      : { memoryRoot: config.memoryRoot, actorNames: {}, memories: [], source };
+    const targetMemories = change.checkpoint
+      ? await withMemoryChangeReviewSnapshot({
+        home: config.homeRoot,
+        project: config.project.name,
+        changeId,
+        use: async ({ files }) => Promise.all(files.map(async (file) => ({
+          operation: file.operation,
+          memory: memoryPayloadFromSource(file.label, await readFile(file.path, "utf8"))
+        })))
+      })
+      : [];
+    sendJson(response, 200, {
+      change: memoryChangeSummary(change, reviews),
+      targets: change.targets,
+      targetMemories,
+      payload,
+      reviews: reviews.map((review) => ({
+        ...review,
+        stale: review.target?.digest !== change.checkpoint?.digest
+      }))
+    });
+    return;
+  }
+
   const memoryMatch = url.pathname.match(/^\/api\/memories\/([^/]+)\/([^/]+)$/);
   if (request.method === "GET" && memoryMatch) {
     const kind = decodeURIComponent(memoryMatch[1]) as MemoryKind;
@@ -585,6 +671,31 @@ async function handleRequest(
 
   if (request.method === "GET" && url.pathname === "/api/reviews") {
     if (url.searchParams.get("representation") === "summary") {
+      const changeId = url.searchParams.get("change_id")?.trim();
+      if (changeId) {
+        const reviews = (await listReviews(reviewsRoot)).filter((review) => (
+          review.source === "changeset" && review.target?.id === changeId
+        ));
+        let digest: string | undefined;
+        if (config.project?.name) {
+          try {
+            digest = (await readMemoryChange({
+              home: config.homeRoot,
+              project: config.project.name,
+              changeId
+            })).checkpoint?.digest;
+          } catch {
+            // Preserve Review history even if its ChangeSet is no longer available.
+          }
+        }
+        sendJson(response, 200, {
+          reviews: reviews.map((review) => ({
+            ...review,
+            stale: Boolean(digest && review.target?.digest !== digest)
+          }))
+        });
+        return;
+      }
       const reviews = await listReviewSummaries(reviewsRoot, {
         memoryId: url.searchParams.get("memory_id") ?? undefined,
         memoryPath: url.searchParams.get("memory_path") ?? undefined
@@ -838,6 +949,18 @@ async function handleRequest(
     return;
   }
 
+  const reviewSnapshotsMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)\/snapshots$/);
+  if (request.method === "GET" && reviewSnapshotsMatch) {
+    const id = decodeURIComponent(reviewSnapshotsMatch[1]);
+    const snapshots = await readReviewSnapshots(reviewsRoot, id, "changeset");
+    if (snapshots.length === 0) {
+      sendJson(response, 404, { error: "ChangeSet Review snapshots not found" });
+      return;
+    }
+    sendJson(response, 200, { memories: await Promise.all(snapshots.map(snapshotPayload)) });
+    return;
+  }
+
   const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)$/);
   if (request.method === "GET" && runMatch) {
     const runId = decodeURIComponent(runMatch[1]);
@@ -876,9 +999,85 @@ async function handleRequest(
   }
 
   if (request.method === "POST" && url.pathname === "/api/reviews") {
-    const body = await readJsonBody<{ title?: unknown; source?: unknown; memoryId?: unknown; memoryName?: unknown; memoryPath?: unknown }>(request);
+    const body = await readJsonBody<{ title?: unknown; source?: unknown; memoryId?: unknown; memoryName?: unknown; memoryPath?: unknown; changeId?: unknown }>(request);
     if (body.source === "task") {
       sendJson(response, 410, { error: "task reviews have been removed; configure Artifact Review on the Artifact instead" });
+      return;
+    }
+    if (body.source === "changeset") {
+      if (!config.project?.name || typeof body.changeId !== "string" || !body.changeId.trim()) {
+        sendJson(response, 400, { error: "Project and changeId are required" });
+        return;
+      }
+      const changeId = body.changeId.trim();
+      const review = await withChangeSetReviewCreationLock(reviewsRoot, changeId, async () => {
+        let current: MemoryChangeSet;
+        try {
+          current = await readMemoryChange({ home: config.homeRoot, project: config.project!.name, changeId });
+        } catch (error) {
+          if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+            sendJson(response, 404, { code: "changeset_not_found", error: `ChangeSet not found: ${changeId}` });
+            return undefined;
+          }
+          throw error;
+        }
+        if (!current.checkpoint || current.checkpoint.valid !== true) {
+          sendJson(response, 409, {
+            code: "changeset_validation_required",
+            error: current.checkpoint
+              ? "ChangeSet validation must pass before creating a Review; fix the diagnostics and run memory change validate again"
+              : "ChangeSet must be validated before creating a Review"
+          });
+          return undefined;
+        }
+        return withMemoryChangeReviewSnapshot({
+          home: config.homeRoot,
+          project: config.project!.name,
+          changeId,
+          use: async ({ change, files }) => {
+            if (change.checkpoint?.valid !== true) {
+              sendJson(response, 409, {
+                code: "changeset_validation_required",
+                error: "ChangeSet validation must pass before creating a Review; fix the diagnostics and run memory change validate again"
+              });
+              return undefined;
+            }
+            const existing = (await listReviews(reviewsRoot)).find((candidate) => (
+              candidate.source === "changeset"
+              && candidate.target?.id === changeId
+              && candidate.target?.digest === change.checkpoint!.digest
+            ));
+            if (existing) {
+              sendJson(response, 409, { error: `A current Review already exists: ${existing.id}` });
+              return undefined;
+            }
+            return createReview({
+              title: typeof body.title === "string" ? body.title : `ChangeSet Review · ${change.id}`,
+              source: "changeset",
+              target: {
+                source: "changeset",
+                id: change.id,
+                name: change.id,
+                project: config.project!.name,
+                digest: change.checkpoint.digest,
+                baseRevision: change.checkpoint.base_revision
+              },
+              changeManifest: {
+                targets: change.targets.map((target) => ({
+                  operation: target.operation,
+                  path: target.path,
+                  ...(target.destination_path ? { destinationPath: target.destination_path } : {})
+                }))
+              },
+              memoryRoot: config.memoryRoot,
+              reviewsRoot,
+              snapshotFiles: files.map((file) => ({ label: file.label, path: file.path, kind: "changeset" }))
+            });
+          }
+        });
+      });
+      if (!review) return;
+      sendJson(response, 201, { review });
       return;
     }
     const title = typeof body.title === "string" ? body.title : undefined;
@@ -1005,21 +1204,38 @@ async function readViewServiceConfig(): Promise<MemsphereConfig> {
   }
 }
 
-async function snapshotPayload(input: { snapshot: { label: string; path: string; kind: "memory" | "task"; createdAt: string }; content: string; snapshotRoot: string }): Promise<unknown> {
-  const entity = parseMemoryYaml(input.content);
-  const kind = memoryKindFromSnapshot(input.snapshot.label, entity);
-  const primaryName = entity && typeof entity === "object" && Array.isArray((entity as { names?: unknown }).names)
-    ? ((entity as { names: string[] }).names[0] ?? input.snapshot.label)
-    : input.snapshot.label;
+async function snapshotPayload(input: { snapshot: { label: string; path: string; kind: ReviewSource; createdAt: string }; content: string; snapshotRoot: string }): Promise<unknown> {
   return {
     snapshot: input.snapshot,
-    memory: {
-      id: `${kind}/${primaryName}`,
-      kind,
-      path: input.snapshot.label,
-      entity
-    }
+    memory: memoryPayloadFromSource(input.snapshot.label, input.content)
   };
+}
+
+function memoryPayloadFromSource(label: string, content: string): {
+  id: string;
+  kind: string;
+  path: string;
+  entity?: unknown;
+  error?: string;
+} {
+  try {
+    const entity = parseMemoryYaml(content);
+    const kind = memoryKindFromSnapshot(label, entity);
+    const primaryName = entity && typeof entity === "object" && Array.isArray((entity as { names?: unknown }).names)
+      ? ((entity as { names: string[] }).names[0] ?? label)
+      : label;
+    return { id: `${kind}/${primaryName}`, kind, path: label, entity };
+  } catch (error) {
+    const kind = memoryKindFromSnapshot(label, undefined);
+    const fileName = label.split(/[\\/]/).at(-1) ?? label;
+    const name = fileName.replace(/\.ya?ml$/i, "") || "invalid";
+    return {
+      id: `${kind}/${name}`,
+      kind,
+      path: label,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
 }
 
 function memoryKindFromSnapshot(label: string, entity: unknown): string {
@@ -1089,6 +1305,48 @@ async function loadMemoryPayload(config: MemsphereConfig, viewCache: ViewMemoryC
   return withMemoryPayloadRoot(config, viewCache, changeId, (memoryRoot, source) =>
     loadMemoryPayloadFromRoot(config, viewCache, memoryRoot, source)
   );
+}
+
+function memoryChangeSummary(change: MemoryChangeSet, reviews: ReviewFile[]): unknown {
+  const related = reviews.filter((review) => review.source === "changeset" && review.target?.id === change.id);
+  const current = related.find((review) => (
+    review.target?.digest === change.checkpoint?.digest && review.status === "done"
+  )) ?? related.find((review) => review.target?.digest === change.checkpoint?.digest);
+  const counts = { create: 0, update: 0, delete: 0, rename: 0 };
+  for (const target of change.targets) counts[target.operation] += 1;
+  let state: string = change.status;
+  if (change.status === "draft" && !change.checkpoint) state = "unvalidated";
+  else if (change.status === "draft" && change.checkpoint?.valid === false) state = "invalid";
+  else if (change.status === "draft" && current) {
+    if (current.status === "done") state = "approved";
+    else if (
+      current.status === "draft"
+      || (["submitted", "processing"].includes(current.status) && current.comments.length === 0)
+    ) state = "in_review";
+    else if (current.comments.length > 0) state = "changes_requested";
+    else state = "in_review";
+  } else if (change.status === "draft") state = "valid";
+  return {
+    id: change.id,
+    project: change.project,
+    storeType: change.store_type ?? "managed",
+    status: change.status,
+    state,
+    active: change.status === "draft",
+    baseRevision: change.base_revision,
+    createdAt: change.created_at,
+    updatedAt: change.updated_at,
+    publishedRevision: change.published_revision,
+    digest: change.checkpoint?.digest,
+    validatedAt: change.checkpoint?.created_at,
+    valid: change.checkpoint?.valid,
+    issues: change.checkpoint?.issues ?? [],
+    counts,
+    targetCount: change.targets.length,
+    reviewCount: related.length,
+    currentReviewId: current?.id,
+    staleReviewCount: related.filter((review) => review.target?.digest !== change.checkpoint?.digest).length
+  };
 }
 
 async function withMemoryPayloadRoot<T>(
@@ -2018,7 +2276,7 @@ function normalizeReviewComments(value: unknown): ReviewComment[] {
     const memoryName = typeof record.memoryName === "string" ? record.memoryName : "";
     const kind = typeof record.kind === "string" ? record.kind : "";
     const createdAt = typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString();
-    const source = record.source === "task" ? "task" : record.source === "memory" ? "memory" : undefined;
+    const source = record.source === "task" ? "task" : record.source === "memory" ? "memory" : record.source === "changeset" ? "changeset" : undefined;
 
     if (!body) {
       throw new Error(`comments[${index}].body is required`);
@@ -2072,6 +2330,9 @@ export function isViewPagePath(pathname: string): boolean {
   if (/^\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
   if (/^\/projects\/[^/]+\/memories$/.test(pathname)) return true;
   if (/^\/projects\/[^/]+\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
+  if (/^\/projects\/[^/]+\/changes$/.test(pathname)) return true;
+  if (/^\/projects\/[^/]+\/changes\/[^/]+$/.test(pathname)) return true;
+  if (/^\/projects\/[^/]+\/changes\/[^/]+\/reviews\/[^/]+$/.test(pathname)) return true;
   if (/^\/tasks\/[^/]+$/.test(pathname)) return true;
   if (/^\/tasks\/[^/]+\/artifact-reviews\/[^/]+$/.test(pathname)) return true;
   if (/^\/settings\/[^/]+$/.test(pathname)) return true;
