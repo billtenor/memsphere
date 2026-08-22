@@ -247,7 +247,7 @@ export async function withMemoryChangeReviewSnapshot<T>(input: {
   });
 }
 
-async function withMemoryChangeCheckpointLock<T>(
+export async function withMemoryChangeCheckpointLock<T>(
   input: { home?: string; project: string },
   action: () => Promise<T>
 ): Promise<T> {

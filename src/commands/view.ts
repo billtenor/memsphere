@@ -51,6 +51,7 @@ import {
   MemoryChangePreviewCache,
   listMemoryChanges,
   readMemoryChange,
+  withMemoryChangeCheckpointLock,
   withMemoryChangeReviewSnapshot,
   type MemoryChangeSet
 } from "../memory/changeset.js";
@@ -1105,17 +1106,20 @@ async function handleRequest(
   }
 
   if (request.method === "PATCH" && reviewMatch) {
+    const reviewId = decodeURIComponent(reviewMatch[1]);
     const body = await readJsonBody<{ title?: unknown; status?: unknown; comments?: unknown; expectedUpdatedAt?: unknown }>(request);
     const status = normalizeReviewStatus(body.status);
     const comments = body.comments === undefined ? undefined : normalizeReviewComments(body.comments);
-    let review;
+    let mutation;
     try {
-      review = await updateReview(reviewsRoot, decodeURIComponent(reviewMatch[1]), {
-        title: typeof body.title === "string" ? body.title : undefined,
-        status,
-        comments,
-        expectedUpdatedAt: typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : undefined
-      });
+      mutation = await withCurrentReviewMutation({ config, reviewsRoot, reviewId }, () => (
+        updateReview(reviewsRoot, reviewId, {
+          title: typeof body.title === "string" ? body.title : undefined,
+          status,
+          comments,
+          expectedUpdatedAt: typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : undefined
+        })
+      ));
     } catch (error) {
       if (error instanceof ReviewRevisionConflictError) {
         sendJson(response, 409, {
@@ -1128,21 +1132,46 @@ async function handleRequest(
       }
       throw error;
     }
-    if (!review) {
+    if (mutation.kind === "missing") {
       sendJson(response, 404, { error: "review not found" });
       return;
     }
-    sendJson(response, 200, { review });
+    if (mutation.kind === "stale") {
+      sendJson(response, 409, {
+        code: "changeset_review_stale",
+        error: "Historical ChangeSet Review snapshots and comments are read-only"
+      });
+      return;
+    }
+    if (!mutation.value) {
+      sendJson(response, 404, { error: "review not found" });
+      return;
+    }
+    sendJson(response, 200, { review: mutation.value });
     return;
   }
 
   if (request.method === "DELETE" && reviewMatch) {
-    const deleted = await deleteReview(reviewsRoot, decodeURIComponent(reviewMatch[1]));
-    if (!deleted) {
+    const reviewId = decodeURIComponent(reviewMatch[1]);
+    const mutation = await withCurrentReviewMutation({ config, reviewsRoot, reviewId }, () => (
+      deleteReview(reviewsRoot, reviewId)
+    ));
+    if (mutation.kind === "missing") {
       sendJson(response, 404, { error: "review not found" });
       return;
     }
-    sendJson(response, 200, { deleted: true });
+    if (mutation.kind === "stale") {
+      sendJson(response, 409, {
+        code: "changeset_review_stale",
+        error: "Historical ChangeSet Review snapshots and comments are read-only"
+      });
+      return;
+    }
+    if (!mutation.value) {
+      sendJson(response, 404, { error: "review not found" });
+      return;
+    }
+    sendJson(response, 200, { deleted: mutation.value });
     return;
   }
 
@@ -1307,6 +1336,47 @@ async function loadMemoryPayload(config: MemsphereConfig, viewCache: ViewMemoryC
   return withMemoryPayloadRoot(config, viewCache, changeId, (memoryRoot, source) =>
     loadMemoryPayloadFromRoot(config, viewCache, memoryRoot, source)
   );
+}
+
+type CurrentReviewMutationResult<T> =
+  | { kind: "ok"; value: T }
+  | { kind: "missing" }
+  | { kind: "stale" };
+
+async function withCurrentReviewMutation<T>(
+  input: { config: MemsphereConfig; reviewsRoot: string; reviewId: string },
+  action: () => Promise<T>
+): Promise<CurrentReviewMutationResult<T>> {
+  const initial = await getReview(input.reviewsRoot, input.reviewId);
+  if (!initial) return { kind: "missing" };
+  if (initial.source !== "changeset") return { kind: "ok", value: await action() };
+
+  const project = input.config.project?.name;
+  if (!project || !initial.target?.id) return { kind: "stale" };
+  return withMemoryChangeCheckpointLock({ home: input.config.homeRoot, project }, async () => {
+    const review = await getReview(input.reviewsRoot, input.reviewId);
+    if (!review) return { kind: "missing" };
+    if (review.source !== "changeset") return { kind: "ok", value: await action() };
+    if (!review.target?.id) return { kind: "stale" };
+
+    let change: MemoryChangeSet;
+    try {
+      change = await readMemoryChange({
+        home: input.config.homeRoot,
+        project,
+        changeId: review.target.id
+      });
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        return { kind: "stale" };
+      }
+      throw error;
+    }
+    if (!change.checkpoint?.digest || review.target.digest !== change.checkpoint.digest) {
+      return { kind: "stale" };
+    }
+    return { kind: "ok", value: await action() };
+  });
 }
 
 function memoryChangeSummary(change: MemoryChangeSet, reviews: ReviewFile[]): unknown {

@@ -346,6 +346,47 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       );
       const newer = await validateMemoryChange();
       assert.notEqual(newer.checkpointDigest, expanded.checkpointDigest);
+
+      const stalePatch = await fetch(`${expandedOrigin}/api/reviews/${encodeURIComponent(review.id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "must not change",
+          status: "done",
+          comments: [{
+            id: "comment-on-stale-snapshot",
+            source: "changeset",
+            memoryId: "concepts/shared",
+            memoryName: "shared",
+            kind: "concepts",
+            body: "This mutation must be rejected.",
+            createdAt: new Date().toISOString()
+          }]
+        })
+      });
+      assert.equal(stalePatch.status, 409);
+      assert.equal(
+        (await stalePatch.json() as { code: string }).code,
+        "changeset_review_stale"
+      );
+      const staleDelete = await fetch(`${expandedOrigin}/api/reviews/${encodeURIComponent(review.id)}`, {
+        method: "DELETE"
+      });
+      assert.equal(staleDelete.status, 409);
+      assert.equal(
+        (await staleDelete.json() as { code: string }).code,
+        "changeset_review_stale"
+      );
+      const unchangedStaleResponse = await fetch(
+        `${expandedOrigin}/api/reviews/${encodeURIComponent(review.id)}`
+      );
+      const unchangedStale = (await unchangedStaleResponse.json() as {
+        review: { title: string; status: string; comments: unknown[] };
+      }).review;
+      assert.equal(unchangedStale.title, `ChangeSet Review · ${first.changeId}`);
+      assert.equal(unchangedStale.status, "submitted");
+      assert.deepEqual(unchangedStale.comments, []);
+
       const creationBrowser = await chromium.launch({ headless: true });
       try {
         const page = await creationBrowser.newPage({ viewport: { width: 1366, height: 900 } });
