@@ -8,15 +8,18 @@ defines:
   - 从已完成任务、Run、产物、仓库证据或已经理清的执行思路中，提取可复用、可执行且可验证的 Procedure Memory。
   - 适用于新建 Procedure 或根据可靠实践更新已有 Procedure，不负责执行被提取的流程。
   - 只保留会改变执行、判断或验收结果的内容，不把对话记录、临时尝试和通用常识照搬进 Memory。
+  - 同一交付意图下围绕目标 Procedure 产生的相关 Memory 修改，可以在一个 Run 中复用同一 ChangeSet 多轮完成，直到 human 接受整个 ChangeSet 候选。
 asserts:
   - 提取前必须使用 memsphere memory list 和 memory read 查找并应用当前工程中的 Memory 撰写、Procedure 编写和 YAML 语法规则；未找到时遵循本流程约束。
-  - 只能把 human 输入、实际执行证据或可验证来源支持的内容写入 Procedure；尚未执行的思路不得描述为已验证经验。
+  - 只能把 human 输入、实际执行证据或可验证来源支持的内容写入当前 ChangeSet；尚未执行的思路不得描述为已验证经验。
   - 必须提取可复用的任务逻辑，不得记录仅适用于本次任务的路径、值、偶发重试或无关工具调用。
-  - 只创建或更新目标 Procedure 文件，不得修改其他 Memory 或无关工作区内容。
+  - 只能创建、更新或删除当前交付意图所需的 Memory；除主要目标 Procedure 外，允许在同一 ChangeSet 中修改为保持定义、规则、结构或流程一致性所必需的相关 Memory，不得夹带无关 Memory 或工作区改动。
+  - 一个 Run 必须持续复用同一个 ChangeSet，并处理同一交付意图下的全部相关增量修改；只有转入无关任务、改变主要交付目标或 human 明确要求独立交付时，才启动新的 Run 和 ChangeSet。
 goals:
   - 明确 Procedure 的触发场景、边界、目标和最终交付物。
   - 将可靠经验压缩为最小且完整的执行流程。
   - 生成并验证可被 memsphere Run 执行的 Procedure YAML。
+  - 在同一个 Run 中完成 human 要求的多轮相关修改，并只发布最终接受的完整 ChangeSet。
 flow:
   - !action
     action: 提供需要提取的任务、已完成实践或执行思路，并按需指定目标 Procedure。
@@ -25,92 +28,131 @@ flow:
       name: Procedure 提取请求
       format: markdown
 
-  - !action
-    action: 收集当前对话、Run、Artifact、代码、文档和现有 Memory 中与目标任务直接相关的证据，确定提取来源、适用边界和目标 Procedure。
-    actor: agent
-    asserts:
-      - 更新已有 Procedure 时必须完整读取原文件，并保留仍然有效的行为和约束。
-      - 实际执行结果用于确定已验证步骤和约束；human 明确确认的规则按强制程度写入 asserts 或 suggests；仅完成推演的判断不得表述为已经实践验证，关键不确定性必须进入补充循环。
-    suggests:
-      - 尽量复用当前上下文中的已有信息，避免要求 human 重复描述。
-    artifact: !artifact
-      name: Procedure 提取依据
-      format: markdown
-
   - !while
     condition: !action
-      action: 判断是否仍缺少会影响流程触发、最终产物、关键分支、human 决策或循环终止的必要信息。
+      action: 判断当前 ChangeSet 是否仍有待处理的创建、修改或删除要求。
       actor: agent
+      asserts:
+        - 初始 Procedure 提取请求尚未处理时必须返回 true；后续必须结合上一轮 Memory ChangeSet 候选验收意见判断。
+        - 只有 human 已明确接受最新候选，且没有尚未处理的增量要求时才能返回 false。
       artifact: !artifact
-        name: 是否缺少关键流程信息
+        name: 是否继续修改 Memory ChangeSet
         type: boolean
     do:
       - !action
-        action: 补充当前证据无法判断且会影响流程触发、最终产物、关键分支、human 决策或循环终止的信息。
-        actor: human
+        action: 收集本轮修改要求及相关证据，确定提取来源、适用边界、主要目标 Procedure 和当前 ChangeSet 的完整 Memory 范围。
+        actor: agent
+        asserts:
+          - 首轮必须使用 Procedure 提取请求；后续轮次必须同时使用上一轮 Memory ChangeSet 候选验收意见中的增量要求，并保留仍然有效的既有依据。
+          - 必须识别本轮 ChangeSet 涉及的全部 Memory，并记录每项修改与主要目标 Procedure 或同一交付意图的直接关系；新增无直接关系的目标时必须转入新的 Run 和 ChangeSet。
+          - 更新或删除已有 Memory 时必须完整读取原文件及其适用的 Concept、Schema 和规则；更新主要目标 Procedure 时必须保留仍然有效的行为和约束，删除 Memory 时必须检查并处理逻辑引用、System/Reserved 安装来源和同步副本。
+          - 实际执行结果用于确定已验证步骤和约束；human 明确确认的规则按强制程度写入 asserts 或 suggests；仅完成推演的判断不得表述为已经实践验证，关键不确定性必须进入补充循环。
+        suggests:
+          - 尽量复用当前 Run 已收集的依据，避免要求 human 重复描述或重复读取没有变化的证据。
         artifact: !artifact
-          name: Procedure 提取补充信息
+          name: 本轮 Memory ChangeSet 提取依据
+          format: markdown
+
+      - !while
+        condition: !action
+          action: 判断本轮是否仍缺少会影响流程触发、最终产物、关键分支、human 决策或循环终止的必要信息。
+          actor: agent
+          artifact: !artifact
+            name: 本轮是否缺少关键流程信息
+            type: boolean
+        do:
+          - !action
+            action: 补充当前证据无法判断且会影响流程触发、最终产物、关键分支、human 决策或循环终止的信息。
+            actor: human
+            artifact: !artifact
+              name: 本轮 Procedure 提取补充信息
+              format: markdown
+
+      - !action
+        action: 根据本轮提取依据和补充信息更新主要目标 Procedure，以及当前 ChangeSet 中全部相关 Memory 的完整候选。
+        actor: agent
+        asserts:
+          - 顶层 names[0] 必须是准确且稳定的小写 ASCII kebab-case canonical name；alias、defines 和 goals 必须准确表达自然语言名称、用途、适用边界和预期结果。
+          - 必须区分强制规范和可选建议；持续约束写入 Procedure asserts，局部约束写入 Action asserts，可选做法写入 suggests。
+          - flow 只保留完成任务所必需的步骤；不得为展示思考过程而拆分中间 Action。
+          - 每个 Action 必须职责单一、actor 准确并产出后续步骤或 human 实际需要的 Artifact。
+          - 每个 Action 的 action 只描述当前步骤的核心任务并保持简洁；执行范围、强制条件和验收要求写入同级 asserts，可选做法写入 suggests，不得把要求堆叠在步骤描述中。
+          - 只有真正改变控制流的判断和重复执行才使用 !if、!while；condition 必须产出 boolean，循环必须具有可判断的终止条件。
+          - 只有可复用且已存在的独立 Procedure 才使用 !call。
+          - 强制使用的命令或工具必须写入 action 或 asserts，可选做法写入 suggests。
+          - 相关 Memory 必须分别遵循其类型对应的 Concept、Schema 和 YAML 规则；不得用 Procedure 编写规则替代其他 Memory 类型的契约。
+          - "只有循环外最终发布的 Memory ChangeSet 和面向 human 的处理摘要可以标记 final: true。"
+        suggests:
+          - 避免按单次执行时间线照抄对话、工具调用、探索过程和偶发重试，应提取稳定且可复用的任务逻辑。
+          - 避免把同一 actor 可以连续完成且没有新输入或独立交付价值的工作拆成多个 Action。
+          - 避免用 !if 判断后再用 !while 重复判断同一条件；需要反复处理时直接使用 !while。
+          - Artifact 需要根据评审意见反复修改时，优先声明 artifact.review，由 Artifact Review 管理意见、决策和修订轮次；human 新增修改要求才进入下一次外层循环。
+          - 避免为了满足语法而创建后续步骤和 human 都不会使用的确认结果、候选清单或检查 Artifact。
+          - 避免要求 human 重复已有信息，或确认 agent 能依据证据自行判断的事项。
+          - 避免把局部约束提升为 Procedure asserts，或把可选做法写成强制要求。
+          - 避免穷举低概率例外；分支只保留常见情况或会改变任务结果的关键情况。
+          - 避免在校验和必要复核完成前把草稿或中间产物标记为 final。
+        artifact: !artifact
+          name: 本轮 Memory ChangeSet 草稿
+          type: object
+          format: yaml
+
+      - !action
+        action: 使用 memsphere memory edit 定位并建立或更新当前 ChangeSet 中全部 Memory 的 Working Change。
+        actor: agent
+        asserts:
+          - Managed Project 首个目标使用 memsphere memory edit 创建 ChangeSet，新增目标使用 --change 追加到既有 ChangeSet，并写入各自的 Workspace 候选路径；不得直接修改正式 Memory 工作树。
+          - Embedded Project 必须分别使用 memsphere memory edit 获取每个目标在当前 Git worktree 中的 Edit Path，不得根据主工作树规范路径自行推断；删除前也必须先定位现有目标，最终通过正常 Git 提交合入，不使用 ChangeSet publish。
+          - 后续轮次必须复用首轮保存的 change id 和各目标 Edit Path；Embedded Project 通过同一个 memory change validate [change-id] 重新捕获当前 worktree 中属于该交付意图的完整 Memory 变更，不得为相关增量创建新的 ChangeSet。
+          - 新建时使用唯一且可识别的 YAML 文件名；更新时保留同一目标路径；删除时不得遗留悬空引用、System/Reserved manifest 条目或应同步的副本。
+        artifact: !artifact
+          name: 本轮 Memory ChangeSet Working Change
+          type: object
+          format: yaml
+
+      - !action
+        action: 校验并评审本轮 Memory ChangeSet 候选。
+        actor: agent
+        asserts:
+          - Managed 与 Embedded Project 必须使用 memsphere memory change validate [change-id] 复用同一 ChangeSet，校验本轮修改并更新可供 View Changes 页面展示的单一当前验证内容。
+          - 必须检查 ChangeSet 的完整 target 清单及每项修改与交付意图的关系；对 Procedure 检查步骤输入与 Artifact 衔接、actor 归属、约束作用域、分支完整性、循环终止和最终交付物，对其他 Memory 检查其类型契约、引用完整性和 System/Reserved 同步要求。
+          - 必须删除重复、无执行价值或可由其他已读取 Memory 提供的内容；删除或重命名 Memory 时必须确认不存在未处理的逻辑引用、manifest 条目或同步副本。
+          - 未通过 change validate 时不得提交评审或声称本轮完成；普通 memsphere validate 不代替 Embedded ChangeSet 捕获，也不得把稀疏 ChangeSet candidate 或当前验证内容直接传给 memsphere validate --memory-root。
+          - Reviewer 或 Runner 对当前候选要求修改时，必须使用当前 Artifact Review 的 revision round 修订并重报，不得因此创建新 Run 或进入下一次外层循环。
+        artifact: !artifact
+          name: 本轮已验证的 Memory ChangeSet
+          type: object
+          format: yaml
+          review:
+            - 流程设计者
+
+      - !action
+        action: 验收当前 Memory ChangeSet 候选，并决定接受或继续修改。
+        actor: human
+        asserts:
+          - 必须明确选择接受当前候选或继续修改；继续修改时必须提供下一轮增量要求。
+          - 只有当前 ChangeSet 预览、校验结果和评审结论均可接受时才能选择接受。
+        artifact: !artifact
+          name: Memory ChangeSet 候选验收意见
           format: markdown
 
   - !action
-    action: 根据提取依据和补充信息提取可复用流程，并生成完整 !procedure YAML 草稿。
+    action: 发布 human 已接受的最终 Memory ChangeSet。
     actor: agent
     asserts:
-      - 顶层 names[0] 必须是准确且稳定的小写 ASCII kebab-case canonical name；alias、defines 和 goals 必须准确表达自然语言名称、用途、适用边界和预期结果。
-      - 必须区分强制规范和可选建议；持续约束写入 Procedure asserts，局部约束写入 Action asserts，可选做法写入 suggests。
-      - flow 只保留完成任务所必需的步骤；不得为展示思考过程而拆分中间 Action。
-      - 每个 Action 必须职责单一、actor 准确并产出后续步骤或 human 实际需要的 Artifact。
-      - 每个 Action 的 action 只描述当前步骤的核心任务并保持简洁；执行范围、强制条件和验收要求写入同级 asserts，可选做法写入 suggests，不得把要求堆叠在步骤描述中。
-      - 只有真正改变控制流的判断和重复执行才使用 !if、!while；condition 必须产出 boolean，循环必须具有可判断的终止条件。
-      - 只有可复用且已存在的独立 Procedure 才使用 !call。
-      - 强制使用的命令或工具必须写入 action 或 asserts，可选做法写入 suggests。
-      - "只有最终交付物和面向 human 的处理摘要可以标记 final: true。"
-    suggests:
-      - 避免按单次执行时间线照抄对话、工具调用、探索过程和偶发重试，应提取稳定且可复用的任务逻辑。
-      - 避免把同一 actor 可以连续完成且没有新输入或独立交付价值的工作拆成多个 Action。
-      - 避免用 !if 判断后再用 !while 重复判断同一条件；需要反复处理时直接使用 !while。
-      - Artifact 需要根据评审意见反复修改时，优先声明 artifact.review，由 Artifact Review 管理意见、决策和修订轮次；重复执行本身具有流程语义时仍可使用 !while。
-      - 避免为了满足语法而创建后续步骤和 human 都不会使用的确认结果、候选清单或检查 Artifact。
-      - 避免要求 human 重复已有信息，或确认 agent 能依据证据自行判断的事项。
-      - 避免把局部约束提升为 Procedure asserts，或把可选做法写成强制要求。
-      - 避免穷举低概率例外；分支只保留常见情况或会改变任务结果的关键情况。
-      - 避免在校验和必要复核完成前把草稿或中间产物标记为 final。
+      - 必须发布外层循环最后一次通过校验、评审并被 human 接受的同一 ChangeSet；验收后不得夹带新的 Memory 改动。
+      - Managed Project 使用 memsphere memory publish 发布；Embedded Project 使用普通 Git commit 发布，且不得制造空 commit 或自动 push。
+      - 整个 Run 只能执行一次最终 publish 或 commit；发布前必须满足当前工程的适用测试和交付规则。
     artifact: !artifact
-      name: Procedure Memory 草稿
+      name: 已发布的 Memory ChangeSet
       type: object
       format: yaml
-
-  - !action
-    action: 使用 memsphere memory edit 定位目标 Procedure；Managed Project 创建或追加 ChangeSet 并写入 CLI 返回的 Workspace 候选路径，Embedded Project 则写入 CLI 返回的当前 Git worktree Memory 路径。
-    actor: agent
-    asserts:
-      - Managed Project 不得直接修改正式 Memory 工作树；必须保留 CLI 返回的 change id。
-      - Embedded Project 必须使用 CLI 返回的 Edit Path，不得根据主工作树规范路径自行推断编辑位置；修改通过正常 Git 提交合入，不使用 ChangeSet publish。
-      - 新建时使用唯一且可识别的 YAML 文件名；更新时修改 ChangeSet 中复制出的候选文件。
-    artifact: !artifact
-      name: 初版 Procedure Memory
-      type: object
-      format: yaml
-
-  - !action
-    action: Managed 与 Embedded Project 统一使用 memsphere memory change validate [change-id] 校验本轮修改并更新可供 View Changes 页面展示的单一当前验证内容；修正可安全解决的问题并在稳定 ChangeSet 页面中确认，完成 Review 后由 Managed 使用 memsphere memory publish、Embedded 使用普通 Git commit 发布。
-    actor: agent
-    asserts:
-      - 必须检查步骤输入与 Artifact 衔接、actor 归属、约束作用域、分支完整性、循环终止和最终交付物。
-      - 必须删除重复、无执行价值或可由其他已读取 Memory 提供的内容。
-      - 未通过 change validate 时不得声称 Procedure 已完成；普通 memsphere validate 不代替 Embedded ChangeSet 捕获，也不得把稀疏 ChangeSet candidate 或当前验证内容直接传给 memsphere validate --memory-root。
-    artifact: !artifact
-      name: 已验证的 Procedure Memory
-      type: object
-      format: yaml
-      review:
-        - 流程设计者
       final: true
 
   - !action
-    action: 向 human 简要说明 Procedure 的文件路径、提取依据、关键边界和校验结果。
+    action: 向 human 简要说明 ChangeSet 的主要目标 Procedure、全部 Memory 路径、提取依据、多轮修改记录、关键边界和校验结果。
     actor: agent
     artifact: !artifact
-      name: Procedure 提取结果
+      name: Memory ChangeSet 提取结果
       format: markdown
       final: true
