@@ -92,32 +92,34 @@ flow:
           format: markdown
 
       - !action
-        action: 将 master 合入目标分支并解决冲突。
-        actor: agent
-        asserts:
-          - 必须确认当前位于目标分支并获取最新 master；不得把目标分支反向合入 master。
-          - 必须保留本轮已接受评审问题产生的修复，完成 master 合入并逐项解决全部冲突；不得通过丢弃一方改动或覆盖他人提交规避冲突。
-          - 冲突解决后必须重新检查相对基线的完整变更，并运行受合入或冲突解决影响的测试与检查；验证失败时不得进入 commit 步骤。
-        artifact: !artifact
-          name: Master 合入与冲突解决记录
-          format: markdown
-
-      - !action
         action: 提交本轮修复的 Git commit。
         actor: agent
         asserts:
-          - 只允许提交本轮已接受评审问题产生的修复，以及合入 master 和解决冲突所需的实际改动；不得暂存或提交其他工作区内容。
-          - 存在实际改动时，必须在 master 合入、冲突解决和适用验证均达到可提交条件后创建 commit 并记录 commit SHA；没有实际改动时必须记录未创建 commit，不得制造空 commit。
+          - 只允许提交本轮已接受评审问题产生的修复；不得暂存或提交其他工作区内容，也不得把尚未执行的 master 合入混入该 commit。
+          - 存在实际改动时，必须在本轮修复及适用验证达到可提交条件后创建 commit 并记录 commit SHA；没有实际改动时必须记录未创建 commit，不得制造空 commit。
+          - 必须在合入 master 前完成本轮修复 commit，并确认不存在尚未提交的本轮修复；无法建立可安全合入的工作区状态时不得继续。
           - 不得自动 push，除非 human 在请求中明确授权。
         artifact: !artifact
           name: 分支修复 Commit 结果
           format: markdown
 
       - !action
+        action: 将 master 合入目标分支并解决冲突。
+        actor: agent
+        asserts:
+          - 必须确认当前位于目标分支、本轮修复已提交且工作区可安全合入，并获取最新 master；不得把目标分支反向合入 master。
+          - 必须保留本轮已接受评审问题产生的修复，完成 master 合入并逐项解决全部冲突；不得通过丢弃一方改动或覆盖他人提交规避冲突。
+          - 合入或冲突解决后必须重新检查相对基线的完整变更，并运行受合入影响的测试与检查；验证失败时不得声称本轮完成。
+          - 必须完成合入所需的 merge commit 并记录 SHA；目标分支已经包含最新 master 时必须记录未创建 merge commit，不得制造空 commit。
+        artifact: !artifact
+          name: Master 合入与冲突解决记录
+          format: markdown
+
+      - !action
         action: 记录本轮评审与修复结果。
         actor: agent
         asserts:
-          - 必须以文字记录目标 HEAD SHA、评审覆盖、全部意见及处置、代码改动、验证结果、Master 合入与冲突解决记录、分支修复 Commit 结果、未解决问题和残余风险，作为下一轮避免遗漏和重复处理的基线。
+          - 必须以文字记录目标 HEAD SHA、评审覆盖、全部意见及处置、代码改动、验证结果、分支修复 Commit 结果、Master 合入与冲突解决记录、未解决问题和残余风险，作为下一轮避免遗漏和重复处理的基线。
           - 不得用 GitHub comment、review 或 thread 链接代替本地产物中的完整文字说明。
         artifact: !artifact
           name: 分支评审与修复轮次记录
