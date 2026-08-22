@@ -1010,6 +1010,8 @@ async function handleRequest(
         return;
       }
       const changeId = body.changeId.trim();
+      // Fixed lock order: Review creation lock, then the ChangeSet checkpoint lock
+      // acquired by withMemoryChangeReviewSnapshot. No mutation path acquires them in reverse.
       const review = await withChangeSetReviewCreationLock(reviewsRoot, changeId, async () => {
         let current: MemoryChangeSet;
         try {

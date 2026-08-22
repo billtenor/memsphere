@@ -10,7 +10,12 @@ import { createViewServer } from "../src/commands/view.js";
 import { runGit } from "../src/git.js";
 import { validateCommand } from "../src/commands/validate.js";
 import { readViewConfig } from "../src/config.js";
-import { MemoryChangePreviewCache, validateMemoryChange, withMemoryChangePreview } from "../src/memory/changeset.js";
+import {
+  MemoryChangePreviewCache,
+  validateMemoryChange,
+  withMemoryChangePreview,
+  withMemoryChangeReviewSnapshot
+} from "../src/memory/changeset.js";
 import { readProjectRegistry } from "../src/project/registry.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 
@@ -215,6 +220,30 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     };
     assert.deepEqual(new Set(expandedChange.targets.map((target) => target.operation)), new Set(["create", "delete", "rename", "update"]));
     assert.deepEqual(await readdir(join(project.root, "changes", first.changeId, "checkpoints")), [expanded.checkpointDigest]);
+
+    let releaseSnapshot!: () => void;
+    let snapshotEntered!: () => void;
+    const snapshotGate = new Promise<void>((resolve) => { releaseSnapshot = resolve; });
+    const snapshotStarted = new Promise<void>((resolve) => { snapshotEntered = resolve; });
+    const heldSnapshot = withMemoryChangeReviewSnapshot({
+      project: "embedded",
+      changeId: first.changeId,
+      use: async () => {
+        snapshotEntered();
+        await snapshotGate;
+      }
+    });
+    await snapshotStarted;
+    let validationSettled = false;
+    const concurrentValidation = validateMemoryChange().then((result) => {
+      validationSettled = true;
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(validationSettled, false, "validation must wait until Review snapshot creation releases the checkpoint lock");
+    releaseSnapshot();
+    await heldSnapshot;
+    assert.equal((await concurrentValidation).checkpointDigest, expanded.checkpointDigest);
 
     let expandedReviewId = "";
     const expandedView = createViewServer(await readViewConfig());
@@ -477,6 +506,23 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       status: string;
     };
     assert.equal(completed.status, "completed");
+
+    const completedView = createViewServer(await readViewConfig());
+    await new Promise<void>((resolve, reject) => {
+      completedView.once("error", reject);
+      completedView.listen(0, "127.0.0.1", resolve);
+    });
+    const completedOrigin = `http://127.0.0.1:${(completedView.address() as AddressInfo).port}`;
+    const completedBrowser = await chromium.launch({ headless: true });
+    try {
+      const page = await completedBrowser.newPage();
+      await page.goto(`${completedOrigin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
+      await page.getByText("Completed ChangeSet", { exact: true }).waitFor();
+      assert.equal(await page.getByText("Draft ChangeSet", { exact: true }).count(), 0);
+    } finally {
+      await completedBrowser.close();
+      await new Promise<void>((resolve) => completedView.close(() => resolve()));
+    }
   } finally {
     process.chdir(previous.cwd);
     if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;

@@ -3768,7 +3768,12 @@ export const browserHtml = String.raw`<!doctype html>
 
       const meta = document.createElement("div");
       meta.className = "meta";
-      meta.append(pill("Draft ChangeSet", true, change.valid === false ? "warn" : ""));
+      const lifecycle = change.status === "published"
+        ? "Published ChangeSet"
+        : change.status === "completed"
+          ? "Completed ChangeSet"
+          : "Draft ChangeSet";
+      meta.append(pill(lifecycle, true, change.valid === false ? "warn" : ""));
       meta.append(pill("Store: " + change.storeType));
       meta.append(pill("Base: " + String(change.baseRevision || "").slice(0, 12)));
       if (change.digest) meta.append(pill("Digest: " + String(change.digest).slice(0, 12)));

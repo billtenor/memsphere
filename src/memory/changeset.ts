@@ -126,31 +126,34 @@ export class MemoryChangePreviewCache {
     changeId: string;
     use: (preview: MemoryChangePreview) => Promise<T>;
   }): Promise<T> {
-    const prepared = await prepareMemoryChangePreview(input);
-    await this.#invalidateOlderVersions(prepared.changeKey, prepared.cacheKey);
-    let entry = this.#entries.get(prepared.cacheKey);
-    if (!entry) {
-      let pending = this.#pending.get(prepared.cacheKey);
-      if (!pending) {
-        pending = materializePreparedMemoryChangePreview(prepared).then((preview) => ({
-          preview,
-          refs: 0,
-          stale: false,
-          lastUsed: Date.now()
-        }));
-        this.#pending.set(prepared.cacheKey, pending);
+    const entry = await withMemoryChangeCheckpointLock(input, async () => {
+      const prepared = await prepareMemoryChangePreview(input);
+      await this.#invalidateOlderVersions(prepared.changeKey, prepared.cacheKey);
+      let current = this.#entries.get(prepared.cacheKey);
+      if (!current) {
+        let pending = this.#pending.get(prepared.cacheKey);
+        if (!pending) {
+          pending = materializePreparedMemoryChangePreview(prepared).then((preview) => ({
+            preview,
+            refs: 0,
+            stale: false,
+            lastUsed: Date.now()
+          }));
+          this.#pending.set(prepared.cacheKey, pending);
+        }
+        try {
+          current = await pending;
+          this.#entries.set(prepared.cacheKey, current);
+        } finally {
+          if (this.#pending.get(prepared.cacheKey) === pending) this.#pending.delete(prepared.cacheKey);
+        }
+        await this.#evictOverflow();
       }
-      try {
-        entry = await pending;
-        this.#entries.set(prepared.cacheKey, entry);
-      } finally {
-        if (this.#pending.get(prepared.cacheKey) === pending) this.#pending.delete(prepared.cacheKey);
-      }
-      await this.#evictOverflow();
-    }
-    entry.preview = { ...entry.preview, change: prepared.change };
-    entry.refs += 1;
-    entry.lastUsed = Date.now();
+      current.preview = { ...current.preview, change: prepared.change };
+      current.refs += 1;
+      current.lastUsed = Date.now();
+      return current;
+    });
     try {
       return await input.use(entry.preview);
     } finally {
@@ -199,8 +202,10 @@ export async function withMemoryChangePreview<T>(input: {
   changeId: string;
   use: (preview: MemoryChangePreview) => Promise<T>;
 }): Promise<T> {
-  const prepared = await prepareMemoryChangePreview(input);
-  const preview = await materializePreparedMemoryChangePreview(prepared);
+  const preview = await withMemoryChangeCheckpointLock(input, async () => {
+    const prepared = await prepareMemoryChangePreview(input);
+    return materializePreparedMemoryChangePreview(prepared);
+  });
   try {
     return await input.use(preview);
   } finally {
@@ -214,30 +219,40 @@ export async function withMemoryChangeReviewSnapshot<T>(input: {
   changeId: string;
   use: (snapshot: MemoryChangeReviewSnapshot) => Promise<T>;
 }): Promise<T> {
-  const prepared = await prepareMemoryChangePreview(input);
-  const preview = await materializePreparedMemoryChangePreview(prepared);
-  let baseRoot: string | undefined;
-  try {
-    if (prepared.change.targets.some((target) => target.operation === "delete")) {
-      baseRoot = await mkdtemp(join(tmpdir(), "memsphere-review-change-base-"));
-      if (changeStoreType(prepared.change) === "managed") {
-        await materializeGitMemoryRoot(prepared.project.memoryRoot, prepared.change.checkpoint!.base_revision, ".", baseRoot);
-      } else {
-        const source = prepared.change.source_worktree;
-        if (!source) throw new Error(`Embedded ChangeSet ${prepared.change.id} has no source metadata`);
-        await materializeGitMemoryRoot(source.repository_root, prepared.change.checkpoint!.base_revision, source.memory_path, baseRoot);
+  return withMemoryChangeCheckpointLock(input, async () => {
+    const prepared = await prepareMemoryChangePreview(input);
+    const preview = await materializePreparedMemoryChangePreview(prepared);
+    let baseRoot: string | undefined;
+    try {
+      if (prepared.change.targets.some((target) => target.operation === "delete")) {
+        baseRoot = await mkdtemp(join(tmpdir(), "memsphere-review-change-base-"));
+        if (changeStoreType(prepared.change) === "managed") {
+          await materializeGitMemoryRoot(prepared.project.memoryRoot, prepared.change.checkpoint!.base_revision, ".", baseRoot);
+        } else {
+          const source = prepared.change.source_worktree;
+          if (!source) throw new Error(`Embedded ChangeSet ${prepared.change.id} has no source metadata`);
+          await materializeGitMemoryRoot(source.repository_root, prepared.change.checkpoint!.base_revision, source.memory_path, baseRoot);
+        }
       }
+      const files = prepared.change.targets.map((target) => ({
+        label: target.destination_path ?? target.path,
+        path: join(target.operation === "delete" ? baseRoot! : preview.memoryRoot, target.destination_path ?? target.path),
+        operation: target.operation
+      }));
+      return await input.use({ ...preview, files });
+    } finally {
+      await rm(preview.memoryRoot, { recursive: true, force: true });
+      if (baseRoot) await rm(baseRoot, { recursive: true, force: true });
     }
-    const files = prepared.change.targets.map((target) => ({
-      label: target.destination_path ?? target.path,
-      path: join(target.operation === "delete" ? baseRoot! : preview.memoryRoot, target.destination_path ?? target.path),
-      operation: target.operation
-    }));
-    return await input.use({ ...preview, files });
-  } finally {
-    await rm(preview.memoryRoot, { recursive: true, force: true });
-    if (baseRoot) await rm(baseRoot, { recursive: true, force: true });
-  }
+  });
+}
+
+async function withMemoryChangeCheckpointLock<T>(
+  input: { home?: string; project: string },
+  action: () => Promise<T>
+): Promise<T> {
+  const context = await resolveProjectContext({ home: input.home, project: input.project });
+  return withFileLock(memoryMutationLock(context.primary), action);
 }
 
 async function prepareMemoryChangePreview(input: {
