@@ -280,6 +280,7 @@ test("Changes is a first-class route with immutable ChangeSet Review snapshots",
   assert.match(browserHtml, /detail\.targetMemories/);
   assert.match(browserHtml, /comment\.source === "changeset" \? "changes" : "memory"/);
   assert.match(browserHtml, /review\.source !== "changeset" && !review\.comments\.length/);
+  assert.match(browserHtml, /el\.submitReview\.disabled = !review \|\| review\.status !== "draft" \|\| !canComment\(\)/);
   assert.match(browserHtml, /change\.valid !== true/);
   assert.match(browserHtml, /Fix the validation diagnostics and run memory change validate again/);
 });

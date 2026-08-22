@@ -6764,7 +6764,8 @@ export const browserHtml = String.raw`<!doctype html>
       el.commentSummary.textContent = review
         ? review.id
         : "No review selected";
-      el.submitReview.disabled = !review || review.status !== "draft" || (review.source !== "changeset" && comments.length === 0);
+      el.submitReview.disabled = !review || review.status !== "draft" || !canComment()
+        || (review.source !== "changeset" && comments.length === 0);
       el.submitReview.textContent = review?.status === "draft" ? "Submit" : review?.status || "Submit";
       el.comments.innerHTML = "";
       if (!review) {
