@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { memoryKinds, type MemoryKind } from "../src/memory/kinds.js";
-import { listMemoryFiles } from "../src/memory/store.js";
+import { listMemoryFiles, readMemoryFile, readMemoryFileSummary } from "../src/memory/store.js";
 import { projectConfigSchema } from "../src/project/model.js";
 import { validateMemoryRoot } from "../src/validation.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
@@ -45,6 +45,37 @@ test("listMemoryFiles keeps yaml filtering and sorting for existing directories"
       join(proceduresRoot, "a.yaml"),
       join(proceduresRoot, "b.yml")
     ]);
+  });
+});
+
+test("readMemoryFileSummary falls back to full parsing for quoted name keys", async () => {
+  await withTempDir(async (dir) => {
+    const path = join(dir, "quoted.yaml");
+    await writeFile(path, withCurrentMemorySyntax(`!concept
+"names": [quoted-memory, Quoted Memory]
+defines: [valid]
+`));
+
+    assert.deepEqual((await readMemoryFile("concepts", path)).entity.names, ["quoted-memory", "Quoted Memory"]);
+    assert.deepEqual((await readMemoryFileSummary("concepts", path)).names, ["quoted-memory", "Quoted Memory"]);
+  });
+});
+
+test("readMemoryFileSummary validates the root tag and logical names without parsing the body", async () => {
+  await withTempDir(async (dir) => {
+    const wrongTag = join(dir, "wrong-tag.yaml");
+    const invalidCanonical = join(dir, "invalid-canonical.yaml");
+    const invalidAlias = join(dir, "invalid-alias.yaml");
+    const brokenBody = join(dir, "broken-body.yaml");
+    await writeFile(wrongTag, withCurrentMemorySyntax("!statement\nnames: [valid-name]\nasserts: [valid]\n"));
+    await writeFile(invalidCanonical, withCurrentMemorySyntax("!concept\nnames: [InvalidName]\ndefines: [valid]\n"));
+    await writeFile(invalidAlias, withCurrentMemorySyntax("!concept\nnames: [valid-name, ' bad ']\ndefines: [valid]\n"));
+    await writeFile(brokenBody, withCurrentMemorySyntax("!concept\nnames: [valid-name, Valid name]\ndefines: [\n"));
+
+    await assert.rejects(readMemoryFileSummary("concepts", wrongTag), /Expected !concept Memory tag/);
+    await assert.rejects(readMemoryFileSummary("concepts", invalidCanonical), /lowercase ASCII kebab-case/);
+    await assert.rejects(readMemoryFileSummary("concepts", invalidAlias), /leading or trailing whitespace/);
+    assert.deepEqual((await readMemoryFileSummary("concepts", brokenBody)).names, ["valid-name", "Valid name"]);
   });
 });
 
@@ -101,7 +132,7 @@ for (const missingKind of memoryKinds) {
 
 test("validateMemoryStore reports precise control_plane config paths", async () => {
   const result = projectConfigSchema.safeParse({
-    store: { type: "embedded", memory_path: "memory" },
+    store: { type: "embedded", repository_path: "/repo", memory_path: "memory" },
     control_plane: {
       runner: { permissions: ["artifact.delete"] },
       actors: {}

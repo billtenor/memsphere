@@ -189,14 +189,7 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
 
 async function openTaskPage(browser: Browser, url: string, width: number): Promise<Page> {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
-  await gotoViewAndWaitForRuns(page, url);
-  await page.getByRole("button", { name: "Task", exact: true }).click();
-  await page.locator(".task-card-main").first().click();
-  await page.locator(".markdown-table-scroll").first().waitFor();
-  return page;
-}
-
-async function gotoViewAndWaitForRuns(page: Page, url: string): Promise<void> {
+  await page.goto(url);
   const runsLoaded = page.waitForResponse(
     (response) =>
       new URL(response.url()).pathname === "/api/runs"
@@ -204,8 +197,12 @@ async function gotoViewAndWaitForRuns(page: Page, url: string): Promise<void> {
       && response.ok(),
     { timeout: 10_000 }
   );
-  await page.goto(url);
+  await page.getByRole("button", { name: "Task", exact: true }).click();
   await runsLoaded;
+  await page.locator("#task-tab.active").waitFor();
+  await page.locator(".task-card-main").first().click();
+  await page.locator(".markdown-table-scroll").first().waitFor();
+  return page;
 }
 
 async function openMemoryPage(browser: Browser, url: string, width: number): Promise<Page> {
@@ -239,14 +236,20 @@ async function assertReviewPanelCanResizeLayout(page: Page): Promise<void> {
   assert.equal(await reviewToggle.getAttribute("aria-expanded"), "false");
   const widthBeforeOpen = await content.evaluate((element) => element.getBoundingClientRect().width);
   await reviewToggle.click();
-  await page.waitForTimeout(200);
+  await page.waitForFunction(
+    (width) => document.querySelector(".content")!.getBoundingClientRect().width < width - 1,
+    widthBeforeOpen
+  );
   assert.equal(await reviewToggle.getAttribute("aria-expanded"), "true");
   assert(await page.getByRole("button", { name: "Close", exact: true }).isVisible());
   assert(await page.getByRole("button", { name: "Create Review", exact: true }).isVisible());
   const widthWhileOpen = await content.evaluate((element) => element.getBoundingClientRect().width);
   assert(widthWhileOpen < widthBeforeOpen, `expected content width to shrink: ${widthBeforeOpen} -> ${widthWhileOpen}`);
   await reviewToggle.click();
-  await page.waitForTimeout(200);
+  await page.waitForFunction(
+    (width) => Math.abs(document.querySelector(".content")!.getBoundingClientRect().width - width) <= 1,
+    widthBeforeOpen
+  );
   assert.equal(await reviewToggle.getAttribute("aria-expanded"), "false");
   const widthAfterClose = await content.evaluate((element) => element.getBoundingClientRect().width);
   assert(
@@ -254,9 +257,15 @@ async function assertReviewPanelCanResizeLayout(page: Page): Promise<void> {
     `expected content width to recover within one pixel: ${widthBeforeOpen} -> ${widthAfterClose}`
   );
   await reviewToggle.click();
-  await page.waitForTimeout(200);
+  await page.waitForFunction(
+    (width) => document.querySelector(".content")!.getBoundingClientRect().width < width - 1,
+    widthBeforeOpen
+  );
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(200);
+  await page.waitForFunction(
+    (width) => Math.abs(document.querySelector(".content")!.getBoundingClientRect().width - width) <= 1,
+    widthBeforeOpen
+  );
   assert.equal(await reviewToggle.getAttribute("aria-expanded"), "false");
   const widthAfterEscape = await content.evaluate((element) => element.getBoundingClientRect().width);
   assert(
@@ -306,13 +315,67 @@ test("Task titles fall back to the Procedure name for historical Runs", async ()
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1024, height: 900 } });
     try {
-      await gotoViewAndWaitForRuns(page, url);
+      await page.goto(url);
+      const runsLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/runs" && response.ok(),
+        { timeout: 10_000 }
+      );
+      const initialDetailLoaded = page.waitForResponse(
+        (response) => /^\/api\/runs\/run-/.test(new URL(response.url()).pathname),
+        { timeout: 10_000 }
+      );
       await page.getByRole("button", { name: "Task", exact: true }).click();
+      await runsLoaded;
+      const initialDetailResponse = await initialDetailLoaded;
+      assert.equal(initialDetailResponse.status(), 200, await initialDetailResponse.text());
+      await page.locator(".meta .pill", { hasText: "流程: Responsive browser fixture" }).waitFor();
       const legacy = page.locator(".task-card-main", { hasText: "Legacy procedure fallback" });
+      const detailLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${legacyRunId}`,
+        { timeout: 10_000 }
+      );
       await legacy.click();
+      const detailResponse = await detailLoaded;
+      assert.equal(detailResponse.status(), 200, await detailResponse.text());
       assert.equal(await page.locator("#title").textContent(), "Legacy procedure fallback");
       await page.locator(".meta .pill", { hasText: "流程: Legacy procedure fallback" }).waitFor();
       await assertPageDoesNotOverflow(page);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+test("missing Run detail is reported as not found", async () => {
+  await withResponsiveView(async (_browser, url) => {
+    const response = await fetch(`${url}/api/runs/run-missing`);
+    assert.equal(response.status, 404);
+    assert.match(await response.text(), /run not found/i);
+  });
+});
+
+test("archiving the selected Run loads the next Task detail", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await openTaskPage(browser, url, 1024);
+    try {
+      assert.equal(await page.locator("#title").textContent(), runName);
+      page.once("dialog", dialog => dialog.accept());
+      const archived = page.waitForResponse((response) =>
+        response.request().method() === "POST"
+        && new URL(response.url()).pathname === `/api/archive/runs/${runId}`
+      );
+      const nextDetail = page.waitForResponse((response) =>
+        new URL(response.url()).pathname === `/api/runs/${legacyRunId}`
+      );
+      await page.locator(".task-card.active .task-card-archive").click();
+      assert.equal((await archived).status(), 200);
+      assert.equal((await nextDetail).status(), 200);
+      await page.getByRole("heading", { name: "Legacy procedure fallback", exact: true }).waitFor();
+      assert.doesNotMatch(await page.locator("#detail").textContent() ?? "", /Loading task/);
+      assert.equal(
+        await page.evaluate(() => localStorage.getItem("memsphere.selectedTask.v1")),
+        legacyRunId
+      );
     } finally {
       await page.close();
     }
@@ -520,6 +583,43 @@ test("View deep links restore Memory, Task, Memory Review, and browser history",
       await page.waitForURL(url + `/tasks/${runId}`);
       await page.getByRole("heading", { name: runName, exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
+
+      let releaseStaleRunDetail!: () => void;
+      let captureStaleRunDetail!: () => void;
+      const staleRunDetailGate = new Promise<void>((resolve) => { releaseStaleRunDetail = resolve; });
+      const staleRunDetailCaptured = new Promise<void>((resolve) => { captureStaleRunDetail = resolve; });
+      let delayedRunDetail = false;
+      await page.route(`**/api/runs/${runId}`, async (route) => {
+        if (delayedRunDetail) return route.continue();
+        delayedRunDetail = true;
+        const response = await route.fetch();
+        captureStaleRunDetail();
+        await staleRunDetailGate;
+        await route.fulfill({ response });
+      });
+      const staleRunDetailResponse = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${runId}`
+      );
+      await page.evaluate((path) => {
+        history.pushState({}, "", path);
+        dispatchEvent(new PopStateEvent("popstate"));
+      }, `/tasks/${runId}`);
+      await staleRunDetailCaptured;
+
+      const latestRunDetailResponse = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${legacyRunId}`
+      );
+      await page.evaluate((path) => {
+        history.pushState({}, "", path);
+        dispatchEvent(new PopStateEvent("popstate"));
+      }, `/tasks/${legacyRunId}`);
+      assert.equal((await latestRunDetailResponse).status(), 200);
+      await page.getByRole("heading", { name: "Legacy procedure fallback", exact: true }).waitFor();
+      releaseStaleRunDetail();
+      assert.equal((await staleRunDetailResponse).status(), 200);
+      await page.waitForTimeout(100);
+      assert.equal(new URL(page.url()).pathname, `/tasks/${legacyRunId}`);
+      assert.equal(await page.locator("#title").textContent(), "Legacy procedure fallback");
 
       const missing = await browser.newPage();
       await missing.goto(`${url}/memories/concepts/${encodeURIComponent("Missing memory")}`);

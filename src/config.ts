@@ -47,6 +47,11 @@ export async function readConfig(configPath?: string): Promise<MemsphereConfig> 
   return readProjectExecutionConfig();
 }
 
+export async function readViewConfig(configPath?: string): Promise<MemsphereConfig> {
+  if (configPath) return readConfigAt(resolve(configPath));
+  return readProjectExecutionConfig({ memoryScope: "canonical" });
+}
+
 export async function readConfigAt(configPath: string): Promise<MemsphereConfig> {
   const resolvedConfigPath = resolve(configPath);
   const projectManifestPath = join(dirname(resolvedConfigPath), "project.json");
@@ -73,13 +78,18 @@ async function readProjectExecutionConfig(options: {
   projectConfigPath?: string;
   home?: string;
   project?: string;
+  memoryScope?: "workspace" | "canonical";
 } = {}): Promise<MemsphereConfig> {
   const home = options.home ?? resolveMemsphereHome();
   const global = await readGlobalConfig(homePaths(home).configPath);
   const explicitRoot = options.projectConfigPath ? dirname(options.projectConfigPath) : undefined;
   const context = explicitRoot
     ? await resolveContextByRoot(home, explicitRoot)
-    : await resolveProjectContext({ home, project: options.project ?? process.env.MEMSPHERE_PROJECT });
+    : await resolveProjectContext({
+      home,
+      project: options.project ?? process.env.MEMSPHERE_PROJECT,
+      memoryScope: options.memoryScope
+    });
   const revision = await storeRevision(context.primary.memoryRoot, context.primary.config.store.type);
   const mounted = await Promise.all(context.mounted.map(async (project) => ({
     name: project.name,
@@ -106,7 +116,7 @@ async function readProjectExecutionConfig(options: {
 }
 
 export async function readProjectConfig(project: string, home?: string): Promise<MemsphereConfig> {
-  return readProjectExecutionConfig({ project, home });
+  return readProjectExecutionConfig({ project, home, memoryScope: "canonical" });
 }
 
 async function readGlobalConfig(path: string): Promise<z.infer<typeof globalConfigSchema>> {
@@ -121,7 +131,7 @@ async function readGlobalConfig(path: string): Promise<z.infer<typeof globalConf
 async function resolveContextByRoot(home: string, root: string) {
   const manifest = JSON.parse(await readFile(join(root, "project.json"), "utf8")) as { name?: unknown };
   if (typeof manifest.name !== "string") throw new Error(`invalid Project manifest: ${join(root, "project.json")}`);
-  return resolveProjectContext({ home, project: manifest.name });
+  return resolveProjectContext({ home, project: manifest.name, memoryScope: "canonical" });
 }
 
 async function storeRevision(memoryRoot: string, type: "managed" | "embedded"): Promise<string | undefined> {

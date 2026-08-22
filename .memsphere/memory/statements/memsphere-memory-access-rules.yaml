@@ -19,6 +19,8 @@ asserts:
   - 只有无法提取可用名称、别名或类型时，才应使用不带 --query 或 --kind 的完整列表，避免把无关摘要大量载入上下文。
   - memsphere memory list 返回的 names 首项是 canonical name，其余项是别名；canonical name 和别名都可作为 bare selector 发现候选 Memory，但只有 canonical name 可以组成显式逻辑引用。
   - Memory 文件名和目录位置属于 Provider 存储细节，不构成逻辑引用，Agent 不得通过物理路径推断 Memory 身份或来源。
+  - Embedded Project 配置中的 repository_path 是主工作树绝对路径，memory_path 是仓库相对路径；View 展示该主工作树中的规范 Memory，CLI 命令在同一 Git common-dir 的 linked worktree 中执行时读取当前 worktree 的有效 Memory。
+  - Embedded CLI 解析必须拒绝其他仓库和非 Git 工作区；当前 worktree 不存在 memory_path 时必须直接报错，不得静默读取主工作树。Agent 编辑时必须使用 memsphere memory edit 返回的当前 worktree 路径，并通过正常 Git 提交合入，不得对 Embedded Project 使用 ChangeSet publish。
   - Agent 应优先根据用户明确表达的目标选择 Memory，不能仅因某份 Memory 能解释输入中的局部事实就忽略更符合目标的候选。
   - 存在多个同样符合目标且无法消除歧义的候选时，Agent 必须列出候选并请求用户确认，不得静默选择。
   - Agent 不需要判断 Memory 是预置安装还是用户创建，也不得依赖该来源作出语义选择。

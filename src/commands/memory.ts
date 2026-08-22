@@ -1,4 +1,5 @@
 import type { MemoryCatalog } from "../memory/catalog.js";
+import { join } from "node:path";
 import { createMemoryCatalog } from "../memory/factory.js";
 import { isMemoryKind, memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import {
@@ -15,6 +16,7 @@ import {
 } from "../memory/serializer.js";
 import { MemoryNavigation, type MemoryIdentity } from "../memory/navigation.js";
 import {
+  editEmbeddedMemories,
   editMemories,
   publishMemoryChange,
   pushMemory,
@@ -24,6 +26,7 @@ import {
   syncMemory,
   validateMemoryChange
 } from "../memory/changeset.js";
+import { resolveProjectContext } from "../project/resolver.js";
 import { readConfig } from "../config.js";
 import { getViewServiceStatus, viewServiceUrl } from "../view/service.js";
 
@@ -114,6 +117,21 @@ export async function memoryReadCommand(
 }
 
 export async function memoryEditCommand(references: string[], options: { change?: string } = {}): Promise<void> {
+  const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  if (context.primary.config.store.type === "embedded") {
+    if (options.change) throw new Error("--change is only available for a Managed Project");
+    const result = await editEmbeddedMemories(references);
+    console.log("Store: embedded");
+    console.log(`Repository Root: ${result.repositoryRoot}`);
+    console.log(`Workspace Root: ${result.workspaceRoot}`);
+    console.log(`Memory Root: ${result.memoryRoot}`);
+    for (const target of result.targets) {
+      console.log(`Edit: ${target.reference}\t${target.operation}\t${join(result.memoryRoot, target.path)}`);
+    }
+    console.log("Next: memsphere validate");
+    console.log("Integrate these Memory changes through the repository's normal Git workflow.");
+    return;
+  }
   const result = await editMemories({ references, changeId: options.change });
   console.log(`ChangeSet: ${result.change.id}`);
   console.log(`Candidate Root: ${result.candidateRoot}`);

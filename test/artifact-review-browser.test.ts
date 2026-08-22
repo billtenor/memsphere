@@ -22,6 +22,7 @@ import { runArtifactReviewAgentWorker } from "../src/acp/review-worker.js";
 import type { AgentReviewProvider } from "../src/acp/provider.js";
 import { agentActivityPath, readAgentActivitySnapshot } from "../src/acp/activity.js";
 import { reviewConfiguration } from "./helpers/review.js";
+import { runGit } from "../src/git.js";
 
 const browserTestDirectory = dirname(fileURLToPath(import.meta.url));
 const browserFakeReviewer = join(browserTestDirectory, "fixtures", "fake-acp-reviewer.mjs");
@@ -118,6 +119,18 @@ flow:
     assert.equal(await memoryArtifact.getByText("decider", { exact: true }).count(), 0);
     assert.equal(await memoryArtifact.getByText("advisor", { exact: true }).count(), 0);
     await page.getByRole("button", { name: "Task", exact: true }).click();
+    const bindingPanel = page.locator(".run-bindings");
+    const bindingToggle = bindingPanel.locator(".run-binding-toggle");
+    const bindingBody = bindingPanel.locator(".run-binding-body");
+    await bindingToggle.waitFor();
+    assert.equal(await bindingToggle.getAttribute("aria-expanded"), "false");
+    assert.equal(await bindingBody.isVisible(), false);
+    await bindingToggle.click();
+    assert.equal(await bindingToggle.getAttribute("aria-expanded"), "true");
+    await bindingBody.getByText("换绑只影响尚未创建的 Review；已创建 Review 的参与者保持不变。", { exact: true }).waitFor();
+    await bindingToggle.click();
+    assert.equal(await bindingToggle.getAttribute("aria-expanded"), "false");
+    assert.equal(await bindingBody.isVisible(), false);
     await page.getByRole("button", { name: /^产物评审 0\/2$/ }).click();
     const reviewModal = page.locator("#artifact-review-modal");
     await reviewModal.waitFor();
@@ -726,6 +739,7 @@ test("Agent Activity expands in the participant row without disrupting Human rev
   const configPath = join(scopeRoot, "config.json");
   process.env.MEMSPHERE_HOME = home;
   await mkdir(join(memoryRoot, "procedures"), { recursive: true });
+  await runGit(["init", "-b", "master"], { cwd: scopeRoot });
   await mkdir(reviewsRoot, { recursive: true });
   await writeFile(join(memoryRoot, "procedures", "activity-review.yaml"), withCurrentMemorySyntax(`!procedure
 name: agent-activity-browser
@@ -786,7 +800,7 @@ flow:
     acp_providers: { traex: {} }
   }, null, 2)}\n`);
   await writeFile(configPath, `${JSON.stringify({
-    store: { type: "embedded", memory_path: memoryRoot },
+    store: { type: "embedded", repository_path: scopeRoot, memory_path: "memory" },
     control_plane: {
       runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
       actors: {

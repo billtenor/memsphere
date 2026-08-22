@@ -4,6 +4,8 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { chromium } from "playwright";
+import { archiveRun } from "../src/archive/store.js";
 import { createViewServer } from "../src/commands/view.js";
 import type { MemsphereConfig } from "../src/config.js";
 import { parseControlPlaneConfig } from "../src/control-plane/index.js";
@@ -23,6 +25,7 @@ test("Artifact Review View API isolates drafts and settles the Run once", async 
   const memoryRoot = join(dir, "memory");
   const runsRoot = join(dir, "runs");
   const reviewsRoot = join(dir, "reviews");
+  const archiveRoot = join(dir, "archives");
   await mkdir(join(memoryRoot, "procedures"), { recursive: true });
   await mkdir(reviewsRoot, { recursive: true });
   await writeFile(join(memoryRoot, "procedures", "reviewed.yaml"), withCurrentMemorySyntax(`!procedure
@@ -103,7 +106,7 @@ flow:
     memoryRoot,
     reviewsRoot,
     runsRoot,
-    archiveRoot: join(dir, "archives"),
+    archiveRoot,
     view: { host: "127.0.0.1", port: 0 },
     controlPlane
   };
@@ -126,13 +129,35 @@ flow:
     assert.doesNotMatch(publicSource, /artifactReviews|Private candidate/);
     assert.doesNotMatch(publicSource, /attempt-private|workerPid|cliReadyAt|private-prompt|private-session|protocolVersion|private-agent|private-version|private-model|private-stop/);
 
+    const summaryResponse = await fetch(`${base}/api/runs?representation=summary`);
+    assert.equal(summaryResponse.status, 200);
+    const summarySource = await summaryResponse.text();
+    const summaryPayload = JSON.parse(summarySource) as {
+      runs: Array<{ id: string; eventCount: number; reviewProgress?: { id: string; submitted: number; total: number } }>;
+    };
+    const runSummary = summaryPayload.runs.find((candidate) => candidate.id === started.id);
+    assert.deepEqual(runSummary?.reviewProgress, {
+      id: review.id,
+      status: "pending",
+      currentRoundId: review.currentRoundId,
+      updatedAt: pending.updatedAt,
+      submitted: 0,
+      total: 2
+    });
+    assert.equal(runSummary?.eventCount, 0);
+    assert.doesNotMatch(summarySource, /artifactReviews|Private candidate|attempt-private/);
+
     const roundPath = `${base}/api/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
+    const directRoundPath = `${base}/api/runs/${started.id}/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
     const publicInitial = await fetch(roundPath);
     assert.equal(publicInitial.status, 200);
     const publicContext = await publicInitial.json() as ReviewContext;
     assert.equal(publicContext.assignment, undefined);
     assert.equal(publicContext.submission.artifact.content, "# Private candidate\n");
     assert.equal(publicContext.rounds[0]?.assignments.length, 2);
+    const directInitial = await fetch(`${directRoundPath}?actor_id=alice`);
+    assert.equal(directInitial.status, 200);
+    assert.equal((await directInitial.json() as ReviewContext).assignment.actorId, "alice");
 
     const aliceInitial = await fetch(`${roundPath}?actor_id=alice`);
     assert.equal(aliceInitial.status, 200);
@@ -264,6 +289,51 @@ flow:
     )?.submitted?.comments[0];
     assert.equal(advisory?.body, "Advisory suggestion\\n\\nSecond paragraph");
     assert.match(advisory?.renderedBody ?? "", /<p>Advisory suggestion<\/p>\s*<p>Second paragraph<\/p>/);
+
+    await archiveRun({ archiveRoot, runsRoot, id: started.id });
+    const archivedDetail = await fetch(`${base}/api/runs/${started.id}`);
+    assert.equal(archivedDetail.status, 200);
+    assert.equal((await archivedDetail.json() as { run: { readOnly?: boolean } }).run.readOnly, true);
+    const archivedEvidence = await fetch(`${directRoundPath}?actor_id=alice`);
+    assert.equal(archivedEvidence.status, 200);
+    assert.equal((await archivedEvidence.json() as ReviewContext).submission.artifact.content, "# Private candidate\n");
+    const activeSummaries = await fetch(`${base}/api/runs?representation=summary`).then(response => response.json()) as {
+      runs: Array<{ id: string }>;
+    };
+    assert.equal(activeSummaries.runs.some((candidate) => candidate.id === started.id), false);
+
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+      const archivedReviewUrl = `${base}/tasks/${started.id}/artifact-reviews/${review.id}`
+        + `?round=${review.currentRoundId}`;
+      const directContextRequests: string[] = [];
+      page.on("request", (request) => {
+        const url = new URL(request.url());
+        if (url.pathname.startsWith(`/api/runs/${started.id}/artifact-reviews/${review.id}/rounds/`)) {
+          directContextRequests.push(url.pathname);
+        }
+      });
+      await page.goto(archivedReviewUrl);
+      const archivedModal = page.locator("#artifact-review-modal[open]");
+      await archivedModal.waitFor();
+      await archivedModal.getByText("Private candidate", { exact: true }).waitFor();
+
+      const summaryRefresh = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.pathname === "/api/runs" && url.searchParams.get("representation") === "summary";
+      });
+      assert.equal((await summaryRefresh).status(), 200);
+      await page.waitForTimeout(100);
+      assert.equal(new URL(page.url()).pathname, `/tasks/${started.id}/artifact-reviews/${review.id}`);
+      assert.equal(await archivedModal.isVisible(), true);
+      await archivedModal.getByText("Private candidate", { exact: true }).waitFor();
+      assert.equal(directContextRequests.every(path => path.includes(`/api/runs/${started.id}/`)), true);
+      assert.equal(await page.locator(".task-card").count(), 0);
+      assert.equal(await page.locator("#count").textContent(), "0 tasks");
+    } finally {
+      await browser.close();
+    }
   } finally {
     server.close();
     await once(server, "close");
