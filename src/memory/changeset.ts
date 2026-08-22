@@ -58,7 +58,7 @@ export const memoryChangeSetSchema = z.object({
   project: z.string().min(1),
   workspace_key: z.string().min(1),
   base_revision: z.string().min(1),
-  status: z.enum(["draft", "published"]),
+  status: z.enum(["draft", "published", "completed"]),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
   published_revision: z.string().min(1).optional(),
@@ -86,12 +86,17 @@ export type MemoryChangeValidationResult = {
   storeType: "managed" | "embedded";
   baseRevision: string;
   checkpointDigest: string;
+  completedChangeIds: string[];
   issues: ValidationIssue[];
 };
 
 export type MemoryChangePreview = {
   change: MemoryChangeSet;
   memoryRoot: string;
+};
+
+export type MemoryChangeReviewSnapshot = MemoryChangePreview & {
+  files: Array<{ label: string; path: string; operation: MemoryChangeOperation }>;
 };
 
 type PreparedMemoryChangePreview = {
@@ -200,6 +205,38 @@ export async function withMemoryChangePreview<T>(input: {
     return await input.use(preview);
   } finally {
     await rm(preview.memoryRoot, { recursive: true, force: true });
+  }
+}
+
+export async function withMemoryChangeReviewSnapshot<T>(input: {
+  home?: string;
+  project: string;
+  changeId: string;
+  use: (snapshot: MemoryChangeReviewSnapshot) => Promise<T>;
+}): Promise<T> {
+  const prepared = await prepareMemoryChangePreview(input);
+  const preview = await materializePreparedMemoryChangePreview(prepared);
+  let baseRoot: string | undefined;
+  try {
+    if (prepared.change.targets.some((target) => target.operation === "delete")) {
+      baseRoot = await mkdtemp(join(tmpdir(), "memsphere-review-change-base-"));
+      if (changeStoreType(prepared.change) === "managed") {
+        await materializeGitMemoryRoot(prepared.project.memoryRoot, prepared.change.checkpoint!.base_revision, ".", baseRoot);
+      } else {
+        const source = prepared.change.source_worktree;
+        if (!source) throw new Error(`Embedded ChangeSet ${prepared.change.id} has no source metadata`);
+        await materializeGitMemoryRoot(source.repository_root, prepared.change.checkpoint!.base_revision, source.memory_path, baseRoot);
+      }
+    }
+    const files = prepared.change.targets.map((target) => ({
+      label: target.destination_path ?? target.path,
+      path: join(target.operation === "delete" ? baseRoot! : preview.memoryRoot, target.destination_path ?? target.path),
+      operation: target.operation
+    }));
+    return await input.use({ ...preview, files });
+  } finally {
+    await rm(preview.memoryRoot, { recursive: true, force: true });
+    if (baseRoot) await rm(baseRoot, { recursive: true, force: true });
   }
 }
 
@@ -512,7 +549,8 @@ export async function validateMemoryChange(changeId?: string): Promise<MemoryCha
         checkpointRoot,
         checkpointRoot,
         captured.change.base_revision,
-        issues
+        issues,
+        captured.completedChangeIds
       );
     } finally {
       await rm(resolve(captured.candidateRoot, ".."), { recursive: true, force: true });
@@ -651,7 +689,8 @@ function validationResult(
   candidateRoot: string,
   _checkpointRoot: string,
   baseRevision: string,
-  issues: ValidationIssue[]
+  issues: ValidationIssue[],
+  completedChangeIds: string[] = []
 ): MemoryChangeValidationResult {
   if (!change.checkpoint) throw new Error(`ChangeSet ${change.id} checkpoint was not persisted`);
   return {
@@ -661,6 +700,7 @@ function validationResult(
     storeType: changeStoreType(change),
     baseRevision,
     checkpointDigest: change.checkpoint.digest,
+    completedChangeIds,
     issues
   };
 }
@@ -669,6 +709,7 @@ type EmbeddedCapture = {
   change: MemoryChangeSet;
   candidateRoot: string;
   memoryRoot: string;
+  completedChangeIds: string[];
 };
 
 async function captureEmbeddedWorkingChange(
@@ -699,31 +740,69 @@ async function captureEmbeddedWorkingChange(
   }
 
   let change: MemoryChangeSet;
-  if (requestedId) {
-    change = await readChange(project, requestedId);
-    assertDraftOwner(change, project.name, workspace.key);
-    if (changeStoreType(change) !== "embedded") throw new Error(`ChangeSet ${change.id} is not an Embedded ChangeSet`);
-    if (change.source_worktree?.instance_key !== workspace.instanceKey || change.base_revision !== baseRevision) {
-      throw new Error(`Embedded ChangeSet ${change.id} belongs to another worktree or HEAD`);
+  try {
+    if (requestedId) {
+      change = await readChange(project, requestedId);
+      assertDraftOwner(change, project.name, workspace.key);
+      if (changeStoreType(change) !== "embedded") throw new Error(`ChangeSet ${change.id} is not an Embedded ChangeSet`);
+      if (change.base_revision !== baseRevision) {
+        throw new Error(`Embedded ChangeSet ${change.id} belongs to another Git base revision`);
+      }
+    } else {
+      const projectChanges = await listProjectChanges(project);
+      const completedChangeIds: string[] = [];
+      for (const candidate of projectChanges) {
+        if (
+          candidate.status === "draft"
+          && changeStoreType(candidate) === "embedded"
+          && candidate.workspace_key === workspace.key
+          && candidate.base_revision !== baseRevision
+        ) {
+          candidate.status = "completed";
+          candidate.updated_at = new Date().toISOString();
+          await writeChange(project, candidate);
+          completedChangeIds.push(candidate.id);
+        }
+      }
+      const matches = projectChanges.filter((candidate) => (
+        candidate.status === "draft"
+        && changeStoreType(candidate) === "embedded"
+        && candidate.workspace_key === workspace.key
+        && candidate.base_revision === baseRevision
+      ));
+      if (matches.length > 1) {
+        const digest = await checkpointDigest(captured.targets, captured.candidateRoot);
+        const exact = matches.filter((candidate) => candidate.checkpoint?.digest === digest)
+          .sort((left, right) => left.created_at.localeCompare(right.created_at));
+        if (exact.length !== matches.length) {
+          throw new Error(`multiple divergent Embedded ChangeSets were found for the current repository and Git base: ${matches.map((item) => item.id).sort().join(", ")}`);
+        }
+        change = exact[0];
+        for (const duplicate of matches) {
+          if (duplicate.id === change.id) continue;
+          duplicate.status = "completed";
+          duplicate.updated_at = new Date().toISOString();
+          await writeChange(project, duplicate);
+          completedChangeIds.push(duplicate.id);
+        }
+      } else {
+        change = matches[0] ?? newChange(project, workspace.key);
+      }
+      change.store_type = "embedded";
+      change.base_revision = baseRevision;
+      change.source_worktree = source;
+      change.targets = captured.targets;
+      return { change, candidateRoot: captured.candidateRoot, memoryRoot, completedChangeIds };
     }
-  } else {
-    const matches = (await listProjectChanges(project)).filter((candidate) => (
-      candidate.status === "draft"
-      && changeStoreType(candidate) === "embedded"
-      && candidate.workspace_key === workspace.key
-      && candidate.source_worktree?.instance_key === workspace.instanceKey
-      && candidate.base_revision === baseRevision
-    ));
-    if (matches.length > 1) {
-      throw new Error(`multiple active Embedded ChangeSets were found; provide one explicitly: ${matches.map((item) => item.id).sort().join(", ")}`);
-    }
-    change = matches[0] ?? newChange(project, workspace.key);
+    change.store_type = "embedded";
+    change.base_revision = baseRevision;
+    change.source_worktree = source;
+    change.targets = captured.targets;
+    return { change, candidateRoot: captured.candidateRoot, memoryRoot, completedChangeIds: [] };
+  } catch (error) {
+    await rm(resolve(captured.candidateRoot, ".."), { recursive: true, force: true });
+    throw error;
   }
-  change.store_type = "embedded";
-  change.base_revision = baseRevision;
-  change.source_worktree = source;
-  change.targets = captured.targets;
-  return { change, candidateRoot: captured.candidateRoot, memoryRoot };
 }
 
 async function captureEmbeddedTargets(
@@ -905,6 +984,19 @@ async function listProjectChanges(project: ResolvedProject): Promise<MemoryChang
     if (change) changes.push(change);
   }
   return changes;
+}
+
+export async function listMemoryChanges(input: { home?: string; project: string }): Promise<MemoryChangeSet[]> {
+  const context = await resolveProjectContext({ home: input.home, project: input.project });
+  return (await listProjectChanges(context.primary)).sort((left, right) => {
+    const activity = Number(right.status === "draft") - Number(left.status === "draft");
+    return activity || right.updated_at.localeCompare(left.updated_at);
+  });
+}
+
+export async function readMemoryChange(input: { home?: string; project: string; changeId: string }): Promise<MemoryChangeSet> {
+  const context = await resolveProjectContext({ home: input.home, project: input.project });
+  return readChange(context.primary, input.changeId);
 }
 
 function changeStoreType(change: MemoryChangeSet): "managed" | "embedded" {

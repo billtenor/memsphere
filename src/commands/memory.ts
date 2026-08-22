@@ -128,7 +128,7 @@ export async function memoryEditCommand(references: string[], options: { change?
     for (const target of result.targets) {
       console.log(`Edit: ${target.reference}\t${target.operation}\t${join(result.memoryRoot, target.path)}`);
     }
-    console.log("Next: memsphere validate");
+    console.log("Next: memsphere memory change validate");
     console.log("Integrate these Memory changes through the repository's normal Git workflow.");
     return;
   }
@@ -184,7 +184,10 @@ export async function memoryChangeValidateCommand(
   console.log(`ChangeSet: ${result.changeId}`);
   console.log(`Store: ${result.storeType}`);
   console.log(`Base Revision: ${result.baseRevision}`);
-  console.log(`Checkpoint: ${result.checkpointDigest}`);
+  console.log(`Content Digest: ${result.checkpointDigest}`);
+  if (result.completedChangeIds.length > 0) {
+    console.log(`Completed previous ChangeSets: ${result.completedChangeIds.join(", ")}`);
+  }
   console.log(`memoryRoot: ${result.memoryRoot}`);
   if (preview.url) console.log(`Preview: ${preview.url}`);
   else console.log(`Preview: start memsphere View, then open ${preview.path}`);
@@ -200,7 +203,7 @@ async function memoryChangePreview(changeId: string): Promise<{ path: string; ur
 }
 
 export function memoryChangePreviewPath(project: string, changeId: string): string {
-  return `/projects/${encodeURIComponent(project)}/memories?change=${encodeURIComponent(changeId)}`;
+  return `/projects/${encodeURIComponent(project)}/changes/${encodeURIComponent(changeId)}`;
 }
 
 export async function memoryRecoverCommand(reference: string, options: { restore?: boolean; createChange?: boolean }): Promise<void> {

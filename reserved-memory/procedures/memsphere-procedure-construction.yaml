@@ -114,10 +114,10 @@ flow:
         action: 校验并评审本轮 Memory ChangeSet 候选。
         actor: agent
         asserts:
-          - Managed 与 Embedded Project 必须使用 memsphere memory change validate [change-id] 复用同一 ChangeSet，校验本轮修改并更新可供 View 展示的稀疏 checkpoint。
+          - Managed 与 Embedded Project 必须使用 memsphere memory change validate [change-id] 复用同一 ChangeSet，校验本轮修改并更新可供 View Changes 页面展示的单一当前验证内容。
           - 必须检查 ChangeSet 的完整 target 清单及每项修改与交付意图的关系；对 Procedure 检查步骤输入与 Artifact 衔接、actor 归属、约束作用域、分支完整性、循环终止和最终交付物，对其他 Memory 检查其类型契约、引用完整性和 System/Reserved 同步要求。
           - 必须删除重复、无执行价值或可由其他已读取 Memory 提供的内容；删除或重命名 Memory 时必须确认不存在未处理的逻辑引用、manifest 条目或同步副本。
-          - 未通过 change validate 时不得提交评审或声称本轮完成；普通 memsphere validate 不代替 Embedded ChangeSet 捕获，也不得把稀疏 ChangeSet candidate 或 checkpoint 直接传给 memsphere validate --memory-root。
+          - 未通过 change validate 时不得提交评审或声称本轮完成；普通 memsphere validate 不代替 Embedded ChangeSet 捕获，也不得把稀疏 ChangeSet candidate 或当前验证内容直接传给 memsphere validate --memory-root。
           - Reviewer 或 Runner 对当前候选要求修改时，必须使用当前 Artifact Review 的 revision round 修订并重报，不得因此创建新 Run 或进入下一次外层循环。
         artifact: !artifact
           name: 本轮已验证的 Memory ChangeSet

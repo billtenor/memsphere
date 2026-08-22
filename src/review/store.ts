@@ -7,10 +7,11 @@ import { atomicWriteFile, withFileLock } from "../persistence.js";
 
 export const reviewStatuses = ["draft", "submitted", "processing", "done"] as const;
 export type ReviewStatus = (typeof reviewStatuses)[number];
+export type ReviewSource = "memory" | "task" | "changeset";
 
 export type ReviewComment = {
   id: string;
-  source?: "memory" | "task";
+  source?: ReviewSource;
   memoryId: string;
   memoryName: string;
   kind: string;
@@ -32,22 +33,34 @@ export type ReviewComment = {
 export type ReviewSnapshot = {
   label: string;
   path: string;
-  kind: "memory" | "task";
+  kind: ReviewSource;
   createdAt: string;
 };
 
 export type ReviewTarget = {
-  source: "memory" | "task";
+  source: ReviewSource;
   id: string;
   name?: string;
   path?: string;
   runId?: string;
+  project?: string;
+  digest?: string;
+  baseRevision?: string;
+};
+
+export type ReviewChangeManifest = {
+  targets: Array<{
+    operation: "create" | "update" | "delete" | "rename";
+    path: string;
+    destinationPath?: string;
+  }>;
 };
 
 export type ReviewFile = {
   id: string;
-  source?: "memory" | "task";
+  source?: ReviewSource;
   target?: ReviewTarget;
+  changeManifest?: ReviewChangeManifest;
   title: string;
   status: ReviewStatus;
   createdAt: string;
@@ -64,19 +77,19 @@ export type ReviewFile = {
 
 export type ReviewListSummary = {
   id: string;
-  source: "memory" | "task";
+  source: ReviewSource;
   title: string;
   status: ReviewStatus;
   target?: ReviewTarget;
   createdAt: string;
   updatedAt: string;
   commentCount: number;
-  snapshotKinds: Array<"memory" | "task">;
+  snapshotKinds: ReviewSource[];
 };
 
 const commentSchema = z.object({
   id: z.string(),
-  source: z.enum(["memory", "task"]).optional(),
+  source: z.enum(["memory", "task", "changeset"]).optional(),
   memoryId: z.string(),
   memoryName: z.string(),
   kind: z.string(),
@@ -97,14 +110,24 @@ const commentSchema = z.object({
 
 const reviewSchema = z.object({
   id: z.string(),
-  source: z.enum(["memory", "task"]).optional(),
+  source: z.enum(["memory", "task", "changeset"]).optional(),
   target: z.object({
-    source: z.enum(["memory", "task"]),
+    source: z.enum(["memory", "task", "changeset"]),
     id: z.string(),
     name: z.string().optional(),
     path: z.string().optional(),
-    runId: z.string().optional()
+    runId: z.string().optional(),
+    project: z.string().optional(),
+    digest: z.string().optional(),
+    baseRevision: z.string().optional()
   }).optional(),
+  changeManifest: z.object({
+    targets: z.array(z.object({
+      operation: z.enum(["create", "update", "delete", "rename"]),
+      path: z.string(),
+      destinationPath: z.string().optional()
+    }).strict())
+  }).strict().optional(),
   title: z.string(),
   status: z.enum(reviewStatuses),
   createdAt: z.string(),
@@ -115,7 +138,7 @@ const reviewSchema = z.object({
   snapshots: z.array(z.object({
     label: z.string(),
     path: z.string(),
-    kind: z.enum(["memory", "task"]),
+    kind: z.enum(["memory", "task", "changeset"]),
     createdAt: z.string()
   })).min(1),
   comments: z.array(commentSchema),
@@ -124,20 +147,23 @@ const reviewSchema = z.object({
 
 const reviewListSummarySchema: z.ZodType<ReviewListSummary> = z.object({
   id: z.string(),
-  source: z.enum(["memory", "task"]),
+  source: z.enum(["memory", "task", "changeset"]),
   title: z.string(),
   status: z.enum(reviewStatuses),
   target: z.object({
-    source: z.enum(["memory", "task"]),
+    source: z.enum(["memory", "task", "changeset"]),
     id: z.string(),
     name: z.string().optional(),
     path: z.string().optional(),
-    runId: z.string().optional()
+    runId: z.string().optional(),
+    project: z.string().optional(),
+    digest: z.string().optional(),
+    baseRevision: z.string().optional()
   }).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   commentCount: z.number().int().nonnegative(),
-  snapshotKinds: z.array(z.enum(["memory", "task"]))
+  snapshotKinds: z.array(z.enum(["memory", "task", "changeset"]))
 });
 
 const reviewSummaryCacheSchema = z.object({
@@ -159,14 +185,15 @@ const reviewSubjectIndexTtlMs = 5_000;
 
 type CreateReviewInput = {
   title?: string;
-  source?: "memory" | "task";
+  source?: ReviewSource;
   target?: ReviewTarget;
+  changeManifest?: ReviewChangeManifest;
   memoryRoot: string;
   reviewsRoot: string;
   snapshotFiles?: Array<{
     label: string;
     path: string;
-    kind: "memory" | "task";
+    kind: ReviewSource;
     directory?: boolean;
     entryPath?: string;
     rewriteRunMemoryRoot?: string;
@@ -196,6 +223,15 @@ export async function ensureReviewDirectory(reviewsRoot: string): Promise<string
   await mkdir(reviewsRoot, { recursive: true });
   await mkdir(join(reviewsRoot, ".locks"), { recursive: true });
   return reviewsRoot;
+}
+
+export async function withChangeSetReviewCreationLock<T>(
+  reviewsRoot: string,
+  changeId: string,
+  action: () => Promise<T>
+): Promise<T> {
+  const lockKey = createHash("sha256").update(`changeset\0${changeId}`).digest("hex");
+  return withFileLock(join(reviewsRoot, ".locks", `create-${lockKey}.lock`), action);
 }
 
 export async function listReviews(reviewsRoot: string): Promise<ReviewFile[]> {
@@ -354,7 +390,7 @@ export async function getReview(reviewsRoot: string, id: string): Promise<Review
 export async function readReviewSnapshot(
   reviewsRoot: string,
   id: string,
-  kind?: "memory" | "task"
+  kind?: ReviewSource
 ): Promise<{ snapshot: ReviewSnapshot; content: string; snapshotRoot: string } | undefined> {
   const review = await getReview(reviewsRoot, id);
   if (!review) return undefined;
@@ -365,6 +401,25 @@ export async function readReviewSnapshot(
   return { snapshot, content, snapshotRoot: snapshotArtifactRoot(reviewsRoot, id, snapshot, safePath) };
 }
 
+export async function readReviewSnapshots(
+  reviewsRoot: string,
+  id: string,
+  kind?: ReviewSource
+): Promise<Array<{ snapshot: ReviewSnapshot; content: string; snapshotRoot: string }>> {
+  const review = await getReview(reviewsRoot, id);
+  if (!review) return [];
+  const results: Array<{ snapshot: ReviewSnapshot; content: string; snapshotRoot: string }> = [];
+  for (const snapshot of review.snapshots.filter((item) => !kind || item.kind === kind)) {
+    const safePath = safeRelativePath(snapshot.path);
+    results.push({
+      snapshot,
+      content: await readFile(join(reviewsRoot, id, safePath), "utf8"),
+      snapshotRoot: snapshotArtifactRoot(reviewsRoot, id, snapshot, safePath)
+    });
+  }
+  return results;
+}
+
 export async function createReview(input: CreateReviewInput): Promise<ReviewFile> {
   await ensureReviewDirectory(input.reviewsRoot);
   const now = new Date().toISOString();
@@ -373,6 +428,7 @@ export async function createReview(input: CreateReviewInput): Promise<ReviewFile
     id,
     source: input.source ?? "memory",
     target: input.target,
+    changeManifest: input.changeManifest,
     title: input.title?.trim() || `Review ${new Date(now).toLocaleString()}`,
     status: "draft",
     createdAt: now,
