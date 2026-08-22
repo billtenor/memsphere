@@ -25,7 +25,6 @@ flow:
       format: markdown
       review:
         - 产品负责人
-        - 项目负责人
 
   - !action
     action: 基于已确认的需求契约调查代码，形成实施与验证方案。
@@ -40,7 +39,6 @@ flow:
         - 研发工程师
         - 架构师
         - 测试工程师
-        - 项目负责人
 
   - !action
     action: 基于已确认的实施与验证方案产出开发计划或 Task List。
@@ -92,7 +90,6 @@ flow:
         - 研发工程师
         - 测试工程师
         - 架构师
-        - 项目负责人
 
   - !action
     action: 复核实际改动、验证结果和验收结论，形成交付报告。
@@ -103,6 +100,8 @@ flow:
     artifact: !artifact
       name: 敏捷需求开发交付报告
       format: markdown
+      review:
+        - 产品负责人
       final: true
 
   - !action

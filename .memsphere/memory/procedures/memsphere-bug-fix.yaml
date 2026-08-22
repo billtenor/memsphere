@@ -26,7 +26,7 @@ flow:
       name: bug 理解摘要
       format: markdown
       review:
-        - 提需方
+        - 需求负责人
 
   - !action
     action: 分析 bug 的代码原因或流程原因。
@@ -51,7 +51,6 @@ flow:
       review:
         - 研发工程师
         - 测试工程师
-        - 提需方
 
   - !action
     action: 实施代码修复。
@@ -83,3 +82,4 @@ flow:
       review:
         - 研发工程师
         - 测试工程师
+        - 需求负责人
