@@ -119,6 +119,18 @@ flow:
     assert.equal(await memoryArtifact.getByText("decider", { exact: true }).count(), 0);
     assert.equal(await memoryArtifact.getByText("advisor", { exact: true }).count(), 0);
     await page.getByRole("button", { name: "Task", exact: true }).click();
+    const bindingPanel = page.locator(".run-bindings");
+    const bindingToggle = bindingPanel.locator(".run-binding-toggle");
+    const bindingBody = bindingPanel.locator(".run-binding-body");
+    await bindingToggle.waitFor();
+    assert.equal(await bindingToggle.getAttribute("aria-expanded"), "false");
+    assert.equal(await bindingBody.isVisible(), false);
+    await bindingToggle.click();
+    assert.equal(await bindingToggle.getAttribute("aria-expanded"), "true");
+    await bindingBody.getByText("换绑只影响尚未创建的 Review；已创建 Review 的参与者保持不变。", { exact: true }).waitFor();
+    await bindingToggle.click();
+    assert.equal(await bindingToggle.getAttribute("aria-expanded"), "false");
+    assert.equal(await bindingBody.isVisible(), false);
     await page.getByRole("button", { name: /^产物评审 0\/2$/ }).click();
     const reviewModal = page.locator("#artifact-review-modal");
     await reviewModal.waitFor();

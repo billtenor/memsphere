@@ -193,6 +193,15 @@ export const browserHtml = String.raw`<!doctype html>
     .call-link { color: var(--accent); text-decoration: none; font-weight: 700; }
     .call-link:hover { text-decoration: underline; }
     .task-summary { display: grid; gap: 12px; }
+    .run-bindings { padding: 0; overflow: hidden; }
+    .run-binding-toggle { width: 100%; border: 0; background: transparent; color: var(--text); padding: 12px; display: flex; gap: 10px; align-items: center; text-align: left; }
+    .run-binding-toggle:hover { background: #f4f5f1; }
+    .run-binding-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .run-binding-toggle .block-title { flex: 1; margin: 0; }
+    .run-binding-toggle-caret { width: 7px; height: 7px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg) translate(-1px, 1px); transform-origin: center; transition: transform 120ms ease; }
+    .run-binding-toggle[aria-expanded="true"] .run-binding-toggle-caret { transform: rotate(225deg) translate(-1px, 1px); }
+    .run-binding-body { display: grid; gap: 10px; border-top: 1px solid var(--line); padding: 12px; }
+    .run-binding-body[hidden] { display: none; }
     .run-binding-list { display: grid; gap: 10px; }
     .run-binding-row { border: 1px solid var(--line); border-radius: 7px; padding: 10px; display: grid; gap: 8px; }
     .run-binding-head, .run-binding-actions, .run-binding-actors { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -793,6 +802,7 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewActivities: {},
       artifactReviewMaterialBySubmission: {},
       inlineCommentDraft: null,
+      expandedRunBindings: new Set(),
       taskPollingRenderPending: false,
       taskDetailReloadPending: null,
       artifactReviewHistoryRoundId: null,
@@ -3696,13 +3706,42 @@ export const browserHtml = String.raw`<!doctype html>
       if (!slots.length || !actors.length) return null;
       const panel = document.createElement("section");
       panel.className = "panel run-bindings";
-      panel.append(blockTitle(displayLanguage === "zh" ? "运行期评审绑定" : "Runtime review bindings"));
+      const expanded = state.expandedRunBindings.has(run.id);
+      const bodyId = "run-binding-body-" + String(run.id).replace(/[^a-zA-Z0-9_-]/g, "-");
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "run-binding-toggle";
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.setAttribute("aria-controls", bodyId);
+      const title = document.createElement("span");
+      title.className = "block-title";
+      title.textContent = displayLanguage === "zh" ? "运行期评审绑定" : "Runtime review bindings";
+      toggle.append(
+        title,
+        pill(slots.length + (displayLanguage === "zh" ? " 个槽位" : slots.length === 1 ? " slot" : " slots"))
+      );
+      const caret = document.createElement("span");
+      caret.className = "run-binding-toggle-caret";
+      caret.setAttribute("aria-hidden", "true");
+      toggle.append(caret);
+      const body = document.createElement("div");
+      body.id = bodyId;
+      body.className = "run-binding-body";
+      body.hidden = !expanded;
+      toggle.addEventListener("click", () => {
+        const open = toggle.getAttribute("aria-expanded") !== "true";
+        toggle.setAttribute("aria-expanded", String(open));
+        body.hidden = !open;
+        if (open) state.expandedRunBindings.add(run.id);
+        else state.expandedRunBindings.delete(run.id);
+      });
+      panel.append(toggle, body);
       const help = document.createElement("div");
       help.className = "muted";
       help.textContent = displayLanguage === "zh"
         ? "换绑只影响尚未创建的 Review；已创建 Review 的参与者保持不变。"
         : "Changes affect only Reviews that have not been created; existing Review participants stay frozen.";
-      panel.append(help);
+      body.append(help);
       const list = document.createElement("div");
       list.className = "run-binding-list";
       const bindingSnapshotSlots = new Map((run.bindingSnapshot?.slots || []).map(item => [item.key, item]));
@@ -3762,9 +3801,9 @@ export const browserHtml = String.raw`<!doctype html>
         row.append(actions);
         list.append(row);
       }
-      panel.append(list);
+      body.append(list);
       if (run.bindingChanges?.length) {
-        panel.append(blockTitle(displayLanguage === "zh" ? "换绑历史" : "Binding history"));
+        body.append(blockTitle(displayLanguage === "zh" ? "换绑历史" : "Binding history"));
         const history = document.createElement("ul");
         history.className = "run-binding-history";
         for (const change of [...run.bindingChanges].reverse()) {
@@ -3773,7 +3812,7 @@ export const browserHtml = String.raw`<!doctype html>
             + " · " + runBindingValueLabel(change.before, run) + " → " + runBindingValueLabel(change.after, run);
           history.append(item);
         }
-        panel.append(history);
+        body.append(history);
       }
       return panel;
     }
