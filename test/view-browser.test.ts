@@ -315,8 +315,8 @@ test("ChangeSets are a Memory editing sub-flow with direct Comments", () => {
   assert.match(browserHtml, /summary\.textContent = "其他 ChangeSet · " \+ otherChanges\.length/);
   assert.match(browserHtml, /link\.textContent = change\.id \+ " · " \+ changeStatusLabel\(change\.status\)/);
   assert.match(browserHtml, /change\.id \+ " · " \+ changeStatusLabel\(change\.status\) \+ " · " \+ formatTime\(change\.updatedAt\)/);
-  assert.match(browserHtml, /changeDraft: \{ zh: "草稿", yaml: "Draft" \}/);
-  assert.match(browserHtml, /changePublished: \{ zh: "已发布", yaml: "Published" \}/);
+  assert.match(browserHtml, /changeActive: \{ zh: "进行中", yaml: "Active" \}/);
+  assert.doesNotMatch(browserHtml, /changePublished:/);
   assert.match(browserHtml, /changeCompleted: \{ zh: "已完成", yaml: "Completed" \}/);
   assert.match(browserHtml, /changeAbandoned: \{ zh: "已废弃", yaml: "Abandoned" \}/);
   assert.match(browserHtml, /if \(canComment\(\)\) \{[\s\S]*el\.detail\.append\(agentHint\);[\s\S]*选择下方任意内容旁的 \+/);

@@ -671,8 +671,7 @@ export const browserHtml = String.raw`<!doctype html>
       archiveRunConfirm: { zh: "归档这个 run？归档后它将不再出现在 Task 列表中。", yaml: "Archive this run? It will no longer appear in the Task list." },
       archiveChangeConfirm: { zh: "归档这个 ChangeSet？归档后它将不再在页面中展示。", yaml: "Archive this ChangeSet? It will no longer appear in the View." },
       completed: { zh: "已完成", yaml: "done" },
-      changeDraft: { zh: "草稿", yaml: "Draft" },
-      changePublished: { zh: "已发布", yaml: "Published" },
+      changeActive: { zh: "进行中", yaml: "Active" },
       changeCompleted: { zh: "已完成", yaml: "Completed" },
       changeAbandoned: { zh: "已废弃", yaml: "Abandoned" },
       changeCommentPending: { zh: "待处理", yaml: "Pending" },
@@ -3472,19 +3471,13 @@ export const browserHtml = String.raw`<!doctype html>
       }
       const change = detail.change;
       el.title.textContent = change.id;
-      el.subtitle.textContent = "ChangeSet · " + change.status;
+      el.subtitle.textContent = "ChangeSet · " + changeStatusLabel(change.status);
       el.detail.className = "";
       el.detail.innerHTML = "";
 
       const meta = document.createElement("div");
       meta.className = "meta";
-      const lifecycle = change.status === "published"
-        ? "Published ChangeSet"
-        : change.status === "completed"
-          ? "Completed ChangeSet"
-          : change.status === "abandoned"
-            ? "Abandoned ChangeSet"
-          : "Draft ChangeSet";
+      const lifecycle = changeStatusLabel(change.status) + " ChangeSet";
       meta.append(pill(lifecycle, true, change.valid === false ? "warn" : ""));
       meta.append(pill("Store: " + change.storeType));
       meta.append(pill("Base: " + String(change.baseRevision || "").slice(0, 12)));
@@ -3504,7 +3497,7 @@ export const browserHtml = String.raw`<!doctype html>
         });
         actions.append(identity);
       }
-      if (change.status === "draft") {
+      if (change.status === "active") {
         const addMemory = document.createElement("button");
         addMemory.type = "button";
         addMemory.className = "btn";
@@ -4546,7 +4539,7 @@ export const browserHtml = String.raw`<!doctype html>
           && context.assignment?.status === "draft"
         );
       }
-      if (state.viewMode === "changes") return state.changeDetail?.change?.status === "draft";
+      if (state.viewMode === "changes") return state.changeDetail?.change?.status === "active";
       return false;
     }
 
@@ -8312,7 +8305,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (status === "done" || status === "completed") return "done";
       if (status === "running") return "processing";
       if (status === "processing") return "processing";
-      if (status === "draft") return "warn";
+      if (status === "active") return "warn";
       return "";
     }
 
@@ -8320,14 +8313,13 @@ export const browserHtml = String.raw`<!doctype html>
       const changeStatus = state.changeDetail?.change?.status;
       if (comment.status === "completed") return t("changeCommentCompleted");
       if (changeStatus === "abandoned") return t("changeCommentAbandoned");
-      if (["completed", "published"].includes(changeStatus)) return t("changeCommentEnded");
+      if (changeStatus === "completed") return t("changeCommentEnded");
       if (comment.status === "processing") return t("changeCommentProcessing");
       return t("changeCommentPending");
     }
 
     function changeStatusLabel(status) {
-      if (status === "draft") return t("changeDraft");
-      if (status === "published") return t("changePublished");
+      if (status === "active") return t("changeActive");
       if (status === "completed") return t("changeCompleted");
       if (status === "abandoned") return t("changeAbandoned");
       return status;

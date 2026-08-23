@@ -114,10 +114,11 @@ export const memoryChangeSetSchema = z.object({
   project: z.string().min(1),
   workspace_key: z.string().min(1),
   base_revision: z.string().min(1),
-  status: z.enum(["draft", "published", "completed", "abandoned"]),
+  status: z.enum(["active", "completed", "abandoned"]),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
   published_revision: z.string().min(1).optional(),
+  candidate_revision: z.string().min(1).optional(),
   merge_parent: z.string().min(1).optional(),
   store_type: z.enum(["managed", "embedded"]).optional(),
   source_worktree: sourceWorktreeSchema.optional(),
@@ -331,7 +332,7 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
       project: input.project,
       memoryScope: "canonical"
     });
-    const change = await readChange(context.primary, input.changeId);
+    const change = await readReconciledChange(context.primary, input.changeId);
     const baseRoot = await mkdtemp(join(tmpdir(), "memsphere-change-detail-base-"));
     const previewRoot = await mkdtemp(join(tmpdir(), "memsphere-change-detail-preview-"));
     const scopeRevisionRoots: string[] = [];
@@ -427,7 +428,7 @@ async function prepareMemoryChangePreview(input: {
   changeId: string;
 }): Promise<PreparedMemoryChangePreview> {
   const context = await resolveProjectContext({ home: input.home, project: input.project });
-  const change = await readChange(context.primary, input.changeId);
+  const change = await readReconciledChange(context.primary, input.changeId);
   if (change.project !== context.primary.name) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
   if (!change.checkpoint) throw new Error(`ChangeSet ${change.id} has no validated checkpoint`);
   const candidateRoot = checkpointMemoryRoot(context.primary, change.id, change.checkpoint.digest);
@@ -614,7 +615,7 @@ export async function checkpointWorkspaceChanges(): Promise<number> {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const change = await readChange(context.primary, entry.name).catch(() => undefined);
-    if (!change || change.status !== "draft" || change.workspace_key !== workspace.key) continue;
+    if (!change || change.status !== "active" || change.workspace_key !== workspace.key) continue;
     const source = join(workspaceChanges, entry.name, "memory");
     if (!await exists(source)) continue;
     const recovery = recoveryRoot(context.primary, entry.name);
@@ -653,7 +654,7 @@ export async function publishMemoryChange(
   return withFileLock(memoryMutationLock(initialContext.primary), async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     assertManaged(context.primary);
-    const change = await readChange(context.primary, changeId);
+    const change = await readReconciledChange(context.primary, changeId);
     assertDraftOwner(change, context.primary.name, workspace.key);
     if (options.expectedKind === "sync" && !change.merge_parent) {
       throw new Error(`ChangeSet ${change.id} is not a Sync ChangeSet`);
@@ -674,8 +675,8 @@ export async function validateMemoryChange(changeId?: string): Promise<MemoryCha
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     if (context.primary.config.store.type === "managed") {
       await assertManagedHealthy(context.primary);
-      const resolvedId = changeId ?? await resolveSingleManagedDraft(context.primary, workspace);
-      const change = await readChange(context.primary, resolvedId);
+      const resolvedId = changeId ?? await resolveSingleManagedActive(context.primary, workspace);
+      const change = await readReconciledChange(context.primary, resolvedId);
       assertDraftOwner(change, context.primary.name, workspace.key);
       if (changeStoreType(change) !== "managed") throw new Error(`ChangeSet ${change.id} is not a Managed ChangeSet`);
       const candidateRoot = workspaceCandidateRoot(workspace.path, resolvedId);
@@ -741,14 +742,14 @@ export async function validateMemoryChange(changeId?: string): Promise<MemoryCha
   });
 }
 
-async function resolveSingleManagedDraft(project: ResolvedProject, workspace: WorkspaceIdentity): Promise<string> {
+async function resolveSingleManagedActive(project: ResolvedProject, workspace: WorkspaceIdentity): Promise<string> {
   const root = resolve(workspace.path, ".memsphere-work", "changes");
   let entries;
   try {
     entries = await readdir(root, { withFileTypes: true });
   } catch (error) {
     if (isCode(error, "ENOENT")) {
-      throw new Error("no Managed draft ChangeSet was found in the current Workspace; run memsphere memory edit or provide a change id");
+      throw new Error("no active Managed ChangeSet was found in the current Workspace; run memsphere memory edit or provide a change id");
     }
     throw error;
   }
@@ -757,7 +758,7 @@ async function resolveSingleManagedDraft(project: ResolvedProject, workspace: Wo
     if (!entry.isDirectory() || !/^change-[a-zA-Z0-9-]+$/.test(entry.name)) continue;
     const change = await readChange(project, entry.name).catch(() => undefined);
     if (
-      change?.status === "draft"
+      change?.status === "active"
       && change.project === project.name
       && change.workspace_key === workspace.key
       && changeStoreType(change) === "managed"
@@ -767,9 +768,9 @@ async function resolveSingleManagedDraft(project: ResolvedProject, workspace: Wo
   ids.sort();
   if (ids.length === 1) return ids[0];
   if (ids.length === 0) {
-    throw new Error("no Managed draft ChangeSet was found in the current Workspace; run memsphere memory edit or provide a change id");
+    throw new Error("no active Managed ChangeSet was found in the current Workspace; run memsphere memory edit or provide a change id");
   }
-  throw new Error(`multiple Managed draft ChangeSets were found; provide one explicitly: ${ids.join(", ")}`);
+  throw new Error(`multiple active Managed ChangeSets were found; provide one explicitly: ${ids.join(", ")}`);
 }
 
 async function snapshotSparseCandidate(
@@ -838,6 +839,7 @@ async function persistValidatedCheckpoint(
   issueCandidateRoot = candidateRoot
 ): Promise<string> {
   const digest = await checkpointDigest(change.targets, candidateRoot);
+  const checkpointChanged = change.checkpoint?.digest !== digest;
   const checkpoints = checkpointsRoot(project, change.id);
   const revisionRoot = join(checkpoints, digest);
   const finalMemoryRoot = join(revisionRoot, "memory");
@@ -861,6 +863,7 @@ async function persistValidatedCheckpoint(
     valid: issues.length === 0,
     issues: issues.map((issue) => persistedValidationIssue(issue, effectiveMemoryRoot, issueCandidateRoot))
   };
+  if (checkpointChanged && changeStoreType(change) === "embedded") delete change.candidate_revision;
   change.updated_at = new Date().toISOString();
   await writeChange(project, change);
   for (const entry of await readdir(checkpoints, { withFileTypes: true })) {
@@ -959,7 +962,7 @@ async function captureEmbeddedWorkingChange(
   let change: MemoryChangeSet;
   try {
     if (requestedId) {
-      change = await readChange(project, requestedId);
+      change = await readReconciledChange(project, requestedId);
       assertDraftOwner(change, project.name, workspace.key);
       if (changeStoreType(change) !== "embedded") throw new Error(`ChangeSet ${change.id} is not an Embedded ChangeSet`);
       if (change.base_revision !== baseRevision) {
@@ -969,23 +972,10 @@ async function captureEmbeddedWorkingChange(
         await forwardEmbeddedViewBase(change, workspace.path, memoryPath, baseRevision);
       }
     } else {
-      const projectChanges = await listProjectChanges(project);
+      const projectChanges = await listProjectChanges(project, true);
       const completedChangeIds: string[] = [];
-      for (const candidate of projectChanges) {
-        if (
-          candidate.status === "draft"
-          && changeStoreType(candidate) === "embedded"
-          && candidate.workspace_key === workspace.key
-          && candidate.base_revision !== baseRevision
-        ) {
-          candidate.status = "completed";
-          candidate.updated_at = new Date().toISOString();
-          await writeChange(project, candidate);
-          completedChangeIds.push(candidate.id);
-        }
-      }
       const matches = projectChanges.filter((candidate) => (
-        candidate.status === "draft"
+        candidate.status === "active"
         && changeStoreType(candidate) === "embedded"
         && candidate.workspace_key === workspace.key
         && candidate.base_revision === baseRevision
@@ -1000,10 +990,12 @@ async function captureEmbeddedWorkingChange(
         change = exact[0];
         for (const duplicate of matches) {
           if (duplicate.id === change.id) continue;
-          duplicate.status = "completed";
+          if (duplicate.comments.length > 0 || duplicate.scope.length > 0 || duplicate.claim || duplicate.origin === "view") {
+            throw new Error(`duplicate Embedded ChangeSet ${duplicate.id} contains user data and must be resolved explicitly`);
+          }
+          duplicate.status = "abandoned";
           duplicate.updated_at = new Date().toISOString();
           await writeChange(project, duplicate);
-          completedChangeIds.push(duplicate.id);
         }
       } else {
         change = matches[0] ?? newChange(project, workspace.key);
@@ -1194,7 +1186,7 @@ async function materializeGitMemoryRoot(
   }
 }
 
-async function listProjectChanges(project: ResolvedProject): Promise<MemoryChangeSet[]> {
+async function listProjectChanges(project: ResolvedProject, reconcile = false): Promise<MemoryChangeSet[]> {
   let entries;
   try {
     entries = await readdir(project.paths.changesRoot, { withFileTypes: true });
@@ -1205,7 +1197,8 @@ async function listProjectChanges(project: ResolvedProject): Promise<MemoryChang
   const changes: MemoryChangeSet[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || !/^change-[a-zA-Z0-9-]+$/.test(entry.name)) continue;
-    const change = await readChange(project, entry.name).catch(() => undefined);
+    const change = await (reconcile ? readReconciledChange(project, entry.name) : readChange(project, entry.name))
+      .catch(() => undefined);
     if (change) changes.push(change);
   }
   return changes;
@@ -1213,15 +1206,18 @@ async function listProjectChanges(project: ResolvedProject): Promise<MemoryChang
 
 export async function listMemoryChanges(input: { home?: string; project: string }): Promise<MemoryChangeSet[]> {
   const context = await resolveProjectContext({ home: input.home, project: input.project });
-  return (await listProjectChanges(context.primary)).sort((left, right) => {
-    const activity = Number(right.status === "draft") - Number(left.status === "draft");
-    return activity || right.updated_at.localeCompare(left.updated_at);
+  return withFileLock(memoryMutationLock(context.primary), async () => {
+    const changes = await listProjectChanges(context.primary, true);
+    return changes.sort((left, right) => {
+      const activity = Number(right.status === "active") - Number(left.status === "active");
+      return activity || right.updated_at.localeCompare(left.updated_at);
+    });
   });
 }
 
 export async function readMemoryChange(input: { home?: string; project: string; changeId: string }): Promise<MemoryChangeSet> {
   const context = await resolveProjectContext({ home: input.home, project: input.project });
-  return readChange(context.primary, input.changeId);
+  return withFileLock(memoryMutationLock(context.primary), () => readReconciledChange(context.primary, input.changeId));
 }
 
 export async function createViewMemoryChange(input: {
@@ -1280,7 +1276,7 @@ export async function addMemoryChangeScope(input: {
       project: input.project,
       memoryScope: "canonical"
     })).primary;
-    const change = await readChange(project, input.changeId);
+    const change = await readReconciledChange(project, input.changeId);
     assertMutableChange(change, input.expectedUpdatedAt);
     if (change.claim) {
       throw new Error("cannot add Memory while the ChangeSet is claimed; finish the claim, add Memory, then claim again");
@@ -1318,7 +1314,7 @@ export async function abandonMemoryChange(input: {
       project: input.project,
       memoryScope: "canonical"
     })).primary;
-    const change = await readChange(project, input.changeId);
+    const change = await readReconciledChange(project, input.changeId);
     assertMutableChange(change, input.expectedUpdatedAt);
     change.status = "abandoned";
     delete change.claim;
@@ -1341,8 +1337,8 @@ export async function archiveMemoryChange(input: {
       project: input.project,
       memoryScope: "canonical"
     })).primary;
-    const change = await readChange(project, input.changeId);
-    if (change.status === "draft") throw new Error("only terminal ChangeSets can be archived");
+    const change = await readReconciledChange(project, input.changeId);
+    if (change.status === "active") throw new Error("only terminal ChangeSets can be archived");
     if (input.expectedUpdatedAt && change.updated_at !== input.expectedUpdatedAt) {
       throw new Error(`ChangeSet ${change.id} was modified by another operation`);
     }
@@ -1374,7 +1370,7 @@ export async function createMemoryChangeComment(input: {
       project: input.project,
       memoryScope: "canonical"
     })).primary;
-    const change = await readChange(project, input.changeId);
+    const change = await readReconciledChange(project, input.changeId);
     assertMutableChange(change, input.expectedUpdatedAt);
     const actor = memoryChangeActorSchema.parse(input.actor);
     const body = input.body.trim();
@@ -1423,7 +1419,7 @@ export async function updateMemoryChangeComment(input: {
       project: input.project,
       memoryScope: "canonical"
     })).primary;
-    const change = await readChange(project, input.changeId);
+    const change = await readReconciledChange(project, input.changeId);
     assertMutableChange(change, input.expectedUpdatedAt);
     const actor = memoryChangeActorSchema.parse(input.actor);
     const comment = change.comments.find((item) => item.id === input.commentId);
@@ -1461,7 +1457,7 @@ export async function deleteMemoryChangeComment(input: {
       project: input.project,
       memoryScope: "canonical"
     })).primary;
-    const change = await readChange(project, input.changeId);
+    const change = await readReconciledChange(project, input.changeId);
     assertMutableChange(change, input.expectedUpdatedAt);
     const actor = memoryChangeActorSchema.parse(input.actor);
     const index = change.comments.findIndex((item) => item.id === input.commentId);
@@ -1484,8 +1480,8 @@ export async function claimMemoryChange(input: {
   const workspace = await resolveWorkspaceIdentity();
   return withFileLock(memoryMutationLock(initial.primary), async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-    const change = await readChange(context.primary, input.changeId);
-    if (change.status !== "draft") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
+    const change = await readReconciledChange(context.primary, input.changeId);
+    if (change.status !== "active") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
     if (change.project !== context.primary.name) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
     if (change.claim && change.claim.instance_key !== workspace.instanceKey && !input.force) {
       throw new Error(`ChangeSet ${change.id} is already claimed by ${change.claim.root}; use --force to take over`);
@@ -1539,7 +1535,7 @@ export async function finishMemoryChange(input: {
   const workspace = await resolveWorkspaceIdentity();
   return withFileLock(memoryMutationLock(initial.primary), async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-    const change = await readChange(context.primary, input.changeId);
+    const change = await readReconciledChange(context.primary, input.changeId);
     assertClaimOwner(change, context.primary.name, workspace);
     const ids = new Set(input.commentIds ?? []);
     if (ids.size > 0 && !input.reason) throw new Error("--reason is required when completing Comments");
@@ -1573,8 +1569,8 @@ export async function completeMemoryChange(changeId: string): Promise<MemoryChan
   const initial = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   return withFileLock(memoryMutationLock(initial.primary), async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-    const change = await readChange(context.primary, changeId);
-    if (change.status !== "draft") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
+    const change = await readReconciledChange(context.primary, changeId);
+    if (change.status !== "active") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
     if (change.targets.length > 0) throw new Error("only a ChangeSet without actual Memory differences can be completed explicitly");
     if (change.comments.some((comment) => comment.status !== "completed")) {
       throw new Error("all ChangeSet Comments must be completed first");
@@ -1618,7 +1614,7 @@ async function canonicalChangeIdentity(project: ResolvedProject): Promise<{
 }
 
 function assertMutableChange(change: MemoryChangeSet, expectedUpdatedAt?: string): void {
-  if (change.status !== "draft") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
+  if (change.status !== "active") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
   if (expectedUpdatedAt && change.updated_at !== expectedUpdatedAt) {
     throw new Error(`ChangeSet ${change.id} was modified by another operation`);
   }
@@ -1632,7 +1628,7 @@ function assertSameChangeActor(expected: MemoryChangeActor, actual: MemoryChange
 
 function assertClaimOwner(change: MemoryChangeSet, project: string, workspace: WorkspaceIdentity): void {
   if (change.project !== project) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
-  if (change.status !== "draft") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
+  if (change.status !== "active") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
   if (!change.claim) throw new Error(`ChangeSet ${change.id} is not claimed`);
   if (change.claim.instance_key !== workspace.instanceKey) {
     throw new Error(`ChangeSet ${change.id} is claimed by ${change.claim.root}`);
@@ -1964,7 +1960,7 @@ async function publishLocked(project: ResolvedProject, change: MemoryChangeSet, 
     const revision = await updatePublishedRevision(project);
     const published = memoryChangeSetSchema.parse({
       ...effectiveChange,
-      status: "published",
+      status: "completed",
       published_revision: revision,
       updated_at: new Date().toISOString()
     });
@@ -2108,7 +2104,7 @@ function newChange(
     project: project.name,
     workspace_key: workspaceKey,
     base_revision: revision,
-    status: "draft",
+    status: "active",
     created_at: now,
     updated_at: now,
     targets: [],
@@ -2257,13 +2253,20 @@ async function readChange(project: ResolvedProject, id: string): Promise<MemoryC
   return memoryChangeSetSchema.parse(JSON.parse(await readFile(changePath(project, id), "utf8")));
 }
 
+async function readReconciledChange(project: ResolvedProject, id: string): Promise<MemoryChangeSet> {
+  const change = await readChange(project, id);
+  const reconciled = await reconcileEmbeddedChange(project, change);
+  if (reconciled !== change) await writeChange(project, reconciled);
+  return reconciled;
+}
+
 async function writeChange(project: ResolvedProject, change: MemoryChangeSet): Promise<void> {
   await atomicWriteJson(changePath(project, change.id), memoryChangeSetSchema.parse(change));
 }
 
 function assertDraftOwner(change: MemoryChangeSet, project: string, workspaceKey: string): void {
   if (change.project !== project) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
-  if (change.status !== "draft") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
+  if (change.status !== "active") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
   if (change.workspace_key !== workspaceKey) throw new Error(`ChangeSet ${change.id} belongs to another Workspace`);
 }
 
@@ -2285,6 +2288,82 @@ function checkpointsRoot(project: ResolvedProject, id: string): string {
 function checkpointMemoryRoot(project: ResolvedProject, id: string, digest: string): string {
   if (!/^[a-f0-9]{64}$/.test(digest)) throw new Error(`invalid ChangeSet checkpoint digest: ${digest}`);
   return join(checkpointsRoot(project, id), digest, "memory");
+}
+
+async function reconcileEmbeddedChange(
+  project: ResolvedProject,
+  change: MemoryChangeSet
+): Promise<MemoryChangeSet> {
+  if (
+    change.status !== "active"
+    || changeStoreType(change) !== "embedded"
+    || !change.checkpoint?.valid
+    || change.targets.length === 0
+    || !change.source_worktree
+  ) return change;
+
+  const source = change.source_worktree;
+  let candidateRevision = change.candidate_revision;
+  if (!candidateRevision) {
+    const sourceHead = await gitOutput(["rev-parse", "HEAD"], source.root).catch(() => undefined);
+    if (sourceHead && await revisionMatchesCheckpoint(project, change, sourceHead)) {
+      candidateRevision = sourceHead;
+    }
+  }
+
+  const masterRevision = await gitOutput(["rev-parse", "master"], source.repository_root).catch(() => undefined);
+  const completed = Boolean(masterRevision && (
+    await revisionMatchesCheckpoint(project, change, masterRevision)
+    || candidateRevision && await isAncestor(candidateRevision, masterRevision, source.repository_root)
+  ));
+  const candidateChanged = candidateRevision !== change.candidate_revision;
+  const statusChanged = completed;
+  if (!candidateChanged && !statusChanged) return change;
+
+  return memoryChangeSetSchema.parse({
+    ...change,
+    ...(candidateRevision ? { candidate_revision: candidateRevision } : {}),
+    ...(completed ? { status: "completed" as const } : {}),
+    updated_at: new Date().toISOString()
+  });
+}
+
+async function revisionMatchesCheckpoint(
+  project: ResolvedProject,
+  change: MemoryChangeSet,
+  revision: string
+): Promise<boolean> {
+  if (!change.checkpoint || !change.source_worktree) return false;
+  const candidateRoot = checkpointMemoryRoot(project, change.id, change.checkpoint.digest);
+  if (!await exists(candidateRoot)) return false;
+  const source = change.source_worktree;
+  for (const target of change.targets) {
+    const destinationPath = embeddedRepositoryPath(source.memory_path, target.destination_path ?? target.path);
+    const destinationDigest = await gitOutput(
+      ["rev-parse", `${revision}:${destinationPath}`],
+      source.repository_root
+    ).catch(() => undefined);
+    if (target.operation === "delete") {
+      if (destinationDigest) return false;
+      continue;
+    }
+    const candidatePath = join(candidateRoot, target.path);
+    if (!await exists(candidatePath)) return false;
+    const candidateDigest = await gitOutput(
+      ["hash-object", "--", candidatePath],
+      source.repository_root
+    ).catch(() => undefined);
+    if (!candidateDigest || destinationDigest !== candidateDigest) return false;
+    if (target.operation === "rename") {
+      const originalPath = embeddedRepositoryPath(source.memory_path, target.path);
+      const originalDigest = await gitOutput(
+        ["rev-parse", `${revision}:${originalPath}`],
+        source.repository_root
+      ).catch(() => undefined);
+      if (originalPath !== destinationPath && originalDigest) return false;
+    }
+  }
+  return true;
 }
 
 function workspaceCandidateRoot(workspace: string, id: string): string {

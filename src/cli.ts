@@ -215,7 +215,7 @@ memoryChange.command("finish")
   .action(memoryChangeFinishCommand);
 
 memoryChange.command("complete")
-  .description("Complete a draft ChangeSet that has no actual Memory differences or unfinished Comments.")
+  .description("Complete an active ChangeSet that has no actual Memory differences or unfinished Comments.")
   .argument("<change-id>", "ChangeSet id")
   .action(memoryChangeCompleteCommand);
 

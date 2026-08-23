@@ -51,7 +51,7 @@ memsphere memory change validate
 
 两种 Project 都只保存一份稀疏、内容寻址的当前验证内容；再次校验会原子替换它，不创建供用户选择或回滚的额外快照。命令会输出 ChangeSet id 和稳定 View 地址 `/projects/<project>/changes/<change-id>`。View 顶层只并列 Memory 与 Task；ChangeSet 是 Memory 编辑子功能，从 Memory 列表的“修改中 · N”展开进入。
 
-Embedded 的标准命令不需要额外选择参数：同一 Project、Git repository 和 base revision 下会持续复用同一个逻辑 ChangeSet，linked worktree 路径变化不会生成新对象；Git base revision 变化后才完成旧 ChangeSet并为后续差异创建新对象。ChangeSet candidate 和当前验证内容都只包含目标文件，不应直接传给 `memsphere validate --memory-root`；该参数仍用于校验包含四类目录的完整 Memory Store。Managed 最终发布仍使用 `memsphere memory publish`；Embedded 最终发布仍使用普通 Git commit。
+Embedded 的标准命令不需要额外选择参数：同一 Project、Git repository 和 base revision 下会持续复用同一个逻辑 ChangeSet，linked worktree 路径变化不会生成新对象。ChangeSet 的生命周期只有 active、completed、abandoned：普通 commit、push 或创建 PR 后仍为 active，候选提交合入 `master` 后才自动成为 completed；Managed 使用 `memsphere memory publish` 后直接成为 completed。ChangeSet candidate 和当前验证内容都只包含目标文件，不应直接传给 `memsphere validate --memory-root`；该参数仍用于校验包含四类目录的完整 Memory Store。
 
 Memory 详情的“修改”会在简单确认后创建一个新的持久 ChangeSet。用户不能在 View 直接编辑 YAML，只能把已有 Memory 加入 ChangeSet，并在结构位置旁通过 `+` 逐条提交修改意见。Comment 直接绑定 ChangeSet，状态只有 pending、processing、completed；不再存在独立 Memory Review 或 ChangeSet Review。Human Actor 与稳定 Browser user UUID 只用于归因，不构成身份认证。
 

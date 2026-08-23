@@ -155,7 +155,7 @@ export async function memoryRenameCommand(reference: string, newName: string, op
 export async function memoryPublishCommand(options: { change?: string; message?: string }): Promise<void> {
   if (!options.change) throw new Error("--change <id> is required");
   const change = await publishMemoryChange(options.change, options.message, { expectedKind: "regular" });
-  console.log(`Published ChangeSet: ${change.id}`);
+  console.log(`Completed ChangeSet: ${change.id}`);
   console.log(`Revision: ${change.published_revision}`);
 }
 
@@ -214,9 +214,6 @@ export async function memoryChangeValidateCommand(
   console.log(`Store: ${result.storeType}`);
   console.log(`Base Revision: ${result.baseRevision}`);
   console.log(`Content Digest: ${result.checkpointDigest}`);
-  if (result.completedChangeIds.length > 0) {
-    console.log(`Completed previous ChangeSets: ${result.completedChangeIds.join(", ")}`);
-  }
   console.log(`memoryRoot: ${result.memoryRoot}`);
   if (preview.url) console.log(`Preview: ${preview.url}`);
   else console.log(`Preview: start memsphere View, then open ${preview.path}`);
