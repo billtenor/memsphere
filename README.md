@@ -49,11 +49,21 @@ Embedded Project 直接修改当前 Git worktree 中的 Memory，然后执行同
 memsphere memory change validate
 ```
 
-两种 Project 都只保存一份稀疏、内容寻址的当前验证内容；再次校验会原子替换它，不创建供用户选择或回滚的额外快照。命令会输出 ChangeSet id 和稳定 View 地址 `/projects/<project>/changes/<change-id>`。Changes 是 View 的一等入口，可浏览变更列表、操作类型、完整有效 Store、校验诊断和关联 Review，不改变 Memories 中的正式版本。
+两种 Project 都只保存一份稀疏、内容寻址的当前验证内容；再次校验会原子替换它，不创建供用户选择或回滚的额外快照。命令会输出 ChangeSet id 和稳定 View 地址 `/projects/<project>/changes/<change-id>`。View 顶层只并列 Memory 与 Task；ChangeSet 是 Memory 编辑子功能，从 Memory 列表的“修改中 · N”展开进入。
 
 Embedded 的标准命令不需要额外选择参数：同一 Project、Git repository 和 base revision 下会持续复用同一个逻辑 ChangeSet，linked worktree 路径变化不会生成新对象；Git base revision 变化后才完成旧 ChangeSet并为后续差异创建新对象。ChangeSet candidate 和当前验证内容都只包含目标文件，不应直接传给 `memsphere validate --memory-root`；该参数仍用于校验包含四类目录的完整 Memory Store。Managed 最终发布仍使用 `memsphere memory publish`；Embedded 最终发布仍使用普通 Git commit。
 
-ChangeSet 详情可以直接创建 Review。Review 复制当前 digest 对应的 create/update/rename 内容和 delete 前内容作为不可变稀疏证据，并继续使用现有 Memory Comment 与状态流程。再次校验导致 digest 改变后，旧 Review 显示为过期但快照与 Comment 保持不变；当前内容可以创建新的 Review。Human 与 Agent 创建的 Comment 使用同一模型。
+Memory 详情的“修改”会在简单确认后创建一个新的持久 ChangeSet。用户不能在 View 直接编辑 YAML，只能把已有 Memory 加入 ChangeSet，并在结构位置旁通过 `+` 逐条提交修改意见。Comment 直接绑定 ChangeSet，状态只有 pending、processing、completed；不再存在独立 Memory Review 或 ChangeSet Review。Human Actor 与稳定 Browser user UUID 只用于归因，不构成身份认证。
+
+用户在 Agent 对话中提供 ChangeSet id 后，Agent 在对应 worktree 接手并处理 Comment：
+
+```bash
+memsphere memory change claim <change-id>
+memsphere memory change validate <change-id>
+memsphere memory change finish <change-id> --comment <comment-id> --reason fixed
+```
+
+已有处理者时 `claim` 默认拒绝；只有用户明确要求强制接手才使用 `--force`。不合理的 Comment 不修改内容，使用 `--reason rejected` 完成，并在 Agent 对话中说明判断。没有实际差异且所有 Comment 已完成时使用 `memsphere memory change complete <change-id>`。`finish` 会释放 claim；View 不提供“交给 Agent 处理”按钮，也不会因提交 Comment 自动创建 Task。
 
 Embedded Project 中使用同一条编辑命令时，CLI 会返回当前 worktree 中的实际 YAML 路径；修改后使用普通 Git 工作流集成，不执行 `memory publish`：
 

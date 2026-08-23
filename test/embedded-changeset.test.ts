@@ -137,6 +137,16 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     }
     await assert.rejects(realpath(cachedRoots[0]!));
 
+    const projectConfigPath = join(project.root, "config.json");
+    const projectConfig = JSON.parse(await readFile(projectConfigPath, "utf8")) as Record<string, unknown>;
+    await writeFile(projectConfigPath, `${JSON.stringify({
+      ...projectConfig,
+      control_plane: {
+        runner: { permissions: [] },
+        actors: { alice: { kind: "human", name: "Alice", permissions: [] } }
+      }
+    }, null, 2)}\n`);
+
     const view = createViewServer(await readViewConfig());
     await new Promise<void>((resolve, reject) => {
       view.once("error", reject);
@@ -182,6 +192,15 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       );
       assert.equal(previewSummary.memories.some((memory) => memory.entity !== undefined), false);
       assert.doesNotMatch(previewSummarySource, /Linked preview/);
+
+      const changeDetailResponse = await fetch(`${origin}/api/changes/${encodeURIComponent(first.changeId)}`);
+      const changeDetail = await changeDetailResponse.json() as {
+        actorNames: Record<string, string>;
+        actorKinds: Record<string, string>;
+      };
+      assert.equal(changeDetailResponse.status, 200);
+      assert.deepEqual(changeDetail.actorNames, { alice: "Alice" });
+      assert.deepEqual(changeDetail.actorKinds, { alice: "human" });
 
       const previewDetailResponse = await fetch(
         `${origin}/api/memories/concepts/shared?change=${encodeURIComponent(first.changeId)}`
@@ -245,231 +264,6 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     await heldSnapshot;
     assert.equal((await concurrentValidation).checkpointDigest, expanded.checkpointDigest);
 
-    let expandedReviewId = "";
-    const expandedView = createViewServer(await readViewConfig());
-    await new Promise<void>((resolve, reject) => {
-      expandedView.once("error", reject);
-      expandedView.listen(0, "127.0.0.1", resolve);
-    });
-    const expandedOrigin = `http://127.0.0.1:${(expandedView.address() as AddressInfo).port}`;
-    try {
-      const changesResponse = await fetch(`${expandedOrigin}/api/changes`);
-      const changesPayload = await changesResponse.json() as { changes: Array<{ id: string; targetCount: number }> };
-      assert.equal(changesResponse.status, 200);
-      assert.equal(changesPayload.changes.find((change) => change.id === first.changeId)?.targetCount, 4);
-
-      const detailResponse = await fetch(`${expandedOrigin}/api/changes/${encodeURIComponent(first.changeId)}`);
-      const detail = await detailResponse.json() as {
-        targetMemories: Array<{ operation: string; memory: { path: string; entity: { names?: string[] } } }>;
-      };
-      assert.equal(detailResponse.status, 200);
-      assert.deepEqual(
-        detail.targetMemories.find((target) => target.operation === "delete")?.memory.entity.names,
-        ["delete-me"]
-      );
-
-      const createCurrentReview = () => fetch(`${expandedOrigin}/api/reviews`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ source: "changeset", changeId: first.changeId })
-      });
-      const concurrentResponses = await Promise.all([createCurrentReview(), createCurrentReview()]);
-      assert.deepEqual(concurrentResponses.map((item) => item.status).sort(), [201, 409]);
-      const reviewResponse = concurrentResponses.find((item) => item.status === 201)!;
-      const rejectedConcurrent = concurrentResponses.find((item) => item.status === 409)!;
-      assert.match(await rejectedConcurrent.text(), /already exists/);
-      const review = (await reviewResponse.json() as {
-        review: {
-          id: string;
-          target: { digest: string };
-          changeManifest: { targets: Array<{ operation: string }> };
-        };
-      }).review;
-      assert.equal(reviewResponse.status, 201);
-      assert.equal(review.target.digest, expanded.checkpointDigest);
-      assert.deepEqual(
-        new Set(review.changeManifest.targets.map((target) => target.operation)),
-        new Set(["create", "delete", "rename", "update"])
-      );
-      expandedReviewId = review.id;
-
-      const duplicateReview = await fetch(`${expandedOrigin}/api/reviews`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ source: "changeset", changeId: first.changeId })
-      });
-      assert.equal(duplicateReview.status, 409);
-      assert.match(await duplicateReview.text(), /already exists/);
-
-      const snapshotsResponse = await fetch(`${expandedOrigin}/api/reviews/${encodeURIComponent(review.id)}/snapshots`);
-      const snapshots = await snapshotsResponse.json() as {
-        memories: Array<{ memory: { path: string; entity: { defines?: string[] } } }>;
-      };
-      assert.equal(snapshotsResponse.status, 200);
-      assert.equal(snapshots.memories.length, 4);
-      assert.deepEqual(
-        snapshots.memories.find((item) => item.memory.path === "concepts/shared.yaml")?.memory.entity.defines,
-        ["Linked preview"]
-      );
-
-      const reviewBrowser = await chromium.launch({ headless: true });
-      try {
-        const page = await reviewBrowser.newPage({ viewport: { width: 1366, height: 900 } });
-        await page.goto(
-          `${expandedOrigin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`
-          + `/reviews/${encodeURIComponent(review.id)}`
-        );
-        const submit = page.getByRole("button", { name: "Submit", exact: true });
-        await submit.waitFor();
-        assert.equal(await submit.isEnabled(), true);
-        await submit.click();
-        await page.getByText("submitted · 0 comment(s)", { exact: true }).waitFor();
-        await page.close();
-      } finally {
-        await reviewBrowser.close();
-      }
-      const submittedReview = await fetch(`${expandedOrigin}/api/reviews/${encodeURIComponent(review.id)}`);
-      assert.equal(
-        (await submittedReview.json() as { review: { status: string } }).review.status,
-        "submitted"
-      );
-      const submittedChanges = await fetch(`${expandedOrigin}/api/changes`);
-      assert.equal(
-        ((await submittedChanges.json()) as { changes: Array<{ id: string; state: string }> }).changes
-          .find((change) => change.id === first.changeId)?.state,
-        "in_review"
-      );
-
-      await writeFile(
-        join(linkedMemory, "concepts", "shared.yaml"),
-        linkedSource.replace("Linked preview", "Newer stale review")
-      );
-      const newer = await validateMemoryChange();
-      assert.notEqual(newer.checkpointDigest, expanded.checkpointDigest);
-
-      const stalePatch = await fetch(`${expandedOrigin}/api/reviews/${encodeURIComponent(review.id)}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          title: "must not change",
-          status: "done",
-          comments: [{
-            id: "comment-on-stale-snapshot",
-            source: "changeset",
-            memoryId: "concepts/shared",
-            memoryName: "shared",
-            kind: "concepts",
-            body: "This mutation must be rejected.",
-            createdAt: new Date().toISOString()
-          }]
-        })
-      });
-      assert.equal(stalePatch.status, 409);
-      assert.equal(
-        (await stalePatch.json() as { code: string }).code,
-        "changeset_review_stale"
-      );
-      const staleDelete = await fetch(`${expandedOrigin}/api/reviews/${encodeURIComponent(review.id)}`, {
-        method: "DELETE"
-      });
-      assert.equal(staleDelete.status, 409);
-      assert.equal(
-        (await staleDelete.json() as { code: string }).code,
-        "changeset_review_stale"
-      );
-      const unchangedStaleResponse = await fetch(
-        `${expandedOrigin}/api/reviews/${encodeURIComponent(review.id)}`
-      );
-      const unchangedStale = (await unchangedStaleResponse.json() as {
-        review: { title: string; status: string; comments: unknown[] };
-      }).review;
-      assert.equal(unchangedStale.title, `ChangeSet Review · ${first.changeId}`);
-      assert.equal(unchangedStale.status, "submitted");
-      assert.deepEqual(unchangedStale.comments, []);
-
-      const creationBrowser = await chromium.launch({ headless: true });
-      try {
-        const page = await creationBrowser.newPage({ viewport: { width: 1366, height: 900 } });
-        let createRequests = 0;
-        page.on("request", (request) => {
-          if (request.method() === "POST" && new URL(request.url()).pathname === "/api/reviews") createRequests += 1;
-        });
-        await page.goto(`${expandedOrigin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
-        const createReview = page.locator("#detail").getByRole("button", { name: "Create Review", exact: true });
-        await createReview.waitFor();
-        assert.equal(await createReview.isEnabled(), true);
-        const createdResponse = page.waitForResponse((response) => (
-          response.request().method() === "POST" && new URL(response.url()).pathname === "/api/reviews"
-        ));
-        await createReview.click();
-        assert.equal((await createdResponse).status(), 201);
-        await page.waitForFunction(() => Array.from(document.querySelectorAll("#detail button")).some((button) => (
-          button.textContent === "Create Review" && (button as HTMLButtonElement).disabled
-        )));
-        assert.equal(await createReview.isDisabled(), true);
-        assert.match(await createReview.getAttribute("title") ?? "", /already exists/);
-        assert.equal(createRequests, 1);
-        await page.close();
-      } finally {
-        await creationBrowser.close();
-      }
-
-      await writeFile(join(linkedMemory, "concepts", "shared.yaml"), linkedSource);
-      const restored = await validateMemoryChange();
-      assert.equal(restored.checkpointDigest, expanded.checkpointDigest);
-      const restoredDuplicate = await fetch(`${expandedOrigin}/api/reviews`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ source: "changeset", changeId: first.changeId })
-      });
-      assert.equal(restoredDuplicate.status, 409);
-      assert.match(await restoredDuplicate.text(), new RegExp(review.id));
-
-      const doneReview = await fetch(`${expandedOrigin}/api/reviews/${encodeURIComponent(review.id)}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          status: "done",
-          comments: [{
-            id: "comment-resolved",
-            source: "changeset",
-            memoryId: "concepts/shared",
-            memoryName: "shared",
-            kind: "concepts",
-            body: "Resolved before completion.",
-            createdAt: new Date().toISOString()
-          }]
-        })
-      });
-      assert.equal(doneReview.status, 200, await doneReview.text());
-      const duplicateDoneReview = await fetch(`${expandedOrigin}/api/reviews`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ source: "changeset", changeId: first.changeId })
-      });
-      assert.equal(duplicateDoneReview.status, 409);
-      assert.match(await duplicateDoneReview.text(), new RegExp(review.id));
-      const approvedChanges = await fetch(`${expandedOrigin}/api/changes`);
-      assert.equal(
-        ((await approvedChanges.json()) as { changes: Array<{ id: string; state: string }> }).changes
-          .find((change) => change.id === first.changeId)?.state,
-        "approved"
-      );
-      const approvedBrowser = await chromium.launch({ headless: true });
-      try {
-        const page = await approvedBrowser.newPage({ viewport: { width: 1366, height: 900 } });
-        await page.goto(`${expandedOrigin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
-        const createReview = page.locator("#detail").getByRole("button", { name: "Create Review", exact: true });
-        await createReview.waitFor();
-        assert.equal(await createReview.isDisabled(), true);
-        assert.match(await createReview.getAttribute("title") ?? "", /already exists/);
-        await page.close();
-      } finally {
-        await approvedBrowser.close();
-      }
-    } finally {
-      await new Promise<void>((resolve) => expandedView.close(() => resolve()));
-    }
 
     await writeFile(join(linkedMemory, "concepts", "shared.yaml"), "!concept\nnames: [Broken\n");
     const invalid = await validateMemoryChange();
@@ -488,42 +282,16 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     });
     const invalidOrigin = `http://127.0.0.1:${(invalidView.address() as AddressInfo).port}`;
     const browser = await chromium.launch({ headless: true });
-    try {
-      const historicalReviewsResponse = await fetch(
-        `${invalidOrigin}/api/reviews?representation=summary&change_id=${encodeURIComponent(first.changeId)}`
-      );
-      const historicalReviews = await historicalReviewsResponse.json() as {
-        reviews: Array<{ id: string; stale?: boolean }>;
-      };
-      assert.equal(historicalReviewsResponse.status, 200);
-      assert.equal(historicalReviews.reviews.find((review) => review.id === expandedReviewId)?.stale, true);
-
-      const historicalSnapshotResponse = await fetch(
-        `${invalidOrigin}/api/reviews/${encodeURIComponent(expandedReviewId)}/snapshots`
-      );
-      const historicalSnapshotSource = await historicalSnapshotResponse.text();
-      assert.equal(historicalSnapshotResponse.status, 200);
-      assert.match(historicalSnapshotSource, /Linked preview/);
-      assert.doesNotMatch(historicalSnapshotSource, /Broken/);
-
-      const invalidReviewResponse = await fetch(`${invalidOrigin}/api/reviews`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ source: "changeset", changeId: first.changeId })
-      });
-      assert.equal(invalidReviewResponse.status, 409);
-      const invalidReviewError = await invalidReviewResponse.json() as { code: string; error: string };
-      assert.equal(invalidReviewError.code, "changeset_validation_required");
-      assert.match(invalidReviewError.error, /validation must pass/);
-
-      const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+   try {
+     const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
       await page.goto(`${invalidOrigin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
       await page.getByRole("heading", { name: "Validation diagnostics", exact: true }).waitFor();
+      assert.deepEqual(
+        await page.evaluate(() => (window as unknown as { currentChangeOperator(): unknown }).currentChangeOperator()),
+        { kind: "human", id: "alice" }
+      );
       assert.match(await page.locator(".error-panel").first().textContent() ?? "", /concepts\/shared\.yaml/);
-      const createReview = page.getByRole("button", { name: "Create Review", exact: true });
-      assert.equal(await createReview.isDisabled(), true);
-      assert.match(await page.getByText(/Fix the validation diagnostics/).textContent() ?? "", /memory change validate/);
-      assert.equal(new URL(page.url()).pathname, `/projects/embedded/changes/${first.changeId}`);
+      assert.equal(await page.getByRole("button", { name: "Create Review", exact: true }).count(), 0);
       await page.close();
     } finally {
       await browser.close();

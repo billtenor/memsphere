@@ -22,7 +22,6 @@ export type ValidationIssue = {
 export type ValidationResult = {
   configPath: string;
   memoryRoot?: string;
-  reviewsRoot?: string;
   runsRoot?: string;
   issues: ValidationIssue[];
 };
@@ -52,14 +51,12 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
   const resolvedConfigPath = configPath;
 
   let memoryRoot: string | undefined;
-  let reviewsRoot: string | undefined;
   let runsRoot: string | undefined;
   let config: MemsphereConfig;
 
   try {
     config = resolvedConfigPath ? await readConfigAt(resolvedConfigPath) : await readConfig();
     memoryRoot = config.memoryRoot;
-    reviewsRoot = config.reviewsRoot;
     runsRoot = config.runsRoot;
   } catch (error) {
     return {
@@ -72,10 +69,6 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
     issues.push({ path: memoryRoot, message: "memory root does not exist" });
   }
 
-  if (!(await pathExists(reviewsRoot))) {
-    issues.push({ path: reviewsRoot, message: "reviews root does not exist" });
-  }
-
   if (!(await pathExists(runsRoot))) {
     issues.push({ path: runsRoot, message: "runs root does not exist" });
   }
@@ -85,7 +78,6 @@ export async function validateMemoryStore(configPath?: string): Promise<Validati
   return {
     configPath: resolvedConfigPath ?? config.configPath,
     memoryRoot,
-    reviewsRoot,
     runsRoot,
     issues
   };

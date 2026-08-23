@@ -16,8 +16,11 @@ import {
 } from "../memory/serializer.js";
 import { MemoryNavigation, type MemoryIdentity } from "../memory/navigation.js";
 import {
+  claimMemoryChange,
+  completeMemoryChange,
   editEmbeddedMemories,
   editMemories,
+  finishMemoryChange,
   publishMemoryChange,
   pushMemory,
   recoverMemory,
@@ -158,6 +161,32 @@ export async function memoryPublishCommand(options: { change?: string; message?:
 
 export async function memoryChangeResumeCommand(changeId: string): Promise<void> {
   console.log(`Candidate Root: ${await resumeMemoryChange(changeId)}`);
+}
+
+export async function memoryChangeClaimCommand(changeId: string, options: { force?: boolean } = {}): Promise<void> {
+  const result = await claimMemoryChange({ changeId, force: options.force });
+  console.log(`Claimed ChangeSet: ${result.change.id}`);
+  console.log(`Candidate Root: ${result.candidateRoot}`);
+  console.log(`Processing Comments: ${result.change.comments.filter((comment) => comment.status === "processing").length}`);
+  for (const warning of result.warnings) console.warn(`Warning: ${warning}`);
+}
+
+export async function memoryChangeFinishCommand(
+  changeId: string,
+  options: { comment?: string[]; reason?: "fixed" | "rejected" } = {}
+): Promise<void> {
+  const change = await finishMemoryChange({
+    changeId,
+    commentIds: options.comment,
+    reason: options.reason
+  });
+  console.log(`Finished ChangeSet processing: ${change.id}`);
+  console.log(`Completed Comments: ${(options.comment ?? []).length}`);
+}
+
+export async function memoryChangeCompleteCommand(changeId: string): Promise<void> {
+  const change = await completeMemoryChange(changeId);
+  console.log(`Completed ChangeSet: ${change.id}`);
 }
 
 export async function memoryChangeValidateCommand(

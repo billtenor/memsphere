@@ -17,7 +17,7 @@
       "statements/memsphere-yaml-syntax-rules.yaml",
       "procedures/memsphere-general-task-execution.yaml",
       "procedures/memsphere-procedure-construction.yaml",
-      "procedures/memsphere-memory-review-process.yaml",
+      "procedures/memsphere-changeset-comment-processing.yaml",
       "procedures/memsphere-tutorial-chapter-01.yaml",
       "procedures/memsphere-tutorial-chapter-02.yaml"
     ],
@@ -43,6 +43,7 @@
       "procedures/dialogic-procedure-construction.yaml",
       "procedures/memsphere-review.yaml",
       "procedures/memsphere-review-application.yaml",
+      "procedures/memsphere-memory-review-process.yaml",
       "procedures/memsphere-tutorial.yaml"
     ]
   }

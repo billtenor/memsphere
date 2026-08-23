@@ -16,22 +16,22 @@ test("View page routes are explicit and never absorb API or unknown paths", () =
     "/memories/concepts/Memory",
     "/projects/alpha/memories",
     "/projects/alpha/memories/concepts/Memory",
-    "/projects/alpha/changes",
     "/projects/alpha/changes/change-1",
-    "/projects/alpha/changes/change-1/reviews/review-1",
     "/tasks",
     "/tasks/run-1",
     "/tasks/run-1/artifact-reviews/review-1",
     "/settings/overview",
-    "/settings/participants",
-    "/projects/alpha/memories/concepts/Memory/reviews/review-1"
+    "/settings/participants"
   ]) assert.equal(isViewPagePath(path), true, path);
   for (const path of [
     "/api/memories",
     "/api/unknown",
     "/unknown",
+    "/projects/alpha/changes",
     "/tasks/run-1/other/review-1",
     "/projects/alpha/memories/concepts/Memory/reviews",
+    "/projects/alpha/changes/change-1/reviews/review-1",
+    "/projects/alpha/memories/concepts/Memory/reviews/review-1",
     "/memory-reviews/review-1"
   ]) {
     assert.equal(isViewPagePath(path), false, path);
@@ -43,7 +43,16 @@ test("browser script includes URL parsing, canonical history, and popstate resto
   assert.match(browserHtml, /function currentBrowserUrl\(\)/);
   assert.match(browserHtml, /history\[method\]\(null, "", next\)/);
   assert.match(browserHtml, /window\.addEventListener\("popstate"/);
+  assert.match(browserHtml, /async function returnFromChange\(\)/);
+  assert.match(browserHtml, /history\.replaceState\(null, "", returnUrl\)/);
+  assert.match(browserHtml, /await loadAll\(\{ route: parseBrowserRoute\(window\.location\), render: true \}\)/);
+  assert.match(browserHtml, /state\.changeReturnUrl = window\.location\.pathname \+ window\.location\.search \+ window\.location\.hash/);
+  assert.match(browserHtml, /sessionStorage\.setItem\(changeReturnUrlKey/);
+  assert.match(browserHtml, /storedReturn\.changeId === state\.selectedChangeId/);
+  assert.match(browserHtml, /sessionStorage\.removeItem\(changeReturnUrlKey\)/);
   assert.doesNotMatch(browserHtml, /\/memory-reviews\//);
+  assert.doesNotMatch(browserHtml, /changeset-review|memory-review/);
+  assert.doesNotMatch(browserHtml, /\/api\/reviews/);
   assert.match(browserHtml, /\/projects\/" \+ encodeRoutePart\(state\.currentProject\)/);
   assert.match(browserHtml, /prepareBrowserRoute/);
   assert.match(browserHtml, /\{ page: "memories", project, changeId, fragment \}/);
@@ -54,8 +63,6 @@ test("browser script includes URL parsing, canonical history, and popstate resto
 
 test("browser loads summaries by route and fetches details on demand", () => {
   assert.match(browserHtml, /new URLSearchParams\(\{ representation: "summary" \}\)/);
-  assert.match(browserHtml, /query\.set\("memory_id", subject\.id\)/);
-  assert.match(browserHtml, /query\.set\("change_id", state\.selectedChangeId\)/);
   assert.match(browserHtml, /fetch\("\/api\/runs\?representation=summary"\)/);
   assert.match(browserHtml, /\/api\/memories\/" \+ encodeURIComponent\(summary\.kind\)/);
   assert.match(browserHtml, /\/api\/runs\/" \+ encodeURIComponent\(id\)/);
@@ -69,44 +76,37 @@ test("archived Run detail survives active summary refresh without joining Task n
   assert.match(browserHtml, /const activeRuns = state\.runs\.filter\(run => run\.archived !== true && run\.readOnly !== true\)/);
 });
 
-test("summary stores do not reuse full Memory or Review list readers", async () => {
+test("Memory summaries do not reuse full Memory readers", async () => {
   const viewSource = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/commands/view.ts", import.meta.url), "utf8")).then(source => source.replace(/\r\n/g, "\n"));
-  const reviewSource = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/review/store.ts", import.meta.url), "utf8")).then(source => source.replace(/\r\n/g, "\n"));
   const memorySummaryBody = viewSource.match(/async function loadMemorySummaryPayload[\s\S]*?\n}\n\nasync function systemMemoryReferences/)?.[0] || "";
-  const reviewSummaryBody = reviewSource.match(/export async function listReviewSummaries[\s\S]*?\n}\n\nasync function readReviewSummary/)?.[0] || "";
   assert.match(memorySummaryBody, /readMemoryFileSummary/);
   assert.doesNotMatch(memorySummaryBody, /loadMemoryPayload|readMemoryFile\(/);
-  assert.match(reviewSummaryBody, /readReviewSummary/);
-  assert.doesNotMatch(reviewSummaryBody, /listReviews\(/);
 });
 
 test("detail loaders ignore responses from a previous Project generation", () => {
   assert.match(browserHtml, /projectGeneration: 0/);
   assert.match(browserHtml, /function resetProjectState\(\) \{\s*state\.projectGeneration \+= 1;/);
-  for (const loader of ["loadMemoryDetail", "loadReviewDetail", "loadRunDetail"]) {
+  for (const loader of ["loadMemoryDetail", "loadRunDetail"]) {
     const body = browserHtml.match(new RegExp("async function " + loader + "[\\s\\S]*?\\n    }"))?.[0] || "";
     assert.match(body, /const projectGeneration = state\.projectGeneration/);
     assert.match(body, /if \(projectGeneration !== state\.projectGeneration\) return null;/);
   }
 });
 
-test("Review and Run detail loaders reject superseded requests and changed summary revisions", () => {
-  for (const [loader, requests] of [["loadReviewDetail", "reviewDetailRequests"], ["loadRunDetail", "runDetailRequests"]]) {
-    const body = browserHtml.match(new RegExp("async function " + loader + "[\\s\\S]*?\\n    }"))?.[0] || "";
-    assert.match(body, new RegExp("state\\." + requests + "\\.get\\(id\\) !== requestId"));
-    assert.match(body, /startingRevision/);
-    assert.match(body, /updatedAt/);
-  }
-  assert.match(browserHtml, /expectedUpdatedAt: current\?\.updatedAt/);
-  assert.match(browserHtml, /response\.status === 409/);
+test("Run detail loader rejects superseded requests and changed summary revisions", () => {
+  const body = browserHtml.match(/async function loadRunDetail[\s\S]*?\n    }/)?.[0] || "";
+  assert.match(body, /state\.runDetailRequests\.get\(id\) !== requestId/);
+  assert.match(body, /startingRevision/);
+  assert.match(body, /updatedAt/);
 });
 
 test("stale page loads cannot release the active route application guard", () => {
   assert.match(browserHtml, /finally \{\s*if \(isCurrentPageLoad\(options\)\) state\.routeApplying = false;/);
 });
 
-test("manual view switches supersede an in-flight page load", () => {
-  assert.match(browserHtml, /async function setViewMode\(mode, options = \{\}\) \{\s*const generation = \+\+state\.pageLoadGeneration;\s*await projectSwitchChain;\s*if \(generation !== state\.pageLoadGeneration\) return;/);
+test("manual view switches retry after an in-flight Project switch and finalize routing", () => {
+  assert.match(browserHtml, /async function setViewMode\(mode, options = \{\}\) \{\s*const generation = \+\+state\.pageLoadGeneration;\s*await projectSwitchChain;\s*if \(generation !== state\.pageLoadGeneration\) return setViewMode\(mode, options\);/);
+  assert.match(browserHtml, /if \(generation !== state\.pageLoadGeneration\) return;\s*state\.routeReady = true;\s*renderAll\(\);/);
 });
 
 test("ChangeSet preview renders persisted validation diagnostics", () => {
@@ -231,22 +231,19 @@ test("task step artifact area is shown when an event exists", () => {
 });
 
 test("Task view exposes only Artifact Review and never falls back to Task Review", () => {
-  assert.match(browserHtml, /el\.reviewToggle\.hidden = state\.viewMode === "task" \? !taskHasArtifactReview : false/);
-  assert.match(browserHtml, /if \(!artifactReviewSummariesForRun\(\)\.length\) return/);
+  assert.match(browserHtml, /el\.reviewToggle\.hidden = !taskHasArtifactReview/);
+  assert.match(browserHtml, /if \(state\.viewMode !== "task" \|\| !artifactReviewSummariesForRun\(\)\.length\) return/);
   assert.doesNotMatch(browserHtml, /Only done tasks can create a review/);
   assert.doesNotMatch(browserHtml, /Task review ·/);
 });
 
-test("Memory review creation has no Reserved source branch", () => {
-  assert.doesNotMatch(browserHtml, /selectedMemory\(\)\?\.source === "reserved"/);
-  assert.doesNotMatch(browserHtml, /Import reserved memory before creating a review/);
-});
-
-test("review mutations use button action guards", () => {
-  assert.match(browserHtml, /runButtonAction\(el\.createReview, createReview\)/);
-  assert.match(browserHtml, /runButtonAction\(el\.submitReview, submitReview\)/);
+test("ChangeSet Comment mutations use button action guards", () => {
   assert.match(browserHtml, /runButtonAction\(save, async \(\) => \{/);
   assert.match(browserHtml, /runButtonAction\(save, \(\) => updateComment\(comment\.id, body\)\)/);
+  assert.match(browserHtml, /async function runButtonAction\(button, action\) \{[\s\S]*?finally \{\s*button\.disabled = false;/);
+  assert.match(browserHtml, /JSON\.stringify\(\{ operator, withdraw: true/);
+  assert.match(browserHtml, /comment\.status === "processing"/);
+  assert.match(browserHtml, /withdraw\.textContent = "撤回"/);
 });
 
 test("Artifact Review renders Agent progress and exposes retry only for failed Agents", () => {
@@ -269,20 +266,64 @@ test("Artifact Review comment severity belongs to the card header", () => {
   assert.match(browserHtml, /\.artifact-review-comment-head \{ display: flex; justify-content: space-between;/);
 });
 
-test("Changes is a first-class route with immutable ChangeSet Review snapshots", () => {
-  assert.match(browserHtml, /id="changes-tab"/);
+test("ChangeSets are a Memory editing sub-flow with direct Comments", () => {
+  assert.doesNotMatch(browserHtml, /id="changes-tab"/);
+  assert.match(browserHtml, /body\.changes-mode \.view-tabs, body\.changes-mode \.search/);
+  assert.match(browserHtml, /wrap\.className = "memory-change-wrap" \+ \(memory\.id === state\.selectedId \? " active" : ""\)/);
+  assert.match(browserHtml, /\.memory-change-wrap\.active \{ background: var\(--accent-soft\); color: #173f3c; \}/);
+  assert.match(browserHtml, /\.memory-change-wrap\.active \.memory-button \{ background: transparent;/);
+  assert.match(browserHtml, /summary\.textContent = "相关 ChangeSet · " \+ relatedChanges\.length/);
+  assert.match(browserHtml, /edit\.textContent = "修改"/);
   assert.match(browserHtml, /\/projects\/" \+ encodeRoutePart\(state\.currentProject\) \+ "\/changes"/);
   assert.match(browserHtml, /\/api\/changes\/" \+ encodeURIComponent\(changeId\)/);
-  assert.match(browserHtml, /kind === "changeset"/);
-  assert.match(browserHtml, /\/snapshots"/);
-  assert.match(browserHtml, /Loading immutable Review snapshot/);
-  assert.match(browserHtml, /Historical Review snapshot/);
-  assert.match(browserHtml, /detail\.targetMemories/);
-  assert.match(browserHtml, /comment\.source === "changeset" \? "changes" : "memory"/);
-  assert.match(browserHtml, /review\.source !== "changeset" && !review\.comments\.length/);
-  assert.match(browserHtml, /el\.submitReview\.disabled = !review \|\| review\.status !== "draft" \|\| !canComment\(\)/);
-  assert.match(browserHtml, /change\.valid !== true/);
-  assert.match(browserHtml, /Fix the validation diagnostics and run memory change validate again/);
+  assert.match(browserHtml, /state\.changeDetail\.targetMemories/);
+  assert.match(browserHtml, /\/comments"/);
+  assert.match(browserHtml, /currentChangeOperator\(\)/);
+  assert.doesNotMatch(browserHtml, /function renderChangesNav\(/);
+  assert.match(browserHtml, /changeActorSelectionKey/);
+  assert.match(browserHtml, /function chooseChangeOperator\(options = \{\}\)/);
+  assert.match(browserHtml, /state\.changeDetail\.actorKinds \|\| \{\}/);
+  assert.match(browserHtml, /renderChangeComments\(detail\.comments \|\| \[\], main\)/);
+  assert.match(browserHtml, /layout\.append\(main, renderChangeComments\(detail\.comments \|\| \[\], main\)\)/);
+  assert.match(browserHtml, /section\.className = "panel change-comments change-comment-sidebar"/);
+  assert.match(browserHtml, /id="change-comments-toggle"/);
+  assert.match(browserHtml, /state\.changeCommentsCollapsed = !state\.changeCommentsCollapsed/);
+  assert.match(browserHtml, /layout\.className = "change-detail-layout" \+ \(state\.changeCommentsCollapsed \? " comments-collapsed" : ""\)/);
+  assert.match(browserHtml, /\.change-detail-layout\.comments-collapsed \.change-comment-sidebar \{ display: none; \}/);
+  assert.match(browserHtml, /const target = findCommentTarget\(comment\) \|\| findCommentAnchor\(comment\)/);
+  assert.match(browserHtml, /if \(isCommentOutdated\(comment, contentRoot\)\)/);
+  assert.match(browserHtml, /\.change-detail-layout \{ display: grid; grid-template-columns: minmax\(0, 1fr\) minmax\(260px, 320px\);/);
+  assert.doesNotMatch(browserHtml, /copy\.textContent = "Copy link"/);
+  assert.doesNotMatch(browserHtml, /targets\.className = "change-targets"/);
+  assert.match(browserHtml, /changeCommentOutdated: \{ zh: "原内容已变化", yaml: "Content changed" \}/);
+  assert.match(browserHtml, /outdated\.title = t\("changeCommentOutdatedHelp"\)/);
+  assert.match(browserHtml, /function changeCommentStatusLabel\(comment\)/);
+  assert.match(browserHtml, /未处理（ChangeSet 已结束）/);
+  assert.match(browserHtml, /未处理（ChangeSet 已废弃）/);
+  assert.match(browserHtml, /changeCommentPending: \{ zh: "待处理", yaml: "Pending" \}/);
+  assert.match(browserHtml, /changeCommentProcessing: \{ zh: "处理中", yaml: "Processing" \}/);
+  assert.match(browserHtml, /changeCommentCompleted: \{ zh: "已完成", yaml: "Completed" \}/);
+  assert.match(browserHtml, /return t\("changeCommentPending"\)/);
+  assert.match(browserHtml, /return t\("changeCommentProcessing"\)/);
+  assert.match(browserHtml, /addMemory\.disabled = change\.claimed/);
+  assert.match(browserHtml, /async function chooseMemoryToAdd\(change\)/);
+  assert.match(browserHtml, /const scopedPaths = new Set\(change\.memoryPaths \|\| \[\]\)/);
+  assert.match(browserHtml, /当前没有可添加的 Memory。/);
+  assert.match(browserHtml, /相关 ChangeSet · /);
+  assert.match(browserHtml, /const relatedChanges = state\.changes\.filter\(change => \(change\.memoryPaths \|\| \[\]\)\.includes\(memory\.path\)\)/);
+  assert.doesNotMatch(browserHtml, /const relatedChanges = state\.changes\.filter\(change => change\.active/);
+  assert.match(browserHtml, /summary\.textContent = "其他 ChangeSet · " \+ otherChanges\.length/);
+  assert.match(browserHtml, /link\.textContent = change\.id \+ " · " \+ changeStatusLabel\(change\.status\)/);
+  assert.match(browserHtml, /change\.id \+ " · " \+ changeStatusLabel\(change\.status\) \+ " · " \+ formatTime\(change\.updatedAt\)/);
+  assert.match(browserHtml, /changeDraft: \{ zh: "草稿", yaml: "Draft" \}/);
+  assert.match(browserHtml, /changePublished: \{ zh: "已发布", yaml: "Published" \}/);
+  assert.match(browserHtml, /changeCompleted: \{ zh: "已完成", yaml: "Completed" \}/);
+  assert.match(browserHtml, /changeAbandoned: \{ zh: "已废弃", yaml: "Abandoned" \}/);
+  assert.match(browserHtml, /if \(canComment\(\)\) \{[\s\S]*el\.detail\.append\(agentHint\);[\s\S]*选择下方任意内容旁的 \+/);
+  assert.match(browserHtml, /archiveChangeConfirm: \{ zh: "归档这个 ChangeSet？归档后它将不再在页面中展示。"/);
+  assert.match(browserHtml, /fetch\("\/api\/archive\/changes\/" \+ encodeURIComponent\(change\.id\)/);
+  assert.match(browserHtml, /await returnFromChange\(\)/);
+  assert.doesNotMatch(browserHtml, /main\.append\(agentHint\)/);
 });
 
 test("Artifact Review evidence is selected in the artifact pane", () => {
@@ -505,32 +546,24 @@ test("task view switches to two columns on compact desktop screens", () => {
 
   assert(compactLayout);
   assert(narrowLayout);
-  assert.match(compactLayout, /body\.task-mode \.shell \{ grid-template-columns: 280px minmax\(0, 1fr\) 0 0; \}/);
+  assert.match(compactLayout, /body\.task-mode \.shell \{ grid-template-columns: 280px minmax\(0, 1fr\); \}/);
   assert.match(narrowLayout, /\.flow-head \{ grid-template-columns: 1fr;/);
   assert.match(narrowLayout, /\.artifact-row \{ justify-content: flex-start; min-width: 0; \}/);
 });
 
-test("Review expands the shell with a resizable divider on demand", () => {
-  assert.match(browserHtml, /\.shell \{ display: grid; grid-template-columns: 300px minmax\(0, 1fr\) 0 0;/);
-  assert.match(browserHtml, /body\.review-drawer-open \.shell \{ grid-template-columns: 300px minmax\(0, 1fr\) 8px var\(--review-width\); \}/);
-  assert.match(browserHtml, /\.review \{ min-width: 0; overflow: hidden; visibility: hidden;/);
-  assert.doesNotMatch(browserHtml, /position: fixed; z-index: 30;/);
-  assert.doesNotMatch(browserHtml, /function isCompactReviewLayout/);
+test("Memory and ChangeSet pages do not ship the retired Review drawer", () => {
+  assert.match(browserHtml, /\.shell \{ display: grid; grid-template-columns: 300px minmax\(0, 1fr\);/);
+  assert.doesNotMatch(browserHtml, /id="review-panel"|id="create-review"|id="submit-review"|id="review-resizer"/);
+  assert.doesNotMatch(browserHtml, /function setReviewDrawer|function createReview|function loadReviews/);
 });
 
 test("flow cards can shrink inside the task grid", () => {
   assert.match(browserHtml, /\.flow-item \{ min-width: 0;/);
 });
 
-test("Review has accessible open and close controls", () => {
-  assert.match(browserHtml, /id="review-toggle"[^>]*aria-controls="review-panel"[^>]*aria-expanded="false"/);
-  assert.match(browserHtml, /id="review-close"/);
-  assert.match(browserHtml, /id="review-resizer"[^>]*role="separator"[^>]*aria-controls="review-panel"/);
-  assert.match(browserHtml, /function beginReviewResize\(event\)/);
-  assert.match(browserHtml, /localStorage\.setItem\(reviewPanelWidthKey, String\(clamped\)\)/);
-  assert.match(browserHtml, /function setReviewDrawer\(open\)/);
-  assert.match(browserHtml, /event\.key === "Escape" && state\.reviewDrawerOpen/);
-  assert.match(browserHtml, /body\.review-drawer-open \.review \{ overflow: auto; visibility: visible; pointer-events: auto;/);
+test("Artifact Review keeps the only Review toolbar control", () => {
+  assert.match(browserHtml, /id="review-toggle"[^>]*aria-controls="artifact-review-modal"[^>]*hidden/);
+  assert.doesNotMatch(browserHtml, /reviewDrawerOpen|selectedReviewId|reviewPanelWidthKey/);
 });
 
 test("node comment controls stay contextual instead of permanently occupying headers", () => {
@@ -588,8 +621,8 @@ test("Artifact Review keeps local draft text across conflict recovery renders", 
   assert.match(browserHtml, /sameArtifactReviewDraftScope\(draft\.artifactReviewScope, currentArtifactReviewDraftScope\(\)\)/);
 });
 
-test("initial loading validates the saved review only after its subject data is available", () => {
-  assert.match(browserHtml, /if \(targetMode === "memory"\) await loadMemories\(\);\s*else if \(targetMode === "task"\) await loadRuns\(\{ loadDetail: false \}\);\s*else if \(targetMode === "changes"\) await loadChanges\(\);\s*else await loadSettings\(\);[\s\S]*?ensureSelectedReview\(\);/);
+test("initial Memory loading also loads associated ChangeSets", () => {
+  assert.match(browserHtml, /if \(targetMode === "memory"\) \{\s*await loadMemories\(\);\s*await loadChanges\(\);\s*\}/);
 });
 
 test("task polling does not replace active editors or open Artifact Review selectors", () => {
@@ -635,10 +668,8 @@ test("browser can hide installed system memory from the Project Catalog", () => 
   assert.match(browserHtml, /text\.textContent = t\("hideSystemMemories"\)/);
 });
 
-test("browser exposes archive controls for done reviews and runs", () => {
-  assert.match(browserHtml, /review-archive/);
+test("browser preserves archive controls for done runs", () => {
   assert.match(browserHtml, /task-card-archive/);
-  assert.match(browserHtml, /\/api\/archive\/reviews\//);
   assert.match(browserHtml, /\/api\/archive\/runs\//);
   assert.match(browserHtml, /archiveDoneOnly/);
 });

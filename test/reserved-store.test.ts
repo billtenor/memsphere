@@ -68,8 +68,8 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "memsphere Procedure记忆提取流程",
     "Procedure 提取流程",
     "memsphere-procedure-construction",
-    "memsphere 记忆 review 处理流程",
-    "memsphere-memory-review-process",
+    "memsphere ChangeSet Comment 处理流程",
+    "memsphere-changeset-comment-processing",
     "memsphere 教学流程-第一章",
     "memsphere-tutorial-chapter-01",
     "memsphere 教学流程-第二章",
@@ -157,6 +157,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "procedures/dialogic-procedure-construction.yaml",
     "procedures/memsphere-review.yaml",
     "procedures/memsphere-review-application.yaml",
+    "procedures/memsphere-memory-review-process.yaml",
     "procedures/memsphere-tutorial.yaml"
   ]);
   const tutorial = await readFile(

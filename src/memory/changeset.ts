@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, posix, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { atomicWriteJson, withFileLock } from "../persistence.js";
+import { archiveChangeDirectory, type ArchiveEntry } from "../archive/store.js";
 import { gitOutput, gitOutputRaw, runGit } from "../git.js";
 import { memoryKinds, type MemoryKind } from "./kinds.js";
 import { readAllMemoryFiles } from "./store.js";
@@ -52,13 +53,68 @@ const sourceWorktreeSchema = z.object({
   memory_path: z.string().min(1)
 }).strict();
 
+export const memoryChangeActorSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("human"),
+    id: z.string().min(1),
+    name: z.string().min(1)
+  }).strict(),
+  z.object({
+    kind: z.literal("browser"),
+    id: z.string().uuid(),
+    name: z.literal("Browser user")
+  }).strict(),
+  z.object({
+    kind: z.literal("workspace"),
+    id: z.string().min(1),
+    name: z.string().min(1)
+  }).strict()
+]);
+
+const changeScopeSchema = z.object({
+  reference: z.string().min(1),
+  path: z.string().min(1).refine(isSafeMemoryPath, "invalid or escaping Memory path"),
+  base_digest: z.string().min(1),
+  added_revision: z.string().min(1).optional(),
+  added_at: z.string().datetime()
+}).strict();
+
+const changeCommentLocationSchema = z.object({
+  anchor: z.string().min(1),
+  line: z.number().int().positive(),
+  hash: z.string().min(1).optional()
+}).strict();
+
+export const memoryChangeCommentSchema = z.object({
+  id: z.string().min(1),
+  status: z.enum(["pending", "processing", "completed"]),
+  submitted_by: memoryChangeActorSchema,
+  memory_reference: z.string().min(1),
+  path: z.string().min(1).refine(isSafeMemoryPath, "invalid or escaping Memory path"),
+  target: z.string().min(1).optional(),
+  location: changeCommentLocationSchema.optional(),
+  snapshot: z.string().optional(),
+  checkpoint_digest: z.string().min(1).optional(),
+  base_revision: z.string().min(1),
+  body: z.string().min(1),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime()
+}).strict();
+
+const changeClaimSchema = z.object({
+  workspace_key: z.string().min(1),
+  instance_key: z.string().min(1),
+  root: z.string().min(1),
+  claimed_at: z.string().datetime()
+}).strict();
+
 export const memoryChangeSetSchema = z.object({
   format_version: z.literal(1),
   id: z.string().min(1),
   project: z.string().min(1),
   workspace_key: z.string().min(1),
   base_revision: z.string().min(1),
-  status: z.enum(["draft", "published", "completed"]),
+  status: z.enum(["draft", "published", "completed", "abandoned"]),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
   published_revision: z.string().min(1).optional(),
@@ -66,11 +122,18 @@ export const memoryChangeSetSchema = z.object({
   store_type: z.enum(["managed", "embedded"]).optional(),
   source_worktree: sourceWorktreeSchema.optional(),
   checkpoint: changeCheckpointSchema.optional(),
-  targets: z.array(changeTargetSchema)
+  targets: z.array(changeTargetSchema),
+  origin: z.enum(["cli", "view"]).default("cli"),
+  created_by: memoryChangeActorSchema.optional(),
+  scope: z.array(changeScopeSchema).default([]),
+  comments: z.array(memoryChangeCommentSchema).default([]),
+  claim: changeClaimSchema.optional()
 }).strict();
 
 export type MemoryChangeSet = z.infer<typeof memoryChangeSetSchema>;
 export type MemoryChangeOperation = z.infer<typeof changeTargetSchema>["operation"];
+export type MemoryChangeActor = z.infer<typeof memoryChangeActorSchema>;
+export type MemoryChangeComment = z.infer<typeof memoryChangeCommentSchema>;
 
 export type EmbeddedMemoryEditResult = {
   repositoryRoot: string;
@@ -97,6 +160,15 @@ export type MemoryChangePreview = {
 
 export type MemoryChangeReviewSnapshot = MemoryChangePreview & {
   files: Array<{ label: string; path: string; operation: MemoryChangeOperation }>;
+};
+
+export type MemoryChangeDetailSnapshot = MemoryChangePreview & {
+  files: Array<{
+    reference: string;
+    label: string;
+    path: string;
+    operation: MemoryChangeOperation | "unchanged";
+  }>;
 };
 
 type PreparedMemoryChangePreview = {
@@ -243,6 +315,100 @@ export async function withMemoryChangeReviewSnapshot<T>(input: {
     } finally {
       await rm(preview.memoryRoot, { recursive: true, force: true });
       if (baseRoot) await rm(baseRoot, { recursive: true, force: true });
+    }
+  });
+}
+
+export async function withMemoryChangeDetailSnapshot<T>(input: {
+  home?: string;
+  project: string;
+  changeId: string;
+  use: (snapshot: MemoryChangeDetailSnapshot) => Promise<T>;
+}): Promise<T> {
+  return withMemoryChangeCheckpointLock(input, async () => {
+    const context = await resolveProjectContext({
+      home: input.home,
+      project: input.project,
+      memoryScope: "canonical"
+    });
+    const change = await readChange(context.primary, input.changeId);
+    const baseRoot = await mkdtemp(join(tmpdir(), "memsphere-change-detail-base-"));
+    const previewRoot = await mkdtemp(join(tmpdir(), "memsphere-change-detail-preview-"));
+    const scopeRevisionRoots: string[] = [];
+    try {
+      if (changeStoreType(change) === "managed") {
+        await materializeGitMemoryRoot(context.primary.memoryRoot, change.base_revision, ".", baseRoot);
+      } else {
+        const source = change.source_worktree;
+        if (!source) throw new Error(`Embedded ChangeSet ${change.id} has no source metadata`);
+        await materializeGitMemoryRoot(source.repository_root, change.base_revision, source.memory_path, baseRoot);
+      }
+      await cp(baseRoot, previewRoot, { recursive: true });
+      const materializedRevisions = new Map<string, string>();
+      for (const scope of change.scope) {
+        const revision = scope.added_revision ?? change.base_revision;
+        if (revision === change.base_revision) continue;
+        let revisionRoot = materializedRevisions.get(revision);
+        if (!revisionRoot) {
+          revisionRoot = await mkdtemp(join(tmpdir(), "memsphere-change-scope-revision-"));
+          scopeRevisionRoots.push(revisionRoot);
+          if (changeStoreType(change) === "managed") {
+            await materializeGitMemoryRoot(context.primary.memoryRoot, revision, ".", revisionRoot);
+          } else {
+            const source = change.source_worktree;
+            if (!source) throw new Error(`Embedded ChangeSet ${change.id} has no source metadata`);
+            await materializeGitMemoryRoot(source.repository_root, revision, source.memory_path, revisionRoot);
+          }
+          materializedRevisions.set(revision, revisionRoot);
+        }
+        const sourcePath = join(revisionRoot, scope.path);
+        if (!await exists(sourcePath)) {
+          throw new Error(`scoped Memory is unavailable at its added revision: ${scope.path}`);
+        }
+        for (const destinationRoot of [baseRoot, previewRoot]) {
+          const destination = join(destinationRoot, scope.path);
+          await mkdir(dirname(destination), { recursive: true });
+          await cp(sourcePath, destination);
+        }
+      }
+      if (change.checkpoint && change.targets.length > 0) {
+        await applyTargets(
+          previewRoot,
+          checkpointMemoryRoot(context.primary, change.id, change.checkpoint.digest),
+          change.targets
+        );
+      }
+      const targetsByPath = new Map(change.targets.map((target) => [target.destination_path ?? target.path, target]));
+      const scopeByPath = new Map(change.scope.map((scope) => [scope.path, scope]));
+      for (const target of change.targets) {
+        const path = target.destination_path ?? target.path;
+        if (!scopeByPath.has(path)) {
+          scopeByPath.set(path, {
+            reference: target.reference,
+            path,
+            base_digest: target.base_digest ?? "created",
+            added_revision: target.added_revision,
+            added_at: change.updated_at
+          });
+        }
+      }
+      const files = [...scopeByPath.values()].map((scope) => {
+        const target = targetsByPath.get(scope.path);
+        return {
+          reference: scope.reference,
+          label: scope.path,
+          path: join(target?.operation === "delete" ? baseRoot : previewRoot, scope.path),
+          operation: target?.operation ?? "unchanged" as const
+        };
+      }).sort((left, right) => {
+        const changed = Number(right.operation !== "unchanged") - Number(left.operation !== "unchanged");
+        return changed || left.label.localeCompare(right.label);
+      });
+      return await input.use({ change, memoryRoot: previewRoot, files });
+    } finally {
+      await rm(baseRoot, { recursive: true, force: true });
+      await rm(previewRoot, { recursive: true, force: true });
+      await Promise.all(scopeRevisionRoots.map((root) => rm(root, { recursive: true, force: true })));
     }
   });
 }
@@ -514,7 +680,9 @@ export async function validateMemoryChange(changeId?: string): Promise<MemoryCha
       if (changeStoreType(change) !== "managed") throw new Error(`ChangeSet ${change.id} is not a Managed ChangeSet`);
       const candidateRoot = workspaceCandidateRoot(workspace.path, resolvedId);
       if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
-      const effectiveChange = await resolveEffectiveSyncTargets(change, candidateRoot);
+      const effectiveChange = change.origin === "view"
+        ? await resolveViewManagedTargets(change, candidateRoot, context.primary.memoryRoot)
+        : await resolveEffectiveSyncTargets(change, candidateRoot);
       await assertChangeTargetsCurrent(context.primary, effectiveChange);
       const checkpointCandidate = await snapshotSparseCandidate(candidateRoot, effectiveChange.targets);
       try {
@@ -624,6 +792,40 @@ async function snapshotSparseCandidate(
     await cp(join(candidateRoot, target.path), destination);
   }
   return memoryRoot;
+}
+
+async function resolveViewManagedTargets(
+  change: MemoryChangeSet,
+  candidateRoot: string,
+  gitRoot: string
+): Promise<MemoryChangeSet> {
+  const scopedPaths = new Set(change.scope.map((item) => item.path));
+  const targets = change.targets.filter((target) => !scopedPaths.has(target.path));
+  for (const scoped of change.scope) {
+    const candidate = join(candidateRoot, scoped.path);
+    if (!await exists(candidate)) {
+      targets.push({
+        operation: "delete",
+        reference: scoped.reference,
+        path: scoped.path,
+        base_digest: scoped.base_digest,
+        added_revision: scoped.added_revision ?? change.base_revision
+      });
+      continue;
+    }
+    await assertRegularFileInside(candidateRoot, scoped.path);
+    const digest = await gitOutput(["hash-object", "--", candidate], gitRoot);
+    if (digest === scoped.base_digest) continue;
+    targets.push({
+      operation: "update",
+      reference: scoped.reference,
+      path: scoped.path,
+      base_digest: scoped.base_digest,
+      added_revision: scoped.added_revision ?? change.base_revision
+    });
+  }
+  targets.sort((left, right) => left.path.localeCompare(right.path));
+  return memoryChangeSetSchema.parse({ ...change, targets });
 }
 
 async function persistValidatedCheckpoint(
@@ -761,7 +963,10 @@ async function captureEmbeddedWorkingChange(
       assertDraftOwner(change, project.name, workspace.key);
       if (changeStoreType(change) !== "embedded") throw new Error(`ChangeSet ${change.id} is not an Embedded ChangeSet`);
       if (change.base_revision !== baseRevision) {
-        throw new Error(`Embedded ChangeSet ${change.id} belongs to another Git base revision`);
+        if (change.origin !== "view") {
+          throw new Error(`Embedded ChangeSet ${change.id} belongs to another Git base revision`);
+        }
+        await forwardEmbeddedViewBase(change, workspace.path, memoryPath, baseRevision);
       }
     } else {
       const projectChanges = await listProjectChanges(project);
@@ -933,6 +1138,11 @@ function embeddedMemoryPath(memoryPath: string, repositoryPath: string): string 
   return repositoryPath.slice(prefix.length);
 }
 
+function embeddedRepositoryPath(memoryPath: string, memoryRelativePath: string): string {
+  const normalizedRoot = memoryPath === "." ? "" : memoryPath.replace(/^\.\//, "").replace(/\/$/, "");
+  return normalizedRoot ? `${normalizedRoot}/${memoryRelativePath}` : memoryRelativePath;
+}
+
 function fallbackReference(path: string): string {
   const [kind, file] = path.split("/");
   return `${kind}/${file.replace(/\.ya?ml$/i, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "invalid"}`;
@@ -1014,8 +1224,512 @@ export async function readMemoryChange(input: { home?: string; project: string; 
   return readChange(context.primary, input.changeId);
 }
 
+export async function createViewMemoryChange(input: {
+  home?: string;
+  project: string;
+  reference: string;
+  actor: MemoryChangeActor;
+}): Promise<MemoryChangeSet> {
+  const context = await resolveProjectContext({
+    home: input.home,
+    project: input.project,
+    memoryScope: "canonical"
+  });
+  return withFileLock(memoryMutationLock(context.primary), async () => {
+    const project = (await resolveProjectContext({
+      home: input.home,
+      project: input.project,
+      memoryScope: "canonical"
+    })).primary;
+    const actor = memoryChangeActorSchema.parse(input.actor);
+    const identity = await canonicalChangeIdentity(project);
+    const target = await resolveTarget(project, input.reference, "edit", undefined, identity.baseRevision);
+    if (target.operation !== "update" || !target.base_digest) {
+      throw new Error("View can only create a ChangeSet from an existing Memory");
+    }
+    const change = newChange(project, identity.workspace.key, {
+      origin: "view",
+      actor,
+      baseRevision: identity.baseRevision
+    });
+    change.store_type = project.config.store.type;
+    change.scope.push({
+      reference: target.reference,
+      path: target.path,
+      base_digest: target.base_digest,
+      added_revision: target.added_revision,
+      added_at: change.created_at
+    });
+    if (identity.source) change.source_worktree = identity.source;
+    await writeChange(project, change);
+    return change;
+  });
+}
+
+export async function addMemoryChangeScope(input: {
+  home?: string;
+  project: string;
+  changeId: string;
+  reference: string;
+  expectedUpdatedAt?: string;
+}): Promise<MemoryChangeSet> {
+  const initial = await resolveProjectContext({ home: input.home, project: input.project, memoryScope: "canonical" });
+  return withFileLock(memoryMutationLock(initial.primary), async () => {
+    const project = (await resolveProjectContext({
+      home: input.home,
+      project: input.project,
+      memoryScope: "canonical"
+    })).primary;
+    const change = await readChange(project, input.changeId);
+    assertMutableChange(change, input.expectedUpdatedAt);
+    if (change.claim) {
+      throw new Error("cannot add Memory while the ChangeSet is claimed; finish the claim, add Memory, then claim again");
+    }
+    const identity = await canonicalChangeIdentity(project);
+    const target = await resolveTarget(project, input.reference, "edit", undefined, identity.baseRevision);
+    if (target.operation !== "update" || !target.base_digest) {
+      throw new Error("View can only add an existing Memory to a ChangeSet");
+    }
+    if (!change.scope.some((item) => item.path === target.path)) {
+      change.scope.push({
+        reference: target.reference,
+        path: target.path,
+        base_digest: target.base_digest,
+        added_revision: target.added_revision,
+        added_at: new Date().toISOString()
+      });
+      change.updated_at = new Date().toISOString();
+      await writeChange(project, change);
+    }
+    return change;
+  });
+}
+
+export async function abandonMemoryChange(input: {
+  home?: string;
+  project: string;
+  changeId: string;
+  expectedUpdatedAt?: string;
+}): Promise<MemoryChangeSet> {
+  const initial = await resolveProjectContext({ home: input.home, project: input.project, memoryScope: "canonical" });
+  return withFileLock(memoryMutationLock(initial.primary), async () => {
+    const project = (await resolveProjectContext({
+      home: input.home,
+      project: input.project,
+      memoryScope: "canonical"
+    })).primary;
+    const change = await readChange(project, input.changeId);
+    assertMutableChange(change, input.expectedUpdatedAt);
+    change.status = "abandoned";
+    delete change.claim;
+    change.updated_at = new Date().toISOString();
+    await writeChange(project, change);
+    return change;
+  });
+}
+
+export async function archiveMemoryChange(input: {
+  home?: string;
+  project: string;
+  changeId: string;
+  expectedUpdatedAt?: string;
+}): Promise<ArchiveEntry> {
+  const initial = await resolveProjectContext({ home: input.home, project: input.project, memoryScope: "canonical" });
+  return withFileLock(memoryMutationLock(initial.primary), async () => {
+    const project = (await resolveProjectContext({
+      home: input.home,
+      project: input.project,
+      memoryScope: "canonical"
+    })).primary;
+    const change = await readChange(project, input.changeId);
+    if (change.status === "draft") throw new Error("only terminal ChangeSets can be archived");
+    if (input.expectedUpdatedAt && change.updated_at !== input.expectedUpdatedAt) {
+      throw new Error(`ChangeSet ${change.id} was modified by another operation`);
+    }
+    return archiveChangeDirectory({
+      archiveRoot: project.paths.archiveRoot,
+      changesRoot: project.paths.changesRoot,
+      id: change.id
+    });
+  });
+}
+
+export async function createMemoryChangeComment(input: {
+  home?: string;
+  project: string;
+  changeId: string;
+  actor: MemoryChangeActor;
+  memoryReference: string;
+  path: string;
+  target?: string;
+  location?: { anchor: string; line: number; hash?: string };
+  snapshot?: string;
+  body: string;
+  expectedUpdatedAt?: string;
+}): Promise<{ change: MemoryChangeSet; comment: MemoryChangeComment }> {
+  const initial = await resolveProjectContext({ home: input.home, project: input.project, memoryScope: "canonical" });
+  return withFileLock(memoryMutationLock(initial.primary), async () => {
+    const project = (await resolveProjectContext({
+      home: input.home,
+      project: input.project,
+      memoryScope: "canonical"
+    })).primary;
+    const change = await readChange(project, input.changeId);
+    assertMutableChange(change, input.expectedUpdatedAt);
+    const actor = memoryChangeActorSchema.parse(input.actor);
+    const body = input.body.trim();
+    if (!body) throw new Error("Comment body is required");
+    assertSafeMemoryPath(input.path);
+    const scoped = change.scope.some((item) => item.path === input.path)
+      || change.targets.some((item) => (item.destination_path ?? item.path) === input.path);
+    if (!scoped) throw new Error(`Memory is not part of ChangeSet ${change.id}: ${input.path}`);
+    const now = new Date().toISOString();
+    const comment = memoryChangeCommentSchema.parse({
+      id: changeCommentId(),
+      status: "pending",
+      submitted_by: actor,
+      memory_reference: input.memoryReference,
+      path: input.path,
+      ...(input.target ? { target: input.target } : {}),
+      ...(input.location ? { location: input.location } : {}),
+      ...(input.snapshot !== undefined ? { snapshot: input.snapshot } : {}),
+      ...(change.checkpoint ? { checkpoint_digest: change.checkpoint.digest } : {}),
+      base_revision: change.checkpoint?.base_revision ?? change.base_revision,
+      body,
+      created_at: now,
+      updated_at: now
+    });
+    change.comments.push(comment);
+    change.updated_at = now;
+    await writeChange(project, change);
+    return { change, comment };
+  });
+}
+
+export async function updateMemoryChangeComment(input: {
+  home?: string;
+  project: string;
+  changeId: string;
+  commentId: string;
+  actor: MemoryChangeActor;
+  body?: string;
+  withdraw?: boolean;
+  expectedUpdatedAt?: string;
+}): Promise<{ change: MemoryChangeSet; comment: MemoryChangeComment }> {
+  const initial = await resolveProjectContext({ home: input.home, project: input.project, memoryScope: "canonical" });
+  return withFileLock(memoryMutationLock(initial.primary), async () => {
+    const project = (await resolveProjectContext({
+      home: input.home,
+      project: input.project,
+      memoryScope: "canonical"
+    })).primary;
+    const change = await readChange(project, input.changeId);
+    assertMutableChange(change, input.expectedUpdatedAt);
+    const actor = memoryChangeActorSchema.parse(input.actor);
+    const comment = change.comments.find((item) => item.id === input.commentId);
+    if (!comment) throw new Error(`Comment not found: ${input.commentId}`);
+    assertSameChangeActor(comment.submitted_by, actor);
+    if (input.withdraw) {
+      if (comment.status !== "processing") throw new Error("only processing Comments can be withdrawn");
+      comment.status = "completed";
+    } else {
+      if (comment.status !== "pending") throw new Error("only pending Comments can be edited");
+      const body = input.body?.trim();
+      if (!body) throw new Error("Comment body is required");
+      comment.body = body;
+    }
+    const now = new Date().toISOString();
+    comment.updated_at = now;
+    change.updated_at = now;
+    await writeChange(project, change);
+    return { change, comment };
+  });
+}
+
+export async function deleteMemoryChangeComment(input: {
+  home?: string;
+  project: string;
+  changeId: string;
+  commentId: string;
+  actor: MemoryChangeActor;
+  expectedUpdatedAt?: string;
+}): Promise<MemoryChangeSet> {
+  const initial = await resolveProjectContext({ home: input.home, project: input.project, memoryScope: "canonical" });
+  return withFileLock(memoryMutationLock(initial.primary), async () => {
+    const project = (await resolveProjectContext({
+      home: input.home,
+      project: input.project,
+      memoryScope: "canonical"
+    })).primary;
+    const change = await readChange(project, input.changeId);
+    assertMutableChange(change, input.expectedUpdatedAt);
+    const actor = memoryChangeActorSchema.parse(input.actor);
+    const index = change.comments.findIndex((item) => item.id === input.commentId);
+    if (index < 0) throw new Error(`Comment not found: ${input.commentId}`);
+    const comment = change.comments[index];
+    assertSameChangeActor(comment.submitted_by, actor);
+    if (comment.status !== "pending") throw new Error("only pending Comments can be deleted");
+    change.comments.splice(index, 1);
+    change.updated_at = new Date().toISOString();
+    await writeChange(project, change);
+    return change;
+  });
+}
+
+export async function claimMemoryChange(input: {
+  changeId: string;
+  force?: boolean;
+}): Promise<{ change: MemoryChangeSet; candidateRoot: string; warnings: string[] }> {
+  const initial = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  const workspace = await resolveWorkspaceIdentity();
+  return withFileLock(memoryMutationLock(initial.primary), async () => {
+    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    const change = await readChange(context.primary, input.changeId);
+    if (change.status !== "draft") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
+    if (change.project !== context.primary.name) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
+    if (change.claim && change.claim.instance_key !== workspace.instanceKey && !input.force) {
+      throw new Error(`ChangeSet ${change.id} is already claimed by ${change.claim.root}; use --force to take over`);
+    }
+    if (change.claim?.instance_key === workspace.instanceKey) {
+      const candidateRoot = changeStoreType(change) === "managed"
+        ? workspaceCandidateRoot(workspace.path, change.id)
+        : context.primary.memoryRoot;
+      if (await exists(candidateRoot)) {
+        return {
+          change,
+          candidateRoot,
+          warnings: ["ChangeSet is already claimed by this Workspace; the existing candidate was preserved"]
+        };
+      }
+    }
+    if (change.origin === "view") change.workspace_key = workspace.key;
+    else if (change.workspace_key !== workspace.key) throw new Error(`ChangeSet ${change.id} belongs to another Workspace`);
+    const warnings = await prepareClaimCandidate(context.primary, change, workspace);
+    const now = new Date().toISOString();
+    change.claim = {
+      workspace_key: workspace.key,
+      instance_key: workspace.instanceKey,
+      root: workspace.path,
+      claimed_at: now
+    };
+    for (const comment of change.comments) {
+      if (comment.status === "pending") {
+        comment.status = "processing";
+        comment.updated_at = now;
+      }
+    }
+    change.updated_at = now;
+    await writeChange(context.primary, change);
+    return {
+      change,
+      candidateRoot: changeStoreType(change) === "managed"
+        ? workspaceCandidateRoot(workspace.path, change.id)
+        : context.primary.memoryRoot,
+      warnings
+    };
+  });
+}
+
+export async function finishMemoryChange(input: {
+  changeId: string;
+  commentIds?: string[];
+  reason?: "fixed" | "rejected";
+}): Promise<MemoryChangeSet> {
+  const initial = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  const workspace = await resolveWorkspaceIdentity();
+  return withFileLock(memoryMutationLock(initial.primary), async () => {
+    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    const change = await readChange(context.primary, input.changeId);
+    assertClaimOwner(change, context.primary.name, workspace);
+    const ids = new Set(input.commentIds ?? []);
+    if (ids.size > 0 && !input.reason) throw new Error("--reason is required when completing Comments");
+    if (input.reason === "fixed" && !change.checkpoint?.valid) {
+      throw new Error("fixed Comments require a valid ChangeSet checkpoint");
+    }
+    for (const id of ids) {
+      const comment = change.comments.find((item) => item.id === id);
+      if (!comment) throw new Error(`Comment not found: ${id}`);
+      if (comment.status !== "processing") throw new Error(`Comment is not processing: ${id}`);
+    }
+    const unfinished = change.comments.filter((comment) => comment.status === "processing" && !ids.has(comment.id));
+    if (unfinished.length > 0) {
+      throw new Error(`finish must complete every processing Comment: ${unfinished.map((comment) => comment.id).join(", ")}`);
+    }
+    const now = new Date().toISOString();
+    for (const comment of change.comments) {
+      if (ids.has(comment.id)) {
+        comment.status = "completed";
+        comment.updated_at = now;
+      }
+    }
+    delete change.claim;
+    change.updated_at = now;
+    await writeChange(context.primary, change);
+    return change;
+  });
+}
+
+export async function completeMemoryChange(changeId: string): Promise<MemoryChangeSet> {
+  const initial = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  return withFileLock(memoryMutationLock(initial.primary), async () => {
+    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    const change = await readChange(context.primary, changeId);
+    if (change.status !== "draft") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
+    if (change.targets.length > 0) throw new Error("only a ChangeSet without actual Memory differences can be completed explicitly");
+    if (change.comments.some((comment) => comment.status !== "completed")) {
+      throw new Error("all ChangeSet Comments must be completed first");
+    }
+    change.status = "completed";
+    delete change.claim;
+    change.updated_at = new Date().toISOString();
+    await writeChange(context.primary, change);
+    return change;
+  });
+}
+
 function changeStoreType(change: MemoryChangeSet): "managed" | "embedded" {
   return change.store_type ?? "managed";
+}
+
+async function canonicalChangeIdentity(project: ResolvedProject): Promise<{
+  workspace: WorkspaceIdentity;
+  baseRevision: string;
+  source?: z.infer<typeof sourceWorktreeSchema>;
+}> {
+  if (project.config.store.type === "managed") {
+    return {
+      workspace: await resolveWorkspaceIdentity(project.memoryRoot),
+      baseRevision: project.config.store.published_revision
+    };
+  }
+  const workspace = await resolveWorkspaceIdentity(project.config.store.repository_path);
+  if (workspace.kind !== "git") throw new Error("Embedded Project repository must be a Git worktree");
+  const baseRevision = await gitOutput(["rev-parse", "HEAD"], workspace.path);
+  return {
+    workspace,
+    baseRevision,
+    source: {
+      instance_key: workspace.instanceKey,
+      root: workspace.path,
+      repository_root: workspace.path,
+      memory_path: project.config.store.memory_path
+    }
+  };
+}
+
+function assertMutableChange(change: MemoryChangeSet, expectedUpdatedAt?: string): void {
+  if (change.status !== "draft") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
+  if (expectedUpdatedAt && change.updated_at !== expectedUpdatedAt) {
+    throw new Error(`ChangeSet ${change.id} was modified by another operation`);
+  }
+}
+
+function assertSameChangeActor(expected: MemoryChangeActor, actual: MemoryChangeActor): void {
+  if (expected.kind !== actual.kind || expected.id !== actual.id) {
+    throw new Error("only the Comment submitter can modify it");
+  }
+}
+
+function assertClaimOwner(change: MemoryChangeSet, project: string, workspace: WorkspaceIdentity): void {
+  if (change.project !== project) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
+  if (change.status !== "draft") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
+  if (!change.claim) throw new Error(`ChangeSet ${change.id} is not claimed`);
+  if (change.claim.instance_key !== workspace.instanceKey) {
+    throw new Error(`ChangeSet ${change.id} is claimed by ${change.claim.root}`);
+  }
+}
+
+async function prepareClaimCandidate(
+  project: ResolvedProject,
+  change: MemoryChangeSet,
+  workspace: WorkspaceIdentity
+): Promise<string[]> {
+  const warnings: string[] = [];
+  if (changeStoreType(change) === "embedded") {
+    if (project.config.store.type !== "embedded" || workspace.kind !== "git") {
+      throw new Error(`Embedded ChangeSet ${change.id} must be claimed inside its Git repository`);
+    }
+    const configured = await resolveWorkspaceIdentity(project.config.store.repository_path);
+    if (configured.kind !== "git" || configured.key !== workspace.key) {
+      throw new Error(`Embedded ChangeSet ${change.id} belongs to another Git repository`);
+    }
+    const currentBase = await gitOutput(["rev-parse", "HEAD"], workspace.path);
+    if (change.origin === "view" && change.base_revision !== currentBase) {
+      await forwardEmbeddedViewBase(change, workspace.path, project.config.store.memory_path, currentBase);
+    }
+    const dirty = await gitOutput(
+      ["status", "--porcelain", "--", project.config.store.memory_path],
+      workspace.path
+    );
+    if (dirty) warnings.push("the current worktree already contains Memory changes; claiming may mix ChangeSets");
+    if (change.checkpoint && change.targets.length > 0) {
+      await applyTargets(
+        project.memoryRoot,
+        checkpointMemoryRoot(project, change.id, change.checkpoint.digest),
+        change.targets
+      );
+    }
+    change.source_worktree = {
+      instance_key: workspace.instanceKey,
+      root: workspace.path,
+      repository_root: configured.path,
+      memory_path: project.config.store.memory_path
+    };
+    return warnings;
+  }
+
+  if (project.config.store.type !== "managed") {
+    throw new Error(`Managed ChangeSet ${change.id} cannot be claimed in an Embedded Project`);
+  }
+  const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
+  if (change.origin === "cli" && await exists(candidateRoot)) return warnings;
+  if (await exists(candidateRoot)) warnings.push("the current Workspace already contains a candidate for this ChangeSet");
+  for (const scoped of change.scope) {
+    const current = join(project.memoryRoot, scoped.path);
+    if (!await exists(current)) {
+      throw new Error(`edit conflict: scoped Memory changed or was deleted since ChangeSet creation: ${scoped.path}`);
+    }
+    if (await gitBlobDigest(project.memoryRoot, scoped.path) !== scoped.base_digest) {
+      throw new Error(`edit conflict: scoped Memory changed since ChangeSet creation: ${scoped.path}`);
+    }
+  }
+  await rm(candidateRoot, { recursive: true, force: true });
+  await mkdir(candidateRoot, { recursive: true });
+  for (const scoped of change.scope) {
+    const source = join(project.memoryRoot, scoped.path);
+    const destination = join(candidateRoot, scoped.path);
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(source, destination);
+  }
+  if (change.checkpoint && change.targets.length > 0) {
+    await applyTargets(
+      candidateRoot,
+      checkpointMemoryRoot(project, change.id, change.checkpoint.digest),
+      change.targets
+    );
+  }
+  return warnings;
+}
+
+async function forwardEmbeddedViewBase(
+  change: MemoryChangeSet,
+  workspaceRoot: string,
+  memoryPath: string,
+  baseRevision: string
+): Promise<void> {
+  for (const scoped of change.scope) {
+    const repositoryPath = embeddedRepositoryPath(memoryPath, scoped.path);
+    let currentDigest = "";
+    try {
+      currentDigest = await gitOutput(["rev-parse", `${baseRevision}:${repositoryPath}`], workspaceRoot);
+    } catch {
+      throw new Error(`edit conflict: scoped Memory changed or was deleted since ChangeSet creation: ${scoped.path}`);
+    }
+    if (currentDigest !== scoped.base_digest) {
+      throw new Error(`edit conflict: scoped Memory changed since ChangeSet creation: ${scoped.path}`);
+    }
+  }
+  change.base_revision = baseRevision;
 }
 
 export async function recoverMemory(
@@ -1379,9 +2093,14 @@ async function createChange(project: ResolvedProject, workspaceKey: string): Pro
   return change;
 }
 
-function newChange(project: ResolvedProject, workspaceKey: string): MemoryChangeSet {
+function newChange(
+  project: ResolvedProject,
+  workspaceKey: string,
+  options: { origin?: "cli" | "view"; actor?: MemoryChangeActor; baseRevision?: string } = {}
+): MemoryChangeSet {
   const id = changeId();
-  const revision = project.config.store.type === "managed" ? project.config.store.published_revision : "embedded";
+  const revision = options.baseRevision
+    ?? (project.config.store.type === "managed" ? project.config.store.published_revision : "embedded");
   const now = new Date().toISOString();
   return {
     format_version: 1,
@@ -1392,7 +2111,11 @@ function newChange(project: ResolvedProject, workspaceKey: string): MemoryChange
     status: "draft",
     created_at: now,
     updated_at: now,
-    targets: []
+    targets: [],
+    origin: options.origin ?? "cli",
+    ...(options.actor ? { created_by: options.actor } : {}),
+    scope: [],
+    comments: []
   };
 }
 
@@ -1400,7 +2123,8 @@ async function resolveTarget(
   project: ResolvedProject,
   referenceInput: string,
   operation: "edit" | "delete" | "rename",
-  createPath?: string
+  createPath?: string,
+  addedRevision?: string
 ): Promise<z.infer<typeof changeTargetSchema>> {
   const reference = normalizeMemoryName(referenceInput);
   if (referenceInput !== reference && reference.includes("/")) {
@@ -1422,7 +2146,8 @@ async function resolveTarget(
     throw new Error(`explicit Memory reference must use the canonical name: ${reference}`);
   }
   if (found.length > 1) throw new Error(`Memory reference is ambiguous within Project: ${reference}`);
-  const revision = project.config.store.type === "managed" ? project.config.store.published_revision : "embedded";
+  const revision = addedRevision
+    ?? (project.config.store.type === "managed" ? project.config.store.published_revision : "embedded");
   if (found.length === 0) {
     if (operation !== "edit" || !logical) throw new Error(`Memory was not found: ${reference}`);
     if (createPath !== undefined) assertSafeCreatePath(reference, createPath);
@@ -1573,6 +2298,10 @@ function assertSafeId(id: string): void {
 
 function changeId(): string {
   return `change-${new Date().toISOString().replace(/[-:.]/g, "").replace("T", "-").replace("Z", "z")}-${randomBytes(4).toString("hex")}`;
+}
+
+function changeCommentId(): string {
+  return `comment-${new Date().toISOString().replace(/[-:.]/g, "").replace("T", "-").replace("Z", "z")}-${randomBytes(4).toString("hex")}`;
 }
 
 function safeFileName(name: string): string {

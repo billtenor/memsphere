@@ -3,13 +3,14 @@ import { createRequire } from "node:module";
 import { Command, Option } from "commander";
 import {
   archiveListCommand,
-  archiveRestoreReviewCommand,
   archiveRestoreRunCommand,
-  archiveReviewCommand,
   archiveRunCommand
 } from "./commands/archive.js";
 import {
   memoryChangeResumeCommand,
+  memoryChangeClaimCommand,
+  memoryChangeCompleteCommand,
+  memoryChangeFinishCommand,
   memoryChangeValidateCommand,
   memoryDeleteCommand,
   memoryEditCommand,
@@ -199,6 +200,24 @@ const memoryChange = memory.command("change").description("Manage Memory ChangeS
 memoryChange.command("resume")
   .argument("<change-id>", "ChangeSet id")
   .action(memoryChangeResumeCommand);
+
+memoryChange.command("claim")
+  .description("Claim a ChangeSet for processing in the current Workspace.")
+  .argument("<change-id>", "ChangeSet id")
+  .option("--force", "replace another Workspace claim")
+  .action(memoryChangeClaimCommand);
+
+memoryChange.command("finish")
+  .description("Complete selected ChangeSet Comments and release the current claim.")
+  .argument("<change-id>", "ChangeSet id")
+  .option("--comment <ids...>", "processing Comment ids to complete")
+  .addOption(new Option("--reason <reason>", "Comment completion reason").choices(["fixed", "rejected"]))
+  .action(memoryChangeFinishCommand);
+
+memoryChange.command("complete")
+  .description("Complete a draft ChangeSet that has no actual Memory differences or unfinished Comments.")
+  .argument("<change-id>", "ChangeSet id")
+  .action(memoryChangeCompleteCommand);
 
 memoryChange.command("validate")
   .description("Capture and validate the current Managed or Embedded Working Change.")
@@ -505,19 +524,13 @@ migrate
 
 const archive = program
   .command("archive")
-  .description("Archive and restore completed reviews and runs.");
+  .description("Archive completed items and restore supported kinds.");
 
 archive
   .command("list")
   .description("List archived items.")
-  .argument("[kind]", "one of: reviews, runs")
+  .argument("[kind]", "optional: runs or changes")
   .action(archiveListCommand);
-
-archive
-  .command("review")
-  .description("Archive a done review.")
-  .argument("<id>", "review id")
-  .action(archiveReviewCommand);
 
 archive
   .command("run")
@@ -527,13 +540,7 @@ archive
 
 const restore = archive
   .command("restore")
-  .description("Restore an archived review or run.");
-
-restore
-  .command("review")
-  .description("Restore an archived review.")
-  .argument("<id>", "review id")
-  .action(archiveRestoreReviewCommand);
+  .description("Restore an archived run.");
 
 restore
   .command("run")
