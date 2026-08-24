@@ -53,7 +53,7 @@ export async function listArchived(input: { archiveRoot: string; kind?: ArchiveK
 
 export async function archiveRun(input: Pick<ArchiveRoots, "archiveRoot" | "runsRoot"> & { id: string }): Promise<ArchiveEntry> {
   const run = await readRun(input.runsRoot, input.id);
-  ensureDone("run", run);
+  ensureTerminalRun(run);
 
   const layout = await resolveActiveRunLayout(input.runsRoot, input.id);
   const archivePath = archiveItemPath(input.archiveRoot, "runs", input.id);
@@ -138,6 +138,12 @@ async function resolveActiveRunLayout(runsRoot: string, id: string): Promise<{ l
 function ensureDone(type: ArchiveObjectType, item: { id: string; status: string }): void {
   if (item.status !== "done") {
     throw new Error(`only done ${type}s can be archived: ${item.id}`);
+  }
+}
+
+function ensureTerminalRun(run: Pick<RunState, "id" | "status">): void {
+  if (run.status !== "done" && run.status !== "abandoned") {
+    throw new Error(`only done or abandoned runs can be archived: ${run.id}`);
   }
 }
 

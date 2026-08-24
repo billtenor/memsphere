@@ -5,18 +5,36 @@ import { join } from "node:path";
 import test from "node:test";
 import { archiveChangeDirectory, archiveRun, listArchived, restoreRun } from "../src/archive/store.js";
 
-async function writeRunFixture(runsRoot: string, id: string, status: "running" | "done", legacy = false): Promise<void> {
-  const run = {
-    formatVersion: 2,
-    id,
-    name: id,
-    procedure: "procedures/test",
-    status,
-    startedAt: "2026-08-01T00:00:00.000Z",
-    updatedAt: "2026-08-01T00:00:00.000Z",
-    events: [],
-    artifacts: {}
-  };
+async function writeRunFixture(
+  runsRoot: string,
+  id: string,
+  status: "running" | "done" | "abandoned",
+  legacy = false
+): Promise<void> {
+  const run = status === "abandoned"
+    ? {
+        contractVersion: 2,
+        id,
+        name: id,
+        procedureName: "test",
+        memoryRoot: "/tmp/memory",
+        status,
+        createdAt: "2026-08-01T00:00:00.000Z",
+        updatedAt: "2026-08-01T00:00:00.000Z",
+        stack: [],
+        events: []
+      }
+    : {
+        formatVersion: 2,
+        id,
+        name: id,
+        procedure: "procedures/test",
+        status,
+        startedAt: "2026-08-01T00:00:00.000Z",
+        updatedAt: "2026-08-01T00:00:00.000Z",
+        events: [],
+        artifacts: {}
+      };
   if (legacy) {
     await mkdir(runsRoot, { recursive: true });
     await writeFile(join(runsRoot, `${id}.json`), `${JSON.stringify(run, null, 2)}\n`);
@@ -42,6 +60,20 @@ test("archives and restores done run directories", async () => {
   }
 });
 
+test("archives and restores abandoned runs without changing their terminal status", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-archive-abandoned-run-"));
+  try {
+    const runsRoot = join(dir, "runs");
+    const archiveRoot = join(dir, "archives");
+    await writeRunFixture(runsRoot, "run-abandoned", "abandoned");
+    await archiveRun({ archiveRoot, runsRoot, id: "run-abandoned" });
+    const restored = await restoreRun({ archiveRoot, runsRoot, id: "run-abandoned" });
+    assert.equal(restored.status, "abandoned");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("archives and restores legacy root-level run files", async () => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-archive-legacy-run-"));
   try {
@@ -56,13 +88,13 @@ test("archives and restores legacy root-level run files", async () => {
   }
 });
 
-test("refuses non-done runs and active restore conflicts", async () => {
+test("refuses non-terminal runs and active restore conflicts", async () => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-archive-conflict-"));
   try {
     const runsRoot = join(dir, "runs");
     const archiveRoot = join(dir, "archives");
     await writeRunFixture(runsRoot, "run-running", "running");
-    await assert.rejects(archiveRun({ archiveRoot, runsRoot, id: "run-running" }), /only done runs/);
+    await assert.rejects(archiveRun({ archiveRoot, runsRoot, id: "run-running" }), /only done or abandoned runs/);
     await writeRunFixture(runsRoot, "run-conflict", "done");
     await archiveRun({ archiveRoot, runsRoot, id: "run-conflict" });
     await writeRunFixture(runsRoot, "run-conflict", "done");

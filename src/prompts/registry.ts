@@ -91,6 +91,9 @@ const reviewDecisionSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("pending"),
     remaining: z.number().int().nonnegative()
+  }).strict(),
+  z.object({
+    kind: z.literal("cancelled")
   }).strict()
 ]);
 
@@ -241,6 +244,17 @@ const runCompletedSchema = z.object({
   }).strict())
 }).strict();
 
+const runAbandonedSchema = z.object({
+  runId: z.string(),
+  runName: z.string(),
+  procedureName: z.string(),
+  abandonedAt: z.string(),
+  initiator: z.string(),
+  reason: z.string().optional(),
+  currentStep: z.string().optional(),
+  artifactCount: z.number().int().nonnegative()
+}).strict();
+
 const runReportReceiptSchema = z.object({
   runId: z.string(),
   artifactName: z.string(),
@@ -331,6 +345,12 @@ const definitions = {
     audience: "runner",
     purpose: "summary",
     schema: runCompletedSchema
+  },
+  "run.abandoned": {
+    path: "run/abandoned.hbs",
+    audience: "runner",
+    purpose: "summary",
+    schema: runAbandonedSchema
   },
   "run.report-receipt": {
     path: "run/report-receipt.hbs",

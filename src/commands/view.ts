@@ -64,6 +64,7 @@ import {
 } from "../memory/changeset.js";
 import { readBundledSystemMemories } from "../reserved/store.js";
 import {
+  abandonRun,
   ArtifactAuthorizationFailure,
   ArtifactReviewConflictError,
   artifactReviewForActor,
@@ -804,6 +805,33 @@ async function handleRequest(
     return;
   }
 
+  const runAbandonMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/abandon$/);
+  if (request.method === "POST" && runAbandonMatch) {
+    try {
+      const body = await readJsonBody<{ reason?: unknown; actorId?: unknown }>(request);
+      if (body.reason !== undefined && typeof body.reason !== "string") {
+        throw new Error("reason must be a string");
+      }
+      if (body.actorId !== undefined && typeof body.actorId !== "string") {
+        throw new Error("actorId must be a string");
+      }
+      const result = await abandonRun({
+        runsRoot,
+        runId: decodeURIComponent(runAbandonMatch[1]),
+        source: "view",
+        reason: body.reason,
+        actorId: body.actorId
+      });
+      sendJson(response, 200, {
+        run: await toViewRunPayload(runsRoot, result.run),
+        warnings: result.terminationWarnings
+      });
+    } catch (error) {
+      sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
+    }
+    return;
+  }
+
   const runBindingsMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/bindings$/);
   if (runBindingsMatch) {
     const runId = decodeURIComponent(runBindingsMatch[1]);
@@ -1414,11 +1442,13 @@ async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknow
 
 async function schemaWritingPayload(runsRoot: string, run: RunState): Promise<unknown> {
   const snapshot = buildSchemaWritingSnapshot(runsRoot, run);
-  if (!snapshot?.draft) return snapshot;
+  if (!snapshot) return snapshot;
+  const publicSnapshot = { ...snapshot, readOnly: run.status !== "running" };
+  if (!snapshot.draft) return publicSnapshot;
   try {
     const content = await readFile(snapshot.draft.filePath, "utf8");
     return {
-      ...snapshot,
+      ...publicSnapshot,
       draft: {
         ...snapshot.draft,
         content,
@@ -1427,7 +1457,7 @@ async function schemaWritingPayload(runsRoot: string, run: RunState): Promise<un
     };
   } catch (error) {
     return {
-      ...snapshot,
+      ...publicSnapshot,
       draft: {
         ...snapshot.draft,
         contentError: error instanceof Error ? error.message : String(error)

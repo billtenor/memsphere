@@ -9,6 +9,7 @@ export type PromptInputMap = {
   "control-plane.permission-description": PermissionDescriptionPromptModel;
   "run.current-step": RunCurrentStepPromptModel;
   "run.completed": RunCompletedPromptModel;
+  "run.abandoned": RunAbandonedPromptModel;
   "run.report-receipt": RunReportReceiptPromptModel;
   "run.review-vote-receipt": RunReviewVoteReceiptPromptModel;
   "run.review-summary": ArtifactReviewSummaryPromptModel;
@@ -123,6 +124,9 @@ export type ArtifactReviewSummaryPromptModel = {
     | {
         kind: "pending";
         remaining: number;
+      }
+    | {
+        kind: "cancelled";
       };
 };
 
@@ -226,6 +230,17 @@ export type RunCompletedPromptModel = {
   };
   procedureAsserts: string[];
   finalArtifacts: Array<{ name: string; path?: string }>;
+};
+
+export type RunAbandonedPromptModel = {
+  runId: string;
+  runName: string;
+  procedureName: string;
+  abandonedAt: string;
+  initiator: string;
+  reason?: string;
+  currentStep?: string;
+  artifactCount: number;
 };
 
 export type RunReportReceiptPromptModel = {

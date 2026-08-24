@@ -27,6 +27,7 @@ import {
   type PromptLocale
 } from "../prompts/index.js";
 import {
+  abandonRun,
   type ArtifactReportSource,
   buildRunBindingSnapshot,
   buildSchemaWritingSnapshot,
@@ -95,6 +96,12 @@ type ReviewResolveOptions = OutputOptions & {
 
 type RunIdOptions = {
   run?: string;
+};
+
+type RunAbandonOptions = RunIdOptions & {
+  reason?: string;
+  reasonFile?: string;
+  actor?: string;
 };
 
 type OutputOptions = { output?: "json" | "text" };
@@ -608,6 +615,24 @@ export async function runSkipCommand(options: RunIdOptions): Promise<void> {
   const config = await readConfig();
   const run = await skipRun({ runsRoot: config.runsRoot, runId });
   printRunOutput({ kind: "skip", run, runsRoot: config.runsRoot });
+}
+
+export async function runAbandonCommand(options: RunAbandonOptions): Promise<void> {
+  const runId = requireRunId(options.run);
+  if (options.reason !== undefined && options.reasonFile !== undefined) {
+    throw new Error("use only one of --reason or --reason-file");
+  }
+  const reason = options.reasonFile ? await readFile(options.reasonFile, "utf8") : options.reason;
+  const config = await readConfig();
+  const result = await abandonRun({
+    runsRoot: config.runsRoot,
+    runId,
+    source: "cli",
+    actorId: options.actor,
+    reason
+  });
+  for (const warning of result.terminationWarnings) console.error(`warning: ${warning}`);
+  printRunOutput({ kind: "status", run: result.run, runsRoot: config.runsRoot });
 }
 
 export async function runStatusCommand(options: RunIdOptions): Promise<void> {

@@ -15,6 +15,7 @@ export async function dispatchArtifactReviewAgents(input: {
   runtime?: CliRuntimeDescriptor;
 }): Promise<number> {
   const run = await readRun(input.config.runsRoot, input.run.id);
+  if (run.status !== "running") return 0;
   const reviews = (run.artifactReviews ?? []).filter((review) => review.status === "pending");
   const queued = reviews.flatMap((review) => {
     const round = review.rounds.find((candidate) => candidate.id === review.currentRoundId);

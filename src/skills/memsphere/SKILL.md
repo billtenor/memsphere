@@ -358,10 +358,22 @@ memsphere run report --run <Run ID> --artifact-file <受管草稿绝对路径>
 
 未触发 Review 的上报回执后会继续显示下一个待执行步骤或 Run 完成状态。完整 Review 汇总由 `run review wait` 返回；`run review vote` 只确认投票结果并给出推进后的下一动作，不重复刚刚展示的意见。不应从 report 回执推断评审结果。继续执行和上报，直到 CLI 明确显示完成。
 
+#### 废弃运行中的 Run
+
+只有 Human 可以主动决定废弃仍在运行的 Run。Agent 不得因为步骤失败、Reviewer 失败、超时、无进展或自身判断而自动废弃；只有收到 Human 对目标 Run 的明确废弃指示后，才可以代为执行：
+
+```bash
+memsphere run abandon --run <Run ID> [--reason "<可选原因>"]
+```
+
+需要保留多行原因时使用 `--reason-file <文件路径>`；若要把已冻结的 Human Actor 记录为发起者，可附加 `--actor <Human Actor ID>`。命令把 Run 从 `running` 转为独立的 `abandoned` 终态，记录时间、Human 发起信息和停止位置，保留已有 Artifact、Schema 草稿及 Review 证据，取消未完成的 Review/Assignment/Attempt，并尽力停止 Reviewer Worker。重复废弃是幂等读取；done Run 不得废弃。
+
+废弃后 Run 只读且不可恢复执行，不能继续 report、schema、binding 或 Review 写入。废弃不会自动归档；Human 若还希望隐藏该 Run，必须再单独点击或执行归档。只有 `done` 或 `abandoned` Run 可以归档，恢复后仍保持归档前的终态。
+
 #### 人机协同
 
 当 `Actor` 为 `human` 时，暂停 Agent 执行，把 `Ask human to do`、相关要求和产物格式清楚地告知用户，并等待用户提供结果。不要代替用户完成 human 步骤，也不要在用户回复前继续推进。
 
 收到用户结果后，将它作为当前步骤产物按 `Then` 命令上报，再继续处理 CLI 返回的新步骤。CLI 明确返回 Run 完成状态时，向用户汇报流程完成情况和最终产物。
 
-旧 Memory 若未声明 `syntax`，先执行 `memsphere migrate syntax --check`；若仍使用 `format: boolean/string/number/schema`，执行 `memsphere migrate artifact-contract-v2 --check`；若使用 `element_types`、字符串形式的旧 `items`、array 直接声明 `fields`，或旧式 Schema `format: outline/table`，再执行 `memsphere migrate schema-contract-v2 --check`。`--write` 只允许 Embedded Store；Managed Store 必须把迁移结果作为 ChangeSet 候选正常 Publish。未经 human 明确确认，不对真实 Memory Store 执行迁移。旧语法不能启动新 Run，v1 running Run 不得跨版本继续，done Run 与 Review snapshot 仅只读展示。
+旧 Memory 若未声明 `syntax`，先执行 `memsphere migrate syntax --check`；若仍使用 `format: boolean/string/number/schema`，执行 `memsphere migrate artifact-contract-v2 --check`；若使用 `element_types`、字符串形式的旧 `items`、array 直接声明 `fields`，或旧式 Schema `format: outline/table`，再执行 `memsphere migrate schema-contract-v2 --check`。`--write` 只允许 Embedded Store；Managed Store 必须把迁移结果作为 ChangeSet 候选正常 Publish。未经 human 明确确认，不对真实 Memory Store 执行迁移。旧语法不能启动新 Run，v1 running Run 不得跨版本继续，done/abandoned Run 与 Review snapshot 仅只读展示。

@@ -79,6 +79,20 @@ test("single-Run status shows the Run name and Procedure name with historical fa
       kind: "status",
       run: { ...base, id: "run-completed", status: "done", stack: [] }
     });
+    printRunOutput({
+      kind: "status",
+      run: {
+        ...base,
+        id: "run-abandoned",
+        status: "abandoned",
+        abandonment: {
+          abandonedAt: "2026-08-22T00:00:00.000Z",
+          reason: "Human stopped it",
+          initiator: { kind: "human", source: "cli", name: "Alice" },
+          current: { frame: "procedure", memoryName: "release-procedure", stepId: "flow[1]" }
+        }
+      }
+    });
   } finally {
     console.log = originalLog;
   }
@@ -87,6 +101,8 @@ test("single-Run status shows the Run name and Procedure name with historical fa
   assert.match(output, /Run run-named\nName: Release candidate verification\nProcedure: release-procedure/);
   assert.match(output, /Run run-legacy\nName: release-procedure\nProcedure: release-procedure/);
   assert.match(output, /Run run-completed\nName: Release candidate verification\nProcedure: release-procedure/);
+  assert.match(output, /Run run-abandoned\nName: Release candidate verification\nProcedure: release-procedure/);
+  assert.match(output, /Abandoned[\s\S]*Human stopped it[\s\S]*cannot continue/);
 });
 
 test("inline Artifact Review comments reject escaped multiline Markdown", () => {

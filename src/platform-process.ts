@@ -15,10 +15,11 @@ export function spawnCommand(
 export async function terminateProcessTree(
   pid: number,
   signal: NodeJS.Signals = "SIGTERM",
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  processGroup = false
 ): Promise<void> {
   if (platform !== "win32") {
-    process.kill(pid, signal);
+    process.kill(processGroup ? -pid : pid, signal);
     return;
   }
   await new Promise<void>((resolveTermination, reject) => {

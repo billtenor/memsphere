@@ -20,8 +20,8 @@ export const artifactReviewDispositionValues = [
 ] as const;
 export type ArtifactReviewDispositionValue = (typeof artifactReviewDispositionValues)[number];
 export type ArtifactReviewBinding = "decision" | "advisory";
-export type ArtifactReviewStatus = "pending" | "awaiting_runner_vote" | "awaiting_revision" | "passed";
-export type ArtifactReviewRoundStatus = "pending" | "awaiting_runner_vote" | "passed" | "changes_requested";
+export type ArtifactReviewStatus = "pending" | "awaiting_runner_vote" | "awaiting_revision" | "passed" | "cancelled";
+export type ArtifactReviewRoundStatus = "pending" | "awaiting_runner_vote" | "passed" | "changes_requested" | "cancelled";
 
 export type ArtifactReviewAnchor = {
   submissionId: string;
@@ -133,7 +133,7 @@ export type ArtifactReviewAssignment = {
   slotIds: string[];
   permissions: PermissionId[];
   binding: ArtifactReviewBinding;
-  status: "draft" | "queued" | "running" | "submitted" | "failed";
+  status: "draft" | "queued" | "running" | "submitted" | "failed" | "cancelled";
   draft: ArtifactReviewDraft;
   attempts?: ArtifactReviewAgentAttempt[];
   submitted?: ArtifactReviewSubmittedOpinion;
