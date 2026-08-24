@@ -96,15 +96,18 @@ test("memory change validate checks the effective Store without expanding a spar
     const repairHelp = await runCli(workspace, ["project", "repair", "--help"], home);
     assert.equal(repairHelp.code, 0, repairHelp.stderr);
     assert.match(repairHelp.stdout, /only bundled System Memory/);
-    assert.match(repairHelp.stdout, /user Memory\s+is not modified/);
-    assert.match(repairHelp.stdout, /Embedded or Mounted Projects are never repair targets/);
+    assert.match(repairHelp.stdout, /user Memory is not\s+modified/);
+    assert.match(repairHelp.stdout, /Embedded\s+repair validates the complete candidate/);
+    assert.match(repairHelp.stdout, /without committing or pushing/);
+    assert.match(repairHelp.stdout, /Mounted Projects remain read-only/);
     assert.match(repairHelp.stdout, /manifest v3 tombstone matches/);
-    assert.match(repairHelp.stdout, /no differences,\s+it creates neither a ChangeSet nor a Revision/);
+    assert.match(repairHelp.stdout, /If there are no differences, nothing is written/);
     assert.match(repairHelp.stdout, /Explicit \[name\], then global --project, then the current Primary Project/);
 
     const repaired = await runCli(workspace, ["--project", "project", "project", "repair"], home);
     assert.equal(repaired.code, 0, repaired.stderr);
     assert.match(repaired.stdout, /^Project: project$/m);
+    assert.match(repaired.stdout, /^Store: Managed$/m);
     assert.match(repaired.stdout, /^System Memory changes: 0 create, 0 update, 0 delete$/m);
     assert.match(repaired.stdout, /^Revision: [0-9a-f]{40,64}$/m);
     assert.doesNotMatch(repaired.stdout, /ChangeSet:|Candidate Root:|Validate:|Publish:/);

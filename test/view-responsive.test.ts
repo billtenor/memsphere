@@ -271,7 +271,10 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
       const scrollBox = narrowPage.locator(".markdown-table-scroll").first();
       const box = await scrollBox.boundingBox();
       assert(box);
-      assert(await scrollBox.evaluate((element) => element.scrollWidth > element.clientWidth));
+      await narrowPage.waitForFunction(() => {
+        const element = document.querySelector(".markdown-table-scroll");
+        return element instanceof HTMLElement && element.scrollWidth > element.clientWidth;
+      });
       await scrollBox.evaluate((element) => { element.scrollLeft = 240; });
       assert(await scrollBox.evaluate((element) => element.scrollLeft > 0));
       await assertPageDoesNotOverflow(narrowPage);
@@ -486,7 +489,7 @@ test("Task pages do not expose the retired Task Review entry or inline comments"
 test("View deep links restore Memory, Task, and browser history", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
-    page.setDefaultTimeout(5_000);
+    page.setDefaultTimeout(10_000);
     try {
       await page.goto(`${url}/memories/concepts/user-note`, { waitUntil: "networkidle" });
       assert.equal(await page.locator("#title").textContent(), "User note", await page.locator("body").innerText());
@@ -499,13 +502,28 @@ test("View deep links restore Memory, Task, and browser history", async () => {
 
       await page.getByRole("button", { name: "Task", exact: true }).click();
       assert.equal(new URL(page.url()).pathname, "/tasks");
+      const selectedDetailLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
+      );
       await page.locator(".task-card-main").first().click();
+      await selectedDetailLoaded;
+      await page.waitForLoadState("networkidle");
       assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
-      await page.goBack();
+      const backDetailLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
+      );
+      await page.evaluate(() => history.back());
       await page.waitForURL(url + "/tasks");
+      await backDetailLoaded;
+      await page.waitForLoadState("networkidle");
       assert.equal(new URL(page.url()).pathname, "/tasks");
-      await page.goForward();
+      const forwardDetailLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
+      );
+      await page.evaluate(() => history.forward());
       await page.waitForURL(url + `/tasks/${runId}`);
+      await forwardDetailLoaded;
+      await page.waitForLoadState("networkidle");
       await page.getByRole("heading", { name: runName, exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
 

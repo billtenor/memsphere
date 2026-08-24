@@ -223,6 +223,20 @@ memsphere validate
 memsphere view start
 ```
 
+#### 修复或升级 System Memory
+
+现有 Managed 或 Embedded Project 如需补装、恢复或升级当前版本内置的 System Memory，可执行一次 repair。manifest v3 明确标记的废弃 System Memory 默认清理，但只有历史路径与 canonical identity 同时匹配时才允许删除，不会触碰用户 Memory 或 Mounted Project：
+
+```bash
+memsphere project repair my-project
+# 也可使用全局选择，或省略名称采用当前 Primary Project
+memsphere --project my-project project repair
+```
+
+Managed repair 内部生成受控 ChangeSet、校验完整有效 Memory 并自动发布；无差异时不创建 ChangeSet 或 Revision，ChangeSet 创建后的失败会保留为带 failure 诊断的只读 `abandoned` 记录并清理 Workspace candidate。
+
+Embedded repair 使用命令所在 Git worktree 的有效 Memory Root。命令先拒绝覆盖计划目标上的未提交修改，在临时目录中校验完整候选 Store，再把通过校验的 System Memory 差异写回当前 worktree；不会执行 commit、push 或 Managed publish。用户使用普通 `git diff` 审阅并按仓库流程集成这些修改。linked worktree 中执行时不会修改主 worktree；无差异时不写文件。
+
 ### 6.5 发现并读取 Memory
 
 列出当前 Project 可见的全部 Memory，或只列出 Procedure：

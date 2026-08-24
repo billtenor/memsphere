@@ -223,6 +223,20 @@ Start the local View:
 memsphere view start
 ~~~
 
+#### Repair or Upgrade System Memory
+
+To install missing System Memory, restore it, or upgrade it to the bundled version in an existing Managed or Embedded Project, run repair. System Memory marked as retired by manifest v3 is removed by default, but only when both its historical path and canonical identity match. User Memory and Mounted Projects are not touched:
+
+~~~bash
+memsphere project repair my-project
+# You can also select the Project globally, or omit the name to use the current Primary Project
+memsphere --project my-project project repair
+~~~
+
+Managed repair creates a controlled ChangeSet, validates the complete effective Memory, and publishes it automatically. A no-op repair creates no ChangeSet or Revision. If a failure occurs after ChangeSet creation, Memsphere preserves a read-only `abandoned` record with failure diagnostics and removes the Workspace candidate.
+
+Embedded repair uses the effective Memory Root in the Git worktree where the command runs. It refuses to overwrite uncommitted changes on planned targets, validates the complete candidate Store in a temporary directory, and writes validated System Memory differences back to the current worktree. It does not commit, push, or perform a Managed publish. Review the result with an ordinary `git diff` and integrate it through the repository's normal workflow. Running it in a linked worktree does not modify the main worktree; a no-op repair writes nothing.
+
 ### 6.5 Discover and Read Memory
 
 List all Memory visible to the current Project, or list only Procedures:
