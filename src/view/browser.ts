@@ -3754,6 +3754,7 @@ export const browserHtml = String.raw`<!doctype html>
           }
           button.append(title, meta);
           button.addEventListener("click", async () => {
+            const generation = ++state.pageLoadGeneration;
             state.routeError = "";
             state.routeLanding = "";
             const changedTask = state.selectedTaskId !== run.id;
@@ -3763,6 +3764,7 @@ export const browserHtml = String.raw`<!doctype html>
             renderAll();
             if (changedTask) scrollTaskDetailToTop();
             await loadRunDetail(run.id);
+            if (generation !== state.pageLoadGeneration) return;
             renderAll();
           });
           const actions = document.createElement("div");

@@ -502,7 +502,12 @@ test("View deep links restore Memory, Task, and browser history", async () => {
 
       await page.getByRole("button", { name: "Task", exact: true }).click();
       assert.equal(new URL(page.url()).pathname, "/tasks");
+      const selectedDetailLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
+      );
       await page.locator(".task-card-main").first().click();
+      await selectedDetailLoaded;
+      await page.waitForLoadState("networkidle");
       assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
       const backDetailLoaded = page.waitForResponse(
         (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
@@ -510,6 +515,7 @@ test("View deep links restore Memory, Task, and browser history", async () => {
       await page.evaluate(() => history.back());
       await page.waitForURL(url + "/tasks");
       await backDetailLoaded;
+      await page.waitForLoadState("networkidle");
       assert.equal(new URL(page.url()).pathname, "/tasks");
       const forwardDetailLoaded = page.waitForResponse(
         (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
@@ -517,6 +523,7 @@ test("View deep links restore Memory, Task, and browser history", async () => {
       await page.evaluate(() => history.forward());
       await page.waitForURL(url + `/tasks/${runId}`);
       await forwardDetailLoaded;
+      await page.waitForLoadState("networkidle");
       await page.getByRole("heading", { name: runName, exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
 
