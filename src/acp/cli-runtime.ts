@@ -74,7 +74,10 @@ export function agentReviewCliSource(descriptor: CliRuntimeDescriptor): "install
 function buildGuard(descriptor: CliRuntimeDescriptor): string {
   return `import { spawnSync } from "node:child_process";
 const args = process.argv.slice(2);
-const option = name => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined; };
+const options = name => args.flatMap((arg, index) => {
+  if (arg === name) return [args[index + 1]];
+  return arg.startsWith(name + "=") ? [arg.slice(name.length + 1)] : [];
+});
 const reviewWrite = args[0] === "run" && args[1] === "review" && ["comment", "submit"].includes(args[2]);
 const assignmentShow = args[0] === "run" && args[1] === "review" && args[2] === "assignment" && args[3] === "show";
 const artifactShow = args[0] === "run" && args[1] === "artifact" && args[2] === "show";
@@ -83,18 +86,18 @@ const stepShow = args[0] === "run" && args[1] === "step" && args[2] === "show";
 const runShow = args[0] === "run" && args[1] === "show";
 const memoryRead = args[0] === "memory" && ["list", "read"].includes(args[1]);
 const bind = (name, value) => {
-  const existing = option(name);
-  if (existing !== undefined) return existing === value;
+  const existing = options(name);
+  if (existing.length > 0) return Boolean(value) && existing.every(item => item === value);
   if (!value) return false;
   args.push(name, value);
   return true;
 };
-const needsAssignment = assignmentShow || artifactContractShow || reviewWrite || (artifactShow && option("--step") === undefined);
-const needsRun = runShow || stepShow || (artifactShow && option("--step") !== undefined);
+const needsAssignment = assignmentShow || artifactContractShow || reviewWrite || (artifactShow && options("--step").length === 0);
+const needsRun = runShow || stepShow || (artifactShow && options("--step").length > 0);
 const boundAssignment = !needsAssignment || bind("--assignment", process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID);
 const boundRun = !needsRun || bind("--run", process.env.MEMSPHERE_REVIEW_RUN_ID);
 const memoryRun = process.env.MEMSPHERE_REVIEW_MEMORY_RUN_ID;
-const boundMemoryRun = !memoryRead || (memoryRun ? bind("--run", memoryRun) : option("--run") === undefined);
+const boundMemoryRun = !memoryRead || (memoryRun ? bind("--run", memoryRun) : options("--run").length === 0);
 const allowed = (args.length === 1 && args[0] === "--version")
   || (memoryRead && boundMemoryRun)
   || (runShow && boundRun)
