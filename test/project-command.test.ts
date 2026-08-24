@@ -351,11 +351,13 @@ test("Embedded System Memory repair rejects dirty targets and stale preparations
     assert.match(await readFile(targetPath, "utf8"), /concurrent edit/);
 
     await runGit(["restore", "--", ".memsphere/memory/concepts/memsphere-framework.yaml"], { cwd: workspace });
-    const modePrepared = await prepareEmbeddedSystemMemoryRepair("embedded-cas");
-    assert(modePrepared);
-    await chmod(targetPath, 0o755);
-    await assert.rejects(applyEmbeddedSystemMemoryRepair(modePrepared), /target changed during repair/);
-    assert.equal((await stat(targetPath)).mode & 0o777, 0o755);
+    if (process.platform !== "win32") {
+      const modePrepared = await prepareEmbeddedSystemMemoryRepair("embedded-cas");
+      assert(modePrepared);
+      await chmod(targetPath, 0o755);
+      await assert.rejects(applyEmbeddedSystemMemoryRepair(modePrepared), /target changed during repair/);
+      assert.equal((await stat(targetPath)).mode & 0o777, 0o755);
+    }
 
     await runGit(["restore", "--", ".memsphere/memory/concepts/memsphere-framework.yaml"], { cwd: workspace });
     const rollbackPrepared = await prepareEmbeddedSystemMemoryRepair("embedded-cas");
