@@ -278,6 +278,7 @@ run
   .argument("[procedure-name]", "procedure primary name or alias")
   .requiredOption("--name <name>", "name for this run")
   .option("--file <path>", "start from a Procedure YAML file without installing it")
+  .option("--change <id>", "start from the validated candidate Memory in an active ChangeSet")
   .option("--review-config <path>", "bind Review Slots to Actors and select Decision Policies")
   .action((procedureName, options) => runStartCommand(procedureName, options));
 

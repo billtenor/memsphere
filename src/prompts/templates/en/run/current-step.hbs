@@ -1,6 +1,9 @@
 Run {{runId}}
 Name: {{runName}}
 Procedure: {{procedureName}}
+{{#if memorySource}}
+Memory Source: ChangeSet {{memorySource.changeId}} @ {{memorySource.checkpointDigest}}
+{{/if}}
 {{#each procedureAsserts}}
 {{#if @first}}
 

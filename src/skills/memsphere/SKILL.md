@@ -246,6 +246,14 @@ memsphere run start --file "<Procedure YAML 路径>" --name "<本次 Run 名称>
 
 Procedure 名称参数与 `--file` 必须二选一；两种方式都必须通过 `--name` 指定本次 Run 的名称。文件中的根 Procedure 会在启动时写入 Run 快照；外部 `!call` 和外部 Schema 从 Run 启动时冻结的 Project Memory Revision 解析。
 
+需要在正式集成或 Managed publish 前试运行已经验证的 active ChangeSet 时，使用：
+
+```bash
+memsphere run start "<Procedure 名称>" --change <change-id> --name "<本次 Run 名称>"
+```
+
+该入口从 ChangeSet 的 base revision 与当前 checkpoint 物化完整候选 Memory Store，并把 ChangeSet id、checkpoint digest 和 base revision 冻结进 Run。ChangeSet 后续修改不影响已经启动的 Run；需要测试新 checkpoint 时启动新的 Run。`--change` 不得与 `--file` 同时使用，也不接受未验证、验证失败、completed 或 abandoned 的 ChangeSet。不传 `--change` 时，Embedded 读取当前 worktree，Managed 读取 `published_revision`。
+
 命令会返回 Run ID 和第一个待执行步骤。后续命令都使用这个 Run ID，不要再次启动同一个流程。
 
 #### 理解当前步骤

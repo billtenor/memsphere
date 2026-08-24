@@ -239,6 +239,13 @@ export type RunState = {
     primary: { name: string; revision: string };
     mounted: Array<{ name: string; revision: string }>;
   };
+  memorySource?: {
+    kind: "changeset";
+    project: string;
+    changeId: string;
+    checkpointDigest: string;
+    baseRevision: string;
+  };
   createdAt: string;
   updatedAt: string;
   plan?: RunStep[];
@@ -718,6 +725,13 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
     primary: z.object({ name: z.string(), revision: z.string() }).strict(),
     mounted: z.array(z.object({ name: z.string(), revision: z.string() }).strict())
   }).strict().optional(),
+  memorySource: z.object({
+    kind: z.literal("changeset"),
+    project: z.string(),
+    changeId: z.string(),
+    checkpointDigest: z.string(),
+    baseRevision: z.string()
+  }).strict().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   plan: z.array(runStepSchema).optional(),
@@ -784,6 +798,7 @@ export async function startRun(input: {
   controlPlane?: ControlPlaneConfig;
   reviewConfiguration?: RunReviewConfiguration;
   memoryProjects?: RunState["memoryProjects"];
+  memorySource?: RunState["memorySource"];
   memoryCatalog?: MemoryCatalog;
   projectMemoryCatalogs?: Record<string, MemoryCatalog>;
 }): Promise<RunState> {
@@ -848,6 +863,7 @@ export async function startRun(input: {
     asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
     memoryRoot: input.memoryRoot,
     memoryProjects: input.memoryProjects,
+    memorySource: input.memorySource,
     createdAt: now,
     updatedAt: now,
     plan: cloneSteps(steps),
