@@ -20,9 +20,15 @@ test("missing Git guidance remains portable outside Windows", () => {
 });
 
 test("README documents native Windows shells without requiring Git Bash", async () => {
-  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const readmeEn = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const readmeZhCn = await readFile(
+    new URL("../README.zh-CN.md", import.meta.url),
+    "utf8"
+  );
 
-  assert.match(readme, /重新打开 PowerShell、CMD 或 Git Bash 等受支持 shell/);
-  assert.match(readme, /不要求先进入 Git Bash/);
-  assert.doesNotMatch(readme, /在 Git Bash 中使用 Memsphere/);
+  assert.match(readmeEn, /Reopen PowerShell, CMD, Git Bash, or another supported shell/);
+  assert.match(readmeEn, /does not require Git Bash/);
+  assert.match(readmeZhCn, /重新打开 PowerShell、CMD 或 Git Bash 等受支持 shell/);
+  assert.match(readmeZhCn, /不要求先进入 Git Bash/);
+  assert.doesNotMatch(readmeZhCn, /在 Git Bash 中使用 Memsphere/);
 });

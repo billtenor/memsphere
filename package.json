@@ -28,6 +28,7 @@
     "LICENSE",
     "NOTICE",
     "README.md",
+    "README.zh-CN.md",
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
