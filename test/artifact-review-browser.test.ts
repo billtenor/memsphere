@@ -373,9 +373,10 @@ flow:
     );
     await composer.fill("Alice private draft");
     await staleRoundWithBobDraft(address.port, firstReview.id, firstReview.currentRoundId, "Bob stale update before Alice add");
-    const aliceAddRecovery = waitForDraftSaveAfterExternalUpdate(page);
-    await reviewModal.getByRole("button", { name: "添加意见", exact: true }).click();
-    await aliceAddRecovery;
+    await clickAndWaitForForcedDraftRecovery(
+      page,
+      reviewModal.getByRole("button", { name: "添加意见", exact: true })
+    );
     await page.getByText("Alice private draft", { exact: true }).waitFor();
     assert.equal(await page.getByPlaceholder("补充整体评审意见").isEnabled(), true);
     assert.deepEqual(dialogs, []);
@@ -1101,6 +1102,54 @@ async function waitForDraftSaveAfterExternalUpdate(page: import("playwright").Pa
     );
     return controls.length > 0 && Array.from(controls).every((control) => !control.disabled);
   });
+}
+
+async function clickAndWaitForForcedDraftRecovery(
+  page: import("playwright").Page,
+  button: import("playwright").Locator
+): Promise<void> {
+  let forcedConflict = false;
+  const forceFirstPatchConflict = async (route: import("playwright").Route): Promise<void> => {
+    if (!forcedConflict && route.request().method() === "PATCH") {
+      forcedConflict = true;
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "forced Artifact Review draft conflict" })
+      });
+      return;
+    }
+    await route.continue();
+  };
+  await page.route("**/draft", forceFirstPatchConflict);
+  try {
+    const conflict = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/draft")
+        && response.request().method() === "PATCH"
+        && response.status() === 409,
+      { timeout: 10_000 }
+    );
+    const recovered = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/draft")
+        && response.request().method() === "PATCH"
+        && response.status() === 200,
+      { timeout: 10_000 }
+    );
+    await button.click();
+    await conflict;
+    await recovered;
+    assert.equal(forcedConflict, true);
+    await page.waitForFunction(() => {
+      const controls = document.querySelectorAll<HTMLButtonElement>(
+        "#artifact-review-modal .artifact-review-vote button"
+      );
+      return controls.length > 0 && Array.from(controls).every((control) => !control.disabled);
+    });
+  } finally {
+    await page.unroute("**/draft", forceFirstPatchConflict);
+  }
 }
 
 async function expectInlineValue(locator: import("playwright").Locator, expected: string): Promise<void> {
