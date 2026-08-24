@@ -8,6 +8,7 @@ import { parseControlPlaneConfig } from "../src/control-plane/index.js";
 import { memoryKinds } from "../src/memory/kinds.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 import {
+  abandonRun,
   activeProcedureAsserts,
   appendArtifactReviewAgentComment,
   ArtifactAuthorizationFailure,
@@ -129,6 +130,226 @@ test("startRun freezes and persists the configured work language", async () => {
     assert.equal(started.name, "Test run");
     assert.equal(persisted.language, "en");
     assert.equal(persisted.name, "Test run");
+  });
+});
+
+test("abandonRun records a Human terminal decision, preserves evidence, and blocks progress", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "target.yaml"), validProcedure);
+    const started = await startRun({ name: "Abandon me", memoryRoot, runsRoot, procedureName: "target-procedure" });
+
+    const first = await abandonRun({
+      runsRoot,
+      runId: started.id,
+      source: "cli",
+      reason: "No longer needed",
+      terminateWorker: async () => undefined
+    });
+    assert.equal(first.run.status, "abandoned");
+    assert.equal(first.run.abandonment?.reason, "No longer needed");
+    assert.equal(first.run.abandonment?.initiator.kind, "human");
+    assert.equal(first.run.abandonment?.current?.stepId, "flow[1]");
+    assert.equal(currentStep(first.run), undefined);
+
+    const second = await abandonRun({
+      runsRoot,
+      runId: started.id,
+      source: "view",
+      reason: "ignored",
+      terminateWorker: async () => undefined
+    });
+    assert.equal(second.run.abandonment?.abandonedAt, first.run.abandonment?.abandonedAt);
+    assert.equal(second.run.abandonment?.reason, "No longer needed");
+    await assert.rejects(
+      reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "late" } }),
+      /Run is not running.*abandoned/
+    );
+  });
+});
+
+test("abandonRun rejects invalid terminal states, actors, and reasons without modifying the Run", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "target.yaml"), validProcedure);
+    const controlPlane = parseControlPlaneConfig({
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        human: { kind: "human", name: "Human", permissions: ["artifact.read"] },
+        agent: {
+          kind: "agent",
+          name: "Agent",
+          permissions: ["artifact.read"],
+          system_prompt: "Review independently.",
+          agent: { provider: "traex" }
+        }
+      }
+    });
+    const running = await startRun({ name: "Guarded", memoryRoot, runsRoot, procedureName: "target-procedure", controlPlane });
+    const original = await readFile(join(runsRoot, running.id, `${running.id}.json`), "utf8");
+    await assert.rejects(
+      abandonRun({ runsRoot, runId: running.id, source: "cli", actorId: "agent" }),
+      /must be a Human Actor/
+    );
+    await assert.rejects(
+      abandonRun({ runsRoot, runId: running.id, source: "cli", actorId: "missing" }),
+      /must be a Human Actor/
+    );
+    await assert.rejects(
+      abandonRun({ runsRoot, runId: running.id, source: "cli", reason: "x".repeat(2_001) }),
+      /must not exceed 2000 characters/
+    );
+    assert.equal(await readFile(join(runsRoot, running.id, `${running.id}.json`), "utf8"), original);
+
+    const completed = await startRun({ name: "Complete", memoryRoot, runsRoot, procedureName: "target-procedure" });
+    await reportRun({ runsRoot, runId: completed.id, artifact: { kind: "inline", value: "done" } });
+    await assert.rejects(abandonRun({ runsRoot, runId: completed.id, source: "view" }), /already done/);
+
+    const readOnly = await startRun({ name: "Read only", memoryRoot, runsRoot, procedureName: "target-procedure" });
+    const readOnlyState = await readRun(runsRoot, readOnly.id);
+    readOnlyState.readOnly = true;
+    await writeRawFile(join(runsRoot, readOnly.id, `${readOnly.id}.json`), `${JSON.stringify(readOnlyState, null, 2)}\n`);
+    await assert.rejects(abandonRun({ runsRoot, runId: readOnly.id, source: "view" }), /read-only.*cannot be abandoned/);
+  });
+});
+
+test("abandonRun and reportRun serialize to exactly one terminal outcome", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "target.yaml"), validProcedure);
+    const started = await startRun({ name: "Race", memoryRoot, runsRoot, procedureName: "target-procedure" });
+
+    const results = await Promise.allSettled([
+      abandonRun({ runsRoot, runId: started.id, source: "view", terminateWorker: async () => undefined }),
+      reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "completed first" } })
+    ]);
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+    assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+    const final = await readRun(runsRoot, started.id);
+    assert.ok(final.status === "done" || final.status === "abandoned");
+    assert.equal(final.events.length, final.status === "done" ? 1 : 0);
+  });
+});
+
+test("abandonRun preserves a Schema draft and rejects finalization", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "schema.yaml"), `!procedure
+name: abandon-schema-draft
+flow:
+  - !action
+    action: Produce a structured result.
+    artifact: !artifact
+      name: structured result
+      type: object
+      format: { name: markdown, layout: outline }
+      schema: !schema
+        name: Structured result
+        fields: [summary]
+`);
+    const started = await startRun({ name: "Schema draft", memoryRoot, runsRoot, procedureName: "abandon-schema-draft" });
+    await enterSchema({ memoryRoot, runsRoot, runId: started.id });
+    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Structured result" } });
+    const awaiting = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "Preserved summary" } });
+    assert(currentSchemaFinalization(awaiting));
+    const draft = awaiting.schemaDrafts?.["flow[1]"];
+    assert(draft);
+    const draftPath = join(runsRoot, draft.path);
+    const before = await readFile(draftPath, "utf8");
+
+    const abandoned = await abandonRun({ runsRoot, runId: started.id, source: "view", terminateWorker: async () => undefined });
+    assert.equal(abandoned.run.schemaDrafts?.["flow[1]"]?.status, "awaiting_finalization");
+    assert.equal(await readFile(draftPath, "utf8"), before);
+    await assert.rejects(submitManagedSchemaDraft(runsRoot, started.id), /Run is not running.*abandoned/);
+    await assert.rejects(enterSchema({ memoryRoot, runsRoot, runId: started.id }), /Run is not running.*abandoned/);
+    assert.equal(await readFile(draftPath, "utf8"), before);
+  });
+});
+
+test("abandonRun serializes with Human Review submission and rejects later Review writes", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "review.yaml"), `!procedure
+name: abandon-human-review
+flow:
+  - !action
+    action: Produce a reviewed result.
+    artifact: !artifact
+      name: reviewed result
+      review: [reviewer]
+`);
+    const controlPlane = parseControlPlaneConfig({
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] }
+      }
+    });
+    const started = await startRun({
+      name: "Human review race",
+      memoryRoot,
+      runsRoot,
+      procedureName: "abandon-human-review",
+      controlPlane,
+      reviewConfiguration: reviewConfiguration({ procedure: "abandon-human-review", slots: { reviewer: ["human"] } })
+    });
+    const pending = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "candidate" } });
+    const review = currentArtifactReview(pending);
+    assert(review);
+    const round = review.rounds[0];
+    const assignment = round.assignments[0];
+    const drafted = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: review.id,
+      roundId: round.id,
+      actorId: assignment.actorId,
+      expectedRevision: round.revision,
+      draft: { vote: "approve", comments: [] }
+    });
+    const raced = await Promise.allSettled([
+      abandonRun({ runsRoot, runId: started.id, source: "view", terminateWorker: async () => undefined }),
+      submitArtifactReviewAssignment({
+        runsRoot,
+        reviewId: review.id,
+        roundId: round.id,
+        actorId: assignment.actorId,
+        expectedRevision: drafted.round.revision
+      })
+    ]);
+    assert.equal(raced[0].status, "fulfilled");
+    const final = await readRun(runsRoot, started.id);
+    assert.equal(final.status, "abandoned");
+    const finalRevision = final.artifactReviews?.[0]?.rounds[0]?.revision;
+    assert(finalRevision);
+    await assert.rejects(updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: review.id,
+      roundId: round.id,
+      actorId: assignment.actorId,
+      expectedRevision: finalRevision,
+      draft: { vote: "request_changes", comments: [{ body: "late" }] }
+    }), /Run is not running.*abandoned/);
+    await assert.rejects(submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: round.id,
+      actorId: assignment.actorId,
+      expectedRevision: finalRevision
+    }), /Run is not running.*abandoned/);
   });
 });
 
@@ -1672,6 +1893,10 @@ test("running v1 Runs remain byte-for-byte read-only", async () => {
     await assert.rejects(
       reportRun({ runsRoot, runId, artifact: { kind: "inline", value: "result" } }),
       /v1 run is read-only/
+    );
+    await assert.rejects(
+      abandonRun({ runsRoot, runId, source: "view" }),
+      /read-only and cannot be abandoned/
     );
     assert.equal(await readFile(path, "utf8"), source);
   });

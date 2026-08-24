@@ -1,0 +1,12 @@
+Run {{runId}}
+Name: {{runName}}
+Procedure: {{procedureName}}
+
+Abandoned
+- Time: {{abandonedAt}}
+- Initiator: {{initiator}}
+{{#if currentStep}}- Stopped at: {{currentStep}}
+{{/if}}{{#if reason}}- Reason: {{reason}}
+{{/if}}- Preserved artifacts: {{artifactCount}}
+
+This Run cannot continue. Archive it separately to remove it from the Task list.

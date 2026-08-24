@@ -43,6 +43,7 @@ import {
 } from "./commands/migrate.js";
 import { memoryKinds } from "./memory/kinds.js";
 import {
+  runAbandonCommand,
   runEnterSchemaCommand,
   runArtifactContractShowCommand,
   runArtifactShowCommand,
@@ -313,6 +314,15 @@ run
   .action(runReportCommand);
 
 run
+  .command("abandon")
+  .description("Abandon a running Run after an explicit Human decision; this does not archive it.")
+  .requiredOption("--run <id>", "run id")
+  .option("--reason <text>", "optional Human-provided reason")
+  .option("--reason-file <path>", "read the optional reason from a file")
+  .option("--actor <id>", "Human Actor id from the frozen Run snapshot")
+  .action(runAbandonCommand);
+
+run
   .command("show")
   .description("Show a concise Run outline with its steps and Artifact summaries.")
   .requiredOption("--run <id>", "run id")
@@ -555,7 +565,7 @@ archive
 
 archive
   .command("run")
-  .description("Archive a done run.")
+  .description("Archive a done or abandoned run.")
   .argument("<id>", "run id")
   .action(archiveRunCommand);
 

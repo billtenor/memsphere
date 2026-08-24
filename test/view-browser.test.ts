@@ -668,10 +668,24 @@ test("browser can hide installed system memory from the Project Catalog", () => 
   assert.match(browserHtml, /text\.textContent = t\("hideSystemMemories"\)/);
 });
 
-test("browser preserves archive controls for done runs", () => {
+test("browser shows abandon for running runs and archive only for terminal runs", () => {
   assert.match(browserHtml, /task-card-archive/);
   assert.match(browserHtml, /\/api\/archive\/runs\//);
-  assert.match(browserHtml, /archiveDoneOnly/);
+  assert.match(browserHtml, /if \(run\.status === "running"\) \{\s+actions\.append\(abandonRunButton\(run\)\);\s+\} else \{\s+actions\.append\(archiveRunButton\(run\)\);\s+\}/);
+  assert.doesNotMatch(browserHtml, /archiveDoneOnly/);
+  assert.match(browserHtml, /\["running", "done", "abandoned"\]/);
+  assert.match(browserHtml, /function abandonRunButton\(run\)/);
+  assert.match(browserHtml, /\/api\/runs\/" \+ encodeURIComponent\(run\.id\) \+ "\/abandon/);
+  assert.match(browserHtml, /if \(!confirm\(t\("abandonRunConfirm"\)\)\) return false;/);
+  assert.match(browserHtml, /确认废弃这个 Run？废弃后将不能继续执行。/);
+  assert.doesNotMatch(browserHtml, /Run 将不能继续执行，也不会自动归档/);
+  assert.match(browserHtml, /body: JSON\.stringify\(\{\}\)/);
+  assert.doesNotMatch(browserHtml, /prompt\(t\("abandonReason"\)/);
+  assert.doesNotMatch(browserHtml, /abandonReason:/);
+  assert.match(browserHtml, /Review cancelled; existing content is preserved as read-only evidence/);
+  assert.match(browserHtml, /snapshot\.draft\?\.status === "awaiting_finalization" && !snapshot\.readOnly/);
+  assert.match(browserHtml, /schemaDraftReadOnly/);
+  assert.match(browserHtml, /\["done", "abandoned"\]\.includes\(run\.status\)/);
 });
 
 test("Task titles use the Run name and keep the Procedure name in details", () => {
