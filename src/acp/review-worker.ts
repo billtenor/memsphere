@@ -77,6 +77,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
       sessionEnv: {
         MEMSPHERE_CLI: cliRuntime.launcherPath,
         MEMSPHERE_REVIEW_RUN_ID: claimed.run.id,
+        ...(claimed.run.memorySnapshot ? { MEMSPHERE_REVIEW_MEMORY_RUN_ID: claimed.run.id } : {}),
         MEMSPHERE_REVIEW_ASSIGNMENT_ID: artifactReviewAssignmentId(claimed.assignment),
         MEMSPHERE_CONFIG_PATH: config.configPath,
         MEMSPHERE_WORKSPACE_ROOT: workspaceRoot,

@@ -1,0 +1,85 @@
+!procedure
+syntax: memsphere-20260721-stable
+names:
+  - memsphere-changeset-comment-processing
+  - memsphere ChangeSet Comment 处理流程
+defines:
+  - 接手一个 ChangeSet，判断并处理其中的待处理 Comment，校验候选内容并释放处理权。
+  - Comment 直接绑定 ChangeSet；本流程不创建或处理独立 Memory Review，也不处理 Run Artifact Review。
+asserts:
+  - 必须由 human 在 Agent 对话中明确提供 ChangeSet id；提交 Comment 本身不自动创建 Task 或启动 Agent。
+  - 处理前必须执行 memsphere memory change claim <change-id>；已有处理者时不得绕过，只有 human 明确要求接手时才使用 --force。
+  - 每条 processing Comment 都必须综合判断；合理则修改候选内容，不合理则保持内容不变。处理说明只在 Agent 对话中向 human 说明，不另建实体。
+  - 标记 fixed 的 Comment 前必须运行 memsphere memory change validate <change-id> 且校验通过；rejected 不得伪造修改或校验结果。
+  - 不得修改 Comment 原文、提交者、定位快照、状态以外的审计字段，也不得修改与 Comment 无关的 Memory 内容。
+  - 本流程结束时必须用 memsphere memory change finish 处理明确列出的 Comment 并释放 claim；没有实际差异且全部 Comment 已完成时可以显式 complete。
+goals:
+  - 安全处理 ChangeSet Comment，并保持无关内容不变。
+  - 用 claim 提供基础排他性，用 validate 与目标级 CAS 防止静默覆盖。
+  - 让 Human 与 Agent 提交的 Comment 使用完全相同的处理路径。
+flow:
+  - !action
+    action: 在当前 worktree 的 Agent 对话中提供需要处理的 ChangeSet id。
+    actor: human
+    artifact: !artifact
+      name: ChangeSet 处理请求
+      format: markdown
+  - !action
+    action: 执行 memsphere memory change claim <change-id>，读取 ChangeSet 范围、待处理 Comment、base revision、checkpoint 和已有工作区修改；若 CLI 提示已被 claim，则停止并请 human 决定是否使用 --force 接手。
+    actor: agent
+    artifact: !artifact
+      name: ChangeSet 与 Comment 上下文
+      format: markdown
+  - !action
+    action: 逐条判断 processing Comment 是否合理；合理的 Comment 在当前 worktree 或 Managed candidate 中修改对应 Memory，不合理的 Comment 保持内容不变，并在对话中说明判断依据。
+    actor: agent
+    asserts:
+      - 必须结合 body、Memory、target、location、snapshot、hash 与当前内容判断意图。
+      - 定位已过期或存在冲突时不得盲改；不能安全判断时暂停并请求 human 决定。
+      - 允许多个 ChangeSet 绑定同一 worktree，但 CLI 警告不能被静默忽略；冲突由目标级 CAS 阻止。
+    artifact: !artifact
+      name: Comment 处理结果
+      format: markdown
+  - !while
+    condition: !action
+      action: 运行 memsphere memory change validate <change-id>；判断合理 Comment 的修改是否仍未通过校验，或是否仍有 Comment 需要 human 决定。
+      actor: agent
+      artifact: !artifact
+        name: 是否仍需修正
+        type: boolean
+    do:
+      - !action
+        action: 根据校验诊断或 human 决定继续修正同一 ChangeSet，不创建新的 ChangeSet。
+        actor: agent
+        artifact: !artifact
+          name: ChangeSet 修正
+          format: markdown
+  - !action
+    action: 对已修复 Comment 执行 memsphere memory change finish <change-id> --comment <comment-id> --reason fixed；对明确拒绝的 Comment 使用 --reason rejected。一次可列出多个同一结果的 Comment；未处理 Comment 不能静默跳过。
+    actor: agent
+    artifact: !artifact
+      name: Comment 完成与 claim 释放结果
+      format: markdown
+      final: true
+  - !if
+    condition: !action
+      action: 判断 ChangeSet 是否没有实际 Memory 差异且全部 Comment 已完成。
+      actor: agent
+      artifact: !artifact
+        name: 是否需要显式完成
+        type: boolean
+    then:
+      - !action
+        action: 执行 memsphere memory change complete <change-id>。
+        actor: agent
+        artifact: !artifact
+          name: ChangeSet 完成结果
+          format: markdown
+          final: true
+  - !action
+    action: 在 Agent 对话中向 human 简要说明已修复、已拒绝、仍待处理的 Comment 与校验结果。
+    actor: agent
+    artifact: !artifact
+      name: ChangeSet 处理摘要
+      format: markdown
+      final: true

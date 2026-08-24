@@ -1,6 +1,12 @@
 Run {{runId}}
 名称：{{runName}}
 流程：{{procedureName}}
+{{#if memorySource}}
+Memory 来源：ChangeSet {{memorySource.changeId}} @ {{memorySource.checkpointDigest}}
+{{#if memorySource.snapshot}}
+读取本 Run 的 Memory 时使用 `memsphere memory list/read --run {{runId}}`，不要混用当前工作树或后续 checkpoint。
+{{/if}}
+{{/if}}
 {{#each procedureAsserts}}
 {{#if @first}}
 

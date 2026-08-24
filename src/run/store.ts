@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, posix, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
@@ -51,6 +51,7 @@ import {
 } from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
 import { MemoryNotFoundError, type MemoryCatalog } from "../memory/catalog.js";
+import { memoryKinds } from "../memory/kinds.js";
 import { currentMemorySyntax, type MemorySyntaxVersion } from "../memory/syntax.js";
 import { inheritSchemaFormat, resolveSchemaContract } from "../memory/schema.js";
 import { resolvePromptLocale, type PromptLocale } from "../prompts/locale.js";
@@ -238,6 +239,16 @@ export type RunState = {
   memoryProjects?: {
     primary: { name: string; revision: string };
     mounted: Array<{ name: string; revision: string }>;
+  };
+  memorySource?: {
+    kind: "changeset";
+    project: string;
+    changeId: string;
+    checkpointDigest: string;
+    baseRevision: string;
+  };
+  memorySnapshot?: {
+    path: "memory";
   };
   createdAt: string;
   updatedAt: string;
@@ -718,6 +729,16 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
     primary: z.object({ name: z.string(), revision: z.string() }).strict(),
     mounted: z.array(z.object({ name: z.string(), revision: z.string() }).strict())
   }).strict().optional(),
+  memorySource: z.object({
+    kind: z.literal("changeset"),
+    project: z.string(),
+    changeId: z.string(),
+    checkpointDigest: z.string(),
+    baseRevision: z.string()
+  }).strict().optional(),
+  memorySnapshot: z.object({
+    path: z.literal("memory")
+  }).strict().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   plan: z.array(runStepSchema).optional(),
@@ -776,6 +797,7 @@ export async function ensureRunDirectory(runsRoot: string): Promise<string> {
 
 export async function startRun(input: {
   memoryRoot: string;
+  memorySnapshotRoot?: string;
   runsRoot: string;
   name: string;
   language?: PromptLocale;
@@ -784,6 +806,7 @@ export async function startRun(input: {
   controlPlane?: ControlPlaneConfig;
   reviewConfiguration?: RunReviewConfiguration;
   memoryProjects?: RunState["memoryProjects"];
+  memorySource?: RunState["memorySource"];
   memoryCatalog?: MemoryCatalog;
   projectMemoryCatalogs?: Record<string, MemoryCatalog>;
 }): Promise<RunState> {
@@ -848,6 +871,8 @@ export async function startRun(input: {
     asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
     memoryRoot: input.memoryRoot,
     memoryProjects: input.memoryProjects,
+    memorySource: input.memorySource,
+    memorySnapshot: input.memorySnapshotRoot ? { path: "memory" } : undefined,
     createdAt: now,
     updatedAt: now,
     plan: cloneSteps(steps),
@@ -865,8 +890,40 @@ export async function startRun(input: {
   };
 
   await expandAutoCallSteps(run);
-  await writeRun(input.runsRoot, run);
+  if (input.memorySnapshotRoot) {
+    await writeRunMemorySnapshot(input.runsRoot, run.id, input.memorySnapshotRoot);
+  }
+  try {
+    await writeRun(input.runsRoot, run);
+  } catch (error) {
+    if (input.memorySnapshotRoot) {
+      await rm(join(input.runsRoot, run.id, "memory"), { recursive: true, force: true });
+    }
+    throw error;
+  }
   return run;
+}
+
+async function writeRunMemorySnapshot(runsRoot: string, runId: string, sourceRoot: string): Promise<void> {
+  const directory = join(runsRoot, runId);
+  const target = join(directory, "memory");
+  const temporary = join(directory, `.memory.${process.pid}.${randomUUID()}.tmp`);
+  await mkdir(temporary, { recursive: true });
+  try {
+    for (const kind of memoryKinds) {
+      const source = join(sourceRoot, kind);
+      try {
+        await stat(source);
+      } catch (error) {
+        if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") continue;
+        throw error;
+      }
+      await cp(source, join(temporary, kind), { recursive: true, errorOnExist: true, force: false });
+    }
+    await rename(temporary, target);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 }
 
 export function normalizeRunName(value: unknown): string {

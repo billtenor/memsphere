@@ -28,6 +28,11 @@ export function buildRunCurrentStepPromptModel(
     runId: run.id,
     runName: runDisplayName(run),
     procedureName: run.procedureName,
+    memorySource: run.memorySource ? {
+      changeId: run.memorySource.changeId,
+      checkpointDigest: run.memorySource.checkpointDigest,
+      snapshot: Boolean(run.memorySnapshot)
+    } : undefined,
     procedureAsserts: activeProcedureAsserts(run)
   };
   if (run.status === "done") return undefined;
@@ -143,6 +148,10 @@ export function buildRunCompletedPromptModel(run: RunState): RunCompletedPromptM
     runId: run.id,
     runName: runDisplayName(run),
     procedureName: run.procedureName,
+    memorySource: run.memorySource ? {
+      changeId: run.memorySource.changeId,
+      checkpointDigest: run.memorySource.checkpointDigest
+    } : undefined,
     procedureAsserts: activeProcedureAsserts(run),
     finalArtifacts: finalArtifacts(run).map((artifact) => ({
       name: artifact.name,

@@ -49,7 +49,6 @@ test("Project lifecycle keeps creation separate from Workspace binding", async (
       "memory",
       "changes",
       "runs",
-      "reviews",
       "archives",
       "evals",
       ".runtime"

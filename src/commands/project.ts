@@ -336,7 +336,6 @@ async function writeProjectMetadata(root: string, name: string, config: ProjectC
   await Promise.all([
     mkdir(paths.changesRoot, { recursive: true }),
     mkdir(paths.runsRoot, { recursive: true }),
-    mkdir(paths.reviewsRoot, { recursive: true }),
     mkdir(paths.archiveRoot, { recursive: true }),
     mkdir(paths.evalsRoot, { recursive: true }),
     mkdir(paths.runtimeRoot, { recursive: true })

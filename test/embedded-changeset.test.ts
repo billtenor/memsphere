@@ -10,7 +10,16 @@ import { createViewServer } from "../src/commands/view.js";
 import { runGit } from "../src/git.js";
 import { validateCommand } from "../src/commands/validate.js";
 import { readViewConfig } from "../src/config.js";
-import { MemoryChangePreviewCache, validateMemoryChange, withMemoryChangePreview } from "../src/memory/changeset.js";
+import {
+  MemoryChangePreviewCache,
+  createMemoryChangeComment,
+  deleteMemoryChangeComment,
+  listMemoryChanges,
+  readMemoryChange,
+  validateMemoryChange,
+  withMemoryChangePreview,
+  withMemoryChangeReviewSnapshot
+} from "../src/memory/changeset.js";
 import { readProjectRegistry } from "../src/project/registry.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 
@@ -19,6 +28,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
   const home = join(fixture, "home");
   const main = join(fixture, "main");
   const linked = join(fixture, "linked");
+  const linkedTwin = join(fixture, "linked-twin");
   const mainMemory = join(main, ".memsphere", "memory");
   const linkedMemory = join(linked, ".memsphere", "memory");
   const gitConfig = join(fixture, "gitconfig");
@@ -69,6 +79,33 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     assert.equal(await readFile(join(mainMemory, "concepts", "shared.yaml"), "utf8"), mainSource);
     const changesAfterFirst = (await readdir(join(project.root, "changes"))).filter((name) => name.startsWith("change-"));
     assert.deepEqual(changesAfterFirst, [first.changeId]);
+
+    await runGit(["worktree", "add", "-b", "linked-twin", linkedTwin], { cwd: main });
+    await writeFile(join(linkedTwin, ".memsphere", "memory", "concepts", "shared.yaml"), linkedSource);
+    process.chdir(linkedTwin);
+    const divergentId = "change-divergent-same-base";
+    const canonicalChange = JSON.parse(
+      await readFile(join(project.root, "changes", first.changeId, "change.json"), "utf8")
+    ) as Record<string, unknown> & { checkpoint: Record<string, unknown> };
+    await mkdir(join(project.root, "changes", divergentId));
+    await writeFile(join(project.root, "changes", divergentId, "change.json"), `${JSON.stringify({
+      ...canonicalChange,
+      id: divergentId,
+      checkpoint: { ...canonicalChange.checkpoint, digest: "f".repeat(64) }
+    }, null, 2)}\n`);
+    await assert.rejects(
+      validateMemoryChange(),
+      new RegExp(`multiple divergent Embedded ChangeSets.*${first.changeId}.*${divergentId}|multiple divergent Embedded ChangeSets.*${divergentId}.*${first.changeId}`)
+    );
+    assert.equal(
+      (JSON.parse(await readFile(join(project.root, "changes", divergentId, "change.json"), "utf8")) as { status: string }).status,
+      "active"
+    );
+    await rm(join(project.root, "changes", divergentId), { recursive: true });
+    const fromTwin = await validateMemoryChange();
+    assert.equal(fromTwin.changeId, first.changeId);
+    assert.equal(fromTwin.checkpointDigest, first.checkpointDigest);
+    process.chdir(linked);
     const checkpoint = join(project.root, "changes", first.changeId, "checkpoints", first.checkpointDigest, "memory");
     assert.deepEqual(await readdir(checkpoint), ["concepts"]);
     assert.deepEqual(await readdir(join(checkpoint, "concepts")), ["shared.yaml"]);
@@ -103,6 +140,16 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       await previewCache.dispose();
     }
     await assert.rejects(realpath(cachedRoots[0]!));
+
+    const projectConfigPath = join(project.root, "config.json");
+    const projectConfig = JSON.parse(await readFile(projectConfigPath, "utf8")) as Record<string, unknown>;
+    await writeFile(projectConfigPath, `${JSON.stringify({
+      ...projectConfig,
+      control_plane: {
+        runner: { permissions: [] },
+        actors: { alice: { kind: "human", name: "Alice", permissions: [] } }
+      }
+    }, null, 2)}\n`);
 
     const view = createViewServer(await readViewConfig());
     await new Promise<void>((resolve, reject) => {
@@ -150,6 +197,15 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       assert.equal(previewSummary.memories.some((memory) => memory.entity !== undefined), false);
       assert.doesNotMatch(previewSummarySource, /Linked preview/);
 
+      const changeDetailResponse = await fetch(`${origin}/api/changes/${encodeURIComponent(first.changeId)}`);
+      const changeDetail = await changeDetailResponse.json() as {
+        actorNames: Record<string, string>;
+        actorKinds: Record<string, string>;
+      };
+      assert.equal(changeDetailResponse.status, 200);
+      assert.deepEqual(changeDetail.actorNames, { alice: "Alice" });
+      assert.deepEqual(changeDetail.actorKinds, { alice: "human" });
+
       const previewDetailResponse = await fetch(
         `${origin}/api/memories/concepts/shared?change=${encodeURIComponent(first.changeId)}`
       );
@@ -161,6 +217,9 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
 
       const missing = await fetch(`${origin}/api/memories?change=change-missing`);
       assert.equal(missing.status, 404);
+      const missingDetail = await fetch(`${origin}/api/changes/change-missing`);
+      assert.equal(missingDetail.status, 404);
+      assert.equal((await missingDetail.json() as { code: string }).code, "changeset_not_found");
     } finally {
       await new Promise<void>((resolve) => view.close(() => resolve()));
     }
@@ -185,6 +244,31 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     assert.deepEqual(new Set(expandedChange.targets.map((target) => target.operation)), new Set(["create", "delete", "rename", "update"]));
     assert.deepEqual(await readdir(join(project.root, "changes", first.changeId, "checkpoints")), [expanded.checkpointDigest]);
 
+    let releaseSnapshot!: () => void;
+    let snapshotEntered!: () => void;
+    const snapshotGate = new Promise<void>((resolve) => { releaseSnapshot = resolve; });
+    const snapshotStarted = new Promise<void>((resolve) => { snapshotEntered = resolve; });
+    const heldSnapshot = withMemoryChangeReviewSnapshot({
+      project: "embedded",
+      changeId: first.changeId,
+      use: async () => {
+        snapshotEntered();
+        await snapshotGate;
+      }
+    });
+    await snapshotStarted;
+    let validationSettled = false;
+    const concurrentValidation = validateMemoryChange().then((result) => {
+      validationSettled = true;
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(validationSettled, false, "validation must wait until Review snapshot creation releases the checkpoint lock");
+    releaseSnapshot();
+    await heldSnapshot;
+    assert.equal((await concurrentValidation).checkpointDigest, expanded.checkpointDigest);
+
+
     await writeFile(join(linkedMemory, "concepts", "shared.yaml"), "!concept\nnames: [Broken\n");
     const invalid = await validateMemoryChange();
     const canonicalLinkedMemory = await realpath(linkedMemory);
@@ -202,12 +286,16 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     });
     const invalidOrigin = `http://127.0.0.1:${(invalidView.address() as AddressInfo).port}`;
     const browser = await chromium.launch({ headless: true });
-    try {
-      const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
-      await page.goto(`${invalidOrigin}/projects/embedded/memories?change=${encodeURIComponent(first.changeId)}`);
+   try {
+     const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+      await page.goto(`${invalidOrigin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
       await page.getByRole("heading", { name: "Validation diagnostics", exact: true }).waitFor();
+      assert.deepEqual(
+        await page.evaluate(() => (window as unknown as { currentChangeOperator(): unknown }).currentChangeOperator()),
+        { kind: "human", id: "alice" }
+      );
       assert.match(await page.locator(".error-panel").first().textContent() ?? "", /concepts\/shared\.yaml/);
-      assert.equal(new URL(page.url()).pathname, "/projects/embedded/memories");
+      assert.equal(await page.getByRole("button", { name: "Create Review", exact: true }).count(), 0);
       await page.close();
     } finally {
       await browser.close();
@@ -223,9 +311,79 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     await runGit(["add", ".memsphere/memory"], { cwd: linked });
     await runGit(["commit", "-m", "advance linked head"], { cwd: linked });
     await writeFile(join(linkedMemory, "concepts", "shared.yaml"), linkedSource.replace("Linked preview", "Next round"));
-    const next = await validateMemoryChange();
-    assert.notEqual(next.changeId, first.changeId);
-    assert.notEqual(next.baseRevision, first.baseRevision);
+    const firstRead = await readMemoryChange({ home, project: "embedded", changeId: first.changeId });
+    assert.equal(firstRead.status, "active");
+    assert.match(firstRead.candidate_revision ?? "", /^[0-9a-f]{40,64}$/);
+    const repeatedRead = await readMemoryChange({ home, project: "embedded", changeId: first.changeId });
+    assert.equal(repeatedRead.updated_at, firstRead.updated_at);
+    const withComment = await createMemoryChangeComment({
+      home,
+      project: "embedded",
+      changeId: first.changeId,
+      actor: { kind: "human", id: "reviewer", name: "Reviewer" },
+      memoryReference: "concepts/shared",
+      path: "concepts/shared.yaml",
+      body: "CAS remains valid after repeated reconciliation reads",
+      expectedUpdatedAt: repeatedRead.updated_at
+    });
+    const afterCommentRead = await readMemoryChange({ home, project: "embedded", changeId: first.changeId });
+    assert.equal(afterCommentRead.comments.length, 1);
+    await deleteMemoryChangeComment({
+      home,
+      project: "embedded",
+      changeId: first.changeId,
+      commentId: withComment.comment.id,
+      actor: { kind: "human", id: "reviewer", name: "Reviewer" },
+      expectedUpdatedAt: afterCommentRead.updated_at
+    });
+
+    const changePath = join(project.root, "changes", first.changeId, "change.json");
+    const reusable = JSON.parse(await readFile(changePath, "utf8")) as Record<string, unknown>;
+    await writeFile(changePath, `${JSON.stringify({ ...reusable, origin: "view" }, null, 2)}\n`);
+    const forwarded = await validateMemoryChange(first.changeId);
+    assert.equal(forwarded.changeId, first.changeId);
+    assert.notEqual(forwarded.baseRevision, first.baseRevision);
+    assert.notEqual(forwarded.checkpointDigest, first.checkpointDigest);
+    const newerCandidate = await readMemoryChange({ home, project: "embedded", changeId: first.changeId });
+    assert.equal(newerCandidate.status, "active");
+    assert.equal(newerCandidate.candidate_revision, undefined);
+
+    process.chdir(main);
+    await runGit(["merge", "--no-ff", "linked", "-m", "merge linked memory"], { cwd: main });
+    const staleCandidateCheck = (await listMemoryChanges({ home, project: "embedded" }))
+      .find((change) => change.id === first.changeId);
+    assert(staleCandidateCheck);
+    assert.equal(staleCandidateCheck.status, "active");
+
+    process.chdir(linked);
+    await runGit(["add", ".memsphere/memory"], { cwd: linked });
+    await runGit(["commit", "-m", "advance linked candidate"], { cwd: linked });
+    process.chdir(main);
+    await runGit(["merge", "--no-ff", "linked", "-m", "merge updated linked memory"], { cwd: main });
+    const reconciled = (await listMemoryChanges({ home, project: "embedded" }))
+      .find((change) => change.id === first.changeId);
+    assert(reconciled);
+    const completed = JSON.parse(await readFile(join(project.root, "changes", first.changeId, "change.json"), "utf8")) as {
+      status: string;
+    };
+    assert.equal(completed.status, "completed");
+
+    const completedView = createViewServer(await readViewConfig());
+    await new Promise<void>((resolve, reject) => {
+      completedView.once("error", reject);
+      completedView.listen(0, "127.0.0.1", resolve);
+    });
+    const completedOrigin = `http://127.0.0.1:${(completedView.address() as AddressInfo).port}`;
+    const completedBrowser = await chromium.launch({ headless: true });
+    try {
+      const page = await completedBrowser.newPage();
+      await page.goto(`${completedOrigin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
+      await page.getByText(/^(Completed|已完成) ChangeSet$/).waitFor();
+      assert.equal(await page.getByText(/^(Active|进行中) ChangeSet$/).count(), 0);
+    } finally {
+      await completedBrowser.close();
+      await new Promise<void>((resolve) => completedView.close(() => resolve()));
+    }
   } finally {
     process.chdir(previous.cwd);
     if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;
