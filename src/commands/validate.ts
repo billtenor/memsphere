@@ -5,7 +5,7 @@ import { checkpointWorkspaceChanges } from "../memory/changeset.js";
 export async function validateCommand(options: { memoryRoot?: string; format?: "text" | "json" } = {}): Promise<void> {
   if (!options.memoryRoot) await checkpointWorkspaceChanges();
   const result = options.memoryRoot
-    ? { configPath: "(stateless)", ...(await validateMemoryRoot(resolve(options.memoryRoot))), reviewsRoot: undefined, runsRoot: undefined }
+    ? { configPath: "(stateless)", ...(await validateMemoryRoot(resolve(options.memoryRoot))), runsRoot: undefined }
     : await validateMemoryStore();
 
   if (options.format === "json") {
@@ -20,10 +20,6 @@ export async function validateCommand(options: { memoryRoot?: string; format?: "
 
     if (result.memoryRoot) {
       console.log(`memoryRoot: ${result.memoryRoot}`);
-    }
-
-    if (result.reviewsRoot) {
-      console.log(`reviewsRoot: ${result.reviewsRoot}`);
     }
 
     if (result.runsRoot) {

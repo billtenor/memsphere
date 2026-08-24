@@ -95,14 +95,14 @@ flow:
       - !action
         action: |-
           介绍 Artifact Review、评审席位、参与者和绑定关系。首次进入时可以这样表述：
-          “Artifact Review 用于判断 Run 中已经上报的 Artifact 是否满足当前步骤的要求，并给出评论、投票和改进意见。它评审的是 Artifact，与用于修改 Memory 的 Memory Review 是两套不同机制。
+          “Artifact Review 用于判断 Run 中已经上报的 Artifact 是否满足当前步骤的要求，并给出评论、投票和改进意见。它评审的是 Artifact，与 ChangeSet 上直接提交的修改 Comment 是两套不同机制。
           Procedure 在 Artifact 的 review 字段中声明评审席位。席位表示流程需要的评审视角或职责，例如‘产品负责人’或‘流程把控者’，不是某个具体的人或 Agent。
           参与者是在当前工程配置中登记的具体 Human 或 Agent，例如 Alice 或某个由 Traex 启动的 Agent。启动 Run 时，再把具体参与者绑定到本次 Run 的评审席位。这样，同一份 Procedure 可以在不同工程或不同 Run 中使用不同参与者，而不用修改流程记忆。”
           后续轮次根据 human 的问题继续讨论。
         actor: agent
         asserts:
           - 必须把评审席位表述为 Procedure 内的评审视角或职责，把参与者表述为配置中的具体 Human 或 Agent。
-          - 不得把参与者名称直接写入 Procedure 的 review 字段，不得把 Artifact Review 与 Memory Review 混为一谈。
+          - 不得把参与者名称直接写入 Procedure 的 review 字段，不得把 Artifact Review 与 ChangeSet Comment 混为一谈。
         artifact: !artifact
           name: Artifact Review 模型教学内容
           format: markdown

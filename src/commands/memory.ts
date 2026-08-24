@@ -16,8 +16,11 @@ import {
 } from "../memory/serializer.js";
 import { MemoryNavigation, type MemoryIdentity } from "../memory/navigation.js";
 import {
+  claimMemoryChange,
+  completeMemoryChange,
   editEmbeddedMemories,
   editMemories,
+  finishMemoryChange,
   publishMemoryChange,
   pushMemory,
   recoverMemory,
@@ -128,7 +131,7 @@ export async function memoryEditCommand(references: string[], options: { change?
     for (const target of result.targets) {
       console.log(`Edit: ${target.reference}\t${target.operation}\t${join(result.memoryRoot, target.path)}`);
     }
-    console.log("Next: memsphere validate");
+    console.log("Next: memsphere memory change validate");
     console.log("Integrate these Memory changes through the repository's normal Git workflow.");
     return;
   }
@@ -152,12 +155,38 @@ export async function memoryRenameCommand(reference: string, newName: string, op
 export async function memoryPublishCommand(options: { change?: string; message?: string }): Promise<void> {
   if (!options.change) throw new Error("--change <id> is required");
   const change = await publishMemoryChange(options.change, options.message, { expectedKind: "regular" });
-  console.log(`Published ChangeSet: ${change.id}`);
+  console.log(`Completed ChangeSet: ${change.id}`);
   console.log(`Revision: ${change.published_revision}`);
 }
 
 export async function memoryChangeResumeCommand(changeId: string): Promise<void> {
   console.log(`Candidate Root: ${await resumeMemoryChange(changeId)}`);
+}
+
+export async function memoryChangeClaimCommand(changeId: string, options: { force?: boolean } = {}): Promise<void> {
+  const result = await claimMemoryChange({ changeId, force: options.force });
+  console.log(`Claimed ChangeSet: ${result.change.id}`);
+  console.log(`Candidate Root: ${result.candidateRoot}`);
+  console.log(`Processing Comments: ${result.change.comments.filter((comment) => comment.status === "processing").length}`);
+  for (const warning of result.warnings) console.warn(`Warning: ${warning}`);
+}
+
+export async function memoryChangeFinishCommand(
+  changeId: string,
+  options: { comment?: string[]; reason?: "fixed" | "rejected" } = {}
+): Promise<void> {
+  const change = await finishMemoryChange({
+    changeId,
+    commentIds: options.comment,
+    reason: options.reason
+  });
+  console.log(`Finished ChangeSet processing: ${change.id}`);
+  console.log(`Completed Comments: ${(options.comment ?? []).length}`);
+}
+
+export async function memoryChangeCompleteCommand(changeId: string): Promise<void> {
+  const change = await completeMemoryChange(changeId);
+  console.log(`Completed ChangeSet: ${change.id}`);
 }
 
 export async function memoryChangeValidateCommand(
@@ -184,7 +213,7 @@ export async function memoryChangeValidateCommand(
   console.log(`ChangeSet: ${result.changeId}`);
   console.log(`Store: ${result.storeType}`);
   console.log(`Base Revision: ${result.baseRevision}`);
-  console.log(`Checkpoint: ${result.checkpointDigest}`);
+  console.log(`Content Digest: ${result.checkpointDigest}`);
   console.log(`memoryRoot: ${result.memoryRoot}`);
   if (preview.url) console.log(`Preview: ${preview.url}`);
   else console.log(`Preview: start memsphere View, then open ${preview.path}`);
@@ -200,7 +229,7 @@ async function memoryChangePreview(changeId: string): Promise<{ path: string; ur
 }
 
 export function memoryChangePreviewPath(project: string, changeId: string): string {
-  return `/projects/${encodeURIComponent(project)}/memories?change=${encodeURIComponent(changeId)}`;
+  return `/projects/${encodeURIComponent(project)}/changes/${encodeURIComponent(changeId)}`;
 }
 
 export async function memoryRecoverCommand(reference: string, options: { restore?: boolean; createChange?: boolean }): Promise<void> {

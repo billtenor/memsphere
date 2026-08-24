@@ -113,7 +113,7 @@ flow:
     });
     const memoryArtifact = page.locator(".artifact-row").first();
     await memoryArtifact.getByText("评审", { exact: true }).waitFor();
-    await page.getByRole("button", { name: "Review", exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Review", exact: true }).isVisible(), false);
     assert.equal(await memoryArtifact.getByText("Decider", { exact: true }).count(), 1);
     assert.equal(await memoryArtifact.getByText("Advisor", { exact: true }).count(), 1);
     assert.equal(await memoryArtifact.getByText("decider", { exact: true }).count(), 0);
