@@ -668,10 +668,11 @@ test("browser can hide installed system memory from the Project Catalog", () => 
   assert.match(browserHtml, /text\.textContent = t\("hideSystemMemories"\)/);
 });
 
-test("browser preserves archive controls for done runs", () => {
+test("browser shows abandon for running runs and archive only for terminal runs", () => {
   assert.match(browserHtml, /task-card-archive/);
   assert.match(browserHtml, /\/api\/archive\/runs\//);
-  assert.match(browserHtml, /archiveDoneOnly/);
+  assert.match(browserHtml, /if \(run\.status === "running"\) \{\s+actions\.append\(abandonRunButton\(run\)\);\s+\} else \{\s+actions\.append\(archiveRunButton\(run\)\);\s+\}/);
+  assert.doesNotMatch(browserHtml, /archiveDoneOnly/);
   assert.match(browserHtml, /\["running", "done", "abandoned"\]/);
   assert.match(browserHtml, /function abandonRunButton\(run\)/);
   assert.match(browserHtml, /\/api\/runs\/" \+ encodeURIComponent\(run\.id\) \+ "\/abandon/);

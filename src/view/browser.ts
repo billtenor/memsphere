@@ -672,7 +672,6 @@ export const browserHtml = String.raw`<!doctype html>
       archive: { zh: "归档", yaml: "Archive" },
       abandon: { zh: "废弃", yaml: "Abandon" },
       abandonRunConfirm: { zh: "确认废弃这个 Run？废弃后将不能继续执行。", yaml: "Abandon this Run? It cannot continue after abandonment." },
-      archiveDoneOnly: { zh: "只有 done 或 abandoned 状态的 Run 可以归档", yaml: "Only done or abandoned Runs can be archived" },
       archiveRunConfirm: { zh: "归档这个 run？归档后它将不再出现在 Task 列表中。", yaml: "Archive this run? It will no longer appear in the Task list." },
       archiveChangeConfirm: { zh: "归档这个 ChangeSet？归档后它将不再在页面中展示。", yaml: "Archive this ChangeSet? It will no longer appear in the View." },
       completed: { zh: "已完成", yaml: "done" },
@@ -3767,8 +3766,11 @@ export const browserHtml = String.raw`<!doctype html>
           });
           const actions = document.createElement("div");
           actions.className = "task-card-archive";
-          if (run.status === "running") actions.append(abandonRunButton(run));
-          actions.append(archiveRunButton(run));
+          if (run.status === "running") {
+            actions.append(abandonRunButton(run));
+          } else {
+            actions.append(archiveRunButton(run));
+          }
           card.append(button, actions);
           list.append(card);
         }
@@ -4016,9 +4018,7 @@ export const browserHtml = String.raw`<!doctype html>
       button.type = "button";
       button.className = ["btn", "archive-run-action", className].filter(Boolean).join(" ");
       button.textContent = t("archive");
-      const terminal = run.status === "done" || run.status === "abandoned";
-      button.disabled = !terminal;
-      button.title = terminal ? t("archiveRunConfirm") : t("archiveDoneOnly");
+      button.title = t("archiveRunConfirm");
       button.addEventListener("click", () => runButtonAction(button, () => archiveSelectedRun(run)));
       return button;
     }
