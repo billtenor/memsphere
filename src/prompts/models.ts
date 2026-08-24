@@ -133,6 +133,7 @@ export type RunCurrentStepPromptModel = {
   memorySource?: {
     changeId: string;
     checkpointDigest: string;
+    snapshot: boolean;
   };
   procedureAsserts: string[];
   step:

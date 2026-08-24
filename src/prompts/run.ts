@@ -30,7 +30,8 @@ export function buildRunCurrentStepPromptModel(
     procedureName: run.procedureName,
     memorySource: run.memorySource ? {
       changeId: run.memorySource.changeId,
-      checkpointDigest: run.memorySource.checkpointDigest
+      checkpointDigest: run.memorySource.checkpointDigest,
+      snapshot: Boolean(run.memorySnapshot)
     } : undefined,
     procedureAsserts: activeProcedureAsserts(run)
   };

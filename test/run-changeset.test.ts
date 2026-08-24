@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { runStartCommand } from "../src/commands/run.js";
+import { createMemoryCommandCatalog } from "../src/commands/memory.js";
 import { projectCreateCommand } from "../src/commands/project.js";
 import { runGit } from "../src/git.js";
 import { abandonMemoryChange, editMemories, validateMemoryChange } from "../src/memory/changeset.js";
@@ -19,6 +20,13 @@ flow:
     action: ${instruction}
     artifact: !artifact
       name: result
+`;
+
+const statement = (rule: string) => `!statement
+syntax: ${currentMemorySyntax}
+names: [candidate-rule]
+asserts:
+  - ${rule}
 `;
 
 async function silently(action: () => Promise<void>): Promise<void> {
@@ -53,10 +61,14 @@ test("Managed Run can start from a validated active ChangeSet without publishing
     await silently(() => projectCreateCommand("managed", { bind: true }));
 
     const edited = await editMemories({
-      references: ["procedures/candidate-run"],
-      createPaths: new Map([["procedures/candidate-run", "procedures/candidate-run.yaml"]])
+      references: ["procedures/candidate-run", "statements/candidate-rule"],
+      createPaths: new Map([
+        ["procedures/candidate-run", "procedures/candidate-run.yaml"],
+        ["statements/candidate-rule", "statements/candidate-rule.yaml"]
+      ])
     });
     await writeFile(join(edited.candidateRoot, "procedures", "candidate-run.yaml"), procedure("Run the managed candidate."));
+    await writeFile(join(edited.candidateRoot, "statements", "candidate-rule.yaml"), statement("Use the first checkpoint."));
     const validation = await validateMemoryChange(edited.change.id);
     assert.deepEqual(validation.issues, []);
 
@@ -85,14 +97,35 @@ test("Managed Run can start from a validated active ChangeSet without publishing
       run.memoryProjects?.primary.revision,
       `changeset:${edited.change.id}@${validation.checkpointDigest}`
     );
+    assert.deepEqual(run.memorySnapshot, { path: "memory" });
+    const frozenCatalog = await createMemoryCommandCatalog(run.id);
+    assert.deepEqual((await frozenCatalog.read("candidate-rule", { kind: "statements" })).asserts, [
+      "Use the first checkpoint."
+    ]);
 
     await writeFile(join(edited.candidateRoot, "procedures", "candidate-run.yaml"), procedure("Run the newer checkpoint."));
+    await writeFile(join(edited.candidateRoot, "statements", "candidate-rule.yaml"), statement("Use the newer checkpoint."));
     const newerValidation = await validateMemoryChange(edited.change.id);
     assert.notEqual(newerValidation.checkpointDigest, validation.checkpointDigest);
     const frozenRun = (await listRuns(join(registry.projects.managed.root, "runs")))
       .find((candidate) => candidate.name === "Managed candidate source");
     assert.equal(frozenRun?.stack[0]?.steps[0]?.instruction, "Run the managed candidate.");
     assert.equal(frozenRun?.memorySource?.checkpointDigest, validation.checkpointDigest);
+    assert.deepEqual((await frozenCatalog.read("candidate-rule", { kind: "statements" })).asserts, [
+      "Use the first checkpoint."
+    ]);
+
+    await silently(() => runStartCommand("candidate-run", {
+      name: "Newer managed candidate source",
+      change: edited.change.id
+    }));
+    const newerRun = (await listRuns(join(registry.projects.managed.root, "runs")))
+      .find((candidate) => candidate.name === "Newer managed candidate source");
+    assert(newerRun);
+    const newerCatalog = await createMemoryCommandCatalog(newerRun.id);
+    assert.deepEqual((await newerCatalog.read("candidate-rule", { kind: "statements" })).asserts, [
+      "Use the newer checkpoint."
+    ]);
 
     await abandonMemoryChange({ home, project: "managed", changeId: edited.change.id });
     await assert.rejects(
@@ -178,6 +211,21 @@ test("Embedded Run uses the selected ChangeSet instead of the current worktree M
     assert.equal(candidateRun?.stack[0]?.steps[0]?.instruction, "Run the ChangeSet version.");
     assert.equal(candidateRun?.memorySource?.changeId, validation.changeId);
     assert.equal(candidateRun?.memorySource?.checkpointDigest, validation.checkpointDigest);
+    assert.deepEqual(candidateRun?.memorySnapshot, { path: "memory" });
+    assert.equal(
+      await readFile(join(registry.projects.embedded.root, "runs", candidateRun!.id, "memory", "procedures", "candidate-run.yaml"), "utf8"),
+      procedure("Run the ChangeSet version.")
+    );
+    await writeFile(
+      join(linked, ".memsphere", "memory", "procedures", "candidate-run.yaml"),
+      procedure("Run a later worktree version.")
+    );
+    const candidateCatalog = await createMemoryCommandCatalog(candidateRun!.id);
+    assert.equal(
+      (await candidateCatalog.read("candidate-run", { kind: "procedures" }) as { flow: Array<{ action: string }> })
+        .flow[0]?.action,
+      "Run the ChangeSet version."
+    );
   } finally {
     process.chdir(previous.cwd);
     if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;

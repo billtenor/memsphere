@@ -252,7 +252,14 @@ Procedure 名称参数与 `--file` 必须二选一；两种方式都必须通过
 memsphere run start "<Procedure 名称>" --change <change-id> --name "<本次 Run 名称>"
 ```
 
-该入口从 ChangeSet 的 base revision 与当前 checkpoint 物化完整候选 Memory Store，并把 ChangeSet id、checkpoint digest 和 base revision 冻结进 Run。ChangeSet 后续修改不影响已经启动的 Run；需要测试新 checkpoint 时启动新的 Run。`--change` 不得与 `--file` 同时使用，也不接受未验证、验证失败、completed 或 abandoned 的 ChangeSet。不传 `--change` 时，Embedded 读取当前 worktree，Managed 读取 `published_revision`。
+该入口从 ChangeSet 的 base revision 与当前 checkpoint 物化四类完整候选 Memory，并把不可变快照、ChangeSet id、checkpoint digest 和 base revision 冻结进 Run。执行这个 Run 时，使用同一个 Run ID 发现和读取其 Memory 快照：
+
+```bash
+memsphere memory list --run <Run ID>
+memsphere memory read "<名称/逻辑引用>" --run <Run ID>
+```
+
+Concept、Statement、Schema 和 Procedure 都必须从该入口读取，不能混用当前工作树或后来 checkpoint 的版本。ChangeSet 后续修改不影响已经启动的 Run；需要测试新 checkpoint 时启动新的 Run。`--change` 不得与 `--file` 同时使用，也不接受未验证、验证失败、completed 或 abandoned 的 ChangeSet。不传 `--change` 时，Embedded 读取当前 worktree，Managed 读取 `published_revision`。
 
 命令会返回 Run ID 和第一个待执行步骤。后续命令都使用这个 Run ID，不要再次启动同一个流程。
 

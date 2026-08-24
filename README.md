@@ -57,7 +57,7 @@ memsphere memory change validate
 memsphere run start <procedure-name> --change <change-id> --name "<run-name>"
 ```
 
-该 Run 从 ChangeSet 的 base revision 与当前 checkpoint 物化完整候选 Memory Store，并冻结 ChangeSet id、checkpoint digest 和 base revision；ChangeSet 后续再次校验不会改变已经启动的 Run。不传 `--change` 时，Embedded 仍读取当前 worktree，Managed 仍读取 `published_revision`。
+该 Run 从 ChangeSet 的 base revision 与当前 checkpoint 物化四类完整候选 Memory，保存 Run 级不可变快照，并冻结 ChangeSet id、checkpoint digest 和 base revision；ChangeSet 后续再次校验不会改变已经启动的 Run。执行时可用 `memsphere memory list --run <run-id>` 和 `memsphere memory read <reference> --run <run-id>` 读取同一快照中的 Concept、Statement、Schema 与 Procedure。不传 `--change` 时，Embedded 仍读取当前 worktree，Managed 仍读取 `published_revision`。
 
 Embedded 的标准命令不需要额外选择参数：同一 Project、Git repository 和 base revision 下会持续复用同一个逻辑 ChangeSet，linked worktree 路径变化不会生成新对象。ChangeSet 的生命周期只有 active、completed、abandoned：普通 commit、push 或创建 PR 后仍为 active，候选提交合入 `master` 后才自动成为 completed；Managed 使用 `memsphere memory publish` 后直接成为 completed。ChangeSet candidate 和当前验证内容都只包含目标文件，不应直接传给 `memsphere validate --memory-root`；该参数仍用于校验包含四类目录的完整 Memory Store。
 
