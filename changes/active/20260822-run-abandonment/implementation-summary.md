@@ -14,7 +14,7 @@
 - `src/run/store.ts`、`src/artifact-review.ts`：新增 `abandoned` / `cancelled` 状态和废弃审计元数据；写锁内原子转换；统一 running 写守卫；保留证据并取消未完成 Review、Assignment、Attempt。
 - `src/platform-process.ts`、`src/acp/dispatcher.ts`、`src/view/service.ts`：停止派发已废弃 Run；锁外尽力终止 detached Reviewer Worker 进程组，并避免影响普通 ACP 子进程。
 - `src/commands/run.ts`、`src/cli.ts`：新增 `memsphere run abandon --run ... [--reason|--reason-file] [--actor]`，仅用于 Human 已明确决定后的执行。
-- `src/commands/view.ts`、`src/view/browser.ts`：新增废弃 API、原因输入与二次确认、独立 abandoned 分组、停止步骤与原因展示；废弃后只读，归档仍为单独按钮。
+- `src/commands/view.ts`、`src/view/browser.ts`：新增废弃 API、一次确认弹窗、独立 abandoned 分组、停止步骤与可选原因展示；View 不要求填写原因，废弃后只读，归档仍为单独按钮。
 - `src/archive/store.ts`：允许 done / abandoned Run 归档，恢复后保持原终态；running 仍拒绝。
 - `src/prompts/**`：新增双语 `run.abandoned` 终态 Prompt，并让 cancelled Review 只读呈现。
 - `reserved-memory/**`、`.memsphere/memory/**`、`src/skills/memsphere/SKILL.md`、`README.md`：同步 Human-only、保留证据、不可恢复、不自动归档等用户语义。
@@ -37,7 +37,7 @@
 - `memsphere validate`：当前 Project Memory 通过。
 - `node dist/cli.js validate --memory-root reserved-memory`：System Memory 源通过。
 - `memsphere memory change validate`：Embedded ChangeSet `change-20260822-032730960z-632ae5cb` 通过。
-- Playwright CLI 真实交互：running 时归档禁用；废弃需原因输入与确认；废弃后留在 abandoned 分组、显示原因且归档可用；再次确认归档后才从 Task 列表移除。
+- Playwright CLI 真实交互：running 时归档禁用；点击废弃后只需确认；废弃后留在 abandoned 分组且归档可用；再次确认归档后才从 Task 列表移除。
 
 ## 未验证项
 

@@ -671,7 +671,6 @@ export const browserHtml = String.raw`<!doctype html>
       jumpToCurrentStepTitle: { zh: "跳转到当前正在运行的流程节点", yaml: "Jump to the currently running flow node" },
       archive: { zh: "归档", yaml: "Archive" },
       abandon: { zh: "废弃", yaml: "Abandon" },
-      abandonReason: { zh: "输入可选的废弃原因。按“确定”继续，按“取消”返回。", yaml: "Enter an optional abandonment reason. Choose OK to continue or Cancel to go back." },
       abandonRunConfirm: { zh: "确认废弃这个 Run？已有内容会保留，但 Run 将不能继续执行，也不会自动归档。", yaml: "Abandon this Run? Existing evidence will be preserved, but the Run cannot continue and will not be archived automatically." },
       archiveDoneOnly: { zh: "只有 done 或 abandoned 状态的 Run 可以归档", yaml: "Only done or abandoned Runs can be archived" },
       archiveRunConfirm: { zh: "归档这个 run？归档后它将不再出现在 Task 列表中。", yaml: "Archive this run? It will no longer appear in the Task list." },
@@ -6037,13 +6036,11 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function abandonSelectedRun(run) {
       if (!run || run.status !== "running") return;
-      const reason = prompt(t("abandonReason"), "");
-      if (reason === null) return false;
       if (!confirm(t("abandonRunConfirm"))) return false;
       const response = await fetch("/api/runs/" + encodeURIComponent(run.id) + "/abandon", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ reason })
+        body: JSON.stringify({})
       });
       if (!response.ok) throw new Error(await response.text());
       const payload = await response.json();

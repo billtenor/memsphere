@@ -54,7 +54,7 @@ flow:
     const abandoned = await fetch(`${base}/api/runs/${started.id}/abandon`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ reason: "Human no longer needs this result" })
+      body: JSON.stringify({})
     });
     assert.equal(abandoned.status, 200);
     const payload = await abandoned.json() as {
@@ -65,7 +65,7 @@ flow:
       };
     };
     assert.equal(payload.run.status, "abandoned");
-    assert.equal(payload.run.abandonment?.reason, "Human no longer needs this result");
+    assert.equal(payload.run.abandonment?.reason, undefined);
     assert.equal(payload.run.schemaWriting?.readOnly, true);
     assert.equal(payload.run.schemaWriting?.draft?.status, "awaiting_finalization");
     assert.match(payload.run.schemaWriting?.draft?.content ?? "", /Unaccepted summary/);

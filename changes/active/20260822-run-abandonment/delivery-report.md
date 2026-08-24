@@ -5,7 +5,7 @@
 - 新增独立 Run 终态 `abandoned`，仅允许 Human 对 running Run 主动发起；记录时间、可选 Human Actor、原因与停止步骤。
 - 废弃转换在 Run 写锁内完成并支持幂等；保留 Artifact、Schema 草稿及 Review 证据，取消未完成 Review、Round、Assignment 和 Attempt，并尽力终止运行中的 Agent Worker。
 - 统一限制废弃后的 Run、Schema、Binding 和 Artifact Review 推进写入；dispatcher 不再为非 running Run 派发 Agent，迟到写入被拒绝。
-- CLI 新增 `memsphere run abandon`；View 新增废弃原因、二次确认、abandoned 分组和只读证据展示。废弃不自动归档，用户仍需另行点击归档。
+- CLI 新增 `memsphere run abandon`；View 点击废弃后仅展示一次确认弹窗，不要求填写原因，并提供 abandoned 分组和只读证据展示。废弃不自动归档，用户仍需另行点击归档。
 - done 与 abandoned Run 均可归档，恢复后保持原终态；running Run 仍不可归档。
 - 双语 Prompt、README、Skill、System Memory 和当前 Project Memory 已同步；修复废弃 Schema 草稿仍展示最终提交命令的问题，并修正 `archive run` 帮助文案。
 
@@ -13,7 +13,7 @@
 
 - `npm run typecheck`：通过。
 - `npm run build`：通过。
-- `npm test`：410 total / 409 passed / 0 failed / 1 Windows-only skipped。
+- 合并最新 master 并完成本轮交互修订后，`npm test`：412 total / 411 passed / 0 failed / 1 Windows-only skipped。
 - Project Memory 与 reserved Memory 校验：通过。
 - Embedded ChangeSet `change-20260822-032730960z-632ae5cb`：通过。
 - `git diff --check`：通过。

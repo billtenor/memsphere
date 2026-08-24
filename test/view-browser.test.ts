@@ -675,6 +675,10 @@ test("browser preserves archive controls for done runs", () => {
   assert.match(browserHtml, /\["running", "done", "abandoned"\]/);
   assert.match(browserHtml, /function abandonRunButton\(run\)/);
   assert.match(browserHtml, /\/api\/runs\/" \+ encodeURIComponent\(run\.id\) \+ "\/abandon/);
+  assert.match(browserHtml, /if \(!confirm\(t\("abandonRunConfirm"\)\)\) return false;/);
+  assert.match(browserHtml, /body: JSON\.stringify\(\{\}\)/);
+  assert.doesNotMatch(browserHtml, /prompt\(t\("abandonReason"\)/);
+  assert.doesNotMatch(browserHtml, /abandonReason:/);
   assert.match(browserHtml, /Review cancelled; existing content is preserved as read-only evidence/);
   assert.match(browserHtml, /snapshot\.draft\?\.status === "awaiting_finalization" && !snapshot\.readOnly/);
   assert.match(browserHtml, /schemaDraftReadOnly/);
