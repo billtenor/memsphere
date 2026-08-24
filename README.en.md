@@ -78,38 +78,37 @@ This distinction matters: Memsphere is not an Agent, and it should not be tied t
 Memsphere is planned to manage four kinds of assets that work together:
 
 ~~~mermaid
-flowchart LR
+flowchart TB
     H["Human"]
     A["General-purpose Agent"]
 
     subgraph S["One personalized software system"]
         direction TB
-        M["Memory<br/>knowledge, rules, structures, and processes"]
+        M["Memory<br/>Agent entry: knowledge, rules, structures, and processes"]
         C["CLI<br/>deterministic tools"]
-        D[("Data<br/>structured data, files, and documents")]
-        I["Interface<br/>operations and visualization"]
+        I["Interface<br/>human entry: operations and visualization"]
+        D[("Data<br/>shared foundation for CLI and Interface")]
 
+        M -.->|"guides Agent invocation"| C
         C <-->|"read and write"| D
-        I <-->|"display and operate"| D
+        I <-->|"query, operate, and display"| D
     end
 
     H <-->|"natural language"| A
     A -->|"read and follow"| M
-    A -->|"invoke"| C
-    A <-->|"use and manage"| D
-    H <-->|"direct interaction"| I
+    H <-->|"operate and inspect"| I
 ~~~
 
 Each asset has a different responsibility:
 
 | Asset | Role | How it evolves |
 | --- | --- | --- |
-| Memory | Preserves the knowledge, rules, structures, and processes through which software understands the world, makes decisions, and completes work | Grows from natural-language descriptions into a readable, verifiable semantic model |
+| Memory | Serves as the Agent's entry into the software and preserves the knowledge, rules, structures, and processes through which it understands the world, makes decisions, and completes work | Grows from natural-language descriptions into a readable, verifiable semantic model |
 | CLI | Encapsulates deterministic tools for Agents | Distills steps repeatedly performed by an Agent into code and commands |
-| Data | Preserves content continuously produced and used by software, including structured data, files, and document collections | Grows from scattered context into bounded, structured, queryable data assets |
-| Interface | Provides operations and visualization when people need to interact with data directly | Grows from natural-language-driven interaction into stable operational and presentation interfaces |
+| Data | Serves as the shared foundation for CLI tools and interfaces, preserving the structured data, files, and document collections continuously produced and used by software | Grows from scattered context into bounded, structured, queryable data assets |
+| Interface | Serves as the human entry into the software, providing operations and visualization | Grows from natural-language-driven interaction into stable operational and presentation interfaces |
 
-This creates two complementary paths of interaction. People can use natural language to let an Agent understand intent, follow Memory, invoke CLI tools, and work with data. When an Agent is unnecessary, they can also operate and inspect data directly through interfaces. Memory keeps the software's understanding and behavior consistent. CLI provides stable execution while saving Tokens. Data retains the results of each run. Interfaces return direct interaction to people where it belongs.
+This creates two entry points and one shared foundation. An Agent enters the software through Memory, understands and follows its knowledge, rules, and processes, and then invokes CLI tools for deterministic work. A person enters through an interface to operate the software and inspect results. People interact directly with the interface, not with the underlying data; the interface then queries, presents, or modifies that data. Data supports both CLI tools and interfaces, keeping deterministic execution and human operations grounded in the same software state.
 
 None of these assets must exist in full on the first day of a software system.
 
