@@ -607,12 +607,16 @@ async function assertEmbeddedRepairTargetsClean(
   const repositoryPaths = [...new Set(targetPaths.map((path) => embeddedRepositoryPath(memoryPath, path)))];
   if (repositoryPaths.length === 0) return;
   const status = await gitOutput(
-    ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...repositoryPaths],
+    ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...repositoryPaths.map(gitLiteralPathspec)],
     workspaceRoot
   );
   if (status) {
     throw new Error(`Embedded System Memory repair target has uncommitted changes: ${repositoryPaths.join(", ")}`);
   }
+}
+
+function gitLiteralPathspec(path: string): string {
+  return `:(literal)${path}`;
 }
 
 function embeddedRepositoryPath(memoryPath: string, memoryRelativePath: string): string {

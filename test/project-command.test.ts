@@ -374,6 +374,36 @@ test("Embedded System Memory repair rejects dirty targets and stale preparations
   }
 });
 
+test("Embedded System Memory repair treats dirty target paths as literal Git pathspecs", async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-embedded-repair-pathspec-"));
+  const home = join(fixture, "home");
+  const workspace = join(fixture, "workspace");
+  const memoryRoot = join(workspace, "mem[ory]");
+  const targetPath = join(memoryRoot, "concepts", "memsphere-framework.yaml");
+  const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME };
+  try {
+    await mkdir(workspace);
+    await runGit(["init", "-b", "master"], { cwd: workspace });
+    await installBundledSystemMemory(memoryRoot);
+    const bundled = await readFile(targetPath, "utf8");
+    await writeFile(targetPath, `${bundled}\n# committed drift\n`);
+    await runGit(["add", "-A"], { cwd: workspace });
+    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "pathspec fixture"], { cwd: workspace });
+    process.env.MEMSPHERE_HOME = home;
+    process.chdir(workspace);
+    await projectCreateCommand("embedded-pathspec", { embedded: memoryRoot, bind: true });
+
+    await writeFile(targetPath, `${bundled}\n# dirty target\n`);
+    await assert.rejects(projectRepairCommand("embedded-pathspec"), /target has uncommitted changes/);
+    assert.match(await readFile(targetPath, "utf8"), /dirty target/);
+  } finally {
+    process.chdir(previous.cwd);
+    if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;
+    else process.env.MEMSPHERE_HOME = previous.home;
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
 test("Embedded System Memory repair validates the complete candidate before writing", async () => {
   const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-embedded-repair-validation-"));
   const home = join(fixture, "home");
