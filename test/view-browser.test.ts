@@ -78,7 +78,7 @@ test("archived Run detail survives active summary refresh without joining Task n
 
 test("Memory summaries do not reuse full Memory readers", async () => {
   const viewSource = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/commands/view.ts", import.meta.url), "utf8")).then(source => source.replace(/\r\n/g, "\n"));
-  const memorySummaryBody = viewSource.match(/async function loadMemorySummaryPayload[\s\S]*?\n}\n\nasync function systemMemoryReferences/)?.[0] || "";
+  const memorySummaryBody = viewSource.match(/async function loadMemorySummaryPayload[\s\S]*?\n}\n\nasync function loadMemoryDetailPayload/)?.[0] || "";
   assert.match(memorySummaryBody, /readMemoryFileSummary/);
   assert.doesNotMatch(memorySummaryBody, /loadMemoryPayload|readMemoryFile\(/);
 });
@@ -172,7 +172,7 @@ test("memory view recognizes only tagged actions and renders recursive typed str
   assert.match(browserHtml, /memory\.entity\.syntax/);
   assert.match(browserHtml, /step\.tag === "!action"/);
   assert.match(browserHtml, /while \(branch\)/);
-  assert.match(browserHtml, /definition\.tag === "!schema"/);
+  assert.doesNotMatch(browserHtml, /definition\.tag === "!schema"/);
   assert.match(browserHtml, /typeof child === "string"/);
 });
 
@@ -589,6 +589,17 @@ test("comment freshness compares the saved source snapshot instead of rendered c
   assert.doesNotMatch(browserHtml, /hashSnapshot\(node\.textContent \|\| ""\)/);
 });
 
+test("Statement rule references use the same comment target and layout as inline rules", () => {
+  assert.match(
+    browserHtml,
+    /commentable\(\s*renderRuleReference\(value, anchor, effectiveReference, Boolean\(effectiveTree\), key\),\s*label,\s*value\.target,\s*anchor,\s*\{\},\s*legacyAnchor\s*\)/
+  );
+  assert.match(
+    browserHtml,
+    /renderRuleReference\(value, anchor, undefined, false\),\s*target,\s*value\.target,\s*anchor,\s*\{ run, step, commentKind: key \}/
+  );
+});
+
 test("saving a comment restores its expanded, anchored location", () => {
   assert.match(browserHtml, /const comment = await addComment\(target, snapshot, body, location, context\);/);
   assert.match(browserHtml, /if \(comment\) \{\s*state\.inlineCommentDraft = null;\s*editor\.remove\(\);\s*scrollToComment\(comment\);/);
@@ -697,16 +708,23 @@ test("Task titles use the Run name and keep the Procedure name in details", () =
   assert.match(browserHtml, /run start &lt;procedure&gt; --name &lt;run-name&gt;/);
 });
 
-test("browser renders recursive Statement sections and keeps suggestions separate", () => {
+test("browser renders recursive Statement sections with per-reference effective expansion", () => {
   assert.match(browserHtml, /suggests: \{ zh: "建议", yaml: "suggests" \}/);
   assert.match(browserHtml, /sections: \{ zh: "章节", yaml: "sections" \}/);
-  assert.match(browserHtml, /appendList\(target, t\("suggests"\), node\.suggests, "suggests", path\)/);
+  assert.match(browserHtml, /appendList\(target, t\("suggests"\), node\.suggests, "suggests", path, node\.effectiveRules\?\.suggests\)/);
   assert.match(browserHtml, /memory\.kind === "statements"\) el\.detail\.append\(renderStatement/);
   assert.match(browserHtml, /function renderStatement\(node, depth, path, fallbackName = t\("statements"\), anchor = "statement:" \+ path\)/);
   assert.match(browserHtml, /for \(const \[index, child\] of node\.sections\.entries\(\)\)/);
   assert.match(browserHtml, /children\.append\(renderStatement\(child, depth \+ 1, childPath, t\("statements"\), anchor \+ ":sections\["/);
   assert.match(browserHtml, /sectionHeader\(name, "!statement", path, anchor\)/);
-  assert.match(browserHtml, /renderStatement\(definition, 1, path, "", path\)/);
+  assert.match(browserHtml, /memoryHasRuleReference\(memory\.entity\)/);
+  assert.match(browserHtml, /params\.set\("effective", "true"\)/);
+  assert.match(browserHtml, /state\.viewMode === "changes" \? state\.selectedChangeId/);
+  assert.match(browserHtml, /function renderRuleReference\(ref, path, effectiveReference, effectiveAvailable, channel = "asserts"\)/);
+  assert.match(browserHtml, /function countEffectiveRules\(node\)/);
+  assert.match(browserHtml, /function renderEffectiveRuleSection\(node\)/);
+  assert.match(browserHtml, /renderRuleReference\(value, anchor, effectiveReference, Boolean\(effectiveTree\), key\)/);
+  assert.doesNotMatch(browserHtml, /renderStatement\(definition, 1, path, "", path\)/);
 });
 
 test("browser renders Action contracts, inline schemas, and final artifacts as distinct task UI", () => {
@@ -739,13 +757,13 @@ test("browser marks v1 runs read-only and shows v2 Artifact validation metadata"
   assert.match(browserHtml, /event\.artifact\.validation\?\.status === "passed"/);
 });
 
-test("browser renders Procedure assertions in memory and active run views", () => {
+test("browser renders raw Procedure assertions in Memory and frozen trees in active Runs", () => {
   assert.match(browserHtml, /appendTextBlocks\(wrap, entity\)/);
   assert.match(browserHtml, /function renderRunProcedureAsserts\(run\)/);
-  assert.match(browserHtml, /function activeRunProcedureAsserts\(run\)/);
-  assert.match(browserHtml, /frame\.asserts/);
-  assert.match(browserHtml, /"task:" \+ run\.id \+ ":procedure:asserts\["/);
-  assert.match(browserHtml, /commentKind: "asserts"/);
+  assert.match(browserHtml, /function activeRunProcedureAssertTrees\(run\)/);
+  assert.match(browserHtml, /frame\.assertTree/);
+  assert.match(browserHtml, /renderEffectiveRuleTreeBlock\(tree, t\("procedureAsserts"\)\)/);
+  assert.match(browserHtml, /if \(step\.assertTree\) wrap\.append\(renderEffectiveRuleTreeBlock/);
 });
 
 test("task calls use task-scoped review anchors and navigate to Memory", () => {

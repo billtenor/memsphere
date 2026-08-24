@@ -1,4 +1,4 @@
-import type { DefinitionPart, MemoryEntity } from "./ast.js";
+import type { MemoryEntity } from "./ast.js";
 import type { MemoryKind } from "./kinds.js";
 import {
   canonicalMemoryNameIssue,
@@ -14,10 +14,6 @@ export type MemoryDescriptor = {
   kind: MemoryKind;
   names: string[];
   defines: string[];
-  structured_defines?: {
-    statement?: number;
-    schema?: number;
-  };
   project_name?: string;
   revision?: string;
   frozen?: string;
@@ -211,14 +207,13 @@ function buildCatalogIndex(descriptors: ProviderMemoryDescriptor[]): CatalogInde
       });
     }
 
-    const definitionSummary = summarizeDefinitions(source.defines);
     entries.push({
       providerId: source.id,
       descriptor: {
         reference,
         kind: source.kind,
         names,
-        ...definitionSummary,
+        defines: [...source.defines],
         ...(source.project_name ? { project_name: source.project_name } : {}),
         ...(source.revision ? { revision: source.revision } : {}),
         ...(source.frozen ? { frozen: source.frozen } : {})
@@ -253,28 +248,6 @@ function buildCatalogIndex(descriptors: ProviderMemoryDescriptor[]): CatalogInde
   entries.sort((a, b) => compareDescriptors(a.descriptor, b.descriptor));
   issues.sort((a, b) => compareStrings(`${a.kind}/${a.name ?? ""}/${a.message}`, `${b.kind}/${b.name ?? ""}/${b.message}`));
   return { entries, issues };
-}
-
-function summarizeDefinitions(defines: DefinitionPart[]): Pick<MemoryDescriptor, "defines" | "structured_defines"> {
-  const text = defines.filter((part): part is string => typeof part === "string");
-  let statement = 0;
-  let schema = 0;
-
-  for (const part of defines) {
-    if (typeof part === "string") continue;
-    if (part.tag === "!statement") statement += 1;
-    if (part.tag === "!schema") schema += 1;
-  }
-
-  const structured_defines = {
-    ...(statement > 0 ? { statement } : {}),
-    ...(schema > 0 ? { schema } : {})
-  };
-
-  return {
-    defines: [...text],
-    ...(statement > 0 || schema > 0 ? { structured_defines } : {})
-  };
 }
 
 function resolveEntry(

@@ -102,20 +102,14 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   ]) {
     const concept = files.find((file) => file.entity.names.includes(conceptName));
     assert(concept?.entity.tag === "!concept");
-    assert(concept.entity.defines.some((definition) =>
-      typeof definition === "object" &&
-      definition.tag === "!ref" &&
-      definition.target === schemaReference
-    ));
-    assert.equal(concept.entity.defines.some((definition) =>
-      typeof definition === "object" && definition.tag === "!schema"
-    ), false);
+    assert(concept.entity.defines.every((definition) => typeof definition === "string"));
+    assert(concept.entity.defines.some((definition) => definition.includes(schemaReference.slice("schemas/".length))));
   }
-  for (const [entitySchemaName, expectedFields] of [
-    ["memsphere-concept-schema", ["syntax", "name", "names", "defines", "extends"]],
-    ["memsphere-statement-schema", ["syntax", "name", "names", "defines", "asserts", "suggests", "sections"]],
-    ["memsphere-procedure-schema", ["syntax", "name", "names", "defines", "asserts", "goals", "flow"]],
-    ["memsphere-schema-schema", ["syntax", "name", "names", "defines", "asserts", "suggests", "optional", "type", "format", "fields", "item", "items"]]
+  for (const [entitySchemaName, expectedFields, requiredFields] of [
+    ["memsphere-concept-schema", ["syntax", "name", "names", "defines", "extends"], ["syntax", "defines"]],
+    ["memsphere-statement-schema", ["syntax", "name", "names", "defines", "asserts", "suggests", "sections"], ["syntax"]],
+    ["memsphere-procedure-schema", ["syntax", "name", "names", "defines", "asserts", "goals", "flow"], ["syntax", "defines"]],
+    ["memsphere-schema-schema", ["syntax", "name", "names", "defines", "asserts", "suggests", "optional", "type", "format", "fields", "item", "items"], ["syntax"]]
   ] as const) {
     const entitySchema = files.find((file) => file.entity.names.includes(entitySchemaName));
     assert(entitySchema?.entity.tag === "!schema");
@@ -124,11 +118,10 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
       return { name: field.names[0], optional: field.optional === true };
     });
     assert.deepEqual(fields.map((field) => field.name), expectedFields);
-    assert.equal(fields[0]?.optional, false);
-    assert(fields.slice(1).every((field) => field.optional));
+    assert.deepEqual(fields.filter((field) => !field.optional).map((field) => field.name), requiredFields);
   }
   assert(files.every((file) => file.entity.syntax === currentMemorySyntax));
-  assert(memory.entity.defines.some((definition) => typeof definition === "object" && definition.tag === "!statement"));
+  assert(files.every((file) => file.entity.defines.every((definition) => typeof definition === "string")));
   assert.equal(manifest.version, 2);
   assert.equal("memory_syntax" in manifest ? manifest.memory_syntax : undefined, currentMemorySyntax);
   assert.equal(manifest.system_memory.install.length, 17);

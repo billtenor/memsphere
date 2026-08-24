@@ -9,7 +9,7 @@ import {
   type ArtifactValidationContext
 } from "../src/artifact-validation.js";
 import { schemaNodeFromMemory, type SchemaNode } from "../src/memory/ast.js";
-import { artifactNodeSchema, conceptMemorySchema, schemaMemorySchema } from "../src/memory/schema.js";
+import { artifactNodeSchema, schemaMemorySchema } from "../src/memory/schema.js";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
 
 const fixtureRoot = join(process.cwd(), "test", "fixtures", "artifact-format-validation");
@@ -81,10 +81,5 @@ async function readFixtureSchema(path: string): Promise<SchemaNode> {
   if (parsed && typeof parsed === "object" && (parsed as { tag?: unknown }).tag === "!schema") {
     return schemaNodeFromMemory(schemaMemorySchema.parse(parsed));
   }
-  const concept = conceptMemorySchema.parse(parsed);
-  const schema = concept.defines.find((definition): definition is SchemaNode =>
-    typeof definition === "object" && definition.tag === "!schema"
-  );
-  assert(schema, `fixture ${path} must contain a Schema definition`);
-  return schema;
+  assert.fail(`fixture ${path} must contain a top-level Schema`);
 }

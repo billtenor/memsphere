@@ -47,7 +47,9 @@ flow:
         action: 只读评审当前 HEAD 并生成代码问题清单。
         actor: agent
         asserts:
-          - 必须固定当前 HEAD SHA，使用基线中记录的最终需求方案、技术方案和测试方案，并显式读取和应用 memsphere-repository-development-rules。
+          - !ref
+            target: statements/memsphere-repository-development-rules
+          - 必须固定当前 HEAD SHA，并使用基线中记录的最终需求方案、技术方案和测试方案。
           - 必须核对实现是否满足获批需求、是否遵循技术方案或有合理且已说明的偏差、测试与检查是否覆盖测试方案；方案缺失或不一致本身必须作为评审证据处理。
           - 问题清单必须记录实际覆盖和有证据的问题；没有问题时也必须说明实际覆盖。
           - 本步骤只读，且从固定当前 HEAD 到 Artifact Review 完成期间 HEAD 必须保持不变；HEAD 变化时必须重新生成候选。

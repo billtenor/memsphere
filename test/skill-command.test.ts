@@ -45,9 +45,17 @@ test("unified skill and reserved memories keep the same bootstrap contract", asy
     "memsphere project bind",
     "memsphere run start",
     "--name",
+    "memsphere-general-task-execution"
+  ]) {
+    assert.match(skill, new RegExp(signal));
+    assert.match(reserved, new RegExp(signal));
+  }
+
+  // Operational Run instructions belong to the Skill. Concept defines are now
+  // definition-only text and no longer embed a Statement copy of this manual.
+  for (const signal of [
     "memsphere run report",
     "--artifact-file",
-    "memsphere-general-task-execution",
     "Procedure Asserts",
     "Actor",
     "Ask human to do",
@@ -55,7 +63,6 @@ test("unified skill and reserved memories keep the same bootstrap contract", asy
     "Then"
   ]) {
     assert.match(skill, new RegExp(signal));
-    assert.match(reserved, new RegExp(signal));
   }
 
   for (const obsolete of [

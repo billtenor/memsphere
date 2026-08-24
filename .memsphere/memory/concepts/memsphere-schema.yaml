@@ -5,26 +5,8 @@ names:
   - Schema
 defines:
   - memsphere 中用于定义文档、数据或协作产物内容结构的 Memory。
-  - 用于让协作者按共同的结构填写或验证产物，不用于表达领域术语或独立事实。
+  - Schema 让协作者按共同的结构填写或验证产物，不用于表达领域术语或独立事实。
   - fields 共同定义产物包含的字段；字段是结构要求，不是可以任意选择的示例项。
-  - Artifact 与 Schema 都可以声明 type 和 format；Schema 还用 fields 与重复结构描述当前值内部的结构。
-  - !statement
-    asserts:
-      - "当 Artifact 使用 markdown + layout: outline 时，普通字段名称必须成为 Markdown 标题，并按 fields 的嵌套关系形成标题层级；!repeat body 的直接字段按位置匹配，不校验标题名称。"
-      - "当 Artifact 使用 markdown + layout: table 时，array 的 item object 第一层 fields 必须成为 Markdown 表格列，每个列表元素占一行。"
-      - Schema 的 asserts 是对实例内容和结构的自然语言附加约束，必须与 fields 一并满足，但不由代码 validator 猜测执行。
-      - 按 Node 局部读取嵌套字段时，返回的根级与祖先 Schema context、Repeat 限制和目标 fragment 必须共同生效。
-      - 字符串 field 只提供字段名称；嵌套 !schema 用于继续描述该字段的子结构或约束。
-      - "!repeat 是供 object + markdown + layout: outline Artifact 使用的结构控制节点，它让 body 中的一组字段按同一轮次整体重复。"
-      - "!repeat 的 limit 可用 min/max 约束次数；未给 min 时按 0 理解，未给 max 时表示没有业务上限。"
-      - "!repeat 不允许用于 table、defines、Procedure flow 或其他位置，body 中也不能再次嵌套 !repeat。"
-      - 数组 Schema 使用 item 表达唯一元素契约，或使用 items 表达多个候选组成的联合元素契约；数组不能直接声明 fields。
-      - 数组 Schema 未声明 item/items 时只校验数组容器，不约束成员类型。
-      - Schema 的 type 不继承父层；显式声明优先，省略时有 fields 推断为 object、无 fields 推断为 string。
-      - Schema 的 format 省略时继承父层；Markdown layout 只由兼容的 object outline 或 array table 结构节点保留，标量字段不继承 layout。
-      - Schema 增量填写开始时必须先展示父 Action、父 Artifact 内容契约和完整字段结构；具体字段提示必须保留根、祖先与当前 Schema 约束的来源，并提供已完成、当前与剩余进度。
-      - Schema 字段 Event 是可追溯的中间结果，不是父 Artifact 的已接纳结果；每次字段上报后都应从已持久化 Event 更新同一路径的受管累计草稿。
-      - 全部字段完成后必须先保留完整草稿和父 Artifact 结构与契约校验结果，等待 Runner 全局阅读、直接编辑并显式提交；即使父校验失败，也不得丢弃已经通过字段级校验的结果。
-      - Runner 显式提交受管草稿时必须读取文件最新内容并重新校验；只有提交成功后才能按父 Artifact 的 review 契约进入统一接纳或 Artifact Review 流程。
-  - !ref
-    target: schemas/memsphere-schema-schema
+  - Artifact 与 Schema 都可以声明 type 和 format；Schema 还使用 fields、item、items 和 Repeat 描述当前值内部的结构。
+  - Schema 可以使用 asserts 与 suggests 补充自然语言内容约束，这些规则不会被代码 validator 根据文本自动猜测执行。
+  - Schema 的合法 YAML 结构由 memsphere-schema-schema 定义。

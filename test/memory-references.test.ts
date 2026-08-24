@@ -10,16 +10,17 @@ function memoryFile(path: string, kind: MemoryFile["kind"], entity: MemoryEntity
 
 test("reference validation resolves canonical logical references", () => {
   const files: MemoryFile[] = [
-    memoryFile("concept.yaml", "concepts", {
-      tag: "!concept",
-      names: ["concept-a"],
-      defines: [{ tag: "!ref", target: "schemas/schema-a" }]
-    }),
-    memoryFile("schema.yaml", "schemas", {
+    memoryFile("consumer.yaml", "schemas", {
       tag: "!schema",
-      names: ["schema-a", "Schema Alias"],
+      names: ["consumer"],
       defines: [],
-      fields: ["summary"]
+      asserts: [{ tag: "!ref", target: "statements/rule-a" }]
+    }),
+    memoryFile("rule.yaml", "statements", {
+      tag: "!statement",
+      names: ["rule-a", "Rule Alias"],
+      defines: [],
+      asserts: ["Required."]
     })
   ];
 
@@ -28,19 +29,20 @@ test("reference validation resolves canonical logical references", () => {
 
 test("reference validation rejects aliases and malformed names in explicit references", () => {
   const files: MemoryFile[] = [
-    memoryFile("concept.yaml", "concepts", {
-      tag: "!concept",
-      names: ["concept-a"],
-      defines: [
-        { tag: "!ref", target: "schemas/Schema Alias" },
-        { tag: "!ref", target: "schemas/schema_alias" }
+    memoryFile("consumer.yaml", "statements", {
+      tag: "!statement",
+      names: ["consumer"],
+      defines: [],
+      asserts: [
+        { tag: "!ref", target: "statements/Rule Alias" },
+        { tag: "!ref", target: "statements/rule_alias" }
       ]
     }),
-    memoryFile("schema.yaml", "schemas", {
-      tag: "!schema",
-      names: ["schema-a", "Schema Alias"],
+    memoryFile("rule.yaml", "statements", {
+      tag: "!statement",
+      names: ["rule-a", "Rule Alias"],
       defines: [],
-      fields: ["summary"]
+      asserts: ["Required."]
     })
   ];
 
@@ -51,22 +53,62 @@ test("reference validation rejects aliases and malformed names in explicit refer
 
 test("reference validation detects cycles reached through canonical references", () => {
   const files: MemoryFile[] = [
-    memoryFile("concept.yaml", "concepts", {
-      tag: "!concept",
-      names: ["concept-a", "Concept Alias"],
-      defines: [{ tag: "!ref", target: "schemas/schema-a" }]
+    memoryFile("a.yaml", "statements", {
+      tag: "!statement",
+      names: ["rule-a"],
+      defines: [],
+      asserts: [{ tag: "!ref", target: "statements/rule-b" }]
     }),
-    memoryFile("schema.yaml", "schemas", {
-      tag: "!schema",
-      names: ["schema-a", "Schema Alias"],
-      defines: [{ tag: "!ref", target: "concepts/concept-a" }]
+    memoryFile("b.yaml", "statements", {
+      tag: "!statement",
+      names: ["rule-b"],
+      defines: [],
+      asserts: [{ tag: "!ref", target: "statements/rule-a" }]
     })
   ];
 
   const cycle = validateMemoryReferences(files).find((issue) => issue.message.includes("Memory reference cycle detected"));
   assert(cycle);
-  assert.match(cycle.message, /concepts\/concept-a/);
-  assert.match(cycle.message, /schemas\/schema-a/);
+  assert.match(cycle.message, /statements\/rule-a\.asserts/);
+  assert.match(cycle.message, /statements\/rule-b\.asserts/);
+});
+
+test("reference validation does not combine assert and suggest graphs", () => {
+  const files: MemoryFile[] = [
+    memoryFile("a.yaml", "statements", {
+      tag: "!statement",
+      names: ["rule-a"],
+      defines: [],
+      asserts: ["A."],
+      suggests: [{ tag: "!ref", target: "statements/rule-b" }]
+    }),
+    memoryFile("b.yaml", "statements", {
+      tag: "!statement",
+      names: ["rule-b"],
+      defines: [],
+      asserts: [{ tag: "!ref", target: "statements/rule-a" }],
+      suggests: ["B."]
+    })
+  ];
+  assert.deepEqual(validateMemoryReferences(files), []);
+});
+
+test("reference validation rejects a channel with an empty effective projection", () => {
+  const files: MemoryFile[] = [
+    memoryFile("consumer.yaml", "schemas", {
+      tag: "!schema",
+      names: ["consumer"],
+      defines: [],
+      asserts: [{ tag: "!ref", target: "statements/advice" }]
+    }),
+    memoryFile("advice.yaml", "statements", {
+      tag: "!statement",
+      names: ["advice"],
+      defines: [],
+      suggests: ["Prefer clarity."]
+    })
+  ];
+  assert.match(validateMemoryReferences(files)[0].message, /has no effective asserts/);
 });
 
 test("reference validation checks target kinds", () => {

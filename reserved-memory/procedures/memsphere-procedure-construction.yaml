@@ -74,6 +74,8 @@ flow:
         asserts:
           - 顶层 names[0] 必须是准确且稳定的小写 ASCII kebab-case canonical name；alias、defines 和 goals 必须准确表达自然语言名称、用途、适用边界和预期结果。
           - 必须区分强制规范和可选建议；持续约束写入 Procedure asserts，局部约束写入 Action asserts，可选做法写入 suggests。
+          - defines 只用非空字符串说明流程的含义、用途和边界，不得写入 !ref 或匿名 Statement/Schema。
+          - 需要复用外部规则时，必须根据强制程度在 Statement/Schema/Action 的 asserts 或 suggests，或 Procedure 的 asserts 中引用 Statement；不能确定投影通道时必须请 human 选择，不得自动猜测。
           - flow 只保留完成任务所必需的步骤；不得为展示思考过程而拆分中间 Action。
           - 每个 Action 必须职责单一、actor 准确并产出后续步骤或 human 实际需要的 Artifact。
           - 每个 Action 的 action 只描述当前步骤的核心任务并保持简洁；执行范围、强制条件和验收要求写入同级 asserts，可选做法写入 suggests，不得把要求堆叠在步骤描述中。

@@ -1,4 +1,5 @@
 import type { ArtifactReviewAgentContext } from "../run/store.js";
+import { activeProcedureAssertTrees, currentStep, renderEffectiveRuleTree } from "../run/store.js";
 import { renderPrompt, type PromptLocale } from "../prompts/index.js";
 import {
   buildAgentReviewContract,
@@ -18,6 +19,10 @@ export async function buildArtifactReviewerPrompt(input: {
   const submission = review.submissions.find((candidate) => candidate.id === round.submissionId);
   if (!submission) throw new Error(`Artifact Review Submission not found: ${round.submissionId}`);
   const contract = buildAgentReviewContract(input.context);
+  const step = currentStep(run);
+  if (!step || step.id !== review.stepId) {
+    throw new Error(`Artifact Review current Step is unavailable: ${review.stepId}`);
+  }
   const systemPrompt = run.controlPlane?.actors[assignment.actorId]?.systemPrompt;
   const rolePrompts = systemPrompt ? [systemPrompt] : [];
   const locale = input.locale ?? "zh-CN";
@@ -37,15 +42,15 @@ export async function buildArtifactReviewerPrompt(input: {
     rolePrompts,
     contract: {
       actionInstruction: contract.action.instruction,
-      procedureAsserts: contract.procedure.asserts,
-      actionAsserts: contract.action.asserts,
-      suggestions: contract.action.suggests,
+      procedureAsserts: activeProcedureAssertTrees(run).flatMap((tree) => renderEffectiveRuleTree(tree, locale)),
+      actionAsserts: renderEffectiveRuleTree(step.assertTree, locale),
+      suggestions: renderEffectiveRuleTree(step.suggestTree, locale),
       details: contract.action.details,
       artifact: {
         name: contract.artifact.name,
         type: contract.artifact.type ?? (locale === "zh-CN" ? "未指定" : "unspecified"),
         format: formatArtifactFormat(contract.artifact.format),
-        schema: summarizeAgentReviewSchema(contract.artifact.schema),
+        schema: summarizeAgentReviewSchema(step.schema),
         final: contract.artifact.final,
         reviewPolicy: contract.artifact.review ?? (locale === "zh-CN" ? "无" : "none")
       }

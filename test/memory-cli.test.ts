@@ -195,7 +195,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
   await withScope(async ({ nested, memoryRoot }) => {
     await writeFile(
       join(memoryRoot, "concepts", "random-95f2.yaml"),
-      withCurrentMemorySyntax("!concept\nnames: [memory, 记忆]\ndefines:\n  - A managed memory.\n  - !statement\n    asserts: [Read the complete memory.]\n")
+      withCurrentMemorySyntax("!concept\nnames: [memory, 记忆]\ndefines:\n  - A managed memory.\n")
     );
     await writeFile(
       join(memoryRoot, "schemas", "another-random-name.yaml"),
@@ -209,8 +209,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
     assert.deepEqual(page.memories.map((item: { reference: string }) => item.reference), ["concepts/memory", "schemas/record"]);
     const memorySummary = page.memories.find((item: { reference: string }) => item.reference === "concepts/memory");
     assert.deepEqual(memorySummary.defines, ["A managed memory."]);
-    assert.deepEqual(memorySummary.structured_defines, { statement: 1 });
-    assert(!list.stdout.includes("Read the complete memory."));
+    assert.equal(memorySummary.structured_defines, undefined);
     assert.equal(page.next_cursor, null);
     assert(!list.stdout.includes("random-95f2"));
     assert(!list.stdout.includes(memoryRoot));
@@ -220,7 +219,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
     const filteredPage = JSON.parse(filtered.stdout);
     assert.deepEqual(filteredPage.memories.map((item: { reference: string }) => item.reference), ["concepts/memory"]);
     assert.deepEqual(filteredPage.memories[0].defines, ["A managed memory."]);
-    assert.deepEqual(filteredPage.memories[0].structured_defines, { statement: 1 });
+    assert.equal(filteredPage.memories[0].structured_defines, undefined);
 
     for (const reference of ["concepts/memory", "memory", "记忆"]) {
       const read = await runCli(nested, ["memory", "read", reference]);
@@ -230,15 +229,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
         tag: "!concept",
         syntax: currentMemorySyntax,
         names: ["memory", "记忆"],
-        defines: [
-          "A managed memory.",
-          {
-            tag: "!statement",
-            names: [],
-            defines: [],
-            asserts: ["Read the complete memory."]
-          }
-        ]
+        defines: ["A managed memory."]
       });
     }
   });
@@ -247,12 +238,12 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
 test("validate checks Memory references by target kind and dependency cycles", async () => {
   await withScope(async ({ nested, memoryRoot }) => {
     await writeFile(
-      join(memoryRoot, "concepts", "concept.yaml"),
-      withCurrentMemorySyntax("!concept\nnames: [concept-a, Concept Alias]\ndefines:\n  - !ref\n    target: schemas/schema-a\n")
+      join(memoryRoot, "schemas", "schema-b.yaml"),
+      withCurrentMemorySyntax("!schema\nnames: [schema-b]\nfields:\n  - !ref\n    target: schemas/schema-a\n")
     );
     await writeFile(
       join(memoryRoot, "schemas", "schema.yaml"),
-      withCurrentMemorySyntax("!schema\nnames: [schema-a, Schema Alias]\ndefines:\n  - !ref\n    target: concepts/concept-a\n")
+      withCurrentMemorySyntax("!schema\nnames: [schema-a, Schema Alias]\nfields:\n  - !ref\n    target: schemas/schema-b\n")
     );
 
     const cycle = await runCli(nested, ["validate"]);
@@ -260,8 +251,8 @@ test("validate checks Memory references by target kind and dependency cycles", a
     assert.match(cycle.stderr, /Memory reference cycle detected/);
 
     await writeFile(
-      join(memoryRoot, "concepts", "concept.yaml"),
-      withCurrentMemorySyntax("!concept\nnames: [concept-a]\ndefines:\n  - !ref\n    target: schemas/schema-a\n")
+      join(memoryRoot, "schemas", "schema-b.yaml"),
+      withCurrentMemorySyntax("!schema\nnames: [schema-b]\nfields: [value]\n")
     );
     await writeFile(
       join(memoryRoot, "schemas", "schema.yaml"),
@@ -274,7 +265,7 @@ test("validate checks Memory references by target kind and dependency cycles", a
 
     await writeFile(
       join(memoryRoot, "schemas", "schema.yaml"),
-      withCurrentMemorySyntax("!schema\nnames: [schema-a]\ndefines:\n  - !ref\n    target: schemas/missing\n")
+      withCurrentMemorySyntax("!schema\nnames: [schema-a]\nfields:\n  - !ref\n    target: schemas/missing\n")
     );
 
     const missing = await runCli(nested, ["validate"]);

@@ -113,8 +113,9 @@ defines:
 - 顶层 `names` 的第一项是 canonical name，必须是 1–120 字符的小写 ASCII kebab-case；其余项是别名，可以使用 Unicode 和内部空格，但不得包含首尾空白、控制字符或 `/`。嵌套节点名称不受顶层命名规则限制。
 - 显式 `<kind>/<name>`、`!ref target`、Procedure `!call target`、Concept `extends` 和 Artifact 的外部 `schema` 必须使用目标 canonical name，不接受 alias；普通 rename 不自动移动 File Provider 中的 Memory 文件。
 - 原本允许 `names` 的节点也允许写单个 `name`，其解析结果等价于 `names: [name]`；二者不能同时出现。
-- `defines` 用于定义这份 Memory；其中的全部成员共同生效。
-- `defines` 可以包含 `!ref` 外部 Memory 引用；`target` 必须是 `concepts/<canonical-name>`、`statements/<canonical-name>` 或 `schemas/<canonical-name>` 形式的逻辑引用，不接受普通名称或 alias。
+- `defines` 只使用非空字符串定义这份 Memory 的含义、用途和边界；不允许 `!ref` 或匿名 Statement/Schema。
+- Statement、Schema 的 `asserts` / `suggests`、Procedure 的 `asserts` 以及 Action 的 `asserts` / `suggests` 可以使用 `!ref` 引用外部 Statement；`target` 必须是 `statements/<canonical-name>` 形式的逻辑引用。`asserts` 只引入目标的有效断言，`suggests` 只引入有效建议，不跨通道改变强制程度。
+- Statement 引用递归应用目标全部 sections 中同通道的规则，展示有效规则时保留 section 名称和层级；存储、编辑、diff 和普通 read 仍保留原始 `!ref`。
 - 不同类型还拥有自己的字段。编写或解释某种 Memory 前，读取对应的 Concept Memory 了解完整语义和字段规则。
 
 Procedure 中每个 `!action` 的 `!artifact` 使用 `type -> format -> schema` 三层机器契约：

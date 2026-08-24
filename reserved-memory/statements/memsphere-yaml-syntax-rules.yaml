@@ -148,7 +148,7 @@ sections:
               - 读取一个节点时，必须先根据 YAML tag 确定区块，再检查区块允许和要求的关键字，随后按关键字规则检查字段值，并递归处理字段中的子区块。
               - 示例中的 !procedure、!action 和 !artifact 是区块；names、flow、action、artifact、name、type 和 format 是关键字；flow 的值是包含子区块的 YAML sequence。
               - 顶层 Memory 必须具有非空 names，或使用非空 name 作为 names 的单值简写；嵌套节点是否必须具有名称由所在区块决定。
-              - defines 中的匿名 !statement 和 !schema 可以省略 names 和 name，但必须分别满足自身的最小有效内容要求；!ref 是结构化外部 Memory 引用，不会被解析为普通文本定义。
+              - defines 只接受文本；规则必须直接写入 asserts/suggests 或在其中引用 Statement，结构复用必须使用 Schema 明确允许 !ref 的位置。
 
   - !statement
     names:
@@ -230,35 +230,33 @@ sections:
         defines:
           - 定义当前节点的含义、用途和边界。
           - |-
-            `defines` 可以同时包含自然语言和匿名结构：
+            `defines` 只使用自然语言解释当前节点：
             ```yaml
             defines:
               - 发布是将已验证版本交付给用户的过程。
-              - !statement
-                asserts:
-                  - 发布前必须完成验收。
             ```
         asserts:
-          - defines 的值必须是由非空字符串、!ref、匿名 !statement 或匿名 !schema 组成的数组。
-          - defines 中的全部成员共同定义当前节点并同时生效，不得被解释为互斥候选。
+          - defines 的值必须是由非空字符串组成的非空数组。
+          - defines 不允许 !ref、匿名 !statement、匿名 !schema 或其他结构化成员。
 
       - !statement
         names:
           - "!ref"
           - Memory 引用
         defines:
-          - 通过稳定逻辑引用连接外部 Concept、Statement 或 Schema Memory，使定义和结构可以复用而不复制内嵌内容。
+          - 通过稳定逻辑引用复用外部 Statement 规则或 Schema 结构。
           - |-
             ```yaml
-            defines:
+            asserts:
               - !ref
-                target: schemas/memsphere-concept-schema
+                target: statements/release-rules
             ```
         asserts:
           - "!ref 只能使用 mapping 形式，且必须声明非空 target。"
-          - target 必须是 canonical Memory 逻辑引用，形如 concepts/canonical-name、statements/canonical-name 或 schemas/canonical-name；不得写普通名称或 alias。
-          - defines 中的 !ref 可以指向 Concept、Statement 或 Schema；Schema fields、item、items 和 Artifact.schema 中的 !ref 只能指向 Schema。
-          - validate 必须拒绝不存在、目标类型不允许和形成循环依赖的 !ref。
+          - target 必须是 canonical Memory 逻辑引用；asserts/suggests 中使用 statements/canonical-name，Schema 结构位置使用 schemas/canonical-name，不得写普通名称或 alias。
+          - asserts 中的 !ref 只引入目标 Statement 的有效 asserts；suggests 中的 !ref 只引入目标 Statement 的有效 suggests，不得跨通道升级或降级。
+          - Statement 投影必须递归包含全部 sections 和同通道传递引用，并保留 section 名称与层级作为组织结构，不得仅拍平为无分组文本。
+          - validate 必须拒绝不存在、目标类型不允许、当前通道投影为空和形成同通道循环依赖的 !ref。
           - memory read 与 View 必须展示 !ref 及其 target，但默认不得递归内联目标内容。
 
       - !statement
@@ -274,7 +272,7 @@ sections:
               - 发布前必须通过测试。
             ```
         asserts:
-          - asserts 如出现必须是非空字符串数组，每一项独立表达一条断言。
+          - asserts 如出现必须是由非空字符串或指向 Statement 的 !ref 组成的非空数组。
           - asserts 不得被 suggests 削弱或替代。
           - asserts 是自然语言断言，不等同于 type、format 和 schema 声明的可自动检查结构规则。
 
@@ -290,7 +288,7 @@ sections:
               - 标题尽量保持简洁。
             ```
         asserts:
-          - suggests 如出现必须是非空字符串数组。
+          - suggests 如出现必须是由非空字符串或指向 Statement 的 !ref 组成的非空数组。
           - suggests 不得覆盖、削弱或替代任何适用的 asserts。
 
       - !statement
@@ -771,12 +769,12 @@ sections:
             ```
         asserts:
           - "!statement 节点允许 name/names、defines、asserts、suggests 和 sections 字段。"
-          - asserts 如出现，必须是非空字符串数组，每一项都是必须成立或需要被验证的规则、事实或约束。
-          - suggests 如出现，必须是非空字符串数组，每一项都是可参考但不强制满足的建议，且不得削弱 asserts。
+          - asserts 如出现，必须是由非空字符串或指向 Statement 的 !ref 组成的非空数组，每一项都是必须成立或需要被验证的规则、事实或约束。
+          - suggests 如出现，必须是由非空字符串或指向 Statement 的 !ref 组成的非空数组，每一项都是可参考但不强制满足的建议，且不得削弱 asserts。
           - sections 如出现，必须是由带 !statement tag 的节点组成的非空数组，用于递归组织规则树。
           - sections 的每个成员必须具有非空 names 或非空 name；同一父节点下各成员的规范名称不得重复。
           - 每个 Statement 节点必须至少包含非空 asserts、suggests 或 sections 中的一项；defines 不能单独构成有效 Statement。
-          - sections 只负责组织规则，不改变规则的生效语义；读取整份 Statement 时，与任务相关的全部节点共同生效。
+          - sections 只负责组织规则，不改变规则的生效语义；整份 Statement 被引用时，当前投影通道的全部节点规则都生效。
 
       - !statement
         names:
@@ -805,10 +803,10 @@ sections:
         asserts:
           - "!schema 节点允许 name/names、defines、asserts、suggests、optional、type、format、fields、item 和 items 字段。"
           - 顶层 !schema 与 fields 中作为具名字段使用的 !schema 必须具有非空 names 或非空 name。
-          - defines 与 item/items 中的匿名 !schema 可以省略 names 和 name，但必须至少具有非空 defines、asserts、suggests、type、format、fields、item 或 items 中的一项。
+          - item/items 中的匿名 !schema 可以省略 names 和 name，但必须至少具有非空 defines、asserts、suggests、type、format、fields、item 或 items 中的一项。
           - fields、item、items 和 Artifact.schema 中的 !ref 必须指向 Schema Memory，解析后按目标 Schema 约束当前值。
-          - Schema.asserts 如出现，必须是字符串数组，用于表达代码无法自动推导的内容或业务约束。
-          - Schema.suggests 如出现，必须是非空字符串数组，用于表达不影响结构合法性的字段书写建议；Schema 写作时会与继承到当前字段的 asserts 分开展示。
+          - Schema.asserts 如出现，必须是由非空字符串或指向 Statement 的 !ref 组成的数组，用于表达代码无法自动推导的内容或业务约束。
+          - Schema.suggests 如出现，必须是由非空字符串或指向 Statement 的 !ref 组成的非空数组，用于表达不影响结构合法性的字段书写建议。
         sections:
           - !statement
             names:
@@ -982,7 +980,7 @@ sections:
             ```
         asserts:
           - "!procedure 根节点允许 name/names、defines、asserts、goals 和 flow 字段。"
-          - Procedure.asserts 如出现，必须是非空字符串数组，并在当前 Procedure 及其调用链执行期间持续生效。
+          - Procedure.asserts 如出现，必须是由非空字符串或指向 Statement 的 !ref 组成的非空数组，并在当前 Procedure 及其调用链执行期间持续生效。
           - goals 必须是字符串数组，用于声明流程目标。
           - flow 必须是由 !action、!if、!while 或 !call 节点组成的有序数组。
         sections:
@@ -1009,8 +1007,8 @@ sections:
               - "!action 只允许 action、actor、asserts、suggests 和 artifact 字段。"
               - action 必须是非空字符串，描述当前步骤要完成的动作。
               - actor 只允许 agent 或 human，省略时默认为 agent。
-              - Action.asserts 如出现，必须是非空字符串数组，只约束当前步骤。
-              - Action.suggests 如出现，必须是非空字符串数组，只为当前步骤提供非强制建议。
+              - Action.asserts 如出现，必须是由非空字符串或指向 Statement 的 !ref 组成的非空数组，只约束当前步骤。
+              - Action.suggests 如出现，必须是由非空字符串或指向 Statement 的 !ref 组成的非空数组，只为当前步骤提供非强制建议。
               - "每个 !action 必须包含 artifact: !artifact；不得使用无 tag 的 YAML mapping 代替 Artifact。"
               - 普通 flow 中的 Action 不得产出 boolean Artifact；boolean Artifact 仅允许作为 !if 或 !while 的 condition 结果。
             sections:

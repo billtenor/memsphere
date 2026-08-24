@@ -158,11 +158,16 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     assert.deepEqual((await readMemoryFile("concepts", join(memoryRoot, "concepts", "other.yaml"))).entity.names, ["other", "Other Alias"]);
     assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
 
-    const dependent = await editMemories({ references: ["concepts/dependent"] });
-    const dependentPath = join(dependent.candidateRoot, "concepts", "dependent.yaml");
-    await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("defines: []", "defines:\n  - !ref\n    target: concepts/shared"));
+    const sharedSchema = await editMemories({ references: ["schemas/shared-schema"] });
+    const sharedSchemaCandidate = join(sharedSchema.candidateRoot, "schemas", "shared-schema.yaml");
+    await writeFile(sharedSchemaCandidate, (await readFile(sharedSchemaCandidate, "utf8")).replace("defines: []", "fields: [value]"));
+    await publishMemoryChange(sharedSchema.change.id);
+
+    const dependent = await editMemories({ references: ["schemas/dependent"] });
+    const dependentPath = join(dependent.candidateRoot, "schemas", "dependent.yaml");
+    await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("defines: []", "fields:\n  - !ref\n    target: schemas/shared-schema"));
     assert.deepEqual((await validateMemoryChange(dependent.change.id)).issues, []);
-    await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("concepts/shared", "concepts/missing"));
+    await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("schemas/shared-schema", "schemas/missing"));
     const missingReference = await validateMemoryChange(dependent.change.id);
     assert(missingReference.issues.some((issue) => issue.path === dependentPath && issue.message.includes("was not found")));
     const persistedMissingReference = memoryChangeSetSchema.parse(JSON.parse(await readFile(
@@ -170,13 +175,13 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
       "utf8"
     )));
     assert(persistedMissingReference.checkpoint?.issues.some((issue) => (
-      issue.path === "concepts/dependent.yaml" && issue.message.includes("was not found")
+      issue.path === "schemas/dependent.yaml" && issue.message.includes("was not found")
     )));
-    await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("concepts/missing", "concepts/shared"));
+    await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("schemas/missing", "schemas/shared-schema"));
     await publishMemoryChange(dependent.change.id);
     assert.deepEqual((await readMemoryFile("concepts", join(memoryRoot, "concepts", "other.yaml"))).entity.names, ["other", "Other Alias"]);
 
-    const deleted = await editMemories({ references: ["shared"], operation: "delete" });
+    const deleted = await editMemories({ references: ["schemas/shared-schema"], operation: "delete" });
     const deleteValidation = await validateMemoryChange(deleted.change.id);
     assert(deleteValidation.issues.some((issue) => issue.message.includes("was not found")));
 
@@ -230,6 +235,7 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
 
     await writeFile(join(memoryRoot, "concepts", "shared.yaml"), (await readFile(join(memoryRoot, "concepts", "shared.yaml"), "utf8")).replace("First", "Outside"));
+    await writeFile(join(memoryRoot, "schemas", "shared-schema.yaml"), (await readFile(join(memoryRoot, "schemas", "shared-schema.yaml"), "utf8")).replace("value", "outside-value"));
     const config = JSON.parse(await readFile(join(registry.projects.project.root, "config.json"), "utf8")) as {
       store: { branch: string; published_revision: string };
     };
@@ -240,9 +246,10 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
       managed: { branch: config.store.branch, publishedRevision: config.store.published_revision }
     }]));
     const listed = await catalog.list();
-    assert.deepEqual(listed.memories.filter((item) => item.frozen).map((item) => item.names[0]).sort(), ["dependent", "shared"]);
+    assert.deepEqual(listed.memories.filter((item) => item.frozen).map((item) => item.names[0]).sort(), ["dependent", "shared", "shared-schema"]);
     await assert.rejects(catalog.read("shared"), MemoryFrozenError);
     assert.equal((await catalog.read("Other Alias")).names[0], "other-renamed");
+    await recoverMemory("schemas/shared-schema", "restore");
 
     const recovered = await recoverMemory("shared", "create-change");
     assert(recovered.change && recovered.candidateRoot);

@@ -1,9 +1,12 @@
 import type { MemoryCatalog } from "../memory/catalog.js";
+import type { RulePart, StatementNode } from "../memory/ast.js";
 import { join } from "node:path";
 import { createMemoryCatalog, createMemoryCatalogForConfig } from "../memory/factory.js";
 import { isMemoryKind, memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import {
   serializeMemoryJson,
+  serializeEffectiveMemoryReadJson,
+  serializeEffectiveMemoryReadYaml,
   serializeMemoryListJson,
   serializeMemoryListText,
   serializeMemoryListYaml,
@@ -12,8 +15,10 @@ import {
   serializeMemoryNodeListYaml,
   serializeMemoryNodeReadJson,
   serializeMemoryNodeReadYaml,
-  serializeMemoryYaml
+  serializeMemoryYaml,
+  toEffectiveRuleDisplayTree
 } from "../memory/serializer.js";
+import { resolveRuleParts } from "../memory/rules.js";
 import { MemoryNavigation, type MemoryIdentity } from "../memory/navigation.js";
 import {
   claimMemoryChange,
@@ -53,6 +58,7 @@ export type MemoryReadCommandOptions = {
   node?: string;
   output?: string;
   run?: string;
+  effective?: boolean;
 };
 
 export type MemoryCommandDependencies = {
@@ -113,13 +119,72 @@ export async function memoryReadCommand(
     const descriptor = await catalog.resolve(reference, { kind });
     const entity = await catalog.read(descriptor.reference, { kind: descriptor.kind });
     const result = new MemoryNavigation(toIdentity(descriptor), entity).readNode(options.node);
-    const value = output === "json" ? serializeMemoryNodeReadJson(result) : serializeMemoryNodeReadYaml(result);
+    const effective = options.effective ? await resolveEffectiveRules(result.fragment, catalog) : undefined;
+    const value = options.effective
+      ? output === "json"
+        ? serializeEffectiveMemoryReadJson({ declared: result, effective })
+        : serializeEffectiveMemoryReadYaml({ declared: result, effective })
+      : output === "json" ? serializeMemoryNodeReadJson(result) : serializeMemoryNodeReadYaml(result);
     dependencies.writeStdout(value);
     return;
   }
   const entity = await catalog.read(reference, { kind });
-  const value = output === "json" ? serializeMemoryJson(entity) : serializeMemoryYaml(entity);
+  const effective = options.effective ? await resolveEffectiveRules(entity, catalog) : undefined;
+  const value = options.effective
+    ? output === "json"
+      ? serializeEffectiveMemoryReadJson({ declared: entity, effective })
+      : serializeEffectiveMemoryReadYaml({ declared: entity, effective })
+    : output === "json" ? serializeMemoryJson(entity) : serializeMemoryYaml(entity);
   dependencies.writeStdout(value);
+}
+
+async function resolveEffectiveRules(value: unknown, catalog: MemoryCatalog): Promise<Record<string, unknown>> {
+  const lookup = async (target: string): Promise<StatementNode> => {
+    const statement = await catalog.read(target, { kind: "statements" });
+    if (statement.tag !== "!statement") throw new Error(`Memory ${target} is not a Statement`);
+    return statement;
+  };
+  return (await resolveEffectiveRuleLocations(value, lookup)) ?? {};
+}
+
+async function resolveEffectiveRuleLocations(
+  value: unknown,
+  lookup: (target: string) => Promise<StatementNode>
+): Promise<Record<string, unknown> | undefined> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown> & { asserts?: RulePart[]; suggests?: RulePart[] };
+  const effectiveRules = {
+    ...(source.asserts
+      ? toEffectiveRuleDisplayTree(await resolveRuleParts("asserts", source.asserts, lookup))
+      : {}),
+    ...(source.suggests
+      ? toEffectiveRuleDisplayTree(await resolveRuleParts("suggests", source.suggests, lookup))
+      : {})
+  };
+  const children: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(source)) {
+    if (["tag", "syntax", "name", "names", "defines", "asserts", "suggests"].includes(key)) continue;
+    if (Array.isArray(child)) {
+      const resolved = (await Promise.all(child.map((item) => resolveEffectiveRuleLocations(item, lookup))))
+        .filter((item): item is Record<string, unknown> => item !== undefined);
+      if (resolved.length > 0) children[key] = resolved;
+      continue;
+    }
+    const resolved = await resolveEffectiveRuleLocations(child, lookup);
+    if (resolved) children[key] = resolved;
+  }
+  const identity = {
+    ...(typeof source.tag === "string" ? { tag: source.tag } : {}),
+    ...(Array.isArray(source.names) && typeof source.names[0] === "string" ? { name: source.names[0] } : {}),
+    ...(typeof source.name === "string" ? { name: source.name } : {}),
+    ...(typeof source.action === "string" ? { action: source.action } : {})
+  };
+  if (Object.keys(effectiveRules).length === 0 && Object.keys(children).length === 0) return undefined;
+  return {
+    ...identity,
+    ...(Object.keys(effectiveRules).length > 0 ? { effectiveRules } : {}),
+    ...children
+  };
 }
 
 export async function createMemoryCommandCatalog(runId?: string): Promise<MemoryCatalog> {

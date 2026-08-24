@@ -1,7 +1,6 @@
 import type {
   ActionNode,
   CallNode,
-  DefinitionPart,
   FlowNode,
   IfNode,
   MemoryRefNode,
@@ -10,6 +9,7 @@ import type {
   RepeatNode,
   SchemaField,
   SchemaNode,
+  RulePart,
   StatementNode,
   WhileNode
 } from "./ast.js";
@@ -562,14 +562,13 @@ function stripRepeatBody(repeat: RepeatNode): Omit<RepeatNode, "body"> {
 }
 
 function definitionSummary(
-  defines: DefinitionPart[],
-  asserts?: string[],
-  suggests?: string[]
+  defines: string[],
+  asserts?: RulePart[],
+  suggests?: RulePart[]
 ): string | undefined {
-  return defines.find((definition): definition is string => typeof definition === "string")
-    ?? defines.find((definition): definition is MemoryRefNode => typeof definition === "object" && definition.tag === "!ref")?.target
-    ?? asserts?.[0]
-    ?? suggests?.[0];
+  return defines[0]
+    ?? asserts?.find((part): part is string => typeof part === "string")
+    ?? suggests?.find((part): part is string => typeof part === "string");
 }
 
 function indexNodes(nodes: InternalMemoryNode[]): Map<string, InternalMemoryNode> {

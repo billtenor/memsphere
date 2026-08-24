@@ -147,7 +147,7 @@ function buildInvocations(scene: RunOutputScene, locale: PromptLocale): PromptIn
 
   if (scene.kind === "enter_schema") {
     return [
-      invocation("run.schema-overview", buildSchemaOverviewPromptModel(scene.snapshot)),
+      invocation("run.schema-overview", buildSchemaOverviewPromptModel(scene.snapshot, locale)),
       currentStateInvocation(scene.run, locale, scene.runsRoot)
     ];
   }

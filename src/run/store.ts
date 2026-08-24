@@ -54,6 +54,12 @@ import { MemoryNotFoundError, type MemoryCatalog } from "../memory/catalog.js";
 import { memoryKinds } from "../memory/kinds.js";
 import { currentMemorySyntax, type MemorySyntaxVersion } from "../memory/syntax.js";
 import { inheritSchemaFormat, resolveSchemaContract } from "../memory/schema.js";
+import {
+  flattenEffectiveRules,
+  resolveRuleParts,
+  type EffectiveRuleTree,
+  type RuleLookup
+} from "../memory/rules.js";
 import { resolvePromptLocale, type PromptLocale } from "../prompts/locale.js";
 import { terminateProcessTree } from "../platform-process.js";
 import {
@@ -66,6 +72,7 @@ import {
   type IfNode,
   type MemoryRefNode,
   type ProcedureMemory,
+  type RulePart,
   schemaNodeFromMemory,
   type RepeatNode,
   type SchemaMemory,
@@ -124,6 +131,9 @@ export type SchemaConstraintSource = {
   defines?: string[];
   asserts?: string[];
   suggests?: string[];
+  /** Frozen authority; asserts/suggests above are derived render caches. */
+  assertTree?: EffectiveRuleTree;
+  suggestTree?: EffectiveRuleTree;
 };
 
 export type SchemaStepContext = {
@@ -153,6 +163,8 @@ export type RunFrame = {
   type: FrameType;
   memoryName: string;
   asserts?: string[];
+  /** Frozen authority; asserts is derived from this tree. */
+  assertTree?: EffectiveRuleTree;
   steps: RunStep[];
   index: number;
   returnTo?: string;
@@ -176,6 +188,9 @@ export type RunStep = {
   optional?: boolean;
   asserts?: string[];
   suggests?: string[];
+  /** Frozen authorities; asserts/suggests are derived render caches. */
+  assertTree?: EffectiveRuleTree;
+  suggestTree?: EffectiveRuleTree;
   details?: string[];
   schemaContext?: SchemaStepContext;
   controlPlane?: ArtifactControlPlane;
@@ -197,8 +212,13 @@ export type RunStep = {
 };
 
 export type RunSchemaContract =
-  | { kind: "external"; name: string; node?: SchemaNode }
-  | { kind: "inline"; id: string; node: SchemaNode };
+  | { kind: "external"; name: string; node?: RunSchemaNode }
+  | { kind: "inline"; id: string; node: RunSchemaNode };
+
+export type RunSchemaNode = SchemaNode & {
+  assertTree?: EffectiveRuleTree;
+  suggestTree?: EffectiveRuleTree;
+};
 
 export type RunEvent = {
   at: string;
@@ -224,6 +244,8 @@ export type RunEvent = {
 export type RunProcedureTemplate = {
   memoryName: string;
   asserts?: string[];
+  /** Frozen authority; asserts is derived from this tree. */
+  assertTree?: EffectiveRuleTree;
   steps: RunStep[];
 };
 
@@ -252,6 +274,8 @@ export type RunState = {
   status: RunStatus;
   procedureName: string;
   asserts?: string[];
+  /** Frozen authority; asserts is derived from this tree. */
+  assertTree?: EffectiveRuleTree;
   memoryRoot: string;
   memoryProjects?: {
     primary: { name: string; revision: string };
@@ -354,6 +378,37 @@ const artifactFormatSpecSchema = z.object({
   options: z.record(z.unknown())
 }).strict();
 
+const effectiveRuleEntrySchema: z.ZodType<EffectiveRuleTree["entries"][number]> = z.lazy(() =>
+  z.union([
+    z.object({
+      kind: z.literal("rule"),
+      text: z.string(),
+      ruleId: z.string()
+    }).strict(),
+    z.object({
+      kind: z.literal("reference"),
+      target: z.string(),
+      entries: z.array(effectiveRuleEntrySchema),
+      sections: z.array(effectiveRuleSectionSchema)
+    }).strict()
+  ])
+);
+
+const effectiveRuleSectionSchema: z.ZodType<EffectiveRuleTree["sections"][number]> = z.lazy(() =>
+  z.object({
+    name: z.string(),
+    defines: z.array(z.string()),
+    entries: z.array(effectiveRuleEntrySchema),
+    sections: z.array(effectiveRuleSectionSchema)
+  }).strict()
+);
+
+const effectiveRuleTreeSchema: z.ZodType<EffectiveRuleTree> = z.object({
+  channel: z.enum(["asserts", "suggests"]),
+  entries: z.array(effectiveRuleEntrySchema),
+  sections: z.array(effectiveRuleSectionSchema)
+}).strict();
+
 const runSchemaContractSchema: z.ZodType<RunSchemaContract> = z.union([
   z.object({ kind: z.literal("external"), name: z.string(), node: z.custom<SchemaNode>().optional() }).strict(),
   z.object({ kind: z.literal("inline"), id: z.string(), node: z.custom<SchemaNode>() }).strict()
@@ -389,7 +444,9 @@ const schemaConstraintSourceSchema: z.ZodType<SchemaConstraintSource> = z.object
   format: artifactFormatSpecSchema,
   defines: z.array(z.string()).optional(),
   asserts: z.array(z.string()).optional(),
-  suggests: z.array(z.string()).optional()
+  suggests: z.array(z.string()).optional(),
+  assertTree: effectiveRuleTreeSchema.optional(),
+  suggestTree: effectiveRuleTreeSchema.optional()
 }).strict();
 
 const schemaStepContextSchema: z.ZodType<SchemaStepContext> = z.object({
@@ -470,6 +527,8 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
     optional: z.boolean().optional(),
     asserts: z.array(z.string()).optional(),
     suggests: z.array(z.string()).optional(),
+    assertTree: effectiveRuleTreeSchema.optional(),
+    suggestTree: effectiveRuleTreeSchema.optional(),
     details: z.array(z.string()).optional(),
     schemaContext: schemaStepContextSchema.optional(),
     controlPlane: artifactControlPlaneSchema.optional(),
@@ -516,6 +575,7 @@ const runStateSchema: z.ZodType<RunState> = z.object({
   status: z.enum(["running", "done", "abandoned"]),
   procedureName: z.string(),
   asserts: z.array(z.string()).optional(),
+  assertTree: effectiveRuleTreeSchema.optional(),
   memoryRoot: z.string(),
   memoryProjects: z.object({
     primary: z.object({ name: z.string(), revision: z.string() }).strict(),
@@ -529,6 +589,7 @@ const runStateSchema: z.ZodType<RunState> = z.object({
     type: z.enum(["procedure", "schema"]),
     memoryName: z.string(),
     asserts: z.array(z.string()).optional(),
+    assertTree: effectiveRuleTreeSchema.optional(),
     steps: z.array(runStepSchema),
     index: z.number(),
     returnTo: z.string().optional(),
@@ -561,6 +622,7 @@ const runStateSchema: z.ZodType<RunState> = z.object({
 const runProcedureTemplateSchema: z.ZodType<RunProcedureTemplate> = z.object({
   memoryName: z.string(),
   asserts: z.array(z.string()).optional(),
+  assertTree: effectiveRuleTreeSchema.optional(),
   steps: z.array(runStepSchema)
 }).strict();
 
@@ -759,6 +821,7 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
   status: z.enum(["running", "done", "abandoned"]),
   procedureName: z.string(),
   asserts: z.array(z.string()).optional(),
+  assertTree: effectiveRuleTreeSchema.optional(),
   memoryRoot: z.string(),
   memoryProjects: z.object({
     primary: z.object({ name: z.string(), revision: z.string() }).strict(),
@@ -782,6 +845,7 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
     type: z.enum(["procedure", "schema"]),
     memoryName: z.string(),
     asserts: z.array(z.string()).optional(),
+    assertTree: effectiveRuleTreeSchema.optional(),
     steps: z.array(runStepSchema),
     index: z.number(),
     returnTo: z.string().optional(),
@@ -904,7 +968,8 @@ export async function startRun(input: {
     name: runName,
     status: "running",
     procedureName: procedure.entity.names[0],
-    asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
+    asserts: rootTemplate.asserts ? [...rootTemplate.asserts] : undefined,
+    assertTree: rootTemplate.assertTree ? structuredClone(rootTemplate.assertTree) : undefined,
     memoryRoot: input.memoryRoot,
     memoryProjects: input.memoryProjects,
     memorySource: input.memorySource,
@@ -915,7 +980,8 @@ export async function startRun(input: {
     stack: [{
       type: "procedure",
       memoryName: procedure.entity.names[0],
-      asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
+      asserts: rootTemplate.asserts ? [...rootTemplate.asserts] : undefined,
+      assertTree: rootTemplate.assertTree ? structuredClone(rootTemplate.assertTree) : undefined,
       steps,
       index: 0
     }],
@@ -2630,12 +2696,70 @@ export function currentFrame(run: RunState): RunFrame | undefined {
 }
 
 export function activeProcedureAsserts(run: RunState): string[] {
-  return [...new Set([
-    ...(run.asserts ?? []),
+  return [...new Set(activeProcedureAssertTrees(run)
+    .flatMap((tree) => flattenEffectiveRules(tree).map((rule) => rule.text)))];
+}
+
+export function activeProcedureAssertTrees(run: RunState): EffectiveRuleTree[] {
+  const trees = [
+    run.assertTree,
     ...run.stack
       .filter((frame) => frame.type === "procedure")
-      .flatMap((frame) => frame.asserts ?? [])
-  ])];
+      .map((frame) => frame.assertTree)
+  ].filter((tree): tree is EffectiveRuleTree => Boolean(tree));
+  const seen = new Set<string>();
+  return trees.filter((tree) => {
+    const key = JSON.stringify(tree);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * Render a frozen rule tree without exposing internal rule ids or YAML paths.
+ * Each returned string is one Markdown list block; references and sections stay
+ * nested so their names continue to carry emphasis in prompts.
+ */
+export function renderEffectiveRuleTree(
+  tree: EffectiveRuleTree | undefined,
+  locale: PromptLocale = "en"
+): string[] {
+  if (!tree) return [];
+  const sourceLabel = locale === "zh-CN" ? "来自" : "From";
+  const sectionLabel = locale === "zh-CN" ? "章节" : "Section";
+  const contextLabel = locale === "zh-CN" ? "上下文" : "Context";
+  const rulesLabel = locale === "zh-CN" ? "规则" : "Rules";
+  const indent = (blocks: string[]): string => blocks
+    .map((block) => block.split("\n").map((line) => `  ${line}`).join("\n"))
+    .join("\n");
+  const renderParts = (
+    entries: EffectiveRuleTree["entries"],
+    sections: EffectiveRuleTree["sections"]
+  ): string[] => {
+    const blocks = entries.map((entry) => {
+      if (entry.kind === "rule") return entry.text;
+      const nested = renderParts(entry.entries, entry.sections);
+      return nested.length
+        ? `${sourceLabel} ${entry.target}\n${indent(nested.map((value) => `- ${value}`))}`
+        : `${sourceLabel} ${entry.target}`;
+    });
+    for (const section of sections) {
+      const nested = renderParts(section.entries, section.sections);
+      const groups: string[] = [];
+      if (section.defines.length) {
+        groups.push(`${contextLabel}:\n${indent(section.defines.map((value) => `- ${value}`))}`);
+      }
+      if (nested.length) {
+        groups.push(`${rulesLabel}:\n${indent(nested.map((value) => `- ${value}`))}`);
+      }
+      blocks.push(groups.length
+        ? `${sectionLabel} ${section.name}\n${indent(groups)}`
+        : `${sectionLabel} ${section.name}`);
+    }
+    return blocks;
+  };
+  return renderParts(tree.entries, tree.sections);
 }
 
 export function finalArtifacts(run: RunState): RunEvent["artifact"][] {
@@ -2660,6 +2784,8 @@ export type SchemaWritingSnapshot = {
     instruction: string;
     asserts: string[];
     suggests: string[];
+    assertTree?: EffectiveRuleTree;
+    suggestTree?: EffectiveRuleTree;
   };
   artifact: {
     name: string;
@@ -2713,7 +2839,9 @@ export function buildSchemaWritingSnapshot(runsRoot: string, run: RunState): Sch
     action: {
       instruction: context.parentStep.instruction,
       asserts: [...(context.parentStep.asserts ?? [])],
-      suggests: [...(context.parentStep.suggests ?? [])]
+      suggests: [...(context.parentStep.suggests ?? [])],
+      assertTree: context.parentStep.assertTree ? structuredClone(context.parentStep.assertTree) : undefined,
+      suggestTree: context.parentStep.suggestTree ? structuredClone(context.parentStep.suggestTree) : undefined
     },
     artifact: {
       name: context.parentStep.artifact!,
@@ -2944,11 +3072,13 @@ async function snapshotReachableProcedureTemplates(
     if (visited.has(canonicalName)) return;
     visited.add(canonicalName);
 
-    const steps = compileProcedureSteps(procedure);
+    const steps = await compileProcedureSteps(procedure, memoryRoot, lookup);
     await snapshotExternalSchemas(memoryRoot, steps, lookup);
+    const procedureRules = await freezeRulePair(memoryRoot, procedure.asserts, undefined, lookup);
     const template: RunProcedureTemplate = {
       memoryName: canonicalName,
-      asserts: procedure.asserts ? [...procedure.asserts] : undefined,
+      asserts: procedureRules.asserts,
+      assertTree: procedureRules.assertTree,
       steps
     };
     snapshots[canonicalName] = template;
@@ -3307,22 +3437,38 @@ function assertArtifactReviewCanStart(
   });
 }
 
-function compileProcedureSteps(procedure: ProcedureMemory): RunStep[] {
-  return compileFlowSteps(procedure.flow, "flow");
+async function compileProcedureSteps(
+  procedure: ProcedureMemory,
+  memoryRoot: string,
+  lookup?: RunMemoryLookup
+): Promise<RunStep[]> {
+  return compileFlowSteps(procedure.flow, "flow", memoryRoot, lookup);
 }
 
-function compileFlowSteps(flow: FlowNode[], prefix: string): RunStep[] {
-  return flow.map((node, index) => compileFlowStep(node, `${prefix}[${index + 1}]`));
+async function compileFlowSteps(
+  flow: FlowNode[],
+  prefix: string,
+  memoryRoot: string,
+  lookup?: RunMemoryLookup
+): Promise<RunStep[]> {
+  return Promise.all(flow.map((node, index) =>
+    compileFlowStep(node, `${prefix}[${index + 1}]`, memoryRoot, lookup)
+  ));
 }
 
-function compileFlowStep(node: FlowNode, id: string): RunStep {
+async function compileFlowStep(
+  node: FlowNode,
+  id: string,
+  memoryRoot: string,
+  lookup?: RunMemoryLookup
+): Promise<RunStep> {
   switch (node.tag) {
     case "!action":
-      return compileActionStep(node, id);
+      return compileActionStep(node, id, memoryRoot, lookup);
     case "!if":
-      return compileIfStep(node, id);
+      return compileIfStep(node, id, memoryRoot, lookup);
     case "!while":
-      return compileWhileStep(node, id);
+      return compileWhileStep(node, id, memoryRoot, lookup);
     case "!call":
       return {
         id,
@@ -3333,7 +3479,13 @@ function compileFlowStep(node: FlowNode, id: string): RunStep {
   }
 }
 
-function compileActionStep(node: ActionNode, id: string): RunStep {
+async function compileActionStep(
+  node: ActionNode,
+  id: string,
+  memoryRoot: string,
+  lookup?: RunMemoryLookup
+): Promise<RunStep> {
+  const rules = await freezeRulePair(memoryRoot, node.asserts, node.suggests, lookup);
   return {
     id,
     kind: "action",
@@ -3341,8 +3493,7 @@ function compileActionStep(node: ActionNode, id: string): RunStep {
     actor: node.actor ?? "agent",
     artifact: node.artifact.name,
     ...compileArtifactStep(node.artifact, id),
-    asserts: node.asserts ? [...node.asserts] : undefined,
-    suggests: node.suggests ? [...node.suggests] : undefined
+    ...rules
   };
 }
 
@@ -3377,39 +3528,55 @@ function assertSchemaNode(value: SchemaNode | MemoryRefNode, path: string): Sche
   throw new Error(`unresolved Memory reference at ${path}: ${value.target}`);
 }
 
-function compileIfStep(node: IfNode, id: string): RunStep {
-  const fallback = compileFlowSteps(node.else ?? [], `${id}.else`);
-  return compileIfChain(node, id, fallback);
+async function compileIfStep(
+  node: IfNode,
+  id: string,
+  memoryRoot: string,
+  lookup?: RunMemoryLookup
+): Promise<RunStep> {
+  const fallback = await compileFlowSteps(node.else ?? [], `${id}.else`, memoryRoot, lookup);
+  return compileIfChain(node, id, fallback, memoryRoot, lookup);
 }
 
-function compileIfChain(node: IfNode, id: string, fallback: RunStep[]): RunStep {
-  const thenSteps = compileFlowSteps(node.then, `${id}.then`);
+async function compileIfChain(
+  node: IfNode,
+  id: string,
+  fallback: RunStep[],
+  memoryRoot: string,
+  lookup?: RunMemoryLookup
+): Promise<RunStep> {
+  const thenSteps = await compileFlowSteps(node.then, `${id}.then`, memoryRoot, lookup);
   const elseSteps = node.elseif
-    ? [compileIfChain(node.elseif, `${id}.elseif`, fallback)]
+    ? [await compileIfChain(node.elseif, `${id}.elseif`, fallback, memoryRoot, lookup)]
     : fallback;
+  const rules = await freezeRulePair(memoryRoot, node.condition.asserts, node.condition.suggests, lookup);
   return {
     id,
     kind: "branch",
     instruction: node.condition.action,
     actor: node.condition.actor ?? "agent",
     ...compileArtifactStep(node.condition.artifact, id),
-    asserts: node.condition.asserts ? [...node.condition.asserts] : undefined,
-    suggests: node.condition.suggests ? [...node.condition.suggests] : undefined,
+    ...rules,
     details: describeControlTargets("true", thenSteps).concat(describeControlTargets("false", elseSteps)),
     branches: { truthy: thenSteps, falsy: elseSteps }
   };
 }
 
-function compileWhileStep(node: WhileNode, id: string): RunStep {
-  const body = compileFlowSteps(node.do, `${id}.do`);
+async function compileWhileStep(
+  node: WhileNode,
+  id: string,
+  memoryRoot: string,
+  lookup?: RunMemoryLookup
+): Promise<RunStep> {
+  const body = await compileFlowSteps(node.do, `${id}.do`, memoryRoot, lookup);
+  const rules = await freezeRulePair(memoryRoot, node.condition.asserts, node.condition.suggests, lookup);
   return {
     id,
     kind: "loop",
     instruction: node.condition.action,
     actor: node.condition.actor ?? "agent",
     ...compileArtifactStep(node.condition.artifact, id),
-    asserts: node.condition.asserts ? [...node.condition.asserts] : undefined,
-    suggests: node.condition.suggests ? [...node.condition.suggests] : undefined,
+    ...rules,
     details: describeControlTargets("while true", body).concat(["false: continue after loop"]),
     loop: { body }
   };
@@ -3451,6 +3618,8 @@ function cloneStep(step: RunStep): RunStep {
     reviewPolicy: step.reviewPolicy,
     asserts: step.asserts ? [...step.asserts] : undefined,
     suggests: step.suggests ? [...step.suggests] : undefined,
+    assertTree: step.assertTree ? structuredClone(step.assertTree) : undefined,
+    suggestTree: step.suggestTree ? structuredClone(step.suggestTree) : undefined,
     details: step.details ? [...step.details] : undefined,
     schemaContext: step.schemaContext ? structuredClone(step.schemaContext) : undefined,
     controlPlane: step.controlPlane ? structuredClone(step.controlPlane) : undefined,
@@ -3487,6 +3656,7 @@ async function expandAutoCallSteps(run: RunState): Promise<void> {
         type: "procedure",
         memoryName: template.memoryName,
         asserts: template.asserts ? [...template.asserts] : undefined,
+        assertTree: template.assertTree ? structuredClone(template.assertTree) : undefined,
         steps,
         index: 0,
         returnTo: step.id
@@ -3496,12 +3666,14 @@ async function expandAutoCallSteps(run: RunState): Promise<void> {
     const procedure = await findMemoryByName(run.memoryRoot, "procedures", step.target, true);
     if (!procedure) throw new Error(`procedure not found: ${step.target}`);
     const procedureMemory = procedure.entity as ProcedureMemory;
-    const steps = compileProcedureSteps(procedureMemory);
+    const steps = await compileProcedureSteps(procedureMemory, run.memoryRoot);
     await snapshotExternalSchemas(run.memoryRoot, steps);
+    const procedureRules = await freezeRulePair(run.memoryRoot, procedureMemory.asserts);
     run.stack.push({
       type: "procedure",
       memoryName: procedure.entity.names[0],
-      asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
+      asserts: procedureRules.asserts,
+      assertTree: procedureRules.assertTree,
       steps,
       index: 0,
       returnTo: step.id
@@ -3742,9 +3914,7 @@ function walkSchema(
     artifact: path,
     contract,
     controlPlane,
-    details: definitionDetails(node.defines)
-      .concat((node.asserts ?? []).map((value) => `asserts: ${value}`))
-      .concat((node.suggests ?? []).map((value) => `suggests: ${value}`)),
+    details: definitionDetails(node.defines),
     schemaContext: { rootName, path, sources },
     optional: node.optional === true
   }));
@@ -3903,13 +4073,22 @@ function schemaConstraintSource(
   contract: CompiledArtifactContract
 ): SchemaConstraintSource {
   const defines = definitionDetails(node.defines);
+  const frozen = node as RunSchemaNode;
+  const asserts = frozen.assertTree
+    ? flattenEffectiveRules(frozen.assertTree).map((rule) => rule.text)
+    : undefined;
+  const suggests = frozen.suggestTree
+    ? flattenEffectiveRules(frozen.suggestTree).map((rule) => rule.text)
+    : undefined;
   return {
     path,
     type: contract.type,
     format: structuredClone(contract.format),
     defines: defines.length ? defines : undefined,
-    asserts: node.asserts?.length ? [...node.asserts] : undefined,
-    suggests: node.suggests?.length ? [...node.suggests] : undefined
+    asserts,
+    suggests,
+    assertTree: frozen.assertTree ? structuredClone(frozen.assertTree) : undefined,
+    suggestTree: frozen.suggestTree ? structuredClone(frozen.suggestTree) : undefined
   };
 }
 
@@ -3935,42 +4114,48 @@ function cloneSchema(schema: SchemaNode): SchemaNode {
 }
 
 function definitionDetails(defines: DefinitionPart[]): string[] {
-  const details: string[] = [];
-  for (const definition of defines) {
-    if (typeof definition === "string") {
-      details.push(`defines: ${definition}`);
-      continue;
-    }
-    if (definition.tag === "!statement") {
-      details.push(...statementDefinitionDetails(definition));
-      continue;
-    }
-    if (definition.tag === "!ref") {
-      details.push(`ref: ${definition.target}`);
-      continue;
-    }
-    details.push(...definitionDetails(definition.defines));
-    details.push(...(definition.asserts ?? []).map((value) => `asserts: ${value}`));
-  }
-  return details;
-}
-
-function statementDefinitionDetails(statement: StatementNode, path: string[] = []): string[] {
-  const details = definitionDetails(statement.defines);
-  const qualifier = path.length > 0 ? ` [${path.join(" > ")}]` : "";
-  details.push(...(statement.asserts ?? []).map((value) => `asserts${qualifier}: ${value}`));
-  details.push(...(statement.suggests ?? []).map((value) => `suggests${qualifier}: ${value}`));
-
-  for (const section of statement.sections ?? []) {
-    details.push(...statementDefinitionDetails(section, [...path, section.names[0].trim()]));
-  }
-  return details;
+  return defines.map((definition) => `defines: ${definition}`);
 }
 
 type RunMemoryLookup = (
-  kind: "procedures" | "schemas",
+  kind: "procedures" | "schemas" | "statements",
   referenceOrName: string
 ) => Promise<MemoryFile | undefined>;
+
+type FrozenRulePair = {
+  /** Derived caches used by legacy renderers; never resolve from these arrays. */
+  asserts?: string[];
+  suggests?: string[];
+  assertTree?: EffectiveRuleTree;
+  suggestTree?: EffectiveRuleTree;
+};
+
+async function freezeRulePair(
+  memoryRoot: string,
+  asserts?: RulePart[],
+  suggests?: RulePart[],
+  lookup?: RunMemoryLookup
+): Promise<FrozenRulePair> {
+  const statementLookup: RuleLookup = async (target) => {
+    const memory = lookup
+      ? await lookup("statements", target)
+      : await findStatementMemory(memoryRoot, target);
+    if (!memory) throw new Error(`statement not found: ${target}`);
+    return memory.entity as StatementNode;
+  };
+  const assertTree = asserts?.length
+    ? await resolveRuleParts("asserts", asserts, statementLookup)
+    : undefined;
+  const suggestTree = suggests?.length
+    ? await resolveRuleParts("suggests", suggests, statementLookup)
+    : undefined;
+  return {
+    assertTree,
+    suggestTree,
+    asserts: assertTree ? flattenEffectiveRules(assertTree).map((rule) => rule.text) : undefined,
+    suggests: suggestTree ? flattenEffectiveRules(suggestTree).map((rule) => rule.text) : undefined
+  };
+}
 
 function catalogLookup(catalog: MemoryCatalog): RunMemoryLookup {
   return async (kind, referenceOrName) => {
@@ -4009,6 +4194,9 @@ async function snapshotExternalSchemas(
     if (step.schema?.kind === "inline") {
       step.schema.node = await resolveSchemaReferences(memoryRoot, step.schema.node, [`inline:${step.schema.id}`], lookup);
     }
+    if (step.schema?.node) {
+      await freezeSchemaRuleTrees(memoryRoot, step.schema.node, lookup);
+    }
     if (step.schema?.node && step.artifact && step.type && step.format) {
       step.validationPlan = artifactValidatorRegistry.resolvePlan(stepContract(step));
     }
@@ -4025,6 +4213,31 @@ async function snapshotExternalSchemas(
     }
     if (step.loop) await snapshotExternalSchemas(memoryRoot, step.loop.body, lookup);
   }
+}
+
+async function freezeSchemaRuleTrees(
+  memoryRoot: string,
+  node: RunSchemaNode,
+  lookup?: RunMemoryLookup
+): Promise<void> {
+  const rules = await freezeRulePair(memoryRoot, node.asserts, node.suggests, lookup);
+  node.assertTree = rules.assertTree;
+  node.suggestTree = rules.suggestTree;
+  // RulePart arrays stay in the Schema snapshot as declarations; execution always
+  // consumes the frozen trees above.
+  const children: SchemaNode[] = [];
+  for (const field of node.fields ?? []) {
+    if (typeof field !== "object") continue;
+    if (field.tag === "!schema") children.push(field);
+    if (field.tag === "!repeat") {
+      for (const bodyField of field.body) {
+        if (typeof bodyField === "object" && bodyField.tag === "!schema") children.push(bodyField);
+      }
+    }
+  }
+  if (node.item?.tag === "!schema") children.push(node.item);
+  for (const item of node.items ?? []) if (item.tag === "!schema") children.push(item);
+  for (const child of children) await freezeSchemaRuleTrees(memoryRoot, child, lookup);
 }
 
 function artifactSchemaNeedsResolution(schema: ActionNode["artifact"]["schema"]): boolean {
@@ -4285,7 +4498,18 @@ async function findSchemaMemory(memoryRoot: string, referenceOrName: string): Pr
   return findMemoryByName(memoryRoot, "schemas", referenceOrName, true);
 }
 
-async function findMemoryByReference(memoryRoot: string, kind: "schemas", reference: string): Promise<MemoryFile | undefined> {
+async function findStatementMemory(memoryRoot: string, referenceOrName: string): Promise<MemoryFile | undefined> {
+  if (referenceOrName.startsWith("statements/")) {
+    return findMemoryByReference(memoryRoot, "statements", referenceOrName);
+  }
+  return findMemoryByName(memoryRoot, "statements", referenceOrName, true);
+}
+
+async function findMemoryByReference(
+  memoryRoot: string,
+  kind: "schemas" | "statements",
+  reference: string
+): Promise<MemoryFile | undefined> {
   const paths = await listMemoryFiles(memoryRoot, kind);
   let hasInvalidMemory = false;
 
@@ -4304,7 +4528,7 @@ async function findMemoryByReference(memoryRoot: string, kind: "schemas", refere
 
   if (hasInvalidMemory) {
     throw new Error(
-      `schema ${reference} could not be resolved because the Memory store ` +
+      `${kind === "schemas" ? "schema" : "statement"} ${reference} could not be resolved because the Memory store ` +
       "contains invalid Memory YAML; run memsphere validate"
     );
   }
@@ -4317,7 +4541,7 @@ function memoryReference(file: MemoryFile): string {
 
 async function findMemoryByName(
   memoryRoot: string,
-  kind: "procedures" | "schemas",
+  kind: "procedures" | "schemas" | "statements",
   name: string,
   canonicalOnly = false
 ): Promise<MemoryFile | undefined> {
@@ -4340,7 +4564,7 @@ async function findMemoryByName(
 
   if (hasInvalidMemory) {
     throw new Error(
-      `${kind === "procedures" ? "procedure" : "schema"} ${name} could not be resolved because the Memory store ` +
+      `${kind === "procedures" ? "procedure" : kind === "schemas" ? "schema" : "statement"} ${name} could not be resolved because the Memory store ` +
       "contains invalid Memory YAML; run memsphere validate"
     );
   }

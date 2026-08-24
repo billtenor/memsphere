@@ -153,8 +153,6 @@ export const browserHtml = String.raw`<!doctype html>
     .inline-comment-editor textarea { margin-bottom: 8px; }
     .thread-edit-editor { grid-column: auto; margin: 2px 0 0; }
     .child-stack { margin-top: 12px; }
-    .definition-list > li { margin: 10px 0; }
-    .definition-list > li > .section { min-width: 0; margin: 0; }
     .schema-node > .section-header .node-title { font-weight: 400; }
     .schema-field-list { margin-top: 0; }
     .schema-field-content { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
@@ -163,6 +161,10 @@ export const browserHtml = String.raw`<!doctype html>
     .memory-ref-link { display: inline-flex; align-items: center; width: fit-content; max-width: 100%; border: 0; background: transparent; color: var(--accent); padding: 0; font: inherit; font-weight: 700; text-align: left; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: 3px; }
     .memory-ref-link:hover { color: #173f3c; }
     .memory-ref-link.missing { color: var(--muted); text-decoration-style: dotted; }
+    .rule-reference-summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .rule-reference-toggle { border: 0; border-radius: 999px; background: var(--soft); color: var(--muted); padding: 3px 9px; font: inherit; font-size: 12px; cursor: pointer; }
+    .rule-reference-toggle:hover { color: var(--text); }
+    .effective-rule-inline { margin: 8px 0 2px 14px; padding-left: 12px; border-left: 2px solid var(--line); }
     .field-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
     .field-table th, .field-table td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; white-space: pre-wrap; }
     .field-table th { width: 220px; background: #f3f5f0; font-weight: 700; }
@@ -630,6 +632,11 @@ export const browserHtml = String.raw`<!doctype html>
       procedureAsserts: { zh: "流程断言", yaml: "Procedure Asserts" },
       procedureName: { zh: "流程", yaml: "Procedure" },
       suggests: { zh: "建议", yaml: "suggests" },
+      showEffectiveRules: { zh: "查看生效规则", yaml: "Show effective rules" },
+      hideEffectiveRules: { zh: "隐藏生效规则", yaml: "Hide effective rules" },
+      effectiveRules: { zh: "生效规则", yaml: "Effective rules" },
+      effectiveRuleCount: { zh: "条生效规则", yaml: "effective rules" },
+      referencedFrom: { zh: "引用自", yaml: "Referenced from" },
       sections: { zh: "章节", yaml: "sections" },
       goals: { zh: "目标", yaml: "goals" },
       flow: { zh: "流程", yaml: "flow" },
@@ -777,6 +784,8 @@ export const browserHtml = String.raw`<!doctype html>
       byName: new Map(),
       runs: [],
       memoryDetails: new Map(),
+      effectiveMemoryIds: new Set(),
+      effectiveMemoryRequests: new Map(),
       runDetails: new Map(),
       runDetailRequests: new Map(),
       detailRequestSequence: 0,
@@ -1104,12 +1113,12 @@ export const browserHtml = String.raw`<!doctype html>
         if (!applied || generation !== state.pageLoadGeneration) return;
         state.routeReady = true;
         if (targetMode === "memory" && route.page !== "memory") {
-          await loadMemoryDetail(state.selectedId || state.memories[0]?.id);
+          await loadMemorySelection(state.selectedId || state.memories[0]?.id);
         } else if (targetMode === "task" && route.page === "tasks") {
           await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
         }
       } else if (targetMode === "memory") {
-        await loadMemoryDetail(state.selectedId || state.memories[0]?.id);
+        await loadMemorySelection(state.selectedId || state.memories[0]?.id);
       } else if (targetMode === "task") {
         await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
       } else if (targetMode === "changes" && state.selectedChangeId) {
@@ -1194,6 +1203,8 @@ export const browserHtml = String.raw`<!doctype html>
       state.memories = [];
       state.runs = [];
       state.memoryDetails.clear();
+      state.effectiveMemoryIds.clear();
+      state.effectiveMemoryRequests.clear();
       state.runDetails.clear();
       state.runDetailRequests.clear();
       state.taskDetailReloadPending = null;
@@ -1316,16 +1327,21 @@ export const browserHtml = String.raw`<!doctype html>
       return state.changeDetail;
     }
 
-    async function loadMemoryDetail(id) {
+    async function loadMemoryDetail(id, options = {}) {
       if (!id) return null;
       const projectGeneration = state.projectGeneration;
       const summary = state.memories.find(memory => memory.id === id);
       if (!summary || summary.error) return null;
       const names = summary.entity?.names || summary.names || [];
       const canonicalName = names[0] || id.slice(id.indexOf("/") + 1);
+      const params = new URLSearchParams();
+      const effectiveChangeId = state.changeId || (state.viewMode === "changes" ? state.selectedChangeId : "");
+      if (effectiveChangeId) params.set("change", effectiveChangeId);
+      if (options.effective) params.set("effective", "true");
+      const query = params.toString();
       const response = await fetch(
         "/api/memories/" + encodeURIComponent(summary.kind) + "/" + encodeURIComponent(canonicalName)
-        + (state.changeId ? "?change=" + encodeURIComponent(state.changeId) : "")
+        + (query ? "?" + query : "")
       );
       if (!response.ok) throw new Error(await response.text());
       const detail = (await response.json()).memory;
@@ -1336,8 +1352,25 @@ export const browserHtml = String.raw`<!doctype html>
       return summary;
     }
 
+    async function loadEffectiveMemory(id) {
+      if (!id) return null;
+      if (state.effectiveMemoryRequests.has(id)) return state.effectiveMemoryRequests.get(id);
+      const request = loadMemoryDetail(id, { effective: true }).finally(() => {
+        state.effectiveMemoryRequests.delete(id);
+      });
+      state.effectiveMemoryRequests.set(id, request);
+      return request;
+    }
+
     async function loadMemorySelection(id) {
-      await loadMemoryDetail(id);
+      const memory = await loadMemoryDetail(id);
+      if (!memory || !memoryHasRuleReference(memory.entity)) return;
+      try {
+        await loadEffectiveMemory(id);
+        state.effectiveMemoryIds.add(id);
+      } catch {
+        state.effectiveMemoryIds.delete(id);
+      }
     }
 
     async function loadRuns(options = {}) {
@@ -2875,7 +2908,7 @@ export const browserHtml = String.raw`<!doctype html>
           const memory = memoryForRoute(route.kind, route.name);
           if (memory) {
             state.selectedId = memory.id;
-            await loadMemoryDetail(memory.id);
+            await loadMemorySelection(memory.id);
             if (!isCurrentPageLoad(options)) return false;
           }
           else {
@@ -3267,7 +3300,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (mode === "memory") {
         await loadMemories();
         await loadChanges();
-        await loadMemoryDetail(state.selectedId || state.memories[0]?.id);
+        await loadMemorySelection(state.selectedId || state.memories[0]?.id);
       } else if (mode === "task") {
         await loadRuns({ loadDetail: false });
         await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
@@ -3982,35 +4015,27 @@ export const browserHtml = String.raw`<!doctype html>
 
 
     function renderRunProcedureAsserts(run) {
-      const values = activeRunProcedureAsserts(run);
-      if (!values.length) return null;
+      const trees = activeRunProcedureAssertTrees(run);
+      if (!trees.length) return null;
       const wrap = document.createElement("div");
       wrap.className = "run-procedure-asserts";
-      wrap.append(blockTitle(t("procedureAsserts")));
-      const list = document.createElement("ul");
-      list.className = "text-list";
-      values.forEach((value, index) => {
-        const item = document.createElement("li");
-        const target = t("procedureAsserts") + "[" + (index + 1) + "]";
-        item.append(commentable(
-          value,
-          target,
-          value,
-          "task:" + run.id + ":procedure:asserts[" + (index + 1) + "]",
-          { run, commentKind: "asserts" }
-        ));
-        list.append(item);
-      });
-      wrap.append(list);
+      for (const tree of trees) wrap.append(renderEffectiveRuleTreeBlock(tree, t("procedureAsserts")));
       return wrap;
     }
 
-    function activeRunProcedureAsserts(run) {
-      const values = [...(run.asserts || [])];
+    function activeRunProcedureAssertTrees(run) {
+      const trees = [];
+      if (run.assertTree) trees.push(run.assertTree);
       for (const frame of (run.stack || [])) {
-        if (frame.type === "procedure") values.push(...(frame.asserts || []));
+        if (frame.type === "procedure" && frame.assertTree) trees.push(frame.assertTree);
       }
-      return [...new Set(values)];
+      const seen = new Set();
+      return trees.filter(tree => {
+        const key = JSON.stringify(tree);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
     }
 
     function archiveRunButton(run, className = "") {
@@ -4402,20 +4427,18 @@ export const browserHtml = String.raw`<!doctype html>
         const heading = document.createElement("div");
         heading.textContent = t("constraintSource") + " · " + source.path;
         section.append(heading);
-        const values = [];
-        for (const value of source.defines || []) values.push("defines: " + value);
-        for (const value of source.asserts || []) values.push("asserts: " + value);
-        for (const value of source.suggests || []) values.push("suggests: " + value);
-        if (values.length) {
+        if (source.defines?.length) {
           const list = document.createElement("ul");
           list.className = "text-list";
-          for (const value of values) {
+          for (const value of source.defines) {
             const item = document.createElement("li");
-            item.textContent = value;
+            item.textContent = "defines: " + value;
             list.append(item);
           }
           section.append(list);
         }
+        if (source.assertTree) section.append(renderEffectiveRuleTreeBlock(source.assertTree, t("asserts")));
+        if (source.suggestTree) section.append(renderEffectiveRuleTreeBlock(source.suggestTree, t("suggests")));
         wrap.append(section);
       }
 
@@ -4949,8 +4972,8 @@ export const browserHtml = String.raw`<!doctype html>
 
     function appendTextBlocks(target, node, path = "") {
       appendDefinitions(target, node.defines, path);
-      appendList(target, t("asserts"), node.asserts, "asserts", path);
-      appendList(target, t("suggests"), node.suggests, "suggests", path);
+      appendList(target, t("asserts"), node.asserts, "asserts", path, node.effectiveRules?.asserts);
+      appendList(target, t("suggests"), node.suggests, "suggests", path, node.effectiveRules?.suggests);
     }
 
     function appendNames(target, node) {
@@ -4963,54 +4986,31 @@ export const browserHtml = String.raw`<!doctype html>
       title.className = "block-title";
       title.textContent = t("defines");
       target.append(title);
-      const strings = definitions
-        .map((value, index) => ({ value, index }))
-        .filter(entry => typeof entry.value === "string");
-      if (strings.length) {
-        const list = document.createElement("ul");
-        list.className = "text-list";
-        for (const entry of strings) {
-          const item = document.createElement("li");
-          const label = t("defines") + "[" + (entry.index + 1) + "]";
-          const legacyAnchor = "defines[" + (entry.index + 1) + "]";
-          const anchor = path ? path + "." + legacyAnchor : legacyAnchor;
-          item.append(commentable(entry.value, label, entry.value, anchor, {}, legacyAnchor));
-          list.append(item);
-        }
-        target.append(list);
-      }
-      const structures = definitions
-        .map((value, index) => ({ value, index }))
-        .filter(entry => entry.value && typeof entry.value === "object");
-      if (!structures.length) return;
-      const children = document.createElement("ul");
-      children.className = "text-list definition-list child-stack";
-      structures.forEach((entry) => {
-        const definition = entry.value;
-        const path = "defines[" + (entry.index + 1) + "]";
-        if (definition.tag === "!schema") {
-          children.append(renderDefinitionItem(renderSchema(definition, 1, path, "")));
-          return;
-        }
-        if (definition.tag === "!ref") {
-          children.append(renderDefinitionItem(renderMemoryRef(definition, path)));
-          return;
-        }
-        children.append(renderDefinitionItem(renderStatement(definition, 1, path, "", path)));
+      const list = document.createElement("ul");
+      list.className = "text-list";
+      definitions.forEach((value, index) => {
+        const item = document.createElement("li");
+        const label = t("defines") + "[" + (index + 1) + "]";
+        const legacyAnchor = "defines[" + (index + 1) + "]";
+        const anchor = path ? path + "." + legacyAnchor : legacyAnchor;
+        item.append(commentable(value, label, value, anchor, {}, legacyAnchor));
+        list.append(item);
       });
-      target.append(children);
+      target.append(list);
     }
 
     function renderMemoryRef(ref, path) {
       const target = ref.target || "";
+      const resolved = memoryByReference(target);
+      const missing = Boolean(state.payload && !resolved);
       const link = document.createElement("button");
       link.type = "button";
-      link.className = "memory-ref-link" + (memoryByReference(target) ? "" : " missing");
+      link.className = "memory-ref-link" + (missing ? " missing" : "");
       link.textContent = target || t("missingTarget");
-      link.title = memoryByReference(target) ? "Open referenced memory" : "Referenced memory not found";
+      link.title = missing ? "Referenced memory not found" : "Open referenced memory";
       link.addEventListener("click", (event) => {
         event.stopPropagation();
-        openMemoryReference(target);
+        openMemoryReference(target).catch(renderFatalError);
       });
       return link;
     }
@@ -5025,46 +5025,195 @@ export const browserHtml = String.raw`<!doctype html>
         const kind = value.slice(0, separator);
         const name = value.slice(separator + 1);
         return state.memories.find(memory =>
-          memory.kind === kind && memoryNames(memory).includes(name)
+          memory.kind === kind && memoryNames(memory)[0] === name
         ) || null;
       }
       return state.byName.get(value) || null;
     }
 
-    function openMemoryReference(reference) {
-      const target = memoryByReference(reference);
-      if (!target) return;
+    async function openMemoryReference(reference) {
+      let target = memoryByReference(reference);
+      if (!target && !state.payload) {
+        await loadMemories();
+        target = memoryByReference(reference);
+      }
+      if (!target) {
+        renderAll();
+        return;
+      }
       state.routeError = "";
       state.routeLanding = "";
       state.viewMode = "memory";
       localStorage.setItem(viewModeKey, "memory");
       state.selectedId = target.id;
       renderAll();
-      loadMemorySelection(target.id).then(renderAll).catch(renderFatalError);
+      await loadMemorySelection(target.id);
+      renderAll();
     }
 
-    function renderDefinitionItem(section) {
-      const item = document.createElement("li");
-      item.append(section);
-      return item;
-    }
-
-    function appendList(target, heading, values, key, path = "") {
+    function appendList(target, heading, values, key, path = "", effectiveTree) {
       if (!values || !values.length) return;
       const title = document.createElement("div");
       title.className = "block-title";
       title.textContent = heading;
       const list = document.createElement("ul");
       list.className = "text-list";
+      const effectiveReferences = effectiveRuleEntries(effectiveTree, key).filter(entry =>
+        entry && typeof entry === "object" && (entry.reference || entry.kind === "reference")
+      );
+      const matchedReferences = new Set();
       values.forEach((value, index) => {
         const item = document.createElement("li");
         const label = heading + "[" + (index + 1) + "]";
         const legacyAnchor = key + "[" + (index + 1) + "]";
         const anchor = path ? path + "." + legacyAnchor : legacyAnchor;
-        item.append(commentable(value, label, value, anchor, {}, legacyAnchor));
+        if (value && typeof value === "object" && value.tag === "!ref") {
+          const effectiveReference = effectiveReferences.find((entry, entryIndex) => {
+            if (matchedReferences.has(entryIndex)) return false;
+            return (entry.reference || entry.target) === value.target;
+          });
+          if (effectiveReference) matchedReferences.add(effectiveReferences.indexOf(effectiveReference));
+          item.append(commentable(
+            renderRuleReference(value, anchor, effectiveReference, Boolean(effectiveTree), key),
+            label,
+            value.target,
+            anchor,
+            {},
+            legacyAnchor
+          ));
+        } else {
+          item.append(commentable(value, label, value, anchor, {}, legacyAnchor));
+        }
         list.append(item);
       });
       target.append(title, list);
+    }
+
+    function renderRuleReference(ref, path, effectiveReference, effectiveAvailable, channel = "asserts") {
+      const wrap = document.createElement("div");
+      wrap.className = "rule-reference";
+      const summary = document.createElement("div");
+      summary.className = "rule-reference-summary";
+      summary.append(renderMemoryRef(ref, path));
+      if (effectiveAvailable) {
+        const count = effectiveReference ? countEffectiveRules(effectiveReference) : 0;
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "rule-reference-toggle";
+        toggle.textContent = count + " " + t("effectiveRuleCount");
+        toggle.setAttribute("aria-expanded", "false");
+        toggle.disabled = !effectiveReference;
+        const body = document.createElement("div");
+        body.className = "effective-rule-inline";
+        body.hidden = true;
+        appendEffectiveRuleEntries(body, effectiveRuleEntries(effectiveReference, channel));
+        for (const section of effectiveReference?.sections || []) body.append(renderEffectiveRuleSection(section));
+        toggle.addEventListener("click", event => {
+          event.stopPropagation();
+          body.hidden = !body.hidden;
+          toggle.setAttribute("aria-expanded", String(!body.hidden));
+        });
+        summary.append(toggle);
+        wrap.append(summary, body);
+        return wrap;
+      }
+      wrap.append(summary);
+      return wrap;
+    }
+
+    function countEffectiveRules(node) {
+      let count = 0;
+      for (const entry of effectiveRuleEntries(node)) {
+        if (typeof entry === "string" || entry.kind === "rule") count += 1;
+        else if (entry && typeof entry === "object") count += countEffectiveRules(entry);
+      }
+      for (const section of node.sections || []) count += countEffectiveRules(section);
+      return count;
+    }
+
+    function effectiveRuleEntries(node, channel = "") {
+      if (Array.isArray(node)) return node;
+      if (!node || typeof node !== "object") return [];
+      if (channel && Array.isArray(node[channel])) return node[channel];
+      if (Array.isArray(node.asserts)) return node.asserts;
+      if (Array.isArray(node.suggests)) return node.suggests;
+      return Array.isArray(node.entries) ? node.entries : [];
+    }
+
+    function memoryHasRuleReference(value, seen = new Set()) {
+      if (!value || typeof value !== "object" || seen.has(value)) return false;
+      seen.add(value);
+      for (const key of ["asserts", "suggests"]) {
+        if ((value[key] || []).some(part => part && typeof part === "object" && part.tag === "!ref")) return true;
+      }
+      return Object.values(value).some(child => Array.isArray(child)
+        ? child.some(item => memoryHasRuleReference(item, seen))
+        : memoryHasRuleReference(child, seen));
+    }
+
+    function renderEffectiveRuleTreeBlock(tree, heading) {
+      const wrap = document.createElement("div");
+      wrap.className = "effective-rule-tree";
+      wrap.append(blockTitle(heading));
+      appendEffectiveRuleEntries(wrap, effectiveRuleEntries(tree));
+      for (const section of tree.sections || []) wrap.append(renderEffectiveRuleSection(section));
+      return wrap;
+    }
+
+    function appendEffectiveRuleEntries(target, entries) {
+      const direct = entries.filter(entry => typeof entry === "string" || entry.kind === "rule");
+      if (direct.length) {
+        const list = document.createElement("ul");
+        list.className = "text-list";
+        for (const entry of direct) {
+          const item = document.createElement("li");
+          item.textContent = typeof entry === "string" ? entry : entry.text;
+          list.append(item);
+        }
+        target.append(list);
+      }
+      for (const entry of entries.filter(entry => entry && typeof entry === "object" && (entry.kind === "reference" || entry.reference))) {
+        const section = document.createElement("div");
+        section.className = "section effective-reference open";
+        const heading = document.createElement("div");
+        heading.className = "section-header";
+        const chevron = document.createElement("span");
+        chevron.className = "chevron";
+        chevron.textContent = "›";
+        const label = document.createElement("span");
+        label.className = "node-title";
+        label.textContent = t("referencedFrom") + " ";
+        const reference = entry.reference || entry.target;
+        label.append(renderMemoryRef({ tag: "!ref", target: reference }, reference));
+        heading.append(chevron, label);
+        const body = document.createElement("div");
+        body.className = "section-body";
+        appendEffectiveRuleEntries(body, effectiveRuleEntries(entry));
+        for (const child of entry.sections || []) body.append(renderEffectiveRuleSection(child));
+        section.append(heading, body);
+        target.append(section);
+      }
+    }
+
+    function renderEffectiveRuleSection(node) {
+      const section = document.createElement("div");
+      section.className = "section effective-section open";
+      const heading = document.createElement("div");
+      heading.className = "section-header";
+      const chevron = document.createElement("span");
+      chevron.className = "chevron";
+      chevron.textContent = "›";
+      const title = document.createElement("span");
+      title.className = "node-title";
+      title.textContent = node.name || t("sections");
+      heading.append(chevron, title);
+      const body = document.createElement("div");
+      body.className = "section-body";
+      if (node.defines?.length) appendList(body, t("defines"), node.defines, "effective-defines");
+      appendEffectiveRuleEntries(body, effectiveRuleEntries(node));
+      for (const child of node.sections || []) body.append(renderEffectiveRuleSection(child));
+      section.append(heading, body);
+      return section;
     }
 
     function renderTableFields(fields, path) {
@@ -5183,7 +5332,7 @@ export const browserHtml = String.raw`<!doctype html>
       link.addEventListener("click", (event) => {
         event.preventDefault();
         if (target) {
-          openMemoryReference(target.id);
+          openMemoryReference(target.id).catch(renderFatalError);
         }
       });
       const head = document.createElement("div");
@@ -5433,7 +5582,7 @@ export const browserHtml = String.raw`<!doctype html>
         event.stopPropagation();
         const target = state.byName.get(schemaName);
         if (target) {
-          openMemoryReference(target.id);
+          openMemoryReference(target.id).catch(renderFatalError);
         }
       });
       return link;
@@ -5451,9 +5600,14 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderActionContracts(step, run, anchorPrefix = "") {
-      if (!step || (!step.asserts?.length && !step.suggests?.length)) return null;
+      if (!step) return null;
       const wrap = document.createElement("div");
       wrap.className = "action-contracts";
+      if (run) {
+        if (step.assertTree) wrap.append(renderEffectiveRuleTreeBlock(step.assertTree, t("asserts")));
+        if (step.suggestTree) wrap.append(renderEffectiveRuleTreeBlock(step.suggestTree, t("suggests")));
+        return wrap.childElementCount ? wrap : null;
+      }
       for (const [key, label, values] of [["asserts", t("asserts"), step.asserts], ["suggests", t("suggests"), step.suggests]]) {
         if (!values?.length) continue;
         const group = document.createElement("div");
@@ -5464,7 +5618,17 @@ export const browserHtml = String.raw`<!doctype html>
           const target = label + "[" + (index + 1) + "]";
           const fieldAnchor = key + "[" + (index + 1) + "]";
           const anchor = run ? taskAnchor(run, step, fieldAnchor) : anchorPrefix ? anchorPrefix + "." + fieldAnchor : fieldAnchor;
-          item.append(commentable(value, target, value, anchor, { run, step, commentKind: key }));
+          if (value && typeof value === "object" && value.tag === "!ref") {
+            item.append(commentable(
+              renderRuleReference(value, anchor, undefined, false),
+              target,
+              value.target,
+              anchor,
+              { run, step, commentKind: key }
+            ));
+          } else {
+            item.append(commentable(value, target, value, anchor, { run, step, commentKind: key }));
+          }
           list.append(item);
         });
         group.append(list);

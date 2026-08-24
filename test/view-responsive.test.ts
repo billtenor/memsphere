@@ -28,6 +28,7 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     mkdir(join(memoryRoot, "concepts"), { recursive: true }),
     mkdir(join(memoryRoot, "procedures"), { recursive: true }),
     mkdir(join(memoryRoot, "schemas"), { recursive: true }),
+    mkdir(join(memoryRoot, "statements"), { recursive: true }),
     mkdir(join(reservedRoot, "concepts"), { recursive: true }),
     mkdir(homeRoot, { recursive: true }),
     mkdir(reviewsRoot, { recursive: true }),
@@ -89,6 +90,8 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     "    action: Inspect an action field.",
     "    asserts:",
     "      - Action field comments must be available.",
+    "      - !ref",
+    "        target: statements/shared-rules",
     "    artifact: !artifact",
     "      name: Field comment target",
     "      format: markdown"
@@ -113,6 +116,39 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     "    fields:",
     "      - !schema",
     "        names: [ Requirement source ]"
+  ].join("\n"));
+  await writeFile(join(memoryRoot, "statements", "shared-rules.yaml"), [
+    "!statement",
+    `syntax: ${currentMemorySyntax}`,
+    "names: [ shared-rules, shared-rules-alias, Shared rules ]",
+    "defines: [ Shared rules fixture. ]",
+    "asserts:",
+    "  - The shared assertion applies.",
+    "sections:",
+    "  - !statement",
+    "    names: [ Evidence ]",
+    "    defines: [ Evidence-specific context. ]",
+    "    asserts:",
+    "      - Cite supporting evidence."
+  ].join("\n"));
+  await writeFile(join(memoryRoot, "statements", "referencing-rules.yaml"), [
+    "!statement",
+    `syntax: ${currentMemorySyntax}`,
+    "names: [ referencing-rules, Referencing rules ]",
+    "defines: [ Reference fixture. ]",
+    "asserts:",
+    "  - Keep the local assertion.",
+    "  - !ref",
+    "    target: statements/shared-rules"
+  ].join("\n"));
+  await writeFile(join(memoryRoot, "statements", "referencing-alias.yaml"), [
+    "!statement",
+    `syntax: ${currentMemorySyntax}`,
+    "names: [ referencing-alias, Referencing alias ]",
+    "defines: [ Invalid alias reference fixture. ]",
+    "asserts:",
+    "  - !ref",
+    "    target: statements/shared-rules-alias"
   ].join("\n"));
 
   const artifactPath = join(runDir, "artifacts", "001-wide-table.md");
@@ -428,6 +464,130 @@ test("Memory API identifies installed system memory independently of its file pa
     assert.equal(systemMemory?.system, true);
     const userMemory = payload.memories.find((memory) => memory.entity?.names?.[0] === "user-note");
     assert.equal(userMemory?.system, false);
+  });
+});
+
+test("Memory detail keeps rule references raw unless effective expansion is requested", async () => {
+  await withResponsiveView(async (_browser, url) => {
+    const summaryResponse = await fetch(`${url}/api/memories?representation=summary`);
+    assert.equal(summaryResponse.status, 200, await summaryResponse.text());
+    const rawResponse = await fetch(`${url}/api/memories/statements/referencing-rules`);
+    const raw = await rawResponse.json() as { memory: { entity: Record<string, unknown> } };
+    assert.equal(rawResponse.status, 200);
+    assert.deepEqual((raw.memory.entity.asserts as unknown[])[1], {
+      tag: "!ref",
+      target: "statements/shared-rules"
+    });
+    assert.equal(Object.hasOwn(raw.memory.entity, "effectiveRules"), false);
+
+    const effectiveResponse = await fetch(`${url}/api/memories/statements/referencing-rules?effective=true`);
+    const effective = await effectiveResponse.json() as {
+      memory: { entity: { effectiveRules: { asserts: unknown[] } } };
+    };
+    assert.equal(effectiveResponse.status, 200);
+    assert.deepEqual(effective.memory.entity.effectiveRules.asserts, [
+      "Keep the local assertion.",
+      {
+        reference: "statements/shared-rules",
+        asserts: ["The shared assertion applies."],
+        sections: [{
+          name: "Evidence",
+          defines: ["Evidence-specific context."],
+          asserts: ["Cite supporting evidence."]
+        }]
+      }
+    ]);
+    assert.doesNotMatch(JSON.stringify(effective), /"entries"|"sections":\[\]|"defines":\[\]/);
+    assert.doesNotMatch(JSON.stringify(effective), /ruleId|source_path|imported_at/);
+
+    const aliasResponse = await fetch(`${url}/api/memories/statements/referencing-alias?effective=true`);
+    assert.equal(aliasResponse.status, 400);
+    assert.match(await aliasResponse.text(), /Statement not found: statements\/shared-rules-alias/);
+  });
+});
+
+test("View shows per-reference rule counts and expands each Statement reference in place", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
+    try {
+      await page.goto(`${url}/memories/statements/referencing-alias`);
+      await page.locator("#subtitle", { hasText: "statements/referencing-alias" }).waitFor();
+      const invalidAlias = page.getByRole("button", { name: "statements/shared-rules-alias", exact: true });
+      await invalidAlias.waitFor();
+      assert.match(await invalidAlias.getAttribute("class") ?? "", /missing/);
+      await invalidAlias.click();
+      assert.equal(await page.locator("#subtitle").textContent(), "statements/referencing-alias");
+
+      await page.goto(`${url}/memories/statements/referencing-rules`);
+      await page.locator("#title", { hasText: "Referencing rules" }).waitFor();
+      const reference = page.locator(".rule-reference", { hasText: "statements/shared-rules" }).first();
+      await reference.waitFor();
+      const referenceCommentable = reference.locator(
+        "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' commentable ')]"
+      );
+      assert.equal(await referenceCommentable.count(), 1);
+      assert.equal(await referenceCommentable.locator(":scope > .inline-plus").count(), 1);
+      assert.equal(
+        await referenceCommentable.locator(":scope > .commentable-body").getAttribute("data-comment-snapshot"),
+        "statements/shared-rules"
+      );
+      const localRuleBody = page.locator(".text-list li", { hasText: "Keep the local assertion." })
+        .locator(".commentable-body");
+      const [referenceBox, localRuleBox] = await Promise.all([
+        referenceCommentable.locator(":scope > .commentable-body").boundingBox(),
+        localRuleBody.boundingBox()
+      ]);
+      assert(referenceBox && localRuleBox);
+      assert.equal(Math.abs(referenceBox.x - localRuleBox.x) < 1, true);
+      const toggle = reference.locator(".rule-reference-toggle");
+      await toggle.waitFor();
+      assert.equal(await toggle.textContent(), "2 条生效规则");
+      const body = reference.locator(".effective-rule-inline");
+      assert.equal(await body.isHidden(), true);
+      assert.equal(await page.getByRole("button", { name: "查看生效规则", exact: true }).count(), 0);
+
+      await toggle.click();
+      await body.waitFor();
+      assert.match(await body.textContent() ?? "", /The shared assertion applies\./);
+      assert.match(await body.textContent() ?? "", /Evidence/);
+      assert.match(await body.textContent() ?? "", /Evidence-specific context\./);
+      assert.match(await body.textContent() ?? "", /Cite supporting evidence\./);
+
+      await reference.getByRole("button", { name: "statements/shared-rules", exact: true }).click();
+      await page.locator("#subtitle", { hasText: "statements/shared-rules" }).waitFor();
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+test("Procedure Action rule references keep inline comment controls and rule alignment", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
+    try {
+      await page.goto(`${url}/memories/procedures/reviewable-procedure`);
+      await page.getByRole("heading", { name: "Reviewable procedure", exact: true }).waitFor();
+      const reference = page.locator(".rule-reference", { hasText: "statements/shared-rules" });
+      await reference.waitFor();
+      const referenceCommentable = reference.locator(
+        "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' commentable ')]"
+      );
+      assert.equal(await referenceCommentable.locator(":scope > .inline-plus").count(), 1);
+      assert.equal(
+        await referenceCommentable.locator(":scope > .commentable-body").getAttribute("data-comment-snapshot"),
+        "statements/shared-rules"
+      );
+      const plainRuleBody = page.locator(".action-contracts li", { hasText: "Action field comments must be available." })
+        .locator(":scope > .commentable > .commentable-body");
+      const [referenceBox, plainRuleBox] = await Promise.all([
+        referenceCommentable.locator(":scope > .commentable-body").boundingBox(),
+        plainRuleBody.boundingBox()
+      ]);
+      assert(referenceBox && plainRuleBox);
+      assert.equal(Math.abs(referenceBox.x - plainRuleBox.x) < 1, true);
+    } finally {
+      await page.close();
+    }
   });
 });
 
