@@ -188,12 +188,15 @@ test("framework Memory and Skill describe scoped Settings consistently", async (
     assert.match(memory, /全部已注册 Project/);
     assert.match(memory, /memsphere project repair \[name\]/);
     assert.match(memory, /历史路径与 canonical identity 同时匹配/);
+    assert.match(memory, /Embedded repair 使用当前 Git worktree/);
+    assert.match(memory, /不 commit、push 或使用 Managed publish/);
   }
   assert.match(skill, /左侧分组导航直接进入 Memsphere 或当前 Project 设置/);
   assert.match(skill, /右侧只展示当前配置内容/);
   assert.match(skill, /切换 Project 不清除全局草稿/);
   assert.match(skill, /任一已注册 Project/);
   assert.match(skill, /memsphere project repair \[project-name\]/);
+  assert.match(skill, /Embedded repair 使用当前 Git worktree/);
   assert.doesNotMatch(skill, /project reinitialize/);
 });
 
