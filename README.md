@@ -34,6 +34,16 @@ memsphere project show
 memsphere validate
 ```
 
+现有 Managed Project 如需补装、恢复或升级当前版本内置的 System Memory，可执行一次 repair。命令内部生成受控 ChangeSet、校验完整有效 Memory 并自动发布；manifest v3 明确标记的废弃 System Memory 默认清理，但只有历史路径与 canonical identity 同时匹配时才允许删除，不会触碰用户 Memory 或 Mounted Project：
+
+```bash
+memsphere project repair my-project
+# 也可使用全局选择，或省略名称采用当前 Primary Project
+memsphere --project my-project project repair
+```
+
+无差异时 repair 不创建 ChangeSet 或 Revision；ChangeSet 创建后的失败会保留为带 failure 诊断的只读 `abandoned` 记录，并清理 Workspace candidate。
+
 Managed Project 中修改 Memory 时，先创建 ChangeSet，再校验 ChangeSet 应用到正式 Store 后的完整结果，确认 View 预览后发布：
 
 ```bash
