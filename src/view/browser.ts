@@ -1115,6 +1115,7 @@ export const browserHtml = String.raw`<!doctype html>
       } else if (targetMode === "changes" && state.selectedChangeId) {
         await loadChangeDetail(state.selectedChangeId);
       }
+      if (generation !== state.pageLoadGeneration) return;
       if (options.render !== false) renderAll();
     }
 
