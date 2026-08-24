@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import test from "node:test";
@@ -8,7 +8,9 @@ import {
   projectCloneCommand,
   projectCreateCommand,
   projectMountCommand,
+  prepareManagedSystemMemoryChange,
   projectPruneCommand,
+  projectRepairCommand,
   projectUnbindCommand,
   projectUnmountCommand
 } from "../src/commands/project.js";
@@ -18,6 +20,7 @@ import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 import { readAllMemoryFiles } from "../src/memory/store.js";
 import { readReservedMemoryManifest } from "../src/reserved/store.js";
+import { editMemories, publishMemoryChange, validateMemoryChange } from "../src/memory/changeset.js";
 
 test("Project lifecycle keeps creation separate from Workspace binding", async () => {
   const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-command-"));
@@ -92,6 +95,142 @@ test("Project lifecycle keeps creation separate from Workspace binding", async (
   }
 });
 
+test("Managed Project System Memory repair validates and publishes automatically", async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-repair-"));
+  const home = join(fixture, "home");
+  const workspace = join(fixture, "workspace");
+  const gitConfig = join(fixture, "gitconfig");
+  const previous = {
+    cwd: process.cwd(),
+    home: process.env.MEMSPHERE_HOME,
+    project: process.env.MEMSPHERE_PROJECT,
+    gitConfig: process.env.GIT_CONFIG_GLOBAL
+  };
+  try {
+    await import("node:fs/promises").then(({ mkdir }) => mkdir(workspace));
+    await writeFile(gitConfig, "[user]\n\tname = Test User\n\temail = test@example.com\n");
+    await runGit(["init", "-b", "master"], { cwd: workspace });
+    process.env.MEMSPHERE_HOME = home;
+    process.env.GIT_CONFIG_GLOBAL = gitConfig;
+    process.chdir(workspace);
+
+    await projectCreateCommand("existing", { bind: true });
+    assert.equal(await prepareManagedSystemMemoryChange(), undefined);
+
+    const localEdit = await editMemories({ references: ["concepts/memsphere-memory"] });
+    const localTarget = localEdit.change.targets[0];
+    const localCandidate = join(localEdit.candidateRoot, localTarget.path);
+    await writeFile(localCandidate, `${await readFile(localCandidate, "utf8")}\n# local divergence\n`);
+    await publishMemoryChange(localEdit.change.id, "Diverge System Memory for test");
+
+    await projectRepairCommand("existing");
+    assert.equal(await prepareManagedSystemMemoryChange("existing"), undefined);
+    const registry = await readProjectRegistry(home);
+    const projectRoot = registry.projects.existing.root;
+    const repairedConfig = JSON.parse(await readFile(join(projectRoot, "config.json"), "utf8")) as {
+      store: { published_revision: string };
+    };
+    assert.equal(
+      await runGit(["log", "-1", "--format=%s"], { cwd: join(projectRoot, "memory") }).then((result) => result.stdout),
+      "Repair Memsphere system Memory"
+    );
+    const changeCount = (await readdir(join(projectRoot, "changes"))).length;
+    await projectRepairCommand("existing");
+    assert.equal((await readdir(join(projectRoot, "changes"))).length, changeCount);
+    const noOpConfig = JSON.parse(await readFile(join(projectRoot, "config.json"), "utf8")) as {
+      store: { published_revision: string };
+    };
+    assert.equal(noOpConfig.store.published_revision, repairedConfig.store.published_revision);
+  } finally {
+    process.chdir(previous.cwd);
+    if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;
+    else process.env.MEMSPHERE_HOME = previous.home;
+    if (previous.project === undefined) delete process.env.MEMSPHERE_PROJECT;
+    else process.env.MEMSPHERE_PROJECT = previous.project;
+    if (previous.gitConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = previous.gitConfig;
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("System Memory repair deletes only v3 tombstone identities and rejects path reuse", async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-repair-identity-"));
+  const home = join(fixture, "home");
+  const workspace = join(fixture, "workspace");
+  const gitConfig = join(fixture, "gitconfig");
+  const previous = {
+    cwd: process.cwd(),
+    home: process.env.MEMSPHERE_HOME,
+    project: process.env.MEMSPHERE_PROJECT,
+    gitConfig: process.env.GIT_CONFIG_GLOBAL
+  };
+  try {
+    await import("node:fs/promises").then(({ mkdir }) => mkdir(workspace));
+    await writeFile(gitConfig, "[user]\n\tname = Test User\n\temail = test@example.com\n");
+    await runGit(["init", "-b", "master"], { cwd: workspace });
+    process.env.MEMSPHERE_HOME = home;
+    process.env.GIT_CONFIG_GLOBAL = gitConfig;
+    process.chdir(workspace);
+
+    await projectCreateCommand("legacy", { bind: true });
+    let registry = await readProjectRegistry(home);
+    const legacyRoot = registry.projects.legacy.root;
+    const legacyMemoryRoot = join(legacyRoot, "memory");
+    await writeFile(
+      join(legacyMemoryRoot, "concepts", "memory.yaml"),
+      withCurrentMemorySyntax("!concept\nnames: [Memory]\ndefines: [Legacy System Memory.]\n")
+    );
+    await runGit(["add", "concepts/memory.yaml"], { cwd: legacyMemoryRoot });
+    await runGit(["commit", "-m", "Install legacy System Memory"], { cwd: legacyMemoryRoot });
+    const legacyRevision = await runGit(["rev-parse", "HEAD"], { cwd: legacyMemoryRoot }).then((result) => result.stdout);
+    const legacyConfigPath = join(legacyRoot, "config.json");
+    const legacyConfig = JSON.parse(await readFile(legacyConfigPath, "utf8"));
+    legacyConfig.store.published_revision = legacyRevision;
+    await writeFile(legacyConfigPath, `${JSON.stringify(legacyConfig, null, 2)}\n`);
+
+    const legacyRepair = await prepareManagedSystemMemoryChange("legacy");
+    assert(legacyRepair);
+    assert.equal(legacyRepair.created, 0);
+    assert.equal(legacyRepair.updated, 0);
+    assert.equal(legacyRepair.deleted, 1);
+    assert.deepEqual(legacyRepair.change.targets.map((target) => target.reference), ["concepts/Memory"]);
+    assert.deepEqual((await validateMemoryChange(legacyRepair.change.id)).issues, []);
+    await publishMemoryChange(legacyRepair.change.id, "Remove legacy System Memory");
+    await assert.rejects(readFile(join(legacyMemoryRoot, "concepts", "memory.yaml")), /ENOENT/);
+
+    await projectCreateCommand("protected", {});
+    registry = await readProjectRegistry(home);
+    process.env.MEMSPHERE_PROJECT = "protected";
+    const protectedEdit = await editMemories({
+      references: ["concepts/user-memory"],
+      createPaths: new Map([["concepts/user-memory", "concepts/memory.yaml"]])
+    });
+    await writeFile(
+      join(protectedEdit.candidateRoot, "concepts", "memory.yaml"),
+      withCurrentMemorySyntax("!concept\nnames: [user-memory]\ndefines: [User-owned Memory.]\n")
+    );
+    await publishMemoryChange(protectedEdit.change.id, "Create user Memory at historical path");
+    const changesBefore = (await readdir(join(registry.projects.protected.root, "changes"))).length;
+    assert.equal(await prepareManagedSystemMemoryChange("legacy"), undefined);
+    assert.equal(process.env.MEMSPHERE_PROJECT, "protected");
+    await assert.rejects(
+      prepareManagedSystemMemoryChange(),
+      /removal identity conflict.*concepts\/memory.yaml.*concepts\/user-memory/
+    );
+    assert.equal((await readdir(join(registry.projects.protected.root, "changes"))).length, changesBefore);
+    assert.match(await readFile(join(registry.projects.protected.root, "memory", "concepts", "memory.yaml"), "utf8"), /User-owned/);
+  } finally {
+    process.chdir(previous.cwd);
+    if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;
+    else process.env.MEMSPHERE_HOME = previous.home;
+    if (previous.project === undefined) delete process.env.MEMSPHERE_PROJECT;
+    else process.env.MEMSPHERE_PROJECT = previous.project;
+    if (previous.gitConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = previous.gitConfig;
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
 test("Embedded Project reuses the current repository without nested Git", async () => {
   const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-embedded-"));
   const home = join(fixture, "home");
@@ -104,6 +243,7 @@ test("Embedded Project reuses the current repository without nested Git", async 
     process.env.MEMSPHERE_HOME = home;
     process.chdir(workspace);
     await projectCreateCommand("embedded", { embedded: memoryRoot, bind: true });
+    await assert.rejects(projectRepairCommand("embedded"), /requires a Managed Project/);
     const registry = await readProjectRegistry(home);
     const config = JSON.parse(await readFile(join(registry.projects.embedded.root, "config.json"), "utf8"));
     assert.deepEqual(config.store, {

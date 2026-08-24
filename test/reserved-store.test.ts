@@ -9,7 +9,8 @@ import {
   bundledReservedMemoryRoot,
   readBundledSystemMemories,
   readReservedMemoryManifest,
-  reservedMemoryManifestSchema
+  reservedMemoryManifestSchema,
+  reservedSystemMemoryRemovalTombstones
 } from "../src/reserved/store.js";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
@@ -129,13 +130,13 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   }
   assert(files.every((file) => file.entity.syntax === currentMemorySyntax));
   assert(memory.entity.defines.some((definition) => typeof definition === "object" && definition.tag === "!statement"));
-  assert.equal(manifest.version, 2);
+  assert.equal(manifest.version, 3);
   assert.equal("memory_syntax" in manifest ? manifest.memory_syntax : undefined, currentMemorySyntax);
   assert.equal(manifest.system_memory.install.length, 17);
   assert.deepEqual(systemMemories.map((memory) => memory.path), manifest.system_memory.install);
   assert(systemMemories.every((memory) => memory.reference === `${memory.kind}/${memory.names[0]}`));
   assert(systemMemories.every((memory) => memory.names.length > 0));
-  assert.deepEqual(manifest.system_memory.remove, [
+  assert.deepEqual(reservedSystemMemoryRemovalTombstones(manifest).map((tombstone) => tombstone.path), [
     "concepts/memory.yaml",
     "concepts/memsphere.yaml",
     "concepts/concept.yaml",
@@ -160,6 +161,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "procedures/memsphere-memory-review-process.yaml",
     "procedures/memsphere-tutorial.yaml"
   ]);
+  assert(reservedSystemMemoryRemovalTombstones(manifest).every((tombstone) => tombstone.references.length > 0));
   const tutorial = await readFile(
     join(bundledReservedMemoryRoot(), "procedures", "memsphere-tutorial-chapter-01.yaml"),
     "utf8"
@@ -184,11 +186,15 @@ test("framework Memory and Skill describe scoped Settings consistently", async (
     assert.match(memory, /右侧只展示当前配置内容/);
     assert.match(memory, /独立的草稿、Revision、校验和保存生命周期/);
     assert.match(memory, /全部已注册 Project/);
+    assert.match(memory, /memsphere project repair \[name\]/);
+    assert.match(memory, /历史路径与 canonical identity 同时匹配/);
   }
   assert.match(skill, /左侧分组导航直接进入 Memsphere 或当前 Project 设置/);
   assert.match(skill, /右侧只展示当前配置内容/);
   assert.match(skill, /切换 Project 不清除全局草稿/);
   assert.match(skill, /任一已注册 Project/);
+  assert.match(skill, /memsphere project repair \[project-name\]/);
+  assert.doesNotMatch(skill, /project reinitialize/);
 });
 
 test("manifest rejects unsafe, duplicate, overlapping, and unknown values", () => {
@@ -197,9 +203,47 @@ test("manifest rejects unsafe, duplicate, overlapping, and unknown values", () =
     { version: 1, system_memory: { install: ["concepts/./x.yaml"], remove: [] } },
     { version: 1, system_memory: { install: ["concepts/x.yaml", "concepts/x.yaml"], remove: [] } },
     { version: 1, system_memory: { install: ["concepts/x.yaml"], remove: ["concepts/x.yaml"] } },
-    { version: 1, system_memory: { install: [], remove: [] }, extra: true }
+    { version: 1, system_memory: { install: [], remove: [] }, extra: true },
+    {
+      version: 3,
+      memory_syntax: currentMemorySyntax,
+      system_memory: {
+        install: [],
+        remove: [{ path: "concepts/x.yaml", references: ["statements/x"] }]
+      }
+    },
+    {
+      version: 3,
+      memory_syntax: currentMemorySyntax,
+      system_memory: {
+        install: [],
+        remove: [
+          { path: "concepts/x.yaml", references: ["concepts/x"] },
+          { path: "concepts/x.yaml", references: ["concepts/x-old"] }
+        ]
+      }
+    },
+    {
+      version: 3,
+      memory_syntax: currentMemorySyntax,
+      system_memory: {
+        install: [],
+        remove: [{ path: "concepts/x.yaml", references: ["concepts/x", "concepts/x"] }]
+      }
+    }
   ]) {
     assert.equal(reservedMemoryManifestSchema.safeParse(manifest).success, false);
+  }
+});
+
+test("legacy manifests remain readable but cannot authorize identity-based removal", () => {
+  for (const version of [1, 2] as const) {
+    const parsed = reservedMemoryManifestSchema.parse({
+      version,
+      ...(version === 2 ? { memory_syntax: currentMemorySyntax } : {}),
+      system_memory: { install: [], remove: ["concepts/legacy.yaml"] }
+    });
+    assert.deepEqual(reservedSystemMemoryRemovalTombstones(parsed), []);
   }
 });
 

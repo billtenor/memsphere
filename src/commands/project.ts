@@ -1,5 +1,5 @@
 import { cp, mkdir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { homePaths, resolveMemsphereHome } from "../home.js";
 import { atomicWriteJson, withFileLock } from "../persistence.js";
 import { gitOutput, runGit } from "../git.js";
@@ -7,10 +7,25 @@ import { projectConfigSchema, projectManifestSchema, assertProjectName, type Pro
 import { ensureMemoryDirectories } from "../validation.js";
 import { projectPaths } from "../project/paths.js";
 import { listRegisteredProjects, pathExists, readProjectRegistry, updateProjectRegistry } from "../project/registry.js";
-import { resolveRegisteredProject } from "../project/resolver.js";
+import { resolveProjectContext, resolveRegisteredProject } from "../project/resolver.js";
 import { resolveMainWorkspacePath, resolveWorkspaceIdentity } from "../project/workspace.js";
-import { editMemories, publishMemoryChange } from "../memory/changeset.js";
-import { bundledReservedMemoryRoot, readBundledSystemMemories } from "../reserved/store.js";
+import {
+  assertManagedProjectHealthy,
+  deleteMemoriesByIdentity,
+  editMemories,
+  failMemoryChange,
+  publishMemoryChange,
+  validateMemoryChange
+} from "../memory/changeset.js";
+import {
+  bundledReservedMemoryRoot,
+  readBundledSystemMemories,
+  readReservedMemoryManifest,
+  reservedSystemMemoryRemovalTombstones,
+  type BundledSystemMemoryDescriptor
+} from "../reserved/store.js";
+import { isMemoryKind, memoryKindTags, type MemoryKind } from "../memory/kinds.js";
+import { parseMemoryYaml } from "../memory/yaml.js";
 import { assertWindowsPrerequisites } from "../windows-prerequisites.js";
 
 type BindOption = { bind?: boolean };
@@ -51,26 +66,266 @@ export async function projectCreateCommand(
 }
 
 async function bootstrapManagedSystemMemory(projectName: string): Promise<void> {
+  const result = await runManagedSystemMemoryRepair(projectName, "Bootstrap Memsphere system Memory");
+  if (result.created === 0) throw new Error("new Managed Project unexpectedly has no System Memory to bootstrap");
+}
+
+export type SystemMemoryChangePreparation = {
+  project: string;
+  change: Awaited<ReturnType<typeof editMemories>>["change"];
+  candidateRoot: string;
+  created: number;
+  updated: number;
+  deleted: number;
+};
+
+type SystemMemoryReconcilePlan = {
+  project: string;
+  sourceRoot: string;
+  creates: BundledSystemMemoryDescriptor[];
+  updates: BundledSystemMemoryDescriptor[];
+  deletes: SystemMemoryStoreDescriptor[];
+};
+
+type SystemMemoryStoreDescriptor = {
+  id: string;
+  kind: MemoryKind;
+  names: string[];
+  baseDigest: string;
+};
+
+type SystemMemoryRepairResult = {
+  project: string;
+  created: number;
+  updated: number;
+  deleted: number;
+  revision: string;
+};
+
+/** Build a controlled ChangeSet that reconciles a Managed Project with this package's System Memory. */
+export async function prepareManagedSystemMemoryChange(projectName?: string): Promise<SystemMemoryChangePreparation | undefined> {
+  return withSelectedProject(projectName, prepareSelectedManagedSystemMemoryChange);
+}
+
+async function prepareSelectedManagedSystemMemoryChange(): Promise<SystemMemoryChangePreparation | undefined> {
+  const plan = await buildSelectedSystemMemoryReconcilePlan();
+  if (plan.creates.length === 0 && plan.updates.length === 0 && plan.deletes.length === 0) return undefined;
+  let result: Awaited<ReturnType<typeof editMemories>> | undefined;
+  try {
+    const installs = [...plan.creates, ...plan.updates];
+    if (installs.length > 0) {
+      result = await editMemories({
+        references: installs.map((memory) => memory.reference),
+        createPaths: new Map(plan.creates.map((memory) => [memory.reference, memory.path])),
+        onChangeCreated: (created) => { result = created; }
+      });
+      for (const memory of installs) {
+        const target = result.change.targets.find((candidate) => candidate.reference === memory.reference);
+        if (!target) throw new Error(`System Memory ChangeSet target is missing: ${memory.reference}`);
+        await cp(join(plan.sourceRoot, memory.path), join(result.candidateRoot, target.path));
+      }
+    }
+    if (plan.deletes.length > 0) {
+      result = await deleteMemoriesByIdentity({
+        targets: plan.deletes.map((descriptor) => ({
+          reference: memoryReference(descriptor),
+          path: descriptor.id,
+          baseDigest: descriptor.baseDigest
+        })),
+        changeId: result?.change.id,
+        onChangeCreated: (created) => { result = created; }
+      });
+    }
+    if (!result) throw new Error("System Memory reconciliation produced no ChangeSet");
+    return {
+      project: plan.project,
+      change: result.change,
+      candidateRoot: result.candidateRoot,
+      created: plan.creates.length,
+      updated: plan.updates.length,
+      deleted: plan.deletes.length
+    };
+  } catch (error) {
+    if (result) await failSystemMemoryChange(result, "prepare", error);
+    throw error;
+  }
+}
+
+async function buildSelectedSystemMemoryReconcilePlan(): Promise<SystemMemoryReconcilePlan> {
+  const context = await resolveProjectContext({
+    project: process.env.MEMSPHERE_PROJECT,
+    memoryScope: "canonical"
+  });
+  if (context.primary.config.store.type !== "managed") {
+    throw new Error(`Project "${context.primary.name}" uses Embedded Memory; System Memory repair requires a Managed Project`);
+  }
+  await assertManagedProjectHealthy(context.primary);
   const sourceRoot = bundledReservedMemoryRoot();
-  const memories = await readBundledSystemMemories(sourceRoot);
+  const [memories, manifest, currentDescriptors] = await Promise.all([
+    readBundledSystemMemories(sourceRoot),
+    readReservedMemoryManifest(sourceRoot),
+    listPublishedMemoryIdentities(
+      context.primary.memoryRoot,
+      context.primary.config.store.published_revision
+    )
+  ]);
+  const currentByReference = new Map(currentDescriptors.map((descriptor) => [memoryReference(descriptor), descriptor]));
+  const currentByPath = new Map(currentDescriptors.map((descriptor) => [descriptor.id, descriptor]));
+  const installReferences = new Set(memories.map((memory) => memory.reference));
+  const creates: BundledSystemMemoryDescriptor[] = [];
+  const updates: BundledSystemMemoryDescriptor[] = [];
+  for (const memory of memories) {
+    const current = currentByReference.get(memory.reference);
+    if (!current) {
+      const occupant = currentByPath.get(memory.path);
+      if (occupant) {
+        throw new Error(
+          `System Memory install path conflict at ${memory.path}: expected ${memory.reference}, found ${memoryReference(occupant)}`
+        );
+      }
+      creates.push(memory);
+      continue;
+    }
+    const [bundledSource, currentSource] = await Promise.all([
+      readFile(join(sourceRoot, memory.path)),
+      readFile(join(context.primary.memoryRoot, current.id))
+    ]);
+    if (!bundledSource.equals(currentSource)) updates.push(memory);
+  }
+  const deletes: SystemMemoryStoreDescriptor[] = [];
+  for (const tombstone of reservedSystemMemoryRemovalTombstones(manifest)) {
+    const current = currentByPath.get(tombstone.path);
+    if (!current) continue;
+    const reference = memoryReference(current);
+    if (!tombstone.references.includes(reference)) {
+      throw new Error(
+        `System Memory removal identity conflict at ${tombstone.path}: found ${reference}`
+      );
+    }
+    if (!installReferences.has(reference)) deletes.push(current);
+  }
+  return {
+    project: context.primary.name,
+    sourceRoot,
+    creates,
+    updates,
+    deletes
+  };
+}
+
+export async function projectRepairCommand(nameInput?: string): Promise<void> {
+  const result = await runManagedSystemMemoryRepair(nameInput, "Repair Memsphere system Memory");
+  console.log(`Project: ${result.project}`);
+  console.log(`System Memory changes: ${result.created} create, ${result.updated} update, ${result.deleted} delete`);
+  console.log(`Revision: ${result.revision}`);
+}
+
+async function runManagedSystemMemoryRepair(
+  projectName: string | undefined,
+  message: string
+): Promise<SystemMemoryRepairResult> {
+  return withSelectedProject(projectName, async () => {
+    const context = await resolveProjectContext({
+      project: process.env.MEMSPHERE_PROJECT,
+      memoryScope: "canonical"
+    });
+    if (context.primary.config.store.type !== "managed") {
+      throw new Error(`Project "${context.primary.name}" uses Embedded Memory; System Memory repair requires a Managed Project`);
+    }
+    const prepared = await prepareSelectedManagedSystemMemoryChange();
+    if (!prepared) {
+      return {
+        project: context.primary.name,
+        created: 0,
+        updated: 0,
+        deleted: 0,
+        revision: context.primary.config.store.published_revision
+      };
+    }
+    let stage: "validate" | "publish" = "validate";
+    try {
+      const validation = await validateMemoryChange(prepared.change.id);
+      if (validation.issues.length > 0) {
+        throw new Error(
+          `System Memory repair validation failed: ${validation.issues[0]?.path}: ${validation.issues[0]?.message}`
+        );
+      }
+      stage = "publish";
+      const published = await publishMemoryChange(prepared.change.id, message);
+      await rm(resolve(prepared.candidateRoot, ".."), { recursive: true, force: true }).catch(() => undefined);
+      return {
+        project: prepared.project,
+        created: prepared.created,
+        updated: prepared.updated,
+        deleted: prepared.deleted,
+        revision: published.published_revision ?? context.primary.config.store.published_revision
+      };
+    } catch (error) {
+      return await failSystemMemoryChange(prepared, stage, error);
+    }
+  });
+}
+
+async function failSystemMemoryChange(
+  prepared: Pick<SystemMemoryChangePreparation, "change" | "candidateRoot">,
+  stage: "prepare" | "validate" | "publish",
+  error: unknown
+): Promise<never> {
+  const followupErrors: unknown[] = [];
+  await failMemoryChange(prepared.change.id, stage, error).catch((failureError) => followupErrors.push(failureError));
+  await rm(resolve(prepared.candidateRoot, ".."), { recursive: true, force: true })
+    .catch((cleanupError) => followupErrors.push(cleanupError));
+  if (followupErrors.length > 0) {
+    throw new AggregateError([error, ...followupErrors], "System Memory repair failed and diagnostics or cleanup were incomplete");
+  }
+  throw error;
+}
+
+async function withSelectedProject<T>(projectName: string | undefined, operation: () => Promise<T>): Promise<T> {
+  const selectedProject = projectName?.trim();
+  if (selectedProject) assertProjectName(selectedProject);
   const previous = process.env.MEMSPHERE_PROJECT;
   try {
-    process.env.MEMSPHERE_PROJECT = projectName;
-    const result = await editMemories({
-      references: memories.map((memory) => memory.reference),
-      createPaths: new Map(memories.map((memory) => [memory.reference, memory.path]))
-    });
-    for (const memory of memories) {
-      const target = result.change.targets.find((candidate) => candidate.reference === memory.reference);
-      if (!target) throw new Error(`bootstrap ChangeSet target is missing: ${memory.reference}`);
-      await cp(resolve(sourceRoot, memory.path), resolve(result.candidateRoot, target.path));
-    }
-    await publishMemoryChange(result.change.id, "Bootstrap Memsphere system Memory");
-    await rm(resolve(result.candidateRoot, ".."), { recursive: true, force: true });
+    if (selectedProject) process.env.MEMSPHERE_PROJECT = selectedProject;
+    return await operation();
   } finally {
     if (previous === undefined) delete process.env.MEMSPHERE_PROJECT;
     else process.env.MEMSPHERE_PROJECT = previous;
   }
+}
+
+async function listPublishedMemoryIdentities(
+  memoryRoot: string,
+  revision: string
+): Promise<SystemMemoryStoreDescriptor[]> {
+  const output = await gitOutput(["ls-tree", "-r", "--name-only", revision], memoryRoot);
+  const descriptors: SystemMemoryStoreDescriptor[] = [];
+  for (const id of output.split("\n").filter(Boolean)) {
+    if (!id.endsWith(".yaml") && !id.endsWith(".yml")) continue;
+    const kind = id.split("/", 1)[0];
+    if (!isMemoryKind(kind)) continue;
+    const source = await gitOutput(["show", `${revision}:${id}`], memoryRoot);
+    const parsed = parseMemoryYaml(`${source}\n`);
+    if (!parsed || typeof parsed !== "object") throw new Error(`invalid historical Memory document: ${id}`);
+    const record = parsed as Record<string, unknown>;
+    if (record.tag !== memoryKindTags[kind]) {
+      throw new Error(`${id} uses ${String(record.tag)} but expected ${memoryKindTags[kind]}`);
+    }
+    const rawNames = record.names ?? record.name;
+    const names = typeof rawNames === "string"
+      ? [rawNames]
+      : Array.isArray(rawNames) && rawNames.every((name) => typeof name === "string")
+        ? rawNames as string[]
+        : [];
+    if (!names[0]?.trim()) throw new Error(`historical Memory has no canonical name: ${id}`);
+    const baseDigest = await gitOutput(["rev-parse", `${revision}:${id}`], memoryRoot);
+    descriptors.push({ id, kind, names, baseDigest });
+  }
+  return descriptors;
+}
+
+function memoryReference(descriptor: SystemMemoryStoreDescriptor): string {
+  return `${descriptor.kind}/${descriptor.names[0]}`;
 }
 
 async function rollbackCreatedRegistration(home: string, name: string, root: string): Promise<void> {
