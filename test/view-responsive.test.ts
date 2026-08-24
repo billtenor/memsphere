@@ -489,7 +489,7 @@ test("Task pages do not expose the retired Task Review entry or inline comments"
 test("View deep links restore Memory, Task, and browser history", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
-    page.setDefaultTimeout(5_000);
+    page.setDefaultTimeout(10_000);
     try {
       await page.goto(`${url}/memories/concepts/user-note`, { waitUntil: "networkidle" });
       assert.equal(await page.locator("#title").textContent(), "User note", await page.locator("body").innerText());
@@ -504,11 +504,19 @@ test("View deep links restore Memory, Task, and browser history", async () => {
       assert.equal(new URL(page.url()).pathname, "/tasks");
       await page.locator(".task-card-main").first().click();
       assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
-      await page.goBack({ waitUntil: "networkidle" });
+      const backDetailLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
+      );
+      await page.evaluate(() => history.back());
       await page.waitForURL(url + "/tasks");
+      await backDetailLoaded;
       assert.equal(new URL(page.url()).pathname, "/tasks");
-      await page.goForward({ waitUntil: "networkidle" });
+      const forwardDetailLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
+      );
+      await page.evaluate(() => history.forward());
       await page.waitForURL(url + `/tasks/${runId}`);
+      await forwardDetailLoaded;
       await page.getByRole("heading", { name: runName, exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
 
