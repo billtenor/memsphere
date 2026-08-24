@@ -271,7 +271,10 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
       const scrollBox = narrowPage.locator(".markdown-table-scroll").first();
       const box = await scrollBox.boundingBox();
       assert(box);
-      assert(await scrollBox.evaluate((element) => element.scrollWidth > element.clientWidth));
+      await narrowPage.waitForFunction(() => {
+        const element = document.querySelector(".markdown-table-scroll");
+        return element instanceof HTMLElement && element.scrollWidth > element.clientWidth;
+      });
       await scrollBox.evaluate((element) => { element.scrollLeft = 240; });
       assert(await scrollBox.evaluate((element) => element.scrollLeft > 0));
       await assertPageDoesNotOverflow(narrowPage);
@@ -501,10 +504,10 @@ test("View deep links restore Memory, Task, and browser history", async () => {
       assert.equal(new URL(page.url()).pathname, "/tasks");
       await page.locator(".task-card-main").first().click();
       assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
-      await page.goBack();
+      await page.goBack({ waitUntil: "networkidle" });
       await page.waitForURL(url + "/tasks");
       assert.equal(new URL(page.url()).pathname, "/tasks");
-      await page.goForward();
+      await page.goForward({ waitUntil: "networkidle" });
       await page.waitForURL(url + `/tasks/${runId}`);
       await page.getByRole("heading", { name: runName, exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
