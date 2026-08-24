@@ -171,7 +171,7 @@ flow:
 - Human 完成前序流程后若不再参与后续 Review，Runner 可以执行 `memsphere run binding show --run <run_id>` 查看 Run 冻结的 Actor、当前 Slot Binding、影响 scope 和历史，再执行 `memsphere run binding update --run <run_id> --slot <procedure::slot> --actor <actor_id>` 换绑；多个 Actor 重复传 `--actor`，未来不需要该 Slot 时使用 `--skip`。只能选择 Run 启动时已经冻结的 Actor；更新只影响尚未创建的 Review，已经创建的 Review、Round、Assignment 和后续修订轮次保持原 Binding。
 - Runner 在 `run report` 前应阅读 CLI 输出的权限说明；成功或拒绝结果中的权限、来源和自然语言说明均来自 Run 启动时保存的控制平面快照。
 - 确定性校验通过后，Run 会返回稳定的 `review_id` 和 `memsphere run review wait --review <review_id>`；Review 通过前当前 Action 不推进。Review Submission 自动冻结当前候选之前已经上报的全部 Artifact，Reviewer 根据当前 Artifact 与要求按需追溯。全部评审意见收齐后，如 CLI 提示等待 Runner 投票，应先阅读摘要和 blocking 意见，再显式执行 `memsphere run review vote`。Runner 拥有最终决定权；建议意见和 blocking 严重级别不会形成额外否决权。需要留下审计记录时，可在投票前使用 `memsphere run review resolve` 记录意见的接受、延期或驳回原因。
-- 绑定到当前 Slot 的 Agent Actor 会由 Memsphere 通过 ACP 自动启动。初始 Prompt 会给出精炼的 Review contract 和前序 Artifact 索引；Agent Reviewer 在当前 Workspace/worktree 中使用 PATH 注入的受限 `memsphere-review` 会话命令，命令自动绑定当前 Run 与 Assignment，直接通过 Store 操作自己的 Assignment，不创建或监听 Review bridge/socket，也不依赖某一种 shell 的环境变量语法。`run review comment` 必须声明 severity；短意见使用 `--body`，多行 Markdown 使用 `--body-file`，历史 `--body-stdin` 仍兼容。提交摘要可使用 `--summary-file`。普通 ACP 文本回复不构成 Comment 或 Vote。Agent 失败时可用 `memsphere run review retry --review <id> --assignment <actor-or-assignment-id>` 显式重试。
+- 绑定到当前 Slot 的 Agent Actor 会由 Memsphere 通过 ACP 自动启动。初始 Prompt 会给出精炼的 Review contract 和前序 Artifact 索引；Agent Reviewer 在当前 Workspace/worktree 中使用 PATH 注入的受限 `memsphere-review` 会话命令，命令自动绑定当前 Run 与 Assignment；ChangeSet Run 的 `memory list/read` 还会自动绑定该 Run 的冻结 Memory 快照。Reviewer 直接通过 Store 操作自己的 Assignment，不创建或监听 Review bridge/socket，也不依赖某一种 shell 的环境变量语法。`run review comment` 必须声明 severity；短意见使用 `--body`，多行 Markdown 使用 `--body-file`，历史 `--body-stdin` 仍兼容。提交摘要可使用 `--summary-file`。普通 ACP 文本回复不构成 Comment 或 Vote。Agent 失败时可用 `memsphere run review retry --review <id> --assignment <actor-or-assignment-id>` 显式重试。
 - Human 使用 View 中的大尺寸 Artifact Review 浮窗操作本人 Assignment：按 Round 查看当时的不可变 Submission、正式 Comment、Vote、Result 与 Revision Summary，在当前轮添加整体或定位 Comment、选择 Vote 并 Submit。历史 Round 只读，完成后的 Review 仍可从对应 Run 步骤重新打开。
 - Artifact Review Comment 只绑定当前 Artifact Submission；定位 Comment 保存 Submission、digest、Renderer target 和短上下文，不评论 Memory 或 Workspace 文件，也不会自动迁移到下一轮。Memory 修改意见只作为 ChangeSet Comment 存储和处理，与 Artifact Review 完全独立。
 - 调试 Agent 启动时，可设置 `debug.agent_review: true` 禁止后台真实派发，再显式执行 `memsphere run try-run --run <run_id>` 生成 `launch.json` 和 `prompt.md`。该命令不 claim Assignment、不启动 ACP，也不修改 Run；View 轮询不会自动生成调试文件。
@@ -252,7 +252,14 @@ Procedure 名称参数与 `--file` 必须二选一；两种方式都必须通过
 memsphere run start "<Procedure 名称>" --change <change-id> --name "<本次 Run 名称>"
 ```
 
-该入口从 ChangeSet 的 base revision 与当前 checkpoint 物化完整候选 Memory Store，并把 ChangeSet id、checkpoint digest 和 base revision 冻结进 Run。ChangeSet 后续修改不影响已经启动的 Run；需要测试新 checkpoint 时启动新的 Run。`--change` 不得与 `--file` 同时使用，也不接受未验证、验证失败、completed 或 abandoned 的 ChangeSet。不传 `--change` 时，Embedded 读取当前 worktree，Managed 读取 `published_revision`。
+该入口从 ChangeSet 的 base revision 与当前 checkpoint 物化四类完整候选 Memory，并把不可变快照、ChangeSet id、checkpoint digest 和 base revision 冻结进 Run。执行这个 Run 时，使用同一个 Run ID 发现和读取其 Memory 快照：
+
+```bash
+memsphere memory list --run <Run ID>
+memsphere memory read "<名称/逻辑引用>" --run <Run ID>
+```
+
+Concept、Statement、Schema 和 Procedure 都必须从该入口读取，不能混用当前工作树或后来 checkpoint 的版本。ChangeSet 后续修改不影响已经启动的 Run；需要测试新 checkpoint 时启动新的 Run。`--change` 不得与 `--file` 同时使用，也不接受未验证、验证失败、completed 或 abandoned 的 ChangeSet。不传 `--change` 时，Embedded 读取当前 worktree，Managed 读取 `published_revision`。
 
 命令会返回 Run ID 和第一个待执行步骤。后续命令都使用这个 Run ID，不要再次启动同一个流程。
 

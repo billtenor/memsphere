@@ -149,6 +149,7 @@ memory
   .addOption(new Option("--kind <kind>", "filter or narrow resolution by memory kind").choices([...memoryKinds]))
   .option("--query <text>", "match a top-level canonical name or alias")
   .option("--node <node-ref>", "list direct children of a memory node")
+  .option("--run <run-id>", "read from a Run's frozen ChangeSet Memory snapshot")
   .addOption(new Option("--output <format>", "output format").choices(["yaml", "json", "text"]).default("yaml"))
   .action((reference, options) => memoryListCommand(reference, options));
 
@@ -158,6 +159,7 @@ memory
   .argument("<reference>", "canonical logical reference, or bare canonical name or alias")
   .addOption(new Option("--kind <kind>", "narrow name resolution by memory kind").choices([...memoryKinds]))
   .option("--node <node-ref>", "read one memory node with its required context")
+  .option("--run <run-id>", "read from a Run's frozen ChangeSet Memory snapshot")
   .addOption(new Option("--output <format>", "output format").choices(["yaml", "json"]).default("yaml"))
   .action((reference, options) => memoryReadCommand(reference, options));
 

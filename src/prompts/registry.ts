@@ -185,7 +185,8 @@ const runCurrentStepSchema = z.object({
   procedureName: z.string(),
   memorySource: z.object({
     changeId: z.string(),
-    checkpointDigest: z.string()
+    checkpointDigest: z.string(),
+    snapshot: z.boolean()
   }).strict().optional(),
   procedureAsserts: z.array(z.string()),
   step: z.discriminatedUnion("kind", [

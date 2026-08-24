@@ -1,6 +1,6 @@
 import type { MemoryCatalog } from "../memory/catalog.js";
 import { join } from "node:path";
-import { createMemoryCatalog } from "../memory/factory.js";
+import { createMemoryCatalog, createMemoryCatalogForConfig } from "../memory/factory.js";
 import { isMemoryKind, memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import {
   serializeMemoryJson,
@@ -31,6 +31,7 @@ import {
 } from "../memory/changeset.js";
 import { resolveProjectContext } from "../project/resolver.js";
 import { readConfig } from "../config.js";
+import { readRun } from "../run/store.js";
 import { getViewServiceStatus, viewServiceUrl } from "../view/service.js";
 
 const listOutputs = ["yaml", "json", "text"] as const;
@@ -44,21 +45,23 @@ export type MemoryListCommandOptions = {
   query?: string;
   node?: string;
   output?: string;
+  run?: string;
 };
 
 export type MemoryReadCommandOptions = {
   kind?: string;
   node?: string;
   output?: string;
+  run?: string;
 };
 
 export type MemoryCommandDependencies = {
-  createCatalog: () => Promise<MemoryCatalog>;
+  createCatalog: (runId?: string) => Promise<MemoryCatalog>;
   writeStdout: (value: string) => void;
 };
 
 const defaultDependencies: MemoryCommandDependencies = {
-  createCatalog: createMemoryCatalog,
+  createCatalog: createMemoryCommandCatalog,
   writeStdout: (value) => process.stdout.write(value)
 };
 
@@ -75,7 +78,7 @@ export async function memoryListCommand(
   if (reference && options.query) {
     throw new Error("memory list --query cannot be used with a memory reference");
   }
-  const catalog = await dependencies.createCatalog();
+  const catalog = await dependencies.createCatalog(options.run);
   if (reference) {
     const descriptor = await catalog.resolve(reference, { kind });
     const entity = await catalog.read(descriptor.reference, { kind: descriptor.kind });
@@ -105,7 +108,7 @@ export async function memoryReadCommand(
 ): Promise<void> {
   const kind = parseKind(options.kind);
   const output = parseOutput(options.output ?? "yaml", readOutputs, "memory read");
-  const catalog = await dependencies.createCatalog();
+  const catalog = await dependencies.createCatalog(options.run);
   if (options.node !== undefined) {
     const descriptor = await catalog.resolve(reference, { kind });
     const entity = await catalog.read(descriptor.reference, { kind: descriptor.kind });
@@ -117,6 +120,19 @@ export async function memoryReadCommand(
   const entity = await catalog.read(reference, { kind });
   const value = output === "json" ? serializeMemoryJson(entity) : serializeMemoryYaml(entity);
   dependencies.writeStdout(value);
+}
+
+export async function createMemoryCommandCatalog(runId?: string): Promise<MemoryCatalog> {
+  if (!runId) return createMemoryCatalog();
+  const config = await readConfig();
+  const run = await readRun(config.runsRoot, runId);
+  if (!run.memorySource || !run.memorySnapshot) {
+    throw new Error(`Run ${runId} does not have a frozen ChangeSet Memory snapshot`);
+  }
+  const memoryRoot = join(config.runsRoot, run.id, run.memorySnapshot.path);
+  const revision = run.memoryProjects?.primary.revision
+    ?? `changeset:${run.memorySource.changeId}@${run.memorySource.checkpointDigest}`;
+  return createMemoryCatalogForConfig(config, { memoryRoot, revision });
 }
 
 export async function memoryEditCommand(references: string[], options: { change?: string } = {}): Promise<void> {

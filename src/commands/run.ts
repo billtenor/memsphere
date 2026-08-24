@@ -157,6 +157,7 @@ export async function runStartCommand(procedureName: string | undefined, options
     memorySource: NonNullable<RunState["memorySource"]>;
   }): Promise<RunState> => startRun({
     memoryRoot: config.memoryRoot,
+    memorySnapshotRoot: source?.memoryRoot,
     runsRoot: config.runsRoot,
     name: runName,
     language: config.language,
