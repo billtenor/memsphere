@@ -155,16 +155,63 @@ Install the Memsphere Skill globally so that your Agent can discover it:
 memsphere skill init --global
 ~~~
 
-### 6.3 Create and Bind a Project
+### 6.3 Choose and Create a Project
 
-Enter your working directory and create a persistent Project:
+A Project is Memsphere's persistent space for Memory, ChangeSets, Runs, and Archives. After you bind the current working directory to a Project, Agents reading Memory or running Procedures there use that Project's context.
+
+Memsphere provides two kinds of Project. Both can hold Memory and run Procedures; the main difference is **where Memory is stored and how changes are managed**:
+
+| Type | Where Memory is stored | How changes are managed | Best suited for |
+| --- | --- | --- | --- |
+| Managed Project | The operating system's user data directory | Validated and published through Memsphere ChangeSets | Personalized software maintained independently of a specific code repository |
+| Embedded Project | A selected directory inside a Git repository | Committed, reviewed, and merged through Git | Memory that should be versioned and shared alongside code |
+
+If you are unsure, start with a Managed Project. Choose an Embedded Project when you explicitly want Memory to follow a code repository.
+
+#### 6.3.1 Managed Project
+
+Enter your working directory, then create and bind a Managed Project:
 
 ~~~bash
 cd <your-project>
 memsphere project create my-project --bind
 ~~~
 
-Inspect the current state and validate Memory:
+`--bind` only associates the current working directory with the Project; it does not copy Memory into that directory. The Project's Memory remains available even if a temporary directory or Git worktree is deleted.
+
+When you edit Managed Memory, Memsphere creates a ChangeSet. Validate the completed edit before publishing it:
+
+~~~bash
+memsphere memory edit concepts/example
+memsphere memory change validate <change-id>
+memsphere memory publish --change <change-id>
+~~~
+
+#### 6.3.2 Embedded Project
+
+To keep Memory and code in the same Git repository, create and bind an Embedded Project:
+
+~~~bash
+cd <your-git-repository>
+memsphere project create my-project --embedded .memsphere/memory --bind
+~~~
+
+Here, `.memsphere/memory` is the Memory directory inside the repository. When an Agent works in different Git worktrees, it reads and edits the version of Memory in the current worktree.
+
+Validate changes with Memsphere, then commit them through your normal Git workflow:
+
+~~~bash
+memsphere memory edit concepts/example
+memsphere memory change validate
+git add .memsphere/memory
+git commit -m "Update Memory"
+~~~
+
+Embedded Memory does not use `memsphere memory publish`; Memsphere does not commit Git changes for you.
+
+### 6.4 Validate the Project and Start View
+
+Inspect the currently bound Project and validate its Memory:
 
 ~~~bash
 memsphere project show
@@ -177,75 +224,40 @@ Start the local View:
 memsphere view start
 ~~~
 
-Then, in a new Agent session, enter:
+### 6.5 Discover and Read Memory
 
-~~~text
-Use memsphere to start memsphere-tutorial-chapter-01.
-~~~
-
-The Agent will discover the applicable Procedure, create a Run, and advance through its steps.
-
-## 7. Two Kinds of Project
-
-Memsphere provides two Project models.
-
-### 7.1 Managed Project
-
-A Managed Project is designed for software assets maintained over time by a person or team. Its Memory is stored in the operating system's user data directory, so it is not deleted with a temporary working directory or Git worktree.
-
-~~~bash
-memsphere project create my-project --bind
-~~~
-
-When you edit Memory, Memsphere creates a ChangeSet. Validate the change before publishing it:
-
-~~~bash
-memsphere memory edit concepts/example
-memsphere memory change validate <change-id>
-memsphere memory publish --change <change-id>
-~~~
-
-### 7.2 Embedded Project
-
-An Embedded Project is designed for repositories that want to version Memory alongside code. Memory lives directly in the Git repository and follows its existing commit, review, and merge workflow.
-
-~~~bash
-memsphere project create my-project --embedded .memsphere/memory --bind
-~~~
-
-Validate after editing:
-
-~~~bash
-memsphere memory edit concepts/example
-memsphere memory change validate
-~~~
-
-Memsphere does not commit Git changes for you. Validated changes continue through the normal Git workflow.
-
-## 8. Reading Memory and Running Procedures
-
-List the Memory visible to the current Project:
+List all Memory visible to the current Project, or list only Procedures:
 
 ~~~bash
 memsphere memory list
 memsphere memory list --kind procedures
 ~~~
 
-Read a Memory:
+The list is for discovering candidates. After selecting one, read the complete Memory:
 
 ~~~bash
 memsphere memory read <reference>
 ~~~
 
-Start a Procedure Run:
+### 6.6 Run Your First Procedure
+
+After reading the target Procedure, start a named Run:
 
 ~~~bash
 memsphere run start <procedure-name> --name "<run-name>"
 ~~~
 
-Every step in a Run explicitly asks for an Artifact. The Agent reports results through run report; Memsphere validates them, records state, and enters Review when required.
+Every step in a Run explicitly asks for an Artifact. The Agent reports results through `run report`; Memsphere validates them, records state, and enters Review when required.
 
-## 9. Memsphere Is Still Evolving
+You can also enter the following in a new Agent session:
+
+~~~text
+Use memsphere to start memsphere-tutorial-chapter-01.
+~~~
+
+The Agent will discover and read the applicable Procedure, create a Run, and advance through its steps.
+
+## 7. Memsphere Is Still Evolving
 
 The sections above describe the complete direction Memsphere is working toward. We are beginning with the most important foundation and turning that direction into reality one step at a time.
 
@@ -284,7 +296,7 @@ Memsphere will continue to expand according to the same principles:
 
 Our goal is not to turn everyone into a programmer in the traditional sense. It is to let every person and every organization own software that truly fits them.
 
-## 10. Development
+## 8. Development
 
 ~~~bash
 git clone https://github.com/billtenor/memsphere.git
@@ -296,6 +308,6 @@ npm test
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before contributing. For security issues, see [SECURITY.md](SECURITY.md).
 
-## 11. License
+## 9. License
 
 Memsphere is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.

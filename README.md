@@ -155,16 +155,63 @@ npm install -g memsphere
 memsphere skill init --global
 ```
 
-### 6.3 创建并绑定 Project
+### 6.3 选择并创建 Project
 
-进入你的工作目录，创建一个持久 Project：
+Project 是 Memsphere 中保存 Memory、ChangeSet、Run 和 Archive 的持久空间。把当前工作目录绑定到一个 Project 后，Agent 在这里读取 Memory 或运行 Procedure 时，就会使用这个 Project 的上下文。
+
+Memsphere 提供两种 Project。它们都可以承载 Memory 并运行 Procedure，区别主要在于 **Memory 保存在哪里，以及变更通过什么方式管理**：
+
+| 类型 | Memory 保存位置 | 变更方式 | 适合场景 |
+| --- | --- | --- | --- |
+| Managed Project | 操作系统的用户数据目录 | 通过 Memsphere ChangeSet 校验并发布 | 独立于某个代码仓库、需要长期保留的个性化软件 |
+| Embedded Project | Git 仓库中的指定目录 | 通过 Git 提交、审查和合入 | 需要与代码一起版本化和协作的 Memory |
+
+如果暂时不确定，建议先使用 Managed Project；只有明确希望 Memory 跟随代码仓库时，再选择 Embedded Project。
+
+#### 6.3.1 Managed Project
+
+进入工作目录，创建并绑定一个 Managed Project：
 
 ```bash
 cd <你的工程>
 memsphere project create my-project --bind
 ```
 
-查看当前状态并验证 Memory：
+`--bind` 只是在当前工作目录与 Project 之间建立关联，不会把 Memory 复制进工作目录。即使临时目录或 Git worktree 被删除，Project 中的 Memory 仍然存在。
+
+修改 Managed Memory 时，Memsphere 会创建 ChangeSet。完成编辑后先校验，再发布：
+
+```bash
+memsphere memory edit concepts/example
+memsphere memory change validate <change-id>
+memsphere memory publish --change <change-id>
+```
+
+#### 6.3.2 Embedded Project
+
+如果希望 Memory 与代码保存在同一个 Git 仓库中，创建并绑定一个 Embedded Project：
+
+```bash
+cd <你的 Git 仓库>
+memsphere project create my-project --embedded .memsphere/memory --bind
+```
+
+这里的 `.memsphere/memory` 是仓库内的 Memory 目录。Agent 在不同 Git worktree 中工作时，会读取和修改当前 worktree 对应版本的 Memory。
+
+修改后使用 Memsphere 校验，再通过正常的 Git 工作流提交：
+
+```bash
+memsphere memory edit concepts/example
+memsphere memory change validate
+git add .memsphere/memory
+git commit -m "更新 Memory"
+```
+
+Embedded Memory 不使用 `memsphere memory publish`；Memsphere 不会替你提交 Git。
+
+### 6.4 验证 Project 并启动 View
+
+查看当前绑定的 Project，并验证其中的 Memory：
 
 ```bash
 memsphere project show
@@ -177,67 +224,24 @@ memsphere validate
 memsphere view start
 ```
 
-现在可以在一个新的 Agent 会话中输入：
+### 6.5 发现并读取 Memory
 
-```text
-请使用 memsphere，启动 memsphere 教学流程-第一章。
-```
-
-Agent 会发现适用的 Procedure，创建 Run，并按照步骤推进任务。
-
-## 7. 两种 Project
-
-Memsphere 提供两种 Project 形态。
-
-### 7.1 Managed Project
-
-Managed Project 适合个人或团队长期维护的软件资产。其 Memory 保存在操作系统用户数据目录中，不会随着临时工作目录或 Git worktree 删除。
-
-```bash
-memsphere project create my-project --bind
-```
-
-修改 Memory 时，Memsphere 会创建 ChangeSet。完成编辑后先校验，再发布：
-
-```bash
-memsphere memory edit concepts/example
-memsphere memory change validate <change-id>
-memsphere memory publish --change <change-id>
-```
-
-### 7.2 Embedded Project
-
-Embedded Project 适合希望把 Memory 与代码一起版本化的仓库。Memory 直接位于 Git 仓库中，并沿用现有的提交、审查和合入流程。
-
-```bash
-memsphere project create my-project --embedded .memsphere/memory --bind
-```
-
-修改后进行校验：
-
-```bash
-memsphere memory edit concepts/example
-memsphere memory change validate
-```
-
-Memsphere 不会替你提交 Git；验证后的变更仍由正常的 Git 工作流管理。
-
-## 8. 读取 Memory 与运行 Procedure
-
-列出当前 Project 可见的 Memory：
+列出当前 Project 可见的全部 Memory，或只列出 Procedure：
 
 ```bash
 memsphere memory list
 memsphere memory list --kind procedures
 ```
 
-读取一个 Memory：
+列表用于发现候选。确定目标后，读取完整 Memory：
 
 ```bash
 memsphere memory read <reference>
 ```
 
-启动一次 Procedure Run：
+### 6.6 运行第一个 Procedure
+
+读取目标 Procedure 后，启动一次有名称的 Run：
 
 ```bash
 memsphere run start <procedure-name> --name "<run-name>"
@@ -245,7 +249,15 @@ memsphere run start <procedure-name> --name "<run-name>"
 
 运行中的每一步都会明确要求产出 Artifact。Agent 通过 `run report` 上报结果，Memsphere 负责校验、记录状态，并在需要时进入 Review。
 
-## 9. Memsphere 仍在进化
+也可以直接在一个新的 Agent 会话中输入：
+
+```text
+请使用 memsphere，启动 memsphere 教学流程-第一章。
+```
+
+Agent 会发现并读取适用的 Procedure，创建 Run，并按照步骤推进任务。
+
+## 7. Memsphere 仍在进化
 
 上面描述的是 Memsphere 要抵达的完整方向。我们正在从最重要的基础开始，一步步把它变成现实。
 
@@ -284,7 +296,7 @@ Memsphere 将沿着同一原则继续扩展：
 
 我们希望最终做到的，并不是让每个人都成为传统意义上的程序员，而是让每个人、每个组织，都能拥有真正适合自己的软件。
 
-## 10. 开发
+## 8. 开发
 
 ```bash
 git clone https://github.com/billtenor/memsphere.git
@@ -296,6 +308,6 @@ npm test
 
 参与开发前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题请参阅 [SECURITY.md](SECURITY.md)。
 
-## 11. 许可证
+## 9. 许可证
 
 Memsphere 使用 Apache License 2.0，详见 [LICENSE](LICENSE)。
