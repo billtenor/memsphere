@@ -156,14 +156,14 @@ memsphere skill init --global
 
 ### 6.3 Choose and Create a Project
 
-A Project is Memsphere's persistent space for Memory, ChangeSets, Runs, and Archives. After you bind the current working directory to a Project, Agents reading Memory or running Procedures there use that Project's context.
+A Project is Memsphere's persistent space for Memory, run history, and other software assets. After you bind the current working directory to a Project, Agents can read and run that personalized software there.
 
-Memsphere provides two kinds of Project. Both can hold Memory and run Procedures; the main difference is **where Memory is stored and how changes are managed**:
+Memsphere provides two kinds of Project. The most important difference is whether Memory should follow a code repository.
 
-| Type | Where Memory is stored | How changes are managed | Best suited for |
+| Type | Where Memory lives | How changes are saved | When to choose it |
 | --- | --- | --- | --- |
-| Managed Project | The operating system's user data directory | Validated and published through Memsphere ChangeSets | Personalized software maintained independently of a specific code repository |
-| Embedded Project | A selected directory inside a Git repository | Committed, reviewed, and merged through Git | Memory that should be versioned and shared alongside code |
+| Managed Project | Stored separately by Memsphere, outside the code repository | Confirmed and saved in Memsphere | Memory does not need to be committed with code |
+| Embedded Project | Stored with the code in a Git repository | Committed and reviewed through Git like code | Memory needs to be maintained together with code |
 
 If you are unsure, start with a Managed Project. Choose an Embedded Project when you explicitly want Memory to follow a code repository.
 

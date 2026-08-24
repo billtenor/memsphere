@@ -156,14 +156,14 @@ memsphere skill init --global
 
 ### 6.3 选择并创建 Project
 
-Project 是 Memsphere 中保存 Memory、ChangeSet、Run 和 Archive 的持久空间。把当前工作目录绑定到一个 Project 后，Agent 在这里读取 Memory 或运行 Procedure 时，就会使用这个 Project 的上下文。
+Project 是 Memsphere 中保存 Memory、运行记录和其他软件资产的持久空间。把当前工作目录绑定到一个 Project 后，Agent 就能在这里读取和运行这套个性化软件。
 
-Memsphere 提供两种 Project。它们都可以承载 Memory 并运行 Procedure，区别主要在于 **Memory 保存在哪里，以及变更通过什么方式管理**：
+Memsphere 提供两种 Project，最重要的区别是：Memory 要不要跟着代码仓库走。
 
-| 类型 | Memory 保存位置 | 变更方式 | 适合场景 |
+| 类型 | Memory 放在哪里 | 修改后怎么保存 | 什么时候选择 |
 | --- | --- | --- | --- |
-| Managed Project | 操作系统的用户数据目录 | 通过 Memsphere ChangeSet 校验并发布 | 独立于某个代码仓库、需要长期保留的个性化软件 |
-| Embedded Project | Git 仓库中的指定目录 | 通过 Git 提交、审查和合入 | 需要与代码一起版本化和协作的 Memory |
+| Managed Project | 由 Memsphere 单独保存，不放进代码仓库 | 在 Memsphere 中确认并保存 | Memory 不需要跟着代码一起提交时 |
+| Embedded Project | 和代码一起放在 Git 仓库中 | 像代码一样通过 Git 提交和审查 | Memory 需要跟着代码一起协作时 |
 
 如果暂时不确定，建议先使用 Managed Project；只有明确希望 Memory 跟随代码仓库时，再选择 Embedded Project。
 
