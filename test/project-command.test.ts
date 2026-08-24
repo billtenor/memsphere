@@ -406,6 +406,36 @@ test("Embedded System Memory repair treats dirty target paths as literal Git pat
   }
 });
 
+test("Embedded System Memory repair rejects ignored targets", async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-embedded-repair-ignored-"));
+  const home = join(fixture, "home");
+  const workspace = join(fixture, "workspace");
+  const memoryRoot = join(workspace, ".memsphere", "memory");
+  const targetPath = join(memoryRoot, "concepts", "memsphere-framework.yaml");
+  const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME };
+  try {
+    await mkdir(workspace);
+    await runGit(["init", "-b", "master"], { cwd: workspace });
+    await writeFile(join(workspace, ".gitignore"), ".memsphere/memory/\n");
+    await runGit(["add", ".gitignore"], { cwd: workspace });
+    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "ignore embedded memory"], { cwd: workspace });
+    await installBundledSystemMemory(memoryRoot);
+    await writeFile(targetPath, `${await readFile(targetPath, "utf8")}\n# ignored drift\n`);
+
+    process.env.MEMSPHERE_HOME = home;
+    process.chdir(workspace);
+    await projectCreateCommand("embedded-ignored", { embedded: memoryRoot, bind: true });
+
+    await assert.rejects(projectRepairCommand("embedded-ignored"), /target has uncommitted changes/);
+    assert.match(await readFile(targetPath, "utf8"), /ignored drift/);
+  } finally {
+    process.chdir(previous.cwd);
+    if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;
+    else process.env.MEMSPHERE_HOME = previous.home;
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
 test("Embedded System Memory repair validates the complete candidate before writing", async () => {
   const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-embedded-repair-validation-"));
   const home = join(fixture, "home");
