@@ -7,8 +7,8 @@ test("npm package preserves the memsphere first-use bootstrap contract", async (
     files?: string[];
     scripts?: Record<string, string>;
   };
-  const readmeEn = await readFile("README.md", "utf8");
-  const readmeZhCn = await readFile("README.zh-CN.md", "utf8");
+  const readmeZhCn = await readFile("README.md", "utf8");
+  const readmeEn = await readFile("README.en.md", "utf8");
 
   assert.deepEqual(packageJson.files, [
     "dist",
@@ -16,7 +16,7 @@ test("npm package preserves the memsphere first-use bootstrap contract", async (
     "LICENSE",
     "NOTICE",
     "README.md",
-    "README.zh-CN.md",
+    "README.en.md",
     "THIRD_PARTY_NOTICES.md"
   ]);
   assert.equal(packageJson.scripts?.prepack, "npm run build");
@@ -31,7 +31,7 @@ test("npm package preserves the memsphere first-use bootstrap contract", async (
     assert.match(readmeEn, new RegExp(instruction));
   }
 
-  assert.match(readmeEn, /\[简体中文\]\(README\.zh-CN\.md\)/);
-  assert.match(readmeZhCn, /\[English\]\(README\.md\)/);
+  assert.match(readmeEn, /\[简体中文\]\(README\.md\)/);
+  assert.match(readmeZhCn, /\[English\]\(README\.en\.md\)/);
   assert.match(readmeZhCn, /memsphere 教学流程-第一章/);
 });
