@@ -262,6 +262,7 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     assert.match(prompt, /Do not invent findings/);
     assert.doesNotMatch(JSON.stringify(launch), /MEMSPHERE_REVIEW_ENDPOINT|MEMSPHERE_REVIEW_CAPABILITY|bridge\.sock/);
     assert.match(prompt, /memsphere-review run step show --step "<step-ref>"/);
+    assert.match(prompt, /ChangeSet Run sessions automatically bind their frozen Memory snapshot/);
     assert.doesNotMatch(prompt, /Identity:|Binding:|Decision policy:|Candidate Artifact and contract|Required workflow/);
     assert.doesNotMatch(prompt, /reviewer-agent|round-|assignment-/);
     await assert.rejects(
@@ -296,6 +297,12 @@ test("Agent Review CLI launcher rejects commands outside the Session allowlist",
     });
     assert.equal(wrongStepRun.status, 2);
 
+    const wrongMemoryRun = crossSpawn.sync(runtime.launcherPath, ["memory", "list", "--run", "other"], {
+      encoding: "utf8",
+      env: { ...process.env, MEMSPHERE_REVIEW_MEMORY_RUN_ID: "bound-run" }
+    });
+    assert.equal(wrongMemoryRun.status, 2);
+
     const wrongAssignment = crossSpawn.sync(runtime.launcherPath, [
       "run", "review", "assignment", "show", "--assignment", "other"
     ], {
@@ -319,6 +326,12 @@ test("Agent Review CLI launcher rejects commands outside the Session allowlist",
       "run", "artifact", "show", "--output", "json"
     ], { encoding: "utf8", env: unboundEnv });
     assert.equal(missingBinding.status, 2);
+
+    const unboundMemoryRun = crossSpawn.sync(runtime.launcherPath, ["memory", "read", "example", "--run", "other"], {
+      encoding: "utf8",
+      env: unboundEnv
+    });
+    assert.equal(unboundMemoryRun.status, 2);
   } finally {
     await runtime.cleanup();
   }
@@ -329,6 +342,7 @@ test("Agent Review CLI launcher injects Session bindings without shell environme
   const env = {
     ...process.env,
     MEMSPHERE_REVIEW_RUN_ID: "bound-run",
+    MEMSPHERE_REVIEW_MEMORY_RUN_ID: "bound-run",
     MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment"
   };
   try {
@@ -348,6 +362,24 @@ test("Agent Review CLI launcher injects Session bindings without shell environme
     assert.deepEqual(JSON.parse(prior.stdout.trim()), [
       "run", "artifact", "show", "--step", "flow[1]", "--output", "json", "--run", "bound-run"
     ]);
+
+    const memory = crossSpawn.sync(runtime.launcherPath, ["memory", "read", "example", "--output", "json"], {
+      encoding: "utf8",
+      env
+    });
+    assert.equal(memory.status, 0);
+    assert.deepEqual(JSON.parse(memory.stdout.trim()), [
+      "memory", "read", "example", "--output", "json", "--run", "bound-run"
+    ]);
+
+    const regularEnv = { ...env };
+    delete regularEnv.MEMSPHERE_REVIEW_MEMORY_RUN_ID;
+    const regularMemory = crossSpawn.sync(runtime.launcherPath, ["memory", "list", "--output", "json"], {
+      encoding: "utf8",
+      env: regularEnv
+    });
+    assert.equal(regularMemory.status, 0);
+    assert.deepEqual(JSON.parse(regularMemory.stdout.trim()), ["memory", "list", "--output", "json"]);
   } finally {
     await runtime.cleanup();
   }

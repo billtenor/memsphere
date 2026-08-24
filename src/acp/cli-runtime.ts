@@ -81,6 +81,7 @@ const artifactShow = args[0] === "run" && args[1] === "artifact" && args[2] === 
 const artifactContractShow = args[0] === "run" && args[1] === "artifact" && args[2] === "contract" && args[3] === "show";
 const stepShow = args[0] === "run" && args[1] === "step" && args[2] === "show";
 const runShow = args[0] === "run" && args[1] === "show";
+const memoryRead = args[0] === "memory" && ["list", "read"].includes(args[1]);
 const bind = (name, value) => {
   const existing = option(name);
   if (existing !== undefined) return existing === value;
@@ -92,8 +93,10 @@ const needsAssignment = assignmentShow || artifactContractShow || reviewWrite ||
 const needsRun = runShow || stepShow || (artifactShow && option("--step") !== undefined);
 const boundAssignment = !needsAssignment || bind("--assignment", process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID);
 const boundRun = !needsRun || bind("--run", process.env.MEMSPHERE_REVIEW_RUN_ID);
+const memoryRun = process.env.MEMSPHERE_REVIEW_MEMORY_RUN_ID;
+const boundMemoryRun = !memoryRead || (memoryRun ? bind("--run", memoryRun) : option("--run") === undefined);
 const allowed = (args.length === 1 && args[0] === "--version")
-  || (args[0] === "memory" && ["list", "read"].includes(args[1]))
+  || (memoryRead && boundMemoryRun)
   || (runShow && boundRun)
   || (stepShow && boundRun)
   || (artifactShow && boundAssignment && boundRun)
