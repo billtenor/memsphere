@@ -125,7 +125,11 @@ One of Memsphere's core directions is therefore:
 
 > Reserve Tokens for the parts that genuinely require understanding and judgment. Give established, deterministic work to the CLI.
 
-After an Agent has understood and completed the same steps repeatedly, those steps can be distilled into code. The Agent can then select and invoke a command with much less context instead of reasoning through every detail again. This improves stability, reduces Token consumption, and returns work to the traditional computing resources best suited to perform it.
+But this transition should not depend entirely on users noticing and driving it themselves. Memsphere will also provide a set of built-in meta-memories. They do not perform specific business tasks directly. Instead, they guide an Agent to observe how personalized software actually runs, identify repeated steps with clear boundaries that are suitable for deterministic execution, and help the user develop, validate, and distill those steps into personalized CLI tools.
+
+The collaboration between the two kinds of computing power is therefore not a one-time manual refactor, but part of the software's continuous evolution. Early on, the software relies more heavily on Token-based computing to explore, understand, and adapt to requirements. As experience accumulates, meta-memory guides the Agent to move stable parts into CLI tools executed by traditional computing resources, while Token-based computing remains focused on new, uncertain work that genuinely requires judgment.
+
+Once a set of steps has been distilled into code, the Agent can select and invoke a command with much less context instead of reasoning through every detail again. This improves stability, reduces Token consumption, and returns work to the traditional computing resources best suited to perform it.
 
 The CLI is therefore not primarily a collection of commands for humans. It is a software capability layer designed first for Agents.
 
