@@ -8,6 +8,7 @@ defines:
   - memsphere Skill 提供与预置 Memory 一致的快速入口和冗余摘要；Memory 承载完整知识与流程，CLI 提供稳定的发现、读取和 Run 执行能力。
   - Agent 通过 memsphere memory list 发现 Memory，通过 memsphere memory read 完整读取或按 Node 读取相关内容，而不依赖 Memory 当前使用文件还是其他存储后端。
   - Project 是 Memory、ChangeSet、Run、Review 与 Archive 的持久数据空间；Workspace 只通过全局 Registry 绑定一个 Primary Project，并可挂载只读 Mounted Project。
+  - Run 的正常完成终态是 done，Human 主动中止的终态是 abandoned；abandoned 保留运行证据但禁止继续推进。Run 终态与 Archive 生命周期分离，废弃不会自动归档，done 与 abandoned 均可由用户另行归档并恢复为原终态。
   - Embedded Project 使用绝对 repository_path 标识主工作树，并使用仓库相对 memory_path 标识 Memory 目录；View 始终读取主工作树中的规范 Memory，CLI 在同一 Git common-dir 的 linked worktree 中执行时则解析到当前 worktree，且不得回退到主工作树或跨仓库解析。
   - Managed Memory 的修改必须先使用 memsphere memory edit 创建 Workspace 内稀疏候选，再使用 memsphere memory change validate [change-id] 校验候选叠加到正式 Store 后的完整结果并保存 Project 内的稀疏 checkpoint，最后使用 memsphere memory publish 原子提交；省略 change id 时当前 Workspace 必须恰有一个 Managed 草稿。Embedded Memory 直接在当前 Git worktree 修改，使用同一个 change validate 命令按当前 HEAD 捕获或复用 ChangeSet 与稀疏 checkpoint，最终仍由普通 Git commit 发布。普通 memsphere validate 只校验正式 Store，不创建 Embedded ChangeSet。ChangeSet candidate 与 checkpoint 都不是完整 Memory Root，不得直接传给 memsphere validate --memory-root；Agent 不直接修改 Managed 正式 Memory 工作树。
   - Memory 的逻辑引用由类型和 canonical name 组成，canonical name 固定使用小写 ASCII kebab-case；别名只作为不带 kind 的发现和选择输入，不能组成显式逻辑引用或持久跨 Memory 引用。文件路径只是 File Provider 的存储元数据，不参与引用或 System Memory 身份判断。Managed Project bootstrap 通过 ChangeSet 保留 System Memory manifest 声明的安装路径，rename 不自动移动文件。

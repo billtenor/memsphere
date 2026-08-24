@@ -14,6 +14,7 @@ import {
 import type { PromptLocale } from "./locale.js";
 import type {
   RunCompletedPromptModel,
+  RunAbandonedPromptModel,
   RunCurrentStepPromptModel,
   RunReportReceiptPromptModel,
   SchemaOverviewPromptModel
@@ -30,7 +31,7 @@ export function buildRunCurrentStepPromptModel(
     procedureName: run.procedureName,
     procedureAsserts: activeProcedureAsserts(run)
   };
-  if (run.status === "done") return undefined;
+  if (run.status !== "running") return undefined;
 
   const schemaFinalization = currentSchemaFinalization(run);
   if (schemaFinalization) {
@@ -148,6 +149,23 @@ export function buildRunCompletedPromptModel(run: RunState): RunCompletedPromptM
       name: artifact.name,
       path: artifact.path
     }))
+  };
+}
+
+export function buildRunAbandonedPromptModel(run: RunState): RunAbandonedPromptModel | undefined {
+  if (run.status !== "abandoned") return undefined;
+  const actor = run.abandonment?.initiator;
+  return {
+    runId: run.id,
+    runName: runDisplayName(run),
+    procedureName: run.procedureName,
+    abandonedAt: run.abandonment?.abandonedAt ?? run.updatedAt,
+    initiator: actor?.name ?? actor?.actorId ?? "human",
+    reason: run.abandonment?.reason,
+    currentStep: run.abandonment?.current
+      ? `${run.abandonment.current.memoryName}#${run.abandonment.current.stepId}`
+      : undefined,
+    artifactCount: run.events.length
   };
 }
 

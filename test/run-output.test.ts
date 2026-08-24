@@ -113,3 +113,14 @@ test("Schema entry returns only the current field instruction", () => {
     ["run.schema-overview", "run.current-step"]
   );
 });
+
+test("abandoned Run output is terminal and has no next action", () => {
+  const run = runningRun();
+  run.status = "abandoned";
+  run.abandonment = {
+    abandonedAt: "2026-08-22T00:00:00.000Z",
+    initiator: { kind: "human", source: "view" },
+    current: { frame: "procedure", memoryName: "output", stepId: "flow[1]" }
+  };
+  assert.deepEqual(runOutputPromptIds({ kind: "status", run }, "en"), ["run.abandoned"]);
+});

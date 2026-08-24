@@ -82,6 +82,7 @@ function localize(locale: PromptLocale, value: string): string {
     awaiting_runner_vote: "等待 Runner 投票",
     awaiting_revision: "等待修改",
     passed: "已通过",
+    cancelled: "已取消",
     approve: "通过",
     request_changes: "要求修改",
     abstain: "弃权",
@@ -99,7 +100,7 @@ export function buildArtifactReviewNextActionPromptModel(
   round: ArtifactReviewRound,
   runId: string
 ): ReviewNextActionPromptModel {
-  if (review.status === "passed") return { kind: "none" };
+  if (review.status === "passed" || review.status === "cancelled") return { kind: "none" };
   if (review.status === "awaiting_runner_vote") {
     return {
       kind: "runner_vote",
@@ -118,6 +119,7 @@ function buildDecision(
   round: ArtifactReviewRound,
   submitted: number
 ): ArtifactReviewSummaryPromptModel["decision"] {
+  if (review.status === "cancelled") return { kind: "cancelled" };
   if (review.status === "awaiting_runner_vote") {
     const decisionVotes = round.votes.filter(
       (vote) => vote.subject.kind === "actor" && vote.binding === "decision"

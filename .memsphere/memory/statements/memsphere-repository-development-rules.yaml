@@ -40,7 +40,8 @@ sections:
         names:
           - Review
         asserts:
-          - 修改 review 数据模型、状态流转、snapshot、comment 定位、task review 上下文或 View 中的 Review 操作时，必须更新 memsphere-review。
+          - 修改 Artifact Review 数据模型、状态流转、snapshot、comment 定位或 View 操作时，必须更新 memsphere-procedure，并检查 memsphere-framework、相关教程与 skill；不得引用已经移除的 memsphere-review Memory。
+          - 修改独立 Memory Review 的数据模型、状态流转或 View 操作时，必须检查 memsphere-memory-review-process、相关教程与 skill。
       - !statement
         names:
           - Project 创建与预置安装

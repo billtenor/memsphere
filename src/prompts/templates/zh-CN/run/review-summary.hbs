@@ -53,3 +53,7 @@
 结论：
 - 本轮评审仍在进行。请使用相同的 review_id 继续等待，直到所有评审者提交。
 {{/ifDecision}}
+{{#ifDecision decision "cancelled"}}
+结论：
+- 所属 Run 已废弃，本轮评审已取消并保持只读。
+{{/ifDecision}}

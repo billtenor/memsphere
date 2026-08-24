@@ -8,7 +8,18 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { artifactReviewAssignmentId } from "../src/artifact-review.js";
 import { readConfig } from "../src/config.js";
-import { currentArtifactReview, readRun, reportRun, retryArtifactReviewAgentAssignment, startRun } from "../src/run/store.js";
+import {
+  abandonRun,
+  appendArtifactReviewAgentComment,
+  currentArtifactReview,
+  failArtifactReviewAgentAssignment,
+  markArtifactReviewAgentCliReady,
+  readRun,
+  reportRun,
+  retryArtifactReviewAgentAssignment,
+  startRun,
+  submitArtifactReviewAgentAssignment
+} from "../src/run/store.js";
 import { runArtifactReviewAgentWorker } from "../src/acp/review-worker.js";
 import { createAgentReviewCliRuntime } from "../src/acp/cli-runtime.js";
 import {
@@ -162,6 +173,72 @@ test("ACP Agent Reviewer failure is visible and can be requeued explicitly", asy
     assert.equal(retried.assignment.status, "queued");
     assert.equal(retried.assignment.attempts?.length, 2);
     assert.equal(retried.attempt.status, "queued");
+  });
+});
+
+test("abandoning a Run cancels running Agent Review work and preserves the terminal state when termination fails", async () => {
+  await withAgentReviewFixture("approve", async ({ configPath, runsRoot, runId }) => {
+    const config = await readConfig(configPath);
+    const before = await readRun(runsRoot, runId);
+    const review = currentArtifactReview(before);
+    assert(review);
+    const assignment = review.rounds[0].assignments[0];
+    assignment.status = "running";
+    assert(assignment.attempts?.[0]);
+    assignment.attempts[0].status = "running";
+    assignment.attempts[0].workerPid = 4242;
+    await writeFile(join(runsRoot, runId, `${runId}.json`), `${JSON.stringify(before, null, 2)}\n`);
+    const terminated: number[] = [];
+
+    const result = await abandonRun({
+      runsRoot,
+      runId,
+      source: "view",
+      reason: "Human stopped the Run",
+      terminateWorker: async (pid) => {
+        terminated.push(pid);
+        throw new Error("simulated termination failure");
+      }
+    });
+    const cancelled = result.run.artifactReviews?.find((candidate) => candidate.id === review.id);
+    assert.equal(result.run.status, "abandoned");
+    assert.equal(cancelled?.status, "cancelled");
+    assert.equal(cancelled?.rounds[0]?.status, "cancelled");
+    assert.equal(cancelled?.rounds[0]?.assignments[0]?.status, "cancelled");
+    assert.equal(cancelled?.rounds[0]?.assignments[0]?.attempts?.[0]?.status, "cancelled");
+    assert.deepEqual(terminated, [4242]);
+    assert.match(result.terminationWarnings[0] ?? "", /4242.*simulated termination failure/);
+    assert.equal((await readRun(runsRoot, runId)).status, "abandoned");
+    assert.equal(currentArtifactReview(result.run), undefined);
+    assert.equal(await dispatchArtifactReviewAgents({ config, run: result.run }), 0);
+    const lateInput = {
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.rounds[0].id,
+      actorId: assignment.actorId,
+      attemptId: assignment.attempts[0].id
+    };
+    await assert.rejects(markArtifactReviewAgentCliReady(lateInput), /Run is not running.*abandoned/);
+    await assert.rejects(appendArtifactReviewAgentComment({
+      ...lateInput,
+      body: "late comment",
+      severity: "blocking"
+    }), /read-only|not running|cancelled/);
+    await assert.rejects(submitArtifactReviewAgentAssignment({
+      ...lateInput,
+      vote: "approve",
+      summary: "late submit"
+    }), /Run is not running.*abandoned/);
+    await assert.rejects(failArtifactReviewAgentAssignment({
+      ...lateInput,
+      failure: { stage: "session", code: "late_failure", message: "late failure" }
+    }), /Run is not running.*abandoned/);
+    await assert.rejects(retryArtifactReviewAgentAssignment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.rounds[0].id,
+      actorId: assignment.actorId
+    }), /Run is not running.*abandoned/);
   });
 });
 

@@ -47,11 +47,12 @@ comments: []
 async function writeRunFixture(
   runsRoot: string,
   id: string,
-  status: "running" | "done",
+  status: "running" | "done" | "abandoned",
   layout: "directory" | "legacy-file" = "directory",
   name?: string
 ): Promise<void> {
   const payload = `${JSON.stringify({
+    contractVersion: 2,
     id,
     ...(name ? { name } : {}),
     status,
@@ -109,7 +110,7 @@ test("refuses to archive non-done reviews and runs", async () => {
     );
     await assert.rejects(
       archiveRun({ archiveRoot, runsRoot, id: "run-running" }),
-      /only done runs can be archived/
+      /only done or abandoned runs can be archived/
     );
     assert.equal(await pathExists(join(reviewsRoot, "review-draft", "review.yaml")), true);
     assert.equal(await pathExists(join(runsRoot, "run-running", "run-running.json")), true);
@@ -133,6 +134,20 @@ test("archives and restores done run directories", async () => {
     assert.equal(restored.id, id);
     assert.equal(await pathExists(join(runsRoot, id, `${id}.json`)), true);
     assert.match(await readFile(join(runsRoot, id, `${id}.json`), "utf8"), /"name": "Archived delivery"/);
+  });
+});
+
+test("archives and restores abandoned runs without changing their terminal status", async () => {
+  await withTempDir(async (dir) => {
+    const archiveRoot = join(dir, "archives");
+    const runsRoot = join(dir, "runs");
+    const id = "run-abandoned";
+    await writeRunFixture(runsRoot, id, "abandoned");
+
+    await archiveRun({ archiveRoot, runsRoot, id });
+    const restored = await restoreRun({ archiveRoot, runsRoot, id });
+
+    assert.equal(restored.status, "abandoned");
   });
 });
 

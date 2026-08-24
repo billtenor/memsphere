@@ -100,6 +100,16 @@ memsphere run binding update --run <run-id> \
 
 可重复传入 `--actor` 绑定多人，或使用 `--skip` 跳过未来该 Slot。换绑只能使用 Run 启动时冻结的 Actor，并保留审计记录；已经创建的 Review、Round 和 Assignment 不会改变。
 
+## 废弃运行中的 Run
+
+Human 明确决定不再继续一个 Run 后，可以在 View 点击“废弃”，或执行：
+
+```bash
+memsphere run abandon --run <run-id> --reason "<可选原因>"
+```
+
+废弃会保留已有 Artifact、Schema 草稿和 Review 证据，取消未完成的 Reviewer 工作，并把 Run 置为不可继续的 `abandoned` 终态。Agent 不得自行决定废弃；只有收到 Human 对目标 Run 的明确指示后才能代执行命令。废弃不会自动归档，如需从 Task 列表移除，用户需要再单独归档。
+
 ## License
 
 This project is licensed under the Apache License, Version 2.0. See

@@ -54,6 +54,7 @@ import { MemoryNotFoundError, type MemoryCatalog } from "../memory/catalog.js";
 import { currentMemorySyntax, type MemorySyntaxVersion } from "../memory/syntax.js";
 import { inheritSchemaFormat, resolveSchemaContract } from "../memory/schema.js";
 import { resolvePromptLocale, type PromptLocale } from "../prompts/locale.js";
+import { terminateProcessTree } from "../platform-process.js";
 import {
   builtInArtifactFormats,
   stepActors,
@@ -96,8 +97,24 @@ export class ArtifactAuthorizationFailure extends Error {
   }
 }
 
-export type RunStatus = "running" | "done";
+export type RunStatus = "running" | "done" | "abandoned";
 export type FrameType = "procedure" | "schema";
+
+export type RunAbandonment = {
+  abandonedAt: string;
+  reason?: string;
+  initiator: {
+    kind: "human";
+    actorId?: string;
+    name?: string;
+    source: "cli" | "view";
+  };
+  current?: {
+    frame: FrameType;
+    memoryName: string;
+    stepId: string;
+  };
+};
 
 export type SchemaConstraintSource = {
   path: string;
@@ -241,6 +258,7 @@ export type RunState = {
   };
   createdAt: string;
   updatedAt: string;
+  abandonment?: RunAbandonment;
   plan?: RunStep[];
   stack: RunFrame[];
   events: RunEvent[];
@@ -462,13 +480,29 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
   })
 );
 
+const runAbandonmentSchema = z.object({
+  abandonedAt: z.string(),
+  reason: z.string().optional(),
+  initiator: z.object({
+    kind: z.literal("human"),
+    actorId: z.string().optional(),
+    name: z.string().optional(),
+    source: z.enum(["cli", "view"])
+  }).strict(),
+  current: z.object({
+    frame: z.enum(["procedure", "schema"]),
+    memoryName: z.string(),
+    stepId: z.string()
+  }).strict().optional()
+}).strict();
+
 const runStateSchema: z.ZodType<RunState> = z.object({
   contractVersion: z.literal(2),
   readOnly: z.boolean().optional(),
   memorySyntax: z.string().optional(),
   id: z.string(),
   name: z.string().optional(),
-  status: z.enum(["running", "done"]),
+  status: z.enum(["running", "done", "abandoned"]),
   procedureName: z.string(),
   asserts: z.array(z.string()).optional(),
   memoryRoot: z.string(),
@@ -478,6 +512,7 @@ const runStateSchema: z.ZodType<RunState> = z.object({
   }).strict().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  abandonment: runAbandonmentSchema.optional(),
   plan: z.array(runStepSchema).optional(),
   stack: z.array(z.object({
     type: z.enum(["procedure", "schema"]),
@@ -568,7 +603,7 @@ const artifactReviewAssignmentSchema = z.object({
   slotIds: z.array(z.string()),
   permissions: z.array(z.enum(permissionIds)),
   binding: z.enum(["decision", "advisory"]),
-  status: z.enum(["draft", "queued", "running", "submitted", "failed"]),
+  status: z.enum(["draft", "queued", "running", "submitted", "failed", "cancelled"]),
   draft: z.object({
     comments: z.array(artifactReviewCommentSchema),
     vote: z.enum(artifactReviewVoteValues).optional(),
@@ -635,7 +670,7 @@ const artifactReviewRoundSchema = z.object({
   id: z.string(),
   sequence: z.number().int().positive(),
   submissionId: z.string(),
-  status: z.enum(["pending", "awaiting_runner_vote", "passed", "changes_requested"]),
+  status: z.enum(["pending", "awaiting_runner_vote", "passed", "changes_requested", "cancelled"]),
   revision: z.number().int().positive(),
   createdAt: z.string(),
   assignments: z.array(artifactReviewAssignmentSchema),
@@ -689,7 +724,7 @@ const artifactReviewSchema: z.ZodType<ArtifactReview<RunEvent["artifact"]>, z.Zo
   artifactName: z.string(),
   policyId: z.string(),
   controlPlane: artifactControlPlaneSchema,
-  status: z.enum(["pending", "awaiting_runner_vote", "awaiting_revision", "passed"]),
+  status: z.enum(["pending", "awaiting_runner_vote", "awaiting_revision", "passed", "cancelled"]),
   currentRoundId: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -710,7 +745,7 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
   memorySyntax: z.string().optional(),
   id: z.string(),
   name: z.string().optional(),
-  status: z.enum(["running", "done"]),
+  status: z.enum(["running", "done", "abandoned"]),
   procedureName: z.string(),
   asserts: z.array(z.string()).optional(),
   memoryRoot: z.string(),
@@ -720,6 +755,7 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
   }).strict().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  abandonment: runAbandonmentSchema.optional(),
   plan: z.array(runStepSchema).optional(),
   stack: z.array(z.object({
     type: z.enum(["procedure", "schema"]),
@@ -884,6 +920,99 @@ export function runDisplayName(run: Pick<RunState, "name" | "procedureName">): s
   return run.name?.trim() || run.procedureName;
 }
 
+export type AbandonRunResult = {
+  run: RunState;
+  terminationWarnings: string[];
+};
+
+export async function abandonRun(input: {
+  runsRoot: string;
+  runId: string;
+  source: "cli" | "view";
+  actorId?: string;
+  reason?: string;
+  terminateWorker?: (pid: number) => Promise<void>;
+}): Promise<AbandonRunResult> {
+  const workerPids: number[] = [];
+  const run = await withRunWriteLock(input.runsRoot, input.runId, async () => {
+    const current = await readRun(input.runsRoot, input.runId);
+    if (current.status === "abandoned") return current;
+    if (current.contractVersion === 1 || current.readOnly) {
+      throw new Error(`Run is read-only and cannot be abandoned: ${current.id}`);
+    }
+    if (current.status === "done") throw new Error(`Run is already done: ${current.id}`);
+
+    const reason = input.reason?.trim() || undefined;
+    if (reason && reason.length > 2_000) throw new Error("abandonment reason must not exceed 2000 characters");
+    const actorId = input.actorId?.trim() || undefined;
+    const actor = actorId ? current.controlPlane?.actors[actorId] : undefined;
+    if (actorId && (!actor || actor.kind !== "human")) {
+      throw new Error(`Run abandonment actor must be a Human Actor in the Run snapshot: ${actorId}`);
+    }
+    const frame = currentFrame(current);
+    const step = currentStep(current);
+    const now = new Date().toISOString();
+
+    for (const review of current.artifactReviews ?? []) {
+      if (review.status === "passed" || review.status === "cancelled") continue;
+      review.status = "cancelled";
+      review.updatedAt = now;
+      const round = review.rounds.find((candidate) => candidate.id === review.currentRoundId);
+      if (!round) continue;
+      if (round.status !== "passed" && round.status !== "changes_requested" && round.status !== "cancelled") {
+        round.status = "cancelled";
+      }
+      for (const assignment of round.assignments) {
+        if (assignment.status !== "submitted" && assignment.status !== "cancelled") {
+          assignment.status = "cancelled";
+        }
+        for (const attempt of assignment.attempts ?? []) {
+          if (attempt.status !== "queued" && attempt.status !== "running") continue;
+          if (attempt.status === "running" && attempt.workerPid) workerPids.push(attempt.workerPid);
+          attempt.status = "cancelled";
+          attempt.completedAt = now;
+          attempt.stopReason = "run_abandoned";
+        }
+      }
+      round.revision += 1;
+    }
+
+    current.status = "abandoned";
+    current.abandonment = {
+      abandonedAt: now,
+      reason,
+      initiator: {
+        kind: "human",
+        actorId,
+        name: actor?.name,
+        source: input.source
+      },
+      ...(frame && step ? {
+        current: { frame: frame.type, memoryName: frame.memoryName, stepId: step.id }
+      } : {})
+    };
+    current.updatedAt = now;
+    await writeRun(input.runsRoot, current);
+    return current;
+  });
+
+  const terminate = input.terminateWorker ?? ((pid: number) => terminateProcessTree(pid, "SIGTERM", process.platform, true));
+  const terminationWarnings: string[] = [];
+  await Promise.all([...new Set(workerPids)].map(async (pid) => {
+    try {
+      await terminate(pid);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      terminationWarnings.push(`failed to terminate Agent Review worker ${pid}: ${message}`);
+    }
+  }));
+  return { run, terminationWarnings };
+}
+
+function assertRunRunning(run: RunState): void {
+  if (run.status !== "running") throw new Error(`Run is not running: ${run.id} (${run.status})`);
+}
+
 export async function readRun(runsRoot: string, id: string): Promise<RunState> {
   const raw = await readFile(await existingRunPath(runsRoot, id), "utf8");
   return parseRunState(JSON.parse(raw));
@@ -960,12 +1089,14 @@ async function readRunSummary(runsRoot: string, id: string): Promise<RunListSumm
   }
   const runId = requiredSummaryString(source.id, "id");
   const status = source.status;
-  if (status !== "running" && status !== "done") throw new Error(`invalid Run summary status: ${runId}`);
+  if (status !== "running" && status !== "done" && status !== "abandoned") {
+    throw new Error(`invalid Run summary status: ${runId}`);
+  }
   const reviews = Array.isArray(source.artifactReviews)
     ? source.artifactReviews.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
     : [];
   const activeReview = [...reviews]
-    .filter((review) => review.status !== "passed")
+    .filter((review) => review.status !== "passed" && review.status !== "cancelled")
     .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")))[0];
   return {
     id: runId,
@@ -982,7 +1113,7 @@ async function readRunSummary(runsRoot: string, id: string): Promise<RunListSumm
 
 function summarizeRun(run: RunState): RunListSummary {
   const activeReview = [...(run.artifactReviews ?? [])]
-    .filter((review) => review.status !== "passed")
+    .filter((review) => review.status !== "passed" && review.status !== "cancelled")
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
   return {
     id: run.id,
@@ -1062,7 +1193,7 @@ export async function updateRunSlotBinding(input: {
     const run = await readRun(input.runsRoot, input.runId);
     if (run.contractVersion !== 3) throw new Error("Run binding update requires Run v3");
     if (run.readOnly) throw new Error(`Run is read-only: ${run.id}`);
-    if (run.status !== "running") throw new Error(`Run is not running: ${run.id}`);
+    assertRunRunning(run);
     if (!run.controlPlane || !run.reviewConfiguration || !run.procedureSnapshots) {
       throw new Error(`Run has no Review binding configuration: ${run.id}`);
     }
@@ -1132,9 +1263,7 @@ async function reportRunUnlocked(input: {
   if (run.contractVersion === 1 || run.readOnly) {
     throw new Error(`v1 run is read-only and cannot report after the Artifact Contract v2 upgrade: ${input.runId}`);
   }
-  if (run.status === "done") {
-    throw new Error(`run is already done: ${input.runId}`);
-  }
+  assertRunRunning(run);
 
   const schemaFinalization = currentSchemaFinalization(run);
   if (schemaFinalization) {
@@ -1399,7 +1528,9 @@ export type ArtifactReviewAgentContext = ArtifactReviewContext & {
 };
 
 export function currentArtifactReview(run: RunState): ArtifactReview<RunEvent["artifact"]> | undefined {
-  return run.artifactReviews?.find((review) => review.status !== "passed" && currentStep(run)?.id === review.stepId);
+  return run.artifactReviews?.find((review) => (
+    review.status !== "passed" && review.status !== "cancelled" && currentStep(run)?.id === review.stepId
+  ));
 }
 
 export async function findArtifactReview(input: {
@@ -1485,6 +1616,7 @@ export async function updateArtifactReviewDraft(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     const round = requireArtifactReviewRound(review, input.roundId);
     if (review.status !== "pending" || round.status !== "pending") {
@@ -1539,6 +1671,7 @@ export async function submitArtifactReviewAssignment(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     const round = requireArtifactReviewRound(review, input.roundId);
     const assignment = requireArtifactReviewAssignment(round, input.actorId);
@@ -1599,6 +1732,7 @@ export async function claimArtifactReviewAgentAssignment(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    if (run.status !== "running") return undefined;
     const review = requireArtifactReview(run, input.reviewId);
     if (review.currentRoundId !== input.roundId || review.status !== "pending") return undefined;
     const round = requireArtifactReviewRound(review, input.roundId);
@@ -1701,6 +1835,7 @@ export async function retryArtifactReviewAgentAssignment(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     if (review.currentRoundId !== input.roundId || review.status !== "pending") {
       throw new Error(`Artifact Review Round is read-only: ${input.roundId}`);
@@ -1788,6 +1923,7 @@ export async function submitArtifactReviewAgentAssignment(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     const round = requireArtifactReviewRound(review, input.roundId);
     const assignment = requireArtifactReviewAssignment(round, input.actorId);
@@ -1863,6 +1999,7 @@ export async function resolveArtifactReviewComment(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     if (review.currentRoundId !== input.roundId || !["pending", "awaiting_runner_vote"].includes(review.status)) {
       throw new Error(`Artifact Review Round is read-only: ${input.roundId}`);
@@ -1915,6 +2052,7 @@ export async function submitArtifactReviewRunnerVote(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     if (review.currentRoundId !== input.roundId) {
       throw new Error(`Artifact Review Runner vote targets a stale Round: ${input.roundId}`);
@@ -2179,6 +2317,7 @@ async function mutateArtifactReviewAgentAttempt(
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     const round = requireArtifactReviewRound(review, input.roundId);
     const assignment = requireArtifactReviewAssignment(round, input.actorId);
@@ -2202,6 +2341,7 @@ function activeReviewForStep(
   return run.artifactReviews?.find((review) => (
     review.stepId === step.id
     && review.status !== "passed"
+    && review.status !== "cancelled"
     && (!step.controlPlane || review.controlPlane.artifactScope === step.controlPlane.artifactScope)
   ));
 }
@@ -2286,7 +2426,7 @@ async function skipRunUnlocked(input: { runsRoot: string; runId: string }): Prom
   if (run.contractVersion === 1 || run.readOnly) {
     throw new Error(`v1 run is read-only and cannot skip after the Artifact Contract v2 upgrade: ${input.runId}`);
   }
-  if (run.status === "done") throw new Error(`run is already done: ${input.runId}`);
+  assertRunRunning(run);
 
   const frame = currentFrame(run);
   const step = currentStep(run);
@@ -2328,9 +2468,7 @@ async function repeatRunUnlocked(input: { runsRoot: string; runId: string; count
   if (run.contractVersion === 1 || run.readOnly) {
     throw new Error(`v1 run is read-only and cannot continue after the Artifact Contract v2 upgrade: ${input.runId}`);
   }
-  if (run.status === "done") {
-    throw new Error(`run is already done: ${input.runId}`);
-  }
+  assertRunRunning(run);
 
   const frame = currentFrame(run);
   const step = currentStep(run);
@@ -2382,9 +2520,7 @@ async function enterSchemaUnlocked(input: { memoryRoot: string; runsRoot: string
   if (run.contractVersion === 1 || run.readOnly) {
     throw new Error(`v1 run is read-only and cannot enter schema after the Artifact Contract v2 upgrade: ${input.runId}`);
   }
-  if (run.status === "done") {
-    throw new Error(`run is already done: ${input.runId}`);
-  }
+  assertRunRunning(run);
 
   const activeStep = currentStep(run);
   if (!input.schemaName) {
@@ -2427,6 +2563,7 @@ async function enterSchemaUnlocked(input: { memoryRoot: string; runsRoot: string
 }
 
 export function currentStep(run: RunState): RunStep | undefined {
+  if (run.status !== "running") return undefined;
   const frame = currentFrame(run);
   return frame ? frame.steps[frame.index] : undefined;
 }
@@ -2558,6 +2695,7 @@ export function buildSchemaWritingSnapshot(runsRoot: string, run: RunState): Sch
 }
 
 export async function ensureCurrentSchemaDraft(runsRoot: string, run: RunState): Promise<RunState> {
+  if (run.status !== "running") return run;
   const context = currentSchemaParentContext(run);
   if (!context) return run;
   const progress = schemaFrameProgress(run, context.schemaFrame);
@@ -3277,7 +3415,7 @@ function cloneStep(step: RunStep): RunStep {
 
 async function expandAutoCallSteps(run: RunState): Promise<void> {
   let guard = 0;
-  while (run.status !== "done") {
+  while (run.status === "running") {
     if (guard++ > 20) throw new Error("too many nested !call steps");
     const frame = currentFrame(run);
     const step = currentStep(run);

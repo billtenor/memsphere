@@ -220,7 +220,7 @@ async function terminateAndWait(
 }
 
 async function terminateProcess(pid: number, signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
-  await terminateProcessTree(pid, signal);
+  await terminateProcessTree(pid, signal, process.platform, true);
 }
 
 function isMissingFileError(error: unknown): boolean {

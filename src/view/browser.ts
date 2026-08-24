@@ -120,7 +120,8 @@ export const browserHtml = String.raw`<!doctype html>
     .archive-run-action { align-self: center; min-height: 30px; min-width: 52px; padding: 5px 10px; font-size: 12px; line-height: 1.45; color: #4f5a5c; background: var(--surface); border-color: #c7cfca; box-shadow: var(--shadow); }
     .archive-run-action:not(:disabled):hover { color: #173f3c; border-color: var(--accent); background: #edf6f3; }
     .archive-run-action:disabled { color: #9aa1a5; background: #f2f3ef; border-color: var(--line); box-shadow: none; }
-    .task-card-archive { justify-self: end; align-self: end; }
+    .task-card-archive { justify-self: end; align-self: end; display: flex; gap: 6px; }
+    .abandon-run-action { min-height: 30px; padding: 5px 10px; font-size: 12px; }
     .current-step-jump { color: var(--accent); background: #edf6f3; border-color: #b8cbc7; font-weight: 700; }
     .current-step-jump:hover { background: #e3f2ee; }
     .current-step-jump:focus-visible { outline: 3px solid rgba(40, 108, 103, .18); outline-offset: 2px; }
@@ -128,6 +129,7 @@ export const browserHtml = String.raw`<!doctype html>
     .pill.warn { color: var(--warn); background: #fbf2e8; border-color: #ead2b7; }
     .pill.processing { color: var(--accent); background: #edf6f3; border-color: #b8cbc7; }
     .pill.done { color: var(--ok); background: #edf6f0; border-color: #b8d8c5; }
+    .pill.abandoned { color: #765317; background: #fff7df; border-color: #e5cf98; }
     .pill.outdated { color: var(--danger); background: #fbefed; border-color: #e5bcb5; }
     .pill.human { color: #7b3f17; background: #fff1df; border-color: #e5c09c; }
     .pill.agent { color: #173f3c; background: #edf6f3; border-color: #b8cbc7; }
@@ -679,6 +681,7 @@ export const browserHtml = String.raw`<!doctype html>
       schemaProgress: { zh: "字段进度", yaml: "Field progress" },
       managedDraft: { zh: "累计草稿", yaml: "Managed draft" },
       globalAdjustment: { zh: "等待全局调整", yaml: "Awaiting global adjustment" },
+      schemaDraftReadOnly: { zh: "未接纳的只读草稿", yaml: "Unaccepted read-only draft" },
       contractValidation: { zh: "结构与契约校验", yaml: "Contract validation" },
       remaining: { zh: "剩余", yaml: "remaining" },
       constraintSource: { zh: "约束来源", yaml: "Constraint source" },
@@ -699,10 +702,14 @@ export const browserHtml = String.raw`<!doctype html>
       jumpToCurrentStep: { zh: "跳到当前步骤", yaml: "Jump to current" },
       jumpToCurrentStepTitle: { zh: "跳转到当前正在运行的流程节点", yaml: "Jump to the currently running flow node" },
       archive: { zh: "归档", yaml: "Archive" },
-      archiveDoneOnly: { zh: "只有 done 状态的内容可以归档", yaml: "Only done items can be archived" },
+      abandon: { zh: "废弃", yaml: "Abandon" },
+      abandonReason: { zh: "输入可选的废弃原因。按“确定”继续，按“取消”返回。", yaml: "Enter an optional abandonment reason. Choose OK to continue or Cancel to go back." },
+      abandonRunConfirm: { zh: "确认废弃这个 Run？已有内容会保留，但 Run 将不能继续执行，也不会自动归档。", yaml: "Abandon this Run? Existing evidence will be preserved, but the Run cannot continue and will not be archived automatically." },
+      archiveDoneOnly: { zh: "只有 done 或 abandoned 状态的 Run 可以归档", yaml: "Only done or abandoned Runs can be archived" },
       archiveRunConfirm: { zh: "归档这个 run？归档后它将不再出现在 Task 列表中。", yaml: "Archive this run? It will no longer appear in the Task list." },
       archiveReviewConfirm: { zh: "归档这个 review？归档后它将不再出现在 Review 列表中。", yaml: "Archive this review? It will no longer appear in the Review list." },
       completed: { zh: "已完成", yaml: "done" },
+      stopped: { zh: "已停止", yaml: "stopped" },
       notStarted: { zh: "未开始", yaml: "pending" },
       waitingReport: { zh: "等待上报", yaml: "waiting" },
       none: { zh: "无", yaml: "none" },
@@ -754,6 +761,7 @@ export const browserHtml = String.raw`<!doctype html>
       draft: { zh: "草稿", yaml: "Draft" },
       passed: { zh: "已通过", yaml: "Passed" },
       changesRequested: { zh: "需修改", yaml: "Changes requested" },
+      cancelled: { zh: "已取消", yaml: "Cancelled" },
       awaitingRunnerVote: { zh: "等待执行者投票", yaml: "Awaiting Runner vote" },
       pendingVote: { zh: "待投票", yaml: "Pending vote" },
       agentReviewer: { zh: "Agent 评审", yaml: "Agent reviewer" },
@@ -3588,7 +3596,7 @@ export const browserHtml = String.raw`<!doctype html>
         return;
       }
 
-      for (const status of ["running", "done"]) {
+      for (const status of ["running", "done", "abandoned"]) {
         const group = activeRuns.filter(run => run.status === status);
         if (!group.length) continue;
         const label = document.createElement("div");
@@ -3628,7 +3636,11 @@ export const browserHtml = String.raw`<!doctype html>
             await loadRunDetail(run.id);
             renderAll();
           });
-          card.append(button, archiveRunButton(run, "task-card-archive"));
+          const actions = document.createElement("div");
+          actions.className = "task-card-archive";
+          if (run.status === "running") actions.append(abandonRunButton(run));
+          actions.append(archiveRunButton(run));
+          card.append(button, actions);
           list.append(card);
         }
         el.nav.append(list);
@@ -3680,9 +3692,13 @@ export const browserHtml = String.raw`<!doctype html>
       meta.append(pill(t("procedureName") + ": " + run.procedureName));
       meta.append(pill(run.status, false, statusPillClass(run.status)));
       if (run.contractVersion === 1 || run.readOnly) meta.append(pill(t("legacyReadOnly"), false, "warn"));
-      meta.append(pill(run.stack.length + " active frame(s)"));
+      meta.append(pill(run.stack.length + (run.status === "running" ? " active frame(s)" : " retained frame(s)")));
       meta.append(pill(run.events.length + " artifact(s)"));
       meta.append(pill("updated " + formatTime(run.updatedAt)));
+      if (run.abandonment) {
+        meta.append(pill(t("abandon") + ": " + formatTime(run.abandonment.abandonedAt), false, "abandoned"));
+        if (run.abandonment.reason) meta.append(pill(run.abandonment.reason, false, "abandoned"));
+      }
       if (run.artifactReview?.round) {
         const reviewStatus = artifactReviewRoundStatusLabel(run.artifactReview.round.status);
         const reviewButton = document.createElement("button");
@@ -3874,9 +3890,20 @@ export const browserHtml = String.raw`<!doctype html>
       button.type = "button";
       button.className = ["btn", "archive-run-action", className].filter(Boolean).join(" ");
       button.textContent = t("archive");
-      button.disabled = run.status !== "done";
-      button.title = run.status === "done" ? t("archiveRunConfirm") : t("archiveDoneOnly");
+      const terminal = run.status === "done" || run.status === "abandoned";
+      button.disabled = !terminal;
+      button.title = terminal ? t("archiveRunConfirm") : t("archiveDoneOnly");
       button.addEventListener("click", () => runButtonAction(button, () => archiveSelectedRun(run)));
+      return button;
+    }
+
+    function abandonRunButton(run) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn danger abandon-run-action";
+      button.textContent = t("abandon");
+      button.disabled = run.status !== "running";
+      button.addEventListener("click", () => runButtonAction(button, () => abandonSelectedRun(run)));
       return button;
     }
 
@@ -4022,7 +4049,7 @@ export const browserHtml = String.raw`<!doctype html>
       item.className = "flow-item" + (isActive ? " task-step" : "");
       attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
-      item.append(renderFlowHead(t("step"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
+      item.append(renderFlowHead(t("step"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep, run), { run, step, event, commentKind: "action" }));
       appendOptional(item, renderActionContracts(step, run));
       appendOptional(item, renderInlineSchemaDetails(step, Boolean(isActive)));
       appendOptional(item, renderSchemaWriting(run, step));
@@ -4036,7 +4063,7 @@ export const browserHtml = String.raw`<!doctype html>
       item.className = "flow-item branch" + (isActive ? " task-step" : "");
       attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
-      item.append(renderFlowHead(t("if"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
+      item.append(renderFlowHead(t("if"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep, run), { run, step, event, commentKind: "action" }));
       appendOptional(item, renderActionContracts(step, run));
       appendOptional(item, renderInlineSchemaDetails(step, Boolean(isActive)));
       appendOptional(item, renderTaskStepResult(step, event, run));
@@ -4051,7 +4078,7 @@ export const browserHtml = String.raw`<!doctype html>
       item.className = "flow-item branch" + (isActive ? " task-step" : "");
       attachTaskStepLocation(item, run, step, isActive);
       const event = eventsByStep.get(step.id);
-      item.append(renderFlowHead(t("while"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep), { run, step, event, commentKind: "action" }));
+      item.append(renderFlowHead(t("while"), step.instruction, step.artifact || step.id, taskAnchor(run, step, "action"), step, taskStepStatus(step, event, activeStep, run), { run, step, event, commentKind: "action" }));
       appendOptional(item, renderActionContracts(step, run));
       appendOptional(item, renderInlineSchemaDetails(step, Boolean(isActive)));
       appendOptional(item, renderTaskStepResult(step, event, run));
@@ -4182,9 +4209,10 @@ export const browserHtml = String.raw`<!doctype html>
       requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
     }
 
-    function taskStepStatus(step, event, activeStep) {
+    function taskStepStatus(step, event, activeStep, run) {
       if (event) return t("completed");
       if (activeStep && activeStep.id === step.id) return t("currentStep");
+      if (run.abandonment?.current?.stepId === step.id) return t("stopped");
       return t("notStarted");
     }
 
@@ -4204,6 +4232,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function currentRunStep(run) {
+      if (run.status !== "running") return null;
       if (run.schemaWriting?.parentStepId) {
         return findRunStepById(run.plan || [], run.schemaWriting.parentStepId);
       }
@@ -4233,8 +4262,10 @@ export const browserHtml = String.raw`<!doctype html>
       progress.className = "schema-writing-progress";
       progress.append(pill(t("schemaProgress") + " " + snapshot.progress.completed + "/" + snapshot.progress.total));
       progress.append(pill(t("remaining") + " " + snapshot.progress.remaining));
-      if (snapshot.draft?.status === "awaiting_finalization") {
+      if (snapshot.draft?.status === "awaiting_finalization" && !snapshot.readOnly) {
         progress.append(pill(t("globalAdjustment"), false, "warn"));
+      } else if (snapshot.draft && snapshot.readOnly) {
+        progress.append(pill(t("schemaDraftReadOnly"), false, "warn"));
       }
       if (snapshot.currentField?.path) progress.append(pill(snapshot.currentField.path, false, "strong"));
       wrap.append(progress);
@@ -4294,7 +4325,12 @@ export const browserHtml = String.raw`<!doctype html>
           error.textContent = snapshot.draft.contentError;
           preview.append(error);
         }
-        if (snapshot.draft.status === "awaiting_finalization") {
+        if (snapshot.readOnly) {
+          const notice = document.createElement("div");
+          notice.className = "muted";
+          notice.textContent = t("schemaDraftReadOnly");
+          preview.append(notice);
+        } else if (snapshot.draft.status === "awaiting_finalization") {
           const command = document.createElement("div");
           command.className = "pre mono";
           command.textContent = "memsphere run report --run " + shellQuote(run.id)
@@ -5183,7 +5219,7 @@ export const browserHtml = String.raw`<!doctype html>
       label.textContent = t("artifact");
       artifactLine.append(label);
       appendArtifactMeta(artifactLine, step);
-      if (status) artifactLine.append(pill(status, false, status === t("currentStep") ? "processing" : status === t("completed") ? "done" : ""));
+      if (status) artifactLine.append(pill(status, false, status === t("currentStep") ? "processing" : status === t("completed") ? "done" : status === t("stopped") ? "warn" : ""));
       row.append(artifactLine);
       appendArtifactReviewRoles(row, step);
       return row;
@@ -5882,7 +5918,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function archiveSelectedRun(run) {
-      if (!run || run.status !== "done") return;
+      if (!run || !["done", "abandoned"].includes(run.status)) return;
       if (!confirm(t("archiveRunConfirm"))) return;
       const response = await fetch("/api/archive/runs/" + encodeURIComponent(run.id), { method: "POST" });
       if (!response.ok) throw new Error(await response.text());
@@ -5896,6 +5932,28 @@ export const browserHtml = String.raw`<!doctype html>
       saveSelectedTask();
       if (state.selectedTaskId) await loadRunDetail(state.selectedTaskId);
       renderAll();
+    }
+
+    async function abandonSelectedRun(run) {
+      if (!run || run.status !== "running") return;
+      const reason = prompt(t("abandonReason"), "");
+      if (reason === null) return false;
+      if (!confirm(t("abandonRunConfirm"))) return false;
+      const response = await fetch("/api/runs/" + encodeURIComponent(run.id) + "/abandon", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason })
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const payload = await response.json();
+      state.runDetails.set(run.id, payload.run);
+      const summary = state.runs.find(item => item.id === run.id);
+      if (summary) Object.assign(summary, payload.run, {
+        eventCount: payload.run.events?.length || 0,
+        reviewProgress: undefined
+      });
+      renderAll();
+      if (Array.isArray(payload.warnings) && payload.warnings.length) alert(payload.warnings.join("\n"));
     }
 
     async function archiveReviewById(id) {
@@ -6469,7 +6527,7 @@ export const browserHtml = String.raw`<!doctype html>
         pill(
           artifactReviewRoundStatusLabel(scopeRound.status),
           false,
-          scopeRound.status === "passed" ? "done" : scopeRound.status === "changes_requested" ? "warn" : "processing"
+          ["passed", "cancelled"].includes(scopeRound.status) ? "done" : scopeRound.status === "changes_requested" ? "warn" : "processing"
         ),
         pill(review.policyId),
         pill(t("round") + " " + selectedSequence + " · " + scopeSubmitted + "/" + scopeTotal),
@@ -6738,7 +6796,7 @@ export const browserHtml = String.raw`<!doctype html>
         ...(round?.votes || []).map(vote => vote.submittedAt)
       ].filter(Boolean).map(timestamp => new Date(timestamp).getTime()).filter(Number.isFinite);
       const end = timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : "";
-      const terminal = round?.status === "passed" || round?.status === "changes_requested";
+      const terminal = round?.status === "passed" || round?.status === "changes_requested" || round?.status === "cancelled";
       value.textContent = formatTime(round?.createdAt) + " – " + (terminal && end ? formatTime(end) : t("inProgress"));
       wrap.append(label, value);
       return wrap;
@@ -7619,6 +7677,13 @@ export const browserHtml = String.raw`<!doctype html>
       if (readOnly) {
         const submitted = document.createElement("div");
         submitted.className = "artifact-review-message";
+        if (assignment.status === "cancelled") {
+          submitted.textContent = displayLanguage === "zh"
+            ? "评审已取消；已有内容保留为只读证据。"
+            : "Review cancelled; existing content is preserved as read-only evidence.";
+          el.artifactReviewMyContent.append(submitted);
+          return;
+        }
         const vote = assignment.submitted?.vote;
         submitted.textContent = displayLanguage === "zh"
           ? "已提交评审 · " + artifactReviewVoteLabel(vote, assignment.binding)
@@ -8179,6 +8244,10 @@ export const browserHtml = String.raw`<!doctype html>
           : (round.status === "passed"
               ? "This round passed: " + decisionText + " decision votes approved; " + result.advisoryTotal + " advisory votes were recorded."
               : "This round requested changes: " + decisionText + " decision votes approved, which did not satisfy the policy; " + result.advisoryTotal + " advisory votes were recorded.");
+      } else if (round.status === "cancelled") {
+        summary.textContent = displayLanguage === "zh"
+          ? "本轮因 Run 已废弃而取消；已有意见与运行记录保留为只读证据。"
+          : "This round was cancelled because the Run was abandoned; existing comments and activity remain as read-only evidence.";
       } else {
         summary.textContent = t("round") + " " + round.sequence + " · "
           + (round.assignments || []).filter(assignment => assignment.status === "submitted").length
@@ -8216,6 +8285,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function artifactReviewAssignmentStatusLabel(status, actorKind) {
       if (status === "submitted") return t("submitted");
+      if (status === "cancelled") return t("cancelled");
       if (actorKind !== "agent") return t("draft");
       if (status === "queued") return t("queued");
       if (status === "running") return t("running");
@@ -8226,6 +8296,7 @@ export const browserHtml = String.raw`<!doctype html>
     function artifactReviewRoundStatusLabel(status) {
       if (status === "passed") return t("passed");
       if (status === "changes_requested") return t("changesRequested");
+      if (status === "cancelled") return t("cancelled");
       if (status === "awaiting_runner_vote") return t("awaitingRunnerVote");
       return t("pendingReview");
     }
@@ -8339,6 +8410,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function statusPillClass(status) {
       if (status === "done") return "done";
+      if (status === "abandoned") return "abandoned";
       if (status === "running") return "processing";
       if (status === "processing") return "processing";
       if (status === "draft") return "warn";

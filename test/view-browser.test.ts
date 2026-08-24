@@ -621,6 +621,13 @@ test("browser exposes archive controls for done reviews and runs", () => {
   assert.match(browserHtml, /\/api\/archive\/reviews\//);
   assert.match(browserHtml, /\/api\/archive\/runs\//);
   assert.match(browserHtml, /archiveDoneOnly/);
+  assert.match(browserHtml, /\["running", "done", "abandoned"\]/);
+  assert.match(browserHtml, /function abandonRunButton\(run\)/);
+  assert.match(browserHtml, /\/api\/runs\/" \+ encodeURIComponent\(run\.id\) \+ "\/abandon/);
+  assert.match(browserHtml, /Review cancelled; existing content is preserved as read-only evidence/);
+  assert.match(browserHtml, /snapshot\.draft\?\.status === "awaiting_finalization" && !snapshot\.readOnly/);
+  assert.match(browserHtml, /schemaDraftReadOnly/);
+  assert.match(browserHtml, /\["done", "abandoned"\]\.includes\(run\.status\)/);
 });
 
 test("Task titles use the Run name and keep the Procedure name in details", () => {
