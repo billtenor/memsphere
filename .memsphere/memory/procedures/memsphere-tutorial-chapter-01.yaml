@@ -14,7 +14,7 @@ asserts:
 goals:
   - 让用户理解 memsphere 如何积累并复用人类经验与 Agent 成功经验。
   - 让用户理解 Concept、Statement、Schema、Procedure 的职责和协作方式。
-  - 让用户理解 Memory 来源、加载入口、View、Run、Memory Review 和维护方式。
+  - 让用户理解 Memory 来源、加载入口、View、Run、ChangeSet Comment 和维护方式。
 flow:
   - !while
     condition: !action
@@ -245,7 +245,7 @@ flow:
         action: |-
           提供已经通过准入检查的 View 访问地址，介绍 View 的定位和主要入口；必须把实际地址输出为可点击的 Markdown 链接，不得保留 Host 或端口占位符。首次进入时可以这样表述：
           “View 是人使用 memsphere 的主要界面。顶部的 Memory 页面用于浏览和搜索当前 Project Catalog 中已经发布的 Memory；Task 页面用于查看正在执行或已经完成的 Run，以及每一步产生的 Artifact。
-          Memory Review 也从 View 发起和提交。设置页面则用于维护存储位置、View 服务和参与评审的人或 Agent。
+          在 Memory 详情点击“修改”会创建一个 ChangeSet；进入 ChangeSet 后，可以直接在对应内容旁提交 Comment。设置页面则用于维护存储位置、View 服务和参与评审的人或 Agent。
           我已经启动了当前 Project 的 View，你可以点击 [打开 memsphere View](<实际 View 访问地址>) 实际浏览；切换 Project 或修改设置都由你自行决定。”
           后续轮次根据 human 的问题继续讨论。
         actor: agent
@@ -289,28 +289,28 @@ flow:
 
   - !while
     condition: !action
-      action: 判断 human 是否尚未完成“Memory Review”教学主题。
+      action: 判断 human 是否尚未完成“ChangeSet Comment”教学主题。
       actor: agent
       artifact: !artifact
-        name: 是否继续 Memory Review 教学
+        name: 是否继续 ChangeSet Comment 教学
         type: boolean
     do:
       - !action
         action: |-
-          只介绍 Memory Review 的用途和处理方式。首次进入时可以这样表述：
-          “Memory Review 用于对一条 Memory 提交具体修改意见。你可以在 View 中打开 Memory、创建 Review，并把意见添加到对应内容旁边；提交后，Agent 会通过 memsphere 记忆 review 处理流程理解意见、修改 Memory 并完成校验。
-          这种方式能把意见准确绑定到被评论内容的具体行，使评论指向的位置更准确；同时保留 Review 的状态、原始上下文和处理结果，适合需要逐项审阅的修改。
-          这里先介绍 Memory Review，不展开 Run 中的 Artifact Review；后者会在更进阶的教学中介绍。”
+          只介绍 ChangeSet Comment 的用途和处理方式。首次进入时可以这样表述：
+          “要对 Memory 提交具体修改意见，可以在 View 中打开 Memory、点击‘修改’创建 ChangeSet，再把 Comment 添加到对应内容旁边。Comment 提交后立即处于待处理状态，不存在额外的 Review 实体或‘提交意见’动作。
+          你可以在 Agent 对话中提供 ChangeSet ID，请 Agent 通过 memsphere ChangeSet Comment 处理流程接手。Agent 会逐条判断意见，修改候选 Memory 或说明拒绝理由，并在 validate 成功后完成 Comment。
+          Comment 会绑定提交时的具体内容位置；这里不展开 Run 中带评论、轮次和投票的 Artifact Review，后者会在更进阶的教学中介绍。”
           后续轮次根据 human 的问题继续讨论。
         actor: agent
         artifact: !artifact
-          name: Memory Review 教学内容
+          name: ChangeSet Comment 教学内容
           format: markdown
       - !action
-        action: 选择继续讨论 Memory Review，或明确进入下一个教学主题；继续讨论时说明问题或想法。
+        action: 选择继续讨论 ChangeSet Comment，或明确进入下一个教学主题；继续讨论时说明问题或想法。
         actor: human
         artifact: !artifact
-          name: Memory Review 学习选择
+          name: ChangeSet Comment 学习选择
           format: markdown
 
   - !while
@@ -325,7 +325,7 @@ flow:
         action: |-
           介绍用户创建和维护 Memory 的推荐方式。首次进入时可以这样表述：
           “你通常不需要人工编辑 Memory YAML。要记录新经验时，可以直接告诉我经验内容，或者在一次任务完成得很好后，让我把刚才的方法提取成 Memory。
-          要修改 Memory 时，你可以在 View 中通过 Memory Review 把意见准确标注到对应内容；也可以直接在当前对话里告诉我应该如何修改。View 更适合逐项审阅，对话更适合快速说明整体想法。
+          要修改 Memory 时，你可以在 View 中创建 ChangeSet，把 Comment 准确标注到对应内容；也可以直接在当前对话里告诉我应该如何修改。View 更适合逐项审阅，对话更适合快速说明整体想法。
           我不建议你直接修改 Memory 文件。由 Agent 维护，更容易同时检查相关 Concept、Statement、Schema 和 Procedure，保持多种 Memory 之间的一致性。”
           后续轮次根据 human 的问题继续讨论。
         actor: agent

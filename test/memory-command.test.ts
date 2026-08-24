@@ -69,6 +69,20 @@ test("memory list defaults to YAML and forwards filters", async () => {
   assert.deepEqual(state.catalog.listCalls, [{ kind: "concepts", query: "记忆" }]);
 });
 
+test("memory list and read select the frozen catalog for a Run", async () => {
+  const state = fixture();
+  const requestedRuns: Array<string | undefined> = [];
+  state.dependencies.createCatalog = async (runId) => {
+    requestedRuns.push(runId);
+    return state.catalog;
+  };
+
+  await memoryListCommand(undefined, { run: "run-frozen" }, state.dependencies);
+  await memoryReadCommand("Memory", { run: "run-frozen" }, state.dependencies);
+
+  assert.deepEqual(requestedRuns, ["run-frozen", "run-frozen"]);
+});
+
 test("memory list supports JSON and text", async () => {
   const json = fixture();
   await memoryListCommand(undefined, { output: "json" }, json.dependencies);

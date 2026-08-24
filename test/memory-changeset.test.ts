@@ -132,8 +132,8 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     assert.deepEqual(await readdir(join(registry.projects.project.root, "changes", created.change.id, "checkpoints")), [
       initialValidation.checkpointDigest
     ]);
-    const competing = await editMemories({ references: ["concepts/competing-draft"] });
-    await assert.rejects(validateMemoryChange(), /multiple Managed draft ChangeSets.*provide one explicitly/);
+    const competing = await editMemories({ references: ["concepts/competing-active"] });
+    await assert.rejects(validateMemoryChange(), /multiple active Managed ChangeSets.*provide one explicitly/);
     await rm(join(competing.candidateRoot, ".."), { recursive: true, force: true });
     await rm(join(registry.projects.project.root, "changes", competing.change.id), { recursive: true, force: true });
     assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
@@ -141,6 +141,7 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     await rm(created.candidateRoot, { recursive: true, force: true });
     assert.equal(await resumeMemoryChange(created.change.id), created.candidateRoot);
     const published = await publishMemoryChange(created.change.id);
+    assert.equal(published.status, "completed");
     assert.match(published.published_revision ?? "", /^[0-9a-f]{40,64}$/);
     assert.match(await readFile(join(memoryRoot, "concepts", "shared.yaml"), "utf8"), /Initial/);
     assert.deepEqual((await readMemoryFile("concepts", join(memoryRoot, "concepts", "other.yaml"))).entity.names, ["other", "Other Alias"]);
@@ -286,7 +287,7 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
       assert.equal(await gitOutput(["rev-parse", "HEAD"], memoryRoot), revisionBefore);
       assert.equal(revisionAfter, revisionBefore);
       assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
-      assert.equal(savedChange.status, "draft");
+      assert.equal(savedChange.status, "active");
       assert.equal(savedChange.published_revision, undefined);
 
       const auditFailed = await editMemories({ references: ["concepts/audit-failure"] });
@@ -305,7 +306,7 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
       assert.equal(await gitOutput(["rev-parse", "HEAD"], memoryRoot), revisionBefore);
       assert.equal(configAfterAuditFailure, revisionBefore);
       assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
-      assert.equal(savedAuditChange.status, "draft");
+      assert.equal(savedAuditChange.status, "active");
       assert.equal(savedAuditChange.published_revision, undefined);
     }
   } finally {
@@ -325,7 +326,7 @@ test("ChangeSet metadata rejects path traversal", () => {
     project: "project",
     workspace_key: "path:/workspace",
     base_revision: "abc123",
-    status: "draft",
+    status: "active",
     created_at: "2026-08-17T00:00:00.000Z",
     updated_at: "2026-08-17T00:00:00.000Z",
     targets: [{
@@ -336,4 +337,22 @@ test("ChangeSet metadata rejects path traversal", () => {
       added_revision: "abc123"
     }]
   }).success, false);
+});
+
+test("ChangeSet metadata accepts only the active lifecycle vocabulary", () => {
+  const base = {
+    format_version: 1 as const,
+    id: "change-lifecycle",
+    project: "project",
+    workspace_key: "path:/workspace",
+    base_revision: "abc123",
+    created_at: "2026-08-17T00:00:00.000Z",
+    updated_at: "2026-08-17T00:00:00.000Z",
+    targets: []
+  };
+  assert.equal(memoryChangeSetSchema.safeParse({ ...base, status: "active" }).success, true);
+  assert.equal(memoryChangeSetSchema.safeParse({ ...base, status: "completed" }).success, true);
+  assert.equal(memoryChangeSetSchema.safeParse({ ...base, status: "abandoned" }).success, true);
+  assert.equal(memoryChangeSetSchema.safeParse({ ...base, status: "draft" }).success, false);
+  assert.equal(memoryChangeSetSchema.safeParse({ ...base, status: "published" }).success, false);
 });

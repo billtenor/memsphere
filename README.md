@@ -49,16 +49,36 @@ Embedded Project 直接修改当前 Git worktree 中的 Memory，然后执行同
 memsphere memory change validate
 ```
 
-两种 Project 都会在 Project 目录保存稀疏、内容寻址的校验 checkpoint。命令会输出 ChangeSet id 和 View 预览地址（或启动 View 后应打开的路径）；预览 URL 为 `/memories?change=<change-id>`，不改变 View 默认展示的正式版本。重复校验同一候选或同一 Embedded worktree/HEAD 会更新并复用当前 ChangeSet。普通 `memsphere validate` 只校验正式 Store，不创建 Embedded ChangeSet。
+两种 Project 都只保存一份稀疏、内容寻址的当前验证内容；再次校验会原子替换它，不创建供用户选择或回滚的额外快照。命令会输出 ChangeSet id 和稳定 View 地址 `/projects/<project>/changes/<change-id>`。View 顶层只并列 Memory 与 Task；ChangeSet 是 Memory 编辑子功能，从 Memory 列表的“修改中 · N”展开进入。
 
-ChangeSet candidate 和 checkpoint 都只包含目标文件，不应直接传给 `memsphere validate --memory-root`；该参数仍用于校验包含四类目录的完整 Memory Store。Managed 最终发布仍使用 `memsphere memory publish`；Embedded 最终发布仍使用普通 Git commit。
+验证成功的 active ChangeSet 可以在正式集成前直接启动 Procedure Run：
+
+```bash
+memsphere run start <procedure-name> --change <change-id> --name "<run-name>"
+```
+
+该 Run 从 ChangeSet 的 base revision 与当前 checkpoint 物化四类完整候选 Memory，保存 Run 级不可变快照，并冻结 ChangeSet id、checkpoint digest 和 base revision；ChangeSet 后续再次校验不会改变已经启动的 Run。执行时可用 `memsphere memory list --run <run-id>` 和 `memsphere memory read <reference> --run <run-id>` 读取同一快照中的 Concept、Statement、Schema 与 Procedure。不传 `--change` 时，Embedded 仍读取当前 worktree，Managed 仍读取 `published_revision`。
+
+Embedded 的标准命令不需要额外选择参数：同一 Project、Git repository 和 base revision 下会持续复用同一个逻辑 ChangeSet，linked worktree 路径变化不会生成新对象。ChangeSet 的生命周期只有 active、completed、abandoned：普通 commit、push 或创建 PR 后仍为 active，候选提交合入 `master` 后才自动成为 completed；Managed 使用 `memsphere memory publish` 后直接成为 completed。ChangeSet candidate 和当前验证内容都只包含目标文件，不应直接传给 `memsphere validate --memory-root`；该参数仍用于校验包含四类目录的完整 Memory Store。
+
+Memory 详情的“修改”会在简单确认后创建一个新的持久 ChangeSet。用户不能在 View 直接编辑 YAML，只能把已有 Memory 加入 ChangeSet，并在结构位置旁通过 `+` 逐条提交修改意见。Comment 直接绑定 ChangeSet，状态只有 pending、processing、completed；不再存在独立 Memory Review 或 ChangeSet Review。Human Actor 与稳定 Browser user UUID 只用于归因，不构成身份认证。
+
+用户在 Agent 对话中提供 ChangeSet id 后，Agent 在对应 worktree 接手并处理 Comment：
+
+```bash
+memsphere memory change claim <change-id>
+memsphere memory change validate <change-id>
+memsphere memory change finish <change-id> --comment <comment-id> --reason fixed
+```
+
+已有处理者时 `claim` 默认拒绝；只有用户明确要求强制接手才使用 `--force`。不合理的 Comment 不修改内容，使用 `--reason rejected` 完成，并在 Agent 对话中说明判断。没有实际差异且所有 Comment 已完成时使用 `memsphere memory change complete <change-id>`。`finish` 会释放 claim；View 不提供“交给 Agent 处理”按钮，也不会因提交 Comment 自动创建 Task。
 
 Embedded Project 中使用同一条编辑命令时，CLI 会返回当前 worktree 中的实际 YAML 路径；修改后使用普通 Git 工作流集成，不执行 `memory publish`：
 
 ```bash
 memsphere memory edit concepts/example
 # 编辑输出的 Edit 路径
-memsphere validate
+memsphere memory change validate
 ```
 
 新建一个 Agent 会话，然后告诉 Agent：

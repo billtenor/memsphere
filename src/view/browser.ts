@@ -26,23 +26,16 @@ export const browserHtml = String.raw`<!doctype html>
       --danger: #a14436;
       --ok: #23744d;
       --shadow: 0 1px 2px rgba(25, 30, 35, .08);
-      --review-width: 380px;
       --artifact-review-left: 58%;
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     button, input, textarea { font: inherit; }
     button { cursor: pointer; }
-    .shell { display: grid; grid-template-columns: 300px minmax(0, 1fr) 0 0; min-height: 100vh; transition: grid-template-columns 160ms ease; }
-    body.review-resizing, body.review-resizing * { cursor: col-resize !important; user-select: none !important; }
-    body.review-resizing .shell { transition: none; }
+    .shell { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: 100vh; }
     .sidebar { background: #fbfbf8; border-color: var(--line); overflow: auto; height: 100vh; position: sticky; top: 0; }
     .sidebar { border-right: 1px solid var(--line); padding: 16px; }
-    .review { min-width: 0; overflow: hidden; visibility: hidden; pointer-events: none; background: #fbfbf8; border-left: 0; padding: 0; }
-    .review-resizer { display: none; position: relative; min-width: 8px; background: #fbfbf8; cursor: col-resize; touch-action: none; outline: none; }
-    .review-resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--line); transition: background 120ms ease, width 120ms ease; }
-    .review-resizer:hover::before, .review-resizer:focus-visible::before, body.review-resizing .review-resizer::before { width: 2px; background: var(--accent); }
-    .brand, .review-head, .toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .brand, .toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
     .brand { align-items: center; min-width: 0; }
     .brand-settings { display: inline-grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); padding: 0; font-size: 20px; line-height: 1; }
     .brand-settings:hover { background: var(--soft); color: var(--text); }
@@ -62,36 +55,34 @@ export const browserHtml = String.raw`<!doctype html>
     .project-select-option { display: block; width: 100%; border: 0; border-radius: 4px; background: transparent; color: var(--text); padding: 8px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
     .project-select-option:hover, .project-select-option:focus-visible { background: var(--soft); outline: none; }
     .project-select-option[aria-selected="true"] { background: var(--accent-soft); color: #173f3c; font-weight: 700; }
-    .review-actions { display: flex; gap: 8px; align-items: flex-start; }
-    .review-toggle, .review-close { display: inline-flex; }
+    .review-toggle { display: inline-flex; }
     .review-toggle[hidden] { display: none; }
-    .brand h1, .review-head h2, .title { margin: 0; letter-spacing: 0; }
+    .brand h1, .title { margin: 0; letter-spacing: 0; }
     .brand h1 { font-size: 18px; }
     .view-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 14px; }
     .view-tab { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); padding: 7px 8px; }
     .view-tab.active { border-color: #b8cbc7; background: var(--accent-soft); color: #173f3c; font-weight: 700; }
-    .count, .muted, .subtitle, .review-sub { color: var(--muted); }
+    .count, .muted, .subtitle { color: var(--muted); }
     .count { font-size: 12px; }
     .search, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); outline: none; }
     .search { margin: 14px 0 16px; padding: 9px 10px; }
     textarea { min-height: 92px; resize: vertical; padding: 10px; }
     .search:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(40, 108, 103, .12); }
     .kind { margin: 14px 0 6px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
-    .memory-list, .review-list, .comment-list, .flow, .task-list, .event-list { display: grid; gap: 8px; }
-    .memory-button, .review-card, .task-card { width: 100%; text-align: left; border: 0; border-radius: 6px; background: transparent; color: var(--text); padding: 8px 9px; }
-    .memory-button:hover, .review-card:hover, .task-card:hover { background: #eceee8; }
-    .memory-button.active, .review-card.active, .task-card.active { background: var(--accent-soft); color: #173f3c; font-weight: 700; }
+    .memory-list, .comment-list, .flow, .task-list, .event-list { display: grid; gap: 8px; }
+    .memory-button, .task-card { width: 100%; text-align: left; border: 0; border-radius: 6px; background: transparent; color: var(--text); padding: 8px 9px; }
+    .memory-change-wrap { display: grid; border-radius: 6px; }
+    .memory-change-wrap.active { background: var(--accent-soft); color: #173f3c; }
+    .memory-change-wrap.active .memory-button { background: transparent; color: #173f3c; font-weight: 700; }
+    .memory-change-summary { margin: -4px 9px 5px; color: var(--accent); font-size: 12px; cursor: pointer; }
+    .memory-change-links { display: grid; gap: 3px; margin: 0 9px 7px; }
+    .memory-change-link { border: 0; background: transparent; color: var(--muted); padding: 2px 0; text-align: left; font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; cursor: pointer; overflow-wrap: anywhere; }
+    .memory-change-link:hover { color: var(--accent); }
+    .memory-button:hover, .task-card:hover { background: #eceee8; }
+    .memory-button.active, .task-card.active { background: var(--accent-soft); color: #173f3c; font-weight: 700; }
     .memory-options { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; }
     .memory-option { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
     .memory-option input { width: 15px; height: 15px; accent-color: var(--accent); }
-    .review-card { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; box-shadow: var(--shadow); }
-    .review-card b { display: block; overflow-wrap: anywhere; margin-bottom: 4px; }
-    .review-card-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
-    .review-card-main { min-width: 0; border: 0; background: transparent; color: inherit; padding: 0; text-align: left; cursor: pointer; }
-    .review-card-main b { display: block; overflow-wrap: anywhere; margin-bottom: 4px; }
-    .review-card-actions { display: grid; gap: 6px; justify-items: end; }
-    .review-delete { padding: 4px 7px; font-size: 12px; }
-    .review-archive { padding: 4px 7px; font-size: 12px; }
     .task-card { width: 100%; border: 0; border-radius: 6px; background: transparent; color: var(--text); padding: 8px 9px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
     .task-card-main { min-width: 0; border: 0; background: transparent; color: inherit; padding: 0; text-align: left; cursor: pointer; display: grid; gap: 4px; }
     .task-card b { overflow-wrap: anywhere; }
@@ -289,7 +280,6 @@ export const browserHtml = String.raw`<!doctype html>
       font-size: 11px;
       font-weight: 700;
     }
-    .review-sub { margin: 4px 0 14px; font-size: 13px; }
     .artifact-review-stack { display: grid; gap: 10px; }
     .artifact-review-panel { display: grid; gap: 10px; align-content: start; }
     .artifact-review-panel > h3 { margin: 0; font-size: 15px; letter-spacing: 0; }
@@ -466,33 +456,33 @@ export const browserHtml = String.raw`<!doctype html>
     .settings-change-list li { border-left: 3px solid var(--accent); padding: 7px 10px; background: #f3f5f0; overflow-wrap: anywhere; }
     .settings-token { max-width: 520px; }
     body.settings-mode .view-tabs, body.settings-mode .search, body.settings-mode #expand, body.settings-mode #collapse, body.settings-mode #review-toggle { display: none; }
+    body.changes-mode .view-tabs, body.changes-mode .search, body.changes-mode #expand, body.changes-mode #collapse { display: none; }
+    .change-detail-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); gap: 18px; align-items: start; }
+    .change-detail-layout.comments-collapsed { grid-template-columns: minmax(0, 1fr); }
+    .change-detail-layout.comments-collapsed .change-comment-sidebar { display: none; }
+    .change-detail-main { min-width: 0; }
+    .change-comment-sidebar { position: sticky; top: 18px; max-height: calc(100vh - 36px); overflow-y: auto; margin: 12px 0; }
     code { background: var(--soft); border-radius: 4px; padding: 1px 4px; }
     body.task-mode .search, body.task-mode #expand, body.task-mode #collapse { display: none; }
-    body.review-drawer-open .shell { grid-template-columns: 300px minmax(0, 1fr) 8px var(--review-width); }
-    body.review-drawer-open .review-resizer { display: block; }
-    body.review-drawer-open .review { overflow: auto; visibility: visible; pointer-events: auto; padding: 16px; }
     @keyframes taskStepSpotlight {
       0% { box-shadow: 0 0 0 5px rgba(40, 108, 103, .24), var(--shadow); }
       100% { box-shadow: var(--shadow); }
     }
     @media (max-width: 1400px) {
-      .shell { grid-template-columns: 280px minmax(0, 1fr) 0 0; }
-      body.task-mode .shell { grid-template-columns: 280px minmax(0, 1fr) 0 0; }
-      body.review-drawer-open .shell { grid-template-columns: 280px minmax(0, 1fr) 8px var(--review-width); }
+      .shell { grid-template-columns: 280px minmax(0, 1fr); }
+      body.task-mode .shell { grid-template-columns: 280px minmax(0, 1fr); }
     }
     @media (max-width: 1100px) {
       .flow-head { grid-template-columns: 1fr; gap: 8px; align-items: flex-start; }
       .artifact-row { justify-content: flex-start; min-width: 0; }
+      .change-detail-layout { grid-template-columns: minmax(0, 1fr); }
+      .change-comment-sidebar { position: static; max-height: none; }
     }
     @media (max-width: 760px) {
-      .shell, body.review-drawer-open .shell { grid-template-columns: 1fr; }
+      .shell { grid-template-columns: 1fr; }
       .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-      .review-resizer, body.review-drawer-open .review-resizer { display: none; }
-      .review { grid-column: 1; }
       .content { padding: 18px 16px 36px; }
       .toolbar { flex-direction: column; }
-      body.review-drawer-open .sidebar, body.review-drawer-open .content { display: none; }
-      body.review-drawer-open .review { min-height: 100vh; border-left: 0; }
       dialog.artifact-review-modal { width: 100vw; height: 100dvh; max-height: none; border: 0; border-radius: 0; }
       .artifact-review-modal-head { padding: 12px 14px; }
       .artifact-review-modal-body { display: block; }
@@ -544,38 +534,14 @@ export const browserHtml = String.raw`<!doctype html>
         <div class="toolbar-actions">
           <button class="btn" id="expand">Expand all</button>
           <button class="btn" id="collapse">Collapse all</button>
-          <button class="btn review-toggle" id="review-toggle" type="button" aria-controls="review-panel" aria-expanded="false">Review</button>
+          <button class="btn review-toggle" id="review-toggle" type="button" aria-controls="artifact-review-modal" aria-expanded="false" hidden>Artifact Review</button>
+          <button class="btn" id="change-comments-toggle" type="button" aria-controls="change-comment-sidebar" aria-expanded="true" hidden>收起修改意见</button>
           <button class="btn" id="refresh">Refresh</button>
         </div>
       </div>
       <div id="detail" class="empty">Loading...</div>
     </section>
 
-    <div class="review-resizer" id="review-resizer" role="separator" aria-controls="review-panel" aria-orientation="vertical" aria-valuemin="300" aria-valuenow="380" tabindex="-1"></div>
-
-    <aside class="review" id="review-panel" aria-labelledby="review-heading">
-      <div class="review-head">
-        <div>
-          <h2 id="review-heading">Review</h2>
-          <div class="review-sub" id="review-label">Create or select a review to comment inline</div>
-        </div>
-        <div class="review-actions">
-          <button class="btn primary" id="create-review">Create Review</button>
-          <button class="btn review-close" id="review-close" type="button">Close</button>
-        </div>
-      </div>
-      <div id="reviews" class="review-list"></div>
-      <section class="panel">
-        <div class="toolbar" style="margin-bottom: 10px;">
-          <div>
-            <div class="block-title" style="margin-top: 0;">Comments</div>
-            <div class="muted" id="comment-summary"></div>
-          </div>
-          <button class="btn primary" id="submit-review">Submit</button>
-        </div>
-        <div id="comments" class="comment-list"></div>
-      </section>
-    </aside>
   </main>
 
   <dialog class="artifact-review-modal" id="artifact-review-modal" aria-labelledby="artifact-review-modal-title">
@@ -627,18 +593,20 @@ export const browserHtml = String.raw`<!doctype html>
 
   <script>
     const kindOrder = ["procedures", "schemas", "concepts", "statements"];
-    const selectedReviewKey = "memsphere.selectedReview.v2";
     const selectedTaskKey = "memsphere.selectedTask.v1";
     const viewModeKey = "memsphere.viewMode.v1";
     const displayLanguageKey = "memsphere.displayLanguage.v1";
     const hideSystemMemoriesKey = "memsphere.hideSystemMemories.v1";
     const artifactReviewIdentityKey = "memsphere.artifactReviewIdentity.v1";
+    const changeBrowserIdentityKey = "memsphere.changeBrowserIdentity.v1";
+    const changeActorSelectionKey = "memsphere.changeActorSelection.v1";
+    const changeReturnUrlKey = "memsphere.changeReturnUrl.v1";
+    const changeCommentsCollapsedKey = "memsphere.changeCommentsCollapsed.v1";
     const artifactReviewOpenedKey = "memsphere.artifactReviewOpened.v1";
     const artifactReviewSelectedKey = "memsphere.artifactReviewSelected.v1";
     const artifactReviewRoundKey = "memsphere.artifactReviewRound.v1";
     const artifactReviewMobilePaneKey = "memsphere.artifactReviewMobilePane.v1";
     const artifactReviewSplitKey = "memsphere.artifactReviewSplit.v1";
-    const reviewPanelWidthKey = "memsphere.reviewPanelWidth.v1";
     const settingsTokenKey = "memsphere.settingsToken.v1";
     const settingsRouteDestinations = {
       overview: { scope: "global", module: "overview" },
@@ -707,9 +675,22 @@ export const browserHtml = String.raw`<!doctype html>
       abandonRunConfirm: { zh: "确认废弃这个 Run？已有内容会保留，但 Run 将不能继续执行，也不会自动归档。", yaml: "Abandon this Run? Existing evidence will be preserved, but the Run cannot continue and will not be archived automatically." },
       archiveDoneOnly: { zh: "只有 done 或 abandoned 状态的 Run 可以归档", yaml: "Only done or abandoned Runs can be archived" },
       archiveRunConfirm: { zh: "归档这个 run？归档后它将不再出现在 Task 列表中。", yaml: "Archive this run? It will no longer appear in the Task list." },
-      archiveReviewConfirm: { zh: "归档这个 review？归档后它将不再出现在 Review 列表中。", yaml: "Archive this review? It will no longer appear in the Review list." },
+      archiveChangeConfirm: { zh: "归档这个 ChangeSet？归档后它将不再在页面中展示。", yaml: "Archive this ChangeSet? It will no longer appear in the View." },
       completed: { zh: "已完成", yaml: "done" },
       stopped: { zh: "已停止", yaml: "stopped" },
+      changeActive: { zh: "进行中", yaml: "Active" },
+      changeCompleted: { zh: "已完成", yaml: "Completed" },
+      changeAbandoned: { zh: "已废弃", yaml: "Abandoned" },
+      changeCommentPending: { zh: "待处理", yaml: "Pending" },
+      changeCommentProcessing: { zh: "处理中", yaml: "Processing" },
+      changeCommentCompleted: { zh: "已完成", yaml: "Completed" },
+      changeCommentEnded: { zh: "未处理（ChangeSet 已结束）", yaml: "Unprocessed (ChangeSet ended)" },
+      changeCommentAbandoned: { zh: "未处理（ChangeSet 已废弃）", yaml: "Unprocessed (ChangeSet abandoned)" },
+      changeComments: { zh: "修改意见", yaml: "Comments" },
+      hideChangeComments: { zh: "收起修改意见", yaml: "Hide comments" },
+      showChangeComments: { zh: "显示修改意见", yaml: "Show comments" },
+      changeCommentOutdated: { zh: "原内容已变化", yaml: "Content changed" },
+      changeCommentOutdatedHelp: { zh: "这条意见提交后，对应位置的内容发生了变化；意见仍需处理。", yaml: "The content at this location changed after the comment was submitted; the comment still needs handling." },
       notStarted: { zh: "未开始", yaml: "pending" },
       waitingReport: { zh: "等待上报", yaml: "waiting" },
       none: { zh: "无", yaml: "none" },
@@ -775,27 +756,30 @@ export const browserHtml = String.raw`<!doctype html>
       viewMode: routeViewMode(initialBrowserRoute),
       lastContentViewMode: ["task", "artifact-review"].includes(initialBrowserRoute.page)
         ? "task"
-        : localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
+        : initialBrowserRoute.page === "change"
+          ? "changes"
+          : localStorage.getItem(viewModeKey) === "task" ? "task" : "memory",
       payload: null,
       changeId: initialBrowserRoute.changeId || "",
+      changes: [],
+      selectedChangeId: initialBrowserRoute.changeId || "",
+      changeReturnUrl: "",
+      changeDetail: null,
+      changeShowAll: false,
+      changeCommentsCollapsed: localStorage.getItem(changeCommentsCollapsedKey) === "true",
       memories: [],
       actorNames: {},
+      actorKinds: {},
       filtered: [],
       hideSystemMemories: localStorage.getItem(hideSystemMemoriesKey) !== "false",
       selectedId: initialBrowserRoute.page === "memory"
         ? initialBrowserRoute.kind + "/" + initialBrowserRoute.name
         : null,
       selectedTaskId: initialBrowserRoute.runId || localStorage.getItem(selectedTaskKey) || null,
-      selectedReviewId: initialBrowserRoute.page === "memory-review"
-        ? initialBrowserRoute.reviewId
-        : localStorage.getItem(selectedReviewKey) || null,
       byName: new Map(),
-      reviews: [],
       runs: [],
       memoryDetails: new Map(),
-      reviewDetails: new Map(),
       runDetails: new Map(),
-      reviewDetailRequests: new Map(),
       runDetailRequests: new Map(),
       detailRequestSequence: 0,
       pageLoadGeneration: 0,
@@ -826,10 +810,6 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewReturnScrollY: null,
       artifactReviewReturnFocus: "",
       artifactReviewReturnFocusTop: null,
-      reviewSnapshots: new Map(),
-      loadingSnapshots: new Set(),
-      reviewDrawerOpen: initialBrowserRoute.page === "memory-review",
-      reviewPanelWidth: Number.parseFloat(localStorage.getItem(reviewPanelWidthKey) || "") || 380,
       settingsMeta: null,
       settingsScope: initialBrowserRoute.settings?.scope || "global",
       settingsModules: { global: "overview", project: "overview" },
@@ -911,6 +891,13 @@ export const browserHtml = String.raw`<!doctype html>
           ? { page: "memory", project, kind, name, changeId, fragment }
           : { page: "invalid", mode: "memory", error: "Invalid Project Memory URL.", fragment };
       }
+      if (parts[0] === "projects" && parts[2] === "changes" && parts.length === 4) {
+        const project = decoded(parts[1]);
+        const routeChangeId = decoded(parts[3]);
+        return project && routeChangeId
+          ? { page: "change", project, changeId: routeChangeId, fragment }
+          : { page: "invalid", mode: "changes", error: "Invalid ChangeSet URL.", fragment };
+      }
       if (pathname === "/tasks") return { page: "tasks", fragment };
       if (parts[0] === "tasks" && parts.length === 2) {
         const runId = decoded(parts[1]);
@@ -939,27 +926,14 @@ export const browserHtml = String.raw`<!doctype html>
           ? { page: "settings", publicModule: moduleName, settings, fragment }
           : { page: "invalid", mode: "settings", error: "Settings page not found: " + (moduleName || parts[1]), fragment };
       }
-      if (
-        parts[0] === "projects"
-        && parts[2] === "memories"
-        && parts[5] === "reviews"
-        && parts.length === 7
-      ) {
-        const project = decoded(parts[1]);
-        const kind = decoded(parts[3]);
-        const name = decoded(parts[4]);
-        const reviewId = decoded(parts[6]);
-        return project && kind && name && reviewId
-          ? { page: "memory-review", project, kind, name, reviewId, fragment }
-          : { page: "invalid", mode: "memory", error: "Invalid Memory Review URL.", fragment };
-      }
       return { page: "invalid", mode: "memory", error: "Page not found: " + pathname, fragment };
     }
 
     function routeViewMode(route) {
       if (route.page === "settings" || route.mode === "settings") return "settings";
       if (["tasks", "task", "artifact-review"].includes(route.page) || route.mode === "task") return "task";
-      if (["root", "memories", "memory", "memory-review"].includes(route.page)) return "memory";
+      if (route.page === "change" || route.mode === "changes") return "changes";
+      if (["root", "memories", "memory"].includes(route.page)) return "memory";
       const stored = localStorage.getItem(viewModeKey);
       return ["memory", "task", "settings"].includes(stored) ? stored : "memory";
     }
@@ -984,19 +958,10 @@ export const browserHtml = String.raw`<!doctype html>
       subtitle: document.getElementById("subtitle"),
       count: document.getElementById("count"),
       search: document.getElementById("search"),
-      reviews: document.getElementById("reviews"),
-      comments: document.getElementById("comments"),
-      commentSummary: document.getElementById("comment-summary"),
-      submitReview: document.getElementById("submit-review"),
-      reviewHeading: document.getElementById("review-heading"),
-      reviewLabel: document.getElementById("review-label"),
-      createReview: document.getElementById("create-review"),
-      reviewPanel: document.getElementById("review-panel"),
-      reviewResizer: document.getElementById("review-resizer"),
       shell: document.querySelector(".shell"),
       sidebar: document.querySelector(".sidebar"),
       reviewToggle: document.getElementById("review-toggle"),
-      reviewClose: document.getElementById("review-close"),
+      changeCommentsToggle: document.getElementById("change-comments-toggle"),
       artifactReviewModal: document.getElementById("artifact-review-modal"),
       artifactReviewModalTitle: document.getElementById("artifact-review-modal-title"),
       artifactReviewModalSubtitle: document.getElementById("artifact-review-modal-subtitle"),
@@ -1033,14 +998,12 @@ export const browserHtml = String.raw`<!doctype html>
     document.getElementById("expand").addEventListener("click", () => setAllSections(true));
     document.getElementById("collapse").addEventListener("click", () => setAllSections(false));
     document.getElementById("refresh").addEventListener("click", () => loadAll().catch(renderFatalError));
-    el.createReview.addEventListener("click", () => runButtonAction(el.createReview, createReview));
     el.reviewToggle.addEventListener("click", () => handleReviewToggle().catch(error => alert(error instanceof Error ? error.message : String(error))));
-    el.reviewClose.addEventListener("click", () => setReviewDrawer(false));
-    el.reviewResizer.addEventListener("pointerdown", beginReviewResize);
-    el.reviewResizer.addEventListener("keydown", resizeReviewWithKeyboard);
-    el.reviewResizer.addEventListener("dblclick", () => setReviewPanelWidth(380, true));
-    el.reviewResizer.setAttribute("aria-label", t("resizeReview"));
-    el.reviewResizer.title = t("resizeReview") + " · " + t("resetReviewWidth");
+    el.changeCommentsToggle.addEventListener("click", () => {
+      state.changeCommentsCollapsed = !state.changeCommentsCollapsed;
+      localStorage.setItem(changeCommentsCollapsedKey, String(state.changeCommentsCollapsed));
+      renderAll();
+    });
     el.artifactReviewModalResizer.setAttribute("aria-label", t("resizeReview"));
     el.artifactReviewModalResizer.title = t("resizeReview") + " · " + t("resetReviewWidth");
     el.memoryTab.addEventListener("click", () => setViewMode("memory", { landing: true }));
@@ -1050,7 +1013,6 @@ export const browserHtml = String.raw`<!doctype html>
     });
     el.projectSelect.addEventListener("click", toggleProjectMenu);
     el.projectSelect.addEventListener("keydown", handleProjectSelectKeydown);
-    el.submitReview.addEventListener("click", () => runButtonAction(el.submitReview, submitReview));
     el.artifactReviewModalClose.addEventListener("click", closeArtifactReviewModal);
     el.artifactReviewSubmit.addEventListener("click", () => runButtonAction(el.artifactReviewSubmit, submitArtifactReview));
     el.artifactReviewModalResizer.addEventListener("pointerdown", beginArtifactReviewModalResize);
@@ -1068,7 +1030,6 @@ export const browserHtml = String.raw`<!doctype html>
     });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeProjectMenu();
-      if (event.key === "Escape" && state.reviewDrawerOpen) setReviewDrawer(false);
     });
     document.addEventListener("click", (event) => {
       if (!(event.target instanceof Element) || !event.target.closest(".project-select-wrap")) closeProjectMenu();
@@ -1082,7 +1043,6 @@ export const browserHtml = String.raw`<!doctype html>
         renderAll();
       }, 0);
     });
-    window.addEventListener("resize", () => syncReviewDrawer());
     window.addEventListener("popstate", () => {
       loadAll({ route: parseBrowserRoute(window.location), render: true }).catch(renderFatalError);
     });
@@ -1133,15 +1093,19 @@ export const browserHtml = String.raw`<!doctype html>
       }
       const targetMode = route ? routeViewMode(route) : state.viewMode;
       state.viewMode = targetMode;
-      if (targetMode === "memory") await loadMemories();
+      if (targetMode === "memory") {
+        await loadMemories();
+        await loadChanges();
+      }
       else if (targetMode === "task") await loadRuns({ loadDetail: false });
+      else if (targetMode === "changes") await loadChanges();
       else await loadSettings();
       if (generation !== state.pageLoadGeneration) return;
       if (route) {
         const applied = await applyBrowserRoute(route, { render: false, generation });
         if (!applied || generation !== state.pageLoadGeneration) return;
         state.routeReady = true;
-        if (targetMode === "memory" && route.page !== "memory" && route.page !== "memory-review") {
+        if (targetMode === "memory" && route.page !== "memory") {
           await loadMemoryDetail(state.selectedId || state.memories[0]?.id);
         } else if (targetMode === "task" && route.page === "tasks") {
           await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
@@ -1150,8 +1114,9 @@ export const browserHtml = String.raw`<!doctype html>
         await loadMemoryDetail(state.selectedId || state.memories[0]?.id);
       } else if (targetMode === "task") {
         await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
+      } else if (targetMode === "changes" && state.selectedChangeId) {
+        await loadChangeDetail(state.selectedChangeId);
       }
-      ensureSelectedReview();
       if (options.render !== false) renderAll();
     }
 
@@ -1228,18 +1193,16 @@ export const browserHtml = String.raw`<!doctype html>
       state.projectGeneration += 1;
       state.selectedId = null;
       state.selectedTaskId = null;
-      state.selectedReviewId = null;
       state.memories = [];
-      state.reviews = [];
       state.runs = [];
       state.memoryDetails.clear();
-      state.reviewDetails.clear();
       state.runDetails.clear();
-      state.reviewDetailRequests.clear();
       state.runDetailRequests.clear();
       state.taskDetailReloadPending = null;
       state.changeId = "";
-      state.reviewSnapshots.clear();
+      state.changes = [];
+      state.selectedChangeId = "";
+      state.changeDetail = null;
       state.settingsScopes.project = {
         data: null,
         draft: null,
@@ -1297,7 +1260,6 @@ export const browserHtml = String.raw`<!doctype html>
       el.detail.textContent = message;
       el.nav.innerHTML = "";
       el.count.textContent = "Error";
-      renderReview();
     }
 
     async function loadMemories() {
@@ -1316,7 +1278,7 @@ export const browserHtml = String.raw`<!doctype html>
         ...(state.memoryDetails.get(memory.id) || {})
       }));
       state.actorNames = state.payload.actorNames || {};
-      if (state.payload.source?.mode === "changeset") state.selectedReviewId = null;
+      state.actorKinds = state.payload.actorKinds || {};
       state.byName = new Map();
       for (const memory of state.memories) {
         for (const name of memory.entity?.names || memory.names || []) state.byName.set(name, memory);
@@ -1324,6 +1286,36 @@ export const browserHtml = String.raw`<!doctype html>
       applyFilter();
       if (!state.selectedId && state.filtered[0]) state.selectedId = state.filtered[0].id;
       return true;
+    }
+
+    async function loadChanges() {
+      const response = await fetch("/api/changes");
+      if (!response.ok) throw new Error(await response.text());
+      state.changes = (await response.json()).changes || [];
+      if (!state.changes.some(change => change.id === state.selectedChangeId)) {
+        state.selectedChangeId = state.changes.find(change => change.active)?.id || state.changes[0]?.id || "";
+        state.changeDetail = null;
+      }
+      return true;
+    }
+
+    async function loadChangeDetail(changeId) {
+      if (!changeId) {
+        state.changeDetail = null;
+        return null;
+      }
+      const response = await fetch("/api/changes/" + encodeURIComponent(changeId));
+      if (!response.ok) throw new Error(await response.text());
+      state.changeDetail = await response.json();
+      state.actorNames = state.changeDetail.actorNames || {};
+      state.actorKinds = state.changeDetail.actorKinds || {};
+      state.selectedChangeId = changeId;
+      state.changeId = "";
+      state.payload = null;
+      state.memories = (state.changeDetail.targetMemories || []).map(item => item.memory).filter(Boolean);
+      state.filtered = state.memories;
+      if (!state.filtered.some(memory => memory.id === state.selectedId)) state.selectedId = state.filtered[0]?.id || null;
+      return state.changeDetail;
     }
 
     async function loadMemoryDetail(id) {
@@ -1348,92 +1340,6 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function loadMemorySelection(id) {
       await loadMemoryDetail(id);
-      if (state.selectedId !== id || !state.reviewDrawerOpen) return;
-      await loadReviews();
-      if (state.selectedId !== id) return;
-      ensureSelectedReview();
-      if (state.selectedReviewId) await loadReviewDetail(state.selectedReviewId);
-    }
-
-    async function loadReviews() {
-      const projectGeneration = state.projectGeneration;
-      const subject = reviewListSubject();
-      if (!subject) {
-        state.reviews = [];
-        return;
-      }
-      const query = new URLSearchParams({ representation: "summary", memory_id: subject.id });
-      if (subject.path) query.set("memory_path", subject.path);
-      const response = await fetch("/api/reviews?" + query);
-      if (!response.ok) throw new Error(await response.text());
-      const payload = await response.json();
-      if (projectGeneration !== state.projectGeneration) return false;
-      const currentSubject = reviewListSubject();
-      if (!currentSubject || currentSubject.id !== subject.id || currentSubject.path !== subject.path) return false;
-      state.reviews = (payload.reviews || []).map(review => {
-        const detail = state.reviewDetails.get(review.id);
-        return detail?.updatedAt === review.updatedAt ? { ...review, ...detail } : review;
-      });
-      return true;
-    }
-
-    async function loadReviewDetail(id) {
-      if (!id) return null;
-      const projectGeneration = state.projectGeneration;
-      const subject = reviewListSubject();
-      if (!subject) return null;
-      const startingRevision = state.reviews.find(review => review.id === id)?.updatedAt;
-      const requestId = ++state.detailRequestSequence;
-      state.reviewDetailRequests.set(id, requestId);
-      const response = await fetch("/api/reviews/" + encodeURIComponent(id));
-      if (!response.ok) {
-        if (response.status === 404) return null;
-        throw new Error(await response.text());
-      }
-      const detail = (await response.json()).review;
-      if (projectGeneration !== state.projectGeneration) return null;
-      if (state.reviewDetailRequests.get(id) !== requestId) return null;
-      const currentSubject = reviewListSubject();
-      if (!currentSubject || currentSubject.id !== subject.id || currentSubject.path !== subject.path) return null;
-      if (!reviewMatchesSubject(detail, subject)) return null;
-      const summary = state.reviews.find(review => review.id === id);
-      if (!summary) return null;
-      if (summary.updatedAt !== startingRevision || (detail.updatedAt && summary.updatedAt && detail.updatedAt < summary.updatedAt)) return null;
-      state.reviewDetails.set(id, detail);
-      Object.assign(summary, detail, { commentCount: detail.comments?.length || 0 });
-      return detail;
-    }
-
-    async function ensureReviewSnapshot(kind) {
-      const review = selectedReview();
-      if (!review?.snapshots?.length) return null;
-      const key = review.id + ":" + kind;
-      if (state.reviewSnapshots.has(key)) return state.reviewSnapshots.get(key);
-      if (state.loadingSnapshots.has(key)) return null;
-      state.loadingSnapshots.add(key);
-      fetch("/api/reviews/" + encodeURIComponent(review.id) + "/snapshot?kind=" + encodeURIComponent(kind))
-        .then(async response => {
-          if (!response.ok) {
-            if (response.status !== 404) throw new Error(await response.text());
-            return null;
-          }
-          return response.json();
-        })
-        .then(snapshot => {
-          if (snapshot) state.reviewSnapshots.set(key, snapshot);
-        })
-        .catch(console.error)
-        .finally(() => {
-          state.loadingSnapshots.delete(key);
-          renderAll();
-        });
-      return null;
-    }
-
-    function currentReviewSnapshot(kind) {
-      const review = selectedReview();
-      if (!review?.snapshots?.length) return null;
-      return state.reviewSnapshots.get(review.id + ":" + kind) || null;
     }
 
     async function loadRuns(options = {}) {
@@ -1882,7 +1788,6 @@ export const browserHtml = String.raw`<!doctype html>
         storageGrid.className = "settings-grid";
         for (const [key, label] of [
           ["memoryRoot", "Memory 根目录"],
-          ["reviewsRoot", "Review 根目录"],
           ["runsRoot", "Run 根目录"],
           ["archiveRoot", "Archive 根目录"]
         ]) {
@@ -2943,18 +2848,6 @@ export const browserHtml = String.raw`<!doctype html>
       return memoryDisplayName(memory.entity || { names: memoryNames(memory) });
     }
 
-    function memoryForReview(review) {
-      const target = review?.target;
-      const comment = review?.comments?.[0];
-      const snapshot = review?.snapshots?.find(item => item.kind === "memory");
-      return state.memories.find(memory => {
-        if (target?.path && memory.path === target.path) return true;
-        if (target?.id && memory.id === target.id) return true;
-        if (comment?.memoryId && memory.id === comment.memoryId) return true;
-        return Boolean(snapshot?.label && memory.path === snapshot.label);
-      }) || null;
-    }
-
     async function applyBrowserRoute(route, options = {}) {
       state.routeApplying = true;
       state.artifactReviewRequest += 1;
@@ -2962,20 +2855,15 @@ export const browserHtml = String.raw`<!doctype html>
       state.pendingFragment = route.fragment || "";
       state.routeError = "";
       state.routeLanding = "";
-      state.reviewDrawerOpen = false;
       state.artifactReviewModalOpen = false;
       if (el.artifactReviewModal.open) el.artifactReviewModal.close();
       try {
         const nextChangeId = route.changeId || "";
-        if (nextChangeId !== state.changeId) {
+        if (route.page !== "change" && nextChangeId !== state.changeId) {
           state.changeId = nextChangeId;
           state.selectedId = null;
-          state.selectedReviewId = null;
           state.memories = [];
           state.memoryDetails.clear();
-          state.reviews = [];
-          state.reviewDetails.clear();
-          state.reviewSnapshots.clear();
           await loadMemories();
         }
         if (route.page === "invalid") {
@@ -2996,34 +2884,15 @@ export const browserHtml = String.raw`<!doctype html>
             state.selectedId = null;
             state.routeError = "Memory not found: " + route.kind + "/" + route.name;
           }
-        } else if (route.page === "memory-review") {
-          state.viewMode = "memory";
-          const routeMemory = route.kind && route.name ? memoryForRoute(route.kind, route.name) : null;
-          if (routeMemory) {
-            state.selectedId = routeMemory.id;
-            await loadMemoryDetail(routeMemory.id);
+        } else if (route.page === "change") {
+          state.viewMode = "changes";
+          await loadChanges();
+          if (!isCurrentPageLoad(options)) return false;
+          if (!state.changes.some(change => change.id === route.changeId)) {
+            state.routeError = "ChangeSet not found: " + route.changeId;
+          } else {
+            await loadChangeDetail(route.changeId);
             if (!isCurrentPageLoad(options)) return false;
-            await loadReviews();
-            if (!isCurrentPageLoad(options)) return false;
-            await loadReviewDetail(route.reviewId);
-            if (!isCurrentPageLoad(options)) return false;
-          }
-          const review = state.reviews.find(item => item.id === route.reviewId);
-          const memory = memoryForReview(review);
-          if (route.project && route.project !== state.currentProject) {
-            state.routeError = "Project not found: " + route.project;
-          } else if (!review) state.routeError = "Memory Review not found: " + route.reviewId;
-          else if (!memory) state.routeError = "The Memory for this review is unavailable.";
-          else if (route.kind && route.name && !routeMemory) {
-            state.routeError = "Memory not found: " + route.kind + "/" + route.name;
-          } else if (routeMemory && routeMemory.id !== memory.id) {
-            state.routeError = "The Memory Review target does not match the URL Memory.";
-          }
-          else {
-            state.selectedId = memory.id;
-            state.selectedReviewId = review.id;
-            state.reviewDrawerOpen = true;
-            saveSelectedReview();
           }
         } else if (route.page === "tasks") {
           state.viewMode = "task";
@@ -3076,7 +2945,7 @@ export const browserHtml = String.raw`<!doctype html>
             await loadSettings();
           }
         }
-        if (state.viewMode === "memory" || state.viewMode === "task") state.lastContentViewMode = state.viewMode;
+        if (["memory", "task", "changes"].includes(state.viewMode)) state.lastContentViewMode = state.viewMode;
         localStorage.setItem(viewModeKey, state.viewMode);
         if (options.render) renderAll();
       } finally {
@@ -3122,16 +2991,9 @@ export const browserHtml = String.raw`<!doctype html>
             search = params.toString() ? "?" + params.toString() : "";
           } else path = "/tasks/" + encodeRoutePart(run.id);
         } else path = "/tasks/" + encodeRoutePart(run.id);
-      } else if (state.reviewDrawerOpen && state.selectedReviewId) {
-        const review = state.reviews.find(item => item.id === state.selectedReviewId) || null;
-        const memory = memoryForReview(review);
-        const memoryName = memoryNames(memory)[0];
-        path = review && memoryName && state.currentProject
-          ? "/projects/" + encodeRoutePart(state.currentProject)
-            + "/memories/" + encodeRoutePart(memory.kind)
-            + "/" + encodeRoutePart(memoryName)
-            + "/reviews/" + encodeRoutePart(review.id)
-          : "/memories";
+      } else if (state.viewMode === "changes") {
+        const base = "/projects/" + encodeRoutePart(state.currentProject) + "/changes";
+        path = state.selectedChangeId ? base + "/" + encodeRoutePart(state.selectedChangeId) : "/memories";
       } else {
         if (state.routeLanding === "memories") {
           const base = state.changeId && state.currentProject
@@ -3195,6 +3057,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderAll() {
       document.body.classList.toggle("task-mode", state.viewMode === "task");
+      document.body.classList.toggle("changes-mode", state.viewMode === "changes");
       document.body.classList.toggle("settings-mode", state.viewMode === "settings");
       document.body.classList.toggle("review-active", canComment());
       document.body.classList.toggle("artifact-review-modal-open", state.artifactReviewModalOpen);
@@ -3202,15 +3065,17 @@ export const browserHtml = String.raw`<!doctype html>
       const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
       const artifactReview = state.viewMode === "task" ? defaultArtifactReviewSummary(run) : null;
       const taskHasArtifactReview = state.viewMode === "task" && Boolean(artifactReview?.round);
-      el.reviewToggle.hidden = state.viewMode === "task" ? !taskHasArtifactReview : false;
+      el.reviewToggle.hidden = !taskHasArtifactReview;
       el.reviewToggle.textContent = taskHasArtifactReview
         ? t("artifactReview") + " " + artifactReview.round.submitted + "/" + artifactReview.round.total
-        : "Review";
-      el.reviewToggle.setAttribute("aria-controls", taskHasArtifactReview ? "artifact-review-modal" : "review-panel");
-      if (state.viewMode === "task") state.reviewDrawerOpen = false;
-      syncReviewDrawer();
+        : t("artifactReview");
+      el.reviewToggle.setAttribute("aria-controls", "artifact-review-modal");
+      const showChangeCommentsToggle = state.viewMode === "changes" && Boolean(state.changeDetail);
+      el.changeCommentsToggle.hidden = !showChangeCommentsToggle;
+      el.changeCommentsToggle.textContent = t(state.changeCommentsCollapsed ? "showChangeComments" : "hideChangeComments");
+      el.changeCommentsToggle.setAttribute("aria-expanded", String(!state.changeCommentsCollapsed));
       syncArtifactReviewModalState();
-      el.memoryTab.classList.toggle("active", state.viewMode === "memory");
+      el.memoryTab.classList.toggle("active", state.viewMode === "memory" || state.viewMode === "changes");
       el.taskTab.classList.toggle("active", state.viewMode === "task");
       el.settingsTab.classList.toggle("active", state.viewMode === "settings");
       el.settingsTab.setAttribute("aria-pressed", String(state.viewMode === "settings"));
@@ -3218,8 +3083,6 @@ export const browserHtml = String.raw`<!doctype html>
       el.settingsTab.title = state.viewMode === "settings" ? "退出设置" : "设置";
       el.settingsTab.textContent = state.viewMode === "settings" ? "\u2190" : "\u2699";
       if (state.viewMode === "settings") {
-        state.reviewDrawerOpen = false;
-        syncReviewDrawer();
         renderSettingsNav();
         if (state.routeError) renderRouteError();
         else renderSettings();
@@ -3237,30 +3100,26 @@ export const browserHtml = String.raw`<!doctype html>
         finishRouteRender();
         return;
       }
+      if (state.viewMode === "changes") {
+        renderChangeMemoryNav();
+        if (state.routeError) renderRouteError();
+        else renderSelectedChange();
+        restoreOpenInlineEditor();
+        finishRouteRender();
+        return;
+      }
       updateMemoryCount();
       renderNav();
       if (state.routeError) renderRouteError();
       else renderSelected();
-      renderReview();
       restoreOpenInlineEditor();
       finishRouteRender();
     }
 
     async function handleReviewToggle() {
-      if (state.viewMode === "task") {
-        if (!artifactReviewSummariesForRun().length) return;
-        if (state.artifactReviewModalOpen) closeArtifactReviewModal();
-        else await openArtifactReviewModal();
-        return;
-      }
-      const open = !state.reviewDrawerOpen;
-      setReviewDrawer(open);
-      if (open) {
-        await loadReviews();
-        ensureSelectedReview();
-        if (state.selectedReviewId) await loadReviewDetail(state.selectedReviewId);
-        renderAll();
-      }
+      if (state.viewMode !== "task" || !artifactReviewSummariesForRun().length) return;
+      if (state.artifactReviewModalOpen) closeArtifactReviewModal();
+      else await openArtifactReviewModal();
     }
 
     async function openArtifactReviewModal(reviewId) {
@@ -3288,7 +3147,6 @@ export const browserHtml = String.raw`<!doctype html>
         writeStoredObject(artifactReviewRoundKey, state.artifactReviewRoundByReview);
         writeStoredObject(artifactReviewOpenedKey, state.artifactReviewOpenedRounds);
       }
-      state.reviewDrawerOpen = false;
       state.artifactReviewModalOpen = true;
       state.artifactReviewLocateFailure = "";
       await syncArtifactReviewContext(true);
@@ -3329,7 +3187,7 @@ export const browserHtml = String.raw`<!doctype html>
       el.artifactReviewReviewTab.classList.toggle("active", state.artifactReviewMobilePane === "review");
       document.documentElement.style.setProperty("--artifact-review-left", state.artifactReviewSplit + "%");
       el.artifactReviewModalResizer.setAttribute("aria-valuenow", String(state.artifactReviewSplit));
-      el.reviewToggle.setAttribute("aria-expanded", String(state.artifactReviewModalOpen || state.reviewDrawerOpen));
+      el.reviewToggle.setAttribute("aria-expanded", String(state.artifactReviewModalOpen));
     }
 
     function setArtifactReviewMobilePane(pane) {
@@ -3381,13 +3239,14 @@ export const browserHtml = String.raw`<!doctype html>
     async function setViewMode(mode, options = {}) {
       const generation = ++state.pageLoadGeneration;
       await projectSwitchChain;
-      if (generation !== state.pageLoadGeneration) return;
+      if (generation !== state.pageLoadGeneration) return setViewMode(mode, options);
       state.routeError = "";
-      if (options.landing) state.routeLanding = mode === "task" ? "tasks" : mode === "memory" ? "memories" : "";
+      if (options.landing) state.routeLanding = mode === "task" ? "tasks" : mode === "memory" ? "memories" : mode === "changes" ? "changes" : "";
       else if (mode === "settings") state.routeLanding = "";
       if (!state.routeReady) {
         if (mode === "task") state.pendingRoute = { page: "tasks", fragment: "" };
         else if (mode === "memory") state.pendingRoute = { page: "memories", fragment: "" };
+        else if (mode === "changes") state.pendingRoute = { page: "changes", project: state.currentProject, fragment: "" };
         else if (mode === "settings") {
           state.pendingRoute = {
             page: "settings",
@@ -3397,12 +3256,8 @@ export const browserHtml = String.raw`<!doctype html>
         }
       }
       state.viewMode = mode;
-      if (mode === "memory" || mode === "task") state.lastContentViewMode = mode;
+      if (["memory", "task", "changes"].includes(mode)) state.lastContentViewMode = mode;
       localStorage.setItem(viewModeKey, mode);
-      ensureSelectedReview();
-      if (mode === "settings" || mode === "task") {
-        state.reviewDrawerOpen = false;
-      }
       renderAll();
       if (mode === "settings") {
         if (!state.settingsMeta || (!state.settingsData && !state.settingsLoading)) {
@@ -3413,102 +3268,58 @@ export const browserHtml = String.raw`<!doctype html>
       }
       if (mode === "memory") {
         await loadMemories();
+        await loadChanges();
         await loadMemoryDetail(state.selectedId || state.memories[0]?.id);
       } else if (mode === "task") {
         await loadRuns({ loadDetail: false });
         await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
+      } else if (mode === "changes") {
+        await loadChanges();
+        await loadChangeDetail(state.selectedChangeId);
       }
+      if (generation !== state.pageLoadGeneration) return;
+      state.routeReady = true;
       renderAll();
     }
 
-    function syncReviewDrawer() {
-      const open = state.reviewDrawerOpen;
-      const resizable = open && window.innerWidth > 760;
-      document.body.classList.toggle("review-drawer-open", open);
-      el.reviewToggle.setAttribute("aria-expanded", String(open));
-      el.reviewPanel.setAttribute("aria-hidden", String(!open));
-      el.reviewResizer.tabIndex = resizable ? 0 : -1;
-      el.reviewResizer.setAttribute("aria-hidden", String(!resizable));
-      applyReviewPanelWidth(state.reviewPanelWidth);
-    }
-
-    function reviewPanelWidthBounds() {
-      const shellWidth = el.shell.getBoundingClientRect().width || window.innerWidth;
-      const sidebarWidth = window.innerWidth > 760 ? el.sidebar.getBoundingClientRect().width : 0;
-      const min = 300;
-      const max = Math.max(min, Math.floor(shellWidth - sidebarWidth - 360 - 8));
-      return { min, max };
-    }
-
-    function applyReviewPanelWidth(width) {
-      const bounds = reviewPanelWidthBounds();
-      const numericWidth = Number.isFinite(width) ? width : 380;
-      const clamped = Math.round(Math.min(bounds.max, Math.max(bounds.min, numericWidth)));
-      document.documentElement.style.setProperty("--review-width", clamped + "px");
-      el.reviewResizer.setAttribute("aria-valuemin", String(bounds.min));
-      el.reviewResizer.setAttribute("aria-valuemax", String(bounds.max));
-      el.reviewResizer.setAttribute("aria-valuenow", String(clamped));
-      el.reviewResizer.setAttribute("aria-valuetext", clamped + "px");
-      return clamped;
-    }
-
-    function setReviewPanelWidth(width, persist) {
-      const clamped = applyReviewPanelWidth(width);
-      state.reviewPanelWidth = clamped;
-      if (persist) localStorage.setItem(reviewPanelWidthKey, String(clamped));
-    }
-
-    function beginReviewResize(event) {
-      if (!state.reviewDrawerOpen || window.innerWidth <= 760 || event.button !== 0) return;
-      event.preventDefault();
-      const pointerId = event.pointerId;
-      const shellRight = el.shell.getBoundingClientRect().right;
-      document.body.classList.add("review-resizing");
-      el.reviewResizer.setPointerCapture(pointerId);
-      const move = moveEvent => {
-        setReviewPanelWidth(shellRight - moveEvent.clientX - 4, false);
-      };
-      const finish = finishEvent => {
-        if (el.reviewResizer.hasPointerCapture(pointerId)) el.reviewResizer.releasePointerCapture(pointerId);
-        el.reviewResizer.removeEventListener("pointermove", move);
-        el.reviewResizer.removeEventListener("pointerup", finish);
-        el.reviewResizer.removeEventListener("pointercancel", finish);
-        document.body.classList.remove("review-resizing");
-        setReviewPanelWidth(state.reviewPanelWidth, true);
-      };
-      el.reviewResizer.addEventListener("pointermove", move);
-      el.reviewResizer.addEventListener("pointerup", finish);
-      el.reviewResizer.addEventListener("pointercancel", finish);
-      move(event);
-    }
-
-    function resizeReviewWithKeyboard(event) {
-      const bounds = reviewPanelWidthBounds();
-      const step = event.shiftKey ? 64 : 24;
-      let width = Number(el.reviewResizer.getAttribute("aria-valuenow")) || state.reviewPanelWidth;
-      if (event.key === "ArrowLeft") width += step;
-      else if (event.key === "ArrowRight") width -= step;
-      else if (event.key === "Home") width = bounds.min;
-      else if (event.key === "End") width = bounds.max;
-      else return;
-      event.preventDefault();
-      setReviewPanelWidth(width, true);
-    }
-
-    function setReviewDrawer(open) {
-      state.reviewDrawerOpen = Boolean(open);
-      syncReviewDrawer();
-      syncBrowserUrl();
-      if (state.reviewDrawerOpen) requestAnimationFrame(() => el.reviewClose.focus());
-      else el.reviewToggle.focus();
-    }
-
-    function ensureSelectedReview() {
-      const reviews = filteredReviews();
-      if (!reviews.some(review => review.id === state.selectedReviewId)) {
-        state.selectedReviewId = null;
-        saveSelectedReview();
+    async function openChange(changeId) {
+      if (state.viewMode !== "changes") {
+        state.changeReturnUrl = window.location.pathname + window.location.search + window.location.hash;
+        sessionStorage.setItem(changeReturnUrlKey, JSON.stringify({
+          project: state.currentProject,
+          changeId,
+          url: state.changeReturnUrl
+        }));
       }
+      state.viewMode = "changes";
+      state.routeLanding = "";
+      await loadChangeDetail(changeId);
+      renderAll();
+    }
+
+    async function returnFromChange() {
+      let storedReturn = null;
+      try {
+        storedReturn = JSON.parse(sessionStorage.getItem(changeReturnUrlKey) || "null");
+      } catch {
+        storedReturn = null;
+      }
+      const storedReturnUrl = storedReturn
+        && storedReturn.project === state.currentProject
+        && storedReturn.changeId === state.selectedChangeId
+        && typeof storedReturn.url === "string"
+        ? storedReturn.url
+        : "";
+      const returnUrl = state.changeReturnUrl || storedReturnUrl;
+      state.changeReturnUrl = "";
+      sessionStorage.removeItem(changeReturnUrlKey);
+      const currentUrl = window.location.pathname + window.location.search + window.location.hash;
+      if (returnUrl && returnUrl !== currentUrl) {
+        history.replaceState(null, "", returnUrl);
+        await loadAll({ route: parseBrowserRoute(window.location), render: true });
+        return;
+      }
+      await setViewMode("memory", { landing: true });
     }
 
     function applyFilter() {
@@ -3534,6 +3345,8 @@ export const browserHtml = String.raw`<!doctype html>
         const list = document.createElement("div");
         list.className = "memory-list";
         for (const memory of group) {
+          const wrap = document.createElement("div");
+          wrap.className = "memory-change-wrap" + (memory.id === state.selectedId ? " active" : "");
           const button = document.createElement("button");
           button.className = "memory-button" + (memory.id === state.selectedId ? " active" : "");
           button.textContent = memory.error ? invalidMemoryName(memory) : memorySummaryName(memory);
@@ -3542,15 +3355,54 @@ export const browserHtml = String.raw`<!doctype html>
             state.routeError = "";
             state.routeLanding = "";
             state.selectedId = memory.id;
-            state.selectedReviewId = null;
-            if (state.reviewDrawerOpen) state.reviews = [];
             renderAll();
             await loadMemorySelection(memory.id);
             renderAll();
           });
-          list.append(button);
+          wrap.append(button);
+          const relatedChanges = state.changes.filter(change => (change.memoryPaths || []).includes(memory.path));
+          if (relatedChanges.length) {
+            const details = document.createElement("details");
+            const summary = document.createElement("summary");
+            summary.className = "memory-change-summary";
+            summary.textContent = "相关 ChangeSet · " + relatedChanges.length;
+            const links = document.createElement("div");
+            links.className = "memory-change-links";
+            for (const change of relatedChanges) {
+              const link = document.createElement("button");
+              link.type = "button";
+              link.className = "memory-change-link";
+              link.textContent = change.id + " · " + changeStatusLabel(change.status);
+              link.addEventListener("click", () => openChange(change.id));
+              links.append(link);
+            }
+            details.append(summary, links);
+            wrap.append(details);
+          }
+          list.append(wrap);
         }
         el.nav.append(list);
+      }
+      const attachedPaths = new Set(state.memories.map(memory => memory.path));
+      const otherChanges = state.changes.filter(change => !(change.memoryPaths || []).some(path => attachedPaths.has(path)));
+      if (otherChanges.length) {
+        const details = document.createElement("details");
+        details.className = "memory-options";
+        const summary = document.createElement("summary");
+        summary.className = "memory-change-summary";
+        summary.textContent = "其他 ChangeSet · " + otherChanges.length;
+        const links = document.createElement("div");
+        links.className = "memory-change-links";
+        for (const change of otherChanges) {
+          const link = document.createElement("button");
+          link.type = "button";
+          link.className = "memory-change-link";
+          link.textContent = change.id + " · " + changeStatusLabel(change.status);
+          link.addEventListener("click", () => openChange(change.id));
+          links.append(link);
+        }
+        details.append(summary, links);
+        el.nav.append(details);
       }
       renderSystemMemoryToggle();
     }
@@ -3582,6 +3434,284 @@ export const browserHtml = String.raw`<!doctype html>
 
     function updateMemoryCount() {
       el.count.textContent = state.filtered.length + " memories";
+    }
+
+    function renderChangeMemoryNav() {
+      el.nav.innerHTML = "";
+      el.count.textContent = state.memories.length + " memories";
+      const back = document.createElement("button");
+      back.type = "button";
+      back.className = "memory-button";
+      back.textContent = "← 返回 Memory";
+      back.addEventListener("click", () => returnFromChange());
+      el.nav.append(back);
+      for (const kind of kindOrder) {
+        const group = state.memories.filter(memory => memory.kind === kind);
+        if (!group.length) continue;
+        const label = document.createElement("div");
+        label.className = "kind";
+        label.textContent = t(kind);
+        const list = document.createElement("div");
+        list.className = "memory-list";
+        for (const memory of group) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "memory-button" + (memory.id === state.selectedId ? " active" : "");
+          button.textContent = memory.error ? invalidMemoryName(memory) : memorySummaryName(memory);
+          button.addEventListener("click", () => {
+            state.selectedId = memory.id;
+            renderAll();
+          });
+          list.append(button);
+        }
+        el.nav.append(label, list);
+      }
+    }
+
+    function renderSelectedChange() {
+      const detail = state.changeDetail;
+      if (!detail) {
+        el.title.textContent = "Changes";
+        el.subtitle.textContent = "Validated Memory changes for this Project";
+        el.detail.className = "empty";
+        el.detail.textContent = state.changes.length ? "Select a ChangeSet." : "No ChangeSets yet.";
+        return;
+      }
+      const change = detail.change;
+      el.title.textContent = change.id;
+      el.subtitle.textContent = "ChangeSet · " + changeStatusLabel(change.status);
+      el.detail.className = "";
+      el.detail.innerHTML = "";
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      const lifecycle = changeStatusLabel(change.status) + " ChangeSet";
+      meta.append(pill(lifecycle, true, change.valid === false ? "warn" : ""));
+      meta.append(pill("Store: " + change.storeType));
+      meta.append(pill("Base: " + String(change.baseRevision || "").slice(0, 12)));
+      if (change.digest) meta.append(pill("Digest: " + String(change.digest).slice(0, 12)));
+      meta.append(pill(change.valid === false ? "Validation failed" : change.valid === true ? "Validation passed" : "Not validated", false, change.valid === false ? "warn" : ""));
+
+      const actions = document.createElement("div");
+      actions.className = "toolbar-actions";
+      if (changeHumanActorIds().length > 1) {
+        const identity = document.createElement("button");
+        identity.type = "button";
+        identity.className = "btn";
+        identity.textContent = "身份：" + changeOperatorLabel();
+        identity.addEventListener("click", async () => {
+          await chooseChangeOperator({ forcePrompt: true });
+          renderAll();
+        });
+        actions.append(identity);
+      }
+      if (change.status === "active") {
+        const addMemory = document.createElement("button");
+        addMemory.type = "button";
+        addMemory.className = "btn";
+        addMemory.textContent = "添加 Memory";
+        addMemory.disabled = change.claimed;
+        if (change.claimed) addMemory.title = "处理中不能添加 Memory；请先让 Agent finish，再添加并重新 claim。";
+        addMemory.addEventListener("click", () => runButtonAction(addMemory, async () => {
+          const reference = await chooseMemoryToAdd(change);
+          if (!reference) return;
+          const response = await fetch("/api/changes/" + encodeURIComponent(change.id) + "/memories", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ memoryReference: reference, expectedUpdatedAt: change.updatedAt })
+          });
+          if (!response.ok) throw new Error(await response.text());
+          await loadChanges();
+          await loadChangeDetail(change.id);
+          renderAll();
+        }));
+        const abandon = document.createElement("button");
+        abandon.type = "button";
+        abandon.className = "btn danger";
+        abandon.textContent = "废弃";
+        abandon.addEventListener("click", () => runButtonAction(abandon, async () => {
+          if (!confirm("废弃这个 ChangeSet？废弃后将只读且不可恢复。")) return;
+          const response = await fetch("/api/changes/" + encodeURIComponent(change.id) + "/abandon", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ expectedUpdatedAt: change.updatedAt })
+          });
+          if (!response.ok) throw new Error(await response.text());
+          await loadChanges();
+          await loadChangeDetail(change.id);
+          renderAll();
+        }));
+        actions.append(addMemory, abandon);
+      } else {
+        const archive = document.createElement("button");
+        archive.type = "button";
+        archive.className = "btn";
+        archive.textContent = t("archive");
+        archive.addEventListener("click", () => runButtonAction(archive, async () => {
+          if (!confirm(t("archiveChangeConfirm"))) return;
+          const response = await fetch("/api/archive/changes/" + encodeURIComponent(change.id), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ expectedUpdatedAt: change.updatedAt })
+          });
+          if (!response.ok) throw new Error(await response.text());
+          await returnFromChange();
+        }));
+        actions.append(archive);
+      }
+      el.detail.append(meta, actions);
+      if (canComment()) {
+        const agentHint = document.createElement("p");
+        agentHint.className = "muted";
+        agentHint.append(document.createTextNode("让 Agent 处理时，在对应 worktree 的对话中提供 ChangeSet ID，并执行 "), settingsInlineCode("memory change claim " + change.id), document.createTextNode("。"));
+        el.detail.append(agentHint);
+        if (!(detail.comments || []).length) {
+          const hint = document.createElement("p");
+          hint.className = "muted";
+          hint.textContent = "选择下方任意内容旁的 +，直接提交修改意见。";
+          el.detail.append(hint);
+        }
+      }
+
+      if ((change.issues || []).length) {
+        const errors = document.createElement("section");
+        errors.className = "error-panel";
+        const heading = document.createElement("h3");
+        heading.textContent = "Validation diagnostics";
+        const list = document.createElement("ul");
+        for (const issue of change.issues) {
+          const item = document.createElement("li");
+          item.textContent = issue.path + (issue.line ? ":" + issue.line + ":" + (issue.column || 1) : "") + ": " + issue.message;
+          list.append(item);
+        }
+        errors.append(heading, list);
+        el.detail.append(errors);
+      }
+
+      const layout = document.createElement("div");
+      layout.className = "change-detail-layout" + (state.changeCommentsCollapsed ? " comments-collapsed" : "");
+      const main = document.createElement("div");
+      main.className = "change-detail-main";
+
+      const memory = selectedMemory();
+      if (memory?.entity) {
+        const content = document.createElement("section");
+        content.className = "panel";
+        const heading = document.createElement("h3");
+        heading.textContent = memoryDisplayName(memory.entity);
+        content.append(heading, renderMeta(memory));
+        if (memory.kind === "schemas") content.append(renderSchema(memory.entity, 0, primaryName(memory.entity)));
+        else if (memory.kind === "statements") content.append(renderStatement(memory.entity, 0, primaryName(memory.entity)));
+        else if (memory.kind === "procedures") content.append(renderProcedure(memory.entity));
+        else content.append(renderGeneric(memory.entity));
+        main.append(content);
+      } else if (memory?.error) {
+        const error = document.createElement("section");
+        error.className = "error-panel";
+        const heading = document.createElement("h3");
+        heading.textContent = memory.path;
+        const message = document.createElement("p");
+        message.textContent = memory.error;
+        error.append(heading, message);
+        main.append(error);
+      }
+
+      layout.append(main, renderChangeComments(detail.comments || [], main));
+      el.detail.append(layout);
+    }
+
+    async function chooseMemoryToAdd(change) {
+      const response = await fetch("/api/memories?representation=summary");
+      if (!response.ok) throw new Error(await response.text());
+      const payload = await response.json();
+      const scopedPaths = new Set(change.memoryPaths || []);
+      const candidates = (payload.memories || []).filter(memory => !memory.error && !scopedPaths.has(memory.path));
+      if (!candidates.length) {
+        alert(displayLanguage === "zh" ? "当前没有可添加的 Memory。" : "There are no more Memories to add.");
+        return "";
+      }
+      const references = candidates.map(memory => memory.id).sort();
+      const message = displayLanguage === "zh"
+        ? "输入要加入这个 ChangeSet 的 Memory（可选：\n" + references.join("\n") + "）"
+        : "Enter a Memory to add to this ChangeSet (available:\n" + references.join("\n") + ")";
+      const input = prompt(message, references[0]);
+      if (!input?.trim()) return "";
+      const value = input.trim();
+      const candidate = candidates.find(memory => memory.id === value || memoryNames(memory).includes(value));
+      if (!candidate) {
+        throw new Error(displayLanguage === "zh" ? "请选择列表中的 Memory。" : "Select a Memory from the list.");
+      }
+      return candidate.id;
+    }
+
+    function renderChangeComments(comments, contentRoot = document) {
+      const section = document.createElement("section");
+      section.id = "change-comment-sidebar";
+      section.className = "panel change-comments change-comment-sidebar";
+      const heading = document.createElement("h3");
+      heading.textContent = t("changeComments") + " · " + comments.length;
+      section.append(heading);
+      if (!comments.length) {
+        const empty = document.createElement("p");
+        empty.className = "muted";
+        empty.textContent = "暂无修改意见。";
+        section.append(empty);
+        return section;
+      }
+      for (const comment of comments) {
+        const card = document.createElement("article");
+        card.className = "comment-card";
+        card.id = "summary-" + commentDomId(comment.id);
+        const title = document.createElement("b");
+        title.textContent = comment.memory_reference + (comment.target ? " · " + comment.target : "");
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.style.margin = "5px 0";
+        meta.append(pill(changeCommentStatusLabel(comment), false, statusPillClass(comment.status)));
+        if (comment.location?.line) meta.append(pill("Line " + comment.location.line));
+        if (isCommentOutdated(comment, contentRoot)) {
+          const outdated = pill(t("changeCommentOutdated"), false, "outdated");
+          outdated.title = t("changeCommentOutdatedHelp");
+          meta.append(outdated);
+        }
+        const body = document.createElement("p");
+        body.textContent = comment.body;
+        const actions = document.createElement("div");
+        actions.className = "comment-actions";
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "btn";
+        open.textContent = "Go to";
+        open.addEventListener("click", () => {
+          selectCommentSubject(comment);
+          renderAll();
+          setTimeout(() => scrollToComment(comment), 0);
+        });
+        actions.append(open);
+        if (canComment() && isCurrentChangeCommentOwner(comment) && comment.status === "pending") {
+          const edit = document.createElement("button");
+          edit.type = "button";
+          edit.className = "btn";
+          edit.textContent = "Edit";
+          edit.addEventListener("click", () => openCommentEditEditor(card, comment));
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "btn danger";
+          remove.textContent = "Remove";
+          remove.addEventListener("click", () => runButtonAction(remove, () => removeComment(comment.id)));
+          actions.append(edit, remove);
+        } else if (canComment() && isCurrentChangeCommentOwner(comment) && comment.status === "processing") {
+          const withdraw = document.createElement("button");
+          withdraw.type = "button";
+          withdraw.className = "btn danger";
+          withdraw.textContent = "撤回";
+          withdraw.addEventListener("click", () => runButtonAction(withdraw, () => withdrawComment(comment.id)));
+          actions.append(withdraw);
+        }
+        card.append(title, meta, body, actions);
+        section.append(card);
+      }
+      return section;
     }
 
     function renderTaskNav() {
@@ -3710,9 +3840,6 @@ export const browserHtml = String.raw`<!doctype html>
       }
       const activeStep = currentRunStep(run);
       if (activeStep && run.plan && run.plan.length) meta.append(currentStepJumpButton(run));
-      const review = selectedReview();
-      const commentCount = review ? review.comments.filter(comment => comment.memoryId === "task/" + run.id).length : 0;
-      if (commentCount) meta.append(pill(commentCount + " review comments", false, "warn"));
       return meta;
     }
 
@@ -4367,14 +4494,15 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function selectedMemory() {
-      const snapshot = currentReviewSnapshot("memory");
-      if (snapshot?.memory) return snapshot.memory;
+      if (state.viewMode === "changes") {
+        const targetMemories = (state.changeDetail?.targetMemories || []).map(item => item.memory);
+        return state.memories.find((item) => item.id === state.selectedId)
+          || targetMemories.find((item) => item.id === state.selectedId)
+          || state.filtered[0]
+          || targetMemories[0];
+      }
       return state.memories.find((item) => item.id === state.selectedId)
         || state.filtered[0];
-    }
-
-    function selectedReview() {
-      return filteredReviews().find(review => review.id === state.selectedReviewId) || null;
     }
 
     function activeArtifactReviewSummary() {
@@ -4413,57 +4541,32 @@ export const browserHtml = String.raw`<!doctype html>
       return Boolean(state.artifactReviewModalOpen && state.artifactReviewContext);
     }
 
-    function filteredReviews() {
-      const subject = reviewListSubject();
-      if (!subject) return [];
-      return state.reviews.filter(review => reviewMatchesSubject(review, subject));
-    }
-
-    function reviewListSubject() {
-      if (state.viewMode !== "memory") return null;
-      const memory = state.memories.find((item) => item.id === state.selectedId) || state.filtered[0];
-      if (!memory) return null;
-      return {
-        source: "memory",
-        id: memory.id,
-        path: memory.path
-      };
-    }
-
-    function reviewMatchesSubject(review, subject) {
-      if (reviewSource(review) !== subject.source) return false;
-
-      if (review.target) {
-        if (review.target.source !== subject.source) return false;
-        if (review.target.path && subject.path) return review.target.path === subject.path;
-        return review.target.id === subject.id;
-      }
-
-      return review.snapshots?.some(snapshot => snapshot.kind === "memory" && snapshot.label === subject.path)
-        || review.comments?.some(comment => comment.memoryId === subject.id);
-    }
-
-    function reviewSource(review) {
-      if (review.source === "memory") return review.source;
-      return "invalid";
-    }
-
     function currentReviewSubject() {
-      if (state.viewMode !== "memory") return null;
-      if (state.payload?.source?.mode === "changeset") return null;
+      if (state.viewMode !== "changes") return null;
       const memory = selectedMemory();
+      if (!memory && state.viewMode === "changes" && state.selectedChangeId) {
+        return {
+          source: "changeset",
+          id: state.selectedChangeId,
+          kind: "changeset",
+          name: state.selectedChangeId,
+          path: "",
+          changeId: state.selectedChangeId
+        };
+      }
       if (!memory) return null;
       return {
-        source: "memory",
+        source: "changeset",
         id: memory.id,
         kind: memory.kind,
         name: memory.error ? invalidMemoryName(memory) : primaryName(memory.entity),
-        path: memory.path
+        path: memory.path,
+        changeId: state.selectedChangeId
       };
     }
 
     function canComment() {
-      if (state.payload?.source?.mode === "changeset") return false;
+      if (state.payload?.source?.mode === "changeset" && state.viewMode !== "changes") return false;
       if (isArtifactReviewMode()) {
         const context = state.artifactReviewContext;
         return Boolean(
@@ -4472,43 +4575,11 @@ export const browserHtml = String.raw`<!doctype html>
           && context.assignment?.status === "draft"
         );
       }
-      const status = selectedReview()?.status;
-      return status === "draft" || status === "submitted";
-    }
-
-    function canCreateReview() {
-      const subject = currentReviewSubject();
-      return Boolean(subject);
-    }
-
-    function reviewCreationDisabledReason() {
-      if (state.payload?.source?.mode === "changeset") return "Memory Review is only available for formal Memory, not a ChangeSet preview";
-      const subject = currentReviewSubject();
-      if (!subject) return "Select a Memory before creating a review";
-      return "";
+      if (state.viewMode === "changes") return state.changeDetail?.change?.status === "active";
+      return false;
     }
 
     function renderSelected() {
-      const review = selectedReview();
-      if (review && !Array.isArray(review.comments)) {
-        el.title.textContent = "Review";
-        el.subtitle.textContent = review.id;
-        el.detail.className = "empty";
-        el.detail.textContent = "Loading review...";
-        return;
-      }
-      if (review && !review.snapshots?.some(snapshot => snapshot.kind === "memory")) {
-        renderInvalidReview(review, "Memory review has no memory snapshot.");
-        return;
-      }
-      if (review && !currentReviewSnapshot("memory")) {
-        ensureReviewSnapshot("memory");
-        el.title.textContent = "Memory";
-        el.subtitle.textContent = review.id;
-        el.detail.className = "empty";
-        el.detail.textContent = "Loading review snapshot...";
-        return;
-      }
       const memory = selectedMemory();
       if (!memory) {
         el.title.textContent = "No memories";
@@ -4533,16 +4604,57 @@ export const browserHtml = String.raw`<!doctype html>
         return;
       }
       if (memory.error) {
-        if (!currentReviewSnapshot("memory")) state.selectedId = memory.id;
+        state.selectedId = memory.id;
         renderInvalidMemory(memory);
         return;
       }
-      if (!currentReviewSnapshot("memory")) state.selectedId = memory.id;
+      state.selectedId = memory.id;
       el.title.textContent = memoryDisplayName(memory.entity);
       el.subtitle.textContent = memory.id;
       el.detail.className = "";
       el.detail.innerHTML = "";
       state.renderLine = 0;
+      const actions = document.createElement("div");
+      actions.className = "toolbar-actions";
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "btn primary";
+      edit.textContent = "修改";
+      edit.addEventListener("click", () => runButtonAction(edit, async () => {
+        if (!confirm("创建一个新的 ChangeSet 来修改这个 Memory？创建后可自由提交修改意见。")) return;
+        const operator = await chooseChangeOperator();
+        if (!operator) return;
+        const response = await fetch("/api/changes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ memoryReference: memory.id, operator })
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const result = await response.json();
+        await loadChanges();
+        await openChange(result.change.id);
+      }));
+      actions.append(edit);
+      el.detail.append(actions);
+      const relatedChanges = state.changes.filter(change => (change.memoryPaths || []).includes(memory.path));
+      if (relatedChanges.length) {
+        const history = document.createElement("details");
+        history.className = "panel memory-change-history";
+        const summary = document.createElement("summary");
+        summary.textContent = "相关 ChangeSet · " + relatedChanges.length;
+        const list = document.createElement("div");
+        list.className = "memory-change-links";
+        for (const change of relatedChanges) {
+          const link = document.createElement("button");
+          link.type = "button";
+          link.className = "memory-change-link";
+          link.textContent = change.id + " · " + changeStatusLabel(change.status) + " · " + formatTime(change.updatedAt);
+          link.addEventListener("click", () => openChange(change.id));
+          list.append(link);
+        }
+        history.append(summary, list);
+        el.detail.append(history);
+      }
       el.detail.append(renderMeta(memory));
       const diagnostics = renderPreviewIssues();
       if (diagnostics) el.detail.append(diagnostics);
@@ -4550,13 +4662,6 @@ export const browserHtml = String.raw`<!doctype html>
       else if (memory.kind === "statements") el.detail.append(renderStatement(memory.entity, 0, primaryName(memory.entity)));
       else if (memory.kind === "procedures") el.detail.append(renderProcedure(memory.entity));
       else el.detail.append(renderGeneric(memory.entity));
-    }
-
-    function renderInvalidReview(review, message) {
-      el.title.textContent = "Invalid review";
-      el.subtitle.textContent = review?.id || "";
-      el.detail.className = "empty";
-      el.detail.textContent = message || "This review has no snapshot.";
     }
 
     function primaryName(entity) {
@@ -4626,9 +4731,6 @@ export const browserHtml = String.raw`<!doctype html>
       meta.append(pill(memory.entity.tag || memory.kind, true));
       if (memory.entity.syntax) meta.append(pill(t("syntax") + ": " + memory.entity.syntax));
       if (memory.entity.format) meta.append(pill("format: " + memory.entity.format));
-      const review = selectedReview();
-      const commentCount = review ? review.comments.filter(c => c.memoryId === memory.id).length : 0;
-      if (commentCount) meta.append(pill(commentCount + " review comments", false, "warn"));
       return meta;
     }
 
@@ -4938,8 +5040,6 @@ export const browserHtml = String.raw`<!doctype html>
       state.viewMode = "memory";
       localStorage.setItem(viewModeKey, "memory");
       state.selectedId = target.id;
-      state.selectedReviewId = null;
-      if (state.reviewDrawerOpen) state.reviews = [];
       renderAll();
       loadMemorySelection(target.id).then(renderAll).catch(renderFatalError);
     }
@@ -5681,18 +5781,19 @@ export const browserHtml = String.raw`<!doctype html>
           return candidate.location === anchor || candidate.target === anchor || (legacyAnchor && candidate.location === legacyAnchor);
         });
       }
-      const review = selectedReview();
-      const subject = currentReviewSubject();
-      if (!review || !subject) return [];
-      return review.comments.filter(comment => {
-        if (comment.memoryId !== subject.id) return false;
-        const anchorMatches = comment.location?.anchor
-          ? comment.location.anchor === anchor || (legacyAnchor && comment.location.anchor === legacyAnchor)
-          : comment.target === anchor;
-        if (!anchorMatches) return false;
-        if (!comment.location?.hash) return true;
-        return comment.location.hash === hashSnapshot(snapshot);
-      });
+      if (state.viewMode === "changes") {
+        const subject = currentReviewSubject();
+        return (state.changeDetail?.comments || []).filter(comment => {
+          if (!subject || comment.path !== subject.path) return false;
+          const anchorMatches = comment.location?.anchor
+            ? comment.location.anchor === anchor || (legacyAnchor && comment.location.anchor === legacyAnchor)
+            : comment.target === anchor;
+          if (!anchorMatches) return false;
+          if (!comment.location?.hash) return true;
+          return comment.location.hash === hashSnapshot(snapshot);
+        });
+      }
+      return [];
     }
 
     function renderInlineThread(anchor, snapshot, legacyAnchor = "") {
@@ -5710,20 +5811,39 @@ export const browserHtml = String.raw`<!doctype html>
         note.className = "inline-thread-note";
         note.textContent = comment.body;
         view.append(note);
-        if (canComment() && (!isArtifactReviewMode() || comment._mineDraft)) {
+        if (state.viewMode === "changes") {
+          const status = document.createElement("div");
+          status.className = "muted";
+          status.textContent = changeCommentStatusLabel(comment);
+          view.append(status);
+        }
+        const canEditArtifactComment = isArtifactReviewMode() && canComment() && comment._mineDraft;
+        const ownsChangeComment = state.viewMode === "changes" && isCurrentChangeCommentOwner(comment);
+        const canEditChangeComment = canComment() && ownsChangeComment && comment.status === "pending";
+        const canWithdrawChangeComment = canComment() && ownsChangeComment && comment.status === "processing";
+        if (canEditArtifactComment || canEditChangeComment || canWithdrawChangeComment) {
           const actions = document.createElement("div");
           actions.className = "comment-actions";
-          const edit = document.createElement("button");
-          edit.type = "button";
-          edit.className = "btn";
-          edit.textContent = "Edit";
-          edit.addEventListener("click", () => openCommentEditEditor(item, comment));
-          const remove = document.createElement("button");
-          remove.type = "button";
-          remove.className = "btn danger";
-          remove.textContent = "Remove";
-          remove.addEventListener("click", () => runButtonAction(remove, () => removeComment(comment.id)));
-          actions.append(edit, remove);
+          if (canEditArtifactComment || canEditChangeComment) {
+            const edit = document.createElement("button");
+            edit.type = "button";
+            edit.className = "btn";
+            edit.textContent = "Edit";
+            edit.addEventListener("click", () => openCommentEditEditor(item, comment));
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "btn danger";
+            remove.textContent = "Remove";
+            remove.addEventListener("click", () => runButtonAction(remove, () => removeComment(comment.id)));
+            actions.append(edit, remove);
+          } else {
+            const withdraw = document.createElement("button");
+            withdraw.type = "button";
+            withdraw.className = "btn danger";
+            withdraw.textContent = "撤回";
+            withdraw.addEventListener("click", () => runButtonAction(withdraw, () => withdrawComment(comment.id)));
+            actions.append(withdraw);
+          }
           view.append(actions);
         }
         item.append(view);
@@ -5814,30 +5934,6 @@ export const browserHtml = String.raw`<!doctype html>
       for (const section of el.detail.querySelectorAll(".section")) section.classList.toggle("open", open);
     }
 
-    async function createReview() {
-      if (!canCreateReview()) return;
-      const subject = currentReviewSubject();
-      const title = subject ? "Memory review · " + subject.name : undefined;
-      const response = await fetch("/api/reviews", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          title,
-          source: "memory",
-          memoryId: subject?.id,
-          memoryName: subject?.name,
-          memoryPath: subject?.path
-        })
-      });
-      if (!response.ok) throw new Error(await response.text());
-      const review = (await response.json()).review;
-      state.reviewDetails.set(review.id, review);
-      state.reviews.unshift(review);
-      state.selectedReviewId = review.id;
-      saveSelectedReview();
-      renderAll();
-    }
-
     async function addComment(target, snapshot, body, location, context = {}) {
       if (isArtifactReviewMode()) {
         const reviewContext = state.artifactReviewContext;
@@ -5867,24 +5963,32 @@ export const browserHtml = String.raw`<!doctype html>
         if (result.ok) delete context.pendingCommentId;
         return result.ok ? comment : null;
       }
-      const review = selectedReview();
-      const subject = currentReviewSubject();
-      if (!subject || !review || !canComment()) return;
-      const comment = {
-        id: uuid(),
-        source: subject.source,
-        memoryId: subject.id,
-        memoryName: subject.name,
-        kind: subject.kind,
-        target: String(target || "").trim(),
-        location,
-        snapshot: snapshot === undefined ? undefined : String(snapshot),
-        body,
-        createdAt: new Date().toISOString()
-      };
-      const comments = review.comments.concat(comment);
-      await patchReview(review.id, { comments });
-      return comment;
+      if (state.viewMode === "changes") {
+        const subject = currentReviewSubject();
+        if (!subject || !canComment()) return null;
+        const operator = await chooseChangeOperator();
+        if (!operator) return null;
+        const response = await fetch("/api/changes/" + encodeURIComponent(state.selectedChangeId) + "/comments", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            operator,
+            memoryReference: subject.id,
+            path: subject.path,
+            target: String(target || "").trim() || undefined,
+            location,
+            snapshot: snapshot === undefined ? undefined : String(snapshot),
+            body,
+            expectedUpdatedAt: state.changeDetail?.change?.updatedAt
+          })
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const result = await response.json();
+        await loadChangeDetail(state.selectedChangeId);
+        renderAll();
+        return result.comment;
+      }
+      return null;
     }
 
     async function removeComment(id) {
@@ -5898,23 +6002,20 @@ export const browserHtml = String.raw`<!doctype html>
         }, { deletedCommentIds: [id] });
         return result.ok;
       }
-      const review = selectedReview();
-      if (!review || !canComment()) return;
-      await patchReview(review.id, { comments: review.comments.filter(comment => comment.id !== id) });
-    }
-
-    async function deleteSelectedReview(id) {
-      const review = state.reviews.find(item => item.id === id);
-      if (!review) return;
-      const label = review.title || review.id;
-      if (!confirm("Delete review \"" + label + "\"? This will remove its comments and snapshots.")) return;
-      const response = await fetch("/api/reviews/" + encodeURIComponent(id), { method: "DELETE" });
-      if (!response.ok) throw new Error(await response.text());
-      state.reviewSnapshots.delete(id + ":memory");
-      state.reviewDetails.delete(id);
-      state.reviews = state.reviews.filter(item => item.id !== id);
-      ensureSelectedReview();
-      renderAll();
+      if (state.viewMode === "changes") {
+        const operator = await chooseChangeOperator();
+        if (!operator) return false;
+        const response = await fetch("/api/changes/" + encodeURIComponent(state.selectedChangeId) + "/comments/" + encodeURIComponent(id), {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ operator, expectedUpdatedAt: state.changeDetail?.change?.updatedAt })
+        });
+        if (!response.ok) throw new Error(await response.text());
+        await loadChangeDetail(state.selectedChangeId);
+        renderAll();
+        return true;
+      }
+      return false;
     }
 
     async function archiveSelectedRun(run) {
@@ -5955,23 +6056,6 @@ export const browserHtml = String.raw`<!doctype html>
       renderAll();
       if (Array.isArray(payload.warnings) && payload.warnings.length) alert(payload.warnings.join("\n"));
     }
-
-    async function archiveReviewById(id) {
-      const review = state.reviews.find(item => item.id === id);
-      if (!review || review.status !== "done") return;
-      if (!confirm(t("archiveReviewConfirm"))) return;
-      const response = await fetch("/api/archive/reviews/" + encodeURIComponent(review.id), { method: "POST" });
-      if (!response.ok) throw new Error(await response.text());
-      state.reviewSnapshots.delete(review.id + ":memory");
-      if (state.selectedReviewId === review.id) {
-        state.selectedReviewId = null;
-        saveSelectedReview();
-      }
-      state.reviewDetails.delete(review.id);
-      state.reviews = state.reviews.filter(item => item.id !== review.id);
-      renderAll();
-    }
-
     async function updateComment(id, body) {
       if (isArtifactReviewMode()) {
         const context = state.artifactReviewContext;
@@ -5983,21 +6067,35 @@ export const browserHtml = String.raw`<!doctype html>
         }, { changedCommentIds: [id] });
         return result.ok;
       }
-      const review = selectedReview();
-      if (!review || !canComment()) return;
-      await patchReview(review.id, {
-        comments: review.comments.map(comment => comment.id === id ? { ...comment, body } : comment)
-      });
+      if (state.viewMode === "changes") {
+        const operator = await chooseChangeOperator();
+        if (!operator) return false;
+        const response = await fetch("/api/changes/" + encodeURIComponent(state.selectedChangeId) + "/comments/" + encodeURIComponent(id), {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ operator, body, expectedUpdatedAt: state.changeDetail?.change?.updatedAt })
+        });
+        if (!response.ok) throw new Error(await response.text());
+        await loadChangeDetail(state.selectedChangeId);
+        renderAll();
+        return true;
+      }
+      return false;
     }
 
-    async function submitReview() {
-      if (isArtifactReviewMode()) {
-        await submitArtifactReview();
-        return;
-      }
-      const review = selectedReview();
-      if (!review || review.status !== "draft" || !review.comments.length) return;
-      await patchReview(review.id, { status: "submitted" });
+    async function withdrawComment(id) {
+      if (state.viewMode !== "changes") return false;
+      const operator = await chooseChangeOperator();
+      if (!operator) return false;
+      const response = await fetch("/api/changes/" + encodeURIComponent(state.selectedChangeId) + "/comments/" + encodeURIComponent(id), {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ operator, withdraw: true, expectedUpdatedAt: state.changeDetail?.change?.updatedAt })
+      });
+      if (!response.ok) throw new Error(await response.text());
+      await loadChangeDetail(state.selectedChangeId);
+      renderAll();
+      return true;
     }
 
     function artifactReviewVisibleComments() {
@@ -6367,111 +6465,14 @@ export const browserHtml = String.raw`<!doctype html>
       });
     }
 
-    async function patchReview(id, patch) {
-      const current = state.reviewDetails.get(id) || state.reviews.find(item => item.id === id);
-      const response = await fetch("/api/reviews/" + encodeURIComponent(id), {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...patch, expectedUpdatedAt: current?.updatedAt })
-      });
-      if (!response.ok) {
-        const message = await response.text();
-        if (response.status === 409) {
-          await loadReviews({ loadDetail: false });
-          await loadReviewDetail(id);
-          renderAll();
-        }
-        throw new Error(message);
-      }
-      const review = (await response.json()).review;
-      state.reviewDetails.set(review.id, review);
-      const summary = state.reviews.find(item => item.id === review.id);
-      if (summary) Object.assign(summary, review, { commentCount: review.comments?.length || 0 });
-      else state.reviews.unshift({ ...review, commentCount: review.comments?.length || 0 });
-      renderAll();
-    }
-
     async function runButtonAction(button, action) {
       button.disabled = true;
       try {
-        const result = await action();
-        if (result === false) button.disabled = false;
+        await action();
       } catch (error) {
         alert(error instanceof Error ? error.message : String(error));
+      } finally {
         button.disabled = false;
-      }
-    }
-
-    function renderReview() {
-      const review = selectedReview();
-      el.reviewHeading.textContent = "Review";
-      el.createReview.hidden = false;
-      el.submitReview.hidden = false;
-      const canCreate = canCreateReview();
-      el.createReview.disabled = !canCreate;
-      el.createReview.title = canCreate ? "Create Review" : reviewCreationDisabledReason();
-      renderReviewList();
-      el.reviewLabel.textContent = review
-        ? review.status + " · " + review.comments.length + " comment(s)"
-        : "Create or select a review to comment inline";
-      const comments = review?.comments || [];
-      el.commentSummary.textContent = review
-        ? review.id
-        : "No review selected";
-      el.submitReview.disabled = !review || review.status !== "draft" || comments.length === 0;
-      el.submitReview.textContent = review?.status === "draft" ? "Submit" : review?.status || "Submit";
-      el.comments.innerHTML = "";
-      if (!review) {
-        const empty = document.createElement("div");
-        empty.className = "muted";
-        empty.textContent = "Create a review, then use + beside the content to add comments.";
-        el.comments.append(empty);
-        return;
-      }
-      if (!comments.length) {
-        const empty = document.createElement("div");
-        empty.className = "muted";
-        empty.textContent = canComment()
-          ? "Use + beside a section, line, field, or step to add comments."
-          : "No comments in this review.";
-        el.comments.append(empty);
-        return;
-      }
-      for (const comment of comments) {
-        const card = document.createElement("article");
-        card.className = "comment-card";
-        const title = document.createElement("b");
-        title.textContent = commentTitle(comment);
-        const meta = document.createElement("div");
-        meta.className = "muted";
-        meta.textContent = commentMetaText(comment);
-        if (isCommentOutdated(comment)) meta.append(" ", pill("outdated", false, "outdated"));
-        const body = document.createElement("p");
-        body.textContent = comment.body;
-        const actions = document.createElement("div");
-        actions.className = "comment-actions";
-        const open = document.createElement("button");
-        open.className = "btn";
-        open.textContent = "Go to";
-        open.addEventListener("click", () => {
-          selectCommentSubject(comment);
-          renderAll();
-          setTimeout(() => scrollToComment(comment), 0);
-        });
-        actions.append(open);
-        if (canComment()) {
-          const edit = document.createElement("button");
-          edit.className = "btn";
-          edit.textContent = "Edit";
-          edit.addEventListener("click", () => editCommentInDocument(comment));
-          const remove = document.createElement("button");
-          remove.className = "btn danger";
-          remove.textContent = "Remove";
-          remove.addEventListener("click", () => runButtonAction(remove, () => removeComment(comment.id)));
-          actions.append(edit, remove);
-        }
-        card.append(title, meta, body, actions);
-        el.comments.append(card);
       }
     }
 
@@ -8307,8 +8308,7 @@ export const browserHtml = String.raw`<!doctype html>
         if (artifactTarget) artifactTarget.scrollIntoView({ block: "center", behavior: "smooth" });
         return;
       }
-      if (isCommentOutdated(comment)) return;
-      const target = findCommentTarget(comment);
+      const target = findCommentTarget(comment) || findCommentAnchor(comment);
       if (target) {
         for (const section of target.closest(".content")?.querySelectorAll(".section") || []) {
           if (section.contains(target)) section.classList.add("open");
@@ -8333,17 +8333,15 @@ export const browserHtml = String.raw`<!doctype html>
       return "Memory" + (comment.location?.line ? " · Line " + comment.location.line : " · Unanchored");
     }
 
-    function isCommentOutdated(comment) {
+    function isCommentOutdated(comment, root = document) {
       if (!comment.location?.hash) return false;
       const subject = currentReviewSubject();
-      if (!subject || subject.id !== comment.memoryId) return false;
-      return !findCommentTarget(comment);
+      if (!subject || subject.path !== comment.path) return false;
+      return !findCommentTarget(comment, root);
     }
 
-    function findCommentTarget(comment) {
-      const anchor = comment.location?.anchor || comment.target || "";
-      const selector = '[data-anchor="' + CSS.escape(anchor) + '"], [data-legacy-anchor="' + CSS.escape(anchor) + '"]';
-      const candidates = [...document.querySelectorAll(selector)];
+    function findCommentTarget(comment, root = document) {
+      const candidates = findCommentAnchors(comment, root);
       if (!comment.location?.hash) return candidates[0] || null;
       return candidates.find(node => {
         const snapshot = node.dataset.commentSnapshot ?? node.querySelector(".commentable-body")?.dataset.commentSnapshot;
@@ -8351,80 +8349,56 @@ export const browserHtml = String.raw`<!doctype html>
       }) || null;
     }
 
+    function findCommentAnchor(comment, root = document) {
+      return findCommentAnchors(comment, root)[0] || null;
+    }
+
+    function findCommentAnchors(comment, root = document) {
+      const anchor = comment.location?.anchor || comment.target || "";
+      const selector = '[data-anchor="' + CSS.escape(anchor) + '"], [data-legacy-anchor="' + CSS.escape(anchor) + '"]';
+      return [...root.querySelectorAll(selector)];
+    }
+
     function commentTitle(comment) {
       const target = comment.artifactName || comment.target;
-      return "Memory · " + comment.memoryName + (target ? " · " + target : "");
+      return "Memory · " + (comment.memory_reference || "") + (target ? " · " + target : "");
     }
 
     function selectCommentSubject(comment) {
-      state.viewMode = "memory";
-      localStorage.setItem(viewModeKey, "memory");
-      state.selectedId = comment.memoryId;
-    }
-
-    function renderReviewList() {
-      el.reviews.innerHTML = "";
-      const reviews = filteredReviews();
-      if (!reviews.length) return;
-      for (const review of reviews) {
-        const card = document.createElement("article");
-        card.className = "review-card review-card-row" + (review.id === state.selectedReviewId ? " active" : "");
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "review-card-main";
-        const title = document.createElement("b");
-        title.textContent = review.title || review.id;
-        const meta = document.createElement("div");
-        meta.className = "meta";
-        meta.style.margin = "0";
-        meta.append(pill(review.status, false, statusPillClass(review.status)));
-        meta.append(pill((review.commentCount ?? review.comments?.length ?? 0) + " comments"));
-        button.append(title, meta);
-        button.addEventListener("click", async () => {
-          state.routeError = "";
-          state.routeLanding = "";
-          state.selectedReviewId = state.selectedReviewId === review.id ? null : review.id;
-          saveSelectedReview();
-          if (state.selectedReviewId) await loadReviewDetail(state.selectedReviewId);
-          renderAll();
-        });
-        const del = document.createElement("button");
-        del.type = "button";
-        del.className = "btn danger review-delete";
-        del.textContent = "Delete";
-        del.addEventListener("click", () => runButtonAction(del, () => deleteSelectedReview(review.id)));
-        const archive = document.createElement("button");
-        archive.type = "button";
-        archive.className = "btn review-archive";
-        archive.textContent = t("archive");
-        archive.disabled = review.status !== "done";
-        archive.title = review.status === "done" ? t("archiveReviewConfirm") : t("archiveDoneOnly");
-        archive.addEventListener("click", () => runButtonAction(archive, () => archiveReviewById(review.id)));
-        const actions = document.createElement("div");
-        actions.className = "review-card-actions";
-        actions.append(del, archive);
-        card.append(button, actions);
-        el.reviews.append(card);
-      }
+      state.viewMode = "changes";
+      localStorage.setItem(viewModeKey, state.viewMode);
+      const memory = state.memories.find(item => item.path === comment.path || item.id === comment.memory_reference);
+      if (memory) state.selectedId = memory.id;
     }
 
     function statusPillClass(status) {
-      if (status === "done") return "done";
+      if (status === "done" || status === "completed") return "done";
       if (status === "abandoned") return "abandoned";
       if (status === "running") return "processing";
       if (status === "processing") return "processing";
-      if (status === "draft") return "warn";
+      if (status === "active") return "warn";
       return "";
+    }
+
+    function changeCommentStatusLabel(comment) {
+      const changeStatus = state.changeDetail?.change?.status;
+      if (comment.status === "completed") return t("changeCommentCompleted");
+      if (changeStatus === "abandoned") return t("changeCommentAbandoned");
+      if (changeStatus === "completed") return t("changeCommentEnded");
+      if (comment.status === "processing") return t("changeCommentProcessing");
+      return t("changeCommentPending");
+    }
+
+    function changeStatusLabel(status) {
+      if (status === "active") return t("changeActive");
+      if (status === "completed") return t("changeCompleted");
+      if (status === "abandoned") return t("changeAbandoned");
+      return status;
     }
 
     function saveSelectedTask() {
       if (state.selectedTaskId) localStorage.setItem(selectedTaskKey, state.selectedTaskId);
       else localStorage.removeItem(selectedTaskKey);
-    }
-
-    function saveSelectedReview() {
-      if (state.selectedReviewId) localStorage.setItem(selectedReviewKey, state.selectedReviewId);
-      else localStorage.removeItem(selectedReviewKey);
     }
 
     function readStoredObject(key) {
@@ -8443,6 +8417,57 @@ export const browserHtml = String.raw`<!doctype html>
     function uuid() {
       if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
       return "id-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+    }
+
+    function changeHumanActorIds() {
+      return Object.keys(state.actorKinds || {}).filter(actorId => state.actorKinds[actorId] === "human").sort();
+    }
+
+    function selectedChangeHumanId() {
+      const humans = changeHumanActorIds();
+      if (humans.length === 1) return humans[0];
+      const selected = readStoredObject(changeActorSelectionKey)[state.currentProject];
+      return humans.includes(selected) ? selected : "";
+    }
+
+    function currentChangeOperator() {
+      const humans = changeHumanActorIds();
+      const humanId = selectedChangeHumanId();
+      if (humanId) return { kind: "human", id: humanId };
+      if (humans.length > 0) return null;
+      let browserId = localStorage.getItem(changeBrowserIdentityKey);
+      if (!browserId) {
+        browserId = window.crypto?.randomUUID?.() || "00000000-0000-4000-8000-" + Math.random().toString(16).slice(2).padEnd(12, "0").slice(0, 12);
+        localStorage.setItem(changeBrowserIdentityKey, browserId);
+      }
+      return { kind: "browser", id: browserId };
+    }
+
+    function changeOperatorLabel() {
+      const operator = currentChangeOperator();
+      if (!operator) return "请选择";
+      return operator.kind === "human" ? (state.actorNames[operator.id] || operator.id) : "Browser";
+    }
+
+    async function chooseChangeOperator(options = {}) {
+      const humans = changeHumanActorIds();
+      const current = currentChangeOperator();
+      if (current && (!options.forcePrompt || humans.length <= 1)) return current;
+      if (humans.length <= 1) return current;
+      const choices = humans.map(id => id + (state.actorNames[id] ? " (" + state.actorNames[id] + ")" : "")).join(", ");
+      const selected = prompt("选择本次操作身份：" + choices, current?.id || humans[0]);
+      if (!selected) return null;
+      const actorId = selected.trim();
+      if (!humans.includes(actorId)) throw new Error("未知 Human 身份：" + actorId);
+      const selections = readStoredObject(changeActorSelectionKey);
+      selections[state.currentProject] = actorId;
+      writeStoredObject(changeActorSelectionKey, selections);
+      return { kind: "human", id: actorId };
+    }
+
+    function isCurrentChangeCommentOwner(comment) {
+      const operator = currentChangeOperator();
+      return Boolean(operator && comment?.submitted_by?.kind === operator.kind && comment?.submitted_by?.id === operator.id);
     }
   </script>
 </body>

@@ -15,6 +15,7 @@ import {
 } from "../acp/review-session.js";
 import { readConfig } from "../config.js";
 import { createMemoryCatalogForConfig, createProjectMemoryCatalogs } from "../memory/factory.js";
+import { withMemoryChangePreview } from "../memory/changeset.js";
 import {
   type RunReviewConfiguration
 } from "../control-plane/index.js";
@@ -67,6 +68,7 @@ type RunStartOptions = {
   file?: string;
   name?: string;
   reviewConfig?: string;
+  change?: string;
 };
 
 type ReviewWaitOptions = { review?: string };
@@ -146,35 +148,75 @@ type AgentReviewSubmitOptions = AgentReviewAssignmentOptions & {
 export async function runStartCommand(procedureName: string | undefined, options: RunStartOptions = {}): Promise<void> {
   const procedure = procedureName?.trim();
   const procedureFile = options.file?.trim();
+  const changeId = options.change?.trim();
   if (!procedure && !procedureFile) throw new Error("provide a procedure name or --file <path>");
   if (procedure && procedureFile) throw new Error("use either a procedure name or --file <path>, not both");
+  if (changeId && procedureFile) throw new Error("--change cannot be used with --file");
   const runName = normalizeRunName(options.name);
 
   const config = await readConfig();
-  const memoryCatalog = createMemoryCatalogForConfig(config);
   const reviewConfiguration = options.reviewConfig
     ? parseRunReviewConfiguration(JSON.parse(await readFile(options.reviewConfig, "utf8")))
     : undefined;
+  const start = async (source?: {
+    memoryRoot: string;
+    revision: string;
+    memorySource: NonNullable<RunState["memorySource"]>;
+  }): Promise<RunState> => startRun({
+    memoryRoot: config.memoryRoot,
+    memorySnapshotRoot: source?.memoryRoot,
+    runsRoot: config.runsRoot,
+    name: runName,
+    language: config.language,
+    procedureName: procedure,
+    procedureFile,
+    controlPlane: config.controlPlane,
+    reviewConfiguration,
+    memoryProjects: config.project?.revision ? {
+      primary: {
+        name: config.project.name,
+        revision: source?.revision ?? config.project.revision
+      },
+      mounted: config.project.mounted.flatMap((project) => project.revision
+        ? [{ name: project.name, revision: project.revision }]
+        : [])
+    } : undefined,
+    memorySource: source?.memorySource,
+    memoryCatalog: createMemoryCatalogForConfig(config, source),
+    projectMemoryCatalogs: createProjectMemoryCatalogs(config, source)
+  });
   let run: RunState;
   try {
-    run = await startRun({
-      memoryRoot: config.memoryRoot,
-      runsRoot: config.runsRoot,
-      name: runName,
-      language: config.language,
-      procedureName: procedure,
-      procedureFile,
-      controlPlane: config.controlPlane,
-      reviewConfiguration,
-      memoryProjects: config.project?.revision ? {
-        primary: { name: config.project.name, revision: config.project.revision },
-        mounted: config.project.mounted.flatMap((project) => project.revision
-          ? [{ name: project.name, revision: project.revision }]
-          : [])
-      } : undefined,
-      memoryCatalog,
-      projectMemoryCatalogs: createProjectMemoryCatalogs(config)
-    });
+    if (!changeId) {
+      run = await start();
+    } else {
+      if (!config.project) throw new Error("--change requires a Project-backed Memory store");
+      run = await withMemoryChangePreview({
+        home: config.homeRoot,
+        project: config.project.name,
+        changeId,
+        use: async (preview) => {
+          if (preview.change.status !== "active") {
+            throw new Error(`ChangeSet ${changeId} is not active`);
+          }
+          if (!preview.change.checkpoint?.valid) {
+            throw new Error(`ChangeSet ${changeId} does not have a valid checkpoint`);
+          }
+          const revision = `changeset:${changeId}@${preview.change.checkpoint.digest}`;
+          return start({
+            memoryRoot: preview.memoryRoot,
+            revision,
+            memorySource: {
+              kind: "changeset",
+              project: preview.change.project,
+              changeId,
+              checkpointDigest: preview.change.checkpoint.digest,
+              baseRevision: preview.change.checkpoint.base_revision
+            }
+          });
+        }
+      });
+    }
   } catch (error) {
     if (!(error instanceof RunReviewConfigurationRequired)) throw error;
     console.log(renderPrompt(
@@ -690,6 +732,7 @@ export function buildRunOverview(run: RunState): unknown {
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
     memoryProjects: run.memoryProjects,
+    memorySource: run.memorySource,
     totalSteps: steps.length,
     currentStepRef: currentRef,
     steps: steps.map((located) => ({

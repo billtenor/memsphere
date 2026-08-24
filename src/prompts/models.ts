@@ -134,6 +134,11 @@ export type RunCurrentStepPromptModel = {
   runId: string;
   runName: string;
   procedureName: string;
+  memorySource?: {
+    changeId: string;
+    checkpointDigest: string;
+    snapshot: boolean;
+  };
   procedureAsserts: string[];
   step:
     | {
@@ -219,6 +224,10 @@ export type RunCompletedPromptModel = {
   runId: string;
   runName: string;
   procedureName: string;
+  memorySource?: {
+    changeId: string;
+    checkpointDigest: string;
+  };
   procedureAsserts: string[];
   finalArtifacts: Array<{ name: string; path?: string }>;
 };

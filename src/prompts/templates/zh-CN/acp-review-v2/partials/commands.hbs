@@ -11,7 +11,7 @@
   memsphere-review run step show --step "<step-ref>" --output json
 - 在相关时读取某个前序产物：
   memsphere-review run artifact show --step "<step-ref>" --output json
-- 发现和读取项目 Memory：
+- 发现和读取项目 Memory；ChangeSet Run 会话会自动绑定其冻结 Memory 快照：
   memsphere-review memory list --output json
   memsphere-review memory read <reference> --output json
 - 添加具体评审意见。Comment 正文使用 Markdown：

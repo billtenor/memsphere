@@ -186,6 +186,11 @@ const runCurrentStepSchema = z.object({
   runId: z.string(),
   runName: z.string(),
   procedureName: z.string(),
+  memorySource: z.object({
+    changeId: z.string(),
+    checkpointDigest: z.string(),
+    snapshot: z.boolean()
+  }).strict().optional(),
   procedureAsserts: z.array(z.string()),
   step: z.discriminatedUnion("kind", [
     z.object({
@@ -228,6 +233,10 @@ const runCompletedSchema = z.object({
   runId: z.string(),
   runName: z.string(),
   procedureName: z.string(),
+  memorySource: z.object({
+    changeId: z.string(),
+    checkpointDigest: z.string()
+  }).strict().optional(),
   procedureAsserts: z.array(z.string()),
   finalArtifacts: z.array(z.object({
     name: z.string(),
