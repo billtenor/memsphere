@@ -676,6 +676,8 @@ test("browser preserves archive controls for done runs", () => {
   assert.match(browserHtml, /function abandonRunButton\(run\)/);
   assert.match(browserHtml, /\/api\/runs\/" \+ encodeURIComponent\(run\.id\) \+ "\/abandon/);
   assert.match(browserHtml, /if \(!confirm\(t\("abandonRunConfirm"\)\)\) return false;/);
+  assert.match(browserHtml, /确认废弃这个 Run？废弃后将不能继续执行。/);
+  assert.doesNotMatch(browserHtml, /Run 将不能继续执行，也不会自动归档/);
   assert.match(browserHtml, /body: JSON\.stringify\(\{\}\)/);
   assert.doesNotMatch(browserHtml, /prompt\(t\("abandonReason"\)/);
   assert.doesNotMatch(browserHtml, /abandonReason:/);

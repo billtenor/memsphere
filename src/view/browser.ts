@@ -671,7 +671,7 @@ export const browserHtml = String.raw`<!doctype html>
       jumpToCurrentStepTitle: { zh: "跳转到当前正在运行的流程节点", yaml: "Jump to the currently running flow node" },
       archive: { zh: "归档", yaml: "Archive" },
       abandon: { zh: "废弃", yaml: "Abandon" },
-      abandonRunConfirm: { zh: "确认废弃这个 Run？已有内容会保留，但 Run 将不能继续执行，也不会自动归档。", yaml: "Abandon this Run? Existing evidence will be preserved, but the Run cannot continue and will not be archived automatically." },
+      abandonRunConfirm: { zh: "确认废弃这个 Run？废弃后将不能继续执行。", yaml: "Abandon this Run? It cannot continue after abandonment." },
       archiveDoneOnly: { zh: "只有 done 或 abandoned 状态的 Run 可以归档", yaml: "Only done or abandoned Runs can be archived" },
       archiveRunConfirm: { zh: "归档这个 run？归档后它将不再出现在 Task 列表中。", yaml: "Archive this run? It will no longer appear in the Task list." },
       archiveChangeConfirm: { zh: "归档这个 ChangeSet？归档后它将不再在页面中展示。", yaml: "Archive this ChangeSet? It will no longer appear in the View." },
