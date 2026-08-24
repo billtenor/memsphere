@@ -13,6 +13,7 @@ import {
   assertManagedProjectHealthy,
   deleteMemoriesByIdentity,
   editMemories,
+  editMemoriesByIdentity,
   failMemoryChange,
   publishMemoryChange,
   validateMemoryChange
@@ -83,7 +84,7 @@ type SystemMemoryReconcilePlan = {
   project: string;
   sourceRoot: string;
   creates: BundledSystemMemoryDescriptor[];
-  updates: BundledSystemMemoryDescriptor[];
+  updates: SystemMemoryUpdateDescriptor[];
   deletes: SystemMemoryStoreDescriptor[];
 };
 
@@ -91,6 +92,11 @@ type SystemMemoryStoreDescriptor = {
   id: string;
   kind: MemoryKind;
   names: string[];
+  baseDigest: string;
+};
+
+type SystemMemoryUpdateDescriptor = BundledSystemMemoryDescriptor & {
+  targetPath: string;
   baseDigest: string;
 };
 
@@ -114,9 +120,20 @@ async function prepareSelectedManagedSystemMemoryChange(): Promise<SystemMemoryC
   try {
     const installs = [...plan.creates, ...plan.updates];
     if (installs.length > 0) {
-      result = await editMemories({
-        references: installs.map((memory) => memory.reference),
-        createPaths: new Map(plan.creates.map((memory) => [memory.reference, memory.path])),
+      result = await editMemoriesByIdentity({
+        targets: [
+          ...plan.creates.map((memory) => ({
+            reference: memory.reference,
+            path: memory.path,
+            operation: "create" as const
+          })),
+          ...plan.updates.map((memory) => ({
+            reference: memory.reference,
+            path: memory.targetPath,
+            operation: "update" as const,
+            baseDigest: memory.baseDigest
+          }))
+        ],
         onChangeCreated: (created) => { result = created; }
       });
       for (const memory of installs) {
@@ -173,7 +190,7 @@ async function buildSelectedSystemMemoryReconcilePlan(): Promise<SystemMemoryRec
   const currentByPath = new Map(currentDescriptors.map((descriptor) => [descriptor.id, descriptor]));
   const installReferences = new Set(memories.map((memory) => memory.reference));
   const creates: BundledSystemMemoryDescriptor[] = [];
-  const updates: BundledSystemMemoryDescriptor[] = [];
+  const updates: SystemMemoryUpdateDescriptor[] = [];
   for (const memory of memories) {
     const current = currentByReference.get(memory.reference);
     if (!current) {
@@ -190,7 +207,9 @@ async function buildSelectedSystemMemoryReconcilePlan(): Promise<SystemMemoryRec
       readFile(join(sourceRoot, memory.path)),
       readFile(join(context.primary.memoryRoot, current.id))
     ]);
-    if (!bundledSource.equals(currentSource)) updates.push(memory);
+    if (!bundledSource.equals(currentSource)) {
+      updates.push({ ...memory, targetPath: current.id, baseDigest: current.baseDigest });
+    }
   }
   const deletes: SystemMemoryStoreDescriptor[] = [];
   for (const tombstone of reservedSystemMemoryRemovalTombstones(manifest)) {
