@@ -43,6 +43,9 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "memsphere-memory",
     "Memsphere",
     "memsphere-framework",
+    "个性化软件",
+    "Personalized Software",
+    "memsphere-personalized-software",
     "Concept",
     "memsphere-concept",
     "Statement",
@@ -125,7 +128,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   assert(files.every((file) => file.entity.defines.every((definition) => typeof definition === "string")));
   assert.equal(manifest.version, 3);
   assert.equal("memory_syntax" in manifest ? manifest.memory_syntax : undefined, currentMemorySyntax);
-  assert.equal(manifest.system_memory.install.length, 17);
+  assert.equal(manifest.system_memory.install.length, 18);
   assert.deepEqual(systemMemories.map((memory) => memory.path), manifest.system_memory.install);
   assert(systemMemories.every((memory) => memory.reference === `${memory.kind}/${memory.names[0]}`));
   assert(systemMemories.every((memory) => memory.names.length > 0));
@@ -159,7 +162,9 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     join(bundledReservedMemoryRoot(), "procedures", "memsphere-tutorial-chapter-01.yaml"),
     "utf8"
   );
-  assert.match(tutorial, /Project Catalog/);
+  assert.match(tutorial, /Prompt、Skill、Memsphere/);
+  assert.match(tutorial, /Human 真实场景/);
+  assert.match(tutorial, /当前教学 Run 的 View 观察指引/);
   assert.doesNotMatch(tutorial, /导入 Reserved Memory|Imported|not imported|了解并导入 Reserved Memory/);
 });
 

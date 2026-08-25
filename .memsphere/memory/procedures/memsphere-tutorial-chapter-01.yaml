@@ -4,348 +4,160 @@ names:
   - memsphere-tutorial-chapter-01
   - memsphere 教学流程-第一章
 defines:
-  - 面向首次使用 memsphere 的用户，在已绑定 Project 的真实 Workspace 或练习目录中逐步理解经验记忆、四类 Memory 及主要用户功能。
-  - 每个教学主题都允许 human 留在当前步骤继续讨论，明确选择进入下一步后才继续。
-  - 必须由 human 完成的操作交给 human；agent 可以完成的操作由 agent 执行并说明结果。
+  - 面向首次使用 Memsphere 的 Human，从一个真实需求出发理解个性化软件、Prompt/Skill/Memsphere 的适用边界、完整愿景与当前能力，并在当前教学 Run 和 View 中完成一次可观察的入门闭环。
+  - 本章帮助 Human 判断自己为什么需要或不需要 Memsphere；结论可以是 Prompt、Skill 或 Memsphere，不以使用更多功能作为成功标准。
 asserts:
-  - 不得修改 System Memory 或覆盖已有用户 Memory；写操作必须说明目标和影响。
-  - 每个教学主题尚未开始或 human 选择继续讨论时必须留在对应 while；只有 human 明确选择进入下一步时才能退出。
-  - Human 在任一教学主题中提问时，agent 必须先使用 memsphere 查询并读取相关 Memory；Memory 中没有可靠答案时必须明确说明不知道，不得编造。
+  - 不得修改 System Memory 或用户 Memory，不得为教学创建额外 Procedure、ChangeSet 或 Run；任何准入写操作都必须说明目标、影响并限定为当前环境所需。
+  - 必须明确区分完整产品方向和当前版本：当前首先实现 Memory，个性化 CLI、数据和界面成为完整一等资产仍是后续方向。
+  - 不得在本章执行 Memory edit/publish、ChangeSet 处理、Artifact Review、ACP Provider 配置、运行期 Slot 换绑、Run abandon 或 Archive。
+  - 纯教学 Human checkpoint 只能使用流程中声明的四个 Human Action；环境授权、外部排障和 Human 主动提问不计入。
+  - Human 在任一步骤提问时，Agent 必须先使用 memsphere 读取与问题相关的当前 Memory；Memory 中没有可靠答案时必须明确说明不知道，不得编造。
 goals:
-  - 让用户理解 memsphere 如何积累并复用人类经验与 Agent 成功经验。
-  - 让用户理解 Concept、Statement、Schema、Procedure 的职责和协作方式。
-  - 让用户理解 Memory 来源、加载入口、View、Run、ChangeSet Comment 和维护方式。
+  - 让 Human 理解 Memsphere 是通用 Agent 之上的个性化软件运行环境，而不是另一个 Agent 或完整等同于 Memory 的框架。
+  - 让 Human 能根据真实需求判断 Prompt、Skill 或 Memsphere 是否适用，并理解软件可以从自然语言开始按需生长。
+  - 让 Human 理解四类软件资产、两种算力、当前版本能力及四类 Memory 的协作关系。
+  - 让 Human 在 View 中观察当前教学 Run、步骤与 Artifact，并获得适合自己场景的下一步起点建议。
 flow:
   - !while
     condition: !action
-      action: 检查教学准入要求，判断是否仍有任何一项未满足。
+      action: 实际检查教学准入要求，判断是否仍有任何一项未满足。
       actor: agent
       asserts:
-        - 必须已经安装 memsphere npm 包与 memsphere skill，并存在可用 Project；当前 Workspace 必须绑定 Primary Project。
-        - 当前 Project 的 config 与 Memory Store 必须可用，且 memsphere validate 必须通过。
-        - memsphere View 必须使用当前环境可访问的 Host 和一个可用端口成功启动，且 agent 已确认访问地址可用；首次配置时端口可以由 agent 随机选择。
-        - 必须实际检查 memsphere CLI 与 skill、Project Binding、config、Memory Store 和 memsphere validate 结果，不得依据默认值或历史结果推断。
-        - 任一准入项无法确认时，必须判定为尚未满足。
+        - 必须实际检查 Node.js 20+、Git、memsphere CLI、memsphere Skill、当前 Workspace 的 Primary Project Binding、当前 Project 类型和配置、`memsphere validate`，以及当前环境可访问的 View 地址。
+        - 必须区分 Managed 与 Embedded Project，并只把“Memory 是否跟随代码仓库”作为本章需要理解的首要差异。
+        - Windows 专项要求只在原生 Windows 环境出现；WSL 按独立 Linux 环境处理。
+        - "`memsphere project repair` 只在 Managed Project 的 System Memory 确有故障且适用时作为排障手段，不是准入必经步骤。"
+        - 任一项目无法实际确认时必须判定为尚未满足，不得依据默认值或历史结果推断。
       artifact: !artifact
         name: 是否仍有未满足的教学准入要求
         type: boolean
     do:
       - !action
-        action: 定位未满足的准入项，完成 agent 可以安全处理的事项，并为必须由 human 完成的事项给出最小操作和影响说明。
+        action: 定位未满足的准入项，完成 Agent 可以安全处理的事项；需要 Human 授权、安装、认证、创建或绑定 Project 时，给出最小操作、影响和验证方法。
         actor: agent
         asserts:
-          - 不得替 human 猜测 Primary Project；需要新建或绑定时说明 `memsphere project create <name> --bind` 或 `memsphere project bind <name>` 的影响。
-          - View 尚不可用时，agent 必须根据当前环境选择 Host 和可用端口、启动或重启 View，并实际确认访问地址可用。
+          - 不得替 Human 猜测 Primary Project；需要创建或绑定时说明 Managed 与 Embedded 的选择及对应命令影响。
+          - View 尚不可访问时，选择适合当前环境的 Host 和可用端口启动或重启，并实际检查访问结果。
         artifact: !artifact
           name: 教学准入处理结果
           format: markdown
       - !if
         condition: !action
-          action: 判断教学准入处理结果中是否仍有必须由 human 完成的事项。
+          action: 判断准入处理结果中是否仍有必须由 Human 完成的外部操作。
           actor: agent
           artifact: !artifact
             name: 是否需要 Human 完成准入操作
             type: boolean
         then:
           - !action
-            action: 完成教学准入处理结果中明确标记为必须由 human 执行的操作，并反馈结果。
+            action: 完成准入处理结果中明确列出的授权、安装、认证、Project 创建或绑定操作，并反馈实际结果。
             actor: human
             artifact: !artifact
               name: Human 准入操作结果
               format: markdown
-  - !while
-    condition: !action
-      action: 判断 human 是否尚未完成“memsphere 概述”教学主题。
-      actor: agent
-      artifact: !artifact
-        name: 是否继续 memsphere 概述
-        type: boolean
-    do:
-      - !action
-        action: |-
-          介绍 memsphere 解决的问题、经验来源和复用方式。首次进入时可以这样表述：
-          “memsphere 是面向用户经验记忆的框架，解决 Agent 面对某种情境时应该如何判断、如何行动，以及依据什么准则的问题。
-          经验可以来自你的总结。你可以告诉我，做某件事时先做什么、再做什么，以及其中需要注意什么；我会把它提取成经验记忆。以后你只需提出同类任务，我就会依据这些经验执行。
-          经验也可以来自大模型成功完成的任务。当一次任务完成得很好时，你可以让我把刚才的方法整理成经验记忆，供下一次直接复用。”
-          后续轮次根据 human 上一轮提出的问题继续解释，不重复无关内容。
-        actor: agent
-        artifact: !artifact
-          name: memsphere 概述
-          format: markdown
-      - !action
-        action: 选择继续讨论 memsphere 概述，或明确进入下一个教学主题；继续讨论时说明问题或想法。
-        actor: human
-        artifact: !artifact
-          name: memsphere 概述学习选择
-          format: markdown
+
+  - !action
+    action: 读取 memsphere-personalized-software 与 memsphere-framework，简要介绍 Memsphere 的位置和 Prompt、Skill、Memsphere 的适用边界；然后邀请 Human 提供一项自己真实做过或希望反复完成的需求。可以用“每天整理关注领域的新论文，并说明哪些值得阅读”帮助理解，但不得替 Human 编造场景。
+    actor: agent
+    asserts:
+      - 必须说明 Memsphere 不是 Agent，而是运行在通用 Agent 之上的个性化软件运行环境；Agent、LLM 与硬件分别承担执行、语义算力和底层计算职责。
+      - 必须说明 Prompt、Skill、Memsphere 不是必须走完的升级路线，简单场景不需要 Memsphere 也是有效结论。
+    artifact: !artifact
+      name: 产品定位与场景引导
+      format: markdown
+
+  - !action
+    action: 描述一项自己的真实需求，包括它发生一次还是反复发生、目前如何完成、哪些知识或判断需要长期保留；也可以明确使用“个人研究助手”案例继续。
+    actor: human
+    artifact: !artifact
+      name: Human 真实场景
+      format: markdown
 
   - !while
     condition: !action
-      action: 判断 human 是否尚未完成“Concept”教学主题。
+      action: 根据 Human 最近一次“软件生长模型学习确认”判断是否需要继续讲解：尚未确认，或仍有疑问、不同意或需要修正时返回 true；只有 Human 明确表示内容清楚且认可时返回 false。
       actor: agent
       artifact: !artifact
-        name: 是否继续 Concept 教学
+        name: 是否继续讲解软件生长模型
         type: boolean
     do:
       - !action
-        action: |-
-          介绍 Concept 的用途和示例。首次进入时可以这样表述：
-          “Concept，也就是概念记忆，用于定义一个概念或领域对象是什么。它解决的是人与 Agent 对同一个词理解不一致的问题。
-          例如，我们可以把‘大额报销’定义为‘金额超过 5000 元的报销’。以后流程或规则提到大额报销时，大家使用的就是同一个含义。”
-          后续轮次根据 human 的问题继续讨论。
-        actor: agent
-        artifact: !artifact
-          name: Concept 教学内容
-          format: markdown
-      - !action
-        action: 选择继续讨论 Concept，或明确进入下一个教学主题；继续讨论时说明问题或想法。
-        actor: human
-        artifact: !artifact
-          name: Concept 学习选择
-          format: markdown
-
-  - !while
-    condition: !action
-      action: 判断 human 是否尚未完成“Statement”教学主题。
-      actor: agent
-      artifact: !artifact
-        name: 是否继续 Statement 教学
-        type: boolean
-    do:
-      - !action
-        action: |-
-          介绍 Statement 的用途和示例。首次进入时可以这样表述：
-          “Statement，也就是陈述记忆，用于表达可以独立理解和核查的事实、规则、约束与建议。它把隐藏在大段描述中的判断准则拆解成 Agent 可以明确遵循的规则。
-          例如，‘大额报销必须经过部门负责人审批’就是一条 Statement。Agent 遇到满足‘大额报销’定义的申请时，必须遵守这条审批规则。
-          较大的 Statement 可以用 section 分组突出主题。其他 Statement、Schema、Procedure 或步骤需要复用规则时，在 asserts 或 suggests 中引用它：asserts 只引入强制规则，suggests 只引入建议，展示时仍保留 section 层级。”
-          后续轮次根据 human 的问题继续讨论。
-        actor: agent
-        artifact: !artifact
-          name: Statement 教学内容
-          format: markdown
-      - !action
-        action: 选择继续讨论 Statement，或明确进入下一个教学主题；继续讨论时说明问题或想法。
-        actor: human
-        artifact: !artifact
-          name: Statement 学习选择
-          format: markdown
-
-  - !while
-    condition: !action
-      action: 判断 human 是否尚未完成“Schema”教学主题。
-      actor: agent
-      artifact: !artifact
-        name: 是否继续 Schema 教学
-        type: boolean
-    do:
-      - !action
-        action: |-
-          介绍 Schema 的用途和示例。首次进入时可以这样表述：
-          “Schema，也就是图式记忆，用于描述一个产物应该具备的结构、内容和质量要求。它不只是输出模板，也表达‘一个合格结果应该是什么样’。
-          例如，报销单的 Schema 可以要求结果包含金额、用途、申请人和票据信息。Agent 生成或检查报销单时，就能据此判断内容是否完整。”
-          后续轮次根据 human 的问题继续讨论。
-        actor: agent
-        artifact: !artifact
-          name: Schema 教学内容
-          format: markdown
-      - !action
-        action: 选择继续讨论 Schema，或明确进入下一个教学主题；继续讨论时说明问题或想法。
-        actor: human
-        artifact: !artifact
-          name: Schema 学习选择
-          format: markdown
-
-  - !while
-    condition: !action
-      action: 判断 human 是否尚未完成“Procedure”教学主题。
-      actor: agent
-      artifact: !artifact
-        name: 是否继续 Procedure 教学
-        type: boolean
-    do:
-      - !action
-        action: |-
-          介绍 Procedure 的用途和示例。首次进入时可以这样表述：
-          “Procedure，也就是程序记忆，用于描述任务目标、执行步骤、分支与循环、由谁执行，以及每一步应该产生什么结果。它让过程经验真正进入 Agent 的逐步执行。
-          例如，一个报销 Procedure 可以先收集报销信息，再判断是否属于大额报销；属于大额报销时进入负责人审批，最后登记处理结果。”
-          后续轮次根据 human 的问题继续讨论。
-        actor: agent
-        artifact: !artifact
-          name: Procedure 教学内容
-          format: markdown
-      - !action
-        action: 选择继续讨论 Procedure，或明确进入下一个教学主题；继续讨论时说明问题或想法。
-        actor: human
-        artifact: !artifact
-          name: Procedure 学习选择
-          format: markdown
-
-  - !while
-    condition: !action
-      action: 判断 human 是否尚未完成“Memory 协作与加载入口”教学主题。
-      actor: agent
-      artifact: !artifact
-        name: 是否继续 Memory 协作与加载入口教学
-        type: boolean
-    do:
-      - !action
-        action: |-
-          介绍四类 Memory 如何协作，以及 Procedure 是 Agent 遵循经验记忆完成任务的唯一入口。首次进入时可以这样表述：
-          “四类 Memory 并不是彼此孤立的。Concept 提供一致的理解，Statement 提供判断准则，Schema 约束过程和最终产物，Procedure 把这些经验组织成一次完整执行。
-          当你让我‘处理这笔 6000 元的报销’时，Agent 会先选择适用的报销 Procedure，再在执行过程中加载‘大额报销’Concept、审批 Statement 和报销单 Schema。你不需要自己逐条指定这些记忆。
-          因此，Procedure 是 Agent 遵循经验记忆完成任务的唯一入口；Agent 总是先选择流程，再按当前步骤需要加载其他 Memory。”
-          后续轮次根据 human 的问题继续讨论。
+        action: 根据 Human 真实场景判断更适合 Prompt、Skill 还是 Memsphere，并用该场景解释软件如何按需生长出 Memory、个性化 CLI、数据和界面，以及 Token 算力与确定性算力如何协同。
         actor: agent
         asserts:
-          - 只介绍用户需要理解的加载原则，不展开 Node 局部读取等 CLI 细节。
+          - 判断必须给出场景依据；即使结论是不需要 Memsphere，也要说明什么变化出现后才值得升级。
+          - 必须说明 Agent 通过 Memory 进入软件，人通过界面进入软件，数据是 CLI 与界面的公共底座；软件不要求第一天拥有全部四类资产。
+          - 必须说明早期可以更多依赖 Token 算力探索，稳定、重复、边界明确的步骤再逐步沉淀为 CLI 交给确定性算力。
+          - 不得把 Memsphere 当前管理 CLI 或通用 View 冒充为该场景已经拥有个性化 CLI、数据或界面资产。
         artifact: !artifact
-          name: Memory 协作与加载入口说明
+          name: 场景适用性与软件生长模型
           format: markdown
       - !action
-        action: 选择继续讨论 Memory 协作与加载入口，或明确进入下一个教学主题；继续讨论时说明问题或想法。
+        action: 确认场景适用性判断和软件生长模型是否清楚；如有疑问或不同意，说明需要解释或修正的部分，否则明确继续。
         actor: human
         artifact: !artifact
-          name: Memory 协作与加载入口学习选择
+          name: 软件生长模型学习确认
           format: markdown
 
   - !while
     condition: !action
-      action: 判断 human 是否尚未完成“Memory 来源”教学主题。
+      action: 判断 Human 是否尚未确认当前版本边界、四类 Memory 和当前 Project 类型清楚且正确。
       actor: agent
       artifact: !artifact
-        name: 是否继续 Memory 来源教学
+        name: 是否继续讲解当前能力
         type: boolean
     do:
       - !action
-        action: |-
-          介绍 Project Catalog 中的三类 Memory。首次进入时可以这样表述：
-          “System Memory 是 memsphere 正常运行和自举所需的内置记忆，创建 Managed Project 时会通过首笔 ChangeSet 安装；正式 Store 不应被直接编辑，后续更新也必须通过合法 ChangeSet 发布。
-          Primary Project 中的用户 Memory 是当前项目自己积累和维护的经验，修改时使用 ChangeSet 编辑、校验并发布。
-          Mounted Project Memory 来自独立演进的其他 Project，在当前 Workspace 中严格只读；同名时必须明确选择 Project，不能跨 Project 引用。”
-          后续轮次根据 human 的问题继续讨论。
+        action: 读取 memsphere-memory、memsphere-concept、memsphere-statement、memsphere-schema 与 memsphere-procedure，一次性说明当前版本能力、四类 Memory 的职责与协作方式，以及当前 Project 的 Managed/Embedded 类型。
         actor: agent
-        artifact: !artifact
-          name: Memory 来源说明
-          format: markdown
-      - !action
-        action: 选择继续讨论 Memory 来源，或明确进入下一个教学主题；继续讨论时说明问题或想法。
-        actor: human
-        artifact: !artifact
-          name: Memory 来源学习选择
-          format: markdown
-
-  - !while
-    condition: !action
-      action: 判断 human 是否尚未完成“View”教学主题。
-      actor: agent
-      artifact: !artifact
-        name: 是否继续 View 教学
-        type: boolean
-    do:
-      - !action
-        action: |-
-          提供已经通过准入检查的 View 访问地址，介绍 View 的定位和主要入口；必须把实际地址输出为可点击的 Markdown 链接，不得保留 Host 或端口占位符。首次进入时可以这样表述：
-          “View 是人使用 memsphere 的主要界面。顶部的 Memory 页面用于浏览和搜索当前 Project Catalog 中已经发布的 Memory；Task 页面用于查看正在执行或已经完成的 Run，以及每一步产生的 Artifact。
-          在 Memory 详情点击“修改”会创建一个 ChangeSet；进入 ChangeSet 后，可以直接在对应内容旁提交 Comment。设置页面则用于维护存储位置、View 服务和参与评审的人或 Agent。
-          我已经启动了当前 Project 的 View，你可以点击 [打开 memsphere View](<实际 View 访问地址>) 实际浏览；切换 Project 或修改设置都由你自行决定。”
-          后续轮次根据 human 的问题继续讨论。
-        actor: agent
-        artifact: !artifact
-          name: View 教学内容
-          format: markdown
-      - !action
-        action: 可打开 View 浏览；随后选择继续讨论 View，或明确进入下一个教学主题，继续讨论时说明问题或想法。
-        actor: human
         asserts:
-          - 不得直接编辑 System Memory；切换 Project 和修改设置必须由 human 自行决定。
+          - 必须说明当前版本首先实现 Memory，并列出 Project、Run、Artifact、Review、ChangeSet、View 与 Skill 接入；这些是完整愿景的第一块地基，不是四类资产已经全部完成。
+          - 必须把 Concept 解释为“它是什么”、Statement 解释为“什么必须成立”、Schema 解释为“合格结果长什么样”、Procedure 解释为“这件事如何完成”，并说明四者共同构成软件的语义部分。
+          - 只解释当前 Project 实际采用的类型和另一类型的首要差异，不展开 Mounted Project、完整 ChangeSet 生命周期、Review 配置或运行期换绑。
         artifact: !artifact
-          name: View 学习选择
+          name: 当前能力与 Memory 协作模型
+          format: markdown
+      - !action
+        action: 确认当前版本边界、四类 Memory 和当前 Project 类型是否清楚；如有疑问或不同意，说明需要解释或修正的部分，否则明确继续。
+        actor: human
+        artifact: !artifact
+          name: 当前能力学习确认
           format: markdown
 
   - !while
     condition: !action
-      action: 判断 human 是否尚未完成“Run”教学主题。
+      action: 判断 Human 是否尚未在 View 中找到当前教学 Run、当前步骤和至少一份 Artifact。
       actor: agent
       artifact: !artifact
-        name: 是否继续 Run 教学
+        name: 是否继续 View 实践
         type: boolean
     do:
       - !action
-        action: |-
-          承接已经介绍过的 Procedure，以当前教学流程为例重点介绍 Run、步骤、Actor 和 Artifact。首次进入时可以这样表述：
-          “前面介绍过，Procedure 是可重复使用的流程定义。一个 Procedure 被具体启动并执行一次，就是一次 Run；同一个 Procedure 可以在不同任务中产生多次独立的 Run。
-          Run 每次只开放当前步骤，步骤会指定由 Agent 还是 Human 完成，并把结果记录为 Artifact。我们现在进行的教学就是一次 Run：我负责讲解，你负责决定继续讨论还是进入下一步。
-          你可以在 View 顶部点击 Task，在左侧 running 分组中选择启动时通过 --name 指定的 Run 名称，查看本次教学 Run、当前步骤和已经产生的 Artifact；详情页会另行显示流程名称‘memsphere 教学流程-第一章’。”
-          后续轮次根据 human 的问题继续讨论。
+        action: 查询当前教学 Run 的实际状态，提供已经通过准入检查的可点击 View 地址、当前教学 Run 的用户可读名称和 Run ID，并指导 Human 在 View 中找到当前步骤和至少一份已上报 Artifact。
         actor: agent
+        asserts:
+          - 必须使用实际地址、Run 名称、Run ID、当前步骤和 Artifact，不得保留 Host、端口或名称占位符。
+          - 必须明确区分 Procedure 名称、单次 Run 名称和 Run ID；不得要求 Human 新建练习 Procedure 或额外 Run。
+          - 只要求观察，不在本章发起 Review、修改 Memory 或处理 ChangeSet。
         artifact: !artifact
-          name: Run 教学内容
+          name: 当前教学 Run 的 View 观察指引
           format: markdown
       - !action
-        action: 可在 View 中查看本次教学 Run；随后选择继续讨论 Run，或明确进入下一个教学主题，继续讨论时说明问题或想法。
+        action: 打开 View，按指引找到当前教学 Run、当前步骤和至少一份 Artifact；反馈实际看到的内容、无法访问的问题或仍有的疑问。
         actor: human
         artifact: !artifact
-          name: Run 学习选择
-          format: markdown
-
-  - !while
-    condition: !action
-      action: 判断 human 是否尚未完成“ChangeSet Comment”教学主题。
-      actor: agent
-      artifact: !artifact
-        name: 是否继续 ChangeSet Comment 教学
-        type: boolean
-    do:
-      - !action
-        action: |-
-          只介绍 ChangeSet Comment 的用途和处理方式。首次进入时可以这样表述：
-          “要对 Memory 提交具体修改意见，可以在 View 中打开 Memory、点击‘修改’创建 ChangeSet，再把 Comment 添加到对应内容旁边。Comment 提交后立即处于待处理状态，不存在额外的 Review 实体或‘提交意见’动作。
-          你可以在 Agent 对话中提供 ChangeSet ID，请 Agent 通过 memsphere ChangeSet Comment 处理流程接手。Agent 会逐条判断意见，修改候选 Memory 或说明拒绝理由，并在 validate 成功后完成 Comment。
-          Comment 会绑定提交时的具体内容位置；这里不展开 Run 中带评论、轮次和投票的 Artifact Review，后者会在更进阶的教学中介绍。”
-          后续轮次根据 human 的问题继续讨论。
-        actor: agent
-        artifact: !artifact
-          name: ChangeSet Comment 教学内容
-          format: markdown
-      - !action
-        action: 选择继续讨论 ChangeSet Comment，或明确进入下一个教学主题；继续讨论时说明问题或想法。
-        actor: human
-        artifact: !artifact
-          name: ChangeSet Comment 学习选择
-          format: markdown
-
-  - !while
-    condition: !action
-      action: 判断 human 是否尚未完成“Memory 创建与维护”教学主题。
-      actor: agent
-      artifact: !artifact
-        name: 是否继续 Memory 创建与维护教学
-        type: boolean
-    do:
-      - !action
-        action: |-
-          介绍用户创建和维护 Memory 的推荐方式。首次进入时可以这样表述：
-          “你通常不需要人工编辑 Memory YAML。要记录新经验时，可以直接告诉我经验内容，或者在一次任务完成得很好后，让我把刚才的方法提取成 Memory。
-          要修改 Memory 时，你可以在 View 中创建 ChangeSet，把 Comment 准确标注到对应内容；也可以直接在当前对话里告诉我应该如何修改。View 更适合逐项审阅，对话更适合快速说明整体想法。
-          我不建议你直接修改 Memory 文件。由 Agent 维护，更容易同时检查相关 Concept、Statement、Schema 和 Procedure，保持多种 Memory 之间的一致性。”
-          后续轮次根据 human 的问题继续讨论。
-        actor: agent
-        artifact: !artifact
-          name: Memory 创建与维护教学内容
-          format: markdown
-      - !action
-        action: 选择继续讨论 Memory 创建与维护，或明确完成教学；继续讨论时说明问题或想法。
-        actor: human
-        artifact: !artifact
-          name: Memory 创建与维护学习选择
+          name: View 实践结果
           format: markdown
 
   - !action
-    action: |-
-      汇总已完成的教学主题和 human 仍有疑问的内容，并推荐继续学习 memsphere 教学流程-第二章。
-      必须说明启动方法，可以这样表述：“需要继续时，你可以使用 memsphere skill，并对我说：‘请你启动 memsphere 教学流程-第二章 的流程。’”
+    action: 根据 Human 的真实场景、学习确认和 View 实践结果，形成第一章完成摘要与个性化软件起点建议。
     actor: agent
+    asserts:
+      - 总结已经理解和完成的内容、仍未解决的问题及可立即采取的下一步。
+      - 最终建议必须明确选择 Prompt、Skill 或 Memsphere 作为当前起点，并说明理由。
+      - 适合 Memsphere 时，说明最先需要沉淀的 Memory、第一条 Procedure 驱动请求，以及未来可能按需生长的 CLI、数据和界面；不得把未来能力表述为当前交付。
+      - 第二章重构完成前，不得输出启动第二章的行动指令；不得推荐不存在的第三章或第四章。
     artifact: !artifact
-      name: memsphere 教学完成摘要
+      name: memsphere 教学第一章完成摘要
       format: markdown
       final: true

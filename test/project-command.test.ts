@@ -119,6 +119,31 @@ test("Managed Project System Memory repair validates and publishes automatically
     await projectCreateCommand("existing", { bind: true });
     assert.equal(await prepareManagedSystemMemoryChange(), undefined);
 
+    const registry = await readProjectRegistry(home);
+    const projectRoot = registry.projects.existing.root;
+    const memoryRoot = join(projectRoot, "memory");
+    const personalizedSoftwarePath = join(memoryRoot, "concepts", "memsphere-personalized-software.yaml");
+    await rm(personalizedSoftwarePath);
+    for (const relativePath of [
+      join("concepts", "memsphere-framework.yaml"),
+      join("procedures", "memsphere-tutorial-chapter-01.yaml")
+    ]) {
+      const path = join(memoryRoot, relativePath);
+      const source = await readFile(path, "utf8");
+      await writeFile(
+        path,
+        source.replace("  - !ref\n    target: concepts/memsphere-personalized-software\n", "")
+      );
+    }
+    await runGit(["add", "-A"], { cwd: memoryRoot });
+    await runGit(["commit", "-m", "Simulate Project created before new System Memory"], { cwd: memoryRoot });
+    const legacyRevision = await runGit(["rev-parse", "HEAD"], { cwd: memoryRoot }).then((result) => result.stdout);
+    const legacyConfigPath = join(projectRoot, "config.json");
+    const legacyConfig = JSON.parse(await readFile(legacyConfigPath, "utf8"));
+    legacyConfig.store.published_revision = legacyRevision;
+    await writeFile(legacyConfigPath, `${JSON.stringify(legacyConfig, null, 2)}\n`);
+    await assert.rejects(access(personalizedSoftwarePath), /ENOENT/);
+
     const localEdit = await editMemories({ references: ["concepts/memsphere-memory"] });
     const localTarget = localEdit.change.targets[0];
     const localCandidate = join(localEdit.candidateRoot, localTarget.path);
@@ -127,8 +152,7 @@ test("Managed Project System Memory repair validates and publishes automatically
 
     await projectRepairCommand("existing");
     assert.equal(await prepareManagedSystemMemoryChange("existing"), undefined);
-    const registry = await readProjectRegistry(home);
-    const projectRoot = registry.projects.existing.root;
+    assert.match(await readFile(personalizedSoftwarePath, "utf8"), /memsphere-personalized-software/);
     const repairedConfig = JSON.parse(await readFile(join(projectRoot, "config.json"), "utf8")) as {
       store: { published_revision: string };
     };
