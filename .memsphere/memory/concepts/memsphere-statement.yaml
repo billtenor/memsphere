@@ -5,8 +5,8 @@ names:
   - Statement
 defines:
   - memsphere 中用于表达可被核查的事实、规则、约束和建议的 Memory。
-  - Statement 通过 asserts 列出必须成立的断言，通过 suggests 列出可以参考但不强制满足的建议，并通过 sections 按树状层级组织较大的规则集合。
-  - asserts 与 suggests 中都可以引用具名 Statement，引用所在字段决定引入目标的断言通道或建议通道。
+  - Statement 通过 asserts 列出必须遵守的规则，通过 suggests 列出可以参考但不强制满足的建议，并通过 sections 按树状层级组织较大的规则集合。
+  - asserts 与 suggests 中都可以引用具名 Statement，引用所在字段决定引入目标的规则通道或建议通道。
   - sections 的树状层级用于组织和呈现规则，不改变规则的强制程度。
   - Statement 不用于解释领域术语，也不用于定义文档或数据结构；这些内容分别由 Concept 和 Schema 表达。
   - Statement 的合法 YAML 结构由 memsphere-statement-schema 定义。

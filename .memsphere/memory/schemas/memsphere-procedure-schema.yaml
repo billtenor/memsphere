@@ -12,7 +12,7 @@ asserts:
   - "syntax 必须填写 memsphere-20260721-stable。"
   - name 与 names 必须且只能使用一个；顶层规范名称必须是 1–120 字符的小写 ASCII kebab-case。names 的后续成员是别名，可以使用 Unicode 和内部空格，但不得包含首尾空白、控制字符或 `/`，且全部名称不得重复。
   - defines 必须是由非空字符串组成的非空数组，不允许 !ref 或匿名结构。
-  - Procedure.asserts 可以包含非空字符串或指向 Statement 的 !ref，引用只投影目标的有效断言。
+  - Procedure.asserts 可以包含非空字符串或指向 Statement 的 !ref，引用只投影目标的有效规则。
   - Procedure.asserts 如出现，其中每一项都在整个 Procedure 及其调用链执行期间持续生效。
   - flow 的每个成员必须使用 !action、!if、!while 或 !call tag，并满足对应节点规则。
   - "!action 只允许 action、actor、asserts、suggests 和 artifact；artifact 必须使用 !artifact tag，并只允许 name、type、format、schema、review 和 final。"

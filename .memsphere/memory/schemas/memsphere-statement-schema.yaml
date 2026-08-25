@@ -11,7 +11,7 @@ asserts:
   - "syntax 必须填写 memsphere-20260721-stable；嵌套 Statement 不得声明 syntax。"
   - name 与 names 必须且只能使用一个；顶层规范名称必须是 1–120 字符的小写 ASCII kebab-case。names 的后续成员是别名，可以使用 Unicode 和内部空格，但不得包含首尾空白、控制字符或 `/`，且全部名称不得重复。
   - defines 如出现必须是由非空字符串组成的非空数组，不允许 !ref 或匿名结构。
-  - asserts 与 suggests 可以包含非空字符串或指向 Statement 的 !ref；引用分别只引入目标的有效断言或有效建议。
+  - asserts 与 suggests 可以包含非空字符串或指向 Statement 的 !ref；引用分别只引入目标的有效规则或有效建议。
   - 每个 Statement 节点必须至少包含 asserts、suggests 或 sections 中的一项；suggests 不得削弱或替代 asserts。
   - sections 的成员必须使用 !statement tag 和非空名称，同级规范名称不得重复，并递归遵循本 Schema。
 fields:

@@ -10,7 +10,7 @@ Memory 来源：ChangeSet {{memorySource.changeId}} @ {{memorySource.checkpointD
 {{#each procedureAsserts}}
 {{#if @first}}
 
-流程断言：
+流程规则：
 {{/if}}
 - {{this}}
 {{/each}}
@@ -53,7 +53,7 @@ memsphere run repeat <count> --run {{runId}}
 {{#each step.asserts}}
 {{#if @first}}
 
-断言：
+规则：
 {{/if}}
 - {{this}}
 {{/each}}
@@ -103,7 +103,7 @@ memsphere run skip --run {{runId}}
 {{#each step.schemaWriting.actionAsserts}}
 {{#if @first}}
 
-步骤断言：
+步骤规则：
 {{/if}}
 - {{this}}
 {{/each}}
@@ -141,7 +141,7 @@ Schema 写作：
 {{#each step.progress.asserts}}
 {{#if @first}}
 
-字段断言：
+字段规则：
 {{/if}}
 - {{this}}
 {{/each}}

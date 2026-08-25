@@ -125,6 +125,8 @@ flow:
 
     const output = renderRunOutput({ kind: "start", run: started, runsRoot }, "zh-CN");
     assert.match(output, /来自 statements\/shared-rules/);
+    assert.match(output, /流程规则：/);
+    assert.doesNotMatch(output, /流程断言|步骤断言|字段断言|\n断言：/);
     assert.match(output, /章节 Security/);
     assert.match(output, /上下文:/);
     assert.match(output, /规则:/);

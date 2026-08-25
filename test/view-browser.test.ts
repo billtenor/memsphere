@@ -709,6 +709,8 @@ test("Task titles use the Run name and keep the Procedure name in details", () =
 });
 
 test("browser renders recursive Statement sections with per-reference effective expansion", () => {
+  assert.match(browserHtml, /asserts: \{ zh: "规则", yaml: "asserts" \}/);
+  assert.match(browserHtml, /procedureAsserts: \{ zh: "流程规则", yaml: "Procedure Asserts" \}/);
   assert.match(browserHtml, /suggests: \{ zh: "建议", yaml: "suggests" \}/);
   assert.match(browserHtml, /rules: \{ zh: "规则", yaml: "Rules" \}/);
   assert.match(browserHtml, /sections: \{ zh: "章节", yaml: "sections" \}/);
