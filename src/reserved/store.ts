@@ -34,24 +34,99 @@ const uniqueMemoryPathsSchema = z.array(memoryPathSchema).superRefine((paths, co
   }
 });
 
-const manifestSystemMemorySchema = z.object({
+const legacyManifestSystemMemorySchema = z.object({
   install: uniqueMemoryPathsSchema,
   remove: uniqueMemoryPathsSchema
+}).strict();
+
+const memoryIdentityReferenceSchema = z.string().min(1).superRefine((reference, context) => {
+  const separator = reference.indexOf("/");
+  const kind = reference.slice(0, separator);
+  const name = reference.slice(separator + 1);
+  if (
+    separator <= 0
+    || !isMemoryKind(kind)
+    || !name
+    || name.trim() !== name
+    || name.includes("/")
+    || name.includes("\\")
+    || name.includes("\0")
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `invalid canonical Memory reference: ${reference}`
+    });
+  }
+});
+
+const removalTombstoneSchema = z.object({
+  path: memoryPathSchema,
+  references: z.array(memoryIdentityReferenceSchema).min(1).superRefine((references, context) => {
+    const seen = new Set<string>();
+    for (const [index, reference] of references.entries()) {
+      if (seen.has(reference)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index],
+          message: `duplicate canonical Memory reference: ${reference}`
+        });
+      }
+      seen.add(reference);
+    }
+  })
+}).strict().superRefine((tombstone, context) => {
+  const kind = tombstone.path.split("/", 1)[0];
+  for (const [index, reference] of tombstone.references.entries()) {
+    if (!reference.startsWith(`${kind}/`)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["references", index],
+        message: `Memory reference kind does not match tombstone path: ${reference}`
+      });
+    }
+  }
+});
+
+const identityRemovalSchema = z.array(removalTombstoneSchema).superRefine((tombstones, context) => {
+  const seen = new Set<string>();
+  for (const [index, tombstone] of tombstones.entries()) {
+    if (seen.has(tombstone.path)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [index, "path"],
+        message: `duplicate removal tombstone path: ${tombstone.path}`
+      });
+    }
+    seen.add(tombstone.path);
+  }
+});
+
+const identityManifestSystemMemorySchema = z.object({
+  install: uniqueMemoryPathsSchema,
+  remove: identityRemovalSchema
 }).strict();
 
 export const reservedMemoryManifestSchema = z.discriminatedUnion("version", [
   z.object({
     version: z.literal(1),
-    system_memory: manifestSystemMemorySchema
+    system_memory: legacyManifestSystemMemorySchema
   }).strict(),
   z.object({
     version: z.literal(2),
     memory_syntax: z.literal(currentMemorySyntax),
-    system_memory: manifestSystemMemorySchema
+    system_memory: legacyManifestSystemMemorySchema
+  }).strict(),
+  z.object({
+    version: z.literal(3),
+    memory_syntax: z.literal(currentMemorySyntax),
+    system_memory: identityManifestSystemMemorySchema
   }).strict()
 ]).superRefine((manifest, context) => {
   const install = new Set(manifest.system_memory.install);
-  for (const [index, path] of manifest.system_memory.remove.entries()) {
+  const removePaths = manifest.version === 3
+    ? manifest.system_memory.remove.map((tombstone) => tombstone.path)
+    : manifest.system_memory.remove;
+  for (const [index, path] of removePaths.entries()) {
     if (install.has(path)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -63,6 +138,21 @@ export const reservedMemoryManifestSchema = z.discriminatedUnion("version", [
 });
 
 export type ReservedMemoryManifest = z.infer<typeof reservedMemoryManifestSchema>;
+
+export type ReservedSystemMemoryRemovalTombstone = {
+  path: string;
+  references: string[];
+};
+
+export function reservedSystemMemoryRemovalTombstones(
+  manifest: ReservedMemoryManifest
+): ReservedSystemMemoryRemovalTombstone[] {
+  if (manifest.version !== 3) return [];
+  return manifest.system_memory.remove.map((tombstone) => ({
+    path: tombstone.path,
+    references: [...tombstone.references]
+  }));
+}
 
 export type BundledSystemMemoryDescriptor = {
   path: string;

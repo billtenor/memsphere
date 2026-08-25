@@ -74,6 +74,8 @@ memsphere memory read memsphere-schema
 
 如果命令提示当前 Workspace 未绑定 Primary Project，告知用户使用 `memsphere project list` 查看 Project，并执行 `memsphere project bind <project-name>`；只需临时访问一个 Project 时使用全局 `--project <project-name>`，不得自行猜测目标。
 
+如果现有 Managed 或 Embedded Project 缺少 System Memory，或需要恢复、升级当前 memsphere 版本内置的 System Memory，使用 `memsphere project repair [project-name]`。目标选择顺序是显式名称、全局 `--project`、当前 Primary Project。Managed repair 内部生成受控 ChangeSet、校验完整有效 Memory 并自动发布；无差异时不创建 ChangeSet 或 Revision，ChangeSet 创建后的失败保留为带 failure 诊断的只读 `abandoned` 记录并清理 Workspace candidate。Embedded repair 使用当前 Git worktree 的有效 Memory Root，拒绝覆盖计划目标上的未提交修改，先校验完整候选 Store，再只写入可由 Git 审阅的 System Memory 差异，不 commit、push 或使用 Managed publish；linked worktree 中不会修改主 worktree。manifest v3 声明的废弃 System Memory 默认清理，但必须同时匹配历史路径和 canonical identity；路径被用户 Memory 复用时 repair 会在写入前失败。Mounted Project 仍是只读来源，也没有 `reinitialize` 别名。
+
 列表同时包含 Primary 与 Mounted Project 时，使用返回的 `project_name` 和 Revision 判断来源。跨 Project 出现同名 Memory 时必须使用 `--project` 明确选择；Mounted Project 在组合上下文中严格只读。
 
 Embedded Project 的配置使用 Git 主 worktree 绝对 `repository_path` 和仓库相对 `memory_path`。View 固定读取主 worktree；普通 CLI 根据当前命令所在 worktree 重映射 Memory Root，并拒绝其他仓库。使用 `memsphere memory edit <reference>` 时，Managed Project 编辑 CLI 返回的 ChangeSet Candidate；Embedded Project 编辑 CLI 返回的当前 worktree YAML 路径。当前分支缺少 Memory Root 时不得回退读取主 worktree。

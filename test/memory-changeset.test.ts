@@ -8,6 +8,7 @@ import { gitOutput, runGit } from "../src/git.js";
 import {
   checkpointWorkspaceChanges,
   editMemories,
+  failMemoryChange,
   memoryChangeSetSchema,
   publishMemoryChange,
   recoverMemory,
@@ -222,6 +223,26 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     const missingCandidate = await editMemories({ references: ["concepts/missing-candidate"] });
     await rm(join(missingCandidate.candidateRoot, missingCandidate.change.targets[0].path));
     await assert.rejects(validateMemoryChange(missingCandidate.change.id), /candidate file is missing/);
+
+    const diagnosedFailure = await editMemories({ references: ["concepts/diagnosed-failure"] });
+    const diagnosedValidation = await validateMemoryChange(diagnosedFailure.change.id);
+    assert.deepEqual(diagnosedValidation.issues, []);
+    const failedChange = await failMemoryChange(
+      diagnosedFailure.change.id,
+      "validate",
+      new Error("diagnostic summary\nprivate detail")
+    );
+    assert.equal(failedChange.status, "abandoned");
+    assert.equal(failedChange.failure?.stage, "validate");
+    assert.equal(failedChange.failure?.summary, "diagnostic summary");
+    assert.equal(failedChange.checkpoint?.digest, diagnosedValidation.checkpointDigest);
+    await assert.rejects(validateMemoryChange(diagnosedFailure.change.id), /already abandoned/);
+    await assert.rejects(publishMemoryChange(diagnosedFailure.change.id), /already abandoned/);
+    await assert.rejects(resumeMemoryChange(diagnosedFailure.change.id), /already abandoned/);
+    await assert.rejects(editMemories({
+      references: ["concepts/another-failure"],
+      changeId: diagnosedFailure.change.id
+    }), /already abandoned/);
 
     const first = await editMemories({ references: ["shared"] });
     const second = await editMemories({ references: ["shared"] });

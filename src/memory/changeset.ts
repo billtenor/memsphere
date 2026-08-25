@@ -108,6 +108,12 @@ const changeClaimSchema = z.object({
   claimed_at: z.string().datetime()
 }).strict();
 
+const changeFailureSchema = z.object({
+  stage: z.enum(["prepare", "validate", "publish"]),
+  failed_at: z.string().datetime(),
+  summary: z.string().min(1)
+}).strict();
+
 export const memoryChangeSetSchema = z.object({
   format_version: z.literal(1),
   id: z.string().min(1),
@@ -123,13 +129,22 @@ export const memoryChangeSetSchema = z.object({
   store_type: z.enum(["managed", "embedded"]).optional(),
   source_worktree: sourceWorktreeSchema.optional(),
   checkpoint: changeCheckpointSchema.optional(),
+  failure: changeFailureSchema.optional(),
   targets: z.array(changeTargetSchema),
   origin: z.enum(["cli", "view"]).default("cli"),
   created_by: memoryChangeActorSchema.optional(),
   scope: z.array(changeScopeSchema).default([]),
   comments: z.array(memoryChangeCommentSchema).default([]),
   claim: changeClaimSchema.optional()
-}).strict();
+}).strict().superRefine((change, context) => {
+  if (change.status !== "abandoned" && change.failure) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["failure"],
+      message: "only an abandoned ChangeSet may contain failure diagnostics"
+    });
+  }
+});
 
 export type MemoryChangeSet = z.infer<typeof memoryChangeSetSchema>;
 export type MemoryChangeOperation = z.infer<typeof changeTargetSchema>["operation"];
@@ -477,6 +492,8 @@ export async function editMemories(input: {
   operation?: "edit" | "delete";
   /** Internal-only storage paths for callers, such as bootstrap, that already own a stable path. */
   createPaths?: ReadonlyMap<string, string>;
+  /** Internal lifecycle hook for callers that must persist diagnostics after any post-create failure. */
+  onChangeCreated?: (created: { change: MemoryChangeSet; candidateRoot: string }) => void;
 }): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
   if (input.references.length === 0) throw new Error("provide at least one Memory reference");
   if (input.createPaths) {
@@ -513,6 +530,7 @@ export async function editMemories(input: {
     : await createChange(context.primary, workspace.key);
   assertDraftOwner(change, context.primary.name, workspace.key);
   const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
+  input.onChangeCreated?.({ change, candidateRoot });
   await mkdir(candidateRoot, { recursive: true });
 
   for (const target of targets) {
@@ -529,6 +547,65 @@ export async function editMemories(input: {
     await mkdir(dirname(candidate), { recursive: true });
     if (target.operation === "create") await writeFile(candidate, newMemoryTemplate(target.reference), "utf8");
     else await cp(source, candidate);
+  }
+  change.updated_at = new Date().toISOString();
+  await writeChange(context.primary, change);
+  return { change, candidateRoot };
+}
+
+/** Internal-only deletion entrypoint for a caller that already verified historical path and canonical identity. */
+export async function deleteMemoriesByIdentity(input: {
+  targets: Array<{ reference: string; path: string; baseDigest: string }>;
+  changeId?: string;
+  onChangeCreated?: (created: { change: MemoryChangeSet; candidateRoot: string }) => void;
+}): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
+  if (input.targets.length === 0) throw new Error("provide at least one Memory identity target");
+  const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  assertManaged(context.primary);
+  const workspace = await resolveWorkspaceIdentity();
+  const revision = context.primary.config.store.published_revision;
+  const targets: Array<z.infer<typeof changeTargetSchema>> = [];
+  const seen = new Set<string>();
+  for (const target of input.targets) {
+    assertSafeMemoryPath(target.path);
+    if (!target.reference.trim() || target.reference.includes("\0")) {
+      throw new Error(`invalid historical Memory identity: ${target.reference}`);
+    }
+    if (seen.has(target.path)) throw new Error(`duplicate historical Memory path: ${target.path}`);
+    seen.add(target.path);
+    const source = join(context.primary.memoryRoot, target.path);
+    if (!await exists(source)) throw new Error(`historical Memory path is missing: ${target.path}`);
+    const currentDigest = await gitBlobDigest(context.primary.memoryRoot, target.path);
+    if (currentDigest !== target.baseDigest) {
+      throw new Error(`historical Memory identity changed before deletion: ${target.reference}`);
+    }
+    targets.push({
+      operation: "delete",
+      reference: target.reference,
+      path: target.path,
+      base_digest: target.baseDigest,
+      added_revision: revision
+    });
+  }
+  const change = input.changeId
+    ? await readChange(context.primary, input.changeId)
+    : await createChange(context.primary, workspace.key);
+  assertDraftOwner(change, context.primary.name, workspace.key);
+  const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
+  input.onChangeCreated?.({ change, candidateRoot });
+  await mkdir(candidateRoot, { recursive: true });
+  for (const target of targets) {
+    const existingTarget = change.targets.find((current) => current.path === target.path);
+    if (existingTarget) {
+      if (existingTarget.reference !== target.reference) {
+        throw new Error(`Memory path is already targeted by ChangeSet: ${target.path}`);
+      }
+      continue;
+    }
+    change.targets.push(target);
+    const candidate = join(candidateRoot, target.path);
+    await mkdir(dirname(candidate), { recursive: true });
+    await cp(join(context.primary.memoryRoot, target.path), candidate);
   }
   change.updated_at = new Date().toISOString();
   await writeChange(context.primary, change);
@@ -666,6 +743,31 @@ export async function publishMemoryChange(
     if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
     return publishLocked(context.primary, change, candidateRoot, message);
   });
+}
+
+export async function failMemoryChange(
+  changeId: string,
+  stage: "prepare" | "validate" | "publish",
+  error: unknown
+): Promise<MemoryChangeSet> {
+  const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  assertManaged(context.primary);
+  const workspace = await resolveWorkspaceIdentity();
+  const change = await readChange(context.primary, changeId);
+  assertDraftOwner(change, context.primary.name, workspace.key);
+  const failed = memoryChangeSetSchema.parse({
+    ...change,
+    status: "abandoned",
+    claim: undefined,
+    failure: {
+      stage,
+      failed_at: new Date().toISOString(),
+      summary: safeFailureSummary(error)
+    },
+    updated_at: new Date().toISOString()
+  });
+  await writeChange(context.primary, failed);
+  return failed;
 }
 
 export async function validateMemoryChange(changeId?: string): Promise<MemoryChangeValidationResult> {
@@ -2229,7 +2331,7 @@ async function copyWorkingTree(source: string, destination: string): Promise<voi
   }
 }
 
-async function assertManagedHealthy(project: ResolvedProject): Promise<void> {
+export async function assertManagedProjectHealthy(project: ResolvedProject): Promise<void> {
   assertManaged(project);
   const [branch, revision, dirty] = await Promise.all([
     gitOutput(["branch", "--show-current"], project.memoryRoot),
@@ -2240,6 +2342,8 @@ async function assertManagedHealthy(project: ResolvedProject): Promise<void> {
     throw new Error("Managed Memory Store is frozen because its branch, HEAD, or working tree was modified outside Memsphere");
   }
 }
+
+const assertManagedHealthy = assertManagedProjectHealthy;
 
 function assertManaged(project: ResolvedProject): asserts project is ResolvedProject & { config: { store: { type: "managed"; branch: string; upstream?: string; published_revision: string }; control_plane?: ResolvedProject["config"]["control_plane"] } } {
   if (project.config.store.type !== "managed") throw new Error("Managed Memory ChangeSets are not available for an Embedded Project");
@@ -2268,6 +2372,12 @@ function assertDraftOwner(change: MemoryChangeSet, project: string, workspaceKey
   if (change.project !== project) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
   if (change.status !== "active") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
   if (change.workspace_key !== workspaceKey) throw new Error(`ChangeSet ${change.id} belongs to another Workspace`);
+}
+
+function safeFailureSummary(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const firstLine = message.split(/\r?\n/, 1)[0]?.trim() || "Unknown System Memory repair failure";
+  return firstLine.slice(0, 500);
 }
 
 function changePath(project: ResolvedProject, id: string): string {

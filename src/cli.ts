@@ -30,6 +30,7 @@ import {
   projectListCommand,
   projectMountCommand,
   projectPruneCommand,
+  projectRepairCommand,
   projectRegisterCommand,
   projectShowCommand,
   projectUnbindCommand,
@@ -122,6 +123,25 @@ project.command("show")
   .argument("[name]", "Project name; defaults to the current Primary")
   .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
   .action(projectShowCommand);
+
+project.command("repair")
+  .description("Restore or update bundled System Memory in a Managed or Embedded Project.")
+  .argument("[name]", "Project name; defaults to --project or the current Primary")
+  .addHelpText("after", `
+Safety and behavior:
+  Repairs only bundled System Memory in the selected Project; user Memory is not
+  modified, and Mounted Projects remain read-only catalog sources.
+  Deprecated bundled entries are deleted only when a manifest v3 tombstone matches
+  both their historical path and canonical identity.
+  Managed repair validates and publishes through a controlled ChangeSet. Embedded
+  repair validates the complete candidate, then writes only the System Memory diff
+  to the current Git worktree without committing or pushing it. Dirty repair targets
+  are never overwritten. If there are no differences, nothing is written.
+
+Project selection:
+  Explicit [name], then global --project, then the current Primary Project.
+`)
+  .action(projectRepairCommand);
 
 project.command("bind")
   .argument("<name>", "Project name")
