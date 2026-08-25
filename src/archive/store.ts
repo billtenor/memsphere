@@ -1,11 +1,10 @@
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { getReview, type ReviewFile } from "../review/store.js";
 import { readRun, type RunState } from "../run/store.js";
 
-export const archiveKinds = ["reviews", "runs"] as const;
+export const archiveKinds = ["runs", "changes"] as const;
 export type ArchiveKind = (typeof archiveKinds)[number];
-export type ArchiveObjectType = "review" | "run";
+export type ArchiveObjectType = "run";
 
 export type ArchiveEntry = {
   kind: ArchiveKind;
@@ -25,8 +24,8 @@ type ArchiveMetadata = {
 
 type ArchiveRoots = {
   archiveRoot: string;
-  reviewsRoot: string;
   runsRoot: string;
+  changesRoot: string;
 };
 
 export function archiveRootForScope(scopeRoot: string): string {
@@ -52,23 +51,9 @@ export async function listArchived(input: { archiveRoot: string; kind?: ArchiveK
   return entries.sort((a, b) => (b.archivedAt ?? b.id).localeCompare(a.archivedAt ?? a.id));
 }
 
-export async function archiveReview(input: Pick<ArchiveRoots, "archiveRoot" | "reviewsRoot"> & { id: string }): Promise<ArchiveEntry> {
-  const review = await getReview(input.reviewsRoot, input.id);
-  if (!review) throw new Error(`review not found: ${input.id}`);
-  ensureDone("review", review);
-
-  const activePath = join(input.reviewsRoot, input.id);
-  const archivePath = archiveItemPath(input.archiveRoot, "reviews", input.id);
-  await ensureCanMove(activePath, archivePath);
-  await mkdir(archiveKindRoot(input.archiveRoot, "reviews"), { recursive: true });
-  await rename(activePath, archivePath);
-  const metadata = await writeArchiveMetadata(archivePath, "reviews", input.id, "directory");
-  return { kind: "reviews", id: input.id, path: archivePath, archivedAt: metadata.archivedAt };
-}
-
 export async function archiveRun(input: Pick<ArchiveRoots, "archiveRoot" | "runsRoot"> & { id: string }): Promise<ArchiveEntry> {
   const run = await readRun(input.runsRoot, input.id);
-  ensureDone("run", run);
+  ensureTerminalRun(run);
 
   const layout = await resolveActiveRunLayout(input.runsRoot, input.id);
   const archivePath = archiveItemPath(input.archiveRoot, "runs", input.id);
@@ -86,15 +71,23 @@ export async function archiveRun(input: Pick<ArchiveRoots, "archiveRoot" | "runs
   return { kind: "runs", id: input.id, path: archivePath, archivedAt: metadata.archivedAt };
 }
 
-export async function restoreReview(input: Pick<ArchiveRoots, "archiveRoot" | "reviewsRoot"> & { id: string }): Promise<ReviewFile> {
-  const archivePath = archiveItemPath(input.archiveRoot, "reviews", input.id);
-  const activePath = join(input.reviewsRoot, input.id);
-  await ensureCanMove(archivePath, activePath);
-  await mkdir(input.reviewsRoot, { recursive: true });
-  await rename(archivePath, activePath);
-  const review = await getReview(input.reviewsRoot, input.id);
-  if (!review) throw new Error(`restored review is invalid: ${input.id}`);
-  return review;
+export async function archiveChangeDirectory(
+  input: Pick<ArchiveRoots, "archiveRoot" | "changesRoot"> & { id: string }
+): Promise<ArchiveEntry> {
+  if (!/^change-[a-zA-Z0-9-]+$/.test(input.id)) throw new Error(`invalid ChangeSet id: ${input.id}`);
+  const source = join(input.changesRoot, input.id);
+  const archivePath = archiveItemPath(input.archiveRoot, "changes", input.id);
+  if (await pathExists(archivePath)) throw new Error(`archive already exists: ${input.id}`);
+  await ensureCanMove(source, archivePath);
+  await mkdir(archiveKindRoot(input.archiveRoot, "changes"), { recursive: true });
+  await rename(source, archivePath);
+  try {
+    const metadata = await writeArchiveMetadata(archivePath, "changes", input.id, "directory");
+    return { kind: "changes", id: input.id, path: archivePath, archivedAt: metadata.archivedAt };
+  } catch (error) {
+    await rename(archivePath, source).catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function restoreRun(input: Pick<ArchiveRoots, "archiveRoot" | "runsRoot"> & { id: string }): Promise<RunState> {
@@ -145,6 +138,12 @@ async function resolveActiveRunLayout(runsRoot: string, id: string): Promise<{ l
 function ensureDone(type: ArchiveObjectType, item: { id: string; status: string }): void {
   if (item.status !== "done") {
     throw new Error(`only done ${type}s can be archived: ${item.id}`);
+  }
+}
+
+function ensureTerminalRun(run: Pick<RunState, "id" | "status">): void {
+  if (run.status !== "done" && run.status !== "abandoned") {
+    throw new Error(`only done or abandoned runs can be archived: ${run.id}`);
   }
 }
 

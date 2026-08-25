@@ -10,7 +10,7 @@ asserts:
   - 根节点必须使用 !concept 标签，只允许 syntax、name/names、defines 和 extends 字段。
   - "syntax 必须填写 memsphere-20260721-stable。"
   - name 与 names 必须且只能使用一个；顶层规范名称必须是 1–120 字符的小写 ASCII kebab-case。names 的后续成员是别名，可以使用 Unicode 和内部空格，但不得包含首尾空白、控制字符或 `/`，且全部名称不得重复。
-  - defines 可以包含非空字符串、!ref、匿名 !statement 或匿名 !schema；嵌套结构必须携带 YAML tag，全部成员共同生效。
+  - defines 必须是由非空字符串组成的非空数组，不允许 !ref 或匿名结构。
   - extends 如出现，其中每一项必须引用一个上位 Concept。
 fields:
   - !schema
@@ -34,15 +34,11 @@ fields:
       - Concept 的 canonical name 与别名，首项必须满足顶层 canonical name 规则。
   - !schema
     name: defines
-    optional: true
     type: array
-    items:
-      - !schema
-        type: string
-      - !schema
-        type: object
+    item: !schema
+      type: string
     defines:
-      - 对概念语义的文本定义、外部 Memory 引用，以及用于补充规则或结构的匿名 Statement、Schema。
+      - 对概念语义、用途和边界的文本定义。
   - !schema
     name: extends
     optional: true

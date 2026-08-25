@@ -52,6 +52,7 @@ export async function writeAgentReviewDebugArtifacts(input: {
     const assignmentId = artifactReviewAssignmentId(assignment);
     const sessionEnv = {
       MEMSPHERE_REVIEW_RUN_ID: input.run.id,
+      ...(input.run.memorySnapshot ? { MEMSPHERE_REVIEW_MEMORY_RUN_ID: input.run.id } : {}),
       MEMSPHERE_REVIEW_ASSIGNMENT_ID: assignmentId,
       MEMSPHERE_CONFIG_PATH: input.config.configPath,
       MEMSPHERE_WORKSPACE_ROOT: workspaceRoot,

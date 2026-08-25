@@ -17,7 +17,6 @@ export type MemsphereConfig = {
   homeRoot?: string;
   language: PromptLocale;
   memoryRoot: string;
-  reviewsRoot: string;
   runsRoot: string;
   archiveRoot: string;
   controlPlane?: ControlPlaneConfig;
@@ -103,7 +102,6 @@ async function readProjectExecutionConfig(options: {
     homeRoot: home,
     language: global.language ?? defaultPromptLocale,
     memoryRoot: context.primary.memoryRoot,
-    reviewsRoot: context.primary.paths.reviewsRoot,
     runsRoot: context.primary.paths.runsRoot,
     archiveRoot: context.primary.paths.archiveRoot,
     controlPlane: context.primary.config.control_plane

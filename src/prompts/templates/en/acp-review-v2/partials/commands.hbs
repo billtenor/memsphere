@@ -11,7 +11,7 @@
   memsphere-review run step show --step "<step-ref>" --output json
 - Read a prior Artifact from the outline when it is relevant:
   memsphere-review run artifact show --step "<step-ref>" --output json
-- Discover and read project Memory:
+- Discover and read project Memory; ChangeSet Run sessions automatically bind their frozen Memory snapshot:
   memsphere-review memory list --output json
   memsphere-review memory read <reference> --output json
 - Add a concrete review comment. Comment bodies use Markdown:

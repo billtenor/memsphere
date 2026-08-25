@@ -10,8 +10,12 @@ asserts:
   - 当用户已经给出可唯一解析的 bare 规范名称、bare 别名或 canonical 逻辑引用时，Agent 可以直接使用 memsphere memory read；目标尚未唯一确定时，必须先使用 memsphere memory list 发现候选。
   - 显式逻辑引用固定使用 `<kind>/<canonical-name>`；canonical name 必须是 1–120 字符的小写 ASCII kebab-case，不接受 alias。别名只能作为不带 kind 的 selector，并在同一解析范围内无冲突时定位到当前 canonical reference。
   - memsphere memory list 的 --query 只精确匹配规范名称或别名，不执行全文检索或语义检索；Agent 应优先使用从用户请求中提取的准确名称或别名，并在已知类型时同时使用 --kind。
-  - 不带 Memory 引用的 memsphere memory list 使用 names 与顶层字符串 defines 作为紧凑的发现元数据；内嵌 Statement 和 Schema 只通过 structured_defines 展示直接成员数量。
+  - 不带 Memory 引用的 memsphere memory list 使用 names 与顶层文本 defines 作为紧凑的发现元数据；列表不展开 asserts/suggests 中的 Statement 引用。
   - 顶层 list 中的 defines 用于理解和选择候选，但不能代替读取 Memory 内容。
+  - 普通 memory read 必须忠实展示声明结构，asserts/suggests 中的 !ref 保持为引用，不默认内联目标规则。
+  - 需要执行、判断、校验、Review 或审计有效规则时，系统必须计算引用闭包；需要向人或 Agent 呈现时，应按来源 Statement 与 section 层级分组，不拍平为无来源字符串。
+  - Memory 编辑、存储、diff 和普通浏览保留 !ref；View 可在引用处按需展开有效规则，并保留打开源 Statement 的入口。
+  - Run 创建时必须将当前可达的有效规则及来源冻结到快照；历史 Run 只展示当时冻结的规则，不用当前 Statement 重新计算。
   - Concept 必须完整读取；较长的 Statement、Schema 和 Procedure 可以完整读取，也可以使用 memsphere memory list <reference> 列出直接子 Node，并用 --node 逐层定位和读取相关内容。
   - Node 列表中的 node_ref 由 CLI 生成，Agent 必须原样使用，不得自行猜测或拼接；列表应按 Node 的实际主引用来源显示 name、field、artifact、condition_artifact 或 target，不得统一伪装成 name。
   - memsphere memory read <reference> --node <node_ref> 返回 context 和 fragment；二者共同构成局部内容的有效语义，必须一起理解和应用，不能把 fragment 当作脱离上下文的完整 Memory。
@@ -21,6 +25,8 @@ asserts:
   - Memory 文件名和目录位置属于 Provider 存储细节，不构成逻辑引用，Agent 不得通过物理路径推断 Memory 身份或来源。
   - Embedded Project 配置中的 repository_path 是主工作树绝对路径，memory_path 是仓库相对路径；View 展示该主工作树中的规范 Memory，CLI 命令在同一 Git common-dir 的 linked worktree 中执行时读取当前 worktree 的有效 Memory。
   - Embedded CLI 解析必须拒绝其他仓库和非 Git 工作区；当前 worktree 不存在 memory_path 时必须直接报错，不得静默读取主工作树。Agent 编辑时必须使用 memsphere memory edit 返回的当前 worktree 路径，并通过正常 Git 提交合入，不得对 Embedded Project 使用 ChangeSet publish。
+  - 使用验证成功的 active ChangeSet 启动 Run 时，Run 必须冻结该 checkpoint 的四类完整候选 Memory 快照，而不只冻结可执行 Procedure 和外部 Schema；Agent 在执行该 Run 时必须使用 memsphere memory list/read --run <run-id> 发现和读取该快照中的 Concept、Statement、Schema 与 Procedure，后续 ChangeSet 校验或工作树变化不得改变既有 Run 的读取结果。
+  - ChangeSet Run 的 Agent Reviewer 使用受限 memsphere-review memory list/read 时，Session 必须自动绑定当前 Run 的冻结 Memory 快照；不得允许 Reviewer 显式改读其他 Run。普通 Run 没有冻结 ChangeSet 快照时保持读取当前项目 Memory，历史 ChangeSet Run 缺少快照时不得伪装成已冻结。
   - Agent 应优先根据用户明确表达的目标选择 Memory，不能仅因某份 Memory 能解释输入中的局部事实就忽略更符合目标的候选。
   - 存在多个同样符合目标且无法消除歧义的候选时，Agent 必须列出候选并请求用户确认，不得静默选择。
   - Agent 不需要判断 Memory 是预置安装还是用户创建，也不得依赖该来源作出语义选择。

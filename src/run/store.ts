@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, posix, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
@@ -51,9 +51,17 @@ import {
 } from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
 import { MemoryNotFoundError, type MemoryCatalog } from "../memory/catalog.js";
+import { memoryKinds } from "../memory/kinds.js";
 import { currentMemorySyntax, type MemorySyntaxVersion } from "../memory/syntax.js";
 import { inheritSchemaFormat, resolveSchemaContract } from "../memory/schema.js";
+import {
+  flattenEffectiveRules,
+  resolveRuleParts,
+  type EffectiveRuleTree,
+  type RuleLookup
+} from "../memory/rules.js";
 import { resolvePromptLocale, type PromptLocale } from "../prompts/locale.js";
+import { terminateProcessTree } from "../platform-process.js";
 import {
   builtInArtifactFormats,
   stepActors,
@@ -64,6 +72,7 @@ import {
   type IfNode,
   type MemoryRefNode,
   type ProcedureMemory,
+  type RulePart,
   schemaNodeFromMemory,
   type RepeatNode,
   type SchemaMemory,
@@ -96,8 +105,24 @@ export class ArtifactAuthorizationFailure extends Error {
   }
 }
 
-export type RunStatus = "running" | "done";
+export type RunStatus = "running" | "done" | "abandoned";
 export type FrameType = "procedure" | "schema";
+
+export type RunAbandonment = {
+  abandonedAt: string;
+  reason?: string;
+  initiator: {
+    kind: "human";
+    actorId?: string;
+    name?: string;
+    source: "cli" | "view";
+  };
+  current?: {
+    frame: FrameType;
+    memoryName: string;
+    stepId: string;
+  };
+};
 
 export type SchemaConstraintSource = {
   path: string;
@@ -106,6 +131,9 @@ export type SchemaConstraintSource = {
   defines?: string[];
   asserts?: string[];
   suggests?: string[];
+  /** Frozen authority; asserts/suggests above are derived render caches. */
+  assertTree?: EffectiveRuleTree;
+  suggestTree?: EffectiveRuleTree;
 };
 
 export type SchemaStepContext = {
@@ -135,6 +163,8 @@ export type RunFrame = {
   type: FrameType;
   memoryName: string;
   asserts?: string[];
+  /** Frozen authority; asserts is derived from this tree. */
+  assertTree?: EffectiveRuleTree;
   steps: RunStep[];
   index: number;
   returnTo?: string;
@@ -158,6 +188,9 @@ export type RunStep = {
   optional?: boolean;
   asserts?: string[];
   suggests?: string[];
+  /** Frozen authorities; asserts/suggests are derived render caches. */
+  assertTree?: EffectiveRuleTree;
+  suggestTree?: EffectiveRuleTree;
   details?: string[];
   schemaContext?: SchemaStepContext;
   controlPlane?: ArtifactControlPlane;
@@ -179,8 +212,13 @@ export type RunStep = {
 };
 
 export type RunSchemaContract =
-  | { kind: "external"; name: string; node?: SchemaNode }
-  | { kind: "inline"; id: string; node: SchemaNode };
+  | { kind: "external"; name: string; node?: RunSchemaNode }
+  | { kind: "inline"; id: string; node: RunSchemaNode };
+
+export type RunSchemaNode = SchemaNode & {
+  assertTree?: EffectiveRuleTree;
+  suggestTree?: EffectiveRuleTree;
+};
 
 export type RunEvent = {
   at: string;
@@ -206,6 +244,8 @@ export type RunEvent = {
 export type RunProcedureTemplate = {
   memoryName: string;
   asserts?: string[];
+  /** Frozen authority; asserts is derived from this tree. */
+  assertTree?: EffectiveRuleTree;
   steps: RunStep[];
 };
 
@@ -234,13 +274,26 @@ export type RunState = {
   status: RunStatus;
   procedureName: string;
   asserts?: string[];
+  /** Frozen authority; asserts is derived from this tree. */
+  assertTree?: EffectiveRuleTree;
   memoryRoot: string;
   memoryProjects?: {
     primary: { name: string; revision: string };
     mounted: Array<{ name: string; revision: string }>;
   };
+  memorySource?: {
+    kind: "changeset";
+    project: string;
+    changeId: string;
+    checkpointDigest: string;
+    baseRevision: string;
+  };
+  memorySnapshot?: {
+    path: "memory";
+  };
   createdAt: string;
   updatedAt: string;
+  abandonment?: RunAbandonment;
   plan?: RunStep[];
   stack: RunFrame[];
   events: RunEvent[];
@@ -325,6 +378,37 @@ const artifactFormatSpecSchema = z.object({
   options: z.record(z.unknown())
 }).strict();
 
+const effectiveRuleEntrySchema: z.ZodType<EffectiveRuleTree["entries"][number]> = z.lazy(() =>
+  z.union([
+    z.object({
+      kind: z.literal("rule"),
+      text: z.string(),
+      ruleId: z.string()
+    }).strict(),
+    z.object({
+      kind: z.literal("reference"),
+      target: z.string(),
+      entries: z.array(effectiveRuleEntrySchema),
+      sections: z.array(effectiveRuleSectionSchema)
+    }).strict()
+  ])
+);
+
+const effectiveRuleSectionSchema: z.ZodType<EffectiveRuleTree["sections"][number]> = z.lazy(() =>
+  z.object({
+    name: z.string(),
+    defines: z.array(z.string()),
+    entries: z.array(effectiveRuleEntrySchema),
+    sections: z.array(effectiveRuleSectionSchema)
+  }).strict()
+);
+
+const effectiveRuleTreeSchema: z.ZodType<EffectiveRuleTree> = z.object({
+  channel: z.enum(["asserts", "suggests"]),
+  entries: z.array(effectiveRuleEntrySchema),
+  sections: z.array(effectiveRuleSectionSchema)
+}).strict();
+
 const runSchemaContractSchema: z.ZodType<RunSchemaContract> = z.union([
   z.object({ kind: z.literal("external"), name: z.string(), node: z.custom<SchemaNode>().optional() }).strict(),
   z.object({ kind: z.literal("inline"), id: z.string(), node: z.custom<SchemaNode>() }).strict()
@@ -360,7 +444,9 @@ const schemaConstraintSourceSchema: z.ZodType<SchemaConstraintSource> = z.object
   format: artifactFormatSpecSchema,
   defines: z.array(z.string()).optional(),
   asserts: z.array(z.string()).optional(),
-  suggests: z.array(z.string()).optional()
+  suggests: z.array(z.string()).optional(),
+  assertTree: effectiveRuleTreeSchema.optional(),
+  suggestTree: effectiveRuleTreeSchema.optional()
 }).strict();
 
 const schemaStepContextSchema: z.ZodType<SchemaStepContext> = z.object({
@@ -441,6 +527,8 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
     optional: z.boolean().optional(),
     asserts: z.array(z.string()).optional(),
     suggests: z.array(z.string()).optional(),
+    assertTree: effectiveRuleTreeSchema.optional(),
+    suggestTree: effectiveRuleTreeSchema.optional(),
     details: z.array(z.string()).optional(),
     schemaContext: schemaStepContextSchema.optional(),
     controlPlane: artifactControlPlaneSchema.optional(),
@@ -462,15 +550,32 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
   })
 );
 
+const runAbandonmentSchema = z.object({
+  abandonedAt: z.string(),
+  reason: z.string().optional(),
+  initiator: z.object({
+    kind: z.literal("human"),
+    actorId: z.string().optional(),
+    name: z.string().optional(),
+    source: z.enum(["cli", "view"])
+  }).strict(),
+  current: z.object({
+    frame: z.enum(["procedure", "schema"]),
+    memoryName: z.string(),
+    stepId: z.string()
+  }).strict().optional()
+}).strict();
+
 const runStateSchema: z.ZodType<RunState> = z.object({
   contractVersion: z.literal(2),
   readOnly: z.boolean().optional(),
   memorySyntax: z.string().optional(),
   id: z.string(),
   name: z.string().optional(),
-  status: z.enum(["running", "done"]),
+  status: z.enum(["running", "done", "abandoned"]),
   procedureName: z.string(),
   asserts: z.array(z.string()).optional(),
+  assertTree: effectiveRuleTreeSchema.optional(),
   memoryRoot: z.string(),
   memoryProjects: z.object({
     primary: z.object({ name: z.string(), revision: z.string() }).strict(),
@@ -478,11 +583,13 @@ const runStateSchema: z.ZodType<RunState> = z.object({
   }).strict().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  abandonment: runAbandonmentSchema.optional(),
   plan: z.array(runStepSchema).optional(),
   stack: z.array(z.object({
     type: z.enum(["procedure", "schema"]),
     memoryName: z.string(),
     asserts: z.array(z.string()).optional(),
+    assertTree: effectiveRuleTreeSchema.optional(),
     steps: z.array(runStepSchema),
     index: z.number(),
     returnTo: z.string().optional(),
@@ -515,6 +622,7 @@ const runStateSchema: z.ZodType<RunState> = z.object({
 const runProcedureTemplateSchema: z.ZodType<RunProcedureTemplate> = z.object({
   memoryName: z.string(),
   asserts: z.array(z.string()).optional(),
+  assertTree: effectiveRuleTreeSchema.optional(),
   steps: z.array(runStepSchema)
 }).strict();
 
@@ -568,7 +676,7 @@ const artifactReviewAssignmentSchema = z.object({
   slotIds: z.array(z.string()),
   permissions: z.array(z.enum(permissionIds)),
   binding: z.enum(["decision", "advisory"]),
-  status: z.enum(["draft", "queued", "running", "submitted", "failed"]),
+  status: z.enum(["draft", "queued", "running", "submitted", "failed", "cancelled"]),
   draft: z.object({
     comments: z.array(artifactReviewCommentSchema),
     vote: z.enum(artifactReviewVoteValues).optional(),
@@ -635,7 +743,7 @@ const artifactReviewRoundSchema = z.object({
   id: z.string(),
   sequence: z.number().int().positive(),
   submissionId: z.string(),
-  status: z.enum(["pending", "awaiting_runner_vote", "passed", "changes_requested"]),
+  status: z.enum(["pending", "awaiting_runner_vote", "passed", "changes_requested", "cancelled"]),
   revision: z.number().int().positive(),
   createdAt: z.string(),
   assignments: z.array(artifactReviewAssignmentSchema),
@@ -689,7 +797,7 @@ const artifactReviewSchema: z.ZodType<ArtifactReview<RunEvent["artifact"]>, z.Zo
   artifactName: z.string(),
   policyId: z.string(),
   controlPlane: artifactControlPlaneSchema,
-  status: z.enum(["pending", "awaiting_runner_vote", "awaiting_revision", "passed"]),
+  status: z.enum(["pending", "awaiting_runner_vote", "awaiting_revision", "passed", "cancelled"]),
   currentRoundId: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -710,21 +818,34 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
   memorySyntax: z.string().optional(),
   id: z.string(),
   name: z.string().optional(),
-  status: z.enum(["running", "done"]),
+  status: z.enum(["running", "done", "abandoned"]),
   procedureName: z.string(),
   asserts: z.array(z.string()).optional(),
+  assertTree: effectiveRuleTreeSchema.optional(),
   memoryRoot: z.string(),
   memoryProjects: z.object({
     primary: z.object({ name: z.string(), revision: z.string() }).strict(),
     mounted: z.array(z.object({ name: z.string(), revision: z.string() }).strict())
   }).strict().optional(),
+  memorySource: z.object({
+    kind: z.literal("changeset"),
+    project: z.string(),
+    changeId: z.string(),
+    checkpointDigest: z.string(),
+    baseRevision: z.string()
+  }).strict().optional(),
+  memorySnapshot: z.object({
+    path: z.literal("memory")
+  }).strict().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  abandonment: runAbandonmentSchema.optional(),
   plan: z.array(runStepSchema).optional(),
   stack: z.array(z.object({
     type: z.enum(["procedure", "schema"]),
     memoryName: z.string(),
     asserts: z.array(z.string()).optional(),
+    assertTree: effectiveRuleTreeSchema.optional(),
     steps: z.array(runStepSchema),
     index: z.number(),
     returnTo: z.string().optional(),
@@ -776,6 +897,7 @@ export async function ensureRunDirectory(runsRoot: string): Promise<string> {
 
 export async function startRun(input: {
   memoryRoot: string;
+  memorySnapshotRoot?: string;
   runsRoot: string;
   name: string;
   language?: PromptLocale;
@@ -784,6 +906,7 @@ export async function startRun(input: {
   controlPlane?: ControlPlaneConfig;
   reviewConfiguration?: RunReviewConfiguration;
   memoryProjects?: RunState["memoryProjects"];
+  memorySource?: RunState["memorySource"];
   memoryCatalog?: MemoryCatalog;
   projectMemoryCatalogs?: Record<string, MemoryCatalog>;
 }): Promise<RunState> {
@@ -845,16 +968,20 @@ export async function startRun(input: {
     name: runName,
     status: "running",
     procedureName: procedure.entity.names[0],
-    asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
+    asserts: rootTemplate.asserts ? [...rootTemplate.asserts] : undefined,
+    assertTree: rootTemplate.assertTree ? structuredClone(rootTemplate.assertTree) : undefined,
     memoryRoot: input.memoryRoot,
     memoryProjects: input.memoryProjects,
+    memorySource: input.memorySource,
+    memorySnapshot: input.memorySnapshotRoot ? { path: "memory" } : undefined,
     createdAt: now,
     updatedAt: now,
     plan: cloneSteps(steps),
     stack: [{
       type: "procedure",
       memoryName: procedure.entity.names[0],
-      asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
+      asserts: rootTemplate.asserts ? [...rootTemplate.asserts] : undefined,
+      assertTree: rootTemplate.assertTree ? structuredClone(rootTemplate.assertTree) : undefined,
       steps,
       index: 0
     }],
@@ -865,8 +992,40 @@ export async function startRun(input: {
   };
 
   await expandAutoCallSteps(run);
-  await writeRun(input.runsRoot, run);
+  if (input.memorySnapshotRoot) {
+    await writeRunMemorySnapshot(input.runsRoot, run.id, input.memorySnapshotRoot);
+  }
+  try {
+    await writeRun(input.runsRoot, run);
+  } catch (error) {
+    if (input.memorySnapshotRoot) {
+      await rm(join(input.runsRoot, run.id, "memory"), { recursive: true, force: true });
+    }
+    throw error;
+  }
   return run;
+}
+
+async function writeRunMemorySnapshot(runsRoot: string, runId: string, sourceRoot: string): Promise<void> {
+  const directory = join(runsRoot, runId);
+  const target = join(directory, "memory");
+  const temporary = join(directory, `.memory.${process.pid}.${randomUUID()}.tmp`);
+  await mkdir(temporary, { recursive: true });
+  try {
+    for (const kind of memoryKinds) {
+      const source = join(sourceRoot, kind);
+      try {
+        await stat(source);
+      } catch (error) {
+        if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") continue;
+        throw error;
+      }
+      await cp(source, join(temporary, kind), { recursive: true, errorOnExist: true, force: false });
+    }
+    await rename(temporary, target);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 }
 
 export function normalizeRunName(value: unknown): string {
@@ -882,6 +1041,99 @@ export function normalizeRunName(value: unknown): string {
 
 export function runDisplayName(run: Pick<RunState, "name" | "procedureName">): string {
   return run.name?.trim() || run.procedureName;
+}
+
+export type AbandonRunResult = {
+  run: RunState;
+  terminationWarnings: string[];
+};
+
+export async function abandonRun(input: {
+  runsRoot: string;
+  runId: string;
+  source: "cli" | "view";
+  actorId?: string;
+  reason?: string;
+  terminateWorker?: (pid: number) => Promise<void>;
+}): Promise<AbandonRunResult> {
+  const workerPids: number[] = [];
+  const run = await withRunWriteLock(input.runsRoot, input.runId, async () => {
+    const current = await readRun(input.runsRoot, input.runId);
+    if (current.status === "abandoned") return current;
+    if (current.contractVersion === 1 || current.readOnly) {
+      throw new Error(`Run is read-only and cannot be abandoned: ${current.id}`);
+    }
+    if (current.status === "done") throw new Error(`Run is already done: ${current.id}`);
+
+    const reason = input.reason?.trim() || undefined;
+    if (reason && reason.length > 2_000) throw new Error("abandonment reason must not exceed 2000 characters");
+    const actorId = input.actorId?.trim() || undefined;
+    const actor = actorId ? current.controlPlane?.actors[actorId] : undefined;
+    if (actorId && (!actor || actor.kind !== "human")) {
+      throw new Error(`Run abandonment actor must be a Human Actor in the Run snapshot: ${actorId}`);
+    }
+    const frame = currentFrame(current);
+    const step = currentStep(current);
+    const now = new Date().toISOString();
+
+    for (const review of current.artifactReviews ?? []) {
+      if (review.status === "passed" || review.status === "cancelled") continue;
+      review.status = "cancelled";
+      review.updatedAt = now;
+      const round = review.rounds.find((candidate) => candidate.id === review.currentRoundId);
+      if (!round) continue;
+      if (round.status !== "passed" && round.status !== "changes_requested" && round.status !== "cancelled") {
+        round.status = "cancelled";
+      }
+      for (const assignment of round.assignments) {
+        if (assignment.status !== "submitted" && assignment.status !== "cancelled") {
+          assignment.status = "cancelled";
+        }
+        for (const attempt of assignment.attempts ?? []) {
+          if (attempt.status !== "queued" && attempt.status !== "running") continue;
+          if (attempt.status === "running" && attempt.workerPid) workerPids.push(attempt.workerPid);
+          attempt.status = "cancelled";
+          attempt.completedAt = now;
+          attempt.stopReason = "run_abandoned";
+        }
+      }
+      round.revision += 1;
+    }
+
+    current.status = "abandoned";
+    current.abandonment = {
+      abandonedAt: now,
+      reason,
+      initiator: {
+        kind: "human",
+        actorId,
+        name: actor?.name,
+        source: input.source
+      },
+      ...(frame && step ? {
+        current: { frame: frame.type, memoryName: frame.memoryName, stepId: step.id }
+      } : {})
+    };
+    current.updatedAt = now;
+    await writeRun(input.runsRoot, current);
+    return current;
+  });
+
+  const terminate = input.terminateWorker ?? ((pid: number) => terminateProcessTree(pid, "SIGTERM", process.platform, true));
+  const terminationWarnings: string[] = [];
+  await Promise.all([...new Set(workerPids)].map(async (pid) => {
+    try {
+      await terminate(pid);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      terminationWarnings.push(`failed to terminate Agent Review worker ${pid}: ${message}`);
+    }
+  }));
+  return { run, terminationWarnings };
+}
+
+function assertRunRunning(run: RunState): void {
+  if (run.status !== "running") throw new Error(`Run is not running: ${run.id} (${run.status})`);
 }
 
 export async function readRun(runsRoot: string, id: string): Promise<RunState> {
@@ -960,12 +1212,14 @@ async function readRunSummary(runsRoot: string, id: string): Promise<RunListSumm
   }
   const runId = requiredSummaryString(source.id, "id");
   const status = source.status;
-  if (status !== "running" && status !== "done") throw new Error(`invalid Run summary status: ${runId}`);
+  if (status !== "running" && status !== "done" && status !== "abandoned") {
+    throw new Error(`invalid Run summary status: ${runId}`);
+  }
   const reviews = Array.isArray(source.artifactReviews)
     ? source.artifactReviews.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
     : [];
   const activeReview = [...reviews]
-    .filter((review) => review.status !== "passed")
+    .filter((review) => review.status !== "passed" && review.status !== "cancelled")
     .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")))[0];
   return {
     id: runId,
@@ -982,7 +1236,7 @@ async function readRunSummary(runsRoot: string, id: string): Promise<RunListSumm
 
 function summarizeRun(run: RunState): RunListSummary {
   const activeReview = [...(run.artifactReviews ?? [])]
-    .filter((review) => review.status !== "passed")
+    .filter((review) => review.status !== "passed" && review.status !== "cancelled")
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
   return {
     id: run.id,
@@ -1062,7 +1316,7 @@ export async function updateRunSlotBinding(input: {
     const run = await readRun(input.runsRoot, input.runId);
     if (run.contractVersion !== 3) throw new Error("Run binding update requires Run v3");
     if (run.readOnly) throw new Error(`Run is read-only: ${run.id}`);
-    if (run.status !== "running") throw new Error(`Run is not running: ${run.id}`);
+    assertRunRunning(run);
     if (!run.controlPlane || !run.reviewConfiguration || !run.procedureSnapshots) {
       throw new Error(`Run has no Review binding configuration: ${run.id}`);
     }
@@ -1132,9 +1386,7 @@ async function reportRunUnlocked(input: {
   if (run.contractVersion === 1 || run.readOnly) {
     throw new Error(`v1 run is read-only and cannot report after the Artifact Contract v2 upgrade: ${input.runId}`);
   }
-  if (run.status === "done") {
-    throw new Error(`run is already done: ${input.runId}`);
-  }
+  assertRunRunning(run);
 
   const schemaFinalization = currentSchemaFinalization(run);
   if (schemaFinalization) {
@@ -1399,7 +1651,9 @@ export type ArtifactReviewAgentContext = ArtifactReviewContext & {
 };
 
 export function currentArtifactReview(run: RunState): ArtifactReview<RunEvent["artifact"]> | undefined {
-  return run.artifactReviews?.find((review) => review.status !== "passed" && currentStep(run)?.id === review.stepId);
+  return run.artifactReviews?.find((review) => (
+    review.status !== "passed" && review.status !== "cancelled" && currentStep(run)?.id === review.stepId
+  ));
 }
 
 export async function findArtifactReview(input: {
@@ -1485,6 +1739,7 @@ export async function updateArtifactReviewDraft(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     const round = requireArtifactReviewRound(review, input.roundId);
     if (review.status !== "pending" || round.status !== "pending") {
@@ -1539,6 +1794,7 @@ export async function submitArtifactReviewAssignment(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     const round = requireArtifactReviewRound(review, input.roundId);
     const assignment = requireArtifactReviewAssignment(round, input.actorId);
@@ -1599,6 +1855,7 @@ export async function claimArtifactReviewAgentAssignment(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    if (run.status !== "running") return undefined;
     const review = requireArtifactReview(run, input.reviewId);
     if (review.currentRoundId !== input.roundId || review.status !== "pending") return undefined;
     const round = requireArtifactReviewRound(review, input.roundId);
@@ -1701,6 +1958,7 @@ export async function retryArtifactReviewAgentAssignment(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     if (review.currentRoundId !== input.roundId || review.status !== "pending") {
       throw new Error(`Artifact Review Round is read-only: ${input.roundId}`);
@@ -1788,6 +2046,7 @@ export async function submitArtifactReviewAgentAssignment(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     const round = requireArtifactReviewRound(review, input.roundId);
     const assignment = requireArtifactReviewAssignment(round, input.actorId);
@@ -1863,6 +2122,7 @@ export async function resolveArtifactReviewComment(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     if (review.currentRoundId !== input.roundId || !["pending", "awaiting_runner_vote"].includes(review.status)) {
       throw new Error(`Artifact Review Round is read-only: ${input.roundId}`);
@@ -1915,6 +2175,7 @@ export async function submitArtifactReviewRunnerVote(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     if (review.currentRoundId !== input.roundId) {
       throw new Error(`Artifact Review Runner vote targets a stale Round: ${input.roundId}`);
@@ -2179,6 +2440,7 @@ async function mutateArtifactReviewAgentAttempt(
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
+    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     const round = requireArtifactReviewRound(review, input.roundId);
     const assignment = requireArtifactReviewAssignment(round, input.actorId);
@@ -2202,6 +2464,7 @@ function activeReviewForStep(
   return run.artifactReviews?.find((review) => (
     review.stepId === step.id
     && review.status !== "passed"
+    && review.status !== "cancelled"
     && (!step.controlPlane || review.controlPlane.artifactScope === step.controlPlane.artifactScope)
   ));
 }
@@ -2286,7 +2549,7 @@ async function skipRunUnlocked(input: { runsRoot: string; runId: string }): Prom
   if (run.contractVersion === 1 || run.readOnly) {
     throw new Error(`v1 run is read-only and cannot skip after the Artifact Contract v2 upgrade: ${input.runId}`);
   }
-  if (run.status === "done") throw new Error(`run is already done: ${input.runId}`);
+  assertRunRunning(run);
 
   const frame = currentFrame(run);
   const step = currentStep(run);
@@ -2328,9 +2591,7 @@ async function repeatRunUnlocked(input: { runsRoot: string; runId: string; count
   if (run.contractVersion === 1 || run.readOnly) {
     throw new Error(`v1 run is read-only and cannot continue after the Artifact Contract v2 upgrade: ${input.runId}`);
   }
-  if (run.status === "done") {
-    throw new Error(`run is already done: ${input.runId}`);
-  }
+  assertRunRunning(run);
 
   const frame = currentFrame(run);
   const step = currentStep(run);
@@ -2382,9 +2643,7 @@ async function enterSchemaUnlocked(input: { memoryRoot: string; runsRoot: string
   if (run.contractVersion === 1 || run.readOnly) {
     throw new Error(`v1 run is read-only and cannot enter schema after the Artifact Contract v2 upgrade: ${input.runId}`);
   }
-  if (run.status === "done") {
-    throw new Error(`run is already done: ${input.runId}`);
-  }
+  assertRunRunning(run);
 
   const activeStep = currentStep(run);
   if (!input.schemaName) {
@@ -2427,6 +2686,7 @@ async function enterSchemaUnlocked(input: { memoryRoot: string; runsRoot: string
 }
 
 export function currentStep(run: RunState): RunStep | undefined {
+  if (run.status !== "running") return undefined;
   const frame = currentFrame(run);
   return frame ? frame.steps[frame.index] : undefined;
 }
@@ -2436,12 +2696,70 @@ export function currentFrame(run: RunState): RunFrame | undefined {
 }
 
 export function activeProcedureAsserts(run: RunState): string[] {
-  return [...new Set([
-    ...(run.asserts ?? []),
+  return [...new Set(activeProcedureAssertTrees(run)
+    .flatMap((tree) => flattenEffectiveRules(tree).map((rule) => rule.text)))];
+}
+
+export function activeProcedureAssertTrees(run: RunState): EffectiveRuleTree[] {
+  const trees = [
+    run.assertTree,
     ...run.stack
       .filter((frame) => frame.type === "procedure")
-      .flatMap((frame) => frame.asserts ?? [])
-  ])];
+      .map((frame) => frame.assertTree)
+  ].filter((tree): tree is EffectiveRuleTree => Boolean(tree));
+  const seen = new Set<string>();
+  return trees.filter((tree) => {
+    const key = JSON.stringify(tree);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * Render a frozen rule tree without exposing internal rule ids or YAML paths.
+ * Each returned string is one Markdown list block; references and sections stay
+ * nested so their names continue to carry emphasis in prompts.
+ */
+export function renderEffectiveRuleTree(
+  tree: EffectiveRuleTree | undefined,
+  locale: PromptLocale = "en"
+): string[] {
+  if (!tree) return [];
+  const sourceLabel = locale === "zh-CN" ? "来自" : "From";
+  const sectionLabel = locale === "zh-CN" ? "章节" : "Section";
+  const contextLabel = locale === "zh-CN" ? "上下文" : "Context";
+  const rulesLabel = locale === "zh-CN" ? "规则" : "Rules";
+  const indent = (blocks: string[]): string => blocks
+    .map((block) => block.split("\n").map((line) => `  ${line}`).join("\n"))
+    .join("\n");
+  const renderParts = (
+    entries: EffectiveRuleTree["entries"],
+    sections: EffectiveRuleTree["sections"]
+  ): string[] => {
+    const blocks = entries.map((entry) => {
+      if (entry.kind === "rule") return entry.text;
+      const nested = renderParts(entry.entries, entry.sections);
+      return nested.length
+        ? `${sourceLabel} ${entry.target}\n${indent(nested.map((value) => `- ${value}`))}`
+        : `${sourceLabel} ${entry.target}`;
+    });
+    for (const section of sections) {
+      const nested = renderParts(section.entries, section.sections);
+      const groups: string[] = [];
+      if (section.defines.length) {
+        groups.push(`${contextLabel}:\n${indent(section.defines.map((value) => `- ${value}`))}`);
+      }
+      if (nested.length) {
+        groups.push(`${rulesLabel}:\n${indent(nested.map((value) => `- ${value}`))}`);
+      }
+      blocks.push(groups.length
+        ? `${sectionLabel} ${section.name}\n${indent(groups)}`
+        : `${sectionLabel} ${section.name}`);
+    }
+    return blocks;
+  };
+  return renderParts(tree.entries, tree.sections);
 }
 
 export function finalArtifacts(run: RunState): RunEvent["artifact"][] {
@@ -2466,6 +2784,8 @@ export type SchemaWritingSnapshot = {
     instruction: string;
     asserts: string[];
     suggests: string[];
+    assertTree?: EffectiveRuleTree;
+    suggestTree?: EffectiveRuleTree;
   };
   artifact: {
     name: string;
@@ -2519,7 +2839,9 @@ export function buildSchemaWritingSnapshot(runsRoot: string, run: RunState): Sch
     action: {
       instruction: context.parentStep.instruction,
       asserts: [...(context.parentStep.asserts ?? [])],
-      suggests: [...(context.parentStep.suggests ?? [])]
+      suggests: [...(context.parentStep.suggests ?? [])],
+      assertTree: context.parentStep.assertTree ? structuredClone(context.parentStep.assertTree) : undefined,
+      suggestTree: context.parentStep.suggestTree ? structuredClone(context.parentStep.suggestTree) : undefined
     },
     artifact: {
       name: context.parentStep.artifact!,
@@ -2558,6 +2880,7 @@ export function buildSchemaWritingSnapshot(runsRoot: string, run: RunState): Sch
 }
 
 export async function ensureCurrentSchemaDraft(runsRoot: string, run: RunState): Promise<RunState> {
+  if (run.status !== "running") return run;
   const context = currentSchemaParentContext(run);
   if (!context) return run;
   const progress = schemaFrameProgress(run, context.schemaFrame);
@@ -2749,11 +3072,13 @@ async function snapshotReachableProcedureTemplates(
     if (visited.has(canonicalName)) return;
     visited.add(canonicalName);
 
-    const steps = compileProcedureSteps(procedure);
+    const steps = await compileProcedureSteps(procedure, memoryRoot, lookup);
     await snapshotExternalSchemas(memoryRoot, steps, lookup);
+    const procedureRules = await freezeRulePair(memoryRoot, procedure.asserts, undefined, lookup);
     const template: RunProcedureTemplate = {
       memoryName: canonicalName,
-      asserts: procedure.asserts ? [...procedure.asserts] : undefined,
+      asserts: procedureRules.asserts,
+      assertTree: procedureRules.assertTree,
       steps
     };
     snapshots[canonicalName] = template;
@@ -3112,22 +3437,38 @@ function assertArtifactReviewCanStart(
   });
 }
 
-function compileProcedureSteps(procedure: ProcedureMemory): RunStep[] {
-  return compileFlowSteps(procedure.flow, "flow");
+async function compileProcedureSteps(
+  procedure: ProcedureMemory,
+  memoryRoot: string,
+  lookup?: RunMemoryLookup
+): Promise<RunStep[]> {
+  return compileFlowSteps(procedure.flow, "flow", memoryRoot, lookup);
 }
 
-function compileFlowSteps(flow: FlowNode[], prefix: string): RunStep[] {
-  return flow.map((node, index) => compileFlowStep(node, `${prefix}[${index + 1}]`));
+async function compileFlowSteps(
+  flow: FlowNode[],
+  prefix: string,
+  memoryRoot: string,
+  lookup?: RunMemoryLookup
+): Promise<RunStep[]> {
+  return Promise.all(flow.map((node, index) =>
+    compileFlowStep(node, `${prefix}[${index + 1}]`, memoryRoot, lookup)
+  ));
 }
 
-function compileFlowStep(node: FlowNode, id: string): RunStep {
+async function compileFlowStep(
+  node: FlowNode,
+  id: string,
+  memoryRoot: string,
+  lookup?: RunMemoryLookup
+): Promise<RunStep> {
   switch (node.tag) {
     case "!action":
-      return compileActionStep(node, id);
+      return compileActionStep(node, id, memoryRoot, lookup);
     case "!if":
-      return compileIfStep(node, id);
+      return compileIfStep(node, id, memoryRoot, lookup);
     case "!while":
-      return compileWhileStep(node, id);
+      return compileWhileStep(node, id, memoryRoot, lookup);
     case "!call":
       return {
         id,
@@ -3138,7 +3479,13 @@ function compileFlowStep(node: FlowNode, id: string): RunStep {
   }
 }
 
-function compileActionStep(node: ActionNode, id: string): RunStep {
+async function compileActionStep(
+  node: ActionNode,
+  id: string,
+  memoryRoot: string,
+  lookup?: RunMemoryLookup
+): Promise<RunStep> {
+  const rules = await freezeRulePair(memoryRoot, node.asserts, node.suggests, lookup);
   return {
     id,
     kind: "action",
@@ -3146,8 +3493,7 @@ function compileActionStep(node: ActionNode, id: string): RunStep {
     actor: node.actor ?? "agent",
     artifact: node.artifact.name,
     ...compileArtifactStep(node.artifact, id),
-    asserts: node.asserts ? [...node.asserts] : undefined,
-    suggests: node.suggests ? [...node.suggests] : undefined
+    ...rules
   };
 }
 
@@ -3182,39 +3528,55 @@ function assertSchemaNode(value: SchemaNode | MemoryRefNode, path: string): Sche
   throw new Error(`unresolved Memory reference at ${path}: ${value.target}`);
 }
 
-function compileIfStep(node: IfNode, id: string): RunStep {
-  const fallback = compileFlowSteps(node.else ?? [], `${id}.else`);
-  return compileIfChain(node, id, fallback);
+async function compileIfStep(
+  node: IfNode,
+  id: string,
+  memoryRoot: string,
+  lookup?: RunMemoryLookup
+): Promise<RunStep> {
+  const fallback = await compileFlowSteps(node.else ?? [], `${id}.else`, memoryRoot, lookup);
+  return compileIfChain(node, id, fallback, memoryRoot, lookup);
 }
 
-function compileIfChain(node: IfNode, id: string, fallback: RunStep[]): RunStep {
-  const thenSteps = compileFlowSteps(node.then, `${id}.then`);
+async function compileIfChain(
+  node: IfNode,
+  id: string,
+  fallback: RunStep[],
+  memoryRoot: string,
+  lookup?: RunMemoryLookup
+): Promise<RunStep> {
+  const thenSteps = await compileFlowSteps(node.then, `${id}.then`, memoryRoot, lookup);
   const elseSteps = node.elseif
-    ? [compileIfChain(node.elseif, `${id}.elseif`, fallback)]
+    ? [await compileIfChain(node.elseif, `${id}.elseif`, fallback, memoryRoot, lookup)]
     : fallback;
+  const rules = await freezeRulePair(memoryRoot, node.condition.asserts, node.condition.suggests, lookup);
   return {
     id,
     kind: "branch",
     instruction: node.condition.action,
     actor: node.condition.actor ?? "agent",
     ...compileArtifactStep(node.condition.artifact, id),
-    asserts: node.condition.asserts ? [...node.condition.asserts] : undefined,
-    suggests: node.condition.suggests ? [...node.condition.suggests] : undefined,
+    ...rules,
     details: describeControlTargets("true", thenSteps).concat(describeControlTargets("false", elseSteps)),
     branches: { truthy: thenSteps, falsy: elseSteps }
   };
 }
 
-function compileWhileStep(node: WhileNode, id: string): RunStep {
-  const body = compileFlowSteps(node.do, `${id}.do`);
+async function compileWhileStep(
+  node: WhileNode,
+  id: string,
+  memoryRoot: string,
+  lookup?: RunMemoryLookup
+): Promise<RunStep> {
+  const body = await compileFlowSteps(node.do, `${id}.do`, memoryRoot, lookup);
+  const rules = await freezeRulePair(memoryRoot, node.condition.asserts, node.condition.suggests, lookup);
   return {
     id,
     kind: "loop",
     instruction: node.condition.action,
     actor: node.condition.actor ?? "agent",
     ...compileArtifactStep(node.condition.artifact, id),
-    asserts: node.condition.asserts ? [...node.condition.asserts] : undefined,
-    suggests: node.condition.suggests ? [...node.condition.suggests] : undefined,
+    ...rules,
     details: describeControlTargets("while true", body).concat(["false: continue after loop"]),
     loop: { body }
   };
@@ -3256,6 +3618,8 @@ function cloneStep(step: RunStep): RunStep {
     reviewPolicy: step.reviewPolicy,
     asserts: step.asserts ? [...step.asserts] : undefined,
     suggests: step.suggests ? [...step.suggests] : undefined,
+    assertTree: step.assertTree ? structuredClone(step.assertTree) : undefined,
+    suggestTree: step.suggestTree ? structuredClone(step.suggestTree) : undefined,
     details: step.details ? [...step.details] : undefined,
     schemaContext: step.schemaContext ? structuredClone(step.schemaContext) : undefined,
     controlPlane: step.controlPlane ? structuredClone(step.controlPlane) : undefined,
@@ -3277,7 +3641,7 @@ function cloneStep(step: RunStep): RunStep {
 
 async function expandAutoCallSteps(run: RunState): Promise<void> {
   let guard = 0;
-  while (run.status !== "done") {
+  while (run.status === "running") {
     if (guard++ > 20) throw new Error("too many nested !call steps");
     const frame = currentFrame(run);
     const step = currentStep(run);
@@ -3292,6 +3656,7 @@ async function expandAutoCallSteps(run: RunState): Promise<void> {
         type: "procedure",
         memoryName: template.memoryName,
         asserts: template.asserts ? [...template.asserts] : undefined,
+        assertTree: template.assertTree ? structuredClone(template.assertTree) : undefined,
         steps,
         index: 0,
         returnTo: step.id
@@ -3301,12 +3666,14 @@ async function expandAutoCallSteps(run: RunState): Promise<void> {
     const procedure = await findMemoryByName(run.memoryRoot, "procedures", step.target, true);
     if (!procedure) throw new Error(`procedure not found: ${step.target}`);
     const procedureMemory = procedure.entity as ProcedureMemory;
-    const steps = compileProcedureSteps(procedureMemory);
+    const steps = await compileProcedureSteps(procedureMemory, run.memoryRoot);
     await snapshotExternalSchemas(run.memoryRoot, steps);
+    const procedureRules = await freezeRulePair(run.memoryRoot, procedureMemory.asserts);
     run.stack.push({
       type: "procedure",
       memoryName: procedure.entity.names[0],
-      asserts: procedureMemory.asserts ? [...procedureMemory.asserts] : undefined,
+      asserts: procedureRules.asserts,
+      assertTree: procedureRules.assertTree,
       steps,
       index: 0,
       returnTo: step.id
@@ -3547,9 +3914,7 @@ function walkSchema(
     artifact: path,
     contract,
     controlPlane,
-    details: definitionDetails(node.defines)
-      .concat((node.asserts ?? []).map((value) => `asserts: ${value}`))
-      .concat((node.suggests ?? []).map((value) => `suggests: ${value}`)),
+    details: definitionDetails(node.defines),
     schemaContext: { rootName, path, sources },
     optional: node.optional === true
   }));
@@ -3708,13 +4073,22 @@ function schemaConstraintSource(
   contract: CompiledArtifactContract
 ): SchemaConstraintSource {
   const defines = definitionDetails(node.defines);
+  const frozen = node as RunSchemaNode;
+  const asserts = frozen.assertTree
+    ? flattenEffectiveRules(frozen.assertTree).map((rule) => rule.text)
+    : undefined;
+  const suggests = frozen.suggestTree
+    ? flattenEffectiveRules(frozen.suggestTree).map((rule) => rule.text)
+    : undefined;
   return {
     path,
     type: contract.type,
     format: structuredClone(contract.format),
     defines: defines.length ? defines : undefined,
-    asserts: node.asserts?.length ? [...node.asserts] : undefined,
-    suggests: node.suggests?.length ? [...node.suggests] : undefined
+    asserts,
+    suggests,
+    assertTree: frozen.assertTree ? structuredClone(frozen.assertTree) : undefined,
+    suggestTree: frozen.suggestTree ? structuredClone(frozen.suggestTree) : undefined
   };
 }
 
@@ -3740,42 +4114,48 @@ function cloneSchema(schema: SchemaNode): SchemaNode {
 }
 
 function definitionDetails(defines: DefinitionPart[]): string[] {
-  const details: string[] = [];
-  for (const definition of defines) {
-    if (typeof definition === "string") {
-      details.push(`defines: ${definition}`);
-      continue;
-    }
-    if (definition.tag === "!statement") {
-      details.push(...statementDefinitionDetails(definition));
-      continue;
-    }
-    if (definition.tag === "!ref") {
-      details.push(`ref: ${definition.target}`);
-      continue;
-    }
-    details.push(...definitionDetails(definition.defines));
-    details.push(...(definition.asserts ?? []).map((value) => `asserts: ${value}`));
-  }
-  return details;
-}
-
-function statementDefinitionDetails(statement: StatementNode, path: string[] = []): string[] {
-  const details = definitionDetails(statement.defines);
-  const qualifier = path.length > 0 ? ` [${path.join(" > ")}]` : "";
-  details.push(...(statement.asserts ?? []).map((value) => `asserts${qualifier}: ${value}`));
-  details.push(...(statement.suggests ?? []).map((value) => `suggests${qualifier}: ${value}`));
-
-  for (const section of statement.sections ?? []) {
-    details.push(...statementDefinitionDetails(section, [...path, section.names[0].trim()]));
-  }
-  return details;
+  return defines.map((definition) => `defines: ${definition}`);
 }
 
 type RunMemoryLookup = (
-  kind: "procedures" | "schemas",
+  kind: "procedures" | "schemas" | "statements",
   referenceOrName: string
 ) => Promise<MemoryFile | undefined>;
+
+type FrozenRulePair = {
+  /** Derived caches used by legacy renderers; never resolve from these arrays. */
+  asserts?: string[];
+  suggests?: string[];
+  assertTree?: EffectiveRuleTree;
+  suggestTree?: EffectiveRuleTree;
+};
+
+async function freezeRulePair(
+  memoryRoot: string,
+  asserts?: RulePart[],
+  suggests?: RulePart[],
+  lookup?: RunMemoryLookup
+): Promise<FrozenRulePair> {
+  const statementLookup: RuleLookup = async (target) => {
+    const memory = lookup
+      ? await lookup("statements", target)
+      : await findStatementMemory(memoryRoot, target);
+    if (!memory) throw new Error(`statement not found: ${target}`);
+    return memory.entity as StatementNode;
+  };
+  const assertTree = asserts?.length
+    ? await resolveRuleParts("asserts", asserts, statementLookup)
+    : undefined;
+  const suggestTree = suggests?.length
+    ? await resolveRuleParts("suggests", suggests, statementLookup)
+    : undefined;
+  return {
+    assertTree,
+    suggestTree,
+    asserts: assertTree ? flattenEffectiveRules(assertTree).map((rule) => rule.text) : undefined,
+    suggests: suggestTree ? flattenEffectiveRules(suggestTree).map((rule) => rule.text) : undefined
+  };
+}
 
 function catalogLookup(catalog: MemoryCatalog): RunMemoryLookup {
   return async (kind, referenceOrName) => {
@@ -3814,6 +4194,9 @@ async function snapshotExternalSchemas(
     if (step.schema?.kind === "inline") {
       step.schema.node = await resolveSchemaReferences(memoryRoot, step.schema.node, [`inline:${step.schema.id}`], lookup);
     }
+    if (step.schema?.node) {
+      await freezeSchemaRuleTrees(memoryRoot, step.schema.node, lookup);
+    }
     if (step.schema?.node && step.artifact && step.type && step.format) {
       step.validationPlan = artifactValidatorRegistry.resolvePlan(stepContract(step));
     }
@@ -3830,6 +4213,31 @@ async function snapshotExternalSchemas(
     }
     if (step.loop) await snapshotExternalSchemas(memoryRoot, step.loop.body, lookup);
   }
+}
+
+async function freezeSchemaRuleTrees(
+  memoryRoot: string,
+  node: RunSchemaNode,
+  lookup?: RunMemoryLookup
+): Promise<void> {
+  const rules = await freezeRulePair(memoryRoot, node.asserts, node.suggests, lookup);
+  node.assertTree = rules.assertTree;
+  node.suggestTree = rules.suggestTree;
+  // RulePart arrays stay in the Schema snapshot as declarations; execution always
+  // consumes the frozen trees above.
+  const children: SchemaNode[] = [];
+  for (const field of node.fields ?? []) {
+    if (typeof field !== "object") continue;
+    if (field.tag === "!schema") children.push(field);
+    if (field.tag === "!repeat") {
+      for (const bodyField of field.body) {
+        if (typeof bodyField === "object" && bodyField.tag === "!schema") children.push(bodyField);
+      }
+    }
+  }
+  if (node.item?.tag === "!schema") children.push(node.item);
+  for (const item of node.items ?? []) if (item.tag === "!schema") children.push(item);
+  for (const child of children) await freezeSchemaRuleTrees(memoryRoot, child, lookup);
 }
 
 function artifactSchemaNeedsResolution(schema: ActionNode["artifact"]["schema"]): boolean {
@@ -4090,7 +4498,18 @@ async function findSchemaMemory(memoryRoot: string, referenceOrName: string): Pr
   return findMemoryByName(memoryRoot, "schemas", referenceOrName, true);
 }
 
-async function findMemoryByReference(memoryRoot: string, kind: "schemas", reference: string): Promise<MemoryFile | undefined> {
+async function findStatementMemory(memoryRoot: string, referenceOrName: string): Promise<MemoryFile | undefined> {
+  if (referenceOrName.startsWith("statements/")) {
+    return findMemoryByReference(memoryRoot, "statements", referenceOrName);
+  }
+  return findMemoryByName(memoryRoot, "statements", referenceOrName, true);
+}
+
+async function findMemoryByReference(
+  memoryRoot: string,
+  kind: "schemas" | "statements",
+  reference: string
+): Promise<MemoryFile | undefined> {
   const paths = await listMemoryFiles(memoryRoot, kind);
   let hasInvalidMemory = false;
 
@@ -4109,7 +4528,7 @@ async function findMemoryByReference(memoryRoot: string, kind: "schemas", refere
 
   if (hasInvalidMemory) {
     throw new Error(
-      `schema ${reference} could not be resolved because the Memory store ` +
+      `${kind === "schemas" ? "schema" : "statement"} ${reference} could not be resolved because the Memory store ` +
       "contains invalid Memory YAML; run memsphere validate"
     );
   }
@@ -4122,7 +4541,7 @@ function memoryReference(file: MemoryFile): string {
 
 async function findMemoryByName(
   memoryRoot: string,
-  kind: "procedures" | "schemas",
+  kind: "procedures" | "schemas" | "statements",
   name: string,
   canonicalOnly = false
 ): Promise<MemoryFile | undefined> {
@@ -4145,7 +4564,7 @@ async function findMemoryByName(
 
   if (hasInvalidMemory) {
     throw new Error(
-      `${kind === "procedures" ? "procedure" : "schema"} ${name} could not be resolved because the Memory store ` +
+      `${kind === "procedures" ? "procedure" : kind === "schemas" ? "schema" : "statement"} ${name} could not be resolved because the Memory store ` +
       "contains invalid Memory YAML; run memsphere validate"
     );
   }

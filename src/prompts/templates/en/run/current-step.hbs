@@ -1,6 +1,12 @@
 Run {{runId}}
 Name: {{runName}}
 Procedure: {{procedureName}}
+{{#if memorySource}}
+Memory Source: ChangeSet {{memorySource.changeId}} @ {{memorySource.checkpointDigest}}
+{{#if memorySource.snapshot}}
+When reading Memory for this Run, use `memsphere memory list/read --run {{runId}}`; do not mix in the current worktree or a later checkpoint.
+{{/if}}
+{{/if}}
 {{#each procedureAsserts}}
 {{#if @first}}
 

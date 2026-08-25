@@ -2,6 +2,32 @@ import { Document, Pair, YAMLMap, YAMLSeq, type Node } from "yaml";
 import type { MemoryEntity } from "./ast.js";
 import type { MemoryListPage } from "./catalog.js";
 import type { MemoryNodeListPage, MemoryNodeReadResult } from "./navigation.js";
+import type {
+  EffectiveRuleEntry,
+  EffectiveRuleSection,
+  EffectiveRuleTree
+} from "./rules.js";
+
+export type EffectiveRuleDisplayEntry = string | {
+  reference: string;
+  asserts?: EffectiveRuleDisplayEntry[];
+  suggests?: EffectiveRuleDisplayEntry[];
+  sections?: EffectiveRuleDisplaySection[];
+};
+
+export type EffectiveRuleDisplaySection = {
+  name: string;
+  defines?: string[];
+  asserts?: EffectiveRuleDisplayEntry[];
+  suggests?: EffectiveRuleDisplayEntry[];
+  sections?: EffectiveRuleDisplaySection[];
+};
+
+export type EffectiveRuleDisplayTree = {
+  asserts?: EffectiveRuleDisplayEntry[];
+  suggests?: EffectiveRuleDisplayEntry[];
+  sections?: EffectiveRuleDisplaySection[];
+};
 
 export function serializeMemoryYaml(entity: MemoryEntity): string {
   return serializeYaml(prepareMemoryForYaml(entity));
@@ -9,6 +35,77 @@ export function serializeMemoryYaml(entity: MemoryEntity): string {
 
 export function serializeMemoryJson(entity: MemoryEntity): string {
   return `${JSON.stringify(entity, null, 2)}\n`;
+}
+
+export function serializeEffectiveMemoryReadYaml(value: unknown): string {
+  return serializeYaml(prepareMemoryForYaml(value));
+}
+
+export function serializeEffectiveMemoryReadJson(value: unknown): string {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+/** Remove opaque rule ids from the user-facing effective view. */
+export function toEffectiveRuleDisplayTree(tree: EffectiveRuleTree): EffectiveRuleDisplayTree {
+  return toEffectiveRuleDisplayNode(tree.channel, tree.entries, tree.sections);
+}
+
+export function toEffectiveRuleDisplayEntries(tree: EffectiveRuleTree): EffectiveRuleDisplayEntry[] {
+  return tree.entries.map((entry) => toEffectiveRuleDisplayEntry(entry, tree.channel));
+}
+
+/** Recursively project every internal effective-rule tree in a public payload. */
+export function toEffectiveRuleDisplayValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(toEffectiveRuleDisplayValue);
+  if (value === null || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  if (
+    (record.channel === "asserts" || record.channel === "suggests")
+    && Array.isArray(record.entries)
+    && Array.isArray(record.sections)
+  ) {
+    return toEffectiveRuleDisplayTree(record as unknown as EffectiveRuleTree);
+  }
+  return Object.fromEntries(
+    Object.entries(record).map(([key, child]) => [key, toEffectiveRuleDisplayValue(child)])
+  );
+}
+
+function toEffectiveRuleDisplayNode(
+  channel: EffectiveRuleTree["channel"],
+  entries: readonly EffectiveRuleEntry[],
+  sections: readonly EffectiveRuleSection[]
+): EffectiveRuleDisplayTree {
+  return {
+    ...(entries.length > 0
+      ? { [channel]: entries.map((entry) => toEffectiveRuleDisplayEntry(entry, channel)) }
+      : {}),
+    ...(sections.length > 0
+      ? { sections: sections.map((section) => toEffectiveRuleDisplaySection(section, channel)) }
+      : {})
+  };
+}
+
+function toEffectiveRuleDisplayEntry(
+  entry: EffectiveRuleEntry,
+  channel: EffectiveRuleTree["channel"]
+): EffectiveRuleDisplayEntry {
+  if (entry.kind === "rule") return entry.text;
+  return {
+    reference: entry.target,
+    ...toEffectiveRuleDisplayNode(channel, entry.entries, entry.sections)
+  };
+}
+
+function toEffectiveRuleDisplaySection(
+  section: EffectiveRuleSection,
+  channel: EffectiveRuleTree["channel"]
+): EffectiveRuleDisplaySection {
+  return {
+    name: section.name,
+    ...(section.defines.length > 0 ? { defines: [...section.defines] } : {}),
+    ...toEffectiveRuleDisplayNode(channel, section.entries, section.sections)
+  };
 }
 
 export function serializeMemoryListYaml(page: MemoryListPage): string {

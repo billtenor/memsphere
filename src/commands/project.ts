@@ -1,16 +1,34 @@
-import { cp, mkdir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { createHash } from "node:crypto";
+import { copyFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { homePaths, resolveMemsphereHome } from "../home.js";
-import { atomicWriteJson, withFileLock } from "../persistence.js";
+import { atomicWriteFile, atomicWriteJson, withFileLock } from "../persistence.js";
 import { gitOutput, runGit } from "../git.js";
 import { projectConfigSchema, projectManifestSchema, assertProjectName, type ProjectConfigFile } from "../project/model.js";
-import { ensureMemoryDirectories } from "../validation.js";
+import { ensureMemoryDirectories, validateMemoryRoot } from "../validation.js";
 import { projectPaths } from "../project/paths.js";
 import { listRegisteredProjects, pathExists, readProjectRegistry, updateProjectRegistry } from "../project/registry.js";
-import { resolveRegisteredProject } from "../project/resolver.js";
+import { resolveProjectContext, resolveRegisteredProject } from "../project/resolver.js";
 import { resolveMainWorkspacePath, resolveWorkspaceIdentity } from "../project/workspace.js";
-import { editMemories, publishMemoryChange } from "../memory/changeset.js";
-import { bundledReservedMemoryRoot, readBundledSystemMemories } from "../reserved/store.js";
+import {
+  assertManagedProjectHealthy,
+  deleteMemoriesByIdentity,
+  editMemories,
+  failMemoryChange,
+  publishMemoryChange,
+  validateMemoryChange
+} from "../memory/changeset.js";
+import {
+  bundledReservedMemoryRoot,
+  readBundledSystemMemories,
+  readReservedMemoryManifest,
+  reservedSystemMemoryRemovalTombstones,
+  type BundledSystemMemoryDescriptor
+} from "../reserved/store.js";
+import { isMemoryKind, memoryKinds, memoryKindTags, type MemoryKind } from "../memory/kinds.js";
+import { parseMemoryYaml } from "../memory/yaml.js";
+import { listMemoryFiles } from "../memory/store.js";
 import { assertWindowsPrerequisites } from "../windows-prerequisites.js";
 
 type BindOption = { bind?: boolean };
@@ -51,26 +69,702 @@ export async function projectCreateCommand(
 }
 
 async function bootstrapManagedSystemMemory(projectName: string): Promise<void> {
+  const result = await runManagedSystemMemoryRepair(projectName, "Bootstrap Memsphere system Memory");
+  if (result.created === 0) throw new Error("new Managed Project unexpectedly has no System Memory to bootstrap");
+}
+
+export type SystemMemoryChangePreparation = {
+  project: string;
+  change: Awaited<ReturnType<typeof editMemories>>["change"];
+  candidateRoot: string;
+  created: number;
+  updated: number;
+  deleted: number;
+};
+
+type SystemMemoryReconcilePlan = {
+  project: string;
+  sourceRoot: string;
+  currentDescriptors: SystemMemoryStoreDescriptor[];
+  creates: BundledSystemMemoryDescriptor[];
+  updates: BundledSystemMemoryDescriptor[];
+  deletes: SystemMemoryStoreDescriptor[];
+};
+
+type SystemMemoryStoreDescriptor = {
+  id: string;
+  kind: MemoryKind;
+  names: string[];
+  baseDigest: string;
+};
+
+type SystemMemoryRepairResult = {
+  project: string;
+  storeType: "managed" | "embedded";
+  created: number;
+  updated: number;
+  deleted: number;
+  revision?: string;
+  worktree?: string;
+};
+
+type EmbeddedRepairTarget = {
+  operation: "create" | "update" | "delete";
+  reference: string;
+  path: string;
+  sourcePath?: string;
+  snapshot: EmbeddedFileSnapshot;
+};
+
+type EmbeddedFileSnapshot =
+  | { exists: false }
+  | { exists: true; content: Buffer; digest: string; mode: number };
+
+export type EmbeddedSystemMemoryRepairPreparation = {
+  project: string;
+  memoryRoot: string;
+  workspaceRoot: string;
+  memoryPath: string;
+  stagingRoot: string;
+  targets: EmbeddedRepairTarget[];
+  created: number;
+  updated: number;
+  deleted: number;
+};
+
+/** Build a controlled ChangeSet that reconciles a Managed Project with this package's System Memory. */
+export async function prepareManagedSystemMemoryChange(projectName?: string): Promise<SystemMemoryChangePreparation | undefined> {
+  return withSelectedProject(projectName, prepareSelectedManagedSystemMemoryChange);
+}
+
+async function prepareSelectedManagedSystemMemoryChange(): Promise<SystemMemoryChangePreparation | undefined> {
+  const plan = await buildSelectedSystemMemoryReconcilePlan();
+  if (plan.creates.length === 0 && plan.updates.length === 0 && plan.deletes.length === 0) return undefined;
+  let result: Awaited<ReturnType<typeof editMemories>> | undefined;
+  try {
+    const installs = [...plan.creates, ...plan.updates];
+    if (installs.length > 0) {
+      result = await editMemories({
+        references: installs.map((memory) => memory.reference),
+        createPaths: new Map(plan.creates.map((memory) => [memory.reference, memory.path])),
+        onChangeCreated: (created) => { result = created; }
+      });
+      for (const memory of installs) {
+        const target = result.change.targets.find((candidate) => candidate.reference === memory.reference);
+        if (!target) throw new Error(`System Memory ChangeSet target is missing: ${memory.reference}`);
+        await cp(join(plan.sourceRoot, memory.path), join(result.candidateRoot, target.path));
+      }
+    }
+    if (plan.deletes.length > 0) {
+      result = await deleteMemoriesByIdentity({
+        targets: plan.deletes.map((descriptor) => ({
+          reference: memoryReference(descriptor),
+          path: descriptor.id,
+          baseDigest: descriptor.baseDigest
+        })),
+        changeId: result?.change.id,
+        onChangeCreated: (created) => { result = created; }
+      });
+    }
+    if (!result) throw new Error("System Memory reconciliation produced no ChangeSet");
+    return {
+      project: plan.project,
+      change: result.change,
+      candidateRoot: result.candidateRoot,
+      created: plan.creates.length,
+      updated: plan.updates.length,
+      deleted: plan.deletes.length
+    };
+  } catch (error) {
+    if (result) await failSystemMemoryChange(result, "prepare", error);
+    throw error;
+  }
+}
+
+async function buildSelectedSystemMemoryReconcilePlan(): Promise<SystemMemoryReconcilePlan> {
+  const context = await resolveProjectContext({
+    project: process.env.MEMSPHERE_PROJECT,
+    memoryScope: "canonical"
+  });
+  if (context.primary.config.store.type !== "managed") {
+    throw new Error(`Project "${context.primary.name}" uses Embedded Memory; System Memory repair requires a Managed Project`);
+  }
+  await assertManagedProjectHealthy(context.primary);
   const sourceRoot = bundledReservedMemoryRoot();
-  const memories = await readBundledSystemMemories(sourceRoot);
+  const currentDescriptors = await listPublishedMemoryIdentities(
+    context.primary.memoryRoot,
+    context.primary.config.store.published_revision
+  );
+  return buildSystemMemoryReconcilePlan({
+    project: context.primary.name,
+    sourceRoot,
+    memoryRoot: context.primary.memoryRoot,
+    currentDescriptors
+  });
+}
+
+async function buildSystemMemoryReconcilePlan(input: {
+  project: string;
+  sourceRoot: string;
+  memoryRoot: string;
+  currentDescriptors: SystemMemoryStoreDescriptor[];
+}): Promise<SystemMemoryReconcilePlan> {
+  const [memories, manifest] = await Promise.all([
+    readBundledSystemMemories(input.sourceRoot),
+    readReservedMemoryManifest(input.sourceRoot)
+  ]);
+  const currentDescriptors = input.currentDescriptors;
+  const currentByReference = new Map(currentDescriptors.map((descriptor) => [memoryReference(descriptor), descriptor]));
+  const currentByPath = new Map(currentDescriptors.map((descriptor) => [descriptor.id, descriptor]));
+  const installReferences = new Set(memories.map((memory) => memory.reference));
+  const creates: BundledSystemMemoryDescriptor[] = [];
+  const updates: BundledSystemMemoryDescriptor[] = [];
+  for (const memory of memories) {
+    const current = currentByReference.get(memory.reference);
+    if (!current) {
+      const occupant = currentByPath.get(memory.path);
+      if (occupant) {
+        throw new Error(
+          `System Memory install path conflict at ${memory.path}: expected ${memory.reference}, found ${memoryReference(occupant)}`
+        );
+      }
+      creates.push(memory);
+      continue;
+    }
+    const [bundledSource, currentSource] = await Promise.all([
+      readFile(join(input.sourceRoot, memory.path)),
+      readFile(join(input.memoryRoot, current.id))
+    ]);
+    if (!bundledSource.equals(currentSource)) updates.push(memory);
+  }
+  const deletes: SystemMemoryStoreDescriptor[] = [];
+  for (const tombstone of reservedSystemMemoryRemovalTombstones(manifest)) {
+    const current = currentByPath.get(tombstone.path);
+    if (!current) continue;
+    const reference = memoryReference(current);
+    if (!tombstone.references.includes(reference)) {
+      throw new Error(
+        `System Memory removal identity conflict at ${tombstone.path}: found ${reference}`
+      );
+    }
+    if (!installReferences.has(reference)) deletes.push(current);
+  }
+  return {
+    project: input.project,
+    sourceRoot: input.sourceRoot,
+    currentDescriptors,
+    creates,
+    updates,
+    deletes
+  };
+}
+
+export async function prepareEmbeddedSystemMemoryRepair(
+  projectName?: string
+): Promise<EmbeddedSystemMemoryRepairPreparation | undefined> {
+  return withSelectedProject(projectName, async () => {
+    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    return withProjectLock(context.home, context.primary.name, () => prepareSelectedEmbeddedSystemMemoryRepair(context));
+  });
+}
+
+async function prepareSelectedEmbeddedSystemMemoryRepair(
+  context: Awaited<ReturnType<typeof resolveProjectContext>>
+): Promise<EmbeddedSystemMemoryRepairPreparation | undefined> {
+  if (context.primary.config.store.type !== "embedded") {
+    throw new Error(`Project "${context.primary.name}" uses Managed Memory; Embedded System Memory repair requires an Embedded Project`);
+  }
+  if (context.workspace.kind !== "git") throw new Error("Embedded System Memory repair must run inside a Git worktree");
+  const sourceRoot = bundledReservedMemoryRoot();
+  const plan = await buildSystemMemoryReconcilePlan({
+    project: context.primary.name,
+    sourceRoot,
+    memoryRoot: context.primary.memoryRoot,
+    currentDescriptors: await listWorkingMemoryIdentities(context.primary.memoryRoot)
+  });
+  if (plan.creates.length === 0 && plan.updates.length === 0 && plan.deletes.length === 0) return undefined;
+
+  const targetInputs = [
+    ...plan.creates.map((memory) => ({
+      operation: "create" as const,
+      reference: memory.reference,
+      path: memory.path,
+      sourcePath: join(plan.sourceRoot, memory.path)
+    })),
+    ...plan.updates.map((memory) => {
+      const current = findPlanDescriptor(plan, memory.reference);
+      return {
+        operation: "update" as const,
+        reference: memory.reference,
+        path: current.id,
+        sourcePath: join(plan.sourceRoot, memory.path)
+      };
+    }),
+    ...plan.deletes.map((memory) => ({
+      operation: "delete" as const,
+      reference: memoryReference(memory),
+      path: memory.id
+    }))
+  ];
+  await assertEmbeddedRepairTargetsClean(
+    context.workspace.path,
+    context.primary.config.store.memory_path,
+    targetInputs.map((target) => target.path)
+  );
+  const targets: EmbeddedRepairTarget[] = [];
+  for (const target of targetInputs) {
+    assertSystemMemoryPath(target.path);
+    const snapshot = await snapshotEmbeddedFile(context.primary.memoryRoot, target.path);
+    if (target.operation === "create" && snapshot.exists) {
+      throw new Error(`Embedded System Memory create conflict: ${target.reference}`);
+    }
+    if (target.operation !== "create" && !snapshot.exists) {
+      throw new Error(`Embedded System Memory changed or was deleted during repair: ${target.reference}`);
+    }
+    targets.push({ ...target, snapshot });
+  }
+
+  const stagingRoot = await mkdtemp(join(tmpdir(), "memsphere-embedded-system-repair-"));
+  try {
+    await copyMemoryKinds(context.primary.memoryRoot, stagingRoot);
+    await applyEmbeddedRepairTargets(stagingRoot, targets);
+    const validation = await validateMemoryRoot(stagingRoot);
+    if (validation.issues.length > 0) {
+      const issue = validation.issues[0]!;
+      const issuePath = relative(stagingRoot, issue.path).replaceAll("\\", "/") || issue.path;
+      throw new Error(`Embedded System Memory repair validation failed: ${issuePath}: ${issue.message}`);
+    }
+    return {
+      project: context.primary.name,
+      memoryRoot: context.primary.memoryRoot,
+      workspaceRoot: context.workspace.path,
+      memoryPath: context.primary.config.store.memory_path,
+      stagingRoot,
+      targets,
+      created: plan.creates.length,
+      updated: plan.updates.length,
+      deleted: plan.deletes.length
+    };
+  } catch (error) {
+    await rm(stagingRoot, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+function findPlanDescriptor(
+  plan: SystemMemoryReconcilePlan,
+  reference: string
+): SystemMemoryStoreDescriptor {
+  const current = plan.currentDescriptors.find((descriptor) => memoryReference(descriptor) === reference);
+  if (!current) throw new Error(`System Memory update target is missing: ${reference}`);
+  return current;
+}
+
+export async function applyEmbeddedSystemMemoryRepair(
+  prepared: EmbeddedSystemMemoryRepairPreparation
+): Promise<SystemMemoryRepairResult> {
+  try {
+    return await withSelectedProject(prepared.project, async () => {
+      const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+      return withProjectLock(context.home, prepared.project, () => applySelectedEmbeddedSystemMemoryRepair(context, prepared));
+    });
+  } catch (error) {
+    await rm(prepared.stagingRoot, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function applySelectedEmbeddedSystemMemoryRepair(
+  context: Awaited<ReturnType<typeof resolveProjectContext>>,
+  prepared: EmbeddedSystemMemoryRepairPreparation
+): Promise<SystemMemoryRepairResult> {
+  try {
+    if (context.primary.config.store.type !== "embedded") {
+      throw new Error(`Project "${context.primary.name}" no longer uses Embedded Memory`);
+    }
+    if (
+      context.primary.name !== prepared.project
+      || context.primary.memoryRoot !== prepared.memoryRoot
+      || context.workspace.path !== prepared.workspaceRoot
+      || context.primary.config.store.memory_path !== prepared.memoryPath
+    ) {
+      throw new Error("Embedded System Memory repair context changed after preparation; retry the command");
+    }
+    await assertEmbeddedRepairSnapshotsCurrent(prepared);
+    const applied: EmbeddedRepairTarget[] = [];
+    try {
+      for (const target of prepared.targets) {
+        await applyEmbeddedRepairTarget(prepared.memoryRoot, prepared.stagingRoot, target);
+        applied.push(target);
+      }
+      const validation = await validateMemoryRoot(prepared.memoryRoot);
+      if (validation.issues.length > 0) {
+        const issue = validation.issues[0]!;
+        throw new Error(`Embedded System Memory repair post-write validation failed: ${issue.path}: ${issue.message}`);
+      }
+    } catch (error) {
+      const rollbackErrors: unknown[] = [];
+      for (const target of applied.reverse()) {
+        await restoreEmbeddedRepairTarget(prepared.memoryRoot, target)
+          .catch((rollbackError) => rollbackErrors.push(rollbackError));
+      }
+      if (rollbackErrors.length > 0) {
+        throw new AggregateError([error, ...rollbackErrors], "Embedded System Memory repair failed and rollback was incomplete");
+      }
+      throw error;
+    }
+    return {
+      project: prepared.project,
+      storeType: "embedded",
+      created: prepared.created,
+      updated: prepared.updated,
+      deleted: prepared.deleted,
+      worktree: prepared.workspaceRoot
+    };
+  } finally {
+    await rm(prepared.stagingRoot, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+async function runEmbeddedSystemMemoryRepair(projectName?: string): Promise<SystemMemoryRepairResult> {
+  const prepared = await prepareEmbeddedSystemMemoryRepair(projectName);
+  if (prepared) return applyEmbeddedSystemMemoryRepair(prepared);
+  return withSelectedProject(projectName, async () => {
+    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    if (context.primary.config.store.type !== "embedded") {
+      throw new Error(`Project "${context.primary.name}" uses Managed Memory; Embedded System Memory repair requires an Embedded Project`);
+    }
+    const validation = await validateMemoryRoot(context.primary.memoryRoot);
+    if (validation.issues.length > 0) {
+      const issue = validation.issues[0]!;
+      throw new Error(`Embedded System Memory repair validation failed: ${issue.path}: ${issue.message}`);
+    }
+    return {
+      project: context.primary.name,
+      storeType: "embedded",
+      created: 0,
+      updated: 0,
+      deleted: 0,
+      worktree: context.workspace.path
+    };
+  });
+}
+
+export async function projectRepairCommand(nameInput?: string): Promise<void> {
+  const result = await withSelectedProject(nameInput, async () => {
+    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    return context.primary.config.store.type === "managed"
+      ? runManagedSystemMemoryRepair(context.primary.name, "Repair Memsphere system Memory")
+      : runEmbeddedSystemMemoryRepair(context.primary.name);
+  });
+  console.log(`Project: ${result.project}`);
+  console.log(`Store: ${result.storeType === "managed" ? "Managed" : "Embedded"}`);
+  console.log(`System Memory changes: ${result.created} create, ${result.updated} update, ${result.deleted} delete`);
+  if (result.revision) console.log(`Revision: ${result.revision}`);
+  if (result.worktree) {
+    console.log(`Worktree: ${result.worktree}`);
+    console.log("Validation: passed");
+  }
+}
+
+async function runManagedSystemMemoryRepair(
+  projectName: string | undefined,
+  message: string
+): Promise<SystemMemoryRepairResult> {
+  return withSelectedProject(projectName, async () => {
+    const context = await resolveProjectContext({
+      project: process.env.MEMSPHERE_PROJECT,
+      memoryScope: "canonical"
+    });
+    if (context.primary.config.store.type !== "managed") {
+      throw new Error(`Project "${context.primary.name}" uses Embedded Memory; System Memory repair requires a Managed Project`);
+    }
+    const prepared = await prepareSelectedManagedSystemMemoryChange();
+    if (!prepared) {
+      return {
+        project: context.primary.name,
+        storeType: "managed",
+        created: 0,
+        updated: 0,
+        deleted: 0,
+        revision: context.primary.config.store.published_revision
+      };
+    }
+    let stage: "validate" | "publish" = "validate";
+    try {
+      const validation = await validateMemoryChange(prepared.change.id);
+      if (validation.issues.length > 0) {
+        throw new Error(
+          `System Memory repair validation failed: ${validation.issues[0]?.path}: ${validation.issues[0]?.message}`
+        );
+      }
+      stage = "publish";
+      const published = await publishMemoryChange(prepared.change.id, message);
+      await rm(resolve(prepared.candidateRoot, ".."), { recursive: true, force: true }).catch(() => undefined);
+      return {
+        project: prepared.project,
+        storeType: "managed",
+        created: prepared.created,
+        updated: prepared.updated,
+        deleted: prepared.deleted,
+        revision: published.published_revision ?? context.primary.config.store.published_revision
+      };
+    } catch (error) {
+      return await failSystemMemoryChange(prepared, stage, error);
+    }
+  });
+}
+
+async function failSystemMemoryChange(
+  prepared: Pick<SystemMemoryChangePreparation, "change" | "candidateRoot">,
+  stage: "prepare" | "validate" | "publish",
+  error: unknown
+): Promise<never> {
+  const followupErrors: unknown[] = [];
+  await failMemoryChange(prepared.change.id, stage, error).catch((failureError) => followupErrors.push(failureError));
+  await rm(resolve(prepared.candidateRoot, ".."), { recursive: true, force: true })
+    .catch((cleanupError) => followupErrors.push(cleanupError));
+  if (followupErrors.length > 0) {
+    throw new AggregateError([error, ...followupErrors], "System Memory repair failed and diagnostics or cleanup were incomplete");
+  }
+  throw error;
+}
+
+async function withSelectedProject<T>(projectName: string | undefined, operation: () => Promise<T>): Promise<T> {
+  const selectedProject = projectName?.trim();
+  if (selectedProject) assertProjectName(selectedProject);
   const previous = process.env.MEMSPHERE_PROJECT;
   try {
-    process.env.MEMSPHERE_PROJECT = projectName;
-    const result = await editMemories({
-      references: memories.map((memory) => memory.reference),
-      createPaths: new Map(memories.map((memory) => [memory.reference, memory.path]))
-    });
-    for (const memory of memories) {
-      const target = result.change.targets.find((candidate) => candidate.reference === memory.reference);
-      if (!target) throw new Error(`bootstrap ChangeSet target is missing: ${memory.reference}`);
-      await cp(resolve(sourceRoot, memory.path), resolve(result.candidateRoot, target.path));
-    }
-    await publishMemoryChange(result.change.id, "Bootstrap Memsphere system Memory");
-    await rm(resolve(result.candidateRoot, ".."), { recursive: true, force: true });
+    if (selectedProject) process.env.MEMSPHERE_PROJECT = selectedProject;
+    return await operation();
   } finally {
     if (previous === undefined) delete process.env.MEMSPHERE_PROJECT;
     else process.env.MEMSPHERE_PROJECT = previous;
   }
+}
+
+async function listPublishedMemoryIdentities(
+  memoryRoot: string,
+  revision: string
+): Promise<SystemMemoryStoreDescriptor[]> {
+  const output = await gitOutput(["ls-tree", "-r", "--name-only", revision], memoryRoot);
+  const descriptors: SystemMemoryStoreDescriptor[] = [];
+  for (const id of output.split("\n").filter(Boolean)) {
+    if (!id.endsWith(".yaml") && !id.endsWith(".yml")) continue;
+    const kind = id.split("/", 1)[0];
+    if (!isMemoryKind(kind)) continue;
+    const source = await gitOutput(["show", `${revision}:${id}`], memoryRoot);
+    const parsed = parseMemoryYaml(`${source}\n`);
+    if (!parsed || typeof parsed !== "object") throw new Error(`invalid historical Memory document: ${id}`);
+    const record = parsed as Record<string, unknown>;
+    if (record.tag !== memoryKindTags[kind]) {
+      throw new Error(`${id} uses ${String(record.tag)} but expected ${memoryKindTags[kind]}`);
+    }
+    const rawNames = record.names ?? record.name;
+    const names = typeof rawNames === "string"
+      ? [rawNames]
+      : Array.isArray(rawNames) && rawNames.every((name) => typeof name === "string")
+        ? rawNames as string[]
+        : [];
+    if (!names[0]?.trim()) throw new Error(`historical Memory has no canonical name: ${id}`);
+    const baseDigest = await gitOutput(["rev-parse", `${revision}:${id}`], memoryRoot);
+    descriptors.push({ id, kind, names, baseDigest });
+  }
+  return descriptors;
+}
+
+async function listWorkingMemoryIdentities(memoryRoot: string): Promise<SystemMemoryStoreDescriptor[]> {
+  const descriptors: SystemMemoryStoreDescriptor[] = [];
+  for (const kind of memoryKinds) {
+    for (const filePath of await listMemoryFiles(memoryRoot, kind)) {
+      const id = relative(memoryRoot, filePath).replaceAll("\\", "/");
+      assertSystemMemoryPath(id);
+      const source = await readFile(filePath);
+      const parsed = parseMemoryYaml(source.toString("utf8"));
+      if (!parsed || typeof parsed !== "object") throw new Error(`invalid Embedded Memory document: ${id}`);
+      const record = parsed as Record<string, unknown>;
+      if (record.tag !== memoryKindTags[kind]) {
+        throw new Error(`${id} uses ${String(record.tag)} but expected ${memoryKindTags[kind]}`);
+      }
+      const rawNames = record.names ?? record.name;
+      const names = typeof rawNames === "string"
+        ? [rawNames]
+        : Array.isArray(rawNames) && rawNames.every((name) => typeof name === "string")
+          ? rawNames as string[]
+          : [];
+      if (!names[0]?.trim()) throw new Error(`Embedded Memory has no canonical name: ${id}`);
+      descriptors.push({ id, kind, names, baseDigest: digestBuffer(source) });
+    }
+  }
+  return descriptors;
+}
+
+async function assertEmbeddedRepairTargetsClean(
+  workspaceRoot: string,
+  memoryPath: string,
+  targetPaths: string[]
+): Promise<void> {
+  const repositoryPaths = [...new Set(targetPaths.map((path) => embeddedRepositoryPath(memoryPath, path)))];
+  if (repositoryPaths.length === 0) return;
+  const status = await gitOutput(
+    ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--", ...repositoryPaths.map(gitLiteralPathspec)],
+    workspaceRoot
+  );
+  if (status) {
+    throw new Error(`Embedded System Memory repair target has uncommitted changes: ${repositoryPaths.join(", ")}`);
+  }
+}
+
+function gitLiteralPathspec(path: string): string {
+  return `:(literal)${path}`;
+}
+
+function embeddedRepositoryPath(memoryPath: string, memoryRelativePath: string): string {
+  const normalizedRoot = memoryPath === "." ? "" : memoryPath.replace(/^\.\//, "").replace(/\/$/, "");
+  return normalizedRoot ? posix.join(normalizedRoot, memoryRelativePath) : memoryRelativePath;
+}
+
+async function snapshotEmbeddedFile(memoryRoot: string, path: string): Promise<EmbeddedFileSnapshot> {
+  assertSystemMemoryPath(path);
+  const target = join(memoryRoot, path);
+  let info;
+  try {
+    info = await lstat(target);
+  } catch (error) {
+    if (isCode(error, "ENOENT")) return { exists: false };
+    throw error;
+  }
+  if (!info.isFile()) throw new Error(`Embedded System Memory target must be a regular file: ${path}`);
+  const [resolvedRoot, resolvedTarget] = await Promise.all([realpath(memoryRoot), realpath(target)]);
+  if (resolvedTarget !== resolvedRoot && !resolvedTarget.startsWith(`${resolvedRoot}${sep}`)) {
+    throw new Error(`Embedded System Memory target escapes Memory Root through a symbolic link: ${path}`);
+  }
+  const content = await readFile(target);
+  return { exists: true, content, digest: digestBuffer(content), mode: info.mode & 0o777 };
+}
+
+async function copyMemoryKinds(sourceRoot: string, destinationRoot: string): Promise<void> {
+  for (const kind of memoryKinds) {
+    const source = join(sourceRoot, kind);
+    const destination = join(destinationRoot, kind);
+    let info;
+    try {
+      info = await lstat(source);
+    } catch (error) {
+      if (isCode(error, "ENOENT")) {
+        await mkdir(destination, { recursive: true });
+        continue;
+      }
+      throw error;
+    }
+    if (!info.isDirectory()) {
+      const reason = info.isSymbolicLink() ? "symbolic links are not allowed" : "expected a directory";
+      throw new Error(`Cannot stage Embedded Memory kind ${kind}: ${reason}: ${source}`);
+    }
+    await copyEmbeddedMemoryTree(source, destination);
+  }
+}
+
+async function copyEmbeddedMemoryTree(source: string, destination: string): Promise<void> {
+  await mkdir(destination, { recursive: true });
+  for (const entry of await readdir(source, { withFileTypes: true })) {
+    const sourcePath = join(source, entry.name);
+    const destinationPath = join(destination, entry.name);
+    const info = await lstat(sourcePath);
+    if (info.isSymbolicLink()) {
+      throw new Error(`Cannot stage Embedded Memory: symbolic links are not allowed: ${sourcePath}`);
+    }
+    if (info.isDirectory()) {
+      await copyEmbeddedMemoryTree(sourcePath, destinationPath);
+      continue;
+    }
+    if (!info.isFile()) {
+      throw new Error(`Cannot stage Embedded Memory: expected a regular file: ${sourcePath}`);
+    }
+    await copyFile(sourcePath, destinationPath);
+  }
+}
+
+async function applyEmbeddedRepairTargets(root: string, targets: EmbeddedRepairTarget[]): Promise<void> {
+  for (const target of targets) {
+    const destination = join(root, target.path);
+    if (target.operation === "delete") {
+      await rm(destination, { force: true });
+      continue;
+    }
+    if (!target.sourcePath) throw new Error(`Embedded System Memory source is missing: ${target.reference}`);
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(target.sourcePath, destination);
+  }
+}
+
+async function assertEmbeddedRepairSnapshotsCurrent(
+  prepared: EmbeddedSystemMemoryRepairPreparation
+): Promise<void> {
+  for (const target of prepared.targets) {
+    const current = await snapshotEmbeddedFile(prepared.memoryRoot, target.path);
+    if (!sameEmbeddedSnapshot(current, target.snapshot)) {
+      throw new Error(`Embedded System Memory target changed during repair: ${target.reference}`);
+    }
+  }
+}
+
+async function applyEmbeddedRepairTarget(
+  memoryRoot: string,
+  stagingRoot: string,
+  target: EmbeddedRepairTarget
+): Promise<void> {
+  const destination = join(memoryRoot, target.path);
+  if (target.operation === "delete") {
+    await rm(destination, { force: true });
+    return;
+  }
+  const source = join(stagingRoot, target.path);
+  const [content, info] = await Promise.all([readFile(source, "utf8"), lstat(source)]);
+  if (!info.isFile()) throw new Error(`Embedded System Memory candidate must be a regular file: ${target.path}`);
+  await atomicWriteFile(destination, content, info.mode & 0o777);
+}
+
+async function restoreEmbeddedRepairTarget(memoryRoot: string, target: EmbeddedRepairTarget): Promise<void> {
+  const destination = join(memoryRoot, target.path);
+  if (!target.snapshot.exists) {
+    await rm(destination, { force: true });
+    return;
+  }
+  await atomicWriteFile(destination, target.snapshot.content.toString("utf8"), target.snapshot.mode);
+}
+
+function sameEmbeddedSnapshot(left: EmbeddedFileSnapshot, right: EmbeddedFileSnapshot): boolean {
+  if (left.exists !== right.exists) return false;
+  if (!left.exists) return true;
+  const existingRight = right as Extract<EmbeddedFileSnapshot, { exists: true }>;
+  return left.digest === existingRight.digest && left.mode === existingRight.mode;
+}
+
+function digestBuffer(content: Buffer): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function assertSystemMemoryPath(path: string): void {
+  if (
+    path.includes("\\")
+    || path !== posix.normalize(path)
+    || path.startsWith("../")
+    || path.startsWith("/")
+    || !memoryKinds.includes(path.split("/", 1)[0] as MemoryKind)
+    || path.split("/").length !== 2
+    || !/\.ya?ml$/i.test(path)
+  ) {
+    throw new Error(`invalid or escaping System Memory path: ${path}`);
+  }
+}
+
+function memoryReference(descriptor: SystemMemoryStoreDescriptor): string {
+  return `${descriptor.kind}/${descriptor.names[0]}`;
+}
+
+function isCode(error: unknown, code: string): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === code);
 }
 
 async function rollbackCreatedRegistration(home: string, name: string, root: string): Promise<void> {
@@ -336,7 +1030,6 @@ async function writeProjectMetadata(root: string, name: string, config: ProjectC
   await Promise.all([
     mkdir(paths.changesRoot, { recursive: true }),
     mkdir(paths.runsRoot, { recursive: true }),
-    mkdir(paths.reviewsRoot, { recursive: true }),
     mkdir(paths.archiveRoot, { recursive: true }),
     mkdir(paths.evalsRoot, { recursive: true }),
     mkdir(paths.runtimeRoot, { recursive: true })

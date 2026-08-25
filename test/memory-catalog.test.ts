@@ -62,17 +62,13 @@ test("catalog lists stable public descriptors without reading bodies", async () 
   assert(!JSON.stringify(await catalog.list()).includes("/private/"));
 });
 
-test("catalog folds structured definitions into counts while preserving prose", async () => {
+test("catalog exposes textual definitions without a structured-definition side channel", async () => {
   const provider = new FakeProvider(
     [{
       id: "one",
       kind: "concepts",
       names: ["memory"],
-      defines: [
-        "A managed memory.",
-        { tag: "!statement", names: [], defines: [], asserts: ["Required."] },
-        { tag: "!schema", names: [], defines: [], fields: ["value"] }
-      ]
+      defines: ["A managed memory."]
     }],
     {}
   );
@@ -82,8 +78,7 @@ test("catalog folds structured definitions into counts while preserving prose", 
       reference: "concepts/memory",
       kind: "concepts",
       names: ["memory"],
-      defines: ["A managed memory."],
-      structured_defines: { statement: 1, schema: 1 }
+      defines: ["A managed memory."]
     }],
     next_cursor: null
   });

@@ -1,10 +1,16 @@
 Run {{runId}}
 名称：{{runName}}
 流程：{{procedureName}}
+{{#if memorySource}}
+Memory 来源：ChangeSet {{memorySource.changeId}} @ {{memorySource.checkpointDigest}}
+{{#if memorySource.snapshot}}
+读取本 Run 的 Memory 时使用 `memsphere memory list/read --run {{runId}}`，不要混用当前工作树或后续 checkpoint。
+{{/if}}
+{{/if}}
 {{#each procedureAsserts}}
 {{#if @first}}
 
-流程断言：
+流程规则：
 {{/if}}
 - {{this}}
 {{/each}}
@@ -47,7 +53,7 @@ memsphere run repeat <count> --run {{runId}}
 {{#each step.asserts}}
 {{#if @first}}
 
-断言：
+规则：
 {{/if}}
 - {{this}}
 {{/each}}
@@ -97,7 +103,7 @@ memsphere run skip --run {{runId}}
 {{#each step.schemaWriting.actionAsserts}}
 {{#if @first}}
 
-步骤断言：
+步骤规则：
 {{/if}}
 - {{this}}
 {{/each}}
@@ -135,7 +141,7 @@ Schema 写作：
 {{#each step.progress.asserts}}
 {{#if @first}}
 
-字段断言：
+字段规则：
 {{/if}}
 - {{this}}
 {{/each}}

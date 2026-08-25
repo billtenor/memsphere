@@ -165,8 +165,32 @@ test("ACP reviewer templates preserve the same contract facts and commands in bo
   }
   assert.match(english, /# Memsphere Artifact Reviewer/);
   assert.match(chinese, /# Memsphere 产物评审员/);
+  assert.match(chinese, /### Procedure 规则/);
+  assert.match(chinese, /### Action 规则/);
+  assert.match(chinese, /逐条覆盖契约规则/);
+  assert.doesNotMatch(chinese, /断言/);
   assert.match(renderPrompt("acp.artifact-review.reminder", "en", {}), /without a formal review submission/);
   assert.match(renderPrompt("acp.artifact-review.reminder", "zh-CN", {}), /尚未正式提交评审/);
+});
+
+test("Chinese Schema overview presents asserts as rules without changing the field model", () => {
+  const output = renderPrompt("run.schema-overview", "zh-CN", {
+    procedureName: "delivery",
+    action: {
+      instruction: "Produce a report.",
+      asserts: ["Keep the scope stable."],
+      suggests: ["Be concise."]
+    },
+    artifact: { name: "report", final: false },
+    progress: {
+      completed: 0,
+      total: 1,
+      pendingRepeatControls: 0,
+      fields: [{ path: "report", status: "current" }]
+    }
+  });
+  assert.match(output, /动作规则：Keep the scope stable\./);
+  assert.doesNotMatch(output, /动作断言/);
 });
 
 test("ACP reviewer omits empty contract sections and implementation terminology", () => {

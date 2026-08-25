@@ -15,6 +15,7 @@ import {
 } from "./review.js";
 import {
   buildRunCompletedPromptModel,
+  buildRunAbandonedPromptModel,
   buildRunCurrentStepPromptModel,
   buildRunReportReceiptPromptModel,
   buildSchemaOverviewPromptModel
@@ -115,7 +116,7 @@ function buildInvocations(scene: RunOutputScene, locale: PromptLocale): PromptIn
       "run.review-summary",
       buildArtifactReviewSummaryPromptModel(scene.review, scene.round, locale)
     );
-    if (scene.review.status === "passed") {
+    if (scene.review.status === "passed" || scene.review.status === "cancelled") {
       return [summary, currentStateInvocation(scene.run, locale, scene.runsRoot)];
     }
     return [
@@ -132,7 +133,7 @@ function buildInvocations(scene: RunOutputScene, locale: PromptLocale): PromptIn
       "run.review-vote-receipt",
       buildRunReviewVoteReceiptPromptModel(scene.vote, locale)
     );
-    if (scene.review.status === "passed") {
+    if (scene.review.status === "passed" || scene.review.status === "cancelled") {
       return [receipt, currentStateInvocation(scene.run, locale, scene.runsRoot)];
     }
     return [
@@ -146,7 +147,7 @@ function buildInvocations(scene: RunOutputScene, locale: PromptLocale): PromptIn
 
   if (scene.kind === "enter_schema") {
     return [
-      invocation("run.schema-overview", buildSchemaOverviewPromptModel(scene.snapshot)),
+      invocation("run.schema-overview", buildSchemaOverviewPromptModel(scene.snapshot, locale)),
       currentStateInvocation(scene.run, locale, scene.runsRoot)
     ];
   }
@@ -158,7 +159,9 @@ function currentStateInvocation(
   run: RunState,
   locale: PromptLocale,
   runsRoot?: string
-): PromptInvocation<"run.current-step" | "run.completed" | "run.review-summary"> {
+): PromptInvocation<"run.current-step" | "run.completed" | "run.abandoned" | "run.review-summary"> {
+  const abandoned = buildRunAbandonedPromptModel(run);
+  if (abandoned) return invocation("run.abandoned", abandoned);
   const completed = buildRunCompletedPromptModel(run);
   if (completed) return invocation("run.completed", completed);
 

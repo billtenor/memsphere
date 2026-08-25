@@ -9,6 +9,7 @@ import {
   buildRunArtifactDetail,
   buildRunOverview,
   buildRunStepDetail,
+  buildSchemaWritingDetail,
   printRunOutput,
   printSchemaWritingOverview,
   runStartCommand,
@@ -29,6 +30,14 @@ import {
   buildRunReviewVoteReceiptPromptModel
 } from "../src/prompts/review.js";
 import { renderPrompt } from "../src/prompts/renderer.js";
+
+function ruleTree(channel: "asserts" | "suggests", ...texts: string[]) {
+  return {
+    channel,
+    entries: texts.map((text, index) => ({ kind: "rule" as const, text, ruleId: `test:${channel}[${index}]` })),
+    sections: []
+  };
+}
 
 test("run start command rejects missing, blank, and control-character names", async () => {
   await assert.rejects(runStartCommand("procedure"), /run name is required/);
@@ -79,6 +88,20 @@ test("single-Run status shows the Run name and Procedure name with historical fa
       kind: "status",
       run: { ...base, id: "run-completed", status: "done", stack: [] }
     });
+    printRunOutput({
+      kind: "status",
+      run: {
+        ...base,
+        id: "run-abandoned",
+        status: "abandoned",
+        abandonment: {
+          abandonedAt: "2026-08-22T00:00:00.000Z",
+          reason: "Human stopped it",
+          initiator: { kind: "human", source: "cli", name: "Alice" },
+          current: { frame: "procedure", memoryName: "release-procedure", stepId: "flow[1]" }
+        }
+      }
+    });
   } finally {
     console.log = originalLog;
   }
@@ -87,6 +110,8 @@ test("single-Run status shows the Run name and Procedure name with historical fa
   assert.match(output, /Run run-named\nName: Release candidate verification\nProcedure: release-procedure/);
   assert.match(output, /Run run-legacy\nName: release-procedure\nProcedure: release-procedure/);
   assert.match(output, /Run run-completed\nName: Release candidate verification\nProcedure: release-procedure/);
+  assert.match(output, /Run run-abandoned\nName: Release candidate verification\nProcedure: release-procedure/);
+  assert.match(output, /Abandoned[\s\S]*Human stopped it[\s\S]*cannot continue/);
 });
 
 test("inline Artifact Review comments reject escaped multiline Markdown", () => {
@@ -152,7 +177,9 @@ test("Run inspection separates navigation, step detail, and Artifact content", a
       }
     },
     asserts: ["The summary is concrete."],
-    suggests: ["Keep it short."]
+    suggests: ["Keep it short."],
+    assertTree: ruleTree("asserts", "The summary is concrete."),
+    suggestTree: ruleTree("suggests", "Keep it short.")
   }, {
     id: "flow[2]",
     kind: "action",
@@ -203,10 +230,11 @@ test("Run inspection separates navigation, step detail, and Artifact content", a
   assert.equal("controlPlane" in overview, false);
 
   const detail = buildRunStepDetail(run, "CLI inspection#flow[1]") as {
-    step: { asserts: string[]; suggests: string[] };
+    step: { asserts: { entries: string[] }; suggests: { entries: string[] } };
   };
-  assert.deepEqual(detail.step.asserts, ["The summary is concrete."]);
-  assert.deepEqual(detail.step.suggests, ["Keep it short."]);
+  assert.equal(detail.step.asserts[0], "The summary is concrete.");
+  assert.equal(detail.step.suggests[0], "Keep it short.");
+  assert.doesNotMatch(JSON.stringify(detail), /ruleId/);
 
   const artifact = await buildRunArtifactDetail("/runs", run, "CLI inspection#flow[1]") as {
     source: string;
@@ -219,11 +247,12 @@ test("Run inspection separates navigation, step detail, and Artifact content", a
   assert.equal("contract" in artifact, false);
 
   const contract = buildRunArtifactContractDetail(run, "CLI inspection#flow[1]") as {
-    action: { instruction: string; asserts: string[] };
+    action: { instruction: string; asserts: { entries: string[] } };
     artifact: { schema: { kind: string; node: { fields: unknown[] } } };
   };
   assert.equal(contract.action.instruction, "Produce the summary.");
-  assert.deepEqual(contract.action.asserts, ["The summary is concrete."]);
+  assert.equal(contract.action.asserts[0], "The summary is concrete.");
+  assert.doesNotMatch(JSON.stringify(contract), /ruleId/);
   assert.equal(contract.artifact.schema.kind, "inline");
   assert.equal(contract.artifact.schema.node.fields.length, 1);
 });
@@ -236,6 +265,7 @@ test("run output separates Procedure assertions from Action assertions", () => {
     status: "running",
     procedureName: "guarded-procedure",
     asserts: ["Keep the global contract active."],
+    assertTree: ruleTree("asserts", "Keep the global contract active."),
     memoryRoot: "/memory",
     createdAt: "2026-07-16T00:00:00.000Z",
     updatedAt: "2026-07-16T00:00:00.000Z",
@@ -243,6 +273,7 @@ test("run output separates Procedure assertions from Action assertions", () => {
       type: "procedure",
       memoryName: "guarded-procedure",
       asserts: ["Keep the global contract active."],
+      assertTree: ruleTree("asserts", "Keep the global contract active."),
       steps: [{
         id: "flow[1]",
         kind: "action",
@@ -251,7 +282,8 @@ test("run output separates Procedure assertions from Action assertions", () => {
         artifact: "result",
         type: "string",
         format: { name: "plain", options: {} },
-        asserts: ["Check this step."]
+        asserts: ["Check this step."],
+        assertTree: ruleTree("asserts", "Check this step.")
       }],
       index: 0
     }],
@@ -405,7 +437,8 @@ test("Schema field output shows production constraints and progress without perm
     type: "object",
     format: { name: "markdown", options: { layout: "outline" } },
     schema: { kind: "inline", id: "Delivery", node: { tag: "!schema", names: ["Delivery"], defines: [] } },
-    asserts: ["Keep the delivery coherent."]
+    asserts: ["Keep the delivery coherent."],
+    assertTree: ruleTree("asserts", "Keep the delivery coherent.")
   };
   const fieldStep: NonNullable<RunState["plan"]>[number] = {
     id: "schema:Delivery.summary",
@@ -422,14 +455,18 @@ test("Schema field output shows production constraints and progress without perm
         format: { name: "markdown", options: { layout: "outline" } },
         defines: ["A complete delivery."],
         asserts: ["Include every required section."],
-        suggests: ["Keep the complete delivery concise."]
+        suggests: ["Keep the complete delivery concise."],
+        assertTree: ruleTree("asserts", "Include every required section."),
+        suggestTree: ruleTree("suggests", "Keep the complete delivery concise.")
       }, {
         path: "Delivery.summary",
         type: "string",
         format: { name: "markdown", options: {} },
         defines: ["Summarize the delivery."],
         asserts: ["Describe the delivered result."],
-        suggests: ["Use one sentence."]
+        suggests: ["Use one sentence."],
+        assertTree: ruleTree("asserts", "Describe the delivered result."),
+        suggestTree: ruleTree("suggests", "Use one sentence.")
       }]
     }
   };
@@ -557,7 +594,9 @@ test("Schema overview includes the parent production contract without Review con
     action: {
       instruction: "Produce a complete delivery.",
       asserts: ["Keep the document coherent."],
-      suggests: ["Prefer concise sections."]
+      suggests: ["Prefer concise sections."],
+      assertTree: ruleTree("asserts", "Keep the document coherent."),
+      suggestTree: ruleTree("suggests", "Prefer concise sections.")
     },
     artifact: {
       name: "delivery",
@@ -586,7 +625,14 @@ test("Schema overview includes the parent production contract without Review con
       path: "Delivery",
       type: "object",
       format: { name: "markdown", options: { layout: "outline" } },
-      sources: []
+      sources: [{
+        path: "Delivery",
+        defines: [],
+        asserts: ["Keep nested content coherent."],
+        suggests: [],
+        assertTree: ruleTree("asserts", "Keep nested content coherent."),
+        suggestTree: ruleTree("suggests")
+      }]
     }
   } satisfies SchemaWritingSnapshot;
 
@@ -605,6 +651,10 @@ test("Schema overview includes the parent production contract without Review con
   assert.match(output, /final artifact: yes/);
   assert.match(output, /report each field to update one managed draft/);
   assert.doesNotMatch(output, /Review|Role Binding|Permission|Vote|Decision/);
+
+  const detail = buildSchemaWritingDetail(snapshot);
+  assert.doesNotMatch(JSON.stringify(detail), /ruleId|source_path|imported_at/);
+  assert.match(JSON.stringify(detail), /Keep nested content coherent/);
 });
 
 test("Schema finalization output points to the managed draft and exact report command", () => {

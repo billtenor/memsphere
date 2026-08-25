@@ -4,7 +4,7 @@ import { access, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import MarkdownIt from "markdown-it";
 import { ZodError, type ZodIssue } from "zod";
-import { archiveReview, archiveRun } from "../archive/store.js";
+import { archiveRun } from "../archive/store.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
 import { agentActivityDelta, readAgentActivitySnapshot } from "../acp/activity.js";
 import { detectAcpProviderInstances } from "../acp/detection.js";
@@ -47,22 +47,26 @@ import { authorizeArtifactOperation, controlPlaneConfigSchema, listPermissionDef
 import { listMemoryFiles, readMemoryFile, readMemoryFileSummary } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
-import { MemoryChangePreviewCache } from "../memory/changeset.js";
+import { resolveRuleParts, type RuleLookup } from "../memory/rules.js";
+import { toEffectiveRuleDisplayTree, toEffectiveRuleDisplayValue } from "../memory/serializer.js";
+import {
+  abandonMemoryChange,
+  addMemoryChangeScope,
+  archiveMemoryChange,
+  createMemoryChangeComment,
+  createViewMemoryChange,
+  deleteMemoryChangeComment,
+  MemoryChangePreviewCache,
+  listMemoryChanges,
+  readMemoryChange,
+  updateMemoryChangeComment,
+  withMemoryChangeDetailSnapshot,
+  type MemoryChangeActor,
+  type MemoryChangeSet
+} from "../memory/changeset.js";
 import { readBundledSystemMemories } from "../reserved/store.js";
 import {
-  createReview,
-  getReview,
-  listReviews,
-  listReviewSummaries,
-  readReviewSnapshot,
-  ReviewRevisionConflictError,
-  reviewStatuses,
-  updateReview,
-  deleteReview,
-  type ReviewComment,
-  type ReviewStatus
-} from "../review/store.js";
-import {
+  abandonRun,
   ArtifactAuthorizationFailure,
   ArtifactReviewConflictError,
   artifactReviewForActor,
@@ -110,6 +114,7 @@ type ViewServeOptions = {
 type MemoryPayload = {
   memoryRoot: string;
   actorNames: Record<string, string>;
+  actorKinds: Record<string, "human" | "agent">;
   source: {
     mode: "formal" | "changeset";
     changeId?: string;
@@ -204,7 +209,6 @@ export async function viewServeCommand(options: ViewServeOptions): Promise<void>
     });
     console.log(`memsphere view running at http://${host}:${actualPort}`);
     console.log(`memoryRoot: ${config.memoryRoot}`);
-    console.log(`reviewsRoot: ${config.reviewsRoot}`);
   });
 
   const close = async () => {
@@ -276,7 +280,7 @@ async function handleRequest(
   viewCache: ViewMemoryCache
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
-  const { memoryRoot, reviewsRoot, runsRoot } = config;
+  const { memoryRoot, runsRoot } = config;
   const archiveRoot = config.archiveRoot;
 
   if (request.method === "GET" && url.pathname === "/api/projects") {
@@ -557,6 +561,217 @@ async function handleRequest(
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/changes") {
+    if (!config.project?.name) {
+      sendJson(response, 200, { changes: [] });
+      return;
+    }
+    const changes = await listMemoryChanges({ home: config.homeRoot, project: config.project.name });
+    sendJson(response, 200, {
+      changes: changes.map(memoryChangeSummary)
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/changes") {
+    if (!config.project?.name) {
+      sendJson(response, 404, { error: "No Project is currently selected" });
+      return;
+    }
+    try {
+      const body = await readJsonBody<{ memoryReference?: unknown; operator?: unknown }>(request);
+      if (typeof body.memoryReference !== "string" || !body.memoryReference.trim()) {
+        throw new Error("memoryReference is required");
+      }
+      const change = await createViewMemoryChange({
+        home: config.homeRoot,
+        project: config.project.name,
+        reference: body.memoryReference.trim(),
+        actor: resolveMemoryChangeActor(config, body.operator)
+      });
+      sendJson(response, 201, { change: memoryChangeSummary(change) });
+    } catch (error) {
+      sendMemoryChangeError(response, error);
+    }
+    return;
+  }
+
+  const changeMatch = url.pathname.match(/^\/api\/changes\/([^/]+)$/);
+  if (request.method === "GET" && changeMatch) {
+    if (!config.project?.name) {
+      sendJson(response, 404, { error: "No Project is currently selected" });
+      return;
+    }
+    const changeId = decodeURIComponent(changeMatch[1]);
+    let change: MemoryChangeSet;
+    try {
+      change = await readMemoryChange({ home: config.homeRoot, project: config.project.name, changeId });
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        sendJson(response, 404, { code: "changeset_not_found", error: `ChangeSet not found: ${changeId}` });
+        return;
+      }
+      throw error;
+    }
+    const source: MemoryPayload["source"] = {
+        mode: "changeset",
+        changeId: change.id,
+        storeType: change.store_type ?? "managed",
+        baseRevision: change.checkpoint?.base_revision,
+        updatedAt: change.updated_at,
+        valid: change.checkpoint?.valid,
+        issues: change.checkpoint?.issues
+    };
+    const targetMemories = await withMemoryChangeDetailSnapshot({
+      home: config.homeRoot,
+      project: config.project.name,
+      changeId,
+      use: async ({ files }) => Promise.all(files.map(async (file) => ({
+        reference: file.reference,
+        operation: file.operation,
+        memory: memoryPayloadFromSource(file.label, await readFile(file.path, "utf8"))
+      })))
+    });
+    sendJson(response, 200, {
+      change: memoryChangeSummary(change),
+      targets: change.targets,
+      targetMemories,
+      comments: change.comments,
+      actorNames: Object.fromEntries(
+        Object.entries(config.controlPlane?.actors ?? {}).map(([actorId, actor]) => [actorId, actor.name])
+      ),
+      actorKinds: Object.fromEntries(
+        Object.entries(config.controlPlane?.actors ?? {}).map(([actorId, actor]) => [actorId, actor.kind])
+      ),
+      source
+    });
+    return;
+  }
+
+  const changeMemoriesMatch = url.pathname.match(/^\/api\/changes\/([^/]+)\/memories$/);
+  if (request.method === "POST" && changeMemoriesMatch) {
+    if (!config.project?.name) {
+      sendJson(response, 404, { error: "No Project is currently selected" });
+      return;
+    }
+    try {
+      const body = await readJsonBody<{ memoryReference?: unknown; expectedUpdatedAt?: unknown }>(request);
+      if (typeof body.memoryReference !== "string" || !body.memoryReference.trim()) {
+        throw new Error("memoryReference is required");
+      }
+      const change = await addMemoryChangeScope({
+        home: config.homeRoot,
+        project: config.project.name,
+        changeId: decodeURIComponent(changeMemoriesMatch[1]),
+        reference: body.memoryReference.trim(),
+        expectedUpdatedAt: typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : undefined
+      });
+      sendJson(response, 200, { change: memoryChangeSummary(change) });
+    } catch (error) {
+      sendMemoryChangeError(response, error);
+    }
+    return;
+  }
+
+  const changeAbandonMatch = url.pathname.match(/^\/api\/changes\/([^/]+)\/abandon$/);
+  if (request.method === "POST" && changeAbandonMatch) {
+    if (!config.project?.name) {
+      sendJson(response, 404, { error: "No Project is currently selected" });
+      return;
+    }
+    try {
+      const body = await readJsonBody<{ expectedUpdatedAt?: unknown }>(request);
+      const change = await abandonMemoryChange({
+        home: config.homeRoot,
+        project: config.project.name,
+        changeId: decodeURIComponent(changeAbandonMatch[1]),
+        expectedUpdatedAt: typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : undefined
+      });
+      sendJson(response, 200, { change: memoryChangeSummary(change) });
+    } catch (error) {
+      sendMemoryChangeError(response, error);
+    }
+    return;
+  }
+
+  const changeCommentsMatch = url.pathname.match(/^\/api\/changes\/([^/]+)\/comments$/);
+  if (request.method === "POST" && changeCommentsMatch) {
+    if (!config.project?.name) {
+      sendJson(response, 404, { error: "No Project is currently selected" });
+      return;
+    }
+    try {
+      const body = await readJsonBody<{
+        operator?: unknown;
+        memoryReference?: unknown;
+        path?: unknown;
+        target?: unknown;
+        location?: unknown;
+        snapshot?: unknown;
+        body?: unknown;
+        expectedUpdatedAt?: unknown;
+      }>(request);
+      if (typeof body.memoryReference !== "string" || typeof body.path !== "string" || typeof body.body !== "string") {
+        throw new Error("memoryReference, path, and body are required");
+      }
+      const result = await createMemoryChangeComment({
+        home: config.homeRoot,
+        project: config.project.name,
+        changeId: decodeURIComponent(changeCommentsMatch[1]),
+        actor: resolveMemoryChangeActor(config, body.operator),
+        memoryReference: body.memoryReference,
+        path: body.path,
+        target: typeof body.target === "string" ? body.target : undefined,
+        location: normalizeMemoryChangeLocation(body.location),
+        snapshot: typeof body.snapshot === "string" ? body.snapshot : undefined,
+        body: body.body,
+        expectedUpdatedAt: typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : undefined
+      });
+      sendJson(response, 201, { change: memoryChangeSummary(result.change), comment: result.comment });
+    } catch (error) {
+      sendMemoryChangeError(response, error);
+    }
+    return;
+  }
+
+  const changeCommentMatch = url.pathname.match(/^\/api\/changes\/([^/]+)\/comments\/([^/]+)$/);
+  if (["PATCH", "DELETE"].includes(request.method ?? "") && changeCommentMatch) {
+    if (!config.project?.name) {
+      sendJson(response, 404, { error: "No Project is currently selected" });
+      return;
+    }
+    try {
+      const body = await readJsonBody<{
+        operator?: unknown;
+        body?: unknown;
+        withdraw?: unknown;
+        expectedUpdatedAt?: unknown;
+      }>(request);
+      const common = {
+        home: config.homeRoot,
+        project: config.project.name,
+        changeId: decodeURIComponent(changeCommentMatch[1]),
+        commentId: decodeURIComponent(changeCommentMatch[2]),
+        actor: resolveMemoryChangeActor(config, body.operator),
+        expectedUpdatedAt: typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : undefined
+      };
+      if (request.method === "DELETE") {
+        const change = await deleteMemoryChangeComment(common);
+        sendJson(response, 200, { change: memoryChangeSummary(change) });
+      } else {
+        const result = await updateMemoryChangeComment({
+          ...common,
+          body: typeof body.body === "string" ? body.body : undefined,
+          withdraw: body.withdraw === true
+        });
+        sendJson(response, 200, { change: memoryChangeSummary(result.change), comment: result.comment });
+      }
+    } catch (error) {
+      sendMemoryChangeError(response, error);
+    }
+    return;
+  }
+
   const memoryMatch = url.pathname.match(/^\/api\/memories\/([^/]+)\/([^/]+)$/);
   if (request.method === "GET" && memoryMatch) {
     const kind = decodeURIComponent(memoryMatch[1]) as MemoryKind;
@@ -567,7 +782,14 @@ async function handleRequest(
     }
     const changeId = url.searchParams.get("change")?.trim();
     try {
-      const memory = await loadMemoryDetailPayload(config, viewCache, kind, name, changeId || undefined);
+      const memory = await loadMemoryDetailPayload(
+        config,
+        viewCache,
+        kind,
+        name,
+        changeId || undefined,
+        url.searchParams.get("effective") === "true"
+      );
       if (!memory) {
         sendJson(response, 404, { error: "memory not found" });
         return;
@@ -583,26 +805,39 @@ async function handleRequest(
     return;
   }
 
-  if (request.method === "GET" && url.pathname === "/api/reviews") {
-    if (url.searchParams.get("representation") === "summary") {
-      const reviews = await listReviewSummaries(reviewsRoot, {
-        memoryId: url.searchParams.get("memory_id") ?? undefined,
-        memoryPath: url.searchParams.get("memory_path") ?? undefined
-      });
-      sendJson(response, 200, { reviews });
-      return;
-    }
-    const reviews = (await listReviews(reviewsRoot)).filter((review) => review.source !== "task");
-    sendJson(response, 200, { reviews });
-    return;
-  }
-
   if (request.method === "GET" && url.pathname === "/api/runs") {
     if (url.searchParams.get("representation") === "summary") {
       sendJson(response, 200, { runs: await listRunSummaries(config.runsRoot) });
       return;
     }
     sendJson(response, 200, { runs: await loadRunPayload(config) });
+    return;
+  }
+
+  const runAbandonMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/abandon$/);
+  if (request.method === "POST" && runAbandonMatch) {
+    try {
+      const body = await readJsonBody<{ reason?: unknown; actorId?: unknown }>(request);
+      if (body.reason !== undefined && typeof body.reason !== "string") {
+        throw new Error("reason must be a string");
+      }
+      if (body.actorId !== undefined && typeof body.actorId !== "string") {
+        throw new Error("actorId must be a string");
+      }
+      const result = await abandonRun({
+        runsRoot,
+        runId: decodeURIComponent(runAbandonMatch[1]),
+        source: "view",
+        reason: body.reason,
+        actorId: body.actorId
+      });
+      sendJson(response, 200, {
+        run: await toViewRunPayload(runsRoot, result.run),
+        warnings: result.terminationWarnings
+      });
+    } catch (error) {
+      sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
+    }
     return;
   }
 
@@ -822,22 +1057,6 @@ async function handleRequest(
     return;
   }
 
-  const reviewSnapshotMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)\/snapshot$/);
-  if (request.method === "GET" && reviewSnapshotMatch) {
-    const id = decodeURIComponent(reviewSnapshotMatch[1]);
-    if (url.searchParams.get("kind") === "task") {
-      sendJson(response, 410, { error: "task reviews have been removed; use Artifact Review" });
-      return;
-    }
-    const snapshot = await readReviewSnapshot(reviewsRoot, id, "memory");
-    if (!snapshot) {
-      sendJson(response, 404, { error: "snapshot not found" });
-      return;
-    }
-    sendJson(response, 200, await snapshotPayload(snapshot));
-    return;
-  }
-
   const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)$/);
   if (request.method === "GET" && runMatch) {
     const runId = decodeURIComponent(runMatch[1]);
@@ -864,97 +1083,6 @@ async function handleRequest(
     return;
   }
 
-  const reviewMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)$/);
-  if (request.method === "GET" && reviewMatch) {
-    const review = await getReview(reviewsRoot, decodeURIComponent(reviewMatch[1]));
-    if (!review) {
-      sendJson(response, 404, { error: "review not found" });
-      return;
-    }
-    sendJson(response, 200, { review });
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/reviews") {
-    const body = await readJsonBody<{ title?: unknown; source?: unknown; memoryId?: unknown; memoryName?: unknown; memoryPath?: unknown }>(request);
-    if (body.source === "task") {
-      sendJson(response, 410, { error: "task reviews have been removed; configure Artifact Review on the Artifact instead" });
-      return;
-    }
-    const title = typeof body.title === "string" ? body.title : undefined;
-    const memoryId = typeof body.memoryId === "string" ? body.memoryId : undefined;
-    const memoryName = typeof body.memoryName === "string" ? body.memoryName : undefined;
-    const memoryPath = typeof body.memoryPath === "string" ? body.memoryPath : undefined;
-    const snapshotFiles = await resolveReviewSnapshotFiles({
-      memoryRoot,
-      memoryId,
-      memoryPath,
-      viewCache
-    });
-    const review = await createReview({
-      title,
-      source: "memory",
-      target: { source: "memory", id: memoryId ?? "", path: memoryPath, name: memoryName },
-      memoryRoot,
-      reviewsRoot,
-      snapshotFiles
-    });
-    sendJson(response, 201, { review });
-    return;
-  }
-
-  if (request.method === "PATCH" && reviewMatch) {
-    const body = await readJsonBody<{ title?: unknown; status?: unknown; comments?: unknown; expectedUpdatedAt?: unknown }>(request);
-    const status = normalizeReviewStatus(body.status);
-    const comments = body.comments === undefined ? undefined : normalizeReviewComments(body.comments);
-    let review;
-    try {
-      review = await updateReview(reviewsRoot, decodeURIComponent(reviewMatch[1]), {
-        title: typeof body.title === "string" ? body.title : undefined,
-        status,
-        comments,
-        expectedUpdatedAt: typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : undefined
-      });
-    } catch (error) {
-      if (error instanceof ReviewRevisionConflictError) {
-        sendJson(response, 409, {
-          code: "review_revision_conflict",
-          error: error.message,
-          expectedUpdatedAt: error.expectedUpdatedAt,
-          actualUpdatedAt: error.actualUpdatedAt
-        });
-        return;
-      }
-      throw error;
-    }
-    if (!review) {
-      sendJson(response, 404, { error: "review not found" });
-      return;
-    }
-    sendJson(response, 200, { review });
-    return;
-  }
-
-  if (request.method === "DELETE" && reviewMatch) {
-    const deleted = await deleteReview(reviewsRoot, decodeURIComponent(reviewMatch[1]));
-    if (!deleted) {
-      sendJson(response, 404, { error: "review not found" });
-      return;
-    }
-    sendJson(response, 200, { deleted: true });
-    return;
-  }
-
-  const archiveReviewMatch = url.pathname.match(/^\/api\/archive\/reviews\/([^/]+)$/);
-  if (request.method === "POST" && archiveReviewMatch) {
-    const entry = await archiveReview({
-      archiveRoot,
-      reviewsRoot,
-      id: decodeURIComponent(archiveReviewMatch[1])
-    });
-    sendJson(response, 200, { archived: entry });
-    return;
-  }
 
   const archiveRunMatch = url.pathname.match(/^\/api\/archive\/runs\/([^/]+)$/);
   if (request.method === "POST" && archiveRunMatch) {
@@ -964,6 +1092,27 @@ async function handleRequest(
       id: decodeURIComponent(archiveRunMatch[1])
     });
     sendJson(response, 200, { archived: entry });
+    return;
+  }
+
+  const archiveChangeMatch = url.pathname.match(/^\/api\/archive\/changes\/([^/]+)$/);
+  if (request.method === "POST" && archiveChangeMatch) {
+    if (!config.project?.name) {
+      sendJson(response, 404, { error: "No Project is currently selected" });
+      return;
+    }
+    try {
+      const body = await readJsonBody<{ expectedUpdatedAt?: unknown }>(request);
+      const entry = await archiveMemoryChange({
+        home: config.homeRoot,
+        project: config.project.name,
+        changeId: decodeURIComponent(archiveChangeMatch[1]),
+        expectedUpdatedAt: typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : undefined
+      });
+      sendJson(response, 200, { archived: entry });
+    } catch (error) {
+      sendMemoryChangeError(response, error);
+    }
     return;
   }
 
@@ -996,7 +1145,6 @@ async function readViewServiceConfig(): Promise<MemsphereConfig> {
       homeRoot: home,
       language: "zh-CN",
       memoryRoot: join(home, "projects"),
-      reviewsRoot: join(home, "projects"),
       runsRoot: join(home, "projects"),
       archiveRoot: join(home, "projects"),
       debug: { agentReview: false, root: join(home, ".runtime", "debug") },
@@ -1005,21 +1153,31 @@ async function readViewServiceConfig(): Promise<MemsphereConfig> {
   }
 }
 
-async function snapshotPayload(input: { snapshot: { label: string; path: string; kind: "memory" | "task"; createdAt: string }; content: string; snapshotRoot: string }): Promise<unknown> {
-  const entity = parseMemoryYaml(input.content);
-  const kind = memoryKindFromSnapshot(input.snapshot.label, entity);
-  const primaryName = entity && typeof entity === "object" && Array.isArray((entity as { names?: unknown }).names)
-    ? ((entity as { names: string[] }).names[0] ?? input.snapshot.label)
-    : input.snapshot.label;
-  return {
-    snapshot: input.snapshot,
-    memory: {
-      id: `${kind}/${primaryName}`,
+function memoryPayloadFromSource(label: string, content: string): {
+  id: string;
+  kind: string;
+  path: string;
+  entity?: unknown;
+  error?: string;
+} {
+  try {
+    const entity = parseMemoryYaml(content);
+    const kind = memoryKindFromSnapshot(label, entity);
+    const primaryName = entity && typeof entity === "object" && Array.isArray((entity as { names?: unknown }).names)
+      ? ((entity as { names: string[] }).names[0] ?? label)
+      : label;
+    return { id: `${kind}/${primaryName}`, kind, path: label, entity };
+  } catch (error) {
+    const kind = memoryKindFromSnapshot(label, undefined);
+    const fileName = label.split(/[\\/]/).at(-1) ?? label;
+    const name = fileName.replace(/\.ya?ml$/i, "") || "invalid";
+    return {
+      id: `${kind}/${name}`,
       kind,
-      path: input.snapshot.label,
-      entity
-    }
-  };
+      path: label,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
 }
 
 function memoryKindFromSnapshot(label: string, entity: unknown): string {
@@ -1033,40 +1191,6 @@ function memoryKindFromSnapshot(label: string, entity: unknown): string {
   return "memories";
 }
 
-async function resolveReviewSnapshotFiles(input: {
-  memoryRoot: string;
-  memoryId?: string;
-  memoryPath?: string;
-  viewCache: ViewMemoryCache;
-}): Promise<Array<{ label: string; path: string; kind: "memory" }>> {
-  if (!input.memoryId) return [];
-
-  if (input.memoryPath) {
-    const path = resolveMemoryPath(input.memoryRoot, input.memoryPath);
-    return [{
-      label: portableRelative(input.memoryRoot, path),
-      path,
-      kind: "memory"
-    }];
-  }
-
-  const file = await input.viewCache.find(input.memoryRoot, input.memoryId);
-  if (!file) return [];
-  return [{
-    label: portableRelative(input.memoryRoot, file.path),
-    path: file.path,
-    kind: "memory"
-  }];
-}
-
-function resolveMemoryPath(memoryRoot: string, memoryPath: string): string {
-  const root = resolve(memoryRoot);
-  const path = resolve(root, memoryPath);
-  if (path !== root && !path.startsWith(root + sep)) {
-    throw new Error(`invalid memory path: ${memoryPath}`);
-  }
-  return path;
-}
 
 async function buildMemoryFileIndex(memoryRoot: string): Promise<Map<string, { kind: MemoryKind; path: string }>> {
   const result = new Map<string, { kind: MemoryKind; path: string }>();
@@ -1089,6 +1213,79 @@ async function loadMemoryPayload(config: MemsphereConfig, viewCache: ViewMemoryC
   return withMemoryPayloadRoot(config, viewCache, changeId, (memoryRoot, source) =>
     loadMemoryPayloadFromRoot(config, viewCache, memoryRoot, source)
   );
+}
+
+
+function memoryChangeSummary(change: MemoryChangeSet): unknown {
+  const counts = { create: 0, update: 0, delete: 0, rename: 0 };
+  for (const target of change.targets) counts[target.operation] += 1;
+  const commentCounts = { pending: 0, processing: 0, completed: 0 };
+  for (const comment of change.comments) commentCounts[comment.status] += 1;
+  return {
+    id: change.id,
+    project: change.project,
+    storeType: change.store_type ?? "managed",
+    status: change.status,
+    origin: change.origin,
+    active: change.status === "active",
+    baseRevision: change.base_revision,
+    createdAt: change.created_at,
+    updatedAt: change.updated_at,
+    publishedRevision: change.published_revision,
+    candidateRevision: change.candidate_revision,
+    digest: change.checkpoint?.digest,
+    validatedAt: change.checkpoint?.created_at,
+    valid: change.checkpoint?.valid,
+    issues: change.checkpoint?.issues ?? [],
+    counts,
+    targetCount: change.targets.length,
+    scopeCount: change.scope.length,
+    memoryPaths: [...new Set([
+      ...change.scope.map((item) => item.path),
+      ...change.targets.map((item) => item.destination_path ?? item.path)
+    ])],
+    commentCounts,
+    createdBy: change.created_by,
+    claimed: Boolean(change.claim)
+  };
+}
+
+function resolveMemoryChangeActor(config: MemsphereConfig, input: unknown): MemoryChangeActor {
+  if (!input || typeof input !== "object") throw new Error("operator is required");
+  const operator = input as { kind?: unknown; id?: unknown };
+  if (operator.kind === "human" && typeof operator.id === "string") {
+    const actor = config.controlPlane?.actors?.[operator.id];
+    if (!actor || actor.kind !== "human") throw new Error(`Human Actor not found: ${operator.id}`);
+    return { kind: "human", id: operator.id, name: actor.name };
+  }
+  if (operator.kind === "browser" && typeof operator.id === "string") {
+    return { kind: "browser", id: operator.id, name: "Browser user" };
+  }
+  throw new Error("operator must identify a configured Human Actor or a browser UUID");
+}
+
+function normalizeMemoryChangeLocation(input: unknown): { anchor: string; line: number; hash?: string } | undefined {
+  if (input === undefined) return undefined;
+  if (!input || typeof input !== "object") throw new Error("location must be an object");
+  const location = input as { anchor?: unknown; line?: unknown; hash?: unknown };
+  if (typeof location.anchor !== "string" || !location.anchor.trim()) throw new Error("location.anchor is required");
+  if (!Number.isInteger(location.line) || Number(location.line) < 1) throw new Error("location.line must be a positive integer");
+  if (location.hash !== undefined && typeof location.hash !== "string") throw new Error("location.hash must be a string");
+  return {
+    anchor: location.anchor.trim(),
+    line: Number(location.line),
+    ...(typeof location.hash === "string" && location.hash ? { hash: location.hash } : {})
+  };
+}
+
+function sendMemoryChangeError(response: ServerResponse, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  const missing = /not found/i.test(message);
+  const conflict = /changed since|already |only |claimed|not part of|belongs to/i.test(message);
+  sendJson(response, missing ? 404 : conflict ? 409 : 400, {
+    code: missing ? "changeset_not_found" : conflict ? "changeset_conflict" : "invalid_changeset_request",
+    error: message
+  });
 }
 
 async function withMemoryPayloadRoot<T>(
@@ -1140,7 +1337,15 @@ async function loadMemoryPayloadFromRoot(
   }
 
   viewCache.replaceIndex(memoryRoot, fileIndex);
-  return { memoryRoot: config.memoryRoot, actorNames, memories, source };
+  return {
+    memoryRoot: config.memoryRoot,
+    actorNames,
+    actorKinds: Object.fromEntries(
+      Object.entries(config.controlPlane?.actors ?? {}).map(([actorId, actor]) => [actorId, actor.kind])
+    ),
+    memories,
+    source
+  };
 }
 
 async function loadMemorySummaryPayload(config: MemsphereConfig, viewCache: ViewMemoryCache, changeId?: string): Promise<MemoryPayload> {
@@ -1188,6 +1393,9 @@ async function loadMemorySummaryPayloadFromRoot(
     actorNames: Object.fromEntries(
       Object.entries(config.controlPlane?.actors ?? {}).map(([actorId, actor]) => [actorId, actor.name])
     ),
+    actorKinds: Object.fromEntries(
+      Object.entries(config.controlPlane?.actors ?? {}).map(([actorId, actor]) => [actorId, actor.kind])
+    ),
     memories,
     source
   };
@@ -1198,13 +1406,56 @@ async function loadMemoryDetailPayload(
   viewCache: ViewMemoryCache,
   kind: MemoryKind,
   name: string,
-  changeId?: string
+  changeId?: string,
+  effective = false
 ): Promise<MemoryPayload["memories"][number] | undefined> {
   return withMemoryPayloadRoot(config, viewCache, changeId, async (memoryRoot) => {
     const file = await viewCache.find(memoryRoot, `${kind}/${name}`);
     if (!file) return undefined;
-    return loadMemoryListItem(memoryRoot, kind, file.path, await systemMemoryReferences());
+    const memory = await loadMemoryListItem(memoryRoot, kind, file.path, await systemMemoryReferences());
+    if (effective && memory.entity) await attachEffectiveRuleTrees(memoryRoot, memory.entity);
+    return memory;
   });
+}
+
+async function attachEffectiveRuleTrees(memoryRoot: string, entity: unknown): Promise<void> {
+  const statements = new Map<string, Awaited<ReturnType<typeof readMemoryFile>>["entity"]>();
+  const lookup: RuleLookup = async (target) => {
+    if (!statements.size) {
+      for (const path of await listMemoryFiles(memoryRoot, "statements")) {
+        const statement = await readMemoryFile("statements", path);
+        const canonicalName = statement.entity.names[0];
+        if (canonicalName) statements.set(`statements/${canonicalName}`, statement.entity);
+      }
+    }
+    const statement = statements.get(target);
+    if (!statement || statement.tag !== "!statement") throw new Error(`Statement not found: ${target}`);
+    return statement;
+  };
+
+  const visit = async (value: unknown): Promise<void> => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const node = value as Record<string, unknown>;
+    for (const child of Object.values(node)) {
+      if (Array.isArray(child)) {
+        for (const item of child) await visit(item);
+      } else {
+        await visit(child);
+      }
+    }
+    const effectiveRules: Record<string, unknown> = {};
+    for (const channel of ["asserts", "suggests"] as const) {
+      const parts = node[channel];
+      if (!Array.isArray(parts) || !parts.some(isMemoryReferenceValue)) continue;
+      Object.assign(effectiveRules, toEffectiveRuleDisplayTree(await resolveRuleParts(channel, parts, lookup)));
+    }
+    if (Object.keys(effectiveRules).length) node.effectiveRules = effectiveRules;
+  };
+  await visit(entity);
+}
+
+function isMemoryReferenceValue(value: unknown): boolean {
+  return Boolean(value && typeof value === "object" && (value as { tag?: unknown }).tag === "!ref");
 }
 
 async function systemMemoryReferences(): Promise<Set<string>> {
@@ -1230,7 +1481,7 @@ async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknow
   const { artifactReviews: _privateArtifactReviews, ...publicRun } = hydrated;
   const review = currentArtifactReview(hydrated);
   const schemaWriting = await schemaWritingPayload(runsRoot, hydrated);
-  return {
+  return toEffectiveRuleDisplayValue({
     ...publicRun,
     bindingSnapshot: buildRunBindingSnapshot(hydrated),
     artifactReview: review ? artifactReviewSummary(review, hydrated.controlPlane) : undefined,
@@ -1238,16 +1489,18 @@ async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknow
       artifactReviewSummary(candidate, hydrated.controlPlane)
     ),
     schemaWriting
-  };
+  });
 }
 
 async function schemaWritingPayload(runsRoot: string, run: RunState): Promise<unknown> {
   const snapshot = buildSchemaWritingSnapshot(runsRoot, run);
-  if (!snapshot?.draft) return snapshot;
+  if (!snapshot) return snapshot;
+  const publicSnapshot = { ...snapshot, readOnly: run.status !== "running" };
+  if (!snapshot.draft) return publicSnapshot;
   try {
     const content = await readFile(snapshot.draft.filePath, "utf8");
     return {
-      ...snapshot,
+      ...publicSnapshot,
       draft: {
         ...snapshot.draft,
         content,
@@ -1256,7 +1509,7 @@ async function schemaWritingPayload(runsRoot: string, run: RunState): Promise<un
     };
   } catch (error) {
     return {
-      ...snapshot,
+      ...publicSnapshot,
       draft: {
         ...snapshot.draft,
         contentError: error instanceof Error ? error.message : String(error)
@@ -1731,7 +1984,6 @@ function projectSettingsPayload(document: ProjectConfigDocument): Record<string,
     store: document.raw.store,
     resolvedPaths: {
       memoryRoot: document.resolved.memoryRoot,
-      reviewsRoot: document.resolved.reviewsRoot,
       runsRoot: document.resolved.runsRoot,
       archiveRoot: document.resolved.archiveRoot
     },
@@ -1936,13 +2188,6 @@ function sendArtifactReviewError(response: ServerResponse, error: unknown): void
   sendJson(response, status, { error: message });
 }
 
-function normalizeReviewStatus(value: unknown): ReviewStatus | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value === "string" && reviewStatuses.includes(value as ReviewStatus)) {
-    return value as ReviewStatus;
-  }
-  throw new Error("invalid review status");
-}
 
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -2002,62 +2247,6 @@ function summarizeZodIssue(issue: ZodIssue): string {
   return `${path}: ${issue.message}`;
 }
 
-function normalizeReviewComments(value: unknown): ReviewComment[] {
-  if (!Array.isArray(value)) {
-    throw new Error("comments must be an array");
-  }
-
-  return value.map((comment, index) => {
-    if (!comment || typeof comment !== "object") {
-      throw new Error(`comments[${index}] must be an object`);
-    }
-
-    const record = comment as Record<string, unknown>;
-    const body = typeof record.body === "string" ? record.body.trim() : "";
-    const memoryId = typeof record.memoryId === "string" ? record.memoryId : "";
-    const memoryName = typeof record.memoryName === "string" ? record.memoryName : "";
-    const kind = typeof record.kind === "string" ? record.kind : "";
-    const createdAt = typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString();
-    const source = record.source === "task" ? "task" : record.source === "memory" ? "memory" : undefined;
-
-    if (!body) {
-      throw new Error(`comments[${index}].body is required`);
-    }
-    if (!memoryId || !memoryName || !kind) {
-      throw new Error(`comments[${index}] must include memoryId, memoryName, and kind`);
-    }
-
-    return {
-      id: typeof record.id === "string" ? record.id : `${Date.now()}-${index}`,
-      source,
-      memoryId,
-      memoryName,
-      kind,
-      runId: typeof record.runId === "string" ? record.runId : undefined,
-      runName: typeof record.runName === "string" ? record.runName : undefined,
-      stepId: typeof record.stepId === "string" ? record.stepId : undefined,
-      artifactName: typeof record.artifactName === "string" ? record.artifactName : undefined,
-      target: typeof record.target === "string" ? record.target : undefined,
-      location: normalizeCommentLocation(record.location),
-      snapshot: typeof record.snapshot === "string" ? record.snapshot : undefined,
-      body,
-      createdAt
-    };
-  });
-}
-
-function normalizeCommentLocation(value: unknown): ReviewComment["location"] {
-  if (!value || typeof value !== "object") return undefined;
-  const record = value as Record<string, unknown>;
-  if (typeof record.anchor !== "string" || !record.anchor) return undefined;
-  const line = Number(record.line);
-  if (!Number.isInteger(line) || line < 1) return undefined;
-  return {
-    anchor: record.anchor,
-    line,
-    hash: typeof record.hash === "string" ? record.hash : undefined
-  };
-}
 
 function sendHtml(response: ServerResponse, body: string): void {
   response.writeHead(200, {
@@ -2072,10 +2261,11 @@ export function isViewPagePath(pathname: string): boolean {
   if (/^\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
   if (/^\/projects\/[^/]+\/memories$/.test(pathname)) return true;
   if (/^\/projects\/[^/]+\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
+  if (/^\/projects\/[^/]+\/changes\/[^/]+$/.test(pathname)) return true;
   if (/^\/tasks\/[^/]+$/.test(pathname)) return true;
   if (/^\/tasks\/[^/]+\/artifact-reviews\/[^/]+$/.test(pathname)) return true;
   if (/^\/settings\/[^/]+$/.test(pathname)) return true;
-  return /^\/projects\/[^/]+\/memories\/[^/]+\/[^/]+\/reviews\/[^/]+$/.test(pathname);
+  return false;
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {

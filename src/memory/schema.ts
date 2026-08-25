@@ -18,6 +18,7 @@ import {
   type ProcedureMemory,
   type ProcedureNode,
   type RepeatNode,
+  type RulePart,
   type SchemaField,
   type SchemaMemory,
   type SchemaNode,
@@ -111,12 +112,13 @@ function withRootSyntax<T extends { tag: string }>(
 }
 
 let definitionPartSchema: z.ZodType<DefinitionPart, z.ZodTypeDef, unknown>;
+let rulePartSchema: z.ZodType<RulePart, z.ZodTypeDef, unknown>;
 let staticSchemaFieldSchema: z.ZodType<StaticSchemaField, z.ZodTypeDef, unknown>;
 let schemaFieldSchema: z.ZodType<SchemaField, z.ZodTypeDef, unknown>;
 let legacyFlowNodeSchema: z.ZodType<FlowNode, z.ZodTypeDef, unknown>;
 let legacyIfNodeSchema: z.ZodType<IfNode, z.ZodTypeDef, unknown>;
 
-const definesSchema = z.lazy(() => z.array(definitionPartSchema)).default([]);
+const definesSchema = z.array(nonEmptyString).default([]);
 
 const logicalMemoryReferenceSchema = nonEmptyString.superRefine((value, context) => {
   if (!parseLogicalMemoryReference(value)) {
@@ -131,6 +133,8 @@ const memoryRefNodeSchema: z.ZodType<MemoryRefNode, z.ZodTypeDef, unknown> = z.o
   tag: z.literal("!ref"),
   target: logicalMemoryReferenceSchema
 }).strict();
+
+rulePartSchema = z.union([nonEmptyString, memoryRefNodeSchema]);
 
 const formatInputSchema = z.union([
   nonEmptyString.transform((name) => ({ name, options: {} })),
@@ -148,8 +152,8 @@ const statementNodeSchema: z.ZodType<StatementNode, z.ZodTypeDef, unknown> = z.l
     tag: z.literal("!statement"),
     names: namesSchema,
     defines: definesSchema,
-    asserts: z.array(nonEmptyString).min(1).optional(),
-    suggests: z.array(nonEmptyString).min(1).optional(),
+    asserts: z.array(rulePartSchema).min(1).optional(),
+    suggests: z.array(rulePartSchema).min(1).optional(),
     sections: z.array(statementNodeSchema).min(1).optional()
   }).strict().superRefine((node, context) => {
     if (!node.asserts?.length && !node.suggests?.length && !node.sections?.length) {
@@ -190,8 +194,8 @@ const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(()
     tag: z.literal("!schema"),
     names: namesSchema,
     defines: definesSchema,
-    asserts: z.array(nonEmptyString).optional(),
-    suggests: z.array(nonEmptyString).min(1).optional(),
+    asserts: z.array(rulePartSchema).optional(),
+    suggests: z.array(rulePartSchema).min(1).optional(),
     optional: z.boolean().optional(),
     type: nonEmptyString.optional(),
     format: schemaFormatInputSchema,
@@ -219,7 +223,7 @@ const schemaNodeSchema: z.ZodType<SchemaNode, z.ZodTypeDef, unknown> = z.lazy(()
   }))
 );
 
-definitionPartSchema = z.lazy(() => z.union([nonEmptyString, statementNodeSchema, schemaNodeSchema, memoryRefNodeSchema]));
+definitionPartSchema = nonEmptyString;
 
 staticSchemaFieldSchema = z.lazy(() => z.union([
   nonEmptyString,
@@ -520,8 +524,8 @@ const legacyActionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = z.o
   tag: z.literal("!action"),
   action: nonEmptyString,
   actor: z.enum(stepActors).optional(),
-  asserts: z.array(nonEmptyString).min(1).optional(),
-  suggests: z.array(nonEmptyString).min(1).optional(),
+  asserts: z.array(rulePartSchema).min(1).optional(),
+  suggests: z.array(rulePartSchema).min(1).optional(),
   artifact: legacyArtifactNodeSchema
 }).strict();
 
@@ -637,7 +641,7 @@ const legacyProcedureNodeSchema: z.ZodType<ProcedureNode, z.ZodTypeDef, unknown>
     tag: z.literal("!procedure"),
     names: namesSchema,
     defines: definesSchema,
-    asserts: z.array(nonEmptyString).min(1).optional(),
+    asserts: z.array(rulePartSchema).min(1).optional(),
     goals: stringArray,
     flow: z.array(legacyFlowNodeSchema).default([])
   }).strict())
@@ -688,8 +692,8 @@ export const actionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = z.
   tag: z.literal("!action"),
   action: nonEmptyString,
   actor: z.enum(stepActors).optional(),
-  asserts: z.array(nonEmptyString).min(1).optional(),
-  suggests: z.array(nonEmptyString).min(1).optional(),
+  asserts: z.array(rulePartSchema).min(1).optional(),
+  suggests: z.array(rulePartSchema).min(1).optional(),
   artifact: artifactNodeSchema
 }).strict();
 
@@ -759,7 +763,7 @@ const procedureNodeSchema: z.ZodType<ProcedureNode, z.ZodTypeDef, unknown> = req
     tag: z.literal("!procedure"),
     names: namesSchema,
     defines: definesSchema,
-    asserts: z.array(nonEmptyString).min(1).optional(),
+    asserts: z.array(rulePartSchema).min(1).optional(),
     goals: stringArray,
     flow: z.array(flowNodeSchema).default([])
   }).strict())
@@ -773,6 +777,7 @@ export {
   ifNodeSchema,
   memoryRefNodeSchema,
   repeatNodeSchema,
+  rulePartSchema,
   schemaFieldSchema,
   schemaNodeSchema,
   statementNodeSchema,

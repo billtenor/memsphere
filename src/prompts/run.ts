@@ -1,12 +1,13 @@
 import { resolve } from "node:path";
 import {
-  activeProcedureAsserts,
+  activeProcedureAssertTrees,
   buildSchemaWritingSnapshot,
   currentArtifactReview,
   currentFrame,
   currentSchemaFinalization,
   currentStep,
   finalArtifacts,
+  renderEffectiveRuleTree,
   runDisplayName,
   type RunState,
   type SchemaWritingSnapshot
@@ -14,6 +15,7 @@ import {
 import type { PromptLocale } from "./locale.js";
 import type {
   RunCompletedPromptModel,
+  RunAbandonedPromptModel,
   RunCurrentStepPromptModel,
   RunReportReceiptPromptModel,
   SchemaOverviewPromptModel
@@ -28,9 +30,15 @@ export function buildRunCurrentStepPromptModel(
     runId: run.id,
     runName: runDisplayName(run),
     procedureName: run.procedureName,
-    procedureAsserts: activeProcedureAsserts(run)
+    memorySource: run.memorySource ? {
+      changeId: run.memorySource.changeId,
+      checkpointDigest: run.memorySource.checkpointDigest,
+      snapshot: Boolean(run.memorySnapshot)
+    } : undefined,
+    procedureAsserts: activeProcedureAssertTrees(run)
+      .flatMap((tree) => renderEffectiveRuleTree(tree, locale))
   };
-  if (run.status === "done") return undefined;
+  if (run.status !== "running") return undefined;
 
   const schemaFinalization = currentSchemaFinalization(run);
   if (schemaFinalization) {
@@ -82,8 +90,8 @@ export function buildRunCurrentStepPromptModel(
   const content = {
     actor: step.actor === "human" ? "human" as const : "agent" as const,
     instruction: step.instruction,
-    asserts: step.asserts ?? [],
-    suggests: step.suggests ?? [],
+    asserts: renderEffectiveRuleTree(step.assertTree, locale),
+    suggests: renderEffectiveRuleTree(step.suggestTree, locale),
     details: step.details ?? [],
     artifact: {
       name: step.artifact,
@@ -107,8 +115,8 @@ export function buildRunCurrentStepPromptModel(
       schemaWriting: {
         procedureName: schemaSnapshot.procedureName,
         actionInstruction: schemaSnapshot.action.instruction,
-        actionAsserts: schemaSnapshot.action.asserts,
-        actionSuggests: schemaSnapshot.action.suggests,
+        actionAsserts: renderEffectiveRuleTree(schemaSnapshot.action.assertTree, locale),
+        actionSuggests: renderEffectiveRuleTree(schemaSnapshot.action.suggestTree, locale),
         artifactName: schemaSnapshot.artifact.name
       },
       progress: {
@@ -122,8 +130,8 @@ export function buildRunCurrentStepPromptModel(
           format: currentSchemaSource ? formatDisplay(currentSchemaSource.format) : formatDisplay(step.format)
         },
         defines: uniqueSchemaGuidance(schemaSources.flatMap((source) => source.defines ?? [])),
-        asserts: uniqueSchemaGuidance(schemaSources.flatMap((source) => source.asserts ?? [])),
-        suggests: uniqueSchemaGuidance(schemaSources.flatMap((source) => source.suggests ?? [])),
+        asserts: schemaSources.flatMap((source) => renderEffectiveRuleTree(source.assertTree, locale)),
+        suggests: schemaSources.flatMap((source) => renderEffectiveRuleTree(source.suggestTree, locale)),
         draftPath: schemaSnapshot.draft?.filePath
       }
     } : {
@@ -143,11 +151,33 @@ export function buildRunCompletedPromptModel(run: RunState): RunCompletedPromptM
     runId: run.id,
     runName: runDisplayName(run),
     procedureName: run.procedureName,
-    procedureAsserts: activeProcedureAsserts(run),
+    memorySource: run.memorySource ? {
+      changeId: run.memorySource.changeId,
+      checkpointDigest: run.memorySource.checkpointDigest
+    } : undefined,
+    procedureAsserts: activeProcedureAssertTrees(run)
+      .flatMap((tree) => renderEffectiveRuleTree(tree, run.language)),
     finalArtifacts: finalArtifacts(run).map((artifact) => ({
       name: artifact.name,
       path: artifact.path
     }))
+  };
+}
+
+export function buildRunAbandonedPromptModel(run: RunState): RunAbandonedPromptModel | undefined {
+  if (run.status !== "abandoned") return undefined;
+  const actor = run.abandonment?.initiator;
+  return {
+    runId: run.id,
+    runName: runDisplayName(run),
+    procedureName: run.procedureName,
+    abandonedAt: run.abandonment?.abandonedAt ?? run.updatedAt,
+    initiator: actor?.name ?? actor?.actorId ?? "human",
+    reason: run.abandonment?.reason,
+    currentStep: run.abandonment?.current
+      ? `${run.abandonment.current.memoryName}#${run.abandonment.current.stepId}`
+      : undefined,
+    artifactCount: run.events.length
   };
 }
 
@@ -169,14 +199,15 @@ export function buildRunReportReceiptPromptModel(run: RunState): RunReportReceip
 }
 
 export function buildSchemaOverviewPromptModel(
-  snapshot: SchemaWritingSnapshot
+  snapshot: SchemaWritingSnapshot,
+  locale: PromptLocale = "en"
 ): SchemaOverviewPromptModel {
   return {
     procedureName: snapshot.procedureName,
     action: {
       instruction: snapshot.action.instruction,
-      asserts: snapshot.action.asserts,
-      suggests: snapshot.action.suggests
+      asserts: renderEffectiveRuleTree(snapshot.action.assertTree, locale),
+      suggests: renderEffectiveRuleTree(snapshot.action.suggestTree, locale)
     },
     artifact: {
       name: snapshot.artifact.name,

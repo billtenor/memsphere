@@ -74,6 +74,8 @@ flow:
         asserts:
           - 顶层 names[0] 必须是准确且稳定的小写 ASCII kebab-case canonical name；alias、defines 和 goals 必须准确表达自然语言名称、用途、适用边界和预期结果。
           - 必须区分强制规范和可选建议；持续约束写入 Procedure asserts，局部约束写入 Action asserts，可选做法写入 suggests。
+          - defines 只用非空字符串说明流程的含义、用途和边界，不得写入 !ref 或匿名 Statement/Schema。
+          - 需要复用外部规则时，必须根据强制程度在 Statement/Schema/Action 的 asserts 或 suggests，或 Procedure 的 asserts 中引用 Statement；不能确定投影通道时必须请 human 选择，不得自动猜测。
           - flow 只保留完成任务所必需的步骤；不得为展示思考过程而拆分中间 Action。
           - 每个 Action 必须职责单一、actor 准确并产出后续步骤或 human 实际需要的 Artifact。
           - 每个 Action 的 action 只描述当前步骤的核心任务并保持简洁；执行范围、强制条件和验收要求写入同级 asserts，可选做法写入 suggests，不得把要求堆叠在步骤描述中。
@@ -114,10 +116,10 @@ flow:
         action: 校验并评审本轮 Memory ChangeSet 候选。
         actor: agent
         asserts:
-          - Managed 与 Embedded Project 必须使用 memsphere memory change validate [change-id] 复用同一 ChangeSet，校验本轮修改并更新可供 View 展示的稀疏 checkpoint。
+          - Managed 与 Embedded Project 必须使用 memsphere memory change validate [change-id] 复用同一 ChangeSet，校验本轮修改并更新可通过 Memory 入口和 ChangeSet 详情稳定链接查看的单一当前验证内容。
           - 必须检查 ChangeSet 的完整 target 清单及每项修改与交付意图的关系；对 Procedure 检查步骤输入与 Artifact 衔接、actor 归属、约束作用域、分支完整性、循环终止和最终交付物，对其他 Memory 检查其类型契约、引用完整性和 System/Reserved 同步要求。
           - 必须删除重复、无执行价值或可由其他已读取 Memory 提供的内容；删除或重命名 Memory 时必须确认不存在未处理的逻辑引用、manifest 条目或同步副本。
-          - 未通过 change validate 时不得提交评审或声称本轮完成；普通 memsphere validate 不代替 Embedded ChangeSet 捕获，也不得把稀疏 ChangeSet candidate 或 checkpoint 直接传给 memsphere validate --memory-root。
+          - 未通过 change validate 时不得提交评审或声称本轮完成；普通 memsphere validate 不代替 Embedded ChangeSet 捕获，也不得把稀疏 ChangeSet candidate 或当前验证内容直接传给 memsphere validate --memory-root。
           - Reviewer 或 Runner 对当前候选要求修改时，必须使用当前 Artifact Review 的 revision round 修订并重报，不得因此创建新 Run 或进入下一次外层循环。
         artifact: !artifact
           name: 本轮已验证的 Memory ChangeSet

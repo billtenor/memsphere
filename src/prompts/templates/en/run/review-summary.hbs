@@ -53,3 +53,7 @@ Conclusion:
 Conclusion:
 - This review round is still in progress; keep waiting with the same review_id until every assigned reviewer submits.
 {{/ifDecision}}
+{{#ifDecision decision "cancelled"}}
+Conclusion:
+- The owning Run was abandoned. This review round is cancelled and read-only.
+{{/ifDecision}}

@@ -24,14 +24,7 @@ const entities: MemoryEntity[] = [
     syntax: currentMemorySyntax,
     names: ["memory-core", "记忆 #1"],
     defines: [
-      "A multiline\ndefinition",
-      {
-        tag: "!statement",
-        names: ["Embedded statement"],
-        defines: [],
-        asserts: ["Nested tags survive."],
-        suggests: ["Keep them structured."]
-      }
+      "A multiline\ndefinition"
     ],
     extends: []
   },
@@ -40,8 +33,8 @@ const entities: MemoryEntity[] = [
     syntax: currentMemorySyntax,
     names: ["suggestion"],
     defines: [],
-    asserts: ["Statements assert."],
-    suggests: ["Statements may suggest."],
+    asserts: ["Statements assert.", { tag: "!ref", target: "statements/shared-assertions" }],
+    suggests: ["Statements may suggest.", { tag: "!ref", target: "statements/shared-suggestions" }],
     sections: [
       {
         tag: "!statement",

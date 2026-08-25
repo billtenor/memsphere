@@ -93,6 +93,29 @@ test("memory change validate checks the effective Store without expanding a spar
     const createdProject = await runCli(workspace, ["project", "create", "project", "--bind"], home);
     assert.equal(createdProject.code, 0, createdProject.stderr);
 
+    const repairHelp = await runCli(workspace, ["project", "repair", "--help"], home);
+    assert.equal(repairHelp.code, 0, repairHelp.stderr);
+    assert.match(repairHelp.stdout, /only bundled System Memory/);
+    assert.match(repairHelp.stdout, /user Memory is not\s+modified/);
+    assert.match(repairHelp.stdout, /Embedded\s+repair validates the complete candidate/);
+    assert.match(repairHelp.stdout, /without committing or pushing/);
+    assert.match(repairHelp.stdout, /Mounted Projects remain read-only/);
+    assert.match(repairHelp.stdout, /manifest v3 tombstone matches/);
+    assert.match(repairHelp.stdout, /If there are no differences, nothing is written/);
+    assert.match(repairHelp.stdout, /Explicit \[name\], then global --project, then the current Primary Project/);
+
+    const repaired = await runCli(workspace, ["--project", "project", "project", "repair"], home);
+    assert.equal(repaired.code, 0, repaired.stderr);
+    assert.match(repaired.stdout, /^Project: project$/m);
+    assert.match(repaired.stdout, /^Store: Managed$/m);
+    assert.match(repaired.stdout, /^System Memory changes: 0 create, 0 update, 0 delete$/m);
+    assert.match(repaired.stdout, /^Revision: [0-9a-f]{40,64}$/m);
+    assert.doesNotMatch(repaired.stdout, /ChangeSet:|Candidate Root:|Validate:|Publish:/);
+
+    const removedAlias = await runCli(workspace, ["project", "reinitialize"], home);
+    assert.notEqual(removedAlias.code, 0);
+    assert.match(removedAlias.stderr, /unknown command ['‘]?reinitialize/);
+
     const edited = await runCli(workspace, ["memory", "edit", "concepts/shared"], home);
     assert.equal(edited.code, 0, edited.stderr);
     const changeId = /^ChangeSet: (.+)$/m.exec(edited.stdout)?.[1];
@@ -108,7 +131,7 @@ test("memory change validate checks the effective Store without expanding a spar
     assert.match(textResult.stdout, new RegExp(`ChangeSet: ${changeId}`));
     assert.match(
       textResult.stdout,
-      new RegExp(`Preview: start memsphere View, then open /projects/project/memories\\?change=${changeId}`)
+      new RegExp(`Preview: start memsphere View, then open /projects/project/changes/${changeId}`)
     );
     assert.deepEqual(await readdir(candidateRoot), ["concepts"]);
 
@@ -138,7 +161,7 @@ test("memory edit uses the current Embedded worktree without a ChangeSet", async
     const created = await runCli(nested, ["memory", "edit", "concepts/new-memory"]);
     assert.equal(created.code, 0, created.stderr);
     assert.match(created.stdout, /Store: embedded/);
-    assert.match(created.stdout, /Next: memsphere validate/);
+    assert.match(created.stdout, /Next: memsphere memory change validate/);
     assert(!created.stdout.includes("ChangeSet:"));
     assert.match(await readFile(join(memoryRoot, "concepts", "new-memory.yaml"), "utf8"), /new-memory/);
 
@@ -195,7 +218,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
   await withScope(async ({ nested, memoryRoot }) => {
     await writeFile(
       join(memoryRoot, "concepts", "random-95f2.yaml"),
-      withCurrentMemorySyntax("!concept\nnames: [memory, 记忆]\ndefines:\n  - A managed memory.\n  - !statement\n    asserts: [Read the complete memory.]\n")
+      withCurrentMemorySyntax("!concept\nnames: [memory, 记忆]\ndefines:\n  - A managed memory.\n")
     );
     await writeFile(
       join(memoryRoot, "schemas", "another-random-name.yaml"),
@@ -209,8 +232,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
     assert.deepEqual(page.memories.map((item: { reference: string }) => item.reference), ["concepts/memory", "schemas/record"]);
     const memorySummary = page.memories.find((item: { reference: string }) => item.reference === "concepts/memory");
     assert.deepEqual(memorySummary.defines, ["A managed memory."]);
-    assert.deepEqual(memorySummary.structured_defines, { statement: 1 });
-    assert(!list.stdout.includes("Read the complete memory."));
+    assert.equal(memorySummary.structured_defines, undefined);
     assert.equal(page.next_cursor, null);
     assert(!list.stdout.includes("random-95f2"));
     assert(!list.stdout.includes(memoryRoot));
@@ -220,7 +242,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
     const filteredPage = JSON.parse(filtered.stdout);
     assert.deepEqual(filteredPage.memories.map((item: { reference: string }) => item.reference), ["concepts/memory"]);
     assert.deepEqual(filteredPage.memories[0].defines, ["A managed memory."]);
-    assert.deepEqual(filteredPage.memories[0].structured_defines, { statement: 1 });
+    assert.equal(filteredPage.memories[0].structured_defines, undefined);
 
     for (const reference of ["concepts/memory", "memory", "记忆"]) {
       const read = await runCli(nested, ["memory", "read", reference]);
@@ -230,15 +252,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
         tag: "!concept",
         syntax: currentMemorySyntax,
         names: ["memory", "记忆"],
-        defines: [
-          "A managed memory.",
-          {
-            tag: "!statement",
-            names: [],
-            defines: [],
-            asserts: ["Read the complete memory."]
-          }
-        ]
+        defines: ["A managed memory."]
       });
     }
   });
@@ -247,12 +261,12 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
 test("validate checks Memory references by target kind and dependency cycles", async () => {
   await withScope(async ({ nested, memoryRoot }) => {
     await writeFile(
-      join(memoryRoot, "concepts", "concept.yaml"),
-      withCurrentMemorySyntax("!concept\nnames: [concept-a, Concept Alias]\ndefines:\n  - !ref\n    target: schemas/schema-a\n")
+      join(memoryRoot, "schemas", "schema-b.yaml"),
+      withCurrentMemorySyntax("!schema\nnames: [schema-b]\nfields:\n  - !ref\n    target: schemas/schema-a\n")
     );
     await writeFile(
       join(memoryRoot, "schemas", "schema.yaml"),
-      withCurrentMemorySyntax("!schema\nnames: [schema-a, Schema Alias]\ndefines:\n  - !ref\n    target: concepts/concept-a\n")
+      withCurrentMemorySyntax("!schema\nnames: [schema-a, Schema Alias]\nfields:\n  - !ref\n    target: schemas/schema-b\n")
     );
 
     const cycle = await runCli(nested, ["validate"]);
@@ -260,8 +274,8 @@ test("validate checks Memory references by target kind and dependency cycles", a
     assert.match(cycle.stderr, /Memory reference cycle detected/);
 
     await writeFile(
-      join(memoryRoot, "concepts", "concept.yaml"),
-      withCurrentMemorySyntax("!concept\nnames: [concept-a]\ndefines:\n  - !ref\n    target: schemas/schema-a\n")
+      join(memoryRoot, "schemas", "schema-b.yaml"),
+      withCurrentMemorySyntax("!schema\nnames: [schema-b]\nfields: [value]\n")
     );
     await writeFile(
       join(memoryRoot, "schemas", "schema.yaml"),
@@ -274,7 +288,7 @@ test("validate checks Memory references by target kind and dependency cycles", a
 
     await writeFile(
       join(memoryRoot, "schemas", "schema.yaml"),
-      withCurrentMemorySyntax("!schema\nnames: [schema-a]\ndefines:\n  - !ref\n    target: schemas/missing\n")
+      withCurrentMemorySyntax("!schema\nnames: [schema-a]\nfields:\n  - !ref\n    target: schemas/missing\n")
     );
 
     const missing = await runCli(nested, ["validate"]);

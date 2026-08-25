@@ -1,9 +1,12 @@
 import type { MemoryCatalog } from "../memory/catalog.js";
+import type { RulePart, StatementNode } from "../memory/ast.js";
 import { join } from "node:path";
-import { createMemoryCatalog } from "../memory/factory.js";
+import { createMemoryCatalog, createMemoryCatalogForConfig } from "../memory/factory.js";
 import { isMemoryKind, memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import {
   serializeMemoryJson,
+  serializeEffectiveMemoryReadJson,
+  serializeEffectiveMemoryReadYaml,
   serializeMemoryListJson,
   serializeMemoryListText,
   serializeMemoryListYaml,
@@ -12,12 +15,17 @@ import {
   serializeMemoryNodeListYaml,
   serializeMemoryNodeReadJson,
   serializeMemoryNodeReadYaml,
-  serializeMemoryYaml
+  serializeMemoryYaml,
+  toEffectiveRuleDisplayTree
 } from "../memory/serializer.js";
+import { resolveRuleParts } from "../memory/rules.js";
 import { MemoryNavigation, type MemoryIdentity } from "../memory/navigation.js";
 import {
+  claimMemoryChange,
+  completeMemoryChange,
   editEmbeddedMemories,
   editMemories,
+  finishMemoryChange,
   publishMemoryChange,
   pushMemory,
   recoverMemory,
@@ -28,6 +36,7 @@ import {
 } from "../memory/changeset.js";
 import { resolveProjectContext } from "../project/resolver.js";
 import { readConfig } from "../config.js";
+import { readRun } from "../run/store.js";
 import { getViewServiceStatus, viewServiceUrl } from "../view/service.js";
 
 const listOutputs = ["yaml", "json", "text"] as const;
@@ -41,21 +50,24 @@ export type MemoryListCommandOptions = {
   query?: string;
   node?: string;
   output?: string;
+  run?: string;
 };
 
 export type MemoryReadCommandOptions = {
   kind?: string;
   node?: string;
   output?: string;
+  run?: string;
+  effective?: boolean;
 };
 
 export type MemoryCommandDependencies = {
-  createCatalog: () => Promise<MemoryCatalog>;
+  createCatalog: (runId?: string) => Promise<MemoryCatalog>;
   writeStdout: (value: string) => void;
 };
 
 const defaultDependencies: MemoryCommandDependencies = {
-  createCatalog: createMemoryCatalog,
+  createCatalog: createMemoryCommandCatalog,
   writeStdout: (value) => process.stdout.write(value)
 };
 
@@ -72,7 +84,7 @@ export async function memoryListCommand(
   if (reference && options.query) {
     throw new Error("memory list --query cannot be used with a memory reference");
   }
-  const catalog = await dependencies.createCatalog();
+  const catalog = await dependencies.createCatalog(options.run);
   if (reference) {
     const descriptor = await catalog.resolve(reference, { kind });
     const entity = await catalog.read(descriptor.reference, { kind: descriptor.kind });
@@ -102,18 +114,90 @@ export async function memoryReadCommand(
 ): Promise<void> {
   const kind = parseKind(options.kind);
   const output = parseOutput(options.output ?? "yaml", readOutputs, "memory read");
-  const catalog = await dependencies.createCatalog();
+  const catalog = await dependencies.createCatalog(options.run);
   if (options.node !== undefined) {
     const descriptor = await catalog.resolve(reference, { kind });
     const entity = await catalog.read(descriptor.reference, { kind: descriptor.kind });
     const result = new MemoryNavigation(toIdentity(descriptor), entity).readNode(options.node);
-    const value = output === "json" ? serializeMemoryNodeReadJson(result) : serializeMemoryNodeReadYaml(result);
+    const effective = options.effective ? await resolveEffectiveRules(result.fragment, catalog) : undefined;
+    const value = options.effective
+      ? output === "json"
+        ? serializeEffectiveMemoryReadJson({ declared: result, effective })
+        : serializeEffectiveMemoryReadYaml({ declared: result, effective })
+      : output === "json" ? serializeMemoryNodeReadJson(result) : serializeMemoryNodeReadYaml(result);
     dependencies.writeStdout(value);
     return;
   }
   const entity = await catalog.read(reference, { kind });
-  const value = output === "json" ? serializeMemoryJson(entity) : serializeMemoryYaml(entity);
+  const effective = options.effective ? await resolveEffectiveRules(entity, catalog) : undefined;
+  const value = options.effective
+    ? output === "json"
+      ? serializeEffectiveMemoryReadJson({ declared: entity, effective })
+      : serializeEffectiveMemoryReadYaml({ declared: entity, effective })
+    : output === "json" ? serializeMemoryJson(entity) : serializeMemoryYaml(entity);
   dependencies.writeStdout(value);
+}
+
+async function resolveEffectiveRules(value: unknown, catalog: MemoryCatalog): Promise<Record<string, unknown>> {
+  const lookup = async (target: string): Promise<StatementNode> => {
+    const statement = await catalog.read(target, { kind: "statements" });
+    if (statement.tag !== "!statement") throw new Error(`Memory ${target} is not a Statement`);
+    return statement;
+  };
+  return (await resolveEffectiveRuleLocations(value, lookup)) ?? {};
+}
+
+async function resolveEffectiveRuleLocations(
+  value: unknown,
+  lookup: (target: string) => Promise<StatementNode>
+): Promise<Record<string, unknown> | undefined> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown> & { asserts?: RulePart[]; suggests?: RulePart[] };
+  const effectiveRules = {
+    ...(source.asserts
+      ? toEffectiveRuleDisplayTree(await resolveRuleParts("asserts", source.asserts, lookup))
+      : {}),
+    ...(source.suggests
+      ? toEffectiveRuleDisplayTree(await resolveRuleParts("suggests", source.suggests, lookup))
+      : {})
+  };
+  const children: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(source)) {
+    if (["tag", "syntax", "name", "names", "defines", "asserts", "suggests"].includes(key)) continue;
+    if (Array.isArray(child)) {
+      const resolved = (await Promise.all(child.map((item) => resolveEffectiveRuleLocations(item, lookup))))
+        .filter((item): item is Record<string, unknown> => item !== undefined);
+      if (resolved.length > 0) children[key] = resolved;
+      continue;
+    }
+    const resolved = await resolveEffectiveRuleLocations(child, lookup);
+    if (resolved) children[key] = resolved;
+  }
+  const identity = {
+    ...(typeof source.tag === "string" ? { tag: source.tag } : {}),
+    ...(Array.isArray(source.names) && typeof source.names[0] === "string" ? { name: source.names[0] } : {}),
+    ...(typeof source.name === "string" ? { name: source.name } : {}),
+    ...(typeof source.action === "string" ? { action: source.action } : {})
+  };
+  if (Object.keys(effectiveRules).length === 0 && Object.keys(children).length === 0) return undefined;
+  return {
+    ...identity,
+    ...(Object.keys(effectiveRules).length > 0 ? { effectiveRules } : {}),
+    ...children
+  };
+}
+
+export async function createMemoryCommandCatalog(runId?: string): Promise<MemoryCatalog> {
+  if (!runId) return createMemoryCatalog();
+  const config = await readConfig();
+  const run = await readRun(config.runsRoot, runId);
+  if (!run.memorySource || !run.memorySnapshot) {
+    throw new Error(`Run ${runId} does not have a frozen ChangeSet Memory snapshot`);
+  }
+  const memoryRoot = join(config.runsRoot, run.id, run.memorySnapshot.path);
+  const revision = run.memoryProjects?.primary.revision
+    ?? `changeset:${run.memorySource.changeId}@${run.memorySource.checkpointDigest}`;
+  return createMemoryCatalogForConfig(config, { memoryRoot, revision });
 }
 
 export async function memoryEditCommand(references: string[], options: { change?: string } = {}): Promise<void> {
@@ -128,7 +212,7 @@ export async function memoryEditCommand(references: string[], options: { change?
     for (const target of result.targets) {
       console.log(`Edit: ${target.reference}\t${target.operation}\t${join(result.memoryRoot, target.path)}`);
     }
-    console.log("Next: memsphere validate");
+    console.log("Next: memsphere memory change validate");
     console.log("Integrate these Memory changes through the repository's normal Git workflow.");
     return;
   }
@@ -152,12 +236,38 @@ export async function memoryRenameCommand(reference: string, newName: string, op
 export async function memoryPublishCommand(options: { change?: string; message?: string }): Promise<void> {
   if (!options.change) throw new Error("--change <id> is required");
   const change = await publishMemoryChange(options.change, options.message, { expectedKind: "regular" });
-  console.log(`Published ChangeSet: ${change.id}`);
+  console.log(`Completed ChangeSet: ${change.id}`);
   console.log(`Revision: ${change.published_revision}`);
 }
 
 export async function memoryChangeResumeCommand(changeId: string): Promise<void> {
   console.log(`Candidate Root: ${await resumeMemoryChange(changeId)}`);
+}
+
+export async function memoryChangeClaimCommand(changeId: string, options: { force?: boolean } = {}): Promise<void> {
+  const result = await claimMemoryChange({ changeId, force: options.force });
+  console.log(`Claimed ChangeSet: ${result.change.id}`);
+  console.log(`Candidate Root: ${result.candidateRoot}`);
+  console.log(`Processing Comments: ${result.change.comments.filter((comment) => comment.status === "processing").length}`);
+  for (const warning of result.warnings) console.warn(`Warning: ${warning}`);
+}
+
+export async function memoryChangeFinishCommand(
+  changeId: string,
+  options: { comment?: string[]; reason?: "fixed" | "rejected" } = {}
+): Promise<void> {
+  const change = await finishMemoryChange({
+    changeId,
+    commentIds: options.comment,
+    reason: options.reason
+  });
+  console.log(`Finished ChangeSet processing: ${change.id}`);
+  console.log(`Completed Comments: ${(options.comment ?? []).length}`);
+}
+
+export async function memoryChangeCompleteCommand(changeId: string): Promise<void> {
+  const change = await completeMemoryChange(changeId);
+  console.log(`Completed ChangeSet: ${change.id}`);
 }
 
 export async function memoryChangeValidateCommand(
@@ -184,7 +294,7 @@ export async function memoryChangeValidateCommand(
   console.log(`ChangeSet: ${result.changeId}`);
   console.log(`Store: ${result.storeType}`);
   console.log(`Base Revision: ${result.baseRevision}`);
-  console.log(`Checkpoint: ${result.checkpointDigest}`);
+  console.log(`Content Digest: ${result.checkpointDigest}`);
   console.log(`memoryRoot: ${result.memoryRoot}`);
   if (preview.url) console.log(`Preview: ${preview.url}`);
   else console.log(`Preview: start memsphere View, then open ${preview.path}`);
@@ -200,7 +310,7 @@ async function memoryChangePreview(changeId: string): Promise<{ path: string; ur
 }
 
 export function memoryChangePreviewPath(project: string, changeId: string): string {
-  return `/projects/${encodeURIComponent(project)}/memories?change=${encodeURIComponent(changeId)}`;
+  return `/projects/${encodeURIComponent(project)}/changes/${encodeURIComponent(changeId)}`;
 }
 
 export async function memoryRecoverCommand(reference: string, options: { restore?: boolean; createChange?: boolean }): Promise<void> {

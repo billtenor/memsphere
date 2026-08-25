@@ -3,13 +3,14 @@ import { createRequire } from "node:module";
 import { Command, Option } from "commander";
 import {
   archiveListCommand,
-  archiveRestoreReviewCommand,
   archiveRestoreRunCommand,
-  archiveReviewCommand,
   archiveRunCommand
 } from "./commands/archive.js";
 import {
   memoryChangeResumeCommand,
+  memoryChangeClaimCommand,
+  memoryChangeCompleteCommand,
+  memoryChangeFinishCommand,
   memoryChangeValidateCommand,
   memoryDeleteCommand,
   memoryEditCommand,
@@ -29,6 +30,7 @@ import {
   projectListCommand,
   projectMountCommand,
   projectPruneCommand,
+  projectRepairCommand,
   projectRegisterCommand,
   projectShowCommand,
   projectUnbindCommand,
@@ -41,6 +43,7 @@ import {
 } from "./commands/migrate.js";
 import { memoryKinds } from "./memory/kinds.js";
 import {
+  runAbandonCommand,
   runEnterSchemaCommand,
   runArtifactContractShowCommand,
   runArtifactShowCommand,
@@ -121,6 +124,25 @@ project.command("show")
   .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
   .action(projectShowCommand);
 
+project.command("repair")
+  .description("Restore or update bundled System Memory in a Managed or Embedded Project.")
+  .argument("[name]", "Project name; defaults to --project or the current Primary")
+  .addHelpText("after", `
+Safety and behavior:
+  Repairs only bundled System Memory in the selected Project; user Memory is not
+  modified, and Mounted Projects remain read-only catalog sources.
+  Deprecated bundled entries are deleted only when a manifest v3 tombstone matches
+  both their historical path and canonical identity.
+  Managed repair validates and publishes through a controlled ChangeSet. Embedded
+  repair validates the complete candidate, then writes only the System Memory diff
+  to the current Git worktree without committing or pushing it. Dirty repair targets
+  are never overwritten. If there are no differences, nothing is written.
+
+Project selection:
+  Explicit [name], then global --project, then the current Primary Project.
+`)
+  .action(projectRepairCommand);
+
 project.command("bind")
   .argument("<name>", "Project name")
   .action(projectBindCommand);
@@ -148,6 +170,7 @@ memory
   .addOption(new Option("--kind <kind>", "filter or narrow resolution by memory kind").choices([...memoryKinds]))
   .option("--query <text>", "match a top-level canonical name or alias")
   .option("--node <node-ref>", "list direct children of a memory node")
+  .option("--run <run-id>", "read from a Run's frozen ChangeSet Memory snapshot")
   .addOption(new Option("--output <format>", "output format").choices(["yaml", "json", "text"]).default("yaml"))
   .action((reference, options) => memoryListCommand(reference, options));
 
@@ -157,6 +180,8 @@ memory
   .argument("<reference>", "canonical logical reference, or bare canonical name or alias")
   .addOption(new Option("--kind <kind>", "narrow name resolution by memory kind").choices([...memoryKinds]))
   .option("--node <node-ref>", "read one memory node with its required context")
+  .option("--effective", "include the resolved effective rules for the selected memory or node")
+  .option("--run <run-id>", "read from a Run's frozen ChangeSet Memory snapshot")
   .addOption(new Option("--output <format>", "output format").choices(["yaml", "json"]).default("yaml"))
   .action((reference, options) => memoryReadCommand(reference, options));
 
@@ -199,6 +224,24 @@ const memoryChange = memory.command("change").description("Manage Memory ChangeS
 memoryChange.command("resume")
   .argument("<change-id>", "ChangeSet id")
   .action(memoryChangeResumeCommand);
+
+memoryChange.command("claim")
+  .description("Claim a ChangeSet for processing in the current Workspace.")
+  .argument("<change-id>", "ChangeSet id")
+  .option("--force", "replace another Workspace claim")
+  .action(memoryChangeClaimCommand);
+
+memoryChange.command("finish")
+  .description("Complete selected ChangeSet Comments and release the current claim.")
+  .argument("<change-id>", "ChangeSet id")
+  .option("--comment <ids...>", "processing Comment ids to complete")
+  .addOption(new Option("--reason <reason>", "Comment completion reason").choices(["fixed", "rejected"]))
+  .action(memoryChangeFinishCommand);
+
+memoryChange.command("complete")
+  .description("Complete an active ChangeSet that has no actual Memory differences or unfinished Comments.")
+  .argument("<change-id>", "ChangeSet id")
+  .action(memoryChangeCompleteCommand);
 
 memoryChange.command("validate")
   .description("Capture and validate the current Managed or Embedded Working Change.")
@@ -259,6 +302,7 @@ run
   .argument("[procedure-name]", "procedure primary name or alias")
   .requiredOption("--name <name>", "name for this run")
   .option("--file <path>", "start from a Procedure YAML file without installing it")
+  .option("--change <id>", "start from the validated candidate Memory in an active ChangeSet")
   .option("--review-config <path>", "bind Review Slots to Actors and select Decision Policies")
   .action((procedureName, options) => runStartCommand(procedureName, options));
 
@@ -271,6 +315,15 @@ run
   .option("--revision-summary <text>", "revision summary")
   .option("--revision-summary-file <path>", "read the revision summary from file")
   .action(runReportCommand);
+
+run
+  .command("abandon")
+  .description("Abandon a running Run after an explicit Human decision; this does not archive it.")
+  .requiredOption("--run <id>", "run id")
+  .option("--reason <text>", "optional Human-provided reason")
+  .option("--reason-file <path>", "read the optional reason from a file")
+  .option("--actor <id>", "Human Actor id from the frozen Run snapshot")
+  .action(runAbandonCommand);
 
 run
   .command("show")
@@ -505,35 +558,23 @@ migrate
 
 const archive = program
   .command("archive")
-  .description("Archive and restore completed reviews and runs.");
+  .description("Archive completed items and restore supported kinds.");
 
 archive
   .command("list")
   .description("List archived items.")
-  .argument("[kind]", "one of: reviews, runs")
+  .argument("[kind]", "optional: runs or changes")
   .action(archiveListCommand);
 
 archive
-  .command("review")
-  .description("Archive a done review.")
-  .argument("<id>", "review id")
-  .action(archiveReviewCommand);
-
-archive
   .command("run")
-  .description("Archive a done run.")
+  .description("Archive a done or abandoned run.")
   .argument("<id>", "run id")
   .action(archiveRunCommand);
 
 const restore = archive
   .command("restore")
-  .description("Restore an archived review or run.");
-
-restore
-  .command("review")
-  .description("Restore an archived review.")
-  .argument("<id>", "review id")
-  .action(archiveRestoreReviewCommand);
+  .description("Restore an archived run.");
 
 restore
   .command("run")

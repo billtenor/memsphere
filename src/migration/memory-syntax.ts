@@ -251,7 +251,6 @@ async function stageLegacyContractMigrations(
     configPath: join(root, "config.json"),
     scopeRoot: root,
     memoryRoot,
-    reviewsRoot: join(root, "reviews"),
     runsRoot: join(root, "runs"),
     archiveRoot: join(root, "archives")
   };

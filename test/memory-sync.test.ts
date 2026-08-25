@@ -71,7 +71,7 @@ test("Memory sync creates merge commits and isolates conflicts in a Sync ChangeS
     const rejectedChange = JSON.parse(
       await readFile(join(projectRoot, "changes", ordinary.change.id, "change.json"), "utf8")
     ) as { status: string; published_revision?: string };
-    assert.equal(rejectedChange.status, "draft");
+    assert.equal(rejectedChange.status, "active");
     assert.equal(rejectedChange.published_revision, undefined);
 
     await writeFile(join(organization, "statements", "fixture.yaml"), (await readFile(join(organization, "statements", "fixture.yaml"), "utf8")).replace("Base", "Organization"));

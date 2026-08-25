@@ -8,7 +8,18 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { artifactReviewAssignmentId } from "../src/artifact-review.js";
 import { readConfig } from "../src/config.js";
-import { currentArtifactReview, readRun, reportRun, retryArtifactReviewAgentAssignment, startRun } from "../src/run/store.js";
+import {
+  abandonRun,
+  appendArtifactReviewAgentComment,
+  currentArtifactReview,
+  failArtifactReviewAgentAssignment,
+  markArtifactReviewAgentCliReady,
+  readRun,
+  reportRun,
+  retryArtifactReviewAgentAssignment,
+  startRun,
+  submitArtifactReviewAgentAssignment
+} from "../src/run/store.js";
 import { runArtifactReviewAgentWorker } from "../src/acp/review-worker.js";
 import { createAgentReviewCliRuntime } from "../src/acp/cli-runtime.js";
 import {
@@ -165,6 +176,72 @@ test("ACP Agent Reviewer failure is visible and can be requeued explicitly", asy
   });
 });
 
+test("abandoning a Run cancels running Agent Review work and preserves the terminal state when termination fails", async () => {
+  await withAgentReviewFixture("approve", async ({ configPath, runsRoot, runId }) => {
+    const config = await readConfig(configPath);
+    const before = await readRun(runsRoot, runId);
+    const review = currentArtifactReview(before);
+    assert(review);
+    const assignment = review.rounds[0].assignments[0];
+    assignment.status = "running";
+    assert(assignment.attempts?.[0]);
+    assignment.attempts[0].status = "running";
+    assignment.attempts[0].workerPid = 4242;
+    await writeFile(join(runsRoot, runId, `${runId}.json`), `${JSON.stringify(before, null, 2)}\n`);
+    const terminated: number[] = [];
+
+    const result = await abandonRun({
+      runsRoot,
+      runId,
+      source: "view",
+      reason: "Human stopped the Run",
+      terminateWorker: async (pid) => {
+        terminated.push(pid);
+        throw new Error("simulated termination failure");
+      }
+    });
+    const cancelled = result.run.artifactReviews?.find((candidate) => candidate.id === review.id);
+    assert.equal(result.run.status, "abandoned");
+    assert.equal(cancelled?.status, "cancelled");
+    assert.equal(cancelled?.rounds[0]?.status, "cancelled");
+    assert.equal(cancelled?.rounds[0]?.assignments[0]?.status, "cancelled");
+    assert.equal(cancelled?.rounds[0]?.assignments[0]?.attempts?.[0]?.status, "cancelled");
+    assert.deepEqual(terminated, [4242]);
+    assert.match(result.terminationWarnings[0] ?? "", /4242.*simulated termination failure/);
+    assert.equal((await readRun(runsRoot, runId)).status, "abandoned");
+    assert.equal(currentArtifactReview(result.run), undefined);
+    assert.equal(await dispatchArtifactReviewAgents({ config, run: result.run }), 0);
+    const lateInput = {
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.rounds[0].id,
+      actorId: assignment.actorId,
+      attemptId: assignment.attempts[0].id
+    };
+    await assert.rejects(markArtifactReviewAgentCliReady(lateInput), /Run is not running.*abandoned/);
+    await assert.rejects(appendArtifactReviewAgentComment({
+      ...lateInput,
+      body: "late comment",
+      severity: "blocking"
+    }), /read-only|not running|cancelled/);
+    await assert.rejects(submitArtifactReviewAgentAssignment({
+      ...lateInput,
+      vote: "approve",
+      summary: "late submit"
+    }), /Run is not running.*abandoned/);
+    await assert.rejects(failArtifactReviewAgentAssignment({
+      ...lateInput,
+      failure: { stage: "session", code: "late_failure", message: "late failure" }
+    }), /Run is not running.*abandoned/);
+    await assert.rejects(retryArtifactReviewAgentAssignment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.rounds[0].id,
+      actorId: assignment.actorId
+    }), /Run is not running.*abandoned/);
+  });
+});
+
 test("ACP Agent Reviewer preserves invalid Provider argument failures", async () => {
   await withAgentReviewFixture("approve", async ({ configPath, runsRoot, runId }) => {
     const before = await readRun(runsRoot, runId);
@@ -262,6 +339,7 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     assert.match(prompt, /Do not invent findings/);
     assert.doesNotMatch(JSON.stringify(launch), /MEMSPHERE_REVIEW_ENDPOINT|MEMSPHERE_REVIEW_CAPABILITY|bridge\.sock/);
     assert.match(prompt, /memsphere-review run step show --step "<step-ref>"/);
+    assert.match(prompt, /ChangeSet Run sessions automatically bind their frozen Memory snapshot/);
     assert.doesNotMatch(prompt, /Identity:|Binding:|Decision policy:|Candidate Artifact and contract|Required workflow/);
     assert.doesNotMatch(prompt, /reviewer-agent|round-|assignment-/);
     await assert.rejects(
@@ -296,6 +374,26 @@ test("Agent Review CLI launcher rejects commands outside the Session allowlist",
     });
     assert.equal(wrongStepRun.status, 2);
 
+    const wrongMemoryRun = crossSpawn.sync(runtime.launcherPath, ["memory", "list", "--run", "other"], {
+      encoding: "utf8",
+      env: { ...process.env, MEMSPHERE_REVIEW_MEMORY_RUN_ID: "bound-run" }
+    });
+    assert.equal(wrongMemoryRun.status, 2);
+
+    const wrongEqualsMemoryRun = crossSpawn.sync(runtime.launcherPath, ["memory", "read", "example", "--run=other"], {
+      encoding: "utf8",
+      env: { ...process.env, MEMSPHERE_REVIEW_MEMORY_RUN_ID: "bound-run" }
+    });
+    assert.equal(wrongEqualsMemoryRun.status, 2);
+
+    const duplicateMemoryRun = crossSpawn.sync(runtime.launcherPath, [
+      "memory", "list", "--run", "bound-run", "--run=other"
+    ], {
+      encoding: "utf8",
+      env: { ...process.env, MEMSPHERE_REVIEW_MEMORY_RUN_ID: "bound-run" }
+    });
+    assert.equal(duplicateMemoryRun.status, 2);
+
     const wrongAssignment = crossSpawn.sync(runtime.launcherPath, [
       "run", "review", "assignment", "show", "--assignment", "other"
     ], {
@@ -303,6 +401,14 @@ test("Agent Review CLI launcher rejects commands outside the Session allowlist",
       env: { ...process.env, MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment" }
     });
     assert.equal(wrongAssignment.status, 2);
+
+    const wrongEqualsAssignment = crossSpawn.sync(runtime.launcherPath, [
+      "run", "review", "assignment", "show", "--assignment=other"
+    ], {
+      encoding: "utf8",
+      env: { ...process.env, MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment" }
+    });
+    assert.equal(wrongEqualsAssignment.status, 2);
 
     const wrongContractAssignment = crossSpawn.sync(runtime.launcherPath, [
       "run", "artifact", "contract", "show", "--assignment", "other"
@@ -319,6 +425,18 @@ test("Agent Review CLI launcher rejects commands outside the Session allowlist",
       "run", "artifact", "show", "--output", "json"
     ], { encoding: "utf8", env: unboundEnv });
     assert.equal(missingBinding.status, 2);
+
+    const unboundMemoryRun = crossSpawn.sync(runtime.launcherPath, ["memory", "read", "example", "--run", "other"], {
+      encoding: "utf8",
+      env: unboundEnv
+    });
+    assert.equal(unboundMemoryRun.status, 2);
+
+    const unboundEqualsMemoryRun = crossSpawn.sync(runtime.launcherPath, ["memory", "read", "example", "--run=other"], {
+      encoding: "utf8",
+      env: unboundEnv
+    });
+    assert.equal(unboundEqualsMemoryRun.status, 2);
   } finally {
     await runtime.cleanup();
   }
@@ -329,6 +447,7 @@ test("Agent Review CLI launcher injects Session bindings without shell environme
   const env = {
     ...process.env,
     MEMSPHERE_REVIEW_RUN_ID: "bound-run",
+    MEMSPHERE_REVIEW_MEMORY_RUN_ID: "bound-run",
     MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment"
   };
   try {
@@ -348,6 +467,32 @@ test("Agent Review CLI launcher injects Session bindings without shell environme
     assert.deepEqual(JSON.parse(prior.stdout.trim()), [
       "run", "artifact", "show", "--step", "flow[1]", "--output", "json", "--run", "bound-run"
     ]);
+
+    const memory = crossSpawn.sync(runtime.launcherPath, ["memory", "read", "example", "--output", "json"], {
+      encoding: "utf8",
+      env
+    });
+    assert.equal(memory.status, 0);
+    assert.deepEqual(JSON.parse(memory.stdout.trim()), [
+      "memory", "read", "example", "--output", "json", "--run", "bound-run"
+    ]);
+
+    const equalsMemory = crossSpawn.sync(runtime.launcherPath, [
+      "memory", "read", "example", "--run=bound-run", "--output", "json"
+    ], { encoding: "utf8", env });
+    assert.equal(equalsMemory.status, 0);
+    assert.deepEqual(JSON.parse(equalsMemory.stdout.trim()), [
+      "memory", "read", "example", "--run=bound-run", "--output", "json"
+    ]);
+
+    const regularEnv = { ...env };
+    delete regularEnv.MEMSPHERE_REVIEW_MEMORY_RUN_ID;
+    const regularMemory = crossSpawn.sync(runtime.launcherPath, ["memory", "list", "--output", "json"], {
+      encoding: "utf8",
+      env: regularEnv
+    });
+    assert.equal(regularMemory.status, 0);
+    assert.deepEqual(JSON.parse(regularMemory.stdout.trim()), ["memory", "list", "--output", "json"]);
   } finally {
     await runtime.cleanup();
   }

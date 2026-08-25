@@ -70,7 +70,6 @@ export type ProjectConfigDraftValidation = {
   changes: ConfigChange[];
   resolvedPaths?: {
     memoryRoot: string;
-    reviewsRoot: string;
     runsRoot: string;
     archiveRoot: string;
   };
@@ -181,7 +180,6 @@ export function validateProjectConfigDraft(
       changes: diffConfig(editableProjectConfigDraft(document), normalized),
       resolvedPaths: {
         memoryRoot: document.resolved.memoryRoot,
-        reviewsRoot: document.resolved.reviewsRoot,
         runsRoot: document.resolved.runsRoot,
         archiveRoot: document.resolved.archiveRoot
       }

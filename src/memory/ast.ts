@@ -20,11 +20,12 @@ export type MemoryRefNode = {
   target: string;
 };
 
-export type DefinitionPart = string | StatementNode | SchemaNode | MemoryRefNode;
+export type DefinitionPart = string;
+export type RulePart = string | MemoryRefNode;
 
 export type CommonMemoryNode = {
   names: string[];
-  defines: DefinitionPart[];
+  defines: string[];
 };
 
 export type ConceptNode = CommonMemoryNode & {
@@ -34,8 +35,8 @@ export type ConceptNode = CommonMemoryNode & {
 
 export type StatementNode = CommonMemoryNode & {
   tag: "!statement";
-  asserts?: string[];
-  suggests?: string[];
+  asserts?: RulePart[];
+  suggests?: RulePart[];
   sections?: StatementNode[];
 };
 
@@ -56,8 +57,8 @@ export type SchemaField = StaticSchemaField | RepeatNode;
 
 export type SchemaNode = CommonMemoryNode & {
   tag: "!schema";
-  asserts?: string[];
-  suggests?: string[];
+  asserts?: RulePart[];
+  suggests?: RulePart[];
   optional?: boolean;
   type?: ArtifactType;
   format?: ArtifactFormatSpec;
@@ -80,8 +81,8 @@ export type ActionNode = {
   tag: "!action";
   action: string;
   actor?: StepActor;
-  asserts?: string[];
-  suggests?: string[];
+  asserts?: RulePart[];
+  suggests?: RulePart[];
   artifact: ArtifactNode;
 };
 
@@ -108,7 +109,7 @@ export type FlowNode = ActionNode | IfNode | WhileNode | CallNode;
 
 export type ProcedureNode = CommonMemoryNode & {
   tag: "!procedure";
-  asserts?: string[];
+  asserts?: RulePart[];
   goals: string[];
   flow: FlowNode[];
 };

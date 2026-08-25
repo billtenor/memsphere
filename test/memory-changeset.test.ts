@@ -8,6 +8,7 @@ import { gitOutput, runGit } from "../src/git.js";
 import {
   checkpointWorkspaceChanges,
   editMemories,
+  failMemoryChange,
   memoryChangeSetSchema,
   publishMemoryChange,
   recoverMemory,
@@ -132,8 +133,8 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     assert.deepEqual(await readdir(join(registry.projects.project.root, "changes", created.change.id, "checkpoints")), [
       initialValidation.checkpointDigest
     ]);
-    const competing = await editMemories({ references: ["concepts/competing-draft"] });
-    await assert.rejects(validateMemoryChange(), /multiple Managed draft ChangeSets.*provide one explicitly/);
+    const competing = await editMemories({ references: ["concepts/competing-active"] });
+    await assert.rejects(validateMemoryChange(), /multiple active Managed ChangeSets.*provide one explicitly/);
     await rm(join(competing.candidateRoot, ".."), { recursive: true, force: true });
     await rm(join(registry.projects.project.root, "changes", competing.change.id), { recursive: true, force: true });
     assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
@@ -141,6 +142,7 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     await rm(created.candidateRoot, { recursive: true, force: true });
     assert.equal(await resumeMemoryChange(created.change.id), created.candidateRoot);
     const published = await publishMemoryChange(created.change.id);
+    assert.equal(published.status, "completed");
     assert.match(published.published_revision ?? "", /^[0-9a-f]{40,64}$/);
     assert.match(await readFile(join(memoryRoot, "concepts", "shared.yaml"), "utf8"), /Initial/);
     assert.deepEqual((await readMemoryFile("concepts", join(memoryRoot, "concepts", "other.yaml"))).entity.names, ["other", "Other Alias"]);
@@ -157,11 +159,16 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     assert.deepEqual((await readMemoryFile("concepts", join(memoryRoot, "concepts", "other.yaml"))).entity.names, ["other", "Other Alias"]);
     assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
 
-    const dependent = await editMemories({ references: ["concepts/dependent"] });
-    const dependentPath = join(dependent.candidateRoot, "concepts", "dependent.yaml");
-    await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("defines: []", "defines:\n  - !ref\n    target: concepts/shared"));
+    const sharedSchema = await editMemories({ references: ["schemas/shared-schema"] });
+    const sharedSchemaCandidate = join(sharedSchema.candidateRoot, "schemas", "shared-schema.yaml");
+    await writeFile(sharedSchemaCandidate, (await readFile(sharedSchemaCandidate, "utf8")).replace("defines: []", "fields: [value]"));
+    await publishMemoryChange(sharedSchema.change.id);
+
+    const dependent = await editMemories({ references: ["schemas/dependent"] });
+    const dependentPath = join(dependent.candidateRoot, "schemas", "dependent.yaml");
+    await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("defines: []", "fields:\n  - !ref\n    target: schemas/shared-schema"));
     assert.deepEqual((await validateMemoryChange(dependent.change.id)).issues, []);
-    await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("concepts/shared", "concepts/missing"));
+    await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("schemas/shared-schema", "schemas/missing"));
     const missingReference = await validateMemoryChange(dependent.change.id);
     assert(missingReference.issues.some((issue) => issue.path === dependentPath && issue.message.includes("was not found")));
     const persistedMissingReference = memoryChangeSetSchema.parse(JSON.parse(await readFile(
@@ -169,13 +176,13 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
       "utf8"
     )));
     assert(persistedMissingReference.checkpoint?.issues.some((issue) => (
-      issue.path === "concepts/dependent.yaml" && issue.message.includes("was not found")
+      issue.path === "schemas/dependent.yaml" && issue.message.includes("was not found")
     )));
-    await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("concepts/missing", "concepts/shared"));
+    await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("schemas/missing", "schemas/shared-schema"));
     await publishMemoryChange(dependent.change.id);
     assert.deepEqual((await readMemoryFile("concepts", join(memoryRoot, "concepts", "other.yaml"))).entity.names, ["other", "Other Alias"]);
 
-    const deleted = await editMemories({ references: ["shared"], operation: "delete" });
+    const deleted = await editMemories({ references: ["schemas/shared-schema"], operation: "delete" });
     const deleteValidation = await validateMemoryChange(deleted.change.id);
     assert(deleteValidation.issues.some((issue) => issue.message.includes("was not found")));
 
@@ -217,6 +224,26 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     await rm(join(missingCandidate.candidateRoot, missingCandidate.change.targets[0].path));
     await assert.rejects(validateMemoryChange(missingCandidate.change.id), /candidate file is missing/);
 
+    const diagnosedFailure = await editMemories({ references: ["concepts/diagnosed-failure"] });
+    const diagnosedValidation = await validateMemoryChange(diagnosedFailure.change.id);
+    assert.deepEqual(diagnosedValidation.issues, []);
+    const failedChange = await failMemoryChange(
+      diagnosedFailure.change.id,
+      "validate",
+      new Error("diagnostic summary\nprivate detail")
+    );
+    assert.equal(failedChange.status, "abandoned");
+    assert.equal(failedChange.failure?.stage, "validate");
+    assert.equal(failedChange.failure?.summary, "diagnostic summary");
+    assert.equal(failedChange.checkpoint?.digest, diagnosedValidation.checkpointDigest);
+    await assert.rejects(validateMemoryChange(diagnosedFailure.change.id), /already abandoned/);
+    await assert.rejects(publishMemoryChange(diagnosedFailure.change.id), /already abandoned/);
+    await assert.rejects(resumeMemoryChange(diagnosedFailure.change.id), /already abandoned/);
+    await assert.rejects(editMemories({
+      references: ["concepts/another-failure"],
+      changeId: diagnosedFailure.change.id
+    }), /already abandoned/);
+
     const first = await editMemories({ references: ["shared"] });
     const second = await editMemories({ references: ["shared"] });
     await writeFile(join(first.candidateRoot, "concepts", "shared.yaml"), (await readFile(join(first.candidateRoot, "concepts", "shared.yaml"), "utf8")).replace("Initial", "First"));
@@ -229,6 +256,7 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
 
     await writeFile(join(memoryRoot, "concepts", "shared.yaml"), (await readFile(join(memoryRoot, "concepts", "shared.yaml"), "utf8")).replace("First", "Outside"));
+    await writeFile(join(memoryRoot, "schemas", "shared-schema.yaml"), (await readFile(join(memoryRoot, "schemas", "shared-schema.yaml"), "utf8")).replace("value", "outside-value"));
     const config = JSON.parse(await readFile(join(registry.projects.project.root, "config.json"), "utf8")) as {
       store: { branch: string; published_revision: string };
     };
@@ -239,9 +267,10 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
       managed: { branch: config.store.branch, publishedRevision: config.store.published_revision }
     }]));
     const listed = await catalog.list();
-    assert.deepEqual(listed.memories.filter((item) => item.frozen).map((item) => item.names[0]).sort(), ["dependent", "shared"]);
+    assert.deepEqual(listed.memories.filter((item) => item.frozen).map((item) => item.names[0]).sort(), ["dependent", "shared", "shared-schema"]);
     await assert.rejects(catalog.read("shared"), MemoryFrozenError);
     assert.equal((await catalog.read("Other Alias")).names[0], "other-renamed");
+    await recoverMemory("schemas/shared-schema", "restore");
 
     const recovered = await recoverMemory("shared", "create-change");
     assert(recovered.change && recovered.candidateRoot);
@@ -286,7 +315,7 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
       assert.equal(await gitOutput(["rev-parse", "HEAD"], memoryRoot), revisionBefore);
       assert.equal(revisionAfter, revisionBefore);
       assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
-      assert.equal(savedChange.status, "draft");
+      assert.equal(savedChange.status, "active");
       assert.equal(savedChange.published_revision, undefined);
 
       const auditFailed = await editMemories({ references: ["concepts/audit-failure"] });
@@ -305,7 +334,7 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
       assert.equal(await gitOutput(["rev-parse", "HEAD"], memoryRoot), revisionBefore);
       assert.equal(configAfterAuditFailure, revisionBefore);
       assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
-      assert.equal(savedAuditChange.status, "draft");
+      assert.equal(savedAuditChange.status, "active");
       assert.equal(savedAuditChange.published_revision, undefined);
     }
   } finally {
@@ -325,7 +354,7 @@ test("ChangeSet metadata rejects path traversal", () => {
     project: "project",
     workspace_key: "path:/workspace",
     base_revision: "abc123",
-    status: "draft",
+    status: "active",
     created_at: "2026-08-17T00:00:00.000Z",
     updated_at: "2026-08-17T00:00:00.000Z",
     targets: [{
@@ -336,4 +365,22 @@ test("ChangeSet metadata rejects path traversal", () => {
       added_revision: "abc123"
     }]
   }).success, false);
+});
+
+test("ChangeSet metadata accepts only the active lifecycle vocabulary", () => {
+  const base = {
+    format_version: 1 as const,
+    id: "change-lifecycle",
+    project: "project",
+    workspace_key: "path:/workspace",
+    base_revision: "abc123",
+    created_at: "2026-08-17T00:00:00.000Z",
+    updated_at: "2026-08-17T00:00:00.000Z",
+    targets: []
+  };
+  assert.equal(memoryChangeSetSchema.safeParse({ ...base, status: "active" }).success, true);
+  assert.equal(memoryChangeSetSchema.safeParse({ ...base, status: "completed" }).success, true);
+  assert.equal(memoryChangeSetSchema.safeParse({ ...base, status: "abandoned" }).success, true);
+  assert.equal(memoryChangeSetSchema.safeParse({ ...base, status: "draft" }).success, false);
+  assert.equal(memoryChangeSetSchema.safeParse({ ...base, status: "published" }).success, false);
 });

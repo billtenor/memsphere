@@ -91,6 +91,9 @@ const reviewDecisionSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("pending"),
     remaining: z.number().int().nonnegative()
+  }).strict(),
+  z.object({
+    kind: z.literal("cancelled")
   }).strict()
 ]);
 
@@ -183,6 +186,11 @@ const runCurrentStepSchema = z.object({
   runId: z.string(),
   runName: z.string(),
   procedureName: z.string(),
+  memorySource: z.object({
+    changeId: z.string(),
+    checkpointDigest: z.string(),
+    snapshot: z.boolean()
+  }).strict().optional(),
   procedureAsserts: z.array(z.string()),
   step: z.discriminatedUnion("kind", [
     z.object({
@@ -225,11 +233,26 @@ const runCompletedSchema = z.object({
   runId: z.string(),
   runName: z.string(),
   procedureName: z.string(),
+  memorySource: z.object({
+    changeId: z.string(),
+    checkpointDigest: z.string()
+  }).strict().optional(),
   procedureAsserts: z.array(z.string()),
   finalArtifacts: z.array(z.object({
     name: z.string(),
     path: z.string().optional()
   }).strict())
+}).strict();
+
+const runAbandonedSchema = z.object({
+  runId: z.string(),
+  runName: z.string(),
+  procedureName: z.string(),
+  abandonedAt: z.string(),
+  initiator: z.string(),
+  reason: z.string().optional(),
+  currentStep: z.string().optional(),
+  artifactCount: z.number().int().nonnegative()
 }).strict();
 
 const runReportReceiptSchema = z.object({
@@ -322,6 +345,12 @@ const definitions = {
     audience: "runner",
     purpose: "summary",
     schema: runCompletedSchema
+  },
+  "run.abandoned": {
+    path: "run/abandoned.hbs",
+    audience: "runner",
+    purpose: "summary",
+    schema: runAbandonedSchema
   },
   "run.report-receipt": {
     path: "run/report-receipt.hbs",

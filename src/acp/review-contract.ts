@@ -1,27 +1,33 @@
 import {
-  activeProcedureAsserts,
+  activeProcedureAssertTrees,
   currentFrame,
   currentStep,
   type ArtifactReviewContext,
   type RunSchemaContract
 } from "../run/store.js";
+import type { EffectiveRuleTree } from "../memory/rules.js";
+import {
+  toEffectiveRuleDisplayEntries,
+  toEffectiveRuleDisplayValue,
+  type EffectiveRuleDisplayEntry
+} from "../memory/serializer.js";
 
 export type AgentReviewContract = {
   procedure: {
     name: string;
-    asserts: string[];
+    asserts: EffectiveRuleDisplayEntry[];
   };
   action: {
     instruction: string;
-    asserts: string[];
-    suggests: string[];
+    asserts: EffectiveRuleDisplayEntry[];
+    suggests: EffectiveRuleDisplayEntry[];
     details: string[];
   };
   artifact: {
     name: string;
     type?: string;
     format?: { name: string; options: Readonly<Record<string, unknown>> };
-    schema?: RunSchemaContract;
+    schema?: unknown;
     final: boolean;
     review?: string;
   };
@@ -36,23 +42,27 @@ export function buildAgentReviewContract(context: ArtifactReviewContext): AgentR
   return {
     procedure: {
       name: frame?.memoryName ?? context.run.procedureName,
-      asserts: activeProcedureAsserts(context.run)
+      asserts: activeProcedureAssertTrees(context.run).flatMap(toEffectiveRuleDisplayEntries)
     },
     action: {
       instruction: step.instruction,
-      asserts: step.asserts ?? [],
-      suggests: step.suggests ?? [],
+      asserts: toEffectiveRuleDisplayEntries(step.assertTree ?? emptyRuleTree("asserts")),
+      suggests: toEffectiveRuleDisplayEntries(step.suggestTree ?? emptyRuleTree("suggests")),
       details: step.details ?? []
     },
     artifact: {
       name: step.artifact ?? context.review.artifactName,
       type: step.type,
       format: step.format,
-      schema: step.schema,
+      schema: toEffectiveRuleDisplayValue(step.schema),
       final: step.final ?? false,
       review: step.reviewPolicy
     }
   };
+}
+
+function emptyRuleTree(channel: "asserts" | "suggests"): EffectiveRuleTree {
+  return { channel, entries: [], sections: [] };
 }
 
 export function summarizeAgentReviewSchema(schema: RunSchemaContract | undefined): string {

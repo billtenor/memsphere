@@ -1,10 +1,13 @@
 Run {{runId}}
 名称：{{runName}}
 流程：{{procedureName}}
+{{#if memorySource}}
+Memory 来源：ChangeSet {{memorySource.changeId}} @ {{memorySource.checkpointDigest}}
+{{/if}}
 {{#each procedureAsserts}}
 {{#if @first}}
 
-流程断言：
+流程规则：
 {{/if}}
 - {{this}}
 {{/each}}

@@ -1,11 +1,11 @@
-import type { DefinitionPart, MemoryEntity } from "./ast.js";
+import type { MemoryEntity } from "./ast.js";
 import type { MemoryKind } from "./kinds.js";
 
 export type ProviderMemoryDescriptor = {
   id: string;
   kind: MemoryKind;
   names: string[];
-  defines: DefinitionPart[];
+  defines: string[];
   project_name?: string;
   revision?: string;
   frozen?: string;
