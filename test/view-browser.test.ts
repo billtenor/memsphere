@@ -710,6 +710,7 @@ test("Task titles use the Run name and keep the Procedure name in details", () =
 
 test("browser renders recursive Statement sections with per-reference effective expansion", () => {
   assert.match(browserHtml, /suggests: \{ zh: "建议", yaml: "suggests" \}/);
+  assert.match(browserHtml, /rules: \{ zh: "规则", yaml: "Rules" \}/);
   assert.match(browserHtml, /sections: \{ zh: "章节", yaml: "sections" \}/);
   assert.match(browserHtml, /appendList\(target, t\("suggests"\), node\.suggests, "suggests", path, node\.effectiveRules\?\.suggests\)/);
   assert.match(browserHtml, /memory\.kind === "statements"\) el\.detail\.append\(renderStatement/);
@@ -723,6 +724,7 @@ test("browser renders recursive Statement sections with per-reference effective 
   assert.match(browserHtml, /function renderRuleReference\(ref, path, effectiveReference, effectiveAvailable, channel = "asserts"\)/);
   assert.match(browserHtml, /function countEffectiveRules\(node\)/);
   assert.match(browserHtml, /function renderEffectiveRuleSection\(node, scope\)/);
+  assert.match(browserHtml, /if \(entries\.length\) body\.append\(blockTitle\(t\("rules"\)\)\)/);
   assert.match(browserHtml, /collapsedEffectiveRuleGroups: new Set\(\)/);
   assert.match(browserHtml, /function bindEffectiveRuleGroup\(section, heading, key\)/);
   assert.match(browserHtml, /heading\.setAttribute\("role", "button"\)/);

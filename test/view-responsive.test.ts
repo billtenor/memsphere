@@ -370,6 +370,15 @@ test("Task effective rule references and sections collapse and survive rerenders
       await rerenderedHeading.press("Enter");
       assert.equal(await rerenderedHeading.getAttribute("aria-expanded"), "true");
       const effectiveSection = rerenderedReference.locator(".effective-section").first();
+      assert.deepEqual(
+        await effectiveSection.locator(":scope > .section-body > .block-title").allTextContents(),
+        ["定义", "规则"]
+      );
+      const groupedText = await effectiveSection.locator(":scope > .section-body > .text-list").allTextContents();
+      assert.equal(groupedText.length, 2);
+      assert.match(groupedText[0] ?? "", /Evidence-specific context\./);
+      assert.doesNotMatch(groupedText[0] ?? "", /Cite supporting evidence\./);
+      assert.equal(groupedText[1], "Cite supporting evidence.");
       const sectionHeading = effectiveSection.locator(":scope > .section-header");
       await sectionHeading.press(" ");
       assert.equal(await sectionHeading.getAttribute("aria-expanded"), "false");

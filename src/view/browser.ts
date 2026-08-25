@@ -639,6 +639,7 @@ export const browserHtml = String.raw`<!doctype html>
       effectiveRules: { zh: "生效规则", yaml: "Effective rules" },
       effectiveRuleCount: { zh: "条生效规则", yaml: "effective rules" },
       referencedFrom: { zh: "引用自", yaml: "Referenced from" },
+      rules: { zh: "规则", yaml: "Rules" },
       sections: { zh: "章节", yaml: "sections" },
       goals: { zh: "目标", yaml: "goals" },
       flow: { zh: "流程", yaml: "flow" },
@@ -5229,8 +5230,10 @@ export const browserHtml = String.raw`<!doctype html>
       const body = document.createElement("div");
       body.className = "section-body";
       if (node.defines?.length) appendList(body, t("defines"), node.defines, "effective-defines");
+      const entries = effectiveRuleEntries(node);
+      if (entries.length) body.append(blockTitle(t("rules")));
       bindEffectiveRuleGroup(section, heading, scope);
-      appendEffectiveRuleEntries(body, effectiveRuleEntries(node), scope + ":entries");
+      appendEffectiveRuleEntries(body, entries, scope + ":entries");
       for (const [index, child] of (node.sections || []).entries()) {
         body.append(renderEffectiveRuleSection(child, scope + ":section:" + index));
       }
