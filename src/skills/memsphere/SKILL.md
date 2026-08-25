@@ -270,10 +270,10 @@ Concept、Statement、Schema 和 Procedure 都必须从该入口读取，不能�
 
 启动、状态查询或流程推进后，CLI 会按当前场景返回当前步骤、Review 下一步或完成状态：
 
-- `Procedure Asserts` 是当前调用链中全部 Procedure 必须持续满足的全局约束。
+- `流程规则` 是当前调用链中全部 Procedure 必须持续满足的全局约束。
 - `Do` 表示当前 Agent 步骤需要完成的事情；Agent 步骤不重复展示执行者。
 - `Ask human to do` 表示当前步骤需要 Human 操作，Agent 必须暂停并等待 Human 提供结果。
-- `Asserts` 是当前步骤必须满足的要求。
+- `规则` 是当前步骤必须满足的要求。
 - `Suggests` 是执行时可以参考的建议。
 - `Details` 是理解和执行当前步骤所需的补充上下文。
       - `Artifact` 表示当前步骤需要产出的内容、业务类型、编码格式和可选 Schema。
@@ -285,7 +285,7 @@ Concept、Statement、Schema 和 Procedure 都必须从该入口读取，不能�
 
 #### 上报步骤产物
 
-完成当前步骤后，检查产物是否满足 `Procedure Asserts`、步骤提示、`Asserts` 和 `Artifact` 格式，然后执行 CLI 在 `Then` 中给出的命令。
+完成当前步骤后，检查产物是否满足 `流程规则`、步骤提示、`规则` 和 `Artifact` 格式，然后执行 CLI 在 `Then` 中给出的命令。
 
 Agent 执行任何 `memsphere run report` 命令时，必须请求宿主在沙盒外执行。如果 CLI 拒绝受限环境中的 Report，使用完全相同的命令申请提升或非沙盒执行权限后重试；不要修改参数规避检查。
 

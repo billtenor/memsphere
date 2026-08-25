@@ -172,6 +172,10 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     assertTree: {
       channel: "asserts",
       entries: [{
+        kind: "rule",
+        text: "The local rule before the reference applies.",
+        ruleId: "procedures/responsive-browser-fixture#asserts[0]"
+      }, {
         kind: "reference",
         target: "statements/shared-rules",
         entries: [{
@@ -189,6 +193,10 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
           }],
           sections: []
         }]
+      }, {
+        kind: "rule",
+        text: "The local rule after the reference applies.",
+        ruleId: "procedures/responsive-browser-fixture#asserts[2]"
       }],
       sections: []
     },
@@ -348,10 +356,30 @@ test("Task effective rule references and sections collapse and survive rerenders
     const page = await openTaskPage(browser, url, 1366);
     try {
       const reference = page.locator(".run-procedure-asserts .effective-reference").first();
+      const ruleList = page.locator(".run-procedure-asserts > .effective-rule-tree > .effective-rule-list");
+      const topLevelItems = ruleList.locator(":scope > li");
       const referenceHeading = reference.locator(":scope > .section-header");
       const referenceBody = reference.locator(":scope > .section-body");
       await referenceHeading.waitFor();
+      assert.equal(await topLevelItems.count(), 3);
+      assert.match(await topLevelItems.nth(0).innerText(), /local rule before/);
+      assert.match(await topLevelItems.nth(1).innerText(), /statements\/shared-rules/);
+      assert.match(await topLevelItems.nth(2).innerText(), /local rule after/);
+      assert.equal(await topLevelItems.nth(1).evaluate(element => getComputedStyle(element).display), "list-item");
+      assert.equal(await topLevelItems.nth(1).evaluate(element => getComputedStyle(element).listStyleType), "disc");
+      const [firstRuleBox, referenceItemBox, referenceHeadingBox] = await Promise.all([
+        topLevelItems.nth(0).boundingBox(),
+        topLevelItems.nth(1).boundingBox(),
+        referenceHeading.boundingBox()
+      ]);
+      assert(firstRuleBox && referenceItemBox && referenceHeadingBox);
+      assert.equal(Math.abs(firstRuleBox.x - referenceItemBox.x) < 1, true);
+      assert.equal(Math.abs(referenceItemBox.x - referenceHeadingBox.x) <= 1, true);
       assert.equal(await referenceHeading.getAttribute("aria-expanded"), "true");
+      const nestedRule = referenceBody.locator(":scope > .effective-rule-list > li").first();
+      const nestedRuleBox = await nestedRule.boundingBox();
+      assert(nestedRuleBox);
+      assert.equal(nestedRuleBox.x > referenceHeadingBox.x, true);
 
       await referenceHeading.click({ position: { x: 8, y: 8 } });
       assert.equal(await referenceHeading.getAttribute("aria-expanded"), "false");

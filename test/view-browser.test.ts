@@ -726,6 +726,10 @@ test("browser renders recursive Statement sections with per-reference effective 
   assert.match(browserHtml, /function renderRuleReference\(ref, path, effectiveReference, effectiveAvailable, channel = "asserts"\)/);
   assert.match(browserHtml, /function countEffectiveRules\(node\)/);
   assert.match(browserHtml, /function renderEffectiveRuleSection\(node, scope\)/);
+  assert.match(browserHtml, /list\.className = "text-list effective-rule-list"/);
+  assert.match(browserHtml, /item\.className = "effective-reference-item"/);
+  assert.match(browserHtml, /entries\.forEach\(\(entry, index\) =>/);
+  assert.doesNotMatch(browserHtml, /entries\.filter\(entry => typeof entry === "string" \|\| entry\.kind === "rule"\)/);
   assert.match(browserHtml, /if \(entries\.length\) body\.append\(blockTitle\(t\("rules"\)\)\)/);
   assert.match(browserHtml, /collapsedEffectiveRuleGroups: new Set\(\)/);
   assert.match(browserHtml, /function bindEffectiveRuleGroup\(section, heading, key\)/);

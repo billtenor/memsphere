@@ -56,7 +56,7 @@ test("unified skill and reserved memories keep the same bootstrap contract", asy
   for (const signal of [
     "memsphere run report",
     "--artifact-file",
-    "Procedure Asserts",
+    "流程规则",
     "Actor",
     "Ask human to do",
     "Suggests",
@@ -64,6 +64,7 @@ test("unified skill and reserved memories keep the same bootstrap contract", asy
   ]) {
     assert.match(skill, new RegExp(signal));
   }
+  assert.doesNotMatch(skill, /`Procedure Asserts`|`Asserts`/);
 
   for (const obsolete of [
     "不得使用 find",

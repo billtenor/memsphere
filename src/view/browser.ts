@@ -138,6 +138,8 @@ export const browserHtml = String.raw`<!doctype html>
     .block-title { margin: 12px 0 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
     .text-list { margin: 0; padding-left: 18px; }
     .text-list li { margin: 5px 0; white-space: pre-wrap; }
+    .effective-rule-list > .effective-reference-item { white-space: normal; }
+    .effective-reference-item > .effective-reference { margin: 0; }
     .commentable { position: relative; display: block; margin: 4px 0; width: 100%; }
     .review-active .commentable { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 7px; align-items: flex-start; }
     .commentable-body { min-width: 0; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -5176,19 +5178,18 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function appendEffectiveRuleEntries(target, entries, scope) {
-      const direct = entries.filter(entry => typeof entry === "string" || entry.kind === "rule");
-      if (direct.length) {
-        const list = document.createElement("ul");
-        list.className = "text-list";
-        for (const entry of direct) {
+      const list = document.createElement("ul");
+      list.className = "text-list effective-rule-list";
+      entries.forEach((entry, index) => {
+        if (typeof entry === "string" || entry?.kind === "rule") {
           const item = document.createElement("li");
           item.textContent = typeof entry === "string" ? entry : entry.text;
           list.append(item);
+          return;
         }
-        target.append(list);
-      }
-      entries.forEach((entry, index) => {
         if (!entry || typeof entry !== "object" || (entry.kind !== "reference" && !entry.reference)) return;
+        const item = document.createElement("li");
+        item.className = "effective-reference-item";
         const section = document.createElement("div");
         section.className = "section effective-reference";
         const heading = document.createElement("div");
@@ -5211,8 +5212,10 @@ export const browserHtml = String.raw`<!doctype html>
           body.append(renderEffectiveRuleSection(child, entryScope + ":section:" + childIndex));
         }
         section.append(heading, body);
-        target.append(section);
+        item.append(section);
+        list.append(item);
       });
+      if (list.childElementCount) target.append(list);
     }
 
     function renderEffectiveRuleSection(node, scope) {
