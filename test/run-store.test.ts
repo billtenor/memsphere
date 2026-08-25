@@ -1298,9 +1298,11 @@ test("schema execution expands shorthand string fields", async () => {
     const memoryRoot = join(dir, "memory");
     const proceduresRoot = join(memoryRoot, "procedures");
     const schemasRoot = join(memoryRoot, "schemas");
+    const statementsRoot = join(memoryRoot, "statements");
     const runsRoot = join(dir, "runs");
     await mkdir(proceduresRoot, { recursive: true });
     await mkdir(schemasRoot, { recursive: true });
+    await mkdir(statementsRoot, { recursive: true });
 
     await writeFile(join(proceduresRoot, "target.yaml"), `!procedure
 names: [target-procedure]
@@ -1318,25 +1320,36 @@ flow:
     await writeFile(join(schemasRoot, "demo.yaml"), `!schema
 names: [demo-schema]
 defines:
-  - !statement
-    asserts:
-      - Keep it concise.
-    suggests:
-      - Prefer direct wording.
-    sections:
-      - !statement
-        names: [Formatting]
-        asserts:
-          - Use Markdown headings.
-        sections:
-          - !statement
-            names: [Examples]
-            suggests:
-              - Include one example when useful.
+  - Guidance for the demo schema.
+asserts:
+  - !ref
+    target: statements/demo-guidance
+suggests:
+  - !ref
+    target: statements/demo-guidance
 fields:
   - summary
   - !schema
     names: [details]
+`);
+    await writeFile(join(statementsRoot, "demo-guidance.yaml"), `!statement
+names: [demo-guidance]
+defines:
+  - Shared writing guidance.
+asserts:
+  - Keep it concise.
+suggests:
+  - Prefer direct wording.
+sections:
+  - !statement
+    names: [Formatting]
+    asserts:
+      - Use Markdown headings.
+    sections:
+      - !statement
+        names: [Examples]
+        suggests:
+          - Include one example when useful.
 `);
 
     const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "target-procedure" });
@@ -1353,10 +1366,14 @@ fields:
       { name: "markdown", options: {} }
     ]);
     assert.deepEqual(schemaFrame?.steps.map((step) => step.type), ["object", "string", "string"]);
-    assert(schemaFrame?.steps[0].details?.includes("asserts: Keep it concise."));
-    assert(schemaFrame?.steps[0].details?.includes("suggests: Prefer direct wording."));
-    assert(schemaFrame?.steps[0].details?.includes("asserts [Formatting]: Use Markdown headings."));
-    assert(schemaFrame?.steps[0].details?.includes("suggests [Formatting > Examples]: Include one example when useful."));
+    assert.deepEqual(schemaFrame?.steps[0].schemaContext?.sources[0].asserts, [
+      "Keep it concise.",
+      "Use Markdown headings."
+    ]);
+    assert.deepEqual(schemaFrame?.steps[0].schemaContext?.sources[0].suggests, [
+      "Prefer direct wording.",
+      "Include one example when useful."
+    ]);
   });
 });
 

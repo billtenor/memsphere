@@ -10,9 +10,10 @@ defines:
 asserts:
   - 根节点必须使用 !schema 标签，只允许 syntax、name/names、defines、asserts、suggests、optional、type、format、fields、item 和 items 字段。
   - "syntax 必须填写 memsphere-20260721-stable。"
-  - 顶层 Schema 必须使用非空 name 或 names；fields 中的详细 Schema 字段也必须具有名称，defines 与 item/items 中的匿名 Schema 可以省略名称。
+  - 顶层 Schema 必须使用非空 name 或 names；fields 中的详细 Schema 字段也必须具有名称，item/items 中的匿名 Schema 可以省略名称。
   - name 与 names 互斥；顶层规范名称必须是 1–120 字符的小写 ASCII kebab-case。names 的后续成员是别名，可以使用 Unicode 和内部空格，但不得包含首尾空白、控制字符或 `/`，且全部名称不得重复。
-  - defines 可以包含非空字符串、!ref、匿名 !statement 或匿名 !schema；嵌套结构必须携带 YAML tag，全部成员共同生效。
+  - defines 如出现必须是由非空字符串组成的数组，不允许 !ref 或匿名结构。
+  - asserts 与 suggests 可以包含非空字符串或指向 Statement 的 !ref；引用分别只引入目标的有效规则或有效建议。
   - optional 只能在 fields 中的具名 !schema 字段上取 true；省略或 false 表示字段必填。
   - type 不继承父层；显式声明优先，省略时有 fields 推断为 object、无 fields 推断为 string。
   - format 省略时继承父 Schema 或所属 Artifact 的兼容格式；object markdown 使用 outline，array markdown 使用 table。
@@ -42,27 +43,30 @@ fields:
     name: defines
     optional: true
     type: array
+    item: !schema
+      type: string
+    defines:
+      - 对结构语义、用途和边界的文本说明。
+  - !schema
+    name: asserts
+    optional: true
+    type: array
     items:
       - !schema
         type: string
       - !schema
         type: object
     defines:
-      - 对结构语义的文本说明、外部 Memory 引用，以及用于补充规则或结构的匿名 Statement、Schema。
-  - !schema
-    name: asserts
-    optional: true
-    type: array
-    item: !schema
-      type: string
-    defines:
       - 内容、书写或校验要求。
   - !schema
     name: suggests
     optional: true
     type: array
-    item: !schema
-      type: string
+    items:
+      - !schema
+        type: string
+      - !schema
+        type: object
     defines:
       - 不影响结构合法性的书写建议和优化方向。
   - !schema

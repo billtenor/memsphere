@@ -17,7 +17,7 @@ flow:
     actor: agent
     asserts:
       - 不得因模型自认为熟悉某个术语而跳过核心领域对象和交付物名称的 Concept 检索。
-      - 命中相关 Concept 后必须完整读取并以其全部 defines 为准；memory list 摘要不得替代 memory read。
+      - 命中相关 Concept 后必须完整读取其全部文本 defines；memory list 摘要不得替代 memory read。
       - 只有未命中相关 Concept 时才可使用模型自身理解；未命中且不存在歧义时不得扩大检索。
       - 影响后续执行的概念歧义必须在进入下一步前解决。
       - 任务没有可识别的核心领域对象或交付物名称，或者完成检索后未命中相关 Concept 且不存在概念歧义时，概念理解简述可以填写“无”。

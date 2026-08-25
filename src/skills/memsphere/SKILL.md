@@ -115,8 +115,9 @@ defines:
 - 顶层 `names` 的第一项是 canonical name，必须是 1–120 字符的小写 ASCII kebab-case；其余项是别名，可以使用 Unicode 和内部空格，但不得包含首尾空白、控制字符或 `/`。嵌套节点名称不受顶层命名规则限制。
 - 显式 `<kind>/<name>`、`!ref target`、Procedure `!call target`、Concept `extends` 和 Artifact 的外部 `schema` 必须使用目标 canonical name，不接受 alias；普通 rename 不自动移动 File Provider 中的 Memory 文件。
 - 原本允许 `names` 的节点也允许写单个 `name`，其解析结果等价于 `names: [name]`；二者不能同时出现。
-- `defines` 用于定义这份 Memory；其中的全部成员共同生效。
-- `defines` 可以包含 `!ref` 外部 Memory 引用；`target` 必须是 `concepts/<canonical-name>`、`statements/<canonical-name>` 或 `schemas/<canonical-name>` 形式的逻辑引用，不接受普通名称或 alias。
+- `defines` 只使用非空字符串定义这份 Memory 的含义、用途和边界；不允许 `!ref` 或匿名 Statement/Schema。
+- Statement、Schema 的 `asserts` / `suggests`、Procedure 的 `asserts` 以及 Action 的 `asserts` / `suggests` 可以使用 `!ref` 引用外部 Statement；`target` 必须是 `statements/<canonical-name>` 形式的逻辑引用。`asserts` 只引入目标的有效规则，`suggests` 只引入有效建议，不跨通道改变强制程度。
+- Statement 引用递归应用目标全部 sections 中同通道的规则，展示有效规则时保留 section 名称和层级；存储、编辑、diff 和普通 read 仍保留原始 `!ref`。
 - 不同类型还拥有自己的字段。编写或解释某种 Memory 前，读取对应的 Concept Memory 了解完整语义和字段规则。
 
 Procedure 中每个 `!action` 的 `!artifact` 使用 `type -> format -> schema` 三层机器契约：
@@ -269,10 +270,10 @@ Concept、Statement、Schema 和 Procedure 都必须从该入口读取，不能�
 
 启动、状态查询或流程推进后，CLI 会按当前场景返回当前步骤、Review 下一步或完成状态：
 
-- `Procedure Asserts` 是当前调用链中全部 Procedure 必须持续满足的全局约束。
+- `流程规则` 是当前调用链中全部 Procedure 必须持续满足的全局约束。
 - `Do` 表示当前 Agent 步骤需要完成的事情；Agent 步骤不重复展示执行者。
 - `Ask human to do` 表示当前步骤需要 Human 操作，Agent 必须暂停并等待 Human 提供结果。
-- `Asserts` 是当前步骤必须满足的要求。
+- `规则` 是当前步骤必须满足的要求。
 - `Suggests` 是执行时可以参考的建议。
 - `Details` 是理解和执行当前步骤所需的补充上下文。
       - `Artifact` 表示当前步骤需要产出的内容、业务类型、编码格式和可选 Schema。
@@ -284,7 +285,7 @@ Concept、Statement、Schema 和 Procedure 都必须从该入口读取，不能�
 
 #### 上报步骤产物
 
-完成当前步骤后，检查产物是否满足 `Procedure Asserts`、步骤提示、`Asserts` 和 `Artifact` 格式，然后执行 CLI 在 `Then` 中给出的命令。
+完成当前步骤后，检查产物是否满足 `流程规则`、步骤提示、`规则` 和 `Artifact` 格式，然后执行 CLI 在 `Then` 中给出的命令。
 
 Agent 执行任何 `memsphere run report` 命令时，必须请求宿主在沙盒外执行。如果 CLI 拒绝受限环境中的 Report，使用完全相同的命令申请提升或非沙盒执行权限后重试；不要修改参数规避检查。
 

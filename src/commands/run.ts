@@ -16,6 +16,12 @@ import {
 import { readConfig } from "../config.js";
 import { createMemoryCatalogForConfig, createProjectMemoryCatalogs } from "../memory/factory.js";
 import { withMemoryChangePreview } from "../memory/changeset.js";
+import type { EffectiveRuleTree, RuleChannel } from "../memory/rules.js";
+import {
+  toEffectiveRuleDisplayEntries,
+  toEffectiveRuleDisplayValue,
+  type EffectiveRuleDisplayEntry
+} from "../memory/serializer.js";
 import {
   type RunReviewConfiguration
 } from "../control-plane/index.js";
@@ -590,10 +596,14 @@ export async function runSchemaShowCommand(options: RunSchemaShowOptions): Promi
   const snapshot = buildSchemaWritingSnapshot(config.runsRoot, run);
   if (!snapshot) throw new Error(`run has no active Schema writing context: ${runId}`);
   if ((options.output ?? "text") === "json") {
-    console.log(JSON.stringify(snapshot));
+    console.log(JSON.stringify(buildSchemaWritingDetail(snapshot)));
     return;
   }
   printSchemaWritingOverview(snapshot, resolvePromptLocale(run.language));
+}
+
+export function buildSchemaWritingDetail(snapshot: SchemaWritingSnapshot): unknown {
+  return toEffectiveRuleDisplayValue(snapshot);
 }
 
 export async function runRepeatCommand(countValue: string, options: RunIdOptions): Promise<void> {
@@ -689,7 +699,7 @@ export function printSchemaWritingOverview(
   console.log(renderPrompt(
     "run.schema-overview",
     locale,
-    buildSchemaOverviewPromptModel(snapshot)
+    buildSchemaOverviewPromptModel(snapshot, locale)
   ));
 }
 
@@ -771,22 +781,22 @@ function stepDetail(run: RunState, located: LocatedRunStep): unknown {
   const frame = currentFrame(run);
   const active = currentStep(run);
   const currentRef = frame && active ? `${frame.memoryName}#${active.id}` : undefined;
-  return {
+  return toEffectiveRuleDisplayValue({
     ref: locatedStepRef(located),
     procedureName: located.memoryName,
     current: locatedStepRef(located) === currentRef,
-    procedureAsserts: procedureAssertsFor(run, located.memoryName),
+    procedureAsserts: toEffectiveRuleDisplayEntries(procedureAssertsFor(run, located.memoryName)),
     step: {
       id: located.step.id,
       kind: located.step.kind ?? "action",
       actor: located.step.actor ?? "agent",
       instruction: located.step.instruction,
-      asserts: located.step.asserts ?? [],
-      suggests: located.step.suggests ?? [],
+      asserts: publicRuleTree(located.step.assertTree, "asserts"),
+      suggests: publicRuleTree(located.step.suggestTree, "suggests"),
       details: located.step.details ?? [],
       artifact: artifactContractDetail(located.step)
     }
-  };
+  });
 }
 
 export async function buildRunArtifactDetail(runsRoot: string, run: RunState, reference: string): Promise<unknown> {
@@ -809,26 +819,36 @@ export async function buildRunArtifactDetail(runsRoot: string, run: RunState, re
 
 export function buildRunArtifactContractDetail(run: RunState, reference: string): unknown {
   const located = findRunStep(run, reference);
-  return {
+  return toEffectiveRuleDisplayValue({
     stepRef: locatedStepRef(located),
     procedure: {
       name: located.memoryName,
-      asserts: procedureAssertsFor(run, located.memoryName)
+      asserts: toEffectiveRuleDisplayEntries(procedureAssertsFor(run, located.memoryName))
     },
     action: {
       instruction: located.step.instruction,
-      asserts: located.step.asserts ?? [],
-      suggests: located.step.suggests ?? [],
+      asserts: publicRuleTree(located.step.assertTree, "asserts"),
+      suggests: publicRuleTree(located.step.suggestTree, "suggests"),
       details: located.step.details ?? []
     },
     artifact: artifactContractDetail(located.step)
-  };
+  });
 }
 
-function procedureAssertsFor(run: RunState, memoryName: string): string[] {
+function procedureAssertsFor(run: RunState, memoryName: string): EffectiveRuleTree {
   const template = Object.values(run.procedureSnapshots ?? {})
     .find((candidate) => candidate.memoryName === memoryName);
-  return template?.asserts ?? (memoryName === run.procedureName ? run.asserts ?? [] : []);
+  return template?.assertTree
+    ?? (memoryName === run.procedureName ? run.assertTree : undefined)
+    ?? ruleTreeOrEmpty("asserts");
+}
+
+function ruleTreeOrEmpty(channel: RuleChannel): EffectiveRuleTree {
+  return { channel, entries: [], sections: [] };
+}
+
+function publicRuleTree(tree: EffectiveRuleTree | undefined, channel: RuleChannel): EffectiveRuleDisplayEntry[] {
+  return toEffectiveRuleDisplayEntries(tree ?? ruleTreeOrEmpty(channel));
 }
 
 async function artifactForDisplay(

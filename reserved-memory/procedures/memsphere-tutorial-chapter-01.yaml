@@ -116,7 +116,8 @@ flow:
         action: |-
           介绍 Statement 的用途和示例。首次进入时可以这样表述：
           “Statement，也就是陈述记忆，用于表达可以独立理解和核查的事实、规则、约束与建议。它把隐藏在大段描述中的判断准则拆解成 Agent 可以明确遵循的规则。
-          例如，‘大额报销必须经过部门负责人审批’就是一条 Statement。Agent 遇到满足‘大额报销’定义的申请时，必须遵守这条审批规则。”
+          例如，‘大额报销必须经过部门负责人审批’就是一条 Statement。Agent 遇到满足‘大额报销’定义的申请时，必须遵守这条审批规则。
+          较大的 Statement 可以用 section 分组突出主题。其他 Statement、Schema、Procedure 或步骤需要复用规则时，在 asserts 或 suggests 中引用它：asserts 只引入强制规则，suggests 只引入建议，展示时仍保留 section 层级。”
           后续轮次根据 human 的问题继续讨论。
         actor: agent
         artifact: !artifact

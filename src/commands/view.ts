@@ -47,6 +47,8 @@ import { authorizeArtifactOperation, controlPlaneConfigSchema, listPermissionDef
 import { listMemoryFiles, readMemoryFile, readMemoryFileSummary } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
+import { resolveRuleParts, type RuleLookup } from "../memory/rules.js";
+import { toEffectiveRuleDisplayTree, toEffectiveRuleDisplayValue } from "../memory/serializer.js";
 import {
   abandonMemoryChange,
   addMemoryChangeScope,
@@ -780,7 +782,14 @@ async function handleRequest(
     }
     const changeId = url.searchParams.get("change")?.trim();
     try {
-      const memory = await loadMemoryDetailPayload(config, viewCache, kind, name, changeId || undefined);
+      const memory = await loadMemoryDetailPayload(
+        config,
+        viewCache,
+        kind,
+        name,
+        changeId || undefined,
+        url.searchParams.get("effective") === "true"
+      );
       if (!memory) {
         sendJson(response, 404, { error: "memory not found" });
         return;
@@ -1397,13 +1406,56 @@ async function loadMemoryDetailPayload(
   viewCache: ViewMemoryCache,
   kind: MemoryKind,
   name: string,
-  changeId?: string
+  changeId?: string,
+  effective = false
 ): Promise<MemoryPayload["memories"][number] | undefined> {
   return withMemoryPayloadRoot(config, viewCache, changeId, async (memoryRoot) => {
     const file = await viewCache.find(memoryRoot, `${kind}/${name}`);
     if (!file) return undefined;
-    return loadMemoryListItem(memoryRoot, kind, file.path, await systemMemoryReferences());
+    const memory = await loadMemoryListItem(memoryRoot, kind, file.path, await systemMemoryReferences());
+    if (effective && memory.entity) await attachEffectiveRuleTrees(memoryRoot, memory.entity);
+    return memory;
   });
+}
+
+async function attachEffectiveRuleTrees(memoryRoot: string, entity: unknown): Promise<void> {
+  const statements = new Map<string, Awaited<ReturnType<typeof readMemoryFile>>["entity"]>();
+  const lookup: RuleLookup = async (target) => {
+    if (!statements.size) {
+      for (const path of await listMemoryFiles(memoryRoot, "statements")) {
+        const statement = await readMemoryFile("statements", path);
+        const canonicalName = statement.entity.names[0];
+        if (canonicalName) statements.set(`statements/${canonicalName}`, statement.entity);
+      }
+    }
+    const statement = statements.get(target);
+    if (!statement || statement.tag !== "!statement") throw new Error(`Statement not found: ${target}`);
+    return statement;
+  };
+
+  const visit = async (value: unknown): Promise<void> => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const node = value as Record<string, unknown>;
+    for (const child of Object.values(node)) {
+      if (Array.isArray(child)) {
+        for (const item of child) await visit(item);
+      } else {
+        await visit(child);
+      }
+    }
+    const effectiveRules: Record<string, unknown> = {};
+    for (const channel of ["asserts", "suggests"] as const) {
+      const parts = node[channel];
+      if (!Array.isArray(parts) || !parts.some(isMemoryReferenceValue)) continue;
+      Object.assign(effectiveRules, toEffectiveRuleDisplayTree(await resolveRuleParts(channel, parts, lookup)));
+    }
+    if (Object.keys(effectiveRules).length) node.effectiveRules = effectiveRules;
+  };
+  await visit(entity);
+}
+
+function isMemoryReferenceValue(value: unknown): boolean {
+  return Boolean(value && typeof value === "object" && (value as { tag?: unknown }).tag === "!ref");
 }
 
 async function systemMemoryReferences(): Promise<Set<string>> {
@@ -1429,7 +1481,7 @@ async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknow
   const { artifactReviews: _privateArtifactReviews, ...publicRun } = hydrated;
   const review = currentArtifactReview(hydrated);
   const schemaWriting = await schemaWritingPayload(runsRoot, hydrated);
-  return {
+  return toEffectiveRuleDisplayValue({
     ...publicRun,
     bindingSnapshot: buildRunBindingSnapshot(hydrated),
     artifactReview: review ? artifactReviewSummary(review, hydrated.controlPlane) : undefined,
@@ -1437,7 +1489,7 @@ async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknow
       artifactReviewSummary(candidate, hydrated.controlPlane)
     ),
     schemaWriting
-  };
+  });
 }
 
 async function schemaWritingPayload(runsRoot: string, run: RunState): Promise<unknown> {

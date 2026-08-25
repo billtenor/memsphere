@@ -5,14 +5,9 @@ names:
   - Memory
 defines:
   - memsphere 中为了跨越单次对话或运行而被有意沉淀，并可供 agent 重复理解、引用或执行的语义实体。
-  - Memory 是各种具体记忆类型的抽象上位概念。
-  - Memory 的物理路径由 Project 的 Store Provider 解析；Embedded Project 的规范路径位于 repository_path 指向的主工作树，CLI 的有效路径可以位于同一仓库的当前 linked worktree，但物理路径差异不改变 Memory 的逻辑身份。
-  - Concept、Statement、Procedure 和 Schema 是 memsphere 当前提供的四种具体 Memory 类型。
-  - 一段信息只有在被有意沉淀以供后续复用时，才成为 Memory；单次任务产物、临时对话或运行状态不会因此自动成为 Memory。
-  - memsphere 使用带 YAML tag 的 mapping 描述 Memory；根节点 tag 表示具体 Memory 类型。顶层 names 首项是 1–120 字符的小写 ASCII kebab-case canonical name，其余项是可使用自然语言的别名；defines 中的全部成员共同定义该 Memory。
+  - Memory 是各种具体记忆类型的抽象上位概念；Concept、Statement、Procedure 和 Schema 是当前四种具体类型。
+  - Memory 的物理路径由 Project 的 Store Provider 解析，物理路径差异不改变 Memory 的逻辑身份。
+  - 一段信息只有被有意沉淀供后续复用时才成为 Memory；单次任务产物、临时对话或运行状态不会因此自动成为 Memory。
+  - memsphere 使用带 YAML tag 的 mapping 描述 Memory；根节点 tag 表示具体类型，defines 只包含定义该 Memory 含义、用途和边界的非空文本。
   - 每份正式 Memory 使用顶层 syntax 字段声明不可变的 Memsphere YAML 语法版本；未声明时固定按历史迁移起点 start 解释。
   - 初次理解 memsphere 时，应从 Memory 开始，依次读取 Concept、Statement、Procedure 和 Schema。
-  - !statement
-    asserts:
-      - 顶层 Memory 必须包含非空 defines，且至少包含一条非空字符串，用于说明该 Memory 的含义、用途或约束范围。
-      - 匿名嵌套 Statement、Schema 等结构不是独立 Memory，其 defines 可以省略。

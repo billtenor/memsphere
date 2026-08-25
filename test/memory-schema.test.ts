@@ -61,9 +61,7 @@ test("top-level canonical names are strict while aliases and nested names stay d
   const valid = conceptMemorySchema.parse(parseMemoryYaml(withCurrentMemorySyntax(`!concept
 names: [memorybase-review-rules, "MemoryBase 评审规则", "review rules"]
 defines:
-  - !statement
-    names: ["嵌套说明 / 可读名称"]
-    asserts: [Nested names remain descriptive.]
+  - A definition.
 `)));
   assert.deepEqual(valid.names, ["memorybase-review-rules", "MemoryBase 评审规则", "review rules"]);
 
@@ -94,52 +92,35 @@ defines: [invalid]
   }
 });
 
-test("defines accepts text, Memory refs, anonymous Statement, and anonymous Schema", () => {
+test("defines accepts only text while rule fields accept Statement refs", () => {
   const entity = parseSchema(`!schema
 names: [example]
 defines:
   - Text definition.
+asserts:
+  - A rule must hold.
   - !ref
     target: statements/external-rule
-  - !statement
-    asserts:
-      - A rule must hold.
-    suggests:
-      - Prefer the documented path.
-    sections:
-      - !statement
-        names: [Nested guidance]
-        suggests:
-          - Prefer a focused example.
-  - !schema
-    fields:
-      - shorthand
-      - !schema
-        names: [detailed]
-        asserts:
-          - Detailed value is required.
+suggests:
+  - !ref
+    target: statements/external-guidance
 fields:
   - simple
   - !schema
     names: [nested]
 `);
 
-  assert.deepEqual(entity.defines[1], { tag: "!ref", target: "statements/external-rule" });
-  const embeddedStatement = entity.defines[2];
-  assert.equal(typeof embeddedStatement === "string" ? undefined : embeddedStatement.tag, "!statement");
-  if (typeof embeddedStatement !== "string" && embeddedStatement.tag === "!statement") {
-    assert.deepEqual(embeddedStatement.suggests, ["Prefer the documented path."]);
-    assert.deepEqual(embeddedStatement.sections?.[0].suggests, ["Prefer a focused example."]);
-  }
-  assert.equal(entity.defines[3].tag, "!schema");
+  assert.deepEqual(entity.defines, ["Text definition."]);
+  assert.deepEqual(entity.asserts?.[1], { tag: "!ref", target: "statements/external-rule" });
+  assert.deepEqual(entity.suggests?.[0], { tag: "!ref", target: "statements/external-guidance" });
   assert.equal(entity.fields?.[0], "simple");
   assert.equal(entity.fields?.[1].tag, "!schema");
   assert.throws(() => parseSchema(`!schema
 names: [example]
 defines:
   - !ref
-    target: External rule
-`), /lowercase-kebab-case-canonical-name/);
+    target: statements/external-rule
+`), /defines/);
 });
 
 test("Statement supports independent assertion and suggestion collections", () => {
@@ -600,7 +581,7 @@ flow:
 `));
 });
 
-test("requires names for top-level and field Schema but permits anonymous embedded Schema", () => {
+test("requires names for top-level and field Schema", () => {
   assert.throws(() => parseSchema(`!schema
 defines: [value]
 `), /top-level memory/);
@@ -610,13 +591,13 @@ fields:
   - !schema
     asserts: [Required.]
 `), /non-empty names/);
-  assert.doesNotThrow(() => parseSchema(`!schema
+  assert.throws(() => parseSchema(`!schema
 names: [root]
 defines:
   - !schema
     type: array
     format: json
-`));
+`), /defines/);
 });
 
 test("Schema supports optional type and format contracts", () => {

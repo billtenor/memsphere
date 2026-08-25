@@ -104,6 +104,65 @@ test("memory read defaults to tagged YAML and supports JSON", async () => {
   assert.deepEqual(JSON.parse(json.stdout()), json.entity);
 });
 
+test("memory read --effective preserves references and section groups without exposing rule ids", async () => {
+  const consumer: MemoryEntity = {
+    tag: "!schema",
+    names: ["record"],
+    defines: ["A record."],
+    asserts: ["Local rule.", { tag: "!ref", target: "statements/shared-rules" }],
+    fields: ["summary", {
+      tag: "!schema",
+      names: ["security"],
+      defines: [],
+      suggests: [{ tag: "!ref", target: "statements/shared-rules" }]
+    }]
+  };
+  const shared: MemoryEntity = {
+    tag: "!statement",
+    names: ["shared-rules"],
+    defines: ["Shared rules."],
+    asserts: ["Imported rule."],
+    suggests: ["Prefer concise evidence."],
+    sections: [{
+      tag: "!statement",
+      names: ["Security"],
+      defines: ["Security requirements."],
+      asserts: ["Describe security risk."]
+    }]
+  };
+  const page: MemoryListPage = {
+    memories: [{ reference: "schemas/record", kind: "schemas", names: ["record"], defines: ["A record."] }],
+    next_cursor: null
+  };
+  const catalog = new FakeCatalog(page, consumer);
+  catalog.read = async (reference: string, query: MemoryResolveQuery = {}) => {
+    catalog.readCalls.push({ reference, query });
+    return reference === "statements/shared-rules" ? shared : consumer;
+  };
+  let stdout = "";
+  const dependencies: MemoryCommandDependencies = {
+    createCatalog: async () => catalog,
+    writeStdout: (value) => { stdout += value; }
+  };
+
+  await memoryReadCommand("schemas/record", { effective: true, output: "json" }, dependencies);
+  const result = JSON.parse(stdout);
+  assert.deepEqual(result.declared, consumer);
+  assert.deepEqual(result.effective.effectiveRules.asserts[0], "Local rule.");
+  assert.equal(result.effective.effectiveRules.asserts[1].reference, "statements/shared-rules");
+  assert.equal(result.effective.effectiveRules.asserts[1].sections[0].name, "Security");
+  assert.deepEqual(result.effective.effectiveRules.asserts[1].asserts, ["Imported rule."]);
+  assert.deepEqual(result.effective.effectiveRules.asserts[1].sections[0].asserts, ["Describe security risk."]);
+  assert.equal(Object.hasOwn(result.effective.effectiveRules.asserts[1], "entries"), false);
+  assert.equal(Object.hasOwn(result.effective.effectiveRules.asserts[1].sections[0], "sections"), false);
+  assert.equal(result.effective.fields[0].name, "security");
+  assert.equal(
+    result.effective.fields[0].effectiveRules.suggests[0].reference,
+    "statements/shared-rules"
+  );
+  assert(!stdout.includes("ruleId"));
+});
+
 test("memory handlers do not write partial stdout on catalog or argument errors", async () => {
   const catalogFailure = fixture();
   catalogFailure.catalog.fail = new Error("catalog failed");

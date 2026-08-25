@@ -5,29 +5,8 @@ names:
   - Statement
 defines:
   - memsphere 中用于表达可被核查的事实、规则、约束和建议的 Memory。
-  - Statement 通过 asserts 列出必须成立的断言，通过 suggests 列出执行时可以参考但不强制满足的建议，并通过 sections 在同一领域内按树状层级组织较大的规则集合。
-  - 任意 Statement 节点都可以同时包含 asserts、suggests 和 sections；树状层级只负责组织内容，不产生额外的规则继承语义。
+  - Statement 通过 asserts 列出必须遵守的规则，通过 suggests 列出可以参考但不强制满足的建议，并通过 sections 按树状层级组织较大的规则集合。
+  - asserts 与 suggests 中都可以引用具名 Statement，引用所在字段决定引入目标的规则通道或建议通道。
+  - sections 的树状层级用于组织和呈现规则，不改变规则的强制程度。
   - Statement 不用于解释领域术语，也不用于定义文档或数据结构；这些内容分别由 Concept 和 Schema 表达。
-  - !statement
-    sections:
-      - !statement
-        names:
-          - 断言语义
-        asserts:
-          - asserts 中的每一项都必须独立成立，列表成员不是候选项或建议项。
-          - 一项断言不得因为同一 Memory 中存在文本定义或 Schema 而被忽略。
-          - 断言与用户输入冲突时，Agent 不得静默改写输入或继续生成违反断言的产物。
-          - 无法判断断言是否成立时，Agent 应取得必要信息，而不是把未知当作成立。
-      - !statement
-        names:
-          - 建议语义
-        asserts:
-          - suggests 不得削弱、替代或覆盖任何 asserts。
-      - !statement
-        names:
-          - 树状规则语义
-        asserts:
-          - 读取一份树状 Statement 后，其中与当前任务相关的全部节点共同生效，不得只读取或应用根节点规则。
-          - 按 Node 局部读取时，返回的根级与祖先 context 和目标 fragment 必须共同生效；任务涉及其他节点时必须继续读取。
-  - !ref
-    target: schemas/memsphere-statement-schema
+  - Statement 的合法 YAML 结构由 memsphere-statement-schema 定义。

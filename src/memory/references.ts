@@ -1,11 +1,11 @@
 import type {
   ActionNode,
   ArtifactNode,
-  DefinitionPart,
   FlowNode,
   MemoryEntity,
   MemoryRefNode,
   RepeatNode,
+  RulePart,
   SchemaField,
   SchemaNode,
   StaticSchemaField,
@@ -32,11 +32,13 @@ type ReferenceEdge = {
   form: "logical-reference" | "canonical-name";
   expected: readonly ExpectedKind[];
   filePath: string;
+  channel?: "asserts" | "suggests";
 };
 
 export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryReferenceIssue[] {
   const issues: MemoryReferenceIssue[] = [];
   const byReference = new Map<string, Set<string>>();
+  const entitiesByReference = new Map<string, MemoryEntity>();
   const edges: ReferenceEdge[] = [];
 
   for (const file of files) {
@@ -45,6 +47,7 @@ export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryRe
     const matches = byReference.get(reference) ?? new Set<string>();
     matches.add(reference);
     byReference.set(reference, matches);
+    entitiesByReference.set(reference, file.entity);
   }
 
   for (const file of files) {
@@ -54,6 +57,10 @@ export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryRe
   }
 
   const graph = new Map<string, ReferenceEdge[]>();
+  const ruleGraphs = {
+    asserts: new Map<string, ReferenceEdge[]>(),
+    suggests: new Map<string, ReferenceEdge[]>()
+  };
   for (const edge of edges) {
     if (edge.target === "__invalid_optional_context__") {
       issues.push({
@@ -103,19 +110,64 @@ export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryRe
     // Catalog validation reports the conflicting name. Do not choose an
     // arbitrary canonical target and derive misleading dependency cycles.
     if (targets.size > 1) continue;
-    const outgoing = graph.get(edge.source) ?? [];
-    outgoing.push({ ...edge, target: [...targets][0] });
-    graph.set(edge.source, outgoing);
+    const resolvedTarget = [...targets][0];
+    if (edge.channel) {
+      const targetEntity = entitiesByReference.get(resolvedTarget);
+      if (
+        targetEntity?.tag === "!statement" &&
+        !hasEffectiveRuleChannel(targetEntity, edge.channel, entitiesByReference, new Set([resolvedTarget]))
+      ) {
+        issues.push({
+          path: edge.filePath,
+          message: `${edge.sourcePath}: !ref target "${edge.target}" has no effective ${edge.channel}`
+        });
+      }
+      const ruleGraph = ruleGraphs[edge.channel];
+      const source = `${edge.source}.${edge.channel}`;
+      const target = `${resolvedTarget}.${edge.channel}`;
+      const outgoing = ruleGraph.get(source) ?? [];
+      outgoing.push({ ...edge, source, target });
+      ruleGraph.set(source, outgoing);
+    } else {
+      const outgoing = graph.get(edge.source) ?? [];
+      outgoing.push({ ...edge, target: resolvedTarget });
+      graph.set(edge.source, outgoing);
+    }
   }
 
   issues.push(...detectReferenceCycles(graph));
+  issues.push(...detectReferenceCycles(ruleGraphs.asserts));
+  issues.push(...detectReferenceCycles(ruleGraphs.suggests));
   return issues;
+}
+
+function hasEffectiveRuleChannel(
+  statement: StatementNode,
+  channel: "asserts" | "suggests",
+  entities: ReadonlyMap<string, MemoryEntity>,
+  visiting: Set<string>
+): boolean {
+  const parts = statement[channel] ?? [];
+  if (parts.some((part) => typeof part === "string")) return true;
+  for (const part of parts) {
+    if (typeof part === "string") continue;
+    const parsed = parseLogicalMemoryReference(part.target);
+    if (!parsed || parsed.kind !== "statements") continue;
+    const target = canonicalMemoryReference(parsed.kind, parsed.name);
+    if (!target || visiting.has(target)) continue;
+    const entity = entities.get(target);
+    if (entity?.tag !== "!statement") continue;
+    const nestedVisiting = new Set(visiting);
+    nestedVisiting.add(target);
+    if (hasEffectiveRuleChannel(entity, channel, entities, nestedVisiting)) return true;
+  }
+  return (statement.sections ?? []).some((section) =>
+    hasEffectiveRuleChannel(section, channel, entities, new Set(visiting))
+  );
 }
 
 function collectReferenceEdges(entity: MemoryEntity, source: string, filePath: string): ReferenceEdge[] {
   const edges: ReferenceEdge[] = [];
-  collectDefinitions(entity.defines, source, filePath, "defines", edges);
-
   switch (entity.tag) {
     case "!concept":
       for (const [index, target] of (entity.extends ?? []).entries()) {
@@ -123,35 +175,35 @@ function collectReferenceEdges(entity: MemoryEntity, source: string, filePath: s
       }
       break;
     case "!statement":
+      collectRuleRefs(entity.asserts ?? [], source, filePath, "asserts", "asserts", edges);
+      collectRuleRefs(entity.suggests ?? [], source, filePath, "suggests", "suggests", edges);
       collectStatementSections(entity.sections ?? [], source, filePath, "sections", edges);
       break;
     case "!schema":
       collectSchemaRefs(entity, source, filePath, "schema", edges, false);
       break;
     case "!procedure":
+      collectRuleRefs(entity.asserts ?? [], source, filePath, "asserts", "asserts", edges);
       collectFlowRefs(entity.flow, source, filePath, "flow", edges);
       break;
   }
   return edges;
 }
 
-function collectDefinitions(
-  definitions: readonly DefinitionPart[],
+function collectRuleRefs(
+  parts: readonly RulePart[],
   source: string,
   filePath: string,
   path: string,
+  channel: "asserts" | "suggests",
   edges: ReferenceEdge[]
 ): void {
-  for (const [index, definition] of definitions.entries()) {
-    const childPath = `${path}[${index}]`;
-    if (typeof definition === "string") continue;
-    if (definition.tag === "!ref") {
-      edges.push(referenceEdge(source, filePath, childPath, definition, ["concepts", "statements", "schemas"]));
-      continue;
-    }
-    collectDefinitions(definition.defines, source, filePath, `${childPath}.defines`, edges);
-    if (definition.tag === "!statement") collectStatementSections(definition.sections ?? [], source, filePath, `${childPath}.sections`, edges);
-    if (definition.tag === "!schema") collectSchemaRefs(definition, source, filePath, childPath, edges, false);
+  for (const [index, part] of parts.entries()) {
+    if (typeof part === "string") continue;
+    edges.push({
+      ...referenceEdge(source, filePath, `${path}[${index}]`, part, ["statements"]),
+      channel
+    });
   }
 }
 
@@ -164,7 +216,8 @@ function collectStatementSections(
 ): void {
   for (const [index, section] of sections.entries()) {
     const childPath = `${path}[${index}]`;
-    collectDefinitions(section.defines, source, filePath, `${childPath}.defines`, edges);
+    collectRuleRefs(section.asserts ?? [], source, filePath, `${childPath}.asserts`, "asserts", edges);
+    collectRuleRefs(section.suggests ?? [], source, filePath, `${childPath}.suggests`, "suggests", edges);
     collectStatementSections(section.sections ?? [], source, filePath, `${childPath}.sections`, edges);
   }
 }
@@ -177,7 +230,8 @@ function collectSchemaRefs(
   edges: ReferenceEdge[],
   fieldPosition: boolean
 ): void {
-  collectDefinitions(schema.defines, source, filePath, `${path}.defines`, edges);
+  collectRuleRefs(schema.asserts ?? [], source, filePath, `${path}.asserts`, "asserts", edges);
+  collectRuleRefs(schema.suggests ?? [], source, filePath, `${path}.suggests`, "suggests", edges);
   for (const [index, field] of (schema.fields ?? []).entries()) {
     collectSchemaFieldRef(field, source, filePath, `${path}.fields[${index}]`, edges);
   }
@@ -275,6 +329,8 @@ function collectActionRefs(
   path: string,
   edges: ReferenceEdge[]
 ): void {
+  collectRuleRefs(action.asserts ?? [], source, filePath, `${path}.asserts`, "asserts", edges);
+  collectRuleRefs(action.suggests ?? [], source, filePath, `${path}.suggests`, "suggests", edges);
   collectArtifactRefs(action.artifact, source, filePath, `${path}.artifact`, edges);
 }
 
