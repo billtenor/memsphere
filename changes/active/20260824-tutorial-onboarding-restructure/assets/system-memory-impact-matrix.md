@@ -4,7 +4,7 @@
 
 | Memory | 结论 | 理由 |
 | --- | --- | --- |
-| `concepts/memsphere-personalized-software.yaml` | 新增 | 独立承载个性化软件、Prompt/Skill/Memsphere 边界、四类资产、两种算力及当前/未来边界。 |
+| `concepts/memsphere-personalized-software.yaml` | 新增 | 独立承载个性化软件、Prompt/Skill/Memsphere 边界、四类资产及两种算力；版本实现边界由 framework 和教学流程说明。 |
 | `concepts/memsphere-memory.yaml` | 修改 | 需要说明 Memory 是 Agent 进入个性化软件的入口，也是当前版本首先实现的语义资产，而非完整 Memsphere。 |
 | `concepts/memsphere-framework.yaml` | 修改 | 当前首句把 Memsphere 完整定义为 Memory 框架；需改为 Agent 之上的个性化软件运行环境，并引用新 Concept。 |
 | `concepts/memsphere-concept.yaml` | 修改 | 需要补充 Concept 在个性化软件语义资产中的职责，保持类型定义不变。 |
