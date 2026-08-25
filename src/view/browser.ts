@@ -127,6 +127,8 @@ export const browserHtml = String.raw`<!doctype html>
     .section { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); margin: 10px 0; overflow: hidden; }
     .section-header { width: 100%; border: 0; background: transparent; text-align: left; display: grid; grid-template-columns: 22px 24px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 12px 14px; color: var(--text); }
     .section-header:hover { background: #f4f5f1; }
+    .effective-reference > .section-header, .effective-section > .section-header { cursor: pointer; }
+    .effective-reference > .section-header:focus-visible, .effective-section > .section-header:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
     .chevron { color: var(--muted); transition: transform 120ms ease; }
     .section.open > .section-header .chevron { transform: rotate(90deg); }
     .node-title { overflow-wrap: anywhere; font-weight: 700; }
@@ -802,6 +804,7 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewMaterialBySubmission: {},
       inlineCommentDraft: null,
       expandedRunBindings: new Set(),
+      collapsedEffectiveRuleGroups: new Set(),
       taskPollingRenderPending: false,
       taskDetailReloadPending: null,
       artifactReviewHistoryRoundId: null,
@@ -4019,7 +4022,9 @@ export const browserHtml = String.raw`<!doctype html>
       if (!trees.length) return null;
       const wrap = document.createElement("div");
       wrap.className = "run-procedure-asserts";
-      for (const tree of trees) wrap.append(renderEffectiveRuleTreeBlock(tree, t("procedureAsserts")));
+      trees.forEach((tree, index) => {
+        wrap.append(renderEffectiveRuleTreeBlock(tree, t("procedureAsserts"), "run:" + run.id + ":procedure-asserts:" + index));
+      });
       return wrap;
     }
 
@@ -4421,7 +4426,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (snapshot.currentField?.path) progress.append(pill(snapshot.currentField.path, false, "strong"));
       wrap.append(progress);
 
-      for (const source of snapshot.currentField?.sources || []) {
+      for (const [sourceIndex, source] of (snapshot.currentField?.sources || []).entries()) {
         const section = document.createElement("div");
         section.className = "schema-writing-source";
         const heading = document.createElement("div");
@@ -4437,8 +4442,9 @@ export const browserHtml = String.raw`<!doctype html>
           }
           section.append(list);
         }
-        if (source.assertTree) section.append(renderEffectiveRuleTreeBlock(source.assertTree, t("asserts")));
-        if (source.suggestTree) section.append(renderEffectiveRuleTreeBlock(source.suggestTree, t("suggests")));
+        const scope = "run:" + run.id + ":schema:" + step.id + ":source:" + sourceIndex + ":" + source.path;
+        if (source.assertTree) section.append(renderEffectiveRuleTreeBlock(source.assertTree, t("asserts"), scope + ":asserts"));
+        if (source.suggestTree) section.append(renderEffectiveRuleTreeBlock(source.suggestTree, t("suggests"), scope + ":suggests"));
         wrap.append(section);
       }
 
@@ -5106,8 +5112,11 @@ export const browserHtml = String.raw`<!doctype html>
         const body = document.createElement("div");
         body.className = "effective-rule-inline";
         body.hidden = true;
-        appendEffectiveRuleEntries(body, effectiveRuleEntries(effectiveReference, channel));
-        for (const section of effectiveReference?.sections || []) body.append(renderEffectiveRuleSection(section));
+        const scope = "memory:" + path + ":" + channel;
+        appendEffectiveRuleEntries(body, effectiveRuleEntries(effectiveReference, channel), scope + ":entries");
+        for (const [index, section] of (effectiveReference?.sections || []).entries()) {
+          body.append(renderEffectiveRuleSection(section, scope + ":section:" + index));
+        }
         toggle.addEventListener("click", event => {
           event.stopPropagation();
           body.hidden = !body.hidden;
@@ -5151,16 +5160,18 @@ export const browserHtml = String.raw`<!doctype html>
         : memoryHasRuleReference(child, seen));
     }
 
-    function renderEffectiveRuleTreeBlock(tree, heading) {
+    function renderEffectiveRuleTreeBlock(tree, heading, scope) {
       const wrap = document.createElement("div");
       wrap.className = "effective-rule-tree";
       wrap.append(blockTitle(heading));
-      appendEffectiveRuleEntries(wrap, effectiveRuleEntries(tree));
-      for (const section of tree.sections || []) wrap.append(renderEffectiveRuleSection(section));
+      appendEffectiveRuleEntries(wrap, effectiveRuleEntries(tree), scope + ":entries");
+      for (const [index, section] of (tree.sections || []).entries()) {
+        wrap.append(renderEffectiveRuleSection(section, scope + ":section:" + index));
+      }
       return wrap;
     }
 
-    function appendEffectiveRuleEntries(target, entries) {
+    function appendEffectiveRuleEntries(target, entries, scope) {
       const direct = entries.filter(entry => typeof entry === "string" || entry.kind === "rule");
       if (direct.length) {
         const list = document.createElement("ul");
@@ -5172,9 +5183,10 @@ export const browserHtml = String.raw`<!doctype html>
         }
         target.append(list);
       }
-      for (const entry of entries.filter(entry => entry && typeof entry === "object" && (entry.kind === "reference" || entry.reference))) {
+      entries.forEach((entry, index) => {
+        if (!entry || typeof entry !== "object" || (entry.kind !== "reference" && !entry.reference)) return;
         const section = document.createElement("div");
-        section.className = "section effective-reference open";
+        section.className = "section effective-reference";
         const heading = document.createElement("div");
         heading.className = "section-header";
         const chevron = document.createElement("span");
@@ -5188,16 +5200,20 @@ export const browserHtml = String.raw`<!doctype html>
         heading.append(chevron, label);
         const body = document.createElement("div");
         body.className = "section-body";
-        appendEffectiveRuleEntries(body, effectiveRuleEntries(entry));
-        for (const child of entry.sections || []) body.append(renderEffectiveRuleSection(child));
+        const entryScope = scope + ":reference:" + index + ":" + reference;
+        bindEffectiveRuleGroup(section, heading, entryScope);
+        appendEffectiveRuleEntries(body, effectiveRuleEntries(entry), entryScope + ":entries");
+        for (const [childIndex, child] of (entry.sections || []).entries()) {
+          body.append(renderEffectiveRuleSection(child, entryScope + ":section:" + childIndex));
+        }
         section.append(heading, body);
         target.append(section);
-      }
+      });
     }
 
-    function renderEffectiveRuleSection(node) {
+    function renderEffectiveRuleSection(node, scope) {
       const section = document.createElement("div");
-      section.className = "section effective-section open";
+      section.className = "section effective-section";
       const heading = document.createElement("div");
       heading.className = "section-header";
       const chevron = document.createElement("span");
@@ -5210,10 +5226,34 @@ export const browserHtml = String.raw`<!doctype html>
       const body = document.createElement("div");
       body.className = "section-body";
       if (node.defines?.length) appendList(body, t("defines"), node.defines, "effective-defines");
-      appendEffectiveRuleEntries(body, effectiveRuleEntries(node));
-      for (const child of node.sections || []) body.append(renderEffectiveRuleSection(child));
+      bindEffectiveRuleGroup(section, heading, scope);
+      appendEffectiveRuleEntries(body, effectiveRuleEntries(node), scope + ":entries");
+      for (const [index, child] of (node.sections || []).entries()) {
+        body.append(renderEffectiveRuleSection(child, scope + ":section:" + index));
+      }
       section.append(heading, body);
       return section;
+    }
+
+    function bindEffectiveRuleGroup(section, heading, key) {
+      const setOpen = open => {
+        section.classList.toggle("open", open);
+        heading.setAttribute("aria-expanded", String(open));
+        if (open) state.collapsedEffectiveRuleGroups.delete(key);
+        else state.collapsedEffectiveRuleGroups.add(key);
+      };
+      heading.setAttribute("role", "button");
+      heading.tabIndex = 0;
+      setOpen(!state.collapsedEffectiveRuleGroups.has(key));
+      heading.addEventListener("click", event => {
+        if (event.target instanceof Element && event.target.closest("button, a, input, select, textarea")) return;
+        setOpen(!section.classList.contains("open"));
+      });
+      heading.addEventListener("keydown", event => {
+        if (event.target !== heading || (event.key !== "Enter" && event.key !== " ")) return;
+        event.preventDefault();
+        setOpen(!section.classList.contains("open"));
+      });
     }
 
     function renderTableFields(fields, path) {
@@ -5604,8 +5644,9 @@ export const browserHtml = String.raw`<!doctype html>
       const wrap = document.createElement("div");
       wrap.className = "action-contracts";
       if (run) {
-        if (step.assertTree) wrap.append(renderEffectiveRuleTreeBlock(step.assertTree, t("asserts")));
-        if (step.suggestTree) wrap.append(renderEffectiveRuleTreeBlock(step.suggestTree, t("suggests")));
+        const scope = "run:" + run.id + ":step:" + step.id;
+        if (step.assertTree) wrap.append(renderEffectiveRuleTreeBlock(step.assertTree, t("asserts"), scope + ":asserts"));
+        if (step.suggestTree) wrap.append(renderEffectiveRuleTreeBlock(step.suggestTree, t("suggests"), scope + ":suggests"));
         return wrap.childElementCount ? wrap : null;
       }
       for (const [key, label, values] of [["asserts", t("asserts"), step.asserts], ["suggests", t("suggests"), step.suggests]]) {

@@ -722,7 +722,12 @@ test("browser renders recursive Statement sections with per-reference effective 
   assert.match(browserHtml, /state\.viewMode === "changes" \? state\.selectedChangeId/);
   assert.match(browserHtml, /function renderRuleReference\(ref, path, effectiveReference, effectiveAvailable, channel = "asserts"\)/);
   assert.match(browserHtml, /function countEffectiveRules\(node\)/);
-  assert.match(browserHtml, /function renderEffectiveRuleSection\(node\)/);
+  assert.match(browserHtml, /function renderEffectiveRuleSection\(node, scope\)/);
+  assert.match(browserHtml, /collapsedEffectiveRuleGroups: new Set\(\)/);
+  assert.match(browserHtml, /function bindEffectiveRuleGroup\(section, heading, key\)/);
+  assert.match(browserHtml, /heading\.setAttribute\("role", "button"\)/);
+  assert.match(browserHtml, /heading\.setAttribute\("aria-expanded", String\(open\)\)/);
+  assert.match(browserHtml, /event\.key !== "Enter" && event\.key !== " "/);
   assert.match(browserHtml, /renderRuleReference\(value, anchor, effectiveReference, Boolean\(effectiveTree\), key\)/);
   assert.doesNotMatch(browserHtml, /renderStatement\(definition, 1, path, "", path\)/);
 });
@@ -762,7 +767,7 @@ test("browser renders raw Procedure assertions in Memory and frozen trees in act
   assert.match(browserHtml, /function renderRunProcedureAsserts\(run\)/);
   assert.match(browserHtml, /function activeRunProcedureAssertTrees\(run\)/);
   assert.match(browserHtml, /frame\.assertTree/);
-  assert.match(browserHtml, /renderEffectiveRuleTreeBlock\(tree, t\("procedureAsserts"\)\)/);
+  assert.match(browserHtml, /renderEffectiveRuleTreeBlock\(tree, t\("procedureAsserts"\), "run:" \+ run\.id/);
   assert.match(browserHtml, /if \(step\.assertTree\) wrap\.append\(renderEffectiveRuleTreeBlock/);
 });
 

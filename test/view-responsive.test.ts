@@ -169,6 +169,29 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     updatedAt: "2026-07-19T00:00:00.000Z",
     stack: [],
     asserts: ["The task-level procedure contract remains reviewable."],
+    assertTree: {
+      channel: "asserts",
+      entries: [{
+        kind: "reference",
+        target: "statements/shared-rules",
+        entries: [{
+          kind: "rule",
+          text: "The shared assertion applies.",
+          ruleId: "statements/shared-rules#asserts[0]"
+        }],
+        sections: [{
+          name: "Evidence",
+          defines: ["Evidence-specific context."],
+          entries: [{
+            kind: "rule",
+            text: "Cite supporting evidence.",
+            ruleId: "statements/shared-rules#sections[0].asserts[0]"
+          }],
+          sections: []
+        }]
+      }],
+      sections: []
+    },
     plan: Array.from({ length: 24 }, (_, index) => ({
       id: `flow[${index + 1}]`,
       kind: (index === 1 ? "call" : "action") as "action" | "call",
@@ -313,6 +336,44 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
       await assertPageDoesNotOverflow(narrowPage);
     } finally {
       await narrowPage.close();
+    }
+  });
+});
+
+test("Task effective rule references and sections collapse and survive rerenders", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await openTaskPage(browser, url, 1366);
+    try {
+      const reference = page.locator(".run-procedure-asserts .effective-reference").first();
+      const referenceHeading = reference.locator(":scope > .section-header");
+      const referenceBody = reference.locator(":scope > .section-body");
+      await referenceHeading.waitFor();
+      assert.equal(await referenceHeading.getAttribute("aria-expanded"), "true");
+
+      await referenceHeading.click({ position: { x: 8, y: 8 } });
+      assert.equal(await referenceHeading.getAttribute("aria-expanded"), "false");
+      assert.equal(await referenceBody.isHidden(), true);
+
+      await page.evaluate(() => {
+        const rerender = (window as typeof window & { renderAll?: () => void }).renderAll;
+        if (typeof rerender !== "function") throw new Error("renderAll is unavailable");
+        rerender?.();
+      });
+      const rerenderedReference = page.locator(".run-procedure-asserts .effective-reference").first();
+      const rerenderedHeading = rerenderedReference.locator(":scope > .section-header");
+      assert.equal(await rerenderedHeading.getAttribute("aria-expanded"), "false");
+      assert.equal(await rerenderedReference.locator(":scope > .section-body").isHidden(), true);
+
+      await rerenderedHeading.press("Enter");
+      assert.equal(await rerenderedHeading.getAttribute("aria-expanded"), "true");
+      const effectiveSection = rerenderedReference.locator(".effective-section").first();
+      const sectionHeading = effectiveSection.locator(":scope > .section-header");
+      await sectionHeading.press(" ");
+      assert.equal(await sectionHeading.getAttribute("aria-expanded"), "false");
+      assert.equal(await effectiveSection.locator(":scope > .section-body").isHidden(), true);
+
+    } finally {
+      await page.close();
     }
   });
 });
