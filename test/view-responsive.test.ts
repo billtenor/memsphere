@@ -845,9 +845,16 @@ test("View deep links restore Memory, Run, and browser history", async () => {
       }, `/tasks/${legacyRunId}`);
       assert.equal((await latestRunDetailResponse).status(), 200);
       await page.getByRole("heading", { name: "Legacy procedure fallback", exact: true }).waitFor();
+      await page.evaluate(() => {
+        delete document.documentElement.dataset.memsphereViewLoadApplied;
+        window.addEventListener("memsphere:view-load-settled", (event) => {
+          const detail = event instanceof CustomEvent ? event.detail : null;
+          document.documentElement.dataset.memsphereViewLoadApplied = String(detail?.applied);
+        }, { once: true });
+      });
       releaseStaleRunDetail();
       assert.equal((await staleRunDetailResponse).status(), 200);
-      await page.waitForTimeout(100);
+      await page.waitForFunction(() => document.documentElement.dataset.memsphereViewLoadApplied === "false");
       assert.equal(new URL(page.url()).pathname, `/tasks/${legacyRunId}`);
       assert.equal(await page.locator("#title").textContent(), "Legacy procedure fallback");
 

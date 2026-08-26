@@ -258,11 +258,13 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     });
     await snapshotStarted;
     let validationSettled = false;
-    const concurrentValidation = validateMemoryChange().then((result) => {
+    let validationWaiting!: () => void;
+    const validationQueued = new Promise<void>((resolve) => { validationWaiting = resolve; });
+    const concurrentValidation = validateMemoryChange(undefined, { onLockWait: validationWaiting }).then((result) => {
       validationSettled = true;
       return result;
     });
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await validationQueued;
     assert.equal(validationSettled, false, "validation must wait until Review snapshot creation releases the checkpoint lock");
     releaseSnapshot();
     await heldSnapshot;

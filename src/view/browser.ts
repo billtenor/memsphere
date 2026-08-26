@@ -1064,10 +1064,10 @@ export const browserHtml = String.raw`<!doctype html>
     setInterval(() => {
       if (state.viewMode === "settings") return;
       if (state.viewMode !== "task") return;
-      if (hasActiveTaskInteraction()) {
-        syncArtifactReviewActivities().catch(console.error);
-      } else {
-        loadRuns().then(changed => {
+      const kind = hasActiveTaskInteraction() ? "activity" : "runs";
+      const polling = kind === "activity"
+        ? syncArtifactReviewActivities()
+        : loadRuns().then(changed => {
           if (!changed) return;
           if (hasActiveTaskInteraction()) {
             state.taskPollingRenderPending = true;
@@ -1075,63 +1075,73 @@ export const browserHtml = String.raw`<!doctype html>
           }
           state.taskPollingRenderPending = false;
           renderAll();
-        }).catch(console.error);
-      }
+        });
+      polling.catch(console.error).finally(() => {
+        window.dispatchEvent(new CustomEvent("memsphere:view-poll-settled", { detail: { kind } }));
+      });
     }, 4000);
 
     async function loadAll(options = {}) {
       const generation = ++state.pageLoadGeneration;
-      await projectSwitchChain;
-      if (generation !== state.pageLoadGeneration) return;
-      await loadProjects();
-      if (generation !== state.pageLoadGeneration) return;
-      if (options.project && options.project !== state.currentProject) {
-        await switchProject(options.project);
+      let loadApplied = false;
+      try {
+        await projectSwitchChain;
         if (generation !== state.pageLoadGeneration) return;
-      }
-      let route = options.route || (!state.routeReady ? state.pendingRoute : null);
-      if (route) {
-        route = await prepareBrowserRoute(route);
+        await loadProjects();
         if (generation !== state.pageLoadGeneration) return;
-        state.pendingRoute = route;
-        if (route.project && route.project !== state.currentProject) {
-          if (!confirmProjectSwitch()) {
-            state.routeReplaceNext = true;
-            syncBrowserUrl();
-            return;
-          }
-          await switchProject(route.project);
+        if (options.project && options.project !== state.currentProject) {
+          await switchProject(options.project);
           if (generation !== state.pageLoadGeneration) return;
         }
-      }
-      const targetMode = route ? routeViewMode(route) : state.viewMode;
-      state.viewMode = targetMode;
-      if (targetMode === "memory") {
-        await loadMemories();
-        await loadChanges();
-      }
-      else if (targetMode === "task") await loadRuns({ loadDetail: false });
-      else if (targetMode === "changes") await loadChanges();
-      else await loadSettings();
-      if (generation !== state.pageLoadGeneration) return;
-      if (route) {
-        const applied = await applyBrowserRoute(route, { render: false, generation });
-        if (!applied || generation !== state.pageLoadGeneration) return;
-        state.routeReady = true;
-        if (targetMode === "memory" && route.page !== "memory") {
-          await loadMemorySelection(state.selectedId || state.memories[0]?.id);
-        } else if (targetMode === "task" && route.page === "tasks") {
-          await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
+        let route = options.route || (!state.routeReady ? state.pendingRoute : null);
+        if (route) {
+          route = await prepareBrowserRoute(route);
+          if (generation !== state.pageLoadGeneration) return;
+          state.pendingRoute = route;
+          if (route.project && route.project !== state.currentProject) {
+            if (!confirmProjectSwitch()) {
+              state.routeReplaceNext = true;
+              syncBrowserUrl();
+              return;
+            }
+            await switchProject(route.project);
+            if (generation !== state.pageLoadGeneration) return;
+          }
         }
-      } else if (targetMode === "memory") {
-        await loadMemorySelection(state.selectedId || state.memories[0]?.id);
-      } else if (targetMode === "task") {
-        await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
-      } else if (targetMode === "changes" && state.selectedChangeId) {
-        await loadChangeDetail(state.selectedChangeId);
+        const targetMode = route ? routeViewMode(route) : state.viewMode;
+        state.viewMode = targetMode;
+        if (targetMode === "memory") {
+          await loadMemories();
+          await loadChanges();
+        }
+        else if (targetMode === "task") await loadRuns({ loadDetail: false });
+        else if (targetMode === "changes") await loadChanges();
+        else await loadSettings();
+        if (generation !== state.pageLoadGeneration) return;
+        if (route) {
+          const applied = await applyBrowserRoute(route, { render: false, generation });
+          if (!applied || generation !== state.pageLoadGeneration) return;
+          state.routeReady = true;
+          if (targetMode === "memory" && route.page !== "memory") {
+            await loadMemorySelection(state.selectedId || state.memories[0]?.id);
+          } else if (targetMode === "task" && route.page === "tasks") {
+            await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
+          }
+        } else if (targetMode === "memory") {
+          await loadMemorySelection(state.selectedId || state.memories[0]?.id);
+        } else if (targetMode === "task") {
+          await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
+        } else if (targetMode === "changes" && state.selectedChangeId) {
+          await loadChangeDetail(state.selectedChangeId);
+        }
+        if (generation !== state.pageLoadGeneration) return;
+        if (options.render !== false) renderAll();
+        loadApplied = true;
+      } finally {
+        window.dispatchEvent(new CustomEvent("memsphere:view-load-settled", {
+          detail: { generation, currentGeneration: state.pageLoadGeneration, applied: loadApplied }
+        }));
       }
-      if (generation !== state.pageLoadGeneration) return;
-      if (options.render !== false) renderAll();
     }
 
     async function prepareBrowserRoute(route) {

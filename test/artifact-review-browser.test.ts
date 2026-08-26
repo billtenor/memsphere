@@ -292,7 +292,6 @@ flow:
     assert.equal(await inlineTextarea.inputValue(), "Inline text survives a failed save");
     assert.equal(await inlineSave.isEnabled(), true);
     await page.unroute("**/draft");
-    await page.waitForTimeout(50);
     const inlineRetrySaved = page.waitForResponse((response) =>
       response.url().endsWith("/draft") && response.request().method() === "PATCH"
     );
@@ -447,7 +446,6 @@ flow:
     await identity.waitFor();
     const reviewPanel = page.locator("#artifact-review-review-pane");
     const reviewResizer = page.getByRole("separator", { name: "调整产物与评审区域宽度" });
-    await page.waitForTimeout(220);
     const panelBeforeResize = await reviewPanel.boundingBox();
     const resizerBox = await reviewResizer.boundingBox();
     assert(panelBeforeResize && resizerBox);
@@ -462,8 +460,12 @@ flow:
       `expected drag to grow review panel: ${panelBeforeResize.width} -> ${panelAfterResize.width}`
     );
     assert.equal(await page.evaluate(() => Number(localStorage.getItem("memsphere.artifactReviewSplit.v1")) < 58), true);
+    const splitBeforeKeyboard = Number(await reviewResizer.getAttribute("aria-valuenow"));
     await reviewResizer.press("ArrowRight");
-    await page.waitForTimeout(220);
+    await page.waitForFunction((previous) => {
+      const resizer = document.querySelector('[role="separator"][aria-label="调整产物与评审区域宽度"]');
+      return Number(resizer?.getAttribute("aria-valuenow")) > previous;
+    }, splitBeforeKeyboard);
     const panelAfterKeyboard = await reviewPanel.boundingBox();
     assert(panelAfterKeyboard);
     assert(panelAfterKeyboard.width < panelAfterResize.width);
@@ -489,7 +491,7 @@ flow:
     const menuBox = await roundMenu.boundingBox();
     assert(triggerBox && menuBox);
     assert(menuBox.y >= triggerBox.y + triggerBox.height);
-    await page.waitForTimeout(4_300);
+    await waitForViewLifecycleEvent(page, "memsphere:view-poll-settled", "activity");
     assert.equal(await roundSelector.getAttribute("data-polling-sentinel"), "preserved");
     assert.equal(await roundMenu.isVisible(), true);
     await roundMenu.locator(`[data-round-id="${firstReview.currentRoundId}"]`).click();
@@ -551,7 +553,7 @@ flow:
     assert.match(await page.locator("body").getAttribute("class") || "", /\bartifact-review-modal-open\b/);
     await page.mouse.move(2, 2);
     await page.mouse.wheel(0, 1200);
-    await page.waitForTimeout(50);
+    await waitForAnimationFrames(page, 2);
     assert.equal(await page.evaluate(() => window.scrollY), lockedScrollY);
     const reviewPane = page.locator("#artifact-review-review-pane");
     await reviewPane.evaluate((pane) => {
@@ -564,7 +566,7 @@ flow:
       reviewPaneBox.y + reviewPaneBox.height / 2
     );
     await page.mouse.wheel(0, 1200);
-    await page.waitForTimeout(50);
+    await waitForAnimationFrames(page, 2);
     assert.equal(await page.evaluate(() => window.scrollY), lockedScrollY);
     const completedRoundSelector = reviewModal.getByRole("button", { name: "轮次", exact: true });
     await completedRoundSelector.click();
@@ -579,7 +581,10 @@ flow:
     assert(reviewOpenPosition && reviewOpenPosition.scrollY > 0);
     await reviewModal.getByRole("button", { name: "关闭", exact: true }).click();
     await reviewModal.waitFor({ state: "hidden" });
-    await page.waitForTimeout(100);
+    await page.waitForFunction((expectedTop) => {
+      const button = document.querySelector(".task-result [data-artifact-review-id]");
+      return button instanceof HTMLElement && Math.abs(button.getBoundingClientRect().top - expectedTop) < 2;
+    }, reviewOpenPosition.top);
     const restoredPosition = await page.locator(".task-result [data-artifact-review-id]").evaluate((button) => ({
       scrollY: window.scrollY,
       top: button.getBoundingClientRect().top
@@ -1000,7 +1005,7 @@ flow:
       element.dataset.stabilityMarker = "preserved";
     });
     const settledScrollTop = await log.evaluate((element) => element.scrollTop);
-    await page.waitForTimeout(4_500);
+    await waitForViewLifecycleEvent(page, "memsphere:view-poll-settled", "activity");
     assert.equal(await log.getAttribute("data-stability-marker"), "preserved");
     assert.equal(await log.evaluate((element) => element.scrollTop), settledScrollTop);
 
@@ -1052,7 +1057,6 @@ async function selectIdentity(
   }
   if (await option.getAttribute("aria-selected") === "true") {
     await select.click();
-    await page.waitForTimeout(20);
     return;
   }
   const loaded = page.waitForResponse(
@@ -1069,7 +1073,30 @@ async function selectIdentity(
     return Boolean(trigger?.textContent?.includes(label));
   }, expectedLabel);
   await loaded;
-  await page.waitForTimeout(20);
+}
+
+async function waitForAnimationFrames(page: import("playwright").Page, count: number): Promise<void> {
+  await page.evaluate(async (frameCount) => {
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  }, count);
+}
+
+async function waitForViewLifecycleEvent(
+  page: import("playwright").Page,
+  eventName: string,
+  kind: string
+): Promise<void> {
+  await page.evaluate(({ name }) => {
+    delete document.documentElement.dataset.memsphereViewLifecycle;
+    window.addEventListener(name, (event) => {
+      const detail = event instanceof CustomEvent ? event.detail : null;
+      document.documentElement.dataset.memsphereViewLifecycle = detail?.kind ?? "";
+    }, { once: true });
+  }, { name: eventName });
+  await page.waitForFunction((expectedKind) =>
+    document.documentElement.dataset.memsphereViewLifecycle === expectedKind, kind);
 }
 
 async function clickAndWaitForDraftSave(
