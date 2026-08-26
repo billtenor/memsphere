@@ -56,7 +56,8 @@ export async function projectCreateCommand(
       moved = true;
       await registerCreatedProject(home, name, root, options.bind);
       registryWritten = true;
-      if (!options.embedded) await bootstrapManagedSystemMemory(name);
+      if (options.embedded) await bootstrapEmbeddedSystemMemory(name);
+      else await bootstrapManagedSystemMemory(name);
       registered = true;
     } finally {
       await rm(stagingRoot, { recursive: true, force: true }).catch(() => undefined);
@@ -71,6 +72,13 @@ export async function projectCreateCommand(
 async function bootstrapManagedSystemMemory(projectName: string): Promise<void> {
   const result = await runManagedSystemMemoryRepair(projectName, "Bootstrap Memsphere system Memory");
   if (result.created === 0) throw new Error("new Managed Project unexpectedly has no System Memory to bootstrap");
+}
+
+async function bootstrapEmbeddedSystemMemory(projectName: string): Promise<void> {
+  await withSelectedProject(projectName, async () => {
+    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    await runSelectedEmbeddedSystemMemoryRepair(context);
+  });
 }
 
 export type SystemMemoryChangePreparation = {
@@ -427,27 +435,33 @@ async function applySelectedEmbeddedSystemMemoryRepair(
 }
 
 async function runEmbeddedSystemMemoryRepair(projectName?: string): Promise<SystemMemoryRepairResult> {
-  const prepared = await prepareEmbeddedSystemMemoryRepair(projectName);
-  if (prepared) return applyEmbeddedSystemMemoryRepair(prepared);
   return withSelectedProject(projectName, async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-    if (context.primary.config.store.type !== "embedded") {
-      throw new Error(`Project "${context.primary.name}" uses Managed Memory; Embedded System Memory repair requires an Embedded Project`);
-    }
-    const validation = await validateMemoryRoot(context.primary.memoryRoot);
-    if (validation.issues.length > 0) {
-      const issue = validation.issues[0]!;
-      throw new Error(`Embedded System Memory repair validation failed: ${issue.path}: ${issue.message}`);
-    }
-    return {
-      project: context.primary.name,
-      storeType: "embedded",
-      created: 0,
-      updated: 0,
-      deleted: 0,
-      worktree: context.workspace.path
-    };
+    return withProjectLock(context.home, context.primary.name, () => runSelectedEmbeddedSystemMemoryRepair(context));
   });
+}
+
+async function runSelectedEmbeddedSystemMemoryRepair(
+  context: Awaited<ReturnType<typeof resolveProjectContext>>
+): Promise<SystemMemoryRepairResult> {
+  const prepared = await prepareSelectedEmbeddedSystemMemoryRepair(context);
+  if (prepared) return applySelectedEmbeddedSystemMemoryRepair(context, prepared);
+  if (context.primary.config.store.type !== "embedded") {
+    throw new Error(`Project "${context.primary.name}" uses Managed Memory; Embedded System Memory repair requires an Embedded Project`);
+  }
+  const validation = await validateMemoryRoot(context.primary.memoryRoot);
+  if (validation.issues.length > 0) {
+    const issue = validation.issues[0]!;
+    throw new Error(`Embedded System Memory repair validation failed: ${issue.path}: ${issue.message}`);
+  }
+  return {
+    project: context.primary.name,
+    storeType: "embedded",
+    created: 0,
+    updated: 0,
+    deleted: 0,
+    worktree: context.workspace.path
+  };
 }
 
 export async function projectRepairCommand(nameInput?: string): Promise<void> {
