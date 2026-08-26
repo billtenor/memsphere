@@ -65,6 +65,8 @@ flow:
         action: 综合评审意见并形成不包含代码修改的处置结论。
         actor: agent
         asserts:
+          - !ref
+            target: statements/memsphere-repository-development-rules
           - Runner 必须根据代码、测试和适用工程 Memory 独立复核全部评审意见，合并重复项并逐项决定接受、拒绝、请求澄清或延期，不得因 Reviewer 提出就自动接受。
           - 接受表示问题成立并进入下一修复步骤，不表示问题已经修复。
           - 项目负责人审核的是处置判断及依据是否合理完整，不得仅因已接受问题尚未修复而拒绝准确的处置结论。
