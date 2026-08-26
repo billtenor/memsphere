@@ -4,7 +4,7 @@ names:
   - memsphere-tutorial-chapter-01
   - memsphere 教学流程-第一章
 defines:
-  - 面向首次使用 Memsphere 的 Human，从一个真实需求出发理解个性化软件、Prompt/Skill/Memsphere 的适用边界、完整愿景与当前能力，并在 View 的当前教学任务（内部一次 Run）中完成一次可观察的入门闭环。
+  - 面向首次使用 Memsphere 的 Human，从一个真实需求出发理解个性化软件、Prompt/Skill/Memsphere 的适用边界、完整愿景与当前能力，并在 View 的当前教学 Run 中完成一次可观察的入门闭环。
   - 本章帮助 Human 判断自己为什么需要或不需要 Memsphere；结论可以是 Prompt、Skill 或 Memsphere，不以使用更多功能作为成功标准。
 asserts:
   - 不得修改 System Memory 或用户 Memory，不得为教学创建额外 Procedure、ChangeSet 或 Run；任何准入写操作都必须说明目标、影响并限定为当前环境所需。
@@ -16,7 +16,7 @@ goals:
   - 让 Human 理解 Memsphere 是通用 Agent 之上的个性化软件运行环境，而不是另一个 Agent 或完整等同于 Memory 的框架。
   - 让 Human 能根据真实需求判断 Prompt、Skill 或 Memsphere 是否适用，并理解软件可以从自然语言开始按需生长。
   - 让 Human 理解四类软件资产、两种算力、当前版本能力及四类 Memory 的协作关系。
-  - 让 Human 在 View 中观察当前教学任务、步骤与步骤产物，理解它们与 Run、Artifact 的对应关系，并获得适合自己场景的下一步起点建议。
+  - 让 Human 在 View 中观察当前教学 Run、步骤与产物，并理解 Procedure 名称、Run 名称、Run ID 和 Artifact 的关系，获得适合自己场景的下一步起点建议。
 flow:
   - !while
     condition: !action
@@ -126,24 +126,24 @@ flow:
 
   - !while
     condition: !action
-      action: 判断 Human 是否尚未在 View 中找到当前教学任务、当前步骤和至少一份步骤产物。
+      action: 判断 Human 是否尚未在 View 中找到当前教学 Run、当前步骤和至少一份产物。
       actor: agent
       artifact: !artifact
         name: 是否继续 View 实践
         type: boolean
     do:
       - !action
-        action: 查询当前教学 Run 的实际状态，提供已经通过准入检查的可点击 View 地址、当前教学任务的用户可读名称和 Run ID；先说明 View 中的“任务”对应 Memsphere 内部的一次 Run、“步骤产物”对应 Artifact，再指导 Human 找到当前步骤和至少一份已上报步骤产物。
+        action: 查询当前教学 Run 的实际状态，提供已经通过准入检查的可点击 View 地址、当前 Run 的用户可读名称和 Run ID；指导 Human 在 View 顶部进入“Run”，从左侧 running 分组按用户可读名称找到本次教学 Run，并查看当前步骤和至少一份已上报产物。
         actor: agent
         asserts:
-          - 必须使用实际地址、任务名称、Run ID、当前步骤和步骤产物，不得保留 Host、端口或名称占位符。
-          - 必须优先使用 View 实际展示的“任务”和“步骤产物”，并明确它们分别对应内部 Run 和 Artifact；同时区分 Procedure 名称、用户可读任务名称和 Run ID，不得要求 Human 新建练习 Procedure 或额外 Run。
+          - 必须使用实际地址、Run 名称、Run ID、当前步骤和产物，不得保留 Host、端口或名称占位符。
+          - 必须使用 View 实际展示的“Run”和“产物”，并区分 Procedure 名称、用户可读 Run 名称和 Run ID；说明每一步上报的产物就是 Artifact，不得要求 Human 新建练习 Procedure 或额外 Run。
           - 只要求观察，不在本章发起 Review、修改 Memory 或处理 ChangeSet。
         artifact: !artifact
-          name: 当前教学任务的 View 观察指引
+          name: 当前教学 Run 的 View 观察指引
           format: markdown
       - !action
-        action: 打开 View，按指引找到当前教学任务、当前步骤和至少一份步骤产物；反馈实际看到的内容、无法访问的问题或仍有的疑问。
+        action: 打开 View，按指引找到当前教学 Run、当前步骤和至少一份产物；反馈实际看到的内容、无法访问的问题或仍有的疑问。
         actor: human
         artifact: !artifact
           name: View 实践结果

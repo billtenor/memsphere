@@ -164,9 +164,10 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   );
   assert.match(tutorial, /Prompt、Skill、Memsphere/);
   assert.match(tutorial, /Human 真实场景/);
-  assert.match(tutorial, /当前教学任务的 View 观察指引/);
-  assert.match(tutorial, /“任务”对应 Memsphere 内部的一次 Run/);
-  assert.match(tutorial, /“步骤产物”对应 Artifact/);
+  assert.match(tutorial, /当前教学 Run 的 View 观察指引/);
+  assert.match(tutorial, /View 顶部进入“Run”/);
+  assert.match(tutorial, /每一步上报的产物就是 Artifact/);
+  assert.doesNotMatch(tutorial, /View 实际展示的“任务”/);
   assert.doesNotMatch(tutorial, /导入 Reserved Memory|Imported|not imported|了解并导入 Reserved Memory/);
 });
 

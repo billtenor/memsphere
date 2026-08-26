@@ -330,7 +330,7 @@ flow:
       await archivedModal.getByText("Private candidate", { exact: true }).waitFor();
       assert.equal(directContextRequests.every(path => path.includes(`/api/runs/${started.id}/`)), true);
       assert.equal(await page.locator(".task-card").count(), 0);
-      assert.equal(await page.locator("#count").textContent(), "0 tasks");
+      assert.equal(await page.locator("#count").textContent(), "0 runs");
     } finally {
       await browser.close();
     }

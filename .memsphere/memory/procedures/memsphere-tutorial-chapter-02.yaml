@@ -124,7 +124,7 @@ flow:
       - !action
         action: |-
           介绍 Human 与 Agent 参与者在 Artifact Review 中的行为。首次进入时可以这样表述：
-          “Human 参与者由真实用户完成评审。Artifact Review 开始后，Human 在 View 的 Task 页面打开对应 Run 和当前步骤，在 Artifact Review 浮窗中查看 Artifact，添加评论、选择投票并提交。
+          “Human 参与者由真实用户完成评审。Artifact Review 开始后，Human 在 View 的 Run 页面打开对应 Run 和当前步骤，在 Artifact Review 浮窗中查看 Artifact，添加评论、选择投票并提交。
           Agent 参与者是由 memsphere 自动启动、承担评审工作的子 Agent。Artifact Review 开始后，memsphere 会把当前评审要求和 Artifact 上下文交给它；子 Agent 通过 memsphere 命令读取评审、提交评论和投票。
           要启动子 Agent，需要为 Agent 参与者选择 ACP Provider 和可选模型。ACP Provider 是 memsphere 连接并启动具体 Agent 产品的适配入口，不是另一个评审角色。
           同一个评审席位在一次 Run 中可以绑定 Human，也可以绑定 Agent。选择哪一种参与者，取决于流程需要的人类判断、自动化程度和可用环境。Run 启动后，如果 Human 完成前序流程并退出，Runner 还可以把该席位显式换绑给本次 Run 已冻结的 Agent；换绑只影响尚未创建的 Review，已有 Review 保持不变。”

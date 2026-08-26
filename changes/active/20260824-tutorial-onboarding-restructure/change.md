@@ -27,7 +27,7 @@ README 同时定义了从 Prompt 到 Skill、再到 Memsphere 的适用边界，
 - 新增独立 Concept `memsphere-personalized-software`，稳定定义个性化软件、Prompt/Skill/Memsphere 边界、四类软件资产及两种算力；`memsphere-framework` 引用并落实 Memsphere 在 Agent/LLM 之上的运行环境、资产管理职责和当前实现边界。
 - 第一章的首要成功标准是用户理解自己为什么需要或不需要 Memsphere，并完成一次可观察的当前版本入门闭环，而不是听完全部术语。
 - 使用 README 的“个人研究助手”作为贯穿案例，并允许 Human 提供自己的重复需求替代案例；四类 Memory 不再组织成四段必经的独立问答课程。
-- 直接利用当前教学 Procedure 自身的一次 Run 作为实践对象，让用户在 View 中先按界面用语找到本次“任务”、当前步骤和“步骤产物”，并理解它们分别对应内部 Run 与 Artifact；第一章不额外创建练习 Procedure 或额外 Run。
+- 直接利用当前教学 Procedure 自身的一次 Run 作为实践对象，让用户在 View 顶部进入“Run”，按用户可读名称找到本次教学 Run、当前步骤和已上报产物，并理解 Procedure 名称、Run 名称、Run ID 与 Artifact 的关系；第一章不额外创建练习 Procedure 或额外 Run。
 - 准入检查区分 Managed 与 Embedded Project。共同检查 Node.js、Git、CLI、Skill、Primary Project Binding、当前 Project、`memsphere validate` 和 View；按 README 只解释“Memory 是否跟随代码仓库”这一首要选择。`project repair` 只在实际 System Memory 故障排查时按适用 Memory 处理，不作为第一章必经教学。
 - 第一章必须明确区分完整方向和当前版本：Memory、个性化 CLI、数据和界面是完整软件资产模型；当前版本首先实现 Memory，不能把 Memsphere 管理 CLI 或通用 View 表述为个性化 CLI、数据与界面已经成为完整的一等资产。
 - 第一章只建立完成入门所需的最小心智模型。Mounted Project、完整 ChangeSet 生命周期、候选 ChangeSet Run、Artifact Review、ACP Provider、运行期 Slot 换绑、Run abandonment 与 Archive 等内容不进入第一章主线。
@@ -47,7 +47,7 @@ README 同时定义了从 Prompt 到 Skill、再到 Memsphere 的适用边界，
   2. Prompt、Skill 与 Memsphere 的定位及 Human 真实场景。
   3. Memory、个性化 CLI、数据与界面的软件生长模型，以及两种算力协同。
   4. 当前版本能力、四类 Memory 和 Managed/Embedded Project。
-  5. 在 View 中观察当前教学任务、Action 和步骤产物，并理解它们与 Run、Artifact 的映射。
+  5. 在 View 中观察当前教学 Run、Action 和产物，并理解 Procedure 名称、Run 名称、Run ID 与 Artifact 的关系。
   6. 生成适合 Human 当前场景的个人软件起点建议。
 - 第一章纯教学 Human checkpoint 不超过 4 个，分别用于真实场景、软件生长模型、当前能力和 View 实践；环境授权或排障不计入。
 - 同步修改 bundled `reserved-memory`、当前工程 `.memsphere/memory`、manifest 与相关安装/repair 测试，保持 System Memory 身份、路径和内容一致。
@@ -66,7 +66,7 @@ README 同时定义了从 Prompt 到 Skill、再到 Memsphere 的适用边界，
 8. 第一章让 Human 基于一个真实需求判断 Prompt、Skill 或 Memsphere 是否适用，并明确 Memsphere 与通用 Agent、LLM 和硬件的层次关系；即使结论是不需要 Memsphere，也视为有效教学结果。
 9. 第一章使用“个人研究助手”或 Human 真实场景解释四类软件资产、两个入口、数据公共底座和 Token/确定性算力协同；明确软件不要求第一天拥有全部资产。
 10. 第一章一次性说明 Concept、Statement、Schema 和 Procedure 的职责与协作，明确当前版本还提供 Project、Run、Artifact、Review、ChangeSet、View 和 Skill 接入，并严格区分这些当前能力与完整资产愿景。
-11. Human 能通过实际 View 地址打开当前 Project，按用户可读名称找到教学任务，并观察当前步骤和至少一份已上报步骤产物；教学内容先使用 View 的“任务”与“步骤产物”，再说明它们对应内部 Run 与 Artifact，并正确区分 Procedure 名称、用户可读任务名称和 Run ID。
+11. Human 能通过实际 View 地址打开当前 Project，在顶部进入“Run”，按用户可读名称找到教学 Run，并观察当前步骤和至少一份已上报产物；教学内容使用 View 当前展示的“Run”与“产物”，说明每一步上报的产物就是 Artifact，并正确区分 Procedure 名称、用户可读 Run 名称和 Run ID。
 12. 第一章主线不实际执行 Memory edit/publish、ChangeSet 处理、Artifact Review、Provider 配置、运行期换绑、Run abandon 或 Archive；Human 主动提问时可以基于当前 Memory 回答，但不得把相关专题重新变成必经步骤。
 13. 第一章中用于纯教学导航的 Human 学习选择 Action 不超过 4 个；环境授权、必须由 Human 完成的外部操作和用户主动提问不计入该数量。
 14. 第一章最终产物按 Human 的真实场景给出 Prompt、Skill 或 Memsphere 起点建议；适合 Memsphere 时说明最先需要的 Memory、第一条 Procedure 驱动请求，以及未来可能生长的 CLI、数据和界面；不把未来能力冒充当前交付。
@@ -147,7 +147,7 @@ README 同时定义了从 Prompt 到 Skill、再到 Memsphere 的适用边界，
 
 2026-08-26 完成真实第一章 Run `run-20260826-042624z-10e8c806`，最终状态为 `done`。Human 使用“每天帮我筛选值得读的 AI 论文”作为真实场景，完成产品定位、软件生长模型、当前能力与四类 Memory、Embedded Project 和 View 实践的全部 checkpoint，并在 View 中确认当前步骤及“Human 真实场景”步骤产物；最终产物给出从最小 Memory 开始、未来按需生长 CLI、数据和个性化界面的建议。过程中没有执行 Memory edit/publish、ChangeSet、Artifact Review、Provider、Run abandon 或 Archive，也没有出现循环卡死。
 
-本次体验同时发现初始 View 指引要求 Human 寻找内部术语 `Run` 和 `Artifact`，而 View 实际面向用户展示“任务”和“步骤产物”，导致 Human 误以为页面内容不匹配。后续分支评审已批准并完成最小修复：第一章现在优先使用界面术语，并明确“任务”对应内部 Run、“步骤产物”对应 Artifact；产品定位与 Reserved Store 测试已锁定该映射。合入最新 master 后暴露的 System Memory manifest 数量断言也已从 18 更新为 19。修复后的 `memsphere validate`、`npm run typecheck`、`npm run build`、相关定向测试和 `git diff --check` 均通过，授权环境串行完整测试为 439 passed、0 failed、1 个原生 Windows 条件 skip。需求方最终确认仍待完成，因此 Change 保持 `doing`。
+本次体验同时发现初始 View 指引要求 Human 寻找内部术语 `Run` 和 `Artifact`，而当时 View 面向用户展示“任务”和“步骤产物”，导致 Human 误以为页面内容不匹配。分支曾据此把第一章改为优先使用当时的界面术语。随后 master 的 PR #37 又把 View 入口统一改为“Run”，因此本分支在合并时以最新界面为准，将第一章和契约测试同步为“Run / 产物”，并保留 Procedure 名称、用户可读 Run 名称、Run ID 与 Artifact 的区别。此前 manifest 数量断言也已从 18 更新为 19。需求方最终确认仍待完成，因此 Change 保持 `doing`。
 
 ## 需求更新记录
 
@@ -157,3 +157,4 @@ README 同时定义了从 Prompt 到 Skill、再到 Memsphere 的适用边界，
 - 2026-08-26，Run `run-20260825-155733z-7de68ce6`：分支评审确认旧文档仍把第二章混入当前交付，并发现 Managed repair 测试的旧内容替换已为空操作。经项目负责人批准，将本 Change 全面收敛到“内置产品语义统一 + 第一章重构”，第二章保留为后续独立需求；同时增强 repair 回归测试并完成完整自动化验证。
 - 2026-08-26，Run `run-20260826-042624z-10e8c806`：以“每天帮我筛选值得读的 AI 论文”为真实场景完成第一章 Human 体验与 View 观察，验证主流程可以正常完成；同时发现教学指引使用 `Run`/`Artifact`、View 使用“任务”/“步骤产物”的术语落差，已记录并等待下一轮评审处置。
 - 2026-08-26，Run `run-20260825-155733z-7de68ce6`：项目负责人批准修复真实体验发现的术语落差，第一章改为先使用“任务”/“步骤产物”并映射内部 Run/Artifact；同时修复 master 合入后 19 份 System Memory 与测试仍断言 18 的语义冲突。完整串行测试恢复为 439 passed、0 failed、1 skip。
+- 2026-08-26，合入 master PR #37：View 顶部入口从“任务”统一为“Run”。冲突解决保留重构后的第一章主线，并将 View 实践指引、验收标准和契约测试同步到最新“Run / 产物”界面术语；本轮需基于新的合并 HEAD 重新评审和验证。
