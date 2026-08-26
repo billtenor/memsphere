@@ -569,6 +569,65 @@ test("Run status polling loads an uncached replacement in the same secondary men
   });
 });
 
+test("Run status polling refreshes a stale cached replacement in the same secondary menu", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
+    let legacyUpdated = false;
+    let selectedMoved = false;
+    const nextRevision = "2026-07-20T00:00:00.000Z";
+    await page.route("**/api/runs**", async (route) => {
+      const response = await route.fetch();
+      const payload = await response.json() as { runs?: Array<Record<string, unknown>> };
+      if (payload.runs) {
+        payload.runs = payload.runs.map((run) => ({
+          ...run,
+          status: run.id === runId && selectedMoved ? "done" : "running",
+          ...(run.id === runId && selectedMoved ? { updatedAt: nextRevision } : {}),
+          ...(run.id === legacyRunId && legacyUpdated ? { updatedAt: nextRevision } : {})
+        }));
+      }
+      await route.fulfill({ response, json: payload });
+    });
+    await page.route("**/api/runs/*", async (route) => {
+      const response = await route.fetch();
+      const payload = await response.json() as { run?: Record<string, unknown> };
+      if (payload.run) {
+        payload.run = {
+          ...payload.run,
+          status: "running",
+          ...(payload.run.id === legacyRunId && selectedMoved ? { updatedAt: nextRevision } : {})
+        };
+      }
+      await route.fulfill({ response, json: payload });
+    });
+    try {
+      await page.goto(`${url}/tasks/${legacyRunId}`);
+      await page.locator("#title", { hasText: "Legacy procedure fallback" }).waitFor();
+      await page.goto(`${url}/tasks/${runId}`);
+      await page.getByRole("heading", { name: runName, exact: true }).waitFor();
+
+      const summaryUpdated = page.waitForResponse((response) => (
+        new URL(response.url()).pathname === "/api/runs"
+        && new URL(response.url()).searchParams.get("representation") === "summary"
+      ));
+      legacyUpdated = true;
+      await summaryUpdated;
+
+      const replacementLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${legacyRunId}`,
+        { timeout: 10_000 }
+      );
+      selectedMoved = true;
+      const replacementResponse = await replacementLoaded;
+      const replacementPayload = await replacementResponse.json() as { run: { updatedAt: string } };
+      assert.equal(replacementPayload.run.updatedAt, nextRevision);
+      await page.locator("#title", { hasText: "Legacy procedure fallback" }).waitFor();
+    } finally {
+      await page.close();
+    }
+  });
+});
+
 test("missing Run detail is reported as not found", async () => {
   await withResponsiveView(async (_browser, url) => {
     const response = await fetch(`${url}/api/runs/run-missing`);
