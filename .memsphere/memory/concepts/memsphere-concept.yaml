@@ -5,6 +5,7 @@ names:
   - Concept
 defines:
   - memsphere 中用于解释一个可稳定复用的概念、词汇或领域抽象是什么的 Memory。
+  - 在个性化软件的语义资产中，Concept 让不同 Agent 和不同运行对软件中的对象、边界与关系形成稳定一致的理解。
   - 用于统一记忆术语，使不同记忆和执行流程对同一概念形成一致理解。
   - Concept 的 defines 只使用文本描述概念含义、用途和边界；需要独立核查的规则和内容结构分别由 Statement 与 Schema 表达。
   - Concept 的合法 YAML 结构由 memsphere-concept-schema 定义。
