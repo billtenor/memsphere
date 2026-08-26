@@ -37,3 +37,20 @@ test("npm package preserves the memsphere first-use bootstrap contract", async (
   assert.match(readmeZhCn, /安装配置成功后不要停在总结/);
   assert.match(readmeZhCn, /memsphere 教学流程-第一章/);
 });
+
+test("release metadata uses the package version consistently", async () => {
+  const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
+    version: string;
+  };
+  const packageLock = JSON.parse(await readFile("package-lock.json", "utf8")) as {
+    version: string;
+    packages: Record<string, { version?: string }>;
+  };
+  const acpClient = await readFile("src/acp/client.ts", "utf8");
+  const thirdPartyNotices = await readFile("THIRD_PARTY_NOTICES.md", "utf8");
+
+  assert.equal(packageLock.version, packageJson.version);
+  assert.equal(packageLock.packages[""]?.version, packageJson.version);
+  assert.match(acpClient, new RegExp(`clientInfo: \\{[^}]*version: "${packageJson.version.replaceAll(".", "\\.")}"`));
+  assert.match(thirdPartyNotices, new RegExp(`for Memsphere ${packageJson.version.replaceAll(".", "\\.")}\\.`));
+});
