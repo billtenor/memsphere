@@ -1,8 +1,8 @@
 ---
 id: 20260824-tutorial-onboarding-restructure
-status: doing
 type: feature
 created: 2026-08-24
+completed_at: 2026-08-26
 run_id: run-20260824-112234z-cc114a0a
 ---
 
@@ -139,15 +139,15 @@ README 同时定义了从 Prompt 到 Skill、再到 Memsphere 的适用边界，
 - [x] 补充产品定位一致性与 System Memory 测试。
 - [x] 执行第一章 Managed、Embedded 场景验证和一次真实教学 Run 体验，完成第一章里程碑验收。
 - [x] 执行完整校验、回归和构建。
-- [ ] 整理验收证据并交由需求方确认。
+- [x] 整理验收证据并交由需求方确认。
 
 ## 验收结果
 
-内置 Memory 产品语义统一、第一章 Procedure 重构、Skill/manifest 同步和自动化契约测试已经实现。本次分支修复后，`memsphere validate`、定向 `project-command` 测试、`npm run typecheck`、`npm run build` 和 `git diff --check` 均通过；授权环境中的串行完整测试为 439 passed、0 failed、1 个原生 Windows 条件 skip。
+内置 Memory 产品语义统一、第一章 Procedure 重构、Skill/manifest 同步和自动化契约测试已经实现。最终分支通过 `memsphere validate`、`npm run typecheck`、`npm run build`、定向测试和 `git diff --check`；授权环境中的串行完整测试共 442 项，其中 441 passed、0 failed、1 个原生 Windows 条件 skip。
 
 2026-08-26 完成真实第一章 Run `run-20260826-042624z-10e8c806`，最终状态为 `done`。Human 使用“每天帮我筛选值得读的 AI 论文”作为真实场景，完成产品定位、软件生长模型、当前能力与四类 Memory、Embedded Project 和 View 实践的全部 checkpoint，并在 View 中确认当前步骤及“Human 真实场景”步骤产物；最终产物给出从最小 Memory 开始、未来按需生长 CLI、数据和个性化界面的建议。过程中没有执行 Memory edit/publish、ChangeSet、Artifact Review、Provider、Run abandon 或 Archive，也没有出现循环卡死。
 
-本次体验同时发现初始 View 指引要求 Human 寻找内部术语 `Run` 和 `Artifact`，而当时 View 面向用户展示“任务”和“步骤产物”，导致 Human 误以为页面内容不匹配。分支曾据此把第一章改为优先使用当时的界面术语。随后 master 的 PR #37 又把 View 入口统一改为“Run”，因此本分支在合并时以最新界面为准，将第一章和契约测试同步为“Run / 产物”，并保留 Procedure 名称、用户可读 Run 名称、Run ID 与 Artifact 的区别。此前 manifest 数量断言也已从 18 更新为 19。需求方最终确认仍待完成，因此 Change 保持 `doing`。
+本次体验同时发现初始 View 指引要求 Human 寻找内部术语 `Run` 和 `Artifact`，而当时 View 面向用户展示“任务”和“步骤产物”，导致 Human 误以为页面内容不匹配。分支曾据此把第一章改为优先使用当时的界面术语。随后 master 的 PR #37 又把 View 入口统一改为“Run”，因此本分支在合并时以最新界面为准，将第一章和契约测试同步为“Run / 产物”，并保留 Procedure 名称、用户可读 Run 名称、Run ID 与 Artifact 的区别。此前 manifest 数量断言也已从 18 更新为 19。Run `run-20260825-155733z-7de68ce6` 完成多轮固定 HEAD 评审与修复，最终 HEAD 经架构师、测试、Runner 和项目负责人审核通过，无 blocking、risk 或 suggestion；需求方已明确要求推送 PR 并在 CI 通过后合入 master，验收完成。
 
 ## 需求更新记录
 
