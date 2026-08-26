@@ -67,7 +67,7 @@ test("chapter one is a bounded first-use journey based on a real scenario", asyn
     "Memory、个性化 CLI、数据和界面",
     "Token 算力与确定性算力",
     "当前能力与 Memory 协作模型",
-    "当前教学 Run 的 View 观察指引",
+    "当前教学任务的 View 观察指引",
     "个性化软件起点建议"
   ]) {
     assert.match(tutorial, new RegExp(signal));
@@ -83,6 +83,8 @@ test("chapter one is a bounded first-use journey based on a real scenario", asyn
   assert.equal(tutorial.match(/^  - !while$/gm)?.length, 4);
   assert.match(tutorial, /project repair.*不是准入必经步骤/);
   assert.match(tutorial, /不得在本章执行 Memory edit\/publish/);
+  assert.match(tutorial, /“任务”对应 Memsphere 内部的一次 Run/);
+  assert.match(tutorial, /“步骤产物”对应 Artifact/);
   assert.doesNotMatch(tutorial, /请你启动 memsphere 教学流程-第二章/);
   assert.doesNotMatch(tutorial, /请你启动 memsphere 教学流程-第三章/);
 });
