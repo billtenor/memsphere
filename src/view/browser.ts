@@ -525,7 +525,7 @@ export const browserHtml = String.raw`<!doctype html>
       <span class="count" id="count">Loading</span>
       <div class="view-tabs">
         <button class="view-tab active" id="memory-tab" type="button">Memory</button>
-        <button class="view-tab" id="task-tab" type="button">Task</button>
+        <button class="view-tab" id="task-tab" type="button">Run</button>
       </div>
       <input id="search" class="search" type="search" placeholder="Search memories" />
       <div id="nav"></div>
@@ -684,7 +684,7 @@ export const browserHtml = String.raw`<!doctype html>
       archive: { zh: "归档", yaml: "Archive" },
       abandon: { zh: "废弃", yaml: "Abandon" },
       abandonRunConfirm: { zh: "确认废弃这个 Run？废弃后将不能继续执行。", yaml: "Abandon this Run? It cannot continue after abandonment." },
-      archiveRunConfirm: { zh: "归档这个 run？归档后它将不再出现在 Task 列表中。", yaml: "Archive this run? It will no longer appear in the Task list." },
+      archiveRunConfirm: { zh: "归档这个 Run？归档后它将不再出现在 Run 列表中。", yaml: "Archive this Run? It will no longer appear in the Run list." },
       archiveChangeConfirm: { zh: "归档这个 ChangeSet？归档后它将不再在页面中展示。", yaml: "Archive this ChangeSet? It will no longer appear in the View." },
       completed: { zh: "已完成", yaml: "done" },
       stopped: { zh: "已停止", yaml: "stopped" },
@@ -916,7 +916,7 @@ export const browserHtml = String.raw`<!doctype html>
         const runId = decoded(parts[1]);
         return runId
           ? { page: "task", runId, fragment }
-          : { page: "invalid", mode: "task", error: "Invalid Task URL.", fragment };
+          : { page: "invalid", mode: "task", error: "Invalid Run URL.", fragment };
       }
       if (parts[0] === "tasks" && parts[2] === "artifact-reviews" && parts.length === 4) {
         const runId = decoded(parts[1]);
@@ -1518,7 +1518,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function fetchArtifactReviewContext(reviewId, roundId, actorId) {
       const runId = state.selectedTaskId;
-      if (!runId) throw new Error("No task selected for Artifact Review");
+      if (!runId) throw new Error("No Run selected for Artifact Review");
       const response = await fetch(
         "/api/runs/" + encodeURIComponent(runId)
         + "/artifact-reviews/" + encodeURIComponent(reviewId)
@@ -2949,7 +2949,7 @@ export const browserHtml = String.raw`<!doctype html>
           }
           if (!run) {
             state.selectedTaskId = null;
-            state.routeError = "Task not found: " + route.runId;
+            state.routeError = "Run not found: " + route.runId;
           } else {
             state.selectedTaskId = run.id;
             saveSelectedTask();
@@ -3755,11 +3755,11 @@ export const browserHtml = String.raw`<!doctype html>
     function renderTaskNav() {
       el.nav.innerHTML = "";
       const activeRuns = state.runs.filter(run => run.archived !== true && run.readOnly !== true);
-      el.count.textContent = activeRuns.length + " tasks";
+      el.count.textContent = activeRuns.length + " runs";
       if (!activeRuns.length) {
         const empty = document.createElement("div");
         empty.className = "muted";
-        empty.textContent = "No task runs yet.";
+        empty.textContent = "No Runs yet.";
         el.nav.append(empty);
         return;
       }
@@ -3831,7 +3831,7 @@ export const browserHtml = String.raw`<!doctype html>
     function renderSelectedTask() {
       const run = selectedTask();
       if (!run) {
-        el.title.textContent = "Tasks";
+        el.title.textContent = "Runs";
         el.subtitle.textContent = "No runs found.";
         el.detail.className = "empty";
         el.detail.innerHTML = 'Start one with <code>memsphere run start &lt;procedure&gt; --name &lt;run-name&gt;</code>.';
@@ -3844,7 +3844,7 @@ export const browserHtml = String.raw`<!doctype html>
       el.subtitle.textContent = run.id;
       if (!Array.isArray(run.stack) || !Array.isArray(run.events)) {
         el.detail.className = "empty";
-        el.detail.textContent = "Loading task...";
+        el.detail.textContent = "Loading Run...";
         return;
       }
       el.detail.className = "task-summary";

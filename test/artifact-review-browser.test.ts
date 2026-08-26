@@ -118,7 +118,7 @@ flow:
     assert.equal(await memoryArtifact.getByText("Advisor", { exact: true }).count(), 1);
     assert.equal(await memoryArtifact.getByText("decider", { exact: true }).count(), 0);
     assert.equal(await memoryArtifact.getByText("advisor", { exact: true }).count(), 0);
-    await page.getByRole("button", { name: "Task", exact: true }).click();
+    await page.getByRole("button", { name: "Run", exact: true }).click();
     const bindingPanel = page.locator(".run-bindings");
     const bindingToggle = bindingPanel.locator(".run-binding-toggle");
     const bindingBody = bindingPanel.locator(".run-binding-body");
@@ -441,7 +441,7 @@ flow:
     await page.reload();
     await page.locator("#artifact-review-modal[open]").waitFor();
     await page.locator("#artifact-review-modal-close").click();
-    await page.getByRole("button", { name: "Task", exact: true }).click();
+    await page.getByRole("button", { name: "Run", exact: true }).click();
     await page.getByRole("button", { name: /^产物评审 0\/2$/ }).click();
     identity = page.getByRole("combobox", { name: "评审身份" });
     await identity.waitFor();
@@ -707,7 +707,7 @@ flow:
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await page.goto(`http://127.0.0.1:${address.port}`);
-    await page.getByRole("button", { name: "Task", exact: true }).click();
+    await page.getByRole("button", { name: "Run", exact: true }).click();
     const reviewToggle = page.locator("#review-toggle");
     await page.waitForFunction(() =>
       document.getElementById("review-toggle")?.getAttribute("aria-controls") === "artifact-review-modal"
@@ -894,7 +894,7 @@ flow:
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await page.goto(`http://127.0.0.1:${address.port}`);
-    await page.getByRole("button", { name: "Task", exact: true }).click();
+    await page.getByRole("button", { name: "Run", exact: true }).click();
     await page.getByRole("button", { name: /^产物评审 1\/2$/ }).click();
     const modal = page.locator("#artifact-review-modal");
     let materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
