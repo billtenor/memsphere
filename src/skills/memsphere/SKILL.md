@@ -74,7 +74,7 @@ memsphere memory read memsphere-schema
 
 如果命令提示当前 Workspace 未绑定 Primary Project，告知用户使用 `memsphere project list` 查看 Project，并执行 `memsphere project bind <project-name>`；只需临时访问一个 Project 时使用全局 `--project <project-name>`，不得自行猜测目标。
 
-如果现有 Managed 或 Embedded Project 缺少 System Memory，或需要恢复、升级当前 memsphere 版本内置的 System Memory，使用 `memsphere project repair [project-name]`。目标选择顺序是显式名称、全局 `--project`、当前 Primary Project。Managed repair 内部生成受控 ChangeSet、校验完整有效 Memory 并自动发布；无差异时不创建 ChangeSet 或 Revision，ChangeSet 创建后的失败保留为带 failure 诊断的只读 `abandoned` 记录并清理 Workspace candidate。Embedded repair 使用当前 Git worktree 的有效 Memory Root，拒绝覆盖计划目标上的未提交修改，先校验完整候选 Store，再只写入可由 Git 审阅的 System Memory 差异，不 commit、push 或使用 Managed publish；linked worktree 中不会修改主 worktree。当前 manifest v4（兼容 v3）声明的废弃 System Memory 默认清理，但必须同时匹配历史路径和 canonical identity；路径被用户 Memory 复用时 repair 会在写入前失败。Mounted Project 仍是只读来源，也没有 `reinitialize` 别名。
+创建 Managed 或 Embedded Project 时都会自动安装当前版本内置的 System Memory；Managed 通过首笔受控 ChangeSet 发布，Embedded 只在当前 Git worktree 写入可审阅的文件差异，不 stage、commit 或 push。如果现有 Project 缺少 System Memory，或需要恢复、升级，使用 `memsphere project repair [project-name]`。目标选择顺序是显式名称、全局 `--project`、当前 Primary Project。Managed repair 内部生成受控 ChangeSet、校验完整有效 Memory 并自动发布；无差异时不创建 ChangeSet 或 Revision，ChangeSet 创建后的失败保留为带 failure 诊断的只读 `abandoned` 记录并清理 Workspace candidate。Embedded repair 使用当前 Git worktree 的有效 Memory Root，拒绝覆盖计划目标上的未提交修改，先校验完整候选 Store，再只写入可由 Git 审阅的 System Memory 差异，不 commit、push 或使用 Managed publish；linked worktree 中不会修改主 worktree。当前 manifest v4（兼容 v3）声明的废弃 System Memory 默认清理，但必须同时匹配历史路径和 canonical identity；路径被用户 Memory 复用时 repair 会在写入前失败。Mounted Project 仍是只读来源，也没有 `reinitialize` 别名。
 
 列表同时包含 Primary 与 Mounted Project 时，使用返回的 `project_name` 和 Revision 判断来源。跨 Project 出现同名 Memory 时必须使用 `--project` 明确选择；Mounted Project 在组合上下文中严格只读。
 
@@ -236,6 +236,16 @@ memsphere memory list --kind procedures
 memsphere 使用 Run 记录和控制一次 Procedure 的执行过程，保证 Agent 每次只处理当前步骤，并在取得步骤产物后继续推进。
 
 #### 启动流程
+
+启动新的 Run 前，先判断当前任务上下文是否已经关联 Run ID。若已有，先查询其状态：
+
+```bash
+memsphere run status --run <Run ID>
+```
+
+用户请求属于当前任务、当前步骤、产物修订、Review、人机协同步骤或当前 Procedure 调用链时，必须继续使用现有 Run，并执行 CLI 返回的 `Then`；不得重复启动 Procedure，也不得通过新 Run 绕过等待或评审。Procedure 中的 `!call` 由当前 Run 负责推进，不另起 Run。
+
+只有当前任务没有关联 Run、已有 Run 已完成或经 Human 明确决定 abandon，或者用户发起语义独立的新任务时，才启动新的 Run。是否复用以任务执行上下文为准，不能只根据 Procedure 名称判断；无法确定时，先向用户确认。
 
 读取执行所需的 Procedure 内容后，使用它的名称启动一次 Run：
 

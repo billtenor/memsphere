@@ -199,6 +199,8 @@ memsphere project create my-project --bind
 
 `--bind` only associates the current working directory with the Project; it does not copy Memory into that directory. The Project's Memory remains available even if a temporary directory or Git worktree is deleted.
 
+Creation automatically installs the bundled System Memory for the current version and publishes it to the Managed Store through the initial controlled ChangeSet.
+
 When you edit Managed Memory, Memsphere creates a ChangeSet. Validate the completed edit before publishing it:
 
 ~~~bash
@@ -216,7 +218,7 @@ cd <your-git-repository>
 memsphere project create my-project --embedded .memsphere/memory --bind
 ~~~
 
-Here, `.memsphere/memory` is the Memory directory inside the repository. When an Agent works in different Git worktrees, it reads and edits the version of Memory in the current worktree.
+Here, `.memsphere/memory` is the Memory directory inside the repository. Creation automatically installs the bundled System Memory as file changes in the current worktree that can be reviewed with Git; Memsphere does not stage or commit them. When an Agent works in different Git worktrees, it reads and edits the version of Memory in the current worktree.
 
 Validate changes with Memsphere, then commit them through your normal Git workflow:
 
