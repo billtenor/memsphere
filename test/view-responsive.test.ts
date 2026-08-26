@@ -287,7 +287,7 @@ async function openTaskPage(browser: Browser, url: string, width: number): Promi
       && response.ok(),
     { timeout: 10_000 }
   );
-  await page.getByRole("button", { name: "Task", exact: true }).click();
+  await page.getByRole("button", { name: "Run", exact: true }).click();
   await runsLoaded;
   await page.locator("#task-tab.active").waitFor();
   await page.locator(".task-card-main").first().click();
@@ -351,7 +351,7 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
   });
 });
 
-test("Task effective rule references and sections collapse and survive rerenders", async () => {
+test("Run effective rule references and sections collapse and survive rerenders", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await openTaskPage(browser, url, 1366);
     try {
@@ -439,7 +439,7 @@ test("Task effective rule references and sections collapse and survive rerenders
   });
 });
 
-test("Task titles fall back to the Procedure name for historical Runs", async () => {
+test("Run titles fall back to the Procedure name for historical Runs", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1024, height: 900 } });
     try {
@@ -452,7 +452,7 @@ test("Task titles fall back to the Procedure name for historical Runs", async ()
         (response) => /^\/api\/runs\/run-/.test(new URL(response.url()).pathname),
         { timeout: 10_000 }
       );
-      await page.getByRole("button", { name: "Task", exact: true }).click();
+      await page.getByRole("button", { name: "Run", exact: true }).click();
       await runsLoaded;
       const initialDetailResponse = await initialDetailLoaded;
       assert.equal(initialDetailResponse.status(), 200, await initialDetailResponse.text());
@@ -482,7 +482,7 @@ test("missing Run detail is reported as not found", async () => {
   });
 });
 
-test("archiving the selected Run loads the next Task detail", async () => {
+test("archiving the selected Run loads the next Run detail", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await openTaskPage(browser, url, 1024);
     try {
@@ -499,7 +499,7 @@ test("archiving the selected Run loads the next Task detail", async () => {
       assert.equal((await archived).status(), 200);
       assert.equal((await nextDetail).status(), 200);
       await page.getByRole("heading", { name: "Legacy procedure fallback", exact: true }).waitFor();
-      assert.doesNotMatch(await page.locator("#detail").textContent() ?? "", /Loading task/);
+      assert.doesNotMatch(await page.locator("#detail").textContent() ?? "", /Loading Run/);
       assert.equal(
         await page.evaluate(() => localStorage.getItem("memsphere.selectedTask.v1")),
         legacyRunId
@@ -748,13 +748,13 @@ test("multiple Human identities require and persist a Project-local ChangeSet se
   });
 });
 
-test("Task pages do not expose the retired Task Review entry or inline comments", async () => {
+test("Run pages do not expose the retired Task Review entry or inline comments", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
     page.setDefaultTimeout(5_000);
     try {
       await page.goto(url);
-      await page.getByRole("button", { name: "Task", exact: true }).click();
+      await page.getByRole("button", { name: "Run", exact: true }).click();
       await page.locator(".task-card-main").first().click();
       assert.equal(await page.getByRole("button", { name: "Review", exact: true }).count(), 0);
       assert.equal(await page.locator('[data-anchor^="task:"] .inline-plus:visible').count(), 0);
@@ -765,7 +765,7 @@ test("Task pages do not expose the retired Task Review entry or inline comments"
   });
 });
 
-test("View deep links restore Memory, Task, and browser history", async () => {
+test("View deep links restore Memory, Run, and browser history", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
     page.setDefaultTimeout(10_000);
@@ -779,7 +779,7 @@ test("View deep links restore Memory, Task, and browser history", async () => {
       await page.getByRole("heading", { name: "Reviewable schema", exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, "/memories/schemas/reviewable-schema");
 
-      await page.getByRole("button", { name: "Task", exact: true }).click();
+      await page.getByRole("button", { name: "Run", exact: true }).click();
       assert.equal(new URL(page.url()).pathname, "/tasks");
       const selectedDetailLoaded = page.waitForResponse(
         (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()

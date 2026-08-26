@@ -315,7 +315,7 @@ Memsphere 当前支持四种 Memory：
 - **Artifact**：保存每个步骤的交付结果，并依据 Schema 进行校验；
 - **Review**：让人或 Agent 审阅运行产物；
 - **ChangeSet**：安全地编辑、校验和发布 Memory 变更；
-- **View**：在本地浏览 Memory、Task、Run、Review 和变更状态；
+- **View**：在本地浏览 Memory、Run、Review 和变更状态；
 - **Skill 接入**：让兼容的 Agent 自动发现 Memsphere，并按项目 Memory 工作。
 
 Memsphere 仍处于早期阶段。这些能力是完整愿景的第一块地基，而不是终点。CLI、数据与界面是接下来需要逐步成为一等资产的部分。
