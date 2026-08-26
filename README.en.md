@@ -317,7 +317,7 @@ The current version also provides:
 - **Artifact**: preserves each step's deliverable and validates it against a Schema;
 - **Review**: lets people or Agents review Run artifacts;
 - **ChangeSet**: safely edits, validates, and publishes Memory changes;
-- **View**: locally browses Memory, Tasks, Runs, Reviews, and changes;
+- **View**: locally browses Memory, Runs, Reviews, and changes;
 - **Skill integration**: lets compatible Agents discover Memsphere and work according to Project Memory.
 
 Memsphere is still at an early stage. These capabilities are the first foundation of the larger vision, not the destination. CLI, data, and interfaces are the next areas that need to become first-class assets.

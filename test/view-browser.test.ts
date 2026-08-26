@@ -71,7 +71,7 @@ test("browser loads summaries by route and fetches details on demand", () => {
   assert.doesNotMatch(browserHtml, /Promise\.all\(\[loadMemories\(\), loadReviews\(\), loadRuns\(\)\]\)/);
 });
 
-test("archived Run detail survives active summary refresh without joining Task navigation", () => {
+test("archived Run detail survives active summary refresh without joining Run navigation", () => {
   assert.match(browserHtml, /selectedArchivedDetail\?\.readOnly === true/);
   assert.match(browserHtml, /const activeRuns = state\.runs\.filter\(run => run\.archived !== true && run\.readOnly !== true\)/);
 });
@@ -230,11 +230,23 @@ test("task step artifact area is shown when an event exists", () => {
   assert.equal(shouldRenderTaskStepArtifact({ stepId: "flow-1", artifact: { value: "done" } }), true);
 });
 
-test("Task view exposes only Artifact Review and never falls back to Task Review", () => {
+test("Run view exposes only Artifact Review and never falls back to Task Review", () => {
   assert.match(browserHtml, /el\.reviewToggle\.hidden = !taskHasArtifactReview/);
   assert.match(browserHtml, /if \(state\.viewMode !== "task" \|\| !artifactReviewSummariesForRun\(\)\.length\) return/);
   assert.doesNotMatch(browserHtml, /Only done tasks can create a review/);
   assert.doesNotMatch(browserHtml, /Task review ·/);
+});
+
+test("Run view uses Run terminology for user-visible states", () => {
+  assert.match(browserHtml, />Run<\/button>/);
+  assert.match(browserHtml, /activeRuns\.length \+ " runs"/);
+  assert.match(browserHtml, /"No Runs yet\."/);
+  assert.match(browserHtml, /"Runs"/);
+  assert.match(browserHtml, /"Loading Run\.\.\."/);
+  assert.match(browserHtml, /"Invalid Run URL\."/);
+  assert.match(browserHtml, /"Run not found: "/);
+  assert.doesNotMatch(browserHtml, />Task<\/button>/);
+  assert.doesNotMatch(browserHtml, /Task list/);
 });
 
 test("ChangeSet Comment mutations use button action guards", () => {
@@ -699,7 +711,7 @@ test("browser shows abandon for running runs and archive only for terminal runs"
   assert.match(browserHtml, /\["done", "abandoned"\]\.includes\(run\.status\)/);
 });
 
-test("Task titles use the Run name and keep the Procedure name in details", () => {
+test("Run titles use the Run name and keep the Procedure name in details", () => {
   assert.match(browserHtml, /function runDisplayName\(run\)/);
   assert.match(browserHtml, /return run\?\.name\?\.trim\(\) \|\| run\?\.procedureName \|\| "";/);
   assert.match(browserHtml, /title\.textContent = runDisplayName\(run\);/);

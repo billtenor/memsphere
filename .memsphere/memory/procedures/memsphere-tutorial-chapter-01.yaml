@@ -245,7 +245,7 @@ flow:
       - !action
         action: |-
           提供已经通过准入检查的 View 访问地址，介绍 View 的定位和主要入口；必须把实际地址输出为可点击的 Markdown 链接，不得保留 Host 或端口占位符。首次进入时可以这样表述：
-          “View 是人使用 memsphere 的主要界面。顶部的 Memory 页面用于浏览和搜索当前 Project Catalog 中已经发布的 Memory；Task 页面用于查看正在执行或已经完成的 Run，以及每一步产生的 Artifact。
+          “View 是人使用 memsphere 的主要界面。顶部的 Memory 页面用于浏览和搜索当前 Project Catalog 中已经发布的 Memory；Run 页面用于查看正在执行或已经完成的 Run，以及每一步产生的 Artifact。
           在 Memory 详情点击“修改”会创建一个 ChangeSet；进入 ChangeSet 后，可以直接在对应内容旁提交 Comment。设置页面则用于维护存储位置、View 服务和参与评审的人或 Agent。
           我已经启动了当前 Project 的 View，你可以点击 [打开 memsphere View](<实际 View 访问地址>) 实际浏览；切换 Project 或修改设置都由你自行决定。”
           后续轮次根据 human 的问题继续讨论。
@@ -275,7 +275,7 @@ flow:
           承接已经介绍过的 Procedure，以当前教学流程为例重点介绍 Run、步骤、Actor 和 Artifact。首次进入时可以这样表述：
           “前面介绍过，Procedure 是可重复使用的流程定义。一个 Procedure 被具体启动并执行一次，就是一次 Run；同一个 Procedure 可以在不同任务中产生多次独立的 Run。
           Run 每次只开放当前步骤，步骤会指定由 Agent 还是 Human 完成，并把结果记录为 Artifact。我们现在进行的教学就是一次 Run：我负责讲解，你负责决定继续讨论还是进入下一步。
-          你可以在 View 顶部点击 Task，在左侧 running 分组中选择启动时通过 --name 指定的 Run 名称，查看本次教学 Run、当前步骤和已经产生的 Artifact；详情页会另行显示流程名称‘memsphere 教学流程-第一章’。”
+          你可以在 View 顶部点击 Run，在左侧 running 分组中选择启动时通过 --name 指定的 Run 名称，查看本次教学 Run、当前步骤和已经产生的 Artifact；详情页会另行显示流程名称‘memsphere 教学流程-第一章’。”
           后续轮次根据 human 的问题继续讨论。
         actor: agent
         artifact: !artifact
