@@ -72,7 +72,7 @@ README 同时定义了从 Prompt 到 Skill、再到 Memsphere 的适用边界，
 14. 第一章最终产物按 Human 的真实场景给出 Prompt、Skill 或 Memsphere 起点建议；适合 Memsphere 时说明最先需要的 Memory、第一条 Procedure 驱动请求，以及未来可能生长的 CLI、数据和界面；不把未来能力冒充当前交付。
 15. 第一章完成而第二章尚未完成时，不要求或推荐用户启动第二章；第二章可用后，第一章只提供可选的第二章入口，不把继续学习设为完成第一章的条件。
 16. bundled `reserved-memory`、`.memsphere/memory`、manifest 和 Skill 源码保持一致，Managed `project repair` 可以为现有 Project 安装新增 System Memory 并更新受影响内容，不修改用户 Memory。
-17. 测试覆盖新增 Concept 的 canonical identity/alias、manifest 安装、全部内置 Memory 影响矩阵、README/System Memory/Skill 核心定位一致性、第一章主线阶段、Human checkpoint 上限和未完成第二章的断链保护。
+17. 测试覆盖新增 Concept 的 canonical identity/alias、manifest 安装、README/System Memory/Skill 核心定位一致性、第一章主线阶段、Human checkpoint 上限和未完成第二章的断链保护。全部内置 Memory 影响矩阵由逐份人工审计和评审确认，不新增 manifest 到 Markdown 矩阵的专用自动化测试。
 18. `memsphere validate`、`npm run typecheck`、相关定向测试、`npm test`、`npm run build` 和 `git diff --check` 全部通过；如存在平台限定跳过项，验收记录必须说明。
 19. 通过一次真实启动的第一章 Run 进行人工体验验收：可完成准入、定位判断、软件生长模型、当前能力、View 实践和个人起点建议，且无循环卡死、无意义重复、产品边界误导或未经授权写操作。
 
@@ -158,3 +158,4 @@ README 同时定义了从 Prompt 到 Skill、再到 Memsphere 的适用边界，
 - 2026-08-26，Run `run-20260826-042624z-10e8c806`：以“每天帮我筛选值得读的 AI 论文”为真实场景完成第一章 Human 体验与 View 观察，验证主流程可以正常完成；同时发现教学指引使用 `Run`/`Artifact`、View 使用“任务”/“步骤产物”的术语落差，已记录并等待下一轮评审处置。
 - 2026-08-26，Run `run-20260825-155733z-7de68ce6`：项目负责人批准修复真实体验发现的术语落差，第一章改为先使用“任务”/“步骤产物”并映射内部 Run/Artifact；同时修复 master 合入后 19 份 System Memory 与测试仍断言 18 的语义冲突。完整串行测试恢复为 439 passed、0 failed、1 skip。
 - 2026-08-26，合入 master PR #37：View 顶部入口从“任务”统一为“Run”。冲突解决保留重构后的第一章主线，并将 View 实践指引、验收标准和契约测试同步到最新“Run / 产物”界面术语；本轮需基于新的合并 HEAD 重新评审和验证。
+- 2026-08-26，Run `run-20260825-155733z-7de68ce6`：评审发现影响矩阵遗漏 `procedures/memsphere-usage-issue-reporting.yaml`。项目负责人批准补齐人工审计记录，并明确不为 manifest 到 Markdown 矩阵的对应关系新增专用自动化测试；验收口径同步调整。

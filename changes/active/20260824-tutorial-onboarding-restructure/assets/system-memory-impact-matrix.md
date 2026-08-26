@@ -20,6 +20,7 @@
 | `procedures/memsphere-general-task-execution.yaml` | 无需修改 | 通用兜底执行契约没有产品定位叙事，继续适用于当前版本。 |
 | `procedures/memsphere-procedure-construction.yaml` | 无需修改 | 只负责从实践提取 Procedure，不承担 Memsphere 完整产品定义。 |
 | `procedures/memsphere-changeset-comment-processing.yaml` | 无需修改 | 只负责 ChangeSet Comment 生命周期，不承担产品身份或入门课程语义。 |
+| `procedures/memsphere-usage-issue-reporting.yaml` | 无需修改 | 只负责使用体验问题的取证、安全分流、脱敏、Human 授权和 GitHub Issue 提交，不定义 Memsphere 产品身份或软件资产愿景。 |
 | `procedures/memsphere-tutorial-chapter-01.yaml` | 修改 | 旧流程是过长的 Memory 功能目录，需按新版 README 重建首次使用闭环。 |
 | `procedures/memsphere-tutorial-chapter-02.yaml` | 无需修改（当前迭代） | 当前内容不把 Memsphere 定义为纯 Memory 框架；完整课程重构已由 Human 明确安排在第一章验收后的下一独立迭代，本轮不做临时半重构。 |
 
