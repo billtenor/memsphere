@@ -220,7 +220,7 @@ flow:
         action: |-
           介绍 Project Catalog 中的三类 Memory。首次进入时可以这样表述：
           “System Memory 是 memsphere 正常运行和自举所需的内置记忆，创建 Managed 或 Embedded Project 时都会自动安装；Managed 通过首笔 ChangeSet 发布，Embedded 写入当前 Git worktree 并由正常 Git 流程审阅和集成。
-          Primary Project 中的用户 Memory 是当前项目自己积累和维护的经验，修改时使用 ChangeSet 编辑、校验并发布。
+          Primary Project 中的用户 Memory 是当前项目自己积累和维护的经验：Managed Project 使用 ChangeSet 编辑、校验并发布；Embedded Project 在当前 Git worktree 中修改、校验，并通过正常 Git 流程审阅和集成。
           Mounted Project Memory 来自独立演进的其他 Project，在当前 Workspace 中严格只读；同名时必须明确选择 Project，不能跨 Project 引用。”
           后续轮次根据 human 的问题继续讨论。
         actor: agent

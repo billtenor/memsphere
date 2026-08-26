@@ -315,7 +315,11 @@ test("Embedded System Memory repair creates, updates, and deletes only as worktr
   try {
     await mkdir(workspace);
     await runGit(["init", "-b", "master"], { cwd: workspace });
-    await installBundledSystemMemory(memoryRoot);
+    await mkdir(memoryRoot, { recursive: true });
+
+    process.env.MEMSPHERE_HOME = home;
+    process.chdir(workspace);
+    await projectCreateCommand("embedded-repair", { embedded: memoryRoot, bind: true });
     await runGit(["add", ".memsphere/memory"], { cwd: workspace });
     await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "install system memory"], { cwd: workspace });
 
@@ -328,9 +332,6 @@ test("Embedded System Memory repair creates, updates, and deletes only as worktr
     await runGit(["add", ".memsphere/memory"], { cwd: workspace });
     await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "drift system memory"], { cwd: workspace });
 
-    process.env.MEMSPHERE_HOME = home;
-    process.chdir(workspace);
-    await projectCreateCommand("embedded-repair", { embedded: memoryRoot, bind: true });
     const headBefore = await gitOutput(["rev-parse", "HEAD"], workspace);
     await projectRepairCommand("embedded-repair");
 
