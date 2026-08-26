@@ -1088,13 +1088,20 @@ async function waitForViewLifecycleEvent(
   eventName: string,
   kind: string
 ): Promise<void> {
-  await page.evaluate(({ name }) => {
+  await page.evaluate(({ name, expectedKind }) => {
     delete document.documentElement.dataset.memsphereViewLifecycle;
+    const lifecycleWait = new AbortController();
     window.addEventListener(name, (event) => {
       const detail = event instanceof CustomEvent ? event.detail : null;
-      document.documentElement.dataset.memsphereViewLifecycle = detail?.kind ?? "";
-    }, { once: true });
-  }, { name: eventName });
+      if (detail?.kind !== expectedKind) return;
+      document.documentElement.dataset.memsphereViewLifecycle = detail.kind;
+      lifecycleWait.abort();
+    }, { signal: lifecycleWait.signal });
+    window.dispatchEvent(new CustomEvent(name, { detail: { kind: `unexpected:${expectedKind}` } }));
+    if (document.documentElement.dataset.memsphereViewLifecycle !== undefined) {
+      throw new Error("a non-matching lifecycle event consumed the waiter");
+    }
+  }, { name: eventName, expectedKind: kind });
   await page.waitForFunction((expectedKind) =>
     document.documentElement.dataset.memsphereViewLifecycle === expectedKind, kind);
 }

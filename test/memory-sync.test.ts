@@ -97,7 +97,12 @@ test("Memory sync creates merge commits and isolates conflicts in a Sync ChangeS
     const syncQueued = new Promise<void>((resolve) => { syncWaiting = resolve; });
     await withFileLock(join(projectRoot, ".runtime", "memory-publish.lock"), async () => {
       pendingSync = syncMemory({ onLockWait: syncWaiting }).finally(() => { syncSettled = true; });
-      await syncQueued;
+      await Promise.race([
+        syncQueued,
+        delay(5_000, undefined, { ref: false }).then(() => {
+          throw new Error("timed out waiting for sync to queue behind the publish lock");
+        })
+      ]);
       assert.equal(syncSettled, false);
     });
     assert(pendingSync);

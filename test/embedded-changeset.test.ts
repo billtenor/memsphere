@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import { projectCreateCommand } from "../src/commands/project.js";
 import { createViewServer } from "../src/commands/view.js";
@@ -264,7 +265,12 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       validationSettled = true;
       return result;
     });
-    await validationQueued;
+    await Promise.race([
+      validationQueued,
+      delay(5_000, undefined, { ref: false }).then(() => {
+        throw new Error("timed out waiting for validation to queue behind the checkpoint lock");
+      })
+    ]);
     assert.equal(validationSettled, false, "validation must wait until Review snapshot creation releases the checkpoint lock");
     releaseSnapshot();
     await heldSnapshot;
