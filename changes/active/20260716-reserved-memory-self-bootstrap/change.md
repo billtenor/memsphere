@@ -396,13 +396,13 @@ Run 状态应记录实际解析到的 Memory 逻辑引用和内容版本，避�
 
 预置记忆源码仍然可以在 memsphere 工程仓库中正常开发和 review。相关限制针对标准 Store 中由安装清单管理的实体，不是仓库中的 `reserved-memory/` 源码。
 
-### 名称和导入语义
+### 名称和导入语义（后续决策）
 
 单个 Memory Store 中不应存在重复的规范名称或别名。预置更新与已有 Memory 冲突时，应在受控 ChangeSet 的人机协同阶段解决；多个可见 Project 出现同名 Memory 时直接报告歧义，Catalog 不根据来源设置不透明的覆盖优先级。
 
-采用该安装模型后，“Reserved Memory 是否已导入”不再是运行时状态。预置内容完成 bootstrap 或受控更新后就是 Managed Store 中可直接使用的 Memory，View 中原有的 `reserved`、`not imported` 等读取标签应相应移除。
+上述结论只适用于由 bootstrap/repair 管理、直接生效的 System Memory。后续产品新增了独立的“记忆市场”：它展示 npm 包内的官方精选 Memory，只有用户点击导入并完成 ChangeSet 后才进入 Project 生效，因此市场条目可以有“未导入、一致、有差异、名称冲突”状态。
 
-如果未来允许用户基于受管理的预置 Memory 创建独立可编辑版本，该行为更接近 `fork`：它需要新的规范名称和独立身份，不应继续使用 `import` 表达。
+市场导入不是 System Memory fork。导入后的内容直接成为普通用户 Memory，与包内条目独立演进；二者不保留来源、版本或自动更新关系，只按当前 `<kind>/<canonical-name>` 做简单关联。用户重命名后即解除关联；重新导入只是用当前包内内容创建一次由用户确认的替换 ChangeSet。
 
 ## 自举验收 Procedure
 

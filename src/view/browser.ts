@@ -62,6 +62,12 @@ export const browserHtml = String.raw`<!doctype html>
     .view-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 14px; }
     .view-tab { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); padding: 7px 8px; }
     .view-tab.active { border-color: #b8cbc7; background: var(--accent-soft); color: #173f3c; font-weight: 700; }
+    .memory-source-tabs, .task-status-tabs { display: grid; gap: 3px; margin: 6px 0 0; padding: 3px; border: 1px solid var(--line); border-radius: 6px; background: var(--soft); }
+    .memory-source-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .task-status-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .task-status-tabs[hidden] { display: none; }
+    .memory-source-tab, .task-status-tab { min-height: 28px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); padding: 4px 7px; font-size: 11px; }
+    .memory-source-tab.active, .task-status-tab.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); font-weight: 700; }
     .count, .muted, .subtitle { color: var(--muted); }
     .count { font-size: 12px; }
     .search, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); outline: none; }
@@ -80,6 +86,14 @@ export const browserHtml = String.raw`<!doctype html>
     .memory-change-link:hover { color: var(--accent); }
     .memory-button:hover, .task-card:hover { background: #eceee8; }
     .memory-button.active, .task-card.active { background: var(--accent-soft); color: #173f3c; font-weight: 700; }
+    .market-memory-button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+    .market-memory-name { min-width: 0; overflow-wrap: anywhere; }
+    .market-memory-status { border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); padding: 1px 6px; font-size: 11px; font-weight: 600; line-height: 1.45; white-space: nowrap; }
+    .market-memory-status[data-status="consistent"] { border-color: #b8cbc7; background: #edf5f2; color: #286c67; }
+    .market-memory-status[data-status="importing"] { border-color: #b8cbc7; background: var(--accent-soft); color: var(--accent); }
+    .market-memory-status[data-status="different"] { border-color: #dccb9f; background: #faf5e8; color: #745d22; }
+    .market-memory-status[data-status="name_conflict"] { border-color: #dfb8b5; background: #fbefee; color: var(--danger); }
+    .market-memory-button.active .market-memory-status { font-weight: 600; }
     .memory-options { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; }
     .memory-option { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
     .memory-option input { width: 15px; height: 15px; accent-color: var(--accent); }
@@ -463,6 +477,7 @@ export const browserHtml = String.raw`<!doctype html>
     .settings-token { max-width: 520px; }
     body.settings-mode .view-tabs, body.settings-mode .search, body.settings-mode #expand, body.settings-mode #collapse, body.settings-mode #review-toggle { display: none; }
     body.changes-mode .view-tabs, body.changes-mode .search, body.changes-mode #expand, body.changes-mode #collapse { display: none; }
+    body.settings-mode .memory-source-tabs, body.changes-mode .memory-source-tabs { display: none; }
     .change-detail-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); gap: 18px; align-items: start; }
     .change-detail-layout.comments-collapsed { grid-template-columns: minmax(0, 1fr); }
     .change-detail-layout.comments-collapsed .change-comment-sidebar { display: none; }
@@ -470,6 +485,7 @@ export const browserHtml = String.raw`<!doctype html>
     .change-comment-sidebar { position: sticky; top: 18px; max-height: calc(100vh - 36px); overflow-y: auto; margin: 12px 0; }
     code { background: var(--soft); border-radius: 4px; padding: 1px 4px; }
     body.task-mode .search, body.task-mode #expand, body.task-mode #collapse { display: none; }
+    body.task-mode .memory-source-tabs { display: none; }
     @keyframes taskStepSpotlight {
       0% { box-shadow: 0 0 0 5px rgba(40, 108, 103, .24), var(--shadow); }
       100% { box-shadow: var(--shadow); }
@@ -526,6 +542,15 @@ export const browserHtml = String.raw`<!doctype html>
       <div class="view-tabs">
         <button class="view-tab active" id="memory-tab" type="button">Memory</button>
         <button class="view-tab" id="task-tab" type="button">Run</button>
+      </div>
+      <div class="memory-source-tabs" id="memory-source-tabs">
+        <button class="memory-source-tab active" id="project-memory-tab" type="button">当前项目</button>
+        <button class="memory-source-tab" id="market-tab" type="button">记忆市场</button>
+      </div>
+      <div class="task-status-tabs" id="task-status-tabs" role="tablist" aria-label="Run status" hidden>
+        <button class="task-status-tab active" id="running-task-tab" type="button" role="tab" aria-selected="true">running</button>
+        <button class="task-status-tab" id="done-task-tab" type="button" role="tab" aria-selected="false">done</button>
+        <button class="task-status-tab" id="abandoned-task-tab" type="button" role="tab" aria-selected="false">abandoned</button>
       </div>
       <input id="search" class="search" type="search" placeholder="Search memories" />
       <div id="nav"></div>
@@ -778,6 +803,8 @@ export const browserHtml = String.raw`<!doctype html>
       changeShowAll: false,
       changeCommentsCollapsed: localStorage.getItem(changeCommentsCollapsedKey) === "true",
       memories: [],
+      marketMemories: [],
+      selectedMarketReference: null,
       actorNames: {},
       actorKinds: {},
       filtered: [],
@@ -786,6 +813,7 @@ export const browserHtml = String.raw`<!doctype html>
         ? initialBrowserRoute.kind + "/" + initialBrowserRoute.name
         : null,
       selectedTaskId: initialBrowserRoute.runId || localStorage.getItem(selectedTaskKey) || null,
+      taskStatus: "running",
       byName: new Map(),
       runs: [],
       memoryDetails: new Map(),
@@ -883,6 +911,7 @@ export const browserHtml = String.raw`<!doctype html>
       const changeId = search.get("change") || "";
       if (pathname === "/") return { page: "root", changeId, fragment };
       if (pathname === "/memories") return { page: "memories", changeId, fragment };
+      if (pathname === "/market") return { page: "market", fragment };
       if (parts[0] === "memories" && parts.length === 3) {
         const kind = decoded(parts[1]);
         const name = decoded(parts[2]);
@@ -895,6 +924,12 @@ export const browserHtml = String.raw`<!doctype html>
         return project
           ? { page: "memories", project, changeId, fragment }
           : { page: "invalid", mode: "memory", error: "Invalid Project Memory URL.", fragment };
+      }
+      if (parts[0] === "projects" && parts[2] === "market" && parts.length === 3) {
+        const project = decoded(parts[1]);
+        return project
+          ? { page: "market", project, fragment }
+          : { page: "invalid", mode: "market", error: "Invalid Project Market URL.", fragment };
       }
       if (parts[0] === "projects" && parts[2] === "memories" && parts.length === 5) {
         const project = decoded(parts[1]);
@@ -946,6 +981,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (route.page === "settings" || route.mode === "settings") return "settings";
       if (["tasks", "task", "artifact-review"].includes(route.page) || route.mode === "task") return "task";
       if (route.page === "change" || route.mode === "changes") return "changes";
+      if (route.page === "market" || route.mode === "market") return "market";
       if (["root", "memories", "memory"].includes(route.page)) return "memory";
       const stored = localStorage.getItem(viewModeKey);
       return ["memory", "task", "settings"].includes(stored) ? stored : "memory";
@@ -999,7 +1035,13 @@ export const browserHtml = String.raw`<!doctype html>
       artifactReviewArtifactTab: document.getElementById("artifact-review-artifact-tab"),
       artifactReviewReviewTab: document.getElementById("artifact-review-review-tab"),
       memoryTab: document.getElementById("memory-tab"),
+      projectMemoryTab: document.getElementById("project-memory-tab"),
+      marketTab: document.getElementById("market-tab"),
       taskTab: document.getElementById("task-tab"),
+      taskStatusTabs: document.getElementById("task-status-tabs"),
+      runningTaskTab: document.getElementById("running-task-tab"),
+      doneTaskTab: document.getElementById("done-task-tab"),
+      abandonedTaskTab: document.getElementById("abandoned-task-tab"),
       settingsTab: document.getElementById("settings-tab"),
       projectSelect: document.getElementById("project-select"),
       projectSelectValue: document.getElementById("project-select-value"),
@@ -1020,7 +1062,12 @@ export const browserHtml = String.raw`<!doctype html>
     el.artifactReviewModalResizer.setAttribute("aria-label", t("resizeReview"));
     el.artifactReviewModalResizer.title = t("resizeReview") + " · " + t("resetReviewWidth");
     el.memoryTab.addEventListener("click", () => setViewMode("memory", { landing: true }));
+    el.projectMemoryTab.addEventListener("click", () => setViewMode("memory", { landing: true }));
+    el.marketTab.addEventListener("click", () => setViewMode("market", { landing: true }));
     el.taskTab.addEventListener("click", () => setViewMode("task", { landing: true }));
+    el.runningTaskTab.addEventListener("click", () => setTaskStatus("running").catch(renderFatalError));
+    el.doneTaskTab.addEventListener("click", () => setTaskStatus("done").catch(renderFatalError));
+    el.abandonedTaskTab.addEventListener("click", () => setTaskStatus("abandoned").catch(renderFatalError));
     el.settingsTab.addEventListener("click", () => {
       setViewMode(state.viewMode === "settings" ? state.lastContentViewMode : "settings");
     });
@@ -1038,6 +1085,10 @@ export const browserHtml = String.raw`<!doctype html>
       closeArtifactReviewModal();
     });
     el.search.addEventListener("input", () => {
+      if (state.viewMode === "market") {
+        renderMarketNav();
+        return;
+      }
       applyFilter();
       renderNav();
     });
@@ -1110,6 +1161,7 @@ export const browserHtml = String.raw`<!doctype html>
         await loadMemories();
         await loadChanges();
       }
+      else if (targetMode === "market") await loadMarket();
       else if (targetMode === "task") await loadRuns({ loadDetail: false });
       else if (targetMode === "changes") await loadChanges();
       else await loadSettings();
@@ -1208,6 +1260,8 @@ export const browserHtml = String.raw`<!doctype html>
       state.selectedId = null;
       state.selectedTaskId = null;
       state.memories = [];
+      state.marketMemories = [];
+      state.selectedMarketReference = null;
       state.runs = [];
       state.memoryDetails.clear();
       state.effectiveMemoryIds.clear();
@@ -1311,6 +1365,21 @@ export const browserHtml = String.raw`<!doctype html>
       if (!state.changes.some(change => change.id === state.selectedChangeId)) {
         state.selectedChangeId = state.changes.find(change => change.active)?.id || state.changes[0]?.id || "";
         state.changeDetail = null;
+      }
+      return true;
+    }
+
+    async function loadMarket() {
+      const projectGeneration = state.projectGeneration;
+      el.detail.className = "empty";
+      el.detail.textContent = "Loading...";
+      const response = await fetch("/api/market/memories");
+      if (!response.ok) throw new Error(await response.text());
+      if (projectGeneration !== state.projectGeneration) return false;
+      state.payload = null;
+      state.marketMemories = (await response.json()).memories || [];
+      if (!state.marketMemories.some(item => item.reference === state.selectedMarketReference)) {
+        state.selectedMarketReference = state.marketMemories[0]?.reference || null;
       }
       return true;
     }
@@ -2922,6 +2991,10 @@ export const browserHtml = String.raw`<!doctype html>
             state.selectedId = null;
             state.routeError = "Memory not found: " + route.kind + "/" + route.name;
           }
+        } else if (route.page === "market") {
+          state.viewMode = "market";
+          state.routeLanding = "market";
+          if (!state.marketMemories.length) await loadMarket();
         } else if (route.page === "change") {
           state.viewMode = "changes";
           await loadChanges();
@@ -2935,6 +3008,10 @@ export const browserHtml = String.raw`<!doctype html>
         } else if (route.page === "tasks") {
           state.viewMode = "task";
           state.routeLanding = "tasks";
+          state.taskStatus = "running";
+          const firstRunning = state.runs.find(run => run.archived !== true && run.readOnly !== true && run.status === "running");
+          state.selectedTaskId = firstRunning?.id || null;
+          saveSelectedTask();
         } else if (route.page === "task" || route.page === "artifact-review") {
           state.viewMode = "task";
           let run = state.runs.find(item => item.id === route.runId);
@@ -2952,6 +3029,7 @@ export const browserHtml = String.raw`<!doctype html>
             state.routeError = "Run not found: " + route.runId;
           } else {
             state.selectedTaskId = run.id;
+            if (["running", "done", "abandoned"].includes(run.status)) state.taskStatus = run.status;
             saveSelectedTask();
             if (route.page === "artifact-review") {
               const review = artifactReviewSummariesForRun(run).find(item => item.id === route.reviewId);
@@ -2983,7 +3061,7 @@ export const browserHtml = String.raw`<!doctype html>
             await loadSettings();
           }
         }
-        if (["memory", "task", "changes"].includes(state.viewMode)) state.lastContentViewMode = state.viewMode;
+        if (["memory", "market", "task", "changes"].includes(state.viewMode)) state.lastContentViewMode = state.viewMode;
         localStorage.setItem(viewModeKey, state.viewMode);
         if (options.render) renderAll();
       } finally {
@@ -3032,6 +3110,10 @@ export const browserHtml = String.raw`<!doctype html>
       } else if (state.viewMode === "changes") {
         const base = "/projects/" + encodeRoutePart(state.currentProject) + "/changes";
         path = state.selectedChangeId ? base + "/" + encodeRoutePart(state.selectedChangeId) : "/memories";
+      } else if (state.viewMode === "market") {
+        path = state.currentProject
+          ? "/projects/" + encodeRoutePart(state.currentProject) + "/market"
+          : "/market";
       } else {
         if (state.routeLanding === "memories") {
           const base = state.changeId && state.currentProject
@@ -3113,8 +3195,17 @@ export const browserHtml = String.raw`<!doctype html>
       el.changeCommentsToggle.textContent = t(state.changeCommentsCollapsed ? "showChangeComments" : "hideChangeComments");
       el.changeCommentsToggle.setAttribute("aria-expanded", String(!state.changeCommentsCollapsed));
       syncArtifactReviewModalState();
-      el.memoryTab.classList.toggle("active", state.viewMode === "memory" || state.viewMode === "changes");
+      el.memoryTab.classList.toggle("active", ["memory", "market", "changes"].includes(state.viewMode));
+      el.projectMemoryTab.classList.toggle("active", state.viewMode === "memory" || state.viewMode === "changes");
+      el.marketTab.classList.toggle("active", state.viewMode === "market");
       el.taskTab.classList.toggle("active", state.viewMode === "task");
+      el.taskStatusTabs.hidden = state.viewMode !== "task";
+      el.runningTaskTab.classList.toggle("active", state.taskStatus === "running");
+      el.doneTaskTab.classList.toggle("active", state.taskStatus === "done");
+      el.abandonedTaskTab.classList.toggle("active", state.taskStatus === "abandoned");
+      el.runningTaskTab.setAttribute("aria-selected", String(state.taskStatus === "running"));
+      el.doneTaskTab.setAttribute("aria-selected", String(state.taskStatus === "done"));
+      el.abandonedTaskTab.setAttribute("aria-selected", String(state.taskStatus === "abandoned"));
       el.settingsTab.classList.toggle("active", state.viewMode === "settings");
       el.settingsTab.setAttribute("aria-pressed", String(state.viewMode === "settings"));
       el.settingsTab.setAttribute("aria-label", state.viewMode === "settings" ? "退出设置" : "设置");
@@ -3143,6 +3234,13 @@ export const browserHtml = String.raw`<!doctype html>
         if (state.routeError) renderRouteError();
         else renderSelectedChange();
         restoreOpenInlineEditor();
+        finishRouteRender();
+        return;
+      }
+      if (state.viewMode === "market") {
+        renderMarketNav();
+        if (state.routeError) renderRouteError();
+        else renderSelectedMarket();
         finishRouteRender();
         return;
       }
@@ -3279,11 +3377,15 @@ export const browserHtml = String.raw`<!doctype html>
       await projectSwitchChain;
       if (generation !== state.pageLoadGeneration) return setViewMode(mode, options);
       state.routeError = "";
-      if (options.landing) state.routeLanding = mode === "task" ? "tasks" : mode === "memory" ? "memories" : mode === "changes" ? "changes" : "";
+      if (options.landing) {
+        state.routeLanding = mode === "task" ? "tasks" : mode === "memory" ? "memories" : mode === "market" ? "market" : mode === "changes" ? "changes" : "";
+        if (mode === "task") state.taskStatus = "running";
+      }
       else if (mode === "settings") state.routeLanding = "";
       if (!state.routeReady) {
         if (mode === "task") state.pendingRoute = { page: "tasks", fragment: "" };
         else if (mode === "memory") state.pendingRoute = { page: "memories", fragment: "" };
+        else if (mode === "market") state.pendingRoute = { page: "market", project: state.currentProject, fragment: "" };
         else if (mode === "changes") state.pendingRoute = { page: "changes", project: state.currentProject, fragment: "" };
         else if (mode === "settings") {
           state.pendingRoute = {
@@ -3294,7 +3396,7 @@ export const browserHtml = String.raw`<!doctype html>
         }
       }
       state.viewMode = mode;
-      if (["memory", "task", "changes"].includes(mode)) state.lastContentViewMode = mode;
+      if (["memory", "market", "task", "changes"].includes(mode)) state.lastContentViewMode = mode;
       localStorage.setItem(viewModeKey, mode);
       renderAll();
       if (mode === "settings") {
@@ -3308,9 +3410,14 @@ export const browserHtml = String.raw`<!doctype html>
         await loadMemories();
         await loadChanges();
         await loadMemorySelection(state.selectedId || state.memories[0]?.id);
+      } else if (mode === "market") {
+        await loadMarket();
       } else if (mode === "task") {
         await loadRuns({ loadDetail: false });
-        await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
+        const visibleRun = state.runs.find(run => run.archived !== true && run.readOnly !== true && run.status === state.taskStatus);
+        state.selectedTaskId = visibleRun?.id || null;
+        saveSelectedTask();
+        await loadRunDetail(state.selectedTaskId);
       } else if (mode === "changes") {
         await loadChanges();
         await loadChangeDetail(state.selectedChangeId);
@@ -3472,6 +3579,122 @@ export const browserHtml = String.raw`<!doctype html>
 
     function updateMemoryCount() {
       el.count.textContent = state.filtered.length + " memories";
+    }
+
+    function marketStatusLabel(status) {
+      return ({
+        not_imported: "未导入",
+        importing: "导入中",
+        consistent: "已导入 · 无变更",
+        different: "已导入 · 有差异",
+        name_conflict: "名称冲突"
+      })[status] || status;
+    }
+
+    function renderMarketNav() {
+      el.nav.innerHTML = "";
+      const query = el.search.value.trim().toLowerCase();
+      const items = state.marketMemories.filter(item => !query || [item.reference, ...(item.names || [])].join(" ").toLowerCase().includes(query));
+      el.count.textContent = items.length + " items";
+      for (const kind of kindOrder) {
+        const group = items.filter(item => item.kind === kind);
+        if (!group.length) continue;
+        const label = document.createElement("div");
+        label.className = "kind";
+        label.textContent = t(kind);
+        const list = document.createElement("div");
+        list.className = "memory-list";
+        for (const item of group) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "memory-button market-memory-button" + (item.reference === state.selectedMarketReference ? " active" : "");
+          const name = document.createElement("span");
+          name.className = "market-memory-name";
+          name.textContent = memoryDisplayName(item.entity);
+          const status = document.createElement("span");
+          status.className = "market-memory-status";
+          status.dataset.status = item.status;
+          status.textContent = marketStatusLabel(item.status);
+          if (item.status === "importing" && item.changeId) {
+            button.title = "查看对应的 ChangeSet";
+          }
+          button.append(name, status);
+          button.addEventListener("click", async () => {
+            if (item.status === "importing" && item.changeId) {
+              await openChange(item.changeId);
+              return;
+            }
+            state.selectedMarketReference = item.reference;
+            state.routeLanding = "";
+            renderAll();
+          });
+          list.append(button);
+        }
+        el.nav.append(label, list);
+      }
+    }
+
+    function renderSelectedMarket() {
+      const item = state.marketMemories.find(candidate => candidate.reference === state.selectedMarketReference) || null;
+      if (!item) {
+        el.title.textContent = "记忆市场";
+        el.subtitle.textContent = "当前 npm 包没有打包市场记忆";
+        el.detail.className = "empty";
+        el.detail.textContent = "No market memories found.";
+        return;
+      }
+      el.title.textContent = memoryDisplayName(item.entity);
+      el.subtitle.textContent = item.reference;
+      el.detail.className = "";
+      el.detail.innerHTML = "";
+      state.renderLine = 0;
+      const actions = document.createElement("div");
+      actions.className = "toolbar-actions";
+      if (item.status === "importing" && item.changeId) {
+        const statusLink = document.createElement("button");
+        statusLink.type = "button";
+        statusLink.className = "pill strong";
+        statusLink.textContent = "导入中 · 查看 ChangeSet";
+        statusLink.addEventListener("click", () => openChange(item.changeId));
+        actions.append(statusLink);
+      } else {
+        actions.append(pill(marketStatusLabel(item.status), true, item.status === "name_conflict" ? "warn" : ""));
+      }
+      if (item.status !== "consistent" && item.status !== "name_conflict" && item.status !== "importing") {
+        const importButton = document.createElement("button");
+        importButton.type = "button";
+        importButton.className = "btn primary";
+        importButton.textContent = item.status === "different" ? "重新导入" : "导入";
+        importButton.addEventListener("click", () => runButtonAction(importButton, async () => {
+          const operator = await chooseChangeOperator();
+          if (!operator) return;
+          const parts = item.reference.split("/");
+          const response = await fetch(
+            "/api/market/memories/" + encodeURIComponent(parts[0]) + "/" + encodeURIComponent(parts.slice(1).join("/")) + "/import",
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ operator })
+            }
+          );
+          if (!response.ok) throw new Error(await response.text());
+          const result = await response.json();
+          await loadChanges();
+          await openChange(result.change.id);
+        }));
+        actions.append(importButton);
+      }
+      el.detail.append(actions, renderMeta({ kind: item.kind, entity: item.entity }));
+      if (item.conflict) {
+        const conflict = document.createElement("section");
+        conflict.className = "error-panel";
+        conflict.textContent = item.conflict;
+        el.detail.append(conflict);
+      }
+      if (item.kind === "schemas") el.detail.append(renderSchema(item.entity, 0, primaryName(item.entity)));
+      else if (item.kind === "statements") el.detail.append(renderStatement(item.entity, 0, primaryName(item.entity)));
+      else if (item.kind === "procedures") el.detail.append(renderProcedure(item.entity));
+      else el.detail.append(renderGeneric(item.entity));
     }
 
     function renderChangeMemoryNav() {
@@ -3755,25 +3978,19 @@ export const browserHtml = String.raw`<!doctype html>
     function renderTaskNav() {
       el.nav.innerHTML = "";
       const activeRuns = state.runs.filter(run => run.archived !== true && run.readOnly !== true);
-      el.count.textContent = activeRuns.length + " runs";
-      if (!activeRuns.length) {
+      const visibleRuns = activeRuns.filter(run => run.status === state.taskStatus);
+      el.count.textContent = visibleRuns.length + " runs";
+      if (!visibleRuns.length) {
         const empty = document.createElement("div");
         empty.className = "muted";
-        empty.textContent = "No Runs yet.";
+        empty.textContent = "No " + state.taskStatus + " runs.";
         el.nav.append(empty);
         return;
       }
 
-      for (const status of ["running", "done", "abandoned"]) {
-        const group = activeRuns.filter(run => run.status === status);
-        if (!group.length) continue;
-        const label = document.createElement("div");
-        label.className = "kind";
-        label.textContent = status;
-        el.nav.append(label);
-        const list = document.createElement("div");
-        list.className = "task-list";
-        for (const run of group) {
+      const list = document.createElement("div");
+      list.className = "task-list";
+      for (const run of visibleRuns) {
           const card = document.createElement("article");
           card.className = "task-card" + (run.id === state.selectedTaskId ? " active" : "");
           const button = document.createElement("button");
@@ -3815,13 +4032,29 @@ export const browserHtml = String.raw`<!doctype html>
           }
           card.append(button, actions);
           list.append(card);
-        }
-        el.nav.append(list);
       }
+      el.nav.append(list);
+    }
+
+    async function setTaskStatus(status) {
+      if (!["running", "done", "abandoned"].includes(status)) return;
+      state.taskStatus = status;
+      state.routeError = "";
+      state.routeLanding = "tasks";
+      const run = state.runs.find(item => item.archived !== true && item.readOnly !== true && item.status === status) || null;
+      const changedTask = state.selectedTaskId !== run?.id;
+      state.selectedTaskId = run?.id || null;
+      saveSelectedTask();
+      if (changedTask) state.artifactReviewContext = null;
+      renderAll();
+      if (!run) return;
+      if (changedTask) scrollTaskDetailToTop();
+      await loadRunDetail(run.id);
+      renderAll();
     }
 
     function selectedTask() {
-      return state.runs.find(run => run.id === state.selectedTaskId) || state.runs[0] || null;
+      return state.runs.find(run => run.id === state.selectedTaskId) || null;
     }
 
     function runDisplayName(run) {
@@ -3832,9 +4065,9 @@ export const browserHtml = String.raw`<!doctype html>
       const run = selectedTask();
       if (!run) {
         el.title.textContent = "Runs";
-        el.subtitle.textContent = "No runs found.";
+        el.subtitle.textContent = "No " + state.taskStatus + " runs.";
         el.detail.className = "empty";
-        el.detail.innerHTML = 'Start one with <code>memsphere run start &lt;procedure&gt; --name &lt;run-name&gt;</code>.';
+        el.detail.innerHTML = 'Choose another Run status or start one with <code>memsphere run start &lt;procedure&gt; --name &lt;run-name&gt;</code>.';
         return;
       }
 

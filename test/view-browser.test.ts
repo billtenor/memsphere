@@ -13,9 +13,11 @@ test("View page routes are explicit and never absorb API or unknown paths", () =
   for (const path of [
     "/",
     "/memories",
+    "/market",
     "/memories/concepts/Memory",
     "/projects/alpha/memories",
     "/projects/alpha/memories/concepts/Memory",
+    "/projects/alpha/market",
     "/projects/alpha/changes/change-1",
     "/tasks",
     "/tasks/run-1",
@@ -36,6 +38,38 @@ test("View page routes are explicit and never absorb API or unknown paths", () =
   ]) {
     assert.equal(isViewPagePath(path), false, path);
   }
+});
+
+test("Memory Market is an opt-in Memory sub-view backed by ChangeSets", () => {
+  assert.match(browserHtml, /id="project-memory-tab"[^>]*>当前项目<\/button>/);
+  assert.match(browserHtml, /id="market-tab"[^>]*>记忆市场<\/button>/);
+  assert.match(browserHtml, /\.memory-source-tabs, \.task-status-tabs \{[^}]*margin: 6px 0 0;[^}]*background: var\(--soft\);/);
+  assert.match(browserHtml, /\.memory-source-tab\.active, \.task-status-tab\.active \{ background: var\(--surface\);[^}]*box-shadow: var\(--shadow\);/);
+  assert.match(browserHtml, /fetch\("\/api\/market\/memories"\)/);
+  assert.match(browserHtml, /not_imported: "未导入"/);
+  assert.match(browserHtml, /importing: "导入中"/);
+  assert.match(browserHtml, /consistent: "已导入 · 无变更"/);
+  assert.match(browserHtml, /different: "已导入 · 有差异"/);
+  assert.match(browserHtml, /name_conflict: "名称冲突"/);
+  assert.match(browserHtml, /button\.className = "memory-button market-memory-button"/);
+  assert.match(browserHtml, /status\.className = "market-memory-status"/);
+  assert.match(browserHtml, /status\.dataset\.status = item\.status/);
+  assert.match(browserHtml, /statusLink\.textContent = "导入中 · 查看 ChangeSet"/);
+  assert.match(browserHtml, /\.market-memory-status \{ border: 1px solid var\(--line\);/);
+  assert.match(browserHtml, /item\.status === "different" \? "重新导入" : "导入"/);
+  assert.match(browserHtml, /await openChange\(result\.change\.id\)/);
+  assert.doesNotMatch(browserHtml, /marketVersion|preset_id|presetId/);
+});
+
+test("Run uses a secondary status menu instead of grouped status headings", () => {
+  assert.match(browserHtml, /id="task-status-tabs"[^>]*role="tablist"/);
+  assert.match(browserHtml, /id="running-task-tab"[^>]*>running<\/button>/);
+  assert.match(browserHtml, /id="done-task-tab"[^>]*>done<\/button>/);
+  assert.match(browserHtml, /id="abandoned-task-tab"[^>]*>abandoned<\/button>/);
+  assert.match(browserHtml, /taskStatus: "running"/);
+  assert.match(browserHtml, /const visibleRuns = activeRuns\.filter\(run => run\.status === state\.taskStatus\)/);
+  assert.match(browserHtml, /el\.count\.textContent = visibleRuns\.length \+ " runs"/);
+  assert.doesNotMatch(browserHtml, /for \(const status of \["running", "done", "abandoned"\]\)/);
 });
 
 test("browser script includes URL parsing, canonical history, and popstate restoration", () => {
@@ -239,8 +273,8 @@ test("Run view exposes only Artifact Review and never falls back to Task Review"
 
 test("Run view uses Run terminology for user-visible states", () => {
   assert.match(browserHtml, />Run<\/button>/);
-  assert.match(browserHtml, /activeRuns\.length \+ " runs"/);
-  assert.match(browserHtml, /"No Runs yet\."/);
+  assert.match(browserHtml, /visibleRuns\.length \+ " runs"/);
+  assert.match(browserHtml, /"No " \+ state\.taskStatus \+ " runs\."/);
   assert.match(browserHtml, /"Runs"/);
   assert.match(browserHtml, /"Loading Run\.\.\."/);
   assert.match(browserHtml, /"Invalid Run URL\."/);

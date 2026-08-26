@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, posix, relative, resolve, sep } from "node:path";
 import { z } from "zod";
@@ -7,7 +7,7 @@ import { atomicWriteJson, withFileLock } from "../persistence.js";
 import { archiveChangeDirectory, type ArchiveEntry } from "../archive/store.js";
 import { gitOutput, gitOutputRaw, runGit } from "../git.js";
 import { memoryKinds, type MemoryKind } from "./kinds.js";
-import { readAllMemoryFiles } from "./store.js";
+import { readAllMemoryFiles, readMemoryFile } from "./store.js";
 import { currentMemorySyntax } from "./syntax.js";
 import { serializeMemoryYaml } from "./serializer.js";
 import { validateMemoryRoot, type ValidationIssue } from "../validation.js";
@@ -132,6 +132,7 @@ export const memoryChangeSetSchema = z.object({
   failure: changeFailureSchema.optional(),
   targets: z.array(changeTargetSchema),
   origin: z.enum(["cli", "view"]).default("cli"),
+  intent: z.literal("market_import").optional(),
   created_by: memoryChangeActorSchema.optional(),
   scope: z.array(changeScopeSchema).default([]),
   comments: z.array(memoryChangeCommentSchema).default([]),
@@ -387,12 +388,13 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
           await cp(sourcePath, destination);
         }
       }
-      if (change.checkpoint && change.targets.length > 0) {
-        await applyTargets(
-          previewRoot,
-          checkpointMemoryRoot(context.primary, change.id, change.checkpoint.digest),
-          change.targets
-        );
+      if (change.targets.length > 0) {
+        const candidateRoot = change.checkpoint
+          ? checkpointMemoryRoot(context.primary, change.id, change.checkpoint.digest)
+          : change.intent === "market_import" ? marketCandidateRoot(context.primary, change.id) : undefined;
+        if (candidateRoot && await exists(candidateRoot)) {
+          await applyTargets(previewRoot, candidateRoot, change.targets);
+        }
       }
       const targetsByPath = new Map(change.targets.map((target) => [target.destination_path ?? target.path, target]));
       const scopeByPath = new Map(change.scope.map((scope) => [scope.path, scope]));
@@ -551,6 +553,89 @@ export async function editMemories(input: {
   change.updated_at = new Date().toISOString();
   await writeChange(context.primary, change);
   return { change, candidateRoot };
+}
+
+export async function createMarketMemoryChange(input: {
+  home?: string;
+  project: string;
+  actor: MemoryChangeActor;
+  targets: Array<{ reference: string; path: string; source: Buffer }>;
+}): Promise<MemoryChangeSet> {
+  if (input.targets.length === 0) throw new Error("market import requires at least one Memory");
+  const initial = await resolveProjectContext({ home: input.home, project: input.project, memoryScope: "canonical" });
+  return withFileLock(memoryMutationLock(initial.primary), async () => {
+    const project = (await resolveProjectContext({
+      home: input.home,
+      project: input.project,
+      memoryScope: "canonical"
+    })).primary;
+    const actor = memoryChangeActorSchema.parse(input.actor);
+    const existing = (await listProjectChanges(project, true)).find((change) => (
+      change.status === "active"
+      && change.intent === "market_import"
+    ));
+    const identity = await canonicalChangeIdentity(project);
+    const change = existing ?? newChange(project, identity.workspace.key, {
+        origin: "view",
+        actor,
+        baseRevision: identity.baseRevision
+      });
+    if (existing?.claim) {
+      throw new Error("cannot import another market Memory while the ChangeSet is claimed; finish the claim, then import again");
+    }
+    if (!existing) {
+      change.intent = "market_import";
+      change.store_type = project.config.store.type;
+      if (identity.source) change.source_worktree = identity.source;
+    }
+    const candidateRoot = marketCandidateRoot(project, change.id);
+    const writtenCandidates: string[] = [];
+    try {
+      const files = await readAllMemoryFiles(project.memoryRoot);
+      for (const source of input.targets) {
+        if (change.targets.some((target) => target.reference === source.reference)) continue;
+        const logical = parseLogicalMemoryReference(source.reference);
+        if (!logical) throw new Error(`invalid market Memory reference: ${source.reference}`);
+        assertSafeCreatePath(source.reference, source.path);
+        const existsByReference = files.some((file) => (
+          file.kind === logical.kind && file.entity.names[0] === logical.name
+        ));
+        const target = await resolveTarget(
+          project,
+          source.reference,
+          "edit",
+          existsByReference ? undefined : source.path,
+          change.base_revision
+        );
+        if (change.targets.some((item) => item.path === target.path)) {
+          throw new Error(`market import targets the same Memory path more than once: ${target.path}`);
+        }
+        const candidate = join(candidateRoot, target.path);
+        await mkdir(dirname(candidate), { recursive: true });
+        await writeFile(candidate, source.source);
+        writtenCandidates.push(candidate);
+        const parsed = await readMemoryFile(logical.kind, candidate);
+        if (parsed.entity.names[0] !== logical.name) {
+          throw new Error(`market Memory identity does not match source content: ${source.reference}`);
+        }
+        change.targets.push(target);
+      }
+      if (writtenCandidates.length === 0) return change;
+      change.targets.sort((left, right) => left.path.localeCompare(right.path));
+      delete change.checkpoint;
+      delete change.candidate_revision;
+      change.updated_at = new Date().toISOString();
+      await writeChange(project, change);
+      return change;
+    } catch (error) {
+      if (existing) {
+        await Promise.all(writtenCandidates.map((candidate) => rm(candidate, { force: true }).catch(() => undefined)));
+      } else {
+        await rm(join(project.paths.changesRoot, change.id), { recursive: true, force: true }).catch(() => undefined);
+      }
+      throw error;
+    }
+  });
 }
 
 /** Internal-only deletion entrypoint for a caller that already verified historical path and canonical identity. */
@@ -726,12 +811,17 @@ export async function publishMemoryChange(
   options: { expectedKind?: "regular" | "sync" } = {}
 ): Promise<MemoryChangeSet> {
   const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  assertManaged(initialContext.primary);
   const workspace = await resolveWorkspaceIdentity();
   return withFileLock(memoryMutationLock(initialContext.primary), async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-    assertManaged(context.primary);
     const change = await readReconciledChange(context.primary, changeId);
+    if (context.primary.config.store.type === "embedded") {
+      if (change.intent !== "market_import") {
+        throw new Error("Managed Memory ChangeSets are not available for an Embedded Project");
+      }
+      return applyEmbeddedMarketChange(context.primary, change, workspace);
+    }
+    assertManaged(context.primary);
     assertDraftOwner(change, context.primary.name, workspace.key);
     if (options.expectedKind === "sync" && !change.merge_parent) {
       throw new Error(`ChangeSet ${change.id} is not a Sync ChangeSet`);
@@ -795,6 +885,12 @@ export async function validateMemoryChange(changeId?: string): Promise<MemoryCha
           checkpointCandidate,
           candidateRoot
         );
+        if (change.intent === "market_import") {
+          const centralCandidateRoot = marketCandidateRoot(context.primary, change.id);
+          await rm(centralCandidateRoot, { recursive: true, force: true });
+          await mkdir(dirname(centralCandidateRoot), { recursive: true });
+          await cp(candidateRoot, centralCandidateRoot, { recursive: true });
+        }
         effectiveChange.store_type = "managed";
         const checkpointRoot = await persistValidatedCheckpoint(
           context.primary,
@@ -818,6 +914,58 @@ export async function validateMemoryChange(changeId?: string): Promise<MemoryCha
       }
     }
 
+    if (changeId) {
+      const marketChange = await readReconciledChange(context.primary, changeId);
+      if (marketChange.intent === "market_import") {
+        if (marketChange.status !== "active") throw new Error(`ChangeSet ${marketChange.id} is already ${marketChange.status}`);
+        if (changeStoreType(marketChange) !== "embedded") throw new Error(`ChangeSet ${marketChange.id} is not an Embedded ChangeSet`);
+        const source = marketChange.source_worktree;
+        if (!source || workspace.kind !== "git" || workspace.key !== marketChange.workspace_key) {
+          throw new Error(`Embedded market ChangeSet ${marketChange.id} belongs to another Git workspace`);
+        }
+        const centralCandidateRoot = marketCandidateRoot(context.primary, marketChange.id);
+        const claimedCandidateRoot = marketChange.claim?.instance_key === workspace.instanceKey
+          ? workspaceCandidateRoot(workspace.path, marketChange.id)
+          : undefined;
+        const candidateRoot = claimedCandidateRoot && await exists(claimedCandidateRoot)
+          ? claimedCandidateRoot
+          : centralCandidateRoot;
+        if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
+        const checkpointCandidate = await snapshotSparseCandidate(candidateRoot, marketChange.targets);
+        try {
+          const issues = await validateEffectiveMemoryChange(
+            context.primary,
+            marketChange,
+            checkpointCandidate,
+            candidateRoot
+          );
+          if (candidateRoot !== centralCandidateRoot) {
+            await rm(centralCandidateRoot, { recursive: true, force: true });
+            await mkdir(dirname(centralCandidateRoot), { recursive: true });
+            await cp(candidateRoot, centralCandidateRoot, { recursive: true });
+          }
+          const checkpointRoot = await persistValidatedCheckpoint(
+            context.primary,
+            marketChange,
+            checkpointCandidate,
+            marketChange.base_revision,
+            issues,
+            context.primary.memoryRoot,
+            candidateRoot
+          );
+          return validationResult(
+            marketChange,
+            context.primary.memoryRoot,
+            candidateRoot,
+            checkpointRoot,
+            marketChange.base_revision,
+            issues
+          );
+        } finally {
+          await rm(resolve(checkpointCandidate, ".."), { recursive: true, force: true });
+        }
+      }
+    }
     const captured = await captureEmbeddedWorkingChange(context.primary, workspace, changeId);
     try {
       const issues = await validateEmbeddedEffectiveMemory(captured.change, captured.candidateRoot);
@@ -1591,7 +1739,9 @@ export async function claimMemoryChange(input: {
     if (change.claim?.instance_key === workspace.instanceKey) {
       const candidateRoot = changeStoreType(change) === "managed"
         ? workspaceCandidateRoot(workspace.path, change.id)
-        : context.primary.memoryRoot;
+        : change.intent === "market_import"
+          ? workspaceCandidateRoot(workspace.path, change.id)
+          : context.primary.memoryRoot;
       if (await exists(candidateRoot)) {
         return {
           change,
@@ -1622,7 +1772,9 @@ export async function claimMemoryChange(input: {
       change,
       candidateRoot: changeStoreType(change) === "managed"
         ? workspaceCandidateRoot(workspace.path, change.id)
-        : context.primary.memoryRoot,
+        : change.intent === "market_import"
+          ? workspaceCandidateRoot(workspace.path, change.id)
+          : context.primary.memoryRoot,
       warnings
     };
   });
@@ -1752,6 +1904,24 @@ async function prepareClaimCandidate(
       throw new Error(`Embedded ChangeSet ${change.id} belongs to another Git repository`);
     }
     const currentBase = await gitOutput(["rev-parse", "HEAD"], workspace.path);
+    if (change.intent === "market_import") {
+      if (change.base_revision !== currentBase) {
+        throw new Error(`Embedded market ChangeSet ${change.id} belongs to another Git base revision`);
+      }
+      const source = marketCandidateRoot(project, change.id);
+      if (!await exists(source)) throw new Error(`ChangeSet candidate is missing: ${source}`);
+      const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
+      await rm(candidateRoot, { recursive: true, force: true });
+      await mkdir(dirname(candidateRoot), { recursive: true });
+      await cp(source, candidateRoot, { recursive: true });
+      change.source_worktree = {
+        instance_key: workspace.instanceKey,
+        root: workspace.path,
+        repository_root: configured.path,
+        memory_path: project.config.store.memory_path
+      };
+      return warnings;
+    }
     if (change.origin === "view" && change.base_revision !== currentBase) {
       await forwardEmbeddedViewBase(change, workspace.path, project.config.store.memory_path, currentBase);
     }
@@ -1782,6 +1952,16 @@ async function prepareClaimCandidate(
   const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
   if (change.origin === "cli" && await exists(candidateRoot)) return warnings;
   if (await exists(candidateRoot)) warnings.push("the current Workspace already contains a candidate for this ChangeSet");
+  if (change.intent === "market_import") {
+    const source = change.checkpoint?.valid
+      ? checkpointMemoryRoot(project, change.id, change.checkpoint.digest)
+      : marketCandidateRoot(project, change.id);
+    if (!await exists(source)) throw new Error(`ChangeSet candidate is missing: ${source}`);
+    await rm(candidateRoot, { recursive: true, force: true });
+    await mkdir(dirname(candidateRoot), { recursive: true });
+    await cp(source, candidateRoot, { recursive: true });
+    return warnings;
+  }
   for (const scoped of change.scope) {
     const current = join(project.memoryRoot, scoped.path);
     if (!await exists(current)) {
@@ -2037,6 +2217,70 @@ async function readSyncConflictCandidate(root: string, path: string): Promise<Bu
     theirsContent,
     `>>>>>>> upstream${theirs ? "" : " (deleted)"}\n`
   ].join("");
+}
+
+async function applyEmbeddedMarketChange(
+  project: ResolvedProject,
+  change: MemoryChangeSet,
+  workspace: WorkspaceIdentity
+): Promise<MemoryChangeSet> {
+  if (project.config.store.type !== "embedded") throw new Error("Embedded market apply requires an Embedded Project");
+  const embeddedStore = project.config.store;
+  if (workspace.kind !== "git" || workspace.key !== change.workspace_key) {
+    throw new Error(`Embedded market ChangeSet ${change.id} belongs to another Git workspace`);
+  }
+  if (change.status !== "active") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
+  if (!change.checkpoint?.valid) throw new Error(`ChangeSet ${change.id} does not have a valid checkpoint`);
+  if (change.targets.length === 0) throw new Error(`ChangeSet ${change.id} has no Memory targets`);
+  const head = await gitOutput(["rev-parse", "HEAD"], workspace.path);
+  if (head !== change.base_revision) throw new Error(`Embedded market ChangeSet ${change.id} belongs to another Git base revision`);
+  const repositoryPaths = change.targets.map((target) => embeddedRepositoryPath(embeddedStore.memory_path, target.path));
+  const dirty = await gitOutput(["status", "--porcelain", "--", ...repositoryPaths], workspace.path);
+  if (dirty) throw new Error(`Embedded market targets have uncommitted changes: ${repositoryPaths.join(", ")}`);
+  await assertChangeTargetsCurrent(project, change);
+  const checkpointRoot = checkpointMemoryRoot(project, change.id, change.checkpoint.digest);
+  if (!await exists(checkpointRoot)) throw new Error(`ChangeSet checkpoint is missing: ${change.id}`);
+  if (await checkpointDigest(change.targets, checkpointRoot) !== change.checkpoint.digest) {
+    throw new Error(`ChangeSet checkpoint digest does not match: ${change.id}`);
+  }
+  const staging = await mkdtemp(join(tmpdir(), "memsphere-embedded-market-"));
+  const snapshots = new Map<string, { source?: Buffer; mode?: number }>();
+  try {
+    await copyWorkingTree(project.memoryRoot, staging);
+    await applyTargets(staging, checkpointRoot, change.targets);
+    const candidateValidation = await validateMemoryRoot(staging);
+    if (candidateValidation.issues.length > 0) {
+      throw new Error(`ChangeSet validation failed: ${candidateValidation.issues[0]?.path}: ${candidateValidation.issues[0]?.message}`);
+    }
+    for (const target of change.targets) {
+      const livePath = join(project.memoryRoot, target.path);
+      const source = await readFile(livePath).catch((error: unknown) => {
+        if (isCode(error, "ENOENT")) return undefined;
+        throw error;
+      });
+      const mode = source === undefined ? undefined : (await lstat(livePath)).mode;
+      snapshots.set(target.path, { source, mode });
+    }
+    await applyTargets(project.memoryRoot, checkpointRoot, change.targets);
+    const formalValidation = await validateMemoryRoot(project.memoryRoot);
+    if (formalValidation.issues.length > 0) {
+      throw new Error(`Embedded market apply validation failed: ${formalValidation.issues[0]?.path}: ${formalValidation.issues[0]?.message}`);
+    }
+    return change;
+  } catch (error) {
+    for (const [path, snapshot] of snapshots) {
+      const target = join(project.memoryRoot, path);
+      if (snapshot.source === undefined) await rm(target, { force: true }).catch(() => undefined);
+      else {
+        await mkdir(dirname(target), { recursive: true });
+        await writeFile(target, snapshot.source);
+        if (snapshot.mode !== undefined) await chmod(target, snapshot.mode);
+      }
+    }
+    throw error;
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
 }
 
 async function publishLocked(project: ResolvedProject, change: MemoryChangeSet, candidateRoot: string, message?: string): Promise<MemoryChangeSet> {
@@ -2388,6 +2632,11 @@ function changePath(project: ResolvedProject, id: string): string {
 function recoveryRoot(project: ResolvedProject, id: string): string {
   assertSafeId(id);
   return join(project.paths.changesRoot, id, "memory");
+}
+
+function marketCandidateRoot(project: ResolvedProject, id: string): string {
+  assertSafeId(id);
+  return join(project.paths.changesRoot, id, "market-candidate");
 }
 
 function checkpointsRoot(project: ResolvedProject, id: string): string {

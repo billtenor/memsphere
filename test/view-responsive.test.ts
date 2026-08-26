@@ -290,6 +290,7 @@ async function openTaskPage(browser: Browser, url: string, width: number): Promi
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await runsLoaded;
   await page.locator("#task-tab.active").waitFor();
+  await page.getByRole("tab", { name: "done", exact: true }).click();
   await page.locator(".task-card-main").first().click();
   await page.locator(".markdown-table-scroll").first().waitFor();
   return page;
@@ -448,12 +449,13 @@ test("Run titles fall back to the Procedure name for historical Runs", async () 
         (response) => new URL(response.url()).pathname === "/api/runs" && response.ok(),
         { timeout: 10_000 }
       );
+      await page.getByRole("button", { name: "Run", exact: true }).click();
+      await runsLoaded;
       const initialDetailLoaded = page.waitForResponse(
         (response) => /^\/api\/runs\/run-/.test(new URL(response.url()).pathname),
         { timeout: 10_000 }
       );
-      await page.getByRole("button", { name: "Run", exact: true }).click();
-      await runsLoaded;
+      await page.getByRole("tab", { name: "done", exact: true }).click();
       const initialDetailResponse = await initialDetailLoaded;
       assert.equal(initialDetailResponse.status(), 200, await initialDetailResponse.text());
       await page.locator(".meta .pill", { hasText: "流程: Responsive browser fixture" }).waitFor();
@@ -754,7 +756,12 @@ test("Run pages do not expose the retired Task Review entry or inline comments",
     page.setDefaultTimeout(5_000);
     try {
       await page.goto(url);
+      const runsLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/runs" && response.ok()
+      );
       await page.getByRole("button", { name: "Run", exact: true }).click();
+      await runsLoaded;
+      await page.getByRole("tab", { name: "done", exact: true }).click();
       await page.locator(".task-card-main").first().click();
       assert.equal(await page.getByRole("button", { name: "Review", exact: true }).count(), 0);
       assert.equal(await page.locator('[data-anchor^="task:"] .inline-plus:visible').count(), 0);
@@ -779,11 +786,16 @@ test("View deep links restore Memory, Run, and browser history", async () => {
       await page.getByRole("heading", { name: "Reviewable schema", exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, "/memories/schemas/reviewable-schema");
 
+      const runsLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/runs" && response.ok()
+      );
       await page.getByRole("button", { name: "Run", exact: true }).click();
+      await runsLoaded;
       assert.equal(new URL(page.url()).pathname, "/tasks");
       const selectedDetailLoaded = page.waitForResponse(
         (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
       );
+      await page.getByRole("tab", { name: "done", exact: true }).click();
       await page.locator(".task-card-main").first().click();
       await selectedDetailLoaded;
       await page.waitForLoadState("networkidle");

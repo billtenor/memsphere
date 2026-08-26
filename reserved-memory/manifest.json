@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "memory_syntax": "memsphere-20260721-stable",
   "system_memory": {
     "install": [
@@ -46,6 +46,19 @@
       { "path": "procedures/memsphere-review-application.yaml", "references": ["procedures/处理 memsphere review 流程"] },
       { "path": "procedures/memsphere-memory-review-process.yaml", "references": ["procedures/memsphere-memory-review-process"] },
       { "path": "procedures/memsphere-tutorial.yaml", "references": ["procedures/memsphere tutorial 流程"] }
+    ]
+  },
+  "market_memory": {
+    "install": [
+      "procedures/memsphere-agile-requirement-development.yaml",
+      "procedures/memsphere-bug-fix.yaml",
+      "procedures/memsphere-code-branch-review-and-remediation.yaml",
+      "procedures/memsphere-requirement-management.yaml",
+      "statements/memsphere-general-requirement-rules.yaml",
+      "statements/memsphere-general-development-rules.yaml",
+      "statements/memsphere-general-testing-rules.yaml",
+      "statements/memsphere-general-delivery-rules.yaml",
+      "statements/memsphere-repository-development-rules.yaml"
     ]
   }
 }
