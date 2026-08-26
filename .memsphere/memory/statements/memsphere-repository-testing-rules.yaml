@@ -23,7 +23,7 @@ sections:
       - 代码行为与回归测试
     asserts:
       - 修改代码行为时必须在适用层级补充或更新能够覆盖变更风险的自动化测试，并先运行受影响测试文件；修复 bug 必须增加或更新能够复现原问题的回归测试。
-      - 完成针对性测试后必须运行 npm test 全量回归，不得通过删除、跳过或弱化既有断言使测试通过。
+      - 完成受影响测试后必须运行 npm test 全量回归，不得通过删除、跳过或弱化既有断言使测试通过。
       - 修改 CLI、Memory、Run、Artifact、Review、View、Reserved Store、Archive 或 Migration 时，测试必须覆盖成功路径以及本次变更涉及的失败或边界路径。
   - !statement
     names:
@@ -47,7 +47,7 @@ sections:
     asserts:
       - 新建、修改、移动或删除 .memsphere/memory 中的任意 Concept、Statement、Procedure 或 Schema 后，必须运行 memsphere validate。
       - memsphere validate 必须确认 config 与各 root 可用、四类当前 Memory 均可解析、syntax 与字段结构合法，并检查规范名称和别名等 catalog 冲突。
-      - memsphere validate 不验证自然语言 asserts 是否成立、Procedure 是否能按预期运行、Artifact 内容是否符合业务语义，也不直接校验 reserved-memory 源目录；这些必须由针对性测试或实际运行验证。
+      - memsphere validate 不验证自然语言 asserts 是否成立、Procedure 是否能按预期运行、Artifact 内容是否符合业务语义，也不直接校验 reserved-memory 源目录；这些必须由覆盖对应语义的自动化测试或实际运行验证。
   - !statement
     names:
       - System 与 Reserved Memory
@@ -56,7 +56,9 @@ sections:
       - 修改 System Memory 后必须同步当前开发 Project 的 Memory 副本，再运行 memsphere validate；源文件与安装副本不得出现非预期差异。
   - !statement
     names:
-      - 针对性验证
+      - 变更范围与必跑测试
+    defines:
+      - 本节只记录 memsphere 仓库中可长期复用的变更范围与现有必跑测试套件映射，不收录单次变更临时选择的测试。
     asserts:
       - 修改 Memory YAML 语法、实体 schema、解析或序列化时，必须运行 memory-schema、memory-syntax 和 memory-serializer 相关测试。
       - 修改 Schema 或 Artifact 契约、格式解析和 validator 时，必须运行 artifact-validation、artifact-format-fixtures 及相关 migration 测试，并同时覆盖合法与非法 Artifact。
