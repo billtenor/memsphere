@@ -142,7 +142,28 @@ The CLI is therefore not primarily a collection of commands for humans. It is a 
 
 Windows users need to install [Git for Windows](https://git-scm.com/download/win) and ensure that git is available on PATH. Reopen PowerShell, CMD, Git Bash, or another supported shell after installation. Memsphere does not require Git Bash to run.
 
-### 6.2 Installation
+### 6.2 Ask an Agent to Install Memsphere and Start the Tutorial (Recommended)
+
+Memsphere is designed for Agents, so installation, initialization, and Project setup are best delegated to an Agent as well. First, have the Agent enter the working directory where you want to use Memsphere, then send it this entire prompt:
+
+~~~text
+Install and configure Memsphere in the current working directory. Perform all required terminal operations yourself:
+
+1. Check that Node.js 20 or later and Git are available. If a prerequisite is missing, tell me clearly what I need to install.
+2. Run npm install -g memsphere, then run memsphere skill init --global.
+3. Read and follow the Memsphere Skill you just installed. If this session does not automatically refresh its Skill list, read SKILL.md directly from the location reported by the installation command and continue this task; do not ask me to open a new session solely for that reason.
+4. Check whether the current directory is already bound to a Project. Reuse an existing binding. If it is not bound, ask whether I want a Managed Project or an Embedded Project. If I am unsure, recommend and create a Managed Project, then bind this directory.
+5. Run memsphere project show and memsphere validate, and resolve any installation or configuration issues you can handle.
+6. After setup succeeds, do not stop with a summary. Immediately use memsphere to discover and read the complete memsphere-tutorial-chapter-01 Procedure, start a named Run, and begin the tutorial by following the current step returned by the Run.
+
+Pause only when you genuinely need me to choose a Project type, grant permission, or complete a human step.
+~~~
+
+The goal of this prompt is not merely to install Memsphere. It tells the Agent to continue into the first tutorial chapter in the same task. Once the tutorial begins, the Agent performs the steps it can handle and pauses with clear instructions when your action or decision is required.
+
+### 6.3 Installation Command Reference
+
+These are the core installation commands the Agent will run. You can also run them manually when troubleshooting installation:
 
 ~~~bash
 npm install -g memsphere
@@ -154,7 +175,7 @@ Install the Memsphere Skill globally so that your Agent can discover it:
 memsphere skill init --global
 ~~~
 
-### 6.3 Choose and Create a Project
+### 6.4 Choose and Create a Project
 
 A Project is Memsphere's persistent space for Memory, run history, and other software assets. After you bind the current working directory to a Project, Agents can read and run that personalized software there.
 
@@ -167,7 +188,7 @@ Memsphere provides two kinds of Project. The most important difference is whethe
 
 If you are unsure, start with a Managed Project. Choose an Embedded Project when you explicitly want Memory to follow a code repository.
 
-#### 6.3.1 Managed Project
+#### 6.4.1 Managed Project
 
 Enter your working directory, then create and bind a Managed Project:
 
@@ -188,7 +209,7 @@ memsphere memory change validate <change-id>
 memsphere memory publish --change <change-id>
 ~~~
 
-#### 6.3.2 Embedded Project
+#### 6.4.2 Embedded Project
 
 To keep Memory and code in the same Git repository, create and bind an Embedded Project:
 
@@ -210,7 +231,7 @@ git commit -m "Update Memory"
 
 Embedded Memory does not use `memsphere memory publish`; Memsphere does not commit Git changes for you.
 
-### 6.4 Validate the Project and Start View
+### 6.5 Validate the Project and Start View
 
 Inspect the currently bound Project and validate its Memory:
 
@@ -239,7 +260,7 @@ Managed repair creates a controlled ChangeSet, validates the complete effective 
 
 Embedded repair uses the effective Memory Root in the Git worktree where the command runs. It refuses to overwrite uncommitted changes on planned targets, validates the complete candidate Store in a temporary directory, and writes validated System Memory differences back to the current worktree. It does not commit, push, or perform a Managed publish. Review the result with an ordinary `git diff` and integrate it through the repository's normal workflow. Running it in a linked worktree does not modify the main worktree; a no-op repair writes nothing.
 
-### 6.5 Discover and Read Memory
+### 6.6 Discover and Read Memory
 
 List all Memory visible to the current Project, or list only Procedures:
 
@@ -254,7 +275,7 @@ The list is for discovering candidates. After selecting one, read the complete M
 memsphere memory read <reference>
 ~~~
 
-### 6.6 Run Your First Procedure
+### 6.7 Run Your First Procedure
 
 After reading the target Procedure, start a named Run:
 
