@@ -324,7 +324,7 @@ flow:
         return url.pathname === "/api/runs" && url.searchParams.get("representation") === "summary";
       });
       assert.equal((await summaryRefresh).status(), 200);
-      await page.waitForTimeout(100);
+      await page.waitForFunction(() => document.querySelector("#count")?.textContent === "0 runs");
       assert.equal(new URL(page.url()).pathname, `/tasks/${started.id}/artifact-reviews/${review.id}`);
       assert.equal(await archivedModal.isVisible(), true);
       await archivedModal.getByText("Private candidate", { exact: true }).waitFor();
