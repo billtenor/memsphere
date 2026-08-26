@@ -356,30 +356,46 @@ test("Task effective rule references and sections collapse and survive rerenders
     const page = await openTaskPage(browser, url, 1366);
     try {
       const reference = page.locator(".run-procedure-asserts .effective-reference").first();
-      const ruleList = page.locator(".run-procedure-asserts > .effective-rule-tree > .effective-rule-list");
-      const topLevelItems = ruleList.locator(":scope > li");
       const referenceHeading = reference.locator(":scope > .section-header");
       const referenceBody = reference.locator(":scope > .section-body");
       await referenceHeading.waitFor();
-      assert.equal(await topLevelItems.count(), 3);
-      assert.match(await topLevelItems.nth(0).innerText(), /local rule before/);
-      assert.match(await topLevelItems.nth(1).innerText(), /statements\/shared-rules/);
-      assert.match(await topLevelItems.nth(2).innerText(), /local rule after/);
-      assert.equal(await topLevelItems.nth(1).evaluate(element => getComputedStyle(element).display), "list-item");
-      assert.equal(await topLevelItems.nth(1).evaluate(element => getComputedStyle(element).listStyleType), "disc");
-      const [firstRuleBox, referenceItemBox, referenceHeadingBox] = await Promise.all([
-        topLevelItems.nth(0).boundingBox(),
-        topLevelItems.nth(1).boundingBox(),
-        referenceHeading.boundingBox()
-      ]);
-      assert(firstRuleBox && referenceItemBox && referenceHeadingBox);
-      assert.equal(Math.abs(firstRuleBox.x - referenceItemBox.x) < 1, true);
-      assert.equal(Math.abs(referenceItemBox.x - referenceHeadingBox.x) <= 1, true);
+      const readRuleLayout = () => page.evaluate(() => {
+        const items = [...document.querySelectorAll<HTMLElement>(
+          ".run-procedure-asserts > .effective-rule-tree > .effective-rule-list > li"
+        )];
+        const firstRule = items[0];
+        const referenceItem = items[1];
+        const referenceHeadingElement = referenceItem?.querySelector<HTMLElement>(
+          ":scope > .effective-reference > .section-header"
+        );
+        const nestedRule = referenceItem?.querySelector<HTMLElement>(
+          ":scope > .effective-reference > .section-body > .effective-rule-list > li"
+        );
+        if (!firstRule || !referenceItem || !referenceHeadingElement || !nestedRule) return null;
+        const referenceStyle = getComputedStyle(referenceItem);
+        return {
+          tagNames: items.map(item => item.tagName),
+          texts: items.map(item => item.innerText),
+          display: referenceStyle.display,
+          listStyleType: referenceStyle.listStyleType,
+          firstRuleX: firstRule.getBoundingClientRect().x,
+          referenceItemX: referenceItem.getBoundingClientRect().x,
+          referenceHeadingX: referenceHeadingElement.getBoundingClientRect().x,
+          nestedRuleX: nestedRule.getBoundingClientRect().x
+        };
+      });
+      const ruleLayout = await readRuleLayout();
+      assert(ruleLayout);
+      assert.deepEqual(ruleLayout.tagNames, ["LI", "LI", "LI"]);
+      assert.match(ruleLayout.texts[0] ?? "", /local rule before/);
+      assert.match(ruleLayout.texts[1] ?? "", /statements\/shared-rules/);
+      assert.match(ruleLayout.texts[2] ?? "", /local rule after/);
+      assert.equal(ruleLayout.display, "list-item");
+      assert.equal(ruleLayout.listStyleType, "disc");
+      assert.equal(Math.abs(ruleLayout.firstRuleX - ruleLayout.referenceItemX) < 1, true);
+      assert.equal(Math.abs(ruleLayout.referenceItemX - ruleLayout.referenceHeadingX) <= 1, true);
       assert.equal(await referenceHeading.getAttribute("aria-expanded"), "true");
-      const nestedRule = referenceBody.locator(":scope > .effective-rule-list > li").first();
-      const nestedRuleBox = await nestedRule.boundingBox();
-      assert(nestedRuleBox);
-      assert.equal(nestedRuleBox.x > referenceHeadingBox.x, true);
+      assert.equal(ruleLayout.nestedRuleX > ruleLayout.referenceHeadingX, true);
 
       await referenceHeading.click({ position: { x: 8, y: 8 } });
       assert.equal(await referenceHeading.getAttribute("aria-expanded"), "false");
@@ -394,6 +410,11 @@ test("Task effective rule references and sections collapse and survive rerenders
       const rerenderedHeading = rerenderedReference.locator(":scope > .section-header");
       assert.equal(await rerenderedHeading.getAttribute("aria-expanded"), "false");
       assert.equal(await rerenderedReference.locator(":scope > .section-body").isHidden(), true);
+      const rerenderedRuleLayout = await readRuleLayout();
+      assert(rerenderedRuleLayout);
+      assert.deepEqual(rerenderedRuleLayout.tagNames, ["LI", "LI", "LI"]);
+      assert.equal(rerenderedRuleLayout.display, "list-item");
+      assert.equal(rerenderedRuleLayout.listStyleType, "disc");
 
       await rerenderedHeading.press("Enter");
       assert.equal(await rerenderedHeading.getAttribute("aria-expanded"), "true");
