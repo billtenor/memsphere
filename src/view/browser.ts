@@ -1173,12 +1173,12 @@ export const browserHtml = String.raw`<!doctype html>
         if (targetMode === "memory" && route.page !== "memory") {
           await loadMemorySelection(state.selectedId || state.memories[0]?.id);
         } else if (targetMode === "task" && route.page === "tasks") {
-          await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
+          await loadRunDetail(selectedTask()?.id);
         }
       } else if (targetMode === "memory") {
         await loadMemorySelection(state.selectedId || state.memories[0]?.id);
       } else if (targetMode === "task") {
-        await loadRunDetail(state.selectedTaskId || state.runs[0]?.id);
+        await loadRunDetail(selectedTask()?.id);
       } else if (targetMode === "changes" && state.selectedChangeId) {
         await loadChangeDetail(state.selectedChangeId);
       }
@@ -1469,11 +1469,11 @@ export const browserHtml = String.raw`<!doctype html>
         ? [{ ...selectedArchivedDetail, eventCount: selectedArchivedDetail.events?.length || 0, archived: true }, ...activeRuns]
         : activeRuns;
       const explicitRunRoute = !state.routeReady && ["task", "artifact-review"].includes(state.pendingRoute?.page);
-      if (!explicitRunRoute && !state.runs.some(run => run.id === state.selectedTaskId)) {
-        state.selectedTaskId = state.runs[0]?.id || null;
+      if (!explicitRunRoute && !selectedTask()) {
+        state.selectedTaskId = visibleTaskRuns()[0]?.id || null;
         saveSelectedTask();
       }
-      const selected = state.runs.find(run => run.id === state.selectedTaskId) || state.runs[0];
+      const selected = selectedTask();
       if (options.loadDetail !== false && selected && previous.get(selected.id) !== selected.updatedAt) {
         if (hasActiveTaskInteraction()) {
           const detail = state.runDetails.get(selected.id);
@@ -1527,7 +1527,7 @@ export const browserHtml = String.raw`<!doctype html>
         state.artifactReviewContext = null;
         return;
       }
-      const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
+      const run = selectedTask();
       const reviews = artifactReviewSummariesForRun(run);
       let reviewId = run && state.artifactReviewModalOpen ? state.artifactReviewSelectedByRun[run.id] : "";
       let review = reviews.find(candidate => candidate.id === reviewId);
@@ -3092,7 +3092,7 @@ export const browserHtml = String.raw`<!doctype html>
         path = "/settings/" + settingsPublicModule(state.settingsScope, state.settingsModule);
       } else if (state.viewMode === "task") {
         if (state.routeLanding === "tasks") return "/tasks";
-        const run = state.runs.find(item => item.id === state.selectedTaskId) || null;
+        const run = selectedTask();
         if (!run) path = "/tasks";
         else if (state.artifactReviewModalOpen) {
           const review = selectedArtifactReviewSummary();
@@ -3182,7 +3182,7 @@ export const browserHtml = String.raw`<!doctype html>
       document.body.classList.toggle("review-active", canComment());
       document.body.classList.toggle("artifact-review-modal-open", state.artifactReviewModalOpen);
       document.documentElement.classList.toggle("artifact-review-modal-open", state.artifactReviewModalOpen);
-      const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
+      const run = selectedTask();
       const artifactReview = state.viewMode === "task" ? defaultArtifactReviewSummary(run) : null;
       const taskHasArtifactReview = state.viewMode === "task" && Boolean(artifactReview?.round);
       el.reviewToggle.hidden = !taskHasArtifactReview;
@@ -3259,7 +3259,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     async function openArtifactReviewModal(reviewId) {
-      const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
+      const run = selectedTask();
       if (!run) return;
       state.routeLanding = "";
       const reviews = artifactReviewSummariesForRun(run);
@@ -3977,8 +3977,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderTaskNav() {
       el.nav.innerHTML = "";
-      const activeRuns = state.runs.filter(run => run.archived !== true && run.readOnly !== true);
-      const visibleRuns = activeRuns.filter(run => run.status === state.taskStatus);
+      const visibleRuns = visibleTaskRuns();
       el.count.textContent = visibleRuns.length + " runs";
       if (!visibleRuns.length) {
         const empty = document.createElement("div");
@@ -4041,7 +4040,7 @@ export const browserHtml = String.raw`<!doctype html>
       state.taskStatus = status;
       state.routeError = "";
       state.routeLanding = "tasks";
-      const run = state.runs.find(item => item.archived !== true && item.readOnly !== true && item.status === status) || null;
+      const run = visibleTaskRuns()[0] || null;
       const changedTask = state.selectedTaskId !== run?.id;
       state.selectedTaskId = run?.id || null;
       saveSelectedTask();
@@ -4053,8 +4052,15 @@ export const browserHtml = String.raw`<!doctype html>
       renderAll();
     }
 
+    function visibleTaskRuns() {
+      return state.runs.filter(run => run.archived !== true && run.readOnly !== true && run.status === state.taskStatus);
+    }
+
     function selectedTask() {
-      return state.runs.find(run => run.id === state.selectedTaskId) || null;
+      const selected = state.runs.find(run => run.id === state.selectedTaskId) || null;
+      if (!selected) return null;
+      if (selected.archived === true || selected.readOnly === true) return selected;
+      return selected.status === state.taskStatus ? selected : null;
     }
 
     function runDisplayName(run) {
@@ -4774,13 +4780,13 @@ export const browserHtml = String.raw`<!doctype html>
 
     function activeArtifactReviewSummary() {
       if (state.viewMode !== "task") return null;
-      const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
+      const run = selectedTask();
       return run?.artifactReview || null;
     }
 
     function artifactReviewSummariesForRun(run) {
       const selectedRun = run || (state.viewMode === "task"
-        ? state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null
+        ? selectedTask()
         : null);
       return selectedRun?.artifactReviewSummaries || (selectedRun?.artifactReview ? [selectedRun.artifactReview] : []);
     }
@@ -4797,7 +4803,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function selectedArtifactReviewSummary() {
-      const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
+      const run = selectedTask();
       if (!run) return null;
       const reviews = artifactReviewSummariesForRun(run);
       const reviewId = state.artifactReviewSelectedByRun[run.id];
@@ -6475,7 +6481,7 @@ export const browserHtml = String.raw`<!doctype html>
       }
       state.runDetails.delete(run.id);
       state.runs = state.runs.filter(item => item.id !== run.id);
-      if (!state.selectedTaskId) state.selectedTaskId = state.runs[0]?.id || null;
+      if (!state.selectedTaskId) state.selectedTaskId = visibleTaskRuns()[0]?.id || null;
       saveSelectedTask();
       if (state.selectedTaskId) await loadRunDetail(state.selectedTaskId);
       renderAll();
@@ -7248,7 +7254,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderArtifactReviewSelector(selectedReview) {
-      const run = state.runs.find(item => item.id === state.selectedTaskId) || state.runs[0] || null;
+      const run = selectedTask();
       const reviews = artifactReviewSummariesForRun(run);
       const chooser = document.createElement("div");
       chooser.className = "artifact-review-round-select artifact-review-artifact-select";

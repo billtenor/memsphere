@@ -169,6 +169,41 @@ test("Embedded market publish applies a validated candidate without committing o
     assert.match(await readFile(join(memoryRoot, target.path), "utf8"), /!statement/);
     assert.match(await gitOutput(["status", "--porcelain", "--", `.memsphere/memory/${target.path}`], repository), /^\?\?/);
     assert.equal((await readMemoryChange({ home, project: "embedded", changeId: change.id })).status, "active");
+
+    await finishMemoryChange({ changeId: change.id });
+    const secondPlan = await planMemoryMarketImport(memoryRoot, "statements/memsphere-general-development-rules");
+    const secondTarget = secondPlan.targets[0]!;
+    const expanded = await createMarketMemoryChange({
+      home,
+      project: "embedded",
+      actor: { kind: "human", id: "owner", name: "Owner" },
+      targets: secondPlan.targets
+    });
+    assert.equal(expanded.id, change.id);
+    await claimMemoryChange({ changeId: change.id });
+    assert.deepEqual((await validateMemoryChange(change.id)).issues, []);
+    await finishMemoryChange({ changeId: change.id });
+    const expandedApplied = await publishMemoryChange(change.id);
+    assert.equal(expandedApplied.status, "active");
+    assert.match(await readFile(join(memoryRoot, target.path), "utf8"), /!statement/);
+    assert.match(await readFile(join(memoryRoot, secondTarget.path), "utf8"), /!statement/);
+    assert.equal((await publishMemoryChange(change.id)).status, "active");
+
+    await writeFile(join(memoryRoot, target.path), Buffer.concat([
+      await readFile(join(memoryRoot, target.path)),
+      Buffer.from("\n# personalized\n")
+    ]));
+    const thirdPlan = await planMemoryMarketImport(memoryRoot, "statements/memsphere-general-delivery-rules");
+    await createMarketMemoryChange({
+      home,
+      project: "embedded",
+      actor: { kind: "human", id: "owner", name: "Owner" },
+      targets: thirdPlan.targets
+    });
+    await claimMemoryChange({ changeId: change.id });
+    assert.deepEqual((await validateMemoryChange(change.id)).issues, []);
+    await finishMemoryChange({ changeId: change.id });
+    await assert.rejects(publishMemoryChange(change.id), /uncommitted changes/);
   } finally {
     restoreEnvironment(previous);
     await rm(fixture, { recursive: true, force: true });

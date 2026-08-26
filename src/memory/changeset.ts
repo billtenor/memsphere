@@ -2234,25 +2234,28 @@ async function applyEmbeddedMarketChange(
   if (change.targets.length === 0) throw new Error(`ChangeSet ${change.id} has no Memory targets`);
   const head = await gitOutput(["rev-parse", "HEAD"], workspace.path);
   if (head !== change.base_revision) throw new Error(`Embedded market ChangeSet ${change.id} belongs to another Git base revision`);
-  const repositoryPaths = change.targets.map((target) => embeddedRepositoryPath(embeddedStore.memory_path, target.path));
-  const dirty = await gitOutput(["status", "--porcelain", "--", ...repositoryPaths], workspace.path);
-  if (dirty) throw new Error(`Embedded market targets have uncommitted changes: ${repositoryPaths.join(", ")}`);
-  await assertChangeTargetsCurrent(project, change);
   const checkpointRoot = checkpointMemoryRoot(project, change.id, change.checkpoint.digest);
   if (!await exists(checkpointRoot)) throw new Error(`ChangeSet checkpoint is missing: ${change.id}`);
   if (await checkpointDigest(change.targets, checkpointRoot) !== change.checkpoint.digest) {
     throw new Error(`ChangeSet checkpoint digest does not match: ${change.id}`);
   }
+  const pendingTargets = await pendingEmbeddedMarketTargets(project, change, checkpointRoot);
+  const repositoryPaths = pendingTargets.map((target) => embeddedRepositoryPath(embeddedStore.memory_path, target.path));
+  const dirty = repositoryPaths.length > 0
+    ? await gitOutput(["status", "--porcelain", "--", ...repositoryPaths], workspace.path)
+    : "";
+  if (dirty) throw new Error(`Embedded market targets have uncommitted changes: ${repositoryPaths.join(", ")}`);
+  await assertChangeTargetsCurrent(project, memoryChangeSetSchema.parse({ ...change, targets: pendingTargets }));
   const staging = await mkdtemp(join(tmpdir(), "memsphere-embedded-market-"));
   const snapshots = new Map<string, { source?: Buffer; mode?: number }>();
   try {
     await copyWorkingTree(project.memoryRoot, staging);
-    await applyTargets(staging, checkpointRoot, change.targets);
+    await applyTargets(staging, checkpointRoot, pendingTargets);
     const candidateValidation = await validateMemoryRoot(staging);
     if (candidateValidation.issues.length > 0) {
       throw new Error(`ChangeSet validation failed: ${candidateValidation.issues[0]?.path}: ${candidateValidation.issues[0]?.message}`);
     }
-    for (const target of change.targets) {
+    for (const target of pendingTargets) {
       const livePath = join(project.memoryRoot, target.path);
       const source = await readFile(livePath).catch((error: unknown) => {
         if (isCode(error, "ENOENT")) return undefined;
@@ -2261,7 +2264,7 @@ async function applyEmbeddedMarketChange(
       const mode = source === undefined ? undefined : (await lstat(livePath)).mode;
       snapshots.set(target.path, { source, mode });
     }
-    await applyTargets(project.memoryRoot, checkpointRoot, change.targets);
+    await applyTargets(project.memoryRoot, checkpointRoot, pendingTargets);
     const formalValidation = await validateMemoryRoot(project.memoryRoot);
     if (formalValidation.issues.length > 0) {
       throw new Error(`Embedded market apply validation failed: ${formalValidation.issues[0]?.path}: ${formalValidation.issues[0]?.message}`);
@@ -2281,6 +2284,30 @@ async function applyEmbeddedMarketChange(
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
+}
+
+async function pendingEmbeddedMarketTargets(
+  project: ResolvedProject,
+  change: MemoryChangeSet,
+  checkpointRoot: string
+): Promise<MemoryChangeSet["targets"]> {
+  const pending: MemoryChangeSet["targets"] = [];
+  for (const target of change.targets) {
+    if (target.operation !== "create" && target.operation !== "update") {
+      throw new Error(`Embedded market ChangeSet has an unsupported target operation: ${target.operation}`);
+    }
+    const destinationPath = target.destination_path ?? target.path;
+    const current = join(project.memoryRoot, destinationPath);
+    if (await exists(current)) {
+      const [currentDigest, candidateDigest] = await Promise.all([
+        gitBlobDigest(project.memoryRoot, destinationPath),
+        gitBlobDigest(checkpointRoot, target.path)
+      ]);
+      if (currentDigest === candidateDigest) continue;
+    }
+    pending.push(target);
+  }
+  return pending;
 }
 
 async function publishLocked(project: ResolvedProject, change: MemoryChangeSet, candidateRoot: string, message?: string): Promise<MemoryChangeSet> {

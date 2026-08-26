@@ -67,8 +67,13 @@ test("Run uses a secondary status menu instead of grouped status headings", () =
   assert.match(browserHtml, /id="done-task-tab"[^>]*>done<\/button>/);
   assert.match(browserHtml, /id="abandoned-task-tab"[^>]*>abandoned<\/button>/);
   assert.match(browserHtml, /taskStatus: "running"/);
-  assert.match(browserHtml, /const visibleRuns = activeRuns\.filter\(run => run\.status === state\.taskStatus\)/);
+  assert.match(browserHtml, /const visibleRuns = visibleTaskRuns\(\)/);
   assert.match(browserHtml, /el\.count\.textContent = visibleRuns\.length \+ " runs"/);
+  assert.match(browserHtml, /function visibleTaskRuns\(\)/);
+  assert.match(browserHtml, /if \(!explicitRunRoute && !selectedTask\(\)\)/);
+  assert.match(browserHtml, /state\.selectedTaskId = visibleTaskRuns\(\)\[0\]\?\.id \|\| null/);
+  assert.match(browserHtml, /return selected\.status === state\.taskStatus \? selected : null/);
+  assert.doesNotMatch(browserHtml, /state\.runs\.find\(item => item\.id === state\.selectedTaskId\) \|\| state\.runs\[0\] \|\| null/);
   assert.doesNotMatch(browserHtml, /for \(const status of \["running", "done", "abandoned"\]\)/);
 });
 
@@ -107,7 +112,8 @@ test("browser loads summaries by route and fetches details on demand", () => {
 
 test("archived Run detail survives active summary refresh without joining Run navigation", () => {
   assert.match(browserHtml, /selectedArchivedDetail\?\.readOnly === true/);
-  assert.match(browserHtml, /const activeRuns = state\.runs\.filter\(run => run\.archived !== true && run\.readOnly !== true\)/);
+  assert.match(browserHtml, /return state\.runs\.filter\(run => run\.archived !== true && run\.readOnly !== true && run\.status === state\.taskStatus\)/);
+  assert.match(browserHtml, /if \(selected\.archived === true \|\| selected\.readOnly === true\) return selected/);
 });
 
 test("Memory summaries do not reuse full Memory readers", async () => {

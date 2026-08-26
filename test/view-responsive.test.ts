@@ -476,6 +476,40 @@ test("Run titles fall back to the Procedure name for historical Runs", async () 
   });
 });
 
+test("Run status polling clears a selection that moved to another secondary menu", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
+    let status = "running";
+    await page.route("**/api/runs**", async (route) => {
+      const response = await route.fetch();
+      const payload = await response.json() as { runs?: Array<Record<string, unknown>>; run?: Record<string, unknown> };
+      if (payload.runs) payload.runs = payload.runs.map((run) => ({ ...run, status }));
+      if (payload.run) payload.run = { ...payload.run, status };
+      await route.fulfill({ response, json: payload });
+    });
+    try {
+      await page.goto(url);
+      await page.getByRole("button", { name: "Run", exact: true }).click();
+      await page.locator(".task-card-main").first().waitFor();
+      assert.equal(await page.getByRole("tab", { name: "running", exact: true }).getAttribute("aria-selected"), "true");
+
+      const refreshed = page.waitForResponse((response) => (
+        new URL(response.url()).pathname === "/api/runs"
+        && new URL(response.url()).searchParams.get("representation") === "summary"
+      ));
+      status = "done";
+      await refreshed;
+      await page.locator("#nav").getByText("No running runs.", { exact: true }).waitFor();
+      assert.equal(await page.locator(".task-card-main").count(), 0);
+      await page.getByRole("tab", { name: "done", exact: true }).click();
+      await page.locator(".task-card-main").first().waitFor();
+      assert.equal(await page.getByRole("tab", { name: "done", exact: true }).getAttribute("aria-selected"), "true");
+    } finally {
+      await page.close();
+    }
+  });
+});
+
 test("missing Run detail is reported as not found", async () => {
   await withResponsiveView(async (_browser, url) => {
     const response = await fetch(`${url}/api/runs/run-missing`);
@@ -800,14 +834,12 @@ test("View deep links restore Memory, Run, and browser history", async () => {
       await selectedDetailLoaded;
       await page.waitForLoadState("networkidle");
       assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
-      const backDetailLoaded = page.waitForResponse(
-        (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
-      );
       await page.evaluate(() => history.back());
       await page.waitForURL(url + "/tasks");
-      await backDetailLoaded;
       await page.waitForLoadState("networkidle");
       assert.equal(new URL(page.url()).pathname, "/tasks");
+      await page.locator("#nav").getByText("No running runs.", { exact: true }).waitFor();
+      assert.equal(await page.locator(".task-card-main").count(), 0);
       const forwardDetailLoaded = page.waitForResponse(
         (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
       );

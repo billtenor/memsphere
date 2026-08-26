@@ -48,3 +48,36 @@ test("market state compares current canonical Memory by raw file bytes", async (
     assert.equal(item?.status, "different");
   });
 });
+
+test("renaming a market Memory detaches it while retaining the old name as an alias reports a conflict", async () => {
+  await withMemoryRoot(async (root) => {
+    const bundled = (await readBundledMarketMemories())[0]!;
+    const canonicalLine = `  - ${bundled.names[0]}\n`;
+    const renamed = bundled.source.toString("utf8").replace(
+      /names:\n(?:  - .*\n)+/,
+      "names:\n  - personalized-market-memory\n"
+    );
+    await writeFile(join(root, bundled.kind, "personalized-market-memory.yaml"), renamed);
+    let item = (await listMemoryMarket(root)).find((candidate) => candidate.reference === bundled.reference);
+    assert.equal(item?.status, "not_imported");
+
+    const conflicting = renamed.replace("  - personalized-market-memory\n", `  - personalized-market-memory\n${canonicalLine}`);
+    await writeFile(join(root, bundled.kind, "personalized-market-memory.yaml"), conflicting);
+    item = (await listMemoryMarket(root)).find((candidate) => candidate.reference === bundled.reference);
+    assert.equal(item?.status, "name_conflict");
+  });
+});
+
+test("market import reuses an existing personalized dependency without overwriting it", async () => {
+  await withMemoryRoot(async (root) => {
+    const dependency = (await readBundledMarketMemories()).find(
+      (item) => item.reference === "statements/memsphere-repository-development-rules"
+    );
+    assert(dependency);
+    await writeFile(join(root, dependency.path), Buffer.concat([dependency.source, Buffer.from("\n# personalized\n")]));
+    const plan = await planMemoryMarketImport(root, "procedures/code-branch-review-and-remediation");
+    assert.deepEqual(plan.targets.map((target) => target.reference), [
+      "procedures/code-branch-review-and-remediation"
+    ]);
+  });
+});
