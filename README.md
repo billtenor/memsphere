@@ -199,6 +199,8 @@ memsphere project create my-project --bind
 
 `--bind` 只是在当前工作目录与 Project 之间建立关联，不会把 Memory 复制进工作目录。即使临时目录或 Git worktree 被删除，Project 中的 Memory 仍然存在。
 
+创建过程中会自动安装当前版本内置的 System Memory，并通过首笔受控 ChangeSet 发布到 Managed Store。
+
 修改 Managed Memory 时，Memsphere 会创建 ChangeSet。完成编辑后先校验，再发布：
 
 ```bash
@@ -216,7 +218,7 @@ cd <你的 Git 仓库>
 memsphere project create my-project --embedded .memsphere/memory --bind
 ```
 
-这里的 `.memsphere/memory` 是仓库内的 Memory 目录。Agent 在不同 Git worktree 中工作时，会读取和修改当前 worktree 对应版本的 Memory。
+这里的 `.memsphere/memory` 是仓库内的 Memory 目录。创建过程中会自动安装当前版本内置的 System Memory，形成留在当前 worktree 中、可由 Git 审阅的文件差异；Memsphere 不会自动 stage 或 commit。Agent 在不同 Git worktree 中工作时，会读取和修改当前 worktree 对应版本的 Memory。
 
 修改后使用 Memsphere 校验，再通过正常的 Git 工作流提交：
 

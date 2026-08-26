@@ -108,7 +108,7 @@ flow:
         type: boolean
     do:
       - !action
-        action: 读取 memsphere-memory、memsphere-concept、memsphere-statement、memsphere-schema 与 memsphere-procedure，一次性说明当前版本能力、四类 Memory 的职责与协作方式，以及当前 Project 的 Managed/Embedded 类型。
+        action: 读取 memsphere-memory、memsphere-concept、memsphere-statement、memsphere-schema 与 memsphere-procedure，一次性说明当前版本能力、四类 Memory 的职责与协作方式，以及当前 Project 的 Managed/Embedded 类型；说明创建两类 Project 时都会自动安装 System Memory，Managed 通过首笔 ChangeSet 发布，Embedded 写入当前 Git worktree 并由正常 Git 流程审阅和集成。
         actor: agent
         asserts:
           - 必须说明当前版本首先实现 Memory，并列出 Project、Run、Artifact、Review、ChangeSet、View 与 Skill 接入；这些是完整愿景的第一块地基，不是四类资产已经全部完成。
