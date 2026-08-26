@@ -245,13 +245,13 @@ test("Embedded Project reuses the current repository without nested Git", async 
     process.env.MEMSPHERE_HOME = home;
     process.chdir(workspace);
     await projectCreateCommand("embedded", { embedded: memoryRoot, bind: true });
-    await projectRepairCommand("embedded");
     assert.deepEqual(
       (await readAllMemoryFiles(memoryRoot))
         .map((file) => relative(memoryRoot, file.path).replaceAll("\\", "/"))
         .sort(),
       [...(await readReservedMemoryManifest()).system_memory.install].sort()
     );
+    assert.equal(await gitOutput(["diff", "--cached", "--name-only"], workspace), "");
     const registry = await readProjectRegistry(home);
     const config = JSON.parse(await readFile(join(registry.projects.embedded.root, "config.json"), "utf8"));
     assert.deepEqual(config.store, {
@@ -273,6 +273,39 @@ test("Embedded Project reuses the current repository without nested Git", async 
   }
 });
 
+test("Embedded Project creation rolls back registration when System Memory bootstrap conflicts", async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-embedded-bootstrap-conflict-"));
+  const home = join(fixture, "home");
+  const workspace = join(fixture, "workspace");
+  const memoryRoot = join(workspace, ".memsphere", "memory");
+  const conflictPath = join(memoryRoot, "concepts", "memsphere-memory.yaml");
+  const conflictSource = withCurrentMemorySyntax("!concept\nnames: [user-memory]\ndefines: [User-owned Memory.]\n");
+  const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME };
+  try {
+    await mkdir(dirname(conflictPath), { recursive: true });
+    await writeFile(conflictPath, conflictSource);
+    await runGit(["init", "-b", "master"], { cwd: workspace });
+    process.env.MEMSPHERE_HOME = home;
+    process.chdir(workspace);
+
+    await assert.rejects(
+      projectCreateCommand("embedded-conflict", { embedded: memoryRoot, bind: true }),
+      /System Memory install path conflict.*concepts\/memsphere-memory\.yaml.*concepts\/user-memory/
+    );
+
+    const registry = await readProjectRegistry(home);
+    assert.equal(registry.projects["embedded-conflict"], undefined);
+    assert.deepEqual(registry.workspaces, {});
+    await assert.rejects(access(join(home, "projects", "embedded-conflict")), /ENOENT/);
+    assert.equal(await readFile(conflictPath, "utf8"), conflictSource);
+  } finally {
+    process.chdir(previous.cwd);
+    if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;
+    else process.env.MEMSPHERE_HOME = previous.home;
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
 test("Embedded System Memory repair creates, updates, and deletes only as worktree changes", async () => {
   const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-embedded-repair-"));
   const home = join(fixture, "home");
@@ -282,7 +315,11 @@ test("Embedded System Memory repair creates, updates, and deletes only as worktr
   try {
     await mkdir(workspace);
     await runGit(["init", "-b", "master"], { cwd: workspace });
-    await installBundledSystemMemory(memoryRoot);
+    await mkdir(memoryRoot, { recursive: true });
+
+    process.env.MEMSPHERE_HOME = home;
+    process.chdir(workspace);
+    await projectCreateCommand("embedded-repair", { embedded: memoryRoot, bind: true });
     await runGit(["add", ".memsphere/memory"], { cwd: workspace });
     await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "install system memory"], { cwd: workspace });
 
@@ -295,9 +332,6 @@ test("Embedded System Memory repair creates, updates, and deletes only as worktr
     await runGit(["add", ".memsphere/memory"], { cwd: workspace });
     await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "drift system memory"], { cwd: workspace });
 
-    process.env.MEMSPHERE_HOME = home;
-    process.chdir(workspace);
-    await projectCreateCommand("embedded-repair", { embedded: memoryRoot, bind: true });
     const headBefore = await gitOutput(["rev-parse", "HEAD"], workspace);
     await projectRepairCommand("embedded-repair");
 
@@ -414,17 +448,23 @@ test("Embedded System Memory repair rejects ignored targets", async () => {
   const targetPath = join(memoryRoot, "concepts", "memsphere-framework.yaml");
   const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME };
   try {
-    await mkdir(workspace);
+    await mkdir(memoryRoot, { recursive: true });
     await runGit(["init", "-b", "master"], { cwd: workspace });
-    await writeFile(join(workspace, ".gitignore"), ".memsphere/memory/\n");
-    await runGit(["add", ".gitignore"], { cwd: workspace });
-    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "ignore embedded memory"], { cwd: workspace });
-    await installBundledSystemMemory(memoryRoot);
-    await writeFile(targetPath, `${await readFile(targetPath, "utf8")}\n# ignored drift\n`);
-
     process.env.MEMSPHERE_HOME = home;
     process.chdir(workspace);
     await projectCreateCommand("embedded-ignored", { embedded: memoryRoot, bind: true });
+    await runGit(["add", ".memsphere/memory"], { cwd: workspace });
+    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "install system memory"], { cwd: workspace });
+    await rm(targetPath);
+    await runGit(["add", ".memsphere/memory"], { cwd: workspace });
+    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "remove repair target"], { cwd: workspace });
+    await writeFile(join(workspace, ".gitignore"), ".memsphere/memory/concepts/memsphere-framework.yaml\n");
+    await runGit(["add", ".gitignore"], { cwd: workspace });
+    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "ignore repair target"], { cwd: workspace });
+    await writeFile(
+      targetPath,
+      `${await readFile(join(bundledReservedMemoryRoot(), "concepts", "memsphere-framework.yaml"), "utf8")}\n# ignored drift\n`
+    );
 
     await assert.rejects(projectRepairCommand("embedded-ignored"), /target has uncommitted changes/);
     assert.match(await readFile(targetPath, "utf8"), /ignored drift/);
@@ -444,9 +484,13 @@ test("Embedded System Memory repair validates the complete candidate before writ
   const targetPath = join(memoryRoot, "concepts", "memsphere-framework.yaml");
   const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME };
   try {
-    await mkdir(workspace);
+    await mkdir(memoryRoot, { recursive: true });
     await runGit(["init", "-b", "master"], { cwd: workspace });
-    await installBundledSystemMemory(memoryRoot);
+    process.env.MEMSPHERE_HOME = home;
+    process.chdir(workspace);
+    await projectCreateCommand("embedded-validation", { embedded: memoryRoot, bind: true });
+    await runGit(["add", ".memsphere/memory"], { cwd: workspace });
+    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "install system memory"], { cwd: workspace });
     const drifted = `${await readFile(targetPath, "utf8")}\n# committed drift\n`;
     await writeFile(targetPath, drifted);
     await writeFile(
@@ -455,9 +499,6 @@ test("Embedded System Memory repair validates the complete candidate before writ
     );
     await runGit(["add", ".memsphere/memory"], { cwd: workspace });
     await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "invalid candidate fixture"], { cwd: workspace });
-    process.env.MEMSPHERE_HOME = home;
-    process.chdir(workspace);
-    await projectCreateCommand("embedded-validation", { embedded: memoryRoot, bind: true });
 
     await assert.rejects(projectRepairCommand("embedded-validation"), /repair validation failed/);
     assert.equal(await readFile(targetPath, "utf8"), drifted);
@@ -480,16 +521,16 @@ test("Embedded System Memory repair never stages through a symbolic-link kind di
   try {
     await mkdir(memoryRoot, { recursive: true });
     await mkdir(outsideConcepts);
-    for (const kind of ["statements", "procedures", "schemas"]) {
-      await mkdir(join(memoryRoot, kind));
-    }
-    await symlink(outsideConcepts, join(memoryRoot, "concepts"), "dir");
     await runGit(["init", "-b", "master"], { cwd: workspace });
-    await runGit(["add", ".memsphere/memory"], { cwd: workspace });
-    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "symlink memory kind"], { cwd: workspace });
     process.env.MEMSPHERE_HOME = home;
     process.chdir(workspace);
     await projectCreateCommand("embedded-symlink", { embedded: memoryRoot, bind: true });
+    await runGit(["add", ".memsphere/memory"], { cwd: workspace });
+    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "install system memory"], { cwd: workspace });
+    await rm(join(memoryRoot, "concepts"), { recursive: true });
+    await symlink(outsideConcepts, join(memoryRoot, "concepts"), "dir");
+    await runGit(["add", "-A", ".memsphere/memory"], { cwd: workspace });
+    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "replace concepts with symlink"], { cwd: workspace });
 
     await assert.rejects(projectRepairCommand("embedded-symlink"), /symbolic links are not allowed/);
     assert.deepEqual(await readdir(outsideConcepts), []);
@@ -509,18 +550,19 @@ test("Embedded System Memory repair validates a no-op Store before reporting suc
   const memoryRoot = join(workspace, ".memsphere", "memory");
   const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME };
   try {
-    await mkdir(workspace);
+    await mkdir(memoryRoot, { recursive: true });
     await runGit(["init", "-b", "master"], { cwd: workspace });
-    await installBundledSystemMemory(memoryRoot);
+    process.env.MEMSPHERE_HOME = home;
+    process.chdir(workspace);
+    await projectCreateCommand("embedded-noop-validation", { embedded: memoryRoot, bind: true });
+    await runGit(["add", ".memsphere/memory"], { cwd: workspace });
+    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "install system memory"], { cwd: workspace });
     await writeFile(
       join(memoryRoot, "concepts", "invalid-alias.yaml"),
       withCurrentMemorySyntax("!concept\nnames: [invalid-alias, Memory]\ndefines: [Conflicting alias.]\n")
     );
     await runGit(["add", ".memsphere/memory"], { cwd: workspace });
     await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "invalid no-op fixture"], { cwd: workspace });
-    process.env.MEMSPHERE_HOME = home;
-    process.chdir(workspace);
-    await projectCreateCommand("embedded-noop-validation", { embedded: memoryRoot, bind: true });
 
     await assert.rejects(projectRepairCommand("embedded-noop-validation"), /repair validation failed/);
     assert.equal(await gitOutput(["status", "--short"], workspace), "");
@@ -540,18 +582,17 @@ test("Embedded System Memory repair rejects install path identity reuse before w
   const occupiedPath = join(memoryRoot, "concepts", "memsphere-memory.yaml");
   const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME };
   try {
-    await mkdir(dirname(occupiedPath), { recursive: true });
-    for (const kind of ["statements", "procedures", "schemas"]) {
-      await mkdir(join(memoryRoot, kind), { recursive: true });
-    }
-    const userMemory = withCurrentMemorySyntax("!concept\nnames: [user-memory]\ndefines: [User-owned Memory.]\n");
-    await writeFile(occupiedPath, userMemory);
+    await mkdir(memoryRoot, { recursive: true });
     await runGit(["init", "-b", "master"], { cwd: workspace });
-    await runGit(["add", ".memsphere/memory"], { cwd: workspace });
-    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "path conflict fixture"], { cwd: workspace });
     process.env.MEMSPHERE_HOME = home;
     process.chdir(workspace);
     await projectCreateCommand("embedded-conflict", { embedded: memoryRoot, bind: true });
+    await runGit(["add", ".memsphere/memory"], { cwd: workspace });
+    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "install system memory"], { cwd: workspace });
+    const userMemory = withCurrentMemorySyntax("!concept\nnames: [user-memory]\ndefines: [User-owned Memory.]\n");
+    await writeFile(occupiedPath, userMemory);
+    await runGit(["add", ".memsphere/memory"], { cwd: workspace });
+    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "path conflict fixture"], { cwd: workspace });
 
     await assert.rejects(projectRepairCommand("embedded-conflict"), /install path conflict.*concepts\/memsphere-memory\.yaml/);
     assert.equal(await readFile(occupiedPath, "utf8"), userMemory);
@@ -591,7 +632,6 @@ test("Embedded Project created from a linked worktree records the main worktree"
       repository_path: await realpath(main),
       memory_path: ".memsphere/memory"
     });
-    await projectRepairCommand("linked-embedded");
     assert.deepEqual(
       await readFile(join(linked, ".memsphere", "memory", "concepts", "memsphere-memory.yaml")),
       await readFile(join(bundledReservedMemoryRoot(), "concepts", "memsphere-memory.yaml"))

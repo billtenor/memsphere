@@ -342,8 +342,16 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
         const element = document.querySelector(".markdown-table-scroll");
         return element instanceof HTMLElement && element.scrollWidth > element.clientWidth;
       });
-      await scrollBox.evaluate((element) => { element.scrollLeft = 240; });
-      assert(await scrollBox.evaluate((element) => element.scrollLeft > 0));
+      const scrollState = await scrollBox.evaluate((element) => {
+        element.scrollLeft = 240;
+        return {
+          clientWidth: element.clientWidth,
+          scrollLeft: element.scrollLeft,
+          scrollWidth: element.scrollWidth
+        };
+      });
+      assert(scrollState.scrollWidth > scrollState.clientWidth);
+      assert(scrollState.scrollLeft > 0);
       await assertPageDoesNotOverflow(narrowPage);
     } finally {
       await narrowPage.close();
