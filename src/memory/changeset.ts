@@ -860,7 +860,10 @@ export async function failMemoryChange(
   return failed;
 }
 
-export async function validateMemoryChange(changeId?: string): Promise<MemoryChangeValidationResult> {
+export async function validateMemoryChange(
+  changeId?: string,
+  options: { onLockWait?: () => void } = {}
+): Promise<MemoryChangeValidationResult> {
   const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   const workspace = await resolveWorkspaceIdentity();
   return withFileLock(memoryMutationLock(initialContext.primary), async () => {
@@ -989,7 +992,7 @@ export async function validateMemoryChange(changeId?: string): Promise<MemoryCha
     } finally {
       await rm(resolve(captured.candidateRoot, ".."), { recursive: true, force: true });
     }
-  });
+  }, { onWait: options.onLockWait });
 }
 
 async function resolveSingleManagedActive(project: ResolvedProject, workspace: WorkspaceIdentity): Promise<string> {
@@ -2096,7 +2099,9 @@ export async function pushMemory(): Promise<void> {
   await runGit(["push", "origin", context.primary.config.store.branch], { cwd: context.primary.memoryRoot });
 }
 
-export async function syncMemory(): Promise<{ revision?: string; change?: MemoryChangeSet; candidateRoot?: string }> {
+export async function syncMemory(
+  options: { onLockWait?: () => void } = {}
+): Promise<{ revision?: string; change?: MemoryChangeSet; candidateRoot?: string }> {
   const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   assertManaged(initialContext.primary);
   const source = await prepareSync(initialContext.primary);
@@ -2104,7 +2109,7 @@ export async function syncMemory(): Promise<{ revision?: string; change?: Memory
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     assertManaged(context.primary);
     return syncMemoryLocked(context.primary, source);
-  });
+  }, { onWait: options.onLockWait });
 }
 
 type PreparedSync = { upstream: string; mergeParent: string };

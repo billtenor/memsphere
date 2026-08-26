@@ -5,6 +5,12 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 const inProcessLocks = new Map<string, Promise<void>>();
 
+export type FileLockOptions = {
+  timeoutMs?: number;
+  staleMs?: number;
+  onWait?: () => void;
+};
+
 export async function atomicWriteFile(path: string, content: string, mode = 0o600): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temporaryPath = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
@@ -50,19 +56,27 @@ export async function atomicWriteJson(path: string, value: unknown): Promise<voi
 export async function withFileLock<T>(
   lockPath: string,
   action: () => Promise<T>,
-  options: { timeoutMs?: number; staleMs?: number } = {}
+  options: FileLockOptions = {}
 ): Promise<T> {
   const key = resolve(lockPath);
+  const queuedBehindInProcessLock = inProcessLocks.has(key);
   const previous = inProcessLocks.get(key) ?? Promise.resolve();
+  let waitReported = false;
+  const reportWait = () => {
+    if (waitReported) return;
+    waitReported = true;
+    options.onWait?.();
+  };
   let release!: () => void;
   const current = new Promise<void>((resolveCurrent) => {
     release = resolveCurrent;
   });
   const tail = previous.then(() => current);
   inProcessLocks.set(key, tail);
-  await previous;
   try {
-    return await withFilesystemLock(lockPath, action, options);
+    if (queuedBehindInProcessLock) reportWait();
+    await previous;
+    return await withFilesystemLock(lockPath, action, { ...options, onWait: reportWait });
   } finally {
     release();
     if (inProcessLocks.get(key) === tail) inProcessLocks.delete(key);
@@ -72,7 +86,7 @@ export async function withFileLock<T>(
 async function withFilesystemLock<T>(
   lockPath: string,
   action: () => Promise<T>,
-  options: { timeoutMs?: number; staleMs?: number }
+  options: FileLockOptions
 ): Promise<T> {
   const timeoutMs = options.timeoutMs ?? 10_000;
   const staleMs = options.staleMs ?? 60_000;
@@ -88,6 +102,7 @@ async function withFilesystemLock<T>(
       break;
     } catch (error) {
       if (!isCode(error, "EEXIST")) throw error;
+      options.onWait?.();
       await removeStaleLock(lockPath, staleMs);
       if (Date.now() >= deadline) throw new Error(`timed out waiting for lock: ${lockPath}`);
       await sleep(25);

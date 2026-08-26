@@ -689,8 +689,9 @@ test("initial Memory loading also loads associated ChangeSets", () => {
 });
 
 test("task polling does not replace active editors or open Artifact Review selectors", () => {
-  assert.match(browserHtml, /if \(hasActiveTaskInteraction\(\)\) \{\s*syncArtifactReviewActivities\(\)\.catch\(console\.error\);\s*\} else \{/);
+  assert.match(browserHtml, /const kind = hasActiveTaskInteraction\(\) \? "activity" : "runs";\s*const polling = kind === "activity"\s*\? syncArtifactReviewActivities\(\)\s*: loadRuns\(\)\.then/);
   assert.match(browserHtml, /loadRuns\(\)\.then\(changed => \{\s*if \(!changed\) return;[\s\S]*if \(hasActiveTaskInteraction\(\)\) \{[\s\S]*taskPollingRenderPending = true/);
+  assert.match(browserHtml, /polling\.catch\(console\.error\)\.finally\(\(\) => \{\s*window\.dispatchEvent\(new CustomEvent\("memsphere:view-poll-settled"/);
   assert.match(browserHtml, /function refreshAgentActivityDom\([\s\S]*existing\.replaceWith\(renderAgentActivity/);
   assert.match(browserHtml, /artifact-review-select-menu:not\(\[hidden\]\)/);
   assert.match(browserHtml, /document\.activeElement\?\.matches\?\.\("\.artifact-review-select"\)/);
