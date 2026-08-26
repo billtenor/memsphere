@@ -5,6 +5,7 @@ names:
   - Schema
 defines:
   - memsphere 中用于定义文档、数据或协作产物内容结构的 Memory。
+  - 在个性化软件的语义资产中，Schema 让输入、中间结果和最终交付拥有可共享、可验证的结构，而不只是一段无法稳定检查的自然语言输出。
   - Schema 让协作者按共同的结构填写或验证产物，不用于表达领域术语或独立事实。
   - fields 共同定义产物包含的字段；字段是结构要求，不是可以任意选择的示例项。
   - Artifact 与 Schema 都可以声明 type 和 format；Schema 还使用 fields、item、items 和 Repeat 描述当前值内部的结构。

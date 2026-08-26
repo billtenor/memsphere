@@ -17,6 +17,9 @@ test("skill init installs only the unified memsphere skill", async () => {
 
     const source = (await readFile(join(dir, "memsphere", "SKILL.md"), "utf8")).replace(/\r\n/g, "\n");
     assert.match(source, /^---\nname: memsphere\n/);
+    assert.match(source, /AI 时代个性化软件的运行环境/);
+    assert.match(source, /Memsphere 不是 Agent/);
+    assert.match(source, /当前版本首先实现 Memory/);
     assert.match(source, /memsphere memory list/);
     assert.match(source, /memsphere memory read/);
     assert.match(source, /memsphere run start/);

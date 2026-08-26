@@ -4,10 +4,11 @@ names:
   - memsphere-memory
   - Memory
 defines:
-  - memsphere 中为了跨越单次对话或运行而被有意沉淀，并可供 agent 重复理解、引用或执行的语义实体。
+  - 个性化软件中为了跨越单次对话或运行而被有意沉淀，并可供 Agent 重复理解、引用或执行的语义资产。
+  - Memory 是 Agent 理解并进入个性化软件的入口，也是 Memsphere 当前版本首先实现的资产；它不等同于完整的 Memsphere，也不等同于包含 CLI、数据和界面的完整个性化软件。
   - Memory 是各种具体记忆类型的抽象上位概念；Concept、Statement、Procedure 和 Schema 是当前四种具体类型。
   - Memory 的物理路径由 Project 的 Store Provider 解析，物理路径差异不改变 Memory 的逻辑身份。
   - 一段信息只有被有意沉淀供后续复用时才成为 Memory；单次任务产物、临时对话或运行状态不会因此自动成为 Memory。
   - memsphere 使用带 YAML tag 的 mapping 描述 Memory；根节点 tag 表示具体类型，defines 只包含定义该 Memory 含义、用途和边界的非空文本。
   - 每份正式 Memory 使用顶层 syntax 字段声明不可变的 Memsphere YAML 语法版本；未声明时固定按历史迁移起点 start 解释。
-  - 初次理解 memsphere 时，应从 Memory 开始，依次读取 Concept、Statement、Procedure 和 Schema。
+  - 需要理解当前版本的语义资产时，应从 Memory 开始，依次读取 Concept、Statement、Procedure 和 Schema；需要理解 Memsphere 的完整产品定位时，还必须读取 memsphere-personalized-software 与 memsphere-framework。

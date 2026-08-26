@@ -5,6 +5,7 @@ names:
   - Procedure
 defines:
   - memsphere 中用于描述一个任务从开始到结束如何执行的 Memory。
+  - 在个性化软件的语义资产中，Procedure 把反复出现的工作组织为可执行、可检查、可复用的运行入口，并通过 Run 与 Artifact 留下过程和结果。
   - Procedure 通过 goals 描述目标，通过 asserts 声明全局约束，并通过 flow 安排有序 Action、分支、循环和对子流程的调用。
   - 同一个 Procedure 可以多次执行，每次执行形成相互独立的 Run；Run 记录 Procedure 名称、当前步骤、步骤产物和最终交付物。
   - Artifact Review 使用 Procedure 本地 Slot 表达评审视角，Actor Binding 与 Decision Policy 在创建 Run 时选择并冻结。

@@ -119,6 +119,39 @@ test("Managed Project System Memory repair validates and publishes automatically
     await projectCreateCommand("existing", { bind: true });
     assert.equal(await prepareManagedSystemMemoryChange(), undefined);
 
+    const registry = await readProjectRegistry(home);
+    const projectRoot = registry.projects.existing.root;
+    const memoryRoot = join(projectRoot, "memory");
+    const personalizedSoftwarePath = join(memoryRoot, "concepts", "memsphere-personalized-software.yaml");
+    await rm(personalizedSoftwarePath);
+    const legacyTargets = [
+      {
+        relativePath: join("concepts", "memsphere-framework.yaml"),
+        currentText: "  - Memsphere 是 AI 时代个性化软件的运行环境：它为软件提供相对稳定的语言、运行时和资产管理方式，让软件能够从自然语言开始并在真实使用中持续演化。",
+        legacyText: "  - Memsphere 是维护、检索和遵循 Memory 的框架。"
+      },
+      {
+        relativePath: join("procedures", "memsphere-tutorial-chapter-01.yaml"),
+        currentText: "  - 面向首次使用 Memsphere 的 Human，从一个真实需求出发理解个性化软件、Prompt/Skill/Memsphere 的适用边界、完整愿景与当前能力，并在 View 的当前教学 Run 中完成一次可观察的入门闭环。",
+        legacyText: "  - 面向首次使用 Memsphere 的 Human，介绍四类 Memory。"
+      }
+    ];
+    for (const { relativePath, currentText, legacyText } of legacyTargets) {
+      const path = join(memoryRoot, relativePath);
+      const source = await readFile(path, "utf8");
+      const legacySource = source.replace(currentText, legacyText);
+      assert.notEqual(legacySource, source, `test fixture did not stale ${relativePath}`);
+      await writeFile(path, legacySource);
+    }
+    await runGit(["add", "-A"], { cwd: memoryRoot });
+    await runGit(["commit", "-m", "Simulate Project created before new System Memory"], { cwd: memoryRoot });
+    const legacyRevision = await runGit(["rev-parse", "HEAD"], { cwd: memoryRoot }).then((result) => result.stdout);
+    const legacyConfigPath = join(projectRoot, "config.json");
+    const legacyConfig = JSON.parse(await readFile(legacyConfigPath, "utf8"));
+    legacyConfig.store.published_revision = legacyRevision;
+    await writeFile(legacyConfigPath, `${JSON.stringify(legacyConfig, null, 2)}\n`);
+    await assert.rejects(access(personalizedSoftwarePath), /ENOENT/);
+
     const localEdit = await editMemories({ references: ["concepts/memsphere-memory"] });
     const localTarget = localEdit.change.targets[0];
     const localCandidate = join(localEdit.candidateRoot, localTarget.path);
@@ -127,8 +160,15 @@ test("Managed Project System Memory repair validates and publishes automatically
 
     await projectRepairCommand("existing");
     assert.equal(await prepareManagedSystemMemoryChange("existing"), undefined);
-    const registry = await readProjectRegistry(home);
-    const projectRoot = registry.projects.existing.root;
+    for (const relativePath of [
+      join("concepts", "memsphere-personalized-software.yaml"),
+      ...legacyTargets.map((target) => target.relativePath)
+    ]) {
+      assert.equal(
+        await readFile(join(memoryRoot, relativePath), "utf8"),
+        await readFile(join(bundledReservedMemoryRoot(), relativePath), "utf8")
+      );
+    }
     const repairedConfig = JSON.parse(await readFile(join(projectRoot, "config.json"), "utf8")) as {
       store: { published_revision: string };
     };
