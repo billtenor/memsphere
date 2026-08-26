@@ -137,13 +137,17 @@ README 同时定义了从 Prompt 到 Skill、再到 Memsphere 的适用边界，
 - [x] 补充第一章流程草图，确认研究助手/用户场景、Human checkpoint 和每步 Artifact。
 - [x] 重写 bundled 第一章 Procedure，补充第一章教学契约与打包测试。
 - [x] 补充产品定位一致性与 System Memory 测试。
-- [ ] 执行第一章 Managed、Embedded 场景验证和一次真实教学 Run 体验，完成第一章里程碑验收。
+- [x] 执行第一章 Managed、Embedded 场景验证和一次真实教学 Run 体验，完成第一章里程碑验收。
 - [x] 执行完整校验、回归和构建。
 - [ ] 整理验收证据并交由需求方确认。
 
 ## 验收结果
 
-内置 Memory 产品语义统一、第一章 Procedure 重构、Skill/manifest 同步和自动化契约测试已经实现。本次分支修复后，`memsphere validate`、定向 `project-command` 测试、`npm run typecheck`、`npm run build` 和 `git diff --check` 均通过；授权环境中的串行完整测试为 439 passed、0 failed、1 个原生 Windows 条件 skip。第一章真实 Run 体验和需求方最终确认仍待完成，因此 Change 保持 `doing`。
+内置 Memory 产品语义统一、第一章 Procedure 重构、Skill/manifest 同步和自动化契约测试已经实现。本次分支修复后，`memsphere validate`、定向 `project-command` 测试、`npm run typecheck`、`npm run build` 和 `git diff --check` 均通过；授权环境中的串行完整测试为 439 passed、0 failed、1 个原生 Windows 条件 skip。
+
+2026-08-26 完成真实第一章 Run `run-20260826-042624z-10e8c806`，最终状态为 `done`。Human 使用“每天帮我筛选值得读的 AI 论文”作为真实场景，完成产品定位、软件生长模型、当前能力与四类 Memory、Embedded Project 和 View 实践的全部 checkpoint，并在 View 中确认当前步骤及“Human 真实场景”步骤产物；最终产物给出从最小 Memory 开始、未来按需生长 CLI、数据和个性化界面的建议。过程中没有执行 Memory edit/publish、ChangeSet、Artifact Review、Provider、Run abandon 或 Archive，也没有出现循环卡死。
+
+本次体验同时发现一项待处置问题：初始 View 指引要求 Human 寻找内部术语 `Run` 和 `Artifact`，而 View 实际面向用户展示“任务”和“步骤产物”，导致 Human 误以为页面内容不匹配；解释术语映射并改用界面用语后，Human 顺利完成观察。该问题尚未在代码分支评审流程中完成独立处置与修复，需求方最终确认也仍待完成，因此 Change 保持 `doing`。
 
 ## 需求更新记录
 
@@ -151,3 +155,4 @@ README 同时定义了从 Prompt 到 Skill、再到 Memsphere 的适用边界，
 - 2026-08-25，Run `run-20260825-053922z-dbf0ee80`：Human 确认新增独立个性化软件 Concept、全量审计但按实际影响修改、保留 `memsphere-framework` identity；同时把第二章从最小一致性修正扩大为完整重构，并明确先验收第一章、再实施第二章。状态保持 `todo`，尚未开始实现。
 - 2026-08-25，Run `run-20260825-055009z-49ece6ad`：启动敏捷需求开发的第一章里程碑，当前迭代范围为全部内置 Memory 产品语义统一与第一章重构；第二章保留为下一独立迭代。产品需求契约已通过，状态更新为 `doing`。
 - 2026-08-26，Run `run-20260825-155733z-7de68ce6`：分支评审确认旧文档仍把第二章混入当前交付，并发现 Managed repair 测试的旧内容替换已为空操作。经项目负责人批准，将本 Change 全面收敛到“内置产品语义统一 + 第一章重构”，第二章保留为后续独立需求；同时增强 repair 回归测试并完成完整自动化验证。
+- 2026-08-26，Run `run-20260826-042624z-10e8c806`：以“每天帮我筛选值得读的 AI 论文”为真实场景完成第一章 Human 体验与 View 观察，验证主流程可以正常完成；同时发现教学指引使用 `Run`/`Artifact`、View 使用“任务”/“步骤产物”的术语落差，已记录并等待下一轮评审处置。
