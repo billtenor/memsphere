@@ -18,11 +18,20 @@ test("project names are readable stable identifiers", () => {
 test("Registry updates serialize concurrent writers", async () => {
   const home = await mkdtemp(join(tmpdir(), "memsphere-registry-"));
   try {
+    let activeUpdaters = 0;
+    let maximumActiveUpdaters = 0;
     await Promise.all(Array.from({ length: 8 }, (_, index) => updateProjectRegistry(home, async (registry) => {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      registry.projects[`p-${index}`] = { root: join(home, `p-${index}`) };
+      activeUpdaters += 1;
+      maximumActiveUpdaters = Math.max(maximumActiveUpdaters, activeUpdaters);
+      try {
+        await Promise.resolve();
+        registry.projects[`p-${index}`] = { root: join(home, `p-${index}`) };
+      } finally {
+        activeUpdaters -= 1;
+      }
     })));
     const registry = await readProjectRegistry(home);
+    assert.equal(maximumActiveUpdaters, 1);
     assert.equal(Object.keys(registry.projects).length, 8);
   } finally {
     await rm(home, { recursive: true, force: true });

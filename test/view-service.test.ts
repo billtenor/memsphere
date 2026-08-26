@@ -87,13 +87,17 @@ test("start is idempotent while the managed View service is running", async () =
 test("start waits for its child service to publish state", async () => {
   await withTempConfig(async (config) => {
     const childPid = 4321;
+    let publishState = true;
     const started = await startViewService(config, {
       isProcessAlive: () => true,
       spawnProcess: (() => {
-        setTimeout(() => void writeViewServiceState(viewServiceStatePath(config), state(config, childPid, 30003)), 5);
         return { pid: childPid, unref() {} } as ChildProcess;
       }) as never,
-      sleep: async () => new Promise((resolveSleep) => setTimeout(resolveSleep, 5))
+      sleep: async () => {
+        if (!publishState) return;
+        publishState = false;
+        await writeViewServiceState(viewServiceStatePath(config), state(config, childPid, 30003));
+      }
     });
 
     assert.equal(started.pid, childPid);
@@ -118,7 +122,7 @@ test("start fails immediately when its child exits before publishing state", asy
         }) as never,
         sleep: async () => {
           sleepCount += 1;
-          await new Promise((resolveSleep) => setTimeout(resolveSleep, 0));
+          await Promise.resolve();
         }
       }),
       /exited with code 1 before publishing state.*already in use/
@@ -132,18 +136,22 @@ test("managed start does not transport the Settings token through the child envi
     config.view = { host: "0.0.0.0", port: 30002 };
     const childPid = 4321;
     let spawnOptions: Record<string, unknown> | undefined;
+    let publishState = true;
     const started = await startViewService(config, {
       isProcessAlive: () => true,
       spawnProcess: ((...args: unknown[]) => {
         spawnOptions = args[2] as Record<string, unknown>;
-        setTimeout(() => void writeViewServiceState(viewServiceStatePath(config), {
+        return { pid: childPid, unref() {} } as ChildProcess;
+      }) as never,
+      sleep: async () => {
+        if (!publishState) return;
+        publishState = false;
+        await writeViewServiceState(viewServiceStatePath(config), {
           ...state(config, childPid),
           host: "0.0.0.0",
           settingsToken: "a".repeat(43)
-        }), 5);
-        return { pid: childPid, unref() {} } as ChildProcess;
-      }) as never,
-      sleep: async () => new Promise((resolveSleep) => setTimeout(resolveSleep, 5))
+        });
+      }
     });
 
     assert.equal(spawnOptions?.env, undefined);
@@ -174,14 +182,18 @@ test("restart replaces the managed service state", async () => {
     const path = viewServiceStatePath(config);
     await writeViewServiceState(path, state(config, 1234));
     let oldAlive = true;
+    let publishState = true;
     const restarted = await restartViewService(config, {
       isProcessAlive: (pid) => pid === 1234 ? oldAlive : true,
       killProcess: (pid) => { if (pid === 1234) oldAlive = false; },
       spawnProcess: (() => {
-        setTimeout(() => void writeViewServiceState(path, state(config, 4321, 30004)), 5);
         return { pid: 4321, unref() {} } as ChildProcess;
       }) as never,
-      sleep: async () => new Promise((resolveSleep) => setTimeout(resolveSleep, 5))
+      sleep: async () => {
+        if (!publishState) return;
+        publishState = false;
+        await writeViewServiceState(path, state(config, 4321, 30004));
+      }
     });
 
     assert.equal(restarted.pid, 4321);
