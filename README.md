@@ -142,7 +142,28 @@ CLI 因而不是面向人的命令集合，而是优先面向 Agent 的软件能
 
 Windows 用户需要安装 [Git for Windows](https://git-scm.com/download/win)，并确保 `git` 已加入 `PATH`。安装后请重新打开 PowerShell、CMD 或 Git Bash 等受支持 shell。运行 Memsphere 不要求先进入 Git Bash。
 
-### 6.2 安装
+### 6.2 让 Agent 安装并开始教学（推荐）
+
+Memsphere 面向 Agent 使用，安装、初始化和 Project 配置也建议直接交给 Agent 完成。请先让 Agent 进入你希望使用 Memsphere 的工作目录，然后把下面整段指令发给它：
+
+```text
+请帮我在当前工作目录安装并配置 Memsphere，全程由你执行需要的终端命令：
+
+1. 检查 Node.js 20 或更高版本以及 Git 是否可用；如果缺少环境，清楚告诉我需要补什么。
+2. 执行 npm install -g memsphere，然后执行 memsphere skill init --global。
+3. 读取刚安装的 Memsphere Skill 并遵循它。若当前会话没有自动刷新 Skill 列表，请根据安装命令返回的位置直接读取 SKILL.md，继续当前任务，不要仅因此要求我新开会话。
+4. 检查当前目录是否已经绑定 Project。已绑定就复用；未绑定时，询问我要使用 Managed Project 还是 Embedded Project。如果我不确定，推荐并创建 Managed Project，再绑定当前目录。
+5. 执行 memsphere project show 和 memsphere validate，解决可以由你处理的安装或配置问题。
+6. 安装配置成功后不要停在总结。请立即使用 memsphere，发现并完整读取“memsphere 教学流程-第一章”，启动一个有名称的 Run，并按照 Run 返回的当前步骤带我开始教学。
+
+执行过程中，只在确实需要我选择 Project 类型、授权或完成人类步骤时暂停询问我。
+```
+
+这段指令的目标不只是“安装成功”，而是让 Agent 在同一个任务中继续启动第一章教学。教学流程开始后，Agent 会执行可以代劳的步骤，并在必须由你操作或选择时停下来说明。
+
+### 6.3 安装命令参考
+
+下面是 Agent 将执行的核心安装命令，也可以在排查安装问题时手动运行：
 
 ```bash
 npm install -g memsphere
@@ -154,7 +175,7 @@ npm install -g memsphere
 memsphere skill init --global
 ```
 
-### 6.3 选择并创建 Project
+### 6.4 选择并创建 Project
 
 Project 是 Memsphere 中保存 Memory、运行记录和其他软件资产的持久空间。把当前工作目录绑定到一个 Project 后，Agent 就能在这里读取和运行这套个性化软件。
 
@@ -167,7 +188,7 @@ Memsphere 提供两种 Project，最重要的区别是：Memory 要不要跟着�
 
 如果暂时不确定，建议先使用 Managed Project；只有明确希望 Memory 跟随代码仓库时，再选择 Embedded Project。
 
-#### 6.3.1 Managed Project
+#### 6.4.1 Managed Project
 
 进入工作目录，创建并绑定一个 Managed Project：
 
@@ -186,7 +207,7 @@ memsphere memory change validate <change-id>
 memsphere memory publish --change <change-id>
 ```
 
-#### 6.3.2 Embedded Project
+#### 6.4.2 Embedded Project
 
 如果希望 Memory 与代码保存在同一个 Git 仓库中，创建并绑定一个 Embedded Project：
 
@@ -208,7 +229,7 @@ git commit -m "更新 Memory"
 
 Embedded Memory 不使用 `memsphere memory publish`；Memsphere 不会替你提交 Git。
 
-### 6.4 验证 Project 并启动 View
+### 6.5 验证 Project 并启动 View
 
 查看当前绑定的 Project，并验证其中的 Memory：
 
@@ -237,7 +258,7 @@ Managed repair 内部生成受控 ChangeSet、校验完整有效 Memory 并自�
 
 Embedded repair 使用命令所在 Git worktree 的有效 Memory Root。命令先拒绝覆盖计划目标上的未提交修改，在临时目录中校验完整候选 Store，再把通过校验的 System Memory 差异写回当前 worktree；不会执行 commit、push 或 Managed publish。用户使用普通 `git diff` 审阅并按仓库流程集成这些修改。linked worktree 中执行时不会修改主 worktree；无差异时不写文件。
 
-### 6.5 发现并读取 Memory
+### 6.6 发现并读取 Memory
 
 列出当前 Project 可见的全部 Memory，或只列出 Procedure：
 
@@ -252,7 +273,7 @@ memsphere memory list --kind procedures
 memsphere memory read <reference>
 ```
 
-### 6.6 运行第一个 Procedure
+### 6.7 运行第一个 Procedure
 
 读取目标 Procedure 后，启动一次有名称的 Run：
 
