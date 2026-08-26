@@ -26,6 +26,7 @@ test("npm package preserves the memsphere first-use bootstrap contract", async (
     "npm install -g memsphere",
     "memsphere skill init --global",
     "memsphere project create my-project --bind",
+    "After setup succeeds, do not stop with a summary",
     "memsphere-tutorial-chapter-01"
   ]) {
     assert.match(readmeEn, new RegExp(instruction));
@@ -33,5 +34,6 @@ test("npm package preserves the memsphere first-use bootstrap contract", async (
 
   assert.match(readmeEn, /\[简体中文\]\(README\.md\)/);
   assert.match(readmeZhCn, /\[English\]\(README\.en\.md\)/);
+  assert.match(readmeZhCn, /安装配置成功后不要停在总结/);
   assert.match(readmeZhCn, /memsphere 教学流程-第一章/);
 });

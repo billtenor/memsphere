@@ -19,6 +19,7 @@
       "procedures/memsphere-general-task-execution.yaml",
       "procedures/memsphere-procedure-construction.yaml",
       "procedures/memsphere-changeset-comment-processing.yaml",
+      "procedures/memsphere-usage-issue-reporting.yaml",
       "procedures/memsphere-tutorial-chapter-01.yaml",
       "procedures/memsphere-tutorial-chapter-02.yaml"
     ],
