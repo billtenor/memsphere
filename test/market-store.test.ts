@@ -81,3 +81,27 @@ test("market import reuses an existing personalized dependency without overwriti
     ]);
   });
 });
+
+test("unrelated invalid Memory does not block market listing or import planning", async () => {
+  await withMemoryRoot(async (root) => {
+    await writeFile(join(root, "concepts", "broken.yaml"), "!concept\nnames: [\n");
+
+    const market = await listMemoryMarket(root);
+    assert(market.length > 0);
+    const plan = await planMemoryMarketImport(root, "procedures/memsphere-agile-requirement-development");
+    assert.deepEqual(plan.targets.map((target) => target.reference), [
+      "procedures/memsphere-agile-requirement-development"
+    ]);
+
+    const bundled = (await readBundledMarketMemories())[0]!;
+    await writeFile(join(root, bundled.kind, "broken-conflict.yaml"), [
+      `!${bundled.kind.slice(0, -1)}`,
+      "names:",
+      "  - broken-conflict",
+      `  - ${bundled.names[0]}`,
+      "defines: ["
+    ].join("\n"));
+    const conflicted = (await listMemoryMarket(root)).find((item) => item.reference === bundled.reference);
+    assert.equal(conflicted?.status, "name_conflict");
+  });
+});

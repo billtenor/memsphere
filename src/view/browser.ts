@@ -1474,7 +1474,10 @@ export const browserHtml = String.raw`<!doctype html>
         saveSelectedTask();
       }
       const selected = selectedTask();
-      if (options.loadDetail !== false && selected && previous.get(selected.id) !== selected.updatedAt) {
+      if (options.loadDetail !== false && selected && (
+        !state.runDetails.has(selected.id)
+        || previous.get(selected.id) !== selected.updatedAt
+      )) {
         if (hasActiveTaskInteraction()) {
           const detail = state.runDetails.get(selected.id);
           if (detail) Object.assign(selected, detail, { eventCount: detail.events?.length || 0 });

@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { MemoryEntity } from "../memory/ast.js";
 import { collectMemoryReferenceTargets } from "../memory/references.js";
-import { readAllMemoryFiles, type MemoryFile } from "../memory/store.js";
+import {
+  listMemoryFiles,
+  readMemoryFileSummary,
+  type MemoryFileSummary
+} from "../memory/store.js";
+import { memoryKinds } from "../memory/kinds.js";
 import {
   readBundledMarketMemories,
   type BundledMarketMemoryDescriptor
@@ -28,7 +33,7 @@ export type MarketImportTarget = {
 export async function listMemoryMarket(memoryRoot: string): Promise<MarketMemoryItem[]> {
   const [market, projectFiles] = await Promise.all([
     readBundledMarketMemories(),
-    readAllMemoryFiles(memoryRoot)
+    readProjectMemoryIdentities(memoryRoot)
   ]);
   return Promise.all(market.map((item) => marketItem(item, projectFiles)));
 }
@@ -39,7 +44,7 @@ export async function planMemoryMarketImport(
 ): Promise<{ item: MarketMemoryItem; targets: MarketImportTarget[] }> {
   const [market, projectFiles] = await Promise.all([
     readBundledMarketMemories(),
-    readAllMemoryFiles(memoryRoot)
+    readProjectMemoryIdentities(memoryRoot)
   ]);
   const byReference = new Map(market.map((item) => [item.reference, item]));
   const selected = byReference.get(reference);
@@ -83,12 +88,12 @@ export class MarketMemoryNameConflictError extends Error {
 
 async function marketItem(
   market: BundledMarketMemoryDescriptor,
-  projectFiles: readonly MemoryFile[]
+  projectFiles: readonly MemoryFileSummary[]
 ): Promise<MarketMemoryItem> {
   const canonical = projectFiles.find((file) => logicalReference(file) === market.reference);
   const collision = projectFiles.find((file) => file !== canonical
     && file.kind === market.kind
-    && market.names.some((name) => file.entity.names.includes(name)));
+    && market.names.some((name) => file.names.includes(name)));
   if (collision) {
     return {
       reference: market.reference,
@@ -114,6 +119,17 @@ async function marketItem(
   };
 }
 
-function logicalReference(file: MemoryFile): string {
-  return `${file.kind}/${file.entity.names[0]}`;
+async function readProjectMemoryIdentities(memoryRoot: string): Promise<MemoryFileSummary[]> {
+  const files: MemoryFileSummary[] = [];
+  for (const kind of memoryKinds) {
+    for (const path of await listMemoryFiles(memoryRoot, kind)) {
+      const summary = await readMemoryFileSummary(kind, path).catch(() => undefined);
+      if (summary) files.push(summary);
+    }
+  }
+  return files;
+}
+
+function logicalReference(file: MemoryFileSummary): string {
+  return `${file.kind}/${file.names[0]}`;
 }

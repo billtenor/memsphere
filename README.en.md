@@ -235,9 +235,9 @@ The only exception is a `market_import` ChangeSet created from Memory Market in 
 
 #### 6.4.3 Memory Market
 
-Under Memory, View provides a Current Project / Memory Market switch. Memory Market displays officially selected Memory bundled in the npm package, but bundled items are inactive by default and do not enter the current Project Catalog or any Run. Import and Re-import create a ChangeSet so the user can inspect the candidate and decide whether to publish or apply it.
+Under Memory, View provides a Current Project / Memory Market switch. Memory Market displays officially selected Memory bundled in the npm package, but bundled items are inactive by default and do not enter the current Project Catalog or any Run. Import and Re-import create a market ChangeSet; subsequent item-by-item imports in the same Project keep appending to the same active ChangeSet until it is completed or abandoned. The user inspects the combined candidate in that ChangeSet and decides whether to publish or apply it.
 
-Once imported, an item is ordinary user Memory: it can be edited or renamed and does not update automatically with the npm package. View associates the two copies only by the current `<kind>/<canonical-name>` and reports Not imported, Imported · unchanged, Different, or Name conflict. Renaming ends the association. Renaming a bundled item is equivalent to removing the old item and adding a new one. Re-import replaces the same-name Memory with current bundled content and includes only referenced market dependencies missing from the Project; existing dependencies are not overwritten.
+Once imported, an item is ordinary user Memory: it can be edited or renamed and does not update automatically with the npm package. View associates the two copies only by the current `<kind>/<canonical-name>` and reports Not imported, Importing, Imported · unchanged, Imported · different, or Name conflict. Importing links directly to the active market ChangeSet. Renaming ends the association. Renaming a bundled item is equivalent to removing the old item and adding a new one. Re-import replaces the same-name Memory with current bundled content and includes only referenced market dependencies missing from the Project; existing dependencies are not overwritten.
 
 ### 6.5 Validate the Project and Start View
 
