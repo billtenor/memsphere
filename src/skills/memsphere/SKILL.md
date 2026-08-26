@@ -5,7 +5,13 @@ description: Use memsphere to discover, read, interpret, and apply project Memor
 
 # Memsphere
 
-memsphere 定义了一套维护记忆、检索记忆和遵循记忆的框架。通过 memsphere CLI，可以读取当前 Workspace 的 Primary 与 Mounted Project 中积累的知识和流程，并按照这些历史经验完成任务。
+Memsphere 是 AI 时代个性化软件的运行环境。它让软件从自然语言开始，并在真实使用中逐步生长为可复用、可验证、可管理、可持续演化的资产。这里的个性化软件可以服务个人、团队、组织或行业。
+
+Memsphere 不是 Agent，而是运行在不同通用 Agent 之上的一层，为个性化软件提供相对稳定的语言、运行时和资产管理方式。Prompt 适合一次意图，Skill 适合边界清晰的可复用能力；当软件需要长期运行、持续管理和不断演化时，再由 Memsphere 组织。三者不是必须走完的升级路线，也不是互相替代的关系。
+
+Memsphere 规划管理 Memory、个性化 CLI、数据和界面四类协作资产，并让 LLM 的 Token 算力与传统确定性算力按各自优势协同工作。当前版本首先实现 Memory，同时提供 Project、Run、Artifact、Review、ChangeSet、View 和 Skill 接入作为第一块地基；个性化 CLI、数据和界面成为完整一等资产仍属于后续方向。
+
+Memory 是 Agent 理解并进入个性化软件的语义入口。通过 memsphere CLI，Agent 可以读取当前 Workspace 的 Primary 与 Mounted Project 中积累的知识、规则、结构和流程，并按照这些资产完成任务。
 
 Memsphere Home 的 `config.json` 中，`language` 控制面向 Agent 的工作语言，支持 `zh-CN` 和 `en`，省略时固定为 `zh-CN`。Run 启动后会冻结该语言，因此修改配置只影响后续创建的 Run。
 

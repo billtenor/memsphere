@@ -5,6 +5,7 @@
     "install": [
       "concepts/memsphere-memory.yaml",
       "concepts/memsphere-framework.yaml",
+      "concepts/memsphere-personalized-software.yaml",
       "concepts/memsphere-concept.yaml",
       "concepts/memsphere-statement.yaml",
       "concepts/memsphere-procedure.yaml",

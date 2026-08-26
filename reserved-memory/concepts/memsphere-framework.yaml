@@ -4,7 +4,10 @@ names:
   - memsphere-framework
   - Memsphere
 defines:
-  - memsphere 定义了一套维护、检索和遵循 Memory 的框架，使 Agent 能够复用 Project 中积累的概念、陈述、流程和图式。
+  - Memsphere 是 AI 时代个性化软件的运行环境：它为软件提供相对稳定的语言、运行时和资产管理方式，让软件能够从自然语言开始并在真实使用中持续演化。
+  - Memsphere 不是 Agent，而是运行在不同通用 Agent 之上的一层；Agent 负责理解意图和执行工作，Memsphere 负责组织、运行和管理可以跨对话、模型与 Agent 积累的软件资产。
+  - memsphere-personalized-software 定义 Memsphere 所承载的个性化软件、四类协作资产及两种算力的完整产品模型。
+  - 当前版本首先实现 Memory，并以 Project、Run、Artifact、Review、ChangeSet、View 和 Skill 接入支撑这套语义资产；个性化 CLI、数据和界面成为完整一等资产仍属于后续演化方向。
   - memsphere Skill 提供与预置 Memory 一致的快速入口和冗余摘要；Memory 承载完整知识与流程，CLI 提供稳定的发现、读取和 Run 执行能力。
   - Agent 通过 memsphere memory list 发现 Memory，通过 memsphere memory read 完整读取或按 Node 读取相关内容，而不依赖 Memory 当前使用文件还是其他存储后端。
   - Project 是 Memory、ChangeSet、Run 与 Archive 的持久数据空间；Workspace 只通过全局 Registry 绑定一个 Primary Project，并可挂载只读 Mounted Project。Memory 修改意见直接作为 Comment 持久化在 ChangeSet；独立 Memory Review 已移除，Run Artifact Review 仍属于 Run。

@@ -5,6 +5,7 @@ names:
   - Statement
 defines:
   - memsphere 中用于表达可被核查的事实、规则、约束和建议的 Memory。
+  - 在个性化软件的语义资产中，Statement 保存必须长期成立的事实与约束，使 Agent 的判断不会只依赖当前对话中的临时提示。
   - Statement 通过 asserts 列出必须遵守的规则，通过 suggests 列出可以参考但不强制满足的建议，并通过 sections 按树状层级组织较大的规则集合。
   - asserts 与 suggests 中都可以引用具名 Statement，引用所在字段决定引入目标的规则通道或建议通道。
   - sections 的树状层级用于组织和呈现规则，不改变规则的强制程度。
