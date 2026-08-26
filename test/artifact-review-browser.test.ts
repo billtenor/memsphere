@@ -437,7 +437,7 @@ flow:
     assert(secondReview);
     assert.equal(secondReview.rounds.length, 2);
 
-    await page.reload();
+    await reloadAndWaitForViewLoad(page);
     await page.locator("#artifact-review-modal[open]").waitFor();
     await page.locator("#artifact-review-modal-close").click();
     await page.getByRole("button", { name: "Run", exact: true }).click();
@@ -1104,6 +1104,24 @@ async function waitForViewLifecycleEvent(
   }, { name: eventName, expectedKind: kind });
   await page.waitForFunction((expectedKind) =>
     document.documentElement.dataset.memsphereViewLifecycle === expectedKind, kind);
+}
+
+async function reloadAndWaitForViewLoad(page: import("playwright").Page): Promise<void> {
+  await page.addInitScript(() => {
+    const lifecycleWait = new AbortController();
+    window.addEventListener("memsphere:view-load-settled", (event) => {
+      const detail = event instanceof CustomEvent ? event.detail : null;
+      if (detail?.applied !== true) return;
+      document.documentElement.dataset.memsphereViewLoadSettled = "applied";
+      lifecycleWait.abort();
+    }, { signal: lifecycleWait.signal });
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() =>
+    document.documentElement.dataset.memsphereViewLoadSettled === "applied",
+    undefined,
+    { timeout: 30_000 }
+  );
 }
 
 async function clickAndWaitForDraftSave(
