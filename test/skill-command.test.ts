@@ -23,6 +23,8 @@ test("skill init installs only the unified memsphere skill", async () => {
     assert.match(source, /memsphere memory list/);
     assert.match(source, /memsphere memory read/);
     assert.match(source, /memsphere run start/);
+    assert.match(source, /memsphere run status --run <Run ID>/);
+    assert.match(source, /Procedure 中的 `!call` 由当前 Run 负责推进，不另起 Run/);
     assert.match(source, /memsphere run start "<Procedure 名称>" --name "<本次 Run 名称>"/);
     assert.match(source, /memsphere run start --file "<Procedure YAML 路径>" --name "<本次 Run 名称>"/);
     assert.match(source, /memsphere run repeat/);

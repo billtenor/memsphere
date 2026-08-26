@@ -241,6 +241,16 @@ memsphere 使用 Run 记录和控制一次 Procedure 的执行过程，保证 Ag
 
 #### 启动流程
 
+启动新的 Run 前，先判断当前任务上下文是否已经关联 Run ID。若已有，先查询其状态：
+
+```bash
+memsphere run status --run <Run ID>
+```
+
+用户请求属于当前任务、当前步骤、产物修订、Review、人机协同步骤或当前 Procedure 调用链时，必须继续使用现有 Run，并执行 CLI 返回的 `Then`；不得重复启动 Procedure，也不得通过新 Run 绕过等待或评审。Procedure 中的 `!call` 由当前 Run 负责推进，不另起 Run。
+
+只有当前任务没有关联 Run、已有 Run 已完成或经 Human 明确决定 abandon，或者用户发起语义独立的新任务时，才启动新的 Run。是否复用以任务执行上下文为准，不能只根据 Procedure 名称判断；无法确定时，先向用户确认。
+
 读取执行所需的 Procedure 内容后，使用它的名称启动一次 Run：
 
 ```bash
