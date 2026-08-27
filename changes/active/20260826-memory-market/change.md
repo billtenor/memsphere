@@ -11,6 +11,7 @@ Memsphere Run：`run-20260826-041558z-2a3102b3`
 ## 产品契约
 
 - V1 只有 npm 包内官方精选内容，不接入远端、第三方、账号、评分或自动更新。
+- npm 包内官方精选源码独立存放于 `reserved-memory/official-memory/`，不与 `reserved-memory/system-memory/` 下直接生效的 System Memory 混放。
 - 导入前不进入 Project Catalog 或 Run；导入后就是普通用户 Memory，可自由编辑、重命名和独立演进。
 - 市场条目和 Project Memory 只按当前 `<kind>/<canonical-name>` 关联，不保存来源、市场 id 或版本。
 - 状态仅为：未导入、导入中、已导入且无变更、已导入且有差异、名称冲突；一致性比较原始文件字节。“导入中”可跳转到对应 ChangeSet。

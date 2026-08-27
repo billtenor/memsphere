@@ -339,7 +339,9 @@ Project Resolver 在当前 Workspace 中解析出的 Primary 与只读 Mounted M
 
 ```text
 repository or npm package
-reserved-memory/                 预置记忆源码
+reserved-memory/                 预置记忆源码容器与安装清单
+  system-memory/                 随 Project 自举、修复并直接生效的 System Memory
+  official-memory/               记忆市场展示的官方精选 Memory（默认不生效）
         |
         | project create + bootstrap ChangeSet
         v
