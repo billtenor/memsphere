@@ -1,57 +1,55 @@
 !procedure
 syntax: memsphere-20260721-stable
 names:
-  - memsphere-requirement-management
-  - memsphere 需求管理流程
-  - Changes 需求管理流程
+  - generic-requirement-management
+  - 通用需求管理流程
 defines:
-  - 使用仓库根目录的 changes 管理单个需求的记录、状态更新、完成归档和取消归档。
-  - 每个需求使用一个目录和一份 change.md；详细过程产物留在 .memsphere/runs，通过 run_id 关联。
+  - 按当前项目的需求管理约定，管理单个需求的记录、状态更新、完成归档和取消归档。
 asserts:
-  - 一次 Run 只处理一个 change，只修改需求记录及其明确附件，不得暂存、提交或清理无关内容。
-  - 操作前必须读取 changes/README.md，检查重复需求、关联需求、目标 change 和归档路径冲突。
-  - 更新已有 change 时必须保留仍然有效的背景、决策、验收标准和历史结果。
+  - 一次执行只处理一个需求，只修改需求记录及其明确附件，不得修改或清理无关内容。
+  - 操作前必须确认当前项目的需求记录、状态和归档约定，并检查重复需求、关联需求、目标记录和归档冲突。
+  - 更新已有需求时必须保留仍然有效的背景、决策、验收标准和历史结果。
 goals:
-  - 让需求状态和生命周期可以通过目录与 change.md 直接追踪。
+  - 让需求状态和生命周期可以通过项目约定的记录直接追踪。
   - 保留需求、验收标准、技术与测试方案、开发任务和验收结果。
 flow:
   - !action
-    action: 提供新需求描述或已有 change 的管理请求，以及相关附件、目标状态或归档意图。
+    action: 提供新需求描述或已有需求的管理请求，以及相关附件、目标状态或归档意图。
     actor: human
     artifact: !artifact
       name: 需求管理请求
       format: markdown
 
   - !action
-    action: 读取 changes/README.md，定位相关 change，并按本次操作需要调查代码、测试和提交记录。
+    action: 读取当前项目的需求管理约定，定位相关需求记录，并按本次操作需要调查代码、测试和提交记录。
     actor: agent
     asserts:
       - 新需求必须检查重复和强关联需求；没有则记录“无”。
       - 已有需求必须唯一定位，不能仅凭相似标题猜测。
-      - 只调查足以判断本次操作的信息，不得维护额外的需求总表或状态索引。
+      - 只调查足以判断本次操作的信息，不得额外建立项目未要求的需求总表或状态索引。
     artifact: !artifact
       name: 需求调查与操作判断
       format: markdown
 
   - !if
     condition: !action
-      action: 判断本次请求是否需要创建新的 change。
+      action: 判断本次请求是否需要创建新的需求记录。
       actor: agent
       artifact: !artifact
-        name: 是否创建新 Change
+        name: 是否创建新需求记录
         type: boolean
     then:
       - !action
-        action: 整理需求目标、边界和验收标准，并创建 changes/active/<YYYYMMDD-slug>/change.md。
+        action: 整理需求目标、边界和验收标准，并按当前项目约定创建需求记录。
         actor: agent
         asserts:
-          - change ID 必须唯一，格式为 YYYYMMDD-slug，目录名与文档头中的 id 一致。
-          - 文档头必须包含 id、status、type、created 和 run_id；status 为 todo，run_id 为当前 Run ID。
+          - 需求标识必须唯一，并符合当前项目的命名与存储约定。
+          - 需求记录必须包含标识、状态、类型和创建时间；项目要求执行追踪标识时必须一并记录。
           - 正文必须说明需求、验收标准、范围、不做事项和关联需求；验收标准应可执行或可观察。
           - 尚未形成的方案、任务和验收结果写“待开发前补充”或“尚未开始”，不得虚构。
-          - 附件必须放入同一 change 目录的 assets，不得引用临时附件路径。
+          - 附件必须保存到项目约定的稳定位置，不得引用临时路径。
         artifact: !artifact
-          name: 新建 Change 结果
+          name: 新建需求记录结果
           format: markdown
 
     else:
@@ -64,7 +62,7 @@ flow:
             type: boolean
         then:
           - !action
-            action: 对照全部验收标准检查实际实现，运行必要测试，将证据和结论写入 change.md，并在归档前保持或更新为 accepting。
+            action: 对照全部验收标准检查实际实现，运行必要测试，并将证据和结论写入需求记录。
             actor: agent
             asserts:
               - 必须记录实际命令、结果、未执行项、阻塞问题，以及无法自动化检查的交付要求和可观察证据。
@@ -83,11 +81,11 @@ flow:
                 type: boolean
             then:
               - !action
-                action: 移除 status，增加 completed_at，并将目录移动到 changes/archive/completed/<change-id>/。
+                action: 按当前项目约定记录完成状态和完成时间，并在项目设有归档机制时归档需求记录。
                 actor: agent
                 asserts:
                   - 只有完整验收明确通过时才能归档。
-                  - 归档目标已存在时必须停止并报告，不得覆盖。
+                  - 归档目标冲突时必须停止并报告，不得覆盖。
                 artifact: !artifact
                   name: Completed 归档结果
                   format: markdown
@@ -102,32 +100,32 @@ flow:
                 type: boolean
             then:
               - !action
-                action: 将可确认的取消原因和日期写入 change.md，移除 active status，并将目录移动到 changes/archive/cancelled/<YYYY>/<change-id>/。
+                action: 将可确认的取消原因和日期写入需求记录，按当前项目约定更新取消状态，并在项目设有归档机制时归档。
                 actor: agent
                 asserts:
                   - 未提供详细原因时只记录“需求方明确请求取消”等可确认事实，不得虚构背景。
-                  - 归档目标已存在时必须停止并报告，不得覆盖。
+                  - 归档目标冲突时必须停止并报告，不得覆盖。
                 artifact: !artifact
                   name: Cancelled 归档结果
                   format: markdown
             else:
               - !action
-                action: 根据实际进展更新 active change 的状态和受影响内容。
+                action: 根据实际进展更新需求记录的状态和受影响内容。
                 actor: agent
                 asserts:
-                  - status 只允许 todo、doing 或 accepting，分别表示尚未开发、正在开发、正在测试或等待验收。
+                  - 状态值和状态迁移必须符合当前项目的需求管理约定。
                   - 状态和内容变化必须有 human 请求、代码、测试或实际执行记录作为依据。
                 artifact: !artifact
                   name: Active Change 更新结果
                   format: markdown
 
   - !action
-    action: 复核最终 change 的路径、文档头、正文结构、状态或归档位置，并读取完整 change.md 作为产物。
+    action: 复核最终需求记录的位置、元数据、正文结构、状态或归档位置，并读取完整记录作为产物。
     actor: agent
     asserts:
-      - active 文档必须包含合法 status；completed 文档必须移除 status 并包含 completed_at；cancelled 文档必须记录取消原因。
+      - 活跃需求必须包含合法状态；已完成需求必须包含完成时间；已取消需求必须记录取消原因。
     artifact: !artifact
-      name: 最终 Change 文档
+      name: 最终需求记录
       type: object
       format:
         name: markdown
@@ -146,7 +144,7 @@ flow:
       final: true
 
   - !action
-    action: 向 human 汇报处理结果、最终路径和后续动作。
+    action: 向 human 汇报处理结果、最终记录位置和后续动作。
     actor: agent
     artifact: !artifact
       name: 需求管理处理摘要

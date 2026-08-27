@@ -31,7 +31,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   const names = new Map<string, string>();
 
   for (const file of files) {
-    assert.match(basename(file.path), /^memsphere-/);
+    assert.match(basename(file.path), /^(?:memsphere|generic)-/);
     for (const name of file.entity.names) {
       assert.equal(names.has(name), false, `duplicate reserved memory name: ${name}`);
       names.set(name, file.path);
@@ -67,8 +67,12 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "memsphere-memory-access-rules",
     "Memsphere YAML 语法规则",
     "memsphere-yaml-syntax-rules",
-    "敏捷需求开发流程",
-    "memsphere-agile-requirement-development",
+    "通用敏捷需求开发流程",
+    "generic-agile-requirement-development",
+    "通用 bug 修复流程",
+    "generic-bug-fix",
+    "通用需求管理流程",
+    "generic-requirement-management",
     "memsphere Procedure记忆提取流程",
     "Procedure 提取流程",
     "memsphere-procedure-construction",
@@ -164,10 +168,10 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
 test("bundled Market manifest exposes every complete source", async () => {
   const market = await readBundledMarketMemories();
   assert.deepEqual(market.map((memory) => memory.reference), [
-    "procedures/memsphere-agile-requirement-development",
-    "procedures/memsphere-bug-fix",
+    "procedures/generic-agile-requirement-development",
+    "procedures/generic-bug-fix",
     "procedures/generic-code-branch-review-and-remediation",
-    "procedures/memsphere-requirement-management",
+    "procedures/generic-requirement-management",
     "statements/memsphere-general-requirement-rules",
     "statements/memsphere-general-development-rules",
     "statements/memsphere-general-testing-rules",

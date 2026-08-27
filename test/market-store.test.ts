@@ -19,7 +19,7 @@ async function withMemoryRoot(fn: (root: string) => Promise<void>): Promise<void
 
 test("market import plans only the selected Memory when it has no explicit Memory references", async () => {
   await withMemoryRoot(async (root) => {
-    const reference = "procedures/memsphere-agile-requirement-development";
+    const reference = "procedures/generic-agile-requirement-development";
     const emptyPlan = await planMemoryMarketImport(root, reference);
     assert.equal(emptyPlan.item.status, "not_imported");
     assert.deepEqual(emptyPlan.targets.map((target) => target.reference), [reference]);
@@ -101,9 +101,9 @@ test("unrelated invalid Memory does not block market listing or import planning"
 
     const market = await listMemoryMarket(root);
     assert(market.length > 0);
-    const plan = await planMemoryMarketImport(root, "procedures/memsphere-agile-requirement-development");
+    const plan = await planMemoryMarketImport(root, "procedures/generic-agile-requirement-development");
     assert.deepEqual(plan.targets.map((target) => target.reference), [
-      "procedures/memsphere-agile-requirement-development"
+      "procedures/generic-agile-requirement-development"
     ]);
   });
 });
