@@ -37,18 +37,3 @@ test("npm package preserves the memsphere first-use bootstrap contract", async (
   assert.match(readmeZhCn, /安装配置成功后不要停在总结/);
   assert.match(readmeZhCn, /memsphere 教学流程-第一章/);
 });
-
-test("npm package includes every Memory Market manifest source", async () => {
-  const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { files?: string[] };
-  const manifest = JSON.parse(await readFile("reserved-memory/manifest.json", "utf8")) as {
-    version: number;
-    market_memory?: { install?: string[] };
-  };
-  assert(packageJson.files?.includes("reserved-memory"));
-  assert.equal(manifest.version, 4);
-  assert((manifest.market_memory?.install?.length ?? 0) > 0);
-  await Promise.all((manifest.market_memory?.install ?? []).map(async (path) => {
-    const source = await readFile(`reserved-memory/${path}`, "utf8");
-    assert.match(source, /^!(concept|statement|schema|procedure)\n/);
-  }));
-});

@@ -1,7 +1,22 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
-import { missingGitMessage } from "../src/git.js";
+import { gitHashObject, missingGitMessage, runGit } from "../src/git.js";
+
+test("gitHashObject hashes the exact bytes supplied on stdin", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-git-hash-"));
+  const path = join(root, "bytes.bin");
+  const source = Buffer.from([0x4c, 0x46, 0x0a, 0x43, 0x52, 0x4c, 0x46, 0x0d, 0x0a, 0x00, 0xff]);
+  try {
+    await writeFile(path, source);
+    const expected = (await runGit(["hash-object", "--", "bytes.bin"], { cwd: root })).stdout;
+    assert.equal(await gitHashObject(source, root), expected);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("missing Git guidance keeps Windows CLI shells neutral", () => {
   const message = missingGitMessage("win32");

@@ -5,7 +5,7 @@ import { basename, dirname, join, posix, relative, resolve, sep } from "node:pat
 import { z } from "zod";
 import { atomicWriteJson, withFileLock } from "../persistence.js";
 import { archiveChangeDirectory, type ArchiveEntry } from "../archive/store.js";
-import { gitOutput, gitOutputRaw, runGit } from "../git.js";
+import { gitHashObject, gitOutput, gitOutputRaw, runGit } from "../git.js";
 import { memoryKinds, type MemoryKind } from "./kinds.js";
 import { readAllMemoryFiles, readMemoryFile } from "./store.js";
 import { currentMemorySyntax } from "./syntax.js";
@@ -2792,7 +2792,7 @@ function logicalReferenceFromDescriptor(descriptor: { kind: MemoryKind; names: s
 }
 
 async function gitBlobDigest(root: string, path: string): Promise<string> {
-  return gitOutput(["hash-object", "--", path], root);
+  return gitHashObject(await readFile(join(root, path)), root);
 }
 
 async function exists(path: string): Promise<boolean> {

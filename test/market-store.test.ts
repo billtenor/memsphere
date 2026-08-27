@@ -49,24 +49,35 @@ test("market state compares current canonical Memory by raw file bytes", async (
   });
 });
 
-test("renaming a market Memory detaches it while retaining the old name as an alias reports a conflict", async () => {
+test("renaming a market Memory detaches it from the market item", async () => {
   await withMemoryRoot(async (root) => {
     const bundled = (await readBundledMarketMemories())[0]!;
-    const canonicalLine = `  - ${bundled.names[0]}\n`;
-    const renamed = bundled.source.toString("utf8").replace(
-      /names:\n(?:  - .*\n)+/,
-      "names:\n  - personalized-market-memory\n"
-    );
+    const renamed = renameBundledMemory(bundled, []);
     await writeFile(join(root, bundled.kind, "personalized-market-memory.yaml"), renamed);
-    let item = (await listMemoryMarket(root)).find((candidate) => candidate.reference === bundled.reference);
+    const item = (await listMemoryMarket(root)).find((candidate) => candidate.reference === bundled.reference);
     assert.equal(item?.status, "not_imported");
+  });
+});
 
-    const conflicting = renamed.replace("  - personalized-market-memory\n", `  - personalized-market-memory\n${canonicalLine}`);
-    await writeFile(join(root, bundled.kind, "personalized-market-memory.yaml"), conflicting);
-    item = (await listMemoryMarket(root)).find((candidate) => candidate.reference === bundled.reference);
+test("retaining a market canonical name as an alias reports a name conflict", async () => {
+  await withMemoryRoot(async (root) => {
+    const bundled = (await readBundledMarketMemories())[0]!;
+    const renamed = renameBundledMemory(bundled, [bundled.names[0]!]);
+    await writeFile(join(root, bundled.kind, "personalized-market-memory.yaml"), renamed);
+    const item = (await listMemoryMarket(root)).find((candidate) => candidate.reference === bundled.reference);
     assert.equal(item?.status, "name_conflict");
   });
 });
+
+function renameBundledMemory(
+  bundled: { source: Buffer; names: string[] },
+  aliases: string[]
+): string {
+  return bundled.source.toString("utf8").replaceAll("\r\n", "\n").replace(
+    /names:\n(?:  - .*\n)+/,
+    ["names:", "  - personalized-market-memory", ...aliases.map((alias) => `  - ${alias}`), ""].join("\n")
+  );
+}
 
 test("market import reuses an existing personalized dependency without overwriting it", async () => {
   await withMemoryRoot(async (root) => {
