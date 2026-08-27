@@ -51,10 +51,10 @@
   },
   "market_memory": {
     "install": [
-      "procedures/memsphere-agile-requirement-development.yaml",
-      "procedures/memsphere-bug-fix.yaml",
+      "procedures/generic-agile-requirement-development.yaml",
+      "procedures/generic-bug-fix.yaml",
       "procedures/memsphere-code-branch-review-and-remediation.yaml",
-      "procedures/memsphere-requirement-management.yaml",
+      "procedures/generic-requirement-management.yaml",
       "statements/memsphere-general-requirement-rules.yaml",
       "statements/memsphere-general-development-rules.yaml",
       "statements/memsphere-general-testing-rules.yaml",

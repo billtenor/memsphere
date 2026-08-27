@@ -1,12 +1,10 @@
 !procedure
 syntax: memsphere-20260721-stable
 names:
-  - memsphere-bug-fix
-  - memsphere bug 修复流程
-  - MemsphereBugFix
-  - FixMemsphereBug
+  - generic-bug-fix
+  - 通用 bug 修复流程
 defines:
-  - 当 memsphere 工程在使用、测试或维护过程中暴露 bug 时，引导 human 和 agent 共同完成 bug 理解确认、根因定位、修复方案确认、代码修复、测试补充和验证摘要整理的流程。
+  - 当软件项目在使用、测试或维护过程中暴露 bug 时，引导 human 和 agent 共同完成 bug 理解确认、根因定位、修复方案确认、代码修复、测试补充和验证摘要整理。
 goals:
   - 完成针对已确认 bug 的代码修复。
   - 补充能够覆盖该 bug 的测试 case；自动化不可行时，将手工验证 case 整理到测试文档或测试文档集合。
