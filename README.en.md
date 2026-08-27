@@ -231,6 +231,14 @@ git commit -m "Update Memory"
 
 Embedded Memory does not use `memsphere memory publish`; Memsphere does not commit Git changes for you.
 
+The only exception is a `market_import` ChangeSet created from Memory Market in View. After review and validation, publish only applies the isolated candidate to the current Embedded worktree. It still does not commit or push, and the ChangeSet remains active until the change reaches the main branch.
+
+#### 6.4.3 Memory Market
+
+Under Memory, View provides a Current Project / Memory Market switch. Memory Market displays officially selected Memory bundled in the npm package, but bundled items are inactive by default and do not enter the current Project Catalog or any Run. Import and Re-import create a market ChangeSet; subsequent item-by-item imports in the same Project keep appending to the same active ChangeSet until it is completed or abandoned. The user inspects the combined candidate in that ChangeSet and decides whether to publish or apply it.
+
+Once imported, an item is ordinary user Memory: it can be edited or renamed and does not update automatically with the npm package. View associates the two copies only by the current `<kind>/<canonical-name>` and reports Not imported, Importing, Imported · unchanged, Imported · different, or Name conflict. Importing links directly to the active market ChangeSet. Renaming ends the association. Renaming a bundled item is equivalent to removing the old item and adding a new one. Re-import replaces the same-name Memory with current bundled content and includes only referenced market dependencies missing from the Project; existing dependencies are not overwritten.
+
 ### 6.5 Validate the Project and Start View
 
 Inspect the currently bound Project and validate its Memory:
@@ -248,7 +256,7 @@ memsphere view start
 
 #### Repair or Upgrade System Memory
 
-To install missing System Memory, restore it, or upgrade it to the bundled version in an existing Managed or Embedded Project, run repair. System Memory marked as retired by manifest v3 is removed by default, but only when both its historical path and canonical identity match. User Memory and Mounted Projects are not touched:
+To install missing System Memory, restore it, or upgrade it to the bundled version in an existing Managed or Embedded Project, run repair. System Memory marked as retired by the current manifest v4 (with v3 compatibility) is removed by default, but only when both its historical path and canonical identity match. User Memory and Mounted Projects are not touched:
 
 ~~~bash
 memsphere project repair my-project

@@ -1,0 +1,12 @@
+!concept
+syntax: memsphere-20260721-stable
+names:
+  - memsphere-view
+  - View
+defines:
+  - Memsphere 提供给 Human 的本地操作界面，用于查看和操作当前 Project 中的 Memory、Run、Artifact Review 和 ChangeSet。
+  - 一个 Memsphere Home 运行一个 View 服务；View 同一时刻展示一个 Project，切换 Project 后页面内容随之切换。
+  - Memory 与 Run 是 View 的顶层入口；ChangeSet 从 Memory 相关入口进入，Artifact Review 从对应 Run 的步骤进入。
+  - Human 可以在 Run 页面查看当前步骤、Artifact、参与者和状态，并在 Artifact Review 页面查看 Submission、Comment、Vote、Round 和结果。
+  - View 中的稳定地址可以让 Human 与 Agent 返回同一个 Project、ChangeSet、Run 或 Review。
+  - View 是 Memsphere 当前的通用管理界面，不等同于某个个性化软件未来生长出的专属界面。

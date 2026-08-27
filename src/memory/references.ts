@@ -35,6 +35,30 @@ type ReferenceEdge = {
   channel?: "asserts" | "suggests";
 };
 
+export function collectMemoryReferenceTargets(entity: MemoryEntity): string[] {
+  const sourceKind = entity.tag === "!concept"
+    ? "concepts"
+    : entity.tag === "!statement"
+      ? "statements"
+      : entity.tag === "!schema" ? "schemas" : "procedures";
+  const source = canonicalMemoryReference(sourceKind, entity.names[0] ?? "") ?? `${sourceKind}/unknown`;
+  const targets = new Set<string>();
+  for (const edge of collectReferenceEdges(entity, source, source)) {
+    if (edge.target === "__invalid_optional_context__") continue;
+    if (edge.form === "logical-reference") {
+      const parsed = parseLogicalMemoryReference(edge.target);
+      if (!parsed || !edge.expected.includes(parsed.kind as ExpectedKind)) continue;
+      const reference = canonicalMemoryReference(parsed.kind, parsed.name);
+      if (reference) targets.add(reference);
+      continue;
+    }
+    if (canonicalMemoryNameIssue(edge.target)) continue;
+    const reference = canonicalMemoryReference(edge.expected[0], edge.target);
+    if (reference) targets.add(reference);
+  }
+  return [...targets].sort((left, right) => left.localeCompare(right));
+}
+
 export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryReferenceIssue[] {
   const issues: MemoryReferenceIssue[] = [];
   const byReference = new Map<string, Set<string>>();

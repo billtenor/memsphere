@@ -236,6 +236,11 @@ export async function memoryRenameCommand(reference: string, newName: string, op
 export async function memoryPublishCommand(options: { change?: string; message?: string }): Promise<void> {
   if (!options.change) throw new Error("--change <id> is required");
   const change = await publishMemoryChange(options.change, options.message, { expectedKind: "regular" });
+  if (change.store_type === "embedded" && change.intent === "market_import") {
+    console.log(`Applied ChangeSet to worktree: ${change.id}`);
+    console.log("Review and commit the Memory changes with Git; the ChangeSet remains active until integration.");
+    return;
+  }
   console.log(`Completed ChangeSet: ${change.id}`);
   console.log(`Revision: ${change.published_revision}`);
 }
