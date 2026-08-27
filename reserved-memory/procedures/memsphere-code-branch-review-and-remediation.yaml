@@ -1,9 +1,9 @@
 !procedure
 syntax: memsphere-20260721-stable
 names:
-  - code-branch-review-and-remediation
-  - 基于代码分支的评审与修复流程
-  - 代码分支循环评审修复流程
+  - generic-code-branch-review-and-remediation
+  - 通用代码分支评审与修复流程
+  - 通用代码分支循环评审修复流程
 defines:
   - 面向一个代码分支，在同一个 Run 中基于目标分支与基线分支的完整差异持续完成代码评审、问题判断、修复和复验，直到没有待处理问题或 human 决定结束。
   - 合并代码评审与评论修复的核心逻辑，不依赖 GitHub Pull Request、review comment 或 thread。

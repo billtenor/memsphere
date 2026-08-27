@@ -166,7 +166,7 @@ test("bundled Market manifest exposes every complete source", async () => {
   assert.deepEqual(market.map((memory) => memory.reference), [
     "procedures/memsphere-agile-requirement-development",
     "procedures/memsphere-bug-fix",
-    "procedures/code-branch-review-and-remediation",
+    "procedures/generic-code-branch-review-and-remediation",
     "procedures/memsphere-requirement-management",
     "statements/memsphere-general-requirement-rules",
     "statements/memsphere-general-development-rules",
@@ -179,7 +179,7 @@ test("bundled Market manifest exposes every complete source", async () => {
 test("bundled branch-review applies general development and testing rules", async () => {
   const market = await readBundledMarketMemories();
   const branchReview = market.find((memory) => (
-    memory.reference === "procedures/code-branch-review-and-remediation"
+    memory.reference === "procedures/generic-code-branch-review-and-remediation"
   ));
   assert(branchReview);
   const source = branchReview.source.toString("utf8");
