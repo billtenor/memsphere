@@ -8,6 +8,7 @@ import { currentMemorySyntax } from "../src/memory/syntax.js";
 import {
   bundledReservedMemoryRoot,
   readBundledSystemMemories,
+  readBundledMarketMemories,
   readReservedMemoryManifest,
   reservedMemoryManifestSchema,
   reservedSystemMemoryRemovalTombstones
@@ -31,7 +32,6 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
 
   for (const file of files) {
     assert.match(basename(file.path), /^memsphere-/);
-    assert.equal(file.entity.names[0], basename(file.path, ".yaml"));
     for (const name of file.entity.names) {
       assert.equal(names.has(name), false, `duplicate reserved memory name: ${name}`);
       names.set(name, file.path);
@@ -140,10 +140,11 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   }
   assert(files.every((file) => file.entity.syntax === currentMemorySyntax));
   assert(files.every((file) => file.entity.defines.every((definition) => typeof definition === "string")));
-  assert.equal(manifest.version, 3);
+  assert.equal(manifest.version, 4);
   assert.equal("memory_syntax" in manifest ? manifest.memory_syntax : undefined, currentMemorySyntax);
   assert.equal(manifest.system_memory.install.length, 25);
   assert.deepEqual(systemMemories.map((memory) => memory.path), manifest.system_memory.install);
+  assert(systemMemories.every((memory) => memory.names[0] === basename(memory.path, ".yaml")));
   assert(systemMemories.every((memory) => memory.reference === `${memory.kind}/${memory.names[0]}`));
   assert(systemMemories.every((memory) => memory.names.length > 0));
   assert.deepEqual(reservedSystemMemoryRemovalTombstones(manifest).map((tombstone) => tombstone.path), [
@@ -172,6 +173,45 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "procedures/memsphere-tutorial.yaml"
   ]);
   assert(reservedSystemMemoryRemovalTombstones(manifest).every((tombstone) => tombstone.references.length > 0));
+});
+
+test("bundled Market manifest exposes every complete source", async () => {
+  const market = await readBundledMarketMemories();
+  assert.deepEqual(market.map((memory) => memory.reference), [
+    "procedures/memsphere-agile-requirement-development",
+    "procedures/memsphere-bug-fix",
+    "procedures/code-branch-review-and-remediation",
+    "procedures/memsphere-requirement-management",
+    "statements/memsphere-general-requirement-rules",
+    "statements/memsphere-general-development-rules",
+    "statements/memsphere-general-testing-rules",
+    "statements/memsphere-general-delivery-rules",
+    "statements/memsphere-repository-development-rules",
+    "statements/memsphere-repository-testing-rules"
+  ]);
+  assert(market.every((memory) => memory.source.length > 0 && memory.digest.length === 64));
+});
+
+test("bundled branch-review applies repository development and testing rules", async () => {
+  const market = await readBundledMarketMemories();
+  const branchReview = market.find((memory) => (
+    memory.reference === "procedures/code-branch-review-and-remediation"
+  ));
+  assert(branchReview);
+  const source = branchReview.source.toString("utf8");
+  assert.equal(
+    [...source.matchAll(/target: statements\/memsphere-repository-development-rules/g)].length,
+    2,
+    "branch review must apply repository development rules during review and disposition"
+  );
+  assert.equal(
+    [...source.matchAll(/target: statements\/memsphere-repository-testing-rules/g)].length,
+    3,
+    "branch review must apply repository testing rules during review, disposition, and remediation"
+  );
+});
+
+test("chapter one teaches one bounded first-use Run journey", async () => {
   const tutorial = await readFile(
     join(bundledReservedMemoryRoot(), "procedures", "memsphere-tutorial-chapter-01.yaml"),
     "utf8"
@@ -282,6 +322,40 @@ test("manifest requires install sources to be regular YAML files but allows remo
   });
 });
 
+test("manifest v4 requires every market dependency to be declared by System or Market install", async () => {
+  await withTempDir(async (dir) => {
+    const sourceRoot = join(dir, "source");
+    await mkdir(join(sourceRoot, "statements"), { recursive: true });
+    await writeFile(join(sourceRoot, "statements", "system-rule.yaml"), statementYaml("system-rule"));
+    await writeFile(join(sourceRoot, "statements", "market-b.yaml"), statementYaml("market-b"));
+    await writeFile(
+      join(sourceRoot, "statements", "market-a.yaml"),
+      statementYaml("market-a", ["statements/system-rule", "statements/market-b"])
+    );
+
+    await writeV4Manifest(sourceRoot, ["statements/system-rule.yaml"], [
+      "statements/market-a.yaml",
+      "statements/market-b.yaml"
+    ]);
+    await readReservedMemoryManifest(sourceRoot);
+
+    await writeV4Manifest(sourceRoot, ["statements/system-rule.yaml"], ["statements/market-a.yaml"]);
+    await assert.rejects(
+      readReservedMemoryManifest(sourceRoot),
+      /market Memory dependency is not declared.*statements\/market-b/
+    );
+
+    await writeFile(
+      join(sourceRoot, "statements", "market-a.yaml"),
+      statementYaml("market-a", ["statements/definitely-missing"])
+    );
+    await assert.rejects(
+      readReservedMemoryManifest(sourceRoot),
+      /market Memory dependency is not declared.*statements\/definitely-missing/
+    );
+  });
+});
+
 async function writeManifest(sourceRoot: string, install: string[], removePaths: string[]): Promise<void> {
   await mkdir(sourceRoot, { recursive: true });
   await writeFile(
@@ -292,4 +366,20 @@ async function writeManifest(sourceRoot: string, install: string[], removePaths:
 
 function conceptYaml(name: string): string {
   return `!concept\nnames:\n  - ${name}\ndefines:\n  - ${name} definition.\n`;
+}
+
+async function writeV4Manifest(sourceRoot: string, systemInstall: string[], marketInstall: string[]): Promise<void> {
+  await writeFile(join(sourceRoot, "manifest.json"), `${JSON.stringify({
+    version: 4,
+    memory_syntax: currentMemorySyntax,
+    system_memory: { install: systemInstall, remove: [] },
+    market_memory: { install: marketInstall }
+  }, null, 2)}\n`);
+}
+
+function statementYaml(name: string, references: string[] = []): string {
+  const asserts = references.length
+    ? references.map((reference) => `  - !ref\n    target: ${reference}`).join("\n")
+    : "  - A valid rule.";
+  return `!statement\nsyntax: ${currentMemorySyntax}\nnames: [${name}]\nasserts:\n${asserts}\n`;
 }

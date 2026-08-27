@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { isMemoryKind, memoryKinds, type MemoryKind } from "../memory/kinds.js";
+import { collectMemoryReferenceTargets } from "../memory/references.js";
 import { readMemoryFile } from "../memory/store.js";
 import { currentMemorySyntax } from "../memory/syntax.js";
 
@@ -106,6 +108,10 @@ const identityManifestSystemMemorySchema = z.object({
   remove: identityRemovalSchema
 }).strict();
 
+const marketMemorySchema = z.object({
+  install: uniqueMemoryPathsSchema
+}).strict();
+
 export const reservedMemoryManifestSchema = z.discriminatedUnion("version", [
   z.object({
     version: z.literal(1),
@@ -120,10 +126,16 @@ export const reservedMemoryManifestSchema = z.discriminatedUnion("version", [
     version: z.literal(3),
     memory_syntax: z.literal(currentMemorySyntax),
     system_memory: identityManifestSystemMemorySchema
+  }).strict(),
+  z.object({
+    version: z.literal(4),
+    memory_syntax: z.literal(currentMemorySyntax),
+    system_memory: identityManifestSystemMemorySchema,
+    market_memory: marketMemorySchema
   }).strict()
 ]).superRefine((manifest, context) => {
   const install = new Set(manifest.system_memory.install);
-  const removePaths = manifest.version === 3
+  const removePaths = manifest.version === 3 || manifest.version === 4
     ? manifest.system_memory.remove.map((tombstone) => tombstone.path)
     : manifest.system_memory.remove;
   for (const [index, path] of removePaths.entries()) {
@@ -132,6 +144,16 @@ export const reservedMemoryManifestSchema = z.discriminatedUnion("version", [
         code: z.ZodIssueCode.custom,
         path: ["system_memory", "remove", index],
         message: `memory path cannot be installed and removed: ${path}`
+      });
+    }
+  }
+  if (manifest.version === 4) {
+    for (const [index, path] of manifest.market_memory.install.entries()) {
+      if (!install.has(path)) continue;
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["market_memory", "install", index],
+        message: `memory path cannot be system and market memory: ${path}`
       });
     }
   }
@@ -147,7 +169,7 @@ export type ReservedSystemMemoryRemovalTombstone = {
 export function reservedSystemMemoryRemovalTombstones(
   manifest: ReservedMemoryManifest
 ): ReservedSystemMemoryRemovalTombstone[] {
-  if (manifest.version !== 3) return [];
+  if (manifest.version !== 3 && manifest.version !== 4) return [];
   return manifest.system_memory.remove.map((tombstone) => ({
     path: tombstone.path,
     references: [...tombstone.references]
@@ -159,6 +181,12 @@ export type BundledSystemMemoryDescriptor = {
   kind: MemoryKind;
   reference: string;
   names: string[];
+};
+
+export type BundledMarketMemoryDescriptor = BundledSystemMemoryDescriptor & {
+  source: Buffer;
+  digest: string;
+  entity: Awaited<ReturnType<typeof readMemoryFile>>["entity"];
 };
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -174,16 +202,53 @@ export async function readReservedMemoryManifest(sourceRoot = bundledReservedMem
   const parsed: unknown = JSON.parse(source);
   const manifest = reservedMemoryManifestSchema.parse(parsed);
 
-  for (const relativePath of manifest.system_memory.install) {
+  const sourcePaths = [
+    ...manifest.system_memory.install,
+    ...(manifest.version === 4 ? manifest.market_memory.install : [])
+  ];
+  for (const relativePath of sourcePaths) {
+    const sourceType = manifest.version === 4 && manifest.market_memory.install.includes(relativePath)
+      ? "market"
+      : "system";
     const sourcePath = resolveMemoryPath(sourceRoot, relativePath);
     const sourceStat = await lstat(sourcePath).catch((error: unknown) => {
       if (isNodeError(error, "ENOENT")) {
-        throw new Error(`system memory source not found: ${relativePath}`);
+        throw new Error(`${sourceType} memory source not found: ${relativePath}`);
       }
       throw error;
     });
     if (!sourceStat.isFile()) {
-      throw new Error(`system memory source is not a regular file: ${relativePath}`);
+      throw new Error(`${sourceType} memory source is not a regular file: ${relativePath}`);
+    }
+  }
+
+  if (manifest.version === 4) {
+    const identities = new Map<string, string>();
+    const bundled = new Map<string, Awaited<ReturnType<typeof readMemoryFile>>>();
+    const canonicalReferences = new Set<string>();
+    for (const relativePath of sourcePaths) {
+      const kind = relativePath.split("/", 1)[0];
+      if (!isMemoryKind(kind)) throw new Error(`invalid bundled Memory kind: ${relativePath}`);
+      const file = await readMemoryFile(kind, resolveMemoryPath(sourceRoot, relativePath));
+      bundled.set(relativePath, file);
+      if (file.entity.syntax !== manifest.memory_syntax) {
+        throw new Error(`bundled Memory ${relativePath} uses syntax ${file.entity.syntax}; expected ${manifest.memory_syntax}`);
+      }
+      for (const name of file.entity.names) {
+        const identity = `${kind}/${name}`;
+        const previous = identities.get(identity);
+        if (previous) throw new Error(`duplicate bundled Memory identity ${identity}: ${previous}, ${relativePath}`);
+        identities.set(identity, relativePath);
+      }
+      canonicalReferences.add(`${kind}/${file.entity.names[0]}`);
+    }
+    for (const relativePath of manifest.market_memory.install) {
+      const file = bundled.get(relativePath);
+      if (!file) throw new Error(`market memory source was not loaded: ${relativePath}`);
+      for (const dependency of collectMemoryReferenceTargets(file.entity)) {
+        if (canonicalReferences.has(dependency)) continue;
+        throw new Error(`market Memory dependency is not declared by system_memory.install or market_memory.install: ${dependency} (${relativePath})`);
+      }
     }
   }
 
@@ -200,6 +265,29 @@ export async function readBundledSystemMemories(
     const file = await readMemoryFile(kind, resolveMemoryPath(sourceRoot, path));
     const names = [...file.entity.names];
     return { path, kind, reference: `${kind}/${names[0]}`, names };
+  }));
+}
+
+export async function readBundledMarketMemories(
+  sourceRoot = bundledReservedMemoryRoot()
+): Promise<BundledMarketMemoryDescriptor[]> {
+  const manifest = await readReservedMemoryManifest(sourceRoot);
+  if (manifest.version !== 4) return [];
+  return Promise.all(manifest.market_memory.install.map(async (path) => {
+    const kind = path.split("/", 1)[0];
+    if (!isMemoryKind(kind)) throw new Error(`invalid market Memory kind: ${path}`);
+    const absolute = resolveMemoryPath(sourceRoot, path);
+    const [file, source] = await Promise.all([readMemoryFile(kind, absolute), readFile(absolute)]);
+    const names = [...file.entity.names];
+    return {
+      path,
+      kind,
+      reference: `${kind}/${names[0]}`,
+      names,
+      source,
+      digest: createHash("sha256").update(source).digest("hex"),
+      entity: file.entity
+    };
   }));
 }
 

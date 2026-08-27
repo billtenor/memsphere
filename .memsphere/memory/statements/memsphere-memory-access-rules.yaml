@@ -24,7 +24,8 @@ asserts:
   - memsphere memory list 返回的 names 首项是 canonical name，其余项是别名；canonical name 和别名都可作为 bare selector 发现候选 Memory，但只有 canonical name 可以组成显式逻辑引用。
   - Memory 文件名和目录位置属于 Provider 存储细节，不构成逻辑引用，Agent 不得通过物理路径推断 Memory 身份或来源。
   - Embedded Project 配置中的 repository_path 是主工作树绝对路径，memory_path 是仓库相对路径；View 展示该主工作树中的规范 Memory，CLI 命令在同一 Git common-dir 的 linked worktree 中执行时读取当前 worktree 的有效 Memory。
-  - Embedded CLI 解析必须拒绝其他仓库和非 Git 工作区；当前 worktree 不存在 memory_path 时必须直接报错，不得静默读取主工作树。Agent 编辑时必须使用 memsphere memory edit 返回的当前 worktree 路径，并通过正常 Git 提交合入，不得对 Embedded Project 使用 ChangeSet publish。
+  - Embedded CLI 解析必须拒绝其他仓库和非 Git 工作区；当前 worktree 不存在 memory_path 时必须直接报错，不得静默读取主工作树。Agent 编辑时必须使用 memsphere memory edit 返回的当前 worktree 路径，并通过正常 Git 提交合入。普通 Embedded ChangeSet 不得 publish；仅 intent 为 market_import 的隔离候选可复用 publish 将已校验内容应用到当前 worktree，且不得 commit、push 或把 ChangeSet 标记为 completed。
+  - 记忆市场是 npm 包内的官方精选 Memory 展示区，不是运行时 Memory 来源。市场 Memory 只有经用户点击导入、形成 ChangeSet 并完成 Project 写入后才生效；active 的导入 ChangeSet 只形成可跳转的“导入中”流程状态。之后它是普通用户 Memory，与包内内容独立演进。两者仅以当前 kind/canonical-name 关联，原始文件字节决定“一致”或“有差异”，不记录来源或版本，也不自动更新。
   - 使用验证成功的 active ChangeSet 启动 Run 时，Run 必须冻结该 checkpoint 的四类完整候选 Memory 快照，而不只冻结可执行 Procedure 和外部 Schema；Agent 在执行该 Run 时必须使用 memsphere memory list/read --run <run-id> 发现和读取该快照中的 Concept、Statement、Schema 与 Procedure，后续 ChangeSet 校验或工作树变化不得改变既有 Run 的读取结果。
   - ChangeSet Run 的 Agent Reviewer 使用受限 memsphere-review memory list/read 时，Session 必须自动绑定当前 Run 的冻结 Memory 快照；不得允许 Reviewer 显式改读其他 Run。普通 Run 没有冻结 ChangeSet 快照时保持读取当前项目 Memory，历史 ChangeSet Run 缺少快照时不得伪装成已冻结。
   - Agent 应优先根据用户明确表达的目标选择 Memory，不能仅因某份 Memory 能解释输入中的局部事实就忽略更符合目标的候选。

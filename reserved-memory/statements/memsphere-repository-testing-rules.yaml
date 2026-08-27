@@ -1,0 +1,76 @@
+!statement
+syntax: memsphere-20260721-stable
+names:
+  - memsphere-repository-testing-rules
+  - memsphere 代码仓库测试规范
+defines:
+  - 规定 memsphere 代码与 Memory 变更交付前的最低测试和校验要求。
+asserts:
+  - 交付前必须通过 npm run typecheck、npm test、npm run build 和 memsphere validate；存在失败时不得声称交付完成。
+  - 必须记录实际执行的测试命令、结果和未执行项，不得用历史结果代替当前变更验证。
+  - npm run validate 当前只执行构建，不得替代 memsphere validate。
+sections:
+  - !statement
+    names:
+      - 测试意图与职责边界
+    defines:
+      - 规定测试的存在理由、独立保护契约和职责边界。
+    asserts:
+      - 每条测试必须能用以下范式说明其存在理由：在前提 P 下，用户执行 A 后，应观察到结果 Y；如果测试失败，说明产品契约 X 被破坏。
+      - 每条测试必须独立保护一个明确的用户可观察契约，并能通过测试名称和断言识别被破坏的产品含义；无法明确产品契约 X 或可观察结果 Y 的测试不得保持当前形态。
+      - 一条测试只能有一个主要失败含义；多个断言必须共同证明同一契约，无关契约必须拆分为独立测试。
+      - 非被测前置状态必须优先通过 Store、API 或 helper 以最短路径构造；测试必须验证用户可观察结果，不得把非被测的实现步骤重新演练为测试主体。
+  - !statement
+    names:
+      - 测试分层
+    asserts:
+      - 测试层级必须按实际跨越的运行边界判断，不得根据文件名、测试框架或是否使用 mock 笼统命名。
+      - 单元测试验证单个小范围行为，不启动真实 HTTP 服务、浏览器或子进程；模块测试验证同一子系统内多个模块的协作，可以使用受控临时文件系统或内存 fixture，但不跨用户可见的服务或进程边界；集成测试跨越真实 HTTP 服务、CLI 或子进程、Git 仓库、浏览器等边界。
+      - 创建真实 View HTTP 服务并由浏览器通过 API、DOM 和 CSS 验证行为的测试属于浏览器驱动的 View 集成测试，不得归类为单元测试。
+      - 应选择能够验证变更风险的最低测试层级；真实边界上的行为必须由适用的集成测试覆盖，不得只用单元测试替代。
+  - !statement
+    names:
+      - 代码行为与回归测试
+    asserts:
+      - 修改代码行为时必须在适用层级补充或更新能够覆盖变更风险的自动化测试，并先运行受影响测试文件；修复 bug 必须增加或更新能够复现原问题的回归测试。
+      - 完成受影响测试后必须运行 npm test 全量回归，不得通过删除、跳过或弱化既有断言使测试通过。
+      - 修改 CLI、Memory、Run、Artifact、Review、View、Reserved Store、Archive 或 Migration 时，测试必须覆盖成功路径以及本次变更涉及的失败或边界路径。
+  - !statement
+    names:
+      - 自动化测试稳定性
+    defines:
+      - memsphere 的单元、模块和集成测试只要由测试代码实现并在 CI 中自动运行，就共同受本节约束；本仓库曾反复出现测试因未受控时序或页面重渲染竞态而在 CI 失败的问题，本节用于防止此类不稳定测试再次进入 CI。
+    asserts:
+      - 自动化测试不得依赖机器执行速度、任务调度顺序或其他未受控时序；同一份代码在相同 CI 环境中重复运行时，结果必须保持一致。
+      - 测试异步加载、轮询或页面重渲染时，必须等待被测状态出现并设置超时，不得仅通过等待固定时长判断测试结果。
+      - 测试失败源于竞态时，必须修复竞态；确实需要固定等待或重试时，必须限制等待时间或重试次数，并说明原因。
+  - !statement
+    names:
+      - 前端交互测试
+    asserts:
+      - 凡是进行了前端交互调整，交付前必须使用 playwright-cli 对受影响的交互进行实际操作测试，并确认交互行为正确。
+      - 使用真实浏览器驱动 View 的自动化测试属于集成测试；异步加载、轮询和重渲染场景必须遵循自动化测试稳定性要求。
+      - 对可能被重渲染打断的瞬时 DOM 状态进行写入并立即观察时，应在同一页面执行上下文中完成；如果被测契约要求状态跨重渲染保持，则必须等待并断言重渲染后的稳定状态。
+  - !statement
+    names:
+      - Memory Store 校验
+    asserts:
+      - 新建、修改、移动或删除 .memsphere/memory 中的任意 Concept、Statement、Procedure 或 Schema 后，必须运行 memsphere validate。
+      - memsphere validate 必须确认 config 与各 root 可用、四类当前 Memory 均可解析、syntax 与字段结构合法，并检查规范名称和别名等 catalog 冲突。
+      - memsphere validate 不验证自然语言 asserts 是否成立、Procedure 是否能按预期运行、Artifact 内容是否符合业务语义，也不直接校验 reserved-memory 源目录；这些必须由覆盖对应语义的自动化测试或实际运行验证。
+  - !statement
+    names:
+      - System 与 Reserved Memory
+    asserts:
+      - 修改 reserved-memory 中的 Memory、manifest 或安装行为时，必须运行 test/reserved-store.test.ts，验证 Managed Project bootstrap、System Memory manifest 完整性和受控更新契约，以及重复创建时的拒绝行为。
+      - 修改 System Memory 后必须同步当前开发 Project 的 Memory 副本，再运行 memsphere validate；源文件与安装副本不得出现非预期差异。
+  - !statement
+    names:
+      - 变更范围与必跑测试
+    defines:
+      - 本节只记录 memsphere 仓库中可长期复用的变更范围与现有必跑测试套件映射，不收录单次变更临时选择的测试。
+    asserts:
+      - 修改 Memory YAML 语法、实体 schema、解析或序列化时，必须运行 memory-schema、memory-syntax 和 memory-serializer 相关测试。
+      - 修改 Schema 或 Artifact 契约、格式解析和 validator 时，必须运行 artifact-validation、artifact-format-fixtures 及相关 migration 测试，并同时覆盖合法与非法 Artifact。
+      - 修改 Procedure Run、分支、循环、Call、Schema 填写或 Repeat 时，必须运行 run-store 和 run-command 相关测试。
+      - 修改 Review、View 或归档行为时，必须运行对应的 review-store、view 或 archive-store 测试。
