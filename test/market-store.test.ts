@@ -28,9 +28,9 @@ test("market import plans only the selected Memory when it has no explicit Memor
 
 test("market import includes dependencies required by a selected Procedure", async () => {
   await withMemoryRoot(async (root) => {
-    const plan = await planMemoryMarketImport(root, "procedures/code-branch-review-and-remediation");
+    const plan = await planMemoryMarketImport(root, "procedures/generic-code-branch-review-and-remediation");
     assert.deepEqual(plan.targets.map((target) => target.reference), [
-      "procedures/code-branch-review-and-remediation",
+      "procedures/generic-code-branch-review-and-remediation",
       "statements/memsphere-general-development-rules",
       "statements/memsphere-general-testing-rules"
     ]);
@@ -87,9 +87,9 @@ test("market import reuses an existing personalized dependency without overwriti
     );
     assert(dependency);
     await writeFile(join(root, dependency.path), Buffer.concat([dependency.source, Buffer.from("\n# personalized\n")]));
-    const plan = await planMemoryMarketImport(root, "procedures/code-branch-review-and-remediation");
+    const plan = await planMemoryMarketImport(root, "procedures/generic-code-branch-review-and-remediation");
     assert.deepEqual(plan.targets.map((target) => target.reference), [
-      "procedures/code-branch-review-and-remediation",
+      "procedures/generic-code-branch-review-and-remediation",
       "statements/memsphere-general-testing-rules"
     ]);
   });
