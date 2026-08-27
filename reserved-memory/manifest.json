@@ -10,6 +10,10 @@
       "concepts/memsphere-statement.yaml",
       "concepts/memsphere-procedure.yaml",
       "concepts/memsphere-schema.yaml",
+      "concepts/memsphere-run.yaml",
+      "concepts/memsphere-actor.yaml",
+      "concepts/memsphere-artifact-review.yaml",
+      "concepts/memsphere-view.yaml",
       "schemas/memsphere-concept-schema.yaml",
       "schemas/memsphere-statement-schema.yaml",
       "schemas/memsphere-procedure-schema.yaml",
@@ -21,7 +25,9 @@
       "procedures/memsphere-changeset-comment-processing.yaml",
       "procedures/memsphere-usage-issue-reporting.yaml",
       "procedures/memsphere-tutorial-chapter-01.yaml",
-      "procedures/memsphere-tutorial-chapter-02.yaml"
+      "procedures/memsphere-tutorial-chapter-02.yaml",
+      "procedures/memsphere-tutorial-chapter-03.yaml",
+      "procedures/memsphere-tutorial-chapter-03-review-experience.yaml"
     ],
     "remove": [
       { "path": "concepts/memory.yaml", "references": ["concepts/Memory"] },

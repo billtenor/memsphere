@@ -1,0 +1,13 @@
+!concept
+syntax: memsphere-20260721-stable
+names:
+  - memsphere-actor
+  - Actor
+  - 参与者
+defines:
+  - Memsphere Project 控制平面中可参与 Artifact Review 的 Human 或 Agent。
+  - Human Actor 代表真实 Human；Agent Actor 通过已配置的 ACP Provider 和可选模型参与评审。
+  - Actor 使用稳定 id、显示名称和 Permission 描述身份与可执行的 Memsphere 操作；Actor 不等同于 Procedure 中 Action 的 actor 字段。
+  - Run 创建时，Actor 可以通过 Binding 承担一个或多个 Review Slot；Review Slot 表达评审视角，Actor 表达本次实际由谁参与。
+  - Runner 是通用 Agent 框架托管的 Run 实际执行者，可以由主 Agent 单独构成，也可以由主 Agent 与子 Agent 共同构成。Runner 不是 Review Actor，也不需要通过 Review Slot Binding 才能执行。
+  - Agent Reviewer 只能在自己的 Review Assignment 中读取 Submission、提交 Comment 和 Vote，不能接管 Run 步骤或直接修改 Artifact。
