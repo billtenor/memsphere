@@ -17,6 +17,7 @@ Memsphere Run：`run-20260826-041558z-2a3102b3`
 - 用户重命名后不再关联。市场条目改名等同旧条目下架、新条目新增；删除市场条目不影响用户 Memory。
 - 同一 Project 的导入和重新导入持续追加到同一个 active 市场 ChangeSet，完成或废弃后才新建，不预先展示 diff。缺失的市场依赖随候选补入，Project 已有依赖不覆盖。
 - 首批市场内容包含敏捷需求开发、bug 修复、代码分支评审与修复、需求管理流程，以及这些流程所需的通用规则、开发规范和测试规范依赖。
+- 仓库专属开发规范和测试规范不进入记忆市场；市场流程只依赖吸收了可泛化实践的通用开发规范与通用测试规范。
 - Managed 复用正常 ChangeSet publish；Embedded 仅允许 `market_import` ChangeSet 将校验后的隔离候选应用到当前 worktree，不 commit、push 或提前完成 ChangeSet。
 
 ## 实现范围

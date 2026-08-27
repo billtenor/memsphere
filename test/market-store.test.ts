@@ -31,8 +31,8 @@ test("market import includes dependencies required by a selected Procedure", asy
     const plan = await planMemoryMarketImport(root, "procedures/code-branch-review-and-remediation");
     assert.deepEqual(plan.targets.map((target) => target.reference), [
       "procedures/code-branch-review-and-remediation",
-      "statements/memsphere-repository-development-rules",
-      "statements/memsphere-repository-testing-rules"
+      "statements/memsphere-general-development-rules",
+      "statements/memsphere-general-testing-rules"
     ]);
   });
 });
@@ -83,14 +83,14 @@ function renameBundledMemory(
 test("market import reuses an existing personalized dependency without overwriting it", async () => {
   await withMemoryRoot(async (root) => {
     const dependency = (await readBundledMarketMemories()).find(
-      (item) => item.reference === "statements/memsphere-repository-development-rules"
+      (item) => item.reference === "statements/memsphere-general-development-rules"
     );
     assert(dependency);
     await writeFile(join(root, dependency.path), Buffer.concat([dependency.source, Buffer.from("\n# personalized\n")]));
     const plan = await planMemoryMarketImport(root, "procedures/code-branch-review-and-remediation");
     assert.deepEqual(plan.targets.map((target) => target.reference), [
       "procedures/code-branch-review-and-remediation",
-      "statements/memsphere-repository-testing-rules"
+      "statements/memsphere-general-testing-rules"
     ]);
   });
 });
