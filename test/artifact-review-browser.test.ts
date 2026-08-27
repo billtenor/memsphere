@@ -127,6 +127,135 @@ test("Human Artifact Review completes once after a revised second round", async 
   }
 });
 
+test("failed Artifact Review draft saves retain input and retry exactly once", async () => {
+  const fixture = await createSingleActorReviewFixture();
+  try {
+    await withReviewBrowser(fixture.config, { width: 1440, height: 900 }, async (page, origin) => {
+      await page.goto(
+        `${origin}/tasks/${fixture.runId}/artifact-reviews/${fixture.review.id}?round=${fixture.review.currentRoundId}`,
+        { waitUntil: "domcontentloaded" }
+      );
+      const modal = page.locator("#artifact-review-modal[open]");
+      await modal.waitFor();
+      await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
+
+      await modal.locator(".inline-plus").first().click();
+      let inlineEditor = modal.locator(".inline-comment-editor").first();
+      let inlineInput = inlineEditor.getByPlaceholder("What should change here?");
+      let inlineSave = inlineEditor.getByRole("button", { name: "Add comment", exact: true });
+      await inlineInput.fill("Inline text survives a failed save");
+      await failNextDraftSave(page, "inline draft outage", () => inlineSave.click());
+      inlineEditor = modal.locator(".inline-comment-editor").first();
+      inlineInput = inlineEditor.getByPlaceholder("What should change here?");
+      inlineSave = inlineEditor.getByRole("button", { name: "Add comment", exact: true });
+      assert.equal(await inlineInput.inputValue(), "Inline text survives a failed save");
+      assert.equal(await inlineSave.isEnabled(), true);
+      await clickAndWaitForDraftSave(page, inlineSave);
+
+      const composer = modal.getByPlaceholder("补充整体评审意见");
+      const composerSave = modal.getByRole("button", { name: "添加意见", exact: true });
+      await composer.fill("Overall text survives a failed save");
+      await failNextDraftSave(page, "composer draft outage", () => composerSave.click());
+      assert.equal(await composer.inputValue(), "Overall text survives a failed save");
+      assert.equal(await composerSave.isEnabled(), true);
+      await clickAndWaitForDraftSave(page, composerSave);
+
+      const persisted = currentArtifactReview(await readRun(fixture.runsRoot, fixture.runId));
+      const comments = persisted?.rounds[0]?.assignments.find(
+        (assignment) => assignment.actorId === "alice"
+      )?.draft.comments ?? [];
+      assert.equal(comments.filter((comment) => comment.body === "Inline text survives a failed save").length, 1);
+      assert.equal(comments.filter((comment) => comment.body === "Overall text survives a failed save").length, 1);
+    });
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("Artifact Review persists and restores the panel split", async () => {
+  const fixture = await createSingleActorReviewFixture();
+  try {
+    await withReviewBrowser(fixture.config, { width: 1440, height: 900 }, async (page, origin) => {
+      const reviewUrl = `${origin}/tasks/${fixture.runId}/artifact-reviews/${fixture.review.id}?round=${fixture.review.currentRoundId}`;
+      await page.goto(reviewUrl, { waitUntil: "domcontentloaded" });
+      const resizer = page.getByRole("separator", { name: "调整产物与评审区域宽度" });
+      await resizer.waitFor();
+      const initial = Number(await resizer.getAttribute("aria-valuenow"));
+      await resizer.press("ArrowRight");
+      await page.waitForFunction((previous) => {
+        const element = document.querySelector('[role="separator"][aria-label="调整产物与评审区域宽度"]');
+        return Number(element?.getAttribute("aria-valuenow")) > previous
+          && Number(localStorage.getItem("memsphere.artifactReviewSplit.v1")) > previous;
+      }, initial);
+      const persisted = Number(await resizer.getAttribute("aria-valuenow"));
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      const restored = page.getByRole("separator", { name: "调整产物与评审区域宽度" });
+      await restored.waitFor();
+      assert.equal(Number(await restored.getAttribute("aria-valuenow")), persisted);
+    });
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("Artifact Review keeps historical round selection across polling and makes it read-only", async () => {
+  const fixture = await createSingleActorReviewFixture();
+  try {
+    const revised = await createRevisedSingleActorReview(fixture);
+    await withReviewBrowser(fixture.config, { width: 1440, height: 900 }, async (page, origin) => {
+      await page.goto(
+        `${origin}/tasks/${fixture.runId}/artifact-reviews/${revised.id}?round=${revised.currentRoundId}`,
+        { waitUntil: "domcontentloaded" }
+      );
+      const modal = page.locator("#artifact-review-modal[open]");
+      await modal.waitFor();
+      await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
+      const roundSelector = page.getByRole("button", { name: "轮次", exact: true });
+      await roundSelector.click();
+      const roundMenu = page.getByRole("listbox", { name: "轮次" });
+      await roundMenu.waitFor();
+      await waitForViewLifecycleEvent(page, "memsphere:view-poll-settled", "activity");
+      assert.equal(await roundMenu.isVisible(), true);
+      await roundMenu.locator(`[data-round-id="${fixture.review.currentRoundId}"]`).click();
+
+      await modal.getByText("历史轮次仅供查看，不能投票、添加意见或重新提交。", { exact: true }).waitFor();
+      assert.equal(await modal.getByRole("radio").count(), 0);
+      assert.equal(await modal.getByRole("button", { name: "添加意见", exact: true }).count(), 0);
+      assert.equal(await modal.getByRole("button", { name: "提交评审", exact: true }).isVisible(), false);
+    });
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("Artifact Review locates an anchored historical comment in its artifact", async () => {
+  const fixture = await createSingleActorReviewFixture();
+  try {
+    const revised = await createRevisedSingleActorReview(fixture, "Locate this historical comment");
+    await withReviewBrowser(fixture.config, { width: 1440, height: 900 }, async (page, origin) => {
+      await page.goto(
+        `${origin}/tasks/${fixture.runId}/artifact-reviews/${revised.id}?round=${revised.currentRoundId}`,
+        { waitUntil: "domcontentloaded" }
+      );
+      const modal = page.locator("#artifact-review-modal[open]");
+      await modal.waitFor();
+      await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
+      const roundSelector = page.getByRole("button", { name: "轮次", exact: true });
+      await roundSelector.click();
+      await page.getByRole("listbox", { name: "轮次" })
+        .locator(`[data-round-id="${fixture.review.currentRoundId}"]`).click();
+      const comment = modal.locator(".comment-card").filter({ hasText: "Locate this historical comment" });
+      await comment.getByRole("button", { name: "定位", exact: true }).click();
+      const located = modal.locator('[data-anchor="markdown:h1:0"].artifact-review-target-located');
+      await located.waitFor();
+      assert.match(await located.innerText(), /Focused candidate/);
+    });
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
 test("completed Artifact Review locks page scrolling and restores the trigger position", async () => {
   const fixture = await createSingleActorReviewFixture();
   try {
@@ -723,6 +852,58 @@ async function approveSingleActorReview(
   await submitArtifactReviewRunnerVote({ runsRoot, reviewId, roundId, vote: "approve" });
 }
 
+async function createRevisedSingleActorReview(
+  fixture: BrowserReviewFixture,
+  anchoredComment?: string
+): Promise<BrowserReviewFixture["review"]> {
+  const round = fixture.review.rounds[0];
+  const submission = fixture.review.submissions.find((candidate) => candidate.id === round.submissionId);
+  assert(submission);
+  const now = new Date().toISOString();
+  const drafted = await updateArtifactReviewDraft({
+    runsRoot: fixture.runsRoot,
+    reviewId: fixture.review.id,
+    roundId: round.id,
+    actorId: "alice",
+    expectedRevision: round.revision,
+    draft: {
+      vote: "request_changes",
+      comments: [{
+        id: "historical-anchored-comment",
+        body: anchoredComment ?? "Request a focused revision",
+        severity: "risk",
+        ...(anchoredComment ? { anchor: {
+          submissionId: submission.id,
+          target: "markdown:h1:0",
+          location: "markdown:h1:0",
+          sourceHash: submission.digest,
+          context: "Focused candidate"
+        } } : {}),
+        createdAt: now,
+        updatedAt: now
+      }]
+    }
+  });
+  await submitArtifactReviewAssignment({
+    runsRoot: fixture.runsRoot,
+    reviewId: fixture.review.id,
+    roundId: round.id,
+    actorId: "alice",
+    expectedRevision: drafted.round.revision
+  });
+  const rejected = currentArtifactReview(await readRun(fixture.runsRoot, fixture.runId));
+  assert.equal(rejected?.status, "awaiting_revision");
+  const revisedRun = await reportRun({
+    runsRoot: fixture.runsRoot,
+    runId: fixture.runId,
+    artifact: { kind: "inline", value: "# Revised focused candidate\n\nReview body revised.\n" },
+    revisionSummary: "Addressed the focused review."
+  });
+  const revised = currentArtifactReview(revisedRun);
+  assert(revised);
+  return revised;
+}
+
 async function withReviewBrowser(
   config: MemsphereConfig,
   viewport: { width: number; height: number },
@@ -756,6 +937,29 @@ async function submitThroughConfirmation(page: import("playwright").Page): Promi
   const response = await submitted;
   assert.equal(response.status(), 200);
   await dialog.waitFor({ state: "detached" });
+}
+
+async function failNextDraftSave(
+  page: import("playwright").Page,
+  message: string,
+  action: () => Promise<unknown>
+): Promise<void> {
+  let failed = false;
+  await page.route("**/draft", async (route) => {
+    if (!failed && route.request().method() === "PATCH") {
+      failed = true;
+      await route.fulfill({ status: 503, body: message });
+      return;
+    }
+    await route.continue();
+  });
+  try {
+    await action();
+    await page.getByText(message, { exact: true }).waitFor();
+    assert.equal(failed, true);
+  } finally {
+    await page.unroute("**/draft");
+  }
 }
 
 async function selectIdentity(

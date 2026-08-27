@@ -105,7 +105,11 @@ test("unrelated invalid Memory does not block market listing or import planning"
     assert.deepEqual(plan.targets.map((target) => target.reference), [
       "procedures/memsphere-agile-requirement-development"
     ]);
+  });
+});
 
+test("invalid Memory with a readable alias conservatively reports a Market name conflict", async () => {
+  await withMemoryRoot(async (root) => {
     const bundled = (await readBundledMarketMemories())[0]!;
     await writeFile(join(root, bundled.kind, "broken-conflict.yaml"), [
       `!${bundled.kind.slice(0, -1)}`,

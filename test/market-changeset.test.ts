@@ -12,7 +12,8 @@ import {
   finishMemoryChange,
   publishMemoryChange,
   readMemoryChange,
-  validateMemoryChange
+  validateMemoryChange,
+  withMemoryChangeDetailSnapshot
 } from "../src/memory/changeset.js";
 import { memoryKinds } from "../src/memory/kinds.js";
 import { readProjectRegistry } from "../src/project/registry.js";
@@ -129,6 +130,26 @@ test("Managed Market import stays inactive until publish completes its ChangeSet
     const published = await publishMemoryChange(change.id);
     assert.equal(published.status, "completed");
     assert.match(await readFile(join(fixture.memoryRoot, plan.targets[0]!.path), "utf8"), /!statement/);
+  });
+});
+
+test("active Market ChangeSet details expose the candidate before Project activation", async () => {
+  await withManagedMarket(async (fixture) => {
+    const { change, plan } = await createImport(fixture, "statements/memsphere-general-testing-rules");
+    const target = plan.targets[0]!;
+
+    await assert.rejects(readFile(join(fixture.memoryRoot, target.path)), /ENOENT/);
+    await withMemoryChangeDetailSnapshot({
+      home: fixture.home,
+      project: fixture.project,
+      changeId: change.id,
+      use: async ({ files }) => {
+        const candidate = files.find((file) => file.reference === target.reference);
+        assert(candidate);
+        assert.match(await readFile(candidate.path, "utf8"), /!statement/);
+      }
+    });
+    await assert.rejects(readFile(join(fixture.memoryRoot, target.path)), /ENOENT/);
   });
 });
 

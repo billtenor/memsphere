@@ -161,7 +161,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   assert(reservedSystemMemoryRemovalTombstones(manifest).every((tombstone) => tombstone.references.length > 0));
 });
 
-test("bundled Market manifest exposes complete sources and branch-review dependencies", async () => {
+test("bundled Market manifest exposes every complete source", async () => {
   const market = await readBundledMarketMemories();
   assert.deepEqual(market.map((memory) => memory.reference), [
     "procedures/memsphere-agile-requirement-development",
@@ -176,7 +176,10 @@ test("bundled Market manifest exposes complete sources and branch-review depende
     "statements/memsphere-repository-testing-rules"
   ]);
   assert(market.every((memory) => memory.source.length > 0 && memory.digest.length === 64));
+});
 
+test("bundled branch-review applies repository development and testing rules", async () => {
+  const market = await readBundledMarketMemories();
   const branchReview = market.find((memory) => (
     memory.reference === "procedures/code-branch-review-and-remediation"
   ));
