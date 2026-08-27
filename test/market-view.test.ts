@@ -96,6 +96,28 @@ test("an unpublished Market import stays out of the Project Catalog", async () =
   });
 });
 
+test("an unpublished Market candidate is visible in its ChangeSet detail", async () => {
+  await withMarketView(async ({ origin }) => {
+    const imported = await importMarket(origin, "statements", "memsphere-general-testing-rules");
+    assert.equal(imported.response.status, 201);
+
+    const response = await fetch(`${origin}/api/changes/${imported.payload.change.id}`);
+    assert.equal(response.status, 200);
+    const detail = await response.json() as {
+      targetMemories: Array<{ reference: string }>;
+    };
+    assert.equal(detail.targetMemories.some((memory) => (
+      memory.reference === "statements/memsphere-general-testing-rules"
+    )), true);
+    const catalog = await fetch(`${origin}/api/memories`).then((result) => result.json()) as {
+      memories: Array<{ id: string }>;
+    };
+    assert.equal(catalog.memories.some((memory) => (
+      memory.id === "statements/memsphere-general-testing-rules"
+    )), false);
+  });
+});
+
 test("Memory Market View API rejects a canonical-name alias conflict", async () => {
   await withMarketView(async ({ origin, memoryRoot }) => {
     await writeFile(

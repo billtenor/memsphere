@@ -199,7 +199,7 @@ test("Artifact Review persists and restores the panel split", async () => {
   }
 });
 
-test("Artifact Review keeps historical round selection across polling and makes it read-only", async () => {
+test("Artifact Review makes historical rounds read-only", async () => {
   const fixture = await createSingleActorReviewFixture();
   try {
     const revised = await createRevisedSingleActorReview(fixture);
@@ -214,15 +214,46 @@ test("Artifact Review keeps historical round selection across polling and makes 
       const roundSelector = page.getByRole("button", { name: "轮次", exact: true });
       await roundSelector.click();
       const roundMenu = page.getByRole("listbox", { name: "轮次" });
-      await roundMenu.waitFor();
-      await waitForViewLifecycleEvent(page, "memsphere:view-poll-settled", "activity");
-      assert.equal(await roundMenu.isVisible(), true);
       await roundMenu.locator(`[data-round-id="${fixture.review.currentRoundId}"]`).click();
 
       await modal.getByText("历史轮次仅供查看，不能投票、添加意见或重新提交。", { exact: true }).waitFor();
       assert.equal(await modal.getByRole("radio").count(), 0);
       assert.equal(await modal.getByRole("button", { name: "添加意见", exact: true }).count(), 0);
       assert.equal(await modal.getByRole("button", { name: "提交评审", exact: true }).isVisible(), false);
+    });
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("Artifact Review keeps a selected historical round across polling", async () => {
+  const fixture = await createSingleActorReviewFixture();
+  try {
+    const revised = await createRevisedSingleActorReview(fixture);
+    await withReviewBrowser(fixture.config, { width: 1440, height: 900 }, async (page, origin) => {
+      await page.goto(
+        `${origin}/tasks/${fixture.runId}/artifact-reviews/${revised.id}?round=${revised.currentRoundId}`,
+        { waitUntil: "domcontentloaded" }
+      );
+      const modal = page.locator("#artifact-review-modal[open]");
+      await modal.waitFor();
+      await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
+      const roundSelector = page.getByRole("button", { name: "轮次", exact: true });
+      await roundSelector.click();
+      let roundMenu = page.getByRole("listbox", { name: "轮次" });
+      await roundMenu.locator(`[data-round-id="${fixture.review.currentRoundId}"]`).click();
+      await modal.getByText("历史轮次 · 只读", { exact: true }).waitFor();
+
+      await roundSelector.click();
+      roundMenu = page.getByRole("listbox", { name: "轮次" });
+      await roundMenu.waitFor();
+      await waitForViewLifecycleEvent(page, "memsphere:view-poll-settled", "activity");
+      assert.equal(await roundMenu.isVisible(), true);
+      assert.equal(
+        await roundMenu.locator(`[data-round-id="${fixture.review.currentRoundId}"]`).getAttribute("aria-selected"),
+        "true"
+      );
+      await modal.getByText("历史轮次 · 只读", { exact: true }).waitFor();
     });
   } finally {
     await rm(fixture.dir, { recursive: true, force: true });
@@ -250,6 +281,34 @@ test("Artifact Review locates an anchored historical comment in its artifact", a
       const located = modal.locator('[data-anchor="markdown:h1:0"].artifact-review-target-located');
       await located.waitFor();
       assert.match(await located.innerText(), /Focused candidate/);
+    });
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("Artifact Review normalizes invalid Round and Material URLs and syncs material selection", async () => {
+  const fixture = await createSingleActorReviewFixture();
+  try {
+    await withReviewBrowser(fixture.config, { width: 1440, height: 900 }, async (page, origin) => {
+      await page.goto(
+        `${origin}/tasks/${fixture.runId}/artifact-reviews/${fixture.review.id}?round=round-missing&material=material-missing`,
+        { waitUntil: "domcontentloaded" }
+      );
+      const modal = page.locator("#artifact-review-modal[open]");
+      await modal.waitFor();
+      await page.waitForFunction((roundId) => {
+        const params = new URLSearchParams(location.search);
+        return params.get("round") === roundId && !params.has("material");
+      }, fixture.review.currentRoundId);
+
+      const material = modal.getByRole("combobox", { name: "选择评审材料", exact: true });
+      await material.click();
+      await modal.getByRole("option", { name: /^冻结契约/ }).click();
+      await page.waitForFunction(() => new URLSearchParams(location.search).get("material") === "contract");
+      await material.click();
+      await modal.getByRole("option", { name: /^待评审产物/ }).click();
+      await page.waitForFunction(() => !new URLSearchParams(location.search).has("material"));
     });
   } finally {
     await rm(fixture.dir, { recursive: true, force: true });
