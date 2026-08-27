@@ -27,6 +27,7 @@ test("gitHashObject applies Git path filters without asking Git to open the sour
     await writeFile(path, source);
     await runGit(["init", "-b", "master"], { cwd: root });
     const expected = (await runGit(["hash-object", "--", "memory.txt"], { cwd: root })).stdout;
+    await rm(path);
     assert.equal(await gitHashObject(source, root, "memory.txt"), expected);
   } finally {
     await rm(root, { recursive: true, force: true });

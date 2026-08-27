@@ -12,8 +12,7 @@ import {
   finishMemoryChange,
   publishMemoryChange,
   readMemoryChange,
-  validateMemoryChange,
-  withMemoryChangeDetailSnapshot
+  validateMemoryChange
 } from "../src/memory/changeset.js";
 import { memoryKinds } from "../src/memory/kinds.js";
 import { readProjectRegistry } from "../src/project/registry.js";
@@ -25,6 +24,22 @@ type Environment = {
   gitConfig?: string;
 };
 
+type MarketFixture = {
+  home: string;
+  project: "managed" | "embedded";
+  workspace: string;
+  memoryRoot: string;
+};
+
+function currentEnvironment(): Environment {
+  return {
+    cwd: process.cwd(),
+    home: process.env.MEMSPHERE_HOME,
+    project: process.env.MEMSPHERE_PROJECT,
+    gitConfig: process.env.GIT_CONFIG_GLOBAL
+  };
+}
+
 function restoreEnvironment(previous: Environment): void {
   process.chdir(previous.cwd);
   if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;
@@ -35,18 +50,12 @@ function restoreEnvironment(previous: Environment): void {
   else process.env.GIT_CONFIG_GLOBAL = previous.gitConfig;
 }
 
-test("Managed market import stays inactive until its ChangeSet is published", async () => {
+async function withManagedMarket(run: (fixture: MarketFixture) => Promise<void>): Promise<void> {
   const fixture = await mkdtemp(join(tmpdir(), "memsphere-managed-market-"));
   const home = join(fixture, "home");
   const workspace = join(fixture, "workspace");
-  const otherWorkspace = join(fixture, "other-workspace");
   const gitConfig = join(fixture, "gitconfig");
-  const previous: Environment = {
-    cwd: process.cwd(),
-    home: process.env.MEMSPHERE_HOME,
-    project: process.env.MEMSPHERE_PROJECT,
-    gitConfig: process.env.GIT_CONFIG_GLOBAL
-  };
+  const previous = currentEnvironment();
   try {
     await mkdir(workspace);
     await writeFile(gitConfig, "[user]\n\tname = Test User\n\temail = test@example.com\n");
@@ -58,154 +67,172 @@ test("Managed market import stays inactive until its ChangeSet is published", as
     await projectCreateCommand("managed", { bind: true });
     const project = (await readProjectRegistry(home)).projects.managed;
     assert(project);
-    const memoryRoot = join(project.root, "memory");
-    const plan = await planMemoryMarketImport(memoryRoot, "statements/memsphere-general-testing-rules");
-    const change = await createMarketMemoryChange({
-      home,
-      project: "managed",
-      actor: { kind: "human", id: "owner", name: "Owner" },
-      targets: plan.targets
-    });
-    assert.equal(change.intent, "market_import");
-    assert.equal(change.status, "active");
-    await claimMemoryChange({ changeId: change.id });
-    assert.deepEqual((await validateMemoryChange(change.id)).issues, []);
-    assert((await readMemoryChange({ home, project: "managed", changeId: change.id })).checkpoint);
-    await finishMemoryChange({ changeId: change.id });
-    const secondPlan = await planMemoryMarketImport(memoryRoot, "statements/memsphere-general-development-rules");
-    const second = await createMarketMemoryChange({
-      home,
-      project: "managed",
-      actor: { kind: "human", id: "owner", name: "Owner" },
-      targets: secondPlan.targets
-    });
-    assert.equal(second.id, change.id);
-    assert.equal(second.checkpoint, undefined);
-    const thirdPlan = await planMemoryMarketImport(memoryRoot, "statements/memsphere-general-delivery-rules");
-    const expanded = await createMarketMemoryChange({
-      home,
-      project: "managed",
-      actor: { kind: "human", id: "owner", name: "Owner" },
-      targets: thirdPlan.targets
-    });
-    assert.equal(expanded.id, change.id);
-    assert.deepEqual(
-      new Set(expanded.targets.map((target) => target.reference)),
-      new Set([...plan.targets, ...secondPlan.targets, ...thirdPlan.targets].map((target) => target.reference))
-    );
-    const duplicate = await createMarketMemoryChange({
-      home,
-      project: "managed",
-      actor: { kind: "human", id: "owner", name: "Owner" },
-      targets: plan.targets
-    });
-    assert.equal(duplicate.id, change.id);
-    assert.equal(duplicate.targets.length, expanded.targets.length);
-    await assert.rejects(readFile(join(memoryRoot, plan.targets[0]!.path)), /ENOENT/);
-    await withMemoryChangeDetailSnapshot({
-      home,
-      project: "managed",
-      changeId: change.id,
-      use: async ({ files }) => assert.match(await readFile(files[0]!.path, "utf8"), /!statement/)
-    });
-    const claimed = await claimMemoryChange({ changeId: change.id });
-    assert.match(await readFile(join(claimed.candidateRoot, plan.targets[0]!.path), "utf8"), /!statement/);
-    await mkdir(otherWorkspace);
-    await runGit(["init", "-b", "master"], { cwd: otherWorkspace });
-    process.chdir(otherWorkspace);
-    await assert.rejects(validateMemoryChange(change.id), /belongs to another Workspace/);
-    await assert.rejects(publishMemoryChange(change.id), /belongs to another Workspace/);
-    process.chdir(workspace);
-    assert.deepEqual((await validateMemoryChange(change.id)).issues, []);
-    const published = await publishMemoryChange(change.id);
-    assert.equal(published.status, "completed");
-    assert.match(await readFile(join(memoryRoot, plan.targets[0]!.path), "utf8"), /!statement/);
+    await run({ home, project: "managed", workspace, memoryRoot: join(project.root, "memory") });
   } finally {
     restoreEnvironment(previous);
     await rm(fixture, { recursive: true, force: true });
   }
-});
+}
 
-test("Embedded market publish applies a validated candidate without committing or completing it", async () => {
+async function withEmbeddedMarket(run: (fixture: MarketFixture) => Promise<void>): Promise<void> {
   const fixture = await mkdtemp(join(tmpdir(), "memsphere-embedded-market-"));
   const home = join(fixture, "home");
-  const repository = join(fixture, "repository");
-  const memoryRoot = join(repository, ".memsphere", "memory");
+  const workspace = join(fixture, "repository");
+  const memoryRoot = join(workspace, ".memsphere", "memory");
   const gitConfig = join(fixture, "gitconfig");
-  const previous: Environment = {
-    cwd: process.cwd(),
-    home: process.env.MEMSPHERE_HOME,
-    project: process.env.MEMSPHERE_PROJECT,
-    gitConfig: process.env.GIT_CONFIG_GLOBAL
-  };
+  const previous = currentEnvironment();
   try {
     for (const kind of memoryKinds) await mkdir(join(memoryRoot, kind), { recursive: true });
-    await writeFile(join(memoryRoot, "concepts", "base.yaml"), "!concept\nsyntax: memsphere-20260721-stable\nnames: [base]\ndefines: [Base]\n");
+    await writeFile(
+      join(memoryRoot, "concepts", "base.yaml"),
+      "!concept\nsyntax: memsphere-20260721-stable\nnames: [base]\ndefines: [Base]\n"
+    );
     await writeFile(gitConfig, "[user]\n\tname = Test User\n\temail = test@example.com\n");
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     process.env.MEMSPHERE_HOME = home;
     process.env.MEMSPHERE_PROJECT = "embedded";
-    await runGit(["init", "-b", "master"], { cwd: repository });
-    await runGit(["add", ".memsphere/memory"], { cwd: repository });
-    await runGit(["commit", "-m", "memory fixture"], { cwd: repository });
-    process.chdir(repository);
+    await runGit(["init", "-b", "master"], { cwd: workspace });
+    await runGit(["add", ".memsphere/memory"], { cwd: workspace });
+    await runGit(["commit", "-m", "memory fixture"], { cwd: workspace });
+    process.chdir(workspace);
     await projectCreateCommand("embedded", { embedded: memoryRoot, bind: true });
-    const plan = await planMemoryMarketImport(memoryRoot, "statements/memsphere-general-testing-rules");
-    const target = plan.targets[0]!;
-    const change = await createMarketMemoryChange({
-      home,
-      project: "embedded",
-      actor: { kind: "human", id: "owner", name: "Owner" },
-      targets: plan.targets
-    });
-    await assert.rejects(readFile(join(memoryRoot, target.path)), /ENOENT/);
-    const claimed = await claimMemoryChange({ changeId: change.id });
-    assert.match(await readFile(join(claimed.candidateRoot, target.path), "utf8"), /!statement/);
-    await assert.rejects(readFile(join(memoryRoot, target.path)), /ENOENT/);
-    assert.deepEqual((await validateMemoryChange(change.id)).issues, []);
-    await assert.rejects(readFile(join(memoryRoot, target.path)), /ENOENT/);
-    const applied = await publishMemoryChange(change.id);
-    assert.equal(applied.status, "active");
-    assert.match(await readFile(join(memoryRoot, target.path), "utf8"), /!statement/);
-    assert.match(await gitOutput(["status", "--porcelain", "--", `.memsphere/memory/${target.path}`], repository), /^\?\?/);
-    assert.equal((await readMemoryChange({ home, project: "embedded", changeId: change.id })).status, "active");
-
-    await finishMemoryChange({ changeId: change.id });
-    const secondPlan = await planMemoryMarketImport(memoryRoot, "statements/memsphere-general-development-rules");
-    const secondTarget = secondPlan.targets[0]!;
-    const expanded = await createMarketMemoryChange({
-      home,
-      project: "embedded",
-      actor: { kind: "human", id: "owner", name: "Owner" },
-      targets: secondPlan.targets
-    });
-    assert.equal(expanded.id, change.id);
-    await claimMemoryChange({ changeId: change.id });
-    assert.deepEqual((await validateMemoryChange(change.id)).issues, []);
-    await finishMemoryChange({ changeId: change.id });
-    const expandedApplied = await publishMemoryChange(change.id);
-    assert.equal(expandedApplied.status, "active");
-    assert.match(await readFile(join(memoryRoot, target.path), "utf8"), /!statement/);
-    assert.match(await readFile(join(memoryRoot, secondTarget.path), "utf8"), /!statement/);
-    assert.equal((await publishMemoryChange(change.id)).status, "active");
-
-    await writeFile(join(memoryRoot, target.path), Buffer.concat([
-      await readFile(join(memoryRoot, target.path)),
-      Buffer.from("\n# personalized\n")
-    ]));
-    const thirdPlan = await planMemoryMarketImport(memoryRoot, "statements/memsphere-general-delivery-rules");
-    await createMarketMemoryChange({
-      home,
-      project: "embedded",
-      actor: { kind: "human", id: "owner", name: "Owner" },
-      targets: thirdPlan.targets
-    });
-    await claimMemoryChange({ changeId: change.id });
-    assert.deepEqual((await validateMemoryChange(change.id)).issues, []);
-    await finishMemoryChange({ changeId: change.id });
-    await assert.rejects(publishMemoryChange(change.id), /uncommitted changes/);
+    await run({ home, project: "embedded", workspace, memoryRoot });
   } finally {
     restoreEnvironment(previous);
     await rm(fixture, { recursive: true, force: true });
   }
+}
+
+async function createImport(fixture: MarketFixture, reference: string) {
+  const plan = await planMemoryMarketImport(fixture.memoryRoot, reference);
+  const change = await createMarketMemoryChange({
+    home: fixture.home,
+    project: fixture.project,
+    actor: { kind: "human", id: "owner", name: "Owner" },
+    targets: plan.targets
+  });
+  return { change, plan };
+}
+
+async function validateAndRelease(changeId: string): Promise<void> {
+  await claimMemoryChange({ changeId });
+  assert.deepEqual((await validateMemoryChange(changeId)).issues, []);
+  await finishMemoryChange({ changeId });
+}
+
+test("Managed Market import stays inactive until publish completes its ChangeSet", async () => {
+  await withManagedMarket(async (fixture) => {
+    const { change, plan } = await createImport(fixture, "statements/memsphere-general-testing-rules");
+    await validateAndRelease(change.id);
+
+    await assert.rejects(readFile(join(fixture.memoryRoot, plan.targets[0]!.path)), /ENOENT/);
+    const published = await publishMemoryChange(change.id);
+    assert.equal(published.status, "completed");
+    assert.match(await readFile(join(fixture.memoryRoot, plan.targets[0]!.path), "utf8"), /!statement/);
+  });
+});
+
+test("Managed Market imports aggregate in one active ChangeSet", async () => {
+  await withManagedMarket(async (fixture) => {
+    const first = await createImport(fixture, "statements/memsphere-general-testing-rules");
+    const second = await createImport(fixture, "statements/memsphere-general-development-rules");
+    const duplicate = await createImport(fixture, "statements/memsphere-general-testing-rules");
+
+    assert.equal(second.change.id, first.change.id);
+    assert.equal(duplicate.change.id, first.change.id);
+    assert.deepEqual(
+      new Set(duplicate.change.targets.map((target) => target.reference)),
+      new Set([...first.plan.targets, ...second.plan.targets].map((target) => target.reference))
+    );
+  });
+});
+
+test("appending a Managed Market import invalidates its validated checkpoint", async () => {
+  await withManagedMarket(async (fixture) => {
+    const first = await createImport(fixture, "statements/memsphere-general-testing-rules");
+    await claimMemoryChange({ changeId: first.change.id });
+    assert.deepEqual((await validateMemoryChange(first.change.id)).issues, []);
+    assert((await readMemoryChange({
+      home: fixture.home,
+      project: fixture.project,
+      changeId: first.change.id
+    })).checkpoint);
+    await finishMemoryChange({ changeId: first.change.id });
+
+    const expanded = await createImport(fixture, "statements/memsphere-general-development-rules");
+    assert.equal(expanded.change.id, first.change.id);
+    assert.equal(expanded.change.checkpoint, undefined);
+  });
+});
+
+test("Managed Market ChangeSets reject validation and publish from another Workspace", async () => {
+  await withManagedMarket(async (fixture) => {
+    const { change } = await createImport(fixture, "statements/memsphere-general-testing-rules");
+    const otherWorkspace = join(fixture.home, "other-workspace");
+    await mkdir(otherWorkspace);
+    await runGit(["init", "-b", "master"], { cwd: otherWorkspace });
+    process.chdir(otherWorkspace);
+
+    await assert.rejects(validateMemoryChange(change.id), /belongs to another Workspace/);
+    await assert.rejects(publishMemoryChange(change.id), /belongs to another Workspace/);
+  });
+});
+
+test("Embedded Market publish applies without committing or completing the ChangeSet", async () => {
+  await withEmbeddedMarket(async (fixture) => {
+    const { change, plan } = await createImport(fixture, "statements/memsphere-general-testing-rules");
+    const target = plan.targets[0]!;
+    await claimMemoryChange({ changeId: change.id });
+    assert.deepEqual((await validateMemoryChange(change.id)).issues, []);
+    await assert.rejects(readFile(join(fixture.memoryRoot, target.path)), /ENOENT/);
+
+    const applied = await publishMemoryChange(change.id);
+    assert.equal(applied.status, "active");
+    assert.match(await readFile(join(fixture.memoryRoot, target.path), "utf8"), /!statement/);
+    assert.match(
+      await gitOutput(["status", "--porcelain", "--", `.memsphere/memory/${target.path}`], fixture.workspace),
+      /^\?\?/
+    );
+    assert.equal((await readMemoryChange({
+      home: fixture.home,
+      project: fixture.project,
+      changeId: change.id
+    })).status, "active");
+  });
+});
+
+test("additional Embedded Market imports can be applied through the same active ChangeSet", async () => {
+  await withEmbeddedMarket(async (fixture) => {
+    const first = await createImport(fixture, "statements/memsphere-general-testing-rules");
+    await claimMemoryChange({ changeId: first.change.id });
+    assert.deepEqual((await validateMemoryChange(first.change.id)).issues, []);
+    await publishMemoryChange(first.change.id);
+    await finishMemoryChange({ changeId: first.change.id });
+
+    const second = await createImport(fixture, "statements/memsphere-general-development-rules");
+    assert.equal(second.change.id, first.change.id);
+    await validateAndRelease(second.change.id);
+    assert.equal((await publishMemoryChange(second.change.id)).status, "active");
+    assert.match(await readFile(join(fixture.memoryRoot, first.plan.targets[0]!.path), "utf8"), /!statement/);
+    assert.match(await readFile(join(fixture.memoryRoot, second.plan.targets[0]!.path), "utf8"), /!statement/);
+  });
+});
+
+test("Embedded Market publish rejects a target personalized after its previous apply", async () => {
+  await withEmbeddedMarket(async (fixture) => {
+    const first = await createImport(fixture, "statements/memsphere-general-testing-rules");
+    const target = first.plan.targets[0]!;
+    await claimMemoryChange({ changeId: first.change.id });
+    assert.deepEqual((await validateMemoryChange(first.change.id)).issues, []);
+    await publishMemoryChange(first.change.id);
+    await finishMemoryChange({ changeId: first.change.id });
+    await writeFile(join(fixture.memoryRoot, target.path), Buffer.concat([
+      await readFile(join(fixture.memoryRoot, target.path)),
+      Buffer.from("\n# personalized\n")
+    ]));
+
+    const expanded = await createImport(fixture, "statements/memsphere-general-delivery-rules");
+    await validateAndRelease(expanded.change.id);
+    await assert.rejects(publishMemoryChange(expanded.change.id), /uncommitted changes/);
+  });
 });

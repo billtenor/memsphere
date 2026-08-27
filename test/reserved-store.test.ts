@@ -159,8 +159,10 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "procedures/memsphere-tutorial.yaml"
   ]);
   assert(reservedSystemMemoryRemovalTombstones(manifest).every((tombstone) => tombstone.references.length > 0));
+});
+
+test("bundled Market manifest exposes complete sources and branch-review dependencies", async () => {
   const market = await readBundledMarketMemories();
-  assert.equal(market.length, 10);
   assert.deepEqual(market.map((memory) => memory.reference), [
     "procedures/memsphere-agile-requirement-development",
     "procedures/memsphere-bug-fix",
@@ -174,24 +176,25 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "statements/memsphere-repository-testing-rules"
   ]);
   assert(market.every((memory) => memory.source.length > 0 && memory.digest.length === 64));
+
   const branchReview = market.find((memory) => (
     memory.reference === "procedures/code-branch-review-and-remediation"
   ));
   assert(branchReview);
+  const source = branchReview.source.toString("utf8");
   assert.equal(
-    [...branchReview.source.toString("utf8").matchAll(
-      /target: statements\/memsphere-repository-development-rules/g
-    )].length,
+    [...source.matchAll(/target: statements\/memsphere-repository-development-rules/g)].length,
     2,
     "branch review must apply repository development rules during review and disposition"
   );
   assert.equal(
-    [...branchReview.source.toString("utf8").matchAll(
-      /target: statements\/memsphere-repository-testing-rules/g
-    )].length,
+    [...source.matchAll(/target: statements\/memsphere-repository-testing-rules/g)].length,
     3,
     "branch review must apply repository testing rules during review, disposition, and remediation"
   );
+});
+
+test("chapter one teaches one bounded first-use Run journey", async () => {
   const tutorial = await readFile(
     join(bundledReservedMemoryRoot(), "procedures", "memsphere-tutorial-chapter-01.yaml"),
     "utf8"

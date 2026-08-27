@@ -558,7 +558,23 @@ test("Run status polling loads an uncached replacement in the same secondary men
       assert.equal(replacementResponse.status(), 200);
       const replacementPayload = await replacementResponse.json() as { run: { status: string } };
       assert.equal(replacementPayload.run.status, "running");
-      await page.waitForTimeout(1_000);
+      await page.evaluate(() => {
+        delete document.documentElement.dataset.memsphereViewPollSettled;
+        const controller = new AbortController();
+        window.addEventListener("memsphere:view-poll-settled", (event) => {
+          const detail = event instanceof CustomEvent ? event.detail : null;
+          if (detail?.kind !== "runs") return;
+          document.documentElement.dataset.memsphereViewPollSettled = detail.kind;
+          controller.abort();
+        }, { signal: controller.signal });
+      });
+      await page.waitForFunction(() => (
+        document.documentElement.dataset.memsphereViewPollSettled === "runs"
+      ), undefined, { timeout: 10_000 });
+      await page.waitForFunction(({ expectedId, expectedTitle }) => (
+        localStorage.getItem("memsphere.selectedTask.v1") === expectedId
+        && document.querySelector("#title")?.textContent === expectedTitle
+      ), { expectedId: legacyRunId, expectedTitle: "Legacy procedure fallback" }, { timeout: 10_000 });
       assert.deepEqual(await page.evaluate(() => ({
         selected: localStorage.getItem("memsphere.selectedTask.v1"),
         title: document.querySelector("#title")?.textContent
