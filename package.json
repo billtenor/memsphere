@@ -1,6 +1,6 @@
 {
   "name": "memsphere",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A local YAML-backed memory CLI for AI runtimes.",
   "license": "Apache-2.0",
   "author": "Yanjun Liu <billtenor.thu@gmail.com>",

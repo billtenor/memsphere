@@ -21,7 +21,12 @@ import { readProjectRegistry } from "../src/project/registry.js";
 import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 import { readAllMemoryFiles } from "../src/memory/store.js";
-import { bundledReservedMemoryRoot, readReservedMemoryManifest } from "../src/reserved/store.js";
+import {
+  bundledReservedMemoryRoot,
+  bundledSystemMemoryRoot,
+  readBundledSystemMemories,
+  readReservedMemoryManifest
+} from "../src/reserved/store.js";
 import {
   editMemories,
   memoryChangeSetSchema,
@@ -71,7 +76,6 @@ async function readOnlyNewChange(
     )
   };
 }
-
 test("Project lifecycle keeps creation separate from Workspace binding", async () => {
   const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-command-"));
   const home = join(fixture, "home");
@@ -214,7 +218,7 @@ test("Managed Project System Memory repair validates and publishes automatically
     ]) {
       assert.equal(
         await readFile(join(memoryRoot, relativePath), "utf8"),
-        await readFile(join(bundledReservedMemoryRoot(), relativePath), "utf8")
+        await readFile(join(bundledSystemMemoryRoot(), relativePath), "utf8")
       );
     }
     const repairedConfig = JSON.parse(await readFile(join(projectRoot, "config.json"), "utf8")) as {
@@ -248,17 +252,17 @@ test("Managed Project System Memory repair validates and publishes automatically
     );
     await writeFile(
       join(projectRoot, "memory", legacyPath),
-      withCurrentMemorySyntax("!concept\nnames: [Memory]\ndefines: [Legacy System Memory.]\n")
+      withCurrentMemorySyntax("!concept\nnames: [legacy-memory]\ndefines: [Unlisted user Memory.]\n")
     );
     await publishDirectStoreCommit(projectRoot, "Create mixed System Memory repair fixture");
 
     const mixedOutput = await captureProjectRepair("existing");
-    assert(mixedOutput.includes("System Memory changes: 1 create, 1 update, 1 delete"));
+    assert(mixedOutput.includes("System Memory changes: 1 create, 1 update, 0 delete"));
     const mixedChange = await readOnlyNewChange(projectRoot, mixedChangesBefore);
     assert.equal(mixedChange.record.status, "completed");
     assert.deepEqual(
       mixedChange.record.targets.map((target: { operation: string }) => target.operation).sort(),
-      ["create", "delete", "update"]
+      ["create", "update"]
     );
     assert.equal(
       Number(await runGit(["rev-list", "--count", "HEAD"], { cwd: join(projectRoot, "memory") })
@@ -267,13 +271,13 @@ test("Managed Project System Memory repair validates and publishes automatically
     );
     assert.deepEqual(
       await readFile(join(projectRoot, "memory", missingPath)),
-      await readFile(join(bundledReservedMemoryRoot(), missingPath))
+      await readFile(join(bundledSystemMemoryRoot(), missingPath))
     );
     assert.deepEqual(
       await readFile(join(projectRoot, "memory", driftedPath)),
-      await readFile(join(bundledReservedMemoryRoot(), driftedPath))
+      await readFile(join(bundledSystemMemoryRoot(), driftedPath))
     );
-    await assert.rejects(access(join(projectRoot, "memory", legacyPath)));
+    assert.match(await readFile(join(projectRoot, "memory", legacyPath), "utf8"), /Unlisted user Memory/);
   } finally {
     process.chdir(previous.cwd);
     if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;
@@ -286,8 +290,8 @@ test("Managed Project System Memory repair validates and publishes automatically
   }
 });
 
-test("System Memory repair deletes only v3 tombstone identities and rejects path reuse", async () => {
-  const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-repair-identity-"));
+test("Managed System Memory repair updates canonical identity at its current storage path", async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-repair-identity-path-"));
   const home = join(fixture, "home");
   const workspace = join(fixture, "workspace");
   const gitConfig = join(fixture, "gitconfig");
@@ -305,53 +309,34 @@ test("System Memory repair deletes only v3 tombstone identities and rejects path
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     process.chdir(workspace);
 
-    await projectCreateCommand("legacy", { bind: true });
-    let registry = await readProjectRegistry(home);
-    const legacyRoot = registry.projects.legacy.root;
-    const legacyMemoryRoot = join(legacyRoot, "memory");
+    await projectCreateCommand("identity-path", { bind: true });
+    const registry = await readProjectRegistry(home);
+    const projectRoot = registry.projects["identity-path"].root;
+    const memoryRoot = join(projectRoot, "memory");
+    const originalPath = (await readReservedMemoryManifest()).system_memory.install[0];
+    const currentPath = join(dirname(originalPath), "relocated-system-memory.yaml");
+    await runGit(["mv", originalPath, currentPath], { cwd: memoryRoot });
     await writeFile(
-      join(legacyMemoryRoot, "concepts", "memory.yaml"),
-      withCurrentMemorySyntax("!concept\nnames: [Memory]\ndefines: [Legacy System Memory.]\n")
+      join(memoryRoot, currentPath),
+      `${await readFile(join(memoryRoot, currentPath), "utf8")}\n# identity path divergence\n`
     );
-    await runGit(["add", "concepts/memory.yaml"], { cwd: legacyMemoryRoot });
-    await runGit(["commit", "-m", "Install legacy System Memory"], { cwd: legacyMemoryRoot });
-    const legacyRevision = await runGit(["rev-parse", "HEAD"], { cwd: legacyMemoryRoot }).then((result) => result.stdout);
-    const legacyConfigPath = join(legacyRoot, "config.json");
-    const legacyConfig = JSON.parse(await readFile(legacyConfigPath, "utf8"));
-    legacyConfig.store.published_revision = legacyRevision;
-    await writeFile(legacyConfigPath, `${JSON.stringify(legacyConfig, null, 2)}\n`);
+    await publishDirectStoreCommit(projectRoot, "Relocate and diverge System Memory");
 
-    const legacyRepair = await prepareManagedSystemMemoryChange("legacy");
-    assert(legacyRepair);
-    assert.equal(legacyRepair.created, 0);
-    assert.equal(legacyRepair.updated, 0);
-    assert.equal(legacyRepair.deleted, 1);
-    assert.deepEqual(legacyRepair.change.targets.map((target) => target.reference), ["concepts/Memory"]);
-    assert.deepEqual((await validateMemoryChange(legacyRepair.change.id)).issues, []);
-    await publishMemoryChange(legacyRepair.change.id, "Remove legacy System Memory");
-    await assert.rejects(readFile(join(legacyMemoryRoot, "concepts", "memory.yaml")), /ENOENT/);
+    const repair = await prepareManagedSystemMemoryChange("identity-path");
+    assert(repair);
+    assert.equal(repair.created, 0);
+    assert.equal(repair.updated, 1);
+    assert.equal(repair.deleted, 0);
+    assert.equal(repair.change.targets.length, 1);
+    assert.equal(repair.change.targets[0].path, currentPath);
+    assert.deepEqual((await validateMemoryChange(repair.change.id)).issues, []);
+    await publishMemoryChange(repair.change.id, "Repair relocated System Memory");
 
-    await projectCreateCommand("protected", {});
-    registry = await readProjectRegistry(home);
-    process.env.MEMSPHERE_PROJECT = "protected";
-    const protectedEdit = await editMemories({
-      references: ["concepts/user-memory"],
-      createPaths: new Map([["concepts/user-memory", "concepts/memory.yaml"]])
-    });
-    await writeFile(
-      join(protectedEdit.candidateRoot, "concepts", "memory.yaml"),
-      withCurrentMemorySyntax("!concept\nnames: [user-memory]\ndefines: [User-owned Memory.]\n")
+    assert.deepEqual(
+      await readFile(join(memoryRoot, currentPath)),
+      await readFile(join(bundledSystemMemoryRoot(), originalPath))
     );
-    await publishMemoryChange(protectedEdit.change.id, "Create user Memory at historical path");
-    const changesBefore = (await readdir(join(registry.projects.protected.root, "changes"))).length;
-    assert.equal(await prepareManagedSystemMemoryChange("legacy"), undefined);
-    assert.equal(process.env.MEMSPHERE_PROJECT, "protected");
-    await assert.rejects(
-      prepareManagedSystemMemoryChange(),
-      /removal identity conflict.*concepts\/memory.yaml.*concepts\/user-memory/
-    );
-    assert.equal((await readdir(join(registry.projects.protected.root, "changes"))).length, changesBefore);
-    assert.match(await readFile(join(registry.projects.protected.root, "memory", "concepts", "memory.yaml"), "utf8"), /User-owned/);
+    await assert.rejects(readFile(join(memoryRoot, originalPath)), /ENOENT/);
   } finally {
     process.chdir(previous.cwd);
     if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;
@@ -395,7 +380,7 @@ test("System Memory repair honors explicit, global, Primary, and Mounted selecti
       await writeFile(target, `${await readFile(target, "utf8")}\n# ${name} divergence\n`);
       await publishDirectStoreCommit(projectRoot, `Diverge ${name}`);
     }
-    const bundled = await readFile(join(bundledReservedMemoryRoot(), systemPath));
+    const bundled = await readFile(join(bundledSystemMemoryRoot(), systemPath));
 
     process.env.MEMSPHERE_PROJECT = "mounted";
     await captureProjectRepair("explicit");
@@ -575,7 +560,7 @@ test("Embedded Project creation rolls back registration when System Memory boots
   }
 });
 
-test("Embedded System Memory repair creates, updates, and deletes only as worktree changes", async () => {
+test("Embedded System Memory repair creates and updates without deleting unlisted Memory", async () => {
   const fixture = await mkdtemp(join(tmpdir(), "memsphere-project-embedded-repair-"));
   const home = join(fixture, "home");
   const workspace = join(fixture, "workspace");
@@ -597,21 +582,21 @@ test("Embedded System Memory repair creates, updates, and deletes only as worktr
     const removedPath = "concepts/memory.yaml";
     await rm(join(memoryRoot, createdPath));
     await writeFile(join(memoryRoot, updatedPath), `${await readFile(join(memoryRoot, updatedPath), "utf8")}\n# drift\n`);
-    await writeFile(join(memoryRoot, removedPath), withCurrentMemorySyntax("!concept\nnames: [Memory]\ndefines: [Legacy System Memory.]\n"));
+    await writeFile(join(memoryRoot, removedPath), withCurrentMemorySyntax("!concept\nnames: [legacy-memory]\ndefines: [Legacy System Memory.]\n"));
     await runGit(["add", ".memsphere/memory"], { cwd: workspace });
     await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "drift system memory"], { cwd: workspace });
 
     const headBefore = await gitOutput(["rev-parse", "HEAD"], workspace);
     await projectRepairCommand("embedded-repair");
 
-    assert.deepEqual(await readFile(join(memoryRoot, createdPath)), await readFile(join(bundledReservedMemoryRoot(), createdPath)));
-    assert.deepEqual(await readFile(join(memoryRoot, updatedPath)), await readFile(join(bundledReservedMemoryRoot(), updatedPath)));
-    await assert.rejects(readFile(join(memoryRoot, removedPath)), /ENOENT/);
+    assert.deepEqual(await readFile(join(memoryRoot, createdPath)), await readFile(join(bundledSystemMemoryRoot(), createdPath)));
+    assert.deepEqual(await readFile(join(memoryRoot, updatedPath)), await readFile(join(bundledSystemMemoryRoot(), updatedPath)));
+    assert.match(await readFile(join(memoryRoot, removedPath), "utf8"), /Legacy System Memory/);
     assert.equal(await gitOutput(["rev-parse", "HEAD"], workspace), headBefore);
     const statusAfterRepair = await gitOutput(["status", "--short"], workspace);
     assert.match(statusAfterRepair, /memsphere-memory\.yaml/);
     assert.match(statusAfterRepair, /memsphere-framework\.yaml/);
-    assert.match(statusAfterRepair, /concepts\/memory\.yaml/);
+    assert.doesNotMatch(statusAfterRepair, /concepts\/memory\.yaml/);
 
     await projectRepairCommand("embedded-repair");
     assert.equal(await gitOutput(["status", "--short"], workspace), statusAfterRepair);
@@ -732,7 +717,7 @@ test("Embedded System Memory repair rejects ignored targets", async () => {
     await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "ignore repair target"], { cwd: workspace });
     await writeFile(
       targetPath,
-      `${await readFile(join(bundledReservedMemoryRoot(), "concepts", "memsphere-framework.yaml"), "utf8")}\n# ignored drift\n`
+      `${await readFile(join(bundledSystemMemoryRoot(), "concepts", "memsphere-framework.yaml"), "utf8")}\n# ignored drift\n`
     );
 
     await assert.rejects(projectRepairCommand("embedded-ignored"), /target has uncommitted changes/);
@@ -903,7 +888,7 @@ test("Embedded Project created from a linked worktree records the main worktree"
     });
     assert.deepEqual(
       await readFile(join(linked, ".memsphere", "memory", "concepts", "memsphere-memory.yaml")),
-      await readFile(join(bundledReservedMemoryRoot(), "concepts", "memsphere-memory.yaml"))
+      await readFile(join(bundledSystemMemoryRoot(), "concepts", "memsphere-memory.yaml"))
     );
     await assert.rejects(
       readFile(join(main, ".memsphere", "memory", "concepts", "memsphere-memory.yaml")),
@@ -1016,8 +1001,9 @@ test("concurrent creation of one Project preserves the winning Project Root", as
 async function installBundledSystemMemory(memoryRoot: string): Promise<void> {
   const sourceRoot = bundledReservedMemoryRoot();
   const manifest = await readReservedMemoryManifest(sourceRoot);
+  const sources = new Map((await readBundledSystemMemories(sourceRoot)).map((memory) => [memory.path, memory.sourcePath]));
   for (const path of manifest.system_memory.install) {
     await mkdir(dirname(join(memoryRoot, path)), { recursive: true });
-    await cp(join(sourceRoot, path), join(memoryRoot, path));
+    await cp(sources.get(path)!, join(memoryRoot, path));
   }
 }

@@ -10,6 +10,8 @@ import { currentMemorySyntax } from "../memory/syntax.js";
 
 export const reservedMemoryDirectoryName = "reserved-memory";
 export const reservedMemoryManifestFileName = "manifest.json";
+export const systemMemoryDirectoryName = "system-memory";
+export const officialMemoryDirectoryName = "official-memory";
 
 const memoryPathSchema = z.string().min(1).superRefine((value, context) => {
   try {
@@ -178,6 +180,7 @@ export function reservedSystemMemoryRemovalTombstones(
 
 export type BundledSystemMemoryDescriptor = {
   path: string;
+  sourcePath: string;
   kind: MemoryKind;
   reference: string;
   names: string[];
@@ -196,21 +199,31 @@ export function bundledReservedMemoryRoot(): string {
   return join(packageRoot, reservedMemoryDirectoryName);
 }
 
+export function bundledSystemMemoryRoot(): string {
+  return join(bundledReservedMemoryRoot(), systemMemoryDirectoryName);
+}
+
+export function bundledOfficialMemoryRoot(): string {
+  return join(bundledReservedMemoryRoot(), officialMemoryDirectoryName);
+}
+
 export async function readReservedMemoryManifest(sourceRoot = bundledReservedMemoryRoot()): Promise<ReservedMemoryManifest> {
   const manifestPath = join(sourceRoot, reservedMemoryManifestFileName);
   const source = await readFile(manifestPath, "utf8");
   const parsed: unknown = JSON.parse(source);
   const manifest = reservedMemoryManifestSchema.parse(parsed);
 
-  const sourcePaths = [
-    ...manifest.system_memory.install,
-    ...(manifest.version === 4 ? manifest.market_memory.install : [])
+  const sourceEntries = [
+    ...manifest.system_memory.install.map((path) => ({ path, sourceType: "system" as const })),
+    ...(manifest.version === 4
+      ? manifest.market_memory.install.map((path) => ({ path, sourceType: "official" as const }))
+      : [])
   ];
-  for (const relativePath of sourcePaths) {
-    const sourceType = manifest.version === 4 && manifest.market_memory.install.includes(relativePath)
-      ? "market"
-      : "system";
-    const sourcePath = resolveMemoryPath(sourceRoot, relativePath);
+  for (const { path: relativePath, sourceType } of sourceEntries) {
+    const memorySourceRoot = sourceType === "system"
+      ? systemMemorySourceRoot(sourceRoot, manifest)
+      : officialMemorySourceRoot(sourceRoot);
+    const sourcePath = resolveMemoryPath(memorySourceRoot, relativePath);
     const sourceStat = await lstat(sourcePath).catch((error: unknown) => {
       if (isNodeError(error, "ENOENT")) {
         throw new Error(`${sourceType} memory source not found: ${relativePath}`);
@@ -226,10 +239,13 @@ export async function readReservedMemoryManifest(sourceRoot = bundledReservedMem
     const identities = new Map<string, string>();
     const bundled = new Map<string, Awaited<ReturnType<typeof readMemoryFile>>>();
     const canonicalReferences = new Set<string>();
-    for (const relativePath of sourcePaths) {
+    for (const { path: relativePath, sourceType } of sourceEntries) {
       const kind = relativePath.split("/", 1)[0];
       if (!isMemoryKind(kind)) throw new Error(`invalid bundled Memory kind: ${relativePath}`);
-      const file = await readMemoryFile(kind, resolveMemoryPath(sourceRoot, relativePath));
+      const memorySourceRoot = sourceType === "system"
+        ? systemMemorySourceRoot(sourceRoot, manifest)
+        : officialMemorySourceRoot(sourceRoot);
+      const file = await readMemoryFile(kind, resolveMemoryPath(memorySourceRoot, relativePath));
       bundled.set(relativePath, file);
       if (file.entity.syntax !== manifest.memory_syntax) {
         throw new Error(`bundled Memory ${relativePath} uses syntax ${file.entity.syntax}; expected ${manifest.memory_syntax}`);
@@ -259,12 +275,14 @@ export async function readBundledSystemMemories(
   sourceRoot = bundledReservedMemoryRoot()
 ): Promise<BundledSystemMemoryDescriptor[]> {
   const manifest = await readReservedMemoryManifest(sourceRoot);
+  const memorySourceRoot = systemMemorySourceRoot(sourceRoot, manifest);
   return Promise.all(manifest.system_memory.install.map(async (path) => {
     const kind = path.split("/", 1)[0];
     if (!isMemoryKind(kind)) throw new Error(`invalid system Memory kind: ${path}`);
-    const file = await readMemoryFile(kind, resolveMemoryPath(sourceRoot, path));
+    const sourcePath = resolveMemoryPath(memorySourceRoot, path);
+    const file = await readMemoryFile(kind, sourcePath);
     const names = [...file.entity.names];
-    return { path, kind, reference: `${kind}/${names[0]}`, names };
+    return { path, sourcePath, kind, reference: `${kind}/${names[0]}`, names };
   }));
 }
 
@@ -273,14 +291,16 @@ export async function readBundledMarketMemories(
 ): Promise<BundledMarketMemoryDescriptor[]> {
   const manifest = await readReservedMemoryManifest(sourceRoot);
   if (manifest.version !== 4) return [];
+  const memorySourceRoot = officialMemorySourceRoot(sourceRoot);
   return Promise.all(manifest.market_memory.install.map(async (path) => {
     const kind = path.split("/", 1)[0];
     if (!isMemoryKind(kind)) throw new Error(`invalid market Memory kind: ${path}`);
-    const absolute = resolveMemoryPath(sourceRoot, path);
+    const absolute = resolveMemoryPath(memorySourceRoot, path);
     const [file, source] = await Promise.all([readMemoryFile(kind, absolute), readFile(absolute)]);
     const names = [...file.entity.names];
     return {
       path,
+      sourcePath: absolute,
       kind,
       reference: `${kind}/${names[0]}`,
       names,
@@ -289,6 +309,14 @@ export async function readBundledMarketMemories(
       entity: file.entity
     };
   }));
+}
+
+function systemMemorySourceRoot(sourceRoot: string, manifest: ReservedMemoryManifest): string {
+  return manifest.version === 4 ? join(sourceRoot, systemMemoryDirectoryName) : sourceRoot;
+}
+
+function officialMemorySourceRoot(sourceRoot: string): string {
+  return join(sourceRoot, officialMemoryDirectoryName);
 }
 
 function assertSafeMemoryRelativePath(relativePath: string): void {

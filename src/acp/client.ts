@@ -92,7 +92,7 @@ export async function runAgentReviewAcpSession(input: {
         const initialized = await context.request(acp.methods.agent.initialize, {
           protocolVersion: acp.PROTOCOL_VERSION,
           clientCapabilities: { fs: { readTextFile: true, writeTextFile: false }, terminal: false },
-          clientInfo: { name: "memsphere", title: "Memsphere", version: "0.1.1" }
+          clientInfo: { name: "memsphere", title: "Memsphere", version: "0.1.2" }
         }, { cancellationSignal: startupSignal });
         if (initialized.protocolVersion !== acp.PROTOCOL_VERSION) {
           throw new Error(`acp_protocol_mismatch: expected ${acp.PROTOCOL_VERSION}, received ${initialized.protocolVersion}`);

@@ -177,7 +177,7 @@ async function prepareSelectedManagedSystemMemoryChange(): Promise<SystemMemoryC
       for (const memory of installs) {
         const target = result.change.targets.find((candidate) => candidate.reference === memory.reference);
         if (!target) throw new Error(`System Memory ChangeSet target is missing: ${memory.reference}`);
-        await cp(join(plan.sourceRoot, memory.path), join(result.candidateRoot, target.path));
+        await cp(memory.sourcePath, join(result.candidateRoot, target.path));
       }
     }
     if (plan.deletes.length > 0) {
@@ -257,7 +257,7 @@ async function buildSystemMemoryReconcilePlan(input: {
       continue;
     }
     const [bundledSource, currentSource] = await Promise.all([
-      readFile(join(input.sourceRoot, memory.path)),
+      readFile(memory.sourcePath),
       readFile(join(input.memoryRoot, current.id))
     ]);
     if (!bundledSource.equals(currentSource)) {
@@ -316,7 +316,7 @@ async function prepareSelectedEmbeddedSystemMemoryRepair(
       operation: "create" as const,
       reference: memory.reference,
       path: memory.path,
-      sourcePath: join(plan.sourceRoot, memory.path)
+      sourcePath: memory.sourcePath
     })),
     ...plan.updates.map((memory) => {
       const current = findPlanDescriptor(plan, memory.reference);
@@ -324,7 +324,7 @@ async function prepareSelectedEmbeddedSystemMemoryRepair(
         operation: "update" as const,
         reference: memory.reference,
         path: current.id,
-        sourcePath: join(plan.sourceRoot, memory.path)
+        sourcePath: memory.sourcePath
       };
     }),
     ...plan.deletes.map((memory) => ({
