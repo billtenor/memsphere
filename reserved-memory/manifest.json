@@ -64,9 +64,7 @@
       "statements/memsphere-general-requirement-rules.yaml",
       "statements/memsphere-general-development-rules.yaml",
       "statements/memsphere-general-testing-rules.yaml",
-      "statements/memsphere-general-delivery-rules.yaml",
-      "statements/memsphere-repository-development-rules.yaml",
-      "statements/memsphere-repository-testing-rules.yaml"
+      "statements/memsphere-general-delivery-rules.yaml"
     ]
   }
 }

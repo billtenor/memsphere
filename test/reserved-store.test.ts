@@ -180,34 +180,32 @@ test("bundled Market manifest exposes every complete source", async () => {
   assert.deepEqual(market.map((memory) => memory.reference), [
     "procedures/memsphere-agile-requirement-development",
     "procedures/memsphere-bug-fix",
-    "procedures/code-branch-review-and-remediation",
+    "procedures/generic-code-branch-review-and-remediation",
     "procedures/memsphere-requirement-management",
     "statements/memsphere-general-requirement-rules",
     "statements/memsphere-general-development-rules",
     "statements/memsphere-general-testing-rules",
-    "statements/memsphere-general-delivery-rules",
-    "statements/memsphere-repository-development-rules",
-    "statements/memsphere-repository-testing-rules"
+    "statements/memsphere-general-delivery-rules"
   ]);
   assert(market.every((memory) => memory.source.length > 0 && memory.digest.length === 64));
 });
 
-test("bundled branch-review applies repository development and testing rules", async () => {
+test("bundled branch-review applies general development and testing rules", async () => {
   const market = await readBundledMarketMemories();
   const branchReview = market.find((memory) => (
-    memory.reference === "procedures/code-branch-review-and-remediation"
+    memory.reference === "procedures/generic-code-branch-review-and-remediation"
   ));
   assert(branchReview);
   const source = branchReview.source.toString("utf8");
   assert.equal(
-    [...source.matchAll(/target: statements\/memsphere-repository-development-rules/g)].length,
+    [...source.matchAll(/target: statements\/memsphere-general-development-rules/g)].length,
     2,
-    "branch review must apply repository development rules during review and disposition"
+    "branch review must apply general development rules during review and disposition"
   );
   assert.equal(
-    [...source.matchAll(/target: statements\/memsphere-repository-testing-rules/g)].length,
+    [...source.matchAll(/target: statements\/memsphere-general-testing-rules/g)].length,
     3,
-    "branch review must apply repository testing rules during review, disposition, and remediation"
+    "branch review must apply general testing rules during review, disposition, and remediation"
   );
 });
 
