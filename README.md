@@ -231,6 +231,14 @@ git commit -m "更新 Memory"
 
 Embedded Memory 不使用 `memsphere memory publish`；Memsphere 不会替你提交 Git。
 
+唯一例外是从 View 的“记忆市场”创建的 `market_import` ChangeSet：用户审阅并校验后，publish 只把隔离候选应用到当前 Embedded worktree，仍不会 commit 或 push，ChangeSet 也要等变更合入主分支后才完成。
+
+#### 6.4.3 记忆市场
+
+View 的 Memory 下提供“当前项目 / 记忆市场”入口。记忆市场展示随 npm 包发布的官方精选 Memory，但这些内容默认不生效，也不会进入当前 Project 的 Catalog 或 Run。点击“导入”或“重新导入”会创建市场导入 ChangeSet；同一 Project 后续逐项导入会继续追加到同一个 active ChangeSet，直到它完成或废弃。用户在 ChangeSet 中查看合并后的候选并自行决定是否发布或应用。
+
+导入后的 Memory 是普通用户 Memory，可以自由编辑或重命名；它不会随 npm 包自动升级。View 只按当前 `<kind>/<canonical-name>` 做简单关联，并显示“未导入、导入中、已导入 · 无变更、已导入 · 有差异、名称冲突”。“导入中”表示对应的导入 ChangeSet 尚处于 active 状态，可直接跳转查看。重命名后关联自然解除；包内条目改名视为旧条目下架、新条目新增。重新导入会以包内内容替换同名 Memory，并只补入 Project 中缺失的市场依赖，不覆盖已经存在的依赖。
+
 ### 6.5 验证 Project 并启动 View
 
 查看当前绑定的 Project，并验证其中的 Memory：
@@ -248,7 +256,7 @@ memsphere view start
 
 #### 修复或升级 System Memory
 
-现有 Managed 或 Embedded Project 如需补装、恢复或升级当前版本内置的 System Memory，可执行一次 repair。manifest v3 明确标记的废弃 System Memory 默认清理，但只有历史路径与 canonical identity 同时匹配时才允许删除，不会触碰用户 Memory 或 Mounted Project：
+现有 Managed 或 Embedded Project 如需补装、恢复或升级当前版本内置的 System Memory，可执行一次 repair。当前 manifest v4（兼容 v3）明确标记的废弃 System Memory 默认清理，但只有历史路径与 canonical identity 同时匹配时才允许删除，不会触碰用户 Memory 或 Mounted Project：
 
 ```bash
 memsphere project repair my-project

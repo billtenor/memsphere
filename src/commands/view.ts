@@ -54,6 +54,7 @@ import {
   addMemoryChangeScope,
   archiveMemoryChange,
   createMemoryChangeComment,
+  createMarketMemoryChange,
   createViewMemoryChange,
   deleteMemoryChangeComment,
   MemoryChangePreviewCache,
@@ -65,6 +66,11 @@ import {
   type MemoryChangeSet
 } from "../memory/changeset.js";
 import { readBundledSystemMemories } from "../reserved/store.js";
+import {
+  listMemoryMarket,
+  MarketMemoryNameConflictError,
+  planMemoryMarketImport
+} from "../market/store.js";
 import {
   abandonRun,
   ArtifactAuthorizationFailure,
@@ -557,6 +563,66 @@ async function handleRequest(
         code: missing ? "changeset_not_found" : "changeset_unavailable",
         error: error instanceof Error ? error.message : String(error)
       });
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/market/memories") {
+    try {
+      const [memories, changes] = await Promise.all([
+        listMemoryMarket(config.memoryRoot),
+        config.project?.name
+          ? listMemoryChanges({ home: config.homeRoot, project: config.project.name })
+          : Promise.resolve([])
+      ]);
+      const importing = activeMarketImports(changes);
+      sendJson(response, 200, {
+        memories: memories.map((memory) => {
+          const changeId = importing.get(memory.reference);
+          return changeId ? { ...memory, status: "importing", changeId } : memory;
+        })
+      });
+    } catch (error) {
+      sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
+    }
+    return;
+  }
+
+  const marketImportMatch = url.pathname.match(/^\/api\/market\/memories\/([^/]+)\/([^/]+)\/import$/);
+  if (request.method === "POST" && marketImportMatch) {
+    if (!config.project?.name) {
+      sendJson(response, 404, { error: "No Project is currently selected" });
+      return;
+    }
+    try {
+      const kind = decodeURIComponent(marketImportMatch[1]) as MemoryKind;
+      const name = decodeURIComponent(marketImportMatch[2]);
+      if (!memoryKinds.includes(kind)) throw new Error(`invalid Memory kind: ${kind}`);
+      const reference = `${kind}/${name}`;
+      const body = await readJsonBody<{ operator?: unknown }>(request);
+      const active = activeMarketImports(await listMemoryChanges({
+        home: config.homeRoot,
+        project: config.project.name
+      })).get(reference);
+      if (active) {
+        const change = await readMemoryChange({ home: config.homeRoot, project: config.project.name, changeId: active });
+        sendJson(response, 200, { change: memoryChangeSummary(change) });
+        return;
+      }
+      const plan = await planMemoryMarketImport(config.memoryRoot, reference);
+      const change = await createMarketMemoryChange({
+        home: config.homeRoot,
+        project: config.project.name,
+        actor: resolveMemoryChangeActor(config, body.operator),
+        targets: plan.targets
+      });
+      sendJson(response, 201, { change: memoryChangeSummary(change) });
+    } catch (error) {
+      if (error instanceof MarketMemoryNameConflictError) {
+        sendJson(response, 409, { code: "market_name_conflict", error: error.message });
+      } else {
+        sendMemoryChangeError(response, error);
+      }
     }
     return;
   }
@@ -1227,6 +1293,7 @@ function memoryChangeSummary(change: MemoryChangeSet): unknown {
     storeType: change.store_type ?? "managed",
     status: change.status,
     origin: change.origin,
+    intent: change.intent,
     active: change.status === "active",
     baseRevision: change.base_revision,
     createdAt: change.created_at,
@@ -1248,6 +1315,17 @@ function memoryChangeSummary(change: MemoryChangeSet): unknown {
     createdBy: change.created_by,
     claimed: Boolean(change.claim)
   };
+}
+
+function activeMarketImports(changes: readonly MemoryChangeSet[]): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const change of changes) {
+    if (change.status !== "active" || change.intent !== "market_import") continue;
+    for (const target of change.targets) {
+      if (!result.has(target.reference)) result.set(target.reference, change.id);
+    }
+  }
+  return result;
 }
 
 function resolveMemoryChangeActor(config: MemsphereConfig, input: unknown): MemoryChangeActor {
@@ -2257,10 +2335,11 @@ function sendHtml(response: ServerResponse, body: string): void {
 }
 
 export function isViewPagePath(pathname: string): boolean {
-  if (["/", "/memories", "/tasks"].includes(pathname)) return true;
+  if (["/", "/memories", "/market", "/tasks"].includes(pathname)) return true;
   if (/^\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
   if (/^\/projects\/[^/]+\/memories$/.test(pathname)) return true;
   if (/^\/projects\/[^/]+\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
+  if (/^\/projects\/[^/]+\/market$/.test(pathname)) return true;
   if (/^\/projects\/[^/]+\/changes\/[^/]+$/.test(pathname)) return true;
   if (/^\/tasks\/[^/]+$/.test(pathname)) return true;
   if (/^\/tasks\/[^/]+\/artifact-reviews\/[^/]+$/.test(pathname)) return true;

@@ -1,0 +1,85 @@
+!procedure
+syntax: memsphere-20260721-stable
+names:
+  - memsphere-bug-fix
+  - memsphere bug 修复流程
+  - MemsphereBugFix
+  - FixMemsphereBug
+defines:
+  - 当 memsphere 工程在使用、测试或维护过程中暴露 bug 时，引导 human 和 agent 共同完成 bug 理解确认、根因定位、修复方案确认、代码修复、测试补充和验证摘要整理的流程。
+goals:
+  - 完成针对已确认 bug 的代码修复。
+  - 补充能够覆盖该 bug 的测试 case；自动化不可行时，将手工验证 case 整理到测试文档或测试文档集合。
+  - 给出验证摘要，说明已执行验证、结果、未执行项及原因。
+flow:
+  - !action
+    action: 接收 bug 初始描述。
+    actor: human
+    artifact: !artifact
+      name: bug 初始描述
+      format: markdown
+
+  - !action
+    action: 整理 agent 对 bug 的理解，包含实际行为、期望行为、影响范围和已知证据。
+    actor: agent
+    artifact: !artifact
+      name: bug 理解摘要
+      format: markdown
+      review:
+        - 需求负责人
+
+  - !action
+    action: 分析 bug 的代码原因或流程原因。
+    actor: agent
+    artifact: !artifact
+      name: bug 根因分析
+      format: markdown
+
+  - !action
+    action: 分析现有自动化测试为什么没有覆盖该 bug。
+    actor: agent
+    artifact: !artifact
+      name: 测试缺口分析
+      format: markdown
+
+  - !action
+    action: 形成代码与测试修复方案；测试优先自动化，自动化不可行时说明手工验证 case 及测试文档沉淀方式。
+    actor: agent
+    artifact: !artifact
+      name: Bug 修复方案
+      format: markdown
+      review:
+        - 研发工程师
+        - 测试工程师
+
+  - !action
+    action: 实施代码修复。
+    actor: agent
+    artifact: !artifact
+      name: 代码修复结果
+      format: markdown
+
+  - !action
+    action: 补充或更新测试 case；自动化不可行时，将手工验证 case 整理到测试文档或测试文档集合。
+    actor: agent
+    artifact: !artifact
+      name: 补充测试 case
+      format: markdown
+
+  - !action
+    action: 执行验证命令或手工验证步骤。
+    actor: agent
+    artifact: !artifact
+      name: 验证执行记录
+      format: markdown
+
+  - !action
+    action: 整理最终验证摘要，说明已执行验证、结果、未执行项及原因。
+    actor: agent
+    artifact: !artifact
+      name: 验证摘要
+      format: markdown
+      review:
+        - 研发工程师
+        - 测试工程师
+        - 需求负责人

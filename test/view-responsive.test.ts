@@ -290,6 +290,7 @@ async function openTaskPage(browser: Browser, url: string, width: number): Promi
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await runsLoaded;
   await page.locator("#task-tab.active").waitFor();
+  await page.getByRole("tab", { name: "done", exact: true }).click();
   await page.locator(".task-card-main").first().click();
   await page.locator(".markdown-table-scroll").first().waitFor();
   return page;
@@ -456,12 +457,13 @@ test("Run titles fall back to the Procedure name for historical Runs", async () 
         (response) => new URL(response.url()).pathname === "/api/runs" && response.ok(),
         { timeout: 10_000 }
       );
+      await page.getByRole("button", { name: "Run", exact: true }).click();
+      await runsLoaded;
       const initialDetailLoaded = page.waitForResponse(
         (response) => /^\/api\/runs\/run-/.test(new URL(response.url()).pathname),
         { timeout: 10_000 }
       );
-      await page.getByRole("button", { name: "Run", exact: true }).click();
-      await runsLoaded;
+      await page.getByRole("tab", { name: "done", exact: true }).click();
       const initialDetailResponse = await initialDetailLoaded;
       assert.equal(initialDetailResponse.status(), 200, await initialDetailResponse.text());
       await page.locator(".meta .pill", { hasText: "流程: Responsive browser fixture" }).waitFor();
@@ -476,6 +478,166 @@ test("Run titles fall back to the Procedure name for historical Runs", async () 
       assert.equal(await page.locator("#title").textContent(), "Legacy procedure fallback");
       await page.locator(".meta .pill", { hasText: "流程: Legacy procedure fallback" }).waitFor();
       await assertPageDoesNotOverflow(page);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+test("Run status polling clears a selection that moved to another secondary menu", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
+    let status = "running";
+    await page.route("**/api/runs**", async (route) => {
+      const response = await route.fetch();
+      const payload = await response.json() as { runs?: Array<Record<string, unknown>>; run?: Record<string, unknown> };
+      if (payload.runs) payload.runs = payload.runs.map((run) => ({ ...run, status }));
+      if (payload.run) payload.run = { ...payload.run, status };
+      await route.fulfill({ response, json: payload });
+    });
+    try {
+      await page.goto(url);
+      await page.getByRole("button", { name: "Run", exact: true }).click();
+      await page.locator(".task-card-main").first().waitFor();
+      assert.equal(await page.getByRole("tab", { name: "running", exact: true }).getAttribute("aria-selected"), "true");
+
+      const refreshed = page.waitForResponse((response) => (
+        new URL(response.url()).pathname === "/api/runs"
+        && new URL(response.url()).searchParams.get("representation") === "summary"
+      ));
+      status = "done";
+      await refreshed;
+      await page.locator("#nav").getByText("No running runs.", { exact: true }).waitFor();
+      assert.equal(await page.locator(".task-card-main").count(), 0);
+      await page.getByRole("tab", { name: "done", exact: true }).click();
+      await page.locator(".task-card-main").first().waitFor();
+      assert.equal(await page.getByRole("tab", { name: "done", exact: true }).getAttribute("aria-selected"), "true");
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+test("Run status polling loads an uncached replacement in the same secondary menu", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
+    let selectedMoved = false;
+    await page.route("**/api/runs**", async (route) => {
+      const response = await route.fetch();
+      const payload = await response.json() as { runs?: Array<Record<string, unknown>>; run?: Record<string, unknown> };
+      if (payload.runs) {
+        payload.runs = payload.runs.map((run) => ({
+          ...run,
+          status: run.id === runId && selectedMoved ? "done" : "running",
+          ...(run.id === runId && selectedMoved ? { updatedAt: "2026-07-20T00:00:00.000Z" } : {})
+        }));
+      }
+      await route.fulfill({ response, json: payload });
+    });
+    await page.route("**/api/runs/*", async (route) => {
+      const response = await route.fetch();
+      const payload = await response.json() as { run?: Record<string, unknown> };
+      if (payload.run) payload.run = { ...payload.run, status: "running" };
+      await route.fulfill({ response, json: payload });
+    });
+    try {
+      await page.addInitScript((selectedId) => {
+        localStorage.setItem("memsphere.selectedTask.v1", selectedId);
+      }, runId);
+      await page.goto(url);
+      await page.getByRole("button", { name: "Run", exact: true }).click();
+      await page.getByRole("tab", { name: "running", exact: true }).click();
+      await page.getByRole("heading", { name: runName, exact: true }).waitFor();
+
+      const replacementLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${legacyRunId}`,
+        { timeout: 10_000 }
+      );
+      selectedMoved = true;
+      const replacementResponse = await replacementLoaded;
+      assert.equal(replacementResponse.status(), 200);
+      const replacementPayload = await replacementResponse.json() as { run: { status: string } };
+      assert.equal(replacementPayload.run.status, "running");
+      await page.evaluate(() => {
+        delete document.documentElement.dataset.memsphereViewPollSettled;
+        const controller = new AbortController();
+        window.addEventListener("memsphere:view-poll-settled", (event) => {
+          const detail = event instanceof CustomEvent ? event.detail : null;
+          if (detail?.kind !== "runs") return;
+          document.documentElement.dataset.memsphereViewPollSettled = detail.kind;
+          controller.abort();
+        }, { signal: controller.signal });
+      });
+      await page.waitForFunction(() => (
+        document.documentElement.dataset.memsphereViewPollSettled === "runs"
+      ), undefined, { timeout: 10_000 });
+      await page.waitForFunction(({ expectedId, expectedTitle }) => (
+        localStorage.getItem("memsphere.selectedTask.v1") === expectedId
+        && document.querySelector("#title")?.textContent === expectedTitle
+      ), { expectedId: legacyRunId, expectedTitle: "Legacy procedure fallback" }, { timeout: 10_000 });
+      assert.deepEqual(await page.evaluate(() => ({
+        selected: localStorage.getItem("memsphere.selectedTask.v1"),
+        title: document.querySelector("#title")?.textContent
+      })), { selected: legacyRunId, title: "Legacy procedure fallback" });
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+test("Run status polling refreshes a stale cached replacement in the same secondary menu", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
+    let legacyUpdated = false;
+    let selectedMoved = false;
+    const nextRevision = "2026-07-20T00:00:00.000Z";
+    await page.route("**/api/runs**", async (route) => {
+      const response = await route.fetch();
+      const payload = await response.json() as { runs?: Array<Record<string, unknown>> };
+      if (payload.runs) {
+        payload.runs = payload.runs.map((run) => ({
+          ...run,
+          status: run.id === runId && selectedMoved ? "done" : "running",
+          ...(run.id === runId && selectedMoved ? { updatedAt: nextRevision } : {}),
+          ...(run.id === legacyRunId && legacyUpdated ? { updatedAt: nextRevision } : {})
+        }));
+      }
+      await route.fulfill({ response, json: payload });
+    });
+    await page.route("**/api/runs/*", async (route) => {
+      const response = await route.fetch();
+      const payload = await response.json() as { run?: Record<string, unknown> };
+      if (payload.run) {
+        payload.run = {
+          ...payload.run,
+          status: "running",
+          ...(payload.run.id === legacyRunId && selectedMoved ? { updatedAt: nextRevision } : {})
+        };
+      }
+      await route.fulfill({ response, json: payload });
+    });
+    try {
+      await page.goto(`${url}/tasks/${legacyRunId}`);
+      await page.locator("#title", { hasText: "Legacy procedure fallback" }).waitFor();
+      await page.goto(`${url}/tasks/${runId}`);
+      await page.getByRole("heading", { name: runName, exact: true }).waitFor();
+
+      const summaryUpdated = page.waitForResponse((response) => (
+        new URL(response.url()).pathname === "/api/runs"
+        && new URL(response.url()).searchParams.get("representation") === "summary"
+      ));
+      legacyUpdated = true;
+      await summaryUpdated;
+
+      const replacementLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/runs/${legacyRunId}`,
+        { timeout: 10_000 }
+      );
+      selectedMoved = true;
+      const replacementResponse = await replacementLoaded;
+      const replacementPayload = await replacementResponse.json() as { run: { updatedAt: string } };
+      assert.equal(replacementPayload.run.updatedAt, nextRevision);
+      await page.locator("#title", { hasText: "Legacy procedure fallback" }).waitFor();
     } finally {
       await page.close();
     }
@@ -762,7 +924,12 @@ test("Run pages do not expose the retired Task Review entry or inline comments",
     page.setDefaultTimeout(5_000);
     try {
       await page.goto(url);
+      const runsLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/runs" && response.ok()
+      );
       await page.getByRole("button", { name: "Run", exact: true }).click();
+      await runsLoaded;
+      await page.getByRole("tab", { name: "done", exact: true }).click();
       await page.locator(".task-card-main").first().click();
       assert.equal(await page.getByRole("button", { name: "Review", exact: true }).count(), 0);
       assert.equal(await page.locator('[data-anchor^="task:"] .inline-plus:visible').count(), 0);
@@ -787,23 +954,26 @@ test("View deep links restore Memory, Run, and browser history", async () => {
       await page.getByRole("heading", { name: "Reviewable schema", exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, "/memories/schemas/reviewable-schema");
 
+      const runsLoaded = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/runs" && response.ok()
+      );
       await page.getByRole("button", { name: "Run", exact: true }).click();
+      await runsLoaded;
       assert.equal(new URL(page.url()).pathname, "/tasks");
       const selectedDetailLoaded = page.waitForResponse(
         (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
       );
+      await page.getByRole("tab", { name: "done", exact: true }).click();
       await page.locator(".task-card-main").first().click();
       await selectedDetailLoaded;
       await page.waitForLoadState("networkidle");
       assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
-      const backDetailLoaded = page.waitForResponse(
-        (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
-      );
       await page.evaluate(() => history.back());
       await page.waitForURL(url + "/tasks");
-      await backDetailLoaded;
       await page.waitForLoadState("networkidle");
       assert.equal(new URL(page.url()).pathname, "/tasks");
+      await page.locator("#nav").getByText("No running runs.", { exact: true }).waitFor();
+      assert.equal(await page.locator(".task-card-main").count(), 0);
       const forwardDetailLoaded = page.waitForResponse(
         (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
       );
