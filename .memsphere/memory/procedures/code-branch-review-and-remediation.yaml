@@ -49,6 +49,8 @@ flow:
         asserts:
           - !ref
             target: statements/memsphere-repository-development-rules
+          - !ref
+            target: statements/memsphere-repository-testing-rules
           - 必须固定当前 HEAD SHA，并使用基线中记录的最终需求方案、技术方案和测试方案。
           - 必须核对实现是否满足获批需求、是否遵循技术方案或有合理且已说明的偏差、测试与检查是否覆盖测试方案；方案缺失或不一致本身必须作为评审证据处理。
           - 问题清单必须记录实际覆盖和有证据的问题；没有问题时也必须说明实际覆盖。
@@ -65,6 +67,10 @@ flow:
         action: 综合评审意见并形成不包含代码修改的处置结论。
         actor: agent
         asserts:
+          - !ref
+            target: statements/memsphere-repository-development-rules
+          - !ref
+            target: statements/memsphere-repository-testing-rules
           - Runner 必须根据代码、测试和适用工程 Memory 独立复核全部评审意见，合并重复项并逐项决定接受、拒绝、请求澄清或延期，不得因 Reviewer 提出就自动接受。
           - 接受表示问题成立并进入下一修复步骤，不表示问题已经修复。
           - 项目负责人审核的是处置判断及依据是否合理完整，不得仅因已接受问题尚未修复而拒绝准确的处置结论。
@@ -79,6 +85,8 @@ flow:
         action: 根据已批准的处置结论修复问题并完成验证。
         actor: agent
         asserts:
+          - !ref
+            target: statements/memsphere-repository-testing-rules
           - 只允许修改本轮处置结论已接受的问题，并运行适用工程 Memory 和变更范围要求的测试与检查。
           - 如果目标分支 HEAD 在修复期间发生变化，必须先重新同步并复核处置结论，禁止覆盖或忽略他人的新提交。
         artifact: !artifact
