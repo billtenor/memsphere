@@ -9,7 +9,7 @@ const reservedRoot = join(root, "reserved-memory");
 const projectMemoryRoot = join(root, ".memsphere", "memory");
 
 async function readReserved(relativePath: string): Promise<string> {
-  return readFile(join(reservedRoot, relativePath), "utf8");
+  return (await readFile(join(reservedRoot, relativePath), "utf8")).replace(/\r\n/g, "\n");
 }
 
 test("README, System Memory, and Skill share the personalized software positioning", async () => {
