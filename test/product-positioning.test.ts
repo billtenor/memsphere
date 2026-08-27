@@ -5,7 +5,7 @@ import test from "node:test";
 import { readReservedMemoryManifest } from "../src/reserved/store.js";
 
 const root = process.cwd();
-const reservedRoot = join(root, "reserved-memory");
+const reservedRoot = join(root, "reserved-memory", "system-memory");
 const projectMemoryRoot = join(root, ".memsphere", "memory");
 
 async function readReserved(relativePath: string): Promise<string> {

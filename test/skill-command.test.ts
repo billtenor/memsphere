@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { skillInitCommand } from "../src/commands/skill.js";
 import { readAllMemoryFiles } from "../src/memory/store.js";
-import { bundledReservedMemoryRoot } from "../src/reserved/store.js";
+import { bundledSystemMemoryRoot } from "../src/reserved/store.js";
 
 test("skill init installs only the unified memsphere skill", async () => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-skill-test-"));
@@ -37,7 +37,7 @@ test("skill init installs only the unified memsphere skill", async () => {
 
 test("unified skill and reserved memories keep the same bootstrap contract", async () => {
   const skill = await readFile(join(process.cwd(), "src", "skills", "memsphere", "SKILL.md"), "utf8");
-  const reserved = JSON.stringify((await readAllMemoryFiles(bundledReservedMemoryRoot())).map((file) => file.entity));
+  const reserved = JSON.stringify((await readAllMemoryFiles(bundledSystemMemoryRoot())).map((file) => file.entity));
 
   for (const signal of [
     "memsphere memory list",

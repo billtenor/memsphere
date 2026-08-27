@@ -29,31 +29,7 @@
       "procedures/memsphere-tutorial-chapter-03.yaml",
       "procedures/memsphere-tutorial-chapter-03-review-experience.yaml"
     ],
-    "remove": [
-      { "path": "concepts/memory.yaml", "references": ["concepts/Memory"] },
-      { "path": "concepts/memsphere.yaml", "references": ["concepts/Memsphere"] },
-      { "path": "concepts/concept.yaml", "references": ["concepts/Concept"] },
-      { "path": "concepts/statement.yaml", "references": ["concepts/Statement"] },
-      { "path": "concepts/procedure.yaml", "references": ["concepts/Procedure"] },
-      { "path": "concepts/schema.yaml", "references": ["concepts/Schema"] },
-      { "path": "schemas/concept.yaml", "references": ["schemas/Concept entity schema"] },
-      { "path": "schemas/statement.yaml", "references": ["schemas/Statement entity schema"] },
-      { "path": "schemas/procedure.yaml", "references": ["schemas/Procedure entity schema"] },
-      { "path": "schemas/schema.yaml", "references": ["schemas/Schema entity schema"] },
-      { "path": "schemas/concept-entity-schema.yaml", "references": ["schemas/Concept entity schema"] },
-      { "path": "schemas/statement-entity-schema.yaml", "references": ["schemas/Statement entity schema"] },
-      { "path": "schemas/procedure-entity-schema.yaml", "references": ["schemas/Procedure entity schema"] },
-      { "path": "schemas/schema-entity-schema.yaml", "references": ["schemas/Schema entity schema"] },
-      { "path": "statements/memory-access-rules.yaml", "references": ["statements/Memory 访问规则"] },
-      { "path": "statements/memory-interpretation-application-rules.yaml", "references": ["statements/Memory 解读与应用规则"] },
-      { "path": "procedures/general-task-execution.yaml", "references": ["procedures/通用流程"] },
-      { "path": "procedures/procedure-construction.yaml", "references": ["procedures/Procedure 提取流程"] },
-      { "path": "procedures/dialogic-procedure-construction.yaml", "references": ["procedures/对话式构建 procedure 流程"] },
-      { "path": "procedures/memsphere-review.yaml", "references": ["procedures/memsphere 记忆 review 处理流程"] },
-      { "path": "procedures/memsphere-review-application.yaml", "references": ["procedures/处理 memsphere review 流程"] },
-      { "path": "procedures/memsphere-memory-review-process.yaml", "references": ["procedures/memsphere-memory-review-process"] },
-      { "path": "procedures/memsphere-tutorial.yaml", "references": ["procedures/memsphere tutorial 流程"] }
-    ]
+    "remove": []
   },
   "market_memory": {
     "install": [
