@@ -2792,7 +2792,7 @@ function logicalReferenceFromDescriptor(descriptor: { kind: MemoryKind; names: s
 }
 
 async function gitBlobDigest(root: string, path: string): Promise<string> {
-  return gitHashObject(await readFile(join(root, path)), root);
+  return gitHashObject(await readFile(join(root, path)), root, path);
 }
 
 async function exists(path: string): Promise<boolean> {

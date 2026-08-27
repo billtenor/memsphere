@@ -18,6 +18,21 @@ test("gitHashObject hashes the exact bytes supplied on stdin", async () => {
   }
 });
 
+test("gitHashObject applies Git path filters without asking Git to open the source path", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-git-filtered-hash-"));
+  const path = join(root, "memory.txt");
+  const source = Buffer.from("first\r\nsecond\r\n");
+  try {
+    await writeFile(join(root, ".gitattributes"), "*.txt text\n");
+    await writeFile(path, source);
+    await runGit(["init", "-b", "master"], { cwd: root });
+    const expected = (await runGit(["hash-object", "--", "memory.txt"], { cwd: root })).stdout;
+    assert.equal(await gitHashObject(source, root, "memory.txt"), expected);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("missing Git guidance keeps Windows CLI shells neutral", () => {
   const message = missingGitMessage("win32");
 

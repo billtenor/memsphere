@@ -28,9 +28,9 @@ export async function runGit(
   }
 }
 
-export async function gitHashObject(source: Uint8Array, cwd?: string): Promise<string> {
+export async function gitHashObject(source: Uint8Array, cwd?: string, path?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile("git", ["hash-object", "--stdin"], {
+    const child = execFile("git", ["hash-object", ...(path ? [`--path=${path}`] : []), "--stdin"], {
       cwd,
       encoding: "utf8",
       maxBuffer: 10 * 1024 * 1024,
