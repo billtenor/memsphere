@@ -31,7 +31,8 @@ test("market import includes dependencies required by a selected Procedure", asy
     const plan = await planMemoryMarketImport(root, "procedures/code-branch-review-and-remediation");
     assert.deepEqual(plan.targets.map((target) => target.reference), [
       "procedures/code-branch-review-and-remediation",
-      "statements/memsphere-repository-development-rules"
+      "statements/memsphere-repository-development-rules",
+      "statements/memsphere-repository-testing-rules"
     ]);
   });
 });
@@ -88,7 +89,8 @@ test("market import reuses an existing personalized dependency without overwriti
     await writeFile(join(root, dependency.path), Buffer.concat([dependency.source, Buffer.from("\n# personalized\n")]));
     const plan = await planMemoryMarketImport(root, "procedures/code-branch-review-and-remediation");
     assert.deepEqual(plan.targets.map((target) => target.reference), [
-      "procedures/code-branch-review-and-remediation"
+      "procedures/code-branch-review-and-remediation",
+      "statements/memsphere-repository-testing-rules"
     ]);
   });
 });
