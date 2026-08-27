@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { access, chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, posix, relative } from "node:path";
 import test from "node:test";
 import {
   projectBindCommand,
@@ -314,7 +314,7 @@ test("Managed System Memory repair updates canonical identity at its current sto
     const projectRoot = registry.projects["identity-path"].root;
     const memoryRoot = join(projectRoot, "memory");
     const originalPath = (await readReservedMemoryManifest()).system_memory.install[0];
-    const currentPath = join(dirname(originalPath), "relocated-system-memory.yaml");
+    const currentPath = posix.join(posix.dirname(originalPath), "relocated-system-memory.yaml");
     await runGit(["mv", originalPath, currentPath], { cwd: memoryRoot });
     await writeFile(
       join(memoryRoot, currentPath),
