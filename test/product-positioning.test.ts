@@ -89,3 +89,41 @@ test("chapter one is a bounded first-use journey based on a real scenario", asyn
   assert.doesNotMatch(tutorial, /请你启动 memsphere 教学流程-第二章/);
   assert.doesNotMatch(tutorial, /请你启动 memsphere 教学流程-第三章/);
 });
+
+test("chapter three teaches Run execution and configurable Artifact Review roles", async () => {
+  const [tutorial, experience, run, actor, review, view, procedure] = await Promise.all([
+    readReserved("procedures/memsphere-tutorial-chapter-03.yaml"),
+    readReserved("procedures/memsphere-tutorial-chapter-03-review-experience.yaml"),
+    readReserved("concepts/memsphere-run.yaml"),
+    readReserved("concepts/memsphere-actor.yaml"),
+    readReserved("concepts/memsphere-artifact-review.yaml"),
+    readReserved("concepts/memsphere-view.yaml"),
+    readReserved("concepts/memsphere-procedure.yaml")
+  ]);
+
+  assert.match(run, /Action 的 actor 只区分 human 与 agent/);
+  assert.match(run, /Runner 是 Memsphere 在当前通用 Agent 框架中的实际执行者/);
+  assert.match(run, /主 Agent 和子 Agent 共同构成 Runner/);
+  assert.match(actor, /Actor 不等同于 Procedure 中 Action 的 actor 字段/);
+  assert.match(actor, /Review Slot.*Binding/);
+  assert.match(review, /不可变 Artifact Submission/);
+  assert.match(review, /ChangeSet Comment 是两种不同对象/);
+  assert.match(view, /Memory 与 Run 是 View 的顶层入口/);
+  assert.match(view, /本地操作界面/);
+  assert.match(view, /不等同于.*专属界面/);
+  assert.match(procedure, /memsphere-run/);
+  assert.match(procedure, /memsphere-actor.*memsphere-artifact-review/);
+
+  assert.match(tutorial, /Run 步骤执行者只区分 Human 和 Runner/);
+  assert.match(tutorial, /实际检查第三章教学环境/);
+  assert.match(tutorial, /当前 Project 至少有一名 Human Actor/);
+  assert.match(tutorial, /没有任何可用 ACP Provider.*不得继续阻塞/);
+  assert.match(tutorial, /Runner 内部如何分工由通用 Agent 框架管理/);
+  assert.doesNotMatch(tutorial, /调用本章的 Agent 在执行 run start 预检时/);
+  assert.match(tutorial, /请启动 memsphere 教学流程-第三章 Review 体验流程/);
+  assert.match(tutorial, /Review 体验 Run 是否还没有结束/);
+  assert.match(experience, /review:\n\s+- Human 体验者\n\s+- Agent 观察者/);
+  assert.match(tutorial, /不得要求 Human 复述或回答概念/);
+  assert.doesNotMatch(tutorial, /Human 的多角色 Review 观察结果/);
+  assert.doesNotMatch(tutorial, /role_bindings|permission_grants/);
+});

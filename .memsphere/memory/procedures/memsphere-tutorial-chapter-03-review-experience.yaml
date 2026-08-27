@@ -1,0 +1,47 @@
+!procedure
+syntax: memsphere-20260721-stable
+names:
+  - memsphere-tutorial-chapter-03-review-experience
+  - memsphere 教学流程-第三章 Review 体验
+defines:
+  - 用一份简短的角色对照 Artifact，让 Human 实际体验一次带 Review 的 Run。
+asserts:
+  - 启动时必须将“Human 体验者”绑定到 Human Actor。
+  - “Agent 观察者”可以绑定到可用 Agent Actor；没有可用 Agent Actor 或 Human 不希望使用时可以 skip。
+goals:
+  - 产出一份经 Human Review，并在可用时同时经 Agent Review 的 Artifact。
+  - 让 Human 在 View 中查看 Artifact、Comment、Vote、Round 和最终结果。
+flow:
+  - !action
+    action: 根据本次 Run 的真实 Runner、Review Slot 和 Actor Binding，生成一份简短的 Run 执行角色与 Review 角色对照。
+    actor: agent
+    asserts:
+      - 必须说明 Human Action 由 Human 执行，Agent Action 交给 Runner，Runner 内部分工由通用 Agent 框架管理。
+      - 必须列出实际绑定的 Reviewer，不得把 skip 的 Slot 表述为已参与。
+      - 必须说明 Reviewer 只评审 Artifact，不接管 Run 步骤，也不直接修改 Artifact。
+    artifact: !artifact
+      name: Run 执行与 Review 角色对照
+      type: object
+      format:
+        name: markdown
+        layout: outline
+      schema: !schema
+        fields:
+          - Run 执行角色
+          - Review 角色
+          - 本次实际参与者
+          - 设计原因
+      review:
+        - Human 体验者
+        - Agent 观察者
+
+  - !action
+    action: 总结本次 Artifact Review 的参与者、Comment、Vote、Round 和最终结果。
+    actor: agent
+    asserts:
+      - 必须根据本次实际 Review 记录总结，不得编造参与者或结果。
+      - 必须提供实际 run_id 和 View 入口。
+    artifact: !artifact
+      name: 第三章 Review 体验完成摘要
+      format: markdown
+      final: true

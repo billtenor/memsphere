@@ -54,6 +54,16 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "memsphere-schema",
     "Procedure",
     "memsphere-procedure",
+    "Run",
+    "memsphere-run",
+    "Actor",
+    "参与者",
+    "memsphere-actor",
+    "Artifact Review",
+    "产物评审",
+    "memsphere-artifact-review",
+    "View",
+    "memsphere-view",
     "Concept Schema",
     "memsphere-concept-schema",
     "Statement Schema",
@@ -78,6 +88,10 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "memsphere-tutorial-chapter-01",
     "memsphere 教学流程-第二章",
     "memsphere-tutorial-chapter-02",
+    "memsphere 教学流程-第三章",
+    "memsphere-tutorial-chapter-03",
+    "memsphere 教学流程-第三章 Review 体验",
+    "memsphere-tutorial-chapter-03-review-experience",
     "memsphere 通用流程",
     "通用流程",
     "兜底流程",
@@ -128,7 +142,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   assert(files.every((file) => file.entity.defines.every((definition) => typeof definition === "string")));
   assert.equal(manifest.version, 3);
   assert.equal("memory_syntax" in manifest ? manifest.memory_syntax : undefined, currentMemorySyntax);
-  assert.equal(manifest.system_memory.install.length, 19);
+  assert.equal(manifest.system_memory.install.length, 25);
   assert.deepEqual(systemMemories.map((memory) => memory.path), manifest.system_memory.install);
   assert(systemMemories.every((memory) => memory.reference === `${memory.kind}/${memory.names[0]}`));
   assert(systemMemories.every((memory) => memory.names.length > 0));
