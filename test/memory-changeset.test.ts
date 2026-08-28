@@ -475,6 +475,13 @@ test("ChangeSet reads reject store mismatches and lists do not hide corrupt reco
       bestEffort.failures.find((failure) => failure.id === record.id)?.error ?? "",
       /store_type is embedded.*uses managed/
     );
+
+    const missingRecordId = "change-missing-record";
+    await mkdir(join(changesRoot, missingRecordId));
+    await assert.rejects(
+      listMemoryChangesBestEffort({ home, project: "project" }),
+      (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT")
+    );
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }

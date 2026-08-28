@@ -1556,6 +1556,7 @@ async function listProjectChangesBestEffort(project: ResolvedProject): Promise<{
     try {
       changes.push(await readReconciledChange(project, entry.name));
     } catch (error) {
+      if (!(error instanceof MemoryChangeIntegrityError)) throw error;
       failures.push({
         id: entry.name,
         error: error instanceof Error ? error.message : String(error)
