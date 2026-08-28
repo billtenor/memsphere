@@ -690,8 +690,8 @@ test("Artifact Review keeps local draft text across conflict recovery renders", 
   assert.match(browserHtml, /sameArtifactReviewDraftScope\(draft\.artifactReviewScope, currentArtifactReviewDraftScope\(\)\)/);
 });
 
-test("initial Memory loading also loads associated ChangeSets", () => {
-  assert.match(browserHtml, /if \(targetMode === "memory"\) \{\s*await loadMemories\(\);\s*await loadChanges\(\);\s*\}/);
+test("initial Memory loading treats associated ChangeSets as optional", () => {
+  assert.match(browserHtml, /if \(targetMode === "memory"\) \{\s*await loadMemories\(\);\s*await loadChanges\(\{ optional: true \}\);\s*\}/);
 });
 
 test("task polling does not replace active editors or open Artifact Review selectors", () => {

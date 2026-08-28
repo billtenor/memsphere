@@ -757,6 +757,7 @@ const browserTemplate = String.raw`<!doctype html>
       effectiveMemoryIds: new Set(),
       effectiveMemoryRequests: new Map(),
       runDetails: new Map(),
+      runDetailErrors: new Map(),
       runDetailRequests: new Map(),
       detailRequestSequence: 0,
       pageLoadGeneration: 0,
@@ -1204,7 +1205,7 @@ const browserTemplate = String.raw`<!doctype html>
         state.viewMode = targetMode;
         if (targetMode === "memory") {
           await loadMemories();
-          await loadChanges();
+          await loadChanges({ optional: true });
         }
         else if (targetMode === "market") await loadMarket();
         else if (targetMode === "task") await loadRuns({ loadDetail: false });
@@ -1318,6 +1319,7 @@ const browserTemplate = String.raw`<!doctype html>
       state.effectiveMemoryIds.clear();
       state.effectiveMemoryRequests.clear();
       state.runDetails.clear();
+      state.runDetailErrors.clear();
       state.runDetailRequests.clear();
       state.taskDetailReloadPending = null;
       state.changeId = "";
@@ -1409,15 +1411,22 @@ const browserTemplate = String.raw`<!doctype html>
       return true;
     }
 
-    async function loadChanges() {
-      const response = await fetch("/api/changes");
-      if (!response.ok) throw await responseError(response);
-      state.changes = (await response.json()).changes || [];
-      if (!state.changes.some(change => change.id === state.selectedChangeId)) {
-        state.selectedChangeId = state.changes.find(change => change.active)?.id || state.changes[0]?.id || "";
-        state.changeDetail = null;
+    async function loadChanges(options = {}) {
+      try {
+        const response = await fetch("/api/changes");
+        if (!response.ok) throw await responseError(response);
+        state.changes = (await response.json()).changes || [];
+        if (!state.changes.some(change => change.id === state.selectedChangeId)) {
+          state.selectedChangeId = state.changes.find(change => change.active)?.id || state.changes[0]?.id || "";
+          state.changeDetail = null;
+        }
+        return true;
+      } catch (error) {
+        if (options.optional !== true) throw error;
+        state.changes = [];
+        console.error("Unable to load ChangeSets", error);
+        return false;
       }
-      return true;
     }
 
     async function loadMarket() {
@@ -1566,17 +1575,27 @@ const browserTemplate = String.raw`<!doctype html>
       const startingRevision = state.runs.find(run => run.id === id)?.updatedAt;
       const requestId = ++state.detailRequestSequence;
       state.runDetailRequests.set(id, requestId);
-      const response = await fetch("/api/runs/" + encodeURIComponent(id));
-      if (!response.ok) {
-        if (response.status === 404) return null;
-        throw new Error(await response.text());
+      let detail;
+      try {
+        const response = await fetch("/api/runs/" + encodeURIComponent(id));
+        if (!response.ok) {
+          if (response.status === 404) return null;
+          throw new Error(await response.text());
+        }
+        detail = (await response.json()).run;
+      } catch (error) {
+        if (projectGeneration !== state.projectGeneration) return null;
+        if (state.runDetailRequests.get(id) !== requestId) return null;
+        state.runDetailErrors.set(id, error instanceof Error ? error.message : String(error));
+        console.error("Unable to load Run detail", error);
+        return null;
       }
-      const detail = (await response.json()).run;
       if (projectGeneration !== state.projectGeneration) return null;
       if (state.runDetailRequests.get(id) !== requestId) return null;
       const currentSummary = state.runs.find(run => run.id === id);
       if (currentSummary?.updatedAt !== startingRevision
         || (detail.updatedAt && currentSummary?.updatedAt && detail.updatedAt < currentSummary.updatedAt)) return null;
+      state.runDetailErrors.delete(id);
       state.runDetails.set(id, detail);
       const summary = currentSummary;
       if (summary) Object.assign(summary, detail, { eventCount: detail.events?.length || 0 });
@@ -3061,10 +3080,18 @@ const browserTemplate = String.raw`<!doctype html>
           state.viewMode = "changes";
           await loadChanges();
           if (!isCurrentPageLoad(options)) return false;
-          if (!state.changes.some(change => change.id === route.changeId)) {
+          const change = state.changes.find(candidate => candidate.id === route.changeId);
+          if (!change) {
             state.routeError = uiT("route.changeSetNotFound", { id: route.changeId });
+          } else if (change.error) {
+            state.selectedChangeId = route.changeId;
+            state.routeError = change.error;
           } else {
-            await loadChangeDetail(route.changeId);
+            try {
+              await loadChangeDetail(route.changeId);
+            } catch (error) {
+              state.routeError = error instanceof Error ? error.message : String(error);
+            }
             if (!isCurrentPageLoad(options)) return false;
           }
         } else if (route.page === "tasks") {
@@ -3470,7 +3497,7 @@ const browserTemplate = String.raw`<!doctype html>
       }
       if (mode === "memory") {
         await loadMemories();
-        await loadChanges();
+        await loadChanges({ optional: true });
         await loadMemorySelection(state.selectedId || state.memories[0]?.id);
       } else if (mode === "market") {
         await loadMarket();
@@ -3503,6 +3530,16 @@ const browserTemplate = String.raw`<!doctype html>
       state.selectedChangeId = changeId;
       state.changeDetail = null;
       state.routeError = "";
+      const unavailable = state.changes.find(change => change.id === changeId && change.error);
+      if (unavailable) {
+        const path = state.currentProject
+          ? "/projects/" + encodeRoutePart(state.currentProject) + "/changes/" + encodeRoutePart(changeId)
+          : "/memories";
+        history.pushState(null, "", path);
+        state.routeError = unavailable.error;
+        renderAll();
+        return;
+      }
       try {
         await loadChangeDetail(changeId);
       } catch (error) {
@@ -3586,7 +3623,7 @@ const browserTemplate = String.raw`<!doctype html>
               const link = document.createElement("button");
               link.type = "button";
               link.className = "memory-change-link";
-              link.textContent = change.id + " · " + changeStatusLabel(change.status);
+              link.textContent = changeListLabel(change);
               link.addEventListener("click", () => openChange(change.id));
               links.append(link);
             }
@@ -3611,7 +3648,7 @@ const browserTemplate = String.raw`<!doctype html>
           const link = document.createElement("button");
           link.type = "button";
           link.className = "memory-change-link";
-          link.textContent = change.id + " · " + changeStatusLabel(change.status);
+          link.textContent = changeListLabel(change);
           link.addEventListener("click", () => openChange(change.id));
           links.append(link);
         }
@@ -4158,6 +4195,17 @@ const browserTemplate = String.raw`<!doctype html>
       saveSelectedTask();
       el.title.textContent = runDisplayName(run);
       el.subtitle.textContent = run.id;
+      const detailError = state.runDetailErrors.get(run.id);
+      if (detailError) {
+        el.detail.className = "error-panel";
+        el.detail.innerHTML = "";
+        const heading = document.createElement("h3");
+        heading.textContent = uiT("common.error");
+        const message = document.createElement("p");
+        message.textContent = detailError;
+        el.detail.append(heading, message);
+        return;
+      }
       if (!Array.isArray(run.stack) || !Array.isArray(run.events)) {
         el.detail.className = "empty";
         el.detail.textContent = uiT("run.loading");
@@ -8850,6 +8898,10 @@ const browserTemplate = String.raw`<!doctype html>
       if (status === "completed") return uiT("change.status.completed");
       if (status === "abandoned") return uiT("change.status.abandoned");
       return status;
+    }
+
+    function changeListLabel(change) {
+      return change.id + " · " + (change.error ? uiT("change.unavailable") : changeStatusLabel(change.status));
     }
 
     function saveSelectedTask() {

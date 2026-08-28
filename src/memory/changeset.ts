@@ -579,7 +579,7 @@ export async function createMarketMemoryChange(input: {
       memoryScope: "canonical"
     })).primary;
     const actor = memoryChangeActorSchema.parse(input.actor);
-    const existing = (await listProjectChanges(project, true)).find((change) => (
+    const existing = (await listProjectChangesBestEffort(project)).changes.find((change) => (
       change.status === "active"
       && change.intent === "market_import"
     ));
@@ -1538,14 +1538,60 @@ async function listProjectChanges(project: ResolvedProject, reconcile = false): 
   return changes;
 }
 
+async function listProjectChangesBestEffort(project: ResolvedProject): Promise<{
+  changes: MemoryChangeSet[];
+  failures: Array<{ id: string; error: string }>;
+}> {
+  let entries;
+  try {
+    entries = await readdir(project.paths.changesRoot, { withFileTypes: true });
+  } catch (error) {
+    if (isCode(error, "ENOENT")) return { changes: [], failures: [] };
+    throw error;
+  }
+  const changes: MemoryChangeSet[] = [];
+  const failures: Array<{ id: string; error: string }> = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^change-[a-zA-Z0-9-]+$/.test(entry.name)) continue;
+    try {
+      changes.push(await readReconciledChange(project, entry.name));
+    } catch (error) {
+      if (!(error instanceof MemoryChangeIntegrityError)) throw error;
+      failures.push({
+        id: entry.name,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+  return { changes, failures };
+}
+
+function sortMemoryChanges(changes: MemoryChangeSet[]): MemoryChangeSet[] {
+  return changes.sort((left, right) => {
+    const activity = Number(right.status === "active") - Number(left.status === "active");
+    return activity || right.updated_at.localeCompare(left.updated_at);
+  });
+}
+
 export async function listMemoryChanges(input: { home?: string; project: string }): Promise<MemoryChangeSet[]> {
   const context = await resolveProjectContext({ home: input.home, project: input.project });
   return withFileLock(memoryMutationLock(context.primary), async () => {
     const changes = await listProjectChanges(context.primary, true);
-    return changes.sort((left, right) => {
-      const activity = Number(right.status === "active") - Number(left.status === "active");
-      return activity || right.updated_at.localeCompare(left.updated_at);
-    });
+    return sortMemoryChanges(changes);
+  });
+}
+
+export async function listMemoryChangesBestEffort(input: { home?: string; project: string }): Promise<{
+  changes: MemoryChangeSet[];
+  failures: Array<{ id: string; error: string }>;
+}> {
+  const context = await resolveProjectContext({ home: input.home, project: input.project });
+  return withFileLock(memoryMutationLock(context.primary), async () => {
+    const result = await listProjectChangesBestEffort(context.primary);
+    return {
+      changes: sortMemoryChanges(result.changes),
+      failures: result.failures.sort((left, right) => right.id.localeCompare(left.id))
+    };
   });
 }
 

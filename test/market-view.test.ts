@@ -11,7 +11,7 @@ import { runGit } from "../src/git.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 
 async function withMarketView(
-  run: (fixture: { origin: string; memoryRoot: string }) => Promise<void>
+  run: (fixture: { origin: string; memoryRoot: string; changesRoot: string }) => Promise<void>
 ): Promise<void> {
   const fixture = await mkdtemp(join(tmpdir(), "memsphere-market-view-"));
   const home = join(fixture, "home");
@@ -40,7 +40,7 @@ async function withMarketView(
     });
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     try {
-      await run({ origin, memoryRoot: config.memoryRoot });
+      await run({ origin, memoryRoot: config.memoryRoot, changesRoot: join(config.scopeRoot, "changes") });
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -128,6 +128,33 @@ test("Memory Market View API rejects a canonical-name alias conflict", async () 
     const conflict = await importMarket(origin, "statements", "memsphere-general-development-rules");
     assert.equal(conflict.response.status, 409);
     assert.equal(conflict.payload.code, "market_name_conflict");
+  });
+});
+
+test("Memory Market ignores unrelated corrupt ChangeSets for listing and imports", async () => {
+  await withMarketView(async ({ origin, changesRoot }) => {
+    const id = "change-corrupt-market-view";
+    await mkdir(join(changesRoot, id), { recursive: true });
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    await writeFile(join(changesRoot, id, "change.json"), `${JSON.stringify({
+      format_version: 1,
+      id,
+      project: "market-view",
+      workspace_key: "path:/corrupt",
+      base_revision: "corrupt",
+      status: "completed",
+      created_at: timestamp,
+      updated_at: timestamp,
+      targets: [],
+      origin: "cli",
+      scope: [],
+      comments: []
+    }, null, 2)}\n`);
+
+    const listed = await marketPayload(origin);
+    assert.ok(listed.memories.length > 0);
+    const imported = await importMarket(origin, "statements", "memsphere-general-testing-rules");
+    assert.equal(imported.response.status, 201);
   });
 });
 

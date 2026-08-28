@@ -10,6 +10,7 @@ import {
   editMemories,
   failMemoryChange,
   listMemoryChanges,
+  listMemoryChangesBestEffort,
   MemoryChangeIntegrityError,
   memoryChangeSetSchema,
   publishMemoryChange,
@@ -467,6 +468,19 @@ test("ChangeSet reads reject store mismatches and lists do not hide corrupt reco
     await assert.rejects(
       listMemoryChanges({ home, project: "project" }),
       (error: unknown) => error instanceof MemoryChangeIntegrityError && error.changeId === record.id
+    );
+    const bestEffort = await listMemoryChangesBestEffort({ home, project: "project" });
+    assert.equal(bestEffort.changes.some((change) => change.id === record.id), false);
+    assert.match(
+      bestEffort.failures.find((failure) => failure.id === record.id)?.error ?? "",
+      /store_type is embedded.*uses managed/
+    );
+
+    const missingRecordId = "change-missing-record";
+    await mkdir(join(changesRoot, missingRecordId));
+    await assert.rejects(
+      listMemoryChangesBestEffort({ home, project: "project" }),
+      (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT")
     );
   } finally {
     await rm(fixture, { recursive: true, force: true });
