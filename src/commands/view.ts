@@ -57,6 +57,7 @@ import {
   createMarketMemoryChange,
   createViewMemoryChange,
   deleteMemoryChangeComment,
+  MemoryChangeIntegrityError,
   MemoryChangePreviewCache,
   listMemoryChanges,
   readMemoryChange,
@@ -276,7 +277,10 @@ export function createViewServer(config: MemsphereConfig, options: ViewServerOpt
       await handleRequest(request, response, config, options, viewCache);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      sendJson(response, 500, { error: message });
+      sendJson(response, 500, {
+        ...(error instanceof MemoryChangeIntegrityError ? { code: error.code } : {}),
+        error: message
+      });
     }
   });
   server.once("close", () => void viewCache.dispose());
@@ -613,7 +617,7 @@ async function handleRequest(
       })).get(reference);
       if (active) {
         const change = await readMemoryChange({ home: config.homeRoot, project: config.project.name, changeId: active });
-        sendJson(response, 200, { change: memoryChangeSummary(change) });
+        sendJson(response, 200, { change: await memoryChangeSummary(change) });
         return;
       }
       const plan = await planMemoryMarketImport(config.memoryRoot, reference);
@@ -623,7 +627,7 @@ async function handleRequest(
         actor: resolveMemoryChangeActor(config, body.operator),
         targets: plan.targets
       });
-      sendJson(response, 201, { change: memoryChangeSummary(change) });
+      sendJson(response, 201, { change: await memoryChangeSummary(change) });
     } catch (error) {
       if (error instanceof MarketMemoryNameConflictError) {
         sendJson(response, 409, { code: "market_name_conflict", error: error.message });
@@ -641,7 +645,7 @@ async function handleRequest(
     }
     const changes = await listMemoryChanges({ home: config.homeRoot, project: config.project.name });
     sendJson(response, 200, {
-      changes: changes.map(memoryChangeSummary)
+      changes: await Promise.all(changes.map(memoryChangeSummary))
     });
     return;
   }
@@ -662,7 +666,7 @@ async function handleRequest(
         reference: body.memoryReference.trim(),
         actor: resolveMemoryChangeActor(config, body.operator)
       });
-      sendJson(response, 201, { change: memoryChangeSummary(change) });
+      sendJson(response, 201, { change: await memoryChangeSummary(change) });
     } catch (error) {
       sendMemoryChangeError(response, error);
     }
@@ -689,7 +693,7 @@ async function handleRequest(
     const source: MemoryPayload["source"] = {
         mode: "changeset",
         changeId: change.id,
-        storeType: change.store_type ?? "managed",
+        storeType: change.store_type,
         baseRevision: change.checkpoint?.base_revision,
         updatedAt: change.updated_at,
         valid: change.checkpoint?.valid,
@@ -706,7 +710,7 @@ async function handleRequest(
       })))
     });
     sendJson(response, 200, {
-      change: memoryChangeSummary(change),
+      change: await memoryChangeSummary(change),
       targets: change.targets,
       targetMemories,
       comments: change.comments,
@@ -739,7 +743,7 @@ async function handleRequest(
         reference: body.memoryReference.trim(),
         expectedUpdatedAt: typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : undefined
       });
-      sendJson(response, 200, { change: memoryChangeSummary(change) });
+      sendJson(response, 200, { change: await memoryChangeSummary(change) });
     } catch (error) {
       sendMemoryChangeError(response, error);
     }
@@ -760,7 +764,7 @@ async function handleRequest(
         changeId: decodeURIComponent(changeAbandonMatch[1]),
         expectedUpdatedAt: typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : undefined
       });
-      sendJson(response, 200, { change: memoryChangeSummary(change) });
+      sendJson(response, 200, { change: await memoryChangeSummary(change) });
     } catch (error) {
       sendMemoryChangeError(response, error);
     }
@@ -800,7 +804,7 @@ async function handleRequest(
         body: body.body,
         expectedUpdatedAt: typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : undefined
       });
-      sendJson(response, 201, { change: memoryChangeSummary(result.change), comment: result.comment });
+      sendJson(response, 201, { change: await memoryChangeSummary(result.change), comment: result.comment });
     } catch (error) {
       sendMemoryChangeError(response, error);
     }
@@ -830,14 +834,14 @@ async function handleRequest(
       };
       if (request.method === "DELETE") {
         const change = await deleteMemoryChangeComment(common);
-        sendJson(response, 200, { change: memoryChangeSummary(change) });
+        sendJson(response, 200, { change: await memoryChangeSummary(change) });
       } else {
         const result = await updateMemoryChangeComment({
           ...common,
           body: typeof body.body === "string" ? body.body : undefined,
           withdraw: body.withdraw === true
         });
-        sendJson(response, 200, { change: memoryChangeSummary(result.change), comment: result.comment });
+        sendJson(response, 200, { change: await memoryChangeSummary(result.change), comment: result.comment });
       }
     } catch (error) {
       sendMemoryChangeError(response, error);
@@ -1289,7 +1293,7 @@ async function loadMemoryPayload(config: MemsphereConfig, viewCache: ViewMemoryC
 }
 
 
-function memoryChangeSummary(change: MemoryChangeSet): unknown {
+async function memoryChangeSummary(change: MemoryChangeSet): Promise<unknown> {
   const counts = { create: 0, update: 0, delete: 0, rename: 0 };
   for (const target of change.targets) counts[target.operation] += 1;
   const commentCounts = { pending: 0, processing: 0, completed: 0 };
@@ -1297,7 +1301,7 @@ function memoryChangeSummary(change: MemoryChangeSet): unknown {
   return {
     id: change.id,
     project: change.project,
-    storeType: change.store_type ?? "managed",
+    storeType: change.store_type,
     status: change.status,
     origin: change.origin,
     intent: change.intent,
@@ -1320,8 +1324,23 @@ function memoryChangeSummary(change: MemoryChangeSet): unknown {
     ])],
     commentCounts,
     createdBy: change.created_by,
-    claimed: Boolean(change.claim)
+    claimed: Boolean(change.claim),
+    sourceWorktree: change.source_worktree ? {
+      root: change.source_worktree.root,
+      repositoryRoot: change.source_worktree.repository_root,
+      memoryPath: change.source_worktree.memory_path,
+      available: await pathAvailable(change.source_worktree.root)
+    } : undefined
   };
+}
+
+async function pathAvailable(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function activeMarketImports(changes: readonly MemoryChangeSet[]): Map<string, string> {
@@ -1365,6 +1384,10 @@ function normalizeMemoryChangeLocation(input: unknown): { anchor: string; line: 
 
 function sendMemoryChangeError(response: ServerResponse, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof MemoryChangeIntegrityError) {
+    sendJson(response, 500, { code: error.code, error: message });
+    return;
+  }
   const missing = /not found/i.test(message);
   const conflict = /changed since|already |only |claimed|not part of|belongs to/i.test(message);
   sendJson(response, missing ? 404 : conflict ? 409 : 400, {
@@ -1388,7 +1411,7 @@ async function withMemoryPayloadRoot<T>(
       use: async ({ change, memoryRoot }) => use(memoryRoot, {
         mode: "changeset",
         changeId: change.id,
-        storeType: change.store_type ?? "managed",
+        storeType: change.store_type,
         baseRevision: change.checkpoint?.base_revision,
         updatedAt: change.updated_at,
         valid: change.checkpoint?.valid,

@@ -1377,7 +1377,7 @@ const browserTemplate = String.raw`<!doctype html>
       const message = error instanceof Error ? error.message : String(error);
       el.title.textContent = uiT("fatal.title");
       el.subtitle.textContent = "";
-      el.detail.className = "empty";
+      el.detail.className = "error-panel";
       el.detail.textContent = message;
       el.nav.innerHTML = "";
       el.count.textContent = uiT("common.error");
@@ -1411,7 +1411,7 @@ const browserTemplate = String.raw`<!doctype html>
 
     async function loadChanges() {
       const response = await fetch("/api/changes");
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw await responseError(response);
       state.changes = (await response.json()).changes || [];
       if (!state.changes.some(change => change.id === state.selectedChangeId)) {
         state.selectedChangeId = state.changes.find(change => change.active)?.id || state.changes[0]?.id || "";
@@ -1441,7 +1441,7 @@ const browserTemplate = String.raw`<!doctype html>
         return null;
       }
       const response = await fetch("/api/changes/" + encodeURIComponent(changeId));
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw await responseError(response);
       state.changeDetail = await response.json();
       state.actorNames = state.changeDetail.actorNames || {};
       state.actorKinds = state.changeDetail.actorKinds || {};
@@ -1452,6 +1452,16 @@ const browserTemplate = String.raw`<!doctype html>
       state.filtered = state.memories;
       if (!state.filtered.some(memory => memory.id === state.selectedId)) state.selectedId = state.filtered[0]?.id || null;
       return state.changeDetail;
+    }
+
+    async function responseError(response) {
+      const text = await response.text();
+      try {
+        const payload = JSON.parse(text);
+        return new Error(payload.error || text);
+      } catch {
+        return new Error(text || ("Request failed with HTTP " + response.status));
+      }
     }
 
     async function loadMemoryDetail(id, options = {}) {
@@ -3216,9 +3226,9 @@ const browserTemplate = String.raw`<!doctype html>
     }
 
     function renderRouteError() {
-      el.title.textContent = uiT("common.notFound");
+      el.title.textContent = uiT(state.viewMode === "changes" ? "change.unavailable" : "common.notFound");
       el.subtitle.textContent = window.location.pathname;
-      el.detail.className = "empty";
+      el.detail.className = state.viewMode === "changes" ? "error-panel" : "empty";
       el.detail.textContent = state.routeError;
     }
 
@@ -3490,7 +3500,14 @@ const browserTemplate = String.raw`<!doctype html>
       }
       state.viewMode = "changes";
       state.routeLanding = "";
-      await loadChangeDetail(changeId);
+      state.selectedChangeId = changeId;
+      state.changeDetail = null;
+      state.routeError = "";
+      try {
+        await loadChangeDetail(changeId);
+      } catch (error) {
+        state.routeError = error instanceof Error ? error.message : String(error);
+      }
       renderAll();
     }
 
@@ -3802,6 +3819,12 @@ const browserTemplate = String.raw`<!doctype html>
       meta.append(pill(lifecycle, true, change.valid === false ? "warn" : ""));
       meta.append(pill(uiT("change.store", { value: change.storeType })));
       meta.append(pill(uiT("change.base", { value: String(change.baseRevision || "").slice(0, 12) })));
+      if (change.sourceWorktree) {
+        const source = pill(uiT("change.source", { value: change.sourceWorktree.root }));
+        source.title = change.sourceWorktree.root;
+        meta.append(source);
+        if (!change.sourceWorktree.available) meta.append(pill(uiT("change.sourceUnavailable"), false, "warn"));
+      }
       if (change.digest) meta.append(pill(uiT("change.digest", { value: String(change.digest).slice(0, 12) })));
       meta.append(pill(uiT(change.valid === false ? "change.validationFailed" : change.valid === true ? "change.validationPassed" : "change.notValidated"), false, change.valid === false ? "warn" : ""));
 

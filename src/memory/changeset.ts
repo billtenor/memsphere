@@ -126,7 +126,7 @@ export const memoryChangeSetSchema = z.object({
   published_revision: z.string().min(1).optional(),
   candidate_revision: z.string().min(1).optional(),
   merge_parent: z.string().min(1).optional(),
-  store_type: z.enum(["managed", "embedded"]).optional(),
+  store_type: z.enum(["managed", "embedded"]),
   source_worktree: sourceWorktreeSchema.optional(),
   checkpoint: changeCheckpointSchema.optional(),
   failure: changeFailureSchema.optional(),
@@ -151,6 +151,15 @@ export type MemoryChangeSet = z.infer<typeof memoryChangeSetSchema>;
 export type MemoryChangeOperation = z.infer<typeof changeTargetSchema>["operation"];
 export type MemoryChangeActor = z.infer<typeof memoryChangeActorSchema>;
 export type MemoryChangeComment = z.infer<typeof memoryChangeCommentSchema>;
+
+export class MemoryChangeIntegrityError extends Error {
+  readonly code = "changeset_integrity_error";
+
+  constructor(readonly changeId: string, message: string) {
+    super(`ChangeSet ${changeId} has invalid persisted data: ${message}`);
+    this.name = "MemoryChangeIntegrityError";
+  }
+}
 
 export type EmbeddedMemoryEditResult = {
   repositoryRoot: string;
@@ -315,7 +324,7 @@ export async function withMemoryChangeReviewSnapshot<T>(input: {
     try {
       if (prepared.change.targets.some((target) => target.operation === "delete")) {
         baseRoot = await mkdtemp(join(tmpdir(), "memsphere-review-change-base-"));
-        if (changeStoreType(prepared.change) === "managed") {
+        if (prepared.change.store_type === "managed") {
           await materializeGitMemoryRoot(prepared.project.memoryRoot, prepared.change.checkpoint!.base_revision, ".", baseRoot);
         } else {
           const source = prepared.change.source_worktree;
@@ -353,7 +362,7 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
     const previewRoot = await mkdtemp(join(tmpdir(), "memsphere-change-detail-preview-"));
     const scopeRevisionRoots: string[] = [];
     try {
-      if (changeStoreType(change) === "managed") {
+      if (change.store_type === "managed") {
         await materializeGitMemoryRoot(context.primary.memoryRoot, change.base_revision, ".", baseRoot);
       } else {
         const source = change.source_worktree;
@@ -369,7 +378,7 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
         if (!revisionRoot) {
           revisionRoot = await mkdtemp(join(tmpdir(), "memsphere-change-scope-revision-"));
           scopeRevisionRoots.push(revisionRoot);
-          if (changeStoreType(change) === "managed") {
+          if (change.store_type === "managed") {
             await materializeGitMemoryRoot(context.primary.memoryRoot, revision, ".", revisionRoot);
           } else {
             const source = change.source_worktree;
@@ -469,7 +478,7 @@ async function materializePreparedMemoryChangePreview(
   const { change, project, candidateRoot } = prepared;
   const staging = await mkdtemp(join(tmpdir(), "memsphere-view-change-"));
   try {
-    if (changeStoreType(change) === "managed") {
+    if (change.store_type === "managed") {
       await materializeGitMemoryRoot(project.memoryRoot, change.checkpoint!.base_revision, ".", staging);
     } else {
       const source = change.source_worktree;
@@ -946,7 +955,7 @@ export async function validateMemoryChange(
       const resolvedId = changeId ?? await resolveSingleManagedActive(context.primary, workspace);
       const change = await readReconciledChange(context.primary, resolvedId);
       assertDraftOwner(change, context.primary.name, workspace.key);
-      if (changeStoreType(change) !== "managed") throw new Error(`ChangeSet ${change.id} is not a Managed ChangeSet`);
+      if (change.store_type !== "managed") throw new Error(`ChangeSet ${change.id} is not a Managed ChangeSet`);
       const candidateRoot = workspaceCandidateRoot(workspace.path, resolvedId);
       if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
       const effectiveChange = change.origin === "view"
@@ -994,7 +1003,7 @@ export async function validateMemoryChange(
       const marketChange = await readReconciledChange(context.primary, changeId);
       if (marketChange.intent === "market_import") {
         if (marketChange.status !== "active") throw new Error(`ChangeSet ${marketChange.id} is already ${marketChange.status}`);
-        if (changeStoreType(marketChange) !== "embedded") throw new Error(`ChangeSet ${marketChange.id} is not an Embedded ChangeSet`);
+        if (marketChange.store_type !== "embedded") throw new Error(`ChangeSet ${marketChange.id} is not an Embedded ChangeSet`);
         const source = marketChange.source_worktree;
         if (!source || workspace.kind !== "git" || workspace.key !== marketChange.workspace_key) {
           throw new Error(`Embedded market ChangeSet ${marketChange.id} belongs to another Git workspace`);
@@ -1087,7 +1096,7 @@ async function resolveSingleManagedActive(project: ResolvedProject, workspace: W
       change?.status === "active"
       && change.project === project.name
       && change.workspace_key === workspace.key
-      && changeStoreType(change) === "managed"
+      && change.store_type === "managed"
       && await exists(join(root, entry.name, "memory"))
     ) ids.push(entry.name);
   }
@@ -1189,7 +1198,7 @@ async function persistValidatedCheckpoint(
     valid: issues.length === 0,
     issues: issues.map((issue) => persistedValidationIssue(issue, effectiveMemoryRoot, issueCandidateRoot))
   };
-  if (checkpointChanged && changeStoreType(change) === "embedded") delete change.candidate_revision;
+  if (checkpointChanged && change.store_type === "embedded") delete change.candidate_revision;
   change.updated_at = new Date().toISOString();
   await writeChange(project, change);
   for (const entry of await readdir(checkpoints, { withFileTypes: true })) {
@@ -1243,7 +1252,7 @@ function validationResult(
     changeId: change.id,
     memoryRoot,
     candidateRoot,
-    storeType: changeStoreType(change),
+    storeType: change.store_type,
     baseRevision,
     checkpointDigest: change.checkpoint.digest,
     completedChangeIds,
@@ -1290,7 +1299,7 @@ async function captureEmbeddedWorkingChange(
     if (requestedId) {
       change = await readReconciledChange(project, requestedId);
       assertDraftOwner(change, project.name, workspace.key);
-      if (changeStoreType(change) !== "embedded") throw new Error(`ChangeSet ${change.id} is not an Embedded ChangeSet`);
+      if (change.store_type !== "embedded") throw new Error(`ChangeSet ${change.id} is not an Embedded ChangeSet`);
       if (change.base_revision !== baseRevision) {
         if (change.origin !== "view") {
           throw new Error(`Embedded ChangeSet ${change.id} belongs to another Git base revision`);
@@ -1302,7 +1311,7 @@ async function captureEmbeddedWorkingChange(
       const completedChangeIds: string[] = [];
       const matches = projectChanges.filter((candidate) => (
         candidate.status === "active"
-        && changeStoreType(candidate) === "embedded"
+        && candidate.store_type === "embedded"
         && candidate.workspace_key === workspace.key
         && candidate.base_revision === baseRevision
       ));
@@ -1523,9 +1532,8 @@ async function listProjectChanges(project: ResolvedProject, reconcile = false): 
   const changes: MemoryChangeSet[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || !/^change-[a-zA-Z0-9-]+$/.test(entry.name)) continue;
-    const change = await (reconcile ? readReconciledChange(project, entry.name) : readChange(project, entry.name))
-      .catch(() => undefined);
-    if (change) changes.push(change);
+    const change = await (reconcile ? readReconciledChange(project, entry.name) : readChange(project, entry.name));
+    changes.push(change);
   }
   return changes;
 }
@@ -1813,7 +1821,7 @@ export async function claimMemoryChange(input: {
       throw new Error(`ChangeSet ${change.id} is already claimed by ${change.claim.root}; use --force to take over`);
     }
     if (change.claim?.instance_key === workspace.instanceKey) {
-      const candidateRoot = changeStoreType(change) === "managed"
+      const candidateRoot = change.store_type === "managed"
         ? workspaceCandidateRoot(workspace.path, change.id)
         : change.intent === "market_import"
           ? workspaceCandidateRoot(workspace.path, change.id)
@@ -1846,7 +1854,7 @@ export async function claimMemoryChange(input: {
     await writeChange(context.primary, change);
     return {
       change,
-      candidateRoot: changeStoreType(change) === "managed"
+      candidateRoot: change.store_type === "managed"
         ? workspaceCandidateRoot(workspace.path, change.id)
         : change.intent === "market_import"
           ? workspaceCandidateRoot(workspace.path, change.id)
@@ -1913,10 +1921,6 @@ export async function completeMemoryChange(changeId: string): Promise<MemoryChan
   });
 }
 
-function changeStoreType(change: MemoryChangeSet): "managed" | "embedded" {
-  return change.store_type ?? "managed";
-}
-
 async function canonicalChangeIdentity(project: ResolvedProject): Promise<{
   workspace: WorkspaceIdentity;
   baseRevision: string;
@@ -1971,7 +1975,7 @@ async function prepareClaimCandidate(
   workspace: WorkspaceIdentity
 ): Promise<string[]> {
   const warnings: string[] = [];
-  if (changeStoreType(change) === "embedded") {
+  if (change.store_type === "embedded") {
     if (project.config.store.type !== "embedded" || workspace.kind !== "git") {
       throw new Error(`Embedded ChangeSet ${change.id} must be claimed inside its Git repository`);
     }
@@ -2558,6 +2562,7 @@ function newChange(
     status: "active",
     created_at: now,
     updated_at: now,
+    store_type: project.config.store.type,
     targets: [],
     origin: options.origin ?? "cli",
     ...(options.actor ? { created_by: options.actor } : {}),
@@ -2703,7 +2708,20 @@ function memoryMutationLock(project: ResolvedProject): string {
 }
 
 async function readChange(project: ResolvedProject, id: string): Promise<MemoryChangeSet> {
-  return memoryChangeSetSchema.parse(JSON.parse(await readFile(changePath(project, id), "utf8")));
+  const source = await readFile(changePath(project, id), "utf8");
+  let change: MemoryChangeSet;
+  try {
+    change = memoryChangeSetSchema.parse(JSON.parse(source));
+  } catch (error) {
+    throw new MemoryChangeIntegrityError(id, error instanceof Error ? error.message : String(error));
+  }
+  if (change.store_type !== project.config.store.type) {
+    throw new MemoryChangeIntegrityError(
+      id,
+      `store_type is ${change.store_type}, but Project ${project.name} uses ${project.config.store.type}`
+    );
+  }
+  return change;
 }
 
 async function readReconciledChange(project: ResolvedProject, id: string): Promise<MemoryChangeSet> {
@@ -2760,7 +2778,7 @@ async function reconcileEmbeddedChange(
 ): Promise<MemoryChangeSet> {
   if (
     change.status !== "active"
-    || changeStoreType(change) !== "embedded"
+    || change.store_type !== "embedded"
     || !change.checkpoint?.valid
     || change.targets.length === 0
     || !change.source_worktree
