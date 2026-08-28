@@ -13,4 +13,5 @@ defines:
   - 用户内容、Memory canonical name、Run id、命令、文件路径、ACP Provider 名称、状态码和错误原文等技术标识保持原样；固定按钮、标题、提示、空状态、确认文案、日期格式与 ACP 安装检测说明由当前界面语言决定。
   - View 源码使用可执行静态门禁检查静态模板和动态 DOM 文案入口；除品牌、结构标记和可复制技术命令的最小允许清单外，固定可见文案必须来自界面语言资源或 Memory DSL 标签表。
   - View 中的稳定地址可以让 Human 与 Agent 返回同一个 Project、ChangeSet、Run 或 Review。
+  - View 对单条持久化记录实行故障隔离：损坏 ChangeSet 在列表中标为 unavailable，详细错误只在 Human 选择后显示，不阻塞 Memory、记忆市场或其他有效 ChangeSet；记忆市场只跳过明确的 ChangeSet 完整性损坏，非完整性存储故障仍显式失败；单个 Run detail 损坏只在该 Run 详情区报错，不阻塞 Running 列表与其他 Run。
   - View 是 Memsphere 当前的通用管理界面，不等同于某个个性化软件未来生长出的专属界面。

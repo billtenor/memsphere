@@ -100,6 +100,8 @@ View 顶层只展示 Memory 与 Run，Memory 下分“当前项目”与“记�
 
 Memory 详情的“修改”经简单确认后总是创建一个新的持久、未绑定 ChangeSet；用户不能直接编辑 YAML，只能在 ChangeSet 中加入已有 Memory，并通过结构位置旁的 `+` 逐条提交 Comment。Comment 直接绑定 ChangeSet，状态为 pending、processing、completed，不存在独立 Memory Review、ChangeSet Review、Submit Review、Round 或 Vote。Human Actor 和稳定 Browser user UUID 只用于归因，不构成认证。ChangeSet 详情仅展示纳入范围的候选 Memory，不展示 diff 或完整 Store；active 可添加 Memory、提交 Comment 或确认废弃，completed、abandoned 只读。
 
+View 对持久化记录按记录隔离故障：损坏 ChangeSet 在列表中标为 `unavailable`，详细错误只在用户选择后显示，不阻塞 Memory、记忆市场或其他有效 ChangeSet；记忆市场列表与导入只跳过明确的 ChangeSet 完整性损坏，文件 I/O、权限、Git reconcile 或写回等非完整性故障仍显式失败，避免绕过已有 active 市场 ChangeSet。单个 Run detail 损坏只在该 Run 详情区报错，Running 列表与其他 Run 仍保持可用。
+
 Human 在 Agent 对话中提供 ChangeSet id 后，Agent 在当前 worktree 执行 `memsphere memory change claim <change-id>`。已有 claim 时默认停止；只有 human 明确要求接手才使用 `--force`。claim 把 pending Comment 置为 processing，并将中央候选准备到当前 worktree/Workspace；已有本地 Memory 修改只警告，最终由目标级 CAS 阻止静默覆盖。合理 Comment 修改后必须执行 `memsphere memory change validate <change-id>`，再用 `memsphere memory change finish <change-id> --comment <id> --reason fixed` 完成；不合理 Comment 保持内容不变并用 `--reason rejected`，判断说明只在对话中反馈。finish 释放 claim。没有实际差异且所有 Comment 已完成时使用 `memsphere memory change complete <change-id>`。Embedded View ChangeSet 显式绑定新 HEAD 时，仅在 scoped target digest 未变化时允许安全前移，否则报 edit conflict。
 
 Managed 最终使用 `memsphere memory publish --change <change-id>` 发布并完成 ChangeSet。普通 Embedded ChangeSet 仍使用普通 Git commit、push 与合入流程；只有 `market_import` ChangeSet 可在 validate 后复用同一 publish 命令，把隔离候选应用到当前 worktree。该操作不 commit、push，也不完成 ChangeSet；候选内容进入 `master` 后 ChangeSet 才完成。ChangeSet candidate 与当前验证内容都不是完整 Memory Root，不得传给 `memsphere validate --memory-root`。
