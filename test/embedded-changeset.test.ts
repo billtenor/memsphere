@@ -266,14 +266,21 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
         id: corruptId
       }, null, 2)}\n`);
       try {
-        for (const path of ["/api/changes", `/api/changes/${corruptId}`]) {
-          const response = await fetch(origin + path);
-          const payload = await response.json() as { code: string; error: string };
-          assert.equal(response.status, 500);
-          assert.equal(payload.code, "changeset_integrity_error");
-          assert.match(payload.error, new RegExp(corruptId));
-          assert.match(payload.error, /store_type/);
-        }
+        const listResponse = await fetch(origin + "/api/changes");
+        const listPayload = await listResponse.json() as {
+          changes: Array<{ id: string; status: string; error?: string }>;
+        };
+        assert.equal(listResponse.status, 200);
+        const unavailable = listPayload.changes.find((change) => change.id === corruptId);
+        assert.equal(unavailable?.status, "unavailable");
+        assert.match(unavailable?.error ?? "", /store_type/);
+
+        const detailResponse = await fetch(origin + `/api/changes/${corruptId}`);
+        const detailPayload = await detailResponse.json() as { code: string; error: string };
+        assert.equal(detailResponse.status, 500);
+        assert.equal(detailPayload.code, "changeset_integrity_error");
+        assert.match(detailPayload.error, new RegExp(corruptId));
+        assert.match(detailPayload.error, /store_type/);
 
         const corruptBrowser = await chromium.launch({ headless: true });
         try {

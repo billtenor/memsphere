@@ -59,7 +59,7 @@ import {
   deleteMemoryChangeComment,
   MemoryChangeIntegrityError,
   MemoryChangePreviewCache,
-  listMemoryChanges,
+  listMemoryChangesBestEffort,
   readMemoryChange,
   updateMemoryChangeComment,
   withMemoryChangeDetailSnapshot,
@@ -580,13 +580,13 @@ async function handleRequest(
 
   if (request.method === "GET" && url.pathname === "/api/market/memories") {
     try {
-      const [memories, changes] = await Promise.all([
+      const [memories, changeResult] = await Promise.all([
         listMemoryMarket(config.memoryRoot),
         config.project?.name
-          ? listMemoryChanges({ home: config.homeRoot, project: config.project.name })
-          : Promise.resolve([])
+          ? listMemoryChangesBestEffort({ home: config.homeRoot, project: config.project.name })
+          : Promise.resolve({ changes: [], failures: [] })
       ]);
-      const importing = activeMarketImports(changes);
+      const importing = activeMarketImports(changeResult.changes);
       sendJson(response, 200, {
         memories: memories.map((memory) => {
           const changeId = importing.get(memory.reference);
@@ -611,10 +611,10 @@ async function handleRequest(
       if (!memoryKinds.includes(kind)) throw new Error(`invalid Memory kind: ${kind}`);
       const reference = `${kind}/${name}`;
       const body = await readJsonBody<{ operator?: unknown }>(request);
-      const active = activeMarketImports(await listMemoryChanges({
+      const active = activeMarketImports((await listMemoryChangesBestEffort({
         home: config.homeRoot,
         project: config.project.name
-      })).get(reference);
+      })).changes).get(reference);
       if (active) {
         const change = await readMemoryChange({ home: config.homeRoot, project: config.project.name, changeId: active });
         sendJson(response, 200, { change: await memoryChangeSummary(change) });
@@ -643,9 +643,21 @@ async function handleRequest(
       sendJson(response, 200, { changes: [] });
       return;
     }
-    const changes = await listMemoryChanges({ home: config.homeRoot, project: config.project.name });
+    const { changes, failures } = await listMemoryChangesBestEffort({
+      home: config.homeRoot,
+      project: config.project.name
+    });
     sendJson(response, 200, {
-      changes: await Promise.all(changes.map(memoryChangeSummary))
+      changes: [
+        ...await Promise.all(changes.map(memoryChangeSummary)),
+        ...failures.map((failure) => ({
+          id: failure.id,
+          status: "unavailable",
+          active: false,
+          memoryPaths: [],
+          error: failure.error
+        }))
+      ]
     });
     return;
   }
