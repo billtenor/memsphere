@@ -54,7 +54,7 @@ const memoryIdentityReferenceSchema = z.string().min(1).superRefine((reference, 
     || name.trim() !== name
     || name.includes("/")
     || name.includes("\\")
-    || name.includes("\0")
+    || /[\u0000-\u001f\u007f]/.test(name)
   ) {
     context.addIssue({
       code: z.ZodIssueCode.custom,

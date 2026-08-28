@@ -295,6 +295,30 @@ test("manifest rejects unsafe, duplicate, overlapping, and unknown values", () =
         install: [],
         remove: [{ path: "concepts/x.yaml", references: ["concepts/x", "concepts/x"] }]
       }
+    },
+    {
+      version: 3,
+      memory_syntax: currentMemorySyntax,
+      system_memory: {
+        install: [],
+        remove: [{ path: "concepts/x.yaml", references: ["concepts/legacy\tname"] }]
+      }
+    },
+    {
+      version: 3,
+      memory_syntax: currentMemorySyntax,
+      system_memory: {
+        install: [],
+        remove: [{ path: "concepts/x.yaml", references: ["concepts/legacy\nname"] }]
+      }
+    },
+    {
+      version: 3,
+      memory_syntax: currentMemorySyntax,
+      system_memory: {
+        install: [],
+        remove: [{ path: "concepts/x.yaml", references: ["concepts/legacy\u007fname"] }]
+      }
     }
   ]) {
     assert.equal(reservedMemoryManifestSchema.safeParse(manifest).success, false);

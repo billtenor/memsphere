@@ -638,6 +638,79 @@ export async function createMarketMemoryChange(input: {
   });
 }
 
+/** Internal-only edit entrypoint for a caller that already resolved canonical identity and storage path. */
+export async function editMemoriesByIdentity(input: {
+  targets: Array<{
+    reference: string;
+    path: string;
+    operation: "create" | "update";
+    baseDigest?: string;
+  }>;
+  changeId?: string;
+  onChangeCreated?: (created: { change: MemoryChangeSet; candidateRoot: string }) => void;
+}): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
+  if (input.targets.length === 0) throw new Error("provide at least one Memory identity target");
+  const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  assertManaged(context.primary);
+  const workspace = await resolveWorkspaceIdentity();
+  const revision = context.primary.config.store.published_revision;
+  const targets: Array<z.infer<typeof changeTargetSchema>> = [];
+  const seen = new Set<string>();
+  for (const target of input.targets) {
+    assertSafeCreatePath(target.reference, target.path);
+    if (seen.has(target.path)) throw new Error(`duplicate Memory identity path: ${target.path}`);
+    seen.add(target.path);
+    const source = join(context.primary.memoryRoot, target.path);
+    if (target.operation === "create") {
+      if (await exists(source)) throw new Error(`explicit create path already exists: ${target.path}`);
+      targets.push({
+        operation: "create",
+        reference: target.reference,
+        path: target.path,
+        added_revision: revision
+      });
+      continue;
+    }
+    if (!target.baseDigest) throw new Error(`update identity requires a base digest: ${target.reference}`);
+    if (!await exists(source)) throw new Error(`Memory identity path is missing: ${target.path}`);
+    const currentDigest = await gitBlobDigest(context.primary.memoryRoot, target.path);
+    if (currentDigest !== target.baseDigest) {
+      throw new Error(`Memory identity changed before update: ${target.reference}`);
+    }
+    targets.push({
+      operation: "update",
+      reference: target.reference,
+      path: target.path,
+      base_digest: target.baseDigest,
+      added_revision: revision
+    });
+  }
+  const change = input.changeId
+    ? await readChange(context.primary, input.changeId)
+    : await createChange(context.primary, workspace.key);
+  assertDraftOwner(change, context.primary.name, workspace.key);
+  const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
+  input.onChangeCreated?.({ change, candidateRoot });
+  await mkdir(candidateRoot, { recursive: true });
+  for (const target of targets) {
+    const existingTarget = change.targets.find((current) => current.path === target.path);
+    if (existingTarget) {
+      if (existingTarget.reference !== target.reference) {
+        throw new Error(`Memory path is already targeted by ChangeSet: ${target.path}`);
+      }
+      continue;
+    }
+    change.targets.push(target);
+    const candidate = join(candidateRoot, target.path);
+    await mkdir(dirname(candidate), { recursive: true });
+    if (target.operation === "update") await cp(join(context.primary.memoryRoot, target.path), candidate);
+    else await writeFile(candidate, newMemoryTemplate(target.reference), "utf8");
+  }
+  change.updated_at = new Date().toISOString();
+  await writeChange(context.primary, change);
+  return { change, candidateRoot };
+}
+
 /** Internal-only deletion entrypoint for a caller that already verified historical path and canonical identity. */
 export async function deleteMemoriesByIdentity(input: {
   targets: Array<{ reference: string; path: string; baseDigest: string }>;
