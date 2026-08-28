@@ -324,13 +324,13 @@ flow:
         return url.pathname === "/api/runs" && url.searchParams.get("representation") === "summary";
       });
       assert.equal((await summaryRefresh).status(), 200);
-      await page.waitForFunction(() => document.querySelector("#count")?.textContent === "0 runs");
+      await page.waitForFunction(() => document.querySelector("#count")?.textContent === "0 个运行");
       assert.equal(new URL(page.url()).pathname, `/tasks/${started.id}/artifact-reviews/${review.id}`);
       assert.equal(await archivedModal.isVisible(), true);
       await archivedModal.getByText("Private candidate", { exact: true }).waitFor();
       assert.equal(directContextRequests.every(path => path.includes(`/api/runs/${started.id}/`)), true);
       assert.equal(await page.locator(".task-card").count(), 0);
-      assert.equal(await page.locator("#count").textContent(), "0 runs");
+      assert.equal(await page.locator("#count").textContent(), "0 个运行");
     } finally {
       await browser.close();
     }

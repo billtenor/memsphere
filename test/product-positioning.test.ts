@@ -62,36 +62,36 @@ test("chapter one is a bounded first-use journey based on a real scenario", asyn
   const tutorial = await readReserved("procedures/memsphere-tutorial-chapter-01.yaml");
 
   for (const signal of [
-    "Human 真实场景",
-    "Prompt、Skill、Memsphere",
-    "Memory、个性化 CLI、数据和界面",
-    "Token 算力与确定性算力",
-    "当前能力与 Memory 协作模型",
-    "当前教学 Run 的 View 观察指引",
+    "人工参与者真实场景",
+    "提示词、技能、Memsphere",
+    "记忆、个性化命令行工具、数据和界面",
+    "词元算力与确定性算力",
+    "当前能力与记忆协作模型",
+    "当前教学流程运行的可视化界面观察指引",
     "个性化软件起点建议"
   ]) {
     assert.match(tutorial, new RegExp(signal));
   }
 
   const teachingHumanArtifacts = [
-    "Human 真实场景",
+    "人工参与者真实场景",
     "软件生长模型学习确认",
     "当前能力学习确认",
-    "View 实践结果"
+    "可视化界面实践结果"
   ];
   assert.equal(teachingHumanArtifacts.filter((name) => tutorial.includes(`name: ${name}`)).length, 4);
   assert.equal(tutorial.match(/^  - !while$/gm)?.length, 4);
   assert.match(tutorial, /project repair.*不是准入必经步骤/);
-  assert.match(tutorial, /不得在本章执行 Memory edit\/publish/);
-  assert.match(tutorial, /View 顶部进入“Run”/);
-  assert.match(tutorial, /每一步上报的产物就是 Artifact/);
-  assert.doesNotMatch(tutorial, /View 实际展示的“任务”/);
+  assert.match(tutorial, /不得在本章执行记忆编辑或发布/);
+  assert.match(tutorial, /可视化界面顶部进入“流程运行”/);
+  assert.match(tutorial, /每一步上报的产物就是运行产物/);
+  assert.doesNotMatch(tutorial, /可视化界面实际展示的“任务”/);
   assert.match(tutorial, /教学流程-第二章.*作为可选后续入口/);
   assert.match(tutorial, /不得把启动第二章设为第一章完成条件/);
   assert.doesNotMatch(tutorial, /请你启动 memsphere 教学流程-第三章/);
 });
 
-test("chapter three teaches Run execution and configurable Artifact Review roles", async () => {
+test("chapter three teaches flow execution and configurable artifact review roles in Chinese", async () => {
   const [tutorial, experience, run, actor, review, view, procedure] = await Promise.all([
     readReserved("procedures/memsphere-tutorial-chapter-03.yaml"),
     readReserved("procedures/memsphere-tutorial-chapter-03-review-experience.yaml"),
@@ -115,47 +115,47 @@ test("chapter three teaches Run execution and configurable Artifact Review roles
   assert.match(procedure, /memsphere-run/);
   assert.match(procedure, /memsphere-actor.*memsphere-artifact-review/);
 
-  assert.match(tutorial, /Run 步骤执行者只区分 Human 和 Runner/);
+  assert.match(tutorial, /流程运行步骤执行者只区分人工参与者和流程执行者/);
   assert.match(tutorial, /实际检查第三章教学环境/);
-  assert.match(tutorial, /当前 Project 至少有一名 Human Actor/);
-  assert.match(tutorial, /没有任何可用 ACP Provider.*不得继续阻塞/);
-  assert.match(tutorial, /Runner 内部如何分工由通用 Agent 框架管理/);
+  assert.match(tutorial, /当前项目至少有一名人工参与者/);
+  assert.match(tutorial, /没有任何可用 ACP 服务提供方.*不得继续阻塞/);
+  assert.match(tutorial, /流程执行者内部如何分工由通用智能体框架管理/);
   assert.doesNotMatch(tutorial, /调用本章的 Agent 在执行 run start 预检时/);
-  assert.match(tutorial, /请启动 memsphere 教学流程-第三章 Review 体验流程/);
-  assert.match(tutorial, /Review 体验 Run 是否还没有结束/);
-  assert.match(experience, /review:\n\s+- Human 体验者\n\s+- Agent 观察者/);
-  assert.match(tutorial, /不得要求 Human 复述或回答概念/);
-  assert.doesNotMatch(tutorial, /Human 的多角色 Review 观察结果/);
+  assert.match(tutorial, /请启动 memsphere 教学流程-第三章评审体验流程/);
+  assert.match(tutorial, /评审体验流程运行是否还没有结束/);
+  assert.match(experience, /review:\n\s+- 人工体验者\n\s+- 智能体观察者/);
+  assert.match(tutorial, /不得要求人工参与者复述或回答概念/);
+  assert.doesNotMatch(tutorial, /人工参与者的多角色评审观察结果/);
   assert.doesNotMatch(tutorial, /role_bindings|permission_grants/);
 });
 
-test("chapter two prepares and runs one personalized Procedure through four gates", async () => {
+test("chapter two prepares and runs one personalized procedure through four Chinese gates", async () => {
   const tutorial = await readReserved("procedures/memsphere-tutorial-chapter-02.yaml");
 
   for (const signal of [
-    "Human 提供的个性化流程",
-    "Memory 市场",
-    "已校验的个性化 Procedure",
+    "人工参与者提供的个性化流程",
+    "记忆市场",
+    "已校验的个性化流程记忆",
     "memsphere memory change validate",
-    "ChangeSet 查看说明",
-    "已提交 Comment",
+    "记忆变更集查看说明",
+    "已提交修改意见",
     "请启动 <个性化流程名称> 流程",
     "个性化流程运行状态",
-    "Human 的 Run 检查结果",
-    "提交 Review 意见"
+    "人工参与者的流程运行检查结果",
+    "提交评审意见"
   ]) {
     assert.match(tutorial, new RegExp(signal));
   }
 
   assert.equal(tutorial.match(/^  - !while$/gm)?.length, 4);
-  assert.equal(tutorial.match(/name: Human 的流程启动请求/g)?.length, 1);
+  assert.equal(tutorial.match(/name: 人工参与者的流程启动请求/g)?.length, 1);
   assert.doesNotMatch(tutorial, /!if/);
   assert.doesNotMatch(tutorial, /^\s{4,}- !while$/m);
-  assert.match(tutorial, /不得 publish、commit、push、merge 或废弃 ChangeSet/);
-  assert.match(tutorial, /不得修改 System Memory、Mounted Memory/);
+  assert.match(tutorial, /不得发布、提交、推送、合并或废弃记忆变更集/);
+  assert.match(tutorial, /不得修改系统记忆、挂载记忆/);
   assert.match(tutorial, /环境是否还没有准备就绪/);
-  assert.match(tutorial, /Human 是否还没有提供一个想使用的个性化流程/);
-  assert.match(tutorial, /Human 提供的个性化流程是否还没有准备就绪/);
+  assert.match(tutorial, /人工参与者是否还没有提供一个想使用的个性化流程/);
+  assert.match(tutorial, /人工参与者提供的个性化流程是否还没有准备就绪/);
   assert.match(tutorial, /个性化流程是否还没有运行结束/);
   assert.doesNotMatch(tutorial, /请你启动 memsphere 教学流程-第三章/);
   assert.doesNotMatch(tutorial, /^\s+review:/m);

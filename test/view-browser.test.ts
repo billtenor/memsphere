@@ -41,34 +41,34 @@ test("View page routes are explicit and never absorb API or unknown paths", () =
 });
 
 test("Memory Market is an opt-in Memory sub-view backed by ChangeSets", () => {
-  assert.match(browserHtml, /id="project-memory-tab"[^>]*>当前项目<\/button>/);
-  assert.match(browserHtml, /id="market-tab"[^>]*>记忆市场<\/button>/);
+  assert.match(browserHtml, /id="project-memory-tab"[^>]*data-i18n="navigation\.currentProject"/);
+  assert.match(browserHtml, /id="market-tab"[^>]*data-i18n="navigation\.memoryMarket"/);
   assert.match(browserHtml, /\.memory-source-tabs, \.task-status-tabs \{[^}]*margin: 6px 0 0;[^}]*background: var\(--soft\);/);
   assert.match(browserHtml, /\.memory-source-tab\.active, \.task-status-tab\.active \{ background: var\(--surface\);[^}]*box-shadow: var\(--shadow\);/);
   assert.match(browserHtml, /fetch\("\/api\/market\/memories"\)/);
-  assert.match(browserHtml, /not_imported: "未导入"/);
-  assert.match(browserHtml, /importing: "导入中"/);
-  assert.match(browserHtml, /consistent: "已导入 · 无变更"/);
-  assert.match(browserHtml, /different: "已导入 · 有差异"/);
-  assert.match(browserHtml, /name_conflict: "名称冲突"/);
+  assert.match(browserHtml, /not_imported: uiT\("market\.notImported"\)/);
+  assert.match(browserHtml, /importing: uiT\("market\.importing"\)/);
+  assert.match(browserHtml, /consistent: uiT\("market\.consistent"\)/);
+  assert.match(browserHtml, /different: uiT\("market\.different"\)/);
+  assert.match(browserHtml, /name_conflict: uiT\("market\.nameConflict"\)/);
   assert.match(browserHtml, /button\.className = "memory-button market-memory-button"/);
   assert.match(browserHtml, /status\.className = "market-memory-status"/);
   assert.match(browserHtml, /status\.dataset\.status = item\.status/);
-  assert.match(browserHtml, /statusLink\.textContent = "导入中 · 查看 ChangeSet"/);
+  assert.match(browserHtml, /statusLink\.textContent = uiT\("market\.importingViewChangeSet"\)/);
   assert.match(browserHtml, /\.market-memory-status \{ border: 1px solid var\(--line\);/);
-  assert.match(browserHtml, /item\.status === "different" \? "重新导入" : "导入"/);
+  assert.match(browserHtml, /uiT\(item\.status === "different" \? "market\.reimport" : "market\.import"\)/);
   assert.match(browserHtml, /await openChange\(result\.change\.id\)/);
   assert.doesNotMatch(browserHtml, /marketVersion|preset_id|presetId/);
 });
 
 test("Run uses a secondary status menu instead of grouped status headings", () => {
   assert.match(browserHtml, /id="task-status-tabs"[^>]*role="tablist"/);
-  assert.match(browserHtml, /id="running-task-tab"[^>]*>running<\/button>/);
-  assert.match(browserHtml, /id="done-task-tab"[^>]*>done<\/button>/);
-  assert.match(browserHtml, /id="abandoned-task-tab"[^>]*>abandoned<\/button>/);
+  assert.match(browserHtml, /id="running-task-tab"[^>]*data-i18n="run\.status\.running"/);
+  assert.match(browserHtml, /id="done-task-tab"[^>]*data-i18n="run\.status\.done"/);
+  assert.match(browserHtml, /id="abandoned-task-tab"[^>]*data-i18n="run\.status\.abandoned"/);
   assert.match(browserHtml, /taskStatus: "running"/);
   assert.match(browserHtml, /const visibleRuns = visibleTaskRuns\(\)/);
-  assert.match(browserHtml, /el\.count\.textContent = visibleRuns\.length \+ " runs"/);
+  assert.match(browserHtml, /el\.count\.textContent = uiT\("run\.count", \{ count: visibleRuns\.length \}\)/);
   assert.match(browserHtml, /function visibleTaskRuns\(\)/);
   assert.match(browserHtml, /if \(!explicitRunRoute && !selectedTask\(\)\)/);
   assert.match(browserHtml, /state\.selectedTaskId = visibleTaskRuns\(\)\[0\]\?\.id \|\| null/);
@@ -151,7 +151,13 @@ test("manual view switches retry after an in-flight Project switch and finalize 
 
 test("ChangeSet preview renders persisted validation diagnostics", () => {
   assert.match(browserHtml, /function renderPreviewIssues\(\)/);
-  assert.match(browserHtml, /heading\.textContent = "Validation diagnostics"/);
+  assert.match(browserHtml, /heading\.textContent = uiT\("change\.validationDiagnostics"\)/);
+  assert.match(browserHtml, /pill\(uiT\("change\.previewTitle"\)/);
+  assert.match(browserHtml, /uiT\("change\.store", \{ value: source\.storeType \}\)/);
+  assert.match(browserHtml, /uiT\(source\.valid === false \? "change\.validationFailed" : "change\.validationPassed"\)/);
+  assert.match(browserHtml, /uiT\("change\.updated", \{ time: formatTime\(source\.updatedAt\) \}\)/);
+  assert.match(browserHtml, /uiT\("artifact\.fileReadFailed", \{ error: artifact\.contentError \}\)/);
+  assert.match(browserHtml, /uiT\("artifact\.file", \{ path: artifact\.path \}\)/);
   assert.match(browserHtml, /const location = issue\.path/);
   assert.match(browserHtml, /item\.textContent = location \+ ": " \+ issue\.message/);
 });
@@ -160,40 +166,40 @@ test("Settings separates the global and Project configuration workspaces", () =>
   assert.match(browserHtml, /id="settings-tab"/);
   assert.match(browserHtml, /class="brand-settings"/);
   assert.match(browserHtml, /<div class="brand">[\s\S]*<h1>memsphere<\/h1>[\s\S]*id="settings-tab"[\s\S]*&#9881;/);
-  assert.match(browserHtml, /class="project-switcher"[\s\S]*id="project-select-label">Project<\/span>[\s\S]*class="project-select"[\s\S]*role="listbox"/);
+  assert.match(browserHtml, /class="project-switcher"[\s\S]*id="project-select-label"[^>]*data-i18n="navigation\.project"[\s\S]*class="project-select"[\s\S]*role="listbox"/);
   assert.doesNotMatch(browserHtml, /id="project-select" class="search"/);
   assert.match(browserHtml, /body\.settings-mode \.view-tabs/);
   assert.match(browserHtml, /state\.viewMode === "settings" \? state\.lastContentViewMode : "settings"/);
   assert.doesNotMatch(browserHtml, /class="view-tab" id="settings-tab"/);
-  assert.match(browserHtml, /\["global", "Memsphere", \[\["overview", "概览"\]/);
-  assert.match(browserHtml, /\["project", "Project · " \+ state\.currentProject, \[\["overview", "概览"\]/);
+  assert.match(browserHtml, /\["global", "Memsphere", \[\["overview", uiT\("settings\.overview"\)\]/);
+  assert.match(browserHtml, /\["project", uiT\("navigation\.project"\) \+ " · " \+ state\.currentProject/);
   assert.match(browserHtml, /className = "settings-nav-group"/);
   assert.doesNotMatch(browserHtml, /className = "settings-scope"/);
-  assert.match(browserHtml, /\["overview", "概览"\]/);
-  assert.match(browserHtml, /\["general", "常规"\]/);
+  assert.match(browserHtml, /\["overview", uiT\("settings\.overview"\)\]/);
+  assert.match(browserHtml, /\["general", uiT\("settings\.general"\)\]/);
   assert.doesNotMatch(browserHtml, /\["storage", "存储"\]/);
-  assert.match(browserHtml, /storageTitle\.textContent = "存储位置"/);
-  assert.match(browserHtml, /\["view", "View 服务"\]/);
-  assert.match(browserHtml, /\["providers", "ACP Provider"\]/);
-  assert.match(browserHtml, /\["participants", "参与者配置"\]/);
+  assert.match(browserHtml, /storageTitle\.textContent = uiT\("settings\.storageLocation"\)/);
+  assert.match(browserHtml, /\["view", uiT\("settings\.viewService"\)\]/);
+  assert.match(browserHtml, /\["providers", uiT\("settings\.providers"\)\]/);
+  assert.match(browserHtml, /\["participants", uiT\("settings\.participants"\)\]/);
   assert.match(browserHtml, /执行者/);
   assert.doesNotMatch(browserHtml, /Runner 不能删除/);
-  assert.match(browserHtml, /save\.textContent = "保存"/);
+  assert.match(browserHtml, /save\.textContent = uiT\("common\.save"\)/);
   assert.match(browserHtml, /\["general", "view", "providers", "participants"\]\.includes\(state\.settingsModule\)/);
   assert.match(browserHtml, /heading\.setAttribute\("aria-expanded"/);
   assert.doesNotMatch(browserHtml, /检查并保存/);
-  assert.match(browserHtml, /settingsPermissionCheck\("使用默认值"/);
-  assert.match(browserHtml, /确认配置变更/);
+  assert.match(browserHtml, /settingsPermissionCheck\(uiT\("settings\.useDefault"\)/);
+  assert.match(browserHtml, /uiT\("settings\.confirmChanges"\)/);
   assert.match(browserHtml, /memsphere view restart/);
   assert.doesNotMatch(browserHtml, /当前运行地址/);
   assert.doesNotMatch(browserHtml, /保存并重启后地址/);
-  assert.match(browserHtml, /没有未保存修改/);
-  assert.match(browserHtml, /"ACP Provider"/);
+  assert.match(browserHtml, /uiT\(settingsIsDirty\(\) \? "settings\.unsaved" : "settings\.noUnsaved"\)/);
+  assert.match(browserHtml, /uiT\("settings\.providers"\)/);
   assert.match(browserHtml, /\.settings-select-menu \{ position: absolute; top: calc\(100% \+ 4px\); right: 0; left: 0;/);
   assert.doesNotMatch(browserHtml, /document\.createElement\("select"\)/);
   assert.match(browserHtml, /document\.createElement\("details"\)/);
-  assert.match(browserHtml, /Agent 只选择 ACP Provider 与 Model/);
-  assert.match(browserHtml, /permissionCount \+ " 项权限"/);
+  assert.match(browserHtml, /uiT\("settings\.participantHelp"\)/);
+  assert.match(browserHtml, /uiT\("settings\.permissionCount", \{ count: permissionCount \}\)/);
   assert.doesNotMatch(browserHtml, /直接授予/);
   assert.doesNotMatch(browserHtml, /可授予/);
   assert.match(browserHtml, /configurablePermissionIds/);
@@ -229,8 +235,12 @@ test("browser renders current Schema type, format, layout, and item contracts", 
 });
 
 test("browser shows explicit optional true metadata", () => {
-  assert.match(browserHtml, /badges\.push\("optional: true"\)/);
-  assert.match(browserHtml, /\(optional: true\)/);
+  assert.match(browserHtml, /badges\.push\(t\("optional"\) \+ ": true"\)/);
+  assert.match(browserHtml, /" \(" \+ t\("optional"\) \+ ": true\)"/);
+  assert.match(browserHtml, /meta\.textContent = t\("string"\)/);
+  assert.match(browserHtml, /uiT\("review\.commentCount", \{ count \}\)/);
+  assert.match(browserHtml, /t\("defines"\) \+ ": " \+ value/);
+  assert.match(browserHtml, /pill\(t\("format"\) \+ ": " \+ memory\.entity\.format\)/);
 });
 
 test("browser renders Memory refs as direct navigation links", () => {
@@ -278,13 +288,13 @@ test("Run view exposes only Artifact Review and never falls back to Task Review"
 });
 
 test("Run view uses Run terminology for user-visible states", () => {
-  assert.match(browserHtml, />Run<\/button>/);
-  assert.match(browserHtml, /visibleRuns\.length \+ " runs"/);
-  assert.match(browserHtml, /"No " \+ state\.taskStatus \+ " runs\."/);
-  assert.match(browserHtml, /"Runs"/);
-  assert.match(browserHtml, /"Loading Run\.\.\."/);
-  assert.match(browserHtml, /"Invalid Run URL\."/);
-  assert.match(browserHtml, /"Run not found: "/);
+  assert.match(browserHtml, /id="task-tab"[^>]*data-i18n="navigation\.run"/);
+  assert.match(browserHtml, /uiT\("run\.count", \{ count: visibleRuns\.length \}\)/);
+  assert.match(browserHtml, /uiT\("run\.emptyForStatus"/);
+  assert.match(browserHtml, /uiT\("run\.title"\)/);
+  assert.match(browserHtml, /uiT\("run\.loading"\)/);
+  assert.match(browserHtml, /uiT\("route\.invalidRun"\)/);
+  assert.match(browserHtml, /uiT\("run\.notFound"/);
   assert.doesNotMatch(browserHtml, />Task<\/button>/);
   assert.doesNotMatch(browserHtml, /Task list/);
 });
@@ -295,7 +305,7 @@ test("ChangeSet Comment mutations use button action guards", () => {
   assert.match(browserHtml, /async function runButtonAction\(button, action\) \{[\s\S]*?finally \{\s*button\.disabled = false;/);
   assert.match(browserHtml, /JSON\.stringify\(\{ operator, withdraw: true/);
   assert.match(browserHtml, /comment\.status === "processing"/);
-  assert.match(browserHtml, /withdraw\.textContent = "撤回"/);
+  assert.match(browserHtml, /withdraw\.textContent = uiT\("common\.withdraw"\)/);
 });
 
 test("Artifact Review renders Agent progress and exposes retry only for failed Agents", () => {
@@ -304,11 +314,13 @@ test("Artifact Review renders Agent progress and exposes retry only for failed A
   assert.match(browserHtml, /const currentRoundSelected = selectedRound\?\.id === review\.currentRoundId/);
   assert.match(browserHtml, /currentRoundSelected\s*&& assignment\.actorKind === "agent"\s*&& assignment\.status === "failed"\s*&& review\.status === "pending"/);
   assert.match(browserHtml, /retryArtifactReviewAgent\(context\)/);
+  assert.match(browserHtml, /artifactReviewAssignmentStatusLabel\(retryState\.status, "agent"\) \+ " · " \+ t\("attempt"\)/);
+  assert.doesNotMatch(browserHtml, /\? retryState\.status \+ " · "/);
   assert.match(browserHtml, /attempt\.failure\.code \+ ": " \+ attempt\.failure\.message/);
   assert.match(browserHtml, /state\.artifactReviewRetries/);
-  assert.match(browserHtml, /Repeated advisory groups/);
-  assert.match(browserHtml, /Decision intent: /);
-  assert.match(browserHtml, /"实现证据：" \+ \(referenced \? "已引用" : "未引用"\)/);
+  assert.match(browserHtml, /uiT\("review\.progressSummary"/);
+  assert.match(browserHtml, /uiT\("review\.decisionIntent"/);
+  assert.match(browserHtml, /function artifactReviewImplementationEvidenceLabel/);
 });
 
 test("Artifact Review comment severity belongs to the card header", () => {
@@ -324,8 +336,8 @@ test("ChangeSets are a Memory editing sub-flow with direct Comments", () => {
   assert.match(browserHtml, /wrap\.className = "memory-change-wrap" \+ \(memory\.id === state\.selectedId \? " active" : ""\)/);
   assert.match(browserHtml, /\.memory-change-wrap\.active \{ background: var\(--accent-soft\); color: #173f3c; \}/);
   assert.match(browserHtml, /\.memory-change-wrap\.active \.memory-button \{ background: transparent;/);
-  assert.match(browserHtml, /summary\.textContent = "相关 ChangeSet · " \+ relatedChanges\.length/);
-  assert.match(browserHtml, /edit\.textContent = "修改"/);
+  assert.match(browserHtml, /summary\.textContent = uiT\("memory\.relatedChangeSets", \{ count: relatedChanges\.length \}\)/);
+  assert.match(browserHtml, /edit\.textContent = uiT\("memory\.edit"\)/);
   assert.match(browserHtml, /\/projects\/" \+ encodeRoutePart\(state\.currentProject\) \+ "\/changes"/);
   assert.match(browserHtml, /\/api\/changes\/" \+ encodeURIComponent\(changeId\)/);
   assert.match(browserHtml, /state\.changeDetail\.targetMemories/);
@@ -347,32 +359,30 @@ test("ChangeSets are a Memory editing sub-flow with direct Comments", () => {
   assert.match(browserHtml, /\.change-detail-layout \{ display: grid; grid-template-columns: minmax\(0, 1fr\) minmax\(260px, 320px\);/);
   assert.doesNotMatch(browserHtml, /copy\.textContent = "Copy link"/);
   assert.doesNotMatch(browserHtml, /targets\.className = "change-targets"/);
-  assert.match(browserHtml, /changeCommentOutdated: \{ zh: "原内容已变化", yaml: "Content changed" \}/);
+  assert.match(browserHtml, /changeCommentOutdated: "change\.commentOutdated"/);
   assert.match(browserHtml, /outdated\.title = t\("changeCommentOutdatedHelp"\)/);
   assert.match(browserHtml, /function changeCommentStatusLabel\(comment\)/);
-  assert.match(browserHtml, /未处理（ChangeSet 已结束）/);
-  assert.match(browserHtml, /未处理（ChangeSet 已废弃）/);
-  assert.match(browserHtml, /changeCommentPending: \{ zh: "待处理", yaml: "Pending" \}/);
-  assert.match(browserHtml, /changeCommentProcessing: \{ zh: "处理中", yaml: "Processing" \}/);
-  assert.match(browserHtml, /changeCommentCompleted: \{ zh: "已完成", yaml: "Completed" \}/);
-  assert.match(browserHtml, /return t\("changeCommentPending"\)/);
-  assert.match(browserHtml, /return t\("changeCommentProcessing"\)/);
+  assert.match(browserHtml, /uiT\("change\.comment\.ended"\)/);
+  assert.match(browserHtml, /uiT\("change\.comment\.abandoned"\)/);
+  assert.match(browserHtml, /uiT\("change\.comment\.completed"\)/);
+  assert.match(browserHtml, /uiT\("change\.comment\.processing"\)/);
+  assert.match(browserHtml, /uiT\("change\.comment\.pending"\)/);
   assert.match(browserHtml, /addMemory\.disabled = change\.claimed/);
   assert.match(browserHtml, /async function chooseMemoryToAdd\(change\)/);
   assert.match(browserHtml, /const scopedPaths = new Set\(change\.memoryPaths \|\| \[\]\)/);
-  assert.match(browserHtml, /当前没有可添加的 Memory。/);
-  assert.match(browserHtml, /相关 ChangeSet · /);
+  assert.match(browserHtml, /uiT\("change\.noMemoryToAdd"\)/);
+  assert.match(browserHtml, /uiT\("memory\.relatedChangeSets"/);
   assert.match(browserHtml, /const relatedChanges = state\.changes\.filter\(change => \(change\.memoryPaths \|\| \[\]\)\.includes\(memory\.path\)\)/);
   assert.doesNotMatch(browserHtml, /const relatedChanges = state\.changes\.filter\(change => change\.active/);
-  assert.match(browserHtml, /summary\.textContent = "其他 ChangeSet · " \+ otherChanges\.length/);
+  assert.match(browserHtml, /summary\.textContent = uiT\("memory\.otherChangeSets", \{ count: otherChanges\.length \}\)/);
   assert.match(browserHtml, /link\.textContent = change\.id \+ " · " \+ changeStatusLabel\(change\.status\)/);
   assert.match(browserHtml, /change\.id \+ " · " \+ changeStatusLabel\(change\.status\) \+ " · " \+ formatTime\(change\.updatedAt\)/);
-  assert.match(browserHtml, /changeActive: \{ zh: "进行中", yaml: "Active" \}/);
+  assert.match(browserHtml, /uiT\("change\.status\.active"\)/);
   assert.doesNotMatch(browserHtml, /changePublished:/);
-  assert.match(browserHtml, /changeCompleted: \{ zh: "已完成", yaml: "Completed" \}/);
-  assert.match(browserHtml, /changeAbandoned: \{ zh: "已废弃", yaml: "Abandoned" \}/);
-  assert.match(browserHtml, /if \(canComment\(\)\) \{[\s\S]*el\.detail\.append\(agentHint\);[\s\S]*选择下方任意内容旁的 \+/);
-  assert.match(browserHtml, /archiveChangeConfirm: \{ zh: "归档这个 ChangeSet？归档后它将不再在页面中展示。"/);
+  assert.match(browserHtml, /uiT\("change\.status\.completed"\)/);
+  assert.match(browserHtml, /uiT\("change\.status\.abandoned"\)/);
+  assert.match(browserHtml, /if \(canComment\(\)\) \{[\s\S]*hint\.textContent = uiT\("change\.commentHint"\)/);
+  assert.match(browserHtml, /confirm\(uiT\("change\.archiveConfirm"\)\)/);
   assert.match(browserHtml, /fetch\("\/api\/archive\/changes\/" \+ encodeURIComponent\(change\.id\)/);
   assert.match(browserHtml, /await returnFromChange\(\)/);
   assert.doesNotMatch(browserHtml, /main\.append\(agentHint\)/);
@@ -400,19 +410,15 @@ test("Artifact Review exposes read-only Agent Activity inside participant rows",
   assert.match(browserHtml, /artifact-review-attempt-select/);
   assert.match(browserHtml, /artifact-review-agent-summary-row/);
   assert.match(browserHtml, /artifact-review-activity-toggle/);
-  assert.match(browserHtml, /displayLanguage === "zh" \? "查看详情" : "View details"/);
-  assert.match(browserHtml, /trigger\.setAttribute\("aria-label", displayLanguage === "zh" \? "选择 Attempt" : "Select attempt"\)/);
+  assert.match(browserHtml, /toggle\.textContent = uiT\(activity\?\.expanded \? "review\.hideDetails" : "review\.viewDetails"\)/);
+  assert.match(browserHtml, /trigger\.setAttribute\("aria-label", uiT\("review\.selectAttempt"\)\)/);
   assert.match(browserHtml, /existing\.querySelector\("\.artifact-review-select-menu:not\(\[hidden\]\)"\)/);
-  assert.match(browserHtml, /message: "消息"/);
-  assert.match(browserHtml, /tool: "工具调用"/);
-  assert.match(browserHtml, /plan: "执行计划"/);
-  assert.match(browserHtml, /thought: "分析"/);
-  assert.match(browserHtml, /lifecycle: "运行状态"/);
+  assert.match(browserHtml, /return uiMessages\["review\.kind\." \+ kind\] \|\| kind/);
   assert.match(browserHtml, /head\.append\(kind, time\)/);
   assert.match(browserHtml, /row\.append\(head, title\)/);
   assert.match(browserHtml, /\.artifact-review-activity-event-head time \{ flex: 0 0 auto; white-space: nowrap;/);
   assert.match(browserHtml, /event\.status && event\.status !== "completed"/);
-  assert.match(browserHtml, /in_progress: "进行中"/);
+  assert.match(browserHtml, /return uiMessages\["review\.status\." \+ status\] \|\| status/);
   assert.doesNotMatch(browserHtml, /artifact-review-activity-head select/);
 });
 
@@ -453,7 +459,7 @@ test("Artifact Review uses a resizable evidence modal with stable Submission tar
   assert.match(browserHtml, /context: String\(snapshot \?\? ""\)\.trim\(\)\.slice\(0, 500\)/);
   assert.match(browserHtml, /context\.rounds\.find\(round => round\.submissionId === comment\.anchor\.submissionId\)/);
   assert.match(browserHtml, /artifact-review-target-located/);
-  assert.match(browserHtml, /Unable to locate:/);
+  assert.match(browserHtml, /uiT\("review\.unableToLocate"/);
   assert.match(browserHtml, /artifactReviewSummariesForRun\(run\)\.find\(review => review\.stepId === step\.id\)/);
   assert.match(browserHtml, /controls\.append\(renderArtifactReviewRoundTimeline\(context\)\)/);
   assert.match(browserHtml, /controls\.append\(renderArtifactReviewHistorySelector\(context\)\)/);
@@ -490,7 +496,7 @@ test("Artifact Review uses a resizable evidence modal with stable Submission tar
 });
 
 test("memory and task artifacts show participating Review Slot names", () => {
-  assert.match(browserHtml, /reviewers: \{ zh: "评审", yaml: "Review" \}/);
+  assert.match(browserHtml, /reviewers: "review\.reviewers"/);
   assert.match(browserHtml, /state\.actorNames = state\.payload\.actorNames \|\| \{\}/);
   assert.match(browserHtml, /appendArtifactReviewRoles\(row, step\)/);
   assert.match(browserHtml, /artifactLine\.className = "artifact-meta-line"/);
@@ -508,12 +514,12 @@ test("task view supports audited runtime Review Slot rebinding", () => {
   assert.match(browserHtml, /toggle\.setAttribute\("aria-expanded", String\(expanded\)\)/);
   assert.match(browserHtml, /body\.hidden = !expanded/);
   assert.match(browserHtml, /expandedRunBindings: new Set\(\)/);
-  assert.match(browserHtml, /换绑只影响尚未创建的 Review/);
+  assert.match(browserHtml, /help\.textContent = uiT\("run\.bindingHelp"\)/);
   assert.match(browserHtml, /function updateRunBinding\(run, slot, skip, actorIds\)/);
   assert.match(browserHtml, /settingsFetch\("\/api\/runs\/" \+ encodeURIComponent\(run\.id\) \+ "\/bindings/);
   assert.match(browserHtml, /run\.bindingChanges/);
   assert.match(browserHtml, /run\.bindingSnapshot\?\.slots/);
-  assert.match(browserHtml, /existing Reviews preserved/);
+  assert.match(browserHtml, /uiT\("run\.existingReviewsPreserved"/);
   assert.match(browserHtml, /className = "run-binding-actors"/);
 });
 
@@ -712,7 +718,7 @@ test("opening a legacy comment falls back to its nested legacy anchor", () => {
 });
 
 test("comment cards label their navigation action as Go to", () => {
-  assert.match(browserHtml, /open\.textContent = "Go to"/);
+  assert.match(browserHtml, /open\.textContent = uiT\("common\.goTo"\)/);
   assert.doesNotMatch(browserHtml, /open\.textContent = "Open"/);
 });
 
@@ -740,13 +746,13 @@ test("browser shows abandon for running runs and archive only for terminal runs"
   assert.match(browserHtml, /\["running", "done", "abandoned"\]/);
   assert.match(browserHtml, /function abandonRunButton\(run\)/);
   assert.match(browserHtml, /\/api\/runs\/" \+ encodeURIComponent\(run\.id\) \+ "\/abandon/);
-  assert.match(browserHtml, /if \(!confirm\(t\("abandonRunConfirm"\)\)\) return false;/);
-  assert.match(browserHtml, /确认废弃这个 Run？废弃后将不能继续执行。/);
+  assert.match(browserHtml, /if \(!confirm\(uiT\("run\.abandonConfirm"\)\)\) return false;/);
+  assert.match(browserHtml, /"run\.abandonConfirm":"确认废弃这个运行？废弃后将不能继续执行。"/);
   assert.doesNotMatch(browserHtml, /Run 将不能继续执行，也不会自动归档/);
   assert.match(browserHtml, /body: JSON\.stringify\(\{\}\)/);
   assert.doesNotMatch(browserHtml, /prompt\(t\("abandonReason"\)/);
   assert.doesNotMatch(browserHtml, /abandonReason:/);
-  assert.match(browserHtml, /Review cancelled; existing content is preserved as read-only evidence/);
+  assert.match(browserHtml, /uiT\("review\.cancelledReadOnly"\)/);
   assert.match(browserHtml, /snapshot\.draft\?\.status === "awaiting_finalization" && !snapshot\.readOnly/);
   assert.match(browserHtml, /schemaDraftReadOnly/);
   assert.match(browserHtml, /\["done", "abandoned"\]\.includes\(run\.status\)/);
@@ -758,7 +764,7 @@ test("Run titles use the Run name and keep the Procedure name in details", () =>
   assert.match(browserHtml, /title\.textContent = runDisplayName\(run\);/);
   assert.match(browserHtml, /el\.title\.textContent = runDisplayName\(run\);/);
   assert.match(browserHtml, /pill\(t\("procedureName"\) \+ ": " \+ run\.procedureName\)/);
-  assert.match(browserHtml, /run start &lt;procedure&gt; --name &lt;run-name&gt;/);
+  assert.match(browserHtml, /uiT\("run\.chooseOrStart"\)/);
 });
 
 test("browser renders recursive Statement sections with per-reference effective expansion", () => {
@@ -817,7 +823,7 @@ test("browser renders Action contracts, inline schemas, and final artifacts as d
 });
 
 test("browser marks v1 runs read-only and shows v2 Artifact validation metadata", () => {
-  assert.match(browserHtml, /legacyReadOnly: \{ zh: "旧版只读", yaml: "v1 read-only" \}/);
+  assert.match(browserHtml, /legacyReadOnly: "run\.legacyReadOnly"/);
   assert.match(browserHtml, /run\.contractVersion === 1 \|\| run\.readOnly/);
   assert.match(browserHtml, /event\.artifact\.type/);
   assert.match(browserHtml, /event\.artifact\.validation\?\.status === "passed"/);

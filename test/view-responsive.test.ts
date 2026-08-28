@@ -108,6 +108,7 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     `syntax: ${currentMemorySyntax}`,
     "names: [ reviewable-schema, Reviewable schema ]",
     "defines: [ A schema fixture for inline review. ]",
+    "optional: true",
     "asserts:",
     "  - A newly added comment must remain current.",
     "fields:",
@@ -115,7 +116,8 @@ async function withResponsiveView(fn: (browser: Browser, url: string) => Promise
     "    names: [ Background ]",
     "    fields:",
     "      - !schema",
-    "        names: [ Requirement source ]"
+    "        names: [ Requirement source ]",
+    "  - Summary"
   ].join("\n"));
   await writeFile(join(memoryRoot, "statements", "shared-rules.yaml"), [
     "!statement",
@@ -287,10 +289,10 @@ async function openTaskPage(browser: Browser, url: string, width: number): Promi
       && response.ok(),
     { timeout: 10_000 }
   );
-  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await page.getByRole("button", { name: "运行", exact: true }).click();
   await runsLoaded;
   await page.locator("#task-tab.active").waitFor();
-  await page.getByRole("tab", { name: "done", exact: true }).click();
+  await page.getByRole("tab", { name: "已完成", exact: true }).click();
   await page.locator(".task-card-main").first().click();
   await page.locator(".markdown-table-scroll").first().waitFor();
   return page;
@@ -457,13 +459,13 @@ test("Run titles fall back to the Procedure name for historical Runs", async () 
         (response) => new URL(response.url()).pathname === "/api/runs" && response.ok(),
         { timeout: 10_000 }
       );
-      await page.getByRole("button", { name: "Run", exact: true }).click();
+      await page.getByRole("button", { name: "运行", exact: true }).click();
       await runsLoaded;
       const initialDetailLoaded = page.waitForResponse(
         (response) => /^\/api\/runs\/run-/.test(new URL(response.url()).pathname),
         { timeout: 10_000 }
       );
-      await page.getByRole("tab", { name: "done", exact: true }).click();
+      await page.getByRole("tab", { name: "已完成", exact: true }).click();
       const initialDetailResponse = await initialDetailLoaded;
       assert.equal(initialDetailResponse.status(), 200, await initialDetailResponse.text());
       await page.locator(".meta .pill", { hasText: "流程: Responsive browser fixture" }).waitFor();
@@ -497,9 +499,9 @@ test("Run status polling clears a selection that moved to another secondary menu
     });
     try {
       await page.goto(url);
-      await page.getByRole("button", { name: "Run", exact: true }).click();
+      await page.getByRole("button", { name: "运行", exact: true }).click();
       await page.locator(".task-card-main").first().waitFor();
-      assert.equal(await page.getByRole("tab", { name: "running", exact: true }).getAttribute("aria-selected"), "true");
+      assert.equal(await page.getByRole("tab", { name: "运行中", exact: true }).getAttribute("aria-selected"), "true");
 
       const refreshed = page.waitForResponse((response) => (
         new URL(response.url()).pathname === "/api/runs"
@@ -507,11 +509,11 @@ test("Run status polling clears a selection that moved to another secondary menu
       ));
       status = "done";
       await refreshed;
-      await page.locator("#nav").getByText("No running runs.", { exact: true }).waitFor();
+      await page.locator("#nav").getByText("没有运行中的运行。", { exact: true }).waitFor();
       assert.equal(await page.locator(".task-card-main").count(), 0);
-      await page.getByRole("tab", { name: "done", exact: true }).click();
+      await page.getByRole("tab", { name: "已完成", exact: true }).click();
       await page.locator(".task-card-main").first().waitFor();
-      assert.equal(await page.getByRole("tab", { name: "done", exact: true }).getAttribute("aria-selected"), "true");
+      assert.equal(await page.getByRole("tab", { name: "已完成", exact: true }).getAttribute("aria-selected"), "true");
     } finally {
       await page.close();
     }
@@ -545,8 +547,8 @@ test("Run status polling loads an uncached replacement in the same secondary men
         localStorage.setItem("memsphere.selectedTask.v1", selectedId);
       }, runId);
       await page.goto(url);
-      await page.getByRole("button", { name: "Run", exact: true }).click();
-      await page.getByRole("tab", { name: "running", exact: true }).click();
+      await page.getByRole("button", { name: "运行", exact: true }).click();
+      await page.getByRole("tab", { name: "运行中", exact: true }).click();
       await page.getByRole("heading", { name: runName, exact: true }).waitFor();
 
       const replacementLoaded = page.waitForResponse(
@@ -686,7 +688,7 @@ test("Memory nav only shows the Project Catalog and can hide installed system me
     page.setDefaultTimeout(5_000);
     try {
       await page.goto(url);
-      await page.getByRole("button", { name: "Memory", exact: true }).click();
+      await page.getByRole("button", { name: "记忆", exact: true }).click();
       await page.waitForURL(`${url}/memories`);
       await page.getByRole("button", { name: "User note", exact: true }).waitFor();
       const hideSystem = page.getByLabel("隐藏系统记忆");
@@ -711,7 +713,7 @@ test("Memory navigation uses aliases while the detail header exposes the canonic
     const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
     try {
       await page.goto(url);
-      await page.getByRole("button", { name: "Memory", exact: true }).click();
+      await page.getByRole("button", { name: "记忆", exact: true }).click();
       await page.waitForURL(`${url}/memories`);
       await page.getByRole("button", { name: "User note", exact: true }).waitFor();
       await page.getByRole("button", { name: "User note", exact: true }).click();
@@ -719,23 +721,23 @@ test("Memory navigation uses aliases while the detail header exposes the canonic
       assert.equal(await page.locator("#subtitle").textContent(), "concepts/user-note");
       assert.equal(new URL(page.url()).pathname, "/memories/concepts/user-note");
 
-      await page.getByPlaceholder("Search memories").fill("concepts/user-note");
+      await page.getByPlaceholder("搜索记忆").fill("concepts/user-note");
       await page.getByRole("button", { name: "User note", exact: true }).waitFor();
-      await page.getByPlaceholder("Search memories").fill("user-note");
+      await page.getByPlaceholder("搜索记忆").fill("user-note");
       await page.getByRole("button", { name: "User note", exact: true }).waitFor();
-      await page.getByPlaceholder("Search memories").fill("User note");
+      await page.getByPlaceholder("搜索记忆").fill("User note");
       await page.getByRole("button", { name: "User note", exact: true }).waitFor();
 
-      await page.getByPlaceholder("Search memories").fill("canonical-only");
+      await page.getByPlaceholder("搜索记忆").fill("canonical-only");
       await page.getByRole("button", { name: "canonical-only", exact: true }).click();
       assert.equal(await page.locator("#title").textContent(), "canonical-only");
       assert.equal(await page.locator("#subtitle").textContent(), "concepts/canonical-only");
 
-      await page.getByPlaceholder("Search memories").fill("concepts/broken-memory.yaml");
+      await page.getByPlaceholder("搜索记忆").fill("concepts/broken-memory.yaml");
       await page.getByRole("button", { name: "broken-memory", exact: true }).click();
       assert.equal(await page.locator("#title").textContent(), "broken-memory");
       assert.equal(await page.locator("#subtitle").textContent(), "concepts / concepts/broken-memory.yaml");
-      assert.match(await page.locator("#detail").textContent() ?? "", /Invalid memory YAML/);
+      assert.match(await page.locator("#detail").textContent() ?? "", /记忆 YAML 无效/);
     } finally {
       await page.close();
     }
@@ -795,6 +797,22 @@ test("Memory detail keeps rule references raw unless effective expansion is requ
     const aliasResponse = await fetch(`${url}/api/memories/statements/referencing-alias?effective=true`);
     assert.equal(aliasResponse.status, 400);
     assert.match(await aliasResponse.text(), /Statement not found: statements\/shared-rules-alias/);
+  });
+});
+
+test("default Chinese Memory detail renders Schema labels without fixed English UI copy", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
+    try {
+      await page.goto(`${url}/memories/schemas/reviewable-schema`);
+      await page.locator("#title", { hasText: "Reviewable schema" }).waitFor();
+      assert.match(await page.locator(".node-badges").first().textContent() ?? "", /可选: true/);
+      assert.equal(await page.locator(".schema-field-type").first().textContent(), "短文本");
+      assert.equal(await page.getByText("optional: true", { exact: true }).count(), 0);
+      assert.equal(await page.getByText("string", { exact: true }).count(), 0);
+    } finally {
+      await page.close();
+    }
   });
 });
 
@@ -927,9 +945,9 @@ test("Run pages do not expose the retired Task Review entry or inline comments",
       const runsLoaded = page.waitForResponse(
         (response) => new URL(response.url()).pathname === "/api/runs" && response.ok()
       );
-      await page.getByRole("button", { name: "Run", exact: true }).click();
+      await page.getByRole("button", { name: "运行", exact: true }).click();
       await runsLoaded;
-      await page.getByRole("tab", { name: "done", exact: true }).click();
+      await page.getByRole("tab", { name: "已完成", exact: true }).click();
       await page.locator(".task-card-main").first().click();
       assert.equal(await page.getByRole("button", { name: "Review", exact: true }).count(), 0);
       assert.equal(await page.locator('[data-anchor^="task:"] .inline-plus:visible').count(), 0);
@@ -957,13 +975,13 @@ test("View deep links restore Memory, Run, and browser history", async () => {
       const runsLoaded = page.waitForResponse(
         (response) => new URL(response.url()).pathname === "/api/runs" && response.ok()
       );
-      await page.getByRole("button", { name: "Run", exact: true }).click();
+      await page.getByRole("button", { name: "运行", exact: true }).click();
       await runsLoaded;
       assert.equal(new URL(page.url()).pathname, "/tasks");
       const selectedDetailLoaded = page.waitForResponse(
         (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
       );
-      await page.getByRole("tab", { name: "done", exact: true }).click();
+      await page.getByRole("tab", { name: "已完成", exact: true }).click();
       await page.locator(".task-card-main").first().click();
       await selectedDetailLoaded;
       await page.waitForLoadState("networkidle");
@@ -972,7 +990,7 @@ test("View deep links restore Memory, Run, and browser history", async () => {
       await page.waitForURL(url + "/tasks");
       await page.waitForLoadState("networkidle");
       assert.equal(new URL(page.url()).pathname, "/tasks");
-      await page.locator("#nav").getByText("No running runs.", { exact: true }).waitFor();
+      await page.locator("#nav").getByText("没有运行中的运行。", { exact: true }).waitFor();
       assert.equal(await page.locator(".task-card-main").count(), 0);
       const forwardDetailLoaded = page.waitForResponse(
         (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
@@ -1030,8 +1048,8 @@ test("View deep links restore Memory, Run, and browser history", async () => {
 
       const missing = await browser.newPage();
       await missing.goto(`${url}/memories/concepts/${encodeURIComponent("Missing memory")}`);
-      await missing.getByRole("heading", { name: "Not found", exact: true }).waitFor();
-      assert.match(await missing.locator("#detail").textContent() ?? "", /Memory not found/);
+      await missing.getByRole("heading", { name: "未找到", exact: true }).waitFor();
+      assert.match(await missing.locator("#detail").textContent() ?? "", /未找到记忆/);
       await missing.close();
 
       assert.equal((await fetch(`${url}/unknown-page`)).status, 404);

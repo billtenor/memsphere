@@ -4,121 +4,121 @@ names:
   - memsphere-tutorial-chapter-02
   - memsphere 教学流程-第二章
 defines:
-  - 帮助 Human 获得一个个性化 Procedure，在 ChangeSet 中把它准备好，然后启动并完成一次 Run。
-  - 个性化 Procedure 可以由 Human 提供，也可以从 Memory 市场导入。
+  - 帮助人工参与者获得一份个性化流程记忆，在记忆变更集中把它准备好，然后启动并完成一次流程运行。
+  - 个性化流程记忆可以由人工参与者提供，也可以从记忆市场导入。
 asserts:
   - 全章只使用四个顶层循环：准备环境、提供个性化流程、准备个性化流程、运行个性化流程。
-  - 只修改本章个性化流程直接需要的 User Memory，不得修改 System Memory、Mounted Memory 或无关 Memory。
-  - 未经 Human 明确同意，不得 publish、commit、push、merge 或废弃 ChangeSet。
-  - Human 提问时，先读取相关 Memory。Memory 中没有答案时，明确说明不知道。
-  - 本章不讲配置中心、定时执行或完整 Git/PR 流程。
+  - 只修改本章个性化流程直接需要的用户记忆，不得修改系统记忆、挂载记忆或无关记忆。
+  - 未经人工参与者明确同意，不得发布、提交、推送、合并或废弃记忆变更集。
+  - 人工参与者提问时，先读取相关记忆。记忆中没有答案时，明确说明不知道。
+  - 本章不讲配置中心、定时执行或完整 Git 与拉取请求流程。
 goals:
-  - 让 Human 知道如何提供自己的执行流程，或从 Memory 市场导入一个流程。
-  - 让 Human 学会在 ChangeSet 页面查看候选流程并提交 Comment。
-  - 让 Human 学会启动流程，并在 Run 页面查看状态和提交 Review。
+  - 让人工参与者知道如何提供自己的执行流程，或从记忆市场导入一个流程。
+  - 让人工参与者学会在记忆变更集页面查看候选流程并提交修改意见。
+  - 让人工参与者学会启动流程，并在流程运行页面查看状态和提交评审。
 flow:
   - !while
     condition: !action
       action: 检查环境是否还没有准备就绪。
       actor: agent
       asserts:
-        - 检查 memsphere CLI、memsphere Skill、Primary Project、Project 类型、Memory Store、正式 Memory 校验、View 地址，以及冲突中的 Memory 修改或 active ChangeSet。
-        - Mounted Project 只能读取，不能作为修改目标。
+        - 检查 memsphere 命令行工具、memsphere 技能、主项目、项目类型、记忆库、正式记忆校验、可视化界面地址，以及冲突中的记忆修改或活跃记忆变更集。
+        - 挂载项目只能读取，不能作为修改目标。
         - 还有问题时继续准备；全部准备好后结束本循环。
       artifact: !artifact
         name: 环境是否还没准备好
         type: boolean
     do:
       - !action
-        action: 解决 Agent 可以安全解决的环境问题，并告诉 Human 还需要做什么。
+        action: 解决智能体可以安全解决的环境问题，并告诉人工参与者还需要做什么。
         actor: agent
         asserts:
-          - 不得猜测 Human 想使用哪个 Project。
+          - 不得猜测人工参与者想使用哪个项目。
           - 不得覆盖、暂存、提交或清理已有工作区内容。
-          - 需要 Human 操作时，说明具体操作和完成后的确认方法。
+          - 需要人工参与者操作时，说明具体操作和完成后的确认方法。
         artifact: !artifact
           name: 环境准备说明
           format: markdown
       - !action
-        action: 完成 Agent 提出的环境操作；如果不需要操作，确认环境可以继续使用。
+        action: 完成智能体提出的环境操作；如果不需要操作，确认环境可以继续使用。
         actor: human
         artifact: !artifact
-          name: Human 的环境准备结果
+          name: 人工参与者的环境准备结果
           format: markdown
 
   - !while
     condition: !action
-      action: 检查 Human 是否还没有提供一个想使用的个性化流程。
+      action: 检查人工参与者是否还没有提供一个想使用的个性化流程。
       actor: agent
       asserts:
-        - Human 提供了自己的流程说明，或提供了 Memory 市场导入时创建的 ChangeSet id 后，结束本循环。
+        - 人工参与者提供了自己的流程说明，或提供了记忆市场导入时创建的记忆变更集 ID 后，结束本循环。
         - 只有想法但还没有说明流程如何执行时，继续引导。
       artifact: !artifact
         name: 是否还没有个性化流程
         type: boolean
     do:
       - !action
-        action: 引导 Human 描述自己的执行流程，或者引导 Human 从 Memory 市场选择并导入一个 Procedure。
+        action: 引导人工参与者描述自己的执行流程，或者引导人工参与者从记忆市场选择并导入一份流程记忆。
         actor: agent
         asserts:
-          - Human 描述自己的流程时，只询问开始条件、主要步骤、需要 Human 决定的地方和结束结果。
-          - 从 Memory 市场导入 Procedure 后，引导 Human 复制导入时创建的 ChangeSet id 并发给 Agent。
-          - 不要求 Human 编写 YAML 或选择 Memory 类型。
+          - 人工参与者描述自己的流程时，只询问开始条件、主要步骤、需要人工参与者决定的地方和结束结果。
+          - 从记忆市场导入流程记忆后，引导人工参与者复制导入时创建的记忆变更集 ID 并发给智能体。
+          - 不要求人工参与者编写 YAML 或选择记忆类型。
         artifact: !artifact
           name: 提供个性化流程的方法
           format: markdown
       - !action
-        action: 描述一个自己想使用的执行流程；或者从 Memory 市场导入 Procedure，并把导入时创建的 ChangeSet id 发给 Agent。
+        action: 描述一个自己想使用的执行流程；或者从记忆市场导入流程记忆，并把导入时创建的记忆变更集 ID 发给智能体。
         actor: human
         artifact: !artifact
-          name: Human 提供的个性化流程
+          name: 人工参与者提供的个性化流程
           format: markdown
 
   - !while
     condition: !action
-      action: 检查 Human 提供的个性化流程是否还没有准备就绪。
+      action: 检查人工参与者提供的个性化流程是否还没有准备就绪。
       actor: agent
       asserts:
-        - 还没有生成通过校验的候选 Procedure，或 Human 回复已经提交 Comment 时，继续。
-        - 候选 Procedure 已通过校验，且 Human 回复没有 Comment 时，结束本循环。
+        - 还没有生成通过校验的候选流程记忆，或人工参与者回复已经提交修改意见时，继续。
+        - 候选流程记忆已通过校验，且人工参与者回复没有修改意见时，结束本循环。
       artifact: !artifact
         name: 个性化流程是否还没准备好
         type: boolean
     do:
       - !action
-        action: 根据 Human 提供的流程、Memory 市场导入的 ChangeSet 或上一轮 Comment，创建或修改个性化 Procedure，并校验同一个 ChangeSet。
+        action: 根据人工参与者提供的流程、记忆市场导入的记忆变更集或上一轮修改意见，创建或修改个性化流程记忆，并校验同一个记忆变更集。
         actor: agent
         asserts:
-          - Human 描述自己的流程时，第一次修改创建或定位 ChangeSet；后续修改继续使用同一个 ChangeSet。
-          - Human 提供 Memory 市场导入生成的 ChangeSet id 时，claim 并使用这个 ChangeSet，不得另建 ChangeSet。
-          - 有待处理 Comment 时，先 claim 当前 ChangeSet，根据 Comment 修改候选内容，重新 validate，再 finish 已处理的 Comment。
+          - 人工参与者描述自己的流程时，第一次修改创建或定位记忆变更集；后续修改继续使用同一个记忆变更集。
+          - 人工参与者提供记忆市场导入生成的记忆变更集 ID 时，认领并使用这个记忆变更集，不得另建记忆变更集。
+          - 有待处理修改意见时，先认领当前记忆变更集，根据修改意见修改候选内容，重新校验，再完成已处理的修改意见。
           - 使用 `memsphere memory change validate [change-id]`；普通 `memsphere validate` 不能代替。
-          - Agent 负责编辑 YAML，Human 不需要查看或手写 YAML。
+          - 智能体负责编辑 YAML，人工参与者不需要查看或手写 YAML。
         artifact: !artifact
-          name: 已校验的个性化 Procedure
+          name: 已校验的个性化流程记忆
           type: object
           format: yaml
       - !action
-        action: 把 ChangeSet 的链接和 id 发给 Human，请 Human 查看个性化 Procedure；内容有问题时，在对应位置提交 Comment。
+        action: 把记忆变更集的链接和 ID 发给人工参与者，请人工参与者查看个性化流程记忆；内容有问题时，在对应位置提交修改意见。
         actor: agent
         asserts:
-          - 不得要求 Human 查看或编辑 YAML。
-          - 说明 Comment 用来修改长期保存的 Procedure。
+          - 不得要求人工参与者查看或编辑 YAML。
+          - 说明修改意见用于修改长期保存的流程记忆。
         artifact: !artifact
-          name: ChangeSet 查看说明
+          name: 记忆变更集查看说明
           format: markdown
       - !action
-        action: 查看 ChangeSet 页面，然后回复“已提交 Comment”或“没有 Comment”。
+        action: 查看记忆变更集页面，然后回复“已提交修改意见”或“没有修改意见”。
         actor: human
         artifact: !artifact
-          name: Human 的 ChangeSet 检查结果
+          name: 人工参与者的记忆变更集检查结果
           format: markdown
 
   - !action
-    action: 发送“请启动 <个性化流程名称> 流程”，请求 Agent 启动刚刚准备好的个性化流程。
+    action: 发送“请启动 <个性化流程名称> 流程”，请求智能体启动刚刚准备好的个性化流程。
     actor: human
     artifact: !artifact
-      name: Human 的流程启动请求
+      name: 人工参与者的流程启动请求
       format: markdown
 
   - !while
@@ -126,35 +126,35 @@ flow:
       action: 检查个性化流程是否还没有运行结束。
       actor: agent
       asserts:
-        - 还没有创建 Run，Run 正在执行，或 Review 要求修改时，继续。
-        - Run 明确显示 done 或 abandoned 后，结束本循环。
+        - 还没有创建流程运行、流程运行正在执行，或评审要求修改时，继续。
+        - 流程运行明确显示 `done` 或 `abandoned` 后，结束本循环。
       artifact: !artifact
         name: 个性化流程是否还没运行结束
         type: boolean
     do:
       - !action
-        action: 根据 Human 的启动请求创建 Run，或继续处理同一个 Run，并把 Run 链接发给 Human。
+        action: 根据人工参与者的启动请求创建流程运行，或继续处理同一个流程运行，并把流程运行链接发给人工参与者。
         actor: agent
         asserts:
-          - 第一次执行时使用 `memsphere run start <procedure> --change <change-id> --name <name>` 启动一次候选 Run，并保存 run_id。
-          - 后续循环必须继续同一个 run_id，不得重复启动。
-          - 严格执行 Run 当前返回的步骤，不得提前执行后续步骤。
+          - 第一次执行时使用 `memsphere run start <procedure> --change <change-id> --name <name>` 启动一次候选流程运行，并保存运行 ID（run_id）。
+          - 后续循环必须继续同一个运行 ID（run_id），不得重复启动。
+          - 严格执行流程运行当前返回的步骤，不得提前执行后续步骤。
         artifact: !artifact
           name: 个性化流程运行状态
           format: markdown
       - !action
-        action: 打开 Run 页面查看当前状态；如果页面要求 Review，提交 Review 意见，然后把结果告诉 Agent。
+        action: 打开流程运行页面查看当前状态；如果页面要求评审，提交评审意见，然后把结果告诉智能体。
         actor: human
         artifact: !artifact
-          name: Human 的 Run 检查结果
+          name: 人工参与者的流程运行检查结果
           format: markdown
 
   - !action
-    action: 总结 Human 使用的个性化流程、ChangeSet 检查结果、Run 的最终状态，以及 Human 在本章学会的操作。
+    action: 总结人工参与者使用的个性化流程、记忆变更集检查结果、流程运行的最终状态，以及人工参与者在本章学会的操作。
     actor: agent
     asserts:
-      - 用简单语言说明 Procedure、ChangeSet、Comment、Run 和 Review 在本章中分别做了什么。
-      - 提供本章实际使用的 ChangeSet id 和 run_id。
+      - 用简单语言说明流程记忆、记忆变更集、修改意见、流程运行和评审在本章中分别做了什么。
+      - 提供本章实际使用的记忆变更集 ID 和运行 ID（run_id）。
     artifact: !artifact
       name: memsphere 教学第二章完成摘要
       format: markdown

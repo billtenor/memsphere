@@ -4,150 +4,150 @@ names:
   - memsphere-tutorial-chapter-03
   - memsphere 教学流程-第三章
 defines:
-  - 帮助 Human 配置 ACP Provider 与 Actor，理解 Run 执行角色和 Review 角色的区别，然后启动一次带 Artifact Review 的体验 Run。
+  - 帮助人工参与者配置 ACP 服务提供方与参与者，理解流程运行执行角色和评审角色的区别，然后启动一次带运行产物评审的体验流程运行。
 asserts:
-  - Run 步骤执行者只区分 Human 和 Runner。Runner 由通用 Agent 框架托管，可以是主 Agent，也可以由主 Agent 与子 Agent 共同构成；Memsphere 不介入框架内部如何分工。
-  - Review Slot 只表示评审视角，实际参与者由本次 Run 的 Actor Binding 决定；Reviewer 不执行 Run 步骤，也不直接修改 Artifact。
-  - Human 提问时，先读取 memsphere-run、memsphere-actor、memsphere-artifact-review 和 memsphere-view；Memory 中没有答案时明确说明不知道。
-  - 本章不展开 ACP Provider 内部机制、Permission Catalog、运行期换绑、Reviewer 调试与重试或不同 Decision Policy 的详细差异。
+  - 流程运行步骤执行者只区分人工参与者和流程执行者。流程执行者由通用智能体框架托管，可以是主智能体，也可以由主智能体与子智能体共同构成；Memsphere 不介入框架内部如何分工。
+  - 评审槽位只表示评审视角，实际参与者由本次流程运行的参与者绑定决定；评审者不执行流程运行步骤，也不直接修改运行产物。
+  - 人工参与者提问时，先读取 memsphere-run、memsphere-actor、memsphere-artifact-review 和 memsphere-view；记忆中没有答案时明确说明不知道。
+  - 本章不展开 ACP 服务提供方内部机制、权限目录、运行期换绑、评审者调试与重试或不同决策策略的详细差异。
 goals:
-  - 让 Human 知道 ACP Provider 用于连接 Agent 产品，Actor 表示可参与 Review 的具体 Human 或 Agent。
-  - 让 Human 区分 Run 执行者与 Artifact Reviewer。
-  - 让 Human 理解 Review Slot、Actor、Binding、Reviewer 与 Runner 的关系。
-  - 让 Human 主动启动一次带 Artifact Review 的 Run，并在 View 中完成 Review。
+  - 让人工参与者知道 ACP 服务提供方用于连接智能体产品，参与者表示可参与评审的具体人工参与者或智能体。
+  - 让人工参与者区分流程执行者与运行产物评审者。
+  - 让人工参与者理解评审槽位、参与者、参与者绑定、评审者与流程执行者的关系。
+  - 让人工参与者主动启动一次带运行产物评审的流程运行，并在可视化界面中完成评审。
 flow:
   - !while
     condition: !action
       action: 实际检查第三章教学环境，判断是否仍有未满足的准入项。
       actor: agent
       asserts:
-        - 必须实际检查 memsphere CLI 与 Skill、Primary Project Binding、Project 配置与 Memory Store、`memsphere validate` 结果，以及当前环境可访问的 View 地址。
+        - 必须实际检查 memsphere 命令行工具与技能、主项目绑定、项目配置与记忆库、`memsphere validate` 结果，以及当前环境可访问的可视化界面地址。
         - 任一项无法实际确认时必须判定为尚未满足，不得根据历史结果推断。
       artifact: !artifact
         name: 是否仍有未满足的第三章准入项
         type: boolean
     do:
       - !action
-        action: 定位未满足的准入项，完成 Agent 可以安全处理的事项；需要 Human 完成配置、安装、认证或授权时，给出最小操作、影响和验证方法。
+        action: 定位未满足的准入项，完成智能体可以安全处理的事项；需要人工参与者完成配置、安装、认证或授权时，给出最小操作、影响和验证方法。
         actor: agent
         asserts:
-          - View 尚不可访问时，选择当前环境可用的 Host 和端口启动或重启，并实际检查访问结果。
-          - 如果准入问题要求废弃或重新启动当前 Run，必须先说明原因并等待 Human 决定。
+          - 可视化界面尚不可访问时，选择当前环境可用的主机地址和端口启动或重启，并实际检查访问结果。
+          - 如果准入问题要求废弃或重新启动当前流程运行，必须先说明原因并等待人工参与者决定。
         artifact: !artifact
           name: 第三章准入处理结果
           format: markdown
       - !action
-        action: 完成准入处理结果中明确列出的 Human 操作；没有需要 Human 操作的事项时，回复“无需额外操作”。
+        action: 完成准入处理结果中明确列出的人工操作；没有需要人工参与者操作的事项时，回复“无需额外操作”。
         actor: human
         artifact: !artifact
-          name: Human 准入操作结果
+          name: 人工参与者准入操作结果
           format: markdown
 
   - !while
     condition: !action
-      action: 判断 Human 是否尚未理解 ACP Provider 与 Actor，或当前 Project 尚未具备 Human 已确认的参与者配置。
+      action: 判断人工参与者是否尚未理解 ACP 服务提供方与参与者，或当前项目尚未具备人工参与者已确认的参与者配置。
       actor: agent
       asserts:
-        - 必须确认当前 Project 至少有一名 Human Actor。
-        - Human 希望使用 Agent Reviewer 时，必须确认选定的 ACP Provider 可用，且已配置对应 Agent Actor。
-        - 没有任何可用 ACP Provider 时，只要 Human Actor 已准备并且 Human 已理解这一限制，就不得继续阻塞。
-        - 只有 Human 确认参与者配置已准备且没有疑问时，才结束本循环。
+        - 必须确认当前项目至少有一名人工参与者。
+        - 人工参与者希望使用智能体评审者时，必须确认选定的 ACP 服务提供方可用，且已配置对应智能体参与者。
+        - 没有任何可用 ACP 服务提供方时，只要人工参与者已准备并且理解这一限制，就不得继续阻塞。
+        - 只有人工参与者确认参与者配置已准备且没有疑问时，才结束本循环。
       artifact: !artifact
-        name: 是否继续 ACP 与 Actor 配置
+        name: 是否继续 ACP 与参与者配置
         type: boolean
     do:
       - !action
-        action: 读取当前 Memsphere Home 的 ACP Provider 和当前 Project 的 Actor 配置，用实际配置解释两者的作用，并引导 Human 在 View 设置中补齐希望的参与者。
+        action: 读取当前 Memsphere 主目录的 ACP 服务提供方和当前项目的参与者配置，用实际配置解释两者的作用，并引导人工参与者在可视化界面设置中补齐希望的参与者。
         actor: agent
         asserts:
-          - 必须说明 ACP Provider 是 Memsphere 连接并启动 Agent 产品的入口，Actor 是参与 Review 的具体 Human 或 Agent。
-          - 必须提供当前可访问的 View 设置入口，不得使用 Host、端口或 Actor 占位符。
-          - 有可用 ACP Provider 时，询问 Human 是否希望配置 Agent Actor，不得替 Human 默认选择 Provider 或模型。
-          - 没有可用 ACP Provider 时，明确说明本次将使用 Human Reviewer，并引导 Human 至少配置一名 Human Actor。
-          - 只解释和配置当前需要的内容，不展开 ACP 内部实现、完整 Permission Catalog 或高级运行配置。
+          - 必须说明 ACP 服务提供方是 Memsphere 连接并启动智能体产品的入口，参与者是参与评审的具体人工参与者或智能体。
+          - 必须提供当前可访问的可视化界面设置入口，不得使用主机地址、端口或参与者占位符。
+          - 有可用 ACP 服务提供方时，询问人工参与者是否希望配置智能体参与者，不得替人工参与者默认选择服务提供方或模型。
+          - 没有可用 ACP 服务提供方时，明确说明本次将使用人工评审者，并引导人工参与者至少配置一名人工参与者。
+          - 只解释和配置当前需要的内容，不展开 ACP 内部实现、完整权限目录或高级运行配置。
         artifact: !artifact
-          name: ACP 与 Actor 配置指引
+          name: ACP 与参与者配置指引
           format: markdown
       - !action
-        action: 在 View 设置中查看或完成需要的 ACP Provider 与 Actor 配置；然后回复配置已准备且没有疑问，或说明尚未完成的事项与疑问。
+        action: 在可视化界面设置中查看或完成需要的 ACP 服务提供方与参与者配置；然后回复配置已准备且没有疑问，或说明尚未完成的事项与疑问。
         actor: human
         artifact: !artifact
-          name: ACP 与 Actor 配置确认
+          name: ACP 与参与者配置确认
           format: markdown
 
   - !while
     condition: !action
-      action: 根据 Human 最近一次“协作角色学习确认”，判断是否还需要继续解释 Run 执行角色与 Review 角色。
+      action: 根据人工参与者最近一次“协作角色学习确认”，判断是否还需要继续解释流程运行执行角色与评审角色。
       actor: agent
       asserts:
-        - Human 尚未确认、还有疑问或指出解释需要修正时继续。
-        - 只有 Human 明确表示没有疑问时才结束本循环；不得要求 Human 复述或回答概念。
+        - 人工参与者尚未确认、还有疑问或指出解释需要修正时继续。
+        - 只有人工参与者明确表示没有疑问时才结束本循环；不得要求人工参与者复述或回答概念。
       artifact: !artifact
         name: 是否继续解释协作角色
         type: boolean
     do:
       - !action
-        action: 读取本章引用的四个 Concept，根据本次 Run 的真实配置，解释 Human Action 和 Agent Action 分别由谁执行，Review Slot 如何绑定 Actor，以及 Runner 与 Reviewer 为什么分开。
+        action: 读取本章引用的四个概念，根据本次流程运行的真实配置，解释人工操作和智能体操作分别由谁执行、评审槽位如何绑定参与者，以及流程执行者与评审者为什么分开。
         actor: agent
         asserts:
-          - 必须使用当前 Run 的真实名称、run_id、Runner、Review Slot、Actor Binding 和 View 地址，不得使用占位符。
-          - 必须说明 Memsphere 把 Agent Action 交给一个连续的 Runner 执行上下文，Runner 内部如何分工由通用 Agent 框架管理；Review 则可以配置多个独立视角。
-          - 必须说明 Reviewer 只评审已上报的 Artifact，不接管 Run 步骤，也不直接修改 Artifact。
-          - “Agent 观察者”已 skip 时，说明本次只由 Human Review，同时使用当前配置解释如何在未来加入 Agent Reviewer。
+          - 必须使用当前流程运行的真实名称、运行 ID（run_id）、流程执行者、评审槽位、参与者绑定和可视化界面地址，不得使用占位符。
+          - 必须说明 Memsphere 把智能体操作交给一个连续的流程执行上下文，流程执行者内部如何分工由通用智能体框架管理；评审则可以配置多个独立视角。
+          - 必须说明评审者只评审已上报的运行产物，不接管流程运行步骤，也不直接修改运行产物。
+          - “智能体观察者”已跳过时，说明本次只由人工参与者评审，同时使用当前配置解释如何在未来加入智能体评审者。
         artifact: !artifact
-          name: Run 执行与 Review 角色说明
+          name: 流程运行执行与评审角色说明
           format: markdown
       - !action
-        action: 阅读 Agent 的解释和本次 Artifact Review；如果还有疑问或不同意，直接说明问题，否则回复“没有疑问”。
+        action: 阅读智能体的解释和本次运行产物评审；如果还有疑问或不同意，直接说明问题，否则回复“没有疑问”。
         actor: human
         artifact: !artifact
           name: 协作角色学习确认
           format: markdown
 
   - !action
-    action: 发送“请启动 memsphere 教学流程-第三章 Review 体验流程”，请求 Agent 启动一次带 Artifact Review 的体验 Run。
+    action: 发送“请启动 memsphere 教学流程-第三章评审体验流程”，请求智能体启动一次带运行产物评审的体验流程运行。
     actor: human
     artifact: !artifact
-      name: Human 的 Review 体验 Run 启动请求
+      name: 人工参与者的评审体验流程运行启动请求
       format: markdown
 
   - !while
     condition: !action
-      action: 检查 Review 体验 Run 是否还没有运行结束。
+      action: 检查评审体验流程运行是否还没有运行结束。
       actor: agent
       asserts:
-        - 还没有创建体验 Run、Run 正在执行，或 Review 要求修改时继续。
-        - 体验 Run 明确显示 done 或 abandoned 后结束本循环。
+        - 还没有创建体验流程运行、流程运行正在执行，或评审要求修改时继续。
+        - 体验流程运行明确显示 `done` 或 `abandoned` 后结束本循环。
       artifact: !artifact
-        name: Review 体验 Run 是否还没有结束
+        name: 评审体验流程运行是否还没有结束
         type: boolean
     do:
       - !action
-        action: 根据 Human 的启动请求创建 Review 体验 Run，或继续处理同一个 Run，并把 Run 链接发给 Human。
+        action: 根据人工参与者的启动请求创建评审体验流程运行，或继续处理同一个流程运行，并把流程运行链接发给人工参与者。
         actor: agent
         asserts:
-          - 第一次执行时，启动“memsphere 教学流程-第三章 Review 体验”，并保存实际 run_id；后续循环必须继续同一个 run_id。
-          - 启动预检时，将“Human 体验者”绑定到 Human 已确认的 Human Actor。
-          - 当前有可用 ACP Provider 和 Agent Actor 时，询问 Human 是否将“Agent 观察者”绑定到 Agent Actor；没有或 Human 不使用时明确 skip。
-          - 必须为 Review scope 选择 Decision Policy，并严格执行体验 Run 当前返回的步骤，不得重复启动。
+          - 第一次执行时，启动“memsphere 教学流程-第三章评审体验”，并保存实际运行 ID（run_id）；后续循环必须继续同一个运行 ID（run_id）。
+          - 启动预检时，将“人工体验者”绑定到人工参与者已确认的人工参与者。
+          - 当前有可用 ACP 服务提供方和智能体参与者时，询问人工参与者是否将“智能体观察者”绑定到智能体参与者；没有或人工参与者不使用时明确跳过。
+          - 必须为评审范围选择决策策略，并严格执行体验流程运行当前返回的步骤，不得重复启动。
         artifact: !artifact
-          name: Review 体验 Run 状态
+          name: 评审体验流程运行状态
           format: markdown
       - !action
-        action: 打开 Review 体验 Run 页面查看当前状态；页面要求 Review 时，查看 Artifact、提交 Comment 和 Vote，然后把结果告诉 Agent。
+        action: 打开评审体验流程运行页面查看当前状态；页面要求评审时，查看运行产物、提交评审意见和投票，然后把结果告诉智能体。
         actor: human
         artifact: !artifact
-          name: Human 的 Review 体验结果
+          name: 人工参与者的评审体验结果
           format: markdown
 
   - !action
-    action: 根据本次第三章 Run、Review 体验 Run、参与者配置和 Human 的问题，总结 ACP Provider、Actor、Run 执行角色、Review 角色及 View 的关系。
+    action: 根据本次第三章流程运行、评审体验流程运行、参与者配置和人工参与者的问题，总结 ACP 服务提供方、参与者、流程运行执行角色、评审角色及可视化界面的关系。
     actor: agent
     asserts:
-      - 用一句话分别说明 ACP Provider、Actor、Runner、Human Action、Review Slot、Actor Binding、Reviewer 和 View。
-      - 明确说明 Memsphere 面向一个连续的 Runner 执行上下文，Runner 内部可由多个 Agent 协作；Review 则允许多个独立视角。
-      - 记录 Review 体验 Run 实际使用 Human Review 还是 Human 与 Agent 多视角 Review，不得把 skip 的 Agent Slot 表述为已参与。
-      - 提供第三章 Run 和 Review 体验 Run 的实际 run_id 与 View 入口。
+      - 用一句话分别说明 ACP 服务提供方、参与者、流程执行者、人工操作、评审槽位、参与者绑定、评审者和可视化界面。
+      - 明确说明 Memsphere 面向一个连续的流程执行上下文，流程执行者内部可由多个智能体协作；评审则允许多个独立视角。
+      - 记录评审体验流程运行实际使用人工评审还是人工与智能体多视角评审，不得把已跳过的智能体槽位表述为已参与。
+      - 提供第三章流程运行和评审体验流程运行的实际运行 ID（run_id）与可视化界面入口。
     artifact: !artifact
       name: memsphere 教学第三章完成摘要
       format: markdown

@@ -132,8 +132,8 @@ test("Managed Project System Memory repair validates and publishes automatically
       },
       {
         relativePath: join("procedures", "memsphere-tutorial-chapter-01.yaml"),
-        currentText: "  - 面向首次使用 Memsphere 的 Human，从一个真实需求出发理解个性化软件、Prompt/Skill/Memsphere 的适用边界、完整愿景与当前能力，并在 View 的当前教学 Run 中完成一次可观察的入门闭环。",
-        legacyText: "  - 面向首次使用 Memsphere 的 Human，介绍四类 Memory。"
+        currentText: "  - 面向首次使用 Memsphere 的人工参与者，从一个真实需求出发理解个性化软件、提示词、技能与 Memsphere 的适用边界、完整愿景和当前能力，并在可视化界面的当前教学流程运行中完成一次可观察的入门闭环。",
+        legacyText: "  - 面向首次使用 Memsphere 的人工参与者，介绍四类记忆。"
       }
     ];
     for (const { relativePath, currentText, legacyText } of legacyTargets) {

@@ -50,7 +50,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await page.click("#settings-tab");
 
     const globalSettingsNav = page.getByRole("group", { name: "Memsphere", exact: true });
-    const demoSettingsNav = page.getByRole("group", { name: "Project · demo", exact: true });
+    const demoSettingsNav = page.getByRole("group", { name: "项目 · demo", exact: true });
     assert.equal(await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).getAttribute("aria-current"), "page");
     assert.equal(await demoSettingsNav.count(), 1);
     const globalSettingsToggle = globalSettingsNav.getByRole("button", { name: "Memsphere", exact: true });
@@ -59,8 +59,8 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await globalSettingsToggle.click();
     assert.equal(await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).isVisible(), true);
     assert.equal(await page.getByRole("heading", { name: "Memsphere 设置", exact: true }).count(), 1);
-    await globalSettingsNav.getByRole("button", { name: "View 服务", exact: true }).click();
-    await page.getByRole("heading", { name: "View 服务", exact: true }).waitFor();
+    await globalSettingsNav.getByRole("button", { name: "界面服务", exact: true }).click();
+    await page.getByRole("heading", { name: "界面服务", exact: true }).waitFor();
     assert.equal(new URL(page.url()).pathname, "/settings/view");
     assert.equal(await page.getByText("当前运行地址").count(), 0);
     assert.equal(await page.getByText("保存并重启后地址").count(), 0);
@@ -70,7 +70,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     const globalConfig = overview.getByText("全局配置", { exact: true });
     await globalConfig.waitFor();
     assert.equal(await globalConfig.count(), 1);
-    assert.equal(await overview.getByText("Project 配置", { exact: true }).count(), 0);
+    assert.equal(await overview.getByText("项目配置", { exact: true }).count(), 0);
     await demoSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
     assert.equal(new URL(page.url()).pathname, "/settings/project");
     await demoSettingsNav.getByRole("button", { name: "参与者配置", exact: true }).click();
@@ -104,9 +104,11 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await page.getByRole("button", { name: "重新读取", exact: true }).click();
     await demoSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
     const projectOverview = page.locator(".settings-section").last();
-    const projectConfig = projectOverview.getByText("Project 配置", { exact: true });
+    const projectConfig = projectOverview.getByText("项目配置", { exact: true });
     await projectConfig.waitFor();
     assert.equal(await projectConfig.count(), 1);
+    assert.equal(await projectOverview.getByText("存储", { exact: true }).count(), 1);
+    assert.equal(await projectOverview.getByText("Store", { exact: true }).count(), 0);
     assert.equal(await projectOverview.getByText("全局配置", { exact: true }).count(), 0);
     assert.equal(await page.getByRole("button", { name: "重新读取", exact: true }).count(), 0);
     assert.equal(await page.getByRole("button", { name: "保存", exact: true }).count(), 0);
@@ -146,15 +148,15 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await participant.getByRole("combobox", { name: "类型", exact: true }).click();
     await participant.getByRole("option", { name: "Agent", exact: true }).click();
     participant = page.locator(".settings-participant").last();
-    assert.equal(await participant.getByText("ACP Provider", { exact: true }).count(), 1);
-    assert.equal(await participant.getByText("Model", { exact: true }).count(), 1);
+    assert.equal(await participant.getByText("ACP 提供方", { exact: true }).count(), 1);
+    assert.equal(await participant.getByText("模型", { exact: true }).count(), 1);
     assert.equal(await participant.getByText("Prompt version", { exact: true }).count(), 0);
     assert.equal(await participant.getByText("Command", { exact: true }).count(), 0);
     assert.equal(await participant.getByText("Args（每行一个）", { exact: true }).count(), 0);
-    const provider = participant.getByRole("combobox", { name: "ACP Provider", exact: true });
+    const provider = participant.getByRole("combobox", { name: "ACP 提供方", exact: true });
     assert.equal((await provider.textContent())?.trim(), "traex · Traex · 待检测⌄");
     await provider.click();
-    const providerMenu = participant.getByRole("listbox", { name: "ACP Provider", exact: true });
+    const providerMenu = participant.getByRole("listbox", { name: "ACP 提供方", exact: true });
     const providerBox = await provider.boundingBox();
     const providerMenuBox = await providerMenu.boundingBox();
     assert.ok(providerBox && providerMenuBox);
@@ -166,7 +168,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     const idBox = await participant.getByLabel("ID", { exact: true }).boundingBox();
     const typeBox = await participant.getByRole("combobox", { name: "类型", exact: true }).boundingBox();
     const nameBox = await participant.getByLabel("名称", { exact: true }).boundingBox();
-    const promptBox = await participant.getByLabel("System prompt", { exact: true }).boundingBox();
+    const promptBox = await participant.getByLabel("系统提示词", { exact: true }).boundingBox();
     assert.ok(idBox && typeBox && nameBox && idBox.width <= 360);
     assert.ok(Math.abs(idBox.y - typeBox.y) < 2);
     assert.ok(Math.abs(idBox.y - nameBox.y) < 2);
@@ -187,20 +189,20 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     page.once("dialog", dialog => dialog.accept());
     await page.locator("#project-select").click();
     await page.getByRole("option", { name: "beta", exact: true }).click();
-    await page.getByRole("group", { name: "Project · beta", exact: true }).waitFor();
+    await page.getByRole("group", { name: "项目 · beta", exact: true }).waitFor();
     await globalSettingsNav.getByRole("button", { name: "常规", exact: true }).click();
     assert.equal((await page.getByRole("combobox", { name: "工作语言" }).textContent())?.trim(), "English⌄");
 
-    await globalSettingsNav.getByRole("button", { name: "ACP Provider", exact: true }).click();
+    await globalSettingsNav.getByRole("button", { name: "ACP 提供方", exact: true }).click();
     let traexProvider = page.locator(".settings-provider").filter({ hasText: "traex" }).first();
     await traexProvider.locator("summary").click();
     assert.equal(await page.getByRole("button", { name: "添加 Provider", exact: true }).count(), 0);
     assert.equal(await traexProvider.getByLabel("ID", { exact: true }).count(), 0);
     assert.equal(await traexProvider.getByRole("combobox", { name: "类型", exact: true }).count(), 0);
-    const providerCommand = traexProvider.getByLabel("Command", { exact: true });
+    const providerCommand = traexProvider.getByLabel("命令", { exact: true });
     assert.equal(await providerCommand.inputValue(), "traex");
     assert.equal(await providerCommand.isDisabled(), true);
-    await traexProvider.getByLabel("Args（每行一个）", { exact: true }).fill("--verbose");
+    await traexProvider.getByLabel("参数（每行一个）", { exact: true }).fill("--verbose");
     traexProvider = page.locator(".settings-provider").filter({ hasText: "traex" }).first();
     const resetProvider = traexProvider.getByRole("button", { name: "恢复默认值", exact: true });
     assert.equal(await resetProvider.isDisabled(), false);
@@ -229,13 +231,13 @@ test("Settings browser preserves omitted sections and stays responsive", async (
         + "INITIAL_AGENT_MODE=read-only codex-acp"
     );
 
-    await page.getByRole("button", { name: "View 服务", exact: true }).click();
-    const portInputBox = await page.getByLabel("Port", { exact: true }).boundingBox();
-    const defaultViewBox = await page.getByText("使用默认 View 配置", { exact: true }).boundingBox();
+    await page.getByRole("button", { name: "界面服务", exact: true }).click();
+    const portInputBox = await page.getByLabel("端口", { exact: true }).boundingBox();
+    const defaultViewBox = await page.getByText("使用默认界面配置", { exact: true }).boundingBox();
     assert.ok(portInputBox && defaultViewBox);
     assert.ok(defaultViewBox.y >= portInputBox.y + portInputBox.height + 12);
-    await page.getByText("使用默认 View 配置", { exact: true }).click();
-    await page.locator(".settings-field").filter({ hasText: "Port" }).locator("input").fill("-1");
+    await page.getByText("使用默认界面配置", { exact: true }).click();
+    await page.locator(".settings-field").filter({ hasText: "端口" }).locator("input").fill("-1");
     await page.getByRole("button", { name: "保存", exact: true }).click();
     await page.waitForFunction(() => !document.querySelector("#settings-status")?.textContent?.includes("错误 0"));
     assert.doesNotMatch(await page.locator("#settings-status").textContent() ?? "", /错误 0/);

@@ -4,64 +4,64 @@ names:
   - memsphere-tutorial-chapter-01
   - memsphere 教学流程-第一章
 defines:
-  - 面向首次使用 Memsphere 的 Human，从一个真实需求出发理解个性化软件、Prompt/Skill/Memsphere 的适用边界、完整愿景与当前能力，并在 View 的当前教学 Run 中完成一次可观察的入门闭环。
-  - 本章帮助 Human 判断自己为什么需要或不需要 Memsphere；结论可以是 Prompt、Skill 或 Memsphere，不以使用更多功能作为成功标准。
+  - 面向首次使用 Memsphere 的人工参与者，从一个真实需求出发理解个性化软件、提示词、技能与 Memsphere 的适用边界、完整愿景和当前能力，并在可视化界面的当前教学流程运行中完成一次可观察的入门闭环。
+  - 本章帮助人工参与者判断自己为什么需要或不需要 Memsphere；结论可以是提示词、技能或 Memsphere，不以使用更多功能作为成功标准。
 asserts:
-  - 不得修改 System Memory 或用户 Memory，不得为教学创建额外 Procedure、ChangeSet 或 Run；任何准入写操作都必须说明目标、影响并限定为当前环境所需。
-  - 必须明确区分完整产品方向和当前版本：当前首先实现 Memory，个性化 CLI、数据和界面成为完整一等资产仍是后续方向。
-  - 不得在本章执行 Memory edit/publish、ChangeSet 处理、Artifact Review、ACP Provider 配置、运行期 Slot 换绑、Run abandon 或 Archive。
-  - 纯教学 Human checkpoint 只能使用流程中声明的四个 Human Action；环境授权、外部排障和 Human 主动提问不计入。
-  - Human 在任一步骤提问时，Agent 必须先使用 memsphere 读取与问题相关的当前 Memory；Memory 中没有可靠答案时必须明确说明不知道，不得编造。
+  - 不得修改系统记忆或用户记忆，不得为教学创建额外流程记忆、记忆变更集或流程运行；任何准入写操作都必须说明目标、影响并限定为当前环境所需。
+  - 必须明确区分完整产品方向和当前版本：当前首先实现记忆，个性化命令行工具、数据和界面成为完整一等资产仍是后续方向。
+  - 不得在本章执行记忆编辑或发布、记忆变更集处理、运行产物评审、ACP 服务提供方配置、运行期评审槽位换绑、流程运行废弃或归档。
+  - 纯教学人工确认点只能使用流程中声明的四个人工操作；环境授权、外部排障和人工参与者主动提问不计入。
+  - 人工参与者在任一步骤提问时，智能体必须先使用 memsphere 读取与问题相关的当前记忆；记忆中没有可靠答案时必须明确说明不知道，不得编造。
 goals:
-  - 让 Human 理解 Memsphere 是通用 Agent 之上的个性化软件运行环境，而不是另一个 Agent 或完整等同于 Memory 的框架。
-  - 让 Human 能根据真实需求判断 Prompt、Skill 或 Memsphere 是否适用，并理解软件可以从自然语言开始按需生长。
-  - 让 Human 理解四类软件资产、两种算力、当前版本能力及四类 Memory 的协作关系。
-  - 让 Human 在 View 中观察当前教学 Run、步骤与产物，并理解 Procedure 名称、Run 名称、Run ID 和 Artifact 的关系，获得适合自己场景的下一步起点建议。
+  - 让人工参与者理解 Memsphere 是通用智能体之上的个性化软件运行环境，而不是另一个智能体或完整等同于记忆的框架。
+  - 让人工参与者能根据真实需求判断提示词、技能或 Memsphere 是否适用，并理解软件可以从自然语言开始按需生长。
+  - 让人工参与者理解四类软件资产、两种算力、当前版本能力及四类记忆的协作关系。
+  - 让人工参与者在可视化界面中观察当前教学流程运行、步骤与运行产物，并理解流程记忆名称、流程运行名称、运行 ID 和运行产物的关系，获得适合自己场景的下一步起点建议。
 flow:
   - !while
     condition: !action
       action: 实际检查教学准入要求，判断是否仍有任何一项未满足。
       actor: agent
       asserts:
-        - 必须实际检查 Node.js 20+、Git、memsphere CLI、memsphere Skill、当前 Workspace 的 Primary Project Binding、当前 Project 类型和配置、`memsphere validate`，以及当前环境可访问的 View 地址。
-        - 必须区分 Managed 与 Embedded Project，并只把“Memory 是否跟随代码仓库”作为本章需要理解的首要差异。
+        - 必须实际检查 Node.js 20+、Git、memsphere 命令行工具、memsphere 技能、当前工作区的主项目绑定、当前项目类型和配置、`memsphere validate`，以及当前环境可访问的可视化界面地址。
+        - 必须区分托管型与嵌入型项目，并只把“记忆是否跟随代码仓库”作为本章需要理解的首要差异。
         - Windows 专项要求只在原生 Windows 环境出现；WSL 按独立 Linux 环境处理。
-        - "`memsphere project repair` 只在 Managed Project 的 System Memory 确有故障且适用时作为排障手段，不是准入必经步骤。"
+        - "`memsphere project repair` 只在托管型项目的系统记忆确有故障且适用时作为排障手段，不是准入必经步骤。"
         - 任一项目无法实际确认时必须判定为尚未满足，不得依据默认值或历史结果推断。
       artifact: !artifact
         name: 是否仍有未满足的教学准入要求
         type: boolean
     do:
       - !action
-        action: 定位未满足的准入项，完成 Agent 可以安全处理的事项；需要 Human 授权、安装、认证、创建或绑定 Project 时，给出最小操作、影响和验证方法。
+        action: 定位未满足的准入项，完成智能体可以安全处理的事项；需要人工参与者授权、安装、认证、创建或绑定项目时，给出最小操作、影响和验证方法。
         actor: agent
         asserts:
-          - 不得替 Human 猜测 Primary Project；需要创建或绑定时说明 Managed 与 Embedded 的选择及对应命令影响。
-          - View 尚不可访问时，选择适合当前环境的 Host 和可用端口启动或重启，并实际检查访问结果。
+          - 不得替人工参与者猜测主项目；需要创建或绑定时说明托管型与嵌入型的选择及对应命令影响。
+          - 可视化界面尚不可访问时，选择适合当前环境的主机地址和可用端口启动或重启，并实际检查访问结果。
         artifact: !artifact
           name: 教学准入处理结果
           format: markdown
       - !if
         condition: !action
-          action: 判断准入处理结果中是否仍有必须由 Human 完成的外部操作。
+          action: 判断准入处理结果中是否仍有必须由人工参与者完成的外部操作。
           actor: agent
           artifact: !artifact
-            name: 是否需要 Human 完成准入操作
+            name: 是否需要人工参与者完成准入操作
             type: boolean
         then:
           - !action
-            action: 完成准入处理结果中明确列出的授权、安装、认证、Project 创建或绑定操作，并反馈实际结果。
+            action: 完成准入处理结果中明确列出的授权、安装、认证、项目创建或绑定操作，并反馈实际结果。
             actor: human
             artifact: !artifact
-              name: Human 准入操作结果
+              name: 人工参与者准入操作结果
               format: markdown
 
   - !action
-    action: 读取 memsphere-personalized-software 与 memsphere-framework，简要介绍 Memsphere 的位置和 Prompt、Skill、Memsphere 的适用边界；然后邀请 Human 提供一项自己真实做过或希望反复完成的需求。可以用“每天整理关注领域的新论文，并说明哪些值得阅读”帮助理解，但不得替 Human 编造场景。
+    action: 读取 memsphere-personalized-software 与 memsphere-framework，简要介绍 Memsphere 的位置以及提示词、技能、Memsphere 的适用边界；然后邀请人工参与者提供一项自己真实做过或希望反复完成的需求。可以用“每天整理关注领域的新论文，并说明哪些值得阅读”帮助理解，但不得替人工参与者编造场景。
     actor: agent
     asserts:
-      - 必须说明 Memsphere 不是 Agent，而是运行在通用 Agent 之上的个性化软件运行环境；Agent、LLM 与硬件分别承担执行、语义算力和底层计算职责。
-      - 必须说明 Prompt、Skill、Memsphere 不是必须走完的升级路线，简单场景不需要 Memsphere 也是有效结论。
+      - 必须说明 Memsphere 不是智能体，而是运行在通用智能体之上的个性化软件运行环境；智能体、大语言模型与硬件分别承担执行、语义算力和底层计算职责。
+      - 必须说明提示词、技能、Memsphere 不是必须走完的升级路线，简单场景不需要 Memsphere 也是有效结论。
     artifact: !artifact
       name: 产品定位与场景引导
       format: markdown
@@ -70,25 +70,25 @@ flow:
     action: 描述一项自己的真实需求，包括它发生一次还是反复发生、目前如何完成、哪些知识或判断需要长期保留；也可以明确使用“个人研究助手”案例继续。
     actor: human
     artifact: !artifact
-      name: Human 真实场景
+      name: 人工参与者真实场景
       format: markdown
 
   - !while
     condition: !action
-      action: 根据 Human 最近一次“软件生长模型学习确认”判断是否需要继续讲解：尚未确认，或仍有疑问、不同意或需要修正时返回 true；只有 Human 明确表示内容清楚且认可时返回 false。
+      action: 根据人工参与者最近一次“软件生长模型学习确认”判断是否需要继续讲解：尚未确认，或仍有疑问、不同意或需要修正时返回 true；只有人工参与者明确表示内容清楚且认可时返回 false。
       actor: agent
       artifact: !artifact
         name: 是否继续讲解软件生长模型
         type: boolean
     do:
       - !action
-        action: 根据 Human 真实场景判断更适合 Prompt、Skill 还是 Memsphere，并用该场景解释软件如何按需生长出 Memory、个性化 CLI、数据和界面，以及 Token 算力与确定性算力如何协同。
+        action: 根据人工参与者真实场景判断更适合提示词、技能还是 Memsphere，并用该场景解释软件如何按需生长出记忆、个性化命令行工具、数据和界面，以及词元算力与确定性算力如何协同。
         actor: agent
         asserts:
           - 判断必须给出场景依据；即使结论是不需要 Memsphere，也要说明什么变化出现后才值得升级。
-          - 必须说明 Agent 通过 Memory 进入软件，人通过界面进入软件，数据是 CLI 与界面的公共底座；软件不要求第一天拥有全部四类资产。
-          - 必须说明早期可以更多依赖 Token 算力探索，稳定、重复、边界明确的步骤再逐步沉淀为 CLI 交给确定性算力。
-          - 不得把 Memsphere 当前管理 CLI 或通用 View 冒充为该场景已经拥有个性化 CLI、数据或界面资产。
+          - 必须说明智能体通过记忆进入软件，人通过界面进入软件，数据是命令行工具与界面的公共底座；软件不要求第一天拥有全部四类资产。
+          - 必须说明早期可以更多依赖词元算力探索，稳定、重复、边界明确的步骤再逐步沉淀为命令行工具并交给确定性算力。
+          - 不得把 Memsphere 当前管理命令行工具或通用可视化界面冒充为该场景已经拥有个性化命令行工具、数据或界面资产。
         artifact: !artifact
           name: 场景适用性与软件生长模型
           format: markdown
@@ -101,24 +101,24 @@ flow:
 
   - !while
     condition: !action
-      action: 判断 Human 是否尚未确认当前版本边界、四类 Memory 和当前 Project 类型清楚且正确。
+      action: 判断人工参与者是否尚未确认当前版本边界、四类记忆和当前项目类型清楚且正确。
       actor: agent
       artifact: !artifact
         name: 是否继续讲解当前能力
         type: boolean
     do:
       - !action
-        action: 读取 memsphere-memory、memsphere-concept、memsphere-statement、memsphere-schema 与 memsphere-procedure，一次性说明当前版本能力、四类 Memory 的职责与协作方式，以及当前 Project 的 Managed/Embedded 类型；说明创建两类 Project 时都会自动安装 System Memory，Managed 通过首笔 ChangeSet 发布，Embedded 写入当前 Git worktree 并由正常 Git 流程审阅和集成。
+        action: 读取 memsphere-memory、memsphere-concept、memsphere-statement、memsphere-schema 与 memsphere-procedure，一次性说明当前版本能力、四类记忆的职责与协作方式，以及当前项目的托管型或嵌入型类型；说明创建两类项目时都会自动安装系统记忆，托管型通过首笔记忆变更集发布，嵌入型写入当前 Git 工作树并由正常 Git 流程审阅和集成。
         actor: agent
         asserts:
-          - 必须说明当前版本首先实现 Memory，并列出 Project、Run、Artifact、Review、ChangeSet、View 与 Skill 接入；这些是完整愿景的第一块地基，不是四类资产已经全部完成。
-          - 必须把 Concept 解释为“它是什么”、Statement 解释为“什么必须成立”、Schema 解释为“合格结果长什么样”、Procedure 解释为“这件事如何完成”，并说明四者共同构成软件的语义部分。
-          - 只解释当前 Project 实际采用的类型和另一类型的首要差异，不展开 Mounted Project、完整 ChangeSet 生命周期、Review 配置或运行期换绑。
+          - 必须说明当前版本首先实现记忆，并列出项目、流程运行、运行产物、评审、记忆变更集、可视化界面与技能接入；这些是完整愿景的第一块地基，不是四类资产已经全部完成。
+          - 必须把概念解释为“它是什么”、陈述解释为“什么必须成立”、图式解释为“合格结果长什么样”、流程记忆解释为“这件事如何完成”，并说明四者共同构成软件的语义部分。
+          - 只解释当前项目实际采用的类型和另一类型的首要差异，不展开挂载项目、完整记忆变更集生命周期、评审配置或运行期换绑。
         artifact: !artifact
-          name: 当前能力与 Memory 协作模型
+          name: 当前能力与记忆协作模型
           format: markdown
       - !action
-        action: 确认当前版本边界、四类 Memory 和当前 Project 类型是否清楚；如有疑问或不同意，说明需要解释或修正的部分，否则明确继续。
+        action: 确认当前版本边界、四类记忆和当前项目类型是否清楚；如有疑问或不同意，说明需要解释或修正的部分，否则明确继续。
         actor: human
         artifact: !artifact
           name: 当前能力学习确认
@@ -126,37 +126,37 @@ flow:
 
   - !while
     condition: !action
-      action: 判断 Human 是否尚未在 View 中找到当前教学 Run、当前步骤和至少一份产物。
+      action: 判断人工参与者是否尚未在可视化界面中找到当前教学流程运行、当前步骤和至少一份运行产物。
       actor: agent
       artifact: !artifact
-        name: 是否继续 View 实践
+        name: 是否继续可视化界面实践
         type: boolean
     do:
       - !action
-        action: 查询当前教学 Run 的实际状态，提供已经通过准入检查的可点击 View 地址、当前 Run 的用户可读名称和 Run ID；指导 Human 在 View 顶部进入“Run”，从左侧 running 分组按用户可读名称找到本次教学 Run，并查看当前步骤和至少一份已上报产物。
+        action: 查询当前教学流程运行的实际状态，提供已经通过准入检查的可点击可视化界面地址、当前流程运行的用户可读名称和运行 ID；指导人工参与者在可视化界面顶部进入“流程运行”，从左侧“运行中”分组按用户可读名称找到本次教学流程运行，并查看当前步骤和至少一份已上报的运行产物。
         actor: agent
         asserts:
-          - 必须使用实际地址、Run 名称、Run ID、当前步骤和产物，不得保留 Host、端口或名称占位符。
-          - 必须使用 View 实际展示的“Run”和“产物”，并区分 Procedure 名称、用户可读 Run 名称和 Run ID；说明每一步上报的产物就是 Artifact，不得要求 Human 新建练习 Procedure 或额外 Run。
-          - 只要求观察，不在本章发起 Review、修改 Memory 或处理 ChangeSet。
+          - 必须使用实际地址、流程运行名称、运行 ID、当前步骤和运行产物，不得保留主机地址、端口或名称占位符。
+          - 必须使用可视化界面实际展示的“流程运行”和“运行产物”，并区分流程记忆名称、用户可读流程运行名称和运行 ID；说明每一步上报的产物就是运行产物，不得要求人工参与者新建练习流程记忆或额外流程运行。
+          - 只要求观察，不在本章发起评审、修改记忆或处理记忆变更集。
         artifact: !artifact
-          name: 当前教学 Run 的 View 观察指引
+          name: 当前教学流程运行的可视化界面观察指引
           format: markdown
       - !action
-        action: 打开 View，按指引找到当前教学 Run、当前步骤和至少一份产物；反馈实际看到的内容、无法访问的问题或仍有的疑问。
+        action: 打开可视化界面，按指引找到当前教学流程运行、当前步骤和至少一份运行产物；反馈实际看到的内容、无法访问的问题或仍有的疑问。
         actor: human
         artifact: !artifact
-          name: View 实践结果
+          name: 可视化界面实践结果
           format: markdown
 
   - !action
-    action: 根据 Human 的真实场景、学习确认和 View 实践结果，形成第一章完成摘要与个性化软件起点建议。
+    action: 根据人工参与者的真实场景、学习确认和可视化界面实践结果，形成第一章完成摘要与个性化软件起点建议。
     actor: agent
     asserts:
       - 总结已经理解和完成的内容、仍未解决的问题及可立即采取的下一步。
-      - 最终建议必须明确选择 Prompt、Skill 或 Memsphere 作为当前起点，并说明理由。
-      - 适合 Memsphere 时，说明最先需要沉淀的 Memory、第一条 Procedure 驱动请求，以及未来可能按需生长的 CLI、数据和界面；不得把未来能力表述为当前交付。
-      - 可以把“memsphere 教学流程-第二章”作为可选后续入口，并说明它用于把真实经验沉淀为可验证的候选 Memory；不得把启动第二章设为第一章完成条件，也不得推荐不存在的第三章或第四章。
+      - 最终建议必须明确选择提示词、技能或 Memsphere 作为当前起点，并说明理由。
+      - 适合 Memsphere 时，说明最先需要沉淀的记忆、第一条流程记忆驱动请求，以及未来可能按需生长的命令行工具、数据和界面；不得把未来能力表述为当前交付。
+      - 可以把“memsphere 教学流程-第二章”作为可选后续入口，并说明它用于把真实经验沉淀为可验证的候选记忆；不得把启动第二章设为第一章完成条件，也不得推荐不存在的第三章或第四章。
     artifact: !artifact
       name: memsphere 教学第一章完成摘要
       format: markdown
