@@ -1336,7 +1336,7 @@ export const browserHtml = String.raw`<!doctype html>
       const message = error instanceof Error ? error.message : String(error);
       el.title.textContent = "Failed to load memsphere";
       el.subtitle.textContent = "";
-      el.detail.className = "empty";
+      el.detail.className = "error-panel";
       el.detail.textContent = message;
       el.nav.innerHTML = "";
       el.count.textContent = "Error";
@@ -1370,7 +1370,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function loadChanges() {
       const response = await fetch("/api/changes");
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw await responseError(response);
       state.changes = (await response.json()).changes || [];
       if (!state.changes.some(change => change.id === state.selectedChangeId)) {
         state.selectedChangeId = state.changes.find(change => change.active)?.id || state.changes[0]?.id || "";
@@ -1400,7 +1400,7 @@ export const browserHtml = String.raw`<!doctype html>
         return null;
       }
       const response = await fetch("/api/changes/" + encodeURIComponent(changeId));
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw await responseError(response);
       state.changeDetail = await response.json();
       state.actorNames = state.changeDetail.actorNames || {};
       state.actorKinds = state.changeDetail.actorKinds || {};
@@ -1411,6 +1411,16 @@ export const browserHtml = String.raw`<!doctype html>
       state.filtered = state.memories;
       if (!state.filtered.some(memory => memory.id === state.selectedId)) state.selectedId = state.filtered[0]?.id || null;
       return state.changeDetail;
+    }
+
+    async function responseError(response) {
+      const text = await response.text();
+      try {
+        const payload = JSON.parse(text);
+        return new Error(payload.error || text);
+      } catch {
+        return new Error(text || ("Request failed with HTTP " + response.status));
+      }
     }
 
     async function loadMemoryDetail(id, options = {}) {
@@ -3175,9 +3185,9 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderRouteError() {
-      el.title.textContent = "Not found";
+      el.title.textContent = state.viewMode === "changes" ? "ChangeSet unavailable" : "Not found";
       el.subtitle.textContent = window.location.pathname;
-      el.detail.className = "empty";
+      el.detail.className = state.viewMode === "changes" ? "error-panel" : "empty";
       el.detail.textContent = state.routeError;
     }
 
@@ -3449,7 +3459,14 @@ export const browserHtml = String.raw`<!doctype html>
       }
       state.viewMode = "changes";
       state.routeLanding = "";
-      await loadChangeDetail(changeId);
+      state.selectedChangeId = changeId;
+      state.changeDetail = null;
+      state.routeError = "";
+      try {
+        await loadChangeDetail(changeId);
+      } catch (error) {
+        state.routeError = error instanceof Error ? error.message : String(error);
+      }
       renderAll();
     }
 
@@ -3761,6 +3778,12 @@ export const browserHtml = String.raw`<!doctype html>
       meta.append(pill(lifecycle, true, change.valid === false ? "warn" : ""));
       meta.append(pill("Store: " + change.storeType));
       meta.append(pill("Base: " + String(change.baseRevision || "").slice(0, 12)));
+      if (change.sourceWorktree) {
+        const source = pill("Source: " + change.sourceWorktree.root);
+        source.title = change.sourceWorktree.root;
+        meta.append(source);
+        if (!change.sourceWorktree.available) meta.append(pill("来源工作区不可用", false, "warn"));
+      }
       if (change.digest) meta.append(pill("Digest: " + String(change.digest).slice(0, 12)));
       meta.append(pill(change.valid === false ? "Validation failed" : change.valid === true ? "Validation passed" : "Not validated", false, change.valid === false ? "warn" : ""));
 

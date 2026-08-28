@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -9,8 +9,11 @@ import {
   checkpointWorkspaceChanges,
   editMemories,
   failMemoryChange,
+  listMemoryChanges,
+  MemoryChangeIntegrityError,
   memoryChangeSetSchema,
   publishMemoryChange,
+  readMemoryChange,
   recoverMemory,
   renameMemory,
   resumeMemoryChange,
@@ -357,6 +360,7 @@ test("ChangeSet metadata rejects path traversal", () => {
     status: "active",
     created_at: "2026-08-17T00:00:00.000Z",
     updated_at: "2026-08-17T00:00:00.000Z",
+    store_type: "managed",
     targets: [{
       operation: "update",
       reference: "concepts/test",
@@ -376,6 +380,7 @@ test("ChangeSet metadata accepts only the active lifecycle vocabulary", () => {
     base_revision: "abc123",
     created_at: "2026-08-17T00:00:00.000Z",
     updated_at: "2026-08-17T00:00:00.000Z",
+    store_type: "managed" as const,
     targets: []
   };
   assert.equal(memoryChangeSetSchema.safeParse({ ...base, status: "active" }).success, true);
@@ -383,4 +388,87 @@ test("ChangeSet metadata accepts only the active lifecycle vocabulary", () => {
   assert.equal(memoryChangeSetSchema.safeParse({ ...base, status: "abandoned" }).success, true);
   assert.equal(memoryChangeSetSchema.safeParse({ ...base, status: "draft" }).success, false);
   assert.equal(memoryChangeSetSchema.safeParse({ ...base, status: "published" }).success, false);
+});
+
+test("ChangeSet metadata requires store_type while allowing Managed source worktrees", () => {
+  const base = {
+    format_version: 1 as const,
+    id: "change-store-type",
+    project: "project",
+    workspace_key: "path:/workspace",
+    base_revision: "abc123",
+    status: "active" as const,
+    created_at: "2026-08-17T00:00:00.000Z",
+    updated_at: "2026-08-17T00:00:00.000Z",
+    targets: []
+  };
+  const missing = memoryChangeSetSchema.safeParse(base);
+  assert.equal(missing.success, false);
+  if (!missing.success) assert.deepEqual(missing.error.issues[0]?.path, ["store_type"]);
+  assert.equal(memoryChangeSetSchema.safeParse({
+    ...base,
+    store_type: "managed",
+    source_worktree: {
+      instance_key: "path:/workspace",
+      root: "/workspace",
+      repository_root: "/workspace",
+      memory_path: "memory"
+    }
+  }).success, true);
+});
+
+test("ChangeSet reads reject store mismatches and lists do not hide corrupt records", async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "memsphere-change-integrity-"));
+  const home = join(fixture, "home");
+  const projectRoot = join(fixture, "project");
+  const changesRoot = join(projectRoot, "changes");
+  const createdAt = "2026-08-17T00:00:00.000Z";
+  try {
+    await mkdir(join(projectRoot, ".runtime"), { recursive: true });
+    await mkdir(changesRoot, { recursive: true });
+    await mkdir(home, { recursive: true });
+    await writeFile(join(home, "registry.json"), `${JSON.stringify({
+      format_version: 1,
+      projects: { project: { root: projectRoot } },
+      workspaces: {}
+    }, null, 2)}\n`);
+    await writeFile(join(projectRoot, "project.json"), `${JSON.stringify({
+      format_version: 1,
+      name: "project",
+      created_at: createdAt
+    }, null, 2)}\n`);
+    await writeFile(join(projectRoot, "config.json"), `${JSON.stringify({
+      store: { type: "managed", branch: "master", published_revision: "abc123" }
+    }, null, 2)}\n`);
+    const record = {
+      format_version: 1,
+      id: "change-wrong-store",
+      project: "project",
+      workspace_key: "path:/workspace",
+      base_revision: "abc123",
+      status: "completed",
+      created_at: createdAt,
+      updated_at: createdAt,
+      store_type: "embedded",
+      targets: [],
+      origin: "cli",
+      scope: [],
+      comments: []
+    };
+    await mkdir(join(changesRoot, record.id));
+    await writeFile(join(changesRoot, record.id, "change.json"), `${JSON.stringify(record, null, 2)}\n`);
+
+    await assert.rejects(
+      readMemoryChange({ home, project: "project", changeId: record.id }),
+      (error: unknown) => error instanceof MemoryChangeIntegrityError
+        && error.changeId === record.id
+        && /store_type is embedded.*uses managed/.test(error.message)
+    );
+    await assert.rejects(
+      listMemoryChanges({ home, project: "project" }),
+      (error: unknown) => error instanceof MemoryChangeIntegrityError && error.changeId === record.id
+    );
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
 });

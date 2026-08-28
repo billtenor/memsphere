@@ -202,10 +202,45 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       const changeDetail = await changeDetailResponse.json() as {
         actorNames: Record<string, string>;
         actorKinds: Record<string, string>;
+        change: { sourceWorktree?: { root: string; available: boolean } };
       };
       assert.equal(changeDetailResponse.status, 200);
       assert.deepEqual(changeDetail.actorNames, { alice: "Alice" });
       assert.deepEqual(changeDetail.actorKinds, { alice: "human" });
+      assert([
+        await realpath(linked),
+        await realpath(linkedTwin)
+      ].includes(changeDetail.change.sourceWorktree?.root ?? ""));
+      assert.equal(changeDetail.change.sourceWorktree?.available, true);
+
+      const changeRecordPath = join(project.root, "changes", first.changeId, "change.json");
+      const originalChangeRecord = await readFile(changeRecordPath, "utf8");
+      const unavailableSource = JSON.parse(originalChangeRecord) as {
+        source_worktree: { root: string };
+      };
+      unavailableSource.source_worktree.root = join(fixture, "removed-linked-worktree");
+      await writeFile(changeRecordPath, `${JSON.stringify(unavailableSource, null, 2)}\n`);
+      try {
+        const unavailableResponse = await fetch(`${origin}/api/changes/${encodeURIComponent(first.changeId)}`);
+        const unavailable = await unavailableResponse.json() as {
+          change: { status: string; sourceWorktree: { root: string; available: boolean } };
+        };
+        assert.equal(unavailableResponse.status, 200);
+        assert.equal(unavailable.change.status, "active");
+        assert.equal(unavailable.change.sourceWorktree.available, false);
+
+        const sourceBrowser = await chromium.launch({ headless: true });
+        try {
+          const page = await sourceBrowser.newPage({ viewport: { width: 1366, height: 900 } });
+          await page.goto(`${origin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
+          await page.getByText("来源工作区不可用", { exact: true }).waitFor();
+          assert.match(await page.locator(".meta").first().textContent() ?? "", /removed-linked-worktree/);
+        } finally {
+          await sourceBrowser.close();
+        }
+      } finally {
+        await writeFile(changeRecordPath, originalChangeRecord);
+      }
 
       const previewDetailResponse = await fetch(
         `${origin}/api/memories/concepts/shared?change=${encodeURIComponent(first.changeId)}`
@@ -221,6 +256,38 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       const missingDetail = await fetch(`${origin}/api/changes/change-missing`);
       assert.equal(missingDetail.status, 404);
       assert.equal((await missingDetail.json() as { code: string }).code, "changeset_not_found");
+
+      const corruptId = "change-corrupt-store-type";
+      const corruptRoot = join(project.root, "changes", corruptId);
+      await mkdir(corruptRoot);
+      const { store_type: _storeType, ...corruptChange } = canonicalChange;
+      await writeFile(join(corruptRoot, "change.json"), `${JSON.stringify({
+        ...corruptChange,
+        id: corruptId
+      }, null, 2)}\n`);
+      try {
+        for (const path of ["/api/changes", `/api/changes/${corruptId}`]) {
+          const response = await fetch(origin + path);
+          const payload = await response.json() as { code: string; error: string };
+          assert.equal(response.status, 500);
+          assert.equal(payload.code, "changeset_integrity_error");
+          assert.match(payload.error, new RegExp(corruptId));
+          assert.match(payload.error, /store_type/);
+        }
+
+        const corruptBrowser = await chromium.launch({ headless: true });
+        try {
+          const page = await corruptBrowser.newPage({ viewport: { width: 1366, height: 900 } });
+          await page.goto(`${origin}/projects/embedded/changes/${corruptId}`);
+          await page.locator(".error-panel").waitFor();
+          assert.match(await page.locator(".error-panel").textContent() ?? "", new RegExp(corruptId));
+          assert.match(await page.locator(".error-panel").textContent() ?? "", /store_type/);
+        } finally {
+          await corruptBrowser.close();
+        }
+      } finally {
+        await rm(corruptRoot, { recursive: true, force: true });
+      }
     } finally {
       await new Promise<void>((resolve) => view.close(() => resolve()));
     }
