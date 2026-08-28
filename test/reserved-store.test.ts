@@ -99,7 +99,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "memsphere-tutorial-chapter-02",
     "memsphere 教学流程-第三章",
     "memsphere-tutorial-chapter-03",
-    "memsphere 教学流程-第三章 Review 体验",
+    "memsphere 教学流程-第三章评审体验",
     "memsphere-tutorial-chapter-03-review-experience",
     "memsphere 通用流程",
     "通用流程",
@@ -201,17 +201,17 @@ test("bundled branch-review applies general development and testing rules", asyn
   );
 });
 
-test("chapter one teaches one bounded first-use Run journey", async () => {
+test("chapter one teaches one bounded first-use journey with Chinese user-facing terms", async () => {
   const tutorial = await readFile(
     join(bundledSystemMemoryRoot(), "procedures", "memsphere-tutorial-chapter-01.yaml"),
     "utf8"
   );
-  assert.match(tutorial, /Prompt、Skill、Memsphere/);
-  assert.match(tutorial, /Human 真实场景/);
-  assert.match(tutorial, /当前教学 Run 的 View 观察指引/);
-  assert.match(tutorial, /View 顶部进入“Run”/);
-  assert.match(tutorial, /每一步上报的产物就是 Artifact/);
-  assert.doesNotMatch(tutorial, /View 实际展示的“任务”/);
+  assert.match(tutorial, /提示词、技能、Memsphere/);
+  assert.match(tutorial, /人工参与者真实场景/);
+  assert.match(tutorial, /当前教学流程运行的可视化界面观察指引/);
+  assert.match(tutorial, /可视化界面顶部进入“流程运行”/);
+  assert.match(tutorial, /每一步上报的产物就是运行产物/);
+  assert.doesNotMatch(tutorial, /可视化界面实际展示的“任务”/);
   assert.doesNotMatch(tutorial, /导入 Reserved Memory|Imported|not imported|了解并导入 Reserved Memory/);
 });
 
@@ -225,6 +225,14 @@ test("framework Memory and Skill describe scoped Settings consistently", async (
     "utf8"
   );
   const skill = await readFile(join(process.cwd(), "src", "skills", "memsphere", "SKILL.md"), "utf8");
+  const reservedView = await readFile(
+    join(bundledSystemMemoryRoot(), "concepts", "memsphere-view.yaml"),
+    "utf8"
+  );
+  const projectView = await readFile(
+    join(process.cwd(), ".memsphere", "memory", "concepts", "memsphere-view.yaml"),
+    "utf8"
+  );
 
   for (const memory of [reservedFramework, projectFramework]) {
     assert.match(memory, /左侧分组导航直接进入 Memsphere 全局设置或当前 Project 设置/);
@@ -235,6 +243,13 @@ test("framework Memory and Skill describe scoped Settings consistently", async (
     assert.match(memory, /历史路径与 canonical identity 同时匹配/);
     assert.match(memory, /Embedded repair 使用当前 Git worktree/);
     assert.match(memory, /不 commit、push 或使用 Managed publish/);
+    assert.match(memory, /language 同时选择 Memsphere 面向 Agent 的工作语言和 View 固定界面语言/);
+    assert.match(memory, /当前 View 进程立即更新/);
+  }
+  for (const memory of [reservedView, projectView]) {
+    assert.match(memory, /固定界面文案通过独立语言资源展示/);
+    assert.match(memory, /Memory DSL 字段在中文标签与 YAML 原名之间的展示切换是另一项独立偏好/);
+    assert.match(memory, /修改 View host 或 port 仍需执行 memsphere view restart/);
   }
   assert.match(skill, /左侧分组导航直接进入 Memsphere 或当前 Project 设置/);
   assert.match(skill, /右侧只展示当前配置内容/);
@@ -242,6 +257,8 @@ test("framework Memory and Skill describe scoped Settings consistently", async (
   assert.match(skill, /任一已注册 Project/);
   assert.match(skill, /memsphere project repair \[project-name\]/);
   assert.match(skill, /Embedded repair 使用当前 Git worktree/);
+  assert.match(skill, /固定界面文案通过 zh-CN\/en 语言资源/);
+  assert.match(skill, /成功保存 `language` 后下一次加载立即使用新界面语言/);
   assert.doesNotMatch(skill, /project reinitialize/);
 });
 

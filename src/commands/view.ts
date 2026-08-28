@@ -97,7 +97,12 @@ import {
   type RunState,
   type RunStep
 } from "../run/store.js";
-import { browserHtml } from "../view/browser.js";
+import { renderBrowserHtml } from "../view/browser.js";
+import {
+  localizeAcpProviderDefinition,
+  localizeAcpProviderDetection,
+  resolveViewLocale
+} from "../view/locales/index.js";
 import {
   clearViewServiceState,
   getViewServiceStatus,
@@ -313,7 +318,7 @@ async function handleRequest(
   }
 
   if (request.method === "GET" && isViewPagePath(url.pathname)) {
-    sendHtml(response, browserHtml);
+    sendHtml(response, renderBrowserHtml(config.language));
     return;
   }
 
@@ -362,12 +367,12 @@ async function handleRequest(
       await readRegisteredProjectConfigs(config.homeRoot)
     );
     const { candidate: _candidate, ...publicValidation } = validation;
+    const candidateView = validation.candidate?.view ?? { host: "127.0.0.1", port: 0 };
     sendJson(response, validation.valid ? 200 : 422, {
       ...publicValidation,
       expectedRevision: document.revision,
       runningRevision: options.runningRevision ?? document.revision,
-      restartRequired: document.revision !== (options.runningRevision ?? document.revision)
-        || validation.changes.length > 0
+      restartRequired: !sameViewConfig(candidateView, config.view)
     });
     return;
   }
@@ -409,9 +414,10 @@ async function handleRequest(
         ? { acp_providers: validation.candidate.acp_providers }
         : {})
     }).acpProviders ?? defaultAcpProviderInstances();
+    const detectionResults = await detectAcpProviderInstances(providers);
     sendJson(response, 200, {
       detectedAt: new Date().toISOString(),
-      results: await detectAcpProviderInstances(providers)
+      results: detectionResults.map((result) => localizeAcpProviderDetection(result, config.language))
     });
     return;
   }
@@ -431,6 +437,7 @@ async function handleRequest(
         draft: body.config as EditableGlobalConfigDraft,
         projects: () => readRegisteredProjectConfigs(config.homeRoot)
       });
+      config.language = resolveViewLocale(saved.raw.language);
       sendJson(response, 200, {
         ...globalSettingsPayload(
           saved,
@@ -2048,13 +2055,14 @@ function globalSettingsPayload(
   runningView: MemsphereConfig["view"],
   projects: ProjectConfigReference[]
 ): Record<string, unknown> {
+  const diskView = document.raw.view ?? { host: "127.0.0.1", port: 0 };
   return {
     configPath: document.configPath,
     scopeRoot: document.scopeRoot,
     runningRevision,
     runningView,
     diskRevision: document.revision,
-    restartRequired: runningRevision !== document.revision,
+    restartRequired: !sameViewConfig(diskView, runningView),
     explicit: {
       language: Object.hasOwn(document.raw, "language"),
       view: Object.hasOwn(document.raw, "view"),
@@ -2066,11 +2074,18 @@ function globalSettingsPayload(
       view: { host: "127.0.0.1", port: 0 }
     },
     acpProviderCatalog: listAcpProviderDefinitions().map((definition) => ({
-      ...definition,
+      ...localizeAcpProviderDefinition(definition, document.raw.language),
       defaultInstance: defaultAcpProviderInstance(definition.type)
     })),
     providerReferences: providerReferenceMap(projects)
   };
+}
+
+function sameViewConfig(
+  left: MemsphereConfig["view"],
+  right: MemsphereConfig["view"]
+): boolean {
+  return left.host === right.host && left.port === right.port;
 }
 
 function projectSettingsPayload(document: ProjectConfigDocument): Record<string, unknown> {

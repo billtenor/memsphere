@@ -326,3 +326,53 @@ test("global Settings remains available when no Project is selected", async () =
     await import("node:fs/promises").then(({ rm }) => rm(dir, { recursive: true, force: true }));
   }
 });
+
+test("saving language updates the next View page in the same process without requiring restart", async () => {
+  await withSettingsServer("127.0.0.1", async ({ origin }) => {
+    const initialPage = await (await fetch(origin)).text();
+    assert.match(initialPage, /<html lang="zh-CN">/);
+
+    const payload = await (await fetch(`${origin}/api/settings/global`)).json() as {
+      diskRevision: string;
+      config: { language?: string; view?: { host: string; port: number } };
+    };
+    payload.config.language = "en";
+    const saved = await fetch(`${origin}/api/settings/global`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ expectedRevision: payload.diskRevision, config: payload.config })
+    });
+    assert.equal(saved.status, 200);
+    assert.equal((await saved.json() as { restartRequired: boolean }).restartRequired, false);
+
+    const englishPage = await (await fetch(origin)).text();
+    assert.match(englishPage, /<html lang="en">/);
+    assert.match(englishPage, /"common\.refresh":"Refresh"/);
+
+    const current = await (await fetch(`${origin}/api/settings/global`)).json() as {
+      diskRevision: string;
+      config: { language?: string; view?: { host: string; port: number } };
+    };
+    const invalid = await fetch(`${origin}/api/settings/global`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({
+        expectedRevision: current.diskRevision,
+        config: { ...current.config, language: "unsupported" }
+      })
+    });
+    assert.equal(invalid.status, 422);
+    assert.match(await (await fetch(origin)).text(), /<html lang="en">/);
+
+    const validateHostChange = await fetch(`${origin}/api/settings/global/validate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({
+        expectedRevision: current.diskRevision,
+        config: { ...current.config, view: { host: "127.0.0.1", port: 30003 } }
+      })
+    });
+    assert.equal(validateHostChange.status, 200);
+    assert.equal((await validateHostChange.json() as { restartRequired: boolean }).restartRequired, true);
+  });
+});

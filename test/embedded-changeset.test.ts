@@ -362,9 +362,13 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     const invalidOrigin = `http://127.0.0.1:${(invalidView.address() as AddressInfo).port}`;
     const browser = await chromium.launch({ headless: true });
    try {
-     const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
-      await page.goto(`${invalidOrigin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
-      await page.getByRole("heading", { name: "Validation diagnostics", exact: true }).waitFor();
+      const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+      await page.goto(`${invalidOrigin}/projects/embedded/memories?change=${encodeURIComponent(first.changeId)}`);
+      await page.getByText("草稿预览", { exact: true }).first().waitFor();
+      await page.getByRole("button", { name: "shared", exact: true }).click();
+      await page.getByRole("heading", { name: "记忆 YAML 无效", exact: true }).waitFor();
+      assert.match(await page.locator(".meta").first().textContent() ?? "", /存储：embedded/);
+      assert.match(await page.locator(".meta").first().textContent() ?? "", /校验失败/);
       assert.deepEqual(
         await page.evaluate(() => (window as unknown as { currentChangeOperator(): unknown }).currentChangeOperator()),
         { kind: "human", id: "alice" }
@@ -453,8 +457,8 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     try {
       const page = await completedBrowser.newPage();
       await page.goto(`${completedOrigin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
-      await page.getByText(/^(Completed|已完成) ChangeSet$/).waitFor();
-      assert.equal(await page.getByText(/^(Active|进行中) ChangeSet$/).count(), 0);
+      await page.getByText("已完成 · 变更集", { exact: true }).waitFor();
+      assert.equal(await page.getByText("进行中 · 变更集", { exact: true }).count(), 0);
     } finally {
       await completedBrowser.close();
       await new Promise<void>((resolve) => completedView.close(() => resolve()));
