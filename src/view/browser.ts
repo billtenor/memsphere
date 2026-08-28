@@ -1,3 +1,5 @@
+import { resolveViewLocale, serializeViewMessages, type ViewLocale } from "./locales/index.js";
+
 export function shouldRenderTaskStepArtifact(event: unknown): boolean {
   return Boolean(event);
 }
@@ -6,8 +8,8 @@ export function shouldRenderMarkdownArtifact(artifact: { format?: string; render
   return artifact?.format === "markdown" && typeof artifact.renderedContent === "string";
 }
 
-export const browserHtml = String.raw`<!doctype html>
-<html lang="en">
+const browserTemplate = String.raw`<!doctype html>
+<html lang="__MEMSPHERE_VIEW_LANG__">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -526,51 +528,51 @@ export const browserHtml = String.raw`<!doctype html>
     <aside class="sidebar">
       <div class="brand">
         <h1>memsphere</h1>
-        <button class="brand-settings" id="settings-tab" type="button" aria-label="设置" title="设置">&#9881;</button>
+        <button class="brand-settings" id="settings-tab" type="button" data-i18n-aria-label="common.settings" data-i18n-title="common.settings">&#9881;</button>
       </div>
       <div class="project-switcher">
-        <span class="project-label" id="project-select-label">Project</span>
+        <span class="project-label" id="project-select-label" data-i18n="navigation.project"></span>
         <div class="project-select-wrap">
           <button id="project-select" class="project-select" type="button" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="project-select-label project-select-value">
-            <span class="project-select-value" id="project-select-value">Loading</span>
+            <span class="project-select-value" id="project-select-value" data-i18n="common.loading"></span>
             <span class="project-select-caret" aria-hidden="true"></span>
           </button>
           <div id="project-select-menu" class="project-select-menu" role="listbox" aria-labelledby="project-select-label" hidden></div>
         </div>
       </div>
-      <span class="count" id="count">Loading</span>
+      <span class="count" id="count" data-i18n="common.loading"></span>
       <div class="view-tabs">
-        <button class="view-tab active" id="memory-tab" type="button">Memory</button>
-        <button class="view-tab" id="task-tab" type="button">Run</button>
+        <button class="view-tab active" id="memory-tab" type="button" data-i18n="navigation.memory"></button>
+        <button class="view-tab" id="task-tab" type="button" data-i18n="navigation.run"></button>
       </div>
       <div class="memory-source-tabs" id="memory-source-tabs">
-        <button class="memory-source-tab active" id="project-memory-tab" type="button">当前项目</button>
-        <button class="memory-source-tab" id="market-tab" type="button">记忆市场</button>
+        <button class="memory-source-tab active" id="project-memory-tab" type="button" data-i18n="navigation.currentProject"></button>
+        <button class="memory-source-tab" id="market-tab" type="button" data-i18n="navigation.memoryMarket"></button>
       </div>
-      <div class="task-status-tabs" id="task-status-tabs" role="tablist" aria-label="Run status" hidden>
-        <button class="task-status-tab active" id="running-task-tab" type="button" role="tab" aria-selected="true">running</button>
-        <button class="task-status-tab" id="done-task-tab" type="button" role="tab" aria-selected="false">done</button>
-        <button class="task-status-tab" id="abandoned-task-tab" type="button" role="tab" aria-selected="false">abandoned</button>
+      <div class="task-status-tabs" id="task-status-tabs" role="tablist" data-i18n-aria-label="navigation.run" hidden>
+        <button class="task-status-tab active" id="running-task-tab" type="button" role="tab" aria-selected="true" data-i18n="run.status.running"></button>
+        <button class="task-status-tab" id="done-task-tab" type="button" role="tab" aria-selected="false" data-i18n="run.status.done"></button>
+        <button class="task-status-tab" id="abandoned-task-tab" type="button" role="tab" aria-selected="false" data-i18n="run.status.abandoned"></button>
       </div>
-      <input id="search" class="search" type="search" placeholder="Search memories" />
+      <input id="search" class="search" type="search" data-i18n-placeholder="navigation.searchMemories" />
       <div id="nav"></div>
     </aside>
 
     <section class="content">
       <div class="toolbar">
         <div>
-          <h2 class="title" id="title">Memory Browser</h2>
-          <div class="subtitle" id="subtitle">Loading local memory store...</div>
+          <h2 class="title" id="title" data-i18n="navigation.memoryBrowser"></h2>
+          <div class="subtitle" id="subtitle" data-i18n="navigation.loadingStore"></div>
         </div>
         <div class="toolbar-actions">
-          <button class="btn" id="expand">Expand all</button>
-          <button class="btn" id="collapse">Collapse all</button>
-          <button class="btn review-toggle" id="review-toggle" type="button" aria-controls="artifact-review-modal" aria-expanded="false" hidden>Artifact Review</button>
-          <button class="btn" id="change-comments-toggle" type="button" aria-controls="change-comment-sidebar" aria-expanded="true" hidden>收起修改意见</button>
-          <button class="btn" id="refresh">Refresh</button>
+          <button class="btn" id="expand" data-i18n="common.expandAll"></button>
+          <button class="btn" id="collapse" data-i18n="common.collapseAll"></button>
+          <button class="btn review-toggle" id="review-toggle" type="button" aria-controls="artifact-review-modal" aria-expanded="false" data-i18n="review.artifactReview" hidden></button>
+          <button class="btn" id="change-comments-toggle" type="button" aria-controls="change-comment-sidebar" aria-expanded="true" data-i18n="change.hideComments" hidden></button>
+          <button class="btn" id="refresh" data-i18n="common.refresh"></button>
         </div>
       </div>
-      <div id="detail" class="empty">Loading...</div>
+      <div id="detail" class="empty" data-i18n="common.loading"></div>
     </section>
 
   </main>
@@ -579,42 +581,42 @@ export const browserHtml = String.raw`<!doctype html>
     <div class="artifact-review-modal-shell">
       <header class="artifact-review-modal-head">
         <div class="artifact-review-modal-heading">
-          <h2 id="artifact-review-modal-title">Artifact Review</h2>
+          <h2 id="artifact-review-modal-title" data-i18n="review.artifactReview"></h2>
           <div class="artifact-review-modal-subtitle" id="artifact-review-modal-subtitle"></div>
         </div>
-        <button class="btn" id="artifact-review-modal-close" type="button">Close</button>
+        <button class="btn" id="artifact-review-modal-close" type="button" data-i18n="common.close"></button>
       </header>
       <div class="artifact-review-mobile-tabs" id="artifact-review-mobile-tabs">
-        <button class="view-tab active" id="artifact-review-artifact-tab" type="button">Artifact</button>
-        <button class="view-tab" id="artifact-review-review-tab" type="button">Review</button>
+        <button class="view-tab active" id="artifact-review-artifact-tab" type="button" data-i18n="review.artifact"></button>
+        <button class="view-tab" id="artifact-review-review-tab" type="button" data-i18n="review.review"></button>
       </div>
       <div class="artifact-review-modal-body">
         <section class="artifact-review-modal-pane artifact-pane" id="artifact-review-artifact-pane">
-          <div class="artifact-review-artifact-head"><div class="artifact-review-artifact-heading"><h3 id="artifact-review-artifact-title">Artifact</h3><div id="artifact-review-material-selector"></div></div></div>
+          <div class="artifact-review-artifact-head"><div class="artifact-review-artifact-heading"><h3 id="artifact-review-artifact-title" data-i18n="review.artifact"></h3><div id="artifact-review-material-selector"></div></div></div>
           <div id="artifact-review-artifact-content" class="artifact-review-artifact-content"></div>
         </section>
         <div class="artifact-review-modal-resizer" id="artifact-review-modal-resizer" role="separator" aria-controls="artifact-review-artifact-pane artifact-review-review-pane" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="75" aria-valuenow="58" tabindex="0"></div>
         <aside class="artifact-review-modal-pane review-pane" id="artifact-review-review-pane">
           <section class="panel artifact-review-panel" id="artifact-review-scope-panel">
-            <h3 id="artifact-review-scope-title">Review scope</h3>
+            <h3 id="artifact-review-scope-title" data-i18n="review.scope"></h3>
             <div id="artifact-review-modal-controls" class="artifact-review-panel-content"></div>
           </section>
           <section class="panel artifact-review-panel" id="artifact-review-my-panel">
-            <h3 id="artifact-review-my-title">My review</h3>
+            <h3 id="artifact-review-my-title" data-i18n="review.myReview"></h3>
             <div class="muted" id="artifact-review-comment-summary"></div>
             <div id="artifact-review-my-content" class="artifact-review-panel-content"></div>
             <div id="artifact-review-submit-area" class="artifact-review-operation-group artifact-review-submit-area">
-              <h4 id="artifact-review-submit-title">Submit review</h4>
+              <h4 id="artifact-review-submit-title" data-i18n="review.submit"></h4>
               <p class="artifact-review-operation-help" id="artifact-review-submit-summary"></p>
-              <button class="btn primary" id="artifact-review-submit">Submit review</button>
+              <button class="btn primary" id="artifact-review-submit" data-i18n="review.submit"></button>
             </div>
           </section>
           <section class="panel artifact-review-panel" id="artifact-review-progress-panel">
-            <h3 id="artifact-review-progress-title">Participation progress</h3>
+            <h3 id="artifact-review-progress-title" data-i18n="review.participation"></h3>
             <div id="artifact-review-progress-content" class="artifact-review-panel-content"></div>
           </section>
           <section class="panel artifact-review-panel" id="artifact-review-record-panel">
-            <h3 id="artifact-review-record-title">Review record</h3>
+            <h3 id="artifact-review-record-title" data-i18n="review.record"></h3>
             <div id="artifact-review-modal-comments" class="comment-list"></div>
           </section>
         </aside>
@@ -623,6 +625,8 @@ export const browserHtml = String.raw`<!doctype html>
   </dialog>
 
   <script>
+    const uiLocale = __MEMSPHERE_VIEW_LOCALE__;
+    const uiMessages = __MEMSPHERE_VIEW_MESSAGES__;
     const kindOrder = ["procedures", "schemas", "concepts", "statements"];
     const selectedTaskKey = "memsphere.selectedTask.v1";
     const viewModeKey = "memsphere.viewMode.v1";
@@ -690,8 +694,10 @@ export const browserHtml = String.raw`<!doctype html>
       contractValidation: { zh: "结构与契约校验", yaml: "Contract validation" },
       remaining: { zh: "剩余", yaml: "remaining" },
       constraintSource: { zh: "约束来源", yaml: "Constraint source" },
+      next: { zh: "下一步", yaml: "Next" },
       inlineSchema: { zh: "内嵌图式", yaml: "inline schema" },
       type: { zh: "类型", yaml: "type" },
+      optional: { zh: "可选", yaml: "optional" },
       fields: { zh: "字段", yaml: "fields" },
       item: { zh: "元素", yaml: "item" },
       items: { zh: "候选元素", yaml: "items" },
@@ -699,93 +705,24 @@ export const browserHtml = String.raw`<!doctype html>
       final: { zh: "最终交付物", yaml: "final" },
       finalArtifacts: { zh: "最终交付物", yaml: "final artifacts" },
       layout: { zh: "布局", yaml: "layout" },
+      min: { zh: "最少", yaml: "min" },
+      max: { zh: "最多", yaml: "max" },
+      unbounded: { zh: "不设上限", yaml: "unbounded" },
       statement: { zh: "命题", yaml: "statement" },
       action: { zh: "要做什么", yaml: "action" },
       then: { zh: "然后", yaml: "then" },
       artifactContent: { zh: "产物内容", yaml: "artifact.value" },
-      currentStep: { zh: "当前步骤", yaml: "current" },
-      jumpToCurrentStep: { zh: "跳到当前步骤", yaml: "Jump to current" },
-      jumpToCurrentStepTitle: { zh: "跳转到当前正在运行的流程节点", yaml: "Jump to the currently running flow node" },
-      archive: { zh: "归档", yaml: "Archive" },
-      abandon: { zh: "废弃", yaml: "Abandon" },
-      abandonRunConfirm: { zh: "确认废弃这个 Run？废弃后将不能继续执行。", yaml: "Abandon this Run? It cannot continue after abandonment." },
-      archiveRunConfirm: { zh: "归档这个 Run？归档后它将不再出现在 Run 列表中。", yaml: "Archive this Run? It will no longer appear in the Run list." },
-      archiveChangeConfirm: { zh: "归档这个 ChangeSet？归档后它将不再在页面中展示。", yaml: "Archive this ChangeSet? It will no longer appear in the View." },
-      completed: { zh: "已完成", yaml: "done" },
-      stopped: { zh: "已停止", yaml: "stopped" },
-      changeActive: { zh: "进行中", yaml: "Active" },
-      changeCompleted: { zh: "已完成", yaml: "Completed" },
-      changeAbandoned: { zh: "已废弃", yaml: "Abandoned" },
-      changeCommentPending: { zh: "待处理", yaml: "Pending" },
-      changeCommentProcessing: { zh: "处理中", yaml: "Processing" },
-      changeCommentCompleted: { zh: "已完成", yaml: "Completed" },
-      changeCommentEnded: { zh: "未处理（ChangeSet 已结束）", yaml: "Unprocessed (ChangeSet ended)" },
-      changeCommentAbandoned: { zh: "未处理（ChangeSet 已废弃）", yaml: "Unprocessed (ChangeSet abandoned)" },
-      changeComments: { zh: "修改意见", yaml: "Comments" },
-      hideChangeComments: { zh: "收起修改意见", yaml: "Hide comments" },
-      showChangeComments: { zh: "显示修改意见", yaml: "Show comments" },
-      changeCommentOutdated: { zh: "原内容已变化", yaml: "Content changed" },
-      changeCommentOutdatedHelp: { zh: "这条意见提交后，对应位置的内容发生了变化；意见仍需处理。", yaml: "The content at this location changed after the comment was submitted; the comment still needs handling." },
-      notStarted: { zh: "未开始", yaml: "pending" },
-      waitingReport: { zh: "等待上报", yaml: "waiting" },
-      none: { zh: "无", yaml: "none" },
       missingTarget: { zh: "未找到 ", yaml: "missing " },
-      noSteps: { zh: "没有步骤", yaml: "No steps" },
-      noArtifacts: { zh: "还没有上报产物。", yaml: "No artifact has been reported yet." },
-      hideSystemMemories: { zh: "隐藏系统记忆", yaml: "Hide system memory" },
       format: { zh: "格式", yaml: "format" },
       boolean: { zh: "判断结果", yaml: "boolean" },
       string: { zh: "短文本", yaml: "string" },
       number: { zh: "数字", yaml: "number" },
       markdown: { zh: "文档", yaml: "markdown" },
+      column: { zh: "列", yaml: "Column" },
+      file: { zh: "文件", yaml: "file" },
+      inline: { zh: "内嵌", yaml: "inline" },
       json: { zh: "JSON", yaml: "json" },
-      yaml: { zh: "YAML", yaml: "yaml" },
-      legacyReadOnly: { zh: "旧版只读", yaml: "v1 read-only" },
-      validated: { zh: "校验通过", yaml: "validated" },
-      artifactReview: { zh: "产物评审", yaml: "Artifact Review" },
-      reviewArtifact: { zh: "评审产物", yaml: "Reviewed artifact" },
-      artifactPane: { zh: "产物", yaml: "Artifact" },
-      reviewPane: { zh: "评审", yaml: "Review" },
-      close: { zh: "关闭", yaml: "Close" },
-      reviewers: { zh: "评审", yaml: "Review" },
-      pendingReview: { zh: "待评审", yaml: "Pending review" },
-      reviewedArtifact: { zh: "待评审产物", yaml: "Artifact under review" },
-      identity: { zh: "评审身份", yaml: "Review identity" },
-      decisionVote: { zh: "决策票", yaml: "Decision vote" },
-      advisoryVote: { zh: "建议票", yaml: "Advisory vote" },
-      approve: { zh: "通过", yaml: "Approve" },
-      requestChanges: { zh: "修改", yaml: "Request changes" },
-      abstain: { zh: "弃权", yaml: "Abstain" },
-      submitArtifactReview: { zh: "提交评审", yaml: "Submit review" },
-      participants: { zh: "参与进度", yaml: "Participation" },
-      roundSummary: { zh: "本轮汇总", yaml: "Round summary" },
-      myDraft: { zh: "我的草稿", yaml: "My draft" },
-      submittedOpinions: { zh: "已提交意见", yaml: "Submitted opinions" },
-      reviewComments: { zh: "评审意见", yaml: "Review comments" },
-      voteSummary: { zh: "投票摘要", yaml: "Vote summary" },
-      noReviewComments: { zh: "无单独评审意见", yaml: "No separate review comments" },
-      reviewTime: { zh: "评审时间", yaml: "Review time" },
-      inProgress: { zh: "进行中", yaml: "In progress" },
-      automatic: { zh: "自动", yaml: "Automatic" },
-      runner: { zh: "执行者", yaml: "Runner" },
-      round: { zh: "轮次", yaml: "Round" },
-      revisionSummary: { zh: "修改摘要", yaml: "Revision summary" },
-      selectIdentity: { zh: "请选择评审身份", yaml: "Select a review identity" },
-      resizeReview: { zh: "调整产物与评审区域宽度", yaml: "Resize artifact and review panels" },
-      resetReviewWidth: { zh: "双击恢复默认宽度", yaml: "Double-click to reset width" },
-      submitted: { zh: "已提交", yaml: "Submitted" },
-      draft: { zh: "草稿", yaml: "Draft" },
-      passed: { zh: "已通过", yaml: "Passed" },
-      changesRequested: { zh: "需修改", yaml: "Changes requested" },
-      cancelled: { zh: "已取消", yaml: "Cancelled" },
-      awaitingRunnerVote: { zh: "等待执行者投票", yaml: "Awaiting Runner vote" },
-      pendingVote: { zh: "待投票", yaml: "Pending vote" },
-      agentReviewer: { zh: "Agent 评审", yaml: "Agent reviewer" },
-      queued: { zh: "等待启动", yaml: "Queued" },
-      running: { zh: "评审中", yaml: "Running" },
-      failed: { zh: "执行失败", yaml: "Failed" },
-      retry: { zh: "重试", yaml: "Retry" },
-      attempt: { zh: "尝试", yaml: "Attempt" }
+      yaml: { zh: "YAML", yaml: "yaml" }
     };
     const state = {
       viewMode: routeViewMode(initialBrowserRoute),
@@ -917,19 +854,19 @@ export const browserHtml = String.raw`<!doctype html>
         const name = decoded(parts[2]);
         return kind && name
           ? { page: "memory", kind, name, changeId, fragment }
-          : { page: "invalid", mode: "memory", error: "Invalid Memory URL.", fragment };
+          : { page: "invalid", mode: "memory", error: uiT("route.invalidMemory"), fragment };
       }
       if (parts[0] === "projects" && parts[2] === "memories" && parts.length === 3) {
         const project = decoded(parts[1]);
         return project
           ? { page: "memories", project, changeId, fragment }
-          : { page: "invalid", mode: "memory", error: "Invalid Project Memory URL.", fragment };
+          : { page: "invalid", mode: "memory", error: uiT("route.invalidProjectMemory"), fragment };
       }
       if (parts[0] === "projects" && parts[2] === "market" && parts.length === 3) {
         const project = decoded(parts[1]);
         return project
           ? { page: "market", project, fragment }
-          : { page: "invalid", mode: "market", error: "Invalid Project Market URL.", fragment };
+          : { page: "invalid", mode: "market", error: uiT("route.invalidProjectMarket"), fragment };
       }
       if (parts[0] === "projects" && parts[2] === "memories" && parts.length === 5) {
         const project = decoded(parts[1]);
@@ -937,21 +874,21 @@ export const browserHtml = String.raw`<!doctype html>
         const name = decoded(parts[4]);
         return project && kind && name
           ? { page: "memory", project, kind, name, changeId, fragment }
-          : { page: "invalid", mode: "memory", error: "Invalid Project Memory URL.", fragment };
+          : { page: "invalid", mode: "memory", error: uiT("route.invalidProjectMemory"), fragment };
       }
       if (parts[0] === "projects" && parts[2] === "changes" && parts.length === 4) {
         const project = decoded(parts[1]);
         const routeChangeId = decoded(parts[3]);
         return project && routeChangeId
           ? { page: "change", project, changeId: routeChangeId, fragment }
-          : { page: "invalid", mode: "changes", error: "Invalid ChangeSet URL.", fragment };
+          : { page: "invalid", mode: "changes", error: uiT("route.invalidChangeSet"), fragment };
       }
       if (pathname === "/tasks") return { page: "tasks", fragment };
       if (parts[0] === "tasks" && parts.length === 2) {
         const runId = decoded(parts[1]);
         return runId
           ? { page: "task", runId, fragment }
-          : { page: "invalid", mode: "task", error: "Invalid Run URL.", fragment };
+          : { page: "invalid", mode: "task", error: uiT("route.invalidRun"), fragment };
       }
       if (parts[0] === "tasks" && parts[2] === "artifact-reviews" && parts.length === 4) {
         const runId = decoded(parts[1]);
@@ -965,16 +902,16 @@ export const browserHtml = String.raw`<!doctype html>
               material: search.get("material") || "",
               fragment
             }
-          : { page: "invalid", mode: "task", error: "Invalid Artifact Review URL.", fragment };
+          : { page: "invalid", mode: "task", error: uiT("route.invalidArtifactReview"), fragment };
       }
       if (parts[0] === "settings" && parts.length === 2) {
         const moduleName = decoded(parts[1]);
         const settings = moduleName ? settingsRouteDestinations[moduleName] : null;
         return settings
           ? { page: "settings", publicModule: moduleName, settings, fragment }
-          : { page: "invalid", mode: "settings", error: "Settings page not found: " + (moduleName || parts[1]), fragment };
+          : { page: "invalid", mode: "settings", error: uiT("route.settingsNotFound", { name: moduleName || parts[1] }), fragment };
       }
-      return { page: "invalid", mode: "memory", error: "Page not found: " + pathname, fragment };
+      return { page: "invalid", mode: "memory", error: uiT("route.pageNotFound", { path: pathname }), fragment };
     }
 
     function routeViewMode(route) {
@@ -991,13 +928,115 @@ export const browserHtml = String.raw`<!doctype html>
       return encodeURIComponent(String(value || ""));
     }
 
+    function uiT(key, params = {}) {
+      const message = uiMessages[key];
+      if (!message) throw new Error("Missing View message: " + key);
+      const template = typeof message === "string"
+        ? message
+        : message[new Intl.PluralRules(uiLocale).select(Number(params.count)) === "one" ? "one" : "other"];
+      return template.replace(/\{([A-Za-z0-9_]+)\}/g, (_, name) => String(params[name] ?? "{" + name + "}"));
+    }
+
+    function uiDate(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value || "");
+      return new Intl.DateTimeFormat(uiLocale, {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: uiLocale === "zh-CN" ? false : undefined
+      }).format(date);
+    }
+
+    function applyStaticTranslations(root = document) {
+      for (const node of root.querySelectorAll("[data-i18n]")) node.textContent = uiT(node.dataset.i18n);
+      for (const node of root.querySelectorAll("[data-i18n-title]")) node.title = uiT(node.dataset.i18nTitle);
+      for (const node of root.querySelectorAll("[data-i18n-placeholder]")) node.placeholder = uiT(node.dataset.i18nPlaceholder);
+      for (const node of root.querySelectorAll("[data-i18n-aria-label]")) {
+        node.setAttribute("aria-label", uiT(node.dataset.i18nAriaLabel));
+      }
+    }
+
+    const legacyUiMessageKeys = {
+      archive: "common.archive",
+      abandon: "common.abandon",
+      archiveRunConfirm: "run.archiveConfirm",
+      abandonRunConfirm: "run.abandonConfirm",
+      archiveChangeConfirm: "change.archiveConfirm",
+      artifactReview: "review.artifactReview",
+      artifactPane: "review.artifact",
+      reviewPane: "review.review",
+      close: "common.close",
+      pendingReview: "review.pendingReview",
+      identity: "review.identity",
+      decisionVote: "review.decisionVote",
+      advisoryVote: "review.advisoryVote",
+      approve: "review.approve",
+      requestChanges: "review.requestChanges",
+      abstain: "review.abstain",
+      submitArtifactReview: "review.submit",
+      participants: "review.participation",
+      roundSummary: "review.roundSummary",
+      draft: "review.draft",
+      submittedOpinions: "review.submittedOpinions",
+      reviewComments: "review.comments",
+      voteSummary: "review.voteSummary",
+      noReviewComments: "review.noReviewComments",
+      reviewTime: "review.reviewTime",
+      inProgress: "time.inProgress",
+      automatic: "review.automatic",
+      runner: "review.runner",
+      round: "review.round",
+      revisionSummary: "review.revisionSummary",
+      selectIdentity: "review.selectIdentity",
+      submitted: "review.submitted",
+      passed: "review.passed",
+      changesRequested: "review.changesRequested",
+      cancelled: "review.cancelled",
+      awaitingRunnerVote: "review.awaitingRunnerVote",
+      pendingVote: "review.pendingVote",
+      agentReviewer: "review.agentReviewer",
+      queued: "review.queued",
+      running: "review.running",
+      failed: "review.failed",
+      retry: "review.retry",
+      attempt: "review.attempt",
+      reviewArtifact: "review.reviewArtifact",
+      changeComments: "change.comments",
+      hideChangeComments: "change.hideComments",
+      showChangeComments: "change.showComments",
+      changeCommentOutdated: "change.commentOutdated",
+      changeCommentOutdatedHelp: "change.commentOutdatedHelp",
+      hideSystemMemories: "memory.hideSystem",
+      jumpToCurrentStep: "run.jumpToCurrent",
+      jumpToCurrentStepTitle: "run.jumpToCurrentTitle",
+      currentStep: "run.currentStep",
+      completed: "run.step.completed",
+      stopped: "run.step.stopped",
+      notStarted: "run.notStarted",
+      noArtifacts: "run.noArtifacts",
+      noSteps: "run.noSteps",
+      legacyReadOnly: "run.legacyReadOnly",
+      validated: "run.artifactValidated",
+      reviewers: "review.reviewers",
+      reviewedArtifact: "review.reviewedArtifact",
+      resizeReview: "review.resize",
+      resetReviewWidth: "review.resetWidth"
+    };
+
     function t(key) {
+      const uiKey = legacyUiMessageKeys[key];
+      if (uiKey) return uiT(uiKey);
       return vocabulary[key]?.[displayLanguage] || key;
     }
 
     function artifactReviewImplementationEvidenceLabel(referenced) {
-      if (displayLanguage === "zh") return "实现证据：" + (referenced ? "已引用" : "未引用");
-      return "Implementation evidence: " + (referenced ? "referenced" : "not referenced");
+      return uiT("review.implementationEvidence", {
+        status: uiT(referenced ? "review.evidenceReferenced" : "review.evidenceNotReferenced")
+      });
     }
 
     const el = {
@@ -1049,6 +1088,8 @@ export const browserHtml = String.raw`<!doctype html>
     };
 
     let projectSwitchChain = Promise.resolve();
+
+    applyStaticTranslations();
 
     document.getElementById("expand").addEventListener("click", () => setAllSections(true));
     document.getElementById("collapse").addEventListener("click", () => setAllSections(false));
@@ -1205,7 +1246,7 @@ export const browserHtml = String.raw`<!doctype html>
         return {
           page: "invalid",
           mode: "memory",
-          error: "Project not found: " + route.project,
+          error: uiT("route.projectNotFound", { name: route.project }),
           fragment: route.fragment || ""
         };
       }
@@ -1218,8 +1259,8 @@ export const browserHtml = String.raw`<!doctype html>
       const payload = await response.json();
       state.projects = (payload.projects || []).filter(project => !project.missing);
       state.currentProject = payload.current || "";
-      el.projectSelectValue.textContent = state.currentProject || "No Project";
-      el.projectSelect.title = state.currentProject || "No Project";
+      el.projectSelectValue.textContent = state.currentProject || uiT("navigation.noProject");
+      el.projectSelect.title = state.currentProject || uiT("navigation.noProject");
       el.projectSelectMenu.innerHTML = "";
       for (const project of state.projects) {
         const option = document.createElement("button");
@@ -1329,23 +1370,23 @@ export const browserHtml = String.raw`<!doctype html>
         && projectScope.draft
         && JSON.stringify(projectScope.draft) !== JSON.stringify(projectScope.data.config)
       );
-      return !projectDirty || window.confirm("当前 Project 设置有未保存修改。放弃修改并切换 Project？");
+      return !projectDirty || window.confirm(uiT("navigation.projectUnsavedConfirm"));
     }
 
     function renderFatalError(error) {
       const message = error instanceof Error ? error.message : String(error);
-      el.title.textContent = "Failed to load memsphere";
+      el.title.textContent = uiT("fatal.title");
       el.subtitle.textContent = "";
       el.detail.className = "empty";
       el.detail.textContent = message;
       el.nav.innerHTML = "";
-      el.count.textContent = "Error";
+      el.count.textContent = uiT("common.error");
     }
 
     async function loadMemories() {
       const projectGeneration = state.projectGeneration;
       el.detail.className = "empty";
-      el.detail.textContent = "Loading...";
+      el.detail.textContent = uiT("common.loading");
       const params = new URLSearchParams({ representation: "summary" });
       if (state.changeId) params.set("change", state.changeId);
       const response = await fetch("/api/memories?" + params.toString());
@@ -1382,7 +1423,7 @@ export const browserHtml = String.raw`<!doctype html>
     async function loadMarket() {
       const projectGeneration = state.projectGeneration;
       el.detail.className = "empty";
-      el.detail.textContent = "Loading...";
+      el.detail.textContent = uiT("common.loading");
       const response = await fetch("/api/market/memories");
       if (!response.ok) throw new Error(await response.text());
       if (projectGeneration !== state.projectGeneration) return false;
@@ -1598,7 +1639,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function fetchArtifactReviewContext(reviewId, roundId, actorId) {
       const runId = state.selectedTaskId;
-      if (!runId) throw new Error("No Run selected for Artifact Review");
+      if (!runId) throw new Error(uiT("review.noRunSelected"));
       const response = await fetch(
         "/api/runs/" + encodeURIComponent(runId)
         + "/artifact-reviews/" + encodeURIComponent(reviewId)
@@ -1627,7 +1668,7 @@ export const browserHtml = String.raw`<!doctype html>
             state.settingsScopes.project.data = null;
             state.settingsScopes.project.draft = null;
             state.settingsTokenError = state.settingsToken
-              ? "操作令牌不正确，请检查后重试。"
+              ? uiT("settings.tokenInvalid")
               : "";
             sessionStorage.removeItem(settingsTokenKey);
             applySettingsScope(state.settingsScope);
@@ -1720,8 +1761,8 @@ export const browserHtml = String.raw`<!doctype html>
       const nav = document.createElement("div");
       nav.className = "settings-nav";
       const groups = [
-        ["global", "Memsphere", [["overview", "概览"], ["general", "常规"], ["view", "View 服务"], ["providers", "ACP Provider"]]],
-        ["project", "Project · " + state.currentProject, [["overview", "概览"], ["participants", "参与者配置"]]]
+        ["global", "Memsphere", [["overview", uiT("settings.overview")], ["general", uiT("settings.general")], ["view", uiT("settings.viewService")], ["providers", uiT("settings.providers")]]],
+        ["project", uiT("navigation.project") + " · " + state.currentProject, [["overview", uiT("settings.overview")], ["participants", uiT("settings.participants")]]]
       ];
       for (const [scopeName, headingText, modules] of groups) {
         if (scopeName === "project" && !state.currentProject) continue;
@@ -1765,11 +1806,11 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderSettings() {
       el.title.textContent = state.settingsScope === "global"
-        ? "Memsphere 设置"
-        : state.currentProject ? state.currentProject + " 项目设置" : "Project 设置";
+        ? uiT("navigation.settingsLabel", { name: "Memsphere" })
+        : uiT("navigation.projectSettingsLabel", { name: state.currentProject || uiT("navigation.project") });
       el.subtitle.textContent = state.settingsScope === "global"
-        ? "管理 Memsphere Home 全局配置"
-        : state.currentProject ? "管理当前 Project 配置" : "当前没有可管理的 Project";
+        ? uiT("navigation.globalSettingsSubtitle")
+        : uiT("navigation.projectSettingsSubtitle");
       el.detail.className = "";
       el.detail.innerHTML = "";
       const layout = document.createElement("div");
@@ -1777,7 +1818,7 @@ export const browserHtml = String.raw`<!doctype html>
       el.detail.append(layout);
 
       if (state.settingsLoading) {
-        layout.append(settingsEmpty("正在读取配置..."));
+        layout.append(settingsEmpty(uiT("settings.loading")));
         return;
       }
       if (state.settingsMeta?.requiresToken && !state.settingsScopes.global.data) {
@@ -1786,8 +1827,8 @@ export const browserHtml = String.raw`<!doctype html>
       }
       if (!state.settingsData || !state.settingsDraft) {
         layout.append(settingsEmpty(state.settingsScope === "project"
-          ? "当前没有可管理的 Project。Memsphere 全局设置仍然可用。"
-          : "配置尚未加载。"));
+          ? uiT("settings.projectUnavailable")
+          : uiT("settings.notLoaded")));
         return;
       }
 
@@ -1822,8 +1863,8 @@ export const browserHtml = String.raw`<!doctype html>
       const section = document.createElement("section");
       section.className = "settings-section settings-token";
       const title = document.createElement("h3");
-      title.textContent = "验证配置操作权限";
-      const field = settingsTextField("操作令牌", state.settingsToken, value => {
+      title.textContent = uiT("settings.validatePermission");
+      const field = settingsTextField(uiT("settings.token"), state.settingsToken, value => {
         state.settingsToken = value.trim();
         state.settingsTokenError = "";
         field.querySelector(".settings-error")?.remove();
@@ -1843,15 +1884,15 @@ export const browserHtml = String.raw`<!doctype html>
       const help = document.createElement("div");
       help.className = "settings-help";
       help.append(
-        document.createTextNode("不知道令牌？请在启动 View 的工作区执行 "),
+        document.createTextNode(uiT("settings.tokenHelpPrefix")),
         settingsInlineCode("memsphere view status"),
-        document.createTextNode("。")
+        document.createTextNode(uiT("settings.tokenHelpSuffix"))
       );
       field.append(help);
       const action = document.createElement("button");
       action.type = "button";
       action.className = "btn primary";
-      action.textContent = "进入配置中心";
+      action.textContent = uiT("settings.enter");
       action.addEventListener("click", () => {
         loadSettings().then(renderAll).catch(renderFatalError);
       });
@@ -1863,15 +1904,15 @@ export const browserHtml = String.raw`<!doctype html>
       const status = document.createElement("div");
       status.id = "settings-status";
       status.className = "settings-status";
-      status.append(pill("磁盘配置 " + shortRevision(state.settingsData.diskRevision), false, "strong"));
+      status.append(pill(uiT("settings.diskConfig", { revision: shortRevision(state.settingsData.diskRevision) }), false, "strong"));
       if (state.settingsScope === "global") {
-        status.append(pill("运行配置 " + shortRevision(state.settingsData.runningRevision)));
-        status.append(pill(state.settingsData.restartRequired ? "待重启生效" : "已生效", false, state.settingsData.restartRequired ? "warn" : "done"));
+        status.append(pill(uiT("settings.runningConfig", { revision: shortRevision(state.settingsData.runningRevision) })));
+        status.append(pill(uiT(state.settingsData.restartRequired ? "settings.restartPending" : "settings.applied"), false, state.settingsData.restartRequired ? "warn" : "done"));
       } else {
-        status.append(pill("Project 配置", false, "done"));
+        status.append(pill(uiT("settings.scope.project"), false, "done"));
       }
-      status.append(pill(settingsIsDirty() ? "未保存修改" : "没有未保存修改", false, settingsIsDirty() ? "warn" : "done"));
-      status.append(pill("错误 " + state.settingsErrors.length, false, state.settingsErrors.length ? "warn" : ""));
+      status.append(pill(uiT(settingsIsDirty() ? "settings.unsaved" : "settings.noUnsaved"), false, settingsIsDirty() ? "warn" : "done"));
+      status.append(pill(uiT("settings.errorCount", { count: state.settingsErrors.length }), false, state.settingsErrors.length ? "warn" : ""));
       return status;
     }
 
@@ -1879,35 +1920,35 @@ export const browserHtml = String.raw`<!doctype html>
       const section = document.createElement("section");
       section.className = "settings-section";
       const title = document.createElement("h3");
-      title.textContent = "概览";
+      title.textContent = uiT("settings.overview");
       const grid = document.createElement("div");
       grid.className = "settings-grid";
       if (state.settingsScope === "global") {
         const projectCount = state.projects.length;
         grid.append(
-          settingsReadOnly("Scope", "Memsphere Home"),
-          settingsReadOnly("全局配置", state.settingsData.configPath),
-          settingsReadOnly("已注册 Project", String(projectCount)),
-          settingsReadOnly("ACP Provider", String(state.settingsData.acpProviderCatalog?.length || 0))
+          settingsReadOnly(uiT("settings.scope"), "Memsphere Home"),
+          settingsReadOnly(uiT("settings.scope.global"), state.settingsData.configPath),
+          settingsReadOnly(uiT("settings.registeredProjects"), String(projectCount)),
+          settingsReadOnly(uiT("settings.providerCount"), String(state.settingsData.acpProviderCatalog?.length || 0))
         );
       } else {
         grid.append(
-          settingsReadOnly("Project", state.settingsData.projectName || "-"),
-          settingsReadOnly("Project 配置", state.settingsData.configPath),
-          settingsReadOnly("Store 类型", state.settingsData.store?.type || "-"),
-          settingsReadOnly("Store", JSON.stringify(state.settingsData.store || {}))
+          settingsReadOnly(uiT("navigation.project"), state.settingsData.projectName || "-"),
+          settingsReadOnly(uiT("settings.scope.project"), state.settingsData.configPath),
+          settingsReadOnly(uiT("settings.storeType"), state.settingsData.store?.type || "-"),
+          settingsReadOnly(uiT("settings.store"), JSON.stringify(state.settingsData.store || {}))
         );
       }
       section.append(title, grid);
       if (state.settingsScope === "project") {
         const storageTitle = document.createElement("h4");
-        storageTitle.textContent = "存储位置";
+        storageTitle.textContent = uiT("settings.storageLocation");
         const storageGrid = document.createElement("div");
         storageGrid.className = "settings-grid";
         for (const [key, label] of [
-          ["memoryRoot", "Memory 根目录"],
-          ["runsRoot", "Run 根目录"],
-          ["archiveRoot", "Archive 根目录"]
+          ["memoryRoot", uiT("settings.memoryRoot")],
+          ["runsRoot", uiT("settings.runsRoot")],
+          ["archiveRoot", uiT("settings.archiveRoot")]
         ]) {
           storageGrid.append(settingsReadOnly(label, state.settingsData.resolvedPaths[key]));
         }
@@ -1920,11 +1961,11 @@ export const browserHtml = String.raw`<!doctype html>
       const section = document.createElement("section");
       section.className = "settings-section";
       const title = document.createElement("h3");
-      title.textContent = "常规";
+      title.textContent = uiT("settings.general");
       const grid = document.createElement("div");
       grid.className = "settings-grid";
       grid.append(settingsSelectField(
-        "工作语言",
+        uiT("settings.workingLanguage"),
         state.settingsDraft.language || "zh-CN",
         [
           ["zh-CN", "中文"],
@@ -1942,22 +1983,22 @@ export const browserHtml = String.raw`<!doctype html>
       const section = document.createElement("section");
       section.className = "settings-section";
       const title = document.createElement("h3");
-      title.textContent = "View 服务";
+      title.textContent = uiT("settings.viewService");
       const explicit = Boolean(state.settingsDraft.view);
       const view = state.settingsDraft.view || cloneSettingsValue(state.settingsData.defaults.view);
       const grid = document.createElement("div");
       grid.className = "settings-grid";
       grid.append(
-        settingsTextField("Host", view.host, value => {
+        settingsTextField(uiT("settings.host"), view.host, value => {
           state.settingsDraft.view ||= cloneSettingsValue(state.settingsData.defaults.view);
           state.settingsDraft.view.host = value;
         }, { path: "view.host", disabled: !explicit }),
-        settingsTextField("Port", String(view.port), value => {
+        settingsTextField(uiT("settings.port"), String(view.port), value => {
           state.settingsDraft.view ||= cloneSettingsValue(state.settingsData.defaults.view);
           state.settingsDraft.view.port = Number(value);
         }, { path: "view.port", type: "number", min: 0, max: 65535, disabled: !explicit })
       );
-      const useDefault = settingsPermissionCheck("使用默认 View 配置", !explicit, checked => {
+      const useDefault = settingsPermissionCheck(uiT("settings.useDefaultView"), !explicit, checked => {
         if (checked) delete state.settingsDraft.view;
         else state.settingsDraft.view = cloneSettingsValue(state.settingsData.defaults.view);
         renderAll();
@@ -1965,7 +2006,7 @@ export const browserHtml = String.raw`<!doctype html>
       useDefault.classList.add("settings-default-toggle");
       const help = document.createElement("p");
       help.className = "settings-help";
-      help.textContent = "保存后执行 memsphere view restart，使 Host 与 Port 配置生效。";
+      help.textContent = uiT("settings.viewRestartHelp");
       section.append(title, grid, useDefault, help);
       return section;
     }
@@ -1977,19 +2018,19 @@ export const browserHtml = String.raw`<!doctype html>
       heading.className = "settings-section-head";
       const headingCopy = document.createElement("div");
       const title = document.createElement("h3");
-      title.textContent = "参与者配置";
+      title.textContent = uiT("settings.participants");
       const subtitle = document.createElement("p");
       subtitle.className = "settings-section-subtitle";
-      subtitle.textContent = "按参与者展开编辑权限；Agent 只选择 ACP Provider 与 Model。";
+      subtitle.textContent = uiT("settings.participantHelp");
       headingCopy.append(title, subtitle);
       if (!state.settingsDraft.control_plane) {
         const message = document.createElement("p");
         message.className = "muted";
-        message.textContent = "当前未启用参与者控制平面。";
+        message.textContent = uiT("settings.participantDisabled");
         const enable = document.createElement("button");
         enable.type = "button";
         enable.className = "btn";
-        enable.textContent = "启用参与者配置";
+        enable.textContent = uiT("settings.enableParticipants");
         enable.addEventListener("click", () => {
           state.settingsDraft.control_plane = { runner: { permissions: [] }, actors: {} };
           renderAll();
@@ -2011,13 +2052,13 @@ export const browserHtml = String.raw`<!doctype html>
       const add = document.createElement("button");
       add.type = "button";
       add.className = "btn";
-      add.textContent = "添加参与者";
+      add.textContent = uiT("settings.addParticipant");
       add.addEventListener("click", () => {
         const actors = state.settingsDraft.control_plane.actors;
         let index = Object.keys(actors).length + 1;
         let id = "actor" + index;
         while (actors[id]) id = "actor" + (++index);
-        actors[id] = { kind: "human", name: "新参与者", permissions: [] };
+        actors[id] = { kind: "human", name: uiT("settings.newParticipant"), permissions: [] };
         state.settingsExpandedParticipants.push(id);
         renderAll();
       });
@@ -2033,17 +2074,17 @@ export const browserHtml = String.raw`<!doctype html>
       heading.className = "settings-section-head";
       const headingCopy = document.createElement("div");
       const title = document.createElement("h3");
-      title.textContent = "ACP Provider";
+      title.textContent = uiT("settings.providers");
       const subtitle = document.createElement("p");
       subtitle.className = "settings-section-subtitle";
-      subtitle.textContent = "管理 Agent CLI、启动参数与安装检测；认证仍由各 Provider 自身管理。";
+      subtitle.textContent = uiT("settings.providerHelp");
       headingCopy.append(title, subtitle);
       const actions = document.createElement("div");
       actions.className = "settings-provider-status";
       const detect = document.createElement("button");
       detect.type = "button";
       detect.className = "btn";
-      detect.textContent = state.settingsProviderDetecting ? "检测中..." : "自动检测";
+      detect.textContent = uiT(state.settingsProviderDetecting ? "settings.detecting" : "settings.autoDetect");
       detect.disabled = state.settingsProviderDetecting;
       detect.addEventListener("click", () => detectSettingsProviders().catch(showSettingsFailure));
       actions.append(detect);
@@ -2088,7 +2129,7 @@ export const browserHtml = String.raw`<!doctype html>
         name,
         pill(entry.definition.name),
         providerDetectionPill(entry.id),
-        pill("Windows: " + (windowsSupport?.status || "unknown"))
+        pill(uiT("settings.windowsStatus", { status: uiT("settings.provider.status." + (windowsSupport?.status || "unknown")) }))
       );
       const refs = settingsProviderReferences(entry.id);
       const meta = document.createElement("div");
@@ -2096,9 +2137,9 @@ export const browserHtml = String.raw`<!doctype html>
       const detection = state.settingsProviderDetection[entry.id];
       meta.textContent = [
         detection?.path,
-        detection?.version || detection?.reason || "尚未检测",
+        detection?.version || detection?.reason || uiT("settings.notDetected"),
         windowsSupport?.reason,
-        refs.length + " 个参与者引用"
+        uiT("settings.participantReferences", { count: refs.length })
       ].filter(Boolean).join(" · ");
       main.append(heading, meta);
       summary.append(main);
@@ -2110,11 +2151,11 @@ export const browserHtml = String.raw`<!doctype html>
       const resetOrDelete = document.createElement("button");
       resetOrDelete.type = "button";
       resetOrDelete.className = "btn" + (entry.builtin ? "" : " danger");
-      resetOrDelete.textContent = entry.builtin ? "恢复默认值" : "删除";
+      resetOrDelete.textContent = uiT(entry.builtin ? "settings.restoreDefaults" : "common.delete");
       resetOrDelete.disabled = refs.length > 0 || (entry.builtin && !entry.explicit);
       resetOrDelete.title = refs.length
-        ? "以下参与者仍在引用：" + refs.join("、")
-        : entry.builtin && !entry.explicit ? "当前正在使用系统默认值" : "";
+        ? uiT("settings.referencedBy", { references: refs.join("、") })
+        : entry.builtin && !entry.explicit ? uiT("settings.defaultInUse") : "";
       resetOrDelete.addEventListener("click", () => {
         delete state.settingsDraft.acp_providers?.[entry.id];
         state.settingsProviderDetection[entry.id] = { status: "pending_redetect" };
@@ -2123,7 +2164,7 @@ export const browserHtml = String.raw`<!doctype html>
       const markProviderExplicit = () => {
         if (!entry.builtin) return;
         resetOrDelete.disabled = refs.length > 0;
-        resetOrDelete.title = refs.length ? "以下参与者仍在引用：" + refs.join("、") : "";
+        resetOrDelete.title = refs.length ? uiT("settings.referencedBy", { references: refs.join("、") }) : "";
       };
       bodyActions.append(resetOrDelete);
       body.append(bodyActions);
@@ -2139,7 +2180,7 @@ export const browserHtml = String.raw`<!doctype html>
       const grid = document.createElement("div");
       grid.className = "settings-grid settings-participant-basic";
       grid.append(
-        settingsTextField("Command", provider.command || entry.definition.defaultCommand, () => {}, {
+        settingsTextField(uiT("settings.command"), provider.command || entry.definition.defaultCommand, () => {}, {
           disabled: true,
           wide: true
         })
@@ -2149,17 +2190,17 @@ export const browserHtml = String.raw`<!doctype html>
       const timeoutGrid = document.createElement("div");
       timeoutGrid.className = "settings-grid settings-participant-basic";
       timeoutGrid.append(
-        settingsTextField("Startup timeout (ms)", String(provider.startup_timeout_ms ?? 60000), value => {
+        settingsTextField(uiT("settings.startupTimeout"), String(provider.startup_timeout_ms ?? 60000), value => {
           ensureSettingsProvider(entry.id, provider.type).startup_timeout_ms = Number(value);
           markProviderExplicit();
           invalidateSettingsProviderDetection(entry.id);
         }, { type: "number", min: 1 }),
-        settingsTextField("Idle timeout (ms)", String(provider.idle_timeout_ms ?? 120000), value => {
+        settingsTextField(uiT("settings.idleTimeout"), String(provider.idle_timeout_ms ?? 120000), value => {
           ensureSettingsProvider(entry.id, provider.type).idle_timeout_ms = Number(value);
           markProviderExplicit();
           invalidateSettingsProviderDetection(entry.id);
         }, { type: "number", min: 1 }),
-        settingsTextField("Max runtime (ms)", provider.max_runtime_ms == null ? "" : String(provider.max_runtime_ms), value => {
+        settingsTextField(uiT("settings.maxRuntime"), provider.max_runtime_ms == null ? "" : String(provider.max_runtime_ms), value => {
           ensureSettingsProvider(entry.id, provider.type).max_runtime_ms = value.trim() ? Number(value) : null;
           markProviderExplicit();
           invalidateSettingsProviderDetection(entry.id);
@@ -2167,12 +2208,12 @@ export const browserHtml = String.raw`<!doctype html>
       );
       body.append(timeoutGrid);
       body.append(
-        settingsTextArea("Args（每行一个）", (provider.args || []).join("\n"), value => {
+        settingsTextArea(uiT("settings.args"), (provider.args || []).join("\n"), value => {
           ensureSettingsProvider(entry.id, provider.type).args = value.split(/\r?\n/).filter(line => line.length > 0);
           markProviderExplicit();
           invalidateSettingsProviderDetection(entry.id);
         }, "acp_providers." + entry.id + ".args"),
-        settingsTextArea("Env（每行 KEY=VALUE，不允许凭据）", Object.entries(provider.env || {})
+        settingsTextArea(uiT("settings.env"), Object.entries(provider.env || {})
           .map(([key, value]) => key + "=" + value).join("\n"), value => {
           ensureSettingsProvider(entry.id, provider.type).env = Object.fromEntries(value.split(/\r?\n/)
             .filter(line => line.includes("="))
@@ -2183,7 +2224,7 @@ export const browserHtml = String.raw`<!doctype html>
       );
       const preview = document.createElement("div");
       preview.className = "settings-provider-preview mono";
-      preview.textContent = "实际启动：" + settingsProviderLaunchPreview(provider);
+      preview.textContent = uiT("settings.actualLaunch", { command: settingsProviderLaunchPreview(provider) });
       body.append(preview);
       item.append(summary, body);
       return item;
@@ -2219,7 +2260,7 @@ export const browserHtml = String.raw`<!doctype html>
       const runtimeSummary = actor.kind === "agent"
         ? " · " + (actor.agent?.provider || "traex") + (actor.agent?.model ? " · " + actor.agent.model : "")
         : "";
-      meta.textContent = permissionCount + " 项权限" + runtimeSummary;
+      meta.textContent = uiT("settings.permissionCount", { count: permissionCount }) + runtimeSummary;
       summaryMain.append(heading, meta);
       summary.append(summaryMain);
 
@@ -2230,9 +2271,9 @@ export const browserHtml = String.raw`<!doctype html>
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "btn danger";
-      remove.textContent = "删除";
+      remove.textContent = uiT("common.delete");
       remove.disabled = runner;
-      remove.title = runner ? t("runner") + "不能删除" : "";
+      remove.title = runner ? uiT("settings.runnerCannotDelete") : "";
       remove.addEventListener("click", () => {
         delete state.settingsDraft.control_plane.actors[id];
         state.settingsExpandedParticipants = state.settingsExpandedParticipants.filter(value => value !== id);
@@ -2249,13 +2290,13 @@ export const browserHtml = String.raw`<!doctype html>
             path: "control_plane.actors." + id,
             commitOnChange: true
           }),
-          settingsSelectField("类型", actor.kind, [["human", "Human"], ["agent", "Agent"]], value => {
+          settingsSelectField(uiT("settings.type"), actor.kind, [["human", uiT("settings.human")], ["agent", uiT("settings.agent")]], value => {
             actor.kind = value;
             if (value === "agent" && !actor.agent) actor.agent = defaultSettingsAgent();
             if (value === "human") delete actor.agent;
           }),
-          settingsTextField("名称", actor.name || "", value => { actor.name = value; }, { path: "control_plane.actors." + id + ".name" }),
-          settingsTextArea("System prompt", actor.system_prompt || "", value => {
+          settingsTextField(uiT("settings.name"), actor.name || "", value => { actor.name = value; }, { path: "control_plane.actors." + id + ".name" }),
+          settingsTextArea(uiT("settings.systemPrompt"), actor.system_prompt || "", value => {
             if (value.trim()) actor.system_prompt = value;
             else delete actor.system_prompt;
           }, "control_plane.actors." + id + ".system_prompt")
@@ -2273,7 +2314,7 @@ export const browserHtml = String.raw`<!doctype html>
       const permissions = actor.permissions || [];
       const wrap = document.createElement("div");
       const title = document.createElement("h4");
-      title.textContent = "权限";
+      title.textContent = uiT("settings.permissions");
       const grid = document.createElement("div");
       grid.className = "settings-permissions";
       for (const definition of state.settingsData.permissionCatalog || []) {
@@ -2284,7 +2325,7 @@ export const browserHtml = String.raw`<!doctype html>
           renderAll();
         }));
         const description = document.createElement("p");
-        description.textContent = definition.descriptions?.["zh-CN"] || definition.id;
+        description.textContent = definition.descriptions?.[uiLocale] || definition.id;
         row.append(description);
         grid.append(row);
       }
@@ -2296,7 +2337,7 @@ export const browserHtml = String.raw`<!doctype html>
       const runtime = agent || defaultSettingsAgent();
       const wrap = document.createElement("div");
       const title = document.createElement("h4");
-      title.textContent = "Agent 运行";
+      title.textContent = uiT("settings.agentRuntime");
       const grid = document.createElement("div");
       grid.className = "settings-grid settings-compact-grid";
       const providerOptions = settingsProviderEntries().map(entry => {
@@ -2304,10 +2345,10 @@ export const browserHtml = String.raw`<!doctype html>
         return [entry.id, entry.id + " · " + entry.definition.name + " · " + status];
       });
       grid.append(
-        settingsSelectField("ACP Provider", runtime.provider || "traex", providerOptions, value => {
+        settingsSelectField(uiT("settings.providers"), runtime.provider || "traex", providerOptions, value => {
           runtime.provider = value;
         }),
-        settingsTextField("Model", runtime.model || "", value => setOptionalValue(runtime, "model", value), {
+        settingsTextField(uiT("settings.model"), runtime.model || "", value => setOptionalValue(runtime, "model", value), {
           path: "control_plane.actors." + id + ".agent.model"
         })
       );
@@ -2321,12 +2362,12 @@ export const browserHtml = String.raw`<!doctype html>
       const reload = document.createElement("button");
       reload.type = "button";
       reload.className = "btn";
-      reload.textContent = "重新读取";
+      reload.textContent = uiT("settings.reload");
       reload.addEventListener("click", () => loadSettings({ forceScope: state.settingsScope }).then(renderAll).catch(renderFatalError));
       const save = document.createElement("button");
       save.type = "button";
       save.className = "btn primary";
-      save.textContent = "保存";
+      save.textContent = uiT("common.save");
       save.addEventListener("click", () => validateSettings().catch(showSettingsFailure));
       actions.append(reload, save);
       return actions;
@@ -2345,12 +2386,12 @@ export const browserHtml = String.raw`<!doctype html>
       });
       const payload = await response.json();
       if (response.status === 409) {
-        state.settingsNotice = "配置文件已在磁盘上发生变化，请重新读取后再编辑。";
+        state.settingsNotice = uiT("settings.configChanged");
         renderAll();
         return;
       }
       if (!response.ok || !payload.valid) {
-        state.settingsErrors = payload.errors || [{ path: "", message: payload.error || "配置校验失败" }];
+        state.settingsErrors = payload.errors || [{ path: "", message: payload.error || uiT("settings.validationFailed") }];
         renderAll();
         return;
       }
@@ -2362,7 +2403,7 @@ export const browserHtml = String.raw`<!doctype html>
       const section = document.createElement("section");
       section.className = "settings-section";
       const title = document.createElement("h3");
-      title.textContent = "确认配置变更";
+      title.textContent = uiT("settings.confirmChanges");
       const changes = document.createElement("ul");
       changes.className = "settings-change-list";
       for (const change of state.settingsConfirm.changes || []) {
@@ -2373,7 +2414,7 @@ export const browserHtml = String.raw`<!doctype html>
       }
       if (!changes.children.length) {
         const item = document.createElement("li");
-        item.textContent = "没有配置变化。";
+        item.textContent = uiT("settings.noChanges");
         changes.append(item);
       }
       const code = document.createElement("pre");
@@ -2383,13 +2424,13 @@ export const browserHtml = String.raw`<!doctype html>
         state.settingsConfirm.normalizedJson || JSON.stringify(state.settingsDraft, null, 2) + "\n"
       );
       const diffTitle = document.createElement("h4");
-      diffTitle.textContent = "JSON diff";
+      diffTitle.textContent = uiT("settings.jsonDiff");
       const actions = document.createElement("div");
       actions.className = "settings-actions";
       const back = document.createElement("button");
       back.type = "button";
       back.className = "btn";
-      back.textContent = "返回编辑";
+      back.textContent = uiT("settings.backToEdit");
       back.addEventListener("click", () => {
         state.settingsConfirm = null;
         renderAll();
@@ -2397,7 +2438,7 @@ export const browserHtml = String.raw`<!doctype html>
       const confirm = document.createElement("button");
       confirm.type = "button";
       confirm.className = "btn primary";
-      confirm.textContent = "确认保存";
+      confirm.textContent = uiT("settings.confirmSave");
       confirm.disabled = !state.settingsConfirm.changes?.length;
       confirm.addEventListener("click", () => saveSettings().catch(showSettingsFailure));
       actions.append(back, confirm);
@@ -2417,13 +2458,13 @@ export const browserHtml = String.raw`<!doctype html>
       const payload = await response.json();
       if (response.status === 409) {
         state.settingsConfirm = null;
-        state.settingsNotice = "保存失败：配置文件已被其他进程修改，请重新读取。";
+        state.settingsNotice = uiT("settings.saveConflict");
         renderAll();
         return;
       }
       if (!response.ok) {
         state.settingsConfirm = null;
-        state.settingsErrors = payload.errors || [{ path: "", message: payload.error || "保存失败" }];
+        state.settingsErrors = payload.errors || [{ path: "", message: payload.error || uiT("settings.saveFailed") }];
         renderAll();
         return;
       }
@@ -2432,9 +2473,8 @@ export const browserHtml = String.raw`<!doctype html>
       state.settingsConfirm = null;
       state.settingsErrors = [];
       state.settingsNotice = payload.restartRequired
-        ? "配置已保存。请执行 memsphere view restart；重启后地址："
-          + settingsViewUrl(payload.config.view || payload.defaults.view) + "。"
-        : "配置已保存并生效。";
+        ? uiT("settings.savedRestart", { url: settingsViewUrl(payload.config.view || payload.defaults.view) })
+        : uiT("settings.savedApplied");
       stashSettingsScope();
       renderAll();
     }
@@ -2454,7 +2494,7 @@ export const browserHtml = String.raw`<!doctype html>
       const wrap = document.createElement("div");
       wrap.className = "settings-field settings-path-field";
       const useDefault = state.settingsDraft[key] === undefined;
-      const check = settingsPermissionCheck("使用默认值", useDefault, checked => {
+      const check = settingsPermissionCheck(uiT("settings.useDefault"), useDefault, checked => {
         if (checked) delete state.settingsDraft[key];
         else state.settingsDraft[key] = state.settingsData.defaults[key];
         renderAll();
@@ -2687,7 +2727,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (!clean || clean === currentId) return;
       const actors = state.settingsDraft.control_plane.actors;
       if (actors[clean]) {
-        state.settingsNotice = "参与者 ID 已存在：" + clean;
+        state.settingsNotice = uiT("settings.participantIdExists", { id: clean });
         return;
       }
       actors[clean] = actors[currentId];
@@ -2770,24 +2810,25 @@ export const browserHtml = String.raw`<!doctype html>
       for (const item of document.querySelectorAll(".settings-provider")) {
         if (item.dataset.providerId !== id) continue;
         const status = item.querySelector(".settings-provider-detection");
-        if (status) status.textContent = "待重新检测";
+        if (status) status.textContent = uiT("settings.pendingDetection");
         const preview = item.querySelector(".settings-provider-preview");
         const provider = settingsProviderEntries().find(entry => entry.id === id)?.value;
-        if (preview && provider) preview.textContent = "实际启动：" + settingsProviderLaunchPreview(provider);
+        if (preview && provider) preview.textContent = uiT("settings.actualLaunch", { command: settingsProviderLaunchPreview(provider) });
       }
     }
 
     function settingsProviderLaunchPreview(provider) {
       const args = [provider.command];
+      const modelPlaceholder = "<" + uiT("settings.participantModelPlaceholder") + ">";
       if (provider.type === "traex") {
-        args.push("--sandbox", "workspace-write", "--ask-for-approval", "never", "-c", "model=\"<参与者模型>\"");
+        args.push("--sandbox", "workspace-write", "--ask-for-approval", "never", "-c", "model=\"" + modelPlaceholder + "\"");
       } else if (provider.type === "qwen") {
-        args.push("--model", "<参与者模型>", "--approval-mode=auto");
+        args.push("--model", modelPlaceholder, "--approval-mode=auto");
       } else if (provider.type === "kimi") {
-        args.push("--model", "<参与者模型>", "--auto");
+        args.push("--model", modelPlaceholder, "--auto");
       } else if (provider.type === "codex") {
         args.unshift(
-          "CODEX_CONFIG={\"model\":\"<参与者模型>\"}",
+          "CODEX_CONFIG={\"model\":\"" + modelPlaceholder + "\"}",
           "NO_BROWSER=1",
           "INITIAL_AGENT_MODE=read-only"
         );
@@ -2807,14 +2848,14 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function settingsProviderStatusLabel(result) {
-      if (!result) return "待检测";
+      if (!result) return uiT("settings.provider.detection.pending");
       return {
-        installed: "已安装",
-        version_unknown: "版本未知",
-        missing: "未安装",
-        failed: "检测失败",
-        pending_redetect: "待重新检测"
-      }[result.status] || "待检测";
+        installed: uiT("settings.provider.detection.installed"),
+        version_unknown: uiT("settings.provider.detection.versionUnknown"),
+        missing: uiT("settings.provider.detection.notInstalled"),
+        failed: uiT("settings.provider.detection.failedLabel"),
+        pending_redetect: uiT("settings.pendingDetection")
+      }[result.status] || uiT("settings.provider.detection.pending");
     }
 
     function providerDetectionPill(id) {
@@ -2844,14 +2885,14 @@ export const browserHtml = String.raw`<!doctype html>
         });
         const payload = await response.json();
         if (!response.ok) {
-          state.settingsErrors = payload.errors || [{ path: "", message: payload.error || "ACP Provider 检测失败" }];
+          state.settingsErrors = payload.errors || [{ path: "", message: payload.error || uiT("settings.providerDetectionFailed") }];
           return;
         }
         state.settingsProviderDetection = Object.fromEntries(
           (payload.results || []).map(result => [result.id, result])
         );
         persistSettingsProviderDetection();
-        state.settingsNotice = "ACP Provider 检测完成。";
+        state.settingsNotice = uiT("settings.providerDetectionCompleted");
       } finally {
         state.settingsProviderDetecting = false;
         renderAll();
@@ -2923,7 +2964,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function compactSettingsValue(value) {
-      if (value === undefined) return "未设置";
+      if (value === undefined) return uiT("settings.unset");
       const text = typeof value === "string" ? value : JSON.stringify(value);
       return text.length > 90 ? text.slice(0, 87) + "..." : text;
     }
@@ -2948,7 +2989,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function settingsChangeLabel(kind) {
-      return ({ added: "新增", removed: "移除", changed: "修改" })[kind] || kind;
+      return ({ added: uiT("settings.change.added"), removed: uiT("settings.change.removed"), changed: uiT("settings.change.changed") })[kind] || kind;
     }
 
     function memoryForRoute(kind, name) {
@@ -3000,7 +3041,7 @@ export const browserHtml = String.raw`<!doctype html>
           }
           else {
             state.selectedId = null;
-            state.routeError = "Memory not found: " + route.kind + "/" + route.name;
+            state.routeError = uiT("route.memoryNotFound", { name: route.kind + "/" + route.name });
           }
         } else if (route.page === "market") {
           state.viewMode = "market";
@@ -3011,7 +3052,7 @@ export const browserHtml = String.raw`<!doctype html>
           await loadChanges();
           if (!isCurrentPageLoad(options)) return false;
           if (!state.changes.some(change => change.id === route.changeId)) {
-            state.routeError = "ChangeSet not found: " + route.changeId;
+            state.routeError = uiT("route.changeSetNotFound", { id: route.changeId });
           } else {
             await loadChangeDetail(route.changeId);
             if (!isCurrentPageLoad(options)) return false;
@@ -3037,14 +3078,14 @@ export const browserHtml = String.raw`<!doctype html>
           }
           if (!run) {
             state.selectedTaskId = null;
-            state.routeError = "Run not found: " + route.runId;
+            state.routeError = uiT("run.notFound", { id: route.runId });
           } else {
             state.selectedTaskId = run.id;
             if (["running", "done", "abandoned"].includes(run.status)) state.taskStatus = run.status;
             saveSelectedTask();
             if (route.page === "artifact-review") {
               const review = artifactReviewSummariesForRun(run).find(item => item.id === route.reviewId);
-              if (!review) state.routeError = "Artifact Review not found: " + route.reviewId;
+              if (!review) state.routeError = uiT("route.artifactReviewNotFound", { id: route.reviewId });
               else {
                 state.artifactReviewSelectedByRun[run.id] = review.id;
                 state.artifactReviewRoundByReview[review.id] = route.roundId || review.currentRoundId;
@@ -3175,7 +3216,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function renderRouteError() {
-      el.title.textContent = "Not found";
+      el.title.textContent = uiT("common.notFound");
       el.subtitle.textContent = window.location.pathname;
       el.detail.className = "empty";
       el.detail.textContent = state.routeError;
@@ -3219,8 +3260,8 @@ export const browserHtml = String.raw`<!doctype html>
       el.abandonedTaskTab.setAttribute("aria-selected", String(state.taskStatus === "abandoned"));
       el.settingsTab.classList.toggle("active", state.viewMode === "settings");
       el.settingsTab.setAttribute("aria-pressed", String(state.viewMode === "settings"));
-      el.settingsTab.setAttribute("aria-label", state.viewMode === "settings" ? "退出设置" : "设置");
-      el.settingsTab.title = state.viewMode === "settings" ? "退出设置" : "设置";
+      el.settingsTab.setAttribute("aria-label", uiT(state.viewMode === "settings" ? "common.exitSettings" : "common.settings"));
+      el.settingsTab.title = uiT(state.viewMode === "settings" ? "common.exitSettings" : "common.settings");
       el.settingsTab.textContent = state.viewMode === "settings" ? "\u2190" : "\u2699";
       if (state.viewMode === "settings") {
         renderSettingsNav();
@@ -3521,7 +3562,7 @@ export const browserHtml = String.raw`<!doctype html>
             const details = document.createElement("details");
             const summary = document.createElement("summary");
             summary.className = "memory-change-summary";
-            summary.textContent = "相关 ChangeSet · " + relatedChanges.length;
+            summary.textContent = uiT("memory.relatedChangeSets", { count: relatedChanges.length });
             const links = document.createElement("div");
             links.className = "memory-change-links";
             for (const change of relatedChanges) {
@@ -3546,7 +3587,7 @@ export const browserHtml = String.raw`<!doctype html>
         details.className = "memory-options";
         const summary = document.createElement("summary");
         summary.className = "memory-change-summary";
-        summary.textContent = "其他 ChangeSet · " + otherChanges.length;
+        summary.textContent = uiT("memory.otherChangeSets", { count: otherChanges.length });
         const links = document.createElement("div");
         links.className = "memory-change-links";
         for (const change of otherChanges) {
@@ -3589,16 +3630,16 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function updateMemoryCount() {
-      el.count.textContent = state.filtered.length + " memories";
+      el.count.textContent = uiT("memory.count", { count: state.filtered.length });
     }
 
     function marketStatusLabel(status) {
       return ({
-        not_imported: "未导入",
-        importing: "导入中",
-        consistent: "已导入 · 无变更",
-        different: "已导入 · 有差异",
-        name_conflict: "名称冲突"
+        not_imported: uiT("market.notImported"),
+        importing: uiT("market.importing"),
+        consistent: uiT("market.consistent"),
+        different: uiT("market.different"),
+        name_conflict: uiT("market.nameConflict")
       })[status] || status;
     }
 
@@ -3606,7 +3647,7 @@ export const browserHtml = String.raw`<!doctype html>
       el.nav.innerHTML = "";
       const query = el.search.value.trim().toLowerCase();
       const items = state.marketMemories.filter(item => !query || [item.reference, ...(item.names || [])].join(" ").toLowerCase().includes(query));
-      el.count.textContent = items.length + " items";
+      el.count.textContent = uiT("memory.itemCount", { count: items.length });
       for (const kind of kindOrder) {
         const group = items.filter(item => item.kind === kind);
         if (!group.length) continue;
@@ -3627,7 +3668,7 @@ export const browserHtml = String.raw`<!doctype html>
           status.dataset.status = item.status;
           status.textContent = marketStatusLabel(item.status);
           if (item.status === "importing" && item.changeId) {
-            button.title = "查看对应的 ChangeSet";
+            button.title = uiT("market.viewChangeSet");
           }
           button.append(name, status);
           button.addEventListener("click", async () => {
@@ -3648,10 +3689,10 @@ export const browserHtml = String.raw`<!doctype html>
     function renderSelectedMarket() {
       const item = state.marketMemories.find(candidate => candidate.reference === state.selectedMarketReference) || null;
       if (!item) {
-        el.title.textContent = "记忆市场";
-        el.subtitle.textContent = "当前 npm 包没有打包市场记忆";
+        el.title.textContent = uiT("market.emptyTitle");
+        el.subtitle.textContent = uiT("market.emptySubtitle");
         el.detail.className = "empty";
-        el.detail.textContent = "No market memories found.";
+        el.detail.textContent = uiT("market.empty");
         return;
       }
       el.title.textContent = memoryDisplayName(item.entity);
@@ -3665,7 +3706,7 @@ export const browserHtml = String.raw`<!doctype html>
         const statusLink = document.createElement("button");
         statusLink.type = "button";
         statusLink.className = "pill strong";
-        statusLink.textContent = "导入中 · 查看 ChangeSet";
+        statusLink.textContent = uiT("market.importingViewChangeSet");
         statusLink.addEventListener("click", () => openChange(item.changeId));
         actions.append(statusLink);
       } else {
@@ -3675,7 +3716,7 @@ export const browserHtml = String.raw`<!doctype html>
         const importButton = document.createElement("button");
         importButton.type = "button";
         importButton.className = "btn primary";
-        importButton.textContent = item.status === "different" ? "重新导入" : "导入";
+        importButton.textContent = uiT(item.status === "different" ? "market.reimport" : "market.import");
         importButton.addEventListener("click", () => runButtonAction(importButton, async () => {
           const operator = await chooseChangeOperator();
           if (!operator) return;
@@ -3710,11 +3751,11 @@ export const browserHtml = String.raw`<!doctype html>
 
     function renderChangeMemoryNav() {
       el.nav.innerHTML = "";
-      el.count.textContent = state.memories.length + " memories";
+      el.count.textContent = uiT("memory.count", { count: state.memories.length });
       const back = document.createElement("button");
       back.type = "button";
       back.className = "memory-button";
-      back.textContent = "← 返回 Memory";
+      back.textContent = "← " + uiT("navigation.backToMemory");
       back.addEventListener("click", () => returnFromChange());
       el.nav.append(back);
       for (const kind of kindOrder) {
@@ -3743,26 +3784,26 @@ export const browserHtml = String.raw`<!doctype html>
     function renderSelectedChange() {
       const detail = state.changeDetail;
       if (!detail) {
-        el.title.textContent = "Changes";
-        el.subtitle.textContent = "Validated Memory changes for this Project";
+        el.title.textContent = uiT("change.title");
+        el.subtitle.textContent = uiT("change.subtitle");
         el.detail.className = "empty";
-        el.detail.textContent = state.changes.length ? "Select a ChangeSet." : "No ChangeSets yet.";
+        el.detail.textContent = uiT(state.changes.length ? "change.select" : "change.empty");
         return;
       }
       const change = detail.change;
       el.title.textContent = change.id;
-      el.subtitle.textContent = "ChangeSet · " + changeStatusLabel(change.status);
+      el.subtitle.textContent = uiT("change.label") + " · " + changeStatusLabel(change.status);
       el.detail.className = "";
       el.detail.innerHTML = "";
 
       const meta = document.createElement("div");
       meta.className = "meta";
-      const lifecycle = changeStatusLabel(change.status) + " ChangeSet";
+      const lifecycle = changeStatusLabel(change.status) + " · " + uiT("change.label");
       meta.append(pill(lifecycle, true, change.valid === false ? "warn" : ""));
-      meta.append(pill("Store: " + change.storeType));
-      meta.append(pill("Base: " + String(change.baseRevision || "").slice(0, 12)));
-      if (change.digest) meta.append(pill("Digest: " + String(change.digest).slice(0, 12)));
-      meta.append(pill(change.valid === false ? "Validation failed" : change.valid === true ? "Validation passed" : "Not validated", false, change.valid === false ? "warn" : ""));
+      meta.append(pill(uiT("change.store", { value: change.storeType })));
+      meta.append(pill(uiT("change.base", { value: String(change.baseRevision || "").slice(0, 12) })));
+      if (change.digest) meta.append(pill(uiT("change.digest", { value: String(change.digest).slice(0, 12) })));
+      meta.append(pill(uiT(change.valid === false ? "change.validationFailed" : change.valid === true ? "change.validationPassed" : "change.notValidated"), false, change.valid === false ? "warn" : ""));
 
       const actions = document.createElement("div");
       actions.className = "toolbar-actions";
@@ -3770,7 +3811,7 @@ export const browserHtml = String.raw`<!doctype html>
         const identity = document.createElement("button");
         identity.type = "button";
         identity.className = "btn";
-        identity.textContent = "身份：" + changeOperatorLabel();
+        identity.textContent = uiT("change.identity", { identity: changeOperatorLabel() });
         identity.addEventListener("click", async () => {
           await chooseChangeOperator({ forcePrompt: true });
           renderAll();
@@ -3781,9 +3822,9 @@ export const browserHtml = String.raw`<!doctype html>
         const addMemory = document.createElement("button");
         addMemory.type = "button";
         addMemory.className = "btn";
-        addMemory.textContent = "添加 Memory";
+        addMemory.textContent = uiT("change.addMemory");
         addMemory.disabled = change.claimed;
-        if (change.claimed) addMemory.title = "处理中不能添加 Memory；请先让 Agent finish，再添加并重新 claim。";
+        if (change.claimed) addMemory.title = uiT("change.addMemoryClaimed");
         addMemory.addEventListener("click", () => runButtonAction(addMemory, async () => {
           const reference = await chooseMemoryToAdd(change);
           if (!reference) return;
@@ -3800,9 +3841,9 @@ export const browserHtml = String.raw`<!doctype html>
         const abandon = document.createElement("button");
         abandon.type = "button";
         abandon.className = "btn danger";
-        abandon.textContent = "废弃";
+        abandon.textContent = uiT("common.abandon");
         abandon.addEventListener("click", () => runButtonAction(abandon, async () => {
-          if (!confirm("废弃这个 ChangeSet？废弃后将只读且不可恢复。")) return;
+          if (!confirm(uiT("change.abandonConfirm"))) return;
           const response = await fetch("/api/changes/" + encodeURIComponent(change.id) + "/abandon", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -3818,9 +3859,9 @@ export const browserHtml = String.raw`<!doctype html>
         const archive = document.createElement("button");
         archive.type = "button";
         archive.className = "btn";
-        archive.textContent = t("archive");
+        archive.textContent = uiT("common.archive");
         archive.addEventListener("click", () => runButtonAction(archive, async () => {
-          if (!confirm(t("archiveChangeConfirm"))) return;
+          if (!confirm(uiT("change.archiveConfirm"))) return;
           const response = await fetch("/api/archive/changes/" + encodeURIComponent(change.id), {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -3835,12 +3876,16 @@ export const browserHtml = String.raw`<!doctype html>
       if (canComment()) {
         const agentHint = document.createElement("p");
         agentHint.className = "muted";
-        agentHint.append(document.createTextNode("让 Agent 处理时，在对应 worktree 的对话中提供 ChangeSet ID，并执行 "), settingsInlineCode("memory change claim " + change.id), document.createTextNode("。"));
+        agentHint.append(
+          document.createTextNode(uiT("change.agentHintPrefix")),
+          settingsInlineCode("memory change claim " + change.id),
+          document.createTextNode(uiT("change.agentHintSuffix"))
+        );
         el.detail.append(agentHint);
         if (!(detail.comments || []).length) {
           const hint = document.createElement("p");
           hint.className = "muted";
-          hint.textContent = "选择下方任意内容旁的 +，直接提交修改意见。";
+          hint.textContent = uiT("change.commentHint");
           el.detail.append(hint);
         }
       }
@@ -3849,7 +3894,7 @@ export const browserHtml = String.raw`<!doctype html>
         const errors = document.createElement("section");
         errors.className = "error-panel";
         const heading = document.createElement("h3");
-        heading.textContent = "Validation diagnostics";
+        heading.textContent = uiT("change.validationDiagnostics");
         const list = document.createElement("ul");
         for (const issue of change.issues) {
           const item = document.createElement("li");
@@ -3899,19 +3944,17 @@ export const browserHtml = String.raw`<!doctype html>
       const scopedPaths = new Set(change.memoryPaths || []);
       const candidates = (payload.memories || []).filter(memory => !memory.error && !scopedPaths.has(memory.path));
       if (!candidates.length) {
-        alert(displayLanguage === "zh" ? "当前没有可添加的 Memory。" : "There are no more Memories to add.");
+        alert(uiT("change.noMemoryToAdd"));
         return "";
       }
       const references = candidates.map(memory => memory.id).sort();
-      const message = displayLanguage === "zh"
-        ? "输入要加入这个 ChangeSet 的 Memory（可选：\n" + references.join("\n") + "）"
-        : "Enter a Memory to add to this ChangeSet (available:\n" + references.join("\n") + ")";
+      const message = uiT("change.selectMemoryPrompt", { references: "\n" + references.join("\n") });
       const input = prompt(message, references[0]);
       if (!input?.trim()) return "";
       const value = input.trim();
       const candidate = candidates.find(memory => memory.id === value || memoryNames(memory).includes(value));
       if (!candidate) {
-        throw new Error(displayLanguage === "zh" ? "请选择列表中的 Memory。" : "Select a Memory from the list.");
+        throw new Error(uiT("change.selectListedMemory"));
       }
       return candidate.id;
     }
@@ -3921,12 +3964,12 @@ export const browserHtml = String.raw`<!doctype html>
       section.id = "change-comment-sidebar";
       section.className = "panel change-comments change-comment-sidebar";
       const heading = document.createElement("h3");
-      heading.textContent = t("changeComments") + " · " + comments.length;
+      heading.textContent = uiT("change.comments") + " · " + comments.length;
       section.append(heading);
       if (!comments.length) {
         const empty = document.createElement("p");
         empty.className = "muted";
-        empty.textContent = "暂无修改意见。";
+        empty.textContent = uiT("change.noComments");
         section.append(empty);
         return section;
       }
@@ -3940,7 +3983,7 @@ export const browserHtml = String.raw`<!doctype html>
         meta.className = "meta";
         meta.style.margin = "5px 0";
         meta.append(pill(changeCommentStatusLabel(comment), false, statusPillClass(comment.status)));
-        if (comment.location?.line) meta.append(pill("Line " + comment.location.line));
+        if (comment.location?.line) meta.append(pill(uiT("change.line", { line: comment.location.line })));
         if (isCommentOutdated(comment, contentRoot)) {
           const outdated = pill(t("changeCommentOutdated"), false, "outdated");
           outdated.title = t("changeCommentOutdatedHelp");
@@ -3953,7 +3996,7 @@ export const browserHtml = String.raw`<!doctype html>
         const open = document.createElement("button");
         open.type = "button";
         open.className = "btn";
-        open.textContent = "Go to";
+        open.textContent = uiT("common.goTo");
         open.addEventListener("click", () => {
           selectCommentSubject(comment);
           renderAll();
@@ -3964,19 +4007,19 @@ export const browserHtml = String.raw`<!doctype html>
           const edit = document.createElement("button");
           edit.type = "button";
           edit.className = "btn";
-          edit.textContent = "Edit";
+          edit.textContent = uiT("common.edit");
           edit.addEventListener("click", () => openCommentEditEditor(card, comment));
           const remove = document.createElement("button");
           remove.type = "button";
           remove.className = "btn danger";
-          remove.textContent = "Remove";
+          remove.textContent = uiT("common.remove");
           remove.addEventListener("click", () => runButtonAction(remove, () => removeComment(comment.id)));
           actions.append(edit, remove);
         } else if (canComment() && isCurrentChangeCommentOwner(comment) && comment.status === "processing") {
           const withdraw = document.createElement("button");
           withdraw.type = "button";
           withdraw.className = "btn danger";
-          withdraw.textContent = "撤回";
+          withdraw.textContent = uiT("common.withdraw");
           withdraw.addEventListener("click", () => runButtonAction(withdraw, () => withdrawComment(comment.id)));
           actions.append(withdraw);
         }
@@ -3989,11 +4032,11 @@ export const browserHtml = String.raw`<!doctype html>
     function renderTaskNav() {
       el.nav.innerHTML = "";
       const visibleRuns = visibleTaskRuns();
-      el.count.textContent = visibleRuns.length + " runs";
+      el.count.textContent = uiT("run.count", { count: visibleRuns.length });
       if (!visibleRuns.length) {
         const empty = document.createElement("div");
         empty.className = "muted";
-        empty.textContent = "No " + state.taskStatus + " runs.";
+        empty.textContent = uiT("run.emptyForStatus", { status: uiT("run.status." + state.taskStatus) });
         el.nav.append(empty);
         return;
       }
@@ -4010,7 +4053,7 @@ export const browserHtml = String.raw`<!doctype html>
           title.textContent = runDisplayName(run);
           const meta = document.createElement("span");
           meta.className = "muted";
-          meta.textContent = shortRunId(run.id) + " · " + (run.eventCount ?? run.events?.length ?? 0) + " artifact(s)";
+          meta.textContent = shortRunId(run.id) + " · " + uiT("run.artifactCount", { count: run.eventCount ?? run.events?.length ?? 0 });
           const reviewProgress = run.artifactReview?.round || run.reviewProgress;
           if (reviewProgress) {
             meta.append(
@@ -4081,10 +4124,10 @@ export const browserHtml = String.raw`<!doctype html>
     function renderSelectedTask() {
       const run = selectedTask();
       if (!run) {
-        el.title.textContent = "Runs";
-        el.subtitle.textContent = "No " + state.taskStatus + " runs.";
+        el.title.textContent = uiT("run.title");
+        el.subtitle.textContent = uiT("run.emptyForStatus", { status: uiT("run.status." + state.taskStatus) });
         el.detail.className = "empty";
-        el.detail.innerHTML = 'Choose another Run status or start one with <code>memsphere run start &lt;procedure&gt; --name &lt;run-name&gt;</code>.';
+        el.detail.textContent = uiT("run.chooseOrStart");
         return;
       }
 
@@ -4094,7 +4137,7 @@ export const browserHtml = String.raw`<!doctype html>
       el.subtitle.textContent = run.id;
       if (!Array.isArray(run.stack) || !Array.isArray(run.events)) {
         el.detail.className = "empty";
-        el.detail.textContent = "Loading Run...";
+        el.detail.textContent = uiT("run.loading");
         return;
       }
       el.detail.className = "task-summary";
@@ -4113,11 +4156,11 @@ export const browserHtml = String.raw`<!doctype html>
       const meta = document.createElement("div");
       meta.className = "meta";
       meta.append(pill(t("procedureName") + ": " + run.procedureName));
-      meta.append(pill(run.status, false, statusPillClass(run.status)));
+      meta.append(pill(uiT("run.status." + run.status), false, statusPillClass(run.status)));
       if (run.contractVersion === 1 || run.readOnly) meta.append(pill(t("legacyReadOnly"), false, "warn"));
-      meta.append(pill(run.stack.length + (run.status === "running" ? " active frame(s)" : " retained frame(s)")));
-      meta.append(pill(run.events.length + " artifact(s)"));
-      meta.append(pill("updated " + formatTime(run.updatedAt)));
+      meta.append(pill(uiT(run.status === "running" ? "run.activeFrames" : "run.retainedFrames", { count: run.stack.length })));
+      meta.append(pill(uiT("run.artifactCount", { count: run.events.length })));
+      meta.append(pill(uiT("run.updated", { time: formatTime(run.updatedAt) })));
       if (run.abandonment) {
         meta.append(pill(t("abandon") + ": " + formatTime(run.abandonment.abandonedAt), false, "abandoned"));
         if (run.abandonment.reason) meta.append(pill(run.abandonment.reason, false, "abandoned"));
@@ -4151,10 +4194,10 @@ export const browserHtml = String.raw`<!doctype html>
       toggle.setAttribute("aria-controls", bodyId);
       const title = document.createElement("span");
       title.className = "block-title";
-      title.textContent = displayLanguage === "zh" ? "运行期评审绑定" : "Runtime review bindings";
+      title.textContent = uiT("run.runtimeReviewBindings");
       toggle.append(
         title,
-        pill(slots.length + (displayLanguage === "zh" ? " 个槽位" : slots.length === 1 ? " slot" : " slots"))
+        pill(uiT("run.slotCount", { count: slots.length }))
       );
       const caret = document.createElement("span");
       caret.className = "run-binding-toggle-caret";
@@ -4174,9 +4217,7 @@ export const browserHtml = String.raw`<!doctype html>
       panel.append(toggle, body);
       const help = document.createElement("div");
       help.className = "muted";
-      help.textContent = displayLanguage === "zh"
-        ? "换绑只影响尚未创建的 Review；已创建 Review 的参与者保持不变。"
-        : "Changes affect only Reviews that have not been created; existing Review participants stay frozen.";
+      help.textContent = uiT("run.bindingHelp");
       body.append(help);
       const list = document.createElement("div");
       list.className = "run-binding-list";
@@ -4190,9 +4231,9 @@ export const browserHtml = String.raw`<!doctype html>
         name.textContent = artifactReviewRoleDisplayName(slot);
         const bindingSnapshot = bindingSnapshotSlots.get(slot);
         const scopeCount = bindingSnapshot?.reviewScopes?.length || 0;
-        head.append(name, pill(scopeCount + (displayLanguage === "zh" ? " 个 Review scope" : " Review scopes")));
+        head.append(name, pill(uiT("run.reviewScopeCount", { count: scopeCount })));
         if (bindingSnapshot?.reviewIds?.length) {
-          head.append(pill(bindingSnapshot.reviewIds.length + (displayLanguage === "zh" ? " 个既有 Review 保持不变" : " existing Reviews preserved"), false, "done"));
+          head.append(pill(uiT("run.existingReviewsPreserved", { count: bindingSnapshot.reviewIds.length }), false, "done"));
         }
         row.append(head);
 
@@ -4223,11 +4264,11 @@ export const browserHtml = String.raw`<!doctype html>
         skip.addEventListener("change", () => {
           for (const checkbox of actorChoices.querySelectorAll('input[type="checkbox"]')) checkbox.disabled = skip.checked;
         });
-        skipLabel.append(skip, document.createTextNode(displayLanguage === "zh" ? "跳过未来评审" : "Skip future reviews"));
+        skipLabel.append(skip, document.createTextNode(uiT("run.skipFutureReviews")));
         const save = document.createElement("button");
         save.type = "button";
         save.className = "btn primary";
-        save.textContent = displayLanguage === "zh" ? "更新绑定" : "Update binding";
+        save.textContent = uiT("run.updateBinding");
         save.disabled = run.status !== "running" || run.readOnly;
         save.addEventListener("click", () => runButtonAction(save, async () => {
           const actorIds = [...actorChoices.querySelectorAll('input[type="checkbox"]:checked')].map(input => input.value);
@@ -4239,7 +4280,7 @@ export const browserHtml = String.raw`<!doctype html>
       }
       body.append(list);
       if (run.bindingChanges?.length) {
-        body.append(blockTitle(displayLanguage === "zh" ? "换绑历史" : "Binding history"));
+        body.append(blockTitle(uiT("run.bindingHistory")));
         const history = document.createElement("ul");
         history.className = "run-binding-history";
         for (const change of [...run.bindingChanges].reverse()) {
@@ -4268,7 +4309,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function runBindingValueLabel(binding, run) {
-      if (binding?.skip) return displayLanguage === "zh" ? "跳过" : "skip";
+      if (binding?.skip) return uiT("run.skip");
       return (binding?.actorIds || []).map(actorId => run.controlPlane?.actors?.[actorId]?.name || actorId).join(", ");
     }
 
@@ -4303,8 +4344,8 @@ export const browserHtml = String.raw`<!doctype html>
       const button = document.createElement("button");
       button.type = "button";
       button.className = ["btn", "archive-run-action", className].filter(Boolean).join(" ");
-      button.textContent = t("archive");
-      button.title = t("archiveRunConfirm");
+      button.textContent = uiT("common.archive");
+      button.title = uiT("run.archiveConfirm");
       button.addEventListener("click", () => runButtonAction(button, () => archiveSelectedRun(run)));
       return button;
     }
@@ -4313,7 +4354,7 @@ export const browserHtml = String.raw`<!doctype html>
       const button = document.createElement("button");
       button.type = "button";
       button.className = "btn danger abandon-run-action";
-      button.textContent = t("abandon");
+      button.textContent = uiT("common.abandon");
       button.disabled = run.status !== "running";
       button.addEventListener("click", () => runButtonAction(button, () => abandonSelectedRun(run)));
       return button;
@@ -4336,7 +4377,7 @@ export const browserHtml = String.raw`<!doctype html>
       section.className = "section open task-step inline-schema-host";
       const isRepeat = step.kind === "repeat" && step.repeat;
       const title = isRepeat ? t("repeat") : step.artifact;
-      section.append(taskSectionHeader("Next: " + title, isRepeat ? "!repeat" : formatLabel(step.format), "next-step"));
+      section.append(taskSectionHeader(t("next") + ": " + title, isRepeat ? "!repeat" : formatLabel(step.format), "next-step"));
       const panel = document.createElement("div");
       panel.className = "section-body";
       panel.append(blockTitle(t("action")));
@@ -4693,7 +4734,7 @@ export const browserHtml = String.raw`<!doctype html>
           list.className = "text-list";
           for (const value of source.defines) {
             const item = document.createElement("li");
-            item.textContent = "defines: " + value;
+            item.textContent = t("defines") + ": " + value;
             list.append(item);
           }
           section.append(list);
@@ -4766,9 +4807,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function formatTime(value) {
       if (!value) return "";
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return value;
-      return date.toLocaleString();
+      return uiDate(value);
     }
 
     function shellQuote(value) {
@@ -4866,7 +4905,7 @@ export const browserHtml = String.raw`<!doctype html>
     function renderSelected() {
       const memory = selectedMemory();
       if (!memory) {
-        el.title.textContent = "No memories";
+        el.title.textContent = uiT("memory.noMemories");
         el.subtitle.textContent = "";
         el.detail.className = "";
         el.detail.innerHTML = "";
@@ -4876,7 +4915,7 @@ export const browserHtml = String.raw`<!doctype html>
         if (diagnostics) el.detail.append(diagnostics);
         if (!diagnostics) {
           el.detail.className = "empty";
-          el.detail.textContent = "No memory entities found.";
+          el.detail.textContent = uiT("memory.noEntities");
         }
         return;
       }
@@ -4884,7 +4923,7 @@ export const browserHtml = String.raw`<!doctype html>
         el.title.textContent = memorySummaryName(memory);
         el.subtitle.textContent = memory.id;
         el.detail.className = "empty";
-        el.detail.textContent = "Loading...";
+        el.detail.textContent = uiT("common.loading");
         return;
       }
       if (memory.error) {
@@ -4903,9 +4942,9 @@ export const browserHtml = String.raw`<!doctype html>
       const edit = document.createElement("button");
       edit.type = "button";
       edit.className = "btn primary";
-      edit.textContent = "修改";
+      edit.textContent = uiT("memory.edit");
       edit.addEventListener("click", () => runButtonAction(edit, async () => {
-        if (!confirm("创建一个新的 ChangeSet 来修改这个 Memory？创建后可自由提交修改意见。")) return;
+        if (!confirm(uiT("memory.editConfirm"))) return;
         const operator = await chooseChangeOperator();
         if (!operator) return;
         const response = await fetch("/api/changes", {
@@ -4925,7 +4964,7 @@ export const browserHtml = String.raw`<!doctype html>
         const history = document.createElement("details");
         history.className = "panel memory-change-history";
         const summary = document.createElement("summary");
-        summary.textContent = "相关 ChangeSet · " + relatedChanges.length;
+        summary.textContent = uiT("memory.relatedChangeSets", { count: relatedChanges.length });
         const list = document.createElement("div");
         list.className = "memory-change-links";
         for (const change of relatedChanges) {
@@ -4980,11 +5019,11 @@ export const browserHtml = String.raw`<!doctype html>
       panel.className = "error-panel";
 
       const heading = document.createElement("h3");
-      heading.textContent = "Invalid memory YAML";
+      heading.textContent = uiT("memory.invalidYaml");
       panel.append(heading);
 
       const body = document.createElement("p");
-      body.textContent = memory.error?.message || "This memory could not be loaded.";
+      body.textContent = memory.error?.message || uiT("memory.loadFailed");
       panel.append(body);
 
       const issues = Array.isArray(memory.error?.issues) && memory.error.issues.length
@@ -5014,7 +5053,7 @@ export const browserHtml = String.raw`<!doctype html>
       appendPreviewMeta(meta);
       meta.append(pill(memory.entity.tag || memory.kind, true));
       if (memory.entity.syntax) meta.append(pill(t("syntax") + ": " + memory.entity.syntax));
-      if (memory.entity.format) meta.append(pill("format: " + memory.entity.format));
+      if (memory.entity.format) meta.append(pill(t("format") + ": " + memory.entity.format));
       return meta;
     }
 
@@ -5029,12 +5068,12 @@ export const browserHtml = String.raw`<!doctype html>
     function appendPreviewMeta(meta) {
       const source = state.payload?.source;
       if (source?.mode !== "changeset") return;
-      meta.append(pill("Draft Preview", true, source.valid === false ? "warn" : ""));
-      meta.append(pill("ChangeSet: " + source.changeId));
-      if (source.storeType) meta.append(pill("Store: " + source.storeType));
-      if (source.baseRevision) meta.append(pill("Base: " + String(source.baseRevision).slice(0, 12)));
-      meta.append(pill(source.valid === false ? "Validation failed" : "Validation passed", false, source.valid === false ? "warn" : ""));
-      if (source.updatedAt) meta.append(pill("Updated: " + formatTime(source.updatedAt)));
+      meta.append(pill(uiT("change.previewTitle"), true, source.valid === false ? "warn" : ""));
+      meta.append(pill(uiT("change.label") + ": " + source.changeId));
+      if (source.storeType) meta.append(pill(uiT("change.store", { value: source.storeType })));
+      if (source.baseRevision) meta.append(pill(uiT("change.base", { value: String(source.baseRevision).slice(0, 12) })));
+      meta.append(pill(uiT(source.valid === false ? "change.validationFailed" : "change.validationPassed"), false, source.valid === false ? "warn" : ""));
+      if (source.updatedAt) meta.append(pill(uiT("change.updated", { time: formatTime(source.updatedAt) })));
     }
 
     function renderPreviewIssues() {
@@ -5044,7 +5083,7 @@ export const browserHtml = String.raw`<!doctype html>
       const panel = document.createElement("section");
       panel.className = "error-panel";
       const heading = document.createElement("h3");
-      heading.textContent = "Validation diagnostics";
+      heading.textContent = uiT("change.validationDiagnostics");
       const list = document.createElement("ul");
       list.className = "error-list";
       for (const issue of issues) {
@@ -5083,7 +5122,7 @@ export const browserHtml = String.raw`<!doctype html>
       const section = document.createElement("div");
       section.className = "section schema-node" + (depth < 2 ? " open" : "");
       const badges = ["!schema"];
-      if (node.optional) badges.push("optional: true");
+      if (node.optional) badges.push(t("optional") + ": true");
       if (node.type) badges.push(t("type") + ": " + node.type);
       if (node.format) {
         badges.push(t("format") + ": " + formatLabel(node.format));
@@ -5149,10 +5188,10 @@ export const browserHtml = String.raw`<!doctype html>
       const section = document.createElement("div");
       section.className = "section schema-node" + (depth < 2 ? " open" : "");
       const min = node.limit && node.limit.min !== undefined ? node.limit.min : 0;
-      const max = node.limit && node.limit.max !== undefined ? node.limit.max : "unbounded";
+      const max = node.limit && node.limit.max !== undefined ? node.limit.max : t("unbounded");
       const name = t("repeat");
       const headerAnchor = "schema:" + path;
-      section.append(sectionHeader(name, ["!repeat", "min: " + min, "max: " + max], path, headerAnchor));
+      section.append(sectionHeader(name, ["!repeat", t("min") + ": " + min, t("max") + ": " + max], path, headerAnchor));
       const body = document.createElement("div");
       body.className = "section-body";
       appendSectionHeaderThread(body, headerAnchor, name);
@@ -5210,11 +5249,11 @@ export const browserHtml = String.raw`<!doctype html>
         badgeContainer.append(pill(badge));
       }
       const count = commentsForAnchor(location.anchor, text).length;
-      if (count) badgeContainer.append(pill(count + " comments", false, "warn"));
+      if (count) badgeContainer.append(pill(uiT("review.commentCount", { count }), false, "warn"));
       const targetButton = document.createElement("span");
       targetButton.className = "target-add";
       targetButton.textContent = "+";
-      targetButton.title = "Add review comment";
+      targetButton.title = uiT("memory.addReviewComment");
       targetButton.addEventListener("click", (event) => {
         event.stopPropagation();
         event.preventDefault();
@@ -5269,7 +5308,7 @@ export const browserHtml = String.raw`<!doctype html>
       link.type = "button";
       link.className = "memory-ref-link" + (missing ? " missing" : "");
       link.textContent = target || t("missingTarget");
-      link.title = missing ? "Referenced memory not found" : "Open referenced memory";
+      link.title = uiT(missing ? "memory.referenceNotFound" : "memory.openReference");
       link.addEventListener("click", (event) => {
         event.stopPropagation();
         openMemoryReference(target).catch(renderFatalError);
@@ -5527,7 +5566,7 @@ export const browserHtml = String.raw`<!doctype html>
             : displayName(field, t("schema"));
         const row = document.createElement("tr");
         const th = document.createElement("th");
-        th.textContent = fieldName + (field && typeof field === "object" && field.optional ? " (optional: true)" : "");
+        th.textContent = fieldName + (field && typeof field === "object" && field.optional ? " (" + t("optional") + ": true)" : "");
         const fieldTarget = path + " > " + fieldName;
         const fieldAnchor = "field:" + fieldTarget;
         const fieldLocation = nextLocation(fieldAnchor);
@@ -5540,7 +5579,7 @@ export const browserHtml = String.raw`<!doctype html>
           if (field.defines && field.defines.length) parts.push(field.defines.filter(value => typeof value === "string").join("\n"));
           if (field.asserts && field.asserts.length) parts.push(field.asserts.join("\n"));
         }
-        const snapshot = parts.join("\n\n") || "Column";
+        const snapshot = parts.join("\n\n") || t("column");
         td.append(commentable(snapshot, fieldTarget, snapshot, fieldAnchor + ":body"));
         row.append(th, td);
         body.append(row);
@@ -5564,13 +5603,13 @@ export const browserHtml = String.raw`<!doctype html>
       title.textContent = name;
       const meta = document.createElement("span");
       meta.className = "schema-field-type";
-      meta.textContent = "string";
+      meta.textContent = t("string");
       const count = commentsForAnchor(location.anchor, name).length;
-      if (count) meta.append(" · " + count + " comments");
+      if (count) meta.append(" · " + uiT("review.commentCount", { count }));
       const targetButton = document.createElement("button");
       targetButton.className = "target-add";
       targetButton.textContent = "+";
-      targetButton.title = "Add review comment";
+      targetButton.title = uiT("memory.addReviewComment");
       targetButton.addEventListener("click", () => {
         openInlineEditor(field, path, name, withLocationHash(location, name));
       });
@@ -5626,8 +5665,8 @@ export const browserHtml = String.raw`<!doctype html>
       const link = document.createElement("a");
       link.className = "call-link";
       link.href = "#";
-      link.textContent = target ? memoryNames(target)[0] : (name || "(missing target)");
-      link.title = target ? "Open called memory" : "Called memory not found";
+      link.textContent = target ? memoryNames(target)[0] : (name || t("missingTarget"));
+      link.title = uiT(target ? "memory.openCalled" : "memory.calledNotFound");
       link.addEventListener("click", (event) => {
         event.preventDefault();
         if (target) {
@@ -5864,11 +5903,11 @@ export const browserHtml = String.raw`<!doctype html>
     function appendArtifactStorageMeta(target, artifact) {
       if (!artifact) return;
       if (artifact.storage === "file") {
-        target.append(pill("file", false, "strong"));
+        target.append(pill(t("file"), false, "strong"));
         if (artifact.path) target.append(pill(artifact.path));
         return;
       }
-      if (artifact.storage === "inline") target.append(pill("inline"));
+      if (artifact.storage === "inline") target.append(pill(t("inline")));
     }
 
     function schemaLinkPill(schemaName) {
@@ -5876,7 +5915,7 @@ export const browserHtml = String.raw`<!doctype html>
       link.type = "button";
       link.className = "pill schema-link";
       link.textContent = t("schema") + ": " + schemaName;
-      link.title = "Open schema";
+      link.title = uiT("schema.open");
       link.addEventListener("click", (event) => {
         event.stopPropagation();
         const target = state.byName.get(schemaName);
@@ -5955,8 +5994,8 @@ export const browserHtml = String.raw`<!doctype html>
       if (!artifact) return "";
       if (artifact.storage === "file") {
         if (typeof artifact.content === "string") return artifact.content;
-        if (artifact.contentError) return "Unable to read artifact file: " + artifact.contentError;
-        return artifact.path ? "File artifact: " + artifact.path : "";
+        if (artifact.contentError) return uiT("artifact.fileReadFailed", { error: artifact.contentError });
+        return artifact.path ? uiT("artifact.file", { path: artifact.path }) : "";
       }
       const value = artifact.value;
       return value !== null && typeof value === "object" ? JSON.stringify(value, null, 2) : value ?? "";
@@ -6100,7 +6139,7 @@ export const browserHtml = String.raw`<!doctype html>
       button.type = "button";
       button.className = "inline-plus";
       button.textContent = "+";
-      button.title = "Add review comment";
+      button.title = uiT("memory.addReviewComment");
       button.addEventListener("click", (event) => {
         event.stopPropagation();
         openInlineEditor(button.parentElement, target, snapshot, location, context);
@@ -6126,7 +6165,7 @@ export const browserHtml = String.raw`<!doctype html>
       const editor = document.createElement("div");
       editor.className = "inline-comment-editor";
       const textarea = document.createElement("textarea");
-      textarea.placeholder = "What should change here?";
+      textarea.placeholder = uiT("change.commentPlaceholder");
       textarea.value = initialBody;
       textarea.addEventListener("input", () => {
         if (state.inlineCommentDraft && state.inlineCommentDraft.location?.anchor === location?.anchor) {
@@ -6138,11 +6177,11 @@ export const browserHtml = String.raw`<!doctype html>
       const save = document.createElement("button");
       save.type = "button";
       save.className = "btn primary";
-      save.textContent = "Add comment";
+      save.textContent = uiT("common.addComment");
       const cancel = document.createElement("button");
       cancel.type = "button";
       cancel.className = "btn";
-      cancel.textContent = "Cancel";
+      cancel.textContent = uiT("common.cancel");
       save.addEventListener("click", () => {
         const body = textarea.value.trim();
         if (!body) {
@@ -6291,19 +6330,19 @@ export const browserHtml = String.raw`<!doctype html>
             const edit = document.createElement("button");
             edit.type = "button";
             edit.className = "btn";
-            edit.textContent = "Edit";
+            edit.textContent = uiT("common.edit");
             edit.addEventListener("click", () => openCommentEditEditor(item, comment));
             const remove = document.createElement("button");
             remove.type = "button";
             remove.className = "btn danger";
-            remove.textContent = "Remove";
+            remove.textContent = uiT("common.remove");
             remove.addEventListener("click", () => runButtonAction(remove, () => removeComment(comment.id)));
             actions.append(edit, remove);
           } else {
             const withdraw = document.createElement("button");
             withdraw.type = "button";
             withdraw.className = "btn danger";
-            withdraw.textContent = "撤回";
+            withdraw.textContent = uiT("common.withdraw");
             withdraw.addEventListener("click", () => runButtonAction(withdraw, () => withdrawComment(comment.id)));
             actions.append(withdraw);
           }
@@ -6328,11 +6367,11 @@ export const browserHtml = String.raw`<!doctype html>
       const save = document.createElement("button");
       save.type = "button";
       save.className = "btn primary";
-      save.textContent = "Save";
+      save.textContent = uiT("common.save");
       const cancel = document.createElement("button");
       cancel.type = "button";
       cancel.className = "btn";
-      cancel.textContent = "Cancel";
+      cancel.textContent = uiT("common.cancel");
       save.addEventListener("click", () => {
         const body = textarea.value.trim();
         if (!body) {
@@ -6483,7 +6522,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function archiveSelectedRun(run) {
       if (!run || !["done", "abandoned"].includes(run.status)) return;
-      if (!confirm(t("archiveRunConfirm"))) return;
+      if (!confirm(uiT("run.archiveConfirm"))) return;
       const response = await fetch("/api/archive/runs/" + encodeURIComponent(run.id), { method: "POST" });
       if (!response.ok) throw new Error(await response.text());
       if (state.selectedTaskId === run.id) {
@@ -6500,7 +6539,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     async function abandonSelectedRun(run) {
       if (!run || run.status !== "running") return;
-      if (!confirm(t("abandonRunConfirm"))) return false;
+      if (!confirm(uiT("run.abandonConfirm"))) return false;
       const response = await fetch("/api/runs/" + encodeURIComponent(run.id) + "/abandon", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -6741,7 +6780,7 @@ export const browserHtml = String.raw`<!doctype html>
       const entry = ensureArtifactReviewLocalEntry(context);
       const pendingDraft = setArtifactReviewLocalDraft(context, draft, change);
       state.artifactReviewSaving = true;
-      entry.status = displayLanguage === "zh" ? "正在保存评审草稿" : "Saving review draft";
+      entry.status = uiT("review.loadingDraft");
       entry.warning = "";
       state.artifactReviewConflict = "";
       setArtifactReviewControlsBusy(true);
@@ -6752,7 +6791,7 @@ export const browserHtml = String.raw`<!doctype html>
           body: JSON.stringify(artifactReviewDraftPayload(context, pendingDraft))
         });
         if (response.status === 409) {
-          entry.status = displayLanguage === "zh" ? "评审轮次已更新，正在同步你的草稿" : "The review round changed; syncing your draft";
+          entry.status = uiT("review.roundChanged");
           try {
             const latestContext = await fetchArtifactReviewContext(context.review.id, context.review.currentRoundId, context.assignment.actorId);
             state.artifactReviewContext = latestContext;
@@ -6776,9 +6815,7 @@ export const browserHtml = String.raw`<!doctype html>
             renderAll();
             return { ok: true, recovered: true };
           } catch (_error) {
-            entry.warning = displayLanguage === "zh"
-              ? "评审轮次又被更新了，你的草稿已保留，请稍后重试"
-              : "The review round changed again. Your draft is preserved; retry shortly.";
+            entry.warning = uiT("review.roundChangedAgain");
             entry.status = "";
             state.artifactReviewConflict = entry.warning;
             if (hasOpenInlineEditor()) syncArtifactReviewStatusMessage(state.artifactReviewContext || context);
@@ -6832,18 +6869,16 @@ export const browserHtml = String.raw`<!doctype html>
 
     function artifactReviewSubmitDisabledReason() {
       const context = state.artifactReviewContext;
-      if (!context?.assignment) return displayLanguage === "zh" ? "无需评审" : "No review required";
-      if (state.artifactReviewSaving) return displayLanguage === "zh" ? "正在保存评审草稿" : "Saving review draft";
+      if (!context?.assignment) return uiT("review.noReviewRequired");
+      if (state.artifactReviewSaving) return uiT("review.loadingDraft");
       if (state.artifactReviewConflict) return state.artifactReviewConflict;
       if (context.review.status !== "pending") return t("round") + " " + context.review.status;
       if (context.assignment.status === "submitted") return t("submitted");
       const draft = artifactReviewEffectiveDraft(context);
       const vote = draft.vote;
-      if (!vote) return displayLanguage === "zh" ? "请先选择投票结果" : "Select a vote first";
+      if (!vote) return uiT("review.selectVote");
       if ((vote === "request_changes" || vote === "abstain") && !(draft.comments || []).length) {
-        return displayLanguage === "zh"
-          ? (vote === "abstain" ? "选择弃权时，至少需要一条原因说明" : "选择修改时，至少需要一条意见")
-          : (vote === "abstain" ? "Abstaining requires at least one reason" : "Requesting changes requires at least one comment");
+        return uiT(vote === "abstain" ? "review.abstainNeedsReason" : "review.changesNeedComment");
       }
       return "";
     }
@@ -6872,9 +6907,7 @@ export const browserHtml = String.raw`<!doctype html>
         } catch (_error) {
           // Keep the visible draft state when the refresh also fails.
         }
-        state.artifactReviewConflict = displayLanguage === "zh"
-          ? "评审轮次已更新；当前页面中的未提交文本仍然保留，请刷新本轮后再操作。"
-          : "The review round changed. Your local text is preserved; refresh before submitting.";
+        state.artifactReviewConflict = uiT("review.roundChangedSubmit");
         renderAll();
         return;
       }
@@ -6891,25 +6924,25 @@ export const browserHtml = String.raw`<!doctype html>
         const body = document.createElement("div");
         body.className = "artifact-review-dialog-body";
         const title = document.createElement("h3");
-        title.textContent = t("submitArtifactReview");
+        title.textContent = uiT("review.submit");
         const summary = document.createElement("div");
         const draft = artifactReviewEffectiveDraft(context);
         const vote = artifactReviewVoteLabel(draft.vote, context.assignment.binding);
         summary.textContent = artifactReviewRoleName(context.assignment) + " · "
           + t("round") + " " + context.review.round.sequence + " · "
           + (context.assignment.binding === "decision" ? t("decisionVote") : t("advisoryVote")) + " · "
-          + vote + " · " + draft.comments.length + " comment(s)";
+          + vote + " · " + uiT("review.commentCount", { count: draft.comments.length });
         const warning = document.createElement("div");
         warning.className = "artifact-review-message warn";
-        warning.textContent = displayLanguage === "zh" ? "提交后，本轮评审不可修改。" : "This round cannot be edited after submission.";
+        warning.textContent = uiT("review.submitImmutable");
         const actions = document.createElement("div");
         actions.className = "artifact-review-dialog-actions";
         const cancel = document.createElement("button");
         cancel.className = "btn";
-        cancel.textContent = displayLanguage === "zh" ? "取消" : "Cancel";
+        cancel.textContent = uiT("common.cancel");
         const confirmButton = document.createElement("button");
         confirmButton.className = "btn primary";
-        confirmButton.textContent = t("submitArtifactReview");
+        confirmButton.textContent = uiT("review.submit");
         cancel.addEventListener("click", () => dialog.close("cancel"));
         confirmButton.addEventListener("click", () => dialog.close("confirm"));
         dialog.addEventListener("close", () => {
@@ -6946,13 +6979,13 @@ export const browserHtml = String.raw`<!doctype html>
       el.artifactReviewModalComments.innerHTML = "";
       el.artifactReviewArtifactContent.innerHTML = "";
       el.artifactReviewMaterialSelector.innerHTML = "";
-      el.artifactReviewScopeTitle.textContent = displayLanguage === "zh" ? "评审范围" : "Review scope";
-      el.artifactReviewMyTitle.textContent = displayLanguage === "zh" ? "我的评审" : "My review";
-      el.artifactReviewProgressTitle.textContent = displayLanguage === "zh" ? "参与进度" : "Participation progress";
-      el.artifactReviewRecordTitle.textContent = displayLanguage === "zh" ? "评审记录" : "Review record";
-      el.artifactReviewSubmitTitle.textContent = displayLanguage === "zh" ? "提交评审" : "Submit review";
+      el.artifactReviewScopeTitle.textContent = uiT("review.scope");
+      el.artifactReviewMyTitle.textContent = uiT("review.myReview");
+      el.artifactReviewProgressTitle.textContent = uiT("review.participation");
+      el.artifactReviewRecordTitle.textContent = uiT("review.record");
+      el.artifactReviewSubmitTitle.textContent = uiT("review.submit");
       if (!review?.round) {
-        el.artifactReviewModalTitle.textContent = t("artifactReview");
+        el.artifactReviewModalTitle.textContent = uiT("review.artifactReview");
         el.artifactReviewModalSubtitle.textContent = "";
         el.artifactReviewCommentSummary.textContent = "";
         el.artifactReviewSubmitArea.hidden = true;
@@ -6963,13 +6996,13 @@ export const browserHtml = String.raw`<!doctype html>
       const selectedRound = context ? selectedArtifactReviewRound(context) : review.round;
       const selectedSequence = selectedRound?.sequence || review.round.sequence;
       const viewingHistory = Boolean(selectedRound && selectedRound.id !== review.currentRoundId);
-      el.artifactReviewModalTitle.textContent = t("artifactReview");
-      el.artifactReviewModalClose.textContent = t("close");
-      el.artifactReviewArtifactTab.textContent = t("artifactPane");
-      el.artifactReviewReviewTab.textContent = t("reviewPane");
+      el.artifactReviewModalTitle.textContent = uiT("review.artifactReview");
+      el.artifactReviewModalClose.textContent = uiT("common.close");
+      el.artifactReviewArtifactTab.textContent = uiT("review.artifact");
+      el.artifactReviewReviewTab.textContent = uiT("review.review");
       el.artifactReviewModalSubtitle.textContent = review.artifactName + " · " + review.id;
       const selectedMaterial = context ? selectedArtifactReviewMaterial(context) : null;
-      el.artifactReviewArtifactTitle.textContent = displayLanguage === "zh" ? "评审材料" : "Review material";
+      el.artifactReviewArtifactTitle.textContent = uiT("review.material");
       if (context && selectedMaterial) {
         el.artifactReviewMaterialSelector.append(renderArtifactReviewMaterialSelector(context, selectedMaterial));
       }
@@ -6993,15 +7026,13 @@ export const browserHtml = String.raw`<!doctype html>
         ),
         pill(review.policyId),
         pill(t("round") + " " + selectedSequence + " · " + scopeSubmitted + "/" + scopeTotal),
-        pill(viewingHistory
-          ? (displayLanguage === "zh" ? "历史轮次 · 只读" : "Historical round · read-only")
-          : (displayLanguage === "zh" ? "当前轮次" : "Current round"))
+        pill(uiT(viewingHistory ? "review.historicalRound" : "review.currentRound"))
       );
       controls.append(scopeMeta);
       if (context) controls.append(renderArtifactReviewHistorySelector(context));
       const humanAssignments = (review.round.assignments || []).filter(assignment => assignment.actorKind !== "agent");
       if (humanAssignments.length) {
-        const identityLabel = blockTitle(t("identity"));
+        const identityLabel = blockTitle(uiT("review.identity"));
         el.artifactReviewMyContent.append(identityLabel, renderArtifactReviewIdentitySelector(review, context));
       }
 
@@ -7025,13 +7056,13 @@ export const browserHtml = String.raw`<!doctype html>
       if (state.artifactReviewLoading) {
         const loading = document.createElement("div");
         loading.className = "muted";
-        loading.textContent = displayLanguage === "zh" ? "加载中..." : "Loading...";
+        loading.textContent = uiT("common.loading");
         el.artifactReviewMyContent.append(loading);
         el.artifactReviewArtifactContent.append(loading.cloneNode(true));
       } else if (!context) {
         const empty = document.createElement("div");
         empty.className = "artifact-review-message";
-        empty.textContent = t("selectIdentity");
+        empty.textContent = uiT("review.selectIdentity");
         el.artifactReviewMyContent.append(empty);
       } else {
         el.artifactReviewArtifactContent.append(renderArtifactReviewSubmission(context, selectedMaterial));
@@ -7042,7 +7073,7 @@ export const browserHtml = String.raw`<!doctype html>
       const agentManaged = context?.assignment?.actorKind === "agent";
       const readOnly = !context?.assignment || viewingHistory || context.assignment.status === "submitted" || context.review.status !== "pending";
       el.artifactReviewSubmitArea.hidden = Boolean(agentManaged || readOnly);
-      el.artifactReviewSubmit.textContent = context?.assignment?.status === "submitted" ? t("submitted") : t("submitArtifactReview");
+      el.artifactReviewSubmit.textContent = uiT(context?.assignment?.status === "submitted" ? "review.submitted" : "review.submit");
       el.artifactReviewSubmit.disabled = agentManaged || Boolean(disabledReason);
       el.artifactReviewSubmit.title = disabledReason;
       el.artifactReviewCommentSummary.textContent = context?.assignment
@@ -7052,9 +7083,10 @@ export const browserHtml = String.raw`<!doctype html>
         const draft = artifactReviewEffectiveDraft(context);
         const vote = context.assignment.submitted?.vote || draft.vote;
         const comments = draft.comments?.length || 0;
-        el.artifactReviewSubmitSummary.textContent = displayLanguage === "zh"
-          ? "当前投票：" + artifactReviewVoteLabel(vote, context.assignment.binding) + " · 草稿意见：" + comments + " 条"
-          : "Current vote: " + artifactReviewVoteLabel(vote, context.assignment.binding) + " · Draft comments: " + comments;
+        el.artifactReviewSubmitSummary.textContent = uiT("review.currentVoteSummary", {
+          vote: artifactReviewVoteLabel(vote, context.assignment.binding),
+          count: comments
+        });
       } else {
         el.artifactReviewSubmitSummary.textContent = "";
       }
@@ -7076,20 +7108,15 @@ export const browserHtml = String.raw`<!doctype html>
         .filter(Boolean);
       const environmentFailures = failures.filter(item => item.category === "environment").length;
       const unresolvedBlocking = artifactReviewUnresolvedBlocking(round);
-      if (displayLanguage === "zh") {
-        return "已提交 " + submitted + "/" + total
-          + " · " + (decisionReady ? "决策票已就绪" : "仍在等待评审")
-          + " · 阻塞意见 " + (severity.blocking || 0)
-          + " · 未处置 " + unresolvedBlocking
-          + " · 环境失败 " + environmentFailures
-          + " · 重复建议组 " + (round.repeatedAdvisories || []).length;
-      }
-      return submitted + "/" + total + " submitted"
-        + " · " + (decisionReady ? "Decision votes are ready" : "Waiting for reviews")
-        + " · Blocking comments " + (severity.blocking || 0)
-        + " · Unresolved " + unresolvedBlocking
-        + " · Environment failures " + environmentFailures
-        + " · Repeated advisory groups " + (round.repeatedAdvisories || []).length;
+      return uiT("review.progressSummary", {
+        submitted,
+        total,
+        decision: uiT(decisionReady ? "review.decisionReady" : "review.waitingReviews"),
+        blocking: severity.blocking || 0,
+        unresolved: unresolvedBlocking,
+        environmentFailures,
+        repeated: (round.repeatedAdvisories || []).length
+      });
     }
 
     function artifactReviewUnresolvedBlocking(round) {
@@ -7105,19 +7132,19 @@ export const browserHtml = String.raw`<!doctype html>
       return [
         {
           key: "candidate",
-          label: displayLanguage === "zh" ? "待评审产物" : "Artifact under review",
+          label: uiT("review.pendingArtifact"),
           artifact: context.submission.artifact,
           commentable: true
         },
         {
           key: "contract",
-          label: displayLanguage === "zh" ? "冻结契约" : "Frozen contract",
+          label: uiT("review.frozenContract"),
           artifact: context.submission.contractArtifact,
           commentable: false
         },
         ...((context.submission.contextArtifacts || []).map((item, index) => ({
           key: "context:" + index,
-          label: displayLanguage === "zh" ? "前序产物" : "Earlier Artifact",
+          label: uiT("review.earlierArtifact"),
           artifact: item.artifact,
           commentable: false
         })))
@@ -7137,7 +7164,7 @@ export const browserHtml = String.raw`<!doctype html>
       trigger.type = "button";
       trigger.className = "artifact-review-select artifact-review-select-trigger";
       trigger.setAttribute("role", "combobox");
-      trigger.setAttribute("aria-label", displayLanguage === "zh" ? "选择评审材料" : "Select review material");
+      trigger.setAttribute("aria-label", uiT("review.selectMaterial"));
       trigger.setAttribute("aria-haspopup", "listbox");
       trigger.setAttribute("aria-expanded", "false");
       const triggerText = document.createElement("span");
@@ -7150,7 +7177,7 @@ export const browserHtml = String.raw`<!doctype html>
       const menu = document.createElement("div");
       menu.className = "artifact-review-select-menu";
       menu.setAttribute("role", "listbox");
-      menu.setAttribute("aria-label", displayLanguage === "zh" ? "选择评审材料" : "Select review material");
+      menu.setAttribute("aria-label", uiT("review.selectMaterial"));
       menu.hidden = true;
       const setOpen = open => {
         menu.hidden = !open;
@@ -7201,7 +7228,7 @@ export const browserHtml = String.raw`<!doctype html>
       const meta = document.createElement("div");
       meta.className = "meta";
       meta.append(pill(material.label, true));
-      if (!material.commentable) meta.append(pill(displayLanguage === "zh" ? "只读快照" : "Read-only snapshot"));
+      if (!material.commentable) meta.append(pill(uiT("review.readOnlySnapshot")));
       if (artifact.type) meta.append(pill(artifact.type));
       appendFormatMeta(meta, artifact.format, artifactSchemaName(artifact), artifact.schema?.kind === "inline");
       appendArtifactStorageMeta(meta, artifact);
@@ -7382,15 +7409,13 @@ export const browserHtml = String.raw`<!doctype html>
           summary.className = "artifact-review-agent-summary";
           summary.textContent = activity?.summary
             ? activity.summary.text + " · " + formatTime(activity.summary.at)
-            : (displayLanguage === "zh" ? "等待 Agent 活动" : "Waiting for Agent activity");
+            : uiT("review.waitingActivity");
           summaryRow.append(summary);
           if (latestAgentAttempt(assignment)) {
             const toggle = document.createElement("button");
             toggle.type = "button";
             toggle.className = "artifact-review-activity-toggle";
-            toggle.textContent = activity?.expanded
-              ? (displayLanguage === "zh" ? "收起详情" : "Hide details")
-              : (displayLanguage === "zh" ? "查看详情" : "View details");
+            toggle.textContent = uiT(activity?.expanded ? "review.hideDetails" : "review.viewDetails");
             toggle.setAttribute("aria-expanded", String(Boolean(activity?.expanded)));
             toggle.setAttribute("aria-controls", agentActivityDomId(review, selectedRound, assignment));
             toggle.addEventListener("click", async () => {
@@ -7411,9 +7436,7 @@ export const browserHtml = String.raw`<!doctype html>
           if (attempt?.failure?.message) {
             const failure = document.createElement("span");
             failure.className = "muted";
-            failure.textContent = displayLanguage === "zh"
-              ? "失败：" + attempt.failure.message
-              : "Failure: " + attempt.failure.message;
+            failure.textContent = uiT("review.failure", { message: attempt.failure.message });
             main.append(failure);
           }
         }
@@ -7421,7 +7444,7 @@ export const browserHtml = String.raw`<!doctype html>
         if (assignment.binding === "decision" && decisionIntent) {
           const intent = document.createElement("span");
           intent.className = "muted";
-          intent.textContent = "Decision intent: " + decisionIntent;
+          intent.textContent = uiT("review.decisionIntent", { intent: decisionIntent });
           main.append(intent);
         }
         if (submitted || assignment.status === "submitted") {
@@ -7583,7 +7606,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (summary) {
         summary.textContent = entry.summary
           ? entry.summary.text + " · " + formatTime(entry.summary.at)
-          : (displayLanguage === "zh" ? "等待 Agent 活动" : "Waiting for Agent activity");
+          : uiT("review.waitingActivity");
       }
       const existing = document.getElementById(agentActivityDomId(review, round, assignment));
       const interacting = existing && (
@@ -7636,7 +7659,7 @@ export const browserHtml = String.raw`<!doctype html>
       const head = document.createElement("div");
       head.className = "artifact-review-activity-head";
       const title = document.createElement("b");
-      title.textContent = displayLanguage === "zh" ? "运行记录" : "Activity";
+      title.textContent = uiT("review.activity");
       const attempts = assignment.attempts || [assignment.attempt].filter(Boolean);
       const chooser = document.createElement("div");
       chooser.className = "artifact-review-round-select artifact-review-attempt-select";
@@ -7644,13 +7667,13 @@ export const browserHtml = String.raw`<!doctype html>
       trigger.type = "button";
       trigger.className = "artifact-review-select artifact-review-select-trigger";
       trigger.setAttribute("role", "combobox");
-      trigger.setAttribute("aria-label", displayLanguage === "zh" ? "选择 Attempt" : "Select attempt");
+      trigger.setAttribute("aria-label", uiT("review.selectAttempt"));
       trigger.setAttribute("aria-haspopup", "listbox");
       trigger.setAttribute("aria-expanded", "false");
       const selectedAttempt = attempts.find(attempt => attempt.sequence === entry.selectedAttempt);
       const triggerText = document.createElement("span");
       triggerText.textContent = selectedAttempt
-        ? t("attempt") + " " + selectedAttempt.sequence + " · " + selectedAttempt.status
+        ? t("attempt") + " " + selectedAttempt.sequence + " · " + agentActivityStatusLabel(selectedAttempt.status)
         : t("attempt");
       const caret = document.createElement("span");
       caret.className = "artifact-review-select-caret";
@@ -7660,7 +7683,7 @@ export const browserHtml = String.raw`<!doctype html>
       const menu = document.createElement("div");
       menu.className = "artifact-review-select-menu";
       menu.setAttribute("role", "listbox");
-      menu.setAttribute("aria-label", displayLanguage === "zh" ? "选择 Attempt" : "Select attempt");
+      menu.setAttribute("aria-label", uiT("review.selectAttempt"));
       menu.hidden = true;
       const setOpen = open => {
         menu.hidden = !open;
@@ -7680,7 +7703,7 @@ export const browserHtml = String.raw`<!doctype html>
         option.className = "artifact-review-select-option";
         option.setAttribute("role", "option");
         option.setAttribute("aria-selected", String(attempt.sequence === entry.selectedAttempt));
-        option.textContent = t("attempt") + " " + attempt.sequence + " · " + attempt.status;
+        option.textContent = t("attempt") + " " + attempt.sequence + " · " + agentActivityStatusLabel(attempt.status);
         option.addEventListener("click", async () => {
           setOpen(false);
           if (attempt.sequence === entry.selectedAttempt) return trigger.focus();
@@ -7737,7 +7760,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (entry.truncated) {
         const truncated = document.createElement("div");
         truncated.className = "artifact-review-message warn";
-        truncated.textContent = (displayLanguage === "zh" ? "较早活动已截断" : "Earlier activity was truncated")
+        truncated.textContent = uiT("review.earlierTruncated")
           + " · " + entry.droppedCount;
         wrap.append(truncated);
       }
@@ -7752,12 +7775,12 @@ export const browserHtml = String.raw`<!doctype html>
       if (entry.loading && !entry.loaded) {
         const loading = document.createElement("div");
         loading.className = "muted";
-        loading.textContent = "Loading...";
+        loading.textContent = uiT("common.loading");
         log.append(loading);
       } else if (!entry.events.length) {
         const empty = document.createElement("div");
         empty.className = "muted";
-        empty.textContent = displayLanguage === "zh" ? "等待 Agent 活动" : "Waiting for Agent activity";
+        empty.textContent = uiT("review.waitingActivity");
         log.append(empty);
       } else {
         for (const event of entry.events) log.append(renderAgentActivityEvent(event));
@@ -7819,28 +7842,11 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function agentActivityKindLabel(kind) {
-      if (displayLanguage !== "zh") return kind;
-      return ({
-        message: "消息",
-        tool: "工具调用",
-        plan: "执行计划",
-        thought: "分析",
-        lifecycle: "运行状态"
-      })[kind] || kind;
+      return uiMessages["review.kind." + kind] || kind;
     }
 
     function agentActivityStatusLabel(status) {
-      if (displayLanguage !== "zh") return status;
-      return ({
-        pending: "等待中",
-        in_progress: "进行中",
-        running: "运行中",
-        connected: "已连接",
-        completed: "已完成",
-        submitted: "已提交",
-        stopped: "已停止",
-        failed: "失败"
-      })[status] || status;
+      return uiMessages["review.status." + status] || status;
     }
 
     function artifactReviewParticipantDomId(assignment) {
@@ -8094,7 +8100,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (!entry?.status) {
         const refresh = document.createElement("button");
         refresh.className = "btn";
-        refresh.textContent = displayLanguage === "zh" ? "刷新当前轮次" : "Refresh round";
+        refresh.textContent = uiT("review.refreshRound");
         refresh.addEventListener("click", async () => {
           await syncArtifactReviewContext(true);
           renderAll();
@@ -8114,9 +8120,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (viewingHistory) {
         const history = document.createElement("div");
         history.className = "artifact-review-message";
-        history.textContent = displayLanguage === "zh"
-          ? "历史轮次仅供查看，不能投票、添加意见或重新提交。"
-          : "Historical rounds are read-only; voting, commenting, and resubmission are unavailable.";
+        history.textContent = uiT("review.historyReadOnly");
         el.artifactReviewMyContent.append(history);
         renderArtifactReviewSubmittedOpinions(selectedRound, el.artifactReviewModalComments, false);
         return;
@@ -8126,7 +8130,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (!assignment) {
         const noReview = document.createElement("div");
         noReview.className = "artifact-review-message";
-        noReview.textContent = displayLanguage === "zh" ? "无需评审" : "No review required";
+        noReview.textContent = uiT("review.noReviewRequired");
         el.artifactReviewMyContent.append(noReview);
         renderArtifactReviewSubmittedOpinions(selectedRound, el.artifactReviewModalComments, false);
         return;
@@ -8140,27 +8144,21 @@ export const browserHtml = String.raw`<!doctype html>
         const submitted = document.createElement("div");
         submitted.className = "artifact-review-message";
         if (assignment.status === "cancelled") {
-          submitted.textContent = displayLanguage === "zh"
-            ? "评审已取消；已有内容保留为只读证据。"
-            : "Review cancelled; existing content is preserved as read-only evidence.";
+          submitted.textContent = uiT("review.cancelledReadOnly");
           el.artifactReviewMyContent.append(submitted);
           return;
         }
         const vote = assignment.submitted?.vote;
-        submitted.textContent = displayLanguage === "zh"
-          ? "已提交评审 · " + artifactReviewVoteLabel(vote, assignment.binding)
-          : "Review submitted · " + artifactReviewVoteLabel(vote, assignment.binding);
+        submitted.textContent = uiT("review.submittedVote", { vote: artifactReviewVoteLabel(vote, assignment.binding) });
         const jump = document.createElement("button");
         jump.className = "btn";
-        jump.textContent = displayLanguage === "zh" ? "查看正式意见" : "View submitted opinion";
+        jump.textContent = uiT("review.viewSubmitted");
         jump.addEventListener("click", () => scrollToArtifactReviewParticipant(assignment));
         el.artifactReviewMyContent.append(submitted, jump);
       } else {
         const commentGroup = artifactReviewOperationGroup(
-          displayLanguage === "zh" ? "评审意见" : "Review comments",
-          displayLanguage === "zh"
-            ? "记录具体问题或建议。添加意见只保存草稿，不会提交整份评审。"
-            : "Record specific issues or suggestions. Adding a comment saves a draft; it does not submit the review."
+          uiT("review.comments"),
+          uiT("review.commentsHelp")
         );
         commentGroup.append(renderArtifactReviewCommentComposer(context));
         const draftComments = artifactReviewEffectiveDraft(context).comments || [];
@@ -8170,10 +8168,8 @@ export const browserHtml = String.raw`<!doctype html>
         el.artifactReviewMyContent.append(commentGroup);
 
         const voteGroup = artifactReviewOperationGroup(
-          displayLanguage === "zh" ? "投票" : "Vote",
-          displayLanguage === "zh"
-            ? "根据上述评审意见，选择你对本轮产物的最终立场。"
-            : "Based on the review comments above, choose your final position on this Artifact."
+          uiT("review.vote"),
+          uiT("review.voteHelp")
         );
         voteGroup.append(renderArtifactVoteControl(context, false));
         el.artifactReviewMyContent.append(voteGroup);
@@ -8208,7 +8204,7 @@ export const browserHtml = String.raw`<!doctype html>
       const progress = document.createElement("div");
       progress.className = "artifact-review-message" + (assignment.status === "failed" ? " warn" : "");
       progress.textContent = retryState
-        ? retryState.status + " · " + t("attempt") + " " + retryState.attempt
+        ? artifactReviewAssignmentStatusLabel(retryState.status, "agent") + " · " + t("attempt") + " " + retryState.attempt
         : artifactReviewAssignmentStatusLabel(assignment.status, "agent")
           + (attempt ? " · " + (attempt.provider || "Agent") + " · " + t("attempt") + " " + attempt.sequence : "");
       status.append(progress);
@@ -8409,7 +8405,7 @@ export const browserHtml = String.raw`<!doctype html>
       wrap.className = "artifact-review-comment";
       const entry = ensureArtifactReviewLocalEntry(context);
       const textarea = document.createElement("textarea");
-      textarea.placeholder = displayLanguage === "zh" ? "补充整体评审意见" : "Add an overall review comment";
+      textarea.placeholder = uiT("review.overallPlaceholder");
       textarea.value = entry?.composerText || "";
       textarea.addEventListener("input", () => {
         const activeEntry = ensureArtifactReviewLocalEntry(context);
@@ -8433,7 +8429,7 @@ export const browserHtml = String.raw`<!doctype html>
       severityTrigger.type = "button";
       severityTrigger.className = "artifact-review-select artifact-review-select-trigger";
       severityTrigger.setAttribute("role", "combobox");
-      severityTrigger.setAttribute("aria-label", displayLanguage === "zh" ? "意见分类" : "Comment severity");
+      severityTrigger.setAttribute("aria-label", uiT("review.commentSeverity"));
       severityTrigger.setAttribute("aria-haspopup", "listbox");
       severityTrigger.setAttribute("aria-expanded", "false");
       severityTrigger.disabled = state.artifactReviewSaving;
@@ -8447,7 +8443,7 @@ export const browserHtml = String.raw`<!doctype html>
       const severityMenu = document.createElement("div");
       severityMenu.className = "artifact-review-select-menu";
       severityMenu.setAttribute("role", "listbox");
-      severityMenu.setAttribute("aria-label", displayLanguage === "zh" ? "意见分类" : "Comment severity");
+      severityMenu.setAttribute("aria-label", uiT("review.commentSeverity"));
       severityMenu.hidden = true;
       const setSeverityOpen = open => {
         severityMenu.hidden = !open;
@@ -8519,7 +8515,7 @@ export const browserHtml = String.raw`<!doctype html>
       severity.append(severityTrigger, severityMenu);
       const add = document.createElement("button");
       add.className = "btn";
-      add.textContent = displayLanguage === "zh" ? "添加意见" : "Add comment";
+      add.textContent = uiT("common.addComment");
       add.disabled = state.artifactReviewSaving;
       add.addEventListener("click", () => {
         const body = textarea.value.trim();
@@ -8576,29 +8572,29 @@ export const browserHtml = String.raw`<!doctype html>
       if (disposition) {
         const resolution = document.createElement("div");
         resolution.className = "artifact-review-message";
-        resolution.textContent = (displayLanguage === "zh" ? "处置：" : "Disposition: ")
-          + artifactReviewDispositionLabel(disposition.disposition)
-          + (disposition.note ? " · " + disposition.note : "");
+        resolution.textContent = uiT("review.disposition", {
+          value: artifactReviewDispositionLabel(disposition.disposition)
+            + (disposition.note ? " · " + disposition.note : "")
+        });
         card.append(resolution);
         if (disposition.validationSummary) {
           const validation = document.createElement("div");
           validation.className = "muted";
-          validation.textContent = (displayLanguage === "zh" ? "验证：" : "Validation: ")
-            + disposition.validationSummary;
+          validation.textContent = uiT("review.validation", { value: disposition.validationSummary });
           card.append(validation);
         }
       }
       if (comment.anchor?.location || comment.anchor?.target) {
         const go = document.createElement("button");
         go.className = "btn";
-        go.textContent = displayLanguage === "zh" ? "定位" : "Go to";
+        go.textContent = uiT("common.goTo");
         go.addEventListener("click", () => runButtonAction(go, () => locateArtifactReviewComment(comment)));
         card.append(go);
       }
       if (editable) {
         const remove = document.createElement("button");
         remove.className = "btn danger";
-        remove.textContent = displayLanguage === "zh" ? "删除" : "Remove";
+        remove.textContent = uiT("common.remove");
         remove.addEventListener("click", () => runButtonAction(remove, () => removeComment(comment.id)));
         card.append(remove);
       } else if (
@@ -8609,7 +8605,7 @@ export const browserHtml = String.raw`<!doctype html>
       ) {
         const resolve = document.createElement("button");
         resolve.className = "btn";
-        resolve.textContent = displayLanguage === "zh" ? "处置" : "Resolve";
+        resolve.textContent = uiT("review.resolve");
         resolve.addEventListener("click", () => runButtonAction(resolve, () => resolveArtifactReviewCommentInView(comment)));
         card.append(resolve);
       }
@@ -8617,22 +8613,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function artifactReviewDispositionLabel(value) {
-      if (displayLanguage !== "zh") {
-        return ({
-          "accepted-fixed": "Accepted and fixed",
-          "accepted-followup": "Accepted for follow-up",
-          "rejected-out-of-scope": "Out of scope",
-          "rejected-not-blocking": "Not blocking",
-          "rejected-invalid": "Invalid"
-        })[value] || value;
-      }
-      return ({
-        "accepted-fixed": "已接受并修复",
-        "accepted-followup": "已接受，后续处理",
-        "rejected-out-of-scope": "超出范围",
-        "rejected-not-blocking": "不构成阻塞",
-        "rejected-invalid": "无效意见"
-      })[value] || value;
+      return uiMessages["review.disposition." + value] || value;
     }
 
     async function locateArtifactReviewComment(comment) {
@@ -8640,9 +8621,7 @@ export const browserHtml = String.raw`<!doctype html>
       if (!context || !comment.anchor) return;
       const targetRound = context.rounds.find(round => round.submissionId === comment.anchor.submissionId);
       if (!targetRound) {
-        state.artifactReviewLocateFailure = displayLanguage === "zh"
-          ? "无法找到该意见对应的评审轮次，已保留原始定位引用。"
-          : "The review round for this comment is unavailable; the original reference is preserved.";
+        state.artifactReviewLocateFailure = uiT("review.locateRoundUnavailable");
         renderAll();
         return;
       }
@@ -8656,8 +8635,7 @@ export const browserHtml = String.raw`<!doctype html>
       const target = el.artifactReviewArtifactContent.querySelector('[data-anchor="' + CSS.escape(anchor) + '"]')
         || el.artifactReviewArtifactContent.querySelector('[data-anchor="' + CSS.escape(comment.anchor.target) + '"]');
       if (!target) {
-        state.artifactReviewLocateFailure = (displayLanguage === "zh" ? "无法精确定位：" : "Unable to locate: ")
-          + comment.anchor.target;
+        state.artifactReviewLocateFailure = uiT("review.unableToLocate", { target: comment.anchor.target });
         renderAll();
         return;
       }
@@ -8672,11 +8650,11 @@ export const browserHtml = String.raw`<!doctype html>
     async function resolveArtifactReviewCommentInView(comment) {
       const context = state.artifactReviewContext;
       if (!context) return;
-      const disposition = prompt("Disposition: accepted-fixed / accepted-followup / rejected-out-of-scope / rejected-not-blocking / rejected-invalid", "rejected-not-blocking");
+      const disposition = prompt(uiT("review.dispositionPrompt"), "rejected-not-blocking");
       if (!disposition) return false;
-      const note = prompt("Disposition note", "") || "";
+      const note = prompt(uiT("review.dispositionNote"), "") || "";
       if (!note.trim()) return false;
-      const validationSummary = disposition === "accepted-fixed" ? (prompt("Validation summary", "") || "") : undefined;
+      const validationSummary = disposition === "accepted-fixed" ? (prompt(uiT("review.validationSummary"), "") || "") : undefined;
       const response = await fetch("/api/artifact-reviews/" + encodeURIComponent(context.review.id)
         + "/rounds/" + encodeURIComponent(context.review.currentRoundId)
         + "/comments/" + encodeURIComponent(comment.id) + "/resolve", {
@@ -8699,17 +8677,12 @@ export const browserHtml = String.raw`<!doctype html>
       const result = round.result;
       if (result) {
         const decisionText = result.decisionApprove + "/" + result.decisionTotal;
-        summary.textContent = displayLanguage === "zh"
-          ? (round.status === "passed"
-              ? "本轮已通过：" + decisionText + " 张决策票通过；另记录 " + result.advisoryTotal + " 张建议票。"
-              : "本轮要求修改：" + decisionText + " 张决策票通过，未达到当前决策规则；另记录 " + result.advisoryTotal + " 张建议票。")
-          : (round.status === "passed"
-              ? "This round passed: " + decisionText + " decision votes approved; " + result.advisoryTotal + " advisory votes were recorded."
-              : "This round requested changes: " + decisionText + " decision votes approved, which did not satisfy the policy; " + result.advisoryTotal + " advisory votes were recorded.");
+        summary.textContent = uiT(round.status === "passed" ? "review.roundPassed" : "review.roundChanges", {
+          decision: decisionText,
+          advisory: result.advisoryTotal
+        });
       } else if (round.status === "cancelled") {
-        summary.textContent = displayLanguage === "zh"
-          ? "本轮因 Run 已废弃而取消；已有意见与运行记录保留为只读证据。"
-          : "This round was cancelled because the Run was abandoned; existing comments and activity remain as read-only evidence.";
+        summary.textContent = uiT("review.roundCancelled");
       } else {
         summary.textContent = t("round") + " " + round.sequence + " · "
           + (round.assignments || []).filter(assignment => assignment.status === "submitted").length
@@ -8739,10 +8712,7 @@ export const browserHtml = String.raw`<!doctype html>
     }
 
     function artifactReviewSeverityLabel(value) {
-      if (displayLanguage !== "zh") {
-        return ({ blocking: "Blocking", risk: "Risk", suggestion: "Suggestion" })[value] || value;
-      }
-      return ({ blocking: "阻塞问题", risk: "风险", suggestion: "建议" })[value] || value;
+      return uiMessages["review.severity." + value] || value;
     }
 
     function artifactReviewAssignmentStatusLabel(status, actorKind) {
@@ -8791,7 +8761,9 @@ export const browserHtml = String.raw`<!doctype html>
 
     function commentMetaText(comment) {
       if (isCommentOutdated(comment)) return "";
-      return "Memory" + (comment.location?.line ? " · Line " + comment.location.line : " · Unanchored");
+      return uiT("navigation.memory") + (comment.location?.line
+        ? " · " + uiT("change.line", { line: comment.location.line })
+        : " · " + uiT("change.unanchored"));
     }
 
     function isCommentOutdated(comment, root = document) {
@@ -8822,7 +8794,7 @@ export const browserHtml = String.raw`<!doctype html>
 
     function commentTitle(comment) {
       const target = comment.artifactName || comment.target;
-      return "Memory · " + (comment.memory_reference || "") + (target ? " · " + target : "");
+      return uiT("navigation.memory") + " · " + (comment.memory_reference || "") + (target ? " · " + target : "");
     }
 
     function selectCommentSubject(comment) {
@@ -8843,17 +8815,17 @@ export const browserHtml = String.raw`<!doctype html>
 
     function changeCommentStatusLabel(comment) {
       const changeStatus = state.changeDetail?.change?.status;
-      if (comment.status === "completed") return t("changeCommentCompleted");
-      if (changeStatus === "abandoned") return t("changeCommentAbandoned");
-      if (changeStatus === "completed") return t("changeCommentEnded");
-      if (comment.status === "processing") return t("changeCommentProcessing");
-      return t("changeCommentPending");
+      if (comment.status === "completed") return uiT("change.comment.completed");
+      if (changeStatus === "abandoned") return uiT("change.comment.abandoned");
+      if (changeStatus === "completed") return uiT("change.comment.ended");
+      if (comment.status === "processing") return uiT("change.comment.processing");
+      return uiT("change.comment.pending");
     }
 
     function changeStatusLabel(status) {
-      if (status === "active") return t("changeActive");
-      if (status === "completed") return t("changeCompleted");
-      if (status === "abandoned") return t("changeAbandoned");
+      if (status === "active") return uiT("change.status.active");
+      if (status === "completed") return uiT("change.status.completed");
+      if (status === "abandoned") return uiT("change.status.abandoned");
       return status;
     }
 
@@ -8906,8 +8878,8 @@ export const browserHtml = String.raw`<!doctype html>
 
     function changeOperatorLabel() {
       const operator = currentChangeOperator();
-      if (!operator) return "请选择";
-      return operator.kind === "human" ? (state.actorNames[operator.id] || operator.id) : "Browser";
+      if (!operator) return uiT("common.select");
+      return operator.kind === "human" ? (state.actorNames[operator.id] || operator.id) : uiT("common.browser");
     }
 
     async function chooseChangeOperator(options = {}) {
@@ -8916,10 +8888,10 @@ export const browserHtml = String.raw`<!doctype html>
       if (current && (!options.forcePrompt || humans.length <= 1)) return current;
       if (humans.length <= 1) return current;
       const choices = humans.map(id => id + (state.actorNames[id] ? " (" + state.actorNames[id] + ")" : "")).join(", ");
-      const selected = prompt("选择本次操作身份：" + choices, current?.id || humans[0]);
+      const selected = prompt(uiT("change.operatorPrompt", { choices }), current?.id || humans[0]);
       if (!selected) return null;
       const actorId = selected.trim();
-      if (!humans.includes(actorId)) throw new Error("未知 Human 身份：" + actorId);
+      if (!humans.includes(actorId)) throw new Error(uiT("change.unknownHuman", { id: actorId }));
       const selections = readStoredObject(changeActorSelectionKey);
       selections[state.currentProject] = actorId;
       writeStoredObject(changeActorSelectionKey, selections);
@@ -8933,3 +8905,13 @@ export const browserHtml = String.raw`<!doctype html>
   </script>
 </body>
 </html>`;
+
+export function renderBrowserHtml(locale: ViewLocale | unknown = "zh-CN"): string {
+  const resolved = resolveViewLocale(locale);
+  return browserTemplate
+    .replace("__MEMSPHERE_VIEW_LANG__", resolved)
+    .replace("__MEMSPHERE_VIEW_LOCALE__", JSON.stringify(resolved))
+    .replace("__MEMSPHERE_VIEW_MESSAGES__", serializeViewMessages(resolved));
+}
+
+export const browserHtml = renderBrowserHtml();

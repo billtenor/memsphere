@@ -78,7 +78,7 @@ test("Human Artifact Review completes once after a revised second round", async 
         page,
         reviewModal.getByRole("button", { name: "添加意见", exact: true })
       );
-      await clickAndWaitForDraftSave(page, reviewModal.getByRole("radio", { name: "修改", exact: true }));
+      await clickAndWaitForDraftSave(page, reviewModal.getByRole("radio", { name: "要求修改", exact: true }));
       await submitThroughConfirmation(page);
 
       await selectIdentity(page, identity, "bob");
@@ -117,7 +117,7 @@ test("Human Artifact Review completes once after a revised second round", async 
         roundId: secondReview.currentRoundId,
         vote: "approve"
       });
-      await page.getByText("done", { exact: true }).first().waitFor({ timeout: 6_000 });
+      await page.getByText("已完成", { exact: true }).first().waitFor({ timeout: 6_000 });
       const completed = await readRun(fixture.runsRoot, fixture.runId);
       assert.equal(completed.status, "done");
       assert.equal(completed.events.length, 1);
@@ -141,19 +141,20 @@ test("failed Artifact Review draft saves retain input and retry exactly once", a
 
       await modal.locator(".inline-plus").first().click();
       let inlineEditor = modal.locator(".inline-comment-editor").first();
-      let inlineInput = inlineEditor.getByPlaceholder("What should change here?");
-      let inlineSave = inlineEditor.getByRole("button", { name: "Add comment", exact: true });
+      let inlineInput = inlineEditor.getByPlaceholder("这里应该如何修改？");
+      let inlineSave = inlineEditor.getByRole("button", { name: "添加意见", exact: true });
       await inlineInput.fill("Inline text survives a failed save");
       await failNextDraftSave(page, "inline draft outage", () => inlineSave.click());
       inlineEditor = modal.locator(".inline-comment-editor").first();
-      inlineInput = inlineEditor.getByPlaceholder("What should change here?");
-      inlineSave = inlineEditor.getByRole("button", { name: "Add comment", exact: true });
+      inlineInput = inlineEditor.getByPlaceholder("这里应该如何修改？");
+      inlineSave = inlineEditor.getByRole("button", { name: "添加意见", exact: true });
       assert.equal(await inlineInput.inputValue(), "Inline text survives a failed save");
       assert.equal(await inlineSave.isEnabled(), true);
       await clickAndWaitForDraftSave(page, inlineSave);
 
       const composer = modal.getByPlaceholder("补充整体评审意见");
-      const composerSave = modal.getByRole("button", { name: "添加意见", exact: true });
+      const composerSave = modal.locator("#artifact-review-my-content")
+        .getByRole("button", { name: "添加意见", exact: true });
       await composer.fill("Overall text survives a failed save");
       await failNextDraftSave(page, "composer draft outage", () => composerSave.click());
       assert.equal(await composer.inputValue(), "Overall text survives a failed save");
@@ -321,7 +322,7 @@ test("completed Artifact Review locks page scrolling and restores the trigger po
     await approveSingleActorReview(fixture.runsRoot, fixture.runId, fixture.review.id, fixture.review.currentRoundId);
     await withReviewBrowser(fixture.config, { width: 1440, height: 900 }, async (page, origin) => {
       await page.goto(`${origin}/tasks/${fixture.runId}`, { waitUntil: "domcontentloaded" });
-      await page.getByText("done", { exact: true }).first().waitFor();
+      await page.getByText("已完成", { exact: true }).first().waitFor();
       await page.evaluate(() => {
         const content = document.querySelector<HTMLElement>(".content");
         const button = document.querySelector<HTMLElement>(".task-result [data-artifact-review-id]");
@@ -461,7 +462,7 @@ flow:
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await page.goto(`http://127.0.0.1:${address.port}`);
-    await page.getByRole("button", { name: "Run", exact: true }).click();
+    await page.getByRole("button", { name: "运行", exact: true }).click();
     const reviewToggle = page.locator("#review-toggle");
     await page.waitForFunction(() =>
       document.getElementById("review-toggle")?.getAttribute("aria-controls") === "artifact-review-modal"
@@ -475,6 +476,15 @@ flow:
     await modal.locator("#artifact-review-scope-panel").getByText("artifact_acceptance.unanimous", { exact: true }).waitFor();
     await modal.locator("#artifact-review-progress-panel").getByText("Advisor", { exact: true }).waitFor();
     await modal.locator("#artifact-review-record-panel").getByText("本轮汇总", { exact: true }).waitFor();
+    assert.deepEqual(
+      await page.evaluate(() => {
+        const statusLabel = (window as unknown as {
+          artifactReviewAssignmentStatusLabel(status: string, actorKind: string): string;
+        }).artifactReviewAssignmentStatusLabel;
+        return [statusLabel("queued", "agent"), statusLabel("failed", "agent")];
+      }),
+      ["等待启动", "执行失败"]
+    );
   } finally {
     await browser.close();
     server.close();
@@ -648,7 +658,7 @@ flow:
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await page.goto(`http://127.0.0.1:${address.port}`);
-    await page.getByRole("button", { name: "Run", exact: true }).click();
+    await page.getByRole("button", { name: "运行", exact: true }).click();
     await page.getByRole("button", { name: /^产物评审 1\/2$/ }).click();
     const modal = page.locator("#artifact-review-modal");
     let materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
@@ -702,11 +712,11 @@ flow:
     assert(toolTitleBox.y >= toolKindBox.y + toolKindBox.height);
     await agentRow.getByText(/^实现证据：(已引用|未引用)$/).waitFor();
     assert.equal(await composer.inputValue(), "Human draft remains visible");
-    const attemptChooser = agentRow.getByRole("combobox", { name: "选择 Attempt" });
+    const attemptChooser = agentRow.getByRole("combobox", { name: "选择尝试" });
     assert.equal(await attemptChooser.evaluate((element) => element.tagName), "BUTTON");
     assert.equal(await attemptChooser.evaluate((element) => element.getBoundingClientRect().width <= 260), true);
     await attemptChooser.click();
-    const currentAttempt = agentRow.getByRole("option", { name: /尝试 1 · submitted/ });
+    const currentAttempt = agentRow.getByRole("option", { name: /尝试 1 · 已提交/ });
     await currentAttempt.waitFor();
     await currentAttempt.click();
     await composer.focus();
