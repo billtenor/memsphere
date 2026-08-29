@@ -183,11 +183,26 @@ export type ArtifactReviewRound = {
   status: ArtifactReviewRoundStatus;
   revision: number;
   createdAt: string;
+  controlPlane?: ArtifactControlPlane;
+  bindingSource?: {
+    resolvedAt: string;
+    slots: Record<string, {
+      kind: "run-start" | "run-update";
+      changeId?: string;
+    }>;
+  };
   assignments: ArtifactReviewAssignment[];
   votes: ArtifactReviewVote[];
   commentDispositions?: ArtifactReviewCommentDisposition[];
   result?: ArtifactReviewRoundResult;
 };
+
+export function artifactReviewRoundControlPlane<TArtifact>(
+  review: ArtifactReview<TArtifact>,
+  round: ArtifactReviewRound
+): ArtifactControlPlane {
+  return round.controlPlane ?? review.controlPlane;
+}
 
 export type ArtifactReviewOutcome = {
   status: "passed";

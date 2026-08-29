@@ -293,6 +293,8 @@ memsphere run start <procedure-name> --name "<run-name>"
 
 Every step in a Run explicitly asks for an Artifact. The Agent reports results through `run report`; Memsphere validates them, records state, and enters Review when required.
 
+After a Review starts, use `memsphere run binding show/update` or the View to change later reviewers. The current and historical rounds stay unchanged; the next round of the same Review uses the last successfully saved Binding. Saving a Binding in the View does not require the Settings operation token.
+
 You can also enter the following in a new Agent session:
 
 ~~~text

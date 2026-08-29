@@ -11,6 +11,7 @@ import {
   buildRunStepDetail,
   buildSchemaWritingDetail,
   printRunOutput,
+  printRunBindingOutput,
   printSchemaWritingOverview,
   runStartCommand,
   resolveReviewCommentBody,
@@ -46,6 +47,22 @@ test("run start command rejects missing, blank, and control-character names", as
     runStartCommand("procedure", { name: "line one\nline two" }),
     /run name must not contain control characters/
   );
+});
+
+test("Run binding text output explains the next-round boundary while JSON stays machine-readable", () => {
+  const lines: string[] = [];
+  const originalLog = console.log;
+  console.log = (...values: unknown[]) => lines.push(values.join(" "));
+  try {
+    printRunBindingOutput({ slots: [] }, "text", "show");
+    printRunBindingOutput({ change: { id: "change-1" } }, "text", "update");
+    printRunBindingOutput({ slots: [] }, "json", "show");
+  } finally {
+    console.log = originalLog;
+  }
+  assert.match(lines[0], /Current and historical rounds are frozen.*next bindings.*new round or future Review/);
+  assert.match(lines[2], /Binding saved.*Current and historical rounds stay unchanged.*next round or future Reviews/);
+  assert.deepEqual(JSON.parse(lines[4]), { slots: [] });
 });
 
 test("single-Run status shows the Run name and Procedure name with historical fallback", () => {

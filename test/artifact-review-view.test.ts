@@ -341,7 +341,7 @@ flow:
   }
 });
 
-test("View API reads and updates future Run Slot bindings", async () => {
+test("non-loopback View updates Run Slot bindings without the Settings token and still rejects forged origins", async () => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-run-binding-view-"));
   const memoryRoot = join(dir, "memory");
   const runsRoot = join(dir, "runs");
@@ -384,16 +384,17 @@ flow:
     reviewsRoot,
     runsRoot,
     archiveRoot: join(dir, "archives"),
-    view: { host: "127.0.0.1", port: 0 },
+    view: { host: "0.0.0.0", port: 0 },
     controlPlane
   };
-  const server = createViewServer(config);
+  const server = createViewServer(config, { settingsToken: "settings-secret" });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   try {
     const address = server.address();
     assert(address && typeof address === "object");
     const endpoint = `http://127.0.0.1:${address.port}/api/runs/${started.id}/bindings`;
+    assert.equal((await fetch(`http://127.0.0.1:${address.port}/api/settings/global`)).status, 401);
     const initial = await fetch(endpoint);
     assert.equal(initial.status, 200);
     assert.deepEqual((await initial.json() as { slots: Array<{ binding: unknown }> }).slots[0].binding, { actorIds: ["human"] });
@@ -404,6 +405,20 @@ flow:
       body: JSON.stringify({ slot: "view-handoff::owner", actorIds: ["agent"] })
     });
     assert.equal(rejectedOrigin.status, 403);
+
+    const forgedOrigin = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://attacker.example" },
+      body: JSON.stringify({ slot: "view-handoff::owner", actorIds: ["agent"] })
+    });
+    assert.equal(forgedOrigin.status, 403);
+
+    const nonJson = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "text/plain", origin: new URL(endpoint).origin },
+      body: JSON.stringify({ slot: "view-handoff::owner", actorIds: ["agent"] })
+    });
+    assert.equal(nonJson.status, 403);
 
     const updated = await fetch(endpoint, {
       method: "POST",

@@ -17,6 +17,7 @@ import {
   artifactReviewAssignmentId,
   artifactReviewFailureCategory,
   artifactReviewOpinionReferencesImplementation,
+  artifactReviewRoundControlPlane,
   repeatedArtifactReviewAdvisories,
   type ArtifactReviewAgentAttempt,
   type ArtifactReviewSubmittedOpinion,
@@ -97,7 +98,7 @@ import {
   type RunState,
   type RunStep
 } from "../run/store.js";
-import { renderBrowserHtml } from "../view/browser.js";
+import { legacyViewBundlePath, renderViewHostHtml } from "../view/host.js";
 import {
   localizeAcpProviderDefinition,
   localizeAcpProviderDetection,
@@ -298,6 +299,11 @@ async function handleRequest(
   const { memoryRoot, runsRoot } = config;
   const archiveRoot = config.archiveRoot;
 
+  if (request.method === "GET" && url.pathname === legacyViewBundlePath) {
+    sendJavaScript(response, await readLegacyViewBundle());
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/projects") {
     const projects = await listRegisteredProjects(config.homeRoot ?? resolveMemsphereHome());
     sendJson(response, 200, { current: config.project?.name, projects });
@@ -318,7 +324,7 @@ async function handleRequest(
   }
 
   if (request.method === "GET" && isViewPagePath(url.pathname)) {
-    sendHtml(response, renderBrowserHtml(config.language));
+    sendHtml(response, renderViewHostHtml(config.language));
     return;
   }
 
@@ -939,7 +945,11 @@ async function handleRequest(
         return;
       }
       if (request.method === "POST") {
-        if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+        const rejection = jsonMutationOriginRejection(request, config, "Run binding");
+        if (rejection) {
+          sendJson(response, 403, { code: "request_origin_rejected", error: rejection });
+          return;
+        }
         const body = await readJsonBody<{ slot?: unknown; actorIds?: unknown; skip?: unknown }>(request);
         const slot = typeof body.slot === "string" ? body.slot : "";
         const actorIds = Array.isArray(body.actorIds) && body.actorIds.every((actor) => typeof actor === "string")
@@ -1659,7 +1669,7 @@ function artifactReviewSummary(
     .filter((attempt) => attempt.status === "failed" && attempt.failure)
     .map((attempt) => ({ attempt: attempt.sequence, ...attempt.failure!, category: artifactReviewFailureCategory(attempt.failure!) }));
   const runnerCanDecide = authorizeArtifactOperation({
-    controlPlane: review.controlPlane,
+    controlPlane: round ? artifactReviewRoundControlPlane(review, round) : review.controlPlane,
     subject: { kind: "runner" },
     permission: "decision.decide"
   }).allowed;
@@ -1687,6 +1697,7 @@ function artifactReviewSummary(
       submitted: round.assignments.filter((assignment) => assignment.status === "submitted").length,
       total: round.assignments.length,
       decisionReady: round.assignments.every((assignment) => assignment.status === "submitted"),
+      bindingSource: round.bindingSource,
       severity,
       unresolvedBlocking: advisoryComments.filter((comment) => comment.severity === "blocking" && !resolvedCommentIds.has(comment.id)).length,
       failures,
@@ -1846,6 +1857,7 @@ async function artifactReviewContextPayload(
       status: round.status,
       revision: round.revision,
       createdAt: round.createdAt,
+      bindingSource: round.bindingSource,
       assignments: round.assignments.map((assignment) => ({
         id: assignment.id,
         actorId: assignment.actorId,
@@ -2165,7 +2177,7 @@ function authorizeSettingsRequest(
   verifyOrigin = false
 ): boolean {
   if (verifyOrigin) {
-    const rejection = settingsOriginRejection(request, config);
+    const rejection = jsonMutationOriginRejection(request, config, "Settings");
     if (rejection) {
       sendJson(response, 403, { code: "request_origin_rejected", error: rejection });
       return false;
@@ -2183,31 +2195,35 @@ function authorizeSettingsRequest(
   return true;
 }
 
-function settingsOriginRejection(request: IncomingMessage, config: MemsphereConfig): string | undefined {
+function jsonMutationOriginRejection(
+  request: IncomingMessage,
+  config: MemsphereConfig,
+  subject: string
+): string | undefined {
   const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
-  if (contentType !== "application/json") return "Settings requests must use application/json";
+  if (contentType !== "application/json") return `${subject} requests must use application/json`;
 
   const originHeader = request.headers.origin;
   const hostHeader = request.headers.host;
-  if (!originHeader || !hostHeader) return "Settings requests require Origin and Host headers";
+  if (!originHeader || !hostHeader) return `${subject} requests require Origin and Host headers`;
 
   let origin: URL;
   try {
     origin = new URL(originHeader);
   } catch {
-    return "Settings request Origin is invalid";
+    return `${subject} request Origin is invalid`;
   }
   if (!["http:", "https:"].includes(origin.protocol) || origin.host.toLowerCase() !== hostHeader.toLowerCase()) {
-    return "Settings request Origin must match the current View origin";
+    return `${subject} request Origin must match the current View origin`;
   }
 
   const fetchSite = request.headers["sec-fetch-site"];
   if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") {
-    return "Cross-site Settings requests are not allowed";
+    return `Cross-site ${subject} requests are not allowed`;
   }
 
   if (isLoopbackHost(config.view.host) && !isLoopbackRequestHost(origin.hostname)) {
-    return "Loopback Settings requests must use a loopback hostname";
+    return `Loopback ${subject} requests must use a loopback hostname`;
   }
   return undefined;
 }
@@ -2380,6 +2396,34 @@ function sendHtml(response: ServerResponse, body: string): void {
   response.writeHead(200, {
     "content-type": "text/html; charset=utf-8",
     "cache-control": "no-store"
+  });
+  response.end(body);
+}
+
+const compiledLegacyViewBundleUrl = new URL("../view/legacy-view.js", import.meta.url);
+
+async function readLegacyViewBundle(): Promise<string> {
+  try {
+    const bundle = await readFile(compiledLegacyViewBundleUrl, "utf8");
+    if (!bundle.trim()) throw new Error(`legacy View bundle is empty: ${compiledLegacyViewBundleUrl.pathname}`);
+    return bundle;
+  } catch (error) {
+    if (
+      import.meta.url.endsWith(".ts")
+      && error && typeof error === "object" && "code" in error && error.code === "ENOENT"
+    ) {
+      const { legacyViewBundle } = await import("../view/browser.js");
+      return legacyViewBundle;
+    }
+    throw error;
+  }
+}
+
+function sendJavaScript(response: ServerResponse, body: string): void {
+  response.writeHead(200, {
+    "content-type": "text/javascript; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff"
   });
   response.end(body);
 }

@@ -293,6 +293,8 @@ memsphere run start <procedure-name> --name "<run-name>"
 
 运行中的每一步都会明确要求产出 Artifact。Agent 通过 `run report` 上报结果，Memsphere 负责校验、记录状态，并在需要时进入 Review。
 
+Review 已开始后，可以用 `memsphere run binding show/update` 或 View 调整后续评审人。当前轮和历史轮保持不变；同一 Review 的下一轮使用最后一次成功保存的 Binding。View 中保存 Binding 不要求输入设置密钥。
+
 也可以直接在一个新的 Agent 会话中输入：
 
 ```text
