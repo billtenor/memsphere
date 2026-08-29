@@ -6,6 +6,7 @@ names:
 defines:
   - 约束 memsphere 代码仓库中已完成需求的交付收尾。
 asserts:
+  - 交付前必须检查本轮是否存在 Memory 差异；存在时，交付记录必须包含与最终内容匹配且校验通过的 ChangeSet ID、校验状态和 View 入口，普通 memsphere validate 不能代替 memsphere memory change validate [change-id]。
   - 需求完成实现、测试和验收后，必须在 change.md 中记录验收结果，移除 active status，并写入 completed_at。
   - 必须将需求目录从 changes/active/<change-id>/ 移动到 changes/archive/completed/<change-id>/；归档目标已存在时不得覆盖。
   - 状态更新与目录归档完成前，不得将该需求视为已经完整交付。

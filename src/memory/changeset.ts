@@ -3,7 +3,7 @@ import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, 
 import { tmpdir } from "node:os";
 import { basename, dirname, join, posix, relative, resolve, sep } from "node:path";
 import { z } from "zod";
-import { atomicWriteJson, withFileLock } from "../persistence.js";
+import { atomicReplaceDirectoryWithCommit, atomicWriteJson, withFileLock } from "../persistence.js";
 import { archiveChangeDirectory, type ArchiveEntry } from "../archive/store.js";
 import { gitHashObject, gitOutput, gitOutputRaw, runGit } from "../git.js";
 import { memoryKinds, type MemoryKind } from "./kinds.js";
@@ -1200,12 +1200,34 @@ async function persistValidatedCheckpoint(
   };
   if (checkpointChanged && change.store_type === "embedded") delete change.candidate_revision;
   change.updated_at = new Date().toISOString();
-  await writeChange(project, change);
+  if (change.store_type === "managed") {
+    await atomicReplaceDirectoryWithCommit(
+      candidateRoot,
+      recoveryRoot(project, change.id),
+      async () => writeChangeConfirmingCommit(project, change)
+    );
+  } else {
+    await writeChange(project, change);
+  }
   for (const entry of await readdir(checkpoints, { withFileTypes: true })) {
     if (entry.name === digest || !entry.isDirectory()) continue;
     await rm(join(checkpoints, entry.name), { recursive: true, force: true });
   }
   return finalMemoryRoot;
+}
+
+async function writeChangeConfirmingCommit(project: ResolvedProject, change: MemoryChangeSet): Promise<void> {
+  try {
+    await writeChange(project, change);
+  } catch (error) {
+    try {
+      const persisted = await readChange(project, change.id);
+      if (JSON.stringify(persisted) === JSON.stringify(change)) return;
+    } catch {
+      // Preserve the original write failure when the persisted state cannot confirm the commit.
+    }
+    throw error;
+  }
 }
 
 async function checkpointDigest(targets: MemoryChangeSet["targets"], candidateRoot: string): Promise<string> {
@@ -1307,7 +1329,9 @@ async function captureEmbeddedWorkingChange(
         await forwardEmbeddedViewBase(change, workspace.path, memoryPath, baseRevision);
       }
     } else {
-      const projectChanges = await listProjectChanges(project, true);
+      const listed = await listProjectChangesBestEffort(project);
+      await assertEmbeddedCaptureFailuresAreTerminal(project, listed.failures);
+      const projectChanges = listed.changes;
       const completedChangeIds: string[] = [];
       const matches = projectChanges.filter((candidate) => (
         candidate.status === "active"
@@ -1564,6 +1588,27 @@ async function listProjectChangesBestEffort(project: ResolvedProject): Promise<{
     }
   }
   return { changes, failures };
+}
+
+async function assertEmbeddedCaptureFailuresAreTerminal(
+  project: ResolvedProject,
+  failures: Array<{ id: string; error: string }>
+): Promise<void> {
+  for (const failure of failures) {
+    let status: unknown;
+    try {
+      const persisted = JSON.parse(await readFile(changePath(project, failure.id), "utf8")) as unknown;
+      status = persisted && typeof persisted === "object"
+        ? (persisted as Record<string, unknown>).status
+        : undefined;
+    } catch {
+      status = undefined;
+    }
+    if (status === "completed" || status === "abandoned") continue;
+
+    // Re-read the blocking record so callers retain the canonical integrity error.
+    await readReconciledChange(project, failure.id);
+  }
 }
 
 function sortMemoryChanges(changes: MemoryChangeSet[]): MemoryChangeSet[] {

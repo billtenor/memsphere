@@ -54,6 +54,7 @@ flow:
       - 开发前读取适用的开发规范 Statement 记忆；在摘要中列出采用项，未找到则记“无”并继续。
       - 实施必须与需求契约、实施与验证方案和开发计划一致；方案变更必须先完成同等确认。
       - 实现需求涉及的代码、文档、Skill 或 Memory 时，保持相关内容一致。
+      - 完成开发后检查本轮 Memory 差异；存在差异时必须对当前内容执行 memsphere memory change validate [change-id]，功能实现摘要记录 ChangeSet ID、校验状态和 View 入口，普通 memsphere validate 不能代替。
       - 摘要必须列出本轮修改文件、关键代码路径和主要 diff、需求映射、行为与兼容性影响、已执行测试结果和未验证项。
     suggests:
       - 在满足需求契约和实施与验证方案的前提下，agent 可以自主安排具体实施与验证过程。
@@ -68,6 +69,7 @@ flow:
       - 验证前读取适用的测试规范 Statement 记忆；未找到则按无额外规范继续。
       - 必须实际执行首次验证，记录执行内容、结果和未执行项。
       - 必须区分本轮失败、历史失败和环境阻塞。
+      - 验证结束时重新检查 Memory 差异；存在差异时必须在最终内容上重新执行 memsphere memory change validate [change-id]，初始验证报告记录 ChangeSet ID、校验状态和 View 入口。
     artifact: !artifact
       name: 初始验证报告
       format: markdown
@@ -97,6 +99,7 @@ flow:
     asserts:
       - 读取适用的交付规范 Statement 记忆；未找到则按无额外规范继续。
       - 报告必须包含交付内容、验证结果、验收结论、后续范围和残留问题。
+      - 报告前必须检查 Memory 差异；存在差异时，报告必须包含与最终内容匹配且校验通过的 ChangeSet ID、校验状态和 View 入口，普通 memsphere validate 不能代替变更级校验。
     artifact: !artifact
       name: 敏捷需求开发交付报告
       format: markdown
@@ -111,6 +114,7 @@ flow:
       - 读取适用的 Git 规范 Statement 记忆；未找到则继续。
       - 只允许提交当前迭代产生的改动，不得暂存或提交其他工作区内容。
       - commit 前必须确认应交付的实现、测试和文档改动已完整纳入，并记录 commit SHA。
+      - commit 前必须检查 Memory 差异；存在差异时重新执行 memsphere memory change validate [change-id] 并确认输出匹配当前内容，不得使用普通 memsphere validate 或过期 checkpoint 代替。
     artifact: !artifact
       name: 本轮 Commit 结果
       format: markdown

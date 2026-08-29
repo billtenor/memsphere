@@ -154,9 +154,17 @@ project.command("prune").description("Remove missing registrations and their bin
 
 program
   .command("validate")
-  .description("Validate config, memory directories, and YAML memory entities.")
+  .description("Validate the current Project Store or one stateless Memory root.")
   .option("--memory-root <path>", "validate one Memory root without Home, Registry or Binding")
   .addOption(new Option("--format <format>", "diagnostic output format").choices(["text", "json"]).default("text"))
+  .addHelpText("after", `
+This command validates Store/config health and Memory entities. It never creates
+or updates a ChangeSet. To capture and validate unpublished Memory changes in a
+bound Project, run:
+  memsphere memory change validate [change-id]
+
+The stateless --memory-root mode has no Project or ChangeSet context.
+`)
   .action(validateCommand);
 
 const memory = program

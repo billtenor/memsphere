@@ -338,14 +338,11 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
       await narrowPage.locator(".meta .pill", { hasText: "流程: Responsive browser fixture" }).waitFor();
       await assertPageDoesNotOverflow(narrowPage);
       assert.equal(await narrowPage.locator(".flow-head").first().evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length), 1);
-      const scrollBox = narrowPage.locator(".markdown-table-scroll").first();
-      const box = await scrollBox.boundingBox();
-      assert(box);
-      await narrowPage.waitForFunction(() => {
+      const scrollStateHandle = await narrowPage.waitForFunction(() => {
         const element = document.querySelector(".markdown-table-scroll");
-        return element instanceof HTMLElement && element.scrollWidth > element.clientWidth;
-      });
-      const scrollState = await scrollBox.evaluate((element) => {
+        if (!(element instanceof HTMLElement) || element.scrollWidth <= element.clientWidth) {
+          return false;
+        }
         element.scrollLeft = 240;
         return {
           clientWidth: element.clientWidth,
@@ -353,6 +350,12 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
           scrollWidth: element.scrollWidth
         };
       });
+      const scrollState = await scrollStateHandle.jsonValue() as {
+        clientWidth: number;
+        scrollLeft: number;
+        scrollWidth: number;
+      };
+      await scrollStateHandle.dispose();
       assert(scrollState.scrollWidth > scrollState.clientWidth);
       assert(scrollState.scrollLeft > 0);
       await assertPageDoesNotOverflow(narrowPage);

@@ -11,6 +11,7 @@ asserts:
   - 修改必须限定在当前需求范围内，不得夹带无关重构或行为变更。
   - 实现必须完整处理当前需求涉及的正常路径、失败路径和边界情况。
   - 用户可见行为、公开接口、配置或使用方式发生变化时，必须同步更新相关文档、示例和契约说明。
+  - 项目使用 Memsphere 且本轮存在 Memory 差异时，结束开发、提交评审或创建 commit 前必须对当前最终内容执行 memsphere memory change validate [change-id]；普通 memsphere validate 不能代替变更级校验。
   - 完成开发后必须记录修改范围、关键实现、行为与兼容性影响，以及仍未解决的问题。
 sections:
   - !statement

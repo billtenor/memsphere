@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
+import { cp, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -51,6 +51,107 @@ async function replaceFile(temporaryPath: string, path: string): Promise<void> {
 
 export async function atomicWriteJson(path: string, value: unknown): Promise<void> {
   await atomicWriteFile(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+type DirectoryCommitOperations = {
+  copy: (source: string, destination: string) => Promise<void>;
+  rename: (source: string, destination: string) => Promise<void>;
+  remove: (path: string) => Promise<void>;
+};
+
+const directoryCommitOperations: DirectoryCommitOperations = {
+  copy: async (source, destination) => cp(source, destination, { recursive: true }),
+  rename,
+  remove: async (path) => rm(path, { recursive: true, force: true })
+};
+
+export async function atomicReplaceDirectoryWithCommit(
+  source: string,
+  destination: string,
+  commit: () => Promise<void>,
+  operations: DirectoryCommitOperations = directoryCommitOperations
+): Promise<void> {
+  await mkdir(dirname(destination), { recursive: true });
+  const token = `${process.pid}-${randomBytes(6).toString("hex")}`;
+  const prepared = `${destination}.preparing-${token}`;
+  const backup = `${destination}.previous-${token}`;
+  const rejected = `${destination}.rejected-${token}`;
+  let hasBackup = false;
+  let hadPrevious = false;
+  let installed = false;
+  let preserveRejected = false;
+  try {
+    await operations.copy(source, prepared);
+    if (await pathExists(destination)) {
+      hadPrevious = true;
+      await operations.rename(destination, backup);
+      hasBackup = true;
+    }
+    try {
+      await operations.rename(prepared, destination);
+      installed = true;
+    } catch (error) {
+      if (hasBackup) {
+        try {
+          await operations.rename(backup, destination);
+          hasBackup = false;
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            `failed to install directory and restore its previous content; previous content is preserved at ${backup}; replacement source remains at ${source}`
+          );
+        }
+      }
+      throw error;
+    }
+
+    try {
+      await commit();
+    } catch (error) {
+      try {
+        await operations.rename(destination, rejected);
+      } catch (rollbackError) {
+        preserveRejected = true;
+        const previous = hadPrevious
+          ? `previous content is preserved at ${backup}`
+          : "no previous directory existed";
+        throw new AggregateError(
+          [error, rollbackError],
+          `failed to commit and begin rollback; replacement remains at ${destination}; ${previous}`
+        );
+      }
+      installed = false;
+      try {
+        if (hasBackup) {
+          await operations.rename(backup, destination);
+          hasBackup = false;
+        }
+        await operations.remove(rejected);
+      } catch (rollbackError) {
+        preserveRejected = true;
+        const previous = hasBackup
+          ? `previous content is preserved at ${backup}`
+          : hadPrevious
+            ? `previous content was restored at ${destination}`
+            : "no previous directory existed";
+        throw new AggregateError(
+          [error, rollbackError],
+          `failed to commit and roll back directory replacement; ${previous}; rejected replacement is preserved at ${rejected}`
+        );
+      }
+      throw error;
+    }
+
+    if (hasBackup) {
+      await operations.remove(backup).catch(() => undefined);
+      hasBackup = false;
+    }
+  } finally {
+    await operations.remove(prepared).catch(() => undefined);
+    if (!installed && !hasBackup && !preserveRejected) {
+      await operations.remove(rejected).catch(() => undefined);
+    }
+  }
 }
 
 export async function withFileLock<T>(
@@ -147,6 +248,16 @@ function processExists(pid: number): boolean {
     return true;
   } catch (error) {
     return isCode(error, "EPERM");
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (isCode(error, "ENOENT")) return false;
+    throw error;
   }
 }
 
