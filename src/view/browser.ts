@@ -4308,6 +4308,22 @@ const browserTemplate = String.raw`<!doctype html>
         }
         row.append(head);
 
+        for (const activeReview of bindingSnapshot?.activeReviews || []) {
+          const currentAndNext = document.createElement("div");
+          currentAndNext.className = "muted";
+          currentAndNext.append(
+            document.createTextNode(uiT("run.currentRoundBinding", {
+              round: activeReview.currentRoundSequence,
+              binding: runBindingValueLabel(activeReview.currentBinding, run)
+            })),
+            document.createElement("br"),
+            document.createTextNode(uiT("run.nextRoundBinding", {
+              binding: runBindingValueLabel(activeReview.nextBinding, run)
+            }))
+          );
+          row.append(currentAndNext);
+        }
+
         const actorChoices = document.createElement("div");
         actorChoices.className = "run-binding-actors";
         const selected = new Set(binding.actorIds || []);
@@ -4366,7 +4382,7 @@ const browserTemplate = String.raw`<!doctype html>
     }
 
     async function updateRunBinding(run, slot, skip, actorIds) {
-      const response = await settingsFetch("/api/runs/" + encodeURIComponent(run.id) + "/bindings", {
+      const response = await fetch("/api/runs/" + encodeURIComponent(run.id) + "/bindings", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(skip ? { slot, skip: true } : { slot, actorIds })

@@ -338,14 +338,14 @@ const runBinding = run
 
 runBinding
   .command("show")
-  .description("Show frozen Actors, current Slot bindings, affected scopes, and binding history.")
+  .description("Show frozen Actors, current-round bindings, next-round bindings, affected scopes, and history.")
   .requiredOption("--run <id>", "run id")
   .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
   .action(runBindingShowCommand);
 
 runBinding
   .command("update")
-  .description("Replace one Slot binding for Reviews that have not been created yet.")
+  .description("Replace one Slot binding for the next round of an active Review or for future Reviews.")
   .requiredOption("--run <id>", "run id")
   .requiredOption("--slot <procedure::slot>", "fully qualified Review Slot key")
   .option("--actor <id>", "bind a frozen Actor; repeat for multiple Actors", (value, previous: string[]) => [...previous, value], [])
