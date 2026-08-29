@@ -24,7 +24,7 @@ View / CLI
   → Project 中的权威数据
 ```
 
-Memory、CLI、数据和界面是个性化软件可以逐步生长出的四类协作资产。它们不是四套独立产品，也不要求在软件诞生时全部存在。
+Memory、CLI、数据和界面是个性化软件可以逐步生长出的四类协作资产。它们不是四套独立产品，也不要求在软件诞生时全部存在。Memory 保持为 Project 级语义资产；CLI、View、领域逻辑和持久化能力由 Module 承载。
 
 ## 总体边界
 
@@ -61,6 +61,7 @@ Memsphere Core
 └── View Host
 
 Project
+├── Memory
 ├── Module Instance A
 ├── Module Instance B
 ├── Module Instance C
@@ -72,9 +73,9 @@ Project
 
 软件不再要求以传统应用的形式整体打包，也不要求从第一天起就具备完整代码：一份程序化 Memory 可以独立形成软件，一个只提供交互界面的能力也可以独立形成软件；随着使用深入，它们可以继续生长出确定性工具、领域逻辑和持久数据。
 
-为了让这些能力能够独立开发、安装、组合和演进，Memsphere 把一个可独立成立的软件单元称为 **Module**。一个 Project 可以组装多个 Module；Module 可以由 Memsphere 官方提供，也可以由用户在安装 Memsphere 后自行开发。
+为了让可执行能力能够独立开发、安装、组合和演进，Memsphere 把一个可独立成立的代码单元称为 **Module**。一个 Project 可以组装多个 Module；Module 可以由 Memsphere 官方提供，也可以由用户在安装 Memsphere 后自行开发。Memory 沿用既有 Project 级结构独立组织，不归属于某个 Module。
 
-Module 面向两类使用者提供入口：Agent 通过 Memory 理解软件并调用 CLI，Human 通过 View 操作和观察软件。CLI 与 View 不各自实现一套业务逻辑，而是复用 Module 的 Application 与 Domain，并最终操作同一份权威数据。
+Module 面向两类使用者提供入口：Project 中的 Memory 可以指导 Agent 发现并调用 Module CLI，Human 通过 Module View 操作和观察软件。CLI 与 View 不各自实现一套业务逻辑，而是复用 Module 的 Application 与 Domain，并最终操作同一份权威数据。Memory 与 Module 可以相互引用，但不存在目录归属或共同打包关系。
 
 因此，用户代码不能进入 Memsphere 源码，也不能要求重新编译已经发布的 Memsphere。Memsphere 固化稳定的 Host、SDK 和组装协议，Module 则独立编译并由 Project 引入运行。
 
@@ -83,7 +84,7 @@ Module 面向两类使用者提供入口：Agent 通过 Memory 理解软件并�
 - Core 固化跨软件复用的平台机制，个性化业务能力通过 Module 演进。
 - Project 成为软件资产、Module 实例、运行记录和权威数据的统一持久边界。
 - 一个 Project 可以声明和组装多个独立的 Module 实例。
-- Module 可以按真实需要逐步生长出 Memory、CLI、View 和数据能力，不为形式完整而强制空实现。
+- Project 可以按真实需要逐步生长出 Memory 和 Module；Module 可以逐步生长出 CLI、View、领域逻辑和持久化能力，不为形式完整而强制空实现。
 - 官方 Module 与用户 Module 采用同一套发现、加载和组装机制。
 - CLI 是 Agent 使用确定性能力的入口，View 是 Human 操作和观察软件的入口。
 - CLI 与 View 复用 Application 和 Domain，并基于同一份权威数据工作。
@@ -115,14 +116,15 @@ Project 不等于一个传统软件包。它可以同时容纳多个用途不同
 
 ### Module
 
-Module 是 Memsphere 中可独立开发、安装、组合和演进的软件单元。它可以包含以下能力：
+Module 是 Memsphere 中可独立开发、安装、组合和演进的可执行软件单元。它可以包含以下能力：
 
-- **Memory**：Agent 理解和进入软件的语义入口，保存知识、规则、结构与流程；
 - **CLI**：面向 Agent 的确定性操作入口；
 - **View**：面向 Human 的操作与可视化入口；
 - **领域与数据能力**：由 Domain、Application 和 Persistence Adapter 共同实现，作为 CLI 与 View 的公共底座。
 
-这些能力不要求在 Module 诞生时全部存在。只有 Memory 的 Module、只有 View 原型的 Module，都是有效的早期形态；需要确定性执行和持久状态时，再逐步补充其他部分。
+这些能力不要求在 Module 诞生时全部存在。只有 View 原型的 Module 也是有效的早期形态；需要确定性执行和持久状态时，再逐步补充其他部分。
+
+Memory 是 Project 级语义资产，继续由既有 Memory Store、Catalog、ChangeSet 和 Run 体系组织。它可以独立形成个性化软件，也可以描述某个 Module 的知识与流程、指导 Agent 调用 Module CLI，但不进入 Module 目录、Manifest 或打包生命周期。
 
 ### Module 实例
 
@@ -142,15 +144,27 @@ Memsphere View 是一个 Home 级通用管理界面，用于管理 Project、Mem
 
 ## Module 的三层代码结构
 
-Module 采用三个同心层次：Domain、Application 和 Adapters。
+Module 采用三个同心层次：Domain、Application 和 Adapter。
+
+Memsphere 自身的源码仓库把 Core 与内置 Module 分开组织：
+
+```text
+memsphere/
+├── src/                        # Memsphere Core
+└── modules/                    # 随 Memsphere 发布的内置 Module 集合
+    └── <module-id>/             # 一个内置 Module
+```
+
+`modules/` 是多个 Module 的集合目录，不是架构层。每个内置 Module 与用户 Module 使用相同的目录结构、Manifest 和 Host 协议；区别只在于内置 Module 随 Memsphere 一同分发。现有 Core 中的业务界面后续按模块边界逐步迁入这里，本次架构定义不要求立即搬迁代码。
+
+单个 Module 的内部结构为：
 
 ```text
 module/
 ├── module.json                 # Module 描述文件；具体字段后续定义
-├── memory/                     # 可选，面向 Agent 的语义资产
 ├── domain/                     # 领域模型、规则和领域所拥有的契约
 ├── application/                # 用例编排和应用层所拥有的契约
-└── adapters/                   # 外圈适配器
+└── adapter/                    # 外圈适配器
     ├── cli/                    # Agent 的确定性入口
     ├── view/                   # Human 的界面、静态资源及 View API 入口
     └── persistence/            # 文件、数据库或远程存储实现
@@ -168,9 +182,9 @@ Application 把 Domain 能力编排成可执行用例，负责事务边界、权
 
 如果某个契约只服务于应用用例而不是领域本身，它由 Application 定义。
 
-### Adapters
+### Adapter
 
-Adapters 位于同一个外圈，从不同方向连接 Module 与外部世界：
+Adapter 位于同一个外圈，从不同方向连接 Module 与外部世界：
 
 - CLI Adapter 把 Agent 发起的确定性命令转换成 Application 调用；
 - View Adapter 把 Human 的界面操作转换成 Application 调用，并把结果呈现为浏览器界面；
@@ -202,7 +216,7 @@ Human
 静态依赖始终指向内层：
 
 ```text
-adapters → application → domain
+adapter → application → domain
 ```
 
 依赖倒置不要求单独建立 `ports/` 目录。契约写在拥有需求的内层，并与相关领域能力或应用用例放在一起：
@@ -229,8 +243,8 @@ Memsphere
     └── Failure Boundary
 
 Project
+├── Memory
 ├── Module Instance A
-│   ├── Memory
 │   ├── CLI Adapter
 │   ├── View Adapter
 │   └── Domain / Application / Persistence
@@ -302,6 +316,7 @@ View 扩展协议不绑定 React、Vue 或其他 UI 框架。View Host 提供框
 - 公共 Module 可以安装到用户级 Module 仓库，被多个 Project 复用；
 - Project 记录启用的 Module、实例、精确版本和实例配置；
 - Project 内开发的本地 Module 随 Project 保存和迁移；
+- Memsphere 内置 Module 的源码位于仓库根目录 `modules/`，构建后随 Memsphere 一同分发；
 - 公共 Module 不必复制进每个 Project，但 Project 必须锁定版本并能报告缺失依赖；
 - 公共 Module 升级由用户明确触发，不自动改变既有 Project；
 - 同一个 Module 版本的代码只加载一次，但可以创建多个配置和数据相互隔离的实例。
@@ -391,7 +406,7 @@ DSH 不能轻易重启，是因为重启可能中断大量正在运行的 Sessio
 
 在本架构基线上，后续文档应依次明确：
 
-1. Module Manifest：Module 身份、版本、Memory、Node.js 入口、View Bundle、静态资源、SDK 兼容范围和依赖声明；
+1. Module Manifest：Module 身份、版本、Node.js 入口、View Bundle、静态资源、SDK 兼容范围和依赖声明；
 2. Module Runtime：Module 发现、依赖解析、加载、实例化、CLI/View 注册和故障协议；
 3. Project Composition：本地 Module、公共 Module、实例配置、数据命名空间和版本锁文件；
 4. View SDK：Slot 声明与注册、Module 实例上下文、路由、主题、挂载和故障协议；
