@@ -1,10 +1,76 @@
-# Module 与 View 扩展架构
+# Memsphere 总体架构
 
-本文记录 Memsphere 个性化软件 Module 及其 View 扩展能力的长期架构基线。它描述稳定的产品边界、代码分层和系统职责，不规定当前版本必须一次性实现的全部细节。
+本文记录 Memsphere 的长期总体架构基线。它描述 Memsphere 在 Agent 生态中的位置、平台核心与个性化软件的边界、Project 和 Module 的组织方式、代码分层，以及 CLI、View 与数据能力如何协作；不规定当前版本必须一次性实现的全部细节。
 
-## 背景
+## 系统定位
 
-Memsphere 是个性化软件的运行环境。软件不再要求以传统应用的形式整体打包，也不要求从第一天起就具备完整代码：一份程序化 Memory 可以独立形成软件，一个只提供交互界面的能力也可以独立形成软件；随着使用深入，它们可以继续生长出确定性工具、领域逻辑和持久数据。
+Memsphere 是运行在通用 Agent 之上的个性化软件运行环境。Agent 负责理解意图、推理和执行；Memsphere 负责组织、运行和管理可以跨对话、模型与 Agent 持续积累的软件资产。
+
+Human 和 Agent 从不同入口使用同一套个性化软件：
+
+```text
+Human
+  → Memsphere View
+  → Module View Adapter
+
+Agent
+  → Memory
+  → Module CLI Adapter
+
+View / CLI
+  → Application
+  → Domain
+  → Persistence Adapter
+  → Project 中的权威数据
+```
+
+Memory、CLI、数据和界面是个性化软件可以逐步生长出的四类协作资产。它们不是四套独立产品，也不要求在软件诞生时全部存在。
+
+## 总体边界
+
+Memsphere 总体上由三部分组成：
+
+### Memsphere Core
+
+Memsphere Core 是随 Memsphere 发布并保持稳定的平台基座，负责：
+
+- Home、Registry、Workspace Binding 与 Project 解析；
+- Memory 的发现、读取、修改和验证；
+- Procedure Run、Artifact、Review、ChangeSet 与 Archive；
+- Module 的发现、依赖解析、实例组装和生命周期边界；
+- CLI Host、View Host 以及 Module 可依赖的公开 SDK；
+- 故障隔离、配置管理和稳定的系统入口。
+
+Core 提供运行环境和公共机制，不承载某个个性化软件的专属业务规则。
+
+### Project
+
+Project 是个性化软件资产、Module 实例、运行记录和权威数据的持久空间。Workspace 绑定 Project 后，Agent 与 Human 才能在当前工作上下文中使用其中的软件。
+
+### Module
+
+Module 是 Project 中可独立开发、安装、组合和演进的软件单元。官方能力与用户能力都应尽量通过相同的 Module 机制接入 Core，而不是不断扩大特权核心。
+
+三者关系如下：
+
+```text
+Memsphere Core
+├── Memory / Run / Review / ChangeSet Runtime
+├── Module Composition Runtime
+├── CLI Host
+└── View Host
+
+Project
+├── Module Instance A
+├── Module Instance B
+├── Module Instance C
+├── Run / Review / ChangeSet / Archive
+└── Module 实例的权威数据
+```
+
+## 个性化软件与 Module
+
+软件不再要求以传统应用的形式整体打包，也不要求从第一天起就具备完整代码：一份程序化 Memory 可以独立形成软件，一个只提供交互界面的能力也可以独立形成软件；随着使用深入，它们可以继续生长出确定性工具、领域逻辑和持久数据。
 
 为了让这些能力能够独立开发、安装、组合和演进，Memsphere 把一个可独立成立的软件单元称为 **Module**。一个 Project 可以组装多个 Module；Module 可以由 Memsphere 官方提供，也可以由用户在安装 Memsphere 后自行开发。
 
@@ -12,8 +78,10 @@ Module 面向两类使用者提供入口：Agent 通过 Memory 理解软件并�
 
 因此，用户代码不能进入 Memsphere 源码，也不能要求重新编译已经发布的 Memsphere。Memsphere 固化稳定的 Host、SDK 和组装协议，Module 则独立编译并由 Project 引入运行。
 
-## 架构目标
+## 总体架构目标
 
+- Core 固化跨软件复用的平台机制，个性化业务能力通过 Module 演进。
+- Project 成为软件资产、Module 实例、运行记录和权威数据的统一持久边界。
 - 一个 Project 可以声明和组装多个独立的 Module 实例。
 - Module 可以按真实需要逐步生长出 Memory、CLI、View 和数据能力，不为形式完整而强制空实现。
 - 官方 Module 与用户 Module 采用同一套发现、加载和组装机制。
@@ -37,7 +105,7 @@ Module 面向两类使用者提供入口：Agent 通过 Memory 理解软件并�
 - 不重启服务的插件热替换；
 - 常驻的用户后台服务。
 
-## 核心概念及关系
+## 个性化软件组织模型
 
 ### Project
 
@@ -146,7 +214,7 @@ adapters → application → domain
 
 Port 是边界契约，不是第四个架构层。防腐层负责外部模型与内部模型之间的翻译，通常属于 Adapter，也不等同于 Port。
 
-## 总体运行结构
+## Module 运行结构
 
 ```text
 Memsphere

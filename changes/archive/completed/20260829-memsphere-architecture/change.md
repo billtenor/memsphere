@@ -1,20 +1,21 @@
 ---
-id: 20260829-module-view-extension-architecture
+id: 20260829-memsphere-architecture
 type: documentation
 created: 2026-08-29
-run_id: run-20260829-114314z-01ce53e6
+run_id: run-20260829-121532z-a9ade5bc
 completed_at: 2026-08-29
 ---
 
-# Module 与 View 扩展架构
+# Memsphere 总体架构
 
 ## 需求
 
-将现有以 View 模块为一级扩展单元的技术架构基线提升为 Module 架构，补充 Project、Module、Memory、CLI、View、领域逻辑和持久化之间的关系，并明确 Module 的三层目录设计。
+形成 Memsphere 总体架构基线，明确 Memsphere Core、Project 与 Module 的边界，补充 Memory、CLI、View、领域逻辑和持久化之间的关系，并明确 Module 的三层目录设计。
 
 ## 范围
 
 - 一个 Project 可以组装多个 Module 实例。
+- Memsphere Core 提供 Project、Memory、Run、Review、ChangeSet、Module Composition、CLI Host 与 View Host 等稳定平台能力。
 - Module 可以按需包含 Memory、CLI、View 和领域数据能力。
 - Module 采用 Domain、Application、Adapters 三层。
 - Adapters 包含 CLI、View、Persistence 三类适配器。
@@ -27,6 +28,12 @@ completed_at: 2026-08-29
 - 不修改运行时代码、CLI、API、Memory 或持久化格式。
 - 不实现插件热更新、第三方沙箱或常驻用户后台服务。
 
+## 向前兼容
+
+结论：不需要向前兼容。
+
+本轮只修正尚未合入 master 的架构文档定位和路径，不修改稳定 checkpoint、运行时行为或公开 API。
+
 ## 验收标准
 
 - 架构文档明确 Project、Module、Module 实例和四类软件能力的关系。
@@ -38,13 +45,14 @@ completed_at: 2026-08-29
 
 ## 实现
 
-- 将 `docs/view-extension-architecture.md` 重构为 Module 与 View 扩展架构基线。
+- 将原 `docs/view-extension-architecture.md` 重命名并重构为 `docs/architecture.md`，作为 Memsphere 总体架构基线。
+- 新增 Memsphere 的系统定位、总体边界，以及 Core、Project、Module 的全景关系。
 - 新增 Module 三层目录、契约归属、双入口、浏览器到 Node.js Application 的边界说明。
 - 更新总体运行结构、安装组装、无状态数据边界和后续设计清单。
 
 ## 验收结果
 
-- 敏捷开发 Run `run-20260829-114314z-01ce53e6` 完成需求、方案、实现与三方验收；研发、测试和架构评审均通过。
+- 敏捷开发 Run `run-20260829-114314z-01ce53e6` 完成初始架构内容；定位修正 Run `run-20260829-121532z-a9ade5bc` 将其提升为 Memsphere 总体架构文档。
 - `git diff --check`、关键术语正反向检查通过。
 - `npm run typecheck`、`npm run build`、`memsphere validate` 通过。
 - `npm test` 在具备本地端口和子进程权限的环境中完整通过：509 通过、0 失败、1 个 Windows 专属测试跳过。
