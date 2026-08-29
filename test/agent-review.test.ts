@@ -11,6 +11,7 @@ import { readConfig } from "../src/config.js";
 import {
   abandonRun,
   appendArtifactReviewAgentComment,
+  claimArtifactReviewAgentAssignment,
   currentArtifactReview,
   failArtifactReviewAgentAssignment,
   markArtifactReviewAgentCliReady,
@@ -18,7 +19,10 @@ import {
   reportRun,
   retryArtifactReviewAgentAssignment,
   startRun,
-  submitArtifactReviewAgentAssignment
+  submitArtifactReviewAssignment,
+  submitArtifactReviewAgentAssignment,
+  updateArtifactReviewDraft,
+  updateRunSlotBinding
 } from "../src/run/store.js";
 import { runArtifactReviewAgentWorker } from "../src/acp/review-worker.js";
 import { createAgentReviewCliRuntime } from "../src/acp/cli-runtime.js";
@@ -122,6 +126,147 @@ test("ACP Agent Reviewer completes its bound Assignment through the Session CLI"
       await once(server, "close");
     }
   });
+});
+
+test("dispatcher only launches the rebound Agent in the next Round and is idempotent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-agent-handoff-"));
+  const previousHome = process.env.MEMSPHERE_HOME;
+  try {
+    const home = join(root, "home");
+    const projectRoot = join(home, "projects", "handoff-fixture");
+    const memoryRoot = join(projectRoot, "memory");
+    const runsRoot = join(projectRoot, "runs");
+    const configPath = join(projectRoot, "config.json");
+    process.env.MEMSPHERE_HOME = home;
+    await mkdir(join(memoryRoot, "procedures"), { recursive: true });
+    await runGit(["init", "-b", "master"], { cwd: projectRoot });
+    await writeFile(join(memoryRoot, "procedures", "handoff.yaml"), withCurrentMemorySyntax(`!procedure
+name: agent-handoff-fixture
+flow:
+  - !action
+    action: Review and revise the candidate.
+    artifact: !artifact
+      name: reviewed result
+      review: [reviewer]
+`));
+    await writeFile(join(projectRoot, "project.json"), `${JSON.stringify({
+      format_version: 1,
+      name: "handoff-fixture",
+      created_at: new Date().toISOString()
+    }, null, 2)}\n`);
+    await writeFile(join(home, "registry.json"), `${JSON.stringify({
+      format_version: 1,
+      projects: { "handoff-fixture": { root: projectRoot } },
+      workspaces: {}
+    }, null, 2)}\n`);
+    await writeFile(join(home, "config.json"), `${JSON.stringify({
+      language: "en",
+      acp_providers: { traex: {} }
+    }, null, 2)}\n`);
+    await writeFile(configPath, `${JSON.stringify({
+      store: { type: "embedded", repository_path: projectRoot, memory_path: "memory" },
+      control_plane: {
+        runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+        actors: {
+          human: {
+            kind: "human",
+            name: "Human",
+            permissions: ["artifact.read", "decision.decide"]
+          },
+          agent: {
+            kind: "agent",
+            name: "Agent",
+            permissions: ["artifact.read", "decision.assess"],
+            agent: { provider: "traex" }
+          }
+        }
+      }
+    }, null, 2)}\n`);
+    const config = await readConfig(configPath);
+    const started = await startRun({
+      name: "Human to Agent handoff",
+      memoryRoot: config.memoryRoot,
+      runsRoot: config.runsRoot,
+      language: config.language,
+      procedureName: "agent-handoff-fixture",
+      controlPlane: config.controlPlane,
+      reviewConfiguration: reviewConfiguration({
+        procedure: "agent-handoff-fixture",
+        slots: { reviewer: ["human"] }
+      })
+    });
+    const firstPending = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "first" }
+    });
+    const review = currentArtifactReview(firstPending);
+    assert(review);
+    const firstRound = review.rounds[0];
+    const drafted = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: review.id,
+      roundId: firstRound.id,
+      actorId: "human",
+      expectedRevision: firstRound.revision,
+      draft: { vote: "request_changes", comments: [{ body: "Please revise." }] }
+    });
+    await submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: firstRound.id,
+      actorId: "human",
+      expectedRevision: drafted.round.revision
+    });
+    await updateRunSlotBinding({
+      runsRoot,
+      runId: started.id,
+      slot: "agent-handoff-fixture::reviewer",
+      actorIds: ["agent"]
+    });
+    const revised = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "second" },
+      revisionSummary: "Addressed the Human feedback."
+    });
+    const secondReview = currentArtifactReview(revised);
+    assert(secondReview);
+    assert.equal(secondReview.id, review.id);
+    const secondRound = secondReview.rounds[1];
+    const launched: Array<{ reviewId: string; roundId: string; assignmentId: string }> = [];
+    const launchWorker = async (assignment: { reviewId: string; roundId: string; assignmentId: string }) => {
+      launched.push(assignment);
+      const claimed = await claimArtifactReviewAgentAssignment({
+        runsRoot,
+        reviewId: assignment.reviewId,
+        roundId: assignment.roundId,
+        actorId: assignment.assignmentId,
+        workerPid: 4242
+      });
+      assert(claimed);
+    };
+
+    assert.equal(await dispatchArtifactReviewAgents({ config, run: revised, launchWorker }), 1);
+    assert.equal(await dispatchArtifactReviewAgents({ config, run: revised, launchWorker }), 0);
+    assert.deepEqual(launched, [{
+      reviewId: review.id,
+      roundId: secondRound.id,
+      assignmentId: artifactReviewAssignmentId(secondRound.assignments[0])
+    }]);
+
+    const persisted = currentArtifactReview(await readRun(runsRoot, started.id));
+    assert(persisted);
+    assert.equal(persisted.rounds[0].assignments[0].actorId, "human");
+    assert.deepEqual(persisted.rounds[0].assignments[0].attempts ?? [], []);
+    assert.equal(persisted.rounds[1].assignments[0].actorId, "agent");
+    assert.equal(persisted.rounds[1].assignments[0].status, "running");
+    assert.equal(persisted.rounds[1].assignments[0].attempts?.length, 1);
+  } finally {
+    if (previousHome === undefined) delete process.env.MEMSPHERE_HOME;
+    else process.env.MEMSPHERE_HOME = previousHome;
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("ACP Agent Reviewer failure is visible and can be requeued explicitly", async () => {

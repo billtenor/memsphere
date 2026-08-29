@@ -7,8 +7,8 @@ names:
 defines:
   - Run 中针对某次不可变 Artifact Submission 发起的评审，用于让 Human 或 Agent 从一个或多个视角检查结果。
   - Procedure 在 Artifact 的 review 中声明 Review Slot；Slot 表达需要的评审视角，不绑定具体 Actor。
-  - Run 创建时为每个 Review scope 选择 Decision Policy，并把 Review Slot 绑定到 Actor 或明确跳过；这些选择随 Run 一起冻结。
+  - Run 创建时为每个 Review scope 选择 Decision Policy，并把 Review Slot 初始绑定到 Actor 或明确跳过；Decision Policy、Actor、权限与 Agent 配置随 Run 冻结，Runner 可以通过显式、受校验且带审计的运行期操作修改后续 Round 或未来 Review 的 Binding。
   - 每个实际 Reviewer 在当前 Review Round 中拥有 Assignment，可以查看 Submission、提交 Comment 和 Vote；Reviewer 不能直接修改 Artifact 或推进 Run。
   - 全部 Reviewer 完成后，Runner 阅读意见并作出推进决定；要求修改时由 Runner 修订同一 Artifact，再形成新的 Submission 和 Review Round。
+  - 每个 Round 在创建时冻结自己的 Binding、权限和 Assignment；运行期换绑不改变当前或历史 Round，只让同一 Review 的下一 Round 使用创建前最后一次成功保存的 Binding。
   - Artifact Review Comment 只评价当前 Submission，与用于修改长期 Memory 的 ChangeSet Comment 是两种不同对象。
-

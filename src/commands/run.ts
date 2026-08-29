@@ -410,7 +410,7 @@ export async function runBindingShowCommand(options: RunBindingShowOptions): Pro
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await readRun(config.runsRoot, runId);
-  printStructured(buildRunBindingSnapshot(run), options.output);
+  printRunBindingOutput(buildRunBindingSnapshot(run), options.output, "show");
 }
 
 export async function runBindingUpdateCommand(options: RunBindingUpdateOptions): Promise<void> {
@@ -428,7 +428,20 @@ export async function runBindingUpdateCommand(options: RunBindingUpdateOptions):
     actorIds: options.skip ? undefined : actorIds,
     skip: options.skip
   });
-  printStructured({ change: result.change, bindings: result.snapshot }, options.output);
+  printRunBindingOutput({ change: result.change, bindings: result.snapshot }, options.output, "update");
+}
+
+export function printRunBindingOutput(
+  value: unknown,
+  output: "json" | "text" | undefined,
+  mode: "show" | "update"
+): void {
+  if ((output ?? "text") === "text") {
+    console.log(mode === "update"
+      ? "Binding saved. Current and historical rounds stay unchanged; the new binding applies to the next round or future Reviews."
+      : "Current and historical rounds are frozen; displayed next bindings apply only when a new round or future Review is created.");
+  }
+  printStructured(value, output);
 }
 
 export async function runTryRunCommand(options: RunIdOptions): Promise<void> {

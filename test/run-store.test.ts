@@ -2174,13 +2174,28 @@ flow:
     });
     assert.deepEqual(changed.change.before, { actorIds: ["human"] });
     assert.deepEqual(changed.change.after, { actorIds: ["agent"] });
-    assert.deepEqual(changed.change.affectedReviewScopes, ["handoff#flow[2]"]);
-    assert.deepEqual(changed.change.preservedReviewIds, [firstReview.id]);
+    assert.deepEqual(changed.change.affectedReviewScopes, ["handoff#flow[1]", "handoff#flow[2]"]);
+    assert.deepEqual(changed.change.preservedReviewIds, []);
+    assert.deepEqual(changed.change.affectedReviews, [{
+      reviewId: firstReview.id,
+      artifactScope: "handoff#flow[1]",
+      effectiveFromRoundSequence: 2,
+      preservedRoundIds: [firstRound.id]
+    }]);
     assert.deepEqual(buildRunBindingSnapshot(changed.run).slots[0], {
       key: "handoff::owner",
       binding: { actorIds: ["agent"] },
-      reviewScopes: ["handoff#flow[2]"],
-      reviewIds: [firstReview.id]
+      reviewScopes: ["handoff#flow[1]", "handoff#flow[2]"],
+      reviewIds: [firstReview.id],
+      activeReviews: [{
+        reviewId: firstReview.id,
+        artifactScope: "handoff#flow[1]",
+        currentRoundId: firstRound.id,
+        currentRoundSequence: 1,
+        currentBinding: { actorIds: ["human"] },
+        nextBinding: { actorIds: ["agent"] },
+        effectiveFromRoundSequence: 2
+      }]
     });
     assert.deepEqual(changed.run.artifactReviews?.[0].rounds[0].assignments.map((assignment) => assignment.actorId), ["human"]);
 
@@ -2218,6 +2233,219 @@ flow:
     assert.deepEqual(reviews[1].rounds[0].assignments.map((assignment) => assignment.actorId), ["agent"]);
     assert.deepEqual(reviews[0].controlPlane.bindings["handoff::owner"].actorIds, ["human"]);
     assert.deepEqual(reviews[1].controlPlane.bindings["handoff::owner"].actorIds, ["agent"]);
+  });
+});
+
+test("Run binding update applies to the next Round of the same Review without changing the current Round", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "round-handoff.yaml"), `!procedure
+name: round-handoff
+flow:
+  - !action
+    action: Review and revise it.
+    artifact: !artifact
+      name: result
+      review: [owner]
+`);
+    const controlPlane = parseControlPlaneConfig({
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] },
+        agent: {
+          kind: "agent",
+          name: "Agent",
+          permissions: ["artifact.read", "decision.assess"],
+          agent: { provider: "traex" }
+        }
+      }
+    });
+    const started = await startRun({
+      name: "Same Review round handoff",
+      memoryRoot,
+      runsRoot,
+      procedureName: "round-handoff",
+      controlPlane,
+      reviewConfiguration: reviewConfiguration({ procedure: "round-handoff", slots: { owner: ["human"] } })
+    });
+    const firstPending = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "first" }
+    });
+    const review = currentArtifactReview(firstPending);
+    assert(review);
+    const firstRound = review.rounds[0];
+    const draft = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: review.id,
+      roundId: firstRound.id,
+      actorId: "human",
+      expectedRevision: firstRound.revision,
+      draft: { vote: "request_changes", comments: [{ body: "Please revise." }] }
+    });
+    const rejected = await submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: firstRound.id,
+      actorId: "human",
+      expectedRevision: draft.round.revision
+    });
+    assert.equal(rejected.review.status, "awaiting_revision");
+    const frozenFirstRound = JSON.parse(JSON.stringify(rejected.round)) as typeof rejected.round;
+
+    const changed = await updateRunSlotBinding({
+      runsRoot,
+      runId: started.id,
+      slot: "round-handoff::owner",
+      actorIds: ["agent"]
+    });
+    assert.deepEqual(changed.change.affectedReviews?.[0], {
+      reviewId: review.id,
+      artifactScope: "round-handoff#flow[1]",
+      effectiveFromRoundSequence: 2,
+      preservedRoundIds: [firstRound.id]
+    });
+
+    const revised = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "second" },
+      revisionSummary: "Addressed the Human feedback."
+    });
+    const sameReview = currentArtifactReview(revised);
+    assert(sameReview);
+    assert.equal(sameReview.id, review.id);
+    assert.equal(sameReview.rounds.length, 2);
+    assert.deepEqual(sameReview.rounds[0], frozenFirstRound);
+    assert.deepEqual(sameReview.rounds[1].assignments.map((assignment) => assignment.actorId), ["agent"]);
+    assert.deepEqual(sameReview.rounds[1].controlPlane?.bindings["round-handoff::owner"].actorIds, ["agent"]);
+    assert.deepEqual(sameReview.rounds[1].bindingSource?.slots["round-handoff::owner"], {
+      kind: "run-update",
+      changeId: changed.change.id
+    });
+
+    await updateRunSlotBinding({
+      runsRoot,
+      runId: started.id,
+      slot: "round-handoff::owner",
+      actorIds: ["human"]
+    });
+    const persisted = await readRun(runsRoot, started.id);
+    const current = currentArtifactReview(persisted);
+    assert.deepEqual(current?.rounds[1].assignments.map((assignment) => assignment.actorId), ["agent"]);
+    assert.deepEqual(buildRunBindingSnapshot(persisted).slots[0].activeReviews?.[0].nextBinding, {
+      actorIds: ["human"]
+    });
+  });
+});
+
+test("binding update and revision report are linearizable in both forced lock orders", async () => {
+  await withTempDir(async (dir) => {
+    for (const order of ["update-first", "report-first"] as const) {
+      const scenarioRoot = join(dir, order);
+      const memoryRoot = join(scenarioRoot, "memory");
+      const proceduresRoot = join(memoryRoot, "procedures");
+      const runsRoot = join(scenarioRoot, "runs");
+      await mkdir(proceduresRoot, { recursive: true });
+      await writeFile(join(proceduresRoot, "round-race.yaml"), `!procedure
+name: round-race
+flow:
+  - !action
+    action: Review and revise it.
+    artifact: !artifact
+      name: result
+      review: [owner]
+`);
+      const controlPlane = parseControlPlaneConfig({
+        runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+        actors: {
+          human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] },
+          agent: {
+            kind: "agent",
+            name: "Agent",
+            permissions: ["artifact.read", "decision.assess"],
+            agent: { provider: "traex" }
+          }
+        }
+      });
+      const started = await startRun({
+        name: `Round binding race ${order}`,
+        memoryRoot,
+        runsRoot,
+        procedureName: "round-race",
+        controlPlane,
+        reviewConfiguration: reviewConfiguration({ procedure: "round-race", slots: { owner: ["human"] } })
+      });
+      const pending = await reportRun({
+        runsRoot,
+        runId: started.id,
+        artifact: { kind: "inline", value: "first" }
+      });
+      const review = currentArtifactReview(pending);
+      assert(review);
+      const firstRound = review.rounds[0];
+      const draft = await updateArtifactReviewDraft({
+        runsRoot,
+        reviewId: review.id,
+        roundId: firstRound.id,
+        actorId: "human",
+        expectedRevision: firstRound.revision,
+        draft: { vote: "request_changes", comments: [{ body: "Revise it." }] }
+      });
+      await submitArtifactReviewAssignment({
+        runsRoot,
+        reviewId: review.id,
+        roundId: firstRound.id,
+        actorId: "human",
+        expectedRevision: draft.round.revision
+      });
+
+      let enteredCriticalSection!: () => void;
+      let releaseCriticalSection!: () => void;
+      const entered = new Promise<void>((resolve) => { enteredCriticalSection = resolve; });
+      const release = new Promise<void>((resolve) => { releaseCriticalSection = resolve; });
+      const update = () => updateRunSlotBinding({
+        runsRoot,
+        runId: started.id,
+        slot: "round-race::owner",
+        actorIds: ["agent"],
+        beforeBindingWrite: order === "update-first" ? async () => {
+          enteredCriticalSection();
+          await release;
+        } : undefined
+      });
+      const report = () => reportRun({
+        runsRoot,
+        runId: started.id,
+        artifact: { kind: "inline", value: "second" },
+        revisionSummary: "Revised concurrently with the handoff.",
+        beforeArtifactReview: order === "report-first" ? async () => {
+          enteredCriticalSection();
+          await release;
+        } : undefined
+      });
+      const first = order === "update-first" ? update() : report();
+      await entered;
+      const second = order === "update-first" ? report() : update();
+      releaseCriticalSection();
+      await Promise.all([first, second]);
+
+      const final = await readRun(runsRoot, started.id);
+      const finalReview = currentArtifactReview(final);
+      assert(finalReview);
+      const secondRound = finalReview.rounds[1];
+      const change = final.bindingChanges?.at(-1);
+      assert(change?.affectedReviews?.[0]);
+      assert.equal(change.affectedReviews[0].effectiveFromRoundSequence, order === "update-first" ? 2 : 3);
+      assert.deepEqual(secondRound.assignments.map((assignment) => assignment.actorId), [
+        order === "update-first" ? "agent" : "human"
+      ]);
+      assert.deepEqual(final.reviewConfiguration?.slots["round-race::owner"], { actorIds: ["agent"] });
+    }
   });
 });
 

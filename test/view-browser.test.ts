@@ -516,7 +516,10 @@ test("task view supports audited runtime Review Slot rebinding", () => {
   assert.match(browserHtml, /expandedRunBindings: new Set\(\)/);
   assert.match(browserHtml, /help\.textContent = uiT\("run\.bindingHelp"\)/);
   assert.match(browserHtml, /function updateRunBinding\(run, slot, skip, actorIds\)/);
-  assert.match(browserHtml, /settingsFetch\("\/api\/runs\/" \+ encodeURIComponent\(run\.id\) \+ "\/bindings/);
+  assert.match(browserHtml, /fetch\("\/api\/runs\/" \+ encodeURIComponent\(run\.id\) \+ "\/bindings/);
+  assert.doesNotMatch(browserHtml, /settingsFetch\("\/api\/runs\/" \+ encodeURIComponent\(run\.id\) \+ "\/bindings/);
+  assert.match(browserHtml, /uiT\("run\.currentRoundBinding"/);
+  assert.match(browserHtml, /uiT\("run\.nextRoundBinding"/);
   assert.match(browserHtml, /run\.bindingChanges/);
   assert.match(browserHtml, /run\.bindingSnapshot\?\.slots/);
   assert.match(browserHtml, /uiT\("run\.existingReviewsPreserved"/);

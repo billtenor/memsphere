@@ -13,6 +13,11 @@ export async function dispatchArtifactReviewAgents(input: {
   config: MemsphereConfig;
   run: RunState;
   runtime?: CliRuntimeDescriptor;
+  launchWorker?: (assignment: {
+    reviewId: string;
+    roundId: string;
+    assignmentId: string;
+  }) => Promise<void>;
 }): Promise<number> {
   const run = await readRun(input.config.runsRoot, input.run.id);
   if (run.status !== "running") return 0;
@@ -28,13 +33,18 @@ export async function dispatchArtifactReviewAgents(input: {
   if (input.config.debug.agentReview) return 0;
   const runtime = input.runtime ?? currentCliRuntimeDescriptor();
   await Promise.all(queued.map(async ({ review, round, assignment }) => {
+    const assignmentId = artifactReviewAssignmentId(assignment);
+    if (input.launchWorker) {
+      await input.launchWorker({ reviewId: review.id, roundId: round.id, assignmentId });
+      return;
+    }
     const args = [
       runtime.cliEntrypoint,
       "run", "review", "agent-worker",
       "--config", input.config.configPath,
       "--review", review.id,
       "--round", round.id,
-      "--assignment", artifactReviewAssignmentId(assignment),
+      "--assignment", assignmentId,
       "--node-executable", runtime.nodeExecutable,
       "--cli-entrypoint", runtime.cliEntrypoint
     ];
@@ -55,7 +65,7 @@ export async function dispatchArtifactReviewAgents(input: {
         runsRoot: input.config.runsRoot,
         reviewId: review.id,
         roundId: round.id,
-        actorId: artifactReviewAssignmentId(assignment),
+        actorId: assignmentId,
         workerPid: process.pid
       });
       if (!claimed) return;
