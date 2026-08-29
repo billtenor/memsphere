@@ -81,6 +81,33 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     const changesAfterFirst = (await readdir(join(project.root, "changes"))).filter((name) => name.startsWith("change-"));
     assert.deepEqual(changesAfterFirst, [first.changeId]);
 
+    const firstChange = JSON.parse(
+      await readFile(join(project.root, "changes", first.changeId, "change.json"), "utf8")
+    ) as Record<string, unknown>;
+    const legacyId = "change-legacy-without-store-type";
+    const legacyChange = {
+      ...firstChange,
+      id: legacyId,
+      status: "completed",
+      published_revision: "legacy-revision"
+    };
+    delete legacyChange.store_type;
+    await mkdir(join(project.root, "changes", legacyId));
+    await writeFile(
+      join(project.root, "changes", legacyId, "change.json"),
+      `${JSON.stringify(legacyChange, null, 2)}\n`
+    );
+    assert.equal((await validateMemoryChange()).changeId, first.changeId);
+
+    legacyChange.status = "active";
+    delete legacyChange.published_revision;
+    await writeFile(
+      join(project.root, "changes", legacyId, "change.json"),
+      `${JSON.stringify(legacyChange, null, 2)}\n`
+    );
+    await assert.rejects(validateMemoryChange(), /invalid persisted data.*store_type/s);
+    await rm(join(project.root, "changes", legacyId), { recursive: true });
+
     await runGit(["worktree", "add", "-b", "linked-twin", linkedTwin], { cwd: main });
     await writeFile(join(linkedTwin, ".memsphere", "memory", "concepts", "shared.yaml"), linkedSource);
     process.chdir(linkedTwin);

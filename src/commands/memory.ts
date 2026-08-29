@@ -219,18 +219,25 @@ export async function memoryEditCommand(references: string[], options: { change?
   const result = await editMemories({ references, changeId: options.change });
   console.log(`ChangeSet: ${result.change.id}`);
   console.log(`Candidate Root: ${result.candidateRoot}`);
+  logMemoryChangeValidateNext(result.change.id);
 }
 
 export async function memoryDeleteCommand(references: string[], options: { change?: string } = {}): Promise<void> {
   const result = await editMemories({ references, changeId: options.change, operation: "delete" });
   console.log(`ChangeSet: ${result.change.id}`);
   console.log(`Candidate Root: ${result.candidateRoot}`);
+  logMemoryChangeValidateNext(result.change.id);
 }
 
 export async function memoryRenameCommand(reference: string, newName: string, options: { change?: string } = {}): Promise<void> {
   const result = await renameMemory({ reference, newName, changeId: options.change });
   console.log(`ChangeSet: ${result.change.id}`);
   console.log(`Candidate Root: ${result.candidateRoot}`);
+  logMemoryChangeValidateNext(result.change.id);
+}
+
+function logMemoryChangeValidateNext(changeId: string): void {
+  console.log(`Next: memsphere memory change validate ${changeId}`);
 }
 
 export async function memoryPublishCommand(options: { change?: string; message?: string }): Promise<void> {

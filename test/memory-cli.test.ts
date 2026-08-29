@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -121,9 +121,36 @@ test("memory change validate checks the effective Store without expanding a spar
     const changeId = /^ChangeSet: (.+)$/m.exec(edited.stdout)?.[1];
     const candidateRoot = /^Candidate Root: (.+)$/m.exec(edited.stdout)?.[1];
     assert(changeId && candidateRoot);
+    assert.match(edited.stdout, new RegExp(`Next: memsphere memory change validate ${changeId}`));
     assert.deepEqual(await readdir(candidateRoot), ["concepts"]);
     const candidate = join(candidateRoot, "concepts", "shared.yaml");
     await writeFile(candidate, (await readFile(candidate, "utf8")).replace("defines: []", "defines: [Shared concept]"));
+
+    const deleted = await runCli(workspace, ["memory", "delete", "concepts/memsphere-memory"], home);
+    assert.equal(deleted.code, 0, deleted.stderr);
+    const deleteChangeId = /^ChangeSet: (.+)$/m.exec(deleted.stdout)?.[1];
+    assert(deleteChangeId);
+    assert.match(deleted.stdout, new RegExp(`Next: memsphere memory change validate ${deleteChangeId}`));
+
+    const renamed = await runCli(workspace, [
+      "memory", "rename", "concepts/memsphere-framework", "memsphere-framework-renamed"
+    ], home);
+    assert.equal(renamed.code, 0, renamed.stderr);
+    const renameChangeId = /^ChangeSet: (.+)$/m.exec(renamed.stdout)?.[1];
+    assert(renameChangeId);
+    assert.match(renamed.stdout, new RegExp(`Next: memsphere memory change validate ${renameChangeId}`));
+
+    const changeRoot = join(home, "projects", "project", "changes", changeId);
+    const recoveryRoot = join(changeRoot, "memory");
+    const changeBeforeStoreValidation = await readFile(join(changeRoot, "change.json"), "utf8");
+    await assert.rejects(access(recoveryRoot), /ENOENT/);
+    const storeValidation = await runCli(workspace, ["validate"], home);
+    assert.equal(storeValidation.code, 0, storeValidation.stderr);
+    assert.match(storeValidation.stdout, /Validation scope: current Project Store/);
+    assert.match(storeValidation.stdout, /ChangeSet: not created or updated/);
+    assert.match(storeValidation.stdout, /memsphere memory change validate \[change-id\]/);
+    assert.equal(await readFile(join(changeRoot, "change.json"), "utf8"), changeBeforeStoreValidation);
+    await assert.rejects(access(recoveryRoot), /ENOENT/);
 
     const textResult = await runCli(workspace, ["memory", "change", "validate", changeId], home);
     assert.equal(textResult.code, 0, textResult.stderr);
@@ -133,6 +160,7 @@ test("memory change validate checks the effective Store without expanding a spar
       textResult.stdout,
       new RegExp(`Preview: start memsphere View, then open /projects/project/changes/${changeId}`)
     );
+    await access(recoveryRoot);
     assert.deepEqual(await readdir(candidateRoot), ["concepts"]);
 
     const jsonResult = await runCli(workspace, ["memory", "change", "validate", changeId, "--format", "json"], home);
@@ -172,6 +200,55 @@ test("memory edit uses the current Embedded worktree without a ChangeSet", async
     const rejected = await runCli(nested, ["memory", "edit", "concepts/new-memory", "--change", "change-demo"]);
     assert.equal(rejected.code, 1);
     assert.match(rejected.stderr, /only available for a Managed Project/);
+  });
+});
+
+test("validate distinguishes Project Store checks from stateless Memory root checks", async () => {
+  await withScope(async ({ root, nested, memoryRoot }) => {
+    const help = await runCli(nested, ["validate", "--help"]);
+    assert.equal(help.code, 0, help.stderr);
+    assert.match(help.stdout, /never creates\s+or updates a ChangeSet/);
+    assert.match(help.stdout, /memsphere memory change validate \[change-id\]/);
+    assert.match(help.stdout, /stateless --memory-root mode has no Project or ChangeSet context/);
+
+    const textResult = await runCli(nested, ["validate"]);
+    assert.equal(textResult.code, 0, textResult.stderr);
+    assert.match(textResult.stdout, /Validation scope: current Project Store/);
+    assert.match(textResult.stdout, /ChangeSet: not created or updated/);
+    assert.match(textResult.stdout, /memsphere memory change validate \[change-id\]/);
+
+    const jsonResult = await runCli(nested, ["validate", "--format", "json"]);
+    assert.equal(jsonResult.code, 0, jsonResult.stderr);
+    assert.deepEqual(
+      (({ valid, validationScope, changeSetEffect, nextCommand }) => ({
+        valid, validationScope, changeSetEffect, nextCommand
+      }))(JSON.parse(jsonResult.stdout)),
+      {
+        valid: true,
+        validationScope: "project-store",
+        changeSetEffect: "none",
+        nextCommand: "memsphere memory change validate [change-id]"
+      }
+    );
+
+    const statelessHome = join(root, "missing-home");
+    const statelessText = await runCli(nested, ["validate", "--memory-root", memoryRoot], statelessHome);
+    assert.equal(statelessText.code, 0, statelessText.stderr);
+    assert.match(statelessText.stdout, /Validation scope: stateless Memory root/);
+    assert.match(statelessText.stdout, /ChangeSet: not applicable in --memory-root mode/);
+    assert.doesNotMatch(statelessText.stdout, /For unpublished Memory changes/);
+
+    const statelessJson = await runCli(
+      nested,
+      ["validate", "--memory-root", memoryRoot, "--format", "json"],
+      statelessHome
+    );
+    assert.equal(statelessJson.code, 0, statelessJson.stderr);
+    const payload = JSON.parse(statelessJson.stdout);
+    assert.equal(payload.valid, true);
+    assert.equal(payload.validationScope, "memory-root");
+    assert.equal(payload.changeSetEffect, "none");
+    assert.equal(Object.hasOwn(payload, "nextCommand"), false);
   });
 });
 
