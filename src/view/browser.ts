@@ -8981,6 +8981,91 @@ const browserTemplate = String.raw`<!doctype html>
 </body>
 </html>`;
 
+type LegacyViewTemplateParts = {
+  styles: string;
+  markup: string;
+  script: string;
+};
+
+function legacyViewTemplateParts(): LegacyViewTemplateParts {
+  const styleMatches = [...browserTemplate.matchAll(/<style>([\s\S]*?)<\/style>/g)];
+  const scriptMatches = [...browserTemplate.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  const bodyMatch = browserTemplate.match(/<body>([\s\S]*?)<\/body>/);
+  if (styleMatches.length !== 1 || scriptMatches.length !== 1 || !bodyMatch) {
+    throw new Error("legacy View template must contain exactly one style, body, and script");
+  }
+
+  const body = bodyMatch[1];
+  const scriptTag = scriptMatches[0][0];
+  const scriptOffset = body.lastIndexOf(scriptTag);
+  if (scriptOffset < 0 || body.slice(scriptOffset + scriptTag.length).trim()) {
+    throw new Error("legacy View script must be the final element in the body");
+  }
+
+  const script = scriptMatches[0][1]
+    .replace("const uiLocale = __MEMSPHERE_VIEW_LOCALE__;", "const uiLocale = options.locale;")
+    .replace("const uiMessages = __MEMSPHERE_VIEW_MESSAGES__;", "const uiMessages = options.messages;")
+    .trim();
+  if (script.includes("__MEMSPHERE_VIEW_LOCALE__") || script.includes("__MEMSPHERE_VIEW_MESSAGES__")) {
+    throw new Error("legacy View bundle contains unresolved locale placeholders");
+  }
+
+  return {
+    styles: styleMatches[0][1].trim(),
+    markup: body.slice(0, scriptOffset).trim(),
+    script
+  };
+}
+
+export function renderLegacyViewBundle(): string {
+  const parts = legacyViewTemplateParts();
+  const globalFunctions = legacyViewGlobalFunctions(parts.script);
+  return [
+    `const legacyViewStyles = ${JSON.stringify(parts.styles)};`,
+    `const legacyViewMarkup = ${JSON.stringify(parts.markup)};`,
+    "",
+    "export function mount(options) {",
+    "  if (!options || !(options.root instanceof Element)) throw new Error(\"legacy View mount requires a root Element\");",
+    "  if (typeof options.locale !== \"string\" || !options.messages || typeof options.messages !== \"object\") {",
+    "    throw new Error(\"legacy View mount requires locale messages\");",
+    "  }",
+    "  document.documentElement.lang = options.locale;",
+    "  const previousStyle = document.getElementById(\"memsphere-legacy-view-styles\");",
+    "  if (previousStyle) previousStyle.remove();",
+    "  const style = document.createElement(\"style\");",
+    "  style.id = \"memsphere-legacy-view-styles\";",
+    "  style.textContent = legacyViewStyles;",
+    "  document.head.append(style);",
+    "  options.root.innerHTML = legacyViewMarkup;",
+    "  try {",
+    indentJavaScript(parts.script, 4),
+    globalFunctions.length
+      ? `    Object.assign(window, { ${globalFunctions.join(", ")} });`
+      : "",
+    "  } catch (error) {",
+    "    style.remove();",
+    "    options.root.replaceChildren();",
+    "    throw error;",
+    "  }",
+    "}",
+    ""
+  ].join("\n");
+}
+
+function legacyViewGlobalFunctions(source: string): string[] {
+  return [...new Set(
+    [...source.matchAll(/^ {4}(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/gm)]
+      .map(match => match[1])
+  )];
+}
+
+function indentJavaScript(source: string, spaces: number): string {
+  const prefix = " ".repeat(spaces);
+  return source.split("\n").map(line => `${prefix}${line}`).join("\n");
+}
+
+export const legacyViewBundle = renderLegacyViewBundle();
+
 export function renderBrowserHtml(locale: ViewLocale | unknown = "zh-CN"): string {
   const resolved = resolveViewLocale(locale);
   return browserTemplate

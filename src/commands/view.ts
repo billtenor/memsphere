@@ -97,7 +97,7 @@ import {
   type RunState,
   type RunStep
 } from "../run/store.js";
-import { renderBrowserHtml } from "../view/browser.js";
+import { legacyViewBundlePath, renderViewHostHtml } from "../view/host.js";
 import {
   localizeAcpProviderDefinition,
   localizeAcpProviderDetection,
@@ -298,6 +298,11 @@ async function handleRequest(
   const { memoryRoot, runsRoot } = config;
   const archiveRoot = config.archiveRoot;
 
+  if (request.method === "GET" && url.pathname === legacyViewBundlePath) {
+    sendJavaScript(response, await readLegacyViewBundle());
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/projects") {
     const projects = await listRegisteredProjects(config.homeRoot ?? resolveMemsphereHome());
     sendJson(response, 200, { current: config.project?.name, projects });
@@ -318,7 +323,7 @@ async function handleRequest(
   }
 
   if (request.method === "GET" && isViewPagePath(url.pathname)) {
-    sendHtml(response, renderBrowserHtml(config.language));
+    sendHtml(response, renderViewHostHtml(config.language));
     return;
   }
 
@@ -2380,6 +2385,34 @@ function sendHtml(response: ServerResponse, body: string): void {
   response.writeHead(200, {
     "content-type": "text/html; charset=utf-8",
     "cache-control": "no-store"
+  });
+  response.end(body);
+}
+
+const compiledLegacyViewBundleUrl = new URL("../view/legacy-view.js", import.meta.url);
+
+async function readLegacyViewBundle(): Promise<string> {
+  try {
+    const bundle = await readFile(compiledLegacyViewBundleUrl, "utf8");
+    if (!bundle.trim()) throw new Error(`legacy View bundle is empty: ${compiledLegacyViewBundleUrl.pathname}`);
+    return bundle;
+  } catch (error) {
+    if (
+      import.meta.url.endsWith(".ts")
+      && error && typeof error === "object" && "code" in error && error.code === "ENOENT"
+    ) {
+      const { legacyViewBundle } = await import("../view/browser.js");
+      return legacyViewBundle;
+    }
+    throw error;
+  }
+}
+
+function sendJavaScript(response: ServerResponse, body: string): void {
+  response.writeHead(200, {
+    "content-type": "text/javascript; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff"
   });
   response.end(body);
 }
