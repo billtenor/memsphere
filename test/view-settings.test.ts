@@ -330,7 +330,7 @@ test("global Settings remains available when no Project is selected", async () =
 test("saving language updates the next View page in the same process without requiring restart", async () => {
   await withSettingsServer("127.0.0.1", async ({ origin }) => {
     const initialPage = await (await fetch(origin)).text();
-    assert.match(initialPage, /<html lang="zh-CN">/);
+    assert.match(initialPage, /<html lang="zh-CN"(?: [^>]*)?>/);
 
     const payload = await (await fetch(`${origin}/api/settings/global`)).json() as {
       diskRevision: string;
@@ -346,7 +346,7 @@ test("saving language updates the next View page in the same process without req
     assert.equal((await saved.json() as { restartRequired: boolean }).restartRequired, false);
 
     const englishPage = await (await fetch(origin)).text();
-    assert.match(englishPage, /<html lang="en">/);
+    assert.match(englishPage, /<html lang="en"(?: [^>]*)?>/);
     assert.match(englishPage, /"common\.refresh":"Refresh"/);
 
     const current = await (await fetch(`${origin}/api/settings/global`)).json() as {
@@ -362,7 +362,7 @@ test("saving language updates the next View page in the same process without req
       })
     });
     assert.equal(invalid.status, 422);
-    assert.match(await (await fetch(origin)).text(), /<html lang="en">/);
+    assert.match(await (await fetch(origin)).text(), /<html lang="en"(?: [^>]*)?>/);
 
     const validateHostChange = await fetch(`${origin}/api/settings/global/validate`, {
       method: "POST",
