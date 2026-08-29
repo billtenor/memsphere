@@ -5,6 +5,10 @@ import { join } from "node:path";
 import test from "node:test";
 import { atomicReplaceDirectoryWithCommit } from "../src/persistence.js";
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 test("directory replacement commits new content only after preparation succeeds", async () => {
   const root = await mkdtemp(join(tmpdir(), "memsphere-directory-commit-"));
   const source = join(root, "source");
@@ -204,7 +208,7 @@ test("directory replacement keeps a rejected copy after a transient cleanup fail
     }), (error: unknown) => {
       assert(error instanceof AggregateError);
       message = error.message;
-      assert.match(message, new RegExp(`previous content was restored at ${destination}`));
+      assert.match(message, new RegExp(`previous content was restored at ${escapeRegExp(destination)}`));
       assert.match(message, /rejected replacement is preserved at/);
       return true;
     });

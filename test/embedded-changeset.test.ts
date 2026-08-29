@@ -99,8 +99,15 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     );
     assert.equal((await validateMemoryChange()).changeId, first.changeId);
 
-    legacyChange.status = "active";
+    legacyChange.status = "abandoned";
     delete legacyChange.published_revision;
+    await writeFile(
+      join(project.root, "changes", legacyId, "change.json"),
+      `${JSON.stringify(legacyChange, null, 2)}\n`
+    );
+    assert.equal((await validateMemoryChange()).changeId, first.changeId);
+
+    legacyChange.status = "active";
     await writeFile(
       join(project.root, "changes", legacyId, "change.json"),
       `${JSON.stringify(legacyChange, null, 2)}\n`
