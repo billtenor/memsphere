@@ -30,6 +30,8 @@
 
 当前 Catalog 定义 10 个 Slot。新增 Slot 时直接更新本列表。
 
+当前 Runtime 已接线 `main.view`。其余 9 个 Slot 的产品语义和所有权已经确定，但尚未接入 Host 或迁移现有业务界面；后续接线时直接更新本段状态，不创建另一份阶段性 Slot List。
+
 ## Slot 结构
 
 ```text

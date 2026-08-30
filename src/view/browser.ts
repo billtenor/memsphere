@@ -627,6 +627,28 @@ const browserTemplate = String.raw`<!doctype html>
   <script>
     const uiLocale = __MEMSPHERE_VIEW_LOCALE__;
     const uiMessages = __MEMSPHERE_VIEW_MESSAGES__;
+    const ownViewResource = __MEMSPHERE_VIEW_OWN_RESOURCE__;
+
+    function scheduleViewTask(callback, delay = 0) {
+      let release = () => {};
+      const timer = setTimeout(() => {
+        release();
+        callback();
+      }, delay);
+      release = ownViewResource(() => clearTimeout(timer));
+      return release;
+    }
+
+    function addOwnedDocumentPointerdown(listener) {
+      let release = () => {};
+      const wrapped = event => {
+        release();
+        listener(event);
+      };
+      document.addEventListener("pointerdown", wrapped, { once: true });
+      release = ownViewResource(() => document.removeEventListener("pointerdown", wrapped));
+      return release;
+    }
     const kindOrder = ["procedures", "schemas", "concepts", "statements"];
     const selectedTaskKey = "memsphere.selectedTask.v1";
     const viewModeKey = "memsphere.viewMode.v1";
@@ -1134,27 +1156,41 @@ const browserTemplate = String.raw`<!doctype html>
       applyFilter();
       renderNav();
     });
-    document.addEventListener("keydown", (event) => {
+    const handleDocumentKeydown = (event) => {
       if (event.key === "Escape") closeProjectMenu();
-    });
-    document.addEventListener("click", (event) => {
+    };
+    document.addEventListener("keydown", handleDocumentKeydown);
+    ownViewResource(() => document.removeEventListener("keydown", handleDocumentKeydown));
+    const handleDocumentClick = (event) => {
       if (!(event.target instanceof Element) || !event.target.closest(".project-select-wrap")) closeProjectMenu();
-    });
-    document.addEventListener("focusout", () => {
-      setTimeout(() => {
+    };
+    document.addEventListener("click", handleDocumentClick);
+    ownViewResource(() => document.removeEventListener("click", handleDocumentClick));
+    let focusoutTimer = null;
+    const handleDocumentFocusout = () => {
+      if (focusoutTimer !== null) clearTimeout(focusoutTimer);
+      focusoutTimer = setTimeout(() => {
+        focusoutTimer = null;
         if (hasActiveTaskInteraction()) return;
         if (flushPendingTaskDetail()) return;
         if (!state.taskPollingRenderPending) return;
         state.taskPollingRenderPending = false;
         renderAll();
       }, 0);
+    };
+    document.addEventListener("focusout", handleDocumentFocusout);
+    ownViewResource(() => {
+      document.removeEventListener("focusout", handleDocumentFocusout);
+      if (focusoutTimer !== null) clearTimeout(focusoutTimer);
     });
-    window.addEventListener("popstate", () => {
+    const handleWindowPopstate = () => {
       loadAll({ route: parseBrowserRoute(window.location), render: true }).catch(renderFatalError);
-    });
+    };
+    window.addEventListener("popstate", handleWindowPopstate);
+    ownViewResource(() => window.removeEventListener("popstate", handleWindowPopstate));
 
     loadAll().catch(renderFatalError);
-    setInterval(() => {
+    const taskPollingTimer = setInterval(() => {
       if (state.viewMode === "settings") return;
       if (state.viewMode !== "task") return;
       const kind = hasActiveTaskInteraction() ? "activity" : "runs";
@@ -1173,6 +1209,7 @@ const browserTemplate = String.raw`<!doctype html>
         window.dispatchEvent(new CustomEvent("memsphere:view-poll-settled", { detail: { kind } }));
       });
     }, 4000);
+    ownViewResource(() => clearInterval(taskPollingTimer));
 
     async function loadAll(options = {}) {
       const generation = ++state.pageLoadGeneration;
@@ -7449,10 +7486,10 @@ const browserTemplate = String.raw`<!doctype html>
       });
       trigger.addEventListener("click", () => {
         if (menu.hidden) return;
-        setTimeout(() => {
-          document.addEventListener("pointerdown", event => {
+        scheduleViewTask(() => {
+          addOwnedDocumentPointerdown(event => {
             if (!chooser.contains(event.target)) setOpen(false);
-          }, { once: true });
+          });
         }, 0);
       });
       chooser.append(trigger, menu);
@@ -7835,10 +7872,10 @@ const browserTemplate = String.raw`<!doctype html>
       });
       trigger.addEventListener("click", () => {
         if (menu.hidden) return;
-        setTimeout(() => {
-          document.addEventListener("pointerdown", event => {
+        scheduleViewTask(() => {
+          addOwnedDocumentPointerdown(event => {
             if (!chooser.contains(event.target)) setOpen(false);
-          }, { once: true });
+          });
         }, 0);
       });
       chooser.append(trigger, menu);
@@ -8050,10 +8087,10 @@ const browserTemplate = String.raw`<!doctype html>
       });
       trigger.addEventListener("click", () => {
         if (menu.hidden) return;
-        setTimeout(() => {
-          document.addEventListener("pointerdown", event => {
+        scheduleViewTask(() => {
+          addOwnedDocumentPointerdown(event => {
             if (!chooser.contains(event.target)) setOpen(false);
-          }, { once: true });
+          });
         }, 0);
       });
       chooser.append(trigger, menu);
@@ -8160,10 +8197,10 @@ const browserTemplate = String.raw`<!doctype html>
       });
       trigger.addEventListener("click", () => {
         if (menu.hidden) return;
-        setTimeout(() => {
-          document.addEventListener("pointerdown", event => {
+        scheduleViewTask(() => {
+          addOwnedDocumentPointerdown(event => {
             if (!chooser.contains(event.target)) setOpen(false);
-          }, { once: true });
+          });
         }, 0);
       });
       chooser.append(trigger, menu);
@@ -8567,10 +8604,10 @@ const browserTemplate = String.raw`<!doctype html>
       severityTrigger.addEventListener("click", () => {
         setSeverityOpen(severityMenu.hidden);
         if (!severityMenu.hidden) {
-          setTimeout(() => {
-            document.addEventListener("pointerdown", event => {
+          scheduleViewTask(() => {
+            addOwnedDocumentPointerdown(event => {
               if (!severity.contains(event.target)) setSeverityOpen(false);
-            }, { once: true });
+            });
           }, 0);
         }
       });
@@ -9021,9 +9058,10 @@ function legacyViewTemplateParts(): LegacyViewTemplateParts {
   const script = scriptMatches[0][1]
     .replace("const uiLocale = __MEMSPHERE_VIEW_LOCALE__;", "const uiLocale = options.locale;")
     .replace("const uiMessages = __MEMSPHERE_VIEW_MESSAGES__;", "const uiMessages = options.messages;")
+    .replace("const ownViewResource = __MEMSPHERE_VIEW_OWN_RESOURCE__;", "const ownViewResource = options.ownResource;")
     .trim();
-  if (script.includes("__MEMSPHERE_VIEW_LOCALE__") || script.includes("__MEMSPHERE_VIEW_MESSAGES__")) {
-    throw new Error("legacy View bundle contains unresolved locale placeholders");
+  if (script.includes("__MEMSPHERE_VIEW_")) {
+    throw new Error("legacy View bundle contains unresolved placeholders");
   }
 
   return {
@@ -9037,33 +9075,93 @@ export function renderLegacyViewBundle(): string {
   const parts = legacyViewTemplateParts();
   const globalFunctions = legacyViewGlobalFunctions(parts.script);
   return [
+    `import { defineViewPlugin, slots } from "@memsphere/view-sdk";`,
+    "",
     `const legacyViewStyles = ${JSON.stringify(parts.styles)};`,
     `const legacyViewMarkup = ${JSON.stringify(parts.markup)};`,
+    `const legacyViewGlobalNames = ${JSON.stringify(globalFunctions)};`,
     "",
-    "export function mount(options) {",
-    "  if (!options || !(options.root instanceof Element)) throw new Error(\"legacy View mount requires a root Element\");",
-    "  if (typeof options.locale !== \"string\" || !options.messages || typeof options.messages !== \"object\") {",
-    "    throw new Error(\"legacy View mount requires locale messages\");",
-    "  }",
-    "  document.documentElement.lang = options.locale;",
-    "  const previousStyle = document.getElementById(\"memsphere-legacy-view-styles\");",
-    "  if (previousStyle) previousStyle.remove();",
-    "  const style = document.createElement(\"style\");",
-    "  style.id = \"memsphere-legacy-view-styles\";",
-    "  style.textContent = legacyViewStyles;",
-    "  document.head.append(style);",
-    "  options.root.innerHTML = legacyViewMarkup;",
-    "  try {",
-    indentJavaScript(parts.script, 4),
+    "function createLegacyViewMount(config) {",
+    "  return {",
+    "    mount({ element }) {",
+    "      const resourceDisposers = new Set();",
+    "      const options = {",
+    "        ...config,",
+    "        ownResource(disposer) {",
+    "          if (typeof disposer !== \"function\") throw new TypeError(\"Legacy View resource disposer must be a function\");",
+    "          let active = true;",
+    "          const owned = () => {",
+    "            if (!active) return;",
+    "            active = false;",
+    "            resourceDisposers.delete(owned);",
+    "            return disposer();",
+    "          };",
+    "          resourceDisposers.add(owned);",
+    "          return owned;",
+    "        }",
+    "      };",
+    "      const disposeOwnedResources = () => {",
+    "        const errors = [];",
+    "        for (const disposer of [...resourceDisposers].reverse()) {",
+    "          try { disposer(); } catch (error) { errors.push(error); }",
+    "        }",
+    "        resourceDisposers.clear();",
+    "        return errors;",
+    "      };",
+    "      document.documentElement.lang = options.locale;",
+    "      const previousStyle = document.getElementById(\"memsphere-legacy-view-styles\");",
+    "      if (previousStyle) previousStyle.remove();",
+    "      const previousGlobals = new Map(legacyViewGlobalNames.map(name => [name, {",
+    "        exists: Object.prototype.hasOwnProperty.call(window, name),",
+    "        value: window[name]",
+    "      }]));",
+    "      const style = document.createElement(\"style\");",
+    "      style.id = \"memsphere-legacy-view-styles\";",
+    "      style.textContent = legacyViewStyles;",
+    "      document.head.append(style);",
+    "      element.innerHTML = legacyViewMarkup;",
+    "      try {",
+    indentJavaScript(parts.script, 8),
     globalFunctions.length
-      ? `    Object.assign(window, { ${globalFunctions.join(", ")} });`
+      ? `        Object.assign(window, { ${globalFunctions.join(", ")} });`
       : "",
-    "  } catch (error) {",
-    "    style.remove();",
-    "    options.root.replaceChildren();",
-    "    throw error;",
-    "  }",
+    "      } catch (error) {",
+    "        const cleanupErrors = disposeOwnedResources();",
+    "        style.remove();",
+    "        element.replaceChildren();",
+    "        if (cleanupErrors.length) throw new AggregateError([error, ...cleanupErrors], error instanceof Error ? error.message : String(error));",
+    "        throw error;",
+    "      }",
+    "      return () => {",
+    "        const cleanupErrors = disposeOwnedResources();",
+    "        for (const [name, previous] of previousGlobals) {",
+    "          if (previous.exists) window[name] = previous.value;",
+    "          else delete window[name];",
+    "        }",
+    "        style.remove();",
+    "        element.replaceChildren();",
+    "        if (previousStyle) document.head.append(previousStyle);",
+    "        if (cleanupErrors.length) throw new AggregateError(cleanupErrors, \"Legacy View cleanup failed\");",
+    "      };",
+    "    }",
+    "  };",
     "}",
+    "",
+    "export default defineViewPlugin({",
+    "  name: \"memsphere-legacy-view\",",
+    "  apiVersion: 1,",
+    "  inject: [\"slots\"],",
+    "  apply(context, config) {",
+    "    if (!config || typeof config.locale !== \"string\" || !config.messages || typeof config.messages !== \"object\") {",
+    "      throw new Error(\"legacy View Plugin requires locale messages\");",
+    "    }",
+    "    context.slots.register(slots.mainView, {",
+    "      id: \"legacy.page\",",
+    "      key: \"legacy\",",
+    "      value: createLegacyViewMount(config)",
+    "    });",
+    "  }",
+    "});",
     ""
   ].join("\n");
 }
@@ -9087,7 +9185,11 @@ export function renderBrowserHtml(locale: ViewLocale | unknown = "zh-CN"): strin
   return browserTemplate
     .replace("__MEMSPHERE_VIEW_LANG__", resolved)
     .replace("__MEMSPHERE_VIEW_LOCALE__", JSON.stringify(resolved))
-    .replace("__MEMSPHERE_VIEW_MESSAGES__", serializeViewMessages(resolved));
+    .replace("__MEMSPHERE_VIEW_MESSAGES__", serializeViewMessages(resolved))
+    .replace(
+      "__MEMSPHERE_VIEW_OWN_RESOURCE__",
+      "(disposer => { let active = true; const owned = () => { if (!active) return; active = false; window.removeEventListener(\"pagehide\", owned); return disposer(); }; window.addEventListener(\"pagehide\", owned, { once: true }); return owned; })"
+    );
 }
 
 export const browserHtml = renderBrowserHtml();

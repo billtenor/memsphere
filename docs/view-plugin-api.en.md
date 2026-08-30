@@ -6,7 +6,13 @@ This is the normative API reference for `@memsphere/view-sdk` and ViewHost. It i
 
 For your first Plugin, read [View Plugin Guide](./view-plugin-guide.en.md). For architecture boundaries, see [View Plugin Design](./view-plugin-design.en.md). For built-in Slot names and product semantics, see [View Slot List](./view-slots.en.md).
 
-This document records the current public interface. Add capabilities directly to the corresponding interfaces and constraints. “Must” and “must not” are compatibility requirements; “should” is the default engineering choice.
+This document defines the long-term public interface and explicitly records current runtime support below. Add capabilities directly to the corresponding interfaces, implementation status, and constraints. “Must” and “must not” are compatibility requirements; “should” is the default engineering choice.
+
+## Current Implementation Status
+
+ViewHost currently implements the default Plugin entrypoint, `apiVersion: 1`, `apply()`, Module instance identity, `lifecycle`, Slot Tokens and Registry, registration transactions, and keyed `main.view` Mount, rollback, and cleanup. An import map resolves `@memsphere/view-sdk` to the Host-provided browser SDK, and the built-in Legacy View uses this path.
+
+Router, View API, I18n, Theme, Logger, other built-in Slots, custom child Slots, Manifest, and user Module discovery are defined contracts but are not wired into the runtime yet. A current Plugin requesting any service other than `slots` in `inject` fails explicitly before `apply()`. Update this section directly as those services become available; do not introduce temporary APIs.
 
 ## Module View Entrypoint Contract
 

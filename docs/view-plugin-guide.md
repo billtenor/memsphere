@@ -4,6 +4,8 @@
 
 本文带扩展开发者完成一个最小 View Plugin，并解释代码运行时发生了什么。精确类型和约束请查询 [View Plugin API](./view-plugin-api.md)；架构原因见 [View Plugin Design](./view-plugin-design.md)；可贡献的内置位置见 [View Slot List](./view-slots.md)。
 
+当前 ViewHost 已接通 Plugin 入口、生命周期、Slot Registry 和 `main.view`。本文后续使用 Router、View API 与 I18n 的完整示例同时展示长期组合方式；这些 Context 服务尚未接线，当前可运行 Plugin 只能声明 `inject: ["slots"]` 并注册 `main.view`。准确状态以 API 文档的“当前实现状态”为准。
+
 ## 先理解运行过程
 
 View Plugin 是 Module 的浏览器界面入口。它不启动独立服务，也不直接修改整个 Memsphere 页面。

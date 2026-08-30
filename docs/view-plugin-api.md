@@ -6,7 +6,13 @@
 
 第一次开发 Plugin 请先阅读 [View Plugin Guide](./view-plugin-guide.md)；架构边界见 [View Plugin Design](./view-plugin-design.md)；内置 Slot 名称和产品语义见 [View Slot List](./view-slots.md)。
 
-本文记录当前有效的公开接口。新增能力时直接更新对应接口和约束；文中的“必须”“不得”是兼容性要求，“建议”是默认工程选择。
+本文定义长期公开接口，并在下方明确当前运行支持范围。新增能力时直接更新对应接口、实现状态和约束；文中的“必须”“不得”是兼容性要求，“建议”是默认工程选择。
+
+## 当前实现状态
+
+当前 ViewHost 已实现 Plugin 默认入口、`apiVersion: 1`、`apply()`、Module 实例身份、`lifecycle`、Slot Token/Registry、注册事务，以及 `main.view` 的 keyed Mount、回滚和清理。浏览器通过 import map 将 `@memsphere/view-sdk` 解析到 Host 提供的 SDK，内置 Legacy View 已使用这条链路。
+
+Router、View API、I18n、Theme、Logger、其他内置 Slot、自定义子 Slot、Manifest 和用户 Module 发现仍是已确定但尚未接线的契约。当前 Plugin 在 `inject` 中请求除 `slots` 外的服务会在 `apply()` 前明确失败；这些服务接线后，应直接更新本节，不另立临时 API。
 
 ## Module View 入口契约
 

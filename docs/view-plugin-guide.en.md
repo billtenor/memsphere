@@ -4,6 +4,8 @@
 
 This guide builds a minimal View Plugin and explains what happens at runtime. For exact types and constraints, see [View Plugin API](./view-plugin-api.en.md). For architectural rationale, see [View Plugin Design](./view-plugin-design.en.md). For built-in contribution points, see [View Slot List](./view-slots.en.md).
 
+ViewHost currently wires the Plugin entrypoint, lifecycle, Slot Registry, and `main.view`. The complete example below also shows the long-term composition with Router, View API, and I18n; those Context services are not wired yet. A currently runnable Plugin may declare only `inject: ["slots"]` and register `main.view`. See “Current Implementation Status” in the API reference for the authoritative status.
+
 ## Understand the Runtime Flow
 
 A View Plugin is the browser UI entrypoint of a Module. It neither starts an independent service nor edits the complete Memsphere page directly.

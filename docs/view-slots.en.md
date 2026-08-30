@@ -30,6 +30,8 @@ This document defines the Memsphere View Slot Catalog. It is the UI composition 
 
 The current Catalog defines 10 Slots. Add future Slots directly to this list.
 
+The current Runtime wires `main.view`. Product semantics and ownership are defined for the other nine Slots, but they are not yet connected to Host or populated by migrated business UI. Update this status directly as they are wired; do not create a separate stage-specific Slot List.
+
 ## Slot Structure
 
 ```text
