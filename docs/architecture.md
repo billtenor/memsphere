@@ -1,5 +1,7 @@
 # Memsphere 总体架构
 
+简体中文 | [English](./architecture.en.md)
+
 本文记录 Memsphere 的长期总体架构基线。它描述 Memsphere 在 Agent 生态中的位置、平台核心与个性化软件的边界、Project 和 Module 的组织方式、代码分层，以及 CLI、View 与数据能力如何协作；不规定当前版本必须一次性实现的全部细节。
 
 ## 系统定位
@@ -155,13 +157,13 @@ memsphere/
     └── <module-id>/             # 一个内置 Module
 ```
 
-`modules/` 是多个 Module 的集合目录，不是架构层。每个内置 Module 与用户 Module 使用相同的目录结构、Manifest 和 Host 协议；区别只在于内置 Module 随 Memsphere 一同分发。现有 Core 中的业务界面后续按模块边界逐步迁入这里，本次架构定义不要求立即搬迁代码。
+`modules/` 是多个 Module 的集合目录，不是架构层。每个内置 Module 与用户 Module 使用相同的目录结构、Manifest 和 Host 协议；区别只在于内置 Module 随 Memsphere 一同分发。Core 中的业务界面按领域边界归属对应的内置 Module。
 
 单个 Module 的内部结构为：
 
 ```text
 module/
-├── module.json                 # Module 描述文件；具体字段后续定义
+├── module.json                 # Module 描述文件；具体字段由 Module Manifest 契约定义
 ├── domain/                     # 领域模型、规则和领域所拥有的契约
 ├── application/                # 用例编排和应用层所拥有的契约
 └── adapter/                    # 外圈适配器
@@ -209,7 +211,7 @@ Human
   → 同一份权威数据
 ```
 
-具体传输协议后续定义，但不能让浏览器直接访问数据库，也不能让 CLI 和 View 各自维护独立业务状态。
+具体传输协议由对应 Adapter 契约定义，但不能让浏览器直接访问数据库，也不能让 CLI 和 View 各自维护独立业务状态。
 
 ### 依赖方向与契约归属
 
@@ -278,16 +280,17 @@ Slot 是 Module 明确开放的 UI 扩展位置，也是 View Host 与 Module �
 
 ```text
 View Host
-└── Root Slot
-    ├── Navigation Slot
-    ├── Page Slot
-    ├── Toolbar Slot
-    └── Module 声明的子 Slot
+├── Header Slots
+├── Navigation Slots
+├── Home Slots
+├── Main View Slot
+├── Overlay Slot
+└── Module 声明的子 Slot
 ```
 
 Slot 的所有者负责定义位置、输入和组合规则，其他 Module 只能通过公开契约注册内容。Module 可以在自己拥有的界面中继续声明子 Slot，由此形成一棵可扩展的界面树。
 
-长期 Slot 模型需要支持单一内容、列表内容、按键选择和按条件选择等组合方式；具体类型及 API 在 View SDK 设计中确定。
+Slot 的名称、所有权、贡献权限与组合语义见 [Memsphere View Slot List](./view-slots.md)；View 扩展的边界和生命周期见 [Memsphere View Plugin Design](./view-plugin-design.md)；精确接口见 [Memsphere View Plugin API](./view-plugin-api.md)。
 
 ## 编译与加载
 
@@ -325,7 +328,7 @@ View 扩展协议不绑定 React、Vue 或其他 UI 框架。View Host 提供框
 
 ## 运行与重启模型
 
-Memsphere 不采用 DSH 那种为热更新设计的复杂插件生命周期。它使用可重建的整体启动模型：
+Memsphere 使用可重建的整体启动模型，不建设插件热替换生命周期：
 
 ```text
 启动 Host
@@ -376,35 +379,13 @@ View Host 和 Module 的 View Adapter 是可丢弃的展示与交互运行时，
 
 ## 信任与样式
 
-当前阶段只加载用户自己编写或明确安装的可信代码，不为陌生第三方 Module 提供安全沙箱。可信不代表可以依赖内部实现：Module 仍必须遵守公开的 Host、SDK、Slot 和版本契约。
+当前信任模型只加载用户自己编写或明确安装的可信代码，不为陌生第三方 Module 提供安全沙箱。可信不代表可以依赖内部实现：Module 仍必须遵守公开的 Host、SDK、Slot 和版本契约。
 
 Memsphere 提供主题变量和标准界面能力，帮助 Module 融入官方 Shell，但不强制 Module 采用统一视觉风格。Module 样式不得污染 Host 或其他 Module；具体样式隔离机制在 View SDK 和前端实现设计中确定。
 
-## 与 DSH 的关系
+## 专项契约
 
-本架构参考 DeepSeek Harness 的微内核和客户端组合思想。
-
-采用的原则：
-
-- 产品功能通过插件式 Module 组合，而不是修改特权核心；
-- 官方 Module 与扩展 Module 使用同一机制；
-- Module 代码与 Module 实例分离，同一份代码可以承担多个配置角色；
-- 浏览器 Bundle 独立编译，由 Host 发现和加载；
-- UI 通过类型化 Slot 形成组合树；
-- Slot 只能由所有者声明，其他 Module 通过公开契约贡献内容。
-
-刻意不采用的部分：
-
-- 为长时间运行 Session 服务的插件热更新；
-- 每一项注册都必须可逆的 effect 系统；
-- 配置变化触发的动态插件树卸载和重挂载；
-- 为卸载、依赖丢失和热替换设计的精细停稳协议。
-
-DSH 不能轻易重启，是因为重启可能中断大量正在运行的 Session。Memsphere 的核心运行发生在 Agent 中，View 只是可重建的辅助入口，因此整体重启是更适合 Memsphere 的复杂度选择。持久业务状态属于 Module 的数据能力，不属于 View 进程。
-
-## 后续设计
-
-在本架构基线上，后续文档应依次明确：
+总体架构由以下专项契约细化：
 
 1. Module Manifest：Module 身份、版本、Node.js 入口、View Bundle、静态资源、SDK 兼容范围和依赖声明；
 2. Module Runtime：Module 发现、依赖解析、加载、实例化、CLI/View 注册和故障协议；
@@ -415,4 +396,4 @@ DSH 不能轻易重启，是因为重启可能中断大量正在运行的 Sessio
 7. 开发工具链：创建 Module、Mock 数据、监听编译、重启与浏览器刷新；
 8. 第三方分发：签名、权限、沙箱、市场和兼容性策略。
 
-在这些细节确定前，实现不得让用户 Module 依赖 Memsphere 私有源码，不得把联合编译作为扩展前提，也不得让 CLI、View 或 Persistence Adapter 绕过 Application 与 Domain 各自形成业务逻辑。
+所有专项契约都不得让用户 Module 依赖 Memsphere 私有源码，不得把联合编译作为扩展前提，也不得让 CLI、View 或 Persistence Adapter 绕过 Application 与 Domain 各自形成业务逻辑。
