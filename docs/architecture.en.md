@@ -125,6 +125,21 @@ Memsphere View is the Home-level management interface for Projects, Memory, Run,
 
 The base Shell, Project switching, and failure diagnostics belong to ViewHost and cannot be replaced by Modules.
 
+### Current View Implementation
+
+The repository currently implements three builtin Modules along these boundaries:
+
+```text
+modules/
+├── org.memsphere.memory/{module.json,adapter/view/}
+├── org.memsphere.run/{module.json,adapter/view/}
+└── org.memsphere.settings/{module.json,adapter/view/}
+```
+
+Build produces `dist/modules/<module-id>/dist/view/index.js` independently for each Module; no Legacy Bundle aggregates the three business interfaces. Core's builtin catalog declares only trusted package roots, instances, and reserved route grants. All three Modules pass through the same Manifest validation, SDK compatibility check, Bundle import, instance Context, `apply()` transaction, and Slot/Route commit.
+
+ViewHost currently wires Router plus `navigation.primary`, `header.title`, `header.actions`, and `main.view`. One failed instance produces a local diagnostic, and Project switching may reconstruct the complete page. User Module repository discovery/installation, dynamic Project Composition, the CLI Module Host, and backend domain-directory migration remain unimplemented.
+
 ## Three-Layer Module Structure
 
 Modules use three concentric layers: Domain, Application, and Adapter. The Memsphere repository separates Core from built-in Modules:

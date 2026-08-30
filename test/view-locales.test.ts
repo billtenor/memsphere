@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { renderBrowserHtml } from "../src/view/browser.js";
+import { renderViewHostHtml } from "../src/view/host.js";
 import { findUnlocalizedViewLiterals } from "../src/view/locales/lint.js";
 import {
   formatViewMessage,
@@ -30,15 +29,17 @@ test("View locale resources have matching keys and resolve supported languages",
 });
 
 test("View HTML injects one safe locale bundle and matching document language", () => {
-  const zh = renderBrowserHtml("zh-CN");
-  const en = renderBrowserHtml("en");
-  assert.match(zh, /<html lang="zh-CN">/);
-  assert.match(en, /<html lang="en">/);
+  const zh = renderViewHostHtml("zh-CN", []);
+  const en = renderViewHostHtml("en", []);
+  assert.match(zh, /<html lang="zh-CN"/);
+  assert.match(en, /<html lang="en"/);
   assert.match(zh, /"common\.refresh":"刷新"/);
   assert.match(en, /"common\.refresh":"Refresh"/);
   assert.match(en, /"memory\.count":\{"one":"\{count\} memory","other":"\{count\} memories"\}/);
   assert.doesNotMatch(serializeViewMessages("zh-CN"), /<\/script/i);
-  assert.doesNotThrow(() => new Function(en.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? ""));
+  const bootSource = en.match(/<script id="memsphere-view-boot" type="application\/json">([\s\S]*?)<\/script>/)?.[1];
+  assert(bootSource);
+  assert.equal(JSON.parse(bootSource).locale, "en");
 });
 
 test("ACP detection localizes explanatory text without changing technical fields", () => {
@@ -55,13 +56,9 @@ test("ACP detection localizes explanatory text without changing technical fields
   assert.match(result.installHelp ?? "", /安装/);
 });
 
-test("View rejects fixed user-facing literals outside locale and DSL label helpers", async () => {
-  const source = await readFile(new URL("../src/view/browser.ts", import.meta.url), "utf8");
-  assert.deepEqual(findUnlocalizedViewLiterals(source), []);
-
-  const counterexample = source
-    .replace('refresh.textContent = uiT("review.refreshRound");', 'refresh.textContent = "Refresh now";')
-    .replace('<h1>memsphere</h1>', '<h1>Memory Center</h1>')
+test("View locale lint still rejects fixed user-facing literals", () => {
+  const counterexample = '<body>\n<h1>Memory Center</h1>'
+    + '\n<script>\nbutton.textContent = "Refresh now";'
     + '\nbutton.setAttribute("aria-label", "Open settings");\nconfirm("Discard changes?");\npanel.innerHTML = "<span>Review now</span>";'
     + '\nbutton.textContent = `Refresh ${count} items`;\nbutton.setAttribute(`aria-label`, `Open settings`);'
     + '\nconfirm(`Discard ${count} changes?`);\npanel.innerHTML = `<span>Review ${count} items</span>`;'

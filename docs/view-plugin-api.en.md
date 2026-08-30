@@ -10,9 +10,9 @@ This document defines the long-term public interface and explicitly records curr
 
 ## Current Implementation Status
 
-ViewHost currently implements the default Plugin entrypoint, `apiVersion: 1`, `apply()`, Module instance identity, `lifecycle`, Slot Tokens and Registry, registration transactions, and keyed `main.view` Mount, rollback, and cleanup. An import map resolves `@memsphere/view-sdk` to the Host-provided browser SDK, and the built-in Legacy View uses this path.
+ViewHost currently implements the default Plugin entrypoint, `apiVersion: 1`, `apply()`, Module instance identity, `lifecycle`, minimum Manifest validation, SDK SemVer checks, independent Bundle loading, Router, Slot Tokens and Registry, per-instance registration transactions, rollback, and Mount cleanup. An import map resolves `@memsphere/view-sdk` to the Host-provided browser SDK.
 
-Router, View API, I18n, Theme, Logger, other built-in Slots, custom child Slots, Manifest, and user Module discovery are defined contracts but are not wired into the runtime yet. A current Plugin requesting any service other than `slots` in `inject` fails explicitly before `apply()`. Update this section directly as those services become available; do not introduce temporary APIs.
+The currently injectable services are `slots` and `router`. The wired root Slots are `navigation.primary`, `header.title`, `header.actions`, and `main.view`. The three builtin Modules—`org.memsphere.memory`, `org.memsphere.run`, and `org.memsphere.settings`—all use this public entrypoint and independent Bundles. View API, I18n, Theme, Logger, custom child Slots, user Module discovery/installation, and dynamic Project composition remain unwired. A Plugin requesting an unavailable service fails explicitly before `apply()`.
 
 ## Module View Entrypoint Contract
 
@@ -241,7 +241,7 @@ These are the supported kinds. Adding one is an SDK Minor extension. An older Ho
 
 ### Declaring a Custom Child Slot
 
-Root Slots belong to ViewHost or the built-in Home View. A Module may declare child Slots only inside a Mount Entry it owns:
+Root Slots belong to ViewHost. Future custom child Slots may exist only inside their owner Module's Mount Entry; the current Runtime does not wire this capability:
 
 ```ts
 export const customerDetailActions = defineSlot<HeaderActionDescriptor>()({

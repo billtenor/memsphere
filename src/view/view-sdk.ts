@@ -28,6 +28,7 @@ export interface ViewMountTarget {
 
 export interface ViewRenderContext {
   readonly module: Readonly<ModuleInstanceContext>;
+  readonly route: Readonly<RouteLocation>;
 }
 
 export interface ViewMount {
@@ -36,6 +37,92 @@ export interface ViewMount {
     context: ViewRenderContext,
   ): MaybePromise<void | Disposer>;
 }
+
+const routeActivationBrand: unique symbol = Symbol("memsphere.view.route-activation");
+const routeTargetBrand: unique symbol = Symbol("memsphere.view.route-target");
+
+/** Opaque route predicate created by ViewHost. */
+export interface RouteActivation {
+  readonly [routeActivationBrand]: true;
+}
+
+/** Opaque navigation target created by ViewHost. */
+export interface RouteTarget {
+  readonly [routeTargetBrand]: true;
+}
+
+export interface RouteLocation {
+  readonly pathname: string;
+  readonly search: string;
+  readonly hash: string;
+  readonly params: Readonly<Record<string, string>>;
+  readonly routeKey?: string;
+}
+
+export interface RouteDefinition {
+  readonly id: string;
+  readonly path: string;
+}
+
+export interface RouteToken {
+  readonly key: string;
+  readonly activation: RouteActivation;
+  to(params?: Readonly<Record<string, string>>): RouteTarget;
+}
+
+export interface ViewRouter {
+  register(definition: RouteDefinition): RouteToken;
+  navigate(target: RouteTarget): Promise<void>;
+  readonly location: RouteLocation;
+}
+
+/** @internal ViewHost only. Not part of the Module-facing compatibility contract. */
+export function createHostRouteActivation(): RouteActivation {
+  return Object.freeze({ [routeActivationBrand]: true as const });
+}
+
+/** @internal ViewHost only. Not part of the Module-facing compatibility contract. */
+export function createHostRouteTarget(): RouteTarget {
+  return Object.freeze({ [routeTargetBrand]: true as const });
+}
+
+export type TextRef =
+  | { readonly text: string }
+  | {
+      readonly key: string;
+      readonly params?: Readonly<Record<string, string | number>>;
+    };
+
+export type IconRef =
+  | { readonly kind: "system"; readonly name: string }
+  | { readonly kind: "asset"; readonly url: string; readonly alt: TextRef };
+
+export interface ActionDescriptor {
+  readonly label: TextRef;
+  readonly icon?: IconRef;
+  readonly disabled?: boolean;
+  readonly run: () => MaybePromise<void>;
+}
+
+export interface NavigationItemDescriptor {
+  readonly label: TextRef;
+  readonly icon: IconRef;
+  readonly route: RouteTarget;
+  readonly badge?: TextRef;
+}
+
+export interface HeaderBreadcrumbDescriptor {
+  readonly label: TextRef;
+  readonly route?: RouteTarget;
+}
+
+export interface HeaderTitleDescriptor {
+  readonly title: TextRef;
+  readonly subtitle?: TextRef;
+  readonly breadcrumbs?: readonly HeaderBreadcrumbDescriptor[];
+}
+
+export interface HeaderActionDescriptor extends ActionDescriptor {}
 
 export type SlotKind = "single" | "list" | "keyed";
 export type SlotScope = "shell" | "project" | "page";
@@ -90,7 +177,111 @@ export function isViewMount(value: unknown): value is ViewMount {
   return Boolean(value && typeof value === "object" && typeof (value as ViewMount).mount === "function");
 }
 
+export function isRouteActivation(value: unknown): value is RouteActivation {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && routeActivationBrand in value
+    && (value as { [routeActivationBrand]?: unknown })[routeActivationBrand] === true
+  );
+}
+
+export function isRouteTarget(value: unknown): value is RouteTarget {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && routeTargetBrand in value
+    && (value as { [routeTargetBrand]?: unknown })[routeTargetBrand] === true
+  );
+}
+
+export function isTextRef(value: unknown): value is TextRef {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as { text?: unknown; key?: unknown; params?: unknown };
+  if (typeof candidate.text === "string") {
+    return hasOnlyKeys(value, ["text"])
+      && candidate.text.length > 0
+      && candidate.key === undefined
+      && candidate.params === undefined;
+  }
+  if (typeof candidate.key !== "string" || !candidate.key) return false;
+  if (candidate.text !== undefined) return false;
+  return hasOnlyKeys(value, ["key", "params"])
+    && (candidate.params === undefined || isTextParams(candidate.params));
+}
+
+export function isIconRef(value: unknown): value is IconRef {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as { kind?: unknown; name?: unknown; url?: unknown; alt?: unknown };
+  if (candidate.kind === "system") {
+    return hasOnlyKeys(value, ["kind", "name"])
+      && typeof candidate.name === "string"
+      && candidate.name.length > 0;
+  }
+  return hasOnlyKeys(value, ["kind", "url", "alt"])
+    && candidate.kind === "asset"
+    && typeof candidate.url === "string"
+    && candidate.url.length > 0
+    && isTextRef(candidate.alt);
+}
+
+export function isNavigationItemDescriptor(value: unknown): value is NavigationItemDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<NavigationItemDescriptor>;
+  return hasOnlyKeys(value, ["label", "icon", "route", "badge"])
+    && isTextRef(candidate.label)
+    && isIconRef(candidate.icon)
+    && isRouteTarget(candidate.route)
+    && (candidate.badge === undefined || isTextRef(candidate.badge));
+}
+
+export function isHeaderTitleDescriptor(value: unknown): value is HeaderTitleDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<HeaderTitleDescriptor>;
+  return hasOnlyKeys(value, ["title", "subtitle", "breadcrumbs"])
+    && isTextRef(candidate.title)
+    && (candidate.subtitle === undefined || isTextRef(candidate.subtitle))
+    && (candidate.breadcrumbs === undefined || (
+      Array.isArray(candidate.breadcrumbs)
+      && candidate.breadcrumbs.every(isHeaderBreadcrumbDescriptor)
+    ));
+}
+
+export function isHeaderActionDescriptor(value: unknown): value is HeaderActionDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<HeaderActionDescriptor>;
+  return hasOnlyKeys(value, ["label", "icon", "disabled", "run"])
+    && isTextRef(candidate.label)
+    && (candidate.icon === undefined || isIconRef(candidate.icon))
+    && (candidate.disabled === undefined || typeof candidate.disabled === "boolean")
+    && typeof candidate.run === "function";
+}
+
 export const slots = Object.freeze({
+  navigationPrimary: defineSlot<NavigationItemDescriptor>()({
+    name: "navigation.primary",
+    version: 1,
+    kind: "list",
+    scope: "project",
+    render: "descriptor",
+    validate: isNavigationItemDescriptor
+  }),
+  headerTitle: defineSlot<HeaderTitleDescriptor>()({
+    name: "header.title",
+    version: 1,
+    kind: "single",
+    scope: "page",
+    render: "descriptor",
+    validate: isHeaderTitleDescriptor
+  }),
+  headerActions: defineSlot<HeaderActionDescriptor>()({
+    name: "header.actions",
+    version: 1,
+    kind: "list",
+    scope: "page",
+    render: "descriptor",
+    validate: isHeaderActionDescriptor
+  }),
   mainView: defineSlot<ViewMount, string>()({
     name: "main.view",
     version: 1,
@@ -117,6 +308,7 @@ export interface RegisterOptions<Value> {
   readonly value: Value;
   readonly order?: number;
   readonly children?: readonly AnySlotToken[];
+  readonly when?: RouteActivation;
 }
 
 export interface KeyedRegisterOptions<Value, Key extends string>
@@ -139,6 +331,8 @@ export interface SlotRegistry {
 export interface ViewPluginContext {
   readonly module: Readonly<ModuleInstanceContext>;
   readonly slots: SlotRegistry;
+  /** Present only after the Plugin declares and ViewHost wires the router service. */
+  readonly router?: ViewRouter;
   readonly lifecycle: ViewLifecycle;
 }
 
@@ -154,4 +348,26 @@ export interface ViewPlugin<Config = unknown> {
 
 export function defineViewPlugin<Config>(plugin: ViewPlugin<Config>): ViewPlugin<Config> {
   return plugin;
+}
+
+function isHeaderBreadcrumbDescriptor(value: unknown): value is HeaderBreadcrumbDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<HeaderBreadcrumbDescriptor>;
+  return hasOnlyKeys(value, ["label", "route"])
+    && isTextRef(candidate.label)
+    && (candidate.route === undefined || isRouteTarget(candidate.route));
+}
+
+function isTextParams(value: unknown): value is Readonly<Record<string, string | number>> {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.values(value).every(item => typeof item === "string" || typeof item === "number")
+  );
+}
+
+function hasOnlyKeys(value: object, allowed: readonly string[]): boolean {
+  const names = new Set(allowed);
+  return Object.keys(value).every(key => names.has(key));
 }

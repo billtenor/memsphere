@@ -40,6 +40,20 @@ test("Human Artifact Review keeps each participant's draft private", async () =>
       );
       const reviewModal = page.locator("#artifact-review-modal[open]");
       await reviewModal.waitFor();
+      assert.equal(await page.locator("#memsphere-view-root > .run-loading").count(), 0);
+      const modalColors = await reviewModal.evaluate(element => ({
+        background: getComputedStyle(element).backgroundColor,
+        backdrop: getComputedStyle(element, "::backdrop").backgroundColor,
+        reviewPane: getComputedStyle(element.querySelector("#artifact-review-review-pane")!).backgroundColor,
+      }));
+      assert.notEqual(modalColors.background, "rgba(0, 0, 0, 0)");
+      assert.notEqual(modalColors.backdrop, "rgba(0, 0, 0, 0)");
+      assert.notEqual(modalColors.reviewPane, "rgba(0, 0, 0, 0)");
+      for (const heading of ["评审材料", "评审范围", "我的评审", "参与进度", "评审记录"]) {
+        await reviewModal.getByRole("heading", { name: heading, exact: true }).waitFor();
+      }
+      assert((await reviewModal.locator(".artifact-review-material-meta .run-pill").count()) >= 4);
+      assert((await reviewModal.locator(".artifact-review-participant").count()) >= 2);
       const identity = page.getByRole("combobox", { name: "评审身份" });
       await selectIdentity(page, identity, "alice");
       const composer = reviewModal.getByPlaceholder("补充整体评审意见");
@@ -248,7 +262,10 @@ test("Artifact Review keeps a selected historical round across polling", async (
       await roundSelector.click();
       roundMenu = page.getByRole("listbox", { name: "轮次" });
       await roundMenu.waitFor();
-      await waitForViewLifecycleEvent(page, "memsphere:view-poll-settled", "activity");
+      await page.waitForResponse((response) =>
+        response.request().method() === "GET"
+        && response.url().includes(`/artifact-reviews/${revised.id}/rounds/${fixture.review.currentRoundId}`)
+      );
       assert.equal(await roundMenu.isVisible(), true);
       assert.equal(
         await roundMenu.locator(`[data-round-id="${fixture.review.currentRoundId}"]`).getAttribute("aria-selected"),
@@ -316,7 +333,7 @@ test("Artifact Review normalizes invalid Round and Material URLs and syncs mater
   }
 });
 
-test("completed Artifact Review locks page scrolling and restores the trigger position", async () => {
+test("completed Artifact Review isolates dialog scrolling without mutating Host page state", async () => {
   const fixture = await createSingleActorReviewFixture();
   try {
     await approveSingleActorReview(fixture.runsRoot, fixture.runId, fixture.review.id, fixture.review.currentRoundId);
@@ -339,17 +356,18 @@ test("completed Artifact Review locks page scrolling and restores the trigger po
       await reviewButton.click();
       const reviewModal = page.locator("#artifact-review-modal");
       await reviewModal.waitFor();
-      await page.mouse.move(2, 2);
+      const artifactPane = reviewModal.locator("#artifact-review-artifact-pane");
+      await artifactPane.evaluate((pane) => {
+        if (pane.firstElementChild instanceof HTMLElement) pane.firstElementChild.style.minHeight = "1800px";
+      });
+      await artifactPane.hover();
       await page.mouse.wheel(0, 1200);
       await waitForAnimationFrames(page, 2);
-      assert.equal(await page.evaluate(() => window.scrollY), beforeOpen.scrollY);
+      assert((await artifactPane.evaluate((pane) => pane.scrollTop)) > 0);
 
       await reviewModal.getByRole("button", { name: "关闭", exact: true }).click();
       await reviewModal.waitFor({ state: "hidden" });
-      await page.waitForFunction((expectedTop) => {
-        const button = document.querySelector(".task-result [data-artifact-review-id]");
-        return button instanceof HTMLElement && Math.abs(button.getBoundingClientRect().top - expectedTop) < 2;
-      }, beforeOpen.top);
+      await reviewButton.waitFor({ state: "visible" });
     });
   } finally {
     await rm(fixture.dir, { recursive: true, force: true });
@@ -476,15 +494,6 @@ flow:
     await modal.locator("#artifact-review-scope-panel").getByText("artifact_acceptance.unanimous", { exact: true }).waitFor();
     await modal.locator("#artifact-review-progress-panel").getByText("Advisor", { exact: true }).waitFor();
     await modal.locator("#artifact-review-record-panel").getByText("本轮汇总", { exact: true }).waitFor();
-    assert.deepEqual(
-      await page.evaluate(() => {
-        const statusLabel = (window as unknown as {
-          artifactReviewAssignmentStatusLabel(status: string, actorKind: string): string;
-        }).artifactReviewAssignmentStatusLabel;
-        return [statusLabel("queued", "agent"), statusLabel("failed", "agent")];
-      }),
-      ["等待启动", "执行失败"]
-    );
   } finally {
     await browser.close();
     server.close();
@@ -764,7 +773,10 @@ flow:
       element.dataset.stabilityMarker = "preserved";
     });
     const settledScrollTop = await log.evaluate((element) => element.scrollTop);
-    await waitForViewLifecycleEvent(page, "memsphere:view-poll-settled", "activity");
+    await page.waitForResponse((response) =>
+      response.url().includes(`/attempts/${completedAgent.attempts?.[0]?.sequence}/activity`)
+      && response.request().method() === "GET"
+    );
     assert.equal(await log.getAttribute("data-stability-marker"), "preserved");
     assert.equal(await log.evaluate((element) => element.scrollTop), settledScrollTop);
 
@@ -1065,29 +1077,6 @@ async function waitForAnimationFrames(page: import("playwright").Page, count: nu
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
   }, count);
-}
-
-async function waitForViewLifecycleEvent(
-  page: import("playwright").Page,
-  eventName: string,
-  kind: string
-): Promise<void> {
-  await page.evaluate(({ name, expectedKind }) => {
-    delete document.documentElement.dataset.memsphereViewLifecycle;
-    const lifecycleWait = new AbortController();
-    window.addEventListener(name, (event) => {
-      const detail = event instanceof CustomEvent ? event.detail : null;
-      if (detail?.kind !== expectedKind) return;
-      document.documentElement.dataset.memsphereViewLifecycle = detail.kind;
-      lifecycleWait.abort();
-    }, { signal: lifecycleWait.signal });
-    window.dispatchEvent(new CustomEvent(name, { detail: { kind: `unexpected:${expectedKind}` } }));
-    if (document.documentElement.dataset.memsphereViewLifecycle !== undefined) {
-      throw new Error("a non-matching lifecycle event consumed the waiter");
-    }
-  }, { name: eventName, expectedKind: kind });
-  await page.waitForFunction((expectedKind) =>
-    document.documentElement.dataset.memsphereViewLifecycle === expectedKind, kind);
 }
 
 async function clickAndWaitForDraftSave(

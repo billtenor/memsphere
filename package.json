@@ -32,12 +32,12 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node scripts/build-view-assets.mjs && node -e \"const fs=require('node:fs'); fs.chmodSync('dist/cli.js',0o755); fs.cpSync('src/skills','dist/skills',{recursive:true}); fs.cpSync('src/prompts/templates','dist/prompts/templates',{recursive:true})\"",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && tsc -p tsconfig.modules.json --noEmit && node --import tsx scripts/build-view-assets.mjs && node -e \"const fs=require('node:fs'); fs.chmodSync('dist/cli.js',0o755); fs.cpSync('src/skills','dist/skills',{recursive:true}); fs.cpSync('src/prompts/templates','dist/prompts/templates',{recursive:true})\"",
     "dev": "tsx src/cli.ts",
     "test": "node scripts/run-tests.mjs",
     "test:ci": "node scripts/run-tests.mjs --test-concurrency=1",
     "smoke:project": "node scripts/project-smoke.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.modules.json --noEmit",
     "validate": "npm run build",
     "security:check": "sh scripts/security-check.sh --staged",
     "security:audit": "sh scripts/security-check.sh --all",
@@ -52,6 +52,7 @@
     "cross-spawn": "^7.0.6",
     "handlebars": "^4.7.9",
     "markdown-it": "^14.3.0",
+    "semver": "^7.7.3",
     "yaml": "^2.5.1",
     "zod": "^3.23.8"
   },
@@ -59,6 +60,8 @@
     "@types/cross-spawn": "^6.0.6",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.5.4",
+    "@types/semver": "^7.7.1",
+    "esbuild": "^0.28.1",
     "husky": "^9.1.7",
     "playwright": "^1.55.1",
     "tsx": "^4.19.1",

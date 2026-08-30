@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "org.memsphere.run",
+  "version": "0.1.2",
+  "view": {
+    "entry": "./dist/view/index.js",
+    "sdk": "^1.0.0"
+  }
+}

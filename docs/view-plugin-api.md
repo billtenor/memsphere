@@ -10,9 +10,9 @@
 
 ## 当前实现状态
 
-当前 ViewHost 已实现 Plugin 默认入口、`apiVersion: 1`、`apply()`、Module 实例身份、`lifecycle`、Slot Token/Registry、注册事务，以及 `main.view` 的 keyed Mount、回滚和清理。浏览器通过 import map 将 `@memsphere/view-sdk` 解析到 Host 提供的 SDK，内置 Legacy View 已使用这条链路。
+当前 ViewHost 已实现 Plugin 默认入口、`apiVersion: 1`、`apply()`、Module 实例身份、`lifecycle`、最小 Manifest 校验、SDK SemVer 检查、独立 Bundle 动态加载、Router、Slot Token/Registry、实例级注册事务，以及 Mount 的回滚和清理。浏览器通过 import map 将 `@memsphere/view-sdk` 解析到 Host 提供的 SDK。
 
-Router、View API、I18n、Theme、Logger、其他内置 Slot、自定义子 Slot、Manifest 和用户 Module 发现仍是已确定但尚未接线的契约。当前 Plugin 在 `inject` 中请求除 `slots` 外的服务会在 `apply()` 前明确失败；这些服务接线后，应直接更新本节，不另立临时 API。
+当前可注入服务为 `slots` 和 `router`；已经接线的根 Slot 为 `navigation.primary`、`header.title`、`header.actions` 和 `main.view`。`org.memsphere.memory`、`org.memsphere.run`、`org.memsphere.settings` 三个 builtin Module 均使用同一公开入口和独立 Bundle 运行。View API、I18n、Theme、Logger、自定义子 Slot、用户 Module 发现/安装和 Project 动态组合仍未接线；Plugin 请求尚未提供的服务会在 `apply()` 前明确失败。
 
 ## Module View 入口契约
 
@@ -246,7 +246,7 @@ keyed   // 保存多个 key 的 Entry，由所有者激活某个 key
 
 ### 声明自定义子 Slot
 
-根 Slot 由 ViewHost 或内置 Home View 声明。Module 只能在自己拥有的 Mount Entry 中声明子 Slot：
+根 Slot 由 ViewHost 声明。未来的自定义子 Slot 只能位于所有者 Module 自己的 Mount Entry 内；当前 Runtime 尚未接线该能力：
 
 ```ts
 export const customerDetailActions = defineSlot<HeaderActionDescriptor>()({

@@ -2,8 +2,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { timingSafeEqual } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import MarkdownIt from "markdown-it";
 import { ZodError, type ZodIssue } from "zod";
+import { builtinModuleCatalog } from "../module/builtin-catalog.js";
+import { isViewSdkCompatible, readModuleManifest, resolveModuleViewEntry } from "../module/manifest.js";
 import { archiveRun } from "../archive/store.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
 import { agentActivityDelta, readAgentActivitySnapshot } from "../acp/activity.js";
@@ -99,10 +102,10 @@ import {
   type RunStep
 } from "../run/store.js";
 import {
-  legacyViewBundlePath,
   renderViewHostHtml,
   viewRuntimeBundlePath,
-  viewSdkBundlePath
+  viewSdkBundlePath,
+  type ViewHostBootInstance
 } from "../view/host.js";
 import {
   localizeAcpProviderDefinition,
@@ -304,11 +307,6 @@ async function handleRequest(
   const { memoryRoot, runsRoot } = config;
   const archiveRoot = config.archiveRoot;
 
-  if (request.method === "GET" && url.pathname === legacyViewBundlePath) {
-    sendJavaScript(response, await readLegacyViewBundle());
-    return;
-  }
-
   if (request.method === "GET" && url.pathname === viewSdkBundlePath) {
     sendJavaScript(response, await readCompiledBrowserModule(compiledViewSdkUrl, sourceViewSdkUrl));
     return;
@@ -316,6 +314,12 @@ async function handleRequest(
 
   if (request.method === "GET" && url.pathname === viewRuntimeBundlePath) {
     sendJavaScript(response, await readCompiledBrowserModule(compiledViewRuntimeUrl, sourceViewRuntimeUrl));
+    return;
+  }
+
+  const builtinAsset = builtinModuleAsset(url.pathname);
+  if (request.method === "GET" && builtinAsset) {
+    sendJavaScript(response, await readBuiltinViewBundle(builtinAsset.packageDirectory, builtinAsset.moduleId));
     return;
   }
 
@@ -339,7 +343,7 @@ async function handleRequest(
   }
 
   if (request.method === "GET" && isViewPagePath(url.pathname)) {
-    sendHtml(response, renderViewHostHtml(config.language));
+    sendHtml(response, renderViewHostHtml(config.language, await builtinViewInstances(config)));
     return;
   }
 
@@ -2415,26 +2419,67 @@ function sendHtml(response: ServerResponse, body: string): void {
   response.end(body);
 }
 
-const compiledLegacyViewBundleUrl = new URL("../view/legacy-view.js", import.meta.url);
 const compiledViewSdkUrl = new URL("../view/view-sdk.js", import.meta.url);
 const compiledViewRuntimeUrl = new URL("../view/view-runtime.js", import.meta.url);
 const sourceViewSdkUrl = new URL("../view/view-sdk.ts", import.meta.url);
 const sourceViewRuntimeUrl = new URL("../view/view-runtime.ts", import.meta.url);
 
-async function readLegacyViewBundle(): Promise<string> {
+const viewSdkVersion = "1.0.0";
+
+function builtinAssetPath(moduleId: string): string {
+  return `/assets/modules/${encodeURIComponent(moduleId)}/index.js`;
+}
+
+function builtinModuleAsset(pathname: string) {
+  return builtinModuleCatalog.find(entry => builtinAssetPath(entry.moduleId) === pathname);
+}
+
+async function builtinViewInstances(config: MemsphereConfig): Promise<readonly ViewHostBootInstance[]> {
+  return Promise.all(builtinModuleCatalog.map(async entry => {
+    const { manifest } = await readBuiltinViewManifest(entry.packageDirectory, entry.moduleId);
+    return {
+      pluginPath: builtinAssetPath(entry.moduleId),
+      routeGrants: entry.routes,
+      module: {
+        projectId: config.project?.name ?? "memsphere",
+        moduleId: entry.moduleId,
+        moduleVersion: manifest.version,
+        instanceId: entry.instanceId
+      }
+    };
+  }));
+}
+
+async function readBuiltinViewManifest(packageDirectory: string, expectedModuleId: string) {
+  const packageUrl = import.meta.url.endsWith(".ts")
+    ? new URL(`../../modules/${packageDirectory}/`, import.meta.url)
+    : new URL(`../modules/${packageDirectory}/`, import.meta.url);
+  const manifest = await readModuleManifest(fileURLToPath(new URL("module.json", packageUrl)));
+  if (manifest.id !== expectedModuleId) throw new Error(`Builtin Module id does not match catalog: ${expectedModuleId}`);
+  if (!isViewSdkCompatible(manifest, viewSdkVersion)) throw new Error(`Builtin Module requires incompatible View SDK: ${manifest.view.sdk}`);
+  return { manifest, packageUrl };
+}
+
+async function readBuiltinViewBundle(packageDirectory: string, expectedModuleId: string): Promise<string> {
+  const { manifest, packageUrl } = await readBuiltinViewManifest(packageDirectory, expectedModuleId);
+  const compiledPath = resolveModuleViewEntry(fileURLToPath(packageUrl), manifest);
   try {
-    const bundle = await readFile(compiledLegacyViewBundleUrl, "utf8");
-    if (!bundle.trim()) throw new Error(`legacy View bundle is empty: ${compiledLegacyViewBundleUrl.pathname}`);
+    const bundle = await readFile(compiledPath, "utf8");
+    if (!bundle.trim()) throw new Error(`Builtin View bundle is empty: ${compiledPath}`);
     return bundle;
   } catch (error) {
-    if (
-      import.meta.url.endsWith(".ts")
-      && error && typeof error === "object" && "code" in error && error.code === "ENOENT"
-    ) {
-      const { legacyViewBundle } = await import("../view/browser.js");
-      return legacyViewBundle;
-    }
-    throw error;
+    if (!(import.meta.url.endsWith(".ts") && error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error;
+    const [{ build }, source] = await Promise.all([
+      import("esbuild"),
+      Promise.resolve(new URL(`../../modules/${packageDirectory}/adapter/view/index.ts`, import.meta.url))
+    ]);
+    const result = await build({
+      entryPoints: [source.pathname], bundle: true, write: false, format: "esm", platform: "browser",
+      target: "es2022", external: ["@memsphere/view-sdk"], logLevel: "silent"
+    });
+    const bundle = result.outputFiles[0]?.text;
+    if (!bundle?.trim()) throw new Error(`Builtin View source bundle is empty: ${source.pathname}`);
+    return bundle;
   }
 }
 
@@ -2470,16 +2515,18 @@ function sendJavaScript(response: ServerResponse, body: string): void {
 }
 
 export function isViewPagePath(pathname: string): boolean {
-  if (["/", "/memories", "/market", "/tasks"].includes(pathname)) return true;
-  if (/^\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
-  if (/^\/projects\/[^/]+\/memories$/.test(pathname)) return true;
-  if (/^\/projects\/[^/]+\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
-  if (/^\/projects\/[^/]+\/market$/.test(pathname)) return true;
-  if (/^\/projects\/[^/]+\/changes\/[^/]+$/.test(pathname)) return true;
-  if (/^\/tasks\/[^/]+$/.test(pathname)) return true;
-  if (/^\/tasks\/[^/]+\/artifact-reviews\/[^/]+$/.test(pathname)) return true;
-  if (/^\/settings\/[^/]+$/.test(pathname)) return true;
-  return false;
+  return builtinModuleCatalog.some(module => module.routes.some(route => (
+    [route.path, ...(route.aliases ?? [])].some(pattern => matchesViewRoute(pattern, pathname))
+  )));
+}
+
+function matchesViewRoute(pattern: string, pathname: string): boolean {
+  if (pattern === "/" || pathname === "/") return pattern === pathname;
+  const expected = pattern.split("/").filter(Boolean);
+  const actual = pathname.split("/").filter(Boolean);
+  return expected.length === actual.length && expected.every((segment, index) => (
+    segment.startsWith(":") ? Boolean(actual[index]) : segment === actual[index]
+  ));
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {

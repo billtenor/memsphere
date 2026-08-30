@@ -38,6 +38,12 @@ Composes and renders the Slot Tree from the URL
 
 ViewHost owns loading, contexts, composition, failure isolation, and cleanup. A Plugin declares what its Module instance contributes to the interface.
 
+## Current Implementation
+
+The current implementation discovers `org.memsphere.memory`, `org.memsphere.run`, and `org.memsphere.settings` from a fixed builtin catalog. It validates each `module.json` minimum View slice, package-contained entry path, and SDK SemVer range before dynamically importing three independent ESM Bundles. Instances share Route and Slot registries while retaining separate Contexts, transactions, diagnostics, and cleanup scopes.
+
+The wired Context services are `slots` and `router`; the wired root Slots are `navigation.primary`, `header.title`, `header.actions`, and `main.view`. Stable Shell, Project selector, Core Settings/status entries, and diagnostics remain ViewHost responsibilities. View API, I18n, Theme, Logger, custom child Slots, user Module discovery/installation, dynamic Project composition, Home, and public overlay remain future capabilities.
+
 ## Packaging and Dynamic Loading
 
 The View Plugin ships with its Module:
@@ -111,7 +117,7 @@ A Slot is an explicitly opened UI extension point. Its Token carries:
 - TypeScript Value and Key types;
 - a runtime validator.
 
-Root Slots are declared by ViewHost or the built-in Home View. A Module cannot create a new global root Slot, but it may declare child Slots within a Mount Entry it owns and export Tokens for dependent Modules.
+Root Slots are declared by ViewHost. A future builtin Module that owns an aggregate page may declare child Slots inside that page, but Modules cannot create new global root Slots. Custom child Slots are not wired into the current Runtime.
 
 ```text
 ViewHost root Slot
