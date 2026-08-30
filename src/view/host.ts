@@ -1,6 +1,8 @@
 import { formatViewMessage, resolveViewLocale, viewMessages, type ViewLocale } from "./locales/index.js";
 
 export const legacyViewBundlePath = "/assets/legacy-view.js";
+export const viewSdkBundlePath = "/assets/view-sdk.js";
+export const viewRuntimeBundlePath = "/assets/view-runtime.js";
 
 export function renderViewHostHtml(locale: ViewLocale | unknown = "zh-CN"): string {
   const resolved = resolveViewLocale(locale);
@@ -9,7 +11,18 @@ export function renderViewHostHtml(locale: ViewLocale | unknown = "zh-CN"): stri
     messages: viewMessages(resolved),
     loading: formatViewMessage(resolved, "common.loading"),
     failureTitle: formatViewMessage(resolved, "fatal.title"),
-    bundlePath: legacyViewBundlePath
+    pluginPath: legacyViewBundlePath,
+    runtimePath: viewRuntimeBundlePath,
+    mainViewKey: "legacy",
+    module: {
+      projectId: "memsphere",
+      moduleId: "org.memsphere.legacy-view",
+      moduleVersion: "0.1.2",
+      instanceId: "legacy"
+    }
+  });
+  const importMap = serializeForHtml({
+    imports: { "@memsphere/view-sdk": viewSdkBundlePath }
   });
 
   return `<!doctype html>
@@ -29,6 +42,7 @@ export function renderViewHostHtml(locale: ViewLocale | unknown = "zh-CN"): stri
 <body>
   <main id="memsphere-view-root" class="view-host-status" aria-live="polite">${escapeHtml(formatViewMessage(resolved, "common.loading"))}</main>
   <script id="memsphere-view-boot" type="application/json">${boot}</script>
+  <script type="importmap">${importMap}</script>
   <script type="module">
     const root = document.getElementById("memsphere-view-root");
     const bootNode = document.getElementById("memsphere-view-boot");
@@ -48,10 +62,24 @@ export function renderViewHostHtml(locale: ViewLocale | unknown = "zh-CN"): stri
     };
 
     try {
-      const module = await import(boot.bundlePath);
-      if (typeof module.mount !== "function") throw new Error("View bundle does not export mount()");
+      const [runtimeModule, pluginModule] = await Promise.all([
+        import(boot.runtimePath),
+        import(boot.pluginPath)
+      ]);
+      if (typeof runtimeModule.startViewPlugin !== "function") {
+        throw new Error("View runtime does not export startViewPlugin()");
+      }
       root.className = "";
-      await module.mount({ root, locale: boot.locale, messages: boot.messages });
+      const activePlugin = await runtimeModule.startViewPlugin({
+        plugin: pluginModule.default,
+        config: { locale: boot.locale, messages: boot.messages },
+        module: boot.module,
+        root,
+        mainViewKey: boot.mainViewKey
+      });
+      window.addEventListener("pagehide", () => {
+        void activePlugin.dispose().catch(error => console.error("View Plugin cleanup failed", error));
+      }, { once: true });
       document.documentElement.dataset.viewHostState = "ready";
     } catch (error) {
       fail(error);

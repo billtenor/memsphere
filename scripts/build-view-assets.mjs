@@ -5,7 +5,13 @@ const outputUrl = new URL("../dist/view/legacy-view.js", import.meta.url);
 const browser = await import(browserModuleUrl.href);
 const bundle = browser.legacyViewBundle;
 
-if (typeof bundle !== "string" || !bundle.trim() || !bundle.includes("export function mount(options)")) {
+if (
+  typeof bundle !== "string"
+  || !bundle.trim()
+  || !bundle.includes('from "@memsphere/view-sdk"')
+  || !bundle.includes("export default defineViewPlugin(")
+  || !bundle.includes("context.slots.register(slots.mainView")
+) {
   throw new Error("legacy View bundle generator returned an invalid module");
 }
 

@@ -98,7 +98,12 @@ import {
   type RunState,
   type RunStep
 } from "../run/store.js";
-import { legacyViewBundlePath, renderViewHostHtml } from "../view/host.js";
+import {
+  legacyViewBundlePath,
+  renderViewHostHtml,
+  viewRuntimeBundlePath,
+  viewSdkBundlePath
+} from "../view/host.js";
 import {
   localizeAcpProviderDefinition,
   localizeAcpProviderDetection,
@@ -301,6 +306,16 @@ async function handleRequest(
 
   if (request.method === "GET" && url.pathname === legacyViewBundlePath) {
     sendJavaScript(response, await readLegacyViewBundle());
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === viewSdkBundlePath) {
+    sendJavaScript(response, await readCompiledBrowserModule(compiledViewSdkUrl, sourceViewSdkUrl));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === viewRuntimeBundlePath) {
+    sendJavaScript(response, await readCompiledBrowserModule(compiledViewRuntimeUrl, sourceViewRuntimeUrl));
     return;
   }
 
@@ -2401,6 +2416,10 @@ function sendHtml(response: ServerResponse, body: string): void {
 }
 
 const compiledLegacyViewBundleUrl = new URL("../view/legacy-view.js", import.meta.url);
+const compiledViewSdkUrl = new URL("../view/view-sdk.js", import.meta.url);
+const compiledViewRuntimeUrl = new URL("../view/view-runtime.js", import.meta.url);
+const sourceViewSdkUrl = new URL("../view/view-sdk.ts", import.meta.url);
+const sourceViewRuntimeUrl = new URL("../view/view-runtime.ts", import.meta.url);
 
 async function readLegacyViewBundle(): Promise<string> {
   try {
@@ -2414,6 +2433,28 @@ async function readLegacyViewBundle(): Promise<string> {
     ) {
       const { legacyViewBundle } = await import("../view/browser.js");
       return legacyViewBundle;
+    }
+    throw error;
+  }
+}
+
+async function readCompiledBrowserModule(compiledUrl: URL, sourceUrl: URL): Promise<string> {
+  try {
+    const source = await readFile(compiledUrl, "utf8");
+    if (!source.trim()) throw new Error(`View browser module is empty: ${compiledUrl.pathname}`);
+    return source;
+  } catch (error) {
+    if (
+      import.meta.url.endsWith(".ts")
+      && error && typeof error === "object" && "code" in error && error.code === "ENOENT"
+    ) {
+      const [{ transpileModule, ModuleKind, ScriptTarget }, source] = await Promise.all([
+        import("typescript"),
+        readFile(sourceUrl, "utf8")
+      ]);
+      return transpileModule(source, {
+        compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 }
+      }).outputText;
     }
     throw error;
   }
