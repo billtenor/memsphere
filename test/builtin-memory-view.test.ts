@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { build } from "esbuild";
@@ -100,7 +101,7 @@ test("Memory builtin renders Market status and opens an importing ChangeSet", as
 
 async function buildMemoryBundle(): Promise<string> {
   const result = await build({
-    entryPoints: [new URL("../modules/org.memsphere.memory/adapter/view/index.ts", import.meta.url).pathname],
+    entryPoints: [fileURLToPath(new URL("../modules/org.memsphere.memory/adapter/view/index.ts", import.meta.url))],
     bundle: true,
     write: false,
     format: "esm",

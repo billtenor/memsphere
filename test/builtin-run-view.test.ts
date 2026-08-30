@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { build } from "esbuild";
 import { chromium } from "playwright";
@@ -73,7 +74,7 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
 });
 
 async function buildRunBundle(): Promise<string> {
-  const result = await build({ entryPoints: [new URL("../modules/org.memsphere.run/adapter/view/index.ts", import.meta.url).pathname], bundle: true, write: false, format: "esm", platform: "browser", target: "es2022", external: ["@memsphere/view-sdk"], logLevel: "silent" });
+  const result = await build({ entryPoints: [fileURLToPath(new URL("../modules/org.memsphere.run/adapter/view/index.ts", import.meta.url))], bundle: true, write: false, format: "esm", platform: "browser", target: "es2022", external: ["@memsphere/view-sdk"], logLevel: "silent" });
   return result.outputFiles[0]?.text ?? "";
 }
 async function browserModule(path: string): Promise<string> { const source=await readFile(new URL(path,import.meta.url),"utf8");return transpileModule(source,{compilerOptions:{module:ModuleKind.ESNext,target:ScriptTarget.ES2022}}).outputText; }

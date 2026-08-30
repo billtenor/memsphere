@@ -57,7 +57,7 @@ test("each builtin View entry is a separately compiled Plugin source", async () 
 
 test("Memory summaries do not reuse full Memory readers", async () => {
   const source = await readFile(new URL("../src/commands/view.ts", import.meta.url), "utf8");
-  const body = source.match(/async function loadMemorySummaryPayload[\s\S]*?\n}\n\nasync function loadMemoryDetailPayload/)?.[0] ?? "";
+  const body = source.match(/async function loadMemorySummaryPayload[\s\S]*?\r?\n}\r?\n\r?\nasync function loadMemoryDetailPayload/)?.[0] ?? "";
   assert.match(body, /readMemoryFileSummary/);
   assert.doesNotMatch(body, /loadMemoryPayload|readMemoryFile\(/);
 });

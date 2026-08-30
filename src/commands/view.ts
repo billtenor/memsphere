@@ -2474,7 +2474,7 @@ async function readBuiltinViewBundle(packageDirectory: string, expectedModuleId:
       Promise.resolve(new URL(`../../modules/${packageDirectory}/adapter/view/index.ts`, import.meta.url))
     ]);
     const result = await build({
-      entryPoints: [source.pathname], bundle: true, write: false, format: "esm", platform: "browser",
+      entryPoints: [fileURLToPath(source)], bundle: true, write: false, format: "esm", platform: "browser",
       target: "es2022", external: ["@memsphere/view-sdk"], logLevel: "silent"
     });
     const bundle = result.outputFiles[0]?.text;
