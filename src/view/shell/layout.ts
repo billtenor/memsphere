@@ -59,7 +59,7 @@ export const viewShellStyles = `
   .view-shell-sidebar { display: flex; flex-direction: column; }
   .view-shell-sidebar [data-view-slot="navigation.primary"] { flex: 0 0 auto; }
   .view-shell-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid #d9ded8; }
-  .view-shell-settings { width: 100%; border: 0; border-radius: 6px; padding: 8px 10px; background: transparent; color: #222629; text-align: left; }
+  .view-shell-settings { width: 100%; min-height: 36px; box-sizing: border-box; border: 0; border-radius: 6px; padding: 8px 10px; background: transparent; color: #222629; text-align: left; }
   .view-shell-settings:hover { background: #eef1ed; }
   .view-shell-service-status { margin: 9px 10px 0; color: #6c7379; font-size: 11px; }
   .view-shell-service-status::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: #37a45a; }
