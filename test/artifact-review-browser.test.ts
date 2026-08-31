@@ -691,6 +691,7 @@ flow:
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await page.goto(`http://127.0.0.1:${address.port}`);
     await page.getByRole("button", { name: "运行", exact: true }).click();
+    await page.locator(".run-card-main").first().click();
     const reviewToggle = page.locator("#review-toggle");
     await page.waitForFunction(() =>
       document.getElementById("review-toggle")?.getAttribute("aria-controls") === "artifact-review-modal"
@@ -878,6 +879,7 @@ flow:
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await page.goto(`http://127.0.0.1:${address.port}`);
     await page.getByRole("button", { name: "运行", exact: true }).click();
+    await page.locator(".run-card-main").first().click();
     await page.getByRole("button", { name: /^产物评审 1\/2$/ }).click();
     const modal = page.locator("#artifact-review-modal");
     let materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });

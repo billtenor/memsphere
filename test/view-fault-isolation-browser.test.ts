@@ -37,7 +37,7 @@ test("a failed Run detail remains local to the Run page instead of failing ViewH
   await withBuiltinFixture(["org.memsphere.run"], async ({ page, origin }) => {
     await page.goto(`${origin}/tasks`);
     await assertHostReady(page);
-    await page.getByRole("button", { name: /Invalid historical Run/ }).waitFor();
+    await page.getByRole("button", { name: /Invalid historical Run/ }).click();
     await page.locator(".run-error").waitFor();
     assert.match(await page.locator(".run-error").textContent() ?? "", /invalid persisted Run detail/);
     assert.equal(await page.locator('html[data-view-host-state="failed"]').count(), 0);
