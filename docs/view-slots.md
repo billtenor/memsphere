@@ -2,7 +2,7 @@
 
 简体中文 | [English](./view-slots.en.md)
 
-本文定义 Memsphere View 的 Slot Catalog。它是 View Host、内置 Module 与用户 Module 之间的界面组合基线，只描述公开及 Core 保留 Slot 的语义、所有权和贡献约束。第一次开发扩展请阅读 [Memsphere View Plugin Guide](./view-plugin-guide.md)，架构边界见 [Memsphere View Plugin Design](./view-plugin-design.md)，精确 TypeScript 接口见 [Memsphere View Plugin API](./view-plugin-api.md)。
+本文是 Memsphere View Slot Catalog 的唯一细节来源。它定义公开及 Core 保留 Slot 的名称、语义、所有权、贡献约束和当前接线状态；其他文档只说明各自关心的架构或 API 原则并链接到这里，不重复维护 Catalog。第一次开发扩展请阅读 [Memsphere View Plugin Guide](./view-plugin-guide.md)，架构边界见 [Memsphere View Plugin Design](./view-plugin-design.md)，精确 TypeScript 接口见 [Memsphere View Plugin API](./view-plugin-api.md)。
 
 ## 设计原则
 

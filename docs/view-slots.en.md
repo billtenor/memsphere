@@ -2,7 +2,7 @@
 
 [简体中文](./view-slots.md) | English
 
-This document defines the Memsphere View Slot Catalog. It is the UI composition baseline shared by ViewHost, built-in Modules, and user Modules. It describes only the semantics, ownership, and contribution constraints of public and Core-reserved Slots. For a first extension, read the [Memsphere View Plugin Guide](./view-plugin-guide.en.md). For architecture boundaries, see [Memsphere View Plugin Design](./view-plugin-design.en.md). For exact TypeScript interfaces, see [Memsphere View Plugin API](./view-plugin-api.en.md).
+This document is the single detailed source for the Memsphere View Slot Catalog. It defines the names, semantics, ownership, contribution constraints, and current wiring status of public and Core-reserved Slots. Other documents describe only the architecture or API principles relevant to their purpose and link here instead of duplicating the Catalog. For a first extension, read the [Memsphere View Plugin Guide](./view-plugin-guide.en.md). For architecture boundaries, see [Memsphere View Plugin Design](./view-plugin-design.en.md). For exact TypeScript interfaces, see [Memsphere View Plugin API](./view-plugin-api.en.md).
 
 ## Design Principles
 

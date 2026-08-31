@@ -12,7 +12,7 @@ This document defines the long-term public interface and explicitly records curr
 
 ViewHost currently implements the default Plugin entrypoint, `apiVersion: 1`, `apply()`, Module instance identity, `lifecycle`, minimum Manifest validation, SDK SemVer checks, independent Bundle loading, Router, Slot Tokens and Registry, per-instance registration transactions, rollback, and Mount cleanup. An import map resolves `@memsphere/view-sdk` to the Host-provided browser SDK.
 
-The currently injectable services are `slots` and `router`, and all ten root Slots—`navigation.primary`, `header.title`, `header.actions`, `header.account`, `sidebar.footer`, `home.attention`, `home.continue`, `home.modules`, `main.view`, and `overlay`—are wired. `header.actions`, `home.attention`, and `home.continue` support lifecycle-bound live `upsert()` operations. `overlay` supports Host-managed background Route projection, masking, focus, dismissal, and a local failure boundary. The three builtin Modules—`org.memsphere.memory`, `org.memsphere.run`, and `org.memsphere.settings`—all use this public entrypoint and independent Bundles. View API, I18n, Theme, Logger, custom child Slots, user Module discovery/installation, and dynamic Project composition remain unwired. A Plugin requesting an unavailable service fails explicitly before `apply()`.
+The currently injectable services are `slots` and `router`. The complete root Slot list, product semantics, and current wiring status are maintained in the [View Slot List](./view-slots.en.md). Some aggregate Slots support the restricted live `upsert()` contract defined below, while page overlays support Host-managed background Route projection and local failure isolation. All three built-in Modules use the same public entrypoint and independent Bundles. View API, I18n, Theme, Logger, custom child Slots, user Module discovery/installation, and dynamic Project composition remain unwired. A Plugin requesting an unavailable service fails explicitly before `apply()`.
 
 ## Module View Entrypoint Contract
 
@@ -218,18 +218,9 @@ TypeScript does not replace runtime validation. The SDK supplies validators for 
 import { slots } from "@memsphere/view-sdk";
 
 slots.headerTitle;
-slots.headerActions;
-slots.headerAccount;
-slots.navigationPrimary;
-slots.sidebarFooter;
-slots.homeAttention;
-slots.homeContinue;
-slots.homeModules;
-slots.mainView;
-slots.overlay;
 ```
 
-Their exact names, ownership, and semantics are defined by [View Slot List](./view-slots.en.md).
+The SDK exports the current Catalog's root Tokens through `slots`. The complete export list, ownership, and content semantics are maintained only in the [View Slot List](./view-slots.en.md); the line above demonstrates access and is not a second Catalog.
 
 ### Slot Kinds
 

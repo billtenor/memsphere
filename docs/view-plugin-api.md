@@ -12,7 +12,7 @@
 
 当前 ViewHost 已实现 Plugin 默认入口、`apiVersion: 1`、`apply()`、Module 实例身份、`lifecycle`、最小 Manifest 校验、SDK SemVer 检查、独立 Bundle 动态加载、Router、Slot Token/Registry、实例级注册事务，以及 Mount 的回滚和清理。浏览器通过 import map 将 `@memsphere/view-sdk` 解析到 Host 提供的 SDK。
 
-当前可注入服务为 `slots` 和 `router`；Catalog 中 `navigation.primary`、`header.title`、`header.actions`、`header.account`、`sidebar.footer`、`home.attention`、`home.continue`、`home.modules`、`main.view` 与 `overlay` 10 个根 Slot 均已接线。`header.actions`、`home.attention` 与 `home.continue` 支持实例生命周期内的 live `upsert()`；`overlay` 支持 Host 管理的背景 Route 投影、遮罩、焦点、关闭和局部故障边界。`org.memsphere.memory`、`org.memsphere.run`、`org.memsphere.settings` 三个 builtin Module 均使用同一公开入口和独立 Bundle 运行。View API、I18n、Theme、Logger、自定义子 Slot、用户 Module 发现/安装和 Project 动态组合仍未接线；Plugin 请求尚未提供的服务会在 `apply()` 前明确失败。
+当前可注入服务为 `slots` 和 `router`；根 Slot 的完整清单、产品语义和当前接线状态统一见 [View Slot List](./view-slots.md)。部分聚合 Slot 支持下文定义的受限 live `upsert()`，页面浮层支持 Host 管理的背景 Route 投影与局部故障边界。三个 builtin Module 均使用同一公开入口和独立 Bundle 运行。View API、I18n、Theme、Logger、自定义子 Slot、用户 Module 发现/安装和 Project 动态组合仍未接线；Plugin 请求尚未提供的服务会在 `apply()` 前明确失败。
 
 ## Module View 入口契约
 
@@ -223,18 +223,9 @@ TypeScript 类型不能替代运行时校验。内置 Token 的 validator 由 SD
 import { slots } from "@memsphere/view-sdk";
 
 slots.headerTitle;
-slots.headerActions;
-slots.headerAccount;
-slots.navigationPrimary;
-slots.sidebarFooter;
-slots.homeAttention;
-slots.homeContinue;
-slots.homeModules;
-slots.mainView;
-slots.overlay;
 ```
 
-这些 Token 的准确名称、所有者和内容语义由 [View Slot List](./view-slots.md) 定义。
+SDK 通过 `slots` 导出当前 Catalog 中的根 Token。完整导出清单、所有者和内容语义只在 [View Slot List](./view-slots.md) 维护；上面只展示访问方式，不构成第二份 Catalog。
 
 ### Slot kind
 

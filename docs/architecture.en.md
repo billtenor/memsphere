@@ -138,7 +138,7 @@ modules/
 
 Build produces `dist/modules/<module-id>/dist/view/index.js` independently for each Module; no Legacy Bundle aggregates the three business interfaces. Core's builtin catalog declares only trusted package roots, instances, and reserved route grants. All three Modules pass through the same Manifest validation, SDK compatibility check, Bundle import, instance Context, `apply()` transaction, and Slot/Route commit.
 
-ViewHost currently wires Router, all 10 root Slots, the Stable Shell, Home, and the shared Overlay. Artifact Review is composed through `overlay` above its Run-detail background. One failed instance produces a local diagnostic, and Project switching may reconstruct the complete page. User Module repository discovery/installation, dynamic Project Composition, custom child Slots, the CLI Module Host, and backend domain-directory migration remain unimplemented.
+ViewHost currently wires Router, the root Slot Catalog, the Stable Shell, Home, and shared overlay support. One failed instance produces a local diagnostic, and Project switching may reconstruct the complete page. The authoritative Slot list, product semantics, and current wiring status are maintained in the [Memsphere View Slot List](./view-slots.en.md). User Module repository discovery/installation, dynamic Project Composition, custom child Slots, the CLI Module Host, and backend domain-directory migration remain unimplemented.
 
 ## Three-Layer Module Structure
 
