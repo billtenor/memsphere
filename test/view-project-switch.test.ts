@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { chromium } from "playwright";
 import type { MemsphereConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
@@ -50,16 +51,19 @@ test("View switches Projects without retaining the previous Project Memory data"
       server.listen(0, "127.0.0.1", resolve);
     });
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const browser = await chromium.launch({ headless: true });
     try {
       assert.deepEqual(await memoryNames(origin), ["alpha-memory"]);
-      const selected = await fetch(`${origin}/api/projects/select`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "beta" })
-      });
-      assert.equal(selected.status, 200);
+      const page = await browser.newPage();
+      await page.goto(`${origin}/memories`, { waitUntil: "networkidle" });
+      await page.locator("#view-shell-project-trigger").click();
+      await page.locator("#view-shell-project-menu").getByRole("option", { name: "beta", exact: true }).click();
+      await page.waitForLoadState("networkidle");
+      await page.getByRole("button", { name: /beta-memory/ }).waitFor();
+      assert.equal(new URL(page.url()).pathname, "/memories");
       assert.deepEqual(await memoryNames(origin), ["beta-memory"]);
     } finally {
+      await browser.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   } finally {

@@ -28,9 +28,13 @@
 | `main.view` | View Host | 内置及用户 Module | 按路由 key 选择 | 页面主体。可以注册多个 View，但一次只挂载当前路由选中的一个；Module 可以在自己的 View 内继续声明子 Slot。 |
 | `overlay` | View Host | Memsphere Core、内置及用户 Module | 按浮层 key 选择 | 抽屉、对话框和评审浮窗等临时交互。可以注册多个浮层，但控制器同一时刻只激活一个；View Host 负责遮罩、焦点、关闭行为和故障隔离。 |
 
-当前 Catalog 定义 10 个 Slot。新增 Slot 时直接更新本列表。
+当前 Catalog 定义 10 个长期 Slot。新增 Slot 时直接更新本列表。
 
-当前 Runtime 已接线 `main.view`。其余 9 个 Slot 的产品语义和所有权已经确定，但尚未接入 Host 或迁移现有业务界面；后续接线时直接更新本段状态，不创建另一份阶段性 Slot List。
+## 当前实现状态
+
+当前 SDK 与 ViewHost 已接线 `navigation.primary`、`header.title`、`header.actions` 和 `main.view`，三个 builtin Module 均通过这四个 Slot 接入同一个 Slot Tree。
+
+`header.account`、`sidebar.footer`、三个 Home Slot 与 `overlay` 的产品语义和所有权已经确定，但尚未接线。当前 Shell 暂时固定管理账户状态、Footer 设置与服务状态；Artifact Review 暂时使用 Run Module 自己的 portal 浮层。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
 
 ## Slot 结构
 

@@ -144,6 +144,27 @@ Memsphere View 是一个 Home 级通用管理界面，用于管理 Project、Mem
 
 基础 Shell、Project 切换和故障诊断属于 View Host，不允许 Module 替换。
 
+### 当前 View 实现
+
+当前仓库已经按上述边界落地三个 builtin Module：
+
+```text
+modules/
+├── org.memsphere.memory/
+│   ├── module.json
+│   └── adapter/view/
+├── org.memsphere.run/
+│   ├── module.json
+│   └── adapter/view/
+└── org.memsphere.settings/
+    ├── module.json
+    └── adapter/view/
+```
+
+构建分别生成 `dist/modules/<module-id>/dist/view/index.js`，不存在聚合三块业务界面的 Legacy Bundle。Core 中的 builtin catalog 只声明可信包根、实例和保留路由授权；三个 Module 统一经过 Manifest 校验、SDK 兼容检查、Bundle import、实例 Context、`apply()` 事务和 Slot/Route commit。
+
+ViewHost 当前接通 Router 以及 `navigation.primary`、`header.title`、`header.actions`、`main.view`。单实例失败只产生局部诊断，Project 切换允许整页重组。用户 Module 仓库发现、安装、动态 Project Composition、CLI Module Host 和后端领域目录迁移尚未实现。
+
 ## Module 的三层代码结构
 
 Module 采用三个同心层次：Domain、Application 和 Adapter。

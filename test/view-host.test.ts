@@ -7,60 +7,66 @@ import { chromium, type Page } from "playwright";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import { createViewServer } from "../src/commands/view.js";
 import type { MemsphereConfig } from "../src/config.js";
-import { legacyViewBundle } from "../src/view/browser.js";
+import { builtinModuleCatalog } from "../src/module/builtin-catalog.js";
 import {
-  legacyViewBundlePath,
   renderViewHostHtml,
   viewRuntimeBundlePath,
-  viewSdkBundlePath
+  viewSdkBundlePath,
+  type ViewHostBootInstance
 } from "../src/view/host.js";
+
+const syntheticBundlePath = "/assets/modules/org.example.synthetic/index.js";
+const syntheticRouteKey = "org.example.synthetic@1.0.0:synthetic:route:index";
 
 const viewSdkBundle = await transpileBrowserModule("../src/view/view-sdk.ts");
 const viewRuntimeBundle = await transpileBrowserModule("../src/view/view-runtime.ts");
 
-test("ViewHost document delegates all business UI to one external bundle", () => {
-  const html = renderViewHostHtml("en");
+test("ViewHost document boots the three builtin Module instances in catalog order", () => {
+  const instances = builtinModuleCatalog.map(entry => bootInstance(
+    entry.moduleId,
+    entry.instanceId,
+    `/assets/modules/${entry.moduleId}/index.js`,
+    entry.routes
+  ));
+  const html = renderViewHostHtml("en", instances);
   const bootSource = html.match(/<script id="memsphere-view-boot" type="application\/json">([\s\S]*?)<\/script>/)?.[1];
   assert(bootSource);
   const boot = JSON.parse(bootSource);
 
   assert.equal(boot.locale, "en");
-  assert.equal(boot.pluginPath, legacyViewBundlePath);
   assert.equal(boot.runtimePath, viewRuntimeBundlePath);
-  assert.equal(boot.mainViewKey, "legacy");
+  assert.deepEqual(
+    boot.instances.map((instance: { module: { moduleId: string } }) => instance.module.moduleId),
+    builtinModuleCatalog.map(entry => entry.moduleId)
+  );
+  assert.deepEqual(boot.instances.map((instance: { routeGrants: unknown }) => instance.routeGrants), builtinModuleCatalog.map(entry => entry.routes));
   assert.equal(boot.messages["common.refresh"], "Refresh");
   assert.match(html, /id="memsphere-view-root"/);
   assert.match(html, /"@memsphere\/view-sdk":"\/assets\/view-sdk\.js"/);
-  assert.match(html, /import\(boot\.pluginPath\)/);
-  assert.match(html, /runtimeModule\.startViewPlugin/);
-  assert.doesNotMatch(html, /id="project-memory-tab"/);
-  assert.doesNotMatch(html, /fetch\("\/api\/memories"\)/);
+  assert.match(html, /import\(instance\.pluginPath\)/);
+  assert.match(html, /runtimeModule\.startViewHost/);
+  assert.doesNotMatch(html, /legacy-view\.js|org\.memsphere\.legacy-view/);
 });
 
-test("Legacy View bundle default-exports one Plugin that contributes main.view", () => {
-  assert.match(legacyViewBundle, /from "@memsphere\/view-sdk"/);
-  assert.equal((legacyViewBundle.match(/export default defineViewPlugin\(/g) ?? []).length, 1);
-  assert.match(legacyViewBundle, /context\.slots\.register\(slots\.mainView/);
-  assert.doesNotMatch(legacyViewBundle, /export function mount\(options\)/);
-  assert.match(legacyViewBundle, /project-memory-tab/);
-  assert.match(legacyViewBundle, /fetch\("\/api\/memories\?/);
-  assert.equal((legacyViewBundle.match(/scheduleViewTask\(\(\) => \{/g) ?? []).length, 5);
-  assert.equal((legacyViewBundle.match(/addOwnedDocumentPointerdown\(event => \{/g) ?? []).length, 5);
-});
-
-test("View server serves Host, SDK, Runtime, and Plugin without absorbing unknown assets", async () => {
+test("View server serves Host, SDK, Runtime, and all builtin bundles without serving retired assets", async () => {
   const server = createViewServer({ language: "en" } as MemsphereConfig);
   const origin = await listen(server);
   try {
     const pageResponse = await fetch(`${origin}/memories`);
     assert.equal(pageResponse.status, 200);
     assert.match(pageResponse.headers.get("content-type") ?? "", /^text\/html/);
-    assert.match(await pageResponse.text(), /data-view-host-state="loading"/);
-
-    const bundleResponse = await fetch(`${origin}${legacyViewBundlePath}`);
-    assert.equal(bundleResponse.status, 200);
-    assert.match(bundleResponse.headers.get("content-type") ?? "", /^text\/javascript/);
-    assert.match(await bundleResponse.text(), /export default defineViewPlugin\(/);
+    const host = await pageResponse.text();
+    assert.match(host, /data-view-host-state="loading"/);
+    const bootSource = host.match(/<script id="memsphere-view-boot" type="application\/json">([\s\S]*?)<\/script>/)?.[1];
+    assert(bootSource);
+    const boot = JSON.parse(bootSource);
+    assert.equal(boot.instances.length, 3);
+    for (const instance of boot.instances) {
+      const bundleResponse = await fetch(`${origin}${instance.pluginPath}`);
+      assert.equal(bundleResponse.status, 200, instance.pluginPath);
+      assert.match(bundleResponse.headers.get("content-type") ?? "", /^text\/javascript/);
+      assert.match(await bundleResponse.text(), /defineViewPlugin/);
+    }
 
     const sdkResponse = await fetch(`${origin}${viewSdkBundlePath}`);
     assert.equal(sdkResponse.status, 200);
@@ -68,7 +74,10 @@ test("View server serves Host, SDK, Runtime, and Plugin without absorbing unknow
 
     const runtimeResponse = await fetch(`${origin}${viewRuntimeBundlePath}`);
     assert.equal(runtimeResponse.status, 200);
-    assert.match(await runtimeResponse.text(), /export async function startViewPlugin/);
+    assert.match(await runtimeResponse.text(), /export async function startViewHost/);
+
+    const retiredResponse = await fetch(`${origin}/assets/legacy-view.js`);
+    assert.equal(retiredResponse.status, 404);
 
     const missingResponse = await fetch(`${origin}/assets/unknown-view.js`);
     assert.equal(missingResponse.status, 404);
@@ -83,7 +92,7 @@ test("ViewHost mounts a successfully imported bundle", async () => {
       apply(context) {
         context.slots.register(slots.mainView, {
           id: "page",
-          key: "legacy",
+          key: route.key,
           value: { mount({ element }) { element.innerHTML = '<p id="synthetic-mounted">mounted</p>'; } }
         });
       }
@@ -102,27 +111,19 @@ test("ViewHost mounts a successfully imported bundle", async () => {
 
 test("ViewHost shows a diagnostic when the bundle is missing", async () => {
   await withBrowserHost(undefined, async page => {
-    await page.locator('html[data-view-host-state="failed"]').waitFor();
-    assert.equal(await page.locator("#view-host-error h1").textContent(), "Failed to load Memsphere");
-    assert.ok((await page.locator("#view-host-error p").textContent())?.trim());
+    await assertModuleFailure(page, /could not be imported/i);
   });
 });
 
 test("ViewHost shows a diagnostic when the bundle cannot be imported", async () => {
   await withBrowserHost("export function mount(", async page => {
-    await page.locator('html[data-view-host-state="failed"]').waitFor();
-    assert.equal(await page.locator("#view-host-error h1").textContent(), "Failed to load Memsphere");
-    assert.ok((await page.locator("#view-host-error p").textContent())?.trim());
+    await assertModuleFailure(page, /could not be imported/i);
   });
 });
 
 test("ViewHost shows a diagnostic when the bundle has no default Plugin", async () => {
   await withBrowserHost("export const loaded = true;", async page => {
-    await page.locator('html[data-view-host-state="failed"]').waitFor();
-    assert.equal(
-      await page.locator("#view-host-error p").textContent(),
-      "View bundle does not default export a View Plugin"
-    );
+    await assertModuleFailure(page, "View bundle does not default export a View Plugin");
   });
 });
 
@@ -130,8 +131,7 @@ test("ViewHost rejects an incompatible View Plugin API before apply", async () =
   await withBrowserHost(
     'export default { apiVersion: 2, inject: [], apply() { window.__unexpectedApply = true; } };',
     async page => {
-      await page.locator('html[data-view-host-state="failed"]').waitFor();
-      assert.equal(await page.locator("#view-host-error p").textContent(), "Unsupported View Plugin API version: 2");
+      await assertModuleFailure(page, "Unsupported View Plugin API version: 2");
       assert.equal(await page.evaluate(() => (window as Window & { __unexpectedApply?: boolean }).__unexpectedApply), undefined);
     }
   );
@@ -139,13 +139,9 @@ test("ViewHost rejects an incompatible View Plugin API before apply", async () =
 
 test("ViewHost rejects a Plugin service that is not wired into the current Context", async () => {
   await withBrowserHost(
-    'export default { apiVersion: 1, inject: ["router"], apply() {} };',
+    'export default { apiVersion: 1, inject: ["api"], apply() {} };',
     async page => {
-      await page.locator('html[data-view-host-state="failed"]').waitFor();
-      assert.equal(
-        await page.locator("#view-host-error p").textContent(),
-        "View Plugin requests unsupported service: router"
-      );
+      await assertModuleFailure(page, "View Plugin requests unsupported service: api");
     }
   );
 });
@@ -154,19 +150,14 @@ test("ViewHost shows the apply error thrown by a loaded Plugin", async () => {
   await withBrowserHost(
     pluginSource('apply() { throw new Error("synthetic apply failed"); }'),
     async page => {
-      await page.locator('html[data-view-host-state="failed"]').waitFor();
-      assert.equal(await page.locator("#view-host-error p").textContent(), "synthetic apply failed");
+      await assertModuleFailure(page, "synthetic apply failed");
     }
   );
 });
 
 test("ViewHost shows a diagnostic when Plugin does not register the active main.view", async () => {
   await withBrowserHost(pluginSource("apply() {}"), async page => {
-    await page.locator('html[data-view-host-state="failed"]').waitFor();
-    assert.equal(
-      await page.locator("#view-host-error p").textContent(),
-      "View Plugin did not register main.view key: legacy"
-    );
+    await assertModuleFailure(page, `ViewHost has no main.view for key: ${syntheticRouteKey}`);
   });
 });
 
@@ -175,16 +166,12 @@ test("ViewHost rejects a conflicting keyed main.view registration atomically", a
     pluginSource(`
       apply(context) {
         const value = { mount() {} };
-        context.slots.register(slots.mainView, { id: "first", key: "legacy", value });
-        context.slots.register(slots.mainView, { id: "second", key: "legacy", value });
+        context.slots.register(slots.mainView, { id: "first", key: route.key, value });
+        context.slots.register(slots.mainView, { id: "second", key: route.key, value });
       }
     `),
     async page => {
-      await page.locator('html[data-view-host-state="failed"]').waitFor();
-      assert.equal(
-        await page.locator("#view-host-error p").textContent(),
-        "Slot Entry conflicts in main.view@1: legacy"
-      );
+      await assertModuleFailure(page, `Slot Entry conflicts in main.view@1: ${syntheticRouteKey}`);
     }
   );
 });
@@ -193,15 +180,11 @@ test("ViewHost rejects a main.view value that does not satisfy its Mount contrac
   await withBrowserHost(
     pluginSource(`
       apply(context) {
-        context.slots.register(slots.mainView, { id: "page", key: "legacy", value: {} });
+        context.slots.register(slots.mainView, { id: "page", key: route.key, value: {} });
       }
     `),
     async page => {
-      await page.locator('html[data-view-host-state="failed"]').waitFor();
-      assert.equal(
-        await page.locator("#view-host-error p").textContent(),
-        "Slot main.view@1 rejected Entry value"
-      );
+      await assertModuleFailure(page, "Slot main.view@1 rejected Entry value");
     }
   );
 });
@@ -214,14 +197,14 @@ test("ViewHost rolls back Plugin-owned resources when apply fails", async () => 
         context.lifecycle.own(() => window.__pluginCleanup.push("owned"));
         context.slots.register(slots.mainView, {
           id: "page",
-          key: "legacy",
+          key: route.key,
           value: { mount() {} }
         });
         throw new Error("rollback apply");
       }
     `),
     async page => {
-      await page.locator('html[data-view-host-state="failed"]').waitFor();
+      await assertModuleFailure(page, "rollback apply");
       assert.deepEqual(await page.evaluate(() => (window as Window & { __pluginCleanup: string[] }).__pluginCleanup), ["owned"]);
     }
   );
@@ -233,14 +216,13 @@ test("ViewHost shows the Mount error thrown by a registered main.view", async ()
       apply(context) {
         context.slots.register(slots.mainView, {
           id: "page",
-          key: "legacy",
+          key: route.key,
           value: { mount() { throw new Error("synthetic mount failed"); } }
         });
       }
     `),
     async page => {
-      await page.locator('html[data-view-host-state="failed"]').waitFor();
-      assert.equal(await page.locator("#view-host-error p").textContent(), "synthetic mount failed");
+      await assertModuleFailure(page, "synthetic mount failed");
     }
   );
 });
@@ -257,7 +239,7 @@ test("ViewHost continues disposing resources after one cleanup fails on pagehide
         });
         context.slots.register(slots.mainView, {
           id: "page",
-          key: "legacy",
+          key: route.key,
           value: {
             mount({ element }) {
               element.innerHTML = '<p id="disposable-mounted">mounted</p>';
@@ -278,139 +260,6 @@ test("ViewHost continues disposing resources after one cleanup fails on pagehide
   );
 });
 
-test("Legacy View releases its document listeners, popstate listener, and polling timer", async () => {
-  await withBrowserHost(
-    legacyViewBundle,
-    async page => {
-      await page.locator('html[data-view-host-state="ready"]').waitFor();
-      await page.waitForFunction(() => {
-        const tracker = (window as Window & {
-          __legacyResourceTracker?: { listeners: number; intervals: number };
-        }).__legacyResourceTracker;
-        return tracker?.listeners === 4 && tracker.intervals === 1;
-      });
-
-      await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
-      await page.waitForFunction(() => {
-        const tracker = (window as Window & {
-          __legacyResourceTracker?: { listeners: number; intervals: number };
-        }).__legacyResourceTracker;
-        return tracker?.listeners === 0 && tracker.intervals === 0;
-      });
-    },
-    trackLegacyResources
-  );
-});
-
-test("Legacy View cancels a pending selector listener task when unloaded before timeout", async () => {
-  await withBrowserHost(
-    legacyViewBundle,
-    async page => {
-      await page.locator('html[data-view-host-state="ready"]').waitFor();
-      await page.evaluate(() => {
-        const viewWindow = window as Window & {
-          scheduleViewTask(callback: () => void, delay?: number): () => void;
-          addOwnedDocumentPointerdown(listener: (event: PointerEvent) => void): () => void;
-          __delayedSelectorTaskRan?: boolean;
-        };
-        viewWindow.__delayedSelectorTaskRan = false;
-        viewWindow.scheduleViewTask(() => {
-          viewWindow.__delayedSelectorTaskRan = true;
-          viewWindow.addOwnedDocumentPointerdown(() => {});
-        }, 50);
-        window.dispatchEvent(new Event("pagehide"));
-      });
-      await page.waitForTimeout(100);
-      assert.equal(await page.evaluate(() => (
-        window as Window & { __delayedSelectorTaskRan?: boolean }
-      ).__delayedSelectorTaskRan), false);
-      assert.deepEqual(await legacyResourceCounts(page), { listeners: 0, intervals: 0 });
-    },
-    trackLegacyResources
-  );
-});
-
-test("Legacy View removes a selector listener when unloaded after timeout", async () => {
-  await withBrowserHost(
-    legacyViewBundle,
-    async page => {
-      await page.locator('html[data-view-host-state="ready"]').waitFor();
-      await page.evaluate(() => {
-        const viewWindow = window as Window & {
-          scheduleViewTask(callback: () => void, delay?: number): () => void;
-          addOwnedDocumentPointerdown(listener: (event: PointerEvent) => void): () => void;
-        };
-        viewWindow.scheduleViewTask(() => viewWindow.addOwnedDocumentPointerdown(() => {}));
-      });
-      await page.waitForFunction(() => (
-        window as Window & { __legacyResourceTracker?: { listeners: number } }
-      ).__legacyResourceTracker?.listeners === 5);
-      await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
-      await page.waitForFunction(() => {
-        const tracker = (window as Window & {
-          __legacyResourceTracker?: { listeners: number; intervals: number };
-        }).__legacyResourceTracker;
-        return tracker?.listeners === 0 && tracker.intervals === 0;
-      });
-    },
-    trackLegacyResources
-  );
-});
-
-async function trackLegacyResources(page: Page): Promise<void> {
-  await page.addInitScript({ content: `
-      (() => {
-        const tracker = window.__legacyResourceTracker = { listeners: 0, intervals: 0 };
-        const listeners = [];
-        const originalAdd = EventTarget.prototype.addEventListener;
-        const originalRemove = EventTarget.prototype.removeEventListener;
-        EventTarget.prototype.addEventListener = function(type, listener, options) {
-          const tracked = (this === document && ["keydown", "click", "focusout", "pointerdown"].includes(type))
-            || (this === window && type === "popstate");
-          if (tracked) {
-            listeners.push({ target: this, type, listener, active: true });
-            tracker.listeners += 1;
-          }
-          return originalAdd.call(this, type, listener, options);
-        };
-        EventTarget.prototype.removeEventListener = function(type, listener, options) {
-          const record = listeners.find(candidate => (
-            candidate.active && candidate.target === this && candidate.type === type && candidate.listener === listener
-          ));
-          if (record) {
-            record.active = false;
-            tracker.listeners -= 1;
-          }
-          return originalRemove.call(this, type, listener, options);
-        };
-        const activeIntervals = new Set();
-        const originalSetInterval = window.setInterval;
-        const originalClearInterval = window.clearInterval;
-        window.setInterval = function(...args) {
-          const timer = originalSetInterval.apply(this, args);
-          activeIntervals.add(timer);
-          tracker.intervals = activeIntervals.size;
-          return timer;
-        };
-        window.clearInterval = function(timer) {
-          activeIntervals.delete(timer);
-          tracker.intervals = activeIntervals.size;
-          return originalClearInterval.call(this, timer);
-        };
-      })();
-    ` });
-}
-
-async function legacyResourceCounts(page: Page): Promise<{ listeners: number; intervals: number }> {
-  return page.evaluate(() => {
-    const tracker = (window as Window & {
-      __legacyResourceTracker?: { listeners: number; intervals: number };
-    }).__legacyResourceTracker;
-    if (!tracker) throw new Error("Legacy resource tracker was not installed");
-    return { ...tracker };
-  });
-}
-
 async function withBrowserHost(
   bundle: string | undefined,
   run: (page: Page) => Promise<void>,
@@ -418,7 +267,7 @@ async function withBrowserHost(
 ): Promise<void> {
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
-    if (url.pathname === legacyViewBundlePath) {
+    if (url.pathname === syntheticBundlePath) {
       if (bundle === undefined) {
         response.writeHead(404, { "content-type": "text/plain" });
         response.end("missing");
@@ -439,7 +288,12 @@ async function withBrowserHost(
       return;
     }
     response.writeHead(200, { "content-type": "text/html" });
-    response.end(renderViewHostHtml("en"));
+    response.end(renderViewHostHtml("en", [bootInstance(
+      "org.example.synthetic",
+      "synthetic",
+      syntheticBundlePath,
+      [{ id: "index", path: "/" }]
+    )]));
   });
   const origin = await listen(server);
   const browser = await chromium.launch({ headless: true });
@@ -454,14 +308,41 @@ async function withBrowserHost(
   }
 }
 
+async function assertModuleFailure(page: Page, expected: string | RegExp): Promise<void> {
+  await page.locator('html[data-view-host-state="ready"]').waitFor();
+  const diagnostic = page.locator('.view-host-module-error[data-view-failed-module="org.example.synthetic"]');
+  await diagnostic.waitFor();
+  assert.match(await diagnostic.locator("h2").textContent() ?? "", /^org\.example\.synthetic(?: page)? failed to load$/);
+  const message = (await diagnostic.locator("p").textContent()) ?? "";
+  if (typeof expected === "string") assert.equal(message, expected);
+  else assert.match(message, expected);
+}
+
+function bootInstance(
+  moduleId: string,
+  instanceId: string,
+  pluginPath: string,
+  routeGrants: readonly { id: string; path: string; aliases?: readonly string[] }[]
+): ViewHostBootInstance {
+  return {
+    pluginPath,
+    routeGrants,
+    module: { projectId: "memsphere", moduleId, moduleVersion: "1.0.0", instanceId }
+  };
+}
+
 function pluginSource(body: string): string {
+  const routedBody = body.replace(
+    /apply\(([^)]*)\)\s*\{/,
+    'apply(context) { const route = context.router.register({ id: "index", path: "/" });'
+  );
   return `
     import { defineViewPlugin, slots } from "@memsphere/view-sdk";
     export default defineViewPlugin({
       name: "synthetic",
       apiVersion: 1,
-      inject: ["slots"],
-      ${body}
+      inject: ["slots", "router"],
+      ${routedBody}
     });
   `;
 }

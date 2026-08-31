@@ -1,19 +1,36 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 
-const browserModuleUrl = new URL("../dist/view/browser.js", import.meta.url);
-const outputUrl = new URL("../dist/view/legacy-view.js", import.meta.url);
-const browser = await import(browserModuleUrl.href);
-const bundle = browser.legacyViewBundle;
+const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 
-if (
-  typeof bundle !== "string"
-  || !bundle.trim()
-  || !bundle.includes('from "@memsphere/view-sdk"')
-  || !bundle.includes("export default defineViewPlugin(")
-  || !bundle.includes("context.slots.register(slots.mainView")
-) {
-  throw new Error("legacy View bundle generator returned an invalid module");
+const [{ builtinModuleCatalog }, { parseModuleManifest, resolveModuleViewEntry }] = await Promise.all([
+  import(new URL("../src/module/builtin-catalog.ts", import.meta.url).href),
+  import(new URL("../src/module/manifest.ts", import.meta.url).href)
+]);
+
+for (const catalogEntry of builtinModuleCatalog) {
+  const sourceRoot = resolve(repositoryRoot, "modules", catalogEntry.packageDirectory);
+  const manifestPath = resolve(sourceRoot, "module.json");
+  const manifest = parseModuleManifest(JSON.parse(await readFile(manifestPath, "utf8")));
+  if (manifest.id !== catalogEntry.moduleId) {
+    throw new Error(`Builtin catalog id does not match Manifest: ${catalogEntry.moduleId}`);
+  }
+
+  const outputRoot = resolve(repositoryRoot, "dist", "modules", catalogEntry.packageDirectory);
+  const outputEntry = resolveModuleViewEntry(outputRoot, manifest);
+  const sourceEntry = resolve(sourceRoot, "adapter", "view", "index.ts");
+  await mkdir(dirname(outputEntry), { recursive: true });
+  await build({
+    entryPoints: [sourceEntry],
+    outfile: outputEntry,
+    bundle: true,
+    format: "esm",
+    platform: "browser",
+    target: "es2022",
+    external: ["@memsphere/view-sdk"],
+    logLevel: "silent"
+  });
+  await copyFile(manifestPath, resolve(outputRoot, "module.json"));
 }
-
-await mkdir(new URL("../dist/view/", import.meta.url), { recursive: true });
-await writeFile(outputUrl, bundle, "utf8");

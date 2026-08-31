@@ -4,7 +4,11 @@
 
 本文带扩展开发者完成一个最小 View Plugin，并解释代码运行时发生了什么。精确类型和约束请查询 [View Plugin API](./view-plugin-api.md)；架构原因见 [View Plugin Design](./view-plugin-design.md)；可贡献的内置位置见 [View Slot List](./view-slots.md)。
 
-当前 ViewHost 已接通 Plugin 入口、生命周期、Slot Registry 和 `main.view`。本文后续使用 Router、View API 与 I18n 的完整示例同时展示长期组合方式；这些 Context 服务尚未接线，当前可运行 Plugin 只能声明 `inject: ["slots"]` 并注册 `main.view`。准确状态以 API 文档的“当前实现状态”为准。
+## 当前实现状态
+
+当前 ViewHost 已接通 Plugin 入口、生命周期、Manifest/SDK 校验、独立 Bundle 加载、Router，以及 `navigation.primary`、`header.title`、`header.actions`、`main.view`。当前可运行 Plugin 可以声明 `inject: ["slots", "router"]`。
+
+本文保留 View API 与 I18n 的完整示例，因为它们属于已经确定的长期开发契约；这两项服务目前尚未接线，所以完整示例不能直接作为当前版本的可运行代码。准确进度以 API 文档的“当前实现状态”为准，不因尚未实现而删除后续设计和用法。
 
 ## 先理解运行过程
 

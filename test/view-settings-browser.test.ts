@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
+import { chromium, type Page } from "playwright";
 import type { MemsphereConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
@@ -22,43 +22,44 @@ test("Settings browser preserves omitted sections and stays responsive", async (
 
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    page.setDefaultTimeout(5_000);
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     await page.goto(`http://127.0.0.1:${port}`, { waitUntil: "networkidle" });
-    const brandBox = await page.locator(".brand").boundingBox();
-    const settingsButtonBox = await page.locator("#settings-tab").boundingBox();
-    const projectSelectBox = await page.locator("#project-select").boundingBox();
+    const brandBox = await page.locator(".view-shell-brand").boundingBox();
+    const settingsButtonBox = await page.locator(".view-shell-settings").boundingBox();
+    const projectTrigger = page.locator("#view-shell-project-trigger");
+    const projectSelectBox = await projectTrigger.boundingBox();
     assert.ok(brandBox && settingsButtonBox && projectSelectBox);
-    assert.equal(Math.round(settingsButtonBox.width), 34);
-    assert.equal(Math.round(settingsButtonBox.height), 34);
-    assert.equal(Math.round(projectSelectBox.height), 38);
+    assert.ok(settingsButtonBox.width > 100);
+    assert.ok(settingsButtonBox.height >= 34);
+    assert.ok(projectSelectBox.height >= 34);
     assert.ok(projectSelectBox.y >= brandBox.y + brandBox.height + 12);
-    assert.equal(await page.locator("#settings-tab").getAttribute("aria-label"), "设置");
-    await page.locator("#project-select").click();
-    const projectMenuBox = await page.locator("#project-select-menu").boundingBox();
+    assert.equal((await projectTrigger.textContent())?.trim(), "demo");
+    await projectTrigger.click();
+    const projectMenu = page.locator("#view-shell-project-menu");
+    await projectMenu.waitFor();
+    const projectMenuBox = await projectMenu.boundingBox();
     assert.ok(projectMenuBox);
-    assert.ok(projectMenuBox.y >= projectSelectBox.y + projectSelectBox.height);
-    assert.ok(Math.abs(projectMenuBox.width - projectSelectBox.width) < 2);
-    await page.keyboard.press("Escape");
-    await page.click("#settings-tab");
+    assert.ok(Math.abs(projectMenuBox.x - projectSelectBox.x) < 1);
+    assert.ok(Math.abs(projectMenuBox.width - projectSelectBox.width) < 1);
+    assert.equal(await projectTrigger.getAttribute("aria-expanded"), "true");
+    assert.equal(await projectMenu.getByRole("option", { name: "demo", exact: true }).getAttribute("aria-selected"), "true");
+    await projectTrigger.press("Escape");
+    assert.equal(await projectTrigger.getAttribute("aria-expanded"), "false");
+    assert.equal(await page.locator(".view-shell-settings").textContent(), "⚙ 设置");
+    await page.click(".view-shell-settings");
     assert.equal(new URL(page.url()).pathname, "/settings/overview");
-    assert.equal(await page.locator(".view-tabs").isVisible(), false);
-    assert.equal(await page.locator("#settings-tab").getAttribute("aria-label"), "退出设置");
-    await page.click("#settings-tab");
-    assert.equal(await page.locator(".view-tabs").isVisible(), true);
-    assert.equal(await page.locator("#memory-tab").getAttribute("class"), "view-tab active");
-    await page.click("#settings-tab");
+    await page.locator(".memsphere-settings").waitFor();
 
     const globalSettingsNav = page.getByRole("group", { name: "Memsphere", exact: true });
     const demoSettingsNav = page.getByRole("group", { name: "项目 · demo", exact: true });
+    await demoSettingsNav.waitFor();
     assert.equal(await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).getAttribute("aria-current"), "page");
     assert.equal(await demoSettingsNav.count(), 1);
-    const globalSettingsToggle = globalSettingsNav.getByRole("button", { name: "Memsphere", exact: true });
-    await globalSettingsToggle.click();
-    assert.equal(await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).isVisible(), false);
-    await globalSettingsToggle.click();
     assert.equal(await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).isVisible(), true);
-    assert.equal(await page.getByRole("heading", { name: "Memsphere 设置", exact: true }).count(), 1);
+    assert.equal(await page.locator(".settings-page-header h2", { hasText: "Memsphere 设置" }).count(), 1);
+    assert.equal(await page.locator(".view-shell-heading h1", { hasText: "Memsphere 设置" }).count(), 1);
     await globalSettingsNav.getByRole("button", { name: "界面服务", exact: true }).click();
     await page.getByRole("heading", { name: "界面服务", exact: true }).waitFor();
     assert.equal(new URL(page.url()).pathname, "/settings/view");
@@ -76,14 +77,14 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await demoSettingsNav.getByRole("button", { name: "参与者配置", exact: true }).click();
     assert.equal(new URL(page.url()).pathname, "/settings/participants");
     await page.goBack();
-    await page.getByRole("heading", { name: "demo 项目设置", exact: true }).waitFor();
+    await page.locator(".settings-page-header h2", { hasText: "demo 项目设置" }).waitFor();
     assert.equal(new URL(page.url()).pathname, "/settings/project");
     await page.goForward();
     await demoSettingsNav.getByRole("button", { name: "参与者配置", exact: true }).waitFor();
     assert.equal(new URL(page.url()).pathname, "/settings/participants");
     const directSettings = await browser.newPage();
     await directSettings.goto(`http://127.0.0.1:${port}/settings/project`, { waitUntil: "networkidle" });
-    await directSettings.getByRole("heading", { name: "demo 项目设置", exact: true }).waitFor();
+    await directSettings.locator(".settings-page-header h2", { hasText: "demo 项目设置" }).waitFor();
     await directSettings.close();
     await globalSettingsNav.getByRole("button", { name: "常规", exact: true }).click();
     await page.getByText("工作语言", { exact: true }).waitFor();
@@ -92,8 +93,8 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await page.getByRole("option", { name: "English", exact: true }).click();
     assert.match(await page.locator("#settings-status").textContent() ?? "", /未保存修改/);
     await demoSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
-    await page.getByRole("heading", { name: "demo 项目设置", exact: true }).waitFor();
-    assert.equal(await page.getByRole("heading", { name: "demo 项目设置", exact: true }).count(), 1);
+    await page.locator(".settings-page-header h2", { hasText: "demo 项目设置" }).waitFor();
+    assert.equal(await page.locator(".settings-page-header h2", { hasText: "demo 项目设置" }).count(), 1);
     assert.equal(await page.getByRole("checkbox", { name: "使用默认值" }).count(), 0);
     assert.equal(await page.getByText("存储位置", { exact: true }).count(), 1);
     assert.equal(await page.locator(".settings-section .settings-field").count(), 7);
@@ -183,15 +184,14 @@ test("Settings browser preserves omitted sections and stays responsive", async (
       assert.match(dialog.message(), /未保存修改/);
       await dialog.dismiss();
     });
-    await page.locator("#project-select").click();
-    await page.getByRole("option", { name: "beta", exact: true }).click();
-    assert.equal((await page.locator("#project-select-value").textContent())?.trim(), "demo");
+    await chooseProject(page, "beta");
+    assert.equal((await page.locator("#view-shell-project-trigger").textContent())?.trim(), "demo");
     page.once("dialog", dialog => dialog.accept());
-    await page.locator("#project-select").click();
-    await page.getByRole("option", { name: "beta", exact: true }).click();
+    await chooseProject(page, "beta");
     await page.getByRole("group", { name: "项目 · beta", exact: true }).waitFor();
     await globalSettingsNav.getByRole("button", { name: "常规", exact: true }).click();
-    assert.equal((await page.getByRole("combobox", { name: "工作语言" }).textContent())?.trim(), "English⌄");
+    assert.equal((await page.getByRole("combobox", { name: "工作语言" }).textContent())?.trim(), "中文⌄");
+    assert.match(await page.locator("#settings-status").textContent() ?? "", /没有未保存修改/);
 
     await globalSettingsNav.getByRole("button", { name: "ACP 提供方", exact: true }).click();
     let traexProvider = page.locator(".settings-provider").filter({ hasText: "traex" }).first();
@@ -267,12 +267,14 @@ test("switching Projects replaces an entity URL with the new Project landing pag
 
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    page.setDefaultTimeout(5_000);
     await page.goto(`http://127.0.0.1:${port}/memories/concepts/demo-memory`, { waitUntil: "networkidle" });
-    await page.getByRole("heading", { name: "Demo memory", exact: true }).waitFor();
-    await page.locator("#project-select").click();
-    await page.getByRole("option", { name: "beta", exact: true }).click();
+    const memoryHeading = page.locator(".memory-workspace h2");
+    await memoryHeading.waitFor();
+    assert.match(await memoryHeading.textContent() ?? "", /demo-memory|Demo memory/);
+    await chooseProject(page, "beta");
     await page.waitForURL(`http://127.0.0.1:${port}/memories`);
-    assert.equal((await page.locator("#project-select-value").textContent())?.trim(), "beta");
+    await page.locator("#view-shell-project-trigger", { hasText: "beta" }).waitFor();
     assert.equal(new URL(page.url()).pathname, "/memories");
   } finally {
     await browser.close();
@@ -295,8 +297,9 @@ test("Settings browser shows an inline error for an invalid operator token", asy
 
   try {
     const page = await browser.newPage({ viewport: { width: 900, height: 760 } });
+    page.setDefaultTimeout(5_000);
     await page.goto(`http://127.0.0.1:${port}`, { waitUntil: "networkidle" });
-    await page.click("#settings-tab");
+    await page.click(".view-shell-settings");
 
     let tokenInput = page.getByLabel("操作令牌", { exact: true });
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -331,6 +334,11 @@ test("Settings browser shows an inline error for an invalid operator token", asy
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+async function chooseProject(page: Page, name: string): Promise<void> {
+  await page.locator("#view-shell-project-trigger").click();
+  await page.locator("#view-shell-project-menu").getByRole("option", { name, exact: true }).click();
+}
 
 async function settingsConfigFixture(dir: string, host: string): Promise<MemsphereConfig> {
   const home = join(dir, "home");

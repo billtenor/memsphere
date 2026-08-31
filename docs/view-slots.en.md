@@ -28,9 +28,13 @@ This document defines the Memsphere View Slot Catalog. It is the UI composition 
 | `main.view` | ViewHost | Built-in and user Modules | Select by route key | Main page body. Multiple Views may be registered, but only the one selected by the current route is mounted. A Module may declare child Slots inside its own View. |
 | `overlay` | ViewHost | Memsphere Core and built-in or user Modules | Select by overlay key | Drawers, dialogs, review panels, and other temporary interactions. Multiple overlays may be registered, but the controller activates only one at a time. ViewHost owns masking, focus, closing, and failure isolation. |
 
-The current Catalog defines 10 Slots. Add future Slots directly to this list.
+The Catalog defines 10 long-term Slots. Add future Slots directly to this list.
 
-The current Runtime wires `main.view`. Product semantics and ownership are defined for the other nine Slots, but they are not yet connected to Host or populated by migrated business UI. Update this status directly as they are wired; do not create a separate stage-specific Slot List.
+## Current Implementation Status
+
+The SDK and ViewHost currently wire `navigation.primary`, `header.title`, `header.actions`, and `main.view`. All three built-in Modules contribute to the same Slot Tree through these four Slots.
+
+The product semantics and ownership of `header.account`, `sidebar.footer`, the three Home Slots, and `overlay` are already defined, but they are not wired yet. The current Shell temporarily owns account state, Footer settings, and service status directly. Artifact Review temporarily uses a Run Module-owned portal overlay. Implementation progress belongs only in this section and must not delete or narrow the long-term Catalog above.
 
 ## Slot Structure
 

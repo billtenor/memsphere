@@ -16,6 +16,7 @@ summary; the license distributed with each package is authoritative.
 | `cross-spawn` | 7.0.6 | MIT | [moxystudio/node-cross-spawn](https://github.com/moxystudio/node-cross-spawn) |
 | `handlebars` | 4.7.9 | MIT | [handlebars-lang/handlebars.js](https://github.com/handlebars-lang/handlebars.js) |
 | `markdown-it` | 14.3.0 | MIT | [markdown-it/markdown-it](https://github.com/markdown-it/markdown-it) |
+| `semver` | 7.8.5 | ISC | [npm/node-semver](https://github.com/npm/node-semver) |
 | `yaml` | 2.9.0 | ISC | [eemeli/yaml](https://github.com/eemeli/yaml) |
 | `zod` | 3.25.76 | MIT | [colinhacks/zod](https://github.com/colinhacks/zod) |
 

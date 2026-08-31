@@ -268,7 +268,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
           const page = await sourceBrowser.newPage({ viewport: { width: 1366, height: 900 } });
           await page.goto(`${origin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
           await page.getByText("来源工作区不可用", { exact: true }).waitFor();
-          assert.match(await page.locator(".meta").first().textContent() ?? "", /removed-linked-worktree/);
+          assert.match(await page.locator(".memory-source-worktree .memory-muted").textContent() ?? "", /removed-linked-worktree/);
         } finally {
           await sourceBrowser.close();
         }
@@ -320,9 +320,9 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
         try {
           const page = await corruptBrowser.newPage({ viewport: { width: 1366, height: 900 } });
           await page.goto(`${origin}/projects/embedded/changes/${corruptId}`);
-          await page.locator(".error-panel").waitFor();
-          assert.match(await page.locator(".error-panel").textContent() ?? "", new RegExp(corruptId));
-          assert.match(await page.locator(".error-panel").textContent() ?? "", /store_type/);
+          await page.locator(".memory-error").waitFor();
+          assert.match(await page.locator(".memory-error").textContent() ?? "", new RegExp(corruptId));
+          assert.match(await page.locator(".memory-error").textContent() ?? "", /store_type/);
         } finally {
           await corruptBrowser.close();
         }
@@ -405,16 +405,14 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
    try {
       const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
       await page.goto(`${invalidOrigin}/projects/embedded/memories?change=${encodeURIComponent(first.changeId)}`);
-      await page.getByText("草稿预览", { exact: true }).first().waitFor();
+      await page.getByRole("heading", { name: "草稿预览", exact: true }).waitFor();
       await page.getByRole("button", { name: "shared", exact: true }).click();
       await page.getByRole("heading", { name: "记忆 YAML 无效", exact: true }).waitFor();
-      assert.match(await page.locator(".meta").first().textContent() ?? "", /存储：embedded/);
-      assert.match(await page.locator(".meta").first().textContent() ?? "", /校验失败/);
-      assert.deepEqual(
-        await page.evaluate(() => (window as unknown as { currentChangeOperator(): unknown }).currentChangeOperator()),
-        { kind: "human", id: "alice" }
-      );
-      assert.match(await page.locator(".error-panel").first().textContent() ?? "", /concepts\/shared\.yaml/);
+      const changeContext = page.locator(".memory-change-context .memory-meta");
+      assert.match(await changeContext.textContent() ?? "", /存储：embedded/);
+      assert.match(await changeContext.textContent() ?? "", /校验失败/);
+      assert.equal(await page.evaluate(() => localStorage.getItem("memsphere.changeActorSelection.v1")), null);
+      assert.match(await page.locator(".memory-error").first().textContent() ?? "", /concepts\/shared\.yaml/);
       assert.equal(await page.getByRole("button", { name: "Create Review", exact: true }).count(), 0);
       await page.close();
     } finally {
@@ -498,8 +496,9 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     try {
       const page = await completedBrowser.newPage();
       await page.goto(`${completedOrigin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
-      await page.getByText("已完成 · 变更集", { exact: true }).waitFor();
-      assert.equal(await page.getByText("进行中 · 变更集", { exact: true }).count(), 0);
+      await page.locator(".memory-title", { hasText: first.changeId }).waitFor();
+      await page.locator(".memory-subtitle", { hasText: "已完成" }).waitFor();
+      assert.equal(await page.locator(".memory-subtitle", { hasText: "进行中" }).count(), 0);
     } finally {
       await completedBrowser.close();
       await new Promise<void>((resolve) => completedView.close(() => resolve()));

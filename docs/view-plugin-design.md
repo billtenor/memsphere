@@ -38,6 +38,12 @@ ViewHost 解析 Module 实例
 
 ViewHost 负责加载、上下文、组合、故障隔离和清理；Plugin 负责声明当前 Module 实例向界面贡献什么。
 
+## 当前落地状态
+
+当前实现使用固定 builtin catalog 发现 `org.memsphere.memory`、`org.memsphere.run` 和 `org.memsphere.settings`，校验各自 `module.json` 的最小 View 切片、入口包内路径和 SDK SemVer，再动态加载三个独立 ESM Bundle。所有实例共享 Route/Slot Registry，但拥有独立 Context、事务、诊断和清理作用域。
+
+已接通的 Context 服务为 `slots` 与 `router`，根 Slot 为 `navigation.primary`、`header.title`、`header.actions` 和 `main.view`。稳定 Shell、Project selector、Core 设置/状态入口和故障诊断仍属于 ViewHost。View API、I18n、Theme、Logger、自定义子 Slot、用户 Module 发现/安装、Project 动态组合、Home 和公共 overlay 仍是后续能力。
+
 ## 发布与动态加载
 
 View Plugin 随 Module 发布：
@@ -111,7 +117,7 @@ Slot 是一个明确开放的 UI 扩展位置。Slot Token 同时携带：
 - TypeScript Value/Key 类型；
 - 运行时 validator。
 
-根 Slot 由 ViewHost 或内置 Home View 声明。Module 不能自行创建新的全局根 Slot，但可以在自己拥有的 Mount Entry 中声明子 Slot，并导出 Token 供依赖它的 Module 使用。
+根 Slot 由 ViewHost 或内置 Home View 声明。Module 不能自行创建新的全局根 Slot，但可以在自己拥有的 Mount Entry 中声明子 Slot，并导出 Token 供依赖它的 Module 使用。自定义子 Slot 尚未在当前 Runtime 接线。
 
 ```text
 ViewHost 根 Slot
