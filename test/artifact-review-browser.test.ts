@@ -318,6 +318,50 @@ test("failed Artifact Review draft saves retain input and retry exactly once", a
   }
 });
 
+test("Artifact Review draft saves absorb repeated revision conflicts", async () => {
+  const fixture = await createSingleActorReviewFixture();
+  try {
+    await withReviewBrowser(fixture.config, { width: 1440, height: 900 }, async (page, origin) => {
+      await page.goto(
+        `${origin}/tasks/${fixture.runId}/artifact-reviews/${fixture.review.id}?round=${fixture.review.currentRoundId}`,
+        { waitUntil: "domcontentloaded" }
+      );
+      const modal = page.locator("#artifact-review-modal[open]");
+      await modal.waitFor();
+      await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
+      let conflicts = 0;
+      await page.route("**/draft", async route => {
+        if (route.request().method() === "PATCH" && conflicts < 2) {
+          conflicts += 1;
+          await route.fulfill({
+            status: 409,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "Artifact Review Round revision conflict", actualRevision: 99 })
+          });
+          return;
+        }
+        await route.continue();
+      });
+      try {
+        const saved = page.waitForResponse(response =>
+          response.url().endsWith("/draft")
+          && response.request().method() === "PATCH"
+          && response.status() === 200
+        );
+        await modal.getByRole("radio", { name: "要求修改", exact: true }).click();
+        await saved;
+        assert.equal(conflicts, 2);
+        assert.equal(await modal.locator(".artifact-review-message.warn").count(), 0);
+        assert.equal(await modal.getByText(/revision conflict/).count(), 0);
+      } finally {
+        await page.unroute("**/draft");
+      }
+    });
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
 test("Artifact Review persists and restores the panel split", async () => {
   const fixture = await createSingleActorReviewFixture();
   try {
