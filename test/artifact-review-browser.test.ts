@@ -58,14 +58,17 @@ test("Human Artifact Review keeps each participant's draft private", async () =>
       await selectIdentity(page, identity, "alice");
       const composer = reviewModal.getByPlaceholder("补充整体评审意见");
       await composer.fill("Alice private draft");
-      await reviewModal.getByRole("combobox", { name: "意见分类" }).click();
-      await reviewModal.getByRole("option", { name: "阻塞问题", exact: true }).click();
+      await reviewModal.getByText("意见类型", { exact: true }).waitFor();
+      const commentType = reviewModal.getByRole("combobox", { name: "意见类型" });
+      assert.match((await commentType.innerText()).trim(), /^阻塞/);
+      await commentType.click();
+      await reviewModal.getByRole("option", { name: "阻塞", exact: true }).click();
       await clickAndWaitForDraftSave(
         page,
         reviewModal.getByRole("button", { name: "添加意见", exact: true })
       );
       const savedComment = reviewModal.locator(".comment-card").filter({ hasText: "Alice private draft" });
-      await savedComment.getByText("已保存意见 · 阻塞问题", { exact: true }).waitFor();
+      await savedComment.getByText("已保存意见 · 阻塞", { exact: true }).waitFor();
       const persistedDraft = currentArtifactReview(await readRun(fixture.runsRoot, fixture.runId));
       assert.equal(persistedDraft?.rounds[0]?.assignments.find(assignment => assignment.actorId === "alice")?.draft.comments[0]?.severity, "blocking");
       const commentStyles = await savedComment.evaluate(card => {
@@ -428,9 +431,11 @@ test("Artifact Review locates an anchored historical comment in its artifact", a
       const locateButton = comment.getByRole("button", { name: "定位", exact: true });
       const locateSize = await locateButton.evaluate(button => ({
         button: button.getBoundingClientRect().width,
-        card: button.parentElement?.getBoundingClientRect().width || 0
+        card: button.closest(".comment-card")?.getBoundingClientRect().width || 0,
+        inHeader: button.parentElement?.classList.contains("comment-card-head") || false
       }));
       assert(locateSize.button < locateSize.card / 2);
+      assert.equal(locateSize.inHeader, true);
       await locateButton.click();
       const located = modal.locator('[data-anchor="markdown:h1:0"].artifact-review-target-located');
       await located.waitFor();
