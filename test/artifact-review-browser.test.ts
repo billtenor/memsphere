@@ -83,7 +83,15 @@ test("Human Artifact Review keeps each participant's draft private", async () =>
       assert.equal(commentStyles.accentBorder, "3px");
       const approve = reviewModal.getByRole("radio", { name: "通过", exact: true });
       await approve.evaluate(button => { button.dataset.renderIdentity = "vote-control"; });
-      await clickAndWaitForDraftSave(page, approve);
+      let voteDraftRequests = 0;
+      const countVoteDrafts = (request: import("playwright").Request) => {
+        if (request.url().endsWith("/draft") && request.method() === "PATCH") voteDraftRequests += 1;
+      };
+      page.on("request", countVoteDrafts);
+      await clickVote(approve);
+      await waitForAnimationFrames(page, 2);
+      page.off("request", countVoteDrafts);
+      assert.equal(voteDraftRequests, 0);
       assert.equal(await approve.getAttribute("data-render-identity"), "vote-control");
       const voteStyles = await reviewModal.locator(".artifact-review-vote").evaluate(group => {
         const buttons = [...group.querySelectorAll("button")];
@@ -114,7 +122,7 @@ test("Human Artifact Review keeps each participant's draft private", async () =>
   }
 });
 
-test("Human Artifact Review refreshes and retries a stale submit revision", async () => {
+test("Human Artifact Review saves its local vote against the latest submit revision", async () => {
   const fixture = await createTwoActorReviewFixture();
   try {
     await withReviewBrowser(fixture.config, { width: 1440, height: 900 }, async (page, origin) => {
@@ -125,7 +133,7 @@ test("Human Artifact Review refreshes and retries a stale submit revision", asyn
       const modal = page.locator("#artifact-review-modal[open]");
       await modal.waitFor();
       await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
-      await clickAndWaitForDraftSave(page, modal.getByRole("radio", { name: "通过", exact: true }));
+      await clickVote(modal.getByRole("radio", { name: "通过", exact: true }));
 
       const current = currentArtifactReview(await readRun(fixture.runsRoot, fixture.runId));
       assert(current);
@@ -157,7 +165,7 @@ test("Human Artifact Review refreshes and retries a stale submit revision", asyn
       const dialog = page.locator("dialog.artifact-review-dialog");
       await dialog.getByRole("button", { name: "提交评审", exact: true }).click();
       await dialog.waitFor({ state: "detached" });
-      assert.deepEqual(statuses, [409, 200]);
+      assert.deepEqual(statuses, [200]);
       const completed = currentArtifactReview(await readRun(fixture.runsRoot, fixture.runId));
       assert.equal(completed?.rounds[0]?.assignments.find(assignment => assignment.actorId === "alice")?.status, "submitted");
     });
@@ -176,7 +184,7 @@ test("submitted Human Artifact Review renders an immutable result", async () => 
       );
       const modal = page.locator("#artifact-review-modal[open]");
       await modal.waitFor();
-      await clickAndWaitForDraftSave(page, modal.getByRole("radio", { name: "通过", exact: true }));
+      await clickVote(modal.getByRole("radio", { name: "通过", exact: true }));
       await submitThroughConfirmation(page);
 
       const mine = modal.locator("#artifact-review-my-panel");
@@ -211,11 +219,11 @@ test("Human Artifact Review completes once after a revised second round", async 
         page,
         reviewModal.getByRole("button", { name: "添加意见", exact: true })
       );
-      await clickAndWaitForDraftSave(page, reviewModal.getByRole("radio", { name: "要求修改", exact: true }));
+      await clickVote(reviewModal.getByRole("radio", { name: "要求修改", exact: true }));
       await submitThroughConfirmation(page);
 
       await selectIdentity(page, identity, "bob");
-      await clickAndWaitForDraftSave(page, reviewModal.getByRole("radio", { name: "通过", exact: true }));
+      await clickVote(reviewModal.getByRole("radio", { name: "通过", exact: true }));
       await submitThroughConfirmation(page);
       const rejected = await readRun(fixture.runsRoot, fixture.runId);
       assert.equal(currentArtifactReview(rejected)?.status, "awaiting_revision");
@@ -238,10 +246,10 @@ test("Human Artifact Review completes once after a revised second round", async 
       await reviewModal.waitFor();
       identity = page.getByRole("combobox", { name: "评审身份" });
       await selectIdentity(page, identity, "alice");
-      await clickAndWaitForDraftSave(page, reviewModal.getByRole("radio", { name: "通过", exact: true }));
+      await clickVote(reviewModal.getByRole("radio", { name: "通过", exact: true }));
       await submitThroughConfirmation(page);
       await selectIdentity(page, identity, "bob");
-      await clickAndWaitForDraftSave(page, reviewModal.getByRole("radio", { name: "通过", exact: true }));
+      await clickVote(reviewModal.getByRole("radio", { name: "通过", exact: true }));
       await submitThroughConfirmation(page);
 
       await submitArtifactReviewRunnerVote({
@@ -318,7 +326,7 @@ test("failed Artifact Review draft saves retain input and retry exactly once", a
   }
 });
 
-test("Artifact Review draft saves absorb repeated revision conflicts", async () => {
+test("Artifact Review submit absorbs repeated draft revision conflicts", async () => {
   const fixture = await createSingleActorReviewFixture();
   try {
     await withReviewBrowser(fixture.config, { width: 1440, height: 900 }, async (page, origin) => {
@@ -343,13 +351,22 @@ test("Artifact Review draft saves absorb repeated revision conflicts", async () 
         await route.continue();
       });
       try {
+        await clickVote(modal.getByRole("radio", { name: "通过", exact: true }));
+        await modal.getByRole("button", { name: "提交评审", exact: true }).click();
+        const dialog = page.locator("dialog.artifact-review-dialog");
         const saved = page.waitForResponse(response =>
           response.url().endsWith("/draft")
           && response.request().method() === "PATCH"
           && response.status() === 200
         );
-        await modal.getByRole("radio", { name: "要求修改", exact: true }).click();
+        const submitted = page.waitForResponse(response =>
+          response.url().endsWith("/submit") && response.request().method() === "POST"
+        );
+        await dialog.getByRole("button", { name: "提交评审", exact: true }).click();
         await saved;
+        const submitResponse = await submitted;
+        assert.equal(submitResponse.status(), 200, await submitResponse.text());
+        await dialog.waitFor({ state: "detached" });
         assert.equal(conflicts, 2);
         assert.equal(await modal.locator(".artifact-review-message.warn").count(), 0);
         assert.equal(await modal.getByText(/revision conflict/).count(), 0);
@@ -1280,4 +1297,10 @@ async function clickAndWaitForDraftSave(
   }
   const response = await saved;
   assert.equal(response.status(), 200);
+}
+
+async function clickVote(button: import("playwright").Locator): Promise<void> {
+  await button.click();
+  assert.equal(await button.getAttribute("aria-checked"), "true");
+  assert.equal(await button.evaluate(element => element.classList.contains("active")), true);
 }
