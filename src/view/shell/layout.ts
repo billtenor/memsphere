@@ -10,8 +10,14 @@ export function renderViewShellMarkup(options: ViewShellMarkupOptions): string {
   return `<div class="view-shell" data-view-shell>
     <aside class="view-shell-sidebar" aria-label="Primary navigation">
       <div class="view-shell-brand"><strong>memsphere</strong></div>
-      <label class="view-shell-project-label" for="view-shell-project-select"></label>
-      <select class="view-shell-project-select" id="view-shell-project-select" disabled></select>
+      <label class="view-shell-project-label" id="view-shell-project-label" for="view-shell-project-trigger"></label>
+      <div class="view-shell-project-select-wrap">
+        <button class="view-shell-project-trigger" id="view-shell-project-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" disabled>
+          <span class="view-shell-project-value"></span>
+          <span class="view-shell-project-caret" aria-hidden="true"></span>
+        </button>
+        <div class="view-shell-project-menu" id="view-shell-project-menu" role="listbox" aria-labelledby="view-shell-project-label" hidden></div>
+      </div>
       <nav data-view-slot="navigation.primary"></nav>
       <div class="view-shell-footer" data-view-slot="sidebar.footer">
         <button class="view-shell-settings" type="button" data-view-core-settings></button>
@@ -35,7 +41,19 @@ export const viewShellStyles = `
   .view-shell-sidebar { position: sticky; top: 0; min-width: 0; height: 100vh; box-sizing: border-box; overflow-y: auto; padding: 18px 14px; border-right: 1px solid #d9ded8; background: #fbfbf8; }
   .view-shell-brand { margin: 0 8px 16px; font-size: 18px; }
   .view-shell-project-label { display: block; margin: 0 8px 5px; color: #6c7379; font-size: 11px; }
-  .view-shell-project-select { width: calc(100% - 16px); min-height: 34px; margin: 0 8px 16px; border: 1px solid #d9ded8; border-radius: 6px; background: #fff; padding: 5px 8px; color: #222629; }
+  .view-shell-project-select-wrap { position: relative; min-width: 0; margin: 0 8px 16px; }
+  .view-shell-project-trigger { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 34px; box-sizing: border-box; border: 1px solid #d9ded8; border-radius: 6px; background: #fff; padding: 5px 9px; color: #222629; font: inherit; text-align: left; }
+  .view-shell-project-trigger:not(:disabled):hover { border-color: #b8cbc7; background: #f7f8f4; }
+  .view-shell-project-trigger:focus-visible, .view-shell-project-trigger[aria-expanded="true"] { border-color: #286c67; outline: 0; box-shadow: 0 0 0 3px rgba(40, 108, 103, .12); }
+  .view-shell-project-trigger:disabled { color: #8a9296; cursor: default; }
+  .view-shell-project-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .view-shell-project-caret { width: 7px; height: 7px; margin: -3px 2px 0 0; border-right: 1.5px solid #6c7379; border-bottom: 1.5px solid #6c7379; transform: rotate(45deg); transition: transform 120ms ease; }
+  .view-shell-project-trigger[aria-expanded="true"] .view-shell-project-caret { margin-top: 3px; transform: rotate(225deg); }
+  .view-shell-project-menu { position: absolute; z-index: 30; top: calc(100% + 4px); right: 0; left: 0; max-height: min(240px, 45vh); overflow-y: auto; box-sizing: border-box; border: 1px solid #d9ded8; border-radius: 6px; background: #fff; box-shadow: 0 12px 30px rgba(32, 43, 41, .16); padding: 4px; }
+  .view-shell-project-menu[hidden] { display: none; }
+  .view-shell-project-option { display: block; width: 100%; border: 0; border-radius: 4px; background: transparent; color: #222629; padding: 8px; overflow: hidden; font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+  .view-shell-project-option:hover, .view-shell-project-option:focus-visible { background: #eef1ed; outline: none; }
+  .view-shell-project-option[aria-selected="true"] { background: #dfeeea; color: #173f3c; font-weight: 700; }
   .view-shell-sidebar [data-view-slot="navigation.primary"] { display: grid; gap: 6px; }
   .view-shell-navigation-item { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 9px; width: 100%; min-height: 38px; border: 1px solid transparent; border-radius: 6px; padding: 8px 10px; background: transparent; color: #4f5a5c; text-align: left; }
   .view-shell-navigation-item:hover { background: #eef1ed; color: #222629; }

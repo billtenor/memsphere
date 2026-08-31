@@ -56,7 +56,8 @@ test("View switches Projects without retaining the previous Project Memory data"
       assert.deepEqual(await memoryNames(origin), ["alpha-memory"]);
       const page = await browser.newPage();
       await page.goto(`${origin}/memories`, { waitUntil: "networkidle" });
-      await page.locator("#view-shell-project-select").selectOption("beta");
+      await page.locator("#view-shell-project-trigger").click();
+      await page.locator("#view-shell-project-menu").getByRole("option", { name: "beta", exact: true }).click();
       await page.waitForLoadState("networkidle");
       await page.getByRole("button", { name: /beta-memory/ }).waitFor();
       assert.equal(new URL(page.url()).pathname, "/memories");

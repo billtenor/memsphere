@@ -108,7 +108,10 @@ export function renderViewHostHtml(
       });
       const shell = root.closest("[data-view-shell]");
       const projectLabel = shell?.querySelector(".view-shell-project-label");
-      const projectSelect = shell?.querySelector("#view-shell-project-select");
+      const projectSelectWrap = shell?.querySelector(".view-shell-project-select-wrap");
+      const projectTrigger = shell?.querySelector("#view-shell-project-trigger");
+      const projectValue = shell?.querySelector(".view-shell-project-value");
+      const projectMenu = shell?.querySelector("#view-shell-project-menu");
       const settings = shell?.querySelector("[data-view-core-settings]");
       const serviceStatus = shell?.querySelector("[data-view-core-status]");
       if (projectLabel) projectLabel.textContent = boot.coreShell.project;
@@ -120,40 +123,114 @@ export function renderViewHostHtml(
         });
       }
       if (serviceStatus) serviceStatus.textContent = boot.coreShell.healthy;
-      if (projectSelect) {
+      if (projectTrigger && projectValue && projectMenu && projectSelectWrap) {
+        const closeProjectMenu = (restoreFocus = false) => {
+          projectTrigger.setAttribute("aria-expanded", "false");
+          projectMenu.hidden = true;
+          if (restoreFocus) projectTrigger.focus();
+        };
+        const openProjectMenu = (focusSelected = false) => {
+          if (projectTrigger.disabled) return;
+          projectTrigger.setAttribute("aria-expanded", "true");
+          projectMenu.hidden = false;
+          if (focusSelected) {
+            const selected = projectMenu.querySelector('[aria-selected="true"]')
+              || projectMenu.querySelector(".view-shell-project-option");
+            selected?.focus();
+          }
+        };
+        const showCurrentProject = name => {
+          projectValue.textContent = name || boot.coreShell.project;
+          projectTrigger.title = name || boot.coreShell.project;
+          for (const option of projectMenu.querySelectorAll(".view-shell-project-option")) {
+            option.setAttribute("aria-selected", String(option.dataset.projectName === name));
+          }
+        };
+        const switchProject = async (name, current) => {
+          if (!name || name === current) {
+            closeProjectMenu();
+            return;
+          }
+          if (location.pathname.startsWith("/settings/") && !confirm(boot.coreShell.switchConfirm)) {
+            showCurrentProject(current || "");
+            closeProjectMenu();
+            return;
+          }
+          closeProjectMenu();
+          projectTrigger.disabled = true;
+          const response = await fetch("/api/projects/select", {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name })
+          });
+          if (!response.ok) throw new Error(await response.text());
+          const landing = location.pathname.startsWith("/tasks/") ? "/tasks"
+            : location.pathname.startsWith("/settings/") ? location.pathname
+            : location.pathname === "/market" || location.pathname === "/memory-market" ? "/market"
+            : location.pathname === "/" ? "/"
+            : "/memories";
+          location.replace(landing);
+        };
+        projectTrigger.addEventListener("click", () => {
+          if (projectTrigger.getAttribute("aria-expanded") === "true") closeProjectMenu();
+          else openProjectMenu();
+        });
+        projectTrigger.addEventListener("keydown", event => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            closeProjectMenu();
+            return;
+          }
+          if (!["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) return;
+          event.preventDefault();
+          openProjectMenu(true);
+        });
+        projectMenu.addEventListener("keydown", event => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            closeProjectMenu(true);
+            return;
+          }
+          if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const options = [...projectMenu.querySelectorAll(".view-shell-project-option")];
+          const currentIndex = options.indexOf(document.activeElement);
+          const nextIndex = event.key === "Home" ? 0
+            : event.key === "End" ? options.length - 1
+            : event.key === "ArrowDown" ? Math.min(options.length - 1, currentIndex + 1)
+            : Math.max(0, currentIndex - 1);
+          options[nextIndex]?.focus();
+        });
+        document.addEventListener("click", event => {
+          if (!(event.target instanceof Element) || !event.target.closest(".view-shell-project-select-wrap")) {
+            closeProjectMenu();
+          }
+        });
         fetch("/api/projects").then(response => {
           if (!response.ok) throw new Error(String(response.status));
           return response.json();
         }).then(payload => {
-          projectSelect.replaceChildren();
+          projectMenu.replaceChildren();
           for (const project of payload.projects || []) {
-            const option = document.createElement("option");
-            option.value = project.name;
-            option.textContent = project.name;
-            option.selected = project.name === payload.current;
-            projectSelect.append(option);
-          }
-          projectSelect.disabled = projectSelect.options.length === 0;
-          projectSelect.addEventListener("change", async () => {
-            if (location.pathname.startsWith("/settings/") && !confirm(boot.coreShell.switchConfirm)) {
-              projectSelect.value = payload.current || "";
-              return;
-            }
-            projectSelect.disabled = true;
-            const response = await fetch("/api/projects/select", {
-              method: "POST", headers: { "content-type": "application/json" },
-              body: JSON.stringify({ name: projectSelect.value })
+            const menuOption = document.createElement("button");
+            menuOption.type = "button";
+            menuOption.className = "view-shell-project-option";
+            menuOption.setAttribute("role", "option");
+            menuOption.setAttribute("aria-selected", String(project.name === payload.current));
+            menuOption.dataset.projectName = project.name;
+            menuOption.textContent = project.name;
+            menuOption.title = project.name;
+            menuOption.addEventListener("click", () => {
+              void switchProject(project.name, payload.current).catch(error => {
+                projectTrigger.disabled = false;
+                projectTrigger.title = error instanceof Error ? error.message : String(error);
+              });
             });
-            if (!response.ok) throw new Error(await response.text());
-            const landing = location.pathname.startsWith("/tasks/") ? "/tasks"
-              : location.pathname.startsWith("/settings/") ? location.pathname
-              : location.pathname === "/market" || location.pathname === "/memory-market" ? "/market"
-              : location.pathname === "/" ? "/"
-              : "/memories";
-            location.replace(landing);
-          });
+            projectMenu.append(menuOption);
+          }
+          projectTrigger.disabled = projectMenu.children.length === 0;
+          showCurrentProject(payload.current || "");
         }).catch(error => {
-          projectSelect.title = error instanceof Error ? error.message : String(error);
+          projectTrigger.title = error instanceof Error ? error.message : String(error);
         });
       }
       window.addEventListener("pagehide", () => {
