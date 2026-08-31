@@ -74,6 +74,58 @@ test("Human Artifact Review keeps each participant's draft private", async () =>
   }
 });
 
+test("Human Artifact Review refreshes and retries a stale submit revision", async () => {
+  const fixture = await createTwoActorReviewFixture();
+  try {
+    await withReviewBrowser(fixture.config, { width: 1440, height: 900 }, async (page, origin) => {
+      await page.goto(
+        `${origin}/tasks/${fixture.runId}/artifact-reviews/${fixture.review.id}?round=${fixture.review.currentRoundId}`,
+        { waitUntil: "domcontentloaded" }
+      );
+      const modal = page.locator("#artifact-review-modal[open]");
+      await modal.waitFor();
+      await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
+      await clickAndWaitForDraftSave(page, modal.getByRole("radio", { name: "通过", exact: true }));
+
+      const current = currentArtifactReview(await readRun(fixture.runsRoot, fixture.runId));
+      assert(current);
+      const round = current.rounds.find((candidate) => candidate.id === current.currentRoundId);
+      assert(round);
+      const bobDraft = await updateArtifactReviewDraft({
+        runsRoot: fixture.runsRoot,
+        reviewId: current.id,
+        roundId: round.id,
+        actorId: "bob",
+        expectedRevision: round.revision,
+        draft: { vote: "approve", comments: [] }
+      });
+      await submitArtifactReviewAssignment({
+        runsRoot: fixture.runsRoot,
+        reviewId: current.id,
+        roundId: round.id,
+        actorId: "bob",
+        expectedRevision: bobDraft.round.revision
+      });
+
+      const statuses: number[] = [];
+      page.on("response", response => {
+        if (response.url().endsWith("/submit") && response.request().method() === "POST") {
+          statuses.push(response.status());
+        }
+      });
+      await modal.getByRole("button", { name: "提交评审", exact: true }).click();
+      const dialog = page.locator("dialog.artifact-review-dialog");
+      await dialog.getByRole("button", { name: "提交评审", exact: true }).click();
+      await dialog.waitFor({ state: "detached" });
+      assert.deepEqual(statuses, [409, 200]);
+      const completed = currentArtifactReview(await readRun(fixture.runsRoot, fixture.runId));
+      assert.equal(completed?.rounds[0]?.assignments.find(assignment => assignment.actorId === "alice")?.status, "submitted");
+    });
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
 test("Human Artifact Review completes once after a revised second round", async () => {
   const fixture = await createTwoActorReviewFixture();
   try {
