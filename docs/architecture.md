@@ -163,7 +163,7 @@ modules/
 
 构建分别生成 `dist/modules/<module-id>/dist/view/index.js`，不存在聚合三块业务界面的 Legacy Bundle。Core 中的 builtin catalog 只声明可信包根、实例和保留路由授权；三个 Module 统一经过 Manifest 校验、SDK 兼容检查、Bundle import、实例 Context、`apply()` 事务和 Slot/Route commit。
 
-ViewHost 当前接通 Router 以及 `navigation.primary`、`header.title`、`header.actions`、`main.view`。单实例失败只产生局部诊断，Project 切换允许整页重组。用户 Module 仓库发现、安装、动态 Project Composition、CLI Module Host 和后端领域目录迁移尚未实现。
+ViewHost 当前接通 Router、10 个根 Slot、稳定 Shell、Home 与公共 Overlay；Artifact Review 已通过 `overlay` 组合在 Run 详情背景之上。单实例失败只产生局部诊断，Project 切换允许整页重组。用户 Module 仓库发现、安装、动态 Project Composition、自定义子 Slot、CLI Module Host 和后端领域目录迁移尚未实现。
 
 ## Module 的三层代码结构
 

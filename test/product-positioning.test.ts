@@ -135,7 +135,7 @@ test("chapter three teaches flow execution and configurable artifact review role
   assert.match(actor, /Review Slot.*Binding/);
   assert.match(review, /不可变 Artifact Submission/);
   assert.match(review, /ChangeSet Comment 是两种不同对象/);
-  assert.match(view, /Memory 与 Run 是 View 的顶层入口/);
+  assert.match(view, /稳定 Shell 组合 Home、Memory、Run 和启用的用户 Module 视图/);
   assert.match(view, /本地操作界面/);
   assert.match(view, /不等同于.*专属界面/);
   assert.match(procedure, /memsphere-run/);

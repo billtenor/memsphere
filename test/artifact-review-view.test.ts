@@ -315,7 +315,7 @@ flow:
         }
       });
       await page.goto(archivedReviewUrl);
-      const archivedModal = page.locator("#artifact-review-modal[open]");
+      const archivedModal = page.locator(".view-overlay-layer #artifact-review-modal");
       await archivedModal.waitFor();
       await archivedModal.getByText("Private candidate", { exact: true }).waitFor();
 

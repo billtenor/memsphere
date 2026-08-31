@@ -32,9 +32,9 @@
 
 ## 当前实现状态
 
-当前 SDK 与 ViewHost 已接线 `navigation.primary`、`header.title`、`header.actions` 和 `main.view`，三个 builtin Module 均通过这四个 Slot 接入同一个 Slot Tree。
+当前 SDK 与 ViewHost 已接线本 Catalog 的全部 10 个根 Slot。Core 通过 Host 内置 Plugin 提供 Home、账户、设置与服务状态；三个 builtin Module 通过同一公开 Slot Tree 贡献导航、Header、Page 与 Home 聚合项。Artifact Review 已由 Run Module 注册到 `overlay`，Host 负责背景 Route、遮罩、焦点、关闭、清理与局部故障边界。
 
-`header.account`、`sidebar.footer`、三个 Home Slot 与 `overlay` 的产品语义和所有权已经确定，但尚未接线。当前 Shell 暂时固定管理账户状态、Footer 设置与服务状态；Artifact Review 暂时使用 Run Module 自己的 portal 浮层。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
+自定义子 Slot、用户 Module 发现/安装及 Project 动态组合仍未接线。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
 
 ## Slot 结构
 
@@ -76,7 +76,7 @@ View Host
 
 ### 当前页面上下文
 
-`header.title` 和 `header.actions` 只接收当前激活 View 的贡献。页面离开后，对应贡献随页面卸载，不保留为全局操作。
+`header.title` 和 `header.actions` 只接收当前激活 View 的贡献。页面 Mount 可以随当前内容更新标题右侧的页面级操作；页面离开后，对应贡献随页面卸载，不保留为全局操作。
 
 `navigation.primary`、`sidebar.footer` 和三个 Home Slot 根据当前 Project 的 Module 组合生成。切换 Project 时允许 View 整体重启并重新组装。
 

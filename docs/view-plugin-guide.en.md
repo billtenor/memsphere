@@ -6,7 +6,7 @@ This guide builds a minimal View Plugin and explains what happens at runtime. Fo
 
 ## Current Implementation Status
 
-ViewHost currently wires the Plugin entrypoint, lifecycle, Manifest and SDK validation, independent Bundle loading, Router, and the `navigation.primary`, `header.title`, `header.actions`, and `main.view` Slots. A currently runnable Plugin may declare `inject: ["slots", "router"]`.
+ViewHost currently wires the Plugin entrypoint, lifecycle, Manifest and SDK validation, independent Bundle loading, Router, and all 10 root Slots. Home aggregates support restricted `upsert()` updates, while page overlays use `overlay` with a background Route projection. A currently runnable Plugin may declare `inject: ["slots", "router"]`.
 
 This guide retains the complete View API and I18n example because those services are part of the established long-term development contract. They are not wired yet, so the complete example is not directly runnable against the current release. The API reference's “Current Implementation Status” is authoritative; future design and usage are not removed merely because implementation is pending.
 
@@ -168,7 +168,7 @@ ctx.slots.register(slots.mainView, {
 });
 ```
 
-`slots.navigationPrimary`, `slots.headerTitle`, and `slots.mainView` are Slot Tokens. A Token tells TypeScript and ViewHost where content belongs, which type is allowed, how it composes, and how to validate it at runtime.
+`slots.navigationPrimary`, `slots.headerTitle`, and `slots.mainView` are Slot Tokens; the SDK also exports the remaining Header, Footer, Home, and Overlay root Tokens. A Token tells TypeScript and ViewHost where content belongs, which type is allowed, how it composes, and how to validate it at runtime.
 
 The first two Slots accept Descriptors: the Plugin supplies text, icons, and behavior descriptions and Memsphere renders them consistently. `mainView` accepts a Mount: ViewHost supplies a container and the Plugin renders the complete page.
 

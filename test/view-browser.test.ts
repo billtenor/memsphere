@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { builtinModuleCatalog } from "../src/module/builtin-catalog.js";
 import { isViewPagePath, renderMarkdownContent } from "../src/commands/view.js";
+import { coreViewRoutes } from "../src/view/core-routes.js";
 
 test("View page routes are the union of the builtin Module route grants", () => {
   const concretePaths = [
@@ -35,7 +36,10 @@ test("View page routes are the union of the builtin Module route grants", () => 
   ]) assert.equal(isViewPagePath(path), false, path);
 
   assert.deepEqual(
-    builtinModuleCatalog.flatMap(module => module.routes.flatMap(route => [route.path, ...(route.aliases ?? [])])),
+    [
+      ...coreViewRoutes.flatMap(route => [route.path, ...("aliases" in route ? route.aliases ?? [] : [])]),
+      ...builtinModuleCatalog.flatMap(module => module.routes.flatMap(route => [route.path, ...(route.aliases ?? [])]))
+    ],
     [
       "/", "/memories", "/market", "/memory-market", "/memories/:kind/:name",
       "/projects/:projectId/memories", "/projects/:projectId/memories/:kind/:name",

@@ -12,7 +12,7 @@ This document defines the long-term public interface and explicitly records curr
 
 ViewHost currently implements the default Plugin entrypoint, `apiVersion: 1`, `apply()`, Module instance identity, `lifecycle`, minimum Manifest validation, SDK SemVer checks, independent Bundle loading, Router, Slot Tokens and Registry, per-instance registration transactions, rollback, and Mount cleanup. An import map resolves `@memsphere/view-sdk` to the Host-provided browser SDK.
 
-The currently injectable services are `slots` and `router`. The wired root Slots are `navigation.primary`, `header.title`, `header.actions`, and `main.view`. The three builtin Modules—`org.memsphere.memory`, `org.memsphere.run`, and `org.memsphere.settings`—all use this public entrypoint and independent Bundles. View API, I18n, Theme, Logger, custom child Slots, user Module discovery/installation, and dynamic Project composition remain unwired. A Plugin requesting an unavailable service fails explicitly before `apply()`.
+The currently injectable services are `slots` and `router`, and all ten root Slots—`navigation.primary`, `header.title`, `header.actions`, `header.account`, `sidebar.footer`, `home.attention`, `home.continue`, `home.modules`, `main.view`, and `overlay`—are wired. `header.actions`, `home.attention`, and `home.continue` support lifecycle-bound live `upsert()` operations. `overlay` supports Host-managed background Route projection, masking, focus, dismissal, and a local failure boundary. The three builtin Modules—`org.memsphere.memory`, `org.memsphere.run`, and `org.memsphere.settings`—all use this public entrypoint and independent Bundles. View API, I18n, Theme, Logger, custom child Slots, user Module discovery/installation, and dynamic Project composition remain unwired. A Plugin requesting an unavailable service fails explicitly before `apply()`.
 
 ## Module View Entrypoint Contract
 
@@ -173,6 +173,8 @@ export interface SlotDefinition<
   readonly kind: Kind;
   readonly scope: SlotScope;
   readonly render: SlotRenderMode;
+  /** Allows an instance to update its own Entry after apply commits. */
+  readonly live?: boolean;
 
   /** Runtime Value validator supplied by the owner. */
   validate(value: unknown): value is Value;
@@ -310,10 +312,17 @@ export interface SlotRegistry {
     slot: S,
     options: KeyedRegisterOptions<SlotValue<S>, SlotKey<S>>,
   ): Disposer;
+
+  upsert<S extends typeof slots.headerActions | typeof slots.homeAttention | typeof slots.homeContinue>(
+    slot: S,
+    options: RegisterOptions<SlotValue<S>>,
+  ): Disposer;
 }
 ```
 
 `register()` synchronously validates Token, Value, identity, and ownership and leaves no partial registration on failure. Its disposer removes the Entry and automatically joins the instance lifecycle.
+
+`upsert()` is restricted to aggregate Slots marked `live`, currently `header.actions`, `home.attention`, and `home.continue`. A page Mount may update the page-level actions beside the title for its current content and must withdraw those Entries when it unmounts. It may be called after a successful `apply()` commit and atomically inserts or replaces an Entry by `id` within the current Module instance. Each successful update creates a new epoch lease: an older disposer cannot remove a newer Entry, while instance cleanup still removes every live Entry.
 
 Entry runtime identity is:
 
@@ -362,9 +371,19 @@ export interface NavigationItemDescriptor {
 export interface AttentionItemDescriptor {
   readonly title: TextRef;
   readonly summary?: TextRef;
+  readonly source?: TextRef;
+  readonly icon?: IconRef;
   readonly status: "info" | "warning" | "error";
   readonly updatedAt?: string;
   readonly action: ActionDescriptor;
+}
+
+export interface ContinueItemDescriptor {
+  readonly title: TextRef;
+  readonly summary?: TextRef;
+  readonly icon?: IconRef;
+  readonly updatedAt?: string;
+  readonly route: RouteTarget;
 }
 ```
 
@@ -378,6 +397,9 @@ export interface ViewMount {
     target: ViewMountTarget,
     context: ViewRenderContext,
   ): MaybePromise<void | Disposer>;
+
+  /** Receives a new route context when related Routes reuse this Mount. */
+  update?(context: ViewRenderContext): MaybePromise<void>;
 }
 
 export interface ViewMountTarget {
@@ -401,6 +423,8 @@ export interface ViewRenderContext {
 Runtime contract:
 
 - Host creates an exclusive `element` and calls `mount()` after Entry activation.
+- Related Routes may register the same `ViewMount`. When navigating among them, Host prefers the optional `update()` and preserves the existing container, state, and resources; without `update()`, normal disposal and remounting still apply.
+- `update()` only refreshes the active view and does not create another resource lifecycle; the disposer returned by the original `mount()` still runs on final deactivation.
 - Modules may use the DOM, React, Vue, Svelte, or another browser framework.
 - Host calls the returned disposer before deactivation or container destruction.
 - Modules must not mutate DOM outside Host containers or assume the parent structure of `element`.
@@ -424,12 +448,17 @@ export interface RouteToken {
 
 export interface ViewRouter {
   register(definition: RouteDefinition): RouteToken;
+  project(options: {
+    readonly from: RouteToken;
+    readonly to: RouteToken;
+    readonly params: Readonly<Record<string, string>>;
+  }): RouteProjection;
   navigate(target: RouteTarget): Promise<void>;
   readonly location: RouteLocation;
 }
 ```
 
-`RouteActivation`, `RouteTarget`, and `RouteLocation` are SDK-defined, Host-created route values. Plugins must not forge them.
+`RouteActivation`, `RouteTarget`, `RouteProjection`, and `RouteLocation` are SDK-defined, Host-created route values. Plugins must not forge them. `project()` supports keyed overlays by mapping parameters from an overlay Route to a background page Route owned by the same Module instance. Cross-instance projections, missing target parameters, and unknown parameters must fail. A background Mount receives `RouteLocation.projected === true`; it must remain passive and must not rewrite the active overlay URL.
 
 Module Routes live below the instance base path:
 

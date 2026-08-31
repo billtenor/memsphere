@@ -42,7 +42,7 @@ ViewHost 负责加载、上下文、组合、故障隔离和清理；Plugin 负�
 
 当前实现使用固定 builtin catalog 发现 `org.memsphere.memory`、`org.memsphere.run` 和 `org.memsphere.settings`，校验各自 `module.json` 的最小 View 切片、入口包内路径和 SDK SemVer，再动态加载三个独立 ESM Bundle。所有实例共享 Route/Slot Registry，但拥有独立 Context、事务、诊断和清理作用域。
 
-已接通的 Context 服务为 `slots` 与 `router`，根 Slot 为 `navigation.primary`、`header.title`、`header.actions` 和 `main.view`。稳定 Shell、Project selector、Core 设置/状态入口和故障诊断仍属于 ViewHost。View API、I18n、Theme、Logger、自定义子 Slot、用户 Module 发现/安装、Project 动态组合、Home 和公共 overlay 仍是后续能力。
+已接通的 Context 服务为 `slots` 与 `router`，10 个根 Slot 均已接线。Core 以 Host 内置 Plugin 贡献 Home、账户、设置与服务状态；Home 聚合项支持 Module 生命周期内更新；公共 `overlay` 由 Host 管理遮罩、焦点、关闭与背景 Route 投影。稳定 Shell、Project selector 和故障诊断仍属于 ViewHost。View API、I18n、Theme、Logger、自定义子 Slot、用户 Module 发现/安装和 Project 动态组合仍是后续能力。
 
 ## 发布与动态加载
 

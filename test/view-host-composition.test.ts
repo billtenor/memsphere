@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
+import { build } from "esbuild";
 import { chromium, type Page } from "playwright";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import {
@@ -13,7 +15,7 @@ import {
 } from "../src/view/host.js";
 
 const sdkSource = await browserModule("../src/view/view-sdk.ts");
-const runtimeSource = await browserModule("../src/view/view-runtime.ts");
+const runtimeSource = await browserRuntimeBundle();
 
 test("ViewHost applies instances in catalog order and isolates one failed instance", async () => {
   const instances: ViewHostBootInstance[] = [
@@ -63,7 +65,7 @@ test("a failed builtin route renders a local retry diagnostic while the Shell st
     await page.locator('[data-view-failed-module="org.memsphere.broken"]').waitFor();
     assert.equal(await page.locator("html").getAttribute("data-view-host-state"), "ready");
     assert.match(await page.locator(".view-host-module-error").innerText(), /broken import contract/);
-    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("navigation").getByRole("button", { name: "Settings", exact: true }).click();
     await page.locator("#settings-view").waitFor();
   }, "/broken");
 });
@@ -74,7 +76,7 @@ test("Shell navigation composes main/header descriptors and browser back restore
     {
       ...memory,
       routeGrants: [
-        { id: "index", path: "/memories", aliases: ["/"] },
+        { id: "index", path: "/memories" },
         { id: "detail", path: "/memories/:kind" }
       ]
     },
@@ -129,7 +131,7 @@ test("Shell navigation composes main/header descriptors and browser back restore
     await page.waitForURL(/\/memories\/statements$/);
     assert.equal(await page.locator("#memory-detail-view").textContent(), "Memory detail statements");
 
-    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("navigation").getByRole("button", { name: "Settings", exact: true }).click();
     await page.locator("#settings-view").waitFor();
     assert.equal(await page.locator(".view-shell-heading h1").textContent(), "Settings");
 
@@ -137,7 +139,7 @@ test("Shell navigation composes main/header descriptors and browser back restore
     await page.locator("#memory-detail-view").waitFor();
     assert.equal(new URL(page.url()).pathname, "/memories/statements");
     assert.equal(await page.locator(".view-shell-heading h1").textContent(), "Memory detail");
-  }, "/");
+  }, "/memories");
 });
 
 test("ViewHost keeps the current page visible until the next Mount is ready", async () => {
@@ -177,6 +179,110 @@ test("ViewHost keeps the current page visible until the next Mount is ready", as
     await page.locator("#second-page").waitFor();
     assert.equal(await page.locator("#first-page").count(), 0);
   }, "/first");
+});
+
+test("related Routes can update one active Mount without remounting its page", async () => {
+  const instance: ViewHostBootInstance = {
+    ...bootInstance("org.memsphere.memory", "memory", "/memory.js", "/"),
+    routeGrants: [
+      { id: "index", path: "/memories" },
+      { id: "market", path: "/market" }
+    ]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const index = context.router.register({ id: "index", path: "/memories" });
+      const market = context.router.register({ id: "market", path: "/market" });
+      const shared = {
+        mount({ element }, renderContext) {
+          window.__mountCount = (window.__mountCount || 0) + 1;
+          element.id = "shared-page";
+          element.textContent = renderContext.route.pathname;
+        },
+        update(renderContext) {
+          window.__updateCount = (window.__updateCount || 0) + 1;
+          document.querySelector("#shared-page").textContent = renderContext.route.pathname;
+        }
+      };
+      context.slots.register(slots.navigationPrimary, { id: "market-nav", value: {
+        label: { text: "Market" }, icon: { kind: "system", name: "next" }, route: market.to()
+      }});
+      context.slots.register(slots.mainView, { id: "index", key: index.key, value: shared });
+      context.slots.register(slots.mainView, { id: "market", key: market.key, value: shared });
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/memory.js", bundle]]), undefined, async page => {
+    await page.locator("#shared-page").waitFor();
+    await page.getByRole("button", { name: "Market", exact: true }).click();
+    await page.waitForURL(/\/market$/);
+    await page.waitForFunction(() => document.querySelector("#shared-page")?.textContent === "/market");
+    assert.deepEqual(await page.evaluate(() => ({
+      mounts: (window as any).__mountCount,
+      updates: (window as any).__updateCount
+    })), { mounts: 1, updates: 1 });
+  }, "/memories");
+});
+
+test("Overlay preserves the active Page portal and disposes Overlay before Page", async () => {
+  const instance: ViewHostBootInstance = {
+    ...bootInstance("org.memsphere.run", "run", "/run.js", "/"),
+    routeGrants: [
+      { id: "detail", path: "/tasks/:runId" },
+      { id: "review", path: "/tasks/:runId/artifact-reviews/:reviewId" }
+    ]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const detail = context.router.register({ id: "detail", path: "/tasks/:runId" });
+      const review = context.router.register({ id: "review", path: "/tasks/:runId/artifact-reviews/:reviewId" });
+      const events = window.__portalEvents = [];
+      context.slots.register(slots.mainView, { id: "detail", key: detail.key, value: {
+        mount({ element, portal }) {
+          events.push("page:mount");
+          window.__backgroundPortal = portal;
+          element.innerHTML = '<button id="open-review">Open review</button>';
+          element.querySelector("button").onclick = () => context.router.navigate(review.to({ runId: "run-1", reviewId: "review-1" }));
+          const marker = document.createElement("p"); marker.id = "page-portal-before"; marker.textContent = "before"; portal.append(marker);
+          return () => events.push("page:dispose");
+        }
+      }});
+      context.slots.register(slots.overlay, { id: "review", key: review.key, value: {
+        label: { text: "Review" }, presentation: "dialog",
+        background: context.router.project({ from: review, to: detail, params: { runId: "runId" } }),
+        mount: { mount({ element }) {
+          events.push("overlay:mount"); element.innerHTML = '<p id="review-overlay">Review body</p>';
+          return () => events.push("overlay:dispose");
+        }}
+      }});
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/run.js", bundle]]), undefined, async page => {
+    await page.locator("#page-portal-before").waitFor();
+    await page.locator("#open-review").click();
+    await page.locator("#review-overlay").waitFor();
+    assert.equal(await page.locator("#page-portal-before").count(), 1);
+    assert.equal(await page.evaluate(() => (window as any).__backgroundPortal.isConnected), true);
+    await page.evaluate(() => {
+      const marker = document.createElement("p"); marker.id = "page-portal-during"; marker.textContent = "during";
+      (window as any).__backgroundPortal.append(marker);
+    });
+    await page.locator("#page-portal-during").waitFor();
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.waitForURL(/\/tasks\/run-1$/);
+    assert.equal(await page.locator("#page-portal-during").count(), 1);
+    await page.evaluate(async () => {
+      const marker = document.createElement("p"); marker.id = "page-portal-after"; marker.textContent = "after";
+      (window as any).__backgroundPortal.append(marker);
+      dispatchEvent(new PageTransitionEvent("pagehide"));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    assert.equal(await page.locator("#page-portal-after").count(), 0);
+    assert.deepEqual(await page.evaluate(() => (window as any).__portalEvents), [
+      "page:mount", "overlay:mount", "overlay:dispose", "page:dispose"
+    ]);
+  }, "/tasks/run-1");
 });
 
 test("built-in Route grants reject an unapproved path before composition", async () => {
@@ -384,6 +490,15 @@ async function browserModule(relativePath: string): Promise<string> {
   return transpileModule(source, {
     compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 }
   }).outputText;
+}
+
+async function browserRuntimeBundle(): Promise<string> {
+  const result = await build({
+    entryPoints: [fileURLToPath(new URL("../src/view/view-runtime.ts", import.meta.url))],
+    bundle: true, write: false, format: "esm", platform: "browser", target: "es2022",
+    external: ["@memsphere/view-sdk", "./view-sdk.js"], logLevel: "silent"
+  });
+  return result.outputFiles[0]?.text ?? "";
 }
 
 async function listen(server: Server): Promise<string> {

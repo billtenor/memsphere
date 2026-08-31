@@ -38,12 +38,12 @@ test("Human Artifact Review keeps each participant's draft private", async () =>
         `${origin}/tasks/${fixture.runId}/artifact-reviews/${fixture.review.id}?round=${fixture.review.currentRoundId}`,
         { waitUntil: "domcontentloaded" }
       );
-      const reviewModal = page.locator("#artifact-review-modal[open]");
+      const reviewModal = page.locator(".view-overlay-layer #artifact-review-modal");
       await reviewModal.waitFor();
       assert.equal(await page.locator("#memsphere-view-root > .run-loading").count(), 0);
       const modalColors = await reviewModal.evaluate(element => ({
         background: getComputedStyle(element).backgroundColor,
-        backdrop: getComputedStyle(element, "::backdrop").backgroundColor,
+        backdrop: getComputedStyle(element.closest(".view-overlay-layer")!).backgroundColor,
         reviewPane: getComputedStyle(element.querySelector("#artifact-review-review-pane")!).backgroundColor,
       }));
       assert.notEqual(modalColors.background, "rgba(0, 0, 0, 0)");
@@ -130,7 +130,7 @@ test("Human Artifact Review saves its local vote against the latest submit revis
         `${origin}/tasks/${fixture.runId}/artifact-reviews/${fixture.review.id}?round=${fixture.review.currentRoundId}`,
         { waitUntil: "domcontentloaded" }
       );
-      const modal = page.locator("#artifact-review-modal[open]");
+      const modal = page.locator(".view-overlay-layer #artifact-review-modal");
       await modal.waitFor();
       await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
       await clickVote(modal.getByRole("radio", { name: "通过", exact: true }));
@@ -182,7 +182,7 @@ test("submitted Human Artifact Review renders an immutable result", async () => 
         `${origin}/tasks/${fixture.runId}/artifact-reviews/${fixture.review.id}?round=${fixture.review.currentRoundId}`,
         { waitUntil: "domcontentloaded" }
       );
-      const modal = page.locator("#artifact-review-modal[open]");
+      const modal = page.locator(".view-overlay-layer #artifact-review-modal");
       await modal.waitFor();
       await clickVote(modal.getByRole("radio", { name: "通过", exact: true }));
       await submitThroughConfirmation(page);
@@ -194,6 +194,7 @@ test("submitted Human Artifact Review renders an immutable result", async () => 
       assert.equal(await mine.getByRole("button", { name: "提交评审", exact: true }).count(), 0);
       assert.equal(await mine.getByRole("combobox", { name: "评审身份" }).count(), 0);
       assert.equal(await mine.locator(".artifact-review-message.warn").count(), 0);
+      assert.equal(await mine.locator(".artifact-review-opinion").count(), 0);
       assert.equal(await modal.locator("#artifact-review-progress-panel .artifact-review-participant").first().locator(".artifact-review-opinion").count(), 0);
     });
   } finally {
@@ -209,7 +210,7 @@ test("Human Artifact Review completes once after a revised second round", async 
         `${origin}/tasks/${fixture.runId}/artifact-reviews/${fixture.review.id}?round=${fixture.review.currentRoundId}`,
         { waitUntil: "domcontentloaded" }
       );
-      let reviewModal = page.locator("#artifact-review-modal[open]");
+      let reviewModal = page.locator(".view-overlay-layer #artifact-review-modal");
       await reviewModal.waitFor();
       let identity = page.getByRole("combobox", { name: "评审身份" });
 
@@ -242,7 +243,7 @@ test("Human Artifact Review completes once after a revised second round", async 
         `${origin}/tasks/${fixture.runId}/artifact-reviews/${secondReview.id}?round=${secondReview.currentRoundId}`,
         { waitUntil: "domcontentloaded" }
       );
-      reviewModal = page.locator("#artifact-review-modal[open]");
+      reviewModal = page.locator(".view-overlay-layer #artifact-review-modal");
       await reviewModal.waitFor();
       identity = page.getByRole("combobox", { name: "评审身份" });
       await selectIdentity(page, identity, "alice");
@@ -276,7 +277,7 @@ test("failed Artifact Review draft saves retain input and retry exactly once", a
         `${origin}/tasks/${fixture.runId}/artifact-reviews/${fixture.review.id}?round=${fixture.review.currentRoundId}`,
         { waitUntil: "domcontentloaded" }
       );
-      const modal = page.locator("#artifact-review-modal[open]");
+      const modal = page.locator(".view-overlay-layer #artifact-review-modal");
       await modal.waitFor();
       await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
 
@@ -334,7 +335,7 @@ test("Artifact Review submit absorbs repeated draft revision conflicts", async (
         `${origin}/tasks/${fixture.runId}/artifact-reviews/${fixture.review.id}?round=${fixture.review.currentRoundId}`,
         { waitUntil: "domcontentloaded" }
       );
-      const modal = page.locator("#artifact-review-modal[open]");
+      const modal = page.locator(".view-overlay-layer #artifact-review-modal");
       await modal.waitFor();
       await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
       let conflicts = 0;
@@ -415,7 +416,7 @@ test("Artifact Review makes historical rounds read-only", async () => {
         `${origin}/tasks/${fixture.runId}/artifact-reviews/${revised.id}?round=${revised.currentRoundId}`,
         { waitUntil: "domcontentloaded" }
       );
-      const modal = page.locator("#artifact-review-modal[open]");
+      const modal = page.locator(".view-overlay-layer #artifact-review-modal");
       await modal.waitFor();
       await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
       const roundSelector = page.getByRole("button", { name: "轮次", exact: true });
@@ -435,7 +436,7 @@ test("Artifact Review makes historical rounds read-only", async () => {
   }
 });
 
-test("Artifact Review keeps a selected historical round across polling", async () => {
+test("Artifact Review keeps a selected historical round without background polling", async () => {
   const fixture = await createSingleActorReviewFixture();
   try {
     const revised = await createRevisedSingleActorReview(fixture);
@@ -444,7 +445,7 @@ test("Artifact Review keeps a selected historical round across polling", async (
         `${origin}/tasks/${fixture.runId}/artifact-reviews/${revised.id}?round=${revised.currentRoundId}`,
         { waitUntil: "domcontentloaded" }
       );
-      const modal = page.locator("#artifact-review-modal[open]");
+      const modal = page.locator(".view-overlay-layer #artifact-review-modal");
       await modal.waitFor();
       await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
       const roundSelector = page.getByRole("button", { name: "轮次", exact: true });
@@ -456,10 +457,17 @@ test("Artifact Review keeps a selected historical round across polling", async (
       await roundSelector.click();
       roundMenu = page.getByRole("listbox", { name: "轮次" });
       await roundMenu.waitFor();
-      await page.waitForResponse((response) =>
-        response.request().method() === "GET"
-        && response.url().includes(`/artifact-reviews/${revised.id}/rounds/${fixture.review.currentRoundId}`)
-      );
+      let backgroundRoundRequests = 0;
+      const countRoundRequests = (response: import("playwright").Response) => {
+        if (response.request().method() === "GET"
+          && response.url().includes(`/artifact-reviews/${revised.id}/rounds/${fixture.review.currentRoundId}`)) {
+          backgroundRoundRequests += 1;
+        }
+      };
+      page.on("response", countRoundRequests);
+      await page.waitForTimeout(4_200);
+      page.off("response", countRoundRequests);
+      assert.equal(backgroundRoundRequests, 0);
       assert.equal(await roundMenu.isVisible(), true);
       assert.equal(
         await roundMenu.locator(`[data-round-id="${fixture.review.currentRoundId}"]`).getAttribute("aria-selected"),
@@ -481,7 +489,7 @@ test("Artifact Review locates an anchored historical comment in its artifact", a
         `${origin}/tasks/${fixture.runId}/artifact-reviews/${revised.id}?round=${revised.currentRoundId}`,
         { waitUntil: "domcontentloaded" }
       );
-      const modal = page.locator("#artifact-review-modal[open]");
+      const modal = page.locator(".view-overlay-layer #artifact-review-modal");
       await modal.waitFor();
       await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
       const roundSelector = page.getByRole("button", { name: "轮次", exact: true });
@@ -515,7 +523,7 @@ test("Artifact Review normalizes invalid Round and Material URLs and syncs mater
         `${origin}/tasks/${fixture.runId}/artifact-reviews/${fixture.review.id}?round=round-missing&material=material-missing`,
         { waitUntil: "domcontentloaded" }
       );
-      const modal = page.locator("#artifact-review-modal[open]");
+      const modal = page.locator(".view-overlay-layer #artifact-review-modal");
       await modal.waitFor();
       await page.waitForFunction((roundId) => {
         const params = new URLSearchParams(location.search);
@@ -567,7 +575,7 @@ test("completed Artifact Review isolates dialog scrolling without mutating Host 
       await waitForAnimationFrames(page, 2);
       assert((await artifactPane.evaluate((pane) => pane.scrollTop)) > 0);
 
-      await reviewModal.getByRole("button", { name: "关闭", exact: true }).click();
+      await page.getByRole("button", { name: "关闭", exact: true }).click();
       await reviewModal.waitFor({ state: "hidden" });
       await reviewButton.waitFor({ state: "visible" });
     });
@@ -584,7 +592,7 @@ test("Artifact Review uses desktop panes and mobile tabs without horizontal over
         `${origin}/tasks/${fixture.runId}/artifact-reviews/${fixture.review.id}?round=${fixture.review.currentRoundId}`,
         { waitUntil: "domcontentloaded" }
       );
-      const reviewModal = page.locator("#artifact-review-modal[open]");
+      const reviewModal = page.locator(".view-overlay-layer #artifact-review-modal");
       await reviewModal.waitFor();
       assert.equal(await page.locator("#artifact-review-artifact-pane").isVisible(), true);
       assert.equal(await page.locator("#artifact-review-review-pane").isVisible(), true);

@@ -1,4 +1,4 @@
-import type { RouteTarget, RouteToken, ViewMount } from "@memsphere/view-sdk";
+import type { RouteLocation, RouteTarget, RouteToken, ViewMount } from "@memsphere/view-sdk";
 import type { SettingsViewConfig } from "./index.js";
 
 type JsonObject = Record<string, any>;
@@ -35,15 +35,20 @@ export function createSettingsView(options: SettingsViewOptions): ViewMount {
     global: { data: null, draft: null, errors: [], confirmation: null, notice: "" },
     project: { data: null, draft: null, errors: [], confirmation: null, notice: "" }
   };
+  let app: SettingsApplication | undefined;
   return {
-    async mount({ element }) {
+    async mount({ element }, context) {
       const controller = new AbortController();
-      const app = new SettingsApplication(element, options, controller.signal, scopes);
+      app = new SettingsApplication(element, options, controller.signal, scopes, context.route);
       await app.start();
       return () => {
         controller.abort();
+        app = undefined;
         element.replaceChildren();
       };
+    },
+    async update(context) {
+      await app?.updateRoute(context.route);
     }
   };
 }
@@ -67,19 +72,31 @@ class SettingsApplication {
   #expandedParticipants = new Set<string>();
   readonly #scopes: Record<ScopeName, ScopeState>;
 
-  constructor(root: HTMLElement, options: SettingsViewOptions, signal: AbortSignal, scopes: Record<ScopeName, ScopeState>) {
+  constructor(root: HTMLElement, options: SettingsViewOptions, signal: AbortSignal, scopes: Record<ScopeName, ScopeState>, route: Readonly<RouteLocation>) {
     this.#root = root;
     this.#options = options;
     this.#signal = signal;
     this.#config = options.config;
     this.#scopes = scopes;
-    const destination = destinationFromPath(location.pathname);
+    const destination = destinationFromPath(route.pathname);
     this.#scope = destination.scope;
     this.#module = destination.module;
   }
 
   async start(): Promise<void> {
     this.#root.innerHTML = `<div class="memsphere-settings"><style>${styles}</style><div class="settings-loading">${escapeHtml(this.t("settings.loading", "正在加载配置……"))}</div></div>`;
+    await this.load();
+  }
+
+  async updateRoute(route: Readonly<RouteLocation>): Promise<void> {
+    const destination = destinationFromPath(route.pathname);
+    this.#scope = destination.scope;
+    this.#module = destination.module;
+    if (this.state.data || this.#meta) {
+      this.#loading = false;
+      this.render();
+      return;
+    }
     await this.load();
   }
 

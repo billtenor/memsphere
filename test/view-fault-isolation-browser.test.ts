@@ -51,7 +51,7 @@ async function withBuiltinFixture(
   const [bundles, sdk, runtime] = await Promise.all([
     Promise.all(moduleIds.map(async moduleId => [moduleId, await bundle(moduleId)] as const)),
     browserModule("../src/view/view-sdk.ts"),
-    browserModule("../src/view/view-runtime.ts")
+    browserRuntimeBundle()
   ]);
   const bundleByModule = new Map(bundles);
   const selected = builtinModuleCatalog.filter(entry => moduleIds.includes(entry.moduleId));
@@ -99,6 +99,12 @@ async function assertHostReady(page: import("playwright").Page): Promise<void> {
 async function browserModule(relativePath: string): Promise<string> {
   const source = await readFile(new URL(relativePath, import.meta.url), "utf8");
   return transpileModule(source, { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 } }).outputText;
+}
+
+
+async function browserRuntimeBundle(): Promise<string> {
+  const result = await build({ entryPoints: ["src/view/view-runtime.ts"], bundle: true, write: false, format: "esm", platform: "browser", target: "es2022", external: ["@memsphere/view-sdk", "./view-sdk.js"], logLevel: "silent" });
+  return result.outputFiles[0]?.text ?? "";
 }
 
 function send(response: import("node:http").ServerResponse, status: number, type: string, body: string): void {

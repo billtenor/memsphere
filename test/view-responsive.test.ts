@@ -491,13 +491,17 @@ test("Run titles fall back to the Procedure name for historical Runs", async () 
   });
 });
 
-test("Run status polling clears a selection that moved to another secondary menu", async () => {
+test("Run status list refreshes only when the user asks", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
     page.setDefaultTimeout(10_000);
     let status = "running";
+    let summaryRequests = 0;
     await page.route("**/api/runs**", async (route) => {
-      const response = await route.fetch();
+      const requestUrl = new URL(route.request().url());
+      if (requestUrl.pathname === "/api/runs") summaryRequests += 1;
+      requestUrl.searchParams.delete("status");
+      const response = await route.fetch({ url: requestUrl.toString() });
       const payload = await response.json() as { runs?: Array<Record<string, unknown>>; run?: Record<string, unknown> };
       if (payload.runs) payload.runs = payload.runs.map((run) => ({ ...run, status }));
       if (payload.run) payload.run = { ...payload.run, status };
@@ -508,42 +512,55 @@ test("Run status polling clears a selection that moved to another secondary menu
       await page.getByRole("button", { name: "运行", exact: true }).click();
       await page.locator(".run-card-main").first().waitFor();
       assert.equal(await page.getByRole("tab", { name: "运行中", exact: true }).getAttribute("aria-selected"), "true");
-      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-
       status = "done";
+      const requestsBeforeWait = summaryRequests;
+      await page.waitForTimeout(4_250);
+      assert.equal(summaryRequests, requestsBeforeWait);
       const refreshed = page.waitForResponse((response) => (
         new URL(response.url()).pathname === "/api/runs"
-        && new URL(response.url()).searchParams.get("representation") === "summary"
+        && new URL(response.url()).searchParams.get("status") === "running"
       ));
+      await page.getByRole("button", { name: "刷新", exact: true }).click();
       await refreshed;
       await page.locator(".run-list").getByText("当前状态下没有 Run。", { exact: true }).waitFor();
       assert.equal(await page.locator(".run-card-main").count(), 0);
+      await page.locator('.view-host-mount[data-view-location="/tasks"]').waitFor();
+      const doneLoaded = page.waitForResponse((response) => (
+        new URL(response.url()).pathname === "/api/runs"
+        && new URL(response.url()).searchParams.get("status") === "done"
+      ));
       await page.getByRole("tab", { name: "已完成", exact: true }).click();
+      await doneLoaded;
       await page.locator(".run-card-main").first().waitFor();
       assert.equal(await page.getByRole("tab", { name: "已完成", exact: true }).getAttribute("aria-selected"), "true");
+      assert.equal(new URL(page.url()).pathname, "/tasks");
+      assert.match(await page.locator(".run-workspace").innerText(), /选择一个 Run/);
+      await page.unrouteAll({ behavior: "wait" });
     } finally {
       await page.close();
     }
   });
 });
 
-test("Run status polling loads an uncached replacement in the same secondary menu", async () => {
+test("Run status switching does not load a detail until the user selects one", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
-    let selectedMoved = false;
+    let detailRequests = 0;
     await page.route("**/api/runs**", async (route) => {
-      const response = await route.fetch();
+      const requestUrl = new URL(route.request().url());
+      requestUrl.searchParams.delete("status");
+      const response = await route.fetch({ url: requestUrl.toString() });
       const payload = await response.json() as { runs?: Array<Record<string, unknown>>; run?: Record<string, unknown> };
       if (payload.runs) {
         payload.runs = payload.runs.map((run) => ({
           ...run,
-          status: run.id === runId && selectedMoved ? "done" : "running",
-          ...(run.id === runId && selectedMoved ? { updatedAt: "2026-07-20T00:00:00.000Z" } : {})
+          status: "running"
         }));
       }
       await route.fulfill({ response, json: payload });
     });
     await page.route("**/api/runs/*", async (route) => {
+      detailRequests += 1;
       const response = await route.fetch();
       const payload = await response.json() as { run?: Record<string, unknown> };
       if (payload.run) payload.run = { ...payload.run, status: "running" };
@@ -552,85 +569,36 @@ test("Run status polling loads an uncached replacement in the same secondary men
     try {
       await page.goto(url);
       await page.getByRole("button", { name: "运行", exact: true }).click();
-      await page.getByRole("tab", { name: "运行中", exact: true }).click();
-      await page.getByRole("heading", { name: runName, exact: true }).waitFor();
-      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-
-      const replacementLoaded = page.waitForResponse(
-        (response) => new URL(response.url()).pathname === `/api/runs/${legacyRunId}`,
-        { timeout: 10_000 }
-      );
-      selectedMoved = true;
-      const replacementResponse = await replacementLoaded;
-      assert.equal(replacementResponse.status(), 200);
-      const replacementPayload = await replacementResponse.json() as { run: { status: string } };
-      assert.equal(replacementPayload.run.status, "running");
-      await page.waitForFunction(({ expectedPath, expectedTitle }) => (
-        location.pathname === expectedPath
-        && document.querySelector(".view-host-mount")?.getAttribute("data-view-location") === expectedPath
-        && document.querySelector(".run-title")?.textContent === expectedTitle
-      ), { expectedPath: `/tasks/${legacyRunId}`, expectedTitle: "Legacy procedure fallback" }, { timeout: 10_000 });
+      await page.locator(".run-card-main").first().waitFor();
+      assert.equal(detailRequests, 0);
+      assert.match(await page.locator(".run-workspace").innerText(), /选择一个 Run/);
+      await page.locator(".run-card-main").first().click();
+      await page.locator(".run-title").waitFor();
+      assert.equal(detailRequests, 1);
     } finally {
       await page.close();
     }
   });
 });
 
-test("Run status polling refreshes a stale cached replacement in the same secondary menu", async () => {
+test("Run detail refresh is manual", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
-    let legacyUpdated = false;
-    let selectedMoved = false;
-    const nextRevision = "2026-07-20T00:00:00.000Z";
-    await page.route("**/api/runs**", async (route) => {
-      const response = await route.fetch();
-      const payload = await response.json() as { runs?: Array<Record<string, unknown>> };
-      if (payload.runs) {
-        payload.runs = payload.runs.map((run) => ({
-          ...run,
-          status: run.id === runId && selectedMoved ? "done" : "running",
-          ...(run.id === runId && selectedMoved ? { updatedAt: nextRevision } : {}),
-          ...(run.id === legacyRunId && legacyUpdated ? { updatedAt: nextRevision } : {})
-        }));
-      }
-      await route.fulfill({ response, json: payload });
-    });
+    let detailRequests = 0;
     await page.route("**/api/runs/*", async (route) => {
-      const response = await route.fetch();
-      const payload = await response.json() as { run?: Record<string, unknown> };
-      if (payload.run) {
-        payload.run = {
-          ...payload.run,
-          status: "running",
-          ...(payload.run.id === legacyRunId && selectedMoved ? { updatedAt: nextRevision } : {})
-        };
-      }
-      await route.fulfill({ response, json: payload });
+      detailRequests += 1;
+      await route.continue();
     });
     try {
-      await page.goto(`${url}/tasks/${legacyRunId}`);
-      await page.locator(".run-title", { hasText: "Legacy procedure fallback" }).waitFor();
       await page.goto(`${url}/tasks/${runId}`);
       await page.getByRole("heading", { name: runName, exact: true }).waitFor();
-      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-
-      const summaryUpdated = page.waitForResponse((response) => (
-        new URL(response.url()).pathname === "/api/runs"
-        && new URL(response.url()).searchParams.get("representation") === "summary"
-      ));
-      legacyUpdated = true;
-      await summaryUpdated;
-
-      const replacementLoaded = page.waitForResponse(
-        (response) => new URL(response.url()).pathname === `/api/runs/${legacyRunId}`,
-        { timeout: 10_000 }
-      );
-      selectedMoved = true;
-      const replacementResponse = await replacementLoaded;
-      const replacementPayload = await replacementResponse.json() as { run: { updatedAt: string } };
-      assert.equal(replacementPayload.run.updatedAt, nextRevision);
-      await page.locator(".run-title", { hasText: "Legacy procedure fallback" }).waitFor();
-      await page.locator(`.view-host-mount[data-view-location="/tasks/${legacyRunId}"]`).waitFor();
+      const initialRequests = detailRequests;
+      await page.waitForTimeout(4_250);
+      assert.equal(detailRequests, initialRequests);
+      const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === `/api/runs/${runId}`);
+      await page.getByRole("button", { name: "刷新", exact: true }).click();
+      await refreshed;
+      assert.equal(detailRequests, initialRequests + 1);
     } finally {
       await page.close();
     }
@@ -645,7 +613,7 @@ test("missing Run detail is reported as not found", async () => {
   });
 });
 
-test("archiving the selected Run loads the next Run detail", async () => {
+test("archiving the selected Run returns to the current status list", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await openTaskPage(browser, url, 1024);
     try {
@@ -655,15 +623,12 @@ test("archiving the selected Run loads the next Run detail", async () => {
         response.request().method() === "POST"
         && new URL(response.url()).pathname === `/api/archive/runs/${runId}`
       );
-      const nextDetail = page.waitForResponse((response) =>
-        new URL(response.url()).pathname === `/api/runs/${legacyRunId}`
-      );
       await page.locator(".run-card.active .run-card-action").click();
       assert.equal((await archived).status(), 200);
-      assert.equal((await nextDetail).status(), 200);
-      await page.getByRole("heading", { name: "Legacy procedure fallback", exact: true }).waitFor();
+      await page.locator('.view-host-mount[data-view-location="/tasks"]').waitFor();
+      assert.match(await page.locator(".run-workspace").innerText(), /选择一个 Run/);
       assert.doesNotMatch(await page.locator(".run-workspace").textContent() ?? "", /加载中|Loading/);
-      assert.equal(new URL(page.url()).pathname, `/tasks/${legacyRunId}`);
+      assert.equal(new URL(page.url()).pathname, "/tasks");
     } finally {
       await page.close();
     }
@@ -922,6 +887,8 @@ test("multiple Human identities require and persist a Project-local ChangeSet se
         dialogs.push(dialog.type());
         await dialog.accept(dialog.type() === "prompt" ? "bob" : undefined);
       });
+      await page.locator(".memory-list .memory-button").first().click();
+      await page.locator(".memory-title").waitFor();
       const created = page.waitForRequest((request) => (
         request.method() === "POST" && new URL(request.url()).pathname === "/api/changes"
       ));
@@ -984,6 +951,7 @@ test("View deep links restore Memory, Run, and browser history", async () => {
         (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
       );
       await page.getByRole("tab", { name: "已完成", exact: true }).click();
+      await page.locator(".run-card-main").first().click();
       await selectedDetailLoaded;
       await page.waitForLoadState("networkidle");
       assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
@@ -991,8 +959,8 @@ test("View deep links restore Memory, Run, and browser history", async () => {
       await page.waitForURL(url + "/tasks");
       await page.waitForLoadState("networkidle");
       assert.equal(new URL(page.url()).pathname, "/tasks");
-      await page.locator(".run-list").getByText("当前状态下没有 Run。", { exact: true }).waitFor();
-      assert.equal(await page.locator(".run-card-main").count(), 0);
+      await page.locator(".run-workspace").getByText("选择一个 Run 查看详情。", { exact: true }).waitFor();
+      assert.equal(await page.locator(".run-card.active").count(), 0);
       const forwardDetailLoaded = page.waitForResponse(
         (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
       );

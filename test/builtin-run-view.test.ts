@@ -14,7 +14,7 @@ const bundlePath = "/assets/modules/org.memsphere.run/index.js";
 
 test("Run builtin renders a deep-linked Run and opens its Artifact Review", async () => {
   const [bundle, sdk, runtime] = await Promise.all([
-    buildRunBundle(), browserModule("../src/view/view-sdk.ts"), browserModule("../src/view/view-runtime.ts")
+    buildRunBundle(), browserModule("../src/view/view-sdk.ts"), browserRuntimeBundle()
   ]);
   const catalog = builtinModuleCatalog.find(entry => entry.moduleId === "org.memsphere.run")!;
   const instances: ViewHostBootInstance[] = [{
@@ -22,7 +22,7 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
     module: { projectId: "demo", moduleId: catalog.moduleId, moduleVersion: "0.1.2", instanceId: catalog.instanceId }
   }];
   const run = {
-    id: "run-demo", name: "Demo Run", procedureName: "demo-procedure", status: "running",
+    id: "run-demo", name: "Demo Run", procedureName: "demo-procedure", status: "running", readOnly: true,
     updatedAt: "2026-08-30T00:00:00.000Z",
     stack: [{ type: "procedure", index: 0, steps: [{ id: "step-1", instruction: "Inspect the result", artifact: "report" }] }],
     assertTree: { entries: [{ kind: "reference", target: "statements/run-rules", entries: [{ kind: "rule", text: "Keep evidence." }] }], sections: [] },
@@ -39,13 +39,14 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
     controlPlane: { actors: { human: { kind: "human", name: "Human" } } },
     artifactReview: { id: "review-1", currentRoundId: "round-1", round: { id: "round-1", submitted: 0, total: 1, assignments: [] } }
   };
+  let runDetailRequests = 0;
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
     if (url.pathname === bundlePath) return send(response, "text/javascript", bundle);
     if (url.pathname === viewSdkBundlePath) return send(response, "text/javascript", sdk);
     if (url.pathname === viewRuntimeBundlePath) return send(response, "text/javascript", runtime);
     if (url.pathname === "/api/runs") return json(response, { runs: [{ ...run, eventCount: 0 }] });
-    if (url.pathname === "/api/runs/run-demo") return json(response, { run });
+    if (url.pathname === "/api/runs/run-demo") { runDetailRequests += 1; return json(response, { run }); }
     if (url.pathname === "/api/runs/run-demo/artifact-reviews/review-1/rounds/round-1") return json(response, {
       review: { id: "review-1", currentRoundId: "round-1", status: "pending", round: { id: "round-1", revision: 1, status: "collecting", assignments: [] } },
       submission: { id: "submission-1", artifact: { name: "report", value: "Review this artifact" } }, assignment: null
@@ -58,6 +59,8 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
     await page.goto(`${origin}/tasks/run-demo`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Demo Run", level: 1 }).waitFor();
     assert.match(await page.locator(".run-workspace").innerText(), /Inspect the result/);
+    assert.equal(await page.locator(".run-card.active").count(), 1);
+    assert.equal(await page.locator(".run-card.active .run-card-action").count(), 0);
     assert.equal(await page.locator(".flow-item.branch").count(), 2);
     assert.equal(await page.locator(".flow-item.call").count(), 1);
     assert.equal(await page.locator('[data-current-task-step="true"]').getAttribute("data-step-id"), "step-1");
@@ -70,9 +73,18 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
     assert.match(await page.locator(".run-binding-body").innerText(), /Human/);
     assert.match(await page.locator(".task-result").first().innerText(), /Rendered report/);
     await page.getByRole("button", { name: /Artifact review/ }).click();
-    await page.locator("#artifact-review-modal[open]").waitFor();
+    await page.locator(".view-overlay-layer .artifact-review-modal").waitFor();
     assert.match(await page.locator("#artifact-review-artifact-pane").innerText(), /Review this artifact/);
     assert.equal(new URL(page.url()).pathname, "/tasks/run-demo/artifact-reviews/review-1");
+    assert.equal(runDetailRequests, 1, "opening the review should reuse the Run detail already loaded by the page");
+    const [surfaceBox, modalBox] = await Promise.all([
+      page.locator(".view-overlay-surface").boundingBox(),
+      page.locator(".view-overlay-layer .artifact-review-modal").boundingBox()
+    ]);
+    assert(surfaceBox && modalBox);
+    assert(Math.abs(surfaceBox.width - modalBox.width) < 1);
+    assert(Math.abs(surfaceBox.height - modalBox.height) < 1);
+    assert(modalBox.x + modalBox.width <= (await page.evaluate(() => innerWidth)) + 1);
   } finally { await browser.close(); await close(server); }
 });
 
@@ -81,5 +93,6 @@ async function buildRunBundle(): Promise<string> {
   return result.outputFiles[0]?.text ?? "";
 }
 async function browserModule(path: string): Promise<string> { const source=await readFile(new URL(path,import.meta.url),"utf8");return transpileModule(source,{compilerOptions:{module:ModuleKind.ESNext,target:ScriptTarget.ES2022}}).outputText; }
+async function browserRuntimeBundle():Promise<string>{const result=await build({entryPoints:[fileURLToPath(new URL("../src/view/view-runtime.ts",import.meta.url))],bundle:true,write:false,format:"esm",platform:"browser",target:"es2022",external:["@memsphere/view-sdk","./view-sdk.js"],logLevel:"silent"});return result.outputFiles[0]?.text??"";}
 function send(response:ServerResponse,type:string,body:string):void{response.writeHead(200,{"content-type":`${type}; charset=utf-8`});response.end(body);}function json(response:ServerResponse,body:unknown):void{send(response,"application/json",JSON.stringify(body));}
 async function listen(server:Server):Promise<string>{await new Promise<void>((resolve,reject)=>{server.once("error",reject);server.listen(0,"127.0.0.1",resolve);});return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;}async function close(server:Server):Promise<void>{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}

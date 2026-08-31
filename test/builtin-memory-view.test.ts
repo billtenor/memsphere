@@ -20,7 +20,7 @@ test("Memory builtin independently registers its route pages and renders Memory 
   const [bundle, sdk, runtime] = await Promise.all([
     buildMemoryBundle(),
     browserModule("../src/view/view-sdk.ts"),
-    browserModule("../src/view/view-runtime.ts")
+    browserRuntimeBundle()
   ]);
   const instances: ViewHostBootInstance[] = [{
     pluginPath: memoryBundlePath,
@@ -57,6 +57,8 @@ test("Memory builtin independently registers its route pages and renders Memory 
     assert.equal(await page.locator(".memory-module").count(), 1);
     assert.equal(await page.locator(".memory-source-tabs").count(), 1);
     assert.equal((await page.locator(".memory-count").textContent())?.trim(), "1 total");
+    assert.equal(await page.locator('.memory-workspace button', { hasText: "Edit" }).count(), 0);
+    assert.equal(await page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "Edit", exact: true }).count(), 1);
   } finally {
     await browser.close();
     await close(server);
@@ -65,7 +67,7 @@ test("Memory builtin independently registers its route pages and renders Memory 
 
 test("Memory builtin renders Market status and opens an importing ChangeSet", async () => {
   const [bundle, sdk, runtime] = await Promise.all([
-    buildMemoryBundle(), browserModule("../src/view/view-sdk.ts"), browserModule("../src/view/view-runtime.ts")
+    buildMemoryBundle(), browserModule("../src/view/view-sdk.ts"), browserRuntimeBundle()
   ]);
   const instances: ViewHostBootInstance[] = [{
     pluginPath: memoryBundlePath,
@@ -106,12 +108,16 @@ test("Memory builtin renders Market status and opens an importing ChangeSet", as
     await page.goto(`${origin}/market`, { waitUntil: "networkidle" });
     const market = page.getByRole("button", { name: /Market Memory.*Importing/ });
     await market.waitFor();
-    await market.click();
+    assert.equal(await page.locator('.memory-workspace button', { hasText: "View the corresponding ChangeSet" }).count(), 0);
+    await page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "View the corresponding ChangeSet", exact: true }).click();
     await page.waitForURL(`${origin}/projects/demo/changes/change-market`);
     await page.getByRole("heading", { name: "change-market", exact: true }).waitFor();
     await page.getByRole("heading", { name: "Market Memory", exact: true }).waitFor();
     assert.match(await page.locator(".memory-change-layout").innerText(), /Market content/);
     assert.equal(validatedPreviewRequests, 0);
+    await page.getByRole("button", { name: "← Back to Memory", exact: true }).click();
+    await page.waitForURL(`${origin}/memories`);
+    assert.equal(await page.locator(".memory-count").innerText(), "0 total");
   } finally {
     await browser.close();
     await close(server);
@@ -120,7 +126,7 @@ test("Memory builtin renders Market status and opens an importing ChangeSet", as
 
 test("Memory builtin keeps Procedure content structured instead of exposing object-shaped YAML", async () => {
   const [bundle, sdk, runtime] = await Promise.all([
-    buildMemoryBundle(), browserModule("../src/view/view-sdk.ts"), browserModule("../src/view/view-runtime.ts")
+    buildMemoryBundle(), browserModule("../src/view/view-sdk.ts"), browserRuntimeBundle()
   ]);
   const instances: ViewHostBootInstance[] = [{
     pluginPath: memoryBundlePath,
@@ -184,6 +190,11 @@ async function buildMemoryBundle(): Promise<string> {
 async function browserModule(relativePath: string): Promise<string> {
   const source = await readFile(new URL(relativePath, import.meta.url), "utf8");
   return transpileModule(source, { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 } }).outputText;
+}
+
+async function browserRuntimeBundle(): Promise<string> {
+  const result = await build({ entryPoints: [fileURLToPath(new URL("../src/view/view-runtime.ts", import.meta.url))], bundle: true, write: false, format: "esm", platform: "browser", target: "es2022", external: ["@memsphere/view-sdk", "./view-sdk.js"], logLevel: "silent" });
+  return result.outputFiles[0]?.text ?? "";
 }
 
 function send(response: import("node:http").ServerResponse, status: number, contentType: string, body: string): void {

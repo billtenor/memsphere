@@ -1,6 +1,7 @@
 import {
   defineViewPlugin,
   slots,
+  type Disposer,
   type RouteLocation,
   type RouteToken,
   type ViewMount,
@@ -13,11 +14,12 @@ type Json = Record<string, any>;
 type RunConfig = { locale?: string; messages?: Readonly<Record<string, string>> };
 type RunRoutes = { index: RouteToken; detail: RouteToken; review: RouteToken };
 type Navigate = (target: ReturnType<RouteToken["to"]>) => Promise<void>;
+type RefreshableViewMount = ViewMount & { refresh(): Promise<void> };
 
 const zh: Readonly<Record<string, string>> = Object.freeze({
   run: "运行", running: "运行中", done: "已完成", abandoned: "已废弃",
   loading: "加载中…", empty: "当前状态下没有 Run。", choose: "选择一个 Run 查看详情。",
-  retry: "重试", archive: "归档", abandon: "废弃", review: "产物评审",
+  retry: "重试", refresh: "刷新", archive: "归档", abandon: "废弃", review: "产物评审",
   archiveConfirm: "确认归档这个 Run？", abandonConfirm: "确认废弃这个 Run？",
   artifact: "产物", flow: "执行流程", current: "当前步骤", notStarted: "未开始",
   completed: "已完成", updated: "更新时间", procedure: "流程", events: "产物数",
@@ -49,7 +51,7 @@ const zh: Readonly<Record<string, string>> = Object.freeze({
 const en: Readonly<Record<string, string>> = Object.freeze({
   run: "Runs", running: "Running", done: "Done", abandoned: "Abandoned",
   loading: "Loading…", empty: "No runs in this status.", choose: "Choose a run to inspect.",
-  retry: "Retry", archive: "Archive", abandon: "Abandon", review: "Artifact review",
+  retry: "Retry", refresh: "Refresh", archive: "Archive", abandon: "Abandon", review: "Artifact review",
   archiveConfirm: "Archive this run?", abandonConfirm: "Abandon this run?",
   artifact: "Artifact", flow: "Flow", current: "Current step", notStarted: "Not started",
   completed: "Completed", updated: "Updated", procedure: "Procedure", events: "Artifacts",
@@ -88,9 +90,9 @@ const styles = `
   .run-workspace,.run-workspace>*{min-width:0;max-width:100%}.run-workspace{padding:24px 30px 60px}.run-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}.run-title{margin:0;font-size:26px;min-width:0;overflow-wrap:anywhere}.run-subtitle{min-width:0;margin-top:5px;color:var(--muted);overflow-wrap:anywhere}.run-panel,.run-error,.run-step,.run-artifact{min-width:0;max-width:100%;overflow-wrap:anywhere;margin:12px 0;padding:15px;border:1px solid var(--line);border-radius:8px;background:var(--surface);box-shadow:0 1px 2px #0000000b}.run-error{border-left:4px solid var(--danger)}
   .run-meta{display:flex;flex-wrap:wrap;gap:6px}.run-pill{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:2px 8px;background:var(--soft);color:var(--muted);font-size:11px}.run-pill.running{color:var(--accent);border-color:#a9c8c2}.run-pill.abandoned{color:#7b5a1e;background:#fff6db}.run-pill.done{color:#315f42;background:#e8f4ea}.run-meta-action{display:inline-flex;align-items:center;border:1px solid #bcc5c1;border-radius:6px;background:var(--surface);color:#485352;padding:5px 10px;font-size:12px;font-weight:600;box-shadow:0 1px 2px #00000012}.run-meta-action:hover{border-color:#829d98;background:#f5f8f6;color:#173f3c}.run-meta-action.primary{border-color:#79a9a1;background:#eef7f4;color:#1f625d}.run-meta-action:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .run-section-title{font-weight:750;margin:18px 0 7px}.run-flow{display:grid;gap:8px;min-width:0}.run-step.current{border-left:4px solid var(--accent)}.run-step h3,.run-artifact h3{min-width:0;margin:0 0 7px;font-size:15px;overflow-wrap:anywhere}.run-pre{max-width:100%;padding:11px;border-radius:6px;background:#f3f4f1;white-space:pre-wrap;overflow:auto;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,monospace}.artifact-review-artifact-content{min-width:0;max-width:100%;overflow-wrap:anywhere}.artifact-review-artifact-content table{display:block;max-width:100%;overflow:auto}.run-btn{border:1px solid var(--line);border-radius:6px;background:var(--surface);padding:7px 10px}.run-btn.primary{border-color:var(--accent);background:var(--accent);color:#fff}.run-btn.danger{color:var(--danger)}
-  dialog.artifact-review-modal,dialog.artifact-review-dialog{--surface:#fff;--soft:#f1f3ef;--line:#dce0da;--text:#242829;--muted:#70777a;--accent:#286c67;--danger:#a14436;color:var(--text);background:var(--surface);font:14px/1.45 ui-sans-serif,system-ui,sans-serif}
-  dialog.artifact-review-modal *,dialog.artifact-review-dialog *{box-sizing:border-box}
-  dialog.artifact-review-modal{width:90vw;max-width:none;height:90dvh;max-height:none;margin:auto;padding:0;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);box-shadow:0 24px 80px #191e233d;overflow:hidden}dialog.artifact-review-modal::backdrop{background:#1d262980}.artifact-review-shell{display:grid;grid-template-rows:auto auto auto minmax(0,1fr);height:100%;background:var(--surface)}.artifact-review-head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--surface)}.artifact-review-head h2{margin:0;font-size:18px}.artifact-review-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 18px;border-bottom:1px solid var(--line);background:var(--surface)}.artifact-review-mobile-tabs{display:none}.artifact-review-body{display:grid;grid-template-columns:minmax(0,var(--artifact-review-left,58%)) 7px minmax(330px,1fr);min-height:0;background:var(--surface)}.artifact-review-modal-pane{min-width:0;overflow-x:hidden;overflow-y:auto;padding:18px;overscroll-behavior:contain;background:var(--surface)}#artifact-review-review-pane{background:#fbfbf8}.artifact-review-divider{background:var(--line);cursor:col-resize}.artifact-review-operation-group{border-top:1px solid var(--line);padding:12px 0}.artifact-review-row{padding:9px 0;border-bottom:1px solid var(--line)}.artifact-review-row-main{display:grid;gap:3px}.artifact-review-comment textarea{width:100%;min-height:90px;padding:10px 11px;border:1px solid #aebbb7;border-radius:7px;background:#fff;box-shadow:inset 0 1px 2px #17211f0a}.artifact-review-comment textarea:focus{border-color:var(--accent);outline:2px solid #286c6726;outline-offset:0}.artifact-review-actions,.artifact-review-vote{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}.artifact-review-actions>.run-btn:not(.primary){border-color:#b9c3bf;background:#f7f8f5;font-weight:650;box-shadow:0 1px 2px #17211f12}.artifact-review-actions>.run-btn:not(.primary):hover{border-color:#7f9994;background:#f1f6f4}.artifact-review-submit-area{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}.artifact-review-vote label{display:inline-flex;gap:5px;align-items:center}.artifact-review-target{position:relative;padding:4px}.inline-plus{position:absolute;right:3px;top:3px;border:0;border-radius:50%;background:#dfeae7}.inline-plus::before{content:"+"}.artifact-review-target-located,.artifact-review-opinion-located{outline:3px solid #e6b85b;outline-offset:2px}.artifact-review-message.warn{color:var(--danger)}
+  .artifact-review-modal,dialog.artifact-review-dialog{--surface:#fff;--soft:#f1f3ef;--line:#dce0da;--text:#242829;--muted:#70777a;--accent:#286c67;--danger:#a14436;color:var(--text);background:var(--surface);font:14px/1.45 ui-sans-serif,system-ui,sans-serif}
+  .artifact-review-modal *,dialog.artifact-review-dialog *{box-sizing:border-box}
+  .artifact-review-modal{width:100%;max-width:none;height:100%;max-height:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);box-shadow:0 24px 80px #191e233d;overflow:hidden}.run-review-loading{display:grid;width:100%;height:100%;min-height:0;place-items:center;border:0;border-radius:10px;background:var(--surface);color:var(--muted);box-shadow:none}.artifact-review-shell{display:grid;grid-template-rows:auto auto auto minmax(0,1fr);height:100%;background:var(--surface)}.artifact-review-head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--surface)}.artifact-review-head h2{margin:0;font-size:18px}.artifact-review-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 18px;border-bottom:1px solid var(--line);background:var(--surface)}.artifact-review-mobile-tabs{display:none}.artifact-review-body{display:grid;grid-template-columns:minmax(0,var(--artifact-review-left,58%)) 7px minmax(330px,1fr);min-height:0;background:var(--surface)}.artifact-review-modal-pane{min-width:0;overflow-x:hidden;overflow-y:auto;padding:18px;overscroll-behavior:contain;background:var(--surface)}#artifact-review-review-pane{background:#fbfbf8}.artifact-review-divider{background:var(--line);cursor:col-resize}.artifact-review-operation-group{border-top:1px solid var(--line);padding:12px 0}.artifact-review-row{padding:9px 0;border-bottom:1px solid var(--line)}.artifact-review-row-main{display:grid;gap:3px}.artifact-review-comment textarea{width:100%;min-height:90px;padding:10px 11px;border:1px solid #aebbb7;border-radius:7px;background:#fff;box-shadow:inset 0 1px 2px #17211f0a}.artifact-review-comment textarea:focus{border-color:var(--accent);outline:2px solid #286c6726;outline-offset:0}.artifact-review-actions,.artifact-review-vote{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}.artifact-review-actions>.run-btn:not(.primary){border-color:#b9c3bf;background:#f7f8f5;font-weight:650;box-shadow:0 1px 2px #17211f12}.artifact-review-actions>.run-btn:not(.primary):hover{border-color:#7f9994;background:#f1f6f4}.artifact-review-submit-area{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}.artifact-review-vote label{display:inline-flex;gap:5px;align-items:center}.artifact-review-target{position:relative;padding:4px}.inline-plus{position:absolute;right:3px;top:3px;border:0;border-radius:50%;background:#dfeae7}.inline-plus::before{content:"+"}.artifact-review-target-located,.artifact-review-opinion-located{outline:3px solid #e6b85b;outline-offset:2px}.artifact-review-message.warn{color:var(--danger)}
   dialog.artifact-review-dialog{width:min(460px,calc(100vw - 32px));padding:0;border:1px solid var(--line);border-radius:8px;box-shadow:0 20px 60px #191e233d}dialog.artifact-review-dialog::backdrop{background:#161c1e57}.artifact-review-dialog-body{display:grid;gap:12px;padding:18px}.artifact-review-dialog-body h3{margin:0;font-size:18px}.artifact-review-dialog-actions{display:flex;justify-content:flex-end;gap:8px}.artifact-review-dialog-actions>.run-btn{width:auto;min-width:0}
   .artifact-review-heading{min-width:0;display:grid;gap:4px}.artifact-review-heading h2{margin:0}.artifact-review-subtitle{color:var(--muted);font-size:13px;overflow-wrap:anywhere}.artifact-review-material-heading{margin:0 0 10px;font-size:16px}.artifact-review-material-meta{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}.artifact-review-material-path{display:block;margin:8px 0;padding:7px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:12px;overflow-wrap:anywhere}.artifact-review-material-time{display:inline-block;margin-bottom:12px;color:var(--muted);font-size:12px}.artifact-review-artifact-frame{padding:12px;border:1px solid var(--line);border-radius:8px;background:#f8f9f6}
   .artifact-review-card{margin:0 0 34px;padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);box-shadow:0 1px 2px #0000000b}.artifact-review-card>h3{margin:0 0 12px;font-size:16px}.artifact-review-card-label{display:block;margin:10px 0 6px;color:var(--muted);font-size:12px;font-weight:700}.artifact-review-card-line{margin:6px 0;overflow-wrap:anywhere}.artifact-review-card .artifact-review-row:last-child{border-bottom:0}.artifact-review-progress-summary{margin:8px 0 12px;padding:9px 10px;border-radius:7px;background:var(--soft);color:var(--muted);font-size:12px}.artifact-review-participant{padding:12px 0;border-top:1px solid var(--line)}.artifact-review-participant:first-of-type{border-top:0}.artifact-review-participant-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.artifact-review-participant-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}.artifact-review-opinion{margin-top:9px;padding:10px;border-left:3px solid #b8cbc7;background:#f7f9f6;white-space:pre-wrap;overflow-wrap:anywhere}.artifact-review-opinion h1,.artifact-review-opinion h2,.artifact-review-opinion h3{font-size:1em}.artifact-review-opinion p:first-child{margin-top:0}.artifact-review-opinion p:last-child{margin-bottom:0}.artifact-review-comment-severity{display:inline-block;margin-right:7px;border-radius:999px;padding:1px 7px;background:#fff0eb;color:var(--danger);font-size:11px}.artifact-review-result-summary{padding:10px;border-radius:7px;background:var(--soft)}
@@ -99,7 +101,7 @@ const styles = `
   .artifact-review-vote{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.artifact-review-vote .run-btn{min-width:0;padding:9px 7px;border-color:#b9c3bf;background:#fff;color:var(--text);font-weight:650;box-shadow:0 1px 2px #17211f12}.artifact-review-vote .run-btn:hover{border-color:#7f9994;background:#f1f6f4}.artifact-review-vote .run-btn.active{border-color:var(--accent);background:#dfeeea;color:#173f3c;font-weight:750;box-shadow:inset 0 0 0 1px var(--accent)}.artifact-review-vote .run-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .artifact-review-activity-toggle{flex:0 0 auto;border:0;background:transparent;color:var(--accent);padding:1px 0;font-size:12px}.artifact-review-activity-toggle:hover,.artifact-review-activity-toggle:focus-visible{text-decoration:underline;text-underline-offset:2px;outline:0}.artifact-review-row>.artifact-review-activity{margin-top:10px}
   .artifact-review-artifact-frame{padding:0;border:0;background:transparent}.markdown-body{min-width:0;max-width:100%;margin:8px 0 0;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:#f3f5f0;line-height:1.55;overflow-wrap:anywhere}.markdown-body>:first-child{margin-top:0}.markdown-body>:last-child{margin-bottom:0}.markdown-body p{margin:6px 0}.markdown-body h1,.markdown-body h2,.markdown-body h3,.markdown-body h4,.markdown-body h5,.markdown-body h6{margin:12px 0 6px;line-height:1.3;font-weight:800}.markdown-body h1{font-size:21px}.markdown-body h2{font-size:18px}.markdown-body h3{font-size:16px}.markdown-body h4,.markdown-body h5,.markdown-body h6{font-size:14px}.markdown-body ul,.markdown-body ol{margin:6px 0;padding-left:22px}.markdown-body li{margin:3px 0}.markdown-body blockquote{margin:8px 0;padding:2px 12px;border-left:3px solid var(--line);color:var(--muted)}.markdown-body code{border:1px solid var(--line);border-radius:4px;background:#e9ece6;padding:1px 4px;font:12px ui-monospace,monospace}.markdown-body pre{max-width:100%;margin:8px 0;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:#e9ece6;white-space:pre-wrap;overflow:auto}.markdown-body pre code{border:0;background:none;padding:0;white-space:inherit}.markdown-body table{display:table;width:max-content;min-width:100%;border-collapse:collapse;background:#fff}.markdown-body th,.markdown-body td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}.artifact-review-commentable{display:grid;grid-template-columns:24px minmax(0,1fr);gap:7px;align-items:start;width:100%;scroll-margin-top:16px}.artifact-review-commentable-body{min-width:0;max-width:100%;overflow-wrap:anywhere}.artifact-review-commentable>.inline-plus{position:static;width:20px;height:20px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--muted);padding:0;line-height:16px;opacity:0;transition:opacity 120ms ease,border-color 120ms ease,color 120ms ease}.artifact-review-commentable:hover>.inline-plus,.artifact-review-commentable>.inline-plus:focus,.artifact-review-commentable>.inline-plus[aria-expanded=true]{opacity:1}.artifact-review-commentable>.inline-plus:hover{border-color:var(--accent);color:var(--accent)}.artifact-review-commentable>.inline-comment-editor{grid-column:2;width:100%;margin-top:4px;padding:10px;border:1px solid #c7d8d4;border-radius:8px;background:#f7faf8;box-shadow:0 1px 3px #17211f12}.inline-comment-editor textarea{width:100%;min-height:76px;margin:0;padding:10px 11px;border:1px solid #aebbb7;border-radius:7px;background:#fff}.inline-comment-editor textarea:focus{border-color:var(--accent);outline:2px solid #286c6726}.inline-comment-actions{display:flex;gap:7px;margin-top:8px}.comment-card-head>.artifact-review-locate{flex:0 0 auto;width:auto;padding:1px 3px;border:0;background:transparent;color:var(--accent);font-size:12px;font-weight:500;box-shadow:none}.comment-card-head>.artifact-review-locate:hover{text-decoration:underline;text-underline-offset:2px}.artifact-review-target{padding:0}.artifact-review-target-located{background:#edf6f3;box-shadow:0 0 0 3px #286c6733;outline:0}
-  @media(max-width:820px){.run-layout{display:block}.run-sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.run-workspace{padding:18px 14px 40px}.artifact-review-mobile-tabs{display:flex;gap:5px;padding:8px;border-bottom:1px solid var(--line)}.artifact-review-body{display:block}.artifact-review-divider{display:none}.artifact-review-modal-pane{height:calc(90dvh - 116px)}.artifact-review-modal-pane[hidden]{display:none}}
+  @media(max-width:820px){.run-layout{display:block}.run-sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.run-workspace{padding:18px 14px 40px}.artifact-review-mobile-tabs{display:flex;gap:5px;padding:8px;border-bottom:1px solid var(--line)}.artifact-review-body{display:block}.artifact-review-divider{display:none}.artifact-review-modal-pane{height:calc(100dvh - 116px)}.artifact-review-modal-pane[hidden]{display:none}}
 `;
 
 export default defineViewPlugin<RunConfig>({
@@ -114,96 +116,307 @@ export default defineViewPlugin<RunConfig>({
       detail: ctx.router.register({ id: "detail", path: "/tasks/:runId" }),
       review: ctx.router.register({ id: "artifact-review", path: "/tasks/:runId/artifact-reviews/:reviewId" })
     };
+    const runDetailCache = new Map<string, Json>();
+    const pageMount = createMount(config, routes, navigate, runDetailCache);
     ctx.slots.register(slots.navigationPrimary, {
       id: "run.navigation", order: 200,
       value: { label: { text: tr(config, "run") }, icon: { kind: "system", name: "play" }, route: routes.index.to() }
     });
-    registerPage(ctx, routes.index, "run.index", config, routes,navigate);
-    registerPage(ctx, routes.detail, "run.detail", config, routes,navigate);
-    registerPage(ctx, routes.review, "run.review", config, routes,navigate);
+    registerPage(ctx, routes.index, "run.index", config, pageMount);
+    registerPage(ctx, routes.detail, "run.detail", config, pageMount);
+    ctx.slots.register(slots.overlay, {
+      id: "run.review",
+      key: routes.review.key,
+      when: routes.review.activation,
+      value: {
+        label: { text: tr(config, "review") },
+        presentation: "dialog",
+        background: ctx.router.project({ from: routes.review, to: routes.detail, params: { runId: "runId" } }),
+        mount: createMount(config, routes, navigate, runDetailCache, true)
+      }
+    });
+    startRunHome(ctx, config, routes);
   }
 });
 
-function registerPage(ctx: ViewPluginContext, route: RouteToken, id: string, config: Readonly<RunConfig>, routes: RunRoutes,navigate:Navigate): void {
+function startRunHome(ctx: ViewPluginContext, config: Readonly<RunConfig>, routes: RunRoutes): void {
+  const leases = new Map<string, Disposer>();
+  let controller = new AbortController();
+  let disposed = false;
+  let refreshing: Promise<void> | undefined;
+  const replace = (key: string, create: () => Disposer) => {
+    const previous = leases.get(key);
+    const next = create();
+    leases.set(key, next);
+    void previous?.();
+  };
+  const withdrawMissing = (prefix: string, keep: ReadonlySet<string>) => {
+    for (const [key, dispose] of [...leases]) {
+      if (!key.startsWith(prefix) || keep.has(key)) continue;
+      leases.delete(key); void dispose();
+    }
+  };
+  const refresh = async () => {
+    controller.abort(); controller = new AbortController();
+    try {
+      const response = await fetch("/api/runs?representation=summary&status=running", { signal: controller.signal });
+      if (!response.ok) throw new Error(await response.text());
+      const payload = await response.json() as { runs?: Json[] };
+      const attentionKeep = new Set<string>();
+      const continueKeep = new Set<string>();
+      for (const run of (payload.runs ?? []).filter(item => !item.archived && !item.readOnly).slice(0, 10)) {
+        const progress = run.reviewProgress as Json | undefined;
+        if (progress?.id && progress?.currentRoundId && !["approved", "completed", "cancelled"].includes(String(progress.status ?? ""))) {
+          const key = `attention:${run.id}:${progress.id}`; attentionKeep.add(key);
+          const target = routes.review.to({ runId: String(run.id), reviewId: String(progress.id) });
+          replace(key, () => ctx.slots.upsert(slots.homeAttention, {
+            id: `run.review.${progress.id}`, order: 200,
+            value: {
+              title: { text: String(run.name ?? run.id) },
+              summary: { text: `${tr(config, "reviewProgress")} ${progress.submitted ?? 0}/${progress.total ?? 0}` },
+              icon: { kind: "system", name: "file-text" },
+              source: { text: tr(config, "review") }, status: "warning", updatedAt: String(progress.updatedAt ?? run.updatedAt ?? ""),
+              action: { label: { text: tr(config, "review") }, run: () => ctx.router!.navigate(target) }
+            }
+          }));
+        } else if (run.status === "running") {
+          const key = `continue:${run.id}`; continueKeep.add(key);
+          const target = routes.detail.to({ runId: String(run.id) });
+          replace(key, () => ctx.slots.upsert(slots.homeContinue, {
+            id: `run.${run.id}`, order: 200,
+            value: {
+              title: { text: String(run.name ?? run.id) },
+              summary: { text: tr(config, "running") }, icon: { kind: "system", name: "play" }, updatedAt: String(run.updatedAt ?? ""), route: target
+            }
+          }));
+        }
+      }
+      withdrawMissing("attention:", attentionKeep);
+      withdrawMissing("continue:", continueKeep);
+      const failed = leases.get("attention:error"); if (failed) { leases.delete("attention:error"); void failed(); }
+    } catch (error) {
+      if (controller.signal.aborted || ctx.lifecycle.disposed) return;
+      replace("attention:error", () => ctx.slots.upsert(slots.homeAttention, {
+        id: "run.home.error", order: 290,
+        value: {
+          title: { text: tr(config, "loadFailed") },
+          summary: { text: error instanceof Error ? error.message : String(error) }, status: "error",
+          icon: { kind: "system", name: "warning" },
+          action: { label: { text: tr(config, "retry") }, run: refresh }
+        }
+      }));
+    }
+  };
+  const task = refresh().finally(() => {
+    if (refreshing === task) refreshing = undefined;
+  });
+  refreshing = task;
+  ctx.lifecycle.own(async () => {
+    disposed = true;
+    controller.abort();
+    if (refreshing) await Promise.allSettled([refreshing]);
+    await Promise.allSettled([...leases.values()].map(dispose => dispose())); leases.clear();
+  });
+}
+
+function registerPage(ctx: ViewPluginContext, route: RouteToken, id: string, config: Readonly<RunConfig>, mount: RefreshableViewMount): void {
   ctx.slots.register(slots.headerTitle, {
     id: `${id}.header`, when: route.activation, value: { title: { text: tr(config, id === "run.review" ? "review" : "run") } }
   });
   ctx.slots.register(slots.mainView, {
-    id, key: route.key, when: route.activation, value: createMount(config, routes,navigate)
+    id, key: route.key, when: route.activation, value: mount
+  });
+  ctx.slots.register(slots.headerActions, {
+    id: `${id}.refresh`, order: 100, when: route.activation,
+    value: { label: { text: tr(config, "refresh") }, run: () => mount.refresh() }
   });
 }
 
-function createMount(config: Readonly<RunConfig>, routes: RunRoutes,navigate:Navigate): ViewMount {
+function createMount(config: Readonly<RunConfig>, routes: RunRoutes,navigate:Navigate, runDetailCache: Map<string, Json>, reviewOnly = false): RefreshableViewMount {
+  let app: RunApplication | undefined;
   return {
     async mount({ element, portal }, context) {
       const controller = new AbortController();
       element.classList.add("run-module");
       const style = document.createElement("style"); style.textContent = styles + runDetailStyles; element.append(style);
-      const app = new RunApplication(element, portal, config, routes, context.route, controller,navigate);
+      app = new RunApplication(element, portal, config, routes, context.route, controller,navigate,runDetailCache,reviewOnly);
       await app.start();
-      return () => { controller.abort(); app.dispose(); element.classList.remove("run-module"); element.replaceChildren(); portal.replaceChildren(); };
+      return async () => { controller.abort(); await app?.dispose(); app = undefined; element.classList.remove("run-module"); element.replaceChildren(); portal.replaceChildren(); };
+    },
+    async update(context) {
+      await app?.updateRoute(context.route);
+    },
+    async refresh() {
+      await app?.refresh();
     }
   };
 }
 
 class RunApplication {
   readonly #root: HTMLElement; readonly #portal: HTMLElement; readonly #config: Readonly<RunConfig>;
-  readonly #routes: RunRoutes; readonly #route: RouteLocation; readonly #controller: AbortController;readonly #navigate:Navigate;
+  readonly #routes: RunRoutes; #route: RouteLocation; readonly #controller: AbortController;readonly #navigate:Navigate;
   #runs: Json[] = []; #detail: Json | null = null; #status = "running"; #poll = 0; #busy = false;
   #detailError = ""; #detailErrorRunId = "";
-  #reviewContext: Json | null = null; #reviewDialog: HTMLDialogElement | null = null;
+  #reviewContext: Json | null = null; #reviewDialog: HTMLElement | null = null;
+  readonly #reviewOnly:boolean;
+  readonly #runDetailCache: Map<string, Json>;
   #reviewRoundId = ""; #reviewMaterial = "candidate";
   #activities = new Map<string, Json>();
   #composerByActor = new Map<string,string>();
   #severityByActor = new Map<string,string>();
   #voteByActor = new Map<string,string>();
   #runDetailState = createRunDetailState();
-  constructor(root: HTMLElement, portal: HTMLElement, config: Readonly<RunConfig>, routes: RunRoutes, route: RouteLocation, controller: AbortController,navigate:Navigate) {
-    this.#root=root; this.#portal=portal; this.#config=config; this.#routes=routes; this.#route=route; this.#controller=controller;this.#navigate=navigate;
+  #polling: Promise<void> | undefined;
+  #disposed = false;
+  #runListVersion = "";
+  #lastLoadChanged = true;
+  constructor(root: HTMLElement, portal: HTMLElement, config: Readonly<RunConfig>, routes: RunRoutes, route: RouteLocation, controller: AbortController,navigate:Navigate,runDetailCache:Map<string,Json>,reviewOnly=false) {
+    this.#root=root; this.#portal=portal; this.#config=config; this.#routes=routes; this.#route=route; this.#controller=controller;this.#navigate=navigate;this.#runDetailCache=runDetailCache;this.#reviewOnly=reviewOnly;
   }
   async start(): Promise<void> {
     this.#renderLoading();
     const runId = this.#route.params.runId;
-    await this.#load(runId, { adoptStatus: true });
-    this.#render();
+    if (this.#reviewOnly && runId) await this.#loadReviewRun(runId);
+    else await this.#load(runId, { adoptStatus: true });
+    if(!this.#reviewOnly)this.#render();
     if (this.#route.routeKey?.endsWith("artifact-review") && runId && this.#route.params.reviewId) {
       await this.#openReview(runId, this.#route.params.reviewId);
     }
-    this.#poll = window.setInterval(() => { if(this.#busy)return;if(this.#reviewContext)void this.#pollActivities();if(!this.#root.querySelector(":focus"))void this.#refresh(); }, 4000);
+    this.#poll = window.setInterval(() => this.#scheduleActivityPoll(), 4000);
   }
-  dispose(): void { if (this.#poll) window.clearInterval(this.#poll); this.#reviewDialog?.close(); }
+  async #loadReviewRun(runId:string):Promise<void>{
+    const cached=this.#runDetailCache.get(runId);
+    if(cached){this.#detail=cached;return;}
+    const payload=await this.#request(`/api/runs/${encodeURIComponent(runId)}`);
+    this.#detail=this.#rememberRun(payload.run);
+  }
+  async updateRoute(route: RouteLocation): Promise<void> {
+    this.#route = route;
+    if (this.#reviewOnly) return;
+    const runId = route.params.runId;
+    if (!runId) {
+      this.#detail = null;
+      this.#render();
+      return;
+    }
+    const summary = this.#runs.find(run => run.id === runId);
+    if (summary?.status) this.#status = summary.status;
+    if (this.#detail?.id !== runId || this.#detailErrorRunId === runId) {
+      try {
+        const payload = await this.#request(`/api/runs/${encodeURIComponent(runId)}`);
+        this.#detail = this.#rememberRun(payload.run);
+        this.#detailError = "";
+        this.#detailErrorRunId = "";
+      } catch (error) {
+        this.#detail = null;
+        this.#detailError = error instanceof Error ? error.message : String(error);
+        this.#detailErrorRunId = runId;
+      }
+    }
+    this.#render();
+  }
+  #scheduleActivityPoll(): void {
+    if (this.#disposed || this.#busy || this.#polling || !this.#reviewContext) return;
+    const task = this.#pollActivities().finally(() => {
+      if (this.#polling === task) this.#polling = undefined;
+    });
+    this.#polling = task;
+  }
+  async dispose(): Promise<void> {
+    this.#disposed = true;
+    if (this.#poll) window.clearInterval(this.#poll);
+    this.#controller.abort();
+    if (this.#polling) await Promise.allSettled([this.#polling]);
+    this.#reviewDialog?.remove();
+  }
+  async refresh(): Promise<void> {
+    if (this.#busy) return;
+    this.#busy = true;
+    try { await this.#refresh(); }
+    finally { this.#busy = false; }
+  }
   async #request(path: string, init?: RequestInit): Promise<any> {
     const response = await fetch(path, { ...init, signal: this.#controller.signal });
     if (!response.ok) throw new Error((await response.text()) || `${response.status}`);
     return response.status === 204 ? null : response.json();
   }
-  async #load(runId?: string, options: { adoptStatus?: boolean; replaceMoved?: boolean } = {}): Promise<string | undefined> {
-    const payload = await this.#request("/api/runs?representation=summary");
-    this.#runs = payload.runs || [];
+  async #load(runId?: string, options: { adoptStatus?: boolean; replaceMoved?: boolean; skipUnchanged?: boolean } = {}): Promise<string | undefined> {
+    let prefetchedDetail: Json | null = null;
+    if (runId && options.adoptStatus) {
+      try {
+        const detailPayload = await this.#request(`/api/runs/${encodeURIComponent(runId)}`);
+        prefetchedDetail = this.#rememberRun(detailPayload.run);
+        if (prefetchedDetail?.status) this.#status = prefetchedDetail.status;
+        this.#detail = prefetchedDetail;
+        this.#detailError = "";
+        this.#detailErrorRunId = "";
+      } catch (error) {
+        this.#detail = null;
+        this.#detailError = error instanceof Error ? error.message : String(error);
+        this.#detailErrorRunId = runId;
+      }
+    }
+    const requestedStatus = this.#status;
+    const query = new URLSearchParams({ representation: "summary", status: requestedStatus });
+    const payload = await this.#request(`/api/runs?${query}`);
+    if (requestedStatus !== this.#status) return undefined;
+    const nextRuns = payload.runs || [];
+    const nextListVersion = JSON.stringify(nextRuns.map((run: Json) => [
+      run.id, run.status, run.updatedAt, run.eventCount, run.archived, run.readOnly,
+      run.reviewProgress?.id, run.reviewProgress?.updatedAt, run.reviewProgress?.status
+    ]));
+    const listChanged = nextListVersion !== this.#runListVersion;
+    this.#runListVersion = nextListVersion;
+    this.#runs = nextRuns;
     const selected = runId ? this.#runs.find(run => run.id === runId) : undefined;
     if (options.adoptStatus && selected?.status) this.#status = selected.status;
     const visible = (run: Json | undefined): boolean => Boolean(run && run.status === this.#status && !run.archived && !run.readOnly);
     let targetId = runId;
-    if (!targetId || (options.replaceMoved && !visible(selected))) targetId = this.#runs.find(visible)?.id;
-    if (!targetId) { this.#detail=null;this.#detailError="";this.#detailErrorRunId="";return undefined; }
-    try{const detail = await this.#request(`/api/runs/${encodeURIComponent(targetId)}`);this.#detail = detail.run;this.#detailError="";this.#detailErrorRunId="";}catch(error){this.#detail=null;this.#detailError=error instanceof Error?error.message:String(error);this.#detailErrorRunId=targetId;}
+    if (options.replaceMoved && !visible(selected)) targetId = undefined;
+    if (!targetId) {
+      this.#lastLoadChanged = listChanged || this.#detail !== null || Boolean(this.#detailError);
+      this.#detail=null;this.#detailError="";this.#detailErrorRunId="";return undefined;
+    }
+    if (prefetchedDetail?.id === targetId) {
+      this.#lastLoadChanged = true;
+      return targetId;
+    }
+    if (options.skipUnchanged
+      && this.#detail?.id === targetId
+      && !this.#detailError
+      && selected?.updatedAt === this.#detail.updatedAt
+      && Number(selected?.eventCount ?? 0) === (Array.isArray(this.#detail.events) ? this.#detail.events.length : 0)) {
+      this.#lastLoadChanged = listChanged;
+      return targetId;
+    }
+    this.#lastLoadChanged = true;
+    try{const detail = await this.#request(`/api/runs/${encodeURIComponent(targetId)}`);this.#detail = this.#rememberRun(detail.run);this.#detailError="";this.#detailErrorRunId="";}catch(error){this.#detail=null;this.#detailError=error instanceof Error?error.message:String(error);this.#detailErrorRunId=targetId;}
     return targetId;
   }
-  async #refresh(): Promise<void> {
+  async #refresh(awaitNavigation = true): Promise<void> {
     try {
-      const selected = this.#detail?.id;
+      const selected = this.#reviewOnly ? this.#route.params.runId : this.#detail?.id;
       const replacement = await this.#load(selected, { replaceMoved: !this.#reviewContext });
-      this.#render();
+      if(!this.#reviewOnly&&this.#lastLoadChanged)this.#render();
       if (replacement !== selected) {
-        this.#reviewDialog?.close();
+        if (this.#route.projected) return;
+        this.#reviewDialog?.remove();
         this.#reviewContext = null;
-        await this.#navigate(replacement ? this.#routes.detail.to({ runId: replacement }) : this.#routes.index.to());
+        const navigation = this.#navigate(replacement ? this.#routes.detail.to({ runId: replacement }) : this.#routes.index.to());
+        if (awaitNavigation) await navigation;
+        else void navigation.catch(error => {
+          if (!this.#controller.signal.aborted) console.error("Unable to navigate after Run refresh", error);
+        });
       } else if (this.#reviewContext && replacement) {
         await this.#reloadReview(replacement);
       }
     } catch (error) { if (!this.#controller.signal.aborted) console.error("Unable to refresh Runs", error); }
   }
-  #renderLoading(): void { const box=document.createElement("div"); box.className="run-panel run-loading"; box.textContent=tr(this.#config,"loading"); this.#root.append(box); }
+  #rememberRun(run: Json | null | undefined): Json | null {
+    if (run?.id) this.#runDetailCache.set(String(run.id), run);
+    return run ?? null;
+  }
+  #renderLoading(): void { const box=document.createElement("div"); box.className=`run-panel run-loading${this.#reviewOnly?" run-review-loading":""}`; box.textContent=tr(this.#config,"loading"); this.#root.append(box); }
   #render(): void {
     this.#root.querySelector(":scope > .run-loading")?.remove();
     this.#root.querySelector(".run-layout")?.remove();
@@ -217,16 +430,25 @@ class RunApplication {
     const tabs=document.createElement("div"); tabs.className="run-status-tabs"; tabs.id="task-status-tabs"; tabs.setAttribute("role","tablist");
     for (const status of ["running","done","abandoned"]) {
       const b=document.createElement("button"); b.className=`run-status-tab${this.#status===status?" active":""}`; b.id=`${status}-task-tab`; b.setAttribute("role","tab"); b.setAttribute("aria-selected",String(this.#status===status)); b.textContent=tr(this.#config,status);
-      b.onclick=()=>{this.#status=status; const first=this.#visible()[0]; this.#detail=null; this.#render(); if(first) void this.#select(first.id);}; tabs.append(b);
-    } return tabs;
+      b.onclick=()=>void this.#selectStatus(status); tabs.append(b);
+    }
+    return tabs;
   }
-  #visible(): Json[] { return this.#runs.filter(run=>!run.archived&&!run.readOnly&&run.status===this.#status); }
+  async #selectStatus(status:string):Promise<void>{
+    if(this.#status===status)return;
+    this.#status=status;this.#detail=null;this.#detailError="";this.#detailErrorRunId="";this.#render();
+    if(this.#route.params.runId)await this.#navigate(this.#routes.index.to());
+    await this.#load();this.#render();
+  }
+  #visible(): Json[] { return this.#runs.filter(run=>!run.archived&&run.status===this.#status&&(!run.readOnly||run.id===this.#detail?.id)); }
   #renderList(): HTMLElement {
     const list=document.createElement("div"); list.className="run-list"; const runs=this.#visible();
     if(!runs.length){const empty=document.createElement("p");empty.className="muted";empty.textContent=tr(this.#config,"empty");list.append(empty);return list;}
     for(const run of runs){const card=document.createElement("article");card.className=`run-card${run.id===this.#detail?.id?" active":""}`;
       const main=document.createElement("button");main.className="run-card-main";main.innerHTML=`<b></b><span></span>`;main.querySelector("b")!.textContent=displayName(run);main.querySelector("span")!.textContent=`${shortId(run.id)} · ${run.eventCount ?? 0}`;main.onclick=()=>void this.#select(run.id);
-      const action=document.createElement("button");action.className="run-card-action";action.textContent=tr(this.#config,run.status==="running"?"abandon":"archive");action.onclick=event=>{event.stopPropagation();void(run.status==="running"?this.#abandon(run):this.#archive(run));};card.append(main,action);list.append(card);}
+      card.append(main);
+      if(!run.readOnly){const action=document.createElement("button");action.className="run-card-action";action.textContent=tr(this.#config,run.status==="running"?"abandon":"archive");action.onclick=event=>{event.stopPropagation();void(run.status==="running"?this.#abandon(run):this.#archive(run));};card.append(action);}
+      list.append(card);}
     return list;
   }
   async #select(id:string):Promise<void>{
@@ -236,7 +458,7 @@ class RunApplication {
         await this.#navigate(this.#routes.detail.to({runId:id}));
         return;
       }
-      try{const payload=await this.#request(`/api/runs/${encodeURIComponent(id)}`);this.#detail=payload.run;this.#detailError="";this.#detailErrorRunId="";}
+      try{const payload=await this.#request(`/api/runs/${encodeURIComponent(id)}`);this.#detail=this.#rememberRun(payload.run);this.#detailError="";this.#detailErrorRunId="";}
       catch(error){this.#detail=null;this.#detailError=error instanceof Error?error.message:String(error);this.#detailErrorRunId=id;}
       this.#render();
     } finally { this.#busy=false; }
@@ -259,7 +481,10 @@ class RunApplication {
   async #openReview(runId:string,reviewId:string):Promise<void>{
     this.#busy=true;
     try{
-      if(!this.#route.routeKey?.endsWith("artifact-review"))await this.#navigate(this.#routes.review.to({runId,reviewId}));
+      if(!this.#route.routeKey?.endsWith("artifact-review")){
+        await this.#navigate(this.#routes.review.to({runId,reviewId}));
+        return;
+      }
       if(this.#controller.signal.aborted)return;
       await this.#reloadReview(runId,reviewId);
       if(!this.#controller.signal.aborted)this.#renderReview(runId,reviewId);
@@ -281,17 +506,16 @@ class RunApplication {
   #renderReview(runId:string,reviewId:string):void{
     const previous=this.#reviewDialog;previous?.remove();const context=this.#reviewContext;if(!context)return;
     const split=Math.min(75,Math.max(30,Number(localStorage.getItem("memsphere.artifactReviewSplit.v1"))||58));
-    const dialog=document.createElement("dialog");dialog.className="artifact-review-modal";dialog.id="artifact-review-modal";dialog.style.setProperty("--artifact-review-left",`${split}%`);
-    dialog.innerHTML=`<div class="artifact-review-shell"><header class="artifact-review-head"><div class="artifact-review-heading"><h2></h2><div class="artifact-review-subtitle"></div></div><button class="run-btn" data-close></button></header><div class="artifact-review-controls"></div><div class="artifact-review-mobile-tabs"><button id="artifact-review-artifact-tab" class="run-btn"></button><button id="artifact-review-review-tab" class="run-btn"></button></div><div class="artifact-review-body"><section id="artifact-review-artifact-pane" class="artifact-review-modal-pane"></section><div class="artifact-review-divider" role="separator" tabindex="0" aria-controls="artifact-review-artifact-pane artifact-review-review-pane"></div><section id="artifact-review-review-pane" class="artifact-review-modal-pane"></section></div></div>`;
-    dialog.querySelector("h2")!.textContent=tr(this.#config,"review");(dialog.querySelector(".artifact-review-subtitle") as HTMLElement).textContent=`${context.review?.artifactName||tr(this.#config,"artifact")} · ${reviewId}`;(dialog.querySelector("[data-close]") as HTMLButtonElement).textContent=tr(this.#config,"close");
+    const dialog=document.createElement("div");dialog.className="artifact-review-modal";dialog.id="artifact-review-modal";dialog.style.setProperty("--artifact-review-left",`${split}%`);
+    dialog.innerHTML=`<div class="artifact-review-shell"><header class="artifact-review-head"><div class="artifact-review-heading"><h2></h2><div class="artifact-review-subtitle"></div></div></header><div class="artifact-review-controls"></div><div class="artifact-review-mobile-tabs"><button id="artifact-review-artifact-tab" class="run-btn"></button><button id="artifact-review-review-tab" class="run-btn"></button></div><div class="artifact-review-body"><section id="artifact-review-artifact-pane" class="artifact-review-modal-pane"></section><div class="artifact-review-divider" role="separator" tabindex="0" aria-controls="artifact-review-artifact-pane artifact-review-review-pane"></div><section id="artifact-review-review-pane" class="artifact-review-modal-pane"></section></div></div>`;
+    dialog.querySelector("h2")!.textContent=tr(this.#config,"review");(dialog.querySelector(".artifact-review-subtitle") as HTMLElement).textContent=`${context.review?.artifactName||tr(this.#config,"artifact")} · ${reviewId}`;
     (dialog.querySelector("#artifact-review-artifact-tab") as HTMLButtonElement).textContent=tr(this.#config,"artifactPane");(dialog.querySelector("#artifact-review-review-tab") as HTMLButtonElement).textContent=tr(this.#config,"reviewPane");
     const controls=dialog.querySelector(".artifact-review-controls") as HTMLElement;controls.append(this.#materialSelector(context,()=>this.#renderReview(runId,reviewId)));
     const divider=dialog.querySelector(".artifact-review-divider") as HTMLElement;divider.setAttribute("aria-label",tr(this.#config,"resizeReview"));divider.setAttribute("aria-valuemin","30");divider.setAttribute("aria-valuemax","75");divider.setAttribute("aria-valuenow",String(split));this.#wireDivider(divider,dialog);
-    (dialog.querySelector("[data-close]") as HTMLButtonElement).onclick=()=>dialog.close();const artifactPane=dialog.querySelector("#artifact-review-artifact-pane") as HTMLElement;const reviewPane=dialog.querySelector("#artifact-review-review-pane") as HTMLElement;artifactPane.append(this.#renderMaterial(context));reviewPane.append(this.#renderReviewPanel(runId,context));
+    const artifactPane=dialog.querySelector("#artifact-review-artifact-pane") as HTMLElement;const reviewPane=dialog.querySelector("#artifact-review-review-pane") as HTMLElement;artifactPane.append(this.#renderMaterial(context));reviewPane.append(this.#renderReviewPanel(runId,context));
     const show=(artifact:boolean)=>{artifactPane.hidden=!artifact;reviewPane.hidden=artifact;localStorage.setItem("memsphere.artifactReviewMobilePane.v1",artifact?"artifact":"review");};(dialog.querySelector("#artifact-review-artifact-tab") as HTMLButtonElement).onclick=()=>show(true);(dialog.querySelector("#artifact-review-review-tab") as HTMLButtonElement).onclick=()=>show(false);
     if(matchMedia("(max-width: 820px)").matches)show(localStorage.getItem("memsphere.artifactReviewMobilePane.v1")!=="review");
-    this.#portal.append(dialog);this.#reviewDialog=dialog;
-    dialog.addEventListener("close",()=>{dialog.remove();this.#reviewDialog=null;void this.#navigate(this.#routes.detail.to({runId}));},{once:true});dialog.showModal();
+    this.#root.replaceChildren(dialog);this.#reviewDialog=dialog;
   }
   #renderReviewPanel(runId:string,context:Json):HTMLElement{
     const wrap=document.createElement("div");const round=selectedRound(context,this.#reviewRoundId);const historical=round?.id!==context.review.currentRoundId;
@@ -348,7 +572,7 @@ class RunApplication {
     const toggle=target.querySelector<HTMLButtonElement>(":scope > .inline-plus");const existing=target.querySelector(":scope > .inline-comment-editor");if(existing){existing.remove();toggle?.setAttribute("aria-expanded","false");return;}for(const open of this.#reviewDialog?.querySelectorAll(".inline-comment-editor")||[]){open.parentElement?.querySelector<HTMLButtonElement>(":scope > .inline-plus")?.setAttribute("aria-expanded","false");open.remove();}
     const editor=document.createElement("div");editor.className="inline-comment-editor";const input=document.createElement("textarea");input.placeholder=this.#config.locale?.startsWith("en")?"How should this change?":"这里应该如何修改？";const actions=document.createElement("div");actions.className="inline-comment-actions";const save=button(tr(this.#config,"addOpinion"),"primary");const cancel=button(tr(this.#config,"cancel"));cancel.onclick=()=>{editor.remove();toggle?.setAttribute("aria-expanded","false");toggle?.focus();};save.onclick=()=>{const body=input.value.trim();if(!body){input.focus();return;}const draft=context.assignment?.draft||{vote:null,comments:[]};const comment={id:`comment-${Date.now()}`,body,severity:"risk",anchor:{submissionId:context.submission.id,sourceHash:context.submission.digest,target:anchor,location:anchor,context:String(target.textContent||"").replace("+","").trim().slice(0,500)}};void this.#saveDraft(context,this.#detail?.id||"",{vote:draft.vote||null,comments:[...(draft.comments||[]),comment]},save,input);};actions.append(save,cancel);editor.append(input,actions);target.append(editor);toggle?.setAttribute("aria-expanded","true");input.focus();
   }
-  #wireDivider(divider:HTMLElement,dialog:HTMLDialogElement):void{
+  #wireDivider(divider:HTMLElement,dialog:HTMLElement):void{
     const set=(value:number,persist=true)=>{const next=Math.min(75,Math.max(30,Math.round(value)));dialog.style.setProperty("--artifact-review-left",`${next}%`);divider.setAttribute("aria-valuenow",String(next));if(persist)localStorage.setItem("memsphere.artifactReviewSplit.v1",String(next));};
     divider.onkeydown=event=>{const now=Number(divider.getAttribute("aria-valuenow"))||58;if(event.key==="ArrowLeft"){event.preventDefault();set(now-2);}else if(event.key==="ArrowRight"){event.preventDefault();set(now+2);}};
     divider.onpointerdown=event=>{if(innerWidth<=820)return;const body=divider.parentElement!;divider.setPointerCapture(event.pointerId);const move=(moveEvent:PointerEvent)=>{const box=body.getBoundingClientRect();set(((moveEvent.clientX-box.left)/box.width)*100,false);};const finish=()=>{set(Number(divider.getAttribute("aria-valuenow"))||58);divider.removeEventListener("pointermove",move);divider.removeEventListener("pointerup",finish);};divider.addEventListener("pointermove",move);divider.addEventListener("pointerup",finish);};
@@ -359,7 +583,7 @@ class RunApplication {
   }
   async #persistDraft(context:Json,runId:string,draft:Json):Promise<Json>{let active:Json=this.#reviewContext?.assignment?.actorId===context.assignment.actorId?this.#reviewContext!:context;const payload:{vote?:string;comments:Json[]}={comments:draft.comments||[]};if(draft.vote)payload.vote=draft.vote;let saved:Response|null=null;for(let attempt=0;attempt<5;attempt+=1){const response=await fetch(this.#assignmentUrl(active,"draft"),{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({...payload,expectedRevision:active.review.round.revision}),signal:this.#controller.signal});if(response.status!==409){saved=response;break;}if(attempt===4)throw new Error(tr(this.#config,"conflict"));active=await this.#request(`/api/runs/${encodeURIComponent(runId)}/artifact-reviews/${encodeURIComponent(context.review.id)}/rounds/${encodeURIComponent(this.#reviewRoundId)}?actor_id=${encodeURIComponent(context.assignment.actorId)}`);}if(!saved||!saved.ok)throw new Error(saved?await this.#responseError(saved):tr(this.#config,"conflict"));const result=await saved.json();this.#reviewContext=result;return result;}
   #confirmSubmit(context:Json,runId:string):void{
-    const confirmDialog=document.createElement("dialog");confirmDialog.className="artifact-review-dialog";const body=document.createElement("div");body.className="artifact-review-dialog-body";const title=document.createElement("h3");title.textContent=tr(this.#config,"submit");const message=document.createElement("div");message.className="artifact-review-message warn";message.hidden=true;const actions=document.createElement("div");actions.className="artifact-review-dialog-actions";const cancel=button(tr(this.#config,"cancel"));const submit=button(tr(this.#config,"submit"),"primary");actions.append(cancel,submit);body.append(title,message,actions);confirmDialog.append(body);this.#portal.append(confirmDialog);cancel.onclick=()=>confirmDialog.close();submit.onclick=()=>void this.#withButton(submit,async()=>{message.hidden=true;try{let latest=this.#reviewContext||context;const actorKey=latest.assignment.actorId;const localVote=this.#voteByActor.get(actorKey);if(localVote)latest=await this.#persistDraft(latest,runId,{vote:localVote,comments:latest.assignment?.draft?.comments||[]});let response=await this.#submitAssignment(latest);if(response.status===409){latest=await this.#request(`/api/runs/${encodeURIComponent(runId)}/artifact-reviews/${encodeURIComponent(context.review.id)}/rounds/${encodeURIComponent(this.#reviewRoundId)}?actor_id=${encodeURIComponent(actorKey)}`);this.#reviewContext=latest;if(localVote)latest=await this.#persistDraft(latest,runId,{vote:localVote,comments:latest.assignment?.draft?.comments||[]});response=await this.#submitAssignment(latest);}if(!response.ok){message.textContent=response.status===409?tr(this.#config,"conflict"):await this.#responseError(response);message.hidden=false;return;}this.#reviewContext=await response.json();this.#voteByActor.delete(actorKey);confirmDialog.close();await this.#refresh();this.#renderReview(runId,context.review.id);}catch(error){message.textContent=error instanceof Error?error.message:String(error);message.hidden=false;}});confirmDialog.addEventListener("close",()=>confirmDialog.remove(),{once:true});confirmDialog.showModal();
+    const confirmDialog=document.createElement("dialog");confirmDialog.className="artifact-review-dialog";const body=document.createElement("div");body.className="artifact-review-dialog-body";const title=document.createElement("h3");title.textContent=tr(this.#config,"submit");const message=document.createElement("div");message.className="artifact-review-message warn";message.hidden=true;const actions=document.createElement("div");actions.className="artifact-review-dialog-actions";const cancel=button(tr(this.#config,"cancel"));const submit=button(tr(this.#config,"submit"),"primary");actions.append(cancel,submit);body.append(title,message,actions);confirmDialog.append(body);this.#portal.append(confirmDialog);cancel.onclick=()=>confirmDialog.close();submit.onclick=()=>void this.#withButton(submit,async()=>{message.hidden=true;try{let latest=this.#reviewContext||context;const actorKey=latest.assignment.actorId;const localVote=this.#voteByActor.get(actorKey);if(localVote)latest=await this.#persistDraft(latest,runId,{vote:localVote,comments:latest.assignment?.draft?.comments||[]});let response=await this.#submitAssignment(latest);if(response.status===409){latest=await this.#request(`/api/runs/${encodeURIComponent(runId)}/artifact-reviews/${encodeURIComponent(context.review.id)}/rounds/${encodeURIComponent(this.#reviewRoundId)}?actor_id=${encodeURIComponent(actorKey)}`);this.#reviewContext=latest;if(localVote)latest=await this.#persistDraft(latest,runId,{vote:localVote,comments:latest.assignment?.draft?.comments||[]});response=await this.#submitAssignment(latest);}if(!response.ok){message.textContent=response.status===409?tr(this.#config,"conflict"):await this.#responseError(response);message.hidden=false;return;}this.#reviewContext=await response.json();this.#voteByActor.delete(actorKey);confirmDialog.close();this.#renderReview(runId,context.review.id);}catch(error){message.textContent=error instanceof Error?error.message:String(error);message.hidden=false;}});confirmDialog.addEventListener("close",()=>confirmDialog.remove(),{once:true});confirmDialog.showModal();
   }
   #submitAssignment(context:Json):Promise<Response>{return fetch(this.#assignmentUrl(context,"submit"),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({expectedRevision:context.review.round.revision}),signal:this.#controller.signal});}
   async #responseError(response:Response):Promise<string>{const text=await response.text();try{const payload=JSON.parse(text);return typeof payload?.error==="string"?payload.error:text;}catch{return text||tr(this.#config,"conflict");}}
@@ -369,7 +593,7 @@ class RunApplication {
     const opinion=assignment.submitted||((assignment.summary||assignment.vote)?assignment:null);if(opinion&&(opinion.renderedSummary||opinion.summary))row.append(this.#opinionBody(opinion,false));return row;
   }
   #runner(round:Json):HTMLElement{const runner=round?.runner;const row=document.createElement("article");row.className="artifact-review-participant";const head=document.createElement("div");head.className="artifact-review-participant-head";const main=document.createElement("div");main.className="artifact-review-row-main";const name=document.createElement("b");name.textContent=runner?.actorName||tr(this.#config,"runner");const meta=document.createElement("div");meta.className="artifact-review-participant-meta";meta.append(pill(tr(this.#config,"decision")),pill(runner?.status?assignmentStatus(this.#config,runner):tr(this.#config,"pendingVote")));main.append(name,meta);head.append(main);row.append(head);return row;}
-  #submittedOpinion(assignment:Json):HTMLElement{const row=document.createElement("article");row.className="artifact-review-participant";const name=document.createElement("b");name.textContent=assignmentName(assignment);const meta=document.createElement("div");meta.className="artifact-review-participant-meta";meta.append(pill(`${tr(this.#config,"voteSummary")} · ${voteLabel(this.#config,assignment.vote||assignment.submitted?.vote)}`));row.append(name,meta,this.#opinionBody(assignment.submitted||assignment));return row;}
+  #submittedOpinion(assignment:Json):HTMLElement{const row=document.createElement("article");row.className="artifact-review-participant";const name=document.createElement("b");name.textContent=assignmentName(assignment);const meta=document.createElement("div");meta.className="artifact-review-participant-meta";meta.append(pill(`${tr(this.#config,"voteSummary")} · ${voteLabel(this.#config,assignment.vote||assignment.submitted?.vote)}`));row.append(name,meta);const opinion=this.#opinionBody(assignment.submitted||assignment);if(opinion.childElementCount)row.append(opinion);return row;}
   #opinionBody(opinion:Json,includeComments=true):HTMLElement{const wrap=document.createElement("div");wrap.className="artifact-review-opinion";if(opinion.renderedSummary){const summary=document.createElement("div");summary.innerHTML=opinion.renderedSummary;wrap.append(summary);}else if(opinion.summary){wrap.append(textBlock(opinion.summary));}if(includeComments)for(const comment of opinion.comments||[]){const card=commentCard(comment,"",tr(this.#config,"locate"));const severity=document.createElement("span");severity.className="artifact-review-comment-severity";severity.textContent=severityLabel(this.#config,comment.severity);card.prepend(severity);wrap.append(card);}return wrap;}
   async #agentActivity(review:Json,round:Json,assignment:Json):Promise<HTMLElement>{
     const attempts=assignment.attempts||[];const latest=attempts.at(-1);const wrap=document.createElement("section");wrap.className="artifact-review-activity";const head=document.createElement("div");head.className="artifact-review-activity-head";const title=document.createElement("b");title.textContent=tr(this.#config,"activity");head.append(title);wrap.append(head);if(!latest)return wrap;

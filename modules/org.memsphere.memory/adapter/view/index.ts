@@ -1,6 +1,8 @@
 import {
   defineViewPlugin,
   slots,
+  type Disposer,
+  type HeaderActionDescriptor,
   type RouteLocation,
   type RouteTarget,
   type TextRef,
@@ -29,7 +31,7 @@ type MemoryConfig = {
   locale?: string;
   messages?: Readonly<Record<string, unknown>>;
 };
-type MemoryRouteName = "home" | "index" | "market" | "memory-detail" | "project-index"
+type MemoryRouteName = "index" | "market" | "memory-detail" | "project-index"
   | "project-memory-detail" | "project-market" | "change-detail";
 
 const kindOrder = ["procedures", "schemas", "concepts", "statements"] as const;
@@ -262,7 +264,6 @@ export default defineViewPlugin<MemoryConfig>({
   apply(ctx, config) {
     if (!ctx.router) throw new Error("Memory View requires the router service");
     const routes = {
-      home: ctx.router.register({ id: "home", path: "/" }),
       index: ctx.router.register({ id: "index", path: "/memories" }),
       market: ctx.router.register({ id: "market", path: "/market" }),
       memoryDetail: ctx.router.register({ id: "memory-detail", path: "/memories/:kind/:name" }),
@@ -271,15 +272,22 @@ export default defineViewPlugin<MemoryConfig>({
       projectMarket: ctx.router.register({ id: "project-market", path: "/projects/:projectId/market" }),
       changeDetail: ctx.router.register({ id: "change-detail", path: "/projects/:projectId/changes/:changeId" })
     };
+    const headerActions = createHeaderActionPublisher(ctx);
+    const mount = createMemoryMount(
+      config,
+      routes,
+      target => ctx.router!.navigate(target),
+      headerActions.replace,
+      headerActions.clear
+    );
 
-    registerPage(ctx, routes.home, "home", config, routes);
-    registerPage(ctx, routes.index, "index", config, routes);
-    registerPage(ctx, routes.market, "market", config, routes);
-    registerPage(ctx, routes.memoryDetail, "memory-detail", config, routes);
-    registerPage(ctx, routes.projectIndex, "project-index", config, routes);
-    registerPage(ctx, routes.projectMemoryDetail, "project-memory-detail", config, routes);
-    registerPage(ctx, routes.projectMarket, "project-market", config, routes);
-    registerPage(ctx, routes.changeDetail, "change-detail", config, routes);
+    registerPage(ctx, routes.index, "index", config, mount);
+    registerPage(ctx, routes.market, "market", config, mount);
+    registerPage(ctx, routes.memoryDetail, "memory-detail", config, mount);
+    registerPage(ctx, routes.projectIndex, "project-index", config, mount);
+    registerPage(ctx, routes.projectMemoryDetail, "project-memory-detail", config, mount);
+    registerPage(ctx, routes.projectMarket, "project-market", config, mount);
+    registerPage(ctx, routes.changeDetail, "change-detail", config, mount);
 
     ctx.slots.register(slots.navigationPrimary, {
       id: "memory.navigation",
@@ -290,11 +298,89 @@ export default defineViewPlugin<MemoryConfig>({
         route: routes.index.to()
       }
     });
+    startMemoryHome(ctx, config, routes);
   }
 });
 
+function startMemoryHome(ctx: ViewPluginContext, config: Readonly<MemoryConfig>, routes: MemoryRoutes): void {
+  const leases = new Map<string, Disposer>();
+  let controller = new AbortController();
+  const replace = (key: string, create: () => Disposer) => {
+    const previous = leases.get(key);
+    const next = create();
+    leases.set(key, next);
+    void previous?.();
+  };
+  const withdrawMissing = (prefix: string, keep: ReadonlySet<string>) => {
+    for (const [key, dispose] of [...leases]) {
+      if (!key.startsWith(prefix) || keep.has(key)) continue;
+      leases.delete(key);
+      void dispose();
+    }
+  };
+  const refresh = async () => {
+    controller.abort();
+    controller = new AbortController();
+    try {
+      const response = await fetch("/api/changes", { signal: controller.signal });
+      if (!response.ok) throw new Error(await response.text());
+      const payload = await response.json() as { changes?: ChangeSummary[] };
+      const changes = (payload.changes ?? []).filter(change => change.status === "active" && !change.error);
+      const attentionKeep = new Set<string>();
+      const continueKeep = new Set<string>();
+      for (const change of changes.slice(0, 8)) {
+        const counts = change.commentCounts as JsonRecord | undefined;
+        const pending = Number(counts?.pending ?? 0) + Number(counts?.processing ?? 0);
+        const target = routes.changeDetail.to({ projectId: ctx.module.projectId, changeId: change.id });
+        if (pending > 0) {
+          const key = `attention:${change.id}`; attentionKeep.add(key);
+          replace(key, () => ctx.slots.upsert(slots.homeAttention, {
+            id: `memory.change.${change.id}`,
+            order: 100,
+            value: {
+              title: { text: String(change.title ?? change.id) },
+              summary: { text: `${pending} ${message(config, "change.comments")}` },
+              icon: { kind: "system", name: "code" },
+              source: { text: "ChangeSet" }, status: "warning", updatedAt: change.updatedAt,
+              action: { label: { text: message(config, "market.viewChangeSet") }, run: () => ctx.router!.navigate(target) }
+            }
+          }));
+        } else {
+          const key = `continue:${change.id}`; continueKeep.add(key);
+          replace(key, () => ctx.slots.upsert(slots.homeContinue, {
+            id: `memory.change.${change.id}`,
+            order: 100,
+            value: { title: { text: String(change.title ?? change.id) }, summary: { text: "ChangeSet" }, icon: { kind: "system", name: "code" }, updatedAt: change.updatedAt, route: target }
+          }));
+        }
+      }
+      withdrawMissing("attention:", attentionKeep);
+      withdrawMissing("continue:", continueKeep);
+      const errorLease = leases.get("attention:error");
+      if (errorLease) { leases.delete("attention:error"); void errorLease(); }
+    } catch (error) {
+      if (controller.signal.aborted || ctx.lifecycle.disposed) return;
+      replace("attention:error", () => ctx.slots.upsert(slots.homeAttention, {
+        id: "memory.home.error", order: 190,
+        value: {
+          title: { text: message(config, "memory.loadFailed") },
+          summary: { text: error instanceof Error ? error.message : String(error) },
+          icon: { kind: "system", name: "warning" },
+          status: "error",
+          action: { label: { text: message(config, "common.retry") }, run: refresh }
+        }
+      }));
+    }
+  };
+  void refresh();
+  ctx.lifecycle.own(() => {
+    controller.abort();
+    for (const dispose of leases.values()) void dispose();
+    leases.clear();
+  });
+}
+
 type MemoryRoutes = {
-  home: ReturnType<NonNullable<ViewPluginContext["router"]>["register"]>;
   index: ReturnType<NonNullable<ViewPluginContext["router"]>["register"]>;
   market: ReturnType<NonNullable<ViewPluginContext["router"]>["register"]>;
   memoryDetail: ReturnType<NonNullable<ViewPluginContext["router"]>["register"]>;
@@ -309,7 +395,7 @@ function registerPage(
   route: MemoryRoutes[keyof MemoryRoutes],
   name: MemoryRouteName,
   config: Readonly<MemoryConfig>,
-  routes: MemoryRoutes
+  mount: ViewMount
 ): void {
   ctx.slots.register(slots.headerTitle, {
     id: `memory.header.${name}`,
@@ -320,11 +406,59 @@ function registerPage(
     id: `memory.page.${name}`,
     key: route.key,
     when: route.activation,
-      value: createMemoryMount(config, routes, target => ctx.router!.navigate(target))
+    value: mount
   });
 }
 
-function createMemoryMount(config: Readonly<MemoryConfig>, routes: MemoryRoutes, navigate: (target: RouteTarget) => Promise<void>): ViewMount {
+type PublishedHeaderAction = {
+  readonly id: string;
+  readonly order?: number;
+  readonly stateKey: string;
+  readonly value: HeaderActionDescriptor;
+};
+
+function createHeaderActionPublisher(ctx: ViewPluginContext): {
+  readonly replace: (actions: readonly PublishedHeaderAction[]) => void;
+  readonly clear: () => void;
+} {
+  const leases = new Map<string, { readonly stateKey: string; readonly dispose: Disposer }>();
+  const clear = () => {
+    for (const lease of leases.values()) void lease.dispose();
+    leases.clear();
+  };
+  ctx.lifecycle.own(clear);
+  return {
+    replace(actions) {
+      const keep = new Set(actions.map(action => action.id));
+      for (const [id, lease] of [...leases]) {
+        if (keep.has(id)) continue;
+        leases.delete(id);
+        void lease.dispose();
+      }
+      for (const action of actions) {
+        const previous = leases.get(action.id);
+        if (previous?.stateKey === action.stateKey) continue;
+        const dispose = ctx.slots.upsert(slots.headerActions, {
+          id: `memory.${action.id}`,
+          order: action.order,
+          value: action.value
+        });
+        leases.set(action.id, { stateKey: action.stateKey, dispose });
+        void previous?.dispose();
+      }
+    },
+    clear
+  };
+}
+
+function createMemoryMount(
+  config: Readonly<MemoryConfig>,
+  routes: MemoryRoutes,
+  navigate: (target: RouteTarget) => Promise<void>,
+  publishHeaderActions: (actions: readonly PublishedHeaderAction[]) => void,
+  clearHeaderActions: () => void
+): ViewMount {
+  let app: MemoryApplication | undefined;
   return {
     async mount({ element, portal }, context) {
       const controller = new AbortController();
@@ -332,14 +466,19 @@ function createMemoryMount(config: Readonly<MemoryConfig>, routes: MemoryRoutes,
       style.dataset.memsphereMemoryStyles = "true";
       style.textContent = memoryStyles;
       element.append(style);
-      const app = new MemoryApplication(element, portal, controller, config, routes, context.route, navigate);
+      app = new MemoryApplication(element, portal, controller, config, routes, context.route, navigate, publishHeaderActions);
       await app.start();
       return () => {
         controller.abort();
-        app.dispose();
+        app?.dispose();
+        app = undefined;
+        clearHeaderActions();
         element.replaceChildren();
         portal.replaceChildren();
       };
+    },
+    async update(context) {
+      await app?.updateRoute(context.route);
     }
   };
 }
@@ -350,12 +489,14 @@ class MemoryApplication {
   readonly #controller: AbortController;
   readonly #config: Readonly<MemoryConfig>;
   readonly #routes: MemoryRoutes;
-  readonly #location: Readonly<RouteLocation>;
+  #location: Readonly<RouteLocation>;
   readonly #navigate: (target: RouteTarget) => Promise<void>;
+  readonly #publishHeaderActions: (actions: readonly PublishedHeaderAction[]) => void;
   #memories: MemorySummary[] = [];
   #changes: ChangeSummary[] = [];
   #market: JsonRecord[] = [];
   #memoryDetail: MemorySummary | null = null;
+  readonly #memoryDetailCache = new Map<string, MemorySummary>();
   #changeDetail: JsonRecord | null = null;
   #selectedId = "";
   #selectedMarket = "";
@@ -366,7 +507,7 @@ class MemoryApplication {
   #actorKinds: Record<string, string> = {};
   #generation = 0;
 
-  constructor(root: HTMLElement, portal: HTMLElement, controller: AbortController, config: Readonly<MemoryConfig>, routes: MemoryRoutes, location: Readonly<RouteLocation>, navigate: (target: RouteTarget) => Promise<void>) {
+  constructor(root: HTMLElement, portal: HTMLElement, controller: AbortController, config: Readonly<MemoryConfig>, routes: MemoryRoutes, location: Readonly<RouteLocation>, navigate: (target: RouteTarget) => Promise<void>, publishHeaderActions: (actions: readonly PublishedHeaderAction[]) => void) {
     this.#root = root;
     this.#portal = portal;
     this.#controller = controller;
@@ -375,11 +516,49 @@ class MemoryApplication {
     this.#location = location;
     this.#currentProject = projectFromLocation(location);
     this.#navigate = navigate;
+    this.#publishHeaderActions = publishHeaderActions;
   }
 
   async start(): Promise<void> {
     this.renderLoading();
     await this.load();
+  }
+
+  async updateRoute(location: Readonly<RouteLocation>): Promise<void> {
+    const previousProject = this.#currentProject;
+    const previousRoute = parseLocation(this.#location);
+    this.#location = location;
+    this.#currentProject = projectFromLocation(location) || this.#currentProject;
+    const route = parseLocation(location);
+    if (!this.#memories.length || previousProject !== this.#currentProject || previousRoute.kind === "change" || route.kind === "change" || route.changeId) {
+      await this.load();
+      return;
+    }
+    const generation = ++this.#generation;
+    this.#changeDetail = null;
+    if (route.kind === "market") {
+      if (!this.#market.length) {
+        const payload = await this.request<JsonRecord>("/api/market/memories");
+        if (generation !== this.#generation) return;
+        this.#market = array(payload.memories);
+        this.#selectedMarket ||= String(this.#market[0]?.reference ?? "");
+      }
+      this.render();
+      return;
+    }
+    if (route.kind === "memory-detail") {
+      this.#selectedId = this.#memories.find(memory => memoryReference(memory) === `${route.memoryKind}/${route.memoryName}`)?.id
+        ?? `${route.memoryKind}/${route.memoryName}`;
+    } else {
+      this.#selectedId = "";
+      this.#memoryDetail = null;
+      this.render();
+      return;
+    }
+    const cached = this.#memoryDetailCache.get(this.#selectedId);
+    if (cached) this.#memoryDetail = cached;
+    else if (this.#selectedId) await this.loadMemoryDetail(this.#selectedId, "", generation);
+    if (generation === this.#generation) this.render();
   }
 
   dispose(): void {
@@ -440,9 +619,12 @@ class MemoryApplication {
         } catch (error) {
           this.#changeDetail = { error: errorMessage(error), change: this.#changes.find(item => item.id === route.changeId) ?? { id: route.changeId, status: "unavailable" } };
         }
-      } else {
+      } else if (route.kind === "memory-detail" || route.changeId) {
         this.#selectedId ||= this.visibleMemories()[0]?.id ?? "";
         if (this.#selectedId) await this.loadMemoryDetail(this.#selectedId, route.changeId, generation);
+      } else {
+        this.#selectedId = "";
+        this.#memoryDetail = null;
       }
       if (generation === this.#generation) this.render();
     } catch (error) {
@@ -471,7 +653,10 @@ class MemoryApplication {
         const suffix = rawQuery.size ? `?${rawQuery}` : "";
         payload = await this.request<JsonRecord>(`/api/memories/${encodeURIComponent(requestKind ?? kind)}/${encodeURIComponent(requestName.join("/") || name.join("/"))}${suffix}`);
       }
-      if (generation === this.#generation) this.#memoryDetail = (payload.memory ?? payload) as MemorySummary;
+      if (generation === this.#generation) {
+        this.#memoryDetail = (payload.memory ?? payload) as MemorySummary;
+        this.#memoryDetailCache.set(id, this.#memoryDetail);
+      }
     } catch (error) {
       if (generation === this.#generation) this.#memoryDetail = { ...summary, error: errorMessage(error) };
     }
@@ -490,6 +675,7 @@ class MemoryApplication {
   }
 
   private render(): void {
+    this.syncHeaderActions();
     this.#root.querySelector(".memory-module")?.remove();
     const app = el("section", "memory-module");
     const layout = el("div", "memory-layout");
@@ -498,12 +684,93 @@ class MemoryApplication {
     this.#root.append(app);
   }
 
+  private syncHeaderActions(): void {
+    const route = parseLocation(this.#location);
+    const actions: PublishedHeaderAction[] = [];
+    if (route.kind === "memory-detail" && this.#memoryDetail && !this.#memoryDetail.error) {
+      actions.push({
+        id: "edit",
+        order: 100,
+        stateKey: `edit:${this.#memoryDetail.id}`,
+        value: {
+          label: text(this.t("memory.edit")),
+          run: () => this.#memoryDetail ? this.createChange(this.#memoryDetail) : undefined
+        }
+      });
+    } else if (route.kind === "market") {
+      const item = this.#market.find(candidate => candidate.reference === this.#selectedMarket);
+      if (item?.status === "importing" && item.changeId) {
+        actions.push({
+          id: "market-change",
+          order: 100,
+          stateKey: `change:${String(item.changeId)}`,
+          value: {
+            label: text(this.t("market.viewChangeSet")),
+            run: () => this.openChange(String(item.changeId))
+          }
+        });
+      } else if (item && item.status !== "consistent" && item.status !== "name_conflict") {
+        actions.push({
+          id: "market-import",
+          order: 100,
+          stateKey: `import:${String(item.reference)}:${String(item.status)}`,
+          value: {
+            label: text(this.t(item.status === "different" ? "market.reimport" : "market.import")),
+            run: () => this.importMarket(item)
+          }
+        });
+      }
+    } else if (route.kind === "change") {
+      const change = this.#changeDetail?.change as ChangeSummary | undefined;
+      if (change) {
+        if (change.status === "active") {
+          actions.push({
+            id: "change-add",
+            order: 100,
+            stateKey: `add:${change.id}:${String(Boolean(change.claimed))}`,
+            value: {
+              label: text(this.t("change.addMemory")),
+              disabled: Boolean(change.claimed),
+              run: () => this.addMemory(change)
+            }
+          }, {
+            id: "change-abandon",
+            order: 110,
+            stateKey: `abandon:${change.id}:${String(change.updatedAt)}`,
+            value: { label: text(this.t("common.abandon")), run: () => this.abandonChange(change) }
+          });
+        } else {
+          actions.push({
+            id: "change-archive",
+            order: 100,
+            stateKey: `archive:${change.id}:${String(change.updatedAt)}`,
+            value: { label: text(this.t("common.archive")), run: () => this.archiveChange(change) }
+          });
+        }
+        actions.push({
+          id: "change-comments",
+          order: 120,
+          stateKey: `comments:${change.id}:${String(this.#commentsCollapsed)}`,
+          value: {
+            label: text(this.t("change.comments")),
+            run: () => {
+              this.#commentsCollapsed = !this.#commentsCollapsed;
+              localStorage.setItem(changeCommentsCollapsedKey, String(this.#commentsCollapsed));
+              this.render();
+            }
+          }
+        });
+      }
+    }
+    this.#publishHeaderActions(actions);
+  }
+
   private renderSidebar(): HTMLElement {
     const side = el("aside", "memory-sidebar");
     const source = el("div", "memory-source-tabs");
     const route = parseLocation(this.#location);
-    const local = button(this.t("navigation.currentProject"), "memory-source-tab" + (route.kind !== "market" ? " active" : ""), () => this.navigate(this.#routes.index.to()));
-    const market = button(this.t("navigation.memoryMarket"), "memory-source-tab" + (route.kind === "market" ? " active" : ""), () => this.navigate(this.#routes.market.to()));
+    const local = button(this.t("navigation.currentProject"), "memory-source-tab" + (route.kind !== "market" ? " active" : ""), () => this.navigate(this.memoryIndexTarget()));
+    const market = button(this.t("navigation.memoryMarket"), "memory-source-tab" + (route.kind === "market" ? " active" : ""), () => this.navigate(this.marketTarget()));
     source.append(local, market);
     side.append(source);
     if (route.kind === "market") side.append(this.renderMarketNavigation());
@@ -584,7 +851,7 @@ class MemoryApplication {
 
   private renderChangeNavigation(): HTMLElement {
     const wrap = el("div");
-    wrap.append(button(`← ${this.t("navigation.backToMemory")}`, "memory-button", () => this.navigate(this.#routes.index.to())));
+    wrap.append(button(`← ${this.t("navigation.backToMemory")}`, "memory-button", () => this.navigate(this.memoryIndexTarget())));
     for (const kind of kindOrder) {
       const group = this.#memories.filter(memory => memory.kind === kind);
       if (!group.length) continue;
@@ -606,7 +873,7 @@ class MemoryApplication {
   }
 
   private renderMemoryDetail(): HTMLElement {
-    const detail = this.#memoryDetail ?? this.#memories.find(item => item.id === this.#selectedId) ?? null;
+    const detail = this.#memoryDetail;
     if (!detail) return emptyWorkspace(this.t(this.#memories.length ? "memory.select" : "memory.empty"));
     const context = this.renderChangePreviewContext();
     if (detail.error) {
@@ -618,9 +885,7 @@ class MemoryApplication {
     const workspace = el("div");
     const toolbar = el("header", "memory-toolbar");
     const title = el("div"); title.append(el("h2", "memory-title", memoryName(detail)), el("div", "memory-subtitle", detail.id));
-    const actions = el("div", "memory-toolbar-actions");
-    actions.append(button(this.t("memory.edit"), "memory-btn primary", () => void this.createChange(detail)));
-    toolbar.append(title, actions);
+    toolbar.append(title);
     if (context) workspace.append(context);
     workspace.append(toolbar, renderMeta(detail), renderMemoryEntity(detail.kind, entity, this.t.bind(this), (target, snapshot, location) => void this.beginMemoryComment(detail, target, snapshot, location), this.renderOptions()));
     return workspace;
@@ -646,11 +911,7 @@ class MemoryApplication {
     const workspace = el("div");
     const toolbar = el("header", "memory-toolbar");
     const title = el("div"); title.append(el("h2", "memory-title", memoryName((item.entity ?? item) as MemorySummary)), el("div", "memory-subtitle", String(item.reference ?? "")));
-    const actions = el("div", "memory-toolbar-actions");
-    actions.append(marketStatus(String(item.status ?? ""), this.marketStatusLabel(String(item.status ?? ""))));
-    if (item.status === "importing" && item.changeId) actions.append(button(this.t("market.viewChangeSet"), "memory-btn", () => void this.openChange(String(item.changeId))));
-    else if (item.status !== "consistent" && item.status !== "name_conflict") actions.append(button(this.t(item.status === "different" ? "market.reimport" : "market.import"), "memory-btn primary", () => void this.importMarket(item)));
-    toolbar.append(title, actions);
+    toolbar.append(title, marketStatus(String(item.status ?? ""), this.marketStatusLabel(String(item.status ?? ""))));
     workspace.append(toolbar, renderMemoryEntity(String(item.kind ?? ""), (item.entity ?? item) as JsonRecord, this.t.bind(this), undefined, this.renderOptions()));
     return workspace;
   }
@@ -663,13 +924,7 @@ class MemoryApplication {
     const workspace = el("div");
     const toolbar = el("header", "memory-toolbar");
     const title = el("div"); title.append(el("h2", "memory-title", change.id), el("div", "memory-subtitle", this.changeStatusLabel(String(change.status ?? ""))));
-    const actions = el("div", "memory-toolbar-actions");
-    if (change.status === "active") {
-      const add = button(this.t("change.addMemory"), "memory-btn", () => void this.addMemory(change)); add.disabled = Boolean(change.claimed);
-      actions.append(add, button(this.t("common.abandon"), "memory-btn danger", () => void this.abandonChange(change)));
-    } else actions.append(button(this.t("common.archive"), "memory-btn", () => void this.archiveChange(change)));
-    const toggle = button(this.t("change.comments"), "memory-btn", () => { this.#commentsCollapsed = !this.#commentsCollapsed; localStorage.setItem(changeCommentsCollapsedKey, String(this.#commentsCollapsed)); this.render(); });
-    actions.append(toggle); toolbar.append(title, actions); workspace.append(toolbar);
+    toolbar.append(title); workspace.append(toolbar);
     const sourceWorktree = change.sourceWorktree as JsonRecord | undefined;
     if (sourceWorktree && sourceWorktree.available === false) {
       const source = el("section", "memory-error memory-source-worktree");
@@ -773,7 +1028,7 @@ class MemoryApplication {
 
   private async archiveChange(change: ChangeSummary): Promise<void> {
     if (!confirm("确认归档这个 ChangeSet？")) return;
-    try { await this.request(`/api/archive/changes/${encodeURIComponent(change.id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedUpdatedAt: change.updatedAt }) }); await this.navigate(this.#routes.index.to()); }
+    try { await this.request(`/api/archive/changes/${encodeURIComponent(change.id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedUpdatedAt: change.updatedAt }) }); await this.navigate(this.memoryIndexTarget()); }
     catch (error) { this.showTransientError(error); }
   }
 
@@ -826,6 +1081,14 @@ class MemoryApplication {
   }
 
   private async navigate(target: RouteTarget): Promise<void> { await this.#navigate(target); }
+
+  private memoryIndexTarget(): RouteTarget {
+    return this.#routes.index.to();
+  }
+
+  private marketTarget(): RouteTarget {
+    return this.#routes.market.to();
+  }
 
   private visibleMemories(): MemorySummary[] {
     const query = this.#query.trim().toLowerCase();

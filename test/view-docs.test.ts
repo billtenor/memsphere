@@ -31,7 +31,10 @@ test("View architecture documentation matches the wired Module and Slot runtime"
   for (const moduleId of ["org.memsphere.memory", "org.memsphere.run", "org.memsphere.settings"]) {
     assert.match(current, new RegExp(moduleId.replaceAll(".", "\\.")));
   }
-  for (const slot of ["navigation.primary", "header.title", "header.actions", "main.view"]) {
+  for (const slot of [
+    "navigation.primary", "header.title", "header.actions", "header.account", "sidebar.footer",
+    "home.attention", "home.continue", "home.modules", "main.view", "overlay"
+  ]) {
     assert.match(api, new RegExp(slot.replaceAll(".", "\\.")));
     assert.match(slots, new RegExp(slot.replaceAll(".", "\\.")));
   }

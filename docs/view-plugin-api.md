@@ -12,7 +12,7 @@
 
 当前 ViewHost 已实现 Plugin 默认入口、`apiVersion: 1`、`apply()`、Module 实例身份、`lifecycle`、最小 Manifest 校验、SDK SemVer 检查、独立 Bundle 动态加载、Router、Slot Token/Registry、实例级注册事务，以及 Mount 的回滚和清理。浏览器通过 import map 将 `@memsphere/view-sdk` 解析到 Host 提供的 SDK。
 
-当前可注入服务为 `slots` 和 `router`；已经接线的根 Slot 为 `navigation.primary`、`header.title`、`header.actions` 和 `main.view`。`org.memsphere.memory`、`org.memsphere.run`、`org.memsphere.settings` 三个 builtin Module 均使用同一公开入口和独立 Bundle 运行。View API、I18n、Theme、Logger、自定义子 Slot、用户 Module 发现/安装和 Project 动态组合仍未接线；Plugin 请求尚未提供的服务会在 `apply()` 前明确失败。
+当前可注入服务为 `slots` 和 `router`；Catalog 中 `navigation.primary`、`header.title`、`header.actions`、`header.account`、`sidebar.footer`、`home.attention`、`home.continue`、`home.modules`、`main.view` 与 `overlay` 10 个根 Slot 均已接线。`header.actions`、`home.attention` 与 `home.continue` 支持实例生命周期内的 live `upsert()`；`overlay` 支持 Host 管理的背景 Route 投影、遮罩、焦点、关闭和局部故障边界。`org.memsphere.memory`、`org.memsphere.run`、`org.memsphere.settings` 三个 builtin Module 均使用同一公开入口和独立 Bundle 运行。View API、I18n、Theme、Logger、自定义子 Slot、用户 Module 发现/安装和 Project 动态组合仍未接线；Plugin 请求尚未提供的服务会在 `apply()` 前明确失败。
 
 ## Module View 入口契约
 
@@ -178,6 +178,8 @@ export interface SlotDefinition<
   readonly kind: Kind;
   readonly scope: SlotScope;
   readonly render: SlotRenderMode;
+  /** 允许实例在 apply 提交后更新自己的 Entry。 */
+  readonly live?: boolean;
 
   /** 所有者提供的运行时值校验。 */
   validate(value: unknown): value is Value;
@@ -315,10 +317,17 @@ export interface SlotRegistry {
     slot: S,
     options: KeyedRegisterOptions<SlotValue<S>, SlotKey<S>>,
   ): Disposer;
+
+  upsert<S extends typeof slots.headerActions | typeof slots.homeAttention | typeof slots.homeContinue>(
+    slot: S,
+    options: RegisterOptions<SlotValue<S>>,
+  ): Disposer;
 }
 ```
 
 `register()` 必须同步完成 Token、Value、身份和所有权校验；失败时不得留下部分注册。成功返回的 disposer 撤销当前 Entry，并由 SDK 自动纳入实例生命周期。
+
+`upsert()` 只用于标记为 `live` 的聚合 Slot，当前为 `header.actions`、`home.attention` 和 `home.continue`。页面 Mount 可以据当前内容更新标题右侧的页面级操作，并须在卸载时撤销这些 Entry。它在 `apply()` 成功提交后可调用，以当前 Module 实例内的 `id` 原子新增或替换 Entry。每次成功更新产生新的 epoch lease；旧 disposer 不得删除更新后的 Entry，实例清理仍会撤销全部 live Entry。
 
 Entry 的运行时身份为：
 
@@ -367,9 +376,19 @@ export interface NavigationItemDescriptor {
 export interface AttentionItemDescriptor {
   readonly title: TextRef;
   readonly summary?: TextRef;
+  readonly source?: TextRef;
+  readonly icon?: IconRef;
   readonly status: "info" | "warning" | "error";
   readonly updatedAt?: string;
   readonly action: ActionDescriptor;
+}
+
+export interface ContinueItemDescriptor {
+  readonly title: TextRef;
+  readonly summary?: TextRef;
+  readonly icon?: IconRef;
+  readonly updatedAt?: string;
+  readonly route: RouteTarget;
 }
 ```
 
@@ -385,6 +404,9 @@ export interface ViewMount {
     target: ViewMountTarget,
     context: ViewRenderContext,
   ): MaybePromise<void | Disposer>;
+
+  /** 同一个 Mount 在相关 Route 间复用时，接收新的路由上下文。 */
+  update?(context: ViewRenderContext): MaybePromise<void>;
 }
 
 export interface ViewMountTarget {
@@ -408,6 +430,8 @@ export interface ViewRenderContext {
 运行契约：
 
 - Host 在 Entry 激活后创建独占 `element` 并调用 `mount()`；
+- 多个相关 Route 可以注册同一个 `ViewMount`。切换这些 Route 时，Host 优先调用可选的 `update()` 并保留已有容器、状态与资源；未实现 `update()` 时仍按停用与重新挂载处理；
+- `update()` 只更新当前视图，不创建新的资源生命周期；原 `mount()` 返回的 disposer 仍在最终停用时调用；
 - Module 可以使用原生 DOM、React、Vue、Svelte 或其他浏览器框架；
 - 返回的 disposer 在 Entry 停用或容器销毁前调用；
 - Module 不得修改 Host 容器外 DOM，不得假定 `element` 的父结构；
@@ -431,12 +455,17 @@ export interface RouteToken {
 
 export interface ViewRouter {
   register(definition: RouteDefinition): RouteToken;
+  project(options: {
+    readonly from: RouteToken;
+    readonly to: RouteToken;
+    readonly params: Readonly<Record<string, string>>;
+  }): RouteProjection;
   navigate(target: RouteTarget): Promise<void>;
   readonly location: RouteLocation;
 }
 ```
 
-`RouteActivation`、`RouteTarget` 和 `RouteLocation` 是由 SDK 定义、Host 创建的路由值。Plugin 不得伪造这些对象。
+`RouteActivation`、`RouteTarget`、`RouteProjection` 和 `RouteLocation` 是由 SDK 定义、Host 创建的路由值。Plugin 不得伪造这些对象。`project()` 用于 keyed `overlay`：它把浮层 Route 的参数映射到同一 Module 实例拥有的背景页面 Route；跨实例、缺少目标参数或未知参数必须失败。背景 Mount 收到的 `RouteLocation.projected` 为 `true`，应将其视为被动背景，不主动重写当前浮层 URL。
 
 Module Route 必须位于实例基路径下：
 

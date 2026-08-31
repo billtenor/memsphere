@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
+import { build } from "esbuild";
 import { chromium, type Page } from "playwright";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import { createViewServer } from "../src/commands/view.js";
@@ -19,7 +21,7 @@ const syntheticBundlePath = "/assets/modules/org.example.synthetic/index.js";
 const syntheticRouteKey = "org.example.synthetic@1.0.0:synthetic:route:index";
 
 const viewSdkBundle = await transpileBrowserModule("../src/view/view-sdk.ts");
-const viewRuntimeBundle = await transpileBrowserModule("../src/view/view-runtime.ts");
+const viewRuntimeBundle = await browserRuntimeBundle();
 
 test("ViewHost document boots the three builtin Module instances in catalog order", () => {
   const instances = builtinModuleCatalog.map(entry => bootInstance(
@@ -292,7 +294,7 @@ async function withBrowserHost(
       "org.example.synthetic",
       "synthetic",
       syntheticBundlePath,
-      [{ id: "index", path: "/" }]
+      [{ id: "index", path: "/synthetic" }]
     )]));
   });
   const origin = await listen(server);
@@ -300,7 +302,7 @@ async function withBrowserHost(
   try {
     const page = await browser.newPage();
     await prepare?.(page);
-    await page.goto(origin);
+    await page.goto(`${origin}/synthetic`);
     await run(page);
   } finally {
     await browser.close();
@@ -316,6 +318,15 @@ async function assertModuleFailure(page: Page, expected: string | RegExp): Promi
   const message = (await diagnostic.locator("p").textContent()) ?? "";
   if (typeof expected === "string") assert.equal(message, expected);
   else assert.match(message, expected);
+}
+
+async function browserRuntimeBundle(): Promise<string> {
+  const result = await build({
+    entryPoints: [fileURLToPath(new URL("../src/view/view-runtime.ts", import.meta.url))],
+    bundle: true, write: false, format: "esm", platform: "browser", target: "es2022",
+    external: ["@memsphere/view-sdk", "./view-sdk.js"], logLevel: "silent"
+  });
+  return result.outputFiles[0]?.text ?? "";
 }
 
 function bootInstance(
@@ -334,7 +345,7 @@ function bootInstance(
 function pluginSource(body: string): string {
   const routedBody = body.replace(
     /apply\(([^)]*)\)\s*\{/,
-    'apply(context) { const route = context.router.register({ id: "index", path: "/" });'
+    'apply(context) { const route = context.router.register({ id: "index", path: "/synthetic" });'
   );
   return `
     import { defineViewPlugin, slots } from "@memsphere/view-sdk";
