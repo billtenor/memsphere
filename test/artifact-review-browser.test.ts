@@ -1215,6 +1215,16 @@ async function submitThroughConfirmation(page: import("playwright").Page): Promi
   await page.getByRole("button", { name: "提交评审", exact: true }).click();
   const dialog = page.locator("dialog.artifact-review-dialog");
   await dialog.waitFor();
+  const actionLayout = await dialog.locator(".artifact-review-dialog-actions").evaluate(actions => {
+    const buttons = [...actions.querySelectorAll("button")];
+    const boxes = buttons.map(button => button.getBoundingClientRect());
+    return {
+      count: buttons.length,
+      sameRow: boxes.length === 2 && Math.abs(boxes[0].top - boxes[1].top) < 1,
+      compact: boxes.every(box => box.width < actions.getBoundingClientRect().width / 2)
+    };
+  });
+  assert.deepEqual(actionLayout, { count: 2, sameRow: true, compact: true });
   const submitted = page.waitForResponse((response) =>
     response.url().endsWith("/submit") && response.request().method() === "POST"
   );
