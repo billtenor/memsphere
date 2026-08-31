@@ -126,6 +126,32 @@ test("Human Artifact Review refreshes and retries a stale submit revision", asyn
   }
 });
 
+test("submitted Human Artifact Review renders an immutable result", async () => {
+  const fixture = await createSingleActorReviewFixture();
+  try {
+    await withReviewBrowser(fixture.config, { width: 1440, height: 900 }, async (page, origin) => {
+      await page.goto(
+        `${origin}/tasks/${fixture.runId}/artifact-reviews/${fixture.review.id}?round=${fixture.review.currentRoundId}`,
+        { waitUntil: "domcontentloaded" }
+      );
+      const modal = page.locator("#artifact-review-modal[open]");
+      await modal.waitFor();
+      await clickAndWaitForDraftSave(page, modal.getByRole("radio", { name: "通过", exact: true }));
+      await submitThroughConfirmation(page);
+
+      const mine = modal.locator("#artifact-review-my-panel");
+      await mine.getByText("投票摘要 · 通过", { exact: true }).waitFor();
+      assert.equal(await mine.getByRole("radiogroup").count(), 0);
+      assert.equal(await mine.getByRole("textbox").count(), 0);
+      assert.equal(await mine.getByRole("button", { name: "提交评审", exact: true }).count(), 0);
+      assert.equal(await mine.getByRole("combobox", { name: "评审身份" }).count(), 0);
+      assert.equal(await mine.locator(".artifact-review-message.warn").count(), 0);
+    });
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
 test("Human Artifact Review completes once after a revised second round", async () => {
   const fixture = await createTwoActorReviewFixture();
   try {
