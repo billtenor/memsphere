@@ -147,6 +147,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     if (path === undefined) throw new Error("Route target was not created by this ViewHost");
     globalThis.history?.[replace ? "replaceState" : "pushState"]({}, "", path);
     await composeCurrentLocation();
+    globalThis.scrollTo?.(0, 0);
   });
 
   for (const instanceOptions of options.instances) {
@@ -247,10 +248,11 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
 
       const locationIdentity = routeLocationIdentity(location);
       if (activeMount?.entry === entry && activeMount.locationIdentity === locationIdentity) return;
-      await disposeActiveMount(activeMount);
-      activeMount = undefined;
-
-      const element = options.root;
+      const previousMount = activeMount;
+      const element = document.createElement("div");
+      element.className = "view-host-mount";
+      element.dataset.viewMount = entry.identity;
+      element.dataset.viewLocation = `${location.pathname}${location.search}${location.hash}`;
       const portal = document.createElement("div");
       portal.dataset.viewPortal = entry.identity;
       document.body.append(portal);
@@ -263,14 +265,23 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
         if (disposer !== undefined && typeof disposer !== "function") {
           throw new Error("View Mount must return void or a disposer");
         }
+        await disposeActiveMount(previousMount);
+        if (activeMount === previousMount) activeMount = undefined;
+        options.root.replaceChildren(element);
         activeMount = {
           entry,
+          element,
           portal,
           locationIdentity,
           ...(disposer === undefined ? {} : { disposer: disposer as Disposer })
         };
       } catch (error) {
         portal.remove();
+        element.remove();
+        if (activeMount === previousMount) {
+          await disposeActiveMount(previousMount).catch(() => undefined);
+          activeMount = undefined;
+        }
         renderRuntimePageFailure(options.root, moduleForOwner(instances, entry.owner), errorMessage(error), () => activeHost.activateMainView(key));
       }
       renderShellDescriptors(options.root, slotsRegistry, routeRegistry);
@@ -841,6 +852,7 @@ type RuntimePluginInstance = {
 
 type RuntimeActiveMount = {
   readonly entry: RuntimeEntry;
+  readonly element: HTMLElement;
   readonly portal: HTMLElement;
   readonly locationIdentity: string;
   readonly disposer?: Disposer;
@@ -855,6 +867,7 @@ async function disposeActiveMount(mount: RuntimeActiveMount | undefined): Promis
   try {
     await mount.disposer?.();
   } finally {
+    mount.element.remove();
     mount.portal.remove();
   }
 }

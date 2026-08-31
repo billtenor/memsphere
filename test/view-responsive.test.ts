@@ -567,6 +567,7 @@ test("Run status polling loads an uncached replacement in the same secondary men
       assert.equal(replacementPayload.run.status, "running");
       await page.waitForFunction(({ expectedPath, expectedTitle }) => (
         location.pathname === expectedPath
+        && document.querySelector(".view-host-mount")?.getAttribute("data-view-location") === expectedPath
         && document.querySelector(".run-title")?.textContent === expectedTitle
       ), { expectedPath: `/tasks/${legacyRunId}`, expectedTitle: "Legacy procedure fallback" }, { timeout: 10_000 });
     } finally {
@@ -629,6 +630,7 @@ test("Run status polling refreshes a stale cached replacement in the same second
       const replacementPayload = await replacementResponse.json() as { run: { updatedAt: string } };
       assert.equal(replacementPayload.run.updatedAt, nextRevision);
       await page.locator(".run-title", { hasText: "Legacy procedure fallback" }).waitFor();
+      await page.locator(`.view-host-mount[data-view-location="/tasks/${legacyRunId}"]`).waitFor();
     } finally {
       await page.close();
     }

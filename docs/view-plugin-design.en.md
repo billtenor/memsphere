@@ -117,7 +117,7 @@ A Slot is an explicitly opened UI extension point. Its Token carries:
 - TypeScript Value and Key types;
 - a runtime validator.
 
-Root Slots are declared by ViewHost. A future builtin Module that owns an aggregate page may declare child Slots inside that page, but Modules cannot create new global root Slots. Custom child Slots are not wired into the current Runtime.
+Root Slots are declared by ViewHost or the built-in Home View. Modules cannot create new global root Slots, but they may declare child Slots inside Mount Entries they own and export their Tokens to dependent Modules. Custom child Slots are not wired into the current Runtime yet.
 
 ```text
 ViewHost root Slot

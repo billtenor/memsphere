@@ -232,6 +232,8 @@ test("Artifact Review makes historical rounds read-only", async () => {
       await roundMenu.locator(`[data-round-id="${fixture.review.currentRoundId}"]`).click();
 
       await modal.getByText("历史轮次仅供查看，不能投票、添加意见或重新提交。", { exact: true }).waitFor();
+      assert.match(await modal.locator(".artifact-review-progress-summary").innerText(), /评审已完成/);
+      assert.doesNotMatch(await modal.locator(".artifact-review-progress-summary").innerText(), /仍在等待评审/);
       assert.equal(await modal.getByRole("radio").count(), 0);
       assert.equal(await modal.getByRole("button", { name: "添加意见", exact: true }).count(), 0);
       assert.equal(await modal.getByRole("button", { name: "提交评审", exact: true }).isVisible(), false);
@@ -697,12 +699,14 @@ flow:
     await modal.getByRole("option", { name: "待评审产物 · activity candidate", exact: true }).click();
     const agentRow = modal.locator(".artifact-review-row").filter({ hasText: "Advisor" }).first();
     const detailToggle = agentRow.getByRole("button", { name: "查看详情", exact: true });
-    assert.equal(await detailToggle.locator("xpath=ancestor::*[contains(@class, 'artifact-review-row-main')]").count(), 1);
+    assert.equal(await detailToggle.locator("xpath=ancestor::*[contains(@class, 'artifact-review-participant-head')]").count(), 1);
+    assert.equal(await detailToggle.locator("xpath=ancestor::*[contains(@class, 'artifact-review-row-main')]").count(), 0);
     assert.equal(await agentRow.locator(".comment-actions").getByRole("button", { name: "查看详情", exact: true }).count(), 0);
     await detailToggle.click();
     await agentRow.getByRole("button", { name: "收起详情", exact: true }).waitFor();
     await agentRow.getByText("Reviewing implementation evidence.", { exact: true }).waitFor();
     const activity = agentRow.locator(".artifact-review-activity");
+    assert.equal(await activity.evaluate(element => element.previousElementSibling?.classList.contains("artifact-review-participant-head")), true);
     await activity.getByText("消息", { exact: true }).first().waitFor();
     await activity.getByText("工具调用", { exact: true }).waitFor();
     await activity.getByText("执行计划", { exact: true }).waitFor();
@@ -1087,6 +1091,10 @@ async function clickAndWaitForDraftSave(
     response.url().endsWith("/draft") && response.request().method() === "PATCH"
   );
   await button.click();
+  if (await button.getAttribute("role") === "radio") {
+    assert.equal(await button.getAttribute("aria-checked"), "true");
+    assert.equal(await button.evaluate(element => element.classList.contains("active")), true);
+  }
   const response = await saved;
   assert.equal(response.status(), 200);
 }

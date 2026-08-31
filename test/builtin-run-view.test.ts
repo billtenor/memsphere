@@ -27,7 +27,7 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
     stack: [{ type: "procedure", index: 0, steps: [{ id: "step-1", instruction: "Inspect the result", artifact: "report" }] }],
     assertTree: { entries: [{ kind: "reference", target: "statements/run-rules", entries: [{ kind: "rule", text: "Keep evidence." }] }], sections: [] },
     plan: [{
-      id: "step-1", kind: "branch", instruction: "Inspect the result", artifact: { name: "report", type: "object", format: { name: "markdown", options: { layout: "outline" } }, final: true },
+      id: "step-1", kind: "branch", instruction: "Inspect the result", artifact: { name: "report", type: "object", format: { name: "markdown", options: { layout: "outline" } }, final: true, review: "artifact_acceptance.unanimous" },
       branches: {
         truthy: [{ id: "step-child", kind: "action", instruction: "Follow the accepted branch", artifact: "child result" }],
         falsy: [{ id: "step-fallback", kind: "call", target: "fallback-procedure" }]
@@ -63,6 +63,9 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
     assert.equal(await page.locator('[data-current-task-step="true"]').getAttribute("data-step-id"), "step-1");
     assert.match(await page.locator(".schema-writing").innerText(), /Managed draft/);
     assert.match(await page.locator(".run-procedure-asserts").innerText(), /run-rules/);
+    const reviewers = page.locator(".run-pill").filter({ hasText: "Reviewer:" });
+    assert.equal(await reviewers.count(), 1);
+    assert.equal(await reviewers.first().innerText(), "Reviewer: artifact_acceptance.unanimous");
     await page.locator(".run-binding-toggle").click();
     assert.match(await page.locator(".run-binding-body").innerText(), /Human/);
     assert.match(await page.locator(".task-result").first().innerText(), /Rendered report/);

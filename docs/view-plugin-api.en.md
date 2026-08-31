@@ -241,7 +241,7 @@ These are the supported kinds. Adding one is an SDK Minor extension. An older Ho
 
 ### Declaring a Custom Child Slot
 
-Root Slots belong to ViewHost. Future custom child Slots may exist only inside their owner Module's Mount Entry; the current Runtime does not wire this capability:
+Root Slots are declared by ViewHost or the built-in Home View. A Module may declare child Slots only inside a Mount Entry that it owns; the current Runtime does not wire custom child Slots yet:
 
 ```ts
 export const customerDetailActions = defineSlot<HeaderActionDescriptor>()({

@@ -81,7 +81,7 @@ function renderRunMeta(run: Json, options: RunDetailOptions, labels: Labels): HT
   }
   const review = run.artifactReview || run.artifactReviewSummaries?.find((item: Json) => item.status !== "passed");
   if (review?.id) {
-    const control = button(`${labels.review} ${review.round?.submitted ?? 0}/${review.round?.total ?? 0}`, "run-pill running");
+    const control = button(`${labels.review} ${review.round?.submitted ?? 0}/${review.round?.total ?? 0}`, "run-meta-action primary");
     control.id = "review-toggle";
     control.setAttribute("aria-controls", "artifact-review-modal");
     control.dataset.artifactReviewId = review.id;
@@ -90,7 +90,7 @@ function renderRunMeta(run: Json, options: RunDetailOptions, labels: Labels): HT
   }
   const active = currentRunStep(run);
   if (active) {
-    const jump = button(labels.jumpCurrent, "run-pill current-step-jump");
+    const jump = button(labels.jumpCurrent, "run-meta-action current-step-jump");
     jump.onclick = () => document.querySelector(`[data-current-task-step="true"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
     meta.append(jump);
   }
@@ -305,7 +305,12 @@ function appendArtifactContract(target: HTMLElement, step: Json, labels: Labels)
   if (artifact.type) target.append(pill(artifact.type));
   appendFormatMeta(target, artifact.format, artifact.schema, labels);
   if (artifact.final) target.append(pill(labels.final, "done"));
-  for (const slot of artifact.review || []) target.append(pill(`${labels.reviewer}: ${displaySlot(slot)}`));
+  const reviewSlots = Array.isArray(artifact.review)
+    ? artifact.review
+    : typeof artifact.review === "string" && artifact.review
+      ? [artifact.review]
+      : [];
+  for (const slot of reviewSlots) target.append(pill(`${labels.reviewer}: ${displaySlot(slot)}`));
 }
 
 function appendFormatMeta(target: HTMLElement, format: unknown, schema: unknown, labels: Labels): void {

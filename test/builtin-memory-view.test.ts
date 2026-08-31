@@ -56,6 +56,7 @@ test("Memory builtin independently registers its route pages and renders Memory 
     assert.match(await page.locator(".memory-workspace").innerText(), /Independent builtin detail/);
     assert.equal(await page.locator(".memory-module").count(), 1);
     assert.equal(await page.locator(".memory-source-tabs").count(), 1);
+    assert.equal((await page.locator(".memory-count").textContent())?.trim(), "1 total");
   } finally {
     await browser.close();
     await close(server);
@@ -71,6 +72,7 @@ test("Memory builtin renders Market status and opens an importing ChangeSet", as
     routeBasePath: "/",
     module: { projectId: "demo", moduleId: "org.memsphere.memory", moduleVersion: "0.1.2", instanceId: "memory" }
   }];
+  let validatedPreviewRequests = 0;
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
     if (url.pathname === memoryBundlePath) return send(response, 200, "text/javascript", bundle);
@@ -78,9 +80,23 @@ test("Memory builtin renders Market status and opens an importing ChangeSet", as
     if (url.pathname === viewRuntimeBundlePath) return send(response, 200, "text/javascript", runtime);
     if (url.pathname === "/api/projects") return json(response, { current: "demo", projects: [{ name: "demo" }] });
     if (url.pathname === "/api/changes") return json(response, { changes: [{ id: "change-market", status: "active", memoryPaths: [] }] });
-    if (url.pathname === "/api/memories") return json(response, { memories: [] });
+    if (url.pathname === "/api/memories") {
+      if (url.searchParams.has("change")) {
+        validatedPreviewRequests += 1;
+        return send(response, 400, "application/json", JSON.stringify({ code: "changeset_unavailable", error: "ChangeSet has no validated checkpoint" }));
+      }
+      return json(response, { memories: [] });
+    }
     if (url.pathname === "/api/market/memories") return json(response, { memories: [{ reference: "concepts/market-memory", kind: "concepts", status: "importing", changeId: "change-market", entity: { names: ["Market Memory"], defines: ["Market content"] } }] });
-    if (url.pathname === "/api/changes/change-market") return json(response, { change: { id: "change-market", status: "active", memoryPaths: [] }, targetMemories: [], comments: [] });
+    if (url.pathname === "/api/changes/change-market") return json(response, {
+      change: { id: "change-market", status: "active", memoryPaths: ["concepts/market-memory.yaml"] },
+      targetMemories: [{
+        reference: "concepts/market-memory",
+        operation: "create",
+        memory: { id: "concepts/market-memory", kind: "concepts", path: "concepts/market-memory.yaml", entity: { names: ["market-memory", "Market Memory"], defines: ["Market content"] } }
+      }],
+      comments: []
+    });
     return send(response, 200, "text/html", renderViewHostHtml("en", instances));
   });
   const origin = await listen(server);
@@ -93,6 +109,58 @@ test("Memory builtin renders Market status and opens an importing ChangeSet", as
     await market.click();
     await page.waitForURL(`${origin}/projects/demo/changes/change-market`);
     await page.getByRole("heading", { name: "change-market", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "Market Memory", exact: true }).waitFor();
+    assert.match(await page.locator(".memory-change-layout").innerText(), /Market content/);
+    assert.equal(validatedPreviewRequests, 0);
+  } finally {
+    await browser.close();
+    await close(server);
+  }
+});
+
+test("Memory builtin keeps Procedure content structured instead of exposing object-shaped YAML", async () => {
+  const [bundle, sdk, runtime] = await Promise.all([
+    buildMemoryBundle(), browserModule("../src/view/view-sdk.ts"), browserModule("../src/view/view-runtime.ts")
+  ]);
+  const instances: ViewHostBootInstance[] = [{
+    pluginPath: memoryBundlePath,
+    routeBasePath: "/",
+    module: { projectId: "demo", moduleId: "org.memsphere.memory", moduleVersion: "0.1.2", instanceId: "memory" }
+  }];
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? "/", "http://localhost");
+    if (url.pathname === memoryBundlePath) return send(response, 200, "text/javascript", bundle);
+    if (url.pathname === viewSdkBundlePath) return send(response, 200, "text/javascript", sdk);
+    if (url.pathname === viewRuntimeBundlePath) return send(response, 200, "text/javascript", runtime);
+    if (url.pathname === "/api/projects") return json(response, { current: "demo", projects: [{ name: "demo" }] });
+    if (url.pathname === "/api/changes") return json(response, { changes: [] });
+    if (url.pathname === "/api/memories") return json(response, {
+      memories: [{ id: "procedures/demo-flow", kind: "procedures", path: "procedures/demo-flow.yaml", names: ["demo-flow", "Demo Flow"], system: false }]
+    });
+    if (url.pathname === "/api/memories/procedures/demo-flow") return json(response, {
+      memory: {
+        id: "procedures/demo-flow", kind: "procedures", path: "procedures/demo-flow.yaml",
+        entity: {
+          names: ["demo-flow", "Demo Flow"], defines: ["A readable flow"],
+          flow: [
+            { tag: "!action", action: "Prepare input", artifact: "input", format: { name: "markdown", options: {} } },
+            { tag: "!while", condition: { tag: "!action", action: "Needs another pass", artifact: "decision", format: "plain" }, do: [] }
+          ]
+        }
+      }
+    });
+    return send(response, 200, "text/html", renderViewHostHtml("en", instances));
+  });
+  const origin = await listen(server);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${origin}/memories/procedures/demo-flow`, { waitUntil: "networkidle" });
+    await page.getByRole("heading", { name: "Demo Flow", exact: true, level: 2 }).waitFor();
+    assert.equal(await page.locator(".memory-flow-item").count(), 2);
+    assert.match(await page.locator(".memory-flow").innerText(), /Prepare input/);
+    assert.match(await page.locator(".memory-flow").innerText(), /Needs another pass/);
+    assert.doesNotMatch(await page.locator(".memory-workspace").innerText(), /\[object Object\]|name:\s*markdown|options:\s*\{\}/);
   } finally {
     await browser.close();
     await close(server);

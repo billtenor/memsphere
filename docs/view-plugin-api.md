@@ -246,7 +246,7 @@ keyed   // 保存多个 key 的 Entry，由所有者激活某个 key
 
 ### 声明自定义子 Slot
 
-根 Slot 由 ViewHost 声明。未来的自定义子 Slot 只能位于所有者 Module 自己的 Mount Entry 内；当前 Runtime 尚未接线该能力：
+根 Slot 由 ViewHost 或内置 Home View 声明。Module 只能在自己拥有的 Mount Entry 中声明子 Slot；当前 Runtime 尚未接线自定义子 Slot：
 
 ```ts
 export const customerDetailActions = defineSlot<HeaderActionDescriptor>()({

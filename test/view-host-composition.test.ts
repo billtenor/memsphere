@@ -140,6 +140,45 @@ test("Shell navigation composes main/header descriptors and browser back restore
   }, "/");
 });
 
+test("ViewHost keeps the current page visible until the next Mount is ready", async () => {
+  const instance: ViewHostBootInstance = {
+    ...bootInstance("org.memsphere.memory", "memory", "/memory.js", "/"),
+    routeGrants: [
+      { id: "first", path: "/first" },
+      { id: "second", path: "/second" }
+    ]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const first = context.router.register({ id: "first", path: "/first" });
+      const second = context.router.register({ id: "second", path: "/second" });
+      context.slots.register(slots.navigationPrimary, { id: "second-nav", value: {
+        label: { text: "Second" }, icon: { kind: "system", name: "next" }, route: second.to()
+      }});
+      context.slots.register(slots.mainView, { id: "first", key: first.key, value: {
+        mount({ element }) { element.innerHTML = '<p id="first-page">First page</p>'; }
+      }});
+      context.slots.register(slots.mainView, { id: "second", key: second.key, value: {
+        async mount({ element }) {
+          element.innerHTML = '<p id="next-loading">Loading next page</p>';
+          await new Promise(resolve => setTimeout(resolve, 250));
+          element.innerHTML = '<p id="second-page">Second page</p>';
+        }
+      }});
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/memory.js", bundle]]), undefined, async page => {
+    await page.locator("#first-page").waitFor();
+    await page.getByRole("button", { name: "Second", exact: true }).click();
+    await page.waitForURL(/\/second$/);
+    assert.equal(await page.locator("#first-page").count(), 1);
+    assert.equal(await page.locator("#next-loading").count(), 0);
+    await page.locator("#second-page").waitFor();
+    assert.equal(await page.locator("#first-page").count(), 0);
+  }, "/first");
+});
+
 test("built-in Route grants reject an unapproved path before composition", async () => {
   const instances: ViewHostBootInstance[] = [{
     ...bootInstance("org.memsphere.memory", "memory", "/memory.js", "/"),

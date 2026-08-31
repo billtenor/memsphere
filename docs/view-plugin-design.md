@@ -117,7 +117,7 @@ Slot 是一个明确开放的 UI 扩展位置。Slot Token 同时携带：
 - TypeScript Value/Key 类型；
 - 运行时 validator。
 
-根 Slot 由 ViewHost 声明。未来拥有聚合页面的内置 Module 可以声明自己页面内部的子 Slot，但 Module 不能自行创建新的全局根 Slot。自定义子 Slot 尚未在当前 Runtime 接线。
+根 Slot 由 ViewHost 或内置 Home View 声明。Module 不能自行创建新的全局根 Slot，但可以在自己拥有的 Mount Entry 中声明子 Slot，并导出 Token 供依赖它的 Module 使用。自定义子 Slot 尚未在当前 Runtime 接线。
 
 ```text
 ViewHost 根 Slot

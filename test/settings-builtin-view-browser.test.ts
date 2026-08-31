@@ -56,6 +56,20 @@ test("Settings Builtin Mount loads both scopes and validates an edited global dr
     await page.getByRole("heading", { name: "Memsphere 设置", exact: true }).waitFor();
     assert.match(await page.locator("#settings-status").textContent() ?? "", /没有未保存修改/);
     await page.getByRole("button", { name: "常规", exact: true }).click();
+    await page.waitForURL("**/settings/general");
+    await page.locator('.settings-nav-item[data-section="general"][aria-current="page"]').waitFor();
+    await page.evaluate(() => {
+      document.body.style.minHeight = "2000px";
+      scrollTo(0, 600);
+    });
+    assert(await page.evaluate(() => scrollY > 0));
+    await page.getByRole("button", { name: "界面服务", exact: true }).click();
+    await page.waitForURL("**/settings/view");
+    await page.locator('.settings-nav-item[data-section="view"][aria-current="page"]').waitFor();
+    assert.equal(await page.evaluate(() => scrollY), 0);
+    await page.getByRole("button", { name: "常规", exact: true }).click();
+    await page.waitForURL("**/settings/general");
+    await page.locator('.settings-nav-item[data-section="general"][aria-current="page"]').waitFor();
     const language = page.getByRole("combobox", { name: "工作语言", exact: true });
     await language.click();
     await page.getByRole("option", { name: "English", exact: true }).click();
