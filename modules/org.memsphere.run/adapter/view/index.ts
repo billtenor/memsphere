@@ -373,6 +373,7 @@ class RunApplication {
     const visible = (run: Json | undefined): boolean => Boolean(run && run.status === this.#status && !run.archived && !run.readOnly);
     let targetId = runId;
     if (options.replaceMoved && !visible(selected)) targetId = undefined;
+    if (!targetId) targetId = this.#runs.find(visible)?.id;
     if (!targetId) {
       this.#lastLoadChanged = listChanged || this.#detail !== null || Boolean(this.#detailError);
       this.#detail=null;this.#detailError="";this.#detailErrorRunId="";return undefined;

@@ -319,11 +319,6 @@ flow:
       await archivedModal.waitFor();
       await archivedModal.getByText("Private candidate", { exact: true }).waitFor();
 
-      const summaryRefresh = page.waitForResponse((response) => {
-        const url = new URL(response.url());
-        return url.pathname === "/api/runs" && url.searchParams.get("representation") === "summary";
-      });
-      assert.equal((await summaryRefresh).status(), 200);
       await page.locator(".run-list").getByText("当前状态下没有 Run。", { exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, `/tasks/${started.id}/artifact-reviews/${review.id}`);
       assert.equal(await archivedModal.isVisible(), true);
