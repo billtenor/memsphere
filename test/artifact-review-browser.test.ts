@@ -58,12 +58,16 @@ test("Human Artifact Review keeps each participant's draft private", async () =>
       await selectIdentity(page, identity, "alice");
       const composer = reviewModal.getByPlaceholder("补充整体评审意见");
       await composer.fill("Alice private draft");
+      await reviewModal.getByRole("combobox", { name: "意见分类" }).click();
+      await reviewModal.getByRole("option", { name: "阻塞问题", exact: true }).click();
       await clickAndWaitForDraftSave(
         page,
         reviewModal.getByRole("button", { name: "添加意见", exact: true })
       );
       const savedComment = reviewModal.locator(".comment-card").filter({ hasText: "Alice private draft" });
-      await savedComment.getByText("已保存意见", { exact: true }).waitFor();
+      await savedComment.getByText("已保存意见 · 阻塞问题", { exact: true }).waitFor();
+      const persistedDraft = currentArtifactReview(await readRun(fixture.runsRoot, fixture.runId));
+      assert.equal(persistedDraft?.rounds[0]?.assignments.find(assignment => assignment.actorId === "alice")?.draft.comments[0]?.severity, "blocking");
       const commentStyles = await savedComment.evaluate(card => {
         const input = document.querySelector("#artifact-review-my-content textarea");
         return {
@@ -75,7 +79,9 @@ test("Human Artifact Review keeps each participant's draft private", async () =>
       assert.notEqual(commentStyles.cardBackground, commentStyles.inputBackground);
       assert.equal(commentStyles.accentBorder, "3px");
       const approve = reviewModal.getByRole("radio", { name: "通过", exact: true });
+      await approve.evaluate(button => { button.dataset.renderIdentity = "vote-control"; });
       await clickAndWaitForDraftSave(page, approve);
+      assert.equal(await approve.getAttribute("data-render-identity"), "vote-control");
       const voteStyles = await reviewModal.locator(".artifact-review-vote").evaluate(group => {
         const buttons = [...group.querySelectorAll("button")];
         return {
@@ -86,6 +92,14 @@ test("Human Artifact Review keeps each participant's draft private", async () =>
       });
       assert.notEqual(voteStyles.activeBackground, voteStyles.inactiveBackground);
       assert.equal(voteStyles.borderStyle, "solid");
+      const submit = reviewModal.getByRole("button", { name: "提交评审", exact: true });
+      await submit.hover();
+      const submitHover = await submit.evaluate(button => ({
+        background: getComputedStyle(button).backgroundColor,
+        color: getComputedStyle(button).color
+      }));
+      assert.equal(submitHover.background, "rgb(40, 108, 103)");
+      assert.equal(submitHover.color, "rgb(255, 255, 255)");
 
       await selectIdentity(page, identity, "bob");
       assert.equal(await reviewModal.getByText("Alice private draft", { exact: true }).count(), 0);
@@ -255,7 +269,19 @@ test("failed Artifact Review draft saves retain input and retry exactly once", a
       await modal.waitFor();
       await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
 
-      await modal.locator(".inline-plus").first().click();
+      const inlineToggle = modal.locator(".inline-plus").first();
+      await inlineToggle.click();
+      await modal.getByRole("button", { name: "取消", exact: true }).waitFor();
+      const editorSurface = await modal.locator(".inline-comment-editor").first().evaluate(editor => ({
+        background: getComputedStyle(editor).backgroundColor,
+        border: getComputedStyle(editor).borderStyle
+      }));
+      assert.notEqual(editorSurface.background, "rgba(0, 0, 0, 0)");
+      assert.equal(editorSurface.border, "solid");
+      await inlineToggle.click();
+      assert.equal(await modal.locator(".inline-comment-editor").count(), 0);
+      assert.equal(await inlineToggle.getAttribute("aria-expanded"), "false");
+      await inlineToggle.click();
       let inlineEditor = modal.locator(".inline-comment-editor").first();
       let inlineInput = inlineEditor.getByPlaceholder("这里应该如何修改？");
       let inlineSave = inlineEditor.getByRole("button", { name: "添加意见", exact: true });
@@ -399,7 +425,13 @@ test("Artifact Review locates an anchored historical comment in its artifact", a
       await page.getByRole("listbox", { name: "轮次" })
         .locator(`[data-round-id="${fixture.review.currentRoundId}"]`).click();
       const comment = modal.locator(".comment-card").filter({ hasText: "Locate this historical comment" });
-      await comment.getByRole("button", { name: "定位", exact: true }).click();
+      const locateButton = comment.getByRole("button", { name: "定位", exact: true });
+      const locateSize = await locateButton.evaluate(button => ({
+        button: button.getBoundingClientRect().width,
+        card: button.parentElement?.getBoundingClientRect().width || 0
+      }));
+      assert(locateSize.button < locateSize.card / 2);
+      await locateButton.click();
       const located = modal.locator('[data-anchor="markdown:h1:0"].artifact-review-target-located');
       await located.waitFor();
       assert.match(await located.innerText(), /Focused candidate/);
