@@ -62,7 +62,30 @@ test("Human Artifact Review keeps each participant's draft private", async () =>
         page,
         reviewModal.getByRole("button", { name: "添加意见", exact: true })
       );
-      await reviewModal.getByText("Alice private draft", { exact: true }).waitFor();
+      const savedComment = reviewModal.locator(".comment-card").filter({ hasText: "Alice private draft" });
+      await savedComment.getByText("已保存意见", { exact: true }).waitFor();
+      const commentStyles = await savedComment.evaluate(card => {
+        const input = document.querySelector("#artifact-review-my-content textarea");
+        return {
+          cardBackground: getComputedStyle(card).backgroundColor,
+          inputBackground: input ? getComputedStyle(input).backgroundColor : "",
+          accentBorder: getComputedStyle(card).borderLeftWidth
+        };
+      });
+      assert.notEqual(commentStyles.cardBackground, commentStyles.inputBackground);
+      assert.equal(commentStyles.accentBorder, "3px");
+      const approve = reviewModal.getByRole("radio", { name: "通过", exact: true });
+      await clickAndWaitForDraftSave(page, approve);
+      const voteStyles = await reviewModal.locator(".artifact-review-vote").evaluate(group => {
+        const buttons = [...group.querySelectorAll("button")];
+        return {
+          activeBackground: getComputedStyle(buttons[0]).backgroundColor,
+          inactiveBackground: getComputedStyle(buttons[1]).backgroundColor,
+          borderStyle: getComputedStyle(buttons[0]).borderStyle
+        };
+      });
+      assert.notEqual(voteStyles.activeBackground, voteStyles.inactiveBackground);
+      assert.equal(voteStyles.borderStyle, "solid");
 
       await selectIdentity(page, identity, "bob");
       assert.equal(await reviewModal.getByText("Alice private draft", { exact: true }).count(), 0);
@@ -146,6 +169,7 @@ test("submitted Human Artifact Review renders an immutable result", async () => 
       assert.equal(await mine.getByRole("button", { name: "提交评审", exact: true }).count(), 0);
       assert.equal(await mine.getByRole("combobox", { name: "评审身份" }).count(), 0);
       assert.equal(await mine.locator(".artifact-review-message.warn").count(), 0);
+      assert.equal(await modal.locator("#artifact-review-progress-panel .artifact-review-participant").first().locator(".artifact-review-opinion").count(), 0);
     });
   } finally {
     await rm(fixture.dir, { recursive: true, force: true });
