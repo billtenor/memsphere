@@ -1,7 +1,7 @@
 # View Shell Design QA
 
-- Source: `http://10.37.40.165:4174/`
-- Implementation: `http://10.37.40.165:30000/`
+- Source: prototype View served on port `4174`
+- Implementation: Memsphere View served on port `30000`
 - Viewport and state: Firefox, 1440 × 900, desktop Home, light theme, Project `memsphere`
 - Source capture: `.playwright-cli/element-2026-08-31T09-28-07-648Z.png`
 - Implementation capture: `/tmp/home-actual-final.png`
@@ -42,7 +42,7 @@
 ## Memory page actions
 
 - Source visual truth: `/data00/home/liuyanjun.lyj/.codex/attachments/df55dbca-070c-4e80-a1e5-ff5c60ed67d8/codex-clipboard-ffaa01c5-7444-483b-a409-cb2a8a3e3247.png` (208 × 132 px, source-density crop).
-- Implementation: `http://10.37.40.165:30000/market`, Firefox at 1440 × 900 CSS px and device scale 1.
+- Implementation: Memsphere View `/market`, Firefox at 1440 × 900 CSS px and device scale 1.
 - Full implementation capture: `.playwright-cli/market-header-actions.png` (1440 × 900 px).
 - Focused implementation capture: `.playwright-cli/market-header-actions-focused.png` (69 × 39 px).
 - Combined comparison evidence: `.playwright-cli/market-header-actions-comparison.png` (900 × 420 px), showing the source Page action and the implemented Header action together.
