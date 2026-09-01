@@ -102,7 +102,7 @@ memsphere memory change validate [change-id]
 
 Managed 省略 id 时当前 Workspace 必须恰有一个 active ChangeSet。Embedded 的标准路径直接运行无额外选择参数的命令，并按 Project、Git common repository 与 base revision 创建或复用逻辑 CLI ChangeSet；linked worktree 路径不参与身份判断。命令只保存一份稀疏、内容寻址的当前验证内容，再次 validate 原子替换它，不生成供选择或回滚的多份快照。ChangeSet 生命周期只有 active、completed、abandoned：普通 commit、push 或创建 PR 后仍为 active，候选提交合入 `master` 后才自动成为 completed；Managed publish 后直接成为 completed。输出的稳定 View 入口为 `/projects/<project>/changes/<change-id>`。普通 `memsphere validate` 只校验正式 Store，不创建 Embedded ChangeSet。
 
-View 顶层只展示 Memory 与 Run，Memory 下分“当前项目”与“记忆市场”，Run 下分 running、done 与 abandoned。记忆市场只展示 npm 包内的官方精选 Memory，未导入内容不会进入 Catalog 或 Run。点击“导入”或“重新导入”只创建 `market_import` ChangeSet，不预先展示 diff；同一 Project 的后续导入继续追加到同一个 active ChangeSet，完成或废弃后才新建。用户进入 ChangeSet 查看合并后的候选并决定是否继续。active 的导入 ChangeSet 会让对应市场条目显示“导入中”，并可直接跳转到该 ChangeSet。导入后的实体就是普通用户 Memory，可以重命名和自由修改；它与包内内容独立演进，不保存来源或版本，也不自动更新。View 仅按当前 `<kind>/<canonical-name>` 关联两者，并按原始文件字节显示“未导入 / 导入中 / 已导入 · 无变更 / 已导入 · 有差异 / 名称冲突”。重命名后不再关联，市场条目改名等同旧条目下架、新条目新增。
+View 使用稳定 Shell 组合 Home、Memory、Run 和启用的用户 Module 视图。Home `/` 汇总待处理、继续工作与我的模块；Memory `/memories` 下分“当前项目”与“记忆市场”，Run `/tasks` 下分 running、done 与 abandoned。记忆市场只展示 npm 包内的官方精选 Memory，未导入内容不会进入 Catalog 或 Run。点击“导入”或“重新导入”只创建 `market_import` ChangeSet，不预先展示 diff；同一 Project 的后续导入继续追加到同一个 active ChangeSet，完成或废弃后才新建。用户进入 ChangeSet 查看合并后的候选并决定是否继续。active 的导入 ChangeSet 会让对应市场条目显示“导入中”，并可直接跳转到该 ChangeSet。导入后的实体就是普通用户 Memory，可以重命名和自由修改；它与包内内容独立演进，不保存来源或版本，也不自动更新。View 仅按当前 `<kind>/<canonical-name>` 关联两者，并按原始文件字节显示“未导入 / 导入中 / 已导入 · 无变更 / 已导入 · 有差异 / 名称冲突”。重命名后不再关联，市场条目改名等同旧条目下架、新条目新增。
 
 Memory 详情的“修改”经简单确认后总是创建一个新的持久、未绑定 ChangeSet；用户不能直接编辑 YAML，只能在 ChangeSet 中加入已有 Memory，并通过结构位置旁的 `+` 逐条提交 Comment。Comment 直接绑定 ChangeSet，状态为 pending、processing、completed，不存在独立 Memory Review、ChangeSet Review、Submit Review、Round 或 Vote。Human Actor 和稳定 Browser user UUID 只用于归因，不构成认证。ChangeSet 详情仅展示纳入范围的候选 Memory，不展示 diff 或完整 Store；active 可添加 Memory、提交 Comment 或确认废弃，completed、abandoned 只读。
 
@@ -197,7 +197,7 @@ flow:
 
 ### 维护当前配置
 
-View 是 Memsphere Home 级单一服务，可从 Project 选择器切换当前展示内容。Memory、ChangeSet、Run、设置与 Artifact Review 的主要界面都有稳定 URL，可复制到另一窗口直接重开；ChangeSet 从 Memory 列表的“修改中”标记进入，不占用顶层菜单；Artifact Review 的 Round 与 Material 由查询参数定位，临时身份、草稿和布局不写入 URL。固定界面文案通过 zh-CN/en 语言资源并跟随 Home `language`，与 Memory DSL 的中文标签/YAML 原名展示偏好彼此独立；用户内容、标识符、命令、路径和错误原文保持原样。配置中心通过左侧分组导航直接进入 Memsphere 或当前 Project 设置，右侧只展示当前配置内容：全局设置维护语言、View 服务和 ACP Provider，Project 设置展示 Store 并维护 Control Plane 与 Actor。两个 Scope 分别保存草稿、Revision、校验结果和确认 diff，保存时只原子写入各自配置文件；切换 Project 不清除全局草稿，放弃未保存的 Project 草稿前必须确认。全局 ACP Provider 被任一已注册 Project 的 Actor 引用时不能重置或删除。成功保存 `language` 后下一次加载立即使用新界面语言；只有磁盘 host 或 port 与当前 View 进程不一致时，需要手动执行：
+View 是 Memsphere Home 级单一服务，可从 Project 选择器切换当前展示内容。稳定 Shell 通过十个根 Slot 组合导航、头部、账户、底部、Home 三个区域、Page 与 Overlay；Module 只操作 Host 分配的容器。Memory、ChangeSet、Run、设置与 Artifact Review 的主要界面都有稳定 URL，可复制到另一窗口直接重开；ChangeSet 从 Memory 列表的“修改中”标记进入，不占用顶层菜单；Artifact Review 由 Run Module 注册到 Host overlay，Round 与 Material 由查询参数定位，临时身份、草稿和布局不写入 URL。固定界面文案通过 zh-CN/en 语言资源并跟随 Home `language`，与 Memory DSL 的中文标签/YAML 原名展示偏好彼此独立；用户内容、标识符、命令、路径和错误原文保持原样。配置中心通过左侧分组导航直接进入 Memsphere 或当前 Project 设置，右侧只展示当前配置内容：全局设置维护语言、View 服务和 ACP Provider，Project 设置展示 Store 并维护 Control Plane 与 Actor。两个 Scope 分别保存草稿、Revision、校验结果和确认 diff，保存时只原子写入各自配置文件；切换 Project 不清除全局草稿，放弃未保存的 Project 草稿前必须确认。全局 ACP Provider 被任一已注册 Project 的 Actor 引用时不能重置或删除。成功保存 `language` 后下一次加载立即使用新界面语言；只有磁盘 host 或 port 与当前 View 进程不一致时，需要手动执行：
 
 ```bash
 memsphere view restart

@@ -6,7 +6,7 @@ This guide builds a minimal View Plugin and explains what happens at runtime. Fo
 
 ## Current Implementation Status
 
-ViewHost currently wires the Plugin entrypoint, lifecycle, Manifest and SDK validation, independent Bundle loading, Router, and the `navigation.primary`, `header.title`, `header.actions`, and `main.view` Slots. A currently runnable Plugin may declare `inject: ["slots", "router"]`.
+ViewHost currently wires the Plugin entrypoint, lifecycle, Manifest and SDK validation, independent Bundle loading, Router, and the root Slot Catalog. A currently runnable Plugin may declare `inject: ["slots", "router"]`; the available contribution points, special composition capabilities, and authoritative wiring status are maintained in the [View Slot List](./view-slots.en.md).
 
 This guide retains the complete View API and I18n example because those services are part of the established long-term development contract. They are not wired yet, so the complete example is not directly runnable against the current release. The API reference's “Current Implementation Status” is authoritative; future design and usage are not removed merely because implementation is pending.
 
@@ -168,7 +168,7 @@ ctx.slots.register(slots.mainView, {
 });
 ```
 
-`slots.navigationPrimary`, `slots.headerTitle`, and `slots.mainView` are Slot Tokens. A Token tells TypeScript and ViewHost where content belongs, which type is allowed, how it composes, and how to validate it at runtime.
+The example's `slots.navigationPrimary`, `slots.headerTitle`, and `slots.mainView` are Slot Tokens. A Token tells TypeScript and ViewHost where content belongs, which type is allowed, how it composes, and how to validate it at runtime; consult the [View Slot List](./view-slots.en.md) for other available Tokens.
 
 The first two Slots accept Descriptors: the Plugin supplies text, icons, and behavior descriptions and Memsphere renders them consistently. `mainView` accepts a Mount: ViewHost supplies a container and the Plugin renders the complete page.
 

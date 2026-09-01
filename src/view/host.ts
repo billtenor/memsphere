@@ -13,6 +13,13 @@ export interface ViewHostBootInstance {
     readonly path: string;
     readonly aliases?: readonly string[];
   }[];
+  readonly home?: {
+    readonly title: string;
+    readonly summary: string;
+    readonly icon: string;
+    readonly routeId: string;
+    readonly routeParams?: Readonly<Record<string, string>>;
+  };
   readonly module: {
     readonly projectId: string;
     readonly moduleId: string;
@@ -24,6 +31,7 @@ export interface ViewHostBootInstance {
 export function renderViewHostHtml(
   locale: ViewLocale | unknown = "zh-CN",
   instances?: readonly ViewHostBootInstance[],
+  pathname?: string,
 ): string {
   const resolved = resolveViewLocale(locale);
   const resolvedInstances = instances ?? [];
@@ -48,6 +56,7 @@ export function renderViewHostHtml(
   const importMap = serializeForHtml({
     imports: { "@memsphere/view-sdk": viewSdkBundlePath }
   });
+  const initial = pathname ? initialShellState(resolved, resolvedInstances, pathname) : undefined;
 
   return `<!doctype html>
 <html lang="${resolved}" data-view-host-state="loading">
@@ -65,7 +74,7 @@ export function renderViewHostHtml(
   </style>
 </head>
 <body>
-  ${renderViewShellMarkup({ loading: formatViewMessage(resolved, "common.loading") })}
+  ${renderViewShellMarkup({ loading: formatViewMessage(resolved, "common.loading"), ...(initial ? { initial } : {}) })}
   <script id="memsphere-view-boot" type="application/json">${boot}</script>
   <script type="importmap">${importMap}</script>
   <script type="module">
@@ -100,11 +109,11 @@ export function renderViewHostHtml(
         }
       }));
       root.className = "";
-      root.replaceChildren();
       const activeHost = await runtimeModule.startViewHost({
         instances,
         root,
-        mainViewKey: boot.mainViewKey
+        mainViewKey: boot.mainViewKey,
+        coreConfig: { locale: boot.locale, messages: boot.messages }
       });
       const shell = root.closest("[data-view-shell]");
       const projectLabel = shell?.querySelector(".view-shell-project-label");
@@ -243,6 +252,46 @@ export function renderViewHostHtml(
   </script>
 </body>
 </html>`;
+}
+
+function initialShellState(locale: ViewLocale, instances: readonly ViewHostBootInstance[], pathname: string) {
+  const projectName = instances[0]?.module.projectId ?? "memsphere";
+  const moduleHref = (instance: ViewHostBootInstance): string => {
+    const routeId = instance.home?.routeId;
+    const grant = instance.routeGrants?.find(candidate => candidate.id === routeId);
+    if (!grant) return "/";
+    return grant.path.replace(/:([A-Za-z0-9_]+)/g, (_, name: string) => encodeURIComponent(String(instance.home?.routeParams?.[name] ?? "")));
+  };
+  const memory = instances.find(instance => instance.module.moduleId === "org.memsphere.memory");
+  const run = instances.find(instance => instance.module.moduleId === "org.memsphere.run");
+  const navigation = [
+    { label: formatViewMessage(locale, "navigation.home"), icon: "house", href: "/" },
+    ...(memory ? [{ label: formatViewMessage(locale, "navigation.memory"), icon: "brain", href: moduleHref(memory) }] : []),
+    ...(run ? [{ label: formatViewMessage(locale, "navigation.run"), icon: "play-circle", href: moduleHref(run) }] : [])
+  ];
+  return {
+    pathname,
+    projectName,
+    homeLabel: formatViewMessage(locale, "navigation.home"),
+    memoryLabel: formatViewMessage(locale, "navigation.memory"),
+    runLabel: formatViewMessage(locale, "navigation.run"),
+    settingsLabel: formatViewMessage(locale, "common.settings"),
+    healthyLabel: formatViewMessage(locale, "service.healthy"),
+    accountLabel: formatViewMessage(locale, "account.avatar"),
+    homeTitle: formatViewMessage(locale, "home.title"),
+    attentionLabel: formatViewMessage(locale, "home.attention"),
+    attentionEmpty: formatViewMessage(locale, "home.attention.empty"),
+    continueLabel: formatViewMessage(locale, "home.continue"),
+    continueEmpty: formatViewMessage(locale, "home.continue.empty"),
+    modulesLabel: formatViewMessage(locale, "home.modules"),
+    navigation,
+    modules: instances.flatMap(instance => instance.home ? [{
+      title: instance.home.title,
+      summary: instance.home.summary,
+      icon: instance.home.icon,
+      href: moduleHref(instance)
+    }] : [])
+  };
 }
 
 function serializeForHtml(value: unknown): string {

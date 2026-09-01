@@ -6,7 +6,7 @@
 
 ## 当前实现状态
 
-当前 ViewHost 已接通 Plugin 入口、生命周期、Manifest/SDK 校验、独立 Bundle 加载、Router，以及 `navigation.primary`、`header.title`、`header.actions`、`main.view`。当前可运行 Plugin 可以声明 `inject: ["slots", "router"]`。
+当前 ViewHost 已接通 Plugin 入口、生命周期、Manifest/SDK 校验、独立 Bundle 加载、Router 与根 Slot Catalog。当前可运行 Plugin 可以声明 `inject: ["slots", "router"]`；可贡献位置、特殊组合能力与准确接线状态统一见 [View Slot List](./view-slots.md)。
 
 本文保留 View API 与 I18n 的完整示例，因为它们属于已经确定的长期开发契约；这两项服务目前尚未接线，所以完整示例不能直接作为当前版本的可运行代码。准确进度以 API 文档的“当前实现状态”为准，不因尚未实现而删除后续设计和用法。
 
@@ -168,7 +168,7 @@ ctx.slots.register(slots.mainView, {
 });
 ```
 
-`slots.navigationPrimary`、`slots.headerTitle` 和 `slots.mainView` 都是 Slot Token。Token 同时告诉 TypeScript 和 ViewHost：内容放在哪里、允许什么类型、怎样组合以及如何在运行时校验。
+示例中的 `slots.navigationPrimary`、`slots.headerTitle` 和 `slots.mainView` 都是 Slot Token。Token 同时告诉 TypeScript 和 ViewHost：内容放在哪里、允许什么类型、怎样组合以及如何在运行时校验；其他可用 Token 请直接查询 [View Slot List](./view-slots.md)。
 
 前两个 Slot 接收 Descriptor：Plugin 只提供文字、图标和行为描述，由 Memsphere 统一渲染。`mainView` 接收 Mount：ViewHost 提供容器，由 Plugin 渲染完整页面。
 

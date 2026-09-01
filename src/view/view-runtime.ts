@@ -1,24 +1,32 @@
 import {
   createHostRouteActivation,
+  createHostRouteProjection,
   createHostRouteTarget,
   isSlotToken,
   slots,
   type Disposer,
   type KeyedRegisterOptions,
   type HeaderActionDescriptor,
+  type HeaderAccountDescriptor,
   type HeaderTitleDescriptor,
+  type HomeAttentionItemDescriptor,
+  type HomeContinueItemDescriptor,
+  type HomeModuleItemDescriptor,
   type IconRef,
   type ModuleInstanceContext,
   type NavigationItemDescriptor,
+  type OverlayMountDescriptor,
   type RegisterOptions,
   type RouteActivation,
   type RouteDefinition,
   type RouteLocation,
+  type RouteProjection,
   type RouteTarget,
   type RouteToken,
   type SlotKind,
   type SlotRegistry,
   type SlotToken,
+  type SidebarFooterDescriptor,
   type TextRef,
   type ViewLifecycle,
   type ViewMount,
@@ -27,6 +35,9 @@ import {
   type ViewRouter,
   type ViewServiceName
 } from "./view-sdk.js";
+import { createCorePlugin } from "./core-plugin.js";
+import { coreViewRoutes } from "./core-routes.js";
+import { createHomeMount, type HomeSnapshotReader } from "./shell/home.js";
 
 type AnySlotToken = SlotToken<string, SlotKind, unknown, string>;
 
@@ -39,6 +50,14 @@ type RuntimeEntry = {
   readonly when?: RouteActivation;
   readonly children: readonly AnySlotToken[];
   readonly identity: string;
+  readonly owner: string;
+  readonly epoch?: number;
+};
+
+type RuntimeRouteProjection = {
+  readonly from: RuntimeRoute;
+  readonly to: RuntimeRoute;
+  readonly params: Readonly<Record<string, string>>;
   readonly owner: string;
 };
 
@@ -72,6 +91,13 @@ export interface ViewPluginInstanceOptions<Config = unknown> {
   readonly routeBasePath?: string;
   /** Core-owned allowlist for reserved built-in routes. */
   readonly routeGrants?: readonly ViewRouteGrant[];
+  readonly home?: {
+    readonly title: string;
+    readonly summary: string;
+    readonly icon: string;
+    readonly routeId: string;
+    readonly routeParams?: Readonly<Record<string, string>>;
+  };
 }
 
 export interface StartViewHostOptions {
@@ -79,6 +105,10 @@ export interface StartViewHostOptions {
   readonly root: HTMLElement;
   readonly mainViewKey?: string;
   readonly location?: RouteLocation;
+  readonly coreConfig?: {
+    readonly locale?: string;
+    readonly messages?: Readonly<Record<string, unknown>>;
+  };
 }
 
 export interface ViewInstanceDiagnostic {
@@ -135,7 +165,8 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
   const slotsRegistry = new RuntimeSlotStore(routeRegistry);
   const instances: RuntimePluginInstance[] = [];
   const diagnostics: ViewInstanceDiagnostic[] = [];
-  let activeMount: RuntimeActiveMount | undefined;
+  let activeMainMount: RuntimeActiveMount | undefined;
+  let activeOverlayMount: RuntimeActiveMount | undefined;
   let disposed = false;
   let navigationQueue = Promise.resolve();
   let composeCurrentLocation: () => Promise<void> = async () => {
@@ -150,7 +181,53 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     globalThis.scrollTo?.(0, 0);
   });
 
-  for (const instanceOptions of options.instances) {
+  const coreMessages = options.coreConfig?.messages ?? {};
+  const homeReader: HomeSnapshotReader = Object.freeze({
+    snapshot: () => Object.freeze({
+      attention: Object.freeze(slotsRegistry.entries(slots.homeAttention, routeRegistry.location).map(entry => entry.value as HomeAttentionItemDescriptor)),
+      continueItems: Object.freeze(slotsRegistry.entries(slots.homeContinue, routeRegistry.location).map(entry => entry.value as HomeContinueItemDescriptor)),
+      modules: Object.freeze(options.instances.flatMap(instance => {
+        if (!instance.home) return [];
+        const owner = moduleIdentity(instance.module);
+        const target = routeRegistry.targetFor(owner, instance.home.routeId, instance.home.routeParams ?? {});
+        if (!target) return [];
+        const diagnosticStatus = diagnostics.find(item => moduleIdentity(item.module) === owner)?.status;
+        const status = diagnosticStatus === "active" ? "ready" as const : "failed" as const;
+        return [Object.freeze({
+          title: { text: instance.home.title },
+          summary: { text: instance.home.summary },
+          icon: { kind: "system" as const, name: instance.home.icon },
+          route: target,
+          status
+        })];
+      }))
+    }),
+    subscribe: (listener: () => void) => slotsRegistry.subscribe(listener),
+    navigate: (target: RouteTarget) => routeRegistry.navigate(target)
+  });
+  const coreProjectId = options.instances[0]?.module.projectId ?? "memsphere";
+  const coreModule: Readonly<ModuleInstanceContext> = Object.freeze({
+    projectId: coreProjectId,
+    moduleId: "org.memsphere.core",
+    moduleVersion: "1.0.0",
+    instanceId: "core"
+  });
+  const coreInstance: ViewPluginInstanceOptions = {
+    plugin: createCorePlugin({
+      homeMount: createHomeMount(homeReader, coreMessages),
+      messages: coreMessages,
+      projectName: coreProjectId
+    }),
+    config: Object.freeze({}),
+    module: coreModule,
+    routeBasePath: "/",
+    routeGrants: coreViewRoutes
+  };
+  const allInstances: readonly ViewPluginInstanceOptions[] = options.coreConfig
+    ? [coreInstance, ...options.instances]
+    : options.instances;
+
+  for (const instanceOptions of allInstances) {
     const module = Object.freeze({ ...instanceOptions.module });
     const lifecycle = new RuntimeLifecycle();
     const owner = moduleIdentity(module);
@@ -230,6 +307,138 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     }
   }
 
+  const activateMainEntry = async (entry: RuntimeEntry, location: RouteLocation): Promise<void> => {
+    const locationIdentity = routeLocationIdentity(location);
+    if (activeMainMount?.entry === entry && activeMainMount.locationIdentity === locationIdentity) return;
+    const mount = entry.value as ViewMount;
+    const current = activeMainMount;
+    if (current && current.entry.value === entry.value && mount.update) {
+      await mount.update({ module: moduleForOwner(instances, entry.owner), route: location });
+      current.entry = entry;
+      current.locationIdentity = locationIdentity;
+      current.element.dataset.viewMount = entry.identity;
+      current.element.dataset.viewLocation = `${location.pathname}${location.search}${location.hash}`;
+      return;
+    }
+    const previous = activeMainMount;
+    const element = document.createElement("div");
+    element.className = "view-host-mount";
+    element.dataset.viewMount = entry.identity;
+    element.dataset.viewLocation = `${location.pathname}${location.search}${location.hash}`;
+    const portal = document.createElement("div");
+    portal.className = "view-host-nested-portal";
+    portal.dataset.viewPortal = entry.identity;
+    const pagePortalRoot = options.root.closest<HTMLElement>("[data-view-shell]")?.querySelector<HTMLElement>("[data-view-page-portals]");
+    (pagePortalRoot ?? document.body).append(portal);
+    try {
+      const disposer = await mount.mount(
+        { element, portal },
+        { module: moduleForOwner(instances, entry.owner), route: location }
+      );
+      if (disposer !== undefined && typeof disposer !== "function") throw new Error("View Mount must return void or a disposer");
+      activeMainMount = undefined;
+      await disposeActiveMount(previous);
+      options.root.replaceChildren(element);
+      activeMainMount = { entry, element, portal, locationIdentity, ...(disposer ? { disposer } : {}) };
+    } catch (error) {
+      portal.remove();
+      element.remove();
+      activeMainMount = undefined;
+      await disposeActiveMount(previous);
+      renderRuntimePageFailure(options.root, moduleForOwner(instances, entry.owner), errorMessage(error), () => activeHost.activateMainView());
+    }
+  };
+
+  const dismissOverlay = async (descriptor: OverlayMountDescriptor, source: RouteLocation): Promise<void> => {
+    await routeRegistry.navigate(routeRegistry.projectedTarget(descriptor.background, source));
+  };
+
+  const activateOverlayEntry = async (entry: RuntimeEntry, location: RouteLocation): Promise<void> => {
+    const locationIdentity = routeLocationIdentity(location);
+    if (activeOverlayMount?.entry === entry && activeOverlayMount.locationIdentity === locationIdentity) return;
+    const previous = activeOverlayMount;
+    activeOverlayMount = undefined;
+    await disposeActiveMount(previous);
+    const descriptor = entry.value as OverlayMountDescriptor;
+    const host = options.root.closest<HTMLElement>("[data-view-shell]")?.querySelector<HTMLElement>('[data-view-slot="overlay"]');
+    if (!host) throw new Error("ViewHost Shell does not provide the overlay Slot container");
+    const restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+    const layer = document.createElement("div");
+    layer.className = `view-overlay-layer view-overlay-${descriptor.presentation}`;
+    layer.dataset.viewOverlay = entry.identity;
+    const surface = document.createElement("section");
+    surface.className = "view-overlay-surface";
+    surface.setAttribute("role", "dialog");
+    surface.setAttribute("aria-modal", "true");
+    surface.setAttribute("aria-label", textValue(descriptor.label));
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "view-overlay-close";
+    close.setAttribute("aria-label", messageValue(coreMessages, "overlay.close"));
+    close.append(renderIcon({ kind: "system", name: "x" }));
+    close.hidden = descriptor.dismissible === false;
+    const element = document.createElement("div");
+    element.className = "view-overlay-mount";
+    const portal = document.createElement("div");
+    portal.className = "view-overlay-nested-portal";
+    surface.append(close, element, portal);
+    layer.append(surface);
+    host.replaceChildren(layer);
+    const dismiss = () => dismissOverlay(descriptor, location).catch(error => renderShellNavigationError(options.root, error));
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && descriptor.dismissible !== false) {
+        event.preventDefault();
+        void dismiss();
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [...surface.querySelectorAll<HTMLElement>('button:not([disabled]),select:not([disabled]),textarea:not([disabled]),input:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])')];
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    close.addEventListener("click", dismiss);
+    layer.addEventListener("mousedown", event => {
+      if (event.target === layer && descriptor.dismissible !== false) void dismiss();
+    });
+    document.addEventListener("keydown", onKeydown);
+    try {
+      const mountDisposer = await descriptor.mount.mount(
+        { element, portal },
+        { module: moduleForOwner(instances, entry.owner), route: location }
+      );
+      if (mountDisposer !== undefined && typeof mountDisposer !== "function") throw new Error("Overlay Mount must return void or a disposer");
+      queueMicrotask(() => (surface.querySelector<HTMLElement>("[autofocus]") ?? close).focus());
+      activeOverlayMount = {
+        entry,
+        element,
+        portal,
+        container: layer,
+        locationIdentity,
+        disposer: async () => {
+          try { await mountDisposer?.(); }
+          finally {
+            document.removeEventListener("keydown", onKeydown);
+            if (restoreFocus?.isConnected) restoreFocus.focus();
+          }
+        }
+      };
+    } catch (error) {
+      document.removeEventListener("keydown", onKeydown);
+      element.replaceChildren();
+      const panel = document.createElement("section");
+      panel.className = "view-host-module-error";
+      const heading = document.createElement("h2");
+      heading.textContent = messageValue(coreMessages, "overlay.failed");
+      const detail = document.createElement("p");
+      detail.textContent = errorMessage(error);
+      panel.append(heading, detail);
+      element.append(panel);
+      activeOverlayMount = { entry, element, portal, container: layer, locationIdentity };
+    }
+  };
+
   const activeHost: ActiveViewHost = Object.freeze({
     async activateMainView(key?: string): Promise<void> {
       if (disposed) throw new Error("ViewHost is already disposed");
@@ -239,51 +448,28 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
         renderRuntimePageFailure(options.root, undefined, `No View Route matches: ${location.pathname}`, () => activeHost.activateMainView(key));
         return;
       }
+      const overlayEntry = key === undefined ? slotsRegistry.entry(slots.overlay, selectedKey, location) : undefined;
+      if (overlayEntry) {
+        const descriptor = overlayEntry.value as OverlayMountDescriptor;
+        const background = routeRegistry.projectedLocation(descriptor.background, location);
+        const backgroundEntry = background.routeKey
+          ? slotsRegistry.entry(slots.mainView, background.routeKey, background)
+          : undefined;
+        if (!backgroundEntry) throw new Error("Overlay background Route does not provide main.view");
+        await activateMainEntry(backgroundEntry, background);
+        await activateOverlayEntry(overlayEntry, location);
+        renderShellDescriptors(options.root, slotsRegistry, routeRegistry, background);
+        return;
+      }
+      await disposeActiveMount(activeOverlayMount);
+      activeOverlayMount = undefined;
       const entry = slotsRegistry.entry(slots.mainView, selectedKey, location);
       if (!entry) {
         const owner = routeRegistry.owner(location.pathname);
         renderRuntimePageFailure(options.root, owner ? moduleForOwner(instances, owner) : undefined, `ViewHost has no main.view for key: ${selectedKey}`, () => activeHost.activateMainView(key));
         return;
       }
-
-      const locationIdentity = routeLocationIdentity(location);
-      if (activeMount?.entry === entry && activeMount.locationIdentity === locationIdentity) return;
-      const previousMount = activeMount;
-      const element = document.createElement("div");
-      element.className = "view-host-mount";
-      element.dataset.viewMount = entry.identity;
-      element.dataset.viewLocation = `${location.pathname}${location.search}${location.hash}`;
-      const portal = document.createElement("div");
-      portal.dataset.viewPortal = entry.identity;
-      document.body.append(portal);
-      try {
-        const mount = entry.value as ViewMount;
-        const disposer = await mount.mount(
-          { element, portal },
-          { module: moduleForOwner(instances, entry.owner), route: location }
-        );
-        if (disposer !== undefined && typeof disposer !== "function") {
-          throw new Error("View Mount must return void or a disposer");
-        }
-        await disposeActiveMount(previousMount);
-        if (activeMount === previousMount) activeMount = undefined;
-        options.root.replaceChildren(element);
-        activeMount = {
-          entry,
-          element,
-          portal,
-          locationIdentity,
-          ...(disposer === undefined ? {} : { disposer: disposer as Disposer })
-        };
-      } catch (error) {
-        portal.remove();
-        element.remove();
-        if (activeMount === previousMount) {
-          await disposeActiveMount(previousMount).catch(() => undefined);
-          activeMount = undefined;
-        }
-        renderRuntimePageFailure(options.root, moduleForOwner(instances, entry.owner), errorMessage(error), () => activeHost.activateMainView(key));
-      }
+      await activateMainEntry(entry, location);
       renderShellDescriptors(options.root, slotsRegistry, routeRegistry);
     },
     diagnostics(): ViewHostDiagnosticSnapshot {
@@ -298,11 +484,17 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       disposed = true;
       const errors: unknown[] = [];
       try {
-        await disposeActiveMount(activeMount);
+        await disposeActiveMount(activeOverlayMount);
       } catch (error) {
         errors.push(error);
       }
-      activeMount = undefined;
+      activeOverlayMount = undefined;
+      try {
+        await disposeActiveMount(activeMainMount);
+      } catch (error) {
+        errors.push(error);
+      }
+      activeMainMount = undefined;
       globalThis.removeEventListener?.("popstate", handlePopstate);
       for (const instance of [...instances].reverse()) {
         errors.push(...await instance.lifecycle.disposeCollectingErrors());
@@ -486,6 +678,8 @@ class RuntimeSlotStore {
   readonly #entries: RuntimeEntry[] = [];
   readonly #declared = new Map<string, AnySlotToken>();
   readonly #routes: RuntimeRouteStore;
+  readonly #listeners = new Set<() => void>();
+  #notifyQueued = false;
 
   constructor(routes: RuntimeRouteStore) {
     this.#routes = routes;
@@ -496,6 +690,10 @@ class RuntimeSlotStore {
 
   transaction(module: Readonly<ModuleInstanceContext>, lifecycle: RuntimeLifecycle): RuntimeSlotTransaction {
     return new RuntimeSlotTransaction(this, module, lifecycle);
+  }
+
+  location(): RouteLocation {
+    return this.#routes.location;
   }
 
   prepare(staged: readonly RuntimeEntry[]): readonly RuntimeEntry[] {
@@ -522,12 +720,40 @@ class RuntimeSlotStore {
       this.#entries.push(entry);
       for (const child of entry.children) this.#declared.set(slotIdentity(child), child);
     }
+    this.#notify();
   }
 
   remove(entry: RuntimeEntry): void {
     for (const child of entry.children) this.#removeSlotTree(child);
     const index = this.#entries.indexOf(entry);
-    if (index >= 0) this.#entries.splice(index, 1);
+    if (index >= 0) {
+      this.#entries.splice(index, 1);
+      this.#notify();
+    }
+  }
+
+  upsert(entry: RuntimeEntry): RuntimeEntry {
+    const index = this.#entries.findIndex(candidate => (
+      candidate.token === entry.token && candidate.owner === entry.owner && candidate.id === entry.id
+    ));
+    const candidates = index < 0
+      ? [...this.#entries]
+      : this.#entries.filter((_, candidateIndex) => candidateIndex !== index);
+    assertNoSlotConflict(candidates, entry);
+    if (index < 0) this.#entries.push(entry);
+    else this.#entries.splice(index, 1, entry);
+    this.#notify();
+    return entry;
+  }
+
+  subscribe(listener: () => void): Disposer {
+    this.#listeners.add(listener);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      this.#listeners.delete(listener);
+    };
   }
 
   entry(token: AnySlotToken, key: string, location: RouteLocation): RuntimeEntry | undefined {
@@ -562,6 +788,15 @@ class RuntimeSlotStore {
     for (const entry of entries) this.remove(entry);
     this.#declared.delete(slotIdentity(token));
   }
+
+  #notify(): void {
+    if (this.#notifyQueued) return;
+    this.#notifyQueued = true;
+    queueMicrotask(() => {
+      this.#notifyQueued = false;
+      for (const listener of [...this.#listeners]) listener();
+    });
+  }
 }
 
 class RuntimeSlotTransaction implements SlotRegistry {
@@ -569,6 +804,7 @@ class RuntimeSlotTransaction implements SlotRegistry {
   readonly #module: Readonly<ModuleInstanceContext>;
   readonly #lifecycle: RuntimeLifecycle;
   readonly #staged: RuntimeEntry[] = [];
+  readonly #liveEpochs = new Map<string, number>();
   #state: "open" | "committed" | "rolled-back" = "open";
 
   constructor(
@@ -613,6 +849,44 @@ class RuntimeSlotTransaction implements SlotRegistry {
     });
   }
 
+  upsert(
+    token: AnySlotToken,
+    options: RegisterOptions<unknown>,
+  ): Disposer {
+    if (this.#state !== "committed") throw new Error("Live Slot updates require a committed Plugin instance");
+    if (this.#lifecycle.disposed) throw new Error("View Plugin instance is already disposed");
+    if (token !== slots.headerActions && token !== slots.homeAttention && token !== slots.homeContinue) {
+      throw new Error(`Slot ${slotIdentity(token)} does not allow live Module updates`);
+    }
+    validateSlotRegistration(token, options);
+    const owner = moduleIdentity(this.#module);
+    const liveIdentity = [owner, slotIdentity(token), options.id].join(":");
+    const epoch = (this.#liveEpochs.get(liveIdentity) ?? 0) + 1;
+    const entry: RuntimeEntry = {
+      token,
+      id: options.id,
+      order: options.order ?? 0,
+      value: options.value,
+      ...(options.when === undefined ? {} : { when: options.when }),
+      children: Object.freeze([]),
+      identity: liveIdentity,
+      owner,
+      epoch
+    };
+    this.#store.upsert(entry);
+    this.#liveEpochs.set(liveIdentity, epoch);
+    return this.#lifecycle.own(() => {
+      const current = this.#store.entries(token, this.#storeLocation()).find(candidate => (
+        candidate.owner === owner && candidate.id === options.id
+      ));
+      if (current?.epoch === epoch) this.#store.remove(current);
+    });
+  }
+
+  #storeLocation(): RouteLocation {
+    return this.#store.location();
+  }
+
   prepare(): readonly RuntimeEntry[] {
     if (this.#state !== "open") throw new Error("View Plugin registration transaction is already closed");
     return this.#store.prepare(this.#staged);
@@ -630,6 +904,8 @@ class RuntimeRouteStore {
   #location: RouteLocation;
   readonly #activationKeys = new WeakMap<RouteActivation, string>();
   readonly #targetPaths = new WeakMap<RouteTarget, string>();
+  readonly #tokens = new WeakMap<RouteToken, RuntimeRoute>();
+  readonly #projections = new WeakMap<RouteProjection, RuntimeRouteProjection>();
   #navigate: ((target: RouteTarget, replace: boolean) => Promise<void>) | undefined;
 
   constructor(location: RouteLocation) {
@@ -735,8 +1011,68 @@ class RuntimeRouteStore {
     return target;
   }
 
+  rememberToken(token: RouteToken, route: RuntimeRoute): void {
+    this.#tokens.set(token, route);
+  }
+
+  createProjection(
+    fromToken: RouteToken,
+    toToken: RouteToken,
+    params: Readonly<Record<string, string>>,
+    owner: string,
+  ): RouteProjection {
+    const from = this.#tokens.get(fromToken);
+    const to = this.#tokens.get(toToken);
+    if (!from || !to) throw new Error("Route projection requires Route Tokens created by this ViewHost");
+    if (from.owner !== owner || to.owner !== owner) throw new Error("Cross-instance Route projections are not supported");
+    const sourceNames = new Set(from.parameterNames);
+    for (const targetName of to.parameterNames) {
+      const sourceName = params[targetName];
+      if (!sourceName || !sourceNames.has(sourceName)) {
+        throw new Error(`Route projection does not map target parameter: ${targetName}`);
+      }
+    }
+    if (Object.keys(params).some(name => !to.parameterNames.includes(name))) {
+      throw new Error("Route projection maps an unknown target parameter");
+    }
+    const projection = createHostRouteProjection();
+    this.#projections.set(projection, { from, to, params: Object.freeze({ ...params }), owner });
+    return projection;
+  }
+
+  projectedLocation(projection: RouteProjection, source: RouteLocation): RouteLocation {
+    const value = this.#projections.get(projection);
+    if (!value) throw new Error("Route projection was not created by this ViewHost");
+    if (source.routeKey !== value.from.key) throw new Error("Overlay Route projection source does not match current Route");
+    const params: Record<string, string> = {};
+    for (const targetName of value.to.parameterNames) {
+      const sourceName = value.params[targetName]!;
+      const parameter = source.params[sourceName];
+      if (parameter === undefined) throw new Error(`Overlay Route parameter is missing: ${sourceName}`);
+      params[targetName] = parameter;
+    }
+    return freezeLocation({
+      pathname: fillRoutePath(value.to, params),
+      search: "",
+      hash: "",
+      params: Object.freeze(params),
+      routeKey: value.to.key,
+      projected: true
+    });
+  }
+
+  projectedTarget(projection: RouteProjection, source: RouteLocation): RouteTarget {
+    const location = this.projectedLocation(projection, source);
+    return this.createTarget(location.pathname + location.search + location.hash);
+  }
+
   targetPath(target: RouteTarget): string | undefined {
     return this.#targetPaths.get(target);
+  }
+
+  targetFor(owner: string, routeId: string, params: Readonly<Record<string, string>> = {}): RouteTarget | undefined {
+    const route = this.#routes.find(candidate => candidate.owner === owner && candidate.id === routeId);
+    return route ? this.createTarget(fillRoutePath(route, params)) : undefined;
   }
 
   snapshot(): ViewHostDiagnosticSnapshot["routes"] {
@@ -815,13 +1151,20 @@ class RuntimeRouteTransaction implements ViewRouter {
     };
     this.#staged.push(route);
     this.#lifecycle.own(() => this.#store.remove(route));
-    return Object.freeze({
+    const token = Object.freeze({
       key,
       activation,
       to: (params: Readonly<Record<string, string>> = {}) => (
         this.#store.createTarget(fillRoutePath(route, params))
       )
     });
+    this.#store.rememberToken(token, route);
+    return token;
+  }
+
+  project(options: { readonly from: RouteToken; readonly to: RouteToken; readonly params: Readonly<Record<string, string>> }): RouteProjection {
+    if (this.#state !== "open") throw new Error("View Plugin registration transaction is already closed");
+    return this.#store.createProjection(options.from, options.to, options.params, moduleIdentity(this.#module));
   }
 
   async navigate(target: RouteTarget): Promise<void> {
@@ -851,10 +1194,11 @@ type RuntimePluginInstance = {
 };
 
 type RuntimeActiveMount = {
-  readonly entry: RuntimeEntry;
+  entry: RuntimeEntry;
   readonly element: HTMLElement;
   readonly portal: HTMLElement;
-  readonly locationIdentity: string;
+  readonly container?: HTMLElement;
+  locationIdentity: string;
   readonly disposer?: Disposer;
 };
 
@@ -867,7 +1211,7 @@ async function disposeActiveMount(mount: RuntimeActiveMount | undefined): Promis
   try {
     await mount.disposer?.();
   } finally {
-    mount.element.remove();
+    (mount.container ?? mount.element).remove();
     mount.portal.remove();
   }
 }
@@ -885,13 +1229,16 @@ function renderShellDescriptors(
   root: HTMLElement,
   slotStore: RuntimeSlotStore,
   routeStore: RuntimeRouteStore,
+  renderedLocation?: RouteLocation,
 ): void {
   const shell = root.closest<HTMLElement>("[data-view-shell]");
   if (!shell) return;
-  const location = routeStore.location;
+  const location = renderedLocation ?? routeStore.location;
   const navigation = shell.querySelector<HTMLElement>('[data-view-slot="navigation.primary"]');
   const title = shell.querySelector<HTMLElement>('[data-view-slot="header.title"]');
   const actions = shell.querySelector<HTMLElement>('[data-view-slot="header.actions"]');
+  const account = shell.querySelector<HTMLElement>('[data-view-slot="header.account"]');
+  const footer = shell.querySelector<HTMLElement>('[data-view-slot="sidebar.footer"]');
 
   if (navigation) {
     navigation.replaceChildren(...slotStore.entries(slots.navigationPrimary, location).map(entry => {
@@ -900,15 +1247,15 @@ function renderShellDescriptors(
       button.type = "button";
       button.className = "view-shell-navigation-item";
       button.dataset.viewEntry = entry.identity;
-      button.append(renderIcon(descriptor.icon), textNode(descriptor.label));
+      const targetPath = routeStore.targetPath(descriptor.route);
+      const active = targetPath !== undefined && routePathname(targetPath) === location.pathname;
+      button.append(renderIcon(descriptor.icon, active ? "fill" : "regular"), textNode(descriptor.label));
       if (descriptor.badge) {
         const badge = document.createElement("span");
         badge.className = "view-shell-navigation-badge";
         badge.textContent = textValue(descriptor.badge);
         button.append(badge);
       }
-      const targetPath = routeStore.targetPath(descriptor.route);
-      const active = targetPath !== undefined && routePathname(targetPath) === location.pathname;
       button.classList.toggle("active", active);
       button.setAttribute("aria-current", active ? "page" : "false");
       button.addEventListener("click", () => {
@@ -929,6 +1276,66 @@ function renderShellDescriptors(
       renderHeaderAction(entry.value as HeaderActionDescriptor, entry.identity)
     )));
   }
+
+  if (account) {
+    account.replaceChildren();
+    const entry = slotStore.entries(slots.headerAccount, location)[0];
+    if (entry) account.append(renderHeaderAccount(entry.value as HeaderAccountDescriptor, entry.identity));
+  }
+
+  if (footer) {
+    footer.replaceChildren(...slotStore.entries(slots.sidebarFooter, location).map(entry => (
+      renderSidebarFooter(entry.value as SidebarFooterDescriptor, entry.identity)
+    )));
+  }
+}
+
+function renderHeaderAccount(descriptor: HeaderAccountDescriptor, identity: string): HTMLElement {
+  const container = document.createElement(descriptor.action ? "button" : "div");
+  container.className = "view-shell-account";
+  container.dataset.viewEntry = identity;
+  const avatar = document.createElement("span");
+  avatar.className = "view-shell-account-avatar";
+  avatar.textContent = textValue(descriptor.label);
+  container.append(avatar);
+  if (descriptor.status) {
+    container.title = textValue(descriptor.status);
+  }
+  const userIcon = document.createElement("img");
+  userIcon.className = "view-shell-account-user-icon";
+  userIcon.src = "/assets/system-icons/user.svg";
+  userIcon.alt = "";
+  userIcon.setAttribute("aria-hidden", "true");
+  const caret = document.createElement("img");
+  caret.className = "view-shell-account-caret";
+  caret.src = "/assets/system-icons/caret-down.svg";
+  caret.alt = "";
+  caret.setAttribute("aria-hidden", "true");
+  container.append(userIcon, caret);
+  if (descriptor.action && container instanceof HTMLButtonElement) {
+    container.type = "button";
+    container.addEventListener("click", () => void descriptor.action!.run());
+  }
+  return container;
+}
+
+function renderSidebarFooter(descriptor: SidebarFooterDescriptor, identity: string): HTMLElement {
+  if (descriptor.kind === "action") {
+    const button = renderHeaderAction(descriptor.action, identity);
+    button.classList.add("view-shell-settings");
+    return button;
+  }
+  const status = document.createElement("div");
+  status.className = "view-shell-service-status";
+  status.dataset.status = descriptor.status;
+  status.dataset.viewEntry = identity;
+  const icon = document.createElement("img");
+  icon.className = "view-shell-status-icon";
+  icon.src = "/assets/system-icons/circle-fill.svg";
+  icon.alt = "";
+  icon.setAttribute("aria-hidden", "true");
+  status.append(icon, document.createTextNode(textValue(descriptor.label)));
+  return status;
 }
 
 function renderHeaderTitle(
@@ -974,9 +1381,13 @@ function renderHeaderAction(descriptor: HeaderActionDescriptor, identity: string
   button.type = "button";
   button.className = "view-shell-action";
   button.dataset.viewEntry = identity;
+  button.setAttribute("aria-label", textValue(descriptor.label));
   button.disabled = descriptor.disabled === true;
   if (descriptor.icon) button.append(renderIcon(descriptor.icon));
-  button.append(textNode(descriptor.label));
+  const label = document.createElement("span");
+  label.className = "view-shell-action-label";
+  label.append(textNode(descriptor.label));
+  button.append(label);
   button.addEventListener("click", async () => {
     if (button.disabled) return;
     button.disabled = true;
@@ -997,7 +1408,7 @@ function renderHeaderAction(descriptor: HeaderActionDescriptor, identity: string
   return button;
 }
 
-function renderIcon(icon: IconRef): HTMLElement {
+function renderIcon(icon: IconRef, weight: "regular" | "fill" = "regular"): HTMLElement {
   if (icon.kind === "asset") {
     const image = document.createElement("img");
     image.className = "view-shell-icon";
@@ -1005,11 +1416,23 @@ function renderIcon(icon: IconRef): HTMLElement {
     image.alt = textValue(icon.alt);
     return image;
   }
-  const span = document.createElement("span");
-  span.className = "view-shell-icon";
-  span.dataset.systemIcon = icon.name;
-  span.setAttribute("aria-hidden", "true");
-  return span;
+  const image = document.createElement("img");
+  image.className = "view-shell-icon";
+  const name = systemIconName(icon.name);
+  image.src = `/assets/system-icons/${name}${weight === "fill" ? "-fill" : ""}.svg`;
+  image.alt = "";
+  image.setAttribute("aria-hidden", "true");
+  return image;
+}
+
+function systemIconName(name: string): string {
+  if (name === "memory") return "brain";
+  if (name === "play") return "play-circle";
+  if (name === "gear") return "gear-six";
+  if (name === "search") return "magnifying-glass";
+  return ["house", "brain", "play-circle", "gear-six", "stack", "user", "arrow-right", "x", "cube", "caret-down", "circle-fill", "magnifying-glass", "plus", "file-text", "code", "warning-circle"].includes(name)
+    ? name
+    : "stack";
 }
 
 function textNode(value: TextRef): Text {
@@ -1019,6 +1442,11 @@ function textNode(value: TextRef): Text {
 function textValue(value: TextRef): string {
   if ("text" in value) return value.text;
   return value.key.replace(/\{([A-Za-z0-9_]+)\}/g, (_, name: string) => String(value.params?.[name] ?? `{${name}}`));
+}
+
+function messageValue(messages: Readonly<Record<string, unknown>>, key: string): string {
+  const value = messages[key];
+  return typeof value === "string" ? value : key;
 }
 
 function renderShellNavigationError(root: HTMLElement, error: unknown): void {
@@ -1191,7 +1619,8 @@ function freezeLocation(location: RouteLocation): RouteLocation {
     search: location.search,
     hash: location.hash,
     params: Object.freeze({ ...location.params }),
-    ...(location.routeKey === undefined ? {} : { routeKey: location.routeKey })
+    ...(location.routeKey === undefined ? {} : { routeKey: location.routeKey }),
+    ...(location.projected === true ? { projected: true as const } : {})
   });
 }
 

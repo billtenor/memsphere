@@ -2,14 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createHostRouteActivation,
+  createHostRouteProjection,
   createHostRouteTarget,
   defineSlot,
   defineViewPlugin,
   isHeaderActionDescriptor,
+  isHeaderAccountDescriptor,
   isHeaderTitleDescriptor,
+  isHomeAttentionItemDescriptor,
+  isHomeContinueItemDescriptor,
+  isHomeModuleItemDescriptor,
   isNavigationItemDescriptor,
+  isOverlayMountDescriptor,
   isRouteActivation,
+  isRouteProjection,
   isRouteTarget,
+  isSidebarFooterDescriptor,
   isSlotToken,
   slots,
   type ViewMount,
@@ -63,7 +71,7 @@ test("ViewRenderContext exposes the Host-resolved readonly Route location", () =
   assert.equal(context.route.params.id, "example");
 });
 
-test("built-in Tokens expose the four approved Slot contracts", () => {
+test("built-in Tokens expose the ten approved root Slot contracts", () => {
   assert.deepEqual(
     Object.values(slots).map(slot => ({
       name: slot.definition.name,
@@ -75,7 +83,13 @@ test("built-in Tokens expose the four approved Slot contracts", () => {
       { name: "navigation.primary", kind: "list", scope: "project", render: "descriptor" },
       { name: "header.title", kind: "single", scope: "page", render: "descriptor" },
       { name: "header.actions", kind: "list", scope: "page", render: "descriptor" },
-      { name: "main.view", kind: "keyed", scope: "shell", render: "mount" }
+      { name: "header.account", kind: "single", scope: "shell", render: "descriptor" },
+      { name: "sidebar.footer", kind: "list", scope: "project", render: "descriptor" },
+      { name: "home.attention", kind: "list", scope: "project", render: "descriptor" },
+      { name: "home.continue", kind: "list", scope: "project", render: "descriptor" },
+      { name: "home.modules", kind: "list", scope: "project", render: "descriptor" },
+      { name: "main.view", kind: "keyed", scope: "shell", render: "mount" },
+      { name: "overlay", kind: "keyed", scope: "page", render: "mount" }
     ]
   );
   for (const slot of Object.values(slots)) {
@@ -98,6 +112,7 @@ test("Route values are accepted only when created by the ViewHost bridge", () =>
 
 test("Descriptor validators accept standard data and reject HTML or forged Routes", () => {
   const route = createHostRouteTarget();
+  const projection = createHostRouteProjection();
   const navigation = {
     label: { text: "Memory" },
     icon: { kind: "system", name: "memory" },
@@ -116,9 +131,32 @@ test("Descriptor validators accept standard data and reject HTML or forged Route
   assert.equal(slots.headerTitle.definition.validate(title), true);
   assert.equal(isHeaderActionDescriptor(action), true);
   assert.equal(slots.headerActions.definition.validate(action), true);
+  assert.equal(slots.headerActions.definition.live, true);
   assert.equal(isNavigationItemDescriptor({ ...navigation, route: { path: "/memories" } }), false);
   assert.equal(isHeaderTitleDescriptor({ ...title, html: "<b>unsafe</b>" }), false);
   assert.equal(isHeaderActionDescriptor({ ...action, element: {} }), false);
+
+  const account = { label: { text: "LY" }, status: { text: "Local Human" } };
+  const footer = { kind: "status", label: { text: "Service" }, status: "healthy" };
+  const attention = { title: { text: "Review" }, icon: navigation.icon, status: "warning", action };
+  const continuation = { title: { text: "Run" }, icon: navigation.icon, route };
+  const module = { title: { text: "Memory" }, icon: navigation.icon, route, status: "ready" };
+  const overlay = {
+    label: { text: "Artifact Review" },
+    presentation: "dialog",
+    background: projection,
+    mount: { mount() {} }
+  };
+  assert.equal(isHeaderAccountDescriptor(account), true);
+  assert.equal(isSidebarFooterDescriptor(footer), true);
+  assert.equal(isHomeAttentionItemDescriptor(attention), true);
+  assert.equal(isHomeContinueItemDescriptor(continuation), true);
+  assert.equal(isHomeModuleItemDescriptor(module), true);
+  assert.equal(isOverlayMountDescriptor(overlay), true);
+  assert.equal(isRouteProjection(projection), true);
+  assert.equal(isOverlayMountDescriptor({ ...overlay, background: {} }), false);
+  assert.equal(isHomeAttentionItemDescriptor({ ...attention, html: "<b>unsafe</b>" }), false);
+  assert.equal(isHomeContinueItemDescriptor({ ...continuation, icon: { kind: "html", value: "<b>unsafe</b>" } }), false);
 });
 
 test("defineSlot creates branded immutable Tokens without accepting structural forgeries", () => {

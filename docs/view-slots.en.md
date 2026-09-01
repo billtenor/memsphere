@@ -2,7 +2,7 @@
 
 [简体中文](./view-slots.md) | English
 
-This document defines the Memsphere View Slot Catalog. It is the UI composition baseline shared by ViewHost, built-in Modules, and user Modules. It describes only the semantics, ownership, and contribution constraints of public and Core-reserved Slots. For a first extension, read the [Memsphere View Plugin Guide](./view-plugin-guide.en.md). For architecture boundaries, see [Memsphere View Plugin Design](./view-plugin-design.en.md). For exact TypeScript interfaces, see [Memsphere View Plugin API](./view-plugin-api.en.md).
+This document is the single detailed source for the Memsphere View Slot Catalog. It defines the names, semantics, ownership, contribution constraints, and current wiring status of public and Core-reserved Slots. Other documents describe only the architecture or API principles relevant to their purpose and link here instead of duplicating the Catalog. For a first extension, read the [Memsphere View Plugin Guide](./view-plugin-guide.en.md). For architecture boundaries, see [Memsphere View Plugin Design](./view-plugin-design.en.md). For exact TypeScript interfaces, see [Memsphere View Plugin API](./view-plugin-api.en.md).
 
 ## Design Principles
 
@@ -32,9 +32,9 @@ The Catalog defines 10 long-term Slots. Add future Slots directly to this list.
 
 ## Current Implementation Status
 
-The SDK and ViewHost currently wire `navigation.primary`, `header.title`, `header.actions`, and `main.view`. All three built-in Modules contribute to the same Slot Tree through these four Slots.
+The SDK and ViewHost now wire all 10 root Slots in this Catalog. Core provides Home, account, Settings, and service status through an in-Host Plugin. All three built-in Modules use the same public Slot Tree for navigation, Header, Page, and Home aggregate contributions. Run registers Artifact Review in `overlay`; ViewHost owns the background Route, mask, focus, dismissal, cleanup, and local failure boundary.
 
-The product semantics and ownership of `header.account`, `sidebar.footer`, the three Home Slots, and `overlay` are already defined, but they are not wired yet. The current Shell temporarily owns account state, Footer settings, and service status directly. Artifact Review temporarily uses a Run Module-owned portal overlay. Implementation progress belongs only in this section and must not delete or narrow the long-term Catalog above.
+Custom child Slots, user Module discovery/installation, and dynamic Project composition remain unwired. Implementation progress belongs only in this section and must not delete or narrow the long-term Catalog above.
 
 ## Slot Structure
 
@@ -76,7 +76,7 @@ A standard descriptor must include at least a stable identity, display text, tar
 
 ### Current Page Context
 
-`header.title` and `header.actions` accept contributions only from the active View. Their contributions are removed when the page unmounts and do not remain as global actions.
+`header.title` and `header.actions` accept contributions only from the active View. A page Mount may update the page-level actions beside the title as its current content changes; those contributions are removed when the page unmounts and do not remain global actions.
 
 `navigation.primary`, `sidebar.footer`, and the three Home Slots are assembled from the current Project’s Module composition. Switching Projects may restart and reconstruct the complete View.
 

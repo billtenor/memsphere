@@ -1208,37 +1208,57 @@ export async function listRuns(runsRoot: string): Promise<RunState[]> {
 export async function listRunSummaries(runsRoot: string): Promise<RunListSummary[]> {
   await ensureRunDirectory(runsRoot);
   const entries = await readdir(runsRoot, { withFileTypes: true });
-  const summariesById = new Map<string, RunListSummary>();
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
+  const directoryIds = new Set(entries.filter(entry => entry.isDirectory()).map(entry => entry.name));
+  const ids = [
+    ...directoryIds,
+    ...entries
+      .filter(entry => entry.isFile() && entry.name.endsWith(".json"))
+      .map(entry => entry.name.slice(0, -".json".length))
+      .filter(id => !directoryIds.has(id))
+  ];
+  const summaries: RunListSummary[] = [];
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(16, ids.length) }, async () => {
+    while (cursor < ids.length) {
+      const id = ids[cursor++];
+      if (!id) continue;
       try {
-        const summary = await readRunSummary(runsRoot, entry.name);
-        summariesById.set(summary.id, summary);
+        summaries.push(await readRunSummary(runsRoot, id));
       } catch {
-        // Ignore directories that are not valid run roots.
-      }
-      continue;
-    }
-    if (entry.isFile() && entry.name.endsWith(".json")) {
-      const id = entry.name.slice(0, -".json".length);
-      if (summariesById.has(id)) continue;
-      try {
-        const summary = await readRunSummary(runsRoot, id);
-        summariesById.set(summary.id, summary);
-      } catch {
-        // Ignore files that are not valid runs.
+        // Ignore entries that are not valid runs.
       }
     }
-  }
-  return [...summariesById.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  });
+  await Promise.all(workers);
+  return summaries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+type CachedRunSummary = {
+  readonly mtimeMs: number;
+  readonly ctimeMs: number;
+  readonly size: number;
+  readonly summary: RunListSummary;
+};
+
+const runSummaryCache = new Map<string, CachedRunSummary>();
+
 async function readRunSummary(runsRoot: string, id: string): Promise<RunListSummary> {
-  const raw = JSON.parse(await readFile(await existingRunPath(runsRoot, id), "utf8")) as unknown;
+  const path = await existingRunPath(runsRoot, id);
+  const file = await stat(path);
+  const cached = runSummaryCache.get(path);
+  if (cached
+    && cached.mtimeMs === file.mtimeMs
+    && cached.ctimeMs === file.ctimeMs
+    && cached.size === file.size) {
+    return cached.summary;
+  }
+  const raw = JSON.parse(await readFile(path, "utf8")) as unknown;
   if (!raw || typeof raw !== "object") throw new Error(`invalid Run summary: ${id}`);
   const source = raw as Record<string, unknown>;
   if (source.contractVersion !== 2 && source.contractVersion !== 3) {
-    return summarizeRun(await readRun(runsRoot, id));
+    const summary = summarizeRun(parseRunState(raw));
+    cacheRunSummary(path, file, summary);
+    return summary;
   }
   const runId = requiredSummaryString(source.id, "id");
   const status = source.status;
@@ -1251,7 +1271,7 @@ async function readRunSummary(runsRoot: string, id: string): Promise<RunListSumm
   const activeReview = [...reviews]
     .filter((review) => review.status !== "passed" && review.status !== "cancelled")
     .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")))[0];
-  return {
+  const summary: RunListSummary = {
     id: runId,
     ...(typeof source.name === "string" && source.name.trim() ? { name: source.name } : {}),
     status,
@@ -1262,6 +1282,24 @@ async function readRunSummary(runsRoot: string, id: string): Promise<RunListSumm
     eventCount: Array.isArray(source.events) ? source.events.length : 0,
     ...(activeReview ? { reviewProgress: summarizeReviewProgress(activeReview) } : {})
   };
+  cacheRunSummary(path, file, summary);
+  return summary;
+}
+
+function cacheRunSummary(
+  path: string,
+  file: { readonly mtimeMs: number; readonly ctimeMs: number; readonly size: number },
+  summary: RunListSummary
+): void {
+  runSummaryCache.set(path, {
+    mtimeMs: file.mtimeMs,
+    ctimeMs: file.ctimeMs,
+    size: file.size,
+    summary
+  });
+  if (runSummaryCache.size <= 4096) return;
+  const oldest = runSummaryCache.keys().next().value;
+  if (oldest) runSummaryCache.delete(oldest);
 }
 
 function summarizeRun(run: RunState): RunListSummary {
@@ -4693,7 +4731,8 @@ function legacyRunPath(runsRoot: string, id: string): string {
 async function existingRunPath(runsRoot: string, id: string): Promise<string> {
   const current = runPath(runsRoot, id);
   try {
-    await readFile(current, "utf8");
+    const file = await stat(current);
+    if (!file.isFile()) throw new Error(`Run path is not a file: ${current}`);
     return current;
   } catch {
     return legacyRunPath(runsRoot, id);

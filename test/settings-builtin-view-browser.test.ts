@@ -9,7 +9,15 @@ import { chromium } from "playwright";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 const sdk = transpile(await readFile(new URL("../src/view/view-sdk.ts", import.meta.url), "utf8"));
-const runtime = transpile(await readFile(new URL("../src/view/view-runtime.ts", import.meta.url), "utf8"));
+const runtime = (await build({
+  entryPoints: [resolve("src/view/view-runtime.ts")],
+  bundle: true,
+  write: false,
+  format: "esm",
+  platform: "browser",
+  target: "es2022",
+  external: ["@memsphere/view-sdk", "./view-sdk.js"]
+})).outputFiles[0]!.text;
 const plugin = (await build({
   entryPoints: [resolve("modules/org.memsphere.settings/adapter/view/index.ts")],
   bundle: true,
@@ -53,7 +61,9 @@ test("Settings Builtin Mount loads both scopes and validates an edited global dr
     const pageErrors: string[] = [];
     page.on("pageerror", error => pageErrors.push(error.message));
     await page.goto(`http://127.0.0.1:${port}/settings/overview`);
-    await page.getByRole("heading", { name: "Memsphere 设置", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "Memsphere 设置", exact: true }).waitFor({ timeout: 5_000 }).catch(async error => {
+      throw new Error(`${String(error)}\npage errors: ${pageErrors.join(" | ")}\nbody: ${(await page.locator("body").innerText()).slice(0, 2_000)}`);
+    });
     assert.match(await page.locator("#settings-status").textContent() ?? "", /没有未保存修改/);
     await page.getByRole("button", { name: "常规", exact: true }).click();
     await page.waitForURL("**/settings/general");
@@ -93,6 +103,7 @@ function harness(): string {
       import plugin from "/assets/settings.js";
       window.activeSettingsHost = await startViewHost({ root: document.getElementById("root"), instances: [{
         plugin, config: { locale: "zh-CN", messages: {} }, routeBasePath: "/",
+        routeGrants: [{ id: "section", path: "/settings/:module" }],
         module: { projectId: "memsphere", moduleId: "org.memsphere.settings", moduleVersion: "1.0.0", instanceId: "settings" }
       }]});
     </script></body></html>`;

@@ -6,8 +6,9 @@ names:
 defines:
   - Memsphere 提供给 Human 的本地操作界面，用于查看和操作当前 Project 中的 Memory、Run、Artifact Review 和 ChangeSet。
   - 一个 Memsphere Home 运行一个 View 服务；View 同一时刻展示一个 Project，切换 Project 后页面内容随之切换。
-  - Memory 与 Run 是 View 的顶层入口；ChangeSet 从 Memory 相关入口进入，Artifact Review 从对应 Run 的步骤进入。
-  - Human 可以在 Run 页面查看当前步骤、Artifact、参与者和状态，并在 Artifact Review 页面查看 Submission、Comment、Vote、Round 和结果。
+  - View 使用稳定 Shell 组合 Home、Memory、Run 和启用的用户 Module 视图；Home 通过待处理、继续工作与我的模块三个区域汇总当前 Project 状态，ChangeSet 从 Memory 相关入口进入。
+  - Shell 提供 navigation.primary、header.title、header.actions、header.account、sidebar.footer、home.attention、home.continue、home.modules、main.view 与 overlay 十个根 Slot；Module 页面只管理 Host 分配的 Page 或 Overlay 容器。
+  - Human 可以在 Run 页面查看当前步骤、Artifact、参与者和状态；Artifact Review 从对应 Run 步骤进入，由 Run Module 注册到 Host overlay，并保留 Submission、Comment、Vote、Round、Material 与稳定 URL。
   - View 的固定界面文案通过独立语言资源展示，支持 zh-CN 和 en，并跟随 Memsphere Home config.json 的 language；Memory DSL 字段在中文标签与 YAML 原名之间的展示切换是另一项独立偏好，不改变界面语言。
   - 在配置中心成功保存 language 后，当前 View 进程立即更新界面语言，下一次页面加载使用新语言；保存失败不得改变运行中的界面语言。修改 View host 或 port 仍需执行 memsphere view restart。
   - 用户内容、Memory canonical name、Run id、命令、文件路径、ACP Provider 名称、状态码和错误原文等技术标识保持原样；固定按钮、标题、提示、空状态、确认文案、日期格式与 ACP 安装检测说明由当前界面语言决定。

@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { access, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -107,6 +108,7 @@ import {
   viewSdkBundlePath,
   type ViewHostBootInstance
 } from "../view/host.js";
+import { coreViewRoutes } from "../view/core-routes.js";
 import {
   localizeAcpProviderDefinition,
   localizeAcpProviderDetection,
@@ -281,6 +283,9 @@ class ViewMemoryCache {
 
 export function createViewServer(config: MemsphereConfig, options: ViewServerOptions = {}) {
   const viewCache = new ViewMemoryCache();
+  void systemMemoryReferences().catch(() => {
+    systemMemoryReferencesPromise = undefined;
+  });
   const server = createServer(async (request, response) => {
     try {
       await handleRequest(request, response, config, options, viewCache);
@@ -308,18 +313,30 @@ async function handleRequest(
   const archiveRoot = config.archiveRoot;
 
   if (request.method === "GET" && url.pathname === viewSdkBundlePath) {
-    sendJavaScript(response, await readCompiledBrowserModule(compiledViewSdkUrl, sourceViewSdkUrl));
+    sendJavaScript(request, response, await readCompiledBrowserModule(compiledViewSdkUrl, sourceViewSdkUrl));
     return;
   }
 
   if (request.method === "GET" && url.pathname === viewRuntimeBundlePath) {
-    sendJavaScript(response, await readCompiledBrowserModule(compiledViewRuntimeUrl, sourceViewRuntimeUrl));
+    sendJavaScript(request, response, await readCompiledBrowserModule(compiledViewRuntimeUrl, sourceViewRuntimeUrl));
+    return;
+  }
+
+  const runtimeDependency = viewRuntimeDependencies.get(url.pathname);
+  if (request.method === "GET" && runtimeDependency) {
+    sendJavaScript(request, response, await readCompiledBrowserModule(runtimeDependency.compiled, runtimeDependency.source));
+    return;
+  }
+
+  const systemIcon = url.pathname.match(/^\/assets\/system-icons\/([a-z0-9-]+)\.svg$/)?.[1];
+  if (request.method === "GET" && systemIcon) {
+    await sendSystemIcon(response, systemIcon);
     return;
   }
 
   const builtinAsset = builtinModuleAsset(url.pathname);
   if (request.method === "GET" && builtinAsset) {
-    sendJavaScript(response, await readBuiltinViewBundle(builtinAsset.packageDirectory, builtinAsset.moduleId));
+    sendJavaScript(request, response, await readBuiltinViewBundle(builtinAsset.packageDirectory, builtinAsset.moduleId));
     return;
   }
 
@@ -343,7 +360,7 @@ async function handleRequest(
   }
 
   if (request.method === "GET" && isViewPagePath(url.pathname)) {
-    sendHtml(response, renderViewHostHtml(config.language, await builtinViewInstances(config)));
+    sendHtml(response, renderViewHostHtml(config.language, await builtinViewInstances(config), url.pathname));
     return;
   }
 
@@ -921,7 +938,13 @@ async function handleRequest(
 
   if (request.method === "GET" && url.pathname === "/api/runs") {
     if (url.searchParams.get("representation") === "summary") {
-      sendJson(response, 200, { runs: await listRunSummaries(config.runsRoot) });
+      const status = url.searchParams.get("status")?.trim();
+      if (status && !["running", "done", "abandoned"].includes(status)) {
+        sendJson(response, 400, { error: "unsupported Run status" });
+        return;
+      }
+      const runs = await listRunSummaries(config.runsRoot);
+      sendJson(response, 200, { runs: status ? runs.filter(run => run.status === status) : runs });
       return;
     }
     sendJson(response, 200, { runs: await loadRunPayload(config) });
@@ -1509,31 +1532,40 @@ async function loadMemorySummaryPayloadFromRoot(
   memoryRoot: string,
   source: MemoryPayload["source"]
 ): Promise<MemoryPayload> {
-  const systemReferences = await systemMemoryReferences();
+  const [systemReferences, pathsByKind] = await Promise.all([
+    systemMemoryReferences(),
+    Promise.all(memoryKinds.map(async kind => ({ kind, paths: await listMemoryFiles(memoryRoot, kind) })))
+  ]);
   const memories: MemoryPayload["memories"] = [];
   const fileIndex = new Map<string, { kind: MemoryKind; path: string }>();
-  for (const kind of memoryKinds) {
-    for (const path of await listMemoryFiles(memoryRoot, kind)) {
-      const relativePath = portableRelative(memoryRoot, path);
-      try {
-        const summary = await readMemoryFileSummary(kind, path);
-        memories.push({
-          id: `${kind}/${summary.names[0]}`,
-          kind,
-          path: relativePath,
-          system: summary.names.some((name) => systemReferences.has(`${kind}/${name}`)),
-          names: summary.names
-        });
-        fileIndex.set(`${kind}/${summary.names[0]}`, { kind, path });
-      } catch (error) {
-        memories.push({
-          id: `${kind}/${relativePath}`,
-          kind,
-          path: relativePath,
-          system: false,
-          error: formatMemoryLoadError(error)
-        });
-      }
+  const summaries = await Promise.all(pathsByKind.flatMap(({ kind, paths }) => paths.map(async path => {
+    const relativePath = portableRelative(memoryRoot, path);
+    try {
+      return { ok: true as const, kind, path, relativePath, summary: await readMemoryFileSummary(kind, path) };
+    } catch (error) {
+      return { ok: false as const, kind, path, relativePath, error };
+    }
+  })));
+  for (const item of summaries) {
+    const { kind, path, relativePath } = item;
+    if (item.ok) {
+      const summary = item.summary;
+      memories.push({
+        id: `${kind}/${summary.names[0]}`,
+        kind,
+        path: relativePath,
+        system: summary.names.some((name) => systemReferences.has(`${kind}/${name}`)),
+        names: summary.names
+      });
+      fileIndex.set(`${kind}/${summary.names[0]}`, { kind, path });
+    } else {
+      memories.push({
+        id: `${kind}/${relativePath}`,
+        kind,
+        path: relativePath,
+        system: false,
+        error: formatMemoryLoadError(item.error)
+      });
     }
   }
   viewCache.replaceIndex(memoryRoot, fileIndex);
@@ -1607,12 +1639,13 @@ function isMemoryReferenceValue(value: unknown): boolean {
   return Boolean(value && typeof value === "object" && (value as { tag?: unknown }).tag === "!ref");
 }
 
+let systemMemoryReferencesPromise: Promise<Set<string>> | undefined;
+
 async function systemMemoryReferences(): Promise<Set<string>> {
-  return new Set(
-    (await readBundledSystemMemories()).flatMap((memory) =>
-      memory.names.map((name) => `${memory.kind}/${name}`)
-    )
-  );
+  systemMemoryReferencesPromise ??= readBundledSystemMemories().then(memories => new Set(
+    memories.flatMap((memory) => memory.names.map((name) => `${memory.kind}/${name}`))
+  ));
+  return systemMemoryReferencesPromise;
 }
 
 async function loadRunPayload(config: MemsphereConfig): Promise<unknown[]> {
@@ -2423,6 +2456,20 @@ const compiledViewSdkUrl = new URL("../view/view-sdk.js", import.meta.url);
 const compiledViewRuntimeUrl = new URL("../view/view-runtime.js", import.meta.url);
 const sourceViewSdkUrl = new URL("../view/view-sdk.ts", import.meta.url);
 const sourceViewRuntimeUrl = new URL("../view/view-runtime.ts", import.meta.url);
+const viewRuntimeDependencies = new Map([
+  ["/assets/core-plugin.js", {
+    compiled: new URL("../view/core-plugin.js", import.meta.url),
+    source: new URL("../view/core-plugin.ts", import.meta.url)
+  }],
+  ["/assets/core-routes.js", {
+    compiled: new URL("../view/core-routes.js", import.meta.url),
+    source: new URL("../view/core-routes.ts", import.meta.url)
+  }],
+  ["/assets/shell/home.js", {
+    compiled: new URL("../view/shell/home.js", import.meta.url),
+    source: new URL("../view/shell/home.ts", import.meta.url)
+  }]
+]);
 
 const viewSdkVersion = "1.0.0";
 
@@ -2440,6 +2487,13 @@ async function builtinViewInstances(config: MemsphereConfig): Promise<readonly V
     return {
       pluginPath: builtinAssetPath(entry.moduleId),
       routeGrants: entry.routes,
+      home: {
+        title: entry.title,
+        summary: entry.summary,
+        icon: entry.icon,
+        routeId: entry.homeRouteId,
+        ...(entry.moduleId === "org.memsphere.settings" ? { routeParams: { module: "overview" } } : {})
+      },
       module: {
         projectId: config.project?.name ?? "memsphere",
         moduleId: entry.moduleId,
@@ -2505,17 +2559,54 @@ async function readCompiledBrowserModule(compiledUrl: URL, sourceUrl: URL): Prom
   }
 }
 
-function sendJavaScript(response: ServerResponse, body: string): void {
+function sendJavaScript(request: IncomingMessage, response: ServerResponse, body: string): void {
+  const etag = `"${createHash("sha256").update(body).digest("base64url")}"`;
+  const commonHeaders = {
+    "cache-control": "no-cache",
+    "etag": etag,
+    "vary": "Accept-Encoding",
+    "x-content-type-options": "nosniff"
+  };
+  if (request.headers["if-none-match"] === etag) {
+    response.writeHead(304, commonHeaders);
+    response.end();
+    return;
+  }
+  const gzip = /(?:^|,)\s*gzip\s*(?:,|$)/i.test(request.headers["accept-encoding"] ?? "");
+  const payload = gzip ? gzipSync(body) : body;
   response.writeHead(200, {
     "content-type": "text/javascript; charset=utf-8",
-    "cache-control": "no-store",
+    ...commonHeaders,
+    ...(gzip ? { "content-encoding": "gzip" } : {}),
+    "content-length": Buffer.byteLength(payload)
+  });
+  response.end(payload);
+}
+
+async function sendSystemIcon(response: ServerResponse, name: string): Promise<void> {
+  const supportedRegular = new Set([
+    "arrow-right", "brain", "caret-down", "circle-fill", "code", "cube", "file-text", "gear-six", "house", "magnifying-glass", "play-circle", "plus", "stack", "user", "warning-circle", "x"
+  ]);
+  const weighted = name.match(/^(brain|circle|cube|gear-six|house|play-circle|stack)-(duotone|fill)$/);
+  if (!supportedRegular.has(name) && !weighted) {
+    sendText(response, 404, "Icon not found");
+    return;
+  }
+  const iconUrl = weighted
+    ? import.meta.resolve(`@phosphor-icons/core/${weighted[2]}/${weighted[1]}-${weighted[2]}.svg`)
+    : import.meta.resolve(`@phosphor-icons/core/regular/${name}.svg`);
+  const body = await readFile(fileURLToPath(iconUrl), "utf8");
+  response.writeHead(200, {
+    "content-type": "image/svg+xml; charset=utf-8",
+    "cache-control": "public, max-age=31536000, immutable",
     "x-content-type-options": "nosniff"
   });
   response.end(body);
 }
 
 export function isViewPagePath(pathname: string): boolean {
-  return builtinModuleCatalog.some(module => module.routes.some(route => (
+  return coreViewRoutes.some(route => matchesViewRoute(route.path, pathname))
+    || builtinModuleCatalog.some(module => module.routes.some(route => (
     [route.path, ...(route.aliases ?? [])].some(pattern => matchesViewRoute(pattern, pathname))
   )));
 }

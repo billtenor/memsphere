@@ -31,10 +31,17 @@ test("View architecture documentation matches the wired Module and Slot runtime"
   for (const moduleId of ["org.memsphere.memory", "org.memsphere.run", "org.memsphere.settings"]) {
     assert.match(current, new RegExp(moduleId.replaceAll(".", "\\.")));
   }
-  for (const slot of ["navigation.primary", "header.title", "header.actions", "main.view"]) {
-    assert.match(api, new RegExp(slot.replaceAll(".", "\\.")));
+  for (const slot of [
+    "navigation.primary", "header.title", "header.actions", "header.account", "sidebar.footer",
+    "home.attention", "home.continue", "home.modules", "main.view", "overlay"
+  ]) {
     assert.match(slots, new RegExp(slot.replaceAll(".", "\\.")));
   }
+  for (const document of [api, guide, architecture, design]) {
+    assert.match(document, /\[Memsphere View Slot List\]|\[View Slot List\]/);
+    assert.match(document, /\.\/view-slots\.md/);
+  }
+  assert.match(api, /slots\.headerTitle/);
   assert.doesNotMatch(api, /内置 Legacy View 已使用这条链路/);
   assert.doesNotMatch(guide, /当前可运行 Plugin 只能声明 `inject: \["slots"\]`/);
   assert.doesNotMatch(slots, /当前 Runtime 已接线 `main\.view`。其余 9 个 Slot/);

@@ -8,6 +8,10 @@ export type BuiltinModuleCatalogEntry = Readonly<{
   moduleId: string;
   instanceId: string;
   packageDirectory: string;
+  title: string;
+  summary: string;
+  icon: string;
+  homeRouteId: string;
   routes: readonly BuiltinRouteGrant[];
 }>;
 
@@ -16,8 +20,11 @@ export const builtinModuleCatalog: readonly BuiltinModuleCatalogEntry[] = deepFr
     moduleId: "org.memsphere.memory",
     instanceId: "memory",
     packageDirectory: "org.memsphere.memory",
+    title: "记忆",
+    summary: "组织与维护项目记忆",
+    icon: "brain",
+    homeRouteId: "index",
     routes: [
-      { id: "home", path: "/" },
       { id: "index", path: "/memories" },
       { id: "market", path: "/market", aliases: ["/memory-market"] },
       { id: "memory-detail", path: "/memories/:kind/:name" },
@@ -31,6 +38,10 @@ export const builtinModuleCatalog: readonly BuiltinModuleCatalogEntry[] = deepFr
     moduleId: "org.memsphere.run",
     instanceId: "run",
     packageDirectory: "org.memsphere.run",
+    title: "运行",
+    summary: "执行流程并跟踪产物",
+    icon: "play-circle",
+    homeRouteId: "index",
     routes: [
       { id: "index", path: "/tasks" },
       { id: "detail", path: "/tasks/:runId" },
@@ -41,6 +52,10 @@ export const builtinModuleCatalog: readonly BuiltinModuleCatalogEntry[] = deepFr
     moduleId: "org.memsphere.settings",
     instanceId: "settings",
     packageDirectory: "org.memsphere.settings",
+    title: "设置",
+    summary: "配置 Memsphere 与项目",
+    icon: "gear",
+    homeRouteId: "section",
     routes: [
       { id: "section", path: "/settings/:module" }
     ]

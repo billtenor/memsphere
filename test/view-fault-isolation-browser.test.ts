@@ -37,7 +37,7 @@ test("a failed Run detail remains local to the Run page instead of failing ViewH
   await withBuiltinFixture(["org.memsphere.run"], async ({ page, origin }) => {
     await page.goto(`${origin}/tasks`);
     await assertHostReady(page);
-    await page.getByRole("button", { name: /Invalid historical Run/ }).waitFor();
+    await page.getByRole("button", { name: /Invalid historical Run/ }).click();
     await page.locator(".run-error").waitFor();
     assert.match(await page.locator(".run-error").textContent() ?? "", /invalid persisted Run detail/);
     assert.equal(await page.locator('html[data-view-host-state="failed"]').count(), 0);
@@ -51,7 +51,7 @@ async function withBuiltinFixture(
   const [bundles, sdk, runtime] = await Promise.all([
     Promise.all(moduleIds.map(async moduleId => [moduleId, await bundle(moduleId)] as const)),
     browserModule("../src/view/view-sdk.ts"),
-    browserModule("../src/view/view-runtime.ts")
+    browserRuntimeBundle()
   ]);
   const bundleByModule = new Map(bundles);
   const selected = builtinModuleCatalog.filter(entry => moduleIds.includes(entry.moduleId));
@@ -99,6 +99,12 @@ async function assertHostReady(page: import("playwright").Page): Promise<void> {
 async function browserModule(relativePath: string): Promise<string> {
   const source = await readFile(new URL(relativePath, import.meta.url), "utf8");
   return transpileModule(source, { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 } }).outputText;
+}
+
+
+async function browserRuntimeBundle(): Promise<string> {
+  const result = await build({ entryPoints: ["src/view/view-runtime.ts"], bundle: true, write: false, format: "esm", platform: "browser", target: "es2022", external: ["@memsphere/view-sdk", "./view-sdk.js"], logLevel: "silent" });
+  return result.outputFiles[0]?.text ?? "";
 }
 
 function send(response: import("node:http").ServerResponse, status: number, type: string, body: string): void {

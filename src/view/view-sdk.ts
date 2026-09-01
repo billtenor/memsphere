@@ -36,10 +36,12 @@ export interface ViewMount {
     target: ViewMountTarget,
     context: ViewRenderContext,
   ): MaybePromise<void | Disposer>;
+  update?(context: ViewRenderContext): MaybePromise<void>;
 }
 
 const routeActivationBrand: unique symbol = Symbol("memsphere.view.route-activation");
 const routeTargetBrand: unique symbol = Symbol("memsphere.view.route-target");
+const routeProjectionBrand: unique symbol = Symbol("memsphere.view.route-projection");
 
 /** Opaque route predicate created by ViewHost. */
 export interface RouteActivation {
@@ -51,12 +53,19 @@ export interface RouteTarget {
   readonly [routeTargetBrand]: true;
 }
 
+/** Opaque mapping from an overlay route to its background page route. */
+export interface RouteProjection {
+  readonly [routeProjectionBrand]: true;
+}
+
 export interface RouteLocation {
   readonly pathname: string;
   readonly search: string;
   readonly hash: string;
   readonly params: Readonly<Record<string, string>>;
   readonly routeKey?: string;
+  /** True when this is the passive background projected by an active overlay Route. */
+  readonly projected?: true;
 }
 
 export interface RouteDefinition {
@@ -72,6 +81,11 @@ export interface RouteToken {
 
 export interface ViewRouter {
   register(definition: RouteDefinition): RouteToken;
+  project(options: {
+    readonly from: RouteToken;
+    readonly to: RouteToken;
+    readonly params: Readonly<Record<string, string>>;
+  }): RouteProjection;
   navigate(target: RouteTarget): Promise<void>;
   readonly location: RouteLocation;
 }
@@ -84,6 +98,11 @@ export function createHostRouteActivation(): RouteActivation {
 /** @internal ViewHost only. Not part of the Module-facing compatibility contract. */
 export function createHostRouteTarget(): RouteTarget {
   return Object.freeze({ [routeTargetBrand]: true as const });
+}
+
+/** @internal ViewHost only. Not part of the Module-facing compatibility contract. */
+export function createHostRouteProjection(): RouteProjection {
+  return Object.freeze({ [routeProjectionBrand]: true as const });
 }
 
 export type TextRef =
@@ -124,6 +143,50 @@ export interface HeaderTitleDescriptor {
 
 export interface HeaderActionDescriptor extends ActionDescriptor {}
 
+export interface HeaderAccountDescriptor {
+  readonly label: TextRef;
+  readonly status?: TextRef;
+  readonly action?: ActionDescriptor;
+}
+
+export type SidebarFooterDescriptor =
+  | { readonly kind: "action"; readonly action: ActionDescriptor }
+  | { readonly kind: "status"; readonly label: TextRef; readonly status: "healthy" | "warning" | "error" };
+
+export interface HomeAttentionItemDescriptor {
+  readonly title: TextRef;
+  readonly summary?: TextRef;
+  readonly source?: TextRef;
+  readonly icon?: IconRef;
+  readonly status: "info" | "warning" | "error";
+  readonly updatedAt?: string;
+  readonly action: ActionDescriptor;
+}
+
+export interface HomeContinueItemDescriptor {
+  readonly title: TextRef;
+  readonly summary?: TextRef;
+  readonly icon?: IconRef;
+  readonly updatedAt?: string;
+  readonly route: RouteTarget;
+}
+
+export interface HomeModuleItemDescriptor {
+  readonly title: TextRef;
+  readonly summary?: TextRef;
+  readonly icon: IconRef;
+  readonly route: RouteTarget;
+  readonly status?: "loading" | "ready" | "failed";
+}
+
+export interface OverlayMountDescriptor {
+  readonly label: TextRef;
+  readonly presentation: "dialog" | "drawer";
+  readonly dismissible?: boolean;
+  readonly background: RouteProjection;
+  readonly mount: ViewMount;
+}
+
 export type SlotKind = "single" | "list" | "keyed";
 export type SlotScope = "shell" | "project" | "page";
 export type SlotRenderMode = "descriptor" | "mount";
@@ -138,6 +201,7 @@ export interface SlotDefinition<
   readonly kind: Kind;
   readonly scope: SlotScope;
   readonly render: SlotRenderMode;
+  readonly live?: boolean;
   validate(value: unknown): value is Value;
 }
 
@@ -192,6 +256,15 @@ export function isRouteTarget(value: unknown): value is RouteTarget {
     && typeof value === "object"
     && routeTargetBrand in value
     && (value as { [routeTargetBrand]?: unknown })[routeTargetBrand] === true
+  );
+}
+
+export function isRouteProjection(value: unknown): value is RouteProjection {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && routeProjectionBrand in value
+    && (value as { [routeProjectionBrand]?: unknown })[routeProjectionBrand] === true
   );
 }
 
@@ -257,6 +330,73 @@ export function isHeaderActionDescriptor(value: unknown): value is HeaderActionD
     && typeof candidate.run === "function";
 }
 
+export function isHeaderAccountDescriptor(value: unknown): value is HeaderAccountDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<HeaderAccountDescriptor>;
+  return hasOnlyKeys(value, ["label", "status", "action"])
+    && isTextRef(candidate.label)
+    && (candidate.status === undefined || isTextRef(candidate.status))
+    && (candidate.action === undefined || isHeaderActionDescriptor(candidate.action));
+}
+
+export function isSidebarFooterDescriptor(value: unknown): value is SidebarFooterDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as { kind?: unknown; action?: unknown; label?: unknown; status?: unknown };
+  if (candidate.kind === "action") {
+    return hasOnlyKeys(value, ["kind", "action"]) && isHeaderActionDescriptor(candidate.action);
+  }
+  return hasOnlyKeys(value, ["kind", "label", "status"])
+    && candidate.kind === "status"
+    && isTextRef(candidate.label)
+    && ["healthy", "warning", "error"].includes(String(candidate.status));
+}
+
+export function isHomeAttentionItemDescriptor(value: unknown): value is HomeAttentionItemDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<HomeAttentionItemDescriptor>;
+  return hasOnlyKeys(value, ["title", "summary", "source", "icon", "status", "updatedAt", "action"])
+    && isTextRef(candidate.title)
+    && (candidate.summary === undefined || isTextRef(candidate.summary))
+    && (candidate.source === undefined || isTextRef(candidate.source))
+    && (candidate.icon === undefined || isIconRef(candidate.icon))
+    && ["info", "warning", "error"].includes(String(candidate.status))
+    && (candidate.updatedAt === undefined || typeof candidate.updatedAt === "string")
+    && isHeaderActionDescriptor(candidate.action);
+}
+
+export function isHomeContinueItemDescriptor(value: unknown): value is HomeContinueItemDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<HomeContinueItemDescriptor>;
+  return hasOnlyKeys(value, ["title", "summary", "icon", "updatedAt", "route"])
+    && isTextRef(candidate.title)
+    && (candidate.summary === undefined || isTextRef(candidate.summary))
+    && (candidate.icon === undefined || isIconRef(candidate.icon))
+    && (candidate.updatedAt === undefined || typeof candidate.updatedAt === "string")
+    && isRouteTarget(candidate.route);
+}
+
+export function isHomeModuleItemDescriptor(value: unknown): value is HomeModuleItemDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<HomeModuleItemDescriptor>;
+  return hasOnlyKeys(value, ["title", "summary", "icon", "route", "status"])
+    && isTextRef(candidate.title)
+    && (candidate.summary === undefined || isTextRef(candidate.summary))
+    && isIconRef(candidate.icon)
+    && isRouteTarget(candidate.route)
+    && (candidate.status === undefined || ["loading", "ready", "failed"].includes(candidate.status));
+}
+
+export function isOverlayMountDescriptor(value: unknown): value is OverlayMountDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<OverlayMountDescriptor>;
+  return hasOnlyKeys(value, ["label", "presentation", "dismissible", "background", "mount"])
+    && isTextRef(candidate.label)
+    && (candidate.presentation === "dialog" || candidate.presentation === "drawer")
+    && (candidate.dismissible === undefined || typeof candidate.dismissible === "boolean")
+    && isRouteProjection(candidate.background)
+    && isViewMount(candidate.mount);
+}
+
 export const slots = Object.freeze({
   navigationPrimary: defineSlot<NavigationItemDescriptor>()({
     name: "navigation.primary",
@@ -280,7 +420,50 @@ export const slots = Object.freeze({
     kind: "list",
     scope: "page",
     render: "descriptor",
+    live: true,
     validate: isHeaderActionDescriptor
+  }),
+  headerAccount: defineSlot<HeaderAccountDescriptor>()({
+    name: "header.account",
+    version: 1,
+    kind: "single",
+    scope: "shell",
+    render: "descriptor",
+    validate: isHeaderAccountDescriptor
+  }),
+  sidebarFooter: defineSlot<SidebarFooterDescriptor>()({
+    name: "sidebar.footer",
+    version: 1,
+    kind: "list",
+    scope: "project",
+    render: "descriptor",
+    validate: isSidebarFooterDescriptor
+  }),
+  homeAttention: defineSlot<HomeAttentionItemDescriptor>()({
+    name: "home.attention",
+    version: 1,
+    kind: "list",
+    scope: "project",
+    render: "descriptor",
+    live: true,
+    validate: isHomeAttentionItemDescriptor
+  }),
+  homeContinue: defineSlot<HomeContinueItemDescriptor>()({
+    name: "home.continue",
+    version: 1,
+    kind: "list",
+    scope: "project",
+    render: "descriptor",
+    live: true,
+    validate: isHomeContinueItemDescriptor
+  }),
+  homeModules: defineSlot<HomeModuleItemDescriptor>()({
+    name: "home.modules",
+    version: 1,
+    kind: "list",
+    scope: "project",
+    render: "descriptor",
+    validate: isHomeModuleItemDescriptor
   }),
   mainView: defineSlot<ViewMount, string>()({
     name: "main.view",
@@ -289,6 +472,14 @@ export const slots = Object.freeze({
     scope: "shell",
     render: "mount",
     validate: isViewMount
+  }),
+  overlay: defineSlot<OverlayMountDescriptor, string>()({
+    name: "overlay",
+    version: 1,
+    kind: "keyed",
+    scope: "page",
+    render: "mount",
+    validate: isOverlayMountDescriptor
   })
 });
 
@@ -325,6 +516,11 @@ export interface SlotRegistry {
   register<S extends KeyedSlotToken>(
     slot: S,
     options: KeyedRegisterOptions<SlotValue<S>, SlotKey<S>>,
+  ): Disposer;
+
+  upsert<S extends SingleOrListSlotToken>(
+    slot: S,
+    options: RegisterOptions<SlotValue<S>>,
   ): Disposer;
 }
 

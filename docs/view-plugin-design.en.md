@@ -42,7 +42,7 @@ ViewHost owns loading, contexts, composition, failure isolation, and cleanup. A 
 
 The current implementation discovers `org.memsphere.memory`, `org.memsphere.run`, and `org.memsphere.settings` from a fixed builtin catalog. It validates each `module.json` minimum View slice, package-contained entry path, and SDK SemVer range before dynamically importing three independent ESM Bundles. Instances share Route and Slot registries while retaining separate Contexts, transactions, diagnostics, and cleanup scopes.
 
-The wired Context services are `slots` and `router`; the wired root Slots are `navigation.primary`, `header.title`, `header.actions`, and `main.view`. Stable Shell, Project selector, Core Settings/status entries, and diagnostics remain ViewHost responsibilities. View API, I18n, Theme, Logger, custom child Slots, user Module discovery/installation, dynamic Project composition, Home, and public overlay remain future capabilities.
+The wired Context services are `slots` and `router`. Core and built-in Modules compose through the same Slot Tree, while the Stable Shell, Project selector, and diagnostics remain ViewHost responsibilities. The authoritative root Slot list, ownership, composition semantics, and current wiring status are maintained in the [Memsphere View Slot List](./view-slots.en.md). View API, I18n, Theme, Logger, custom child Slots, user Module discovery/installation, and dynamic Project composition remain future capabilities.
 
 ## Packaging and Dynamic Loading
 

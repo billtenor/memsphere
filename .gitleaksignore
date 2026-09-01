@@ -1,0 +1,6 @@
+# PR #60 design QA recorded a private LAN endpoint. The current document no
+# longer contains the address; keep these exact historical findings ignored
+# without weakening private-address detection elsewhere.
+85961b3fc956d664e7663e11d8e24c6a2e2f86e6:design-qa.md:private-ipv4-address:3
+85961b3fc956d664e7663e11d8e24c6a2e2f86e6:design-qa.md:private-ipv4-address:4
+85961b3fc956d664e7663e11d8e24c6a2e2f86e6:design-qa.md:private-ipv4-address:45
