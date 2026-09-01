@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "org.memsphere.settings",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "view": {
     "entry": "./dist/view/index.js",
     "sdk": "^1.0.0"
