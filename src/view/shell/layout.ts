@@ -1,12 +1,14 @@
 export interface ViewShellMarkupOptions {
   readonly loading: string;
   readonly initial?: {
+    readonly locale: string;
     readonly pathname: string;
     readonly projectName: string;
     readonly homeLabel: string;
     readonly memoryLabel: string;
     readonly runLabel: string;
     readonly settingsLabel: string;
+    readonly settingsHref: string;
     readonly healthyLabel: string;
     readonly accountLabel: string;
     readonly homeTitle: string;
@@ -27,44 +29,112 @@ export interface ViewShellMarkupOptions {
 export function renderViewShellMarkup(options: ViewShellMarkupOptions): string {
   const initial = options.initial;
   const navigation = initial ? renderInitialNavigation(initial) : "";
-  const footer = initial ? `<a class="view-shell-settings" href="/settings/overview">${escapeHtml(initial.settingsLabel)}</a>
-        <div class="view-shell-service-status">${escapeHtml(initial.healthyLabel)}</div>` : "";
+  const footer = initial ? `<a class="view-shell-settings" href="${escapeHtml(initial.settingsHref)}"><img class="view-shell-icon" src="/assets/system-icons/gear-six.svg" alt="" aria-hidden="true" /><span>${escapeHtml(initial.settingsLabel)}</span></a>` : "";
   const header = initial?.pathname === "/" ? `<div class="view-shell-heading"><h1>${escapeHtml(initial.homeLabel)}</h1><p>${escapeHtml(initial.projectName)}</p></div>` : "";
   const account = initial ? `<div class="view-shell-account" aria-label="${escapeHtml(initial.accountLabel)}"><span class="view-shell-account-avatar">${escapeHtml(initial.accountLabel)}</span></div>` : "";
-  const main = initial?.pathname === "/" ? renderInitialHome(initial) : escapeHtml(options.loading);
-  return `<div class="view-shell" data-view-shell>
+  const main = initial?.pathname === "/" ? renderInitialHome(initial) : renderInitialLoading(options.loading);
+  const isHome = initial?.pathname === "/";
+  const hasInitialContentList = !initial?.pathname.startsWith("/settings/");
+  const chinese = initial?.locale === "zh-CN";
+  const projectHomeLabel = chinese ? `返回 ${initial?.projectName ?? "Project"} 主页` : `Return to ${initial?.projectName ?? "Project"} Home`;
+  const switchProjectLabel = chinese ? "切换 Project" : "Switch Project";
+  return `<div class="view-shell" data-view-shell data-view-layout="${isHome ? "home" : "module"}" data-view-content-list="${hasInitialContentList}">
     <aside class="view-shell-sidebar" aria-label="Primary navigation">
-      <div class="view-shell-brand"><img src="/assets/system-icons/cube-duotone.svg" alt="" aria-hidden="true" /><strong>Memsphere</strong></div>
       <label class="view-shell-project-label" id="view-shell-project-label" for="view-shell-project-trigger"></label>
       <div class="view-shell-project-select-wrap">
-        <button class="view-shell-project-trigger" id="view-shell-project-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" disabled>
-          <img class="view-shell-project-icon" src="/assets/system-icons/stack-fill.svg" alt="" aria-hidden="true" />
+        <a class="view-shell-project-home" href="/" aria-label="${escapeHtml(projectHomeLabel)}">
+          <span class="view-shell-project-mark"><img class="view-shell-project-icon" src="/assets/system-icons/cube-fill.svg" alt="" aria-hidden="true" /></span>
           <span class="view-shell-project-value">${escapeHtml(initial?.projectName ?? "")}</span>
+        </a>
+        <button class="view-shell-project-trigger" id="view-shell-project-trigger" data-view-project-menu-trigger type="button" aria-haspopup="menu" aria-expanded="false" aria-label="${escapeHtml(switchProjectLabel)}" disabled>
+          <span class="view-shell-project-trigger-value">${escapeHtml(initial?.projectName ?? "")}</span>
           <img class="view-shell-project-caret" src="/assets/system-icons/caret-down.svg" alt="" aria-hidden="true" />
         </button>
-        <div class="view-shell-project-menu" id="view-shell-project-menu" role="listbox" aria-labelledby="view-shell-project-label" hidden></div>
+        <div class="view-shell-project-menu" id="view-shell-project-menu" role="menu" aria-labelledby="view-shell-project-label" hidden></div>
       </div>
+      <button class="view-shell-search-trigger" data-view-search-trigger type="button" aria-haspopup="dialog" aria-controls="view-shell-search-overlay" aria-expanded="false">
+        <img src="/assets/system-icons/magnifying-glass.svg" alt="" aria-hidden="true" />
+        <span>${chinese ? "搜索" : "Search"}</span>
+      </button>
+      <div class="view-shell-rail-divider" aria-hidden="true"></div>
       <nav data-view-slot="navigation.primary">${navigation}</nav>
+      <div class="view-shell-rail-spacer"></div>
       <div class="view-shell-footer" data-view-slot="sidebar.footer">${footer}</div>
+      <button class="view-shell-add-module" type="button" aria-label="${chinese ? "新增 Module" : "Add Module"}" title="${chinese ? "新增 Module" : "Add Module"}">
+        <img src="/assets/system-icons/plus.svg" alt="" aria-hidden="true" />
+      </button>
+      <div class="view-shell-account-slot" data-view-slot="header.account">${account}</div>
     </aside>
     <section class="view-shell-workspace">
-      <header class="view-shell-header">
-        <div data-view-slot="header.title">${header}</div>
-        <div data-view-slot="header.actions"></div>
-        <div data-view-slot="header.account">${account}</div>
-      </header>
-      <main id="memsphere-view-root" class="${initial?.pathname === "/" ? "" : "view-host-status"}" aria-live="polite">${main}</main>
+      <aside class="view-shell-secondary-panel" aria-label="Secondary navigation">
+        <div class="view-shell-secondary-slot" data-view-slot="navigation.secondary"></div>
+        ${renderPanelResizer("secondary", "Resize secondary navigation", 176, 360, 218)}
+      </aside>
+      <section class="view-shell-list-panel" aria-label="Content list">
+        <div class="view-shell-list-slot" data-view-slot="content.list"></div>
+        ${renderPanelResizer("content-list", "Resize content list", 260, 520, 326)}
+      </section>
+      <section class="view-shell-detail-panel">
+        <header class="view-shell-header">
+          <div data-view-slot="header.title">${header}</div>
+          <div data-view-slot="header.actions"></div>
+        </header>
+        <main id="memsphere-view-root" class="${isHome ? "" : "view-shell-detail-loading"}" aria-live="polite">${main}</main>
+      </section>
     </section>
     <div class="view-shell-page-portals" data-view-page-portals></div>
+    ${renderSearchOverlay(chinese)}
+    ${renderProjectDetailsOverlay(chinese)}
     <div data-view-slot="overlay"></div>
   </div>`;
 }
 
+function renderProjectDetailsOverlay(chinese: boolean): string {
+  const labels = chinese
+    ? { title: "项目详情", close: "关闭", name: "项目名称", root: "项目目录", store: "存储类型", revision: "版本", memory: "Memory 目录" }
+    : { title: "Project details", close: "Close", name: "Project name", root: "Project root", store: "Store type", revision: "Revision", memory: "Memory root" };
+  const row = (key: string, label: string) => `<div class="view-shell-project-detail-row"><dt>${label}</dt><dd data-project-detail="${key}">—</dd></div>`;
+  return `<div class="view-shell-project-details-overlay" data-view-project-details hidden>
+    <section class="view-shell-project-details-card" role="dialog" aria-modal="true" aria-labelledby="view-shell-project-details-title">
+      <header><h2 id="view-shell-project-details-title">${labels.title}</h2><button type="button" data-view-project-details-close aria-label="${labels.close}"><img src="/assets/system-icons/x.svg" alt="" /></button></header>
+      <dl>${row("name", labels.name)}${row("root", labels.root)}${row("store", labels.store)}${row("revision", labels.revision)}${row("memory", labels.memory)}</dl>
+    </section>
+  </div>`;
+}
+
+function renderPanelResizer(name: string, label: string, min: number, max: number, value: number): string {
+  return `<div class="view-shell-panel-resizer" data-view-resizer="${name}" role="separator" aria-label="${label}" aria-orientation="vertical" aria-valuemin="${min}" aria-valuemax="${max}" aria-valuenow="${value}" tabindex="0" title="Drag to resize; double-click to reset"><span></span></div>`;
+}
+
+function renderSearchOverlay(chinese: boolean): string {
+  const label = chinese ? "全局搜索" : "Global search";
+  const placeholder = chinese ? "搜索当前 Project 的全部内容" : "Search everything in the current Project";
+  return `<section class="view-shell-search-overlay" id="view-shell-search-overlay" data-view-search-overlay role="dialog" aria-modal="true" aria-label="${label}" hidden>
+    <header class="view-shell-search-command">
+      <img src="/assets/system-icons/magnifying-glass.svg" alt="" aria-hidden="true" />
+      <input data-view-search-input type="search" autocomplete="off" placeholder="${placeholder}" />
+      <kbd>ESC</kbd>
+      <button data-view-search-close type="button" aria-label="${chinese ? "关闭搜索" : "Close search"}"><img src="/assets/system-icons/x.svg" alt="" aria-hidden="true" /></button>
+    </header>
+    <div class="view-shell-search-providers" data-view-slot="search.providers" role="tablist" aria-label="${chinese ? "搜索分类" : "Search categories"}"></div>
+    <div class="view-shell-search-body">
+      <div class="view-shell-search-empty" data-view-search-empty>
+        <span class="view-shell-search-empty-icon"><img src="/assets/system-icons/magnifying-glass.svg" alt="" aria-hidden="true" /></span>
+        <h2>${chinese ? "跨 Module 搜索" : "Search across Modules"}</h2>
+        <p>${chinese ? "输入关键词，搜索当前 Project 中的内容。" : "Enter a keyword to search the current Project."}</p>
+      </div>
+      <div class="view-shell-search-results" data-view-search-results hidden></div>
+      <p class="view-shell-search-status" data-view-search-status role="status" aria-live="polite"></p>
+    </div>
+    <footer class="view-shell-search-footer"><span>↑↓ ${chinese ? "移动" : "Move"}</span><span>↵ ${chinese ? "打开" : "Open"}</span><span>esc ${chinese ? "退出搜索" : "Exit search"}</span></footer>
+  </section>`;
+}
+
 function renderInitialNavigation(initial: NonNullable<ViewShellMarkupOptions["initial"]>): string {
   return initial.navigation.map(item => {
-    const active = item.href === "/" ? initial.pathname === "/" : initial.pathname.startsWith(item.href);
-    return `<a class="view-shell-navigation-item${active ? " active" : ""}" href="${escapeHtml(item.href)}" aria-current="${active ? "page" : "false"}">
-      <img class="view-shell-icon" src="/assets/system-icons/${initialIconName(item.icon)}${active ? "-fill" : ""}.svg" alt="" aria-hidden="true" />
+    const active = item.href !== "/" && initial.pathname.startsWith(item.href);
+    return `<a class="view-shell-navigation-item${active ? " active" : ""}" href="${escapeHtml(item.href)}" aria-current="${active ? "page" : "false"}" title="${escapeHtml(item.label)}">
+      <span class="view-shell-module-icon"><img class="view-shell-icon" src="/assets/system-icons/${initialIconName(item.icon)}${active ? "-fill" : ""}.svg" alt="" aria-hidden="true" /></span>
       <span>${escapeHtml(item.label)}</span>
     </a>`;
   }).join("");
@@ -85,6 +155,15 @@ function renderInitialHome(initial: NonNullable<ViewShellMarkupOptions["initial"
     ${initialHomeSection(initial.continueLabel, initial.continueEmpty)}
     <section class="view-home-section" data-home-section="modules"><h2>${escapeHtml(initial.modulesLabel)}</h2><div class="view-home-section-body view-home-module-grid">${modules}</div></section>
   </div></div>`;
+}
+
+function renderInitialLoading(label: string): string {
+  return `<div class="view-shell-loading-skeleton" aria-label="${escapeHtml(label)}" role="status">
+    <span class="view-shell-loading-line title"></span>
+    <span class="view-shell-loading-line"></span>
+    <span class="view-shell-loading-line short"></span>
+    <span class="view-shell-loading-card"></span>
+  </div>`;
 }
 
 function initialHomeSection(title: string, emptyLabel: string, count = false): string {
@@ -143,7 +222,7 @@ export const viewShellStyles = `
   .view-shell-sidebar { display: flex; flex-direction: column; }
   .view-shell-sidebar [data-view-slot="navigation.primary"] { flex: 0 0 auto; }
   .view-shell-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid #d9ded8; }
-  .view-shell-settings { width: 100%; min-height: 36px; box-sizing: border-box; border: 0; border-radius: 6px; padding: 8px 10px; background: transparent; color: #222629; text-align: left; }
+  .view-shell-settings { width: 100%; min-height: 36px; box-sizing: border-box; border: 0; border-radius: 6px; padding: 8px 10px; background: transparent; color: #222629; text-align: left; text-decoration:none; }
   .view-shell-settings:hover { background: #eef1ed; }
   .view-shell-service-status { display: flex; align-items: center; gap: 7px; margin: 9px 10px 0; color: #6c7379; font-size: 11px; }
   .view-shell-status-icon { width: 7px; height: 7px; }
@@ -220,10 +299,8 @@ export const viewShellStyles = `
   .view-home-icon-tile.small img { width: 23px; height: 23px; }
   .view-home-icon-tile[data-tone="green"] { background: #edf2ee; }
   .view-home-icon-tile[data-tone="green"] img { filter: invert(25%) sepia(23%) saturate(1140%) hue-rotate(113deg) brightness(87%) contrast(91%); }
-  .view-home-icon-tile[data-tone="blue"] { background: #eef3fb; }
-  .view-home-icon-tile[data-tone="blue"] img { filter: invert(38%) sepia(35%) saturate(1673%) hue-rotate(178deg) brightness(88%) contrast(91%); }
-  .view-home-icon-tile[data-tone="orange"] { background: #fbf0e6; }
-  .view-home-icon-tile[data-tone="orange"] img { filter: invert(47%) sepia(89%) saturate(1020%) hue-rotate(352deg) brightness(91%) contrast(91%); }
+  .view-home-icon-tile[data-tone="blue"], .view-home-icon-tile[data-tone="orange"] { background: #edf2ee; }
+  .view-home-icon-tile[data-tone="blue"] img, .view-home-icon-tile[data-tone="orange"] img { filter: invert(25%) sepia(23%) saturate(1140%) hue-rotate(113deg) brightness(87%) contrast(91%); }
   .view-home-icon-tile[data-tone="error"] { background: #fff0ec; }
   .view-home-icon-tile[data-tone="error"] img { filter: invert(34%) sepia(36%) saturate(1218%) hue-rotate(321deg) brightness(82%) contrast(92%); }
   .view-home-button { min-height: 42px; border: 1px solid #3c6d5e; border-radius: 8px; padding: 0 16px; background: transparent; color: #215544; cursor: pointer; }
@@ -237,10 +314,8 @@ export const viewShellStyles = `
   .view-home-module-icon-tile { display: grid; width: 46px; height: 46px; place-items: center; border-radius: 12px; background: #edf2ee; }
   .view-home-module-icon { width: 23px; height: 23px; }
   .view-home-module-card[data-icon="brain"] .view-home-module-icon { filter: invert(25%) sepia(23%) saturate(1140%) hue-rotate(113deg) brightness(87%) contrast(91%); }
-  .view-home-module-card[data-icon="play-circle"] .view-home-module-icon-tile { background: #eef3fb; }
-  .view-home-module-card[data-icon="play-circle"] .view-home-module-icon { filter: invert(38%) sepia(35%) saturate(1673%) hue-rotate(178deg) brightness(88%) contrast(91%); }
-  .view-home-module-card[data-icon="gear-six"] .view-home-module-icon-tile { background: #fbf0e6; }
-  .view-home-module-card[data-icon="gear-six"] .view-home-module-icon { filter: invert(47%) sepia(89%) saturate(1020%) hue-rotate(352deg) brightness(91%) contrast(91%); }
+  .view-home-module-card[data-icon="play-circle"] .view-home-module-icon-tile, .view-home-module-card[data-icon="gear-six"] .view-home-module-icon-tile { background: #edf2ee; }
+  .view-home-module-card[data-icon="play-circle"] .view-home-module-icon, .view-home-module-card[data-icon="gear-six"] .view-home-module-icon { filter: invert(25%) sepia(23%) saturate(1140%) hue-rotate(113deg) brightness(87%) contrast(91%); }
   .view-home-empty { min-height: 100px; margin: 0; display: grid; place-items: center; color: var(--view-muted); }
   [data-view-page-portals]:empty { display: none; }
   [data-view-page-portals] { position: relative; z-index: 95; }
@@ -289,6 +364,384 @@ export const viewShellStyles = `
     .view-home-module-card, .view-home-module-card:first-child { padding: 16px 0; border-right: 0; border-bottom: 1px solid var(--view-line); }
     .view-overlay-dialog { padding: 0; }
     .view-overlay-surface { width: 100%; height: 100dvh; max-height: 100vh; border-radius: 0; }
+  }
+
+  /* Feishu-like four-column Shell. Module-specific content remains owned by its Mount. */
+  :root {
+    --view-rail-width: 84px;
+    --view-secondary-width: 218px;
+    --view-list-width: 326px;
+    --view-green: #28766e;
+    --view-green-strong: #195c56;
+    --view-green-soft: #deefec;
+    --view-line: #dfe6e3;
+    --view-muted: #697572;
+    --view-canvas: #f7f9f8;
+    --view-panel: #fff;
+  }
+  .view-shell, .view-shell button, .view-shell input {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-synthesis: none;
+    -webkit-font-smoothing: antialiased;
+  }
+  .view-shell {
+    display: grid;
+    width: 100%;
+    height: 100vh;
+    min-height: 0;
+    grid-template-columns: var(--view-rail-width) minmax(0, 1fr);
+    overflow: hidden;
+    background: var(--view-canvas);
+    color: #202726;
+  }
+  .view-shell-sidebar {
+    position: relative;
+    inset: auto;
+    z-index: 24;
+    display: flex;
+    width: auto;
+    min-width: 0;
+    height: 100vh;
+    min-height: 0;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    overflow: visible;
+    padding: 14px 8px 12px;
+    border: 0;
+    border-right: 1px solid #d8e1e0;
+    background: #eef3f4;
+  }
+  .view-shell-project-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .view-shell-project-select-wrap { position: relative; width: 54px; height: 54px; margin: 0; }
+  .view-shell-project-home { position: absolute; inset: 0; display: block; border-radius: 14px; text-decoration: none; }
+  .view-shell-project-mark {
+    display: grid;
+    width: 46px;
+    height: 46px;
+    margin: 0 auto;
+    place-items: center;
+    border-radius: 14px;
+    background: var(--view-green);
+    box-shadow: 0 6px 18px rgba(24, 91, 84, .22);
+  }
+  .view-shell-project-home:hover .view-shell-project-mark { background: var(--view-green-strong); }
+  .view-shell-project-home:focus-visible { outline: 2px solid #69a79f; outline-offset: 3px; }
+  .view-shell-project-icon { width: 21px; height: 21px; filter: invert(1); }
+  .view-shell-project-value { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .view-shell-project-trigger {
+    position: absolute;
+    right: -2px;
+    bottom: -1px;
+    display: grid;
+    width: 21px;
+    min-width: 21px;
+    height: 21px;
+    min-height: 21px;
+    grid-template-columns: 1fr;
+    place-items: center;
+    gap: 0;
+    border: 2px solid #eef3f4;
+    border-radius: 50%;
+    background: #fff;
+    padding: 0;
+    color: var(--view-green);
+    cursor: pointer;
+  }
+  .view-shell-project-trigger:disabled { cursor: default; opacity: .72; }
+  .view-shell-project-trigger:not(:disabled):hover, .view-shell-project-trigger[aria-expanded="true"] { background: #e5f1ef; }
+  .view-shell-project-trigger:focus-visible { outline: 2px solid #69a79f; outline-offset: 2px; box-shadow: none; }
+  .view-shell-project-trigger-value { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .view-shell-project-caret { width: 11px; height: 11px; }
+  .view-shell-project-trigger[aria-expanded="true"] .view-shell-project-caret { transform: rotate(180deg); }
+  .view-shell-project-menu {
+    position: absolute;
+    z-index: 80;
+    top: 2px;
+    right: auto;
+    left: 66px;
+    width: 304px;
+    max-height: min(300px, 60vh);
+    overflow-y: auto;
+    border: 1px solid var(--view-line);
+    border-radius: 18px;
+    background: #fff;
+    box-shadow: 0 14px 40px rgba(31, 46, 43, .17);
+    padding: 14px;
+  }
+  .view-shell-project-menu[hidden] { display: none; }
+  .view-shell-project-menu-title, .view-shell-project-switch-label { color: #87928f; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .view-shell-project-menu-title { margin: 2px 8px 10px; }
+  .view-shell-project-switch-label { margin: 12px 8px 5px; }
+  .view-shell-project-option, .view-shell-project-current { display: grid; width: 100%; min-height: 58px; grid-template-columns: 40px minmax(0,1fr) auto; align-items: center; gap: 12px; border: 0; border-radius: 13px; background: transparent; padding: 8px 10px; color: #27312f; cursor: pointer; font: inherit; text-align: left; }
+  .view-shell-project-option:hover, .view-shell-project-option:focus-visible { background: #f1f6f4; outline: none; }
+  .view-shell-project-current { background: #e5f2ef; }
+  .view-shell-project-current:hover, .view-shell-project-current:focus-visible { background: #dcece8; outline: none; }
+  .view-shell-project-avatar { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 11px; background: var(--view-green); color: #fff; font-size: 16px; font-weight: 700; text-transform: uppercase; }
+  .view-shell-project-option-name, .view-shell-project-current-name { min-width: 0; overflow: hidden; font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
+  .view-shell-project-current-copy { display: grid; min-width: 0; gap: 2px; }
+  .view-shell-project-current-copy small { color: #6f7d79; font-size: 10px; font-weight: 600; }
+  .view-shell-project-details-caret { width: 15px; height: 15px; opacity: .62; transform: rotate(-90deg); }
+  .view-shell-search-trigger {
+    display: flex;
+    width: 46px;
+    height: 42px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    margin-top: 5px;
+    border: 1px solid #dde5e3;
+    border-radius: 12px;
+    background: rgba(255,255,255,.7);
+    color: #667370;
+    cursor: pointer;
+  }
+  .view-shell-search-trigger:hover, .view-shell-search-trigger[aria-expanded="true"] { background: #fff; color: #244d49; }
+  .view-shell-search-trigger:focus-visible { outline: 2px solid #69a79f; outline-offset: 2px; }
+  .view-shell-search-trigger img { width: 21px; height: 21px; }
+  .view-shell-search-trigger span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .view-shell-rail-divider { width: 44px; height: 1px; flex: 0 0 1px; margin: 4px 0; background: #d8e0de; }
+  .view-shell-sidebar [data-view-slot="navigation.primary"] { display: grid; width: 100%; gap: 6px; margin: 0; }
+  .view-shell-navigation-item {
+    display: flex;
+    width: 100%;
+    height: 66px;
+    min-height: 66px;
+    grid-template-columns: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    padding: 6px 2px;
+    color: #596663;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1.2;
+    text-align: center;
+    text-decoration: none;
+  }
+  .view-shell-navigation-item:hover { background: rgba(255,255,255,.72); color: #244d49; }
+  .view-shell-navigation-item.active { border: 0; background: #fff; color: #214b46; box-shadow: 0 1px 4px rgba(31,61,57,.08); font-weight: 650; }
+  .view-shell-module-icon { display:grid; width:34px; height:34px; place-items:center; border-radius:10px; background:#e6efed; }
+  .view-shell-navigation-item .view-shell-icon { width:22px; height:22px; filter:invert(37%) sepia(18%) saturate(1485%) hue-rotate(123deg) brightness(89%) contrast(86%); }
+  .view-shell-navigation-item[data-view-entry*="org.memsphere.run"] .view-shell-module-icon, .view-shell-navigation-item[data-view-entry*="org.memsphere.settings"] .view-shell-module-icon { background:#e6efed; }
+  .view-shell-navigation-item[data-view-entry*="org.memsphere.run"] .view-shell-icon, .view-shell-navigation-item[data-view-entry*="org.memsphere.settings"] .view-shell-icon { filter:invert(37%) sepia(18%) saturate(1485%) hue-rotate(123deg) brightness(89%) contrast(86%); }
+  .view-shell-navigation-item.active .view-shell-module-icon { background:var(--view-green); }
+  .view-shell-navigation-item.active .view-shell-icon { filter:invert(1); }
+  .view-shell-navigation-item[data-view-entry*="org.memsphere.run"].active .view-shell-module-icon, .view-shell-navigation-item[data-view-entry*="org.memsphere.settings"].active .view-shell-module-icon { background:var(--view-green); }
+  .view-shell-navigation-badge { position: absolute; transform: translate(21px, -19px); min-width: 16px; height: 16px; border-radius: 8px; background: #e65b5b; padding: 0 4px; color: #fff; font-size: 9px; line-height: 16px; }
+  .view-shell-rail-spacer { min-height: 4px; flex: 1; }
+  .view-shell-account-slot { min-height: 36px; }
+  .view-shell-add-module { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 9px; background: transparent; color: #667370; cursor: pointer; }
+  .view-shell-add-module:hover { background: #e4ecea; color: #244d49; }
+  .view-shell-add-module img { width: 20px; height: 20px; opacity: .72; }
+  .view-shell-account { display: grid; width: 36px; min-width: 36px; height: 36px; min-height: 36px; place-items: center; border: 0; border-radius: 12px; background: #8b6a4f; padding: 0; }
+  .view-shell-account-avatar { width: auto; height: auto; border-radius: 0; background: transparent; color: #fff; font: 700 12px/1 Inter, sans-serif; }
+  .view-shell-account-user-icon, .view-shell-account-caret { display: none; }
+  .view-shell-footer { display: grid; width: 100%; flex: 0 0 auto; gap: 4px; margin: 0; padding: 0; border: 0; }
+  .view-shell-footer:empty { display: none; }
+  .view-shell-footer .view-shell-settings { display: flex; width: 100%; height: 48px; min-height: 48px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: 11px; padding: 3px; font-size: 10px; text-align: center; }
+  .view-shell-footer .view-shell-settings .view-shell-icon { width: 20px; height: 20px; }
+  .view-shell-service-status { display: none; }
+  .view-shell-workspace {
+    position: relative;
+    grid-column: 2;
+    display: grid;
+    height: 100vh;
+    min-width: 0;
+    min-height: 0;
+    grid-template-columns: var(--view-secondary-width) var(--view-list-width) minmax(0, 1fr);
+    overflow: hidden;
+  }
+  .view-shell-secondary-panel, .view-shell-list-panel, .view-shell-detail-panel { min-width: 0; min-height: 0; }
+  .view-shell-secondary-panel {
+    position: relative;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+    border-right: 1px solid var(--view-line);
+    background: #f4f7f6;
+  }
+  .view-shell-list-panel {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+    border-right: 1px solid var(--view-line);
+    background: #fff;
+  }
+  .view-shell-secondary-slot, .view-shell-list-slot { width: 100%; height: 100%; min-height: 0; overflow: hidden; }
+  .view-shell-secondary-navigation { display: flex; width: 100%; height: 100%; min-height: 0; flex-direction: column; padding: 19px 12px 14px; }
+  .view-shell-secondary-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 0 6px 17px; }
+  .view-shell-secondary-header > div { min-width: 0; }
+  .view-shell-secondary-header small { display: block; margin-bottom: 4px; color: #82908d; font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+  .view-shell-secondary-header h1, .view-shell-secondary-header h2 { overflow: hidden; margin: 0; font-size: 20px; line-height: 1.25; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
+  .view-shell-secondary-settings { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 9px; background: transparent; color: #667370; cursor: pointer; }
+  .view-shell-secondary-settings:hover { background: #e4ecea; color: #244d49; }
+  .view-shell-secondary-settings .view-shell-icon { width: 18px; height: 18px; }
+  .view-shell-secondary-items { display: grid; gap: 3px; }
+  .view-shell-secondary-item { display: grid; width: 100%; height: 41px; grid-template-columns: 23px minmax(0, 1fr) auto; align-items: center; gap: 7px; border: 0; border-radius: 9px; background: transparent; padding: 0 10px; color: #4c5956; cursor: pointer; text-align: left; }
+  .view-shell-secondary-item:hover { background: #e9efed; }
+  .view-shell-secondary-item.active { background: #dcece9; color: #185c55; font-weight: 650; }
+  .view-shell-secondary-item .view-shell-icon { width: 18px; height: 18px; }
+  .view-shell-secondary-badge { display: grid; min-width: 20px; height: 20px; place-items: center; border-radius: 10px; background: rgba(255,255,255,.72); padding: 0 6px; color: #64716e; font-size: 10px; }
+  .view-shell-secondary-item.active .view-shell-secondary-badge { background: #eff8f6; color: var(--view-green); }
+  .view-shell-secondary-footer { display: flex; align-items: flex-start; gap: 7px; margin-top: auto; border-top: 1px solid var(--view-line); padding: 14px 7px 2px; color: #788481; font-size: 11px; line-height: 1.55; }
+  .view-host-list-mount { width: 100%; height: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; }
+  .view-shell-detail-panel { display: flex; flex-direction: column; overflow: hidden; background: #fbfcfb; }
+  .view-shell-header {
+    display: flex;
+    height: 100px;
+    min-height: 100px;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 18px 25px 15px;
+    border: 0;
+    border-bottom: 1px solid var(--view-line);
+    background: rgba(255,255,255,.93);
+  }
+  .view-shell-header [data-view-slot="header.title"] { min-width: 0; flex: 1; }
+  .view-shell-header [data-view-slot="header.actions"] { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; border: 0; padding: 9px 0 0; }
+  .view-shell-heading { display: block; }
+  .view-shell-heading h1 { margin: 0 0 5px; color: #202726; font-size: 21px; font-weight: 650; line-height: 1.3; letter-spacing: -.025em; }
+  .view-shell-heading h1.memory-title, .view-shell-heading h1.run-title { font-size: 23px; font-weight: 700; }
+  .view-shell-heading p, .view-shell-breadcrumbs { margin: 0 0 4px; color: #7c8885; font-size: 11px; }
+  .view-shell-action { min-height: 34px; border-color: #d5dfdc; border-radius: 8px; background: #fff; padding: 0 12px; color: #33403d; font-size: 12px; font-weight: 600; }
+  .view-shell-action:not(:disabled):hover { border-color: #adc8c3; background: #f1f6f4; }
+  .view-shell-header [data-view-slot="header.actions"] .view-shell-action:last-child:not(:disabled) { border-color: var(--view-green); background: var(--view-green); color: #fff; }
+  .view-shell-header [data-view-slot="header.actions"] .view-shell-action:last-child:not(:disabled):hover { border-color: var(--view-green-strong); background: var(--view-green-strong); }
+  #memsphere-view-root { min-width: 0; min-height: 0; flex: 1; overflow: auto; }
+  #memsphere-view-root.view-host-status { min-height: 0; }
+  #memsphere-view-root.view-shell-detail-loading { display: block; padding: 24px 26px; }
+  .view-shell-loading-skeleton { display: grid; max-width: 920px; gap: 12px; margin: 0 auto; }
+  .view-shell-loading-line, .view-shell-loading-card { display: block; border-radius: 9px; background: #edf1ef; animation: view-shell-loading-pulse 1.1s ease-in-out infinite alternate; }
+  .view-shell-loading-line { width: 72%; height: 14px; }
+  .view-shell-loading-line.title { width: 46%; height: 24px; margin-bottom: 8px; }
+  .view-shell-loading-line.short { width: 58%; }
+  .view-shell-loading-card { height: 190px; margin-top: 12px; border: 1px solid #e5eae8; background: #f3f6f5; }
+  @keyframes view-shell-loading-pulse { from { opacity: .54; } to { opacity: .9; } }
+  .view-shell-panel-resizer { position: absolute; z-index: 12; top: 0; right: -5px; bottom: 0; width: 10px; cursor: col-resize; touch-action: none; outline: none; }
+  .view-shell-panel-resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: transparent; transition: background-color 120ms ease; }
+  .view-shell-panel-resizer > span { position: absolute; top: 50%; left: 2px; width: 6px; height: 38px; border-radius: 6px; background: transparent; transform: translateY(-50%); transition: background-color 120ms ease, box-shadow 120ms ease; }
+  .view-shell-panel-resizer:hover::before, .view-shell-panel-resizer:focus-visible::before, .view-shell[data-view-resizing] .view-shell-panel-resizer::before { background: #69a79f; }
+  .view-shell-panel-resizer:hover > span, .view-shell-panel-resizer:focus-visible > span, .view-shell[data-view-resizing] .view-shell-panel-resizer > span { background: #f7fbfa; box-shadow: inset 0 0 0 1px #8ab7b1; }
+  .view-shell[data-view-resizing] { cursor: col-resize; user-select: none; }
+  .view-shell[data-view-layout="home"] .view-shell-workspace { grid-template-columns: minmax(0, 1fr); }
+  .view-shell[data-view-layout="home"] .view-shell-secondary-panel, .view-shell[data-view-layout="home"] .view-shell-list-panel { display: none; }
+  .view-shell[data-view-layout="home"] .view-shell-detail-panel { grid-column: 1 / -1; }
+  .view-shell[data-view-layout="home"] .view-shell-header { background: var(--view-canvas); }
+  .view-shell[data-view-layout="module"][data-view-content-list="false"] .view-shell-workspace { grid-template-columns: var(--view-secondary-width) minmax(0, 1fr); }
+  .view-shell[data-view-layout="module"][data-view-content-list="false"] .view-shell-list-panel { display: none; }
+  .view-home { min-height: 100%; }
+
+  .view-shell-search-overlay {
+    position: fixed;
+    inset: 12px;
+    z-index: 120;
+    display: grid;
+    grid-template-rows: 74px 54px minmax(0, 1fr) 38px;
+    overflow: hidden;
+    border: 1px solid #d8e0de;
+    border-radius: 18px;
+    background: rgba(249,251,250,.98);
+    box-shadow: 0 24px 80px rgba(22,44,40,.24);
+    backdrop-filter: blur(18px);
+  }
+  .view-shell-search-overlay[hidden] { display: none; }
+  .view-shell-search-command { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto 36px; align-items: center; gap: 10px; padding: 13px 20px; border-bottom: 1px solid #edf0ef; background: #fff; color: #74817e; }
+  .view-shell-search-command > img { width: 24px; height: 24px; }
+  .view-shell-search-command input { min-width: 0; border: 0; outline: 0; background: transparent; color: #26312f; font-size: 20px; }
+  .view-shell-search-command input::placeholder { color: #a1aaa8; }
+  .view-shell-search-command kbd { border: 1px solid #dfe5e3; border-radius: 5px; background: #f4f6f5; padding: 3px 6px; color: #8b9592; font: 9px/1.2 inherit; }
+  .view-shell-search-command button { display: grid; width: 36px; height: 36px; place-items: center; border: 0; border-radius: 8px; background: transparent; cursor: pointer; }
+  .view-shell-search-command button:hover { background: #eef3f1; }
+  .view-shell-search-command button img { width: 22px; height: 22px; }
+  .view-shell-search-providers { display: flex; align-items: center; gap: 8px; overflow-x: auto; padding: 8px 20px; border-bottom: 1px solid #e6ebe9; background: #fff; }
+  .view-shell-search-providers button { height: 32px; flex: 0 0 auto; border: 0; border-radius: 17px; background: #f1f4f3; padding: 0 15px; cursor: pointer; font-size: 12px; }
+  .view-shell-search-providers button:hover, .view-shell-search-providers button[aria-selected="true"] { background: #dcece9; color: var(--view-green-strong); font-weight: 650; }
+  .view-shell-search-body { position: relative; min-height: 0; overflow: auto; }
+  .view-shell-search-empty { display: grid; width: 100%; height: 100%; place-content: center; justify-items: center; color: #65726f; text-align: center; }
+  .view-shell-search-empty[hidden], .view-shell-search-results[hidden] { display: none; }
+  .view-shell-search-empty-icon { display: grid; width: 78px; height: 78px; margin-bottom: 17px; place-items: center; border-radius: 25px; background: #e0f0ed; }
+  .view-shell-search-empty-icon img { width: 34px; height: 34px; filter: invert(40%) sepia(18%) saturate(1288%) hue-rotate(123deg) brightness(91%) contrast(87%); }
+  .view-shell-search-empty h2 { margin: 0 0 7px; font-size: 18px; }
+  .view-shell-search-empty p { margin: 0; color: #8a9492; font-size: 12px; }
+  .view-shell-search-results { width: min(760px, calc(100% - 48px)); margin: 24px auto; }
+  .view-shell-search-status { position: absolute; top: 0; left: 50%; margin: 8px 0 0; color: #7c8885; font-size: 11px; transform: translateX(-50%); }
+  .view-shell-search-status:empty { display: none; }
+  .view-shell-search-footer { display: flex; align-items: center; justify-content: flex-end; gap: 18px; border-top: 1px solid #e2e8e6; background: #fff; padding: 0 20px; color: #8b9592; font-size: 10px; }
+  .view-shell-project-details-overlay { position: fixed; inset: 0; z-index: 130; display: grid; place-items: center; padding: 24px; background: rgba(24,29,26,.38); }
+  .view-shell-project-details-overlay[hidden] { display: none; }
+  .view-shell-project-details-card { width: min(560px, 100%); overflow: hidden; border: 1px solid #d8e0de; border-radius: 16px; background: #fff; box-shadow: 0 24px 70px rgba(22,44,40,.22); }
+  .view-shell-project-details-card > header { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px 14px; border-bottom: 1px solid #e6ebe9; }
+  .view-shell-project-details-card h2 { margin: 0; font-size: 19px; }
+  .view-shell-project-details-card header button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 8px; background: transparent; cursor: pointer; }
+  .view-shell-project-details-card header button:hover { background: #eef3f1; }
+  .view-shell-project-details-card header img { width: 18px; height: 18px; }
+  .view-shell-project-details-card dl { display: grid; margin: 0; padding: 8px 20px 20px; }
+  .view-shell-project-detail-row { display: grid; grid-template-columns: 110px minmax(0,1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid #edf1ef; }
+  .view-shell-project-detail-row:last-child { border-bottom: 0; }
+  .view-shell-project-detail-row dt { color: #7c8885; }
+  .view-shell-project-detail-row dd { min-width: 0; margin: 0; color: #26312f; overflow-wrap: anywhere; }
+
+  @media (max-width: 1240px) and (min-width: 821px) {
+    :root { --view-rail-width: 74px; --view-secondary-width: 198px; --view-list-width: 292px; }
+  }
+  @media (max-width: 820px) {
+    :root { --view-rail-width: 74px; --view-secondary-width: 198px; --view-list-width: 292px; }
+    .view-shell {
+      display: grid;
+      width: max(100%, 1084px);
+      height: 100vh;
+      min-height: 0;
+      grid-template-columns: var(--view-rail-width) minmax(0, 1fr);
+      overflow: hidden;
+      padding-bottom: 0;
+    }
+    .view-shell[data-view-content-list="false"] { width: max(100%, 812px); }
+    .view-shell-sidebar {
+      position: relative;
+      inset: auto;
+      z-index: 24;
+      display: flex;
+      width: auto;
+      min-width: 0;
+      height: 100vh;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      overflow: visible;
+      padding: 14px 8px 12px;
+      border: 0;
+      border-right: 1px solid #d8e1e0;
+    }
+    .view-shell-project-select-wrap { display: block; width: 54px; height: 54px; flex: 0 0 auto; }
+    .view-shell-project-trigger { position: absolute; right: -2px; bottom: -1px; display: grid; width: 21px; min-width: 21px; height: 21px; min-height: 21px; grid-template-columns: 1fr; padding: 0; }
+    .view-shell-project-icon { width: 21px; height: 21px; }
+    .view-shell-project-caret { display: block; }
+    .view-shell-project-menu { top: 2px; right: auto; bottom: auto; left: 66px; width: 224px; }
+    .view-shell-sidebar [data-view-slot="navigation.primary"] { display: grid; width: 100%; height: auto; min-width: 0; flex: 0 0 auto; grid-template-columns: none; grid-auto-flow: row; grid-auto-columns: auto; gap: 6px; overflow: visible; }
+    .view-shell-navigation-item { display: flex; width: 100%; height: 66px; min-height: 66px; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px 2px; font-size: 11px; }
+    .view-shell-navigation-item .view-shell-icon { width: 22px; height: 22px; }
+    .view-shell-footer { display: grid; width: 100%; flex: 0 0 auto; margin: 0; padding: 0; }
+    .view-shell-footer .view-shell-settings { display: flex; width: 100%; height: 48px; min-height: 48px; flex-direction: column; padding: 3px; font-size: 10px; }
+    .view-shell-workspace { height: 100vh; min-height: 0; grid-template-columns: var(--view-secondary-width) var(--view-list-width) minmax(520px, 1fr); }
+    .view-shell[data-view-content-list="false"] .view-shell-workspace { grid-template-columns: var(--view-secondary-width) minmax(540px, 1fr); }
+    .view-shell-header { height: 100px; min-height: 100px; padding: 18px 25px 15px; }
+    .view-shell-heading h1 { font-size: 21px; }
+    .view-shell-heading p, .view-shell-breadcrumbs { display: block; }
+    .view-shell-header [data-view-slot="header.actions"] { padding-right: 0; }
+    body:has(.view-overlay-layer) .view-shell { width: 100%; }
+    body:has(.view-overlay-layer) .view-shell-workspace { grid-template-columns: minmax(0, 1fr); }
+    body:has(.view-overlay-layer) .view-shell-secondary-panel,
+    body:has(.view-overlay-layer) .view-shell-list-panel { display: none; }
   }
 `;
 

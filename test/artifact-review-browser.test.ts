@@ -259,6 +259,7 @@ test("Human Artifact Review completes once after a revised second round", async 
         roundId: secondReview.currentRoundId,
         vote: "approve"
       });
+      await page.reload({ waitUntil: "domcontentloaded" });
       await page.getByText("已完成", { exact: true }).first().waitFor({ timeout: 6_000 });
       const completed = await readRun(fixture.runsRoot, fixture.runId);
       assert.equal(completed.status, "done");
@@ -551,14 +552,15 @@ test("completed Artifact Review isolates dialog scrolling without mutating Host 
       await page.goto(`${origin}/tasks/${fixture.runId}`, { waitUntil: "domcontentloaded" });
       await page.getByText("已完成", { exact: true }).first().waitFor();
       await page.evaluate(() => {
-        const content = document.querySelector<HTMLElement>(".content");
+        const content = document.querySelector<HTMLElement>("#memsphere-view-root");
         const button = document.querySelector<HTMLElement>(".task-result [data-artifact-review-id]");
-        if (content) content.style.paddingTop = "1400px";
+        const workspace = document.querySelector<HTMLElement>(".run-workspace");
+        if (workspace) workspace.style.paddingTop = "1400px";
         button?.scrollIntoView({ block: "center" });
       });
       const reviewButton = page.locator(".task-result").getByRole("button", { name: "产物评审", exact: true });
       const beforeOpen = await reviewButton.evaluate((button) => ({
-        scrollY: window.scrollY,
+        scrollY: document.querySelector<HTMLElement>("#memsphere-view-root")?.scrollTop ?? 0,
         top: button.getBoundingClientRect().top
       }));
       assert(beforeOpen.scrollY > 0);
@@ -578,6 +580,7 @@ test("completed Artifact Review isolates dialog scrolling without mutating Host 
       await page.getByRole("button", { name: "关闭", exact: true }).click();
       await reviewModal.waitFor({ state: "hidden" });
       await reviewButton.waitFor({ state: "visible" });
+      assert.equal(await page.locator("#memsphere-view-root").evaluate(root => root.scrollTop), beforeOpen.scrollY);
     });
   } finally {
     await rm(fixture.dir, { recursive: true, force: true });
@@ -692,11 +695,9 @@ flow:
     await page.goto(`http://127.0.0.1:${address.port}`);
     await page.getByRole("button", { name: "运行", exact: true }).click();
     await page.locator(".run-card-main").first().click();
-    const reviewToggle = page.locator("#review-toggle");
-    await page.waitForFunction(() =>
-      document.getElementById("review-toggle")?.getAttribute("aria-controls") === "artifact-review-modal"
-    );
-    assert.equal(await reviewToggle.getAttribute("aria-controls"), "artifact-review-modal");
+    const reviewToggle = page.getByRole("button", { name: /产物评审/ }).first();
+    await reviewToggle.waitFor();
+    assert.match(await reviewToggle.getAttribute("data-view-entry") ?? "", /run\.detail\.review/);
     await reviewToggle.click();
     const modal = page.locator("#artifact-review-modal");
     await modal.getByText("Public review material remains visible.", { exact: true }).waitFor();

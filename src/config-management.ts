@@ -116,7 +116,10 @@ export async function readProjectConfigDocument(
 export function editableGlobalConfigDraft(document: GlobalConfigDocument): EditableGlobalConfigDraft {
   return {
     ...(document.raw.language === undefined ? {} : { language: document.raw.language }),
-    ...(document.raw.view === undefined ? {} : { view: structuredClone(document.raw.view) }),
+    ...(document.raw.view === undefined ? {} : { view: {
+      host: document.raw.view.host,
+      port: document.raw.view.port
+    } }),
     ...(document.raw.acp_providers === undefined
       ? {}
       : { acp_providers: structuredClone(document.raw.acp_providers) })
@@ -136,7 +139,10 @@ export function validateGlobalConfigDraft(
 ): GlobalConfigDraftValidation {
   const candidateInput = {
     ...(draft.language === undefined ? {} : { language: draft.language }),
-    ...(draft.view === undefined ? {} : { view: structuredClone(draft.view) }),
+    ...(draft.view === undefined ? {} : { view: {
+      ...structuredClone(draft.view),
+      ...(document.raw.view?.operator_token ? { operator_token: document.raw.view.operator_token } : {})
+    } }),
     ...(document.raw.debug === undefined ? {} : { debug: structuredClone(document.raw.debug) }),
     ...(draft.acp_providers === undefined ? {} : { acp_providers: structuredClone(draft.acp_providers) })
   };
@@ -203,6 +209,29 @@ export async function writeGlobalConfigDraft(input: {
     const validation = validateGlobalConfigDraft(latest, input.draft, projects);
     if (!validation.valid || !validation.candidate) throw new ConfigDraftValidationError(validation.errors);
     await atomicWriteJson(latest.configPath, validation.candidate);
+    return readGlobalConfigDocument(latest.configPath);
+  });
+}
+
+export async function writeGlobalOperatorToken(input: {
+  document: GlobalConfigDocument;
+  expectedRevision: string;
+  token?: string;
+}): Promise<GlobalConfigDocument> {
+  const lockPath = join(dirname(input.document.configPath), ".runtime", "settings.lock");
+  return withFileLock(lockPath, async () => {
+    const latest = await readGlobalConfigDocument(input.document.configPath);
+    assertExpectedRevision(input.expectedRevision, latest.revision);
+    const view = latest.raw.view ?? { host: "127.0.0.1", port: 0 };
+    const candidate = globalConfigSchema.parse({
+      ...structuredClone(latest.raw),
+      view: {
+        host: view.host,
+        port: view.port,
+        ...(input.token ? { operator_token: input.token } : {})
+      }
+    });
+    await atomicWriteJson(latest.configPath, candidate);
     return readGlobalConfigDocument(latest.configPath);
   });
 }
@@ -297,7 +326,7 @@ export function parseProjectConfigSource(source: string): ProjectConfigFile {
 function normalizeGlobalDraft(global: GlobalConfigFile): EditableGlobalConfigDraft {
   return {
     ...(global.language === undefined ? {} : { language: global.language }),
-    ...(global.view === undefined ? {} : { view: structuredClone(global.view) }),
+    ...(global.view === undefined ? {} : { view: { host: global.view.host, port: global.view.port } }),
     ...(global.acp_providers === undefined ? {} : { acp_providers: structuredClone(global.acp_providers) })
   };
 }

@@ -17,6 +17,9 @@ import {
   isRouteActivation,
   isRouteProjection,
   isRouteTarget,
+  isSearchProviderDescriptor,
+  isSearchResultDescriptor,
+  isSecondaryNavigationDescriptor,
   isSidebarFooterDescriptor,
   isSlotToken,
   slots,
@@ -65,13 +68,14 @@ test("ViewRenderContext exposes the Host-resolved readonly Route location", () =
       search: "",
       hash: "",
       params: { id: "example" },
+      query: { section: "recent" },
       routeKey: "org.test.module@1.0.0:one:route:detail"
     }
   };
   assert.equal(context.route.params.id, "example");
 });
 
-test("built-in Tokens expose the ten approved root Slot contracts", () => {
+test("built-in Tokens expose the thirteen approved root Slot contracts", () => {
   assert.deepEqual(
     Object.values(slots).map(slot => ({
       name: slot.definition.name,
@@ -81,6 +85,9 @@ test("built-in Tokens expose the ten approved root Slot contracts", () => {
     })),
     [
       { name: "navigation.primary", kind: "list", scope: "project", render: "descriptor" },
+      { name: "navigation.secondary", kind: "single", scope: "page", render: "descriptor" },
+      { name: "content.list", kind: "single", scope: "page", render: "mount" },
+      { name: "search.providers", kind: "list", scope: "project", render: "descriptor" },
       { name: "header.title", kind: "single", scope: "page", render: "descriptor" },
       { name: "header.actions", kind: "list", scope: "page", render: "descriptor" },
       { name: "header.account", kind: "single", scope: "shell", render: "descriptor" },
@@ -132,6 +139,8 @@ test("Descriptor validators accept standard data and reject HTML or forged Route
   assert.equal(isHeaderActionDescriptor(action), true);
   assert.equal(slots.headerActions.definition.validate(action), true);
   assert.equal(slots.headerActions.definition.live, true);
+  assert.equal(slots.navigationSecondary.definition.live, true);
+  assert.equal(slots.headerTitle.definition.live, true);
   assert.equal(isNavigationItemDescriptor({ ...navigation, route: { path: "/memories" } }), false);
   assert.equal(isHeaderTitleDescriptor({ ...title, html: "<b>unsafe</b>" }), false);
   assert.equal(isHeaderActionDescriptor({ ...action, element: {} }), false);
@@ -157,6 +166,34 @@ test("Descriptor validators accept standard data and reject HTML or forged Route
   assert.equal(isOverlayMountDescriptor({ ...overlay, background: {} }), false);
   assert.equal(isHomeAttentionItemDescriptor({ ...attention, html: "<b>unsafe</b>" }), false);
   assert.equal(isHomeContinueItemDescriptor({ ...continuation, icon: { kind: "html", value: "<b>unsafe</b>" } }), false);
+
+  const secondary = {
+    title: { text: "Memory" }, icon: navigation.icon,
+    items: [
+      { id: "current", label: { text: "Current" }, icon: navigation.icon, selected: true, route },
+      { id: "refresh", label: { text: "Refresh" }, icon: navigation.icon, selected: false, action }
+    ],
+    footer: { text: "Project navigation" }
+  };
+  assert.equal(isSecondaryNavigationDescriptor(secondary), true);
+  assert.equal(slots.navigationSecondary.definition.validate(secondary), true);
+  assert.equal(isSecondaryNavigationDescriptor({ ...secondary, html: "<b>unsafe</b>" }), false);
+  assert.equal(isSecondaryNavigationDescriptor({
+    ...secondary,
+    items: [{ ...secondary.items[0], action }]
+  }), false);
+  assert.equal(isSecondaryNavigationDescriptor({
+    ...secondary,
+    items: [...secondary.items, secondary.items[0]]
+  }), false);
+
+  const result = { title: { text: "Memory" }, type: { text: "Concept" }, route };
+  const provider = { label: { text: "Memory" }, icon: navigation.icon, search() { return [result]; } };
+  assert.equal(isSearchResultDescriptor(result), true);
+  assert.equal(isSearchProviderDescriptor(provider), true);
+  assert.equal(slots.searchProviders.definition.validate(provider), true);
+  assert.equal(isSearchResultDescriptor({ ...result, route: { path: "/memories" } }), false);
+  assert.equal(isSearchProviderDescriptor({ ...provider, element: {} }), false);
 });
 
 test("defineSlot creates branded immutable Tokens without accepting structural forgeries", () => {

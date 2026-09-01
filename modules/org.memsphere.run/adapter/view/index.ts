@@ -2,12 +2,14 @@ import {
   defineViewPlugin,
   slots,
   type Disposer,
+  type HeaderActionDescriptor,
+  type HeaderTitleDescriptor,
   type RouteLocation,
   type RouteToken,
   type ViewMount,
   type ViewPluginContext
 } from "@memsphere/view-sdk";
-import { createRunDetailState, renderRunDetail } from "./run-detail.js";
+import { createRunDetailState, currentRunStep, renderRunDetail } from "./run-detail.js";
 import { runDetailStyles } from "./run-styles.js";
 
 type Json = Record<string, any>;
@@ -19,7 +21,7 @@ type RefreshableViewMount = ViewMount & { refresh(): Promise<void> };
 const zh: Readonly<Record<string, string>> = Object.freeze({
   run: "运行", running: "运行中", done: "已完成", abandoned: "已废弃",
   loading: "加载中…", empty: "当前状态下没有 Run。", choose: "选择一个 Run 查看详情。",
-  retry: "重试", refresh: "刷新", archive: "归档", abandon: "废弃", review: "产物评审",
+  retry: "重试", refresh: "刷新", archive: "归档", abandon: "废弃", review: "产物评审", jumpCurrent: "跳到当前步骤",
   archiveConfirm: "确认归档这个 Run？", abandonConfirm: "确认废弃这个 Run？",
   artifact: "产物", flow: "执行流程", current: "当前步骤", notStarted: "未开始",
   completed: "已完成", updated: "更新时间", procedure: "流程", events: "产物数",
@@ -51,7 +53,7 @@ const zh: Readonly<Record<string, string>> = Object.freeze({
 const en: Readonly<Record<string, string>> = Object.freeze({
   run: "Runs", running: "Running", done: "Done", abandoned: "Abandoned",
   loading: "Loading…", empty: "No runs in this status.", choose: "Choose a run to inspect.",
-  retry: "Retry", refresh: "Refresh", archive: "Archive", abandon: "Abandon", review: "Artifact review",
+  retry: "Retry", refresh: "Refresh", archive: "Archive", abandon: "Abandon", review: "Artifact review", jumpCurrent: "Jump to current step",
   archiveConfirm: "Archive this run?", abandonConfirm: "Abandon this run?",
   artifact: "Artifact", flow: "Flow", current: "Current step", notStarted: "Not started",
   completed: "Completed", updated: "Updated", procedure: "Procedure", events: "Artifacts",
@@ -84,11 +86,11 @@ const en: Readonly<Record<string, string>> = Object.freeze({
 const styles = `
   .run-module{--surface:#fff;--soft:#f1f3ef;--line:#dce0da;--text:#242829;--muted:#70777a;--accent:#286c67;--danger:#a14436;color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;min-width:0;max-width:100%;min-height:100%;overflow-x:hidden;background:#f7f8f5}
   .run-module *{box-sizing:border-box}.run-module button,.run-module textarea,.run-module select{font:inherit}.run-module button{cursor:pointer}
-  .run-layout{display:grid;grid-template-columns:300px minmax(0,1fr);min-height:100vh}.run-sidebar{position:sticky;top:0;height:100vh;overflow:auto;padding:16px;border-right:1px solid var(--line);background:#fbfbf8}
+  .run-layout{display:grid;grid-template-columns:300px minmax(0,1fr);min-height:100vh}.run-sidebar{position:sticky;top:0;height:100vh;overflow:auto;padding:16px;border-right:1px solid var(--line);background:#fbfbf8}.run-list-surface .run-sidebar{position:static;width:100%;height:auto;min-height:100%;border-right:0;background:transparent;padding:0 8px 12px}
   .run-status-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:3px;background:var(--soft);border:1px solid var(--line);border-radius:7px}.run-status-tab{border:0;border-radius:5px;padding:7px 4px;background:transparent;color:var(--muted)}.run-status-tab.active{background:var(--surface);color:var(--text);font-weight:700;box-shadow:0 1px 2px #0001}
-  .run-list{display:grid;gap:7px;margin-top:14px}.run-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;border:1px solid transparent;border-radius:7px}.run-card.active{border-color:#aec8c3;background:#e5f0ed}.run-card-main{border:0;background:transparent;text-align:left;padding:9px;min-width:0}.run-card-main b,.run-card-main span{display:block;overflow:hidden;text-overflow:ellipsis}.run-card-main span,.muted{color:var(--muted);font-size:12px}.run-card-action{align-self:center;margin-right:6px;border:1px solid var(--line);border-radius:5px;background:var(--surface);padding:5px 7px;color:var(--muted)}
-  .run-workspace,.run-workspace>*{min-width:0;max-width:100%}.run-workspace{padding:24px 30px 60px}.run-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}.run-title{margin:0;font-size:26px;min-width:0;overflow-wrap:anywhere}.run-subtitle{min-width:0;margin-top:5px;color:var(--muted);overflow-wrap:anywhere}.run-panel,.run-error,.run-step,.run-artifact{min-width:0;max-width:100%;overflow-wrap:anywhere;margin:12px 0;padding:15px;border:1px solid var(--line);border-radius:8px;background:var(--surface);box-shadow:0 1px 2px #0000000b}.run-error{border-left:4px solid var(--danger)}
-  .run-meta{display:flex;flex-wrap:wrap;gap:6px}.run-pill{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:2px 8px;background:var(--soft);color:var(--muted);font-size:11px}.run-pill.running{color:var(--accent);border-color:#a9c8c2}.run-pill.abandoned{color:#7b5a1e;background:#fff6db}.run-pill.done{color:#315f42;background:#e8f4ea}.run-meta-action{display:inline-flex;align-items:center;border:1px solid #bcc5c1;border-radius:6px;background:var(--surface);color:#485352;padding:5px 10px;font-size:12px;font-weight:600;box-shadow:0 1px 2px #00000012}.run-meta-action:hover{border-color:#829d98;background:#f5f8f6;color:#173f3c}.run-meta-action.primary{border-color:#79a9a1;background:#eef7f4;color:#1f625d}.run-meta-action:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .run-list{display:grid;gap:2px;margin-top:0}.run-list-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:19px 10px 10px}.run-list-header small{display:block;margin-bottom:4px;color:#82908d;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.run-list-header h2{margin:0;font-size:18px;line-height:1.3;letter-spacing:-.02em}.run-list-refresh{display:grid;width:32px;height:32px;place-items:center;border:0;border-radius:8px;background:transparent;color:var(--muted)}.run-list-refresh:hover{background:#f0f4f2;color:var(--accent)}.run-list-refresh img{width:17px;height:17px;opacity:.7}.run-card{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px;border:0;border-radius:10px;background:transparent}.run-card:hover{background:#f2f6f5}.run-card.active{border:0;background:#e1efed}.run-card-main{display:grid;grid-template-columns:34px minmax(0,1fr) 14px;align-items:start;gap:9px;border:0;background:transparent;text-align:left;padding:10px 9px;min-width:0}.run-card-icon{display:grid;width:34px;height:34px;place-items:center;border-radius:10px;background:#eef4f2;color:#5c7773}.run-card-main .run-card-icon{display:grid}.run-card-icon img{display:block;width:18px;height:18px;opacity:.72}.run-card.active .run-card-icon{background:#fff;color:var(--accent)}.run-card-copy{min-width:0}.run-card-main b,.run-card-main span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.run-card-main b{font-size:13px;line-height:1.35}.run-card-main span,.muted{color:var(--muted);font-size:10px;margin-top:3px}.run-card-caret{width:14px;height:14px;margin-top:8px;opacity:.55;transform:rotate(-90deg)}.run-card-action{align-self:center;margin-right:6px;border:1px solid var(--line);border-radius:6px;background:var(--surface);padding:4px 6px;color:var(--muted);font-size:10px;opacity:0}.run-card:hover .run-card-action,.run-card-action:focus{opacity:1}
+  .run-workspace,.run-workspace>*{min-width:0;max-width:100%}.run-workspace{width:100%;max-width:980px;margin:0 auto;padding:22px 28px 60px}.run-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin:0 0 14px;padding:19px 20px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 1px 2px rgba(20,47,42,.025)}.run-title{margin:0;font-size:22px;min-width:0;overflow-wrap:anywhere}.run-subtitle{min-width:0;margin-top:5px;color:var(--muted);overflow-wrap:anywhere}.run-panel,.run-error,.run-step,.run-artifact{min-width:0;max-width:100%;overflow-wrap:anywhere;margin:12px 0;padding:20px 22px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 1px 2px rgba(20,47,42,.025)}.run-error{border-left:4px solid var(--danger)}
+  .run-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.run-pill{display:inline-flex;min-height:30px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:0 11px;background:var(--soft);color:var(--muted);font-size:11px;line-height:1.2}.run-pill.running{color:var(--accent);border-color:#a9c8c2;background:#eef7f4}.run-pill.abandoned{color:#7b5a1e;background:#fff6db}.run-pill.done{color:#315f42;background:#e8f4ea}.run-meta-action{display:inline-flex;min-height:34px;align-items:center;border:1px solid #9eb2ae;border-radius:8px;background:var(--surface);color:#28534e;padding:0 13px;font-size:12px;font-weight:650;box-shadow:0 1px 2px #00000012}.run-meta-action:hover{border-color:#6f9790;background:#f1f7f5;color:#173f3c}.run-meta-action.primary{border-color:var(--accent);background:var(--accent);color:#fff}.run-meta-action.primary:hover{border-color:#1f5753;background:#1f5753;color:#fff}.run-meta-action:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .run-section-title{font-weight:750;margin:18px 0 7px}.run-flow{display:grid;gap:8px;min-width:0}.run-step.current{border-left:4px solid var(--accent)}.run-step h3,.run-artifact h3{min-width:0;margin:0 0 7px;font-size:15px;overflow-wrap:anywhere}.run-pre{max-width:100%;padding:11px;border-radius:6px;background:#f3f4f1;white-space:pre-wrap;overflow:auto;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,monospace}.artifact-review-artifact-content{min-width:0;max-width:100%;overflow-wrap:anywhere}.artifact-review-artifact-content table{display:block;max-width:100%;overflow:auto}.run-btn{border:1px solid var(--line);border-radius:6px;background:var(--surface);padding:7px 10px}.run-btn.primary{border-color:var(--accent);background:var(--accent);color:#fff}.run-btn.danger{color:var(--danger)}
   .artifact-review-modal,dialog.artifact-review-dialog{--surface:#fff;--soft:#f1f3ef;--line:#dce0da;--text:#242829;--muted:#70777a;--accent:#286c67;--danger:#a14436;color:var(--text);background:var(--surface);font:14px/1.45 ui-sans-serif,system-ui,sans-serif}
   .artifact-review-modal *,dialog.artifact-review-dialog *{box-sizing:border-box}
@@ -112,18 +114,45 @@ export default defineViewPlugin<RunConfig>({
     if (!ctx.router) throw new Error("Run View requires the router service");
     const navigate:Navigate=target=>ctx.router!.navigate(target);
     const routes: RunRoutes = {
-      index: ctx.router.register({ id: "index", path: "/tasks" }),
-      detail: ctx.router.register({ id: "detail", path: "/tasks/:runId" }),
-      review: ctx.router.register({ id: "artifact-review", path: "/tasks/:runId/artifact-reviews/:reviewId" })
+      index: ctx.router.register({ id: "index", path: "/tasks", query: ["status"] }),
+      detail: ctx.router.register({ id: "detail", path: "/tasks/:runId", query: ["status"] }),
+      review: ctx.router.register({ id: "artifact-review", path: "/tasks/:runId/artifact-reviews/:reviewId", query: ["status", "round", "material"] })
     };
     const runDetailCache = new Map<string, Json>();
-    const pageMount = createMount(config, routes, navigate, runDetailCache);
+    const publishSecondary = createRunSecondaryPublisher(ctx, config, routes);
+    const page = createRunPageMounts(config, routes, navigate, runDetailCache, publishSecondary);
+    ctx.lifecycle.own(page.dispose);
     ctx.slots.register(slots.navigationPrimary, {
       id: "run.navigation", order: 200,
-      value: { label: { text: tr(config, "run") }, icon: { kind: "system", name: "play" }, route: routes.index.to() }
+      value: { label: { text: tr(config, "run") }, icon: { kind: "system", name: "play-circle" }, route: routes.index.to() }
     });
-    registerPage(ctx, routes.index, "run.index", config, pageMount);
-    registerPage(ctx, routes.detail, "run.detail", config, pageMount);
+    registerPage(ctx, routes.index, "run.index", config, page);
+    registerPage(ctx, routes.detail, "run.detail", config, page);
+    registerRunSecondary(ctx, config, routes, routes.index, normalizedRunStatus(ctx.router.location.query.status));
+    registerRunSecondary(ctx, config, routes, routes.detail, normalizedRunStatus(ctx.router.location.query.status));
+    ctx.slots.register(slots.searchProviders, {
+      id: "run.search",
+      order: 200,
+      value: {
+        label: { text: tr(config, "run") },
+        icon: { kind: "system", name: "play-circle" },
+        async search({ query, signal }) {
+          const groups = await Promise.all(["running", "done", "abandoned"].map(async status => {
+            const response = await fetch(`/api/runs?${new URLSearchParams({ representation: "summary", status })}`, { signal });
+            if (!response.ok) throw new Error(await response.text());
+            return (await response.json() as { runs?: Json[] }).runs ?? [];
+          }));
+          const needle = query.trim().toLowerCase();
+          return groups.flat().filter(run => !needle || `${run.name ?? ""} ${run.id ?? ""}`.toLowerCase().includes(needle)).slice(0, 30).map(run => ({
+            title: { text: displayName(run) },
+            summary: { text: `${tr(config, String(run.status ?? "running"))} · ${shortId(String(run.id))}` },
+            type: { text: tr(config, "run") },
+            icon: { kind: "system" as const, name: "play-circle" },
+            route: routes.detail.to({ runId: String(run.id) }, { query: { status: String(run.status ?? "running") } })
+          }));
+        }
+      }
+    });
     ctx.slots.register(slots.overlay, {
       id: "run.review",
       key: routes.review.key,
@@ -131,7 +160,7 @@ export default defineViewPlugin<RunConfig>({
       value: {
         label: { text: tr(config, "review") },
         presentation: "dialog",
-        background: ctx.router.project({ from: routes.review, to: routes.detail, params: { runId: "runId" } }),
+        background: ctx.router.project({ from: routes.review, to: routes.detail, params: { runId: "runId" }, query: { status: "status" }, hash: "discard" }),
         mount: createMount(config, routes, navigate, runDetailCache, true)
       }
     });
@@ -186,7 +215,7 @@ function startRunHome(ctx: ViewPluginContext, config: Readonly<RunConfig>, route
             id: `run.${run.id}`, order: 200,
             value: {
               title: { text: String(run.name ?? run.id) },
-              summary: { text: tr(config, "running") }, icon: { kind: "system", name: "play" }, updatedAt: String(run.updatedAt ?? ""), route: target
+              summary: { text: tr(config, "running") }, icon: { kind: "system", name: "play-circle" }, updatedAt: String(run.updatedAt ?? ""), route: target
             }
           }));
         }
@@ -219,17 +248,213 @@ function startRunHome(ctx: ViewPluginContext, config: Readonly<RunConfig>, route
   });
 }
 
-function registerPage(ctx: ViewPluginContext, route: RouteToken, id: string, config: Readonly<RunConfig>, mount: RefreshableViewMount): void {
+type RunPageMounts = Readonly<{
+  list: RefreshableViewMount;
+  detail: RefreshableViewMount;
+  refresh(): Promise<void>;
+  dispose(): Promise<void>;
+}>;
+
+function registerPage(ctx: ViewPluginContext, route: RouteToken, id: string, config: Readonly<RunConfig>, page: RunPageMounts): void {
   ctx.slots.register(slots.headerTitle, {
     id: `${id}.header`, when: route.activation, value: { title: { text: tr(config, id === "run.review" ? "review" : "run") } }
   });
   ctx.slots.register(slots.mainView, {
-    id, key: route.key, when: route.activation, value: mount
+    id, key: route.key, when: route.activation, value: page.detail
+  });
+  ctx.slots.register(slots.contentList, {
+    id: `${id}.list`, when: route.activation, value: page.list
   });
   ctx.slots.register(slots.headerActions, {
     id: `${id}.refresh`, order: 100, when: route.activation,
-    value: { label: { text: tr(config, "refresh") }, run: () => mount.refresh() }
+    value: { label: { text: tr(config, "refresh") }, run: () => page.refresh() }
   });
+}
+
+function registerRunSecondary(
+  ctx: ViewPluginContext,
+  config: Readonly<RunConfig>,
+  routes: RunRoutes,
+  route: RouteToken,
+  selectedStatus: string
+): void {
+  const statusTarget = (status: string) => routes.index.to(undefined, { query: status === "running" ? {} : { status } });
+  ctx.slots.register(slots.navigationSecondary, {
+    id: `run.secondary.${route.key}`,
+    when: route.activation,
+    value: {
+      title: { text: tr(config, "run") },
+      icon: { kind: "system", name: "play-circle" },
+      items: ["running", "done", "abandoned"].map(status => ({
+        id: status,
+        label: { text: tr(config, status) },
+        icon: { kind: "system" as const, name: status === "running" ? "play-circle" : status === "done" ? "check-circle" : "archive" },
+        selected: selectedStatus === status,
+        route: statusTarget(status)
+      }))
+    }
+  });
+}
+
+type PublishedRunHeaderAction = Readonly<{
+  id: string;
+  order: number;
+  stateKey: string;
+  value: HeaderActionDescriptor;
+}>;
+
+function createRunSecondaryPublisher(ctx: ViewPluginContext, config: Readonly<RunConfig>, routes: RunRoutes): (
+  location: RouteLocation,
+  badges?: Readonly<Record<string, number>>,
+  heading?: HeaderTitleDescriptor,
+  actions?: readonly PublishedRunHeaderAction[]
+) => void {
+  let lastKey = "";
+  let dispose: Disposer | undefined;
+  let titleDispose: Disposer | undefined;
+  const actionLeases = new Map<string, { stateKey: string; dispose: Disposer }>();
+  ctx.lifecycle.own(() => {
+    for (const lease of actionLeases.values()) void lease.dispose();
+    actionLeases.clear();
+  });
+  return (location, badges = {}, heading, actions = []) => {
+    const selectedStatus = normalizedRunStatus(location.query.status);
+    const route = location.routeKey?.endsWith(":detail") || location.pathname.includes("/artifact-reviews/") ? routes.detail : routes.index;
+    const key = `${route.key}:${selectedStatus}:${JSON.stringify(badges)}:${JSON.stringify(heading ?? {})}:${actions.map(action => `${action.id}:${action.stateKey}`).join("|")}`;
+    if (key === lastKey) return;
+    lastKey = key;
+    const statusTarget = (status: string) => routes.index.to(undefined, { query: status === "running" ? {} : { status } });
+    const previous = dispose;
+    dispose = ctx.slots.upsert(slots.navigationSecondary, {
+      id: `run.secondary.${route.key}`,
+      when: route.activation,
+      value: {
+        title: { text: tr(config, "run") },
+        icon: { kind: "system", name: "play-circle" },
+        items: ["running", "done", "abandoned"].map(status => ({
+          id: status,
+          label: { text: tr(config, status) },
+          icon: { kind: "system" as const, name: status === "running" ? "play-circle" : status === "done" ? "check-circle" : "archive" },
+          badge: badges[status] ? { text: String(badges[status]) } : undefined,
+          selected: selectedStatus === status,
+          route: statusTarget(status)
+        }))
+      }
+    });
+    void previous?.();
+    const previousTitle = titleDispose;
+    titleDispose = ctx.slots.upsert(slots.headerTitle, {
+      id: `${route === routes.detail ? "run.detail" : "run.index"}.header`,
+      when: route.activation,
+      value: heading ?? { title: { text: tr(config, "run") } }
+    });
+    void previousTitle?.();
+    const keep = new Set(route === routes.detail ? actions.map(action => action.id) : []);
+    for (const [id, lease] of [...actionLeases]) {
+      if (keep.has(id)) continue;
+      actionLeases.delete(id);
+      void lease.dispose();
+    }
+    if (route !== routes.detail) return;
+    for (const action of actions) {
+      const previousAction = actionLeases.get(action.id);
+      if (previousAction?.stateKey === action.stateKey) continue;
+      const actionDispose = ctx.slots.upsert(slots.headerActions, {
+        id: `run.detail.${action.id}`,
+        order: action.order,
+        when: routes.detail.activation,
+        value: action.value
+      });
+      actionLeases.set(action.id, { stateKey: action.stateKey, dispose: actionDispose });
+      void previousAction?.dispose();
+    }
+  };
+}
+
+function createRunPageMounts(
+  config: Readonly<RunConfig>,
+  routes: RunRoutes,
+  navigate: Navigate,
+  runDetailCache: Map<string, Json>,
+  publishSecondary: (
+    location: RouteLocation,
+    badges?: Readonly<Record<string, number>>,
+    heading?: HeaderTitleDescriptor,
+    actions?: readonly PublishedRunHeaderAction[]
+  ) => void
+): RunPageMounts {
+  const controller = new AbortController();
+  let scratch: HTMLElement | undefined;
+  let portal: HTMLElement | undefined;
+  let app: RunApplication | undefined;
+  let start: Promise<void> | undefined;
+  let routeKey = "";
+  let update: Promise<void> | undefined;
+  const publish = (route: RouteLocation) => publishSecondary(
+    route.query.status ? route : Object.freeze({ ...route, query: Object.freeze({ ...route.query, status: app!.status }) }),
+    app!.secondaryBadges(),
+    app!.headerTitle(),
+    app!.headerActions()
+  );
+  const ensure = (route: RouteLocation) => {
+    scratch ??= document.createElement("div");
+    portal ??= document.createElement("div");
+    if (!app) {
+      app = new RunApplication(scratch, portal, config, routes, route, controller, navigate, runDetailCache, false);
+      routeKey = `${route.pathname}${route.search}${route.hash}`;
+    }
+    start ??= app.start();
+    return start;
+  };
+  const updateRoute = async (route: RouteLocation) => {
+    await ensure(route);
+    const key = `${route.pathname}${route.search}${route.hash}`;
+    if (key === routeKey) {
+      await update;
+      publish(route);
+      return;
+    }
+    routeKey = key;
+    update = app!.updateRoute(route).finally(() => { update = undefined; });
+    await update;
+    publish(route);
+  };
+  const makeMount = (surface: "list" | "detail"): RefreshableViewMount => ({
+    async mount({ element }, context) {
+      element.classList.add("run-module", `run-${surface}-surface`);
+      const style = document.createElement("style");
+      style.textContent = styles + runDetailStyles;
+      element.append(style);
+      await ensure(context.route);
+      app![surface === "list" ? "attachList" : "attachDetail"](element);
+      await updateRoute(context.route);
+      return () => {
+        app?.[surface === "list" ? "detachList" : "detachDetail"](element);
+        element.classList.remove("run-module", `run-${surface}-surface`);
+        element.replaceChildren();
+      };
+    },
+    update: context => updateRoute(context.route),
+    refresh: async () => {
+      await app?.refresh();
+      if (app) publish(app.location);
+    }
+  });
+  const list = makeMount("list");
+  const detail = makeMount("detail");
+  return {
+    list,
+    detail,
+    refresh: async () => {
+      await app?.refresh();
+      if (app) publish(app.location);
+    },
+    dispose: async () => {
+      controller.abort();
+      await app?.dispose();
+      app = undefined;
+    }
+  };
 }
 
 function createMount(config: Readonly<RunConfig>, routes: RunRoutes,navigate:Navigate, runDetailCache: Map<string, Json>, reviewOnly = false): RefreshableViewMount {
@@ -254,6 +479,7 @@ function createMount(config: Readonly<RunConfig>, routes: RunRoutes,navigate:Nav
 
 class RunApplication {
   readonly #root: HTMLElement; readonly #portal: HTMLElement; readonly #config: Readonly<RunConfig>;
+  #listRoot: HTMLElement | null = null; #detailRoot: HTMLElement | null = null;
   readonly #routes: RunRoutes; #route: RouteLocation; readonly #controller: AbortController;readonly #navigate:Navigate;
   #runs: Json[] = []; #detail: Json | null = null; #status = "running"; #poll = 0; #busy = false;
   #detailError = ""; #detailErrorRunId = "";
@@ -272,6 +498,49 @@ class RunApplication {
   #lastLoadChanged = true;
   constructor(root: HTMLElement, portal: HTMLElement, config: Readonly<RunConfig>, routes: RunRoutes, route: RouteLocation, controller: AbortController,navigate:Navigate,runDetailCache:Map<string,Json>,reviewOnly=false) {
     this.#root=root; this.#portal=portal; this.#config=config; this.#routes=routes; this.#route=route; this.#controller=controller;this.#navigate=navigate;this.#runDetailCache=runDetailCache;this.#reviewOnly=reviewOnly;
+    this.#status = normalizedRunStatus(route.query.status);
+  }
+  get status(): string { return this.#status; }
+  get location(): RouteLocation { return this.#route; }
+  secondaryBadges(): Readonly<Record<string, number>> {
+    return Object.fromEntries(["running", "done", "abandoned"].map(status => [status, this.#runs.filter(run => !run.archived && run.status === status).length]));
+  }
+  headerTitle(): HeaderTitleDescriptor {
+    if (!this.#detail) return { title: { text: tr(this.#config,"run") } };
+    return {
+      title: { text: displayName(this.#detail) },
+      subtitle: { text: `${tr(this.#config, String(this.#detail.status ?? "running"))} · ${String(this.#detail.id ?? "")}` },
+      breadcrumbs: [{ label: { text: tr(this.#config,"run") }, route: this.#routes.index.to(undefined, { query: this.#status === "running" ? {} : { status: this.#status } }) }]
+    };
+  }
+  headerActions(): readonly PublishedRunHeaderAction[] {
+    const run = this.#detail;
+    if (!run || this.#route.routeKey?.endsWith("artifact-review")) return [];
+    const actions: PublishedRunHeaderAction[] = [];
+    if (currentRunStep(run)) {
+      actions.push({
+        id: "jump-current",
+        order: 200,
+        stateKey: `jump:${String(run.id)}`,
+        value: {
+          label: { text: tr(this.#config, "jumpCurrent") },
+          run: () => this.#detailRoot?.querySelector<HTMLElement>('[data-current-task-step="true"]')?.scrollIntoView({ block: "center", behavior: "smooth" })
+        }
+      });
+    }
+    const review = run.artifactReview || run.artifactReviewSummaries?.find((item: Json) => item.status !== "passed");
+    if (review?.id) {
+      actions.push({
+        id: "review",
+        order: 300,
+        stateKey: `review:${String(run.id)}:${String(review.id)}:${review.round?.submitted ?? 0}:${review.round?.total ?? 0}`,
+        value: {
+          label: { text: `${tr(this.#config, "review")} ${review.round?.submitted ?? 0}/${review.round?.total ?? 0}` },
+          run: () => this.#openReview(String(run.id), String(review.id))
+        }
+      });
+    }
+    return actions;
   }
   async start(): Promise<void> {
     this.#renderLoading();
@@ -282,8 +551,12 @@ class RunApplication {
     if (this.#route.routeKey?.endsWith("artifact-review") && runId && this.#route.params.reviewId) {
       await this.#openReview(runId, this.#route.params.reviewId);
     }
-    this.#poll = window.setInterval(() => this.#scheduleActivityPoll(), 4000);
+    if (this.#reviewOnly) this.#poll = window.setInterval(() => this.#scheduleActivityPoll(), 4000);
   }
+  attachList(root: HTMLElement): void { this.#listRoot = root; this.#render(); }
+  detachList(root: HTMLElement): void { if (this.#listRoot === root) this.#listRoot = null; }
+  attachDetail(root: HTMLElement): void { this.#detailRoot = root; this.#render(); }
+  detachDetail(root: HTMLElement): void { if (this.#detailRoot === root) this.#detailRoot = null; }
   async #loadReviewRun(runId:string):Promise<void>{
     const cached=this.#runDetailCache.get(runId);
     if(cached){this.#detail=cached;return;}
@@ -291,9 +564,19 @@ class RunApplication {
     this.#detail=this.#rememberRun(payload.run);
   }
   async updateRoute(route: RouteLocation): Promise<void> {
+    const previousStatus = this.#status;
     this.#route = route;
     if (this.#reviewOnly) return;
+    this.#status = normalizedRunStatus(route.query.status);
     const runId = route.params.runId;
+    if (previousStatus !== this.#status) {
+      this.#detail = null;
+      this.#detailError = "";
+      this.#detailErrorRunId = "";
+      await this.#load(runId);
+      this.#render();
+      return;
+    }
     if (!runId) {
       this.#detail = null;
       this.#render();
@@ -420,6 +703,20 @@ class RunApplication {
   #render(): void {
     this.#root.querySelector(":scope > .run-loading")?.remove();
     this.#root.querySelector(".run-layout")?.remove();
+    if (this.#listRoot || this.#detailRoot) {
+      if (this.#listRoot) {
+        for (const child of [...this.#listRoot.children]) if (child.tagName !== "STYLE") child.remove();
+        const sidebar=document.createElement("aside"); sidebar.className="run-sidebar";
+        sidebar.append(this.#renderList());
+        this.#listRoot.append(sidebar);
+      }
+      if (this.#detailRoot) {
+        for (const child of [...this.#detailRoot.children]) if (child.tagName !== "STYLE") child.remove();
+        const main=document.createElement("main"); main.className="run-workspace"; main.append(this.#renderDetail());
+        this.#detailRoot.append(main);
+      }
+      return;
+    }
     const layout=document.createElement("div"); layout.className="run-layout";
     const sidebar=document.createElement("aside"); sidebar.className="run-sidebar";
     sidebar.append(this.#renderTabs(), this.#renderList());
@@ -436,16 +733,21 @@ class RunApplication {
   }
   async #selectStatus(status:string):Promise<void>{
     if(this.#status===status)return;
-    this.#status=status;this.#detail=null;this.#detailError="";this.#detailErrorRunId="";this.#render();
-    if(this.#route.params.runId)await this.#navigate(this.#routes.index.to());
-    await this.#load();this.#render();
+    await this.#navigate(this.#routes.index.to(undefined, { query: status === "running" ? {} : { status } }));
   }
   #visible(): Json[] { return this.#runs.filter(run=>!run.archived&&run.status===this.#status&&(!run.readOnly||run.id===this.#detail?.id)); }
   #renderList(): HTMLElement {
     const list=document.createElement("div"); list.className="run-list"; const runs=this.#visible();
+    const header=document.createElement("header");header.className="run-list-header";
+    const copy=document.createElement("div");const eyebrow=document.createElement("small");eyebrow.textContent=tr(this.#config,"run");const heading=document.createElement("h2");heading.textContent=tr(this.#config,this.#status);copy.append(eyebrow,heading);
+    const refresh=document.createElement("button");refresh.type="button";refresh.className="run-list-refresh";refresh.setAttribute("aria-label",this.#config.locale?.startsWith("en")?"Refresh list":"刷新列表");const refreshIcon=document.createElement("img");refreshIcon.src="/assets/system-icons/arrows-clockwise.svg";refreshIcon.alt="";refresh.append(refreshIcon);refresh.onclick=()=>void this.#refresh();header.append(copy,refresh);list.append(header);
     if(!runs.length){const empty=document.createElement("p");empty.className="muted";empty.textContent=tr(this.#config,"empty");list.append(empty);return list;}
     for(const run of runs){const card=document.createElement("article");card.className=`run-card${run.id===this.#detail?.id?" active":""}`;
-      const main=document.createElement("button");main.className="run-card-main";main.innerHTML=`<b></b><span></span>`;main.querySelector("b")!.textContent=displayName(run);main.querySelector("span")!.textContent=`${shortId(run.id)} · ${run.eventCount ?? 0}`;main.onclick=()=>void this.#select(run.id);
+      const main=document.createElement("button");main.className="run-card-main";
+      main.setAttribute("aria-label",displayName(run));
+      const icon=document.createElement("span");icon.className="run-card-icon";const iconImage=document.createElement("img");const active=run.id===this.#detail?.id;const iconName=run.status==="running"?"play-circle":run.status==="done"?"check-circle":"archive";iconImage.src=`/assets/system-icons/${iconName}${active&&iconName==="play-circle"?"-fill":""}.svg`;if(active){iconImage.style.opacity="1";iconImage.style.filter="invert(35%) sepia(18%) saturate(1345%) hue-rotate(119deg) brightness(88%) contrast(89%)";}iconImage.alt="";icon.append(iconImage);
+      const mainCopy=document.createElement("span");mainCopy.className="run-card-copy";const title=document.createElement("b");title.textContent=displayName(run);const meta=document.createElement("span");meta.textContent=`${shortId(run.id)} · ${run.eventCount ?? 0}`;mainCopy.append(title,meta);
+      const caret=document.createElement("img");caret.className="run-card-caret";caret.src="/assets/system-icons/caret-down.svg";caret.alt="";main.append(icon,mainCopy,caret);main.onclick=()=>void this.#select(run.id);
       card.append(main);
       if(!run.readOnly){const action=document.createElement("button");action.className="run-card-action";action.textContent=tr(this.#config,run.status==="running"?"abandon":"archive");action.onclick=event=>{event.stopPropagation();void(run.status==="running"?this.#abandon(run):this.#archive(run));};card.append(action);}
       list.append(card);}
@@ -455,7 +757,7 @@ class RunApplication {
     this.#busy=true;
     try {
       if (this.#route.params.runId !== id) {
-        await this.#navigate(this.#routes.detail.to({runId:id}));
+        await this.#navigate(this.#routes.detail.to({runId:id}, { query: this.#status === "running" ? {} : { status: this.#status } }));
         return;
       }
       try{const payload=await this.#request(`/api/runs/${encodeURIComponent(id)}`);this.#detail=this.#rememberRun(payload.run);this.#detailError="";this.#detailErrorRunId="";}
@@ -482,7 +784,7 @@ class RunApplication {
     this.#busy=true;
     try{
       if(!this.#route.routeKey?.endsWith("artifact-review")){
-        await this.#navigate(this.#routes.review.to({runId,reviewId}));
+        await this.#navigate(this.#routes.review.to({runId,reviewId}, { query: this.#status === "running" ? {} : { status: this.#status } }));
         return;
       }
       if(this.#controller.signal.aborted)return;
@@ -607,6 +909,7 @@ class RunApplication {
 }
 
 function tr(config: Readonly<RunConfig>, key: string): string { const candidate=config.messages?.[key];return typeof candidate==="string"?candidate:((config.locale||document.documentElement.lang).startsWith("en")?en:zh)[key]||key; }
+function normalizedRunStatus(value: unknown): string { return ["running", "done", "abandoned"].includes(String(value)) ? String(value) : "running"; }
 function displayName(run:Json):string{return String(run.name||run.procedureName||run.id||"");}function shortId(id:string):string{return String(id||"").replace(/^run-/,"").slice(0,18);}
 function formatTime(value:unknown):string{if(!value)return "—";const date=new Date(String(value));return Number.isNaN(date.valueOf())?String(value):date.toLocaleString();}
 function pill(text:string,kind=""):HTMLElement{const span=document.createElement("span");span.className=`run-pill ${kind}`;span.textContent=text;return span;}

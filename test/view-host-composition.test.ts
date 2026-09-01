@@ -285,6 +285,93 @@ test("Overlay preserves the active Page portal and disposes Overlay before Page"
   }, "/tasks/run-1");
 });
 
+test("Router query targets canonicalize allowlisted values and preserve browser history", async () => {
+  const instance: ViewHostBootInstance = {
+    ...bootInstance("org.memsphere.memory", "memory", "/memory.js", "/"),
+    routeGrants: [
+      { id: "index", path: "/items", query: ["filter"] },
+      { id: "detail", path: "/items/:id", query: ["filter"] }
+    ]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const index = context.router.register({ id: "index", path: "/items", query: ["filter"] });
+      const detail = context.router.register({ id: "detail", path: "/items/:id", query: ["filter"] });
+      context.slots.register(slots.navigationPrimary, { id: "detail", value: {
+        label: { text: "Open item" }, icon: { kind: "system", name: "next" },
+        route: detail.to({ id: "a/b" }, { query: { filter: "x y" }, hash: "anchor /" })
+      }});
+      const view = {
+        mount({ element }, renderContext) {
+          element.id = "query-view";
+          element.textContent = JSON.stringify(renderContext.route);
+        },
+        update(renderContext) { document.querySelector("#query-view").textContent = JSON.stringify(renderContext.route); }
+      };
+      context.slots.register(slots.mainView, { id: "index", key: index.key, value: view });
+      context.slots.register(slots.mainView, { id: "detail", key: detail.key, value: view });
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/memory.js", bundle]]), undefined, async page => {
+    await page.locator("#query-view").waitFor();
+    assert.equal(new URL(page.url()).search, "?filter=old");
+    assert.equal(new URL(page.url()).hash, "#keep");
+    assert.equal(JSON.parse(await page.locator("#query-view").textContent() ?? "{}").query.filter, "old");
+
+    await page.getByRole("button", { name: "Open item" }).click();
+    await page.waitForURL(/\/items\/a%2Fb\?filter=x\+y#anchor%20%2F$/);
+    const detailRoute = JSON.parse(await page.locator("#query-view").textContent() ?? "{}");
+    assert.deepEqual(detailRoute.query, { filter: "x y" });
+
+    await page.goBack();
+    await page.waitForURL(/\/items\?filter=old#keep$/);
+  }, "/items?filter=old&unknown=gone#keep");
+});
+
+test("Overlay projection maps only declared query and Host dismissal replaces the deep link", async () => {
+  const instance: ViewHostBootInstance = {
+    ...bootInstance("org.memsphere.run", "run", "/run.js", "/"),
+    routeGrants: [
+      { id: "detail", path: "/tasks/:runId", query: ["status"] },
+      { id: "review", path: "/tasks/:runId/artifact-reviews/:reviewId", query: ["status", "round", "material"] }
+    ]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const detail = context.router.register({ id: "detail", path: "/tasks/:runId", query: ["status"] });
+      const review = context.router.register({ id: "review", path: "/tasks/:runId/artifact-reviews/:reviewId", query: ["status", "round", "material"] });
+      context.slots.register(slots.mainView, { id: "detail", key: detail.key, value: {
+        mount({ element }, renderContext) {
+          element.id = "projected-detail";
+          element.textContent = JSON.stringify(renderContext.route);
+        }
+      }});
+      context.slots.register(slots.overlay, { id: "review", key: review.key, value: {
+        label: { text: "Review" }, presentation: "dialog",
+        background: context.router.project({
+          from: review, to: detail, params: { runId: "runId" }, query: { status: "status" }, hash: "discard"
+        }),
+        mount: { mount({ element }) { element.innerHTML = '<p id="projected-overlay">Review</p>'; } }
+      }});
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/run.js", bundle]]), undefined, async page => {
+    await page.locator("#projected-overlay").waitFor();
+    const beforeLength = await page.evaluate(() => history.length);
+    const background = JSON.parse(await page.locator("#projected-detail").textContent() ?? "{}");
+    assert.deepEqual(background.query, { status: "done" });
+    assert.equal(background.hash, "");
+    assert.equal(background.projected, true);
+    assert.equal(new URL(page.url()).search, "?status=done&round=2&material=report");
+
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.waitForURL(/\/tasks\/run-1\?status=done$/);
+    assert.equal(await page.evaluate(() => history.length), beforeLength);
+  }, "/tasks/run-1/artifact-reviews/review-1?status=done&round=2&material=report&unknown=gone#comment");
+});
+
 test("built-in Route grants reject an unapproved path before composition", async () => {
   const instances: ViewHostBootInstance[] = [{
     ...bootInstance("org.memsphere.memory", "memory", "/memory.js", "/"),
@@ -330,6 +417,144 @@ test("shared main.view conflicts roll back the later instance and cleanup is rev
       "first:apply", "second:apply", "second:rollback", "first:mount", "first:unmount", "first:dispose"
     ]);
   });
+});
+
+test("content.list keeps one Mount and local state across detail, query, and Overlay routes", async () => {
+  const run = bootInstance("org.memsphere.run", "run", "/run.js", "/");
+  const instances: ViewHostBootInstance[] = [{
+    ...run,
+    routeGrants: [
+      { id: "index", path: "/tasks", query: ["status"] },
+      { id: "detail", path: "/tasks/:runId", query: ["status"] },
+      { id: "review", path: "/tasks/:runId/reviews/:reviewId", query: ["status", "round"] }
+    ]
+  }];
+  const bundles = new Map([["/run.js", `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const index = context.router.register({ id: "index", path: "/tasks", query: ["status"] });
+      const detail = context.router.register({ id: "detail", path: "/tasks/:runId", query: ["status"] });
+      const review = context.router.register({ id: "review", path: "/tasks/:runId/reviews/:reviewId", query: ["status", "round"] });
+      window.__listLifecycle = { mounts: 0, updates: 0, disposes: 0 };
+      let listElement;
+      const listMount = {
+        mount({ element }, renderContext) {
+          window.__listLifecycle.mounts += 1;
+          listElement = element;
+          element.innerHTML = '<input id="list-filter"><button id="open-detail">Run 1</button>';
+          element.dataset.route = renderContext.route.pathname + renderContext.route.search;
+          element.querySelector('#open-detail').onclick = () => context.router.navigate(detail.to({ runId: "run-1" }, { query: { status: "running" } }));
+          return () => { window.__listLifecycle.disposes += 1; };
+        },
+        update(renderContext) {
+          window.__listLifecycle.updates += 1;
+          listElement.dataset.route = renderContext.route.pathname + renderContext.route.search;
+        }
+      };
+      for (const [id, route] of [["index", index], ["detail", detail]]) {
+        context.slots.register(slots.contentList, { id: "list." + id, when: route.activation, value: listMount });
+      }
+      context.slots.register(slots.mainView, { id: "index", key: index.key, when: index.activation, value: {
+        mount({ element }) { element.innerHTML = '<p id="run-index">Runs</p>'; }
+      }});
+      context.slots.register(slots.mainView, { id: "detail", key: detail.key, when: detail.activation, value: {
+        mount({ element }) {
+          element.innerHTML = '<p id="run-detail">Run detail</p><button id="open-review">Review</button>';
+          element.querySelector('#open-review').onclick = () => context.router.navigate(review.to(
+            { runId: "run-1", reviewId: "review-1" }, { query: { status: "running", round: "2" } }
+          ));
+        }
+      }});
+      context.slots.register(slots.overlay, { id: "review", key: review.key, when: review.activation, value: {
+        label: { text: "Review" }, presentation: "dialog",
+        background: context.router.project({ from: review, to: detail, params: { runId: "runId" }, query: { status: "status" } }),
+        mount: { mount({ element }) { element.innerHTML = '<p id="review-body">Review body</p>'; } }
+      }});
+    }};
+  `]]);
+
+  await withPage(renderViewHostHtml("en", instances), bundles, undefined, async page => {
+    await page.locator("#list-filter").fill("keep me");
+    await page.locator("#open-detail").click();
+    await page.locator("#run-detail").waitFor();
+    assert.equal(await page.locator("#list-filter").inputValue(), "keep me");
+    await page.locator("#open-review").click();
+    await page.locator("#review-body").waitFor();
+    assert.equal(await page.locator("#list-filter").inputValue(), "keep me");
+    await page.locator(".view-overlay-close").click();
+    await page.locator("#review-body").waitFor({ state: "detached" });
+    assert.equal(await page.locator("#list-filter").inputValue(), "keep me");
+    const lifecycle = await page.evaluate(() => (window as Window & {
+      __listLifecycle: { mounts: number; updates: number; disposes: number };
+    }).__listLifecycle);
+    assert.equal(lifecycle.mounts, 1);
+    assert.ok(lifecycle.updates >= 1);
+    assert.equal(lifecycle.disposes, 0);
+  }, "/tasks?status=running");
+});
+
+test("global search filters Providers and isolates aborted or stale queries", async () => {
+  const memory = bootInstance("org.memsphere.memory", "memory", "/memory.js", "/");
+  const instances: ViewHostBootInstance[] = [{
+    ...memory,
+    routeGrants: [{ id: "index", path: "/memories" }]
+  }];
+  const bundles = new Map([["/memory.js", `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const index = context.router.register({ id: "index", path: "/memories" });
+      window.__searchState = { queries: [], aborts: 0 };
+      context.slots.register(slots.navigationPrimary, { id: "memory", value: {
+        label: { text: "Memory" }, icon: { kind: "system", name: "memory" }, route: index.to()
+      }});
+      context.slots.register(slots.mainView, { id: "index", key: index.key, value: { mount({ element }) {
+        element.innerHTML = '<label>Business <input id="business-input"></label>';
+      }}});
+      context.slots.register(slots.searchProviders, { id: "memory-search", value: {
+        label: { text: "Memory" }, icon: { kind: "system", name: "memory" },
+        search({ query, signal }) {
+          window.__searchState.queries.push(query);
+          return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+              if (query === "failure") { reject(new Error("provider failed")); return; }
+              resolve([{ title: { text: query }, summary: { text: "result" }, type: { text: "Memory" }, route: index.to() }]);
+            }, query === "old" ? 400 : 20);
+            signal.addEventListener("abort", () => {
+              clearTimeout(timer);
+              window.__searchState.aborts += 1;
+              reject(new DOMException("aborted", "AbortError"));
+            }, { once: true });
+          });
+        }
+      }});
+    }};
+  `]]);
+
+  await withPage(renderViewHostHtml("en", instances), bundles, undefined, async page => {
+    await page.locator("#business-input").waitFor();
+    await page.locator("[data-view-search-trigger]").focus();
+    await page.keyboard.press("Control+K");
+    await page.locator("[data-view-search-input]").waitFor();
+    assert.equal(await page.locator("[data-view-search-input]").evaluate(element => element === document.activeElement), true);
+    assert.deepEqual(await page.locator('[data-view-slot="search.providers"] button').allTextContents(), ["All", "Memory"]);
+    await page.locator('[data-view-slot="search.providers"] button', { hasText: "Memory" }).click();
+    await page.locator("[data-view-search-input]").fill("old");
+    await page.waitForTimeout(230);
+    await page.locator("[data-view-search-input]").fill("new");
+    await page.getByRole("button", { name: /new/ }).waitFor();
+    assert.equal(await page.locator(".view-shell-search-provider-error").count(), 0);
+    assert.equal(await page.getByRole("button", { name: /old/ }).count(), 0);
+    assert.ok(await page.evaluate(() => (window as Window & { __searchState: { aborts: number } }).__searchState.aborts) >= 1);
+    await page.locator("[data-view-search-input]").fill("failure");
+    await page.locator(".view-shell-search-provider-error").waitFor();
+    assert.match(await page.locator(".view-shell-search-provider-error").innerText(), /provider failed/);
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("[data-view-search-overlay]").isHidden(), true);
+    assert.equal(await page.locator("[data-view-search-trigger]").evaluate(element => element === document.activeElement), true);
+    await page.locator("#business-input").focus();
+    await page.keyboard.press("Control+K");
+    assert.equal(await page.locator("[data-view-search-overlay]").isHidden(), true);
+  }, "/memories");
 });
 
 function bootInstance(

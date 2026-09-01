@@ -21,6 +21,9 @@
 | `header.actions` | View Host | 当前激活的内置或用户 Module | 有序列表 | 与当前页面直接相关的搜索、创建等操作。没有明确高频操作时可以为空。 |
 | `header.account` | View Host | 仅 Memsphere Core | 单一内容 | 当前 Human 身份、登录状态与账户菜单。Module 可以读取授权后的身份上下文，但不能替换该区域。 |
 | `navigation.primary` | View Host | Memsphere Core、已启用的内置及用户 Module | 有序列表 | 产品的统一主导航。Home、Memory、Run 与用户 Module View 在同一层级展示，不按代码来源分组。 |
+| `navigation.secondary` | View Host | 当前激活的内置或用户 Module | 单一内容 | 当前 Module 的二级导航、分组与计数。Host 统一渲染选中态；没有二级结构时可以为空。 |
+| `content.list` | View Host | 当前激活的内置或用户 Module | 单一挂载内容 | 可选的对象列表、筛选与列表级操作。贡献存在时，它与详情 Page 独立滚动并在同一 Module 路由间保持挂载；没有贡献时，Host 自动收起这一列。 |
+| `search.providers` | View Host Search | 已启用的内置及用户 Module | 有序列表 | 全局搜索的数据提供者。Host 统一提供搜索入口、浮层、分类、键盘交互、取消、故障隔离和结果导航。 |
 | `sidebar.footer` | View Host | Memsphere Core、已启用的 Module | 有序列表 | 低频操作和持续状态。条目分为 `action` 与 `status` 两种标准类型；设置和核心服务状态由 Core 提供且不能被删除或替换。 |
 | `home.attention` | Home View | 内置及用户 Module | 聚合列表 | 正在等待 Human 介入的事项，例如评审、确认、失败处理。事项完成后应从该区域消失。 |
 | `home.continue` | Home View | Memsphere Core、内置及用户 Module | 聚合列表 | 最近访问或尚未完成工作的快捷入口，不表达必须处理的压力。与 `home.attention` 重复时优先在后者展示。 |
@@ -28,11 +31,11 @@
 | `main.view` | View Host | 内置及用户 Module | 按路由 key 选择 | 页面主体。可以注册多个 View，但一次只挂载当前路由选中的一个；Module 可以在自己的 View 内继续声明子 Slot。 |
 | `overlay` | View Host | Memsphere Core、内置及用户 Module | 按浮层 key 选择 | 抽屉、对话框和评审浮窗等临时交互。可以注册多个浮层，但控制器同一时刻只激活一个；View Host 负责遮罩、焦点、关闭行为和故障隔离。 |
 
-当前 Catalog 定义 10 个长期 Slot。新增 Slot 时直接更新本列表。
+当前 Catalog 定义 13 个长期 Slot。新增 Slot 时直接更新本列表。
 
 ## 当前实现状态
 
-当前 SDK 与 ViewHost 已接线本 Catalog 的全部 10 个根 Slot。Core 通过 Host 内置 Plugin 提供 Home、账户、设置与服务状态；三个 builtin Module 通过同一公开 Slot Tree 贡献导航、Header、Page 与 Home 聚合项。Artifact Review 已由 Run Module 注册到 `overlay`，Host 负责背景 Route、遮罩、焦点、关闭、清理与局部故障边界。
+当前 SDK 与 ViewHost 已接线本 Catalog 的全部 13 个根 Slot。Core 通过 Host 内置 Plugin 提供 Home、账户等 Shell 内容；三个 builtin Module 通过同一公开 Slot Tree 贡献主导航、二级导航、对象列表、Header、Page、搜索 Provider 与 Home 聚合项。Shell 使用可拖动且持久化的二级导航栏和内容列表栏；Run 普通页面不轮询，Artifact Review 由 Run Module 注册到 `overlay`，Host 负责背景 Route、遮罩、焦点、关闭、清理与局部故障边界。
 
 自定义子 Slot、用户 Module 发现/安装及 Project 动态组合仍未接线。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
 
@@ -44,6 +47,10 @@ View Host
 ├── header.actions
 ├── header.account
 ├── navigation.primary
+├── navigation.secondary
+├── content.list
+├── Search View
+│   └── search.providers
 ├── sidebar.footer
 ├── Home View
 │   ├── home.attention
@@ -63,6 +70,8 @@ View Host
 - `header.actions`
 - `header.account`
 - `navigation.primary`
+- `navigation.secondary`
+- `search.providers`
 - `sidebar.footer`
 - `home.attention`
 - `home.continue`
@@ -70,15 +79,15 @@ View Host
 
 标准描述至少应包含稳定标识、展示文本、目标或回调、来源 Module 实例和可用状态。不同 Slot 可以在 View SDK 中补充各自字段，例如待处理事项的紧急程度和状态、导航项的图标和路由、Footer 条目的 `action/status` 类型。
 
-`main.view` 与 `overlay` 是按 key 选择的界面挂载 Slot。Module 可以独立编译自己的浏览器 Bundle，并通过框架无关的 View SDK 挂载界面；它不能要求与 Memsphere 联合编译。
+`content.list` 是单一挂载 Slot，`main.view` 与 `overlay` 是按 key 选择的挂载 Slot。Module 可以独立编译自己的浏览器 Bundle，并通过框架无关的 View SDK 挂载界面；它不能要求与 Memsphere 联合编译。
 
 ## 组合与权限
 
 ### 当前页面上下文
 
-`header.title` 和 `header.actions` 只接收当前激活 View 的贡献。页面 Mount 可以随当前内容更新标题右侧的页面级操作；页面离开后，对应贡献随页面卸载，不保留为全局操作。
+`header.title` 和 `header.actions` 只接收当前激活 View 的贡献。页面 Mount 可以随已加载内容更新当前对象标题和标题右侧的页面级操作；页面离开后，对应贡献随页面卸载，不保留为全局内容。
 
-`navigation.primary`、`sidebar.footer` 和三个 Home Slot 根据当前 Project 的 Module 组合生成。切换 Project 时允许 View 整体重启并重新组装。
+`navigation.primary`、`search.providers`、`sidebar.footer` 和三个 Home Slot 根据当前 Project 的 Module 组合生成。`navigation.secondary` 与 `content.list` 只显示当前激活 Module 的贡献；Module 没有对象列表时不应为满足布局而注册空的 `content.list`，Host 会把详情区扩展到空出的列。切换 Project 时允许 View 整体重启并重新组装。
 
 ### 统一导航
 
@@ -100,6 +109,7 @@ Module 不能覆盖相同稳定标识，也不能通过排序把 Core 保留内�
 
 - Memsphere 品牌标识；
 - Project 切换器；
+- 全局搜索按钮及搜索浮层外壳；
 - 主页引导标题，例如“今天有什么需要处理？”；
 - Shell 的整体布局、主题基础与故障诊断界面。
 

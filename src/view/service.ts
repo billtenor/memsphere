@@ -18,7 +18,7 @@ const viewServiceStateSchema = z.object({
   port: z.number().int().min(0).max(65535),
   startedAt: z.string().min(1),
   configPath: z.string().min(1),
-  settingsToken: z.string().min(32).optional()
+  settingsToken: z.string().min(1).optional()
 });
 
 export type ViewServiceState = z.infer<typeof viewServiceStateSchema>;

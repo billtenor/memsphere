@@ -61,13 +61,13 @@ test("Settings Builtin Mount loads both scopes and validates an edited global dr
     const pageErrors: string[] = [];
     page.on("pageerror", error => pageErrors.push(error.message));
     await page.goto(`http://127.0.0.1:${port}/settings/overview`);
-    await page.getByRole("heading", { name: "Memsphere 设置", exact: true }).waitFor({ timeout: 5_000 }).catch(async error => {
+    await page.locator("#settings-status").waitFor({ timeout: 5_000 }).catch(async error => {
       throw new Error(`${String(error)}\npage errors: ${pageErrors.join(" | ")}\nbody: ${(await page.locator("body").innerText()).slice(0, 2_000)}`);
     });
     assert.match(await page.locator("#settings-status").textContent() ?? "", /没有未保存修改/);
-    await page.getByRole("button", { name: "常规", exact: true }).click();
+    await page.getByRole("button", { name: "通用设置", exact: true }).click();
     await page.waitForURL("**/settings/general");
-    await page.locator('.settings-nav-item[data-section="general"][aria-current="page"]').waitFor();
+    await page.getByRole("button", { name: "通用设置", exact: true }).waitFor();
     await page.evaluate(() => {
       document.body.style.minHeight = "2000px";
       scrollTo(0, 600);
@@ -75,11 +75,11 @@ test("Settings Builtin Mount loads both scopes and validates an edited global dr
     assert(await page.evaluate(() => scrollY > 0));
     await page.getByRole("button", { name: "界面服务", exact: true }).click();
     await page.waitForURL("**/settings/view");
-    await page.locator('.settings-nav-item[data-section="view"][aria-current="page"]').waitFor();
+    await page.getByRole("button", { name: "界面服务", exact: true }).waitFor();
     assert.equal(await page.evaluate(() => scrollY), 0);
-    await page.getByRole("button", { name: "常规", exact: true }).click();
+    await page.getByRole("button", { name: "通用设置", exact: true }).click();
     await page.waitForURL("**/settings/general");
-    await page.locator('.settings-nav-item[data-section="general"][aria-current="page"]').waitFor();
+    await page.getByRole("button", { name: "通用设置", exact: true }).waitFor();
     const language = page.getByRole("combobox", { name: "工作语言", exact: true });
     await language.click();
     await page.getByRole("option", { name: "English", exact: true }).click();
@@ -96,7 +96,13 @@ test("Settings Builtin Mount loads both scopes and validates an edited global dr
 });
 
 function harness(): string {
-  return `<!doctype html><html><body><main id="root"></main>
+  return `<!doctype html><html><body><div data-view-shell>
+    <nav data-view-slot="navigation.primary"></nav><nav data-view-slot="navigation.secondary"></nav>
+    <aside data-view-slot="content.list"></aside><header data-view-slot="header.title"></header>
+    <div data-view-slot="header.actions"></div><div data-view-slot="header.account"></div>
+    <div data-view-slot="sidebar.footer"></div><main id="root" data-view-slot="main.view"></main>
+    <div data-view-slot="overlay"></div><div data-view-slot="search.providers"></div>
+  </div>
     <script type="importmap">{"imports":{"@memsphere/view-sdk":"/assets/view-sdk.js"}}</script>
     <script type="module">
       import { startViewHost } from "/assets/view-runtime.js";

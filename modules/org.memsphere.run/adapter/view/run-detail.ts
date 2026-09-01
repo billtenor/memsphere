@@ -20,18 +20,7 @@ export function createRunDetailState(): RunDetailState {
 export function renderRunDetail(run: Json, options: RunDetailOptions): HTMLElement {
   const wrap = document.createElement("div");
   const labels = createLabels(options.locale);
-  const head = document.createElement("header");
-  head.className = "run-head";
-  const heading = document.createElement("div");
-  const title = document.createElement("h1");
-  title.className = "run-title";
-  title.textContent = displayName(run);
-  const subtitle = document.createElement("div");
-  subtitle.className = "run-subtitle";
-  subtitle.textContent = run.id;
-  heading.append(title, subtitle);
-  head.append(heading);
-  wrap.append(head, renderRunMeta(run, options, labels));
+  wrap.append(renderRunMeta(run, options, labels));
 
   const assertTrees = activeProcedureAssertTrees(run);
   if (assertTrees.length) {
@@ -79,21 +68,6 @@ function renderRunMeta(run: Json, options: RunDetailOptions, labels: Labels): HT
     meta.append(pill(`${labels.abandonedAt}: ${formatTime(run.abandonment.abandonedAt)}`, "abandoned"));
     if (run.abandonment.reason) meta.append(pill(String(run.abandonment.reason), "abandoned"));
   }
-  const review = run.artifactReview || run.artifactReviewSummaries?.find((item: Json) => item.status !== "passed");
-  if (review?.id) {
-    const control = button(`${labels.review} ${review.round?.submitted ?? 0}/${review.round?.total ?? 0}`, "run-meta-action primary");
-    control.id = "review-toggle";
-    control.setAttribute("aria-controls", "artifact-review-modal");
-    control.dataset.artifactReviewId = review.id;
-    control.onclick = () => void options.openReview(run.id, review.id);
-    meta.append(control);
-  }
-  const active = currentRunStep(run);
-  if (active) {
-    const jump = button(labels.jumpCurrent, "run-meta-action current-step-jump");
-    jump.onclick = () => document.querySelector(`[data-current-task-step="true"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
-    meta.append(jump);
-  }
   return meta;
 }
 
@@ -104,8 +78,15 @@ function renderBindings(run: Json, options: RunDetailOptions, labels: Labels): H
   const panel = document.createElement("section");
   panel.className = "run-panel run-bindings";
   const expanded = options.state.expandedBindings.has(run.id);
-  const toggle = button(labels.bindings, "run-binding-toggle");
+  const toggle = button("", "run-binding-toggle");
   toggle.setAttribute("aria-expanded", String(expanded));
+  const toggleLabel = document.createElement("span");
+  toggleLabel.textContent = labels.bindings;
+  const toggleCaret = document.createElement("img");
+  toggleCaret.className = "run-binding-caret";
+  toggleCaret.src = "/assets/system-icons/caret-down.svg";
+  toggleCaret.alt = "";
+  toggle.append(toggleLabel, toggleCaret);
   const body = document.createElement("div");
   body.className = "run-binding-body";
   body.hidden = !expanded;

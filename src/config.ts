@@ -27,6 +27,7 @@ export type MemsphereConfig = {
   view: {
     host: string;
     port: number;
+    operatorToken?: string;
   };
   project?: {
     name: string;
@@ -68,7 +69,8 @@ export const globalConfigSchema = z.object({
   acp_providers: acpProviderConfigSchema.optional(),
   view: z.object({
     host: z.string().min(1),
-    port: z.number().int().min(0).max(65535)
+    port: z.number().int().min(0).max(65535),
+    operator_token: z.string().min(1).optional()
   }).strict().optional(),
   debug: z.object({ agent_review: z.boolean().optional() }).strict().optional()
 }).strict();
@@ -108,7 +110,13 @@ async function readProjectExecutionConfig(options: {
       ? resolveProjectControlPlane(context.primary.config.control_plane, global.acp_providers)
       : undefined,
     debug: { agentReview: global.debug?.agent_review ?? false, root: join(homePaths(home).runtimeRoot, "debug") },
-    view: global.view ?? { host: "127.0.0.1", port: 0 },
+    view: global.view
+      ? {
+        host: global.view.host,
+        port: global.view.port,
+        ...(global.view.operator_token ? { operatorToken: global.view.operator_token } : {})
+      }
+      : { host: "127.0.0.1", port: 0 },
     project: { name: context.primary.name, revision, store: context.primary.config.store, mounted }
   };
 }

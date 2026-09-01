@@ -13,6 +13,7 @@ import {
   validateGlobalConfigDraft,
   validateProjectConfigDraft,
   writeGlobalConfigDraft,
+  writeGlobalOperatorToken,
   writeProjectConfigDraft
 } from "../src/config-management.js";
 
@@ -82,6 +83,35 @@ test("global and Project config documents have independent revisions and drafts"
     assert.notEqual(fixture.globalDocument.revision, fixture.projectDocument.revision);
     assert.equal(editableGlobalConfigDraft(fixture.globalDocument).language, "zh-CN");
     assert.equal(editableProjectConfigDraft(fixture.projectDocument).control_plane?.actors.human?.name, "Architect");
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("fixed View operator token stays secret and survives ordinary Settings saves", async () => {
+  const fixture = await fixtureConfig();
+  try {
+    const configuredToken = "1";
+    const configured = await writeGlobalOperatorToken({
+      document: fixture.globalDocument,
+      expectedRevision: fixture.globalDocument.revision,
+      token: configuredToken
+    });
+    assert.equal(configured.raw.view?.operator_token, configuredToken);
+    assert.deepEqual(editableGlobalConfigDraft(configured).view, { host: "127.0.0.1", port: 30002 });
+
+    const saved = await writeGlobalConfigDraft({
+      document: configured,
+      expectedRevision: configured.revision,
+      draft: { ...editableGlobalConfigDraft(configured), language: "en" }
+    });
+    assert.equal(saved.raw.view?.operator_token, configuredToken);
+
+    const cleared = await writeGlobalOperatorToken({
+      document: saved,
+      expectedRevision: saved.revision
+    });
+    assert.equal(cleared.raw.view?.operator_token, undefined);
   } finally {
     await rm(fixture.dir, { recursive: true, force: true });
   }
