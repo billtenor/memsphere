@@ -3,6 +3,7 @@ import {
   slots,
   type Disposer,
   type HeaderActionDescriptor,
+  type HeaderTitleDescriptor,
   type RouteLocation,
   type RouteTarget,
   type TextRef,
@@ -39,6 +40,8 @@ const hideSystemMemoriesKey = "memsphere.hideSystemMemories.v1";
 const changeActorSelectionKey = "memsphere.changeActorSelection.v1";
 const changeBrowserIdentityKey = "memsphere.changeBrowserIdentity.v1";
 const changeCommentsCollapsedKey = "memsphere.changeCommentsCollapsed.v1";
+const recentMemoriesKey = "memsphere.memory.recent.v1";
+const recentMemoryLimit = 24;
 
 const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
   "navigation.memory": "记忆",
@@ -46,23 +49,28 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
   "navigation.settings": "设置",
   "navigation.currentProject": "当前项目",
   "navigation.memoryMarket": "记忆市场",
-  "navigation.backToMemory": "返回记忆",
   "common.loading": "加载中…",
   "common.retry": "重试",
   "common.archive": "归档",
   "common.abandon": "废弃",
   "memory.search": "搜索记忆",
+  "memory.recent": "最近使用",
+  "memory.recentSearch": "搜索最近使用",
+  "memory.recentEmpty": "还没有最近使用的记忆。打开一条记忆后，它会出现在这里。",
   "memory.visibleCount": "共 {count} 条",
   "memory.marketItemCount": "共 {count} 项",
   "memory.empty": "没有可展示的记忆。",
   "memory.select": "选择一条记忆查看详情。",
   "memory.edit": "修改",
-  "memory.editConfirm": "创建一个 ChangeSet 来修改这条记忆？",
+  "memory.createChange": "创建变更",
+  "memory.active": "已生效",
+  "memory.editConfirm": "创建一个记忆变更来修改这条记忆？",
   "memory.invalidYaml": "记忆 YAML 无效",
   "memory.hideSystem": "隐藏系统记忆",
-  "memory.otherChangeSets": "其他 ChangeSet（{count}）",
+  "memory.otherChangeSets": "其他记忆变更（{count}）",
   "memory.relatedChangeSets": "修改中（{count}）",
   "market.empty": "记忆市场中没有可用内容。",
+  "market.search": "搜索记忆市场",
   "market.import": "导入",
   "market.reimport": "重新导入",
   "market.notImported": "未导入",
@@ -70,10 +78,11 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
   "market.consistent": "已同步",
   "market.different": "有更新",
   "market.nameConflict": "名称冲突",
-  "market.viewChangeSet": "查看 ChangeSet",
-  "change.title": "ChangeSet",
-  "change.select": "选择一个 ChangeSet。",
-  "change.empty": "没有 ChangeSet。",
+  "market.viewChangeSet": "查看记忆变更",
+  "change.title": "记忆变更",
+  "change.select": "选择一个记忆变更。",
+  "change.search": "搜索记忆变更",
+  "change.empty": "没有记忆变更。",
   "change.comments": "评论",
   "change.noComments": "还没有评论。",
   "change.addComment": "添加评论",
@@ -129,12 +138,15 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
 });
 
 const englishFallbackMessages: Readonly<Record<string, string>> = Object.freeze({
+  "memory.active": "Active",
   "memory.visibleCount": "{count} total", "memory.marketItemCount": "{count} items",
   type: "Type", optional: "Optional", fields: "Fields", item: "Item", items: "Candidates",
   layout: "Layout", min: "Minimum", max: "Maximum", string: "Short text", boolean: "Boolean",
   number: "Number", markdown: "Document", effectiveRuleCount: "effective rules",
   referenceNotFound: "Reference not found", "change.sourceUnavailable": "Source workspace unavailable",
   "memory.invalidYaml": "Invalid Memory YAML", "change.draftPreview": "Draft preview",
+  "memory.recentSearch": "Search recently used", "memory.recentEmpty": "No recently used Memory yet. Open one and it will appear here.",
+  "market.search": "Search Memory Market", "change.search": "Search ChangeSets",
   "change.store": "Store: {value}", "change.validationFailed": "Validation failed",
   names: "Names", defines: "Defines", asserts: "Required rules", suggests: "Suggested rules",
   goals: "Goals", flow: "Flow", format: "Format", repeat: "Repeat", unbounded: "Unbounded",
@@ -148,6 +160,9 @@ const memoryStyles = `
   .memory-module button,.memory-module input,.memory-module textarea { font:inherit; }
   .memory-module button { cursor:pointer; }
   .memory-layout { display:grid; grid-template-columns:300px minmax(0,1fr); min-height:calc(100vh - 82px); }
+  .memory-list-surface .memory-module,.memory-detail-surface .memory-module { min-height:100%; background:transparent; }
+  .memory-list-surface .memory-sidebar { position:static; display:flex; width:100%; height:auto; min-height:100%; flex-direction:column; border-right:0; background:transparent; padding:0 8px 12px; }
+  .memory-detail-surface .memory-workspace { min-height:100%; }
   .memory-sidebar { position:sticky; top:0; height:calc(100vh - 82px); overflow:auto; padding:16px; border-right:1px solid var(--line); background:#fbfbf8; }
   .memory-brand,.memory-toolbar,.memory-toolbar-actions,.memory-comment-actions { display:flex; align-items:center; justify-content:space-between; gap:10px; }
   .memory-brand h1,.memory-title { margin:0; }
@@ -158,17 +173,39 @@ const memoryStyles = `
   .memory-source-tabs { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:3px; margin-top:8px; padding:3px; border:1px solid var(--line); border-radius:6px; background:var(--soft); }
   .memory-source-tab { min-height:28px; border:0; padding:4px 7px; font-size:11px; }
   .memory-search,.memory-module textarea { width:100%; border:1px solid var(--line); border-radius:6px; background:var(--surface); outline:none; }
-  .memory-search { margin:14px 0 10px; padding:9px 10px; }
+  .memory-list-header { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:19px 10px 10px; }
+  .memory-list-header-copy small { display:block; margin-bottom:4px; color:#82908d; font-size:10px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; }
+  .memory-list-header h2 { margin:0; font-size:18px; line-height:1.3; letter-spacing:-.02em; }
+  .memory-list-refresh { display:grid; width:32px; height:32px; place-items:center; border:0; border-radius:8px; background:transparent; color:var(--muted); font-size:18px; }
+  .memory-list-refresh:hover { background:#f0f4f2; color:var(--accent); }
+  .memory-list-refresh img { width:17px; height:17px; opacity:.7; }
+  .memory-search { height:36px; margin:0 6px 10px; padding:0 10px; border-color:#dce4e1; border-radius:9px; background:#f8faf9; font-size:12px; }
   .memory-module textarea { min-height:88px; padding:10px; resize:vertical; }
   .memory-search:focus,.memory-module textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(40,108,103,.12); }
   .memory-count,.memory-muted,.memory-subtitle { color:var(--muted); }
-  .memory-kind { margin:14px 0 6px; color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.08em; }
-  .memory-list,.memory-comment-list,.memory-flow { display:grid; gap:8px; }
-  .memory-button { width:100%; border:0; border-radius:6px; background:transparent; color:var(--text); padding:8px 9px; text-align:left; overflow-wrap:anywhere; }
+  .memory-count { margin:0 9px 8px; color:#87928f; font-size:10px; }
+  .memory-list-footer { margin-top:auto; padding:12px 10px 0; border-top:1px solid var(--line); color:#87928f; font-size:10px; }
+  .memory-list-empty { margin:18px 10px; color:#87928f; font-size:12px; line-height:1.6; }
+  .memory-navigation { display:flex; min-height:100%; flex-direction:column; }
+  .memory-kind { margin:10px 9px 4px; color:#82908d; font-size:10px; font-weight:700; letter-spacing:.08em; }
+  .memory-list,.memory-comment-list,.memory-flow { display:grid; gap:2px; }
+  .memory-button { position:relative; display:grid; width:100%; min-height:58px; grid-template-columns:34px minmax(0,1fr) 14px; align-items:start; gap:9px; border:0; border-radius:10px; background:transparent; color:var(--text); padding:10px 9px; text-align:left; overflow-wrap:anywhere; }
+  .memory-button:hover { background:#f2f6f5; }
+  .memory-button-icon { display:grid; width:34px; height:34px; place-items:center; border-radius:10px; background:#eef4f2; color:#5c7773; font-size:16px; }
+  .memory-button-icon img { width:18px; height:18px; opacity:.72; }
+  .memory-button-copy { display:block; min-width:0; }
+  .memory-button-copy strong,.memory-button-copy small,.memory-button-copy span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .memory-button-copy strong { color:#27312f; font-size:13px; font-weight:650; line-height:1.35; }
+  .memory-button-copy small { margin-top:3px; color:#87928f; font-size:10px; }
+  .memory-button-copy span { margin-top:4px; color:#697572; font-size:11px; }
+  .memory-button-caret { width:14px; height:14px; margin-top:8px; opacity:.55; transform:rotate(-90deg); }
+  .memory-button-trailing { display:flex; min-width:0; flex-direction:column; align-items:flex-end; gap:6px; padding-top:1px; }
+  .memory-button-trailing .memory-button-caret { margin-top:0; }
   .memory-change-wrap { border-radius:6px; }
   .memory-change-wrap:hover { background:#eceee8; }
   .memory-change-wrap:hover .memory-button { background:transparent; }
-  .memory-button.active { background:var(--accent-soft); color:#173f3c; font-weight:700; }
+  .memory-button.active { background:#e1efed; color:#173f3c; font-weight:700; }
+  .memory-button.active .memory-button-icon { background:#fff; color:var(--accent); }
   .memory-change-wrap.active { border-radius:6px; background:var(--accent-soft); }
   .memory-change-wrap.active .memory-button { background:transparent; }
   .memory-related { margin:-4px 9px 5px; color:var(--accent); font-size:12px; }
@@ -177,10 +214,13 @@ const memoryStyles = `
   .memory-options { margin-top:16px; padding-top:12px; border-top:1px solid var(--line); }
   .memory-change-wrap > .memory-options { margin-top:0; padding-top:0; border-top:0; }
   .memory-option { display:flex; align-items:center; gap:8px; color:var(--muted); }
-  .memory-workspace { min-width:0; padding:22px 28px 48px; }
-  .memory-toolbar { align-items:flex-start; margin-bottom:18px; }
-  .memory-title { font-size:26px; line-height:1.2; overflow-wrap:anywhere; }
-  .memory-subtitle { margin-top:7px; font-size:13px; overflow-wrap:anywhere; }
+  .memory-workspace { min-width:0; max-width:972px; margin:0 auto; padding:22px 26px 48px; }
+  .memory-toolbar { align-items:flex-start; justify-content:flex-start; margin:0 0 14px; border:1px solid var(--line); border-radius:12px; background:var(--surface); padding:19px 20px; box-shadow:0 1px 2px rgba(20,47,42,.025); }
+  .memory-toolbar-icon { display:grid; width:46px; height:46px; flex:0 0 auto; place-items:center; border-radius:13px; background:var(--accent-soft); }
+  .memory-toolbar-icon img { width:26px; height:26px; filter:invert(37%) sepia(18%) saturate(1485%) hue-rotate(123deg) brightness(89%) contrast(86%); }
+  .memory-status-pill { display:inline-flex; margin-bottom:5px; border-radius:999px; background:#edf7f5; padding:3px 7px; color:var(--accent); font-size:10px; font-weight:650; }
+  .memory-title { font-size:18px; line-height:1.3; overflow-wrap:anywhere; }
+  .memory-subtitle { margin-top:4px; font-size:12px; overflow-wrap:anywhere; }
   .memory-toolbar-actions,.memory-comment-actions { justify-content:flex-start; flex-wrap:wrap; }
   .memory-btn { border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--text); padding:7px 10px; }
   .memory-btn.primary { border-color:var(--accent); background:var(--accent); color:#fff; }
@@ -189,11 +229,12 @@ const memoryStyles = `
   .memory-empty,.memory-panel,.memory-error { border:1px solid var(--line); border-radius:8px; background:var(--surface); padding:16px; box-shadow:0 1px 2px rgba(25,30,35,.08); }
   .memory-error { border-color:#e8c7bd; border-left:4px solid var(--danger); background:#fffdfb; }
   .memory-error h3 { color:var(--danger); }
-  .memory-panel { margin:12px 0; }
-  .memory-panel>h3 { margin:0 0 10px; }
+  .memory-panel { margin:12px 0; border-radius:12px; padding:21px 22px; box-shadow:0 1px 2px rgba(20,47,42,.025); }
+  .memory-panel>h3 { margin:0 0 16px; font-size:15px; }
+  .memory-panel p,.memory-panel li { font-size:12px; line-height:1.75; }
   .memory-meta { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 12px; }
   .memory-pill { display:inline-flex; border:1px solid var(--line); border-radius:999px; background:var(--soft); color:var(--muted); padding:2px 8px; font-size:11px; }
-  .memory-market-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:center; }
+  .memory-market-row { align-items:start; }
   .memory-market-status { border:1px solid var(--line); border-radius:999px; background:var(--surface); color:var(--muted); padding:1px 6px; font-size:11px; white-space:nowrap; }
   .memory-market-status[data-status=consistent],.memory-market-status[data-status=importing] { border-color:#b8cbc7; color:var(--accent); }
   .memory-market-status[data-status=name_conflict] { color:var(--danger); }
@@ -264,37 +305,71 @@ export default defineViewPlugin<MemoryConfig>({
   apply(ctx, config) {
     if (!ctx.router) throw new Error("Memory View requires the router service");
     const routes = {
-      index: ctx.router.register({ id: "index", path: "/memories" }),
-      market: ctx.router.register({ id: "market", path: "/market" }),
-      memoryDetail: ctx.router.register({ id: "memory-detail", path: "/memories/:kind/:name" }),
-      projectIndex: ctx.router.register({ id: "project-index", path: "/projects/:projectId/memories" }),
-      projectMemoryDetail: ctx.router.register({ id: "project-memory-detail", path: "/projects/:projectId/memories/:kind/:name" }),
-      projectMarket: ctx.router.register({ id: "project-market", path: "/projects/:projectId/market" }),
-      changeDetail: ctx.router.register({ id: "change-detail", path: "/projects/:projectId/changes/:changeId" })
+      index: ctx.router.register({ id: "index", path: "/memories", query: ["section", "change"] }),
+      market: ctx.router.register({ id: "market", path: "/market", query: ["item"] }),
+      memoryDetail: ctx.router.register({ id: "memory-detail", path: "/memories/:kind/:name", query: ["section", "change"] }),
+      projectIndex: ctx.router.register({ id: "project-index", path: "/projects/:projectId/memories", query: ["section", "change"] }),
+      projectMemoryDetail: ctx.router.register({ id: "project-memory-detail", path: "/projects/:projectId/memories/:kind/:name", query: ["section", "change"] }),
+      projectMarket: ctx.router.register({ id: "project-market", path: "/projects/:projectId/market", query: ["item"] }),
+      changeDetail: ctx.router.register({ id: "change-detail", path: "/projects/:projectId/changes/:changeId", query: ["section"] })
     };
     const headerActions = createHeaderActionPublisher(ctx);
-    const mount = createMemoryMount(
+    const publishSecondary = createMemorySecondaryPublisher(ctx, config, routes);
+    const page = createMemoryPageMounts(
       config,
       routes,
       target => ctx.router!.navigate(target),
       headerActions.replace,
-      headerActions.clear
+      headerActions.clear,
+      publishSecondary
     );
+    ctx.lifecycle.own(page.dispose);
 
-    registerPage(ctx, routes.index, "index", config, mount);
-    registerPage(ctx, routes.market, "market", config, mount);
-    registerPage(ctx, routes.memoryDetail, "memory-detail", config, mount);
-    registerPage(ctx, routes.projectIndex, "project-index", config, mount);
-    registerPage(ctx, routes.projectMemoryDetail, "project-memory-detail", config, mount);
-    registerPage(ctx, routes.projectMarket, "project-market", config, mount);
-    registerPage(ctx, routes.changeDetail, "change-detail", config, mount);
+    registerPage(ctx, routes.index, "index", config, page);
+    registerPage(ctx, routes.market, "market", config, page);
+    registerPage(ctx, routes.memoryDetail, "memory-detail", config, page);
+    registerPage(ctx, routes.projectIndex, "project-index", config, page);
+    registerPage(ctx, routes.projectMemoryDetail, "project-memory-detail", config, page);
+    registerPage(ctx, routes.projectMarket, "project-market", config, page);
+    registerPage(ctx, routes.changeDetail, "change-detail", config, page);
+    for (const route of Object.values(routes)) registerMemorySecondary(ctx, config, routes, route);
+    ctx.slots.register(slots.searchProviders, {
+      id: "memory.search",
+      order: 100,
+      value: {
+        label: text(message(config, "navigation.memory")),
+        icon: { kind: "system", name: "brain" },
+        async search({ query, signal }) {
+          const [memories, changes] = await Promise.all([
+            fetch("/api/memories?representation=summary", { signal }).then(async response => {
+              if (!response.ok) throw new Error(await response.text());
+              return response.json() as Promise<{ memories?: MemorySummary[] }>;
+            }),
+            fetch("/api/changes", { signal }).then(response => response.ok ? response.json() as Promise<{ changes?: ChangeSummary[] }> : { changes: [] })
+          ]);
+          const needle = query.trim().toLowerCase();
+          const memoryResults = (memories.memories ?? []).filter(memory => !needle || `${memoryName(memory)} ${memoryReference(memory)}`.toLowerCase().includes(needle)).slice(0, 24).map(memory => {
+            const [kind, ...name] = memoryReference(memory).split("/");
+            return {
+              title: text(memoryName(memory)), summary: text(memoryReference(memory)), type: text(message(config, "navigation.memory")),
+              icon: { kind: "system" as const, name: "brain" }, route: routes.memoryDetail.to({ kind, name: name.join("/") })
+            };
+          });
+          const changeResults = (changes.changes ?? []).filter(change => !needle || `${change.title ?? ""} ${change.id}`.toLowerCase().includes(needle)).slice(0, 12).map(change => ({
+            title: text(String(change.title ?? change.id)), summary: text("ChangeSet"), type: text("ChangeSet"),
+            icon: { kind: "system" as const, name: "code" }, route: routes.changeDetail.to({ projectId: ctx.module.projectId, changeId: change.id })
+          }));
+          return [...memoryResults, ...changeResults];
+        }
+      }
+    });
 
     ctx.slots.register(slots.navigationPrimary, {
       id: "memory.navigation",
       order: 100,
       value: {
         label: text(message(config, "navigation.memory")),
-        icon: { kind: "system", name: "memory" },
+        icon: { kind: "system", name: "brain" },
         route: routes.index.to()
       }
     });
@@ -395,7 +470,7 @@ function registerPage(
   route: MemoryRoutes[keyof MemoryRoutes],
   name: MemoryRouteName,
   config: Readonly<MemoryConfig>,
-  mount: ViewMount
+  page: Readonly<{ list: ViewMount; detail: ViewMount }>
 ): void {
   ctx.slots.register(slots.headerTitle, {
     id: `memory.header.${name}`,
@@ -406,8 +481,107 @@ function registerPage(
     id: `memory.page.${name}`,
     key: route.key,
     when: route.activation,
-    value: mount
+    value: page.detail
   });
+  ctx.slots.register(slots.contentList, {
+    id: `memory.list.${name}`,
+    when: route.activation,
+    value: page.list
+  });
+}
+
+function memorySection(location: RouteLocation): "recent" | "project" | "market" | "changes" {
+  if (location.pathname.includes("/market")) return "market";
+  if (["recent", "project", "market", "changes"].includes(location.query.section ?? "")) {
+    return location.query.section as "recent" | "project" | "market" | "changes";
+  }
+  if (location.pathname.includes("/changes/")) return "changes";
+  return "project";
+}
+
+function registerMemorySecondary(ctx: ViewPluginContext, config: Readonly<MemoryConfig>, routes: MemoryRoutes, route: MemoryRoutes[keyof MemoryRoutes]): void {
+  const selected = memorySection(ctx.router!.location);
+  ctx.slots.register(slots.navigationSecondary, {
+    id: `memory.secondary.${route.key}`,
+    when: route.activation,
+    value: memorySecondaryDescriptor(config, routes, ctx.module.projectId, selected)
+  });
+}
+
+function createMemorySecondaryPublisher(ctx: ViewPluginContext, config: Readonly<MemoryConfig>, routes: MemoryRoutes): (location: RouteLocation, badges?: Readonly<Record<string, number>>, heading?: HeaderTitleDescriptor) => void {
+  let lastKey = "";
+  let dispose: Disposer | undefined;
+  let titleDispose: Disposer | undefined;
+  return (location, badges = {}, heading) => {
+    const selected = memorySection(location);
+    const route = routeForMemoryLocation(routes, location);
+    const key = `${route.key}:${selected}:${JSON.stringify(badges)}:${JSON.stringify(heading ?? {})}`;
+    if (key === lastKey) return;
+    lastKey = key;
+    const previous = dispose;
+    dispose = ctx.slots.upsert(slots.navigationSecondary, {
+      id: `memory.secondary.${route.key}`,
+      when: route.activation,
+      value: memorySecondaryDescriptor(config, routes, ctx.module.projectId, selected, badges)
+    });
+    void previous?.();
+    const previousTitle = titleDispose;
+    titleDispose = ctx.slots.upsert(slots.headerTitle, {
+      id: `memory.header.${memoryRouteName(route, routes)}`,
+      when: route.activation,
+      value: heading ?? { title: text(memoryRouteHeading(config, location)) }
+    });
+    void previousTitle?.();
+  };
+}
+
+function memoryRouteName(route: MemoryRoutes[keyof MemoryRoutes], routes: MemoryRoutes): MemoryRouteName {
+  return route === routes.market ? "market"
+    : route === routes.memoryDetail ? "memory-detail"
+      : route === routes.projectIndex ? "project-index"
+        : route === routes.projectMemoryDetail ? "project-memory-detail"
+          : route === routes.projectMarket ? "project-market"
+            : route === routes.changeDetail ? "change-detail"
+              : "index";
+}
+
+function memoryRouteHeading(config: Readonly<MemoryConfig>, location: RouteLocation): string {
+  if (location.pathname.includes("/market")) return message(config, "navigation.memoryMarket");
+  if (location.pathname.includes("/changes/")) return message(config, "change.title");
+  return message(config, "navigation.memory");
+}
+
+function routeForMemoryLocation(routes: MemoryRoutes, location: RouteLocation): MemoryRoutes[keyof MemoryRoutes] {
+  const suffix = location.routeKey?.split(":").at(-1);
+  return suffix === "market" ? routes.market
+    : suffix === "memory-detail" ? routes.memoryDetail
+      : suffix === "project-index" ? routes.projectIndex
+        : suffix === "project-memory-detail" ? routes.projectMemoryDetail
+          : suffix === "project-market" ? routes.projectMarket
+            : suffix === "change-detail" ? routes.changeDetail
+              : routes.index;
+}
+
+function memorySecondaryDescriptor(
+  config: Readonly<MemoryConfig>,
+  routes: MemoryRoutes,
+  _projectId: string,
+  selected: "recent" | "project" | "market" | "changes",
+  badges: Readonly<Record<string, number>> = {}
+) {
+  return {
+    title: text(message(config, "navigation.memory")),
+    icon: { kind: "system" as const, name: "brain" },
+    items: [
+      { id: "recent", label: text(message(config, "memory.recent")), icon: { kind: "system" as const, name: "clock-counter-clockwise" }, badge: badges.recent ? text(String(badges.recent)) : undefined, selected: selected === "recent", route: routes.index.to(undefined, { query: { section: "recent" } }) },
+      { id: "project", label: text(message(config, "navigation.currentProject")), icon: { kind: "system" as const, name: "brain" }, badge: badges.project ? text(String(badges.project)) : undefined, selected: selected === "project", route: routes.index.to() },
+      { id: "market", label: text(message(config, "navigation.memoryMarket")), icon: { kind: "system" as const, name: "storefront" }, badge: badges.market ? text(String(badges.market)) : undefined, selected: selected === "market", route: routes.market.to() },
+      { id: "changes", label: text(config.locale?.toLowerCase().startsWith("en") ? "ChangeSets" : "记忆变更"), icon: { kind: "system" as const, name: "archive" }, badge: badges.changes ? text(String(badges.changes)) : undefined, selected: selected === "changes", route: routes.index.to(undefined, { query: { section: "changes" } }) }
+    ],
+    footer: text(config.locale?.toLowerCase().startsWith("en")
+      ? "Rendered consistently by navigation.secondary."
+      : "这里由 navigation.secondary 统一呈现。")
+  };
 }
 
 type PublishedHeaderAction = {
@@ -451,40 +625,82 @@ function createHeaderActionPublisher(ctx: ViewPluginContext): {
   };
 }
 
-function createMemoryMount(
+function createMemoryPageMounts(
   config: Readonly<MemoryConfig>,
   routes: MemoryRoutes,
   navigate: (target: RouteTarget) => Promise<void>,
   publishHeaderActions: (actions: readonly PublishedHeaderAction[]) => void,
-  clearHeaderActions: () => void
-): ViewMount {
+  clearHeaderActions: () => void,
+  publishSecondary: (location: RouteLocation, badges?: Readonly<Record<string, number>>, heading?: HeaderTitleDescriptor) => void
+): Readonly<{ list: ViewMount; detail: ViewMount; dispose: Disposer }> {
+  const controller = new AbortController();
+  let scratch: HTMLElement | undefined;
+  let portal: HTMLElement | undefined;
   let app: MemoryApplication | undefined;
-  return {
-    async mount({ element, portal }, context) {
-      const controller = new AbortController();
+  let start: Promise<void> | undefined;
+  let lastRoute = "";
+  let update: Promise<void> | undefined;
+  const ensure = (location: RouteLocation) => {
+    scratch ??= document.createElement("div");
+    portal ??= document.createElement("div");
+    if (!app) {
+      app = new MemoryApplication(scratch, portal, controller, config, routes, location, navigate, publishHeaderActions);
+      lastRoute = `${location.pathname}${location.search}${location.hash}`;
+    }
+    start ??= app.start();
+    return start;
+  };
+  const updateRoute = async (location: RouteLocation) => {
+    await ensure(location);
+    const key = `${location.pathname}${location.search}${location.hash}`;
+    if (lastRoute === key) {
+      await update;
+      publishSecondary(location, app!.secondaryBadges(), app!.headerTitle());
+      return;
+    }
+    lastRoute = key;
+    update = app!.updateRoute(location).finally(() => { update = undefined; });
+    await update;
+    publishSecondary(location, app!.secondaryBadges(), app!.headerTitle());
+  };
+  const createSurface = (surface: "list" | "detail"): ViewMount => ({
+    async mount({ element }, context) {
       const style = document.createElement("style");
       style.dataset.memsphereMemoryStyles = "true";
       style.textContent = memoryStyles;
       element.append(style);
-      app = new MemoryApplication(element, portal, controller, config, routes, context.route, navigate, publishHeaderActions);
-      await app.start();
+      element.classList.add("memory-surface", `memory-${surface}-surface`);
+      await ensure(context.route);
+      app![surface === "list" ? "attachList" : "attachDetail"](element);
+      await updateRoute(context.route);
       return () => {
-        controller.abort();
-        app?.dispose();
-        app = undefined;
-        clearHeaderActions();
+        app?.[surface === "list" ? "detachList" : "detachDetail"](element);
+        if (surface === "detail") clearHeaderActions();
+        element.classList.remove("memory-surface", `memory-${surface}-surface`);
         element.replaceChildren();
-        portal.replaceChildren();
       };
     },
     async update(context) {
-      await app?.updateRoute(context.route);
+      await updateRoute(context.route);
+    }
+  });
+  return {
+    list: createSurface("list"),
+    detail: createSurface("detail"),
+    dispose: () => {
+      controller.abort();
+      app?.dispose();
+      app = undefined;
+      clearHeaderActions();
+      portal?.replaceChildren();
     }
   };
 }
 
 class MemoryApplication {
   readonly #root: HTMLElement;
+  #listRoot: HTMLElement | null = null;
+  #detailRoot: HTMLElement | null = null;
   readonly #portal: HTMLElement;
   readonly #controller: AbortController;
   readonly #config: Readonly<MemoryConfig>;
@@ -495,17 +711,20 @@ class MemoryApplication {
   #memories: MemorySummary[] = [];
   #changes: ChangeSummary[] = [];
   #market: JsonRecord[] = [];
+  #marketCount = 0;
   #memoryDetail: MemorySummary | null = null;
   readonly #memoryDetailCache = new Map<string, MemorySummary>();
   #changeDetail: JsonRecord | null = null;
   #selectedId = "";
   #selectedMarket = "";
+  #changeReturnTarget: RouteTarget | undefined;
   #query = "";
   #hideSystem = localStorage.getItem(hideSystemMemoriesKey) !== "false";
   #commentsCollapsed = localStorage.getItem(changeCommentsCollapsedKey) === "true";
   #currentProject = "";
   #actorKinds: Record<string, string> = {};
   #generation = 0;
+  #fatalError: unknown = null;
 
   constructor(root: HTMLElement, portal: HTMLElement, controller: AbortController, config: Readonly<MemoryConfig>, routes: MemoryRoutes, location: Readonly<RouteLocation>, navigate: (target: RouteTarget) => Promise<void>, publishHeaderActions: (actions: readonly PublishedHeaderAction[]) => void) {
     this.#root = root;
@@ -524,11 +743,64 @@ class MemoryApplication {
     await this.load();
   }
 
+  attachList(root: HTMLElement): void { this.#listRoot = root; this.render(); }
+  detachList(root: HTMLElement): void { if (this.#listRoot === root) this.#listRoot = null; }
+  attachDetail(root: HTMLElement): void { this.#detailRoot = root; this.render(); }
+  detachDetail(root: HTMLElement): void { if (this.#detailRoot === root) this.#detailRoot = null; }
+
+  secondaryBadges(): Readonly<Record<string, number>> {
+    const projectMemories = this.#memories.filter(memory => !memory.system);
+    const available = new Set(projectMemories.map(memory => memory.id));
+    const recent = this.recentMemoryIds().filter(id => available.has(id)).length;
+    return { recent, project: projectMemories.length, market: this.#market.length || this.#marketCount, changes: this.#changes.length };
+  }
+
+  headerTitle(): HeaderTitleDescriptor {
+    const route = parseLocation(this.#location);
+    const memoryCrumb = { label: text(message(this.#config, "navigation.memory")), route: this.#routes.index.to() };
+    const projectCrumb = { label: text(message(this.#config, "navigation.currentProject")), route: this.#routes.index.to() };
+    if (route.kind === "memory-detail") {
+      const detail = this.#memoryDetail;
+      return {
+        title: text(detail ? memoryName(detail) : route.memoryName),
+        subtitle: text(detail
+          ? `${this.t("memory.active")} · ${this.t(detail.kind)} · ${detail.id}`
+          : `${this.t(route.memoryKind)} · ${route.memoryKind}/${route.memoryName}`),
+        breadcrumbs: [memoryCrumb, projectCrumb]
+      };
+    }
+    if (route.kind === "change") return {
+      title: text(String((this.#changeDetail?.change as ChangeSummary | undefined)?.title ?? route.changeId ?? message(this.#config, "change.title"))),
+      subtitle: text(this.#changeDetail?.change
+        ? this.changeStatusLabel(String((this.#changeDetail.change as ChangeSummary).status ?? ""))
+        : "ChangeSet"),
+      breadcrumbs: [memoryCrumb, { label: text(this.#config.locale?.toLowerCase().startsWith("en") ? "ChangeSets" : "记忆变更"), route: this.#routes.index.to(undefined, { query: { section: "changes" } }) }]
+    };
+    if (route.kind === "market") {
+      const item = this.#market.find(candidate => candidate.reference === this.#selectedMarket);
+      return {
+        title: text(item ? memoryName((item.entity ?? item) as MemorySummary) : message(this.#config, "navigation.memoryMarket")),
+        subtitle: text(message(this.#config, "navigation.memoryMarket")),
+        breadcrumbs: [memoryCrumb]
+      };
+    }
+    if (this.#location.query.section === "recent") return {
+      title: text(this.t("memory.recent")),
+      breadcrumbs: [memoryCrumb]
+    };
+    if (this.#location.query.section === "changes") return {
+      title: text(this.#config.locale?.toLowerCase().startsWith("en") ? "ChangeSets" : "记忆变更"),
+      breadcrumbs: [memoryCrumb]
+    };
+    return { title: text(message(this.#config, "navigation.currentProject")), breadcrumbs: [memoryCrumb] };
+  }
+
   async updateRoute(location: Readonly<RouteLocation>): Promise<void> {
     const previousProject = this.#currentProject;
     const previousRoute = parseLocation(this.#location);
     this.#location = location;
     this.#currentProject = projectFromLocation(location) || this.#currentProject;
+    this.#selectedMarket = location.query.item ?? this.#selectedMarket;
     const route = parseLocation(location);
     if (!this.#memories.length || previousProject !== this.#currentProject || previousRoute.kind === "change" || route.kind === "change" || route.changeId) {
       await this.load();
@@ -541,6 +813,7 @@ class MemoryApplication {
         const payload = await this.request<JsonRecord>("/api/market/memories");
         if (generation !== this.#generation) return;
         this.#market = array(payload.memories);
+        this.#marketCount = this.#market.length;
         this.#selectedMarket ||= String(this.#market[0]?.reference ?? "");
       }
       this.render();
@@ -556,7 +829,10 @@ class MemoryApplication {
       return;
     }
     const cached = this.#memoryDetailCache.get(this.#selectedId);
-    if (cached) this.#memoryDetail = cached;
+    if (cached) {
+      this.#memoryDetail = cached;
+      this.rememberRecentMemory(this.#selectedId);
+    }
     else if (this.#selectedId) await this.loadMemoryDetail(this.#selectedId, "", generation);
     if (generation === this.#generation) this.render();
   }
@@ -567,16 +843,19 @@ class MemoryApplication {
 
   private async load(): Promise<void> {
     const generation = ++this.#generation;
+    this.#fatalError = null;
     this.#memoryDetail = null;
     this.#changeDetail = null;
     try {
       const route = parseLocation(this.#location);
+      this.#selectedMarket = this.#location.query.item ?? this.#selectedMarket;
       if (route.kind === "memory-detail") this.#selectedId = `${route.memoryKind}/${route.memoryName}`;
       const previewChangeId = route.kind === "change" ? "" : route.changeId;
-      const [memoryPayload, changePayload, projectPayload] = await Promise.all([
+      const [memoryPayload, changePayload, projectPayload, marketCountPayload] = await Promise.all([
         this.request<JsonRecord>(`/api/memories?${new URLSearchParams({ representation: "summary", ...(previewChangeId ? { change: previewChangeId } : {}) })}`),
         this.request<JsonRecord>("/api/changes").catch(error => ({ changes: [], _error: error })),
-        this.request<JsonRecord>("/api/projects").catch((): JsonRecord => ({}))
+        this.request<JsonRecord>("/api/projects").catch((): JsonRecord => ({})),
+        this.request<JsonRecord>("/api/market/memories?representation=count").catch((): JsonRecord => ({ count: 0 }))
       ]);
       if (generation !== this.#generation) return;
       this.#memories = array(memoryPayload.memories) as MemorySummary[];
@@ -584,6 +863,7 @@ class MemoryApplication {
         this.#selectedId = this.#memories.find(memory => memoryReference(memory) === `${route.memoryKind}/${route.memoryName}`)?.id ?? this.#selectedId;
       }
       this.#changes = array(changePayload.changes) as ChangeSummary[];
+      this.#marketCount = Number(marketCountPayload.count) || 0;
       this.#currentProject = projectFromLocation(this.#location) || String(projectPayload.current ?? this.#currentProject);
       this.#actorKinds = asStringRecord(memoryPayload.actorKinds);
 
@@ -596,6 +876,7 @@ class MemoryApplication {
         const payload = await this.request<JsonRecord>("/api/market/memories");
         if (generation !== this.#generation) return;
         this.#market = array(payload.memories);
+        this.#marketCount = this.#market.length;
         this.#selectedMarket ||= String(this.#market[0]?.reference ?? "");
       } else if (route.kind === "change") {
         try {
@@ -656,6 +937,7 @@ class MemoryApplication {
       if (generation === this.#generation) {
         this.#memoryDetail = (payload.memory ?? payload) as MemorySummary;
         this.#memoryDetailCache.set(id, this.#memoryDetail);
+        this.rememberRecentMemory(id);
       }
     } catch (error) {
       if (generation === this.#generation) this.#memoryDetail = { ...summary, error: errorMessage(error) };
@@ -676,6 +958,26 @@ class MemoryApplication {
 
   private render(): void {
     this.syncHeaderActions();
+    if (this.#listRoot || this.#detailRoot) {
+      if (this.#listRoot) {
+        for (const child of [...this.#listRoot.children]) if (child.tagName !== "STYLE") child.remove();
+        const app = el("section", "memory-module memory-list-module");
+        if (this.#fatalError) app.append(errorWorkspace(this.t("fatal.title"), errorMessage(this.#fatalError)));
+        else app.append(this.renderSidebar());
+        this.#listRoot.append(app);
+      }
+      if (this.#detailRoot) {
+        for (const child of [...this.#detailRoot.children]) if (child.tagName !== "STYLE") child.remove();
+        const app = el("section", "memory-module memory-detail-module");
+        if (this.#fatalError) {
+          const panel = errorWorkspace(this.t("fatal.title"), errorMessage(this.#fatalError));
+          panel.append(button(this.t("common.retry"), "memory-btn", () => void this.load()));
+          app.append(panel);
+        } else app.append(this.renderWorkspace());
+        this.#detailRoot.append(app);
+      }
+      return;
+    }
     this.#root.querySelector(".memory-module")?.remove();
     const app = el("section", "memory-module");
     const layout = el("div", "memory-layout");
@@ -693,7 +995,7 @@ class MemoryApplication {
         order: 100,
         stateKey: `edit:${this.#memoryDetail.id}`,
         value: {
-          label: text(this.t("memory.edit")),
+          label: text(this.#config.locale?.toLowerCase().startsWith("en") ? "Create ChangeSet" : "创建变更"),
           run: () => this.#memoryDetail ? this.createChange(this.#memoryDetail) : undefined
         }
       });
@@ -767,24 +1069,58 @@ class MemoryApplication {
 
   private renderSidebar(): HTMLElement {
     const side = el("aside", "memory-sidebar");
-    const source = el("div", "memory-source-tabs");
     const route = parseLocation(this.#location);
-    const local = button(this.t("navigation.currentProject"), "memory-source-tab" + (route.kind !== "market" ? " active" : ""), () => this.navigate(this.memoryIndexTarget()));
-    const market = button(this.t("navigation.memoryMarket"), "memory-source-tab" + (route.kind === "market" ? " active" : ""), () => this.navigate(this.marketTarget()));
-    source.append(local, market);
-    side.append(source);
     if (route.kind === "market") side.append(this.renderMarketNavigation());
-    else if (route.kind === "change") side.append(this.renderChangeNavigation());
+    else if (route.kind === "change" || this.#location.query.section === "changes") side.append(this.renderChangesIndexNavigation());
     else side.append(this.renderMemoryNavigation());
     return side;
   }
 
+  private renderListHeader(title: string, refreshLabel: string): HTMLElement {
+    const header = el("header", "memory-list-header");
+    const copy = el("div", "memory-list-header-copy");
+    copy.append(el("small", "", this.t("navigation.memory")), el("h2", "", title));
+    const refresh = button("", "memory-list-refresh", () => void this.load());
+    const icon = document.createElement("img"); icon.src = "/assets/system-icons/arrows-clockwise.svg"; icon.alt = ""; refresh.append(icon);
+    refresh.setAttribute("aria-label", refreshLabel);
+    header.append(copy, refresh);
+    return header;
+  }
+
+  private renderChangesIndexNavigation(): HTMLElement {
+    const wrap = el("div", "memory-navigation");
+    wrap.append(this.renderListHeader(this.#config.locale?.toLowerCase().startsWith("en") ? "ChangeSets" : "记忆变更", this.#config.locale?.toLowerCase().startsWith("en") ? "Refresh ChangeSets" : "刷新记忆变更"));
+    const search = input("search", this.t("change.search"), this.#query, "memory-search");
+    search.addEventListener("input", () => { this.#query = search.value; this.render(); });
+    const needle = this.#query.trim().toLowerCase();
+    const changes = this.#changes.filter(change => !needle || `${change.title ?? ""} ${change.id}`.toLowerCase().includes(needle));
+    wrap.append(search);
+    const list = el("div", "memory-list");
+    const selectedChange = parseLocation(this.#location).changeId;
+    for (const change of changes) {
+      const row = button("", `memory-button${change.id === selectedChange ? " active" : ""}`, () => void this.openChange(change.id));
+      row.setAttribute("aria-label", String(change.title ?? change.id));
+      const icon = el("span", "memory-button-icon"); const iconImage = document.createElement("img"); iconImage.src = "/assets/system-icons/code.svg"; iconImage.alt = ""; icon.append(iconImage);
+      const copy = el("span", "memory-button-copy");
+      copy.append(el("strong", "", String(change.title ?? change.id)), el("small", "", this.changeStatusLabel(String(change.status ?? ""))));
+      if (change.title) copy.append(el("span", "", change.id));
+      const caret = document.createElement("img"); caret.className = "memory-button-caret"; caret.src = "/assets/system-icons/caret-down.svg"; caret.alt = "";
+      row.append(icon, copy, caret); list.append(row);
+    }
+    if (!changes.length) list.append(el("div", "memory-list-empty", this.t("change.empty")));
+    wrap.append(list, el("footer", "memory-list-footer", this.format("memory.visibleCount", { count: changes.length })));
+    return wrap;
+  }
+
   private renderMemoryNavigation(): HTMLElement {
-    const wrap = el("div");
-    const search = input("search", this.t("memory.search"), this.#query, "memory-search");
+    const wrap = el("div", "memory-navigation");
+    const recent = this.#location.query.section === "recent";
+    const heading = recent ? this.t("memory.recent") : this.t("navigation.currentProject");
+    const header = this.renderListHeader(heading, this.#config.locale?.toLowerCase().startsWith("en") ? "Refresh list" : "刷新列表");
+    const search = input("search", recent ? this.t("memory.recentSearch") : (this.#config.locale?.toLowerCase().startsWith("en") ? "Search current project" : "搜索当前项目"), this.#query, "memory-search");
     search.addEventListener("input", () => { this.#query = search.value; this.render(); });
     const visible = this.visibleMemories();
-    wrap.append(search, el("div", "memory-count", this.format("memory.visibleCount", { count: visible.length })));
+    wrap.append(header, search);
     for (const kind of kindOrder) {
       const group = visible.filter(memory => memory.kind === kind);
       if (!group.length) continue;
@@ -792,7 +1128,7 @@ class MemoryApplication {
       const list = el("div", "memory-list");
       for (const memory of group) {
         const box = el("div", "memory-change-wrap" + (memory.id === this.#selectedId ? " active" : ""));
-        box.append(button(memoryName(memory), "memory-button" + (memory.id === this.#selectedId ? " active" : ""), async () => {
+        const entry = button("", "memory-button" + (memory.id === this.#selectedId ? " active" : ""), async () => {
           const route = parseLocation(this.#location);
           if (route.changeId) {
             this.#selectedId = memory.id;
@@ -802,34 +1138,50 @@ class MemoryApplication {
           }
           const [kindName, ...name] = memoryReference(memory).split("/");
           const projectId = projectFromLocation(this.#location);
+          const query = this.#location.query.section ? { section: this.#location.query.section } : {};
           await this.navigate(projectId
-            ? this.#routes.projectMemoryDetail.to({ projectId, kind: kindName, name: name.join("/") })
-            : this.#routes.memoryDetail.to({ kind: kindName, name: name.join("/") }));
-        }));
+            ? this.#routes.projectMemoryDetail.to({ projectId, kind: kindName, name: name.join("/") }, { query })
+            : this.#routes.memoryDetail.to({ kind: kindName, name: name.join("/") }, { query }));
+        });
+        entry.setAttribute("aria-label", memoryName(memory));
+        const icon = el("span", "memory-button-icon");
+        const iconImage = document.createElement("img"); iconImage.src = "/assets/system-icons/file-text.svg"; iconImage.alt = ""; icon.append(iconImage);
+        const copy = el("span", "memory-button-copy");
+        copy.append(el("strong", "", memoryName(memory)), el("small", "", this.t(memory.kind)));
+        const summary = memorySummaryDescription(memory) || memoryReference(memory);
+        if (summary) copy.append(el("span", "", summary));
+        const caret = document.createElement("img"); caret.className = "memory-button-caret"; caret.src = "/assets/system-icons/caret-down.svg"; caret.alt = "";
+        entry.append(icon, copy, caret);
+        box.append(entry);
         const related = this.#changes.filter(change => (change.memoryPaths ?? []).includes(memory.path));
         if (related.length) box.append(this.changeLinks(this.format("memory.relatedChangeSets", { count: related.length }), related));
         list.append(box);
       }
       wrap.append(list);
     }
-    const attached = new Set(this.#memories.map(memory => memory.path));
-    const other = this.#changes.filter(change => !(change.memoryPaths ?? []).some(path => attached.has(path)));
-    if (other.length) wrap.append(this.changeLinks(this.format("memory.otherChangeSets", { count: other.length }), other));
+    if (!visible.length) wrap.append(el("div", "memory-list-empty", recent ? this.t("memory.recentEmpty") : this.t("memory.empty")));
+    if (!recent) {
+      const attached = new Set(this.#memories.map(memory => memory.path));
+      const other = this.#changes.filter(change => !(change.memoryPaths ?? []).some(path => attached.has(path)));
+      if (other.length) wrap.append(this.changeLinks(this.format("memory.otherChangeSets", { count: other.length }), other));
+    }
     const option = el("label", "memory-option");
     const checkbox = input("checkbox", "", ""); checkbox.checked = this.#hideSystem;
     checkbox.addEventListener("change", () => { this.#hideSystem = checkbox.checked; localStorage.setItem(hideSystemMemoriesKey, String(checkbox.checked)); this.render(); });
     option.append(checkbox, document.createTextNode(this.t("memory.hideSystem")));
     const options = el("div", "memory-options"); options.append(option); wrap.append(options);
+    wrap.append(el("footer", "memory-list-footer", this.#config.locale?.toLowerCase().startsWith("en") ? `${visible.length} results` : `${visible.length} 条结果`));
     return wrap;
   }
 
   private renderMarketNavigation(): HTMLElement {
-    const wrap = el("div");
-    const search = input("search", this.t("memory.search"), this.#query, "memory-search");
+    const wrap = el("div", "memory-navigation");
+    wrap.append(this.renderListHeader(this.t("navigation.memoryMarket"), this.#config.locale?.toLowerCase().startsWith("en") ? "Refresh Market" : "刷新记忆市场"));
+    const search = input("search", this.t("market.search"), this.#query, "memory-search");
     search.addEventListener("input", () => { this.#query = search.value; this.render(); });
     const query = this.#query.trim().toLowerCase();
     const visible = this.#market.filter(item => !query || `${item.reference ?? ""} ${memoryName(item as MemorySummary)}`.toLowerCase().includes(query));
-    wrap.append(search, el("div", "memory-count", this.format("memory.marketItemCount", { count: visible.length })));
+    wrap.append(search);
     for (const kind of kindOrder) {
       const group = visible.filter(item => item.kind === kind);
       if (!group.length) continue;
@@ -839,27 +1191,22 @@ class MemoryApplication {
         const reference = String(item.reference ?? "");
         const row = button("", "memory-button memory-market-row" + (reference === this.#selectedMarket ? " active" : ""), () => {
           if (item.status === "importing" && item.changeId) { void this.openChange(String(item.changeId)); return; }
-          this.#selectedMarket = reference; this.render();
+          void this.navigate(this.marketTarget(reference));
         });
-        row.append(el("span", "", memoryName((item.entity ?? item) as MemorySummary)), marketStatus(String(item.status ?? ""), this.marketStatusLabel(String(item.status ?? ""))));
+        row.setAttribute("aria-label", `${memoryName((item.entity ?? item) as MemorySummary)} ${this.marketStatusLabel(String(item.status ?? ""))}`.trim());
+        const icon = el("span", "memory-button-icon"); const iconImage = document.createElement("img"); iconImage.src = "/assets/system-icons/file-text.svg"; iconImage.alt = ""; icon.append(iconImage);
+        const copy = el("span", "memory-button-copy");
+        copy.append(el("strong", "", memoryName((item.entity ?? item) as MemorySummary)), el("small", "", this.t(String(item.kind ?? ""))), el("span", "", reference));
+        const trailing = el("span", "memory-button-trailing");
+        const caret = document.createElement("img"); caret.className = "memory-button-caret"; caret.src = "/assets/system-icons/caret-down.svg"; caret.alt = "";
+        trailing.append(marketStatus(String(item.status ?? ""), this.marketStatusLabel(String(item.status ?? ""))), caret);
+        row.append(icon, copy, trailing);
         list.append(row);
       }
       wrap.append(list);
     }
-    return wrap;
-  }
-
-  private renderChangeNavigation(): HTMLElement {
-    const wrap = el("div");
-    wrap.append(button(`← ${this.t("navigation.backToMemory")}`, "memory-button", () => this.navigate(this.memoryIndexTarget())));
-    for (const kind of kindOrder) {
-      const group = this.#memories.filter(memory => memory.kind === kind);
-      if (!group.length) continue;
-      wrap.append(el("div", "memory-kind", this.t(kind)));
-      const list = el("div", "memory-list");
-      for (const memory of group) list.append(button(memoryName(memory), "memory-button" + (memory.id === this.#selectedId ? " active" : ""), () => { this.#selectedId = memory.id; this.render(); }));
-      wrap.append(list);
-    }
+    if (!visible.length) wrap.append(el("div", "memory-list-empty", this.t("market.empty")));
+    wrap.append(el("footer", "memory-list-footer", this.format("memory.marketItemCount", { count: visible.length })));
     return wrap;
   }
 
@@ -867,7 +1214,7 @@ class MemoryApplication {
     const main = el("main", "memory-workspace");
     const route = parseLocation(this.#location);
     if (route.kind === "market") main.append(this.renderMarketDetail());
-    else if (route.kind === "change") main.append(this.renderChangeDetail());
+    else if (route.kind === "change" || this.#location.query.section === "changes") main.append(this.renderChangeDetail());
     else main.append(this.renderMemoryDetail());
     return main;
   }
@@ -883,11 +1230,10 @@ class MemoryApplication {
     }
     const entity = (detail.entity ?? detail) as JsonRecord;
     const workspace = el("div");
-    const toolbar = el("header", "memory-toolbar");
-    const title = el("div"); title.append(el("h2", "memory-title", memoryName(detail)), el("div", "memory-subtitle", detail.id));
-    toolbar.append(title);
+    const content = el("section", "memory-panel memory-content-card");
+    content.append(renderMemoryEntity(detail.kind, entity, this.t.bind(this), (target, snapshot, location) => void this.beginMemoryComment(detail, target, snapshot, location), this.renderOptions()));
     if (context) workspace.append(context);
-    workspace.append(toolbar, renderMeta(detail), renderMemoryEntity(detail.kind, entity, this.t.bind(this), (target, snapshot, location) => void this.beginMemoryComment(detail, target, snapshot, location), this.renderOptions()));
+    workspace.append(content);
     return workspace;
   }
 
@@ -909,10 +1255,9 @@ class MemoryApplication {
     const item = this.#market.find(candidate => candidate.reference === this.#selectedMarket);
     if (!item) return emptyWorkspace(this.t("market.empty"));
     const workspace = el("div");
-    const toolbar = el("header", "memory-toolbar");
-    const title = el("div"); title.append(el("h2", "memory-title", memoryName((item.entity ?? item) as MemorySummary)), el("div", "memory-subtitle", String(item.reference ?? "")));
-    toolbar.append(title, marketStatus(String(item.status ?? ""), this.marketStatusLabel(String(item.status ?? ""))));
-    workspace.append(toolbar, renderMemoryEntity(String(item.kind ?? ""), (item.entity ?? item) as JsonRecord, this.t.bind(this), undefined, this.renderOptions()));
+    const content = el("section", "memory-panel memory-content-card");
+    content.append(renderMemoryEntity(String(item.kind ?? ""), (item.entity ?? item) as JsonRecord, this.t.bind(this), undefined, this.renderOptions()));
+    workspace.append(content);
     return workspace;
   }
 
@@ -922,9 +1267,6 @@ class MemoryApplication {
     const change = (payload.change ?? {}) as ChangeSummary;
     if (payload.error) return errorWorkspace(change.id || this.t("change.title"), String(payload.error));
     const workspace = el("div");
-    const toolbar = el("header", "memory-toolbar");
-    const title = el("div"); title.append(el("h2", "memory-title", change.id), el("div", "memory-subtitle", this.changeStatusLabel(String(change.status ?? ""))));
-    toolbar.append(title); workspace.append(toolbar);
     const sourceWorktree = change.sourceWorktree as JsonRecord | undefined;
     if (sourceWorktree && sourceWorktree.available === false) {
       const source = el("section", "memory-error memory-source-worktree");
@@ -1077,22 +1419,69 @@ class MemoryApplication {
   private async openChange(changeId: string): Promise<void> {
     if (!changeId) return;
     const projectId = this.#currentProject || projectFromLocation(this.#location) || "memsphere";
-    await this.navigate(this.#routes.changeDetail.to({ projectId, changeId }));
+    const section = memorySection(this.#location);
+    if (section === "market") {
+      const query = this.#selectedMarket ? { item: this.#selectedMarket } : {};
+      const sourceProjectId = projectFromLocation(this.#location);
+      this.#changeReturnTarget = sourceProjectId
+        ? this.#routes.projectMarket.to({ projectId: sourceProjectId }, { query })
+        : this.#routes.market.to(undefined, { query });
+    } else {
+      this.#changeReturnTarget = undefined;
+    }
+    await this.navigate(this.#routes.changeDetail.to({ projectId, changeId }, { query: { section } }));
   }
 
   private async navigate(target: RouteTarget): Promise<void> { await this.#navigate(target); }
 
   private memoryIndexTarget(): RouteTarget {
-    return this.#routes.index.to();
+    if (this.#changeReturnTarget) return this.#changeReturnTarget;
+    const section = memorySection(this.#location);
+    const projectId = projectFromLocation(this.#location);
+    if (section === "market") {
+      const query = this.#selectedMarket ? { item: this.#selectedMarket } : {};
+      return projectId
+        ? this.#routes.projectMarket.to({ projectId }, { query })
+        : this.#routes.market.to(undefined, { query });
+    }
+    if (section === "project" && projectId) {
+      return this.#routes.projectIndex.to({ projectId }, { query: { section } });
+    }
+    return this.#routes.index.to(undefined, { query: { section } });
   }
 
-  private marketTarget(): RouteTarget {
-    return this.#routes.market.to();
+  private marketTarget(item = ""): RouteTarget {
+    return this.#routes.market.to(undefined, { query: item ? { item } : {} });
   }
 
   private visibleMemories(): MemorySummary[] {
     const query = this.#query.trim().toLowerCase();
-    return this.#memories.filter(memory => (!this.#hideSystem || !memory.system) && (!query || `${memory.id} ${memory.path} ${(memory.names ?? []).join(" ")}`.toLowerCase().includes(query)));
+    const visible = this.#memories.filter(memory => (!this.#hideSystem || !memory.system) && (!query || `${memory.id} ${memory.path} ${(memory.names ?? []).join(" ")}`.toLowerCase().includes(query)));
+    if (this.#location.query.section !== "recent") return visible;
+    const byId = new Map(visible.map(memory => [memory.id, memory]));
+    return this.recentMemoryIds().map(id => byId.get(id)).filter((memory): memory is MemorySummary => Boolean(memory));
+  }
+
+  private recentMemoryIds(): string[] {
+    const project = this.#currentProject || projectFromLocation(this.#location) || "memsphere";
+    try {
+      const stored = JSON.parse(localStorage.getItem(recentMemoriesKey) || "{}");
+      return Array.isArray(stored[project]) ? stored[project].filter((value: unknown): value is string => typeof value === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private rememberRecentMemory(id: string): void {
+    if (!id) return;
+    const project = this.#currentProject || projectFromLocation(this.#location) || "memsphere";
+    let stored: Record<string, string[]> = {};
+    try {
+      const parsed = JSON.parse(localStorage.getItem(recentMemoriesKey) || "{}");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) stored = parsed;
+    } catch { /* reset corrupt recent history */ }
+    stored[project] = [id, ...(stored[project] ?? []).filter(candidate => candidate !== id)].slice(0, recentMemoryLimit);
+    localStorage.setItem(recentMemoriesKey, JSON.stringify(stored));
   }
 
   private currentOperator(): JsonRecord | null {
@@ -1132,7 +1521,8 @@ class MemoryApplication {
         const memory = this.#memories.find(candidate => memoryReference(candidate) === target || candidate.names?.[0] === target);
         if (!memory) return;
         const [kind, ...name] = memory.id.split("/");
-        void this.navigate(this.#routes.memoryDetail.to({ kind, name: name.join("/") }));
+        const query = this.#location.query.section ? { section: this.#location.query.section } : {};
+        void this.navigate(this.#routes.memoryDetail.to({ kind, name: name.join("/") }, { query }));
       }
     };
   }
@@ -1140,6 +1530,8 @@ class MemoryApplication {
   private format(key: string, params: Record<string, string | number>): string { return Object.entries(params).reduce((value, [name, replacement]) => value.replaceAll(`{${name}}`, String(replacement)), this.t(key)); }
 
   private renderError(error: unknown, retry: () => void): void {
+    this.#fatalError = error;
+    if (this.#listRoot || this.#detailRoot) { this.render(); return; }
     this.#root.querySelector(".memory-module")?.remove();
     const app = el("section", "memory-module memory-workspace");
     const panel = errorWorkspace(this.t("fatal.title"), errorMessage(error)); panel.append(button(this.t("common.retry"), "memory-btn", retry)); app.append(panel); this.#root.append(app);
@@ -1508,6 +1900,18 @@ function memoryName(memory: MemorySummary): string {
   const entity = memory.entity ?? memory;
   const names = Array.isArray(entity.names) ? entity.names : memory.names;
   return String(names?.[1] ?? names?.[0] ?? entity.name ?? (basenameWithoutExtension(memory.path) || memory.id?.split("/").at(-1)) ?? "Memory");
+}
+function memorySummaryDescription(memory: MemorySummary): string {
+  const entity = memory.entity ?? memory;
+  for (const key of ["summary", "description", "defines", "goals"] as const) {
+    const value = entity[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (Array.isArray(value)) {
+      const first = value.find(entry => typeof entry === "string" && entry.trim());
+      if (typeof first === "string") return first.trim();
+    }
+  }
+  return "";
 }
 function memoryReference(memory: MemorySummary): string {
   const entity = memory.entity ?? memory;

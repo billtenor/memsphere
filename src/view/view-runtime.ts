@@ -2,6 +2,7 @@ import {
   createHostRouteActivation,
   createHostRouteProjection,
   createHostRouteTarget,
+  isSearchResultDescriptor,
   isSlotToken,
   slots,
   type Disposer,
@@ -21,11 +22,16 @@ import {
   type RouteDefinition,
   type RouteLocation,
   type RouteProjection,
+  type RouteProjectionOptions,
   type RouteTarget,
+  type RouteTargetOptions,
   type RouteToken,
   type SlotKind,
   type SlotRegistry,
   type SlotToken,
+  type SearchProviderDescriptor,
+  type SearchResultDescriptor,
+  type SecondaryNavigationDescriptor,
   type SidebarFooterDescriptor,
   type TextRef,
   type ViewLifecycle,
@@ -58,6 +64,8 @@ type RuntimeRouteProjection = {
   readonly from: RuntimeRoute;
   readonly to: RuntimeRoute;
   readonly params: Readonly<Record<string, string>>;
+  readonly query: Readonly<Record<string, string>>;
+  readonly hash: "discard" | "preserve";
   readonly owner: string;
 };
 
@@ -67,6 +75,7 @@ type RuntimeRoute = {
   readonly path: string;
   readonly patterns: readonly { readonly path: string; readonly pattern: RegExp }[];
   readonly parameterNames: readonly string[];
+  readonly queryKeys: readonly string[];
   readonly activation: RouteActivation;
   readonly owner: string;
 };
@@ -81,6 +90,7 @@ export interface ViewRouteGrant {
   readonly id: string;
   readonly path: string;
   readonly aliases?: readonly string[];
+  readonly query?: readonly string[];
 }
 
 export interface ViewPluginInstanceOptions<Config = unknown> {
@@ -159,26 +169,46 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     pathname: globalThis.location?.pathname ?? "/",
     search: globalThis.location?.search ?? "",
     hash: globalThis.location?.hash ?? "",
-    params: Object.freeze({})
+    params: Object.freeze({}),
+    query: Object.freeze({})
   };
   const routeRegistry = new RuntimeRouteStore(initialLocation);
   const slotsRegistry = new RuntimeSlotStore(routeRegistry);
   const instances: RuntimePluginInstance[] = [];
   const diagnostics: ViewInstanceDiagnostic[] = [];
+  let activeListMount: RuntimeActiveMount | undefined;
   let activeMainMount: RuntimeActiveMount | undefined;
   let activeOverlayMount: RuntimeActiveMount | undefined;
+  let pendingOverlayRestore: Disposer | undefined;
+  let navigationInProgress = false;
   let disposed = false;
+  let disposeSearch: Disposer = () => undefined;
   let navigationQueue = Promise.resolve();
   let composeCurrentLocation: () => Promise<void> = async () => {
     throw new Error("ViewHost navigation is not ready");
   };
 
-  routeRegistry.setNavigator(async (target, replace) => {
+  const flushPendingOverlayRestore = async (): Promise<void> => {
+    const restore = pendingOverlayRestore;
+    pendingOverlayRestore = undefined;
+    await restore?.();
+  };
+
+  routeRegistry.setNavigator(async (target, replace, preserveScroll) => {
     const path = routeRegistry.targetPath(target);
     if (path === undefined) throw new Error("Route target was not created by this ViewHost");
     globalThis.history?.[replace ? "replaceState" : "pushState"]({}, "", path);
-    await composeCurrentLocation();
-    globalThis.scrollTo?.(0, 0);
+    navigationInProgress = true;
+    try {
+      await composeCurrentLocation();
+      if (preserveScroll) await flushPendingOverlayRestore();
+      else {
+        pendingOverlayRestore = undefined;
+        globalThis.scrollTo?.(0, 0);
+      }
+    } finally {
+      navigationInProgress = false;
+    }
   });
 
   const coreMessages = options.coreConfig?.messages ?? {};
@@ -349,11 +379,70 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     }
   };
 
-  const dismissOverlay = async (descriptor: OverlayMountDescriptor, source: RouteLocation): Promise<void> => {
-    await routeRegistry.navigate(routeRegistry.projectedTarget(descriptor.background, source));
+  const activateListEntry = async (entry: RuntimeEntry, location: RouteLocation): Promise<void> => {
+    const shell = options.root.closest<HTMLElement>("[data-view-shell]");
+    const host = shell?.querySelector<HTMLElement>('[data-view-slot="content.list"]');
+    if (!host) throw new Error("ViewHost Shell does not provide the content.list Slot container");
+    const locationIdentity = routeLocationIdentity(location);
+    if (activeListMount?.entry === entry && activeListMount.locationIdentity === locationIdentity) return;
+    const mount = entry.value as ViewMount;
+    const current = activeListMount;
+    if (current && current.entry.value === entry.value && mount.update) {
+      await mount.update({ module: moduleForOwner(instances, entry.owner), route: location });
+      current.entry = entry;
+      current.locationIdentity = locationIdentity;
+      current.element.dataset.viewMount = entry.identity;
+      current.element.dataset.viewLocation = `${location.pathname}${location.search}${location.hash}`;
+      return;
+    }
+    const element = document.createElement("div");
+    element.className = "view-host-list-mount";
+    element.dataset.viewMount = entry.identity;
+    element.dataset.viewLocation = `${location.pathname}${location.search}${location.hash}`;
+    const portal = document.createElement("div");
+    portal.className = "view-host-list-portal";
+    portal.dataset.viewPortal = entry.identity;
+    const pagePortalRoot = shell?.querySelector<HTMLElement>("[data-view-page-portals]");
+    (pagePortalRoot ?? document.body).append(portal);
+    try {
+      const disposer = await mount.mount(
+        { element, portal },
+        { module: moduleForOwner(instances, entry.owner), route: location }
+      );
+      if (disposer !== undefined && typeof disposer !== "function") throw new Error("View Mount must return void or a disposer");
+      const previous = activeListMount;
+      activeListMount = undefined;
+      await disposeActiveMount(previous);
+      host.replaceChildren(element);
+      activeListMount = { entry, element, portal, locationIdentity, ...(disposer ? { disposer } : {}) };
+    } catch (error) {
+      portal.remove();
+      element.remove();
+      const previous = activeListMount;
+      activeListMount = undefined;
+      await disposeActiveMount(previous);
+      renderRuntimePageFailure(host, moduleForOwner(instances, entry.owner), errorMessage(error), () => activeHost.activateMainView());
+    }
   };
 
-  const activateOverlayEntry = async (entry: RuntimeEntry, location: RouteLocation): Promise<void> => {
+  const clearListMount = async (): Promise<void> => {
+    const previous = activeListMount;
+    activeListMount = undefined;
+    await disposeActiveMount(previous);
+    options.root.closest<HTMLElement>("[data-view-shell]")
+      ?.querySelector<HTMLElement>('[data-view-slot="content.list"]')
+      ?.replaceChildren();
+  };
+
+  const dismissOverlay = async (descriptor: OverlayMountDescriptor, source: RouteLocation): Promise<void> => {
+    await routeRegistry.navigate(routeRegistry.projectedTarget(descriptor.background, source), true, true);
+  };
+
+  const activateOverlayEntry = async (
+    entry: RuntimeEntry,
+    location: RouteLocation,
+    backgroundScroll: readonly RuntimeScrollSnapshot[],
+  ): Promise<void> => {
     const locationIdentity = routeLocationIdentity(location);
     if (activeOverlayMount?.entry === entry && activeOverlayMount.locationIdentity === locationIdentity) return;
     const previous = activeOverlayMount;
@@ -363,6 +452,12 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     const host = options.root.closest<HTMLElement>("[data-view-shell]")?.querySelector<HTMLElement>('[data-view-slot="overlay"]');
     if (!host) throw new Error("ViewHost Shell does not provide the overlay Slot container");
     const restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+    const restoreBackground = () => {
+      if (restoreFocus?.isConnected) restoreFocus.focus({ preventScroll: true });
+      for (const snapshot of backgroundScroll) {
+        if (snapshot.element.isConnected) snapshot.element.scrollTo({ top: snapshot.top, left: snapshot.left });
+      }
+    };
     const layer = document.createElement("div");
     layer.className = `view-overlay-layer view-overlay-${descriptor.presentation}`;
     layer.dataset.viewOverlay = entry.identity;
@@ -418,11 +513,9 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
         locationIdentity,
         disposer: async () => {
           try { await mountDisposer?.(); }
-          finally {
-            document.removeEventListener("keydown", onKeydown);
-            if (restoreFocus?.isConnected) restoreFocus.focus();
-          }
-        }
+          finally { document.removeEventListener("keydown", onKeydown); }
+        },
+        afterDispose: () => { pendingOverlayRestore = restoreBackground; }
       };
     } catch (error) {
       document.removeEventListener("keydown", onKeydown);
@@ -435,7 +528,10 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       detail.textContent = errorMessage(error);
       panel.append(heading, detail);
       element.append(panel);
-      activeOverlayMount = { entry, element, portal, container: layer, locationIdentity };
+      activeOverlayMount = {
+        entry, element, portal, container: layer, locationIdentity,
+        afterDispose: () => { pendingOverlayRestore = restoreBackground; }
+      };
     }
   };
 
@@ -443,6 +539,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     async activateMainView(key?: string): Promise<void> {
       if (disposed) throw new Error("ViewHost is already disposed");
       const location = routeRegistry.location;
+      syncShellLayout(options.root, location, slotsRegistry);
       const selectedKey = key ?? options.mainViewKey ?? location.routeKey;
       if (!selectedKey) {
         renderRuntimePageFailure(options.root, undefined, `No View Route matches: ${location.pathname}`, () => activeHost.activateMainView(key));
@@ -450,27 +547,47 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       }
       const overlayEntry = key === undefined ? slotsRegistry.entry(slots.overlay, selectedKey, location) : undefined;
       if (overlayEntry) {
+        const backgroundScroll = captureBackgroundScroll(options.root);
         const descriptor = overlayEntry.value as OverlayMountDescriptor;
         const background = routeRegistry.projectedLocation(descriptor.background, location);
+        const backgroundListEntry = slotsRegistry.entries(slots.contentList, background)[0];
         const backgroundEntry = background.routeKey
           ? slotsRegistry.entry(slots.mainView, background.routeKey, background)
           : undefined;
         if (!backgroundEntry) throw new Error("Overlay background Route does not provide main.view");
-        await activateMainEntry(backgroundEntry, background);
-        await activateOverlayEntry(overlayEntry, location);
+        const currentListMount = activeListMount;
+        if (backgroundListEntry && currentListMount && currentListMount.entry.value === backgroundListEntry.value) {
+          adoptMountLocation(currentListMount, backgroundListEntry, background);
+        } else if (backgroundListEntry) await activateListEntry(backgroundListEntry, background);
+        else await clearListMount();
+        const currentMainMount = activeMainMount;
+        if (currentMainMount && currentMainMount.entry.value === backgroundEntry.value) {
+          adoptMountLocation(currentMainMount, backgroundEntry, background);
+        } else await activateMainEntry(backgroundEntry, background);
+        await activateOverlayEntry(overlayEntry, location, backgroundScroll);
         renderShellDescriptors(options.root, slotsRegistry, routeRegistry, background);
+        syncShellLayout(options.root, background, slotsRegistry);
+        if (!navigationInProgress) await flushPendingOverlayRestore();
         return;
       }
-      await disposeActiveMount(activeOverlayMount);
+      const previousOverlay = activeOverlayMount;
       activeOverlayMount = undefined;
       const entry = slotsRegistry.entry(slots.mainView, selectedKey, location);
       if (!entry) {
         const owner = routeRegistry.owner(location.pathname);
         renderRuntimePageFailure(options.root, owner ? moduleForOwner(instances, owner) : undefined, `ViewHost has no main.view for key: ${selectedKey}`, () => activeHost.activateMainView(key));
+        await disposeActiveMount(previousOverlay);
+        if (!navigationInProgress) await flushPendingOverlayRestore();
         return;
       }
+      const listEntry = slotsRegistry.entries(slots.contentList, location)[0];
+      if (listEntry) await activateListEntry(listEntry, location);
+      else await clearListMount();
       await activateMainEntry(entry, location);
       renderShellDescriptors(options.root, slotsRegistry, routeRegistry);
+      syncShellLayout(options.root, location, slotsRegistry);
+      await disposeActiveMount(previousOverlay);
+      if (!navigationInProgress) await flushPendingOverlayRestore();
     },
     diagnostics(): ViewHostDiagnosticSnapshot {
       return Object.freeze({
@@ -489,12 +606,24 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
         errors.push(error);
       }
       activeOverlayMount = undefined;
+      pendingOverlayRestore = undefined;
       try {
         await disposeActiveMount(activeMainMount);
       } catch (error) {
         errors.push(error);
       }
       activeMainMount = undefined;
+      try {
+        await disposeActiveMount(activeListMount);
+      } catch (error) {
+        errors.push(error);
+      }
+      activeListMount = undefined;
+      try {
+        await disposeSearch();
+      } catch (error) {
+        errors.push(error);
+      }
       globalThis.removeEventListener?.("popstate", handlePopstate);
       for (const instance of [...instances].reverse()) {
         errors.push(...await instance.lifecycle.disposeCollectingErrors());
@@ -502,6 +631,8 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       if (errors.length) throw new AggregateError(errors, "ViewHost cleanup failed");
     }
   });
+
+  disposeSearch = setupSearchRuntime(options.root, slotsRegistry, routeRegistry);
 
   const compose = async (): Promise<void> => {
     if (disposed) return;
@@ -855,10 +986,13 @@ class RuntimeSlotTransaction implements SlotRegistry {
   ): Disposer {
     if (this.#state !== "committed") throw new Error("Live Slot updates require a committed Plugin instance");
     if (this.#lifecycle.disposed) throw new Error("View Plugin instance is already disposed");
-    if (token !== slots.headerActions && token !== slots.homeAttention && token !== slots.homeContinue) {
+    if (token !== slots.navigationSecondary && token !== slots.headerTitle && token !== slots.headerActions && token !== slots.homeAttention && token !== slots.homeContinue) {
       throw new Error(`Slot ${slotIdentity(token)} does not allow live Module updates`);
     }
     validateSlotRegistration(token, options);
+    if ((token === slots.navigationSecondary || token === slots.headerTitle) && options.when === undefined) {
+      throw new Error(`${slotIdentity(token)} live updates require a Route activation`);
+    }
     const owner = moduleIdentity(this.#module);
     const liveIdentity = [owner, slotIdentity(token), options.id].join(":");
     const epoch = (this.#liveEpochs.get(liveIdentity) ?? 0) + 1;
@@ -906,7 +1040,7 @@ class RuntimeRouteStore {
   readonly #targetPaths = new WeakMap<RouteTarget, string>();
   readonly #tokens = new WeakMap<RouteToken, RuntimeRoute>();
   readonly #projections = new WeakMap<RouteProjection, RuntimeRouteProjection>();
-  #navigate: ((target: RouteTarget, replace: boolean) => Promise<void>) | undefined;
+  #navigate: ((target: RouteTarget, replace: boolean, preserveScroll: boolean) => Promise<void>) | undefined;
 
   constructor(location: RouteLocation) {
     this.#location = freezeLocation(location);
@@ -916,36 +1050,32 @@ class RuntimeRouteStore {
     return this.#location;
   }
 
-  setNavigator(navigate: (target: RouteTarget, replace: boolean) => Promise<void>): void {
+  setNavigator(navigate: (target: RouteTarget, replace: boolean, preserveScroll: boolean) => Promise<void>): void {
     this.#navigate = navigate;
   }
 
-  navigate(target: RouteTarget, replace = false): Promise<void> {
+  navigate(target: RouteTarget, replace = false, preserveScroll = false): Promise<void> {
     if (!this.#navigate) throw new Error("ViewHost navigation is not ready");
-    return this.#navigate(target, replace);
+    return this.#navigate(target, replace, preserveScroll);
   }
 
   updateLocation(location: RouteLocation): void {
     const matched = this.match(location.pathname);
     const route = matched?.route;
     const params = matched ? matchRouteParams(matched) : Object.freeze({});
+    const query = route ? parseRouteQuery(location.search, route.queryKeys) : Object.freeze({});
+    const canonicalSearch = route ? formatRouteQuery(query, route.queryKeys) : "";
+    const canonicalPath = route && matched ? fillRoutePath(route, params) : location.pathname;
     this.#location = freezeLocation({
-      pathname: location.pathname,
-      search: location.search,
+      pathname: canonicalPath,
+      search: canonicalSearch,
       hash: location.hash,
       params,
+      query,
       ...(route ? { routeKey: route.key } : {})
     });
-    if (matched && matched.matchedPath !== route?.path) {
-      const canonicalPath = fillRoutePath(route!, params);
-      globalThis.history?.replaceState({}, "", canonicalPath + location.search + location.hash);
-      this.#location = freezeLocation({
-        pathname: canonicalPath,
-        search: location.search,
-        hash: location.hash,
-        params,
-        routeKey: route!.key
-      });
+    if (matched && (matched.matchedPath !== route?.path || location.pathname !== canonicalPath || location.search !== canonicalSearch)) {
+      globalThis.history?.replaceState({}, "", canonicalPath + canonicalSearch + location.hash);
     }
   }
 
@@ -1016,11 +1146,10 @@ class RuntimeRouteStore {
   }
 
   createProjection(
-    fromToken: RouteToken,
-    toToken: RouteToken,
-    params: Readonly<Record<string, string>>,
+    options: RouteProjectionOptions,
     owner: string,
   ): RouteProjection {
+    const { from: fromToken, to: toToken, params } = options;
     const from = this.#tokens.get(fromToken);
     const to = this.#tokens.get(toToken);
     if (!from || !to) throw new Error("Route projection requires Route Tokens created by this ViewHost");
@@ -1035,8 +1164,29 @@ class RuntimeRouteStore {
     if (Object.keys(params).some(name => !to.parameterNames.includes(name))) {
       throw new Error("Route projection maps an unknown target parameter");
     }
+    const query = options.query ?? {};
+    const sourceQueryKeys = new Set(from.queryKeys);
+    const targetQueryKeys = new Set(to.queryKeys);
+    for (const [targetName, sourceName] of Object.entries(query)) {
+      if (!targetQueryKeys.has(targetName)) {
+        throw new Error(`Route projection maps an unknown target query: ${targetName}`);
+      }
+      if (!sourceQueryKeys.has(sourceName)) {
+        throw new Error(`Route projection maps an unknown source query: ${sourceName}`);
+      }
+    }
+    if (options.hash !== undefined && options.hash !== "discard" && options.hash !== "preserve") {
+      throw new Error("Route projection hash must be discard or preserve");
+    }
     const projection = createHostRouteProjection();
-    this.#projections.set(projection, { from, to, params: Object.freeze({ ...params }), owner });
+    this.#projections.set(projection, {
+      from,
+      to,
+      params: Object.freeze({ ...params }),
+      query: Object.freeze({ ...query }),
+      hash: options.hash ?? "discard",
+      owner
+    });
     return projection;
   }
 
@@ -1051,11 +1201,18 @@ class RuntimeRouteStore {
       if (parameter === undefined) throw new Error(`Overlay Route parameter is missing: ${sourceName}`);
       params[targetName] = parameter;
     }
+    const query: Record<string, string> = {};
+    for (const [targetName, sourceName] of Object.entries(value.query)) {
+      const queryValue = source.query[sourceName];
+      if (queryValue !== undefined) query[targetName] = queryValue;
+    }
+    const frozenQuery = Object.freeze(query);
     return freezeLocation({
       pathname: fillRoutePath(value.to, params),
-      search: "",
-      hash: "",
+      search: formatRouteQuery(frozenQuery, value.to.queryKeys),
+      hash: value.hash === "preserve" ? source.hash : "",
       params: Object.freeze(params),
+      query: frozenQuery,
       routeKey: value.to.key,
       projected: true
     });
@@ -1128,6 +1285,9 @@ class RuntimeRouteTransaction implements ViewRouter {
     if (grant && definition.path !== grant.path) {
       throw new Error(`Route path does not match built-in grant ${definition.id}: ${definition.path}`);
     }
+    if (grant && definition.query !== undefined && !sameStrings(definition.query, grant.query ?? [])) {
+      throw new Error(`Route query allowlist does not match built-in grant ${definition.id}`);
+    }
     const template = grant?.path ?? joinRoutePath(this.#basePath, definition.path);
     const compiled = compileRoute(template);
     const aliases = (grant?.aliases ?? []).map(alias => ({ path: alias, ...compileRoute(alias) }));
@@ -1146,6 +1306,7 @@ class RuntimeRouteTransaction implements ViewRouter {
         ...aliases.map(alias => Object.freeze({ path: alias.path, pattern: alias.pattern }))
       ]),
       parameterNames: compiled.parameterNames,
+      queryKeys: Object.freeze([...(definition.query ?? grant?.query ?? [])]),
       activation,
       owner
     };
@@ -1154,17 +1315,17 @@ class RuntimeRouteTransaction implements ViewRouter {
     const token = Object.freeze({
       key,
       activation,
-      to: (params: Readonly<Record<string, string>> = {}) => (
-        this.#store.createTarget(fillRoutePath(route, params))
+      to: (params: Readonly<Record<string, string>> = {}, options: RouteTargetOptions = {}) => (
+        this.#store.createTarget(routeTargetPath(route, params, options))
       )
     });
     this.#store.rememberToken(token, route);
     return token;
   }
 
-  project(options: { readonly from: RouteToken; readonly to: RouteToken; readonly params: Readonly<Record<string, string>> }): RouteProjection {
+  project(options: RouteProjectionOptions): RouteProjection {
     if (this.#state !== "open") throw new Error("View Plugin registration transaction is already closed");
-    return this.#store.createProjection(options.from, options.to, options.params, moduleIdentity(this.#module));
+    return this.#store.createProjection(options, moduleIdentity(this.#module));
   }
 
   async navigate(target: RouteTarget): Promise<void> {
@@ -1200,10 +1361,37 @@ type RuntimeActiveMount = {
   readonly container?: HTMLElement;
   locationIdentity: string;
   readonly disposer?: Disposer;
+  readonly afterDispose?: Disposer;
 };
+
+type RuntimeScrollSnapshot = {
+  readonly element: Element;
+  readonly top: number;
+  readonly left: number;
+};
+
+function captureBackgroundScroll(root: HTMLElement): readonly RuntimeScrollSnapshot[] {
+  const shell = root.closest<HTMLElement>("[data-view-shell]");
+  const candidates: Array<Element | null> = [
+    root,
+    shell?.querySelector<HTMLElement>('[data-view-slot="content.list"]') ?? null,
+    shell?.querySelector<HTMLElement>('[data-view-slot="navigation.secondary"]') ?? null,
+    document.scrollingElement,
+  ];
+  return candidates
+    .filter((element): element is Element => element instanceof Element)
+    .map(element => ({ element, top: element.scrollTop, left: element.scrollLeft }));
+}
 
 function routeLocationIdentity(location: Readonly<RouteLocation>): string {
   return `${location.pathname}\u0000${location.search}\u0000${location.hash}\u0000${JSON.stringify(location.params)}`;
+}
+
+function adoptMountLocation(mount: RuntimeActiveMount, entry: RuntimeEntry, location: RouteLocation): void {
+  mount.entry = entry;
+  mount.locationIdentity = routeLocationIdentity(location);
+  mount.element.dataset.viewMount = entry.identity;
+  mount.element.dataset.viewLocation = `${location.pathname}${location.search}${location.hash}`;
 }
 
 async function disposeActiveMount(mount: RuntimeActiveMount | undefined): Promise<void> {
@@ -1213,6 +1401,7 @@ async function disposeActiveMount(mount: RuntimeActiveMount | undefined): Promis
   } finally {
     (mount.container ?? mount.element).remove();
     mount.portal.remove();
+    await mount.afterDispose?.();
   }
 }
 
@@ -1235,12 +1424,14 @@ function renderShellDescriptors(
   if (!shell) return;
   const location = renderedLocation ?? routeStore.location;
   const navigation = shell.querySelector<HTMLElement>('[data-view-slot="navigation.primary"]');
+  const secondary = shell.querySelector<HTMLElement>('[data-view-slot="navigation.secondary"]');
   const title = shell.querySelector<HTMLElement>('[data-view-slot="header.title"]');
   const actions = shell.querySelector<HTMLElement>('[data-view-slot="header.actions"]');
   const account = shell.querySelector<HTMLElement>('[data-view-slot="header.account"]');
   const footer = shell.querySelector<HTMLElement>('[data-view-slot="sidebar.footer"]');
 
   if (navigation) {
+    const activeOwner = routeStore.owner(location.pathname);
     navigation.replaceChildren(...slotStore.entries(slots.navigationPrimary, location).map(entry => {
       const descriptor = entry.value as NavigationItemDescriptor;
       const button = document.createElement("button");
@@ -1248,8 +1439,12 @@ function renderShellDescriptors(
       button.className = "view-shell-navigation-item";
       button.dataset.viewEntry = entry.identity;
       const targetPath = routeStore.targetPath(descriptor.route);
-      const active = targetPath !== undefined && routePathname(targetPath) === location.pathname;
-      button.append(renderIcon(descriptor.icon, active ? "fill" : "regular"), textNode(descriptor.label));
+      const active = entry.owner === activeOwner;
+      button.setAttribute("aria-label", textValue(descriptor.label));
+      const iconTile = document.createElement("span");
+      iconTile.className = "view-shell-module-icon";
+      iconTile.append(renderIcon(descriptor.icon, active ? "fill" : "regular"));
+      button.append(iconTile, textNode(descriptor.label));
       if (descriptor.badge) {
         const badge = document.createElement("span");
         badge.className = "view-shell-navigation-badge";
@@ -1265,10 +1460,16 @@ function renderShellDescriptors(
     }));
   }
 
+  if (secondary) {
+    secondary.replaceChildren();
+    const entry = slotStore.entries(slots.navigationSecondary, location)[0];
+    if (entry) secondary.append(renderSecondaryNavigation(entry.value as SecondaryNavigationDescriptor, root, routeStore));
+  }
+
   if (title) {
     const entry = slotStore.entries(slots.headerTitle, location)[0];
     title.replaceChildren();
-    if (entry) title.append(renderHeaderTitle(entry.value as HeaderTitleDescriptor, root, routeStore));
+    if (entry) title.append(renderHeaderTitle(entry.value as HeaderTitleDescriptor, entry.identity, root, routeStore));
   }
 
   if (actions) {
@@ -1288,6 +1489,311 @@ function renderShellDescriptors(
       renderSidebarFooter(entry.value as SidebarFooterDescriptor, entry.identity)
     )));
   }
+}
+
+function setupSearchRuntime(
+  root: HTMLElement,
+  slotStore: RuntimeSlotStore,
+  routeStore: RuntimeRouteStore,
+): Disposer {
+  const shell = root.closest<HTMLElement>("[data-view-shell]");
+  const trigger = shell?.querySelector<HTMLButtonElement>("[data-view-search-trigger]");
+  const overlay = shell?.querySelector<HTMLElement>("[data-view-search-overlay]");
+  const input = shell?.querySelector<HTMLInputElement>("[data-view-search-input]");
+  const closeButton = shell?.querySelector<HTMLButtonElement>("[data-view-search-close]");
+  const categories = shell?.querySelector<HTMLElement>('[data-view-slot="search.providers"]');
+  const results = shell?.querySelector<HTMLElement>("[data-view-search-results]");
+  const empty = shell?.querySelector<HTMLElement>("[data-view-search-empty]");
+  const status = shell?.querySelector<HTMLElement>("[data-view-search-status]");
+  if (!trigger || !overlay || !input || !closeButton || !categories || !results || !empty || !status) {
+    return () => undefined;
+  }
+
+  type CachedProviderResult = Readonly<{
+    entry: RuntimeEntry;
+    results?: readonly SearchResultDescriptor[];
+    error?: string;
+  }>;
+  let open = false;
+  let selectedOwner = "*";
+  let session = 0;
+  let epoch = 0;
+  let debounceTimer = 0;
+  let restoreFocus: HTMLElement | undefined;
+  const cache = new Map<string, CachedProviderResult>();
+  const pending = new Map<string, AbortController>();
+  const chinese = document.documentElement.lang.toLowerCase().startsWith("zh");
+  const allLabel = chinese ? "全部" : "All";
+
+  const providerEntries = (): readonly RuntimeEntry[] => slotStore.entries(slots.searchProviders, routeStore.location);
+  const eligibleEntries = (): readonly RuntimeEntry[] => providerEntries().filter(entry => selectedOwner === "*" || entry.owner === selectedOwner);
+  const cacheKey = (entry: RuntimeEntry, query: string) => `${entry.identity}\u0000${query}`;
+  const abortAll = () => {
+    for (const controller of pending.values()) controller.abort();
+    pending.clear();
+  };
+  const isEditable = (target: EventTarget | null): boolean => {
+    if (!(target instanceof HTMLElement)) return false;
+    return target.matches("input, textarea, select, [contenteditable]:not([contenteditable=\"false\"])")
+      || target.closest("[contenteditable]:not([contenteditable=\"false\"])") !== null;
+  };
+  const validResults = (value: unknown): readonly SearchResultDescriptor[] => {
+    if (!Array.isArray(value)) throw new Error("Search Provider must return an array");
+    for (const result of value) {
+      if (!isSearchResultDescriptor(result)) throw new Error("Search Provider returned an invalid result");
+    }
+    return Object.freeze([...value]) as readonly SearchResultDescriptor[];
+  };
+  const renderResults = () => {
+    const query = input.value.trim();
+    results.replaceChildren();
+    status.textContent = "";
+    if (!query) {
+      empty.hidden = false;
+      results.hidden = true;
+      return;
+    }
+    const cached = eligibleEntries().map(entry => cache.get(cacheKey(entry, query))).filter((value): value is CachedProviderResult => value !== undefined);
+    const rows = cached.flatMap(value => (value.results ?? []).map(result => ({ entry: value.entry, result })));
+    const errors = cached.filter(value => value.error !== undefined);
+    for (const { result } of rows) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "view-shell-search-result";
+      if (result.icon) button.append(renderIcon(result.icon));
+      const copy = document.createElement("span");
+      copy.className = "view-shell-search-result-copy";
+      const title = document.createElement("strong");
+      title.textContent = textValue(result.title);
+      const meta = document.createElement("small");
+      meta.textContent = [textValue(result.type), result.summary ? textValue(result.summary) : ""].filter(Boolean).join(" · ");
+      copy.append(title, meta);
+      button.append(copy);
+      button.addEventListener("click", () => {
+        void routeStore.navigate(result.route)
+          .then(() => closeSearch(false))
+          .catch(error => { status.textContent = errorMessage(error); });
+      });
+      button.addEventListener("keydown", event => {
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+        const buttons = [...results.querySelectorAll<HTMLButtonElement>(".view-shell-search-result")];
+        const index = buttons.indexOf(button);
+        const next = event.key === "ArrowDown" ? Math.min(buttons.length - 1, index + 1) : Math.max(0, index - 1);
+        if (next !== index) { event.preventDefault(); buttons[next]?.focus(); }
+      });
+      results.append(button);
+    }
+    for (const failure of errors) {
+      const panel = document.createElement("p");
+      panel.className = "view-shell-search-provider-error";
+      const descriptor = failure.entry.value as SearchProviderDescriptor;
+      panel.textContent = `${textValue(descriptor.label)} · ${failure.error}`;
+      results.append(panel);
+    }
+    const loading = eligibleEntries().some(entry => pending.has(entry.identity));
+    status.textContent = loading ? (chinese ? "搜索中…" : "Searching…") : "";
+    empty.hidden = rows.length > 0 || errors.length > 0;
+    results.hidden = rows.length === 0 && errors.length === 0;
+    if (!loading && rows.length === 0 && errors.length === 0) {
+      status.textContent = chinese ? "没有找到结果" : "No results";
+    }
+  };
+  const runSearch = () => {
+    if (!open) return;
+    const query = input.value.trim();
+    if (!query) { abortAll(); cache.clear(); renderResults(); return; }
+    const runSession = session;
+    const runEpoch = epoch;
+    const eligible = new Set(eligibleEntries().map(entry => entry.identity));
+    for (const [identity, controller] of pending) {
+      if (!eligible.has(identity)) { controller.abort(); pending.delete(identity); }
+    }
+    for (const entry of eligibleEntries()) {
+      const key = cacheKey(entry, query);
+      if (cache.has(key) || pending.has(entry.identity)) continue;
+      const controller = new AbortController();
+      pending.set(entry.identity, controller);
+      const descriptor = entry.value as SearchProviderDescriptor;
+      Promise.resolve(descriptor.search({ query, signal: controller.signal })).then(value => {
+        if (!open || session !== runSession || epoch !== runEpoch || controller.signal.aborted || input.value.trim() !== query) return;
+        cache.set(key, Object.freeze({ entry, results: validResults(value) }));
+      }).catch(error => {
+        if (!open || session !== runSession || epoch !== runEpoch || controller.signal.aborted || errorName(error) === "AbortError") return;
+        cache.set(key, Object.freeze({ entry, error: errorMessage(error) }));
+      }).finally(() => {
+        if (pending.get(entry.identity) === controller) pending.delete(entry.identity);
+        if (open && session === runSession && epoch === runEpoch && input.value.trim() === query) renderResults();
+      });
+    }
+    renderResults();
+  };
+  const scheduleSearch = (reset: boolean) => {
+    if (reset) {
+      epoch += 1;
+      abortAll();
+      cache.clear();
+    }
+    globalThis.clearTimeout(debounceTimer);
+    debounceTimer = globalThis.setTimeout(runSearch, 180) as unknown as number;
+    renderResults();
+  };
+  const renderCategories = () => {
+    const groups = new Map<string, RuntimeEntry>();
+    for (const entry of providerEntries()) if (!groups.has(entry.owner)) groups.set(entry.owner, entry);
+    if (selectedOwner !== "*" && !groups.has(selectedOwner)) selectedOwner = "*";
+    const definitions: readonly [string, string][] = [["*", allLabel], ...[...groups].map(([owner, entry]) => [owner, textValue((entry.value as SearchProviderDescriptor).label)] as [string, string])];
+    categories.replaceChildren(...definitions.map(([owner, label], index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.role = "tab";
+      button.textContent = label;
+      button.dataset.searchProvider = owner;
+      const selected = owner === selectedOwner;
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+      button.addEventListener("click", () => selectOwner(owner));
+      button.addEventListener("keydown", event => {
+        const buttons = [...categories.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+        const current = buttons.indexOf(button);
+        let next = current;
+        if (event.key === "ArrowRight") next = (current + 1) % buttons.length;
+        else if (event.key === "ArrowLeft") next = (current - 1 + buttons.length) % buttons.length;
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = buttons.length - 1;
+        else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectOwner(owner); return; }
+        else return;
+        event.preventDefault();
+        buttons[next]?.focus();
+      });
+      return button;
+    }));
+  };
+  const selectOwner = (owner: string) => {
+    if (selectedOwner === owner) return;
+    selectedOwner = owner;
+    renderCategories();
+    scheduleSearch(false);
+  };
+  const openSearch = (opener?: HTMLElement) => {
+    if (open) { input.focus(); return; }
+    open = true;
+    session += 1;
+    epoch = 0;
+    selectedOwner = "*";
+    restoreFocus = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : trigger);
+    cache.clear();
+    abortAll();
+    input.value = "";
+    overlay.hidden = false;
+    trigger.setAttribute("aria-expanded", "true");
+    renderCategories();
+    renderResults();
+    queueMicrotask(() => input.focus());
+  };
+  const closeSearch = (restore = true) => {
+    if (!open) return;
+    open = false;
+    session += 1;
+    epoch += 1;
+    globalThis.clearTimeout(debounceTimer);
+    abortAll();
+    cache.clear();
+    overlay.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+    if (restore && restoreFocus?.isConnected) restoreFocus.focus({ preventScroll: true });
+  };
+  const onInput = () => scheduleSearch(true);
+  const onTrigger = () => openSearch(trigger);
+  const onClose = () => closeSearch();
+  const onGlobalKey = (event: KeyboardEvent) => {
+    if (event.key === "Escape" && open) { event.preventDefault(); closeSearch(); return; }
+    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "k" || event.defaultPrevented || event.isComposing || isEditable(event.target)) return;
+    event.preventDefault();
+    openSearch(document.activeElement instanceof HTMLElement ? document.activeElement : trigger);
+  };
+  const onInputKey = (event: KeyboardEvent) => {
+    if (event.key !== "ArrowDown") return;
+    const first = results.querySelector<HTMLButtonElement>(".view-shell-search-result");
+    if (first) { event.preventDefault(); first.focus(); }
+  };
+  trigger.addEventListener("click", onTrigger);
+  closeButton.addEventListener("click", onClose);
+  input.addEventListener("input", onInput);
+  input.addEventListener("keydown", onInputKey);
+  document.addEventListener("keydown", onGlobalKey);
+  return () => {
+    closeSearch(false);
+    trigger.removeEventListener("click", onTrigger);
+    closeButton.removeEventListener("click", onClose);
+    input.removeEventListener("input", onInput);
+    input.removeEventListener("keydown", onInputKey);
+    document.removeEventListener("keydown", onGlobalKey);
+  };
+}
+
+function errorName(error: unknown): string {
+  return error && typeof error === "object" && "name" in error ? String(error.name) : "";
+}
+
+function renderSecondaryNavigation(
+  descriptor: SecondaryNavigationDescriptor,
+  root: HTMLElement,
+  routeStore: RuntimeRouteStore,
+): HTMLElement {
+  const container = document.createElement("div");
+  container.className = "view-shell-secondary-navigation";
+  const header = document.createElement("header");
+  header.className = "view-shell-secondary-header";
+  const headingCopy = document.createElement("div");
+  const eyebrow = document.createElement("small");
+  eyebrow.textContent = "MODULE";
+  const heading = document.createElement("h2");
+  heading.append(textNode(descriptor.title));
+  headingCopy.append(eyebrow, heading);
+  header.append(headingCopy);
+  if (descriptor.settings) {
+    const settings = renderHeaderAction(descriptor.settings, "secondary.settings");
+    settings.classList.add("view-shell-secondary-settings");
+    header.append(settings);
+  }
+  const list = document.createElement("nav");
+  list.className = "view-shell-secondary-items";
+  for (const item of descriptor.items) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "view-shell-secondary-item";
+    button.dataset.secondaryId = item.id;
+    button.setAttribute("aria-label", textValue(item.label));
+    button.classList.toggle("active", item.selected);
+    button.setAttribute("aria-current", item.selected ? "page" : "false");
+    button.append(renderIcon(item.icon, item.selected ? "fill" : "regular"), textNode(item.label));
+    if (item.badge) {
+      const badge = document.createElement("span");
+      badge.className = "view-shell-secondary-badge";
+      badge.textContent = textValue(item.badge);
+      button.append(badge);
+    }
+    button.addEventListener("click", () => {
+      const operation = item.route ? routeStore.navigate(item.route) : Promise.resolve(item.action.run());
+      void operation.catch(error => renderShellNavigationError(root, error));
+    });
+    list.append(button);
+  }
+  container.append(header, list);
+  if (descriptor.footer) {
+    const footer = document.createElement("p");
+    footer.className = "view-shell-secondary-footer";
+    footer.append(textNode(descriptor.footer));
+    container.append(footer);
+  }
+  return container;
+}
+
+function syncShellLayout(root: HTMLElement, location: RouteLocation, slotStore: RuntimeSlotStore): void {
+  const shell = root.closest<HTMLElement>("[data-view-shell]");
+  if (!shell) return;
+  shell.dataset.viewLayout = location.pathname === "/" ? "home" : "module";
+  shell.dataset.viewContentList = String(Boolean(slotStore.entries(slots.contentList, location)[0]));
 }
 
 function renderHeaderAccount(descriptor: HeaderAccountDescriptor, identity: string): HTMLElement {
@@ -1340,6 +1846,7 @@ function renderSidebarFooter(descriptor: SidebarFooterDescriptor, identity: stri
 
 function renderHeaderTitle(
   descriptor: HeaderTitleDescriptor,
+  identity: string,
   root: HTMLElement,
   routeStore: RuntimeRouteStore,
 ): HTMLElement {
@@ -1366,6 +1873,8 @@ function renderHeaderTitle(
     container.append(breadcrumbs);
   }
   const heading = document.createElement("h1");
+  if (identity.includes("org.memsphere.memory")) heading.classList.add("memory-title");
+  if (identity.includes("org.memsphere.run")) heading.classList.add("run-title");
   heading.textContent = textValue(descriptor.title);
   container.append(heading);
   if (descriptor.subtitle) {
@@ -1419,7 +1928,8 @@ function renderIcon(icon: IconRef, weight: "regular" | "fill" = "regular"): HTML
   const image = document.createElement("img");
   image.className = "view-shell-icon";
   const name = systemIconName(icon.name);
-  image.src = `/assets/system-icons/${name}${weight === "fill" ? "-fill" : ""}.svg`;
+  const fillSupported = new Set(["brain", "circle", "cube", "gear-six", "house", "play-circle", "stack"]);
+  image.src = `/assets/system-icons/${name}${weight === "fill" && fillSupported.has(name) ? "-fill" : ""}.svg`;
   image.alt = "";
   image.setAttribute("aria-hidden", "true");
   return image;
@@ -1430,7 +1940,7 @@ function systemIconName(name: string): string {
   if (name === "play") return "play-circle";
   if (name === "gear") return "gear-six";
   if (name === "search") return "magnifying-glass";
-  return ["house", "brain", "play-circle", "gear-six", "stack", "user", "arrow-right", "x", "cube", "caret-down", "circle-fill", "magnifying-glass", "plus", "file-text", "code", "warning-circle"].includes(name)
+  return ["archive", "arrow-right", "arrows-clockwise", "brain", "caret-down", "check-circle", "circle-fill", "clock-counter-clockwise", "code", "cube", "file-text", "folder", "gear-six", "house", "magnifying-glass", "play-circle", "plus", "sliders-horizontal", "sparkle", "stack", "storefront", "user", "warning-circle", "x"].includes(name)
     ? name
     : "stack";
 }
@@ -1537,6 +2047,7 @@ function validateRouteDefinition(definition: RouteDefinition): void {
   if (definition.path.includes("?") || definition.path.includes("#") || definition.path.split("/").includes("..")) {
     throw new Error(`Route path is not a safe relative path: ${definition.path}`);
   }
+  validateRouteQueryKeys(definition.query, "Route definition");
 }
 
 function normalizeBasePath(path: string): string {
@@ -1571,6 +2082,74 @@ function fillRoutePath(route: RuntimeRoute, params: Readonly<Record<string, stri
   return result;
 }
 
+function routeTargetPath(
+  route: RuntimeRoute,
+  params: Readonly<Record<string, string>>,
+  options: RouteTargetOptions,
+): string {
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    throw new Error("Route target options must be an object");
+  }
+  const unknownOptions = Object.keys(options).filter(key => key !== "query" && key !== "hash");
+  if (unknownOptions.length) throw new Error(`Route target options contain unknown field: ${unknownOptions[0]}`);
+  const query = options.query ?? {};
+  if (!query || typeof query !== "object" || Array.isArray(query)) {
+    throw new Error("Route target query must be an object");
+  }
+  const allowed = new Set(route.queryKeys);
+  for (const [key, value] of Object.entries(query)) {
+    if (!allowed.has(key)) throw new Error(`Route target query is not declared: ${key}`);
+    if (value !== undefined && typeof value !== "string") {
+      throw new Error(`Route target query value must be a string or undefined: ${key}`);
+    }
+  }
+  if (options.hash !== undefined && (typeof options.hash !== "string" || options.hash.includes("#"))) {
+    throw new Error("Route target hash must be a string without #");
+  }
+  const normalizedQuery = Object.freeze(Object.fromEntries(
+    Object.entries(query).filter((entry): entry is [string, string] => entry[1] !== undefined)
+  ));
+  const search = formatRouteQuery(normalizedQuery, route.queryKeys);
+  const hash = options.hash === undefined || options.hash === "" ? "" : `#${encodeURIComponent(options.hash)}`;
+  return fillRoutePath(route, params) + search + hash;
+}
+
+function parseRouteQuery(search: string, allowlist: readonly string[]): Readonly<Record<string, string>> {
+  const allowed = new Set(allowlist);
+  const query: Record<string, string> = {};
+  for (const [key, value] of new URLSearchParams(search)) {
+    if (allowed.has(key)) query[key] = value;
+  }
+  return Object.freeze(query);
+}
+
+function formatRouteQuery(query: Readonly<Record<string, string>>, order: readonly string[]): string {
+  const params = new URLSearchParams();
+  for (const key of order) {
+    const value = query[key];
+    if (value !== undefined) params.set(key, value);
+  }
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
+
+function validateRouteQueryKeys(keys: readonly string[] | undefined, source: string): void {
+  if (keys === undefined) return;
+  if (!Array.isArray(keys)) throw new Error(`${source} query allowlist must be an array`);
+  const seen = new Set<string>();
+  for (const key of keys) {
+    if (typeof key !== "string" || !/^[A-Za-z][A-Za-z0-9_.-]*$/.test(key)) {
+      throw new Error(`${source} query key is invalid: ${String(key)}`);
+    }
+    if (seen.has(key)) throw new Error(`${source} query key conflicts: ${key}`);
+    seen.add(key);
+  }
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 function matchRouteParams(matched: RuntimeRouteMatch): Readonly<Record<string, string>> {
   const params: Record<string, string> = {};
   matched.route.parameterNames.forEach((name, index) => {
@@ -1592,6 +2171,7 @@ function validateRouteGrants(grants: readonly ViewRouteGrant[]): ReadonlyMap<str
     if (typeof grant.id !== "string" || !grant.id.trim()) throw new Error("Built-in Route grant id must be non-empty");
     if (result.has(grant.id)) throw new Error(`Built-in Route grant id conflicts: ${grant.id}`);
     validateGrantedRoutePath(grant.path);
+    validateRouteQueryKeys(grant.query, `Built-in Route grant ${grant.id}`);
     for (const path of [grant.path, ...(grant.aliases ?? [])]) {
       validateGrantedRoutePath(path);
       if (paths.has(path)) throw new Error(`Built-in Route grant path conflicts: ${path}`);
@@ -1600,7 +2180,8 @@ function validateRouteGrants(grants: readonly ViewRouteGrant[]): ReadonlyMap<str
     result.set(grant.id, Object.freeze({
       id: grant.id,
       path: grant.path,
-      ...(grant.aliases === undefined ? {} : { aliases: Object.freeze([...grant.aliases]) })
+      ...(grant.aliases === undefined ? {} : { aliases: Object.freeze([...grant.aliases]) }),
+      ...(grant.query === undefined ? {} : { query: Object.freeze([...grant.query]) })
     }));
   }
   return result;
@@ -1619,6 +2200,7 @@ function freezeLocation(location: RouteLocation): RouteLocation {
     search: location.search,
     hash: location.hash,
     params: Object.freeze({ ...location.params }),
+    query: Object.freeze({ ...(location.query ?? {}) }),
     ...(location.routeKey === undefined ? {} : { routeKey: location.routeKey }),
     ...(location.projected === true ? { projected: true as const } : {})
   });
@@ -1629,7 +2211,8 @@ function browserLocation(): RouteLocation {
     pathname: globalThis.location?.pathname ?? "/",
     search: globalThis.location?.search ?? "",
     hash: globalThis.location?.hash ?? "",
-    params: Object.freeze({})
+    params: Object.freeze({}),
+    query: Object.freeze({})
   };
 }
 

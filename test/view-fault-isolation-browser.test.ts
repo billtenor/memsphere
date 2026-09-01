@@ -26,7 +26,8 @@ test("Memory builtin keeps valid Memory usable and isolates an unavailable Chang
     assert.equal(await page.getByText("invalid persisted ChangeSet", { exact: false }).count(), 0);
     await page.locator("summary.memory-related").click();
     await page.getByRole("button", { name: /change-invalid/ }).click();
-    await page.waitForURL(`${origin}/projects/demo/changes/change-invalid`);
+    await page.waitForURL(url => url.pathname === "/projects/demo/changes/change-invalid");
+    assert.equal(new URL(page.url()).searchParams.get("section"), "project");
     await page.locator(".memory-error").waitFor();
     assert.match(await page.locator(".memory-error").textContent() ?? "", /invalid persisted ChangeSet/);
     assert.equal(await page.getByText("Failed to load Memsphere", { exact: true }).count(), 0);

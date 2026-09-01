@@ -155,8 +155,36 @@ test("non-loopback Settings requires a token in addition to same-origin requests
     assert.equal(authorized.status, 200);
     const payload = await authorized.json() as {
       diskRevision: string;
-      config: { language?: string };
+      operatorTokenConfigured: boolean;
+      runningView?: Record<string, unknown>;
+      config: { language?: string; view?: Record<string, unknown> };
     };
+    assert.equal(payload.operatorTokenConfigured, false);
+    assert.equal(payload.config.view?.operator_token, undefined);
+
+    const fixedToken = "1";
+    const configured = await fetch(`${origin}/api/settings/global/operator-token`, {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        origin
+      },
+      body: JSON.stringify({ expectedRevision: payload.diskRevision, token: fixedToken })
+    });
+    assert.equal(configured.status, 200);
+    const configuredPayload = await configured.json() as { diskRevision: string; operatorTokenConfigured: boolean };
+    assert.equal(configuredPayload.operatorTokenConfigured, true);
+    assert.match(await readFile(globalConfigPath, "utf8"), /"operator_token": "1"/);
+
+    const reloaded = await fetch(`${origin}/api/settings/global`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const reloadedPayload = await reloaded.json() as typeof payload;
+    assert.equal(reloadedPayload.operatorTokenConfigured, true);
+    assert.equal(reloadedPayload.config.view?.operator_token, undefined);
+    assert.equal(reloadedPayload.runningView?.operatorToken, undefined);
+    payload.diskRevision = configuredPayload.diskRevision;
     payload.config.language = "en";
 
     const saved = await fetch(`${origin}/api/settings/global`, {

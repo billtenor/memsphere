@@ -218,6 +218,9 @@ TypeScript does not replace runtime validation. The SDK supplies validators for 
 import { slots } from "@memsphere/view-sdk";
 
 slots.headerTitle;
+slots.navigationSecondary;
+slots.contentList;
+slots.searchProviders;
 ```
 
 The SDK exports the current Catalog's root Tokens through `slots`. The complete export list, ownership, and content semantics are maintained only in the [View Slot List](./view-slots.en.md); the line above demonstrates access and is not a second Catalog.
@@ -304,7 +307,7 @@ export interface SlotRegistry {
     options: KeyedRegisterOptions<SlotValue<S>, SlotKey<S>>,
   ): Disposer;
 
-  upsert<S extends typeof slots.headerActions | typeof slots.homeAttention | typeof slots.homeContinue>(
+  upsert<S extends typeof slots.navigationSecondary | typeof slots.headerTitle | typeof slots.headerActions | typeof slots.homeAttention | typeof slots.homeContinue>(
     slot: S,
     options: RegisterOptions<SlotValue<S>>,
   ): Disposer;
@@ -313,7 +316,7 @@ export interface SlotRegistry {
 
 `register()` synchronously validates Token, Value, identity, and ownership and leaves no partial registration on failure. Its disposer removes the Entry and automatically joins the instance lifecycle.
 
-`upsert()` is restricted to aggregate Slots marked `live`, currently `header.actions`, `home.attention`, and `home.continue`. A page Mount may update the page-level actions beside the title for its current content and must withdraw those Entries when it unmounts. It may be called after a successful `apply()` commit and atomically inserts or replaces an Entry by `id` within the current Module instance. Each successful update creates a new epoch lease: an older disposer cannot remove a newer Entry, while instance cleanup still removes every live Entry.
+`upsert()` is restricted to Slots marked `live`, currently `navigation.secondary`, `header.title`, `header.actions`, `home.attention`, and `home.continue`. A page Mount may update secondary-navigation counts, the current object title, and page-level actions from loaded content, and must withdraw those Entries when it unmounts. It may be called after a successful `apply()` commit and atomically inserts or replaces an Entry by `id` within the current Module instance. Each successful update creates a new epoch lease: an older disposer cannot remove a newer Entry, while instance cleanup still removes every live Entry.
 
 Entry runtime identity is:
 
@@ -357,6 +360,40 @@ export interface NavigationItemDescriptor {
   readonly icon: IconRef;
   readonly route: RouteTarget;
   readonly badge?: TextRef;
+}
+
+export type SecondaryNavigationItemDescriptor = Readonly<{
+  id: string;
+  label: TextRef;
+  icon: IconRef;
+  badge?: TextRef;
+  selected: boolean;
+} & (
+  | { route: RouteTarget; action?: never }
+  | { route?: never; action: ActionDescriptor }
+)>;
+
+export interface SecondaryNavigationDescriptor {
+  readonly title: TextRef;
+  readonly icon: IconRef;
+  readonly settings?: ActionDescriptor;
+  readonly items: readonly SecondaryNavigationItemDescriptor[];
+  readonly footer?: TextRef;
+}
+
+export interface SearchProviderDescriptor {
+  readonly label: TextRef;
+  readonly icon: IconRef;
+  search(request: { readonly query: string; readonly signal: AbortSignal }):
+    MaybePromise<readonly SearchResultDescriptor[]>;
+}
+
+export interface SearchResultDescriptor {
+  readonly title: TextRef;
+  readonly summary?: TextRef;
+  readonly type: TextRef;
+  readonly icon?: IconRef;
+  readonly route: RouteTarget;
 }
 
 export interface AttentionItemDescriptor {
@@ -429,25 +466,49 @@ Runtime contract:
 export interface RouteDefinition {
   readonly id: string;
   readonly path: string;
+  readonly query?: readonly string[];
+}
+
+export interface RouteLocation {
+  readonly pathname: string;
+  readonly search: string;
+  readonly hash: string;
+  readonly params: Readonly<Record<string, string>>;
+  readonly query: Readonly<Record<string, string>>;
+  readonly routeKey?: string;
+  readonly projected?: true;
+}
+
+export interface RouteTargetOptions {
+  readonly query?: Readonly<Record<string, string | undefined>>;
+  readonly hash?: string;
 }
 
 export interface RouteToken {
   readonly key: string;
   readonly activation: RouteActivation;
-  to(params?: Readonly<Record<string, string>>): RouteTarget;
+  to(params?: Readonly<Record<string, string>>, options?: RouteTargetOptions): RouteTarget;
+}
+
+export interface RouteProjectionOptions {
+  readonly from: RouteToken;
+  readonly to: RouteToken;
+  /** target parameter name -> source parameter name. */
+  readonly params: Readonly<Record<string, string>>;
+  /** target query key -> source query key. */
+  readonly query?: Readonly<Record<string, string>>;
+  readonly hash?: "discard" | "preserve";
 }
 
 export interface ViewRouter {
   register(definition: RouteDefinition): RouteToken;
-  project(options: {
-    readonly from: RouteToken;
-    readonly to: RouteToken;
-    readonly params: Readonly<Record<string, string>>;
-  }): RouteProjection;
+  project(options: RouteProjectionOptions): RouteProjection;
   navigate(target: RouteTarget): Promise<void>;
   readonly location: RouteLocation;
 }
 ```
+
+`RouteLocation.query` is the frozen key/value map parsed by the Host through the active Route allowlist. `to()` accepts only query keys declared by that Route; `undefined` omits a key. `project()` copies only explicitly mapped values that exist, and discards the hash by default. Overlay close, Escape, and backdrop dismissal use Host-only replace navigation; public `navigate()` always pushes.
 
 `RouteActivation`, `RouteTarget`, `RouteProjection`, and `RouteLocation` are SDK-defined, Host-created route values. Plugins must not forge them. `project()` supports keyed overlays by mapping parameters from an overlay Route to a background page Route owned by the same Module instance. Cross-instance projections, missing target parameters, and unknown parameters must fail. A background Mount receives `RouteLocation.projected === true`; it must remain passive and must not rewrite the active overlay URL.
 

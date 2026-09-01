@@ -63,6 +63,7 @@ export interface RouteLocation {
   readonly search: string;
   readonly hash: string;
   readonly params: Readonly<Record<string, string>>;
+  readonly query: Readonly<Record<string, string>>;
   readonly routeKey?: string;
   /** True when this is the passive background projected by an active overlay Route. */
   readonly projected?: true;
@@ -71,21 +72,31 @@ export interface RouteLocation {
 export interface RouteDefinition {
   readonly id: string;
   readonly path: string;
+  readonly query?: readonly string[];
+}
+
+export interface RouteTargetOptions {
+  readonly query?: Readonly<Record<string, string | undefined>>;
+  readonly hash?: string;
 }
 
 export interface RouteToken {
   readonly key: string;
   readonly activation: RouteActivation;
-  to(params?: Readonly<Record<string, string>>): RouteTarget;
+  to(params?: Readonly<Record<string, string>>, options?: RouteTargetOptions): RouteTarget;
+}
+
+export interface RouteProjectionOptions {
+  readonly from: RouteToken;
+  readonly to: RouteToken;
+  readonly params: Readonly<Record<string, string>>;
+  readonly query?: Readonly<Record<string, string>>;
+  readonly hash?: "discard" | "preserve";
 }
 
 export interface ViewRouter {
   register(definition: RouteDefinition): RouteToken;
-  project(options: {
-    readonly from: RouteToken;
-    readonly to: RouteToken;
-    readonly params: Readonly<Record<string, string>>;
-  }): RouteProjection;
+  project(options: RouteProjectionOptions): RouteProjection;
   navigate(target: RouteTarget): Promise<void>;
   readonly location: RouteLocation;
 }
@@ -128,6 +139,44 @@ export interface NavigationItemDescriptor {
   readonly icon: IconRef;
   readonly route: RouteTarget;
   readonly badge?: TextRef;
+}
+
+export type SecondaryNavigationItemDescriptor = Readonly<{
+  id: string;
+  label: TextRef;
+  icon: IconRef;
+  badge?: TextRef;
+  selected: boolean;
+} & (
+  | { route: RouteTarget; action?: never }
+  | { route?: never; action: ActionDescriptor }
+)>;
+
+export interface SecondaryNavigationDescriptor {
+  readonly title: TextRef;
+  readonly icon: IconRef;
+  readonly settings?: ActionDescriptor;
+  readonly items: readonly SecondaryNavigationItemDescriptor[];
+  readonly footer?: TextRef;
+}
+
+export interface SearchProviderRequest {
+  readonly query: string;
+  readonly signal: AbortSignal;
+}
+
+export interface SearchResultDescriptor {
+  readonly title: TextRef;
+  readonly summary?: TextRef;
+  readonly type: TextRef;
+  readonly icon?: IconRef;
+  readonly route: RouteTarget;
+}
+
+export interface SearchProviderDescriptor {
+  readonly label: TextRef;
+  readonly icon: IconRef;
+  search(request: SearchProviderRequest): MaybePromise<readonly SearchResultDescriptor[]>;
 }
 
 export interface HeaderBreadcrumbDescriptor {
@@ -308,6 +357,56 @@ export function isNavigationItemDescriptor(value: unknown): value is NavigationI
     && (candidate.badge === undefined || isTextRef(candidate.badge));
 }
 
+export function isSecondaryNavigationItemDescriptor(value: unknown): value is SecondaryNavigationItemDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<SecondaryNavigationItemDescriptor> & { route?: unknown; action?: unknown };
+  const hasRoute = candidate.route !== undefined;
+  const hasAction = candidate.action !== undefined;
+  return hasOnlyKeys(value, ["id", "label", "icon", "badge", "selected", "route", "action"])
+    && typeof candidate.id === "string"
+    && candidate.id.length > 0
+    && isTextRef(candidate.label)
+    && isIconRef(candidate.icon)
+    && (candidate.badge === undefined || isTextRef(candidate.badge))
+    && typeof candidate.selected === "boolean"
+    && hasRoute !== hasAction
+    && (!hasRoute || isRouteTarget(candidate.route))
+    && (!hasAction || isHeaderActionDescriptor(candidate.action));
+}
+
+export function isSecondaryNavigationDescriptor(value: unknown): value is SecondaryNavigationDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<SecondaryNavigationDescriptor>;
+  return hasOnlyKeys(value, ["title", "icon", "settings", "items", "footer"])
+    && isTextRef(candidate.title)
+    && isIconRef(candidate.icon)
+    && (candidate.settings === undefined || isHeaderActionDescriptor(candidate.settings))
+    && Array.isArray(candidate.items)
+    && candidate.items.every(isSecondaryNavigationItemDescriptor)
+    && new Set(candidate.items.map(item => item.id)).size === candidate.items.length
+    && (candidate.footer === undefined || isTextRef(candidate.footer));
+}
+
+export function isSearchResultDescriptor(value: unknown): value is SearchResultDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<SearchResultDescriptor>;
+  return hasOnlyKeys(value, ["title", "summary", "type", "icon", "route"])
+    && isTextRef(candidate.title)
+    && (candidate.summary === undefined || isTextRef(candidate.summary))
+    && isTextRef(candidate.type)
+    && (candidate.icon === undefined || isIconRef(candidate.icon))
+    && isRouteTarget(candidate.route);
+}
+
+export function isSearchProviderDescriptor(value: unknown): value is SearchProviderDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<SearchProviderDescriptor>;
+  return hasOnlyKeys(value, ["label", "icon", "search"])
+    && isTextRef(candidate.label)
+    && isIconRef(candidate.icon)
+    && typeof candidate.search === "function";
+}
+
 export function isHeaderTitleDescriptor(value: unknown): value is HeaderTitleDescriptor {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Partial<HeaderTitleDescriptor>;
@@ -406,12 +505,38 @@ export const slots = Object.freeze({
     render: "descriptor",
     validate: isNavigationItemDescriptor
   }),
+  navigationSecondary: defineSlot<SecondaryNavigationDescriptor>()({
+    name: "navigation.secondary",
+    version: 1,
+    kind: "single",
+    scope: "page",
+    render: "descriptor",
+    live: true,
+    validate: isSecondaryNavigationDescriptor
+  }),
+  contentList: defineSlot<ViewMount>()({
+    name: "content.list",
+    version: 1,
+    kind: "single",
+    scope: "page",
+    render: "mount",
+    validate: isViewMount
+  }),
+  searchProviders: defineSlot<SearchProviderDescriptor>()({
+    name: "search.providers",
+    version: 1,
+    kind: "list",
+    scope: "project",
+    render: "descriptor",
+    validate: isSearchProviderDescriptor
+  }),
   headerTitle: defineSlot<HeaderTitleDescriptor>()({
     name: "header.title",
     version: 1,
     kind: "single",
     scope: "page",
     render: "descriptor",
+    live: true,
     validate: isHeaderTitleDescriptor
   }),
   headerActions: defineSlot<HeaderActionDescriptor>()({

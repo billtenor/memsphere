@@ -41,6 +41,7 @@ import {
   validateGlobalConfigDraft,
   validateProjectConfigDraft,
   writeGlobalConfigDraft,
+  writeGlobalOperatorToken,
   writeProjectConfigDraft,
   type EditableGlobalConfigDraft,
   type EditableProjectConfigDraft,
@@ -73,6 +74,7 @@ import {
 } from "../memory/changeset.js";
 import { readBundledSystemMemories } from "../reserved/store.js";
 import {
+  countMemoryMarket,
   listMemoryMarket,
   MarketMemoryNameConflictError,
   planMemoryMarketImport
@@ -206,7 +208,7 @@ export async function viewServeCommand(options: ViewServeOptions): Promise<void>
   const runningDocument = await readGlobalSettingsDocument(config);
   const settingsToken = isLoopbackHost(host)
     ? undefined
-    : createSettingsToken();
+    : config.view.operatorToken ?? createSettingsToken();
   const server = createViewServer(config, {
     runningRevision: runningDocument.revision,
     settingsToken
@@ -342,7 +344,17 @@ async function handleRequest(
 
   if (request.method === "GET" && url.pathname === "/api/projects") {
     const projects = await listRegisteredProjects(config.homeRoot ?? resolveMemsphereHome());
-    sendJson(response, 200, { current: config.project?.name, projects });
+    sendJson(response, 200, {
+      current: config.project?.name,
+      projects,
+      currentProject: config.project ? {
+        name: config.project.name,
+        root: config.scopeRoot,
+        storeType: config.project.store?.type,
+        revision: config.project.revision,
+        memoryRoot: config.memoryRoot
+      } : undefined
+    });
     return;
   }
 
@@ -365,11 +377,59 @@ async function handleRequest(
   }
 
   if (request.method === "GET" && url.pathname === "/api/settings/meta") {
+    const document = await readGlobalSettingsDocument(config);
     sendJson(response, 200, {
       requiresToken: !isLoopbackHost(config.view.host),
+      operatorTokenConfigured: Boolean(document.raw.view?.operator_token),
       host: config.view.host,
       port: config.view.port
     });
+    return;
+  }
+
+  if (url.pathname === "/api/settings/global/operator-token" && request.method === "PUT") {
+    if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+    const body = await readJsonBody<{ expectedRevision?: unknown; token?: unknown }>(request, 16 * 1024);
+    if (typeof body.expectedRevision !== "string" || (body.token !== null && typeof body.token !== "string")) {
+      sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and token are required" });
+      return;
+    }
+    const token = typeof body.token === "string" ? body.token.trim() : undefined;
+    if (token !== undefined && !token) {
+      sendJson(response, 422, {
+        code: "config_invalid",
+        error: "Operation token must not be empty"
+      });
+      return;
+    }
+    const document = await readGlobalSettingsDocument(config);
+    try {
+      const saved = await writeGlobalOperatorToken({
+        document,
+        expectedRevision: body.expectedRevision,
+        ...(token ? { token } : {})
+      });
+      sendJson(response, 200, {
+        diskRevision: saved.revision,
+        operatorTokenConfigured: Boolean(saved.raw.view?.operator_token),
+        restartRequired: true
+      });
+    } catch (error) {
+      if (error instanceof ConfigRevisionConflictError) {
+        sendJson(response, 409, {
+          code: "revision_conflict",
+          error: error.message,
+          expectedRevision: error.expectedRevision,
+          actualRevision: error.actualRevision
+        });
+        return;
+      }
+      if (error instanceof ZodError) {
+        sendJson(response, 422, { code: "config_invalid", error: error.issues[0]?.message ?? "Invalid token" });
+        return;
+      }
+      throw error;
+    }
     return;
   }
 
@@ -622,6 +682,10 @@ async function handleRequest(
 
   if (request.method === "GET" && url.pathname === "/api/market/memories") {
     try {
+      if (url.searchParams.get("representation") === "count") {
+        sendJson(response, 200, { count: await countMemoryMarket() });
+        return;
+      }
       const [memories, changeResult] = await Promise.all([
         listMemoryMarket(config.memoryRoot),
         config.project?.name
@@ -2136,9 +2200,10 @@ function globalSettingsPayload(
     configPath: document.configPath,
     scopeRoot: document.scopeRoot,
     runningRevision,
-    runningView,
+    runningView: { host: runningView.host, port: runningView.port },
     diskRevision: document.revision,
     restartRequired: !sameViewConfig(diskView, runningView),
+    operatorTokenConfigured: Boolean(document.raw.view?.operator_token),
     explicit: {
       language: Object.hasOwn(document.raw, "language"),
       view: Object.hasOwn(document.raw, "view"),
@@ -2158,10 +2223,11 @@ function globalSettingsPayload(
 }
 
 function sameViewConfig(
-  left: MemsphereConfig["view"],
+  left: { host: string; port: number; operator_token?: string },
   right: MemsphereConfig["view"]
 ): boolean {
-  return left.host === right.host && left.port === right.port;
+  return left.host === right.host && left.port === right.port &&
+    left.operator_token === right.operatorToken;
 }
 
 function projectSettingsPayload(document: ProjectConfigDocument): Record<string, unknown> {
@@ -2492,7 +2558,7 @@ async function builtinViewInstances(config: MemsphereConfig): Promise<readonly V
         summary: entry.summary,
         icon: entry.icon,
         routeId: entry.homeRouteId,
-        ...(entry.moduleId === "org.memsphere.settings" ? { routeParams: { module: "overview" } } : {})
+        ...(entry.moduleId === "org.memsphere.settings" ? { routeParams: { module: "general" } } : {})
       },
       module: {
         projectId: config.project?.name ?? "memsphere",
@@ -2585,7 +2651,7 @@ function sendJavaScript(request: IncomingMessage, response: ServerResponse, body
 
 async function sendSystemIcon(response: ServerResponse, name: string): Promise<void> {
   const supportedRegular = new Set([
-    "arrow-right", "brain", "caret-down", "circle-fill", "code", "cube", "file-text", "gear-six", "house", "magnifying-glass", "play-circle", "plus", "stack", "user", "warning-circle", "x"
+    "archive", "arrow-right", "arrows-clockwise", "brain", "caret-down", "check-circle", "circle-fill", "clock-counter-clockwise", "code", "cube", "file-text", "folder", "gear-six", "house", "magnifying-glass", "play-circle", "plus", "sliders-horizontal", "sparkle", "stack", "storefront", "user", "warning-circle", "x"
   ]);
   const weighted = name.match(/^(brain|circle|cube|gear-six|house|play-circle|stack)-(duotone|fill)$/);
   if (!supportedRegular.has(name) && !weighted) {

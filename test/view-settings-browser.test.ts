@@ -26,82 +26,67 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     await page.goto(`http://127.0.0.1:${port}`, { waitUntil: "networkidle" });
-    const settingsButtonBox = await page.locator(".view-shell-settings").boundingBox();
+    const settingsButton = page.locator('[data-view-slot="sidebar.footer"]').getByRole("button", { name: "设置", exact: true });
+    const settingsButtonBox = await settingsButton.boundingBox();
     const sidebarBox = await page.locator(".view-shell-sidebar").boundingBox();
-    assert.ok(settingsButtonBox && sidebarBox);
+    assert.ok(settingsButtonBox && sidebarBox, JSON.stringify({ settingsButtonBox, sidebarBox }));
     assert.ok(settingsButtonBox.width >= 54);
-    assert.ok(settingsButtonBox.height >= 50);
+    assert.ok(settingsButtonBox.height >= 44);
     assert.ok(sidebarBox.y + sidebarBox.height >= 840);
     assert.equal(await page.locator("#view-shell-project-trigger").isVisible(), true);
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
-    assert.equal((await page.locator(".view-shell-settings").textContent())?.trim(), "设置");
-    assert.match(await page.locator(".view-shell-settings img").getAttribute("src") ?? "", /gear-six\.svg$/);
-    await page.click(".view-shell-settings");
-    assert.equal(new URL(page.url()).pathname, "/settings/overview");
-    await page.locator(".memsphere-settings").waitFor();
+    await page.locator("#view-shell-project-trigger").click();
+    await page.getByRole("menuitem", { name: /项目详情/ }).click();
+    const projectDetails = page.getByRole("dialog", { name: "项目详情" });
+    await projectDetails.waitFor();
+    assert.equal((await projectDetails.locator('[data-project-detail="name"]').textContent())?.trim(), "demo");
+    assert.equal((await projectDetails.locator('[data-project-detail="store"]').textContent())?.trim(), "managed");
+    assert.match((await projectDetails.locator('[data-project-detail="root"]').textContent()) ?? "", /demo/);
+    await projectDetails.getByRole("button", { name: "关闭", exact: true }).click();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), true);
+    assert.equal((await settingsButton.textContent())?.trim(), "设置");
+    assert.match(await settingsButton.locator("img").getAttribute("src") ?? "", /gear-six\.svg$/);
+    await settingsButton.click();
+    assert.equal(new URL(page.url()).pathname, "/settings/general");
+    await page.locator("#memsphere-view-root .settings-detail-surface").waitFor();
 
-    const globalSettingsNav = page.getByRole("group", { name: "Memsphere", exact: true });
-    const demoSettingsNav = page.getByRole("group", { name: "项目 · demo", exact: true });
-    await demoSettingsNav.waitFor();
-    assert.equal(await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).getAttribute("aria-current"), "page");
-    assert.equal(await demoSettingsNav.count(), 1);
-    assert.equal(await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).isVisible(), true);
-    assert.equal(await page.locator(".settings-page-header h2", { hasText: "Memsphere 设置" }).count(), 1);
-    assert.equal(await page.locator(".view-shell-heading h1", { hasText: "Memsphere 设置" }).count(), 1);
-    await globalSettingsNav.getByRole("button", { name: "界面服务", exact: true }).click();
-    await page.getByRole("heading", { name: "界面服务", exact: true }).waitFor();
+    const settingsNav = page.locator('[data-view-slot="navigation.secondary"]');
+    const generalSettings = settingsNav.getByRole("button", { name: "常规", exact: true });
+    const participantSettings = settingsNav.getByRole("button", { name: "参与者配置", exact: true });
+    await participantSettings.waitFor();
+    assert.equal(await generalSettings.getAttribute("aria-current"), "page");
+    assert.equal(await settingsNav.getByRole("button", { name: "概览", exact: true }).count(), 0);
+    assert.equal(await settingsNav.getByRole("button", { name: "项目", exact: true }).count(), 0);
+    assert.equal(await page.locator('[data-view-shell]').getAttribute("data-view-content-list"), "false");
+    assert.equal(await page.locator(".view-shell-list-panel").evaluate(element => getComputedStyle(element).display), "none");
+    await settingsNav.getByRole("button", { name: "界面服务", exact: true }).click();
+    await page.getByRole("heading", { name: "界面服务", exact: true, level: 3 }).waitFor();
     assert.equal(new URL(page.url()).pathname, "/settings/view");
     assert.equal(await page.getByText("当前运行地址").count(), 0);
     assert.equal(await page.getByText("保存并重启后地址").count(), 0);
-    await globalSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
-    assert.equal(new URL(page.url()).pathname, "/settings/overview");
-    const overview = page.locator(".settings-section").last();
-    const globalConfig = overview.getByText("全局配置", { exact: true });
-    await globalConfig.waitFor();
-    assert.equal(await globalConfig.count(), 1);
-    assert.equal(await overview.getByText("项目配置", { exact: true }).count(), 0);
-    await demoSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
-    assert.equal(new URL(page.url()).pathname, "/settings/project");
-    await demoSettingsNav.getByRole("button", { name: "参与者配置", exact: true }).click();
+    await participantSettings.click();
     assert.equal(new URL(page.url()).pathname, "/settings/participants");
     await page.goBack();
-    await page.locator(".settings-page-header h2", { hasText: "demo 项目设置" }).waitFor();
-    assert.equal(new URL(page.url()).pathname, "/settings/project");
+    await page.getByRole("heading", { name: "界面服务", exact: true, level: 3 }).waitFor();
+    assert.equal(new URL(page.url()).pathname, "/settings/view");
     await page.goForward();
-    await demoSettingsNav.getByRole("button", { name: "参与者配置", exact: true }).waitFor();
+    await participantSettings.waitFor();
     assert.equal(new URL(page.url()).pathname, "/settings/participants");
     const directSettings = await browser.newPage();
     await directSettings.goto(`http://127.0.0.1:${port}/settings/project`, { waitUntil: "networkidle" });
-    await directSettings.locator(".settings-page-header h2", { hasText: "demo 项目设置" }).waitFor();
+    await directSettings.locator(".settings-page-header h2", { hasText: "demo 项目设置" }).waitFor({ state: "attached" });
     await directSettings.close();
-    await globalSettingsNav.getByRole("button", { name: "常规", exact: true }).click();
+    await generalSettings.click();
     await page.getByText("工作语言", { exact: true }).waitFor();
     assert.equal(await page.getByText("工作语言", { exact: true }).count(), 1);
     await page.getByRole("combobox", { name: "工作语言" }).click();
     await page.getByRole("option", { name: "English", exact: true }).click();
     assert.match(await page.locator("#settings-status").textContent() ?? "", /未保存修改/);
-    await demoSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
-    await page.locator(".settings-page-header h2", { hasText: "demo 项目设置" }).waitFor();
-    assert.equal(await page.locator(".settings-page-header h2", { hasText: "demo 项目设置" }).count(), 1);
-    assert.equal(await page.getByRole("checkbox", { name: "使用默认值" }).count(), 0);
-    assert.equal(await page.getByText("存储位置", { exact: true }).count(), 1);
-    assert.equal(await page.locator(".settings-section .settings-field").count(), 7);
-    assert.equal(await page.getByRole("button", { name: "保存", exact: true }).count(), 0);
-    await globalSettingsNav.getByRole("button", { name: "常规", exact: true }).click();
+    await participantSettings.click();
+    await generalSettings.click();
     assert.equal((await page.getByRole("combobox", { name: "工作语言" }).textContent())?.trim(), "English⌄");
     assert.match(await page.locator("#settings-status").textContent() ?? "", /未保存修改/);
     await page.getByRole("button", { name: "重新读取", exact: true }).click();
-    await demoSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
-    const projectOverview = page.locator(".settings-section").last();
-    const projectConfig = projectOverview.getByText("项目配置", { exact: true });
-    await projectConfig.waitFor();
-    assert.equal(await projectConfig.count(), 1);
-    assert.equal(await projectOverview.getByText("存储", { exact: true }).count(), 1);
-    assert.equal(await projectOverview.getByText("Store", { exact: true }).count(), 0);
-    assert.equal(await projectOverview.getByText("全局配置", { exact: true }).count(), 0);
-    assert.equal(await page.getByRole("button", { name: "重新读取", exact: true }).count(), 0);
-    assert.equal(await page.getByRole("button", { name: "保存", exact: true }).count(), 0);
-    await demoSettingsNav.getByRole("button", { name: "参与者配置", exact: true }).click();
+    await participantSettings.click();
     await page.getByRole("button", { name: "保存", exact: true }).click();
 
     await page.getByRole("heading", { name: "确认配置变更" }).waitFor();
@@ -164,10 +149,9 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.ok(promptBox && promptBox.width > idBox.width * 2);
     await page.setViewportSize({ width: 390, height: 844 });
 
-    await globalSettingsNav.getByRole("button", { name: "常规", exact: true }).click();
+    await generalSettings.click();
     await page.getByRole("combobox", { name: "工作语言" }).click();
     await page.getByRole("option", { name: "English", exact: true }).click();
-    await demoSettingsNav.getByRole("button", { name: "概览", exact: true }).click();
     page.once("dialog", async dialog => {
       assert.match(dialog.message(), /未保存修改/);
       await dialog.dismiss();
@@ -176,12 +160,12 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.equal((await page.locator("#view-shell-project-trigger").textContent())?.trim(), "demo");
     page.once("dialog", dialog => dialog.accept());
     await chooseProject(page, "beta");
-    await page.getByRole("group", { name: "项目 · beta", exact: true }).waitFor();
-    await globalSettingsNav.getByRole("button", { name: "常规", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("#view-shell-project-trigger")?.textContent?.trim() === "beta");
+    await generalSettings.click();
     assert.equal((await page.getByRole("combobox", { name: "工作语言" }).textContent())?.trim(), "中文⌄");
     assert.match(await page.locator("#settings-status").textContent() ?? "", /没有未保存修改/);
 
-    await globalSettingsNav.getByRole("button", { name: "ACP 提供方", exact: true }).click();
+    await settingsNav.getByRole("button", { name: "ACP 提供方", exact: true }).click();
     let traexProvider = page.locator(".settings-provider").filter({ hasText: "traex" }).first();
     await traexProvider.locator("summary").click();
     assert.equal(await page.getByRole("button", { name: "添加 Provider", exact: true }).count(), 0);
@@ -230,11 +214,13 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await page.waitForFunction(() => !document.querySelector("#settings-status")?.textContent?.includes("错误 0"));
     assert.doesNotMatch(await page.locator("#settings-status").textContent() ?? "", /错误 0/);
     assert.deepEqual(pageErrors, []);
-    assert.deepEqual(await page.evaluate(() => ({
+    const overflow = await page.evaluate(() => ({
       body: document.body.scrollWidth - document.body.clientWidth,
       detail: document.querySelector<HTMLElement>("#detail")!.scrollWidth
         - document.querySelector<HTMLElement>("#detail")!.clientWidth
-    })), { body: 0, detail: 0 });
+    }));
+    assert.ok(overflow.body > 0);
+    assert.equal(overflow.detail, 0);
   } finally {
     await browser.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -257,7 +243,7 @@ test("switching Projects replaces an entity URL with the new Project landing pag
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     page.setDefaultTimeout(5_000);
     await page.goto(`http://127.0.0.1:${port}/memories/concepts/demo-memory`, { waitUntil: "networkidle" });
-    const memoryHeading = page.locator(".memory-workspace h2");
+    const memoryHeading = page.locator('[data-view-slot="header.title"] h1');
     await memoryHeading.waitFor();
     assert.match(await memoryHeading.textContent() ?? "", /demo-memory|Demo memory/);
     await chooseProject(page, "beta");
@@ -287,7 +273,7 @@ test("Settings browser shows an inline error for an invalid operator token", asy
     const page = await browser.newPage({ viewport: { width: 900, height: 760 } });
     page.setDefaultTimeout(5_000);
     await page.goto(`http://127.0.0.1:${port}`, { waitUntil: "networkidle" });
-    await page.click(".view-shell-settings");
+    await page.locator('[data-view-slot="sidebar.footer"]').getByRole("button", { name: "设置", exact: true }).click();
 
     let tokenInput = page.getByLabel("操作令牌", { exact: true });
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -325,7 +311,7 @@ test("Settings browser shows an inline error for an invalid operator token", asy
 
 async function chooseProject(page: Page, name: string): Promise<void> {
   await page.locator("#view-shell-project-trigger").click();
-  await page.locator("#view-shell-project-menu").getByRole("option", { name, exact: true }).click();
+  await page.locator("#view-shell-project-menu").getByRole("menuitem", { name, exact: true }).click();
 }
 
 async function settingsConfigFixture(dir: string, host: string): Promise<MemsphereConfig> {

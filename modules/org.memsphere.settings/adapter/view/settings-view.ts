@@ -9,6 +9,7 @@ interface SettingsViewOptions {
   readonly config: SettingsViewConfig;
   readonly route: RouteToken;
   readonly navigate: (target: RouteTarget) => Promise<void>;
+  readonly onRoute?: (route: RouteLocation) => void;
 }
 
 interface ScopeState {
@@ -22,7 +23,7 @@ interface ScopeState {
 const tokenKey = "memsphere.settingsToken.v1";
 const detectionKey = "memsphere.settings.acp-provider-detection";
 const sections: Record<SectionName, { scope: ScopeName; module: string }> = {
-  overview: { scope: "global", module: "overview" },
+  overview: { scope: "global", module: "general" },
   general: { scope: "global", module: "general" },
   view: { scope: "global", module: "view" },
   providers: { scope: "global", module: "providers" },
@@ -30,31 +31,59 @@ const sections: Record<SectionName, { scope: ScopeName; module: string }> = {
   participants: { scope: "project", module: "participants" }
 };
 
-export function createSettingsView(options: SettingsViewOptions): ViewMount {
+export function createSettingsViews(options: SettingsViewOptions): Readonly<{ list: ViewMount; detail: ViewMount; dispose(): void }> {
   const scopes: Record<ScopeName, ScopeState> = {
     global: { data: null, draft: null, errors: [], confirmation: null, notice: "" },
     project: { data: null, draft: null, errors: [], confirmation: null, notice: "" }
   };
+  const controller = new AbortController();
+  let scratch: HTMLElement | undefined;
   let app: SettingsApplication | undefined;
-  return {
+  let start: Promise<void> | undefined;
+  let lastRoute = "";
+  let update: Promise<void> | undefined;
+  const ensure = (route: RouteLocation) => {
+    scratch ??= document.createElement("div");
+    if (!app) {
+      app = new SettingsApplication(scratch, options, controller.signal, scopes, route);
+      lastRoute = `${route.pathname}${route.search}${route.hash}`;
+      options.onRoute?.(route);
+    }
+    start ??= app.start();
+    return start;
+  };
+  const updateRoute = async (route: RouteLocation) => {
+    options.onRoute?.(route);
+    await ensure(route);
+    const key = `${route.pathname}${route.search}${route.hash}`;
+    if (key === lastRoute) return update;
+    lastRoute = key;
+    update = app!.updateRoute(route).finally(() => { update = undefined; });
+    return update;
+  };
+  const surface = (kind: "list" | "detail"): ViewMount => ({
     async mount({ element }, context) {
-      const controller = new AbortController();
-      app = new SettingsApplication(element, options, controller.signal, scopes, context.route);
-      await app.start();
+      await ensure(context.route);
+      app![kind === "list" ? "attachList" : "attachDetail"](element);
+      await updateRoute(context.route);
       return () => {
-        controller.abort();
-        app = undefined;
+        app?.[kind === "list" ? "detachList" : "detachDetail"](element);
         element.replaceChildren();
       };
     },
-    async update(context) {
-      await app?.updateRoute(context.route);
-    }
+    update: context => updateRoute(context.route)
+  });
+  return {
+    list: surface("list"),
+    detail: surface("detail"),
+    dispose() { controller.abort(); app = undefined; }
   };
 }
 
 class SettingsApplication {
   readonly #root: HTMLElement;
+  #listRoot: HTMLElement | null = null;
+  #detailRoot: HTMLElement | null = null;
   readonly #options: SettingsViewOptions;
   readonly #signal: AbortSignal;
   readonly #config: SettingsViewConfig;
@@ -66,6 +95,8 @@ class SettingsApplication {
   #loading = true;
   #token = sessionStorage.getItem(tokenKey) ?? "";
   #tokenError = "";
+  #operatorTokenDraft = "";
+  #operatorTokenError = "";
   #providerDetection: JsonObject = {};
   #detecting = false;
   #expandedProviders = new Set<string>();
@@ -87,6 +118,11 @@ class SettingsApplication {
     this.#root.innerHTML = `<div class="memsphere-settings"><style>${styles}</style><div class="settings-loading">${escapeHtml(this.t("settings.loading", "正在加载配置……"))}</div></div>`;
     await this.load();
   }
+
+  attachList(root: HTMLElement): void { this.#listRoot = root; this.render(); }
+  detachList(root: HTMLElement): void { if (this.#listRoot === root) this.#listRoot = null; }
+  attachDetail(root: HTMLElement): void { this.#detailRoot = root; this.render(); }
+  detachDetail(root: HTMLElement): void { if (this.#detailRoot === root) this.#detailRoot = null; }
 
   async updateRoute(route: Readonly<RouteLocation>): Promise<void> {
     const destination = destinationFromPath(route.pathname);
@@ -167,13 +203,19 @@ class SettingsApplication {
     const title = this.#scope === "global"
       ? this.t("navigation.settingsLabel", "Memsphere 设置", { name: "Memsphere" })
       : this.t("navigation.projectSettingsLabel", `${this.#currentProject || "项目"} 项目设置`, { name: this.#currentProject || this.t("navigation.project", "项目") });
+    const detail = `<section class="settings-content"><header class="settings-page-header"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(this.#scope === "global"
+      ? this.t("navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。")
+      : this.t("navigation.projectSettingsSubtitle", "管理当前项目配置。"))}</p></header>
+      <div id="detail">${this.#loading ? empty(this.t("settings.loading", "正在加载配置……")) : this.contentHtml(scope)}</div></section>`;
+    if (this.#listRoot || this.#detailRoot) {
+      if (this.#listRoot) this.#listRoot.innerHTML = `<div class="memsphere-settings settings-list-surface"><style>${styles}</style><aside class="settings-sidebar">${this.listHtml()}</aside></div>`;
+      if (this.#detailRoot) this.#detailRoot.innerHTML = `<div class="memsphere-settings settings-detail-surface"><style>${styles}</style>${detail}</div>`;
+      this.bind();
+      return;
+    }
     this.#root.innerHTML = `<div class="memsphere-settings"><style>${styles}</style>
       <aside class="settings-sidebar">${this.navHtml()}</aside>
-      <section class="settings-content"><header class="settings-page-header"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(this.#scope === "global"
-        ? this.t("navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。")
-        : this.t("navigation.projectSettingsSubtitle", "管理当前项目配置。"))}</p></header>
-        <div id="detail">${this.#loading ? empty(this.t("settings.loading", "正在加载配置……")) : this.contentHtml(scope)}</div>
-      </section></div>`;
+      ${detail}</div>`;
     this.bind();
   }
 
@@ -203,6 +245,35 @@ class SettingsApplication {
           return `<button type="button" class="settings-nav-item${active ? " active" : ""}" data-section="${section}"${active ? ' aria-current="page"' : ""}>${escapeHtml(name)}</button>`;
         }).join("")}</div>
       </div>`).join("");
+  }
+
+  listHtml(): string {
+    const names: Record<string, string> = {
+      overview: this.t("settings.overview", "设置概览"),
+      general: this.t("settings.general", "通用设置"),
+      view: this.t("settings.viewService", "界面服务"),
+      providers: this.t("settings.providers", "模型提供商"),
+      project: this.t("navigation.project", "当前项目"),
+      participants: this.t("settings.participants", "参与者")
+    };
+    const section = this.#scope === "project" && this.#module === "overview" ? "project" : this.#module;
+    const title = names[section] ?? names.overview;
+    const records = section === "providers"
+      ? ((this.#scopes.global.data?.acpProviderCatalog ?? []) as JsonObject[]).slice(0, 8).map(provider => [String(provider.name ?? provider.id ?? "Provider"), this.t("settings.providers", "模型提供商"), String(provider.description ?? provider.command ?? "")])
+      : section === "participants"
+        ? [[this.t("settings.participants", "参与者"), this.#currentProject || "Project", this.t("navigation.projectSettingsSubtitle", "管理当前项目的参与者配置。")]]
+        : section === "project"
+          ? [[this.#currentProject || this.t("navigation.project", "当前项目"), "Project", this.t("navigation.projectSettingsSubtitle", "管理当前项目配置。")], [this.t("settings.store", "存储"), "Persistence", this.t("settings.storageLocation", "存储位置")]]
+          : section === "view"
+            ? [[this.t("settings.viewService", "界面服务"), "ViewHost", this.t("navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。")], [this.t("settings.scope", "作用范围"), "Memsphere", this.t("settings.scope.global", "全局配置")]]
+            : section === "general"
+              ? [[this.t("settings.language", "工作语言"), this.#config.locale ?? "zh-CN", this.t("settings.languageHelp", "影响 View 的显示语言")], [this.t("settings.scope", "作用范围"), "Memsphere", this.t("settings.scope.global", "全局配置")]]
+              : [[this.t("settings.language", "工作语言"), this.#config.locale ?? "zh-CN", this.t("settings.languageHelp", "影响 View 的显示语言")], [this.t("navigation.project", "当前项目"), this.#currentProject || "-", this.t("navigation.projectSettingsSubtitle", "Project 级设置与数据边界")], [this.t("settings.status", "服务状态"), this.t("service.healthy", "运行正常"), "ViewHost"]];
+    const cards = records.length ? records : [[title, this.t("common.settings", "设置"), this.t("settings.notLoaded", "配置尚未加载。")]];
+    return `<header class="settings-list-header"><div><small>${escapeHtml(this.t("common.settings", "设置"))}</small><h2>${escapeHtml(title)}</h2></div><button type="button" data-action="reload" aria-label="${escapeAttr(this.t("settings.reload", "重新读取"))}"><img src="/assets/system-icons/arrows-clockwise.svg" alt=""></button></header>
+      <label class="settings-local-search"><img src="/assets/system-icons/magnifying-glass.svg" alt=""><input type="search" placeholder="${escapeAttr(this.t("settings.search", `搜索${title}`))}" aria-label="${escapeAttr(this.t("settings.search", `搜索${title}`))}"></label>
+      <div class="settings-record-list">${cards.map(([name, meta, summary], index) => `<article class="settings-record${index === 0 ? " active" : ""}"><span class="settings-record-icon"><img src="/assets/system-icons/gear-six.svg" alt=""></span><span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(meta)}</small><p>${escapeHtml(summary)}</p></span><img class="settings-record-caret" src="/assets/system-icons/caret-down.svg" alt=""></article>`).join("")}</div>
+      <footer class="settings-list-footer">${cards.length} ${escapeHtml(this.t("settings.results", "条结果"))}</footer>`;
   }
 
   contentHtml(scope: ScopeState): string {
@@ -265,7 +336,15 @@ class SettingsApplication {
   generalHtml(scope: ScopeState): string {
     return `<section class="settings-section"><h3>${escapeHtml(this.t("settings.general", "常规"))}</h3><div class="settings-grid">
       ${selectField("language", this.t("settings.workingLanguage", "工作语言"), scope.draft?.language ?? "zh-CN", [["zh-CN", "中文"], ["en", "English"]])}
-    </div>${this.errorsHtml(scope)}</section>`;
+    </div><div class="settings-token-management"><div class="settings-section-head"><div><h4>${escapeHtml(this.t("settings.operatorTokenTitle", "操作令牌"))}</h4><p class="settings-section-subtitle">${escapeHtml(scope.data?.operatorTokenConfigured
+      ? this.t("settings.operatorTokenConfigured", "已设置固定令牌；Memsphere 重启后继续使用它。")
+      : this.t("settings.operatorTokenRandom", "未设置固定令牌；每次启动会生成新的随机令牌。"))}</p></div>${pill(scope.data?.operatorTokenConfigured
+      ? this.t("settings.configured", "已设置")
+      : this.t("settings.randomEachStart", "每次随机"), scope.data?.operatorTokenConfigured ? "done" : "")}</div>
+      <div class="settings-token-editor"><div class="settings-field"><label for="settings-operator-token">${escapeHtml(this.t("settings.newOperatorToken", "新操作令牌"))}</label><input id="settings-operator-token" class="settings-input" data-operator-token type="password" autocomplete="new-password" value="${escapeAttr(this.#operatorTokenDraft)}" placeholder="${escapeAttr(this.t("settings.operatorTokenPlaceholder", "输入任意令牌"))}"${this.#operatorTokenError ? ' aria-invalid="true" aria-describedby="settings-operator-token-error"' : ""}></div>
+      <div class="settings-token-buttons"><button class="btn primary" data-action="save-operator-token">${escapeHtml(this.t("settings.saveOperatorToken", "设置固定令牌"))}</button>${scope.data?.operatorTokenConfigured ? `<button class="btn" data-action="clear-operator-token">${escapeHtml(this.t("settings.clearOperatorToken", "恢复每次随机"))}</button>` : ""}</div></div>
+      ${this.#operatorTokenError ? `<div id="settings-operator-token-error" class="settings-error" role="alert">${escapeHtml(this.#operatorTokenError)}</div>` : ""}
+      <p class="settings-help">${escapeHtml(this.t("settings.operatorTokenHelp", "令牌不会在页面中回显。修改后请重启 View；当前会话仍使用旧令牌。"))}</p></div>${this.errorsHtml(scope)}</section>`;
   }
 
   viewHtml(scope: ScopeState): string {
@@ -337,18 +416,22 @@ class SettingsApplication {
   }
 
   bind(): void {
-    this.#root.querySelectorAll<HTMLDetailsElement>("details[data-provider-id]").forEach(item => item.addEventListener("toggle", () => toggleSet(this.#expandedProviders, item.dataset.providerId!, item.open), { signal: this.#signal }));
-    this.#root.querySelectorAll<HTMLDetailsElement>("details[data-participant]").forEach(item => item.addEventListener("toggle", () => toggleSet(this.#expandedParticipants, item.dataset.participant!, item.open), { signal: this.#signal }));
-    this.#root.querySelectorAll<HTMLButtonElement>("[data-section]").forEach(button => button.addEventListener("click", () => void this.activate(button.dataset.section as SectionName), { signal: this.#signal }));
-    this.#root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("[data-field]").forEach(field => {
+    for (const root of this.surfaceRoots()) this.bindRoot(root);
+  }
+
+  private bindRoot(root: HTMLElement): void {
+    root.querySelectorAll<HTMLDetailsElement>("details[data-provider-id]").forEach(item => item.addEventListener("toggle", () => toggleSet(this.#expandedProviders, item.dataset.providerId!, item.open), { signal: this.#signal }));
+    root.querySelectorAll<HTMLDetailsElement>("details[data-participant]").forEach(item => item.addEventListener("toggle", () => toggleSet(this.#expandedParticipants, item.dataset.participant!, item.open), { signal: this.#signal }));
+    root.querySelectorAll<HTMLButtonElement>("[data-section]").forEach(button => button.addEventListener("click", () => void this.activate(button.dataset.section as SectionName), { signal: this.#signal }));
+    root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("[data-field]").forEach(field => {
       const event = field.dataset.commit === "true" ? "change" : field instanceof HTMLSelectElement || field.type === "checkbox" ? "change" : "input";
       field.addEventListener(event, () => this.updateField(field), { signal: this.#signal });
     });
-    this.#root.querySelectorAll<HTMLButtonElement>("[data-select-field]").forEach(trigger => {
+    root.querySelectorAll<HTMLButtonElement>("[data-select-field]").forEach(trigger => {
       trigger.addEventListener("click", () => {
         const menu = trigger.nextElementSibling as HTMLElement;
         const open = menu.hidden;
-        this.#root.querySelectorAll<HTMLElement>(".settings-select-menu:not([hidden])").forEach(other => {
+        root.querySelectorAll<HTMLElement>(".settings-select-menu:not([hidden])").forEach(other => {
           other.hidden = true;
           other.previousElementSibling?.setAttribute("aria-expanded", "false");
         });
@@ -368,21 +451,31 @@ class SettingsApplication {
         }
       }, { signal: this.#signal });
     });
-    this.#root.querySelectorAll<HTMLButtonElement>("[data-select-option]").forEach(option => {
+    root.querySelectorAll<HTMLButtonElement>("[data-select-option]").forEach(option => {
       option.addEventListener("click", () => this.updateNamedField(option.dataset.selectOption!, option.dataset.value!, true), { signal: this.#signal });
     });
-    this.#root.querySelector<HTMLInputElement>("#settings-token")?.addEventListener("input", event => {
+    root.querySelector<HTMLInputElement>("#settings-token")?.addEventListener("input", event => {
       this.#token = (event.currentTarget as HTMLInputElement).value.trim();
       this.#tokenError = "";
-      this.#root.querySelector("#settings-token-error")?.remove();
+      root.querySelector("#settings-token-error")?.remove();
       (event.currentTarget as HTMLInputElement).removeAttribute("aria-invalid");
       (event.currentTarget as HTMLInputElement).removeAttribute("aria-describedby");
     }, { signal: this.#signal });
-    this.#root.querySelectorAll<HTMLInputElement>("[data-permission]").forEach(input => input.addEventListener("change", () => this.updatePermission(input), { signal: this.#signal }));
-    this.#root.querySelectorAll<HTMLButtonElement>("[data-action]").forEach(button => button.addEventListener("click", () => void this.action(button.dataset.action!), { signal: this.#signal }));
-    this.#root.querySelectorAll<HTMLButtonElement>("[data-remove-participant]").forEach(button => button.addEventListener("click", () => this.removeParticipant(button.dataset.removeParticipant!), { signal: this.#signal }));
-    this.#root.querySelectorAll<HTMLButtonElement>("[data-reset-provider]").forEach(button => button.addEventListener("click", () => this.resetProvider(button.dataset.resetProvider!), { signal: this.#signal }));
+    root.querySelector<HTMLInputElement>("[data-operator-token]")?.addEventListener("input", event => {
+      this.#operatorTokenDraft = (event.currentTarget as HTMLInputElement).value;
+      this.#operatorTokenError = "";
+      (event.currentTarget as HTMLInputElement).removeAttribute("aria-invalid");
+      (event.currentTarget as HTMLInputElement).removeAttribute("aria-describedby");
+      root.querySelector("#settings-operator-token-error")?.remove();
+    }, { signal: this.#signal });
+    root.querySelectorAll<HTMLInputElement>("[data-permission]").forEach(input => input.addEventListener("change", () => this.updatePermission(input), { signal: this.#signal }));
+    root.querySelectorAll<HTMLButtonElement>("[data-action]").forEach(button => button.addEventListener("click", () => void this.action(button.dataset.action!), { signal: this.#signal }));
+    root.querySelectorAll<HTMLButtonElement>("[data-remove-participant]").forEach(button => button.addEventListener("click", () => this.removeParticipant(button.dataset.removeParticipant!), { signal: this.#signal }));
+    root.querySelectorAll<HTMLButtonElement>("[data-reset-provider]").forEach(button => button.addEventListener("click", () => this.resetProvider(button.dataset.resetProvider!), { signal: this.#signal }));
   }
+
+  private surfaceRoots(): readonly HTMLElement[] { return [this.#listRoot, this.#detailRoot].filter((root): root is HTMLElement => Boolean(root)).concat(this.#listRoot || this.#detailRoot ? [] : [this.#root]); }
+  private detailRoot(): HTMLElement { return this.#detailRoot ?? this.#root; }
 
   async activate(sectionName: SectionName): Promise<void> {
     const destination = sections[sectionName];
@@ -395,13 +488,15 @@ class SettingsApplication {
   async action(name: string): Promise<void> {
     try {
       if (name === "token") {
-        this.#token = this.#root.querySelector<HTMLInputElement>("#settings-token")?.value.trim() ?? "";
+        this.#token = this.detailRoot().querySelector<HTMLInputElement>("#settings-token")?.value.trim() ?? "";
         await this.load();
       } else if (name === "reload") await this.load(this.#scope);
       else if (name === "validate") await this.validate();
       else if (name === "save") await this.save();
       else if (name === "back") { this.state.confirmation = null; this.render(); }
       else if (name === "detect") await this.detectProviders();
+      else if (name === "save-operator-token") await this.saveOperatorToken(false);
+      else if (name === "clear-operator-token") await this.saveOperatorToken(true);
       else if (name === "enable-participants") {
         this.state.draft!.control_plane = { runner: { permissions: [] }, actors: {} };
         this.render();
@@ -436,19 +531,19 @@ class SettingsApplication {
       this.refreshStatus();
       if (path.startsWith("provider.")) {
         const id = path.split(".")[1]!;
-        const preview = this.#root.querySelector<HTMLElement>(`[data-provider-id="${CSS.escape(id)}"] .settings-provider-preview`);
+        const preview = this.detailRoot().querySelector<HTMLElement>(`[data-provider-id="${CSS.escape(id)}"] .settings-provider-preview`);
         const provider = this.providerEntries().find(entry => entry.id === id)?.value;
         if (preview && provider) preview.textContent = this.t("settings.actualLaunch", `实际启动：${this.providerPreview(provider)}`, { command: this.providerPreview(provider) });
-        const detection = this.#root.querySelector<HTMLElement>(`[data-provider-id="${CSS.escape(id)}"] .settings-provider-detection`);
+        const detection = this.detailRoot().querySelector<HTMLElement>(`[data-provider-id="${CSS.escape(id)}"] .settings-provider-detection`);
         if (detection) detection.textContent = this.t("settings.pendingDetection", "待重新检测");
-        const reset = this.#root.querySelector<HTMLButtonElement>(`[data-reset-provider="${CSS.escape(id)}"]`);
+        const reset = this.detailRoot().querySelector<HTMLButtonElement>(`[data-reset-provider="${CSS.escape(id)}"]`);
         if (reset && this.providerReferences(id).length === 0) { reset.disabled = false; reset.title = ""; }
       }
     }
   }
 
   refreshStatus(): void {
-    const current = this.#root.querySelector("#settings-status");
+    const current = this.detailRoot().querySelector("#settings-status");
     if (!current) return;
     const template = document.createElement("template");
     template.innerHTML = this.statusHtml(this.state);
@@ -554,6 +649,36 @@ class SettingsApplication {
       scope.notice = payload.restartRequired
         ? this.t("settings.savedRestart", `配置已保存。请执行 memsphere view restart；重启后地址为 ${viewUrl(payload.config.view ?? payload.defaults.view)}。`, { url: viewUrl(payload.config.view ?? payload.defaults.view) })
         : this.t("settings.savedApplied", "配置已保存并应用。");
+    }
+    this.render();
+  }
+
+  async saveOperatorToken(clear: boolean): Promise<void> {
+    const global = this.#scopes.global;
+    const token = clear ? null : this.#operatorTokenDraft.trim();
+    if (!clear && !token) {
+      this.#operatorTokenError = this.t("settings.operatorTokenInvalid", "操作令牌不能为空。");
+      this.render();
+      return;
+    }
+    const response = await this.settingsFetch("/api/settings/global/operator-token", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: global.data!.diskRevision, token })
+    });
+    const payload = await response.json() as JsonObject;
+    if (response.status === 409) {
+      global.notice = this.t("settings.configChanged", "配置文件已在磁盘上变化，请重新读取后再编辑。");
+    } else if (!response.ok) {
+      this.#operatorTokenError = payload.error ?? this.t("settings.saveFailed", "保存失败");
+    } else {
+      global.data!.diskRevision = payload.diskRevision;
+      global.data!.operatorTokenConfigured = payload.operatorTokenConfigured;
+      global.data!.restartRequired = true;
+      this.#operatorTokenDraft = "";
+      global.notice = payload.operatorTokenConfigured
+        ? this.t("settings.operatorTokenSaved", "固定令牌已保存，重启 View 后生效。")
+        : this.t("settings.operatorTokenCleared", "固定令牌已清除；重启 View 后将恢复每次随机生成。");
     }
     this.render();
   }
@@ -664,8 +789,8 @@ class SettingsApplication {
 }
 
 function destinationFromPath(pathname: string): { scope: ScopeName; module: string } {
-  const name = decodeURIComponent(pathname.split("/").filter(Boolean)[1] ?? "overview") as SectionName;
-  return sections[name] ?? sections.overview;
+  const name = decodeURIComponent(pathname.split("/").filter(Boolean)[1] ?? "general") as SectionName;
+  return sections[name] ?? sections.general;
 }
 
 function inputField(path: string, label: string, value: string, options: { type?: string; disabled?: boolean; min?: string; max?: string; commit?: boolean } = {}): string {
@@ -703,12 +828,14 @@ function escapeHtml(value: unknown): string { return String(value).replace(/&/g,
 
 const styles = `
   .memsphere-settings { --surface:#fff;--line:#dfe3dc;--soft:#f1f3ee;--text:#222629;--muted:#6c7379;--accent:#286c67;--accent-soft:#e7f1ee;--danger:#a14436;--shadow:0 2px 10px rgba(25,30,35,.06); display:grid;grid-template-columns:240px minmax(0,1fr);min-height:calc(100vh - 82px);background:#f6f7f4;color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-sizing:border-box }
-  .memsphere-settings * { box-sizing:border-box } .settings-sidebar{padding:24px 16px;border-right:1px solid var(--line);background:#fafbf8}.settings-content{min-width:0;padding:28px 34px 48px}.settings-page-header h2{margin:0;font-size:24px}.settings-page-header p{margin:5px 0 22px;color:var(--muted)}
+  .memsphere-settings.settings-list-surface,.memsphere-settings.settings-detail-surface{display:block;min-height:100%;background:transparent}.settings-list-surface .settings-sidebar{min-height:100%;border-right:0;background:transparent;padding:0 8px 12px}.settings-detail-surface .settings-content{width:100%;max-width:980px;min-height:100%;margin:0 auto}.settings-detail-surface .settings-page-header{display:none}
+  .memsphere-settings * { box-sizing:border-box } .settings-sidebar{padding:24px 16px;border-right:1px solid var(--line);background:#fafbf8}.settings-content{min-width:0;padding:22px 28px 48px}.settings-page-header h2{margin:0;font-size:24px}.settings-page-header p{margin:5px 0 22px;color:var(--muted)}
+  .settings-list-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:19px 10px 10px}.settings-list-header small{display:block;margin-bottom:4px;color:#82908d;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.settings-list-header h2{margin:0;font-size:18px;line-height:1.3;letter-spacing:-.02em}.settings-list-header button{display:grid;width:32px;height:32px;place-items:center;border:0;border-radius:8px;background:transparent;cursor:pointer}.settings-list-header button:hover{background:#f0f4f2}.settings-list-header button img{width:17px;height:17px;opacity:.7}.settings-local-search{display:flex;height:36px;align-items:center;gap:7px;margin:0 6px 10px;border:1px solid #dce4e1;border-radius:9px;background:#f8faf9;padding:0 10px;color:#7a8784}.settings-local-search:focus-within{border-color:#8cb7b1;box-shadow:0 0 0 3px rgba(40,118,110,.08)}.settings-local-search img{width:16px;height:16px;opacity:.55}.settings-local-search input{width:100%;min-width:0;border:0;outline:0;background:transparent;font-size:12px;color:#2f3937}.settings-record-list{display:grid;gap:2px}.settings-record{display:grid;min-height:66px;grid-template-columns:34px minmax(0,1fr) 14px;align-items:start;gap:9px;border-radius:10px;padding:10px 9px}.settings-record:hover{background:#f2f6f5}.settings-record.active{background:#e1efed}.settings-record-icon{display:grid;width:34px;height:34px;place-items:center;border-radius:10px;background:#eef4f2}.settings-record.active .settings-record-icon{background:#fff}.settings-record-icon img{width:18px;height:18px;opacity:.72}.settings-record strong,.settings-record small,.settings-record p{display:block;overflow:hidden;margin:0;text-overflow:ellipsis;white-space:nowrap}.settings-record strong{font-size:13px;line-height:1.35}.settings-record small{margin-top:3px;color:#87928f;font-size:10px}.settings-record p{margin-top:5px;color:#697572;font-size:11px}.settings-record-caret{width:14px;height:14px;margin-top:8px;opacity:.55;transform:rotate(-90deg)}.settings-list-footer{margin-top:auto;border-top:1px solid #eef1f0;padding:10px 9px;color:#8a9592;font-size:10px}
   .settings-nav-group{overflow:hidden;margin-bottom:12px;border:1px solid var(--line);border-radius:7px;background:var(--surface)}.settings-nav-group.active{border-color:#b8cbc7}.settings-nav-heading{padding:9px 10px;background:var(--soft);color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase}.settings-nav-items{display:grid;gap:2px;padding:4px}.settings-nav-item{border:0;border-radius:4px;background:transparent;padding:8px 9px;text-align:left;font-weight:600;color:var(--text);cursor:pointer}.settings-nav-item:hover{background:var(--soft)}.settings-nav-item.active{background:var(--accent-soft);color:#173f3c}
-  .settings-layout{display:grid;gap:16px;max-width:1120px}.settings-section{background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:18px}.settings-section h3{margin:0 0 14px;font-size:17px}.settings-section h4{margin:18px 0 8px;font-size:14px}.settings-section-head{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px}.settings-section-head h3{margin:0}.settings-section-subtitle{margin:4px 0 0;color:var(--muted);font-size:12px}
+  .settings-layout{display:grid;gap:14px;max-width:1120px}.settings-section{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 2px rgba(20,47,42,.025);padding:21px 22px}.settings-section h3{margin:0 0 14px;font-size:17px}.settings-section h4{margin:18px 0 8px;font-size:14px}.settings-section-head{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px}.settings-section-head h3{margin:0}.settings-section-subtitle{margin:4px 0 0;color:var(--muted);font-size:12px}
   .settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 16px}.settings-compact-grid{grid-template-columns:repeat(auto-fit,minmax(240px,360px));justify-content:start}.settings-participant-basic{grid-template-columns:repeat(3,minmax(0,1fr))}.settings-field{display:grid;gap:6px;min-width:0}.settings-field.wide{grid-column:1/-1}.settings-field>label,.settings-label{color:#4f5a5c;font-size:12px;font-weight:700}.settings-input,.settings-select,.settings-field textarea{width:100%;min-width:0;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text);padding:8px 10px;outline:none}.settings-field textarea{min-height:92px;resize:vertical}.settings-input:focus,.settings-select:focus,.settings-field textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(40,108,103,.12)}.settings-input:disabled{border-style:dashed;background:var(--soft);color:var(--muted)}.settings-select-wrap{position:relative;min-width:0}.settings-select-trigger{display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;cursor:pointer}.settings-select-caret{color:var(--muted)}.settings-select-menu{position:absolute;top:calc(100% + 4px);right:0;left:0;z-index:40;display:grid;gap:2px;max-height:240px;overflow-y:auto;padding:4px;border:1px solid var(--line);border-radius:6px;background:var(--surface);box-shadow:0 10px 28px rgba(25,30,35,.16)}.settings-select-menu[hidden]{display:none}.settings-select-option{width:100%;border:0;border-radius:4px;background:transparent;color:var(--text);padding:7px 8px;text-align:left;cursor:pointer}.settings-select-option:hover,.settings-select-option:focus-visible{outline:0;background:var(--soft)}.settings-select-option[aria-selected="true"]{background:var(--accent-soft);color:#173f3c}
   .settings-status{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.pill{display:inline-flex;border:1px solid var(--line);border-radius:999px;background:#fff;padding:2px 8px;color:var(--muted);font-size:12px}.pill.done{border-color:#b9d6c7;background:#edf7f1;color:#226044}.pill.warn{border-color:#e2c99c;background:#fff8e8;color:#7a5714}.pill.strong{font-weight:700}.settings-actions,.settings-participant-actions{display:flex;gap:8px;justify-content:flex-end}.btn{border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text);padding:8px 12px;cursor:pointer}.btn:hover{background:var(--soft)}.btn.primary{border-color:var(--accent);background:var(--accent);color:#fff}.btn.danger{color:var(--danger)}.btn:disabled{cursor:not-allowed;opacity:.5}
-  .settings-check{display:flex;gap:8px;align-items:flex-start}.settings-check input{width:16px;height:16px;margin-top:2px;accent-color:var(--accent)}.settings-default-toggle{margin-top:14px}.settings-help,.settings-error{font-size:12px;overflow-wrap:anywhere}.settings-help{color:var(--muted)}.settings-error{color:var(--danger)}.settings-notice{border-left:3px solid var(--accent);padding:10px 12px;background:var(--accent-soft)}.settings-token{max-width:520px}.settings-token .btn{margin-top:14px}.empty{padding:30px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center}
+  .settings-check{display:flex;gap:8px;align-items:flex-start}.settings-check input{width:16px;height:16px;margin-top:2px;accent-color:var(--accent)}.settings-default-toggle{margin-top:14px}.settings-token-management{margin-top:28px;padding-top:24px;border-top:1px solid var(--line)}.settings-token-management h4{margin:0 0 6px;font-size:16px}.settings-token-editor{display:flex;align-items:end;gap:12px;margin-top:18px}.settings-token-editor .settings-field{flex:1;margin:0}.settings-token-buttons{display:flex;gap:8px;padding-bottom:1px;white-space:nowrap}.settings-help,.settings-error{font-size:12px;overflow-wrap:anywhere}.settings-help{color:var(--muted)}.settings-error{color:var(--danger)}.settings-notice{border-left:3px solid var(--accent);padding:10px 12px;background:var(--accent-soft)}.settings-token{max-width:520px}.settings-token .btn{margin-top:14px}.empty{padding:30px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center}
   .settings-participants,.settings-providers{border-top:1px solid var(--line)}.settings-participant{border-bottom:1px solid var(--line)}.settings-participant>summary{list-style:none}.settings-participant>summary::-webkit-details-marker{display:none}.settings-participant-summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;min-height:58px;padding:10px 4px;cursor:pointer}.settings-participant-summary:hover{background:#f7f8f5}.settings-participant-summary-meta{margin-top:5px;color:var(--muted);font-size:12px;overflow-wrap:anywhere}.settings-participant-body{padding:2px 4px 18px}.settings-permissions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px}.settings-permission{border-left:2px solid var(--line);padding-left:9px}.settings-permission p{margin:3px 0 0 24px;color:var(--muted);font-size:12px}.settings-provider-preview{margin:12px 0 0;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:#f3f5f0;overflow-wrap:anywhere}.settings-change-list{display:grid;gap:8px;padding:0;list-style:none}.settings-change-list li{border-left:3px solid var(--accent);padding:7px 10px;background:#f3f5f0}.settings-code{max-height:440px;overflow:auto;white-space:pre;background:#f3f5f0;border:1px solid var(--line);border-radius:6px;padding:12px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.muted{color:var(--muted)}
-  @media(max-width:760px){.memsphere-settings{grid-template-columns:1fr}.settings-sidebar{border-right:0;border-bottom:1px solid var(--line)}.settings-content{padding:18px 16px 36px}.settings-grid,.settings-compact-grid,.settings-participant-basic,.settings-permissions{grid-template-columns:minmax(0,1fr)}.settings-section{padding:14px}.settings-section-head{align-items:flex-start}}
+  @media(max-width:760px){.memsphere-settings{grid-template-columns:1fr}.settings-sidebar{border-right:0;border-bottom:1px solid var(--line)}.settings-content{padding:18px 16px 36px}.settings-grid,.settings-compact-grid,.settings-participant-basic,.settings-permissions{grid-template-columns:minmax(0,1fr)}.settings-section{padding:14px}.settings-section-head{align-items:flex-start}.settings-token-editor,.settings-token-buttons{align-items:stretch;flex-direction:column}.settings-token-buttons .btn{width:100%}}
 `;

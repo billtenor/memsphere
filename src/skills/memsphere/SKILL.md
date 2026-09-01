@@ -197,7 +197,7 @@ flow:
 
 ### 维护当前配置
 
-View 是 Memsphere Home 级单一服务，可从 Project 选择器切换当前展示内容。稳定 Shell 通过十个根 Slot 组合导航、头部、账户、底部、Home 三个区域、Page 与 Overlay；Module 只操作 Host 分配的容器。Memory、ChangeSet、Run、设置与 Artifact Review 的主要界面都有稳定 URL，可复制到另一窗口直接重开；ChangeSet 从 Memory 列表的“修改中”标记进入，不占用顶层菜单；Artifact Review 由 Run Module 注册到 Host overlay，Round 与 Material 由查询参数定位，临时身份、草稿和布局不写入 URL。固定界面文案通过 zh-CN/en 语言资源并跟随 Home `language`，与 Memory DSL 的中文标签/YAML 原名展示偏好彼此独立；用户内容、标识符、命令、路径和错误原文保持原样。配置中心通过左侧分组导航直接进入 Memsphere 或当前 Project 设置，右侧只展示当前配置内容：全局设置维护语言、View 服务和 ACP Provider，Project 设置展示 Store 并维护 Control Plane 与 Actor。两个 Scope 分别保存草稿、Revision、校验结果和确认 diff，保存时只原子写入各自配置文件；切换 Project 不清除全局草稿，放弃未保存的 Project 草稿前必须确认。全局 ACP Provider 被任一已注册 Project 的 Actor 引用时不能重置或删除。成功保存 `language` 后下一次加载立即使用新界面语言；只有磁盘 host 或 port 与当前 View 进程不一致时，需要手动执行：
+View 是 Memsphere Home 级单一服务，可从 Project 选择器切换当前展示内容。稳定 Shell 通过十三个根 Slot 组合主导航、二级导航、对象列表、全局搜索、头部、账户、底部、Home 三个区域、Page 与 Overlay；Module 只操作 Host 分配的列表、Page 或 Overlay 容器。主导航、二级导航、对象列表和详情形成可伸缩四栏，二级导航栏与对象列表栏宽度由用户拖动并在浏览器本地保存。Memory、ChangeSet、Run、设置与 Artifact Review 的主要界面都有稳定 URL，可复制到另一窗口直接重开；ChangeSet 从 Memory 列表的“修改中”标记进入，不占用顶层菜单；Artifact Review 由 Run Module 注册到 Host overlay，Round 与 Material 由查询参数定位，临时身份、草稿和布局不写入 URL。固定界面文案通过 zh-CN/en 语言资源并跟随 Home `language`，与 Memory DSL 的中文标签/YAML 原名展示偏好彼此独立；用户内容、标识符、命令、路径和错误原文保持原样。配置中心通过左侧分组导航直接进入 Memsphere 或当前 Project 设置，右侧只展示当前配置内容：全局设置维护语言、View 服务和 ACP Provider，Project 设置展示 Store 并维护 Control Plane 与 Actor。两个 Scope 分别保存草稿、Revision、校验结果和确认 diff，保存时只原子写入各自配置文件；切换 Project 不清除全局草稿，放弃未保存的 Project 草稿前必须确认。全局 ACP Provider 被任一已注册 Project 的 Actor 引用时不能重置或删除。成功保存 `language` 后下一次加载立即使用新界面语言；只有磁盘 host 或 port 与当前 View 进程不一致时，需要手动执行：
 
 ```bash
 memsphere view restart

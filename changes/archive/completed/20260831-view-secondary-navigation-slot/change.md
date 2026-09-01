@@ -1,9 +1,11 @@
 ---
 id: 20260831-view-secondary-navigation-slot
-status: todo
+status: completed
 type: feature
 created: 2026-08-31
 run_id: run-20260831-134454z-5c48f73d
+implementation_run_id: run-20260901-033651z-f3b4370a
+completed_at: 2026-09-01
 ---
 
 # View 统一二级导航 Slot
@@ -14,7 +16,7 @@ run_id: run-20260831-134454z-5c48f73d
 
 该 Slot 只承载页面级导航。页面内部的筛选器、局部 Tab、折叠控件和其他业务交互继续由各 Module 自己管理，不进入 Shell。
 
-本需求独立记录，不纳入当前 View 整体界面重构 Run，也不在本次迭代中开发。
+本需求最初独立记录；产品负责人随后明确把它纳入新的飞书式四栏界面重构 Run，并与内容列表、详情页和全局搜索一起实施。
 
 ## 验收标准
 
@@ -49,12 +51,23 @@ run_id: run-20260831-134454z-5c48f73d
 
 ## 技术与测试方案
 
-待开发前补充。
+- 长期 Slot、Descriptor 与 Router 契约见 `docs/view-plugin-api.md`；完整 Slot Catalog 见 `docs/view-slots.md`。
+- Host 统一渲染二级导航，Module 只注册 pure-data Descriptor；选中态由 RouteActivation 驱动。
+- Memory、Run、Settings 同时迁移到 `navigation.secondary`、`content.list` 与 `main.view` 的稳定组合，不保留各自页面级二级菜单。
+- 通过 SDK、Host composition、Shell、三个 builtin Module、响应式与真实 Chromium 浏览器回归验证。
 
 ## 开发任务
 
-待开发前补充。
+- [x] 增加 `navigation.secondary` SDK Token、Descriptor 与 validator。
+- [x] 实现 Runtime 组合、Router 激活和 Host 统一渲染。
+- [x] 迁移 Memory、Run、Settings 页面级二级导航。
+- [x] 与可调宽内容列表、详情页和全局搜索共同完成桌面/移动布局。
+- [x] 更新中英文文档、System Memory、Skill 和自动化测试。
 
 ## 验收结果
 
-尚未开始。
+- 已由 `run-20260901-033651z-f3b4370a` 实现并完成研发、测试、架构联合 Review。
+- `npm test`：501 tests，500 pass，0 fail，1 个 Windows-only skip。
+- `npm run typecheck`、`npm run build`、`git diff --check`、`memsphere validate` 均通过。
+- 真实 Chromium 已验证二级导航、路由选中态、可调宽面板的拖动/键盘/双击复位/刷新持久化，以及桌面和移动布局。
+- Memory ChangeSet `change-20260901-050952488z-29f68302` 校验通过。

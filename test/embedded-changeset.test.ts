@@ -496,9 +496,9 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     try {
       const page = await completedBrowser.newPage();
       await page.goto(`${completedOrigin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
-      await page.locator(".memory-title", { hasText: first.changeId }).waitFor();
-      await page.locator(".memory-subtitle", { hasText: "已完成" }).waitFor();
-      assert.equal(await page.locator(".memory-subtitle", { hasText: "进行中" }).count(), 0);
+      await page.locator(".view-shell-heading", { hasText: first.changeId }).waitFor();
+      await page.locator(".view-shell-heading", { hasText: "已完成" }).waitFor();
+      assert.equal(await page.locator(".view-shell-heading", { hasText: "进行中" }).count(), 0);
     } finally {
       await completedBrowser.close();
       await new Promise<void>((resolve) => completedView.close(() => resolve()));

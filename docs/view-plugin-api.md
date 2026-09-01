@@ -223,6 +223,9 @@ TypeScript 类型不能替代运行时校验。内置 Token 的 validator 由 SD
 import { slots } from "@memsphere/view-sdk";
 
 slots.headerTitle;
+slots.navigationSecondary;
+slots.contentList;
+slots.searchProviders;
 ```
 
 SDK 通过 `slots` 导出当前 Catalog 中的根 Token。完整导出清单、所有者和内容语义只在 [View Slot List](./view-slots.md) 维护；上面只展示访问方式，不构成第二份 Catalog。
@@ -309,7 +312,7 @@ export interface SlotRegistry {
     options: KeyedRegisterOptions<SlotValue<S>, SlotKey<S>>,
   ): Disposer;
 
-  upsert<S extends typeof slots.headerActions | typeof slots.homeAttention | typeof slots.homeContinue>(
+  upsert<S extends typeof slots.navigationSecondary | typeof slots.headerTitle | typeof slots.headerActions | typeof slots.homeAttention | typeof slots.homeContinue>(
     slot: S,
     options: RegisterOptions<SlotValue<S>>,
   ): Disposer;
@@ -318,7 +321,7 @@ export interface SlotRegistry {
 
 `register()` 必须同步完成 Token、Value、身份和所有权校验；失败时不得留下部分注册。成功返回的 disposer 撤销当前 Entry，并由 SDK 自动纳入实例生命周期。
 
-`upsert()` 只用于标记为 `live` 的聚合 Slot，当前为 `header.actions`、`home.attention` 和 `home.continue`。页面 Mount 可以据当前内容更新标题右侧的页面级操作，并须在卸载时撤销这些 Entry。它在 `apply()` 成功提交后可调用，以当前 Module 实例内的 `id` 原子新增或替换 Entry。每次成功更新产生新的 epoch lease；旧 disposer 不得删除更新后的 Entry，实例清理仍会撤销全部 live Entry。
+`upsert()` 只用于标记为 `live` 的 Slot，当前为 `navigation.secondary`、`header.title`、`header.actions`、`home.attention` 和 `home.continue`。页面 Mount 可以据已加载内容更新二级导航数量、当前对象标题和页面级操作，并须在卸载时撤销这些 Entry。它在 `apply()` 成功提交后可调用，以当前 Module 实例内的 `id` 原子新增或替换 Entry。每次成功更新产生新的 epoch lease；旧 disposer 不得删除更新后的 Entry，实例清理仍会撤销全部 live Entry。
 
 Entry 的运行时身份为：
 
@@ -362,6 +365,40 @@ export interface NavigationItemDescriptor {
   readonly icon: IconRef;
   readonly route: RouteTarget;
   readonly badge?: TextRef;
+}
+
+export type SecondaryNavigationItemDescriptor = Readonly<{
+  id: string;
+  label: TextRef;
+  icon: IconRef;
+  badge?: TextRef;
+  selected: boolean;
+} & (
+  | { route: RouteTarget; action?: never }
+  | { route?: never; action: ActionDescriptor }
+)>;
+
+export interface SecondaryNavigationDescriptor {
+  readonly title: TextRef;
+  readonly icon: IconRef;
+  readonly settings?: ActionDescriptor;
+  readonly items: readonly SecondaryNavigationItemDescriptor[];
+  readonly footer?: TextRef;
+}
+
+export interface SearchProviderDescriptor {
+  readonly label: TextRef;
+  readonly icon: IconRef;
+  search(request: { readonly query: string; readonly signal: AbortSignal }):
+    MaybePromise<readonly SearchResultDescriptor[]>;
+}
+
+export interface SearchResultDescriptor {
+  readonly title: TextRef;
+  readonly summary?: TextRef;
+  readonly type: TextRef;
+  readonly icon?: IconRef;
+  readonly route: RouteTarget;
 }
 
 export interface AttentionItemDescriptor {
@@ -436,25 +473,49 @@ export interface ViewRenderContext {
 export interface RouteDefinition {
   readonly id: string;
   readonly path: string;
+  readonly query?: readonly string[];
+}
+
+export interface RouteLocation {
+  readonly pathname: string;
+  readonly search: string;
+  readonly hash: string;
+  readonly params: Readonly<Record<string, string>>;
+  readonly query: Readonly<Record<string, string>>;
+  readonly routeKey?: string;
+  readonly projected?: true;
+}
+
+export interface RouteTargetOptions {
+  readonly query?: Readonly<Record<string, string | undefined>>;
+  readonly hash?: string;
 }
 
 export interface RouteToken {
   readonly key: string;
   readonly activation: RouteActivation;
-  to(params?: Readonly<Record<string, string>>): RouteTarget;
+  to(params?: Readonly<Record<string, string>>, options?: RouteTargetOptions): RouteTarget;
+}
+
+export interface RouteProjectionOptions {
+  readonly from: RouteToken;
+  readonly to: RouteToken;
+  /** 目标参数名 -> 来源参数名。 */
+  readonly params: Readonly<Record<string, string>>;
+  /** 目标 query key -> 来源 query key。 */
+  readonly query?: Readonly<Record<string, string>>;
+  readonly hash?: "discard" | "preserve";
 }
 
 export interface ViewRouter {
   register(definition: RouteDefinition): RouteToken;
-  project(options: {
-    readonly from: RouteToken;
-    readonly to: RouteToken;
-    readonly params: Readonly<Record<string, string>>;
-  }): RouteProjection;
+  project(options: RouteProjectionOptions): RouteProjection;
   navigate(target: RouteTarget): Promise<void>;
   readonly location: RouteLocation;
 }
 ```
+
+`RouteLocation.query` 是 Host 按当前 Route allowlist 解析并冻结的键值映射。`to()` 只接受 Route 已声明的 query key；`undefined` 表示省略。`project()` 的 query 映射只复制显式声明且当前存在的值，hash 默认丢弃。Overlay 的关闭、Escape 与 backdrop 由 Host 使用 replace 完成；公开的 `navigate()` 始终使用 push。
 
 `RouteActivation`、`RouteTarget`、`RouteProjection` 和 `RouteLocation` 是由 SDK 定义、Host 创建的路由值。Plugin 不得伪造这些对象。`project()` 用于 keyed `overlay`：它把浮层 Route 的参数映射到同一 Module 实例拥有的背景页面 Route；跨实例、缺少目标参数或未知参数必须失败。背景 Mount 收到的 `RouteLocation.projected` 为 `true`，应将其视为被动背景，不主动重写当前浮层 URL。
 

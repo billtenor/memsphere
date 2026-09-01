@@ -38,6 +38,10 @@ export async function listMemoryMarket(memoryRoot: string): Promise<MarketMemory
   return Promise.all(market.map((item) => marketItem(item, projectFiles)));
 }
 
+export async function countMemoryMarket(): Promise<number> {
+  return (await readBundledMarketMemories()).length;
+}
+
 export async function planMemoryMarketImport(
   memoryRoot: string,
   reference: string

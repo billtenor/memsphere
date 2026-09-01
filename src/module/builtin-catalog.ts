@@ -2,6 +2,7 @@ export type BuiltinRouteGrant = Readonly<{
   id: string;
   path: string;
   aliases?: readonly string[];
+  query?: readonly string[];
 }>;
 
 export type BuiltinModuleCatalogEntry = Readonly<{
@@ -25,13 +26,13 @@ export const builtinModuleCatalog: readonly BuiltinModuleCatalogEntry[] = deepFr
     icon: "brain",
     homeRouteId: "index",
     routes: [
-      { id: "index", path: "/memories" },
-      { id: "market", path: "/market", aliases: ["/memory-market"] },
-      { id: "memory-detail", path: "/memories/:kind/:name" },
-      { id: "project-index", path: "/projects/:projectId/memories" },
-      { id: "project-memory-detail", path: "/projects/:projectId/memories/:kind/:name" },
-      { id: "project-market", path: "/projects/:projectId/market" },
-      { id: "change-detail", path: "/projects/:projectId/changes/:changeId" }
+      { id: "index", path: "/memories", query: ["section", "change"] },
+      { id: "market", path: "/market", aliases: ["/memory-market"], query: ["item"] },
+      { id: "memory-detail", path: "/memories/:kind/:name", query: ["section", "change"] },
+      { id: "project-index", path: "/projects/:projectId/memories", query: ["section", "change"] },
+      { id: "project-memory-detail", path: "/projects/:projectId/memories/:kind/:name", query: ["section", "change"] },
+      { id: "project-market", path: "/projects/:projectId/market", query: ["item"] },
+      { id: "change-detail", path: "/projects/:projectId/changes/:changeId", query: ["section"] }
     ]
   },
   {
@@ -43,9 +44,9 @@ export const builtinModuleCatalog: readonly BuiltinModuleCatalogEntry[] = deepFr
     icon: "play-circle",
     homeRouteId: "index",
     routes: [
-      { id: "index", path: "/tasks" },
-      { id: "detail", path: "/tasks/:runId" },
-      { id: "artifact-review", path: "/tasks/:runId/artifact-reviews/:reviewId" }
+      { id: "index", path: "/tasks", query: ["status"] },
+      { id: "detail", path: "/tasks/:runId", query: ["status"] },
+      { id: "artifact-review", path: "/tasks/:runId/artifact-reviews/:reviewId", query: ["status", "round", "material"] }
     ]
   },
   {

@@ -52,13 +52,16 @@ test("Memory builtin independently registers its route pages and renders Memory 
   try {
     const page = await browser.newPage();
     await page.goto(`${origin}/memories/concepts/demo-memory`, { waitUntil: "networkidle" });
-    await page.getByRole("heading", { name: "Demo Memory", exact: true, level: 2 }).waitFor();
+    await page.getByRole("heading", { name: "Demo Memory", exact: true, level: 1 }).waitFor();
     assert.match(await page.locator(".memory-workspace").innerText(), /Independent builtin detail/);
-    assert.equal(await page.locator(".memory-module").count(), 1);
-    assert.equal(await page.locator(".memory-source-tabs").count(), 1);
-    assert.equal((await page.locator(".memory-count").textContent())?.trim(), "1 total");
+    assert.equal(await page.locator(".memory-module").count(), 2, "list and detail are independent Module surfaces");
+    assert.equal(await page.locator('[data-view-slot="navigation.secondary"] [aria-current="page"]').count(), 1);
+    assert.equal((await page.locator(".memory-list-footer").textContent())?.trim(), "1 results");
     assert.equal(await page.locator('.memory-workspace button', { hasText: "Edit" }).count(), 0);
-    assert.equal(await page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "Edit", exact: true }).count(), 1);
+    assert.equal(await page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "Create ChangeSet", exact: true }).count(), 1);
+    await page.locator('[data-view-slot="navigation.secondary"] [data-secondary-id="recent"]').click();
+    await page.waitForURL("**/memories?section=recent");
+    assert.equal(await page.locator('[data-secondary-id="recent"]').getAttribute("aria-current"), "page");
   } finally {
     await browser.close();
     await close(server);
@@ -110,14 +113,12 @@ test("Memory builtin renders Market status and opens an importing ChangeSet", as
     await market.waitFor();
     assert.equal(await page.locator('.memory-workspace button', { hasText: "View the corresponding ChangeSet" }).count(), 0);
     await page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "View the corresponding ChangeSet", exact: true }).click();
-    await page.waitForURL(`${origin}/projects/demo/changes/change-market`);
-    await page.getByRole("heading", { name: "change-market", exact: true }).waitFor();
-    await page.getByRole("heading", { name: "Market Memory", exact: true }).waitFor();
+    await page.waitForURL(`${origin}/projects/demo/changes/change-market?section=market`);
+    await page.locator(".memory-title", { hasText: "change-market" }).waitFor();
+    await page.locator(".memory-change-layout").getByRole("heading", { name: "Market Memory", exact: true }).waitFor();
     assert.match(await page.locator(".memory-change-layout").innerText(), /Market content/);
     assert.equal(validatedPreviewRequests, 0);
-    await page.getByRole("button", { name: "← Back to Memory", exact: true }).click();
-    await page.waitForURL(`${origin}/memories`);
-    assert.equal(await page.locator(".memory-count").innerText(), "0 total");
+    assert.equal(await page.getByRole("button", { name: "← Back to Memory", exact: true }).count(), 0);
   } finally {
     await browser.close();
     await close(server);
@@ -162,7 +163,7 @@ test("Memory builtin keeps Procedure content structured instead of exposing obje
   try {
     const page = await browser.newPage();
     await page.goto(`${origin}/memories/procedures/demo-flow`, { waitUntil: "networkidle" });
-    await page.getByRole("heading", { name: "Demo Flow", exact: true, level: 2 }).waitFor();
+    await page.getByRole("heading", { name: "Demo Flow", exact: true, level: 1 }).waitFor();
     assert.equal(await page.locator(".memory-flow-item").count(), 2);
     assert.match(await page.locator(".memory-flow").innerText(), /Prepare input/);
     assert.match(await page.locator(".memory-flow").innerText(), /Needs another pass/);

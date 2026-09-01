@@ -12,6 +12,7 @@ export interface ViewHostBootInstance {
     readonly id: string;
     readonly path: string;
     readonly aliases?: readonly string[];
+    readonly query?: readonly string[];
   }[];
   readonly home?: {
     readonly title: string;
@@ -42,10 +43,14 @@ export function renderViewHostHtml(
     failureTitle: formatViewMessage(resolved, "fatal.title"),
     coreShell: resolved === "zh-CN" ? {
       project: "项目", settings: "⚙ 设置", healthy: "服务状态：正常",
-      switchConfirm: "当前设置页面可能有未保存修改。确认切换项目？"
+      switchConfirm: "当前设置页面可能有未保存修改。确认切换项目？",
+      projectDetails: "项目详情", currentProject: "当前 Project", switchProject: "切换 Project", close: "关闭", projectRoot: "项目目录",
+      storeType: "存储类型", revision: "版本", memoryRoot: "Memory 目录", unavailable: "未设置"
     } : {
       project: "Project", settings: "⚙ Settings", healthy: "Service status: healthy",
-      switchConfirm: "The current settings page may contain unsaved changes. Switch Project?"
+      switchConfirm: "The current settings page may contain unsaved changes. Switch Project?",
+      projectDetails: "Project details", currentProject: "Current Project", switchProject: "Switch Project", close: "Close", projectRoot: "Project root",
+      storeType: "Store type", revision: "Revision", memoryRoot: "Memory root", unavailable: "Not set"
     },
     runtimePath: viewRuntimeBundlePath,
     instances: resolvedInstances.map(instance => ({
@@ -63,6 +68,7 @@ export function renderViewHostHtml(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23286c67'/%3E%3Cpath d='M32 14 48 23v18L32 50 16 41V23z' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='m16 23 16 9 16-9M32 32v18' fill='none' stroke='white' stroke-width='4'/%3E%3C/svg%3E" />
   <title>memsphere</title>
   <style>
     body { margin: 0; background: #f6f7f4; color: #222629; font: 14px/1.45 ui-sans-serif, system-ui, sans-serif; }
@@ -81,6 +87,101 @@ export function renderViewHostHtml(
     const root = document.getElementById("memsphere-view-root");
     const bootNode = document.getElementById("memsphere-view-boot");
     const boot = JSON.parse(bootNode.textContent || "{}");
+    const shell = root.closest("[data-view-shell]");
+    const setupShellResizers = shellElement => {
+      if (!shellElement) return () => {};
+      const storageKey = "memsphere.view.shell-widths.v1";
+      const definitions = {
+        secondary: { property: "--view-secondary-width", min: 176, max: 360, defaultValue: 218 },
+        "content-list": { property: "--view-list-width", min: 260, max: 520, defaultValue: 326 }
+      };
+      let saved = {};
+      try { saved = JSON.parse(localStorage.getItem(storageKey) || "{}"); } catch {}
+      const widths = {};
+      const clamp = (value, definition) => Math.min(definition.max, Math.max(definition.min, Number(value) || definition.defaultValue));
+      const apply = (name, value, persist = false) => {
+        const definition = definitions[name];
+        widths[name] = clamp(value, definition);
+        shellElement.style.setProperty(definition.property, widths[name] + "px");
+        const separator = shellElement.querySelector('[data-view-resizer="' + name + '"]');
+        separator?.setAttribute("aria-valuenow", String(widths[name]));
+        if (persist) {
+          try { localStorage.setItem(storageKey, JSON.stringify(widths)); } catch {}
+        }
+      };
+      for (const [name, definition] of Object.entries(definitions)) apply(name, saved[name] ?? definition.defaultValue);
+      const cleanups = [];
+      let activeDragCleanup = () => {};
+      for (const separator of shellElement.querySelectorAll("[data-view-resizer]")) {
+        const name = separator.dataset.viewResizer;
+        const definition = definitions[name];
+        if (!definition) continue;
+        const onPointerDown = event => {
+          if (event.button !== 0) return;
+          separator.focus();
+          event.preventDefault();
+          activeDragCleanup();
+          const startX = event.clientX;
+          const startWidth = widths[name];
+          let nextWidth = startWidth;
+          let animationFrame = 0;
+          shellElement.dataset.viewResizing = name;
+          const flush = () => {
+            animationFrame = 0;
+            apply(name, nextWidth);
+          };
+          const onMove = moveEvent => {
+            nextWidth = startWidth + moveEvent.clientX - startX;
+            if (!animationFrame) animationFrame = requestAnimationFrame(flush);
+          };
+          const cleanupDrag = persist => {
+            if (animationFrame) {
+              cancelAnimationFrame(animationFrame);
+              animationFrame = 0;
+              apply(name, nextWidth);
+            }
+            delete shellElement.dataset.viewResizing;
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onEnd);
+            window.removeEventListener("pointercancel", onEnd);
+            if (persist) apply(name, widths[name], true);
+            activeDragCleanup = () => {};
+          };
+          const onEnd = () => cleanupDrag(true);
+          activeDragCleanup = () => cleanupDrag(false);
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", onEnd, { once: true });
+          window.addEventListener("pointercancel", onEnd, { once: true });
+        };
+        const onKeyDown = event => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          const step = event.shiftKey ? 48 : 12;
+          apply(name, widths[name] + (event.key === "ArrowRight" ? step : -step), true);
+        };
+        const onDoubleClick = () => apply(name, definition.defaultValue, true);
+        separator.addEventListener("pointerdown", onPointerDown);
+        separator.addEventListener("keydown", onKeyDown);
+        separator.addEventListener("dblclick", onDoubleClick);
+        cleanups.push(() => {
+          separator.removeEventListener("pointerdown", onPointerDown);
+          separator.removeEventListener("keydown", onKeyDown);
+          separator.removeEventListener("dblclick", onDoubleClick);
+        });
+      }
+      const narrow = matchMedia("(max-width: 820px)");
+      const syncSeparatorFocus = () => {
+        for (const separator of shellElement.querySelectorAll("[data-view-resizer]")) separator.tabIndex = narrow.matches ? -1 : 0;
+      };
+      syncSeparatorFocus();
+      narrow.addEventListener?.("change", syncSeparatorFocus);
+      cleanups.push(() => narrow.removeEventListener?.("change", syncSeparatorFocus));
+      return () => {
+        activeDragCleanup();
+        cleanups.splice(0).forEach(cleanup => cleanup());
+      };
+    };
+    const disposeShellResizers = setupShellResizers(shell);
     const fail = reason => {
       document.documentElement.dataset.viewHostState = "failed";
       const panel = document.createElement("section");
@@ -115,19 +216,28 @@ export function renderViewHostHtml(
         mainViewKey: boot.mainViewKey,
         coreConfig: { locale: boot.locale, messages: boot.messages }
       });
-      const shell = root.closest("[data-view-shell]");
+      const projectHome = shell?.querySelector(".view-shell-project-home");
       const projectLabel = shell?.querySelector(".view-shell-project-label");
       const projectSelectWrap = shell?.querySelector(".view-shell-project-select-wrap");
       const projectTrigger = shell?.querySelector("#view-shell-project-trigger");
+      const projectTriggerValue = shell?.querySelector(".view-shell-project-trigger-value");
       const projectValue = shell?.querySelector(".view-shell-project-value");
       const projectMenu = shell?.querySelector("#view-shell-project-menu");
+      const projectDetails = shell?.querySelector("[data-view-project-details]");
+      const projectDetailsClose = shell?.querySelector("[data-view-project-details-close]");
       const settings = shell?.querySelector("[data-view-core-settings]");
       const serviceStatus = shell?.querySelector("[data-view-core-status]");
+      projectHome?.addEventListener("click", event => {
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        history.pushState({}, "", "/");
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
       if (projectLabel) projectLabel.textContent = boot.coreShell.project;
       if (settings) {
         settings.textContent = boot.coreShell.settings;
         settings.addEventListener("click", () => {
-          history.pushState({}, "", "/settings/overview");
+          history.pushState({}, "", "/settings/general");
           window.dispatchEvent(new PopStateEvent("popstate"));
         });
       }
@@ -143,17 +253,15 @@ export function renderViewHostHtml(
           projectTrigger.setAttribute("aria-expanded", "true");
           projectMenu.hidden = false;
           if (focusSelected) {
-            const selected = projectMenu.querySelector('[aria-selected="true"]')
+            const selected = projectMenu.querySelector(".view-shell-project-current")
               || projectMenu.querySelector(".view-shell-project-option");
             selected?.focus();
           }
         };
         const showCurrentProject = name => {
           projectValue.textContent = name || boot.coreShell.project;
+          if (projectTriggerValue) projectTriggerValue.textContent = name || boot.coreShell.project;
           projectTrigger.title = name || boot.coreShell.project;
-          for (const option of projectMenu.querySelectorAll(".view-shell-project-option")) {
-            option.setAttribute("aria-selected", String(option.dataset.projectName === name));
-          }
         };
         const switchProject = async (name, current) => {
           if (!name || name === current) {
@@ -201,7 +309,7 @@ export function renderViewHostHtml(
           }
           if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
           event.preventDefault();
-          const options = [...projectMenu.querySelectorAll(".view-shell-project-option")];
+          const options = [...projectMenu.querySelectorAll(".view-shell-project-current, .view-shell-project-option")];
           const currentIndex = options.indexOf(document.activeElement);
           const nextIndex = event.key === "Home" ? 0
             : event.key === "End" ? options.length - 1
@@ -219,15 +327,73 @@ export function renderViewHostHtml(
           return response.json();
         }).then(payload => {
           projectMenu.replaceChildren();
-          for (const project of payload.projects || []) {
+          const title = document.createElement("div");
+          title.className = "view-shell-project-menu-title";
+          title.textContent = boot.coreShell.currentProject;
+          projectMenu.append(title);
+          const openDetails = () => {
+            closeProjectMenu();
+            if (!projectDetails) return;
+            const detail = payload.currentProject || {};
+            const set = (name, value) => {
+              const node = projectDetails.querySelector('[data-project-detail="' + name + '"]');
+              if (node) node.textContent = value || boot.coreShell.unavailable;
+            };
+            set("name", detail.name || payload.current);
+            set("root", detail.root);
+            set("store", detail.storeType);
+            set("revision", detail.revision);
+            set("memory", detail.memoryRoot);
+            projectDetails.hidden = false;
+            projectDetailsClose?.focus();
+          };
+          if (payload.current) {
+            const current = document.createElement("button");
+            current.type = "button";
+            current.className = "view-shell-project-current";
+            current.setAttribute("role", "menuitem");
+            current.setAttribute("aria-label", payload.current + " · " + boot.coreShell.projectDetails);
+            const avatar = document.createElement("span");
+            avatar.className = "view-shell-project-avatar";
+            avatar.textContent = payload.current.slice(0, 1);
+            const copy = document.createElement("span");
+            copy.className = "view-shell-project-current-copy";
+            const name = document.createElement("strong");
+            name.className = "view-shell-project-current-name";
+            name.textContent = payload.current;
+            const detailLabel = document.createElement("small");
+            detailLabel.textContent = boot.coreShell.projectDetails;
+            copy.append(name, detailLabel);
+            const caret = document.createElement("img");
+            caret.className = "view-shell-project-details-caret";
+            caret.src = "/assets/system-icons/caret-down.svg";
+            caret.alt = "";
+            current.append(avatar, copy, caret);
+            current.addEventListener("click", openDetails);
+            projectMenu.append(current);
+          }
+          const otherProjects = (payload.projects || []).filter(project => project.name !== payload.current);
+          if (otherProjects.length) {
+            const switchLabel = document.createElement("div");
+            switchLabel.className = "view-shell-project-switch-label";
+            switchLabel.textContent = boot.coreShell.switchProject;
+            projectMenu.append(switchLabel);
+          }
+          for (const project of otherProjects) {
             const menuOption = document.createElement("button");
             menuOption.type = "button";
             menuOption.className = "view-shell-project-option";
-            menuOption.setAttribute("role", "option");
-            menuOption.setAttribute("aria-selected", String(project.name === payload.current));
+            menuOption.setAttribute("role", "menuitem");
+            menuOption.setAttribute("aria-label", project.name);
             menuOption.dataset.projectName = project.name;
-            menuOption.textContent = project.name;
             menuOption.title = project.name;
+            const avatar = document.createElement("span");
+            avatar.className = "view-shell-project-avatar";
+            avatar.textContent = project.name.slice(0, 1);
+            const name = document.createElement("span");
+            name.className = "view-shell-project-option-name";
+            name.textContent = project.name;
+            menuOption.append(avatar, name);
             menuOption.addEventListener("click", () => {
               void switchProject(project.name, payload.current).catch(error => {
                 projectTrigger.disabled = false;
@@ -236,13 +402,26 @@ export function renderViewHostHtml(
             });
             projectMenu.append(menuOption);
           }
-          projectTrigger.disabled = projectMenu.children.length === 0;
+          projectTrigger.disabled = !payload.current && otherProjects.length === 0;
           showCurrentProject(payload.current || "");
         }).catch(error => {
           projectTrigger.title = error instanceof Error ? error.message : String(error);
         });
       }
+      const closeProjectDetails = () => {
+        if (!projectDetails || projectDetails.hidden) return;
+        projectDetails.hidden = true;
+        projectTrigger?.focus();
+      };
+      projectDetailsClose?.addEventListener("click", closeProjectDetails);
+      projectDetails?.addEventListener("click", event => {
+        if (event.target === projectDetails) closeProjectDetails();
+      });
+      document.addEventListener("keydown", event => {
+        if (event.key === "Escape" && projectDetails && !projectDetails.hidden) closeProjectDetails();
+      });
       window.addEventListener("pagehide", () => {
+        disposeShellResizers();
         void activeHost.dispose().catch(error => console.error("View Plugin cleanup failed", error));
       }, { once: true });
       document.documentElement.dataset.viewHostState = "ready";
@@ -264,18 +443,20 @@ function initialShellState(locale: ViewLocale, instances: readonly ViewHostBootI
   };
   const memory = instances.find(instance => instance.module.moduleId === "org.memsphere.memory");
   const run = instances.find(instance => instance.module.moduleId === "org.memsphere.run");
+  const settings = instances.find(instance => instance.module.moduleId === "org.memsphere.settings");
   const navigation = [
-    { label: formatViewMessage(locale, "navigation.home"), icon: "house", href: "/" },
     ...(memory ? [{ label: formatViewMessage(locale, "navigation.memory"), icon: "brain", href: moduleHref(memory) }] : []),
     ...(run ? [{ label: formatViewMessage(locale, "navigation.run"), icon: "play-circle", href: moduleHref(run) }] : [])
   ];
   return {
+    locale,
     pathname,
     projectName,
     homeLabel: formatViewMessage(locale, "navigation.home"),
     memoryLabel: formatViewMessage(locale, "navigation.memory"),
     runLabel: formatViewMessage(locale, "navigation.run"),
     settingsLabel: formatViewMessage(locale, "common.settings"),
+    settingsHref: settings ? moduleHref(settings) : "/settings/general",
     healthyLabel: formatViewMessage(locale, "service.healthy"),
     accountLabel: formatViewMessage(locale, "account.avatar"),
     homeTitle: formatViewMessage(locale, "home.title"),
