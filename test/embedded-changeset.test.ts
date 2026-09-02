@@ -18,6 +18,7 @@ import {
   listMemoryChanges,
   readMemoryChange,
   validateMemoryChange,
+  withMemoryChangeDetailSnapshot,
   withMemoryChangePreview,
   withMemoryChangeReviewSnapshot
 } from "../src/memory/changeset.js";
@@ -186,6 +187,18 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       }
     }, null, 2)}\n`);
 
+    const outsideViewWorkspace = join(fixture, "outside-view-workspace");
+    await mkdir(outsideViewWorkspace);
+    process.chdir(outsideViewWorkspace);
+    await assert.rejects(
+      withMemoryChangeDetailSnapshot({
+        home,
+        project: "embedded",
+        changeId: first.changeId,
+        use: async () => undefined
+      }),
+      /Embedded Project commands must run inside the Project's Git repository/
+    );
     const view = createViewServer(await readViewConfig());
     await new Promise<void>((resolve, reject) => {
       view.once("error", reject);
@@ -331,6 +344,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       }
     } finally {
       await new Promise<void>((resolve) => view.close(() => resolve()));
+      process.chdir(linked);
     }
 
     const repeated = await validateMemoryChange();
