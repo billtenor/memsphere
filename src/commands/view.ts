@@ -689,7 +689,11 @@ async function handleRequest(
       const [memories, changeResult] = await Promise.all([
         listMemoryMarket(config.memoryRoot),
         config.project?.name
-          ? listMemoryChangesBestEffort({ home: config.homeRoot, project: config.project.name })
+          ? listMemoryChangesBestEffort({
+            home: config.homeRoot,
+            project: config.project.name,
+            memoryScope: "canonical"
+          })
           : Promise.resolve({ changes: [], failures: [] })
       ]);
       const importing = activeMarketImports(changeResult.changes);
@@ -719,10 +723,16 @@ async function handleRequest(
       const body = await readJsonBody<{ operator?: unknown }>(request);
       const active = activeMarketImports((await listMemoryChangesBestEffort({
         home: config.homeRoot,
-        project: config.project.name
+        project: config.project.name,
+        memoryScope: "canonical"
       })).changes).get(reference);
       if (active) {
-        const change = await readMemoryChange({ home: config.homeRoot, project: config.project.name, changeId: active });
+        const change = await readMemoryChange({
+          home: config.homeRoot,
+          project: config.project.name,
+          memoryScope: "canonical",
+          changeId: active
+        });
         sendJson(response, 200, { change: await memoryChangeSummary(change) });
         return;
       }
@@ -751,7 +761,8 @@ async function handleRequest(
     }
     const { changes, failures } = await listMemoryChangesBestEffort({
       home: config.homeRoot,
-      project: config.project.name
+      project: config.project.name,
+      memoryScope: "canonical"
     });
     sendJson(response, 200, {
       changes: [
@@ -800,7 +811,12 @@ async function handleRequest(
     const changeId = decodeURIComponent(changeMatch[1]);
     let change: MemoryChangeSet;
     try {
-      change = await readMemoryChange({ home: config.homeRoot, project: config.project.name, changeId });
+      change = await readMemoryChange({
+        home: config.homeRoot,
+        project: config.project.name,
+        memoryScope: "canonical",
+        changeId
+      });
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
         sendJson(response, 404, { code: "changeset_not_found", error: `ChangeSet not found: ${changeId}` });
@@ -820,6 +836,7 @@ async function handleRequest(
     const targetMemories = await withMemoryChangeDetailSnapshot({
       home: config.homeRoot,
       project: config.project.name,
+      memoryScope: "canonical",
       changeId,
       use: async ({ files }) => Promise.all(files.map(async (file) => {
         const memory = file.candidatePath
@@ -1546,6 +1563,7 @@ async function withMemoryPayloadRoot<T>(
     return viewCache.previews.use({
       home: config.homeRoot,
       project: config.project.name,
+      memoryScope: "canonical",
       changeId,
       use: async ({ change, memoryRoot }) => use(memoryRoot, {
         mode: "changeset",
