@@ -221,6 +221,7 @@ export class MemoryChangePreviewCache {
   async use<T>(input: {
     home?: string;
     project: string;
+    memoryScope?: "workspace" | "canonical";
     changeId: string;
     use: (preview: MemoryChangePreview) => Promise<T>;
   }): Promise<T> {
@@ -297,6 +298,7 @@ export class MemoryChangePreviewCache {
 export async function withMemoryChangePreview<T>(input: {
   home?: string;
   project: string;
+  memoryScope?: "workspace" | "canonical";
   changeId: string;
   use: (preview: MemoryChangePreview) => Promise<T>;
 }): Promise<T> {
@@ -314,6 +316,7 @@ export async function withMemoryChangePreview<T>(input: {
 export async function withMemoryChangeReviewSnapshot<T>(input: {
   home?: string;
   project: string;
+  memoryScope?: "workspace" | "canonical";
   changeId: string;
   use: (snapshot: MemoryChangeReviewSnapshot) => Promise<T>;
 }): Promise<T> {
@@ -348,6 +351,7 @@ export async function withMemoryChangeReviewSnapshot<T>(input: {
 export async function withMemoryChangeDetailSnapshot<T>(input: {
   home?: string;
   project: string;
+  memoryScope?: "workspace" | "canonical";
   changeId: string;
   use: (snapshot: MemoryChangeDetailSnapshot) => Promise<T>;
 }): Promise<T> {
@@ -355,7 +359,7 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
     const context = await resolveProjectContext({
       home: input.home,
       project: input.project,
-      memoryScope: "canonical"
+      memoryScope: input.memoryScope
     });
     const change = await readReconciledChange(context.primary, input.changeId);
     const baseRoot = await mkdtemp(join(tmpdir(), "memsphere-change-detail-base-"));
@@ -441,19 +445,28 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
 }
 
 export async function withMemoryChangeCheckpointLock<T>(
-  input: { home?: string; project: string },
+  input: { home?: string; project: string; memoryScope?: "workspace" | "canonical" },
   action: () => Promise<T>
 ): Promise<T> {
-  const context = await resolveProjectContext({ home: input.home, project: input.project });
+  const context = await resolveProjectContext({
+    home: input.home,
+    project: input.project,
+    memoryScope: input.memoryScope
+  });
   return withFileLock(memoryMutationLock(context.primary), action);
 }
 
 async function prepareMemoryChangePreview(input: {
   home?: string;
   project: string;
+  memoryScope?: "workspace" | "canonical";
   changeId: string;
 }): Promise<PreparedMemoryChangePreview> {
-  const context = await resolveProjectContext({ home: input.home, project: input.project });
+  const context = await resolveProjectContext({
+    home: input.home,
+    project: input.project,
+    memoryScope: input.memoryScope
+  });
   const change = await readReconciledChange(context.primary, input.changeId);
   if (change.project !== context.primary.name) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
   if (!change.checkpoint) throw new Error(`ChangeSet ${change.id} has no validated checkpoint`);
@@ -1618,19 +1631,35 @@ function sortMemoryChanges(changes: MemoryChangeSet[]): MemoryChangeSet[] {
   });
 }
 
-export async function listMemoryChanges(input: { home?: string; project: string }): Promise<MemoryChangeSet[]> {
-  const context = await resolveProjectContext({ home: input.home, project: input.project });
+export async function listMemoryChanges(input: {
+  home?: string;
+  project: string;
+  memoryScope?: "workspace" | "canonical";
+}): Promise<MemoryChangeSet[]> {
+  const context = await resolveProjectContext({
+    home: input.home,
+    project: input.project,
+    memoryScope: input.memoryScope
+  });
   return withFileLock(memoryMutationLock(context.primary), async () => {
     const changes = await listProjectChanges(context.primary, true);
     return sortMemoryChanges(changes);
   });
 }
 
-export async function listMemoryChangesBestEffort(input: { home?: string; project: string }): Promise<{
+export async function listMemoryChangesBestEffort(input: {
+  home?: string;
+  project: string;
+  memoryScope?: "workspace" | "canonical";
+}): Promise<{
   changes: MemoryChangeSet[];
   failures: Array<{ id: string; error: string }>;
 }> {
-  const context = await resolveProjectContext({ home: input.home, project: input.project });
+  const context = await resolveProjectContext({
+    home: input.home,
+    project: input.project,
+    memoryScope: input.memoryScope
+  });
   return withFileLock(memoryMutationLock(context.primary), async () => {
     const result = await listProjectChangesBestEffort(context.primary);
     return {
@@ -1640,8 +1669,17 @@ export async function listMemoryChangesBestEffort(input: { home?: string; projec
   });
 }
 
-export async function readMemoryChange(input: { home?: string; project: string; changeId: string }): Promise<MemoryChangeSet> {
-  const context = await resolveProjectContext({ home: input.home, project: input.project });
+export async function readMemoryChange(input: {
+  home?: string;
+  project: string;
+  memoryScope?: "workspace" | "canonical";
+  changeId: string;
+}): Promise<MemoryChangeSet> {
+  const context = await resolveProjectContext({
+    home: input.home,
+    project: input.project,
+    memoryScope: input.memoryScope
+  });
   return withFileLock(memoryMutationLock(context.primary), () => readReconciledChange(context.primary, input.changeId));
 }
 

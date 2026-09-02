@@ -198,6 +198,7 @@ test("Embedded Run uses the selected ChangeSet instead of the current worktree M
 
     process.chdir(main);
     await silently(() => runStartCommand("candidate-run", { name: "Embedded worktree source" }));
+    process.chdir(linked);
     await silently(() => runStartCommand("candidate-run", {
       name: "Embedded candidate source",
       change: validation.changeId
