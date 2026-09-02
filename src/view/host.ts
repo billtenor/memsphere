@@ -1,5 +1,7 @@
 import { formatViewMessage, resolveViewLocale, viewMessages, type ViewLocale } from "./locales/index.js";
 import { renderViewShellMarkup, viewShellStyles } from "./shell/layout.js";
+import { viewUiStyles } from "./ui-primitives.js";
+import { viewThemeStyles } from "./theme.js";
 
 export const viewSdkBundlePath = "/assets/view-sdk.js";
 export const viewRuntimeBundlePath = "/assets/view-runtime.js";
@@ -71,12 +73,14 @@ export function renderViewHostHtml(
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23286c67'/%3E%3Cpath d='M32 14 48 23v18L32 50 16 41V23z' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='m16 23 16 9 16-9M32 32v18' fill='none' stroke='white' stroke-width='4'/%3E%3C/svg%3E" />
   <title>memsphere</title>
   <style>
-    body { margin: 0; background: #f6f7f4; color: #222629; font: 14px/1.45 ui-sans-serif, system-ui, sans-serif; }
+    ${viewThemeStyles}
+    body { margin: 0; background: var(--mem-view-color-canvas); color: var(--mem-view-color-text); font: var(--mem-view-font-size-base)/var(--mem-view-line-body) var(--mem-view-font-sans); }
     .view-host-status { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
     .view-host-error { width: min(680px, 100%); border: 1px solid #e8c7bd; border-left: 4px solid #a14436; border-radius: 8px; background: #fffdfb; padding: 18px; box-sizing: border-box; }
     .view-host-error h1 { margin: 0 0 8px; color: #a14436; font-size: 18px; }
     .view-host-error p { margin: 0; color: #6c7379; white-space: pre-wrap; overflow-wrap: anywhere; }
     ${viewShellStyles}
+    ${viewUiStyles}
   </style>
 </head>
 <body>

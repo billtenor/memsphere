@@ -6,9 +6,20 @@
 
 ## 当前实现状态
 
-当前 ViewHost 已接通 Plugin 入口、生命周期、Manifest/SDK 校验、独立 Bundle 加载、Router 与根 Slot Catalog。当前可运行 Plugin 可以声明 `inject: ["slots", "router"]`；可贡献位置、特殊组合能力与准确接线状态统一见 [View Slot List](./view-slots.md)。
+当前 ViewHost 已接通 Plugin 入口、生命周期、Manifest/SDK 校验、独立 Bundle 加载、Router、Theme v1、UI v1 与根 Slot Catalog。常规页面可以声明 `inject: ["slots", "router", "theme", "ui"]`，并配套 `themeVersion: 1`、`uiVersion: 1`；可贡献位置、特殊组合能力与准确接线状态统一见 [View Slot List](./view-slots.md)。
 
 本文保留 View API 与 I18n 的完整示例，因为它们属于已经确定的长期开发契约；这两项服务目前尚未接线，所以完整示例不能直接作为当前版本的可运行代码。准确进度以 API 文档的“当前实现状态”为准，不因尚未实现而删除后续设计和用法。
+
+## 在真实 Shell 中快速做原型
+
+先从独立 Module 开始，不要为了演示框架能力改造 Memory、Run 或 Settings。Host 负责一级/二级菜单、Header、内容列表栏、Theme 和生命周期；Module 用描述数据接入公共壳，只在 `main.view` 内实现自由业务正文。仓库内 Reference Module 可直接运行：
+
+```bash
+npm run build
+node dist/cli.js view restart
+```
+
+构建并重启后，直接在正式 View 的一级菜单选择“原型”，或打开 `/reference`。Reference 是独立 Module，但与 Memory、Run、Settings 一样由同一个 View 服务加载。开发完成前至少检查 zh-CN/en、桌面/窄屏、标准列表的筛选/空状态/选中态、Header action、自定义正文交互、控制台和卸载清理。
 
 ## 先理解运行过程
 
@@ -170,7 +181,11 @@ ctx.slots.register(slots.mainView, {
 
 示例中的 `slots.navigationPrimary`、`slots.headerTitle` 和 `slots.mainView` 都是 Slot Token。Token 同时告诉 TypeScript 和 ViewHost：内容放在哪里、允许什么类型、怎样组合以及如何在运行时校验；其他可用 Token 请直接查询 [View Slot List](./view-slots.md)。
 
-前两个 Slot 接收 Descriptor：Plugin 只提供文字、图标和行为描述，由 Memsphere 统一渲染。`mainView` 接收 Mount：ViewHost 提供容器，由 Plugin 渲染完整页面。
+前两个 Slot 接收 Descriptor：Plugin 只提供文字、图标和行为描述，由 Memsphere 统一渲染。`mainView` 接收 Mount：ViewHost 提供容器，由 Plugin 渲染完整页面。常规对象列表使用 `ctx.ui.contentList(descriptorOrProvider)` 得到标准 Mount 后注册到 `slots.contentList`；只有标准列表无法表达领域诉求时才自行实现该 Mount。
+
+五层边界可以用一句话判断：Shell 决定区域和尺寸，Theme 决定公共视觉变量，UI Primitives 决定通用控件的 DOM/交互，Slot 决定内容放在哪里，Module 只决定领域数据、行为和正文。Module 不读取 `src/view/shell/**`，不依赖 `.view-shell-*` 或 `[data-view-slot]`，不声明 `--mem-view-*`，也不使用 `!important` 覆盖公共壳。
+
+构建期 style contract 是面向常见错误的启发式防错检查，不是安全沙箱；它检查可静态识别的样式模板和已知私有依赖，无法证明任意动态字符串绝对安全。Module 作者仍须遵守上述边界：常规 Feature CSS 应放在可静态检查的模板常量中，并限定在 Feature root 下。生产 builtin 的历史辅助文件尚未全量迁移到此门禁；新增或修改的 Module 样式应主动纳入检查。
 
 `mainView` 是 `keyed` Slot，可以保存多个页面候选。当前路由的 key 决定此刻挂载哪个页面。
 

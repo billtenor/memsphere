@@ -15,6 +15,8 @@ test("View Shell exposes the four-column Slot and search surfaces", () => {
   assert.match(html, /data-view-slot="navigation\.primary"/);
   assert.match(html, /data-view-slot="navigation\.secondary"/);
   assert.match(html, /data-view-slot="content\.list"/);
+  assert.match(html, /data-view-slot="side\.panel"/);
+  assert.match(html, /data-view-side-panel-container[^>]*hidden/);
   assert.match(html, /id="memsphere-view-root"/);
   assert.match(html, /data-view-search-trigger/);
   assert.match(html, /data-view-search-overlay[^>]*hidden/);

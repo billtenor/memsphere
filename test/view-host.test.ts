@@ -23,7 +23,7 @@ const syntheticRouteKey = "org.example.synthetic@1.0.0:synthetic:route:index";
 const viewSdkBundle = await transpileBrowserModule("../src/view/view-sdk.ts");
 const viewRuntimeBundle = await browserRuntimeBundle();
 
-test("ViewHost document boots the three builtin Module instances in catalog order", () => {
+test("ViewHost document boots the four builtin Module instances in catalog order", () => {
   const instances = builtinModuleCatalog.map(entry => bootInstance(
     entry.moduleId,
     entry.instanceId,
@@ -62,7 +62,7 @@ test("View server serves Host, SDK, Runtime, and all builtin bundles without ser
     const bootSource = host.match(/<script id="memsphere-view-boot" type="application\/json">([\s\S]*?)<\/script>/)?.[1];
     assert(bootSource);
     const boot = JSON.parse(bootSource);
-    assert.equal(boot.instances.length, 3);
+    assert.equal(boot.instances.length, 4);
     for (const instance of boot.instances) {
       const bundleResponse = await fetch(`${origin}${instance.pluginPath}`);
       assert.equal(bundleResponse.status, 200, instance.pluginPath);
@@ -78,11 +78,52 @@ test("View server serves Host, SDK, Runtime, and all builtin bundles without ser
     assert.equal(runtimeResponse.status, 200);
     assert.match(await runtimeResponse.text(), /export async function startViewHost/);
 
+    const themeResponse = await fetch(`${origin}/assets/theme.js`);
+    assert.equal(themeResponse.status, 200);
+    assert.match(await themeResponse.text(), /export class RuntimeThemeStore/);
+
+    const uiResponse = await fetch(`${origin}/assets/ui-primitives.js`);
+    assert.equal(uiResponse.status, 200);
+    assert.match(await uiResponse.text(), /export function createViewUi/);
+
+    const iconResponse = await fetch(`${origin}/assets/system-icon.js`);
+    assert.equal(iconResponse.status, 200);
+    assert.match(await iconResponse.text(), /export function normalizeSystemIconName/);
+
+    const referenceResponse = await fetch(`${origin}/assets/modules/org.memsphere.reference/index.js`);
+    assert.equal(referenceResponse.status, 200);
+
     const retiredResponse = await fetch(`${origin}/assets/legacy-view.js`);
     assert.equal(retiredResponse.status, 404);
 
     const missingResponse = await fetch(`${origin}/assets/unknown-view.js`);
     assert.equal(missingResponse.status, 404);
+  } finally {
+    await close(server);
+  }
+});
+
+test("View server can expose an additional Module through explicit development options", async () => {
+  const assetPath = "/assets/dev-modules/org.example.development.js" as const;
+  const instance = bootInstance("org.example.development", "development", assetPath, [{ id: "index", path: "/development" }]);
+  const source = 'export default { apiVersion: 1, inject: [], apply() {} };';
+  const server = createViewServer({ language: "en" } as MemsphereConfig, {
+    developmentModules: [{ assetPath, source, instance, pagePaths: ["/development"] }]
+  });
+  const origin = await listen(server);
+  try {
+    const pageResponse = await fetch(`${origin}/development`);
+    assert.equal(pageResponse.status, 200);
+    const page = await pageResponse.text();
+    const bootSource = page.match(/<script id="memsphere-view-boot" type="application\/json">([\s\S]*?)<\/script>/)?.[1];
+    assert(bootSource);
+    const boot = JSON.parse(bootSource);
+    assert.equal(boot.instances.at(-1)?.module.moduleId, "org.example.development");
+    assert.equal(boot.instances.at(-1)?.pluginPath, assetPath);
+
+    const assetResponse = await fetch(`${origin}${assetPath}`);
+    assert.equal(assetResponse.status, 200);
+    assert.equal(await assetResponse.text(), source);
   } finally {
     await close(server);
   }
@@ -144,6 +185,40 @@ test("ViewHost rejects a Plugin service that is not wired into the current Conte
     'export default { apiVersion: 1, inject: ["api"], apply() {} };',
     async page => {
       await assertModuleFailure(page, "View Plugin requests unsupported service: api");
+    }
+  );
+});
+
+test("ViewHost requires Theme injection and Theme v1 support to be declared together", async () => {
+  await withBrowserHost(
+    'export default { apiVersion: 1, inject: ["theme"], apply() { window.__unexpectedApply = true; } };',
+    async page => {
+      await assertModuleFailure(page, "View Plugin requests theme but does not support Host Theme version 1");
+      assert.equal(await page.evaluate(() => (window as Window & { __unexpectedApply?: boolean }).__unexpectedApply), undefined);
+    }
+  );
+  await withBrowserHost(
+    'export default { apiVersion: 1, themeVersion: 1, inject: [], apply() { window.__unexpectedApply = true; } };',
+    async page => {
+      await assertModuleFailure(page, "View Plugin declares themeVersion without injecting theme");
+      assert.equal(await page.evaluate(() => (window as Window & { __unexpectedApply?: boolean }).__unexpectedApply), undefined);
+    }
+  );
+});
+
+test("ViewHost requires UI injection and UI v1 support to be declared together", async () => {
+  await withBrowserHost(
+    'export default { apiVersion: 1, inject: ["ui"], apply() { window.__unexpectedApply = true; } };',
+    async page => {
+      await assertModuleFailure(page, "View Plugin requests ui but does not support Host UI version 1");
+      assert.equal(await page.evaluate(() => (window as Window & { __unexpectedApply?: boolean }).__unexpectedApply), undefined);
+    }
+  );
+  await withBrowserHost(
+    'export default { apiVersion: 1, uiVersion: 1, inject: [], apply() { window.__unexpectedApply = true; } };',
+    async page => {
+      await assertModuleFailure(page, "View Plugin declares uiVersion without injecting ui");
+      assert.equal(await page.evaluate(() => (window as Window & { __unexpectedApply?: boolean }).__unexpectedApply), undefined);
     }
   );
 });

@@ -40,9 +40,13 @@ ViewHost 负责加载、上下文、组合、故障隔离和清理；Plugin 负�
 
 ## 当前落地状态
 
-当前实现使用固定 builtin catalog 发现 `org.memsphere.memory`、`org.memsphere.run` 和 `org.memsphere.settings`，校验各自 `module.json` 的最小 View 切片、入口包内路径和 SDK SemVer，再动态加载三个独立 ESM Bundle。所有实例共享 Route/Slot Registry，但拥有独立 Context、事务、诊断和清理作用域。
+当前实现使用固定 builtin catalog 发现 `org.memsphere.memory`、`org.memsphere.run`、`org.memsphere.reference` 和 `org.memsphere.settings`，校验各自 `module.json` 的最小 View 切片、入口包内路径和 SDK SemVer，再动态加载四个独立 ESM Bundle。所有实例共享 Route/Slot Registry，但拥有独立 Context、事务、诊断和清理作用域。
 
-已接通的 Context 服务为 `slots` 与 `router`。Core 与 builtin Module 通过同一 Slot Tree 组合界面，稳定 Shell、Project selector 和故障诊断仍属于 ViewHost；准确的根 Slot 清单、所有权、组合语义与当前接线状态统一见 [Memsphere View Slot List](./view-slots.md)。View API、I18n、Theme、Logger、自定义子 Slot、用户 Module 发现/安装和 Project 动态组合仍是后续能力。
+已接通的 Context 服务为 `slots`、`router`、`theme` 与 `ui`。Core 与 builtin Module 通过同一 Slot Tree 组合界面，稳定 Shell、Project selector、Theme v1、UI Primitives 和故障诊断仍属于 ViewHost；准确的根 Slot 清单、所有权、组合语义与当前接线状态统一见 [Memsphere View Slot List](./view-slots.md)。View API、I18n、Logger、自定义子 Slot、用户 Module 发现/安装和 Project 动态组合仍是后续能力。
+
+职责边界固定为五层：Shell 管区域、尺寸、滚动和响应式；Theme 管公共视觉 Token；UI Primitives 管跨 Module 通用 DOM、状态与交互；Slot 管可验证的组合关系；Feature/Module 管领域数据、行为和 `main.view` 内自由正文。标准内容列表由 UI 服务生成 `ViewMount` 后进入原有 `content.list`，不增加第二个 Slot；自定义 Mount 是复杂领域界面的受控逃生口。
+
+Theme 与 Route/Slot 一样由 Host 形成单一真实组合路径：同一个实例作用域的 Theme 同时进入 `apply()`、`main.view`、`content.list` 和 `overlay` 的 Mount Context，并由 Host 把公开 `--mem-view-*` 变量安装到 element 与 portal root。Plugin 只能读取公开 Token，不能声明这些 Token、读取 Host 私有 `--view-*` 变量或依赖 Host 私有 class。Mount 卸载或实例回滚时，Theme root 与订阅一并清理。
 
 ## 发布与动态加载
 
