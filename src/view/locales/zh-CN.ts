@@ -164,7 +164,7 @@ export const zhCNViewMessages = {
   "change.selectMemoryPrompt": "选择要加入记忆变更的记忆：{references}",
   "change.selectListedMemory": "请选择列表中的记忆。",
   "change.noComments": "暂无修改意见。",
-  "change.commentPlaceholder": "这里应该如何修改？",
+  "change.commentPlaceholder": "说明这里需要怎样调整…",
   "change.operatorPrompt": "选择本次操作身份：{choices}",
   "change.unknownHuman": "未知 Human 身份：{id}",
   "change.line": "行 {line}",

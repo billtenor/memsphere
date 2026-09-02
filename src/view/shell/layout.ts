@@ -615,6 +615,9 @@ export const viewShellStyles = `
   .view-shell-heading p, .view-shell-breadcrumbs { margin: 0 0 4px; color: #7c8885; font-size: 11px; }
   .view-shell-action { min-height: 34px; border-color: #d5dfdc; border-radius: 8px; background: #fff; padding: 0 12px; color: #33403d; font-size: 12px; font-weight: 600; }
   .view-shell-action:not(:disabled):hover { border-color: #adc8c3; background: #f1f6f4; }
+  .view-shell-action[data-tone="success"] { min-height:30px; border:0; border-radius:999px; background:#edf7f4; padding:0 10px; color:#276c65; font-size:11px; font-weight:650; }
+  .view-shell-action[data-tone="success"] .view-shell-icon { width:14px; height:14px; filter:brightness(0) saturate(100%) invert(34%) sepia(19%) saturate(1391%) hue-rotate(126deg) brightness(91%) contrast(87%); }
+  .view-shell-action[data-tone="success"]:not(:disabled):hover { border:0; background:#e2f1ed; }
   .view-shell-header [data-view-slot="header.actions"] .view-shell-action:last-child:not(:disabled) { border-color: var(--view-green); background: var(--view-green); color: #fff; }
   .view-shell-header [data-view-slot="header.actions"] .view-shell-action:last-child:not(:disabled):hover { border-color: var(--view-green-strong); background: var(--view-green-strong); }
   #memsphere-view-root { min-width: 0; min-height: 0; flex: 1; overflow: auto; }

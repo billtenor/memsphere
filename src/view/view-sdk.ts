@@ -190,7 +190,9 @@ export interface HeaderTitleDescriptor {
   readonly breadcrumbs?: readonly HeaderBreadcrumbDescriptor[];
 }
 
-export interface HeaderActionDescriptor extends ActionDescriptor {}
+export interface HeaderActionDescriptor extends ActionDescriptor {
+  readonly tone?: "success";
+}
 
 export interface HeaderAccountDescriptor {
   readonly label: TextRef;
@@ -422,10 +424,11 @@ export function isHeaderTitleDescriptor(value: unknown): value is HeaderTitleDes
 export function isHeaderActionDescriptor(value: unknown): value is HeaderActionDescriptor {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Partial<HeaderActionDescriptor>;
-  return hasOnlyKeys(value, ["label", "icon", "disabled", "run"])
+  return hasOnlyKeys(value, ["label", "icon", "disabled", "run", "tone"])
     && isTextRef(candidate.label)
     && (candidate.icon === undefined || isIconRef(candidate.icon))
     && (candidate.disabled === undefined || typeof candidate.disabled === "boolean")
+    && (candidate.tone === undefined || candidate.tone === "success")
     && typeof candidate.run === "function";
 }
 

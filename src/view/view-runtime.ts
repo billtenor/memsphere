@@ -183,6 +183,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
   let navigationInProgress = false;
   let disposed = false;
   let disposeSearch: Disposer = () => undefined;
+  let disposeLiveSlots: Disposer = () => undefined;
   let navigationQueue = Promise.resolve();
   let composeCurrentLocation: () => Promise<void> = async () => {
     throw new Error("ViewHost navigation is not ready");
@@ -624,6 +625,11 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       } catch (error) {
         errors.push(error);
       }
+      try {
+        await disposeLiveSlots();
+      } catch (error) {
+        errors.push(error);
+      }
       globalThis.removeEventListener?.("popstate", handlePopstate);
       for (const instance of [...instances].reverse()) {
         errors.push(...await instance.lifecycle.disposeCollectingErrors());
@@ -666,6 +672,11 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     }
     throw error;
   }
+  disposeLiveSlots = slotsRegistry.subscribe(() => {
+    if (disposed) return;
+    renderShellDescriptors(options.root, slotsRegistry, routeRegistry);
+    syncShellLayout(options.root, routeRegistry.location, slotsRegistry);
+  });
   return activeHost;
 }
 
@@ -1890,9 +1901,10 @@ function renderHeaderAction(descriptor: HeaderActionDescriptor, identity: string
   button.type = "button";
   button.className = "view-shell-action";
   button.dataset.viewEntry = identity;
+  if (descriptor.tone) button.dataset.tone = descriptor.tone;
   button.setAttribute("aria-label", textValue(descriptor.label));
   button.disabled = descriptor.disabled === true;
-  if (descriptor.icon) button.append(renderIcon(descriptor.icon));
+  if (descriptor.icon) button.append(renderIcon(descriptor.icon, descriptor.tone === "success" ? "fill" : "regular"));
   const label = document.createElement("span");
   label.className = "view-shell-action-label";
   label.append(textNode(descriptor.label));
@@ -1928,7 +1940,7 @@ function renderIcon(icon: IconRef, weight: "regular" | "fill" = "regular"): HTML
   const image = document.createElement("img");
   image.className = "view-shell-icon";
   const name = systemIconName(icon.name);
-  const fillSupported = new Set(["brain", "circle", "cube", "gear-six", "house", "play-circle", "stack"]);
+  const fillSupported = new Set(["brain", "circle", "cube", "gear-six", "house", "play-circle", "seal-check", "stack"]);
   image.src = `/assets/system-icons/${name}${weight === "fill" && fillSupported.has(name) ? "-fill" : ""}.svg`;
   image.alt = "";
   image.setAttribute("aria-hidden", "true");
@@ -1940,7 +1952,7 @@ function systemIconName(name: string): string {
   if (name === "play") return "play-circle";
   if (name === "gear") return "gear-six";
   if (name === "search") return "magnifying-glass";
-  return ["archive", "arrow-right", "arrows-clockwise", "brain", "caret-down", "check-circle", "circle-fill", "clock-counter-clockwise", "code", "cube", "file-text", "folder", "gear-six", "house", "magnifying-glass", "play-circle", "plus", "sliders-horizontal", "sparkle", "stack", "storefront", "user", "warning-circle", "x"].includes(name)
+  return ["archive", "arrow-right", "arrows-clockwise", "brain", "caret-down", "check-circle", "circle-fill", "clock-counter-clockwise", "code", "cube", "file-text", "folder", "gear-six", "house", "magnifying-glass", "play-circle", "plus", "seal-check", "sliders-horizontal", "sparkle", "stack", "storefront", "user", "warning-circle", "x"].includes(name)
     ? name
     : "stack";
 }

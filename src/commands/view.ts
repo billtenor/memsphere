@@ -838,11 +838,20 @@ async function handleRequest(
       project: config.project.name,
       memoryScope: "canonical",
       changeId,
-      use: async ({ files }) => Promise.all(files.map(async (file) => ({
-        reference: file.reference,
-        operation: file.operation,
-        memory: memoryPayloadFromSource(file.label, await readFile(file.path, "utf8"))
-      })))
+      use: async ({ files }) => Promise.all(files.map(async (file) => {
+        const memory = file.candidatePath
+          ? memoryPayloadFromSource(file.label, await readFile(file.candidatePath, "utf8"))
+          : undefined;
+        const baseMemory = file.basePath
+          ? memoryPayloadFromSource(file.label, await readFile(file.basePath, "utf8"))
+          : undefined;
+        return {
+          reference: file.reference,
+          operation: file.operation,
+          ...(memory ? { memory } : {}),
+          ...(baseMemory ? { baseMemory } : {})
+        };
+      }))
     });
     sendJson(response, 200, {
       change: await memoryChangeSummary(change),
@@ -1513,16 +1522,18 @@ function resolveMemoryChangeActor(config: MemsphereConfig, input: unknown): Memo
   throw new Error("operator must identify a configured Human Actor or a browser UUID");
 }
 
-function normalizeMemoryChangeLocation(input: unknown): { anchor: string; line: number; hash?: string } | undefined {
+function normalizeMemoryChangeLocation(input: unknown): { anchor: string; line?: number; hash?: string } | undefined {
   if (input === undefined) return undefined;
   if (!input || typeof input !== "object") throw new Error("location must be an object");
   const location = input as { anchor?: unknown; line?: unknown; hash?: unknown };
   if (typeof location.anchor !== "string" || !location.anchor.trim()) throw new Error("location.anchor is required");
-  if (!Number.isInteger(location.line) || Number(location.line) < 1) throw new Error("location.line must be a positive integer");
+  if (location.line !== undefined && (!Number.isInteger(location.line) || Number(location.line) < 1)) {
+    throw new Error("location.line must be a positive integer");
+  }
   if (location.hash !== undefined && typeof location.hash !== "string") throw new Error("location.hash must be a string");
   return {
     anchor: location.anchor.trim(),
-    line: Number(location.line),
+    ...(location.line !== undefined ? { line: Number(location.line) } : {}),
     ...(typeof location.hash === "string" && location.hash ? { hash: location.hash } : {})
   };
 }
@@ -2669,9 +2680,9 @@ function sendJavaScript(request: IncomingMessage, response: ServerResponse, body
 
 async function sendSystemIcon(response: ServerResponse, name: string): Promise<void> {
   const supportedRegular = new Set([
-    "archive", "arrow-right", "arrows-clockwise", "brain", "caret-down", "check-circle", "circle-fill", "clock-counter-clockwise", "code", "cube", "file-text", "folder", "gear-six", "house", "magnifying-glass", "play-circle", "plus", "sliders-horizontal", "sparkle", "stack", "storefront", "user", "warning-circle", "x"
+    "archive", "arrow-right", "arrows-clockwise", "brain", "caret-down", "check-circle", "circle-fill", "clock-counter-clockwise", "code", "cube", "file-text", "folder", "gear-six", "house", "magnifying-glass", "play-circle", "plus", "seal-check", "sliders-horizontal", "sparkle", "stack", "storefront", "user", "warning-circle", "x"
   ]);
-  const weighted = name.match(/^(brain|circle|cube|gear-six|house|play-circle|stack)-(duotone|fill)$/);
+  const weighted = name.match(/^(brain|circle|cube|gear-six|house|play-circle|seal-check|stack)-(duotone|fill)$/);
   if (!supportedRegular.has(name) && !weighted) {
     sendText(response, 404, "Icon not found");
     return;

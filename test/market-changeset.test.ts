@@ -146,7 +146,8 @@ test("active Market ChangeSet details expose the candidate before Project activa
       use: async ({ files }) => {
         const candidate = files.find((file) => file.reference === target.reference);
         assert(candidate);
-        assert.match(await readFile(candidate.path, "utf8"), /!statement/);
+        assert(candidate.candidatePath);
+        assert.match(await readFile(candidate.candidatePath, "utf8"), /!statement/);
       }
     });
     await assert.rejects(readFile(join(fixture.memoryRoot, target.path)), /ENOENT/);

@@ -366,6 +366,77 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     };
     assert.deepEqual(new Set(expandedChange.targets.map((target) => target.operation)), new Set(["create", "delete", "rename", "update"]));
     assert.deepEqual(await readdir(join(project.root, "changes", first.changeId, "checkpoints")), [expanded.checkpointDigest]);
+    await withMemoryChangeDetailSnapshot({
+      home,
+      project: "embedded",
+      changeId: first.changeId,
+      use: async ({ files }) => {
+        const byOperation = new Map(files.map((file) => [file.operation, file]));
+        assert(byOperation.get("create")?.candidatePath);
+        assert.equal(byOperation.get("create")?.basePath, undefined);
+        assert(byOperation.get("update")?.candidatePath);
+        assert(byOperation.get("update")?.basePath);
+        assert(byOperation.get("rename")?.candidatePath);
+        assert(byOperation.get("rename")?.basePath);
+        assert.equal(byOperation.get("delete")?.candidatePath, undefined);
+        assert(byOperation.get("delete")?.basePath);
+      }
+    });
+
+    const operationView = createViewServer(await readViewConfig());
+    await new Promise<void>((resolve, reject) => {
+      operationView.once("error", reject);
+      operationView.listen(0, "127.0.0.1", resolve);
+    });
+    try {
+      const operationOrigin = `http://127.0.0.1:${(operationView.address() as AddressInfo).port}`;
+      const detailResponse = await fetch(`${operationOrigin}/api/changes/${encodeURIComponent(first.changeId)}`);
+      const detail = await detailResponse.json() as {
+        change: { updatedAt: string };
+        targetMemories: Array<{ reference: string; operation: string; memory?: unknown; baseMemory?: unknown }>;
+      };
+      assert.equal(detailResponse.status, 200);
+      const byOperation = new Map(detail.targetMemories.map((target) => [target.operation, target]));
+      assert(byOperation.get("create")?.memory);
+      assert.equal(byOperation.get("create")?.baseMemory, undefined);
+      assert(byOperation.get("update")?.memory);
+      assert(byOperation.get("update")?.baseMemory);
+      assert(byOperation.get("rename")?.memory);
+      assert(byOperation.get("rename")?.baseMemory);
+      assert.equal(byOperation.get("delete")?.memory, undefined);
+      assert(byOperation.get("delete")?.baseMemory);
+      const commentResponse = await fetch(`${operationOrigin}/api/changes/${encodeURIComponent(first.changeId)}/comments`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          operator: { kind: "human", id: "alice" },
+          memoryReference: "concepts/shared",
+          path: "concepts/shared.yaml",
+          target: "concept.defines[1]",
+          location: { anchor: "concept.defines[1]" },
+          snapshot: "Linked preview",
+          body: "Anchor-only structured View comment",
+          expectedUpdatedAt: detail.change.updatedAt
+        })
+      });
+      const commentPayload = await commentResponse.json() as {
+        change: { updatedAt: string };
+        comment: { id: string; location?: { anchor: string; line?: number } };
+      };
+      assert.equal(commentResponse.status, 201);
+      assert.deepEqual(commentPayload.comment.location, { anchor: "concept.defines[1]" });
+      const deleteResponse = await fetch(`${operationOrigin}/api/changes/${encodeURIComponent(first.changeId)}/comments/${encodeURIComponent(commentPayload.comment.id)}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          operator: { kind: "human", id: "alice" },
+          expectedUpdatedAt: commentPayload.change.updatedAt
+        })
+      });
+      assert.equal(deleteResponse.status, 200);
+    } finally {
+      await new Promise<void>((resolve) => operationView.close(() => resolve()));
+    }
 
     let releaseSnapshot!: () => void;
     let snapshotEntered!: () => void;

@@ -137,6 +137,8 @@ test("Descriptor validators accept standard data and reject HTML or forged Route
   assert.equal(isHeaderTitleDescriptor(title), true);
   assert.equal(slots.headerTitle.definition.validate(title), true);
   assert.equal(isHeaderActionDescriptor(action), true);
+  assert.equal(isHeaderActionDescriptor({ ...action, tone: "success" }), true);
+  assert.equal(isHeaderActionDescriptor({ ...action, tone: "danger" }), false);
   assert.equal(slots.headerActions.definition.validate(action), true);
   assert.equal(slots.headerActions.definition.live, true);
   assert.equal(slots.navigationSecondary.definition.live, true);
