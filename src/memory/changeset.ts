@@ -81,7 +81,7 @@ const changeScopeSchema = z.object({
 
 const changeCommentLocationSchema = z.object({
   anchor: z.string().min(1),
-  line: z.number().int().positive(),
+  line: z.number().int().positive().optional(),
   hash: z.string().min(1).optional()
 }).strict();
 
@@ -192,7 +192,8 @@ export type MemoryChangeDetailSnapshot = MemoryChangePreview & {
   files: Array<{
     reference: string;
     label: string;
-    path: string;
+    candidatePath?: string;
+    basePath?: string;
     operation: MemoryChangeOperation | "unchanged";
   }>;
 };
@@ -424,7 +425,12 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
         return {
           reference: scope.reference,
           label: scope.path,
-          path: join(target?.operation === "delete" ? baseRoot : previewRoot, scope.path),
+          candidatePath: target?.operation === "delete"
+            ? undefined
+            : join(previewRoot, scope.path),
+          basePath: target?.operation === "create"
+            ? undefined
+            : join(baseRoot, target?.path ?? scope.path),
           operation: target?.operation ?? "unchanged" as const
         };
       }).sort((left, right) => {
@@ -1783,7 +1789,7 @@ export async function createMemoryChangeComment(input: {
   memoryReference: string;
   path: string;
   target?: string;
-  location?: { anchor: string; line: number; hash?: string };
+  location?: { anchor: string; line?: number; hash?: string };
   snapshot?: string;
   body: string;
   expectedUpdatedAt?: string;

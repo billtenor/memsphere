@@ -20,6 +20,7 @@ type MemorySummary = JsonRecord & {
   system?: boolean;
   error?: unknown;
   entity?: JsonRecord;
+  baseMemory?: MemorySummary;
 };
 type ChangeSummary = JsonRecord & {
   id: string;
@@ -40,6 +41,7 @@ const hideSystemMemoriesKey = "memsphere.hideSystemMemories.v1";
 const changeActorSelectionKey = "memsphere.changeActorSelection.v1";
 const changeBrowserIdentityKey = "memsphere.changeBrowserIdentity.v1";
 const changeCommentsCollapsedKey = "memsphere.changeCommentsCollapsed.v1";
+const changeReviewedKeyPrefix = "memsphere.changeReviewed.v1";
 const recentMemoriesKey = "memsphere.memory.recent.v1";
 const recentMemoryLimit = 24;
 
@@ -83,13 +85,35 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
   "change.select": "选择一个记忆变更。",
   "change.search": "搜索记忆变更",
   "change.empty": "没有记忆变更。",
-  "change.comments": "评论",
-  "change.noComments": "还没有评论。",
+  "change.comments": "修改意见",
+  "change.collapseComments": "收起意见",
+  "change.expandComments": "展开意见",
+  "change.noComments": "暂无修改意见。",
   "change.addComment": "添加评论",
+  "change.commentPlaceholder": "说明这里需要怎样调整…",
+  "change.submitComment": "提交意见",
+  "change.cancelComment": "取消",
   "change.addMemory": "加入记忆",
   "change.validationDiagnostics": "校验诊断",
   "change.sourceUnavailable": "来源工作区不可用",
   "change.draftPreview": "草稿预览",
+  "change.diff": "差异",
+  "change.candidateContent": "完整内容",
+  "change.before": "修改前",
+  "change.after": "修改后",
+  "change.added": "新增",
+  "change.deleted": "删除",
+  "change.fieldChanges": "{count} 处字段变化",
+  "change.validationPassed": "校验通过",
+  "change.reviewProgress": "已查看 {reviewed} / {total}",
+  "change.markReviewedTitle": "看完这条 Memory 了吗？",
+  "change.markReviewedHint": "标记后会自动进入下一条待查看内容。",
+  "change.markReviewed": "标记已查看并继续",
+  "change.reviewed": "已查看",
+  "change.operation.create": "新增", "change.operation.update": "修改", "change.operation.delete": "删除", "change.operation.rename": "重命名",
+  "change.deletedCandidateTitle": "删除后不存在",
+  "change.deletedCandidateHint": "候选版本中已删除这条 Memory。",
+  "change.beforeFullContent": "删除前完整内容",
   "change.store": "存储：{value}",
   "change.validationFailed": "校验失败",
   "change.comment.pending": "待处理",
@@ -133,7 +157,7 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
   "step": "步骤",
   "artifact": "产物",
   "final": "最终产物",
-  "inlineSchema": "内联图式",
+  "inlineSchema": "产物格式与结构",
   "review": "评审"
 });
 
@@ -147,15 +171,48 @@ const englishFallbackMessages: Readonly<Record<string, string>> = Object.freeze(
   "memory.invalidYaml": "Invalid Memory YAML", "change.draftPreview": "Draft preview",
   "memory.recentSearch": "Search recently used", "memory.recentEmpty": "No recently used Memory yet. Open one and it will appear here.",
   "market.search": "Search Memory Market", "change.search": "Search ChangeSets",
+  "change.diff": "Diff", "change.candidateContent": "Full content", "change.before": "Before", "change.after": "After",
+  "change.added": "Added", "change.deleted": "Deleted",
+  "change.collapseComments": "Collapse comments", "change.expandComments": "Expand comments",
+  "change.addComment": "Add comment",
+  "change.commentPlaceholder": "Describe what should change here…",
+  "change.submitComment": "Submit comment", "change.cancelComment": "Cancel",
+  "change.fieldChanges": "{count} field changes",
+  "change.validationPassed": "Validation passed", "change.reviewProgress": "Reviewed {reviewed} / {total}",
+  "change.markReviewedTitle": "Finished reviewing this Memory?", "change.markReviewedHint": "Continue to the next unreviewed Memory after marking it.",
+  "change.markReviewed": "Mark reviewed and continue", "change.reviewed": "Reviewed",
+  "change.operation.create": "Create", "change.operation.update": "Edit", "change.operation.delete": "Delete", "change.operation.rename": "Rename",
+  "change.deletedCandidateTitle": "Not present after deletion", "change.deletedCandidateHint": "This Memory is absent from the candidate version.",
+  "change.beforeFullContent": "Full content before deletion",
   "change.store": "Store: {value}", "change.validationFailed": "Validation failed",
   names: "Names", defines: "Defines", asserts: "Required rules", suggests: "Suggested rules",
   goals: "Goals", flow: "Flow", format: "Format", repeat: "Repeat", unbounded: "Unbounded",
   sections: "Sections", call: "Call", if: "If", while: "While", else: "Else", step: "Step",
-  artifact: "Artifact", final: "Final", inlineSchema: "Inline schema", review: "Review"
+  artifact: "Artifact", final: "Final", inlineSchema: "Artifact format & structure", review: "Review"
 });
 
 const memoryStyles = `
-  .memory-module { --bg:#f6f7f4; --surface:#fff; --soft:#eef1ed; --line:#d9ded8; --text:#222629; --muted:#6c7379; --accent:#286c67; --accent-soft:#dfeeea; --danger:#a14436; min-height:calc(100vh - 82px); background:var(--bg); color:var(--text); font:14px/1.45 ui-sans-serif,system-ui,sans-serif; }
+  .memory-module {
+    --bg:#f6f7f4; --surface:#fff; --soft:#eef1ed; --line:#d9ded8; --text:#222629; --muted:#6c7379; --accent:#286c67; --accent-soft:#dfeeea; --danger:#a14436;
+    /* Memory Page Slot standard. Renderers consume semantic tokens; change states only add tone and layout. */
+    --memory-page-font-sans:ui-sans-serif,system-ui,sans-serif;
+    --memory-page-font-mono:ui-monospace,SFMono-Regular,Consolas,monospace;
+    --memory-page-text-card-title:15px;
+    --memory-page-text-section-title:13px;
+    --memory-page-text-body:13px;
+    --memory-page-text-label:11px;
+    --memory-page-text-meta:10px;
+    --memory-page-line-body:1.65;
+    --memory-page-line-compact:1.4;
+    --memory-page-space-line:8px;
+    --memory-page-space-section:16px;
+    --memory-page-space-card:16px;
+    --memory-page-padding:24px;
+    --memory-page-card-padding:20px;
+    --memory-page-radius-card:12px;
+    --memory-page-radius-section:8px;
+    min-height:calc(100vh - 82px); background:var(--bg); color:var(--text); font:14px/1.45 var(--memory-page-font-sans);
+  }
   .memory-module * { box-sizing:border-box; }
   .memory-module button,.memory-module input,.memory-module textarea { font:inherit; }
   .memory-module button { cursor:pointer; }
@@ -171,11 +228,14 @@ const memoryStyles = `
   .memory-top-nav a,.memory-source-tab { border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--muted); padding:7px 8px; text-align:center; text-decoration:none; }
   .memory-top-nav a.active,.memory-source-tab.active { border-color:#b8cbc7; background:var(--accent-soft); color:#173f3c; font-weight:700; }
   .memory-source-tabs { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:3px; margin-top:8px; padding:3px; border:1px solid var(--line); border-radius:6px; background:var(--soft); }
-  .memory-source-tab { min-height:28px; border:0; padding:4px 7px; font-size:11px; }
+  .memory-source-tab { min-height:28px; border:0; padding:4px 7px; font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
   .memory-search,.memory-module textarea { width:100%; border:1px solid var(--line); border-radius:6px; background:var(--surface); outline:none; }
   .memory-list-header { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:19px 10px 10px; }
+  .memory-list-header-copy { min-width:0; flex:1; }
   .memory-list-header-copy small { display:block; margin-bottom:4px; color:#82908d; font-size:10px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; }
   .memory-list-header h2 { margin:0; font-size:18px; line-height:1.3; letter-spacing:-.02em; }
+  .memory-list-header.compact { align-items:center; }
+  .memory-list-header.compact h2 { overflow:hidden; font-size:14px; line-height:1.35; text-overflow:ellipsis; white-space:nowrap; }
   .memory-list-refresh { display:grid; width:32px; height:32px; place-items:center; border:0; border-radius:8px; background:transparent; color:var(--muted); font-size:18px; }
   .memory-list-refresh:hover { background:#f0f4f2; color:var(--accent); }
   .memory-list-refresh img { width:17px; height:17px; opacity:.7; }
@@ -185,11 +245,14 @@ const memoryStyles = `
   .memory-count,.memory-muted,.memory-subtitle { color:var(--muted); }
   .memory-count { margin:0 9px 8px; color:#87928f; font-size:10px; }
   .memory-list-footer { margin-top:auto; padding:12px 10px 0; border-top:1px solid var(--line); color:#87928f; font-size:10px; }
+  .memory-review-progress { display:grid; gap:6px; margin:0 6px 10px; color:#71807d; font-size:10px; }
+  .memory-review-progress-track { height:3px; overflow:hidden; border-radius:3px; background:#e4ebe8; }
+  .memory-review-progress-track>span { display:block; height:100%; border-radius:inherit; background:var(--accent); }
   .memory-list-empty { margin:18px 10px; color:#87928f; font-size:12px; line-height:1.6; }
   .memory-navigation { display:flex; min-height:100%; flex-direction:column; }
   .memory-kind { margin:10px 9px 4px; color:#82908d; font-size:10px; font-weight:700; letter-spacing:.08em; }
   .memory-list,.memory-comment-list,.memory-flow { display:grid; gap:2px; }
-  .memory-button { position:relative; display:grid; width:100%; min-height:58px; grid-template-columns:34px minmax(0,1fr) 14px; align-items:start; gap:9px; border:0; border-radius:10px; background:transparent; color:var(--text); padding:10px 9px; text-align:left; overflow-wrap:anywhere; }
+  .memory-button { position:relative; display:grid; width:100%; min-height:58px; grid-template-columns:34px minmax(0,1fr) minmax(34px,auto); align-items:start; gap:9px; border:0; border-radius:10px; background:transparent; color:var(--text); padding:10px 7px 10px 9px; text-align:left; overflow-wrap:anywhere; }
   .memory-button:hover { background:#f2f6f5; }
   .memory-button-icon { display:grid; width:34px; height:34px; place-items:center; border-radius:10px; background:#eef4f2; color:#5c7773; font-size:16px; }
   .memory-button-icon img { width:18px; height:18px; opacity:.72; }
@@ -200,6 +263,8 @@ const memoryStyles = `
   .memory-button-copy span { margin-top:4px; color:#697572; font-size:11px; }
   .memory-button-caret { width:14px; height:14px; margin-top:8px; opacity:.55; transform:rotate(-90deg); }
   .memory-button-trailing { display:flex; min-width:0; flex-direction:column; align-items:flex-end; gap:6px; padding-top:1px; }
+  .memory-review-state { min-width:34px; justify-self:end; color:var(--accent); font-size:10px; text-align:right; white-space:nowrap; }
+  .memory-review-state.reviewed { display:grid; width:22px; min-width:22px; height:22px; place-items:center; border-radius:50%; background:#e1efed; font-size:13px; font-weight:800; }
   .memory-button-trailing .memory-button-caret { margin-top:0; }
   .memory-change-wrap { border-radius:6px; }
   .memory-change-wrap:hover { background:#eceee8; }
@@ -214,7 +279,9 @@ const memoryStyles = `
   .memory-options { margin-top:16px; padding-top:12px; border-top:1px solid var(--line); }
   .memory-change-wrap > .memory-options { margin-top:0; padding-top:0; border-top:0; }
   .memory-option { display:flex; align-items:center; gap:8px; color:var(--muted); }
-  .memory-workspace { min-width:0; max-width:972px; margin:0 auto; padding:22px 26px 48px; }
+  .memory-workspace { min-width:0; max-width:972px; margin:0 auto; padding:var(--memory-page-padding) var(--memory-page-padding) 48px; font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); }
+  .memory-workspace.memory-change-workspace { max-width:none; margin:0; padding-right:0; }
+  .memory-workspace .memory-btn { font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
   .memory-toolbar { align-items:flex-start; justify-content:flex-start; margin:0 0 14px; border:1px solid var(--line); border-radius:12px; background:var(--surface); padding:19px 20px; box-shadow:0 1px 2px rgba(20,47,42,.025); }
   .memory-toolbar-icon { display:grid; width:46px; height:46px; flex:0 0 auto; place-items:center; border-radius:13px; background:var(--accent-soft); }
   .memory-toolbar-icon img { width:26px; height:26px; filter:invert(37%) sepia(18%) saturate(1485%) hue-rotate(123deg) brightness(89%) contrast(86%); }
@@ -226,19 +293,19 @@ const memoryStyles = `
   .memory-btn.primary { border-color:var(--accent); background:var(--accent); color:#fff; }
   .memory-btn.danger { color:var(--danger); }
   .memory-btn:disabled { opacity:.55; cursor:not-allowed; }
-  .memory-empty,.memory-panel,.memory-error { border:1px solid var(--line); border-radius:8px; background:var(--surface); padding:16px; box-shadow:0 1px 2px rgba(25,30,35,.08); }
+  .memory-empty,.memory-panel,.memory-error { border:1px solid var(--line); border-radius:var(--memory-page-radius-card); background:var(--surface); padding:var(--memory-page-card-padding); box-shadow:0 1px 2px rgba(25,30,35,.08); }
   .memory-error { border-color:#e8c7bd; border-left:4px solid var(--danger); background:#fffdfb; }
   .memory-error h3 { color:var(--danger); }
-  .memory-panel { margin:12px 0; border-radius:12px; padding:21px 22px; box-shadow:0 1px 2px rgba(20,47,42,.025); }
-  .memory-panel>h3 { margin:0 0 16px; font-size:15px; }
-  .memory-panel p,.memory-panel li { font-size:12px; line-height:1.75; }
+  .memory-panel { margin:var(--memory-page-space-card) 0; box-shadow:0 1px 2px rgba(20,47,42,.025); }
+  .memory-panel>h3 { margin:0 0 var(--memory-page-space-section); font-size:var(--memory-page-text-card-title); line-height:var(--memory-page-line-compact); }
+  .memory-panel p,.memory-panel li { font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); }
   .memory-meta { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 12px; }
-  .memory-pill { display:inline-flex; border:1px solid var(--line); border-radius:999px; background:var(--soft); color:var(--muted); padding:2px 8px; font-size:11px; }
+  .memory-pill { display:inline-flex; border:1px solid var(--line); border-radius:999px; background:var(--soft); color:var(--muted); padding:2px 8px; font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
   .memory-market-row { align-items:start; }
   .memory-market-status { border:1px solid var(--line); border-radius:999px; background:var(--surface); color:var(--muted); padding:1px 6px; font-size:11px; white-space:nowrap; }
   .memory-market-status[data-status=consistent],.memory-market-status[data-status=importing] { border-color:#b8cbc7; color:var(--accent); }
   .memory-market-status[data-status=name_conflict] { color:var(--danger); }
-  .memory-node { position:relative; margin:8px 0; padding:10px 12px; border-left:3px solid #c6d4d1; background:#fafbf8; }
+  .memory-node { position:relative; margin:var(--memory-page-space-line) 0; padding:10px 12px; border-left:3px solid #c6d4d1; background:#fafbf8; }
   .memory-node h3,.memory-node h4 { margin:0 0 8px; }
   .node-badges { display:inline-flex; flex-wrap:wrap; gap:6px; margin-left:8px; }
   .rule-reference-summary { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
@@ -248,54 +315,121 @@ const memoryStyles = `
   .effective-rule-inline { margin:8px 0 2px 14px; padding-left:12px; border-left:2px solid var(--line); }
   .effective-rule-inline[hidden] { display:none; }
   .memory-node ul { margin:6px 0; padding-left:22px; }
-  .memory-document { display:grid; gap:14px; }
-  .memory-section { position:relative; margin:10px 0; overflow:hidden; border:1px solid var(--line); border-radius:8px; background:var(--surface); box-shadow:0 1px 2px rgba(25,30,35,.07); }
+  .memory-document { display:grid; gap:var(--memory-page-space-section); font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); }
+  .memory-section { position:relative; margin:var(--memory-page-space-line) 0; overflow:hidden; border:1px solid var(--line); border-radius:var(--memory-page-radius-section); background:var(--surface); box-shadow:0 1px 2px rgba(25,30,35,.07); }
   .memory-section.memory-node { padding:0; border-left:1px solid var(--line); background:var(--surface); }
   .memory-section-header { display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:8px; width:100%; border:0; background:transparent; color:var(--text); padding:12px 14px; text-align:left; }
   .memory-section-header:hover { background:#f7f8f5; }
   .memory-chevron { color:var(--muted); font-size:22px; line-height:1; transform:rotate(0); transition:transform .12s ease; }
   .memory-section.open>.memory-section-header .memory-chevron { transform:rotate(90deg); }
-  .memory-node-title { min-width:0; font-size:15px; font-weight:700; overflow-wrap:anywhere; }
+  .memory-node-title { min-width:0; font-size:var(--memory-page-text-section-title); font-weight:650; line-height:var(--memory-page-line-compact); overflow-wrap:anywhere; }
   .memory-section-body { display:none; padding:4px 16px 16px 44px; border-top:1px solid var(--line); }
   .memory-section.open>.memory-section-body { display:block; }
-  .memory-block-title { margin:14px 0 6px; color:var(--muted); font-size:11px; font-weight:800; letter-spacing:.07em; text-transform:uppercase; }
-  .text-list { display:grid; gap:6px; margin:0; padding-left:20px; }
+  .memory-block-title { margin:var(--memory-page-space-section) 0 var(--memory-page-space-line); color:var(--muted); font-size:var(--memory-page-text-section-title); font-weight:650; line-height:var(--memory-page-line-compact); letter-spacing:0; text-transform:none; }
+  .text-list { display:grid; gap:var(--memory-page-space-line); margin:0; padding-left:20px; }
   .text-list>li { padding:2px 4px; white-space:pre-wrap; overflow-wrap:anywhere; }
-  .memory-child-stack { display:grid; gap:8px; }
+  .memory-child-stack { display:grid; gap:var(--memory-page-space-line); }
   .memory-schema-field { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; min-height:38px; padding:8px 12px; border:1px solid var(--line); border-radius:6px; background:#fafbf8; }
-  .memory-schema-field-name { font-weight:650; overflow-wrap:anywhere; }
-  .schema-field-type { color:var(--muted); font-size:12px; }
-  .memory-flow { gap:10px; }
-  .memory-flow-item { position:relative; overflow:hidden; border:1px solid var(--line); border-left:4px solid #9cbab5; border-radius:7px; background:var(--surface); }
+  .memory-schema-field-name { font-size:var(--memory-page-text-body); font-weight:400; line-height:var(--memory-page-line-body); overflow-wrap:anywhere; }
+  .schema-field-type { color:var(--muted); font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
+  .memory-flow { gap:12px; }
+  .memory-flow-item { position:relative; overflow:hidden; border:1px solid var(--line); border-left:4px solid #9cbab5; border-radius:var(--memory-page-radius-section); background:var(--surface); }
   .memory-flow-item.call { border-left-color:#8799b1; }
   .memory-flow-item.branch { border-left-color:#c3a269; }
   .memory-flow-head { display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap; padding:11px 13px; }
-  .memory-flow-label { flex:0 0 auto; border-radius:999px; background:var(--accent-soft); color:#173f3c; padding:2px 8px; font-size:11px; font-weight:800; }
-  .memory-flow-action { min-width:0; flex:1 1 240px; font-weight:650; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .memory-flow-label { flex:0 0 auto; border-radius:999px; background:var(--accent-soft); color:#173f3c; padding:2px 8px; font-size:var(--memory-page-text-label); font-weight:650; line-height:var(--memory-page-line-compact); }
+  .memory-flow-action { min-width:0; flex:1 1 240px; font-size:var(--memory-page-text-body); font-weight:650; line-height:var(--memory-page-line-body); white-space:pre-wrap; overflow-wrap:anywhere; }
   .memory-flow-branch { border-top:1px solid var(--line); background:#fafbf8; padding:9px 12px 12px 24px; }
-  .memory-flow-condition { margin-bottom:7px; color:var(--muted); font-size:11px; font-weight:800; }
+  .memory-flow-condition { margin-bottom:7px; color:var(--muted); font-size:var(--memory-page-text-label); font-weight:650; line-height:var(--memory-page-line-compact); }
   .memory-flow-children { display:grid; gap:8px; }
   .memory-artifact-row { display:flex; align-items:center; gap:5px; flex-wrap:wrap; margin-left:auto; }
-  .memory-artifact-label { color:var(--muted); font-size:11px; }
+  .memory-artifact-label { color:var(--muted); font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
   .memory-pill.strong { border-color:#b8cbc7; background:var(--accent-soft); color:#173f3c; font-weight:700; }
   .memory-pill.done { border-color:#b5ccb8; background:#e7f3e7; color:#27612e; }
   .action-contracts { margin:0 13px 10px; padding:9px 12px; border:1px solid var(--line); border-radius:6px; background:#fafbf8; }
+  .memory-flow-item>.memory-artifact-schema { margin:0 13px 10px; }
   .memory-kv { display:grid; grid-template-columns:minmax(90px,auto) minmax(0,1fr); gap:6px 12px; padding:4px 0; }
-  .memory-kv>dt { color:var(--muted); font-weight:700; }
-  .memory-kv>dd { margin:0; overflow-wrap:anywhere; }
+  .memory-kv>dt { color:var(--muted); font-size:var(--memory-page-text-label); font-weight:650; line-height:var(--memory-page-line-compact); }
+  .memory-kv>dd { margin:0; font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); overflow-wrap:anywhere; }
   .memory-commentable { position:relative; }
   .memory-inline-plus { position:absolute; top:4px; right:4px; display:none; width:25px; height:25px; border:1px solid var(--line); border-radius:50%; background:var(--surface); color:var(--accent); }
   .memory-commentable:hover>.memory-inline-plus,.memory-inline-plus:focus { display:block; }
-  .memory-change-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(260px,320px); gap:16px; align-items:start; }
+  .memory-section.memory-commentable:hover>.memory-inline-plus { display:none; }
+  .memory-section.memory-commentable>.memory-section-header:hover~.memory-inline-plus,.memory-section.memory-commentable>.memory-inline-plus:focus { display:block; }
+  .text-list>li>.memory-commentable,.memory-inline-diff-content>.memory-commentable { display:inline; width:auto; }
+  .text-list>li>.memory-commentable>.memory-inline-plus,.memory-inline-diff-content>.memory-commentable>.memory-inline-plus,.memory-artifact-row.memory-commentable>.memory-inline-plus,.memory-flow-action.memory-commentable>.memory-inline-plus { position:static; display:inline-grid; place-items:center; vertical-align:middle; margin:-2px 0 0 8px; opacity:0; pointer-events:none; }
+  .memory-commentable:hover>.memory-inline-plus,.memory-commentable>.memory-inline-plus:focus,.text-list>li:not(.memory-inline-diff-item):hover>.memory-commentable>.memory-inline-plus,.memory-inline-diff-line:hover .memory-inline-diff-content>.memory-commentable>.memory-inline-plus,.memory-inline-diff-line:hover .memory-artifact-row.memory-commentable>.memory-inline-plus { opacity:1; pointer-events:auto; }
+  .memory-flow-action.memory-commentable { display:inline; }
+  .memory-artifact-row.memory-commentable { padding-left:3px; }
+  .memory-inline-comment-editor { display:grid; gap:var(--memory-page-space-line); margin:8px 0 4px; border:1px solid #b8cbc7; border-radius:var(--memory-page-radius-section); background:#f7fbfa; padding:10px; box-shadow:0 1px 2px rgba(20,47,42,.05); list-style:none; }
+  .memory-inline-comment-editor textarea { width:100%; min-height:72px; resize:vertical; border:1px solid var(--line); border-radius:7px; background:var(--surface); color:var(--text); padding:8px 9px; font-family:var(--memory-page-font-sans); font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); }
+  .memory-inline-comment-editor textarea:focus { outline:2px solid rgba(31,126,113,.16); border-color:#87aaa4; }
+  .memory-inline-comment-actions { display:flex; justify-content:flex-end; gap:7px; }
+  .memory-inline-comment-actions .memory-btn { padding:6px 9px; font-size:var(--memory-page-text-label); }
+  .memory-inline-diff-pair>.memory-inline-comment-editor { margin-left:0; margin-right:0; }
+  .memory-commentable.has-comment-draft .memory-inline-plus { display:none; }
+  .memory-change-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(220px,260px); gap:14px; align-items:start; }
+  .memory-change-main { width:min(100%,720px); justify-self:center; }
+  .memory-diff-toolbar { display:inline-grid; grid-template-columns:repeat(2,minmax(84px,1fr)); gap:3px; margin:2px 0 14px; padding:3px; border:1px solid var(--line); border-radius:7px; background:var(--soft); }
+  .memory-diff-toolbar .memory-source-tab { margin:0; }
+  .memory-change-viewbar { display:flex; align-items:center; justify-content:flex-start; gap:14px; margin:0 0 12px; }
+  .memory-change-viewbar .memory-diff-toolbar { flex:0 0 auto; margin:0; }
+  .memory-change-revisions { display:flex; min-width:0; align-items:center; gap:9px; color:var(--muted); font-size:var(--memory-page-text-meta); line-height:var(--memory-page-line-compact); }
+  .memory-change-revision { display:grid; gap:1px; }
+  .memory-change-revision span { font-size:var(--memory-page-text-meta); letter-spacing:.03em; }
+  .memory-change-revision code { color:var(--muted); font-family:var(--memory-page-font-mono); font-size:var(--memory-page-text-meta); line-height:var(--memory-page-line-compact); }
+  .memory-change-revision-arrow { width:12px; height:12px; opacity:.62; transform:rotate(-90deg); }
+  .memory-diff-summary { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; border:1px solid var(--line); border-radius:var(--memory-page-radius-section); background:#fafbf8; padding:9px 11px; color:var(--muted); font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
+  .memory-diff-summary strong { color:var(--text); }
+  .memory-inline-diff-pair { display:grid; gap:4px; flex:1 1 320px; min-width:0; }
+  .memory-inline-diff-line { padding:5px 7px; border-radius:6px; }
+  .text-list>li.memory-inline-diff-item { display:list-item; padding:2px 4px; }
+  .text-list>li.memory-inline-diff-item>.memory-inline-diff-line+.memory-inline-diff-line { margin-top:4px; }
+  .memory-inline-diff-list-row { display:grid; grid-template-columns:42px minmax(0,1fr); align-items:start; gap:7px; }
+  .memory-inline-diff-label { padding-top:1px; color:inherit; font-size:var(--memory-page-text-label); font-weight:650; line-height:var(--memory-page-line-compact); letter-spacing:0; opacity:.78; }
+  .memory-inline-diff-content { min-width:0; font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); white-space:pre-wrap; overflow-wrap:anywhere; }
+  .memory-inline-diff-content>.memory-artifact-row { flex-wrap:nowrap; margin-left:0; overflow-x:auto; }
+  .memory-inline-diff-content>.memory-artifact-row>* { flex:none; white-space:nowrap; }
+  .memory-inline-old { background:#fbe9e7; color:#7e413b; }
+  .memory-inline-new { background:#e3f2ee; color:#17564f; }
+  li.memory-inline-marker-old::marker { color:#c94b40; }
+  li.memory-inline-marker-new::marker { color:#198071; }
+  .memory-inline-removed { margin:5px 0; }
+  .memory-diff-empty { padding:18px 14px; color:var(--muted); font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); text-align:center; }
+  .memory-deleted-candidate { display:grid; gap:4px; margin:0 0 14px; border:1px dashed #d7b1ac; border-radius:var(--memory-page-radius-section); background:#fff8f7; padding:14px; color:#7e413b; }
+  .memory-deleted-candidate strong { font-size:var(--memory-page-text-section-title); line-height:var(--memory-page-line-compact); }
+  .memory-deleted-candidate span { font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
+  .memory-before-full-content { display:grid; gap:10px; }
+  .memory-before-full-content>h4 { margin:0; color:var(--muted); font-size:var(--memory-page-text-section-title); line-height:var(--memory-page-line-compact); }
+  .memory-review-complete { display:flex; align-items:center; justify-content:flex-start; gap:14px; margin-top:14px; border:1px solid var(--line); border-radius:var(--memory-page-radius-section); background:var(--surface); padding:13px 15px; }
+  .memory-review-complete strong,.memory-review-complete small { display:block; }
+  .memory-review-complete strong { font-size:var(--memory-page-text-section-title); line-height:var(--memory-page-line-compact); }
+  .memory-review-complete small { margin-top:3px; color:var(--muted); font-size:var(--memory-page-text-meta); line-height:var(--memory-page-line-compact); }
+  .memory-review-complete .memory-btn { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
   .memory-change-layout.comments-collapsed { grid-template-columns:minmax(0,1fr); }
+  .memory-change-layout.comments-collapsed .memory-change-main { width:min(100%,960px); }
   .memory-change-layout.comments-collapsed .memory-comments { display:none; }
-  .memory-comments { position:sticky; top:16px; max-height:calc(100vh - 32px); overflow:auto; }
-  .memory-comment { border-top:1px solid var(--line); padding:10px 0; }
-  .memory-comment:first-child { border-top:0; }
-  .memory-comment-head { display:flex; justify-content:space-between; gap:8px; color:var(--muted); font-size:12px; }
-  .memory-comment-body { white-space:pre-wrap; overflow-wrap:anywhere; }
-  .memory-comment-target { color:var(--accent); font:11px/1.35 ui-monospace,monospace; }
-  @media(max-width:820px){.memory-layout{display:block}.memory-sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.memory-workspace{padding:18px 14px 36px}.memory-change-layout{display:block}.memory-comments{position:static;max-height:none}.memory-section-body{padding:4px 12px 14px}.memory-flow-head{display:grid}.memory-artifact-row{margin-left:0}}
+  .memory-comments { position:sticky; top:calc(-1 * var(--memory-page-padding)); display:grid; grid-template-rows:auto minmax(140px,1fr) auto; height:calc(100vh - 100px); max-height:calc(100vh - 100px); margin:calc(-1 * var(--memory-page-padding)) 0 0; overflow:hidden; border-width:0 0 0 1px; border-radius:0; background:#fbfcfa; padding:0; box-shadow:none; }
+  .memory-comments-header { display:flex; min-height:54px; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid var(--line); padding:13px 15px; }
+  .memory-comments-title { display:flex; align-items:center; gap:8px; }
+  .memory-comments-title h3 { margin:0; font-size:var(--memory-page-text-section-title); line-height:var(--memory-page-line-compact); }
+  .memory-comments-count { display:inline-grid; min-width:22px; height:22px; place-items:center; border-radius:999px; background:var(--soft); color:var(--muted); font-size:var(--memory-page-text-label); }
+  .memory-comments-close { display:grid; width:28px; height:28px; place-items:center; border:0; border-radius:6px; background:transparent; }
+  .memory-comments-close:hover { background:var(--soft); }
+  .memory-comments-close img { width:16px; height:16px; opacity:.62; }
+  .memory-comments-body { min-height:0; overflow:auto; padding:12px 15px; }
+  .memory-comments-body>p { margin:0; }
+  .memory-comments p,.memory-comments li { font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); }
+  .memory-comment { margin-bottom:9px; border:1px solid var(--line); border-radius:var(--memory-page-radius-section); background:var(--surface); padding:10px 11px; box-shadow:0 1px 2px rgba(20,47,42,.025); }
+  .memory-comment:last-child { margin-bottom:0; }
+  .memory-comment-head { display:flex; min-height:22px; align-items:center; justify-content:space-between; gap:8px; color:var(--muted); font-size:var(--memory-page-text-meta); line-height:var(--memory-page-line-compact); }
+  .memory-comment-head>.memory-pill { flex:none; padding:2px 7px; font-size:var(--memory-page-text-meta); }
+  .memory-comment-target { display:block; max-width:100%; margin:7px 0 0; overflow:hidden; border:0; background:transparent; color:#568079; padding:0; font-family:var(--memory-page-font-mono); font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); text-align:left; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
+  .memory-comment-target:hover { color:var(--accent); text-decoration:underline; text-underline-offset:2px; }
+  .memory-comment-body { margin:8px 0 0; color:var(--text); font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); white-space:pre-wrap; overflow-wrap:anywhere; }
+  .memory-comment-actions { display:flex; justify-content:flex-end; gap:6px; margin-top:9px; padding-top:8px; border-top:1px solid #eef1ed; }
+  .memory-comment-actions .memory-btn { min-height:27px; border-radius:6px; padding:4px 8px; font-size:var(--memory-page-text-label); }
+  @media(max-width:820px){.memory-layout{display:block}.memory-sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.memory-workspace,.memory-workspace.memory-change-workspace{padding:16px 14px 36px}.memory-change-layout{display:block}.memory-change-main{width:auto}.memory-change-viewbar{align-items:flex-start;flex-direction:column}.memory-comments{position:static;top:auto;height:auto;max-height:none;margin:14px 0 0;border:1px solid var(--line);border-radius:var(--memory-page-radius-section)}.memory-section-body{padding:4px 12px 14px}.memory-flow-head{display:grid}.memory-artifact-row{margin-left:0}}
 `;
 
 export default defineViewPlugin<MemoryConfig>({
@@ -612,13 +746,16 @@ function createHeaderActionPublisher(ctx: ViewPluginContext): {
       for (const action of actions) {
         const previous = leases.get(action.id);
         if (previous?.stateKey === action.stateKey) continue;
+        if (previous) {
+          leases.delete(action.id);
+          void previous.dispose();
+        }
         const dispose = ctx.slots.upsert(slots.headerActions, {
           id: `memory.${action.id}`,
           order: action.order,
           value: action.value
         });
         leases.set(action.id, { stateKey: action.stateKey, dispose });
-        void previous?.dispose();
       }
     },
     clear
@@ -721,6 +858,9 @@ class MemoryApplication {
   #query = "";
   #hideSystem = localStorage.getItem(hideSystemMemoriesKey) !== "false";
   #commentsCollapsed = localStorage.getItem(changeCommentsCollapsedKey) === "true";
+  #commentDraft: { memoryId: string; target: string; snapshot: string; location: unknown } | null = null;
+  #changeContentMode: "diff" | "candidate" = "diff";
+  #reviewedMemoryIds = new Set<string>();
   #currentProject = "";
   #actorKinds: Record<string, string> = {};
   #generation = 0;
@@ -884,18 +1024,24 @@ class MemoryApplication {
           this.#actorKinds = asStringRecord(this.#changeDetail.actorKinds);
           const targets = array(this.#changeDetail.targetMemories).map(item => {
             const target = item as JsonRecord;
-            const memory = target.memory && typeof target.memory === "object"
+            const candidate = target.memory && typeof target.memory === "object"
               ? target.memory as MemorySummary
-              : target as MemorySummary;
+              : undefined;
+            const base = target.baseMemory && typeof target.baseMemory === "object"
+              ? target.baseMemory as MemorySummary
+              : undefined;
+            const memory = candidate ?? base ?? target as MemorySummary;
             return {
               ...memory,
               operation: target.operation ?? memory.operation,
-              reference: target.reference ?? memory.reference
+              reference: target.reference ?? memory.reference,
+              baseMemory: base
             } as MemorySummary;
           });
           if (targets.length) {
             this.#memories = targets;
             this.#selectedId = targets.some(item => item.id === this.#selectedId) ? this.#selectedId : targets[0]?.id ?? "";
+            this.#reviewedMemoryIds = this.readReviewedMemories(route.changeId);
           }
         } catch (error) {
           this.#changeDetail = { error: errorMessage(error), change: this.#changes.find(item => item.id === route.changeId) ?? { id: route.changeId, status: "unavailable" } };
@@ -1025,6 +1171,12 @@ class MemoryApplication {
     } else if (route.kind === "change") {
       const change = this.#changeDetail?.change as ChangeSummary | undefined;
       if (change) {
+        if (change.valid === true) actions.push({
+          id: "change-valid",
+          order: 80,
+          stateKey: `valid:${change.id}:${String(change.digest)}`,
+          value: { label: text(this.t("change.validationPassed")), icon: { kind: "system", name: "seal-check" }, tone: "success", run: () => undefined }
+        });
         if (change.status === "active") {
           actions.push({
             id: "change-add",
@@ -1054,12 +1206,8 @@ class MemoryApplication {
           order: 120,
           stateKey: `comments:${change.id}:${String(this.#commentsCollapsed)}`,
           value: {
-            label: text(this.t("change.comments")),
-            run: () => {
-              this.#commentsCollapsed = !this.#commentsCollapsed;
-              localStorage.setItem(changeCommentsCollapsedKey, String(this.#commentsCollapsed));
-              this.render();
-            }
+            label: text(this.t(this.#commentsCollapsed ? "change.expandComments" : "change.collapseComments")),
+            run: () => this.setCommentsCollapsed(!this.#commentsCollapsed)
           }
         });
       }
@@ -1071,13 +1219,14 @@ class MemoryApplication {
     const side = el("aside", "memory-sidebar");
     const route = parseLocation(this.#location);
     if (route.kind === "market") side.append(this.renderMarketNavigation());
-    else if (route.kind === "change" || this.#location.query.section === "changes") side.append(this.renderChangesIndexNavigation());
+    else if (route.kind === "change") side.append(this.renderChangeTargetNavigation());
+    else if (this.#location.query.section === "changes") side.append(this.renderChangesIndexNavigation());
     else side.append(this.renderMemoryNavigation());
     return side;
   }
 
-  private renderListHeader(title: string, refreshLabel: string): HTMLElement {
-    const header = el("header", "memory-list-header");
+  private renderListHeader(title: string, refreshLabel: string, compact = false): HTMLElement {
+    const header = el("header", `memory-list-header${compact ? " compact" : ""}`);
     const copy = el("div", "memory-list-header-copy");
     copy.append(el("small", "", this.t("navigation.memory")), el("h2", "", title));
     const refresh = button("", "memory-list-refresh", () => void this.load());
@@ -1109,6 +1258,35 @@ class MemoryApplication {
     }
     if (!changes.length) list.append(el("div", "memory-list-empty", this.t("change.empty")));
     wrap.append(list, el("footer", "memory-list-footer", this.format("memory.visibleCount", { count: changes.length })));
+    return wrap;
+  }
+
+  private renderChangeTargetNavigation(): HTMLElement {
+    const wrap = el("div", "memory-navigation");
+    const change = this.#changeDetail?.change as ChangeSummary | undefined;
+    wrap.append(this.renderListHeader(String(change?.id ?? this.t("change.title")), this.#config.locale?.toLowerCase().startsWith("en") ? "Refresh ChangeSet" : "刷新记忆变更", true));
+    const search = input("search", this.t("change.search"), this.#query, "memory-search");
+    search.addEventListener("input", () => { this.#query = search.value; this.render(); });
+    const needle = this.#query.trim().toLowerCase();
+    const visible = this.#memories.filter(memory => !needle || `${memoryName(memory)} ${memoryReference(memory)} ${memorySummaryDescription(memory)}`.toLowerCase().includes(needle));
+    wrap.append(search);
+    const progress = el("div", "memory-review-progress");
+    progress.append(el("span", "", this.t("change.reviewProgress").replace("{reviewed}", String(this.#reviewedMemoryIds.size)).replace("{total}", String(this.#memories.length))));
+    const track = el("div", "memory-review-progress-track");
+    const bar = el("span"); bar.style.width = `${this.#memories.length ? Math.min(100, this.#reviewedMemoryIds.size / this.#memories.length * 100) : 0}%`; track.append(bar); progress.append(track); wrap.append(progress);
+    const list = el("div", "memory-list");
+    for (const memory of visible) {
+      const row = button("", `memory-button${memory.id === this.#selectedId ? " active" : ""}`, () => { this.#selectedId = memory.id; this.render(); });
+      row.setAttribute("aria-label", memoryName(memory));
+      const icon = el("span", "memory-button-icon"); const iconImage = document.createElement("img"); iconImage.src = "/assets/system-icons/file-text.svg"; iconImage.alt = ""; icon.append(iconImage);
+      const copy = el("span", "memory-button-copy"); copy.append(el("strong", "", memoryName(memory)), el("small", "", this.t(memory.kind)));
+      const summary = memorySummaryDescription(memory); if (summary) copy.append(el("span", "", summary));
+      const reviewed = this.#reviewedMemoryIds.has(memory.id);
+      const state = el("span", `memory-review-state${reviewed ? " reviewed" : ""}`, reviewed ? "✓" : this.operationLabel(String(memory.operation ?? "update")));
+      row.append(icon, copy, state); list.append(row);
+    }
+    if (!visible.length) list.append(el("div", "memory-list-empty", this.t("change.empty")));
+    wrap.append(list, el("footer", "memory-list-footer", `${visible.length} Memory`));
     return wrap;
   }
 
@@ -1211,8 +1389,8 @@ class MemoryApplication {
   }
 
   private renderWorkspace(): HTMLElement {
-    const main = el("main", "memory-workspace");
     const route = parseLocation(this.#location);
+    const main = el("main", `memory-workspace${route.kind === "change" ? " memory-change-workspace" : ""}`);
     if (route.kind === "market") main.append(this.renderMarketDetail());
     else if (route.kind === "change" || this.#location.query.section === "changes") main.append(this.renderChangeDetail());
     else main.append(this.renderMemoryDetail());
@@ -1275,27 +1453,71 @@ class MemoryApplication {
     }
     if (array(change.issues).length) workspace.append(renderIssues(array(change.issues), this.t("change.validationDiagnostics")));
     const layout = el("div", `memory-change-layout${this.#commentsCollapsed ? " comments-collapsed" : ""}`);
-    const main = el("div");
+    const main = el("div", "memory-change-main");
     const selected = this.#memories.find(memory => memory.id === this.#selectedId);
+    if (selected) {
+      const viewbar = el("div", "memory-change-viewbar");
+      const mode = el("div", "memory-diff-toolbar");
+      const diffButton = button(this.t("change.diff"), `memory-source-tab${this.#changeContentMode === "diff" ? " active" : ""}`, () => { this.#changeContentMode = "diff"; this.render(); });
+      const candidateButton = button(this.t("change.candidateContent"), `memory-source-tab${this.#changeContentMode === "candidate" ? " active" : ""}`, () => { this.#changeContentMode = "candidate"; this.render(); });
+      mode.append(diffButton, candidateButton);
+      const revisions = el("div", "memory-change-revisions");
+      revisions.append(changeRevision("base", String(change.baseRevision ?? "")));
+      const arrow = document.createElement("img");
+      arrow.className = "memory-change-revision-arrow";
+      arrow.src = "/assets/system-icons/caret-down.svg";
+      arrow.alt = "";
+      revisions.append(arrow, changeRevision("candidate", String(change.candidateRevision ?? change.digest ?? "")));
+      viewbar.append(mode, revisions);
+      main.append(viewbar);
+    }
     if (selected?.error) main.append(errorWorkspace(memoryName(selected), errorMessage(selected.error)));
     else if (selected) {
       const panel = el("section", "memory-panel"); panel.append(el("h3", "", memoryName(selected)), renderMeta(selected));
-      panel.append(renderMemoryEntity(selected.kind, (selected.entity ?? selected) as JsonRecord, this.t.bind(this), (target, snapshot, location) => void this.composeComment(selected, target, snapshot, location), this.renderOptions()));
+      const comment = (target: string, snapshot: string, location: unknown) => void this.composeComment(selected, target, snapshot, location);
+      const operation = String(selected.operation ?? "unchanged");
+      if (this.#changeContentMode === "diff" && operation === "create") {
+        panel.append(renderWholeMemoryChange(selected, "new", this.t.bind(this), comment, this.renderOptions()));
+      } else if (this.#changeContentMode === "diff" && operation === "delete") {
+        panel.append(renderWholeMemoryChange(selected, "old", this.t.bind(this), comment, this.renderOptions()));
+      } else if (this.#changeContentMode === "diff" && selected.baseMemory) {
+        panel.append(renderMemoryComparison(selected, selected.baseMemory, this.t.bind(this), comment, this.renderOptions(), this.#changeDetail?.change as ChangeSummary | undefined));
+      } else if (this.#changeContentMode === "candidate" && operation === "delete") {
+        const absent = el("div", "memory-deleted-candidate");
+        absent.append(el("strong", "", this.t("change.deletedCandidateTitle")), el("span", "", this.t("change.deletedCandidateHint")));
+        const before = el("div", "memory-before-full-content");
+        before.append(el("h4", "", this.t("change.beforeFullContent")), renderMemoryEntity(selected.kind, (selected.entity ?? selected) as JsonRecord, this.t.bind(this), undefined, this.renderOptions()));
+        panel.append(absent, before);
+      } else {
+        panel.append(renderMemoryEntity(selected.kind, (selected.entity ?? selected) as JsonRecord, this.t.bind(this), comment, this.renderOptions()));
+      }
       main.append(panel);
+      main.append(this.renderReviewCompletion(selected));
+      this.mountInlineCommentComposer(main, selected);
     }
-    layout.append(main, this.renderComments(array(payload.comments), selected));
+    layout.append(main, this.renderComments(array(payload.comments)));
     workspace.append(layout);
     return workspace;
   }
 
-  private renderComments(comments: JsonRecord[], memory?: MemorySummary): HTMLElement {
+  private renderComments(comments: JsonRecord[]): HTMLElement {
     const section = el("aside", "memory-panel memory-comments");
-    section.append(el("h3", "", `${this.t("change.comments")} · ${comments.length}`));
-    if (!comments.length) section.append(el("p", "memory-muted", this.t("change.noComments")));
+    const header = el("header", "memory-comments-header");
+    const title = el("div", "memory-comments-title");
+    title.append(el("h3", "", this.t("change.comments")), el("span", "memory-comments-count", String(comments.length)));
+    const close = button("", "memory-comments-close", () => this.setCommentsCollapsed(true));
+    close.setAttribute("aria-label", this.t("change.collapseComments"));
+    const closeIcon = document.createElement("img");
+    closeIcon.src = "/assets/system-icons/x.svg";
+    closeIcon.alt = "";
+    close.append(closeIcon);
+    header.append(title, close);
+    const body = el("div", "memory-comments-body");
+    if (!comments.length) body.append(el("p", "memory-muted", this.t("change.noComments")));
     for (const comment of comments) {
       const item = el("article", "memory-comment");
       const head = el("div", "memory-comment-head");
-      head.append(el("span", "", actorLabel(comment.operator ?? comment.actor)), el("span", "memory-pill", this.commentStatus(String(comment.status ?? "pending"))));
+      head.append(el("span", "", actorLabel(comment.submittedBy ?? comment.submitted_by ?? comment.operator ?? comment.actor)), el("span", "memory-pill", this.commentStatus(String(comment.status ?? "pending"))));
       item.append(head);
       if (comment.target || comment.location) item.append(el("button", "memory-comment-target", String(comment.target ?? (comment.location as JsonRecord)?.anchor ?? "")));
       item.append(el("p", "memory-comment-body", String(comment.body ?? "")));
@@ -1304,10 +1526,66 @@ class MemoryApplication {
         actions.append(button("编辑", "memory-btn", () => this.editComment(item, comment)), button("删除", "memory-btn danger", () => void this.deleteComment(String(comment.id))));
         item.append(actions);
       }
-      section.append(item);
+      body.append(item);
     }
-    if (memory && this.canComment()) section.append(button(this.t("change.addComment"), "memory-btn primary", () => void this.composeComment(memory, "", "", undefined)));
+    section.append(header, body);
     return section;
+  }
+
+  private mountInlineCommentComposer(main: HTMLElement, memory: MemorySummary): void {
+    const draft = this.#commentDraft?.memoryId === memory.id ? this.#commentDraft : null;
+    if (!draft?.target || !this.canComment()) return;
+    const anchor = [...main.querySelectorAll<HTMLElement>("[data-anchor]")].find(node => node.dataset.anchor === draft.target);
+    if (!anchor) return;
+    const host = anchor.closest<HTMLElement>(".memory-inline-diff-line")
+      ?? anchor.closest<HTMLElement>(".memory-flow-head")
+      ?? anchor.closest<HTMLElement>("li, .memory-schema-field, .memory-commentable")
+      ?? anchor;
+    host.classList.add("has-comment-draft");
+    const composer = el("div", "memory-inline-comment-editor");
+    const textarea = document.createElement("textarea");
+    textarea.placeholder = this.t("change.commentPlaceholder");
+    textarea.setAttribute("aria-label", this.t("change.commentPlaceholder"));
+    const actions = el("div", "memory-inline-comment-actions");
+    const submit = button(this.t("change.submitComment"), "memory-btn primary", () => void this.submitComment(memory, draft, textarea.value));
+    submit.disabled = true;
+    textarea.addEventListener("input", () => { submit.disabled = !textarea.value.trim(); });
+    actions.append(button(this.t("change.cancelComment"), "memory-btn", () => { this.#commentDraft = null; this.render(); }), submit);
+    composer.append(textarea, actions);
+    if (host.matches(".memory-inline-diff-line, .memory-flow-head")) host.after(composer);
+    else host.append(composer);
+    queueMicrotask(() => { textarea.focus({ preventScroll: true }); composer.scrollIntoView({ block: "nearest" }); });
+  }
+
+  private setCommentsCollapsed(collapsed: boolean): void {
+    this.#commentsCollapsed = collapsed;
+    localStorage.setItem(changeCommentsCollapsedKey, String(collapsed));
+    this.render();
+  }
+
+  private renderReviewCompletion(memory: MemorySummary): HTMLElement {
+    const reviewed = this.#reviewedMemoryIds.has(memory.id);
+    const section = el("section", "memory-review-complete");
+    const copy = el("div"); copy.append(el("strong", "", this.t("change.markReviewedTitle")), el("small", "", this.t("change.markReviewedHint")));
+    const action = button(reviewed ? `✓ ${this.t("change.reviewed")}` : this.t("change.markReviewed"), "memory-btn primary", () => this.markMemoryReviewed(memory));
+    section.append(action, copy);
+    return section;
+  }
+
+  private markMemoryReviewed(memory: MemorySummary): void {
+    this.#reviewedMemoryIds.add(memory.id);
+    const changeId = String((this.#changeDetail?.change as ChangeSummary | undefined)?.id ?? "");
+    if (changeId) localStorage.setItem(`${changeReviewedKeyPrefix}.${changeId}`, JSON.stringify([...this.#reviewedMemoryIds]));
+    const next = this.#memories.find(candidate => !this.#reviewedMemoryIds.has(candidate.id));
+    if (next) this.#selectedId = next.id;
+    this.render();
+  }
+
+  private readReviewedMemories(changeId: string): Set<string> {
+    try {
+      const value = JSON.parse(localStorage.getItem(`${changeReviewedKeyPrefix}.${changeId}`) ?? "[]");
+      return new Set(Array.isArray(value) ? value.filter(item => typeof item === "string") : []);
+    } catch { return new Set(); }
   }
 
   private async createChange(memory: MemorySummary): Promise<void> {
@@ -1374,15 +1652,21 @@ class MemoryApplication {
     catch (error) { this.showTransientError(error); }
   }
 
-  private async composeComment(memory: MemorySummary, target: string, snapshot: string, location: unknown): Promise<void> {
-    if (!this.canComment()) return;
-    const body = prompt(target ? `评论 ${target}` : this.t("change.addComment")); if (!body?.trim()) return;
+  private composeComment(memory: MemorySummary, target: string, snapshot: string, location: unknown): void {
+    if (!this.canComment() || !target) return;
+    this.#commentDraft = { memoryId: memory.id, target, snapshot, location };
+    this.render();
+  }
+
+  private async submitComment(memory: MemorySummary, draft: { target: string; snapshot: string; location: unknown }, body: string): Promise<void> {
+    if (!body.trim() || !this.canComment()) return;
     const operator = await this.chooseOperator(); if (!operator) return;
     const change = this.#changeDetail?.change as ChangeSummary | undefined;
     try {
       await this.request(`/api/changes/${encodeURIComponent(change?.id ?? "")}/comments`, {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operator, memoryReference: memory.id, path: memory.path, target: target || undefined, location, snapshot: snapshot || undefined, body: body.trim(), expectedUpdatedAt: change?.updatedAt })
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operator, memoryReference: memory.id, path: memory.path, target: draft.target || undefined, location: draft.location, snapshot: draft.snapshot || undefined, body: body.trim(), expectedUpdatedAt: change?.updatedAt })
       });
+      this.#commentDraft = null;
       await this.load();
     } catch (error) { this.showTransientError(error); }
   }
@@ -1513,6 +1797,7 @@ class MemoryApplication {
   private canComment(): boolean { return (this.#changeDetail?.change as ChangeSummary | undefined)?.status === "active" && !Boolean((this.#changeDetail?.change as ChangeSummary | undefined)?.claimed); }
   private marketStatusLabel(status: string): string { return this.t(`market.${({ not_imported: "notImported", importing: "importing", consistent: "consistent", different: "different", name_conflict: "nameConflict" } as Record<string, string>)[status] ?? status}`); }
   private changeStatusLabel(status: string): string { return this.t(`change.status.${status}`) === `change.status.${status}` ? status : this.t(`change.status.${status}`); }
+  private operationLabel(operation: string): string { const key = `change.operation.${operation}`; return this.t(key) === key ? operation : this.t(key); }
   private commentStatus(status: string): string { return this.t(`change.comment.${status}`); }
   private renderOptions(): RenderOptions {
     return {
@@ -1580,13 +1865,306 @@ function renderMemoryEntity(kind: string, entity: JsonRecord, t: (key: string) =
   return renderGeneric(entity, "memory", t, comment, options);
 }
 
-function renderSchema(node: JsonRecord, depth: number, fallback: string, path: string, t: (key: string) => string, comment?: CommentCallback, options: RenderOptions = {}): HTMLElement {
-  const title = depth === 0 ? "" : memoryName(node as MemorySummary) || fallback;
+function renderMemoryComparison(
+  candidate: MemorySummary,
+  base: MemorySummary,
+  t: (key: string) => string,
+  comment: CommentCallback,
+  options: RenderOptions,
+  change?: ChangeSummary
+): HTMLElement {
+  const root = candidate.kind === "procedures" ? "procedure"
+    : candidate.kind === "statements" ? "statement"
+      : candidate.kind === "schemas" ? "schema" : "memory";
+  const beforeEntity = (base.entity ?? base) as JsonRecord;
+  const afterEntity = (candidate.entity ?? candidate) as JsonRecord;
+  const changes = scalarDiffEntries(beforeEntity, afterEntity, root);
+  const wrap = el("div", "memory-diff-view");
+  const summary = el("div", "memory-diff-summary");
+  summary.append(el("strong", "", t("change.fieldChanges").replace("{count}", String(changes.length))));
+  wrap.append(summary);
+  const before = renderMemoryEntity(candidate.kind, beforeEntity, t, comment, options);
+  const after = renderMemoryEntity(candidate.kind, afterEntity, t, comment, options);
+  applyInlineMemoryDiff(before, after, changes, t("change.before"), t("change.after"), t("change.added"), t("change.deleted"));
+  wrap.append(after);
+  return wrap;
+}
+
+function renderWholeMemoryChange(
+  memory: MemorySummary,
+  tone: "old" | "new",
+  t: (key: string) => string,
+  comment: CommentCallback | undefined,
+  options: RenderOptions
+): HTMLElement {
+  const rootPath = memory.kind === "procedures" ? "procedure"
+    : memory.kind === "statements" ? "statement"
+      : memory.kind === "schemas" ? "schema" : "memory";
+  const entity = (memory.entity ?? memory) as JsonRecord;
+  const changes = collectScalarDiffs(entity, rootPath, tone === "old" ? "before" : "after");
+  const wrap = el("div", "memory-diff-view");
+  const summary = el("div", "memory-diff-summary");
+  summary.append(el("strong", "", t("change.fieldChanges").replace("{count}", String(changes.length))));
+  wrap.append(summary);
+  const document = renderMemoryEntity(memory.kind, entity, t, comment, options);
+  applyWholeMemoryTone(document, changes, tone, tone === "old" ? t("change.deleted") : t("change.added"));
+  wrap.append(document);
+  return wrap;
+}
+
+function applyWholeMemoryTone(root: HTMLElement, changes: readonly ScalarDiffEntry[], tone: "old" | "new", label: string): void {
+  const nodes = anchoredNodes(root);
+  const groups = diffGroups(root);
+  const handledGroups = new Set<string>();
+  for (const change of changes) {
+    const path = tone === "old" ? change.beforePath : change.afterPath;
+    if (!path) continue;
+    const node = nodes.get(path);
+    if (!node || !root.contains(node)) continue;
+    const groupKey = node.closest<HTMLElement>("[data-diff-group]")?.dataset.diffGroup;
+    if (groupKey) {
+      if (handledGroups.has(groupKey)) continue;
+      handledGroups.add(groupKey);
+      const group = groups.get(groupKey);
+      if (group && root.contains(group)) renderInlineSingle(group, tone, label);
+      continue;
+    }
+    renderInlineSingle(node, tone, label);
+  }
+}
+
+type ScalarDiffEntry = { beforePath?: string; afterPath?: string };
+
+function applyInlineMemoryDiff(
+  before: HTMLElement,
+  after: HTMLElement,
+  changes: readonly ScalarDiffEntry[],
+  beforeLabel: string,
+  afterLabel: string,
+  addedLabel: string,
+  deletedLabel: string
+): void {
+  const beforeNodes = anchoredNodes(before);
+  const afterNodes = anchoredNodes(after);
+  const beforeGroups = diffGroups(before);
+  const afterGroups = diffGroups(after);
+  const handledGroups = new Set<string>();
+  for (const change of changes) {
+    const oldNode = change.beforePath ? beforeNodes.get(change.beforePath) : undefined;
+    const newNode = change.afterPath ? afterNodes.get(change.afterPath) : undefined;
+    const groupKey = oldNode?.closest<HTMLElement>("[data-diff-group]")?.dataset.diffGroup
+      ?? newNode?.closest<HTMLElement>("[data-diff-group]")?.dataset.diffGroup;
+    if (groupKey) {
+      if (handledGroups.has(groupKey)) continue;
+      handledGroups.add(groupKey);
+      const oldGroup = beforeGroups.get(groupKey);
+      const newGroup = afterGroups.get(groupKey);
+      if (oldGroup && newGroup) renderInlineReplacement(oldGroup, newGroup, beforeLabel, afterLabel);
+      else if (newGroup) renderInlineSingle(newGroup, "new", addedLabel);
+      else if (oldGroup) renderInlineRemoval(oldGroup, change.beforePath ?? groupKey, beforeNodes, afterNodes, after, deletedLabel);
+      continue;
+    }
+    if (oldNode && newNode) {
+      renderInlineReplacement(oldNode, newNode, beforeLabel, afterLabel);
+    } else if (newNode) {
+      renderInlineSingle(newNode, "new", addedLabel);
+    } else if (oldNode) {
+      renderInlineRemoval(oldNode, change.beforePath ?? "", beforeNodes, afterNodes, after, deletedLabel);
+    }
+  }
+}
+
+function diffGroups(root: HTMLElement): Map<string, HTMLElement> {
+  const groups = new Map<string, HTMLElement>();
+  for (const node of root.querySelectorAll<HTMLElement>("[data-diff-group]")) {
+    const key = node.dataset.diffGroup ?? "";
+    if (key && !groups.has(key)) groups.set(key, node);
+  }
+  return groups;
+}
+
+function anchoredNodes(root: HTMLElement): Map<string, HTMLElement> {
+  const nodes = new Map<string, HTMLElement>();
+  for (const node of root.querySelectorAll<HTMLElement>("[data-anchor]")) {
+    const path = node.dataset.anchor ?? "";
+    if (path && !nodes.has(path)) nodes.set(path, node);
+  }
+  return nodes;
+}
+
+function renderInlineReplacement(oldSource: HTMLElement, newNode: HTMLElement, beforeLabel: string, afterLabel: string): void {
+  const oldListItem = textListItem(oldSource);
+  const newListItem = textListItem(newNode);
+  if (oldListItem && newListItem) {
+    const oldItem = cleanDiffClone(oldListItem);
+    const oldLine = diffLine(oldItem, "old", beforeLabel);
+    const newLine = diffLine(newListItem, "new", afterLabel);
+    newListItem.classList.add("memory-inline-diff-item");
+    newListItem.append(oldLine, newLine);
+    return;
+  }
+  const oldNode = cleanDiffClone(oldSource);
+  const pair = diffPair();
+  newNode.replaceWith(pair);
+  pair.append(diffLine(oldNode, "old", beforeLabel), diffLine(newNode, "new", afterLabel));
+}
+
+function renderInlineSingle(node: HTMLElement, tone: "old" | "new", label: string): void {
+  const listItem = textListItem(node);
+  if (listItem) {
+    decorateListDiff(listItem, tone, label);
+    return;
+  }
+  const marker = document.createTextNode("");
+  node.replaceWith(marker);
+  marker.replaceWith(diffLine(node, tone, label));
+}
+
+function renderInlineRemoval(oldSource: HTMLElement, path: string, beforeNodes: ReadonlyMap<string, HTMLElement>, afterNodes: ReadonlyMap<string, HTMLElement>, after: HTMLElement, label: string): void {
+  const beforePaths = [...beforeNodes.keys()];
+  const position = beforePaths.indexOf(path);
+  const followingPath = beforePaths.slice(position + 1).find(candidatePath => afterNodes.has(candidatePath));
+  const nearbyPath = followingPath ?? beforePaths.slice(0, Math.max(0, position)).reverse().find(candidatePath => afterNodes.has(candidatePath));
+  const nearby = nearbyPath ? afterNodes.get(nearbyPath) : undefined;
+  const oldList = oldSource.closest<HTMLElement>("ul.text-list");
+  const oldPanel = oldList?.parentElement;
+  const oldNode = textListItem(oldSource) ?? oldSource;
+  if (oldList && oldPanel) {
+    const block = el("section", `${oldPanel.className} memory-inline-removed`.trim());
+    const title = oldPanel.querySelector<HTMLElement>(":scope > .memory-block-title")?.cloneNode(true);
+    const list = document.createElement("ul"); list.className = "text-list";
+    const item = oldNode.tagName === "LI" ? oldNode : document.createElement("li");
+    if (item !== oldNode) item.append(oldNode);
+    decorateListDiff(item, "old", label);
+    list.append(item);
+    if (title) block.append(title);
+    block.append(list);
+    const nearbyBlock = nearby?.closest<HTMLElement>(".memory-list-block, .action-contracts, section");
+    if (nearbyBlock && followingPath) nearbyBlock.before(block);
+    else if (nearbyBlock) nearbyBlock.after(block);
+    else after.append(block);
+    return;
+  }
+  const pair = diffPair("memory-inline-removed");
+  pair.append(diffLine(oldNode, "old", label));
+  if (nearby?.parentElement) nearby.before(pair);
+  else after.append(pair);
+}
+
+function cleanDiffClone(source: HTMLElement): HTMLElement {
+  const clone = source.cloneNode(true) as HTMLElement;
+  clone.removeAttribute("data-anchor");
+  clone.querySelectorAll("[data-anchor]").forEach(node => node.removeAttribute("data-anchor"));
+  clone.querySelectorAll("button").forEach(node => node.remove());
+  clone.querySelectorAll("[id]").forEach(node => node.removeAttribute("id"));
+  return clone;
+}
+
+function textListItem(node: HTMLElement): HTMLLIElement | undefined {
+  const item = node.closest<HTMLLIElement>("li");
+  return item?.parentElement?.matches("ul.text-list") ? item : undefined;
+}
+
+function diffPair(className = ""): HTMLDivElement {
+  return el("div", `memory-inline-diff-pair ${className}`.trim());
+}
+
+function diffLine(node: HTMLElement, tone: "old" | "new", label: string): HTMLDivElement {
+  const item = el("div", `memory-inline-diff-line memory-inline-${tone}`);
+  const line = el("div", "memory-inline-diff-list-row");
+  const content = el("div", "memory-inline-diff-content");
+  if (node.tagName === "LI") while (node.firstChild) content.append(node.firstChild);
+  else content.append(node);
+  line.append(el("span", "memory-inline-diff-label", label), content);
+  item.append(line);
+  return item;
+}
+
+function decorateListDiff(node: HTMLElement, tone: "old" | "new", label: string): void {
+  const line = diffLine(node, tone, label);
+  node.classList.add("memory-inline-diff-item", `memory-inline-marker-${tone}`);
+  node.append(line);
+}
+
+function scalarDiffEntries(before: unknown, after: unknown, path: string): ScalarDiffEntry[] {
+  if (Array.isArray(before) && Array.isArray(after)) {
+    if (before.every(isPrimitive) && after.every(isPrimitive)) return primitiveArrayDiff(before, after, path);
+    const result: ScalarDiffEntry[] = [];
+    const length = Math.max(before.length, after.length);
+    for (let index = 0; index < length; index += 1) {
+      const itemPath = `${path}[${index + 1}]`;
+      if (index >= before.length) result.push(...collectScalarDiffs(after[index], itemPath, "after"));
+      else if (index >= after.length) result.push(...collectScalarDiffs(before[index], itemPath, "before"));
+      else result.push(...scalarDiffEntries(before[index], after[index], itemPath));
+    }
+    return result;
+  }
+  if (isRecord(before) && isRecord(after)) {
+    const result: ScalarDiffEntry[] = [];
+    const ignored = new Set(["tag", "syntax", "effectiveRules"]);
+    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+      if (ignored.has(key)) continue;
+      const childPath = `${path}.${key}`;
+      const inBefore = Object.prototype.hasOwnProperty.call(before, key);
+      const inAfter = Object.prototype.hasOwnProperty.call(after, key);
+      if (!inBefore) result.push(...collectScalarDiffs(after[key], childPath, "after"));
+      else if (!inAfter) result.push(...collectScalarDiffs(before[key], childPath, "before"));
+      else result.push(...scalarDiffEntries(before[key], after[key], childPath));
+    }
+    return result;
+  }
+  if (scalar(before) === scalar(after)) return [];
+  return [{ beforePath: path, afterPath: path }];
+}
+
+function primitiveArrayDiff(before: unknown[], after: unknown[], path: string): ScalarDiffEntry[] {
+  const rows = before.length + 1;
+  const columns = after.length + 1;
+  const table = Array.from({ length: rows }, () => Array<number>(columns).fill(0));
+  for (let left = before.length - 1; left >= 0; left -= 1) for (let right = after.length - 1; right >= 0; right -= 1) {
+    table[left]![right] = scalar(before[left]) === scalar(after[right])
+      ? 1 + table[left + 1]![right + 1]!
+      : Math.max(table[left + 1]![right]!, table[left]![right + 1]!);
+  }
+  const matches: Array<[number, number]> = [];
+  let left = 0; let right = 0;
+  while (left < before.length && right < after.length) {
+    if (scalar(before[left]) === scalar(after[right])) { matches.push([left, right]); left += 1; right += 1; }
+    else if (table[left + 1]![right]! >= table[left]![right + 1]!) left += 1;
+    else right += 1;
+  }
+  const result: ScalarDiffEntry[] = [];
+  let beforeStart = 0; let afterStart = 0;
+  for (const [beforeMatch, afterMatch] of [...matches, [before.length, after.length] as [number, number]]) {
+    const removed = Array.from({ length: beforeMatch - beforeStart }, (_, index) => beforeStart + index);
+    const added = Array.from({ length: afterMatch - afterStart }, (_, index) => afterStart + index);
+    const paired = Math.min(removed.length, added.length);
+    for (let index = 0; index < paired; index += 1) result.push({ beforePath: `${path}[${removed[index]! + 1}]`, afterPath: `${path}[${added[index]! + 1}]` });
+    for (const index of removed.slice(paired)) result.push({ beforePath: `${path}[${index + 1}]` });
+    for (const index of added.slice(paired)) result.push({ afterPath: `${path}[${index + 1}]` });
+    beforeStart = beforeMatch + 1;
+    afterStart = afterMatch + 1;
+  }
+  return result;
+}
+
+function collectScalarDiffs(value: unknown, path: string, side: "before" | "after"): ScalarDiffEntry[] {
+  if (Array.isArray(value)) return value.flatMap((item, index) => collectScalarDiffs(item, `${path}[${index + 1}]`, side));
+  if (isRecord(value)) return Object.entries(value).flatMap(([key, child]) => ["tag", "syntax", "effectiveRules"].includes(key) ? [] : collectScalarDiffs(child, `${path}.${key}`, side));
+  return [side === "before" ? { beforePath: path } : { afterPath: path }];
+}
+
+function isPrimitive(value: unknown): boolean { return value === null || typeof value !== "object"; }
+function isRecord(value: unknown): value is JsonRecord { return Boolean(value && typeof value === "object" && !Array.isArray(value)); }
+
+function renderSchema(node: JsonRecord, depth: number, fallback: string, path: string, t: (key: string) => string, comment?: CommentCallback, options: RenderOptions = {}, openThroughDepth = 1): HTMLElement {
+  const names = array(node.names);
+  const title = depth === 0 ? "" : String(names[1] ?? names[0] ?? node.name ?? fallback);
   const badges = ["!schema"];
   if (node.optional === true) badges.push(`${t("optional")}: true`);
   if (node.type !== undefined) badges.push(`${t("type")}: ${translatedScalar(node.type, t)}`);
   if (node.format !== undefined) badges.push(`${t("format")}: ${formatLabel(node.format)}`);
-  const section = nodeSection(title, path, node, comment, badges, depth < 2);
+  const section = nodeSection(title, path, node, comment, badges, depth <= openThroughDepth);
   const body = sectionBody(section);
   if (depth === 0) appendStringList(body, "names", array(node.names), path, comment, t);
   for (const key of ["defines", "asserts", "suggests"] as const) appendStringList(body, key, array(node[key]), path, comment, t);
@@ -1599,18 +2177,18 @@ function renderSchema(node: JsonRecord, depth: number, fallback: string, path: s
       if (typeof field === "string") children.append(renderSimpleSchemaField(field, fieldPath, t, comment));
       else if (isReference(field)) children.append(renderMemoryReference(field, options, t));
       else if (field && typeof field === "object" && (field as JsonRecord).tag === "!repeat") children.append(renderSchemaRepeat(field as JsonRecord, depth + 1, fieldPath, t, comment, options));
-      else if (field && typeof field === "object") children.append(renderSchema(field as JsonRecord, depth + 1, t("schemas"), fieldPath, t, comment, options));
+      else if (field && typeof field === "object") children.append(renderSchema(field as JsonRecord, depth + 1, t("schemas"), fieldPath, t, comment, options, openThroughDepth));
     });
     body.append(children);
   }
   if (node.item && typeof node.item === "object") {
-    body.append(blockTitle(t("item")), isReference(node.item) ? renderMemoryReference(node.item, options, t) : renderSchema(node.item as JsonRecord, depth + 1, t("item"), `${path}.item`, t, comment, options));
+    body.append(blockTitle(t("item")), isReference(node.item) ? renderMemoryReference(node.item, options, t) : renderSchema(node.item as JsonRecord, depth + 1, t("item"), `${path}.item`, t, comment, options, openThroughDepth));
   }
   const items = array(node.items);
   if (items.length) {
     body.append(blockTitle(t("items")));
     const children = el("div", "memory-child-stack");
-    items.forEach((item, index) => { if (item && typeof item === "object") children.append(isReference(item) ? renderMemoryReference(item, options, t) : renderSchema(item, depth + 1, `${t("item")} ${index + 1}`, `${path}.items[${index + 1}]`, t, comment, options)); });
+    items.forEach((item, index) => { if (item && typeof item === "object") children.append(isReference(item) ? renderMemoryReference(item, options, t) : renderSchema(item, depth + 1, `${t("item")} ${index + 1}`, `${path}.items[${index + 1}]`, t, comment, options, openThroughDepth)); });
     body.append(children);
   }
   return section;
@@ -1686,10 +2264,20 @@ function renderFlowNode(node: JsonRecord, path: string, t: (key: string) => stri
   const control = node.condition && typeof node.condition === "object" ? node.condition as JsonRecord : node;
   const action = String(control.action ?? node.action ?? node.condition ?? "");
   const head = el("div", "memory-flow-head");
-  head.append(el("span", "memory-flow-label", t(tag === "!if" ? "if" : tag === "!while" ? "while" : "step")), commentable(el("span", "memory-flow-action", action), `${path}.action`, action, comment), renderArtifactMeta(control, t));
+  head.append(el("span", "memory-flow-label", t(tag === "!if" ? "if" : tag === "!while" ? "while" : "step")), commentable(el("span", "memory-flow-action", action), `${path}.action`, action, comment), renderArtifactMeta(control, path, t, comment));
   item.append(head);
   for (const key of ["asserts", "suggests"] as const) appendRuleList(item, key, array(control[key]), control.effectiveRules as JsonRecord | undefined, path, t, comment, options, "action-contracts");
-  if (control.schema && typeof control.schema === "object") item.append(renderSchema(control.schema as JsonRecord, 1, t("inlineSchema"), `${path}.schema`, t, comment, options));
+  const artifact = artifactContract(control);
+  if (artifact.schema && typeof artifact.schema === "object") {
+    if (isReference(artifact.schema)) {
+      item.append(renderMemoryReference(artifact.schema, options, t));
+    } else {
+      const schema = renderSchema(artifact.schema as JsonRecord, 1, t("inlineSchema"), `${path}.artifact.schema`, t, comment, options, 2);
+      schema.classList.remove("open");
+      schema.classList.add("memory-artifact-schema");
+      item.append(schema);
+    }
+  }
   for (const key of ["then", "do", "else"] as const) {
     const children = array(node[key]);
     if (!children.length) continue;
@@ -1702,20 +2290,31 @@ function renderFlowNode(node: JsonRecord, path: string, t: (key: string) => stri
   return item;
 }
 
-function renderArtifactMeta(step: JsonRecord, t: (key: string) => string): HTMLElement {
+function renderArtifactMeta(step: JsonRecord, path: string, t: (key: string) => string, comment?: CommentCallback): HTMLElement {
   const row = el("div", "memory-artifact-row");
-  const artifact = step.artifact && typeof step.artifact === "object"
-    ? step.artifact as JsonRecord
-    : { name: step.artifact, type: step.type, format: step.format, schema: step.schema, final: step.final, review: step.reviewPolicy };
+  row.dataset.diffGroup = `${path}.artifact`;
+  const artifact = artifactContract(step);
   const name = String(artifact.name ?? "");
   row.append(el("span", "memory-artifact-label", t("artifact")));
-  if (name) row.append(el("span", "memory-pill strong", name));
-  if (artifact.type) row.append(el("span", "memory-pill", String(artifact.type)));
-  if (artifact.format) row.append(el("span", "memory-pill", formatLabel(artifact.format)));
-  if (artifact.final) row.append(el("span", "memory-pill done", t("final")));
+  if (name) row.append(anchored(el("span", "memory-pill strong", name), `${path}.artifact.name`));
+  if (artifact.type) row.append(anchored(el("span", "memory-pill", String(artifact.type)), `${path}.artifact.type`));
+  if (artifact.format) row.append(anchored(el("span", "memory-pill", formatLabel(artifact.format)), `${path}.artifact.format`));
+  if (artifact.final) row.append(anchored(el("span", "memory-pill done", t("final")), `${path}.artifact.final`));
   const reviewers = Array.isArray(artifact.review) ? artifact.review : typeof artifact.review === "string" ? [artifact.review] : [];
-  reviewers.forEach(value => row.append(el("span", "memory-pill", String(value))));
+  reviewers.forEach((value, index) => row.append(anchored(el("span", "memory-pill", String(value)), `${path}.artifact.review[${index + 1}]`)));
+  if (comment) {
+    const target = `${path}.artifact`;
+    row.classList.add("memory-commentable");
+    row.dataset.anchor = target;
+    row.append(plusButton(() => comment(target, scalar(artifact), { anchor: target })));
+  }
   return row;
+}
+
+function artifactContract(step: JsonRecord): JsonRecord {
+  return step.artifact && typeof step.artifact === "object"
+    ? step.artifact as JsonRecord
+    : { name: step.artifact, type: step.type, format: step.format, schema: step.schema, final: step.final, review: step.reviewPolicy };
 }
 
 function renderGeneric(node: JsonRecord, path: string, t: (key: string) => string, comment?: CommentCallback, options: RenderOptions = {}): HTMLElement {
@@ -1745,8 +2344,11 @@ function nodeSection(title: string, path: string, snapshot: unknown, comment?: C
 function sectionBody(section: HTMLElement): HTMLElement { return section.querySelector<HTMLElement>(":scope > .memory-section-body")!; }
 function blockTitle(value: string): HTMLElement { return el("div", "memory-block-title", value); }
 function commentable(node: HTMLElement, target: string, snapshot: unknown, comment?: CommentCallback): HTMLElement {
-  if (!comment) return node; node.classList.add("memory-commentable"); node.dataset.anchor = target; node.append(plusButton(() => comment(target, scalar(snapshot), { anchor: target }))); return node;
+  node.dataset.anchor = target;
+  if (!comment) return node;
+  node.classList.add("memory-commentable"); node.append(plusButton(() => comment(target, scalar(snapshot), { anchor: target }))); return node;
 }
+function anchored(node: HTMLElement, target: string): HTMLElement { node.dataset.anchor = target; return node; }
 function plusButton(run: () => void): HTMLButtonElement { const plus = button("+", "memory-inline-plus", run); plus.title = "添加评论"; plus.setAttribute("aria-label", "添加评论"); return plus; }
 function renderPrimitiveFields(node: JsonRecord, excluded: string[], t: (key: string) => string, path: string, comment?: CommentCallback): HTMLElement {
   const dl = document.createElement("dl"); dl.className = "memory-kv";
@@ -1882,8 +2484,19 @@ function appendStringList(parent: HTMLElement, key: string, values: unknown[], p
   const block = el("section", "memory-list-block");
   block.append(blockTitle(translatedKey(key, t)));
   const list = document.createElement("ul"); list.className = "text-list";
-  values.forEach((value, index) => { const li = document.createElement("li"); li.textContent = scalar(value); list.append(commentable(li, `${path}.${key}[${index + 1}]`, value, comment)); });
+  values.forEach((value, index) => {
+    const li = document.createElement("li");
+    const body = el("span", "commentable-body", scalar(value));
+    li.append(commentable(body, `${path}.${key}[${index + 1}]`, value, comment));
+    list.append(li);
+  });
   block.append(list); parent.append(block);
+}
+
+function changeRevision(label: string, revision: string): HTMLElement {
+  const item = el("span", "memory-change-revision");
+  item.append(el("span", "", label), el("code", "", revision.slice(0, 7) || "—"));
+  return item;
 }
 
 function renderMeta(memory: MemorySummary): HTMLElement { const meta = el("div", "memory-meta"); for (const value of [memory.kind, memory.path, memory.system ? "system" : "user"]) if (value) meta.append(el("span", "memory-pill", String(value))); return meta; }
