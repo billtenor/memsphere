@@ -23,6 +23,7 @@ This document is the single detailed source for the Memsphere View Slot Catalog.
 | `navigation.primary` | ViewHost | Memsphere Core and enabled built-in or user Modules | Ordered list | Unified primary navigation. Home, Memory, Run, and user Module Views appear at the same level and are not grouped by code origin. |
 | `navigation.secondary` | ViewHost | Active built-in or user Module | Single | Secondary navigation, groups, and counts for the active Module. Host renders selection consistently; it may be empty when the Module has no secondary structure. |
 | `content.list` | ViewHost | Active built-in or user Module | Single mount | Optional object list, filters, and list-level actions. When contributed, it scrolls independently from the detail Page and remains mounted across Routes in the same Module; without a contribution, the Host collapses the column. |
+| `side.panel` | ViewHost | Active built-in or user Module | Single mount | A contextual side panel hidden by default. The Module supplies its label, icon, and content; ViewHost owns the Header trigger, close behavior, focus return, desktop squeeze layout, and narrow-screen overlay layout. |
 | `search.providers` | ViewHost Search | Enabled built-in and user Modules | Ordered list | Data providers for global search. Host owns the entrypoint, overlay, categories, keyboard behavior, cancellation, failure isolation, and result navigation. |
 | `sidebar.footer` | ViewHost | Memsphere Core and enabled Modules | Ordered list | Low-frequency actions and persistent status. Entries use standard `action` or `status` types. Settings and Core service status are provided by Core and cannot be removed or replaced. |
 | `home.attention` | Home View | Built-in and user Modules | Aggregated list | Items waiting for Human intervention, such as reviews, confirmations, and failure handling. Completed items should disappear. |
@@ -31,11 +32,11 @@ This document is the single detailed source for the Memsphere View Slot Catalog.
 | `main.view` | ViewHost | Built-in and user Modules | Select by route key | Main page body. Multiple Views may be registered, but only the one selected by the current route is mounted. A Module may declare child Slots inside its own View. |
 | `overlay` | ViewHost | Memsphere Core and built-in or user Modules | Select by overlay key | Drawers, dialogs, review panels, and other temporary interactions. Multiple overlays may be registered, but the controller activates only one at a time. ViewHost owns masking, focus, closing, and failure isolation. |
 
-The Catalog defines 13 long-term Slots. Add future Slots directly to this list.
+The Catalog defines 14 long-term Slots. Add future Slots directly to this list.
 
 ## Current Implementation Status
 
-The SDK and ViewHost now wire all 13 root Slots in this Catalog. Core provides Home, account, and other Shell-owned content through an in-Host Plugin. All three built-in Modules use the same public Slot Tree for primary navigation, secondary navigation, object lists, Header, Page, search Providers, and Home aggregate contributions. Shell provides resizable and persisted secondary-navigation and content-list columns. Ordinary Run pages do not poll. Run registers Artifact Review in `overlay`; ViewHost owns the background Route, mask, focus, dismissal, cleanup, and local failure boundary.
+The SDK and ViewHost now wire all 14 root Slots in this Catalog. Core provides Home, account, and other Shell-owned content through an in-Host Plugin. All four built-in Modules use the same public Slot Tree for primary navigation, secondary navigation, object lists, contextual side panels, Header, Page, search Providers, and Home aggregate contributions. Shell provides resizable and persisted secondary-navigation and content-list columns. Ordinary Run pages do not poll. Run registers Artifact Review in `overlay`; ViewHost owns the background Route, mask, focus, dismissal, cleanup, and local failure boundary.
 
 Custom child Slots, user Module discovery/installation, and dynamic Project composition remain unwired. Implementation progress belongs only in this section and must not delete or narrow the long-term Catalog above.
 
@@ -79,7 +80,7 @@ The following Slots accept only standard descriptors rendered by ViewHost or Hom
 
 A standard descriptor must include at least a stable identity, display text, target or action, source Module instance, and availability state. Individual Slots may add fields through the View SDK, such as urgency and status for attention items, icon and route for navigation, or the `action/status` footer type.
 
-`content.list` is a single mount Slot; `main.view` and `overlay` are keyed mount Slots. A Module may compile its browser Bundle independently and mount its UI through the framework-neutral View SDK. It cannot require joint compilation with Memsphere.
+`content.list` is a single mount Slot; `main.view` and `overlay` are keyed mount Slots. Regular object lists should use `ctx.ui.contentList(descriptorOrProvider)` to obtain the framework-standard Mount for filtering, loading, empty, row, selection, Badge, focus, and long-text behavior. A domain may still register a custom Mount when that standard cannot express its structure. Both paths use the same Slot and have no hidden priority. A Module may compile its browser Bundle independently and mount its UI through the framework-neutral View SDK. It cannot require joint compilation with Memsphere.
 
 ## Composition and Permissions
 

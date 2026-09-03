@@ -50,6 +50,20 @@ export const builtinModuleCatalog: readonly BuiltinModuleCatalogEntry[] = deepFr
     ]
   },
   {
+    moduleId: "org.memsphere.reference",
+    instanceId: "reference",
+    packageDirectory: "org.memsphere.reference",
+    title: "原型",
+    summary: "验证 View Framework 标准壳与自由业务正文",
+    icon: "sparkle",
+    homeRouteId: "index",
+    routes: [
+      { id: "index", path: "/reference", query: ["item"] },
+      { id: "dialog", path: "/reference/dialog" },
+      { id: "drawer", path: "/reference/drawer" }
+    ]
+  },
+  {
     moduleId: "org.memsphere.settings",
     instanceId: "settings",
     packageDirectory: "org.memsphere.settings",

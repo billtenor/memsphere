@@ -127,7 +127,7 @@ The base Shell, Project switching, and failure diagnostics belong to ViewHost an
 
 ### Current View Implementation
 
-The repository currently implements three builtin Modules along these boundaries:
+The repository currently implements four builtin Modules along these boundaries:
 
 ```text
 modules/

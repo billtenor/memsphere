@@ -146,7 +146,7 @@ Memsphere View 是一个 Home 级通用管理界面，用于管理 Project、Mem
 
 ### 当前 View 实现
 
-当前仓库已经按上述边界落地三个 builtin Module：
+当前仓库已经按上述边界落地四个 builtin Module：
 
 ```text
 modules/
@@ -161,7 +161,7 @@ modules/
     └── adapter/view/
 ```
 
-构建分别生成 `dist/modules/<module-id>/dist/view/index.js`，不存在聚合三块业务界面的 Legacy Bundle。Core 中的 builtin catalog 只声明可信包根、实例和保留路由授权；三个 Module 统一经过 Manifest 校验、SDK 兼容检查、Bundle import、实例 Context、`apply()` 事务和 Slot/Route commit。
+构建分别生成 `dist/modules/<module-id>/dist/view/index.js`，不存在聚合业务界面的 Legacy Bundle。Core 中的 builtin catalog 只声明可信包根、实例和保留路由授权；四个 Module 统一经过 Manifest 校验、SDK 兼容检查、Bundle import、实例 Context、`apply()` 事务和 Slot/Route commit。
 
 ViewHost 当前接通 Router、根 Slot Catalog、稳定 Shell、Home 与公共浮层能力。单实例失败只产生局部诊断，Project 切换允许整页重组。准确的 Slot 清单、产品语义与当前接线状态统一见 [Memsphere View Slot List](./view-slots.md)。用户 Module 仓库发现、安装、动态 Project Composition、自定义子 Slot、CLI Module Host 和后端领域目录迁移尚未实现。
 

@@ -42,7 +42,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.equal((await projectDetails.locator('[data-project-detail="store"]').textContent())?.trim(), "managed");
     assert.match((await projectDetails.locator('[data-project-detail="root"]').textContent()) ?? "", /demo/);
     await projectDetails.getByRole("button", { name: "关闭", exact: true }).click();
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.equal((await settingsButton.textContent())?.trim(), "设置");
     assert.match(await settingsButton.locator("img").getAttribute("src") ?? "", /gear-six\.svg$/);
     await settingsButton.click();
@@ -219,7 +219,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
       detail: document.querySelector<HTMLElement>("#detail")!.scrollWidth
         - document.querySelector<HTMLElement>("#detail")!.clientWidth
     }));
-    assert.ok(overflow.body > 0);
+    assert.ok(overflow.body <= 0);
     assert.equal(overflow.detail, 0);
   } finally {
     await browser.close();

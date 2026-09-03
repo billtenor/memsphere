@@ -6,7 +6,9 @@ import {
   createHostRouteTarget,
   defineSlot,
   defineViewPlugin,
+  isActionDescriptor,
   isHeaderActionDescriptor,
+  isContentListDescriptor,
   isHeaderAccountDescriptor,
   isHeaderTitleDescriptor,
   isHomeAttentionItemDescriptor,
@@ -20,12 +22,23 @@ import {
   isSearchProviderDescriptor,
   isSearchResultDescriptor,
   isSecondaryNavigationDescriptor,
+  isSidePanelDescriptor,
   isSidebarFooterDescriptor,
   isSlotToken,
   slots,
+  viewThemeCssVariables,
   type ViewMount,
   type ViewRenderContext
 } from "../src/view/view-sdk.js";
+import { normalizeSystemIconName } from "../src/view/system-icon.js";
+import { viewThemeLightTokens } from "../src/view/theme.js";
+
+const theme = Object.freeze({
+  version: 1 as const,
+  mode: "light" as const,
+  tokens: viewThemeLightTokens,
+  subscribe: () => () => undefined
+});
 
 test("defineViewPlugin preserves the Plugin object used as the Bundle default export", () => {
   const plugin = {
@@ -70,12 +83,54 @@ test("ViewRenderContext exposes the Host-resolved readonly Route location", () =
       params: { id: "example" },
       query: { section: "recent" },
       routeKey: "org.test.module@1.0.0:one:route:detail"
-    }
+    },
+    theme
   };
   assert.equal(context.route.params.id, "example");
+  assert.equal(context.theme, theme);
 });
 
-test("built-in Tokens expose the thirteen approved root Slot contracts", () => {
+test("Theme v1 publishes a complete stable CSS-variable mapping", () => {
+  assert.equal(Object.keys(viewThemeCssVariables).length, 46);
+  assert.deepEqual(Object.keys(viewThemeCssVariables), Object.keys(viewThemeLightTokens));
+  assert.equal(viewThemeCssVariables["color.textMuted"], "--mem-view-color-text-muted");
+  assert.equal(viewThemeLightTokens["layout.contentMax"], "960px");
+  assert.equal(Object.isFrozen(viewThemeCssVariables), true);
+  assert.equal(Object.isFrozen(viewThemeLightTokens), true);
+});
+
+test("standard content list descriptors reject duplicate ids and ambiguous actions", () => {
+  const route = createHostRouteTarget();
+  const descriptor = {
+    label: { text: "Items" },
+    header: { eyebrow: { text: "Memory" }, title: { text: "Current project" }, action: { label: { text: "Refresh" }, run() {} } },
+    empty: { title: { text: "Empty" } },
+    sections: [{ id: "main", items: [{ id: "one", title: { text: "One" }, route }] }]
+  };
+  assert.equal(isContentListDescriptor(descriptor), true);
+  assert.equal(isContentListDescriptor({ ...descriptor, header: { ...descriptor.header, html: "unsafe" } }), false);
+  assert.equal(isContentListDescriptor({ ...descriptor, sections: [descriptor.sections[0], descriptor.sections[0]] }), false);
+  assert.equal(isContentListDescriptor({
+    ...descriptor,
+    sections: [{ id: "main", items: [{ id: "one", title: { text: "One" }, route, action: { label: { text: "Open" }, run() {} } }] }]
+  }), false);
+  const action = { label: { text: "Open" }, run() {} };
+  assert.equal(isActionDescriptor(action), true);
+  assert.equal(isActionDescriptor({ ...action, tone: "success" }), false);
+  assert.equal(isContentListDescriptor({
+    ...descriptor,
+    sections: [{ id: "main", items: [{ id: "one", title: { text: "One" }, action }] }]
+  }), true);
+});
+
+test("system icon aliases share one canonical mapping", () => {
+  assert.equal(normalizeSystemIconName("settings"), "gear-six");
+  assert.equal(normalizeSystemIconName("run"), "play-circle");
+  assert.equal(normalizeSystemIconName("memory"), "brain");
+  assert.equal(normalizeSystemIconName("unknown"), "stack");
+});
+
+test("built-in Tokens expose the fourteen approved root Slot contracts", () => {
   assert.deepEqual(
     Object.values(slots).map(slot => ({
       name: slot.definition.name,
@@ -90,6 +145,7 @@ test("built-in Tokens expose the thirteen approved root Slot contracts", () => {
       { name: "search.providers", kind: "list", scope: "project", render: "descriptor" },
       { name: "header.title", kind: "single", scope: "page", render: "descriptor" },
       { name: "header.actions", kind: "list", scope: "page", render: "descriptor" },
+      { name: "side.panel", kind: "single", scope: "page", render: "mount" },
       { name: "header.account", kind: "single", scope: "shell", render: "descriptor" },
       { name: "sidebar.footer", kind: "list", scope: "project", render: "descriptor" },
       { name: "home.attention", kind: "list", scope: "project", render: "descriptor" },
@@ -158,12 +214,16 @@ test("Descriptor validators accept standard data and reject HTML or forged Route
     background: projection,
     mount: { mount() {} }
   };
+  const sidePanel = { label: { text: "Inspector" }, icon: navigation.icon, mount: { mount() {} } };
   assert.equal(isHeaderAccountDescriptor(account), true);
   assert.equal(isSidebarFooterDescriptor(footer), true);
   assert.equal(isHomeAttentionItemDescriptor(attention), true);
   assert.equal(isHomeContinueItemDescriptor(continuation), true);
   assert.equal(isHomeModuleItemDescriptor(module), true);
   assert.equal(isOverlayMountDescriptor(overlay), true);
+  assert.equal(isSidePanelDescriptor(sidePanel), true);
+  assert.equal(slots.sidePanel.definition.validate(sidePanel), true);
+  assert.equal(isSidePanelDescriptor({ ...sidePanel, defaultOpen: "yes" }), false);
   assert.equal(isRouteProjection(projection), true);
   assert.equal(isOverlayMountDescriptor({ ...overlay, background: {} }), false);
   assert.equal(isHomeAttentionItemDescriptor({ ...attention, html: "<b>unsafe</b>" }), false);

@@ -12,7 +12,7 @@
 
 当前 ViewHost 已实现 Plugin 默认入口、`apiVersion: 1`、`apply()`、Module 实例身份、`lifecycle`、最小 Manifest 校验、SDK SemVer 检查、独立 Bundle 动态加载、Router、Slot Token/Registry、实例级注册事务，以及 Mount 的回滚和清理。浏览器通过 import map 将 `@memsphere/view-sdk` 解析到 Host 提供的 SDK。
 
-当前可注入服务为 `slots` 和 `router`；根 Slot 的完整清单、产品语义和当前接线状态统一见 [View Slot List](./view-slots.md)。部分聚合 Slot 支持下文定义的受限 live `upsert()`，页面浮层支持 Host 管理的背景 Route 投影与局部故障边界。三个 builtin Module 均使用同一公开入口和独立 Bundle 运行。View API、I18n、Theme、Logger、自定义子 Slot、用户 Module 发现/安装和 Project 动态组合仍未接线；Plugin 请求尚未提供的服务会在 `apply()` 前明确失败。
+当前可注入服务为 `slots`、`router`、`theme` 和 `ui`；根 Slot 的完整清单、产品语义和当前接线状态统一见 [View Slot List](./view-slots.md)。部分聚合 Slot 支持下文定义的受限 live `upsert()`，页面浮层支持 Host 管理的背景 Route 投影与局部故障边界。四个 builtin Module 均使用同一公开入口和独立 Bundle 运行。View API、I18n、Logger、自定义子 Slot、用户 Module 发现/安装和 Project 动态组合仍未接线；Plugin 请求尚未提供的服务会在 `apply()` 前明确失败。
 
 ## Module View 入口契约
 
@@ -341,6 +341,8 @@ moduleId + moduleVersion + instanceId + slot(name@version) + id [+ key]
 
 Descriptor Slot 接收可检查的标准数据，由 Slot 所有者统一渲染。除 SDK 明确定义的 Action 字段外，Descriptor 不得包含回调，也不得包含框架 Component、DOM 节点或 HTML 字符串。
 
+`IconRef.kind: "system"` 的稳定图标名为：`archive`、`arrow-right`、`arrows-clockwise`、`brain`、`caret-down`、`check-circle`、`circle-fill`、`clock-counter-clockwise`、`code`、`cube`、`file-text`、`folder`、`gear-six`、`house`、`magnifying-glass`、`play-circle`、`plus`、`seal-check`、`sliders-horizontal`、`sparkle`、`stack`、`storefront`、`user`、`warning-circle`、`x`。兼容别名 `memory`、`search`、`settings`、`gear`、`play`、`run` 会映射到相应稳定名称；未知名称防御性回退为 `stack`。
+
 ```ts
 export type TextRef =
   | { readonly text: string }
@@ -606,17 +608,37 @@ export interface ViewMessageNamespace {
 
 Module 必须同时提供 `zh-CN` 和 `en` 的固定可见文案。`namespace` 必须以 Module id 开头；Host 拒绝覆盖 Core 或其他 Module namespace。
 
+## ViewUi v1
+
+Plugin 同时声明 `inject: ["ui"]` 与 `uiVersion: 1` 后，`context.ui` 可用；只声明其中一项或 Host 不支持该版本会在 `apply()` 前失败。UI 服务是 Host-owned、领域无关的 Primitive 工厂，不注册 Slot，也不读取业务数据。
+
+```ts
+export interface ViewUi {
+  readonly version: 1;
+  contentList(source: ContentListDescriptor | ContentListProvider): ViewMount;
+  button(action: ActionDescriptor, options?: { tone?: "default" | "primary" }): HTMLButtonElement;
+  iconButton(action: ActionDescriptor): HTMLButtonElement;
+  badge(label: TextRef): HTMLElement;
+  emptyState(empty: ContentListEmptyDescriptor): HTMLElement;
+}
+```
+
+`contentList()` 覆盖 section、item、title、meta、icon、badge、selected、route/action、filter、loading 和 empty。它返回普通 `ViewMount`，由 Module 注册到现有 `slots.contentList`，因此沿用原 Slot 的 single 冲突、Route scope、挂载和 dispose 语义。需要画布、编辑器或其他异构列表时仍可提交自定义 Mount。Descriptor/provider 非法时当前 Mount 明确失败，不回退或渲染部分数据。
+
 ## ViewTheme
 
 ```ts
 export interface ViewTheme {
+  readonly version: 1;
   readonly mode: "light" | "dark";
-  readonly tokens: Readonly<Record<string, string>>;
+  readonly tokens: Readonly<Record<ViewThemeToken, string>>;
   subscribe(listener: () => void): Disposer;
 }
 ```
 
-Theme Token 是稳定视觉接口；Host 私有 CSS class 不是接口。`subscribe()` 返回的 disposer 自动归属当前 Plugin 实例，也可以被 Plugin 提前调用。
+声明 `inject: ["theme"]` 的 Plugin 必须同时声明 `themeVersion: 1`；只声明其中一项会在 `apply()` 前失败。Theme v1 当前提供 light mode，Token 覆盖语义颜色、字体与字号阶梯、行高、间距、圆角、阴影、动效、层级和内容几何。`viewThemeCssVariables` 给出每项到 `--mem-view-*` 的稳定映射，精确键集合以 SDK 类型为唯一来源。
+
+Theme Token 是稳定视觉接口；Host 私有 CSS class 和 `--view-*` 变量不是接口。ViewHost 把同一个只读 Theme 放入 Plugin Context 与所有 Mount Context，并把 CSS 变量安装到 element/portal root。Module 样式只能消费公开变量，不能声明 `--mem-view-*` Token。`subscribe()` 返回的 disposer 自动归属当前 Plugin 实例，也可以被 Plugin 提前调用。
 
 ## ViewLogger
 
