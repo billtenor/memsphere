@@ -27,6 +27,8 @@ import {
 } from "../control-plane/index.js";
 import {
   buildSchemaOverviewPromptModel,
+  buildArtifactReviewNextActionPromptModel,
+  buildRunReviewHumanSubmitReceiptPromptModel,
   renderRunOutput,
   renderPrompt,
   resolvePromptLocale,
@@ -56,8 +58,10 @@ import {
   skipRun,
   startRun,
   submitArtifactReviewRunnerVote,
+  submitArtifactReviewHumanAssignmentForRunner,
   updateRunSlotBinding,
   waitForArtifactReview,
+  type ArtifactReviewDraftInput,
   type RunState
 } from "../run/store.js";
 import { assertReportExecutionCapability } from "../report-execution.js";
@@ -88,6 +92,19 @@ type ReviewVoteOptions = {
 };
 
 type ReviewRetryOptions = OutputOptions & { review?: string; assignment?: string };
+
+type ReviewSubmitForHumanOptions = OutputOptions & {
+  run?: string;
+  review?: string;
+  round?: string;
+  assignment?: string;
+  vote?: string;
+  commentsFile?: string;
+  summary?: string;
+  summaryFile?: string;
+  authorizationNote?: string;
+  authorizationNoteFile?: string;
+};
 
 type ReviewResolveOptions = OutputOptions & {
   review?: string;
@@ -364,6 +381,157 @@ export async function runReviewRetryCommand(options: ReviewRetryOptions): Promis
     status: context.assignment.status,
     attempt: context.attempt
   }, options.output);
+}
+
+export async function runReviewSubmitForHumanCommand(options: ReviewSubmitForHumanOptions): Promise<void> {
+  const runId = requireRunId(options.run);
+  const reviewId = options.review?.trim();
+  const roundId = options.round?.trim();
+  const assignmentId = options.assignment?.trim();
+  if (!reviewId) throw new Error("--review <id> is required");
+  if (!roundId) throw new Error("--round <id> is required");
+  if (!assignmentId) throw new Error("--assignment <actor-or-assignment-id> is required");
+  if (!options.vote || !["approve", "request_changes", "abstain"].includes(options.vote)) {
+    throw new Error("--vote must be approve, request_changes, or abstain");
+  }
+  if (!options.commentsFile) throw new Error("--comments-file <path> is required");
+  if (options.summary !== undefined && options.summaryFile !== undefined) {
+    throw new Error("use only one of --summary or --summary-file");
+  }
+  if ((options.authorizationNote === undefined) === (options.authorizationNoteFile === undefined)) {
+    throw new Error("provide exactly one of --authorization-note or --authorization-note-file");
+  }
+  const comments = parseRunnerDelegatedComments(JSON.parse(await readFile(options.commentsFile, "utf8")));
+  const summary = options.summaryFile ? await readFile(options.summaryFile, "utf8") : options.summary;
+  const authorizationNote = options.authorizationNoteFile
+    ? await readFile(options.authorizationNoteFile, "utf8")
+    : options.authorizationNote!;
+  const config = await readConfig();
+  const context = await submitArtifactReviewHumanAssignmentForRunner({
+    runsRoot: config.runsRoot,
+    runId,
+    reviewId,
+    roundId,
+    assignmentId,
+    vote: options.vote as "approve" | "request_changes" | "abstain",
+    comments,
+    summary,
+    authorizationNote
+  });
+  printRunnerDelegatedReviewReceipt({
+    runId: context.run.id,
+    reviewId: context.review.id,
+    roundId: context.round.id,
+    assignmentId: context.assignment.id,
+    actorId: context.assignment.actorId,
+    vote: context.assignment.submitted?.vote,
+    commentCount: context.assignment.submitted?.comments.length ?? 0,
+    summaryPresent: Boolean(context.assignment.submitted?.summary),
+    delegatedBy: context.assignment.submitted?.delegation?.kind,
+    authorizationNote: context.assignment.submitted?.delegation?.authorizationNote,
+    reviewStatus: context.review.status,
+    roundStatus: context.round.status
+  }, options.output, context.run, context.review, context.round);
+}
+
+type RunnerDelegatedReviewReceipt = {
+  runId: string;
+  reviewId: string;
+  roundId: string;
+  assignmentId?: string;
+  actorId: string;
+  vote?: string;
+  commentCount: number;
+  summaryPresent: boolean;
+  delegatedBy?: string;
+  authorizationNote?: string;
+  reviewStatus: string;
+  roundStatus: string;
+};
+
+function printRunnerDelegatedReviewReceipt(
+  receipt: RunnerDelegatedReviewReceipt,
+  output: "json" | "text" | undefined,
+  run: RunState,
+  review: ArtifactReview<RunState["events"][number]["artifact"]>,
+  round: ArtifactReviewRound
+): void {
+  const nextAction = buildArtifactReviewNextActionPromptModel(review, round, run.id);
+  if ((output ?? "text") === "json") {
+    console.log(JSON.stringify({ ...receipt, nextAction }));
+    return;
+  }
+  const locale = resolvePromptLocale(run.language);
+  const rendered = [
+    renderPrompt("run.review-human-submit-receipt", locale, buildRunReviewHumanSubmitReceiptPromptModel({
+      runId: receipt.runId,
+      reviewId: receipt.reviewId,
+      roundId: receipt.roundId,
+      assignmentId: receipt.assignmentId ?? "-",
+      actorId: receipt.actorId,
+      vote: receipt.vote ?? "-",
+      commentCount: receipt.commentCount,
+      summaryPresent: receipt.summaryPresent,
+      delegatedBy: receipt.delegatedBy ?? "-",
+      authorizationNote: receipt.authorizationNote ?? "-",
+      reviewStatus: receipt.reviewStatus,
+      roundStatus: receipt.roundStatus
+    }, locale)),
+    renderPrompt("run.review-next-action", locale, nextAction)
+  ].filter((value) => value.trim()).join("\n\n");
+  console.log(rendered);
+}
+
+export function parseRunnerDelegatedComments(value: unknown): ArtifactReviewDraftInput["comments"] {
+  if (!Array.isArray(value)) throw new Error("--comments-file must contain a JSON array");
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`comments[${index}] must be an object`);
+    }
+    const record = item as Record<string, unknown>;
+    assertOnlyKeys(record, ["body", "severity", "anchor"], `comments[${index}]`);
+    if (typeof record.body !== "string" || !record.body.trim()) {
+      throw new Error(`comments[${index}].body must be a non-empty string`);
+    }
+    if (record.severity !== undefined && !["blocking", "risk", "suggestion"].includes(String(record.severity))) {
+      throw new Error(`comments[${index}].severity is invalid`);
+    }
+    let anchor: ArtifactReviewDraftInput["comments"][number]["anchor"];
+    if (record.anchor !== undefined) {
+      if (!record.anchor || typeof record.anchor !== "object" || Array.isArray(record.anchor)) {
+        throw new Error(`comments[${index}].anchor must be an object`);
+      }
+      const raw = record.anchor as Record<string, unknown>;
+      assertOnlyKeys(raw, ["submissionId", "target", "location", "sourceHash", "context"], `comments[${index}].anchor`);
+      for (const key of ["submissionId", "target", "sourceHash"] as const) {
+        if (typeof raw[key] !== "string" || !raw[key].trim()) {
+          throw new Error(`comments[${index}].anchor.${key} must be a non-empty string`);
+        }
+      }
+      for (const key of ["location", "context"] as const) {
+        if (raw[key] !== undefined && typeof raw[key] !== "string") {
+          throw new Error(`comments[${index}].anchor.${key} must be a string`);
+        }
+      }
+      anchor = {
+        submissionId: raw.submissionId as string,
+        target: raw.target as string,
+        location: raw.location as string | undefined,
+        sourceHash: raw.sourceHash as string,
+        context: raw.context as string | undefined
+      };
+    }
+    return {
+      body: record.body,
+      severity: record.severity as ArtifactReviewDraftInput["comments"][number]["severity"],
+      anchor
+    };
+  });
+}
+
+function assertOnlyKeys(record: Record<string, unknown>, allowed: readonly string[], path: string): void {
+  const unknown = Object.keys(record).find((key) => !allowed.includes(key));
+  if (unknown) throw new Error(`${path}.${unknown} is not allowed`);
 }
 
 export async function runReviewResolveCommand(options: ReviewResolveOptions): Promise<void> {

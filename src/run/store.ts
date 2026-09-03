@@ -703,7 +703,14 @@ const artifactReviewAssignmentSchema = z.object({
     vote: z.enum(artifactReviewVoteValues),
     summary: z.string().optional(),
     submittedAt: z.string(),
-    authorization: authorizationDecisionSchema
+    authorization: authorizationDecisionSchema,
+    delegation: z.object({
+      kind: z.literal("runner"),
+      runId: z.string().min(1),
+      humanActorId: z.string().min(1),
+      authorizationNote: z.string().min(1),
+      authorization: authorizationDecisionSchema
+    }).strict().optional()
   }).strict().optional(),
   attempts: z.array(artifactReviewAgentAttemptSchema).default([])
 }).strict();
@@ -1173,12 +1180,34 @@ export async function readRun(runsRoot: string, id: string): Promise<RunState> {
 
 export function parseRunState(parsed: unknown): RunState {
   if (parsed && typeof parsed === "object" && (parsed as { contractVersion?: unknown }).contractVersion === 3) {
-    return runStateV3Schema.parse(parsed);
+    return assertArtifactReviewDelegationProvenance(runStateV3Schema.parse(parsed));
   }
   if (parsed && typeof parsed === "object" && (parsed as { contractVersion?: unknown }).contractVersion === 2) {
-    return runStateSchema.parse(parsed);
+    return assertArtifactReviewDelegationProvenance(runStateSchema.parse(parsed));
   }
-  return normalizeLegacyRun(parsed);
+  return assertArtifactReviewDelegationProvenance(normalizeLegacyRun(parsed));
+}
+
+function assertArtifactReviewDelegationProvenance(run: RunState): RunState {
+  for (const review of run.artifactReviews ?? []) {
+    for (const round of review.rounds) {
+      for (const assignment of round.assignments) {
+        const delegation = assignment.submitted?.delegation;
+        if (!delegation) continue;
+        if (delegation.runId !== run.id) {
+          throw new Error(
+            `invalid Runner delegation provenance: Run ${delegation.runId} does not match enclosing Run ${run.id}`
+          );
+        }
+        if (delegation.humanActorId !== assignment.actorId) {
+          throw new Error(
+            `invalid Runner delegation provenance: Human Actor ${delegation.humanActorId} does not match Assignment ${assignment.actorId}`
+          );
+        }
+      }
+    }
+  }
+  return run;
 }
 
 export async function listRuns(runsRoot: string): Promise<RunState[]> {
@@ -1912,14 +1941,22 @@ export async function submitArtifactReviewAssignment(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
-    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     const round = requireArtifactReviewRound(review, input.roundId);
     const assignment = requireArtifactReviewAssignment(round, input.actorId);
-    if (assignment.status === "submitted") return { run, review, round, assignment };
     if ((assignment.actorKind ?? "human") === "agent") {
       throw new Error(`Agent Artifact Review assignment cannot use the Human submit API: ${assignment.actorId}`);
     }
+    if (assignment.status === "submitted") {
+      if (assignment.submitted?.delegation) {
+        throw new ArtifactReviewSubmissionConflictError(
+          assignment.actorId,
+          "assignment was already submitted by a delegated Runner"
+        );
+      }
+      return { run, review, round, assignment };
+    }
+    assertRunRunning(run);
     if (review.status !== "pending" || round.status !== "pending") {
       throw new Error(`Artifact Review Round is read-only: ${round.id}`);
     }
@@ -1948,6 +1985,122 @@ export async function submitArtifactReviewAssignment(input: {
       authorization
     };
     round.votes.push(submittedAssignmentVote(assignment, authorization));
+    round.revision += 1;
+    review.updatedAt = now;
+    const createdArtifactFiles: string[] = [];
+    try {
+      await settleArtifactReviewRound(input.runsRoot, run, review, round, createdArtifactFiles, now);
+      run.updatedAt = now;
+      await writeRun(input.runsRoot, run);
+      return { run, review, round, assignment };
+    } catch (error) {
+      await removeArtifactFiles(createdArtifactFiles);
+      throw error;
+    }
+  });
+}
+
+export async function submitArtifactReviewHumanAssignmentForRunner(input: {
+  runsRoot: string;
+  runId: string;
+  reviewId: string;
+  roundId: string;
+  assignmentId: string;
+  vote: ArtifactReviewVoteValue;
+  comments: ArtifactReviewDraftInput["comments"];
+  summary?: string;
+  authorizationNote: string;
+}): Promise<ArtifactReviewContext> {
+  return withRunWriteLock(input.runsRoot, input.runId, async () => {
+    const run = await readRun(input.runsRoot, input.runId);
+    const review = requireArtifactReview(run, input.reviewId);
+    if (review.currentRoundId !== input.roundId) {
+      throw new Error(`Artifact Review Round is not current: ${input.roundId}`);
+    }
+    const round = requireArtifactReviewRound(review, input.roundId);
+    const assignment = requireArtifactReviewAssignment(round, input.assignmentId);
+    if ((assignment.actorKind ?? "human") !== "human") {
+      throw new Error(`Runner delegated submit requires a Human Artifact Review assignment: ${assignment.actorId}`);
+    }
+    const summary = input.summary?.trim() || undefined;
+    const authorizationNote = input.authorizationNote.trim();
+    if (!authorizationNote) throw new Error("Runner delegated submit authorization note must not be empty");
+    const submission = reviewSubmission(review, round.submissionId);
+    const now = new Date().toISOString();
+    if (assignment.binding === "advisory" && input.comments.some((comment) => !comment.severity)) {
+      throw new Error("Advisory Artifact Review Comment severity is required");
+    }
+    const comments = normalizeArtifactReviewComments(
+      input.comments,
+      submission,
+      now,
+      assignment.submitted?.comments ?? []
+    );
+    if ((input.vote === "request_changes" || input.vote === "abstain") && comments.length === 0) {
+      throw new Error(`${input.vote} requires at least one Comment`);
+    }
+
+    if (assignment.status === "submitted") {
+      const delegated = assignment.submitted?.delegation;
+      if (
+        assignment.submitted
+        && delegated?.kind === "runner"
+        && delegated.runId === run.id
+        && delegated.humanActorId === assignment.actorId
+        && assignment.submitted.vote === input.vote
+        && assignment.submitted.summary === summary
+        && delegated.authorizationNote === authorizationNote
+        && artifactReviewCommentsSemanticallyEqual(assignment.submitted.comments, comments)
+      ) {
+        return { run, review, round, assignment };
+      }
+      throw new ArtifactReviewSubmissionConflictError(
+        assignment.actorId,
+        "assignment is already submitted with a different origin or payload"
+      );
+    }
+
+    assertRunRunning(run);
+    if (review.status !== "pending" || round.status !== "pending") {
+      throw new Error(`Artifact Review Round is read-only: ${round.id}`);
+    }
+    if (assignment.draft.vote || assignment.draft.comments.length > 0) {
+      throw new ArtifactReviewSubmissionConflictError(
+        assignment.actorId,
+        "Human draft contains review content"
+      );
+    }
+    const permission = assignment.binding === "decision" ? "decision.decide" : "decision.assess";
+    const humanAuthorization = authorizeArtifactReviewActor({
+      controlPlane: artifactReviewRoundControlPlane(review, round),
+      assignment,
+      permission
+    });
+    if (!humanAuthorization.allowed) throw new ArtifactAuthorizationFailure(humanAuthorization, []);
+    const runnerAuthorization = authorizeArtifactOperation({
+      controlPlane: artifactReviewRoundControlPlane(review, round),
+      subject: { kind: "runner" },
+      permission: "decision.decide"
+    });
+    if (!runnerAuthorization.allowed) throw new ArtifactAuthorizationFailure(runnerAuthorization, []);
+
+    assignment.draft = { comments, vote: input.vote, updatedAt: now };
+    assignment.status = "submitted";
+    assignment.submitted = {
+      comments: structuredClone(comments),
+      vote: input.vote,
+      summary,
+      submittedAt: now,
+      authorization: humanAuthorization,
+      delegation: {
+        kind: "runner",
+        runId: run.id,
+        humanActorId: assignment.actorId,
+        authorizationNote,
+        authorization: runnerAuthorization
+      }
+    };
+    round.votes.push(submittedAssignmentVote(assignment, humanAuthorization));
     round.revision += 1;
     review.updatedAt = now;
     const createdArtifactFiles: string[] = [];
@@ -2353,6 +2506,15 @@ export class ArtifactReviewConflictError extends Error {
   }
 }
 
+export class ArtifactReviewSubmissionConflictError extends Error {
+  readonly code = "artifact_review_submission_conflict";
+
+  constructor(readonly assignmentId: string, detail: string) {
+    super(`Artifact Review submission conflict for ${assignmentId}: ${detail}`);
+    this.name = "ArtifactReviewSubmissionConflictError";
+  }
+}
+
 async function settleArtifactReviewRound(
   runsRoot: string,
   run: RunState,
@@ -2475,6 +2637,24 @@ function normalizeArtifactReviewComments(
       updatedAt: now
     };
   });
+}
+
+function artifactReviewCommentsSemanticallyEqual(
+  left: readonly ArtifactReviewComment[],
+  right: readonly ArtifactReviewComment[]
+): boolean {
+  const semantic = (comment: ArtifactReviewComment) => ({
+    body: comment.body,
+    severity: comment.severity,
+    anchor: comment.anchor ? {
+      submissionId: comment.anchor.submissionId,
+      target: comment.anchor.target,
+      location: comment.anchor.location,
+      sourceHash: comment.anchor.sourceHash,
+      context: comment.anchor.context
+    } : undefined
+  });
+  return JSON.stringify(left.map(semantic)) === JSON.stringify(right.map(semantic));
 }
 
 function requireArtifactReview(run: RunState, reviewId: string): ArtifactReview<RunEvent["artifact"]> {

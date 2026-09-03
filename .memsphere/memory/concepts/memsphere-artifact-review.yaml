@@ -9,6 +9,9 @@ defines:
   - Procedure 在 Artifact 的 review 中声明 Review Slot；Slot 表达需要的评审视角，不绑定具体 Actor。
   - Run 创建时为每个 Review scope 选择 Decision Policy，并把 Review Slot 初始绑定到 Actor 或明确跳过；Decision Policy、Actor、权限与 Agent 配置随 Run 冻结，Runner 可以通过显式、受校验且带审计的运行期操作修改后续 Round 或未来 Review 的 Binding。
   - 每个实际 Reviewer 在当前 Review Round 中拥有 Assignment，可以查看 Submission、提交 Comment 和 Vote；Reviewer 不能直接修改 Artifact 或推进 Run。
+  - Human 可以明确授权当前 Run 的 Runner 原子代提交本人当前 Assignment 的完整 Comment、Vote 和可选 Summary；Submitted Opinion 仍以 Human 为决策主体，同时记录 Runner、目标 Run、Human Actor 和授权说明 provenance。在 CLI 已建立当前 Review、Round 与 Runner 代提交语境且 payload 完整无歧义时，“我投通过”“我投要求修改”“我投弃权”等确定的执行性投票表达同时构成决定与本次授权，无需重复确认；普通讨论、建议、非确定倾向、沉默或仅要求继续流程不得推断为授权。
+  - 代提交必须同时通过 Human Assignment 所需权限与 Runner decision.decide 权限，只允许当前 Round、Human Assignment 和无业务内容的 Human Draft；它不替代全员完成条件或后续 Runner 最终 Vote。
+  - Run 的 Review 下一步输出使用冻结语言，并根据当前轮未完成 Assignment 的 Actor 类型给出可推进动作：存在 Human 时要求 Runner 向 Human 询问通过、要求修改或弃权并按票型收集 Comment；确定且完整的执行性投票直接构成授权，只有含糊或不完整时才复述 payload 并追加确认；Human 与 Agent 均未完成时并行收集 Human 投票；只有 Agent 未完成时才只提示等待。
   - 全部 Reviewer 完成后，Runner 阅读意见并作出推进决定；要求修改时由 Runner 修订同一 Artifact，再形成新的 Submission 和 Review Round。
   - 每个 Round 在创建时冻结自己的 Binding、权限和 Assignment；运行期换绑不改变当前或历史 Round，只让同一 Review 的下一 Round 使用创建前最后一次成功保存的 Binding。
   - Artifact Review Comment 只评价当前 Submission，与用于修改长期 Memory 的 ChangeSet Comment 是两种不同对象。

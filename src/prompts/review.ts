@@ -8,6 +8,7 @@ import type { RunState } from "../run/store.js";
 import type { PromptLocale } from "./locale.js";
 import type {
   ArtifactReviewSummaryPromptModel,
+  RunReviewHumanSubmitReceiptPromptModel,
   RunReviewVoteReceiptPromptModel,
   ReviewNextActionPromptModel
 } from "./models.js";
@@ -19,6 +20,22 @@ export function buildRunReviewVoteReceiptPromptModel(
   return {
     vote: localize(locale, vote),
     requiresRevision: vote === "request_changes"
+  };
+}
+
+export function buildRunReviewHumanSubmitReceiptPromptModel(
+  receipt: Omit<RunReviewHumanSubmitReceiptPromptModel, "vote" | "reviewStatus" | "roundStatus"> & {
+    vote: string;
+    reviewStatus: string;
+    roundStatus: string;
+  },
+  locale: PromptLocale
+): RunReviewHumanSubmitReceiptPromptModel {
+  return {
+    ...receipt,
+    vote: localize(locale, receipt.vote),
+    reviewStatus: localize(locale, receipt.reviewStatus),
+    roundStatus: localize(locale, receipt.roundStatus)
   };
 }
 
@@ -111,6 +128,28 @@ export function buildArtifactReviewNextActionPromptModel(
   if (review.status === "awaiting_revision") return { kind: "revision", runId };
   const failed = round.assignments.find((assignment) => assignment.status === "failed");
   if (failed) return { kind: "none" };
+  const humanAssignments = round.assignments.filter(
+    (assignment) => (assignment.actorKind ?? "human") === "human"
+      && assignment.status !== "submitted"
+      && assignment.status !== "cancelled"
+  );
+  if (humanAssignments.length > 0) {
+    return {
+      kind: "human_vote",
+      runId,
+      reviewId: review.id,
+      roundId: round.id,
+      agentReviewsPending: round.assignments.some(
+        (assignment) => assignment.actorKind === "agent" && assignment.status !== "submitted"
+          && assignment.status !== "cancelled"
+      ),
+      assignments: humanAssignments.map((assignment) => ({
+        assignmentId: assignment.id ?? assignment.actorId,
+        actorId: assignment.actorId,
+        actorName: assignment.actorName
+      }))
+    };
+  }
   return { kind: "wait", reviewId: review.id };
 }
 

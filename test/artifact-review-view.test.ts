@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -15,6 +15,7 @@ import {
   reportRun,
   resolveArtifactReviewComment,
   startRun,
+  submitArtifactReviewHumanAssignmentForRunner,
   submitArtifactReviewRunnerVote
 } from "../src/run/store.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
@@ -431,6 +432,112 @@ flow:
     });
     assert.equal(invalid.status, 400);
     assert.match(await invalid.text(), /unknown frozen Actor/);
+  } finally {
+    server.close();
+    await once(server, "close");
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("View exposes safe delegated provenance and reads legacy direct opinions", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-delegated-view-"));
+  const memoryRoot = join(dir, "memory");
+  const runsRoot = join(dir, "runs");
+  const reviewsRoot = join(dir, "reviews");
+  await mkdir(join(memoryRoot, "procedures"), { recursive: true });
+  await mkdir(reviewsRoot, { recursive: true });
+  await writeFile(join(memoryRoot, "procedures", "delegated-view.yaml"), withCurrentMemorySyntax(`!procedure
+name: delegated-view
+flow:
+  - !action
+    action: Produce a reviewed Artifact.
+    artifact: !artifact
+      name: reviewed result
+      format: markdown
+      review: [reviewer]
+`));
+  const controlPlane = parseControlPlaneConfig({
+    runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+    actors: { human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] } }
+  });
+  const started = await startRun({
+    name: "Delegated View",
+    memoryRoot,
+    runsRoot,
+    procedureName: "delegated-view",
+    controlPlane,
+    reviewConfiguration: reviewConfiguration({ procedure: "delegated-view", slots: { reviewer: ["human"] } })
+  });
+  const pending = await reportRun({
+    runsRoot,
+    runId: started.id,
+    artifact: { kind: "inline", value: "# Candidate\n" }
+  });
+  const review = currentArtifactReview(pending)!;
+  const delegated = await submitArtifactReviewHumanAssignmentForRunner({
+    runsRoot,
+    runId: started.id,
+    reviewId: review.id,
+    roundId: review.currentRoundId,
+    assignmentId: "human",
+    vote: "approve",
+    comments: [],
+    authorizationNote: "Human explicitly authorized this submission."
+  });
+  const config: MemsphereConfig = {
+    configPath: join(dir, "config.json"), scopeRoot: dir, memoryRoot, reviewsRoot, runsRoot,
+    archiveRoot: join(dir, "archives"), view: { host: "127.0.0.1", port: 0 }, controlPlane
+  };
+  const server = createViewServer(config);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const address = server.address();
+    assert(address && typeof address === "object");
+    const roundPath = `http://127.0.0.1:${address.port}/api/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
+    const response = await fetch(`${roundPath}?actor_id=human`);
+    const source = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(source, /"kind":\s*"runner"/);
+    assert.match(source, /Human explicitly authorized this submission/);
+    assert.doesNotMatch(source, /"authorization"/);
+
+    const conflict = await mutate(`${roundPath}/assignments/human/submit`, "POST", {
+      expectedRevision: delegated.round.revision
+    });
+    assert.equal(conflict.status, 409);
+    assert.equal((await conflict.json() as { code: string }).code, "artifact_review_submission_conflict");
+
+    await submitArtifactReviewRunnerVote({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      vote: "approve"
+    });
+    const doneRetry = await submitArtifactReviewHumanAssignmentForRunner({
+      runsRoot,
+      runId: started.id,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      assignmentId: "human",
+      vote: "approve",
+      comments: [],
+      authorizationNote: "Human explicitly authorized this submission."
+    });
+    assert.equal(doneRetry.run.status, "done");
+    assert.equal(doneRetry.round.revision, delegated.round.revision + 1);
+
+    const persistedPath = join(runsRoot, started.id, `${started.id}.json`);
+    const legacy = JSON.parse(await readFile(persistedPath, "utf8")) as {
+      artifactReviews: Array<{ rounds: Array<{ assignments: Array<{ submitted?: Record<string, unknown> }> }> }>;
+    };
+    delete legacy.artifactReviews[0]!.rounds[0]!.assignments[0]!.submitted!.delegation;
+    await writeFile(persistedPath, `${JSON.stringify(legacy, null, 2)}\n`);
+    const legacyResponse = await fetch(`${roundPath}?actor_id=human`);
+    const legacySource = await legacyResponse.text();
+    assert.equal(legacyResponse.status, 200);
+    assert.doesNotMatch(legacySource, /delegation|authorization/);
+    assert.match(legacySource, /"vote":\s*"approve"/);
   } finally {
     server.close();
     await once(server, "close");

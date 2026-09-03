@@ -350,6 +350,7 @@ sections:
           - Artifact 校验通过后按 Run 中冻结的配置创建 Artifact Review；Review 通过前不得把候选 Artifact 加入 Run events 或推进当前 Action。
           - Review 要求修改时，Runner 修改并重新提交同一个 Artifact，系统创建新的 Review Round；通常不需要在 Procedure 中另写 !while 表达该 Artifact 的评审返工。
           - 当前内置 artifact_acceptance.unanimous 要求全部 Human 与 Agent Reviewer Assignment 提交；只有具有 decision.decide 的 Vote 参与一致通过判定，只有 decision.assess 的 Vote 作为建议保存；Reviewer 完成后仍需 Runner 显式投票。
+          - Human 明确要求把指定意见和 Vote 正式提交到本人当前 Assignment 时，当前 Run Runner 可以受托原子提交；CLI 已建立当前 Review、Round 与代提交语境且 Vote、必需 Comment 和目标完整无歧义时，Human 的确定性“我投……”表达同时构成决定与本次授权，不得要求同义二次确认。必须同时校验 Human Assignment 权限与 Runner decision.decide，限定当前 Review Round、Human Assignment、当前 Submission 和无业务内容 Draft，并记录 Human 业务归属、Runner provenance 与非空授权说明。普通讨论、建议、非确定倾向、沉默或仅要求继续不得推断为授权，受托提交也不替代 Runner 最终 Vote。
           - View 按 Review 与 Round 展示每轮不可变 Artifact Submission、正式 Comment、Vote、Result 和 Revision Summary；历史 Round 只读，完成后的 Review 仍可从对应 Run 步骤重新打开。
           - Artifact Review 定位 Comment 只能绑定创建时的 Submission、digest 和 Renderer target，不得锚定 Memory 或 Workspace 文件，也不得自动迁移到下一轮。
 

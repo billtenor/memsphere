@@ -28,6 +28,9 @@ test("skill init installs only the unified memsphere skill", async () => {
     assert.match(source, /memsphere run start "<Procedure 名称>" --name "<本次 Run 名称>"/);
     assert.match(source, /memsphere run start --file "<Procedure YAML 路径>" --name "<本次 Run 名称>"/);
     assert.match(source, /memsphere run repeat/);
+    assert.match(source, /“我投通过”.*同时构成本次正式投票决定与 Runner 代提交授权/);
+    assert.match(source, /不得再询问一次同义确认/);
+    assert.match(source, /目标不明确、必需 Comment 缺失.*才完整复述/s);
     assert.doesNotMatch(source, /--output yaml/);
     assert.doesNotMatch(source, /\.memsphere\/memory\/concepts/);
   } finally {

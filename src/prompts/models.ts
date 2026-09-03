@@ -12,6 +12,7 @@ export type PromptInputMap = {
   "run.abandoned": RunAbandonedPromptModel;
   "run.report-receipt": RunReportReceiptPromptModel;
   "run.review-vote-receipt": RunReviewVoteReceiptPromptModel;
+  "run.review-human-submit-receipt": RunReviewHumanSubmitReceiptPromptModel;
   "run.review-summary": ArtifactReviewSummaryPromptModel;
   "run.schema-overview": SchemaOverviewPromptModel;
   "run.review-next-action": ReviewNextActionPromptModel;
@@ -68,6 +69,21 @@ export type PermissionDescriptionPromptModel = {
 export type RunReviewVoteReceiptPromptModel = {
   vote: string;
   requiresRevision: boolean;
+};
+
+export type RunReviewHumanSubmitReceiptPromptModel = {
+  runId: string;
+  reviewId: string;
+  roundId: string;
+  assignmentId: string;
+  actorId: string;
+  vote: string;
+  commentCount: number;
+  summaryPresent: boolean;
+  delegatedBy: string;
+  authorizationNote: string;
+  reviewStatus: string;
+  roundStatus: string;
 };
 
 export type ArtifactReviewSummaryPromptModel = {
@@ -282,6 +298,18 @@ export type SchemaOverviewPromptModel = {
 
 export type ReviewNextActionPromptModel =
   | { kind: "wait"; reviewId: string }
+  | {
+      kind: "human_vote";
+      runId: string;
+      reviewId: string;
+      roundId: string;
+      agentReviewsPending: boolean;
+      assignments: Array<{
+        assignmentId: string;
+        actorId: string;
+        actorName: string;
+      }>;
+    }
   | { kind: "runner_vote"; reviewId: string; roundId: string }
   | { kind: "revision"; runId: string }
   | { kind: "none" };
