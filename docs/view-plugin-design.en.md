@@ -40,9 +40,13 @@ ViewHost owns loading, contexts, composition, failure isolation, and cleanup. A 
 
 ## Current Implementation
 
-The current implementation discovers `org.memsphere.memory`, `org.memsphere.run`, and `org.memsphere.settings` from a fixed builtin catalog. It validates each `module.json` minimum View slice, package-contained entry path, and SDK SemVer range before dynamically importing three independent ESM Bundles. Instances share Route and Slot registries while retaining separate Contexts, transactions, diagnostics, and cleanup scopes.
+The current implementation discovers `org.memsphere.memory`, `org.memsphere.run`, `org.memsphere.reference`, and `org.memsphere.settings` from a fixed builtin catalog. It validates each `module.json` minimum View slice, package-contained entry path, and SDK SemVer range before dynamically importing four independent ESM Bundles. Instances share Route and Slot registries while retaining separate Contexts, transactions, diagnostics, and cleanup scopes.
 
-The wired Context services are `slots` and `router`. Core and built-in Modules compose through the same Slot Tree, while the Stable Shell, Project selector, and diagnostics remain ViewHost responsibilities. The authoritative root Slot list, ownership, composition semantics, and current wiring status are maintained in the [Memsphere View Slot List](./view-slots.en.md). View API, I18n, Theme, Logger, custom child Slots, user Module discovery/installation, and dynamic Project composition remain future capabilities.
+The wired Context services are `slots`, `router`, `theme`, and `ui`. Core and built-in Modules compose through the same Slot Tree, while the Stable Shell, Project selector, Theme v1, UI Primitives, and diagnostics remain ViewHost responsibilities. The authoritative root Slot list, ownership, composition semantics, and current wiring status are maintained in the [Memsphere View Slot List](./view-slots.en.md). View API, I18n, Logger, custom child Slots, user Module discovery/installation, and dynamic Project composition remain future capabilities.
+
+The responsibility boundary has five layers: Shell owns regions, dimensions, scrolling, and responsive behavior; Theme owns shared visual Tokens; UI Primitives own reusable DOM, states, and interaction; Slots own validated composition; Features/Modules own domain data, behavior, and free-form content inside `main.view`. Standard lists are UI-generated Mounts in the existing `content.list` Slot, not a second Slot.
+
+Theme follows the same single real composition path as Routes and Slots. One instance-scoped Theme enters `apply()` and the Mount Contexts for `main.view`, `content.list`, and `overlay`; ViewHost installs its public `--mem-view-*` variables on both element and portal roots. Plugins may consume public Tokens but must not declare them, read private Host `--view-*` variables, or depend on private Host classes. Theme roots and subscriptions are cleaned up with Mount disposal or instance rollback.
 
 ## Packaging and Dynamic Loading
 

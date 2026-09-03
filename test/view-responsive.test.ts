@@ -306,10 +306,6 @@ async function assertPageDoesNotOverflow(page: Page): Promise<void> {
       .filter((element) => element.right > window.innerWidth)
       .slice(0, 5)
   }));
-  if (layout.viewportWidth <= 820) {
-    assert.equal(layout.scrollWidth >= 812, true, JSON.stringify(layout));
-    return;
-  }
   assert.equal(layout.scrollWidth <= layout.viewportWidth, true, JSON.stringify(layout));
 }
 

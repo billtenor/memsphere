@@ -6,9 +6,20 @@ This guide builds a minimal View Plugin and explains what happens at runtime. Fo
 
 ## Current Implementation Status
 
-ViewHost currently wires the Plugin entrypoint, lifecycle, Manifest and SDK validation, independent Bundle loading, Router, and the root Slot Catalog. A currently runnable Plugin may declare `inject: ["slots", "router"]`; the available contribution points, special composition capabilities, and authoritative wiring status are maintained in the [View Slot List](./view-slots.en.md).
+ViewHost currently wires the Plugin entrypoint, lifecycle, Manifest and SDK validation, independent Bundle loading, Router, Theme v1, UI v1, and the root Slot Catalog. A typical page may declare `inject: ["slots", "router", "theme", "ui"]` together with `themeVersion: 1` and `uiVersion: 1`; the available contribution points and authoritative wiring status are maintained in the [View Slot List](./view-slots.en.md).
 
 This guide retains the complete View API and I18n example because those services are part of the established long-term development contract. They are not wired yet, so the complete example is not directly runnable against the current release. The API reference's “Current Implementation Status” is authoritative; future design and usage are not removed merely because implementation is pending.
+
+## Rapid Prototypes in the Real Shell
+
+Start prototypes as an independent Module; do not redesign Memory, Run, or Settings merely to demonstrate framework capability. ViewHost owns primary and secondary navigation, Header, the list column, Theme, and lifecycle. A Module contributes descriptors for the shared shell and keeps freedom inside `main.view`. Run the repository Reference Module with:
+
+```bash
+npm run build
+node dist/cli.js view restart
+```
+
+After building and restarting, choose **Prototype** from the primary navigation in the formal View, or open `/reference`. Reference is an independent Module loaded by the same View service as Memory, Run, and Settings. Check zh-CN/en, desktop and narrow layouts, list filtering/empty/selected states, Header actions, custom body interaction, console output, and cleanup.
 
 ## Understand the Runtime Flow
 
@@ -171,6 +182,12 @@ ctx.slots.register(slots.mainView, {
 The example's `slots.navigationPrimary`, `slots.headerTitle`, and `slots.mainView` are Slot Tokens. A Token tells TypeScript and ViewHost where content belongs, which type is allowed, how it composes, and how to validate it at runtime; consult the [View Slot List](./view-slots.en.md) for other available Tokens.
 
 The first two Slots accept Descriptors: the Plugin supplies text, icons, and behavior descriptions and Memsphere renders them consistently. `mainView` accepts a Mount: ViewHost supplies a container and the Plugin renders the complete page.
+
+For a conventional object list, call `ctx.ui.contentList(descriptorOrProvider)` to obtain the standard Mount and register it in `slots.contentList`. Use a custom Mount only when the standard list cannot express the domain interaction. The standard list already covers sections, icons, title/meta, badges, selection, route/action, filtering, loading, empty state, and safe long-text truncation.
+
+Keep the five boundaries explicit: Shell owns public regions and geometry; Theme owns shared visual tokens; UI Primitives own reusable interaction behavior; Slots own validated composition; the Module owns domain data, actions, and its free-form `main.view`. Module CSS must stay under a Feature root and consume `--mem-view-*`; do not read `--view-*`, target `.view-shell-*` or `[data-view-slot]`, redefine public tokens, or override the Host with `!important`.
+
+The build-time style contract is a heuristic guardrail for common mistakes, not a security sandbox. It checks statically recognizable style templates and known private dependencies; it cannot prove arbitrary dynamic strings safe. Module authors must still honor the boundary above: keep ordinary Feature CSS in a statically inspectable template constant and scope it below the Feature root. Historical helper files in production builtins have not all migrated to this gate yet; new or modified Module styles should be enrolled explicitly.
 
 `mainView` is a `keyed` Slot. It retains multiple page candidates, and the active route key selects which page is mounted.
 

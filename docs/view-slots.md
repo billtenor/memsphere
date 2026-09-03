@@ -23,6 +23,7 @@
 | `navigation.primary` | View Host | Memsphere Core、已启用的内置及用户 Module | 有序列表 | 产品的统一主导航。Home、Memory、Run 与用户 Module View 在同一层级展示，不按代码来源分组。 |
 | `navigation.secondary` | View Host | 当前激活的内置或用户 Module | 单一内容 | 当前 Module 的二级导航、分组与计数。Host 统一渲染选中态；没有二级结构时可以为空。 |
 | `content.list` | View Host | 当前激活的内置或用户 Module | 单一挂载内容 | 可选的对象列表、筛选与列表级操作。贡献存在时，它与详情 Page 独立滚动并在同一 Module 路由间保持挂载；没有贡献时，Host 自动收起这一列。 |
+| `side.panel` | View Host | 当前激活的内置或用户 Module | 单一挂载内容 | 默认隐藏的上下文侧栏。Module 提供标题、图标和内容；Host 自动提供 Header 开关、关闭、焦点返回、桌面挤压布局与窄屏覆盖布局。 |
 | `search.providers` | View Host Search | 已启用的内置及用户 Module | 有序列表 | 全局搜索的数据提供者。Host 统一提供搜索入口、浮层、分类、键盘交互、取消、故障隔离和结果导航。 |
 | `sidebar.footer` | View Host | Memsphere Core、已启用的 Module | 有序列表 | 低频操作和持续状态。条目分为 `action` 与 `status` 两种标准类型；设置和核心服务状态由 Core 提供且不能被删除或替换。 |
 | `home.attention` | Home View | 内置及用户 Module | 聚合列表 | 正在等待 Human 介入的事项，例如评审、确认、失败处理。事项完成后应从该区域消失。 |
@@ -31,11 +32,11 @@
 | `main.view` | View Host | 内置及用户 Module | 按路由 key 选择 | 页面主体。可以注册多个 View，但一次只挂载当前路由选中的一个；Module 可以在自己的 View 内继续声明子 Slot。 |
 | `overlay` | View Host | Memsphere Core、内置及用户 Module | 按浮层 key 选择 | 抽屉、对话框和评审浮窗等临时交互。可以注册多个浮层，但控制器同一时刻只激活一个；View Host 负责遮罩、焦点、关闭行为和故障隔离。 |
 
-当前 Catalog 定义 13 个长期 Slot。新增 Slot 时直接更新本列表。
+当前 Catalog 定义 14 个长期 Slot。新增 Slot 时直接更新本列表。
 
 ## 当前实现状态
 
-当前 SDK 与 ViewHost 已接线本 Catalog 的全部 13 个根 Slot。Core 通过 Host 内置 Plugin 提供 Home、账户等 Shell 内容；三个 builtin Module 通过同一公开 Slot Tree 贡献主导航、二级导航、对象列表、Header、Page、搜索 Provider 与 Home 聚合项。Shell 使用可拖动且持久化的二级导航栏和内容列表栏；Run 普通页面不轮询，Artifact Review 由 Run Module 注册到 `overlay`，Host 负责背景 Route、遮罩、焦点、关闭、清理与局部故障边界。
+当前 SDK 与 ViewHost 已接线本 Catalog 的全部 14 个根 Slot。Core 通过 Host 内置 Plugin 提供 Home、账户等 Shell 内容；四个 builtin Module 通过同一公开 Slot Tree 贡献主导航、二级导航、对象列表、按需右侧栏、Header、Page、搜索 Provider 与 Home 聚合项。Shell 使用可拖动且持久化的二级导航栏和内容列表栏；Run 普通页面不轮询，Artifact Review 由 Run Module 注册到 `overlay`，Host 负责背景 Route、遮罩、焦点、关闭、清理与局部故障边界。
 
 自定义子 Slot、用户 Module 发现/安装及 Project 动态组合仍未接线。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
 
@@ -79,7 +80,7 @@ View Host
 
 标准描述至少应包含稳定标识、展示文本、目标或回调、来源 Module 实例和可用状态。不同 Slot 可以在 View SDK 中补充各自字段，例如待处理事项的紧急程度和状态、导航项的图标和路由、Footer 条目的 `action/status` 类型。
 
-`content.list` 是单一挂载 Slot，`main.view` 与 `overlay` 是按 key 选择的挂载 Slot。Module 可以独立编译自己的浏览器 Bundle，并通过框架无关的 View SDK 挂载界面；它不能要求与 Memsphere 联合编译。
+`content.list` 是单一挂载 Slot，`main.view` 与 `overlay` 是按 key 选择的挂载 Slot。常规对象列表应由 `ctx.ui.contentList(descriptorOrProvider)` 生成标准 Mount，从而统一筛选、loading、empty、列表行、选中、Badge、焦点与长文本行为；确有领域特殊结构时仍可直接注册自定义 Mount。两种方式使用同一个 Slot，不存在第二套列表 Slot 或隐式优先级。Module 可以独立编译自己的浏览器 Bundle，并通过框架无关的 View SDK 挂载界面；它不能要求与 Memsphere 联合编译。
 
 ## 组合与权限
 

@@ -245,9 +245,17 @@ export async function viewServeCommand(options: ViewServeOptions): Promise<void>
   process.once("SIGINT", () => void close());
 }
 
+export type ViewDevelopmentModule = Readonly<{
+  assetPath: `/assets/dev-modules/${string}.js`;
+  source: string;
+  instance: ViewHostBootInstance;
+  pagePaths: readonly string[];
+}>;
+
 type ViewServerOptions = {
   runningRevision?: string;
   settingsToken?: string;
+  developmentModules?: readonly ViewDevelopmentModule[];
 };
 
 class ViewMemoryCache {
@@ -285,6 +293,17 @@ class ViewMemoryCache {
 }
 
 export function createViewServer(config: MemsphereConfig, options: ViewServerOptions = {}) {
+  for (const module of options.developmentModules ?? []) {
+    if (!/^\/assets\/dev-modules\/[a-z0-9._-]+\.js$/.test(module.assetPath)) {
+      throw new Error(`Invalid development Module asset path: ${module.assetPath}`);
+    }
+    if (module.instance.pluginPath !== module.assetPath) {
+      throw new Error(`Development Module instance asset mismatch: ${module.instance.module.moduleId}`);
+    }
+    if (module.pagePaths.some(path => !path.startsWith("/") || path.includes(".."))) {
+      throw new Error(`Invalid development Module page path: ${module.instance.module.moduleId}`);
+    }
+  }
   const viewCache = new ViewMemoryCache();
   void systemMemoryReferences().catch(() => {
     systemMemoryReferencesPromise = undefined;
@@ -343,6 +362,12 @@ async function handleRequest(
     return;
   }
 
+  const developmentAsset = options.developmentModules?.find(module => module.assetPath === url.pathname);
+  if (request.method === "GET" && developmentAsset) {
+    sendJavaScript(request, response, developmentAsset.source);
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/projects") {
     const projects = await listRegisteredProjects(config.homeRoot ?? resolveMemsphereHome());
     sendJson(response, 200, {
@@ -372,8 +397,14 @@ async function handleRequest(
     return;
   }
 
-  if (request.method === "GET" && isViewPagePath(url.pathname)) {
-    sendHtml(response, renderViewHostHtml(config.language, await builtinViewInstances(config), url.pathname));
+  const developmentPage = options.developmentModules?.some(module => module.pagePaths.includes(url.pathname)) === true;
+  if (request.method === "GET" && (isViewPagePath(url.pathname) || developmentPage)) {
+    const instances = await builtinViewInstances(config);
+    sendHtml(response, renderViewHostHtml(
+      config.language,
+      [...instances, ...(options.developmentModules?.map(module => module.instance) ?? [])],
+      url.pathname,
+    ));
     return;
   }
 
@@ -2567,6 +2598,18 @@ const compiledViewRuntimeUrl = new URL("../view/view-runtime.js", import.meta.ur
 const sourceViewSdkUrl = new URL("../view/view-sdk.ts", import.meta.url);
 const sourceViewRuntimeUrl = new URL("../view/view-runtime.ts", import.meta.url);
 const viewRuntimeDependencies = new Map([
+  ["/assets/system-icon.js", {
+    compiled: new URL("../view/system-icon.js", import.meta.url),
+    source: new URL("../view/system-icon.ts", import.meta.url)
+  }],
+  ["/assets/theme.js", {
+    compiled: new URL("../view/theme.js", import.meta.url),
+    source: new URL("../view/theme.ts", import.meta.url)
+  }],
+  ["/assets/ui-primitives.js", {
+    compiled: new URL("../view/ui-primitives.js", import.meta.url),
+    source: new URL("../view/ui-primitives.ts", import.meta.url)
+  }],
   ["/assets/core-plugin.js", {
     compiled: new URL("../view/core-plugin.js", import.meta.url),
     source: new URL("../view/core-plugin.ts", import.meta.url)

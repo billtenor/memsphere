@@ -32,6 +32,7 @@ import {
   type SearchProviderDescriptor,
   type SearchResultDescriptor,
   type SecondaryNavigationDescriptor,
+  type SidePanelDescriptor,
   type SidebarFooterDescriptor,
   type TextRef,
   type ViewLifecycle,
@@ -41,9 +42,12 @@ import {
   type ViewRouter,
   type ViewServiceName
 } from "./view-sdk.js";
+import { applyViewThemeRoots, RuntimeThemeStore } from "./theme.js";
 import { createCorePlugin } from "./core-plugin.js";
 import { coreViewRoutes } from "./core-routes.js";
 import { createHomeMount, type HomeSnapshotReader } from "./shell/home.js";
+import { createPrimitiveButton, createViewUi } from "./ui-primitives.js";
+import { fillSystemIconNames, normalizeSystemIconName } from "./system-icon.js";
 
 type AnySlotToken = SlotToken<string, SlotKind, unknown, string>;
 
@@ -158,7 +162,7 @@ export interface ActiveViewPlugin {
   dispose(): Promise<void>;
 }
 
-const supportedServices = new Set<ViewServiceName>(["slots", "router"]);
+const supportedServices = new Set<ViewServiceName>(["slots", "router", "theme", "ui"]);
 
 /**
  * Compose all enabled Module instances into one shared Route/Slot runtime.
@@ -174,6 +178,12 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
   };
   const routeRegistry = new RuntimeRouteStore(initialLocation);
   const slotsRegistry = new RuntimeSlotStore(routeRegistry);
+  const themeStore = new RuntimeThemeStore();
+  const hostThemeLifecycle = new RuntimeLifecycle();
+  const hostThemeCleanup = applyViewThemeRoots(
+    themeStore.scoped(hostThemeLifecycle),
+    options.root.closest<HTMLElement>("[data-view-shell]") ?? options.root,
+  );
   const instances: RuntimePluginInstance[] = [];
   const diagnostics: ViewInstanceDiagnostic[] = [];
   let activeListMount: RuntimeActiveMount | undefined;
@@ -261,6 +271,8 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
   for (const instanceOptions of allInstances) {
     const module = Object.freeze({ ...instanceOptions.module });
     const lifecycle = new RuntimeLifecycle();
+    const theme = themeStore.scoped(lifecycle);
+    const ui = createViewUi(target => routeRegistry.navigate(target));
     const owner = moduleIdentity(module);
     const slotTransaction = slotsRegistry.transaction(module, lifecycle);
     const routeTransaction = routeRegistry.transaction(
@@ -273,11 +285,15 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     try {
       const plugin = validatePlugin(instanceOptions.plugin);
       validateServices(plugin);
+      validateThemeVersion(plugin);
+      validateUiVersion(plugin);
       const context = Object.freeze({
         module,
         lifecycle,
         ...(plugin.inject.includes("slots") ? { slots: slotTransaction } : {}),
-        ...(plugin.inject.includes("router") ? { router: routeTransaction } : {})
+        ...(plugin.inject.includes("router") ? { router: routeTransaction } : {}),
+        ...(plugin.inject.includes("theme") ? { theme } : {}),
+        ...(plugin.inject.includes("ui") ? { ui } : {})
       }) as unknown as ViewPluginContext;
       const applyDisposer = await plugin.apply(context, instanceOptions.config);
       if (applyDisposer !== undefined) {
@@ -297,7 +313,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
         routeTransaction.rollbackCommit(preparedRoutes);
         throw error;
       }
-      instances.push({ owner, module, lifecycle });
+      instances.push({ owner, module, lifecycle, theme });
       diagnostics.push(Object.freeze({ module, status: "active" }));
     } catch (error) {
       const cleanupErrors = await lifecycle.disposeCollectingErrors();
@@ -330,7 +346,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
             failureRoutes.rollbackCommit(preparedRoutes);
             throw commitError;
           }
-          instances.push({ owner, module, lifecycle: failureLifecycle });
+          instances.push({ owner, module, lifecycle: failureLifecycle, theme: themeStore.scoped(failureLifecycle) });
         } catch (fallbackError) {
           cleanupErrors.push(fallbackError, ...await failureLifecycle.disposeCollectingErrors());
         }
@@ -344,7 +360,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     const mount = entry.value as ViewMount;
     const current = activeMainMount;
     if (current && current.entry.value === entry.value && mount.update) {
-      await mount.update({ module: moduleForOwner(instances, entry.owner), route: location });
+      await mount.update({ module: moduleForOwner(instances, entry.owner), route: location, theme: themeForOwner(instances, entry.owner) });
       current.entry = entry;
       current.locationIdentity = locationIdentity;
       current.element.dataset.viewMount = entry.identity;
@@ -361,17 +377,19 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     portal.dataset.viewPortal = entry.identity;
     const pagePortalRoot = options.root.closest<HTMLElement>("[data-view-shell]")?.querySelector<HTMLElement>("[data-view-page-portals]");
     (pagePortalRoot ?? document.body).append(portal);
+    const themeCleanup = applyViewThemeRoots(themeForOwner(instances, entry.owner), element, portal);
     try {
       const disposer = await mount.mount(
         { element, portal },
-        { module: moduleForOwner(instances, entry.owner), route: location }
+        { module: moduleForOwner(instances, entry.owner), route: location, theme: themeForOwner(instances, entry.owner) }
       );
       if (disposer !== undefined && typeof disposer !== "function") throw new Error("View Mount must return void or a disposer");
       activeMainMount = undefined;
       await disposeActiveMount(previous);
       options.root.replaceChildren(element);
-      activeMainMount = { entry, element, portal, locationIdentity, ...(disposer ? { disposer } : {}) };
+      activeMainMount = { entry, element, portal, locationIdentity, themeCleanup, ...(disposer ? { disposer } : {}) };
     } catch (error) {
+      themeCleanup();
       portal.remove();
       element.remove();
       activeMainMount = undefined;
@@ -389,11 +407,17 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     const mount = entry.value as ViewMount;
     const current = activeListMount;
     if (current && current.entry.value === entry.value && mount.update) {
-      await mount.update({ module: moduleForOwner(instances, entry.owner), route: location });
-      current.entry = entry;
-      current.locationIdentity = locationIdentity;
-      current.element.dataset.viewMount = entry.identity;
-      current.element.dataset.viewLocation = `${location.pathname}${location.search}${location.hash}`;
+      try {
+        await mount.update({ module: moduleForOwner(instances, entry.owner), route: location, theme: themeForOwner(instances, entry.owner) });
+        current.entry = entry;
+        current.locationIdentity = locationIdentity;
+        current.element.dataset.viewMount = entry.identity;
+        current.element.dataset.viewLocation = `${location.pathname}${location.search}${location.hash}`;
+      } catch (error) {
+        activeListMount = undefined;
+        await disposeActiveMount(current);
+        renderRuntimePageFailure(host, moduleForOwner(instances, entry.owner), errorMessage(error), () => activeHost.activateMainView());
+      }
       return;
     }
     const element = document.createElement("div");
@@ -405,18 +429,20 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     portal.dataset.viewPortal = entry.identity;
     const pagePortalRoot = shell?.querySelector<HTMLElement>("[data-view-page-portals]");
     (pagePortalRoot ?? document.body).append(portal);
+    const themeCleanup = applyViewThemeRoots(themeForOwner(instances, entry.owner), element, portal);
     try {
       const disposer = await mount.mount(
         { element, portal },
-        { module: moduleForOwner(instances, entry.owner), route: location }
+        { module: moduleForOwner(instances, entry.owner), route: location, theme: themeForOwner(instances, entry.owner) }
       );
       if (disposer !== undefined && typeof disposer !== "function") throw new Error("View Mount must return void or a disposer");
       const previous = activeListMount;
       activeListMount = undefined;
       await disposeActiveMount(previous);
       host.replaceChildren(element);
-      activeListMount = { entry, element, portal, locationIdentity, ...(disposer ? { disposer } : {}) };
+      activeListMount = { entry, element, portal, locationIdentity, themeCleanup, ...(disposer ? { disposer } : {}) };
     } catch (error) {
+      themeCleanup();
       portal.remove();
       element.remove();
       const previous = activeListMount;
@@ -478,6 +504,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     const portal = document.createElement("div");
     portal.className = "view-overlay-nested-portal";
     surface.append(close, element, portal);
+    const themeCleanup = applyViewThemeRoots(themeForOwner(instances, entry.owner), element, portal);
     layer.append(surface);
     host.replaceChildren(layer);
     const dismiss = () => dismissOverlay(descriptor, location).catch(error => renderShellNavigationError(options.root, error));
@@ -502,7 +529,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     try {
       const mountDisposer = await descriptor.mount.mount(
         { element, portal },
-        { module: moduleForOwner(instances, entry.owner), route: location }
+        { module: moduleForOwner(instances, entry.owner), route: location, theme: themeForOwner(instances, entry.owner) }
       );
       if (mountDisposer !== undefined && typeof mountDisposer !== "function") throw new Error("Overlay Mount must return void or a disposer");
       queueMicrotask(() => (surface.querySelector<HTMLElement>("[autofocus]") ?? close).focus());
@@ -514,11 +541,12 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
         locationIdentity,
         disposer: async () => {
           try { await mountDisposer?.(); }
-          finally { document.removeEventListener("keydown", onKeydown); }
+          finally { document.removeEventListener("keydown", onKeydown); themeCleanup(); }
         },
         afterDispose: () => { pendingOverlayRestore = restoreBackground; }
       };
     } catch (error) {
+      themeCleanup();
       document.removeEventListener("keydown", onKeydown);
       element.replaceChildren();
       const panel = document.createElement("section");
@@ -535,6 +563,8 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       };
     }
   };
+
+  const sidePanelRuntime = createSidePanelRuntime(options.root, slotsRegistry, instances);
 
   const activeHost: ActiveViewHost = Object.freeze({
     async activateMainView(key?: string): Promise<void> {
@@ -568,6 +598,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
         await activateOverlayEntry(overlayEntry, location, backgroundScroll);
         renderShellDescriptors(options.root, slotsRegistry, routeRegistry, background);
         syncShellLayout(options.root, background, slotsRegistry);
+        await sidePanelRuntime.sync(background);
         if (!navigationInProgress) await flushPendingOverlayRestore();
         return;
       }
@@ -587,6 +618,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       await activateMainEntry(entry, location);
       renderShellDescriptors(options.root, slotsRegistry, routeRegistry);
       syncShellLayout(options.root, location, slotsRegistry);
+      await sidePanelRuntime.sync(location);
       await disposeActiveMount(previousOverlay);
       if (!navigationInProgress) await flushPendingOverlayRestore();
     },
@@ -621,6 +653,11 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       }
       activeListMount = undefined;
       try {
+        await sidePanelRuntime.dispose();
+      } catch (error) {
+        errors.push(error);
+      }
+      try {
         await disposeSearch();
       } catch (error) {
         errors.push(error);
@@ -634,6 +671,12 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       for (const instance of [...instances].reverse()) {
         errors.push(...await instance.lifecycle.disposeCollectingErrors());
       }
+      try {
+        await hostThemeCleanup();
+        errors.push(...await hostThemeLifecycle.disposeCollectingErrors());
+      } catch (error) {
+        errors.push(error);
+      }
       if (errors.length) throw new AggregateError(errors, "ViewHost cleanup failed");
     }
   });
@@ -645,6 +688,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     routeRegistry.updateLocation(browserLocation());
     await activeHost.activateMainView();
     renderShellDescriptors(options.root, slotsRegistry, routeRegistry);
+    await sidePanelRuntime.sync(routeRegistry.location);
   };
   composeCurrentLocation = () => {
     const operation = navigationQueue.then(compose);
@@ -664,6 +708,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     routeRegistry.updateLocation(initialLocation);
     await activeHost.activateMainView();
     renderShellDescriptors(options.root, slotsRegistry, routeRegistry);
+    await sidePanelRuntime.sync(routeRegistry.location);
   } catch (error) {
     try {
       await activeHost.dispose();
@@ -676,6 +721,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     if (disposed) return;
     renderShellDescriptors(options.root, slotsRegistry, routeRegistry);
     syncShellLayout(options.root, routeRegistry.location, slotsRegistry);
+    void sidePanelRuntime.sync(routeRegistry.location).catch(error => renderShellNavigationError(options.root, error));
   });
   return activeHost;
 }
@@ -776,6 +822,26 @@ function validateServices(plugin: ViewPlugin<unknown>): void {
     if (!supportedServices.has(service)) {
       throw new Error(`View Plugin requests unsupported service: ${service}`);
     }
+  }
+}
+
+function validateThemeVersion(plugin: ViewPlugin<unknown>): void {
+  const injectsTheme = plugin.inject.includes("theme");
+  if (injectsTheme && plugin.themeVersion !== 1) {
+    throw new Error(`View Plugin requests theme but does not support Host Theme version 1`);
+  }
+  if (!injectsTheme && plugin.themeVersion !== undefined) {
+    throw new Error("View Plugin declares themeVersion without injecting theme");
+  }
+}
+
+function validateUiVersion(plugin: ViewPlugin<unknown>): void {
+  const injectsUi = plugin.inject.includes("ui");
+  if (injectsUi && plugin.uiVersion !== 1) {
+    throw new Error("View Plugin requests ui but does not support Host UI version 1");
+  }
+  if (!injectsUi && plugin.uiVersion !== undefined) {
+    throw new Error("View Plugin declares uiVersion without injecting ui");
   }
 }
 
@@ -1363,6 +1429,7 @@ type RuntimePluginInstance = {
   readonly owner: string;
   readonly module: Readonly<ModuleInstanceContext>;
   readonly lifecycle: RuntimeLifecycle;
+  readonly theme: import("./view-sdk.js").ViewTheme;
 };
 
 type RuntimeActiveMount = {
@@ -1373,6 +1440,7 @@ type RuntimeActiveMount = {
   locationIdentity: string;
   readonly disposer?: Disposer;
   readonly afterDispose?: Disposer;
+  readonly themeCleanup?: Disposer;
 };
 
 type RuntimeScrollSnapshot = {
@@ -1410,6 +1478,7 @@ async function disposeActiveMount(mount: RuntimeActiveMount | undefined): Promis
   try {
     await mount.disposer?.();
   } finally {
+    await mount.themeCleanup?.();
     (mount.container ?? mount.element).remove();
     mount.portal.remove();
     await mount.afterDispose?.();
@@ -1423,6 +1492,138 @@ function moduleForOwner(
   const instance = instances.find(candidate => candidate.owner === owner);
   if (!instance) throw new Error(`ViewHost cannot resolve owner for Mount: ${owner}`);
   return instance.module;
+}
+
+function themeForOwner(
+  instances: readonly RuntimePluginInstance[],
+  owner: string,
+): import("./view-sdk.js").ViewTheme {
+  const instance = instances.find(candidate => candidate.owner === owner);
+  if (!instance) throw new Error(`ViewHost cannot resolve Theme owner for Mount: ${owner}`);
+  return instance.theme;
+}
+
+function createSidePanelRuntime(
+  root: HTMLElement,
+  slotStore: RuntimeSlotStore,
+  instances: readonly RuntimePluginInstance[],
+): { sync(location: RouteLocation): Promise<void>; dispose(): Promise<void> } {
+  const shell = root.closest<HTMLElement>("[data-view-shell]");
+  const panel = shell?.querySelector<HTMLElement>("[data-view-side-panel-container]");
+  const title = panel?.querySelector<HTMLElement>("[data-view-side-panel-title]");
+  const closeButton = panel?.querySelector<HTMLButtonElement>("[data-view-side-panel-close]");
+  const host = panel?.querySelector<HTMLElement>('[data-view-slot="side.panel"]');
+  let entry: RuntimeEntry | undefined;
+  let activeMount: RuntimeActiveMount | undefined;
+  let open = false;
+  let trigger: HTMLButtonElement | undefined;
+  let currentLocation: RouteLocation | undefined;
+
+  const updateVisibility = () => {
+    if (!panel || !shell) return;
+    panel.hidden = !open || !entry;
+    shell.dataset.viewSidePanel = String(Boolean(open && entry));
+    trigger?.setAttribute("aria-expanded", String(Boolean(open && entry)));
+  };
+
+  const mountCurrent = async (): Promise<void> => {
+    if (!entry || !host || !currentLocation) return;
+    const descriptor = entry.value as SidePanelDescriptor;
+    const locationIdentity = routeLocationIdentity(currentLocation);
+    if (activeMount?.entry === entry && activeMount.locationIdentity === locationIdentity) return;
+    if (activeMount && (activeMount.entry.value as SidePanelDescriptor).mount === descriptor.mount && descriptor.mount.update) {
+      await descriptor.mount.update({
+        module: moduleForOwner(instances, entry.owner),
+        route: currentLocation,
+        theme: themeForOwner(instances, entry.owner)
+      });
+      adoptMountLocation(activeMount, entry, currentLocation);
+      return;
+    }
+    const previous = activeMount;
+    const element = document.createElement("div");
+    element.className = "view-host-side-panel-mount";
+    element.dataset.viewMount = entry.identity;
+    element.dataset.viewLocation = `${currentLocation.pathname}${currentLocation.search}${currentLocation.hash}`;
+    const portal = document.createElement("div");
+    portal.className = "view-host-side-panel-portal";
+    portal.dataset.viewPortal = entry.identity;
+    shell?.querySelector<HTMLElement>("[data-view-page-portals]")?.append(portal);
+    const themeCleanup = applyViewThemeRoots(themeForOwner(instances, entry.owner), element, portal);
+    try {
+      const disposer = await descriptor.mount.mount(
+        { element, portal },
+        { module: moduleForOwner(instances, entry.owner), route: currentLocation, theme: themeForOwner(instances, entry.owner) }
+      );
+      if (disposer !== undefined && typeof disposer !== "function") throw new Error("View Mount must return void or a disposer");
+      activeMount = undefined;
+      await disposeActiveMount(previous);
+      host.replaceChildren(element);
+      activeMount = { entry, element, portal, locationIdentity, themeCleanup, ...(disposer ? { disposer } : {}) };
+    } catch (error) {
+      themeCleanup();
+      portal.remove();
+      element.remove();
+      activeMount = undefined;
+      await disposeActiveMount(previous);
+      renderRuntimePageFailure(host, moduleForOwner(instances, entry.owner), errorMessage(error), () => mountCurrent());
+    }
+  };
+
+  const setOpen = async (next: boolean) => {
+    open = next;
+    if (open) await mountCurrent();
+    updateVisibility();
+  };
+  const close = () => { void setOpen(false).then(() => trigger?.focus()); };
+  closeButton?.addEventListener("click", close);
+
+  return {
+    async sync(location) {
+      currentLocation = location;
+      const next = slotStore.entries(slots.sidePanel, location)[0];
+      if (next !== entry) {
+        entry = next;
+        open = Boolean(next && (next.value as SidePanelDescriptor).defaultOpen);
+        const previous = activeMount;
+        activeMount = undefined;
+        await disposeActiveMount(previous);
+        host?.replaceChildren();
+      }
+      trigger = undefined;
+      if (!entry) {
+        title?.replaceChildren();
+        updateVisibility();
+        return;
+      }
+      const descriptor = entry.value as SidePanelDescriptor;
+      if (title) title.textContent = textValue(descriptor.label);
+      const actions = shell?.querySelector<HTMLElement>('[data-view-slot="header.actions"]');
+      if (actions) {
+        trigger = renderHeaderAction({
+          label: descriptor.label,
+          ...(descriptor.icon ? { icon: descriptor.icon } : {}),
+          run: () => setOpen(!open)
+        }, `${entry.identity}:trigger`);
+        trigger.dataset.viewSidePanelTrigger = "true";
+        trigger.setAttribute("aria-controls", "memsphere-view-side-panel");
+        actions.append(trigger);
+      }
+      panel?.setAttribute("id", "memsphere-view-side-panel");
+      if (open) await mountCurrent();
+      updateVisibility();
+    },
+    async dispose() {
+      closeButton?.removeEventListener("click", close);
+      const previous = activeMount;
+      activeMount = undefined;
+      await disposeActiveMount(previous);
+      host?.replaceChildren();
+      entry = undefined;
+      open = false;
+      updateVisibility();
+    }
+  };
 }
 
 function renderShellDescriptors(
@@ -1897,35 +2098,14 @@ function renderHeaderTitle(
 }
 
 function renderHeaderAction(descriptor: HeaderActionDescriptor, identity: string): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createPrimitiveButton(descriptor, "default");
   button.className = "view-shell-action";
   button.dataset.viewEntry = identity;
   if (descriptor.tone) button.dataset.tone = descriptor.tone;
-  button.setAttribute("aria-label", textValue(descriptor.label));
-  button.disabled = descriptor.disabled === true;
-  if (descriptor.icon) button.append(renderIcon(descriptor.icon, descriptor.tone === "success" ? "fill" : "regular"));
-  const label = document.createElement("span");
-  label.className = "view-shell-action-label";
-  label.append(textNode(descriptor.label));
-  button.append(label);
-  button.addEventListener("click", async () => {
-    if (button.disabled) return;
-    button.disabled = true;
-    button.setAttribute("aria-busy", "true");
-    button.removeAttribute("data-view-action-error");
-    button.removeAttribute("title");
-    try {
-      await descriptor.run();
-    } catch (error) {
-      const message = errorMessage(error);
-      button.dataset.viewActionError = message;
-      button.title = message;
-    } finally {
-      button.removeAttribute("aria-busy");
-      button.disabled = descriptor.disabled === true;
-    }
-  });
+  const label = button.querySelector("span");
+  if (label) label.className = "view-shell-action-label";
+  const icon = button.querySelector(".mem-view-icon");
+  if (icon && descriptor.icon) icon.replaceWith(renderIcon(descriptor.icon, descriptor.tone === "success" ? "fill" : "regular"));
   return button;
 }
 
@@ -1939,22 +2119,11 @@ function renderIcon(icon: IconRef, weight: "regular" | "fill" = "regular"): HTML
   }
   const image = document.createElement("img");
   image.className = "view-shell-icon";
-  const name = systemIconName(icon.name);
-  const fillSupported = new Set(["brain", "circle", "cube", "gear-six", "house", "play-circle", "seal-check", "stack"]);
-  image.src = `/assets/system-icons/${name}${weight === "fill" && fillSupported.has(name) ? "-fill" : ""}.svg`;
+  const name = normalizeSystemIconName(icon.name);
+  image.src = `/assets/system-icons/${name}${weight === "fill" && fillSystemIconNames.has(name) ? "-fill" : ""}.svg`;
   image.alt = "";
   image.setAttribute("aria-hidden", "true");
   return image;
-}
-
-function systemIconName(name: string): string {
-  if (name === "memory") return "brain";
-  if (name === "play") return "play-circle";
-  if (name === "gear") return "gear-six";
-  if (name === "search") return "magnifying-glass";
-  return ["archive", "arrow-right", "arrows-clockwise", "brain", "caret-down", "check-circle", "circle-fill", "clock-counter-clockwise", "code", "cube", "file-text", "folder", "gear-six", "house", "magnifying-glass", "play-circle", "plus", "seal-check", "sliders-horizontal", "sparkle", "stack", "storefront", "user", "warning-circle", "x"].includes(name)
-    ? name
-    : "stack";
 }
 
 function textNode(value: TextRef): Text {

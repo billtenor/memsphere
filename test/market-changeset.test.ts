@@ -71,7 +71,7 @@ async function withManagedMarket(run: (fixture: MarketFixture) => Promise<void>)
     await run({ home, project: "managed", workspace, memoryRoot: join(project.root, "memory") });
   } finally {
     restoreEnvironment(previous);
-    await rm(fixture, { recursive: true, force: true });
+    await rm(fixture, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 
@@ -100,7 +100,7 @@ async function withEmbeddedMarket(run: (fixture: MarketFixture) => Promise<void>
     await run({ home, project: "embedded", workspace, memoryRoot });
   } finally {
     restoreEnvironment(previous);
-    await rm(fixture, { recursive: true, force: true });
+    await rm(fixture, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 

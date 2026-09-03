@@ -12,7 +12,7 @@ This document defines the long-term public interface and explicitly records curr
 
 ViewHost currently implements the default Plugin entrypoint, `apiVersion: 1`, `apply()`, Module instance identity, `lifecycle`, minimum Manifest validation, SDK SemVer checks, independent Bundle loading, Router, Slot Tokens and Registry, per-instance registration transactions, rollback, and Mount cleanup. An import map resolves `@memsphere/view-sdk` to the Host-provided browser SDK.
 
-The currently injectable services are `slots` and `router`. The complete root Slot list, product semantics, and current wiring status are maintained in the [View Slot List](./view-slots.en.md). Some aggregate Slots support the restricted live `upsert()` contract defined below, while page overlays support Host-managed background Route projection and local failure isolation. All three built-in Modules use the same public entrypoint and independent Bundles. View API, I18n, Theme, Logger, custom child Slots, user Module discovery/installation, and dynamic Project composition remain unwired. A Plugin requesting an unavailable service fails explicitly before `apply()`.
+The currently injectable services are `slots`, `router`, `theme`, and `ui`. The complete root Slot list, product semantics, and current wiring status are maintained in the [View Slot List](./view-slots.en.md). Some aggregate Slots support the restricted live `upsert()` contract defined below, while page overlays support Host-managed background Route projection and local failure isolation. All four built-in Modules use the same public entrypoint and independent Bundles. View API, I18n, Logger, custom child Slots, user Module discovery/installation, and dynamic Project composition remain unwired. A Plugin requesting an unavailable service fails explicitly before `apply()`.
 
 ## Module View Entrypoint Contract
 
@@ -336,6 +336,8 @@ Conflict rules:
 
 Descriptor Slots accept inspectable standard data rendered by the Slot owner. Except for SDK-defined Action fields, a Descriptor contains no callback, framework component, DOM node, or HTML string.
 
+Stable names for `IconRef.kind: "system"` are `archive`, `arrow-right`, `arrows-clockwise`, `brain`, `caret-down`, `check-circle`, `circle-fill`, `clock-counter-clockwise`, `code`, `cube`, `file-text`, `folder`, `gear-six`, `house`, `magnifying-glass`, `play-circle`, `plus`, `seal-check`, `sliders-horizontal`, `sparkle`, `stack`, `storefront`, `user`, `warning-circle`, and `x`. Compatibility aliases `memory`, `search`, `settings`, `gear`, `play`, and `run` map to their stable names; unknown names defensively fall back to `stack`.
+
 ```ts
 export type TextRef =
   | { readonly text: string }
@@ -599,17 +601,24 @@ export interface ViewMessageNamespace {
 
 Modules must provide fixed visible copy in both `zh-CN` and `en`. A `namespace` begins with the Module id. Host rejects attempts to replace Core or another Module namespace.
 
+## ViewUi v1
+
+A Plugin declares both `inject: ["ui"]` and `uiVersion: 1` before `context.ui` is present. Declaring only one, or requesting an unsupported version, fails before `apply()`. This Host-owned, domain-neutral service provides button, icon-button, Badge, empty-state, and standard content-list primitives. `contentList(descriptorOrProvider)` returns a normal `ViewMount` for the existing `content.list` Slot; custom Mounts remain the escape hatch for domain-specific structures. Invalid descriptors fail that Mount explicitly without fallback or partial rendering.
+
 ## ViewTheme
 
 ```ts
 export interface ViewTheme {
+  readonly version: 1;
   readonly mode: "light" | "dark";
-  readonly tokens: Readonly<Record<string, string>>;
+  readonly tokens: Readonly<Record<ViewThemeToken, string>>;
   subscribe(listener: () => void): Disposer;
 }
 ```
 
-Theme Tokens are stable visual interfaces; private Host CSS classes are not. The `subscribe()` disposer automatically joins the instance lifecycle and may also be invoked early.
+A Plugin that declares `inject: ["theme"]` must also declare `themeVersion: 1`; declaring only one fails before `apply()`. Theme v1 currently provides light mode with semantic colors, font and size scales, line heights, spacing, radii, shadows, motion, layering, and content geometry. `viewThemeCssVariables` provides the stable `--mem-view-*` mapping; the SDK type is the single authoritative key list.
+
+Theme Tokens are stable visual interfaces; private Host CSS classes and `--view-*` variables are not. ViewHost passes the same read-only Theme to Plugin and Mount Contexts and installs its CSS variables on element and portal roots. Module styles may consume public variables but must not declare `--mem-view-*` Tokens. The `subscribe()` disposer automatically joins the instance lifecycle and may also be invoked early.
 
 ## ViewLogger
 

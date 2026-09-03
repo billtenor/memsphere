@@ -16,6 +16,7 @@ import {
 
 const sdkSource = await browserModule("../src/view/view-sdk.ts");
 const runtimeSource = await browserRuntimeBundle();
+const referenceSource = await browserEntryBundle("../modules/org.memsphere.reference/adapter/view/index.ts");
 
 test("ViewHost applies instances in catalog order and isolates one failed instance", async () => {
   const instances: ViewHostBootInstance[] = [
@@ -50,6 +51,131 @@ test("ViewHost applies instances in catalog order and isolates one failed instan
   }, "/memories");
 });
 
+test("Theme v1 is one Host-owned context applied to main and portal roots and cleaned on unload", async () => {
+  const instance = {
+    ...bootInstance("org.memsphere.theme", "theme", "/theme-plugin.js", "/"),
+    routeGrants: [{ id: "index", path: "/theme" }]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, themeVersion: 1, inject: ["slots", "router", "theme"], apply(context) {
+      const route = context.router.register({ id: "index", path: "/theme" });
+      window.__pluginTheme = context.theme;
+      context.theme.subscribe(() => undefined);
+      context.slots.register(slots.mainView, { id: "theme", key: route.key, value: {
+        mount({ element, portal }, renderContext) {
+          window.__mountThemeSame = renderContext.theme === window.__pluginTheme;
+          element.id = "theme-page";
+          portal.id = "theme-portal";
+          element.textContent = renderContext.theme.tokens["color.text"];
+        }
+      }});
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/theme-plugin.js", bundle]]), undefined, async page => {
+    await page.locator("#theme-page").waitFor();
+    assert.equal(await page.evaluate(() => (window as Window & { __mountThemeSame: boolean }).__mountThemeSame), true);
+    assert.equal(await page.locator("#theme-page").getAttribute("data-view-theme-version"), "1");
+    assert.equal(await page.locator("#theme-portal").getAttribute("data-view-theme-mode"), "light");
+    assert.equal(await page.locator("#theme-page").evaluate(element => getComputedStyle(element).getPropertyValue("--mem-view-color-text").trim()), "#202826");
+    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+    await page.waitForFunction(() => document.querySelector("#theme-page") === null);
+  }, "/theme");
+});
+
+test("UI v1 renders, updates, navigates, and disposes a standard content list", async () => {
+  const instance = {
+    ...bootInstance("org.memsphere.ui", "ui", "/ui-plugin.js", "/"),
+    routeGrants: [{ id: "index", path: "/ui", query: ["item"] }]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, uiVersion: 1, inject: ["slots", "router", "ui"], apply(context) {
+      const route = context.router.register({ id: "index", path: "/ui", query: ["item"] });
+      let filter = "";
+      const list = context.ui.contentList(renderContext => ({
+        label: { text: "Objects" },
+        filter: { label: { text: "Filter objects" }, value: filter, onInput(value) { filter = value; } },
+        empty: { title: { text: "Nothing found" } },
+        sections: [{ id: "all", items: ["one", "two"].filter(id => id.includes(filter)).map(id => ({
+          id, title: { text: id }, selected: renderContext.route.query.item === id,
+          icon: { kind: "system", name: id === "two" ? "run" : "stack" },
+          route: route.to({}, { query: { item: id } })
+        })) }]
+      }));
+      context.slots.register(slots.contentList, { id: "objects", when: route.activation, value: list });
+      context.slots.register(slots.mainView, { id: "page", key: route.key, value: { mount({ element }) { element.textContent = "UI page"; } } });
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/ui-plugin.js", bundle]]), undefined, async page => {
+    await page.getByRole("button", { name: "one", exact: true }).waitFor();
+    await page.getByRole("searchbox", { name: "Filter objects" }).fill("missing");
+    await page.getByText("Nothing found", { exact: true }).waitFor();
+    const filter = page.getByRole("searchbox", { name: "Filter objects" });
+    await filter.fill("");
+    await filter.focus();
+    await page.keyboard.type("two", { delay: 30 });
+    assert.equal(await filter.evaluate(element => element === document.activeElement), true);
+    assert.equal(await filter.inputValue(), "two");
+    assert.match(await page.getByRole("button", { name: "two", exact: true }).locator("img").getAttribute("src") ?? "", /play-circle\.svg$/);
+    await page.getByRole("button", { name: "two", exact: true }).click();
+    assert.match(page.url(), /[?&]item=two/);
+    assert.equal(await page.getByRole("button", { name: "two", exact: true }).getAttribute("aria-current"), "page");
+    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+    await page.waitForFunction(() => document.querySelector(".mem-view-content-list-root") === null);
+  }, "/ui");
+});
+
+test("UI v1 isolates an invalid content-list provider update", async () => {
+  const instance = {
+    ...bootInstance("org.memsphere.invalid-ui", "invalid-ui", "/invalid-ui.js", "/"),
+    routeGrants: [{ id: "index", path: "/invalid-ui", query: ["state"] }]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, uiVersion: 1, inject: ["slots", "router", "ui"], apply(context) {
+      const route = context.router.register({ id: "index", path: "/invalid-ui", query: ["state"] });
+      const list = context.ui.contentList(renderContext => {
+        if (renderContext.route.query.state === "invalid") return { label: { text: "broken" } };
+        return { label: { text: "Objects" }, empty: { title: { text: "Empty" } }, sections: [{ id: "all", items: [{
+          id: "break", title: { text: "Break provider" }, route: route.to({}, { query: { state: "invalid" } })
+        }] }] };
+      });
+      context.slots.register(slots.contentList, { id: "objects", when: route.activation, value: list });
+      context.slots.register(slots.mainView, { id: "page", key: route.key, value: { mount({ element }) { element.textContent = "Page stays available"; } } });
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/invalid-ui.js", bundle]]), undefined, async page => {
+    await page.getByRole("button", { name: "Break provider", exact: true }).click();
+    const diagnostic = page.locator('[data-view-slot="content.list"] .view-host-module-error');
+    await diagnostic.waitFor();
+    assert.match(await diagnostic.innerText(), /content list descriptor is invalid/);
+    assert.equal(await page.getByText("Page stays available", { exact: true }).count(), 1);
+    assert.equal(await page.getByRole("button", { name: "Break provider", exact: true }).count(), 0);
+  }, "/invalid-ui");
+});
+
+test("Reference Module keeps its standard filter focused during multi-character typing", async () => {
+  const instance: ViewHostBootInstance = {
+    ...bootInstance("org.memsphere.reference", "reference", "/reference.js", "/"),
+    config: { locale: "zh-CN" },
+    routeGrants: [
+      { id: "index", path: "/reference", query: ["item"] },
+      { id: "dialog", path: "/reference/dialog" },
+      { id: "drawer", path: "/reference/drawer" },
+    ]
+  };
+  await withPage(renderViewHostHtml("zh-CN", [instance]), new Map([["/reference.js", referenceSource]]), undefined, async page => {
+    const filter = page.getByRole("searchbox", { name: "筛选对象" });
+    await filter.focus();
+    await page.keyboard.type("研究", { delay: 30 });
+    assert.equal(await filter.evaluate(element => element === document.activeElement), true);
+    assert.equal(await filter.inputValue(), "研究");
+    assert.equal(await page.getByRole("button", { name: /研究笔记/ }).count(), 1);
+    assert.equal(await page.getByRole("button", { name: /关系画布/ }).count(), 0);
+  }, "/reference");
+});
+
 test("a failed builtin route renders a local retry diagnostic while the Shell stays ready", async () => {
   const broken = bootInstance("org.memsphere.broken", "broken", "/broken.js", "/");
   const settings = bootInstance("org.memsphere.settings", "settings", "/settings.js", "/");
@@ -65,7 +191,9 @@ test("a failed builtin route renders a local retry diagnostic while the Shell st
     await page.locator('[data-view-failed-module="org.memsphere.broken"]').waitFor();
     assert.equal(await page.locator("html").getAttribute("data-view-host-state"), "ready");
     assert.match(await page.locator(".view-host-module-error").innerText(), /broken import contract/);
-    await page.getByRole("navigation").getByRole("button", { name: "Settings", exact: true }).click();
+    const settingsNavigation = page.getByRole("navigation").getByRole("button", { name: "Settings", exact: true });
+    assert.match(await settingsNavigation.locator("img").getAttribute("src") ?? "", /gear-six\.svg$/);
+    await settingsNavigation.click();
     await page.locator("#settings-view").waitFor();
   }, "/broken");
 });
@@ -722,6 +850,15 @@ async function browserRuntimeBundle(): Promise<string> {
     entryPoints: [fileURLToPath(new URL("../src/view/view-runtime.ts", import.meta.url))],
     bundle: true, write: false, format: "esm", platform: "browser", target: "es2022",
     external: ["@memsphere/view-sdk", "./view-sdk.js"], logLevel: "silent"
+  });
+  return result.outputFiles[0]?.text ?? "";
+}
+
+async function browserEntryBundle(relativePath: string): Promise<string> {
+  const result = await build({
+    entryPoints: [fileURLToPath(new URL(relativePath, import.meta.url))],
+    bundle: true, write: false, format: "esm", platform: "browser", target: "es2022",
+    external: ["@memsphere/view-sdk"], logLevel: "silent"
   });
   return result.outputFiles[0]?.text ?? "";
 }

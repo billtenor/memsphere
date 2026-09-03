@@ -20,6 +20,9 @@ test("View page routes are the union of the builtin Module route grants", () => 
     "/tasks",
     "/tasks/run-1",
     "/tasks/run-1/artifact-reviews/review-1",
+    "/reference",
+    "/reference/dialog",
+    "/reference/drawer",
     "/settings/overview",
     "/settings/participants"
   ];
@@ -45,6 +48,7 @@ test("View page routes are the union of the builtin Module route grants", () => 
       "/projects/:projectId/memories", "/projects/:projectId/memories/:kind/:name",
       "/projects/:projectId/market", "/projects/:projectId/changes/:changeId",
       "/tasks", "/tasks/:runId", "/tasks/:runId/artifact-reviews/:reviewId",
+      "/reference", "/reference/dialog", "/reference/drawer",
       "/settings/:module"
     ]
   );

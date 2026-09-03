@@ -12,12 +12,12 @@ import {
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 
-test("Builtin Catalog declares three immutable and uniquely identified Modules", () => {
+test("Builtin Catalog declares four immutable and uniquely identified Modules", () => {
   assert.deepEqual(
     builtinModuleCatalog.map(entry => entry.moduleId),
-    ["org.memsphere.memory", "org.memsphere.run", "org.memsphere.settings"]
+    ["org.memsphere.memory", "org.memsphere.run", "org.memsphere.reference", "org.memsphere.settings"]
   );
-  assert.equal(new Set(builtinModuleCatalog.map(entry => entry.instanceId)).size, 3);
+  assert.equal(new Set(builtinModuleCatalog.map(entry => entry.instanceId)).size, 4);
   assert.equal(Object.isFrozen(builtinModuleCatalog), true);
   assert.equal(builtinModuleCatalog.every(entry => Object.isFrozen(entry.routes)), true);
 
