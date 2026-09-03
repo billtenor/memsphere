@@ -9,5 +9,6 @@ defines:
   - Procedure 通过 goals 描述目标，通过 asserts 声明全局约束，并通过 flow 安排有序 Action、分支、循环和对子流程的调用。
   - 同一个 Procedure 可以多次执行，每次执行形成相互独立的 Run；Run 的执行角色、状态和终态由 memsphere-run 定义。
   - Artifact Review 使用 Procedure 本地 Slot 表达评审视角；Actor、Binding、Reviewer 和 Runner 的关系分别由 memsphere-actor 与 memsphere-artifact-review 定义。View 中由 Run Module 把 Artifact Review 注册到 Host overlay，浮层展示不改变其稳定 URL、Round、Submission、Comment、Vote 与结算语义。
+  - Procedure 的 Review Slot、Binding 和 Assignment 不因 Runner 受 Human 授权代提交而改变；受托提交只是当前 Human Assignment 的一种执行方式，仍遵守同一 Review Round 和结算流程。
   - Run 可以正常完成为 done，也可以由 Human 显式废弃为 abandoned；废弃保留已有 Artifact、Schema 草稿和 Review 证据。
   - Procedure 的合法 YAML 结构由 memsphere-procedure-schema 定义。

@@ -128,6 +128,18 @@ const reviewNextActionSchema = z.discriminatedUnion("kind", [
     reviewId: z.string()
   }).strict(),
   z.object({
+    kind: z.literal("human_vote"),
+    runId: z.string(),
+    reviewId: z.string(),
+    roundId: z.string(),
+    agentReviewsPending: z.boolean(),
+    assignments: z.array(z.object({
+      assignmentId: z.string(),
+      actorId: z.string(),
+      actorName: z.string()
+    }).strict()).min(1)
+  }).strict(),
+  z.object({
     kind: z.literal("runner_vote"),
     reviewId: z.string(),
     roundId: z.string()
@@ -365,6 +377,25 @@ const definitions = {
     schema: z.object({
       vote: z.string(),
       requiresRevision: z.boolean()
+    }).strict()
+  },
+  "run.review-human-submit-receipt": {
+    path: "run/review-human-submit-receipt.hbs",
+    audience: "runner",
+    purpose: "receipt",
+    schema: z.object({
+      runId: z.string(),
+      reviewId: z.string(),
+      roundId: z.string(),
+      assignmentId: z.string(),
+      actorId: z.string(),
+      vote: z.string(),
+      commentCount: z.number().int().nonnegative(),
+      summaryPresent: z.boolean(),
+      delegatedBy: z.string(),
+      authorizationNote: z.string(),
+      reviewStatus: z.string(),
+      roundStatus: z.string()
     }).strict()
   },
   "run.review-summary": {

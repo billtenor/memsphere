@@ -47,10 +47,17 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
     if (url.pathname === viewRuntimeBundlePath) return send(response, "text/javascript", runtime);
     if (url.pathname === "/api/runs") return json(response, { runs: [{ ...run, eventCount: 0 }] });
     if (url.pathname === "/api/runs/run-demo") { runDetailRequests += 1; return json(response, { run }); }
-    if (url.pathname === "/api/runs/run-demo/artifact-reviews/review-1/rounds/round-1") return json(response, {
-      review: { id: "review-1", currentRoundId: "round-1", status: "pending", round: { id: "round-1", revision: 1, status: "collecting", assignments: [] } },
-      submission: { id: "submission-1", artifact: { name: "report", value: "Review this artifact" } }, assignment: null
-    });
+    if (url.pathname === "/api/runs/run-demo/artifact-reviews/review-1/rounds/round-1") {
+      const assignment = {
+        actorId: "human", actorName: "Human", actorKind: "human", binding: "decision", status: "submitted", draft: { comments: [] },
+        submitted: { comments: [], vote: "approve", submittedAt: "2026-08-30T01:00:00.000Z", delegation: { kind: "runner", runId: "run-demo", humanActorId: "human", authorizationNote: "Human explicitly authorized this submission." } }
+      };
+      return json(response, {
+        review: { id: "review-1", currentRoundId: "round-1", status: "awaiting_runner_vote", round: { id: "round-1", revision: 2, status: "awaiting_runner_vote", assignments: [assignment] } },
+        rounds: [{ id: "round-1", sequence: 1, revision: 2, status: "awaiting_runner_vote", assignments: [assignment] }],
+        submission: { id: "submission-1", artifact: { name: "report", value: "Review this artifact" } }, assignment
+      });
+    }
     return send(response, "text/html", renderViewHostHtml("en", instances));
   });
   const origin = await listen(server); const browser = await chromium.launch({ headless: true });
@@ -75,6 +82,8 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
     await page.getByRole("button", { name: /Artifact review/ }).click();
     await page.locator(".view-overlay-layer .artifact-review-modal").waitFor();
     assert.match(await page.locator("#artifact-review-artifact-pane").innerText(), /Review this artifact/);
+    assert.match(await page.locator("#artifact-review-review-pane").innerText(), /Runner delegated/);
+    assert.match(await page.locator("#artifact-review-review-pane").innerText(), /Human explicitly authorized this submission/);
     assert.equal(new URL(page.url()).pathname, "/tasks/run-demo/artifact-reviews/review-1");
     assert.equal(runDetailRequests, 1, "opening the review should reuse the Run detail already loaded by the page");
     const [surfaceBox, modalBox] = await Promise.all([

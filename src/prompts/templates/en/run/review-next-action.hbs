@@ -4,6 +4,27 @@ Then:
 {{#ifEq kind "wait"}}
 memsphere run review wait --review {{reviewId}}
 {{/ifEq}}
+{{#ifEq kind "human_vote"}}
+Use the current language to collect a formal vote for this round from each Human below:
+{{#each assignments}}
+- {{actorName}} (actor_id={{actorId}}; assignment_id={{assignmentId}})
+{{/each}}
+
+Explicitly ask the Human to choose one of these three votes:
+- Approve: Comments are optional.
+- Request changes: at least one Comment is required.
+- Abstain: at least one Comment explaining the reason is required.
+{{#if agentReviewsPending}}
+Agent Reviewers are still working in the background; do not wait for them before collecting the Human vote.
+{{/if}}
+This prompt has already established the current Review, Round, and Runner-delegated submission context. If the Human uses a definitive performative such as “I vote approve,” “I vote request changes,” “I abstain,” or “submit…”, and the Vote, required Comments, and target are complete and unambiguous, that statement is both the formal decision and authorization for this delegated submission. Submit directly, record the authorization note, and do not ask for a synonymous confirmation. Ordinary discussion or tentative language such as “I lean toward” is not authorization. Repeat the payload and ask for confirmation only when the target is unclear, a required Comment is missing, referenced feedback is ambiguous, or the payload still needs completion.
+
+After confirmation, run this for each Human Assignment:
+memsphere run review submit-for-human --run {{runId}} --review {{reviewId}} --round {{roundId}} --assignment <assignment_id> --vote <approve|request_changes|abstain> --comments-file <path> --authorization-note-file <path> [--summary-file <path>]
+
+After submitting the Human Assignment, check the round again:
+memsphere run review wait --review {{reviewId}}
+{{/ifEq}}
 {{#ifEq kind "runner_vote"}}
 memsphere run review vote --review {{reviewId}} --round {{roundId}} --vote approve
 memsphere run review vote --review {{reviewId}} --round {{roundId}} --vote request_changes --comment <text>

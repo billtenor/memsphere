@@ -56,6 +56,13 @@ export type ArtifactReviewSubmittedOpinion = {
   summary?: string;
   submittedAt: string;
   authorization: AuthorizationDecision;
+  delegation?: {
+    kind: "runner";
+    runId: string;
+    humanActorId: string;
+    authorizationNote: string;
+    authorization: AuthorizationDecision;
+  };
 };
 
 export function artifactReviewOpinionReferencesImplementation(

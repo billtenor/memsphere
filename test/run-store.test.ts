@@ -12,6 +12,7 @@ import {
   activeProcedureAsserts,
   appendArtifactReviewAgentComment,
   ArtifactAuthorizationFailure,
+  ArtifactReviewSubmissionConflictError,
   artifactSchemaName,
   buildRunBindingSnapshot,
   buildSchemaWritingSnapshot,
@@ -29,6 +30,7 @@ import {
   reportRun,
   submitArtifactReviewAssignment,
   submitArtifactReviewAgentAssignment,
+  submitArtifactReviewHumanAssignmentForRunner,
   submitArtifactReviewRunnerVote,
   skipRun,
   startRun,
@@ -66,6 +68,362 @@ async function submitManagedSchemaDraft(runsRoot: string, runId: string) {
     artifact: { kind: "file", path: join(runsRoot, finalization.draft.path) }
   });
 }
+
+test("Runner delegated Human review submit records provenance and is idempotent after settlement", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "delegated.yaml"), `!procedure
+name: delegated
+flow:
+  - !action
+    action: Produce a reviewed Artifact.
+    artifact: !artifact
+      name: reviewed result
+      format: markdown
+      review: [reviewer]
+  - !action
+    action: Continue.
+    artifact: !artifact
+      name: continuation
+`);
+    const controlPlane = parseControlPlaneConfig({
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] }
+      }
+    });
+    const started = await startRun({
+      name: "Delegated review",
+      memoryRoot,
+      runsRoot,
+      procedureName: "delegated",
+      controlPlane,
+      reviewConfiguration: reviewConfiguration({ procedure: "delegated", slots: { reviewer: ["human"] } })
+    });
+    const reported = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "# Candidate\n" }
+    });
+    const review = currentArtifactReview(reported)!;
+    await assert.rejects(submitArtifactReviewHumanAssignmentForRunner({
+      runsRoot,
+      runId: started.id,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      assignmentId: "human",
+      vote: "request_changes",
+      comments: [],
+      authorizationNote: "Human explicitly requested changes."
+    }), /requires at least one Comment/);
+    const nonEmptyDraft = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      actorId: "human",
+      expectedRevision: 1,
+      draft: { vote: "approve", comments: [] }
+    });
+    await assert.rejects(submitArtifactReviewHumanAssignmentForRunner({
+      runsRoot,
+      runId: started.id,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      assignmentId: "human",
+      vote: "approve",
+      comments: [],
+      authorizationNote: "Human explicitly approved."
+    }), ArtifactReviewSubmissionConflictError);
+    await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      actorId: "human",
+      expectedRevision: nonEmptyDraft.round.revision,
+      draft: { comments: [] }
+    });
+    const first = await submitArtifactReviewHumanAssignmentForRunner({
+      runsRoot,
+      runId: started.id,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      assignmentId: "human",
+      vote: "request_changes",
+      comments: [{ body: "Clarify the authorization boundary." }, { body: "Add the concurrency test." }],
+      summary: "Please address both review comments.",
+      authorizationNote: "Human explicitly asked the Runner to request changes in this Review."
+    });
+    assert.equal(first.review.status, "awaiting_revision");
+    assert.deepEqual(first.assignment.submitted?.comments.map((comment) => comment.body), [
+      "Clarify the authorization boundary.", "Add the concurrency test."
+    ]);
+    assert.equal(first.assignment.submitted?.authorization.subject.kind, "actor");
+    assert.deepEqual(first.assignment.submitted?.delegation && {
+      kind: first.assignment.submitted.delegation.kind,
+      runId: first.assignment.submitted.delegation.runId,
+      humanActorId: first.assignment.submitted.delegation.humanActorId,
+      note: first.assignment.submitted.delegation.authorizationNote,
+      subject: first.assignment.submitted.delegation.authorization.subject.kind
+    }, {
+      kind: "runner",
+      runId: started.id,
+      humanActorId: "human",
+      note: "Human explicitly asked the Runner to request changes in this Review.",
+      subject: "runner"
+    });
+    const revision = first.round.revision;
+    const retried = await submitArtifactReviewHumanAssignmentForRunner({
+      runsRoot,
+      runId: started.id,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      assignmentId: "human",
+      vote: "request_changes",
+      comments: [{ body: "Clarify the authorization boundary." }, { body: "Add the concurrency test." }],
+      summary: "Please address both review comments.",
+      authorizationNote: "Human explicitly asked the Runner to request changes in this Review."
+    });
+    assert.equal(retried.round.revision, revision);
+    assert.equal(retried.round.votes.length, 1);
+    await assert.rejects(submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      actorId: "human",
+      expectedRevision: revision
+    }), ArtifactReviewSubmissionConflictError);
+    await assert.rejects(submitArtifactReviewHumanAssignmentForRunner({
+      runsRoot,
+      runId: started.id,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      assignmentId: "human",
+      vote: "request_changes",
+      comments: [{ body: "Clarify the authorization boundary." }, { body: "Add the concurrency test." }],
+      summary: "Different.",
+      authorizationNote: "Human explicitly asked the Runner to request changes in this Review."
+    }), ArtifactReviewSubmissionConflictError);
+
+    const persistedPath = join(runsRoot, started.id, `${started.id}.json`);
+    const legacyFixture = JSON.parse(await readFile(persistedPath, "utf8")) as {
+      artifactReviews: Array<{ rounds: Array<{ assignments: Array<{ submitted?: Record<string, unknown> }> }> }>;
+    };
+    const legacySubmitted = legacyFixture.artifactReviews[0]!.rounds[0]!.assignments[0]!.submitted!;
+    const delegatedFixture = legacySubmitted.delegation as Record<string, unknown>;
+    delegatedFixture.runId = "run-other";
+    await writeRawFile(persistedPath, `${JSON.stringify(legacyFixture, null, 2)}\n`);
+    await assert.rejects(readRun(runsRoot, started.id), /does not match enclosing Run/);
+    delegatedFixture.runId = started.id;
+    delegatedFixture.humanActorId = "human-other";
+    await writeRawFile(persistedPath, `${JSON.stringify(legacyFixture, null, 2)}\n`);
+    await assert.rejects(readRun(runsRoot, started.id), /does not match Assignment/);
+    delegatedFixture.humanActorId = "human";
+    delegatedFixture.authorizationNote = "";
+    await writeRawFile(persistedPath, `${JSON.stringify(legacyFixture, null, 2)}\n`);
+    await assert.rejects(readRun(runsRoot, started.id), /authorizationNote/);
+    delegatedFixture.authorizationNote = "Human explicitly asked the Runner to request changes in this Review.";
+    delete legacySubmitted.delegation;
+    await writeRawFile(persistedPath, `${JSON.stringify(legacyFixture, null, 2)}\n`);
+    const legacyRead = await readRun(runsRoot, started.id);
+    const legacyOpinion = currentArtifactReview(legacyRead)!.rounds[0]!.assignments[0]!.submitted;
+    assert.equal(legacyOpinion?.delegation, undefined);
+    assert.equal(legacyOpinion?.vote, "request_changes");
+    assert.equal(legacyOpinion?.summary, "Please address both review comments.");
+    assert.equal("authorization" in (legacyOpinion ?? {}), true);
+  });
+});
+
+test("direct Human and Runner delegated review submissions serialize in either lock order", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "delegated-race.yaml"), `!procedure
+name: delegated-race
+flow:
+  - !action
+    action: Produce a reviewed Artifact.
+    artifact: !artifact
+      name: reviewed result
+      review: [reviewer]
+  - !action
+    action: Continue.
+    artifact: !artifact
+      name: continuation
+`);
+    const controlPlane = parseControlPlaneConfig({
+      runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+      actors: {
+        human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] }
+      }
+    });
+    const createReview = async (name: string) => {
+      const started = await startRun({
+        name,
+        memoryRoot,
+        runsRoot,
+        procedureName: "delegated-race",
+        controlPlane,
+        reviewConfiguration: reviewConfiguration({ procedure: "delegated-race", slots: { reviewer: ["human"] } })
+      });
+      const pending = await reportRun({
+        runsRoot,
+        runId: started.id,
+        artifact: { kind: "inline", value: `candidate ${name}` }
+      });
+      return { started, review: currentArtifactReview(pending)! };
+    };
+
+    const directFirst = await createReview("direct first");
+    const drafted = await updateArtifactReviewDraft({
+      runsRoot,
+      reviewId: directFirst.review.id,
+      roundId: directFirst.review.currentRoundId,
+      actorId: "human",
+      expectedRevision: directFirst.review.rounds[0]!.revision,
+      draft: { vote: "approve", comments: [] }
+    });
+    const directPromise = submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: directFirst.review.id,
+      roundId: directFirst.review.currentRoundId,
+      actorId: "human",
+      expectedRevision: drafted.round.revision
+    });
+    await waitForRunWriteLock(runsRoot, directFirst.started.id);
+    const delegatedBehindDirect = submitArtifactReviewHumanAssignmentForRunner({
+      runsRoot,
+      runId: directFirst.started.id,
+      reviewId: directFirst.review.id,
+      roundId: directFirst.review.currentRoundId,
+      assignmentId: "human",
+      vote: "approve",
+      comments: [],
+      authorizationNote: "Human authorized the concurrent delegated submission."
+    });
+    const directRace = await Promise.allSettled([directPromise, delegatedBehindDirect]);
+    assert.equal(directRace.filter((result) => result.status === "fulfilled").length, 1);
+    assert.equal(directRace[0].status, "fulfilled");
+    assert.equal(directRace[1].status, "rejected");
+    assert(directRace[1].status === "rejected" && directRace[1].reason instanceof ArtifactReviewSubmissionConflictError);
+    const directFinal = currentArtifactReview(await readRun(runsRoot, directFirst.started.id))!.rounds[0]!;
+    assert.equal(directFinal.votes.length, 1);
+    assert.equal(directFinal.assignments[0]!.submitted?.delegation, undefined);
+    assert.equal(directFinal.assignments[0]!.draft.vote, "approve");
+
+    const delegatedFirst = await createReview("delegated first");
+    const delegatedPromise = submitArtifactReviewHumanAssignmentForRunner({
+      runsRoot,
+      runId: delegatedFirst.started.id,
+      reviewId: delegatedFirst.review.id,
+      roundId: delegatedFirst.review.currentRoundId,
+      assignmentId: "human",
+      vote: "approve",
+      comments: [],
+      authorizationNote: "Human authorized the concurrent delegated submission."
+    });
+    await waitForRunWriteLock(runsRoot, delegatedFirst.started.id);
+    const directBehindDelegated = submitArtifactReviewAssignment({
+      runsRoot,
+      reviewId: delegatedFirst.review.id,
+      roundId: delegatedFirst.review.currentRoundId,
+      actorId: "human",
+      expectedRevision: delegatedFirst.review.rounds[0]!.revision
+    });
+    const delegatedRace = await Promise.allSettled([delegatedPromise, directBehindDelegated]);
+    assert.equal(delegatedRace.filter((result) => result.status === "fulfilled").length, 1);
+    assert.equal(delegatedRace[0].status, "fulfilled");
+    assert.equal(delegatedRace[1].status, "rejected");
+    assert(delegatedRace[1].status === "rejected" && delegatedRace[1].reason instanceof ArtifactReviewSubmissionConflictError);
+    const delegatedFinal = currentArtifactReview(await readRun(runsRoot, delegatedFirst.started.id))!.rounds[0]!;
+    assert.equal(delegatedFinal.votes.length, 1);
+    assert.equal(delegatedFinal.assignments[0]!.submitted?.delegation?.kind, "runner");
+    assert.equal(delegatedFinal.assignments[0]!.draft.vote, "approve");
+  });
+});
+
+async function waitForRunWriteLock(runsRoot: string, runId: string): Promise<void> {
+  const lockName = createHash("sha256").update(runId).digest("hex");
+  const lockPath = join(runsRoot, ".locks", `${lockName}.lock`);
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    try {
+      await readFile(lockPath, "utf8");
+      return;
+    } catch (error) {
+      if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+  }
+  throw new Error(`timed out waiting for Run lock: ${runId}`);
+}
+
+test("Runner delegated Human review submit fails closed for either permission layer and Agent targets", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "delegated-denied.yaml"), `!procedure
+name: delegated-denied
+flow:
+  - !action
+    action: Produce a reviewed Artifact.
+    artifact: !artifact
+      name: reviewed result
+      review: [reviewer]
+`);
+    const cases = [{
+      name: "runner-denied",
+      runner: ["artifact.read", "artifact.submit"],
+      actor: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] },
+      expected: /Artifact authorization denied: decision\.decide/,
+      tamperHumanPermission: false
+    }, {
+      name: "human-denied",
+      runner: ["artifact.read", "artifact.submit", "decision.decide"],
+      actor: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.assess"] },
+      expected: /Artifact authorization denied: decision\.assess/,
+      tamperHumanPermission: true
+    }, {
+      name: "agent-target",
+      runner: ["artifact.read", "artifact.submit", "decision.decide"],
+      actor: { kind: "agent", name: "Agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "traex" } },
+      expected: /requires a Human/,
+      tamperHumanPermission: false
+    }] as const;
+    for (const entry of cases) {
+      const controlPlane = parseControlPlaneConfig({
+        runner: { permissions: [...entry.runner] }, actors: { reviewer: entry.actor }
+      });
+      const started = await startRun({
+        name: entry.name, memoryRoot, runsRoot, procedureName: "delegated-denied", controlPlane,
+        reviewConfiguration: reviewConfiguration({ procedure: "delegated-denied", slots: { reviewer: ["reviewer"] } })
+      });
+      const reported = await reportRun({
+        runsRoot, runId: started.id, artifact: { kind: "inline", value: "candidate" }
+      });
+      const review = currentArtifactReview(reported)!;
+      if (entry.tamperHumanPermission) {
+        const frozen = review.rounds[0]!.controlPlane ?? review.controlPlane;
+        frozen.permissions.reviewer!.effective = ["artifact.read"];
+        await writeRawFile(join(runsRoot, started.id, `${started.id}.json`), `${JSON.stringify(reported, null, 2)}\n`);
+      }
+      await assert.rejects(submitArtifactReviewHumanAssignmentForRunner({
+        runsRoot, runId: started.id, reviewId: review.id, roundId: review.currentRoundId,
+        assignmentId: "reviewer", vote: "approve", comments: [], authorizationNote: "Explicit authorization."
+      }), entry.expected);
+      const unchanged = await readRun(runsRoot, started.id);
+      const assignment = currentArtifactReview(unchanged)!.rounds[0]!.assignments[0]!;
+      assert.equal(assignment.status === "submitted", false);
+      assert.equal(assignment.submitted, undefined);
+    }
+  });
+});
 
 const validProcedure = `!procedure
 names: [target-procedure]

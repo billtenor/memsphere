@@ -83,6 +83,7 @@ import {
   abandonRun,
   ArtifactAuthorizationFailure,
   ArtifactReviewConflictError,
+  ArtifactReviewSubmissionConflictError,
   artifactReviewForActor,
   buildRunBindingSnapshot,
   buildSchemaWritingSnapshot,
@@ -2065,7 +2066,13 @@ function publicArtifactReviewOpinion(opinion: ArtifactReviewSubmittedOpinion | u
     vote: opinion.vote,
     summary: opinion.summary,
     renderedSummary: opinion.summary ? renderArtifactReviewMarkdown(opinion.summary) : undefined,
-    submittedAt: opinion.submittedAt
+    submittedAt: opinion.submittedAt,
+    delegation: opinion.delegation ? {
+      kind: opinion.delegation.kind,
+      runId: opinion.delegation.runId,
+      humanActorId: opinion.delegation.humanActorId,
+      authorizationNote: opinion.delegation.authorizationNote
+    } : undefined
   };
 }
 
@@ -2462,6 +2469,14 @@ function normalizeArtifactReviewDraft(input: { vote?: unknown; comments?: unknow
 }
 
 function sendArtifactReviewError(response: ServerResponse, error: unknown): void {
+  if (error instanceof ArtifactReviewSubmissionConflictError) {
+    sendJson(response, 409, {
+      error: error.message,
+      code: error.code,
+      assignmentId: error.assignmentId
+    });
+    return;
+  }
   if (error instanceof ArtifactReviewConflictError) {
     sendJson(response, 409, {
       error: error.message,

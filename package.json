@@ -34,7 +34,9 @@
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && tsc -p tsconfig.modules.json --noEmit && node --import tsx scripts/build-view-assets.mjs && node -e \"const fs=require('node:fs'); fs.chmodSync('dist/cli.js',0o755); fs.cpSync('src/skills','dist/skills',{recursive:true}); fs.cpSync('src/prompts/templates','dist/prompts/templates',{recursive:true})\"",
     "dev": "tsx src/cli.ts",
+    "pretest": "npm run build",
     "test": "node scripts/run-tests.mjs",
+    "pretest:ci": "npm run build",
     "test:ci": "node scripts/run-tests.mjs --test-concurrency=1",
     "smoke:project": "node scripts/project-smoke.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.modules.json --noEmit",
