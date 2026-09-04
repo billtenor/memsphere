@@ -261,7 +261,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     }),
     config: Object.freeze({}),
     module: coreModule,
-    routeBasePath: "/",
+    routeBasePath: `/projects/${encodeURIComponent(coreProjectId)}`,
     routeGrants: coreViewRoutes
   };
   const allInstances: readonly ViewPluginInstanceOptions[] = options.coreConfig
@@ -279,7 +279,8 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       module,
       lifecycle,
       instanceOptions.routeBasePath ?? moduleRouteBase(module),
-      instanceOptions.routeGrants
+      instanceOptions.routeGrants,
+      instanceOptions.routeBasePath !== undefined
     );
 
     try {
@@ -325,7 +326,13 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       }));
       if (instanceOptions.routeGrants?.length) {
         const failureLifecycle = new RuntimeLifecycle();
-        const failureRoutes = routeRegistry.transaction(module, failureLifecycle, moduleRouteBase(module), instanceOptions.routeGrants);
+        const failureRoutes = routeRegistry.transaction(
+          module,
+          failureLifecycle,
+          instanceOptions.routeBasePath ?? moduleRouteBase(module),
+          instanceOptions.routeGrants,
+          instanceOptions.routeBasePath !== undefined
+        );
         const failureSlots = slotsRegistry.transaction(module, failureLifecycle);
         try {
           for (const grant of instanceOptions.routeGrants) {
@@ -1161,8 +1168,9 @@ class RuntimeRouteStore {
     lifecycle: RuntimeLifecycle,
     basePath: string,
     grants?: readonly ViewRouteGrant[],
+    scopeGrants = false,
   ): RuntimeRouteTransaction {
-    return new RuntimeRouteTransaction(this, module, lifecycle, basePath, grants);
+    return new RuntimeRouteTransaction(this, module, lifecycle, basePath, grants, scopeGrants);
   }
 
   prepare(staged: readonly RuntimeRoute[]): readonly RuntimeRoute[] {
@@ -1328,6 +1336,7 @@ class RuntimeRouteTransaction implements ViewRouter {
   readonly #lifecycle: RuntimeLifecycle;
   readonly #basePath: string;
   readonly #grants: ReadonlyMap<string, ViewRouteGrant> | undefined;
+  readonly #scopeGrants: boolean;
   readonly #staged: RuntimeRoute[] = [];
   #state: "open" | "committed" = "open";
 
@@ -1337,12 +1346,14 @@ class RuntimeRouteTransaction implements ViewRouter {
     lifecycle: RuntimeLifecycle,
     basePath: string,
     grants?: readonly ViewRouteGrant[],
+    scopeGrants = false,
   ) {
     this.#store = store;
     this.#module = module;
     this.#lifecycle = lifecycle;
     this.#basePath = normalizeBasePath(basePath);
     this.#grants = grants === undefined ? undefined : validateRouteGrants(grants);
+    this.#scopeGrants = scopeGrants;
   }
 
   get location(): RouteLocation {
@@ -1365,9 +1376,12 @@ class RuntimeRouteTransaction implements ViewRouter {
     if (grant && definition.query !== undefined && !sameStrings(definition.query, grant.query ?? [])) {
       throw new Error(`Route query allowlist does not match built-in grant ${definition.id}`);
     }
-    const template = grant?.path ?? joinRoutePath(this.#basePath, definition.path);
+    const template = grant && !this.#scopeGrants ? grant.path : joinRoutePath(this.#basePath, grant?.path ?? definition.path);
     const compiled = compileRoute(template);
-    const aliases = (grant?.aliases ?? []).map(alias => ({ path: alias, ...compileRoute(alias) }));
+    const aliases = (grant?.aliases ?? []).map(alias => {
+      const path = this.#scopeGrants ? joinRoutePath(this.#basePath, alias) : alias;
+      return { path, ...compileRoute(path) };
+    });
     for (const alias of aliases) {
       if (alias.parameterNames.join("\0") !== compiled.parameterNames.join("\0")) {
         throw new Error(`Route alias parameters must match canonical route ${definition.id}: ${alias.path}`);

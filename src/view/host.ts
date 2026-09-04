@@ -220,6 +220,7 @@ export function renderViewHostHtml(
         mainViewKey: boot.mainViewKey,
         coreConfig: { locale: boot.locale, messages: boot.messages }
       });
+      const currentProjectId = boot.instances[0]?.module?.projectId || "memsphere";
       const projectHome = shell?.querySelector(".view-shell-project-home");
       const projectLabel = shell?.querySelector(".view-shell-project-label");
       const projectSelectWrap = shell?.querySelector(".view-shell-project-select-wrap");
@@ -234,14 +235,14 @@ export function renderViewHostHtml(
       projectHome?.addEventListener("click", event => {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
-        history.pushState({}, "", "/");
+        history.pushState({}, "", "/projects/" + encodeURIComponent(currentProjectId));
         window.dispatchEvent(new PopStateEvent("popstate"));
       });
       if (projectLabel) projectLabel.textContent = boot.coreShell.project;
       if (settings) {
         settings.textContent = boot.coreShell.settings;
         settings.addEventListener("click", () => {
-          history.pushState({}, "", "/settings/general");
+          history.pushState({}, "", "/projects/" + encodeURIComponent(currentProjectId) + "/settings/general");
           window.dispatchEvent(new PopStateEvent("popstate"));
         });
       }
@@ -263,33 +264,29 @@ export function renderViewHostHtml(
           }
         };
         const showCurrentProject = name => {
-          projectValue.textContent = name || boot.coreShell.project;
-          if (projectTriggerValue) projectTriggerValue.textContent = name || boot.coreShell.project;
-          projectTrigger.title = name || boot.coreShell.project;
+          projectValue.textContent = name || currentProjectId;
+          if (projectTriggerValue) projectTriggerValue.textContent = name || currentProjectId;
+          projectTrigger.title = name || currentProjectId;
         };
         const switchProject = async (name, current) => {
           if (!name || name === current) {
             closeProjectMenu();
             return;
           }
-          if (location.pathname.startsWith("/settings/") && !confirm(boot.coreShell.switchConfirm)) {
+          const pathParts = location.pathname.split("/");
+          const relativePath = pathParts[1] === "projects" ? "/" + pathParts.slice(3).join("/") : location.pathname;
+          if (relativePath.startsWith("/settings/") && !confirm(boot.coreShell.switchConfirm)) {
             showCurrentProject(current || "");
             closeProjectMenu();
             return;
           }
           closeProjectMenu();
-          projectTrigger.disabled = true;
-          const response = await fetch("/api/projects/select", {
-            method: "POST", headers: { "content-type": "application/json" },
-            body: JSON.stringify({ name })
-          });
-          if (!response.ok) throw new Error(await response.text());
-          const landing = location.pathname.startsWith("/tasks/") ? "/tasks"
-            : location.pathname.startsWith("/settings/") ? location.pathname
-            : location.pathname === "/market" || location.pathname === "/memory-market" ? "/market"
-            : location.pathname === "/" ? "/"
+          const landing = relativePath.startsWith("/tasks/") ? "/tasks"
+            : relativePath.startsWith("/settings/") ? relativePath
+            : relativePath === "/market" || relativePath === "/memory-market" ? "/market"
+            : relativePath === "/" ? ""
             : "/memories";
-          location.replace(landing);
+          location.replace("/projects/" + encodeURIComponent(name) + landing);
         };
         projectTrigger.addEventListener("click", () => {
           if (projectTrigger.getAttribute("aria-expanded") === "true") closeProjectMenu();
@@ -330,6 +327,8 @@ export function renderViewHostHtml(
           if (!response.ok) throw new Error(String(response.status));
           return response.json();
         }).then(payload => {
+          const currentProjectName = currentProjectId;
+          const currentProjectRecord = (payload.projects || []).find(project => project.name === currentProjectName) || {};
           projectMenu.replaceChildren();
           const title = document.createElement("div");
           title.className = "view-shell-project-menu-title";
@@ -338,12 +337,12 @@ export function renderViewHostHtml(
           const openDetails = () => {
             closeProjectMenu();
             if (!projectDetails) return;
-            const detail = payload.currentProject || {};
+            const detail = payload.current === currentProjectName ? (payload.currentProject || currentProjectRecord) : currentProjectRecord;
             const set = (name, value) => {
               const node = projectDetails.querySelector('[data-project-detail="' + name + '"]');
               if (node) node.textContent = value || boot.coreShell.unavailable;
             };
-            set("name", detail.name || payload.current);
+            set("name", detail.name || currentProjectName);
             set("root", detail.root);
             set("store", detail.storeType);
             set("revision", detail.revision);
@@ -351,20 +350,20 @@ export function renderViewHostHtml(
             projectDetails.hidden = false;
             projectDetailsClose?.focus();
           };
-          if (payload.current) {
+          if (currentProjectName) {
             const current = document.createElement("button");
             current.type = "button";
             current.className = "view-shell-project-current";
             current.setAttribute("role", "menuitem");
-            current.setAttribute("aria-label", payload.current + " · " + boot.coreShell.projectDetails);
+            current.setAttribute("aria-label", currentProjectName + " · " + boot.coreShell.projectDetails);
             const avatar = document.createElement("span");
             avatar.className = "view-shell-project-avatar";
-            avatar.textContent = payload.current.slice(0, 1);
+            avatar.textContent = currentProjectName.slice(0, 1);
             const copy = document.createElement("span");
             copy.className = "view-shell-project-current-copy";
             const name = document.createElement("strong");
             name.className = "view-shell-project-current-name";
-            name.textContent = payload.current;
+            name.textContent = currentProjectName;
             const detailLabel = document.createElement("small");
             detailLabel.textContent = boot.coreShell.projectDetails;
             copy.append(name, detailLabel);
@@ -376,7 +375,7 @@ export function renderViewHostHtml(
             current.addEventListener("click", openDetails);
             projectMenu.append(current);
           }
-          const otherProjects = (payload.projects || []).filter(project => project.name !== payload.current);
+          const otherProjects = (payload.projects || []).filter(project => project.name !== currentProjectName);
           if (otherProjects.length) {
             const switchLabel = document.createElement("div");
             switchLabel.className = "view-shell-project-switch-label";
@@ -399,15 +398,15 @@ export function renderViewHostHtml(
             name.textContent = project.name;
             menuOption.append(avatar, name);
             menuOption.addEventListener("click", () => {
-              void switchProject(project.name, payload.current).catch(error => {
+              void switchProject(project.name, currentProjectName).catch(error => {
                 projectTrigger.disabled = false;
                 projectTrigger.title = error instanceof Error ? error.message : String(error);
               });
             });
             projectMenu.append(menuOption);
           }
-          projectTrigger.disabled = !payload.current && otherProjects.length === 0;
-          showCurrentProject(payload.current || "");
+          projectTrigger.disabled = !currentProjectName && otherProjects.length === 0;
+          showCurrentProject(currentProjectName || "");
         }).catch(error => {
           projectTrigger.title = error instanceof Error ? error.message : String(error);
         });
@@ -443,7 +442,9 @@ function initialShellState(locale: ViewLocale, instances: readonly ViewHostBootI
     const routeId = instance.home?.routeId;
     const grant = instance.routeGrants?.find(candidate => candidate.id === routeId);
     if (!grant) return "/";
-    return grant.path.replace(/:([A-Za-z0-9_]+)/g, (_, name: string) => encodeURIComponent(String(instance.home?.routeParams?.[name] ?? "")));
+    const path = grant.path.replace(/:([A-Za-z0-9_]+)/g, (_, name: string) => encodeURIComponent(String(instance.home?.routeParams?.[name] ?? instance.module.projectId)));
+    const base = instance.routeBasePath?.replace(/\/$/, "") ?? "";
+    return base && base !== "/" ? `${base}${path === "/" ? "" : path}` : path;
   };
   const memory = instances.find(instance => instance.module.moduleId === "org.memsphere.memory");
   const run = instances.find(instance => instance.module.moduleId === "org.memsphere.run");
@@ -460,7 +461,7 @@ function initialShellState(locale: ViewLocale, instances: readonly ViewHostBootI
     memoryLabel: formatViewMessage(locale, "navigation.memory"),
     runLabel: formatViewMessage(locale, "navigation.run"),
     settingsLabel: formatViewMessage(locale, "common.settings"),
-    settingsHref: settings ? moduleHref(settings) : "/settings/general",
+    settingsHref: settings ? moduleHref(settings) : `/projects/${encodeURIComponent(projectName)}/settings/general`,
     healthyLabel: formatViewMessage(locale, "service.healthy"),
     accountLabel: formatViewMessage(locale, "account.avatar"),
     homeTitle: formatViewMessage(locale, "home.title"),

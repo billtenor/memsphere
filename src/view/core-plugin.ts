@@ -36,7 +36,7 @@ export function createCorePlugin(options: CorePluginOptions) {
             label: msg("common.settings"),
             icon: { kind: "system", name: "gear-six" },
             run: () => {
-              history.pushState({}, "", "/settings/general");
+              history.pushState({}, "", `/projects/${encodeURIComponent(options.projectName)}/settings/general`);
               window.dispatchEvent(new PopStateEvent("popstate"));
             }
           }

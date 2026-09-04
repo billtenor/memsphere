@@ -206,7 +206,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     });
     const origin = `http://127.0.0.1:${(view.address() as AddressInfo).port}`;
     try {
-      const formalResponse = await fetch(`${origin}/api/memories`);
+      const formalResponse = await fetch(`${origin}/api/projects/embedded/memories`);
       const formal = await formalResponse.json() as {
         memories: Array<{ entity: { defines?: string[] } }>;
         source?: { mode: string };
@@ -215,7 +215,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       assert.deepEqual(formal.source, { mode: "formal" });
       assert.deepEqual(formal.memories.find((memory) => memory.entity.defines?.includes("Published"))?.entity.defines, ["Published"]);
 
-      const previewResponse = await fetch(`${origin}/api/memories?change=${encodeURIComponent(first.changeId)}`);
+      const previewResponse = await fetch(`${origin}/api/projects/embedded/memories?change=${encodeURIComponent(first.changeId)}`);
       const preview = await previewResponse.json() as {
         memories: Array<{ entity: { defines?: string[] } }>;
         source?: { mode: string; changeId: string; storeType: string; valid: boolean };
@@ -228,7 +228,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       assert.equal(preview.source?.valid, true);
 
       const previewSummaryResponse = await fetch(
-        `${origin}/api/memories?representation=summary&change=${encodeURIComponent(first.changeId)}`
+        `${origin}/api/projects/embedded/memories?representation=summary&change=${encodeURIComponent(first.changeId)}`
       );
       const previewSummarySource = await previewSummaryResponse.text();
       const previewSummary = JSON.parse(previewSummarySource) as {
@@ -245,7 +245,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       assert.equal(previewSummary.memories.some((memory) => memory.entity !== undefined), false);
       assert.doesNotMatch(previewSummarySource, /Linked preview/);
 
-      const changeDetailResponse = await fetch(`${origin}/api/changes/${encodeURIComponent(first.changeId)}`);
+      const changeDetailResponse = await fetch(`${origin}/api/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
       const changeDetail = await changeDetailResponse.json() as {
         actorNames: Record<string, string>;
         actorKinds: Record<string, string>;
@@ -268,7 +268,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       unavailableSource.source_worktree.root = join(fixture, "removed-linked-worktree");
       await writeFile(changeRecordPath, `${JSON.stringify(unavailableSource, null, 2)}\n`);
       try {
-        const unavailableResponse = await fetch(`${origin}/api/changes/${encodeURIComponent(first.changeId)}`);
+        const unavailableResponse = await fetch(`${origin}/api/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
         const unavailable = await unavailableResponse.json() as {
           change: { status: string; sourceWorktree: { root: string; available: boolean } };
         };
@@ -290,7 +290,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       }
 
       const previewDetailResponse = await fetch(
-        `${origin}/api/memories/concepts/shared?change=${encodeURIComponent(first.changeId)}`
+        `${origin}/api/projects/embedded/memories/concepts/shared?change=${encodeURIComponent(first.changeId)}`
       );
       const previewDetail = await previewDetailResponse.json() as {
         memory: { entity: { defines?: string[] } };
@@ -298,9 +298,9 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       assert.equal(previewDetailResponse.status, 200);
       assert.deepEqual(previewDetail.memory.entity.defines, ["Linked preview"]);
 
-      const missing = await fetch(`${origin}/api/memories?change=change-missing`);
+      const missing = await fetch(`${origin}/api/projects/embedded/memories?change=change-missing`);
       assert.equal(missing.status, 404);
-      const missingDetail = await fetch(`${origin}/api/changes/change-missing`);
+      const missingDetail = await fetch(`${origin}/api/projects/embedded/changes/change-missing`);
       assert.equal(missingDetail.status, 404);
       assert.equal((await missingDetail.json() as { code: string }).code, "changeset_not_found");
 
@@ -313,7 +313,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
         id: corruptId
       }, null, 2)}\n`);
       try {
-        const listResponse = await fetch(origin + "/api/changes");
+        const listResponse = await fetch(origin + "/api/projects/embedded/changes");
         const listPayload = await listResponse.json() as {
           changes: Array<{ id: string; status: string; error?: string }>;
         };
@@ -322,7 +322,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
         assert.equal(unavailable?.status, "unavailable");
         assert.match(unavailable?.error ?? "", /store_type/);
 
-        const detailResponse = await fetch(origin + `/api/changes/${corruptId}`);
+        const detailResponse = await fetch(origin + `/api/projects/embedded/changes/${corruptId}`);
         const detailPayload = await detailResponse.json() as { code: string; error: string };
         assert.equal(detailResponse.status, 500);
         assert.equal(detailPayload.code, "changeset_integrity_error");
@@ -390,7 +390,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     });
     try {
       const operationOrigin = `http://127.0.0.1:${(operationView.address() as AddressInfo).port}`;
-      const detailResponse = await fetch(`${operationOrigin}/api/changes/${encodeURIComponent(first.changeId)}`);
+      const detailResponse = await fetch(`${operationOrigin}/api/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
       const detail = await detailResponse.json() as {
         change: { updatedAt: string };
         targetMemories: Array<{ reference: string; operation: string; memory?: unknown; baseMemory?: unknown }>;
@@ -405,7 +405,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       assert(byOperation.get("rename")?.baseMemory);
       assert.equal(byOperation.get("delete")?.memory, undefined);
       assert(byOperation.get("delete")?.baseMemory);
-      const commentResponse = await fetch(`${operationOrigin}/api/changes/${encodeURIComponent(first.changeId)}/comments`, {
+      const commentResponse = await fetch(`${operationOrigin}/api/projects/embedded/changes/${encodeURIComponent(first.changeId)}/comments`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -425,7 +425,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       };
       assert.equal(commentResponse.status, 201);
       assert.deepEqual(commentPayload.comment.location, { anchor: "concept.defines[1]" });
-      const deleteResponse = await fetch(`${operationOrigin}/api/changes/${encodeURIComponent(first.changeId)}/comments/${encodeURIComponent(commentPayload.comment.id)}`, {
+      const deleteResponse = await fetch(`${operationOrigin}/api/projects/embedded/changes/${encodeURIComponent(first.changeId)}/comments/${encodeURIComponent(commentPayload.comment.id)}`, {
         method: "DELETE",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

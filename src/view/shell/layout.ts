@@ -34,7 +34,7 @@ export function renderViewShellMarkup(options: ViewShellMarkupOptions): string {
   const account = initial ? `<div class="view-shell-account" aria-label="${escapeHtml(initial.accountLabel)}"><span class="view-shell-account-avatar">${escapeHtml(initial.accountLabel)}</span></div>` : "";
   const main = initial?.pathname === "/" ? renderInitialHome(initial) : renderInitialLoading(options.loading);
   const isHome = initial?.pathname === "/";
-  const hasInitialContentList = !initial?.pathname.startsWith("/settings/");
+  const hasInitialContentList = !initial?.pathname.includes("/settings/");
   const chinese = initial?.locale === "zh-CN";
   const projectHomeLabel = chinese ? `返回 ${initial?.projectName ?? "Project"} 主页` : `Return to ${initial?.projectName ?? "Project"} Home`;
   const switchProjectLabel = chinese ? "切换 Project" : "Switch Project";

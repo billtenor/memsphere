@@ -9,7 +9,7 @@ import type { MemsphereConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
-test("View switches Projects without retaining the previous Project Memory data", async () => {
+test("View keeps Project selection in the URL and isolates concurrent Project requests", async () => {
   const fixture = await mkdtemp(join(tmpdir(), "memsphere-view-projects-"));
   const home = join(fixture, "home");
   const previousHome = process.env.MEMSPHERE_HOME;
@@ -53,15 +53,38 @@ test("View switches Projects without retaining the previous Project Memory data"
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const browser = await chromium.launch({ headless: true });
     try {
-      assert.deepEqual(await memoryNames(origin), ["alpha-memory"]);
-      const page = await browser.newPage();
-      await page.goto(`${origin}/memories`, { waitUntil: "networkidle" });
+      assert.deepEqual(await memoryNames(origin, "alpha"), ["alpha-memory"]);
+      assert.deepEqual(await memoryNames(origin, "beta"), ["beta-memory"]);
+      const [page, betaPage] = await Promise.all([browser.newPage(), browser.newPage()]);
+      await Promise.all([
+        page.goto(`${origin}/projects/alpha/memories`, { waitUntil: "networkidle" }),
+        betaPage.goto(`${origin}/projects/beta/memories`, { waitUntil: "networkidle" })
+      ]);
+      await Promise.all([
+        page.getByRole("button", { name: /alpha-memory/ }).waitFor(),
+        betaPage.getByRole("button", { name: /beta-memory/ }).waitFor()
+      ]);
       await page.locator("#view-shell-project-trigger").click();
       await page.locator("#view-shell-project-menu").getByRole("menuitem", { name: "beta", exact: true }).click();
       await page.waitForLoadState("networkidle");
       await page.getByRole("button", { name: /beta-memory/ }).waitFor();
-      assert.equal(new URL(page.url()).pathname, "/memories");
-      assert.deepEqual(await memoryNames(origin), ["beta-memory"]);
+      assert.equal(new URL(page.url()).pathname, "/projects/beta/memories");
+      assert.equal(new URL(betaPage.url()).pathname, "/projects/beta/memories");
+
+      const interleaved = await Promise.all(Array.from({ length: 12 }, (_, index) => (
+        memoryNames(origin, index % 2 === 0 ? "alpha" : "beta")
+      )));
+      assert.deepEqual(interleaved, Array.from({ length: 12 }, (_, index) => (
+        [`${index % 2 === 0 ? "alpha" : "beta"}-memory`]
+      )));
+
+      const legacyWrite = await fetch(`${origin}/api/projects/select`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "alpha" })
+      });
+      assert.equal(legacyWrite.status, 400);
+      assert.equal((await legacyWrite.json() as { code: string }).code, "project_scope_required");
     } finally {
       await browser.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -92,8 +115,8 @@ function projectConfig(home: string, name: string, root: string): MemsphereConfi
   };
 }
 
-async function memoryNames(origin: string): Promise<string[]> {
-  const response = await fetch(`${origin}/api/memories`);
+async function memoryNames(origin: string, projectId: string): Promise<string[]> {
+  const response = await fetch(`${origin}/api/projects/${encodeURIComponent(projectId)}/memories`);
   const payload = await response.json() as { memories: Array<{ entity?: { names?: string[] } }> };
   assert.equal(response.status, 200);
   return payload.memories.flatMap((memory) => memory.entity?.names?.slice(0, 1) ?? []);
