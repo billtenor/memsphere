@@ -331,6 +331,24 @@ async function handleRequest(
   viewCache: ViewMemoryCache
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
+  const requestedPathname = url.pathname;
+  const scopedApi = url.pathname === "/api/projects/select"
+    ? undefined
+    : matchProjectScopedPath(url.pathname, "/api/projects/");
+  const scopedPage = scopedApi ? undefined : matchProjectScopedPath(url.pathname, "/projects/");
+  const projectScope = scopedApi ?? scopedPage;
+  if (projectScope) {
+    const startupProjectId = config.project?.name ?? "memsphere";
+    if (projectScope.projectId !== startupProjectId) {
+      const projects = await listRegisteredProjects(config.homeRoot ?? resolveMemsphereHome());
+      if (!projects.some(project => project.name === projectScope.projectId && !project.missing)) {
+        sendJson(response, 404, { code: "project_not_found", error: `Project not found: ${projectScope.projectId}` });
+        return;
+      }
+      config = await readProjectConfig(projectScope.projectId, config.homeRoot);
+    }
+    if (scopedApi) url.pathname = `/api${scopedApi.remainder === "/" ? "" : scopedApi.remainder}`;
+  }
   const { memoryRoot, runsRoot } = config;
   const archiveRoot = config.archiveRoot;
 
@@ -385,25 +403,34 @@ async function handleRequest(
   }
 
   if (request.method === "POST" && url.pathname === "/api/projects/select") {
-    const body = await readJsonBody<{ name?: unknown }>(request);
-    if (typeof body.name !== "string" || !body.name.trim()) {
-      sendJson(response, 400, { error: "Project name is required" });
-      return;
-    }
-    const selected = await readProjectConfig(body.name.trim(), config.homeRoot);
-    await viewCache.clear();
-    Object.assign(config, selected);
-    sendJson(response, 200, { current: selected.project?.name });
+    sendJson(response, 400, {
+      code: "project_scope_required",
+      error: "Project selection is URL-scoped; navigate to /projects/:projectId instead"
+    });
     return;
   }
 
-  const developmentPage = options.developmentModules?.some(module => module.pagePaths.includes(url.pathname)) === true;
-  if (request.method === "GET" && (isViewPagePath(url.pathname) || developmentPage)) {
+  if (!projectScope && isProjectResourceApi(url.pathname)) {
+    if (request.method === "GET" || request.method === "HEAD") {
+      redirect(response, 307, projectApiPath(config.project?.name, `${url.pathname}${url.search}`));
+    } else {
+      sendJson(response, 400, { code: "project_scope_required", error: "Project-scoped API URL is required" });
+    }
+    return;
+  }
+
+  const pagePath = scopedPage?.remainder ?? url.pathname;
+  const developmentPage = options.developmentModules?.some(module => module.pagePaths.includes(pagePath)) === true;
+  if (request.method === "GET" && (isViewPagePath(requestedPathname) || isViewPagePath(pagePath) || developmentPage)) {
+    if (!projectScope) {
+      redirect(response, 302, projectPagePath(config.project?.name, `${url.pathname}${url.search}`));
+      return;
+    }
     const instances = await builtinViewInstances(config);
     sendHtml(response, renderViewHostHtml(
       config.language,
       [...instances, ...(options.developmentModules?.map(module => module.instance) ?? [])],
-      url.pathname,
+      requestedPathname,
     ));
     return;
   }
@@ -2635,10 +2662,17 @@ function builtinModuleAsset(pathname: string) {
 }
 
 async function builtinViewInstances(config: MemsphereConfig): Promise<readonly ViewHostBootInstance[]> {
+  const projectId = config.project?.name ?? "memsphere";
+  const projectPrefix = `/projects/${encodeURIComponent(projectId)}`;
+  const projectApiBase = `/api/projects/${encodeURIComponent(projectId)}`;
   return Promise.all(builtinModuleCatalog.map(async entry => {
     const { manifest } = await readBuiltinViewManifest(entry.packageDirectory, entry.moduleId);
     return {
       pluginPath: builtinAssetPath(entry.moduleId),
+      config: { projectApiBase },
+      routeBasePath: ["org.memsphere.run", "org.memsphere.settings"].includes(entry.moduleId)
+        ? projectPrefix
+        : "/",
       routeGrants: entry.routes,
       home: {
         title: entry.title,
@@ -2648,7 +2682,7 @@ async function builtinViewInstances(config: MemsphereConfig): Promise<readonly V
         ...(entry.moduleId === "org.memsphere.settings" ? { routeParams: { module: "general" } } : {})
       },
       module: {
-        projectId: config.project?.name ?? "memsphere",
+        projectId,
         moduleId: entry.moduleId,
         moduleVersion: manifest.version,
         instanceId: entry.instanceId
@@ -2762,6 +2796,43 @@ export function isViewPagePath(pathname: string): boolean {
     || builtinModuleCatalog.some(module => module.routes.some(route => (
     [route.path, ...(route.aliases ?? [])].some(pattern => matchesViewRoute(pattern, pathname))
   )));
+}
+
+function matchProjectScopedPath(pathname: string, prefix: string): { projectId: string; remainder: string } | undefined {
+  if (!pathname.startsWith(prefix)) return undefined;
+  const tail = pathname.slice(prefix.length);
+  const separator = tail.indexOf("/");
+  const encodedProjectId = separator < 0 ? tail : tail.slice(0, separator);
+  if (!encodedProjectId) return undefined;
+  try {
+    const projectId = decodeURIComponent(encodedProjectId);
+    if (!projectId || projectId.includes("/")) return undefined;
+    return { projectId, remainder: separator < 0 ? "/" : tail.slice(separator) };
+  } catch {
+    return undefined;
+  }
+}
+
+function isProjectResourceApi(pathname: string): boolean {
+  return [
+    "/api/runs", "/api/artifact-reviews", "/api/memories", "/api/changes",
+    "/api/market", "/api/archive/runs", "/api/archive/changes", "/api/settings/project"
+  ].some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+function projectApiPath(projectId: string | undefined, resource: string): string {
+  const suffix = resource.startsWith("/api/") ? resource.slice(4) : resource;
+  return `/api/projects/${encodeURIComponent(projectId ?? "memsphere")}${suffix}`;
+}
+
+function projectPagePath(projectId: string | undefined, resource: string): string {
+  const suffix = resource === "/" ? "" : resource;
+  return `/projects/${encodeURIComponent(projectId ?? "memsphere")}${suffix}`;
+}
+
+function redirect(response: ServerResponse, status: 302 | 307, location: string): void {
+  response.writeHead(status, { location, "cache-control": "no-store" });
+  response.end();
 }
 
 function matchesViewRoute(pattern: string, pathname: string): boolean {

@@ -51,7 +51,7 @@ flow:
     const address = server.address();
     assert(address && typeof address === "object");
     const base = `http://127.0.0.1:${address.port}`;
-    const abandoned = await fetch(`${base}/api/runs/${started.id}/abandon`, {
+    const abandoned = await fetch(`${base}/api/projects/memsphere/runs/${started.id}/abandon`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({})
@@ -71,14 +71,14 @@ flow:
     assert.match(payload.run.schemaWriting?.draft?.content ?? "", /Unaccepted summary/);
     assert.equal((await readRun(runsRoot, started.id)).status, "abandoned");
 
-    const active = await fetch(`${base}/api/runs?representation=summary`).then((response) => response.json()) as {
+    const active = await fetch(`${base}/api/projects/memsphere/runs?representation=summary`).then((response) => response.json()) as {
       runs: Array<{ id: string; status: string }>;
     };
     assert.deepEqual(active.runs.find((run) => run.id === started.id)?.status, "abandoned");
 
-    const archived = await fetch(`${base}/api/archive/runs/${started.id}`, { method: "POST" });
+    const archived = await fetch(`${base}/api/projects/memsphere/archive/runs/${started.id}`, { method: "POST" });
     assert.equal(archived.status, 200);
-    const afterArchive = await fetch(`${base}/api/runs?representation=summary`).then((response) => response.json()) as {
+    const afterArchive = await fetch(`${base}/api/projects/memsphere/runs?representation=summary`).then((response) => response.json()) as {
       runs: Array<{ id: string }>;
     };
     assert.equal(afterArchive.runs.some((run) => run.id === started.id), false);

@@ -287,7 +287,7 @@ async function withResponsiveView(
 async function openTaskPage(browser: Browser, url: string, width: number): Promise<Page> {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   page.setDefaultTimeout(5_000);
-  await page.goto(`${url}/tasks/${runId}`);
+  await page.goto(`${url}/projects/responsive/tasks/${runId}`);
   await page.locator(".run-title").waitFor();
   await page.locator(".markdown-table-scroll").first().waitFor();
   return page;
@@ -357,7 +357,7 @@ test("Shell panel widths support pointer drag, reload persistence, keyboard adju
     const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
     page.setDefaultTimeout(5_000);
     try {
-      await page.goto(`${url}/memories`);
+      await page.goto(`${url}/projects/responsive/memories`);
       await page.locator('html[data-view-host-state="ready"]').waitFor();
       const secondary = page.locator('[data-view-resizer="secondary"]');
       const contentList = page.locator('[data-view-resizer="content-list"]');
@@ -406,7 +406,7 @@ test("Shell panel widths support pointer drag, reload persistence, keyboard adju
 
 test("builtin Memory, ChangeSet, and Settings stay within desktop and mobile viewports", async () => {
   await withResponsiveView(async (browser, url) => {
-    const created = await fetch(`${url}/api/changes`, {
+    const created = await fetch(`${url}/api/projects/responsive/changes`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -418,15 +418,15 @@ test("builtin Memory, ChangeSet, and Settings stay within desktop and mobile vie
     assert.equal(created.status, 201, createdText);
     const changeId = (JSON.parse(createdText) as { change: { id: string } }).change.id;
     for (const [path, ready] of [
-      ["/memories/concepts/user-note", "#memsphere-view-root .memory-module"],
+      ["/projects/responsive/memories/concepts/user-note", "#memsphere-view-root .memory-module"],
       [`/projects/responsive/changes/${changeId}`, "#memsphere-view-root .memory-module"],
-      ["/settings/overview", "#memsphere-view-root .settings-detail-surface"]
+      ["/projects/responsive/settings/overview", "#memsphere-view-root .settings-detail-surface"]
     ] as const) {
       const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
       page.setDefaultTimeout(5_000);
       try {
         await page.goto(url + path);
-        await page.locator(ready).waitFor();
+        await page.locator(ready).waitFor().catch(async () => assert.fail(JSON.stringify({ url: page.url(), body: await page.locator("body").innerText() }, null, 2)));
         await page.locator('html[data-view-host-state="ready"]').waitFor();
         if (path.includes("/changes/")) {
           const bodyText = await page.locator("body").innerText();
@@ -494,7 +494,7 @@ test("Run effective rule references and sections collapse and survive rerenders"
       assert.equal(await referenceBody.isHidden(), true);
 
       const refreshCompleted = page.waitForResponse(response => (
-        new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
+        new URL(response.url()).pathname === `/api/projects/responsive/runs/${runId}` && response.ok()
       ));
       await page.getByRole("button", { name: "刷新", exact: true }).click();
       await refreshCompleted;
@@ -539,7 +539,7 @@ test("Run titles fall back to the Procedure name for historical Runs", async () 
     const page = await browser.newPage({ viewport: { width: 1024, height: 900 } });
     page.setDefaultTimeout(5_000);
     try {
-      await page.goto(`${url}/tasks/${legacyRunId}`);
+      await page.goto(`${url}/projects/responsive/tasks/${legacyRunId}`);
       await page.locator(".run-title").waitFor();
       assert.equal(await page.locator(".run-title").textContent(), "Legacy procedure fallback");
       await page.locator(".run-meta .mem-view-badge", { hasText: "流程: Legacy procedure fallback" }).waitFor();
@@ -556,9 +556,9 @@ test("Run status list refreshes only when the user asks", async () => {
     page.setDefaultTimeout(10_000);
     let status = "running";
     let summaryRequests = 0;
-    await page.route("**/api/runs**", async (route) => {
+    await page.route("**/api/projects/responsive/runs*", async (route) => {
       const requestUrl = new URL(route.request().url());
-      if (requestUrl.pathname === "/api/runs") summaryRequests += 1;
+      if (requestUrl.pathname === "/api/projects/responsive/runs") summaryRequests += 1;
       requestUrl.searchParams.delete("status");
       const response = await route.fetch({ url: requestUrl.toString() });
       const payload = await response.json() as { runs?: Array<Record<string, unknown>>; run?: Record<string, unknown> };
@@ -576,23 +576,23 @@ test("Run status list refreshes only when the user asks", async () => {
       await page.waitForTimeout(4_250);
       assert.equal(summaryRequests, requestsBeforeWait);
       const refreshed = page.waitForResponse((response) => (
-        new URL(response.url()).pathname === "/api/runs"
+        new URL(response.url()).pathname === "/api/projects/responsive/runs"
         && new URL(response.url()).searchParams.get("status") === "running"
       ));
       await page.getByRole("button", { name: "刷新", exact: true }).click();
       await refreshed;
       await page.locator(".mem-view-content-list").getByText("当前状态下没有 Run。", { exact: true }).waitFor();
       assert.equal(await page.locator(".mem-view-list-item").count(), 0);
-      await page.locator('.view-host-mount[data-view-location="/tasks"]').waitFor();
+      await page.locator('.view-host-mount[data-view-location="/projects/responsive/tasks"]').waitFor();
       const doneLoaded = page.waitForResponse((response) => (
-        new URL(response.url()).pathname === "/api/runs"
+        new URL(response.url()).pathname === "/api/projects/responsive/runs"
         && new URL(response.url()).searchParams.get("status") === "done"
       ));
       await page.getByRole("button", { name: "已完成", exact: true }).click();
       await doneLoaded;
       await page.locator(".mem-view-list-item").first().waitFor();
       assert.equal(await page.getByRole("button", { name: "已完成", exact: true }).getAttribute("aria-current"), "page");
-      assert.equal(new URL(page.url()).pathname, "/tasks");
+      assert.equal(new URL(page.url()).pathname, "/projects/responsive/tasks");
       assert.match(await page.locator(".run-workspace").innerText(), /选择一个 Run/);
       await page.unrouteAll({ behavior: "wait" });
     } finally {
@@ -605,7 +605,7 @@ test("Run status switching does not load a detail until the user selects one", a
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
     let detailRequests = 0;
-    await page.route("**/api/runs**", async (route) => {
+    await page.route("**/api/projects/responsive/runs*", async (route) => {
       const requestUrl = new URL(route.request().url());
       requestUrl.searchParams.delete("status");
       const response = await route.fetch({ url: requestUrl.toString() });
@@ -618,7 +618,7 @@ test("Run status switching does not load a detail until the user selects one", a
       }
       await route.fulfill({ response, json: payload });
     });
-    await page.route("**/api/runs/*", async (route) => {
+    await page.route("**/api/projects/responsive/runs/*", async (route) => {
       detailRequests += 1;
       const response = await route.fetch();
       const payload = await response.json() as { run?: Record<string, unknown> };
@@ -645,17 +645,17 @@ test("Run detail refresh is manual", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
     let detailRequests = 0;
-    await page.route("**/api/runs/*", async (route) => {
+    await page.route("**/api/projects/responsive/runs/*", async (route) => {
       detailRequests += 1;
       await route.continue();
     });
     try {
-      await page.goto(`${url}/tasks/${runId}`);
+      await page.goto(`${url}/projects/responsive/tasks/${runId}`);
       await page.locator(".run-title", { hasText: runName }).waitFor();
       const initialRequests = detailRequests;
       await page.waitForTimeout(4_250);
       assert.equal(detailRequests, initialRequests);
-      const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === `/api/runs/${runId}`);
+      const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === `/api/projects/responsive/runs/${runId}`);
       await page.getByRole("button", { name: "刷新", exact: true }).click();
       await refreshed;
       assert.equal(detailRequests, initialRequests + 1);
@@ -667,7 +667,7 @@ test("Run detail refresh is manual", async () => {
 
 test("missing Run detail is reported as not found", async () => {
   await withResponsiveView(async (_browser, url) => {
-    const response = await fetch(`${url}/api/runs/run-missing`);
+    const response = await fetch(`${url}/api/projects/responsive/runs/run-missing`);
     assert.equal(response.status, 404);
     assert.match(await response.text(), /run not found/i);
   });
@@ -680,15 +680,15 @@ test("archiving the selected Run returns to the current status list", async () =
       assert.equal(await page.locator(".run-title").textContent(), runName);
       const archived = page.waitForResponse((response) =>
         response.request().method() === "POST"
-        && new URL(response.url()).pathname === `/api/archive/runs/${runId}`
+        && new URL(response.url()).pathname === `/api/projects/responsive/archive/runs/${runId}`
       );
       await page.locator(".mem-view-list-item-row:has(.mem-view-list-item.active) .mem-view-list-item-actions button").click();
       await page.locator("dialog.mem-view-confirm").getByRole("button", { name: "归档", exact: true }).click();
       assert.equal((await archived).status(), 200);
-      await page.locator('.view-host-mount[data-view-location="/tasks"]').waitFor();
+      await page.locator('.view-host-mount[data-view-location="/projects/responsive/tasks"]').waitFor();
       assert.match(await page.locator(".run-workspace").innerText(), /选择一个 Run/);
       assert.doesNotMatch(await page.locator(".run-workspace").textContent() ?? "", /加载中|Loading/);
-      assert.equal(new URL(page.url()).pathname, "/tasks");
+      assert.equal(new URL(page.url()).pathname, "/projects/responsive/tasks");
     } finally {
       await page.close();
     }
@@ -702,7 +702,7 @@ test("Memory nav only shows the Project Catalog and can hide installed system me
     try {
       await page.goto(url);
       await page.getByRole("button", { name: "记忆", exact: true }).click();
-      await page.waitForURL(`${url}/memories`);
+      await page.waitForURL(`${url}/projects/responsive/memories`);
       await page.getByRole("button", { name: "User note", exact: true }).waitFor();
       const hideSystem = page.getByLabel("隐藏系统记忆");
       assert.equal(await hideSystem.isChecked(), true);
@@ -728,14 +728,14 @@ test("Memory navigation uses aliases while the detail header exposes the canonic
     try {
       await page.goto(url);
       await page.getByRole("button", { name: "记忆", exact: true }).click();
-      await page.waitForURL(`${url}/memories`);
+      await page.waitForURL(`${url}/projects/responsive/memories`);
       await page.getByRole("button", { name: "User note", exact: true }).waitFor();
       await page.getByRole("button", { name: "User note", exact: true }).click();
-      await page.waitForURL(`${url}/memories/concepts/user-note`);
+      await page.waitForURL(`${url}/projects/responsive/memories/concepts/user-note`);
       await page.locator(".memory-title", { hasText: "User note" }).waitFor();
       assert.equal(await page.locator(".memory-title").textContent(), "User note");
       assert.match(await page.locator('[data-view-slot="header.title"] p').textContent() ?? "", /concepts\/user-note/);
-      assert.equal(new URL(page.url()).pathname, "/memories/concepts/user-note");
+      assert.equal(new URL(page.url()).pathname, "/projects/responsive/memories/concepts/user-note");
 
       await page.getByPlaceholder("搜索当前项目").fill("concepts/user-note");
       await page.getByRole("button", { name: "User note", exact: true }).waitFor();
@@ -746,14 +746,14 @@ test("Memory navigation uses aliases while the detail header exposes the canonic
 
       await page.getByPlaceholder("搜索当前项目").fill("canonical-only");
       await page.getByRole("button", { name: "canonical-only", exact: true }).click();
-      await page.waitForURL(`${url}/memories/concepts/canonical-only`);
+      await page.waitForURL(`${url}/projects/responsive/memories/concepts/canonical-only`);
       await page.locator(".memory-title", { hasText: "canonical-only" }).waitFor();
       assert.equal(await page.locator(".memory-title").textContent(), "canonical-only");
       assert.match(await page.locator('[data-view-slot="header.title"] p').textContent() ?? "", /concepts\/canonical-only/);
 
       await page.getByPlaceholder("搜索当前项目").fill("concepts/broken-memory.yaml");
       await page.getByRole("button", { name: "broken-memory", exact: true }).click();
-      await page.waitForURL(`${url}/memories/concepts/broken-memory`);
+      await page.waitForURL(`${url}/projects/responsive/memories/concepts/broken-memory`);
       await page.locator(".memory-error").waitFor();
       assert.equal(await page.locator(".memory-error h3").textContent(), "记忆 YAML 无效");
       assert.equal(await page.locator(".mem-view-list-item.active .mem-view-list-item-heading strong").textContent(), "broken-memory");
@@ -766,7 +766,7 @@ test("Memory navigation uses aliases while the detail header exposes the canonic
 
 test("Memory API identifies installed system memory independently of its file path", async () => {
   await withResponsiveView(async (_browser, url) => {
-    const response = await fetch(`${url}/api/memories`);
+    const response = await fetch(`${url}/api/projects/responsive/memories`);
     const payload = await response.json() as {
       memories: Array<{ path: string; system: boolean; entity?: { names?: string[] } }>;
       systemMemoryPaths?: unknown;
@@ -783,9 +783,9 @@ test("Memory API identifies installed system memory independently of its file pa
 
 test("Memory detail keeps rule references raw unless effective expansion is requested", async () => {
   await withResponsiveView(async (_browser, url) => {
-    const summaryResponse = await fetch(`${url}/api/memories?representation=summary`);
+    const summaryResponse = await fetch(`${url}/api/projects/responsive/memories?representation=summary`);
     assert.equal(summaryResponse.status, 200, await summaryResponse.text());
-    const rawResponse = await fetch(`${url}/api/memories/statements/referencing-rules`);
+    const rawResponse = await fetch(`${url}/api/projects/responsive/memories/statements/referencing-rules`);
     const raw = await rawResponse.json() as { memory: { entity: Record<string, unknown> } };
     assert.equal(rawResponse.status, 200);
     assert.deepEqual((raw.memory.entity.asserts as unknown[])[1], {
@@ -794,7 +794,7 @@ test("Memory detail keeps rule references raw unless effective expansion is requ
     });
     assert.equal(Object.hasOwn(raw.memory.entity, "effectiveRules"), false);
 
-    const effectiveResponse = await fetch(`${url}/api/memories/statements/referencing-rules?effective=true`);
+    const effectiveResponse = await fetch(`${url}/api/projects/responsive/memories/statements/referencing-rules?effective=true`);
     const effective = await effectiveResponse.json() as {
       memory: { entity: { effectiveRules: { asserts: unknown[] } } };
     };
@@ -814,7 +814,7 @@ test("Memory detail keeps rule references raw unless effective expansion is requ
     assert.doesNotMatch(JSON.stringify(effective), /"entries"|"sections":\[\]|"defines":\[\]/);
     assert.doesNotMatch(JSON.stringify(effective), /ruleId|source_path|imported_at/);
 
-    const aliasResponse = await fetch(`${url}/api/memories/statements/referencing-alias?effective=true`);
+    const aliasResponse = await fetch(`${url}/api/projects/responsive/memories/statements/referencing-alias?effective=true`);
     assert.equal(aliasResponse.status, 400);
     assert.match(await aliasResponse.text(), /Statement not found: statements\/shared-rules-alias/);
   });
@@ -825,7 +825,7 @@ test("default Chinese Memory detail renders Schema labels without fixed English 
     const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
     page.setDefaultTimeout(10_000);
     try {
-      await page.goto(`${url}/memories/schemas/reviewable-schema`);
+      await page.goto(`${url}/projects/responsive/memories/schemas/reviewable-schema`);
       await page.locator(".memory-title", { hasText: "Reviewable schema" }).waitFor();
       assert.match(await page.locator(".node-badges").first().textContent() ?? "", /可选: true/);
       assert.equal(await page.locator(".schema-field-type").first().textContent(), "短文本");
@@ -841,7 +841,7 @@ test("published Statement references expand in place without ChangeSet comment c
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
     try {
-      await page.goto(`${url}/memories/statements/referencing-alias`);
+      await page.goto(`${url}/projects/responsive/memories/statements/referencing-alias`);
       await page.locator('[data-view-slot="header.title"] p', { hasText: "statements/referencing-alias" }).waitFor();
       const invalidAlias = page.getByRole("button", { name: "statements/shared-rules-alias", exact: true });
       await invalidAlias.waitFor();
@@ -849,7 +849,7 @@ test("published Statement references expand in place without ChangeSet comment c
       await invalidAlias.click();
       assert.match(await page.locator('[data-view-slot="header.title"] p').textContent() ?? "", /statements\/referencing-alias/);
 
-      await page.goto(`${url}/memories/statements/referencing-rules`);
+      await page.goto(`${url}/projects/responsive/memories/statements/referencing-rules`);
       await page.locator(".memory-title", { hasText: "Referencing rules" }).waitFor();
       const reference = page.locator(".rule-reference", { hasText: "statements/shared-rules" }).first();
       await reference.waitFor();
@@ -880,7 +880,7 @@ test("published Procedure Action references do not expose ChangeSet comment cont
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
     try {
-      await page.goto(`${url}/memories/procedures/reviewable-procedure`);
+      await page.goto(`${url}/projects/responsive/memories/procedures/reviewable-procedure`);
       await page.locator(".memory-title", { hasText: "Reviewable procedure" }).waitFor();
       const reference = page.locator(".rule-reference", { hasText: "statements/shared-rules" });
       await reference.waitFor();
@@ -909,13 +909,13 @@ test("multiple Human identities require and persist a Project-local ChangeSet se
     const page = await browser.newPage();
     page.setDefaultTimeout(10_000);
     try {
-      await page.goto(`${url}/memories`, { waitUntil: "networkidle" });
+      await page.goto(`${url}/projects/responsive/memories`, { waitUntil: "networkidle" });
       assert.equal(await page.evaluate(() => localStorage.getItem("memsphere.changeActorSelection.v1")), null);
       const dialogs: string[] = [];
       await page.locator(".mem-view-list-item").first().click();
       await page.locator(".memory-title").waitFor();
       const created = page.waitForRequest((request) => (
-        request.method() === "POST" && new URL(request.url()).pathname === "/api/changes"
+        request.method() === "POST" && new URL(request.url()).pathname === "/api/projects/responsive/changes"
       ));
       await page.getByRole("button", { name: "创建变更", exact: true }).click();
       const operatorPrompt = page.waitForEvent("dialog");
@@ -943,7 +943,7 @@ test("Run pages do not expose the retired Task Review entry or inline comments",
     try {
       await page.goto(url);
       const runsLoaded = page.waitForResponse(
-        (response) => new URL(response.url()).pathname === "/api/runs" && response.ok()
+        (response) => new URL(response.url()).pathname === "/api/projects/responsive/runs" && response.ok()
       );
       await page.getByRole("button", { name: "运行", exact: true }).click();
       await runsLoaded;
@@ -963,59 +963,59 @@ test("View deep links restore Memory, Run, and browser history", async () => {
     const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
     page.setDefaultTimeout(10_000);
     try {
-      await page.goto(`${url}/memories/concepts/user-note`, { waitUntil: "networkidle" });
+      await page.goto(`${url}/projects/responsive/memories/concepts/user-note`, { waitUntil: "networkidle" });
       assert.equal(await page.locator(".memory-title").textContent(), "User note", await page.locator("body").innerText());
       assert.match(await page.locator(".memory-workspace").textContent() ?? "", /A user memory fixture/);
-      assert.equal(new URL(page.url()).pathname, "/memories/concepts/user-note");
+      assert.equal(new URL(page.url()).pathname, "/projects/responsive/memories/concepts/user-note");
 
-      await page.goto(`${url}/memories/schemas/reviewable-schema`);
+      await page.goto(`${url}/projects/responsive/memories/schemas/reviewable-schema`);
       await page.locator(".memory-title", { hasText: "Reviewable schema" }).waitFor();
-      assert.equal(new URL(page.url()).pathname, "/memories/schemas/reviewable-schema");
+      assert.equal(new URL(page.url()).pathname, "/projects/responsive/memories/schemas/reviewable-schema");
 
       const runsLoaded = page.waitForResponse(
-        (response) => new URL(response.url()).pathname === "/api/runs" && response.ok()
+        (response) => new URL(response.url()).pathname === "/api/projects/responsive/runs" && response.ok()
       );
       await page.getByRole("button", { name: "运行", exact: true }).click();
       await runsLoaded;
-      assert.equal(new URL(page.url()).pathname, "/tasks");
+      assert.equal(new URL(page.url()).pathname, "/projects/responsive/tasks");
       const selectedDetailLoaded = page.waitForResponse(
-        (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
+        (response) => new URL(response.url()).pathname === `/api/projects/responsive/runs/${runId}` && response.ok()
       );
       await page.getByRole("button", { name: "已完成", exact: true }).click();
       await page.locator(".mem-view-list-item").first().click();
       await selectedDetailLoaded;
       await page.waitForLoadState("networkidle");
-      assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
+      assert.equal(new URL(page.url()).pathname, `/projects/responsive/tasks/${runId}`);
       await page.evaluate(() => history.back());
-      await page.waitForURL(url + "/tasks?status=done");
+      await page.waitForURL(url + "/projects/responsive/tasks?status=done");
       await page.waitForLoadState("networkidle");
-      assert.equal(new URL(page.url()).pathname, "/tasks");
+      assert.equal(new URL(page.url()).pathname, "/projects/responsive/tasks");
       assert.equal(new URL(page.url()).searchParams.get("status"), "done");
       await page.locator(".run-workspace").getByText("选择一个 Run 查看详情。", { exact: true }).waitFor();
       assert.equal(await page.locator(".mem-view-list-item.active").count(), 0);
       const forwardDetailLoaded = page.waitForResponse(
-        (response) => new URL(response.url()).pathname === `/api/runs/${runId}` && response.ok()
+        (response) => new URL(response.url()).pathname === `/api/projects/responsive/runs/${runId}` && response.ok()
       );
       await page.evaluate(() => history.forward());
-      await page.waitForURL(url + `/tasks/${runId}?status=done`);
+      await page.waitForURL(url + `/projects/responsive/tasks/${runId}?status=done`);
       await forwardDetailLoaded;
       await page.waitForLoadState("networkidle");
       await page.locator(".run-title", { hasText: runName }).waitFor();
-      assert.equal(new URL(page.url()).pathname, `/tasks/${runId}`);
+      assert.equal(new URL(page.url()).pathname, `/projects/responsive/tasks/${runId}`);
       assert.equal(new URL(page.url()).searchParams.get("status"), "done");
 
       await page.evaluate(() => {
-        history.pushState({}, "", "/tasks");
+        history.pushState({}, "", "/projects/responsive/tasks");
         dispatchEvent(new PopStateEvent("popstate"));
       });
-      await page.waitForURL(url + "/tasks");
+      await page.waitForURL(url + "/projects/responsive/tasks");
 
       let releaseStaleRunDetail!: () => void;
       let captureStaleRunDetail!: () => void;
       const staleRunDetailGate = new Promise<void>((resolve) => { releaseStaleRunDetail = resolve; });
       const staleRunDetailCaptured = new Promise<void>((resolve) => { captureStaleRunDetail = resolve; });
       let delayedRunDetail = false;
-      await page.route(`**/api/runs/${runId}`, async (route) => {
+      await page.route(`**/api/projects/responsive/runs/${runId}`, async (route) => {
         if (delayedRunDetail) return route.continue();
         delayedRunDetail = true;
         const response = await route.fetch();
@@ -1024,30 +1024,30 @@ test("View deep links restore Memory, Run, and browser history", async () => {
         await route.fulfill({ response });
       });
       const staleRunDetailResponse = page.waitForResponse(
-        (response) => new URL(response.url()).pathname === `/api/runs/${runId}`
+        (response) => new URL(response.url()).pathname === `/api/projects/responsive/runs/${runId}`
       );
       await page.evaluate((path) => {
         history.pushState({}, "", path);
         dispatchEvent(new PopStateEvent("popstate"));
-      }, `/tasks/${runId}`);
+      }, `/projects/responsive/tasks/${runId}`);
       await staleRunDetailCaptured;
 
       const latestRunDetailResponse = page.waitForResponse(
-        (response) => new URL(response.url()).pathname === `/api/runs/${legacyRunId}`
+        (response) => new URL(response.url()).pathname === `/api/projects/responsive/runs/${legacyRunId}`
       );
       await page.evaluate((path) => {
         history.pushState({}, "", path);
         dispatchEvent(new PopStateEvent("popstate"));
-      }, `/tasks/${legacyRunId}`);
+      }, `/projects/responsive/tasks/${legacyRunId}`);
       releaseStaleRunDetail();
       assert.equal((await staleRunDetailResponse).status(), 200);
       assert.equal((await latestRunDetailResponse).status(), 200);
       await page.locator(".run-title", { hasText: "Legacy procedure fallback" }).waitFor();
-      assert.equal(new URL(page.url()).pathname, `/tasks/${legacyRunId}`);
+      assert.equal(new URL(page.url()).pathname, `/projects/responsive/tasks/${legacyRunId}`);
       assert.equal(await page.locator(".run-title").textContent(), "Legacy procedure fallback");
 
       const missing = await browser.newPage();
-      await missing.goto(`${url}/memories/concepts/${encodeURIComponent("Missing memory")}`);
+      await missing.goto(`${url}/projects/responsive/memories/concepts/${encodeURIComponent("Missing memory")}`);
       await missing.locator(".memory-error").waitFor();
       assert.match(await missing.locator(".memory-error").textContent() ?? "", /未找到|not found/i);
       await missing.close();

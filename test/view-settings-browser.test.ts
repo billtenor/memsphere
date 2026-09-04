@@ -46,7 +46,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.equal((await settingsButton.textContent())?.trim(), "设置");
     assert.match(await settingsButton.locator(".mem-view-system-icon").getAttribute("style") ?? "", /gear-six\.svg/);
     await settingsButton.click();
-    assert.equal(new URL(page.url()).pathname, "/settings/general");
+    assert.equal(new URL(page.url()).pathname, "/projects/demo/settings/general");
     await page.locator("#memsphere-view-root .settings-detail-surface").waitFor();
 
     const settingsNav = page.locator('[data-view-slot="navigation.secondary"]');
@@ -60,17 +60,17 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.equal(await page.locator(".view-shell-list-panel").evaluate(element => getComputedStyle(element).display), "none");
     await settingsNav.getByRole("button", { name: "界面服务", exact: true }).click();
     await page.getByRole("heading", { name: "界面服务", exact: true, level: 3 }).waitFor();
-    assert.equal(new URL(page.url()).pathname, "/settings/view");
+    assert.equal(new URL(page.url()).pathname, "/projects/demo/settings/view");
     assert.equal(await page.getByText("当前运行地址").count(), 0);
     assert.equal(await page.getByText("保存并重启后地址").count(), 0);
     await participantSettings.click();
-    assert.equal(new URL(page.url()).pathname, "/settings/participants");
+    assert.equal(new URL(page.url()).pathname, "/projects/demo/settings/participants");
     await page.goBack();
     await page.getByRole("heading", { name: "界面服务", exact: true, level: 3 }).waitFor();
-    assert.equal(new URL(page.url()).pathname, "/settings/view");
+    assert.equal(new URL(page.url()).pathname, "/projects/demo/settings/view");
     await page.goForward();
     await participantSettings.waitFor();
-    assert.equal(new URL(page.url()).pathname, "/settings/participants");
+    assert.equal(new URL(page.url()).pathname, "/projects/demo/settings/participants");
     const directSettings = await browser.newPage();
     await directSettings.goto(`http://127.0.0.1:${port}/settings/project`, { waitUntil: "networkidle" });
     await directSettings.locator(".settings-page-header h2", { hasText: "demo 项目设置" }).waitFor({ state: "attached" });
@@ -246,9 +246,9 @@ test("switching Projects replaces an entity URL with the new Project landing pag
     await memoryHeading.waitFor();
     assert.match(await memoryHeading.textContent() ?? "", /demo-memory|Demo memory/);
     await chooseProject(page, "beta");
-    await page.waitForURL(`http://127.0.0.1:${port}/memories`);
+    await page.waitForURL(`http://127.0.0.1:${port}/projects/beta/memories`);
     await page.locator("#view-shell-project-trigger", { hasText: "beta" }).waitFor();
-    assert.equal(new URL(page.url()).pathname, "/memories");
+    assert.equal(new URL(page.url()).pathname, "/projects/beta/memories");
   } finally {
     await browser.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));

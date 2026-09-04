@@ -57,7 +57,7 @@ flow:
   try {
     const address = server.address();
     assert(address && typeof address === "object");
-    const detailResponse = await fetch(`http://127.0.0.1:${address.port}/api/runs/${started.id}`);
+    const detailResponse = await fetch(`http://127.0.0.1:${address.port}/api/projects/memsphere/runs/${started.id}`);
     assert.equal(detailResponse.status, 200);
     const detail = await detailResponse.json() as {
       run: { schemaWriting?: { draft?: { content?: string; contentError?: string } } };
@@ -66,7 +66,7 @@ flow:
     assert.equal(detail.run.schemaWriting?.draft?.contentError, undefined);
     assert.match(await readFile(draftPath, "utf8"), /memsphere:pending field=.*summary/);
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/api/runs`);
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/projects/memsphere/runs`);
     assert.equal(response.status, 200);
     const payload = await response.json() as {
       runs: Array<{

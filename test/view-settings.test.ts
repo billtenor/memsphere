@@ -277,7 +277,7 @@ test("global and Project Settings save independently and protect referenced Prov
       permissions: ["artifact.read"],
       agent: { provider: "codex" }
     };
-    const projectSaved = await fetch(`${origin}/api/settings/project`, {
+    const projectSaved = await fetch(`${origin}/api/projects/demo/settings/project`, {
       method: "PUT",
       headers: { "content-type": "application/json", origin },
       body: JSON.stringify({ expectedRevision: projectPayload.diskRevision, config: projectPayload.config })

@@ -35,6 +35,7 @@ type ChangeSummary = JsonRecord & {
 type MemoryConfig = {
   locale?: string;
   messages?: Readonly<Record<string, unknown>>;
+  projectApiBase?: string;
 };
 type MemoryRouteName = "index" | "market" | "memory-detail" | "project-index"
   | "project-memory-detail" | "project-market" | "change-detail";
@@ -435,18 +436,18 @@ export default defineViewPlugin<MemoryConfig>({
         icon: { kind: "system", name: "brain" },
         async search({ query, signal }) {
           const [memories, changes] = await Promise.all([
-            fetch("/api/memories?representation=summary", { signal }).then(async response => {
+            fetch(projectApiUrl(config, "/api/memories?representation=summary"), { signal }).then(async response => {
               if (!response.ok) throw new Error(await response.text());
               return response.json() as Promise<{ memories?: MemorySummary[] }>;
             }),
-            fetch("/api/changes", { signal }).then(response => response.ok ? response.json() as Promise<{ changes?: ChangeSummary[] }> : { changes: [] })
+            fetch(projectApiUrl(config, "/api/changes"), { signal }).then(response => response.ok ? response.json() as Promise<{ changes?: ChangeSummary[] }> : { changes: [] })
           ]);
           const needle = query.trim().toLowerCase();
           const memoryResults = (memories.memories ?? []).filter(memory => !needle || `${memoryName(memory)} ${memoryReference(memory)}`.toLowerCase().includes(needle)).slice(0, 24).map(memory => {
             const [kind, ...name] = memoryReference(memory).split("/");
             return {
               title: text(memoryName(memory)), summary: text(memoryReference(memory)), type: text(message(config, "navigation.memory")),
-              icon: { kind: "system" as const, name: "brain" }, route: routes.memoryDetail.to({ kind, name: name.join("/") })
+              icon: { kind: "system" as const, name: "brain" }, route: routes.projectMemoryDetail.to({ projectId: ctx.module.projectId, kind, name: name.join("/") })
             };
           });
           const changeResults = (changes.changes ?? []).filter(change => !needle || `${change.title ?? ""} ${change.id}`.toLowerCase().includes(needle)).slice(0, 12).map(change => ({
@@ -464,7 +465,7 @@ export default defineViewPlugin<MemoryConfig>({
       value: {
         label: text(message(config, "navigation.memory")),
         icon: { kind: "system", name: "brain" },
-        route: routes.index.to()
+        route: routes.projectIndex.to({ projectId: ctx.module.projectId })
       }
     });
     startMemoryHome(ctx, config, routes);
@@ -491,7 +492,7 @@ function startMemoryHome(ctx: ViewPluginContext, config: Readonly<MemoryConfig>,
     controller.abort();
     controller = new AbortController();
     try {
-      const response = await fetch("/api/changes", { signal: controller.signal });
+      const response = await fetch(projectApiUrl(config, "/api/changes"), { signal: controller.signal });
       if (!response.ok) throw new Error(await response.text());
       const payload = await response.json() as { changes?: ChangeSummary[] };
       const changes = (payload.changes ?? []).filter(change => change.status === "active" && !change.error);
@@ -659,7 +660,7 @@ function routeForMemoryLocation(routes: MemoryRoutes, location: RouteLocation): 
 function memorySecondaryDescriptor(
   config: Readonly<MemoryConfig>,
   routes: MemoryRoutes,
-  _projectId: string,
+  projectId: string,
   selected: "recent" | "project" | "market" | "changes",
   badges: Readonly<Record<string, number>> = {}
 ) {
@@ -667,10 +668,10 @@ function memorySecondaryDescriptor(
     title: text(message(config, "navigation.memory")),
     icon: { kind: "system" as const, name: "brain" },
     items: [
-      { id: "recent", label: text(message(config, "memory.recent")), icon: { kind: "system" as const, name: "clock-counter-clockwise" }, badge: badges.recent ? text(String(badges.recent)) : undefined, selected: selected === "recent", route: routes.index.to(undefined, { query: { section: "recent" } }) },
-      { id: "project", label: text(message(config, "navigation.currentProject")), icon: { kind: "system" as const, name: "brain" }, badge: badges.project ? text(String(badges.project)) : undefined, selected: selected === "project", route: routes.index.to() },
-      { id: "market", label: text(message(config, "navigation.memoryMarket")), icon: { kind: "system" as const, name: "storefront" }, badge: badges.market ? text(String(badges.market)) : undefined, selected: selected === "market", route: routes.market.to() },
-      { id: "changes", label: text(config.locale?.toLowerCase().startsWith("en") ? "ChangeSets" : "记忆变更"), icon: { kind: "system" as const, name: "archive" }, badge: badges.changes ? text(String(badges.changes)) : undefined, selected: selected === "changes", route: routes.index.to(undefined, { query: { section: "changes" } }) }
+      { id: "recent", label: text(message(config, "memory.recent")), icon: { kind: "system" as const, name: "clock-counter-clockwise" }, badge: badges.recent ? text(String(badges.recent)) : undefined, selected: selected === "recent", route: routes.projectIndex.to({ projectId }, { query: { section: "recent" } }) },
+      { id: "project", label: text(message(config, "navigation.currentProject")), icon: { kind: "system" as const, name: "brain" }, badge: badges.project ? text(String(badges.project)) : undefined, selected: selected === "project", route: routes.projectIndex.to({ projectId }) },
+      { id: "market", label: text(message(config, "navigation.memoryMarket")), icon: { kind: "system" as const, name: "storefront" }, badge: badges.market ? text(String(badges.market)) : undefined, selected: selected === "market", route: routes.projectMarket.to({ projectId }) },
+      { id: "changes", label: text(config.locale?.toLowerCase().startsWith("en") ? "ChangeSets" : "记忆变更"), icon: { kind: "system" as const, name: "archive" }, badge: badges.changes ? text(String(badges.changes)) : undefined, selected: selected === "changes", route: routes.projectIndex.to({ projectId }, { query: { section: "changes" } }) }
     ],
     footer: text(config.locale?.toLowerCase().startsWith("en")
       ? "Rendered consistently by navigation.secondary."
@@ -890,8 +891,9 @@ class MemoryApplication {
 
   headerTitle(): HeaderTitleDescriptor {
     const route = parseLocation(this.#location);
-    const memoryCrumb = { label: text(message(this.#config, "navigation.memory")), route: this.#routes.index.to() };
-    const projectCrumb = { label: text(message(this.#config, "navigation.currentProject")), route: this.#routes.index.to() };
+    const projectId = projectFromLocation(this.#location) || this.#currentProject || "memsphere";
+    const memoryCrumb = { label: text(message(this.#config, "navigation.memory")), route: this.#routes.projectIndex.to({ projectId }) };
+    const projectCrumb = { label: text(message(this.#config, "navigation.currentProject")), route: this.#routes.projectIndex.to({ projectId }) };
     if (route.kind === "memory-detail") {
       const detail = this.#memoryDetail;
       return {
@@ -907,7 +909,7 @@ class MemoryApplication {
       subtitle: text(this.#changeDetail?.change
         ? this.changeStatusLabel(String((this.#changeDetail.change as ChangeSummary).status ?? ""))
         : "ChangeSet"),
-      breadcrumbs: [memoryCrumb, { label: text(this.#config.locale?.toLowerCase().startsWith("en") ? "ChangeSets" : "记忆变更"), route: this.#routes.index.to(undefined, { query: { section: "changes" } }) }]
+      breadcrumbs: [memoryCrumb, { label: text(this.#config.locale?.toLowerCase().startsWith("en") ? "ChangeSets" : "记忆变更"), route: this.#routes.projectIndex.to({ projectId }, { query: { section: "changes" } }) }]
     };
     if (route.kind === "market") {
       const item = this.#market.find(candidate => candidate.reference === this.#selectedMarket);
@@ -1084,7 +1086,7 @@ class MemoryApplication {
   }
 
   private async request<T>(url: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(url, { ...init, signal: this.#controller.signal });
+    const response = await fetch(projectApiUrl(this.#config, url), { ...init, signal: this.#controller.signal });
     if (!response.ok) throw new Error(await response.text() || `${response.status} ${response.statusText}`);
     return response.json() as Promise<T>;
   }
@@ -1940,11 +1942,11 @@ class MemoryApplication {
     if (section === "project" && projectId) {
       return this.#routes.projectIndex.to({ projectId }, { query: { section } });
     }
-    return this.#routes.index.to(undefined, { query: { section } });
+    return this.#routes.projectIndex.to({ projectId: projectId || this.#currentProject || "memsphere" }, { query: { section } });
   }
 
   private marketTarget(item = ""): RouteTarget {
-    return this.#routes.market.to(undefined, { query: item ? { item } : {} });
+    return this.#routes.projectMarket.to({ projectId: projectFromLocation(this.#location) || this.#currentProject || "memsphere" }, { query: item ? { item } : {} });
   }
 
   private visibleMemories(): MemorySummary[] {
@@ -2016,7 +2018,7 @@ class MemoryApplication {
         if (!memory) return;
         const [kind, ...name] = memory.id.split("/");
         const query = this.#location.query.section ? { section: this.#location.query.section } : {};
-        void this.navigate(this.#routes.memoryDetail.to({ kind, name: name.join("/") }, { query }));
+        void this.navigate(this.#routes.projectMemoryDetail.to({ projectId: projectFromLocation(this.#location) || this.#currentProject || "memsphere", kind, name: name.join("/") }, { query }));
       }
     };
   }
@@ -2061,6 +2063,10 @@ function projectFromLocation(location: Pick<RouteLocation, "pathname">): string 
   const parts = location.pathname.split("/").filter(Boolean);
   if (parts[0] === "projects" && parts[1]) { try { return decodeURIComponent(parts[1]); } catch { return parts[1]; } }
   return "";
+}
+
+function projectApiUrl(config: Readonly<MemoryConfig>, path: string): string {
+  return path !== "/api/projects" && path.startsWith("/api/") && config.projectApiBase ? `${config.projectApiBase}${path.slice(4)}` : path;
 }
 
 type RenderOptions = {

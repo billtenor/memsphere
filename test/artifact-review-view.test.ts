@@ -119,7 +119,7 @@ flow:
     const address = server.address();
     assert(address && typeof address === "object");
     const base = `http://127.0.0.1:${address.port}`;
-    const publicRuns = await fetch(`${base}/api/runs`);
+    const publicRuns = await fetch(`${base}/api/projects/memsphere/runs`);
     assert.equal(publicRuns.status, 200);
     const publicSource = await publicRuns.text();
     assert.match(publicSource, /"artifactReview"/);
@@ -130,7 +130,7 @@ flow:
     assert.doesNotMatch(publicSource, /artifactReviews|Private candidate/);
     assert.doesNotMatch(publicSource, /attempt-private|workerPid|cliReadyAt|private-prompt|private-session|protocolVersion|private-agent|private-version|private-model|private-stop/);
 
-    const summaryResponse = await fetch(`${base}/api/runs?representation=summary`);
+    const summaryResponse = await fetch(`${base}/api/projects/memsphere/runs?representation=summary`);
     assert.equal(summaryResponse.status, 200);
     const summarySource = await summaryResponse.text();
     const summaryPayload = JSON.parse(summarySource) as {
@@ -148,8 +148,8 @@ flow:
     assert.equal(runSummary?.eventCount, 0);
     assert.doesNotMatch(summarySource, /artifactReviews|Private candidate|attempt-private/);
 
-    const roundPath = `${base}/api/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
-    const directRoundPath = `${base}/api/runs/${started.id}/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
+    const roundPath = `${base}/api/projects/memsphere/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
+    const directRoundPath = `${base}/api/projects/memsphere/runs/${started.id}/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
     const publicInitial = await fetch(roundPath);
     assert.equal(publicInitial.status, 200);
     const publicContext = await publicInitial.json() as ReviewContext;
@@ -257,7 +257,7 @@ flow:
     assert.equal(completed.artifactReviews?.[0]?.rounds[0]?.result?.decisionApprove, 2);
     assert.equal(completed.artifactReviews?.[0]?.rounds[0]?.result?.advisoryTotal, 1);
 
-    const completedRunsResponse = await fetch(`${base}/api/runs`);
+    const completedRunsResponse = await fetch(`${base}/api/projects/memsphere/runs`);
     assert.equal(completedRunsResponse.status, 200);
     const completedRuns = await completedRunsResponse.json() as {
       runs: Array<{
@@ -292,13 +292,13 @@ flow:
     assert.match(advisory?.renderedBody ?? "", /<p>Advisory suggestion<\/p>\s*<p>Second paragraph<\/p>/);
 
     await archiveRun({ archiveRoot, runsRoot, id: started.id });
-    const archivedDetail = await fetch(`${base}/api/runs/${started.id}`);
+    const archivedDetail = await fetch(`${base}/api/projects/memsphere/runs/${started.id}`);
     assert.equal(archivedDetail.status, 200);
     assert.equal((await archivedDetail.json() as { run: { readOnly?: boolean } }).run.readOnly, true);
     const archivedEvidence = await fetch(`${directRoundPath}?actor_id=alice`);
     assert.equal(archivedEvidence.status, 200);
     assert.equal((await archivedEvidence.json() as ReviewContext).submission.artifact.content, "# Private candidate\n");
-    const activeSummaries = await fetch(`${base}/api/runs?representation=summary`).then(response => response.json()) as {
+    const activeSummaries = await fetch(`${base}/api/projects/memsphere/runs?representation=summary`).then(response => response.json()) as {
       runs: Array<{ id: string }>;
     };
     assert.equal(activeSummaries.runs.some((candidate) => candidate.id === started.id), false);
@@ -311,7 +311,7 @@ flow:
       const directContextRequests: string[] = [];
       page.on("request", (request) => {
         const url = new URL(request.url());
-        if (url.pathname.startsWith(`/api/runs/${started.id}/artifact-reviews/${review.id}/rounds/`)) {
+        if (url.pathname.startsWith(`/api/projects/memsphere/runs/${started.id}/artifact-reviews/${review.id}/rounds/`)) {
           directContextRequests.push(url.pathname);
         }
       });
@@ -321,10 +321,10 @@ flow:
       await archivedModal.getByText("Private candidate", { exact: true }).waitFor();
 
       await page.locator(".mem-view-content-list").getByText("当前状态下没有 Run。", { exact: true }).waitFor();
-      assert.equal(new URL(page.url()).pathname, `/tasks/${started.id}/artifact-reviews/${review.id}`);
+      assert.equal(new URL(page.url()).pathname, `/projects/memsphere/tasks/${started.id}/artifact-reviews/${review.id}`);
       assert.equal(await archivedModal.isVisible(), true);
       await archivedModal.getByText("Private candidate", { exact: true }).waitFor();
-      assert.equal(directContextRequests.every(path => path.includes(`/api/runs/${started.id}/`)), true);
+      assert.equal(directContextRequests.every(path => path.includes(`/api/projects/memsphere/runs/${started.id}/`)), true);
       assert.equal(await page.locator(".mem-view-list-item").count(), 0);
     } finally {
       await browser.close();
@@ -388,7 +388,7 @@ flow:
   try {
     const address = server.address();
     assert(address && typeof address === "object");
-    const endpoint = `http://127.0.0.1:${address.port}/api/runs/${started.id}/bindings`;
+    const endpoint = `http://127.0.0.1:${address.port}/api/projects/memsphere/runs/${started.id}/bindings`;
     assert.equal((await fetch(`http://127.0.0.1:${address.port}/api/settings/global`)).status, 401);
     const initial = await fetch(endpoint);
     assert.equal(initial.status, 200);
@@ -494,7 +494,7 @@ flow:
   try {
     const address = server.address();
     assert(address && typeof address === "object");
-    const roundPath = `http://127.0.0.1:${address.port}/api/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
+    const roundPath = `http://127.0.0.1:${address.port}/api/projects/memsphere/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
     const response = await fetch(`${roundPath}?actor_id=human`);
     const source = await response.text();
     assert.equal(response.status, 200);

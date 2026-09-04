@@ -767,7 +767,10 @@ class SettingsApplication {
   settingsFetch(url: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
     if (this.#token) headers.set("authorization", `Bearer ${this.#token}`);
-    return fetch(url, { ...init, headers, signal: this.#signal });
+    const scopedUrl = this.#config.projectApiBase && (url === "/api/settings/project" || url.startsWith("/api/settings/project/"))
+      ? `${this.#config.projectApiBase}${url.slice(4)}`
+      : url;
+    return fetch(scopedUrl, { ...init, headers, signal: this.#signal });
   }
 
   fail(error: unknown): void {
@@ -789,7 +792,9 @@ class SettingsApplication {
 }
 
 function destinationFromPath(pathname: string): { scope: ScopeName; module: string } {
-  const name = decodeURIComponent(pathname.split("/").filter(Boolean)[1] ?? "general") as SectionName;
+  const parts = pathname.split("/").filter(Boolean);
+  const settingsIndex = parts.indexOf("settings");
+  const name = decodeURIComponent(parts[settingsIndex + 1] ?? "general") as SectionName;
   return sections[name] ?? sections.general;
 }
 

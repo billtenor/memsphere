@@ -24,7 +24,7 @@ export const builtinModuleCatalog: readonly BuiltinModuleCatalogEntry[] = deepFr
     title: "记忆",
     summary: "组织与维护项目记忆",
     icon: "brain",
-    homeRouteId: "index",
+    homeRouteId: "project-index",
     routes: [
       { id: "index", path: "/memories", query: ["section", "change"] },
       { id: "market", path: "/market", aliases: ["/memory-market"], query: ["item"] },

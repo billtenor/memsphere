@@ -4,6 +4,7 @@ import { createSettingsViews } from "./settings-view.js";
 export interface SettingsViewConfig {
   readonly locale?: string;
   readonly messages?: Readonly<Record<string, unknown>>;
+  readonly projectApiBase?: string;
 }
 
 export default defineViewPlugin<SettingsViewConfig>({

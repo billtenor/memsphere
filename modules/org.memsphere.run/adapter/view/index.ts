@@ -16,7 +16,7 @@ import { createRunDetailState, currentRunStep, renderRunDetail } from "./run-det
 import { runDetailStyles } from "./run-styles.js";
 
 type Json = Record<string, any>;
-type RunConfig = { locale?: string; messages?: Readonly<Record<string, string>> };
+type RunConfig = { locale?: string; messages?: Readonly<Record<string, string>>; projectApiBase?: string };
 type RunRoutes = { index: RouteToken; detail: RouteToken; review: RouteToken };
 type Navigate = (target: ReturnType<RouteToken["to"]>) => Promise<void>;
 type RefreshableViewMount = ViewMount & { refresh(): Promise<void> };
@@ -140,7 +140,7 @@ export default defineViewPlugin<RunConfig>({
         icon: { kind: "system", name: "play-circle" },
         async search({ query, signal }) {
           const groups = await Promise.all(["running", "done", "abandoned"].map(async status => {
-            const response = await fetch(`/api/runs?${new URLSearchParams({ representation: "summary", status })}`, { signal });
+            const response = await fetch(projectApiUrl(config, `/api/runs?${new URLSearchParams({ representation: "summary", status })}`), { signal });
             if (!response.ok) throw new Error(await response.text());
             return (await response.json() as { runs?: Json[] }).runs ?? [];
           }));
@@ -190,7 +190,7 @@ function startRunHome(ctx: ViewPluginContext, config: Readonly<RunConfig>, route
   const refresh = async () => {
     controller.abort(); controller = new AbortController();
     try {
-      const response = await fetch("/api/runs?representation=summary&status=running", { signal: controller.signal });
+      const response = await fetch(projectApiUrl(config, "/api/runs?representation=summary&status=running"), { signal: controller.signal });
       if (!response.ok) throw new Error(await response.text());
       const payload = await response.json() as { runs?: Json[] };
       const attentionKeep = new Set<string>();
@@ -655,7 +655,7 @@ class RunApplication {
     finally { this.#busy = false; }
   }
   async #request(path: string, init?: RequestInit): Promise<any> {
-    const response = await fetch(path, { ...init, signal: this.#controller.signal });
+    const response = await fetch(projectApiUrl(this.#config, path), { ...init, signal: this.#controller.signal });
     if (!response.ok) throw new Error((await response.text()) || `${response.status}`);
     return response.status === 204 ? null : response.json();
   }
@@ -920,11 +920,11 @@ class RunApplication {
   async #saveDraft(context:Json,runId:string,draft:Json,composer?:HTMLTextAreaElement,rerender=true):Promise<void>{
     await this.#persistDraft(context,runId,draft);if(composer){composer.value="";this.#composerByActor.delete(context.assignment.actorId);}if(rerender)this.#renderReview(runId,context.review.id);
   }
-  async #persistDraft(context:Json,runId:string,draft:Json):Promise<Json>{let active:Json=this.#reviewContext?.assignment?.actorId===context.assignment.actorId?this.#reviewContext!:context;const payload:{vote?:string;comments:Json[]}={comments:draft.comments||[]};if(draft.vote)payload.vote=draft.vote;let saved:Response|null=null;for(let attempt=0;attempt<5;attempt+=1){const response=await fetch(this.#assignmentUrl(active,"draft"),{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({...payload,expectedRevision:active.review.round.revision}),signal:this.#controller.signal});if(response.status!==409){saved=response;break;}if(attempt===4)throw new Error(tr(this.#config,"conflict"));active=await this.#request(`/api/runs/${encodeURIComponent(runId)}/artifact-reviews/${encodeURIComponent(context.review.id)}/rounds/${encodeURIComponent(this.#reviewRoundId)}?actor_id=${encodeURIComponent(context.assignment.actorId)}`);}if(!saved||!saved.ok)throw new Error(saved?await this.#responseError(saved):tr(this.#config,"conflict"));const result=await saved.json();this.#reviewContext=result;return result;}
+  async #persistDraft(context:Json,runId:string,draft:Json):Promise<Json>{let active:Json=this.#reviewContext?.assignment?.actorId===context.assignment.actorId?this.#reviewContext!:context;const payload:{vote?:string;comments:Json[]}={comments:draft.comments||[]};if(draft.vote)payload.vote=draft.vote;let saved:Response|null=null;for(let attempt=0;attempt<5;attempt+=1){const response=await fetch(projectApiUrl(this.#config,this.#assignmentUrl(active,"draft")),{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({...payload,expectedRevision:active.review.round.revision}),signal:this.#controller.signal});if(response.status!==409){saved=response;break;}if(attempt===4)throw new Error(tr(this.#config,"conflict"));active=await this.#request(`/api/runs/${encodeURIComponent(runId)}/artifact-reviews/${encodeURIComponent(context.review.id)}/rounds/${encodeURIComponent(this.#reviewRoundId)}?actor_id=${encodeURIComponent(context.assignment.actorId)}`);}if(!saved||!saved.ok)throw new Error(saved?await this.#responseError(saved):tr(this.#config,"conflict"));const result=await saved.json();this.#reviewContext=result;return result;}
   async #submitReview(context:Json,runId:string):Promise<void>{
     let latest=this.#reviewContext||context;const actorKey=latest.assignment.actorId;const localVote=this.#voteByActor.get(actorKey);if(localVote)latest=await this.#persistDraft(latest,runId,{vote:localVote,comments:latest.assignment?.draft?.comments||[]});let response=await this.#submitAssignment(latest);if(response.status===409){latest=await this.#request(`/api/runs/${encodeURIComponent(runId)}/artifact-reviews/${encodeURIComponent(context.review.id)}/rounds/${encodeURIComponent(this.#reviewRoundId)}?actor_id=${encodeURIComponent(actorKey)}`);this.#reviewContext=latest;if(localVote)latest=await this.#persistDraft(latest,runId,{vote:localVote,comments:latest.assignment?.draft?.comments||[]});response=await this.#submitAssignment(latest);}if(!response.ok)throw new Error(response.status===409?tr(this.#config,"conflict"):await this.#responseError(response));this.#reviewContext=await response.json();this.#voteByActor.delete(actorKey);this.#renderReview(runId,context.review.id);
   }
-  #submitAssignment(context:Json):Promise<Response>{return fetch(this.#assignmentUrl(context,"submit"),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({expectedRevision:context.review.round.revision}),signal:this.#controller.signal});}
+  #submitAssignment(context:Json):Promise<Response>{return fetch(projectApiUrl(this.#config,this.#assignmentUrl(context,"submit")),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({expectedRevision:context.review.round.revision}),signal:this.#controller.signal});}
   async #responseError(response:Response):Promise<string>{const text=await response.text();try{const payload=JSON.parse(text);return typeof payload?.error==="string"?payload.error:text;}catch{return text||tr(this.#config,"conflict");}}
   #participant(context:Json,round:Json,assignment:Json):HTMLElement{
     const row=document.createElement("article");row.className="artifact-review-row artifact-review-participant";row.id=`artifact-review-participant-${safeId(assignment.actorId)}`;const head=document.createElement("div");head.className="artifact-review-participant-head";const main=document.createElement("div");main.className="artifact-review-row-main";const name=document.createElement("b");name.textContent=assignmentName(assignment);const meta=document.createElement("div");meta.className="artifact-review-participant-meta";meta.append(pill(`${assignment.binding==="decision"?tr(this.#config,"decision"):tr(this.#config,"advisory")} · ${assignment.actorKind==="agent"?tr(this.#config,"agent"):assignment.actorKind||"Human"}`),pill(assignmentStatus(this.#config,assignment)),pill(voteLabel(this.#config,assignment.vote||assignment.submitted?.vote)));main.append(name,meta);head.append(main);row.append(head);
@@ -945,6 +945,7 @@ class RunApplication {
 }
 
 function tr(config: Readonly<RunConfig>, key: string): string { const candidate=config.messages?.[key];return typeof candidate==="string"?candidate:((config.locale||document.documentElement.lang).startsWith("en")?en:zh)[key]||key; }
+function projectApiUrl(config: Readonly<RunConfig>, path: string): string { return path.startsWith("/api/") && config.projectApiBase ? `${config.projectApiBase}${path.slice(4)}` : path; }
 function normalizedRunStatus(value: unknown): string { return ["running", "done", "abandoned"].includes(String(value)) ? String(value) : "running"; }
 function displayName(run:Json):string{return String(run.name||run.procedureName||run.id||"");}function shortId(id:string):string{return String(id||"").replace(/^run-/,"").slice(0,18);}
 function formatTime(value:unknown):string{if(!value)return "—";const date=new Date(String(value));return Number.isNaN(date.valueOf())?String(value):date.toLocaleString();}
