@@ -139,8 +139,12 @@ function renderSearchOverlay(chinese: boolean): string {
 function renderInitialNavigation(initial: NonNullable<ViewShellMarkupOptions["initial"]>): string {
   return initial.navigation.map(item => {
     const active = item.href !== "/" && initial.pathname.startsWith(item.href);
+    const icon = initialIconName(item.icon);
+    const weightedIcon = active && ["brain", "circle", "cube", "gear-six", "house", "play-circle", "seal-check", "stack"].includes(icon)
+      ? `${icon}-fill`
+      : icon;
     return `<a class="view-shell-navigation-item${active ? " active" : ""}" href="${escapeHtml(item.href)}" aria-current="${active ? "page" : "false"}" title="${escapeHtml(item.label)}">
-      <span class="view-shell-module-icon"><img class="view-shell-icon" src="/assets/system-icons/${initialIconName(item.icon)}${active ? "-fill" : ""}.svg" alt="" aria-hidden="true" /></span>
+      <span class="view-shell-module-icon"><img class="view-shell-icon" src="/assets/system-icons/${weightedIcon}.svg" alt="" aria-hidden="true" /></span>
       <span>${escapeHtml(item.label)}</span>
     </a>`;
   }).join("");
@@ -243,6 +247,9 @@ export const viewShellStyles = `
   .view-overlay-drawer { justify-content: flex-end; }
   .view-overlay-surface { position: relative; width: min(90vw, calc(100% - 48px)); height: min(90dvh, calc(100vh - 48px)); max-height: none; overflow: hidden; border-radius: var(--mem-view-radius-lg); background: var(--mem-view-color-canvas); box-shadow: var(--mem-view-shadow-overlay); }
   .view-overlay-drawer .view-overlay-surface { width: min(720px, 100%); height: 100%; max-height: none; border-radius: 0; }
+  .view-overlay-dialog[data-size="compact"] .view-overlay-surface { width: min(560px, calc(100% - 48px)); height:auto; min-height:280px; max-height:min(640px, calc(100% - 48px)); }
+  .view-overlay-dialog[data-size="compact"] .view-overlay-mount { min-height:280px; }
+  .view-overlay-drawer[data-size="compact"] .view-overlay-surface { width: min(440px, 100%); }
   .view-overlay-close { position: absolute; z-index: 4; top: 16px; right: 16px; display: grid; place-items: center; width: 36px; height: 36px; padding: 9px; border: 0; border-radius: 50%; background: var(--mem-view-color-subtle); color: var(--mem-view-color-text); cursor: pointer; }
   .view-overlay-close .view-shell-icon { width: 18px; height: 18px; }
   .view-overlay-mount { width: 100%; height: 100%; min-width: 0; }
@@ -406,11 +413,14 @@ export const viewShellStyles = `
   .view-shell-navigation-item:hover { background: color-mix(in srgb, var(--mem-view-color-surface) 72%, transparent); color: var(--mem-view-color-accent-hover); }
   .view-shell-navigation-item.active { border: 0; background: var(--mem-view-color-surface); color: var(--mem-view-color-accent-hover); box-shadow: var(--mem-view-shadow-card); font-weight: 650; }
   .view-shell-module-icon { display:grid; width:34px; height:34px; place-items:center; border-radius:var(--mem-view-radius-md); background:var(--mem-view-color-subtle); }
-  .view-shell-navigation-item .view-shell-icon { width:22px; height:22px; filter:invert(37%) sepia(18%) saturate(1485%) hue-rotate(123deg) brightness(89%) contrast(86%); }
+  .view-shell-navigation-item .view-shell-icon { width:22px; height:22px; }
+  .view-shell-navigation-item img.view-shell-icon { filter:invert(37%) sepia(18%) saturate(1485%) hue-rotate(123deg) brightness(89%) contrast(86%); }
+  .view-shell-navigation-item .mem-view-system-icon { color:var(--mem-view-color-accent-hover); filter:none; }
   .view-shell-navigation-item[data-view-entry*="org.memsphere.run"] .view-shell-module-icon, .view-shell-navigation-item[data-view-entry*="org.memsphere.settings"] .view-shell-module-icon { background:var(--mem-view-color-subtle); }
-  .view-shell-navigation-item[data-view-entry*="org.memsphere.run"] .view-shell-icon, .view-shell-navigation-item[data-view-entry*="org.memsphere.settings"] .view-shell-icon { filter:invert(37%) sepia(18%) saturate(1485%) hue-rotate(123deg) brightness(89%) contrast(86%); }
+  .view-shell-navigation-item[data-view-entry*="org.memsphere.run"] img.view-shell-icon, .view-shell-navigation-item[data-view-entry*="org.memsphere.settings"] img.view-shell-icon { filter:invert(37%) sepia(18%) saturate(1485%) hue-rotate(123deg) brightness(89%) contrast(86%); }
   .view-shell-navigation-item.active .view-shell-module-icon { background:var(--mem-view-color-accent); }
-  .view-shell-navigation-item.active .view-shell-icon { filter:invert(1); }
+  .view-shell-navigation-item.active img.view-shell-icon { filter:invert(1); }
+  .view-shell-navigation-item.active .mem-view-system-icon { color:var(--mem-view-color-on-accent); filter:none; }
   .view-shell-navigation-item[data-view-entry*="org.memsphere.run"].active .view-shell-module-icon, .view-shell-navigation-item[data-view-entry*="org.memsphere.settings"].active .view-shell-module-icon { background:var(--mem-view-color-accent); }
   .view-shell-navigation-badge { position: absolute; transform: translate(21px, -19px); min-width: 16px; height: 16px; border-radius: var(--mem-view-radius-sm); background: var(--mem-view-color-badge); padding: 0 4px; color: var(--mem-view-color-on-accent); font-size: var(--mem-view-font-size-xs); line-height: 16px; }
   .view-shell-rail-spacer { min-height: 4px; flex: 1; }
@@ -493,16 +503,22 @@ export const viewShellStyles = `
   .view-shell-heading h1 { margin: 0 0 5px; color: var(--mem-view-color-text); font-size: var(--mem-view-font-size-xl); font-weight: 650; line-height: 1.3; letter-spacing: -.025em; }
   .view-shell-heading h1.memory-title, .view-shell-heading h1.run-title { font-size: var(--mem-view-font-size-xl); font-weight: 700; }
   .view-shell-heading p, .view-shell-breadcrumbs { margin: 0 0 4px; color: var(--mem-view-color-text-muted); font-size: var(--mem-view-font-size-xs); }
+  .view-shell-breadcrumbs { display:flex; min-width:0; align-items:center; gap:var(--mem-view-space-1); line-height:var(--mem-view-line-compact); }
+  .view-shell-breadcrumbs button { min-width:0; overflow:hidden; border:0; background:transparent; padding:0; color:inherit; font:inherit; line-height:inherit; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
+  .view-shell-breadcrumbs button:hover { color:var(--mem-view-color-accent); text-decoration:underline; text-underline-offset:2px; }
+  .view-shell-breadcrumbs button:focus-visible { border-radius:var(--mem-view-radius-sm); outline:2px solid var(--mem-view-color-accent); outline-offset:2px; }
+  .view-shell-breadcrumb-separator { flex:0 0 auto; color:var(--mem-view-color-text-muted); opacity:.7; }
   .view-shell-action { display:inline-flex; min-height:34px; align-items:center; justify-content:center; gap:7px; border:1px solid var(--mem-view-color-border); border-radius:var(--mem-view-radius-sm); background:var(--mem-view-color-surface); padding:0 12px; color:var(--mem-view-color-text); font-size:var(--mem-view-font-size-sm); font-weight:600; line-height:var(--mem-view-line-compact); cursor:pointer; }
   .view-shell-action .view-shell-icon { width:16px; height:16px; flex:0 0 auto; }
   .view-shell-action:not(:disabled):hover { border-color: var(--mem-view-color-border-strong); background: var(--mem-view-color-subtle); }
   .view-shell-action[data-tone="success"] { min-height:30px; border:0; border-radius:var(--mem-view-radius-pill); background:var(--mem-view-color-accent-soft); padding:0 10px; color:var(--mem-view-color-accent-hover); font-size:var(--mem-view-font-size-xs); font-weight:650; }
-  .view-shell-action[data-tone="success"] .view-shell-icon { width:14px; height:14px; filter:brightness(0) saturate(100%) invert(34%) sepia(19%) saturate(1391%) hue-rotate(126deg) brightness(91%) contrast(87%); }
+  .view-shell-action[data-tone="success"] .view-shell-icon { width:14px; height:14px; }
+  .view-shell-action[data-tone="success"] img.view-shell-icon { filter:brightness(0) saturate(100%) invert(34%) sepia(19%) saturate(1391%) hue-rotate(126deg) brightness(91%) contrast(87%); }
   .view-shell-action[data-tone="success"]:not(:disabled):hover { border:0; background:var(--mem-view-color-accent-soft); }
   .view-shell-header [data-view-slot="header.actions"] .view-shell-action:last-child:not(:disabled) { border-color: var(--mem-view-color-accent); background: var(--mem-view-color-accent); color: var(--mem-view-color-on-accent); }
-  .view-shell-header [data-view-slot="header.actions"] .view-shell-action:last-child:not(:disabled) .view-shell-icon { filter:brightness(0) saturate(100%) invert(1); }
+  .view-shell-header [data-view-slot="header.actions"] .view-shell-action:last-child:not(:disabled) img.view-shell-icon { filter:brightness(0) saturate(100%) invert(1); }
   .view-shell-header [data-view-slot="header.actions"] .view-shell-action:last-child:not(:disabled):hover { border-color: var(--mem-view-color-accent-hover); background: var(--mem-view-color-accent-hover); }
-  #memsphere-view-root { min-width: 0; min-height: 0; flex: 1; overflow: auto; }
+  #memsphere-view-root { min-width: 0; min-height: 0; flex: 1; overflow-x: hidden; overflow-y: auto; }
   .view-shell-side-panel { display:flex; width:min(300px, 38vw); min-width:260px; min-height:0; flex:0 0 auto; flex-direction:column; overflow:hidden; border-left:1px solid var(--mem-view-color-border); background:var(--mem-view-color-surface); box-shadow:-8px 0 24px color-mix(in srgb, var(--mem-view-color-text) 5%, transparent); }
   .view-shell-side-panel[hidden] { display:none; }
   .view-shell-side-panel > header { display:flex; min-height:58px; align-items:center; justify-content:space-between; gap:12px; padding:0 var(--mem-view-space-4); border-bottom:1px solid var(--mem-view-color-border); }
@@ -633,7 +649,7 @@ export const viewShellStyles = `
       width: 100%;
       height: calc(100dvh - var(--view-rail-width));
       grid-template-columns: minmax(0, 1fr);
-      grid-template-rows: 112px minmax(180px, 28vh) minmax(0, 1fr);
+      grid-template-rows: 112px minmax(260px, 36vh) minmax(0, 1fr);
     }
     .view-shell-secondary-panel { border-right: 0; border-bottom: 1px solid var(--mem-view-color-border); overflow: hidden; }
     .view-shell-list-panel { border-right: 0; border-bottom: 1px solid var(--mem-view-color-border); overflow: hidden; }

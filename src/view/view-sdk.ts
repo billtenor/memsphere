@@ -6,7 +6,10 @@ export type ViewThemeToken =
   | "color.canvas" | "color.surface" | "color.subtle"
   | "color.text" | "color.textMuted" | "color.border"
   | "color.accent" | "color.accentHover" | "color.accentSoft"
-  | "color.danger" | "color.dangerSoft" | "color.focusRing"
+  | "color.info" | "color.infoSoft" | "color.onInfo"
+  | "color.success" | "color.successSoft" | "color.onSuccess"
+  | "color.warning" | "color.warningSoft" | "color.onWarning"
+  | "color.danger" | "color.dangerSoft" | "color.onDanger" | "color.focusRing"
   | "color.onAccent" | "color.overlay" | "color.badge" | "color.account" | "color.borderStrong"
   | "font.sans" | "font.mono"
   | "font.sizeXs" | "font.sizeSm" | "font.sizeBase" | "font.sizeMd" | "font.sizeLg" | "font.sizeXl" | "font.sizeDisplay"
@@ -21,8 +24,14 @@ export const viewThemeCssVariables: Readonly<Record<ViewThemeToken, `--mem-view-
   "color.subtle": "--mem-view-color-subtle", "color.text": "--mem-view-color-text",
   "color.textMuted": "--mem-view-color-text-muted", "color.border": "--mem-view-color-border",
   "color.accent": "--mem-view-color-accent", "color.accentHover": "--mem-view-color-accent-hover",
-  "color.accentSoft": "--mem-view-color-accent-soft", "color.danger": "--mem-view-color-danger",
-  "color.dangerSoft": "--mem-view-color-danger-soft", "color.focusRing": "--mem-view-color-focus-ring",
+  "color.accentSoft": "--mem-view-color-accent-soft",
+  "color.info": "--mem-view-color-info", "color.infoSoft": "--mem-view-color-info-soft",
+  "color.onInfo": "--mem-view-color-on-info", "color.success": "--mem-view-color-success",
+  "color.successSoft": "--mem-view-color-success-soft", "color.onSuccess": "--mem-view-color-on-success",
+  "color.warning": "--mem-view-color-warning", "color.warningSoft": "--mem-view-color-warning-soft",
+  "color.onWarning": "--mem-view-color-on-warning", "color.danger": "--mem-view-color-danger",
+  "color.dangerSoft": "--mem-view-color-danger-soft",
+  "color.onDanger": "--mem-view-color-on-danger", "color.focusRing": "--mem-view-color-focus-ring",
   "color.onAccent": "--mem-view-color-on-accent", "color.overlay": "--mem-view-color-overlay",
   "color.badge": "--mem-view-color-badge", "color.account": "--mem-view-color-account",
   "color.borderStrong": "--mem-view-color-border-strong",
@@ -174,6 +183,22 @@ export type TextRef =
       readonly params?: Readonly<Record<string, string | number>>;
     };
 
+export const systemIconNames = Object.freeze([
+  "archive", "arrow-right", "arrows-clockwise", "brain", "caret-down", "check", "check-circle",
+  "circle-fill", "clock-counter-clockwise", "code", "cube", "file-text", "folder", "dots-three",
+  "gear-six", "house", "magnifying-glass", "play-circle", "plus", "seal-check", "sidebar-simple",
+  "sliders-horizontal", "sparkle", "stack", "storefront", "trash", "user", "warning-circle", "x"
+] as const);
+
+export type SystemIconName = typeof systemIconNames[number];
+
+const knownSystemIconNames = new Set<string>(systemIconNames);
+const knownSystemIconAliases = new Set(["memory", "play", "run", "gear", "settings", "search"]);
+
+export function isKnownSystemIconName(name: unknown): boolean {
+  return typeof name === "string" && (knownSystemIconNames.has(name) || knownSystemIconAliases.has(name));
+}
+
 export type IconRef =
   | { readonly kind: "system"; readonly name: string }
   | { readonly kind: "asset"; readonly url: string; readonly alt: TextRef };
@@ -184,6 +209,11 @@ export interface ActionDescriptor {
   readonly disabled?: boolean;
   readonly run: () => MaybePromise<void>;
 }
+
+export type ViewActivation = Readonly<
+  | { route: RouteTarget; action?: never }
+  | { route?: never; action: ActionDescriptor }
+>;
 
 export interface NavigationItemDescriptor {
   readonly label: TextRef;
@@ -259,17 +289,30 @@ export interface ContentListFilterDescriptor {
   readonly onInput: (value: string) => MaybePromise<void>;
 }
 
+export type UiTone = "default" | "info" | "success" | "warning" | "danger";
+export type UiSize = "sm" | "md";
+
+export interface BadgeDescriptor {
+  readonly label: TextRef;
+  readonly tone?: UiTone;
+  readonly icon?: IconRef;
+}
+
 export type ContentListItemDescriptor = Readonly<{
   id: string;
   title: TextRef;
   meta?: TextRef;
+  description?: TextRef;
   icon?: IconRef;
   badge?: TextRef;
+  badges?: readonly BadgeDescriptor[];
+  trailingActions?: readonly ActionDescriptor[];
   selected?: boolean;
-} & (
-  | { route: RouteTarget; action?: never }
-  | { route?: never; action: ActionDescriptor }
-)>;
+  disabled?: boolean;
+  expanded?: boolean;
+  toggle?: ActionDescriptor;
+  details?: ViewMount;
+} & ViewActivation>;
 
 export interface ContentListSectionDescriptor {
   readonly id: string;
@@ -288,21 +331,140 @@ export interface ContentListHeaderDescriptor {
   readonly action?: ActionDescriptor;
 }
 
-export interface ContentListDescriptor {
+export type ContentListDescriptor = Readonly<{
   readonly label: TextRef;
   readonly header?: ContentListHeaderDescriptor;
-  readonly state?: "ready" | "loading";
   readonly filter?: ContentListFilterDescriptor;
-  readonly empty: ContentListEmptyDescriptor;
   readonly sections: readonly ContentListSectionDescriptor[];
-}
+} & (
+  | { readonly state?: "ready"; readonly empty: ContentListEmptyDescriptor; readonly error?: never }
+  | { readonly state: "loading"; readonly empty?: ContentListEmptyDescriptor; readonly error?: never }
+  | { readonly state: "error"; readonly empty?: ContentListEmptyDescriptor; readonly error: FeedbackDescriptor }
+)>;
 
 export interface ConfirmationDescriptor {
   readonly title: TextRef;
   readonly description?: TextRef;
   readonly confirmLabel: TextRef;
   readonly cancelLabel: TextRef;
+  readonly closeLabel?: TextRef;
   readonly tone?: "primary" | "danger";
+}
+
+export interface FeedbackDescriptor {
+  readonly state: "loading" | "empty" | "error" | "success" | "read-only";
+  readonly title: TextRef;
+  readonly description?: TextRef;
+  readonly action?: ActionDescriptor;
+  readonly icon?: IconRef;
+}
+
+export type TabItemDescriptor = Readonly<{
+  id: string;
+  label: TextRef;
+  icon?: IconRef;
+  disabled?: boolean;
+  panelId?: string;
+} & ViewActivation>;
+
+export interface TabsDescriptor {
+  readonly label: TextRef;
+  readonly items: readonly TabItemDescriptor[];
+  readonly selectedId: string;
+}
+
+export interface SegmentedControlItemDescriptor {
+  readonly id: string;
+  readonly label: TextRef;
+  readonly icon?: IconRef;
+  readonly disabled?: boolean;
+}
+
+export interface SegmentedControlDescriptor {
+  readonly label: TextRef;
+  readonly items: readonly SegmentedControlItemDescriptor[];
+  readonly selectedId: string;
+  readonly onSelect: (id: string) => MaybePromise<void>;
+}
+
+export interface DisclosureDescriptor {
+  readonly title: TextRef;
+  readonly description?: TextRef;
+  readonly meta?: TextRef;
+  readonly icon?: IconRef;
+  readonly expanded?: boolean;
+  readonly disabled?: boolean;
+  readonly content: HTMLElement | ViewMount;
+  readonly onToggle?: (expanded: boolean) => MaybePromise<void>;
+}
+
+export interface FieldDescriptor {
+  readonly label: TextRef;
+  readonly description?: TextRef;
+  readonly error?: TextRef;
+  readonly required?: boolean;
+  readonly disabled?: boolean;
+  readonly readOnly?: boolean;
+}
+
+export interface TextFieldDescriptor extends FieldDescriptor {
+  readonly value: string;
+  readonly placeholder?: TextRef;
+  readonly onInput: (value: string) => MaybePromise<void>;
+}
+
+export interface CheckboxFieldDescriptor extends FieldDescriptor {
+  readonly checked: boolean;
+  readonly indeterminate?: boolean;
+  readonly onChange: (checked: boolean) => MaybePromise<void>;
+}
+
+export interface FieldHandle<
+  T extends HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement = HTMLInputElement,
+  D extends FieldDescriptor = FieldDescriptor,
+> {
+  readonly root: HTMLElement;
+  readonly control: T;
+  update(descriptor: D): void;
+}
+
+export interface SelectOptionDescriptor {
+  readonly value: string;
+  readonly label: TextRef;
+  readonly disabled?: boolean;
+}
+
+export interface SelectDescriptor extends FieldDescriptor {
+  readonly value: string;
+  readonly placeholder?: TextRef;
+  readonly options: readonly SelectOptionDescriptor[];
+  readonly onChange: (value: string) => MaybePromise<void>;
+}
+
+export interface ComboboxDescriptor extends SelectDescriptor {
+  readonly query: string;
+  readonly onInput: (query: string) => MaybePromise<void>;
+}
+
+export type ComboboxHandle = Pick<ViewMount, "mount"> & {
+  updateDescriptor(descriptor: ComboboxDescriptor): void;
+};
+
+export interface ProgressDescriptor {
+  readonly label: TextRef;
+  readonly value?: number;
+  readonly max?: number;
+  readonly description?: TextRef;
+  readonly state?: "default" | "success" | "error";
+}
+
+export interface ContainerDescriptor {
+  readonly title?: TextRef;
+  readonly description?: TextRef;
+  readonly icon?: IconRef;
+  readonly tone?: UiTone;
+  readonly actions?: readonly ActionDescriptor[];
+  readonly content: HTMLElement | ViewMount;
 }
 
 export type ContentListProvider = (
@@ -315,8 +477,22 @@ export interface ViewUi {
   button(action: ActionDescriptor, options?: Readonly<{ tone?: "default" | "primary" | "danger" }>): HTMLButtonElement;
   confirmButton(action: ActionDescriptor, confirmation: ConfirmationDescriptor, options?: Readonly<{ tone?: "default" | "primary" | "danger" }>): HTMLButtonElement;
   iconButton(action: ActionDescriptor): HTMLButtonElement;
-  badge(label: TextRef): HTMLElement;
+  badge(label: TextRef | BadgeDescriptor): HTMLElement;
   emptyState(empty: ContentListEmptyDescriptor): HTMLElement;
+  feedback(descriptor: FeedbackDescriptor): HTMLElement;
+  tabs(descriptor: TabsDescriptor): HTMLElement;
+  segmentedControl(descriptor: SegmentedControlDescriptor): HTMLElement;
+  disclosure(descriptor: DisclosureDescriptor): ViewMount;
+  textField(descriptor: TextFieldDescriptor): FieldHandle<HTMLInputElement, TextFieldDescriptor>;
+  searchField(descriptor: TextFieldDescriptor): FieldHandle<HTMLInputElement, TextFieldDescriptor>;
+  textareaField(descriptor: TextFieldDescriptor): FieldHandle<HTMLTextAreaElement, TextFieldDescriptor>;
+  checkboxField(descriptor: CheckboxFieldDescriptor): FieldHandle<HTMLInputElement, CheckboxFieldDescriptor>;
+  select(descriptor: SelectDescriptor): FieldHandle<HTMLSelectElement, SelectDescriptor>;
+  combobox(descriptor: ComboboxDescriptor): ComboboxHandle;
+  progress(descriptor: ProgressDescriptor): HTMLElement;
+  card(descriptor: ContainerDescriptor): ViewMount;
+  section(descriptor: ContainerDescriptor): ViewMount;
+  confirm(confirmation: ConfirmationDescriptor): Promise<boolean>;
 }
 
 export interface HeaderAccountDescriptor {
@@ -358,6 +534,8 @@ export interface HomeModuleItemDescriptor {
 export interface OverlayMountDescriptor {
   readonly label: TextRef;
   readonly presentation: "dialog" | "drawer";
+  /** Host-owned surface geometry. Wide remains the compatibility default. */
+  readonly size?: "wide" | "compact";
   readonly dismissible?: boolean;
   readonly background: RouteProjection;
   readonly mount: ViewMount;
@@ -464,8 +642,7 @@ export function isIconRef(value: unknown): value is IconRef {
   const candidate = value as { kind?: unknown; name?: unknown; url?: unknown; alt?: unknown };
   if (candidate.kind === "system") {
     return hasOnlyKeys(value, ["kind", "name"])
-      && typeof candidate.name === "string"
-      && candidate.name.length > 0;
+      && isKnownSystemIconName(candidate.name);
   }
   return hasOnlyKeys(value, ["kind", "url", "alt"])
     && candidate.kind === "asset"
@@ -580,13 +757,16 @@ function hasActionFields(candidate: Partial<ActionDescriptor>): boolean {
 
 export function isContentListDescriptor(value: unknown): value is ContentListDescriptor {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const candidate = value as Partial<ContentListDescriptor>;
-  return hasOnlyKeys(value, ["label", "header", "state", "filter", "empty", "sections"])
+  const candidate = value as Partial<ContentListDescriptor> & { error?: unknown };
+  const state = candidate.state ?? "ready";
+  return hasOnlyKeys(value, ["label", "header", "state", "filter", "empty", "error", "sections"])
     && isTextRef(candidate.label)
     && (candidate.header === undefined || isContentListHeaderDescriptor(candidate.header))
-    && (candidate.state === undefined || candidate.state === "ready" || candidate.state === "loading")
+    && ["ready", "loading", "error"].includes(state)
     && (candidate.filter === undefined || isContentListFilterDescriptor(candidate.filter))
-    && isContentListEmptyDescriptor(candidate.empty)
+    && (state === "ready" ? isContentListEmptyDescriptor(candidate.empty) && candidate.error === undefined : true)
+    && (state === "loading" ? candidate.error === undefined : true)
+    && (state === "error" ? isFeedbackDescriptor(candidate.error) && candidate.error.state === "error" : true)
     && Array.isArray(candidate.sections)
     && candidate.sections.every(isContentListSectionDescriptor)
     && new Set(candidate.sections.map(section => section.id)).size === candidate.sections.length
@@ -618,16 +798,198 @@ function isContentListItemDescriptor(value: unknown): value is ContentListItemDe
   const candidate = value as Partial<ContentListItemDescriptor> & { route?: unknown; action?: unknown };
   const hasRoute = candidate.route !== undefined;
   const hasAction = candidate.action !== undefined;
-  return hasOnlyKeys(value, ["id", "title", "meta", "icon", "badge", "selected", "route", "action"])
+  return hasOnlyKeys(value, ["id", "title", "meta", "description", "icon", "badge", "badges", "trailingActions", "selected", "disabled", "expanded", "toggle", "details", "route", "action"])
     && typeof candidate.id === "string" && candidate.id.length > 0
     && isTextRef(candidate.title)
     && (candidate.meta === undefined || isTextRef(candidate.meta))
+    && (candidate.description === undefined || isTextRef(candidate.description))
     && (candidate.icon === undefined || isIconRef(candidate.icon))
     && (candidate.badge === undefined || isTextRef(candidate.badge))
+    && (candidate.badges === undefined || (Array.isArray(candidate.badges) && candidate.badges.every(isBadgeDescriptor)))
+    && (candidate.trailingActions === undefined || (Array.isArray(candidate.trailingActions) && candidate.trailingActions.every(isActionDescriptor)))
     && (candidate.selected === undefined || typeof candidate.selected === "boolean")
+    && (candidate.disabled === undefined || typeof candidate.disabled === "boolean")
+    && (candidate.expanded === undefined || typeof candidate.expanded === "boolean")
+    && (candidate.toggle === undefined || isActionDescriptor(candidate.toggle))
+    && (candidate.details === undefined || isViewMount(candidate.details))
     && hasRoute !== hasAction
     && (!hasRoute || isRouteTarget(candidate.route))
     && (!hasAction || isActionDescriptor(candidate.action));
+}
+
+export function isBadgeDescriptor(value: unknown): value is BadgeDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<BadgeDescriptor>;
+  return hasOnlyKeys(value, ["label", "tone", "icon"])
+    && isTextRef(candidate.label)
+    && (candidate.tone === undefined || ["default", "info", "success", "warning", "danger"].includes(candidate.tone))
+    && (candidate.icon === undefined || isIconRef(candidate.icon));
+}
+
+export function isFeedbackDescriptor(value: unknown): value is FeedbackDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<FeedbackDescriptor>;
+  return hasOnlyKeys(value, ["state", "title", "description", "action", "icon"])
+    && ["loading", "empty", "error", "success", "read-only"].includes(String(candidate.state))
+    && isTextRef(candidate.title)
+    && (candidate.description === undefined || isTextRef(candidate.description))
+    && (candidate.action === undefined || isActionDescriptor(candidate.action))
+    && (candidate.icon === undefined || isIconRef(candidate.icon));
+}
+
+function isActivation(candidate: { route?: unknown; action?: unknown }): boolean {
+  const hasRoute = candidate.route !== undefined;
+  const hasAction = candidate.action !== undefined;
+  return hasRoute !== hasAction
+    && (!hasRoute || isRouteTarget(candidate.route))
+    && (!hasAction || isActionDescriptor(candidate.action));
+}
+
+export function isTabsDescriptor(value: unknown): value is TabsDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<TabsDescriptor>;
+  if (!hasOnlyKeys(value, ["label", "items", "selectedId"]) || !isTextRef(candidate.label)
+    || !Array.isArray(candidate.items) || typeof candidate.selectedId !== "string") return false;
+  const ids = new Set(candidate.items.map(item => item.id));
+  return ids.size === candidate.items.length && ids.has(candidate.selectedId) && candidate.items.every(item => {
+    const entry = item as TabItemDescriptor & { route?: unknown; action?: unknown };
+    return hasOnlyKeys(entry, ["id", "label", "icon", "disabled", "panelId", "route", "action"])
+      && typeof entry.id === "string" && entry.id.length > 0 && isTextRef(entry.label)
+      && (entry.icon === undefined || isIconRef(entry.icon))
+      && (entry.disabled === undefined || typeof entry.disabled === "boolean")
+      && (entry.panelId === undefined || (typeof entry.panelId === "string" && entry.panelId.length > 0))
+      && isActivation(entry);
+  });
+}
+
+export function isSegmentedControlDescriptor(value: unknown): value is SegmentedControlDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<SegmentedControlDescriptor>;
+  if (!hasOnlyKeys(value, ["label", "items", "selectedId", "onSelect"]) || !isTextRef(candidate.label)
+    || !Array.isArray(candidate.items) || typeof candidate.selectedId !== "string" || typeof candidate.onSelect !== "function") return false;
+  const ids = new Set(candidate.items.map(item => item.id));
+  return ids.size === candidate.items.length && ids.has(candidate.selectedId) && candidate.items.every(item => (
+    hasOnlyKeys(item, ["id", "label", "icon", "disabled"])
+    && typeof item.id === "string" && item.id.length > 0 && isTextRef(item.label)
+    && (item.icon === undefined || isIconRef(item.icon))
+    && (item.disabled === undefined || typeof item.disabled === "boolean")
+  ));
+}
+
+function hasFieldFields(candidate: Partial<FieldDescriptor>): boolean {
+  return isTextRef(candidate.label)
+    && (candidate.description === undefined || isTextRef(candidate.description))
+    && (candidate.error === undefined || isTextRef(candidate.error))
+    && (candidate.required === undefined || typeof candidate.required === "boolean")
+    && (candidate.disabled === undefined || typeof candidate.disabled === "boolean")
+    && (candidate.readOnly === undefined || typeof candidate.readOnly === "boolean");
+}
+
+export function isTextFieldDescriptor(value: unknown): value is TextFieldDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<TextFieldDescriptor>;
+  return hasOnlyKeys(value, ["label", "description", "error", "required", "disabled", "readOnly", "value", "placeholder", "onInput"])
+    && hasFieldFields(candidate) && typeof candidate.value === "string"
+    && (candidate.placeholder === undefined || isTextRef(candidate.placeholder)) && typeof candidate.onInput === "function";
+}
+
+export function isCheckboxFieldDescriptor(value: unknown): value is CheckboxFieldDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<CheckboxFieldDescriptor>;
+  return hasOnlyKeys(value, ["label", "description", "error", "required", "disabled", "readOnly", "checked", "indeterminate", "onChange"])
+    && hasFieldFields(candidate) && typeof candidate.checked === "boolean"
+    && (candidate.indeterminate === undefined || typeof candidate.indeterminate === "boolean") && typeof candidate.onChange === "function";
+}
+
+export function isSelectDescriptor(value: unknown): value is SelectDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<SelectDescriptor>;
+  return hasOnlyKeys(value, ["label", "description", "error", "required", "disabled", "readOnly", "value", "placeholder", "options", "onChange"])
+    && hasFieldFields(candidate)
+    && typeof candidate.value === "string"
+    && (candidate.placeholder === undefined || isTextRef(candidate.placeholder))
+    && Array.isArray(candidate.options)
+    && candidate.options.every(isSelectOptionDescriptor)
+    && new Set(candidate.options.map(option => option.value)).size === candidate.options.length
+    && typeof candidate.onChange === "function";
+}
+
+export function isComboboxDescriptor(value: unknown): value is ComboboxDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<ComboboxDescriptor>;
+  return hasOnlyKeys(value, ["label", "description", "error", "required", "disabled", "readOnly", "value", "placeholder", "options", "onChange", "query", "onInput"])
+    && hasFieldFields(candidate)
+    && typeof candidate.value === "string"
+    && typeof candidate.query === "string"
+    && (candidate.placeholder === undefined || isTextRef(candidate.placeholder))
+    && Array.isArray(candidate.options)
+    && candidate.options.every(isSelectOptionDescriptor)
+    && new Set(candidate.options.map(option => option.value)).size === candidate.options.length
+    && typeof candidate.onChange === "function"
+    && typeof candidate.onInput === "function";
+}
+
+function isSelectOptionDescriptor(value: unknown): value is SelectOptionDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<SelectOptionDescriptor>;
+  return hasOnlyKeys(value, ["value", "label", "disabled"])
+    && typeof candidate.value === "string"
+    && isTextRef(candidate.label)
+    && (candidate.disabled === undefined || typeof candidate.disabled === "boolean");
+}
+
+export function isDisclosureDescriptor(value: unknown): value is DisclosureDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<DisclosureDescriptor>;
+  return hasOnlyKeys(value, ["title", "description", "meta", "icon", "expanded", "disabled", "content", "onToggle"])
+    && isTextRef(candidate.title)
+    && (candidate.description === undefined || isTextRef(candidate.description))
+    && (candidate.meta === undefined || isTextRef(candidate.meta))
+    && (candidate.icon === undefined || isIconRef(candidate.icon))
+    && (candidate.expanded === undefined || typeof candidate.expanded === "boolean")
+    && (candidate.disabled === undefined || typeof candidate.disabled === "boolean")
+    && (isHtmlElement(candidate.content) || isViewMount(candidate.content))
+    && (candidate.onToggle === undefined || typeof candidate.onToggle === "function");
+}
+
+export function isProgressDescriptor(value: unknown): value is ProgressDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<ProgressDescriptor>;
+  const max = candidate.max ?? 100;
+  return hasOnlyKeys(value, ["label", "value", "max", "description", "state"])
+    && isTextRef(candidate.label)
+    && (candidate.description === undefined || isTextRef(candidate.description))
+    && typeof max === "number" && Number.isFinite(max) && max > 0
+    && (candidate.value === undefined || (typeof candidate.value === "number" && Number.isFinite(candidate.value) && candidate.value >= 0 && candidate.value <= max))
+    && (candidate.state === undefined || ["default", "success", "error"].includes(candidate.state));
+}
+
+export function isContainerDescriptor(value: unknown): value is ContainerDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<ContainerDescriptor>;
+  return hasOnlyKeys(value, ["title", "description", "icon", "tone", "actions", "content"])
+    && (candidate.title === undefined || isTextRef(candidate.title))
+    && (candidate.description === undefined || isTextRef(candidate.description))
+    && (candidate.icon === undefined || isIconRef(candidate.icon))
+    && (candidate.tone === undefined || ["default", "info", "success", "warning", "danger"].includes(candidate.tone))
+    && (candidate.actions === undefined || (Array.isArray(candidate.actions) && candidate.actions.every(isActionDescriptor)))
+    && (isHtmlElement(candidate.content) || isViewMount(candidate.content));
+}
+
+export function isConfirmationDescriptor(value: unknown): value is ConfirmationDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<ConfirmationDescriptor>;
+  return hasOnlyKeys(value, ["title", "description", "confirmLabel", "cancelLabel", "closeLabel", "tone"])
+    && isTextRef(candidate.title)
+    && (candidate.description === undefined || isTextRef(candidate.description))
+    && isTextRef(candidate.confirmLabel)
+    && isTextRef(candidate.cancelLabel)
+    && (candidate.closeLabel === undefined || isTextRef(candidate.closeLabel))
+    && (candidate.tone === undefined || ["primary", "danger"].includes(candidate.tone));
+}
+
+function isHtmlElement(value: unknown): value is HTMLElement {
+  return typeof HTMLElement !== "undefined" && value instanceof HTMLElement;
 }
 
 function isContentListSectionDescriptor(value: unknown): value is ContentListSectionDescriptor {
@@ -641,7 +1003,7 @@ function isContentListSectionDescriptor(value: unknown): value is ContentListSec
     && new Set(candidate.items.map(item => item.id)).size === candidate.items.length;
 }
 
-function isContentListEmptyDescriptor(value: unknown): value is ContentListEmptyDescriptor {
+export function isContentListEmptyDescriptor(value: unknown): value is ContentListEmptyDescriptor {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Partial<ContentListEmptyDescriptor>;
   return hasOnlyKeys(value, ["title", "description"])
@@ -708,9 +1070,10 @@ export function isHomeModuleItemDescriptor(value: unknown): value is HomeModuleI
 export function isOverlayMountDescriptor(value: unknown): value is OverlayMountDescriptor {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Partial<OverlayMountDescriptor>;
-  return hasOnlyKeys(value, ["label", "presentation", "dismissible", "background", "mount"])
+  return hasOnlyKeys(value, ["label", "presentation", "size", "dismissible", "background", "mount"])
     && isTextRef(candidate.label)
     && (candidate.presentation === "dialog" || candidate.presentation === "drawer")
+    && (candidate.size === undefined || candidate.size === "wide" || candidate.size === "compact")
     && (candidate.dismissible === undefined || typeof candidate.dismissible === "boolean")
     && isRouteProjection(candidate.background)
     && isViewMount(candidate.mount);

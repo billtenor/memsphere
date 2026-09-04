@@ -66,8 +66,8 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
     await page.goto(`${origin}/tasks/run-demo`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Demo Run", level: 1 }).waitFor();
     assert.match(await page.locator(".run-workspace").innerText(), /Inspect the result/);
-    assert.equal(await page.locator(".run-card.active").count(), 1);
-    assert.equal(await page.locator(".run-card.active .run-card-action").count(), 0);
+    assert.equal(await page.locator(".mem-view-list-item.active").count(), 1);
+    assert.equal(await page.locator(".mem-view-list-item-row:has(.mem-view-list-item.active) .mem-view-list-item-actions").count(), 0);
     assert.equal(await page.locator(".flow-item.branch").count(), 2);
     assert.equal(await page.locator(".flow-item.call").count(), 1);
     assert.equal(await page.locator('[data-current-task-step="true"]').getAttribute("data-step-id"), "step-1");
@@ -76,7 +76,7 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
     const reviewers = page.locator(".run-pill").filter({ hasText: "Reviewer:" });
     assert.equal(await reviewers.count(), 1);
     assert.equal(await reviewers.first().innerText(), "Reviewer: artifact_acceptance.unanimous");
-    await page.locator(".run-binding-toggle").click();
+    await page.locator(".run-bindings .mem-view-disclosure > button").click();
     assert.match(await page.locator(".run-binding-body").innerText(), /Human/);
     assert.match(await page.locator(".task-result").first().innerText(), /Rendered report/);
     await page.getByRole("button", { name: /Artifact review/ }).click();

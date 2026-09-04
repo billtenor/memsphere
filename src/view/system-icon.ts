@@ -1,9 +1,5 @@
-export const systemIconNames = Object.freeze([
-  "archive", "arrow-right", "arrows-clockwise", "brain", "caret-down", "check-circle",
-  "circle-fill", "clock-counter-clockwise", "code", "cube", "file-text", "folder",
-  "gear-six", "house", "magnifying-glass", "play-circle", "plus", "seal-check",
-  "sliders-horizontal", "sparkle", "stack", "storefront", "user", "warning-circle", "x"
-] as const);
+import { systemIconNames, type SystemIconName } from "./view-sdk.js";
+export { systemIconNames, type SystemIconName } from "./view-sdk.js";
 
 const systemIconNameSet = new Set<string>(systemIconNames);
 const aliases: Readonly<Record<string, string>> = Object.freeze({
@@ -15,11 +11,11 @@ const aliases: Readonly<Record<string, string>> = Object.freeze({
   search: "magnifying-glass"
 });
 
-export const fillSystemIconNames = new Set<string>([
-  "brain", "circle", "cube", "gear-six", "house", "play-circle", "seal-check", "stack"
-]);
-
 export function normalizeSystemIconName(name: string): string {
   const normalized = aliases[name] ?? name;
   return systemIconNameSet.has(normalized) ? normalized : "stack";
+}
+
+export function isSystemIconName(name: unknown): name is SystemIconName {
+  return typeof name === "string" && systemIconNameSet.has(aliases[name] ?? name);
 }

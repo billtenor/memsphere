@@ -15,6 +15,7 @@ import {
 } from "../src/view/host.js";
 
 const sdkSource = await browserModule("../src/view/view-sdk.ts");
+const systemIconSource = await browserModule("../src/view/system-icon.ts");
 const runtimeSource = await browserRuntimeBundle();
 const referenceSource = await browserEntryBundle("../modules/org.memsphere.reference/adapter/view/index.ts");
 
@@ -117,13 +118,90 @@ test("UI v1 renders, updates, navigates, and disposes a standard content list", 
     await page.keyboard.type("two", { delay: 30 });
     assert.equal(await filter.evaluate(element => element === document.activeElement), true);
     assert.equal(await filter.inputValue(), "two");
-    assert.match(await page.getByRole("button", { name: "two", exact: true }).locator("img").getAttribute("src") ?? "", /play-circle\.svg$/);
+    assert.match(await page.getByRole("button", { name: "two", exact: true }).locator(".mem-view-system-icon").getAttribute("style") ?? "", /play-circle\.svg/);
     await page.getByRole("button", { name: "two", exact: true }).click();
     assert.match(page.url(), /[?&]item=two/);
     assert.equal(await page.getByRole("button", { name: "two", exact: true }).getAttribute("aria-current"), "page");
     await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
     await page.waitForFunction(() => document.querySelector(".mem-view-content-list-root") === null);
   }, "/ui");
+});
+
+test("Content List isolates trailing actions, renders states, and disposes nested mounts", async () => {
+  const instance = {
+    ...bootInstance("org.memsphere.list-contract", "list-contract", "/list-contract.js", "/"),
+    routeGrants: [{ id: "index", path: "/list-contract" }]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, uiVersion: 1, inject: ["slots", "router", "ui"], apply(context) {
+      const route = context.router.register({ id: "index", path: "/list-contract" });
+      let expanded = true;
+      let state = "ready";
+      let renderContext;
+      window.__listContract = { row: 0, trailing: 0, mounts: 0, disposes: 0 };
+      const details = { mount({ element }) {
+        window.__listContract.mounts += 1;
+        element.textContent = "Nested details";
+        return () => { window.__listContract.disposes += 1; };
+      }};
+      const list = context.ui.contentList(current => {
+        renderContext = current;
+        if (state === "loading") return { label: { text: "Objects" }, state, sections: [] };
+        if (state === "error") return { label: { text: "Objects" }, state, error: { state: "error", title: { text: "List failed" } }, sections: [] };
+        return { label: { text: "Objects" }, header: { eyebrow: { text: "Module" }, title: { text: "An intentionally long content list title that must not compress its refresh action" }, action: { label: { text: "Refresh list" }, icon: { kind: "system", name: "arrows-clockwise" }, run() {} } }, empty: { title: { text: "Empty" } }, sections: [{ id: "all", items: [{
+          id: "one", title: { text: "One" }, description: { text: "Third line" },
+          badges: [{ label: { text: "Ready" }, tone: "success" }, { label: { text: "Two badges" }, tone: "info" }],
+          action: { label: { text: "Open One" }, run() { window.__listContract.row += 1; } },
+          trailingActions: [{ label: { text: "Bookmark" }, icon: { kind: "system", name: "check" }, run() { window.__listContract.trailing += 1; } }],
+          expanded, details,
+          toggle: { label: { text: expanded ? "Collapse details" : "Expand details" }, icon: { kind: "system", name: "caret-down" }, async run() { expanded = !expanded; await list.update(renderContext); } }
+        }] }] };
+      });
+      window.__setListState = async next => { state = next; await list.update(renderContext); };
+      context.slots.register(slots.contentList, { id: "list", when: route.activation, value: list });
+      context.slots.register(slots.mainView, { id: "page", key: route.key, value: { mount({ element }) { element.textContent = "List contract"; } } });
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/list-contract.js", bundle]]), undefined, async page => {
+    await page.getByText("Nested details", { exact: true }).waitFor();
+    assert.equal(await page.locator(".mem-view-list-item-badges .mem-view-badge").count(), 2);
+    const refresh = page.getByRole("button", { name: "Refresh list" });
+    assert.equal(await refresh.getAttribute("data-tooltip"), "Refresh list");
+    const refreshBox = await refresh.boundingBox();
+    assert(refreshBox && Math.abs(refreshBox.width - 34) < 1 && Math.abs(refreshBox.height - 34) < 1, JSON.stringify(refreshBox));
+    const bookmark = page.getByRole("button", { name: "Bookmark" });
+    assert.equal(await bookmark.getAttribute("title"), "Bookmark");
+    assert.equal(await bookmark.getAttribute("data-tooltip"), "Bookmark");
+    await bookmark.hover();
+    assert.equal(await bookmark.evaluate(node => getComputedStyle(node, "::after").content), '"Bookmark"');
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('[aria-label="Bookmark"]')!, "::after").opacity === "1");
+    assert.equal(await bookmark.evaluate(node => getComputedStyle(node, "::after").opacity), "1");
+    await bookmark.click();
+    assert.equal(await bookmark.getAttribute("title"), "Bookmark");
+    assert.deepEqual(await page.evaluate(() => ({ row: (window as any).__listContract.row, trailing: (window as any).__listContract.trailing })), { row: 0, trailing: 1 });
+    await page.getByRole("button", { name: "Collapse details" }).click();
+    await page.getByText("Nested details", { exact: true }).waitFor({ state: "detached" });
+    assert.deepEqual(await page.evaluate(() => ({ mounts: (window as any).__listContract.mounts, disposes: (window as any).__listContract.disposes })), { mounts: 1, disposes: 1 });
+    await page.getByRole("button", { name: "Expand details" }).click();
+    assert.equal(await page.getByRole("button", { name: "Collapse details" }).getAttribute("title"), "Collapse details");
+    await page.getByText("Nested details", { exact: true }).waitFor();
+    await page.evaluate(() => (window as any).__setListState("loading"));
+    await page.locator('.mem-view-list-loading[role="status"]').waitFor();
+    assert.equal(await page.evaluate(() => (window as any).__listContract.disposes), 2);
+    await page.evaluate(() => (window as any).__setListState("error"));
+    const listError = page.getByRole("alert");
+    await listError.getByText("List failed", { exact: true }).waitFor();
+    const listContentBox = await page.locator(".mem-view-list-content").boundingBox();
+    const listErrorBox = await listError.boundingBox();
+    assert(listContentBox && listErrorBox);
+    assert(listErrorBox.x > listContentBox.x);
+    assert(listErrorBox.x + listErrorBox.width < listContentBox.x + listContentBox.width);
+    await page.evaluate(() => (window as any).__setListState("ready"));
+    await page.getByText("Nested details", { exact: true }).waitFor();
+    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+    await page.waitForFunction(() => (window as any).__listContract.disposes === 3);
+  }, "/list-contract");
 });
 
 test("UI v1 isolates an invalid content-list provider update", async () => {
@@ -176,6 +254,142 @@ test("Reference Module keeps its standard filter focused during multi-character 
   }, "/reference");
 });
 
+test("Reference Module exposes the shared UI catalog and restores focus after confirmation", async () => {
+  const instance = {
+    ...bootInstance("org.memsphere.reference", "reference", "/reference.js", "/"),
+    config: { locale: "zh-CN" },
+    routeGrants: [
+      { id: "index", path: "/reference", query: ["item"] },
+      { id: "dialog", path: "/reference/dialog" },
+      { id: "drawer", path: "/reference/drawer" }
+    ]
+  };
+  await withPage(renderViewHostHtml("zh-CN", [instance]), new Map([["/reference.js", referenceSource]]), undefined, async page => {
+    await page.locator('html[data-view-host-state="ready"]').waitFor();
+    await page.getByText("表单字段", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "标记收藏" }).count(), 1);
+    assert.equal(await page.locator(".mem-view-list-item-badges .mem-view-badge").count(), 2);
+    await page.getByText("由 Content List 挂载并清理的嵌套业务详情。", { exact: true }).waitFor();
+    const listStateCard = page.locator(".reference-component-card", { hasText: "列表栏状态" });
+    const listStateBox = await listStateCard.boundingBox();
+    assert(listStateBox && listStateBox.height < 180, JSON.stringify(listStateBox));
+    await page.getByRole("radio", { name: "加载", exact: true }).click();
+    await page.locator('[data-view-slot="content.list"] .mem-view-list-loading[role="status"]').waitFor();
+    await page.getByRole("radio", { name: "失败", exact: true }).click();
+    await page.getByRole("alert").getByText("列表加载失败", { exact: true }).waitFor();
+    await page.getByRole("radio", { name: "正常", exact: true }).click();
+    await page.getByText("由 Content List 挂载并清理的嵌套业务详情。", { exact: true }).waitFor();
+    await page.getByRole("button", { name: /研究笔记/ }).click();
+    assert.equal(await page.getByRole("button", { name: "标记收藏" }).count(), 0);
+    assert.equal(await page.locator('[data-item-id="canvas"] .mem-view-list-item-heading > .mem-view-badge').count(), 1);
+    await page.getByRole("button", { name: /关系画布/ }).click();
+    await page.getByRole("button", { name: "标记收藏" }).waitFor();
+    assert.equal(await page.getByRole("tablist", { name: "示例选项卡" }).count(), 1);
+    assert.equal(await page.getByRole("radiogroup", { name: "内容模式" }).count(), 1);
+    assert.equal(await page.getByRole("combobox", { name: "评审人" }).count(), 1);
+    assert.equal(await page.getByRole("progressbar").count(), 2);
+    assert.equal(await page.locator('.mem-view-feedback[data-state="read-only"]').getAttribute("aria-readonly"), "true");
+    const invalidDescription = page.getByRole("textbox", { name: "说明" });
+    assert.equal(await invalidDescription.getAttribute("aria-invalid"), "true");
+    assert.match(await invalidDescription.getAttribute("aria-describedby") ?? "", /-description$/);
+    assert.equal(await page.locator(`#${await invalidDescription.getAttribute("aria-describedby")}`).innerText(), "请填写说明");
+    const priority = page.getByRole("combobox", { name: "优先级" });
+    await priority.scrollIntoViewIfNeeded();
+    await priority.click();
+    const priorityListbox = page.getByRole("listbox", { name: "优先级" });
+    await priorityListbox.waitFor();
+    assert.equal(await priorityListbox.getByRole("option").count(), 2);
+    assert.equal(await priority.getAttribute("aria-expanded"), "true");
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    assert.equal(await priority.inputValue(), "high");
+    assert.equal(await priority.getAttribute("aria-expanded"), "false");
+    const overviewTab = page.getByRole("tab", { name: "概览" });
+    await overviewTab.focus();
+    await page.keyboard.press("ArrowRight");
+    const activityTab = page.getByRole("tab", { name: "动态" });
+    assert.equal(await activityTab.getAttribute("aria-selected"), "true");
+    const diffOption = page.getByRole("radio", { name: "差异" });
+    await diffOption.focus();
+    await page.keyboard.press("End");
+    assert.equal(await page.getByRole("radio", { name: "完整内容" }).getAttribute("aria-checked"), "true");
+    const combobox = page.getByRole("combobox", { name: "评审人" });
+    assert.equal(await combobox.getAttribute("placeholder"), "选择或搜索评审人…");
+    assert.equal(await page.locator(".mem-view-field-combobox .mem-view-combobox-caret").count(), 1);
+    await combobox.scrollIntoViewIfNeeded();
+    await combobox.focus();
+    assert.equal(await combobox.getAttribute("aria-autocomplete"), "list");
+    const listbox = page.getByRole("listbox", { name: "评审人" });
+    assert.equal(await listbox.count(), 1);
+    const assertAnchored = async () => {
+      await page.waitForFunction(() => {
+        const control = document.querySelector<HTMLElement>('[role="combobox"][aria-autocomplete="list"]');
+        const list = document.querySelector<HTMLElement>('[role="listbox"]:not([hidden])');
+        if (!control || !list) return false;
+        const controlRect = control.getBoundingClientRect();
+        const listRect = list.getBoundingClientRect();
+        return Math.abs(listRect.left - controlRect.left) < 1
+          && Math.abs(listRect.width - controlRect.width) < 1
+          && Math.abs(listRect.top - controlRect.bottom - 4) < 1;
+      });
+      const controlBox = await combobox.boundingBox();
+      const listBox = await listbox.boundingBox();
+      assert(controlBox && listBox);
+      assert(Math.abs(listBox.x - controlBox.x) < 1, JSON.stringify({ controlBox, listBox }));
+      assert(Math.abs(listBox.width - controlBox.width) < 1, JSON.stringify({ controlBox, listBox }));
+      assert(Math.abs(listBox.y - controlBox.y - controlBox.height - 4) < 1, JSON.stringify({ controlBox, listBox }));
+      assert.equal(await listbox.isVisible(), true);
+    };
+    await assertAnchored();
+    await page.setViewportSize({ width: 760, height: 900 });
+    await combobox.scrollIntoViewIfNeeded();
+    await assertAnchored();
+    await page.keyboard.press("PageDown");
+    assert.match(await combobox.getAttribute("aria-activedescendant") ?? "", /-2$/);
+    await page.keyboard.press("PageUp");
+    assert.match(await combobox.getAttribute("aria-activedescendant") ?? "", /-0$/);
+    await page.keyboard.press("Home");
+    assert.match(await combobox.getAttribute("aria-activedescendant") ?? "", /-0$/);
+    await page.keyboard.press("End");
+    assert.match(await combobox.getAttribute("aria-activedescendant") ?? "", /-2$/);
+    await page.keyboard.press("Enter");
+    assert.equal(await combobox.inputValue(), "测试工程师");
+    assert.equal(await combobox.getAttribute("aria-expanded"), "false");
+    await page.getByText("表单字段", { exact: true }).click();
+    await combobox.focus();
+    assert.equal(await listbox.getByRole("option").count(), 3);
+    await page.keyboard.press("Escape");
+    await combobox.fill("研");
+    assert.equal(await combobox.getAttribute("aria-expanded"), "true");
+    assert.match(await combobox.getAttribute("aria-activedescendant") ?? "", /-0$/);
+    await page.keyboard.press("Escape");
+    assert.equal(await combobox.getAttribute("aria-expanded"), "false");
+    await combobox.focus();
+    await page.getByText("表单字段", { exact: true }).click();
+    assert.equal(await combobox.getAttribute("aria-expanded"), "false");
+    assert.equal(await page.getByRole("progressbar", { name: "评审进度" }).count(), 1);
+    const indeterminate = page.getByRole("progressbar", { name: "后台处理中" });
+    assert.equal(await indeterminate.locator("span").count(), 1);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    assert.equal(await indeterminate.locator("span").evaluate(node => getComputedStyle(node).animationName), "none");
+    const disclosure = page.locator(".mem-view-disclosure > button");
+    assert.equal(await disclosure.getAttribute("aria-expanded"), "true");
+    assert.equal(await disclosure.locator(".mem-view-disclosure-caret").count(), 1);
+    const disclosureBox = await disclosure.boundingBox();
+    const disclosureCaretBox = await disclosure.locator(".mem-view-disclosure-caret").boundingBox();
+    assert(disclosureBox && disclosureCaretBox);
+    assert(disclosureBox.x + disclosureBox.width - disclosureCaretBox.x - disclosureCaretBox.width < 24);
+    await disclosure.click();
+    assert.equal(await disclosure.getAttribute("aria-expanded"), "false");
+    const trigger = page.getByRole("button", { name: "删除示例" });
+    await trigger.click();
+    await page.getByRole("dialog", { name: "删除这个示例？" }).waitFor();
+    await page.keyboard.press("Escape");
+    await trigger.waitFor();
+    await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "删除示例");
+  }, "/reference");
+});
+
 test("a failed builtin route renders a local retry diagnostic while the Shell stays ready", async () => {
   const broken = bootInstance("org.memsphere.broken", "broken", "/broken.js", "/");
   const settings = bootInstance("org.memsphere.settings", "settings", "/settings.js", "/");
@@ -192,7 +406,7 @@ test("a failed builtin route renders a local retry diagnostic while the Shell st
     assert.equal(await page.locator("html").getAttribute("data-view-host-state"), "ready");
     assert.match(await page.locator(".view-host-module-error").innerText(), /broken import contract/);
     const settingsNavigation = page.getByRole("navigation").getByRole("button", { name: "Settings", exact: true });
-    assert.match(await settingsNavigation.locator("img").getAttribute("src") ?? "", /gear-six\.svg$/);
+    assert.match(await settingsNavigation.locator(".mem-view-system-icon").getAttribute("style") ?? "", /gear-six\.svg/);
     await settingsNavigation.click();
     await page.locator("#settings-view").waitFor();
   }, "/broken");
@@ -244,6 +458,12 @@ test("Shell navigation composes main/header descriptors and browser back restore
     assert.equal(await page.locator("#memory-detail-view").textContent(), "Memory detail concepts");
     assert.equal(new URL(page.url()).pathname, "/memories/concepts");
     assert.equal(await page.locator(".view-shell-heading h1").textContent(), "Memory detail");
+    const breadcrumbButton = page.locator(".view-shell-breadcrumbs button");
+    assert.equal(await breadcrumbButton.textContent(), "Memories");
+    assert.deepEqual(await breadcrumbButton.evaluate(node => {
+      const style = getComputedStyle(node);
+      return { border: style.borderStyle, background: style.backgroundColor };
+    }), { border: "none", background: "rgba(0, 0, 0, 0)" });
 
     const capture = page.getByRole("button", { name: "Capture params" });
     await capture.click();
@@ -284,7 +504,7 @@ test("ViewHost keeps the current page visible until the next Mount is ready", as
       const first = context.router.register({ id: "first", path: "/first" });
       const second = context.router.register({ id: "second", path: "/second" });
       context.slots.register(slots.navigationPrimary, { id: "second-nav", value: {
-        label: { text: "Second" }, icon: { kind: "system", name: "next" }, route: second.to()
+        label: { text: "Second" }, icon: { kind: "system", name: "arrow-right" }, route: second.to()
       }});
       context.slots.register(slots.mainView, { id: "first", key: first.key, value: {
         mount({ element }) { element.innerHTML = '<p id="first-page">First page</p>'; }
@@ -334,7 +554,7 @@ test("related Routes can update one active Mount without remounting its page", a
         }
       };
       context.slots.register(slots.navigationPrimary, { id: "market-nav", value: {
-        label: { text: "Market" }, icon: { kind: "system", name: "next" }, route: market.to()
+        label: { text: "Market" }, icon: { kind: "system", name: "arrow-right" }, route: market.to()
       }});
       context.slots.register(slots.mainView, { id: "index", key: index.key, value: shared });
       context.slots.register(slots.mainView, { id: "market", key: market.key, value: shared });
@@ -427,7 +647,7 @@ test("Router query targets canonicalize allowlisted values and preserve browser 
       const index = context.router.register({ id: "index", path: "/items", query: ["filter"] });
       const detail = context.router.register({ id: "detail", path: "/items/:id", query: ["filter"] });
       context.slots.register(slots.navigationPrimary, { id: "detail", value: {
-        label: { text: "Open item" }, icon: { kind: "system", name: "next" },
+        label: { text: "Open item" }, icon: { kind: "system", name: "arrow-right" },
         route: detail.to({ id: "a/b" }, { query: { filter: "x y" }, hash: "anchor /" })
       }});
       const view = {
@@ -740,10 +960,10 @@ function compositionPlugin(name: "memory" | "settings"): string {
         label: { text: "Memory" }, icon: { kind: "system", name: "memory" }, route: index.to()
       }});
       context.slots.register(slots.navigationPrimary, { id: "concept-nav", order: 20, value: {
-        label: { text: "Concepts" }, icon: { kind: "system", name: "concept" }, route: detail.to({ kind: "concepts" })
+        label: { text: "Concepts" }, icon: { kind: "system", name: "brain" }, route: detail.to({ kind: "concepts" })
       }});
       context.slots.register(slots.navigationPrimary, { id: "statement-nav", order: 21, value: {
-        label: { text: "Statements" }, icon: { kind: "system", name: "statement" }, route: detail.to({ kind: "statements" })
+        label: { text: "Statements" }, icon: { kind: "system", name: "file-text" }, route: detail.to({ kind: "statements" })
       }});
       context.slots.register(slots.headerTitle, { id: "memory-title", when: index.activation,
         value: { title: { text: "Memories" } }
@@ -815,6 +1035,7 @@ async function withPage(
   const server = createServer((request, response) => {
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
     const source = path === viewSdkBundlePath ? sdkSource
+      : path === "/assets/system-icon.js" ? systemIconSource
       : path === viewRuntimeBundlePath ? runtimeSource
         : bundles.get(path);
     if (source !== undefined) {

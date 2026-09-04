@@ -30,7 +30,7 @@
 | `home.continue` | Home View | Memsphere Core、内置及用户 Module | 聚合列表 | 最近访问或尚未完成工作的快捷入口，不表达必须处理的压力。与 `home.attention` 重复时优先在后者展示。 |
 | `home.modules` | Home View | Module Composition Runtime | 聚合列表 | 当前 Project 已启用 Module 的入口与摘要。由运行时根据 Project 组合生成，不使用“软件”作为界面概念。 |
 | `main.view` | View Host | 内置及用户 Module | 按路由 key 选择 | 页面主体。可以注册多个 View，但一次只挂载当前路由选中的一个；Module 可以在自己的 View 内继续声明子 Slot。 |
-| `overlay` | View Host | Memsphere Core、内置及用户 Module | 按浮层 key 选择 | 抽屉、对话框和评审浮窗等临时交互。可以注册多个浮层，但控制器同一时刻只激活一个；View Host 负责遮罩、焦点、关闭行为和故障隔离。 |
+| `overlay` | View Host | Memsphere Core、内置及用户 Module | 按浮层 key 选择 | 抽屉、对话框和评审浮窗等临时交互。可以注册多个浮层，但控制器同一时刻只激活一个；View Host 负责遮罩、焦点、关闭行为、`wide`/`compact` 几何尺寸和故障隔离。 |
 
 当前 Catalog 定义 14 个长期 Slot。新增 Slot 时直接更新本列表。
 

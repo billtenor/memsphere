@@ -2,7 +2,7 @@
 
 [简体中文](./view-plugin-guide.md) | English
 
-This guide builds a minimal View Plugin and explains what happens at runtime. For exact types and constraints, see [View Plugin API](./view-plugin-api.en.md). For architectural rationale, see [View Plugin Design](./view-plugin-design.en.md). For built-in contribution points, see [View Slot List](./view-slots.en.md).
+This guide builds a minimal View Plugin and explains what happens at runtime. To copy shared controls directly, start with the [View UI Primitives Handbook](./view-ui-primitives.en.md). For exact types and constraints, see [View Plugin API](./view-plugin-api.en.md). For architectural rationale, see [View Plugin Design](./view-plugin-design.en.md). For built-in contribution points, see [View Slot List](./view-slots.en.md).
 
 ## Current Implementation Status
 
@@ -183,7 +183,7 @@ The example's `slots.navigationPrimary`, `slots.headerTitle`, and `slots.mainVie
 
 The first two Slots accept Descriptors: the Plugin supplies text, icons, and behavior descriptions and Memsphere renders them consistently. `mainView` accepts a Mount: ViewHost supplies a container and the Plugin renders the complete page.
 
-For a conventional object list, call `ctx.ui.contentList(descriptorOrProvider)` to obtain the standard Mount and register it in `slots.contentList`. Use a custom Mount only when the standard list cannot express the domain interaction. The standard list already covers sections, icons, title/meta, badges, selection, route/action, filtering, loading, empty state, and safe long-text truncation.
+For a conventional object list, call `ctx.ui.contentList(descriptorOrProvider)` to obtain the standard Mount and register it in `slots.contentList`. Prefer `ctx.ui` for actions and confirmations, feedback, Tabs/Segmented controls, Disclosure, controlled fields, Select/Combobox, Progress, and Card/Section as well. Use a custom Mount only when a primitive cannot express the domain interaction; domain content and state machines remain Module-owned. The standard list covers sections, icons, three-line copy, multiple badges, selection, route/action, trailing actions, expandable details, filtering, loading, empty and retryable error states, and safe long-text truncation.
 
 Keep the five boundaries explicit: Shell owns public regions and geometry; Theme owns shared visual tokens; UI Primitives own reusable interaction behavior; Slots own validated composition; the Module owns domain data, actions, and its free-form `main.view`. Module CSS must stay under a Feature root and consume `--mem-view-*`; do not read `--view-*`, target `.view-shell-*` or `[data-view-slot]`, redefine public tokens, or override the Host with `!important`.
 
@@ -265,6 +265,7 @@ export default defineViewPlugin<CustomerConfig>({
 
 ## Continue Reading
 
+- To find, select, and copy shared controls quickly, read the [View UI Primitives Handbook](./view-ui-primitives.en.md) and open `/reference` in the production View.
 - For separate compilation, restartability, and Slot ownership, read [View Plugin Design](./view-plugin-design.en.md).
 - For exact signatures, return values, and error constraints, use [View Plugin API](./view-plugin-api.en.md).
 - To choose a contribution point, use [View Slot List](./view-slots.en.md).

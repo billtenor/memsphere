@@ -38,7 +38,10 @@ test("Memory builtin independently registers its route pages and renders Memory 
     if (url.pathname === viewSdkBundlePath) return send(response, 200, "text/javascript", sdk);
     if (url.pathname === viewRuntimeBundlePath) return send(response, 200, "text/javascript", runtime);
     if (url.pathname === "/api/projects") return json(response, { current: "demo", projects: [{ name: "demo" }] });
-    if (url.pathname === "/api/changes") return json(response, { changes: [] });
+    if (url.pathname === "/api/changes") return json(response, { changes: [
+      { id: "change-related", status: "active", memoryPaths: ["concepts/demo-memory.yaml"] },
+      { id: "change-unrelated", status: "active", memoryPaths: ["statements/not-installed.yaml"] }
+    ] });
     if (url.pathname === "/api/memories") return json(response, {
       memories: [{ id: "concepts/demo-memory", kind: "concepts", path: "concepts/demo-memory.yaml", names: ["demo-memory"], system: false }]
     });
@@ -54,9 +57,26 @@ test("Memory builtin independently registers its route pages and renders Memory 
     await page.goto(`${origin}/memories/concepts/demo-memory`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Demo Memory", exact: true, level: 1 }).waitFor();
     assert.match(await page.locator(".memory-workspace").innerText(), /Independent builtin detail/);
-    assert.equal(await page.locator(".memory-module").count(), 2, "list and detail are independent Module surfaces");
+    assert.equal(await page.locator(".memory-workspace .memory-inline-plus").count(), 0, "published Memory detail must not expose ChangeSet comment controls");
+    assert.equal(await page.locator(".mem-view-content-list").count(), 1, "the list surface uses the public Content List primitive");
+    assert.equal(await page.locator(".memory-detail-module").count(), 1, "the domain detail remains an independent Module surface");
     assert.equal(await page.locator('[data-view-slot="navigation.secondary"] [aria-current="page"]').count(), 1);
-    assert.equal((await page.locator(".memory-list-footer").textContent())?.trim(), "1 results");
+    assert.equal(await page.locator(".mem-view-list-item").count(), 1);
+    assert.equal(await page.getByText("Other ChangeSets", { exact: false }).count(), 0);
+    assert.equal(await page.getByText("change-unrelated", { exact: false }).count(), 0, "unrelated ChangeSets belong only in the dedicated ChangeSets navigation");
+    const relatedToggle = page.locator(".mem-view-list-item-actions button");
+    await relatedToggle.click();
+    assert.equal(await relatedToggle.getAttribute("aria-expanded"), "true");
+    assert.equal(await page.locator(".mem-view-list-item-details").count(), 1);
+    const relatedLink = page.getByRole("button", { name: "change-related · Active", exact: true });
+    assert.equal(await relatedLink.getAttribute("class"), "mem-view-button memory-related-link");
+    assert.deepEqual(await relatedLink.evaluate(node => {
+      const style = getComputedStyle(node);
+      return { border: style.borderStyle, background: style.backgroundColor, decoration: style.textDecorationLine };
+    }), { border: "none", background: "rgba(0, 0, 0, 0)", decoration: "underline" });
+    await relatedToggle.click();
+    assert.equal(await relatedToggle.getAttribute("aria-expanded"), "false");
+    assert.equal(await page.locator(".mem-view-list-item-details").count(), 0);
     assert.equal(await page.locator('.memory-workspace button', { hasText: "Edit" }).count(), 0);
     assert.equal(await page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "Create ChangeSet", exact: true }).count(), 1);
     await page.locator('[data-view-slot="navigation.secondary"] [data-secondary-id="recent"]').click();
@@ -226,11 +246,16 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     const viewbar = page.locator(".memory-change-viewbar");
     assert.match(await viewbar.innerText(), /Diff\s+Full content\s+base\s+1234567\s+candidate\s+abcdef1/);
     assert.equal(await viewbar.evaluate(node => node.getBoundingClientRect().top < (node.nextElementSibling?.getBoundingClientRect().top ?? 0)), true);
+    const breadcrumbButtons = page.locator(".view-shell-breadcrumbs button");
+    assert.deepEqual(await breadcrumbButtons.allTextContents(), ["Memory", "ChangeSets"]);
+    assert.equal(await page.locator(".view-shell-breadcrumb-separator").count(), 1);
     assert.equal(await page.locator(".memory-version").count(), 0);
-    assert.match(await page.locator(".memory-review-progress").innerText(), /Reviewed 0 \/ 4/);
+    assert.match(await page.locator(".mem-view-progress").innerText(), /Reviewed 0 \/ 4/);
     const validation = page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "Validation passed", exact: true });
     assert.equal(await validation.getAttribute("data-tone"), "success");
-    assert.match(await validation.locator("img").getAttribute("src") ?? "", /seal-check-fill\.svg$/);
+    assert.match(await validation.innerHTML(), /seal-check\.svg/);
+    const validationIcon = validation.locator(".mem-view-system-icon");
+    assert.equal(await validationIcon.evaluate(node => getComputedStyle(node).backgroundColor), await validation.evaluate(node => getComputedStyle(node).color));
     await page.locator("#memsphere-view-root").evaluate(node => { node.scrollTop = 0; });
     await page.setViewportSize({ width: 1900, height: 900 });
     const collapseComments = page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "Collapse comments", exact: true });
@@ -239,6 +264,31 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     await expandComments.waitFor();
     const collapsedMainWidth = await page.locator(".memory-change-main").evaluate(node => node.getBoundingClientRect().width);
     assert.equal(collapsedMainWidth >= 900 && collapsedMainWidth <= 961, true);
+    const collapsedGeometry = await page.locator(".memory-change-main").evaluate(node => {
+      const main = node.getBoundingClientRect();
+      const root = document.querySelector("#memsphere-view-root")!.getBoundingClientRect();
+      const toolbar = node.querySelector(".memory-change-viewbar")!.getBoundingClientRect();
+      const children = [...node.querySelector(".memory-change-viewbar")!.children].map(child => child.getBoundingClientRect());
+      const groupLeft = Math.min(...children.map(child => child.left));
+      const groupRight = Math.max(...children.map(child => child.right));
+      const segmentTextDeltas = [...node.querySelectorAll<HTMLElement>(".memory-diff-toolbar > button")].map(button => {
+        const box = button.getBoundingClientRect();
+        const label = button.querySelector("span")!.getBoundingClientRect();
+        return Math.abs((box.left + box.right) / 2 - (label.left + label.right) / 2);
+      });
+      return {
+        mainCenterDelta: Math.abs((main.left + main.right) / 2 - (root.left + root.right) / 2),
+        toolbarCenterDelta: Math.abs((groupLeft + groupRight) / 2 - (toolbar.left + toolbar.right) / 2),
+        segmentTextDeltas,
+        overflowsRoot: main.left < root.left || main.right > root.right,
+        rootScrollLeft: document.querySelector<HTMLElement>("#memsphere-view-root")!.scrollLeft
+      };
+    });
+    assert.equal(collapsedGeometry.mainCenterDelta < 14, true);
+    assert.equal(collapsedGeometry.toolbarCenterDelta < 2, true);
+    assert.equal(collapsedGeometry.segmentTextDeltas.every(delta => delta < 2), true);
+    assert.equal(collapsedGeometry.overflowsRoot, false);
+    assert.equal(collapsedGeometry.rootScrollLeft, 0);
     await expandComments.click();
     const commentsRail = page.locator(".memory-comments");
     assert.equal(await commentsRail.locator(".memory-comments-header, .memory-comments-body").count(), 2);
@@ -293,10 +343,10 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     await commentsRail.getByRole("button", { name: "Collapse comments", exact: true }).click();
     await expandComments.waitFor();
     await expandComments.click();
-    assert.equal(await page.locator(".memory-list-header.compact").count(), 1);
+    assert.equal(await page.locator(".mem-view-list-header").count(), 1);
     const listSurfaceRight = await page.locator('[data-view-slot="content.list"]').evaluate(node => node.getBoundingClientRect().right);
-    assert.equal(await page.locator(".memory-review-state").evaluateAll((nodes, right) => nodes.every(node => node.getBoundingClientRect().right <= Number(right)), listSurfaceRight), true);
-    await page.getByRole("button", { name: "Full content", exact: true }).click();
+    assert.equal(await page.locator(".mem-view-content-list .mem-view-badge").evaluateAll((nodes, right) => nodes.every(node => node.getBoundingClientRect().right <= Number(right)), listSurfaceRight), true);
+    await page.getByRole("radio", { name: "Full content", exact: true }).click();
     assert.equal(await page.locator(".memory-inline-old").count(), 0);
     assert.match(await page.locator(".memory-change-layout").innerText(), /After definition/);
     const fullBodyTypography = await page.locator(".text-list > li").filter({ hasText: "After definition" }).evaluate(node => {
@@ -305,7 +355,7 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     });
     assert.deepEqual(fullBodyTypography, diffBodyTypography);
     await page.getByRole("button", { name: "Procedure delivery", exact: true }).click();
-    await page.getByRole("button", { name: "Diff", exact: true }).click();
+    await page.getByRole("radio", { name: "Diff", exact: true }).click();
     const artifactDiff = page.locator(".memory-inline-diff-pair").filter({ hasText: "Old artifact" });
     assert.equal(await artifactDiff.locator(".memory-artifact-row").count(), 2);
     assert.equal(await artifactDiff.locator(".memory-artifact-row").evaluateAll(rows => rows.every(row => /Artifact/.test(row.textContent ?? "") && /markdown/.test(row.textContent ?? "") && /Product/.test(row.textContent ?? ""))), true);
@@ -317,8 +367,8 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     const reviewCard = page.locator(".memory-review-complete");
     assert.equal(await reviewCard.evaluate(node => node.firstElementChild?.tagName === "BUTTON"), true);
     await page.getByRole("button", { name: "Mark reviewed and continue", exact: true }).click();
-    assert.match(await page.locator(".memory-review-progress").innerText(), /Reviewed 1 \/ 4/);
-    assert.equal(await page.locator(".memory-review-state.reviewed").count(), 1);
+    assert.match(await page.locator(".mem-view-progress").innerText(), /Reviewed 1 \/ 4/);
+    assert.equal(await page.locator(".mem-view-list-item .mem-view-badge", { hasText: "Reviewed" }).count(), 1);
     await page.getByRole("button", { name: /Created Memory/ }).click();
     assert.equal(await page.locator(".memory-inline-old").count(), 0);
     assert.equal(await page.locator(".memory-inline-new").count() > 0, true);
@@ -343,7 +393,7 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     assert.equal(submittedComments.at(-1)?.body, "Comment on deleted content");
     assert.equal(submittedComments.at(-1)?.memoryReference, "statements/deleted");
     assert.equal((submittedComments.at(-1)?.location as Record<string, unknown>)?.anchor, "statement.defines[1]");
-    await page.getByRole("button", { name: "Full content", exact: true }).click();
+    await page.getByRole("radio", { name: "Full content", exact: true }).click();
     assert.match(await page.locator(".memory-deleted-candidate").innerText(), /Not present after deletion/);
     assert.match(await page.locator(".memory-before-full-content").innerText(), /Full content before deletion[\s\S]*Only base content/);
   } finally {

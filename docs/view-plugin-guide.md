@@ -2,7 +2,7 @@
 
 简体中文 | [English](./view-plugin-guide.en.md)
 
-本文带扩展开发者完成一个最小 View Plugin，并解释代码运行时发生了什么。精确类型和约束请查询 [View Plugin API](./view-plugin-api.md)；架构原因见 [View Plugin Design](./view-plugin-design.md)；可贡献的内置位置见 [View Slot List](./view-slots.md)。
+本文带扩展开发者完成一个最小 View Plugin，并解释代码运行时发生了什么。想直接复制公共控件请先看 [View 公共控件使用手册](./view-ui-primitives.md)；精确类型和约束请查询 [View Plugin API](./view-plugin-api.md)；架构原因见 [View Plugin Design](./view-plugin-design.md)；可贡献的内置位置见 [View Slot List](./view-slots.md)。
 
 ## 当前实现状态
 
@@ -181,7 +181,7 @@ ctx.slots.register(slots.mainView, {
 
 示例中的 `slots.navigationPrimary`、`slots.headerTitle` 和 `slots.mainView` 都是 Slot Token。Token 同时告诉 TypeScript 和 ViewHost：内容放在哪里、允许什么类型、怎样组合以及如何在运行时校验；其他可用 Token 请直接查询 [View Slot List](./view-slots.md)。
 
-前两个 Slot 接收 Descriptor：Plugin 只提供文字、图标和行为描述，由 Memsphere 统一渲染。`mainView` 接收 Mount：ViewHost 提供容器，由 Plugin 渲染完整页面。常规对象列表使用 `ctx.ui.contentList(descriptorOrProvider)` 得到标准 Mount 后注册到 `slots.contentList`；只有标准列表无法表达领域诉求时才自行实现该 Mount。
+前两个 Slot 接收 Descriptor：Plugin 只提供文字、图标和行为描述，由 Memsphere 统一渲染。`mainView` 接收 Mount：ViewHost 提供容器，由 Plugin 渲染完整页面。常规对象列表使用 `ctx.ui.contentList(descriptorOrProvider)` 得到标准 Mount 后注册到 `slots.contentList`；动作与确认、状态反馈、Tabs/Segmented、Disclosure、受控表单、Select/Combobox、Progress、Card/Section 也应优先使用 `ctx.ui`。只有公共组件无法表达领域诉求时才在 Module Mount 内自行实现，领域正文和状态机不应反向进入 UI Primitives。
 
 五层边界可以用一句话判断：Shell 决定区域和尺寸，Theme 决定公共视觉变量，UI Primitives 决定通用控件的 DOM/交互，Slot 决定内容放在哪里，Module 只决定领域数据、行为和正文。Module 不读取 `src/view/shell/**`，不依赖 `.view-shell-*` 或 `[data-view-slot]`，不声明 `--mem-view-*`，也不使用 `!important` 覆盖公共壳。
 
@@ -267,6 +267,7 @@ export default defineViewPlugin<CustomerConfig>({
 
 ## 继续阅读
 
+- 想快速查找、选择和复制公共控件，阅读 [View 公共控件使用手册](./view-ui-primitives.md)，并在正式 View 打开 `/reference`。
 - 想理解为何分别编译、为何允许重启，以及 Slot 所有权如何工作，阅读 [View Plugin Design](./view-plugin-design.md)。
 - 编写代码时查询精确签名、返回值和错误约束，阅读 [View Plugin API](./view-plugin-api.md)。
 - 选择可以贡献的界面位置，阅读 [View Slot List](./view-slots.md)。
