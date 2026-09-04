@@ -11,6 +11,25 @@ test("Reference Module styles use public tokens and stay inside the Feature root
   }));
 });
 
+test("real Memory and Run Modules pass the public style boundary and keep migrated control CSS removed", async () => {
+  const paths = [
+    "../modules/org.memsphere.memory/adapter/view/index.ts",
+    "../modules/org.memsphere.run/adapter/view/index.ts",
+    "../modules/org.memsphere.run/adapter/view/run-detail.ts",
+    "../modules/org.memsphere.run/adapter/view/run-styles.ts",
+  ];
+  const sources = await Promise.all(paths.map(path => readFile(new URL(path, import.meta.url), "utf8")));
+  sources.forEach((source, index) => assert.doesNotThrow(() => validateModuleStyleBoundary(source, paths[index])));
+  assert.doesNotMatch(sources[0] ?? "", /\.memory-btn\b/);
+  assert.doesNotMatch(sources[1] ?? "", /\.run-btn\b|artifact-review-(?:artifact|review)-tab/);
+  assert.match(sources[0] ?? "", /ui\.contentList\(/, "Memory and ChangeSet must render their real lists through public Content List");
+  assert.doesNotMatch(sources[0] ?? "", /\.memory-button\s*\{/, "retired Memory list-row CSS must not return");
+  assert.match(sources[1] ?? "", /ui\.contentList\(/, "Run must render its real list through public Content List");
+  assert.doesNotMatch(sources[1] ?? "", /\.run-card(?:-main|-action)?\s*\{/, "retired Run list-row CSS must not return");
+  assert.match(sources[2] ?? "", /ui\.disclosure\(/, "Run bindings must use public Disclosure");
+  assert.match(sources[2] ?? "", /ui\.checkboxField\(/, "Run binding choices must use public Checkbox Field");
+});
+
 test("Module style boundary rejects public token declarations and Host internals", () => {
   assert.throws(() => validateModuleStyleBoundary("const css = `:root { --mem-view-color-text: red; }`;", "token"), /must not declare/);
   assert.throws(() => validateModuleStyleBoundary("const css = `.feature { color: var(--view-ink); }`;", "private-token"), /Host-private/);

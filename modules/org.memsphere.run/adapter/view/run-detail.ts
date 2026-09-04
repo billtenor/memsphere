@@ -1,3 +1,5 @@
+import type { ViewRenderContext, ViewUi } from "@memsphere/view-sdk";
+
 type Json = Record<string, any>;
 
 export interface RunDetailState {
@@ -8,6 +10,8 @@ export interface RunDetailState {
 export interface RunDetailOptions {
   readonly locale?: string;
   readonly state: RunDetailState;
+  readonly ui: ViewUi;
+  readonly renderContext: ViewRenderContext;
   readonly request: (path: string, init?: RequestInit) => Promise<any>;
   readonly refresh: () => Promise<void>;
   readonly openReview: (runId: string, reviewId: string) => Promise<void>;
@@ -54,21 +58,24 @@ export function renderRunDetail(run: Json, options: RunDetailOptions): HTMLEleme
 }
 
 function renderRunMeta(run: Json, options: RunDetailOptions, labels: Labels): HTMLElement {
-  const meta = document.createElement("section");
-  meta.className = "run-panel run-meta meta";
+  const host = document.createElement("div");
+  host.className = "run-meta-container";
+  const meta = document.createElement("div");
+  meta.className = "run-meta meta";
   meta.append(
-    pill(`${labels.procedure}: ${run.procedureName || "—"}`),
-    pill(labels.status[String(run.status)] || String(run.status || "—"), String(run.status || "")),
-    pill(`${run.status === "running" ? labels.activeFrames : labels.retainedFrames}: ${(run.stack || []).length}`),
-    pill(`${labels.artifacts}: ${(run.events || []).length}`),
-    pill(`${labels.updated}: ${formatTime(run.updatedAt)}`)
+    options.ui.badge({ label: { text: `${labels.procedure}: ${run.procedureName || "—"}` } }),
+    options.ui.badge({ label: { text: labels.status[String(run.status)] || String(run.status || "—") }, tone: run.status === "done" ? "success" : run.status === "abandoned" ? "warning" : "info" }),
+    options.ui.badge({ label: { text: `${run.status === "running" ? labels.activeFrames : labels.retainedFrames}: ${(run.stack || []).length}` } }),
+    options.ui.badge({ label: { text: `${labels.artifacts}: ${(run.events || []).length}` } }),
+    options.ui.badge({ label: { text: `${labels.updated}: ${formatTime(run.updatedAt)}` } })
   );
-  if (run.contractVersion === 1 || run.readOnly) meta.append(pill(labels.legacyReadOnly, "warn"));
+  if (run.contractVersion === 1 || run.readOnly) meta.append(options.ui.badge({ label: { text: labels.legacyReadOnly }, tone: "warning" }));
   if (run.abandonment) {
-    meta.append(pill(`${labels.abandonedAt}: ${formatTime(run.abandonment.abandonedAt)}`, "abandoned"));
-    if (run.abandonment.reason) meta.append(pill(String(run.abandonment.reason), "abandoned"));
+    meta.append(options.ui.badge({ label: { text: `${labels.abandonedAt}: ${formatTime(run.abandonment.abandonedAt)}` }, tone: "warning" }));
+    if (run.abandonment.reason) meta.append(options.ui.badge({ label: { text: String(run.abandonment.reason) }, tone: "warning" }));
   }
-  return meta;
+  void options.ui.card({ content: meta }).mount({ element: host, portal: host }, options.renderContext);
+  return host;
 }
 
 function renderBindings(run: Json, options: RunDetailOptions, labels: Labels): HTMLElement | null {
@@ -78,25 +85,8 @@ function renderBindings(run: Json, options: RunDetailOptions, labels: Labels): H
   const panel = document.createElement("section");
   panel.className = "run-panel run-bindings";
   const expanded = options.state.expandedBindings.has(run.id);
-  const toggle = button("", "run-binding-toggle");
-  toggle.setAttribute("aria-expanded", String(expanded));
-  const toggleLabel = document.createElement("span");
-  toggleLabel.textContent = labels.bindings;
-  const toggleCaret = document.createElement("img");
-  toggleCaret.className = "run-binding-caret";
-  toggleCaret.src = "/assets/system-icons/caret-down.svg";
-  toggleCaret.alt = "";
-  toggle.append(toggleLabel, toggleCaret);
   const body = document.createElement("div");
   body.className = "run-binding-body";
-  body.hidden = !expanded;
-  toggle.onclick = () => {
-    body.hidden = !body.hidden;
-    toggle.setAttribute("aria-expanded", String(!body.hidden));
-    if (body.hidden) options.state.expandedBindings.delete(run.id);
-    else options.state.expandedBindings.add(run.id);
-  };
-  panel.append(toggle, body);
   const snapshots = new Map<string, Json>((run.bindingSnapshot?.slots || []).map((item: Json) => [item.key, item]));
   for (const [slot, binding] of slots) {
     const row = document.createElement("div");
@@ -109,40 +99,30 @@ function renderBindings(run: Json, options: RunDetailOptions, labels: Labels): H
     actorChoices.className = "run-binding-actors";
     const selected = new Set<string>(binding.actorIds || []);
     for (const [actorId, actor] of actors) {
-      const choice = document.createElement("label");
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.value = actorId;
-      input.checked = selected.has(actorId);
-      input.disabled = run.status !== "running" || run.readOnly || binding.skip === true;
-      choice.append(input, document.createTextNode(`${actor.name || actorId} · ${actor.kind || ""}`));
-      actorChoices.append(choice);
+      const choice = options.ui.checkboxField({
+        label: { text: `${actor.name || actorId} · ${actor.kind || ""}` },
+        checked: selected.has(actorId),
+        disabled: run.status !== "running" || run.readOnly || binding.skip === true,
+        onChange: () => undefined
+      });
+      choice.control.value = actorId;
+      actorChoices.append(choice.root);
     }
     const actions = document.createElement("div");
     actions.className = "run-binding-actions";
-    const skipLabel = document.createElement("label");
-    const skip = document.createElement("input");
-    skip.type = "checkbox";
-    skip.checked = binding.skip === true;
-    skip.disabled = run.status !== "running" || run.readOnly;
-    skip.onchange = () => actorChoices.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(input => { input.disabled = skip.checked; });
-    skipLabel.append(skip, document.createTextNode(labels.skip));
-    const save = button(labels.save, "run-btn primary");
-    save.disabled = run.status !== "running" || run.readOnly;
-    save.onclick = async () => {
-      save.disabled = true;
-      try {
+    const skipField = options.ui.checkboxField({label:{text:labels.skip},checked:binding.skip === true,disabled:run.status !== "running" || run.readOnly,onChange:checked=>{
+      actorChoices.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(input => { input.disabled = checked; });
+    }});
+    const skip = skipField.control;
+    const save = options.ui.button({label:{text:labels.save},disabled:run.status !== "running" || run.readOnly,async run(){
         const actorIds = [...actorChoices.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked')].map(input => input.value);
         await options.request(`/api/runs/${encodeURIComponent(run.id)}/bindings`, {
           method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify(skip.checked ? { slot, skip: true } : { slot, actorIds })
         });
         await options.refresh();
-      } catch (error) {
-        window.alert(error instanceof Error ? error.message : String(error));
-      } finally { save.disabled = false; }
-    };
-    actions.append(skipLabel, save);
+    }},{tone:"primary"});
+    actions.append(skipField.root, save);
     row.append(actorChoices, actions);
     body.append(row);
   }
@@ -156,6 +136,17 @@ function renderBindings(run: Json, options: RunDetailOptions, labels: Labels): H
     }
     body.append(history);
   }
+  const disclosure = options.ui.disclosure({
+    title: { text: labels.bindings },
+    description: { text: labels.reviewScopes },
+    expanded,
+    content: body,
+    onToggle: next => {
+      if (next) options.state.expandedBindings.add(run.id);
+      else options.state.expandedBindings.delete(run.id);
+    }
+  });
+  void disclosure.mount({ element: panel, portal: panel }, options.renderContext);
   return panel;
 }
 
@@ -258,9 +249,8 @@ function renderArtifactResult(event: Json, run: Json, options: RunDetailOptions,
   const review = (run.artifactReviewSummaries || []).find((candidate: Json) => candidate.stepId === event.stepId)
     || (run.artifactReview?.stepId === event.stepId ? run.artifactReview : null);
   if (review?.id) {
-    const open = button(labels.review, "run-btn");
+    const open = options.ui.button({ label: { text: labels.review }, run: () => options.openReview(run.id, review.id) });
     open.dataset.artifactReviewId = review.id;
-    open.onclick = () => void options.openReview(run.id, review.id);
     card.append(open);
   }
   return card;
@@ -356,31 +346,34 @@ function appendEffectiveEntries(target: HTMLElement, entries: unknown[], scope: 
 
 function renderEffectiveReference(entry: Json, scope: string, options: RunDetailOptions, labels: Labels): HTMLElement {
   const section = document.createElement("div"); section.className = "section effective-reference";
-  const header = ruleToggle(`${labels.referencedFrom} ${entry.reference || entry.target}`, scope, options);
   const body = document.createElement("div"); body.className = "section-body"; body.hidden = options.state.collapsedRules.has(scope);
+  const header = ruleToggle(`${labels.referencedFrom} ${entry.reference || entry.target}`, scope, body, options);
   appendEffectiveEntries(body, effectiveEntries(entry), `${scope}:entries`, options, labels);
   for (const [index, child] of (entry.sections || []).entries()) body.append(renderEffectiveSection(child, `${scope}:section:${index}`, options, labels));
-  wireRuleToggle(header, body, scope, options); section.append(header, body); return section;
+  section.append(header, body); return section;
 }
 
 function renderEffectiveSection(node: Json, scope: string, options: RunDetailOptions, labels: Labels): HTMLElement {
   const section = document.createElement("div"); section.className = "section effective-section";
-  const header = ruleToggle(node.name || labels.section, scope, options);
   const body = document.createElement("div"); body.className = "section-body"; body.hidden = options.state.collapsedRules.has(scope);
+  const header = ruleToggle(node.name || labels.section, scope, body, options);
   if (node.defines?.length) appendSimpleRuleGroup(body, node.defines, labels.defines);
   const rules = effectiveEntries(node); if (rules.length) { const title = document.createElement("div"); title.className = "block-title"; title.textContent = labels.rules; body.append(title); appendEffectiveEntries(body, rules, `${scope}:entries`, options, labels); }
   for (const [index, child] of (node.sections || []).entries()) body.append(renderEffectiveSection(child, `${scope}:section:${index}`, options, labels));
-  wireRuleToggle(header, body, scope, options); section.append(header, body); return section;
+  section.append(header, body); return section;
 }
 
-function ruleToggle(label: string, scope: string, options: RunDetailOptions): HTMLButtonElement {
-  const control = button(label, "section-header");
+function ruleToggle(label: string, scope: string, body: HTMLElement, options: RunDetailOptions): HTMLButtonElement {
+  let control!: HTMLButtonElement;
+  control = options.ui.button({ label: { text: label }, run: () => {
+    body.hidden = !body.hidden;
+    control.setAttribute("aria-expanded", String(!body.hidden));
+    if (body.hidden) options.state.collapsedRules.add(scope);
+    else options.state.collapsedRules.delete(scope);
+  }});
+  control.classList.add("section-header");
   control.setAttribute("aria-expanded", String(!options.state.collapsedRules.has(scope)));
   const chevron = document.createElement("span"); chevron.className = "chevron"; chevron.textContent = "›"; control.prepend(chevron); return control;
-}
-
-function wireRuleToggle(header: HTMLButtonElement, body: HTMLElement, scope: string, options: RunDetailOptions): void {
-  header.onclick = () => { body.hidden = !body.hidden; header.setAttribute("aria-expanded", String(!body.hidden)); if (body.hidden) options.state.collapsedRules.add(scope); else options.state.collapsedRules.delete(scope); };
 }
 
 function renderSchemaWriting(run: Json, step: Json, options: RunDetailOptions, labels: Labels): HTMLElement | null {
@@ -447,8 +440,6 @@ function formatTime(value: unknown): string { if (!value) return "—"; const da
 function safeId(value: unknown): string { return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "-"); }
 function shellQuote(value: unknown): string { const text = String(value ?? ""); return /^[a-zA-Z0-9_./:-]+$/.test(text) ? text : `'${text.replace(/'/g, `'\\''`)}'`; }
 function pill(text: string, kind = ""): HTMLElement { const result = document.createElement("span"); result.className = `run-pill pill ${kind}`; result.textContent = text; return result; }
-function button(label: string, classes: string): HTMLButtonElement { const result = document.createElement("button"); result.type = "button"; result.className = classes; result.textContent = label; return result; }
-
 interface Labels {
   procedure: string; activeFrames: string; retainedFrames: string; artifacts: string; artifact: string; updated: string;
   legacyReadOnly: string; abandonedAt: string; review: string; jumpCurrent: string; bindings: string; reviewScopes: string;

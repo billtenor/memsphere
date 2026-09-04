@@ -275,10 +275,21 @@ export function renderViewHostHtml(
           }
           const pathParts = location.pathname.split("/");
           const relativePath = pathParts[1] === "projects" ? "/" + pathParts.slice(3).join("/") : location.pathname;
-          if (relativePath.startsWith("/settings/") && !confirm(boot.coreShell.switchConfirm)) {
-            showCurrentProject(current || "");
+          if (relativePath.startsWith("/settings/")) {
             closeProjectMenu();
-            return;
+            const confirmed = await activeHost.confirm({
+              title: { text: boot.coreShell.switchProject },
+              description: { text: boot.coreShell.switchConfirm },
+              confirmLabel: { text: boot.coreShell.switchProject },
+              cancelLabel: { text: boot.messages["common.cancel"] || "Cancel" },
+              closeLabel: { text: boot.coreShell.close },
+              tone: "danger"
+            });
+            if (!confirmed) {
+              showCurrentProject(current || "");
+              projectTrigger.focus();
+              return;
+            }
           }
           closeProjectMenu();
           const landing = relativePath.startsWith("/tasks/") ? "/tasks"

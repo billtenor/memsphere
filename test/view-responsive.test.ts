@@ -329,8 +329,8 @@ test("View reflows task content and keeps horizontal scrolling local on compact 
     const narrowPage = await openTaskPage(browser, url, 1024);
     try {
       assert.equal(await narrowPage.locator(".run-title").textContent(), runName);
-      assert.equal(await narrowPage.locator(".run-card-main b").first().textContent(), runName);
-      await narrowPage.locator(".run-meta .run-pill", { hasText: "流程: Responsive browser fixture" }).waitFor();
+      assert.equal(await narrowPage.locator(".mem-view-list-item-heading strong").first().textContent(), runName);
+      await narrowPage.locator(".run-meta .mem-view-badge", { hasText: "流程: Responsive browser fixture" }).waitFor();
       await assertPageDoesNotOverflow(narrowPage);
       assert.ok(await narrowPage.locator(".run-step").first().boundingBox());
       const scrollState = await narrowPage.locator(".markdown-table-scroll").first().evaluate(element => {
@@ -542,7 +542,7 @@ test("Run titles fall back to the Procedure name for historical Runs", async () 
       await page.goto(`${url}/projects/responsive/tasks/${legacyRunId}`);
       await page.locator(".run-title").waitFor();
       assert.equal(await page.locator(".run-title").textContent(), "Legacy procedure fallback");
-      await page.locator(".run-meta .run-pill", { hasText: "流程: Legacy procedure fallback" }).waitFor();
+      await page.locator(".run-meta .mem-view-badge", { hasText: "流程: Legacy procedure fallback" }).waitFor();
       await assertPageDoesNotOverflow(page);
     } finally {
       await page.close();
@@ -569,7 +569,7 @@ test("Run status list refreshes only when the user asks", async () => {
     try {
       await page.goto(url);
       await page.getByRole("button", { name: "运行", exact: true }).click();
-      await page.locator(".run-card-main").first().waitFor().catch(async () => assert.fail(JSON.stringify({ url: page.url(), body: await page.locator("body").innerText() }, null, 2)));
+      await page.locator(".mem-view-list-item").first().waitFor();
       assert.equal(await page.getByRole("button", { name: "运行中", exact: true }).getAttribute("aria-current"), "page");
       status = "done";
       const requestsBeforeWait = summaryRequests;
@@ -581,8 +581,8 @@ test("Run status list refreshes only when the user asks", async () => {
       ));
       await page.getByRole("button", { name: "刷新", exact: true }).click();
       await refreshed;
-      await page.locator(".run-list").getByText("当前状态下没有 Run。", { exact: true }).waitFor();
-      assert.equal(await page.locator(".run-card-main").count(), 0);
+      await page.locator(".mem-view-content-list").getByText("当前状态下没有 Run。", { exact: true }).waitFor();
+      assert.equal(await page.locator(".mem-view-list-item").count(), 0);
       await page.locator('.view-host-mount[data-view-location="/projects/responsive/tasks"]').waitFor();
       const doneLoaded = page.waitForResponse((response) => (
         new URL(response.url()).pathname === "/api/projects/responsive/runs"
@@ -590,7 +590,7 @@ test("Run status list refreshes only when the user asks", async () => {
       ));
       await page.getByRole("button", { name: "已完成", exact: true }).click();
       await doneLoaded;
-      await page.locator(".run-card-main").first().waitFor();
+      await page.locator(".mem-view-list-item").first().waitFor();
       assert.equal(await page.getByRole("button", { name: "已完成", exact: true }).getAttribute("aria-current"), "page");
       assert.equal(new URL(page.url()).pathname, "/projects/responsive/tasks");
       assert.match(await page.locator(".run-workspace").innerText(), /选择一个 Run/);
@@ -628,10 +628,10 @@ test("Run status switching does not load a detail until the user selects one", a
     try {
       await page.goto(url);
       await page.getByRole("button", { name: "运行", exact: true }).click();
-      await page.locator(".run-card-main").first().waitFor();
+      await page.locator(".mem-view-list-item").first().waitFor();
       assert.equal(detailRequests, 0);
       assert.match(await page.locator(".run-workspace").innerText(), /选择一个 Run/);
-      await page.locator(".run-card-main").first().click();
+      await page.locator(".mem-view-list-item").first().click();
       await page.locator(".run-title").waitFor();
       assert.equal(detailRequests, 1);
     } finally {
@@ -678,12 +678,12 @@ test("archiving the selected Run returns to the current status list", async () =
     const page = await openTaskPage(browser, url, 1024);
     try {
       assert.equal(await page.locator(".run-title").textContent(), runName);
-      page.once("dialog", dialog => dialog.accept());
       const archived = page.waitForResponse((response) =>
         response.request().method() === "POST"
         && new URL(response.url()).pathname === `/api/projects/responsive/archive/runs/${runId}`
       );
-      await page.locator(".run-card.active .run-card-action").click();
+      await page.locator(".mem-view-list-item-row:has(.mem-view-list-item.active) .mem-view-list-item-actions button").click();
+      await page.locator("dialog.mem-view-confirm").getByRole("button", { name: "归档", exact: true }).click();
       assert.equal((await archived).status(), 200);
       await page.locator('.view-host-mount[data-view-location="/projects/responsive/tasks"]').waitFor();
       assert.match(await page.locator(".run-workspace").innerText(), /选择一个 Run/);
@@ -706,15 +706,15 @@ test("Memory nav only shows the Project Catalog and can hide installed system me
       await page.getByRole("button", { name: "User note", exact: true }).waitFor();
       const hideSystem = page.getByLabel("隐藏系统记忆");
       assert.equal(await hideSystem.isChecked(), true);
-      await page.locator(".memory-button", { hasText: "User note" }).waitFor();
+      await page.locator(".mem-view-list-item", { hasText: "User note" }).waitFor();
       const systemMemoryButton = page.getByRole("button", { name: "Memory", exact: true });
       assert.equal(await systemMemoryButton.count(), 0);
-      assert.equal(await page.locator(".memory-button", { hasText: "reserved-tip" }).count(), 0);
+      assert.equal(await page.locator(".mem-view-list-item", { hasText: "reserved-tip" }).count(), 0);
       await hideSystem.uncheck();
       await systemMemoryButton.waitFor();
       await hideSystem.check();
       assert.equal(await systemMemoryButton.count(), 0);
-      assert.equal(await page.locator(".memory-button", { hasText: "reserved-tip" }).count(), 0);
+      assert.equal(await page.locator(".mem-view-list-item", { hasText: "reserved-tip" }).count(), 0);
     } finally {
       await page.close();
     }
@@ -756,7 +756,7 @@ test("Memory navigation uses aliases while the detail header exposes the canonic
       await page.waitForURL(`${url}/projects/responsive/memories/concepts/broken-memory`);
       await page.locator(".memory-error").waitFor();
       assert.equal(await page.locator(".memory-error h3").textContent(), "记忆 YAML 无效");
-      assert.equal(await page.locator(".memory-button.active .memory-button-copy strong").textContent(), "broken-memory");
+      assert.equal(await page.locator(".mem-view-list-item.active .mem-view-list-item-heading strong").textContent(), "broken-memory");
       assert.match(await page.locator(".memory-error").textContent() ?? "", /记忆 YAML 无效|YAML|Flow sequence/);
     } finally {
       await page.close();
@@ -837,7 +837,7 @@ test("default Chinese Memory detail renders Schema labels without fixed English 
   });
 });
 
-test("View shows per-reference rule counts and expands each Statement reference in place", async () => {
+test("published Statement references expand in place without ChangeSet comment controls", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
     try {
@@ -853,23 +853,7 @@ test("View shows per-reference rule counts and expands each Statement reference 
       await page.locator(".memory-title", { hasText: "Referencing rules" }).waitFor();
       const reference = page.locator(".rule-reference", { hasText: "statements/shared-rules" }).first();
       await reference.waitFor();
-      const referenceCommentable = reference.locator(
-        "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' memory-commentable ')]"
-      );
-      assert.equal(await referenceCommentable.count(), 1);
-      assert.equal(await referenceCommentable.locator(":scope > .memory-inline-plus").count(), 1);
-      assert.equal(
-        await referenceCommentable.getAttribute("data-comment-snapshot"),
-        "statements/shared-rules"
-      );
-      const localRuleBody = page.locator(".text-list li", { hasText: "Keep the local assertion." })
-        .locator(".commentable-body.memory-commentable");
-      const [referenceBox, localRuleBox] = await Promise.all([
-        referenceCommentable.boundingBox(),
-        localRuleBody.boundingBox()
-      ]);
-      assert(referenceBox && localRuleBox);
-      assert.equal(Math.abs(referenceBox.x - localRuleBox.x) < 1, true);
+      assert.equal(await page.locator(".memory-inline-plus").count(), 0);
       const toggle = reference.locator(".rule-reference-toggle");
       await toggle.waitFor();
       assert.equal(await toggle.textContent(), "2 条生效规则");
@@ -892,7 +876,7 @@ test("View shows per-reference rule counts and expands each Statement reference 
   });
 });
 
-test("Procedure Action rule references keep inline comment controls and rule alignment", async () => {
+test("published Procedure Action references do not expose ChangeSet comment controls", async () => {
   await withResponsiveView(async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
     try {
@@ -900,22 +884,7 @@ test("Procedure Action rule references keep inline comment controls and rule ali
       await page.locator(".memory-title", { hasText: "Reviewable procedure" }).waitFor();
       const reference = page.locator(".rule-reference", { hasText: "statements/shared-rules" });
       await reference.waitFor();
-      const referenceCommentable = reference.locator(
-        "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' memory-commentable ')]"
-      );
-      assert.equal(await referenceCommentable.locator(":scope > .memory-inline-plus").count(), 1);
-      assert.equal(
-        await referenceCommentable.getAttribute("data-comment-snapshot"),
-        "statements/shared-rules"
-      );
-      const plainRuleBody = page.locator(".action-contracts li", { hasText: "Action field comments must be available." })
-        .locator(":scope > .commentable-body.memory-commentable");
-      const [referenceBox, plainRuleBox] = await Promise.all([
-        referenceCommentable.boundingBox(),
-        plainRuleBody.boundingBox()
-      ]);
-      assert(referenceBox && plainRuleBox);
-      assert.equal(Math.abs(referenceBox.x - plainRuleBox.x) < 1, true);
+      assert.equal(await page.locator(".memory-inline-plus").count(), 0);
     } finally {
       await page.close();
     }
@@ -943,19 +912,21 @@ test("multiple Human identities require and persist a Project-local ChangeSet se
       await page.goto(`${url}/projects/responsive/memories`, { waitUntil: "networkidle" });
       assert.equal(await page.evaluate(() => localStorage.getItem("memsphere.changeActorSelection.v1")), null);
       const dialogs: string[] = [];
-      page.on("dialog", async (dialog) => {
-        dialogs.push(dialog.type());
-        await dialog.accept(dialog.type() === "prompt" ? "bob" : undefined);
-      });
-      await page.locator(".memory-list .memory-button").first().click();
+      await page.locator(".mem-view-list-item").first().click();
       await page.locator(".memory-title").waitFor();
       const created = page.waitForRequest((request) => (
         request.method() === "POST" && new URL(request.url()).pathname === "/api/projects/responsive/changes"
       ));
       await page.getByRole("button", { name: "创建变更", exact: true }).click();
+      const operatorPrompt = page.waitForEvent("dialog");
+      const confirmClick = page.locator("dialog.mem-view-confirm").getByRole("button", { name: "修改", exact: true }).click();
+      const promptDialog = await operatorPrompt;
+      dialogs.push(promptDialog.type());
+      await promptDialog.accept("bob");
+      await confirmClick;
       const request = await created;
       assert.deepEqual(request.postDataJSON().operator, { kind: "human", id: "bob" });
-      assert.deepEqual(dialogs, ["confirm", "prompt"]);
+      assert.deepEqual(dialogs, ["prompt"]);
       assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem("memsphere.changeActorSelection.v1") ?? "{}")), { responsive: "bob" });
       await page.reload({ waitUntil: "networkidle" });
       assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem("memsphere.changeActorSelection.v1") ?? "{}")), { responsive: "bob" });
@@ -977,7 +948,7 @@ test("Run pages do not expose the retired Task Review entry or inline comments",
       await page.getByRole("button", { name: "运行", exact: true }).click();
       await runsLoaded;
       await page.getByRole("button", { name: "已完成", exact: true }).click();
-      await page.locator(".run-card-main").first().click();
+      await page.locator(".mem-view-list-item").first().click();
       assert.equal(await page.getByRole("button", { name: /^(Review|产物评审)$/ }).count(), 0);
       assert.equal(await page.locator('[data-anchor^="task:"] .memory-inline-plus:visible').count(), 0);
       assert.equal(await page.locator(".run-review-dialog").count(), 0);
@@ -1011,7 +982,7 @@ test("View deep links restore Memory, Run, and browser history", async () => {
         (response) => new URL(response.url()).pathname === `/api/projects/responsive/runs/${runId}` && response.ok()
       );
       await page.getByRole("button", { name: "已完成", exact: true }).click();
-      await page.locator(".run-card-main").first().click();
+      await page.locator(".mem-view-list-item").first().click();
       await selectedDetailLoaded;
       await page.waitForLoadState("networkidle");
       assert.equal(new URL(page.url()).pathname, `/projects/responsive/tasks/${runId}`);
@@ -1021,7 +992,7 @@ test("View deep links restore Memory, Run, and browser history", async () => {
       assert.equal(new URL(page.url()).pathname, "/projects/responsive/tasks");
       assert.equal(new URL(page.url()).searchParams.get("status"), "done");
       await page.locator(".run-workspace").getByText("选择一个 Run 查看详情。", { exact: true }).waitFor();
-      assert.equal(await page.locator(".run-card.active").count(), 0);
+      assert.equal(await page.locator(".mem-view-list-item.active").count(), 0);
       const forwardDetailLoaded = page.waitForResponse(
         (response) => new URL(response.url()).pathname === `/api/projects/responsive/runs/${runId}` && response.ok()
       );

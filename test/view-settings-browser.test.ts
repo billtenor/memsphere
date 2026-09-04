@@ -44,7 +44,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await projectDetails.getByRole("button", { name: "关闭", exact: true }).click();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.equal((await settingsButton.textContent())?.trim(), "设置");
-    assert.match(await settingsButton.locator("img").getAttribute("src") ?? "", /gear-six\.svg$/);
+    assert.match(await settingsButton.locator(".mem-view-system-icon").getAttribute("style") ?? "", /gear-six\.svg/);
     await settingsButton.click();
     assert.equal(new URL(page.url()).pathname, "/projects/demo/settings/general");
     await page.locator("#memsphere-view-root .settings-detail-surface").waitFor();
@@ -152,14 +152,13 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await generalSettings.click();
     await page.getByRole("combobox", { name: "工作语言" }).click();
     await page.getByRole("option", { name: "English", exact: true }).click();
-    page.once("dialog", async dialog => {
-      assert.match(dialog.message(), /未保存修改/);
-      await dialog.dismiss();
-    });
     await chooseProject(page, "beta");
+    const switchConfirmation = page.locator("dialog.mem-view-confirm");
+    assert.match(await switchConfirmation.innerText(), /未保存修改/);
+    await switchConfirmation.getByRole("button", { name: "取消", exact: true }).click();
     assert.equal((await page.locator("#view-shell-project-trigger").textContent())?.trim(), "demo");
-    page.once("dialog", dialog => dialog.accept());
     await chooseProject(page, "beta");
+    await page.locator("dialog.mem-view-confirm").getByRole("button", { name: "切换 Project", exact: true }).click();
     await page.waitForFunction(() => document.querySelector("#view-shell-project-trigger")?.textContent?.trim() === "beta");
     await generalSettings.click();
     assert.equal((await page.getByRole("combobox", { name: "工作语言" }).textContent())?.trim(), "中文⌄");

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import {
   createHostRouteActivation,
@@ -11,6 +13,18 @@ import {
   isContentListDescriptor,
   isHeaderAccountDescriptor,
   isHeaderTitleDescriptor,
+  isIconRef,
+  isFeedbackDescriptor,
+  isTabsDescriptor,
+  isSegmentedControlDescriptor,
+  isTextFieldDescriptor,
+  isCheckboxFieldDescriptor,
+  isComboboxDescriptor,
+  isConfirmationDescriptor,
+  isContainerDescriptor,
+  isDisclosureDescriptor,
+  isProgressDescriptor,
+  isSelectDescriptor,
   isHomeAttentionItemDescriptor,
   isHomeContinueItemDescriptor,
   isHomeModuleItemDescriptor,
@@ -30,7 +44,7 @@ import {
   type ViewMount,
   type ViewRenderContext
 } from "../src/view/view-sdk.js";
-import { normalizeSystemIconName } from "../src/view/system-icon.js";
+import { normalizeSystemIconName, systemIconNames } from "../src/view/system-icon.js";
 import { viewThemeLightTokens } from "../src/view/theme.js";
 
 const theme = Object.freeze({
@@ -91,7 +105,7 @@ test("ViewRenderContext exposes the Host-resolved readonly Route location", () =
 });
 
 test("Theme v1 publishes a complete stable CSS-variable mapping", () => {
-  assert.equal(Object.keys(viewThemeCssVariables).length, 46);
+  assert.equal(Object.keys(viewThemeCssVariables).length, 56);
   assert.deepEqual(Object.keys(viewThemeCssVariables), Object.keys(viewThemeLightTokens));
   assert.equal(viewThemeCssVariables["color.textMuted"], "--mem-view-color-text-muted");
   assert.equal(viewThemeLightTokens["layout.contentMax"], "960px");
@@ -128,6 +142,72 @@ test("system icon aliases share one canonical mapping", () => {
   assert.equal(normalizeSystemIconName("run"), "play-circle");
   assert.equal(normalizeSystemIconName("memory"), "brain");
   assert.equal(normalizeSystemIconName("unknown"), "stack");
+  assert.equal(isIconRef({ kind: "system", name: "trash" }), true);
+  assert.equal(isIconRef({ kind: "system", name: "unknown" }), false);
+});
+
+test("every literal system icon used by production TypeScript exists in the canonical catalog", async () => {
+  const files: string[] = [];
+  const visit = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) await visit(path);
+      else if (entry.isFile() && path.endsWith(".ts")) files.push(path);
+    }
+  };
+  await visit(join(process.cwd(), "src"));
+  await visit(join(process.cwd(), "modules"));
+  const used = new Set<string>();
+  for (const path of files) {
+    const source = await readFile(path, "utf8");
+    for (const match of source.matchAll(/kind:\s*["']system["'][^\n]*?name:\s*["']([a-z0-9-]+)["']/g)) used.add(match[1]);
+  }
+  const missing = [...used].filter(name => !systemIconNames.includes(name as never));
+  assert.deepEqual(missing, []);
+});
+
+test("UI v1 validators enforce controlled fields, navigation activation, and feedback states", () => {
+  const route = createHostRouteTarget();
+  const action = { label: { text: "Choose" }, run() {} };
+  assert.equal(isTextFieldDescriptor({ label: { text: "Name" }, value: "Ada", placeholder: { text: "Type" }, onInput() {} }), true);
+  assert.equal(isTextFieldDescriptor({ label: { text: "Name" }, placeholder: { text: "Type" }, onInput() {} }), false);
+  assert.equal(isCheckboxFieldDescriptor({ label: { text: "Enabled" }, checked: true, onChange() {} }), true);
+  assert.equal(isCheckboxFieldDescriptor({ label: { text: "Enabled" }, onChange() {} }), false);
+  assert.equal(isFeedbackDescriptor({ state: "error", title: { text: "Failed" }, action }), true);
+  assert.equal(isFeedbackDescriptor({ state: "unknown", title: { text: "Failed" } }), false);
+  assert.equal(isTabsDescriptor({
+    label: { text: "Status" }, selectedId: "running",
+    items: [
+      { id: "running", label: { text: "Running" }, route },
+      { id: "done", label: { text: "Done" }, action }
+    ]
+  }), true);
+  assert.equal(isTabsDescriptor({
+    label: { text: "Status" }, selectedId: "missing",
+    items: [{ id: "running", label: { text: "Running" }, route }]
+  }), false);
+  assert.equal(isSegmentedControlDescriptor({
+    label: { text: "View" }, selectedId: "diff", onSelect() {},
+    items: [{ id: "diff", label: { text: "Diff" } }, { id: "full", label: { text: "Full" } }]
+  }), true);
+  assert.equal(isSelectDescriptor({ label: { text: "Role" }, value: "dev", options: [{ value: "dev", label: { text: "Developer" } }], onChange() {} }), true);
+  assert.equal(isSelectDescriptor({ label: { text: "Role" }, value: "dev", options: [{ value: "dev", label: { text: "Developer" } }, { value: "dev", label: { text: "Duplicate" } }], onChange() {} }), false);
+  assert.equal(isComboboxDescriptor({ label: { text: "Reviewer" }, value: "dev", query: "Dev", options: [{ value: "dev", label: { text: "Developer" } }], onInput() {}, onChange() {} }), true);
+  assert.equal(isComboboxDescriptor({ label: { text: "Reviewer" }, value: "dev", options: [], onInput() {}, onChange() {} }), false);
+  assert.equal(isDisclosureDescriptor({ title: { text: "Details" }, content: { mount() {} } }), true);
+  assert.equal(isProgressDescriptor({ label: { text: "Progress" }, value: 2, max: 3 }), true);
+  assert.equal(isProgressDescriptor({ label: { text: "Progress" }, value: 4, max: 3 }), false);
+  assert.equal(isContainerDescriptor({ title: { text: "Card" }, content: { mount() {} } }), true);
+  assert.equal(isConfirmationDescriptor({ title: { text: "Delete?" }, confirmLabel: { text: "Delete" }, cancelLabel: { text: "Cancel" }, tone: "danger" }), true);
+});
+
+test("content list state is a strict ready, loading, or retryable error union", () => {
+  const base = { label: { text: "Items" }, sections: [] };
+  assert.equal(isContentListDescriptor({ ...base, empty: { title: { text: "Empty" } } }), true);
+  assert.equal(isContentListDescriptor({ ...base, state: "loading" }), true);
+  assert.equal(isContentListDescriptor({ ...base, state: "error", error: { state: "error", title: { text: "Failed" }, action: { label: { text: "Retry" }, run() {} } } }), true);
+  assert.equal(isContentListDescriptor({ ...base, state: "ready" }), false);
+  assert.equal(isContentListDescriptor({ ...base, state: "error", empty: { title: { text: "Empty" } } }), false);
 });
 
 test("built-in Tokens expose the fourteen approved root Slot contracts", () => {
@@ -221,6 +301,8 @@ test("Descriptor validators accept standard data and reject HTML or forged Route
   assert.equal(isHomeContinueItemDescriptor(continuation), true);
   assert.equal(isHomeModuleItemDescriptor(module), true);
   assert.equal(isOverlayMountDescriptor(overlay), true);
+  assert.equal(isOverlayMountDescriptor({ ...overlay, size: "compact" }), true);
+  assert.equal(isOverlayMountDescriptor({ ...overlay, size: "fullscreen" }), false);
   assert.equal(isSidePanelDescriptor(sidePanel), true);
   assert.equal(slots.sidePanel.definition.validate(sidePanel), true);
   assert.equal(isSidePanelDescriptor({ ...sidePanel, defaultOpen: "yes" }), false);

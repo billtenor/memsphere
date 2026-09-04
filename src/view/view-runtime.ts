@@ -6,6 +6,7 @@ import {
   isSlotToken,
   slots,
   type Disposer,
+  type ConfirmationDescriptor,
   type KeyedRegisterOptions,
   type HeaderActionDescriptor,
   type HeaderAccountDescriptor,
@@ -46,8 +47,7 @@ import { applyViewThemeRoots, RuntimeThemeStore } from "./theme.js";
 import { createCorePlugin } from "./core-plugin.js";
 import { coreViewRoutes } from "./core-routes.js";
 import { createHomeMount, type HomeSnapshotReader } from "./shell/home.js";
-import { createPrimitiveButton, createViewUi } from "./ui-primitives.js";
-import { fillSystemIconNames, normalizeSystemIconName } from "./system-icon.js";
+import { createPrimitiveButton, createViewUi, renderPrimitiveIcon } from "./ui-primitives.js";
 
 type AnySlotToken = SlotToken<string, SlotKind, unknown, string>;
 
@@ -146,6 +146,7 @@ export interface ViewHostDiagnosticSnapshot {
 
 export interface ActiveViewHost {
   activateMainView(key?: string): Promise<void>;
+  confirm(confirmation: ConfirmationDescriptor): Promise<boolean>;
   diagnostics(): ViewHostDiagnosticSnapshot;
   dispose(): Promise<void>;
 }
@@ -267,12 +268,13 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
   const allInstances: readonly ViewPluginInstanceOptions[] = options.coreConfig
     ? [coreInstance, ...options.instances]
     : options.instances;
+  const hostUi = createViewUi(target => routeRegistry.navigate(target));
 
   for (const instanceOptions of allInstances) {
     const module = Object.freeze({ ...instanceOptions.module });
     const lifecycle = new RuntimeLifecycle();
     const theme = themeStore.scoped(lifecycle);
-    const ui = createViewUi(target => routeRegistry.navigate(target));
+    const ui = hostUi;
     const owner = moduleIdentity(module);
     const slotTransaction = slotsRegistry.transaction(module, lifecycle);
     const routeTransaction = routeRegistry.transaction(
@@ -495,6 +497,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     const layer = document.createElement("div");
     layer.className = `view-overlay-layer view-overlay-${descriptor.presentation}`;
     layer.dataset.viewOverlay = entry.identity;
+    layer.dataset.size = descriptor.size ?? "wide";
     const surface = document.createElement("section");
     surface.className = "view-overlay-surface";
     surface.setAttribute("role", "dialog");
@@ -628,6 +631,9 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       await sidePanelRuntime.sync(location);
       await disposeActiveMount(previousOverlay);
       if (!navigationInProgress) await flushPendingOverlayRestore();
+    },
+    confirm(confirmation: ConfirmationDescriptor): Promise<boolean> {
+      return hostUi.confirm(confirmation);
     },
     diagnostics(): ViewHostDiagnosticSnapshot {
       return Object.freeze({
@@ -1669,7 +1675,7 @@ function renderShellDescriptors(
       button.setAttribute("aria-label", textValue(descriptor.label));
       const iconTile = document.createElement("span");
       iconTile.className = "view-shell-module-icon";
-      iconTile.append(renderIcon(descriptor.icon, active ? "fill" : "regular"));
+      iconTile.append(renderIcon(descriptor.icon));
       button.append(iconTile, textNode(descriptor.label));
       if (descriptor.badge) {
         const badge = document.createElement("span");
@@ -1992,7 +1998,7 @@ function renderSecondaryNavigation(
     button.setAttribute("aria-label", textValue(item.label));
     button.classList.toggle("active", item.selected);
     button.setAttribute("aria-current", item.selected ? "page" : "false");
-    button.append(renderIcon(item.icon, item.selected ? "fill" : "regular"), textNode(item.label));
+    button.append(renderIcon(item.icon), textNode(item.label));
     if (item.badge) {
       const badge = document.createElement("span");
       badge.className = "view-shell-secondary-badge";
@@ -2083,7 +2089,13 @@ function renderHeaderTitle(
     breadcrumbs.className = "view-shell-breadcrumbs";
     breadcrumbs.setAttribute("aria-label", "Breadcrumb");
     for (const [index, breadcrumb] of descriptor.breadcrumbs.entries()) {
-      if (index > 0) breadcrumbs.append(document.createTextNode(" / "));
+      if (index > 0) {
+        const separator = document.createElement("span");
+        separator.className = "view-shell-breadcrumb-separator";
+        separator.setAttribute("aria-hidden", "true");
+        separator.textContent = "/";
+        breadcrumbs.append(separator);
+      }
       if (breadcrumb.route) {
         const button = document.createElement("button");
         button.type = "button";
@@ -2116,28 +2128,16 @@ function renderHeaderAction(descriptor: HeaderActionDescriptor, identity: string
   button.className = "view-shell-action";
   button.dataset.viewEntry = identity;
   if (descriptor.tone) button.dataset.tone = descriptor.tone;
-  const label = button.querySelector("span");
+  button.querySelector(".mem-view-icon")?.classList.add("view-shell-icon");
+  const label = button.querySelector(":scope > span:not(.mem-view-icon)");
   if (label) label.className = "view-shell-action-label";
-  const icon = button.querySelector(".mem-view-icon");
-  if (icon && descriptor.icon) icon.replaceWith(renderIcon(descriptor.icon, descriptor.tone === "success" ? "fill" : "regular"));
   return button;
 }
 
-function renderIcon(icon: IconRef, weight: "regular" | "fill" = "regular"): HTMLElement {
-  if (icon.kind === "asset") {
-    const image = document.createElement("img");
-    image.className = "view-shell-icon";
-    image.src = icon.url;
-    image.alt = textValue(icon.alt);
-    return image;
-  }
-  const image = document.createElement("img");
-  image.className = "view-shell-icon";
-  const name = normalizeSystemIconName(icon.name);
-  image.src = `/assets/system-icons/${name}${weight === "fill" && fillSystemIconNames.has(name) ? "-fill" : ""}.svg`;
-  image.alt = "";
-  image.setAttribute("aria-hidden", "true");
-  return image;
+function renderIcon(icon: IconRef): HTMLElement {
+  const rendered = renderPrimitiveIcon(icon);
+  rendered.classList.add("view-shell-icon");
+  return rendered;
 }
 
 function textNode(value: TextRef): Text {

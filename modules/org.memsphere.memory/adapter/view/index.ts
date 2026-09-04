@@ -1,6 +1,7 @@
 import {
   defineViewPlugin,
   slots,
+  type ContentListDescriptor,
   type Disposer,
   type HeaderActionDescriptor,
   type HeaderTitleDescriptor,
@@ -8,7 +9,9 @@ import {
   type RouteTarget,
   type TextRef,
   type ViewMount,
-  type ViewPluginContext
+  type ViewPluginContext,
+  type ViewRenderContext,
+  type ViewUi
 } from "@memsphere/view-sdk";
 
 type JsonRecord = Record<string, unknown>;
@@ -54,6 +57,7 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
   "navigation.memoryMarket": "记忆市场",
   "common.loading": "加载中…",
   "common.retry": "重试",
+  "common.close": "关闭",
   "common.archive": "归档",
   "common.abandon": "废弃",
   "memory.search": "搜索记忆",
@@ -70,7 +74,6 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
   "memory.editConfirm": "创建一个记忆变更来修改这条记忆？",
   "memory.invalidYaml": "记忆 YAML 无效",
   "memory.hideSystem": "隐藏系统记忆",
-  "memory.otherChangeSets": "其他记忆变更（{count}）",
   "memory.relatedChangeSets": "修改中（{count}）",
   "market.empty": "记忆市场中没有可用内容。",
   "market.search": "搜索记忆市场",
@@ -163,6 +166,7 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
 });
 
 const englishFallbackMessages: Readonly<Record<string, string>> = Object.freeze({
+  "common.close": "Close",
   "memory.active": "Active",
   "memory.visibleCount": "{count} total", "memory.marketItemCount": "{count} items",
   type: "Type", optional: "Optional", fields: "Fields", item: "Item", items: "Candidates",
@@ -226,63 +230,23 @@ const memoryStyles = `
   .memory-brand h1,.memory-title { margin:0; }
   .memory-brand h1 { font-size:18px; }
   .memory-top-nav { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; margin-top:14px; }
-  .memory-top-nav a,.memory-source-tab { border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--muted); padding:7px 8px; text-align:center; text-decoration:none; }
-  .memory-top-nav a.active,.memory-source-tab.active { border-color:#b8cbc7; background:var(--accent-soft); color:#173f3c; font-weight:700; }
-  .memory-source-tabs { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:3px; margin-top:8px; padding:3px; border:1px solid var(--line); border-radius:6px; background:var(--soft); }
-  .memory-source-tab { min-height:28px; border:0; padding:4px 7px; font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
-  .memory-search,.memory-module textarea { width:100%; border:1px solid var(--line); border-radius:6px; background:var(--surface); outline:none; }
-  .memory-list-header { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:19px 10px 10px; }
-  .memory-list-header-copy { min-width:0; flex:1; }
-  .memory-list-header-copy small { display:block; margin-bottom:4px; color:#82908d; font-size:10px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; }
-  .memory-list-header h2 { margin:0; font-size:18px; line-height:1.3; letter-spacing:-.02em; }
-  .memory-list-header.compact { align-items:center; }
-  .memory-list-header.compact h2 { overflow:hidden; font-size:14px; line-height:1.35; text-overflow:ellipsis; white-space:nowrap; }
-  .memory-list-refresh { display:grid; width:32px; height:32px; place-items:center; border:0; border-radius:8px; background:transparent; color:var(--muted); font-size:18px; }
-  .memory-list-refresh:hover { background:#f0f4f2; color:var(--accent); }
-  .memory-list-refresh img { width:17px; height:17px; opacity:.7; }
-  .memory-search { height:36px; margin:0 6px 10px; padding:0 10px; border-color:#dce4e1; border-radius:9px; background:#f8faf9; font-size:12px; }
-  .memory-module textarea { min-height:88px; padding:10px; resize:vertical; }
-  .memory-search:focus,.memory-module textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(40,108,103,.12); }
+  .memory-top-nav a { border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--muted); padding:7px 8px; text-align:center; text-decoration:none; }
+  .memory-top-nav a.active { border-color:#b8cbc7; background:var(--accent-soft); color:#173f3c; font-weight:700; }
+  .memory-module textarea { min-height:88px; resize:vertical; }
   .memory-count,.memory-muted,.memory-subtitle { color:var(--muted); }
   .memory-count { margin:0 9px 8px; color:#87928f; font-size:10px; }
-  .memory-list-footer { margin-top:auto; padding:12px 10px 0; border-top:1px solid var(--line); color:#87928f; font-size:10px; }
-  .memory-review-progress { display:grid; gap:6px; margin:0 6px 10px; color:#71807d; font-size:10px; }
-  .memory-review-progress-track { height:3px; overflow:hidden; border-radius:3px; background:#e4ebe8; }
-  .memory-review-progress-track>span { display:block; height:100%; border-radius:inherit; background:var(--accent); }
-  .memory-list-empty { margin:18px 10px; color:#87928f; font-size:12px; line-height:1.6; }
-  .memory-navigation { display:flex; min-height:100%; flex-direction:column; }
-  .memory-kind { margin:10px 9px 4px; color:#82908d; font-size:10px; font-weight:700; letter-spacing:.08em; }
-  .memory-list,.memory-comment-list,.memory-flow { display:grid; gap:2px; }
-  .memory-button { position:relative; display:grid; width:100%; min-height:58px; grid-template-columns:34px minmax(0,1fr) minmax(34px,auto); align-items:start; gap:9px; border:0; border-radius:10px; background:transparent; color:var(--text); padding:10px 7px 10px 9px; text-align:left; overflow-wrap:anywhere; }
-  .memory-button:hover { background:#f2f6f5; }
-  .memory-button-icon { display:grid; width:34px; height:34px; place-items:center; border-radius:10px; background:#eef4f2; color:#5c7773; font-size:16px; }
-  .memory-button-icon img { width:18px; height:18px; opacity:.72; }
-  .memory-button-copy { display:block; min-width:0; }
-  .memory-button-copy strong,.memory-button-copy small,.memory-button-copy span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .memory-button-copy strong { color:#27312f; font-size:13px; font-weight:650; line-height:1.35; }
-  .memory-button-copy small { margin-top:3px; color:#87928f; font-size:10px; }
-  .memory-button-copy span { margin-top:4px; color:#697572; font-size:11px; }
-  .memory-button-caret { width:14px; height:14px; margin-top:8px; opacity:.55; transform:rotate(-90deg); }
-  .memory-button-trailing { display:flex; min-width:0; flex-direction:column; align-items:flex-end; gap:6px; padding-top:1px; }
-  .memory-review-state { min-width:34px; justify-self:end; color:var(--accent); font-size:10px; text-align:right; white-space:nowrap; }
-  .memory-review-state.reviewed { display:grid; width:22px; min-width:22px; height:22px; place-items:center; border-radius:50%; background:#e1efed; font-size:13px; font-weight:800; }
-  .memory-button-trailing .memory-button-caret { margin-top:0; }
-  .memory-change-wrap { border-radius:6px; }
-  .memory-change-wrap:hover { background:#eceee8; }
-  .memory-change-wrap:hover .memory-button { background:transparent; }
-  .memory-button.active { background:#e1efed; color:#173f3c; font-weight:700; }
-  .memory-button.active .memory-button-icon { background:#fff; color:var(--accent); }
-  .memory-change-wrap.active { border-radius:6px; background:var(--accent-soft); }
-  .memory-change-wrap.active .memory-button { background:transparent; }
-  .memory-related { margin:-4px 9px 5px; color:var(--accent); font-size:12px; }
-  .memory-related-list { display:grid; gap:3px; margin:0 9px 7px; }
-  .memory-related-list button { border:0; background:transparent; color:var(--muted); padding:2px 0; text-align:left; font:11px/1.35 ui-monospace,monospace; }
+  .memory-comment-list,.memory-flow { display:grid; gap:2px; }
+  .memory-list-accessory { margin-top:auto; border-top:1px solid var(--line); }
+  .memory-list-accessory-content { display:grid; gap:10px; padding:12px 14px; }
+  .memory-related-actions { display:grid; justify-items:start; gap:4px; }
+  .memory-related-actions .memory-related-link { width:auto; min-height:auto; justify-content:flex-start; border:0; border-radius:0; background:transparent; padding:3px 1px; color:#2468a2; font-weight:500; line-height:var(--memory-page-line-compact); text-align:left; text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:3px; }
+  .memory-related-actions .memory-related-link:hover:not(:disabled) { border:0; background:transparent; color:#174f80; text-decoration-thickness:2px; }
+  .memory-related-actions .memory-related-link:focus-visible { border-radius:var(--memory-page-radius-section); }
   .memory-options { margin-top:16px; padding-top:12px; border-top:1px solid var(--line); }
   .memory-change-wrap > .memory-options { margin-top:0; padding-top:0; border-top:0; }
   .memory-option { display:flex; align-items:center; gap:8px; color:var(--muted); }
   .memory-workspace { min-width:0; max-width:972px; margin:0 auto; padding:var(--memory-page-padding) var(--memory-page-padding) 48px; font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); }
   .memory-workspace.memory-change-workspace { max-width:none; margin:0; padding-right:0; }
-  .memory-workspace .memory-btn { font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
   .memory-toolbar { align-items:flex-start; justify-content:flex-start; margin:0 0 14px; border:1px solid var(--line); border-radius:12px; background:var(--surface); padding:19px 20px; box-shadow:0 1px 2px rgba(20,47,42,.025); }
   .memory-toolbar-icon { display:grid; width:46px; height:46px; flex:0 0 auto; place-items:center; border-radius:13px; background:var(--accent-soft); }
   .memory-toolbar-icon img { width:26px; height:26px; filter:invert(37%) sepia(18%) saturate(1485%) hue-rotate(123deg) brightness(89%) contrast(86%); }
@@ -290,10 +254,6 @@ const memoryStyles = `
   .memory-title { font-size:18px; line-height:1.3; overflow-wrap:anywhere; }
   .memory-subtitle { margin-top:4px; font-size:12px; overflow-wrap:anywhere; }
   .memory-toolbar-actions,.memory-comment-actions { justify-content:flex-start; flex-wrap:wrap; }
-  .memory-btn { border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--text); padding:7px 10px; }
-  .memory-btn.primary { border-color:var(--accent); background:var(--accent); color:#fff; }
-  .memory-btn.danger { color:var(--danger); }
-  .memory-btn:disabled { opacity:.55; cursor:not-allowed; }
   .memory-empty,.memory-panel,.memory-error { border:1px solid var(--line); border-radius:var(--memory-page-radius-card); background:var(--surface); padding:var(--memory-page-card-padding); box-shadow:0 1px 2px rgba(25,30,35,.08); }
   .memory-error { border-color:#e8c7bd; border-left:4px solid var(--danger); background:#fffdfb; }
   .memory-error h3 { color:var(--danger); }
@@ -366,16 +326,14 @@ const memoryStyles = `
   .memory-inline-comment-editor textarea { width:100%; min-height:72px; resize:vertical; border:1px solid var(--line); border-radius:7px; background:var(--surface); color:var(--text); padding:8px 9px; font-family:var(--memory-page-font-sans); font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); }
   .memory-inline-comment-editor textarea:focus { outline:2px solid rgba(31,126,113,.16); border-color:#87aaa4; }
   .memory-inline-comment-actions { display:flex; justify-content:flex-end; gap:7px; }
-  .memory-inline-comment-actions .memory-btn { padding:6px 9px; font-size:var(--memory-page-text-label); }
   .memory-inline-diff-pair>.memory-inline-comment-editor { margin-left:0; margin-right:0; }
   .memory-commentable.has-comment-draft .memory-inline-plus { display:none; }
-  .memory-change-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(220px,260px); gap:14px; align-items:start; }
-  .memory-change-main { width:min(100%,720px); justify-self:center; }
+  .memory-change-layout { display:grid; min-width:0; grid-template-columns:minmax(0,1fr) minmax(220px,260px); gap:14px; align-items:start; }
+  .memory-change-main { width:100%; max-width:720px; min-width:0; margin-inline:auto; justify-self:stretch; }
   .memory-diff-toolbar { display:inline-grid; grid-template-columns:repeat(2,minmax(84px,1fr)); gap:3px; margin:2px 0 14px; padding:3px; border:1px solid var(--line); border-radius:7px; background:var(--soft); }
-  .memory-diff-toolbar .memory-source-tab { margin:0; }
-  .memory-change-viewbar { display:flex; align-items:center; justify-content:flex-start; gap:14px; margin:0 0 12px; }
+  .memory-change-viewbar { display:flex; min-width:0; align-items:center; justify-content:center; gap:14px; margin:0 0 12px; flex-wrap:wrap; }
   .memory-change-viewbar .memory-diff-toolbar { flex:0 0 auto; margin:0; }
-  .memory-change-revisions { display:flex; min-width:0; align-items:center; gap:9px; color:var(--muted); font-size:var(--memory-page-text-meta); line-height:var(--memory-page-line-compact); }
+  .memory-change-revisions { display:flex; min-width:0; align-items:center; justify-content:center; gap:9px; color:var(--muted); font-size:var(--memory-page-text-meta); line-height:var(--memory-page-line-compact); }
   .memory-change-revision { display:grid; gap:1px; }
   .memory-change-revision span { font-size:var(--memory-page-text-meta); letter-spacing:.03em; }
   .memory-change-revision code { color:var(--muted); font-family:var(--memory-page-font-mono); font-size:var(--memory-page-text-meta); line-height:var(--memory-page-line-compact); }
@@ -406,9 +364,9 @@ const memoryStyles = `
   .memory-review-complete strong,.memory-review-complete small { display:block; }
   .memory-review-complete strong { font-size:var(--memory-page-text-section-title); line-height:var(--memory-page-line-compact); }
   .memory-review-complete small { margin-top:3px; color:var(--muted); font-size:var(--memory-page-text-meta); line-height:var(--memory-page-line-compact); }
-  .memory-review-complete .memory-btn { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
-  .memory-change-layout.comments-collapsed { grid-template-columns:minmax(0,1fr); }
-  .memory-change-layout.comments-collapsed .memory-change-main { width:min(100%,960px); }
+  .memory-review-complete .mem-view-button { white-space:nowrap; }
+  .memory-change-layout.comments-collapsed { display:block; }
+  .memory-change-layout.comments-collapsed .memory-change-main { max-width:960px; }
   .memory-change-layout.comments-collapsed .memory-comments { display:none; }
   .memory-comments { position:sticky; top:calc(-1 * var(--memory-page-padding)); display:grid; grid-template-rows:auto minmax(140px,1fr) auto; height:calc(100vh - 100px); max-height:calc(100vh - 100px); margin:calc(-1 * var(--memory-page-padding)) 0 0; overflow:hidden; border-width:0 0 0 1px; border-radius:0; background:#fbfcfa; padding:0; box-shadow:none; }
   .memory-comments-header { display:flex; min-height:54px; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid var(--line); padding:13px 15px; }
@@ -429,16 +387,17 @@ const memoryStyles = `
   .memory-comment-target:hover { color:var(--accent); text-decoration:underline; text-underline-offset:2px; }
   .memory-comment-body { margin:8px 0 0; color:var(--text); font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); white-space:pre-wrap; overflow-wrap:anywhere; }
   .memory-comment-actions { display:flex; justify-content:flex-end; gap:6px; margin-top:9px; padding-top:8px; border-top:1px solid #eef1ed; }
-  .memory-comment-actions .memory-btn { min-height:27px; border-radius:6px; padding:4px 8px; font-size:var(--memory-page-text-label); }
   @media(max-width:820px){.memory-layout{display:block}.memory-sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.memory-workspace,.memory-workspace.memory-change-workspace{padding:16px 14px 36px}.memory-change-layout{display:block}.memory-change-main{width:auto}.memory-change-viewbar{align-items:flex-start;flex-direction:column}.memory-comments{position:static;top:auto;height:auto;max-height:none;margin:14px 0 0;border:1px solid var(--line);border-radius:var(--memory-page-radius-section)}.memory-section-body{padding:4px 12px 14px}.memory-flow-head{display:grid}.memory-artifact-row{margin-left:0}}
 `;
 
 export default defineViewPlugin<MemoryConfig>({
   name: "memsphere-memory-view",
   apiVersion: 1,
-  inject: ["slots", "router"],
+  inject: ["slots", "router", "theme", "ui"],
+  themeVersion: 1,
+  uiVersion: 1,
   apply(ctx, config) {
-    if (!ctx.router) throw new Error("Memory View requires the router service");
+    if (!ctx.router || !ctx.ui || !ctx.theme) throw new Error("Memory View requires router, theme, and ui services");
     const routes = {
       index: ctx.router.register({ id: "index", path: "/memories", query: ["section", "change"] }),
       market: ctx.router.register({ id: "market", path: "/market", query: ["item"] }),
@@ -454,6 +413,7 @@ export default defineViewPlugin<MemoryConfig>({
       config,
       routes,
       target => ctx.router!.navigate(target),
+      ctx.ui,
       headerActions.replace,
       headerActions.clear,
       publishSecondary
@@ -575,7 +535,7 @@ function startMemoryHome(ctx: ViewPluginContext, config: Readonly<MemoryConfig>,
         value: {
           title: { text: message(config, "memory.loadFailed") },
           summary: { text: error instanceof Error ? error.message : String(error) },
-          icon: { kind: "system", name: "warning" },
+          icon: { kind: "system", name: "warning-circle" },
           status: "error",
           action: { label: { text: message(config, "common.retry") }, run: refresh }
         }
@@ -767,6 +727,7 @@ function createMemoryPageMounts(
   config: Readonly<MemoryConfig>,
   routes: MemoryRoutes,
   navigate: (target: RouteTarget) => Promise<void>,
+  ui: ViewUi,
   publishHeaderActions: (actions: readonly PublishedHeaderAction[]) => void,
   clearHeaderActions: () => void,
   publishSecondary: (location: RouteLocation, badges?: Readonly<Record<string, number>>, heading?: HeaderTitleDescriptor) => void
@@ -778,11 +739,18 @@ function createMemoryPageMounts(
   let start: Promise<void> | undefined;
   let lastRoute = "";
   let update: Promise<void> | undefined;
+  let listContext: ViewRenderContext | undefined;
+  let listAccessory: HTMLElement | undefined;
+  const listMount = ui.contentList(() => app!.contentListDescriptor());
+  const refreshList = () => {
+    if (listContext) void listMount.update?.(listContext);
+    if (listAccessory && app) listAccessory.replaceChildren(app.listAccessory());
+  };
   const ensure = (location: RouteLocation) => {
     scratch ??= document.createElement("div");
     portal ??= document.createElement("div");
     if (!app) {
-      app = new MemoryApplication(scratch, portal, controller, config, routes, location, navigate, publishHeaderActions);
+      app = new MemoryApplication(scratch, portal, controller, config, routes, location, navigate, ui, publishHeaderActions, refreshList);
       lastRoute = `${location.pathname}${location.search}${location.hash}`;
     }
     start ??= app.start();
@@ -802,24 +770,47 @@ function createMemoryPageMounts(
     publishSecondary(location, app!.secondaryBadges(), app!.headerTitle());
   };
   const createSurface = (surface: "list" | "detail"): ViewMount => ({
-    async mount({ element }, context) {
+    async mount({ element, portal: mountPortal }, context) {
       const style = document.createElement("style");
       style.dataset.memsphereMemoryStyles = "true";
       style.textContent = memoryStyles;
       element.append(style);
       element.classList.add("memory-surface", `memory-${surface}-surface`);
       await ensure(context.route);
-      app![surface === "list" ? "attachList" : "attachDetail"](element);
+      if (surface === "list") {
+        const listHost = document.createElement("div");
+        listAccessory = document.createElement("div");
+        listAccessory.className = "memory-list-accessory";
+        element.append(listHost, listAccessory);
+        listContext = context;
+        const disposeList = await listMount.mount({ element: listHost, portal: mountPortal }, context);
+        listAccessory.replaceChildren(app!.listAccessory());
+        await updateRoute(context.route);
+        await listMount.update?.(context);
+        return async () => {
+          if (listContext === context) listContext = undefined;
+          listAccessory = undefined;
+          await disposeList?.();
+          element.classList.remove("memory-surface", "memory-list-surface");
+          element.replaceChildren();
+        };
+      }
+      app!.attachDetail(element);
       await updateRoute(context.route);
       return () => {
-        app?.[surface === "list" ? "detachList" : "detachDetail"](element);
-        if (surface === "detail") clearHeaderActions();
+        app?.detachDetail(element);
+        clearHeaderActions();
         element.classList.remove("memory-surface", `memory-${surface}-surface`);
         element.replaceChildren();
       };
     },
     async update(context) {
+      if (surface === "list") listContext = context;
       await updateRoute(context.route);
+      if (surface === "list") {
+        await listMount.update?.(context);
+        if (listAccessory && app) listAccessory.replaceChildren(app.listAccessory());
+      }
     }
   });
   return {
@@ -837,7 +828,6 @@ function createMemoryPageMounts(
 
 class MemoryApplication {
   readonly #root: HTMLElement;
-  #listRoot: HTMLElement | null = null;
   #detailRoot: HTMLElement | null = null;
   readonly #portal: HTMLElement;
   readonly #controller: AbortController;
@@ -845,7 +835,9 @@ class MemoryApplication {
   readonly #routes: MemoryRoutes;
   #location: Readonly<RouteLocation>;
   readonly #navigate: (target: RouteTarget) => Promise<void>;
+  readonly #ui: ViewUi;
   readonly #publishHeaderActions: (actions: readonly PublishedHeaderAction[]) => void;
+  readonly #onListChange: () => void;
   #memories: MemorySummary[] = [];
   #changes: ChangeSummary[] = [];
   #market: JsonRecord[] = [];
@@ -866,8 +858,9 @@ class MemoryApplication {
   #actorKinds: Record<string, string> = {};
   #generation = 0;
   #fatalError: unknown = null;
+  readonly #expandedRelated = new Set<string>();
 
-  constructor(root: HTMLElement, portal: HTMLElement, controller: AbortController, config: Readonly<MemoryConfig>, routes: MemoryRoutes, location: Readonly<RouteLocation>, navigate: (target: RouteTarget) => Promise<void>, publishHeaderActions: (actions: readonly PublishedHeaderAction[]) => void) {
+  constructor(root: HTMLElement, portal: HTMLElement, controller: AbortController, config: Readonly<MemoryConfig>, routes: MemoryRoutes, location: Readonly<RouteLocation>, navigate: (target: RouteTarget) => Promise<void>, ui: ViewUi, publishHeaderActions: (actions: readonly PublishedHeaderAction[]) => void, onListChange: () => void = () => undefined) {
     this.#root = root;
     this.#portal = portal;
     this.#controller = controller;
@@ -876,7 +869,9 @@ class MemoryApplication {
     this.#location = location;
     this.#currentProject = projectFromLocation(location);
     this.#navigate = navigate;
+    this.#ui = ui;
     this.#publishHeaderActions = publishHeaderActions;
+    this.#onListChange = onListChange;
   }
 
   async start(): Promise<void> {
@@ -884,8 +879,6 @@ class MemoryApplication {
     await this.load();
   }
 
-  attachList(root: HTMLElement): void { this.#listRoot = root; this.render(); }
-  detachList(root: HTMLElement): void { if (this.#listRoot === root) this.#listRoot = null; }
   attachDetail(root: HTMLElement): void { this.#detailRoot = root; this.render(); }
   detachDetail(root: HTMLElement): void { if (this.#detailRoot === root) this.#detailRoot = null; }
 
@@ -1106,20 +1099,14 @@ class MemoryApplication {
 
   private render(): void {
     this.syncHeaderActions();
-    if (this.#listRoot || this.#detailRoot) {
-      if (this.#listRoot) {
-        for (const child of [...this.#listRoot.children]) if (child.tagName !== "STYLE") child.remove();
-        const app = el("section", "memory-module memory-list-module");
-        if (this.#fatalError) app.append(errorWorkspace(this.t("fatal.title"), errorMessage(this.#fatalError)));
-        else app.append(this.renderSidebar());
-        this.#listRoot.append(app);
-      }
+    this.#onListChange();
+    if (this.#detailRoot) {
       if (this.#detailRoot) {
         for (const child of [...this.#detailRoot.children]) if (child.tagName !== "STYLE") child.remove();
         const app = el("section", "memory-module memory-detail-module");
         if (this.#fatalError) {
           const panel = errorWorkspace(this.t("fatal.title"), errorMessage(this.#fatalError));
-          panel.append(button(this.t("common.retry"), "memory-btn", () => void this.load()));
+          panel.append(this.#ui.button({ label: text(this.t("common.retry")), run: () => this.load() }));
           app.append(panel);
         } else app.append(this.renderWorkspace());
         this.#detailRoot.append(app);
@@ -1217,6 +1204,245 @@ class MemoryApplication {
     this.#publishHeaderActions(actions);
   }
 
+  contentListDescriptor(): ContentListDescriptor {
+    const route = parseLocation(this.#location);
+    if (this.#fatalError) {
+      return {
+        state: "error",
+        label: text(this.t("navigation.memory")),
+        sections: [],
+        error: {
+          state: "error",
+          title: text(this.t("fatal.title")),
+          description: text(errorMessage(this.#fatalError)),
+          icon: { kind: "system", name: "warning-circle" },
+          action: { label: text(this.t("common.retry")), run: () => this.load() }
+        }
+      };
+    }
+    if (route.kind === "market") return this.marketListDescriptor();
+    if (route.kind === "change") return this.changeTargetListDescriptor();
+    if (this.#location.query.section === "changes") return this.changeListDescriptor();
+    return this.memoryListDescriptor();
+  }
+
+  listAccessory(): HTMLElement {
+    const accessory = el("div", "memory-list-accessory-content");
+    const route = parseLocation(this.#location);
+    if (route.kind === "change") {
+      accessory.append(this.#ui.progress({
+        label: text(this.t("change.reviewProgress")
+          .replace("{reviewed}", String(this.#reviewedMemoryIds.size))
+          .replace("{total}", String(this.#memories.length))),
+        value: this.#reviewedMemoryIds.size,
+        max: Math.max(1, this.#memories.length)
+      }));
+      return accessory;
+    }
+    if (route.kind !== "market" && this.#location.query.section !== "changes") {
+      const field = this.#ui.checkboxField({
+        label: text(this.t("memory.hideSystem")),
+        checked: this.#hideSystem,
+        onChange: checked => {
+          this.#hideSystem = checked;
+          localStorage.setItem(hideSystemMemoriesKey, String(checked));
+          this.render();
+        }
+      });
+      accessory.append(field.root);
+    }
+    return accessory;
+  }
+
+  private listHeader(title: string, refreshLabel: string) {
+    return {
+      eyebrow: text(this.t("navigation.memory")),
+      title: text(title),
+      action: { label: text(refreshLabel), icon: { kind: "system" as const, name: "arrows-clockwise" }, run: () => this.load() }
+    };
+  }
+
+  private listFilter(label: string) {
+    return {
+      label: text(label),
+      placeholder: text(label),
+      value: this.#query,
+      onInput: (value: string) => { this.#query = value; }
+    };
+  }
+
+  private changeListDescriptor(): ContentListDescriptor {
+    const title = this.#config.locale?.toLowerCase().startsWith("en") ? "ChangeSets" : "记忆变更";
+    const refresh = this.#config.locale?.toLowerCase().startsWith("en") ? "Refresh ChangeSets" : "刷新记忆变更";
+    const needle = this.#query.trim().toLowerCase();
+    const changes = this.#changes.filter(change => !needle || `${change.title ?? ""} ${change.id}`.toLowerCase().includes(needle));
+    const selected = parseLocation(this.#location).changeId;
+    return {
+      label: text(title),
+      header: this.listHeader(title, refresh),
+      filter: this.listFilter(this.t("change.search")),
+      empty: { title: text(this.t("change.empty")) },
+      sections: [{
+        id: "changes",
+        items: changes.map(change => ({
+          id: change.id,
+          title: text(String(change.title ?? change.id)),
+          meta: change.title ? text(change.id) : undefined,
+          description: text(this.changeStatusLabel(String(change.status ?? ""))),
+          icon: { kind: "system", name: "code" },
+          selected: change.id === selected,
+          action: { label: text(String(change.title ?? change.id)), run: () => this.openChange(change.id) }
+        }))
+      }]
+    };
+  }
+
+  private changeTargetListDescriptor(): ContentListDescriptor {
+    const change = this.#changeDetail?.change as ChangeSummary | undefined;
+    const title = String(change?.id ?? this.t("change.title"));
+    const refresh = this.#config.locale?.toLowerCase().startsWith("en") ? "Refresh ChangeSet" : "刷新记忆变更";
+    const needle = this.#query.trim().toLowerCase();
+    const visible = this.#memories.filter(memory => !needle || `${memoryName(memory)} ${memoryReference(memory)} ${memorySummaryDescription(memory)}`.toLowerCase().includes(needle));
+    return {
+      label: text(title),
+      header: this.listHeader(title, refresh),
+      filter: this.listFilter(this.t("change.search")),
+      empty: { title: text(this.t("change.empty")) },
+      sections: [{
+        id: "change-targets",
+        items: visible.map(memory => {
+          const reviewed = this.#reviewedMemoryIds.has(memory.id);
+          return {
+            id: memory.id,
+            title: text(memoryName(memory)),
+            meta: text(this.t(memory.kind)),
+            description: memorySummaryDescription(memory) ? text(memorySummaryDescription(memory)) : undefined,
+            icon: { kind: "system" as const, name: "file-text" },
+            badge: text(reviewed ? (this.#config.locale?.toLowerCase().startsWith("en") ? "Reviewed" : "已查看") : this.operationLabel(String(memory.operation ?? "update"))),
+            selected: memory.id === this.#selectedId,
+            action: { label: text(memoryName(memory)), run: () => { this.#selectedId = memory.id; this.render(); } }
+          };
+        })
+      }]
+    };
+  }
+
+  private memoryListDescriptor(): ContentListDescriptor {
+    const recent = this.#location.query.section === "recent";
+    const title = recent ? this.t("memory.recent") : this.t("navigation.currentProject");
+    const search = recent ? this.t("memory.recentSearch") : (this.#config.locale?.toLowerCase().startsWith("en") ? "Search current project" : "搜索当前项目");
+    const refresh = this.#config.locale?.toLowerCase().startsWith("en") ? "Refresh list" : "刷新列表";
+    const visible = this.visibleMemories();
+    const sections: Array<ContentListDescriptor["sections"][number]> = kindOrder.map(kind => ({
+      id: kind,
+      label: text(this.t(kind)),
+      items: visible.filter(memory => memory.kind === kind).map(memory => this.memoryListItem(memory))
+    })).filter(section => section.items.length > 0);
+    return {
+      label: text(title),
+      header: this.listHeader(title, refresh),
+      filter: this.listFilter(search),
+      empty: { title: text(recent ? this.t("memory.recentEmpty") : this.t("memory.empty")) },
+      sections
+    };
+  }
+
+  private memoryListItem(memory: MemorySummary) {
+    const related = this.#changes.filter(change => (change.memoryPaths ?? []).includes(memory.path));
+    const expanded = this.#expandedRelated.has(memory.id);
+    return {
+      id: memory.id,
+      title: text(memoryName(memory)),
+      meta: text(this.t(memory.kind)),
+      description: text(memorySummaryDescription(memory) || memoryReference(memory)),
+      icon: { kind: "system" as const, name: "file-text" },
+      badges: related.length ? [{ label: text(this.format("memory.relatedChangeSets", { count: related.length })), tone: "info" as const }] : undefined,
+      selected: memory.id === this.#selectedId,
+      action: { label: text(memoryName(memory)), run: () => this.openMemory(memory) },
+      expanded,
+      toggle: related.length ? {
+        label: text(this.format("memory.relatedChangeSets", { count: related.length })),
+        icon: { kind: "system" as const, name: "caret-down" },
+        run: () => {
+          if (expanded) this.#expandedRelated.delete(memory.id); else this.#expandedRelated.add(memory.id);
+          this.render();
+        }
+      } : undefined,
+      details: related.length ? this.relatedChangesMount(related) : undefined
+    };
+  }
+
+  private relatedChangesMount(changes: ChangeSummary[]): ViewMount {
+    return {
+      mount: async ({ element }) => {
+        const list = el("div", "memory-related-actions");
+        for (const change of changes) {
+          const link = this.#ui.button({
+            label: text(`${change.id} · ${this.changeStatusLabel(String(change.status ?? ""))}`),
+            run: () => this.openChange(change.id)
+          });
+          link.classList.add("memory-related-link");
+          list.append(link);
+        }
+        element.replaceChildren(list);
+        return () => element.replaceChildren();
+      }
+    };
+  }
+
+  private async openMemory(memory: MemorySummary): Promise<void> {
+    const route = parseLocation(this.#location);
+    if (route.changeId) {
+      this.#selectedId = memory.id;
+      await this.loadMemoryDetail(memory.id, route.changeId);
+      this.render();
+      return;
+    }
+    const [kindName, ...name] = memoryReference(memory).split("/");
+    const projectId = projectFromLocation(this.#location);
+    const query = this.#location.query.section ? { section: this.#location.query.section } : {};
+    await this.navigate(projectId
+      ? this.#routes.projectMemoryDetail.to({ projectId, kind: kindName, name: name.join("/") }, { query })
+      : this.#routes.memoryDetail.to({ kind: kindName, name: name.join("/") }, { query }));
+  }
+
+  private marketListDescriptor(): ContentListDescriptor {
+    const title = this.t("navigation.memoryMarket");
+    const refresh = this.#config.locale?.toLowerCase().startsWith("en") ? "Refresh Market" : "刷新记忆市场";
+    const query = this.#query.trim().toLowerCase();
+    const visible = this.#market.filter(item => !query || `${item.reference ?? ""} ${memoryName(item as MemorySummary)}`.toLowerCase().includes(query));
+    return {
+      label: text(title),
+      header: this.listHeader(title, refresh),
+      filter: this.listFilter(this.t("market.search")),
+      empty: { title: text(this.t("market.empty")) },
+      sections: kindOrder.map(kind => ({
+        id: kind,
+        label: text(this.t(kind)),
+        items: visible.filter(item => item.kind === kind).map(item => {
+          const reference = String(item.reference ?? "");
+          const label = memoryName((item.entity ?? item) as MemorySummary);
+          return {
+            id: reference,
+            title: text(label),
+            meta: text(this.t(String(item.kind ?? ""))),
+            description: text(reference),
+            icon: { kind: "system" as const, name: "file-text" },
+            badge: text(this.marketStatusLabel(String(item.status ?? ""))),
+            selected: reference === this.#selectedMarket,
+            action: {
+              label: text(`${label} ${this.marketStatusLabel(String(item.status ?? ""))}`.trim()),
+              run: () => {
+                if (item.status === "importing" && item.changeId) return this.openChange(String(item.changeId));
+                return this.navigate(this.marketTarget(reference));
+              }
+            }
+          };
+        })
+      })).filter(section => section.items.length > 0)
+    };
+  }
+
   private renderSidebar(): HTMLElement {
     const side = el("aside", "memory-sidebar");
     const route = parseLocation(this.#location);
@@ -1231,9 +1457,8 @@ class MemoryApplication {
     const header = el("header", `memory-list-header${compact ? " compact" : ""}`);
     const copy = el("div", "memory-list-header-copy");
     copy.append(el("small", "", this.t("navigation.memory")), el("h2", "", title));
-    const refresh = button("", "memory-list-refresh", () => void this.load());
-    const icon = document.createElement("img"); icon.src = "/assets/system-icons/arrows-clockwise.svg"; icon.alt = ""; refresh.append(icon);
-    refresh.setAttribute("aria-label", refreshLabel);
+    const refresh = this.#ui.iconButton({ label: text(refreshLabel), icon: { kind: "system", name: "arrows-clockwise" }, run: () => this.load() });
+    refresh.classList.add("memory-list-refresh");
     header.append(copy, refresh);
     return header;
   }
@@ -1272,10 +1497,8 @@ class MemoryApplication {
     const needle = this.#query.trim().toLowerCase();
     const visible = this.#memories.filter(memory => !needle || `${memoryName(memory)} ${memoryReference(memory)} ${memorySummaryDescription(memory)}`.toLowerCase().includes(needle));
     wrap.append(search);
-    const progress = el("div", "memory-review-progress");
-    progress.append(el("span", "", this.t("change.reviewProgress").replace("{reviewed}", String(this.#reviewedMemoryIds.size)).replace("{total}", String(this.#memories.length))));
-    const track = el("div", "memory-review-progress-track");
-    const bar = el("span"); bar.style.width = `${this.#memories.length ? Math.min(100, this.#reviewedMemoryIds.size / this.#memories.length * 100) : 0}%`; track.append(bar); progress.append(track); wrap.append(progress);
+    const progress = this.#ui.progress({label:text(this.t("change.reviewProgress").replace("{reviewed}", String(this.#reviewedMemoryIds.size)).replace("{total}", String(this.#memories.length))),value:this.#reviewedMemoryIds.size,max:Math.max(1,this.#memories.length)});
+    progress.classList.add("memory-review-progress");wrap.append(progress);
     const list = el("div", "memory-list");
     for (const memory of visible) {
       const row = button("", `memory-button${memory.id === this.#selectedId ? " active" : ""}`, () => { this.#selectedId = memory.id; this.render(); });
@@ -1340,11 +1563,6 @@ class MemoryApplication {
       wrap.append(list);
     }
     if (!visible.length) wrap.append(el("div", "memory-list-empty", recent ? this.t("memory.recentEmpty") : this.t("memory.empty")));
-    if (!recent) {
-      const attached = new Set(this.#memories.map(memory => memory.path));
-      const other = this.#changes.filter(change => !(change.memoryPaths ?? []).some(path => attached.has(path)));
-      if (other.length) wrap.append(this.changeLinks(this.format("memory.otherChangeSets", { count: other.length }), other));
-    }
     const option = el("label", "memory-option");
     const checkbox = input("checkbox", "", ""); checkbox.checked = this.#hideSystem;
     checkbox.addEventListener("change", () => { this.#hideSystem = checkbox.checked; localStorage.setItem(hideSystemMemoriesKey, String(checkbox.checked)); this.render(); });
@@ -1411,7 +1629,7 @@ class MemoryApplication {
     const entity = (detail.entity ?? detail) as JsonRecord;
     const workspace = el("div");
     const content = el("section", "memory-panel memory-content-card");
-    content.append(renderMemoryEntity(detail.kind, entity, this.t.bind(this), (target, snapshot, location) => void this.beginMemoryComment(detail, target, snapshot, location), this.renderOptions()));
+    content.append(renderMemoryEntity(detail.kind, entity, this.t.bind(this), undefined, this.renderOptions()));
     if (context) workspace.append(context);
     workspace.append(content);
     return workspace;
@@ -1426,7 +1644,7 @@ class MemoryApplication {
     const store = String((change as JsonRecord).storeType ?? (change as JsonRecord).store_type ?? "");
     if (store) meta.append(el("span", "memory-pill", this.format("change.store", { value: store })));
     const checkpoint = (change as JsonRecord).checkpoint as JsonRecord | undefined;
-    if ((change as JsonRecord).valid === false || checkpoint?.valid === false) meta.append(el("span", "memory-pill", this.t("change.validationFailed")));
+    if ((change as JsonRecord).valid === false || checkpoint?.valid === false) meta.append(this.#ui.badge({label:text(this.t("change.validationFailed")),tone:"danger",icon:{kind:"system",name:"warning-circle"}}));
     if (meta.childElementCount) panel.append(meta);
     return panel;
   }
@@ -1459,10 +1677,8 @@ class MemoryApplication {
     const selected = this.#memories.find(memory => memory.id === this.#selectedId);
     if (selected) {
       const viewbar = el("div", "memory-change-viewbar");
-      const mode = el("div", "memory-diff-toolbar");
-      const diffButton = button(this.t("change.diff"), `memory-source-tab${this.#changeContentMode === "diff" ? " active" : ""}`, () => { this.#changeContentMode = "diff"; this.render(); });
-      const candidateButton = button(this.t("change.candidateContent"), `memory-source-tab${this.#changeContentMode === "candidate" ? " active" : ""}`, () => { this.#changeContentMode = "candidate"; this.render(); });
-      mode.append(diffButton, candidateButton);
+      const mode = this.#ui.segmentedControl({label:text(this.t("change.title")),selectedId:this.#changeContentMode,items:[{id:"diff",label:text(this.t("change.diff"))},{id:"candidate",label:text(this.t("change.candidateContent"))}],onSelect:id=>{this.#changeContentMode=id as "diff"|"candidate";this.render();}});
+      mode.classList.add("memory-diff-toolbar");
       const revisions = el("div", "memory-change-revisions");
       revisions.append(changeRevision("base", String(change.baseRevision ?? "")));
       const arrow = document.createElement("img");
@@ -1507,25 +1723,21 @@ class MemoryApplication {
     const header = el("header", "memory-comments-header");
     const title = el("div", "memory-comments-title");
     title.append(el("h3", "", this.t("change.comments")), el("span", "memory-comments-count", String(comments.length)));
-    const close = button("", "memory-comments-close", () => this.setCommentsCollapsed(true));
-    close.setAttribute("aria-label", this.t("change.collapseComments"));
-    const closeIcon = document.createElement("img");
-    closeIcon.src = "/assets/system-icons/x.svg";
-    closeIcon.alt = "";
-    close.append(closeIcon);
+    const close = this.#ui.iconButton({ label: text(this.t("change.collapseComments")), icon: { kind: "system", name: "x" }, run: () => this.setCommentsCollapsed(true) });
+    close.classList.add("memory-comments-close");
     header.append(title, close);
     const body = el("div", "memory-comments-body");
     if (!comments.length) body.append(el("p", "memory-muted", this.t("change.noComments")));
     for (const comment of comments) {
       const item = el("article", "memory-comment");
       const head = el("div", "memory-comment-head");
-      head.append(el("span", "", actorLabel(comment.submittedBy ?? comment.submitted_by ?? comment.operator ?? comment.actor)), el("span", "memory-pill", this.commentStatus(String(comment.status ?? "pending"))));
+      head.append(el("span", "", actorLabel(comment.submittedBy ?? comment.submitted_by ?? comment.operator ?? comment.actor)), this.#ui.badge({label:text(this.commentStatus(String(comment.status ?? "pending"))),tone:String(comment.status)==="completed"?"success":String(comment.status)==="processing"?"info":"default"}));
       item.append(head);
       if (comment.target || comment.location) item.append(el("button", "memory-comment-target", String(comment.target ?? (comment.location as JsonRecord)?.anchor ?? "")));
       item.append(el("p", "memory-comment-body", String(comment.body ?? "")));
       if (comment.status === "pending" && isMine(comment, this.currentOperator())) {
         const actions = el("div", "memory-comment-actions");
-        actions.append(button("编辑", "memory-btn", () => this.editComment(item, comment)), button("删除", "memory-btn danger", () => void this.deleteComment(String(comment.id))));
+        actions.append(this.#ui.button({ label: text("编辑"), run: () => this.editComment(item, comment) }), this.#ui.button({ label: text("删除"), run: () => this.deleteComment(String(comment.id)) }, { tone: "danger" }));
         item.append(actions);
       }
       body.append(item);
@@ -1545,15 +1757,18 @@ class MemoryApplication {
       ?? anchor;
     host.classList.add("has-comment-draft");
     const composer = el("div", "memory-inline-comment-editor");
-    const textarea = document.createElement("textarea");
-    textarea.placeholder = this.t("change.commentPlaceholder");
-    textarea.setAttribute("aria-label", this.t("change.commentPlaceholder"));
+    const field = this.#ui.textareaField({
+      label: text(this.t("change.addComment")),
+      value: "",
+      placeholder: text(this.t("change.commentPlaceholder")),
+      onInput: value => { submit.disabled = !value.trim(); }
+    });
+    const textarea = field.control;
     const actions = el("div", "memory-inline-comment-actions");
-    const submit = button(this.t("change.submitComment"), "memory-btn primary", () => void this.submitComment(memory, draft, textarea.value));
+    const submit = this.#ui.button({ label: text(this.t("change.submitComment")), run: () => this.submitComment(memory, draft, textarea.value) }, { tone: "primary" });
     submit.disabled = true;
-    textarea.addEventListener("input", () => { submit.disabled = !textarea.value.trim(); });
-    actions.append(button(this.t("change.cancelComment"), "memory-btn", () => { this.#commentDraft = null; this.render(); }), submit);
-    composer.append(textarea, actions);
+    actions.append(this.#ui.button({ label: text(this.t("change.cancelComment")), run: () => { this.#commentDraft = null; this.render(); } }), submit);
+    composer.append(field.root, actions);
     if (host.matches(".memory-inline-diff-line, .memory-flow-head")) host.after(composer);
     else host.append(composer);
     queueMicrotask(() => { textarea.focus({ preventScroll: true }); composer.scrollIntoView({ block: "nearest" }); });
@@ -1569,7 +1784,7 @@ class MemoryApplication {
     const reviewed = this.#reviewedMemoryIds.has(memory.id);
     const section = el("section", "memory-review-complete");
     const copy = el("div"); copy.append(el("strong", "", this.t("change.markReviewedTitle")), el("small", "", this.t("change.markReviewedHint")));
-    const action = button(reviewed ? `✓ ${this.t("change.reviewed")}` : this.t("change.markReviewed"), "memory-btn primary", () => this.markMemoryReviewed(memory));
+    const action = this.#ui.button({ label: text(reviewed ? `✓ ${this.t("change.reviewed")}` : this.t("change.markReviewed")), run: () => this.markMemoryReviewed(memory) }, { tone: "primary" });
     section.append(action, copy);
     return section;
   }
@@ -1591,29 +1806,16 @@ class MemoryApplication {
   }
 
   private async createChange(memory: MemorySummary): Promise<void> {
-    if (!confirm(this.t("memory.editConfirm"))) return;
+    if (!await this.#ui.confirm({
+      title: text(this.t("memory.edit")), description: text(this.t("memory.editConfirm")),
+      confirmLabel: text(this.t("memory.edit")), cancelLabel: text(this.t("common.cancel")), closeLabel: text(this.t("common.close"))
+    })) return;
     const operator = await this.chooseOperator(); if (!operator) return;
     try {
       const response = await this.request<JsonRecord>("/api/changes", {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ memoryReference: memory.id, operator })
       });
       const change = response.change as ChangeSummary; await this.openChange(change.id);
-    } catch (error) { this.showTransientError(error); }
-  }
-
-  private async beginMemoryComment(memory: MemorySummary, target: string, snapshot: string, location: unknown): Promise<void> {
-    const body = prompt(target ? `评论 ${target}` : this.t("change.addComment"));
-    if (!body?.trim()) return;
-    const operator = await this.chooseOperator(); if (!operator) return;
-    try {
-      const created = await this.request<JsonRecord>("/api/changes", {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ memoryReference: memoryReference(memory), operator })
-      });
-      const change = created.change as ChangeSummary;
-      await this.request(`/api/changes/${encodeURIComponent(change.id)}/comments`, {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operator, memoryReference: memoryReference(memory), path: memory.path, target: target || undefined, location, snapshot: snapshot || undefined, body: body.trim(), expectedUpdatedAt: change.updatedAt })
-      });
-      await this.openChange(change.id);
     } catch (error) { this.showTransientError(error); }
   }
 
@@ -1643,13 +1845,19 @@ class MemoryApplication {
   }
 
   private async abandonChange(change: ChangeSummary): Promise<void> {
-    if (!confirm("确认废弃这个 ChangeSet？")) return;
+    if (!await this.#ui.confirm({
+      title: text(this.t("common.abandon")), description: text(this.t("change.abandonConfirm")),
+      confirmLabel: text(this.t("common.abandon")), cancelLabel: text(this.t("common.cancel")), closeLabel: text(this.t("common.close")), tone: "danger"
+    })) return;
     try { await this.request(`/api/changes/${encodeURIComponent(change.id)}/abandon`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedUpdatedAt: change.updatedAt }) }); await this.load(); }
     catch (error) { this.showTransientError(error); }
   }
 
   private async archiveChange(change: ChangeSummary): Promise<void> {
-    if (!confirm("确认归档这个 ChangeSet？")) return;
+    if (!await this.#ui.confirm({
+      title: text(this.t("common.archive")), description: text(this.t("change.archiveConfirm")),
+      confirmLabel: text(this.t("common.archive")), cancelLabel: text(this.t("common.cancel")), closeLabel: text(this.t("common.close"))
+    })) return;
     try { await this.request(`/api/archive/changes/${encodeURIComponent(change.id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedUpdatedAt: change.updatedAt }) }); await this.navigate(this.memoryIndexTarget()); }
     catch (error) { this.showTransientError(error); }
   }
@@ -1675,16 +1883,17 @@ class MemoryApplication {
 
   private editComment(host: HTMLElement, comment: JsonRecord): void {
     const existing = host.querySelector("textarea"); if (existing) return;
-    const textarea = document.createElement("textarea"); textarea.value = String(comment.body ?? "");
+    const field = this.#ui.textareaField({ label: text("编辑意见"), value: String(comment.body ?? ""), onInput: () => undefined });
+    const textarea = field.control;
     const actions = el("div", "memory-comment-actions");
-    actions.append(button("保存", "memory-btn primary", async () => {
+    actions.append(this.#ui.button({ label: text("保存"), run: async () => {
       if (!textarea.value.trim()) return;
       const operator = await this.chooseOperator(); if (!operator) return;
       const change = this.#changeDetail?.change as ChangeSummary | undefined;
       try { await this.request(`/api/changes/${encodeURIComponent(change?.id ?? "")}/comments/${encodeURIComponent(String(comment.id))}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ operator, body: textarea.value.trim(), expectedUpdatedAt: change?.updatedAt }) }); await this.load(); }
       catch (error) { this.showTransientError(error); }
-    }), button("取消", "memory-btn", () => { textarea.remove(); actions.remove(); }));
-    host.append(textarea, actions); textarea.focus();
+    } }, { tone: "primary" }), this.#ui.button({ label: text("取消"), run: () => { field.root.remove(); actions.remove(); } }));
+    host.append(field.root, actions); textarea.focus();
   }
 
   private async deleteComment(id: string): Promise<void> {
@@ -1818,10 +2027,11 @@ class MemoryApplication {
 
   private renderError(error: unknown, retry: () => void): void {
     this.#fatalError = error;
-    if (this.#listRoot || this.#detailRoot) { this.render(); return; }
+    this.#onListChange();
+    if (this.#detailRoot) { this.render(); return; }
     this.#root.querySelector(".memory-module")?.remove();
     const app = el("section", "memory-module memory-workspace");
-    const panel = errorWorkspace(this.t("fatal.title"), errorMessage(error)); panel.append(button(this.t("common.retry"), "memory-btn", retry)); app.append(panel); this.#root.append(app);
+    const panel = errorWorkspace(this.t("fatal.title"), errorMessage(error)); panel.append(this.#ui.button({ label: text(this.t("common.retry")), run: retry })); app.append(panel); this.#root.append(app);
   }
 
   private showTransientError(error: unknown): void {
