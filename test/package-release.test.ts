@@ -48,9 +48,18 @@ test("release metadata uses the package version consistently", async () => {
   };
   const acpClient = await readFile("src/acp/client.ts", "utf8");
   const thirdPartyNotices = await readFile("THIRD_PARTY_NOTICES.md", "utf8");
+  const moduleManifests = await Promise.all([
+    "org.memsphere.memory",
+    "org.memsphere.reference",
+    "org.memsphere.run",
+    "org.memsphere.settings"
+  ].map(async (moduleId) => JSON.parse(
+    await readFile(`modules/${moduleId}/module.json`, "utf8")
+  ) as { version: string }));
 
   assert.equal(packageLock.version, packageJson.version);
   assert.equal(packageLock.packages[""]?.version, packageJson.version);
+  for (const manifest of moduleManifests) assert.equal(manifest.version, packageJson.version);
   assert.match(acpClient, new RegExp(`clientInfo: \\{[^}]*version: "${packageJson.version.replaceAll(".", "\\.")}"`));
   assert.match(thirdPartyNotices, new RegExp(`for Memsphere ${packageJson.version.replaceAll(".", "\\.")}\\.`));
 });

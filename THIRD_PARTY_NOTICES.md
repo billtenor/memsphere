@@ -1,7 +1,7 @@
 # Third-Party Notices
 
 Memsphere depends on the third-party packages listed below. Versions are
-resolved from `package-lock.json` for Memsphere 0.1.3.
+resolved from `package-lock.json` for Memsphere 0.1.4.
 
 These packages are installed as separate npm dependencies and retain their own
 license files and copyright notices. This document is provided as a convenient
