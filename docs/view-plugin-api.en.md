@@ -4,7 +4,7 @@
 
 This is the normative API reference for `@memsphere/view-sdk` and ViewHost. It is intended for SDK, Host, and Module View implementers and records only public types, methods, and runtime contracts.
 
-For your first Plugin, read [View Plugin Guide](./view-plugin-guide.en.md). For architecture boundaries, see [View Plugin Design](./view-plugin-design.en.md). For built-in Slot names and product semantics, see [View Slot List](./view-slots.en.md).
+For your first Plugin, read [View Plugin Guide](./view-plugin-guide.en.md). For copyable control examples, see the [View UI Primitives Handbook](./view-ui-primitives.en.md). For architecture boundaries, see [View Plugin Design](./view-plugin-design.en.md). For built-in Slot names and product semantics, see [View Slot List](./view-slots.en.md).
 
 This document defines the long-term public interface and explicitly records current runtime support below. Add capabilities directly to the corresponding interfaces, implementation status, and constraints. “Must” and “must not” are compatibility requirements; “should” is the default engineering choice.
 
@@ -603,7 +603,37 @@ Modules must provide fixed visible copy in both `zh-CN` and `en`. A `namespace` 
 
 ## ViewUi v1
 
-A Plugin declares both `inject: ["ui"]` and `uiVersion: 1` before `context.ui` is present. Declaring only one, or requesting an unsupported version, fails before `apply()`. This Host-owned, domain-neutral service provides button, icon-button, Badge, empty-state, and standard content-list primitives. `contentList(descriptorOrProvider)` returns a normal `ViewMount` for the existing `content.list` Slot; custom Mounts remain the escape hatch for domain-specific structures. Invalid descriptors fail that Mount explicitly without fallback or partial rendering.
+A Plugin declares both `inject: ["ui"]` and `uiVersion: 1` before `context.ui` is present. Declaring only one, or requesting an unsupported version, fails before `apply()`. This Host-owned, domain-neutral service provides actions and confirmations, badges and feedback, Tabs/Segmented controls, Disclosure, controlled fields, Select/Combobox, Progress, Card/Section, and the standard Content List. Text fields require a Module-owned `value`, Checkbox requires `checked`, and field-handle `update()` preserves the control node for focus, selection, and IME composition. `ConfirmationDescriptor.closeLabel` supplies the accessible label for the top-right close button. `confirm()` resolves `true` only for confirmation and `false` for cancel, Escape, or close; a failed `confirmButton()` action remains open with inline feedback.
+
+```ts
+export interface ViewUi {
+  readonly version: 1;
+  contentList(source: ContentListDescriptor | ContentListProvider): ViewMount;
+  button(action: ActionDescriptor, options?: { tone?: "default" | "primary" | "danger" }): HTMLButtonElement;
+  confirmButton(action: ActionDescriptor, confirmation: ConfirmationDescriptor, options?: { tone?: "default" | "primary" | "danger" }): HTMLButtonElement;
+  iconButton(action: ActionDescriptor): HTMLButtonElement;
+  badge(value: TextRef | BadgeDescriptor): HTMLElement;
+  emptyState(empty: ContentListEmptyDescriptor): HTMLElement;
+  feedback(value: FeedbackDescriptor): HTMLElement;
+  tabs(value: TabsDescriptor): HTMLElement;
+  segmentedControl(value: SegmentedControlDescriptor): HTMLElement;
+  disclosure(value: DisclosureDescriptor): ViewMount;
+  textField(value: TextFieldDescriptor): FieldHandle<HTMLInputElement>;
+  searchField(value: TextFieldDescriptor): FieldHandle<HTMLInputElement>;
+  textareaField(value: TextFieldDescriptor): FieldHandle<HTMLTextAreaElement>;
+  checkboxField(value: CheckboxFieldDescriptor): FieldHandle<HTMLInputElement>;
+  select(value: SelectDescriptor): FieldHandle<HTMLSelectElement>;
+  combobox(value: ComboboxDescriptor): ComboboxHandle;
+  progress(value: ProgressDescriptor): HTMLElement;
+  card(value: ContainerDescriptor): ViewMount;
+  section(value: ContainerDescriptor): ViewMount;
+  confirm(value: ConfirmationDescriptor): Promise<boolean>;
+}
+```
+
+`ComboboxHandle.updateDescriptor(descriptor)` lets a Module commit controlled `query`, `value`, and `options` changes without replacing the input node. Every public UI factory validates its descriptor at runtime and fails fast on an invalid action, icon, state, or content contract.
+
+`contentList(descriptorOrProvider)` covers section grouping, three-line copy, multiple badges, selection, route/action activation, trailing actions, disabled items, expandable detail Mounts, filtering, and mutually exclusive loading/empty/error-with-retry states. It returns a normal `ViewMount` for the existing `content.list` Slot; custom Mounts remain the escape hatch for domain-specific structures. Invalid descriptors fail that Mount explicitly without fallback or partial rendering.
 
 ## ViewTheme
 

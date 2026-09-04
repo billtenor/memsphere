@@ -8,6 +8,7 @@ const bilingualDocuments = [
   "view-plugin-api",
   "view-plugin-guide",
   "view-slots",
+  "view-ui-primitives",
 ] as const;
 
 test("View architecture documentation matches the wired Module and Slot runtime", async () => {
@@ -19,12 +20,13 @@ test("View architecture documentation matches the wired Module and Slot runtime"
     assert.equal(headingCount(chinese), headingCount(english), `${name} bilingual heading structure`);
   }
 
-  const [api, guide, slots, architecture, design] = await Promise.all([
+  const [api, guide, slots, architecture, design, primitives] = await Promise.all([
     readFile("docs/view-plugin-api.md", "utf8"),
     readFile("docs/view-plugin-guide.md", "utf8"),
     readFile("docs/view-slots.md", "utf8"),
     readFile("docs/architecture.md", "utf8"),
     readFile("docs/view-plugin-design.md", "utf8"),
+    readFile("docs/view-ui-primitives.md", "utf8"),
   ]);
   const current = [api, guide, slots, architecture, design].join("\n");
 
@@ -42,6 +44,14 @@ test("View architecture documentation matches the wired Module and Slot runtime"
     assert.match(document, /\.\/view-slots\.md/);
   }
   assert.match(api, /slots\.headerTitle/);
+  assert.match(guide, /\.\/view-ui-primitives\.md/);
+  for (const primitive of [
+    "contentList", "confirmButton", "iconButton", "feedback", "tabs", "segmentedControl",
+    "disclosure", "textField", "searchField", "textareaField", "checkboxField", "select",
+    "combobox", "progress", "card", "section",
+  ]) {
+    assert.match(primitives, new RegExp(`\\b${primitive}\\b`));
+  }
   assert.doesNotMatch(api, /内置 Legacy View 已使用这条链路/);
   assert.doesNotMatch(guide, /当前可运行 Plugin 只能声明 `inject: \["slots"\]`/);
   assert.doesNotMatch(slots, /当前 Runtime 已接线 `main\.view`。其余 9 个 Slot/);

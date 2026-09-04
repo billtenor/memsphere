@@ -60,9 +60,8 @@ test("Human Artifact Review keeps each participant's draft private", async () =>
       await composer.fill("Alice private draft");
       await reviewModal.getByText("意见类型", { exact: true }).waitFor();
       const commentType = reviewModal.getByRole("combobox", { name: "意见类型" });
-      assert.match((await commentType.innerText()).trim(), /^阻塞/);
-      await commentType.click();
-      await reviewModal.getByRole("option", { name: "阻塞", exact: true }).click();
+      assert.equal(await commentType.inputValue(), "blocking");
+      await commentType.selectOption("blocking");
       await clickAndWaitForDraftSave(
         page,
         reviewModal.getByRole("button", { name: "添加意见", exact: true })
@@ -82,7 +81,6 @@ test("Human Artifact Review keeps each participant's draft private", async () =>
       assert.notEqual(commentStyles.cardBackground, commentStyles.inputBackground);
       assert.equal(commentStyles.accentBorder, "3px");
       const approve = reviewModal.getByRole("radio", { name: "通过", exact: true });
-      await approve.evaluate(button => { button.dataset.renderIdentity = "vote-control"; });
       let voteDraftRequests = 0;
       const countVoteDrafts = (request: import("playwright").Request) => {
         if (request.url().endsWith("/draft") && request.method() === "PATCH") voteDraftRequests += 1;
@@ -92,13 +90,13 @@ test("Human Artifact Review keeps each participant's draft private", async () =>
       await waitForAnimationFrames(page, 2);
       page.off("request", countVoteDrafts);
       assert.equal(voteDraftRequests, 0);
-      assert.equal(await approve.getAttribute("data-render-identity"), "vote-control");
+      assert.equal(await approve.getAttribute("aria-checked"), "true");
       const voteStyles = await reviewModal.locator(".artifact-review-vote").evaluate(group => {
         const buttons = [...group.querySelectorAll("button")];
         return {
           activeBackground: getComputedStyle(buttons[0]).backgroundColor,
           inactiveBackground: getComputedStyle(buttons[1]).backgroundColor,
-          borderStyle: getComputedStyle(buttons[0]).borderStyle
+          borderStyle: getComputedStyle(group).borderStyle
         };
       });
       assert.notEqual(voteStyles.activeBackground, voteStyles.inactiveBackground);
@@ -109,7 +107,7 @@ test("Human Artifact Review keeps each participant's draft private", async () =>
         background: getComputedStyle(button).backgroundColor,
         color: getComputedStyle(button).color
       }));
-      assert.equal(submitHover.background, "rgb(40, 108, 103)");
+      assert.equal(submitHover.background, "rgb(25, 92, 86)");
       assert.equal(submitHover.color, "rgb(255, 255, 255)");
 
       await selectIdentity(page, identity, "bob");
@@ -162,7 +160,7 @@ test("Human Artifact Review saves its local vote against the latest submit revis
         }
       });
       await modal.getByRole("button", { name: "提交评审", exact: true }).click();
-      const dialog = page.locator("dialog.artifact-review-dialog");
+      const dialog = page.locator("dialog.mem-view-confirm");
       await dialog.getByRole("button", { name: "提交评审", exact: true }).click();
       await dialog.waitFor({ state: "detached" });
       assert.deepEqual(statuses, [200]);
@@ -301,6 +299,7 @@ test("failed Artifact Review draft saves retain input and retry exactly once", a
       await inlineInput.fill("Inline text survives a failed save");
       await failNextDraftSave(page, "inline draft outage", () => inlineSave.click());
       inlineEditor = modal.locator(".inline-comment-editor").first();
+      await inlineEditor.getByRole("alert").getByText("inline draft outage", { exact: true }).waitFor();
       inlineInput = inlineEditor.getByPlaceholder("这里应该如何修改？");
       inlineSave = inlineEditor.getByRole("button", { name: "添加意见", exact: true });
       assert.equal(await inlineInput.inputValue(), "Inline text survives a failed save");
@@ -312,6 +311,7 @@ test("failed Artifact Review draft saves retain input and retry exactly once", a
         .getByRole("button", { name: "添加意见", exact: true });
       await composer.fill("Overall text survives a failed save");
       await failNextDraftSave(page, "composer draft outage", () => composerSave.click());
+      await modal.locator("#artifact-review-my-content").getByRole("alert").getByText("composer draft outage", { exact: true }).waitFor();
       assert.equal(await composer.inputValue(), "Overall text survives a failed save");
       assert.equal(await composerSave.isEnabled(), true);
       await clickAndWaitForDraftSave(page, composerSave);
@@ -355,7 +355,7 @@ test("Artifact Review submit absorbs repeated draft revision conflicts", async (
       try {
         await clickVote(modal.getByRole("radio", { name: "通过", exact: true }));
         await modal.getByRole("button", { name: "提交评审", exact: true }).click();
-        const dialog = page.locator("dialog.artifact-review-dialog");
+        const dialog = page.locator("dialog.mem-view-confirm");
         const saved = page.waitForResponse(response =>
           response.url().endsWith("/draft")
           && response.request().method() === "PATCH"
@@ -420,10 +420,8 @@ test("Artifact Review makes historical rounds read-only", async () => {
       const modal = page.locator(".view-overlay-layer #artifact-review-modal");
       await modal.waitFor();
       await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
-      const roundSelector = page.getByRole("button", { name: "轮次", exact: true });
-      await roundSelector.click();
-      const roundMenu = page.getByRole("listbox", { name: "轮次" });
-      await roundMenu.locator(`[data-round-id="${fixture.review.currentRoundId}"]`).click();
+      const roundSelector = page.getByRole("combobox", { name: "轮次", exact: true });
+      await roundSelector.selectOption(fixture.review.currentRoundId);
 
       await modal.getByText("历史轮次仅供查看，不能投票、添加意见或重新提交。", { exact: true }).waitFor();
       assert.match(await modal.locator(".artifact-review-progress-summary").innerText(), /评审已完成/);
@@ -449,15 +447,11 @@ test("Artifact Review keeps a selected historical round without background polli
       const modal = page.locator(".view-overlay-layer #artifact-review-modal");
       await modal.waitFor();
       await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
-      const roundSelector = page.getByRole("button", { name: "轮次", exact: true });
-      await roundSelector.click();
-      let roundMenu = page.getByRole("listbox", { name: "轮次" });
-      await roundMenu.locator(`[data-round-id="${fixture.review.currentRoundId}"]`).click();
+      const roundSelector = page.getByRole("combobox", { name: "轮次", exact: true });
+      await roundSelector.selectOption(fixture.review.currentRoundId);
       await modal.getByText("历史轮次 · 只读", { exact: true }).waitFor();
 
-      await roundSelector.click();
-      roundMenu = page.getByRole("listbox", { name: "轮次" });
-      await roundMenu.waitFor();
+      await roundSelector.waitFor();
       let backgroundRoundRequests = 0;
       const countRoundRequests = (response: import("playwright").Response) => {
         if (response.request().method() === "GET"
@@ -469,11 +463,8 @@ test("Artifact Review keeps a selected historical round without background polli
       await page.waitForTimeout(4_200);
       page.off("response", countRoundRequests);
       assert.equal(backgroundRoundRequests, 0);
-      assert.equal(await roundMenu.isVisible(), true);
-      assert.equal(
-        await roundMenu.locator(`[data-round-id="${fixture.review.currentRoundId}"]`).getAttribute("aria-selected"),
-        "true"
-      );
+      assert.equal(await roundSelector.isVisible(), true);
+      assert.equal(await roundSelector.inputValue(), fixture.review.currentRoundId);
       await modal.getByText("历史轮次 · 只读", { exact: true }).waitFor();
     });
   } finally {
@@ -493,10 +484,8 @@ test("Artifact Review locates an anchored historical comment in its artifact", a
       const modal = page.locator(".view-overlay-layer #artifact-review-modal");
       await modal.waitFor();
       await selectIdentity(page, page.getByRole("combobox", { name: "评审身份" }), "alice");
-      const roundSelector = page.getByRole("button", { name: "轮次", exact: true });
-      await roundSelector.click();
-      await page.getByRole("listbox", { name: "轮次" })
-        .locator(`[data-round-id="${fixture.review.currentRoundId}"]`).click();
+      const roundSelector = page.getByRole("combobox", { name: "轮次", exact: true });
+      await roundSelector.selectOption(fixture.review.currentRoundId);
       const comment = modal.locator(".comment-card").filter({ hasText: "Locate this historical comment" });
       const locateButton = comment.getByRole("button", { name: "定位", exact: true });
       const locateSize = await locateButton.evaluate(button => ({
@@ -532,11 +521,9 @@ test("Artifact Review normalizes invalid Round and Material URLs and syncs mater
       }, fixture.review.currentRoundId);
 
       const material = modal.getByRole("combobox", { name: "选择评审材料", exact: true });
-      await material.click();
-      await modal.getByRole("option", { name: /^冻结契约/ }).click();
+      await material.selectOption("contract");
       await page.waitForFunction(() => new URLSearchParams(location.search).get("material") === "contract");
-      await material.click();
-      await modal.getByRole("option", { name: /^待评审产物/ }).click();
+      await material.selectOption("candidate");
       await page.waitForFunction(() => !new URLSearchParams(location.search).has("material"));
     });
   } finally {
@@ -599,14 +586,25 @@ test("Artifact Review uses desktop panes and mobile tabs without horizontal over
       await reviewModal.waitFor();
       assert.equal(await page.locator("#artifact-review-artifact-pane").isVisible(), true);
       assert.equal(await page.locator("#artifact-review-review-pane").isVisible(), true);
+      assert.equal(await reviewModal.locator(".artifact-review-mobile-tabs").getByRole("tablist").count(), 0);
 
       await page.setViewportSize({ width: 390, height: 844 });
       const artifactPane = page.locator("#artifact-review-artifact-pane");
       const reviewPane = page.locator("#artifact-review-review-pane");
-      await page.locator("#artifact-review-review-tab").click();
+      const mobileTabs = reviewModal.locator(".artifact-review-mobile-tabs");
+      await mobileTabs.getByRole("tablist").waitFor();
+      assert.equal(await mobileTabs.getAttribute("role"), null);
+      assert.equal(await mobileTabs.getByRole("tablist").count(), 1);
+      const artifactTab = mobileTabs.getByRole("tab", { name: "产物", exact: true });
+      let reviewTab = mobileTabs.getByRole("tab", { name: "评审", exact: true });
+      assert.equal(await artifactTab.getAttribute("aria-selected"), "true");
+      await artifactTab.focus();
+      await page.keyboard.press("ArrowRight");
+      reviewTab = mobileTabs.getByRole("tab", { name: "评审", exact: true });
+      assert.equal(await reviewTab.getAttribute("aria-selected"), "true");
       assert.equal(await artifactPane.isVisible(), false);
       assert.equal(await reviewPane.isVisible(), true);
-      await page.locator("#artifact-review-artifact-tab").click();
+      await mobileTabs.getByRole("tab", { name: "产物", exact: true }).click();
       assert.equal(await artifactPane.isVisible(), true);
       assert.equal(await reviewPane.isVisible(), false);
       const overflow = await reviewModal.evaluate((modal) => ({
@@ -614,6 +612,11 @@ test("Artifact Review uses desktop panes and mobile tabs without horizontal over
         scrollWidth: modal.scrollWidth
       }));
       assert(overflow.scrollWidth <= overflow.clientWidth, JSON.stringify(overflow));
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.waitForFunction(() => !document.querySelector(".artifact-review-mobile-tabs [role=tablist]"));
+      assert.equal(await mobileTabs.getByRole("tablist").count(), 0);
+      assert.equal(await artifactPane.isVisible(), true);
+      assert.equal(await reviewPane.isVisible(), true);
     });
   } finally {
     await rm(fixture.dir, { recursive: true, force: true });
@@ -694,7 +697,7 @@ flow:
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await page.goto(`http://127.0.0.1:${address.port}`);
     await page.getByRole("button", { name: "运行", exact: true }).click();
-    await page.locator(".run-card-main").first().click();
+    await page.locator(".mem-view-list-item").first().click();
     const reviewToggle = page.getByRole("button", { name: /产物评审/ }).first();
     await reviewToggle.waitFor();
     assert.match(await reviewToggle.getAttribute("data-view-entry") ?? "", /run\.detail\.review/);
@@ -880,34 +883,29 @@ flow:
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await page.goto(`http://127.0.0.1:${address.port}`);
     await page.getByRole("button", { name: "运行", exact: true }).click();
-    await page.locator(".run-card-main").first().click();
+    await page.locator(".mem-view-list-item").first().click();
     await page.getByRole("button", { name: /^产物评审 1\/2$/ }).click();
     const modal = page.locator("#artifact-review-modal");
     let materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
-    await materialChooser.click();
-    await modal.getByRole("option", { name: "前序产物 · current requirement", exact: true }).click();
+    await materialChooser.selectOption({ label: "前序产物 · current requirement" });
     await modal.getByText("Keep Activity visible.", { exact: true }).waitFor();
     assert.equal(await modal.locator("#artifact-review-artifact-pane .artifact-review-target").count(), 0);
     materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
-    await materialChooser.click();
-    await modal.getByRole("option", { name: "待评审产物 · activity candidate", exact: true }).click();
+    await materialChooser.selectOption({ label: "待评审产物 · activity candidate" });
     await modal.getByText("Review this implementation.", { exact: true }).waitFor();
     assert((await modal.locator("#artifact-review-artifact-pane .artifact-review-target").count()) > 0);
     assert.equal(await modal.getByText("评审证据包", { exact: true }).count(), 0);
     const composer = modal.getByPlaceholder("补充整体评审意见");
     await composer.fill("Human draft remains visible");
     materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
-    await materialChooser.click();
-    await modal.getByRole("option", { name: "冻结契约 · Frozen Review Contract", exact: true }).click();
+    await materialChooser.selectOption({ label: "冻结契约 · Frozen Review Contract" });
     await modal.getByText(/Produce an Artifact with visible Agent activity\./).waitFor();
     materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
-    await materialChooser.click();
-    await modal.getByRole("option", { name: "前序产物 · validation report", exact: true }).click();
+    await materialChooser.selectOption({ label: "前序产物 · validation report" });
     await modal.getByText("Focused tests passed.", { exact: true }).waitFor();
     assert.equal(await composer.inputValue(), "Human draft remains visible");
     materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
-    await materialChooser.click();
-    await modal.getByRole("option", { name: "待评审产物 · activity candidate", exact: true }).click();
+    await materialChooser.selectOption({ label: "待评审产物 · activity candidate" });
     const agentRow = modal.locator(".artifact-review-row").filter({ hasText: "Advisor" }).first();
     const detailToggle = agentRow.getByRole("button", { name: "查看详情", exact: true });
     assert.equal(await detailToggle.locator("xpath=ancestor::*[contains(@class, 'artifact-review-participant-head')]").count(), 1);
@@ -937,12 +935,9 @@ flow:
     await agentRow.getByText(/^实现证据：(已引用|未引用)$/).waitFor();
     assert.equal(await composer.inputValue(), "Human draft remains visible");
     const attemptChooser = agentRow.getByRole("combobox", { name: "选择尝试" });
-    assert.equal(await attemptChooser.evaluate((element) => element.tagName), "BUTTON");
+    assert.equal(await attemptChooser.evaluate((element) => element.tagName), "SELECT");
     assert.equal(await attemptChooser.evaluate((element) => element.getBoundingClientRect().width <= 260), true);
-    await attemptChooser.click();
-    const currentAttempt = agentRow.getByRole("option", { name: /尝试 1 · 已提交/ });
-    await currentAttempt.waitFor();
-    await currentAttempt.click();
+    await attemptChooser.selectOption("1");
     await composer.focus();
     const log = agentRow.locator(".artifact-review-activity-log");
     assert.equal(await log.evaluate((element) => element.scrollHeight > element.clientHeight), true);
@@ -996,7 +991,7 @@ flow:
     assert.equal(await log.evaluate((element) => element.scrollTop), settledScrollTop);
 
     await page.setViewportSize({ width: 720, height: 900 });
-    await modal.locator("#artifact-review-review-tab").click();
+    await modal.locator(".artifact-review-mobile-tabs").getByRole("tab", { name: "评审", exact: true }).click();
     await agentRow.getByText("Late activity must not steal scroll position.", { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
     const identity = modal.getByRole("combobox", { name: "评审身份" });
@@ -1224,9 +1219,9 @@ async function withReviewBrowser(
 
 async function submitThroughConfirmation(page: import("playwright").Page): Promise<void> {
   await page.getByRole("button", { name: "提交评审", exact: true }).click();
-  const dialog = page.locator("dialog.artifact-review-dialog");
+  const dialog = page.locator("dialog.mem-view-confirm");
   await dialog.waitFor();
-  const actionLayout = await dialog.locator(".artifact-review-dialog-actions").evaluate(actions => {
+  const actionLayout = await dialog.locator("footer").evaluate(actions => {
     const buttons = [...actions.querySelectorAll("button")];
     const boxes = buttons.map(button => button.getBoundingClientRect());
     return {
@@ -1274,26 +1269,15 @@ async function selectIdentity(
   actorId: string
 ): Promise<void> {
   const select = page.locator("#artifact-review-modal").getByRole("combobox", { name: "评审身份" });
-  let option = page.locator(`.artifact-review-actor-select .artifact-review-select-menu:not([hidden]) .artifact-review-select-option[data-actor-id="${actorId}"]`);
-  if (!await option.isVisible().catch(() => false)) {
-    await select.waitFor({ state: "visible" });
-    await select.evaluate((element) => {
-      if (element instanceof HTMLElement) element.focus();
-    });
-    await select.click();
-    option = page.locator(`.artifact-review-actor-select .artifact-review-select-menu:not([hidden]) .artifact-review-select-option[data-actor-id="${actorId}"]`);
-    await option.waitFor({ state: "visible" });
-  }
-  if (await option.getAttribute("aria-selected") === "true") {
-    await select.click();
-    return;
-  }
-  await option.click();
-  const expectedLabel = actorId === "alice" ? "Decider" : actorId === "bob" ? "Advisor" : actorId;
-  await page.waitForFunction((label) => {
-    const trigger = document.querySelector(".artifact-review-actor-select .artifact-review-select-trigger");
-    return Boolean(trigger?.textContent?.includes(label));
-  }, expectedLabel);
+  await select.waitFor({ state: "visible" });
+  if (await select.inputValue() === actorId) return;
+  const loaded = page.waitForResponse(response => response.request().method() === "GET" && response.url().includes(`actor_id=${actorId}`));
+  await select.selectOption(actorId);
+  await loaded;
+  await page.waitForFunction((expected) => {
+    const control = document.querySelector(".artifact-review-actor-select .artifact-review-field-control");
+    return control instanceof HTMLSelectElement && control.value === expected;
+  }, actorId);
 }
 
 async function waitForAnimationFrames(page: import("playwright").Page, count: number): Promise<void> {
@@ -1314,7 +1298,6 @@ async function clickAndWaitForDraftSave(
   await button.click();
   if (await button.getAttribute("role") === "radio") {
     assert.equal(await button.getAttribute("aria-checked"), "true");
-    assert.equal(await button.evaluate(element => element.classList.contains("active")), true);
   }
   const response = await saved;
   assert.equal(response.status(), 200);
@@ -1323,5 +1306,4 @@ async function clickAndWaitForDraftSave(
 async function clickVote(button: import("playwright").Locator): Promise<void> {
   await button.click();
   assert.equal(await button.getAttribute("aria-checked"), "true");
-  assert.equal(await button.evaluate(element => element.classList.contains("active")), true);
 }

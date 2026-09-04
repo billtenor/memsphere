@@ -320,12 +320,12 @@ flow:
       await archivedModal.waitFor();
       await archivedModal.getByText("Private candidate", { exact: true }).waitFor();
 
-      await page.locator(".run-list").getByText("当前状态下没有 Run。", { exact: true }).waitFor();
+      await page.locator(".mem-view-content-list").getByText("当前状态下没有 Run。", { exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, `/tasks/${started.id}/artifact-reviews/${review.id}`);
       assert.equal(await archivedModal.isVisible(), true);
       await archivedModal.getByText("Private candidate", { exact: true }).waitFor();
       assert.equal(directContextRequests.every(path => path.includes(`/api/runs/${started.id}/`)), true);
-      assert.equal(await page.locator(".run-card").count(), 0);
+      assert.equal(await page.locator(".mem-view-list-item").count(), 0);
     } finally {
       await browser.close();
     }

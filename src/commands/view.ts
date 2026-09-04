@@ -2738,7 +2738,7 @@ function sendJavaScript(request: IncomingMessage, response: ServerResponse, body
 
 async function sendSystemIcon(response: ServerResponse, name: string): Promise<void> {
   const supportedRegular = new Set([
-    "archive", "arrow-right", "arrows-clockwise", "brain", "caret-down", "check-circle", "circle-fill", "clock-counter-clockwise", "code", "cube", "file-text", "folder", "gear-six", "house", "magnifying-glass", "play-circle", "plus", "seal-check", "sliders-horizontal", "sparkle", "stack", "storefront", "user", "warning-circle", "x"
+    "archive", "arrow-right", "arrows-clockwise", "brain", "caret-down", "check", "check-circle", "circle-fill", "clock-counter-clockwise", "code", "cube", "dots-three", "file-text", "folder", "gear-six", "house", "magnifying-glass", "play-circle", "plus", "seal-check", "sidebar-simple", "sliders-horizontal", "sparkle", "stack", "storefront", "trash", "user", "warning-circle", "x"
   ]);
   const weighted = name.match(/^(brain|circle|cube|gear-six|house|play-circle|seal-check|stack)-(duotone|fill)$/);
   if (!supportedRegular.has(name) && !weighted) {

@@ -30,7 +30,7 @@ This document is the single detailed source for the Memsphere View Slot Catalog.
 | `home.continue` | Home View | Memsphere Core and built-in or user Modules | Aggregated list | Shortcuts to recently visited or unfinished work, without implying urgency. If duplicated in `home.attention`, the attention entry takes precedence. |
 | `home.modules` | Home View | Module Composition Runtime | Aggregated list | Entrypoints and summaries for Modules enabled in the current Project. Generated from Project composition; the UI does not call them “software.” |
 | `main.view` | ViewHost | Built-in and user Modules | Select by route key | Main page body. Multiple Views may be registered, but only the one selected by the current route is mounted. A Module may declare child Slots inside its own View. |
-| `overlay` | ViewHost | Memsphere Core and built-in or user Modules | Select by overlay key | Drawers, dialogs, review panels, and other temporary interactions. Multiple overlays may be registered, but the controller activates only one at a time. ViewHost owns masking, focus, closing, and failure isolation. |
+| `overlay` | ViewHost | Memsphere Core and built-in or user Modules | Select by overlay key | Drawers, dialogs, review panels, and other temporary interactions. Multiple overlays may be registered, but the controller activates only one at a time. ViewHost owns masking, focus, closing, `wide`/`compact` geometry, and failure isolation. |
 
 The Catalog defines 14 long-term Slots. Add future Slots directly to this list.
 

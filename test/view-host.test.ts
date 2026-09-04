@@ -21,6 +21,7 @@ const syntheticBundlePath = "/assets/modules/org.example.synthetic/index.js";
 const syntheticRouteKey = "org.example.synthetic@1.0.0:synthetic:route:index";
 
 const viewSdkBundle = await transpileBrowserModule("../src/view/view-sdk.ts");
+const systemIconBundle = await transpileBrowserModule("../src/view/system-icon.ts");
 const viewRuntimeBundle = await browserRuntimeBundle();
 
 test("ViewHost document boots the four builtin Module instances in catalog order", () => {
@@ -357,6 +358,11 @@ async function withBrowserHost(
     if (url.pathname === viewSdkBundlePath) {
       response.writeHead(200, { "content-type": "text/javascript" });
       response.end(viewSdkBundle);
+      return;
+    }
+    if (url.pathname === "/assets/system-icon.js") {
+      response.writeHead(200, { "content-type": "text/javascript" });
+      response.end(systemIconBundle);
       return;
     }
     if (url.pathname === viewRuntimeBundlePath) {

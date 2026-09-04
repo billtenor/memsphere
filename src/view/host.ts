@@ -272,10 +272,21 @@ export function renderViewHostHtml(
             closeProjectMenu();
             return;
           }
-          if (location.pathname.startsWith("/settings/") && !confirm(boot.coreShell.switchConfirm)) {
-            showCurrentProject(current || "");
+          if (location.pathname.startsWith("/settings/")) {
             closeProjectMenu();
-            return;
+            const confirmed = await activeHost.confirm({
+              title: { text: boot.coreShell.switchProject },
+              description: { text: boot.coreShell.switchConfirm },
+              confirmLabel: { text: boot.coreShell.switchProject },
+              cancelLabel: { text: boot.messages["common.cancel"] || "Cancel" },
+              closeLabel: { text: boot.coreShell.close },
+              tone: "danger"
+            });
+            if (!confirmed) {
+              showCurrentProject(current || "");
+              projectTrigger.focus();
+              return;
+            }
           }
           closeProjectMenu();
           projectTrigger.disabled = true;

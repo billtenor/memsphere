@@ -4,7 +4,7 @@
 
 本文是 `@memsphere/view-sdk` 与 ViewHost 的规范性 API 参考，面向实现 SDK、Host 和 Module View 的开发者。它只记录公开类型、方法和运行时契约。
 
-第一次开发 Plugin 请先阅读 [View Plugin Guide](./view-plugin-guide.md)；架构边界见 [View Plugin Design](./view-plugin-design.md)；内置 Slot 名称和产品语义见 [View Slot List](./view-slots.md)。
+第一次开发 Plugin 请先阅读 [View Plugin Guide](./view-plugin-guide.md)；需要可复制的控件示例见 [View 公共控件使用手册](./view-ui-primitives.md)；架构边界见 [View Plugin Design](./view-plugin-design.md)；内置 Slot 名称和产品语义见 [View Slot List](./view-slots.md)。
 
 本文定义长期公开接口，并在下方明确当前运行支持范围。新增能力时直接更新对应接口、实现状态和约束；文中的“必须”“不得”是兼容性要求，“建议”是默认工程选择。
 
@@ -616,14 +616,33 @@ Plugin 同时声明 `inject: ["ui"]` 与 `uiVersion: 1` 后，`context.ui` 可�
 export interface ViewUi {
   readonly version: 1;
   contentList(source: ContentListDescriptor | ContentListProvider): ViewMount;
-  button(action: ActionDescriptor, options?: { tone?: "default" | "primary" }): HTMLButtonElement;
+  button(action: ActionDescriptor, options?: { tone?: "default" | "primary" | "danger" }): HTMLButtonElement;
+  confirmButton(action: ActionDescriptor, confirmation: ConfirmationDescriptor, options?: { tone?: "default" | "primary" | "danger" }): HTMLButtonElement;
   iconButton(action: ActionDescriptor): HTMLButtonElement;
-  badge(label: TextRef): HTMLElement;
+  badge(value: TextRef | BadgeDescriptor): HTMLElement;
   emptyState(empty: ContentListEmptyDescriptor): HTMLElement;
+  feedback(value: FeedbackDescriptor): HTMLElement;
+  tabs(value: TabsDescriptor): HTMLElement;
+  segmentedControl(value: SegmentedControlDescriptor): HTMLElement;
+  disclosure(value: DisclosureDescriptor): ViewMount;
+  textField(value: TextFieldDescriptor): FieldHandle<HTMLInputElement>;
+  searchField(value: TextFieldDescriptor): FieldHandle<HTMLInputElement>;
+  textareaField(value: TextFieldDescriptor): FieldHandle<HTMLTextAreaElement>;
+  checkboxField(value: CheckboxFieldDescriptor): FieldHandle<HTMLInputElement>;
+  select(value: SelectDescriptor): FieldHandle<HTMLSelectElement>;
+  combobox(value: ComboboxDescriptor): ComboboxHandle;
+  progress(value: ProgressDescriptor): HTMLElement;
+  card(value: ContainerDescriptor): ViewMount;
+  section(value: ContainerDescriptor): ViewMount;
+  confirm(value: ConfirmationDescriptor): Promise<boolean>;
 }
 ```
 
-`contentList()` 覆盖 section、item、title、meta、icon、badge、selected、route/action、filter、loading 和 empty。它返回普通 `ViewMount`，由 Module 注册到现有 `slots.contentList`，因此沿用原 Slot 的 single 冲突、Route scope、挂载和 dispose 语义。需要画布、编辑器或其他异构列表时仍可提交自定义 Mount。Descriptor/provider 非法时当前 Mount 明确失败，不回退或渲染部分数据。
+UI v1 覆盖动作与确认、徽标与反馈、Tabs/Segmented、Disclosure、受控表单、Select/Combobox、Progress、Card/Section 和标准 Content List。文本字段必须由 Module 提供 `value`，Checkbox 必须提供 `checked`；字段句柄的 `update()` 保持 control 节点稳定，适用于焦点、选区和 IME composition。`ComboboxHandle` 同样提供 `updateDescriptor(descriptor)`，供 Module 在输入过滤或选择后提交新的受控 `query/value/options`，并保持输入节点、焦点和弹层状态。`ConfirmationDescriptor.closeLabel` 可为右上角关闭按钮提供无障碍文案；`confirm()` 在确认时返回 `true`，取消、Escape 或关闭返回 `false`；`confirmButton()` 的异步 Action 失败时保留弹窗并显示内联错误。
+
+所有公开 UI 工厂都会在运行期校验 Descriptor；Action、系统图标、状态或内容契约非法时立即明确失败，不静默替换图标或渲染部分结果。
+
+`contentList()` 覆盖 section 分组、三行文本、多 Badge、selected、route/action、尾部操作、禁用、展开详情、filter，以及 loading/empty/error + retry。它返回普通 `ViewMount`，由 Module 注册到现有 `slots.contentList`，因此沿用原 Slot 的 single 冲突、Route scope、挂载和 dispose 语义。需要画布、编辑器或其他异构列表时仍可提交自定义 Mount。Descriptor/provider 非法时当前 Mount 明确失败，不回退或渲染部分数据。
 
 ## ViewTheme
 
