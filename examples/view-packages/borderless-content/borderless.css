@@ -1,0 +1,84 @@
+/* Reduce nested outlines while preserving spacing, grouping, and semantic color. */
+.memory-module .memory-toolbar,
+.memory-module .memory-panel,
+.memory-module .memory-section,
+.memory-module .memory-schema-field,
+.memory-module .memory-flow-item,
+.memory-module .action-contracts,
+.run-module .run-head,
+.run-module .run-panel,
+.run-module .run-step,
+.run-module .run-artifact {
+  border: 0;
+  box-shadow: none;
+}
+
+.memory-module .memory-panel,
+.memory-module .memory-section,
+.memory-module .memory-schema-field,
+.memory-module .memory-flow-item,
+.memory-module .action-contracts,
+.run-module .run-panel,
+.run-module .run-step,
+.run-module .run-artifact {
+  background: color-mix(in srgb, var(--soft) 55%, var(--surface));
+}
+
+.memory-module .memory-section-body,
+.memory-module .memory-flow-branch {
+  border-top: 0;
+}
+
+.memory-module .memory-flow-item.call {
+  background: color-mix(in srgb, #8799b1 8%, var(--surface));
+}
+
+.memory-module .memory-flow-item.branch {
+  background: color-mix(in srgb, #c3a269 9%, var(--surface));
+}
+
+.memory-module .memory-flow-item.current,
+.run-module .run-step.current {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* Keep the useful summary visible and reveal contract details only on demand. */
+.memory-module .memory-artifact-summary,
+.memory-module .memory-review-summary {
+  position: relative;
+  flex-wrap: nowrap;
+  border-radius: 6px;
+  outline: none;
+}
+
+.memory-module .memory-artifact-summary:focus-visible,
+.memory-module .memory-review-summary:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.memory-module .memory-artifact-details,
+.memory-module .memory-review-details {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  right: 0;
+  width: max-content;
+  max-width: min(420px, 80vw);
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(26, 39, 36, 0.16);
+  transition: opacity 120ms ease, visibility 120ms ease;
+}
+
+.memory-module .memory-artifact-summary:hover > .memory-artifact-details,
+.memory-module .memory-artifact-summary:focus-within > .memory-artifact-details,
+.memory-module .memory-review-summary:hover > .memory-review-details,
+.memory-module .memory-review-summary:focus-within > .memory-review-details {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}

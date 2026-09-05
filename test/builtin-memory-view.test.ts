@@ -360,6 +360,10 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     assert.equal(await artifactDiff.locator(".memory-artifact-row").count(), 2);
     assert.equal(await artifactDiff.locator(".memory-artifact-row").evaluateAll(rows => rows.every(row => /Artifact/.test(row.textContent ?? "") && /markdown/.test(row.textContent ?? "") && /Product/.test(row.textContent ?? ""))), true);
     const candidateArtifactRow = artifactDiff.locator(".memory-inline-new .memory-artifact-row");
+    assert.equal(await candidateArtifactRow.locator(":scope > .memory-artifact-summary").count(), 1);
+    assert.equal(await candidateArtifactRow.locator(":scope > .memory-review-summary").count(), 1);
+    assert.equal(await candidateArtifactRow.locator(".memory-review-count").innerText(), "Reviewers: 1");
+    assert.equal(await candidateArtifactRow.locator(".memory-review-details").innerText(), "Product");
     assert.equal(await candidateArtifactRow.locator(".memory-inline-plus").count(), 1);
     assert.equal(await candidateArtifactRow.locator(".memory-pill .memory-inline-plus").count(), 0);
     await candidateArtifactRow.hover();

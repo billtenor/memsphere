@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "org.example.memsphere.borderless-content",
+  "version": "1.0.0",
+  "source": {
+    "type": "local",
+    "homepage": "https://example.invalid/memsphere-borderless-content",
+    "license": "MIT"
+  },
+  "view": {
+    "entry": "./index.js",
+    "sdk": "^1.0.0",
+    "capabilities": ["styles.global"],
+    "styles": [
+      {
+        "id": "borderless-content",
+        "file": "./borderless.css",
+        "scope": "global"
+      }
+    ]
+  }
+}

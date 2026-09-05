@@ -164,7 +164,8 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
   "artifact": "产物",
   "final": "最终产物",
   "inlineSchema": "产物格式与结构",
-  "review": "评审"
+  "review": "评审",
+  "reviewerCount": "评审人：{count}"
 });
 
 const englishFallbackMessages: Readonly<Record<string, string>> = Object.freeze({
@@ -195,7 +196,8 @@ const englishFallbackMessages: Readonly<Record<string, string>> = Object.freeze(
   names: "Names", defines: "Defines", asserts: "Required rules", suggests: "Suggested rules",
   goals: "Goals", flow: "Flow", format: "Format", repeat: "Repeat", unbounded: "Unbounded",
   sections: "Sections", call: "Call", if: "If", while: "While", else: "Else", step: "Step",
-  artifact: "Artifact", final: "Final", inlineSchema: "Artifact format & structure", review: "Review"
+  artifact: "Artifact", final: "Final", inlineSchema: "Artifact format & structure", review: "Review",
+  reviewerCount: "Reviewers: {count}"
 });
 
 const memoryStyles = `
@@ -305,7 +307,9 @@ const memoryStyles = `
   .memory-flow-branch { border-top:1px solid var(--line); background:#fafbf8; padding:9px 12px 12px 24px; }
   .memory-flow-condition { margin-bottom:7px; color:var(--muted); font-size:var(--memory-page-text-label); font-weight:650; line-height:var(--memory-page-line-compact); }
   .memory-flow-children { display:grid; gap:8px; }
-  .memory-artifact-row { display:flex; align-items:center; gap:5px; flex-wrap:wrap; margin-left:auto; }
+  .memory-artifact-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-left:auto; }
+  .memory-artifact-summary,.memory-artifact-details,.memory-review-summary,.memory-review-details { display:inline-flex; align-items:center; gap:5px; flex-wrap:wrap; }
+  .memory-review-count { color:var(--muted); font-size:var(--memory-page-text-label); font-weight:650; line-height:var(--memory-page-line-compact); }
   .memory-artifact-label { color:var(--muted); font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
   .memory-pill.strong { border-color:#b8cbc7; background:var(--accent-soft); color:#173f3c; font-weight:700; }
   .memory-pill.done { border-color:#b5ccb8; background:#e7f3e7; color:#27612e; }
@@ -2562,13 +2566,28 @@ function renderArtifactMeta(step: JsonRecord, path: string, t: (key: string) => 
   row.dataset.diffGroup = `${path}.artifact`;
   const artifact = artifactContract(step);
   const name = String(artifact.name ?? "");
-  row.append(el("span", "memory-artifact-label", t("artifact")));
-  if (name) row.append(anchored(el("span", "memory-pill strong", name), `${path}.artifact.name`));
-  if (artifact.type) row.append(anchored(el("span", "memory-pill", String(artifact.type)), `${path}.artifact.type`));
-  if (artifact.format) row.append(anchored(el("span", "memory-pill", formatLabel(artifact.format)), `${path}.artifact.format`));
-  if (artifact.final) row.append(anchored(el("span", "memory-pill done", t("final")), `${path}.artifact.final`));
+  const artifactSummary = el("span", "memory-artifact-summary");
+  artifactSummary.append(el("span", "memory-artifact-label", t("artifact")));
+  if (name) artifactSummary.append(anchored(el("span", "memory-pill strong", name), `${path}.artifact.name`));
+  const artifactDetails = el("span", "memory-artifact-details");
+  if (artifact.type) artifactDetails.append(anchored(el("span", "memory-pill", String(artifact.type)), `${path}.artifact.type`));
+  if (artifact.format) artifactDetails.append(anchored(el("span", "memory-pill", formatLabel(artifact.format)), `${path}.artifact.format`));
+  if (artifact.final) artifactDetails.append(anchored(el("span", "memory-pill done", t("final")), `${path}.artifact.final`));
+  if (artifactDetails.childElementCount) {
+    artifactSummary.tabIndex = 0;
+    artifactSummary.append(artifactDetails);
+  }
+  row.append(artifactSummary);
   const reviewers = Array.isArray(artifact.review) ? artifact.review : typeof artifact.review === "string" ? [artifact.review] : [];
-  reviewers.forEach((value, index) => row.append(anchored(el("span", "memory-pill", String(value)), `${path}.artifact.review[${index + 1}]`)));
+  if (reviewers.length) {
+    const reviewSummary = el("span", "memory-review-summary");
+    reviewSummary.tabIndex = 0;
+    reviewSummary.append(el("span", "memory-review-count", t("reviewerCount").replace("{count}", String(reviewers.length))));
+    const reviewDetails = el("span", "memory-review-details");
+    reviewers.forEach((value, index) => reviewDetails.append(anchored(el("span", "memory-pill", String(value)), `${path}.artifact.review[${index + 1}]`)));
+    reviewSummary.append(reviewDetails);
+    row.append(reviewSummary);
+  }
   if (comment) {
     const target = `${path}.artifact`;
     row.classList.add("memory-commentable");
