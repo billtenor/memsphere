@@ -1,4 +1,4 @@
-// examples/view-packages/dsh-custom-view/src/index.js
+// examples/view-packages/custom-view-showcase/src/index.js
 import { defineViewPlugin, portableSlots } from "@memsphere/view-sdk";
 var text = (tag, value, className = "") => {
   const element = document.createElement(tag);

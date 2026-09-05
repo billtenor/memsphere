@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
 
-const root = resolve("examples/view-packages/dsh-custom-view");
+const root = resolve("examples/view-packages/custom-view-showcase");
 const outputPath = resolve(root, "index.js");
 
 export async function buildExampleViewPackage() {

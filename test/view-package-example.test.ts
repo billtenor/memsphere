@@ -8,7 +8,7 @@ import { checkExampleViewPackage } from "../scripts/build-example-view-package.m
 
 test("example View Package bundle is reproducible, SDK-external, and copy-installable", async () => {
   await checkExampleViewPackage();
-  const sourceRoot = resolve("examples/view-packages/dsh-custom-view");
+  const sourceRoot = resolve("examples/view-packages/custom-view-showcase");
   const [source, bundle] = await Promise.all([
     readFile(join(sourceRoot, "src/index.js"), "utf8"),
     readFile(join(sourceRoot, "index.js"), "utf8")

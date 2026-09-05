@@ -273,7 +273,7 @@ export default defineViewPlugin<CustomerConfig>({
 - 选择可以贡献的界面位置，阅读 [View Slot List](./view-slots.md)。
 # 本地界面扩展包、主题与界面替换
 
-View Plugin 现在可以作为可信本地“界面扩展包”安装，而不必加入 `builtinModuleCatalog` 或重新编译 Memsphere。示例见 `examples/view-packages/dsh-custom-view`。“设置 → 界面与主题”按“界面扩展包安装、主题配置、界面配置”组织：扩展包是安装、分享和升级单位，主题、页面、组件与样式则可分别选用；“一键应用全部”只是批量填充这些选择，之后仍能逐项调整。整页只有一个保存按钮，所有配置统一保存在 Home 并应用到全部 Project。旧的 `/settings/packages` 与 `/settings/composition` 链接兼容进入统一页面。
+View Plugin 现在可以作为可信本地“界面扩展包”安装，而不必加入 `builtinModuleCatalog` 或重新编译 Memsphere。示例见 `examples/view-packages/custom-view-showcase`。“设置 → 界面与主题”按“界面扩展包安装、主题配置、界面配置”组织：扩展包是安装、分享和升级单位，主题、页面、组件与样式则可分别选用；“一键应用全部”只是批量填充这些选择，之后仍能逐项调整。整页只有一个保存按钮，所有配置统一保存在 Home 并应用到全部 Project。旧的 `/settings/packages` 与 `/settings/composition` 链接兼容进入统一页面。
 
 Package 通过 `module.json` 声明 `capabilities`、`dependencies`、`styles`、`themes`、`contributions` 和可选 `source`。`styles.global` 是显式高权限：`@import`、远程资源、Host 私有 selector、`!important` 和 `--mem-view-*` 声明都会被拒绝。普通 scoped CSS 会绑定 Package 实例 root/portal；声明 `namespace` 后，所有自定义变量定义都会按此前缀强制校验。Theme 的 light/dark 必须声明相同的已知 token 集合。
 

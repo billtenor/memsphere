@@ -17,7 +17,7 @@ test("trusted local Package replaces Memory and Run through formal composition a
   const memoryRoot = join(projectRoot, "memory");
   const runsRoot = join(projectRoot, "runs");
   const packageRoot = join(temporary, "copied-custom-view");
-  await cp(resolve("examples/view-packages/dsh-custom-view"), packageRoot, { recursive: true });
+  await cp(resolve("examples/view-packages/custom-view-showcase"), packageRoot, { recursive: true });
   await mkdir(memoryRoot, { recursive: true });
   await mkdir(runsRoot, { recursive: true });
   await mkdir(join(projectRoot, "archives"), { recursive: true });
@@ -111,7 +111,7 @@ test("Settings completes the local Package installation and Project enablement f
   const temporary = await mkdtemp(join(tmpdir(), "memsphere-view-package-settings-"));
   const home = join(temporary, "home");
   const projectRoot = join(home, "projects", "demo");
-  const packageRoot = resolve("examples/view-packages/dsh-custom-view");
+  const packageRoot = resolve("examples/view-packages/custom-view-showcase");
   await mkdir(join(projectRoot, "memory"), { recursive: true });
   await mkdir(join(projectRoot, "runs"), { recursive: true });
   await mkdir(join(projectRoot, "archives"), { recursive: true });
@@ -313,7 +313,7 @@ test("real Run Artifact uses a custom renderer and restores the official body wh
 test("global composition applies to every Project and stays frozen across disk changes", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "memsphere-view-package-snapshot-"));
   const home = join(temporary, "home");
-  const packageRoot = resolve("examples/view-packages/dsh-custom-view");
+  const packageRoot = resolve("examples/view-packages/custom-view-showcase");
   const grants = ["theme.override", "styles.scoped", "styles.global"] as const;
   const roots = { a: join(home, "projects", "a"), b: join(home, "projects", "b") };
   for (const [name, root] of Object.entries(roots)) {
