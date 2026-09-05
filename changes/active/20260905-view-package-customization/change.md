@@ -72,3 +72,5 @@ Memory 与 Run 必须实际迁移到新架构：官方现有实现成为 priorit
 产品验收第三轮澄清“界面与主题”页面中的所有配置都应对所有 Project 生效，且无需显示额外范围文案。实现已将 Package capability、Theme、Slot、Style 和所需实例统一迁入 Home `view_composition`，Project 历史 View 字段只保留解析兼容、不再参与 resolver；启动快照使用一个全局 composition 为所有已注册 Project 构建实例。页面删除重复介绍卡及全部生效范围分组。跨 A/B Project 浏览器用例验证同一扩展内容同时生效，磁盘修改在重启前仍由全局启动快照隔离。全量 558 项测试结果为 557 passed、1 个 Windows-only skipped、0 failed。最终 Memory ChangeSet 为 `change-20260905-052525896z-679777fa`，Content Digest `8315dc2d43878c7f2b205045dc213fdd5530df18c50a3358c5ebaa3dc616b9a5`，校验通过。
 
 产品验收继续指出独立“样式配置”与 Slot 心智不一致。实现已取消独立样式表：global CSS 统一作为 `styles.global@1` 多选 Slot 候选，scoped CSS 随 Package 实例自动加载；旧 `view_composition.styles` 只保留解析兼容，新保存和“一键应用全部”统一写入 Slot。界面配置表因此由 16 项增至 17 项。全量 558 项测试结果为 557 passed、1 个 Windows-only skipped、0 failed。最新 Memory ChangeSet 为 `change-20260905-153839395z-a96e9586`，变更级校验通过，Content Digest `802b0675abc5af603923a912f34a03c6348e851425b0ba9224aa7b7fe646ed08`，View 入口 `http://0.0.0.0:30000/projects/memsphere/changes/change-20260905-153839395z-a96e9586`。
+
+多选 Slot 的界面进一步统一为下拉多选控件：收起时显示未选择、唯一选项名或选中数量，展开后可连续勾选，Escape 返回触发器；窄屏仍由表格自身横向滚动承载。
