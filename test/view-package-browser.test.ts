@@ -140,8 +140,9 @@ test("Settings completes the local Package installation and Project enablement f
   try {
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/settings/appearance`);
-    await page.getByText("界面扩展包管理", { exact: true }).waitFor();
-    await page.getByText("界面配置 · demo", { exact: true }).waitFor();
+    await page.getByText("对所有 Project 生效", { exact: true }).waitFor();
+    await page.getByText("仅当前 Project 生效：demo", { exact: true }).waitFor();
+    assert.equal(await page.locator(".settings-appearance-intro").count(), 0);
     await page.locator("#settings-package-path").fill(packageRoot);
     await page.locator('[data-action="add-view-package"]').click();
     await save("global");
