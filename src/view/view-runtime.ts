@@ -124,6 +124,7 @@ export interface ViewPluginInstanceOptions<Config = unknown> {
       readonly cell: string;
       readonly id: string;
       readonly priority: readonly [number, number];
+      readonly enabled?: boolean;
     }[];
     readonly blockedCells: readonly string[];
   };
@@ -1293,6 +1294,7 @@ class RuntimeSlotTransaction implements SlotRegistry {
     if (this.#contributionPolicy && !declared) {
       throw new Error(`View contribution is not declared by the Package manifest: ${cell}#${options.id}`);
     }
+    if (declared?.enabled === false) return () => {};
     const entry: RuntimeEntry = {
       token,
       id: options.id,

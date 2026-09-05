@@ -31,6 +31,23 @@ test("example View Package bundle is reproducible, SDK-external, and copy-instal
     });
     assert.equal(composition.installed[0]?.root, copied);
     assert.equal(composition.instances.length, 1);
+    const globalThemeOnly = await resolveViewPackageComposition({
+      global: { installed: [{ path: copied, allow: ["theme.override"] }] },
+      globalThemeSource: "org.example.memsphere.custom-view:sea-glass",
+      project: { packages: [] },
+      sdkVersion: "1.0.0"
+    });
+    assert.equal(globalThemeOnly.instances.length, 1);
+    assert.equal(globalThemeOnly.instances[0]?.allow.has("theme.override"), true);
+    assert.equal(globalThemeOnly.instances[0]?.allowedStyleIds.size, 0);
+    assert.equal(globalThemeOnly.instances[0]?.contributionPolicy.registrations.every(entry => entry.enabled === false), true);
+    const globalThemeWithProjectContent = await resolveViewPackageComposition({
+      global: { installed: [{ path: copied, allow: ["theme.override"] }] },
+      globalThemeSource: "org.example.memsphere.custom-view:sea-glass",
+      project: { packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true, allow: [] }] },
+      sdkVersion: "1.0.0"
+    });
+    assert.equal(globalThemeWithProjectContent.instances[0]?.allow.has("theme.override"), true);
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

@@ -22,16 +22,25 @@ test("global and Project View Package configuration is strict and independently 
     store: { type: "managed", published_revision: "abc" },
     view: {
       packages: [{ id: "org.example.view", version: "1.0.0", enabled: true }],
-      theme: { selected_source: "org.example.theme" }
+      theme: { mode: "light", selected_source: "org.example.theme" },
+      slots: { "org.memsphere.memory.page.presentation@1:page": "org.example.view:main:memory" },
+      styles: { "org.example.view:main:base": true }
     }
   });
   assert.equal(project.view?.packages[0]?.instance_id, undefined);
   assert.equal(project.view?.theme?.selected_source, "org.example.theme");
+  assert.equal(project.view?.theme?.mode, "light");
+  assert.equal(project.view?.slots?.["org.memsphere.memory.page.presentation@1:page"], "org.example.view:main:memory");
+  assert.equal(project.view?.styles?.["org.example.view:main:base"], true);
 
   assert.equal(globalConfigSchema.safeParse({ view: { packages: [] } }).success, false);
   assert.equal(projectConfigSchema.safeParse({
     store: { type: "managed", published_revision: "abc" },
     view_packages: { installed: [] }
+  }).success, false);
+  assert.equal(projectConfigSchema.safeParse({
+    store: { type: "managed", published_revision: "abc" },
+    view: { packages: [], slots: { "org.example.unknown@1:page": null } }
   }).success, false);
 });
 

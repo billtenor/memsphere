@@ -93,8 +93,8 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     assert.equal(await page.getByRole("button", { name: "确认保存" }).isDisabled(), true);
     assert.equal(await page.locator(".settings-change-list").textContent(), "没有配置变化。");
     await page.getByRole("button", { name: "返回编辑" }).click();
-    assert.match(await page.locator("#settings-status").textContent() ?? "", /没有未保存修改/);
-    assert.match(await page.locator("#settings-status").textContent() ?? "", /错误 0/);
+    assert.match(await page.locator("#settings-status").textContent() ?? "", /已保存/);
+    assert.doesNotMatch(await page.locator("#settings-status").textContent() ?? "", /磁盘配置|运行配置|错误 0/);
 
     await page.getByRole("button", { name: "启用参与者配置" }).click();
     assert.equal(await page.getByText("执行者", { exact: true }).count(), 1);
@@ -162,7 +162,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await page.waitForFunction(() => document.querySelector("#view-shell-project-trigger")?.textContent?.trim() === "beta");
     await generalSettings.click();
     assert.equal((await page.getByRole("combobox", { name: "工作语言" }).textContent())?.trim(), "中文⌄");
-    assert.match(await page.locator("#settings-status").textContent() ?? "", /没有未保存修改/);
+    assert.match(await page.locator("#settings-status").textContent() ?? "", /已保存/);
 
     await settingsNav.getByRole("button", { name: "ACP 提供方", exact: true }).click();
     let traexProvider = page.locator(".settings-provider").filter({ hasText: "traex" }).first();
@@ -210,7 +210,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await page.getByText("使用默认界面配置", { exact: true }).click();
     await page.locator(".settings-field").filter({ hasText: "端口" }).locator("input").fill("-1");
     await page.getByRole("button", { name: "保存", exact: true }).click();
-    await page.waitForFunction(() => !document.querySelector("#settings-status")?.textContent?.includes("错误 0"));
+    await page.locator(".settings-error").first().waitFor();
     assert.doesNotMatch(await page.locator("#settings-status").textContent() ?? "", /错误 0/);
     assert.deepEqual(pageErrors, []);
     const overflow = await page.evaluate(() => ({
@@ -295,11 +295,11 @@ test("Settings browser shows an inline error for an invalid operator token", asy
     assert.equal(await tokenInput.getAttribute("aria-invalid"), null);
     assert.equal(await tokenInput.getAttribute("aria-describedby"), null);
     await page.getByRole("button", { name: "进入配置中心", exact: true }).click();
-    await page.getByText("磁盘配置", { exact: false }).first().waitFor();
+    await page.getByText("已保存", { exact: true }).first().waitFor();
     assert.equal(await page.getByText("操作令牌不正确，请检查后重试。", { exact: true }).count(), 0);
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    await page.getByText("磁盘配置", { exact: false }).first().waitFor();
+    await page.getByText("已保存", { exact: true }).first().waitFor();
     assert.equal(await page.getByLabel("操作令牌", { exact: true }).count(), 0);
   } finally {
     await browser.close();

@@ -32,7 +32,7 @@
 | `main.view` | View Host | 内置及用户 Module | 按路由 key 选择 | 页面主体。可以注册多个 View，但一次只挂载当前路由选中的一个；Module 可以在自己的 View 内继续声明子 Slot。 |
 | `overlay` | View Host | Memsphere Core、内置及用户 Module | 按浮层 key 选择 | 抽屉、对话框和评审浮窗等临时交互。可以注册多个浮层，但控制器同一时刻只激活一个；View Host 负责遮罩、焦点、关闭行为、`wide`/`compact` 几何尺寸和故障隔离。 |
 
-当前 Catalog 定义 14 个长期 Slot。新增 Slot 时直接更新本列表。
+当前 Catalog 定义 14 个长期 Slot。`header.account` 由 Core 保留，`home.modules` 由组合运行时生成；其余 12 类可以由界面扩展包声明并出现在“界面配置”表中。新增 Slot 时直接更新本列表和设置目录。
 
 ### 跨 Package Presentation Cells
 
@@ -45,13 +45,13 @@
 | `org.memsphere.run.page.presentation@1` | Run | `page` | `ViewMount` |
 | `org.memsphere.run.artifact.renderer@1` | Run | `artifact` | Artifact、事件、Run 及官方 fallback factory |
 
-官方实现以 priority `1000` 注册。较小 priority 的用户候选可以 shadow；同 priority 冲突须由 Project preference 处理；失败候选标为 abdicated 并自动回退。诊断区显示 active、shadowed 与 abdicated 状态。
+官方实现以 priority `1000` 注册。较小 priority 的用户候选可以 shadow；设置表为每个 single/keyed Slot 选择一个候选，为 list Slot 选择多个候选。显式设置后，未选 contribution 在注册阶段被安全忽略；失败候选标为 abdicated 并自动回退。
 
 ## 当前实现状态
 
 当前 SDK 与 ViewHost 已接线本 Catalog 的全部 14 个根 Slot。Core 通过 Host 内置 Plugin 提供 Home、账户等 Shell 内容；四个 builtin Module 通过同一公开 Slot Tree 贡献主导航、二级导航、对象列表、按需右侧栏、Header、Page、搜索 Provider 与 Home 聚合项。Shell 使用可拖动且持久化的二级导航栏和内容列表栏；Run 普通页面不轮询，Artifact Review 由 Run Module 注册到 `overlay`，Host 负责背景 Route、遮罩、焦点、关闭、清理与局部故障边界。
 
-任意动态子 Slot 仍未接线；四个版本化 portable presentation cell、可信本地用户 Package 发现/安装及 Project 动态组合已经接线。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
+任意动态子 Slot 仍未接线；12 类可扩展根 Slot、四个版本化 portable presentation cell、可信本地界面扩展包发现/安装及按 contribution 的 Project 动态组合已经接线。“界面配置”表展示这 16 类稳定位置，不展示 Core 保留位置。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
 
 ## Slot 结构
 

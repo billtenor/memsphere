@@ -271,13 +271,15 @@ export default defineViewPlugin<CustomerConfig>({
 - 想理解为何分别编译、为何允许重启，以及 Slot 所有权如何工作，阅读 [View Plugin Design](./view-plugin-design.md)。
 - 编写代码时查询精确签名、返回值和错误约束，阅读 [View Plugin API](./view-plugin-api.md)。
 - 选择可以贡献的界面位置，阅读 [View Slot List](./view-slots.md)。
-# 本地 View Package、主题与页面替换
+# 本地界面扩展包、主题与界面替换
 
-View Plugin 现在可以作为可信本地 Package 安装，而不必加入 `builtinModuleCatalog` 或重新编译 Memsphere。示例见 `examples/view-packages/dsh-custom-view`。在“设置 → 界面与主题”同一页面添加绝对路径、设置全局默认；重启 View 后，仍在该页面为当前 Project 启用版本并分别授予 capability。界面把操作放在一起，底层仍分别保存 Home 与 Project 配置；两层都授权时 capability 才生效。旧的 `/settings/packages` 与 `/settings/composition` 链接会兼容进入统一页面。
+View Plugin 现在可以作为可信本地“界面扩展包”安装，而不必加入 `builtinModuleCatalog` 或重新编译 Memsphere。示例见 `examples/view-packages/dsh-custom-view`。“设置 → 界面与主题”按“界面扩展包安装、主题配置、界面配置”组织：扩展包是安装、分享和升级单位，主题、页面、组件与样式则可分别选用；“一键应用全部”只是批量填充这些选择，之后仍能逐项调整。整页只有一个保存按钮，底层会先校验再分别持久化 Home 与 Project 配置。旧的 `/settings/packages` 与 `/settings/composition` 链接兼容进入统一页面。
 
 Package 通过 `module.json` 声明 `capabilities`、`dependencies`、`styles`、`themes`、`contributions` 和可选 `source`。`styles.global` 是显式高权限：`@import`、远程资源、Host 私有 selector、`!important` 和 `--mem-view-*` 声明都会被拒绝。普通 scoped CSS 会绑定 Package 实例 root/portal；声明 `namespace` 后，所有自定义变量定义都会按此前缀强制校验。Theme 的 light/dark 必须声明相同的已知 token 集合。
 
-使用 `portableSlots.memoryPagePresentation`、`memoryDetailRenderer`、`runPagePresentation` 和 `runArtifactRenderer` 替换稳定 Route 内的展示。较小 `priority` 获胜，同 cell 同 priority 必须在 Project 设置选择首选候选；渲染异常会 abdicate 并回退到下一候选。`order` 仍只控制 list 排序。
+界面扩展包可以声明 12 类非 Core 保留的 Host 根 Slot，以及 `portableSlots.memoryPagePresentation`、`memoryDetailRenderer`、`runPagePresentation` 和 `runArtifactRenderer` 四个稳定展示位置。设置页以表格列出全部 16 类可配置位置：single/keyed Slot 单选，list Slot 多选。Manifest 的 `cell` 仍必须精确匹配运行时注册的 `cell + id`；显式配置后，未选择的 contribution 会被安全忽略，渲染异常则 abdicate 并回退。完整目录见 [View Slot List](./view-slots.md)。
+
+主题是全局设置：light/dark/system 模式及选中的扩展包主题统一应用到所有 Project。历史 Project Theme 字段仍可解析以保持配置兼容，但不再参与展示，设置页也不提供 Project 级主题入口。普通设置页不展示 revision、digest 或 running/disk 快照，只显示已保存、未保存或保存后需重启。
 
 页面 Package 通过 `presentation` 服务读取冻结的摘要、当前 Route/选择，并调用 `refresh/openMemory/openCreate/openRun/startRun` 进入官方控制的流程；不直接请求业务 API。Detail/Artifact renderer 只接收 SDK 定义的最小只读正文 context 及官方包装的复制、ChangeSet、Review、下载动作。
 

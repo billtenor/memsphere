@@ -33,6 +33,7 @@ import {
   type ArtifactReviewVote
 } from "../artifact-review.js";
 import { type MemsphereConfig, readProjectConfig, readViewConfig } from "../config.js";
+import { configurableViewSlotIdForCell, configurableViewSlots } from "../view/package-config.js";
 import { homePaths, resolveMemsphereHome } from "../home.js";
 import { listRegisteredProjects } from "../project/registry.js";
 import {
@@ -118,7 +119,7 @@ import {
 } from "../view/host.js";
 import { rewriteGlobalStyleUrls, scopePackageStyle, validateGlobalStyle } from "../view/global-style-contract.js";
 import { viewCompositionDigest } from "../view/package-config.js";
-import { validateViewThemePalette, VIEW_THEME_HOME_LAYER, VIEW_THEME_PROJECT_LAYER } from "../view/theme.js";
+import { validateViewThemePalette, VIEW_THEME_HOME_LAYER } from "../view/theme.js";
 import { coreViewRoutes } from "../view/core-routes.js";
 import {
   localizeAcpProviderDefinition,
@@ -511,6 +512,7 @@ async function handleRequest(
     const projectDocument = await readCurrentProjectSettingsDocument(config);
     const composition = await resolveViewPackageComposition({
       global: globalDocument.raw.view_packages,
+      globalThemeSource: globalDocument.raw.view_theme?.selected_source,
       project: projectDocument?.raw.view,
       sdkVersion: viewSdkVersion
     });
@@ -528,10 +530,14 @@ async function handleRequest(
         source: entry.manifest.source,
         capabilities: entry.manifest.view.capabilities ?? [],
         dependencies: entry.manifest.view.dependencies ?? [],
-        contributions: entry.manifest.view.contributions ?? [],
+        contributions: (entry.manifest.view.contributions ?? []).map(contribution => ({
+          ...contribution,
+          slotId: configurableViewSlotIdForCell(contribution.cell)
+        })),
         styles: entry.manifest.view.styles ?? [],
         themes: entry.manifest.view.themes ?? []
       })),
+      configurableSlots: configurableViewSlots,
       instances: composition.instances.map(entry => ({
         id: entry.package.manifest.id,
         version: entry.package.manifest.version,
@@ -2847,7 +2853,6 @@ function configuredThemeOverrides(config: MemsphereConfig): NonNullable<ViewHost
     }));
   };
   add("org.memsphere.user.home-overrides", VIEW_THEME_HOME_LAYER - 50, config.viewTheme?.overrides);
-  add("org.memsphere.user.project-overrides", VIEW_THEME_PROJECT_LAYER - 50, config.project?.view?.theme?.overrides);
   return Object.freeze(contributions);
 }
 
@@ -2885,6 +2890,7 @@ async function captureViewCompositionBootSnapshot(
     };
     const composition = resolveViewPackageComposition({
       global: viewPackages,
+      globalThemeSource: viewTheme?.selected_source,
       project: projectView,
       sdkVersion: viewSdkVersion
     });
@@ -2950,17 +2956,16 @@ async function externalViewInstances(
     const capabilities = instance.allow;
     const owner = `${instance.package.manifest.id}@${instance.package.manifest.version}:${instance.instanceId}`;
     const styles = await Promise.all((instance.package.manifest.view.styles ?? []).flatMap(style => {
+      if (!instance.allowedStyleIds.has(style.id)) return [];
       const required = style.scope === "global" ? "styles.global" as const : "styles.scoped" as const;
       if (!capabilities.has(required)) return [];
       return [loadViewPackageStyle({ projectId, owner, instance, style, assets })];
     }));
-    const selectedProjectTheme = config.project?.view?.theme?.selected_source;
     const selectedHomeTheme = config.viewTheme?.selected_source;
     const themes = await Promise.all((instance.package.manifest.view.themes ?? []).flatMap(theme => {
       const sourceId = `${instance.package.manifest.id}:${theme.id}`;
-      const selected = sourceId === selectedProjectTheme || (!selectedProjectTheme && sourceId === selectedHomeTheme);
-      const layer = sourceId === selectedProjectTheme ? VIEW_THEME_PROJECT_LAYER : VIEW_THEME_HOME_LAYER;
-      return [loadViewPackageTheme({ projectId, sourceId, layer, selected, instance, file: theme.file, assets })];
+      const selected = sourceId === selectedHomeTheme;
+      return [loadViewPackageTheme({ projectId, sourceId, layer: VIEW_THEME_HOME_LAYER, selected, instance, file: theme.file, assets })];
     }));
     return Object.freeze({
       pluginPath: `/assets/view-packages/${encodeURIComponent(projectId)}/${entry.key}`,

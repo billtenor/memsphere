@@ -27,6 +27,7 @@ export interface ViewHostBootInstance {
       readonly cell: string;
       readonly id: string;
       readonly priority: readonly [number, number];
+      readonly enabled?: boolean;
     }[];
     readonly blockedCells: readonly string[];
   };

@@ -231,8 +231,8 @@ Slot 使用独立的 `name@version` 身份。改变 kind、scope、必填字段�
 完整 Module Manifest、CLI SDK、服务端 View API 注册、Module 配置迁移、市场、签名与沙箱由各自专项契约定义。它们必须遵守本文确定的独立编译、公开 Context、Slot 所有权、实例隔离、数据边界和整体重启模型。
 # 本地 Package Composition 与资产演进
 
-内置实现与可信本地 Package 使用同一 Manifest、实例 Context 和 Slot 协议。Home 只记录已安装路径和 capability 上限；Project 选择版本、实例、启用状态、授权与冲突偏好。View 服务启动后为每个 Project 固定 composition snapshot，变更通过跨平台 `memsphere view restart` 生效。入口和资源使用包根 realpath 约束、内容摘要及 Project 隔离 URL；文件变化不会让旧 URL 返回新字节。
+内置实现与可信本地界面扩展包使用同一 Manifest、实例 Context 和 Slot 协议。Home 记录已安装路径、全局主题和 capability 上限；Project 按 Slot 与 Style 选择包内内容并隐式保留所需实例。View 服务启动后为每个 Project 固定 composition snapshot，变更通过跨平台 `memsphere view restart` 生效。入口和资源使用包根 realpath 约束、内容摘要及 Project 隔离 URL；文件变化不会让旧 URL 返回新字节。
 
-启动 snapshot 同时保存规范化 composition digest 与 Home/Project document revision。页面 boot 和资产注册只消费 running snapshot；Settings 返回 running/disk 两份 digest，并用独立 `restartPending` 表示 Package、capability、preference 或 Theme 变化，不与 host/port 的 `restartRequired` 混用。新注册 Project 需重启后进入 snapshot；从 registry 删除的 Project 不会因旧 snapshot 而继续可达。
+启动 snapshot 同时保存规范化 composition digest 与 Home/Project document revision。页面 boot 和资产注册只消费 running snapshot；Settings API 保留 running/disk digest 与 `restartPending` 供一致性控制，但普通界面只显示“已保存、未保存、重启后生效”。新注册 Project 需重启后进入 snapshot；从 registry 删除的 Project 不会因旧 snapshot 而继续可达。
 
 Community、verified、curated、official-owned 是未来 Catalog 元数据，不进入运行协议。稳定 Package id、SemVer、来源和许可证允许用户方案先本地分享，之后在不静默替换身份的前提下被官方精选或经授权转移维护权。

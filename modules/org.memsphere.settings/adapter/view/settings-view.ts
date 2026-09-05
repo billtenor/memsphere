@@ -216,7 +216,7 @@ class SettingsApplication {
       ? this.t("navigation.settingsLabel", "Memsphere 设置", { name: "Memsphere" })
       : this.t("navigation.projectSettingsLabel", `${this.#currentProject || "项目"} 项目设置`, { name: this.#currentProject || this.t("navigation.project", "项目") });
     const subtitle = this.#module === "appearance"
-      ? this.t("settings.appearanceHelp", "在一个页面中安装界面 Package，并设置全局默认与当前 Project 的展示方式。")
+      ? this.t("settings.appearanceHelp", "安装和管理界面扩展包，并配置全局主题及当前 Project 的页面、组件和样式。")
       : this.#scope === "global"
         ? this.t("navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。")
         : this.t("navigation.projectSettingsSubtitle", "管理当前项目配置。");
@@ -325,11 +325,10 @@ class SettingsApplication {
     const dirty = JSON.stringify(scope.draft) !== JSON.stringify(scope.data?.config);
     const id = this.#module === "appearance" ? `settings-status-${scopeName}` : "settings-status";
     return `<div id="${id}" data-settings-status="${scopeName}" class="settings-status">
-      ${pill(this.t("settings.diskConfig", `磁盘配置 ${shortRevision(scope.data?.diskRevision)}`, { revision: shortRevision(scope.data?.diskRevision) }), "strong")}
-      ${scopeName === "global" ? pill(this.t("settings.runningConfig", `运行配置 ${shortRevision(scope.data?.runningRevision)}`, { revision: shortRevision(scope.data?.runningRevision) })) : pill(this.t("settings.scope.project", "项目配置"), "done")}
-      ${pill(this.t(scope.data?.restartRequired || scope.data?.restartPending ? "settings.restartPending" : "settings.applied", scope.data?.restartRequired || scope.data?.restartPending ? "等待重启" : "已应用"), scope.data?.restartRequired || scope.data?.restartPending ? "warn" : "done")}
-      ${pill(this.t(dirty ? "settings.unsaved" : "settings.noUnsaved", dirty ? "未保存修改" : "没有未保存修改"), dirty ? "warn" : "done")}
-      ${pill(this.t("settings.errorCount", `错误 ${scope.errors.length}`, { count: scope.errors.length }), scope.errors.length ? "warn" : "")}
+      ${pill(dirty
+        ? this.t("settings.unsaved", "有未保存修改")
+        : this.t(scope.data?.restartRequired || scope.data?.restartPending ? "settings.restartPending" : "settings.saved", scope.data?.restartRequired || scope.data?.restartPending ? "已保存，重启后生效" : "已保存"), dirty || scope.data?.restartRequired || scope.data?.restartPending ? "warn" : "done")}
+      ${scope.errors.length ? pill(this.t("settings.errorCount", `有 ${scope.errors.length} 项需要修改`, { count: scope.errors.length }), "warn") : ""}
     </div>`;
   }
 
@@ -383,92 +382,94 @@ class SettingsApplication {
     const projectPanel = project.data && project.draft
       ? this.appearanceScopeHtml("project", project, this.compositionHtml(project))
       : `<section class="settings-section">${empty(this.t("settings.projectUnavailable", "当前没有可管理的项目，但仍可管理 Memsphere 全局设置。"))}</section>`;
+    const notices = [...new Set([global.notice, project.data ? project.notice : ""].filter(Boolean))];
     return `<div class="settings-layout settings-appearance">
-      <section class="settings-section settings-appearance-intro"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.appearance", "界面与主题"))}</h3><p class="settings-section-subtitle">${escapeHtml(this.t("settings.appearanceHelp", "在一个页面中安装界面 Package，并设置全局默认与当前 Project 的展示方式。"))}</p></div></div>${this.packageSnapshotHtml()}</section>
-      ${globalPanel}${projectPanel}
+      <section class="settings-section settings-appearance-intro"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.appearance", "界面与主题"))}</h3><p class="settings-section-subtitle">安装界面扩展包后，可以分别选用其中的主题、页面、组件和样式；也可以一键采用某个扩展包提供的全部内容。</p></div></div></section>
+      ${this.appearanceStatusHtml()}${notices.map(notice => `<div class="settings-notice" role="status">${escapeHtml(notice)}</div>`).join("")}${globalPanel}${projectPanel}
+      <div class="settings-actions"><button class="btn" data-action="reload-appearance">${escapeHtml(this.t("settings.reload", "重新读取"))}</button><button class="btn primary" data-action="save-appearance">${escapeHtml(this.t("common.save", "保存"))}</button></div>
     </div>`;
+  }
+
+  appearanceStatusHtml(): string {
+    const scopes = [this.#scopes.global, ...(this.#scopes.project.data ? [this.#scopes.project] : [])];
+    const dirty = scopes.some(scope => JSON.stringify(scope.draft) !== JSON.stringify(scope.data?.config));
+    const restart = scopes.some(scope => scope.data?.restartRequired || scope.data?.restartPending);
+    const errors = scopes.reduce((count, scope) => count + scope.errors.length, 0);
+    return `<div id="settings-status-appearance" class="settings-status">${pill(dirty ? this.t("settings.unsaved", "有未保存修改") : restart ? this.t("settings.restartPending", "已保存，重启后生效") : this.t("settings.saved", "已保存"), dirty || restart ? "warn" : "done")}${errors ? pill(this.t("settings.errorCount", `有 ${errors} 项需要修改`, { count: errors }), "warn") : ""}</div>`;
   }
 
   appearanceScopeHtml(scopeName: ScopeName, scope: ScopeState, editor: string): string {
     const label = scopeName === "global"
-      ? this.t("settings.appearanceGlobal", "默认用于所有 Project")
-      : this.t("settings.appearanceProject", `当前 Project · ${this.#currentProject}`, { name: this.#currentProject });
-    const notice = scope.notice ? `<div class="settings-notice" role="status">${escapeHtml(scope.notice)}</div>` : "";
-    const body = scope.confirmation ? this.confirmationPanelHtml(scopeName, scope) : `${editor}<div class="settings-actions"><button class="btn" data-action="reload-${scopeName}">${escapeHtml(this.t("settings.reload", "重新读取"))}</button><button class="btn primary" data-action="validate-${scopeName}">${escapeHtml(this.t("common.save", "保存"))}</button></div>`;
-    return `<section class="settings-appearance-scope" data-settings-scope="${scopeName}"><div class="settings-scope-heading"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(scopeName === "global" ? "Memsphere Home" : this.#currentProject)}</span></div>${this.statusHtml(scope, scopeName)}${notice}${body}</section>`;
+      ? "界面扩展包管理"
+      : `界面配置 · ${this.#currentProject}`;
+    return `<section class="settings-appearance-scope" data-settings-scope="${scopeName}"><div class="settings-scope-heading"><strong>${escapeHtml(label)}</strong></div>${editor}</section>`;
   }
 
   confirmationPanelHtml(scopeName: ScopeName, scope: ScopeState): string {
     const confirmation = scope.confirmation!;
     const changes = confirmation.changes ?? [];
-    return `<section class="settings-section"><h3>${escapeHtml(this.t("settings.confirmChanges", "确认配置变更"))}</h3><ul class="settings-change-list">${changes.length ? changes.map((change: JsonObject) => `<li>${escapeHtml(`${change.path} · ${change.kind} · ${compact(change.before)} → ${compact(change.after)}`)}</li>`).join("") : `<li>${escapeHtml(this.t("settings.noChanges", "没有配置变化。"))}</li>`}</ul><details class="settings-participant"><summary class="settings-participant-summary"><strong>${escapeHtml(this.t("settings.advancedDiagnostics", "高级诊断"))}</strong></summary><pre class="settings-code mono">${escapeHtml(confirmation.normalizedJson ?? JSON.stringify(scope.draft, null, 2))}</pre></details><div class="settings-actions"><button class="btn" data-action="back-${scopeName}">${escapeHtml(this.t("settings.backToEdit", "返回编辑"))}</button><button class="btn primary" data-action="save-${scopeName}"${changes.length ? "" : " disabled"}>${escapeHtml(this.t("settings.confirmSave", "确认保存"))}</button></div></section>`;
+    return `<section class="settings-section"><h3>${escapeHtml(this.t("settings.confirmChanges", "确认配置变更"))}</h3><ul class="settings-change-list">${changes.length ? changes.map((change: JsonObject) => `<li>${escapeHtml(`${change.path} · ${change.kind} · ${compact(change.before)} → ${compact(change.after)}`)}</li>`).join("") : `<li>${escapeHtml(this.t("settings.noChanges", "没有配置变化。"))}</li>`}</ul><div class="settings-actions"><button class="btn" data-action="back-${scopeName}">${escapeHtml(this.t("settings.backToEdit", "返回编辑"))}</button><button class="btn primary" data-action="save-${scopeName}"${changes.length ? "" : " disabled"}>${escapeHtml(this.t("settings.confirmSave", "确认保存"))}</button></div></section>`;
   }
 
   packagesHtml(scope: ScopeState): string {
     const records = scope.draft?.view_packages?.installed ?? [];
     const resolved = new Map((this.#viewPackages.installed ?? []).map((item: JsonObject) => [item.path, item]));
     const diagnostics = this.#viewPackages.diagnostics ?? [];
-    const themeOptions: Array<[string, string]> = [["", this.t("settings.systemTheme", "系统默认 Theme")], ...(this.#viewPackages.installed ?? []).flatMap((item: JsonObject) => (item.themes ?? []).map((theme: JsonObject) => [`${item.id}:${theme.id}`, `${item.id} · ${theme.id}`] as [string, string]))];
+    const themeOptions: Array<[string, string]> = [["", "系统默认主题"], ...(this.#viewPackages.installed ?? []).flatMap((item: JsonObject) => (item.themes ?? []).map((theme: JsonObject) => [`${item.id}:${theme.id}`, `${item.id} · ${theme.id}`] as [string, string]))];
     const cards = records.map((record: JsonObject, index: number) => {
       const item = resolved.get(record.path) as JsonObject | undefined;
       const diagnostic = diagnostics.find((entry: JsonObject) => entry.path === record.path);
       const capabilities = item?.capabilities ?? [];
+      const content = item ? [`${(item.themes ?? []).length} 个主题`, `${(item.contributions ?? []).length} 个界面项`, `${(item.styles ?? []).length} 个样式`].join(" · ") : "保存并重启后读取扩展包内容";
       return `<article class="settings-provider settings-view-package"><div class="settings-section-head"><div><strong>${escapeHtml(item ? `${item.id}@${item.version}` : record.path)}</strong><p class="settings-section-subtitle mono">${escapeHtml(record.path)}</p></div><button class="btn danger" data-remove-view-package="${index}">${escapeHtml(this.t("common.delete", "删除"))}</button></div>
-        <div>${pill(diagnostic?.state ?? (item ? "resolved" : "pending restart"), diagnostic?.state === "resolved" ? "done" : "warn")}</div>
+        <div class="settings-package-summary"><span>${escapeHtml(content)}</span>${item && this.#scopes.project.data ? `<button class="btn" data-apply-view-package="${escapeAttr(`${item.id}@${item.version}`)}">一键应用全部</button>` : ""}</div>
         ${diagnostic?.message ? `<div class="settings-error">${escapeHtml(diagnostic.message)}</div>` : ""}
-        <div class="settings-permissions">${capabilities.map((capability: string) => `<label class="settings-check"><input type="checkbox" data-home-view-capability="${escapeAttr(capability)}" data-package-index="${index}"${(record.allow ?? []).includes(capability) ? " checked" : ""}><span>${escapeHtml(capability)}</span></label>`).join("") || `<span class="muted">${escapeHtml(this.t("settings.noCapabilities", "未声明额外 capability"))}</span>`}</div></article>`;
+        ${capabilities.length ? `<details class="settings-package-permissions"><summary>使用权限</summary><p class="settings-help">扩展包只有获得相应权限后，所选内容才会生效。</p><div class="settings-permissions">${capabilities.map((capability: string) => `<label class="settings-check"><input type="checkbox" data-home-view-capability="${escapeAttr(capability)}" data-package-index="${index}"${(record.allow ?? []).includes(capability) ? " checked" : ""}><span>${escapeHtml(capabilityLabel(capability))}</span></label>`).join("")}</div></details>` : ""}</article>`;
     }).join("");
-    return `<section class="settings-section"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.globalAppearance", "全局默认与 Package 安装"))}</h3><p class="settings-section-subtitle">${escapeHtml(this.t("settings.viewPackagesHelp", "添加可信本地 Package，并设置所有 Project 默认继承的 Theme 与授权。保存并重启 View 后生效。"))}</p></div></div>
-      <div class="settings-grid">${selectField("view_theme.mode", this.t("settings.themeMode", "Theme 模式"), scope.draft?.view_theme?.mode ?? "system", [["system", this.t("settings.followSystem", "跟随系统")], ["light", "Light"], ["dark", "Dark"]])}${selectField("view_theme.selected_source", this.t("settings.homeTheme", "默认 Theme"), scope.draft?.view_theme?.selected_source ?? "", themeOptions)}</div>
-      <div class="settings-token-editor"><div class="settings-field"><label for="settings-package-path">${escapeHtml(this.t("settings.localPackagePath", "本地 Package 绝对路径"))}</label><input id="settings-package-path" class="settings-input mono" value="${escapeAttr(this.#packagePathDraft)}" placeholder="/absolute/path/to/package"></div><button class="btn" data-action="add-view-package">${escapeHtml(this.t("settings.add", "添加"))}</button></div>
-      <div class="settings-providers">${cards || empty(this.t("settings.noViewPackages", "尚未安装界面 Package。"))}</div>${this.errorsHtml(scope)}</section>`;
+    return `<section class="settings-section"><div class="settings-section-head"><div><h3>界面扩展包安装</h3><p class="settings-section-subtitle">扩展包是安装和分享单位，可以同时包含主题、页面、组件和样式。安装后再按需选用其中的内容。</p></div></div>
+      <div class="settings-token-editor"><div class="settings-field"><label for="settings-package-path">本地扩展包文件夹</label><input id="settings-package-path" class="settings-input mono" value="${escapeAttr(this.#packagePathDraft)}" placeholder="/absolute/path/to/package"></div><button class="btn" data-action="add-view-package">安装</button></div>
+      <div class="settings-providers">${cards || empty("尚未安装界面扩展包。")}</div>${this.errorsHtml(scope)}</section>
+      <section class="settings-section"><div class="settings-section-head"><div><h3>主题配置</h3><p class="settings-section-subtitle">设置主题和明暗模式，统一应用到所有 Project。</p></div></div><div class="settings-grid">${selectField("view_theme.mode", "明暗模式", scope.draft?.view_theme?.mode ?? "system", [["system", "跟随系统"], ["light", "浅色"], ["dark", "深色"]])}${selectField("view_theme.selected_source", "主题", scope.draft?.view_theme?.selected_source ?? "", themeOptions)}</div></section>`;
   }
 
   compositionHtml(scope: ScopeState): string {
-    const selected = scope.draft?.view?.packages ?? [];
+    const view = scope.draft?.view ?? { packages: [] };
+    const selected = view.packages ?? [];
     const installed = this.#viewPackages.installed ?? [];
-    const diagnostics = this.#viewPackages.diagnostics ?? [];
-    const runtime = (window as Window & { __memsphereViewDiagnostics?: () => JsonObject }).__memsphereViewDiagnostics?.();
-    const runtimeEntries = (runtime?.entries ?? []).filter((entry: JsonObject) => String(entry.slot).startsWith("org.memsphere."));
-    const runtimeEvidence = runtime ? `<details class="settings-participant"><summary class="settings-participant-summary"><div><strong>${escapeHtml(this.t("settings.runtimeDiagnostics", "当前运行诊断"))}</strong><div class="settings-participant-summary-meta">${escapeHtml(`Theme ${runtime.theme?.mode ?? "-"} · ${runtimeEntries.length} presentation candidates`)}</div></div></summary><div class="settings-participant-body"><pre class="settings-code mono">${escapeHtml(JSON.stringify({ theme: runtime.theme, entries: runtimeEntries }, null, 2))}</pre></div></details>` : "";
-    const projectThemeOptions: Array<[string, string]> = [["", this.t("settings.inheritHomeTheme", "继承 Home Theme")], ...installed.flatMap((item: JsonObject) => (item.themes ?? []).map((theme: JsonObject) => [`${item.id}:${theme.id}`, `${item.id} · ${theme.id}`] as [string, string]))];
-    const candidates = installed.flatMap((item: JsonObject) => {
-      const record = selected.find((entry: JsonObject) => entry.id === item.id && entry.version === item.version && entry.enabled);
-      if (!record) return [];
-      return (item.contributions ?? []).map((entry: JsonObject) => ({
-        cell: entry.cell, priority: entry.priority,
-        id: `${item.id}:${record.instance_id ?? item.id}:${entry.id}`,
-        label: `${item.id}@${item.version} · ${entry.id}`
-      }));
-    });
-    const conflictGroups = new Map<string, JsonObject[]>();
-    for (const candidate of candidates) {
-      const key = `${candidate.cell}\u0000${candidate.priority}`;
-      conflictGroups.set(key, [...(conflictGroups.get(key) ?? []), candidate]);
-    }
-    const conflicts = [...conflictGroups.values()].filter(group => group.length > 1).map(group => {
-      const cell = String(group[0]!.cell);
-      const current = selected.map((entry: JsonObject) => entry.preferences?.[cell]).find(Boolean) ?? "";
-      return `<div class="settings-field"><label>${escapeHtml(this.t("settings.preferredContribution", `首选候选 · ${cell}`, { cell }))}</label><select class="settings-input" data-view-preference="${escapeAttr(cell)}"><option value="">${escapeHtml(this.t("settings.chooseCandidate", "请选择以解决同优先级冲突"))}</option>${group.map(candidate => `<option value="${escapeAttr(candidate.id)}"${candidate.id === current ? " selected" : ""}>${escapeHtml(candidate.label)}</option>`).join("")}</select></div>`;
+    const slotDefinitions: JsonObject[] = this.#viewPackages.configurableSlots ?? [];
+    const slotFields = slotDefinitions.map(slot => {
+      const cell = String(slot.id);
+      const [label, help] = viewSlotLabel(cell);
+      const candidates: Array<{ identity: string; label: string; packageIdentity: string }> = [];
+      for (const item of installed) {
+        const record = selected.find((entry: JsonObject) => entry.id === item.id && entry.version === item.version);
+        const instanceId = record?.instance_id ?? item.id;
+        for (const contribution of item.contributions ?? []) if (contribution.slotId === cell) candidates.push({ identity: `${item.id}:${instanceId}:${contribution.id}`, label: `${item.id} · ${contribution.id}`, packageIdentity: `${item.id}@${item.version}` });
+      }
+      const legacy = selected.filter((entry: JsonObject) => entry.enabled !== false).flatMap((record: JsonObject) => {
+        const item = installed.find((entry: JsonObject) => entry.id === record.id && entry.version === record.version);
+        return (item?.contributions ?? []).filter((entry: JsonObject) => entry.slotId === cell).sort((left: JsonObject, right: JsonObject) => left.priority - right.priority).map((entry: JsonObject) => `${item.id}:${record.instance_id ?? item.id}:${entry.id}`);
+      })[0] ?? "";
+      if (slot.kind === "list") {
+        const configured = view.slots?.[cell];
+        const active = new Set(Array.isArray(configured) ? configured : configured ? [configured] : configured === undefined ? candidates.filter(candidate => selected.some((record: JsonObject) => candidate.identity.startsWith(`${record.id}:${record.instance_id ?? record.id}:`))).map(candidate => candidate.identity) : []);
+        const choices = candidates.map(candidate => `<label class="settings-check settings-inline-choice"><input type="checkbox" data-project-view-slot-list="${escapeAttr(cell)}" data-value="${escapeAttr(candidate.identity)}" data-package-identity="${escapeAttr(candidate.packageIdentity)}"${active.has(candidate.identity) ? " checked" : ""}><span>${escapeHtml(candidate.label)}</span></label>`).join("");
+        return `<tr><td><strong>${escapeHtml(label)}</strong><small>${escapeHtml(help)}</small></td><td>可多选</td><td><div class="settings-inline-choices">${choices || `<span class="muted">暂无扩展内容</span>`}</div></td></tr>`;
+      }
+      const options: Array<[string, string]> = [["", "使用系统默认"], ...candidates.map(candidate => [candidate.identity, candidate.label] as [string, string])];
+      const configured = view.slots?.[cell];
+      const current = Object.prototype.hasOwnProperty.call(view.slots ?? {}, cell) ? (typeof configured === "string" ? configured : "") : legacy;
+      return `<tr><td><strong>${escapeHtml(label)}</strong><small>${escapeHtml(help)}</small></td><td>单选</td><td>${selectField(`project_view.slot.${cell}`, `选择${label}使用的内容`, current, options)}</td></tr>`;
     }).join("");
-    const cards = installed.map((item: JsonObject) => {
+    const styleChoices = installed.flatMap((item: JsonObject) => {
       const record = selected.find((entry: JsonObject) => entry.id === item.id && entry.version === item.version);
-      const identity = `${item.id}@${item.version}`;
-      const instanceDiagnostic = diagnostics.find((entry: JsonObject) => entry.packageId === item.id && entry.version === item.version && entry.instanceId);
-      return `<article class="settings-provider settings-view-package"><div class="settings-section-head"><div><strong>${escapeHtml(identity)}</strong><p class="settings-section-subtitle">${escapeHtml(item.source?.homepage ?? item.path)}</p></div><label class="settings-check"><input type="checkbox" data-project-view-package="${escapeAttr(identity)}"${record?.enabled ? " checked" : ""}><span>${escapeHtml(this.t("settings.enabled", "启用"))}</span></label></div>
-        <div>${pill(instanceDiagnostic?.state ?? (record?.enabled ? "configured" : "disabled"), instanceDiagnostic?.state === "resolved" ? "done" : instanceDiagnostic?.state ? "warn" : "")}</div>
-        ${instanceDiagnostic?.message ? `<div class="settings-error">${escapeHtml(instanceDiagnostic.message)}</div>` : ""}
-        <div class="settings-permissions">${(item.capabilities ?? []).map((capability: string) => `<label class="settings-check"><input type="checkbox" data-project-view-capability="${escapeAttr(capability)}" data-package-identity="${escapeAttr(identity)}"${(record?.allow ?? []).includes(capability) ? " checked" : ""}${record ? "" : " disabled"}><span>${escapeHtml(capability)}</span></label>`).join("")}</div>
-        ${(item.contributions ?? []).map((entry: JsonObject) => `<div class="settings-provider-preview mono">${escapeHtml(`${entry.cell} · priority ${entry.priority} · ${entry.id}`)}</div>`).join("")}</article>`;
+      const instanceId = record?.instance_id ?? item.id;
+      return (item.styles ?? []).map((style: JsonObject) => {
+        const identity = `${item.id}:${instanceId}:${style.id}`;
+        return `<tr><td><label class="settings-check"><input type="checkbox" data-project-view-style="${escapeAttr(identity)}" data-package-identity="${escapeAttr(`${item.id}@${item.version}`)}"${view.styles?.[identity] ? " checked" : ""}><span><strong>${escapeHtml(`${item.id} · ${style.id}`)}</strong></span></label></td><td>${escapeHtml(style.scope === "global" ? "整个界面" : "扩展内容")}</td><td>${view.styles?.[identity] ? "已使用" : "未使用"}</td></tr>`;
+      });
     }).join("");
-    return `<section class="settings-section"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.currentProjectAppearance", "当前 Project 的界面"))}</h3><p class="settings-section-subtitle">${escapeHtml(this.t("settings.viewCompositionHelp", "选择当前 Project 使用的 Package、Theme 与 capability；未设置时继承全局默认。"))}</p></div></div><div class="settings-grid">${selectField("project_view.theme", this.t("settings.projectTheme", "当前 Project Theme"), scope.draft?.view?.theme?.selected_source ?? "", projectThemeOptions)}</div>${runtimeEvidence}${conflicts ? `<div class="settings-grid settings-view-conflicts">${conflicts}</div>` : ""}<div class="settings-providers">${cards || empty(this.t("settings.noInstalledPackages", "尚无可用 Package；请先在上方添加并保存，然后重启 View。"))}</div>${this.errorsHtml(scope)}</section>`;
-  }
-
-  packageSnapshotHtml(): string {
-    const snapshot = this.#viewPackages.composition;
-    if (!snapshot) return "";
-    const state = snapshot.restartPending ? this.t("settings.restartPending", "等待重启") : this.t("settings.applied", "已应用");
-    return `<div class="settings-provider-preview mono">${escapeHtml(`${state} · running ${shortRevision(snapshot.runningDigest)} · disk ${shortRevision(snapshot.diskDigest)}`)}</div>`;
+    return `<section class="settings-section"><div class="settings-section-head"><div><h3>界面配置</h3><p class="settings-section-subtitle">为每个界面位置选择系统默认内容，或选用任意已安装扩展包提供的页面、组件和样式。</p></div></div><div class="settings-table-wrap"><table class="settings-config-table"><thead><tr><th>界面位置</th><th>类型</th><th>使用内容</th></tr></thead><tbody>${slotFields}</tbody></table></div><h4>附加样式</h4>${styleChoices ? `<div class="settings-table-wrap"><table class="settings-config-table"><thead><tr><th>样式</th><th>作用范围</th><th>状态</th></tr></thead><tbody>${styleChoices}</tbody></table></div>` : `<span class="muted">已安装的扩展包没有提供可选样式。</span>`}${this.errorsHtml(scope)}</section>`;
   }
 
   participantsHtml(scope: ScopeState): string {
@@ -588,10 +589,10 @@ class SettingsApplication {
     root.querySelectorAll<HTMLButtonElement>("[data-reset-provider]").forEach(button => button.addEventListener("click", () => this.resetProvider(button.dataset.resetProvider!), { signal: this.#signal }));
     root.querySelector<HTMLInputElement>("#settings-package-path")?.addEventListener("input", event => { this.#packagePathDraft = (event.currentTarget as HTMLInputElement).value; }, { signal: this.#signal });
     root.querySelectorAll<HTMLButtonElement>("[data-remove-view-package]").forEach(button => button.addEventListener("click", () => this.removeViewPackage(Number(button.dataset.removeViewPackage)), { signal: this.#signal }));
+    root.querySelectorAll<HTMLButtonElement>("[data-apply-view-package]").forEach(button => button.addEventListener("click", () => this.applyViewPackage(button.dataset.applyViewPackage!), { signal: this.#signal }));
     root.querySelectorAll<HTMLInputElement>("[data-home-view-capability]").forEach(input => input.addEventListener("change", () => this.updateHomeViewCapability(input), { signal: this.#signal }));
-    root.querySelectorAll<HTMLInputElement>("[data-project-view-package]").forEach(input => input.addEventListener("change", () => this.toggleProjectViewPackage(input), { signal: this.#signal }));
-    root.querySelectorAll<HTMLInputElement>("[data-project-view-capability]").forEach(input => input.addEventListener("change", () => this.updateProjectViewCapability(input), { signal: this.#signal }));
-    root.querySelectorAll<HTMLSelectElement>("[data-view-preference]").forEach(select => select.addEventListener("change", () => this.updateViewPreference(select), { signal: this.#signal }));
+    root.querySelectorAll<HTMLInputElement>("[data-project-view-style]").forEach(input => input.addEventListener("change", () => this.updateProjectViewStyle(input), { signal: this.#signal }));
+    root.querySelectorAll<HTMLInputElement>("[data-project-view-slot-list]").forEach(input => input.addEventListener("change", () => this.updateProjectViewSlotList(input), { signal: this.#signal }));
   }
 
   private surfaceRoots(): readonly HTMLElement[] { return [this.#listRoot, this.#detailRoot].filter((root): root is HTMLElement => Boolean(root)).concat(this.#listRoot || this.#detailRoot ? [] : [this.#root]); }
@@ -613,12 +614,14 @@ class SettingsApplication {
       } else if (name === "reload") await this.load(this.#scope);
       else if (name === "reload-global") await this.load("global");
       else if (name === "reload-project") await this.load("project");
+      else if (name === "reload-appearance") { await this.load("global"); await this.load("project"); }
       else if (name === "validate") await this.validate();
       else if (name === "validate-global") await this.validateScope("global");
       else if (name === "validate-project") await this.validateScope("project");
       else if (name === "save") await this.save();
       else if (name === "save-global") await this.saveScope("global");
       else if (name === "save-project") await this.saveScope("project");
+      else if (name === "save-appearance") await this.saveAppearance();
       else if (name === "back") { this.state.confirmation = null; this.render(); }
       else if (name === "back-global") { this.#scopes.global.confirmation = null; this.render(); }
       else if (name === "back-project") { this.#scopes.project.confirmation = null; this.render(); }
@@ -651,11 +654,28 @@ class SettingsApplication {
     else if (path === "view_theme.selected_source") {
       draft.view_theme ??= { mode: "system" };
       setOptional(draft.view_theme, "selected_source", value);
+      if (value) {
+        const packageId = value.split(":")[0];
+        const item = (this.#viewPackages.installed ?? []).find((entry: JsonObject) => entry.id === packageId);
+        const record = (draft.view_packages?.installed ?? []).find((entry: JsonObject) => entry.path === item?.path);
+        if (item && record) record.allow = [...new Set([...(record.allow ?? []), ...(item.capabilities ?? []).filter((capability: string) => capability.startsWith("theme."))])];
+      }
     } else if (path === "project_view.theme") {
       const view = (draft.view ??= { packages: [] });
       view.theme ??= {};
       setOptional(view.theme, "selected_source", value);
       if (!Object.keys(view.theme).length) delete view.theme;
+      if (value) this.ensureProjectViewPackage(value.split(":")[0]!);
+    } else if (path === "project_view.mode") {
+      const view = (draft.view ??= { packages: [] });
+      view.theme ??= {};
+      setOptional(view.theme, "mode", value);
+      if (!Object.keys(view.theme).length) delete view.theme;
+    } else if (path.startsWith("project_view.slot.")) {
+      const cell = path.slice("project_view.slot.".length);
+      const view = (draft.view ??= { packages: [] });
+      (view.slots ??= {})[cell] = value || null;
+      if (value) this.ensureProjectViewPackage(value.split(":")[0]!);
     }
     else if (path === "view.default") {
       if ((field as HTMLInputElement).checked) delete draft.view;
@@ -688,6 +708,14 @@ class SettingsApplication {
     if (!current) return;
     const template = document.createElement("template");
     template.innerHTML = this.statusHtml(this.#scopes[scopeName], scopeName);
+    current.replaceWith(template.content.firstElementChild!);
+  }
+
+  refreshAppearanceStatus(): void {
+    const current = this.detailRoot().querySelector("#settings-status-appearance");
+    if (!current) return;
+    const template = document.createElement("template");
+    template.innerHTML = this.appearanceStatusHtml();
     current.replaceWith(template.content.firstElementChild!);
   }
 
@@ -781,7 +809,87 @@ class SettingsApplication {
   updateHomeViewCapability(input: HTMLInputElement): void {
     const record = this.#scopes.global.draft!.view_packages.installed[Number(input.dataset.packageIndex)];
     record.allow = toggleValue(record.allow ?? [], input.dataset.homeViewCapability!, input.checked);
-    this.refreshStatus("global");
+    this.refreshAppearanceStatus();
+  }
+
+  ensureProjectViewPackage(packageId: string, requestedCapabilities: string[] = []): JsonObject | undefined {
+    const item = (this.#viewPackages.installed ?? []).find((entry: JsonObject) => entry.id === packageId);
+    if (!item || !this.#scopes.project.draft) return undefined;
+    const packages = (this.#scopes.project.draft.view ??= { packages: [] }).packages as JsonObject[];
+    let record = packages.find(entry => entry.id === item.id && entry.version === item.version);
+    if (!record) {
+      record = { id: item.id, version: item.version, enabled: true, allow: [...requestedCapabilities] };
+      packages.push(record);
+    } else {
+      record.enabled = true;
+      record.allow = [...new Set([...(record.allow ?? []), ...requestedCapabilities])];
+    }
+    const globalRecord = (this.#scopes.global.draft?.view_packages?.installed ?? []).find((entry: JsonObject) => entry.path === item.path);
+    if (globalRecord) globalRecord.allow = [...new Set([...(globalRecord.allow ?? []), ...requestedCapabilities])];
+    return record;
+  }
+
+  applyViewPackage(identity: string): void {
+    const separator = identity.lastIndexOf("@");
+    const packageId = separator > 0 ? identity.slice(0, separator) : identity;
+    const version = separator > 0 ? identity.slice(separator + 1) : "";
+    const item = (this.#viewPackages.installed ?? []).find((entry: JsonObject) => entry.id === packageId && entry.version === version);
+    const project = this.#scopes.project;
+    if (!item || !project.draft) return;
+    const record = this.ensureProjectViewPackage(packageId, item.capabilities ?? [])!;
+    const view = project.draft.view;
+    const instanceId = record.instance_id ?? item.id;
+    if ((item.themes ?? []).length) {
+      (this.#scopes.global.draft!.view_theme ??= { mode: "system" }).selected_source = `${item.id}:${item.themes[0].id}`;
+    }
+    view.slots ??= {};
+    for (const contribution of item.contributions ?? []) {
+      const identity = `${item.id}:${instanceId}:${contribution.id}`;
+      const slot = (this.#viewPackages.configurableSlots ?? []).find((entry: JsonObject) => entry.id === contribution.slotId);
+      if (slot?.kind === "list") view.slots[contribution.slotId] = [...new Set([...(Array.isArray(view.slots[contribution.slotId]) ? view.slots[contribution.slotId] : []), identity])];
+      else view.slots[contribution.slotId ?? contribution.cell] = identity;
+    }
+    view.styles ??= {};
+    for (const style of item.styles ?? []) view.styles[`${item.id}:${instanceId}:${style.id}`] = true;
+    const globalRecord = (this.#scopes.global.draft?.view_packages?.installed ?? []).find((entry: JsonObject) => entry.path === item.path);
+    if (globalRecord) globalRecord.allow = [...new Set([...(globalRecord.allow ?? []), ...(item.capabilities ?? [])])];
+    project.notice = `已选用 ${item.id} 提供的全部界面内容；你仍可在下方逐项调整，完成后点击页面底部的保存。`;
+    this.render();
+  }
+
+  updateProjectViewStyle(input: HTMLInputElement): void {
+    const project = this.#scopes.project;
+    if (!project.draft) return;
+    const [packageId] = input.dataset.packageIdentity!.split("@");
+    const identity = input.dataset.projectViewStyle!;
+    const item = (this.#viewPackages.installed ?? []).find((entry: JsonObject) => entry.id === packageId);
+    const styleId = identity.slice(identity.lastIndexOf(":") + 1);
+    const style = (item?.styles ?? []).find((entry: JsonObject) => entry.id === styleId);
+    this.ensureProjectViewPackage(packageId!, [style?.scope === "global" ? "styles.global" : "styles.scoped"]);
+    const view = (project.draft.view ??= { packages: [] });
+    if (!view.styles) {
+      view.styles = {};
+      for (const item of this.#viewPackages.installed ?? []) {
+        const record = view.packages.find((entry: JsonObject) => entry.id === item.id && entry.version === item.version && entry.enabled);
+        if (!record) continue;
+        const instanceId = record.instance_id ?? item.id;
+        for (const style of item.styles ?? []) view.styles[`${item.id}:${instanceId}:${style.id}`] = true;
+      }
+    }
+    view.styles[input.dataset.projectViewStyle!] = input.checked;
+    this.render();
+  }
+
+  updateProjectViewSlotList(input: HTMLInputElement): void {
+    const project = this.#scopes.project;
+    if (!project.draft) return;
+    const [packageId] = input.dataset.packageIdentity!.split("@");
+    this.ensureProjectViewPackage(packageId!);
+    const view = (project.draft.view ??= { packages: [] });
+    const slotId = input.dataset.projectViewSlotList!;
+    const current = Array.isArray(view.slots?.[slotId]) ? view.slots[slotId] as string[] : [];
+    (view.slots ??= {})[slotId] = toggleValue(current, input.dataset.value!, input.checked);
+    this.render();
   }
 
   toggleProjectViewPackage(input: HTMLInputElement): void {
@@ -834,6 +942,24 @@ class SettingsApplication {
 
   async save(): Promise<void> {
     await this.saveScope(this.#scope);
+  }
+
+  async saveAppearance(): Promise<void> {
+    const availableScopes: ScopeName[] = ["global", ...(this.#scopes.project.data ? ["project" as const] : [])];
+    const scopeNames = availableScopes.filter(scopeName => {
+      const scope = this.#scopes[scopeName];
+      return JSON.stringify(scope.draft) !== JSON.stringify(scope.data?.config);
+    });
+    if (!scopeNames.length) {
+      this.#scopes.global.notice = this.t("settings.noChanges", "没有需要保存的修改。");
+      this.render();
+      return;
+    }
+    for (const scopeName of scopeNames) {
+      await this.validateScope(scopeName);
+      if (!this.#scopes[scopeName].confirmation) return;
+    }
+    for (const scopeName of scopeNames) await this.saveScope(scopeName);
   }
 
   async saveScope(scopeName: ScopeName): Promise<void> {
@@ -1028,7 +1154,6 @@ function empty(message: string): string { return `<div class="empty">${escapeHtm
 function pill(label: string, tone = "", extra = ""): string { return `<span class="pill ${escapeAttr(tone)} ${escapeAttr(extra)}">${escapeHtml(label)}</span>`; }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
 function safeId(value: string): string { return value.replace(/[^A-Za-z0-9_-]/g, "-"); }
-function shortRevision(value: unknown): string { return typeof value === "string" ? value.replace(/^sha256:/, "").slice(0, 8) : "unknown"; }
 function compact(value: unknown): string { const text = value === undefined ? "未设置" : typeof value === "string" ? value : JSON.stringify(value); return text.length > 90 ? `${text.slice(0, 87)}...` : text; }
 function viewUrl(view: JsonObject): string { return `http://${view?.host ?? "127.0.0.1"}:${Number(view?.port ?? 0)}`; }
 function setOptional(target: JsonObject, key: string, value: string): void { if (value.trim()) target[key] = value; else delete target[key]; }
@@ -1037,6 +1162,36 @@ function toggleValue(values: string[], value: string, enabled: boolean): string[
   const next = values.filter(candidate => candidate !== value);
   if (enabled) next.push(value);
   return next.sort();
+}
+function capabilityLabel(capability: string): string {
+  return ({
+    "theme.register": "提供完整主题",
+    "theme.override": "调整主题颜色",
+    "styles.scoped": "为扩展内容添加样式",
+    "styles.global": "修改整个界面的样式"
+  } as Record<string, string>)[capability] ?? capability;
+}
+function viewSlotLabel(slotId: string): [string, string] {
+  return ({
+    "navigation.primary@1": ["主导航", "左侧一级导航入口"],
+    "navigation.secondary@1": ["次级导航", "当前模块的二级导航"],
+    "content.list@1": ["内容列表", "页面左侧或列表区域"],
+    "search.providers@1": ["全局搜索来源", "加入全局搜索的数据来源"],
+    "header.title@1": ["页面标题", "标题、说明和面包屑"],
+    "header.actions@1": ["页面操作", "标题栏右侧的操作按钮"],
+    "side.panel@1": ["侧边面板", "页面辅助信息面板"],
+    "header.account@1": ["账户区域", "顶部账户与身份区域"],
+    "sidebar.footer@1": ["侧栏底部", "侧栏底部状态与入口"],
+    "home.attention@1": ["首页待处理", "首页需要关注的事项"],
+    "home.continue@1": ["首页继续处理", "首页可继续的工作"],
+    "home.modules@1": ["首页模块", "首页模块入口"],
+    "main.view@1": ["主内容区域", "路由对应的主要页面内容"],
+    "overlay@1": ["浮层", "对话框与抽屉内容"],
+    "org.memsphere.memory.page.presentation@1:page": ["记忆页面", "整个记忆模块页面"],
+    "org.memsphere.memory.detail.renderer@1:detail": ["记忆详情正文", "单条记忆的内容区域"],
+    "org.memsphere.run.page.presentation@1:page": ["运行页面", "整个运行模块页面"],
+    "org.memsphere.run.artifact.renderer@1:artifact": ["运行产物正文", "运行产物的内容区域"]
+  } as Record<string, [string, string]>)[slotId] ?? [slotId, "扩展包提供的界面位置"];
 }
 function shellArgument(value: unknown): string { const text = String(value); return /^[A-Za-z0-9_./:=+-]+$/.test(text) ? text : `'${text.replace(/'/g, `'\\''`)}'`; }
 function isPluralMessage(value: unknown): value is { one: string; other: string } { return Boolean(value && typeof value === "object" && typeof (value as JsonObject).one === "string" && typeof (value as JsonObject).other === "string"); }
@@ -1049,11 +1204,11 @@ const styles = `
   .memsphere-settings * { box-sizing:border-box } .settings-sidebar{padding:24px 16px;border-right:1px solid var(--line);background:#fafbf8}.settings-content{min-width:0;padding:22px 28px 48px}.settings-page-header h2{margin:0;font-size:24px}.settings-page-header p{margin:5px 0 22px;color:var(--muted)}
   .settings-list-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:19px 10px 10px}.settings-list-header small{display:block;margin-bottom:4px;color:#82908d;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.settings-list-header h2{margin:0;font-size:18px;line-height:1.3;letter-spacing:-.02em}.settings-list-header button{display:grid;width:32px;height:32px;place-items:center;border:0;border-radius:8px;background:transparent;cursor:pointer}.settings-list-header button:hover{background:#f0f4f2}.settings-list-header button img{width:17px;height:17px;opacity:.7}.settings-local-search{display:flex;height:36px;align-items:center;gap:7px;margin:0 6px 10px;border:1px solid #dce4e1;border-radius:9px;background:#f8faf9;padding:0 10px;color:#7a8784}.settings-local-search:focus-within{border-color:#8cb7b1;box-shadow:0 0 0 3px rgba(40,118,110,.08)}.settings-local-search img{width:16px;height:16px;opacity:.55}.settings-local-search input{width:100%;min-width:0;border:0;outline:0;background:transparent;font-size:12px;color:#2f3937}.settings-record-list{display:grid;gap:2px}.settings-record{display:grid;min-height:66px;grid-template-columns:34px minmax(0,1fr) 14px;align-items:start;gap:9px;border-radius:10px;padding:10px 9px}.settings-record:hover{background:#f2f6f5}.settings-record.active{background:#e1efed}.settings-record-icon{display:grid;width:34px;height:34px;place-items:center;border-radius:10px;background:#eef4f2}.settings-record.active .settings-record-icon{background:#fff}.settings-record-icon img{width:18px;height:18px;opacity:.72}.settings-record strong,.settings-record small,.settings-record p{display:block;overflow:hidden;margin:0;text-overflow:ellipsis;white-space:nowrap}.settings-record strong{font-size:13px;line-height:1.35}.settings-record small{margin-top:3px;color:#87928f;font-size:10px}.settings-record p{margin-top:5px;color:#697572;font-size:11px}.settings-record-caret{width:14px;height:14px;margin-top:8px;opacity:.55;transform:rotate(-90deg)}.settings-list-footer{margin-top:auto;border-top:1px solid #eef1f0;padding:10px 9px;color:#8a9592;font-size:10px}
   .settings-nav-group{overflow:hidden;margin-bottom:12px;border:1px solid var(--line);border-radius:7px;background:var(--surface)}.settings-nav-group.active{border-color:#b8cbc7}.settings-nav-heading{padding:9px 10px;background:var(--soft);color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase}.settings-nav-items{display:grid;gap:2px;padding:4px}.settings-nav-item{border:0;border-radius:4px;background:transparent;padding:8px 9px;text-align:left;font-weight:600;color:var(--text);cursor:pointer}.settings-nav-item:hover{background:var(--soft)}.settings-nav-item.active{background:var(--accent-soft);color:#173f3c}
-  .settings-layout{display:grid;gap:14px;max-width:1120px}.settings-section{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 2px rgba(20,47,42,.025);padding:21px 22px}.settings-section h3{margin:0 0 14px;font-size:17px}.settings-section h4{margin:18px 0 8px;font-size:14px}.settings-section-head{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px}.settings-section-head h3{margin:0}.settings-section-subtitle{margin:4px 0 0;color:var(--muted);font-size:12px}
+  .settings-layout{display:grid;min-width:0;gap:14px;max-width:1120px}.settings-section{min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 2px rgba(20,47,42,.025);padding:21px 22px}.settings-section h3{margin:0 0 14px;font-size:17px}.settings-section h4{margin:18px 0 8px;font-size:14px}.settings-section-head{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px}.settings-section-head h3{margin:0}.settings-section-subtitle{margin:4px 0 0;color:var(--muted);font-size:12px}
   .settings-appearance-intro{background:linear-gradient(135deg,#f7fbfa,#eef5f2)}.settings-appearance-scope{display:grid;gap:12px}.settings-scope-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 4px}.settings-scope-heading strong{font-size:15px}.settings-scope-heading span{color:var(--muted);font-size:12px}.settings-appearance-scope>.settings-section{margin:0}
   .settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 16px}.settings-compact-grid{grid-template-columns:repeat(auto-fit,minmax(240px,360px));justify-content:start}.settings-participant-basic{grid-template-columns:repeat(3,minmax(0,1fr))}.settings-field{display:grid;gap:6px;min-width:0}.settings-field.wide{grid-column:1/-1}.settings-field>label,.settings-label{color:#4f5a5c;font-size:12px;font-weight:700}.settings-input,.settings-select,.settings-field textarea{width:100%;min-width:0;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text);padding:8px 10px;outline:none}.settings-field textarea{min-height:92px;resize:vertical}.settings-input:focus,.settings-select:focus,.settings-field textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(40,108,103,.12)}.settings-input:disabled{border-style:dashed;background:var(--soft);color:var(--muted)}.settings-select-wrap{position:relative;min-width:0}.settings-select-trigger{display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;cursor:pointer}.settings-select-caret{color:var(--muted)}.settings-select-menu{position:absolute;top:calc(100% + 4px);right:0;left:0;z-index:40;display:grid;gap:2px;max-height:240px;overflow-y:auto;padding:4px;border:1px solid var(--line);border-radius:6px;background:var(--surface);box-shadow:0 10px 28px rgba(25,30,35,.16)}.settings-select-menu[hidden]{display:none}.settings-select-option{width:100%;border:0;border-radius:4px;background:transparent;color:var(--text);padding:7px 8px;text-align:left;cursor:pointer}.settings-select-option:hover,.settings-select-option:focus-visible{outline:0;background:var(--soft)}.settings-select-option[aria-selected="true"]{background:var(--accent-soft);color:#173f3c}
   .settings-status{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.pill{display:inline-flex;border:1px solid var(--line);border-radius:999px;background:#fff;padding:2px 8px;color:var(--muted);font-size:12px}.pill.done{border-color:#b9d6c7;background:#edf7f1;color:#226044}.pill.warn{border-color:#e2c99c;background:#fff8e8;color:#7a5714}.pill.strong{font-weight:700}.settings-actions,.settings-participant-actions{display:flex;gap:8px;justify-content:flex-end}.btn{border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text);padding:8px 12px;cursor:pointer}.btn:hover{background:var(--soft)}.btn.primary{border-color:var(--accent);background:var(--accent);color:#fff}.btn.danger{color:var(--danger)}.btn:disabled{cursor:not-allowed;opacity:.5}
-  .settings-check{display:flex;gap:8px;align-items:flex-start}.settings-check input{width:16px;height:16px;margin-top:2px;accent-color:var(--accent)}.settings-default-toggle{margin-top:14px}.settings-token-management{margin-top:28px;padding-top:24px;border-top:1px solid var(--line)}.settings-token-management h4{margin:0 0 6px;font-size:16px}.settings-token-editor{display:flex;align-items:end;gap:12px;margin-top:18px}.settings-token-editor .settings-field{flex:1;margin:0}.settings-token-buttons{display:flex;gap:8px;padding-bottom:1px;white-space:nowrap}.settings-help,.settings-error{font-size:12px;overflow-wrap:anywhere}.settings-help{color:var(--muted)}.settings-error{color:var(--danger)}.settings-notice{border-left:3px solid var(--accent);padding:10px 12px;background:var(--accent-soft)}.settings-token{max-width:520px}.settings-token .btn{margin-top:14px}.empty{padding:30px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center}
+  .settings-check{display:flex;gap:8px;align-items:flex-start}.settings-check input{width:16px;height:16px;margin-top:2px;accent-color:var(--accent)}.settings-default-toggle{margin-top:14px}.settings-token-management{margin-top:28px;padding-top:24px;border-top:1px solid var(--line)}.settings-token-management h4{margin:0 0 6px;font-size:16px}.settings-token-editor{display:flex;align-items:end;gap:12px;margin-top:18px}.settings-token-editor .settings-field{flex:1;margin:0}.settings-token-buttons{display:flex;gap:8px;padding-bottom:1px;white-space:nowrap}.settings-help,.settings-error{font-size:12px;overflow-wrap:anywhere}.settings-help{color:var(--muted)}.settings-error{color:var(--danger)}.settings-notice{border-left:3px solid var(--accent);padding:10px 12px;background:var(--accent-soft)}.settings-token{max-width:520px}.settings-token .btn{margin-top:14px}.empty{padding:30px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center}.settings-package-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0;color:var(--muted)}.settings-package-permissions{margin-top:10px}.settings-package-permissions summary{cursor:pointer;font-weight:600}.settings-package-permissions .settings-help{margin:6px 0 10px}.settings-table-wrap{width:100%;min-width:0;overflow-x:auto;border:1px solid var(--line);border-radius:8px}.settings-config-table{width:100%;border-collapse:collapse;min-width:620px}.settings-config-table th,.settings-config-table td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}.settings-config-table th{background:var(--soft);color:var(--muted);font-size:12px;font-weight:600}.settings-config-table tbody tr:last-child td{border-bottom:0}.settings-config-table td:first-child{width:28%}.settings-config-table td:first-child small{display:block;margin-top:3px;color:var(--muted);font-weight:400}.settings-config-table td:nth-child(2){width:18%;color:var(--muted)}.settings-config-table .settings-field{margin:0}.settings-config-table .settings-label{display:none}.settings-inline-choices{display:flex;flex-wrap:wrap;gap:8px 16px}.settings-inline-choice{white-space:nowrap}
   .settings-participants,.settings-providers{border-top:1px solid var(--line)}.settings-participant{border-bottom:1px solid var(--line)}.settings-participant>summary{list-style:none}.settings-participant>summary::-webkit-details-marker{display:none}.settings-participant-summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;min-height:58px;padding:10px 4px;cursor:pointer}.settings-participant-summary:hover{background:#f7f8f5}.settings-participant-summary-meta{margin-top:5px;color:var(--muted);font-size:12px;overflow-wrap:anywhere}.settings-participant-body{padding:2px 4px 18px}.settings-permissions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px}.settings-permission{border-left:2px solid var(--line);padding-left:9px}.settings-permission p{margin:3px 0 0 24px;color:var(--muted);font-size:12px}.settings-provider-preview{margin:12px 0 0;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:#f3f5f0;overflow-wrap:anywhere}.settings-change-list{display:grid;gap:8px;padding:0;list-style:none}.settings-change-list li{border-left:3px solid var(--accent);padding:7px 10px;background:#f3f5f0}.settings-code{max-height:440px;overflow:auto;white-space:pre;background:#f3f5f0;border:1px solid var(--line);border-radius:6px;padding:12px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.muted{color:var(--muted)}
   @media(max-width:760px){.memsphere-settings{grid-template-columns:1fr}.settings-sidebar{border-right:0;border-bottom:1px solid var(--line)}.settings-content{padding:18px 16px 36px}.settings-grid,.settings-compact-grid,.settings-participant-basic,.settings-permissions{grid-template-columns:minmax(0,1fr)}.settings-section{padding:14px}.settings-section-head{align-items:flex-start}.settings-scope-heading{align-items:flex-start;flex-direction:column;gap:2px}.settings-token-editor,.settings-token-buttons{align-items:stretch;flex-direction:column}.settings-token-buttons .btn{width:100%}}
 `;

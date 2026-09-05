@@ -79,6 +79,57 @@ test("global style capability requires both Home and Project grants", async () =
   }
 });
 
+test("Project can select one Package contribution while independently filtering styles", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-view-selection-"));
+  try {
+    const first = await makePackage(root, "first", "org.example.first", "first", true);
+    const second = await makePackage(root, "second", "org.example.second", "second", true);
+    for (const [packageRoot, id] of [[first, "first"], [second, "second"]] as const) {
+      const manifest = JSON.parse(await import("node:fs/promises").then(fs => fs.readFile(join(packageRoot, "module.json"), "utf8")));
+      manifest.view.contributions.push({ id: `nav-${id}`, cell: `navigation.primary@1:nav-${id}`, priority: 100 });
+      await writeFile(join(packageRoot, "module.json"), JSON.stringify(manifest));
+    }
+    const cell = "org.memsphere.memory.page.presentation@1:page";
+    const composition = await resolveViewPackageComposition({
+      global: { installed: [{ path: first, allow: ["styles.global"] }, { path: second, allow: ["styles.global"] }] },
+      project: {
+        packages: [
+          { id: "org.example.first", version: "1.0.0", enabled: true, allow: ["styles.global"] },
+          { id: "org.example.second", version: "1.0.0", enabled: true, allow: ["styles.global"] }
+        ],
+        slots: { [cell]: "org.example.second:org.example.second:second" },
+        styles: {
+          "org.example.first:org.example.first:global": false,
+          "org.example.second:org.example.second:global": true
+        }
+      },
+      sdkVersion: "1.0.0"
+    });
+    assert.deepEqual(composition.instances.map(instance => instance.contributionPolicy.blockedCells), [[], []]);
+    assert.deepEqual(composition.instances[1]!.contributionPolicy.registrations[0]!.priority, [100, 0]);
+    assert.deepEqual(composition.instances[0]!.contributionPolicy.registrations[0]!.priority, [1001, 0]);
+    assert.equal(composition.instances[1]!.contributionPolicy.registrations[0]!.enabled, true);
+    assert.equal(composition.instances[0]!.contributionPolicy.registrations[0]!.enabled, false);
+    assert.deepEqual([...composition.instances[0]!.allowedStyleIds], []);
+    assert.deepEqual([...composition.instances[1]!.allowedStyleIds], ["global"]);
+    const listComposition = await resolveViewPackageComposition({
+      global: { installed: [{ path: first }, { path: second }] },
+      project: {
+        packages: [
+          { id: "org.example.first", version: "1.0.0", enabled: true },
+          { id: "org.example.second", version: "1.0.0", enabled: true }
+        ],
+        slots: { "navigation.primary@1": ["org.example.first:org.example.first:nav-first"] }
+      },
+      sdkVersion: "1.0.0"
+    });
+    assert.equal(listComposition.instances[0]!.contributionPolicy.registrations.find(entry => entry.id === "nav-first")?.enabled, true);
+    assert.equal(listComposition.instances[1]!.contributionPolicy.registrations.find(entry => entry.id === "nav-second")?.enabled, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("asset registry isolates Projects, rejects unsafe types and invalidates changed bytes", async () => {
   const root = await mkdtemp(join(tmpdir(), "memsphere-view-assets-"));
   try {

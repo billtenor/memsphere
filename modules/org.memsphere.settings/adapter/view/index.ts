@@ -37,7 +37,7 @@ export default defineViewPlugin<SettingsViewConfig>({
         value: {
           title: { text: settingsSectionLabel(config, selected) },
           subtitle: { text: selected === "appearance"
-            ? text(config, "settings.appearanceHelp", "在一个页面中安装界面 Package，并设置全局默认与当前 Project 的展示方式。")
+            ? text(config, "settings.appearanceHelp", "安装和管理界面扩展包，并配置全局主题及当前 Project 的页面、组件和样式。")
             : ["project", "participants"].includes(selected)
             ? text(config, "navigation.projectSettingsSubtitle", "管理当前项目配置。")
             : text(config, "navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。") }
@@ -70,7 +70,7 @@ export default defineViewPlugin<SettingsViewConfig>({
       value: {
         title: { text: settingsSectionLabel(config, initialSection) },
         subtitle: { text: initialSection === "appearance"
-          ? text(config, "settings.appearanceHelp", "在一个页面中安装界面 Package，并设置全局默认与当前 Project 的展示方式。")
+          ? text(config, "settings.appearanceHelp", "安装和管理界面扩展包，并配置全局主题及当前 Project 的页面、组件和样式。")
           : ["project", "participants"].includes(initialSection)
           ? text(config, "navigation.projectSettingsSubtitle", "管理当前项目配置。")
           : text(config, "navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。") }

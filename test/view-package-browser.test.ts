@@ -25,13 +25,12 @@ test("trusted local Package replaces Memory and Run through formal composition a
   await writeFile(join(home, "config.json"), JSON.stringify({
     view: { host: "127.0.0.1", port: 0 },
     view_packages: { installed: [{ path: packageRoot, allow: grants }] },
-    view_theme: { mode: "dark" }
+    view_theme: { mode: "dark", selected_source: "org.example.memsphere.custom-view:sea-glass" }
   }));
   await writeFile(join(projectRoot, "config.json"), JSON.stringify({
     store: { type: "managed", branch: "master", published_revision: "test" },
     view: {
       packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true, allow: grants }],
-      theme: { selected_source: "org.example.memsphere.custom-view:sea-glass" }
     }
   }));
   await writeFile(join(home, "registry.json"), JSON.stringify({
@@ -45,12 +44,11 @@ test("trusted local Package replaces Memory and Run through formal composition a
     debug: { agentReview: false, root: join(home, ".runtime", "debug") },
     view: { host: "127.0.0.1", port: 0 },
     viewPackages: { installed: [{ path: packageRoot, allow: [...grants] }] },
-    viewTheme: { mode: "dark" },
+    viewTheme: { mode: "dark", selected_source: "org.example.memsphere.custom-view:sea-glass" },
     project: {
       name: "demo", store: { type: "managed", branch: "master", published_revision: "test" }, mounted: [],
       view: {
-        packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true, allow: [...grants] }],
-        theme: { selected_source: "org.example.memsphere.custom-view:sea-glass" }
+        packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true, allow: [...grants] }]
       }
     }
   };
@@ -83,10 +81,11 @@ test("trusted local Package replaces Memory and Run through formal composition a
 
     await page.goto(`${origin}/projects/demo/settings/appearance`);
     await page.getByText("org.example.memsphere.custom-view@1.0.0", { exact: true }).first().waitFor();
-    await page.getByText("当前运行诊断", { exact: true }).waitFor();
     assert.equal(await page.getByText("Appearance & Themes", { exact: true }).count() > 0, true);
     assert.equal(await page.getByText("界面 Package", { exact: true }).count(), 0);
     assert.equal(await page.getByText("界面组合", { exact: true }).count(), 0);
+    assert.equal(await page.getByText("当前运行诊断", { exact: true }).count(), 0);
+    assert.equal(await page.getByText(/running [0-9a-f]+ · disk [0-9a-f]+/).count(), 0);
 
     const disabledConfig = structuredClone(config) as MemsphereConfig;
     (disabledConfig.project!.view!.packages[0] as { enabled: boolean }).enabled = false;
@@ -98,8 +97,13 @@ test("trusted local Package replaces Memory and Run through formal composition a
     const disabledOrigin = `http://127.0.0.1:${(disabledServer.address() as AddressInfo).port}`;
     await page.goto(`${disabledOrigin}/projects/demo/memories`);
     await page.locator(".memory-detail-surface").waitFor();
+    const disabledBoot = await page.locator("#memsphere-view-boot").textContent().then(text => JSON.parse(text ?? "{}"));
+    assert.equal(disabledBoot.instances.some((instance: { themes?: Array<{ selected?: boolean }> }) => instance.themes?.some(theme => theme.selected)), true);
+    const disabledDiagnostics = await page.evaluate(() => (window as Window & { __memsphereViewDiagnostics(): { instances: Array<{ module: { moduleId: string }; status: string; message?: string }> } }).__memsphereViewDiagnostics());
+    assert.deepEqual(disabledDiagnostics.instances.filter(instance => instance.module.moduleId === "org.example.memsphere.custom-view").map(instance => ({ status: instance.status, message: instance.message })), [{ status: "active", message: undefined }]);
     assert.equal(await page.locator("[data-custom-showcase]").count(), 0);
     assert.equal(await page.locator('style[data-view-package-scope]').count(), 0);
+    assert.equal(await page.locator("[data-view-shell]").evaluate(node => getComputedStyle(node).getPropertyValue("--mem-view-color-accent").trim()), "#71d2c6");
   } finally {
     await browser.close();
     await new Promise<void>(resolveClose => server.close(() => resolveClose()));
@@ -128,18 +132,16 @@ test("Settings completes the local Package installation and Project enablement f
     return { server, origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
   };
   const stop = (server: ReturnType<typeof createViewServer>) => new Promise<void>(resolveClose => server.close(() => resolveClose()));
-  const save = async (scope: "global" | "project") => {
-    await page.locator(`.settings-detail-surface [data-action="validate-${scope}"]`).click();
-    await page.locator(`.settings-detail-surface [data-action="save-${scope}"]`).waitFor();
-    await page.locator(`.settings-detail-surface [data-action="save-${scope}"]`).click();
-    await page.locator(`.settings-detail-surface [data-action="validate-${scope}"]`).waitFor();
+  const save = async (_scope: "global" | "project") => {
+    await page.locator('.settings-detail-surface [data-action="save-appearance"]').click();
+    await page.waitForFunction(() => !document.querySelector("#settings-status-appearance")?.textContent?.includes("未保存"));
   };
   let active: Awaited<ReturnType<typeof launch>> | undefined;
   try {
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/settings/appearance`);
-    await page.getByText("默认用于所有 Project", { exact: true }).waitFor();
-    await page.getByText("当前 Project · demo", { exact: true }).waitFor();
+    await page.getByText("界面扩展包管理", { exact: true }).waitFor();
+    await page.getByText("界面配置 · demo", { exact: true }).waitFor();
     await page.locator("#settings-package-path").fill(packageRoot);
     await page.locator('[data-action="add-view-package"]').click();
     await save("global");
@@ -158,6 +160,7 @@ test("Settings completes the local Package installation and Project enablement f
     await page.goto(`${active.origin}/projects/demo/settings/packages`);
     await page.getByText("界面与主题", { exact: true }).first().waitFor();
     await page.getByText("org.example.memsphere.custom-view@1.0.0", { exact: true }).first().waitFor();
+    await page.getByText("使用权限", { exact: true }).click();
     for (const capability of ["theme.override", "styles.scoped", "styles.global"]) {
       await page.locator(`[data-home-view-capability="${capability}"]`).check();
     }
@@ -175,14 +178,21 @@ test("Settings completes the local Package installation and Project enablement f
 
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/settings/composition`);
-    await page.getByText("全局默认与 Package 安装", { exact: true }).waitFor();
-    await page.getByText("当前 Project 的界面", { exact: true }).waitFor();
-    await page.locator('[data-project-view-package="org.example.memsphere.custom-view@1.0.0"]').check();
-    for (const capability of ["theme.override", "styles.scoped", "styles.global"]) {
-      await page.locator(`[data-project-view-capability="${capability}"]`).check();
-    }
-    await page.locator('[data-select-field="project_view.theme"]').click();
-    await page.locator('[data-select-option="project_view.theme"][data-value="org.example.memsphere.custom-view:sea-glass"]').click();
+    await page.getByText("界面扩展包安装", { exact: true }).waitFor();
+    await page.getByText("主题配置", { exact: true }).waitFor();
+    await page.getByText("界面配置", { exact: true }).waitFor();
+    assert.equal(await page.locator(".settings-config-table").first().locator("tbody tr").count(), 16);
+    assert.equal(await page.getByRole("button", { name: "保存", exact: true }).count(), 1);
+    assert.equal(await page.locator('[data-select-field="project_view.theme"]').count(), 0);
+    assert.equal(await page.getByText(/^[123]\. /).count(), 0);
+    assert.equal(await page.locator("[data-project-view-package]").count(), 0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.body.scrollWidth), await page.evaluate(() => document.documentElement.clientWidth));
+    const tableWidths = await page.locator(".settings-table-wrap").first().evaluate(node => ({ client: node.clientWidth, scroll: node.scrollWidth }));
+    assert.equal(tableWidths.client < tableWidths.scroll, true);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.locator('[data-apply-view-package="org.example.memsphere.custom-view@1.0.0"]').click();
+    await page.getByText(/已选用 org\.example\.memsphere\.custom-view/).waitFor();
     await save("project");
     await page.getByText(/重启/).first().waitFor();
     await page.getByText("界面组合已保存，当前服务仍使用启动快照；请执行 memsphere view restart 后生效。", { exact: true }).waitFor();
@@ -196,7 +206,9 @@ test("Settings completes the local Package installation and Project enablement f
     const project = JSON.parse(await readFile(join(projectRoot, "config.json"), "utf8"));
     assert.equal(project.view.packages[0].enabled, true);
     assert.deepEqual(new Set(project.view.packages[0].allow), new Set(["theme.override", "styles.scoped", "styles.global"]));
-    assert.deepEqual(project.view.theme, { selected_source: "org.example.memsphere.custom-view:sea-glass" });
+    assert.equal(project.view.theme, undefined);
+    assert.equal(Object.keys(project.view.slots).length, 4);
+    assert.equal(Object.values(project.view.styles).filter(Boolean).length, 2);
 
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/memories`);

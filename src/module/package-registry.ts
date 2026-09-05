@@ -14,6 +14,7 @@ import type {
   ProjectViewConfig,
   ViewPackageCapability
 } from "../view/package-config.js";
+import { configurableViewSlotIdForCell } from "../view/package-config.js";
 
 export const OFFICIAL_VIEW_CANDIDATE_PRIORITY = 1000;
 
@@ -48,11 +49,13 @@ export interface ResolvedViewPackageInstance {
   readonly instanceId: string;
   readonly config: Readonly<Record<string, unknown>>;
   readonly allow: ReadonlySet<ViewPackageCapability>;
+  readonly allowedStyleIds: ReadonlySet<string>;
   readonly contributionPolicy: {
     readonly registrations: readonly {
       readonly cell: string;
       readonly id: string;
       readonly priority: readonly [number, number];
+      readonly enabled?: boolean;
     }[];
     readonly blockedCells: readonly string[];
   };
@@ -89,6 +92,7 @@ const assetMime = new Map<string, string>([
 
 export async function resolveViewPackageComposition(input: {
   readonly global?: GlobalViewPackagesConfig;
+  readonly globalThemeSource?: string;
   readonly project?: ProjectViewConfig;
   readonly sdkVersion: string;
 }): Promise<ResolvedViewPackageComposition> {
@@ -135,10 +139,29 @@ export async function resolveViewPackageComposition(input: {
     }
   }
 
-  const selected = (input.project?.packages ?? []).map((config) => ({
+  const selected: Array<{
+    config: NonNullable<typeof input.project>["packages"][number];
+    package: InstalledViewPackage | undefined;
+    themeOnly: boolean;
+  }> = (input.project?.packages ?? []).map((config) => ({
     config,
-    package: identities.get(`${config.id}@${config.version}`)
+    package: identities.get(`${config.id}@${config.version}`),
+    themeOnly: false
   }));
+  const globalThemePackageId = input.globalThemeSource?.split(":")[0];
+  const globalThemePackage = installed.find(entry => entry.manifest.id === globalThemePackageId);
+  if (globalThemePackage && !selected.some(item => item.config.enabled && item.config.id === globalThemePackage.manifest.id && item.config.version === globalThemePackage.manifest.version)) {
+    selected.push({
+      config: {
+        id: globalThemePackage.manifest.id,
+        version: globalThemePackage.manifest.version,
+        enabled: true,
+        allow: [...globalThemePackage.homeAllow]
+      },
+      package: globalThemePackage,
+      themeOnly: true
+    });
+  }
   const selectedIdentities = new Map(selected.filter(item => item.package).map(item => [
     item.package!.manifest.id,
     item.package!.manifest.version
@@ -148,6 +171,7 @@ export async function resolveViewPackageComposition(input: {
     package: InstalledViewPackage;
     instanceId: string;
     blockedCells: Set<string>;
+    themeOnly: boolean;
   }> = [];
 
   for (const item of selected) {
@@ -180,11 +204,12 @@ export async function resolveViewPackageComposition(input: {
       });
       continue;
     }
-    candidates.push({ config: item.config, package: item.package, instanceId, blockedCells: new Set() });
+    candidates.push({ config: item.config, package: item.package, instanceId, blockedCells: new Set(), themeOnly: item.themeOnly });
   }
 
   const contributionGroups = new Map<string, Array<{ candidate: typeof candidates[number]; id: string }>>();
   for (const candidate of candidates) {
+    if (candidate.themeOnly) continue;
     for (const contribution of candidate.package.manifest.view.contributions ?? []) {
       const key = `${contribution.cell}\0${contribution.priority}`;
       const group = contributionGroups.get(key) ?? [];
@@ -216,12 +241,51 @@ export async function resolveViewPackageComposition(input: {
     ordered.forEach((item, rank) => ranks.set(item.id, [declared, rank]));
   }
 
+  for (const [slotId, configured] of Object.entries(input.project?.slots ?? {})) {
+    const selectedIds = new Set(Array.isArray(configured) ? configured : configured ? [configured] : []);
+    const entries = candidates.flatMap(candidate => (candidate.package.manifest.view.contributions ?? [])
+      .filter(contribution => configurableViewSlotIdForCell(contribution.cell) === slotId)
+      .map(contribution => ({
+        candidate,
+        contribution,
+        identity: `${candidate.package.manifest.id}:${candidate.instanceId}:${contribution.id}`
+      }))).sort((left, right) => left.identity.localeCompare(right.identity));
+    let selectedRank = 0;
+    let unselectedRank = 0;
+    entries.forEach(entry => ranks.set(entry.identity, selectedIds.has(entry.identity)
+      ? [entry.contribution.priority, selectedRank++]
+      : [OFFICIAL_VIEW_CANDIDATE_PRIORITY + 1, unselectedRank++]));
+    for (const candidate of candidates) {
+      for (const entry of entries) candidate.blockedCells.delete(entry.contribution.cell);
+    }
+    const missing = [...selectedIds].filter(id => !entries.some(entry => entry.identity === id));
+    if (missing.length) diagnostics.push({
+      state: "invalid",
+      message: `selected View Slot contribution was not found: ${slotId} -> ${missing.join(", ")}`
+    });
+  }
+
   const instances = candidates.map((candidate): ResolvedViewPackageInstance => {
-    const registrations: Array<{ cell: string; id: string; priority: readonly [number, number] }> = [];
+    const registrations: Array<{ cell: string; id: string; priority: readonly [number, number]; enabled?: boolean }> = [];
     for (const contribution of candidate.package.manifest.view.contributions ?? []) {
       const identity = `${candidate.package.manifest.id}:${candidate.instanceId}:${contribution.id}`;
+      if (candidate.themeOnly) {
+        registrations.push({ cell: contribution.cell, id: contribution.id, priority: [OFFICIAL_VIEW_CANDIDATE_PRIORITY + 1, 0], enabled: false });
+        continue;
+      }
       const priority = ranks.get(identity);
-      if (priority) registrations.push({ cell: contribution.cell, id: contribution.id, priority });
+      if (priority) {
+        const slotId = configurableViewSlotIdForCell(contribution.cell);
+        const configured = slotId ? input.project?.slots?.[slotId] : undefined;
+        const selectedIds = new Set(Array.isArray(configured) ? configured : configured ? [configured] : []);
+        const identity = `${candidate.package.manifest.id}:${candidate.instanceId}:${contribution.id}`;
+        registrations.push({
+          cell: contribution.cell,
+          id: contribution.id,
+          priority,
+          ...(configured !== undefined ? { enabled: selectedIds.has(identity) } : {})
+        });
+      }
     }
     if (candidate.blockedCells.size) {
       diagnostics.push({
@@ -237,6 +301,11 @@ export async function resolveViewPackageComposition(input: {
     const allow = new Set([...candidate.package.homeAllow].filter(capability => (
       declared.has(capability) && projectAllow.has(capability)
     )));
+    if (candidate.package.manifest.id === globalThemePackageId) {
+      for (const capability of candidate.package.homeAllow) {
+        if (capability === "theme.register" || capability === "theme.override") allow.add(capability);
+      }
+    }
     for (const capability of declared) {
       if (allow.has(capability)) continue;
       diagnostics.push({
@@ -252,6 +321,12 @@ export async function resolveViewPackageComposition(input: {
       instanceId: candidate.instanceId,
       config: Object.freeze(structuredClone(candidate.config.config ?? {})),
       allow,
+      allowedStyleIds: new Set((candidate.package.manifest.view.styles ?? []).flatMap(style => {
+        if (candidate.themeOnly) return [];
+        if (!input.project?.styles) return [style.id];
+        const identity = `${candidate.package.manifest.id}:${candidate.instanceId}:${style.id}`;
+        return input.project.styles[identity] ? [style.id] : [];
+      })),
       contributionPolicy: Object.freeze({
         registrations: Object.freeze(registrations.map(entry => Object.freeze(entry))),
         blockedCells: Object.freeze([...candidate.blockedCells].sort())

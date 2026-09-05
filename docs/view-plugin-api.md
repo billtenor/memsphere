@@ -724,10 +724,10 @@ Module Manifest、CLI SDK、服务端 View API 注册接口、配置 Schema、�
 # View Package 扩展 API（v1 墄量）
 
 - 可注入服务新增 `themeRegistry`；声明时必须同时设置 `themeRegistryVersion: 1`，且 Package 必须取得有效 Theme capability。
-- `RegisterOptions.priority` 是非负整数，用于 `single`/`keyed` replacement；Host 内部用 `[declaredPriority, preferenceRank]` 整数元组解析用户首选，不使用浮点数。
+- `RegisterOptions.priority` 是非负整数，用于 `single`/`keyed` replacement；Host 内部使用整数元组排序，不使用浮点投影。设置配置显式决定启用哪些候选，未选 contribution 在注册时安全忽略。
 - `portableSlots` 导出四个 `name@1` 边界：`org.memsphere.memory.page.presentation`、`org.memsphere.memory.detail.renderer`、`org.memsphere.run.page.presentation`、`org.memsphere.run.artifact.renderer`。
 - `SlotRegistry.render(token, key, input)` 调用 data renderer，并在异常或非法返回值时把候选标为 abdicated 后继续 fallback。
 - `ViewDataRenderer.render()` 是同步契约，必须立即返回 `HTMLElement`；Promise/thenable 属于非法返回值并触发 fallback。abdicated 状态持续到实例卸载或 View 重启。
 - `ViewThemeRegistry` 提供 `registerTheme`、`selectTheme`、`overrideTokens`，都由实例 lifecycle 持有并可撤销。完整 Theme 与部分 override 均同时提供 light/dark map。
 - `presentation` 服务为 portable page 提供当前 `route`、冻结的 Memory/Run 摘要、筛选值、当前选择、`refresh()`，以及受控 `openMemory()`/`openCreate()`/`openRun()`/`startRun()` 导航；创建与启动入口仍由官方流程拥有，Package 不取得写 store，也不应直接调用业务 `fetch`。Memory detail 与 Run Artifact renderer 分别接收 SDK 定义的最小只读 context 和官方包装的 ChangeSet/Review/copy/download 动作。
-- 外部 contribution 必须在 Manifest 中声明完全匹配的 `cell + id`；运行时只采用 resolver 生成的 priority 元组，忽略 Bundle 自报 priority。未知 cell、漏 key 或 id/cell 不匹配会让实例事务原子失败。
+- 外部 contribution 必须在 Manifest 中声明完全匹配的 `cell + id`，并且只能指向 Slot Catalog 中 12 类可扩展根 Slot 或四个 portable cell；运行时只采用 resolver 生成的 priority 元组，忽略 Bundle 自报 priority。未知 cell、漏 key 或 id/cell 不匹配会让实例事务原子失败。

@@ -18,7 +18,33 @@ export const portableViewContributionCells = [
   "org.memsphere.run.artifact.renderer@1:artifact"
 ] as const;
 
-export const viewPackageContributionCellSchema = z.enum(portableViewContributionCells);
+export const configurableViewSlots = [
+  { id: "navigation.primary@1", kind: "list" },
+  { id: "navigation.secondary@1", kind: "single" },
+  { id: "content.list@1", kind: "single" },
+  { id: "search.providers@1", kind: "list" },
+  { id: "header.title@1", kind: "single" },
+  { id: "header.actions@1", kind: "list" },
+  { id: "side.panel@1", kind: "single" },
+  { id: "sidebar.footer@1", kind: "list" },
+  { id: "home.attention@1", kind: "list" },
+  { id: "home.continue@1", kind: "list" },
+  { id: "main.view@1", kind: "single" },
+  { id: "overlay@1", kind: "single" },
+  ...portableViewContributionCells.map(id => ({ id, kind: "single" as const }))
+] as const;
+
+const configurableViewSlotIds: ReadonlySet<string> = new Set(configurableViewSlots.map(slot => slot.id));
+
+export function configurableViewSlotIdForCell(cell: string): string | undefined {
+  if ((portableViewContributionCells as readonly string[]).includes(cell)) return cell;
+  return configurableViewSlots.find(slot => !slot.id.startsWith("org.memsphere.") && cell.startsWith(`${slot.id}:`))?.id;
+}
+
+export const viewPackageContributionCellSchema = z.string().min(1).refine(
+  value => Boolean(configurableViewSlotIdForCell(value)),
+  "View contribution must target a configurable Host Slot"
+);
 
 const uniqueCapabilities = z.array(viewPackageCapabilitySchema).superRefine((values, context) => {
   if (new Set(values).size !== values.length) {
@@ -58,14 +84,25 @@ export const projectViewPackageSchema = z.object({
 }).strict();
 
 export const projectViewThemeConfigSchema = z.object({
+  mode: z.enum(["light", "dark", "system"]).optional(),
   selected_source: z.string().min(1).optional(),
   preferences: z.record(z.string().min(1)).optional(),
   overrides: viewThemeOverrideSchema.optional()
 }).strict();
 
+const projectViewSlotSelectionsSchema = z.record(z.union([z.string().min(1), z.array(z.string().min(1)), z.null()])).superRefine((value, context) => {
+  for (const cell of Object.keys(value)) {
+    if (!configurableViewSlotIds.has(cell)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: [cell], message: `unknown configurable View Slot: ${cell}` });
+    }
+  }
+});
+
 export const projectViewConfigSchema = z.object({
   packages: z.array(projectViewPackageSchema).default([]),
-  theme: projectViewThemeConfigSchema.optional()
+  theme: projectViewThemeConfigSchema.optional(),
+  slots: projectViewSlotSelectionsSchema.optional(),
+  styles: z.record(z.boolean()).optional()
 }).strict().superRefine((view, context) => {
   const identities = new Set<string>();
   for (const [index, entry] of view.packages.entries()) {
