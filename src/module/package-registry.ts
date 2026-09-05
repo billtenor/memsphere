@@ -14,7 +14,7 @@ import type {
   ViewCompositionConfig,
   ViewPackageCapability
 } from "../view/package-config.js";
-import { configurableViewSlotIdForCell } from "../view/package-config.js";
+import { configurableViewSlotIdForCell, globalStylesViewSlot } from "../view/package-config.js";
 
 export const OFFICIAL_VIEW_CANDIDATE_PRIORITY = 1000;
 
@@ -308,6 +308,13 @@ export async function resolveViewPackageComposition(input: {
         message: `capability is not granted for this installed View Package: ${capability}`
       });
     }
+    const configuredGlobalStyles = input.composition?.slots?.[globalStylesViewSlot];
+    const hasGlobalStyleSlot = Object.prototype.hasOwnProperty.call(input.composition?.slots ?? {}, globalStylesViewSlot);
+    const selectedGlobalStyles = new Set(Array.isArray(configuredGlobalStyles)
+      ? configuredGlobalStyles
+      : configuredGlobalStyles
+        ? [configuredGlobalStyles]
+        : []);
     return Object.freeze({
       package: candidate.package,
       instanceId: candidate.instanceId,
@@ -315,9 +322,11 @@ export async function resolveViewPackageComposition(input: {
       allow,
       allowedStyleIds: new Set((candidate.package.manifest.view.styles ?? []).flatMap(style => {
         if (candidate.themeOnly) return [];
-        if (!input.composition?.styles) return [style.id];
+        if (style.scope === "module") return [style.id];
         const identity = `${candidate.package.manifest.id}:${candidate.instanceId}:${style.id}`;
-        return input.composition.styles[identity] ? [style.id] : [];
+        if (hasGlobalStyleSlot) return selectedGlobalStyles.has(identity) ? [style.id] : [];
+        if (input.composition?.styles) return input.composition.styles[identity] ? [style.id] : [];
+        return [style.id];
       })),
       contributionPolicy: Object.freeze({
         registrations: Object.freeze(registrations.map(entry => Object.freeze(entry))),

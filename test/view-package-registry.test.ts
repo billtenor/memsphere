@@ -74,7 +74,7 @@ test("global style capability requires the installed Package grant", async () =>
   }
 });
 
-test("global composition can select one Package contribution while independently filtering styles", async () => {
+test("global composition can select Package contributions and global styles through Slots", async () => {
   const root = await mkdtemp(join(tmpdir(), "memsphere-view-selection-"));
   try {
     const first = await makePackage(root, "first", "org.example.first", "first", true);
@@ -92,10 +92,9 @@ test("global composition can select one Package contribution while independently
           { id: "org.example.first", version: "1.0.0", enabled: true, allow: ["styles.global"] },
           { id: "org.example.second", version: "1.0.0", enabled: true, allow: ["styles.global"] }
         ],
-        slots: { [cell]: "org.example.second:org.example.second:second" },
-        styles: {
-          "org.example.first:org.example.first:global": false,
-          "org.example.second:org.example.second:global": true
+        slots: {
+          [cell]: "org.example.second:org.example.second:second",
+          "styles.global@1": ["org.example.second:org.example.second:global"]
         }
       },
       sdkVersion: "1.0.0"

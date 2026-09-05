@@ -10,7 +10,7 @@ run_id: run-20260904-165459z-d3bd2ad3
 
 ## 需求
 
-用户可以安装本地界面扩展包，并分别选用其中的主题、页面、组件和样式；本页面中的全部配置统一应用到所有 Project。界面配置覆盖 12 类可扩展 Host 根 Slot 和 Memory/Run 的 4 个 portable cell。默认未配置时，现有界面、URL 与业务能力保持兼容。
+用户可以安装本地界面扩展包，并分别选用其中的主题、页面、组件和全局样式；本页面中的全部配置统一应用到所有 Project。界面配置覆盖 13 类可配置 Host Slot（包含全局样式 Slot）和 Memory/Run 的 4 个 portable cell。扩展内容的 scoped CSS 随对应 Package 实例自动加载，不要求用户重复选择。默认未配置时，现有界面、URL 与业务能力保持兼容。
 
 Theme、样式和展示包应具备稳定 identity、版本、来源与依赖元数据，为后续分享、导入、官方收录和升级演进保留兼容基础；本迭代只交付可信本地路径，不实现远程市场、自动下载或恶意代码沙箱。
 
@@ -18,15 +18,15 @@ Memory 与 Run 必须实际迁移到新架构：官方现有实现成为 priorit
 
 ## 验收标准
 
-- 默认只提供一个“界面与主题”入口，按“界面扩展包安装、主题配置、界面配置”分区；安装是包级，应用是 contribution 级，“一键应用全部”是可继续编辑的批量选择。
+- 默认只提供一个“界面与主题”入口，按“安装新扩展包、已安装扩展包、主题配置、界面配置”分区；安装是包级，应用是 contribution 级，“一键应用全部”是可继续编辑的批量选择。
 - 整页只有一个状态和一个保存按钮，校验后原子保存 Home 全局配置；普通 UI 不展示 revision、digest 或 running/disk 配置。
-- 扩展包安装、权限、主题、Slot 和样式选择全部为 Home 全局配置并应用到所有 Project；历史 Project View 字段只兼容读取且不参与展示。
-- “界面配置”用表格列出全部 16 类用户可配置 Slot，single/keyed 单选、list 多选；新增稳定 Slot 通过统一目录自动进入表格。
+- 扩展包安装、权限、主题和 Slot 选择全部为 Home 全局配置并应用到所有 Project；历史 Project View 字段只兼容读取且不参与展示。
+- “界面配置”用表格列出全部 17 类用户可配置 Slot，single/keyed 单选、list 多选；全局样式使用 `styles.global@1` 多选 Slot，scoped CSS 随 Package 实例自动加载；新增稳定 Slot 通过统一目录自动进入表格。
 - 未配置时 Memory/Run 的 DOM、交互和 URL 保持兼容；四个 presentation/renderer cell 均完成官方候选迁移和用户候选覆盖。
 - 同 cell 数值较小 priority 获胜；同 priority 无首选时所有相关外部实例在 apply 前原子失败并回退官方候选，结果不依赖加载顺序。
 - 四个 cell 的同步 throw、异步 reject 均恢复官方稳定正文 DOM，清理 container/portal/subscription，并在 diagnostics 中记录 failed/abdicated 与 `fallbackTo`。
 - 提供官方完整 light/dark system token、全局 light/dark/system 设置入口、Theme 选择与覆盖、分层回退和来源诊断。
-- scoped/shared style 按实例生命周期安装；global style 经过 Manifest、Home、Project 三层授权和 PostCSS fail-closed 检查。
+- scoped/global style 按实例生命周期安装；global style 经过 Manifest、Home 两层授权、Slot 选择和 PostCSS fail-closed 检查。
 - 外部资产使用进程级 HMAC 不可猜 key、Project/实例隔离和固定 MIME 白名单；跨 Project、旧 key、HTML/SVG/XML/未知类型不可读取。
 - 保存 composition 后保持启动快照并提示 restart pending；重启后 resolver、资产、实例、Theme/Style 和 diagnostics 一致重建，A/B Project 不串线。
 - 提供不进入 builtin catalog 的可复制预编译示例包，CI 重建并校验签入 bundle，SDK 必须 externalize。
@@ -70,3 +70,5 @@ Memory 与 Run 必须实际迁移到新架构：官方现有实现成为 priorit
 返修后最终 `npm run build`、`git diff --check` 和全量 558 项测试通过：557 passed、1 个 Windows-only skipped、0 failed。真实浏览器在当前服务确认统一入口 1 个、旧入口 0 个、界面配置表完整展示 16 类可配置 Slot；旧 packages/composition URL 均进入同一页面。更新后的 Memory ChangeSet 为 `change-20260905-041123536z-7a67ad47`，Content Digest `5bb5f511c114a04a647660a20347dbd0dbcbb32e5a9ece4b7a254938ee8da546`，校验通过。
 
 产品验收第三轮澄清“界面与主题”页面中的所有配置都应对所有 Project 生效，且无需显示额外范围文案。实现已将 Package capability、Theme、Slot、Style 和所需实例统一迁入 Home `view_composition`，Project 历史 View 字段只保留解析兼容、不再参与 resolver；启动快照使用一个全局 composition 为所有已注册 Project 构建实例。页面删除重复介绍卡及全部生效范围分组。跨 A/B Project 浏览器用例验证同一扩展内容同时生效，磁盘修改在重启前仍由全局启动快照隔离。全量 558 项测试结果为 557 passed、1 个 Windows-only skipped、0 failed。最终 Memory ChangeSet 为 `change-20260905-052525896z-679777fa`，Content Digest `8315dc2d43878c7f2b205045dc213fdd5530df18c50a3358c5ebaa3dc616b9a5`，校验通过。
+
+产品验收继续指出独立“样式配置”与 Slot 心智不一致。实现已取消独立样式表：global CSS 统一作为 `styles.global@1` 多选 Slot 候选，scoped CSS 随 Package 实例自动加载；旧 `view_composition.styles` 只保留解析兼容，新保存和“一键应用全部”统一写入 Slot。界面配置表因此由 16 项增至 17 项。全量 558 项测试结果为 557 passed、1 个 Windows-only skipped、0 failed。最新 Memory ChangeSet 为 `change-20260905-153839395z-a96e9586`，变更级校验通过，Content Digest `802b0675abc5af603923a912f34a03c6348e851425b0ba9224aa7b7fe646ed08`，View 入口 `http://0.0.0.0:30000/projects/memsphere/changes/change-20260905-153839395z-a96e9586`。

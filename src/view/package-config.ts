@@ -18,6 +18,8 @@ export const portableViewContributionCells = [
   "org.memsphere.run.artifact.renderer@1:artifact"
 ] as const;
 
+export const globalStylesViewSlot = "styles.global@1" as const;
+
 export const configurableViewSlots = [
   { id: "navigation.primary@1", kind: "list" },
   { id: "navigation.secondary@1", kind: "single" },
@@ -31,6 +33,7 @@ export const configurableViewSlots = [
   { id: "home.continue@1", kind: "list" },
   { id: "main.view@1", kind: "single" },
   { id: "overlay@1", kind: "single" },
+  { id: globalStylesViewSlot, kind: "list" },
   ...portableViewContributionCells.map(id => ({ id, kind: "single" as const }))
 ] as const;
 

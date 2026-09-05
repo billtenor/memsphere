@@ -16,13 +16,16 @@ test("View Package installation, theme, and composition are strict global config
     view_theme: { mode: "dark", selected_source: "org.example.theme" },
     view_composition: {
       packages: [{ id: "org.example.view", version: "1.0.0", enabled: true }],
-      slots: { "org.memsphere.memory.page.presentation@1:page": "org.example.view:main:memory" },
-      styles: { "org.example.view:main:base": true }
+      slots: {
+        "org.memsphere.memory.page.presentation@1:page": "org.example.view:main:memory",
+        "styles.global@1": ["org.example.view:main:base"]
+      }
     }
   });
   assert.equal(global.view_packages?.installed[0]?.path, packagePath);
   assert.equal(global.view_theme?.mode, "dark");
   assert.equal(global.view_composition?.slots?.["org.memsphere.memory.page.presentation@1:page"], "org.example.view:main:memory");
+  assert.deepEqual(global.view_composition?.slots?.["styles.global@1"], ["org.example.view:main:base"]);
 
   const project = projectConfigSchema.parse({
     store: { type: "managed", published_revision: "abc" },

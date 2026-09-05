@@ -433,7 +433,11 @@ class SettingsApplication {
       for (const item of installed) {
         const record = selected.find((entry: JsonObject) => entry.id === item.id && entry.version === item.version);
         const instanceId = record?.instance_id ?? item.id;
-        for (const contribution of item.contributions ?? []) if (contribution.slotId === cell) candidates.push({ identity: `${item.id}:${instanceId}:${contribution.id}`, label: `${item.id} · ${contribution.id}`, packageIdentity: `${item.id}@${item.version}` });
+        if (cell === "styles.global@1") {
+          for (const style of item.styles ?? []) if (style.scope === "global") candidates.push({ identity: `${item.id}:${instanceId}:${style.id}`, label: `${item.id} · ${style.id}`, packageIdentity: `${item.id}@${item.version}` });
+        } else {
+          for (const contribution of item.contributions ?? []) if (contribution.slotId === cell) candidates.push({ identity: `${item.id}:${instanceId}:${contribution.id}`, label: `${item.id} · ${contribution.id}`, packageIdentity: `${item.id}@${item.version}` });
+        }
       }
       const legacy = selected.filter((entry: JsonObject) => entry.enabled !== false).flatMap((record: JsonObject) => {
         const item = installed.find((entry: JsonObject) => entry.id === record.id && entry.version === record.version);
@@ -441,7 +445,10 @@ class SettingsApplication {
       })[0] ?? "";
       if (slot.kind === "list") {
         const configured = view.slots?.[cell];
-        const active = new Set(Array.isArray(configured) ? configured : configured ? [configured] : configured === undefined ? candidates.filter(candidate => selected.some((record: JsonObject) => candidate.identity.startsWith(`${record.id}:${record.instance_id ?? record.id}:`))).map(candidate => candidate.identity) : []);
+        const defaults = cell === "styles.global@1" && view.styles
+          ? candidates.filter(candidate => view.styles[candidate.identity]).map(candidate => candidate.identity)
+          : candidates.filter(candidate => selected.some((record: JsonObject) => record.enabled !== false && candidate.identity.startsWith(`${record.id}:${record.instance_id ?? record.id}:`))).map(candidate => candidate.identity);
+        const active = new Set(Array.isArray(configured) ? configured : configured ? [configured] : configured === undefined ? defaults : []);
         const choices = candidates.map(candidate => `<label class="settings-check settings-inline-choice"><input type="checkbox" data-project-view-slot-list="${escapeAttr(cell)}" data-value="${escapeAttr(candidate.identity)}" data-package-identity="${escapeAttr(candidate.packageIdentity)}"${active.has(candidate.identity) ? " checked" : ""}><span>${escapeHtml(candidate.label)}</span></label>`).join("");
         return `<tr><td><strong>${escapeHtml(label)}</strong><small>${escapeHtml(help)}</small></td><td>可多选</td><td><div class="settings-inline-choices">${choices || `<span class="muted">暂无扩展内容</span>`}</div></td></tr>`;
       }
@@ -450,15 +457,7 @@ class SettingsApplication {
       const current = Object.prototype.hasOwnProperty.call(view.slots ?? {}, cell) ? (typeof configured === "string" ? configured : "") : legacy;
       return `<tr><td><strong>${escapeHtml(label)}</strong><small>${escapeHtml(help)}</small></td><td>单选</td><td>${selectField(`view_composition.slot.${cell}`, `选择${label}使用的内容`, current, options)}</td></tr>`;
     }).join("");
-    const styleChoices = installed.flatMap((item: JsonObject) => {
-      const record = selected.find((entry: JsonObject) => entry.id === item.id && entry.version === item.version);
-      const instanceId = record?.instance_id ?? item.id;
-      return (item.styles ?? []).map((style: JsonObject) => {
-        const identity = `${item.id}:${instanceId}:${style.id}`;
-        return `<tr><td><label class="settings-check"><input type="checkbox" data-project-view-style="${escapeAttr(identity)}" data-package-identity="${escapeAttr(`${item.id}@${item.version}`)}"${view.styles?.[identity] ? " checked" : ""}><span><strong>${escapeHtml(`${item.id} · ${style.id}`)}</strong></span></label></td><td>${escapeHtml(style.scope === "global" ? "整个 Memsphere 界面" : "仅扩展包内容")}</td><td>${view.styles?.[identity] ? "已使用" : "未使用"}</td></tr>`;
-      });
-    }).join("");
-    return `<section class="settings-section"><div class="settings-section-head"><div><h3>界面配置</h3><p class="settings-section-subtitle">为每个界面位置选择系统默认内容，或选用任意已安装扩展包提供的页面、组件和样式。</p></div></div><div class="settings-table-wrap"><table class="settings-config-table"><thead><tr><th>界面位置</th><th>类型</th><th>使用内容</th></tr></thead><tbody>${slotFields}</tbody></table></div><h4>样式配置</h4>${styleChoices ? `<div class="settings-table-wrap"><table class="settings-config-table"><thead><tr><th>样式</th><th>作用范围</th><th>状态</th></tr></thead><tbody>${styleChoices}</tbody></table></div>` : `<span class="muted">已安装的扩展包没有提供可选样式。</span>`}${this.errorsHtml(scope)}</section>`;
+    return `<section class="settings-section"><div class="settings-section-head"><div><h3>界面配置</h3><p class="settings-section-subtitle">为每个界面位置选择系统默认内容，或选用任意已安装扩展包提供的页面、组件和样式。</p></div></div><div class="settings-table-wrap"><table class="settings-config-table"><thead><tr><th>界面位置</th><th>类型</th><th>使用内容</th></tr></thead><tbody>${slotFields}</tbody></table></div>${this.errorsHtml(scope)}</section>`;
   }
 
   participantsHtml(scope: ScopeState): string {
@@ -580,7 +579,6 @@ class SettingsApplication {
     root.querySelectorAll<HTMLButtonElement>("[data-remove-view-package]").forEach(button => button.addEventListener("click", () => this.removeViewPackage(Number(button.dataset.removeViewPackage)), { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-apply-view-package]").forEach(button => button.addEventListener("click", () => this.applyViewPackage(button.dataset.applyViewPackage!), { signal: this.#signal }));
     root.querySelectorAll<HTMLInputElement>("[data-home-view-capability]").forEach(input => input.addEventListener("change", () => this.updateHomeViewCapability(input), { signal: this.#signal }));
-    root.querySelectorAll<HTMLInputElement>("[data-project-view-style]").forEach(input => input.addEventListener("change", () => this.updateProjectViewStyle(input), { signal: this.#signal }));
     root.querySelectorAll<HTMLInputElement>("[data-project-view-slot-list]").forEach(input => input.addEventListener("change", () => this.updateProjectViewSlotList(input), { signal: this.#signal }));
   }
 
@@ -826,34 +824,12 @@ class SettingsApplication {
       if (slot?.kind === "list") view.slots[contribution.slotId] = [...new Set([...(Array.isArray(view.slots[contribution.slotId]) ? view.slots[contribution.slotId] : []), identity])];
       else view.slots[contribution.slotId ?? contribution.cell] = identity;
     }
-    view.styles ??= {};
-    for (const style of item.styles ?? []) view.styles[`${item.id}:${instanceId}:${style.id}`] = true;
+    const globalStyles = (item.styles ?? []).filter((style: JsonObject) => style.scope === "global").map((style: JsonObject) => `${item.id}:${instanceId}:${style.id}`);
+    if (globalStyles.length) view.slots["styles.global@1"] = [...new Set([...(Array.isArray(view.slots["styles.global@1"]) ? view.slots["styles.global@1"] : []), ...globalStyles])];
+    delete view.styles;
     const globalRecord = (this.#scopes.global.draft?.view_packages?.installed ?? []).find((entry: JsonObject) => entry.path === item.path);
     if (globalRecord) globalRecord.allow = [...new Set([...(globalRecord.allow ?? []), ...(item.capabilities ?? [])])];
     global.notice = `已选用 ${item.id} 提供的全部界面内容；你仍可在下方逐项调整，完成后点击页面底部的保存。`;
-    this.render();
-  }
-
-  updateProjectViewStyle(input: HTMLInputElement): void {
-    const global = this.#scopes.global;
-    if (!global.draft) return;
-    const [packageId] = input.dataset.packageIdentity!.split("@");
-    const identity = input.dataset.projectViewStyle!;
-    const item = (this.#viewPackages.installed ?? []).find((entry: JsonObject) => entry.id === packageId);
-    const styleId = identity.slice(identity.lastIndexOf(":") + 1);
-    const style = (item?.styles ?? []).find((entry: JsonObject) => entry.id === styleId);
-    this.ensureViewPackage(packageId!, [style?.scope === "global" ? "styles.global" : "styles.scoped"]);
-    const view = (global.draft.view_composition ??= { packages: [] });
-    if (!view.styles) {
-      view.styles = {};
-      for (const item of this.#viewPackages.installed ?? []) {
-        const record = view.packages.find((entry: JsonObject) => entry.id === item.id && entry.version === item.version && entry.enabled);
-        if (!record) continue;
-        const instanceId = record.instance_id ?? item.id;
-        for (const style of item.styles ?? []) view.styles[`${item.id}:${instanceId}:${style.id}`] = true;
-      }
-    }
-    view.styles[input.dataset.projectViewStyle!] = input.checked;
     this.render();
   }
 
@@ -861,11 +837,12 @@ class SettingsApplication {
     const global = this.#scopes.global;
     if (!global.draft) return;
     const [packageId] = input.dataset.packageIdentity!.split("@");
-    this.ensureViewPackage(packageId!);
+    this.ensureViewPackage(packageId!, input.dataset.projectViewSlotList === "styles.global@1" ? ["styles.global"] : []);
     const view = (global.draft.view_composition ??= { packages: [] });
     const slotId = input.dataset.projectViewSlotList!;
     const current = Array.isArray(view.slots?.[slotId]) ? view.slots[slotId] as string[] : [];
     (view.slots ??= {})[slotId] = toggleValue(current, input.dataset.value!, input.checked);
+    if (slotId === "styles.global@1") delete view.styles;
     this.render();
   }
 
@@ -1164,6 +1141,7 @@ function viewSlotLabel(slotId: string): [string, string] {
     "home.modules@1": ["首页模块", "首页模块入口"],
     "main.view@1": ["主内容区域", "路由对应的主要页面内容"],
     "overlay@1": ["浮层", "对话框与抽屉内容"],
+    "styles.global@1": ["全局样式", "可同时使用多个扩展包提供的全局样式"],
     "org.memsphere.memory.page.presentation@1:page": ["记忆页面", "整个记忆模块页面"],
     "org.memsphere.memory.detail.renderer@1:detail": ["记忆详情正文", "单条记忆的内容区域"],
     "org.memsphere.run.page.presentation@1:page": ["运行页面", "整个运行模块页面"],

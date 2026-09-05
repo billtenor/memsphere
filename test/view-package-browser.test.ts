@@ -180,10 +180,8 @@ test("Settings completes the local Package installation and Project enablement f
     await page.getByRole("button", { name: "卸载", exact: true }).waitFor();
     await page.getByText("主题配置", { exact: true }).waitFor();
     await page.getByText("界面配置", { exact: true }).waitFor();
-    await page.getByText("样式配置", { exact: true }).waitFor();
-    await page.getByText("仅扩展包内容", { exact: true }).waitFor();
-    await page.getByText("整个 Memsphere 界面", { exact: true }).waitFor();
-    assert.equal(await page.locator(".settings-config-table").first().locator("tbody tr").count(), 16);
+    await page.getByText("全局样式", { exact: true }).waitFor();
+    assert.equal(await page.locator(".settings-config-table").first().locator("tbody tr").count(), 17);
     assert.equal(await page.getByRole("button", { name: "保存", exact: true }).count(), 1);
     assert.equal(await page.locator('[data-select-field="project_view.theme"]').count(), 0);
     assert.equal(await page.getByText(/^[123]\. /).count(), 0);
@@ -207,13 +205,16 @@ test("Settings completes the local Package installation and Project enablement f
     await stop(active.server); active = undefined;
     const savedHome = JSON.parse(await readFile(join(home, "config.json"), "utf8"));
     assert.equal(savedHome.view_composition.packages[0].enabled, true);
-    assert.equal(Object.keys(savedHome.view_composition.slots).length, 4);
-    assert.equal(Object.values(savedHome.view_composition.styles).filter(Boolean).length, 2);
+    assert.equal(Object.keys(savedHome.view_composition.slots).length, 5);
+    assert.deepEqual(savedHome.view_composition.slots["styles.global@1"], ["org.example.memsphere.custom-view:org.example.memsphere.custom-view:shared"]);
+    assert.equal(savedHome.view_composition.styles, undefined);
     assert.equal(JSON.parse(await readFile(join(projectRoot, "config.json"), "utf8")).view, undefined);
 
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/memories`);
     await page.getByText("My Memory workspace", { exact: true }).waitFor();
+    assert.equal(await page.locator('style[data-view-package-scope="module"]').count(), 1);
+    assert.equal(await page.locator('style[data-view-package-scope="global"]').count(), 1);
   } finally {
     if (active) await stop(active.server);
     await browser.close();
