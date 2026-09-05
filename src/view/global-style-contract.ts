@@ -17,7 +17,7 @@ const forbiddenSelectorFragments = [
   "#memsphere-view-root"
 ];
 
-export function validateGlobalStyle(source: string): ValidatedGlobalStyle {
+export function validateGlobalStyle(source: string, namespace?: string): ValidatedGlobalStyle {
   let root: Root;
   try {
     root = postcss.parse(source, { from: undefined });
@@ -27,7 +27,7 @@ export function validateGlobalStyle(source: string): ValidatedGlobalStyle {
   const warnings = root.toResult().warnings();
   if (warnings.length) throw new Error(`global style parser warning: ${warnings[0]!.text}`);
   const assets = new Set<string>();
-  walkNodes(root, assets);
+  walkNodes(root, assets, namespace ? namespaceMatcher(namespace) : undefined);
   return Object.freeze({ css: root.toString(), assets: Object.freeze([...assets]) });
 }
 
@@ -62,12 +62,12 @@ export function scopePackageStyle(source: string, owner: string): string {
   return root.toString();
 }
 
-function walkNodes(root: Root, assets: Set<string>): void {
+function walkNodes(root: Root, assets: Set<string>, namespace?: RegExp): void {
   root.walk((node) => {
     if (!isKnownNode(node)) throw new Error(`global style contains an unsupported AST node: ${node.type}`);
     if (node.type === "atrule") validateAtRule(node, assets);
     if (node.type === "rule") validateRule(node);
-    if (node.type === "decl") validateDeclaration(node, assets);
+    if (node.type === "decl") validateDeclaration(node, assets, namespace);
   });
 }
 
@@ -86,12 +86,23 @@ function validateRule(rule: Rule): void {
   }
 }
 
-function validateDeclaration(declaration: Declaration, assets: Set<string>): void {
+function validateDeclaration(declaration: Declaration, assets: Set<string>, namespace?: RegExp): void {
   if (declaration.important) throw new Error("global style must not use !important");
   if (declaration.prop.toLowerCase().startsWith("--mem-view-")) {
     throw new Error(`global style must not declare public Theme token ${declaration.prop}`);
   }
+  if (namespace && declaration.prop.startsWith("--") && !namespace.test(declaration.prop)) {
+    throw new Error(`style custom property is outside its declared namespace: ${declaration.prop}`);
+  }
   collectAssets(declaration.value, assets);
+}
+
+function namespaceMatcher(namespace: string): RegExp {
+  if (!/^--[a-z0-9-]+(?:\*)?$/i.test(namespace) || namespace.indexOf("*") !== namespace.length - 1) {
+    throw new Error(`style namespace must be a custom-property prefix ending in *: ${namespace}`);
+  }
+  const escaped = namespace.slice(0, -1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${escaped}[a-z0-9-]+$`, "i");
 }
 
 function collectAssets(value: string, assets: Set<string>): void {

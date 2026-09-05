@@ -246,20 +246,41 @@ function renderArtifactResult(event: Json, run: Json, options: RunDetailOptions,
   if (artifact.validation?.status) meta.append(pill(`${labels.validation}: ${artifact.validation.status}`, artifact.validation.status === "passed" ? "done" : "warn"));
   if (artifact.final) meta.append(pill(labels.final, "done"));
   if (event.at) meta.append(pill(formatTime(event.at)));
-  card.append(title, meta, options.renderArtifact({
-    artifact,
-    event,
-    run,
-    defaultRender: () => renderArtifactValue(artifact)
-  }));
   const review = (run.artifactReviewSummaries || []).find((candidate: Json) => candidate.stepId === event.stepId)
     || (run.artifactReview?.stepId === event.stepId ? run.artifactReview : null);
+  card.append(title, meta, options.renderArtifact({
+    runId: run.id,
+    artifactId: event.stepId,
+    artifact: freezePresentationValue(structuredClone(artifact)),
+    event: freezePresentationValue(structuredClone(event)),
+    run: freezePresentationValue(structuredClone(run)),
+    ...(review?.id ? { openReview: () => options.openReview(run.id, review.id) } : {}),
+    download: () => downloadArtifact(artifact, artifact.name || event.stepId || "artifact"),
+    defaultRender: () => renderArtifactValue(artifact)
+  }));
   if (review?.id) {
     const open = options.ui.button({ label: { text: labels.review }, run: () => options.openReview(run.id, review.id) });
     open.dataset.artifactReviewId = review.id;
     card.append(open);
   }
   return card;
+}
+
+function freezePresentationValue<T>(value: T): T {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value as Record<string, unknown>)) freezePresentationValue(child);
+  return Object.freeze(value);
+}
+
+function downloadArtifact(artifact: Json, name: string): void {
+  const value = artifact?.content ?? artifact?.value ?? artifact;
+  const blob = new Blob([typeof value === "string" ? value : JSON.stringify(value, null, 2)], { type: "text/plain;charset=utf-8" });
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = String(name);
+  link.click();
+  URL.revokeObjectURL(href);
 }
 
 export function renderArtifactValue(artifact: Json): HTMLElement {

@@ -323,7 +323,7 @@ class SettingsApplication {
     return `<div id="settings-status" class="settings-status">
       ${pill(this.t("settings.diskConfig", `磁盘配置 ${shortRevision(scope.data?.diskRevision)}`, { revision: shortRevision(scope.data?.diskRevision) }), "strong")}
       ${this.#scope === "global" ? pill(this.t("settings.runningConfig", `运行配置 ${shortRevision(scope.data?.runningRevision)}`, { revision: shortRevision(scope.data?.runningRevision) })) : pill(this.t("settings.scope.project", "项目配置"), "done")}
-      ${this.#scope === "global" ? pill(this.t(scope.data?.restartRequired ? "settings.restartPending" : "settings.applied", scope.data?.restartRequired ? "等待重启" : "已应用"), scope.data?.restartRequired ? "warn" : "done") : ""}
+      ${pill(this.t(scope.data?.restartRequired || scope.data?.restartPending ? "settings.restartPending" : "settings.applied", scope.data?.restartRequired || scope.data?.restartPending ? "等待重启" : "已应用"), scope.data?.restartRequired || scope.data?.restartPending ? "warn" : "done")}
       ${pill(this.t(dirty ? "settings.unsaved" : "settings.noUnsaved", dirty ? "未保存修改" : "没有未保存修改"), dirty ? "warn" : "done")}
       ${pill(this.t("settings.errorCount", `错误 ${scope.errors.length}`, { count: scope.errors.length }), scope.errors.length ? "warn" : "")}
     </div>`;
@@ -376,6 +376,7 @@ class SettingsApplication {
     const records = scope.draft?.view_packages?.installed ?? [];
     const resolved = new Map((this.#viewPackages.installed ?? []).map((item: JsonObject) => [item.path, item]));
     const diagnostics = this.#viewPackages.diagnostics ?? [];
+    const snapshotEvidence = this.packageSnapshotHtml();
     const themeOptions: Array<[string, string]> = [["", this.t("settings.systemTheme", "系统默认 Theme")], ...(this.#viewPackages.installed ?? []).flatMap((item: JsonObject) => (item.themes ?? []).map((theme: JsonObject) => [`${item.id}:${theme.id}`, `${item.id} · ${theme.id}`] as [string, string]))];
     const cards = records.map((record: JsonObject, index: number) => {
       const item = resolved.get(record.path) as JsonObject | undefined;
@@ -387,7 +388,7 @@ class SettingsApplication {
         <div class="settings-permissions">${capabilities.map((capability: string) => `<label class="settings-check"><input type="checkbox" data-home-view-capability="${escapeAttr(capability)}" data-package-index="${index}"${(record.allow ?? []).includes(capability) ? " checked" : ""}><span>${escapeHtml(capability)}</span></label>`).join("") || `<span class="muted">${escapeHtml(this.t("settings.noCapabilities", "未声明额外 capability"))}</span>`}</div></article>`;
     }).join("");
     return `<section class="settings-section"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.viewPackages", "界面 Package"))}</h3><p class="settings-section-subtitle">${escapeHtml(this.t("settings.viewPackagesHelp", "添加可信本地 Package。保存并重启 View 后解析入口、版本、依赖和 capability。"))}</p></div></div>
-      <div class="settings-grid">${selectField("view_theme.mode", this.t("settings.themeMode", "Theme 模式"), scope.draft?.view_theme?.mode ?? "system", [["system", this.t("settings.followSystem", "跟随系统")], ["light", "Light"], ["dark", "Dark"]])}${selectField("view_theme.selected_source", this.t("settings.homeTheme", "Home Theme"), scope.draft?.view_theme?.selected_source ?? "", themeOptions)}</div>
+      ${snapshotEvidence}<div class="settings-grid">${selectField("view_theme.mode", this.t("settings.themeMode", "Theme 模式"), scope.draft?.view_theme?.mode ?? "system", [["system", this.t("settings.followSystem", "跟随系统")], ["light", "Light"], ["dark", "Dark"]])}${selectField("view_theme.selected_source", this.t("settings.homeTheme", "Home Theme"), scope.draft?.view_theme?.selected_source ?? "", themeOptions)}</div>
       <div class="settings-token-editor"><div class="settings-field"><label for="settings-package-path">${escapeHtml(this.t("settings.localPackagePath", "本地 Package 绝对路径"))}</label><input id="settings-package-path" class="settings-input mono" value="${escapeAttr(this.#packagePathDraft)}" placeholder="/absolute/path/to/package"></div><button class="btn" data-action="add-view-package">${escapeHtml(this.t("settings.add", "添加"))}</button></div>
       <div class="settings-providers">${cards || empty(this.t("settings.noViewPackages", "尚未安装界面 Package。"))}</div>${this.errorsHtml(scope)}</section>`;
   }
@@ -396,6 +397,7 @@ class SettingsApplication {
     const selected = scope.draft?.view?.packages ?? [];
     const installed = this.#viewPackages.installed ?? [];
     const diagnostics = this.#viewPackages.diagnostics ?? [];
+    const snapshotEvidence = this.packageSnapshotHtml();
     const runtime = (window as Window & { __memsphereViewDiagnostics?: () => JsonObject }).__memsphereViewDiagnostics?.();
     const runtimeEntries = (runtime?.entries ?? []).filter((entry: JsonObject) => String(entry.slot).startsWith("org.memsphere."));
     const runtimeEvidence = runtime ? `<details class="settings-participant"><summary class="settings-participant-summary"><div><strong>${escapeHtml(this.t("settings.runtimeDiagnostics", "当前运行诊断"))}</strong><div class="settings-participant-summary-meta">${escapeHtml(`Theme ${runtime.theme?.mode ?? "-"} · ${runtimeEntries.length} presentation candidates`)}</div></div></summary><div class="settings-participant-body"><pre class="settings-code mono">${escapeHtml(JSON.stringify({ theme: runtime.theme, entries: runtimeEntries }, null, 2))}</pre></div></details>` : "";
@@ -429,7 +431,14 @@ class SettingsApplication {
         <div class="settings-permissions">${(item.capabilities ?? []).map((capability: string) => `<label class="settings-check"><input type="checkbox" data-project-view-capability="${escapeAttr(capability)}" data-package-identity="${escapeAttr(identity)}"${(record?.allow ?? []).includes(capability) ? " checked" : ""}${record ? "" : " disabled"}><span>${escapeHtml(capability)}</span></label>`).join("")}</div>
         ${(item.contributions ?? []).map((entry: JsonObject) => `<div class="settings-provider-preview mono">${escapeHtml(`${entry.cell} · priority ${entry.priority} · ${entry.id}`)}</div>`).join("")}</article>`;
     }).join("");
-    return `<section class="settings-section"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.viewComposition", "界面组合"))}</h3><p class="settings-section-subtitle">${escapeHtml(this.t("settings.viewCompositionHelp", "为当前 Project 启用 Package 并明确授予 capability；保存后重启 View 生效。"))}</p></div></div><div class="settings-grid">${selectField("project_view.theme", this.t("settings.projectTheme", "Project Theme"), scope.draft?.view?.theme?.selected_source ?? "", projectThemeOptions)}</div>${runtimeEvidence}${conflicts ? `<div class="settings-grid settings-view-conflicts">${conflicts}</div>` : ""}<div class="settings-providers">${cards || empty(this.t("settings.noInstalledPackages", "Home 尚无已解析的界面 Package。"))}</div>${this.errorsHtml(scope)}</section>`;
+    return `<section class="settings-section"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.viewComposition", "界面组合"))}</h3><p class="settings-section-subtitle">${escapeHtml(this.t("settings.viewCompositionHelp", "为当前 Project 启用 Package 并明确授予 capability；保存后重启 View 生效。"))}</p></div></div>${snapshotEvidence}<div class="settings-grid">${selectField("project_view.theme", this.t("settings.projectTheme", "Project Theme"), scope.draft?.view?.theme?.selected_source ?? "", projectThemeOptions)}</div>${runtimeEvidence}${conflicts ? `<div class="settings-grid settings-view-conflicts">${conflicts}</div>` : ""}<div class="settings-providers">${cards || empty(this.t("settings.noInstalledPackages", "Home 尚无已解析的界面 Package。"))}</div>${this.errorsHtml(scope)}</section>`;
+  }
+
+  packageSnapshotHtml(): string {
+    const snapshot = this.#viewPackages.composition;
+    if (!snapshot) return "";
+    const state = snapshot.restartPending ? this.t("settings.restartPending", "等待重启") : this.t("settings.applied", "已应用");
+    return `<div class="settings-provider-preview mono">${escapeHtml(`${state} · running ${shortRevision(snapshot.runningDigest)} · disk ${shortRevision(snapshot.diskDigest)}`)}</div>`;
   }
 
   participantsHtml(scope: ScopeState): string {
@@ -790,11 +799,14 @@ class SettingsApplication {
     else {
       scope.data = payload;
       scope.draft = clone(payload.config);
+      if (payload.composition) this.#viewPackages.composition = payload.composition;
       scope.confirmation = null;
       scope.errors = [];
       scope.notice = payload.restartRequired
         ? this.t("settings.savedRestart", `配置已保存。请执行 memsphere view restart；重启后地址为 ${viewUrl(payload.config.view ?? payload.defaults.view)}。`, { url: viewUrl(payload.config.view ?? payload.defaults.view) })
-        : this.t("settings.savedApplied", "配置已保存并应用。");
+        : payload.restartPending
+          ? this.t("settings.savedCompositionRestart", "界面组合已保存，当前服务仍使用启动快照；请执行 memsphere view restart 后生效。")
+          : this.t("settings.savedApplied", "配置已保存并应用。");
     }
     this.render();
   }

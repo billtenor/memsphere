@@ -428,6 +428,7 @@ export const zhCNViewMessages = {
   "schema.open": "打开图式",
   "artifact.fileReadFailed": "无法读取产物文件：{error}",
   "artifact.file": "文件产物：{path}",
+  "settings.savedCompositionRestart": "界面组合已保存，当前服务仍使用启动快照；请执行 memsphere view restart 后生效。",
   "time.inProgress": "进行中"
 } as const;
 

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { satisfies, valid, validRange } from "semver";
 import { z } from "zod";
-import { viewPackageCapabilitySchema } from "../view/package-config.js";
+import { viewPackageCapabilitySchema, viewPackageContributionCellSchema } from "../view/package-config.js";
 
 const moduleIdPattern = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 
@@ -36,7 +36,7 @@ export const moduleManifestSchema = z.object({
     }).strict()).optional(),
     contributions: z.array(z.object({
       id: z.string().min(1),
-      cell: z.string().min(1),
+      cell: viewPackageContributionCellSchema,
       priority: z.number().int().min(0).max(999)
     }).strict()).optional()
   }).strict()

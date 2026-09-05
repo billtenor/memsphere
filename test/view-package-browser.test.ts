@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -8,6 +8,7 @@ import { chromium } from "playwright";
 import type { MemsphereConfig } from "../src/config.js";
 import { readProjectConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
+import { currentMemorySyntax } from "../src/memory/syntax.js";
 
 test("trusted local Package replaces Memory and Run through formal composition and appears in Settings", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "memsphere-view-package-browser-"));
@@ -15,7 +16,8 @@ test("trusted local Package replaces Memory and Run through formal composition a
   const projectRoot = join(home, "projects", "demo");
   const memoryRoot = join(projectRoot, "memory");
   const runsRoot = join(projectRoot, "runs");
-  const packageRoot = resolve("examples/view-packages/dsh-custom-view");
+  const packageRoot = join(temporary, "copied-custom-view");
+  await cp(resolve("examples/view-packages/dsh-custom-view"), packageRoot, { recursive: true });
   await mkdir(memoryRoot, { recursive: true });
   await mkdir(runsRoot, { recursive: true });
   await mkdir(join(projectRoot, "archives"), { recursive: true });
@@ -136,6 +138,14 @@ test("Settings completes the local Package installation and Project enablement f
     await page.locator("#settings-package-path").fill(packageRoot);
     await page.locator('[data-action="add-view-package"]').click();
     await save();
+    await page.getByText(/重启/).first().waitFor();
+    await page.getByText("界面组合已保存，当前服务仍使用启动快照；请执行 memsphere view restart 后生效。", { exact: true }).waitFor();
+    const pendingInstall = await page.evaluate(async () => (await fetch("/api/settings/global")).json());
+    assert.equal(pendingInstall.restartPending, true);
+    assert.notEqual(pendingInstall.composition.runningDigest, pendingInstall.composition.diskDigest);
+    await page.goto(`${active.origin}/projects/demo/memories`);
+    await page.locator(".memory-detail-surface").waitFor();
+    assert.equal(await page.locator("[data-custom-showcase]").count(), 0);
     await stop(active.server); active = undefined;
     assert.equal(JSON.parse(await readFile(join(home, "config.json"), "utf8")).view_packages.installed[0].path, packageRoot);
 
@@ -166,6 +176,14 @@ test("Settings completes the local Package installation and Project enablement f
     await page.locator('[data-select-field="project_view.theme"]').click();
     await page.locator('[data-select-option="project_view.theme"][data-value="org.example.memsphere.custom-view:sea-glass"]').click();
     await save();
+    await page.getByText(/重启/).first().waitFor();
+    await page.getByText("界面组合已保存，当前服务仍使用启动快照；请执行 memsphere view restart 后生效。", { exact: true }).waitFor();
+    const pendingProject = await page.evaluate(async () => (await fetch("/api/projects/demo/settings/project")).json());
+    assert.equal(pendingProject.restartPending, true);
+    assert.notEqual(pendingProject.composition.runningDigest, pendingProject.composition.diskDigest);
+    await page.goto(`${active.origin}/projects/demo/memories`);
+    await page.locator(".memory-detail-surface").waitFor();
+    assert.equal(await page.locator("[data-custom-showcase]").count(), 0);
     await stop(active.server); active = undefined;
     const project = JSON.parse(await readFile(join(projectRoot, "config.json"), "utf8"));
     assert.equal(project.view.packages[0].enabled, true);
@@ -178,5 +196,170 @@ test("Settings completes the local Package installation and Project enablement f
   } finally {
     if (active) await stop(active.server);
     await browser.close();
+  }
+});
+
+test("real Run Artifact uses a custom renderer and restores the official body when disabled", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "memsphere-view-run-artifact-"));
+  const home = join(temporary, "home");
+  const projectRoot = join(home, "projects", "demo");
+  const packageRoot = join(temporary, "artifact-package");
+  const runId = "run-custom-artifact";
+  const runRoot = join(projectRoot, "runs", runId);
+  await mkdir(join(projectRoot, "memory"), { recursive: true });
+  await mkdir(join(projectRoot, "archives"), { recursive: true });
+  await mkdir(runRoot, { recursive: true });
+  await mkdir(packageRoot, { recursive: true });
+  await writeFile(join(packageRoot, "module.json"), JSON.stringify({
+    schemaVersion: 1,
+    id: "org.example.run-artifact-only",
+    version: "1.0.0",
+    view: {
+      entry: "./index.js",
+      sdk: "^1.0.0",
+      contributions: [{ id: "artifact", cell: "org.memsphere.run.artifact.renderer@1:artifact", priority: 100 }]
+    }
+  }));
+  await writeFile(join(packageRoot, "index.js"), `
+    import { portableSlots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots"], apply(context) {
+      context.slots.register(portableSlots.runArtifactRenderer, { id: "artifact", key: "artifact", priority: 999, value: {
+        render(input) { const node = document.createElement("pre"); node.dataset.customArtifact = "true"; node.textContent = input.artifact.value; return node; }
+      }});
+    }};
+  `);
+  await writeFile(join(runRoot, `${runId}.json`), JSON.stringify({
+    contractVersion: 2,
+    memorySyntax: currentMemorySyntax,
+    id: runId,
+    name: "Artifact renderer fixture",
+    status: "done",
+    procedureName: "Artifact renderer fixture",
+    memoryRoot: join(projectRoot, "memory"),
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    stack: [],
+    events: [{
+      at: new Date(0).toISOString(),
+      frame: "procedure",
+      stepId: "flow[1]",
+      artifact: {
+        name: "result",
+        type: "string",
+        format: { name: "markdown", options: {} },
+        storage: "inline",
+        value: "actual artifact body"
+      }
+    }]
+  }));
+  await writeFile(join(home, "config.json"), JSON.stringify({
+    view: { host: "127.0.0.1", port: 0 },
+    view_packages: { installed: [{ path: packageRoot }] }
+  }));
+  const projectConfig = (enabled: boolean) => ({
+    store: { type: "managed", branch: "master", published_revision: "test" },
+    view: { packages: [{ id: "org.example.run-artifact-only", version: "1.0.0", enabled }] }
+  });
+  await writeFile(join(projectRoot, "config.json"), JSON.stringify(projectConfig(true)));
+  await writeFile(join(projectRoot, "project.json"), JSON.stringify({ format_version: 1, name: "demo", created_at: new Date(0).toISOString() }));
+  await writeFile(join(home, "registry.json"), JSON.stringify({ format_version: 1, projects: { demo: { root: projectRoot } }, workspaces: {} }));
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  const launch = async () => {
+    const server = createViewServer(await readProjectConfig("demo", home));
+    await new Promise<void>((resolveListen, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolveListen); });
+    return { server, origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
+  };
+  let active: Awaited<ReturnType<typeof launch>> | undefined;
+  try {
+    active = await launch();
+    await page.goto(`${active.origin}/projects/demo/tasks/${runId}`);
+    await page.waitForTimeout(1000);
+    assert.equal(await page.locator("[data-custom-artifact=true]").count(), 1, JSON.stringify({
+      body: await page.locator("body").innerText(),
+      diagnostics: await page.evaluate(() => (window as any).__memsphereViewDiagnostics?.())
+    }));
+    assert.equal(await page.locator("[data-custom-artifact=true]").textContent(), "actual artifact body");
+    await new Promise<void>(resolveClose => active!.server.close(() => resolveClose())); active = undefined;
+
+    await writeFile(join(projectRoot, "config.json"), JSON.stringify(projectConfig(false)));
+    active = await launch();
+    await page.goto(`${active.origin}/projects/demo/tasks/${runId}`);
+    await page.locator(".artifact-review-artifact-content").waitFor();
+    assert.equal(await page.locator("[data-custom-artifact]").count(), 0);
+    await page.getByText("actual artifact body", { exact: true }).waitFor();
+  } finally {
+    await browser.close();
+    if (active) await new Promise<void>(resolveClose => active!.server.close(() => resolveClose()));
+  }
+});
+
+test("boot composition snapshot stays isolated across A-B-A disk changes and removed Projects", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "memsphere-view-package-snapshot-"));
+  const home = join(temporary, "home");
+  const packageRoot = resolve("examples/view-packages/dsh-custom-view");
+  const grants = ["theme.override", "styles.scoped", "styles.global"] as const;
+  const roots = { a: join(home, "projects", "a"), b: join(home, "projects", "b") };
+  for (const [name, root] of Object.entries(roots)) {
+    await mkdir(join(root, "memory"), { recursive: true });
+    await mkdir(join(root, "runs"), { recursive: true });
+    await mkdir(join(root, "archives"), { recursive: true });
+    await writeFile(join(root, "project.json"), JSON.stringify({ format_version: 1, name, created_at: new Date(0).toISOString() }));
+  }
+  const projectConfig = (enabled: boolean) => ({
+    store: { type: "managed", branch: "master", published_revision: "test" },
+    view: { packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled, allow: grants }] }
+  });
+  await writeFile(join(home, "config.json"), JSON.stringify({
+    view: { host: "127.0.0.1", port: 0 },
+    view_packages: { installed: [{ path: packageRoot, allow: grants }] }
+  }));
+  await writeFile(join(roots.a, "config.json"), JSON.stringify(projectConfig(true)));
+  await writeFile(join(roots.b, "config.json"), JSON.stringify(projectConfig(false)));
+  await writeFile(join(home, "registry.json"), JSON.stringify({
+    format_version: 1,
+    projects: { a: { root: roots.a }, b: { root: roots.b } },
+    workspaces: {}
+  }));
+  const server = createViewServer(await readProjectConfig("a", home));
+  await new Promise<void>((resolveListen, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolveListen); });
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${origin}/projects/a/memories`);
+    await page.getByText("My Memory workspace", { exact: true }).waitFor();
+    await page.goto(`${origin}/projects/b/memories`);
+    await page.locator(".memory-detail-surface").waitFor();
+    assert.equal(await page.locator("[data-custom-showcase]").count(), 0);
+
+    await writeFile(join(roots.a, "config.json"), JSON.stringify(projectConfig(false)));
+    await writeFile(join(roots.b, "config.json"), JSON.stringify(projectConfig(true)));
+
+    await page.goto(`${origin}/projects/b/memories`);
+    await page.locator(".memory-detail-surface").waitFor();
+    assert.equal(await page.locator("[data-custom-showcase]").count(), 0);
+    const bDiagnostics = await page.evaluate(async () => (await fetch("/api/projects/b/settings/view-packages")).json());
+    assert.equal(bDiagnostics.composition.restartPending, true);
+
+    await page.goto(`${origin}/projects/a/memories`);
+    await page.getByText("My Memory workspace", { exact: true }).waitFor();
+    const aDiagnostics = await page.evaluate(async () => (await fetch("/api/projects/a/settings/view-packages")).json());
+    assert.equal(aDiagnostics.composition.restartPending, true);
+    assert.notEqual(aDiagnostics.composition.runningDigest, bDiagnostics.composition.runningDigest);
+
+    await writeFile(join(home, "registry.json"), JSON.stringify({
+      format_version: 1,
+      projects: { a: { root: roots.a } },
+      workspaces: {}
+    }));
+    const removed = await page.goto(`${origin}/projects/b/memories`);
+    assert.equal(removed?.status(), 404);
+    await writeFile(join(home, "registry.json"), JSON.stringify({ format_version: 1, projects: {}, workspaces: {} }));
+    const removedStartup = await page.goto(`${origin}/projects/a/memories`);
+    assert.equal(removedStartup?.status(), 404);
+  } finally {
+    await browser.close();
+    await new Promise<void>(resolveClose => server.close(() => resolveClose()));
   }
 });

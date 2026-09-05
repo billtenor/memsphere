@@ -230,16 +230,28 @@ export function compareViewThemeLayer(left: number, right: number): number {
 
 function validateContribution(contribution: ViewThemeContribution): void {
   if (!contribution.sourceId?.trim()) throw new Error("Theme sourceId must be non-empty");
+  validateViewThemePalette(contribution.tokens, contribution.complete === true);
+}
+
+export function validateViewThemePalette(tokens: ViewThemePalette, complete = false): void {
+  if (!tokens || typeof tokens !== "object" || !tokens.light || typeof tokens.light !== "object" || !tokens.dark || typeof tokens.dark !== "object") {
+    throw new Error("Theme must provide light and dark token maps");
+  }
   for (const mode of ["light", "dark"] as const) {
-    for (const [token, value] of Object.entries(contribution.tokens[mode])) {
+    for (const [token, value] of Object.entries(tokens[mode])) {
       if (!(token in viewThemeCssVariables)) throw new Error(`Unknown Theme token: ${token}`);
       if (typeof value !== "string" || !value.trim()) throw new Error(`Theme token must be non-empty: ${token}`);
     }
   }
-  if (contribution.complete) {
+  const lightKeys = Object.keys(tokens.light).sort();
+  const darkKeys = Object.keys(tokens.dark).sort();
+  if (lightKeys.join("\0") !== darkKeys.join("\0")) {
+    throw new Error("Theme light and dark token maps must declare the same keys");
+  }
+  if (complete) {
     for (const mode of ["light", "dark"] as const) {
       for (const token of Object.keys(viewThemeCssVariables) as ViewThemeToken[]) {
-        if (contribution.tokens[mode][token] === undefined) {
+        if (tokens[mode][token] === undefined) {
           throw new Error(`Complete Theme is missing ${mode} token: ${token}`);
         }
       }

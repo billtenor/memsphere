@@ -34,7 +34,7 @@ Memory 与 Run 必须实际迁移到新架构：官方现有实现成为 priorit
 - 参考 DeepSeek Harness commit `cd5ef8148158c3a752a658978873241fdf8e2bbc` 的分层包组合、稳定 cell、较小 priority 获胜、失败让位和 Theme 注册模型。
 - 沿用本仓库 TypeScript/DOM、ViewHost 生命周期、事务与配置管理；不引入 Cordis、React 或 DSH 包管理器。
 - `defineSlot()` v1 保持对象身份兼容，跨包扩展使用 owner 声明、dependency resolve 真实 token 的 portable Slot。
-- 外部 Package 可使用基础 `slots`、`router`、只读 `theme` 与 `ui` 创建自己的 Module 页面；`themeRegistry` 与 Style contribution 仍按 Manifest/Home/Project capability 裁剪，官方 Route 所有权不转移。
+- 外部 Package 可使用基础 `slots`、`router`、只读 `theme`、`presentation` 与 `ui` 创建自己的 Module 页面；`presentation` 只返回深冻结业务摘要和受控导航，`themeRegistry` 与 Style contribution 仍按 Manifest/Home/Project capability 裁剪，官方 Route 所有权不转移。
 
 ## 技术与测试方案
 
@@ -54,4 +54,8 @@ Memory 与 Run 必须实际迁移到新架构：官方现有实现成为 priorit
 
 ## 验收结果
 
-已完成独立 Package 正式加载、Settings 点击安装/双层授权/启用/Theme 选择/重启闭环、Memory/Run 页面替换、data renderer fallback、dark Theme 和 scoped/global Style 的 Chromium 验证。双 viewport 截图为 `memory-custom-desktop.png` 与 `memory-custom-mobile.png`。Memory ChangeSet `change-20260904-235551857z-74ca6050` 于最终代码上重新校验通过，Content Digest 为 `54239904d5b75ead6c64af0e0b78b35fce82bd270c361257b2b503d254003607`。`npm run typecheck`、`npm run build`、`git diff --check` 均通过；全量 548 项测试最终结果为 547 passed、1 个 Windows-only skipped、0 failed。专业评审与产品验收材料待完成。
+专业评审第 1 轮发现的三个 blocking 已修正：启动层现在冻结全部已注册 Project 的 composition/document revision/digest 与外部资产，Settings/diagnostics 显示 running/disk 和独立 `restartPending`；外部注册必须与 Manifest 的 `cell + id` 完全匹配且 priority 只来自 resolver；Run page 与 Artifact renderer 已补齐同步/异步失败、清理、diagnostics、官方 fallback 及真实 Artifact 启禁用浏览器验证。
+
+可行动 risk 也已收敛：示例提供 source、确定性预编译脚本、构建字节比对、SDK externalize 与复制安装测试，并通过当前 SDK 自动生成内联坏包验证 Host 拒绝；示例使用只读 `presentation` service 而非裸 fetch；renderer 输入深冻结并提供受控动作；Theme light/dark 键集合和 Style namespace 均 fail-closed 校验。双 viewport 截图为 `memory-custom-desktop.png` 与 `memory-custom-mobile.png`。
+
+最终 `npm run typecheck`、`npm run build`、`git diff --check` 均通过；全量 556 项测试结果为 555 passed、1 个 Windows-only skipped、0 failed。最终 Memory ChangeSet 为 `change-20260905-011256129z-a919a8ff`，校验通过，Content Digest `8f17de946b5af2728cd5ba0b08202434cf19f04eb88e66701fc82ebc2cdfdd53`，View 入口 `http://0.0.0.0:30000/projects/memsphere/changes/change-20260905-011256129z-a919a8ff`。专业复审与产品验收材料待完成。

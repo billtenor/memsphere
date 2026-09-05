@@ -275,6 +275,8 @@ export default defineViewPlugin<CustomerConfig>({
 
 View Plugin 现在可以作为可信本地 Package 安装，而不必加入 `builtinModuleCatalog` 或重新编译 Memsphere。示例见 `examples/view-packages/dsh-custom-view`。在“设置 → 界面 Package”添加绝对路径并保存；重启 View 后，在当前 Project 的“设置 → 界面组合”启用版本并分别授予 capability。Home 与 Project 都授权时 capability 才生效。
 
-Package 通过 `module.json` 声明 `capabilities`、`dependencies`、`styles`、`themes`、`contributions` 和可选 `source`。`styles.global` 是显式高权限：`@import`、远程资源、Host 私有 selector、`!important` 和 `--mem-view-*` 声明都会被拒绝。普通 scoped CSS 会绑定 Package 实例 root/portal；自定义变量请使用 Package 自己的命名空间。
+Package 通过 `module.json` 声明 `capabilities`、`dependencies`、`styles`、`themes`、`contributions` 和可选 `source`。`styles.global` 是显式高权限：`@import`、远程资源、Host 私有 selector、`!important` 和 `--mem-view-*` 声明都会被拒绝。普通 scoped CSS 会绑定 Package 实例 root/portal；声明 `namespace` 后，所有自定义变量定义都会按此前缀强制校验。Theme 的 light/dark 必须声明相同的已知 token 集合。
 
 使用 `portableSlots.memoryPagePresentation`、`memoryDetailRenderer`、`runPagePresentation` 和 `runArtifactRenderer` 替换稳定 Route 内的展示。较小 `priority` 获胜，同 cell 同 priority 必须在 Project 设置选择首选候选；渲染异常会 abdicate 并回退到下一候选。`order` 仍只控制 list 排序。
+
+示例的 `index.js` 是预编译 ESM；修改 `src/index.js` 后运行 `node scripts/build-example-view-package.mjs`。正式构建会逐字节检查签入 bundle，并强制保持 `@memsphere/view-sdk` 为 external import。Package 不得内联 SDK，Host 的单例 Token brand 会拒绝这种 bundle。Data renderer 必须同步返回 `HTMLElement`；抛错、返回 Promise/thenable 或其他值都会立即 abdicate 并进入官方 fallback，abdication 持续到实例卸载或 View 重启。

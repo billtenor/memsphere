@@ -59,3 +59,16 @@ test("complete Theme registrations require every token in both modes", () => {
     tokens: { light: { "color.accent": "red" }, dark: { "color.accent": "blue" } }
   }), /missing light token/);
 });
+
+test("partial Theme overrides require the same known tokens in light and dark", () => {
+  const store = new RuntimeThemeStore("light");
+  const lifecycle = new Lifecycle();
+  assert.throws(() => store.registry(lifecycle).registerTheme({
+    sourceId: "org.example.mismatched",
+    tokens: { light: { "color.accent": "red" }, dark: { "color.text": "white" } }
+  }), /same keys/);
+  assert.throws(() => store.registry(lifecycle).registerTheme({
+    sourceId: "org.example.unknown",
+    tokens: { light: { unknown: "red" }, dark: { unknown: "blue" } } as any
+  }), /Unknown Theme token/);
+});

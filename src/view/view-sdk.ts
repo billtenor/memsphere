@@ -84,6 +84,7 @@ export type ViewServiceName =
   | "i18n"
   | "theme"
   | "themeRegistry"
+  | "presentation"
   | "ui"
   | "logger";
 
@@ -92,6 +93,29 @@ export interface ModuleInstanceContext {
   readonly moduleId: string;
   readonly moduleVersion: string;
   readonly instanceId: string;
+}
+
+export interface MemoryPagePresentationContext {
+  readonly kind: "memory-page";
+  readonly filters: Readonly<Record<string, string>>;
+  readonly items: readonly Readonly<Record<string, unknown>>[];
+  readonly selectedReference?: string;
+  refresh(): Promise<MemoryPagePresentationContext>;
+  openMemory(reference: string): Promise<void>;
+}
+
+export interface RunPagePresentationContext {
+  readonly kind: "run-page";
+  readonly filters: Readonly<Record<string, string>>;
+  readonly runs: readonly Readonly<Record<string, unknown>>[];
+  readonly selectedRunId?: string;
+  refresh(): Promise<RunPagePresentationContext>;
+  openRun(id: string): Promise<void>;
+}
+
+export interface ViewPresentationService {
+  memoryPage(filters?: Readonly<Record<string, string>>): Promise<MemoryPagePresentationContext>;
+  runPage(filters?: Readonly<Record<string, string>>): Promise<RunPagePresentationContext>;
 }
 
 export interface ViewLifecycle {
@@ -1319,6 +1343,8 @@ export interface ViewPluginContext {
   readonly themeRegistry?: ViewThemeRegistry;
   /** Present only after the Plugin declares ui and a supported uiVersion. */
   readonly ui?: ViewUi;
+  /** Host-owned read-only business snapshots and controlled navigation for portable page presentations. */
+  readonly presentation?: ViewPresentationService;
   readonly lifecycle: ViewLifecycle;
 }
 

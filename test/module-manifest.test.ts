@@ -82,10 +82,17 @@ test("Manifest accepts shareable View Package metadata and rejects unsafe global
       dependencies: [{ id: "org.memsphere.memory", version: "^1.0.0" }],
       styles: [{ id: "base", file: "./styles/base.css", scope: "global" }],
       themes: [{ id: "forest", file: "./themes/forest.json" }],
-      contributions: [{ id: "memory-page", cell: "org.memsphere.memory.page.presentation@1", priority: 100 }]
+      contributions: [{ id: "memory-page", cell: "org.memsphere.memory.page.presentation@1:page", priority: 100 }]
     }
   });
   assert.equal(manifest.view.contributions?.[0]?.priority, 100);
+  assert.throws(() => parseModuleManifest({
+    ...manifest,
+    view: {
+      ...manifest.view,
+      contributions: [{ id: "unknown", cell: "org.example.unknown@1:page", priority: 1 }]
+    }
+  }), /Invalid enum value/);
 
   assert.throws(() => parseModuleManifest({
     schemaVersion: 1,

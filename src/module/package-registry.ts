@@ -49,7 +49,11 @@ export interface ResolvedViewPackageInstance {
   readonly config: Readonly<Record<string, unknown>>;
   readonly allow: ReadonlySet<ViewPackageCapability>;
   readonly contributionPolicy: {
-    readonly priorities: Readonly<Record<string, readonly [number, number]>>;
+    readonly registrations: readonly {
+      readonly cell: string;
+      readonly id: string;
+      readonly priority: readonly [number, number];
+    }[];
     readonly blockedCells: readonly string[];
   };
 }
@@ -213,11 +217,11 @@ export async function resolveViewPackageComposition(input: {
   }
 
   const instances = candidates.map((candidate): ResolvedViewPackageInstance => {
-    const priorities: Record<string, readonly [number, number]> = {};
+    const registrations: Array<{ cell: string; id: string; priority: readonly [number, number] }> = [];
     for (const contribution of candidate.package.manifest.view.contributions ?? []) {
       const identity = `${candidate.package.manifest.id}:${candidate.instanceId}:${contribution.id}`;
       const priority = ranks.get(identity);
-      if (priority) priorities[identity] = priority;
+      if (priority) registrations.push({ cell: contribution.cell, id: contribution.id, priority });
     }
     if (candidate.blockedCells.size) {
       diagnostics.push({
@@ -249,7 +253,7 @@ export async function resolveViewPackageComposition(input: {
       config: Object.freeze(structuredClone(candidate.config.config ?? {})),
       allow,
       contributionPolicy: Object.freeze({
-        priorities: Object.freeze(priorities),
+        registrations: Object.freeze(registrations.map(entry => Object.freeze(entry))),
         blockedCells: Object.freeze([...candidate.blockedCells].sort())
       })
     });

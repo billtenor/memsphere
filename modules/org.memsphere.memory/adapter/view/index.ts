@@ -1649,12 +1649,23 @@ class MemoryApplication {
       const wrap = el("div"); if (context) wrap.append(context); wrap.append(error); return wrap;
     }
     const entity = (detail.entity ?? detail) as JsonRecord;
+    const reference = `${detail.kind}/${Array.isArray(entity.names) ? String(entity.names[0] ?? detail.path ?? "") : String(detail.path ?? "")}`;
     const workspace = el("div");
     const content = el("section", "memory-panel memory-content-card");
     content.append(this.#renderDetail({
       kind: detail.kind,
-      entity,
-      memory: detail,
+      reference,
+      entity: freezePresentationValue(structuredClone(entity)),
+      memory: freezePresentationValue(structuredClone(detail)),
+      copyReference: () => navigator.clipboard?.writeText(reference),
+      openChangeSet: (id: string) => this.#navigate(this.#routes.changeDetail.to({
+        projectId: projectFromLocation(this.#location) || this.#currentProject || "memsphere",
+        changeId: id
+      })),
+      openReview: (id: string) => this.#navigate(this.#routes.changeDetail.to({
+        projectId: projectFromLocation(this.#location) || this.#currentProject || "memsphere",
+        changeId: id
+      })),
       defaultRender: () => renderMemoryEntity(detail.kind, entity, this.t.bind(this), undefined, this.renderOptions())
     }));
     if (context) workspace.append(context);
@@ -2100,6 +2111,12 @@ type RenderOptions = {
   knownReferences?: ReadonlySet<string>;
   openReference?: (target: string) => void;
 };
+
+function freezePresentationValue<T>(value: T): T {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value as Record<string, unknown>)) freezePresentationValue(child);
+  return Object.freeze(value);
+}
 
 function renderMemoryEntity(kind: string, entity: JsonRecord, t: (key: string) => string, comment?: (target: string, snapshot: string, location: unknown) => void, options: RenderOptions = {}): HTMLElement {
   if (kind === "schemas") return renderSchema(entity, 0, memoryName(entity as MemorySummary), "schema", t, comment, options);

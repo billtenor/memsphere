@@ -718,4 +718,7 @@ Module Manifest, CLI SDK, server-side View API registration, configuration Schem
 - `RegisterOptions.priority` is a non-negative integer for `single`/`keyed` replacement. The Host resolves Project preferences with an integer `[declaredPriority, preferenceRank]` tuple, never a floating-point projection.
 - `portableSlots` exports four `name@1` boundaries: `org.memsphere.memory.page.presentation`, `org.memsphere.memory.detail.renderer`, `org.memsphere.run.page.presentation`, and `org.memsphere.run.artifact.renderer`.
 - `SlotRegistry.render(token, key, input)` invokes a data renderer and marks an invalid or throwing candidate abdicated before falling back.
+- `ViewDataRenderer.render()` is synchronous and must immediately return an `HTMLElement`; a Promise/thenable is invalid and triggers fallback. Abdication lasts until instance unload or View restart.
 - `ViewThemeRegistry` supplies lifecycle-owned `registerTheme`, `selectTheme`, and `overrideTokens`. Complete Themes and partial overrides both provide light and dark maps.
+- The `presentation` service gives portable pages frozen Memory/Run summaries, filters, `refresh()`, and controlled `openMemory()`/`openRun()` navigation; a Package does not need and should not call business APIs with raw `fetch`.
+- Every external contribution must declare an exact Manifest `cell + id`. Runtime uses only the resolver priority tuple and ignores Bundle-reported priority. Unknown cells, missing keys, and id/cell mismatches fail the instance transaction atomically.

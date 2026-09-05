@@ -23,7 +23,11 @@ export interface ViewHostBootInstance {
     readonly layer: number;
   }[];
   readonly contributionPolicy?: {
-    readonly priorities: Readonly<Record<string, readonly [number, number]>>;
+    readonly registrations: readonly {
+      readonly cell: string;
+      readonly id: string;
+      readonly priority: readonly [number, number];
+    }[];
     readonly blockedCells: readonly string[];
   };
   readonly themeOperations?: readonly ("register" | "override")[];

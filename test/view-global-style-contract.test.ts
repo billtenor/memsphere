@@ -49,3 +49,15 @@ test("global style URL rewriting retains structure and uses only validated asset
   assert.match(css, /url\("\/assets\/view-packages\/key\/image\.png"\)/);
   assert.match(css, /url\("\/assets\/view-packages\/key\/font\.woff2"\)/);
 });
+
+test("declared style namespace is enforced for custom-property definitions", () => {
+  assert.doesNotThrow(() => validateGlobalStyle(
+    ".card { --org-example-card-accent: teal; color: var(--org-example-card-accent); }",
+    "--org-example-card-*"
+  ));
+  assert.throws(() => validateGlobalStyle(
+    ".card { --other-accent: teal; }",
+    "--org-example-card-*"
+  ), /outside its declared namespace/);
+  assert.throws(() => validateGlobalStyle(".card { color: teal; }", "org-example-*"), /namespace/);
+});

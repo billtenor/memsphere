@@ -727,4 +727,7 @@ Module Manifest、CLI SDK、服务端 View API 注册接口、配置 Schema、�
 - `RegisterOptions.priority` 是非负整数，用于 `single`/`keyed` replacement；Host 内部用 `[declaredPriority, preferenceRank]` 整数元组解析用户首选，不使用浮点数。
 - `portableSlots` 导出四个 `name@1` 边界：`org.memsphere.memory.page.presentation`、`org.memsphere.memory.detail.renderer`、`org.memsphere.run.page.presentation`、`org.memsphere.run.artifact.renderer`。
 - `SlotRegistry.render(token, key, input)` 调用 data renderer，并在异常或非法返回值时把候选标为 abdicated 后继续 fallback。
+- `ViewDataRenderer.render()` 是同步契约，必须立即返回 `HTMLElement`；Promise/thenable 属于非法返回值并触发 fallback。abdicated 状态持续到实例卸载或 View 重启。
 - `ViewThemeRegistry` 提供 `registerTheme`、`selectTheme`、`overrideTokens`，都由实例 lifecycle 持有并可撤销。完整 Theme 与部分 override 均同时提供 light/dark map。
+- `presentation` 服务为 portable page 提供冻结的 Memory/Run 摘要、筛选值、`refresh()` 以及受控 `openMemory()`/`openRun()` 导航；Package 不需要也不应直接调用业务 `fetch`。
+- 外部 contribution 必须在 Manifest 中声明完全匹配的 `cell + id`；运行时只采用 resolver 生成的 priority 元组，忽略 Bundle 自报 priority。未知 cell、漏 key 或 id/cell 不匹配会让实例事务原子失败。

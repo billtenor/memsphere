@@ -25,8 +25,8 @@ test("View Package resolver loads installed versions and blocks unresolved same-
     const conflicted = await resolveViewPackageComposition({ global, project: baseProject, sdkVersion: "1.0.0" });
     assert.equal(conflicted.installed.length, 2);
     assert.deepEqual(conflicted.instances.map(value => value.contributionPolicy.blockedCells), [
-      ["org.memsphere.memory.page.presentation@1"],
-      ["org.memsphere.memory.page.presentation@1"]
+      ["org.memsphere.memory.page.presentation@1:page"],
+      ["org.memsphere.memory.page.presentation@1:page"]
     ]);
 
     const preferredIdentity = "org.example.second:org.example.second:second";
@@ -35,14 +35,14 @@ test("View Package resolver loads installed versions and blocks unresolved same-
       project: {
         packages: baseProject.packages.map(entry => ({
           ...entry,
-          preferences: { "org.memsphere.memory.page.presentation@1": preferredIdentity }
+          preferences: { "org.memsphere.memory.page.presentation@1:page": preferredIdentity }
         }))
       },
       sdkVersion: "1.0.0"
     });
     assert.deepEqual(resolved.instances.map(value => value.contributionPolicy.blockedCells), [[], []]);
     assert.deepEqual(
-      resolved.instances[1]?.contributionPolicy.priorities[preferredIdentity],
+      resolved.instances[1]?.contributionPolicy.registrations.find(entry => entry.id === "second")?.priority,
       [100, 0]
     );
   } finally {
@@ -133,7 +133,7 @@ async function makePackage(
       sdk: "^1.0.0",
       contributions: [{
         id: contributionId,
-        cell: "org.memsphere.memory.page.presentation@1",
+        cell: "org.memsphere.memory.page.presentation@1:page",
         priority: 100
       }],
       ...(withStyle ? { capabilities: ["styles.global"], styles: [{ id: "global", file: "./global.css", scope: "global" }] } : {})

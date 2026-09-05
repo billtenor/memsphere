@@ -11,6 +11,15 @@ export const viewPackageCapabilitySchema = z.enum([
 
 export type ViewPackageCapability = z.infer<typeof viewPackageCapabilitySchema>;
 
+export const portableViewContributionCells = [
+  "org.memsphere.memory.page.presentation@1:page",
+  "org.memsphere.memory.detail.renderer@1:detail",
+  "org.memsphere.run.page.presentation@1:page",
+  "org.memsphere.run.artifact.renderer@1:artifact"
+] as const;
+
+export const viewPackageContributionCellSchema = z.enum(portableViewContributionCells);
+
 const uniqueCapabilities = z.array(viewPackageCapabilitySchema).superRefine((values, context) => {
   if (new Set(values).size !== values.length) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "capabilities must be unique" });

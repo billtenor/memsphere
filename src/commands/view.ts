@@ -117,7 +117,8 @@ import {
   type ViewHostBootInstance
 } from "../view/host.js";
 import { rewriteGlobalStyleUrls, scopePackageStyle, validateGlobalStyle } from "../view/global-style-contract.js";
-import { VIEW_THEME_HOME_LAYER, VIEW_THEME_PROJECT_LAYER } from "../view/theme.js";
+import { viewCompositionDigest } from "../view/package-config.js";
+import { validateViewThemePalette, VIEW_THEME_HOME_LAYER, VIEW_THEME_PROJECT_LAYER } from "../view/theme.js";
 import { coreViewRoutes } from "../view/core-routes.js";
 import {
   localizeAcpProviderDefinition,
@@ -265,6 +266,25 @@ type ViewServerOptions = {
   developmentModules?: readonly ViewDevelopmentModule[];
 };
 
+type ViewCompositionBootEntry = Readonly<{
+  projectId: string;
+  globalRevision: string;
+  projectRevision?: string;
+  viewPackages: MemsphereConfig["viewPackages"];
+  viewTheme: MemsphereConfig["viewTheme"];
+  projectView: NonNullable<MemsphereConfig["project"]>["view"];
+  digest: string;
+  composition: Promise<ResolvedViewPackageComposition>;
+  externalInstances: Promise<readonly ViewHostBootInstance[]>;
+}>;
+
+type ViewCompositionBootSnapshot = Readonly<{
+  globalRevision: string;
+  globalDigest: string;
+  registeredProjectIds: ReadonlySet<string>;
+  entries: ReadonlyMap<string, ViewCompositionBootEntry>;
+}>;
+
 class ViewMemoryCache {
   readonly previews = new MemoryChangePreviewCache();
   readonly #filesByRoot = new Map<string, Map<string, { kind: MemoryKind; path: string }>>();
@@ -313,13 +333,13 @@ export function createViewServer(config: MemsphereConfig, options: ViewServerOpt
   }
   const viewCache = new ViewMemoryCache();
   const packageAssets = new ViewPackageAssetRegistry();
-  const packageCompositions = new Map<string, Promise<ResolvedViewPackageComposition>>();
+  const compositionBootSnapshot = captureViewCompositionBootSnapshot(config, packageAssets);
   void systemMemoryReferences().catch(() => {
     systemMemoryReferencesPromise = undefined;
   });
   const server = createServer(async (request, response) => {
     try {
-      await handleRequest(request, response, config, options, viewCache, packageAssets, packageCompositions);
+      await handleRequest(request, response, config, options, viewCache, packageAssets, compositionBootSnapshot);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       sendJson(response, 500, {
@@ -339,8 +359,9 @@ async function handleRequest(
   options: ViewServerOptions,
   viewCache: ViewMemoryCache,
   packageAssets: ViewPackageAssetRegistry,
-  packageCompositions: Map<string, Promise<ResolvedViewPackageComposition>>
+  compositionBootSnapshotPromise: Promise<ViewCompositionBootSnapshot>
 ): Promise<void> {
+  const compositionBootSnapshot = await compositionBootSnapshotPromise;
   const url = new URL(request.url ?? "/", "http://localhost");
   const requestedPathname = url.pathname;
   const scopedApi = url.pathname === "/api/projects/select"
@@ -350,12 +371,14 @@ async function handleRequest(
   const projectScope = scopedApi ?? scopedPage;
   if (projectScope) {
     const startupProjectId = config.project?.name ?? "memsphere";
-    if (projectScope.projectId !== startupProjectId) {
+    if (projectScope.projectId !== startupProjectId || compositionBootSnapshot.registeredProjectIds.has(projectScope.projectId)) {
       const projects = await listRegisteredProjects(config.homeRoot ?? resolveMemsphereHome());
       if (!projects.some(project => project.name === projectScope.projectId && !project.missing)) {
         sendJson(response, 404, { code: "project_not_found", error: `Project not found: ${projectScope.projectId}` });
         return;
       }
+    }
+    if (projectScope.projectId !== startupProjectId) {
       config = await readProjectConfig(projectScope.projectId, config.homeRoot);
     }
     if (scopedApi) url.pathname = `/api${scopedApi.remainder === "/" ? "" : scopedApi.remainder}`;
@@ -455,17 +478,18 @@ async function handleRequest(
       return;
     }
     const projectId = config.project?.name ?? "memsphere";
-    const composition = await viewPackageComposition(config, packageCompositions);
+    const bootEntry = compositionBootSnapshot.entries.get(projectId);
+    const presentationConfig = bootEntry ? configWithViewCompositionSnapshot(config, bootEntry) : config;
     const [instances, packageInstances] = await Promise.all([
       builtinViewInstances(config),
-      externalViewInstances(config, composition, packageAssets)
+      bootEntry ? bootEntry.externalInstances : Promise.resolve([])
     ]);
     sendHtml(response, renderViewHostHtml(
       config.language,
       [...instances, ...packageInstances, ...(options.developmentModules?.map(module => module.instance) ?? [])],
       requestedPathname,
-      config.viewTheme?.mode ?? "system",
-      configuredThemeOverrides(config),
+      presentationConfig.viewTheme?.mode ?? "system",
+      configuredThemeOverrides(presentationConfig),
     ));
     return;
   }
@@ -483,11 +507,19 @@ async function handleRequest(
 
   if (request.method === "GET" && url.pathname === "/api/settings/view-packages") {
     if (!authorizeSettingsRequest(request, response, config, options)) return;
+    const globalDocument = await readGlobalSettingsDocument(config);
+    const projectDocument = await readCurrentProjectSettingsDocument(config);
     const composition = await resolveViewPackageComposition({
-      global: config.viewPackages,
-      project: config.project?.view,
+      global: globalDocument.raw.view_packages,
+      project: projectDocument?.raw.view,
       sdkVersion: viewSdkVersion
     });
+    const running = compositionBootSnapshot.entries.get(config.project?.name ?? "memsphere");
+    const diskDigest = compositionConfigDigest(
+      globalDocument.raw.view_packages,
+      globalDocument.raw.view_theme,
+      projectDocument?.raw.view
+    );
     sendJson(response, 200, {
       installed: composition.installed.map(entry => ({
         id: entry.manifest.id,
@@ -507,7 +539,16 @@ async function handleRequest(
         allow: [...entry.allow],
         contributionPolicy: entry.contributionPolicy
       })),
-      diagnostics: composition.diagnostics
+      diagnostics: composition.diagnostics,
+      composition: {
+        runningDigest: running?.digest,
+        diskDigest,
+        runningGlobalRevision: running?.globalRevision,
+        runningProjectRevision: running?.projectRevision,
+        diskGlobalRevision: globalDocument.revision,
+        diskProjectRevision: projectDocument?.revision,
+        restartPending: !running || running.digest !== diskDigest
+      }
     });
     return;
   }
@@ -566,7 +607,8 @@ async function handleRequest(
       document,
       options.runningRevision ?? document.revision,
       config.view,
-      projects
+      projects,
+      compositionBootSnapshot
     ));
     return;
   }
@@ -599,7 +641,11 @@ async function handleRequest(
       ...publicValidation,
       expectedRevision: document.revision,
       runningRevision: options.runningRevision ?? document.revision,
-      restartRequired: !sameViewConfig(candidateView, config.view)
+      restartRequired: !sameViewConfig(candidateView, config.view),
+      ...globalCompositionState({
+        view_packages: validation.candidate?.view_packages,
+        view_theme: validation.candidate?.view_theme
+      }, document.revision, compositionBootSnapshot)
     });
     return;
   }
@@ -670,7 +716,8 @@ async function handleRequest(
           saved,
           options.runningRevision ?? document.revision,
           config.view,
-          await readRegisteredProjectConfigs(config.homeRoot)
+          await readRegisteredProjectConfigs(config.homeRoot),
+          compositionBootSnapshot
         ),
         saved: true
       });
@@ -704,7 +751,11 @@ async function handleRequest(
       sendJson(response, 404, { code: "project_unavailable", error: "No Project is currently selected" });
       return;
     }
-    sendJson(response, 200, projectSettingsPayload(document));
+    sendJson(response, 200, projectSettingsPayload(
+      document,
+      await readGlobalSettingsDocument(config),
+      compositionBootSnapshot.entries.get(document.resolved.project?.name ?? "memsphere")
+    ));
     return;
   }
 
@@ -739,7 +790,13 @@ async function handleRequest(
     sendJson(response, validation.valid ? 200 : 422, {
       ...publicValidation,
       expectedRevision: document.revision,
-      restartRequired: false
+      restartRequired: false,
+      ...projectCompositionState(
+        validation.candidate?.view,
+        document.revision,
+        global,
+        compositionBootSnapshot.entries.get(document.resolved.project?.name ?? "memsphere")
+      )
     });
     return;
   }
@@ -764,7 +821,14 @@ async function handleRequest(
         draft: body.config as EditableProjectConfigDraft,
         globalConfigPath: global.configPath
       });
-      sendJson(response, 200, { ...projectSettingsPayload(saved), saved: true });
+      sendJson(response, 200, {
+        ...projectSettingsPayload(
+          saved,
+          global,
+          compositionBootSnapshot.entries.get(saved.resolved.project?.name ?? "memsphere")
+        ),
+        saved: true
+      });
     } catch (error) {
       if (error instanceof ConfigDraftValidationError) {
         sendJson(response, 422, {
@@ -2353,7 +2417,8 @@ function globalSettingsPayload(
   document: GlobalConfigDocument,
   runningRevision: string,
   runningView: MemsphereConfig["view"],
-  projects: ProjectConfigReference[]
+  projects: ProjectConfigReference[],
+  compositionBootSnapshot: ViewCompositionBootSnapshot
 ): Record<string, unknown> {
   const diskView = document.raw.view ?? { host: "127.0.0.1", port: 0 };
   return {
@@ -2363,6 +2428,7 @@ function globalSettingsPayload(
     runningView: { host: runningView.host, port: runningView.port },
     diskRevision: document.revision,
     restartRequired: !sameViewConfig(diskView, runningView),
+    ...globalCompositionState(document.raw, document.revision, compositionBootSnapshot),
     operatorTokenConfigured: Boolean(document.raw.view?.operator_token),
     explicit: {
       language: Object.hasOwn(document.raw, "language"),
@@ -2390,13 +2456,18 @@ function sameViewConfig(
     left.operator_token === right.operatorToken;
 }
 
-function projectSettingsPayload(document: ProjectConfigDocument): Record<string, unknown> {
+function projectSettingsPayload(
+  document: ProjectConfigDocument,
+  global: GlobalConfigDocument,
+  running: ViewCompositionBootEntry | undefined
+): Record<string, unknown> {
   return {
     configPath: document.configPath,
     projectName: document.resolved.project?.name,
     scopeRoot: document.scopeRoot,
     diskRevision: document.revision,
     restartRequired: false,
+    ...projectCompositionState(document.raw.view, document.revision, global, running),
     explicit: { controlPlane: Object.hasOwn(document.raw, "control_plane") },
     config: editableProjectConfigDraft(document),
     store: document.raw.store,
@@ -2407,6 +2478,46 @@ function projectSettingsPayload(document: ProjectConfigDocument): Record<string,
     },
     permissionCatalog: listPermissionDefinitions()
       .filter((definition) => !hiddenSettingsPermissionIds.has(definition.id))
+  };
+}
+
+function globalCompositionState(
+  disk: Pick<GlobalConfigDocument["raw"], "view_packages" | "view_theme">,
+  diskRevision: string,
+  running: ViewCompositionBootSnapshot
+): Record<string, unknown> {
+  const diskDigest = viewCompositionDigest({
+    view_packages: disk.view_packages,
+    view_theme: disk.view_theme
+  });
+  return {
+    restartPending: running.globalDigest !== diskDigest,
+    composition: {
+      runningDigest: running.globalDigest,
+      diskDigest,
+      runningRevision: running.globalRevision,
+      diskRevision
+    }
+  };
+}
+
+function projectCompositionState(
+  projectView: NonNullable<MemsphereConfig["project"]>["view"],
+  projectRevision: string,
+  global: GlobalConfigDocument,
+  running: ViewCompositionBootEntry | undefined
+): Record<string, unknown> {
+  const diskDigest = compositionConfigDigest(global.raw.view_packages, global.raw.view_theme, projectView);
+  return {
+    restartPending: !running || running.digest !== diskDigest,
+    composition: {
+      runningDigest: running?.digest,
+      diskDigest,
+      runningGlobalRevision: running?.globalRevision,
+      runningProjectRevision: running?.projectRevision,
+      diskGlobalRevision: global.revision,
+      diskProjectRevision: projectRevision
+    }
   };
 }
 
@@ -2740,20 +2851,86 @@ function configuredThemeOverrides(config: MemsphereConfig): NonNullable<ViewHost
   return Object.freeze(contributions);
 }
 
-function viewPackageComposition(
+async function captureViewCompositionBootSnapshot(
   config: MemsphereConfig,
-  cache: Map<string, Promise<ResolvedViewPackageComposition>>,
-): Promise<ResolvedViewPackageComposition> {
-  const projectId = config.project?.name ?? "memsphere";
-  const existing = cache.get(projectId);
-  if (existing) return existing;
-  const snapshot = resolveViewPackageComposition({
-    global: config.viewPackages,
-    project: config.project?.view,
-    sdkVersion: viewSdkVersion
+  assets: ViewPackageAssetRegistry
+): Promise<ViewCompositionBootSnapshot> {
+  const globalDocument = await readGlobalSettingsDocument(config);
+  const viewPackages = structuredClone(config.viewPackages);
+  const viewTheme = structuredClone(config.viewTheme);
+  const entries = new Map<string, ViewCompositionBootEntry>();
+  const registered = (await listRegisteredProjects(config.homeRoot ?? resolveMemsphereHome()))
+    .filter(project => !project.missing);
+  const startupProjectId = config.project?.name;
+  const projectIds = new Set(registered.map(project => project.name));
+  if (startupProjectId) projectIds.add(startupProjectId);
+  await Promise.all([...projectIds].map(async projectId => {
+    const resolved = projectId === startupProjectId
+      ? config
+      : await readProjectConfig(projectId, config.homeRoot);
+    const projectView = structuredClone(resolved.project?.view);
+    let projectRevision = resolved.project?.revision;
+    try {
+      projectRevision = (await readProjectConfigDocument(resolved.configPath, resolved)).revision;
+    } catch {
+      // A Project removed during startup remains absent from the immutable boot snapshot.
+      return;
+    }
+    const digest = compositionConfigDigest(viewPackages, viewTheme, projectView);
+    const presentationConfig: MemsphereConfig = {
+      ...resolved,
+      viewPackages,
+      viewTheme,
+      ...(resolved.project ? { project: { ...resolved.project, view: projectView } } : {})
+    };
+    const composition = resolveViewPackageComposition({
+      global: viewPackages,
+      project: projectView,
+      sdkVersion: viewSdkVersion
+    });
+    entries.set(projectId, Object.freeze({
+      projectId,
+      globalRevision: globalDocument.revision,
+      projectRevision,
+      viewPackages,
+      viewTheme,
+      projectView,
+      digest,
+      composition,
+      externalInstances: composition.then(value => externalViewInstances(presentationConfig, value, assets))
+    }));
+  }));
+  await Promise.all([...entries.values()].map(entry => entry.externalInstances));
+  return Object.freeze({
+    globalRevision: globalDocument.revision,
+    globalDigest: viewCompositionDigest({ view_packages: viewPackages, view_theme: viewTheme }),
+    registeredProjectIds: Object.freeze(new Set(registered.map(project => project.name))),
+    entries
   });
-  cache.set(projectId, snapshot);
-  return snapshot;
+}
+
+function compositionConfigDigest(
+  viewPackages: MemsphereConfig["viewPackages"],
+  viewTheme: MemsphereConfig["viewTheme"],
+  projectView: NonNullable<MemsphereConfig["project"]>["view"]
+): string {
+  return viewCompositionDigest({
+    view_packages: viewPackages,
+    view_theme: viewTheme,
+    project_view: projectView
+  });
+}
+
+function configWithViewCompositionSnapshot(
+  config: MemsphereConfig,
+  entry: ViewCompositionBootEntry
+): MemsphereConfig {
+  return {
+    ...config,
+    viewPackages: entry.viewPackages,
+    viewTheme: entry.viewTheme,
+    ...(config.project ? { project: { ...config.project, view: entry.projectView } } : {})
+  };
 }
 
 async function externalViewInstances(
@@ -2785,16 +2962,13 @@ async function externalViewInstances(
       const layer = sourceId === selectedProjectTheme ? VIEW_THEME_PROJECT_LAYER : VIEW_THEME_HOME_LAYER;
       return [loadViewPackageTheme({ projectId, sourceId, layer, selected, instance, file: theme.file, assets })];
     }));
-    const priorities = Object.fromEntries(
-      Object.entries(instance.contributionPolicy.priorities).map(([identity, priority]) => [identity.split(":").at(-1)!, priority])
-    );
     return Object.freeze({
       pluginPath: `/assets/view-packages/${encodeURIComponent(projectId)}/${entry.key}`,
       config: instance.config,
       styles: Object.freeze(styles),
       themes: Object.freeze(themes),
       contributionPolicy: Object.freeze({
-        priorities: Object.freeze(priorities),
+        registrations: instance.contributionPolicy.registrations,
         blockedCells: instance.contributionPolicy.blockedCells
       }),
       themeOperations: Object.freeze([
@@ -2805,6 +2979,7 @@ async function externalViewInstances(
         "slots" as const,
         "router" as const,
         "theme" as const,
+        "presentation" as const,
         "ui" as const,
         ...(
           capabilities.has("theme.register") || capabilities.has("theme.override")
@@ -2860,6 +3035,7 @@ async function loadViewPackageTheme(input: {
     throw new Error(`Theme must provide light and dark token maps: ${input.file}`);
   }
   const complete = value.complete === true;
+  validateViewThemePalette({ light, dark } as Parameters<typeof validateViewThemePalette>[0], complete);
   const required = complete ? "theme.register" as const : "theme.override" as const;
   if (!input.instance.allow.has(required)) throw new Error(`Theme contribution lacks effective ${required} capability: ${input.sourceId}`);
   return Object.freeze({
@@ -2887,7 +3063,7 @@ async function loadViewPackageStyle(input: {
   const styleBody = await input.assets.read(styleAsset.key, input.projectId);
   if (!styleBody) throw new Error(`Style changed while composing View Package: ${input.style.file}`);
   const source = styleBody.body.toString("utf8");
-  const validated = validateGlobalStyle(source);
+  const validated = validateGlobalStyle(source, input.style.namespace);
   const urls = new Map<string, string>();
   for (const relativePath of validated.assets) {
     const asset = await input.assets.register({

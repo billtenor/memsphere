@@ -1,44 +1,44 @@
-// examples/view-packages/dsh-custom-view/src/index.js
 import { defineViewPlugin, portableSlots } from "@memsphere/view-sdk";
-var text = (tag, value, className = "") => {
+
+const text = (tag, value, className = "") => {
   const element = document.createElement(tag);
   element.className = className;
   element.textContent = value;
   return element;
 };
-var page = (kind, presentation) => ({
+
+const page = (kind, presentation) => ({
   async mount({ element }, context) {
     element.dataset.customShowcase = kind;
     const card = text("section", "", "example-custom-page");
     card.append(text("small", "Community View Package"), text("h2", kind === "memory" ? "My Memory workspace" : "My Run workspace"));
-    const status = text("p", "Loading current Project data\u2026");
+    const status = text("p", "Loading current Project data…");
     card.append(status);
     element.append(card);
     try {
-      const payload = kind === "memory" ? await presentation.memoryPage() : await presentation.runPage({ status: "running" });
+      const payload = kind === "memory"
+        ? await presentation.memoryPage()
+        : await presentation.runPage({ status: "running" });
       const records = payload.items ?? payload.runs ?? [];
-      status.textContent = `${records.length} records \xB7 stable route ${context.route.pathname}`;
+      status.textContent = `${records.length} records · stable route ${context.route.pathname}`;
     } catch (error) {
       status.textContent = `Data remains available through the official API (${String(error)})`;
     }
   }
 });
-var index_default = defineViewPlugin({
+
+export default defineViewPlugin({
   name: "community-custom-view-showcase",
   apiVersion: 1,
   inject: ["slots", "presentation"],
   apply(context) {
     if (!context.presentation) throw new Error("View Package requires the presentation service");
     context.slots.register(portableSlots.memoryPagePresentation, {
-      id: "memory-page",
-      key: "page",
-      priority: 100,
+      id: "memory-page", key: "page", priority: 100,
       value: page("memory", context.presentation)
     });
     context.slots.register(portableSlots.memoryDetailRenderer, {
-      id: "memory-detail",
-      key: "detail",
-      priority: 100,
+      id: "memory-detail", key: "detail", priority: 100,
       value: { render(input) {
         const value = input;
         const card = text("article", "", "example-custom-renderer");
@@ -49,15 +49,11 @@ var index_default = defineViewPlugin({
       } }
     });
     context.slots.register(portableSlots.runPagePresentation, {
-      id: "run-page",
-      key: "page",
-      priority: 100,
+      id: "run-page", key: "page", priority: 100,
       value: page("run", context.presentation)
     });
     context.slots.register(portableSlots.runArtifactRenderer, {
-      id: "run-artifact",
-      key: "artifact",
-      priority: 100,
+      id: "run-artifact", key: "artifact", priority: 100,
       value: { render(input) {
         const value = input;
         const card = text("div", "", "example-custom-renderer");
@@ -69,6 +65,3 @@ var index_default = defineViewPlugin({
     });
   }
 });
-export {
-  index_default as default
-};

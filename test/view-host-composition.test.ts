@@ -152,6 +152,178 @@ test("portable data renderer receives business data and falls back from an async
   }, "/memories/concepts/example");
 });
 
+test("external contribution policy rejects undeclared or mismatched cells and owns effective priority", async () => {
+  const undeclared = {
+    ...bootInstance("org.example.undeclared", "undeclared", "/undeclared.js", "/"),
+    contributionPolicy: { registrations: [], blockedCells: [] }
+  };
+  const mismatched = {
+    ...bootInstance("org.example.mismatched", "mismatched", "/mismatched.js", "/"),
+    contributionPolicy: {
+      registrations: [{ cell: "org.memsphere.memory.page.presentation@1:page", id: "declared", priority: [10, 0] as const }],
+      blockedCells: []
+    }
+  };
+  const governed = {
+    ...bootInstance("org.example.governed", "governed", "/governed.js", "/"),
+    contributionPolicy: {
+      registrations: [{ cell: "org.memsphere.memory.page.presentation@1:page", id: "declared", priority: [100, 0] as const }],
+      blockedCells: []
+    }
+  };
+  const official = {
+    ...bootInstance("org.memsphere.memory", "memory", "/policy-official.js", "/"),
+    routeGrants: [{ id: "index", path: "/memories" }]
+  };
+  const bundles = new Map([
+    ["/undeclared.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots"], apply(context) {
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "hidden", key: "page", priority: 0, value: { mount() {} } });
+      }};
+    `],
+    ["/mismatched.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots"], apply(context) {
+        context.slots.register(portableSlots.runPagePresentation, { id: "declared", key: "page", priority: 0, value: { mount() {} } });
+      }};
+    `],
+    ["/governed.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots"], apply(context) {
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "declared", key: "page", priority: 5000, value: {
+          mount({ element }) { element.id = "manifest-governed-page"; element.textContent = "Manifest wins"; }
+        }});
+      }};
+    `],
+    ["/policy-official.js", `
+      import { portableSlots, slots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+        const route = context.router.register({ id: "index", path: "/memories" });
+        const page = { mount({ element }) { element.id = "policy-official"; } };
+        context.slots.register(slots.mainView, { id: "legacy", key: route.key, when: route.activation, value: page });
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "official", key: "page", priority: 1000, when: route.activation, value: page });
+      }};
+    `]
+  ]);
+  await withPage(renderViewHostHtml("en", [undeclared, mismatched, governed, official]), bundles, undefined, async page => {
+    await page.locator("#manifest-governed-page").waitFor();
+    assert.equal(await page.locator("#policy-official").count(), 0);
+    assert.equal(await page.locator("html").getAttribute("data-view-host-state"), "ready");
+  }, "/memories");
+});
+
+test("a package that bundles the current View SDK is rejected and cannot replace the Host singleton", async () => {
+  const inline = await build({
+    stdin: {
+      contents: `
+        import { portableSlots } from "./src/view/view-sdk.ts";
+        export default { apiVersion: 1, inject: ["slots"], apply(context) {
+          context.slots.register(portableSlots.memoryPagePresentation, { id: "inline", key: "page", value: { mount({ element }) { element.id = "inline-sdk-page"; } } });
+        }};
+      `,
+      resolveDir: process.cwd(),
+      sourcefile: "generated-inline-sdk-package.js"
+    },
+    bundle: true,
+    format: "esm",
+    platform: "browser",
+    write: false,
+    logLevel: "silent"
+  });
+  const bad = {
+    ...bootInstance("org.example.inline-sdk", "inline", "/inline-sdk.js", "/"),
+    contributionPolicy: {
+      registrations: [{ cell: "org.memsphere.memory.page.presentation@1:page", id: "inline", priority: [1, 0] as const }],
+      blockedCells: []
+    }
+  };
+  const official = {
+    ...bootInstance("org.memsphere.memory", "memory", "/inline-sdk-official.js", "/"),
+    routeGrants: [{ id: "index", path: "/memories" }]
+  };
+  const bundles = new Map([
+    ["/inline-sdk.js", inline.outputFiles[0]!.text],
+    ["/inline-sdk-official.js", `
+      import { portableSlots, slots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+        const route = context.router.register({ id: "index", path: "/memories" });
+        const page = { mount({ element }) { element.id = "inline-sdk-official"; } };
+        context.slots.register(slots.mainView, { id: "legacy", key: route.key, when: route.activation, value: page });
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "official", key: "page", priority: 1000, when: route.activation, value: page });
+      }};
+    `]
+  ]);
+  await withPage(renderViewHostHtml("en", [bad, official]), bundles, undefined, async page => {
+    await page.locator("#inline-sdk-official").waitFor({ state: "attached" });
+    assert.equal(await page.locator("#inline-sdk-page").count(), 0);
+    const diagnostics = await page.evaluate(() => (window as any).__memsphereViewDiagnostics());
+    assert.equal(diagnostics.instances.find((entry: any) => entry.module.moduleId === "org.example.inline-sdk")?.status, "failed");
+  }, "/memories");
+});
+
+test("Run page and Artifact renderer exhaust sync and async failures before official fallback", async () => {
+  const external = [
+    bootInstance("org.example.run-sync", "run-sync", "/run-sync.js", "/"),
+    bootInstance("org.example.run-async", "run-async", "/run-async.js", "/")
+  ];
+  const official = {
+    ...bootInstance("org.memsphere.run", "run", "/run-official.js", "/"),
+    routeGrants: [{ id: "detail", path: "/tasks/:runId" }]
+  };
+  const bundles = new Map([
+    ["/run-sync.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots"], apply(context) {
+        context.slots.register(portableSlots.runPagePresentation, { id: "page-sync", key: "page", priority: 50, value: {
+          mount({ element, portal }) { element.id = "failed-run-page-sync"; portal.id = "failed-run-portal-sync"; throw new Error("run page sync failure"); }
+        }});
+        context.slots.register(portableSlots.runArtifactRenderer, { id: "artifact-sync", key: "artifact", priority: 50, value: {
+          render() { throw new Error("run artifact sync failure"); }
+        }});
+      }};
+    `],
+    ["/run-async.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots"], apply(context) {
+        context.slots.register(portableSlots.runPagePresentation, { id: "page-async", key: "page", priority: 60, value: {
+          async mount({ element, portal }) { element.id = "failed-run-page-async"; portal.id = "failed-run-portal-async"; await Promise.resolve(); throw new Error("run page async failure"); }
+        }});
+        context.slots.register(portableSlots.runArtifactRenderer, { id: "artifact-async", key: "artifact", priority: 60, value: {
+          async render() { await Promise.resolve(); throw new Error("run artifact async failure"); }
+        }});
+      }};
+    `],
+    ["/run-official.js", `
+      import { portableSlots, slots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+        const route = context.router.register({ id: "detail", path: "/tasks/:runId" });
+        context.slots.register(portableSlots.runArtifactRenderer, { id: "artifact-official", key: "artifact", priority: 1000, value: {
+          render(input) { const node = document.createElement("pre"); node.id = "official-run-artifact"; node.textContent = input.artifact.title; return node; }
+        }});
+        const page = { mount({ element }) {
+          element.id = "official-run-page";
+          element.append(context.slots.render(portableSlots.runArtifactRenderer, "artifact", { artifact: { title: "Official artifact body" } }));
+        }};
+        context.slots.register(slots.mainView, { id: "legacy", key: route.key, when: route.activation, value: page });
+        context.slots.register(portableSlots.runPagePresentation, { id: "page-official", key: "page", priority: 1000, when: route.activation, value: page });
+      }};
+    `]
+  ]);
+  await withPage(renderViewHostHtml("en", [...external, official]), bundles, undefined, async page => {
+    await page.locator("#official-run-artifact").waitFor();
+    assert.equal(await page.locator("#official-run-artifact").textContent(), "Official artifact body");
+    assert.equal(await page.locator('[id^="failed-run-page-"]').count(), 0);
+    assert.equal(await page.locator('[id^="failed-run-portal-"]').count(), 0);
+    const diagnostics = await page.evaluate(() => (window as any).__memsphereViewDiagnostics());
+    for (const id of ["page-sync", "page-async", "artifact-sync", "artifact-async"]) {
+      const entry = diagnostics.entries.find((candidate: any) => candidate.id === id);
+      assert.equal(entry?.state, "abdicated", id);
+      assert.match(entry?.fallbackTo ?? "", /org\.memsphere\.run/, id);
+    }
+  }, "/tasks/demo-run");
+});
+
 test("UI v1 renders, updates, navigates, and disposes a standard content list", async () => {
   const instance = {
     ...bootInstance("org.memsphere.ui", "ui", "/ui-plugin.js", "/"),

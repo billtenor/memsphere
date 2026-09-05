@@ -42,6 +42,7 @@ import {
   type ViewDataRenderer,
   type ViewPlugin,
   type ViewPluginContext,
+  type ViewPresentationService,
   type ViewRouter,
   type ViewServiceName
 } from "./view-sdk.js";
@@ -119,7 +120,11 @@ export interface ViewPluginInstanceOptions<Config = unknown> {
     readonly layer: number;
   }[];
   readonly contributionPolicy?: {
-    readonly priorities: Readonly<Record<string, readonly [number, number]>>;
+    readonly registrations: readonly {
+      readonly cell: string;
+      readonly id: string;
+      readonly priority: readonly [number, number];
+    }[];
     readonly blockedCells: readonly string[];
   };
   readonly themeOperations?: readonly ("register" | "override")[];
@@ -188,7 +193,7 @@ export interface ActiveViewPlugin {
   dispose(): Promise<void>;
 }
 
-const supportedServices = new Set<ViewServiceName>(["slots", "router", "theme", "themeRegistry", "ui"]);
+const supportedServices = new Set<ViewServiceName>(["slots", "router", "theme", "themeRegistry", "presentation", "ui"]);
 
 /**
  * Compose all enabled Module instances into one shared Route/Slot runtime.
@@ -302,6 +307,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     const theme = themeStore.scoped(lifecycle);
     const themeRegistry = restrictedThemeRegistry(themeStore.registry(lifecycle), instanceOptions.themeOperations);
     const ui = hostUi;
+    const presentation = createPresentationService(module.projectId);
     const owner = moduleIdentity(module);
     const slotTransaction = slotsRegistry.transaction(module, lifecycle, instanceOptions.contributionPolicy);
     const routeTransaction = routeRegistry.transaction(
@@ -327,6 +333,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
         ...(plugin.inject.includes("router") ? { router: routeTransaction } : {}),
         ...(plugin.inject.includes("theme") ? { theme } : {}),
         ...(plugin.inject.includes("themeRegistry") ? { themeRegistry } : {}),
+        ...(plugin.inject.includes("presentation") ? { presentation } : {}),
         ...(plugin.inject.includes("ui") ? { ui } : {})
       }) as unknown as ViewPluginContext;
       const applyDisposer = await plugin.apply(context, instanceOptions.config);
@@ -780,6 +787,57 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
   return activeHost;
 }
 
+function createPresentationService(projectId: string): ViewPresentationService {
+  const projectBase = `/projects/${encodeURIComponent(projectId)}`;
+  const navigate = async (path: string): Promise<void> => {
+    globalThis.history?.pushState({}, "", path);
+    globalThis.dispatchEvent?.(new PopStateEvent("popstate"));
+    await Promise.resolve();
+  };
+  const memoryPage = async (filters: Readonly<Record<string, string>> = {}) => {
+    const query = new URLSearchParams({ representation: "summary", ...filters });
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/memories?${query}`);
+    if (!response.ok) throw new Error(`Memory presentation request failed: ${response.status}`);
+    const payload = await response.json() as { memories?: Array<Record<string, unknown>> };
+    const snapshot = Object.freeze((payload.memories ?? []).map(item => deepFreeze(structuredClone(item))));
+    return Object.freeze({
+      kind: "memory-page" as const,
+      filters: Object.freeze({ ...filters }),
+      items: snapshot,
+      async refresh() { return memoryPage(filters); },
+      async openMemory(reference: string) {
+        const [kind, ...name] = reference.split("/");
+        if (!kind || !name.length) throw new Error(`Invalid Memory reference: ${reference}`);
+        await navigate(`${projectBase}/memories/${encodeURIComponent(kind)}/${encodeURIComponent(name.join("/"))}`);
+      }
+    });
+  };
+  const runPage = async (filters: Readonly<Record<string, string>> = {}) => {
+    const query = new URLSearchParams({ representation: "summary", ...filters });
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/runs?${query}`);
+    if (!response.ok) throw new Error(`Run presentation request failed: ${response.status}`);
+    const payload = await response.json() as { runs?: Array<Record<string, unknown>> };
+    const snapshot = Object.freeze((payload.runs ?? []).map(item => deepFreeze(structuredClone(item))));
+    return Object.freeze({
+      kind: "run-page" as const,
+      filters: Object.freeze({ ...filters }),
+      runs: snapshot,
+      async refresh() { return runPage(filters); },
+      async openRun(id: string) {
+        if (!id.trim()) throw new Error("Run id must be non-empty");
+        await navigate(`${projectBase}/tasks/${encodeURIComponent(id)}`);
+      }
+    });
+  };
+  return Object.freeze({ memoryPage, runPage });
+}
+
+function deepFreeze<T>(value: T): T {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
 /** Compatibility wrapper for the first single-Plugin Host contract. */
 export async function startViewPlugin<Config>(
   options: StartViewPluginOptions<Config>,
@@ -1198,13 +1256,16 @@ class RuntimeSlotTransaction implements SlotRegistry {
     if (this.#contributionPolicy?.blockedCells.includes(cell)) {
       throw new Error(`View contribution is blocked by an unresolved Project preference: ${cell}`);
     }
-    const policyPriority = this.#contributionPolicy?.priorities[options.id];
+    const declared = this.#contributionPolicy?.registrations.find(entry => entry.cell === cell && entry.id === options.id);
+    if (this.#contributionPolicy && !declared) {
+      throw new Error(`View contribution is not declared by the Package manifest: ${cell}#${options.id}`);
+    }
     const entry: RuntimeEntry = {
       token,
       id: options.id,
       ...(key === undefined ? {} : { key }),
       order: options.order ?? 0,
-      priority: policyPriority ?? [options.priority ?? 1000, 0],
+      priority: declared?.priority ?? [options.priority ?? 1000, 0],
       value: options.value,
       ...(extended.when === undefined ? {} : { when: extended.when }),
       children: Object.freeze([...(options.children ?? [])]),
