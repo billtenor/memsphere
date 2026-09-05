@@ -428,6 +428,13 @@ export const zhCNViewMessages = {
   "schema.open": "打开图式",
   "artifact.fileReadFailed": "无法读取产物文件：{error}",
   "artifact.file": "文件产物：{path}",
+  "settings.appearance": "界面与主题",
+  "settings.appearanceHelp": "在一个页面中安装界面 Package，并设置全局默认与当前 Project 的展示方式。",
+  "settings.appearanceGlobal": "默认用于所有 Project",
+  "settings.appearanceProject": "当前 Project · {name}",
+  "settings.globalAppearance": "全局默认与 Package 安装",
+  "settings.currentProjectAppearance": "当前 Project 的界面",
+  "settings.advancedDiagnostics": "高级诊断",
   "settings.savedCompositionRestart": "界面组合已保存，当前服务仍使用启动快照；请执行 memsphere view restart 后生效。",
   "time.inProgress": "进行中"
 } as const;

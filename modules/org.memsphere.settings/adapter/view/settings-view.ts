@@ -3,7 +3,7 @@ import type { SettingsViewConfig } from "./index.js";
 
 type JsonObject = Record<string, any>;
 type ScopeName = "global" | "project";
-type SectionName = "overview" | "general" | "view" | "packages" | "composition" | "providers" | "project" | "participants";
+type SectionName = "overview" | "general" | "view" | "appearance" | "packages" | "composition" | "providers" | "project" | "participants";
 
 interface SettingsViewOptions {
   readonly config: SettingsViewConfig;
@@ -26,8 +26,9 @@ const sections: Record<SectionName, { scope: ScopeName; module: string }> = {
   overview: { scope: "global", module: "general" },
   general: { scope: "global", module: "general" },
   view: { scope: "global", module: "view" },
-  packages: { scope: "global", module: "packages" },
-  composition: { scope: "project", module: "composition" },
+  appearance: { scope: "global", module: "appearance" },
+  packages: { scope: "global", module: "appearance" },
+  composition: { scope: "global", module: "appearance" },
   providers: { scope: "global", module: "providers" },
   project: { scope: "project", module: "overview" },
   participants: { scope: "project", module: "participants" }
@@ -209,12 +210,17 @@ class SettingsApplication {
   render(): void {
     if (this.#signal.aborted) return;
     const scope = this.state;
-    const title = this.#scope === "global"
+    const title = this.#module === "appearance"
+      ? this.t("settings.appearance", "界面与主题")
+      : this.#scope === "global"
       ? this.t("navigation.settingsLabel", "Memsphere 设置", { name: "Memsphere" })
       : this.t("navigation.projectSettingsLabel", `${this.#currentProject || "项目"} 项目设置`, { name: this.#currentProject || this.t("navigation.project", "项目") });
-    const detail = `<section class="settings-content"><header class="settings-page-header"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(this.#scope === "global"
-      ? this.t("navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。")
-      : this.t("navigation.projectSettingsSubtitle", "管理当前项目配置。"))}</p></header>
+    const subtitle = this.#module === "appearance"
+      ? this.t("settings.appearanceHelp", "在一个页面中安装界面 Package，并设置全局默认与当前 Project 的展示方式。")
+      : this.#scope === "global"
+        ? this.t("navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。")
+        : this.t("navigation.projectSettingsSubtitle", "管理当前项目配置。");
+    const detail = `<section class="settings-content"><header class="settings-page-header"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(subtitle)}</p></header>
       <div id="detail">${this.#loading ? empty(this.t("settings.loading", "正在加载配置……")) : this.contentHtml(scope)}</div></section>`;
     if (this.#listRoot || this.#detailRoot) {
       if (this.#listRoot) this.#listRoot.innerHTML = `<div class="memsphere-settings settings-list-surface"><style>${styles}</style><aside class="settings-sidebar">${this.listHtml()}</aside></div>`;
@@ -238,12 +244,11 @@ class SettingsApplication {
         ["overview", this.t("settings.overview", "概览")],
         ["general", this.t("settings.general", "常规")],
         ["view", this.t("settings.viewService", "界面服务")],
-        ["packages", this.t("settings.viewPackages", "界面 Package")],
+        ["appearance", this.t("settings.appearance", "界面与主题")],
         ["providers", this.t("settings.providers", "ACP 提供方")]
       ]],
       ["project", `${this.t("navigation.project", "项目")} · ${this.#currentProject}`, [
         ["project", this.t("settings.overview", "概览")],
-        ["composition", this.t("settings.viewComposition", "界面组合")],
         ["participants", this.t("settings.participants", "参与者配置")]
       ]]
     ];
@@ -263,8 +268,7 @@ class SettingsApplication {
       overview: this.t("settings.overview", "设置概览"),
       general: this.t("settings.general", "通用设置"),
       view: this.t("settings.viewService", "界面服务"),
-      packages: this.t("settings.viewPackages", "界面 Package"),
-      composition: this.t("settings.viewComposition", "界面组合"),
+      appearance: this.t("settings.appearance", "界面与主题"),
       providers: this.t("settings.providers", "模型提供商"),
       project: this.t("navigation.project", "当前项目"),
       participants: this.t("settings.participants", "参与者")
@@ -294,17 +298,16 @@ class SettingsApplication {
     if (!scope.data || !scope.draft) return empty(this.#scope === "project"
       ? this.t("settings.projectUnavailable", "当前没有可管理的项目，但仍可管理 Memsphere 全局设置。")
       : this.t("settings.notLoaded", "配置尚未加载。"));
+    if (this.#module === "appearance") return this.appearanceHtml();
     if (scope.confirmation) return this.confirmationHtml(scope);
     const status = this.statusHtml(scope);
     const notice = scope.notice ? `<div class="settings-notice" role="status">${escapeHtml(scope.notice)}</div>` : "";
     const panel = this.#module === "general" ? this.generalHtml(scope)
       : this.#module === "view" ? this.viewHtml(scope)
-      : this.#module === "packages" ? this.packagesHtml(scope)
-      : this.#module === "composition" ? this.compositionHtml(scope)
       : this.#module === "providers" ? this.providersHtml(scope)
       : this.#module === "participants" ? this.participantsHtml(scope)
       : this.overviewHtml(scope);
-    const actions = ["general", "view", "packages", "composition", "providers", "participants"].includes(this.#module)
+    const actions = ["general", "view", "providers", "participants"].includes(this.#module)
       ? `<div class="settings-actions"><button class="btn" data-action="reload">${escapeHtml(this.t("settings.reload", "重新读取"))}</button><button class="btn primary" data-action="validate">${escapeHtml(this.t("common.save", "保存"))}</button></div>` : "";
     return `<div class="settings-layout">${status}${notice}${panel}${actions}</div>`;
   }
@@ -318,11 +321,12 @@ class SettingsApplication {
       <button class="btn primary" data-action="token">${escapeHtml(this.t("settings.enter", "进入配置中心"))}</button></section>`;
   }
 
-  statusHtml(scope: ScopeState): string {
+  statusHtml(scope: ScopeState, scopeName: ScopeName = this.#scope): string {
     const dirty = JSON.stringify(scope.draft) !== JSON.stringify(scope.data?.config);
-    return `<div id="settings-status" class="settings-status">
+    const id = this.#module === "appearance" ? `settings-status-${scopeName}` : "settings-status";
+    return `<div id="${id}" data-settings-status="${scopeName}" class="settings-status">
       ${pill(this.t("settings.diskConfig", `磁盘配置 ${shortRevision(scope.data?.diskRevision)}`, { revision: shortRevision(scope.data?.diskRevision) }), "strong")}
-      ${this.#scope === "global" ? pill(this.t("settings.runningConfig", `运行配置 ${shortRevision(scope.data?.runningRevision)}`, { revision: shortRevision(scope.data?.runningRevision) })) : pill(this.t("settings.scope.project", "项目配置"), "done")}
+      ${scopeName === "global" ? pill(this.t("settings.runningConfig", `运行配置 ${shortRevision(scope.data?.runningRevision)}`, { revision: shortRevision(scope.data?.runningRevision) })) : pill(this.t("settings.scope.project", "项目配置"), "done")}
       ${pill(this.t(scope.data?.restartRequired || scope.data?.restartPending ? "settings.restartPending" : "settings.applied", scope.data?.restartRequired || scope.data?.restartPending ? "等待重启" : "已应用"), scope.data?.restartRequired || scope.data?.restartPending ? "warn" : "done")}
       ${pill(this.t(dirty ? "settings.unsaved" : "settings.noUnsaved", dirty ? "未保存修改" : "没有未保存修改"), dirty ? "warn" : "done")}
       ${pill(this.t("settings.errorCount", `错误 ${scope.errors.length}`, { count: scope.errors.length }), scope.errors.length ? "warn" : "")}
@@ -372,11 +376,38 @@ class SettingsApplication {
       <p class="settings-help">${escapeHtml(this.t("settings.viewRestartHelp", "保存后执行 memsphere view restart，使主机与端口配置生效。"))}</p>${this.errorsHtml(scope)}</section>`;
   }
 
+  appearanceHtml(): string {
+    const global = this.#scopes.global;
+    const project = this.#scopes.project;
+    const globalPanel = this.appearanceScopeHtml("global", global, this.packagesHtml(global));
+    const projectPanel = project.data && project.draft
+      ? this.appearanceScopeHtml("project", project, this.compositionHtml(project))
+      : `<section class="settings-section">${empty(this.t("settings.projectUnavailable", "当前没有可管理的项目，但仍可管理 Memsphere 全局设置。"))}</section>`;
+    return `<div class="settings-layout settings-appearance">
+      <section class="settings-section settings-appearance-intro"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.appearance", "界面与主题"))}</h3><p class="settings-section-subtitle">${escapeHtml(this.t("settings.appearanceHelp", "在一个页面中安装界面 Package，并设置全局默认与当前 Project 的展示方式。"))}</p></div></div>${this.packageSnapshotHtml()}</section>
+      ${globalPanel}${projectPanel}
+    </div>`;
+  }
+
+  appearanceScopeHtml(scopeName: ScopeName, scope: ScopeState, editor: string): string {
+    const label = scopeName === "global"
+      ? this.t("settings.appearanceGlobal", "默认用于所有 Project")
+      : this.t("settings.appearanceProject", `当前 Project · ${this.#currentProject}`, { name: this.#currentProject });
+    const notice = scope.notice ? `<div class="settings-notice" role="status">${escapeHtml(scope.notice)}</div>` : "";
+    const body = scope.confirmation ? this.confirmationPanelHtml(scopeName, scope) : `${editor}<div class="settings-actions"><button class="btn" data-action="reload-${scopeName}">${escapeHtml(this.t("settings.reload", "重新读取"))}</button><button class="btn primary" data-action="validate-${scopeName}">${escapeHtml(this.t("common.save", "保存"))}</button></div>`;
+    return `<section class="settings-appearance-scope" data-settings-scope="${scopeName}"><div class="settings-scope-heading"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(scopeName === "global" ? "Memsphere Home" : this.#currentProject)}</span></div>${this.statusHtml(scope, scopeName)}${notice}${body}</section>`;
+  }
+
+  confirmationPanelHtml(scopeName: ScopeName, scope: ScopeState): string {
+    const confirmation = scope.confirmation!;
+    const changes = confirmation.changes ?? [];
+    return `<section class="settings-section"><h3>${escapeHtml(this.t("settings.confirmChanges", "确认配置变更"))}</h3><ul class="settings-change-list">${changes.length ? changes.map((change: JsonObject) => `<li>${escapeHtml(`${change.path} · ${change.kind} · ${compact(change.before)} → ${compact(change.after)}`)}</li>`).join("") : `<li>${escapeHtml(this.t("settings.noChanges", "没有配置变化。"))}</li>`}</ul><details class="settings-participant"><summary class="settings-participant-summary"><strong>${escapeHtml(this.t("settings.advancedDiagnostics", "高级诊断"))}</strong></summary><pre class="settings-code mono">${escapeHtml(confirmation.normalizedJson ?? JSON.stringify(scope.draft, null, 2))}</pre></details><div class="settings-actions"><button class="btn" data-action="back-${scopeName}">${escapeHtml(this.t("settings.backToEdit", "返回编辑"))}</button><button class="btn primary" data-action="save-${scopeName}"${changes.length ? "" : " disabled"}>${escapeHtml(this.t("settings.confirmSave", "确认保存"))}</button></div></section>`;
+  }
+
   packagesHtml(scope: ScopeState): string {
     const records = scope.draft?.view_packages?.installed ?? [];
     const resolved = new Map((this.#viewPackages.installed ?? []).map((item: JsonObject) => [item.path, item]));
     const diagnostics = this.#viewPackages.diagnostics ?? [];
-    const snapshotEvidence = this.packageSnapshotHtml();
     const themeOptions: Array<[string, string]> = [["", this.t("settings.systemTheme", "系统默认 Theme")], ...(this.#viewPackages.installed ?? []).flatMap((item: JsonObject) => (item.themes ?? []).map((theme: JsonObject) => [`${item.id}:${theme.id}`, `${item.id} · ${theme.id}`] as [string, string]))];
     const cards = records.map((record: JsonObject, index: number) => {
       const item = resolved.get(record.path) as JsonObject | undefined;
@@ -387,8 +418,8 @@ class SettingsApplication {
         ${diagnostic?.message ? `<div class="settings-error">${escapeHtml(diagnostic.message)}</div>` : ""}
         <div class="settings-permissions">${capabilities.map((capability: string) => `<label class="settings-check"><input type="checkbox" data-home-view-capability="${escapeAttr(capability)}" data-package-index="${index}"${(record.allow ?? []).includes(capability) ? " checked" : ""}><span>${escapeHtml(capability)}</span></label>`).join("") || `<span class="muted">${escapeHtml(this.t("settings.noCapabilities", "未声明额外 capability"))}</span>`}</div></article>`;
     }).join("");
-    return `<section class="settings-section"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.viewPackages", "界面 Package"))}</h3><p class="settings-section-subtitle">${escapeHtml(this.t("settings.viewPackagesHelp", "添加可信本地 Package。保存并重启 View 后解析入口、版本、依赖和 capability。"))}</p></div></div>
-      ${snapshotEvidence}<div class="settings-grid">${selectField("view_theme.mode", this.t("settings.themeMode", "Theme 模式"), scope.draft?.view_theme?.mode ?? "system", [["system", this.t("settings.followSystem", "跟随系统")], ["light", "Light"], ["dark", "Dark"]])}${selectField("view_theme.selected_source", this.t("settings.homeTheme", "Home Theme"), scope.draft?.view_theme?.selected_source ?? "", themeOptions)}</div>
+    return `<section class="settings-section"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.globalAppearance", "全局默认与 Package 安装"))}</h3><p class="settings-section-subtitle">${escapeHtml(this.t("settings.viewPackagesHelp", "添加可信本地 Package，并设置所有 Project 默认继承的 Theme 与授权。保存并重启 View 后生效。"))}</p></div></div>
+      <div class="settings-grid">${selectField("view_theme.mode", this.t("settings.themeMode", "Theme 模式"), scope.draft?.view_theme?.mode ?? "system", [["system", this.t("settings.followSystem", "跟随系统")], ["light", "Light"], ["dark", "Dark"]])}${selectField("view_theme.selected_source", this.t("settings.homeTheme", "默认 Theme"), scope.draft?.view_theme?.selected_source ?? "", themeOptions)}</div>
       <div class="settings-token-editor"><div class="settings-field"><label for="settings-package-path">${escapeHtml(this.t("settings.localPackagePath", "本地 Package 绝对路径"))}</label><input id="settings-package-path" class="settings-input mono" value="${escapeAttr(this.#packagePathDraft)}" placeholder="/absolute/path/to/package"></div><button class="btn" data-action="add-view-package">${escapeHtml(this.t("settings.add", "添加"))}</button></div>
       <div class="settings-providers">${cards || empty(this.t("settings.noViewPackages", "尚未安装界面 Package。"))}</div>${this.errorsHtml(scope)}</section>`;
   }
@@ -397,7 +428,6 @@ class SettingsApplication {
     const selected = scope.draft?.view?.packages ?? [];
     const installed = this.#viewPackages.installed ?? [];
     const diagnostics = this.#viewPackages.diagnostics ?? [];
-    const snapshotEvidence = this.packageSnapshotHtml();
     const runtime = (window as Window & { __memsphereViewDiagnostics?: () => JsonObject }).__memsphereViewDiagnostics?.();
     const runtimeEntries = (runtime?.entries ?? []).filter((entry: JsonObject) => String(entry.slot).startsWith("org.memsphere."));
     const runtimeEvidence = runtime ? `<details class="settings-participant"><summary class="settings-participant-summary"><div><strong>${escapeHtml(this.t("settings.runtimeDiagnostics", "当前运行诊断"))}</strong><div class="settings-participant-summary-meta">${escapeHtml(`Theme ${runtime.theme?.mode ?? "-"} · ${runtimeEntries.length} presentation candidates`)}</div></div></summary><div class="settings-participant-body"><pre class="settings-code mono">${escapeHtml(JSON.stringify({ theme: runtime.theme, entries: runtimeEntries }, null, 2))}</pre></div></details>` : "";
@@ -431,7 +461,7 @@ class SettingsApplication {
         <div class="settings-permissions">${(item.capabilities ?? []).map((capability: string) => `<label class="settings-check"><input type="checkbox" data-project-view-capability="${escapeAttr(capability)}" data-package-identity="${escapeAttr(identity)}"${(record?.allow ?? []).includes(capability) ? " checked" : ""}${record ? "" : " disabled"}><span>${escapeHtml(capability)}</span></label>`).join("")}</div>
         ${(item.contributions ?? []).map((entry: JsonObject) => `<div class="settings-provider-preview mono">${escapeHtml(`${entry.cell} · priority ${entry.priority} · ${entry.id}`)}</div>`).join("")}</article>`;
     }).join("");
-    return `<section class="settings-section"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.viewComposition", "界面组合"))}</h3><p class="settings-section-subtitle">${escapeHtml(this.t("settings.viewCompositionHelp", "为当前 Project 启用 Package 并明确授予 capability；保存后重启 View 生效。"))}</p></div></div>${snapshotEvidence}<div class="settings-grid">${selectField("project_view.theme", this.t("settings.projectTheme", "Project Theme"), scope.draft?.view?.theme?.selected_source ?? "", projectThemeOptions)}</div>${runtimeEvidence}${conflicts ? `<div class="settings-grid settings-view-conflicts">${conflicts}</div>` : ""}<div class="settings-providers">${cards || empty(this.t("settings.noInstalledPackages", "Home 尚无已解析的界面 Package。"))}</div>${this.errorsHtml(scope)}</section>`;
+    return `<section class="settings-section"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.currentProjectAppearance", "当前 Project 的界面"))}</h3><p class="settings-section-subtitle">${escapeHtml(this.t("settings.viewCompositionHelp", "选择当前 Project 使用的 Package、Theme 与 capability；未设置时继承全局默认。"))}</p></div></div><div class="settings-grid">${selectField("project_view.theme", this.t("settings.projectTheme", "当前 Project Theme"), scope.draft?.view?.theme?.selected_source ?? "", projectThemeOptions)}</div>${runtimeEvidence}${conflicts ? `<div class="settings-grid settings-view-conflicts">${conflicts}</div>` : ""}<div class="settings-providers">${cards || empty(this.t("settings.noInstalledPackages", "尚无可用 Package；请先在上方添加并保存，然后重启 View。"))}</div>${this.errorsHtml(scope)}</section>`;
   }
 
   packageSnapshotHtml(): string {
@@ -509,7 +539,7 @@ class SettingsApplication {
     root.querySelectorAll<HTMLButtonElement>("[data-section]").forEach(button => button.addEventListener("click", () => void this.activate(button.dataset.section as SectionName), { signal: this.#signal }));
     root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("[data-field]").forEach(field => {
       const event = field.dataset.commit === "true" ? "change" : field instanceof HTMLSelectElement || field.type === "checkbox" ? "change" : "input";
-      field.addEventListener(event, () => this.updateField(field), { signal: this.#signal });
+      field.addEventListener(event, () => this.updateField(field, field.closest<HTMLElement>("[data-settings-scope]")?.dataset.settingsScope as ScopeName | undefined), { signal: this.#signal });
     });
     root.querySelectorAll<HTMLButtonElement>("[data-select-field]").forEach(trigger => {
       trigger.addEventListener("click", () => {
@@ -536,7 +566,7 @@ class SettingsApplication {
       }, { signal: this.#signal });
     });
     root.querySelectorAll<HTMLButtonElement>("[data-select-option]").forEach(option => {
-      option.addEventListener("click", () => this.updateNamedField(option.dataset.selectOption!, option.dataset.value!, true), { signal: this.#signal });
+      option.addEventListener("click", () => this.updateNamedField(option.dataset.selectOption!, option.dataset.value!, true, undefined, option.closest<HTMLElement>("[data-settings-scope]")?.dataset.settingsScope as ScopeName | undefined), { signal: this.#signal });
     });
     root.querySelector<HTMLInputElement>("#settings-token")?.addEventListener("input", event => {
       this.#token = (event.currentTarget as HTMLInputElement).value.trim();
@@ -581,9 +611,17 @@ class SettingsApplication {
         this.#token = this.detailRoot().querySelector<HTMLInputElement>("#settings-token")?.value.trim() ?? "";
         await this.load();
       } else if (name === "reload") await this.load(this.#scope);
+      else if (name === "reload-global") await this.load("global");
+      else if (name === "reload-project") await this.load("project");
       else if (name === "validate") await this.validate();
+      else if (name === "validate-global") await this.validateScope("global");
+      else if (name === "validate-project") await this.validateScope("project");
       else if (name === "save") await this.save();
+      else if (name === "save-global") await this.saveScope("global");
+      else if (name === "save-project") await this.saveScope("project");
       else if (name === "back") { this.state.confirmation = null; this.render(); }
+      else if (name === "back-global") { this.#scopes.global.confirmation = null; this.render(); }
+      else if (name === "back-project") { this.#scopes.project.confirmation = null; this.render(); }
       else if (name === "detect") await this.detectProviders();
       else if (name === "save-operator-token") await this.saveOperatorToken(false);
       else if (name === "clear-operator-token") await this.saveOperatorToken(true);
@@ -595,17 +633,19 @@ class SettingsApplication {
     } catch (error) { this.fail(error); }
   }
 
-  updateField(field: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement): void {
-    this.updateNamedField(field.dataset.field!, field.value, field instanceof HTMLSelectElement || field.dataset.commit === "true", field);
+  updateField(field: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, scopeName?: ScopeName): void {
+    this.updateNamedField(field.dataset.field!, field.value, field instanceof HTMLSelectElement || field.dataset.commit === "true", field, scopeName);
   }
 
   updateNamedField(
     path: string,
     value: string,
     structural: boolean,
-    field?: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+    field?: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+    scopeName: ScopeName = this.#scope
   ): void {
-    const draft = this.state.draft!;
+    const scope = this.#scopes[scopeName];
+    const draft = scope.draft!;
     if (path === "language") draft.language = value;
     else if (path === "view_theme.mode") (draft.view_theme ??= { mode: "system" }).mode = value;
     else if (path === "view_theme.selected_source") {
@@ -619,17 +659,17 @@ class SettingsApplication {
     }
     else if (path === "view.default") {
       if ((field as HTMLInputElement).checked) delete draft.view;
-      else draft.view = clone(this.state.data!.defaults.view);
+      else draft.view = clone(scope.data!.defaults.view);
       this.render();
       return;
     } else if (path === "view.host") draft.view.host = value;
     else if (path === "view.port") draft.view.port = Number(value);
     else if (path.startsWith("actor.")) this.updateActorField(path, value);
     else if (path.startsWith("provider.")) this.updateProviderField(path, value);
-    this.state.confirmation = null;
+    scope.confirmation = null;
     if (structural) this.render();
     else {
-      this.refreshStatus();
+      this.refreshStatus(scopeName);
       if (path.startsWith("provider.")) {
         const id = path.split(".")[1]!;
         const preview = this.detailRoot().querySelector<HTMLElement>(`[data-provider-id="${CSS.escape(id)}"] .settings-provider-preview`);
@@ -643,11 +683,11 @@ class SettingsApplication {
     }
   }
 
-  refreshStatus(): void {
-    const current = this.detailRoot().querySelector("#settings-status");
+  refreshStatus(scopeName: ScopeName = this.#scope): void {
+    const current = this.detailRoot().querySelector(`[data-settings-status="${scopeName}"]`);
     if (!current) return;
     const template = document.createElement("template");
-    template.innerHTML = this.statusHtml(this.state);
+    template.innerHTML = this.statusHtml(this.#scopes[scopeName], scopeName);
     current.replaceWith(template.content.firstElementChild!);
   }
 
@@ -719,33 +759,34 @@ class SettingsApplication {
   }
 
   addViewPackage(): void {
+    const scope = this.#scopes.global;
     const path = this.#packagePathDraft.trim();
     if (!path.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(path)) {
-      this.state.errors = [{ path: "view_packages.installed", message: this.t("settings.absolutePathRequired", "请输入绝对路径。") }];
+      scope.errors = [{ path: "view_packages.installed", message: this.t("settings.absolutePathRequired", "请输入绝对路径。") }];
       this.render();
       return;
     }
-    const installed = (this.state.draft!.view_packages ??= { installed: [] }).installed as JsonObject[];
+    const installed = (scope.draft!.view_packages ??= { installed: [] }).installed as JsonObject[];
     if (!installed.some(entry => entry.path === path)) installed.push({ path, allow: [] });
     this.#packagePathDraft = "";
-    this.state.errors = [];
+    scope.errors = [];
     this.render();
   }
 
   removeViewPackage(index: number): void {
-    (this.state.draft?.view_packages?.installed ?? []).splice(index, 1);
+    (this.#scopes.global.draft?.view_packages?.installed ?? []).splice(index, 1);
     this.render();
   }
 
   updateHomeViewCapability(input: HTMLInputElement): void {
-    const record = this.state.draft!.view_packages.installed[Number(input.dataset.packageIndex)];
+    const record = this.#scopes.global.draft!.view_packages.installed[Number(input.dataset.packageIndex)];
     record.allow = toggleValue(record.allow ?? [], input.dataset.homeViewCapability!, input.checked);
-    this.refreshStatus();
+    this.refreshStatus("global");
   }
 
   toggleProjectViewPackage(input: HTMLInputElement): void {
     const [id, version] = input.dataset.projectViewPackage!.split("@");
-    const packages = (this.state.draft!.view ??= { packages: [] }).packages as JsonObject[];
+    const packages = (this.#scopes.project.draft!.view ??= { packages: [] }).packages as JsonObject[];
     const record = packages.find(entry => entry.id === id && entry.version === version);
     if (record) record.enabled = input.checked;
     else packages.push({ id, version, enabled: input.checked, allow: [] });
@@ -754,29 +795,33 @@ class SettingsApplication {
 
   updateProjectViewCapability(input: HTMLInputElement): void {
     const [id, version] = input.dataset.packageIdentity!.split("@");
-    const record = this.state.draft!.view.packages.find((entry: JsonObject) => entry.id === id && entry.version === version);
+    const record = this.#scopes.project.draft!.view.packages.find((entry: JsonObject) => entry.id === id && entry.version === version);
     if (!record) return;
     record.allow = toggleValue(record.allow ?? [], input.dataset.projectViewCapability!, input.checked);
-    this.refreshStatus();
+    this.refreshStatus("project");
   }
 
   updateViewPreference(select: HTMLSelectElement): void {
     const cell = select.dataset.viewPreference!;
-    for (const record of this.state.draft!.view.packages as JsonObject[]) {
+    for (const record of this.#scopes.project.draft!.view.packages as JsonObject[]) {
       if (!record.enabled) continue;
       record.preferences ??= {};
       if (select.value) record.preferences[cell] = select.value;
       else delete record.preferences[cell];
       if (!Object.keys(record.preferences).length) delete record.preferences;
     }
-    this.refreshStatus();
+    this.refreshStatus("project");
   }
 
   async validate(): Promise<void> {
-    const scope = this.state;
+    await this.validateScope(this.#scope);
+  }
+
+  async validateScope(scopeName: ScopeName): Promise<void> {
+    const scope = this.#scopes[scopeName];
     scope.errors = [];
     scope.notice = "";
-    const response = await this.settingsFetch(`/api/settings/${this.#scope}/validate`, {
+    const response = await this.settingsFetch(`/api/settings/${scopeName}/validate`, {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ expectedRevision: scope.data!.diskRevision, config: scope.draft })
     });
@@ -788,8 +833,12 @@ class SettingsApplication {
   }
 
   async save(): Promise<void> {
-    const scope = this.state;
-    const response = await this.settingsFetch(`/api/settings/${this.#scope}`, {
+    await this.saveScope(this.#scope);
+  }
+
+  async saveScope(scopeName: ScopeName): Promise<void> {
+    const scope = this.#scopes[scopeName];
+    const response = await this.settingsFetch(`/api/settings/${scopeName}`, {
       method: "PUT", headers: { "content-type": "application/json" },
       body: JSON.stringify({ expectedRevision: scope.data!.diskRevision, config: scope.draft })
     });
@@ -1001,9 +1050,10 @@ const styles = `
   .settings-list-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:19px 10px 10px}.settings-list-header small{display:block;margin-bottom:4px;color:#82908d;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.settings-list-header h2{margin:0;font-size:18px;line-height:1.3;letter-spacing:-.02em}.settings-list-header button{display:grid;width:32px;height:32px;place-items:center;border:0;border-radius:8px;background:transparent;cursor:pointer}.settings-list-header button:hover{background:#f0f4f2}.settings-list-header button img{width:17px;height:17px;opacity:.7}.settings-local-search{display:flex;height:36px;align-items:center;gap:7px;margin:0 6px 10px;border:1px solid #dce4e1;border-radius:9px;background:#f8faf9;padding:0 10px;color:#7a8784}.settings-local-search:focus-within{border-color:#8cb7b1;box-shadow:0 0 0 3px rgba(40,118,110,.08)}.settings-local-search img{width:16px;height:16px;opacity:.55}.settings-local-search input{width:100%;min-width:0;border:0;outline:0;background:transparent;font-size:12px;color:#2f3937}.settings-record-list{display:grid;gap:2px}.settings-record{display:grid;min-height:66px;grid-template-columns:34px minmax(0,1fr) 14px;align-items:start;gap:9px;border-radius:10px;padding:10px 9px}.settings-record:hover{background:#f2f6f5}.settings-record.active{background:#e1efed}.settings-record-icon{display:grid;width:34px;height:34px;place-items:center;border-radius:10px;background:#eef4f2}.settings-record.active .settings-record-icon{background:#fff}.settings-record-icon img{width:18px;height:18px;opacity:.72}.settings-record strong,.settings-record small,.settings-record p{display:block;overflow:hidden;margin:0;text-overflow:ellipsis;white-space:nowrap}.settings-record strong{font-size:13px;line-height:1.35}.settings-record small{margin-top:3px;color:#87928f;font-size:10px}.settings-record p{margin-top:5px;color:#697572;font-size:11px}.settings-record-caret{width:14px;height:14px;margin-top:8px;opacity:.55;transform:rotate(-90deg)}.settings-list-footer{margin-top:auto;border-top:1px solid #eef1f0;padding:10px 9px;color:#8a9592;font-size:10px}
   .settings-nav-group{overflow:hidden;margin-bottom:12px;border:1px solid var(--line);border-radius:7px;background:var(--surface)}.settings-nav-group.active{border-color:#b8cbc7}.settings-nav-heading{padding:9px 10px;background:var(--soft);color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase}.settings-nav-items{display:grid;gap:2px;padding:4px}.settings-nav-item{border:0;border-radius:4px;background:transparent;padding:8px 9px;text-align:left;font-weight:600;color:var(--text);cursor:pointer}.settings-nav-item:hover{background:var(--soft)}.settings-nav-item.active{background:var(--accent-soft);color:#173f3c}
   .settings-layout{display:grid;gap:14px;max-width:1120px}.settings-section{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 2px rgba(20,47,42,.025);padding:21px 22px}.settings-section h3{margin:0 0 14px;font-size:17px}.settings-section h4{margin:18px 0 8px;font-size:14px}.settings-section-head{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px}.settings-section-head h3{margin:0}.settings-section-subtitle{margin:4px 0 0;color:var(--muted);font-size:12px}
+  .settings-appearance-intro{background:linear-gradient(135deg,#f7fbfa,#eef5f2)}.settings-appearance-scope{display:grid;gap:12px}.settings-scope-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 4px}.settings-scope-heading strong{font-size:15px}.settings-scope-heading span{color:var(--muted);font-size:12px}.settings-appearance-scope>.settings-section{margin:0}
   .settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 16px}.settings-compact-grid{grid-template-columns:repeat(auto-fit,minmax(240px,360px));justify-content:start}.settings-participant-basic{grid-template-columns:repeat(3,minmax(0,1fr))}.settings-field{display:grid;gap:6px;min-width:0}.settings-field.wide{grid-column:1/-1}.settings-field>label,.settings-label{color:#4f5a5c;font-size:12px;font-weight:700}.settings-input,.settings-select,.settings-field textarea{width:100%;min-width:0;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text);padding:8px 10px;outline:none}.settings-field textarea{min-height:92px;resize:vertical}.settings-input:focus,.settings-select:focus,.settings-field textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(40,108,103,.12)}.settings-input:disabled{border-style:dashed;background:var(--soft);color:var(--muted)}.settings-select-wrap{position:relative;min-width:0}.settings-select-trigger{display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;cursor:pointer}.settings-select-caret{color:var(--muted)}.settings-select-menu{position:absolute;top:calc(100% + 4px);right:0;left:0;z-index:40;display:grid;gap:2px;max-height:240px;overflow-y:auto;padding:4px;border:1px solid var(--line);border-radius:6px;background:var(--surface);box-shadow:0 10px 28px rgba(25,30,35,.16)}.settings-select-menu[hidden]{display:none}.settings-select-option{width:100%;border:0;border-radius:4px;background:transparent;color:var(--text);padding:7px 8px;text-align:left;cursor:pointer}.settings-select-option:hover,.settings-select-option:focus-visible{outline:0;background:var(--soft)}.settings-select-option[aria-selected="true"]{background:var(--accent-soft);color:#173f3c}
   .settings-status{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.pill{display:inline-flex;border:1px solid var(--line);border-radius:999px;background:#fff;padding:2px 8px;color:var(--muted);font-size:12px}.pill.done{border-color:#b9d6c7;background:#edf7f1;color:#226044}.pill.warn{border-color:#e2c99c;background:#fff8e8;color:#7a5714}.pill.strong{font-weight:700}.settings-actions,.settings-participant-actions{display:flex;gap:8px;justify-content:flex-end}.btn{border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text);padding:8px 12px;cursor:pointer}.btn:hover{background:var(--soft)}.btn.primary{border-color:var(--accent);background:var(--accent);color:#fff}.btn.danger{color:var(--danger)}.btn:disabled{cursor:not-allowed;opacity:.5}
   .settings-check{display:flex;gap:8px;align-items:flex-start}.settings-check input{width:16px;height:16px;margin-top:2px;accent-color:var(--accent)}.settings-default-toggle{margin-top:14px}.settings-token-management{margin-top:28px;padding-top:24px;border-top:1px solid var(--line)}.settings-token-management h4{margin:0 0 6px;font-size:16px}.settings-token-editor{display:flex;align-items:end;gap:12px;margin-top:18px}.settings-token-editor .settings-field{flex:1;margin:0}.settings-token-buttons{display:flex;gap:8px;padding-bottom:1px;white-space:nowrap}.settings-help,.settings-error{font-size:12px;overflow-wrap:anywhere}.settings-help{color:var(--muted)}.settings-error{color:var(--danger)}.settings-notice{border-left:3px solid var(--accent);padding:10px 12px;background:var(--accent-soft)}.settings-token{max-width:520px}.settings-token .btn{margin-top:14px}.empty{padding:30px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center}
   .settings-participants,.settings-providers{border-top:1px solid var(--line)}.settings-participant{border-bottom:1px solid var(--line)}.settings-participant>summary{list-style:none}.settings-participant>summary::-webkit-details-marker{display:none}.settings-participant-summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;min-height:58px;padding:10px 4px;cursor:pointer}.settings-participant-summary:hover{background:#f7f8f5}.settings-participant-summary-meta{margin-top:5px;color:var(--muted);font-size:12px;overflow-wrap:anywhere}.settings-participant-body{padding:2px 4px 18px}.settings-permissions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px}.settings-permission{border-left:2px solid var(--line);padding-left:9px}.settings-permission p{margin:3px 0 0 24px;color:var(--muted);font-size:12px}.settings-provider-preview{margin:12px 0 0;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:#f3f5f0;overflow-wrap:anywhere}.settings-change-list{display:grid;gap:8px;padding:0;list-style:none}.settings-change-list li{border-left:3px solid var(--accent);padding:7px 10px;background:#f3f5f0}.settings-code{max-height:440px;overflow:auto;white-space:pre;background:#f3f5f0;border:1px solid var(--line);border-radius:6px;padding:12px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.muted{color:var(--muted)}
-  @media(max-width:760px){.memsphere-settings{grid-template-columns:1fr}.settings-sidebar{border-right:0;border-bottom:1px solid var(--line)}.settings-content{padding:18px 16px 36px}.settings-grid,.settings-compact-grid,.settings-participant-basic,.settings-permissions{grid-template-columns:minmax(0,1fr)}.settings-section{padding:14px}.settings-section-head{align-items:flex-start}.settings-token-editor,.settings-token-buttons{align-items:stretch;flex-direction:column}.settings-token-buttons .btn{width:100%}}
+  @media(max-width:760px){.memsphere-settings{grid-template-columns:1fr}.settings-sidebar{border-right:0;border-bottom:1px solid var(--line)}.settings-content{padding:18px 16px 36px}.settings-grid,.settings-compact-grid,.settings-participant-basic,.settings-permissions{grid-template-columns:minmax(0,1fr)}.settings-section{padding:14px}.settings-section-head{align-items:flex-start}.settings-scope-heading{align-items:flex-start;flex-direction:column;gap:2px}.settings-token-editor,.settings-token-buttons{align-items:stretch;flex-direction:column}.settings-token-buttons .btn{width:100%}}
 `;

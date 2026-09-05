@@ -271,7 +271,7 @@ export default defineViewPlugin<CustomerConfig>({
 - To choose a contribution point, use [View Slot List](./view-slots.en.md).
 # Local View Packages, Themes, and Presentation Replacement
 
-A View Plugin can now be installed as a trusted local Package without entering `builtinModuleCatalog` or rebuilding Memsphere. See `examples/view-packages/dsh-custom-view`. Add its absolute path under Settings → View Packages, save and restart View, then enable the version and grant capabilities for the current Project under Settings → View Composition. A capability is effective only when both Home and Project grant it.
+A View Plugin can now be installed as a trusted local Package without entering `builtinModuleCatalog` or rebuilding Memsphere. See `examples/view-packages/dsh-custom-view`. Use the single Settings → Appearance & Themes page to add its absolute path and choose global defaults; after restarting View, use the same page to enable the version and grant capabilities for the current Project. The UI is unified while Home and Project configurations remain independently persisted, and a capability is effective only when both scopes grant it. Legacy `/settings/packages` and `/settings/composition` links open the unified page.
 
 The Package `module.json` may declare `capabilities`, `dependencies`, `styles`, `themes`, `contributions`, and optional `source` metadata. `styles.global` is explicitly privileged: imports, remote resources, Host-private selectors, `!important`, and declarations of `--mem-view-*` are rejected. Scoped CSS is attached to the Package instance roots and portals. When `namespace` is declared, every custom-property definition is checked against that prefix. Theme light/dark maps must declare the same set of known tokens.
 

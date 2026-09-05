@@ -81,9 +81,12 @@ test("trusted local Package replaces Memory and Run through formal composition a
     await page.goto(`${origin}/projects/demo/tasks`);
     await page.getByText("My Run workspace", { exact: true }).waitFor();
 
-    await page.goto(`${origin}/projects/demo/settings/composition`);
-    await page.getByText("org.example.memsphere.custom-view@1.0.0", { exact: true }).waitFor();
+    await page.goto(`${origin}/projects/demo/settings/appearance`);
+    await page.getByText("org.example.memsphere.custom-view@1.0.0", { exact: true }).first().waitFor();
     await page.getByText("当前运行诊断", { exact: true }).waitFor();
+    assert.equal(await page.getByText("Appearance & Themes", { exact: true }).count() > 0, true);
+    assert.equal(await page.getByText("界面 Package", { exact: true }).count(), 0);
+    assert.equal(await page.getByText("界面组合", { exact: true }).count(), 0);
 
     const disabledConfig = structuredClone(config) as MemsphereConfig;
     (disabledConfig.project!.view!.packages[0] as { enabled: boolean }).enabled = false;
@@ -125,19 +128,21 @@ test("Settings completes the local Package installation and Project enablement f
     return { server, origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
   };
   const stop = (server: ReturnType<typeof createViewServer>) => new Promise<void>(resolveClose => server.close(() => resolveClose()));
-  const save = async () => {
-    await page.locator('.settings-detail-surface [data-action="validate"]').click();
-    await page.locator('.settings-detail-surface [data-action="save"]').waitFor();
-    await page.locator('.settings-detail-surface [data-action="save"]').click();
-    await page.locator('.settings-detail-surface [data-action="validate"]').waitFor();
+  const save = async (scope: "global" | "project") => {
+    await page.locator(`.settings-detail-surface [data-action="validate-${scope}"]`).click();
+    await page.locator(`.settings-detail-surface [data-action="save-${scope}"]`).waitFor();
+    await page.locator(`.settings-detail-surface [data-action="save-${scope}"]`).click();
+    await page.locator(`.settings-detail-surface [data-action="validate-${scope}"]`).waitFor();
   };
   let active: Awaited<ReturnType<typeof launch>> | undefined;
   try {
     active = await launch();
-    await page.goto(`${active.origin}/projects/demo/settings/packages`);
+    await page.goto(`${active.origin}/projects/demo/settings/appearance`);
+    await page.getByText("默认用于所有 Project", { exact: true }).waitFor();
+    await page.getByText("当前 Project · demo", { exact: true }).waitFor();
     await page.locator("#settings-package-path").fill(packageRoot);
     await page.locator('[data-action="add-view-package"]').click();
-    await save();
+    await save("global");
     await page.getByText(/重启/).first().waitFor();
     await page.getByText("界面组合已保存，当前服务仍使用启动快照；请执行 memsphere view restart 后生效。", { exact: true }).waitFor();
     const pendingInstall = await page.evaluate(async () => (await fetch("/api/settings/global")).json());
@@ -151,7 +156,8 @@ test("Settings completes the local Package installation and Project enablement f
 
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/settings/packages`);
-    await page.getByText("org.example.memsphere.custom-view@1.0.0", { exact: true }).waitFor();
+    await page.getByText("界面与主题", { exact: true }).first().waitFor();
+    await page.getByText("org.example.memsphere.custom-view@1.0.0", { exact: true }).first().waitFor();
     for (const capability of ["theme.override", "styles.scoped", "styles.global"]) {
       await page.locator(`[data-home-view-capability="${capability}"]`).check();
     }
@@ -159,7 +165,7 @@ test("Settings completes the local Package installation and Project enablement f
     await page.locator('[data-select-option="view_theme.mode"][data-value="dark"]').click();
     await page.locator('[data-select-field="view_theme.selected_source"]').click();
     await page.locator('[data-select-option="view_theme.selected_source"][data-value="org.example.memsphere.custom-view:sea-glass"]').click();
-    await save();
+    await save("global");
     await stop(active.server); active = undefined;
     const homeConfig = JSON.parse(await readFile(join(home, "config.json"), "utf8"));
     assert.deepEqual(homeConfig.view_theme, {
@@ -169,13 +175,15 @@ test("Settings completes the local Package installation and Project enablement f
 
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/settings/composition`);
+    await page.getByText("全局默认与 Package 安装", { exact: true }).waitFor();
+    await page.getByText("当前 Project 的界面", { exact: true }).waitFor();
     await page.locator('[data-project-view-package="org.example.memsphere.custom-view@1.0.0"]').check();
     for (const capability of ["theme.override", "styles.scoped", "styles.global"]) {
       await page.locator(`[data-project-view-capability="${capability}"]`).check();
     }
     await page.locator('[data-select-field="project_view.theme"]').click();
     await page.locator('[data-select-option="project_view.theme"][data-value="org.example.memsphere.custom-view:sea-glass"]').click();
-    await save();
+    await save("project");
     await page.getByText(/重启/).first().waitFor();
     await page.getByText("界面组合已保存，当前服务仍使用启动快照；请执行 memsphere view restart 后生效。", { exact: true }).waitFor();
     const pendingProject = await page.evaluate(async () => (await fetch("/api/projects/demo/settings/project")).json());

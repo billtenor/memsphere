@@ -18,7 +18,7 @@ Memory 与 Run 必须实际迁移到新架构：官方现有实现成为 priorit
 
 ## 验收标准
 
-- Home 可添加、检查、授权和移除本地 View Package；Project 可选版本、启禁用、配置实例并处理同 priority 冲突。
+- 默认只提供一个“界面与主题”入口：同页完成 Home Package 安装/全局默认和当前 Project 的启用/Theme/授权；底层仍独立保存两层配置，旧设置 URL 保持兼容。
 - 未配置时 Memory/Run 的 DOM、交互和 URL 保持兼容；四个 presentation/renderer cell 均完成官方候选迁移和用户候选覆盖。
 - 同 cell 数值较小 priority 获胜；同 priority 无首选时所有相关外部实例在 apply 前原子失败并回退官方候选，结果不依赖加载顺序。
 - 四个 cell 的同步 throw、异步 reject 均恢复官方稳定正文 DOM，清理 container/portal/subscription，并在 diagnostics 中记录 failed/abdicated 与 `fallbackTo`。
@@ -48,7 +48,7 @@ Memory 与 Run 必须实际迁移到新架构：官方现有实现成为 priorit
 - [x] Runtime priority/shadow/fallback、per-instance service allowlist、portable Slot 与 diagnostics。
 - [x] Theme Registry、官方 dark token、mode 切换及 Style 生命周期/安全门禁。
 - [x] Memory 与 Run 四个 cell 的官方候选迁移和只读 presentation context。
-- [x] Settings 的 Home 安装、Project composition、冲突处理和 restart pending。
+- [x] Settings 以统一“界面与主题”页面承载 Home 安装、Project composition、冲突处理和 restart pending，并保留两层独立持久化。
 - [x] 独立示例、作者文档、中英文文案、System/Reserved Memory 与 Skill 同步。
 - [ ] 自动化、浏览器实测、专业评审与产品验收材料。
 
@@ -61,3 +61,7 @@ Memory 与 Run 必须实际迁移到新架构：官方现有实现成为 priorit
 专业评审第 2 轮指出 presentation 最小契约被静默收窄后，Runner 代理投“要求修改”：现已补齐 page `route`、当前选择与 `openCreate/startRun` 官方流程动作；Memory detail 与 Run Artifact 改用 SDK 明确定义的最小只读 context，保留官方包装的 ChangeSet/Review/copy/download 动作；外部实例的 `router` 服务授权已移除。新增浏览器契约验证 snapshot/records 深冻结、选中项和官方导航动作。
 
 最终 `npm run typecheck`、`npm run build`、`git diff --check` 均通过；全量 557 项测试结果为 556 passed、1 个 Windows-only skipped、0 failed。最终 Memory ChangeSet 为 `change-20260905-014117951z-7ba6d2f2`，校验通过，Content Digest `4e60c70a42ff83cb029a000aa1942fd147c842cda1b2f51c8baa2218c3c2ebdb`，View 入口 `http://0.0.0.0:30000/projects/memsphere/changes/change-20260905-014117951z-7ba6d2f2`。专业复审与产品验收材料待完成。
+
+产品验收首轮要求将“界面 Package”和“界面组合”合并。返修后默认导航、搜索与标题只保留“界面与主题”，同页按“所有 Project 的默认值”和“当前 Project”解释作用范围；保存仍通过各自 revision/CAS 写入 Home 与 Project，运行/磁盘 digest 放在页面概览和高级诊断中。旧 `/settings/packages`、`/settings/composition` URL 兼容渲染统一页面。浏览器回归覆盖统一入口、旧链接兼容，以及两层配置分别保存后经重启生效。
+
+返修后最终 `npm run build`、`git diff --check` 和全量 557 项测试通过：556 passed、1 个 Windows-only skipped、0 failed。真实浏览器在当前服务确认统一入口 1 个、旧入口 0 个、全局与当前 Project 分区各 1 个；旧 composition URL 可进入同一页面。更新后的 Memory ChangeSet 为 `change-20260905-024350279z-1ddb1442`，Content Digest `067295b17647ec12f8f752f7a1512ccec293c05d9b17be8d2057449a386d779c`，校验通过。

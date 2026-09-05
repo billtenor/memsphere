@@ -273,7 +273,7 @@ export default defineViewPlugin<CustomerConfig>({
 - 选择可以贡献的界面位置，阅读 [View Slot List](./view-slots.md)。
 # 本地 View Package、主题与页面替换
 
-View Plugin 现在可以作为可信本地 Package 安装，而不必加入 `builtinModuleCatalog` 或重新编译 Memsphere。示例见 `examples/view-packages/dsh-custom-view`。在“设置 → 界面 Package”添加绝对路径并保存；重启 View 后，在当前 Project 的“设置 → 界面组合”启用版本并分别授予 capability。Home 与 Project 都授权时 capability 才生效。
+View Plugin 现在可以作为可信本地 Package 安装，而不必加入 `builtinModuleCatalog` 或重新编译 Memsphere。示例见 `examples/view-packages/dsh-custom-view`。在“设置 → 界面与主题”同一页面添加绝对路径、设置全局默认；重启 View 后，仍在该页面为当前 Project 启用版本并分别授予 capability。界面把操作放在一起，底层仍分别保存 Home 与 Project 配置；两层都授权时 capability 才生效。旧的 `/settings/packages` 与 `/settings/composition` 链接会兼容进入统一页面。
 
 Package 通过 `module.json` 声明 `capabilities`、`dependencies`、`styles`、`themes`、`contributions` 和可选 `source`。`styles.global` 是显式高权限：`@import`、远程资源、Host 私有 selector、`!important` 和 `--mem-view-*` 声明都会被拒绝。普通 scoped CSS 会绑定 Package 实例 root/portal；声明 `namespace` 后，所有自定义变量定义都会按此前缀强制校验。Theme 的 light/dark 必须声明相同的已知 token 集合。
 
