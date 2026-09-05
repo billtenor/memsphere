@@ -729,5 +729,5 @@ Module Manifest、CLI SDK、服务端 View API 注册接口、配置 Schema、�
 - `SlotRegistry.render(token, key, input)` 调用 data renderer，并在异常或非法返回值时把候选标为 abdicated 后继续 fallback。
 - `ViewDataRenderer.render()` 是同步契约，必须立即返回 `HTMLElement`；Promise/thenable 属于非法返回值并触发 fallback。abdicated 状态持续到实例卸载或 View 重启。
 - `ViewThemeRegistry` 提供 `registerTheme`、`selectTheme`、`overrideTokens`，都由实例 lifecycle 持有并可撤销。完整 Theme 与部分 override 均同时提供 light/dark map。
-- `presentation` 服务为 portable page 提供冻结的 Memory/Run 摘要、筛选值、`refresh()` 以及受控 `openMemory()`/`openRun()` 导航；Package 不需要也不应直接调用业务 `fetch`。
+- `presentation` 服务为 portable page 提供当前 `route`、冻结的 Memory/Run 摘要、筛选值、当前选择、`refresh()`，以及受控 `openMemory()`/`openCreate()`/`openRun()`/`startRun()` 导航；创建与启动入口仍由官方流程拥有，Package 不取得写 store，也不应直接调用业务 `fetch`。Memory detail 与 Run Artifact renderer 分别接收 SDK 定义的最小只读 context 和官方包装的 ChangeSet/Review/copy/download 动作。
 - 外部 contribution 必须在 Manifest 中声明完全匹配的 `cell + id`；运行时只采用 resolver 生成的 priority 元组，忽略 Bundle 自报 priority。未知 cell、漏 key 或 id/cell 不匹配会让实例事务原子失败。

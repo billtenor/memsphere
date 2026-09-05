@@ -44,7 +44,7 @@ export default defineViewPlugin({
         const card = text("article", "", "example-custom-renderer");
         card.dataset.customMemoryRenderer = String(value.kind ?? "memory");
         card.append(text("h3", `Custom ${String(value.kind ?? "Memory")} renderer`));
-        card.append(text("pre", JSON.stringify(value.entity ?? {}, null, 2)));
+        card.append(text("pre", JSON.stringify({ title: value.title, metadata: value.metadata, sections: value.sections }, null, 2)));
         return card;
       } }
     });
@@ -57,9 +57,9 @@ export default defineViewPlugin({
       value: { render(input) {
         const value = input;
         const card = text("div", "", "example-custom-renderer");
-        card.dataset.customArtifactRenderer = String(value.artifact?.type ?? "artifact");
+        card.dataset.customArtifactRenderer = String(value.type ?? "artifact");
         card.append(text("strong", "Custom Artifact renderer"));
-        card.append(text("pre", JSON.stringify(value.artifact ?? {}, null, 2)));
+        card.append(text("pre", JSON.stringify({ title: value.title, content: value.content, metadata: value.metadata }, null, 2)));
         return card;
       } }
     });

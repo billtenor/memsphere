@@ -58,4 +58,6 @@ Memory 与 Run 必须实际迁移到新架构：官方现有实现成为 priorit
 
 可行动 risk 也已收敛：示例提供 source、确定性预编译脚本、构建字节比对、SDK externalize 与复制安装测试，并通过当前 SDK 自动生成内联坏包验证 Host 拒绝；示例使用只读 `presentation` service 而非裸 fetch；renderer 输入深冻结并提供受控动作；Theme light/dark 键集合和 Style namespace 均 fail-closed 校验。双 viewport 截图为 `memory-custom-desktop.png` 与 `memory-custom-mobile.png`。
 
-最终 `npm run typecheck`、`npm run build`、`git diff --check` 均通过；全量 556 项测试结果为 555 passed、1 个 Windows-only skipped、0 failed。最终 Memory ChangeSet 为 `change-20260905-011256129z-a919a8ff`，校验通过，Content Digest `8f17de946b5af2728cd5ba0b08202434cf19f04eb88e66701fc82ebc2cdfdd53`，View 入口 `http://0.0.0.0:30000/projects/memsphere/changes/change-20260905-011256129z-a919a8ff`。专业复审与产品验收材料待完成。
+专业评审第 2 轮指出 presentation 最小契约被静默收窄后，Runner 代理投“要求修改”：现已补齐 page `route`、当前选择与 `openCreate/startRun` 官方流程动作；Memory detail 与 Run Artifact 改用 SDK 明确定义的最小只读 context，保留官方包装的 ChangeSet/Review/copy/download 动作；外部实例的 `router` 服务授权已移除。新增浏览器契约验证 snapshot/records 深冻结、选中项和官方导航动作。
+
+最终 `npm run typecheck`、`npm run build`、`git diff --check` 均通过；全量 557 项测试结果为 556 passed、1 个 Windows-only skipped、0 failed。最终 Memory ChangeSet 为 `change-20260905-014117951z-7ba6d2f2`，校验通过，Content Digest `4e60c70a42ff83cb029a000aa1942fd147c842cda1b2f51c8baa2218c3c2ebdb`，View 入口 `http://0.0.0.0:30000/projects/memsphere/changes/change-20260905-014117951z-7ba6d2f2`。专业复审与产品验收材料待完成。

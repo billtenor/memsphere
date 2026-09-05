@@ -794,21 +794,47 @@ function createPresentationService(projectId: string): ViewPresentationService {
     globalThis.dispatchEvent?.(new PopStateEvent("popstate"));
     await Promise.resolve();
   };
+  const routeSnapshot = (): Readonly<RouteLocation> => {
+    const location = globalThis.location;
+    const search = location?.search ?? "";
+    return deepFreeze({
+      pathname: location?.pathname ?? projectBase,
+      search,
+      hash: location?.hash ?? "",
+      params: {},
+      query: Object.fromEntries(new URLSearchParams(search))
+    });
+  };
+  const selectedMemoryReference = (pathname: string): string | undefined => {
+    const match = pathname.match(/\/memories\/([^/]+)\/(.+)$/);
+    return match ? `${decodeURIComponent(match[1]!)}/${decodeURIComponent(match[2]!)}` : undefined;
+  };
+  const selectedRunId = (pathname: string): string | undefined => {
+    const match = pathname.match(/\/tasks\/([^/]+)(?:\/|$)/);
+    return match ? decodeURIComponent(match[1]!) : undefined;
+  };
   const memoryPage = async (filters: Readonly<Record<string, string>> = {}) => {
     const query = new URLSearchParams({ representation: "summary", ...filters });
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/memories?${query}`);
     if (!response.ok) throw new Error(`Memory presentation request failed: ${response.status}`);
     const payload = await response.json() as { memories?: Array<Record<string, unknown>> };
     const snapshot = Object.freeze((payload.memories ?? []).map(item => deepFreeze(structuredClone(item))));
+    const route = routeSnapshot();
+    const selectedReference = selectedMemoryReference(route.pathname);
     return Object.freeze({
       kind: "memory-page" as const,
+      route,
       filters: Object.freeze({ ...filters }),
       items: snapshot,
+      ...(selectedReference ? { selectedReference } : {}),
       async refresh() { return memoryPage(filters); },
       async openMemory(reference: string) {
         const [kind, ...name] = reference.split("/");
         if (!kind || !name.length) throw new Error(`Invalid Memory reference: ${reference}`);
         await navigate(`${projectBase}/memories/${encodeURIComponent(kind)}/${encodeURIComponent(name.join("/"))}`);
+      },
+      async openCreate() {
+        await navigate(`${projectBase}/market`);
       }
     });
   };
@@ -818,14 +844,21 @@ function createPresentationService(projectId: string): ViewPresentationService {
     if (!response.ok) throw new Error(`Run presentation request failed: ${response.status}`);
     const payload = await response.json() as { runs?: Array<Record<string, unknown>> };
     const snapshot = Object.freeze((payload.runs ?? []).map(item => deepFreeze(structuredClone(item))));
+    const route = routeSnapshot();
+    const selected = selectedRunId(route.pathname);
     return Object.freeze({
       kind: "run-page" as const,
+      route,
       filters: Object.freeze({ ...filters }),
       runs: snapshot,
+      ...(selected ? { selectedRunId: selected } : {}),
       async refresh() { return runPage(filters); },
       async openRun(id: string) {
         if (!id.trim()) throw new Error("Run id must be non-empty");
         await navigate(`${projectBase}/tasks/${encodeURIComponent(id)}`);
+      },
+      async startRun() {
+        await navigate(`${projectBase}/tasks`);
       }
     });
   };

@@ -2977,7 +2977,6 @@ async function externalViewInstances(
       ]),
       allowedServices: Object.freeze([
         "slots" as const,
-        "router" as const,
         "theme" as const,
         "presentation" as const,
         "ui" as const,

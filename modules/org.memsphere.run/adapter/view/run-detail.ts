@@ -1,4 +1,4 @@
-import type { ViewRenderContext, ViewUi } from "@memsphere/view-sdk";
+import type { RunArtifactPresentationContext, ViewRenderContext, ViewUi } from "@memsphere/view-sdk";
 
 type Json = Record<string, any>;
 
@@ -248,16 +248,24 @@ function renderArtifactResult(event: Json, run: Json, options: RunDetailOptions,
   if (event.at) meta.append(pill(formatTime(event.at)));
   const review = (run.artifactReviewSummaries || []).find((candidate: Json) => candidate.stepId === event.stepId)
     || (run.artifactReview?.stepId === event.stepId ? run.artifactReview : null);
-  card.append(title, meta, options.renderArtifact({
+  const metadata = artifact.metadata && typeof artifact.metadata === "object" && !Array.isArray(artifact.metadata)
+    ? artifact.metadata
+    : {};
+  const presentation: RunArtifactPresentationContext = {
     runId: run.id,
     artifactId: event.stepId,
-    artifact: freezePresentationValue(structuredClone(artifact)),
-    event: freezePresentationValue(structuredClone(event)),
-    run: freezePresentationValue(structuredClone(run)),
+    type: String(artifact.type ?? ""),
+    format: freezePresentationValue(structuredClone(artifact.format ?? null)),
+    title: String(artifact.name || event.stepId || labels.artifact),
+    content: freezePresentationValue(structuredClone(
+      artifact.storage === "file" ? (artifact.content ?? artifact.contentError ?? artifact.path) : (artifact.value ?? artifact.content ?? null)
+    )),
+    metadata: freezePresentationValue(structuredClone(metadata)),
     ...(review?.id ? { openReview: () => options.openReview(run.id, review.id) } : {}),
     download: () => downloadArtifact(artifact, artifact.name || event.stepId || "artifact"),
     defaultRender: () => renderArtifactValue(artifact)
-  }));
+  };
+  card.append(title, meta, options.renderArtifact(Object.freeze(presentation)));
   if (review?.id) {
     const open = options.ui.button({ label: { text: labels.review }, run: () => options.openReview(run.id, review.id) });
     open.dataset.artifactReviewId = review.id;

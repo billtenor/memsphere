@@ -97,20 +97,51 @@ export interface ModuleInstanceContext {
 
 export interface MemoryPagePresentationContext {
   readonly kind: "memory-page";
+  readonly route: Readonly<RouteLocation>;
   readonly filters: Readonly<Record<string, string>>;
   readonly items: readonly Readonly<Record<string, unknown>>[];
   readonly selectedReference?: string;
   refresh(): Promise<MemoryPagePresentationContext>;
   openMemory(reference: string): Promise<void>;
+  /** Opens the official Memory creation/import workflow; the Package never receives write access. */
+  openCreate(): Promise<void>;
 }
 
 export interface RunPagePresentationContext {
   readonly kind: "run-page";
+  readonly route: Readonly<RouteLocation>;
   readonly filters: Readonly<Record<string, string>>;
   readonly runs: readonly Readonly<Record<string, unknown>>[];
   readonly selectedRunId?: string;
   refresh(): Promise<RunPagePresentationContext>;
   openRun(id: string): Promise<void>;
+  /** Opens the official Run start workflow; the Package never receives write access. */
+  startRun(): Promise<void>;
+}
+
+export interface MemoryDetailPresentationContext {
+  readonly reference: string;
+  readonly kind: string;
+  readonly title: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly sections: readonly unknown[];
+  copyReference(): void | Promise<void>;
+  openChangeSet(id: string): void | Promise<void>;
+  openReview(id: string): void | Promise<void>;
+  defaultRender(): HTMLElement;
+}
+
+export interface RunArtifactPresentationContext {
+  readonly runId: string;
+  readonly artifactId: string;
+  readonly type: string;
+  readonly format: unknown;
+  readonly title: string;
+  readonly content: unknown;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  download(): void | Promise<void>;
+  readonly openReview?: () => void | Promise<void>;
+  defaultRender(): HTMLElement;
 }
 
 export interface ViewPresentationService {
@@ -142,8 +173,8 @@ export interface ViewMount {
   update?(context: ViewRenderContext): MaybePromise<void>;
 }
 
-export interface ViewDataRenderer {
-  render(input: unknown): HTMLElement;
+export interface ViewDataRenderer<Input = unknown> {
+  render(input: Input): HTMLElement;
 }
 
 export function isViewDataRenderer(value: unknown): value is ViewDataRenderer {
@@ -1260,7 +1291,7 @@ export const portableSlots = Object.freeze({
     render: "mount",
     validate: isViewMount
   }),
-  memoryDetailRenderer: defineSlot<ViewDataRenderer, "detail">()({
+  memoryDetailRenderer: defineSlot<ViewDataRenderer<MemoryDetailPresentationContext>, "detail">()({
     name: "org.memsphere.memory.detail.renderer",
     version: 1,
     kind: "keyed",
@@ -1276,7 +1307,7 @@ export const portableSlots = Object.freeze({
     render: "mount",
     validate: isViewMount
   }),
-  runArtifactRenderer: defineSlot<ViewDataRenderer, "artifact">()({
+  runArtifactRenderer: defineSlot<ViewDataRenderer<RunArtifactPresentationContext>, "artifact">()({
     name: "org.memsphere.run.artifact.renderer",
     version: 1,
     kind: "keyed",

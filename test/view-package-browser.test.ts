@@ -224,7 +224,7 @@ test("real Run Artifact uses a custom renderer and restores the official body wh
     import { portableSlots } from "@memsphere/view-sdk";
     export default { apiVersion: 1, inject: ["slots"], apply(context) {
       context.slots.register(portableSlots.runArtifactRenderer, { id: "artifact", key: "artifact", priority: 999, value: {
-        render(input) { const node = document.createElement("pre"); node.dataset.customArtifact = "true"; node.textContent = input.artifact.value; return node; }
+        render(input) { const node = document.createElement("pre"); node.dataset.customArtifact = "true"; node.textContent = input.content; return node; }
       }});
     }};
   `);

@@ -6,6 +6,7 @@ import {
   type Disposer,
   type HeaderActionDescriptor,
   type HeaderTitleDescriptor,
+  type MemoryDetailPresentationContext,
   type RouteLocation,
   type RouteTarget,
   type TextRef,
@@ -1652,11 +1653,16 @@ class MemoryApplication {
     const reference = `${detail.kind}/${Array.isArray(entity.names) ? String(entity.names[0] ?? detail.path ?? "") : String(detail.path ?? "")}`;
     const workspace = el("div");
     const content = el("section", "memory-panel memory-content-card");
-    content.append(this.#renderDetail({
+    const metadata = (entity.metadata && typeof entity.metadata === "object" && !Array.isArray(entity.metadata))
+      ? entity.metadata as JsonRecord
+      : {};
+    const sections = Array.isArray(entity.sections) ? entity.sections : [];
+    const presentation: MemoryDetailPresentationContext = {
       kind: detail.kind,
       reference,
-      entity: freezePresentationValue(structuredClone(entity)),
-      memory: freezePresentationValue(structuredClone(detail)),
+      title: memoryName(entity as MemorySummary),
+      metadata: freezePresentationValue(structuredClone(metadata)),
+      sections: freezePresentationValue(structuredClone(sections)),
       copyReference: () => navigator.clipboard?.writeText(reference),
       openChangeSet: (id: string) => this.#navigate(this.#routes.changeDetail.to({
         projectId: projectFromLocation(this.#location) || this.#currentProject || "memsphere",
@@ -1667,7 +1673,8 @@ class MemoryApplication {
         changeId: id
       })),
       defaultRender: () => renderMemoryEntity(detail.kind, entity, this.t.bind(this), undefined, this.renderOptions())
-    }));
+    };
+    content.append(this.#renderDetail(Object.freeze(presentation)));
     if (context) workspace.append(context);
     workspace.append(content);
     return workspace;

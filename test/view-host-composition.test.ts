@@ -117,6 +117,74 @@ test("portable Memory presentation shadows by priority and automatically falls b
   }, "/memories");
 });
 
+test("presentation service exposes frozen route, selection, summaries, and official navigation actions", async () => {
+  const replacement = {
+    ...bootInstance("org.example.presentation", "presentation", "/presentation.js", "/"),
+    module: { projectId: "demo", moduleId: "org.example.presentation", moduleVersion: "1.0.0", instanceId: "presentation" }
+  };
+  const official = {
+    ...bootInstance("org.memsphere.memory", "memory", "/presentation-official.js", "/"),
+    routeGrants: [
+      { id: "detail", path: "/projects/:projectId/memories/:kind/:name" },
+      { id: "market", path: "/projects/:projectId/market" },
+      { id: "runs", path: "/projects/:projectId/tasks" }
+    ]
+  };
+  const bundles = new Map([
+    ["/presentation.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots", "presentation"], apply(context) {
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "replacement", key: "page", priority: 100, value: {
+          async mount({ element }) {
+            const memory = await context.presentation.memoryPage({ status: "ready" });
+            const runs = await context.presentation.runPage({ status: "running" });
+            window.__presentationContract = {
+              route: memory.route,
+              selectedReference: memory.selectedReference,
+              memoryFrozen: Object.isFrozen(memory) && Object.isFrozen(memory.items) && Object.isFrozen(memory.items[0]),
+              runFrozen: Object.isFrozen(runs) && Object.isFrozen(runs.runs) && Object.isFrozen(runs.runs[0])
+            };
+            const create = document.createElement("button"); create.id = "presentation-create"; create.onclick = () => memory.openCreate();
+            const start = document.createElement("button"); start.id = "presentation-start"; start.onclick = () => runs.startRun();
+            element.append(create, start);
+          }
+        }});
+      }};
+    `],
+    ["/presentation-official.js", `
+      import { portableSlots, slots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+        const detail = context.router.register({ id: "detail", path: "/projects/:projectId/memories/:kind/:name" });
+        context.router.register({ id: "market", path: "/projects/:projectId/market" });
+        context.router.register({ id: "runs", path: "/projects/:projectId/tasks" });
+        const page = { mount({ element }) { element.id = "official-presentation-page"; } };
+        context.slots.register(slots.mainView, { id: "legacy", key: detail.key, when: detail.activation, value: page });
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "official", key: "page", priority: 1000, when: detail.activation, value: page });
+      }};
+    `]
+  ]);
+  await withPage(renderViewHostHtml("en", [replacement, official]), bundles, async page => {
+    await page.route("**/api/projects/demo/memories**", route => route.fulfill({
+      contentType: "application/json", body: JSON.stringify({ memories: [{ id: "concepts/example", title: "Example" }] })
+    }));
+    await page.route("**/api/projects/demo/runs**", route => route.fulfill({
+      contentType: "application/json", body: JSON.stringify({ runs: [{ id: "run-1", name: "Run one" }] })
+    }));
+  }, async page => {
+    await page.locator("#presentation-create").waitFor();
+    const contract = await page.evaluate(() => (window as any).__presentationContract);
+    assert.equal(contract.route.pathname, "/projects/demo/memories/concepts/example");
+    assert.equal(contract.selectedReference, "concepts/example");
+    assert.equal(contract.memoryFrozen, true);
+    assert.equal(contract.runFrozen, true);
+    await page.locator("#presentation-create").click();
+    await page.waitForURL(/\/projects\/demo\/market$/);
+    await page.goBack();
+    await page.locator("#presentation-start").click();
+    await page.waitForURL(/\/projects\/demo\/tasks$/);
+  }, "/projects/demo/memories/concepts/example");
+});
+
 test("portable data renderer receives business data and falls back from an async rejection", async () => {
   const replacement = bootInstance("org.example.memory-renderer", "replacement", "/renderer.js", "/");
   const official = {

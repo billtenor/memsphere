@@ -279,4 +279,6 @@ Package 通过 `module.json` 声明 `capabilities`、`dependencies`、`styles`�
 
 使用 `portableSlots.memoryPagePresentation`、`memoryDetailRenderer`、`runPagePresentation` 和 `runArtifactRenderer` 替换稳定 Route 内的展示。较小 `priority` 获胜，同 cell 同 priority 必须在 Project 设置选择首选候选；渲染异常会 abdicate 并回退到下一候选。`order` 仍只控制 list 排序。
 
+页面 Package 通过 `presentation` 服务读取冻结的摘要、当前 Route/选择，并调用 `refresh/openMemory/openCreate/openRun/startRun` 进入官方控制的流程；不直接请求业务 API。Detail/Artifact renderer 只接收 SDK 定义的最小只读正文 context 及官方包装的复制、ChangeSet、Review、下载动作。
+
 示例的 `index.js` 是预编译 ESM；修改 `src/index.js` 后运行 `node scripts/build-example-view-package.mjs`。正式构建会逐字节检查签入 bundle，并强制保持 `@memsphere/view-sdk` 为 external import。Package 不得内联 SDK，Host 的单例 Token brand 会拒绝这种 bundle。Data renderer 必须同步返回 `HTMLElement`；抛错、返回 Promise/thenable 或其他值都会立即 abdicate 并进入官方 fallback，abdication 持续到实例卸载或 View 重启。
