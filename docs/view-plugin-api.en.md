@@ -12,7 +12,7 @@ This document defines the long-term public interface and explicitly records curr
 
 ViewHost currently implements the default Plugin entrypoint, `apiVersion: 1`, `apply()`, Module instance identity, `lifecycle`, minimum Manifest validation, SDK SemVer checks, independent Bundle loading, Router, Slot Tokens and Registry, per-instance registration transactions, rollback, and Mount cleanup. An import map resolves `@memsphere/view-sdk` to the Host-provided browser SDK.
 
-The injectable services are `slots`, `router`, `theme`, `themeRegistry`, and `ui`. The complete root Slot list, product semantics, and current wiring status are maintained in the [View Slot List](./view-slots.en.md). Some aggregate Slots support restricted live `upsert()`, while page overlays support Host-managed background Route projection and local failure isolation. Trusted local Package discovery and Project composition are wired. View API, I18n, Logger, and arbitrary dynamic child Slots remain unwired. A Plugin requesting an unavailable or ungranted service fails before `apply()`.
+The injectable services are `slots`, `router`, `theme`, `themeRegistry`, and `ui`. The complete root Slot list, product semantics, and current wiring status are maintained in the [View Slot List](./view-slots.en.md). Some aggregate Slots support restricted live `upsert()`, while page overlays support Host-managed background Route projection and local failure isolation. Trusted local Package discovery and one global composition applied to every Project are wired. View API, I18n, Logger, and arbitrary dynamic child Slots remain unwired. A Plugin requesting an unavailable or ungranted service fails before `apply()`.
 
 ## Module View Entrypoint Contract
 

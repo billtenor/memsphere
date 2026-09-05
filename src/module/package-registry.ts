@@ -11,7 +11,7 @@ import {
 } from "./manifest.js";
 import type {
   GlobalViewPackagesConfig,
-  ProjectViewConfig,
+  ViewCompositionConfig,
   ViewPackageCapability
 } from "../view/package-config.js";
 import { configurableViewSlotIdForCell } from "../view/package-config.js";
@@ -93,7 +93,7 @@ const assetMime = new Map<string, string>([
 export async function resolveViewPackageComposition(input: {
   readonly global?: GlobalViewPackagesConfig;
   readonly globalThemeSource?: string;
-  readonly project?: ProjectViewConfig;
+  readonly composition?: ViewCompositionConfig;
   readonly sdkVersion: string;
 }): Promise<ResolvedViewPackageComposition> {
   const diagnostics: ViewPackageDiagnostic[] = [];
@@ -140,10 +140,10 @@ export async function resolveViewPackageComposition(input: {
   }
 
   const selected: Array<{
-    config: NonNullable<typeof input.project>["packages"][number];
+    config: NonNullable<typeof input.composition>["packages"][number];
     package: InstalledViewPackage | undefined;
     themeOnly: boolean;
-  }> = (input.project?.packages ?? []).map((config) => ({
+  }> = (input.composition?.packages ?? []).map((config) => ({
     config,
     package: identities.get(`${config.id}@${config.version}`),
     themeOnly: false
@@ -167,7 +167,7 @@ export async function resolveViewPackageComposition(input: {
     item.package!.manifest.version
   ]));
   const candidates: Array<{
-    config: NonNullable<typeof input.project>["packages"][number];
+    config: NonNullable<typeof input.composition>["packages"][number];
     package: InstalledViewPackage;
     instanceId: string;
     blockedCells: Set<string>;
@@ -241,7 +241,7 @@ export async function resolveViewPackageComposition(input: {
     ordered.forEach((item, rank) => ranks.set(item.id, [declared, rank]));
   }
 
-  for (const [slotId, configured] of Object.entries(input.project?.slots ?? {})) {
+  for (const [slotId, configured] of Object.entries(input.composition?.slots ?? {})) {
     const selectedIds = new Set(Array.isArray(configured) ? configured : configured ? [configured] : []);
     const entries = candidates.flatMap(candidate => (candidate.package.manifest.view.contributions ?? [])
       .filter(contribution => configurableViewSlotIdForCell(contribution.cell) === slotId)
@@ -276,7 +276,7 @@ export async function resolveViewPackageComposition(input: {
       const priority = ranks.get(identity);
       if (priority) {
         const slotId = configurableViewSlotIdForCell(contribution.cell);
-        const configured = slotId ? input.project?.slots?.[slotId] : undefined;
+        const configured = slotId ? input.composition?.slots?.[slotId] : undefined;
         const selectedIds = new Set(Array.isArray(configured) ? configured : configured ? [configured] : []);
         const identity = `${candidate.package.manifest.id}:${candidate.instanceId}:${contribution.id}`;
         registrations.push({
@@ -296,16 +296,8 @@ export async function resolveViewPackageComposition(input: {
         message: `unresolved contributions: ${[...candidate.blockedCells].sort().join(", ")}`
       });
     }
-    const projectAllow = new Set(candidate.config.allow ?? []);
     const declared = new Set(candidate.package.manifest.view.capabilities ?? []);
-    const allow = new Set([...candidate.package.homeAllow].filter(capability => (
-      declared.has(capability) && projectAllow.has(capability)
-    )));
-    if (candidate.package.manifest.id === globalThemePackageId) {
-      for (const capability of candidate.package.homeAllow) {
-        if (capability === "theme.register" || capability === "theme.override") allow.add(capability);
-      }
-    }
+    const allow = new Set([...candidate.package.homeAllow].filter(capability => declared.has(capability)));
     for (const capability of declared) {
       if (allow.has(capability)) continue;
       diagnostics.push({
@@ -313,7 +305,7 @@ export async function resolveViewPackageComposition(input: {
         version: candidate.package.manifest.version,
         instanceId: candidate.instanceId,
         state: "capability_denied",
-        message: `capability requires both Home and Project grants: ${capability}`
+        message: `capability is not granted for this installed View Package: ${capability}`
       });
     }
     return Object.freeze({
@@ -323,9 +315,9 @@ export async function resolveViewPackageComposition(input: {
       allow,
       allowedStyleIds: new Set((candidate.package.manifest.view.styles ?? []).flatMap(style => {
         if (candidate.themeOnly) return [];
-        if (!input.project?.styles) return [style.id];
+        if (!input.composition?.styles) return [style.id];
         const identity = `${candidate.package.manifest.id}:${candidate.instanceId}:${style.id}`;
-        return input.project.styles[identity] ? [style.id] : [];
+        return input.composition.styles[identity] ? [style.id] : [];
       })),
       contributionPolicy: Object.freeze({
         registrations: Object.freeze(registrations.map(entry => Object.freeze(entry))),

@@ -10,7 +10,7 @@ run_id: run-20260904-165459z-d3bd2ad3
 
 ## 需求
 
-用户可以安装本地界面扩展包，并分别选用其中的主题、页面、组件和样式；主题与 light/dark/system 模式统一应用到所有 Project，页面、组件和样式按当前 Project 配置。界面配置覆盖 12 类可扩展 Host 根 Slot 和 Memory/Run 的 4 个 portable cell。默认未配置时，现有界面、URL 与业务能力保持兼容。
+用户可以安装本地界面扩展包，并分别选用其中的主题、页面、组件和样式；本页面中的全部配置统一应用到所有 Project。界面配置覆盖 12 类可扩展 Host 根 Slot 和 Memory/Run 的 4 个 portable cell。默认未配置时，现有界面、URL 与业务能力保持兼容。
 
 Theme、样式和展示包应具备稳定 identity、版本、来源与依赖元数据，为后续分享、导入、官方收录和升级演进保留兼容基础；本迭代只交付可信本地路径，不实现远程市场、自动下载或恶意代码沙箱。
 
@@ -19,8 +19,8 @@ Memory 与 Run 必须实际迁移到新架构：官方现有实现成为 priorit
 ## 验收标准
 
 - 默认只提供一个“界面与主题”入口，按“界面扩展包安装、主题配置、界面配置”分区；安装是包级，应用是 contribution 级，“一键应用全部”是可继续编辑的批量选择。
-- 整页只有一个状态和一个保存按钮，先校验再保存 Home 与 Project；普通 UI 不展示 revision、digest 或 running/disk 配置。
-- 主题只提供全局配置并应用到所有 Project；历史 Project Theme 只兼容读取。
+- 整页只有一个状态和一个保存按钮，校验后原子保存 Home 全局配置；普通 UI 不展示 revision、digest 或 running/disk 配置。
+- 扩展包安装、权限、主题、Slot 和样式选择全部为 Home 全局配置并应用到所有 Project；历史 Project View 字段只兼容读取且不参与展示。
 - “界面配置”用表格列出全部 16 类用户可配置 Slot，single/keyed 单选、list 多选；新增稳定 Slot 通过统一目录自动进入表格。
 - 未配置时 Memory/Run 的 DOM、交互和 URL 保持兼容；四个 presentation/renderer cell 均完成官方候选迁移和用户候选覆盖。
 - 同 cell 数值较小 priority 获胜；同 priority 无首选时所有相关外部实例在 apply 前原子失败并回退官方候选，结果不依赖加载顺序。
@@ -51,7 +51,7 @@ Memory 与 Run 必须实际迁移到新架构：官方现有实现成为 priorit
 - [x] Runtime priority/shadow/fallback、per-instance service allowlist、portable Slot 与 diagnostics。
 - [x] Theme Registry、官方 dark token、mode 切换及 Style 生命周期/安全门禁。
 - [x] Memory 与 Run 四个 cell 的官方候选迁移和只读 presentation context。
-- [x] Settings 以统一“界面与主题”页面承载扩展包安装、全局主题和表格式 contribution 配置；单一保存动作协调两层持久化，并只展示可行动状态。
+- [x] Settings 以统一“界面与主题”页面承载扩展包安装、主题和表格式 contribution 配置；单一保存动作原子写入 Home 全局配置，并只展示可行动状态。
 - [x] 独立示例、作者文档、中英文文案、System/Reserved Memory 与 Skill 同步。
 - [ ] 自动化、浏览器实测、专业评审与产品验收材料。
 
@@ -68,3 +68,5 @@ Memory 与 Run 必须实际迁移到新架构：官方现有实现成为 priorit
 产品验收第二轮进一步指出包级启用、双保存按钮、Project 主题、技术诊断和仅四个 Slot 的界面仍不符合用户心智。返修后采用“界面扩展包”术语；扩展包只负责安装与权限，主题全局独立配置，界面内容按 Slot/Style 独立选择；一键应用全部只批量填充选择。配置表由 Host 的稳定 Slot 目录生成并展示 16 类用户可配置位置，整页只有一个保存动作和一个可行动状态。旧 `/settings/packages`、`/settings/composition` URL 继续兼容。
 
 返修后最终 `npm run build`、`git diff --check` 和全量 558 项测试通过：557 passed、1 个 Windows-only skipped、0 failed。真实浏览器在当前服务确认统一入口 1 个、旧入口 0 个、界面配置表完整展示 16 类可配置 Slot；旧 packages/composition URL 均进入同一页面。更新后的 Memory ChangeSet 为 `change-20260905-041123536z-7a67ad47`，Content Digest `5bb5f511c114a04a647660a20347dbd0dbcbb32e5a9ece4b7a254938ee8da546`，校验通过。
+
+产品验收第三轮澄清“界面与主题”页面中的所有配置都应对所有 Project 生效，且无需显示额外范围文案。实现已将 Package capability、Theme、Slot、Style 和所需实例统一迁入 Home `view_composition`，Project 历史 View 字段只保留解析兼容、不再参与 resolver；启动快照使用一个全局 composition 为所有已注册 Project 构建实例。页面删除重复介绍卡及全部生效范围分组。跨 A/B Project 浏览器用例验证同一扩展内容同时生效，磁盘修改在重启前仍由全局启动快照隔离。全量 558 项测试结果为 557 passed、1 个 Windows-only skipped、0 failed。最终 Memory ChangeSet 为 `change-20260905-052525896z-679777fa`，Content Digest `8315dc2d43878c7f2b205045dc213fdd5530df18c50a3358c5ebaa3dc616b9a5`，校验通过。

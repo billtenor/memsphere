@@ -14,6 +14,7 @@ import {
   normalizeInstalledViewPackagePaths,
   type GlobalViewPackagesConfig,
   type GlobalViewThemeConfig,
+  type ViewCompositionConfig,
   type ProjectViewConfig
 } from "./view/package-config.js";
 
@@ -50,6 +51,7 @@ export type EditableGlobalConfigDraft = {
   view?: { host: string; port: number };
   view_packages?: GlobalViewPackagesConfig;
   view_theme?: GlobalViewThemeConfig;
+  view_composition?: ViewCompositionConfig;
   acp_providers?: AcpProviderConfigFile;
 };
 
@@ -135,6 +137,9 @@ export function editableGlobalConfigDraft(document: GlobalConfigDocument): Edita
     ...(document.raw.view_theme === undefined
       ? {}
       : { view_theme: structuredClone(document.raw.view_theme) }),
+    ...(document.raw.view_composition === undefined
+      ? {}
+      : { view_composition: structuredClone(document.raw.view_composition) }),
     ...(document.raw.acp_providers === undefined
       ? {}
       : { acp_providers: structuredClone(document.raw.acp_providers) })
@@ -166,6 +171,7 @@ export function validateGlobalConfigDraft(
       ? {}
       : { view_packages: normalizeInstalledViewPackagePaths(structuredClone(draft.view_packages)) }),
     ...(draft.view_theme === undefined ? {} : { view_theme: structuredClone(draft.view_theme) }),
+    ...(draft.view_composition === undefined ? {} : { view_composition: structuredClone(draft.view_composition) }),
     ...(draft.acp_providers === undefined ? {} : { acp_providers: structuredClone(draft.acp_providers) })
   };
 
@@ -354,6 +360,7 @@ function normalizeGlobalDraft(global: GlobalConfigFile): EditableGlobalConfigDra
       ? {}
       : { view_packages: structuredClone(global.view_packages) }),
     ...(global.view_theme === undefined ? {} : { view_theme: structuredClone(global.view_theme) }),
+    ...(global.view_composition === undefined ? {} : { view_composition: structuredClone(global.view_composition) }),
     ...(global.acp_providers === undefined ? {} : { acp_providers: structuredClone(global.acp_providers) })
   };
 }

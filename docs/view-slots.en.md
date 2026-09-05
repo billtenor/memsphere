@@ -38,7 +38,7 @@ The Catalog defines fourteen long-term Slots. `header.account` is Core-reserved 
 
 The SDK and ViewHost now wire all 14 root Slots in this Catalog. Core provides Home, account, and other Shell-owned content through an in-Host Plugin. All four built-in Modules use the same public Slot Tree for primary navigation, secondary navigation, object lists, contextual side panels, Header, Page, search Providers, and Home aggregate contributions. Shell provides resizable and persisted secondary-navigation and content-list columns. Ordinary Run pages do not poll. Run registers Artifact Review in `overlay`; ViewHost owns the background Route, mask, focus, dismissal, cleanup, and local failure boundary.
 
-Arbitrary dynamic child Slots remain unwired. The twelve extensible root Slot classes, four versioned portable presentation cells, trusted local interface-extension-package discovery, and contribution-level Project composition are wired. Interface configuration lists these sixteen stable classes and omits Core-reserved locations. Implementation progress belongs only in this section and must not delete or narrow the long-term Catalog above.
+Arbitrary dynamic child Slots remain unwired. The twelve extensible root Slot classes, four versioned portable presentation cells, trusted local interface-extension-package discovery, and contribution-level global composition are wired. Interface configuration lists these sixteen stable classes, omits Core-reserved locations, and applies the same selections to every Project. Implementation progress belongs only in this section and must not delete or narrow the long-term Catalog above.
 
 ## Slot Structure
 

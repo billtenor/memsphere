@@ -25,13 +25,11 @@ test("trusted local Package replaces Memory and Run through formal composition a
   await writeFile(join(home, "config.json"), JSON.stringify({
     view: { host: "127.0.0.1", port: 0 },
     view_packages: { installed: [{ path: packageRoot, allow: grants }] },
-    view_theme: { mode: "dark", selected_source: "org.example.memsphere.custom-view:sea-glass" }
+    view_theme: { mode: "dark", selected_source: "org.example.memsphere.custom-view:sea-glass" },
+    view_composition: { packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true }] }
   }));
   await writeFile(join(projectRoot, "config.json"), JSON.stringify({
-    store: { type: "managed", branch: "master", published_revision: "test" },
-    view: {
-      packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true, allow: grants }],
-    }
+    store: { type: "managed", branch: "master", published_revision: "test" }
   }));
   await writeFile(join(home, "registry.json"), JSON.stringify({
     format_version: 1,
@@ -45,11 +43,9 @@ test("trusted local Package replaces Memory and Run through formal composition a
     view: { host: "127.0.0.1", port: 0 },
     viewPackages: { installed: [{ path: packageRoot, allow: [...grants] }] },
     viewTheme: { mode: "dark", selected_source: "org.example.memsphere.custom-view:sea-glass" },
+    viewComposition: { packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true }] },
     project: {
-      name: "demo", store: { type: "managed", branch: "master", published_revision: "test" }, mounted: [],
-      view: {
-        packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true, allow: [...grants] }]
-      }
+      name: "demo", store: { type: "managed", branch: "master", published_revision: "test" }, mounted: []
     }
   };
   const server = createViewServer(config);
@@ -88,7 +84,7 @@ test("trusted local Package replaces Memory and Run through formal composition a
     assert.equal(await page.getByText(/running [0-9a-f]+ · disk [0-9a-f]+/).count(), 0);
 
     const disabledConfig = structuredClone(config) as MemsphereConfig;
-    (disabledConfig.project!.view!.packages[0] as { enabled: boolean }).enabled = false;
+    (disabledConfig.viewComposition!.packages[0] as { enabled: boolean }).enabled = false;
     disabledServer = createViewServer(disabledConfig);
     await new Promise<void>((resolveListen, reject) => {
       disabledServer!.once("error", reject);
@@ -132,7 +128,7 @@ test("Settings completes the local Package installation and Project enablement f
     return { server, origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
   };
   const stop = (server: ReturnType<typeof createViewServer>) => new Promise<void>(resolveClose => server.close(() => resolveClose()));
-  const save = async (_scope: "global" | "project") => {
+  const save = async () => {
     await page.locator('.settings-detail-surface [data-action="save-appearance"]').click();
     await page.waitForFunction(() => !document.querySelector("#settings-status-appearance")?.textContent?.includes("未保存"));
   };
@@ -140,12 +136,11 @@ test("Settings completes the local Package installation and Project enablement f
   try {
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/settings/appearance`);
-    await page.getByText("对所有 Project 生效", { exact: true }).waitFor();
-    await page.getByText("仅当前 Project 生效：demo", { exact: true }).waitFor();
+    assert.equal(await page.locator(".settings-scope-heading").count(), 0);
     assert.equal(await page.locator(".settings-appearance-intro").count(), 0);
     await page.locator("#settings-package-path").fill(packageRoot);
     await page.locator('[data-action="add-view-package"]').click();
-    await save("global");
+    await save();
     await page.getByText(/重启/).first().waitFor();
     await page.getByText("界面组合已保存，当前服务仍使用启动快照；请执行 memsphere view restart 后生效。", { exact: true }).waitFor();
     const pendingInstall = await page.evaluate(async () => (await fetch("/api/settings/global")).json());
@@ -169,7 +164,7 @@ test("Settings completes the local Package installation and Project enablement f
     await page.locator('[data-select-option="view_theme.mode"][data-value="dark"]').click();
     await page.locator('[data-select-field="view_theme.selected_source"]').click();
     await page.locator('[data-select-option="view_theme.selected_source"][data-value="org.example.memsphere.custom-view:sea-glass"]').click();
-    await save("global");
+    await save();
     await stop(active.server); active = undefined;
     const homeConfig = JSON.parse(await readFile(join(home, "config.json"), "utf8"));
     assert.deepEqual(homeConfig.view_theme, {
@@ -194,22 +189,21 @@ test("Settings completes the local Package installation and Project enablement f
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.locator('[data-apply-view-package="org.example.memsphere.custom-view@1.0.0"]').click();
     await page.getByText(/已选用 org\.example\.memsphere\.custom-view/).waitFor();
-    await save("project");
+    await save();
     await page.getByText(/重启/).first().waitFor();
     await page.getByText("界面组合已保存，当前服务仍使用启动快照；请执行 memsphere view restart 后生效。", { exact: true }).waitFor();
-    const pendingProject = await page.evaluate(async () => (await fetch("/api/projects/demo/settings/project")).json());
-    assert.equal(pendingProject.restartPending, true);
-    assert.notEqual(pendingProject.composition.runningDigest, pendingProject.composition.diskDigest);
+    const pendingComposition = await page.evaluate(async () => (await fetch("/api/settings/global")).json());
+    assert.equal(pendingComposition.restartPending, true);
+    assert.notEqual(pendingComposition.composition.runningDigest, pendingComposition.composition.diskDigest);
     await page.goto(`${active.origin}/projects/demo/memories`);
     await page.locator(".memory-detail-surface").waitFor();
     assert.equal(await page.locator("[data-custom-showcase]").count(), 0);
     await stop(active.server); active = undefined;
-    const project = JSON.parse(await readFile(join(projectRoot, "config.json"), "utf8"));
-    assert.equal(project.view.packages[0].enabled, true);
-    assert.deepEqual(new Set(project.view.packages[0].allow), new Set(["theme.override", "styles.scoped", "styles.global"]));
-    assert.equal(project.view.theme, undefined);
-    assert.equal(Object.keys(project.view.slots).length, 4);
-    assert.equal(Object.values(project.view.styles).filter(Boolean).length, 2);
+    const savedHome = JSON.parse(await readFile(join(home, "config.json"), "utf8"));
+    assert.equal(savedHome.view_composition.packages[0].enabled, true);
+    assert.equal(Object.keys(savedHome.view_composition.slots).length, 4);
+    assert.equal(Object.values(savedHome.view_composition.styles).filter(Boolean).length, 2);
+    assert.equal(JSON.parse(await readFile(join(projectRoot, "config.json"), "utf8")).view, undefined);
 
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/memories`);
@@ -275,13 +269,10 @@ test("real Run Artifact uses a custom renderer and restores the official body wh
   }));
   await writeFile(join(home, "config.json"), JSON.stringify({
     view: { host: "127.0.0.1", port: 0 },
-    view_packages: { installed: [{ path: packageRoot }] }
+    view_packages: { installed: [{ path: packageRoot }] },
+    view_composition: { packages: [{ id: "org.example.run-artifact-only", version: "1.0.0", enabled: true }] }
   }));
-  const projectConfig = (enabled: boolean) => ({
-    store: { type: "managed", branch: "master", published_revision: "test" },
-    view: { packages: [{ id: "org.example.run-artifact-only", version: "1.0.0", enabled }] }
-  });
-  await writeFile(join(projectRoot, "config.json"), JSON.stringify(projectConfig(true)));
+  await writeFile(join(projectRoot, "config.json"), JSON.stringify({ store: { type: "managed", branch: "master", published_revision: "test" } }));
   await writeFile(join(projectRoot, "project.json"), JSON.stringify({ format_version: 1, name: "demo", created_at: new Date(0).toISOString() }));
   await writeFile(join(home, "registry.json"), JSON.stringify({ format_version: 1, projects: { demo: { root: projectRoot } }, workspaces: {} }));
   const browser = await chromium.launch({ headless: true });
@@ -303,7 +294,11 @@ test("real Run Artifact uses a custom renderer and restores the official body wh
     assert.equal(await page.locator("[data-custom-artifact=true]").textContent(), "actual artifact body");
     await new Promise<void>(resolveClose => active!.server.close(() => resolveClose())); active = undefined;
 
-    await writeFile(join(projectRoot, "config.json"), JSON.stringify(projectConfig(false)));
+    await writeFile(join(home, "config.json"), JSON.stringify({
+      view: { host: "127.0.0.1", port: 0 },
+      view_packages: { installed: [{ path: packageRoot }] },
+      view_composition: { packages: [{ id: "org.example.run-artifact-only", version: "1.0.0", enabled: false }] }
+    }));
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/tasks/${runId}`);
     await page.locator(".artifact-review-artifact-content").waitFor();
@@ -315,7 +310,7 @@ test("real Run Artifact uses a custom renderer and restores the official body wh
   }
 });
 
-test("boot composition snapshot stays isolated across A-B-A disk changes and removed Projects", async () => {
+test("global composition applies to every Project and stays frozen across disk changes", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "memsphere-view-package-snapshot-"));
   const home = join(temporary, "home");
   const packageRoot = resolve("examples/view-packages/dsh-custom-view");
@@ -327,16 +322,13 @@ test("boot composition snapshot stays isolated across A-B-A disk changes and rem
     await mkdir(join(root, "archives"), { recursive: true });
     await writeFile(join(root, "project.json"), JSON.stringify({ format_version: 1, name, created_at: new Date(0).toISOString() }));
   }
-  const projectConfig = (enabled: boolean) => ({
-    store: { type: "managed", branch: "master", published_revision: "test" },
-    view: { packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled, allow: grants }] }
-  });
   await writeFile(join(home, "config.json"), JSON.stringify({
     view: { host: "127.0.0.1", port: 0 },
-    view_packages: { installed: [{ path: packageRoot, allow: grants }] }
+    view_packages: { installed: [{ path: packageRoot, allow: grants }] },
+    view_composition: { packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true }] }
   }));
-  await writeFile(join(roots.a, "config.json"), JSON.stringify(projectConfig(true)));
-  await writeFile(join(roots.b, "config.json"), JSON.stringify(projectConfig(false)));
+  await writeFile(join(roots.a, "config.json"), JSON.stringify({ store: { type: "managed", branch: "master", published_revision: "test" } }));
+  await writeFile(join(roots.b, "config.json"), JSON.stringify({ store: { type: "managed", branch: "master", published_revision: "test" } }));
   await writeFile(join(home, "registry.json"), JSON.stringify({
     format_version: 1,
     projects: { a: { root: roots.a }, b: { root: roots.b } },
@@ -351,15 +343,16 @@ test("boot composition snapshot stays isolated across A-B-A disk changes and rem
     await page.goto(`${origin}/projects/a/memories`);
     await page.getByText("My Memory workspace", { exact: true }).waitFor();
     await page.goto(`${origin}/projects/b/memories`);
-    await page.locator(".memory-detail-surface").waitFor();
-    assert.equal(await page.locator("[data-custom-showcase]").count(), 0);
+    await page.getByText("My Memory workspace", { exact: true }).waitFor();
 
-    await writeFile(join(roots.a, "config.json"), JSON.stringify(projectConfig(false)));
-    await writeFile(join(roots.b, "config.json"), JSON.stringify(projectConfig(true)));
+    await writeFile(join(home, "config.json"), JSON.stringify({
+      view: { host: "127.0.0.1", port: 0 },
+      view_packages: { installed: [{ path: packageRoot, allow: grants }] },
+      view_composition: { packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: false }] }
+    }));
 
     await page.goto(`${origin}/projects/b/memories`);
-    await page.locator(".memory-detail-surface").waitFor();
-    assert.equal(await page.locator("[data-custom-showcase]").count(), 0);
+    await page.getByText("My Memory workspace", { exact: true }).waitFor();
     const bDiagnostics = await page.evaluate(async () => (await fetch("/api/projects/b/settings/view-packages")).json());
     assert.equal(bDiagnostics.composition.restartPending, true);
 
@@ -367,7 +360,7 @@ test("boot composition snapshot stays isolated across A-B-A disk changes and rem
     await page.getByText("My Memory workspace", { exact: true }).waitFor();
     const aDiagnostics = await page.evaluate(async () => (await fetch("/api/projects/a/settings/view-packages")).json());
     assert.equal(aDiagnostics.composition.restartPending, true);
-    assert.notEqual(aDiagnostics.composition.runningDigest, bDiagnostics.composition.runningDigest);
+    assert.equal(aDiagnostics.composition.runningDigest, bDiagnostics.composition.runningDigest);
 
     await writeFile(join(home, "registry.json"), JSON.stringify({
       format_version: 1,

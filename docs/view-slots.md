@@ -51,7 +51,7 @@
 
 当前 SDK 与 ViewHost 已接线本 Catalog 的全部 14 个根 Slot。Core 通过 Host 内置 Plugin 提供 Home、账户等 Shell 内容；四个 builtin Module 通过同一公开 Slot Tree 贡献主导航、二级导航、对象列表、按需右侧栏、Header、Page、搜索 Provider 与 Home 聚合项。Shell 使用可拖动且持久化的二级导航栏和内容列表栏；Run 普通页面不轮询，Artifact Review 由 Run Module 注册到 `overlay`，Host 负责背景 Route、遮罩、焦点、关闭、清理与局部故障边界。
 
-任意动态子 Slot 仍未接线；12 类可扩展根 Slot、四个版本化 portable presentation cell、可信本地界面扩展包发现/安装及按 contribution 的 Project 动态组合已经接线。“界面配置”表展示这 16 类稳定位置，不展示 Core 保留位置。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
+任意动态子 Slot 仍未接线；12 类可扩展根 Slot、四个版本化 portable presentation cell、可信本地界面扩展包发现/安装及按 contribution 的全局动态组合已经接线。“界面配置”表展示这 16 类稳定位置，不展示 Core 保留位置；同一选择应用到所有 Project。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
 
 ## Slot 结构
 

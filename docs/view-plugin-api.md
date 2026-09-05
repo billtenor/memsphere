@@ -12,7 +12,7 @@
 
 当前 ViewHost 已实现 Plugin 默认入口、`apiVersion: 1`、`apply()`、Module 实例身份、`lifecycle`、最小 Manifest 校验、SDK SemVer 检查、独立 Bundle 动态加载、Router、Slot Token/Registry、实例级注册事务，以及 Mount 的回滚和清理。浏览器通过 import map 将 `@memsphere/view-sdk` 解析到 Host 提供的 SDK。
 
-当前可注入服务为 `slots`、`router`、`theme`、`themeRegistry` 和 `ui`；根 Slot 的完整清单、产品语义和当前接线状态统一见 [View Slot List](./view-slots.md)。部分聚合 Slot 支持下文定义的受限 live `upsert()`，页面浮层支持 Host 管理的背景 Route 投影与局部故障边界。四个 builtin Module 均使用同一公开入口和独立 Bundle 运行。可信本地用户 Package 发现及 Project 动态组合已经接线；View API、I18n、Logger 与任意动态子 Slot 仍未接线。Plugin 请求尚未提供或未授权的服务会在 `apply()` 前明确失败。
+当前可注入服务为 `slots`、`router`、`theme`、`themeRegistry` 和 `ui`；根 Slot 的完整清单、产品语义和当前接线状态统一见 [View Slot List](./view-slots.md)。部分聚合 Slot 支持下文定义的受限 live `upsert()`，页面浮层支持 Host 管理的背景 Route 投影与局部故障边界。四个 builtin Module 均使用同一公开入口和独立 Bundle 运行。可信本地用户 Package 发现及应用到所有 Project 的全局动态组合已经接线；View API、I18n、Logger 与任意动态子 Slot 仍未接线。Plugin 请求尚未提供或未授权的服务会在 `apply()` 前明确失败。
 
 ## Module View 入口契约
 

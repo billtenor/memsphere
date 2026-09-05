@@ -98,12 +98,13 @@ const projectViewSlotSelectionsSchema = z.record(z.union([z.string().min(1), z.a
   }
 });
 
-export const projectViewConfigSchema = z.object({
+const viewCompositionShape = {
   packages: z.array(projectViewPackageSchema).default([]),
-  theme: projectViewThemeConfigSchema.optional(),
   slots: projectViewSlotSelectionsSchema.optional(),
   styles: z.record(z.boolean()).optional()
-}).strict().superRefine((view, context) => {
+};
+
+function validateViewPackageInstances(view: { packages: Array<z.infer<typeof projectViewPackageSchema>> }, context: z.RefinementCtx): void {
   const identities = new Set<string>();
   for (const [index, entry] of view.packages.entries()) {
     const identity = `${entry.id}@${entry.version}#${entry.instance_id ?? entry.id}`;
@@ -116,7 +117,14 @@ export const projectViewConfigSchema = z.object({
     }
     identities.add(identity);
   }
-});
+}
+
+export const viewCompositionConfigSchema = z.object(viewCompositionShape).strict().superRefine(validateViewPackageInstances);
+
+export const projectViewConfigSchema = z.object({
+  ...viewCompositionShape,
+  theme: projectViewThemeConfigSchema.optional()
+}).strict().superRefine(validateViewPackageInstances);
 
 export const globalViewPackagesConfigSchema = z.object({
   installed: z.array(installedViewPackageSchema).default([])
@@ -137,6 +145,7 @@ export const globalViewPackagesConfigSchema = z.object({
 
 export type GlobalViewPackagesConfig = z.infer<typeof globalViewPackagesConfigSchema>;
 export type GlobalViewThemeConfig = z.infer<typeof globalViewThemeConfigSchema>;
+export type ViewCompositionConfig = z.infer<typeof viewCompositionConfigSchema>;
 export type ProjectViewConfig = z.infer<typeof projectViewConfigSchema>;
 
 export function normalizeInstalledViewPackagePaths(

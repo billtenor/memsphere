@@ -270,10 +270,9 @@ type ViewServerOptions = {
 type ViewCompositionBootEntry = Readonly<{
   projectId: string;
   globalRevision: string;
-  projectRevision?: string;
   viewPackages: MemsphereConfig["viewPackages"];
   viewTheme: MemsphereConfig["viewTheme"];
-  projectView: NonNullable<MemsphereConfig["project"]>["view"];
+  viewComposition: MemsphereConfig["viewComposition"];
   digest: string;
   composition: Promise<ResolvedViewPackageComposition>;
   externalInstances: Promise<readonly ViewHostBootInstance[]>;
@@ -509,18 +508,17 @@ async function handleRequest(
   if (request.method === "GET" && url.pathname === "/api/settings/view-packages") {
     if (!authorizeSettingsRequest(request, response, config, options)) return;
     const globalDocument = await readGlobalSettingsDocument(config);
-    const projectDocument = await readCurrentProjectSettingsDocument(config);
     const composition = await resolveViewPackageComposition({
       global: globalDocument.raw.view_packages,
       globalThemeSource: globalDocument.raw.view_theme?.selected_source,
-      project: projectDocument?.raw.view,
+      composition: globalDocument.raw.view_composition,
       sdkVersion: viewSdkVersion
     });
     const running = compositionBootSnapshot.entries.get(config.project?.name ?? "memsphere");
     const diskDigest = compositionConfigDigest(
       globalDocument.raw.view_packages,
       globalDocument.raw.view_theme,
-      projectDocument?.raw.view
+      globalDocument.raw.view_composition
     );
     sendJson(response, 200, {
       installed: composition.installed.map(entry => ({
@@ -550,9 +548,7 @@ async function handleRequest(
         runningDigest: running?.digest,
         diskDigest,
         runningGlobalRevision: running?.globalRevision,
-        runningProjectRevision: running?.projectRevision,
         diskGlobalRevision: globalDocument.revision,
-        diskProjectRevision: projectDocument?.revision,
         restartPending: !running || running.digest !== diskDigest
       }
     });
@@ -650,7 +646,8 @@ async function handleRequest(
       restartRequired: !sameViewConfig(candidateView, config.view),
       ...globalCompositionState({
         view_packages: validation.candidate?.view_packages,
-        view_theme: validation.candidate?.view_theme
+        view_theme: validation.candidate?.view_theme,
+        view_composition: validation.candidate?.view_composition
       }, document.revision, compositionBootSnapshot)
     });
     return;
@@ -2488,13 +2485,14 @@ function projectSettingsPayload(
 }
 
 function globalCompositionState(
-  disk: Pick<GlobalConfigDocument["raw"], "view_packages" | "view_theme">,
+  disk: Pick<GlobalConfigDocument["raw"], "view_packages" | "view_theme" | "view_composition">,
   diskRevision: string,
   running: ViewCompositionBootSnapshot
 ): Record<string, unknown> {
   const diskDigest = viewCompositionDigest({
     view_packages: disk.view_packages,
-    view_theme: disk.view_theme
+    view_theme: disk.view_theme,
+    view_composition: disk.view_composition
   });
   return {
     restartPending: running.globalDigest !== diskDigest,
@@ -2508,19 +2506,18 @@ function globalCompositionState(
 }
 
 function projectCompositionState(
-  projectView: NonNullable<MemsphereConfig["project"]>["view"],
+  _projectView: NonNullable<MemsphereConfig["project"]>["view"],
   projectRevision: string,
   global: GlobalConfigDocument,
   running: ViewCompositionBootEntry | undefined
 ): Record<string, unknown> {
-  const diskDigest = compositionConfigDigest(global.raw.view_packages, global.raw.view_theme, projectView);
+  const diskDigest = compositionConfigDigest(global.raw.view_packages, global.raw.view_theme, global.raw.view_composition);
   return {
     restartPending: !running || running.digest !== diskDigest,
     composition: {
       runningDigest: running?.digest,
       diskDigest,
       runningGlobalRevision: running?.globalRevision,
-      runningProjectRevision: running?.projectRevision,
       diskGlobalRevision: global.revision,
       diskProjectRevision: projectRevision
     }
@@ -2863,6 +2860,7 @@ async function captureViewCompositionBootSnapshot(
   const globalDocument = await readGlobalSettingsDocument(config);
   const viewPackages = structuredClone(config.viewPackages);
   const viewTheme = structuredClone(config.viewTheme);
+  const viewComposition = structuredClone(config.viewComposition);
   const entries = new Map<string, ViewCompositionBootEntry>();
   const registered = (await listRegisteredProjects(config.homeRoot ?? resolveMemsphereHome()))
     .filter(project => !project.missing);
@@ -2873,34 +2871,31 @@ async function captureViewCompositionBootSnapshot(
     const resolved = projectId === startupProjectId
       ? config
       : await readProjectConfig(projectId, config.homeRoot);
-    const projectView = structuredClone(resolved.project?.view);
-    let projectRevision = resolved.project?.revision;
     try {
-      projectRevision = (await readProjectConfigDocument(resolved.configPath, resolved)).revision;
+      await readProjectConfigDocument(resolved.configPath, resolved);
     } catch {
       // A Project removed during startup remains absent from the immutable boot snapshot.
       return;
     }
-    const digest = compositionConfigDigest(viewPackages, viewTheme, projectView);
+    const digest = compositionConfigDigest(viewPackages, viewTheme, viewComposition);
     const presentationConfig: MemsphereConfig = {
       ...resolved,
       viewPackages,
       viewTheme,
-      ...(resolved.project ? { project: { ...resolved.project, view: projectView } } : {})
+      viewComposition
     };
     const composition = resolveViewPackageComposition({
       global: viewPackages,
       globalThemeSource: viewTheme?.selected_source,
-      project: projectView,
+      composition: viewComposition,
       sdkVersion: viewSdkVersion
     });
     entries.set(projectId, Object.freeze({
       projectId,
       globalRevision: globalDocument.revision,
-      projectRevision,
       viewPackages,
       viewTheme,
-      projectView,
+      viewComposition,
       digest,
       composition,
       externalInstances: composition.then(value => externalViewInstances(presentationConfig, value, assets))
@@ -2909,7 +2904,7 @@ async function captureViewCompositionBootSnapshot(
   await Promise.all([...entries.values()].map(entry => entry.externalInstances));
   return Object.freeze({
     globalRevision: globalDocument.revision,
-    globalDigest: viewCompositionDigest({ view_packages: viewPackages, view_theme: viewTheme }),
+    globalDigest: viewCompositionDigest({ view_packages: viewPackages, view_theme: viewTheme, view_composition: viewComposition }),
     registeredProjectIds: Object.freeze(new Set(registered.map(project => project.name))),
     entries
   });
@@ -2918,12 +2913,12 @@ async function captureViewCompositionBootSnapshot(
 function compositionConfigDigest(
   viewPackages: MemsphereConfig["viewPackages"],
   viewTheme: MemsphereConfig["viewTheme"],
-  projectView: NonNullable<MemsphereConfig["project"]>["view"]
+  viewComposition: MemsphereConfig["viewComposition"]
 ): string {
   return viewCompositionDigest({
     view_packages: viewPackages,
     view_theme: viewTheme,
-    project_view: projectView
+    view_composition: viewComposition
   });
 }
 
@@ -2935,7 +2930,7 @@ function configWithViewCompositionSnapshot(
     ...config,
     viewPackages: entry.viewPackages,
     viewTheme: entry.viewTheme,
-    ...(config.project ? { project: { ...config.project, view: entry.projectView } } : {})
+    viewComposition: entry.viewComposition
   };
 }
 

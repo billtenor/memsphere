@@ -22,7 +22,7 @@ test("View Package resolver loads installed versions and blocks unresolved same-
         { id: "org.example.second", version: "1.0.0", enabled: true }
       ]
     };
-    const conflicted = await resolveViewPackageComposition({ global, project: baseProject, sdkVersion: "1.0.0" });
+    const conflicted = await resolveViewPackageComposition({ global, composition: baseProject, sdkVersion: "1.0.0" });
     assert.equal(conflicted.installed.length, 2);
     assert.deepEqual(conflicted.instances.map(value => value.contributionPolicy.blockedCells), [
       ["org.memsphere.memory.page.presentation@1:page"],
@@ -32,7 +32,7 @@ test("View Package resolver loads installed versions and blocks unresolved same-
     const preferredIdentity = "org.example.second:org.example.second:second";
     const resolved = await resolveViewPackageComposition({
       global,
-      project: {
+      composition: {
         packages: baseProject.packages.map(entry => ({
           ...entry,
           preferences: { "org.memsphere.memory.page.presentation@1:page": preferredIdentity }
@@ -50,28 +50,23 @@ test("View Package resolver loads installed versions and blocks unresolved same-
   }
 });
 
-test("global style capability requires both Home and Project grants", async () => {
+test("global style capability requires the installed Package grant", async () => {
   const root = await mkdtemp(join(tmpdir(), "memsphere-view-grants-"));
   try {
     const packageRoot = await makePackage(root, "styled", "org.example.styled", "styled", true);
     for (const manifest of [false, true]) {
       for (const home of [false, true]) {
-        for (const project of [false, true]) {
-          const source = JSON.parse(await import("node:fs/promises").then(fs => fs.readFile(join(packageRoot, "module.json"), "utf8")));
-          source.view.capabilities = manifest ? ["styles.global"] : [];
-          source.view.styles = manifest ? [{ id: "global", file: "./global.css", scope: "global" }] : [];
-          await writeFile(join(packageRoot, "module.json"), JSON.stringify(source));
-          const composition = await resolveViewPackageComposition({
-            global: { installed: [{ path: packageRoot, ...(home ? { allow: ["styles.global" as const] } : {}) }] },
-            project: { packages: [{
-              id: "org.example.styled", version: "1.0.0", enabled: true,
-              ...(project ? { allow: ["styles.global" as const] } : {})
-            }] },
-            sdkVersion: "1.0.0"
-          });
-          const allowed = composition.instances[0]?.allow.has("styles.global") ?? false;
-          assert.equal(allowed, manifest && home && project, `${manifest}/${home}/${project}`);
-        }
+        const source = JSON.parse(await import("node:fs/promises").then(fs => fs.readFile(join(packageRoot, "module.json"), "utf8")));
+        source.view.capabilities = manifest ? ["styles.global"] : [];
+        source.view.styles = manifest ? [{ id: "global", file: "./global.css", scope: "global" }] : [];
+        await writeFile(join(packageRoot, "module.json"), JSON.stringify(source));
+        const composition = await resolveViewPackageComposition({
+          global: { installed: [{ path: packageRoot, ...(home ? { allow: ["styles.global" as const] } : {}) }] },
+          composition: { packages: [{ id: "org.example.styled", version: "1.0.0", enabled: true }] },
+          sdkVersion: "1.0.0"
+        });
+        const allowed = composition.instances[0]?.allow.has("styles.global") ?? false;
+        assert.equal(allowed, manifest && home, `${manifest}/${home}`);
       }
     }
   } finally {
@@ -79,7 +74,7 @@ test("global style capability requires both Home and Project grants", async () =
   }
 });
 
-test("Project can select one Package contribution while independently filtering styles", async () => {
+test("global composition can select one Package contribution while independently filtering styles", async () => {
   const root = await mkdtemp(join(tmpdir(), "memsphere-view-selection-"));
   try {
     const first = await makePackage(root, "first", "org.example.first", "first", true);
@@ -92,7 +87,7 @@ test("Project can select one Package contribution while independently filtering 
     const cell = "org.memsphere.memory.page.presentation@1:page";
     const composition = await resolveViewPackageComposition({
       global: { installed: [{ path: first, allow: ["styles.global"] }, { path: second, allow: ["styles.global"] }] },
-      project: {
+      composition: {
         packages: [
           { id: "org.example.first", version: "1.0.0", enabled: true, allow: ["styles.global"] },
           { id: "org.example.second", version: "1.0.0", enabled: true, allow: ["styles.global"] }
@@ -114,7 +109,7 @@ test("Project can select one Package contribution while independently filtering 
     assert.deepEqual([...composition.instances[1]!.allowedStyleIds], ["global"]);
     const listComposition = await resolveViewPackageComposition({
       global: { installed: [{ path: first }, { path: second }] },
-      project: {
+      composition: {
         packages: [
           { id: "org.example.first", version: "1.0.0", enabled: true },
           { id: "org.example.second", version: "1.0.0", enabled: true }

@@ -405,7 +405,7 @@ memsphere run abandon --run <Run ID> [--reason "<可选原因>"]
 
 #### View Package 自定义
 
-可信本地 View Package 可在“设置 → 界面 Package”添加绝对路径，再到当前 Project 的“界面组合”启用版本、授予 capability 和处理同优先级 presentation 冲突；保存后使用 `memsphere view restart` 应用固定 composition snapshot。Memory/Run 的 page 与 detail/artifact renderer 可通过 portable cells 替换，失败时回退官方候选。Theme/Style 使用 light/dark 分层 Token 与实例 lifecycle；`styles.global` 必须经 Home 与 Project 双重授权。
+可信本地 View Package 可在“设置 → 界面与主题”添加绝对路径，并在同一页面选择主题、Slot 与 Style；这些配置保存在 Home 并统一应用到所有 Project，保存后使用 `memsphere view restart` 应用固定 composition snapshot。Memory/Run 的 page 与 detail/artifact renderer 可通过 portable cells 替换，失败时回退官方候选。Theme/Style 使用 light/dark 分层 Token 与实例 lifecycle；高权限能力必须在安装记录中显式授予。
 
 #### 人机协同
 

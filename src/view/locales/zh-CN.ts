@@ -430,7 +430,7 @@ export const zhCNViewMessages = {
   "artifact.fileReadFailed": "无法读取产物文件：{error}",
   "artifact.file": "文件产物：{path}",
   "settings.appearance": "界面与主题",
-  "settings.appearanceHelp": "安装和管理界面扩展包，并配置全局主题及当前 Project 的页面、组件和样式。",
+  "settings.appearanceHelp": "安装和管理界面扩展包，并配置主题、页面、组件和样式。",
   "settings.appearanceGlobal": "默认用于所有 Project",
   "settings.appearanceProject": "当前 Project · {name}",
   "settings.globalAppearance": "全局默认与 Package 安装",

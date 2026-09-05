@@ -9,14 +9,20 @@ import {
   viewCompositionDigest
 } from "../src/view/package-config.js";
 
-test("global and Project View Package configuration is strict and independently scoped", () => {
+test("View Package installation, theme, and composition are strict global configuration", () => {
   const packagePath = resolve("fixtures/custom-view-package");
   const global = globalConfigSchema.parse({
     view_packages: { installed: [{ path: packagePath, allow: ["styles.global"] }] },
-    view_theme: { mode: "dark", selected_source: "org.example.theme" }
+    view_theme: { mode: "dark", selected_source: "org.example.theme" },
+    view_composition: {
+      packages: [{ id: "org.example.view", version: "1.0.0", enabled: true }],
+      slots: { "org.memsphere.memory.page.presentation@1:page": "org.example.view:main:memory" },
+      styles: { "org.example.view:main:base": true }
+    }
   });
   assert.equal(global.view_packages?.installed[0]?.path, packagePath);
   assert.equal(global.view_theme?.mode, "dark");
+  assert.equal(global.view_composition?.slots?.["org.memsphere.memory.page.presentation@1:page"], "org.example.view:main:memory");
 
   const project = projectConfigSchema.parse({
     store: { type: "managed", published_revision: "abc" },
@@ -34,6 +40,9 @@ test("global and Project View Package configuration is strict and independently 
   assert.equal(project.view?.styles?.["org.example.view:main:base"], true);
 
   assert.equal(globalConfigSchema.safeParse({ view: { packages: [] } }).success, false);
+  assert.equal(globalConfigSchema.safeParse({
+    view_composition: { packages: [], slots: { "org.example.unknown@1:page": null } }
+  }).success, false);
   assert.equal(projectConfigSchema.safeParse({
     store: { type: "managed", published_revision: "abc" },
     view_packages: { installed: [] }
@@ -61,14 +70,13 @@ test("View Package paths and composition digests are canonical", () => {
   }));
 });
 
-test("duplicate installed paths and Project instance identities are rejected", () => {
+test("duplicate installed paths and global composition instance identities are rejected", () => {
   const packagePath = resolve("fixtures/custom-view-package");
   assert.equal(globalConfigSchema.safeParse({
     view_packages: { installed: [{ path: packagePath }, { path: packagePath }] }
   }).success, false);
-  assert.equal(projectConfigSchema.safeParse({
-    store: { type: "managed", published_revision: "abc" },
-    view: {
+  assert.equal(globalConfigSchema.safeParse({
+    view_composition: {
       packages: [
         { id: "org.example.view", version: "1.0.0", enabled: true },
         { id: "org.example.view", version: "1.0.0", enabled: true }

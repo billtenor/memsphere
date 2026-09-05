@@ -24,7 +24,7 @@ test("example View Package bundle is reproducible, SDK-external, and copy-instal
     await cp(sourceRoot, copied, { recursive: true });
     const composition = await resolveViewPackageComposition({
       global: { installed: [{ path: copied }] },
-      project: {
+      composition: {
         packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true }]
       },
       sdkVersion: "1.0.0"
@@ -34,7 +34,7 @@ test("example View Package bundle is reproducible, SDK-external, and copy-instal
     const globalThemeOnly = await resolveViewPackageComposition({
       global: { installed: [{ path: copied, allow: ["theme.override"] }] },
       globalThemeSource: "org.example.memsphere.custom-view:sea-glass",
-      project: { packages: [] },
+      composition: { packages: [] },
       sdkVersion: "1.0.0"
     });
     assert.equal(globalThemeOnly.instances.length, 1);
@@ -44,7 +44,7 @@ test("example View Package bundle is reproducible, SDK-external, and copy-instal
     const globalThemeWithProjectContent = await resolveViewPackageComposition({
       global: { installed: [{ path: copied, allow: ["theme.override"] }] },
       globalThemeSource: "org.example.memsphere.custom-view:sea-glass",
-      project: { packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true, allow: [] }] },
+      composition: { packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true }] },
       sdkVersion: "1.0.0"
     });
     assert.equal(globalThemeWithProjectContent.instances[0]?.allow.has("theme.override"), true);

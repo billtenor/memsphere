@@ -12,7 +12,8 @@ import { resolveProjectContext } from "./project/resolver.js";
 import { projectConfigSchema } from "./project/model.js";
 import {
   globalViewPackagesConfigSchema,
-  globalViewThemeConfigSchema
+  globalViewThemeConfigSchema,
+  viewCompositionConfigSchema
 } from "./view/package-config.js";
 
 export type MemsphereConfig = {
@@ -35,6 +36,7 @@ export type MemsphereConfig = {
   };
   viewPackages?: import("./view/package-config.js").GlobalViewPackagesConfig;
   viewTheme?: import("./view/package-config.js").GlobalViewThemeConfig;
+  viewComposition?: import("./view/package-config.js").ViewCompositionConfig;
   project?: {
     name: string;
     revision?: string;
@@ -81,6 +83,7 @@ export const globalConfigSchema = z.object({
   }).strict().optional(),
   view_packages: globalViewPackagesConfigSchema.optional(),
   view_theme: globalViewThemeConfigSchema.optional(),
+  view_composition: viewCompositionConfigSchema.optional(),
   debug: z.object({ agent_review: z.boolean().optional() }).strict().optional()
 }).strict();
 
@@ -128,6 +131,7 @@ async function readProjectExecutionConfig(options: {
       : { host: "127.0.0.1", port: 0 },
     ...(global.view_packages === undefined ? {} : { viewPackages: global.view_packages }),
     ...(global.view_theme === undefined ? {} : { viewTheme: global.view_theme }),
+    ...(global.view_composition === undefined ? {} : { viewComposition: global.view_composition }),
     project: {
       name: context.primary.name,
       revision,
