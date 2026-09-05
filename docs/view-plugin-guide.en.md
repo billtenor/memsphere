@@ -6,7 +6,7 @@ This guide builds a minimal View Plugin and explains what happens at runtime. To
 
 ## Current Implementation Status
 
-ViewHost currently wires the Plugin entrypoint, lifecycle, Manifest and SDK validation, independent Bundle loading, Router, Theme v1, UI v1, and the root Slot Catalog. A typical page may declare `inject: ["slots", "router", "theme", "ui"]` together with `themeVersion: 1` and `uiVersion: 1`; the available contribution points and authoritative wiring status are maintained in the [View Slot List](./view-slots.en.md).
+ViewHost wires the Plugin entrypoint, lifecycle, Manifest and SDK validation, independent Bundle loading, local Package composition, Router, Theme/Theme Registry, UI v1, the root Slot Catalog, and portable presentation cells. A typical page may declare `inject: ["slots", "router", "theme", "ui"]` together with `themeVersion: 1` and `uiVersion: 1`; the available contribution points and authoritative wiring status are maintained in the [View Slot List](./view-slots.en.md).
 
 This guide retains the complete View API and I18n example because those services are part of the established long-term development contract. They are not wired yet, so the complete example is not directly runnable against the current release. The API reference's “Current Implementation Status” is authoritative; future design and usage are not removed merely because implementation is pending.
 
@@ -269,3 +269,10 @@ export default defineViewPlugin<CustomerConfig>({
 - For separate compilation, restartability, and Slot ownership, read [View Plugin Design](./view-plugin-design.en.md).
 - For exact signatures, return values, and error constraints, use [View Plugin API](./view-plugin-api.en.md).
 - To choose a contribution point, use [View Slot List](./view-slots.en.md).
+# Local View Packages, Themes, and Presentation Replacement
+
+A View Plugin can now be installed as a trusted local Package without entering `builtinModuleCatalog` or rebuilding Memsphere. See `examples/view-packages/dsh-custom-view`. Add its absolute path under Settings → View Packages, save and restart View, then enable the version and grant capabilities for the current Project under Settings → View Composition. A capability is effective only when both Home and Project grant it.
+
+The Package `module.json` may declare `capabilities`, `dependencies`, `styles`, `themes`, `contributions`, and optional `source` metadata. `styles.global` is explicitly privileged: imports, remote resources, Host-private selectors, `!important`, and declarations of `--mem-view-*` are rejected. Scoped CSS is attached to the Package instance roots and portals; custom variables use the Package namespace.
+
+Use `portableSlots.memoryPagePresentation`, `memoryDetailRenderer`, `runPagePresentation`, and `runArtifactRenderer` to replace presentation inside stable official Routes. Lower `priority` wins; equal-priority candidates require an explicit Project preference. A throwing renderer abdicates and the next candidate is used. `order` remains list ordering only.

@@ -1,5 +1,6 @@
 import {
   defineViewPlugin,
+  portableSlots,
   slots,
   type ContentListDescriptor,
   type Disposer,
@@ -409,6 +410,16 @@ export default defineViewPlugin<MemoryConfig>({
     };
     const headerActions = createHeaderActionPublisher(ctx);
     const publishSecondary = createMemorySecondaryPublisher(ctx, config, routes);
+    ctx.slots.register(portableSlots.memoryDetailRenderer, {
+      id: "memory.detail.official",
+      key: "detail",
+      priority: 1000,
+      value: { render(input) {
+        const fallback = (input as { defaultRender?: () => HTMLElement }).defaultRender;
+        if (!fallback) throw new Error("Memory detail renderer input is invalid");
+        return fallback();
+      } }
+    });
     const page = createMemoryPageMounts(
       config,
       routes,
@@ -416,7 +427,8 @@ export default defineViewPlugin<MemoryConfig>({
       ctx.ui,
       headerActions.replace,
       headerActions.clear,
-      publishSecondary
+      publishSecondary,
+      input => ctx.slots.render(portableSlots.memoryDetailRenderer, "detail", input)
     );
     ctx.lifecycle.own(page.dispose);
 
@@ -578,6 +590,13 @@ function registerPage(
     when: route.activation,
     value: page.detail
   });
+  ctx.slots.register(portableSlots.memoryPagePresentation, {
+    id: `memory.presentation.${name}`,
+    key: "page",
+    priority: 1000,
+    when: route.activation,
+    value: page.detail
+  });
   ctx.slots.register(slots.contentList, {
     id: `memory.list.${name}`,
     when: route.activation,
@@ -730,7 +749,8 @@ function createMemoryPageMounts(
   ui: ViewUi,
   publishHeaderActions: (actions: readonly PublishedHeaderAction[]) => void,
   clearHeaderActions: () => void,
-  publishSecondary: (location: RouteLocation, badges?: Readonly<Record<string, number>>, heading?: HeaderTitleDescriptor) => void
+  publishSecondary: (location: RouteLocation, badges?: Readonly<Record<string, number>>, heading?: HeaderTitleDescriptor) => void,
+  renderDetail: (input: unknown) => HTMLElement
 ): Readonly<{ list: ViewMount; detail: ViewMount; dispose: Disposer }> {
   const controller = new AbortController();
   let scratch: HTMLElement | undefined;
@@ -750,7 +770,7 @@ function createMemoryPageMounts(
     scratch ??= document.createElement("div");
     portal ??= document.createElement("div");
     if (!app) {
-      app = new MemoryApplication(scratch, portal, controller, config, routes, location, navigate, ui, publishHeaderActions, refreshList);
+      app = new MemoryApplication(scratch, portal, controller, config, routes, location, navigate, ui, publishHeaderActions, refreshList, renderDetail);
       lastRoute = `${location.pathname}${location.search}${location.hash}`;
     }
     start ??= app.start();
@@ -838,6 +858,7 @@ class MemoryApplication {
   readonly #ui: ViewUi;
   readonly #publishHeaderActions: (actions: readonly PublishedHeaderAction[]) => void;
   readonly #onListChange: () => void;
+  readonly #renderDetail: (input: unknown) => HTMLElement;
   #memories: MemorySummary[] = [];
   #changes: ChangeSummary[] = [];
   #market: JsonRecord[] = [];
@@ -860,7 +881,7 @@ class MemoryApplication {
   #fatalError: unknown = null;
   readonly #expandedRelated = new Set<string>();
 
-  constructor(root: HTMLElement, portal: HTMLElement, controller: AbortController, config: Readonly<MemoryConfig>, routes: MemoryRoutes, location: Readonly<RouteLocation>, navigate: (target: RouteTarget) => Promise<void>, ui: ViewUi, publishHeaderActions: (actions: readonly PublishedHeaderAction[]) => void, onListChange: () => void = () => undefined) {
+  constructor(root: HTMLElement, portal: HTMLElement, controller: AbortController, config: Readonly<MemoryConfig>, routes: MemoryRoutes, location: Readonly<RouteLocation>, navigate: (target: RouteTarget) => Promise<void>, ui: ViewUi, publishHeaderActions: (actions: readonly PublishedHeaderAction[]) => void, onListChange: () => void = () => undefined, renderDetail: (input: unknown) => HTMLElement = input => (input as { defaultRender: () => HTMLElement }).defaultRender()) {
     this.#root = root;
     this.#portal = portal;
     this.#controller = controller;
@@ -872,6 +893,7 @@ class MemoryApplication {
     this.#ui = ui;
     this.#publishHeaderActions = publishHeaderActions;
     this.#onListChange = onListChange;
+    this.#renderDetail = renderDetail;
   }
 
   async start(): Promise<void> {
@@ -1629,7 +1651,12 @@ class MemoryApplication {
     const entity = (detail.entity ?? detail) as JsonRecord;
     const workspace = el("div");
     const content = el("section", "memory-panel memory-content-card");
-    content.append(renderMemoryEntity(detail.kind, entity, this.t.bind(this), undefined, this.renderOptions()));
+    content.append(this.#renderDetail({
+      kind: detail.kind,
+      entity,
+      memory: detail,
+      defaultRender: () => renderMemoryEntity(detail.kind, entity, this.t.bind(this), undefined, this.renderOptions())
+    }));
     if (context) workspace.append(context);
     workspace.append(content);
     return workspace;

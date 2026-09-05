@@ -1,5 +1,6 @@
 import {
   defineViewPlugin,
+  portableSlots,
   slots,
   type Disposer,
   type ContentListDescriptor,
@@ -122,7 +123,18 @@ export default defineViewPlugin<RunConfig>({
     };
     const runDetailCache = new Map<string, Json>();
     const publishSecondary = createRunSecondaryPublisher(ctx, config, routes);
-    const page = createRunPageMounts(config, routes, navigate, ctx.ui, runDetailCache, publishSecondary);
+    ctx.slots.register(portableSlots.runArtifactRenderer, {
+      id: "run.artifact.official",
+      key: "artifact",
+      priority: 1000,
+      value: { render(input) {
+        const fallback = (input as { defaultRender?: () => HTMLElement }).defaultRender;
+        if (!fallback) throw new Error("Run Artifact renderer input is invalid");
+        return fallback();
+      } }
+    });
+    const renderArtifact = (input: unknown) => ctx.slots.render(portableSlots.runArtifactRenderer, "artifact", input);
+    const page = createRunPageMounts(config, routes, navigate, ctx.ui, runDetailCache, publishSecondary, renderArtifact);
     ctx.lifecycle.own(page.dispose);
     ctx.slots.register(slots.navigationPrimary, {
       id: "run.navigation", order: 200,
@@ -163,7 +175,7 @@ export default defineViewPlugin<RunConfig>({
         label: { text: tr(config, "review") },
         presentation: "dialog",
         background: ctx.router.project({ from: routes.review, to: routes.detail, params: { runId: "runId" }, query: { status: "status" }, hash: "discard" }),
-        mount: createMount(config, routes, navigate, ctx.ui, runDetailCache, true)
+        mount: createMount(config, routes, navigate, ctx.ui, runDetailCache, true, renderArtifact)
       }
     });
     startRunHome(ctx, config, routes);
@@ -263,6 +275,9 @@ function registerPage(ctx: ViewPluginContext, route: RouteToken, id: string, con
   });
   ctx.slots.register(slots.mainView, {
     id, key: route.key, when: route.activation, value: page.detail
+  });
+  ctx.slots.register(portableSlots.runPagePresentation, {
+    id: `${id}.presentation`, key: "page", priority: 1000, when: route.activation, value: page.detail
   });
   ctx.slots.register(slots.contentList, {
     id: `${id}.list`, when: route.activation, value: page.list
@@ -384,7 +399,8 @@ function createRunPageMounts(
     badges?: Readonly<Record<string, number>>,
     heading?: HeaderTitleDescriptor,
     actions?: readonly PublishedRunHeaderAction[]
-  ) => void
+  ) => void,
+  renderArtifact: (input: unknown) => HTMLElement
 ): RunPageMounts {
   const controller = new AbortController();
   let scratch: HTMLElement | undefined;
@@ -408,7 +424,7 @@ function createRunPageMounts(
     scratch ??= document.createElement("div");
     portal ??= document.createElement("div");
     if (!app) {
-      app = new RunApplication(scratch, portal, config, routes, route, controller, navigate, ui, runDetailCache, false, refreshList);
+      app = new RunApplication(scratch, portal, config, routes, route, controller, navigate, ui, runDetailCache, false, refreshList, renderArtifact);
       routeKey = `${route.pathname}${route.search}${route.hash}`;
     }
     start ??= app.start();
@@ -487,14 +503,14 @@ function createRunPageMounts(
   };
 }
 
-function createMount(config: Readonly<RunConfig>, routes: RunRoutes,navigate:Navigate, ui: ViewUi, runDetailCache: Map<string, Json>, reviewOnly = false): RefreshableViewMount {
+function createMount(config: Readonly<RunConfig>, routes: RunRoutes,navigate:Navigate, ui: ViewUi, runDetailCache: Map<string, Json>, reviewOnly = false, renderArtifact: (input: unknown) => HTMLElement = input => (input as { defaultRender: () => HTMLElement }).defaultRender()): RefreshableViewMount {
   let app: RunApplication | undefined;
   return {
     async mount({ element, portal }, context) {
       const controller = new AbortController();
       element.classList.add("run-module");
       const style = document.createElement("style"); style.textContent = styles + runDetailStyles; element.append(style);
-      app = new RunApplication(element, portal, config, routes, context.route, controller,navigate,ui,runDetailCache,reviewOnly);
+      app = new RunApplication(element, portal, config, routes, context.route, controller,navigate,ui,runDetailCache,reviewOnly, () => undefined, renderArtifact);
       app.setRenderContext(context);
       await app.start();
       return async () => { controller.abort(); await app?.dispose(); app = undefined; element.classList.remove("run-module"); element.replaceChildren(); portal.replaceChildren(); };
@@ -515,6 +531,7 @@ class RunApplication {
   readonly #routes: RunRoutes; #route: RouteLocation; readonly #controller: AbortController;readonly #navigate:Navigate;
   readonly #ui: ViewUi;
   readonly #onListChange: () => void;
+  readonly #renderArtifact: (input: unknown) => HTMLElement;
   #runs: Json[] = []; #detail: Json | null = null; #status = "running"; #poll = 0; #busy = false;
   #detailError = ""; #detailErrorRunId = "";
   #reviewContext: Json | null = null; #reviewDialog: HTMLElement | null = null;
@@ -532,8 +549,8 @@ class RunApplication {
   #runListVersion = "";
   #lastLoadChanged = true;
   #renderContext: ViewRenderContext | undefined;
-  constructor(root: HTMLElement, portal: HTMLElement, config: Readonly<RunConfig>, routes: RunRoutes, route: RouteLocation, controller: AbortController,navigate:Navigate,ui:ViewUi,runDetailCache:Map<string,Json>,reviewOnly=false,onListChange:()=>void=()=>undefined) {
-    this.#root=root; this.#portal=portal; this.#config=config; this.#routes=routes; this.#route=route; this.#controller=controller;this.#navigate=navigate;this.#ui=ui;this.#runDetailCache=runDetailCache;this.#reviewOnly=reviewOnly;this.#onListChange=onListChange;
+  constructor(root: HTMLElement, portal: HTMLElement, config: Readonly<RunConfig>, routes: RunRoutes, route: RouteLocation, controller: AbortController,navigate:Navigate,ui:ViewUi,runDetailCache:Map<string,Json>,reviewOnly=false,onListChange:()=>void=()=>undefined,renderArtifact:(input:unknown)=>HTMLElement=input=>(input as {defaultRender:()=>HTMLElement}).defaultRender()) {
+    this.#root=root; this.#portal=portal; this.#config=config; this.#routes=routes; this.#route=route; this.#controller=controller;this.#navigate=navigate;this.#ui=ui;this.#runDetailCache=runDetailCache;this.#reviewOnly=reviewOnly;this.#onListChange=onListChange;this.#renderArtifact=renderArtifact;
     this.#status = normalizedRunStatus(route.query.status);
   }
   get status(): string { return this.#status; }
@@ -811,7 +828,8 @@ class RunApplication {
       renderContext: this.#renderContext,
       request: (path, init) => this.#request(path, init),
       refresh: () => this.#refresh(),
-      openReview: (runId, reviewId) => this.#openReview(runId, reviewId)
+      openReview: (runId, reviewId) => this.#openReview(runId, reviewId),
+      renderArtifact: this.#renderArtifact
     });
   }
   async #archive(run:Json):Promise<void>{if(!await this.#ui.confirm({title:{text:tr(this.#config,"archive")},description:{text:tr(this.#config,"archiveConfirm")},confirmLabel:{text:tr(this.#config,"archive")},cancelLabel:{text:tr(this.#config,"cancel")},closeLabel:{text:tr(this.#config,"close")}}))return;this.#busy=true;try{await this.#request(`/api/archive/runs/${encodeURIComponent(run.id)}`,{method:"POST"});await this.#refresh();}finally{this.#busy=false;}}

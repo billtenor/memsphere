@@ -10,6 +10,12 @@ import {
 } from "./control-plane/index.js";
 import { atomicWriteJson, withFileLock } from "./persistence.js";
 import { projectConfigSchema, type ProjectConfigFile } from "./project/model.js";
+import {
+  normalizeInstalledViewPackagePaths,
+  type GlobalViewPackagesConfig,
+  type GlobalViewThemeConfig,
+  type ProjectViewConfig
+} from "./view/package-config.js";
 
 export type ConfigFieldError = { path: string; message: string };
 
@@ -42,11 +48,14 @@ export type ProjectConfigDocument = {
 export type EditableGlobalConfigDraft = {
   language?: "zh-CN" | "en";
   view?: { host: string; port: number };
+  view_packages?: GlobalViewPackagesConfig;
+  view_theme?: GlobalViewThemeConfig;
   acp_providers?: AcpProviderConfigFile;
 };
 
 export type EditableProjectConfigDraft = {
   control_plane?: ProjectControlPlaneConfigFile;
+  view?: ProjectViewConfig;
 };
 
 export type ProjectConfigReference = {
@@ -120,6 +129,12 @@ export function editableGlobalConfigDraft(document: GlobalConfigDocument): Edita
       host: document.raw.view.host,
       port: document.raw.view.port
     } }),
+    ...(document.raw.view_packages === undefined
+      ? {}
+      : { view_packages: structuredClone(document.raw.view_packages) }),
+    ...(document.raw.view_theme === undefined
+      ? {}
+      : { view_theme: structuredClone(document.raw.view_theme) }),
     ...(document.raw.acp_providers === undefined
       ? {}
       : { acp_providers: structuredClone(document.raw.acp_providers) })
@@ -127,9 +142,12 @@ export function editableGlobalConfigDraft(document: GlobalConfigDocument): Edita
 }
 
 export function editableProjectConfigDraft(document: ProjectConfigDocument): EditableProjectConfigDraft {
-  return document.raw.control_plane === undefined
-    ? {}
-    : { control_plane: structuredClone(document.raw.control_plane) };
+  return {
+    ...(document.raw.control_plane === undefined
+      ? {}
+      : { control_plane: structuredClone(document.raw.control_plane) }),
+    ...(document.raw.view === undefined ? {} : { view: structuredClone(document.raw.view) })
+  };
 }
 
 export function validateGlobalConfigDraft(
@@ -144,6 +162,10 @@ export function validateGlobalConfigDraft(
       ...(document.raw.view?.operator_token ? { operator_token: document.raw.view.operator_token } : {})
     } }),
     ...(document.raw.debug === undefined ? {} : { debug: structuredClone(document.raw.debug) }),
+    ...(draft.view_packages === undefined
+      ? {}
+      : { view_packages: normalizeInstalledViewPackagePaths(structuredClone(draft.view_packages)) }),
+    ...(draft.view_theme === undefined ? {} : { view_theme: structuredClone(draft.view_theme) }),
     ...(draft.acp_providers === undefined ? {} : { acp_providers: structuredClone(draft.acp_providers) })
   };
 
@@ -171,7 +193,8 @@ export function validateProjectConfigDraft(
 ): ProjectConfigDraftValidation {
   const candidateInput = {
     store: structuredClone(document.raw.store),
-    ...(draft.control_plane === undefined ? {} : { control_plane: structuredClone(draft.control_plane) })
+    ...(draft.control_plane === undefined ? {} : { control_plane: structuredClone(draft.control_plane) }),
+    ...(draft.view === undefined ? {} : { view: structuredClone(draft.view) })
   };
 
   try {
@@ -327,14 +350,21 @@ function normalizeGlobalDraft(global: GlobalConfigFile): EditableGlobalConfigDra
   return {
     ...(global.language === undefined ? {} : { language: global.language }),
     ...(global.view === undefined ? {} : { view: { host: global.view.host, port: global.view.port } }),
+    ...(global.view_packages === undefined
+      ? {}
+      : { view_packages: structuredClone(global.view_packages) }),
+    ...(global.view_theme === undefined ? {} : { view_theme: structuredClone(global.view_theme) }),
     ...(global.acp_providers === undefined ? {} : { acp_providers: structuredClone(global.acp_providers) })
   };
 }
 
 function normalizeProjectDraft(project: ProjectConfigFile): EditableProjectConfigDraft {
-  return project.control_plane === undefined
-    ? {}
-    : { control_plane: structuredClone(project.control_plane) };
+  return {
+    ...(project.control_plane === undefined
+      ? {}
+      : { control_plane: structuredClone(project.control_plane) }),
+    ...(project.view === undefined ? {} : { view: structuredClone(project.view) })
+  };
 }
 
 function parseConfigError(error: unknown): Error {

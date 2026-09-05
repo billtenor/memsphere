@@ -8,6 +8,25 @@ export const viewRuntimeBundlePath = "/assets/view-runtime.js";
 
 export interface ViewHostBootInstance {
   readonly pluginPath: string;
+  readonly loadError?: string;
+  readonly allowedServices?: readonly import("./view-sdk.js").ViewServiceName[];
+  readonly styles?: readonly {
+    readonly id: string;
+    readonly css: string;
+    readonly scope: "module" | "global";
+  }[];
+  readonly themes?: readonly {
+    readonly sourceId: string;
+    readonly tokens: import("./view-sdk.js").ViewThemePalette;
+    readonly complete?: boolean;
+    readonly selected?: boolean;
+    readonly layer: number;
+  }[];
+  readonly contributionPolicy?: {
+    readonly priorities: Readonly<Record<string, readonly [number, number]>>;
+    readonly blockedCells: readonly string[];
+  };
+  readonly themeOperations?: readonly ("register" | "override")[];
   readonly config?: Readonly<Record<string, unknown>>;
   readonly routeBasePath?: string;
   readonly routeGrants?: readonly {
@@ -35,6 +54,13 @@ export function renderViewHostHtml(
   locale: ViewLocale | unknown = "zh-CN",
   instances?: readonly ViewHostBootInstance[],
   pathname?: string,
+  themeMode: "light" | "dark" | "system" = "system",
+  hostThemes: readonly {
+    readonly sourceId: string;
+    readonly tokens: import("./view-sdk.js").ViewThemePalette;
+    readonly selected?: boolean;
+    readonly layer: number;
+  }[] = [],
 ): string {
   const resolved = resolveViewLocale(locale);
   const resolvedInstances = instances ?? [];
@@ -55,6 +81,8 @@ export function renderViewHostHtml(
       storeType: "Store type", revision: "Revision", memoryRoot: "Memory root", unavailable: "Not set"
     },
     runtimePath: viewRuntimeBundlePath,
+    themeMode,
+    hostThemes,
     instances: resolvedInstances.map(instance => ({
       ...instance,
       config: { locale: resolved, messages: viewMessages(resolved), ...(instance.config ?? {}) }
@@ -207,6 +235,7 @@ export function renderViewHostHtml(
       }
       const instances = await Promise.all(boot.instances.map(async instance => {
         try {
+          if (instance.loadError) throw new Error(instance.loadError);
           const pluginModule = await import(instance.pluginPath);
           return { ...instance, plugin: pluginModule.default };
         } catch (error) {
@@ -218,8 +247,12 @@ export function renderViewHostHtml(
         instances,
         root,
         mainViewKey: boot.mainViewKey,
-        coreConfig: { locale: boot.locale, messages: boot.messages }
+        coreConfig: { locale: boot.locale, messages: boot.messages },
+        themeMode: boot.themeMode,
+        hostThemes: boot.hostThemes
       });
+      window.__memsphereViewDiagnostics = () => activeHost.diagnostics();
+      window.dispatchEvent(new Event("memsphere:view-diagnostics-ready"));
       const currentProjectId = boot.instances[0]?.module?.projectId || "memsphere";
       const projectHome = shell?.querySelector(".view-shell-project-home");
       const projectLabel = shell?.querySelector(".view-shell-project-label");

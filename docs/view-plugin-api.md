@@ -12,7 +12,7 @@
 
 当前 ViewHost 已实现 Plugin 默认入口、`apiVersion: 1`、`apply()`、Module 实例身份、`lifecycle`、最小 Manifest 校验、SDK SemVer 检查、独立 Bundle 动态加载、Router、Slot Token/Registry、实例级注册事务，以及 Mount 的回滚和清理。浏览器通过 import map 将 `@memsphere/view-sdk` 解析到 Host 提供的 SDK。
 
-当前可注入服务为 `slots`、`router`、`theme` 和 `ui`；根 Slot 的完整清单、产品语义和当前接线状态统一见 [View Slot List](./view-slots.md)。部分聚合 Slot 支持下文定义的受限 live `upsert()`，页面浮层支持 Host 管理的背景 Route 投影与局部故障边界。四个 builtin Module 均使用同一公开入口和独立 Bundle 运行。View API、I18n、Logger、自定义子 Slot、用户 Module 发现/安装和 Project 动态组合仍未接线；Plugin 请求尚未提供的服务会在 `apply()` 前明确失败。
+当前可注入服务为 `slots`、`router`、`theme`、`themeRegistry` 和 `ui`；根 Slot 的完整清单、产品语义和当前接线状态统一见 [View Slot List](./view-slots.md)。部分聚合 Slot 支持下文定义的受限 live `upsert()`，页面浮层支持 Host 管理的背景 Route 投影与局部故障边界。四个 builtin Module 均使用同一公开入口和独立 Bundle 运行。可信本地用户 Package 发现及 Project 动态组合已经接线；View API、I18n、Logger 与任意动态子 Slot 仍未接线。Plugin 请求尚未提供或未授权的服务会在 `apply()` 前明确失败。
 
 ## Module View 入口契约
 
@@ -721,3 +721,10 @@ Slot Contract 使用 `name@version` 身份：
 - 不把 secret 放入浏览器配置、Bundle、Descriptor 或日志。
 
 Module Manifest、CLI SDK、服务端 View API 注册接口、配置 Schema、第三方签名与沙箱不属于本 API 文档。
+# View Package 扩展 API（v1 墄量）
+
+- 可注入服务新增 `themeRegistry`；声明时必须同时设置 `themeRegistryVersion: 1`，且 Package 必须取得有效 Theme capability。
+- `RegisterOptions.priority` 是非负整数，用于 `single`/`keyed` replacement；Host 内部用 `[declaredPriority, preferenceRank]` 整数元组解析用户首选，不使用浮点数。
+- `portableSlots` 导出四个 `name@1` 边界：`org.memsphere.memory.page.presentation`、`org.memsphere.memory.detail.renderer`、`org.memsphere.run.page.presentation`、`org.memsphere.run.artifact.renderer`。
+- `SlotRegistry.render(token, key, input)` 调用 data renderer，并在异常或非法返回值时把候选标为 abdicated 后继续 fallback。
+- `ViewThemeRegistry` 提供 `registerTheme`、`selectTheme`、`overrideTokens`，都由实例 lifecycle 持有并可撤销。完整 Theme 与部分 override 均同时提供 light/dark map。

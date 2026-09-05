@@ -403,6 +403,10 @@ memsphere run abandon --run <Run ID> [--reason "<可选原因>"]
 
 废弃后 Run 只读且不可恢复执行，不能继续 report、schema、binding 或 Review 写入。废弃不会自动归档；Human 若还希望隐藏该 Run，必须再单独点击或执行归档。只有 `done` 或 `abandoned` Run 可以归档，恢复后仍保持归档前的终态。
 
+#### View Package 自定义
+
+可信本地 View Package 可在“设置 → 界面 Package”添加绝对路径，再到当前 Project 的“界面组合”启用版本、授予 capability 和处理同优先级 presentation 冲突；保存后使用 `memsphere view restart` 应用固定 composition snapshot。Memory/Run 的 page 与 detail/artifact renderer 可通过 portable cells 替换，失败时回退官方候选。Theme/Style 使用 light/dark 分层 Token 与实例 lifecycle；`styles.global` 必须经 Home 与 Project 双重授权。
+
 #### 人机协同
 
 当 `Actor` 为 `human` 时，暂停 Agent 执行，把 `Ask human to do`、相关要求和产物格式清楚地告知用户，并等待用户提供结果。不要代替用户完成 human 步骤，也不要在用户回复前继续推进。

@@ -84,6 +84,74 @@ test("Theme v1 is one Host-owned context applied to main and portal roots and cl
   }, "/theme");
 });
 
+test("portable Memory presentation shadows by priority and automatically falls back after mount failure", async () => {
+  const replacement = bootInstance("org.example.memory-theme", "replacement", "/replacement.js", "/");
+  const official = {
+    ...bootInstance("org.memsphere.memory", "memory", "/official-memory.js", "/"),
+    routeGrants: [{ id: "index", path: "/memories" }]
+  };
+  const bundles = new Map([
+    ["/replacement.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots"], apply(context) {
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "replacement", key: "page", priority: 100, value: {
+          async mount() { window.__replacementAttempts = (window.__replacementAttempts || 0) + 1; await Promise.resolve(); throw new Error("replacement failed"); }
+        }});
+      }};
+    `],
+    ["/official-memory.js", `
+      import { portableSlots, slots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+        const route = context.router.register({ id: "index", path: "/memories" });
+        const mount = { mount({ element }) { element.id = "official-memory-fallback"; element.textContent = "Official memory"; } };
+        context.slots.register(slots.mainView, { id: "legacy", key: route.key, when: route.activation, value: mount });
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "official", key: "page", priority: 1000, when: route.activation, value: mount });
+      }};
+    `]
+  ]);
+  await withPage(renderViewHostHtml("en", [replacement, official]), bundles, undefined, async page => {
+    await page.locator("#official-memory-fallback").waitFor();
+    assert.equal(await page.locator("#official-memory-fallback").textContent(), "Official memory");
+    assert.equal(await page.evaluate(() => (window as any).__replacementAttempts), 1);
+    assert.equal(await page.locator("html").getAttribute("data-view-host-state"), "ready");
+  }, "/memories");
+});
+
+test("portable data renderer receives business data and falls back from an async rejection", async () => {
+  const replacement = bootInstance("org.example.memory-renderer", "replacement", "/renderer.js", "/");
+  const official = {
+    ...bootInstance("org.memsphere.memory", "memory", "/renderer-host.js", "/"),
+    routeGrants: [{ id: "detail", path: "/memories/:kind/:name" }]
+  };
+  const bundles = new Map([
+    ["/renderer.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots"], apply(context) {
+        context.slots.register(portableSlots.memoryDetailRenderer, { id: "replacement", key: "detail", priority: 100, value: {
+          async render(input) { window.__rendererInput = input.entity; throw new Error("custom detail failed"); }
+        }});
+      }};
+    `],
+    ["/renderer-host.js", `
+      import { portableSlots, slots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+        const route = context.router.register({ id: "detail", path: "/memories/:kind/:name" });
+        context.slots.register(portableSlots.memoryDetailRenderer, { id: "official-renderer", key: "detail", priority: 1000, value: {
+          render(input) { const node = document.createElement("strong"); node.id = "official-detail-renderer"; node.textContent = input.entity.title; return node; }
+        }});
+        const page = { mount({ element }) { element.append(context.slots.render(portableSlots.memoryDetailRenderer, "detail", { entity: { title: "Actual memory entity" } })); } };
+        context.slots.register(slots.mainView, { id: "legacy", key: route.key, when: route.activation, value: page });
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "official-page", key: "page", priority: 1000, when: route.activation, value: page });
+      }};
+    `]
+  ]);
+  await withPage(renderViewHostHtml("en", [replacement, official]), bundles, undefined, async page => {
+    await page.locator("#official-detail-renderer").waitFor();
+    assert.equal(await page.locator("#official-detail-renderer").textContent(), "Actual memory entity");
+    assert.deepEqual(await page.evaluate(() => (window as any).__rendererInput), { title: "Actual memory entity" });
+  }, "/memories/concepts/example");
+});
+
 test("UI v1 renders, updates, navigates, and disposes a standard content list", async () => {
   const instance = {
     ...bootInstance("org.memsphere.ui", "ui", "/ui-plugin.js", "/"),

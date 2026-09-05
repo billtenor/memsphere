@@ -15,6 +15,7 @@ export interface RunDetailOptions {
   readonly request: (path: string, init?: RequestInit) => Promise<any>;
   readonly refresh: () => Promise<void>;
   readonly openReview: (runId: string, reviewId: string) => Promise<void>;
+  readonly renderArtifact: (input: unknown) => HTMLElement;
 }
 
 export function createRunDetailState(): RunDetailState {
@@ -245,7 +246,12 @@ function renderArtifactResult(event: Json, run: Json, options: RunDetailOptions,
   if (artifact.validation?.status) meta.append(pill(`${labels.validation}: ${artifact.validation.status}`, artifact.validation.status === "passed" ? "done" : "warn"));
   if (artifact.final) meta.append(pill(labels.final, "done"));
   if (event.at) meta.append(pill(formatTime(event.at)));
-  card.append(title, meta, renderArtifactValue(artifact));
+  card.append(title, meta, options.renderArtifact({
+    artifact,
+    event,
+    run,
+    defaultRender: () => renderArtifactValue(artifact)
+  }));
   const review = (run.artifactReviewSummaries || []).find((candidate: Json) => candidate.stepId === event.stepId)
     || (run.artifactReview?.stepId === event.stepId ? run.artifactReview : null);
   if (review?.id) {

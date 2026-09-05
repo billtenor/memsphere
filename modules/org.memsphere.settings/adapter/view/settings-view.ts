@@ -3,7 +3,7 @@ import type { SettingsViewConfig } from "./index.js";
 
 type JsonObject = Record<string, any>;
 type ScopeName = "global" | "project";
-type SectionName = "overview" | "general" | "view" | "providers" | "project" | "participants";
+type SectionName = "overview" | "general" | "view" | "packages" | "composition" | "providers" | "project" | "participants";
 
 interface SettingsViewOptions {
   readonly config: SettingsViewConfig;
@@ -26,6 +26,8 @@ const sections: Record<SectionName, { scope: ScopeName; module: string }> = {
   overview: { scope: "global", module: "general" },
   general: { scope: "global", module: "general" },
   view: { scope: "global", module: "view" },
+  packages: { scope: "global", module: "packages" },
+  composition: { scope: "project", module: "composition" },
   providers: { scope: "global", module: "providers" },
   project: { scope: "project", module: "overview" },
   participants: { scope: "project", module: "participants" }
@@ -101,6 +103,8 @@ class SettingsApplication {
   #detecting = false;
   #expandedProviders = new Set<string>();
   #expandedParticipants = new Set<string>();
+  #viewPackages: JsonObject = { installed: [], instances: [], diagnostics: [] };
+  #packagePathDraft = "";
   readonly #scopes: Record<ScopeName, ScopeState>;
 
   constructor(root: HTMLElement, options: SettingsViewOptions, signal: AbortSignal, scopes: Record<ScopeName, ScopeState>, route: Readonly<RouteLocation>) {
@@ -115,6 +119,7 @@ class SettingsApplication {
   }
 
   async start(): Promise<void> {
+    window.addEventListener("memsphere:view-diagnostics-ready", () => this.render(), { signal: this.#signal });
     this.#root.innerHTML = `<div class="memsphere-settings"><style>${styles}</style><div class="settings-loading">${escapeHtml(this.t("settings.loading", "正在加载配置……"))}</div></div>`;
     await this.load();
   }
@@ -140,12 +145,16 @@ class SettingsApplication {
     this.#loading = true;
     this.render();
     try {
-      const [metaResponse, projectResponse] = await Promise.all([
+      const [metaResponse, projectResponse, packageResponse] = await Promise.all([
         fetch("/api/settings/meta", { signal: this.#signal }),
-        fetch("/api/projects", { signal: this.#signal })
+        fetch("/api/projects", { signal: this.#signal }),
+        this.settingsFetch("/api/settings/view-packages")
       ]);
       if (!metaResponse.ok) throw new Error(await metaResponse.text());
       this.#meta = await metaResponse.json() as JsonObject;
+      if (packageResponse.ok && packageResponse.headers.get("content-type")?.includes("application/json")) {
+        this.#viewPackages = await packageResponse.json() as JsonObject;
+      }
       if (projectResponse.ok) {
         const payload = await projectResponse.json() as JsonObject;
         this.#projects = payload.projects ?? [];
@@ -229,10 +238,12 @@ class SettingsApplication {
         ["overview", this.t("settings.overview", "概览")],
         ["general", this.t("settings.general", "常规")],
         ["view", this.t("settings.viewService", "界面服务")],
+        ["packages", this.t("settings.viewPackages", "界面 Package")],
         ["providers", this.t("settings.providers", "ACP 提供方")]
       ]],
       ["project", `${this.t("navigation.project", "项目")} · ${this.#currentProject}`, [
         ["project", this.t("settings.overview", "概览")],
+        ["composition", this.t("settings.viewComposition", "界面组合")],
         ["participants", this.t("settings.participants", "参与者配置")]
       ]]
     ];
@@ -252,6 +263,8 @@ class SettingsApplication {
       overview: this.t("settings.overview", "设置概览"),
       general: this.t("settings.general", "通用设置"),
       view: this.t("settings.viewService", "界面服务"),
+      packages: this.t("settings.viewPackages", "界面 Package"),
+      composition: this.t("settings.viewComposition", "界面组合"),
       providers: this.t("settings.providers", "模型提供商"),
       project: this.t("navigation.project", "当前项目"),
       participants: this.t("settings.participants", "参与者")
@@ -286,10 +299,12 @@ class SettingsApplication {
     const notice = scope.notice ? `<div class="settings-notice" role="status">${escapeHtml(scope.notice)}</div>` : "";
     const panel = this.#module === "general" ? this.generalHtml(scope)
       : this.#module === "view" ? this.viewHtml(scope)
+      : this.#module === "packages" ? this.packagesHtml(scope)
+      : this.#module === "composition" ? this.compositionHtml(scope)
       : this.#module === "providers" ? this.providersHtml(scope)
       : this.#module === "participants" ? this.participantsHtml(scope)
       : this.overviewHtml(scope);
-    const actions = ["general", "view", "providers", "participants"].includes(this.#module)
+    const actions = ["general", "view", "packages", "composition", "providers", "participants"].includes(this.#module)
       ? `<div class="settings-actions"><button class="btn" data-action="reload">${escapeHtml(this.t("settings.reload", "重新读取"))}</button><button class="btn primary" data-action="validate">${escapeHtml(this.t("common.save", "保存"))}</button></div>` : "";
     return `<div class="settings-layout">${status}${notice}${panel}${actions}</div>`;
   }
@@ -355,6 +370,66 @@ class SettingsApplication {
       ${inputField("view.port", this.t("settings.port", "端口"), String(view.port ?? ""), { type: "number", disabled: !explicit, min: "0", max: "65535" })}
       </div><label class="settings-check settings-default-toggle"><input data-field="view.default" type="checkbox"${explicit ? "" : " checked"}><span>${escapeHtml(this.t("settings.useDefaultView", "使用默认界面配置"))}</span></label>
       <p class="settings-help">${escapeHtml(this.t("settings.viewRestartHelp", "保存后执行 memsphere view restart，使主机与端口配置生效。"))}</p>${this.errorsHtml(scope)}</section>`;
+  }
+
+  packagesHtml(scope: ScopeState): string {
+    const records = scope.draft?.view_packages?.installed ?? [];
+    const resolved = new Map((this.#viewPackages.installed ?? []).map((item: JsonObject) => [item.path, item]));
+    const diagnostics = this.#viewPackages.diagnostics ?? [];
+    const themeOptions: Array<[string, string]> = [["", this.t("settings.systemTheme", "系统默认 Theme")], ...(this.#viewPackages.installed ?? []).flatMap((item: JsonObject) => (item.themes ?? []).map((theme: JsonObject) => [`${item.id}:${theme.id}`, `${item.id} · ${theme.id}`] as [string, string]))];
+    const cards = records.map((record: JsonObject, index: number) => {
+      const item = resolved.get(record.path) as JsonObject | undefined;
+      const diagnostic = diagnostics.find((entry: JsonObject) => entry.path === record.path);
+      const capabilities = item?.capabilities ?? [];
+      return `<article class="settings-provider settings-view-package"><div class="settings-section-head"><div><strong>${escapeHtml(item ? `${item.id}@${item.version}` : record.path)}</strong><p class="settings-section-subtitle mono">${escapeHtml(record.path)}</p></div><button class="btn danger" data-remove-view-package="${index}">${escapeHtml(this.t("common.delete", "删除"))}</button></div>
+        <div>${pill(diagnostic?.state ?? (item ? "resolved" : "pending restart"), diagnostic?.state === "resolved" ? "done" : "warn")}</div>
+        ${diagnostic?.message ? `<div class="settings-error">${escapeHtml(diagnostic.message)}</div>` : ""}
+        <div class="settings-permissions">${capabilities.map((capability: string) => `<label class="settings-check"><input type="checkbox" data-home-view-capability="${escapeAttr(capability)}" data-package-index="${index}"${(record.allow ?? []).includes(capability) ? " checked" : ""}><span>${escapeHtml(capability)}</span></label>`).join("") || `<span class="muted">${escapeHtml(this.t("settings.noCapabilities", "未声明额外 capability"))}</span>`}</div></article>`;
+    }).join("");
+    return `<section class="settings-section"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.viewPackages", "界面 Package"))}</h3><p class="settings-section-subtitle">${escapeHtml(this.t("settings.viewPackagesHelp", "添加可信本地 Package。保存并重启 View 后解析入口、版本、依赖和 capability。"))}</p></div></div>
+      <div class="settings-grid">${selectField("view_theme.mode", this.t("settings.themeMode", "Theme 模式"), scope.draft?.view_theme?.mode ?? "system", [["system", this.t("settings.followSystem", "跟随系统")], ["light", "Light"], ["dark", "Dark"]])}${selectField("view_theme.selected_source", this.t("settings.homeTheme", "Home Theme"), scope.draft?.view_theme?.selected_source ?? "", themeOptions)}</div>
+      <div class="settings-token-editor"><div class="settings-field"><label for="settings-package-path">${escapeHtml(this.t("settings.localPackagePath", "本地 Package 绝对路径"))}</label><input id="settings-package-path" class="settings-input mono" value="${escapeAttr(this.#packagePathDraft)}" placeholder="/absolute/path/to/package"></div><button class="btn" data-action="add-view-package">${escapeHtml(this.t("settings.add", "添加"))}</button></div>
+      <div class="settings-providers">${cards || empty(this.t("settings.noViewPackages", "尚未安装界面 Package。"))}</div>${this.errorsHtml(scope)}</section>`;
+  }
+
+  compositionHtml(scope: ScopeState): string {
+    const selected = scope.draft?.view?.packages ?? [];
+    const installed = this.#viewPackages.installed ?? [];
+    const diagnostics = this.#viewPackages.diagnostics ?? [];
+    const runtime = (window as Window & { __memsphereViewDiagnostics?: () => JsonObject }).__memsphereViewDiagnostics?.();
+    const runtimeEntries = (runtime?.entries ?? []).filter((entry: JsonObject) => String(entry.slot).startsWith("org.memsphere."));
+    const runtimeEvidence = runtime ? `<details class="settings-participant"><summary class="settings-participant-summary"><div><strong>${escapeHtml(this.t("settings.runtimeDiagnostics", "当前运行诊断"))}</strong><div class="settings-participant-summary-meta">${escapeHtml(`Theme ${runtime.theme?.mode ?? "-"} · ${runtimeEntries.length} presentation candidates`)}</div></div></summary><div class="settings-participant-body"><pre class="settings-code mono">${escapeHtml(JSON.stringify({ theme: runtime.theme, entries: runtimeEntries }, null, 2))}</pre></div></details>` : "";
+    const projectThemeOptions: Array<[string, string]> = [["", this.t("settings.inheritHomeTheme", "继承 Home Theme")], ...installed.flatMap((item: JsonObject) => (item.themes ?? []).map((theme: JsonObject) => [`${item.id}:${theme.id}`, `${item.id} · ${theme.id}`] as [string, string]))];
+    const candidates = installed.flatMap((item: JsonObject) => {
+      const record = selected.find((entry: JsonObject) => entry.id === item.id && entry.version === item.version && entry.enabled);
+      if (!record) return [];
+      return (item.contributions ?? []).map((entry: JsonObject) => ({
+        cell: entry.cell, priority: entry.priority,
+        id: `${item.id}:${record.instance_id ?? item.id}:${entry.id}`,
+        label: `${item.id}@${item.version} · ${entry.id}`
+      }));
+    });
+    const conflictGroups = new Map<string, JsonObject[]>();
+    for (const candidate of candidates) {
+      const key = `${candidate.cell}\u0000${candidate.priority}`;
+      conflictGroups.set(key, [...(conflictGroups.get(key) ?? []), candidate]);
+    }
+    const conflicts = [...conflictGroups.values()].filter(group => group.length > 1).map(group => {
+      const cell = String(group[0]!.cell);
+      const current = selected.map((entry: JsonObject) => entry.preferences?.[cell]).find(Boolean) ?? "";
+      return `<div class="settings-field"><label>${escapeHtml(this.t("settings.preferredContribution", `首选候选 · ${cell}`, { cell }))}</label><select class="settings-input" data-view-preference="${escapeAttr(cell)}"><option value="">${escapeHtml(this.t("settings.chooseCandidate", "请选择以解决同优先级冲突"))}</option>${group.map(candidate => `<option value="${escapeAttr(candidate.id)}"${candidate.id === current ? " selected" : ""}>${escapeHtml(candidate.label)}</option>`).join("")}</select></div>`;
+    }).join("");
+    const cards = installed.map((item: JsonObject) => {
+      const record = selected.find((entry: JsonObject) => entry.id === item.id && entry.version === item.version);
+      const identity = `${item.id}@${item.version}`;
+      const instanceDiagnostic = diagnostics.find((entry: JsonObject) => entry.packageId === item.id && entry.version === item.version && entry.instanceId);
+      return `<article class="settings-provider settings-view-package"><div class="settings-section-head"><div><strong>${escapeHtml(identity)}</strong><p class="settings-section-subtitle">${escapeHtml(item.source?.homepage ?? item.path)}</p></div><label class="settings-check"><input type="checkbox" data-project-view-package="${escapeAttr(identity)}"${record?.enabled ? " checked" : ""}><span>${escapeHtml(this.t("settings.enabled", "启用"))}</span></label></div>
+        <div>${pill(instanceDiagnostic?.state ?? (record?.enabled ? "configured" : "disabled"), instanceDiagnostic?.state === "resolved" ? "done" : instanceDiagnostic?.state ? "warn" : "")}</div>
+        ${instanceDiagnostic?.message ? `<div class="settings-error">${escapeHtml(instanceDiagnostic.message)}</div>` : ""}
+        <div class="settings-permissions">${(item.capabilities ?? []).map((capability: string) => `<label class="settings-check"><input type="checkbox" data-project-view-capability="${escapeAttr(capability)}" data-package-identity="${escapeAttr(identity)}"${(record?.allow ?? []).includes(capability) ? " checked" : ""}${record ? "" : " disabled"}><span>${escapeHtml(capability)}</span></label>`).join("")}</div>
+        ${(item.contributions ?? []).map((entry: JsonObject) => `<div class="settings-provider-preview mono">${escapeHtml(`${entry.cell} · priority ${entry.priority} · ${entry.id}`)}</div>`).join("")}</article>`;
+    }).join("");
+    return `<section class="settings-section"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.viewComposition", "界面组合"))}</h3><p class="settings-section-subtitle">${escapeHtml(this.t("settings.viewCompositionHelp", "为当前 Project 启用 Package 并明确授予 capability；保存后重启 View 生效。"))}</p></div></div><div class="settings-grid">${selectField("project_view.theme", this.t("settings.projectTheme", "Project Theme"), scope.draft?.view?.theme?.selected_source ?? "", projectThemeOptions)}</div>${runtimeEvidence}${conflicts ? `<div class="settings-grid settings-view-conflicts">${conflicts}</div>` : ""}<div class="settings-providers">${cards || empty(this.t("settings.noInstalledPackages", "Home 尚无已解析的界面 Package。"))}</div>${this.errorsHtml(scope)}</section>`;
   }
 
   participantsHtml(scope: ScopeState): string {
@@ -472,6 +547,12 @@ class SettingsApplication {
     root.querySelectorAll<HTMLButtonElement>("[data-action]").forEach(button => button.addEventListener("click", () => void this.action(button.dataset.action!), { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-remove-participant]").forEach(button => button.addEventListener("click", () => this.removeParticipant(button.dataset.removeParticipant!), { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-reset-provider]").forEach(button => button.addEventListener("click", () => this.resetProvider(button.dataset.resetProvider!), { signal: this.#signal }));
+    root.querySelector<HTMLInputElement>("#settings-package-path")?.addEventListener("input", event => { this.#packagePathDraft = (event.currentTarget as HTMLInputElement).value; }, { signal: this.#signal });
+    root.querySelectorAll<HTMLButtonElement>("[data-remove-view-package]").forEach(button => button.addEventListener("click", () => this.removeViewPackage(Number(button.dataset.removeViewPackage)), { signal: this.#signal }));
+    root.querySelectorAll<HTMLInputElement>("[data-home-view-capability]").forEach(input => input.addEventListener("change", () => this.updateHomeViewCapability(input), { signal: this.#signal }));
+    root.querySelectorAll<HTMLInputElement>("[data-project-view-package]").forEach(input => input.addEventListener("change", () => this.toggleProjectViewPackage(input), { signal: this.#signal }));
+    root.querySelectorAll<HTMLInputElement>("[data-project-view-capability]").forEach(input => input.addEventListener("change", () => this.updateProjectViewCapability(input), { signal: this.#signal }));
+    root.querySelectorAll<HTMLSelectElement>("[data-view-preference]").forEach(select => select.addEventListener("change", () => this.updateViewPreference(select), { signal: this.#signal }));
   }
 
   private surfaceRoots(): readonly HTMLElement[] { return [this.#listRoot, this.#detailRoot].filter((root): root is HTMLElement => Boolean(root)).concat(this.#listRoot || this.#detailRoot ? [] : [this.#root]); }
@@ -497,6 +578,7 @@ class SettingsApplication {
       else if (name === "detect") await this.detectProviders();
       else if (name === "save-operator-token") await this.saveOperatorToken(false);
       else if (name === "clear-operator-token") await this.saveOperatorToken(true);
+      else if (name === "add-view-package") this.addViewPackage();
       else if (name === "enable-participants") {
         this.state.draft!.control_plane = { runner: { permissions: [] }, actors: {} };
         this.render();
@@ -516,6 +598,16 @@ class SettingsApplication {
   ): void {
     const draft = this.state.draft!;
     if (path === "language") draft.language = value;
+    else if (path === "view_theme.mode") (draft.view_theme ??= { mode: "system" }).mode = value;
+    else if (path === "view_theme.selected_source") {
+      draft.view_theme ??= { mode: "system" };
+      setOptional(draft.view_theme, "selected_source", value);
+    } else if (path === "project_view.theme") {
+      const view = (draft.view ??= { packages: [] });
+      view.theme ??= {};
+      setOptional(view.theme, "selected_source", value);
+      if (!Object.keys(view.theme).length) delete view.theme;
+    }
     else if (path === "view.default") {
       if ((field as HTMLInputElement).checked) delete draft.view;
       else draft.view = clone(this.state.data!.defaults.view);
@@ -615,6 +707,60 @@ class SettingsApplication {
     this.#providerDetection[id] = { status: "pending_redetect" };
     this.#expandedProviders.add(id);
     this.render();
+  }
+
+  addViewPackage(): void {
+    const path = this.#packagePathDraft.trim();
+    if (!path.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(path)) {
+      this.state.errors = [{ path: "view_packages.installed", message: this.t("settings.absolutePathRequired", "请输入绝对路径。") }];
+      this.render();
+      return;
+    }
+    const installed = (this.state.draft!.view_packages ??= { installed: [] }).installed as JsonObject[];
+    if (!installed.some(entry => entry.path === path)) installed.push({ path, allow: [] });
+    this.#packagePathDraft = "";
+    this.state.errors = [];
+    this.render();
+  }
+
+  removeViewPackage(index: number): void {
+    (this.state.draft?.view_packages?.installed ?? []).splice(index, 1);
+    this.render();
+  }
+
+  updateHomeViewCapability(input: HTMLInputElement): void {
+    const record = this.state.draft!.view_packages.installed[Number(input.dataset.packageIndex)];
+    record.allow = toggleValue(record.allow ?? [], input.dataset.homeViewCapability!, input.checked);
+    this.refreshStatus();
+  }
+
+  toggleProjectViewPackage(input: HTMLInputElement): void {
+    const [id, version] = input.dataset.projectViewPackage!.split("@");
+    const packages = (this.state.draft!.view ??= { packages: [] }).packages as JsonObject[];
+    const record = packages.find(entry => entry.id === id && entry.version === version);
+    if (record) record.enabled = input.checked;
+    else packages.push({ id, version, enabled: input.checked, allow: [] });
+    this.render();
+  }
+
+  updateProjectViewCapability(input: HTMLInputElement): void {
+    const [id, version] = input.dataset.packageIdentity!.split("@");
+    const record = this.state.draft!.view.packages.find((entry: JsonObject) => entry.id === id && entry.version === version);
+    if (!record) return;
+    record.allow = toggleValue(record.allow ?? [], input.dataset.projectViewCapability!, input.checked);
+    this.refreshStatus();
+  }
+
+  updateViewPreference(select: HTMLSelectElement): void {
+    const cell = select.dataset.viewPreference!;
+    for (const record of this.state.draft!.view.packages as JsonObject[]) {
+      if (!record.enabled) continue;
+      record.preferences ??= {};
+      if (select.value) record.preferences[cell] = select.value;
+      else delete record.preferences[cell];
+      if (!Object.keys(record.preferences).length) delete record.preferences;
+    }
+    this.refreshStatus();
   }
 
   async validate(): Promise<void> {
@@ -767,7 +913,7 @@ class SettingsApplication {
   settingsFetch(url: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
     if (this.#token) headers.set("authorization", `Bearer ${this.#token}`);
-    const scopedUrl = this.#config.projectApiBase && (url === "/api/settings/project" || url.startsWith("/api/settings/project/"))
+    const scopedUrl = this.#config.projectApiBase && (url === "/api/settings/view-packages" || url === "/api/settings/project" || url.startsWith("/api/settings/project/"))
       ? `${this.#config.projectApiBase}${url.slice(4)}`
       : url;
     return fetch(scopedUrl, { ...init, headers, signal: this.#signal });
@@ -826,6 +972,11 @@ function compact(value: unknown): string { const text = value === undefined ? "�
 function viewUrl(view: JsonObject): string { return `http://${view?.host ?? "127.0.0.1"}:${Number(view?.port ?? 0)}`; }
 function setOptional(target: JsonObject, key: string, value: string): void { if (value.trim()) target[key] = value; else delete target[key]; }
 function toggleSet(set: Set<string>, value: string, enabled: boolean): void { if (enabled) set.add(value); else set.delete(value); }
+function toggleValue(values: string[], value: string, enabled: boolean): string[] {
+  const next = values.filter(candidate => candidate !== value);
+  if (enabled) next.push(value);
+  return next.sort();
+}
 function shellArgument(value: unknown): string { const text = String(value); return /^[A-Za-z0-9_./:=+-]+$/.test(text) ? text : `'${text.replace(/'/g, `'\\''`)}'`; }
 function isPluralMessage(value: unknown): value is { one: string; other: string } { return Boolean(value && typeof value === "object" && typeof (value as JsonObject).one === "string" && typeof (value as JsonObject).other === "string"); }
 function escapeAttr(value: unknown): string { return escapeHtml(String(value)).replace(/`/g, "&#96;"); }

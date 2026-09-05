@@ -6,7 +6,7 @@
 
 ## 当前实现状态
 
-当前 ViewHost 已接通 Plugin 入口、生命周期、Manifest/SDK 校验、独立 Bundle 加载、Router、Theme v1、UI v1 与根 Slot Catalog。常规页面可以声明 `inject: ["slots", "router", "theme", "ui"]`，并配套 `themeVersion: 1`、`uiVersion: 1`；可贡献位置、特殊组合能力与准确接线状态统一见 [View Slot List](./view-slots.md)。
+当前 ViewHost 已接通 Plugin 入口、生命周期、Manifest/SDK 校验、独立 Bundle 加载、本地 Package composition、Router、Theme/Theme Registry、UI v1、根 Slot Catalog 与 portable presentation cells。常规页面可以声明 `inject: ["slots", "router", "theme", "ui"]`，并配套 `themeVersion: 1`、`uiVersion: 1`；可贡献位置、特殊组合能力与准确接线状态统一见 [View Slot List](./view-slots.md)。
 
 本文保留 View API 与 I18n 的完整示例，因为它们属于已经确定的长期开发契约；这两项服务目前尚未接线，所以完整示例不能直接作为当前版本的可运行代码。准确进度以 API 文档的“当前实现状态”为准，不因尚未实现而删除后续设计和用法。
 
@@ -271,3 +271,10 @@ export default defineViewPlugin<CustomerConfig>({
 - 想理解为何分别编译、为何允许重启，以及 Slot 所有权如何工作，阅读 [View Plugin Design](./view-plugin-design.md)。
 - 编写代码时查询精确签名、返回值和错误约束，阅读 [View Plugin API](./view-plugin-api.md)。
 - 选择可以贡献的界面位置，阅读 [View Slot List](./view-slots.md)。
+# 本地 View Package、主题与页面替换
+
+View Plugin 现在可以作为可信本地 Package 安装，而不必加入 `builtinModuleCatalog` 或重新编译 Memsphere。示例见 `examples/view-packages/dsh-custom-view`。在“设置 → 界面 Package”添加绝对路径并保存；重启 View 后，在当前 Project 的“设置 → 界面组合”启用版本并分别授予 capability。Home 与 Project 都授权时 capability 才生效。
+
+Package 通过 `module.json` 声明 `capabilities`、`dependencies`、`styles`、`themes`、`contributions` 和可选 `source`。`styles.global` 是显式高权限：`@import`、远程资源、Host 私有 selector、`!important` 和 `--mem-view-*` 声明都会被拒绝。普通 scoped CSS 会绑定 Package 实例 root/portal；自定义变量请使用 Package 自己的命名空间。
+
+使用 `portableSlots.memoryPagePresentation`、`memoryDetailRenderer`、`runPagePresentation` 和 `runArtifactRenderer` 替换稳定 Route 内的展示。较小 `priority` 获胜，同 cell 同 priority 必须在 Project 设置选择首选候选；渲染异常会 abdicate 并回退到下一候选。`order` 仍只控制 list 排序。

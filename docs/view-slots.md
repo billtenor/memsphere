@@ -34,11 +34,24 @@
 
 当前 Catalog 定义 14 个长期 Slot。新增 Slot 时直接更新本列表。
 
+### 跨 Package Presentation Cells
+
+以下四项是独立于 14 个 Shell 根 Slot 的稳定 portable cell。它们不转移官方 Route 或业务 API 所有权：
+
+| Cell | 官方所有者 | key | 输入 |
+| --- | --- | --- | --- |
+| `org.memsphere.memory.page.presentation@1` | Memory | `page` | `ViewMount` |
+| `org.memsphere.memory.detail.renderer@1` | Memory | `detail` | Memory kind、实体及官方 fallback factory |
+| `org.memsphere.run.page.presentation@1` | Run | `page` | `ViewMount` |
+| `org.memsphere.run.artifact.renderer@1` | Run | `artifact` | Artifact、事件、Run 及官方 fallback factory |
+
+官方实现以 priority `1000` 注册。较小 priority 的用户候选可以 shadow；同 priority 冲突须由 Project preference 处理；失败候选标为 abdicated 并自动回退。诊断区显示 active、shadowed 与 abdicated 状态。
+
 ## 当前实现状态
 
 当前 SDK 与 ViewHost 已接线本 Catalog 的全部 14 个根 Slot。Core 通过 Host 内置 Plugin 提供 Home、账户等 Shell 内容；四个 builtin Module 通过同一公开 Slot Tree 贡献主导航、二级导航、对象列表、按需右侧栏、Header、Page、搜索 Provider 与 Home 聚合项。Shell 使用可拖动且持久化的二级导航栏和内容列表栏；Run 普通页面不轮询，Artifact Review 由 Run Module 注册到 `overlay`，Host 负责背景 Route、遮罩、焦点、关闭、清理与局部故障边界。
 
-自定义子 Slot、用户 Module 发现/安装及 Project 动态组合仍未接线。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
+任意动态子 Slot 仍未接线；四个版本化 portable presentation cell、可信本地用户 Package 发现/安装及 Project 动态组合已经接线。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
 
 ## Slot 结构
 

@@ -229,3 +229,8 @@ Distribution to unknown third parties requires separate designs for signing, per
 ## Document Boundary
 
 The complete Module Manifest, CLI SDK, server-side View API registration, Module configuration migration, marketplace, signing, and sandbox are defined by their own contracts. They must preserve the separate-compilation, public-Context, Slot-ownership, instance-isolation, data-boundary, and full-restart model defined here.
+# Local Package Composition and Asset Evolution
+
+Built-ins and trusted local Packages use the same Manifest, instance Context, and Slot protocol. Home records installed paths and capability ceilings; each Project selects versions, instances, enabled state, grants, and conflict preferences. The View service freezes a per-Project composition snapshot at runtime, with changes applied through the cross-platform `memsphere view restart`. Entrypoints and resources use package-root realpath confinement, content digests, and Project-isolated URLs; changed files cannot make an old URL return new bytes.
+
+Community, verified, curated, and official-owned are future Catalog metadata, not runtime protocol states. Stable Package identity, SemVer, source, and license metadata let a user solution move from local sharing to official curation or authorized maintenance transfer without silent identity replacement.

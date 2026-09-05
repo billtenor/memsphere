@@ -8,6 +8,11 @@ import MarkdownIt from "markdown-it";
 import { ZodError, type ZodIssue } from "zod";
 import { builtinModuleCatalog } from "../module/builtin-catalog.js";
 import { isViewSdkCompatible, readModuleManifest, resolveModuleViewEntry } from "../module/manifest.js";
+import {
+  resolveViewPackageComposition,
+  ViewPackageAssetRegistry,
+  type ResolvedViewPackageComposition
+} from "../module/package-registry.js";
 import { archiveRun } from "../archive/store.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
 import { agentActivityDelta, readAgentActivitySnapshot } from "../acp/activity.js";
@@ -111,6 +116,8 @@ import {
   viewSdkBundlePath,
   type ViewHostBootInstance
 } from "../view/host.js";
+import { rewriteGlobalStyleUrls, scopePackageStyle, validateGlobalStyle } from "../view/global-style-contract.js";
+import { VIEW_THEME_HOME_LAYER, VIEW_THEME_PROJECT_LAYER } from "../view/theme.js";
 import { coreViewRoutes } from "../view/core-routes.js";
 import {
   localizeAcpProviderDefinition,
@@ -305,12 +312,14 @@ export function createViewServer(config: MemsphereConfig, options: ViewServerOpt
     }
   }
   const viewCache = new ViewMemoryCache();
+  const packageAssets = new ViewPackageAssetRegistry();
+  const packageCompositions = new Map<string, Promise<ResolvedViewPackageComposition>>();
   void systemMemoryReferences().catch(() => {
     systemMemoryReferencesPromise = undefined;
   });
   const server = createServer(async (request, response) => {
     try {
-      await handleRequest(request, response, config, options, viewCache);
+      await handleRequest(request, response, config, options, viewCache, packageAssets, packageCompositions);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       sendJson(response, 500, {
@@ -328,7 +337,9 @@ async function handleRequest(
   response: ServerResponse,
   config: MemsphereConfig,
   options: ViewServerOptions,
-  viewCache: ViewMemoryCache
+  viewCache: ViewMemoryCache,
+  packageAssets: ViewPackageAssetRegistry,
+  packageCompositions: Map<string, Promise<ResolvedViewPackageComposition>>
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   const requestedPathname = url.pathname;
@@ -351,6 +362,23 @@ async function handleRequest(
   }
   const { memoryRoot, runsRoot } = config;
   const archiveRoot = config.archiveRoot;
+
+  const packageAssetMatch = url.pathname.match(/^\/assets\/view-packages\/([^/]+)\/([A-Za-z0-9_-]+)$/);
+  if (request.method === "GET" && packageAssetMatch) {
+    const projectId = decodeURIComponent(packageAssetMatch[1]!);
+    const result = await packageAssets.read(packageAssetMatch[2]!, projectId);
+    if (!result) {
+      sendText(response, 404, "View Package asset not found");
+      return;
+    }
+    response.writeHead(200, {
+      "content-type": result.asset.mime,
+      "cache-control": "private, immutable, max-age=31536000",
+      "x-content-type-options": "nosniff"
+    });
+    response.end(result.body);
+    return;
+  }
 
   if (request.method === "GET" && url.pathname === viewSdkBundlePath) {
     sendJavaScript(request, response, await readCompiledBrowserModule(compiledViewSdkUrl, sourceViewSdkUrl));
@@ -426,11 +454,18 @@ async function handleRequest(
       redirect(response, 302, projectPagePath(config.project?.name, `${url.pathname}${url.search}`));
       return;
     }
-    const instances = await builtinViewInstances(config);
+    const projectId = config.project?.name ?? "memsphere";
+    const composition = await viewPackageComposition(config, packageCompositions);
+    const [instances, packageInstances] = await Promise.all([
+      builtinViewInstances(config),
+      externalViewInstances(config, composition, packageAssets)
+    ]);
     sendHtml(response, renderViewHostHtml(
       config.language,
-      [...instances, ...(options.developmentModules?.map(module => module.instance) ?? [])],
+      [...instances, ...packageInstances, ...(options.developmentModules?.map(module => module.instance) ?? [])],
       requestedPathname,
+      config.viewTheme?.mode ?? "system",
+      configuredThemeOverrides(config),
     ));
     return;
   }
@@ -442,6 +477,37 @@ async function handleRequest(
       operatorTokenConfigured: Boolean(document.raw.view?.operator_token),
       host: config.view.host,
       port: config.view.port
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/settings/view-packages") {
+    if (!authorizeSettingsRequest(request, response, config, options)) return;
+    const composition = await resolveViewPackageComposition({
+      global: config.viewPackages,
+      project: config.project?.view,
+      sdkVersion: viewSdkVersion
+    });
+    sendJson(response, 200, {
+      installed: composition.installed.map(entry => ({
+        id: entry.manifest.id,
+        version: entry.manifest.version,
+        path: entry.root,
+        source: entry.manifest.source,
+        capabilities: entry.manifest.view.capabilities ?? [],
+        dependencies: entry.manifest.view.dependencies ?? [],
+        contributions: entry.manifest.view.contributions ?? [],
+        styles: entry.manifest.view.styles ?? [],
+        themes: entry.manifest.view.themes ?? []
+      })),
+      instances: composition.instances.map(entry => ({
+        id: entry.package.manifest.id,
+        version: entry.package.manifest.version,
+        instanceId: entry.instanceId,
+        allow: [...entry.allow],
+        contributionPolicy: entry.contributionPolicy
+      })),
+      diagnostics: composition.diagnostics
     });
     return;
   }
@@ -2652,6 +2718,197 @@ const viewRuntimeDependencies = new Map([
 ]);
 
 const viewSdkVersion = "1.0.0";
+
+function configuredThemeOverrides(config: MemsphereConfig): NonNullable<ViewHostBootInstance["themes"]> {
+  const contributions: Array<NonNullable<ViewHostBootInstance["themes"]>[number]> = [];
+  const add = (
+    sourceId: string,
+    layer: number,
+    overrides: { light?: Record<string, string>; dark?: Record<string, string> } | undefined,
+  ) => {
+    if (!overrides) return;
+    if (!overrides.light || !overrides.dark) throw new Error(`${sourceId} must provide both light and dark token overrides`);
+    contributions.push(Object.freeze({
+      sourceId,
+      tokens: Object.freeze({ light: Object.freeze({ ...overrides.light }), dark: Object.freeze({ ...overrides.dark }) }),
+      selected: true,
+      layer
+    }));
+  };
+  add("org.memsphere.user.home-overrides", VIEW_THEME_HOME_LAYER - 50, config.viewTheme?.overrides);
+  add("org.memsphere.user.project-overrides", VIEW_THEME_PROJECT_LAYER - 50, config.project?.view?.theme?.overrides);
+  return Object.freeze(contributions);
+}
+
+function viewPackageComposition(
+  config: MemsphereConfig,
+  cache: Map<string, Promise<ResolvedViewPackageComposition>>,
+): Promise<ResolvedViewPackageComposition> {
+  const projectId = config.project?.name ?? "memsphere";
+  const existing = cache.get(projectId);
+  if (existing) return existing;
+  const snapshot = resolveViewPackageComposition({
+    global: config.viewPackages,
+    project: config.project?.view,
+    sdkVersion: viewSdkVersion
+  });
+  cache.set(projectId, snapshot);
+  return snapshot;
+}
+
+async function externalViewInstances(
+  config: MemsphereConfig,
+  composition: ResolvedViewPackageComposition,
+  assets: ViewPackageAssetRegistry,
+): Promise<readonly ViewHostBootInstance[]> {
+  const projectId = config.project?.name ?? "memsphere";
+  return Promise.all(composition.instances.map(async instance => {
+    try {
+    const entry = await assets.register({
+      projectId,
+      instanceId: instance.instanceId,
+      packageRoot: instance.package.root,
+      file: instance.package.manifest.view.entry
+    });
+    const capabilities = instance.allow;
+    const owner = `${instance.package.manifest.id}@${instance.package.manifest.version}:${instance.instanceId}`;
+    const styles = await Promise.all((instance.package.manifest.view.styles ?? []).flatMap(style => {
+      const required = style.scope === "global" ? "styles.global" as const : "styles.scoped" as const;
+      if (!capabilities.has(required)) return [];
+      return [loadViewPackageStyle({ projectId, owner, instance, style, assets })];
+    }));
+    const selectedProjectTheme = config.project?.view?.theme?.selected_source;
+    const selectedHomeTheme = config.viewTheme?.selected_source;
+    const themes = await Promise.all((instance.package.manifest.view.themes ?? []).flatMap(theme => {
+      const sourceId = `${instance.package.manifest.id}:${theme.id}`;
+      const selected = sourceId === selectedProjectTheme || (!selectedProjectTheme && sourceId === selectedHomeTheme);
+      const layer = sourceId === selectedProjectTheme ? VIEW_THEME_PROJECT_LAYER : VIEW_THEME_HOME_LAYER;
+      return [loadViewPackageTheme({ projectId, sourceId, layer, selected, instance, file: theme.file, assets })];
+    }));
+    const priorities = Object.fromEntries(
+      Object.entries(instance.contributionPolicy.priorities).map(([identity, priority]) => [identity.split(":").at(-1)!, priority])
+    );
+    return Object.freeze({
+      pluginPath: `/assets/view-packages/${encodeURIComponent(projectId)}/${entry.key}`,
+      config: instance.config,
+      styles: Object.freeze(styles),
+      themes: Object.freeze(themes),
+      contributionPolicy: Object.freeze({
+        priorities: Object.freeze(priorities),
+        blockedCells: instance.contributionPolicy.blockedCells
+      }),
+      themeOperations: Object.freeze([
+        ...(capabilities.has("theme.register") ? ["register" as const] : []),
+        ...(capabilities.has("theme.override") ? ["override" as const] : [])
+      ]),
+      allowedServices: Object.freeze([
+        "slots" as const,
+        "router" as const,
+        "theme" as const,
+        "ui" as const,
+        ...(
+          capabilities.has("theme.register") || capabilities.has("theme.override")
+            ? ["themeRegistry" as const]
+            : []
+        )
+      ]),
+      module: Object.freeze({
+        projectId,
+        moduleId: instance.package.manifest.id,
+        moduleVersion: instance.package.manifest.version,
+        instanceId: instance.instanceId
+      })
+    });
+    } catch (error) {
+      return Object.freeze({
+        pluginPath: `/assets/view-packages/${encodeURIComponent(projectId)}/invalid`,
+        loadError: error instanceof Error ? error.message : String(error),
+        config: instance.config,
+        module: Object.freeze({
+          projectId,
+          moduleId: instance.package.manifest.id,
+          moduleVersion: instance.package.manifest.version,
+          instanceId: instance.instanceId
+        })
+      });
+    }
+  }));
+}
+
+async function loadViewPackageTheme(input: {
+  projectId: string;
+  sourceId: string;
+  layer: number;
+  selected: boolean;
+  instance: ResolvedViewPackageComposition["instances"][number];
+  file: string;
+  assets: ViewPackageAssetRegistry;
+}): Promise<NonNullable<ViewHostBootInstance["themes"]>[number]> {
+  const asset = await input.assets.register({
+    projectId: input.projectId,
+    instanceId: input.instance.instanceId,
+    packageRoot: input.instance.package.root,
+    file: input.file
+  });
+  const loaded = await input.assets.read(asset.key, input.projectId);
+  if (!loaded) throw new Error(`Theme changed while composing View Package: ${input.file}`);
+  const value = JSON.parse(loaded.body.toString("utf8")) as Record<string, unknown>;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Theme must be a JSON object: ${input.file}`);
+  const light = value.light;
+  const dark = value.dark;
+  if (!light || typeof light !== "object" || Array.isArray(light) || !dark || typeof dark !== "object" || Array.isArray(dark)) {
+    throw new Error(`Theme must provide light and dark token maps: ${input.file}`);
+  }
+  const complete = value.complete === true;
+  const required = complete ? "theme.register" as const : "theme.override" as const;
+  if (!input.instance.allow.has(required)) throw new Error(`Theme contribution lacks effective ${required} capability: ${input.sourceId}`);
+  return Object.freeze({
+    sourceId: input.sourceId,
+    tokens: Object.freeze({ light: Object.freeze({ ...light }), dark: Object.freeze({ ...dark }) }),
+    ...(complete ? { complete: true } : {}),
+    ...(input.selected ? { selected: true } : {}),
+    layer: input.layer
+  });
+}
+
+async function loadViewPackageStyle(input: {
+  projectId: string;
+  owner: string;
+  instance: ResolvedViewPackageComposition["instances"][number];
+  style: NonNullable<ResolvedViewPackageComposition["instances"][number]["package"]["manifest"]["view"]["styles"]>[number];
+  assets: ViewPackageAssetRegistry;
+}): Promise<{ id: string; css: string; scope: "module" | "global" }> {
+  const styleAsset = await input.assets.register({
+    projectId: input.projectId,
+    instanceId: input.instance.instanceId,
+    packageRoot: input.instance.package.root,
+    file: input.style.file
+  });
+  const styleBody = await input.assets.read(styleAsset.key, input.projectId);
+  if (!styleBody) throw new Error(`Style changed while composing View Package: ${input.style.file}`);
+  const source = styleBody.body.toString("utf8");
+  const validated = validateGlobalStyle(source);
+  const urls = new Map<string, string>();
+  for (const relativePath of validated.assets) {
+    const asset = await input.assets.register({
+      projectId: input.projectId,
+      instanceId: input.instance.instanceId,
+      packageRoot: input.instance.package.root,
+      file: relativePath.startsWith("./") ? relativePath : `./${relativePath}`
+    });
+    urls.set(relativePath, `/assets/view-packages/${encodeURIComponent(input.projectId)}/${asset.key}`);
+  }
+  const scoped = input.style.scope === "module" ? scopePackageStyle(validated.css, input.owner) : validated.css;
+  return Object.freeze({
+    id: `${input.instance.package.manifest.id}:${input.instance.instanceId}:${input.style.id}`,
+    css: rewriteGlobalStyleUrls(scoped, relativePath => {
+      const url = urls.get(relativePath);
+      if (!url) throw new Error(`Style references an unregistered asset: ${relativePath}`);
+      return url;
+    }),
+    scope: input.style.scope
+  });
+}
 
 function builtinAssetPath(moduleId: string): string {
   return `/assets/modules/${encodeURIComponent(moduleId)}/index.js`;
