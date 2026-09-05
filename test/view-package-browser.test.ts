@@ -156,7 +156,7 @@ test("Settings completes the local Package installation and Project enablement f
     await page.goto(`${active.origin}/projects/demo/settings/packages`);
     await page.getByText("界面与主题", { exact: true }).first().waitFor();
     await page.getByText("org.example.memsphere.custom-view@1.0.0", { exact: true }).first().waitFor();
-    await page.getByText("使用权限", { exact: true }).click();
+    await page.getByText("权限设置", { exact: true }).click();
     for (const capability of ["theme.override", "styles.scoped", "styles.global"]) {
       await page.locator(`[data-home-view-capability="${capability}"]`).check();
     }
@@ -174,9 +174,15 @@ test("Settings completes the local Package installation and Project enablement f
 
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/settings/composition`);
-    await page.getByText("界面扩展包安装", { exact: true }).waitFor();
+    await page.getByText("安装新扩展包", { exact: true }).waitFor();
+    await page.getByText("已安装扩展包（1）", { exact: true }).waitFor();
+    await page.getByText("已安装", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "卸载", exact: true }).waitFor();
     await page.getByText("主题配置", { exact: true }).waitFor();
     await page.getByText("界面配置", { exact: true }).waitFor();
+    await page.getByText("样式配置", { exact: true }).waitFor();
+    await page.getByText("仅扩展包内容", { exact: true }).waitFor();
+    await page.getByText("整个 Memsphere 界面", { exact: true }).waitFor();
     assert.equal(await page.locator(".settings-config-table").first().locator("tbody tr").count(), 16);
     assert.equal(await page.getByRole("button", { name: "保存", exact: true }).count(), 1);
     assert.equal(await page.locator('[data-select-field="project_view.theme"]').count(), 0);
