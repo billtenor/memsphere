@@ -723,7 +723,7 @@ Slot Contract 使用 `name@version` 身份：
 Module Manifest、CLI SDK、服务端 View API 注册接口、配置 Schema、第三方签名与沙箱不属于本 API 文档。
 # View Package 扩展 API（v1 墄量）
 
-- 可注入服务新增 `themeRegistry`；声明时必须同时设置 `themeRegistryVersion: 1`，且 Package 必须取得有效 Theme capability。
+- 可注入服务新增 `themeRegistry`；声明时必须同时设置 `themeRegistryVersion: 1`，Package 必须在 Manifest 声明相应 Theme capability，且其主题已被选中。
 - `RegisterOptions.priority` 是非负整数，用于 `single`/`keyed` replacement；Host 内部使用整数元组排序，不使用浮点投影。设置配置显式决定启用哪些候选，未选 contribution 在注册时安全忽略。
 - `portableSlots` 导出四个 `name@1` 边界：`org.memsphere.memory.page.presentation`、`org.memsphere.memory.detail.renderer`、`org.memsphere.run.page.presentation`、`org.memsphere.run.artifact.renderer`。
 - `SlotRegistry.render(token, key, input)` 调用 data renderer，并在异常或非法返回值时把候选标为 abdicated 后继续 fallback。

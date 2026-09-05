@@ -49,15 +49,8 @@ export const viewPackageContributionCellSchema = z.string().min(1).refine(
   "View contribution must target a configurable Host Slot"
 );
 
-const uniqueCapabilities = z.array(viewPackageCapabilitySchema).superRefine((values, context) => {
-  if (new Set(values).size !== values.length) {
-    context.addIssue({ code: z.ZodIssueCode.custom, message: "capabilities must be unique" });
-  }
-});
-
 export const installedViewPackageSchema = z.object({
-  path: z.string().min(1).refine(isAbsolute, "installed View Package path must be absolute"),
-  allow: uniqueCapabilities.optional()
+  path: z.string().min(1).refine(isAbsolute, "installed View Package path must be absolute")
 }).strict();
 
 export const viewThemeOverrideSchema = z.object({
@@ -80,7 +73,6 @@ export const projectViewPackageSchema = z.object({
   id: z.string().min(1),
   version: z.string().min(1),
   enabled: z.boolean().default(true),
-  allow: uniqueCapabilities.optional(),
   instance_id: z.string().min(1).optional(),
   config: z.record(z.unknown()).optional(),
   preferences: z.record(z.string().min(1)).optional()
@@ -157,8 +149,7 @@ export function normalizeInstalledViewPackagePaths(
   if (!value) return undefined;
   return globalViewPackagesConfigSchema.parse({
     installed: value.installed.map((entry) => ({
-      path: resolve(entry.path),
-      ...(entry.allow?.length ? { allow: [...entry.allow].sort() } : {})
+      path: resolve(entry.path)
     }))
   });
 }

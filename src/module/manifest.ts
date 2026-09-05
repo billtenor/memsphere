@@ -53,11 +53,12 @@ export const moduleManifestSchema = z.object({
     }
   }
   for (const [index, style] of (manifest.view.styles ?? []).entries()) {
-    if (style.scope === "global" && !manifest.view.capabilities?.includes("styles.global")) {
+    const required = style.scope === "global" ? "styles.global" : "styles.scoped";
+    if (!manifest.view.capabilities?.includes(required)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["view", "styles", index],
-        message: "global style requires styles.global capability"
+        message: `${style.scope} style requires ${required} capability`
       });
     }
   }

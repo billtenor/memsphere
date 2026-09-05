@@ -12,7 +12,7 @@ import {
 test("View Package installation, theme, and composition are strict global configuration", () => {
   const packagePath = resolve("fixtures/custom-view-package");
   const global = globalConfigSchema.parse({
-    view_packages: { installed: [{ path: packagePath, allow: ["styles.global"] }] },
+    view_packages: { installed: [{ path: packagePath }] },
     view_theme: { mode: "dark", selected_source: "org.example.theme" },
     view_composition: {
       packages: [{ id: "org.example.view", version: "1.0.0", enabled: true }],
@@ -44,6 +44,9 @@ test("View Package installation, theme, and composition are strict global config
 
   assert.equal(globalConfigSchema.safeParse({ view: { packages: [] } }).success, false);
   assert.equal(globalConfigSchema.safeParse({
+    view_packages: { installed: [{ path: packagePath, allow: ["styles.global"] }] }
+  }).success, false);
+  assert.equal(globalConfigSchema.safeParse({
     view_composition: { packages: [], slots: { "org.example.unknown@1:page": null } }
   }).success, false);
   assert.equal(projectConfigSchema.safeParse({
@@ -59,9 +62,9 @@ test("View Package installation, theme, and composition are strict global config
 test("View Package paths and composition digests are canonical", () => {
   const packagePath = resolve("fixtures/custom-view-package");
   assert.deepEqual(normalizeInstalledViewPackagePaths({
-    installed: [{ path: packagePath, allow: ["styles.scoped", "styles.global"] }]
+    installed: [{ path: packagePath }]
   }), {
-    installed: [{ path: packagePath, allow: ["styles.global", "styles.scoped"] }]
+    installed: [{ path: packagePath }]
   });
 
   const left = { packages: [{ enabled: true, id: "org.example.view", config: { b: 2, a: 1 } }] };

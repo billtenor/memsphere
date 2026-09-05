@@ -50,25 +50,16 @@ test("View Package resolver loads installed versions and blocks unresolved same-
   }
 });
 
-test("global style capability requires the installed Package grant", async () => {
-  const root = await mkdtemp(join(tmpdir(), "memsphere-view-grants-"));
+test("global style capability is declared by the Package manifest", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-view-capabilities-"));
   try {
     const packageRoot = await makePackage(root, "styled", "org.example.styled", "styled", true);
-    for (const manifest of [false, true]) {
-      for (const home of [false, true]) {
-        const source = JSON.parse(await import("node:fs/promises").then(fs => fs.readFile(join(packageRoot, "module.json"), "utf8")));
-        source.view.capabilities = manifest ? ["styles.global"] : [];
-        source.view.styles = manifest ? [{ id: "global", file: "./global.css", scope: "global" }] : [];
-        await writeFile(join(packageRoot, "module.json"), JSON.stringify(source));
-        const composition = await resolveViewPackageComposition({
-          global: { installed: [{ path: packageRoot, ...(home ? { allow: ["styles.global" as const] } : {}) }] },
-          composition: { packages: [{ id: "org.example.styled", version: "1.0.0", enabled: true }] },
-          sdkVersion: "1.0.0"
-        });
-        const allowed = composition.instances[0]?.allow.has("styles.global") ?? false;
-        assert.equal(allowed, manifest && home, `${manifest}/${home}`);
-      }
-    }
+    const composition = await resolveViewPackageComposition({
+      global: { installed: [{ path: packageRoot }] },
+      composition: { packages: [{ id: "org.example.styled", version: "1.0.0", enabled: true }] },
+      sdkVersion: "1.0.0"
+    });
+    assert.equal(composition.instances[0]?.capabilities.has("styles.global"), true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -86,11 +77,11 @@ test("global composition can select Package contributions and global styles thro
     }
     const cell = "org.memsphere.memory.page.presentation@1:page";
     const composition = await resolveViewPackageComposition({
-      global: { installed: [{ path: first, allow: ["styles.global"] }, { path: second, allow: ["styles.global"] }] },
+      global: { installed: [{ path: first }, { path: second }] },
       composition: {
         packages: [
-          { id: "org.example.first", version: "1.0.0", enabled: true, allow: ["styles.global"] },
-          { id: "org.example.second", version: "1.0.0", enabled: true, allow: ["styles.global"] }
+          { id: "org.example.first", version: "1.0.0", enabled: true },
+          { id: "org.example.second", version: "1.0.0", enabled: true }
         ],
         slots: {
           [cell]: "org.example.second:org.example.second:second",

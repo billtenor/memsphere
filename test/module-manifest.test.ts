@@ -115,6 +115,17 @@ test("Manifest accepts shareable View Package metadata and rejects unsafe global
     view: {
       entry: "./dist/index.js",
       sdk: "^1.0.0",
+      styles: [{ id: "detail", file: "./styles/detail.css", scope: "module" }]
+    }
+  }), /styles\.scoped/);
+
+  assert.throws(() => parseModuleManifest({
+    schemaVersion: 1,
+    id: "org.example.custom-view",
+    version: "1.2.3",
+    view: {
+      entry: "./dist/index.js",
+      sdk: "^1.0.0",
       contributions: [{ id: "memory-page", cell: "memory.page", priority: 1000 }]
     }
   }));

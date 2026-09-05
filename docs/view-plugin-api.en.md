@@ -714,7 +714,7 @@ The current trust model loads only code written by the user or explicitly instal
 Module Manifest, CLI SDK, server-side View API registration, configuration Schema, third-party signing, and sandboxing are outside this API document.
 # View Package API Additions (v1)
 
-- `themeRegistry` is injectable when `themeRegistryVersion: 1` is declared and the Package has an effective Theme capability.
+- `themeRegistry` is injectable when `themeRegistryVersion: 1` is declared, the Package Manifest declares the relevant Theme capability, and its theme is selected.
 - `RegisterOptions.priority` is a non-negative integer for `single`/`keyed` replacement. Host ordering uses integer tuples, never floating-point projection. Settings explicitly selects enabled candidates; unselected contributions are safely ignored at registration.
 - `portableSlots` exports four `name@1` boundaries: `org.memsphere.memory.page.presentation`, `org.memsphere.memory.detail.renderer`, `org.memsphere.run.page.presentation`, and `org.memsphere.run.artifact.renderer`.
 - `SlotRegistry.render(token, key, input)` invokes a data renderer and marks an invalid or throwing candidate abdicated before falling back.

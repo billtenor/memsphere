@@ -24,7 +24,6 @@ export type ViewPackageDiagnosticState =
   | "incompatible"
   | "duplicate_identity"
   | "missing_dependency"
-  | "capability_denied"
   | "disabled"
   | "conflicted";
 
@@ -41,14 +40,13 @@ export interface InstalledViewPackage {
   readonly root: string;
   readonly manifest: ModuleManifest;
   readonly entryPath: string;
-  readonly homeAllow: ReadonlySet<ViewPackageCapability>;
 }
 
 export interface ResolvedViewPackageInstance {
   readonly package: InstalledViewPackage;
   readonly instanceId: string;
   readonly config: Readonly<Record<string, unknown>>;
-  readonly allow: ReadonlySet<ViewPackageCapability>;
+  readonly capabilities: ReadonlySet<ViewPackageCapability>;
   readonly allowedStyleIds: ReadonlySet<string>;
   readonly contributionPolicy: {
     readonly registrations: readonly {
@@ -124,8 +122,7 @@ export async function resolveViewPackageComposition(input: {
       const packageRecord = Object.freeze({
         root,
         manifest,
-        entryPath,
-        homeAllow: new Set(record.allow ?? []) as ReadonlySet<ViewPackageCapability>
+        entryPath
       });
       identities.set(identity, packageRecord);
       installed.push(packageRecord);
@@ -155,8 +152,7 @@ export async function resolveViewPackageComposition(input: {
       config: {
         id: globalThemePackage.manifest.id,
         version: globalThemePackage.manifest.version,
-        enabled: true,
-        allow: [...globalThemePackage.homeAllow]
+        enabled: true
       },
       package: globalThemePackage,
       themeOnly: true
@@ -296,18 +292,7 @@ export async function resolveViewPackageComposition(input: {
         message: `unresolved contributions: ${[...candidate.blockedCells].sort().join(", ")}`
       });
     }
-    const declared = new Set(candidate.package.manifest.view.capabilities ?? []);
-    const allow = new Set([...candidate.package.homeAllow].filter(capability => declared.has(capability)));
-    for (const capability of declared) {
-      if (allow.has(capability)) continue;
-      diagnostics.push({
-        packageId: candidate.package.manifest.id,
-        version: candidate.package.manifest.version,
-        instanceId: candidate.instanceId,
-        state: "capability_denied",
-        message: `capability is not granted for this installed View Package: ${capability}`
-      });
-    }
+    const capabilities = new Set(candidate.package.manifest.view.capabilities ?? []) as ReadonlySet<ViewPackageCapability>;
     const configuredGlobalStyles = input.composition?.slots?.[globalStylesViewSlot];
     const hasGlobalStyleSlot = Object.prototype.hasOwnProperty.call(input.composition?.slots ?? {}, globalStylesViewSlot);
     const selectedGlobalStyles = new Set(Array.isArray(configuredGlobalStyles)
@@ -319,7 +304,7 @@ export async function resolveViewPackageComposition(input: {
       package: candidate.package,
       instanceId: candidate.instanceId,
       config: Object.freeze(structuredClone(candidate.config.config ?? {})),
-      allow,
+      capabilities,
       allowedStyleIds: new Set((candidate.package.manifest.view.styles ?? []).flatMap(style => {
         if (candidate.themeOnly) return [];
         if (style.scope === "module") return [style.id];

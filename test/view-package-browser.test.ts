@@ -21,10 +21,9 @@ test("trusted local Package replaces Memory and Run through formal composition a
   await mkdir(memoryRoot, { recursive: true });
   await mkdir(runsRoot, { recursive: true });
   await mkdir(join(projectRoot, "archives"), { recursive: true });
-  const grants = ["theme.override", "styles.scoped", "styles.global"] as const;
   await writeFile(join(home, "config.json"), JSON.stringify({
     view: { host: "127.0.0.1", port: 0 },
-    view_packages: { installed: [{ path: packageRoot, allow: grants }] },
+    view_packages: { installed: [{ path: packageRoot }] },
     view_theme: { mode: "dark", selected_source: "org.example.memsphere.custom-view:sea-glass" },
     view_composition: { packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true }] }
   }));
@@ -41,7 +40,7 @@ test("trusted local Package replaces Memory and Run through formal composition a
     language: "en", memoryRoot, runsRoot, archiveRoot: join(projectRoot, "archives"),
     debug: { agentReview: false, root: join(home, ".runtime", "debug") },
     view: { host: "127.0.0.1", port: 0 },
-    viewPackages: { installed: [{ path: packageRoot, allow: [...grants] }] },
+    viewPackages: { installed: [{ path: packageRoot }] },
     viewTheme: { mode: "dark", selected_source: "org.example.memsphere.custom-view:sea-glass" },
     viewComposition: { packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true }] },
     project: {
@@ -156,10 +155,7 @@ test("Settings completes the local Package installation and Project enablement f
     await page.goto(`${active.origin}/projects/demo/settings/packages`);
     await page.getByText("界面与主题", { exact: true }).first().waitFor();
     await page.getByText("org.example.memsphere.custom-view@1.0.0", { exact: true }).first().waitFor();
-    await page.getByText("权限设置", { exact: true }).click();
-    for (const capability of ["theme.override", "styles.scoped", "styles.global"]) {
-      await page.locator(`[data-home-view-capability="${capability}"]`).check();
-    }
+    assert.equal(await page.getByText("权限设置", { exact: true }).count(), 0);
     await page.locator('[data-select-field="view_theme.mode"]').click();
     await page.locator('[data-select-option="view_theme.mode"][data-value="dark"]').click();
     await page.locator('[data-select-field="view_theme.selected_source"]').click();
@@ -181,6 +177,10 @@ test("Settings completes the local Package installation and Project enablement f
     await page.getByText("主题配置", { exact: true }).waitFor();
     await page.getByText("界面配置", { exact: true }).waitFor();
     await page.getByText("全局样式", { exact: true }).waitFor();
+    await page.getByText("记忆模块 / 整体页面", { exact: true }).waitFor();
+    await page.getByText("记忆模块 / 详情正文", { exact: true }).waitFor();
+    await page.getByText("运行模块 / 整体页面", { exact: true }).waitFor();
+    await page.getByText("运行模块 / 产物正文", { exact: true }).waitFor();
     assert.equal(await page.locator(".settings-config-table").first().locator("tbody tr").count(), 17);
     assert.equal(await page.getByRole("button", { name: "保存", exact: true }).count(), 1);
     assert.equal(await page.locator('[data-select-field="project_view.theme"]').count(), 0);
@@ -334,7 +334,6 @@ test("global composition applies to every Project and stays frozen across disk c
   const temporary = await mkdtemp(join(tmpdir(), "memsphere-view-package-snapshot-"));
   const home = join(temporary, "home");
   const packageRoot = resolve("examples/view-packages/custom-view-showcase");
-  const grants = ["theme.override", "styles.scoped", "styles.global"] as const;
   const roots = { a: join(home, "projects", "a"), b: join(home, "projects", "b") };
   for (const [name, root] of Object.entries(roots)) {
     await mkdir(join(root, "memory"), { recursive: true });
@@ -344,7 +343,7 @@ test("global composition applies to every Project and stays frozen across disk c
   }
   await writeFile(join(home, "config.json"), JSON.stringify({
     view: { host: "127.0.0.1", port: 0 },
-    view_packages: { installed: [{ path: packageRoot, allow: grants }] },
+    view_packages: { installed: [{ path: packageRoot }] },
     view_composition: { packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: true }] }
   }));
   await writeFile(join(roots.a, "config.json"), JSON.stringify({ store: { type: "managed", branch: "master", published_revision: "test" } }));
@@ -367,7 +366,7 @@ test("global composition applies to every Project and stays frozen across disk c
 
     await writeFile(join(home, "config.json"), JSON.stringify({
       view: { host: "127.0.0.1", port: 0 },
-      view_packages: { installed: [{ path: packageRoot, allow: grants }] },
+      view_packages: { installed: [{ path: packageRoot }] },
       view_composition: { packages: [{ id: "org.example.memsphere.custom-view", version: "1.0.0", enabled: false }] }
     }));
 

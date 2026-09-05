@@ -540,7 +540,7 @@ async function handleRequest(
         id: entry.package.manifest.id,
         version: entry.package.manifest.version,
         instanceId: entry.instanceId,
-        allow: [...entry.allow],
+        capabilities: [...entry.capabilities],
         contributionPolicy: entry.contributionPolicy
       })),
       diagnostics: composition.diagnostics,
@@ -2948,7 +2948,7 @@ async function externalViewInstances(
       packageRoot: instance.package.root,
       file: instance.package.manifest.view.entry
     });
-    const capabilities = instance.allow;
+    const capabilities = instance.capabilities;
     const owner = `${instance.package.manifest.id}@${instance.package.manifest.version}:${instance.instanceId}`;
     const styles = await Promise.all((instance.package.manifest.view.styles ?? []).flatMap(style => {
       if (!instance.allowedStyleIds.has(style.id)) return [];
@@ -2957,10 +2957,13 @@ async function externalViewInstances(
       return [loadViewPackageStyle({ projectId, owner, instance, style, assets })];
     }));
     const selectedHomeTheme = config.viewTheme?.selected_source;
+    const suppliesSelectedTheme = selectedHomeTheme?.split(":")[0] === instance.package.manifest.id;
     const themes = await Promise.all((instance.package.manifest.view.themes ?? []).flatMap(theme => {
       const sourceId = `${instance.package.manifest.id}:${theme.id}`;
       const selected = sourceId === selectedHomeTheme;
-      return [loadViewPackageTheme({ projectId, sourceId, layer: VIEW_THEME_HOME_LAYER, selected, instance, file: theme.file, assets })];
+      return selected
+        ? [loadViewPackageTheme({ projectId, sourceId, layer: VIEW_THEME_HOME_LAYER, selected, instance, file: theme.file, assets })]
+        : [];
     }));
     return Object.freeze({
       pluginPath: `/assets/view-packages/${encodeURIComponent(projectId)}/${entry.key}`,
@@ -2972,8 +2975,8 @@ async function externalViewInstances(
         blockedCells: instance.contributionPolicy.blockedCells
       }),
       themeOperations: Object.freeze([
-        ...(capabilities.has("theme.register") ? ["register" as const] : []),
-        ...(capabilities.has("theme.override") ? ["override" as const] : [])
+        ...(suppliesSelectedTheme && capabilities.has("theme.register") ? ["register" as const] : []),
+        ...(suppliesSelectedTheme && capabilities.has("theme.override") ? ["override" as const] : [])
       ]),
       allowedServices: Object.freeze([
         "slots" as const,
@@ -2981,7 +2984,7 @@ async function externalViewInstances(
         "presentation" as const,
         "ui" as const,
         ...(
-          capabilities.has("theme.register") || capabilities.has("theme.override")
+          suppliesSelectedTheme && (capabilities.has("theme.register") || capabilities.has("theme.override"))
             ? ["themeRegistry" as const]
             : []
         )
@@ -3036,7 +3039,7 @@ async function loadViewPackageTheme(input: {
   const complete = value.complete === true;
   validateViewThemePalette({ light, dark } as Parameters<typeof validateViewThemePalette>[0], complete);
   const required = complete ? "theme.register" as const : "theme.override" as const;
-  if (!input.instance.allow.has(required)) throw new Error(`Theme contribution lacks effective ${required} capability: ${input.sourceId}`);
+  if (!input.instance.capabilities.has(required)) throw new Error(`Theme contribution lacks declared ${required} capability: ${input.sourceId}`);
   return Object.freeze({
     sourceId: input.sourceId,
     tokens: Object.freeze({ light: Object.freeze({ ...light }), dark: Object.freeze({ ...dark }) }),

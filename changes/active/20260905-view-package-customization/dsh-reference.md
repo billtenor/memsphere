@@ -20,7 +20,7 @@
 - DSH 的自由组合进入 Memsphere 现有 ViewHost transaction/lifecycle，而非另建平行 Runtime。
 - replacement priority 与现有 list `order` 分开；list 继续表示并列展示次序。
 - 外部包首版只替换官方公开 presentation cell，不获得顶层 Route 与 Home entry。
-- 全局样式不是无条件注入，必须经 Manifest + Home + Project 三层授权和静态安全检查。
+- 全局样式不是无条件注入：Package 必须在 Manifest 声明，用户必须在全局样式 Slot 中选择，并通过静态安全检查。
 - 跨 bundle Slot 不靠重复构造同名 token；由 owner 声明，dependency 向 Host resolve 真实 token 与 validator。
 - 配置保存不热替换运行实例；进程启动快照保证一致性，显式重启后原子生效。
 
@@ -28,7 +28,7 @@
 
 - 不引入 Cordis、React 或 DSH 自身包管理器。
 - 不把本地包安装扩展成远程下载、Registry、自动升级或官方认证协议。
-- 不把可信本地 JavaScript 描述为安全沙箱；本轮安全边界聚焦能力裁剪、CSS/资产服务和故障隔离。
+- 不把可信本地 JavaScript 描述为安全沙箱；本轮安全边界聚焦显式内容选择、CSS/资产服务和故障隔离。
 - 不允许外部 renderer 接管 Memory/Run 业务状态机、Review 投票流程或私有 API/DOM。
 
 ## 可分享与官方化演进
