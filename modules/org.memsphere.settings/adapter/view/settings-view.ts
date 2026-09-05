@@ -449,6 +449,9 @@ class SettingsApplication {
         const active = new Set(Array.isArray(configured) ? configured : configured ? [configured] : configured === undefined ? defaults : []);
         return `<tr><td><strong>${escapeHtml(label)}</strong><small>${escapeHtml(help)}</small></td><td>可多选</td><td>${multiSelectField(cell, `选择${label}使用的内容`, candidates, active)}</td></tr>`;
       }
+      if (!candidates.length) {
+        return `<tr><td><strong>${escapeHtml(label)}</strong><small>${escapeHtml(help)}</small></td><td>单选</td><td>${emptyExtensionSelection()}</td></tr>`;
+      }
       const options: Array<[string, string]> = [["", "使用系统默认"], ...candidates.map(candidate => [candidate.identity, candidate.label] as [string, string])];
       const configured = view.slots?.[cell];
       const current = Object.prototype.hasOwnProperty.call(view.slots ?? {}, cell) ? (typeof configured === "string" ? configured : "") : legacy;
@@ -1089,9 +1092,13 @@ function multiSelectField(
   options: Array<{ identity: string; label: string; packageIdentity: string }>,
   selected: ReadonlySet<string>
 ): string {
-  if (!options.length) return `<div class="settings-select settings-select-disabled muted">暂无扩展内容</div>`;
+  if (!options.length) return emptyExtensionSelection();
   const selectedLabels = options.filter(option => selected.has(option.identity)).map(option => option.label);
   return `<details class="settings-multiselect" data-multiselect-field="${escapeAttr(path)}"><summary class="settings-select settings-multiselect-trigger" aria-label="${escapeAttr(label)}"><span data-multiselect-summary title="${escapeAttr(selectedLabels.join("、"))}">${escapeHtml(multiSelectSummary(selectedLabels))}</span><span class="settings-select-caret" aria-hidden="true">⌄</span></summary><div class="settings-multiselect-menu" role="listbox" aria-label="${escapeAttr(label)}" aria-multiselectable="true">${options.map(option => `<label class="settings-multiselect-option" role="option" aria-selected="${String(selected.has(option.identity))}"><input type="checkbox" data-project-view-slot-list="${escapeAttr(path)}" data-value="${escapeAttr(option.identity)}" data-label="${escapeAttr(option.label)}" data-package-identity="${escapeAttr(option.packageIdentity)}"${selected.has(option.identity) ? " checked" : ""}><span>${escapeHtml(option.label)}</span></label>`).join("")}</div></details>`;
+}
+
+function emptyExtensionSelection(): string {
+  return `<div class="settings-select settings-select-disabled muted">暂无可选扩展，使用系统默认</div>`;
 }
 
 function multiSelectSummary(labels: readonly string[]): string {

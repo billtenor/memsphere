@@ -182,6 +182,8 @@ test("Settings completes the local Package installation and Project enablement f
     await page.getByText("运行模块 / 整体页面", { exact: true }).waitFor();
     await page.getByText("运行模块 / 产物正文", { exact: true }).waitFor();
     assert.equal(await page.locator(".settings-config-table").first().locator("tbody tr").count(), 17);
+    assert.equal(await page.getByText("暂无可选扩展，使用系统默认", { exact: true }).count(), 12);
+    assert.equal(await page.locator(".settings-select-disabled").count(), 12);
     assert.equal(await page.getByRole("button", { name: "保存", exact: true }).count(), 1);
     assert.equal(await page.locator('[data-select-field="project_view.theme"]').count(), 0);
     assert.equal(await page.getByText(/^[123]\. /).count(), 0);
