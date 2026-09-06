@@ -66,6 +66,13 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
     await page.goto(`${origin}/tasks/run-demo`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Demo Run", level: 1 }).waitFor();
     assert.match(await page.locator(".run-workspace").innerText(), /Inspect the result/);
+    assert.equal(await page.locator("details.run-collapsible[open]").count(), 0, "Run fields are collapsed by default");
+    const standaloneArtifact = page.locator("details.run-artifact").first();
+    assert.equal(await standaloneArtifact.getAttribute("open"), null, "Run artifacts are collapsed by default");
+    assert.equal(await standaloneArtifact.locator(".artifact-review-artifact-content").isVisible(), false);
+    await page.getByRole("button", { name: "Expand all", exact: true }).click();
+    assert.equal(await page.locator("details.run-collapsible:not([open])").count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Collapse all", exact: true }).count(), 1);
     assert.equal(await page.locator(".mem-view-list-item.active").count(), 1);
     assert.equal(await page.locator(".mem-view-list-item-row:has(.mem-view-list-item.active) .mem-view-list-item-actions").count(), 0);
     assert.equal(await page.locator(".flow-item.branch").count(), 2);

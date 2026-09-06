@@ -39,14 +39,14 @@ test("Memory builtin independently registers its route pages and renders Memory 
     if (url.pathname === viewRuntimeBundlePath) return send(response, 200, "text/javascript", runtime);
     if (url.pathname === "/api/projects") return json(response, { current: "demo", projects: [{ name: "demo" }] });
     if (url.pathname === "/api/changes") return json(response, { changes: [
-      { id: "change-related", status: "active", memoryPaths: ["concepts/demo-memory.yaml"] },
+      { id: "change-related", status: "active", memoryPaths: ["statements/demo-memory.yaml"] },
       { id: "change-unrelated", status: "active", memoryPaths: ["statements/not-installed.yaml"] }
     ] });
     if (url.pathname === "/api/memories") return json(response, {
-      memories: [{ id: "concepts/demo-memory", kind: "concepts", path: "concepts/demo-memory.yaml", names: ["demo-memory"], system: false }]
+      memories: [{ id: "statements/demo-memory", kind: "statements", path: "statements/demo-memory.yaml", names: ["demo-memory"], system: false }]
     });
-    if (url.pathname === "/api/memories/concepts/demo-memory") return json(response, {
-      memory: { id: "concepts/demo-memory", kind: "concepts", path: "concepts/demo-memory.yaml", entity: { names: ["Demo Memory"], defines: ["Independent builtin detail"] } }
+    if (url.pathname === "/api/memories/statements/demo-memory") return json(response, {
+      memory: { id: "statements/demo-memory", kind: "statements", path: "statements/demo-memory.yaml", entity: { names: ["Demo Memory"], defines: ["Independent builtin detail"], sections: [{ names: ["nested", "Nested section"], asserts: ["Nested rule"] }] } }
     });
     return send(response, 200, "text/html", renderViewHostHtml("en", instances));
   });
@@ -54,10 +54,23 @@ test("Memory builtin independently registers its route pages and renders Memory 
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
-    await page.goto(`${origin}/memories/concepts/demo-memory`, { waitUntil: "networkidle" });
+    await page.goto(`${origin}/memories/statements/demo-memory`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Demo Memory", exact: true, level: 1 }).waitFor();
     await page.locator("details.memory-list-block").filter({ hasText: "Defines" }).locator(":scope > summary").click();
     assert.match(await page.locator(".memory-workspace").innerText(), /Independent builtin detail/);
+    const sectionsList = page.locator("details.memory-sections-block");
+    assert.equal(await sectionsList.getAttribute("open"), null);
+    assert.equal(await sectionsList.locator(":scope > summary .memory-list-count").innerText(), "1");
+    assert.equal(await page.getByText("Nested section", { exact: true }).isVisible(), false);
+    await sectionsList.locator(":scope > summary").click();
+    assert.equal(await page.getByText("Nested section", { exact: true }).isVisible(), true);
+    assert.equal(await page.getByText("!statement", { exact: true }).count(), 0);
+    const disclosureToggle = page.getByRole("button", { name: "Expand all", exact: true });
+    await disclosureToggle.click();
+    assert.equal(await page.locator("details.memory-collapsible-list:not([open])").count(), 0);
+    assert.equal(await page.locator(".memory-statement-root .memory-section:not(.open)").count(), 0);
+    await page.getByRole("button", { name: "Collapse all", exact: true }).click();
+    assert.equal(await page.locator("details.memory-collapsible-list[open]").count(), 0);
     assert.equal(await page.locator(".memory-workspace .memory-inline-plus").count(), 0, "published Memory detail must not expose ChangeSet comment controls");
     assert.equal(await page.locator(".mem-view-content-list").count(), 1, "the list surface uses the public Content List primitive");
     assert.equal(await page.locator(".memory-detail-module").count(), 1, "the domain detail remains an independent Module surface");
@@ -469,7 +482,7 @@ test("Memory builtin keeps Procedure content structured instead of exposing obje
     const page = await browser.newPage();
     await page.goto(`${origin}/memories/procedures/demo-flow`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Demo Flow", exact: true, level: 1 }).waitFor();
-    const namesList = page.locator("details.memory-list-block").filter({ hasText: "Names" }).first();
+    const namesList = page.locator("details.memory-list-block").filter({ hasText: "Aliases" }).first();
     assert.equal(await namesList.getAttribute("open"), null);
     assert.equal(await namesList.locator(":scope > summary .memory-list-count").innerText(), "2");
     assert.equal(await namesList.locator(":scope > .memory-collapsible-body").isVisible(), false);

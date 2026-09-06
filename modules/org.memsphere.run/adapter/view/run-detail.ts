@@ -24,6 +24,7 @@ export function createRunDetailState(): RunDetailState {
 
 export function renderRunDetail(run: Json, options: RunDetailOptions): HTMLElement {
   const wrap = document.createElement("div");
+  wrap.className = "run-detail-content";
   const labels = createLabels(options.locale);
   wrap.append(renderRunMeta(run, options, labels));
 
@@ -55,6 +56,7 @@ export function renderRunDetail(run: Json, options: RunDetailOptions): HTMLEleme
   } else {
     wrap.append(renderArtifactCollection(run.events || [], labels.artifacts, options, run, labels));
   }
+  appendDisclosureToggle(wrap, labels);
   return wrap;
 }
 
@@ -153,15 +155,15 @@ function renderBindings(run: Json, options: RunDetailOptions, labels: Labels): H
 
 function renderFlowStep(step: Json, events: Map<string, Json>, active: Json | null, run: Json, options: RunDetailOptions, labels: Labels): HTMLElement {
   if (step.kind === "call") return renderCall(step, active, run, labels);
-  const item = document.createElement("article");
+  const item = document.createElement("details");
   const current = active?.id === step.id;
   const kind = step.kind === "branch" || step.kind === "loop" ? " branch" : "";
-  item.className = `run-step flow-item${kind}${current ? " current task-step" : ""}`;
+  item.className = `run-step run-collapsible flow-item${kind}${current ? " current task-step" : ""}`;
   item.dataset.stepId = step.id;
   if (current) { item.dataset.currentTaskStep = "true"; item.id = `task-step-${safeId(run.id)}-${safeId(step.id)}`; }
   const event = events.get(step.id);
-  const header = document.createElement("div");
-  header.className = "flow-head";
+  const header = document.createElement("summary");
+  header.className = "flow-head run-disclosure-summary";
   const tag = document.createElement("span");
   tag.className = "flow-label";
   tag.textContent = step.kind === "branch" ? labels.if : step.kind === "loop" ? labels.while : labels.step;
@@ -173,13 +175,15 @@ function renderFlowStep(step: Json, events: Map<string, Json>, active: Json | nu
   meta.append(pill(stepStatus(step, event, active, run), current ? "running" : event ? "done" : ""));
   appendArtifactContract(meta, step, labels);
   header.append(tag, action, meta);
-  item.append(header);
-  appendRuleContracts(item, step, `run:${run.id}:step:${step.id}`, options, labels);
+  const body = document.createElement("div");
+  body.className = "run-disclosure-body";
+  item.append(header, body);
+  appendRuleContracts(body, step, `run:${run.id}:step:${step.id}`, options, labels);
   const schemaWriting = renderSchemaWriting(run, step, options, labels);
-  if (schemaWriting) item.append(schemaWriting);
-  if (event?.artifact) item.append(renderArtifactResult(event, run, options, labels));
+  if (schemaWriting) body.append(schemaWriting);
+  if (event?.artifact) body.append(renderArtifactResult(event, run, options, labels));
   if (step.kind === "branch" && step.branches) {
-    item.append(renderChildren(step.branches.truthy || [], events, active, run, options, labels));
+    body.append(renderChildren(step.branches.truthy || [], events, active, run, options, labels));
     if (step.branches.falsy?.length) {
       const otherwise = document.createElement("div");
       otherwise.className = "flow-else";
@@ -187,17 +191,17 @@ function renderFlowStep(step: Json, events: Map<string, Json>, active: Json | nu
       elseLabel.className = "flow-label";
       elseLabel.textContent = labels.else;
       otherwise.append(elseLabel, renderChildren(step.branches.falsy, events, active, run, options, labels));
-      item.append(otherwise);
+      body.append(otherwise);
     }
   }
-  if (step.kind === "loop" && step.loop) item.append(renderChildren(step.loop.body || [], events, active, run, options, labels));
+  if (step.kind === "loop" && step.loop) body.append(renderChildren(step.loop.body || [], events, active, run, options, labels));
   return item;
 }
 
 function renderCall(step: Json, active: Json | null, run: Json, labels: Labels): HTMLElement {
-  const item = document.createElement("article");
+  const item = document.createElement("details");
   const current = active?.id === step.id;
-  item.className = `run-step flow-item call${current ? " current task-step" : ""}`;
+  item.className = `run-step run-collapsible flow-item call${current ? " current task-step" : ""}`;
   item.dataset.stepId = step.id;
   if (current) item.dataset.currentTaskStep = "true";
   const label = document.createElement("span");
@@ -207,7 +211,10 @@ function renderCall(step: Json, active: Json | null, run: Json, labels: Labels):
   link.className = "call-link";
   link.href = `/memories/procedures/${encodeURIComponent(String(step.target || ""))}`;
   link.textContent = step.target || step.instruction || step.id;
-  item.append(label, link, pill(stepStatus(step, undefined, active, run), current ? "running" : ""));
+  const summary = document.createElement("summary");
+  summary.className = "run-disclosure-summary run-call-summary";
+  summary.append(label, link, pill(stepStatus(step, undefined, active, run), current ? "running" : ""));
+  item.append(summary);
   return item;
 }
 
@@ -232,8 +239,8 @@ function renderArtifactCollection(events: Json[], heading: string, options: RunD
 }
 
 function renderArtifactResult(event: Json, run: Json, options: RunDetailOptions, labels: Labels, standalone = false): HTMLElement {
-  const card = document.createElement(standalone ? "article" : "div");
-  card.className = standalone ? "run-artifact task-result" : "task-result";
+  const card = document.createElement("details");
+  card.className = `${standalone ? "run-artifact " : ""}run-collapsible task-result`;
   const artifact = event.artifact || {};
   const title = document.createElement("h3");
   title.textContent = artifact.name || event.stepId || labels.artifact;
@@ -265,11 +272,17 @@ function renderArtifactResult(event: Json, run: Json, options: RunDetailOptions,
     download: () => downloadArtifact(artifact, artifact.name || event.stepId || "artifact"),
     defaultRender: () => renderArtifactValue(artifact)
   };
-  card.append(title, meta, options.renderArtifact(Object.freeze(presentation)));
+  const summary = document.createElement("summary");
+  summary.className = "run-disclosure-summary run-artifact-summary";
+  summary.append(title, meta);
+  const body = document.createElement("div");
+  body.className = "run-disclosure-body";
+  body.append(options.renderArtifact(Object.freeze(presentation)));
+  card.append(summary, body);
   if (review?.id) {
     const open = options.ui.button({ label: { text: labels.review }, run: () => options.openReview(run.id, review.id) });
     open.dataset.artifactReviewId = review.id;
-    card.append(open);
+    body.append(open);
   }
   return card;
 }
@@ -357,11 +370,13 @@ function appendSimpleRuleGroup(target: HTMLElement, entries: unknown[], heading:
 }
 
 function renderEffectiveRuleTree(tree: Json, headingText: string, scope: string, options: RunDetailOptions, labels: Labels): HTMLElement {
-  const wrap = document.createElement("div");
-  wrap.className = "effective-rule-tree";
-  const heading = document.createElement("div"); heading.className = "block-title"; heading.textContent = headingText; wrap.append(heading);
-  appendEffectiveEntries(wrap, effectiveEntries(tree), scope, options, labels);
-  for (const [index, section] of (tree.sections || []).entries()) wrap.append(renderEffectiveSection(section, `${scope}:section:${index}`, options, labels));
+  const wrap = document.createElement("details");
+  wrap.className = "effective-rule-tree run-collapsible";
+  const heading = document.createElement("summary"); heading.className = "block-title run-disclosure-summary"; heading.textContent = headingText; wrap.append(heading);
+  const body = document.createElement("div"); body.className = "run-disclosure-body";
+  appendEffectiveEntries(body, effectiveEntries(tree), scope, options, labels);
+  for (const [index, section] of (tree.sections || []).entries()) body.append(renderEffectiveSection(section, `${scope}:section:${index}`, options, labels));
+  wrap.append(body);
   return wrap;
 }
 
@@ -414,20 +429,21 @@ function ruleToggle(label: string, scope: string, body: HTMLElement, options: Ru
 function renderSchemaWriting(run: Json, step: Json, options: RunDetailOptions, labels: Labels): HTMLElement | null {
   const snapshot = run.schemaWriting;
   if (!snapshot || snapshot.parentStepId !== step.id) return null;
-  const wrap = document.createElement("div"); wrap.className = "schema-writing";
-  const title = document.createElement("div"); title.className = "block-title"; title.textContent = labels.schemaWriting; wrap.append(title);
+  const wrap = document.createElement("details"); wrap.className = "schema-writing run-collapsible";
+  const title = document.createElement("summary"); title.className = "block-title run-disclosure-summary"; title.textContent = labels.schemaWriting; wrap.append(title);
+  const body = document.createElement("div"); body.className = "run-disclosure-body";
   const progress = document.createElement("div"); progress.className = "schema-writing-progress run-meta";
   progress.append(pill(`${labels.progress} ${snapshot.progress?.completed || 0}/${snapshot.progress?.total || 0}`), pill(`${labels.remaining} ${snapshot.progress?.remaining || 0}`));
   if (snapshot.currentField?.path) progress.append(pill(String(snapshot.currentField.path), "strong"));
   if (snapshot.draft?.status === "awaiting_finalization") progress.append(pill(labels.globalAdjustment, "warn"));
-  wrap.append(progress);
+  body.append(progress);
   for (const [index, source] of (snapshot.currentField?.sources || []).entries()) {
     const sourceElement = document.createElement("div"); sourceElement.className = "schema-writing-source";
     const sourceTitle = document.createElement("b"); sourceTitle.textContent = `${labels.constraintSource} · ${source.path}`; sourceElement.append(sourceTitle);
     if (source.defines?.length) sourceElement.append(renderSimpleRules(source.defines, labels.defines));
     if (source.assertTree) sourceElement.append(renderEffectiveRuleTree(source.assertTree, labels.asserts, `run:${run.id}:schema:${step.id}:${index}:asserts`, options, labels));
     if (source.suggestTree) sourceElement.append(renderEffectiveRuleTree(source.suggestTree, labels.suggests, `run:${run.id}:schema:${step.id}:${index}:suggests`, options, labels));
-    wrap.append(sourceElement);
+    body.append(sourceElement);
   }
   if (snapshot.draft) {
     const preview = document.createElement("details"); preview.className = "schema-draft-preview"; preview.open = snapshot.draft.status === "awaiting_finalization";
@@ -438,9 +454,28 @@ function renderSchemaWriting(run: Json, step: Json, options: RunDetailOptions, l
     else if (snapshot.draft.contentError) { const error = document.createElement("div"); error.className = "muted"; error.textContent = snapshot.draft.contentError; preview.append(error); }
     if (snapshot.readOnly) { const notice = document.createElement("div"); notice.className = "muted"; notice.textContent = labels.readOnlyDraft; preview.append(notice); }
     else if (snapshot.draft.status === "awaiting_finalization") { const command = document.createElement("pre"); command.className = "run-pre"; command.textContent = `memsphere run report --run ${shellQuote(run.id)} --artifact-file ${shellQuote(snapshot.draft.filePath)}`; preview.append(command); }
-    wrap.append(preview);
+    body.append(preview);
   }
+  wrap.append(body);
   return wrap;
+}
+
+function appendDisclosureToggle(wrap: HTMLElement, labels: Labels): void {
+  const disclosures = () => [...wrap.querySelectorAll<HTMLDetailsElement>("details.run-collapsible")];
+  if (!disclosures().length) return;
+  let control!: HTMLButtonElement;
+  const update = () => { control.textContent = disclosures().some(item => !item.open) ? labels.expandAll : labels.collapseAll; };
+  control = document.createElement("button");
+  control.type = "button";
+  control.className = "run-disclosure-toggle-all";
+  control.addEventListener("click", () => {
+    const expand = disclosures().some(item => !item.open);
+    disclosures().forEach(item => { item.open = expand; });
+    update();
+  });
+  wrap.addEventListener("toggle", update, true);
+  update();
+  wrap.prepend(control);
 }
 
 export function currentRunStep(run: Json): Json | null {
@@ -483,14 +518,15 @@ interface Labels {
   stopped: string; notStarted: string; validation: string; final: string; reviewer: string; schema: string; inlineSchema: string;
   referencedFrom: string; section: string; defines: string; rules: string; schemaWriting: string; progress: string;
   remaining: string; globalAdjustment: string; constraintSource: string; managedDraft: string; readOnlyDraft: string;
+  expandAll: string; collapseAll: string;
   status: Record<string, string>;
 }
 
 function createLabels(locale = ""): Labels {
   const en = locale.startsWith("en");
   return en ? {
-    procedure:"Procedure",activeFrames:"Active frames",retainedFrames:"Retained frames",artifacts:"Artifacts",artifact:"Artifact",updated:"Updated",legacyReadOnly:"Legacy · Read-only",abandonedAt:"Abandoned",review:"Artifact review",jumpCurrent:"Jump to current step",bindings:"Runtime review bindings",reviewScopes:"Review scopes",skip:"Skip future reviews",save:"Update binding",asserts:"Requirements",suggests:"Suggestions",flow:"Flow",finalArtifacts:"Final artifacts",noArtifacts:"No artifacts",if:"If",while:"While",else:"Else",step:"Step",call:"Call",noSteps:"No steps",completed:"Completed",current:"Current step",stopped:"Stopped",notStarted:"Not started",validation:"Validation",final:"Final",reviewer:"Reviewer",schema:"Schema",inlineSchema:"Inline Schema",referencedFrom:"Referenced from",section:"Section",defines:"Definitions",rules:"Rules",schemaWriting:"Schema writing",progress:"Progress",remaining:"Remaining",globalAdjustment:"Global adjustment",constraintSource:"Constraint source",managedDraft:"Managed draft",readOnlyDraft:"This draft is read-only",status:{running:"Running",done:"Done",abandoned:"Abandoned"}
+    procedure:"Procedure",activeFrames:"Active frames",retainedFrames:"Retained frames",artifacts:"Artifacts",artifact:"Artifact",updated:"Updated",legacyReadOnly:"Legacy · Read-only",abandonedAt:"Abandoned",review:"Artifact review",jumpCurrent:"Jump to current step",bindings:"Runtime review bindings",reviewScopes:"Review scopes",skip:"Skip future reviews",save:"Update binding",asserts:"Requirements",suggests:"Suggestions",flow:"Flow",finalArtifacts:"Final artifacts",noArtifacts:"No artifacts",if:"If",while:"While",else:"Else",step:"Step",call:"Call",noSteps:"No steps",completed:"Completed",current:"Current step",stopped:"Stopped",notStarted:"Not started",validation:"Validation",final:"Final",reviewer:"Reviewer",schema:"Schema",inlineSchema:"Inline Schema",referencedFrom:"Referenced from",section:"Section",defines:"Definitions",rules:"Rules",schemaWriting:"Schema writing",progress:"Progress",remaining:"Remaining",globalAdjustment:"Global adjustment",constraintSource:"Constraint source",managedDraft:"Managed draft",readOnlyDraft:"This draft is read-only",expandAll:"Expand all",collapseAll:"Collapse all",status:{running:"Running",done:"Done",abandoned:"Abandoned"}
   } : {
-    procedure:"流程",activeFrames:"活动帧",retainedFrames:"保留帧",artifacts:"产物",artifact:"产物",updated:"更新时间",legacyReadOnly:"旧版 · 只读",abandonedAt:"废弃于",review:"产物评审",jumpCurrent:"跳到当前步骤",bindings:"运行时评审绑定",reviewScopes:"评审范围",skip:"跳过后续评审",save:"更新绑定",asserts:"规则",suggests:"建议",flow:"执行流程",finalArtifacts:"最终产物",noArtifacts:"暂无产物",if:"如果",while:"循环",else:"否则",step:"步骤",call:"调用流程",noSteps:"没有步骤",completed:"已完成",current:"当前步骤",stopped:"已停止",notStarted:"未开始",validation:"契约校验",final:"最终",reviewer:"评审者",schema:"图式",inlineSchema:"内联图式",referencedFrom:"引用自",section:"章节",defines:"定义",rules:"规则",schemaWriting:"Schema 填写",progress:"进度",remaining:"剩余",globalAdjustment:"全局调整",constraintSource:"约束来源",managedDraft:"受管草稿",readOnlyDraft:"该草稿只读",status:{running:"运行中",done:"已完成",abandoned:"已废弃"}
+    procedure:"流程",activeFrames:"活动帧",retainedFrames:"保留帧",artifacts:"产物",artifact:"产物",updated:"更新时间",legacyReadOnly:"旧版 · 只读",abandonedAt:"废弃于",review:"产物评审",jumpCurrent:"跳到当前步骤",bindings:"运行时评审绑定",reviewScopes:"评审范围",skip:"跳过后续评审",save:"更新绑定",asserts:"规则",suggests:"建议",flow:"执行流程",finalArtifacts:"最终产物",noArtifacts:"暂无产物",if:"如果",while:"循环",else:"否则",step:"步骤",call:"调用流程",noSteps:"没有步骤",completed:"已完成",current:"当前步骤",stopped:"已停止",notStarted:"未开始",validation:"契约校验",final:"最终",reviewer:"评审者",schema:"图式",inlineSchema:"内联图式",referencedFrom:"引用自",section:"章节",defines:"定义",rules:"规则",schemaWriting:"Schema 填写",progress:"进度",remaining:"剩余",globalAdjustment:"全局调整",constraintSource:"约束来源",managedDraft:"受管草稿",readOnlyDraft:"该草稿只读",expandAll:"展开全部",collapseAll:"收起全部",status:{running:"运行中",done:"已完成",abandoned:"已废弃"}
   };
 }

@@ -146,7 +146,7 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
   "markdown": "文档",
   "effectiveRuleCount": "条生效规则",
   "referenceNotFound": "引用不存在",
-  "names": "名称",
+  "names": "别名",
   "defines": "定义",
   "asserts": "必须遵守",
   "suggests": "建议遵守",
@@ -165,7 +165,9 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
   "final": "最终产物",
   "inlineSchema": "产物格式与结构",
   "review": "评审",
-  "reviewerCount": "评审人：{count}"
+  "reviewerCount": "评审人：{count}",
+  "expandAll": "展开全部",
+  "collapseAll": "收起全部"
 });
 
 const englishFallbackMessages: Readonly<Record<string, string>> = Object.freeze({
@@ -193,11 +195,11 @@ const englishFallbackMessages: Readonly<Record<string, string>> = Object.freeze(
   "change.deletedCandidateTitle": "Not present after deletion", "change.deletedCandidateHint": "This Memory is absent from the candidate version.",
   "change.beforeFullContent": "Full content before deletion",
   "change.store": "Store: {value}", "change.validationFailed": "Validation failed",
-  names: "Names", defines: "Defines", asserts: "Required rules", suggests: "Suggested rules",
+  names: "Aliases", defines: "Defines", asserts: "Required rules", suggests: "Suggested rules",
   goals: "Goals", flow: "Flow", format: "Format", repeat: "Repeat", unbounded: "Unbounded",
   sections: "Sections", call: "Call", if: "If", while: "While", else: "Else", step: "Step",
   artifact: "Artifact", final: "Final", inlineSchema: "Artifact format & structure", review: "Review",
-  reviewerCount: "Reviewers: {count}"
+  reviewerCount: "Reviewers: {count}", expandAll: "Expand all", collapseAll: "Collapse all"
 });
 
 const memoryStyles = `
@@ -299,6 +301,10 @@ const memoryStyles = `
   .memory-list-chevron { flex:none; color:var(--muted); font-size:15px; line-height:1; transform:rotate(90deg); transition:transform .12s ease; }
   .memory-collapsible-list:not([open])>summary .memory-list-chevron { transform:rotate(0); }
   .memory-list-count { flex:none; color:var(--muted); font-size:var(--memory-page-text-meta); font-weight:500; line-height:var(--memory-page-line-compact); }
+  .memory-statement-root { padding-top:34px; }
+  .memory-disclosure-toggle-all { position:absolute; z-index:2; top:7px; right:10px; border:0; border-radius:5px; background:transparent; color:var(--muted); padding:4px 7px; font-size:var(--memory-page-text-label); }
+  .memory-disclosure-toggle-all:hover { background:var(--soft); color:var(--text); }
+  .memory-disclosure-toggle-all:focus-visible { outline:2px solid rgba(40,108,103,.18); outline-offset:1px; }
   .text-list { display:grid; gap:var(--memory-page-space-line); margin:0; padding-left:20px; }
   .text-list>li { padding:2px 4px; white-space:pre-wrap; overflow-wrap:anywhere; }
   .memory-child-stack { display:grid; gap:var(--memory-page-space-line); }
@@ -2501,18 +2507,20 @@ function renderSimpleSchemaField(name: string, path: string, t: (key: string) =>
 
 function renderStatement(node: JsonRecord, depth: number, fallback: string, path: string, t: (key: string) => string, comment?: CommentCallback, options: RenderOptions = {}): HTMLElement {
   const title = depth === 0 ? "" : memoryName(node as MemorySummary) || fallback;
-  const section = nodeSection(title, path, node, comment, ["!statement"], depth < 2);
+  const section = nodeSection(title, path, node, comment, [], depth < 2);
   const body = sectionBody(section);
   if (depth === 0) appendStringList(body, "names", array(node.names), path, comment, t);
   appendStringList(body, "defines", array(node.defines), path, comment, t);
   for (const key of ["asserts", "suggests"] as const) appendRuleList(body, key, array(node[key]), node.effectiveRules as JsonRecord | undefined, path, t, comment, options);
   const sections = array(node.sections);
   if (sections.length) {
-    body.append(blockTitle(t("sections")));
+    const { block, body: sectionsBody } = collapsibleList(t("sections"), sections.length, "memory-sections-block");
     const children = el("div", "memory-child-stack");
     sections.forEach((child, index) => { if (child && typeof child === "object") children.append(renderStatement(child as JsonRecord, depth + 1, t("statements"), `${path}.sections[${index + 1}]`, t, comment, options)); });
-    body.append(children);
+    sectionsBody.append(children);
+    body.append(block);
   }
+  if (depth === 0) appendDisclosureToggle(section, t);
   return section;
 }
 
@@ -2630,12 +2638,30 @@ function renderGeneric(node: JsonRecord, path: string, t: (key: string) => strin
 type CommentCallback = (target: string, snapshot: string, location: unknown) => void;
 function nodeSection(title: string, path: string, snapshot: unknown, comment?: CommentCallback, badges: string[] = [], open = true): HTMLElement {
   const section = el("section", `memory-section memory-node memory-commentable${open ? " open" : ""}`); section.dataset.anchor = path;
-  const header = button("", "memory-section-header", () => section.classList.toggle("open"));
+  const header = button("", "memory-section-header", () => { section.classList.toggle("open"); section.dispatchEvent(new CustomEvent("memory-disclosure-change", { bubbles: true })); });
   header.append(el("span", "memory-chevron", "›"), el("span", "memory-node-title", title));
   const badgeWrap = el("span", "node-badges"); badges.filter(Boolean).forEach(value => badgeWrap.append(el("span", "memory-pill", value))); header.append(badgeWrap);
   section.append(header, el("div", "memory-section-body"));
   if (comment) section.append(plusButton(() => comment(path, scalar(snapshot), { anchor: path })));
   return section;
+}
+function appendDisclosureToggle(section: HTMLElement, t: (key: string) => string): void {
+  section.classList.add("memory-statement-root");
+  const details = () => [...section.querySelectorAll<HTMLDetailsElement>("details.memory-collapsible-list")];
+  const nodes = () => [...section.querySelectorAll<HTMLElement>(".memory-section")];
+  const hasCollapsed = () => details().some(item => !item.open) || nodes().some(item => !item.classList.contains("open"));
+  let control!: HTMLButtonElement;
+  const update = () => { control.textContent = t(hasCollapsed() ? "expandAll" : "collapseAll"); };
+  control = button("", "memory-disclosure-toggle-all", () => {
+    const expand = hasCollapsed();
+    details().forEach(item => { item.open = expand; });
+    nodes().forEach(item => item.classList.toggle("open", expand));
+    update();
+  });
+  section.addEventListener("toggle", update, true);
+  section.addEventListener("memory-disclosure-change", update);
+  update();
+  section.append(control);
 }
 function sectionBody(section: HTMLElement): HTMLElement { return section.querySelector<HTMLElement>(":scope > .memory-section-body")!; }
 function blockTitle(value: string): HTMLElement { return el("div", "memory-block-title", value); }
