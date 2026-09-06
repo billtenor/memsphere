@@ -1828,6 +1828,8 @@ class MemoryApplication {
     composer.append(field.root, actions);
     if (host.matches(".memory-inline-diff-line, .memory-flow-head")) host.after(composer);
     else host.append(composer);
+    const collapsedList = composer.closest<HTMLDetailsElement>("details.memory-collapsible-list");
+    if (collapsedList) collapsedList.open = true;
     queueMicrotask(() => { textarea.focus({ preventScroll: true }); composer.scrollIntoView({ block: "nearest" }); });
   }
 
@@ -2640,7 +2642,6 @@ function blockTitle(value: string): HTMLElement { return el("div", "memory-block
 function collapsibleList(title: string, count: number, className = ""): { block: HTMLDetailsElement; body: HTMLDivElement } {
   const block = document.createElement("details");
   block.className = `memory-collapsible-list ${className}`.trim();
-  block.open = true;
   const summary = el("summary", "memory-collapsible-summary");
   summary.append(el("span", "memory-list-chevron", "›"), blockTitle(title), el("span", "memory-list-count", String(count)));
   const body = el("div", "memory-collapsible-body");

@@ -88,7 +88,6 @@ test("borderless content Package removes solid Memory and Run card outlines", as
       reviewSummary.append(reviewCount, reviewDetails);
       const collapsible = document.createElement("details");
       collapsible.className = "memory-collapsible-list memory-list-block";
-      collapsible.open = true;
       const collapsibleSummary = document.createElement("summary");
       const collapsibleLabel = document.createElement("span");
       collapsibleLabel.className = "memory-block-title";
@@ -128,7 +127,7 @@ test("borderless content Package removes solid Memory and Run card outlines", as
     });
     assert.notEqual(result.memoryStepBackground, "rgba(0, 0, 0, 0)");
     await page.locator(".memory-collapsible-list > summary").click();
-    assert.equal(await page.locator(".memory-collapsible-list").getAttribute("open"), null);
+    assert.equal(await page.locator(".memory-collapsible-list").getAttribute("open"), "");
     await page.locator(".memory-artifact-summary").hover();
     assert.equal(await page.locator(".memory-artifact-details").evaluate(node => getComputedStyle(node).visibility), "visible");
     await page.mouse.move(0, 0);
