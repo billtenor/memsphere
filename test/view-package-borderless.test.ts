@@ -54,11 +54,18 @@ test("borderless content Package removes solid Memory and Run card outlines", as
     const result = await page.evaluate(() => {
       const memoryModule = document.createElement("div");
       memoryModule.className = "memory-module";
+      memoryModule.style.setProperty("--soft", "#eef1ed");
+      memoryModule.style.setProperty("--surface", "#ffffff");
+      const memoryFlow = document.createElement("div");
+      memoryFlow.className = "memory-flow";
       const memoryCard = document.createElement("div");
       memoryCard.className = "memory-flow-item";
-      memoryModule.append(memoryCard);
+      memoryFlow.append(memoryCard);
+      memoryModule.append(memoryFlow);
       const runModule = document.createElement("div");
       runModule.className = "run-module";
+      runModule.style.setProperty("--soft", "#eef1ed");
+      runModule.style.setProperty("--surface", "#ffffff");
       const runCard = document.createElement("div");
       runCard.className = "run-step";
       runModule.append(runCard);
@@ -83,21 +90,30 @@ test("borderless content Package removes solid Memory and Run card outlines", as
       document.body.append(memoryModule, runModule);
       return {
         memoryBorder: getComputedStyle(memoryCard).borderTopStyle,
+        memoryRail: getComputedStyle(memoryCard).boxShadow,
+        memoryStepGap: getComputedStyle(memoryFlow).gap,
+        memoryStepBackground: getComputedStyle(memoryCard).backgroundColor,
         runBorder: getComputedStyle(runCard).borderTopStyle,
+        runRail: getComputedStyle(runCard).boxShadow,
         artifactName: artifactName.textContent,
         reviewCount: reviewCount.textContent,
         artifactDetailsVisibility: getComputedStyle(artifactDetails).visibility,
         reviewDetailsVisibility: getComputedStyle(reviewDetails).visibility
       };
     });
-    assert.deepEqual(result, {
+    assert.deepEqual({ ...result, memoryStepBackground: undefined }, {
       memoryBorder: "none",
+      memoryRail: "rgb(156, 186, 181) 3px 0px 0px 0px inset",
+      memoryStepGap: "16px",
+      memoryStepBackground: undefined,
       runBorder: "none",
+      runRail: "rgb(156, 186, 181) 3px 0px 0px 0px inset",
       artifactName: "交付物",
       reviewCount: "评审人：2",
       artifactDetailsVisibility: "hidden",
       reviewDetailsVisibility: "hidden"
     });
+    assert.notEqual(result.memoryStepBackground, "rgba(0, 0, 0, 0)");
     await page.locator(".memory-artifact-summary").hover();
     assert.equal(await page.locator(".memory-artifact-details").evaluate(node => getComputedStyle(node).visibility), "visible");
     await page.locator(".memory-review-summary").hover();

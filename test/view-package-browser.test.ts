@@ -188,6 +188,19 @@ test("Settings completes the local Package installation and Project enablement f
     assert.equal(await page.locator('[data-select-field="project_view.theme"]').count(), 0);
     assert.equal(await page.getByText(/^[123]\. /).count(), 0);
     assert.equal(await page.locator("[data-project-view-package]").count(), 0);
+    const finalSlotSelect = page.getByRole("combobox", { name: "选择运行模块 / 产物正文使用的内容" });
+    await finalSlotSelect.click();
+    const finalSlotMenu = finalSlotSelect.locator("xpath=following-sibling::*[contains(@class, 'settings-select-menu')]");
+    assert.equal(await finalSlotMenu.getAttribute("data-placement"), "top");
+    assert.equal(await finalSlotMenu.isVisible(), true);
+    const finalMenuGeometry = await finalSlotMenu.evaluate(node => {
+      const menu = node.getBoundingClientRect();
+      const trigger = node.previousElementSibling!.getBoundingClientRect();
+      const table = node.closest(".settings-table-wrap")!.getBoundingClientRect();
+      return { aboveTrigger: menu.bottom <= trigger.top, insideTable: menu.top >= table.top && menu.bottom <= table.bottom };
+    });
+    assert.deepEqual(finalMenuGeometry, { aboveTrigger: true, insideTable: true });
+    await finalSlotSelect.press("Escape");
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => document.body.scrollWidth), await page.evaluate(() => document.documentElement.clientWidth));
     const tableWidths = await page.locator(".settings-table-wrap").first().evaluate(node => ({ client: node.clientWidth, scroll: node.scrollWidth }));

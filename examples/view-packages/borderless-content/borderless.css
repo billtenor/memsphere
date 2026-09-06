@@ -16,12 +16,38 @@
 .memory-module .memory-panel,
 .memory-module .memory-section,
 .memory-module .memory-schema-field,
-.memory-module .memory-flow-item,
 .memory-module .action-contracts,
 .run-module .run-panel,
-.run-module .run-step,
 .run-module .run-artifact {
   background: color-mix(in srgb, var(--soft) 55%, var(--surface));
+}
+
+/* Steps use whitespace, a soft surface, and a semantic rail instead of a frame. */
+.memory-module .memory-flow {
+  gap: 16px;
+}
+
+.memory-module .memory-flow-item,
+.run-module .run-step {
+  overflow: visible;
+  background: color-mix(in srgb, var(--soft) 76%, var(--surface));
+  box-shadow: inset 3px 0 0 #9cbab5;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.memory-module .memory-flow-item:hover,
+.run-module .run-step:hover {
+  background: color-mix(in srgb, var(--soft) 92%, var(--surface));
+}
+
+.memory-module .memory-flow-children {
+  gap: 12px;
+}
+
+.memory-module .memory-flow-branch {
+  margin-left: 14px;
+  padding-left: 18px;
+  background: transparent;
 }
 
 .memory-module .memory-section-body,
@@ -31,15 +57,18 @@
 
 .memory-module .memory-flow-item.call {
   background: color-mix(in srgb, #8799b1 8%, var(--surface));
+  box-shadow: inset 3px 0 0 #8799b1;
 }
 
 .memory-module .memory-flow-item.branch {
   background: color-mix(in srgb, #c3a269 9%, var(--surface));
+  box-shadow: inset 3px 0 0 #c3a269;
 }
 
 .memory-module .memory-flow-item.current,
 .run-module .run-step.current {
-  box-shadow: inset 3px 0 0 var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 68%, var(--surface));
+  box-shadow: inset 4px 0 0 var(--accent);
 }
 
 /* Keep the useful summary visible and reveal contract details only on demand. */
@@ -80,5 +109,4 @@
 .memory-module .memory-review-summary:focus-within > .memory-review-details {
   visibility: visible;
   opacity: 1;
-  pointer-events: auto;
 }
