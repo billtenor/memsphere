@@ -86,7 +86,16 @@ test("borderless content Package removes solid Memory and Run card outlines", as
       reviewDetails.className = "memory-review-details";
       reviewDetails.textContent = "产品负责人、架构师";
       reviewSummary.append(reviewCount, reviewDetails);
-      memoryModule.append(artifactSummary, reviewSummary);
+      const collapsible = document.createElement("details");
+      collapsible.className = "memory-collapsible-list memory-list-block";
+      collapsible.open = true;
+      const collapsibleSummary = document.createElement("summary");
+      const collapsibleLabel = document.createElement("span");
+      collapsibleLabel.className = "memory-block-title";
+      collapsibleLabel.textContent = "必须遵守";
+      collapsibleSummary.append(collapsibleLabel);
+      collapsible.append(collapsibleSummary, document.createElement("div"));
+      memoryModule.append(artifactSummary, reviewSummary, collapsible);
       document.body.append(memoryModule, runModule);
       return {
         memoryBorder: getComputedStyle(memoryCard).borderTopStyle,
@@ -97,6 +106,8 @@ test("borderless content Package removes solid Memory and Run card outlines", as
         runRail: getComputedStyle(runCard).boxShadow,
         artifactName: artifactName.textContent,
         reviewCount: reviewCount.textContent,
+        disclosureBorder: getComputedStyle(collapsibleSummary).borderTopStyle,
+        disclosureBackground: getComputedStyle(collapsibleSummary).backgroundColor,
         artifactDetailsVisibility: getComputedStyle(artifactDetails).visibility,
         reviewDetailsVisibility: getComputedStyle(reviewDetails).visibility
       };
@@ -110,12 +121,18 @@ test("borderless content Package removes solid Memory and Run card outlines", as
       runRail: "rgb(156, 186, 181) 3px 0px 0px 0px inset",
       artifactName: "交付物",
       reviewCount: "评审人：2",
+      disclosureBorder: "none",
+      disclosureBackground: "rgba(0, 0, 0, 0)",
       artifactDetailsVisibility: "hidden",
       reviewDetailsVisibility: "hidden"
     });
     assert.notEqual(result.memoryStepBackground, "rgba(0, 0, 0, 0)");
+    await page.locator(".memory-collapsible-list > summary").click();
+    assert.equal(await page.locator(".memory-collapsible-list").getAttribute("open"), null);
     await page.locator(".memory-artifact-summary").hover();
     assert.equal(await page.locator(".memory-artifact-details").evaluate(node => getComputedStyle(node).visibility), "visible");
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(150);
     await page.locator(".memory-review-summary").hover();
     assert.equal(await page.locator(".memory-review-details").evaluate(node => getComputedStyle(node).visibility), "visible");
   } finally {

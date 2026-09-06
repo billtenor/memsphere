@@ -458,6 +458,17 @@ test("Memory builtin keeps Procedure content structured instead of exposing obje
     const page = await browser.newPage();
     await page.goto(`${origin}/memories/procedures/demo-flow`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Demo Flow", exact: true, level: 1 }).waitFor();
+    const namesList = page.locator("details.memory-list-block").filter({ hasText: "Names" }).first();
+    assert.equal(await namesList.getAttribute("open"), "");
+    assert.equal(await namesList.locator(":scope > summary .memory-list-count").innerText(), "2");
+    await namesList.locator(":scope > summary").click();
+    assert.equal(await namesList.getAttribute("open"), null);
+    assert.equal(await namesList.locator(":scope > .memory-collapsible-body").isVisible(), false);
+    await namesList.locator(":scope > summary").press("Enter");
+    assert.equal(await namesList.getAttribute("open"), "");
+    const rulesList = page.locator("details.action-contracts").first();
+    assert.equal(await rulesList.locator(":scope > summary .memory-block-title").innerText(), "Required rules");
+    assert.equal(await rulesList.locator(":scope > summary .memory-list-count").innerText(), "1");
     assert.equal(await page.locator(".memory-flow-item").count(), 2);
     assert.match(await page.locator(".memory-flow").innerText(), /Prepare input/);
     assert.match(await page.locator(".memory-flow").innerText(), /Needs another pass/);

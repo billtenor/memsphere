@@ -291,6 +291,14 @@ const memoryStyles = `
   .memory-section-body { display:none; padding:4px 16px 16px 44px; border-top:1px solid var(--line); }
   .memory-section.open>.memory-section-body { display:block; }
   .memory-block-title { margin:var(--memory-page-space-section) 0 var(--memory-page-space-line); color:var(--muted); font-size:var(--memory-page-text-section-title); font-weight:650; line-height:var(--memory-page-line-compact); letter-spacing:0; text-transform:none; }
+  .memory-collapsible-list>summary { display:flex; width:max-content; max-width:100%; align-items:center; gap:6px; margin:var(--memory-page-space-section) 0 var(--memory-page-space-line); border-radius:5px; padding:2px 4px; color:var(--muted); cursor:pointer; list-style:none; }
+  .memory-collapsible-list>summary::-webkit-details-marker { display:none; }
+  .memory-collapsible-list>summary:hover { background:var(--soft); color:var(--text); }
+  .memory-collapsible-list>summary:focus-visible { outline:2px solid rgba(40,108,103,.18); outline-offset:1px; }
+  .memory-collapsible-list>summary .memory-block-title { min-width:0; margin:0; }
+  .memory-list-chevron { flex:none; color:var(--muted); font-size:15px; line-height:1; transform:rotate(90deg); transition:transform .12s ease; }
+  .memory-collapsible-list:not([open])>summary .memory-list-chevron { transform:rotate(0); }
+  .memory-list-count { flex:none; color:var(--muted); font-size:var(--memory-page-text-meta); font-weight:500; line-height:var(--memory-page-line-compact); }
   .text-list { display:grid; gap:var(--memory-page-space-line); margin:0; padding-left:20px; }
   .text-list>li { padding:2px 4px; white-space:pre-wrap; overflow-wrap:anywhere; }
   .memory-child-stack { display:grid; gap:var(--memory-page-space-line); }
@@ -2302,7 +2310,7 @@ function renderInlineRemoval(oldSource: HTMLElement, path: string, beforeNodes: 
   const oldNode = textListItem(oldSource) ?? oldSource;
   if (oldList && oldPanel) {
     const block = el("section", `${oldPanel.className} memory-inline-removed`.trim());
-    const title = oldPanel.querySelector<HTMLElement>(":scope > .memory-block-title")?.cloneNode(true);
+    const title = oldPanel.querySelector<HTMLElement>(":scope > .memory-block-title, :scope > .memory-collapsible-summary > .memory-block-title")?.cloneNode(true);
     const list = document.createElement("ul"); list.className = "text-list";
     const item = oldNode.tagName === "LI" ? oldNode : document.createElement("li");
     if (item !== oldNode) item.append(oldNode);
@@ -2629,6 +2637,16 @@ function nodeSection(title: string, path: string, snapshot: unknown, comment?: C
 }
 function sectionBody(section: HTMLElement): HTMLElement { return section.querySelector<HTMLElement>(":scope > .memory-section-body")!; }
 function blockTitle(value: string): HTMLElement { return el("div", "memory-block-title", value); }
+function collapsibleList(title: string, count: number, className = ""): { block: HTMLDetailsElement; body: HTMLDivElement } {
+  const block = document.createElement("details");
+  block.className = `memory-collapsible-list ${className}`.trim();
+  block.open = true;
+  const summary = el("summary", "memory-collapsible-summary");
+  summary.append(el("span", "memory-list-chevron", "›"), blockTitle(title), el("span", "memory-list-count", String(count)));
+  const body = el("div", "memory-collapsible-body");
+  block.append(summary, body);
+  return { block, body };
+}
 function commentable(node: HTMLElement, target: string, snapshot: unknown, comment?: CommentCallback): HTMLElement {
   node.dataset.anchor = target;
   if (!comment) return node;
@@ -2684,8 +2702,7 @@ function appendRuleList(
   className = ""
 ): void {
   if (!values.length) return;
-  const panel = el("section", className);
-  panel.append(blockTitle(translatedKey(key, t)));
+  const { block: panel, body } = collapsibleList(translatedKey(key, t), values.length, `memory-list-block ${className}`.trim());
   const list = document.createElement("ul");
   list.className = "text-list";
   const effective = array(effectiveRules?.[key]);
@@ -2704,7 +2721,7 @@ function appendRuleList(
     }
     list.append(item);
   });
-  panel.append(list);
+  body.append(list);
   parent.append(panel);
 }
 
@@ -2767,8 +2784,7 @@ function appendEffectiveRules(parent: HTMLElement, node: JsonRecord, channel: "a
 }
 function appendStringList(parent: HTMLElement, key: string, values: unknown[], path: string, comment?: CommentCallback, t: (key: string) => string = value => value): void {
   if (!values.length) return;
-  const block = el("section", "memory-list-block");
-  block.append(blockTitle(translatedKey(key, t)));
+  const { block, body: listBody } = collapsibleList(translatedKey(key, t), values.length, "memory-list-block");
   const list = document.createElement("ul"); list.className = "text-list";
   values.forEach((value, index) => {
     const li = document.createElement("li");
@@ -2776,7 +2792,7 @@ function appendStringList(parent: HTMLElement, key: string, values: unknown[], p
     li.append(commentable(body, `${path}.${key}[${index + 1}]`, value, comment));
     list.append(li);
   });
-  block.append(list); parent.append(block);
+  listBody.append(list); parent.append(block);
 }
 
 function changeRevision(label: string, revision: string): HTMLElement {
