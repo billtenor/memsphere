@@ -56,6 +56,7 @@ test("Memory builtin independently registers its route pages and renders Memory 
     const page = await browser.newPage();
     await page.goto(`${origin}/memories/statements/demo-memory`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Demo Memory", exact: true, level: 1 }).waitFor();
+    assert.equal(await page.locator(".memory-statement-document > .memory-section-header").isVisible(), false, "the untitled document container has no redundant disclosure arrow");
     await page.locator("details.memory-list-block").filter({ hasText: "Defines" }).locator(":scope > summary").click();
     assert.match(await page.locator(".memory-workspace").innerText(), /Independent builtin detail/);
     const sectionsList = page.locator("details.memory-sections-block");

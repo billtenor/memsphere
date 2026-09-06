@@ -302,6 +302,7 @@ const memoryStyles = `
   .memory-collapsible-list:not([open])>summary .memory-list-chevron { transform:rotate(0); }
   .memory-list-count { flex:none; color:var(--muted); font-size:var(--memory-page-text-meta); font-weight:500; line-height:var(--memory-page-line-compact); }
   .memory-disclosure-root { position:relative; padding-top:34px; }
+  .memory-statement-document>.memory-section-header { display:none; }
   .memory-disclosure-toggle-all { position:absolute; z-index:2; top:7px; right:10px; border:0; border-radius:5px; background:transparent; color:var(--muted); padding:4px 7px; font-size:var(--memory-page-text-label); }
   .memory-disclosure-toggle-all:hover { background:var(--soft); color:var(--text); }
   .memory-disclosure-toggle-all:focus-visible { outline:2px solid rgba(40,108,103,.18); outline-offset:1px; }
@@ -2513,6 +2514,7 @@ function renderSimpleSchemaField(name: string, path: string, t: (key: string) =>
 function renderStatement(node: JsonRecord, depth: number, fallback: string, path: string, t: (key: string) => string, comment?: CommentCallback, options: RenderOptions = {}): HTMLElement {
   const title = depth === 0 ? "" : memoryName(node as MemorySummary) || fallback;
   const section = nodeSection(title, path, node, comment, [], depth < 2);
+  if (depth === 0 && !comment) section.classList.add("memory-statement-document");
   const body = sectionBody(section);
   if (depth === 0) appendStringList(body, "names", array(node.names), path, comment, t);
   appendStringList(body, "defines", array(node.defines), path, comment, t);
