@@ -68,7 +68,7 @@ test("Memory builtin independently registers its route pages and renders Memory 
     const disclosureToggle = page.getByRole("button", { name: "Expand all", exact: true });
     await disclosureToggle.click();
     assert.equal(await page.locator("details.memory-collapsible-list:not([open])").count(), 0);
-    assert.equal(await page.locator(".memory-statement-root .memory-section:not(.open)").count(), 0);
+    assert.equal(await page.locator(".memory-disclosure-root .memory-section:not(.open)").count(), 0);
     await page.getByRole("button", { name: "Collapse all", exact: true }).click();
     assert.equal(await page.locator("details.memory-collapsible-list[open]").count(), 0);
     assert.equal(await page.locator(".memory-workspace .memory-inline-plus").count(), 0, "published Memory detail must not expose ChangeSet comment controls");
@@ -482,6 +482,7 @@ test("Memory builtin keeps Procedure content structured instead of exposing obje
     const page = await browser.newPage();
     await page.goto(`${origin}/memories/procedures/demo-flow`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Demo Flow", exact: true, level: 1 }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Expand all", exact: true }).count(), 1, "Procedure Memory exposes the shared disclosure control");
     const namesList = page.locator("details.memory-list-block").filter({ hasText: "Aliases" }).first();
     assert.equal(await namesList.getAttribute("open"), null);
     assert.equal(await namesList.locator(":scope > summary .memory-list-count").innerText(), "2");
@@ -516,6 +517,12 @@ test("Memory builtin keeps Procedure content structured instead of exposing obje
     assert.equal(await inlineSchema.locator(".schema-field-type").first().evaluate(node => getComputedStyle(node).fontSize), "11px");
     assert.equal(await page.locator(".memory-block-title").first().evaluate(node => getComputedStyle(node).fontSize), "13px");
     assert.doesNotMatch(await page.locator(".memory-workspace").innerText(), /\[object Object\]|name:\s*markdown|options:\s*\{\}/);
+    await page.getByRole("button", { name: "Expand all", exact: true }).click();
+    assert.equal(await page.locator(".memory-disclosure-root details.memory-collapsible-list:not([open])").count(), 0);
+    assert.equal(await page.locator(".memory-disclosure-root .memory-section:not(.open)").count(), 0);
+    await page.getByRole("button", { name: "Collapse all", exact: true }).click();
+    assert.equal(await page.locator(".memory-disclosure-root details.memory-collapsible-list[open]").count(), 0);
+    assert.equal(await page.locator(".memory-disclosure-root .memory-section.open").count(), 0);
   } finally {
     await browser.close();
     await close(server);

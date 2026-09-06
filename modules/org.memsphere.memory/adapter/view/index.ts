@@ -301,7 +301,7 @@ const memoryStyles = `
   .memory-list-chevron { flex:none; color:var(--muted); font-size:15px; line-height:1; transform:rotate(90deg); transition:transform .12s ease; }
   .memory-collapsible-list:not([open])>summary .memory-list-chevron { transform:rotate(0); }
   .memory-list-count { flex:none; color:var(--muted); font-size:var(--memory-page-text-meta); font-weight:500; line-height:var(--memory-page-line-compact); }
-  .memory-statement-root { padding-top:34px; }
+  .memory-disclosure-root { position:relative; padding-top:34px; }
   .memory-disclosure-toggle-all { position:absolute; z-index:2; top:7px; right:10px; border:0; border-radius:5px; background:transparent; color:var(--muted); padding:4px 7px; font-size:var(--memory-page-text-label); }
   .memory-disclosure-toggle-all:hover { background:var(--soft); color:var(--text); }
   .memory-disclosure-toggle-all:focus-visible { outline:2px solid rgba(40,108,103,.18); outline-offset:1px; }
@@ -2146,10 +2146,15 @@ function freezePresentationValue<T>(value: T): T {
 }
 
 function renderMemoryEntity(kind: string, entity: JsonRecord, t: (key: string) => string, comment?: (target: string, snapshot: string, location: unknown) => void, options: RenderOptions = {}): HTMLElement {
-  if (kind === "schemas") return renderSchema(entity, 0, memoryName(entity as MemorySummary), "schema", t, comment, options);
-  if (kind === "statements") return renderStatement(entity, 0, memoryName(entity as MemorySummary), "statement", t, comment, options);
-  if (kind === "procedures") return renderProcedure(entity, "procedure", t, comment, options);
-  return renderGeneric(entity, "memory", t, comment, options);
+  const content = kind === "schemas"
+    ? renderSchema(entity, 0, memoryName(entity as MemorySummary), "schema", t, comment, options)
+    : kind === "statements"
+      ? renderStatement(entity, 0, memoryName(entity as MemorySummary), "statement", t, comment, options)
+      : kind === "procedures"
+        ? renderProcedure(entity, "procedure", t, comment, options)
+        : renderGeneric(entity, "memory", t, comment, options);
+  appendDisclosureToggle(content, t);
+  return content;
 }
 
 function renderMemoryComparison(
@@ -2520,7 +2525,6 @@ function renderStatement(node: JsonRecord, depth: number, fallback: string, path
     sectionsBody.append(children);
     body.append(block);
   }
-  if (depth === 0) appendDisclosureToggle(section, t);
   return section;
 }
 
@@ -2646,9 +2650,10 @@ function nodeSection(title: string, path: string, snapshot: unknown, comment?: C
   return section;
 }
 function appendDisclosureToggle(section: HTMLElement, t: (key: string) => string): void {
-  section.classList.add("memory-statement-root");
   const details = () => [...section.querySelectorAll<HTMLDetailsElement>("details.memory-collapsible-list")];
   const nodes = () => [...section.querySelectorAll<HTMLElement>(".memory-section")];
+  if (!details().length && !nodes().length) return;
+  section.classList.add("memory-disclosure-root");
   const hasCollapsed = () => details().some(item => !item.open) || nodes().some(item => !item.classList.contains("open"));
   let control!: HTMLButtonElement;
   const update = () => { control.textContent = t(hasCollapsed() ? "expandAll" : "collapseAll"); };
