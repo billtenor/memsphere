@@ -631,7 +631,6 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     async activateMainView(key?: string): Promise<void> {
       if (disposed) throw new Error("ViewHost is already disposed");
       const location = routeRegistry.location;
-      syncShellLayout(options.root, location, slotsRegistry);
       const selectedKey = key ?? options.mainViewKey ?? location.routeKey;
       if (!selectedKey) {
         renderRuntimePageFailure(options.root, undefined, `No View Route matches: ${location.pathname}`, () => activeHost.activateMainView(key));
@@ -664,6 +663,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
         return;
       }
       const previousOverlay = activeOverlayMount;
+      syncShellLayout(options.root, location, slotsRegistry);
       activeOverlayMount = undefined;
       const entry = presentationEntryForLocation(slotsRegistry, routeRegistry, instances, location, selectedKey);
       if (!entry) {
