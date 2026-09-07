@@ -39,14 +39,14 @@ test("Memory builtin independently registers its route pages and renders Memory 
     if (url.pathname === viewRuntimeBundlePath) return send(response, 200, "text/javascript", runtime);
     if (url.pathname === "/api/projects") return json(response, { current: "demo", projects: [{ name: "demo" }] });
     if (url.pathname === "/api/changes") return json(response, { changes: [
-      { id: "change-related", status: "active", memoryPaths: ["concepts/demo-memory.yaml"] },
+      { id: "change-related", status: "active", memoryPaths: ["statements/demo-memory.yaml"] },
       { id: "change-unrelated", status: "active", memoryPaths: ["statements/not-installed.yaml"] }
     ] });
     if (url.pathname === "/api/memories") return json(response, {
-      memories: [{ id: "concepts/demo-memory", kind: "concepts", path: "concepts/demo-memory.yaml", names: ["demo-memory"], system: false }]
+      memories: [{ id: "statements/demo-memory", kind: "statements", path: "statements/demo-memory.yaml", names: ["demo-memory"], system: false }]
     });
-    if (url.pathname === "/api/memories/concepts/demo-memory") return json(response, {
-      memory: { id: "concepts/demo-memory", kind: "concepts", path: "concepts/demo-memory.yaml", entity: { names: ["Demo Memory"], defines: ["Independent builtin detail"] } }
+    if (url.pathname === "/api/memories/statements/demo-memory") return json(response, {
+      memory: { id: "statements/demo-memory", kind: "statements", path: "statements/demo-memory.yaml", entity: { names: ["Demo Memory"], defines: ["Independent builtin detail"], sections: [{ names: ["nested", "Nested section"], asserts: ["Nested rule"] }] } }
     });
     return send(response, 200, "text/html", renderViewHostHtml("en", instances));
   });
@@ -54,9 +54,24 @@ test("Memory builtin independently registers its route pages and renders Memory 
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
-    await page.goto(`${origin}/memories/concepts/demo-memory`, { waitUntil: "networkidle" });
+    await page.goto(`${origin}/memories/statements/demo-memory`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Demo Memory", exact: true, level: 1 }).waitFor();
+    assert.equal(await page.locator(".memory-statement-document > .memory-section-header").isVisible(), false, "the untitled document container has no redundant disclosure arrow");
+    await page.locator("details.memory-list-block").filter({ hasText: "Defines" }).locator(":scope > summary").click();
     assert.match(await page.locator(".memory-workspace").innerText(), /Independent builtin detail/);
+    const sectionsList = page.locator("details.memory-sections-block");
+    assert.equal(await sectionsList.getAttribute("open"), null);
+    assert.equal(await sectionsList.locator(":scope > summary .memory-list-count").innerText(), "1");
+    assert.equal(await page.getByText("Nested section", { exact: true }).isVisible(), false);
+    await sectionsList.locator(":scope > summary").click();
+    assert.equal(await page.getByText("Nested section", { exact: true }).isVisible(), true);
+    assert.equal(await page.getByText("!statement", { exact: true }).count(), 0);
+    const disclosureToggle = page.getByRole("button", { name: "Expand all", exact: true });
+    await disclosureToggle.click();
+    assert.equal(await page.locator("details.memory-collapsible-list:not([open])").count(), 0);
+    assert.equal(await page.locator(".memory-disclosure-root .memory-section:not(.open)").count(), 0);
+    await page.getByRole("button", { name: "Collapse all", exact: true }).click();
+    assert.equal(await page.locator("details.memory-collapsible-list[open]").count(), 0);
     assert.equal(await page.locator(".memory-workspace .memory-inline-plus").count(), 0, "published Memory detail must not expose ChangeSet comment controls");
     assert.equal(await page.locator(".mem-view-content-list").count(), 1, "the list surface uses the public Content List primitive");
     assert.equal(await page.locator(".memory-detail-module").count(), 1, "the domain detail remains an independent Module surface");
@@ -136,6 +151,7 @@ test("Memory builtin renders Market status and opens an importing ChangeSet", as
     await page.waitForURL(`${origin}/projects/demo/changes/change-market?section=market`);
     await page.locator(".memory-title", { hasText: "change-market" }).waitFor();
     await page.locator(".memory-change-layout").getByRole("heading", { name: "Market Memory", exact: true }).waitFor();
+    for (const summary of await page.locator("details.memory-collapsible-list > summary").all()) await summary.click();
     assert.match(await page.locator(".memory-change-layout").innerText(), /Market content/);
     assert.equal(validatedPreviewRequests, 0);
     assert.equal(await page.getByRole("button", { name: "← Back to Memory", exact: true }).count(), 0);
@@ -203,6 +219,10 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     let dialogCount = 0;
     page.on("dialog", dialog => { dialogCount += 1; void dialog.dismiss(); });
     await page.goto(`${origin}/projects/demo/changes/change-diff`, { waitUntil: "networkidle" });
+    const collapsedDiffLists = page.locator("details.memory-collapsible-list");
+    await collapsedDiffLists.first().locator(":scope > summary").waitFor();
+    assert.equal(await collapsedDiffLists.evaluateAll(nodes => nodes.every(node => !(node as HTMLDetailsElement).open)), true);
+    for (const summary of await collapsedDiffLists.locator(":scope > summary").all()) await summary.click();
     await page.locator(".memory-inline-diff-pair, li.memory-inline-diff-item").first().waitFor();
     const inlineDiff = page.locator(".memory-list-block").filter({ hasText: "Before definition" });
     assert.equal(await inlineDiff.count(), 1);
@@ -299,6 +319,7 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     const largeWorkspaceRight = await page.locator(".memory-change-workspace").evaluate(node => node.getBoundingClientRect().right);
     assert.equal(Math.abs(await commentsRail.evaluate(node => node.getBoundingClientRect().right) - largeWorkspaceRight) < 1, true);
     assert.equal(await page.locator(".memory-change-main").evaluate(node => node.getBoundingClientRect().width <= 721), true);
+    await page.locator("details.memory-collapsible-list").evaluateAll(nodes => nodes.forEach(node => { (node as HTMLDetailsElement).open = true; }));
     const changedDefinition = page.locator(".memory-inline-new").filter({ hasText: "After definition" });
     const diffBodyTypography = await changedDefinition.evaluate(node => {
       const style = getComputedStyle(node);
@@ -347,6 +368,7 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     const listSurfaceRight = await page.locator('[data-view-slot="content.list"]').evaluate(node => node.getBoundingClientRect().right);
     assert.equal(await page.locator(".mem-view-content-list .mem-view-badge").evaluateAll((nodes, right) => nodes.every(node => node.getBoundingClientRect().right <= Number(right)), listSurfaceRight), true);
     await page.getByRole("radio", { name: "Full content", exact: true }).click();
+    await page.locator("details.memory-collapsible-list").evaluateAll(nodes => nodes.forEach(node => { (node as HTMLDetailsElement).open = true; }));
     assert.equal(await page.locator(".memory-inline-old").count(), 0);
     assert.match(await page.locator(".memory-change-layout").innerText(), /After definition/);
     const fullBodyTypography = await page.locator(".text-list > li").filter({ hasText: "After definition" }).evaluate(node => {
@@ -360,6 +382,10 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     assert.equal(await artifactDiff.locator(".memory-artifact-row").count(), 2);
     assert.equal(await artifactDiff.locator(".memory-artifact-row").evaluateAll(rows => rows.every(row => /Artifact/.test(row.textContent ?? "") && /markdown/.test(row.textContent ?? "") && /Product/.test(row.textContent ?? ""))), true);
     const candidateArtifactRow = artifactDiff.locator(".memory-inline-new .memory-artifact-row");
+    assert.equal(await candidateArtifactRow.locator(":scope > .memory-artifact-summary").count(), 1);
+    assert.equal(await candidateArtifactRow.locator(":scope > .memory-review-summary").count(), 1);
+    assert.equal(await candidateArtifactRow.locator(".memory-review-count").innerText(), "Reviewers: 1");
+    assert.equal(await candidateArtifactRow.locator(".memory-review-details").innerText(), "Product");
     assert.equal(await candidateArtifactRow.locator(".memory-inline-plus").count(), 1);
     assert.equal(await candidateArtifactRow.locator(".memory-pill .memory-inline-plus").count(), 0);
     await candidateArtifactRow.hover();
@@ -370,11 +396,13 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     assert.match(await page.locator(".mem-view-progress").innerText(), /Reviewed 1 \/ 4/);
     assert.equal(await page.locator(".mem-view-list-item .mem-view-badge", { hasText: "Reviewed" }).count(), 1);
     await page.getByRole("button", { name: /Created Memory/ }).click();
+    await page.locator("details.memory-collapsible-list").evaluateAll(nodes => nodes.forEach(node => { (node as HTMLDetailsElement).open = true; }));
     assert.equal(await page.locator(".memory-inline-old").count(), 0);
     assert.equal(await page.locator(".memory-inline-new").count() > 0, true);
     assert.match(await page.locator(".memory-change-main").innerText(), /Only candidate content/);
     assert.match(await page.locator(".memory-inline-new").first().innerText(), /^Added\b/);
     await page.getByRole("button", { name: /Deleted Memory/ }).click();
+    await page.locator("details.memory-collapsible-list").evaluateAll(nodes => nodes.forEach(node => { (node as HTMLDetailsElement).open = true; }));
     assert.equal(await page.locator(".memory-inline-new").count(), 0);
     assert.equal(await page.locator(".memory-inline-old").count() > 0, true);
     assert.match(await page.locator(".memory-change-main").innerText(), /Only base content/);
@@ -394,6 +422,7 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     assert.equal(submittedComments.at(-1)?.memoryReference, "statements/deleted");
     assert.equal((submittedComments.at(-1)?.location as Record<string, unknown>)?.anchor, "statement.defines[1]");
     await page.getByRole("radio", { name: "Full content", exact: true }).click();
+    await page.locator("details.memory-collapsible-list").evaluateAll(nodes => nodes.forEach(node => { (node as HTMLDetailsElement).open = true; }));
     assert.match(await page.locator(".memory-deleted-candidate").innerText(), /Not present after deletion/);
     assert.match(await page.locator(".memory-before-full-content").innerText(), /Full content before deletion[\s\S]*Only base content/);
   } finally {
@@ -454,6 +483,20 @@ test("Memory builtin keeps Procedure content structured instead of exposing obje
     const page = await browser.newPage();
     await page.goto(`${origin}/memories/procedures/demo-flow`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Demo Flow", exact: true, level: 1 }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Expand all", exact: true }).count(), 1, "Procedure Memory exposes the shared disclosure control");
+    const namesList = page.locator("details.memory-list-block").filter({ hasText: "Aliases" }).first();
+    assert.equal(await namesList.getAttribute("open"), null);
+    assert.equal(await namesList.locator(":scope > summary .memory-list-count").innerText(), "2");
+    assert.equal(await namesList.locator(":scope > .memory-collapsible-body").isVisible(), false);
+    await namesList.locator(":scope > summary").press("Enter");
+    assert.equal(await namesList.getAttribute("open"), "");
+    assert.equal(await namesList.locator(":scope > .memory-collapsible-body").isVisible(), true);
+    await namesList.locator(":scope > summary").click();
+    assert.equal(await namesList.getAttribute("open"), null);
+    const rulesList = page.locator("details.action-contracts").first();
+    assert.equal(await rulesList.getAttribute("open"), null);
+    assert.equal(await rulesList.locator(":scope > summary .memory-block-title").innerText(), "Required rules");
+    assert.equal(await rulesList.locator(":scope > summary .memory-list-count").innerText(), "1");
     assert.equal(await page.locator(".memory-flow-item").count(), 2);
     assert.match(await page.locator(".memory-flow").innerText(), /Prepare input/);
     assert.match(await page.locator(".memory-flow").innerText(), /Needs another pass/);
@@ -475,6 +518,12 @@ test("Memory builtin keeps Procedure content structured instead of exposing obje
     assert.equal(await inlineSchema.locator(".schema-field-type").first().evaluate(node => getComputedStyle(node).fontSize), "11px");
     assert.equal(await page.locator(".memory-block-title").first().evaluate(node => getComputedStyle(node).fontSize), "13px");
     assert.doesNotMatch(await page.locator(".memory-workspace").innerText(), /\[object Object\]|name:\s*markdown|options:\s*\{\}/);
+    await page.getByRole("button", { name: "Expand all", exact: true }).click();
+    assert.equal(await page.locator(".memory-disclosure-root details.memory-collapsible-list:not([open])").count(), 0);
+    assert.equal(await page.locator(".memory-disclosure-root .memory-section:not(.open)").count(), 0);
+    await page.getByRole("button", { name: "Collapse all", exact: true }).click();
+    assert.equal(await page.locator(".memory-disclosure-root details.memory-collapsible-list[open]").count(), 0);
+    assert.equal(await page.locator(".memory-disclosure-root .memory-section.open").count(), 0);
   } finally {
     await browser.close();
     await close(server);

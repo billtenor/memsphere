@@ -6,6 +6,24 @@
 
 ## 设计原则
 
+### 公共组件 Slot
+
+Slot 区分框架布局位置、Module 业务扩展点和公共组件。公共组件契约由 Host 的公共 UI 层声明，多个 Module 可重复调用，不由某个 Module 私有目录拥有；配置选择一次会用于所有调用方。
+
+| SDK token | 配置 cell | 用途 |
+| --- | --- | --- |
+| `componentSlots.document` | `content.document@1:default` | 内容画布 |
+| `componentSlots.flow` | `content.flow@1:default` | Procedure 步骤、分支和循环展示 |
+| `componentSlots.disclosure` | `content.disclosure@1:default` | 折叠字段标题、数量和正文 |
+
+Module 通过 `ctx.ui.contentComponent(input)` 调用，扩展包通过 `ctx.slots.register(componentSlots.document, { id, key: "default", value: { render(input) { … } } })` 贡献，同步返回 HTMLElement。Manifest 的 `view.contributions` 声明同一个 cell。注册、全局选择、优先级、失败退让沿用已有渲染器机制；没有候选或候选全部失败时调用输入的默认实现。
+
+`ContentComponentContext` 提供 `kind`、可选的 `title` / `count`、`content` 和 `defaultRender()`。`content` 是调用方提供的内容节点，含业务操作和事件处理器；实现必须保留该节点，可调整展示根或包装结构，不应克隆它。`defaultRender()` 返回原有展示根，允许渐进修改。此版本是内容组合契约，不是可序列化的业务模型，也不开放任意脚本执行或新增全局监听器的生命周期。
+
+折叠字段必须返回包含直接子 `summary` 的原生 `details`，并保留提供的正文节点。这样键盘交互和展开全部继续工作。公共组件注册随扩展包生命周期释放；返回节点随所属页面移除。需要异步加载及显式 disposer 的页面扩展仍使用 ViewMount。
+
+Memory 详情画布、Procedure 流程、字段列表，以及 Run 画布、流程和规则列表使用这些入口。评审绑定、产出物业务操作仍由 Run 管理。极简扩展包提供这三个组件的示例实现，细部视觉仍可与其全局样式组合使用。
+
 - Slot 按产品语义命名，不按“左上角”“第二行”等视觉坐标命名。
 - Slot 由所有者声明位置、输入契约、组合顺序和降级方式，贡献方不能修改 Slot 外部结构。
 - 官方 Module 与用户 Module 使用相同的公开贡献机制；Core 专属内容通过权限约束表达，不另建一套私有协议。
@@ -32,13 +50,26 @@
 | `main.view` | View Host | 内置及用户 Module | 按路由 key 选择 | 页面主体。可以注册多个 View，但一次只挂载当前路由选中的一个；Module 可以在自己的 View 内继续声明子 Slot。 |
 | `overlay` | View Host | Memsphere Core、内置及用户 Module | 按浮层 key 选择 | 抽屉、对话框和评审浮窗等临时交互。可以注册多个浮层，但控制器同一时刻只激活一个；View Host 负责遮罩、焦点、关闭行为、`wide`/`compact` 几何尺寸和故障隔离。 |
 
-当前 Catalog 定义 14 个长期 Slot。新增 Slot 时直接更新本列表。
+当前 Catalog 定义 14 个长期 Slot。`header.account` 由 Core 保留，`home.modules` 由组合运行时生成；其余 12 类可以由界面扩展包声明并出现在“界面配置”表中。新增 Slot 时直接更新本列表和设置目录。
+
+### 跨 Package Presentation Cells
+
+以下四项是独立于 14 个 Shell 根 Slot 的稳定 portable cell。它们不转移官方 Route 或业务 API 所有权：
+
+| Cell | 官方所有者 | key | 输入 |
+| --- | --- | --- | --- |
+| `org.memsphere.memory.page.presentation@1` | Memory | `page` | `ViewMount` |
+| `org.memsphere.memory.detail.renderer@1` | Memory | `detail` | Memory kind、实体及官方 fallback factory |
+| `org.memsphere.run.page.presentation@1` | Run | `page` | `ViewMount` |
+| `org.memsphere.run.artifact.renderer@1` | Run | `artifact` | Artifact、事件、Run 及官方 fallback factory |
+
+官方实现以 priority `1000` 注册。较小 priority 的用户候选可以 shadow；设置表为每个 single/keyed Slot 选择一个候选，为 list Slot 选择多个候选。显式设置后，未选 contribution 在注册阶段被安全忽略；失败候选标为 abdicated 并自动回退。
 
 ## 当前实现状态
 
 当前 SDK 与 ViewHost 已接线本 Catalog 的全部 14 个根 Slot。Core 通过 Host 内置 Plugin 提供 Home、账户等 Shell 内容；四个 builtin Module 通过同一公开 Slot Tree 贡献主导航、二级导航、对象列表、按需右侧栏、Header、Page、搜索 Provider 与 Home 聚合项。Shell 使用可拖动且持久化的二级导航栏和内容列表栏；Run 普通页面不轮询，Artifact Review 由 Run Module 注册到 `overlay`，Host 负责背景 Route、遮罩、焦点、关闭、清理与局部故障边界。
 
-自定义子 Slot、用户 Module 发现/安装及 Project 动态组合仍未接线。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
+任意动态子 Slot 仍未接线；12 类可扩展根 Slot、四个版本化 portable presentation cell、可信本地界面扩展包发现/安装及按 contribution 的全局动态组合已经接线。“界面配置”表展示这 16 类稳定位置，不展示 Core 保留位置；同一选择应用到所有 Project。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
 
 ## Slot 结构
 

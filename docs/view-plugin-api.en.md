@@ -12,7 +12,7 @@ This document defines the long-term public interface and explicitly records curr
 
 ViewHost currently implements the default Plugin entrypoint, `apiVersion: 1`, `apply()`, Module instance identity, `lifecycle`, minimum Manifest validation, SDK SemVer checks, independent Bundle loading, Router, Slot Tokens and Registry, per-instance registration transactions, rollback, and Mount cleanup. An import map resolves `@memsphere/view-sdk` to the Host-provided browser SDK.
 
-The currently injectable services are `slots`, `router`, `theme`, and `ui`. The complete root Slot list, product semantics, and current wiring status are maintained in the [View Slot List](./view-slots.en.md). Some aggregate Slots support the restricted live `upsert()` contract defined below, while page overlays support Host-managed background Route projection and local failure isolation. All four built-in Modules use the same public entrypoint and independent Bundles. View API, I18n, Logger, custom child Slots, user Module discovery/installation, and dynamic Project composition remain unwired. A Plugin requesting an unavailable service fails explicitly before `apply()`.
+The injectable services are `slots`, `router`, `theme`, `themeRegistry`, and `ui`. The complete root Slot list, product semantics, and current wiring status are maintained in the [View Slot List](./view-slots.en.md). Some aggregate Slots support restricted live `upsert()`, while page overlays support Host-managed background Route projection and local failure isolation. Trusted local Package discovery and one global composition applied to every Project are wired. View API, I18n, Logger, and arbitrary dynamic child Slots remain unwired. A Plugin requesting an unavailable or ungranted service fails before `apply()`.
 
 ## Module View Entrypoint Contract
 
@@ -712,3 +712,13 @@ The current trust model loads only code written by the user or explicitly instal
 - not put secrets in browser configuration, Bundles, Descriptors, or logs.
 
 Module Manifest, CLI SDK, server-side View API registration, configuration Schema, third-party signing, and sandboxing are outside this API document.
+# View Package API Additions (v1)
+
+- `themeRegistry` is injectable when `themeRegistryVersion: 1` is declared, the Package Manifest declares the relevant Theme capability, and its theme is selected.
+- `RegisterOptions.priority` is a non-negative integer for `single`/`keyed` replacement. Host ordering uses integer tuples, never floating-point projection. Settings explicitly selects enabled candidates; unselected contributions are safely ignored at registration.
+- `portableSlots` exports four `name@1` boundaries: `org.memsphere.memory.page.presentation`, `org.memsphere.memory.detail.renderer`, `org.memsphere.run.page.presentation`, and `org.memsphere.run.artifact.renderer`.
+- `SlotRegistry.render(token, key, input)` invokes a data renderer and marks an invalid or throwing candidate abdicated before falling back.
+- `ViewDataRenderer.render()` is synchronous and must immediately return an `HTMLElement`; a Promise/thenable is invalid and triggers fallback. Abdication lasts until instance unload or View restart.
+- `ViewThemeRegistry` supplies lifecycle-owned `registerTheme`, `selectTheme`, and `overrideTokens`. Complete Themes and partial overrides both provide light and dark maps.
+- The `presentation` service gives portable pages the current `route`, frozen Memory/Run summaries, filters, current selection, `refresh()`, and controlled `openMemory()`/`openCreate()`/`openRun()`/`startRun()` navigation. Creation and start flows remain official; Packages receive no writable store and should not call business APIs with raw `fetch`. Memory detail and Run Artifact renderers receive SDK-defined minimal read-only contexts plus official wrappers for ChangeSet/Review/copy/download actions.
+- Every external contribution must declare an exact Manifest `cell + id` and target one of the twelve extensible root Slot classes or four portable cells in the Slot Catalog. Runtime uses only the resolver priority tuple and ignores Bundle-reported priority. Unknown cells, missing keys, and id/cell mismatches fail the instance transaction atomically.

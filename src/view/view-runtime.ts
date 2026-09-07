@@ -4,6 +4,9 @@ import {
   createHostRouteTarget,
   isSearchResultDescriptor,
   isSlotToken,
+  portableSlots,
+  componentSlots,
+  type ContentComponentContext,
   slots,
   type Disposer,
   type ConfirmationDescriptor,
@@ -38,8 +41,10 @@ import {
   type TextRef,
   type ViewLifecycle,
   type ViewMount,
+  type ViewDataRenderer,
   type ViewPlugin,
   type ViewPluginContext,
+  type ViewPresentationService,
   type ViewRouter,
   type ViewServiceName
 } from "./view-sdk.js";
@@ -56,6 +61,7 @@ type RuntimeEntry = {
   readonly id: string;
   readonly key?: string;
   readonly order: number;
+  readonly priority: readonly [number, number];
   readonly value: unknown;
   readonly when?: RouteActivation;
   readonly children: readonly AnySlotToken[];
@@ -105,6 +111,26 @@ export interface ViewPluginInstanceOptions<Config = unknown> {
   readonly routeBasePath?: string;
   /** Core-owned allowlist for reserved built-in routes. */
   readonly routeGrants?: readonly ViewRouteGrant[];
+  /** Host-computed capability allowlist. Omit only for trusted built-in instances. */
+  readonly allowedServices?: readonly ViewServiceName[];
+  readonly styles?: readonly { readonly id: string; readonly css: string; readonly scope: "module" | "global" }[];
+  readonly themes?: readonly {
+    readonly sourceId: string;
+    readonly tokens: import("./view-sdk.js").ViewThemePalette;
+    readonly complete?: boolean;
+    readonly selected?: boolean;
+    readonly layer: number;
+  }[];
+  readonly contributionPolicy?: {
+    readonly registrations: readonly {
+      readonly cell: string;
+      readonly id: string;
+      readonly priority: readonly [number, number];
+      readonly enabled?: boolean;
+    }[];
+    readonly blockedCells: readonly string[];
+  };
+  readonly themeOperations?: readonly ("register" | "override")[];
   readonly home?: {
     readonly title: string;
     readonly summary: string;
@@ -119,6 +145,8 @@ export interface StartViewHostOptions {
   readonly root: HTMLElement;
   readonly mainViewKey?: string;
   readonly location?: RouteLocation;
+  readonly themeMode?: "light" | "dark" | "system";
+  readonly hostThemes?: NonNullable<ViewPluginInstanceOptions["themes"]>;
   readonly coreConfig?: {
     readonly locale?: string;
     readonly messages?: Readonly<Record<string, unknown>>;
@@ -139,9 +167,14 @@ export interface ViewHostDiagnosticSnapshot {
     id: string;
     key?: string;
     order: number;
+    priority: readonly [number, number];
+    state: "active" | "shadowed" | "abdicated";
+    message?: string;
+    fallbackTo?: string;
     identity: string;
     owner: string;
   }[];
+  readonly theme: ReturnType<RuntimeThemeStore["diagnostics"]>;
 }
 
 export interface ActiveViewHost {
@@ -163,7 +196,7 @@ export interface ActiveViewPlugin {
   dispose(): Promise<void>;
 }
 
-const supportedServices = new Set<ViewServiceName>(["slots", "router", "theme", "ui"]);
+const supportedServices = new Set<ViewServiceName>(["slots", "router", "theme", "themeRegistry", "presentation", "ui"]);
 
 /**
  * Compose all enabled Module instances into one shared Route/Slot runtime.
@@ -179,8 +212,9 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
   };
   const routeRegistry = new RuntimeRouteStore(initialLocation);
   const slotsRegistry = new RuntimeSlotStore(routeRegistry);
-  const themeStore = new RuntimeThemeStore();
+  const themeStore = new RuntimeThemeStore(options.themeMode ?? "system");
   const hostThemeLifecycle = new RuntimeLifecycle();
+  installInstanceThemes(options.hostThemes ?? [], themeStore, hostThemeLifecycle);
   const hostThemeCleanup = applyViewThemeRoots(
     themeStore.scoped(hostThemeLifecycle),
     options.root.closest<HTMLElement>("[data-view-shell]") ?? options.root,
@@ -274,9 +308,12 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     const module = Object.freeze({ ...instanceOptions.module });
     const lifecycle = new RuntimeLifecycle();
     const theme = themeStore.scoped(lifecycle);
-    const ui = hostUi;
+    const themeRegistry = restrictedThemeRegistry(themeStore.registry(lifecycle), instanceOptions.themeOperations);
+    const presentation = createPresentationService(module.projectId);
     const owner = moduleIdentity(module);
-    const slotTransaction = slotsRegistry.transaction(module, lifecycle);
+    const slotTransaction = slotsRegistry.transaction(module, lifecycle, instanceOptions.contributionPolicy);
+    const ui = Object.freeze({ ...hostUi, contentComponent: (input: ContentComponentContext) =>
+      slotTransaction.render(componentSlots[input.kind], "default", Object.freeze(input)) });
     const routeTransaction = routeRegistry.transaction(
       module,
       lifecycle,
@@ -287,15 +324,20 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
 
     try {
       const plugin = validatePlugin(instanceOptions.plugin);
-      validateServices(plugin);
+      validateServices(plugin, instanceOptions.allowedServices);
       validateThemeVersion(plugin);
+      validateThemeRegistryVersion(plugin);
       validateUiVersion(plugin);
+      installInstanceStyles(instanceOptions.styles ?? [], owner, lifecycle);
+      installInstanceThemes(instanceOptions.themes ?? [], themeStore, lifecycle);
       const context = Object.freeze({
         module,
         lifecycle,
         ...(plugin.inject.includes("slots") ? { slots: slotTransaction } : {}),
         ...(plugin.inject.includes("router") ? { router: routeTransaction } : {}),
         ...(plugin.inject.includes("theme") ? { theme } : {}),
+        ...(plugin.inject.includes("themeRegistry") ? { themeRegistry } : {}),
+        ...(plugin.inject.includes("presentation") ? { presentation } : {}),
         ...(plugin.inject.includes("ui") ? { ui } : {})
       }) as unknown as ViewPluginContext;
       const applyDisposer = await plugin.apply(context, instanceOptions.config);
@@ -384,6 +426,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     const portal = document.createElement("div");
     portal.className = "view-host-nested-portal";
     portal.dataset.viewPortal = entry.identity;
+    markViewModuleRoots(entry.owner, element, portal);
     const pagePortalRoot = options.root.closest<HTMLElement>("[data-view-shell]")?.querySelector<HTMLElement>("[data-view-page-portals]");
     (pagePortalRoot ?? document.body).append(portal);
     const themeCleanup = applyViewThemeRoots(themeForOwner(instances, entry.owner), element, portal);
@@ -403,7 +446,10 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       element.remove();
       activeMainMount = undefined;
       await disposeActiveMount(previous);
-      renderRuntimePageFailure(options.root, moduleForOwner(instances, entry.owner), errorMessage(error), () => activeHost.activateMainView());
+      slotsRegistry.abdicate(entry, error);
+      const fallback = slotsRegistry.entry(entry.token, entry.key ?? "", location);
+      if (fallback) await activateMainEntry(fallback, location);
+      else renderRuntimePageFailure(options.root, moduleForOwner(instances, entry.owner), errorMessage(error), () => activeHost.activateMainView());
     }
   };
 
@@ -436,6 +482,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     const portal = document.createElement("div");
     portal.className = "view-host-list-portal";
     portal.dataset.viewPortal = entry.identity;
+    markViewModuleRoots(entry.owner, element, portal);
     const pagePortalRoot = shell?.querySelector<HTMLElement>("[data-view-page-portals]");
     (pagePortalRoot ?? document.body).append(portal);
     const themeCleanup = applyViewThemeRoots(themeForOwner(instances, entry.owner), element, portal);
@@ -457,7 +504,10 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       const previous = activeListMount;
       activeListMount = undefined;
       await disposeActiveMount(previous);
-      renderRuntimePageFailure(host, moduleForOwner(instances, entry.owner), errorMessage(error), () => activeHost.activateMainView());
+      slotsRegistry.abdicate(entry, error);
+      const fallback = slotsRegistry.entries(entry.token, location)[0];
+      if (fallback) await activateListEntry(fallback, location);
+      else renderRuntimePageFailure(host, moduleForOwner(instances, entry.owner), errorMessage(error), () => activeHost.activateMainView());
     }
   };
 
@@ -513,6 +563,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     element.className = "view-overlay-mount";
     const portal = document.createElement("div");
     portal.className = "view-overlay-nested-portal";
+    markViewModuleRoots(entry.owner, element, portal);
     surface.append(close, element, portal);
     const themeCleanup = applyViewThemeRoots(themeForOwner(instances, entry.owner), element, portal);
     layer.append(surface);
@@ -580,7 +631,6 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     async activateMainView(key?: string): Promise<void> {
       if (disposed) throw new Error("ViewHost is already disposed");
       const location = routeRegistry.location;
-      syncShellLayout(options.root, location, slotsRegistry);
       const selectedKey = key ?? options.mainViewKey ?? location.routeKey;
       if (!selectedKey) {
         renderRuntimePageFailure(options.root, undefined, `No View Route matches: ${location.pathname}`, () => activeHost.activateMainView(key));
@@ -592,9 +642,9 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
         const descriptor = overlayEntry.value as OverlayMountDescriptor;
         const background = routeRegistry.projectedLocation(descriptor.background, location);
         const backgroundListEntry = slotsRegistry.entries(slots.contentList, background)[0];
-        const backgroundEntry = background.routeKey
-          ? slotsRegistry.entry(slots.mainView, background.routeKey, background)
-          : undefined;
+        const backgroundEntry = presentationEntryForLocation(
+          slotsRegistry, routeRegistry, instances, background, background.routeKey
+        );
         if (!backgroundEntry) throw new Error("Overlay background Route does not provide main.view");
         const currentListMount = activeListMount;
         if (backgroundListEntry && currentListMount && currentListMount.entry.value === backgroundListEntry.value) {
@@ -613,8 +663,9 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
         return;
       }
       const previousOverlay = activeOverlayMount;
+      syncShellLayout(options.root, location, slotsRegistry);
       activeOverlayMount = undefined;
-      const entry = slotsRegistry.entry(slots.mainView, selectedKey, location);
+      const entry = presentationEntryForLocation(slotsRegistry, routeRegistry, instances, location, selectedKey);
       if (!entry) {
         const owner = routeRegistry.owner(location.pathname);
         renderRuntimePageFailure(options.root, owner ? moduleForOwner(instances, owner) : undefined, `ViewHost has no main.view for key: ${selectedKey}`, () => activeHost.activateMainView(key));
@@ -639,7 +690,8 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       return Object.freeze({
         instances: Object.freeze(diagnostics.map(value => Object.freeze({ ...value }))),
         routes: routeRegistry.snapshot(),
-        entries: slotsRegistry.snapshot()
+        entries: slotsRegistry.snapshot(),
+        theme: themeStore.diagnostics()
       });
     },
     async dispose(): Promise<void> {
@@ -739,6 +791,90 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
   return activeHost;
 }
 
+function createPresentationService(projectId: string): ViewPresentationService {
+  const projectBase = `/projects/${encodeURIComponent(projectId)}`;
+  const navigate = async (path: string): Promise<void> => {
+    globalThis.history?.pushState({}, "", path);
+    globalThis.dispatchEvent?.(new PopStateEvent("popstate"));
+    await Promise.resolve();
+  };
+  const routeSnapshot = (): Readonly<RouteLocation> => {
+    const location = globalThis.location;
+    const search = location?.search ?? "";
+    return deepFreeze({
+      pathname: location?.pathname ?? projectBase,
+      search,
+      hash: location?.hash ?? "",
+      params: {},
+      query: Object.fromEntries(new URLSearchParams(search))
+    });
+  };
+  const selectedMemoryReference = (pathname: string): string | undefined => {
+    const match = pathname.match(/\/memories\/([^/]+)\/(.+)$/);
+    return match ? `${decodeURIComponent(match[1]!)}/${decodeURIComponent(match[2]!)}` : undefined;
+  };
+  const selectedRunId = (pathname: string): string | undefined => {
+    const match = pathname.match(/\/tasks\/([^/]+)(?:\/|$)/);
+    return match ? decodeURIComponent(match[1]!) : undefined;
+  };
+  const memoryPage = async (filters: Readonly<Record<string, string>> = {}) => {
+    const query = new URLSearchParams({ representation: "summary", ...filters });
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/memories?${query}`);
+    if (!response.ok) throw new Error(`Memory presentation request failed: ${response.status}`);
+    const payload = await response.json() as { memories?: Array<Record<string, unknown>> };
+    const snapshot = Object.freeze((payload.memories ?? []).map(item => deepFreeze(structuredClone(item))));
+    const route = routeSnapshot();
+    const selectedReference = selectedMemoryReference(route.pathname);
+    return Object.freeze({
+      kind: "memory-page" as const,
+      route,
+      filters: Object.freeze({ ...filters }),
+      items: snapshot,
+      ...(selectedReference ? { selectedReference } : {}),
+      async refresh() { return memoryPage(filters); },
+      async openMemory(reference: string) {
+        const [kind, ...name] = reference.split("/");
+        if (!kind || !name.length) throw new Error(`Invalid Memory reference: ${reference}`);
+        await navigate(`${projectBase}/memories/${encodeURIComponent(kind)}/${encodeURIComponent(name.join("/"))}`);
+      },
+      async openCreate() {
+        await navigate(`${projectBase}/market`);
+      }
+    });
+  };
+  const runPage = async (filters: Readonly<Record<string, string>> = {}) => {
+    const query = new URLSearchParams({ representation: "summary", ...filters });
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/runs?${query}`);
+    if (!response.ok) throw new Error(`Run presentation request failed: ${response.status}`);
+    const payload = await response.json() as { runs?: Array<Record<string, unknown>> };
+    const snapshot = Object.freeze((payload.runs ?? []).map(item => deepFreeze(structuredClone(item))));
+    const route = routeSnapshot();
+    const selected = selectedRunId(route.pathname);
+    return Object.freeze({
+      kind: "run-page" as const,
+      route,
+      filters: Object.freeze({ ...filters }),
+      runs: snapshot,
+      ...(selected ? { selectedRunId: selected } : {}),
+      async refresh() { return runPage(filters); },
+      async openRun(id: string) {
+        if (!id.trim()) throw new Error("Run id must be non-empty");
+        await navigate(`${projectBase}/tasks/${encodeURIComponent(id)}`);
+      },
+      async startRun() {
+        await navigate(`${projectBase}/tasks`);
+      }
+    });
+  };
+  return Object.freeze({ memoryPage, runPage });
+}
+
+function deepFreeze<T>(value: T): T {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
 /** Compatibility wrapper for the first single-Plugin Host contract. */
 export async function startViewPlugin<Config>(
   options: StartViewPluginOptions<Config>,
@@ -830,10 +966,14 @@ function renderRuntimePageFailure(
   element.replaceChildren(panel);
 }
 
-function validateServices(plugin: ViewPlugin<unknown>): void {
+function validateServices(plugin: ViewPlugin<unknown>, allowed?: readonly ViewServiceName[]): void {
+  const granted = allowed === undefined ? supportedServices : new Set(allowed);
   for (const service of plugin.inject) {
     if (!supportedServices.has(service)) {
       throw new Error(`View Plugin requests unsupported service: ${service}`);
+    }
+    if (!granted.has(service)) {
+      throw new Error(`View Plugin requests service without an effective capability grant: ${service}`);
     }
   }
 }
@@ -848,6 +988,16 @@ function validateThemeVersion(plugin: ViewPlugin<unknown>): void {
   }
 }
 
+function validateThemeRegistryVersion(plugin: ViewPlugin<unknown>): void {
+  const injectsRegistry = plugin.inject.includes("themeRegistry");
+  if (injectsRegistry && plugin.themeRegistryVersion !== 1) {
+    throw new Error("View Plugin requests themeRegistry but does not support registry version 1");
+  }
+  if (!injectsRegistry && plugin.themeRegistryVersion !== undefined) {
+    throw new Error("View Plugin declares themeRegistryVersion without injecting themeRegistry");
+  }
+}
+
 function validateUiVersion(plugin: ViewPlugin<unknown>): void {
   const injectsUi = plugin.inject.includes("ui");
   if (injectsUi && plugin.uiVersion !== 1) {
@@ -856,6 +1006,60 @@ function validateUiVersion(plugin: ViewPlugin<unknown>): void {
   if (!injectsUi && plugin.uiVersion !== undefined) {
     throw new Error("View Plugin declares uiVersion without injecting ui");
   }
+}
+
+function installInstanceStyles(
+  styles: readonly { readonly id: string; readonly css: string; readonly scope: "module" | "global" }[],
+  owner: string,
+  lifecycle: RuntimeLifecycle,
+): void {
+  const ids = new Set<string>();
+  for (const contribution of styles) {
+    if (!contribution.id.trim() || ids.has(contribution.id)) throw new Error(`invalid or duplicate Style contribution: ${contribution.id}`);
+    ids.add(contribution.id);
+    const element = document.createElement("style");
+    element.dataset.viewPackageStyle = contribution.id;
+    element.dataset.viewPackageOwner = owner;
+    element.dataset.viewPackageScope = contribution.scope;
+    element.textContent = contribution.css;
+    document.head.append(element);
+    lifecycle.own(() => element.remove());
+  }
+}
+
+function installInstanceThemes(
+  themes: NonNullable<ViewPluginInstanceOptions["themes"]>,
+  store: RuntimeThemeStore,
+  lifecycle: RuntimeLifecycle,
+): void {
+  for (const contribution of themes) {
+    const registry = store.registry(lifecycle, contribution.layer);
+    registry.registerTheme(contribution);
+    if (contribution.selected) registry.selectTheme(contribution.sourceId);
+  }
+}
+
+function restrictedThemeRegistry(
+  registry: import("./view-sdk.js").ViewThemeRegistry,
+  allowed?: readonly ("register" | "override")[],
+): import("./view-sdk.js").ViewThemeRegistry {
+  if (allowed === undefined) return registry;
+  const grants = new Set(allowed);
+  return Object.freeze({
+    version: 1 as const,
+    registerTheme(contribution: import("./view-sdk.js").ViewThemeContribution) {
+      if (!grants.has("register")) throw new Error("View Package lacks theme.register capability");
+      return registry.registerTheme(contribution);
+    },
+    selectTheme(sourceId?: string) {
+      if (!grants.size) throw new Error("View Package lacks a Theme capability");
+      return registry.selectTheme(sourceId);
+    },
+    overrideTokens(sourceId: string, tokens: import("./view-sdk.js").ViewThemePalette) {
+      if (!grants.has("override")) throw new Error("View Package lacks theme.override capability");
+      return registry.overrideTokens(sourceId, tokens);
+    }
+  });
 }
 
 class RuntimeLifecycle implements ViewLifecycle {
@@ -900,6 +1104,8 @@ class RuntimeSlotStore {
   readonly #declared = new Map<string, AnySlotToken>();
   readonly #routes: RuntimeRouteStore;
   readonly #listeners = new Set<() => void>();
+  readonly #abdicated = new Set<RuntimeEntry>();
+  readonly #abdicationMessages = new Map<RuntimeEntry, string>();
   #notifyQueued = false;
 
   constructor(routes: RuntimeRouteStore) {
@@ -907,10 +1113,20 @@ class RuntimeSlotStore {
     for (const token of Object.values(slots) as AnySlotToken[]) {
       this.#declared.set(slotIdentity(token), token);
     }
+    for (const token of Object.values(portableSlots) as AnySlotToken[]) {
+      this.#declared.set(slotIdentity(token), token);
+    }
+    for (const token of Object.values(componentSlots) as AnySlotToken[]) {
+      this.#declared.set(slotIdentity(token), token);
+    }
   }
 
-  transaction(module: Readonly<ModuleInstanceContext>, lifecycle: RuntimeLifecycle): RuntimeSlotTransaction {
-    return new RuntimeSlotTransaction(this, module, lifecycle);
+  transaction(
+    module: Readonly<ModuleInstanceContext>,
+    lifecycle: RuntimeLifecycle,
+    contributionPolicy?: ViewPluginInstanceOptions["contributionPolicy"],
+  ): RuntimeSlotTransaction {
+    return new RuntimeSlotTransaction(this, module, lifecycle, contributionPolicy);
   }
 
   location(): RouteLocation {
@@ -945,6 +1161,8 @@ class RuntimeSlotStore {
   }
 
   remove(entry: RuntimeEntry): void {
+    this.#abdicated.delete(entry);
+    this.#abdicationMessages.delete(entry);
     for (const child of entry.children) this.#removeSlotTree(child);
     const index = this.#entries.indexOf(entry);
     if (index >= 0) {
@@ -982,6 +1200,7 @@ class RuntimeSlotStore {
       .filter(candidate => (
         candidate.token === token
         && candidate.key === key
+        && !this.#abdicated.has(candidate)
         && this.#routes.isActive(candidate.when, location)
       ))
       .sort(compareEntries)[0];
@@ -989,8 +1208,15 @@ class RuntimeSlotStore {
 
   entries(token: AnySlotToken, location: RouteLocation): readonly RuntimeEntry[] {
     return this.#entries
-      .filter(candidate => candidate.token === token && this.#routes.isActive(candidate.when, location))
+      .filter(candidate => candidate.token === token && !this.#abdicated.has(candidate) && this.#routes.isActive(candidate.when, location))
       .sort(compareEntries);
+  }
+
+  abdicate(entry: RuntimeEntry, error?: unknown): void {
+    if (!this.#entries.includes(entry) || this.#abdicated.has(entry)) return;
+    this.#abdicated.add(entry);
+    if (error !== undefined) this.#abdicationMessages.set(entry, errorMessage(error));
+    this.#notify();
   }
 
   snapshot(): ViewHostDiagnosticSnapshot["entries"] {
@@ -999,9 +1225,25 @@ class RuntimeSlotStore {
       id: entry.id,
       ...(entry.key === undefined ? {} : { key: entry.key }),
       order: entry.order,
+      priority: entry.priority,
+      state: this.#abdicated.has(entry) ? "abdicated" : this.#isSelected(entry) ? "active" : "shadowed",
+      ...(this.#abdicationMessages.has(entry) ? { message: this.#abdicationMessages.get(entry) } : {}),
+      ...(this.#abdicated.has(entry) ? {
+        fallbackTo: this.#entries
+          .filter(candidate => candidate.token === entry.token && candidate.key === entry.key && !this.#abdicated.has(candidate))
+          .sort(compareEntries)[0]?.identity
+      } : {}),
       identity: entry.identity,
       owner: entry.owner
     })));
+  }
+
+  #isSelected(entry: RuntimeEntry): boolean {
+    if (this.#abdicated.has(entry)) return false;
+    if (entry.token.definition.kind === "list") return true;
+    return this.#entries
+      .filter(candidate => candidate.token === entry.token && candidate.key === entry.key && !this.#abdicated.has(candidate))
+      .sort(compareEntries)[0] === entry;
   }
 
   #removeSlotTree(token: AnySlotToken): void {
@@ -1026,16 +1268,19 @@ class RuntimeSlotTransaction implements SlotRegistry {
   readonly #lifecycle: RuntimeLifecycle;
   readonly #staged: RuntimeEntry[] = [];
   readonly #liveEpochs = new Map<string, number>();
+  readonly #contributionPolicy?: ViewPluginInstanceOptions["contributionPolicy"];
   #state: "open" | "committed" | "rolled-back" = "open";
 
   constructor(
     store: RuntimeSlotStore,
     module: Readonly<ModuleInstanceContext>,
     lifecycle: RuntimeLifecycle,
+    contributionPolicy?: ViewPluginInstanceOptions["contributionPolicy"],
   ) {
     this.#store = store;
     this.#module = module;
     this.#lifecycle = lifecycle;
+    this.#contributionPolicy = contributionPolicy;
   }
 
   register(
@@ -1047,11 +1292,21 @@ class RuntimeSlotTransaction implements SlotRegistry {
     const extended = options as typeof options & { readonly when?: RouteActivation };
     const key = "key" in options ? options.key : undefined;
     const owner = moduleIdentity(this.#module);
+    const cell = `${slotIdentity(token)}:${key ?? options.id}`;
+    if (this.#contributionPolicy?.blockedCells.includes(cell)) {
+      throw new Error(`View contribution is blocked by an unresolved Project preference: ${cell}`);
+    }
+    const declared = this.#contributionPolicy?.registrations.find(entry => entry.cell === cell && entry.id === options.id);
+    if (this.#contributionPolicy && !declared) {
+      throw new Error(`View contribution is not declared by the Package manifest: ${cell}#${options.id}`);
+    }
+    if (declared?.enabled === false) return () => {};
     const entry: RuntimeEntry = {
       token,
       id: options.id,
       ...(key === undefined ? {} : { key }),
       order: options.order ?? 0,
+      priority: declared?.priority ?? [options.priority ?? 1000, 0],
       value: options.value,
       ...(extended.when === undefined ? {} : { when: extended.when }),
       children: Object.freeze([...(options.children ?? [])]),
@@ -1090,6 +1345,7 @@ class RuntimeSlotTransaction implements SlotRegistry {
       token,
       id: options.id,
       order: options.order ?? 0,
+      priority: [options.priority ?? 1000, 0],
       value: options.value,
       ...(options.when === undefined ? {} : { when: options.when }),
       children: Object.freeze([]),
@@ -1105,6 +1361,37 @@ class RuntimeSlotTransaction implements SlotRegistry {
       ));
       if (current?.epoch === epoch) this.#store.remove(current);
     });
+  }
+
+  render(token: SlotToken<string, "keyed", ViewDataRenderer, string>, key: string, input: unknown): HTMLElement {
+    if (this.#lifecycle.disposed) throw new Error("View Plugin instance is already disposed");
+    for (;;) {
+      const entry = this.#store.entry(token as AnySlotToken, key, this.#storeLocation());
+      const component = Object.values(componentSlots).some(candidate => candidate === token);
+      if (!entry) {
+        if (component) return (input as ContentComponentContext).defaultRender();
+        throw new Error(`No data renderer is available for ${slotIdentity(token as AnySlotToken)}:${key}`);
+      }
+      try {
+        const element: unknown = (entry.value as ViewDataRenderer).render(input);
+        if (element && typeof element === "object" && "then" in element) {
+          void Promise.resolve(element).catch(() => undefined);
+          throw new Error("View data renderer returned asynchronously; this cell requires an immediate HTMLElement");
+        }
+        if (!(element instanceof HTMLElement)) throw new Error("View data renderer must return an HTMLElement");
+        if (component) {
+          const context = input as ContentComponentContext;
+          if (!element.contains(context.content)) throw new Error("Content component must preserve its supplied content");
+          if (context.kind === "disclosure" && (!(element instanceof HTMLDetailsElement) || !element.querySelector(":scope > summary"))) {
+            throw new Error("Disclosure component must return a details element with a summary");
+          }
+        }
+        element.dataset.viewModuleOwner = entry.owner;
+        return element;
+      } catch (error) {
+        this.#store.abdicate(entry, error);
+      }
+    }
   }
 
   #storeLocation(): RouteLocation {
@@ -2180,6 +2467,9 @@ function validateSlotRegistration(
   if (!options || typeof options !== "object") throw new Error("Slot registration options are required");
   if (typeof options.id !== "string" || !options.id.trim()) throw new Error("Slot Entry id must be non-empty");
   if (options.order !== undefined && !Number.isFinite(options.order)) throw new Error("Slot Entry order must be finite");
+  if (options.priority !== undefined && (!Number.isInteger(options.priority) || options.priority < 0)) {
+    throw new Error("Slot Entry priority must be a non-negative integer");
+  }
   if (!token.definition.validate(options.value)) {
     throw new Error(`Slot ${slotIdentity(token)} rejected Entry value`);
   }
@@ -2199,10 +2489,15 @@ function assertNoSlotConflict(entries: readonly RuntimeEntry[], candidate: Runti
   const sameSlot = entries.filter(entry => entry.token === candidate.token);
   const conflict = candidate.token.definition.kind === "single"
     ? sameSlot.some(entry => (
-      entry.when === undefined || candidate.when === undefined || entry.when === candidate.when
+      comparePriority(entry.priority, candidate.priority) === 0
+      && (entry.when === undefined || candidate.when === undefined || entry.when === candidate.when)
     ))
     : candidate.token.definition.kind === "keyed"
-      ? sameSlot.some(entry => entry.key === candidate.key)
+      ? sameSlot.some(entry => (
+        entry.key === candidate.key
+        && comparePriority(entry.priority, candidate.priority) === 0
+        && (entry.when === undefined || candidate.when === undefined || entry.when === candidate.when)
+      ))
       : sameSlot.some(entry => entry.owner === candidate.owner && entry.id === candidate.id);
   if (conflict) {
     throw new Error(`Slot Entry conflicts in ${slotIdentity(candidate.token)}: ${candidate.key ?? candidate.id}`);
@@ -2222,7 +2517,14 @@ function validateChildSlot(
 }
 
 function compareEntries(left: RuntimeEntry, right: RuntimeEntry): number {
+  if (left.token.definition.kind !== "list" || right.token.definition.kind !== "list") {
+    return comparePriority(left.priority, right.priority) || left.identity.localeCompare(right.identity);
+  }
   return left.order - right.order || left.identity.localeCompare(right.identity);
+}
+
+function comparePriority(left: readonly [number, number], right: readonly [number, number]): number {
+  return left[0] - right[0] || left[1] - right[1];
 }
 
 function compareRoutes(left: RuntimeRoute, right: RuntimeRoute): number {
@@ -2425,6 +2727,28 @@ function moduleRouteBase(module: Readonly<ModuleInstanceContext>): string {
 
 function moduleIdentity(module: Readonly<ModuleInstanceContext>): string {
   return `${module.moduleId}@${module.moduleVersion}:${module.instanceId}`;
+}
+
+function markViewModuleRoots(owner: string, ...roots: HTMLElement[]): void {
+  for (const root of roots) root.dataset.viewModuleOwner = owner;
+}
+
+function presentationEntryForLocation(
+  store: RuntimeSlotStore,
+  routes: RuntimeRouteStore,
+  instances: readonly RuntimePluginInstance[],
+  location: RouteLocation,
+  mainViewKey?: string,
+): RuntimeEntry | undefined {
+  const owner = routes.owner(location.pathname);
+  const moduleId = owner ? moduleForOwner(instances, owner).moduleId : undefined;
+  const portable = moduleId === "org.memsphere.memory"
+    ? portableSlots.memoryPagePresentation
+    : moduleId === "org.memsphere.run"
+      ? portableSlots.runPagePresentation
+      : undefined;
+  return (portable ? store.entry(portable as AnySlotToken, "page", location) : undefined)
+    ?? (mainViewKey ? store.entry(slots.mainView, mainViewKey, location) : undefined);
 }
 
 function slotIdentity(token: AnySlotToken): string {

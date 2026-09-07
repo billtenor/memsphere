@@ -229,3 +229,10 @@ Slot 使用独立的 `name@version` 身份。改变 kind、scope、必填字段�
 ## 文档边界
 
 完整 Module Manifest、CLI SDK、服务端 View API 注册、Module 配置迁移、市场、签名与沙箱由各自专项契约定义。它们必须遵守本文确定的独立编译、公开 Context、Slot 所有权、实例隔离、数据边界和整体重启模型。
+# 本地 Package Composition 与资产演进
+
+内置实现与可信本地界面扩展包使用同一 Manifest、实例 Context 和 Slot 协议。Home 记录已安装路径、全局主题及 Slot 选择，并将同一组合应用到所有 Project。安装建立对本地包的信任；Manifest capability 声明包提供的内容类型，主题或 Slot 选择决定启用哪些内容，不再设置重复的 Package 权限。全局样式进入 `styles.global@1` 多选 Slot，scoped CSS 随 Package 实例自动加载；历史 Style 开关仅作为配置兼容入口。View 服务启动后固定全局 composition snapshot，并为每个 Project 构建实例；变更通过跨平台 `memsphere view restart` 生效。入口和资源使用包根 realpath 约束、内容摘要及 Project 隔离 URL；文件变化不会让旧 URL 返回新字节。
+
+启动 snapshot 同时保存规范化的全局 composition digest 与 Home document revision。页面 boot 和资产注册只消费 running snapshot；Settings API 保留 running/disk digest 与 `restartPending` 供一致性控制，但普通界面只显示“已保存、未保存、重启后生效”。新注册 Project 需重启后进入 snapshot；从 registry 删除的 Project 不会因旧 snapshot 而继续可达。
+
+Community、verified、curated、official-owned 是未来 Catalog 元数据，不进入运行协议。稳定 Package id、SemVer、来源和许可证允许用户方案先本地分享，之后在不静默替换身份的前提下被官方精选或经授权转移维护权。

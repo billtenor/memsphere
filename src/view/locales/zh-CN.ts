@@ -214,6 +214,7 @@ export const zhCNViewMessages = {
   "settings.confirmSave": "确认保存",
   "settings.pendingDetection": "待重新检测",
   "settings.unsaved": "未保存修改",
+  "settings.saved": "已保存",
   "settings.noUnsaved": "没有未保存修改",
   "settings.scope.global": "全局配置",
   "settings.scope.project": "项目配置",
@@ -222,7 +223,7 @@ export const zhCNViewMessages = {
   "settings.notLoaded": "配置尚未加载。",
   "settings.diskConfig": "磁盘配置 {revision}",
   "settings.runningConfig": "运行配置 {revision}",
-  "settings.restartPending": "待重启生效",
+  "settings.restartPending": "已保存，重启后生效",
   "settings.applied": "已生效",
   "settings.errorCount": "错误 {count}",
   "settings.scope": "配置范围",
@@ -428,6 +429,14 @@ export const zhCNViewMessages = {
   "schema.open": "打开图式",
   "artifact.fileReadFailed": "无法读取产物文件：{error}",
   "artifact.file": "文件产物：{path}",
+  "settings.appearance": "界面与主题",
+  "settings.appearanceHelp": "安装和管理界面扩展包，并配置主题、页面、组件和样式。",
+  "settings.appearanceGlobal": "默认用于所有 Project",
+  "settings.appearanceProject": "当前 Project · {name}",
+  "settings.globalAppearance": "全局默认与 Package 安装",
+  "settings.currentProjectAppearance": "当前 Project 的界面",
+  "settings.advancedDiagnostics": "高级诊断",
+  "settings.savedCompositionRestart": "界面组合已保存，当前服务仍使用启动快照；请执行 memsphere view restart 后生效。",
   "time.inProgress": "进行中"
 } as const;
 

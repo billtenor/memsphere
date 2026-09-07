@@ -32,7 +32,7 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && tsc -p tsconfig.modules.json --noEmit && node --import tsx scripts/build-view-assets.mjs && node -e \"const fs=require('node:fs'); fs.chmodSync('dist/cli.js',0o755); fs.cpSync('src/skills','dist/skills',{recursive:true}); fs.cpSync('src/prompts/templates','dist/prompts/templates',{recursive:true})\"",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && tsc -p tsconfig.modules.json --noEmit && node --import tsx scripts/build-view-assets.mjs && node scripts/build-example-view-package.mjs --check && node -e \"const fs=require('node:fs'); fs.chmodSync('dist/cli.js',0o755); fs.cpSync('src/skills','dist/skills',{recursive:true}); fs.cpSync('src/prompts/templates','dist/prompts/templates',{recursive:true})\"",
     "dev": "tsx src/cli.ts",
     "pretest": "npm run build",
     "test": "node scripts/run-tests.mjs",
@@ -55,6 +55,7 @@
     "cross-spawn": "^7.0.6",
     "handlebars": "^4.7.9",
     "markdown-it": "^14.3.0",
+    "postcss": "8.5.28",
     "semver": "^7.7.3",
     "yaml": "^2.5.1",
     "zod": "^3.23.8"

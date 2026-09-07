@@ -49,6 +49,7 @@ type UiNavigation = (target: RouteTarget) => Promise<void>;
 export function createViewUi(navigate: UiNavigation): ViewUi {
   const ui: ViewUi = {
     version: 1 as const,
+    contentComponent: input => input.defaultRender(),
     contentList(source: ContentListDescriptor | ContentListProvider): ViewMount {
       if (typeof source !== "function") assertContentListDescriptor(source);
       let target: HTMLElement | undefined;

@@ -69,6 +69,68 @@ test("View entry resolution remains inside the Module package", () => {
   assert.equal(resolveModuleViewEntry(root, manifest), resolve(root, "dist/view/index.js"));
 });
 
+test("Manifest accepts shareable View Package metadata and rejects unsafe global styles", () => {
+  const manifest = parseModuleManifest({
+    schemaVersion: 1,
+    id: "org.example.custom-view",
+    version: "1.2.3",
+    source: { type: "local", homepage: "https://example.com/view" },
+    view: {
+      entry: "./dist/index.js",
+      sdk: "^1.0.0",
+      capabilities: ["theme.register", "styles.global"],
+      dependencies: [{ id: "org.memsphere.memory", version: "^1.0.0" }],
+      styles: [{ id: "base", file: "./styles/base.css", scope: "global" }],
+      themes: [{ id: "forest", file: "./themes/forest.json" }],
+      contributions: [
+        { id: "memory-page", cell: "org.memsphere.memory.page.presentation@1:page", priority: 100 },
+        { id: "navigation", cell: "navigation.primary@1:navigation", priority: 100 }
+      ]
+    }
+  });
+  assert.equal(manifest.view.contributions?.[0]?.priority, 100);
+  assert.throws(() => parseModuleManifest({
+    ...manifest,
+    view: {
+      ...manifest.view,
+      contributions: [{ id: "unknown", cell: "org.example.unknown@1:page", priority: 1 }]
+    }
+  }), /configurable Host Slot/);
+
+  assert.throws(() => parseModuleManifest({
+    schemaVersion: 1,
+    id: "org.example.custom-view",
+    version: "1.2.3",
+    view: {
+      entry: "./dist/index.js",
+      sdk: "^1.0.0",
+      styles: [{ id: "base", file: "./styles/base.css", scope: "global" }]
+    }
+  }), /styles\.global/);
+
+  assert.throws(() => parseModuleManifest({
+    schemaVersion: 1,
+    id: "org.example.custom-view",
+    version: "1.2.3",
+    view: {
+      entry: "./dist/index.js",
+      sdk: "^1.0.0",
+      styles: [{ id: "detail", file: "./styles/detail.css", scope: "module" }]
+    }
+  }), /styles\.scoped/);
+
+  assert.throws(() => parseModuleManifest({
+    schemaVersion: 1,
+    id: "org.example.custom-view",
+    version: "1.2.3",
+    view: {
+      entry: "./dist/index.js",
+      sdk: "^1.0.0",
+      contributions: [{ id: "memory-page", cell: "memory.page", priority: 1000 }]
+    }
+  }));
+});
+
 test("View asset build reads source contracts instead of depending on partially built dist files", async () => {
   const script = await readFile(resolve(repositoryRoot, "scripts/build-view-assets.mjs"), "utf8");
   const packageJson = JSON.parse(await readFile(resolve(repositoryRoot, "package.json"), "utf8")) as {

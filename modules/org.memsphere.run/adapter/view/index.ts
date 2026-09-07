@@ -1,5 +1,6 @@
 import {
   defineViewPlugin,
+  portableSlots,
   slots,
   type Disposer,
   type ContentListDescriptor,
@@ -14,6 +15,7 @@ import {
 } from "@memsphere/view-sdk";
 import { createRunDetailState, currentRunStep, renderRunDetail } from "./run-detail.js";
 import { runDetailStyles } from "./run-styles.js";
+import { contentFlowStyles } from "../../../shared/view/content-flow.js";
 
 type Json = Record<string, any>;
 type RunConfig = { locale?: string; messages?: Readonly<Record<string, string>>; projectApiBase?: string };
@@ -90,9 +92,9 @@ const styles = `
   .run-module{--surface:#fff;--soft:#f1f3ef;--line:#dce0da;--text:#242829;--muted:#70777a;--accent:#286c67;--danger:#a14436;color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;min-width:0;max-width:100%;min-height:100%;overflow-x:hidden;background:#f7f8f5}
   .run-module *{box-sizing:border-box}.run-module button,.run-module textarea,.run-module select{font:inherit}.run-module button{cursor:pointer}
   .run-layout{display:grid;grid-template-columns:300px minmax(0,1fr);min-height:100vh}.run-sidebar{position:sticky;top:0;height:100vh;overflow:auto;padding:16px;border-right:1px solid var(--line);background:#fbfbf8}
-  .run-workspace,.run-workspace>*{min-width:0;max-width:100%}.run-workspace{width:100%;max-width:980px;margin:0 auto;padding:22px 28px 60px}.run-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin:0 0 14px;padding:19px 20px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 1px 2px rgba(20,47,42,.025)}.run-title{margin:0;font-size:22px;min-width:0;overflow-wrap:anywhere}.run-subtitle{min-width:0;margin-top:5px;color:var(--muted);overflow-wrap:anywhere}.run-panel,.run-error,.run-step,.run-artifact{min-width:0;max-width:100%;overflow-wrap:anywhere;margin:12px 0;padding:20px 22px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 1px 2px rgba(20,47,42,.025)}.run-error{border-left:4px solid var(--danger)}
+  .run-workspace,.run-workspace>*{min-width:0;max-width:100%}.run-workspace{width:100%;max-width:980px;margin:0 auto;padding:22px 28px 60px}.run-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin:0 0 14px;padding:19px 20px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 1px 2px rgba(20,47,42,.025)}.run-title{margin:0;font-size:22px;min-width:0;overflow-wrap:anywhere}.run-subtitle{min-width:0;margin-top:5px;color:var(--muted);overflow-wrap:anywhere}.run-panel,.run-error,.run-artifact{min-width:0;max-width:100%;overflow-wrap:anywhere;margin:12px 0;padding:20px 22px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 1px 2px rgba(20,47,42,.025)}.run-error{border-left:4px solid var(--danger)}
   .run-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.run-pill{display:inline-flex;min-height:30px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:0 11px;background:var(--soft);color:var(--muted);font-size:11px;line-height:1.2}.run-pill.running{color:var(--accent);border-color:#a9c8c2;background:#eef7f4}.run-pill.abandoned{color:#7b5a1e;background:#fff6db}.run-pill.done{color:#315f42;background:#e8f4ea}.run-meta-action{display:inline-flex;min-height:34px;align-items:center;border:1px solid #9eb2ae;border-radius:8px;background:var(--surface);color:#28534e;padding:0 13px;font-size:12px;font-weight:650;box-shadow:0 1px 2px #00000012}.run-meta-action:hover{border-color:#6f9790;background:#f1f7f5;color:#173f3c}.run-meta-action.primary{border-color:var(--accent);background:var(--accent);color:#fff}.run-meta-action.primary:hover{border-color:#1f5753;background:#1f5753;color:#fff}.run-meta-action:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .run-section-title{font-weight:750;margin:18px 0 7px}.run-flow{display:grid;gap:8px;min-width:0}.run-step.current{border-left:4px solid var(--accent)}.run-step h3,.run-artifact h3{min-width:0;margin:0 0 7px;font-size:15px;overflow-wrap:anywhere}.run-pre{max-width:100%;padding:11px;border-radius:6px;background:#f3f4f1;white-space:pre-wrap;overflow:auto;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,monospace}.artifact-review-artifact-content{min-width:0;max-width:100%;overflow-wrap:anywhere}.artifact-review-artifact-content table{display:block;max-width:100%;overflow:auto}
+  .run-section-title{font-weight:750;margin:18px 0 7px}.run-artifact h3{min-width:0;margin:0 0 7px;font-size:15px;overflow-wrap:anywhere}.run-pre{max-width:100%;padding:11px;border-radius:6px;background:#f3f4f1;white-space:pre-wrap;overflow:auto;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,monospace}.artifact-review-artifact-content{min-width:0;max-width:100%;overflow-wrap:anywhere}.artifact-review-artifact-content table{display:block;max-width:100%;overflow:auto}
   .artifact-review-modal{--surface:#fff;--soft:#f1f3ef;--line:#dce0da;--text:#242829;--muted:#70777a;--accent:#286c67;--danger:#a14436;color:var(--text);background:var(--surface);font:14px/1.45 ui-sans-serif,system-ui,sans-serif}
   .artifact-review-modal *{box-sizing:border-box}
   .artifact-review-modal{width:100%;max-width:none;height:100%;max-height:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);box-shadow:0 24px 80px #191e233d;overflow:hidden}.run-review-loading{display:grid;width:100%;height:100%;min-height:0;place-items:center;border:0;border-radius:10px;background:var(--surface);color:var(--muted);box-shadow:none}.artifact-review-shell{display:grid;grid-template-rows:auto auto auto minmax(0,1fr);height:100%;background:var(--surface)}.artifact-review-head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--surface)}.artifact-review-head h2{margin:0;font-size:18px}.artifact-review-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 18px;border-bottom:1px solid var(--line);background:var(--surface)}.artifact-review-mobile-tabs{display:none}.artifact-review-body{display:grid;grid-template-columns:minmax(0,var(--artifact-review-left,58%)) 7px minmax(330px,1fr);min-height:0;background:var(--surface)}.artifact-review-modal-pane{min-width:0;overflow-x:hidden;overflow-y:auto;padding:18px;overscroll-behavior:contain;background:var(--surface)}#artifact-review-review-pane{background:#fbfbf8}.artifact-review-divider{background:var(--line);cursor:col-resize}.artifact-review-operation-group{border-top:1px solid var(--line);padding:12px 0}.artifact-review-row{padding:9px 0;border-bottom:1px solid var(--line)}.artifact-review-row-main{display:grid;gap:3px}.artifact-review-comment textarea{width:100%;min-height:90px;padding:10px 11px;border:1px solid #aebbb7;border-radius:7px;background:#fff;box-shadow:inset 0 1px 2px #17211f0a}.artifact-review-comment textarea:focus{border-color:var(--accent);outline:2px solid #286c6726;outline-offset:0}.artifact-review-actions,.artifact-review-vote{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}.artifact-review-submit-area{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}.artifact-review-vote label{display:inline-flex;gap:5px;align-items:center}.artifact-review-target{position:relative;padding:4px}.inline-plus{position:absolute;right:3px;top:3px}.artifact-review-target-located,.artifact-review-opinion-located{outline:3px solid #e6b85b;outline-offset:2px}.artifact-review-message.warn{color:var(--danger)}
@@ -122,7 +124,18 @@ export default defineViewPlugin<RunConfig>({
     };
     const runDetailCache = new Map<string, Json>();
     const publishSecondary = createRunSecondaryPublisher(ctx, config, routes);
-    const page = createRunPageMounts(config, routes, navigate, ctx.ui, runDetailCache, publishSecondary);
+    ctx.slots.register(portableSlots.runArtifactRenderer, {
+      id: "run.artifact.official",
+      key: "artifact",
+      priority: 1000,
+      value: { render(input) {
+        const fallback = (input as { defaultRender?: () => HTMLElement }).defaultRender;
+        if (!fallback) throw new Error("Run Artifact renderer input is invalid");
+        return fallback();
+      } }
+    });
+    const renderArtifact = (input: unknown) => ctx.slots.render(portableSlots.runArtifactRenderer, "artifact", input);
+    const page = createRunPageMounts(config, routes, navigate, ctx.ui, runDetailCache, publishSecondary, renderArtifact);
     ctx.lifecycle.own(page.dispose);
     ctx.slots.register(slots.navigationPrimary, {
       id: "run.navigation", order: 200,
@@ -163,7 +176,7 @@ export default defineViewPlugin<RunConfig>({
         label: { text: tr(config, "review") },
         presentation: "dialog",
         background: ctx.router.project({ from: routes.review, to: routes.detail, params: { runId: "runId" }, query: { status: "status" }, hash: "discard" }),
-        mount: createMount(config, routes, navigate, ctx.ui, runDetailCache, true)
+        mount: createMount(config, routes, navigate, ctx.ui, runDetailCache, true, renderArtifact)
       }
     });
     startRunHome(ctx, config, routes);
@@ -263,6 +276,9 @@ function registerPage(ctx: ViewPluginContext, route: RouteToken, id: string, con
   });
   ctx.slots.register(slots.mainView, {
     id, key: route.key, when: route.activation, value: page.detail
+  });
+  ctx.slots.register(portableSlots.runPagePresentation, {
+    id: `${id}.presentation`, key: "page", priority: 1000, when: route.activation, value: page.detail
   });
   ctx.slots.register(slots.contentList, {
     id: `${id}.list`, when: route.activation, value: page.list
@@ -384,7 +400,8 @@ function createRunPageMounts(
     badges?: Readonly<Record<string, number>>,
     heading?: HeaderTitleDescriptor,
     actions?: readonly PublishedRunHeaderAction[]
-  ) => void
+  ) => void,
+  renderArtifact: (input: unknown) => HTMLElement
 ): RunPageMounts {
   const controller = new AbortController();
   let scratch: HTMLElement | undefined;
@@ -408,7 +425,7 @@ function createRunPageMounts(
     scratch ??= document.createElement("div");
     portal ??= document.createElement("div");
     if (!app) {
-      app = new RunApplication(scratch, portal, config, routes, route, controller, navigate, ui, runDetailCache, false, refreshList);
+      app = new RunApplication(scratch, portal, config, routes, route, controller, navigate, ui, runDetailCache, false, refreshList, renderArtifact);
       routeKey = `${route.pathname}${route.search}${route.hash}`;
     }
     start ??= app.start();
@@ -445,7 +462,7 @@ function createRunPageMounts(
         };
       }
       const style = document.createElement("style");
-      style.textContent = styles + runDetailStyles;
+      style.textContent = styles + runDetailStyles + contentFlowStyles;
       element.append(style);
       await ensure(context.route);
       app!.setRenderContext(context);
@@ -487,14 +504,14 @@ function createRunPageMounts(
   };
 }
 
-function createMount(config: Readonly<RunConfig>, routes: RunRoutes,navigate:Navigate, ui: ViewUi, runDetailCache: Map<string, Json>, reviewOnly = false): RefreshableViewMount {
+function createMount(config: Readonly<RunConfig>, routes: RunRoutes,navigate:Navigate, ui: ViewUi, runDetailCache: Map<string, Json>, reviewOnly = false, renderArtifact: (input: unknown) => HTMLElement = input => (input as { defaultRender: () => HTMLElement }).defaultRender()): RefreshableViewMount {
   let app: RunApplication | undefined;
   return {
     async mount({ element, portal }, context) {
       const controller = new AbortController();
       element.classList.add("run-module");
-      const style = document.createElement("style"); style.textContent = styles + runDetailStyles; element.append(style);
-      app = new RunApplication(element, portal, config, routes, context.route, controller,navigate,ui,runDetailCache,reviewOnly);
+      const style = document.createElement("style"); style.textContent = styles + runDetailStyles + contentFlowStyles; element.append(style);
+      app = new RunApplication(element, portal, config, routes, context.route, controller,navigate,ui,runDetailCache,reviewOnly, () => undefined, renderArtifact);
       app.setRenderContext(context);
       await app.start();
       return async () => { controller.abort(); await app?.dispose(); app = undefined; element.classList.remove("run-module"); element.replaceChildren(); portal.replaceChildren(); };
@@ -515,6 +532,7 @@ class RunApplication {
   readonly #routes: RunRoutes; #route: RouteLocation; readonly #controller: AbortController;readonly #navigate:Navigate;
   readonly #ui: ViewUi;
   readonly #onListChange: () => void;
+  readonly #renderArtifact: (input: unknown) => HTMLElement;
   #runs: Json[] = []; #detail: Json | null = null; #status = "running"; #poll = 0; #busy = false;
   #detailError = ""; #detailErrorRunId = "";
   #reviewContext: Json | null = null; #reviewDialog: HTMLElement | null = null;
@@ -532,8 +550,8 @@ class RunApplication {
   #runListVersion = "";
   #lastLoadChanged = true;
   #renderContext: ViewRenderContext | undefined;
-  constructor(root: HTMLElement, portal: HTMLElement, config: Readonly<RunConfig>, routes: RunRoutes, route: RouteLocation, controller: AbortController,navigate:Navigate,ui:ViewUi,runDetailCache:Map<string,Json>,reviewOnly=false,onListChange:()=>void=()=>undefined) {
-    this.#root=root; this.#portal=portal; this.#config=config; this.#routes=routes; this.#route=route; this.#controller=controller;this.#navigate=navigate;this.#ui=ui;this.#runDetailCache=runDetailCache;this.#reviewOnly=reviewOnly;this.#onListChange=onListChange;
+  constructor(root: HTMLElement, portal: HTMLElement, config: Readonly<RunConfig>, routes: RunRoutes, route: RouteLocation, controller: AbortController,navigate:Navigate,ui:ViewUi,runDetailCache:Map<string,Json>,reviewOnly=false,onListChange:()=>void=()=>undefined,renderArtifact:(input:unknown)=>HTMLElement=input=>(input as {defaultRender:()=>HTMLElement}).defaultRender()) {
+    this.#root=root; this.#portal=portal; this.#config=config; this.#routes=routes; this.#route=route; this.#controller=controller;this.#navigate=navigate;this.#ui=ui;this.#runDetailCache=runDetailCache;this.#reviewOnly=reviewOnly;this.#onListChange=onListChange;this.#renderArtifact=renderArtifact;
     this.#status = normalizedRunStatus(route.query.status);
   }
   get status(): string { return this.#status; }
@@ -811,7 +829,8 @@ class RunApplication {
       renderContext: this.#renderContext,
       request: (path, init) => this.#request(path, init),
       refresh: () => this.#refresh(),
-      openReview: (runId, reviewId) => this.#openReview(runId, reviewId)
+      openReview: (runId, reviewId) => this.#openReview(runId, reviewId),
+      renderArtifact: this.#renderArtifact
     });
   }
   async #archive(run:Json):Promise<void>{if(!await this.#ui.confirm({title:{text:tr(this.#config,"archive")},description:{text:tr(this.#config,"archiveConfirm")},confirmLabel:{text:tr(this.#config,"archive")},cancelLabel:{text:tr(this.#config,"cancel")},closeLabel:{text:tr(this.#config,"close")}}))return;this.#busy=true;try{await this.#request(`/api/archive/runs/${encodeURIComponent(run.id)}`,{method:"POST"});await this.#refresh();}finally{this.#busy=false;}}

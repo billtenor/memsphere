@@ -36,7 +36,9 @@ export default defineViewPlugin<SettingsViewConfig>({
         when: section.activation,
         value: {
           title: { text: settingsSectionLabel(config, selected) },
-          subtitle: { text: ["project", "participants"].includes(selected)
+          subtitle: { text: selected === "appearance"
+            ? text(config, "settings.appearanceHelp", "安装和管理界面扩展包，并配置主题、页面、组件和样式。")
+            : ["project", "participants"].includes(selected)
             ? text(config, "navigation.projectSettingsSubtitle", "管理当前项目配置。")
             : text(config, "navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。") }
         }
@@ -67,7 +69,9 @@ export default defineViewPlugin<SettingsViewConfig>({
       when: section.activation,
       value: {
         title: { text: settingsSectionLabel(config, initialSection) },
-        subtitle: { text: ["project", "participants"].includes(initialSection)
+        subtitle: { text: initialSection === "appearance"
+          ? text(config, "settings.appearanceHelp", "安装和管理界面扩展包，并配置主题、页面、组件和样式。")
+          : ["project", "participants"].includes(initialSection)
           ? text(config, "navigation.projectSettingsSubtitle", "管理当前项目配置。")
           : text(config, "navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。") }
       }
@@ -86,7 +90,7 @@ export default defineViewPlugin<SettingsViewConfig>({
         icon: { kind: "system", name: "gear-six" },
         async search({ query }) {
           const entries = [
-            ["general", "常规"], ["view", "界面服务"],
+            ["general", "常规"], ["view", "界面服务"], ["appearance", "界面与主题"],
             ["providers", "ACP 提供方"], ["participants", "参与者配置"]
           ] as const;
           const needle = query.trim().toLowerCase();
@@ -104,6 +108,7 @@ function settingsSecondaryItems(config: SettingsViewConfig, section: RouteToken,
   const entries = [
     ["general", text(config, "settings.general", "通用设置"), "gear-six"],
     ["view", text(config, "settings.viewService", "界面服务"), "sliders-horizontal"],
+    ["appearance", text(config, "settings.appearance", "界面与主题"), "cube"],
     ["providers", text(config, "settings.providers", "模型提供商"), "sparkle"],
     ["participants", text(config, "settings.participants", "参与者"), "user"],
   ] as const;
@@ -120,6 +125,7 @@ function settingsSectionLabel(config: SettingsViewConfig, section: string): stri
   const labels: Readonly<Record<string, string>> = {
     general: text(config, "settings.general", "通用设置"),
     view: text(config, "settings.viewService", "界面服务"),
+    appearance: text(config, "settings.appearance", "界面与主题"),
     providers: text(config, "settings.providers", "模型提供商"),
     project: text(config, "navigation.project", "当前项目"),
     participants: text(config, "settings.participants", "参与者")
@@ -128,6 +134,7 @@ function settingsSectionLabel(config: SettingsViewConfig, section: string): stri
 }
 
 function normalizeSettingsSection(section: string | undefined): string {
+  if (section === "packages" || section === "composition") return "appearance";
   return !section || section === "overview" ? "general" : section;
 }
 

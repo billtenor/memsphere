@@ -10,6 +10,11 @@ import { defaultPromptLocale, promptLocales, type PromptLocale } from "./prompts
 import { homePaths, resolveMemsphereHome } from "./home.js";
 import { resolveProjectContext } from "./project/resolver.js";
 import { projectConfigSchema } from "./project/model.js";
+import {
+  globalViewPackagesConfigSchema,
+  globalViewThemeConfigSchema,
+  viewCompositionConfigSchema
+} from "./view/package-config.js";
 
 export type MemsphereConfig = {
   configPath: string;
@@ -29,10 +34,14 @@ export type MemsphereConfig = {
     port: number;
     operatorToken?: string;
   };
+  viewPackages?: import("./view/package-config.js").GlobalViewPackagesConfig;
+  viewTheme?: import("./view/package-config.js").GlobalViewThemeConfig;
+  viewComposition?: import("./view/package-config.js").ViewCompositionConfig;
   project?: {
     name: string;
     revision?: string;
     store?: import("./project/model.js").ProjectConfigFile["store"];
+    view?: import("./view/package-config.js").ProjectViewConfig;
     mounted: Array<{
       name: string;
       memoryRoot: string;
@@ -72,6 +81,9 @@ export const globalConfigSchema = z.object({
     port: z.number().int().min(0).max(65535),
     operator_token: z.string().min(1).optional()
   }).strict().optional(),
+  view_packages: globalViewPackagesConfigSchema.optional(),
+  view_theme: globalViewThemeConfigSchema.optional(),
+  view_composition: viewCompositionConfigSchema.optional(),
   debug: z.object({ agent_review: z.boolean().optional() }).strict().optional()
 }).strict();
 
@@ -117,7 +129,16 @@ async function readProjectExecutionConfig(options: {
         ...(global.view.operator_token ? { operatorToken: global.view.operator_token } : {})
       }
       : { host: "127.0.0.1", port: 0 },
-    project: { name: context.primary.name, revision, store: context.primary.config.store, mounted }
+    ...(global.view_packages === undefined ? {} : { viewPackages: global.view_packages }),
+    ...(global.view_theme === undefined ? {} : { viewTheme: global.view_theme }),
+    ...(global.view_composition === undefined ? {} : { viewComposition: global.view_composition }),
+    project: {
+      name: context.primary.name,
+      revision,
+      store: context.primary.config.store,
+      ...(context.primary.config.view === undefined ? {} : { view: context.primary.config.view }),
+      mounted
+    }
   };
 }
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isAbsolute, posix } from "node:path";
 import { projectControlPlaneConfigSchema } from "../control-plane/schema.js";
+import { projectViewConfigSchema } from "../view/package-config.js";
 
 export const projectNamePattern = /^[a-z0-9._-]+$/;
 export const projectNameSchema = z.string().min(1).regex(projectNamePattern, {
@@ -32,7 +33,8 @@ const embeddedStoreSchema = z.object({
 
 export const projectConfigSchema = z.object({
   store: z.discriminatedUnion("type", [managedStoreSchema, embeddedStoreSchema]),
-  control_plane: projectControlPlaneConfigSchema.optional()
+  control_plane: projectControlPlaneConfigSchema.optional(),
+  view: projectViewConfigSchema.optional()
 }).strict();
 
 export type ProjectManifest = z.infer<typeof projectManifestSchema>;

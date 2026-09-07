@@ -338,6 +338,42 @@ test("ViewHost continues disposing resources after one cleanup fails on pagehide
   );
 });
 
+test("public component slots support repeated consumers, native disclosure and failure fallback", async () => {
+  await withBrowserHost(`
+    import { defineViewPlugin, slots, componentSlots } from '@memsphere/view-sdk';
+    export default defineViewPlugin({ apiVersion: 1, inject: ['slots', 'router', 'ui'], uiVersion: 1,
+      apply(ctx) {
+        const route = ctx.router.register({ id: 'index', path: '/synthetic' });
+        ctx.slots.register(componentSlots.document, { id: 'canvas', key: 'default', priority: 10,
+          value: { render(input) { const root = document.createElement('article'); root.dataset.customCanvas = ''; root.append(input.content); return root; } } });
+        ctx.slots.register(componentSlots.disclosure, { id: 'broken', key: 'default', priority: 10,
+          value: { render() { return document.createElement('div'); } } });
+        ctx.slots.register(slots.mainView, { id: 'page', key: route.key, value: { mount({ element }) {
+          for (const name of ['memory', 'run']) {
+            const content = document.createElement('button'); content.textContent = name;
+            content.onclick = () => { content.textContent = name + ' clicked'; };
+            element.append(ctx.ui.contentComponent({ kind: 'document', content, defaultRender: () => content }));
+          }
+          const body = document.createElement('div'); body.textContent = 'rules';
+          const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Required';
+          details.append(summary, body);
+          element.append(ctx.ui.contentComponent({ kind: 'disclosure', content: body, title: 'Required', count: 1, defaultRender: () => { details.append(body); return details; } }));
+          const flow = document.createElement('div'); flow.dataset.defaultFlow = '';
+          element.append(ctx.ui.contentComponent({ kind: 'flow', content: flow, defaultRender: () => flow }));
+        } } });
+      }
+    });`, async page => {
+      await page.locator('[data-custom-canvas]').first().waitFor();
+      assert.equal(await page.locator('[data-custom-canvas]').count(), 2);
+      await page.getByRole('button', { name: 'run', exact: true }).click();
+      assert.equal(await page.getByRole('button', { name: 'run clicked', exact: true }).count(), 1);
+      assert.equal(await page.locator('details').getAttribute('open'), null);
+      await page.locator('summary').click();
+      assert.equal(await page.getByText('rules', { exact: true }).isVisible(), true);
+      assert.equal(await page.locator('[data-default-flow]').count(), 1);
+    });
+});
+
 async function withBrowserHost(
   bundle: string | undefined,
   run: (page: Page) => Promise<void>,

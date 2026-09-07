@@ -1,4 +1,14 @@
-import type { ViewRenderContext, ViewUi } from "@memsphere/view-sdk";
+import type { RunArtifactPresentationContext, ViewRenderContext, ViewUi } from "@memsphere/view-sdk";
+import {
+  createContentCanvas,
+  presentContent,
+  createContentList,
+  createContentListDisclosure,
+  renderContentFlow,
+  renderContentListDisclosure,
+  type ContentFlowHooks,
+  type ContentFlowNode
+} from "../../../shared/view/content-flow.js";
 
 type Json = Record<string, any>;
 
@@ -15,6 +25,7 @@ export interface RunDetailOptions {
   readonly request: (path: string, init?: RequestInit) => Promise<any>;
   readonly refresh: () => Promise<void>;
   readonly openReview: (runId: string, reviewId: string) => Promise<void>;
+  readonly renderArtifact: (input: unknown) => HTMLElement;
 }
 
 export function createRunDetailState(): RunDetailState {
@@ -22,7 +33,9 @@ export function createRunDetailState(): RunDetailState {
 }
 
 export function renderRunDetail(run: Json, options: RunDetailOptions): HTMLElement {
+  const canvas = createContentCanvas();
   const wrap = document.createElement("div");
+  wrap.className = "run-detail-content mem-content-document";
   const labels = createLabels(options.locale);
   wrap.append(renderRunMeta(run, options, labels));
 
@@ -41,20 +54,21 @@ export function renderRunDetail(run: Json, options: RunDetailOptions): HTMLEleme
 
   if (Array.isArray(run.plan) && run.plan.length) {
     const label = document.createElement("div");
-    label.className = "run-section-title block-title";
+    label.className = "run-section-title block-title mem-content-flow-title";
     label.textContent = labels.flow;
-    const flow = document.createElement("div");
-    flow.className = "run-flow flow";
     const events = new Map<string, Json>((run.events || []).map((event: Json) => [event.stepId, event]));
     const active = currentRunStep(run);
-    for (const step of run.plan) flow.append(renderFlowStep(step, events, active, run, options, labels));
+    const flow = renderContentFlow(run.plan.map((step: Json) => normalizeRunFlowNode(step)), runFlowHooks(events, active, run, options, labels));
+    flow.classList.add("run-flow", "flow");
     wrap.append(label, flow);
     const finals = (run.events || []).filter((event: Json) => event.artifact?.final);
     if (finals.length) wrap.append(renderArtifactCollection(finals, labels.finalArtifacts, options, run, labels));
   } else {
     wrap.append(renderArtifactCollection(run.events || [], labels.artifacts, options, run, labels));
   }
-  return wrap;
+  appendDisclosureToggle(wrap, labels);
+  canvas.append(wrap);
+  return presentContent("document", canvas, options.ui);
 }
 
 function renderRunMeta(run: Json, options: RunDetailOptions, labels: Labels): HTMLElement {
@@ -83,7 +97,7 @@ function renderBindings(run: Json, options: RunDetailOptions, labels: Labels): H
   const actors = Object.entries(run.controlPlane?.actors || {}) as [string, Json][];
   if (!slots.length || !actors.length) return null;
   const panel = document.createElement("section");
-  panel.className = "run-panel run-bindings";
+  panel.className = "run-panel run-bindings mem-content-disclosure-host";
   const expanded = options.state.expandedBindings.has(run.id);
   const body = document.createElement("div");
   body.className = "run-binding-body";
@@ -150,72 +164,72 @@ function renderBindings(run: Json, options: RunDetailOptions, labels: Labels): H
   return panel;
 }
 
-function renderFlowStep(step: Json, events: Map<string, Json>, active: Json | null, run: Json, options: RunDetailOptions, labels: Labels): HTMLElement {
-  if (step.kind === "call") return renderCall(step, active, run, labels);
-  const item = document.createElement("article");
-  const current = active?.id === step.id;
-  const kind = step.kind === "branch" || step.kind === "loop" ? " branch" : "";
-  item.className = `run-step flow-item${kind}${current ? " current task-step" : ""}`;
-  item.dataset.stepId = step.id;
-  if (current) { item.dataset.currentTaskStep = "true"; item.id = `task-step-${safeId(run.id)}-${safeId(step.id)}`; }
-  const event = events.get(step.id);
-  const header = document.createElement("div");
-  header.className = "flow-head";
-  const tag = document.createElement("span");
-  tag.className = "flow-label";
-  tag.textContent = step.kind === "branch" ? labels.if : step.kind === "loop" ? labels.while : labels.step;
-  const action = document.createElement("h3");
-  action.className = "flow-action";
-  action.textContent = step.instruction || artifactSpec(step).name || step.id;
-  const meta = document.createElement("div");
-  meta.className = "run-meta artifact-row";
-  meta.append(pill(stepStatus(step, event, active, run), current ? "running" : event ? "done" : ""));
-  appendArtifactContract(meta, step, labels);
-  header.append(tag, action, meta);
-  item.append(header);
-  appendRuleContracts(item, step, `run:${run.id}:step:${step.id}`, options, labels);
-  const schemaWriting = renderSchemaWriting(run, step, options, labels);
-  if (schemaWriting) item.append(schemaWriting);
-  if (event?.artifact) item.append(renderArtifactResult(event, run, options, labels));
-  if (step.kind === "branch" && step.branches) {
-    item.append(renderChildren(step.branches.truthy || [], events, active, run, options, labels));
-    if (step.branches.falsy?.length) {
-      const otherwise = document.createElement("div");
-      otherwise.className = "flow-else";
-      const elseLabel = document.createElement("div");
-      elseLabel.className = "flow-label";
-      elseLabel.textContent = labels.else;
-      otherwise.append(elseLabel, renderChildren(step.branches.falsy, events, active, run, options, labels));
-      item.append(otherwise);
+function normalizeRunFlowNode(step: Json): ContentFlowNode<Json> {
+  const kind = step.kind === "branch" || step.kind === "loop" || step.kind === "call" ? step.kind : "action";
+  const branches = kind === "branch"
+    ? [
+        ...(step.branches?.truthy?.length ? [{ kind: "then" as const, nodes: step.branches.truthy.map((child: Json) => normalizeRunFlowNode(child)) }] : []),
+        ...(step.branches?.falsy?.length ? [{ kind: "else" as const, nodes: step.branches.falsy.map((child: Json) => normalizeRunFlowNode(child)) }] : [])
+      ]
+    : kind === "loop" && step.loop?.body?.length
+      ? [{ kind: "do" as const, nodes: step.loop.body.map((child: Json) => normalizeRunFlowNode(child)) }]
+      : [];
+  return {
+    id: String(step.id ?? ""),
+    path: String(step.id ?? ""),
+    kind,
+    action: String(step.instruction || artifactSpec(step).name || step.id || ""),
+    target: String(step.target ?? ""),
+    source: step,
+    content: step,
+    branches
+  };
+}
+
+function runFlowHooks(events: Map<string, Json>, active: Json | null, run: Json, options: RunDetailOptions, labels: Labels): ContentFlowHooks<Json> {
+  return {
+    ui: options.ui,
+    labels: { step: labels.step, if: labels.if, while: labels.while, call: labels.call, else: labels.else },
+    renderCallTarget: node => {
+      const link = document.createElement("a");
+      link.className = "call-link";
+      link.href = `/memories/procedures/${encodeURIComponent(node.target || "")}`;
+      link.textContent = node.target || node.action;
+      return link;
+    },
+    renderMeta: node => {
+      const meta = document.createElement("div");
+      meta.className = "memory-artifact-row mem-content-artifact-contract";
+      appendArtifactContract(meta, node.content, labels);
+      return meta;
+    },
+    decorateNode: (item, node) => {
+      const current = active?.id === node.id;
+      item.classList.add("run-step", "flow-item");
+      item.dataset.stepId = node.id;
+      if (current) {
+        item.classList.add("current", "task-step");
+        item.dataset.currentTaskStep = "true";
+        item.setAttribute("aria-current", "step");
+        item.id = `task-step-${safeId(run.id)}-${safeId(node.id)}`;
+      }
+    },
+    decorateHead: (head, node) => {
+      if (active?.id !== node.id) return;
+      const marker = head.querySelector<HTMLElement>(".mem-content-flow-label")!;
+      marker.classList.add("run-current-step-marker");
+      marker.textContent = labels.current;
+    },
+    renderBody: node => {
+      const holder = document.createElement("div");
+      appendRuleContracts(holder, node.content, `run:${run.id}:step:${node.id}`, options, labels);
+      const schemaWriting = renderSchemaWriting(run, node.content, options, labels);
+      if (schemaWriting) holder.append(schemaWriting);
+      const event = events.get(node.id);
+      if (event?.artifact) holder.append(renderArtifactResult(event, run, options, labels));
+      return [...holder.childNodes];
     }
-  }
-  if (step.kind === "loop" && step.loop) item.append(renderChildren(step.loop.body || [], events, active, run, options, labels));
-  return item;
-}
-
-function renderCall(step: Json, active: Json | null, run: Json, labels: Labels): HTMLElement {
-  const item = document.createElement("article");
-  const current = active?.id === step.id;
-  item.className = `run-step flow-item call${current ? " current task-step" : ""}`;
-  item.dataset.stepId = step.id;
-  if (current) item.dataset.currentTaskStep = "true";
-  const label = document.createElement("span");
-  label.className = "flow-label";
-  label.textContent = labels.call;
-  const link = document.createElement("a");
-  link.className = "call-link";
-  link.href = `/memories/procedures/${encodeURIComponent(String(step.target || ""))}`;
-  link.textContent = step.target || step.instruction || step.id;
-  item.append(label, link, pill(stepStatus(step, undefined, active, run), current ? "running" : ""));
-  return item;
-}
-
-function renderChildren(steps: Json[], events: Map<string, Json>, active: Json | null, run: Json, options: RunDetailOptions, labels: Labels): HTMLElement {
-  const children = document.createElement("div");
-  children.className = "flow-children";
-  if (!steps.length) { const empty = document.createElement("span"); empty.className = "muted"; empty.textContent = labels.noSteps; children.append(empty); }
-  else for (const step of steps) children.append(renderFlowStep(step, events, active, run, options, labels));
-  return children;
+  };
 }
 
 function renderArtifactCollection(events: Json[], heading: string, options: RunDetailOptions, run: Json, labels: Labels): HTMLElement {
@@ -231,29 +245,66 @@ function renderArtifactCollection(events: Json[], heading: string, options: RunD
 }
 
 function renderArtifactResult(event: Json, run: Json, options: RunDetailOptions, labels: Labels, standalone = false): HTMLElement {
-  const card = document.createElement(standalone ? "article" : "div");
-  card.className = standalone ? "run-artifact task-result" : "task-result";
+  const card = document.createElement("details");
+  card.className = `${standalone ? "run-artifact " : ""}run-collapsible task-result mem-content-disclosure`;
   const artifact = event.artifact || {};
   const title = document.createElement("h3");
-  title.textContent = artifact.name || event.stepId || labels.artifact;
+  title.className = "mem-content-disclosure-title";
+  title.textContent = standalone ? (artifact.name || event.stepId || labels.artifact) : labels.output;
   const meta = document.createElement("div");
   meta.className = "run-meta artifact-meta-line";
-  if (event.frame) meta.append(pill(String(event.frame)));
-  if (artifact.type) meta.append(pill(String(artifact.type)));
-  appendFormatMeta(meta, artifact.format, artifact.schema, labels);
-  if (artifact.storage) meta.append(pill(artifact.path ? `${artifact.storage}: ${artifact.path}` : String(artifact.storage)));
+  if (artifact.path) meta.append(pill(`file: ${artifact.path}`));
   if (artifact.validation?.status) meta.append(pill(`${labels.validation}: ${artifact.validation.status}`, artifact.validation.status === "passed" ? "done" : "warn"));
-  if (artifact.final) meta.append(pill(labels.final, "done"));
-  if (event.at) meta.append(pill(formatTime(event.at)));
-  card.append(title, meta, renderArtifactValue(artifact));
+  if (event.at) meta.append(pill(`${labels.time}: ${formatTime(event.at)}`));
   const review = (run.artifactReviewSummaries || []).find((candidate: Json) => candidate.stepId === event.stepId)
     || (run.artifactReview?.stepId === event.stepId ? run.artifactReview : null);
+  const metadata = artifact.metadata && typeof artifact.metadata === "object" && !Array.isArray(artifact.metadata)
+    ? artifact.metadata
+    : {};
+  const presentation: RunArtifactPresentationContext = {
+    runId: run.id,
+    artifactId: event.stepId,
+    type: String(artifact.type ?? ""),
+    format: freezePresentationValue(structuredClone(artifact.format ?? null)),
+    title: String(artifact.name || event.stepId || labels.artifact),
+    content: freezePresentationValue(structuredClone(
+      artifact.storage === "file" ? (artifact.content ?? artifact.contentError ?? artifact.path) : (artifact.value ?? artifact.content ?? null)
+    )),
+    metadata: freezePresentationValue(structuredClone(metadata)),
+    ...(review?.id ? { openReview: () => options.openReview(run.id, review.id) } : {}),
+    download: () => downloadArtifact(artifact, artifact.name || event.stepId || "artifact"),
+    defaultRender: () => renderArtifactValue(artifact)
+  };
+  const summary = document.createElement("summary");
+  summary.className = "run-disclosure-summary run-artifact-summary mem-content-disclosure-summary";
+  summary.append(disclosureChevron(), title);
+  const body = document.createElement("div");
+  body.className = "run-disclosure-body mem-content-disclosure-body";
+  body.append(meta, options.renderArtifact(Object.freeze(presentation)));
+  card.append(summary, body);
   if (review?.id) {
     const open = options.ui.button({ label: { text: labels.review }, run: () => options.openReview(run.id, review.id) });
     open.dataset.artifactReviewId = review.id;
-    card.append(open);
+    body.append(open);
   }
   return card;
+}
+
+function freezePresentationValue<T>(value: T): T {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value as Record<string, unknown>)) freezePresentationValue(child);
+  return Object.freeze(value);
+}
+
+function downloadArtifact(artifact: Json, name: string): void {
+  const value = artifact?.content ?? artifact?.value ?? artifact;
+  const blob = new Blob([typeof value === "string" ? value : JSON.stringify(value, null, 2)], { type: "text/plain;charset=utf-8" });
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = String(name);
+  link.click();
+  URL.revokeObjectURL(href);
 }
 
 export function renderArtifactValue(artifact: Json): HTMLElement {
@@ -272,16 +323,40 @@ export function renderArtifactValue(artifact: Json): HTMLElement {
 
 function appendArtifactContract(target: HTMLElement, step: Json, labels: Labels): void {
   const artifact = artifactSpec(step);
-  target.append(pill(`${labels.artifact}: ${artifact.name || "—"}`, "strong"));
-  if (artifact.type) target.append(pill(artifact.type));
-  appendFormatMeta(target, artifact.format, artifact.schema, labels);
-  if (artifact.final) target.append(pill(labels.final, "done"));
+  const summary = document.createElement("span");
+  summary.className = "mem-content-artifact-summary";
+  const label = document.createElement("span");
+  label.className = "mem-content-artifact-label";
+  label.textContent = labels.artifact;
+  summary.append(label, pill(artifact.name || "—", "strong mem-content-artifact-name"));
+  const details = document.createElement("span");
+  details.className = "mem-content-artifact-details";
+  if (artifact.type) details.append(pill(artifact.type));
+  appendFormatMeta(details, artifact.format, artifact.schema, labels);
+  if (artifact.final) details.append(pill(labels.final, "done"));
+  if (details.childElementCount) {
+    summary.tabIndex = 0;
+    summary.append(details);
+  }
+  target.append(summary);
   const reviewSlots = Array.isArray(artifact.review)
     ? artifact.review
     : typeof artifact.review === "string" && artifact.review
       ? [artifact.review]
       : [];
-  for (const slot of reviewSlots) target.append(pill(`${labels.reviewer}: ${displaySlot(slot)}`));
+  if (reviewSlots.length) {
+    const review = document.createElement("span");
+    review.className = "mem-content-review-summary";
+    review.tabIndex = 0;
+    const count = document.createElement("span");
+    count.className = "mem-content-review-count";
+    count.textContent = `${labels.reviewer}: ${reviewSlots.length}`;
+    const reviewDetails = document.createElement("span");
+    reviewDetails.className = "mem-content-review-details";
+    for (const slot of reviewSlots) reviewDetails.append(pill(displaySlot(slot)));
+    review.append(count, reviewDetails);
+    target.append(review);
+  }
 }
 
 function appendFormatMeta(target: HTMLElement, format: unknown, schema: unknown, labels: Labels): void {
@@ -296,23 +371,19 @@ function appendFormatMeta(target: HTMLElement, format: unknown, schema: unknown,
 
 function appendRuleContracts(target: HTMLElement, step: Json, scope: string, options: RunDetailOptions, labels: Labels): void {
   if (step.assertTree) target.append(renderEffectiveRuleTree(step.assertTree, labels.asserts, `${scope}:asserts`, options, labels));
-  else if (step.asserts?.length) target.append(renderSimpleRules(step.asserts, labels.asserts));
+  else if (step.asserts?.length) target.append(renderSimpleRules(step.asserts, labels.asserts, options.ui));
   if (step.suggestTree) target.append(renderEffectiveRuleTree(step.suggestTree, labels.suggests, `${scope}:suggests`, options, labels));
-  else if (step.suggests?.length) target.append(renderSimpleRules(step.suggests, labels.suggests));
+  else if (step.suggests?.length) target.append(renderSimpleRules(step.suggests, labels.suggests, options.ui));
 }
 
-function renderSimpleRules(entries: unknown[], heading: string): HTMLElement {
-  const wrap = document.createElement("div");
-  wrap.className = "effective-rule-tree action-contracts";
-  const title = document.createElement("div"); title.className = "block-title"; title.textContent = heading;
-  const list = document.createElement("ul"); list.className = "text-list effective-rule-list";
-  for (const entry of entries) { const item = document.createElement("li"); item.textContent = typeof entry === "string" ? entry : (entry as Json)?.target || JSON.stringify(entry); list.append(item); }
-  wrap.append(title, list); return wrap;
+function renderSimpleRules(entries: unknown[], heading: string, ui?: ViewUi): HTMLElement {
+  const values = entries.map(entry => document.createTextNode(typeof entry === "string" ? entry : (entry as Json)?.target || JSON.stringify(entry)));
+  return renderContentListDisclosure(heading, values, "action-contracts effective-rule-tree run-collapsible", ui);
 }
 
 function appendSimpleRuleGroup(target: HTMLElement, entries: unknown[], heading: string): void {
   const title = document.createElement("div"); title.className = "block-title"; title.textContent = heading;
-  const list = document.createElement("ul"); list.className = "text-list";
+  const list = createContentList();
   for (const entry of entries) {
     const item = document.createElement("li");
     item.textContent = typeof entry === "string" ? entry : (entry as Json)?.text || JSON.stringify(entry);
@@ -322,16 +393,15 @@ function appendSimpleRuleGroup(target: HTMLElement, entries: unknown[], heading:
 }
 
 function renderEffectiveRuleTree(tree: Json, headingText: string, scope: string, options: RunDetailOptions, labels: Labels): HTMLElement {
-  const wrap = document.createElement("div");
-  wrap.className = "effective-rule-tree";
-  const heading = document.createElement("div"); heading.className = "block-title"; heading.textContent = headingText; wrap.append(heading);
-  appendEffectiveEntries(wrap, effectiveEntries(tree), scope, options, labels);
-  for (const [index, section] of (tree.sections || []).entries()) wrap.append(renderEffectiveSection(section, `${scope}:section:${index}`, options, labels));
+  const { block: wrap, body } = createContentListDisclosure(headingText, effectiveEntries(tree).length, "effective-rule-tree run-collapsible", options.ui);
+  appendEffectiveEntries(body, effectiveEntries(tree), scope, options, labels);
+  for (const [index, section] of (tree.sections || []).entries()) body.append(renderEffectiveSection(section, `${scope}:section:${index}`, options, labels));
+  wrap.append(body);
   return wrap;
 }
 
 function appendEffectiveEntries(target: HTMLElement, entries: unknown[], scope: string, options: RunDetailOptions, labels: Labels): void {
-  const list = document.createElement("ul"); list.className = "text-list effective-rule-list";
+  const list = createContentList(); list.classList.add("effective-rule-list");
   entries.forEach((entry, index) => {
     const item = document.createElement("li");
     if (typeof entry === "string" || (entry as Json)?.kind === "rule") item.textContent = typeof entry === "string" ? entry : (entry as Json).text;
@@ -379,20 +449,21 @@ function ruleToggle(label: string, scope: string, body: HTMLElement, options: Ru
 function renderSchemaWriting(run: Json, step: Json, options: RunDetailOptions, labels: Labels): HTMLElement | null {
   const snapshot = run.schemaWriting;
   if (!snapshot || snapshot.parentStepId !== step.id) return null;
-  const wrap = document.createElement("div"); wrap.className = "schema-writing";
-  const title = document.createElement("div"); title.className = "block-title"; title.textContent = labels.schemaWriting; wrap.append(title);
+  const wrap = document.createElement("details"); wrap.className = "schema-writing run-collapsible mem-content-disclosure";
+  const title = document.createElement("summary"); title.className = "block-title run-disclosure-summary mem-content-disclosure-summary"; title.append(disclosureChevron(), disclosureTitle(labels.schemaWriting)); wrap.append(title);
+  const body = document.createElement("div"); body.className = "run-disclosure-body mem-content-disclosure-body";
   const progress = document.createElement("div"); progress.className = "schema-writing-progress run-meta";
   progress.append(pill(`${labels.progress} ${snapshot.progress?.completed || 0}/${snapshot.progress?.total || 0}`), pill(`${labels.remaining} ${snapshot.progress?.remaining || 0}`));
   if (snapshot.currentField?.path) progress.append(pill(String(snapshot.currentField.path), "strong"));
   if (snapshot.draft?.status === "awaiting_finalization") progress.append(pill(labels.globalAdjustment, "warn"));
-  wrap.append(progress);
+  body.append(progress);
   for (const [index, source] of (snapshot.currentField?.sources || []).entries()) {
     const sourceElement = document.createElement("div"); sourceElement.className = "schema-writing-source";
     const sourceTitle = document.createElement("b"); sourceTitle.textContent = `${labels.constraintSource} · ${source.path}`; sourceElement.append(sourceTitle);
     if (source.defines?.length) sourceElement.append(renderSimpleRules(source.defines, labels.defines));
     if (source.assertTree) sourceElement.append(renderEffectiveRuleTree(source.assertTree, labels.asserts, `run:${run.id}:schema:${step.id}:${index}:asserts`, options, labels));
     if (source.suggestTree) sourceElement.append(renderEffectiveRuleTree(source.suggestTree, labels.suggests, `run:${run.id}:schema:${step.id}:${index}:suggests`, options, labels));
-    wrap.append(sourceElement);
+    body.append(sourceElement);
   }
   if (snapshot.draft) {
     const preview = document.createElement("details"); preview.className = "schema-draft-preview"; preview.open = snapshot.draft.status === "awaiting_finalization";
@@ -403,9 +474,28 @@ function renderSchemaWriting(run: Json, step: Json, options: RunDetailOptions, l
     else if (snapshot.draft.contentError) { const error = document.createElement("div"); error.className = "muted"; error.textContent = snapshot.draft.contentError; preview.append(error); }
     if (snapshot.readOnly) { const notice = document.createElement("div"); notice.className = "muted"; notice.textContent = labels.readOnlyDraft; preview.append(notice); }
     else if (snapshot.draft.status === "awaiting_finalization") { const command = document.createElement("pre"); command.className = "run-pre"; command.textContent = `memsphere run report --run ${shellQuote(run.id)} --artifact-file ${shellQuote(snapshot.draft.filePath)}`; preview.append(command); }
-    wrap.append(preview);
+    body.append(preview);
   }
+  wrap.append(body);
   return wrap;
+}
+
+function appendDisclosureToggle(wrap: HTMLElement, labels: Labels): void {
+  const disclosures = () => [...wrap.querySelectorAll<HTMLDetailsElement>("details.run-collapsible")];
+  if (!disclosures().length) return;
+  let control!: HTMLButtonElement;
+  const update = () => { control.textContent = disclosures().some(item => !item.open) ? labels.expandAll : labels.collapseAll; };
+  control = document.createElement("button");
+  control.type = "button";
+  control.className = "run-disclosure-toggle-all";
+  control.addEventListener("click", () => {
+    const expand = disclosures().some(item => !item.open);
+    disclosures().forEach(item => { item.open = expand; });
+    update();
+  });
+  wrap.addEventListener("toggle", update, true);
+  update();
+  wrap.prepend(control);
 }
 
 export function currentRunStep(run: Json): Json | null {
@@ -440,22 +530,25 @@ function formatTime(value: unknown): string { if (!value) return "—"; const da
 function safeId(value: unknown): string { return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "-"); }
 function shellQuote(value: unknown): string { const text = String(value ?? ""); return /^[a-zA-Z0-9_./:-]+$/.test(text) ? text : `'${text.replace(/'/g, `'\\''`)}'`; }
 function pill(text: string, kind = ""): HTMLElement { const result = document.createElement("span"); result.className = `run-pill pill ${kind}`; result.textContent = text; return result; }
+function disclosureChevron(): HTMLElement { const result = document.createElement("span"); result.className = "mem-content-disclosure-chevron"; result.setAttribute("aria-hidden", "true"); result.textContent = "›"; return result; }
+function disclosureTitle(text: string): HTMLElement { const result = document.createElement("span"); result.className = "mem-content-disclosure-title"; result.textContent = text; return result; }
 interface Labels {
-  procedure: string; activeFrames: string; retainedFrames: string; artifacts: string; artifact: string; updated: string;
+  procedure: string; activeFrames: string; retainedFrames: string; artifacts: string; artifact: string; output: string; updated: string;
   legacyReadOnly: string; abandonedAt: string; review: string; jumpCurrent: string; bindings: string; reviewScopes: string;
   skip: string; save: string; asserts: string; suggests: string; flow: string; finalArtifacts: string; noArtifacts: string;
   if: string; while: string; else: string; step: string; call: string; noSteps: string; completed: string; current: string;
-  stopped: string; notStarted: string; validation: string; final: string; reviewer: string; schema: string; inlineSchema: string;
+  stopped: string; notStarted: string; time: string; validation: string; final: string; reviewer: string; schema: string; inlineSchema: string;
   referencedFrom: string; section: string; defines: string; rules: string; schemaWriting: string; progress: string;
   remaining: string; globalAdjustment: string; constraintSource: string; managedDraft: string; readOnlyDraft: string;
+  expandAll: string; collapseAll: string;
   status: Record<string, string>;
 }
 
 function createLabels(locale = ""): Labels {
   const en = locale.startsWith("en");
   return en ? {
-    procedure:"Procedure",activeFrames:"Active frames",retainedFrames:"Retained frames",artifacts:"Artifacts",artifact:"Artifact",updated:"Updated",legacyReadOnly:"Legacy · Read-only",abandonedAt:"Abandoned",review:"Artifact review",jumpCurrent:"Jump to current step",bindings:"Runtime review bindings",reviewScopes:"Review scopes",skip:"Skip future reviews",save:"Update binding",asserts:"Requirements",suggests:"Suggestions",flow:"Flow",finalArtifacts:"Final artifacts",noArtifacts:"No artifacts",if:"If",while:"While",else:"Else",step:"Step",call:"Call",noSteps:"No steps",completed:"Completed",current:"Current step",stopped:"Stopped",notStarted:"Not started",validation:"Validation",final:"Final",reviewer:"Reviewer",schema:"Schema",inlineSchema:"Inline Schema",referencedFrom:"Referenced from",section:"Section",defines:"Definitions",rules:"Rules",schemaWriting:"Schema writing",progress:"Progress",remaining:"Remaining",globalAdjustment:"Global adjustment",constraintSource:"Constraint source",managedDraft:"Managed draft",readOnlyDraft:"This draft is read-only",status:{running:"Running",done:"Done",abandoned:"Abandoned"}
+    procedure:"Procedure",activeFrames:"Active frames",retainedFrames:"Retained frames",artifacts:"Artifacts",artifact:"Artifact",output:"Output",updated:"Updated",legacyReadOnly:"Legacy · Read-only",abandonedAt:"Abandoned",review:"Artifact review",jumpCurrent:"Jump to current step",bindings:"Runtime review bindings",reviewScopes:"Review scopes",skip:"Skip future reviews",save:"Update binding",asserts:"Required rules",suggests:"Suggested rules",flow:"Flow",finalArtifacts:"Final artifacts",noArtifacts:"No artifacts",if:"If",while:"While",else:"Else",step:"Step",call:"Call",noSteps:"No steps",completed:"Completed",current:"Current step",stopped:"Stopped",notStarted:"Not started",time:"Time",validation:"Validation",final:"Final",reviewer:"Reviewer",schema:"Schema",inlineSchema:"Inline Schema",referencedFrom:"Referenced from",section:"Section",defines:"Definitions",rules:"Rules",schemaWriting:"Schema writing",progress:"Progress",remaining:"Remaining",globalAdjustment:"Global adjustment",constraintSource:"Constraint source",managedDraft:"Managed draft",readOnlyDraft:"This draft is read-only",expandAll:"Expand all",collapseAll:"Collapse all",status:{running:"Running",done:"Done",abandoned:"Abandoned"}
   } : {
-    procedure:"流程",activeFrames:"活动帧",retainedFrames:"保留帧",artifacts:"产物",artifact:"产物",updated:"更新时间",legacyReadOnly:"旧版 · 只读",abandonedAt:"废弃于",review:"产物评审",jumpCurrent:"跳到当前步骤",bindings:"运行时评审绑定",reviewScopes:"评审范围",skip:"跳过后续评审",save:"更新绑定",asserts:"规则",suggests:"建议",flow:"执行流程",finalArtifacts:"最终产物",noArtifacts:"暂无产物",if:"如果",while:"循环",else:"否则",step:"步骤",call:"调用流程",noSteps:"没有步骤",completed:"已完成",current:"当前步骤",stopped:"已停止",notStarted:"未开始",validation:"契约校验",final:"最终",reviewer:"评审者",schema:"图式",inlineSchema:"内联图式",referencedFrom:"引用自",section:"章节",defines:"定义",rules:"规则",schemaWriting:"Schema 填写",progress:"进度",remaining:"剩余",globalAdjustment:"全局调整",constraintSource:"约束来源",managedDraft:"受管草稿",readOnlyDraft:"该草稿只读",status:{running:"运行中",done:"已完成",abandoned:"已废弃"}
+    procedure:"流程",activeFrames:"活动帧",retainedFrames:"保留帧",artifacts:"产物",artifact:"产物",output:"产出物",updated:"更新时间",legacyReadOnly:"旧版 · 只读",abandonedAt:"废弃于",review:"产物评审",jumpCurrent:"跳到当前步骤",bindings:"运行时评审绑定",reviewScopes:"评审范围",skip:"跳过后续评审",save:"更新绑定",asserts:"必须遵守",suggests:"建议遵守",flow:"执行流程",finalArtifacts:"最终产物",noArtifacts:"暂无产物",if:"如果",while:"循环",else:"否则",step:"步骤",call:"调用流程",noSteps:"没有步骤",completed:"已完成",current:"当前步骤",stopped:"已停止",notStarted:"未开始",time:"时间",validation:"契约校验",final:"最终",reviewer:"评审人",schema:"图式",inlineSchema:"内联图式",referencedFrom:"引用自",section:"章节",defines:"定义",rules:"规则",schemaWriting:"Schema 填写",progress:"进度",remaining:"剩余",globalAdjustment:"全局调整",constraintSource:"约束来源",managedDraft:"受管草稿",readOnlyDraft:"该草稿只读",expandAll:"展开全部",collapseAll:"收起全部",status:{running:"运行中",done:"已完成",abandoned:"已废弃"}
   };
 }

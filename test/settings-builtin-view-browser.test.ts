@@ -64,7 +64,7 @@ test("Settings Builtin Mount loads both scopes and validates an edited global dr
     await page.locator("#settings-status").waitFor({ timeout: 5_000 }).catch(async error => {
       throw new Error(`${String(error)}\npage errors: ${pageErrors.join(" | ")}\nbody: ${(await page.locator("body").innerText()).slice(0, 2_000)}`);
     });
-    assert.match(await page.locator("#settings-status").textContent() ?? "", /没有未保存修改/);
+    assert.match(await page.locator("#settings-status").textContent() ?? "", /已保存/);
     await page.getByRole("button", { name: "通用设置", exact: true }).click();
     await page.waitForURL("**/settings/general");
     await page.getByRole("button", { name: "通用设置", exact: true }).waitFor();

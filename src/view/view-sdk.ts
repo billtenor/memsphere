@@ -59,12 +59,32 @@ export interface ViewTheme {
   subscribe(listener: () => void): Disposer;
 }
 
+export interface ViewThemePalette {
+  readonly light: Readonly<Partial<Record<ViewThemeToken, string>>>;
+  readonly dark: Readonly<Partial<Record<ViewThemeToken, string>>>;
+}
+
+export interface ViewThemeContribution {
+  readonly sourceId: string;
+  readonly tokens: ViewThemePalette;
+  readonly complete?: boolean;
+}
+
+export interface ViewThemeRegistry {
+  readonly version: 1;
+  registerTheme(contribution: ViewThemeContribution): Disposer;
+  selectTheme(sourceId?: string): Disposer;
+  overrideTokens(sourceId: string, tokens: ViewThemePalette): Disposer;
+}
+
 export type ViewServiceName =
   | "slots"
   | "router"
   | "api"
   | "i18n"
   | "theme"
+  | "themeRegistry"
+  | "presentation"
   | "ui"
   | "logger";
 
@@ -73,6 +93,60 @@ export interface ModuleInstanceContext {
   readonly moduleId: string;
   readonly moduleVersion: string;
   readonly instanceId: string;
+}
+
+export interface MemoryPagePresentationContext {
+  readonly kind: "memory-page";
+  readonly route: Readonly<RouteLocation>;
+  readonly filters: Readonly<Record<string, string>>;
+  readonly items: readonly Readonly<Record<string, unknown>>[];
+  readonly selectedReference?: string;
+  refresh(): Promise<MemoryPagePresentationContext>;
+  openMemory(reference: string): Promise<void>;
+  /** Opens the official Memory creation/import workflow; the Package never receives write access. */
+  openCreate(): Promise<void>;
+}
+
+export interface RunPagePresentationContext {
+  readonly kind: "run-page";
+  readonly route: Readonly<RouteLocation>;
+  readonly filters: Readonly<Record<string, string>>;
+  readonly runs: readonly Readonly<Record<string, unknown>>[];
+  readonly selectedRunId?: string;
+  refresh(): Promise<RunPagePresentationContext>;
+  openRun(id: string): Promise<void>;
+  /** Opens the official Run start workflow; the Package never receives write access. */
+  startRun(): Promise<void>;
+}
+
+export interface MemoryDetailPresentationContext {
+  readonly reference: string;
+  readonly kind: string;
+  readonly title: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly sections: readonly unknown[];
+  copyReference(): void | Promise<void>;
+  openChangeSet(id: string): void | Promise<void>;
+  openReview(id: string): void | Promise<void>;
+  defaultRender(): HTMLElement;
+}
+
+export interface RunArtifactPresentationContext {
+  readonly runId: string;
+  readonly artifactId: string;
+  readonly type: string;
+  readonly format: unknown;
+  readonly title: string;
+  readonly content: unknown;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  download(): void | Promise<void>;
+  readonly openReview?: () => void | Promise<void>;
+  defaultRender(): HTMLElement;
+}
+
+export interface ViewPresentationService {
+  memoryPage(filters?: Readonly<Record<string, string>>): Promise<MemoryPagePresentationContext>;
+  runPage(filters?: Readonly<Record<string, string>>): Promise<RunPagePresentationContext>;
 }
 
 export interface ViewLifecycle {
@@ -97,6 +171,26 @@ export interface ViewMount {
     context: ViewRenderContext,
   ): MaybePromise<void | Disposer>;
   update?(context: ViewRenderContext): MaybePromise<void>;
+}
+
+export interface ViewDataRenderer<Input = unknown> {
+  render(input: Input): HTMLElement;
+}
+
+/** Repeatable public UI components, independent of Module and Shell placement. */
+export type ContentComponentKind = "document" | "flow" | "disclosure";
+export interface ContentComponentContext {
+  readonly kind: ContentComponentKind;
+  readonly title?: string;
+  readonly count?: number;
+  /** Host-created content. Preserve this node and its event handlers in the result. */
+  readonly content: HTMLElement;
+  /** Returns the default root, with content attached. May be called to decorate it. */
+  defaultRender(): HTMLElement;
+}
+
+export function isViewDataRenderer(value: unknown): value is ViewDataRenderer {
+  return Boolean(value && typeof value === "object" && typeof (value as ViewDataRenderer).render === "function");
 }
 
 const routeActivationBrand: unique symbol = Symbol("memsphere.view.route-activation");
@@ -473,6 +567,7 @@ export type ContentListProvider = (
 
 export interface ViewUi {
   readonly version: 1;
+  contentComponent(input: ContentComponentContext): HTMLElement;
   contentList(source: ContentListDescriptor | ContentListProvider): ViewMount;
   button(action: ActionDescriptor, options?: Readonly<{ tone?: "default" | "primary" | "danger" }>): HTMLButtonElement;
   confirmButton(action: ActionDescriptor, confirmation: ConfirmationDescriptor, options?: Readonly<{ tone?: "default" | "primary" | "danger" }>): HTMLButtonElement;
@@ -1199,6 +1294,48 @@ export const slots = Object.freeze({
   })
 });
 
+/** Stable cross-Package presentation cells. Route ownership remains with the official Module. */
+export const componentSlots = Object.freeze({
+  document: defineSlot<ViewDataRenderer<ContentComponentContext>, "default">()({ name: "content.document", version: 1, kind: "keyed", scope: "page", render: "descriptor", validate: isViewDataRenderer }),
+  flow: defineSlot<ViewDataRenderer<ContentComponentContext>, "default">()({ name: "content.flow", version: 1, kind: "keyed", scope: "page", render: "descriptor", validate: isViewDataRenderer }),
+  disclosure: defineSlot<ViewDataRenderer<ContentComponentContext>, "default">()({ name: "content.disclosure", version: 1, kind: "keyed", scope: "page", render: "descriptor", validate: isViewDataRenderer })
+});
+
+export const portableSlots = Object.freeze({
+  memoryPagePresentation: defineSlot<ViewMount, "page">()({
+    name: "org.memsphere.memory.page.presentation",
+    version: 1,
+    kind: "keyed",
+    scope: "page",
+    render: "mount",
+    validate: isViewMount
+  }),
+  memoryDetailRenderer: defineSlot<ViewDataRenderer<MemoryDetailPresentationContext>, "detail">()({
+    name: "org.memsphere.memory.detail.renderer",
+    version: 1,
+    kind: "keyed",
+    scope: "page",
+    render: "descriptor",
+    validate: isViewDataRenderer
+  }),
+  runPagePresentation: defineSlot<ViewMount, "page">()({
+    name: "org.memsphere.run.page.presentation",
+    version: 1,
+    kind: "keyed",
+    scope: "page",
+    render: "mount",
+    validate: isViewMount
+  }),
+  runArtifactRenderer: defineSlot<ViewDataRenderer<RunArtifactPresentationContext>, "artifact">()({
+    name: "org.memsphere.run.artifact.renderer",
+    version: 1,
+    kind: "keyed",
+    scope: "page",
+    render: "descriptor",
+    validate: isViewDataRenderer
+  })
+});
+
 type AnySlotToken = SlotToken<string, SlotKind, unknown, string>;
 
 type SlotValue<S extends AnySlotToken> =
@@ -1214,6 +1351,8 @@ export interface RegisterOptions<Value> {
   readonly id: string;
   readonly value: Value;
   readonly order?: number;
+  /** Replacement candidate priority for single/keyed presentation cells. Lower wins. */
+  readonly priority?: number;
   readonly children?: readonly AnySlotToken[];
   readonly when?: RouteActivation;
 }
@@ -1238,6 +1377,9 @@ export interface SlotRegistry {
     slot: S,
     options: RegisterOptions<SlotValue<S>>,
   ): Disposer;
+
+  /** Resolve and invoke a keyed data renderer with priority fallback on failure. */
+  render(slot: SlotToken<string, "keyed", ViewDataRenderer, string>, key: string, input: unknown): HTMLElement;
 }
 
 export interface ViewPluginContext {
@@ -1247,8 +1389,12 @@ export interface ViewPluginContext {
   readonly router?: ViewRouter;
   /** Present only after the Plugin declares theme and a supported themeVersion. */
   readonly theme?: ViewTheme;
+  /** Present only after the Plugin declares themeRegistry and a supported registry version. */
+  readonly themeRegistry?: ViewThemeRegistry;
   /** Present only after the Plugin declares ui and a supported uiVersion. */
   readonly ui?: ViewUi;
+  /** Host-owned read-only business snapshots and controlled navigation for portable page presentations. */
+  readonly presentation?: ViewPresentationService;
   readonly lifecycle: ViewLifecycle;
 }
 
@@ -1257,6 +1403,7 @@ export interface ViewPlugin<Config = unknown> {
   readonly apiVersion: 1;
   readonly inject: readonly ViewServiceName[];
   readonly themeVersion?: 1;
+  readonly themeRegistryVersion?: 1;
   readonly uiVersion?: 1;
   apply(
     context: ViewPluginContext,
