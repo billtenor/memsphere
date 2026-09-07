@@ -30,6 +30,25 @@ test("real Memory and Run Modules pass the public style boundary and keep migrat
   assert.match(sources[2] ?? "", /ui\.checkboxField\(/, "Run binding choices must use public Checkbox Field");
 });
 
+test("Memory and Run share one canonical Procedure flow renderer", async () => {
+  const [memory, run, shared] = await Promise.all([
+    readFile(new URL("../modules/org.memsphere.memory/adapter/view/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../modules/org.memsphere.run/adapter/view/run-detail.ts", import.meta.url), "utf8"),
+    readFile(new URL("../modules/shared/view/content-flow.ts", import.meta.url), "utf8")
+  ]);
+  assert.match(memory, /from "\.\.\/\.\.\/\.\.\/shared\/view\/content-flow\.js"/);
+  assert.match(run, /from "\.\.\/\.\.\/\.\.\/shared\/view\/content-flow\.js"/);
+  assert.match(memory, /renderContentFlow\(models,/);
+  assert.match(run, /renderContentFlow\(run\.plan\.map/);
+  assert.match(shared, /export function renderContentFlowNode/);
+  assert.match(shared, /export const contentFlowStyles/);
+  assert.doesNotThrow(() => validateModuleStyleBoundary(shared, "shared Procedure flow", { scope: ["[data-mem-content-flow]", "[data-mem-content-canvas]", "[data-mem-content-list]"] }));
+  assert.doesNotMatch(memory, /function renderFlowNode\(/, "Memory must not keep a second flow DOM renderer");
+  assert.doesNotMatch(run, /function renderFlowStep\(|function renderCall\(|function renderChildren\(/, "Run must not reconstruct the flow DOM");
+  const runStyles = await readFile(new URL("../modules/org.memsphere.run/adapter/view/run-styles.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(runStyles, /\.flow-(?:head|label|action|children)|\.flow-item/, "Run must not keep a second set of flow visuals");
+});
+
 test("Module style boundary rejects public token declarations and Host internals", () => {
   assert.throws(() => validateModuleStyleBoundary("const css = `:root { --mem-view-color-text: red; }`;", "token"), /must not declare/);
   assert.throws(() => validateModuleStyleBoundary("const css = `.feature { color: var(--view-ink); }`;", "private-token"), /Host-private/);

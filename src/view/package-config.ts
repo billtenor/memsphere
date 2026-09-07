@@ -12,6 +12,9 @@ export const viewPackageCapabilitySchema = z.enum([
 export type ViewPackageCapability = z.infer<typeof viewPackageCapabilitySchema>;
 
 export const portableViewContributionCells = [
+  "content.document@1:default",
+  "content.flow@1:default",
+  "content.disclosure@1:default",
   "org.memsphere.memory.page.presentation@1:page",
   "org.memsphere.memory.detail.renderer@1:detail",
   "org.memsphere.run.page.presentation@1:page",

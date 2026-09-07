@@ -5,6 +5,8 @@ import {
   isSearchResultDescriptor,
   isSlotToken,
   portableSlots,
+  componentSlots,
+  type ContentComponentContext,
   slots,
   type Disposer,
   type ConfirmationDescriptor,
@@ -307,10 +309,11 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     const lifecycle = new RuntimeLifecycle();
     const theme = themeStore.scoped(lifecycle);
     const themeRegistry = restrictedThemeRegistry(themeStore.registry(lifecycle), instanceOptions.themeOperations);
-    const ui = hostUi;
     const presentation = createPresentationService(module.projectId);
     const owner = moduleIdentity(module);
     const slotTransaction = slotsRegistry.transaction(module, lifecycle, instanceOptions.contributionPolicy);
+    const ui = Object.freeze({ ...hostUi, contentComponent: (input: ContentComponentContext) =>
+      slotTransaction.render(componentSlots[input.kind], "default", Object.freeze(input)) });
     const routeTransaction = routeRegistry.transaction(
       module,
       lifecycle,
@@ -1113,6 +1116,9 @@ class RuntimeSlotStore {
     for (const token of Object.values(portableSlots) as AnySlotToken[]) {
       this.#declared.set(slotIdentity(token), token);
     }
+    for (const token of Object.values(componentSlots) as AnySlotToken[]) {
+      this.#declared.set(slotIdentity(token), token);
+    }
   }
 
   transaction(
@@ -1361,7 +1367,11 @@ class RuntimeSlotTransaction implements SlotRegistry {
     if (this.#lifecycle.disposed) throw new Error("View Plugin instance is already disposed");
     for (;;) {
       const entry = this.#store.entry(token as AnySlotToken, key, this.#storeLocation());
-      if (!entry) throw new Error(`No data renderer is available for ${slotIdentity(token as AnySlotToken)}:${key}`);
+      const component = Object.values(componentSlots).some(candidate => candidate === token);
+      if (!entry) {
+        if (component) return (input as ContentComponentContext).defaultRender();
+        throw new Error(`No data renderer is available for ${slotIdentity(token as AnySlotToken)}:${key}`);
+      }
       try {
         const element: unknown = (entry.value as ViewDataRenderer).render(input);
         if (element && typeof element === "object" && "then" in element) {
@@ -1369,6 +1379,13 @@ class RuntimeSlotTransaction implements SlotRegistry {
           throw new Error("View data renderer returned asynchronously; this cell requires an immediate HTMLElement");
         }
         if (!(element instanceof HTMLElement)) throw new Error("View data renderer must return an HTMLElement");
+        if (component) {
+          const context = input as ContentComponentContext;
+          if (!element.contains(context.content)) throw new Error("Content component must preserve its supplied content");
+          if (context.kind === "disclosure" && (!(element instanceof HTMLDetailsElement) || !element.querySelector(":scope > summary"))) {
+            throw new Error("Disclosure component must return a details element with a summary");
+          }
+        }
         element.dataset.viewModuleOwner = entry.owner;
         return element;
       } catch (error) {

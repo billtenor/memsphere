@@ -6,6 +6,22 @@ This document is the single detailed source for the Memsphere View Slot Catalog.
 
 ## Design Principles
 
+### Public component Slots
+
+Public components are repeatable extension points owned by the Host UI contract, distinct from Shell locations and Module business Slots. One global selection applies to every consumer.
+
+| SDK token | Configuration cell | Purpose |
+| --- | --- | --- |
+| `componentSlots.document` | `content.document@1:default` | Content canvas |
+| `componentSlots.flow` | `content.flow@1:default` | Procedure steps and branches |
+| `componentSlots.disclosure` | `content.disclosure@1:default` | Collapsible fields |
+
+Modules call `ctx.ui.contentComponent(input)`. Packages register synchronous data renderers through `ctx.slots.register(componentSlots.document, { id, key: "default", value: { render(input) { … } } })` and declare the same cell in `view.contributions`. Selection, priority and failure abdication use the existing registry. Missing or failed implementations fall back to `input.defaultRender()`.
+
+`ContentComponentContext` exposes `kind`, optional `title` / `count`, a caller-owned `content` HTMLElement and `defaultRender()`. Preserve the supplied content node and its handlers; do not clone it. Implementations can decorate the default root or wrap it. This is a content-composition contract, not a serialized business model. Disclosure renderers must return native `details` with a direct `summary` child and retain the supplied body, preserving keyboard and expand-all behavior.
+
+Registrations follow Package lifetime and DOM follows its page. This synchronous contract does not provide cleanup for global listeners; asynchronous views requiring disposers use ViewMount. Memory detail canvases, Procedure flows and field lists, plus Run canvases, flows and rule lists use these components. Run retains review-binding and output operations. The borderless example supplies all three renderers and can be combined with its global stylesheet.
+
 - Slots are named after product semantics, not visual coordinates such as “top left” or “second row.”
 - A Slot owner defines its location, input contract, composition order, and fallback behavior. Contributors cannot change structure outside the Slot.
 - Built-in and user Modules use the same public contribution mechanism. Core-only content is expressed through permissions, not a separate private protocol.

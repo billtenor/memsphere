@@ -1,6 +1,6 @@
 ---
 id: 20260905-view-package-customization
-status: validating
+completed_at: 2026-09-07
 type: feature
 created: 2026-09-05
 run_id: run-20260904-165459z-d3bd2ad3
@@ -10,7 +10,7 @@ run_id: run-20260904-165459z-d3bd2ad3
 
 ## 需求
 
-用户可以安装本地界面扩展包，并分别选用其中的主题、页面、组件和全局样式；本页面中的全部配置统一应用到所有 Project。界面配置覆盖 13 类可配置 Host Slot（包含全局样式 Slot）和 Memory/Run 的 4 个 portable cell。扩展内容的 scoped CSS 随对应 Package 实例自动加载，不要求用户重复选择。默认未配置时，现有界面、URL 与业务能力保持兼容。
+用户可以安装本地界面扩展包，并分别选用其中的主题、页面、组件和全局样式；本页面中的全部配置统一应用到所有 Project。界面配置覆盖 13 类可配置 Host Slot（包含全局样式 Slot）、Memory/Run 的 4 个 portable cell，以及 3 个公共组件 cell，共 20 项。扩展内容的 scoped CSS 随对应 Package 实例自动加载，不要求用户重复选择。默认未配置时，现有界面、URL 与业务能力保持兼容。
 
 Theme、样式和展示包应具备稳定 identity、版本、来源与依赖元数据，为后续分享、导入、官方收录和升级演进保留兼容基础；本迭代只交付可信本地路径，不实现远程市场、自动下载或恶意代码沙箱。
 
@@ -21,7 +21,7 @@ Memory 与 Run 必须实际迁移到新架构：官方现有实现成为 priorit
 - 默认只提供一个“界面与主题”入口，按“安装新扩展包、已安装扩展包、主题配置、界面配置”分区；安装是包级，应用是 contribution 级，“一键应用全部”是可继续编辑的批量选择。
 - 整页只有一个状态和一个保存按钮，校验后原子保存 Home 全局配置；普通 UI 不展示 revision、digest 或 running/disk 配置。
 - 扩展包安装、主题和 Slot 选择全部为 Home 全局配置并应用到所有 Project；安装建立对本地包的信任，选中主题或 Slot 即启用对应内容，不再设置重复的 Package 权限。
-- “界面配置”用表格列出全部 17 类用户可配置 Slot，single/keyed 单选、list 多选；全局样式使用 `styles.global@1` 多选 Slot，scoped CSS 随 Package 实例自动加载；新增稳定 Slot 通过统一目录自动进入表格。
+- “界面配置”用表格列出全部 20 类用户可配置 Slot，single/keyed 单选、list 多选；全局样式使用 `styles.global@1` 多选 Slot，scoped CSS 随 Package 实例自动加载；新增稳定 Slot 通过统一目录自动进入表格。
 - 未配置时 Memory/Run 的 DOM、交互和 URL 保持兼容；四个 presentation/renderer cell 均完成官方候选迁移和用户候选覆盖。
 - 同 cell 数值较小 priority 获胜；同 priority 无首选时所有相关外部实例在 apply 前原子失败并回退官方候选，结果不依赖加载顺序。
 - 四个 cell 的同步 throw、异步 reject 均恢复官方稳定正文 DOM，清理 container/portal/subscription，并在 diagnostics 中记录 failed/abdicated 与 `fallbackTo`。
@@ -53,9 +53,11 @@ Memory 与 Run 必须实际迁移到新架构：官方现有实现成为 priorit
 - [x] Memory 与 Run 四个 cell 的官方候选迁移和只读 presentation context。
 - [x] Settings 以统一“界面与主题”页面承载扩展包安装、主题和表格式 contribution 配置；单一保存动作原子写入 Home 全局配置，并只展示可行动状态。
 - [x] 独立示例、作者文档、中英文文案、System/Reserved Memory 与 Skill 同步。
-- [ ] 自动化、浏览器实测、专业评审与产品验收材料。
+- [x] 自动化、浏览器实测、专业评审与产品验收材料。
 
 ## 验收结果
+
+2026-09-07 最终验收：用户明确“验收通过”。后续确认的范围包含极简扩展、Memory/Run 共享画布/流程/字段正文，以及 Host 公共 UI 层的 content.document、content.flow、content.disclosure 三个可替换组件 cell；界面配置共 20 项。最终全量 561 项测试为 560 passed、1 项 Windows-only skipped、0 failed。Memory ChangeSet `change-20260907-014245831z-da668b2b` 变更级校验通过，digest `385460738e5606e61da47e66a344bae8d5e9cba221d74227d9ef198fe35e5c8b`，View：http://localhost:30000/projects/memsphere/changes/change-20260907-014245831z-da668b2b 。本需求按交付规范归档；报告复审、commit 和可选 PR 按原 Run 继续，报告详情见 delivery-report.md。以下保留历史评审与返修记录，历史测试数量及 ChangeSet 不作为最终证据。
 
 专业评审第 1 轮发现的三个 blocking 已修正：启动层现在冻结全部已注册 Project 的 composition/document revision/digest 与外部资产，Settings/diagnostics 显示 running/disk 和独立 `restartPending`；外部注册必须与 Manifest 的 `cell + id` 完全匹配且 priority 只来自 resolver；Run page 与 Artifact renderer 已补齐同步/异步失败、清理、diagnostics、官方 fallback 及真实 Artifact 启禁用浏览器验证。
 

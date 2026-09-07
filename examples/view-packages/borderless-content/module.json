@@ -11,6 +11,11 @@
     "entry": "./index.js",
     "sdk": "^1.0.0",
     "capabilities": ["styles.global"],
+    "contributions": [
+      { "id": "document", "cell": "content.document@1:default", "priority": 100 },
+      { "id": "flow", "cell": "content.flow@1:default", "priority": 100 },
+      { "id": "disclosure", "cell": "content.disclosure@1:default", "priority": 100 }
+    ],
     "styles": [
       {
         "id": "borderless-content",

@@ -538,6 +538,7 @@ test("completed Artifact Review isolates dialog scrolling without mutating Host 
     await withReviewBrowser(fixture.config, { width: 1440, height: 900 }, async (page, origin) => {
       await page.goto(`${origin}/tasks/${fixture.runId}`, { waitUntil: "domcontentloaded" });
       await page.getByText("已完成", { exact: true }).first().waitFor();
+      await page.locator("details.task-result > summary").first().click();
       await page.evaluate(() => {
         const content = document.querySelector<HTMLElement>("#memsphere-view-root");
         const button = document.querySelector<HTMLElement>(".task-result [data-artifact-review-id]");

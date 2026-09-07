@@ -181,9 +181,12 @@ test("Settings completes the local Package installation and Project enablement f
     await page.getByText("记忆模块 / 详情正文", { exact: true }).waitFor();
     await page.getByText("运行模块 / 整体页面", { exact: true }).waitFor();
     await page.getByText("运行模块 / 产物正文", { exact: true }).waitFor();
-    assert.equal(await page.locator(".settings-config-table").first().locator("tbody tr").count(), 17);
-    assert.equal(await page.getByText("暂无可选扩展，使用系统默认", { exact: true }).count(), 12);
-    assert.equal(await page.locator(".settings-select-disabled").count(), 12);
+    for (const label of ["公共组件 / 内容画布", "公共组件 / 流程展示", "公共组件 / 折叠字段"]) {
+      await page.getByText(label, { exact: true }).waitFor();
+    }
+    assert.equal(await page.locator(".settings-config-table").first().locator("tbody tr").count(), 20);
+    assert.equal(await page.getByText("暂无可选扩展，使用系统默认", { exact: true }).count(), 15);
+    assert.equal(await page.locator(".settings-select-disabled").count(), 15);
     assert.equal(await page.getByRole("button", { name: "保存", exact: true }).count(), 1);
     assert.equal(await page.locator('[data-select-field="project_view.theme"]').count(), 0);
     assert.equal(await page.getByText(/^[123]\. /).count(), 0);
@@ -321,7 +324,7 @@ test("real Run Artifact uses a custom renderer and restores the official body wh
   try {
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/tasks/${runId}`);
-    await page.waitForTimeout(1000);
+    await page.locator("[data-custom-artifact=true]").waitFor({ state: "attached" });
     assert.equal(await page.locator("[data-custom-artifact=true]").count(), 1, JSON.stringify({
       body: await page.locator("body").innerText(),
       diagnostics: await page.evaluate(() => (window as any).__memsphereViewDiagnostics?.())
@@ -336,6 +339,8 @@ test("real Run Artifact uses a custom renderer and restores the official body wh
     }));
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/tasks/${runId}`);
+    await page.locator(".artifact-review-artifact-content").waitFor({ state: "attached" });
+    await page.locator("details.task-result > summary").first().click();
     await page.locator(".artifact-review-artifact-content").waitFor();
     assert.equal(await page.locator("[data-custom-artifact]").count(), 0);
     await page.getByText("actual artifact body", { exact: true }).waitFor();

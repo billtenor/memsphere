@@ -15,6 +15,16 @@ import {
   type ViewRenderContext,
   type ViewUi
 } from "@memsphere/view-sdk";
+import {
+  contentFlowStyles,
+  presentContent,
+  createContentCanvas,
+  createContentList,
+  createContentListDisclosure,
+  renderContentFlow,
+  type ContentFlowHooks,
+  type ContentFlowNode
+} from "../../../shared/view/content-flow.js";
 
 type JsonRecord = Record<string, unknown>;
 type MemorySummary = JsonRecord & {
@@ -312,20 +322,6 @@ const memoryStyles = `
   .memory-schema-field { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; min-height:38px; padding:8px 12px; border:1px solid var(--line); border-radius:6px; background:#fafbf8; }
   .memory-schema-field-name { font-size:var(--memory-page-text-body); font-weight:400; line-height:var(--memory-page-line-body); overflow-wrap:anywhere; }
   .schema-field-type { color:var(--muted); font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
-  .memory-flow { gap:12px; }
-  .memory-flow-item { position:relative; overflow:hidden; border:1px solid var(--line); border-left:4px solid #9cbab5; border-radius:var(--memory-page-radius-section); background:var(--surface); }
-  .memory-flow-item.call { border-left-color:#8799b1; }
-  .memory-flow-item.branch { border-left-color:#c3a269; }
-  .memory-flow-head { display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap; padding:11px 13px; }
-  .memory-flow-label { flex:0 0 auto; border-radius:999px; background:var(--accent-soft); color:#173f3c; padding:2px 8px; font-size:var(--memory-page-text-label); font-weight:650; line-height:var(--memory-page-line-compact); }
-  .memory-flow-action { min-width:0; flex:1 1 240px; font-size:var(--memory-page-text-body); font-weight:650; line-height:var(--memory-page-line-body); white-space:pre-wrap; overflow-wrap:anywhere; }
-  .memory-flow-branch { border-top:1px solid var(--line); background:#fafbf8; padding:9px 12px 12px 24px; }
-  .memory-flow-condition { margin-bottom:7px; color:var(--muted); font-size:var(--memory-page-text-label); font-weight:650; line-height:var(--memory-page-line-compact); }
-  .memory-flow-children { display:grid; gap:8px; }
-  .memory-artifact-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-left:auto; }
-  .memory-artifact-summary,.memory-artifact-details,.memory-review-summary,.memory-review-details { display:inline-flex; align-items:center; gap:5px; flex-wrap:wrap; }
-  .memory-review-count { color:var(--muted); font-size:var(--memory-page-text-label); font-weight:650; line-height:var(--memory-page-line-compact); }
-  .memory-artifact-label { color:var(--muted); font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
   .memory-pill.strong { border-color:#b8cbc7; background:var(--accent-soft); color:#173f3c; font-weight:700; }
   .memory-pill.done { border-color:#b5ccb8; background:#e7f3e7; color:#27612e; }
   .action-contracts { margin:0 13px 10px; padding:9px 12px; border:1px solid var(--line); border-radius:6px; background:#fafbf8; }
@@ -813,7 +809,7 @@ function createMemoryPageMounts(
     async mount({ element, portal: mountPortal }, context) {
       const style = document.createElement("style");
       style.dataset.memsphereMemoryStyles = "true";
-      style.textContent = memoryStyles;
+      style.textContent = memoryStyles + contentFlowStyles;
       element.append(style);
       element.classList.add("memory-surface", `memory-${surface}-surface`);
       await ensure(context.route);
@@ -1671,7 +1667,7 @@ class MemoryApplication {
     const entity = (detail.entity ?? detail) as JsonRecord;
     const reference = `${detail.kind}/${Array.isArray(entity.names) ? String(entity.names[0] ?? detail.path ?? "") : String(detail.path ?? "")}`;
     const workspace = el("div");
-    const content = el("section", "memory-panel memory-content-card");
+    const content = createContentCanvas("memory-content-card");
     const metadata = (entity.metadata && typeof entity.metadata === "object" && !Array.isArray(entity.metadata))
       ? entity.metadata as JsonRecord
       : {};
@@ -1695,7 +1691,7 @@ class MemoryApplication {
     };
     content.append(this.#renderDetail(Object.freeze(presentation)));
     if (context) workspace.append(context);
-    workspace.append(content);
+    workspace.append(presentContent("document", content, this.#ui));
     return workspace;
   }
 
@@ -2078,6 +2074,7 @@ class MemoryApplication {
   private commentStatus(status: string): string { return this.t(`change.comment.${status}`); }
   private renderOptions(): RenderOptions {
     return {
+      ui: this.#ui,
       knownReferences: new Set(this.#memories.map(memoryReference)),
       openReference: target => {
         const memory = this.#memories.find(candidate => memoryReference(candidate) === target || candidate.names?.[0] === target);
@@ -2136,6 +2133,7 @@ function projectApiUrl(config: Readonly<MemoryConfig>, path: string): string {
 }
 
 type RenderOptions = {
+  ui?: ViewUi;
   knownReferences?: ReadonlySet<string>;
   openReference?: (target: string) => void;
 };
@@ -2459,8 +2457,8 @@ function renderSchema(node: JsonRecord, depth: number, fallback: string, path: s
   if (node.format !== undefined) badges.push(`${t("format")}: ${formatLabel(node.format)}`);
   const section = nodeSection(title, path, node, comment, badges, depth <= openThroughDepth);
   const body = sectionBody(section);
-  if (depth === 0) appendStringList(body, "names", array(node.names), path, comment, t);
-  for (const key of ["defines", "asserts", "suggests"] as const) appendStringList(body, key, array(node[key]), path, comment, t);
+  if (depth === 0) appendStringList(body, "names", array(node.names), path, comment, t, options.ui);
+  for (const key of ["defines", "asserts", "suggests"] as const) appendStringList(body, key, array(node[key]), path, comment, t, options.ui);
   const fields = array(node.fields);
   if (fields.length) {
     body.append(blockTitle(t("fields")));
@@ -2516,12 +2514,12 @@ function renderStatement(node: JsonRecord, depth: number, fallback: string, path
   const section = nodeSection(title, path, node, comment, [], depth < 2);
   if (depth === 0 && !comment) section.classList.add("memory-statement-document");
   const body = sectionBody(section);
-  if (depth === 0) appendStringList(body, "names", array(node.names), path, comment, t);
-  appendStringList(body, "defines", array(node.defines), path, comment, t);
+  if (depth === 0) appendStringList(body, "names", array(node.names), path, comment, t, options.ui);
+  appendStringList(body, "defines", array(node.defines), path, comment, t, options.ui);
   for (const key of ["asserts", "suggests"] as const) appendRuleList(body, key, array(node[key]), node.effectiveRules as JsonRecord | undefined, path, t, comment, options);
   const sections = array(node.sections);
   if (sections.length) {
-    const { block, body: sectionsBody } = collapsibleList(t("sections"), sections.length, "memory-sections-block");
+    const { block, body: sectionsBody } = collapsibleList(t("sections"), sections.length, "memory-sections-block", options.ui);
     const children = el("div", "memory-child-stack");
     sections.forEach((child, index) => { if (child && typeof child === "object") children.append(renderStatement(child as JsonRecord, depth + 1, t("statements"), `${path}.sections[${index + 1}]`, t, comment, options)); });
     sectionsBody.append(children);
@@ -2531,69 +2529,76 @@ function renderStatement(node: JsonRecord, depth: number, fallback: string, path
 }
 
 function renderProcedure(node: JsonRecord, path: string, t: (key: string) => string, comment?: CommentCallback, options: RenderOptions = {}): HTMLElement {
-  const document = el("div", "memory-document");
-  appendStringList(document, "names", array(node.names), path, comment, t);
-  for (const key of ["defines", "goals"] as const) appendStringList(document, key, array(node[key]), path, comment, t);
+  const document = el("div", "memory-document mem-content-document");
+  appendStringList(document, "names", array(node.names), path, comment, t, options.ui);
+  for (const key of ["defines", "goals"] as const) appendStringList(document, key, array(node[key]), path, comment, t, options.ui);
   for (const key of ["asserts", "suggests"] as const) appendRuleList(document, key, array(node[key]), node.effectiveRules as JsonRecord | undefined, path, t, comment, options);
   const steps = array(node.flow);
   if (steps.length) {
-    document.append(blockTitle(t("flow")));
-    const flow = el("div", "memory-flow");
-    steps.forEach((step, index) => flow.append(step && typeof step === "object" ? renderFlowNode(step as JsonRecord, `${path}.flow[${index + 1}]`, t, comment, options) : commentable(el("div", "memory-flow-item", String(step)), `${path}.flow[${index + 1}]`, step, comment)));
-    document.append(flow);
+    const flowTitle = blockTitle(t("flow")); flowTitle.classList.add("mem-content-flow-title"); document.append(flowTitle);
+    const models = steps.map((step, index) => normalizeMemoryFlowNode(step, `${path}.flow[${index + 1}]`));
+    document.append(renderContentFlow(models, memoryFlowHooks(t, comment, options)));
   }
   return document;
 }
 
-function renderFlowNode(node: JsonRecord, path: string, t: (key: string) => string, comment?: CommentCallback, options: RenderOptions = {}): HTMLElement {
+function normalizeMemoryFlowNode(value: unknown, path: string): ContentFlowNode<JsonRecord> {
+  const node = value && typeof value === "object" ? value as JsonRecord : { action: String(value ?? "") };
   const tag = String(node.tag ?? "!action");
-  if (tag === "!call") {
-    const item = el("div", "memory-flow-item call");
-    const head = el("div", "memory-flow-head");
-    head.append(el("span", "memory-flow-label", t("call")), renderMemoryReference({ tag: "!ref", target: String(node.target ?? "") }, options, t));
-    item.append(commentable(head, path, node, comment));
-    return item;
-  }
-  const branch = tag === "!if" || tag === "!while";
-  const item = el("div", `memory-flow-item${branch ? " branch" : ""}`);
   const control = node.condition && typeof node.condition === "object" ? node.condition as JsonRecord : node;
   const action = String(control.action ?? node.action ?? node.condition ?? "");
-  const head = el("div", "memory-flow-head");
-  head.append(el("span", "memory-flow-label", t(tag === "!if" ? "if" : tag === "!while" ? "while" : "step")), commentable(el("span", "memory-flow-action", action), `${path}.action`, action, comment), renderArtifactMeta(control, path, t, comment));
-  item.append(head);
-  for (const key of ["asserts", "suggests"] as const) appendRuleList(item, key, array(control[key]), control.effectiveRules as JsonRecord | undefined, path, t, comment, options, "action-contracts");
-  const artifact = artifactContract(control);
-  if (artifact.schema && typeof artifact.schema === "object") {
-    if (isReference(artifact.schema)) {
-      item.append(renderMemoryReference(artifact.schema, options, t));
-    } else {
-      const schema = renderSchema(artifact.schema as JsonRecord, 1, t("inlineSchema"), `${path}.artifact.schema`, t, comment, options, 2);
-      schema.classList.remove("open");
-      schema.classList.add("memory-artifact-schema");
-      item.append(schema);
+  const kind = tag === "!call" ? "call" : tag === "!if" ? "branch" : tag === "!while" ? "loop" : "action";
+  const branches = (["then", "do", "else"] as const).flatMap(key => {
+    const values = array(node[key]);
+    return values.length ? [{ kind: key, nodes: values.map((child, index) => normalizeMemoryFlowNode(child, `${path}.${key}[${index + 1}]`)) }] : [];
+  });
+  return {
+    id: path,
+    path,
+    kind,
+    action,
+    target: String(node.target ?? ""),
+    source: node,
+    content: control,
+    branches
+  };
+}
+
+function memoryFlowHooks(t: (key: string) => string, comment?: CommentCallback, options: RenderOptions = {}): ContentFlowHooks<JsonRecord> {
+  return {
+    ui: options.ui,
+    labels: { step: t("step"), if: t("if"), while: t("while"), call: t("call"), else: t("else") },
+    renderAction: node => commentable(el("span", "memory-flow-action mem-content-flow-action", node.action), `${node.path}.action`, node.action, comment),
+    renderCallTarget: node => renderMemoryReference({ tag: "!ref", target: node.target ?? "" }, options, t),
+    renderMeta: node => renderArtifactMeta(node.content, node.path, t, comment),
+    decorateHead: (head, node) => { if (node.kind === "call") commentable(head, node.path, node.source, comment); },
+    renderBody: node => {
+      const holder = el("div");
+      for (const key of ["asserts", "suggests"] as const) appendRuleList(holder, key, array(node.content[key]), node.content.effectiveRules as JsonRecord | undefined, node.path, t, comment, options, "action-contracts");
+      const artifact = artifactContract(node.content);
+      if (artifact.schema && typeof artifact.schema === "object") {
+        if (isReference(artifact.schema)) holder.append(renderMemoryReference(artifact.schema, options, t));
+        else {
+          const schema = renderSchema(artifact.schema as JsonRecord, 1, t("inlineSchema"), `${node.path}.artifact.schema`, t, comment, options, 2);
+          schema.classList.remove("open");
+          schema.classList.add("memory-artifact-schema");
+          holder.append(schema);
+        }
+      }
+      return [...holder.childNodes];
     }
-  }
-  for (const key of ["then", "do", "else"] as const) {
-    const children = array(node[key]);
-    if (!children.length) continue;
-    const branchWrap = el("div", "memory-flow-branch");
-    branchWrap.append(el("div", "memory-flow-condition", key === "then" || key === "do" ? "" : t(key)));
-    const stack = el("div", "memory-flow-children");
-    children.forEach((child, index) => { if (child && typeof child === "object") stack.append(renderFlowNode(child as JsonRecord, `${path}.${key}[${index + 1}]`, t, comment, options)); });
-    branchWrap.append(stack); item.append(branchWrap);
-  }
-  return item;
+  };
 }
 
 function renderArtifactMeta(step: JsonRecord, path: string, t: (key: string) => string, comment?: CommentCallback): HTMLElement {
-  const row = el("div", "memory-artifact-row");
+  const row = el("div", "memory-artifact-row mem-content-artifact-contract");
   row.dataset.diffGroup = `${path}.artifact`;
   const artifact = artifactContract(step);
   const name = String(artifact.name ?? "");
-  const artifactSummary = el("span", "memory-artifact-summary");
-  artifactSummary.append(el("span", "memory-artifact-label", t("artifact")));
-  if (name) artifactSummary.append(anchored(el("span", "memory-pill strong", name), `${path}.artifact.name`));
-  const artifactDetails = el("span", "memory-artifact-details");
+  const artifactSummary = el("span", "memory-artifact-summary mem-content-artifact-summary");
+  artifactSummary.append(el("span", "memory-artifact-label mem-content-artifact-label", t("artifact")));
+  if (name) artifactSummary.append(anchored(el("span", "memory-pill strong mem-content-artifact-name", name), `${path}.artifact.name`));
+  const artifactDetails = el("span", "memory-artifact-details mem-content-artifact-details");
   if (artifact.type) artifactDetails.append(anchored(el("span", "memory-pill", String(artifact.type)), `${path}.artifact.type`));
   if (artifact.format) artifactDetails.append(anchored(el("span", "memory-pill", formatLabel(artifact.format)), `${path}.artifact.format`));
   if (artifact.final) artifactDetails.append(anchored(el("span", "memory-pill done", t("final")), `${path}.artifact.final`));
@@ -2604,10 +2609,10 @@ function renderArtifactMeta(step: JsonRecord, path: string, t: (key: string) => 
   row.append(artifactSummary);
   const reviewers = Array.isArray(artifact.review) ? artifact.review : typeof artifact.review === "string" ? [artifact.review] : [];
   if (reviewers.length) {
-    const reviewSummary = el("span", "memory-review-summary");
+    const reviewSummary = el("span", "memory-review-summary mem-content-review-summary");
     reviewSummary.tabIndex = 0;
-    reviewSummary.append(el("span", "memory-review-count", t("reviewerCount").replace("{count}", String(reviewers.length))));
-    const reviewDetails = el("span", "memory-review-details");
+    reviewSummary.append(el("span", "memory-review-count mem-content-review-count", t("reviewerCount").replace("{count}", String(reviewers.length))));
+    const reviewDetails = el("span", "memory-review-details mem-content-review-details");
     reviewers.forEach((value, index) => reviewDetails.append(anchored(el("span", "memory-pill", String(value)), `${path}.artifact.review[${index + 1}]`)));
     reviewSummary.append(reviewDetails);
     row.append(reviewSummary);
@@ -2629,8 +2634,8 @@ function artifactContract(step: JsonRecord): JsonRecord {
 
 function renderGeneric(node: JsonRecord, path: string, t: (key: string) => string, comment?: CommentCallback, options: RenderOptions = {}): HTMLElement {
   const document = el("div", "memory-document");
-  appendStringList(document, "names", array(node.names), path, comment, t);
-  for (const key of ["defines", "asserts", "suggests"] as const) appendStringList(document, key, array(node[key]), path, comment, t);
+  appendStringList(document, "names", array(node.names), path, comment, t, options.ui);
+  for (const key of ["defines", "asserts", "suggests"] as const) appendStringList(document, key, array(node[key]), path, comment, t, options.ui);
   const ignored = new Set(["tag", "syntax", "name", "names", "defines", "asserts", "suggests", "effectiveRules"]);
   const primitives = renderPrimitiveFields(node, [...ignored], t, path, comment);
   if (primitives.childElementCount) document.append(primitives);
@@ -2672,14 +2677,8 @@ function appendDisclosureToggle(section: HTMLElement, t: (key: string) => string
 }
 function sectionBody(section: HTMLElement): HTMLElement { return section.querySelector<HTMLElement>(":scope > .memory-section-body")!; }
 function blockTitle(value: string): HTMLElement { return el("div", "memory-block-title", value); }
-function collapsibleList(title: string, count: number, className = ""): { block: HTMLDetailsElement; body: HTMLDivElement } {
-  const block = document.createElement("details");
-  block.className = `memory-collapsible-list ${className}`.trim();
-  const summary = el("summary", "memory-collapsible-summary");
-  summary.append(el("span", "memory-list-chevron", "›"), blockTitle(title), el("span", "memory-list-count", String(count)));
-  const body = el("div", "memory-collapsible-body");
-  block.append(summary, body);
-  return { block, body };
+function collapsibleList(title: string, count: number, className = "", ui?: ViewUi): { block: HTMLDetailsElement; body: HTMLDivElement } {
+  return createContentListDisclosure(title, count, className, ui);
 }
 function commentable(node: HTMLElement, target: string, snapshot: unknown, comment?: CommentCallback): HTMLElement {
   node.dataset.anchor = target;
@@ -2736,9 +2735,8 @@ function appendRuleList(
   className = ""
 ): void {
   if (!values.length) return;
-  const { block: panel, body } = collapsibleList(translatedKey(key, t), values.length, `memory-list-block ${className}`.trim());
-  const list = document.createElement("ul");
-  list.className = "text-list";
+  const { block: panel, body } = collapsibleList(translatedKey(key, t), values.length, `memory-list-block ${className}`.trim(), options.ui);
+  const list = createContentList();
   const effective = array(effectiveRules?.[key]);
   values.forEach((value, index) => {
     const item = document.createElement("li");
@@ -2816,10 +2814,10 @@ function appendEffectiveRules(parent: HTMLElement, node: JsonRecord, channel: "a
     parent.append(block);
   }
 }
-function appendStringList(parent: HTMLElement, key: string, values: unknown[], path: string, comment?: CommentCallback, t: (key: string) => string = value => value): void {
+function appendStringList(parent: HTMLElement, key: string, values: unknown[], path: string, comment?: CommentCallback, t: (key: string) => string = value => value, ui?: ViewUi): void {
   if (!values.length) return;
-  const { block, body: listBody } = collapsibleList(translatedKey(key, t), values.length, "memory-list-block");
-  const list = document.createElement("ul"); list.className = "text-list";
+  const { block, body: listBody } = collapsibleList(translatedKey(key, t), values.length, "memory-list-block", ui);
+  const list = createContentList();
   values.forEach((value, index) => {
     const li = document.createElement("li");
     const body = el("span", "commentable-body", scalar(value));

@@ -289,6 +289,7 @@ async function openTaskPage(browser: Browser, url: string, width: number): Promi
   page.setDefaultTimeout(5_000);
   await page.goto(`${url}/projects/responsive/tasks/${runId}`);
   await page.locator(".run-title").waitFor();
+  await page.getByRole("button", { name: "展开全部", exact: true }).click();
   await page.locator(".markdown-table-scroll").first().waitFor();
   return page;
 }
@@ -453,7 +454,7 @@ test("Run effective rule references and sections collapse and survive rerenders"
       await referenceHeading.waitFor();
       const readRuleLayout = () => page.evaluate(() => {
         const items = [...document.querySelectorAll<HTMLElement>(
-          ".run-procedure-asserts > .effective-rule-tree > .effective-rule-list > li"
+          ".run-procedure-asserts > .effective-rule-tree > .mem-content-disclosure-body > .effective-rule-list > li"
         )];
         const firstRule = items[0];
         const referenceItem = items[1];
@@ -472,6 +473,7 @@ test("Run effective rule references and sections collapse and survive rerenders"
           listStyleType: referenceStyle.listStyleType,
           firstRuleX: firstRule.getBoundingClientRect().x,
           referenceItemX: referenceItem.getBoundingClientRect().x,
+          referenceContentX: referenceItem.getBoundingClientRect().x + parseFloat(referenceStyle.paddingLeft),
           referenceHeadingX: referenceHeadingElement.getBoundingClientRect().x,
           nestedRuleX: nestedRule.getBoundingClientRect().x
         };
@@ -485,7 +487,7 @@ test("Run effective rule references and sections collapse and survive rerenders"
       assert.equal(ruleLayout.display, "list-item");
       assert.equal(ruleLayout.listStyleType, "disc");
       assert.equal(Math.abs(ruleLayout.firstRuleX - ruleLayout.referenceItemX) < 1, true);
-      assert.equal(Math.abs(ruleLayout.referenceItemX - ruleLayout.referenceHeadingX) <= 1, true);
+      assert.equal(Math.abs(ruleLayout.referenceContentX - ruleLayout.referenceHeadingX) <= 1, true);
       assert.equal(await referenceHeading.getAttribute("aria-expanded"), "true");
       assert.equal(ruleLayout.nestedRuleX > ruleLayout.referenceHeadingX, true);
 
@@ -501,6 +503,7 @@ test("Run effective rule references and sections collapse and survive rerenders"
       await page.waitForFunction(() => document.querySelector('.view-shell-action[aria-busy="true"]') === null);
       const rerenderedReference = page.locator(".run-procedure-asserts .effective-reference").first();
       const rerenderedHeading = rerenderedReference.locator(":scope > .section-header");
+      await page.getByRole("button", { name: "展开全部", exact: true }).click();
       await rerenderedHeading.waitFor();
       assert.equal(await rerenderedHeading.getAttribute("aria-expanded"), "false");
       assert.equal(await rerenderedReference.locator(":scope > .section-body").isHidden(), true);
@@ -844,6 +847,7 @@ test("published Statement references expand in place without ChangeSet comment c
       await page.goto(`${url}/projects/responsive/memories/statements/referencing-alias`);
       await page.locator('[data-view-slot="header.title"] p', { hasText: "statements/referencing-alias" }).waitFor();
       const invalidAlias = page.getByRole("button", { name: "statements/shared-rules-alias", exact: true });
+      await page.getByRole("button", { name: "展开全部", exact: true }).click();
       await invalidAlias.waitFor();
       assert.match(await invalidAlias.getAttribute("class") ?? "", /missing/);
       await invalidAlias.click();
@@ -851,6 +855,7 @@ test("published Statement references expand in place without ChangeSet comment c
 
       await page.goto(`${url}/projects/responsive/memories/statements/referencing-rules`);
       await page.locator(".memory-title", { hasText: "Referencing rules" }).waitFor();
+      await page.getByRole("button", { name: "展开全部", exact: true }).click();
       const reference = page.locator(".rule-reference", { hasText: "statements/shared-rules" }).first();
       await reference.waitFor();
       assert.equal(await page.locator(".memory-inline-plus").count(), 0);
@@ -882,6 +887,7 @@ test("published Procedure Action references do not expose ChangeSet comment cont
     try {
       await page.goto(`${url}/projects/responsive/memories/procedures/reviewable-procedure`);
       await page.locator(".memory-title", { hasText: "Reviewable procedure" }).waitFor();
+      await page.getByRole("button", { name: "展开全部", exact: true }).click();
       const reference = page.locator(".rule-reference", { hasText: "statements/shared-rules" });
       await reference.waitFor();
       assert.equal(await page.locator(".memory-inline-plus").count(), 0);

@@ -177,6 +177,18 @@ export interface ViewDataRenderer<Input = unknown> {
   render(input: Input): HTMLElement;
 }
 
+/** Repeatable public UI components, independent of Module and Shell placement. */
+export type ContentComponentKind = "document" | "flow" | "disclosure";
+export interface ContentComponentContext {
+  readonly kind: ContentComponentKind;
+  readonly title?: string;
+  readonly count?: number;
+  /** Host-created content. Preserve this node and its event handlers in the result. */
+  readonly content: HTMLElement;
+  /** Returns the default root, with content attached. May be called to decorate it. */
+  defaultRender(): HTMLElement;
+}
+
 export function isViewDataRenderer(value: unknown): value is ViewDataRenderer {
   return Boolean(value && typeof value === "object" && typeof (value as ViewDataRenderer).render === "function");
 }
@@ -555,6 +567,7 @@ export type ContentListProvider = (
 
 export interface ViewUi {
   readonly version: 1;
+  contentComponent(input: ContentComponentContext): HTMLElement;
   contentList(source: ContentListDescriptor | ContentListProvider): ViewMount;
   button(action: ActionDescriptor, options?: Readonly<{ tone?: "default" | "primary" | "danger" }>): HTMLButtonElement;
   confirmButton(action: ActionDescriptor, confirmation: ConfirmationDescriptor, options?: Readonly<{ tone?: "default" | "primary" | "danger" }>): HTMLButtonElement;
@@ -1282,6 +1295,12 @@ export const slots = Object.freeze({
 });
 
 /** Stable cross-Package presentation cells. Route ownership remains with the official Module. */
+export const componentSlots = Object.freeze({
+  document: defineSlot<ViewDataRenderer<ContentComponentContext>, "default">()({ name: "content.document", version: 1, kind: "keyed", scope: "page", render: "descriptor", validate: isViewDataRenderer }),
+  flow: defineSlot<ViewDataRenderer<ContentComponentContext>, "default">()({ name: "content.flow", version: 1, kind: "keyed", scope: "page", render: "descriptor", validate: isViewDataRenderer }),
+  disclosure: defineSlot<ViewDataRenderer<ContentComponentContext>, "default">()({ name: "content.disclosure", version: 1, kind: "keyed", scope: "page", render: "descriptor", validate: isViewDataRenderer })
+});
+
 export const portableSlots = Object.freeze({
   memoryPagePresentation: defineSlot<ViewMount, "page">()({
     name: "org.memsphere.memory.page.presentation",
