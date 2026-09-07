@@ -44,7 +44,7 @@ test("Settings Builtin Mount loads both scopes and validates an edited global dr
       return json(response, {
         valid: true,
         changes: [{ path: "language", kind: "changed", before: "zh-CN", after: "en" }],
-        normalizedJson: JSON.stringify({ language: "en" }, null, 2)
+        normalizedJson: JSON.stringify({ language: "en", system_prompt: "你".repeat(2_000) }, null, 2)
       });
     }
     response.writeHead(200, { "content-type": "text/html" });
@@ -88,6 +88,20 @@ test("Settings Builtin Mount loads both scopes and validates an edited global dr
     await page.getByRole("button", { name: "保存", exact: true }).click();
     await page.getByRole("heading", { name: "确认配置变更", exact: true }).waitFor();
     assert.deepEqual(validated, { expectedRevision: "sha256:global", config: { language: "en" } });
+    const confirmationLayout = await page.evaluate(() => {
+      const save = [...document.querySelectorAll<HTMLButtonElement>("button")]
+        .find(button => button.textContent?.trim() === "确认保存")!;
+      const code = document.querySelector<HTMLElement>(".settings-code")!;
+      const saveBox = save.getBoundingClientRect();
+      return {
+        pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        codeOverflow: code.scrollWidth - code.clientWidth,
+        saveVisible: saveBox.left >= 0 && saveBox.right <= innerWidth
+      };
+    });
+    assert.ok(confirmationLayout.pageOverflow <= 0, JSON.stringify(confirmationLayout));
+    assert.ok(confirmationLayout.codeOverflow <= 0, JSON.stringify(confirmationLayout));
+    assert.equal(confirmationLayout.saveVisible, true, JSON.stringify(confirmationLayout));
     assert.deepEqual(pageErrors, []);
   } finally {
     await browser.close();
