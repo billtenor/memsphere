@@ -280,7 +280,8 @@ async function withResponsiveView(
   } finally {
     await browser.close();
     await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
-    await rm(dir, { recursive: true, force: true });
+    // Windows may briefly retain file handles after the server/browser close.
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 
