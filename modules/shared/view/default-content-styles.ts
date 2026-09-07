@@ -1,4 +1,9 @@
-/** The built-in visual contract shared by Memory and Run content. */
+/**
+ * The built-in visual contract shared by Memory and Run content.
+ *
+ * Selected global View Package styles are mounted after Module surfaces so
+ * equal-specificity extension rules can override these defaults.
+ */
 export const defaultContentStyles = `
 /* Reduce nested outlines while preserving spacing, grouping, and semantic color. */
 :is(.memory-module, .run-module) [data-mem-content-canvas] {

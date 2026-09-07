@@ -64,6 +64,11 @@ test("trusted local Package replaces Memory and Run through formal composition a
     assert.equal(await page.locator("[data-custom-showcase=memory]").evaluate(node => getComputedStyle(node).getPropertyValue("--mem-view-color-accent").trim()), "#71d2c6");
     assert.equal(await page.locator('style[data-view-package-scope="global"]').count(), 1);
     assert.equal(await page.locator('style[data-view-package-scope="module"]').count(), 1);
+    assert.equal(await page.evaluate(() => {
+      const scoped = document.querySelector('style[data-view-package-scope="module"]');
+      const global = document.querySelector('style[data-view-package-scope="global"]');
+      return Boolean(scoped && global && (scoped.compareDocumentPosition(global) & Node.DOCUMENT_POSITION_FOLLOWING));
+    }), true, "global Package styles stay after Module styles in document order");
     if (process.env.MEMSPHERE_CAPTURE_VIEW_PACKAGE === "1") {
       await page.screenshot({ path: resolve("changes/active/20260905-view-package-customization/memory-custom-desktop.png"), fullPage: true });
       await page.setViewportSize({ width: 390, height: 844 });

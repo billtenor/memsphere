@@ -1022,7 +1022,8 @@ function installInstanceStyles(
     element.dataset.viewPackageOwner = owner;
     element.dataset.viewPackageScope = contribution.scope;
     element.textContent = contribution.css;
-    document.head.append(element);
+    if (contribution.scope === "global") document.body.append(element);
+    else document.head.append(element);
     lifecycle.own(() => element.remove());
   }
 }
