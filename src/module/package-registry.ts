@@ -37,6 +37,7 @@ export interface ViewPackageDiagnostic {
 }
 
 export interface InstalledViewPackage {
+  readonly configuredPath: string;
   readonly root: string;
   readonly manifest: ModuleManifest;
   readonly entryPath: string;
@@ -121,6 +122,7 @@ export async function resolveViewPackageComposition(input: {
       const entryPath = await safePackageFile(root, resolveModuleViewEntry(root, manifest));
       const packageRecord = Object.freeze({
         root,
+        configuredPath: record.path,
         manifest,
         entryPath
       });

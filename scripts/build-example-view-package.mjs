@@ -23,10 +23,11 @@ export async function buildExampleViewPackage() {
   return output;
 }
 
-export async function checkExampleViewPackage() {
+export async function checkExampleViewPackage(bundlePath = outputPath) {
   const output = await buildExampleViewPackage();
-  const committed = await readFile(outputPath, "utf8");
-  if (committed !== output) {
+  const committed = await readFile(bundlePath, "utf8");
+  // Git may check tracked JavaScript out with CRLF on Windows.
+  if (committed.replace(/\r\n/g, "\n") !== output.replace(/\r\n/g, "\n")) {
     throw new Error("Example View Package bundle is stale; run node scripts/build-example-view-package.mjs");
   }
 }

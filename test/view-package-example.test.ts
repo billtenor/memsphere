@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
+import { cp, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -21,6 +21,11 @@ test("example View Package bundle is reproducible, SDK-external, and copy-instal
   const temporary = await mkdtemp(join(tmpdir(), "memsphere-example-package-"));
   const copied = join(temporary, "custom-view");
   try {
+    const crlfBundle = join(temporary, "crlf.js");
+    await writeFile(crlfBundle, bundle.replace(/\r?\n/g, "\r\n"));
+    await checkExampleViewPackage(crlfBundle);
+    await writeFile(crlfBundle, `${bundle}\n// stale bundle`);
+    await assert.rejects(checkExampleViewPackage(crlfBundle), /bundle is stale/);
     await cp(sourceRoot, copied, { recursive: true });
     const composition = await resolveViewPackageComposition({
       global: { installed: [{ path: copied }] },
@@ -29,7 +34,7 @@ test("example View Package bundle is reproducible, SDK-external, and copy-instal
       },
       sdkVersion: "1.0.0"
     });
-    assert.equal(composition.installed[0]?.root, copied);
+    assert.equal(composition.installed[0]?.root, await realpath(copied));
     assert.equal(composition.instances.length, 1);
     const globalThemeOnly = await resolveViewPackageComposition({
       global: { installed: [{ path: copied }] },

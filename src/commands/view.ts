@@ -524,7 +524,7 @@ async function handleRequest(
       installed: composition.installed.map(entry => ({
         id: entry.manifest.id,
         version: entry.manifest.version,
-        path: entry.root,
+        path: entry.configuredPath,
         source: entry.manifest.source,
         capabilities: entry.manifest.view.capabilities ?? [],
         dependencies: entry.manifest.view.dependencies ?? [],
