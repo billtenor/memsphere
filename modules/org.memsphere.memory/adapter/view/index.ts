@@ -25,6 +25,7 @@ import {
   type ContentFlowHooks,
   type ContentFlowNode
 } from "../../../shared/view/content-flow.js";
+import { defaultContentStyles } from "../../../shared/view/default-content-styles.js";
 
 type JsonRecord = Record<string, unknown>;
 type MemorySummary = JsonRecord & {
@@ -809,7 +810,7 @@ function createMemoryPageMounts(
     async mount({ element, portal: mountPortal }, context) {
       const style = document.createElement("style");
       style.dataset.memsphereMemoryStyles = "true";
-      style.textContent = memoryStyles + contentFlowStyles;
+      style.textContent = memoryStyles + contentFlowStyles + defaultContentStyles;
       element.append(style);
       element.classList.add("memory-surface", `memory-${surface}-surface`);
       await ensure(context.route);

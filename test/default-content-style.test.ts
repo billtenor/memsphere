@@ -2,29 +2,21 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
 import { chromium } from "playwright";
 import { createViewServer } from "../src/commands/view.js";
 import { readProjectConfig } from "../src/config.js";
 
-test("borderless content Package removes solid Memory and Run card outlines", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "memsphere-borderless-package-"));
+test("default content style presents a consistent Memory and Run hierarchy", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "memsphere-default-content-style-"));
   const home = join(temporary, "home");
   const projectRoot = join(home, "projects", "demo");
-  const packageRoot = resolve("examples/view-packages/borderless-content");
   await mkdir(join(projectRoot, "memory"), { recursive: true });
   await mkdir(join(projectRoot, "runs"), { recursive: true });
   await mkdir(join(projectRoot, "archives"), { recursive: true });
   await writeFile(join(home, "config.json"), JSON.stringify({
-    view: { host: "127.0.0.1", port: 0 },
-    view_packages: { installed: [{ path: packageRoot }] },
-    view_composition: {
-      packages: [{ id: "org.example.memsphere.borderless-content", version: "1.0.0", enabled: true }],
-      slots: {
-        "styles.global@1": ["org.example.memsphere.borderless-content:org.example.memsphere.borderless-content:borderless-content"]
-      }
-    }
+    view: { host: "127.0.0.1", port: 0 }
   }));
   await writeFile(join(projectRoot, "config.json"), JSON.stringify({
     store: { type: "managed", branch: "master", published_revision: "test" }
@@ -50,7 +42,7 @@ test("borderless content Package removes solid Memory and Run card outlines", as
   const page = await browser.newPage();
   try {
     await page.goto(`${origin}/projects/demo/memories`);
-    await page.locator('style[data-view-package-scope="global"]').waitFor({ state: "attached" });
+    await page.locator(".memory-module").waitFor({ state: "attached" });
     const result = await page.evaluate(() => {
       const memoryModule = document.createElement("div");
       memoryModule.className = "memory-module";

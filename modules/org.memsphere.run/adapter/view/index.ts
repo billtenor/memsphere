@@ -16,6 +16,7 @@ import {
 import { createRunDetailState, currentRunStep, renderRunDetail } from "./run-detail.js";
 import { runDetailStyles } from "./run-styles.js";
 import { contentFlowStyles } from "../../../shared/view/content-flow.js";
+import { defaultContentStyles } from "../../../shared/view/default-content-styles.js";
 
 type Json = Record<string, any>;
 type RunConfig = { locale?: string; messages?: Readonly<Record<string, string>>; projectApiBase?: string };
@@ -462,7 +463,7 @@ function createRunPageMounts(
         };
       }
       const style = document.createElement("style");
-      style.textContent = styles + runDetailStyles + contentFlowStyles;
+      style.textContent = styles + runDetailStyles + contentFlowStyles + defaultContentStyles;
       element.append(style);
       await ensure(context.route);
       app!.setRenderContext(context);
@@ -510,7 +511,7 @@ function createMount(config: Readonly<RunConfig>, routes: RunRoutes,navigate:Nav
     async mount({ element, portal }, context) {
       const controller = new AbortController();
       element.classList.add("run-module");
-      const style = document.createElement("style"); style.textContent = styles + runDetailStyles + contentFlowStyles; element.append(style);
+      const style = document.createElement("style"); style.textContent = styles + runDetailStyles + contentFlowStyles + defaultContentStyles; element.append(style);
       app = new RunApplication(element, portal, config, routes, context.route, controller,navigate,ui,runDetailCache,reviewOnly, () => undefined, renderArtifact);
       app.setRenderContext(context);
       await app.start();
