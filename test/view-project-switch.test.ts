@@ -57,9 +57,14 @@ test("View keeps Project selection in the URL and isolates concurrent Project re
       assert.deepEqual(await memoryNames(origin, "beta"), ["beta-memory"]);
       const [page, betaPage] = await Promise.all([browser.newPage(), browser.newPage()]);
       await Promise.all([
-        page.goto(`${origin}/projects/alpha/memories`, { waitUntil: "networkidle" }),
+        page.goto(`${origin}/projects/alpha`, { waitUntil: "networkidle" }),
         betaPage.goto(`${origin}/projects/beta/memories`, { waitUntil: "networkidle" })
       ]);
+      const memoryHome = page.locator(".view-home-module-grid").getByRole("button", { name: /^记忆/ });
+      await memoryHome.waitFor();
+      assert.equal(await page.locator(".view-host-module-error").count(), 0);
+      await memoryHome.click();
+      await page.waitForURL(`${origin}/projects/alpha/memories`);
       await Promise.all([
         page.getByRole("button", { name: /alpha-memory/ }).waitFor(),
         betaPage.getByRole("button", { name: /beta-memory/ }).waitFor()
