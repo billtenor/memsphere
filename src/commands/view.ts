@@ -3102,6 +3102,11 @@ async function builtinViewInstances(config: MemsphereConfig): Promise<readonly V
   const projectApiBase = `/api/projects/${encodeURIComponent(projectId)}`;
   return Promise.all(builtinModuleCatalog.map(async entry => {
     const { manifest } = await readBuiltinViewManifest(entry.packageDirectory, entry.moduleId);
+    const homeRoute = entry.routes.find(route => route.id === entry.homeRouteId);
+    const homeRouteParams = {
+      ...(homeRoute?.path.split("/").includes(":projectId") ? { projectId } : {}),
+      ...(entry.moduleId === "org.memsphere.settings" ? { module: "general" } : {})
+    };
     return {
       pluginPath: builtinAssetPath(entry.moduleId),
       config: { projectApiBase },
@@ -3114,7 +3119,7 @@ async function builtinViewInstances(config: MemsphereConfig): Promise<readonly V
         summary: entry.summary,
         icon: entry.icon,
         routeId: entry.homeRouteId,
-        ...(entry.moduleId === "org.memsphere.settings" ? { routeParams: { module: "general" } } : {})
+        ...(Object.keys(homeRouteParams).length ? { routeParams: homeRouteParams } : {})
       },
       module: {
         projectId,

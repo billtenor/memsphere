@@ -61,7 +61,9 @@ test("Settings Builtin Mount loads both scopes and validates an edited global dr
     const pageErrors: string[] = [];
     page.on("pageerror", error => pageErrors.push(error.message));
     await page.goto(`http://127.0.0.1:${port}/settings/overview`);
-    await page.locator("#settings-status").waitFor({ timeout: 5_000 }).catch(async error => {
+    await page.waitForFunction(
+      () => document.querySelector("#settings-status")?.textContent?.includes("已保存") === true
+    ).catch(async error => {
       throw new Error(`${String(error)}\npage errors: ${pageErrors.join(" | ")}\nbody: ${(await page.locator("body").innerText()).slice(0, 2_000)}`);
     });
     assert.match(await page.locator("#settings-status").textContent() ?? "", /已保存/);

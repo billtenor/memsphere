@@ -64,6 +64,15 @@ test("View server serves Host, SDK, Runtime, and all builtin bundles without ser
     assert(bootSource);
     const boot = JSON.parse(bootSource);
     assert.equal(boot.instances.length, 4);
+    const memory = boot.instances.find((instance: { module: { moduleId: string } }) => (
+      instance.module.moduleId === "org.memsphere.memory"
+    ));
+    assert.equal(memory?.home?.routeId, "project-index");
+    assert.deepEqual(memory?.home?.routeParams, { projectId: "memsphere" });
+    const settings = boot.instances.find((instance: { module: { moduleId: string } }) => (
+      instance.module.moduleId === "org.memsphere.settings"
+    ));
+    assert.deepEqual(settings?.home?.routeParams, { module: "general" });
     for (const instance of boot.instances) {
       const bundleResponse = await fetch(`${origin}${instance.pluginPath}`);
       assert.equal(bundleResponse.status, 200, instance.pluginPath);
