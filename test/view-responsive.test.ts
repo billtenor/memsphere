@@ -17,7 +17,7 @@ const runName = `本次Run名称-${"x".repeat(120)}`;
 
 async function withResponsiveView(
   fn: (browser: Browser, url: string) => Promise<void>,
-  options: { includeBrokenMemory?: boolean } = {}
+  options: { includeBrokenMemory?: boolean; extraMemoryCount?: number } = {}
 ): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-responsive-view-"));
   const homeRoot = join(dir, "home");
@@ -77,6 +77,15 @@ async function withResponsiveView(
     "names: [ canonical-only ]",
     "defines: [ A canonical-only memory fixture. ]"
   ].join("\n"));
+  await Promise.all(Array.from({ length: options.extraMemoryCount ?? 0 }, async (_, index) => {
+    const suffix = String(index + 1).padStart(2, "0");
+    await writeFile(join(memoryRoot, "concepts", `overflow-${suffix}.yaml`), [
+      "!concept",
+      `syntax: ${currentMemorySyntax}`,
+      `names: [ overflow-${suffix}, Overflow ${suffix} ]`,
+      "defines: [ A fixture that makes the memory list overflow. ]"
+    ].join("\n"));
+  }));
   if (options.includeBrokenMemory !== false) {
     await writeFile(join(memoryRoot, "concepts", "broken-memory.yaml"), [
       "!concept",
@@ -710,6 +719,26 @@ test("Memory nav only shows the Project Catalog and can hide installed system me
       await page.getByRole("button", { name: "User note", exact: true }).waitFor();
       const hideSystem = page.getByLabel("隐藏系统记忆");
       assert.equal(await hideSystem.isChecked(), true);
+      const listLayout = await page.locator(".view-host-list-mount.memory-list-surface").evaluate(element => {
+        const content = element.querySelector<HTMLElement>(".mem-view-content-list");
+        const accessory = element.querySelector<HTMLElement>(".memory-list-accessory");
+        if (!(element instanceof HTMLElement) || !content || !accessory) throw new Error("Memory list layout is incomplete");
+        const panelBox = element.getBoundingClientRect();
+        const accessoryBox = accessory.getBoundingClientRect();
+        return {
+          contentOverflows: content.scrollHeight > content.clientHeight,
+          panelClientHeight: element.clientHeight,
+          panelScrollHeight: element.scrollHeight,
+          accessoryTop: accessoryBox.top,
+          accessoryBottom: accessoryBox.bottom,
+          panelTop: panelBox.top,
+          panelBottom: panelBox.bottom
+        };
+      });
+      assert.equal(listLayout.contentOverflows, true, JSON.stringify(listLayout));
+      assert.equal(listLayout.panelScrollHeight, listLayout.panelClientHeight, JSON.stringify(listLayout));
+      assert.equal(listLayout.accessoryTop >= listLayout.panelTop, true, JSON.stringify(listLayout));
+      assert.equal(listLayout.accessoryBottom <= listLayout.panelBottom, true, JSON.stringify(listLayout));
       await page.locator(".mem-view-list-item", { hasText: "User note" }).waitFor();
       const systemMemoryButton = page.getByRole("button", { name: "Memory", exact: true });
       assert.equal(await systemMemoryButton.count(), 0);
@@ -722,7 +751,7 @@ test("Memory nav only shows the Project Catalog and can hide installed system me
     } finally {
       await page.close();
     }
-  });
+  }, { extraMemoryCount: 20 });
 });
 
 test("Memory navigation uses aliases while the detail header exposes the canonical reference", async () => {
