@@ -88,7 +88,7 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
     const reviewers = page.locator(".mem-content-review-summary");
     assert.equal(await reviewers.count(), 1);
     assert.equal(await reviewers.locator(".mem-content-review-count").innerText(), "Reviewer: 1");
-    assert.equal(await reviewers.locator(".mem-content-review-details").innerText(), "artifact_acceptance.unanimous");
+    assert.equal(await reviewers.locator(".mem-content-review-details").textContent(), "artifact_acceptance.unanimous");
     assert.equal(await page.locator("details.run-step").count(), 0, "Run steps use the same non-collapsible flow-node skeleton as Memory");
     await page.locator(".run-bindings .mem-view-disclosure > button").click();
     assert.match(await page.locator(".run-binding-body").innerText(), /Human/);
