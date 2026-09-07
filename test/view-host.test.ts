@@ -305,6 +305,155 @@ test("ViewHost shows the Mount error thrown by a registered main.view", async ()
   );
 });
 
+test("ViewHost Retry restores a failed main.view and mounts it again", async () => {
+  await withBrowserHost(
+    pluginSource(`
+      apply(context) {
+        window.__mainMountAttempts = 0;
+        context.slots.register(slots.mainView, {
+          id: "page",
+          key: route.key,
+          value: { mount({ element }) {
+            window.__mainMountAttempts += 1;
+            if (window.__mainMountAttempts === 1) throw new Error("transient main mount failure");
+            element.id = "retried-main-view";
+            element.textContent = "retried main view";
+          } }
+        });
+      }
+    `),
+    async page => {
+      await assertModuleFailure(page, "transient main mount failure");
+      await page.locator(".view-host-module-error button").click({ timeout: 5_000 });
+      await page.locator("#retried-main-view").waitFor({ timeout: 5_000 });
+      assert.equal(await page.evaluate(() => (window as any).__mainMountAttempts), 2);
+      assert.equal(await page.locator(".view-host-module-error").count(), 0);
+      const diagnostics = await page.evaluate(() => (window as any).__memsphereViewDiagnostics());
+      const entry = diagnostics.entries.find((candidate: any) => candidate.id === "page");
+      assert.equal(entry?.state, "active");
+      assert.equal(entry?.message, undefined);
+    }
+  );
+});
+
+test("ViewHost Retry preserves the Mount error when main.view fails again", async () => {
+  await withBrowserHost(
+    pluginSource(`
+      apply(context) {
+        window.__mainMountAttempts = 0;
+        context.slots.register(slots.mainView, {
+          id: "page",
+          key: route.key,
+          value: { mount() {
+            window.__mainMountAttempts += 1;
+            throw new Error("persistent main mount failure");
+          } }
+        });
+      }
+    `),
+    async page => {
+      await assertModuleFailure(page, "persistent main mount failure");
+      await page.locator(".view-host-module-error button").click();
+      await page.waitForFunction(() => (window as any).__mainMountAttempts === 2);
+      await assertModuleFailure(page, "persistent main mount failure");
+      assert.equal(await page.getByText(/ViewHost has no main\.view/).count(), 0);
+      const diagnostics = await page.evaluate(() => (window as any).__memsphereViewDiagnostics());
+      const entry = diagnostics.entries.find((candidate: any) => candidate.id === "page");
+      assert.equal(entry?.state, "abdicated");
+      assert.equal(entry?.message, "persistent main mount failure");
+    }
+  );
+});
+
+test("ViewHost Retry restores every failed main.view candidate and retries the highest priority", async () => {
+  await withBrowserHost(
+    pluginSource(`
+      apply(context) {
+        window.__primaryMountAttempts = 0;
+        window.__fallbackMountAttempts = 0;
+        context.slots.register(slots.mainView, {
+          id: "primary",
+          key: route.key,
+          priority: 10,
+          value: { mount({ element }) {
+            window.__primaryMountAttempts += 1;
+            if (window.__primaryMountAttempts === 1) throw new Error("primary mount failure");
+            element.id = "retried-primary-view";
+            element.textContent = "retried primary view";
+          } }
+        });
+        context.slots.register(slots.mainView, {
+          id: "fallback",
+          key: route.key,
+          priority: 20,
+          value: { mount() {
+            window.__fallbackMountAttempts += 1;
+            throw new Error("fallback mount failure");
+          } }
+        });
+      }
+    `),
+    async page => {
+      await assertModuleFailure(page, "fallback mount failure");
+      await page.locator(".view-host-module-error button").click();
+      await page.locator("#retried-primary-view").waitFor();
+      assert.equal(await page.evaluate(() => (window as any).__primaryMountAttempts), 2);
+      assert.equal(await page.evaluate(() => (window as any).__fallbackMountAttempts), 1);
+      const diagnostics = await page.evaluate(() => (window as any).__memsphereViewDiagnostics());
+      const primary = diagnostics.entries.find((candidate: any) => candidate.id === "primary");
+      const fallback = diagnostics.entries.find((candidate: any) => candidate.id === "fallback");
+      assert.equal(primary?.state, "active");
+      assert.equal(primary?.message, undefined);
+      assert.equal(fallback?.state, "shadowed");
+      assert.equal(fallback?.message, undefined);
+    }
+  );
+});
+
+test("ViewHost Retry restores content.list without remounting a healthy main.view", async () => {
+  await withBrowserHost(
+    pluginSource(`
+      apply(context) {
+        window.__mainMountAttempts = 0;
+        window.__listMountAttempts = 0;
+        context.slots.register(slots.contentList, {
+          id: "list",
+          value: { mount({ element }) {
+            window.__listMountAttempts += 1;
+            if (window.__listMountAttempts === 1) throw new Error("transient list mount failure");
+            element.id = "retried-content-list";
+            element.textContent = "retried content list";
+          } }
+        });
+        context.slots.register(slots.mainView, {
+          id: "page",
+          key: route.key,
+          value: { mount({ element }) {
+            window.__mainMountAttempts += 1;
+            element.id = "healthy-main-view";
+            element.textContent = "healthy main view";
+          } }
+        });
+      }
+    `),
+    async page => {
+      await page.locator("#healthy-main-view").waitFor();
+      const listFailure = page.locator('[data-view-slot="content.list"] .view-host-module-error');
+      await listFailure.waitFor();
+      assert.equal(await listFailure.locator("p").textContent(), "transient list mount failure");
+      await listFailure.locator("button").click();
+      await page.locator("#retried-content-list").waitFor();
+      assert.equal(await page.evaluate(() => (window as any).__listMountAttempts), 2);
+      assert.equal(await page.evaluate(() => (window as any).__mainMountAttempts), 1);
+      assert.equal(await page.getByText(/ViewHost has no main\.view/).count(), 0);
+      const diagnostics = await page.evaluate(() => (window as any).__memsphereViewDiagnostics());
+      const list = diagnostics.entries.find((candidate: any) => candidate.id === "list");
+      assert.equal(list?.state, "active");
+      assert.equal(list?.message, undefined);
+    }
+  );
+});
+
 test("ViewHost continues disposing resources after one cleanup fails on pagehide", async () => {
   await withBrowserHost(
     pluginSource(`

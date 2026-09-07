@@ -449,7 +449,10 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       slotsRegistry.abdicate(entry, error);
       const fallback = slotsRegistry.entry(entry.token, entry.key ?? "", location);
       if (fallback) await activateMainEntry(fallback, location);
-      else renderRuntimePageFailure(options.root, moduleForOwner(instances, entry.owner), errorMessage(error), () => activeHost.activateMainView());
+      else renderRuntimePageFailure(options.root, moduleForOwner(instances, entry.owner), errorMessage(error), () => {
+        slotsRegistry.restoreCell(entry.token, entry.key);
+        return activeHost.activateMainView();
+      });
     }
   };
 
@@ -507,7 +510,10 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       slotsRegistry.abdicate(entry, error);
       const fallback = slotsRegistry.entries(entry.token, location)[0];
       if (fallback) await activateListEntry(fallback, location);
-      else renderRuntimePageFailure(host, moduleForOwner(instances, entry.owner), errorMessage(error), () => activeHost.activateMainView());
+      else renderRuntimePageFailure(host, moduleForOwner(instances, entry.owner), errorMessage(error), () => {
+        slotsRegistry.restoreCell(entry.token, entry.key);
+        return activeHost.activateMainView();
+      });
     }
   };
 
@@ -1218,6 +1224,16 @@ class RuntimeSlotStore {
     this.#abdicated.add(entry);
     if (error !== undefined) this.#abdicationMessages.set(entry, errorMessage(error));
     this.#notify();
+  }
+
+  restoreCell(token: AnySlotToken, key: string | undefined): void {
+    let changed = false;
+    for (const entry of this.#entries) {
+      if (entry.token !== token || entry.key !== key || !this.#abdicated.delete(entry)) continue;
+      this.#abdicationMessages.delete(entry);
+      changed = true;
+    }
+    if (changed) this.#notify();
   }
 
   snapshot(): ViewHostDiagnosticSnapshot["entries"] {
@@ -2312,8 +2328,12 @@ function renderSecondaryNavigation(
 function syncShellLayout(root: HTMLElement, location: RouteLocation, slotStore: RuntimeSlotStore): void {
   const shell = root.closest<HTMLElement>("[data-view-shell]");
   if (!shell) return;
+  const contentListHost = shell.querySelector<HTMLElement>('[data-view-slot="content.list"]');
   shell.dataset.viewLayout = location.pathname === "/" ? "home" : "module";
-  shell.dataset.viewContentList = String(Boolean(slotStore.entries(slots.contentList, location)[0]));
+  shell.dataset.viewContentList = String(Boolean(
+    slotStore.entries(slots.contentList, location)[0]
+    || contentListHost?.querySelector(".view-host-module-error")
+  ));
 }
 
 function renderHeaderAccount(descriptor: HeaderAccountDescriptor, identity: string): HTMLElement {
