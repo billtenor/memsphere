@@ -19,6 +19,7 @@ asserts:
   - format 省略时继承父 Schema 或所属 Artifact 的兼容格式；object markdown 使用 outline，array markdown 使用 table。
   - fields 只用于 object Schema，成员可以是字符串简写、指向 Schema 的 !ref、具名 !schema 或合法 !repeat。
   - item 与 items 互斥，任一出现时必须显式声明 type 为 array；item 是唯一元素契约，items 是至少两个候选组成的联合元素契约。
+  - Schema 节点不声明 Artifact Review；review 属于承载 Schema 的 Artifact。该 Artifact 的全部 Reviewer Slot 在 Run 创建配置中显式 skip 时不要求 Control Plane，任一 Slot 绑定 Actor 时必须配置 Control Plane。
 fields:
   - !schema
     name: syntax
