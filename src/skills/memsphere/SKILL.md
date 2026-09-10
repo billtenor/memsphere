@@ -185,6 +185,7 @@ flow:
 - 原生 Windows 要求 Windows Node.js 与 Git for Windows；用户和 Agent CLI 支持 Windows PowerShell 5.1、PowerShell 7、CMD、Git for Windows 随附的 Git Bash。WSL 按独立 Linux 环境处理，MSYS2/Cygwin 不在当前支持范围。Provider 的安装检测与 Windows 支持等级分别展示。
 - `memsphere run start` 必须通过 `--name` 指定本次 Run 的非空名称，并会先列出所有 Review scope、Slot、可用 Actor 和内置 Decision Policy。把预检示例保存并调整后，使用相同的 `--name` 和 `--review-config <path>` 启动。
 - Review 配置必须为每个 scope 选择 Policy，并为每个 Slot 绑定 Actor 或显式 `skip`；一个 Actor 绑定多个 Slot 时只产生一个 Assignment 和 Vote。
+- 当前 Run 的全部可达 Review Slot 都显式 `skip` 时，不创建 Artifact Review，也不要求 Project 配置 `control_plane`；只要任一 Slot 实际绑定 Actor，Project 仍必须配置 Control Plane。无 Control Plane 时预检仍列出内置 Decision Policy，提供有效全 skip 示例；已经提供含 Actor Binding 的 Review 配置时，CLI 必须明确报告缺少 `control_plane`，不得误报为未提供 Review 配置。
 - Permission 只在 Runner/Actor 的 `permissions` 中配置；Run Review 配置不追加临时权限。Memory YAML 不允许 `role_bindings` 或 `permission_grants`。
 - `runner` 是当前 Run 执行上下文，不需要 Slot Binding。
 - Human 完成当前 Review Round 后若不再参与后续流程，Runner 可以执行 `memsphere run binding show --run <run_id>` 查看 Run 冻结的 Actor、当前 Round Binding、下一 Round Binding、影响 scope 和历史，再执行 `memsphere run binding update --run <run_id> --slot <procedure::slot> --actor <actor_id>` 换绑；多个 Actor 重复传 `--actor`，未来不需要该 Slot 时使用 `--skip`。只能选择 Run 启动时已经冻结的 Actor；更新不改变已经创建的当前或历史 Round、Assignment、Comment、Vote 和结算，同一 Review 的下一 Round 与尚未创建的 Review 使用创建前最后一次成功保存的 Binding。View 中更新 Binding 不使用 Settings operation token，但仍要求同源 JSON 请求。

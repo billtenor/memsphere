@@ -28,6 +28,7 @@ import {
   readRun,
   repeatRun,
   reportRun,
+  RunReviewConfigurationRequired,
   submitArtifactReviewAssignment,
   submitArtifactReviewAgentAssignment,
   submitArtifactReviewHumanAssignmentForRunner,
@@ -3335,6 +3336,175 @@ flow:
     assert.equal(currentStep(enteredChild)?.instruction, "Original child instruction.");
     assert.equal(currentStep(enteredChild)?.artifact, "child result");
     assert.deepEqual(currentStep(enteredChild)?.controlPlane?.bindings, {});
+  });
+});
+
+test("Review preflight exposes built-in policies without a control plane", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "reviewed.yaml"), `!procedure
+name: reviewed-preflight
+flow:
+  - !action
+    action: Produce a reviewed Artifact.
+    artifact: !artifact
+      name: reviewed result
+      review: [reviewer]
+`);
+
+    await assert.rejects(
+      startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "reviewed-preflight" }),
+      (error: unknown) => {
+        assert(error instanceof RunReviewConfigurationRequired);
+        assert.deepEqual(error.preflight.reviews[0]?.policies, ["artifact_acceptance.unanimous"]);
+        assert.deepEqual(error.preflight.example.slots, {
+          "reviewed-preflight::reviewer": { skip: true }
+        });
+        return true;
+      }
+    );
+    assert.deepEqual(await readdir(runsRoot), []);
+  });
+});
+
+test("Run without a control plane accepts an explicitly skipped Review Slot", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "reviewed.yaml"), `!procedure
+name: skipped-review
+flow:
+  - !action
+    action: Produce an optionally reviewed Artifact.
+    artifact: !artifact
+      name: result
+      review: [reviewer]
+`);
+
+    const started = await startRun({
+      name: "Skipped review",
+      memoryRoot,
+      runsRoot,
+      procedureName: "skipped-review",
+      reviewConfiguration: reviewConfiguration({
+        procedure: "skipped-review",
+        slots: { reviewer: "skip" }
+      })
+    });
+    assert.equal(started.controlPlane, undefined);
+    assert.equal(currentStep(started)?.controlPlane, undefined);
+    assert.equal(currentStep(started)?.reviewPolicy, undefined);
+
+    const completed = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "accepted without Review" }
+    });
+    assert.equal(completed.status, "done");
+    assert.equal(completed.artifactReviews, undefined);
+    assert.equal(completed.events[0]?.artifact.authorization, undefined);
+  });
+});
+
+test("Run without a control plane rejects Actor-bound Review Slots before persistence", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "reviewed.yaml"), `!procedure
+name: actor-bound-review
+flow:
+  - !action
+    action: Produce a reviewed Artifact.
+    artifact: !artifact
+      name: result
+      review: [reviewer]
+`);
+
+    await assert.rejects(
+      startRun({
+        name: "Actor-bound review",
+        memoryRoot,
+        runsRoot,
+        procedureName: "actor-bound-review",
+        reviewConfiguration: reviewConfiguration({
+          procedure: "actor-bound-review",
+          slots: { reviewer: ["human"] }
+        })
+      }),
+      (error: unknown) => {
+        assert.match(String(error), /control_plane config is required/);
+        assert.doesNotMatch(String(error), /Review configuration is required/);
+        return true;
+      }
+    );
+    assert.deepEqual(await readdir(runsRoot), []);
+  });
+});
+
+test("Run without a control plane keeps skipped Review Slots disabled in called Procedures", async () => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const proceduresRoot = join(memoryRoot, "procedures");
+    const runsRoot = join(dir, "runs");
+    await mkdir(proceduresRoot, { recursive: true });
+    await writeFile(join(proceduresRoot, "caller.yaml"), `!procedure
+name: skipped-review-caller
+flow:
+  - !action
+    action: Produce the parent Artifact.
+    artifact: !artifact { name: parent result }
+  - !call
+    target: skipped-review-child
+`);
+    await writeFile(join(proceduresRoot, "child.yaml"), `!procedure
+name: skipped-review-child
+flow:
+  - !action
+    action: Produce the child Artifact.
+    artifact: !artifact
+      name: child result
+      review: [reviewer]
+`);
+
+    const started = await startRun({
+      name: "Skipped child review",
+      memoryRoot,
+      runsRoot,
+      procedureName: "skipped-review-caller",
+      reviewConfiguration: {
+        reviews: {
+          "skipped-review-child#flow[1]": { policy: "artifact_acceptance.unanimous" }
+        },
+        slots: {
+          "skipped-review-child::reviewer": { skip: true }
+        }
+      }
+    });
+    const child = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "parent" }
+    });
+    assert.equal(currentStep(child)?.artifact, "child result");
+    assert.equal(currentStep(child)?.controlPlane, undefined);
+    assert.equal(currentStep(child)?.reviewPolicy, undefined);
+
+    const completed = await reportRun({
+      runsRoot,
+      runId: started.id,
+      artifact: { kind: "inline", value: "child" }
+    });
+    assert.equal(completed.status, "done");
+    assert.equal(completed.controlPlane, undefined);
+    assert.equal(completed.artifactReviews, undefined);
+    assert.equal(completed.events.every((event) => event.artifact.authorization === undefined), true);
   });
 });
 

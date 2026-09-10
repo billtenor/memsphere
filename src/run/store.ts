@@ -40,6 +40,7 @@ import {
   authorizeArtifactOperation,
   controlPlaneSnapshotSchema,
   createControlPlaneSnapshot,
+  listDecisionPolicyDefinitions,
   permissionIds,
   renderPermissionGuidance,
   resolveArtifactControlPlane,
@@ -3416,7 +3417,8 @@ function buildRunReviewPreflight(
   ).values()];
   const reviews: RunReviewPreflight["reviews"] = [];
   const slots = new Map<string, RunReviewPreflight["slots"][number]>();
-  const policies = snapshot?.decisionPolicyCatalog.definitions.map((policy) => policy.id) ?? [];
+  const policies = (snapshot?.decisionPolicyCatalog.definitions ?? listDecisionPolicyDefinitions())
+    .map((policy) => policy.id);
   for (const template of templates) {
     for (const step of flattenRunSteps(template.steps)) {
       if (!step.artifact || !step.reviewSlots?.length) continue;
@@ -3459,23 +3461,24 @@ function validateRunReviewConfiguration(
   snapshot: ControlPlaneSnapshot | undefined
 ): RunReviewConfiguration | undefined {
   if (!preflight.reviews.length) return undefined;
-  if (!configuration || !snapshot) throw new RunReviewConfigurationRequired(preflight);
+  if (!configuration) throw new RunReviewConfigurationRequired(preflight);
   const issues: string[] = [];
-  const requiredReviews = new Set(preflight.reviews.map((review) => review.scope));
+  const requiredReviews = new Map(preflight.reviews.map((review) => [review.scope, review]));
   const requiredSlots = new Set(preflight.slots.map((slot) => slot.key));
-  for (const scope of requiredReviews) {
+  for (const [scope, preflightReview] of requiredReviews) {
     const review = configuration.reviews[scope];
     if (!review) {
       issues.push(`reviews.${scope}: required`);
       continue;
     }
-    if (!snapshot.decisionPolicyCatalog.definitions.some((policy) => policy.id === review.policy)) {
+    if (!preflightReview.policies.includes(review.policy)) {
       issues.push(`reviews.${scope}.policy: unknown Decision Policy id ${review.policy}`);
     }
   }
   for (const scope of Object.keys(configuration.reviews)) {
     if (!requiredReviews.has(scope)) issues.push(`reviews.${scope}: unknown Review scope`);
   }
+  const actorBoundSlots: string[] = [];
   for (const key of requiredSlots) {
     const binding = configuration.slots[key];
     if (!binding) {
@@ -3483,6 +3486,7 @@ function validateRunReviewConfiguration(
       continue;
     }
     if ("actorIds" in binding) {
+      actorBoundSlots.push(key);
       if (!binding.actorIds.length) issues.push(`slots.${key}.actors: at least one Actor is required`);
       const seenActorIds = new Set<string>();
       for (const [index, actorId] of binding.actorIds.entries()) {
@@ -3491,7 +3495,7 @@ function validateRunReviewConfiguration(
           continue;
         }
         seenActorIds.add(actorId);
-        if (!snapshot.actors[actorId]) issues.push(`slots.${key}.actors: unknown Actor id ${actorId}`);
+        if (snapshot && !snapshot.actors[actorId]) issues.push(`slots.${key}.actors: unknown Actor id ${actorId}`);
       }
     }
   }
@@ -3499,6 +3503,9 @@ function validateRunReviewConfiguration(
     if (!requiredSlots.has(key)) issues.push(`slots.${key}: unknown Review Slot`);
   }
   if (issues.length) throw new Error(`Invalid Review configuration:\n- ${issues.join("\n- ")}`);
+  if (!snapshot && actorBoundSlots.length) {
+    throw new Error(`control_plane config is required for Actor-bound Review Slots:\n- ${actorBoundSlots.join("\n- ")}`);
+  }
   return structuredClone(configuration);
 }
 
@@ -3666,26 +3673,12 @@ function flattenRunSteps(steps: readonly RunStep[]): RunStep[] {
   return flattened;
 }
 
-function containsArtifactReview(steps: readonly RunStep[]): boolean {
-  return steps.some((step) =>
-    Boolean(
-      step.reviewSlots?.length ||
-        (step.branches &&
-          (containsArtifactReview(step.branches.truthy) || containsArtifactReview(step.branches.falsy))) ||
-        (step.loop && containsArtifactReview(step.loop.body))
-    )
-  );
-}
-
 function instantiateProcedureTemplate(
   template: RunProcedureTemplate,
   snapshot: ControlPlaneSnapshot | undefined,
   reviewConfiguration: RunReviewConfiguration | undefined,
   validationScopes?: ReadonlySet<string>
 ): RunStep[] {
-  if (!snapshot && containsArtifactReview(template.steps)) {
-    throw new Error(`control_plane config is required for Artifact Review: procedure:${template.memoryName}`);
-  }
   const steps = cloneSteps(template.steps);
   applyControlPlaneToSteps(steps, snapshot, reviewConfiguration, template.memoryName, validationScopes);
   return steps;
@@ -3702,7 +3695,14 @@ function applyControlPlaneToSteps(
     if (step.artifact) {
       const artifactScope = `${procedureName}#${step.id}`;
       if (step.reviewSlots?.length && !snapshot) {
-        throw new Error(`control_plane config is required for Artifact Review: ${artifactScope}`);
+        const actorBoundSlots = step.reviewSlots.flatMap((slot) => {
+          const key = `${procedureName}::${slot}`;
+          const binding = reviewConfiguration?.slots[key];
+          return binding && "skip" in binding ? [] : [key];
+        });
+        if (actorBoundSlots.length) {
+          throw new Error(`control_plane config is required for Actor-bound Review Slots in ${artifactScope}:\n- ${actorBoundSlots.join("\n- ")}`);
+        }
       }
       if (snapshot && step.reviewSlots?.length) {
         const review = reviewConfiguration?.reviews[artifactScope];

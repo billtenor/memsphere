@@ -252,7 +252,7 @@ export async function runStartCommand(procedureName: string | undefined, options
   printRunOutput({ kind: "start", run, runsRoot: config.runsRoot });
 }
 
-function parseRunReviewConfiguration(value: unknown): RunReviewConfiguration {
+export function parseRunReviewConfiguration(value: unknown): RunReviewConfiguration {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Review configuration must be a JSON object");
   }
