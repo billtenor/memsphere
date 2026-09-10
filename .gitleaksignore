@@ -4,3 +4,8 @@
 85961b3fc956d664e7663e11d8e24c6a2e2f86e6:design-qa.md:private-ipv4-address:3
 85961b3fc956d664e7663e11d8e24c6a2e2f86e6:design-qa.md:private-ipv4-address:4
 85961b3fc956d664e7663e11d8e24c6a2e2f86e6:design-qa.md:private-ipv4-address:45
+
+# PR #72 acceptance records briefly captured a private View endpoint. Both
+# documents now use localhost; ignore only the exact historical findings.
+91f1f7cb7e1397111b9bc6283fc94cef58c0c4c4:changes/archive/completed/20260905-view-package-customization/change.md:private-ipv4-address:60
+91f1f7cb7e1397111b9bc6283fc94cef58c0c4c4:changes/archive/completed/20260905-view-package-customization/delivery-report.md:private-ipv4-address:31
