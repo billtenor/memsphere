@@ -4,6 +4,8 @@
 >
 > 范围：定义数据层的核心抽象、领域模型机制、扩展接口与职责边界。本文描述设计，不代表现有实现状态；实施分期与迁移步骤由独立实施计划管理。
 
+接口代码与 review 入口见 [src/data](../src/data/README.md)。
+
 ## 1. 目标
 
 Memsphere 的数据层不只负责“把值存下来”，还应当回答：
@@ -209,7 +211,7 @@ Runtime 已绑定 Descriptor，调用 `reflect()` 时只需传入值实例。`un
 
 ### 4.3 Descriptor 与 Value：类型描述和值实例操作
 
-这两个类型沿用 Protobuf 反射设计中的分工：Descriptor 提供模型的类型和字段信息，Value 提供针对具体值实例的反射操作。
+Descriptor 提供模型的类型和字段信息，Value 提供针对具体值实例的反射操作。
 
 `TDefinition` 和 `TValue` 分别表示模型定义和值实例的内存类型；`Descriptor` 和 `Value` 分别提供结构描述和值实例操作能力：
 
@@ -222,17 +224,17 @@ Runtime 已绑定 Descriptor，调用 `reflect()` 时只需传入值实例。`un
 
 ### 4.4 根据模型定义创建 Runtime
 
-模型定义自身也是 Data。它的 `model` 指向元模型，即描述模型定义的模型。本设计将 JSON Schema 2020-12 对应的内置元模型标识为 `json-schema/2020-12`。
+模型定义自身也是 Data。它的 `model` 指向元模型，即描述模型定义的模型。JSON Schema Draft-07 对应的元模型标识为 `json-schema/draft-07`。
 
 ```text
 order-001                  一条订单数据的 ID
   model -> order-model
 
 order-model                订单模型的 ID
-  model -> json-schema/2020-12
+  model -> json-schema/draft-07
 ```
 
-业务或模型配置提供订单模型 ID `order-model` 及其元模型 ID `json-schema/2020-12`。系统加载订单模型定义，按照该元模型对应的 JSON Schema 标准解释定义，创建订单模型的 Runtime。
+业务或模型配置提供订单模型 ID `order-model` 及其元模型 ID `json-schema/draft-07`。系统加载订单模型定义，按照该元模型对应的 JSON Schema 标准解释定义，创建订单模型的 Runtime。
 
 ### 4.5 ModelRuntimeRegistry：按模型 ID 管理 Runtime
 
@@ -398,7 +400,7 @@ type StoredValue = {
 };
 ```
 
-这里保存的是 `TValue` 所表示的值实例，不是反射操作对象 `Value`。这条路径不经过 PayloadSerializer，也不要求构造 Payload；底层数据库使用的编码和字段映射由 ValueStore 实现负责。
+这里保存的是 `TValue` 所表示的值实例，不是反射操作对象 `Value`。调用方不需要构造 Payload；内部编码和字段映射由 ValueStore 实现负责，可以复用 Serializer。例如文件型 ValueStore 在内部使用 JSON 编码，对外仍直接读写值实例。
 
 ValueStore 不保存原始 Payload 的格式和字节。需要导出为 Data 时，由调用方选择内容类型，通过 PayloadSerializer 序列化值实例，再与记录的 `id` 和 `store.model` 组成 Data。
 
@@ -446,7 +448,7 @@ DataStore 和 ValueStore 提供相同的基本操作，区别在于存取的是�
 
 `update` 替换完整 Data 内容或完整值实例，不做字段合并。`expectedRevision` 可选，仅用于检查当前记录版本，必须为正整数；指定版本不匹配时报冲突，省略时仍要求记录存在。`delete` 不带版本条件且记录不存在时返回 false，带条件时记录不存在或版本不匹配均报冲突。
 
-存在性、版本条件的检查与对应写入或删除必须原子执行，不能用先 `has()` 再写入的方式代替。Store 不支持相应保证时应报错，不能静默忽略。删除成功只表示源记录已删除，不表示业务读视图已同步。
+创建不得覆盖已有记录。Store 支持版本条件时，条件检查与对应写入或删除必须在其声明的并发范围内原子执行，不能用调用方先 `has()` 再写入的方式代替；不支持版本条件时应明确报错。无版本条件的更新与删除竞争由实现说明，例如文件 DataStore 使用无锁原子替换，不提供存在性检查与替换之间的事务保证。删除成功只表示源记录已删除，不表示业务读视图已同步。
 
 ### 5.6 业务读视图：自定义查询
 
@@ -499,7 +501,7 @@ Descriptor + PayloadContent  --deserialize--> TValue
 Descriptor + TValue          --serialize----> PayloadContent
 ```
 
-`descriptor` 提供模型的结构描述。Protobuf 二进制等格式依赖它完成转换；JSON、纯文本等格式可以不使用它。
+`descriptor` 提供模型身份及内存结构，Serializer 可据此检查值与格式的兼容性。额外的格式专属信息由 Serializer 实现持有，不放入公共反射接口。
 
 ### 6.2 ModelRuntimeFactory：自定义模型定义标准的解释与 Runtime 创建
 
@@ -507,8 +509,8 @@ ModelRuntimeFactory 提供创建 Runtime 的能力。Factory 可以专门为一�
 
 ```ts
 type ModelRuntimeFactoryTarget =
-  | { readonly model: ModelRef }
-  | { readonly metaModel: ModelRef };
+  | { readonly model: ModelRef; readonly metaModel?: never }
+  | { readonly metaModel: ModelRef; readonly model?: never };
 
 interface ModelRuntimeFactory<TDefinition = unknown> {
   /** 按具体模型或模型定义标准匹配，二者选一。 */
@@ -524,8 +526,8 @@ interface ModelRuntimeFactory<TDefinition = unknown> {
 
 `target` 声明 Factory 处理的对象：
 
-- `{ model: "json-schema/2020-12" }`：专门创建这个元模型的 Runtime，用于描述和操作 JSON Schema 模型定义。
-- `{ metaModel: "json-schema/2020-12" }`：解释采用 JSON Schema 编写的订单等模型定义，创建对应业务模型的 Runtime。
+- `{ model: "json-schema/draft-07" }`：专门创建这个元模型的 Runtime，用于描述和操作 JSON Schema 模型定义。
+- `{ metaModel: "json-schema/draft-07" }`：解释采用 JSON Schema 编写的订单等模型定义，创建对应业务模型的 Runtime。
 
 这是两个不同的 Factory 实现，都使用同一个 `createRuntime()` 接口。Memsphere 优先匹配具体模型 ID；没有专用 Factory 时，才按元模型 ID 选择通用 Factory。同一模型的专用 Factory 与其标准的通用 Factory 可以同时注册。
 
@@ -594,6 +596,14 @@ interface DataExtension {
 
 四个字段分别提供内容格式、模型解释、Data 持久化和值实例持久化的扩展能力。模型 Runtime 和绑定具体模型的 Store 由 Memsphere 调用 Factory 创建，分别保存在 ModelRuntimeRegistry 和 StoreRegistry 中。
 
+内置实现与业务实现使用相同的 DataExtension 接口。内置扩展按单个可独立替换的 Serializer 或 Factory 拆分，各自拥有独立的扩展 ID。例如，JSON Serializer、JSON Schema 业务模型的 Factory、文件系统 DataStoreFactory、文件系统 JSON ValueStoreFactory 分别作为独立扩展。内部辅助类和共用代码可以复用，不需要各自成为扩展；DataExtension 仍允许业务扩展组合多个实现。
+
+已实现扩展的配置、用法及支持范围见[内置扩展说明](../src/data/extensions/README.md)。框架的自动装配与元模型引导流程仍待实现。
+
+默认装配维护这些独立扩展的列表。替换某项内置能力时，在注册前移除对应扩展并加入替代扩展，保留其他扩展；若 Store Factory 的 ID 改变，同时调整对应存储绑定。替换后的组合仍须满足依赖和兼容性要求，注册冲突不通过加载顺序覆盖。
+
+这里的替换发生在初始化装配阶段，不隐含已创建 Runtime、Store 的热替换或存量数据迁移。
+
 Memsphere 安装扩展时收集上述实现，并检查注册冲突：
 
 - `DataExtension.id + version` 唯一；
@@ -644,16 +654,20 @@ Memsphere 解析 JSON 配置、检查顶层为对象，并用 `new Config(json)`
 
 框架不规定配置读取 API，也不绑定配置库。后续可扩展 Config 的能力，而不改变 Factory 的配置参数类型。
 
-### 7.3 Descriptor 与 Value：对齐 Protobuf 的反射接口与能力
+### 7.3 Descriptor 与 Value：内存结构与反射操作
 
-Descriptor 与 Value 的公共接口、反射能力和操作语义默认直接对齐 Protobuf，参照 Go `protoreflect` 与 protobuf-es 的相关接口。本文只说明职责和数据层边界，不展开完整接口定义。
+反射协议只有 object、array、scalar、map 四种基础结构，不涉及序列化与反序列化。详细契约及使用导读见 [src/data](../src/data/README.md)，接口见 [reflection.ts](../src/data/api/reflection.ts)。
 
-- Descriptor 提供类型、字段、枚举、集合等结构描述，以及字段存在性、默认值和字段分组等信息。
-- Value 绑定具体值实例，提供读取、修改、清除和集合操作等反射能力，由 `runtime.reflect(value)` 创建。
+- ObjectDescriptor 描述字段名称、类型及 `additionalProperties` 动态字段，ObjectValue 提供字段存在性、读写、删除与遍历。
+- ArrayDescriptor 描述同类型元素，ArrayValue 提供元素读写、插入、删除与遍历。
+- ScalarDescriptor 描述 null、boolean、number、string、bigint、bytes，可关联字符串或数值枚举；ScalarValue 整体读写实际值。枚举成员名与实际值分离，closed 只接受已声明值，open 还允许同类型的未声明值。
+- MapDescriptor 描述键与值的类型，MapValue 提供条目操作，返回原始键和子 Value。键不转换、复制，按 SameValueZero 比较：基本值按值，对象和字节按身份；内存表示不必是原生 JS Map。
 
-自定义模型定义标准由 ModelRuntime 适配到这套公共反射协议，不自行改变操作语义。对于数据引用、无结构值等需求，先检查 Protobuf 已有能力能否表达；确有无法直接对应的特殊之处，再逐项决策是否以及如何扩展接口。
+Descriptor 的 `id` 用于 Runtime 注册和 Store 绑定，`root` 描述根类型。根类型与嵌套类型使用相同的 TypeDescriptor；`runtime.reflect(value)` 直接返回相应的 Value，视图的 `descriptor` 指向 `runtime.descriptor.root`。
 
-Descriptor 关联当前模型的 ID，本文用 `descriptor.id` 表示，供 Runtime 注册和 Store 绑定使用。对 Value 的修改作用于值实例，持久化仍通过对应的 Store 完成。
+tuple、Record、Set 不另设基础类型；集合可表达为 `Map<T, null>`，不承诺原生 JS Set 适配。枚举附着于标量，不增加 Value 种类或通用约束语言。
+
+undefined 只表示缺失，不是标量；显式 null 是有效值，读取不合成默认值。子 Value 的修改直接反映到父值；`Value.value` 提供当前原始值实例，持久化仍通过 Store 完成。自定义模型定义标准由 ModelRuntime 适配到这套结构与操作协议，不改变公共读写语义。
 
 ### 7.4 路径访问与查询：基于反射的扩展能力
 
@@ -665,7 +679,7 @@ Descriptor 关联当前模型的 ID，本文用 `descriptor.id` 表示，供 Run
 
 ### 7.5 Serializer、ValueStore 与 Runtime 的兼容性
 
-ModelRuntime 提供的 Descriptor 应保留对应标准的必要信息，例如 Protobuf 序列化所需的字段编号和精确类型。Serializer 检查 Descriptor 与自身格式是否兼容，不兼容时明确报错。
+公共 Descriptor 只提供模型身份和内存结构。Serializer 检查结构与值能否由自身格式表达；需要额外格式信息时，由扩展自己的配置或模型上下文提供，不通过反射字段承载。信息不足或不兼容时明确报错。
 
 Serializer、ValueStore 与 Runtime 还需约定一致的值实例表示，例如 bigint、字节数组，以及字段缺失与 null 的区别。ValueStore 负责恢复与 Runtime 兼容的值实例，跨标准组合也需检查结构与值表示是否兼容。
 
@@ -683,14 +697,14 @@ Memsphere 在反射访问值实例前准备并注册所需的 Runtime。业务�
 
 元模型的 Runtime 也由 Factory 创建。Memsphere 使用标准扩展提供的已解码内置定义，调用匹配该元模型 ID 的专用 Factory，再登记返回的 Runtime。这一步不经过依赖该 Runtime 的反序列化流程；内置创建输入的提供方式及元信息表示见第 13 章待决问题。
 
-本例的订单模型定义保存在绑定 `json-schema/2020-12` 的 DataStore 中，订单值实例则由绑定 `order-model` 的 Store 保存。
+本例的订单模型定义保存在绑定 `json-schema/draft-07` 的 DataStore 中，订单值实例则由绑定 `order-model` 的 Store 保存。
 
 以尚未登记的 `order-model` 为例，普通无环依赖的准备过程如下：
 
-1. 按第 8.3 节准备绑定 `json-schema/2020-12` 的 DataStore，再通过 `get(context, "order-model")` 加载模型定义的 Data，并检查其 ID 和元模型与请求一致。
-2. 准备或复用 `json-schema/2020-12` 的 Runtime，使用它的 Descriptor 和匹配模型 Payload.contentType 的 Serializer，反序列化订单模型定义，组成 Model。
+1. 按第 8.3 节准备绑定 `json-schema/draft-07` 的 DataStore，再通过 `get(context, "order-model")` 加载模型定义的 Data，并检查其 ID 和元模型与请求一致。
+2. 准备或复用 `json-schema/draft-07` 的 Runtime，使用它的 Descriptor 和匹配模型 Payload.contentType 的 Serializer，反序列化订单模型定义，组成 Model。
 3. 准备并注册订单模型依赖的其他 Runtime。
-4. 优先选择 `target.model` 为 `order-model` 的 Factory；没有专用 Factory 时，选择 `target.metaModel` 为 `json-schema/2020-12` 的 Factory，调用 `createRuntime(context, model, registry)`。
+4. 优先选择 `target.model` 为 `order-model` 的 Factory；没有专用 Factory 时，选择 `target.metaModel` 为 `json-schema/draft-07` 的 Factory，调用 `createRuntime(context, model, registry)`。
 5. 检查返回 Runtime 的模型 ID，再调用 `registry.register(runtime)` 登记并复用。
 
 ### 8.3 根据模型绑定创建 Store
@@ -849,16 +863,16 @@ const extension: DataExtension = {
 9. Model 演化、实例升级和历史 Run 的只读兼容；
 10. Artifact 与 Data 的关联及兼容视图语义；
 11. 扩展的信任、权限、资源限制和分发机制；
-12. Serializer、ValueStore 与 Runtime 之间的标准信息和值实例表示兼容性；
+12. Serializer、ValueStore 与 Runtime 之间的值实例表示兼容性，以及 Serializer 私有模型上下文的供给方式；
 13. 跨标准依赖的发现、创建顺序，以及循环依赖的分阶段构建与递归占位；
-14. 模型定义标准与 Protobuf 反射接口的映射差异，例如 JSON Schema 的动态属性、联合类型、tuple 和组合结构，以及数据引用、无结构值的表达；特殊之处逐项决策；
-15. 反射修改后的持久化，以及未知字段保留和序列化往返保真语义；
+14. 模型定义标准中其他复杂类型到基础反射结构的映射，以及数据引用的表达；
+15. 反射修改后的持久化，以及格式扩展负责的未知内容保留和序列化往返保真语义；
 16. 通用领域约束的职责归属、跨 Data 约束及表达式标准的选择；
 17. 内置元模型已解码创建输入的提供方式，以及没有更上层模型时 `Model.data.model` 等元模型关联的表示。
 
 ## 14. 相关标准
 
-- [JSON Schema Draft 2020-12](https://json-schema.org/draft/2020-12)
+- [JSON Schema Draft-07](https://json-schema.org/draft-07)
 - [RFC 9535: JSONPath（查询扩展的一种实现参考）](https://www.rfc-editor.org/rfc/rfc9535)
 - [RFC 9110: HTTP Semantics（Media Type）](https://www.rfc-editor.org/rfc/rfc9110)
 - [Protocol Buffers Go Reflection：描述符与值反射接口](https://pkg.go.dev/google.golang.org/protobuf/reflect/protoreflect)
