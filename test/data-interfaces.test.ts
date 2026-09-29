@@ -15,7 +15,7 @@ test("data and reflection interfaces typecheck for consumers, including rejected
   );
   assert.deepEqual(parsed.errors, []);
 
-  const fixtures = ["data-interfaces.ts", "data-reflection.ts"].map(name =>
+  const fixtures = ["data-interfaces.ts", "data-reflection.ts", "data-management.ts"].map(name =>
     fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url))
   );
   const program = ts.createProgram(fixtures, {

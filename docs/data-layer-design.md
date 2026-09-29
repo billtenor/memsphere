@@ -598,7 +598,7 @@ interface DataExtension {
 
 内置实现与业务实现使用相同的 DataExtension 接口。内置扩展按单个可独立替换的 Serializer 或 Factory 拆分，各自拥有独立的扩展 ID。例如，JSON Serializer、JSON Schema 业务模型的 Factory、文件系统 DataStoreFactory、文件系统 JSON ValueStoreFactory 分别作为独立扩展。内部辅助类和共用代码可以复用，不需要各自成为扩展；DataExtension 仍允许业务扩展组合多个实现。
 
-已实现扩展的配置、用法及支持范围见[内置扩展说明](../src/data/extensions/README.md)。框架的自动装配与元模型引导流程仍待实现。
+已实现扩展的配置、用法及支持范围见[内置扩展说明](../src/data/extensions/README.md)。默认注册表和 DataManager 已实现显式装配，见[装配用法](../src/data/management/README.md)；Project 配置接入与内置元模型引导扩展仍待实现。
 
 默认装配维护这些独立扩展的列表。替换某项内置能力时，在注册前移除对应扩展并加入替代扩展，保留其他扩展；若 Store Factory 的 ID 改变，同时调整对应存储绑定。替换后的组合仍须满足依赖和兼容性要求，注册冲突不通过加载顺序覆盖。
 
@@ -606,12 +606,14 @@ interface DataExtension {
 
 Memsphere 安装扩展时收集上述实现，并检查注册冲突：
 
-- `DataExtension.id + version` 唯一；
+- `DataExtension.id` 唯一，version 记录所用版本，同一 ID 不同时注册多个版本；
 - `PayloadSerializer.contentType` 不冲突；
 - ModelRuntimeFactory 的 `target` 只指定一种匹配方式，同一种匹配方式下的模型 ID 不冲突；
 - DataStoreFactory 的 `id` 在 DataStoreFactory 中唯一，ValueStoreFactory 的 `id` 在 ValueStoreFactory 中唯一。
 
 完成注册后，Memsphere 根据模型和存储绑定配置组织第 8 章的准备流程。Factory 负责创建并返回实例，Registry 负责保存和查询实例，业务无需手工调用 Factory 或登记 Registry。缺少所需扩展或存在配置错误时，Memsphere 明确报错，不自动换用其他实现。
+
+DataExtensionRegistry 是 Memsphere 进程内共享的能力目录，登记扩展清单并提供 Serializer、各类 Factory 的同步查询，不绑定 Project，也不加载模型或创建实例。整个扩展的冲突检查通过后才统一登记，检查范围包含扩展内部的重复项。初始化完成并交给 DataManager 使用后，这份能力组合保持不变。接口见 [extension-registry.ts](../src/data/api/extension-registry.ts)。
 
 ## 7. 通用类型与反射接口
 
@@ -684,6 +686,16 @@ undefined 只表示缺失，不是标量；显式 null 是有效值，读取不�
 Serializer、ValueStore 与 Runtime 还需约定一致的值实例表示，例如 bigint、字节数组，以及字段缺失与 null 的区别。ValueStore 负责恢复与 Runtime 兼容的值实例，跨标准组合也需检查结构与值表示是否兼容。
 
 ## 8. Memsphere 的 Runtime 与 Store 准备流程
+
+DataManager 是 Project 级的数据管理入口，使用共享的 DataExtensionRegistry，内部持有 ModelRuntimeRegistry 和 StoreRegistry。它不暴露可登记实例的 Registry，业务通过以下异步方法取得已准备好的结果：
+
+- `getModel(context, ref)`：加载并解码模型定义，返回 Model；
+- `getRuntime(context, ref)`：准备模型及其依赖，创建或复用 ModelRuntime；
+- `getStore(context, model)`：根据存储绑定创建或复用 DataStore、ValueStore。
+
+Registry 查询未找到时返回 undefined，DataManager 的准备操作失败时抛错。同一 Manager 内并发准备同一实例时合并创建，成功后才登记；不同 Project 的 Runtime 和 Store 相互隔离。DataStore 的创建不要求模型 Runtime，ValueStore 的创建则需要先准备 Runtime。接口见 [data-manager.ts](../src/data/api/data-manager.ts)，默认实现为 DefaultDataManager。
+
+DefaultDataManager 接收共享扩展目录、模型来源和 Store 绑定，并固定这次装配的能力与配置。模型来源可以是已解码的 Model，或读取原始模型 Data 的 loadData 回调；原始 Data 的解码由 Manager 选择 Serializer 并准备元模型 Runtime。模型依赖暂由绑定中的 dependencies 显式声明，跨模型循环准备报错。单个调用取消只停止其等待，不取消其他调用共享的准备工作；失败结果不缓存，后续调用可重试。
 
 ### 8.1 Runtime 的注册与构建
 
@@ -869,6 +881,7 @@ const extension: DataExtension = {
 15. 反射修改后的持久化，以及格式扩展负责的未知内容保留和序列化往返保真语义；
 16. 通用领域约束的职责归属、跨 Data 约束及表达式标准的选择；
 17. 内置元模型已解码创建输入的提供方式，以及没有更上层模型时 `Model.data.model` 等元模型关联的表示。
+18. Project 持久配置到 DataManager 装配输入的映射、项目相对路径基准，以及资源释放协议。
 
 ## 14. 相关标准
 

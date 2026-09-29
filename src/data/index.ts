@@ -42,3 +42,12 @@ export type {
   UpdateOptions
 } from "./api/store.js";
 export type { DataExtension } from "./api/extension.js";
+export type { DataExtensionRegistry } from "./api/extension-registry.js";
+export type { DataManager } from "./api/data-manager.js";
+export {
+  DefaultDataExtensionRegistry,
+  DefaultDataManager,
+  type DataManagerOptions,
+  type ModelBinding,
+  type StoreBinding
+} from "./management/index.js";

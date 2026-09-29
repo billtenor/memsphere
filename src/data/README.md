@@ -4,7 +4,7 @@
 
 ## 目录组织
 
-公共类型、接口和 Config 等公共类放在 `api/`，通过根目录的 [index.ts](./index.ts) 统一导出。内置扩展放在 `extensions/`，其私有共用代码放在 `extensions/shared/`。
+公共类型、接口和 Config 等公共类放在 `api/`，通过根目录的 [index.ts](./index.ts) 统一导出。装配管理实现放在 `management/`；内置扩展放在 `extensions/`，其私有共用代码放在 `extensions/shared/`。
 
 `api/` 不依赖具体实现；扩展依赖公共 API，框架装配负责组合实现。
 
@@ -21,7 +21,30 @@
 | [store.ts](./api/store.ts) | 两种 Store 的公共参数、分页结果和 Registry |
 | [data-store.ts](./api/data-store.ts)、[value-store.ts](./api/value-store.ts) | Store、返回记录及对应 Factory |
 | [extension.ts](./api/extension.ts) | DataExtension 能力清单 |
+| [extension-registry.ts](./api/extension-registry.ts) | 进程共享的扩展登记及 Serializer、Factory 查询接口 |
+| [data-manager.ts](./api/data-manager.ts) | Project 内的模型加载、Runtime 与 Store 准备接口 |
 | [reflection.ts](./api/reflection.ts) | object / array / scalar / map 的结构描述和值操作 |
+
+## 扩展装配与实例管理
+
+DataExtensionRegistry 登记 Extension 提供的能力，不创建 Runtime 或 Store。查询均为同步操作，未找到时返回 undefined。Runtime Factory 查询按 `target` 精确匹配，具体模型优先于元模型的选择顺序由 DataManager 执行。
+
+DataManager 属于一个 Project，通过 `getModel / getRuntime / getStore` 按需准备并复用结果。它内部管理 ModelRuntimeRegistry 和 StoreRegistry，不向业务暴露可登记实例的入口。异步准备失败时抛错，不返回 undefined。不同 Project 的同名模型不会共享 Runtime 或 Store。
+
+默认实现为 `DefaultDataExtensionRegistry` 和 `DefaultDataManager`，同样从 `memsphere/data` 导入。宿主显式提供扩展、模型来源与存储绑定；构造时不加载模型或创建 Store。完整装配示例见 [management](./management/README.md)。业务侧的调用如下：
+
+```ts
+import type { Context, DataManager } from "memsphere/data";
+
+declare const context: Context;
+declare const dataManager: DataManager; // 宿主绑定当前 Project。
+
+const store = await dataManager.getStore(context, "order-model");
+if (store.kind !== "ValueStore") throw new Error("order-model 未绑定 ValueStore");
+await store.create(context, "order-001", { orderNo: "O-001", amount: 100 });
+```
+
+模型可以直接提供已解码的 Model，或通过 `loadData(context)` 读取原始模型 Data，由 Manager 准备元模型 Runtime 后解码。模型依赖通过 `dependencies` 显式声明；Manager 不解析 JSON Schema 等标准的引用语法。并发准备合并为一次共享创建，调用方取消只停止自己的等待，共享工作仍可完成并缓存。`DataManager` 不代替 Store 的业务数据增删改查接口，也不提供热更新或 `close()`。
 
 ## 反射接口
 
@@ -65,4 +88,4 @@ tuple、Record、Set 不另设类型。动态对象字段仍由 `ObjectDescripto
 - 模型定义标准中其他复杂类型到基础反射结构的映射。
 - 跨 Data 引用和领域约束；不混入基本的字段、元素读写操作。
 - 路径访问与查询只确定为扩展方向，未增加查询接口或注册字段。
-- Registry、扩展装配、Store 绑定配置和元模型引导流程尚未实现；目前由调用方显式创建 Runtime 和 Store。
+- Project 持久配置与 CLI/View 的接入、模型依赖自动发现、内置 JSON Schema 元模型引导扩展和资源释放协议尚未实现；当前由宿主显式提供装配输入。
