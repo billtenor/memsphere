@@ -7,7 +7,7 @@ import { Config, type Model, type ModelRuntime, type ModelRuntimeRegistry } from
 import {
   FilesystemDataStoreFactory, FilesystemJsonValueStoreFactory, JsonPayloadSerializer,
   JsonSchemaModelRuntimeFactory, JSON_SCHEMA_DRAFT_07,
-  filesystemDataStoreExtension, filesystemJsonValueStoreExtension, jsonSchemaExtension, jsonSerializerExtension
+  filesystemDataStoreExtension, filesystemJsonValueStoreExtension, jsonSchemaExtension, jsonSerializerExtension, rawExtension
 } from "../src/data/extensions/index.js";
 import { bytesContent } from "../src/data/extensions/shared/payload.js";
 
@@ -47,9 +47,9 @@ async function orderRuntime() {
   return runtime;
 }
 
-test("built-ins expose four independently selectable single-capability extensions", () => {
-  const extensions = [filesystemDataStoreExtension, filesystemJsonValueStoreExtension, jsonSchemaExtension, jsonSerializerExtension];
-  assert.equal(new Set(extensions.map(extension => extension.id)).size, 4);
+test("built-ins expose five independently selectable single-capability extensions", () => {
+  const extensions = [filesystemDataStoreExtension, filesystemJsonValueStoreExtension, jsonSchemaExtension, jsonSerializerExtension, rawExtension];
+  assert.equal(new Set(extensions.map(extension => extension.id)).size, 5);
   for (const extension of extensions) {
     const capabilities = [extension.dataStoreFactories, extension.valueStoreFactories, extension.modelRuntimeFactories, extension.payloadSerializers];
     assert.equal(capabilities.filter(Boolean).length, 1);

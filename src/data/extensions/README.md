@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | `filesystemDataStoreExtension` | `memsphere/filesystem-datastore` | `FilesystemDataStoreFactory`，ID 为 `memsphere/filesystem` |
 | `jsonSchemaExtension` | `memsphere/json-schema-draft-07` | `JsonSchemaModelRuntimeFactory`，匹配元模型 `json-schema/draft-07` |
+| `rawExtension` | `memsphere/raw` | `RawModelRuntimeFactory`，匹配元模型 `raw` |
 | `jsonSerializerExtension` | `memsphere/json-serializer` | `JsonPayloadSerializer`，ID 为 `json`，contentType 为 `application/json` |
 | `filesystemJsonValueStoreExtension` | `memsphere/filesystem-json-valuestore` | `FilesystemJsonValueStoreFactory`，ID 为 `memsphere/filesystem-json` |
 
@@ -150,9 +151,53 @@ DataStore 不加内存锁或文件锁。创建不得覆盖同名文件；更新�
 
 此 Factory 创建业务模型的 Runtime；JSON Schema 元模型自身的引导 Factory、Registry 和自动装配仍属于后续框架工作。
 
+## Raw Runtime：整体字节反射
+
+`RAW_MODEL` 为 `"raw"`，表示模型定义标准，不是所有原始内容共用的业务模型 ID。`RawModelRuntimeFactory` 为每个具体模型创建独立的 `RawModelRuntime`，描述符保留该模型 ID，根类型为 `{ kind: "scalar", scalar: "bytes" }`。例如 `artifact-model` 和 `log-model` 可以共用这一标准，同时分别绑定各自的 Store。
+
+`RawModelDefinition` 只支持可选的字符串 `description`，空对象 `{}` 有效；其他字段或不支持的定义会报错。`reflect()` 和 `ScalarValue.set()` 接受 `Uint8Array`（包括 Node.js `Buffer`），不将字符串、普通数组或 `ArrayBuffer` 自动转换成字节。反射只提供整体 `value` 读取与 `set(bytes)` 替换，不提供字段、数组元素或 Map 条目访问；替换仅改变内存视图，不自动写入 Store。
+
+以下通过扩展登记和已解码的 Model 准备 Runtime，不需要 raw 元模型的引导能力：
+
+```ts
+import { DefaultDataExtensionRegistry, DefaultDataManager, type Model } from "memsphere/data";
+import { RAW_MODEL, rawExtension, type RawModelDefinition } from "memsphere/data/extensions";
+
+const definition: RawModelDefinition = { description: "原始交付物内容" };
+const definitionBytes = new TextEncoder().encode(JSON.stringify(definition));
+const model: Model<RawModelDefinition> = {
+  data: {
+    id: "artifact-model",
+    model: RAW_MODEL,
+    payload: {
+      contentType: "application/json",
+      content: {
+        stream: () => new ReadableStream<Uint8Array>({
+          start(controller) { controller.enqueue(definitionBytes.slice()); controller.close(); },
+        }),
+      },
+    },
+  },
+  definition,
+};
+const manager = new DefaultDataManager({
+  extensions: new DefaultDataExtensionRegistry([rawExtension]),
+  models: [{ model }],
+});
+const runtime = await manager.getRuntime({}, "artifact-model");
+const value = runtime.reflect(new TextEncoder().encode("原始内容"));
+if (value.kind !== "scalar") throw new Error("Expected a scalar");
+value.set(new TextEncoder().encode("替换后的内容"));
+// value.value 是替换后的整体字节；原来的 JS 变量和持久化内容不会自动改变。
+```
+
+此处 JSON 仅是模型定义的字节编码，不意味着定义采用 JSON Schema，也不规定业务实例 Payload 的 `contentType`。当前不提供 raw 元模型引导或 Payload Serializer；通过 `models: [{ model }]` 提供已解码定义，不等于可以直接用 `loadData()` 自动解码 raw 模型定义。原始 DataStore 的读写不依赖 raw Runtime；仅保存或读取原始 Payload 时，不要求先为反射将整份内容加载到内存。
+
 ## JSON Serializer 与 ValueStore 的范围
 
 JSON Serializer 使用 UTF-8，保留所有 JSON 属性，不调用 `toJSON` 或 getter。拒绝 undefined、symbol、函数、BigInt、Map、Set、Date、bytes、循环引用、稀疏数组及不能无损表达的属性。描述符包含 map / bigint / bytes 时也会拒绝，即使本次值未出现对应字段。
+
+因此 raw Runtime 不能搭配内置 JSON Serializer 或文件系统 JSON ValueStore 保存字节值；原始 Payload 可继续交给 DataStore，其他值存储方式需提供兼容 bytes 的实现。
 
 数字使用 JS 的 IEEE-754 精度；NaN、Infinity、不安全整数和负零会报错，小数不提供任意精度保证。对象原型、属性修饰符和共享引用身份不属于 JSON 数据模型。
 

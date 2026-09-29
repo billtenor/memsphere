@@ -72,20 +72,21 @@ tuple、Record、Set 不另设类型。动态对象字段仍由 `ObjectDescripto
 - Map 使用原始键，只将条目值包装为子 Value。键按 SameValueZero 比较：基本值按值，对象和字节按身份；反射和写入均不转换、复制键。原始内存表示不必是原生 JS Map。
 - Value.value 是当前原始值实例。根标量的 set 更新视图持有的值，不会改写调用方原来的 JS 变量；保存时读取视图的当前 value。
 
-接口使用示例见[类型测试](../../test/fixtures/data-reflection.ts)。JSON Schema 扩展已提供普通对象、数组和标量的反射实现，共用反射实现也支持原生 Map。
+接口使用示例见[类型测试](../../test/fixtures/data-reflection.ts)。JSON Schema 扩展已提供普通对象、数组和标量的反射实现，raw 扩展将原始字节作为整体标量反射；共用反射实现也支持原生 Map。
 
 ## 内置扩展
 
 - 文件系统 DataStore：以可读的相对文件路径保存原始 Payload，支持子目录，通过文件扩展名恢复 contentType；无锁，不维护 revision。
 - JSON Schema Draft-07 ModelRuntimeFactory：将模型定义转换为 Descriptor，并提供值实例反射。
+- Raw ModelRuntimeFactory：匹配 `raw` 模型定义标准，提供 `bytes` 标量的整体读取与替换，不暴露内部字段或元素。
 - JSON PayloadSerializer：在 JSON 字节与原生值实例之间转换。
 - 文件系统 JSON ValueStore：保存包含 id、值实例及记录信息的格式化 JSON；按文件共享内存锁，保护单运行环境内的 revision 条件写入。
 
-四项分别注册、替换，导入不会自动装配。配置、使用示例和支持范围见[内置扩展说明](./extensions/README.md)。
+五项分别注册、替换，导入不会自动装配。配置、使用示例和支持范围见[内置扩展说明](./extensions/README.md)。raw 的 Runtime 不负责 Payload 编解码；原始 DataStore 的内容读写仍不要求创建 Runtime 或进行反射。
 
 ## 尚未展开的部分
 
 - 模型定义标准中其他复杂类型到基础反射结构的映射。
 - 跨 Data 引用和领域约束；不混入基本的字段、元素读写操作。
 - 路径访问与查询只确定为扩展方向，未增加查询接口或注册字段。
-- Project 持久配置与 CLI/View 的接入、模型依赖自动发现、内置 JSON Schema 元模型引导扩展和资源释放协议尚未实现；当前由宿主显式提供装配输入。
+- Project 持久配置与 CLI/View 的接入、模型依赖自动发现、内置 JSON Schema / raw 元模型引导扩展和资源释放协议尚未实现；当前由宿主显式提供装配输入。
