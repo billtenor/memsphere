@@ -13,6 +13,7 @@ export interface PayloadSerializer<TValue = unknown> {
   /** 唯一处理的 MIME 类型，同时用于标识序列化输出。 */
   readonly contentType: string;
 
+  /** 消费一次输入内容，不依赖流可重放。 */
   deserialize(
     context: Context,
     descriptor: Descriptor,

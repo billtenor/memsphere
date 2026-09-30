@@ -47,6 +47,7 @@ const dataManager = new DefaultDataManager({
   extensions,
   models: [{ model }],
   stores: [{
+    id: "orders",
     model: "order-model",
     kind: "ValueStore",
     factory: "memsphere/filesystem-json",
@@ -54,18 +55,20 @@ const dataManager = new DefaultDataManager({
   }],
 });
 
-const store = await dataManager.getStore(context, "order-model");
+const store = await dataManager.getStore(context, "orders");
 if (store.kind !== "ValueStore") throw new Error("Expected a ValueStore");
 await store.create(context, "order-001", { orderNo: "O-001", amount: 100 });
 ```
 
-调用 `getStore()` 时才创建订单 Runtime 和 ValueStore，后续调用复用同一实例。这里模型已经解码，不需要先创建 JSON Schema 元模型的 Runtime；JSON ValueStore 的内部编码也不依赖全局 Serializer 注册。
+调用 `getStore(context, "orders")` 时才创建订单 Runtime 和 ValueStore，后续按相同 StoreId 查询复用同一实例。这里模型已经解码，不需要先创建 JSON Schema 元模型的 Runtime；JSON ValueStore 的内部编码也不依赖全局 Serializer 注册。
 
 ## 装配输入
 
 - `extensions`：已经注册好的扩展目录。Manager 固定构造时的能力组合；之后添加扩展不会改变已有 Manager。
 - `models`：模型来源及显式依赖列表。
-- `stores`：按模型指定 `kind`、Factory ID 和 Config；同一模型只能绑定一个 Store。
+- `stores`：业务指定 StoreId，并为每个 Store 绑定唯一的 `model`、`kind`、Factory ID 和 Config。StoreId 在当前 Project 内唯一，DataStore 和 ValueStore 共用这个 ID 空间。
+
+同一个模型可以绑定多个 Store，例如 `orders-current` 和 `orders-archived` 都使用 `order-model`。Manager 按 StoreId 独立创建和缓存 Store，两个 ValueStore 可复用相同的模型 Runtime。StoreId 是逻辑标识，不是 Factory ID，也不会自动成为目录名；物理位置由各自的 Config 决定。
 
 模型来源有两种写法：
 
@@ -85,7 +88,7 @@ await store.create(context, "order-001", { orderNo: "O-001", amount: 100 });
 
 Manager 复制绑定列表、依赖列表和 Config 的 JSON 值；Factory 每次尝试得到独立的配置副本。Model.definition 可以是任意标准的内存值，不做通用深拷贝，宿主须将它及扩展能力的标识视为只读。修改模型或配置时重新装配 Manager。
 
-原始 DataStore 的创建只需要存储绑定，不加载模型或 Runtime。Factory 的返回值会检查模型 ID、Store 类型和必需方法，通过后才登记。加载或创建失败可以重试，已经成功准备的依赖可以继续复用。
+原始 DataStore 的创建只需要存储绑定，不加载模型或 Runtime。Factory 的返回值会检查 StoreId、模型 ID、Store 类型和必需方法，必须与绑定一致，通过后才登记。加载或创建失败可以重试，已经成功准备的依赖可以继续复用。
 
 同一 Manager 内并发请求合并创建；调用者取消只停止本次等待，共享工作可以继续完成并缓存。这个合并机制不跨进程，也不改变各 Store 自身的写入并发保证。资源释放与停止共享准备的协议另行设计，目前没有 `close()`。
 

@@ -18,6 +18,7 @@ import type {
   StoredData,
   StoredValue,
   StoreBinding,
+  StoreId,
   ValueStore,
   ValueStoreFactory
 } from "../../src/data/index.js";
@@ -32,12 +33,13 @@ declare const orderValue: unknown;
 declare const decodedModel: Model;
 
 const orderModel: ModelRef = "order-model";
+const orderStore: StoreId = "orders";
 const metaModel: ModelRef = "json-schema/draft-07";
 
 const decodedBinding: ModelBinding = { model: decodedModel, dependencies: ["money-model"] };
 const rawBinding: ModelBinding = { ref: "loaded-model", loadData: async context => ({ ...orderData, id: "loaded-model" }) };
 const storeBinding: StoreBinding = {
-  model: orderModel, kind: "ValueStore", factory: "memsphere/filesystem-json",
+  id: orderStore, model: orderModel, kind: "ValueStore", factory: "memsphere/filesystem-json",
   config: new Config({ directory: "/project/data/orders" })
 };
 const implementedRegistry: DataExtensionRegistry = new DefaultDataExtensionRegistry([extension]);
@@ -71,18 +73,18 @@ async function useProjectManagers(): Promise<void> {
   // 同一模型引用在不同项目中独立解析；实例获取始终是异步操作。
   const pendingModel: Promise<Model> = projectA.getModel(context, orderModel);
   const pendingRuntime: Promise<ModelRuntime> = projectA.getRuntime(context, orderModel);
-  const pendingStore: Promise<DataStore | ValueStore> = projectA.getStore(context, orderModel);
+  const pendingStore: Promise<DataStore | ValueStore> = projectA.getStore(context, orderStore);
   const modelA: Model = await pendingModel;
   const runtimeA: ModelRuntime = await pendingRuntime;
   const storeA: DataStore | ValueStore = await pendingStore;
   const modelB: Model = await projectB.getModel(context, orderModel);
   const runtimeB: ModelRuntime = await projectB.getRuntime(context, orderModel);
-  const storeB: DataStore | ValueStore = await projectB.getStore(context, orderModel);
+  const storeB: DataStore | ValueStore = await projectB.getStore(context, orderStore);
 
   // 业务写入仍由 Store 提供；kind 缩窄后保留各自的创建协议。
   if (storeA.kind === "DataStore") {
     const rawStore: DataStore = storeA;
-    const created: StoredData = await rawStore.create(context, orderData);
+    const created: void = await rawStore.create(context, orderData);
     // @ts-expect-error DataStore 创建接收完整 Data，不接收 ID 和值实例。
     await rawStore.create(context, orderData.id, orderValue);
   } else {

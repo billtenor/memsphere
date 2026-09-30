@@ -68,21 +68,22 @@ test("schema reflection composes with readable raw files and independent JSON va
     const rawPath = join(rawDirectory, "a", "b", "c", "order-001.json");
     const runtime = await orderRuntime();
     const serializer = new JsonPayloadSerializer();
-    const dataStore = await new FilesystemDataStoreFactory().createStore({}, runtime.descriptor.id, rawConfig);
+    const dataStore = await new FilesystemDataStoreFactory().createStore({}, "order-files", runtime.descriptor.id, rawConfig);
     const original = { orderNo: "O-001", lines: [{ quantity: 2 }] };
     const content = await serializer.serialize({}, runtime.descriptor, original);
     const written = await dataStore.create({}, {
       id: rawId, model: runtime.descriptor.id, payload: { contentType: serializer.contentType, content }
     });
     assert.deepEqual(JSON.parse(await readFile(rawPath, "utf8")), original);
-    assert.equal(written.data.id, rawId);
-    assert.equal(written.revision, undefined);
-    const rawReopened = await new FilesystemDataStoreFactory().createStore({}, runtime.descriptor.id, rawConfig);
+    assert.equal(written, undefined);
+    const rawReopened = await new FilesystemDataStoreFactory().createStore({}, "order-files", runtime.descriptor.id, rawConfig);
     const rawRecord = await rawReopened.get({}, rawId);
+    assert.equal(rawRecord?.data.id, rawId);
+    assert.equal(rawRecord?.revision, undefined);
     const decoded = await serializer.deserialize({}, runtime.descriptor, rawRecord!.data.payload.content);
-    const valueStore = await new FilesystemJsonValueStoreFactory().createStore({}, runtime, valueConfig);
+    const valueStore = await new FilesystemJsonValueStoreFactory().createStore({}, "order-values", runtime, valueConfig);
     const created = await valueStore.create({}, "order-001", decoded);
-    const reopened = await new FilesystemJsonValueStoreFactory().createStore({}, await orderRuntime(), valueConfig);
+    const reopened = await new FilesystemJsonValueStoreFactory().createStore({}, "order-values", await orderRuntime(), valueConfig);
     const stored = await reopened.get({}, "order-001");
     assert.deepEqual(stored?.value, original);
     assert.equal(stored?.revision, 1);

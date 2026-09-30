@@ -1,6 +1,9 @@
-import type { DataId, ModelRef } from "./data.js";
+import type { DataId } from "./data.js";
 import type { DataStore } from "./data-store.js";
 import type { ValueStore } from "./value-store.js";
+
+/** 由业务指定的 Store 身份，与模型 ID、数据 ID 和物理存储位置无关。 */
+export type StoreId = string;
 
 export type UpdateOptions = {
   /** 预期的当前记录版本，必须为正整数；不匹配时报冲突。 */
@@ -26,10 +29,10 @@ export type ListResult = {
   nextCursor?: string;
 };
 
-/** 按模型 ID 管理已创建的 Store，不负责创建实例或跨 Store 查找数据。 */
+/** 按 StoreId 管理已创建的 Store，不负责创建实例或跨 Store 查找数据。 */
 export interface StoreRegistry {
-  /** 按 store.model 登记；同一模型只能登记一个 Store，重复登记时报错。 */
+  /** 按 store.id 登记；ID 重复时报错，同一模型可以登记多个 Store。 */
   register(store: DataStore | ValueStore): void;
   /** 查询已登记的 Store，未找到时返回 undefined。 */
-  get(model: ModelRef): DataStore | ValueStore | undefined;
+  get(id: StoreId): DataStore | ValueStore | undefined;
 }

@@ -3,7 +3,7 @@ import type { Context } from "../../api/context.js";
 import type { DataId, ModelRef } from "../../api/data.js";
 import type { DataExtension } from "../../api/extension.js";
 import type { ModelRuntime } from "../../api/model-runtime.js";
-import type { DeleteOptions, ListOptions, ListResult, UpdateOptions } from "../../api/store.js";
+import type { DeleteOptions, ListOptions, ListResult, StoreId, UpdateOptions } from "../../api/store.js";
 import type { StoredValue, ValueStore, ValueStoreFactory } from "../../api/value-store.js";
 import { JsonPayloadSerializer } from "../json-serializer/index.js";
 import {
@@ -27,13 +27,14 @@ type JsonRecord = StoredValue & { revision: number; createdAt: number; updatedAt
 export class FilesystemJsonValueStoreFactory implements ValueStoreFactory {
   readonly id = "memsphere/filesystem-json";
 
-  async createStore(context: Context, runtime: ModelRuntime, config: Config): Promise<ValueStore> {
+  async createStore(context: Context, id: StoreId, runtime: ModelRuntime, config: Config): Promise<ValueStore> {
     context.signal?.throwIfAborted();
+    if (typeof id !== "string" || id.trim().length === 0) throw new TypeError("Store ID must be a non-empty string");
     for (const key of Object.keys(config.json)) {
       if (key !== "directory") throw new TypeError(`Unknown filesystem JSON ValueStore configuration: ${key}`);
     }
     const directory = await prepareDirectory(context, config);
-    return new FilesystemJsonValueStore(runtime, directory);
+    return new FilesystemJsonValueStore(id, runtime, directory);
   }
 }
 
@@ -42,7 +43,7 @@ class FilesystemJsonValueStore implements ValueStore {
   readonly model: ModelRef;
   private readonly serializer = new JsonPayloadSerializer();
 
-  constructor(private readonly runtime: ModelRuntime, private readonly directory: string) {
+  constructor(readonly id: StoreId, private readonly runtime: ModelRuntime, private readonly directory: string) {
     this.model = runtime.descriptor.id;
   }
 
@@ -105,7 +106,7 @@ class FilesystemJsonValueStore implements ValueStore {
       recordFilename(id);
       return id;
     });
-    return paginate(ids, captured, `filesystem-json-value:${this.directory}:${this.model}`);
+    return paginate(ids, captured, JSON.stringify(["filesystem-json-value", this.directory, this.model, this.id]));
   }
 
   private async prepare(context: Context, value: unknown): Promise<unknown> {

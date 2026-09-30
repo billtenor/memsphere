@@ -18,38 +18,31 @@ export function bytesContent(bytes: Uint8Array): PayloadContent {
   };
 }
 
-/** Cancellation also interrupts a source whose next read never settles. */
-export async function readAll(context: Context, content: PayloadContent): Promise<Uint8Array> {
+/** Consume one input stream, applying backpressure and interrupting stalled reads on cancellation. */
+export async function consumeContent(
+  context: Context,
+  content: PayloadContent,
+  consume: (chunk: Uint8Array) => Promise<void>
+): Promise<void> {
   throwIfAborted(context);
   const reader = content.stream().getReader();
-  let rejectAbort!: (reason: unknown) => void;
-  const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
   const onAbort = () => {
     const reason = context.signal?.reason ?? new DOMException("Aborted", "AbortError");
-    rejectAbort(reason);
+    // cancel() closes the readable side and settles pending reads immediately,
+    // even when the source's asynchronous cancellation cleanup never completes.
     void reader.cancel(reason).catch(() => undefined);
   };
   context.signal?.addEventListener("abort", onAbort, { once: true });
   try {
     throwIfAborted(context);
-    const chunks: Uint8Array[] = [];
-    let size = 0;
     while (true) {
-      const result = await Promise.race([reader.read(), aborted]);
+      const result = await reader.read();
       throwIfAborted(context);
       if (result.done) break;
       if (!(result.value instanceof Uint8Array)) throw new TypeError("Payload chunks must be Uint8Array");
-      size += result.value.byteLength;
-      if (!Number.isSafeInteger(size)) throw new RangeError("Payload is too large to read into memory");
-      chunks.push(Uint8Array.from(result.value));
+      await consume(result.value);
+      throwIfAborted(context);
     }
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return bytes;
   } catch (error) {
     void reader.cancel(error).catch(() => undefined);
     throw error;
@@ -57,4 +50,22 @@ export async function readAll(context: Context, content: PayloadContent): Promis
     context.signal?.removeEventListener("abort", onAbort);
     reader.releaseLock();
   }
+}
+
+/** Explicitly aggregate a single consumption when a consumer needs a complete byte array. */
+export async function readAll(context: Context, content: PayloadContent): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  await consumeContent(context, content, async (chunk) => {
+    size += chunk.byteLength;
+    if (!Number.isSafeInteger(size)) throw new RangeError("Payload is too large to read into memory");
+    chunks.push(Uint8Array.from(chunk));
+  });
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
 }

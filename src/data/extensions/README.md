@@ -61,7 +61,7 @@ const registry: ModelRuntimeRegistry = {
 const runtime = await new JsonSchemaModelRuntimeFactory().createRuntime(context, model, registry);
 registry.register(runtime);
 const store = await new FilesystemJsonValueStoreFactory().createStore(
-  context, runtime, new Config({ directory: "./data/orders" }),
+  context, "orders", runtime, new Config({ directory: "./data/orders" }),
 );
 const created = await store.create(context, "order-001", { orderNo: "O-001", amount: 100 });
 const order = runtime.reflect(created.value);
@@ -69,13 +69,15 @@ if (order.kind === "object") order.set(order.descriptor.field("amount")!, 120);
 await store.update(context, created.id, order.value, { expectedRevision: created.revision });
 ```
 
-DataStore 的创建参数为 `(context, modelRef, config)`，写入完整 Data；ValueStore 的创建参数为 `(context, runtime, config)`，写入 `(context, id, value)`。两者均提供 `get / has / create / update / delete / list`。
+DataStore Factory 的创建参数为 `(context, storeId, modelRef, config)`；ValueStore Factory 的创建参数为 `(context, storeId, runtime, config)`。StoreId 由业务指定，在 Project 内唯一；同一个模型可以创建多个独立 Store。两者均提供 `get / has / create / update / delete / list`。
+
+DataStore 写入完整 Data，`create/update` 返回 `Promise<void>`，消费 Payload 流至正常 EOF 且保存完成后成功；调用方读取结果时使用 `get()`。ValueStore 写入 `(context, id, value)`，`create/update` 仍返回 StoredValue。Payload 仅保证一次消费，需要再次读持久化内容时重新 `get()`，不能依赖重放同一输入。
 
 ## 文件 DataStore：保留文件原有格式
 
-`directory` 是该 Store 的根目录，`data_id` 是相对于根目录的文件路径，包含文件名及扩展名。例如 `design.md`，或 `a/b/c/order.json`；后者保存为 `<directory>/a/b/c/order.json`，创建记录时自动建立缺失的中间目录。路径的最后一段是文件名，不是目录名。文件内容与 Payload 字节完全一致，不添加私有文件头，也不进行 base64 编码。
+`directory` 是该 Store 的根目录，StoreId 不自动参与目录拼接或落盘。`data_id` 是相对于根目录的文件路径，包含文件名及扩展名。例如 `design.md`，或 `a/b/c/order.json`；后者保存为 `<directory>/a/b/c/order.json`，创建记录时自动建立缺失的中间目录。路径的最后一段是文件名，不是目录名。文件内容与 Payload 字节完全一致，不添加私有文件头，也不进行 base64 编码。
 
-Linux、Windows、macOS 上的 ID 都用 `/` 分隔目录，调用方不需要切换分隔符。只接受相对路径，不接受绝对路径、反斜杠、空路径段、`.` 或 `..`，也不沿符号链接目录访问记录。`get / has / update / delete` 不创建目录，删除记录后保留空目录。
+Linux、Windows、macOS 上的 ID 都用 `/` 分隔目录，调用方不需要切换分隔符。只接受相对路径，不接受绝对路径、反斜杠、空路径段、`.` 或 `..`，也不沿符号链接目录访问记录。`get / has / update / append / delete` 不创建目录，删除记录后保留空目录。
 
 ```ts
 new Config({
@@ -99,6 +101,10 @@ new Config({
 `model` 来自 Store 绑定，不存入文件。`updatedAt` 使用文件系统的修改时间；不维护 revision，传入 `expectedRevision` 会报不支持。`createdAt` 不返回：原子替换会创建新的文件对象，文件系统的创建时间不能可靠保持“记录首次创建且更新时保留”的语义；不以 ctime 代替创建时间。创建人、更新人没有可信来源时省略。
 
 DataStore 不加内存锁或文件锁。创建不得覆盖同名文件；更新先检查文件存在，再原子替换。并发更新采用最后一次成功替换的内容，不提供多个文件操作之间的事务保证；若删除发生在存在性检查之后，更新可能重新发布该文件。
+
+`create/update` 从输入流逐块写入同目录临时文件，正常 EOF 后才发布完整文件；不因输入流可以持续产生内容就提前发布半成品。写入不要求将完整 Payload 聚合到内存。`get()` 目前仍读取完整文件并返回内存内容，不是惰性文件流。
+
+此实现提供 `AppendableDataStore.append(context, data)`：以追加方式打开已有文件，逐块写入新增字节，不自动创建目标或父目录。输入 model 必须与 Store 绑定一致，contentType 必须与文件扩展名映射一致。追加不使用临时文件替换，已写入的部分可被后续读取看到；取消或失败不撤销这些字节。并发追加可能交错，append 与 update/delete 并发也不提供事务保证；业务须自行协调，不能把整个输入流看作原子追加。
 
 ## 文件 JSON ValueStore：保存可读的值记录
 
@@ -125,13 +131,13 @@ DataStore 不加内存锁或文件锁。创建不得覆盖同名文件；更新�
 
 ## 跨平台文件行为
 
-两个 Store 共享文件操作工具，但不共享记录格式。为不同模型和存储形态配置不同 directory；框架不会通过另存 model 自动隔离目录，也不会把原始业务 JSON 自动识别为 ValueStore 记录。
+两个 Store 共享文件操作工具，但不共享记录格式。物理存储隔离由业务配置 directory；框架不会通过 StoreId 或 model 自动隔离目录，也不会把原始业务 JSON 自动识别为 ValueStore 记录。不同 StoreId 使用相同目录时，并不自动获得不同的数据空间。
 
 - 文件名和每级目录名均遵守可移植命名规则：拒绝 Windows 设备保留名、非法字符、末尾点或空格、过长名称。保留可读的 Unicode，要求输入为 NFC；适配 macOS 返回的分解形式名称。拒绝大小写或规范化后存在歧义的名称，不通过哈希或编码消除冲突。DataStore 无锁，不应并发创建仅在大小写上不同的文件或目录。
 - 使用 Node 文件 API 和系统路径函数，不依赖 shell、符号链接或操作系统专属命令。目标记录必须是普通文件，不能是符号链接或目录；存储目录须可信，不作为对抗恶意目录修改的安全边界。
-- 先写同目录临时文件，关闭句柄后再发布。创建使用排他硬链接，保证完整内容可见且不覆盖现有文件；更新使用原子 rename。Windows 的暂时性文件占用错误有限重试，绝不通过先删旧文件来规避替换失败。本地文件系统须支持硬链接和同目录原子替换，不支持时明确失败；不承诺断电恢复或网络文件系统事务。
+- 创建和替换先写同目录临时文件，关闭句柄后再发布。创建使用排他硬链接，保证完整内容可见且不覆盖现有文件；更新使用原子 rename。Windows 的暂时性文件占用错误有限重试，绝不通过先删旧文件来规避替换失败。本地文件系统须支持硬链接和同目录原子替换，不支持时明确失败；不承诺断电恢复或网络文件系统事务。DataStore 的追加直接写已有文件，不采用这一替换流程。
 - `.memsphere-` 前缀保留给临时文件，不属于数据 ID。正常结束会清理临时文件；崩溃遗留文件不进入列表，可在确认没有活跃写入后清理。
-- `list()` 只枚举文件路径，不读取正文。按完整 ID 字符串顺序分页，默认 100 条、最多 1000 条；DataStore 扫描目录树，ValueStore 扫描单层目录，没有索引，不保证并发修改时的跨页快照。内容读写目前完整缓冲到内存。
+- `list()` 只枚举文件路径，不读取正文。按完整 ID 字符串顺序分页，默认 100 条、最多 1000 条；DataStore 扫描目录树，ValueStore 扫描单层目录，没有索引，不保证并发修改时的跨页快照。DataStore 写入逐块处理，读取仍完整缓冲到内存；ValueStore 的 JSON 编解码仍处理完整值。
 
 文件名规则参考 [Windows 文件命名约定](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)，时间信息参考 [Node.js Stats 时间语义](https://nodejs.org/docs/latest-v22.x/api/fs.html#stat-time-values)。测试沿用仓库 Linux、Windows、macOS 的 CI 矩阵；本地在什么系统执行，只能验证该系统。
 

@@ -2,15 +2,15 @@ import type { Stats } from "node:fs";
 import { Config } from "../../api/config.js";
 import type { Context } from "../../api/context.js";
 import type { Data, DataId, ModelRef } from "../../api/data.js";
-import type { DataStore, DataStoreFactory, StoredData } from "../../api/data-store.js";
+import type { AppendableDataStore, DataStoreFactory, StoredData } from "../../api/data-store.js";
 import type { DataExtension } from "../../api/extension.js";
-import type { DeleteOptions, ListOptions, ListResult, UpdateOptions } from "../../api/store.js";
+import type { DeleteOptions, ListOptions, ListResult, StoreId, UpdateOptions } from "../../api/store.js";
 import {
-  atomicPublish, deleteFile, findFile, listRelativeFilenames, paginate, prepareDirectory,
+  appendFileContent, atomicPublish, cleanupCreatedDirectories, deleteFile, findFile, listRelativeFilenames, paginate, prepareDirectory,
   readFileSnapshot, requirePositiveInteger, requireString, resolveFileParent,
   validateFilename, validateRelativeFilePath
 } from "../shared/filesystem.js";
-import { bytesContent, readAll, throwIfAborted } from "../shared/payload.js";
+import { bytesContent, throwIfAborted } from "../shared/payload.js";
 
 const DEFAULT_CONTENT_TYPE_EXTENSIONS: Readonly<Record<string, readonly string[]>> = {
   "application/json": [".json"],
@@ -37,30 +37,34 @@ const DEFAULT_CONTENT_TYPE_EXTENSIONS: Readonly<Record<string, readonly string[]
  * No locks, private metadata or revision numbers are maintained. Complete-file
  * creation/replacement is atomic, but an update racing a delete can recreate the
  * file; callers coordinate conflicting operations. list reads names, not bodies.
+ * Append writes progressively into the existing file; chunks may be visible
+ * before EOF and survive a failure. Concurrent operations are not serialized.
  */
 export class FilesystemDataStoreFactory implements DataStoreFactory {
   readonly id = "memsphere/filesystem";
 
-  async createStore(context: Context, model: ModelRef, config: Config): Promise<DataStore> {
+  async createStore(context: Context, id: StoreId, model: ModelRef, config: Config): Promise<AppendableDataStore> {
     throwIfAborted(context);
+    requireString(id, "store id");
     requireString(model, "model");
     // Snapshot and validate the entire configuration before the first await.
     const { directory, extensions } = parseConfig(config);
     const root = await prepareDirectory(context, new Config({ directory }));
-    return new FilesystemDataStore(model, root, extensions);
+    return new FilesystemDataStore(id, model, root, extensions);
   }
 }
 
-class FilesystemDataStore implements DataStore {
+class FilesystemDataStore implements AppendableDataStore {
   readonly kind = "DataStore" as const;
   private readonly cursorScope: string;
 
   constructor(
+    readonly id: StoreId,
     readonly model: ModelRef,
     private readonly directory: string,
     private readonly extensions: ReadonlyArray<readonly [string, string]>
   ) {
-    this.cursorScope = JSON.stringify(["filesystem", directory, model, extensions]);
+    this.cursorScope = JSON.stringify(["filesystem", id, directory, model, extensions]);
   }
 
   async get(context: Context, id: DataId): Promise<StoredData | undefined> {
@@ -79,13 +83,21 @@ class FilesystemDataStore implements DataStore {
     return parent !== undefined && (await findFile(context, parent.directory, parent.filename)) !== undefined;
   }
 
-  async create(context: Context, data: Data): Promise<StoredData> {
-    return this.write(context, data, "create");
+  async create(context: Context, data: Data): Promise<void> {
+    await this.write(context, data, "create");
   }
 
-  async update(context: Context, data: Data, options?: UpdateOptions): Promise<StoredData> {
+  async update(context: Context, data: Data, options?: UpdateOptions): Promise<void> {
     rejectRevision(options?.expectedRevision);
-    return this.write(context, data, "replace");
+    await this.write(context, data, "replace");
+  }
+
+  async append(context: Context, data: Data): Promise<void> {
+    throwIfAborted(context);
+    const { id, content } = this.writeTarget(data);
+    const parent = await resolveFileParent(context, this.directory, id);
+    if (!parent) throw Object.assign(new Error(`Data does not exist: ${id}`), { code: "ENOENT" });
+    await appendFileContent(context, parent.directory, parent.filename, content);
   }
 
   async delete(context: Context, id: DataId, options?: DeleteOptions): Promise<boolean> {
@@ -118,8 +130,7 @@ class FilesystemDataStore implements DataStore {
     return contentType;
   }
 
-  private async write(context: Context, data: Data, mode: "create" | "replace"): Promise<StoredData> {
-    throwIfAborted(context);
+  private writeTarget(data: Data) {
     const { id, model, payload } = data;
     const { contentType, content } = payload;
     const expectedType = this.requireContentType(id);
@@ -127,12 +138,21 @@ class FilesystemDataStore implements DataStore {
     if (contentType !== expectedType) {
       throw new TypeError(`payload.contentType must match the filename mapping (${expectedType}): ${id}`);
     }
-    const bytes = await readAll(context, content);
+    return { id, content };
+  }
+
+  private async write(context: Context, data: Data, mode: "create" | "replace"): Promise<void> {
     throwIfAborted(context);
-    const parent = await resolveFileParent(context, this.directory, id, mode === "create");
-    if (!parent) throw Object.assign(new Error(`Data does not exist: ${id}`), { code: "ENOENT" });
-    const stat = await atomicPublish(context, parent.directory, parent.filename, bytes, mode);
-    return this.stored(id, contentType, bytes, stat);
+    const { id, content } = this.writeTarget(data);
+    const createdDirectories: string[] = [];
+    try {
+      const parent = await resolveFileParent(context, this.directory, id, mode === "create", createdDirectories);
+      if (!parent) throw Object.assign(new Error(`Data does not exist: ${id}`), { code: "ENOENT" });
+      await atomicPublish(context, parent.directory, parent.filename, content, mode);
+    } catch (error) {
+      await cleanupCreatedDirectories(createdDirectories);
+      throw error;
+    }
   }
 
   private stored(id: DataId, contentType: string, bytes: Uint8Array, stat: Stats): StoredData {

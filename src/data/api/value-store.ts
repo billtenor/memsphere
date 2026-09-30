@@ -2,7 +2,7 @@ import type { Config } from "./config.js";
 import type { Context } from "./context.js";
 import type { DataId, ModelRef } from "./data.js";
 import type { ModelRuntime } from "./model-runtime.js";
-import type { DeleteOptions, ListOptions, ListResult, UpdateOptions } from "./store.js";
+import type { DeleteOptions, ListOptions, ListResult, StoreId, UpdateOptions } from "./store.js";
 
 /**
  * 直接接收和返回模型的值实例，不要求调用方构造 Payload，不保存反射操作对象 Value。
@@ -12,6 +12,8 @@ import type { DeleteOptions, ListOptions, ListResult, UpdateOptions } from "./st
  */
 export interface ValueStore {
   readonly kind: "ValueStore";
+  /** 业务指定的 Store 身份；一个模型可以对应多个不同 ID 的 Store。 */
+  readonly id: StoreId;
   /** 此 Store 唯一绑定的模型。 */
   readonly model: ModelRef;
 
@@ -63,14 +65,15 @@ export type StoredValue = {
   updatedBy?: string | null;
 };
 
-/** 根据模型 Runtime 和实现专属配置创建 ValueStore。 */
+/** 根据 StoreId、模型 Runtime 和实现专属配置创建 ValueStore。 */
 export interface ValueStoreFactory {
   /** 存储实现的稳定标识，例如 acme/order-database。 */
   readonly id: string;
 
-  /** 返回 Store 的 model 必须等于 runtime.descriptor.id。 */
+  /** 返回 Store 的 id 必须等于传入 ID，model 必须等于 runtime.descriptor.id。 */
   createStore(
     context: Context,
+    id: StoreId,
     runtime: ModelRuntime,
     config: Config
   ): Promise<ValueStore>;

@@ -32,13 +32,14 @@ export type {
   ModelRuntimeRegistry
 } from "./api/model-runtime.js";
 export type { PayloadSerializer } from "./api/serializer.js";
-export type { DataStore, DataStoreFactory, StoredData } from "./api/data-store.js";
+export type { AppendableDataStore, DataStore, DataStoreFactory, StoredData } from "./api/data-store.js";
 export type { StoredValue, ValueStore, ValueStoreFactory } from "./api/value-store.js";
 export type {
   DeleteOptions,
   ListOptions,
   ListResult,
   StoreRegistry,
+  StoreId,
   UpdateOptions
 } from "./api/store.js";
 export type { DataExtension } from "./api/extension.js";

@@ -6,7 +6,7 @@ import type { DataStore } from "../api/data-store.js";
 import type { DataExtensionRegistry } from "../api/extension-registry.js";
 import type { Model } from "../api/model.js";
 import type { ModelRuntime, ModelRuntimeRegistry } from "../api/model-runtime.js";
-import type { StoreRegistry } from "../api/store.js";
+import type { StoreId, StoreRegistry } from "../api/store.js";
 import type { ValueStore } from "../api/value-store.js";
 import { DefaultDataExtensionRegistry } from "./extension-registry.js";
 import { PreparationCache } from "./preparation.js";
@@ -25,8 +25,9 @@ export type ModelBinding = (
     }
 ) & { readonly dependencies?: readonly ModelRef[] };
 
-/** 一个模型在当前 Project 中的存储绑定；Config 的含义由所选 Factory 决定。 */
+/** 当前 Project 中一个独立 Store 的绑定；同一模型可有多个 Store。 */
 export type StoreBinding = {
+  readonly id: StoreId;
   readonly model: ModelRef;
   readonly kind: "DataStore" | "ValueStore";
   readonly factory: string;
@@ -58,7 +59,7 @@ type RegisteredModel = {
 export class DefaultDataManager implements DataManager {
   private readonly extensions: DataExtensionRegistry;
   private readonly models = new Map<ModelRef, RegisteredModel>();
-  private readonly bindings = new Map<ModelRef, StoreBinding>();
+  private readonly bindings = new Map<StoreId, StoreBinding>();
   private readonly preparation = new PreparationCache();
   private readonly sharedContext: Context = Object.freeze({});
   private readonly runtimes: ModelRuntimeRegistry = new RuntimeRegistry();
@@ -74,13 +75,14 @@ export class DefaultDataManager implements DataManager {
       this.models.set(registered.ref, registered);
     }
     for (const binding of options.stores ?? []) {
-      const { model, kind, factory, config: sourceConfig } = binding;
+      const { id, model, kind, factory, config: sourceConfig } = binding;
+      requireId(id, "Store ID");
       requireId(model, "Store model");
       requireId(factory, "Store factory");
       if (kind !== "DataStore" && kind !== "ValueStore") throw new TypeError("Invalid Store kind");
-      if (this.bindings.has(model)) throw new Error(`Duplicate Store binding: ${model}`);
+      if (this.bindings.has(id)) throw new Error(`Duplicate Store binding: ${id}`);
       const config = new Config(copyJsonObject(sourceConfig.json));
-      this.bindings.set(model, Object.freeze({ model, kind, factory, config }));
+      this.bindings.set(id, Object.freeze({ id, model, kind, factory, config }));
     }
     // Factories consume prepared dependencies; only the Manager may publish new instances.
     this.factoryRuntimes = Object.freeze({
@@ -97,25 +99,26 @@ export class DefaultDataManager implements DataManager {
     return this.prepareRuntime(context, ref);
   }
 
-  async getStore(context: Context, model: ModelRef): Promise<DataStore | ValueStore> {
+  async getStore(context: Context, id: StoreId): Promise<DataStore | ValueStore> {
     context.signal?.throwIfAborted();
-    requireId(model, "Model ID");
-    const key = `store:${model}`;
+    requireId(id, "Store ID");
+    const key = `store:${id}`;
     return this.preparation.get(context, key, async () => {
-      const binding = this.bindings.get(model);
-      if (!binding) throw new Error(`No Store binding for model: ${model}`);
+      const binding = this.bindings.get(id);
+      if (!binding) throw new Error(`No Store binding for ID: ${id}`);
+      const { model } = binding;
       let store: DataStore | ValueStore;
       // Give each attempt its own copy; a Factory cannot mutate the binding or a future retry.
       const config = new Config(copyJsonObject(binding.config.json));
       if (binding.kind === "DataStore") {
         const factory = this.extensions.getDataStoreFactory(binding.factory);
         if (!factory) throw new Error(`DataStoreFactory is not registered: ${binding.factory}`);
-        store = await factory.createStore(this.sharedContext, model, config);
+        store = await factory.createStore(this.sharedContext, id, model, config);
       } else {
         const factory = this.extensions.getValueStoreFactory(binding.factory);
         if (!factory) throw new Error(`ValueStoreFactory is not registered: ${binding.factory}`);
         const runtime = await this.prepareRuntime(this.sharedContext, model, key);
-        store = await factory.createStore(this.sharedContext, runtime, config);
+        store = await factory.createStore(this.sharedContext, id, runtime, config);
       }
       assertStore(store, binding);
       this.stores.register(store);
@@ -184,11 +187,11 @@ class RuntimeRegistry implements ModelRuntimeRegistry {
 }
 
 class InstanceStoreRegistry implements StoreRegistry {
-  private readonly values = new Map<ModelRef, DataStore | ValueStore>();
-  get(ref: ModelRef): DataStore | ValueStore | undefined { return this.values.get(ref); }
+  private readonly values = new Map<StoreId, DataStore | ValueStore>();
+  get(id: StoreId): DataStore | ValueStore | undefined { return this.values.get(id); }
   register(store: DataStore | ValueStore): void {
-    if (this.values.has(store.model)) throw new Error(`Store already registered: ${store.model}`);
-    this.values.set(store.model, store);
+    if (this.values.has(store.id)) throw new Error(`Store already registered: ${store.id}`);
+    this.values.set(store.id, store);
   }
 }
 
@@ -233,8 +236,8 @@ function copyModelBinding(binding: ModelBinding): RegisteredModel {
 }
 
 function assertStore(store: DataStore | ValueStore, binding: StoreBinding): void {
-  if (!store || store.model !== binding.model || store.kind !== binding.kind) {
-    throw new TypeError(`Factory returned a Store with mismatched model or kind: ${binding.model}`);
+  if (!store || store.id !== binding.id || store.model !== binding.model || store.kind !== binding.kind) {
+    throw new TypeError(`Factory returned a Store with mismatched ID, model or kind: ${binding.id}`);
   }
   for (const method of ["get", "has", "create", "update", "delete", "list"] as const) {
     if (typeof store[method] !== "function") throw new TypeError(`Factory returned an invalid Store method: ${method}`);

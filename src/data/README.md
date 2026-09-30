@@ -18,8 +18,8 @@
 | [context.ts](./api/context.ts)、[config.ts](./api/config.ts) | 操作上下文和 JSON 配置 |
 | [model.ts](./api/model.ts)、[model-runtime.ts](./api/model-runtime.ts) | 模型定义、Runtime、Registry 和 Factory |
 | [serializer.ts](./api/serializer.ts) | Payload 与值实例之间的转换接口 |
-| [store.ts](./api/store.ts) | 两种 Store 的公共参数、分页结果和 Registry |
-| [data-store.ts](./api/data-store.ts)、[value-store.ts](./api/value-store.ts) | Store、返回记录及对应 Factory |
+| [store.ts](./api/store.ts) | StoreId、两种 Store 的公共参数、分页结果和 Registry |
+| [data-store.ts](./api/data-store.ts)、[value-store.ts](./api/value-store.ts) | Store、可选追加能力、读取记录及对应 Factory |
 | [extension.ts](./api/extension.ts) | DataExtension 能力清单 |
 | [extension-registry.ts](./api/extension-registry.ts) | 进程共享的扩展登记及 Serializer、Factory 查询接口 |
 | [data-manager.ts](./api/data-manager.ts) | Project 内的模型加载、Runtime 与 Store 准备接口 |
@@ -29,7 +29,7 @@
 
 DataExtensionRegistry 登记 Extension 提供的能力，不创建 Runtime 或 Store。查询均为同步操作，未找到时返回 undefined。Runtime Factory 查询按 `target` 精确匹配，具体模型优先于元模型的选择顺序由 DataManager 执行。
 
-DataManager 属于一个 Project，通过 `getModel / getRuntime / getStore` 按需准备并复用结果。它内部管理 ModelRuntimeRegistry 和 StoreRegistry，不向业务暴露可登记实例的入口。异步准备失败时抛错，不返回 undefined。不同 Project 的同名模型不会共享 Runtime 或 Store。
+DataManager 属于一个 Project，通过 `getModel / getRuntime / getStore` 按需准备并复用结果。前两者按模型 ID 查询，`getStore` 按业务指定的 StoreId 查询。每个 Store 只绑定一个模型，同一模型可以拥有多个 Store；StoreId 在 Project 内唯一，不等于物理目录。Manager 内部管理 ModelRuntimeRegistry 和 StoreRegistry，不向业务暴露可登记实例的入口。异步准备失败时抛错，不返回 undefined。不同 Project 不共享 Runtime 或 Store。
 
 默认实现为 `DefaultDataExtensionRegistry` 和 `DefaultDataManager`，同样从 `memsphere/data` 导入。宿主显式提供扩展、模型来源与存储绑定；构造时不加载模型或创建 Store。完整装配示例见 [management](./management/README.md)。业务侧的调用如下：
 
@@ -39,12 +39,20 @@ import type { Context, DataManager } from "memsphere/data";
 declare const context: Context;
 declare const dataManager: DataManager; // 宿主绑定当前 Project。
 
-const store = await dataManager.getStore(context, "order-model");
-if (store.kind !== "ValueStore") throw new Error("order-model 未绑定 ValueStore");
+const store = await dataManager.getStore(context, "orders");
+if (store.kind !== "ValueStore") throw new Error("orders 不是 ValueStore");
 await store.create(context, "order-001", { orderNo: "O-001", amount: 100 });
 ```
 
 模型可以直接提供已解码的 Model，或通过 `loadData(context)` 读取原始模型 Data，由 Manager 准备元模型 Runtime 后解码。模型依赖通过 `dependencies` 显式声明；Manager 不解析 JSON Schema 等标准的引用语法。并发准备合并为一次共享创建，调用方取消只停止自己的等待，共享工作仍可完成并缓存。`DataManager` 不代替 Store 的业务数据增删改查接口，也不提供热更新或 `close()`。
+
+## 内容流与写入
+
+`PayloadContent.stream()` 提供内容读取流，仅保证一次消费，不保证重复调用或从头重放。内容可以在读取过程中产生；需要再次读取已保存的数据时，重新调用 `store.get()`。
+
+DataStore 的 `create/update` 消费输入流至正常 EOF，并在保存完成后返回 `Promise<void>`；流错误、取消或存储失败时拒绝，不返回 StoredData，也不自动重放输入。`get()` 才返回 StoredData。ValueStore 的 `create/update` 仍返回 StoredValue。
+
+`AppendableDataStore` 是可选能力，`append(context, data)` 只追加 Payload 中的新字节。目标必须存在，model 与 contentType 必须一致；不自动创建或补换行。失败可能留下已写部分，不保证回滚或安全重试，也不保证并发操作的整流排序。是否支持追加、追加何时可见，由具体实现声明。
 
 ## 反射接口
 
@@ -76,7 +84,7 @@ tuple、Record、Set 不另设类型。动态对象字段仍由 `ObjectDescripto
 
 ## 内置扩展
 
-- 文件系统 DataStore：以可读的相对文件路径保存原始 Payload，支持子目录，通过文件扩展名恢复 contentType；无锁，不维护 revision。
+- 文件系统 DataStore：以可读的相对文件路径保存原始 Payload，支持子目录，通过文件扩展名恢复 contentType；逐块写入，支持可选追加能力，无锁，不维护 revision。
 - JSON Schema Draft-07 ModelRuntimeFactory：将模型定义转换为 Descriptor，并提供值实例反射。
 - Raw ModelRuntimeFactory：匹配 `raw` 模型定义标准，提供 `bytes` 标量的整体读取与替换，不暴露内部字段或元素。
 - JSON PayloadSerializer：在 JSON 字节与原生值实例之间转换。

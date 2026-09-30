@@ -5,12 +5,13 @@ import { join } from "node:path";
 import test from "node:test";
 import { Config, type JsonObject } from "../src/data/api/config.js";
 import type { Data } from "../src/data/api/data.js";
-import type { DataStore } from "../src/data/api/data-store.js";
+import type { AppendableDataStore } from "../src/data/api/data-store.js";
 import type { PayloadContent } from "../src/data/api/payload.js";
 import { FilesystemDataStoreFactory, filesystemDataStoreExtension } from "../src/data/extensions/filesystem-datastore/index.js";
 import { bytesContent, readAll } from "../src/data/extensions/shared/payload.js";
 
 const MODEL = "example/file-v1";
+const STORE = "example/files";
 const factory = new FilesystemDataStoreFactory();
 
 async function withDirectory(action: (directory: string) => Promise<void>): Promise<void> {
@@ -19,9 +20,9 @@ async function withDirectory(action: (directory: string) => Promise<void>): Prom
   finally { await rm(directory, { recursive: true, force: true }); }
 }
 
-async function withStore(action: (store: DataStore, directory: string) => Promise<void>): Promise<void> {
+async function withStore(action: (store: AppendableDataStore, directory: string) => Promise<void>): Promise<void> {
   await withDirectory(async (directory) => {
-    await action(await factory.createStore({}, MODEL, new Config({ directory })), directory);
+    await action(await factory.createStore({}, STORE, MODEL, new Config({ directory })), directory);
   });
 }
 
@@ -31,6 +32,38 @@ function data(id: string, bytes: Uint8Array | string = new Uint8Array([0, 255, 1
 
 async function bytesOf(payload: PayloadContent): Promise<Uint8Array> {
   return readAll({}, payload);
+}
+
+function streamingData(id: string, firstChunk = "first") {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  let secondRead!: () => void;
+  const waiting = new Promise<void>((resolve) => { secondRead = resolve; });
+  let opens = 0;
+  let reads = 0;
+  let cancelled = false;
+  const source = data(id);
+  source.payload.content = {
+    stream() {
+      opens += 1;
+      assert.equal(opens, 1, "a one-shot Payload must not be reopened");
+      return new ReadableStream<Uint8Array>({
+        start(value) { controller = value; },
+        pull(value) {
+          reads += 1;
+          if (reads === 1) value.enqueue(new TextEncoder().encode(firstChunk));
+          else secondRead();
+        },
+        cancel() { cancelled = true; }
+      }, { highWaterMark: 0 });
+    }
+  };
+  return {
+    data: source,
+    waiting,
+    get controller() { return controller; },
+    get opens() { return opens; },
+    get cancelled() { return cancelled; }
+  };
 }
 
 test("filesystem extension supplies one independent DataStore factory", () => {
@@ -45,13 +78,15 @@ test("filesystem extension supplies one independent DataStore factory", () => {
 test("filesystem DataStore saves ordinary readable files and raw binary bytes, without envelopes or locks", async () => {
   await withStore(async (store, directory) => {
     assert.equal(store.kind, "DataStore");
+    assert.equal(store.id, STORE);
     assert.equal(store.model, MODEL);
     const text = "# 设计文档\n\n普通 Markdown，不增加文件头。\n";
     const json = '{\n  "orderNo": "order-001"\n}\n';
     const binary = new Uint8Array([0, 255, 128, 0, 195, 40, 13, 10]);
     await store.create({}, data("design.md", text, "text/markdown"));
     await store.create({}, data("order-001.json", json, "application/json"));
-    const record = await store.create({}, data("photo.jpg", binary, "image/jpeg"));
+    assert.equal(await store.create({}, data("photo.jpg", binary, "image/jpeg")), undefined);
+    const record = (await store.get({}, "photo.jpg"))!;
     assert.equal(await readFile(join(directory, "design.md"), "utf8"), text);
     assert.equal(await readFile(join(directory, "order-001.json"), "utf8"), json);
     assert.deepEqual(new Uint8Array(await readFile(join(directory, "photo.jpg"))), binary);
@@ -70,18 +105,20 @@ test("filesystem CRUD supports reopens, snapshots, filesystem mtimes and externa
     assert.equal(await store.get({}, "item.bin"), undefined);
     assert.equal(await store.has({}, "item.bin"), false);
     const original = new Uint8Array([1, 2, 3]);
-    const created = await store.create({}, data("item.bin", original));
+    assert.equal(await store.create({}, data("item.bin", original)), undefined);
+    const created = (await store.get({}, "item.bin"))!;
     assert.equal(await store.has({}, "item.bin"), true);
     await assert.rejects(store.create({}, data("item.bin")), /already exists/);
     await assert.rejects(store.update({}, data("missing.bin")), /does not exist/);
     const read = (await store.get({}, "item.bin"))!;
     (await bytesOf(read.data.payload.content)).fill(0);
-    const updated = await store.update({}, data("item.bin", new Uint8Array([4, 5])));
+    assert.equal(await store.update({}, data("item.bin", new Uint8Array([4, 5]))), undefined);
+    const updated = (await store.get({}, "item.bin"))!;
     assert.equal(updated.revision, undefined);
     assert.equal(updated.createdAt, undefined);
     assert.deepEqual(await bytesOf(created.data.payload.content), original);
     assert.deepEqual(await bytesOf(read.data.payload.content), original);
-    const reopened = await factory.createStore({}, MODEL, new Config({ directory }));
+    const reopened = await factory.createStore({}, STORE, MODEL, new Config({ directory }));
     assert.deepEqual(await bytesOf((await reopened.get({}, "item.bin"))!.data.payload.content), new Uint8Array([4, 5]));
     const timestamp = 1_700_000_000;
     await utimes(join(directory, "item.bin"), timestamp, timestamp);
@@ -103,7 +140,8 @@ test("relative file IDs support nested CRUD, duplicate leaves, Unicode directori
     assert.equal(await store.has({}, id), false);
     assert.equal(await store.delete({}, id), false);
     const json = '{\n  "orderNo": "订单一"\n}\n';
-    const created = await store.create({}, data(id, json, "application/json"));
+    await store.create({}, data(id, json, "application/json"));
+    const created = (await store.get({}, id))!;
     assert.equal(created.data.id, id);
     assert.equal(created.data.model, MODEL);
     assert.equal(created.data.payload.contentType, "application/json");
@@ -112,9 +150,10 @@ test("relative file IDs support nested CRUD, duplicate leaves, Unicode directori
     await assert.rejects(store.create({}, data(id, json, "application/json")), /already exists/);
     const sibling = "业务 数据/发货/order-001.json";
     await store.create({}, data(sibling, '{"shipment":1}', "application/json"));
-    const reopened = await factory.createStore({}, MODEL, new Config({ directory }));
+    const reopened = await factory.createStore({}, STORE, MODEL, new Config({ directory }));
     assert.equal((await reopened.get({}, id))!.data.id, id);
-    const updated = await reopened.update({}, data(id, '{"orderNo":"订单二"}', "application/json"));
+    await reopened.update({}, data(id, '{"orderNo":"订单二"}', "application/json"));
+    const updated = (await reopened.get({}, id))!;
     assert.equal(updated.data.id, id);
     assert.equal(new TextDecoder().decode(await bytesOf((await store.get({}, sibling))!.data.payload.content)), '{"shipment":1}');
     await store.create({}, data("folder.json/manual.md", "# Markdown", "text/markdown"));
@@ -180,7 +219,7 @@ test("relative reads, writes and enumeration never traverse symlink directories"
     const outside = join(outer, "outside");
     await mkdir(outside);
     await writeFile(join(outside, "existing.bin"), "outside must stay unchanged");
-    const store = await factory.createStore({}, MODEL, new Config({ directory }));
+    const store = await factory.createStore({}, STORE, MODEL, new Config({ directory }));
     await symlink(outside, join(directory, "linked"), process.platform === "win32" ? "junction" : "dir");
     await assert.rejects(store.get({}, "linked/existing.bin"), /symlink|directory/i);
     await assert.rejects(store.has({}, "linked/existing.bin"), /symlink|directory/i);
@@ -216,13 +255,13 @@ test("model isolation uses explicitly configured directories, not hidden model n
   await withDirectory(async (directory) => {
     const firstDirectory = join(directory, "orders");
     const secondDirectory = join(directory, "products");
-    const first = await factory.createStore({}, "order-model", new Config({ directory: firstDirectory }));
-    const second = await factory.createStore({}, "product-model", new Config({ directory: secondDirectory }));
+    const first = await factory.createStore({}, "orders", "order-model", new Config({ directory: firstDirectory }));
+    const second = await factory.createStore({}, "products", "product-model", new Config({ directory: secondDirectory }));
     await first.create({}, data("item.json", '{"order":1}', "application/json", "order-model"));
     await second.create({}, data("item.json", '{"product":1}', "application/json", "product-model"));
     assert.equal(await readFile(join(firstDirectory, "item.json"), "utf8"), '{"order":1}');
     assert.equal(await readFile(join(secondDirectory, "item.json"), "utf8"), '{"product":1}');
-    const sameDirectory = await factory.createStore({}, "another-model", new Config({ directory: firstDirectory }));
+    const sameDirectory = await factory.createStore({}, "alias", "another-model", new Config({ directory: firstDirectory }));
     assert.equal((await sameDirectory.get({}, "item.json"))!.data.model, "another-model");
     await assert.rejects(first.create({}, data("wrong.bin")), /model does not match/);
     await assert.rejects(first.update({}, data("item.json", "{}", "application/json")), /model does not match/);
@@ -259,7 +298,7 @@ test("custom MIME mapping overrides suffixes, supports longest compound match an
       "application/x-tar": [".tar.gz"]
     };
     const config = new Config({ directory, contentTypeExtensions: configured });
-    const pending = factory.createStore({}, MODEL, config);
+    const pending = factory.createStore({}, STORE, MODEL, config);
     config.json.directory = join(directory, "unexpected");
     jsonSuffixes[0] = ".mutated";
     configured["application/vnd.acme.order+json"][0] = ".changed";
@@ -297,13 +336,14 @@ test("factory rejects invalid mappings and removed lock options before filesyste
     ...[null, [], "mapping", 1].map((contentTypeExtensions) => ({ directory: "not-created", contentTypeExtensions })),
     ...invalidMappings.map((contentTypeExtensions) => ({ directory: "not-created", contentTypeExtensions }))
   ];
-  for (const config of invalidConfigs) await assert.rejects(factory.createStore({}, MODEL, new Config(config)));
-  await assert.rejects(factory.createStore({}, "", new Config({ directory: "not-created" })), /model.*non-empty/);
+  for (const config of invalidConfigs) await assert.rejects(factory.createStore({}, STORE, MODEL, new Config(config)));
+  await assert.rejects(factory.createStore({}, STORE, "", new Config({ directory: "not-created" })), /model.*non-empty/);
+  await assert.rejects(factory.createStore({}, "", MODEL, new Config({ directory: "not-created" })), /store id.*non-empty/);
 });
 
 test("empty suffix arrays disable defaults and allow explicitly reassigning an extension", async () => {
   await withDirectory(async (directory) => {
-    const store = await factory.createStore({}, MODEL, new Config({
+    const store = await factory.createStore({}, STORE, MODEL, new Config({
       directory,
       contentTypeExtensions: {
         "application/json": [],
@@ -346,10 +386,12 @@ test("list enumerates filenames without opening payloads and scopes pagination t
       assert.ok(first.nextCursor);
       const next = await store.list({}, { limit: 2, cursor: first.nextCursor });
       assert.deepEqual(next, { items: [{ id: "c.json" }] });
-      const reopened = await factory.createStore({}, MODEL, new Config({ directory }));
+      const reopened = await factory.createStore({}, STORE, MODEL, new Config({ directory }));
       assert.deepEqual(await reopened.list({}, { cursor: first.nextCursor }), next);
-      const differentModel = await factory.createStore({}, "other-model", new Config({ directory }));
+      const differentModel = await factory.createStore({}, STORE, "other-model", new Config({ directory }));
       await assert.rejects(differentModel.list({}, { cursor: first.nextCursor }), /cursor/);
+      const differentId = await factory.createStore({}, "other-files", MODEL, new Config({ directory }));
+      await assert.rejects(differentId.list({}, { cursor: first.nextCursor }), /cursor/);
       await assert.rejects(store.list({}, { cursor: "invalid" }), /cursor/);
       for (const limit of [0, -1, 1.5, NaN, Infinity, 1001]) await assert.rejects(store.list({}, { limit }));
     } finally { mock.mock.restore(); }
@@ -384,7 +426,7 @@ test("recursive list returns full relative IDs in stable pages without opening a
 
 test("concurrent create never overwrites an existing file and leaves no lock or temporary artifacts", async () => {
   await withStore(async (store, directory) => {
-    const second = await factory.createStore({}, MODEL, new Config({ directory }));
+    const second = await factory.createStore({}, STORE, MODEL, new Config({ directory }));
     const results = await Promise.allSettled([store.create({}, data("item.bin", "one")), second.create({}, data("item.bin", "two"))]);
     assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
     assert.ok(["one", "two"].includes(await readFile(join(directory, "item.bin"), "utf8")));
@@ -419,4 +461,118 @@ test("abort before commit and failed streams preserve original content", async (
     assert.equal(await readFile(join(directory, "item.bin"), "utf8"), "original");
     assert.deepEqual(await readdir(directory), ["item.bin"]);
   });
+});
+
+test("create and update consume one-shot sources incrementally and publish only after EOF", async () => {
+  for (const mode of ["create", "update"] as const) {
+    await withStore(async (store, directory) => {
+      if (mode === "update") await store.create({}, data("item.bin", "old"));
+      const input = streamingData("item.bin");
+      let finished = false;
+      const pending = store[mode]({}, input.data).then(() => { finished = true; });
+      await input.waiting;
+      assert.equal(finished, false);
+      assert.equal(input.opens, 1);
+      // The second pull occurs only after the first chunk has reached the temp file.
+      const temporary = (await readdir(directory)).find((name) => name.startsWith(".memsphere-"))!;
+      assert.equal(await readFile(join(directory, temporary), "utf8"), "first");
+      if (mode === "create") assert.equal(await store.has({}, "item.bin"), false);
+      else assert.equal(await readFile(join(directory, "item.bin"), "utf8"), "old");
+      input.controller.enqueue(new TextEncoder().encode("second"));
+      input.controller.close();
+      await pending;
+      assert.equal(finished, true);
+      assert.equal(await readFile(join(directory, "item.bin"), "utf8"), "firstsecond");
+      assert.deepEqual(await readdir(directory), ["item.bin"]);
+    });
+  }
+});
+
+test("partial streamed writes are not published after source errors or cancellation", async () => {
+  for (const mode of ["create", "update"] as const) {
+    for (const failure of ["error", "abort"] as const) {
+      await withStore(async (store, directory) => {
+        const id = "nested/item.bin";
+        if (mode === "update") await store.create({}, data(id, "old"));
+        const input = streamingData(id);
+        const abort = new AbortController();
+        const pending = store[mode]({ signal: abort.signal }, input.data);
+        const rejected = assert.rejects(pending, /stop partway/);
+        await input.waiting;
+        if (failure === "error") input.controller.error(new Error("stop partway"));
+        else abort.abort(new Error("stop partway"));
+        await rejected;
+        assert.equal(input.opens, 1);
+        if (failure === "abort") assert.equal(input.cancelled, true);
+        if (mode === "create") assert.deepEqual(await readdir(directory), []);
+        else {
+          assert.equal(await readFile(join(directory, "nested", "item.bin"), "utf8"), "old");
+          assert.deepEqual(await readdir(join(directory, "nested")), ["item.bin"]);
+        }
+      });
+    }
+  }
+});
+
+test("append consumes only new bytes progressively and finishes after EOF", async () => {
+  await withStore(async (store, directory) => {
+    await store.create({}, data("logs/item.bin", "existing"));
+    const input = streamingData("logs/item.bin");
+    let finished = false;
+    const pending = store.append({}, input.data).then((result) => {
+      assert.equal(result, undefined);
+      finished = true;
+    });
+    await input.waiting;
+    assert.equal(finished, false);
+    assert.equal(await readFile(join(directory, "logs", "item.bin"), "utf8"), "existingfirst");
+    input.controller.enqueue(new TextEncoder().encode("second"));
+    input.controller.close();
+    await pending;
+    assert.equal(input.opens, 1);
+    assert.equal(await readFile(join(directory, "logs", "item.bin"), "utf8"), "existingfirstsecond");
+    assert.deepEqual(await readdir(join(directory, "logs")), ["item.bin"]);
+  });
+});
+
+test("append validates model, content type and existing identity before consuming input", async () => {
+  await withStore(async (store, directory) => {
+    await store.create({}, data("item.bin", "original"));
+    const invalid = [
+      data("missing.bin"),
+      data("absent/parents/item.bin"),
+      data("item.bin", "", "application/octet-stream", "wrong-model"),
+      data("item.bin", "", "text/plain"),
+      data("../item.bin"),
+      data("ITEM.bin")
+    ];
+    for (const input of invalid) {
+      let consumed = false;
+      input.payload.content = { stream() { consumed = true; throw new Error("must not consume"); } };
+      await assert.rejects(store.append({}, input));
+      assert.equal(consumed, false);
+    }
+    await assert.rejects(store.append({ signal: AbortSignal.abort(new Error("stop before open")) }, data("item.bin")), /stop before open/);
+    assert.equal(await readFile(join(directory, "item.bin"), "utf8"), "original");
+    assert.deepEqual(await readdir(directory), ["item.bin"]);
+  });
+});
+
+test("append source failure and cancellation reject without rolling back the written prefix", async () => {
+  for (const failure of ["error", "abort"] as const) {
+    await withStore(async (store, directory) => {
+      await store.create({}, data("item.bin", "original"));
+      const input = streamingData("item.bin", "partial");
+      const abort = new AbortController();
+      const rejected = assert.rejects(store.append({ signal: abort.signal }, input.data), /append interrupted/);
+      await input.waiting;
+      if (failure === "error") input.controller.error(new Error("append interrupted"));
+      else abort.abort(new Error("append interrupted"));
+      await rejected;
+      assert.equal(await readFile(join(directory, "item.bin"), "utf8"), "originalpartial");
+      assert.deepEqual(await readdir(directory), ["item.bin"]);
+      assert.equal(input.opens, 1);
+      if (failure === "abort") assert.equal(input.cancelled, true);
+    });
+  }
 });

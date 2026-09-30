@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants, type Stats } from "node:fs";
-import fs from "node:fs/promises";
+import fs, { type FileHandle } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Config } from "../../api/config.js";
 import type { Context } from "../../api/context.js";
+import type { PayloadContent } from "../../api/payload.js";
 import type { ListOptions, ListResult } from "../../api/store.js";
-import { throwIfAborted } from "./payload.js";
+import { consumeContent, throwIfAborted } from "./payload.js";
 
 /** Reserved for short-lived implementation files, never for data records. */
 export const INTERNAL_PREFIX = ".memsphere-";
@@ -123,7 +124,8 @@ export async function resolveFileParent(
   context: Context,
   root: string,
   relativePath: string,
-  createDirectories = false
+  createDirectories = false,
+  createdDirectories?: string[]
 ): Promise<{ directory: string; filename: string } | undefined> {
   validateRelativeFilePath(relativePath);
   throwIfAborted(context);
@@ -137,6 +139,7 @@ export async function resolveFileParent(
       throwIfAborted(context);
       try {
         await fs.mkdir(join(directory, segment));
+        createdDirectories?.push(join(directory, segment));
       } catch (error) {
         if (!isCode(error, "EEXIST")) throw error;
       }
@@ -237,7 +240,8 @@ async function retryWindowsMutation(context: Context, action: () => Promise<void
 }
 
 /**
- * Publish complete bytes without exposing partially written files. No file lock.
+ * Consume bytes or a single input stream into a temporary file, then publish it.
+ * No partially written destination and no file lock.
  * create uses an exclusive hard link; replace uses same-directory rename.
  * Replacement has no CAS and may recreate a record concurrently deleted after its existence check.
  * Atomic creation requires a filesystem supporting local hard links.
@@ -246,7 +250,7 @@ export async function atomicPublish(
   context: Context,
   directory: string,
   name: string,
-  bytes: Uint8Array,
+  content: Uint8Array | PayloadContent,
   mode: "create" | "replace"
 ): Promise<Stats> {
   const found = await findFile(context, directory, name);
@@ -256,7 +260,11 @@ export async function atomicPublish(
   const temporary = join(directory, `${INTERNAL_PREFIX}${randomUUID()}.tmp`);
   const handle = await fs.open(temporary, "wx", 0o600);
   try {
-    await handle.writeFile(bytes, { signal: context.signal });
+    if (content instanceof Uint8Array) {
+      await handle.writeFile(content, { signal: context.signal });
+    } else {
+      await writeContent(context, handle, content);
+    }
     await handle.sync();
     const stat = await handle.stat();
     await handle.close();
@@ -272,6 +280,50 @@ export async function atomicPublish(
     await handle.close().catch(() => undefined);
     await fs.unlink(temporary).catch(() => undefined);
   }
+}
+
+/** Write each chunk completely before consuming the next; a file write may be short. */
+async function writeContent(context: Context, handle: FileHandle, content: PayloadContent): Promise<void> {
+  await consumeContent(context, content, async (chunk) => {
+    let offset = 0;
+    while (offset < chunk.byteLength) {
+      throwIfAborted(context);
+      const { bytesWritten } = await handle.write(chunk, offset, chunk.byteLength - offset, null);
+      if (bytesWritten === 0) throw new Error("File write made no progress");
+      offset += bytesWritten;
+    }
+  });
+}
+
+/**
+ * Append to an existing regular file without implicitly creating it.
+ * Already written chunks can be visible before EOF and remain after failure.
+ * No stream-level atomicity or ordering is promised between concurrent operations.
+ */
+export async function appendFileContent(
+  context: Context,
+  directory: string,
+  name: string,
+  content: PayloadContent
+): Promise<void> {
+  const found = await findFile(context, directory, name);
+  if (!found) throw fileError("ENOENT", `Record does not exist: ${name}`);
+  const flags = constants.O_WRONLY | constants.O_APPEND | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW);
+  throwIfAborted(context);
+  const handle = await fs.open(found.path, flags);
+  try {
+    if (!(await handle.stat()).isFile()) throw new Error(`Record must be a regular file: ${name}`);
+    await writeContent(context, handle, content);
+    await handle.sync();
+    throwIfAborted(context);
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Remove only empty directories created by the failed operation, never recursively. */
+export async function cleanupCreatedDirectories(directories: readonly string[]): Promise<void> {
+  for (const directory of [...directories].reverse()) await fs.rmdir(directory).catch(() => undefined);
 }
 
 export async function deleteFile(context: Context, directory: string, name: string): Promise<boolean> {

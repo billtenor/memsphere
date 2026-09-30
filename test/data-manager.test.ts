@@ -39,19 +39,18 @@ function extension(capabilities: Omit<DataExtension, "id" | "version">, id = "te
   return { id, version: "1", ...capabilities };
 }
 
-function dataStore(id: string): DataStore {
+function dataStore(id: string, model = id): DataStore {
   return {
-    kind: "DataStore", model: id,
+    id, kind: "DataStore", model,
     async get() { return undefined; }, async has() { return false; },
-    async create(_context, data) { return { data }; },
-    async update(_context, data) { return { data }; },
+    async create() {}, async update() {},
     async delete() { return false; }, async list() { return { items: [] }; }
   };
 }
 
-function valueStore(id: string): ValueStore {
+function valueStore(id: string, model = id): ValueStore {
   return {
-    kind: "ValueStore", model: id,
+    id, kind: "ValueStore", model,
     async get() { return undefined; }, async has() { return false; },
     async create(_context, itemId, value) { return { id: itemId, value }; },
     async update(_context, itemId, value) { return { id: itemId, value }; },
@@ -77,20 +76,20 @@ test("DataManager constructs lazily and coalesces concurrent runtime and value s
       await release.promise;
       return runtime(input.data.id);
     } }],
-    valueStoreFactories: [{ id: "test/values", async createStore(_context, input) {
+    valueStoreFactories: [{ id: "test/values", async createStore(_context, id, input) {
       calls.push("store");
-      return valueStore(input.descriptor.id);
+      return valueStore(id, input.descriptor.id);
     } }]
   })]);
   const manager = new DefaultDataManager({
     extensions, models: [{ model: model("order") }],
-    stores: [{ model: "order", kind: "ValueStore", factory: "test/values", config: new Config({}) }]
+    stores: [{ id: "orders", model: "order", kind: "ValueStore", factory: "test/values", config: new Config({}) }]
   });
   assert.deepEqual(calls, []);
   assert.equal((await manager.getModel({}, "order")).data.id, "order");
   assert.deepEqual(calls, []);
   const runtimes = [manager.getRuntime({}, "order"), manager.getRuntime({}, "order")];
-  const stores = [manager.getStore({}, "order"), manager.getStore({}, "order")];
+  const stores = [manager.getStore({}, "orders"), manager.getStore({}, "orders")];
   await entered.promise;
   assert.deepEqual(calls, ["runtime"]);
   release.resolve();
@@ -99,7 +98,9 @@ test("DataManager constructs lazily and coalesces concurrent runtime and value s
   assert.equal(firstRuntime, secondRuntime);
   assert.equal(firstStore, secondStore);
   assert.equal(await manager.getRuntime({}, "order"), firstRuntime);
-  assert.equal(await manager.getStore({}, "order"), firstStore);
+  assert.equal(await manager.getStore({}, "orders"), firstStore);
+  assert.equal(firstStore.id, "orders");
+  assert.equal(firstStore.model, "order");
   assert.deepEqual(calls, ["runtime", "store"]);
 });
 
@@ -164,19 +165,22 @@ test("DataManager decodes raw models with the metamodel runtime without creating
 test("DataManager raw DataStore binding does not require any model loader or runtime factory", async () => {
   let creations = 0;
   const extensions = new DefaultDataExtensionRegistry([extension({ dataStoreFactories: [{
-    id: "test/raw", async createStore(_context, id, config) {
+    id: "test/raw", async createStore(_context, id, model, config) {
       creations += 1;
       assert.deepEqual(config.json, { directory: "host-owned" });
-      return dataStore(id);
+      return dataStore(id, model);
     }
   }] })]);
   const manager = new DefaultDataManager({ extensions, stores: [{
-    model: "unloaded/model", kind: "DataStore", factory: "test/raw", config: new Config({ directory: "host-owned" })
+    id: "raw-data", model: "unloaded/model", kind: "DataStore", factory: "test/raw", config: new Config({ directory: "host-owned" })
   }] });
-  const [first, second] = await Promise.all([manager.getStore({}, "unloaded/model"), manager.getStore({}, "unloaded/model")]);
+  const [first, second] = await Promise.all([manager.getStore({}, "raw-data"), manager.getStore({}, "raw-data")]);
   assert.equal(first.kind, "DataStore");
   assert.equal(first, second);
   assert.equal(creations, 1);
+  assert.equal(first.id, "raw-data");
+  assert.equal(first.model, "unloaded/model");
+  await assert.rejects(manager.getStore({}, "unloaded/model"), /store|binding/i);
   await assert.rejects(manager.getModel({}, "unloaded/model"), /model|binding|locat/i);
 });
 
@@ -188,18 +192,20 @@ test("DataManager snapshots bindings, dependency lists, nested Config JSON, and 
       calls.push(input.data.id);
       return runtime(input.data.id);
     } }],
-    dataStoreFactories: [{ id: "test/raw", async createStore(_context, id, config) {
+    dataStoreFactories: [{ id: "test/raw", async createStore(_context, id, model, config) {
       assert.deepEqual(config.json, { directory: "original", nested: { items: ["original"] } });
-      return dataStore(id);
+      return dataStore(id, model);
     } }]
   })]);
   const dependencies = ["dependency"];
   const models = [{ model: model("order"), dependencies }, { model: model("dependency"), dependencies: [] as string[] }];
   const config = new Config({ directory: "original", nested: { items: ["original"] } });
-  const stores = [{ model: "order", kind: "DataStore" as const, factory: "test/raw", config }];
+  const stores = [{ id: "order", model: "order", kind: "DataStore" as const, factory: "test/raw", config }];
   const manager = new DefaultDataManager({ extensions, models, stores });
   dependencies.splice(0, 1, "missing");
   models.length = 0;
+  stores[0].id = "changed-store";
+  stores[0].model = "changed-model";
   stores[0].factory = "missing";
   stores.length = 0;
   config.json.directory = "changed";
@@ -220,6 +226,7 @@ test("DataManager snapshots model, Payload, and store bindings supplied through 
   }
   class RawStoreBinding {
     constructor(private readonly modelId: string, private readonly settings: Config) {}
+    get id() { return "orders"; }
     get model() { return this.modelId; }
     get kind() { return "DataStore" as const; }
     get factory() { return "test/raw"; }
@@ -240,10 +247,11 @@ test("DataManager snapshots model, Payload, and store bindings supplied through 
     modelRuntimeFactories: [{ target: { model: "test/schema" }, async createRuntime(_context, input) {
       return runtime(input.data.id);
     } }],
-    dataStoreFactories: [{ id: "test/raw", async createStore(_context, id, config) {
-      assert.equal(id, "order");
+    dataStoreFactories: [{ id: "test/raw", async createStore(_context, id, model, config) {
+      assert.equal(id, "orders");
+      assert.equal(model, "order");
       assert.deepEqual(config.json, { source: "prototype getters" });
-      return dataStore(id);
+      return dataStore(id, model);
     } }]
   })]);
   const seed = new DecodedModel(model("test/schema", "test/bootstrap", { seed: true }));
@@ -258,7 +266,8 @@ test("DataManager snapshots model, Payload, and store bindings supplied through 
   assert.equal(decoded.data.payload.contentType, "application/json");
   assert.equal(typeof decoded.data.payload.content.stream, "function");
   assert.deepEqual(decoded.definition, definition);
-  const prepared = await manager.getStore({}, "order");
+  const prepared = await manager.getStore({}, "orders");
+  assert.equal(prepared.id, "orders");
   assert.equal(prepared.model, "order");
   assert.equal(prepared.kind, "DataStore");
 });
@@ -266,8 +275,8 @@ test("DataManager snapshots model, Payload, and store bindings supplied through 
 test("DataManager rejects missing bindings and capabilities instead of guessing defaults", async () => {
   const extensions = new DefaultDataExtensionRegistry([filesystemDataStoreExtension]);
   const manager = new DefaultDataManager({ extensions, models: [{ model: model("order") }], stores: [
-    { model: "order", kind: "ValueStore", factory: "missing", config: new Config({}) },
-    { model: "raw", kind: "DataStore", factory: "missing", config: new Config({}) }
+    { id: "order", model: "order", kind: "ValueStore", factory: "missing", config: new Config({}) },
+    { id: "raw", model: "raw", kind: "DataStore", factory: "missing", config: new Config({}) }
   ] });
   await assert.rejects(manager.getModel({}, "missing"), /model|binding|locat/i);
   await assert.rejects(manager.getRuntime({}, "order"), /factory|runtime/i);
@@ -287,8 +296,12 @@ test("DataManager rejects invalid and duplicate input bindings before any factor
   assert.throws(() => new DefaultDataManager({ extensions, models: [{ model: model("order", "") }] }));
   assert.throws(() => new DefaultDataManager({ extensions, models: [{ model: model("order") }, { model: model("order") }] }));
   assert.throws(() => new DefaultDataManager({ extensions, models: [{ model: model("order"), dependencies: [""] }] }));
-  const binding = { model: "order", kind: "DataStore" as const, factory: "raw", config: new Config({}) };
+  const binding = { id: "orders", model: "order", kind: "DataStore" as const, factory: "raw", config: new Config({}) };
   assert.throws(() => new DefaultDataManager({ extensions, stores: [binding, binding] }));
+  assert.throws(() => new DefaultDataManager({ extensions, stores: [binding, { ...binding, model: "other", kind: "ValueStore" }] }), /duplicate/i);
+  for (const id of ["", " ", undefined as unknown as string]) {
+    assert.throws(() => new DefaultDataManager({ extensions, stores: [{ ...binding, id }] }), /store id/i);
+  }
   assert.throws(() => new DefaultDataManager({ extensions, stores: [{ ...binding, model: "" }] }));
   assert.throws(() => new DefaultDataManager({ extensions, stores: [{ ...binding, factory: "" }] }));
 });
@@ -414,28 +427,76 @@ test("DataManager forbids factories from publishing runtime instances through th
   assert.equal(attempts, 2);
 });
 
-test("DataManager store failures and incorrect model or kind are never published and remain retryable", async () => {
+test("DataManager store failures and incorrect ID, model or kind are never published and remain retryable", async () => {
   let attempts = 0;
   const extensions = new DefaultDataExtensionRegistry([extension({ dataStoreFactories: [{
-    id: "test/raw", async createStore(_context, id) {
+    id: "test/raw", async createStore(_context, id, model) {
       attempts += 1;
       if (attempts === 1) throw new Error("transient store failure");
-      if (attempts === 2) return dataStore("wrong");
-      if (attempts === 3) return valueStore(id) as unknown as DataStore;
-      return dataStore(id);
+      if (attempts === 2) return dataStore("wrong", model);
+      if (attempts === 3) return dataStore(id, "wrong");
+      if (attempts === 4) return valueStore(id, model) as unknown as DataStore;
+      return dataStore(id, model);
     }
   }] })]);
   const manager = new DefaultDataManager({ extensions, stores: [{
-    model: "order", kind: "DataStore", factory: "test/raw", config: new Config({})
+    id: "orders", model: "order", kind: "DataStore", factory: "test/raw", config: new Config({})
   }] });
-  await assert.rejects(manager.getStore({}, "order"), /transient store failure/);
-  await assert.rejects(manager.getStore({}, "order"), /identity|model|match/i);
-  await assert.rejects(manager.getStore({}, "order"), /kind|DataStore|match/i);
-  const prepared = await manager.getStore({}, "order");
+  await assert.rejects(manager.getStore({}, "orders"), /transient store failure/);
+  await assert.rejects(manager.getStore({}, "orders"), /identity|id|match/i);
+  await assert.rejects(manager.getStore({}, "orders"), /model|match/i);
+  await assert.rejects(manager.getStore({}, "orders"), /kind|DataStore|match/i);
+  const prepared = await manager.getStore({}, "orders");
   assert.equal(prepared.kind, "DataStore");
+  assert.equal(prepared.id, "orders");
   assert.equal(prepared.model, "order");
-  assert.equal(await manager.getStore({}, "order"), prepared);
-  assert.equal(attempts, 4);
+  assert.equal(await manager.getStore({}, "orders"), prepared);
+  assert.equal(attempts, 5);
+});
+
+test("DataManager prepares independent stores for one model and shares only its Runtime", async () => {
+  const storeCalls: string[] = [];
+  const runtimeInputs: ModelRuntime[] = [];
+  let runtimeCalls = 0;
+  const extensions = new DefaultDataExtensionRegistry([extension({
+    modelRuntimeFactories: [{ target: { metaModel: "test/schema" }, async createRuntime(_context, input) {
+      runtimeCalls += 1;
+      return runtime(input.data.id);
+    } }],
+    dataStoreFactories: [{ id: "test/raw", async createStore(_context, id, model, config) {
+      storeCalls.push(id);
+      assert.equal(config.json.directory, id);
+      return dataStore(id, model);
+    } }],
+    valueStoreFactories: [{ id: "test/values", async createStore(_context, id, input, config) {
+      storeCalls.push(id);
+      runtimeInputs.push(input);
+      assert.equal(config.json.directory, id);
+      return valueStore(id, input.descriptor.id);
+    } }]
+  })]);
+  const manager = new DefaultDataManager({
+    extensions, models: [{ model: model("order") }], stores: [
+      ...["current", "archived"].map(id => ({
+        id, model: "order", kind: "DataStore" as const, factory: "test/raw", config: new Config({ directory: id })
+      })),
+      ...["primary", "replica"].map(id => ({
+        id, model: "order", kind: "ValueStore" as const, factory: "test/values", config: new Config({ directory: id })
+      }))
+    ]
+  });
+  const ids = ["current", "archived", "primary", "replica"];
+  const stores = await Promise.all(ids.map(id => manager.getStore({}, id)));
+  assert.deepEqual(stores.map(store => store.id), ids);
+  assert.deepEqual(stores.map(store => store.model), ids.map(() => "order"));
+  assert.equal(new Set(stores).size, 4);
+  assert.equal(runtimeCalls, 1);
+  assert.equal(runtimeInputs[0], runtimeInputs[1]);
+  assert.equal(runtimeInputs[0], await manager.getRuntime({}, "order"));
+  assert.deepEqual([...storeCalls].sort(), [...ids].sort());
+  for (const [index, id] of ids.entries()) assert.equal(await manager.getStore({}, id), stores[index]);
+  assert.equal(storeCalls.length, 4);
+  await assert.rejects(manager.getStore({}, "order"), /store|binding/i);
 });
 
 test("DataManager rejects declared dependency cycles before invoking runtime factories", { timeout: 2000 }, async () => {
@@ -495,16 +556,17 @@ test("DataManager integrates JSON Schema and filesystem JSON value stores with p
     });
     const createManager = (storeDirectory: string) => new DefaultDataManager({
       extensions, models: [{ model: order }], stores: [{
-        model: "order", kind: "ValueStore", factory: "memsphere/filesystem-json", config: new Config({ directory: storeDirectory })
+        id: "orders", model: "order", kind: "ValueStore", factory: "memsphere/filesystem-json", config: new Config({ directory: storeDirectory })
       }]
     });
     const first = createManager(firstDirectory);
     const second = createManager(secondDirectory);
     assert.deepEqual(await readdir(directory), []);
     const [firstStore, sameStore, secondStore] = await Promise.all([
-      first.getStore({}, "order"), first.getStore({}, "order"), second.getStore({}, "order")
+      first.getStore({}, "orders"), first.getStore({}, "orders"), second.getStore({}, "orders")
     ]);
     assert.equal(firstStore, sameStore);
+    assert.equal(firstStore.id, "orders");
     assert.notEqual(firstStore, secondStore);
     assert.notEqual(await first.getRuntime({}, "order"), await second.getRuntime({}, "order"));
     if (firstStore.kind !== "ValueStore" || secondStore.kind !== "ValueStore") throw new Error("Expected ValueStores");

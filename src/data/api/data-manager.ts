@@ -3,6 +3,7 @@ import type { ModelRef } from "./data.js";
 import type { DataStore } from "./data-store.js";
 import type { Model } from "./model.js";
 import type { ModelRuntime } from "./model-runtime.js";
+import type { StoreId } from "./store.js";
 import type { ValueStore } from "./value-store.js";
 
 /**
@@ -31,11 +32,12 @@ export interface DataManager {
   getRuntime(context: Context, ref: ModelRef): Promise<ModelRuntime>;
 
   /**
-   * 根据模型的存储绑定取得 Store；未创建时调用指定的 Factory 并登记。
+   * 根据 StoreId 对应的存储绑定取得 Store；未创建时调用指定的 Factory 并登记。
    * DataStore 仅需模型 ID 和 Config，不要求加载模型定义或创建 Runtime；
    * ValueStore 则先通过 getRuntime() 准备模型 Runtime。
-   * 返回结果的 model、kind 必须与绑定一致，同一模型复用同一个 Store。
+   * 返回结果的 id、model、kind 必须与绑定一致，同一 StoreId 复用同一个 Store。
+   * 同一模型可以绑定多个 Store；由调用方明确选择，不隐式选择默认 Store。
    * 缺少绑定或 Factory 时抛错，不自动选用其他持久化实现。
    */
-  getStore(context: Context, model: ModelRef): Promise<DataStore | ValueStore>;
+  getStore(context: Context, id: StoreId): Promise<DataStore | ValueStore>;
 }

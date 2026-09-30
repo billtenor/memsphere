@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
+import { promisify } from "node:util";
 import { Config } from "../src/data/api/config.js";
 import {
+  appendFileContent,
   atomicPublish,
+  cleanupCreatedDirectories,
   deleteFile,
   findFile,
   INTERNAL_PREFIX,
@@ -22,6 +26,7 @@ import {
   validateRelativeFilePath,
   withRecordLock
 } from "../src/data/extensions/shared/filesystem.js";
+import { bytesContent, consumeContent } from "../src/data/extensions/shared/payload.js";
 
 const bytes = (value: string) => new TextEncoder().encode(value);
 
@@ -36,6 +41,72 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   const promise = new Promise<void>((done) => { resolve = done; });
   return { promise, resolve };
 }
+
+test("stream cancellation interrupts a stalled read even when source cancellation never settles", async () => {
+  const ready = deferred();
+  const abort = new AbortController();
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>({
+    pull() { ready.resolve(); },
+    cancel(reason) {
+      assert.equal(reason, abort.signal.reason);
+      cancelled = true;
+      return new Promise<void>(() => undefined);
+    }
+  }, { highWaterMark: 0 });
+  const pending = consumeContent({ signal: abort.signal }, { stream: () => stream }, async () => {
+    assert.fail("a stalled source must not produce bytes");
+  });
+  const rejected = assert.rejects(pending, /stop stalled source/);
+  await ready.promise;
+  abort.abort(new Error("stop stalled source"));
+  await rejected;
+  assert.equal(cancelled, true);
+  assert.equal(stream.locked, false);
+});
+
+test("stream consumption does not retain earlier chunks while waiting for EOF", async () => {
+  // Inspect an active operation in a separate GC-enabled process. A permanently
+  // pending abort Promise raced against every read retains all previous chunks.
+  const helper = new URL("../src/data/extensions/shared/payload.ts", import.meta.url).href;
+  const script = `
+    import { consumeContent } from ${JSON.stringify(helper)};
+    const retained = [];
+    for (const signal of [undefined, new AbortController().signal]) {
+      global.gc();
+      const baseline = process.memoryUsage().arrayBuffers;
+      let ready;
+      const waiting = new Promise(resolve => { ready = resolve; });
+      let controller;
+      let count = 0;
+      const source = new ReadableStream({
+        start(value) { controller = value; },
+        pull(value) {
+          if (count++ < 1024) value.enqueue(new Uint8Array(64 * 1024));
+          else ready();
+        }
+      }, { highWaterMark: 0 });
+      const pending = consumeContent({ signal }, { stream: () => source }, async () => {});
+      await waiting;
+      await new Promise(setImmediate);
+      global.gc();
+      global.gc();
+      retained.push(process.memoryUsage().arrayBuffers - baseline);
+      controller.close();
+      await pending;
+    }
+    process.stdout.write(JSON.stringify(retained));
+  `;
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const { stdout } = await promisify(execFile)(process.execPath, ["--expose-gc", "--import", "tsx", "--input-type=module", "-e", script], { env });
+  assert.notEqual(stdout.trim(), "", "GC probe returned no output; child-process execution must be permitted");
+  const retained = JSON.parse(stdout) as number[];
+  assert.equal(retained.length, 2);
+  for (const [index, bytesRetained] of retained.entries()) {
+    assert.ok(bytesRetained < 8 * 1024 * 1024, `retained ${bytesRetained} bytes (signal: ${index === 1}) after consuming 64 MiB`);
+  }
+});
 
 test("portable filenames reject Windows/Linux/macOS hazards on every host", () => {
   const invalid = [
@@ -264,8 +335,90 @@ test("record symlinks are not followed or overwritten", async (t) => {
     assert.deepEqual(await listFilenames({}, directory), ["actual.txt"]);
     await assert.rejects(readFileSnapshot({}, directory, "alias.txt"), /regular file/);
     await assert.rejects(atomicPublish({}, directory, "alias.txt", bytes("wrong"), "replace"), /regular file/);
+    await assert.rejects(appendFileContent({}, directory, "alias.txt", bytesContent(bytes("wrong"))), /regular file/);
     await assert.rejects(deleteFile({}, directory, "alias.txt"), /regular file/);
     assert.equal(await fs.readFile(target, "utf8"), "original");
+  });
+});
+
+test("failed stream cleanup removes only newly created empty directories", async () => {
+  await temporary(async (directory) => {
+    await fs.mkdir(join(directory, "existing"));
+    const created: string[] = [];
+    await resolveFileParent({}, directory, "existing/a/b/item.bin", true, created);
+    assert.deepEqual(created, [join(directory, "existing", "a"), join(directory, "existing", "a", "b")]);
+    await fs.writeFile(join(directory, "existing", "a", "keep.txt"), "another writer's data");
+    await cleanupCreatedDirectories(created);
+    assert.deepEqual(await fs.readdir(join(directory, "existing", "a")), ["keep.txt"]);
+    assert.equal(await fs.readFile(join(directory, "existing", "a", "keep.txt"), "utf8"), "another writer's data");
+  });
+});
+
+test("streamed file writes retry short writes without rereading their source", async (t) => {
+  await temporary(async (directory) => {
+    const originalOpen = fs.open;
+    let writes = 0;
+    const open = t.mock.method(fs, "open", async (...args: Parameters<typeof fs.open>) => {
+      const handle = await originalOpen(...args);
+      const originalWrite = handle.write.bind(handle);
+      t.mock.method(handle, "write", async (chunk: Uint8Array, offset: number, length: number, position: number | null) => {
+        writes += 1;
+        return originalWrite(chunk, offset, Math.min(length, 2), position);
+      });
+      return handle;
+    });
+    try {
+      let opened = 0;
+      await atomicPublish({}, directory, "item.txt", {
+        stream() {
+          opened += 1;
+          assert.equal(opened, 1);
+          return new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(bytes("12345"));
+              controller.enqueue(new Uint8Array());
+              controller.enqueue(bytes("678"));
+              controller.close();
+            }
+          });
+        }
+      }, "create");
+      assert.equal(writes, 5);
+      assert.equal(await fs.readFile(join(directory, "item.txt"), "utf8"), "12345678");
+      await appendFileContent({}, directory, "item.txt", bytesContent(bytes("90abc")));
+      assert.equal(writes, 8);
+      assert.equal(await fs.readFile(join(directory, "item.txt"), "utf8"), "1234567890abc");
+    } finally {
+      open.mock.restore();
+    }
+  });
+});
+
+test("a failed destination cancels its one-shot source and does not publish partial data", async (t) => {
+  await temporary(async (directory) => {
+    await atomicPublish({}, directory, "item.txt", bytes("original"), "create");
+    const originalOpen = fs.open;
+    const open = t.mock.method(fs, "open", async (...args: Parameters<typeof fs.open>) => {
+      const handle = await originalOpen(...args);
+      t.mock.method(handle, "write", async () => { throw new Error("disk full"); });
+      return handle;
+    });
+    let cancelled = false;
+    try {
+      await assert.rejects(atomicPublish({}, directory, "item.txt", {
+        stream() {
+          return new ReadableStream<Uint8Array>({
+            pull(controller) { controller.enqueue(bytes("replacement")); },
+            cancel(reason) { assert.match(String(reason), /disk full/); cancelled = true; }
+          }, { highWaterMark: 0 });
+        }
+      }, "replace"), /disk full/);
+      assert.equal(cancelled, true);
+      assert.equal(await fs.readFile(join(directory, "item.txt"), "utf8"), "original");
+      assert.deepEqual(await fs.readdir(directory), ["item.txt"]);
+    } finally {
+      open.mock.restore();
+    }
   });
 });
 

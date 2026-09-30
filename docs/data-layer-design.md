@@ -52,7 +52,7 @@ Data 统一由 `id`、`model` 和 `payload` 组成。这是数据层公共接口
 即使当前运行环境没有某个 ModelRuntime 或 PayloadSerializer，数据层仍应当能够：
 
 - 保存 Data；
-- 按业务提供的 `model` 和 `id` 获取 Data；
+- 按业务提供的 `storeId` 和 `id` 获取 Data；
 - 复制或导出原始 Payload；
 - 展示 `model` 和 `contentType`；
 - 明确报告“当前不能反序列化”或“当前不能按模型读取”。
@@ -74,7 +74,7 @@ type DataId = string;
 type ModelRef = DataId;
 
 type Data = {
-  /** 在所属数据空间内稳定且唯一的身份。 */
+  /** 在所属 Store 内稳定且唯一的身份。 */
   id: DataId;
 
   /** 描述本 Data 领域语义的 Model Data id。 */
@@ -103,10 +103,10 @@ type Data = {
 
 | DDD 概念 | 数据层表达 | 身份与生命周期 |
 | --- | --- | --- |
-| 聚合根 | 通常是一条独立 Data | 具有全局 `DataId` 和独立生命周期 |
+| 聚合根 | 通常是一条独立 Data | 具有 Store 内唯一的 `DataId` 和独立生命周期 |
 | 聚合内子实体 | Data Payload 内的嵌套结构 | 可以有聚合内局部身份，生命周期从属于聚合根 |
 | 值对象 | Data Payload 内的嵌套值 | 没有身份，按值判断相等，生命周期从属于拥有者 |
-| 跨聚合引用 | 指向另一条 Data 的引用 | 由业务确定目标模型，按 `DataId` 读取 |
+| 跨聚合引用 | 指向另一条 Data 的引用 | 由业务确定目标 Store，按 `DataId` 读取 |
 
 在上面的订单例子中，订单是聚合根，对应一条 Data；订单明细是子实体，可以有订单内的局部 id；明细的单价是 `Money` 值对象，包含金额和币种，没有独立身份。明细和单价都保存在订单的 Payload 中，生命周期从属于订单。程序可通过订单的 `DataId` 读取订单，再通过反射访问其中的明细和单价；嵌套位置不赋予它们独立的 Data 身份。
 
@@ -123,14 +123,16 @@ type Payload = {
 };
 
 interface PayloadContent {
-  /** 每次调用都返回一条从内容起点开始读取的新流。 */
+  /** 获取内容的读取流，仅保证一次消费，不保证重新打开或重放。 */
   stream(): ReadableStream<Uint8Array>;
 }
 ```
 
 `contentType` 描述内容的格式及解释方式，取值沿用标准 MIME 类型；`content` 提供统一的内容读取能力，但不暴露字节存放在哪里。
 
-`content.stream()` 每次打开同一内容的新流。调用者通过流读取内容，实际存储方式由 DataStore 决定。
+内容可以在读取过程中持续产生。调用方不能依赖重复调用 `stream()` 重放内容；再次读取已保存的数据，应重新调用 `store.get()`。内存等来源可以支持重放，但这不是公共协议的保证。重新 `get()` 也不保证读到同一版本。
+
+流暂时没有内容时等待读取；生产方正常关闭、剩余内容读完后，以 `done: true` 表示 EOF。流错误和取消不是正常结束。需要多遍读取或重试时，由调用方重新取得输入来源或显式缓存内容。
 
 需要一次性读取完整内容时，可使用 `readAll()` 将流中的字节合并为一个 `Uint8Array`：
 
@@ -253,7 +255,9 @@ interface ModelRuntimeRegistry {
 
 ## 5. Data 的持久化
 
-数据层提供两种持久化方式：DataStore 保存已序列化的 Data，ValueStore 直接保存模型的值实例。每个 Store 实例通过 `model` 绑定一个具体模型，只存取该模型的数据。
+数据层提供两种持久化方式：DataStore 保存已序列化的 Data，ValueStore 直接保存模型的值实例。每个 Store 实例通过 `model` 绑定一个具体模型，只存取该模型的数据；同一个模型可以绑定多个独立 Store。
+
+Store 使用业务指定的 `StoreId` 标识，在 Project 内唯一。它不是模型 ID，也不是物理目录；同一模型的当前存储、归档存储可以分别使用不同的 StoreId。
 
 ### 5.1 DataStore：保存和读取完整 Data
 
@@ -262,19 +266,23 @@ interface ModelRuntimeRegistry {
 接口及相关类型如下，其中 UpdateOptions、DeleteOptions、ListOptions 和 ListResult 由两种 Store 共用：
 
 ```ts
+type StoreId = string;
+
 interface DataStore {
   readonly kind: "DataStore";
+  /** 业务指定、Project 内唯一的 Store 身份。 */
+  readonly id: StoreId;
   /** 此 Store 唯一绑定的模型。 */
   readonly model: ModelRef;
 
   get(context: Context, id: DataId): Promise<StoredData | undefined>;
   has(context: Context, id: DataId): Promise<boolean>;
-  create(context: Context, data: Data): Promise<StoredData>;
+  create(context: Context, data: Data): Promise<void>;
   update(
     context: Context,
     data: Data,
     options?: UpdateOptions,
-  ): Promise<StoredData>;
+  ): Promise<void>;
   delete(
     context: Context,
     id: DataId,
@@ -316,7 +324,11 @@ DataStore 保存四项信息：
 
 例如，订单的 `id` 为 `order-001`，`model` 为 `order-model`，Payload 保存 `application/json` 和 `{"items":[{"quantity":2}]}` 的 JSON 字节。`id` 和 `model` 随 Data 一起保存，不需要放进订单的 JSON 内容中。
 
-DataStore 保存成功或按 ID 读到记录时，返回 StoredData。其中的 `data` 保留完整的模型 ID、内容类型和内容字节；其余字段是存储管理信息：
+`create/update` 各消费输入 Payload 一次，可以边读边写，不要求先将全部内容聚合到内存。正常 EOF 且保存完成后 Promise 成功；流错误、取消或存储失败时拒绝。不自动重放输入，也不回传保存的数据；需要读取内容或记录信息时，调用 `get()`。
+
+持续传输不代表 EOF 前内容已对其他读取者可见，可见性由实现声明。操作报错也不通用地保证没有任何写入，调用方不能在来源已被消费后直接重试。
+
+DataStore 按 ID 读到记录时返回 StoredData。其中的 `data` 保留完整的模型 ID、内容类型和内容字节；其余字段是存储管理信息：
 
 ```ts
 type StoredData = {
@@ -337,6 +349,21 @@ type StoredData = {
 
 DataStore 不负责解释模型或反序列化内容。Data 的各项信息可以保存在同一条数据库记录中，也可以由实现分别存放；对调用方始终是一条完整 Data 的存取。
 
+#### 可选追加能力
+
+追加保留已有内容，仅在末尾写入新的字节，不属于所有 DataStore 必须支持的能力：
+
+```ts
+interface AppendableDataStore extends DataStore {
+  /** data.payload 只包含此次新增的字节。 */
+  append(context: Context, data: Data): Promise<void>;
+}
+```
+
+目标记录必须存在，输入的 `model` 和 `contentType` 必须与现有记录一致。`append()` 不隐式创建记录，不补换行、不合并 JSON；消费输入流至正常 EOF 并完成保存后返回。失败或取消可能留下已追加的部分，不保证回滚，不能自动重试。公共接口不保证不同追加操作之间的整流排序或不交错；并发行为及追加过程中的读取可见性由实现声明。
+
+需要追加的业务在装配时检查能力；不支持追加的实现仍可用于普通创建、替换和归档复制。
+
 ### 5.2 ValueStore：直接保存和读取值实例
 
 ValueStore 接收 `id` 和值实例，使用自身绑定的模型完成存储映射。
@@ -344,6 +371,8 @@ ValueStore 接收 `id` 和值实例，使用自身绑定的模型完成存储映
 ```ts
 interface ValueStore {
   readonly kind: "ValueStore";
+  /** 与 DataStore 共用 Project 内的 StoreId 命名空间。 */
+  readonly id: StoreId;
   /** 此 Store 唯一绑定的模型。 */
   readonly model: ModelRef;
 
@@ -404,24 +433,26 @@ type StoredValue = {
 
 ValueStore 不保存原始 Payload 的格式和字节。需要导出为 Data 时，由调用方选择内容类型，通过 PayloadSerializer 序列化值实例，再与记录的 `id` 和 `store.model` 组成 Data。
 
-### 5.3 StoreRegistry：按模型 ID 管理 Store
+### 5.3 StoreRegistry：按 StoreId 管理 Store
 
-StoreRegistry 管理当前数据空间中已创建的 Store，按模型 ID 登记和查询：
+StoreRegistry 管理当前 Project 中已创建的 Store，按业务指定的 StoreId 登记和查询：
 
 ```ts
 interface StoreRegistry {
   register(store: DataStore | ValueStore): void;
-  get(model: ModelRef): DataStore | ValueStore | undefined;
+  get(id: StoreId): DataStore | ValueStore | undefined;
 }
 ```
 
-`register()` 按 `store.model` 登记，同一模型只能登记一个 Store，重复登记时报错。`get()` 未找到时返回 undefined。Memsphere 数据层根据存储绑定配置调用 Factory 创建 Store，并负责登记和复用；Registry 只保存和查询实例。`store.kind` 区分 DataStore（`"DataStore"`）和 ValueStore（`"ValueStore"`）。
+`register()` 按 `store.id` 登记，同一 StoreId 重复登记时报错，DataStore 与 ValueStore 共用该命名空间。`get()` 未找到时返回 undefined。Memsphere 数据层根据存储绑定配置调用 Factory 创建 Store，并负责登记和复用；Registry 只保存和查询实例。`store.kind` 区分 DataStore（`"DataStore"`）和 ValueStore（`"ValueStore"`）。
 
-业务访问数据时提供 `model` 和 `id`：Memsphere 取得该模型已准备好的 Store，再按 `id` 存取。跨数据引用同样由业务提供目标模型，数据层不维护 `DataId → Model` 索引，也不跨 Store 搜索。
+业务访问数据时提供 `storeId` 和数据的 `id`：Memsphere 取得指定 Store，再按 `id` 存取。模型由 `store.model` 确定。跨数据引用同样由业务确定目标 Store，数据层不按模型猜测存储位置，也不跨 Store 搜索。
+
+同一模型可以登记多个 Store，同一份 Data 也可以由业务保存到多个 Store。复制、迁移和跨 Store 一致性由业务层负责，不引入通用多副本或跨 Store 事务协议。
 
 ### 5.4 身份与记录版本
 
-数据的 `id` 由调用方提供，`model` 由 Store 的绑定确定。DataStore 保留完整 Data 的三元组；StoredValue 的所属模型通过 `store.model` 取得。一次保存成功后，读取到的身份、模型和内容必须属于同一次提交。
+Store 的 `id` 和数据的 `id` 均由业务提供，分别在 Project 和 Store 内唯一。StoreId 不进入 `Data = id + model + payload`；具体存储位置由 `storeId + dataId` 定位。`model` 由 Store 的绑定确定；StoredValue 的所属模型通过 `store.model` 取得。一次保存成功后，读取到的身份、模型和内容必须属于同一次提交。
 
 `revision`、`createdAt`、`createdBy`、`updatedAt` 和 `updatedBy` 均为可选字段，由对应 Store 管理，不进入 Data 或业务值实例。Store 不支持或无法取得某项信息时，可以省略该字段，不影响数据读写。`revision` 是该 Store 中的记录版本，不是模型版本。
 
@@ -429,7 +460,7 @@ interface StoreRegistry {
 
 ### 5.5 基础存取与分页列表
 
-DataStore 和 ValueStore 提供相同的基本操作，区别在于存取的是完整 Data 还是值实例：
+DataStore 和 ValueStore 提供以下基本操作。DataStore 的 `create/update` 以 Promise 成功或失败表达操作结果；ValueStore 的 `create/update` 仍返回 StoredValue。
 
 | 操作 | 含义 |
 | --- | --- |
@@ -539,7 +570,7 @@ Factory 通过 Registry 查询已登记的外部依赖 Runtime，用其 Descript
 
 ### 6.3 DataStoreFactory：自定义 Data 持久化
 
-DataStoreFactory 根据模型 ID 和存储配置，创建符合第 5.1 节接口的 DataStore。同一个 Factory 可以为不同模型创建各自的 Store。
+DataStoreFactory 根据业务指定的 StoreId、模型 ID 和存储配置，创建符合第 5.1 节接口的 DataStore。同一个 Factory 可以为同一模型或不同模型创建多个 Store。
 
 ```ts
 interface DataStoreFactory {
@@ -548,17 +579,18 @@ interface DataStoreFactory {
 
   createStore(
     context: Context,
+    id: StoreId,
     model: ModelRef,
     config: Config,
   ): Promise<DataStore>;
 }
 ```
 
-DataStore 不解释内容，创建时只需 ModelRef，不需要 ModelRuntime。返回 Store 的 `model` 必须等于传入的模型 ID。`config` 使用第 7.2 节的 Config 封装目录、连接等实现专属参数。
+DataStore 不解释内容，创建时只需 ModelRef，不需要 ModelRuntime。返回 Store 的 `id` 和 `model` 必须与参数一致。Factory 的 `id` 标识存储实现，Store 的 `id` 标识具体实例。`config` 使用第 7.2 节的 Config 封装目录、连接等实现专属参数，StoreId 不自动转成目录或路径前缀。
 
 ### 6.4 ValueStoreFactory：自定义值实例持久化
 
-ValueStoreFactory 根据模型 Runtime 和存储配置，创建符合第 5.2 节接口的 ValueStore。
+ValueStoreFactory 根据业务指定的 StoreId、模型 Runtime 和存储配置，创建符合第 5.2 节接口的 ValueStore。
 
 ```ts
 interface ValueStoreFactory {
@@ -567,13 +599,14 @@ interface ValueStoreFactory {
 
   createStore(
     context: Context,
+    id: StoreId,
     runtime: ModelRuntime,
     config: Config,
   ): Promise<ValueStore>;
 }
 ```
 
-Factory 可通过 `runtime.descriptor` 获取模型结构，通过 `runtime.reflect()` 操作值实例。返回 Store 的 `model` 必须等于 `runtime.descriptor.id`，不再重复传入模型 ID。
+Factory 可通过 `runtime.descriptor` 获取模型结构，通过 `runtime.reflect()` 操作值实例。返回 Store 的 `id` 必须与参数一致，`model` 必须等于 `runtime.descriptor.id`，不再重复传入模型 ID。
 
 ValueStore 实现负责值实例与存储结构的映射，以及恢复与 Runtime 兼容的值实例；不支持某种结构或值类型时，应明确报错。
 
@@ -677,7 +710,7 @@ undefined 只表示缺失，不是标量；显式 null 是有效值，读取不�
 
 这里的查询面向值实例内部的结构；存储层的业务查询由第 5.6 节的业务读视图承担。
 
-跨 Data 引用需要显式解引用并检查权限。目标模型由模型声明或业务确定，Memsphere 根据模型和 ID 取得对应 Store，再读取目标数据；查询不隐式跨越 Data 边界。
+跨 Data 引用需要显式解引用并检查权限。目标模型由模型声明或业务确定，具体 Store 由业务指定；Memsphere 根据 StoreId 取得 Store，再按 DataId 读取目标数据。查询不隐式跨越 Data 边界。
 
 ### 7.5 Serializer、ValueStore 与 Runtime 的兼容性
 
@@ -691,7 +724,7 @@ DataManager 是 Project 级的数据管理入口，使用共享的 DataExtension
 
 - `getModel(context, ref)`：加载并解码模型定义，返回 Model；
 - `getRuntime(context, ref)`：准备模型及其依赖，创建或复用 ModelRuntime；
-- `getStore(context, model)`：根据存储绑定创建或复用 DataStore、ValueStore。
+- `getStore(context, id)`：根据 StoreId 对应的存储绑定创建或复用 DataStore、ValueStore。
 
 Registry 查询未找到时返回 undefined，DataManager 的准备操作失败时抛错。同一 Manager 内并发准备同一实例时合并创建，成功后才登记；不同 Project 的 Runtime 和 Store 相互隔离。DataStore 的创建不要求模型 Runtime，ValueStore 的创建则需要先准备 Runtime。接口见 [data-manager.ts](../src/data/api/data-manager.ts)，默认实现为 DefaultDataManager。
 
@@ -709,22 +742,35 @@ Memsphere 在反射访问值实例前准备并注册所需的 Runtime。业务�
 
 元模型的 Runtime 也由 Factory 创建。Memsphere 使用标准扩展提供的已解码内置定义，调用匹配该元模型 ID 的专用 Factory，再登记返回的 Runtime。这一步不经过依赖该 Runtime 的反序列化流程；内置创建输入的提供方式及元信息表示见第 13 章待决问题。
 
-本例的订单模型定义保存在绑定 `json-schema/draft-07` 的 DataStore 中，订单值实例则由绑定 `order-model` 的 Store 保存。
+本例的订单模型定义保存在业务指定的 `model-definitions` DataStore 中，其绑定模型为 `json-schema/draft-07`；订单值实例则由 `orders` Store 保存，其绑定模型为 `order-model`。
 
 以尚未登记的 `order-model` 为例，普通无环依赖的准备过程如下：
 
-1. 按第 8.3 节准备绑定 `json-schema/draft-07` 的 DataStore，再通过 `get(context, "order-model")` 加载模型定义的 Data，并检查其 ID 和元模型与请求一致。
+1. 按第 8.3 节准备 `model-definitions` DataStore，再通过 `get(context, "order-model")` 加载模型定义的 Data，并检查其 ID 和元模型与请求一致。
 2. 准备或复用 `json-schema/draft-07` 的 Runtime，使用它的 Descriptor 和匹配模型 Payload.contentType 的 Serializer，反序列化订单模型定义，组成 Model。
 3. 准备并注册订单模型依赖的其他 Runtime。
 4. 优先选择 `target.model` 为 `order-model` 的 Factory；没有专用 Factory 时，选择 `target.metaModel` 为 `json-schema/draft-07` 的 Factory，调用 `createRuntime(context, model, registry)`。
 5. 检查返回 Runtime 的模型 ID，再调用 `registry.register(runtime)` 登记并复用。
 
-### 8.3 根据模型绑定创建 Store
+### 8.3 根据存储绑定创建 Store
 
-存储绑定配置指定模型、Store 类型、Factory 标识及该实现所需的配置。例如：
+存储绑定指定 StoreId、模型、Store 类型、Factory 标识及该实现所需的配置：
+
+```ts
+type StoreBinding = {
+  id: StoreId;
+  model: ModelRef;
+  kind: "DataStore" | "ValueStore";
+  factory: string;
+  config: Config;
+};
+```
+
+以下 JSON 表达配置内容，装配时将 `config` 包装为 Config：
 
 ```json
 {
+  "id": "orders",
   "model": "order-model",
   "kind": "DataStore",
   "factory": "memsphere/filesystem",
@@ -734,28 +780,28 @@ Memsphere 在反射访问值实例前准备并注册所需的 Runtime。业务�
 }
 ```
 
-Memsphere 按 `kind` 和 `factory` 选择已注册的 Factory，将 `config` 包装为 Config：
+Memsphere 按 `kind` 和 `factory` 选择已注册的 Factory：
 
-- DataStore：调用 `createStore(context, model, config)`，不要求先准备模型 Runtime。
-- ValueStore：先准备该模型的 Runtime，再调用 `createStore(context, runtime, config)`。
+- DataStore：调用 `createStore(context, id, model, config)`，不要求先准备模型 Runtime。
+- ValueStore：先准备该模型的 Runtime，再调用 `createStore(context, id, runtime, config)`。
 
-创建成功后，Memsphere 检查 Store 的 `kind` 和 `model` 与绑定配置一致，再调用 `storeRegistry.register(store)` 登记并复用。同一个 Factory 可服务多个模型；同一数据空间内，一个模型仍只绑定一个 Store。缺少绑定或 Factory 时报告配置错误。
+创建成功后，Memsphere 检查 Store 的 `id`、`kind` 和 `model` 与绑定配置一致，再调用 `storeRegistry.register(store)` 登记并复用。Manager 以 StoreId 缓存 Store，以 ModelRef 缓存 Runtime；同一模型的多个 Store 可共用 Runtime。缺少绑定或 Factory 时报告配置错误。
 
 ## 9. 读取流程
 
 ### 9.1 从 DataStore 读取
 
-业务提供 `model` 和 `id`，Memsphere 按第 8 章完成所需 Store 和 Runtime 的准备，再读取数据：
+业务提供 `storeId` 和数据的 `id`，Memsphere 按第 8 章准备 Store；需要解释内容时，再准备其模型 Runtime：
 
-1. 取得绑定该模型的 DataStore，调用 `get(context, id)` 得到 StoredData，并取出其中的 Data。
+1. 取得指定 DataStore，调用 `get(context, id)` 得到 StoredData，并取出其中的 Data。
 2. 按 `data.payload.contentType` 选择 Serializer，调用 `deserialize(context, runtime.descriptor, data.payload.content)` 得到值实例。
 3. 调用 `runtime.reflect(value)` 得到 Value，供基础反射操作或查询扩展使用。
 
-Context 传递到反序列化和流读取，取消时释放读取资源。
+仅需原始内容时可直接消费 Payload 流，无需 Serializer 或 Runtime。每次取得的 Payload 仅保证一次消费；再次读取需重新 `get()`。Context 传递到反序列化和流读取，取消时释放读取资源。
 
 ### 9.2 从 ValueStore 读取
 
-Memsphere 准备好业务指定模型的 ValueStore 和 Runtime 后，再按 `id` 读取：
+Memsphere 准备好业务指定 StoreId 的 ValueStore 及其模型 Runtime 后，再按 `id` 读取：
 
 1. 调用 `valueStore.get(context, id)` 得到 StoredValue，其中的 `value` 已是值实例，无需反序列化。
 2. 调用 `runtime.reflect(stored.value)` 得到 Value，供基础反射操作或查询扩展使用。
@@ -764,13 +810,14 @@ Memsphere 准备好业务指定模型的 ValueStore 和 Runtime 后，再按 `id
 
 ## 10. 写入流程
 
-运行步骤产出值实例后，由业务确定数据的 `model`、`id` 以及创建或更新的操作意图。Memsphere 按第 8 章准备并取得该模型的 Store，再按其 `kind` 选择对应的写入路径。缺少存储绑定或所需扩展时明确报错，不擅自选择其他存储实现。
+运行步骤产出值实例后，由业务确定目标 `storeId`、数据的 `model`、`id` 以及创建或更新的操作意图。Memsphere 按第 8 章准备指定 Store，再按其 `kind` 选择对应的写入路径。缺少存储绑定或所需扩展时明确报错，不擅自选择其他存储实现。
 
 ### 10.1 写入 DataStore
 
 1. Memsphere 按第 8.2 节准备模型 Runtime，并选择 PayloadSerializer。
 2. 调用 `serialize(context, runtime.descriptor, value)` 得到 PayloadContent，以 Serializer 的 `contentType` 组成 Payload。
 3. 与 `id`、`model` 组成 Data；新增时调用 `dataStore.create(context, data)`，更新已有记录时调用 `dataStore.update(context, data, options)`。
+4. Store 消费 Payload 流至 EOF，并完成保存后返回；需要读取记录信息时另行调用 `get()`，不能将后续查询当作本次写入的版本回执。
 
 已有 Payload 的文件等产物可直接从第 3 步开始，无需先反序列化再序列化。
 
@@ -778,26 +825,21 @@ Memsphere 准备好业务指定模型的 ValueStore 和 Runtime 后，再按 `id
 
 新增时调用 `valueStore.create(context, id, value)`，更新已有记录时调用 `valueStore.update(context, id, value, options)`。由取得的 ValueStore 按照绑定的模型完成值实例到存储结构的映射。
 
-保存成功后，业务在 Run 产出记录或产出绑定中保留数据的 `model` 和 `id`，供后续读取定位 Store 和记录。
+保存成功后，业务在产出记录或产出绑定中管理 `storeId` 和数据的 `id`，供后续定位 Store 和记录；模型关系仍由 Data 和 Store 的 `model` 表达。具体 Run 接入流程另行实施。
 
 ## 11. Artifact 如何进入 Data 抽象
 
-Artifact 不是与 Data 并列的持久化对象，而是一种领域模型。
+Artifact 的文件内容可直接表达为 Data，以 raw 模型描述整体字节，不要求为内容添加结构化包装。例如：
 
 ```text
-artifact-001
-  model -> memsphere/artifact@1
-  payload -> Artifact 的结构化字段以及产出 Data 引用（model + id）
-
-output-001
-  model -> 某个具体结果模型
-  payload -> contentType + PayloadContent
+report.md
+  model -> artifact-model
+  payload -> text/markdown + PayloadContent
 ```
 
-这样可以区分：
+Run 业务层管理产物清单、阶段和关联关系；DataStore 负责按 ID 保存和读取内容，不通过 `list()` 推断业务归属。当前存储与归档存储可以复用同一 Artifact 模型，使用不同 StoreId；搬运与跨 Store 一致性由 Run 业务层组织。
 
-- **Artifact**：某个 Run step 的交付物、来源、说明和关联关系；
-- **Output Data**：实际生成的文本、文件、图片或领域对象。
+这一节描述接入方向，不代表现有 Run、归档或命令已经接入数据层；具体范围及交付要求由对应需求契约管理。
 
 ## 12. 示例
 
@@ -829,7 +871,7 @@ const image: Data = {
 };
 ```
 
-`contentFromStream` 接收流工厂，每次调用都重新打开同一份图片内容。
+`contentFromStream` 是示意性辅助函数，接收内容来源；公共调用方只消费一次，不依赖流工厂可重复打开同一内容。
 
 `core/image` 可以只将整张图片作为不透明值，也可以进一步描述宽、高、色彩空间等可读取逻辑字段。JPEG 负责表示，`core/image` 负责领域含义；两者不是同一个概念。
 
@@ -869,7 +911,7 @@ const extension: DataExtension = {
 3. 同一模型的 Store 迁移与注册更新规则；
 4. Data reference 在 JSON 等 Payload 中的标准表示；
 5. 路径访问与查询扩展的接口、注册方式、结果形式，以及跨 Data 引用的解引用、深度限制和循环处理；
-6. 两种 Store 的跨记录事务、内容回收和备份机制；
+6. 单个 Store 的跨记录事务、内容回收和备份机制；
 7. 模型版本、快照及 Runtime 的更新与重建规则；
 8. 业务读视图的扩展注册、查询契约、变更订阅与重建机制；
 9. Model 演化、实例升级和历史 Run 的只读兼容；

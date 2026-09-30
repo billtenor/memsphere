@@ -189,12 +189,12 @@ test("raw models share a Runtime standard while retaining separate Stores and ex
       extensions: new DefaultDataExtensionRegistry([rawExtension, filesystemDataStoreExtension]),
       models: [{ model: model({}, "Artifact") }, { model: model({}, "Log") }],
       stores: ["Artifact", "Log"].map(id => ({
-        model: id, kind: "DataStore" as const, factory: "memsphere/filesystem",
+        id: `${id}-store`, model: id, kind: "DataStore" as const, factory: "memsphere/filesystem",
         config: new Config({ directory: join(directory, id) })
       }))
     });
-    const artifactStore = await manager.getStore({}, "Artifact");
-    const logStore = await manager.getStore({}, "Log");
+    const artifactStore = await manager.getStore({}, "Artifact-store");
+    const logStore = await manager.getStore({}, "Log-store");
     if (artifactStore.kind !== "DataStore" || logStore.kind !== "DataStore") throw new Error("Expected raw Stores");
     const id = "same.txt";
     for (const [store, text] of [[artifactStore, "artifact"], [logStore, "log"]] as const) {
