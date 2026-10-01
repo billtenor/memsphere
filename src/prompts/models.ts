@@ -159,6 +159,7 @@ export type RunCurrentStepPromptModel = {
   step:
     | {
         kind: "schema_finalization";
+        stepRefArgument: string;
         artifactName: string;
         completed: number;
         total: number;

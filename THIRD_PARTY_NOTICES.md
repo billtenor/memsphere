@@ -12,6 +12,7 @@ summary; the license distributed with each package is authoritative.
 | Package | Version | License | Upstream |
 | --- | ---: | --- | --- |
 | `@agentclientprotocol/sdk` | 1.2.1 | Apache-2.0 | [agentclientprotocol/typescript-sdk](https://github.com/agentclientprotocol/typescript-sdk) |
+| `ajv` | 8.20.0 | MIT | [ajv-validator/ajv](https://github.com/ajv-validator/ajv) |
 | `commander` | 12.1.0 | MIT | [tj/commander.js](https://github.com/tj/commander.js) |
 | `cross-spawn` | 7.0.6 | MIT | [moxystudio/node-cross-spawn](https://github.com/moxystudio/node-cross-spawn) |
 | `handlebars` | 4.7.9 | MIT | [handlebars-lang/handlebars.js](https://github.com/handlebars-lang/handlebars.js) |
@@ -24,6 +25,10 @@ summary; the license distributed with each package is authoritative.
 
 | Package | Version | License | Introduced by | Upstream |
 | --- | ---: | --- | --- | --- |
+| `fast-deep-equal` | 3.1.3 | MIT | `ajv` | [epoberezkin/fast-deep-equal](https://github.com/epoberezkin/fast-deep-equal) |
+| `fast-uri` | 3.1.8 | BSD-3-Clause | `ajv` | [fastify/fast-uri](https://github.com/fastify/fast-uri) |
+| `json-schema-traverse` | 1.0.0 | MIT | `ajv` | [epoberezkin/json-schema-traverse](https://github.com/epoberezkin/json-schema-traverse) |
+| `require-from-string` | 2.0.2 | MIT | `ajv` | [floatdrop/require-from-string](https://github.com/floatdrop/require-from-string) |
 | `minimist` | 1.2.8 | MIT | `handlebars` | [minimistjs/minimist](https://github.com/minimistjs/minimist) |
 | `neo-async` | 2.6.2 | MIT | `handlebars` | [suguru03/neo-async](https://github.com/suguru03/neo-async) |
 | `source-map` | 0.6.1 | BSD-3-Clause | `handlebars` | [mozilla/source-map](https://github.com/mozilla/source-map) |

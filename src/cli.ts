@@ -47,6 +47,7 @@ import {
   runEnterSchemaCommand,
   runArtifactContractShowCommand,
   runArtifactShowCommand,
+  runArtifactExportCommand,
   runBindingShowCommand,
   runBindingUpdateCommand,
   runRepeatCommand,
@@ -396,6 +397,15 @@ runArtifact
 const runArtifactContract = runArtifact
   .command("contract")
   .description("Inspect the frozen contract for an Artifact.");
+
+runArtifact
+  .command("export")
+  .description("Save a file Artifact to a local working copy.")
+  .requiredOption("--run <id>", "run id")
+  .requiredOption("--step <ref>", "step ref from run show")
+  .requiredOption("--file <path>", "local destination")
+  .option("--force", "overwrite the local destination")
+  .action(runArtifactExportCommand);
 
 runArtifactContract
   .command("show")

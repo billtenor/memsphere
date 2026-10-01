@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { requireRunContent } from "../project/run-data.js";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   artifactReviewAssignmentId,
@@ -126,7 +126,7 @@ async function readBoundContext(binding: BoundAgentReviewSession): Promise<Artif
 
 async function expandArtifact(runsRoot: string, artifact: RunEvent["artifact"]): Promise<unknown> {
   const value = artifact.storage === "file" && artifact.path
-    ? await readFile(join(runsRoot, artifact.path), "utf8")
+    ? (await requireRunContent(runsRoot, "artifact", artifact.path)).toString("utf8")
     : artifact.value;
   return {
     name: artifact.name,

@@ -16,6 +16,7 @@ import {
 import { archiveRun } from "../archive/store.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
 import { agentActivityDelta, readAgentActivitySnapshot } from "../acp/activity.js";
+import { requireRunContent } from "../project/run-data.js";
 import { detectAcpProviderInstances } from "../acp/detection.js";
 import {
   defaultAcpProviderInstance,
@@ -1965,7 +1966,7 @@ async function schemaWritingPayload(runsRoot: string, run: RunState): Promise<un
   const publicSnapshot = { ...snapshot, readOnly: run.status !== "running" };
   if (!snapshot.draft) return publicSnapshot;
   try {
-    const content = await readFile(snapshot.draft.filePath, "utf8");
+    const content = (await requireRunContent(runsRoot, "artifact", snapshot.draft.path)).toString("utf8");
     return {
       ...publicSnapshot,
       draft: {
@@ -2336,7 +2337,8 @@ async function hydrateArtifactContent(
 ): Promise<void> {
   if (artifact.storage === "file" && artifact.path && isTextArtifactFormat(artifact.format.name)) {
     try {
-      artifact.content = await readFile(resolveRunArtifactPath(runsRoot, runId, artifact.path), "utf8");
+      resolveRunArtifactPath(runsRoot, runId, artifact.path); // Keep the Run ownership guard.
+      artifact.content = (await requireRunContent(runsRoot, "artifact", artifact.path)).toString("utf8");
     } catch (error) {
       artifact.contentError = error instanceof Error ? error.message : String(error);
     }

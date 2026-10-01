@@ -20,7 +20,6 @@ Schema Finalization:
 - status: awaiting global adjustment
 - artifact: {{step.artifactName}}
 - progress: {{step.completed}}/{{step.total}}
-- managed draft: {{step.draftPath}}
 {{#if step.validation}}
 - contract validation: {{step.validation.status}}
 {{#each step.validation.issues}}
@@ -29,10 +28,12 @@ Schema Finalization:
 {{/if}}
 
 Do:
-Read the complete managed draft, edit it directly as needed, then submit that same file.
+Export the complete Artifact to a local file, read and edit that copy as needed, then report it. Do not edit managed storage directly.
+
+memsphere run artifact export --run {{runId}} --step {{step.stepRefArgument}} --file <local-file>
 
 Then:
-memsphere run report --run {{runId}} --artifact-file {{step.draftPathArgument}}
+memsphere run report --run {{runId}} --artifact-file <local-file>
 {{/ifEq}}
 {{#ifEq step.kind "repeat"}}
 
@@ -120,13 +121,13 @@ Schema Writing:
 - current field: {{step.progress.field}}
 - progress: {{step.progress.completed}}/{{step.progress.total}}
 - remaining: {{step.progress.remaining}}
-- workflow: report each field to update one managed draft; after all fields are complete, read and edit the full draft before explicitly submitting that same file.
+- workflow: report each field to update one managed Artifact; after all fields are complete, export it, read and edit the local copy, then report that copy.
 {{#if step.progress.pendingRepeatControls}}
 - repeat controls pending: {{step.progress.pendingRepeatControls}}
 {{/if}}
 - field contract: {{step.progress.contract.type}} · {{step.progress.contract.format}}
 {{#if step.progress.draftPath}}
-- managed draft: {{step.progress.draftPath}}
+- managed Artifact: {{step.progress.draftPath}}
 {{/if}}
 
 {{#ifEq step.actor "human"}}Ask the Human to fill:{{else}}Fill:{{/ifEq}}

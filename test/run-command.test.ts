@@ -548,7 +548,7 @@ test("Schema field output shows production constraints and progress without perm
   assert.match(output, /Current Procedure Step:/);
   assert.match(output, /Schema Writing:/);
   assert.match(output, /current field: summary/);
-  assert.match(output, /workflow: report each field to update one managed draft/);
+  assert.match(output, /workflow: report each field to update one managed Artifact/);
   assert.match(output, /field contract: string · markdown/);
   assert.match(output, /Field Definition:\n- A complete delivery\.\n- Summarize the delivery\./);
   assert.match(output, /Field Asserts:\n- Include every required section\.\n- Describe the delivered result\./);
@@ -623,7 +623,7 @@ test("Schema root output uses a readable label instead of its internal node path
 
   const output = normalizeNewlines(lines.join("\n"));
   assert.match(output, /当前字段：文档标题与概述/);
-  assert.match(output, /工作方式：逐字段上报以更新同一份托管草稿/);
+  assert.match(output, /工作方式：逐字段上报以更新同一份托管产物/);
   assert.match(output, /请填写：\n文档标题与概述/);
   assert.doesNotMatch(output, /Write inline:flow\[1\]:artifact/);
 });
@@ -691,7 +691,7 @@ test("Schema overview includes the parent production contract without Review con
   assert.match(output, /action suggest: Prefer concise sections\./);
   assert.match(output, /schema: Delivery/);
   assert.match(output, /final artifact: yes/);
-  assert.match(output, /report each field to update one managed draft/);
+  assert.match(output, /report each field to update one managed Artifact/);
   assert.doesNotMatch(output, /Review|Role Binding|Permission|Vote|Decision/);
 
   const detail = buildSchemaWritingDetail(snapshot);
@@ -699,7 +699,7 @@ test("Schema overview includes the parent production contract without Review con
   assert.match(JSON.stringify(detail), /Keep nested content coherent/);
 });
 
-test("Schema finalization output points to the managed draft and exact report command", () => {
+test("Schema finalization guides export and local-copy report instead of editing managed storage", () => {
   const parentStep: NonNullable<RunState["plan"]>[number] = {
     id: "flow[1]",
     instruction: "Produce the delivery.",
@@ -742,7 +742,7 @@ test("Schema finalization output points to the managed draft and exact report co
         stepId: "flow[1]",
         schemaName: "Delivery",
         status: "awaiting_finalization",
-        path: "run-schema-final/artifacts/drafts/delivery.draft.md",
+        path: "run-schema-final/artifacts/delivery.draft.md",
         fileName: "delivery.draft.md",
         contentType: "text/markdown",
         completed: 1,
@@ -763,12 +763,12 @@ test("Schema finalization output points to the managed draft and exact report co
   }
   const output = normalizeNewlines(lines.join("\n"));
   assert.match(output, /Schema Finalization:/);
-  const expectedDraftPath = resolve("/runs", "run-schema-final", "artifacts", "drafts", "delivery.draft.md");
-  assert(output.includes(`managed draft: ${expectedDraftPath}`));
   assert.match(output, /contract validation: passed/);
-  assert.match(output, /Read the complete managed draft, edit it directly as needed/);
-  assert(output.includes("memsphere run report --run run-schema-final --artifact-file"));
-  assert(output.includes(expectedDraftPath));
+  assert.match(output, /Export the complete Artifact to a local file/);
+  assert(output.includes("memsphere run artifact export --run run-schema-final --step"));
+  assert(output.includes("schema-final#flow[1]"));
+  assert(output.includes("memsphere run report --run run-schema-final --artifact-file <local-file>"));
+  assert.doesNotMatch(output, /artifacts\/drafts|edit it directly/);
   assert.doesNotMatch(output, /Review|Permission Guidance/);
 });
 

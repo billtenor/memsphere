@@ -20,10 +20,18 @@
     ".": "./dist/index.js",
     "./artifact-validation": "./dist/artifact-validation.js",
     "./control-plane": "./dist/control-plane.js",
-    "./run": "./dist/run/store.js"
+    "./run": "./dist/run/store.js",
+    "./data": "./dist/data/index.js",
+    "./data/extensions": "./dist/data/extensions/index.js",
+    "./data/extensions/filesystem-datastore": "./dist/data/extensions/filesystem-datastore/index.js",
+    "./data/extensions/json-schema": "./dist/data/extensions/json-schema/index.js",
+    "./data/extensions/raw": "./dist/data/extensions/raw/index.js",
+    "./data/extensions/json-serializer": "./dist/data/extensions/json-serializer/index.js",
+    "./data/extensions/filesystem-json-valuestore": "./dist/data/extensions/filesystem-json-valuestore/index.js"
   },
   "files": [
     "dist",
+    "scripts/backfill-run-memory-manifest.mjs",
     "reserved-memory",
     "LICENSE",
     "NOTICE",
@@ -51,6 +59,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.2.1",
     "@phosphor-icons/core": "^2.1.1",
+    "ajv": "^8.20.0",
     "commander": "^12.1.0",
     "cross-spawn": "^7.0.6",
     "handlebars": "^4.7.9",

@@ -12,5 +12,7 @@ defines:
   - 创建 Run 时必须为全部可达 Review scope 选择 Decision Policy，并把每个 Slot 绑定到 Actor 或显式跳过；所有 Slot 均显式跳过时不发起 Artifact Review，也不要求 Project 配置 Control Plane，任一 Slot 实际绑定 Actor 时仍必须具备 Control Plane。
   - Procedure 的 Review Slot、Binding 和 Assignment 不因 Runner 受 Human 授权代提交而改变；受托提交只是当前 Human Assignment 的一种执行方式，仍遵守同一 Review Round 和结算流程。
   - Run 可以正常完成为 done，也可以由 Human 显式废弃为 abandoned；废弃保留已有 Artifact、Schema 草稿和 Review 证据。
+  - Schema 逐字段上报合成的中间 Artifact 与正式文件同由 Memsphere 管理；Agent 用 run artifact export 导出本地副本后编辑，再通过统一 run report 上报，不直接编辑托管内容。
+  - export 默认选择该步骤的中间 Artifact、当前 Review Submission 或最近已上报 Artifact；不提供历史版本选择参数，不改变 Procedure YAML 的 Artifact 契约。
   - Procedure 的合法 YAML 结构由 memsphere-procedure-schema 定义。
   - Artifact Review 浮窗按所选材料展示对应的评审内容；当前待评审产物可编辑本人当前 Assignment，前序产物只读展示接受该冻结快照的评审，无法确认对应记录的材料显示无独立评审记录。切回当前待评审产物保留未提交的本地意见。

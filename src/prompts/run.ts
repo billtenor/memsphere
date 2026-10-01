@@ -46,6 +46,7 @@ export function buildRunCurrentStepPromptModel(
       ...common,
       step: {
         kind: "schema_finalization",
+        stepRefArgument: shellQuote(`${schemaFinalization.parentFrame.memoryName}#${schemaFinalization.parentStep.id}`),
         artifactName: schemaFinalization.parentStep.artifact ?? "unknown",
         completed: schemaFinalization.draft.completed,
         total: schemaFinalization.draft.total,

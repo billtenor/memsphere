@@ -1,6 +1,12 @@
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { lstat, mkdir, readFile, readdir, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { dirname, join, sep } from "node:path";
 import { readRun, type RunState } from "../run/store.js";
+import { ensureRunWorkersExited } from "./worker-guard.js";
+import { runContentManifest, type RunContentRef } from "../run/content-manifest.js";
+import { prepareRunData, runDataStore } from "../project/run-data.js";
+import { consumeContent } from "../data/extensions/shared/payload.js";
+import type { PayloadContent } from "../data/api/payload.js";
 
 export const archiveKinds = ["runs", "changes"] as const;
 export type ArchiveKind = (typeof archiveKinds)[number];
@@ -43,6 +49,7 @@ export async function listArchived(input: { archiveRoot: string; kind?: ArchiveK
       if (!entry.isDirectory()) continue;
       const id = entry.name;
       const path = join(kindRoot, id);
+      if (kind === "runs" && !await pathExists(join(path, `${id}.json`))) continue;
       const metadata = await readArchiveMetadata(path);
       entries.push({ kind, id, path, archivedAt: metadata?.archivedAt });
     }
@@ -52,23 +59,10 @@ export async function listArchived(input: { archiveRoot: string; kind?: ArchiveK
 }
 
 export async function archiveRun(input: Pick<ArchiveRoots, "archiveRoot" | "runsRoot"> & { id: string }): Promise<ArchiveEntry> {
-  const run = await readRun(input.runsRoot, input.id);
-  ensureTerminalRun(run);
-
-  const layout = await resolveActiveRunLayout(input.runsRoot, input.id);
   const archivePath = archiveItemPath(input.archiveRoot, "runs", input.id);
-  if (await pathExists(archivePath)) throw new Error(`archive already exists: ${input.id}`);
-  await mkdir(archiveKindRoot(input.archiveRoot, "runs"), { recursive: true });
-
-  if (layout.layout === "directory") {
-    await rename(layout.path, archivePath);
-  } else {
-    await mkdir(archivePath, { recursive: true });
-    await rename(layout.path, join(archivePath, basename(layout.path)));
-  }
-
-  const metadata = await writeArchiveMetadata(archivePath, "runs", input.id, layout.layout);
-  return { kind: "runs", id: input.id, path: archivePath, archivedAt: metadata.archivedAt };
+  await transferRun(input, "archive");
+  const metadata = await readArchiveMetadata(archivePath);
+  return { kind: "runs", id: input.id, path: archivePath, archivedAt: metadata?.archivedAt };
 }
 
 export async function archiveChangeDirectory(
@@ -91,26 +85,104 @@ export async function archiveChangeDirectory(
 }
 
 export async function restoreRun(input: Pick<ArchiveRoots, "archiveRoot" | "runsRoot"> & { id: string }): Promise<RunState> {
-  const archivePath = archiveItemPath(input.archiveRoot, "runs", input.id);
-  if (!(await pathExists(archivePath))) throw new Error(`archive not found: ${input.id}`);
-
-  const metadata = await readArchiveMetadata(archivePath);
-  const layout = metadata?.layout === "legacy-file" ? "legacy-file" : "directory";
-  await mkdir(input.runsRoot, { recursive: true });
-
-  if (layout === "legacy-file") {
-    const source = join(archivePath, `${input.id}.json`);
-    const target = join(input.runsRoot, `${input.id}.json`);
-    await ensureCanMove(source, target);
-    await rename(source, target);
-    await rm(archivePath, { recursive: true, force: true });
-  } else {
-    const target = join(input.runsRoot, input.id);
-    await ensureCanMove(archivePath, target);
-    await rename(archivePath, target);
-  }
-
+  await transferRun(input, "restore");
   return readRun(input.runsRoot, input.id);
+}
+
+async function transferRun(input: Pick<ArchiveRoots, "archiveRoot" | "runsRoot"> & { id: string }, direction: "archive" | "restore"): Promise<void> {
+  if (!/^run-[a-zA-Z0-9-]+$/.test(input.id)) throw new Error(`invalid Run id: ${input.id}`);
+  const archivedRoot = archiveKindRoot(input.archiveRoot, "runs");
+  const sourceRoot = direction === "archive" ? input.runsRoot : archivedRoot;
+  const targetRoot = direction === "archive" ? archivedRoot : input.runsRoot;
+  const source = await findRunState(sourceRoot, input.id);
+  const target = await findRunState(targetRoot, input.id);
+  if (!source && !target) throw new Error(`run not found: ${input.id}`);
+  const run = (source ?? target)!.run;
+  ensureTerminalRun(run);
+  ensureRunWorkersExited(run);
+  // Do not overwrite an independently active Run with an archived terminal copy.
+  if (source && target) ensureTerminalRun(target.run);
+  const manifest = runContentManifest(run);
+  prepareRunData(input);
+  const archivePath = archiveItemPath(input.archiveRoot, "runs", input.id);
+  let metadata = await readArchiveMetadata(archivePath);
+  if (source) {
+    const present: RunContentRef[] = [];
+    for (const ref of manifest) {
+      const from = await runDataStore(sourceRoot, ref.kind);
+      const stored = await from.get({}, ref.id);
+      if (!stored) {
+        if (ref.required) throw new Error(`Run content not found: ${ref.id}`);
+        continue;
+      }
+      present.push(ref);
+      const to = await runDataStore(targetRoot, ref.kind);
+      if (await to.has({}, ref.id)) await to.update({}, stored.data);
+      else await to.create({}, stored.data);
+    }
+    for (const ref of present) {
+      const from = await (await runDataStore(sourceRoot, ref.kind)).get({}, ref.id);
+      const to = await (await runDataStore(targetRoot, ref.kind)).get({}, ref.id);
+      if (!from || !to) throw new Error(`Run content disappeared during transfer: ${ref.id}`);
+      if (from.data.payload.contentType !== to.data.payload.contentType
+        || await contentDigest(from.data.payload.content) !== await contentDigest(to.data.payload.content)) throw new Error(`Run content verification failed: ${ref.id}`);
+    }
+    let targetPath: string;
+    if (direction === "archive") {
+      await mkdir(archivePath, { recursive: true });
+      // Existing business state, saved before the status commit so legacy layout survives redo.
+      metadata ??= await writeArchiveMetadata(archivePath, "runs", input.id, source.layout);
+      targetPath = join(archivePath, `${input.id}.json`);
+    } else {
+      const layout = metadata?.layout ?? "directory";
+      targetPath = layout === "legacy-file" ? join(targetRoot, `${input.id}.json`) : join(targetRoot, input.id, `${input.id}.json`);
+      await mkdir(dirname(targetPath), { recursive: true });
+      if (layout === "directory" && metadata) await saveArchiveMetadata(join(targetRoot, input.id), metadata);
+    }
+    await rename(source.path, targetPath);
+  }
+  // After status commit, the target is authoritative. Never copy stale source remnants back.
+  for (const ref of manifest) {
+    const stored = await (await runDataStore(targetRoot, ref.kind)).get({}, ref.id);
+    if (!stored) {
+      if (ref.required || await (await runDataStore(sourceRoot, ref.kind)).has({}, ref.id)) throw new Error(`Committed Run content is missing: ${ref.id}; source retained`);
+      continue;
+    }
+    // Consume once to detect an unreadable target before deleting its source.
+    await contentDigest(stored.data.payload.content);
+  }
+  for (const ref of manifest) await (await runDataStore(sourceRoot, ref.kind)).delete({}, ref.id);
+  await rm(join(sourceRoot, input.id, ".archive.json"), { force: true });
+  await removeEmptyRunDirectories(join(sourceRoot, input.id), join(sourceRoot, input.id, "memory"));
+}
+
+async function contentDigest(content: PayloadContent): Promise<string> {
+  const hash = createHash("sha256");
+  await consumeContent({}, content, async (chunk) => { hash.update(chunk); });
+  return hash.digest("hex");
+}
+
+async function findRunState(root: string, id: string): Promise<{ path: string; layout: ArchiveLayout; run: RunState } | undefined> {
+  for (const [layout, path] of [["directory", join(root, id, `${id}.json`)], ["legacy-file", join(root, `${id}.json`)]] as const) {
+    if (await pathExists(path)) return { path, layout, run: await readRun(root, id) };
+  }
+  return undefined;
+}
+
+/** Hygiene only: remove empty directories, never recursively delete unknown content. */
+async function removeEmptyRunDirectories(path: string, memoryPath: string): Promise<void> {
+  if (!await pathExists(path)) return;
+  if (!(await lstat(path)).isDirectory()) throw new Error(`Unmanaged Run path retained: ${path}`);
+  for (const entry of await readdir(path, { withFileTypes: true })) {
+    // Old directory snapshots also copied Git placeholders, which are discardable.
+    if (entry.isFile() && entry.name === ".gitkeep" && (path === memoryPath || path.startsWith(`${memoryPath}${sep}`))) {
+      await rm(join(path, entry.name));
+      continue;
+    }
+    if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error(`Unmanaged Run file retained: ${join(path, entry.name)}`);
+    await removeEmptyRunDirectories(join(path, entry.name), memoryPath);
+  }
+  await rmdir(path);
 }
 
 function archiveKindRoot(archiveRoot: string, kind: ArchiveKind): string {
@@ -119,26 +191,6 @@ function archiveKindRoot(archiveRoot: string, kind: ArchiveKind): string {
 
 function archiveItemPath(archiveRoot: string, kind: ArchiveKind, id: string): string {
   return join(archiveKindRoot(archiveRoot, kind), id);
-}
-
-async function resolveActiveRunLayout(runsRoot: string, id: string): Promise<{ layout: ArchiveLayout; path: string }> {
-  const directoryPath = join(runsRoot, id);
-  if (await pathExists(join(directoryPath, `${id}.json`))) {
-    return { layout: "directory", path: directoryPath };
-  }
-
-  const legacyPath = join(runsRoot, `${id}.json`);
-  if (await pathExists(legacyPath)) {
-    return { layout: "legacy-file", path: legacyPath };
-  }
-
-  throw new Error(`run not found: ${id}`);
-}
-
-function ensureDone(type: ArchiveObjectType, item: { id: string; status: string }): void {
-  if (item.status !== "done") {
-    throw new Error(`only done ${type}s can be archived: ${item.id}`);
-  }
 }
 
 function ensureTerminalRun(run: Pick<RunState, "id" | "status">): void {
@@ -158,8 +210,18 @@ async function ensureCanMove(source: string, target: string): Promise<void> {
 
 async function writeArchiveMetadata(path: string, kind: ArchiveKind, id: string, layout: ArchiveLayout): Promise<ArchiveMetadata> {
   const metadata = { kind, id, archivedAt: new Date().toISOString(), layout };
-  await writeFile(join(path, ".archive.json"), `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+  await saveArchiveMetadata(path, metadata);
   return metadata;
+}
+
+async function saveArchiveMetadata(path: string, metadata: ArchiveMetadata): Promise<void> {
+  const temporary = join(path, `.archive.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+    await rename(temporary, join(path, ".archive.json"));
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 async function readArchiveMetadata(path: string): Promise<ArchiveMetadata | undefined> {

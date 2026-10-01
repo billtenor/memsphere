@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -37,6 +37,16 @@ async function silently(action: () => Promise<void>): Promise<void> {
   } finally {
     console.log = original;
   }
+}
+
+async function relativeFiles(root: string, prefix = ""): Promise<string[]> {
+  const files: string[] = [];
+  for (const entry of await readdir(join(root, prefix), { withFileTypes: true })) {
+    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) files.push(...await relativeFiles(root, path));
+    else if (entry.isFile()) files.push(path);
+  }
+  return files.sort();
 }
 
 test("Managed Run can start from a validated active ChangeSet without publishing it", async () => {
@@ -97,7 +107,10 @@ test("Managed Run can start from a validated active ChangeSet without publishing
       run.memoryProjects?.primary.revision,
       `changeset:${edited.change.id}@${validation.checkpointDigest}`
     );
-    assert.deepEqual(run.memorySnapshot, { path: "memory" });
+    const snapshotFiles = await relativeFiles(join(registry.projects.managed.root, "runs", run.id, "memory"));
+    const actualIds = snapshotFiles.map((path) => `${run.id}/memory/${path}`);
+    assert.deepEqual(run.memorySnapshot, { path: "memory", files: actualIds });
+    assert(actualIds.includes(`${run.id}/memory/statements/candidate-rule.yaml`));
     const frozenCatalog = await createMemoryCommandCatalog(run.id);
     assert.deepEqual((await frozenCatalog.read("candidate-rule", { kind: "statements" })).asserts, [
       "Use the first checkpoint."
@@ -212,7 +225,7 @@ test("Embedded Run uses the selected ChangeSet instead of the current worktree M
     assert.equal(candidateRun?.stack[0]?.steps[0]?.instruction, "Run the ChangeSet version.");
     assert.equal(candidateRun?.memorySource?.changeId, validation.changeId);
     assert.equal(candidateRun?.memorySource?.checkpointDigest, validation.checkpointDigest);
-    assert.deepEqual(candidateRun?.memorySnapshot, { path: "memory" });
+    assert.deepEqual(candidateRun?.memorySnapshot, { path: "memory", files: [`${candidateRun!.id}/memory/procedures/candidate-run.yaml`] });
     assert.equal(
       await readFile(join(registry.projects.embedded.root, "runs", candidateRun!.id, "memory", "procedures", "candidate-run.yaml"), "utf8"),
       procedure("Run the ChangeSet version.")
