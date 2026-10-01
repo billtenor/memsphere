@@ -711,7 +711,10 @@ test("saved Home language applies to the actual model browser and model storage 
 test("Project model settings discard restores the saved directory without writing configuration", async () => withView(async (page, fixture) => {
   const directory = await settings(page, fixture);
   assert.equal(await directory.inputValue(), "models/json-schema/draft-07");
-  assert.match(await page.locator(".settings-section").innerText(), new RegExp(fixture.root));
+  assert.deepEqual(await page.locator(".settings-section dl dd").allTextContents(), [
+    fixture.root,
+    join(fixture.root, "models/json-schema/draft-07"),
+  ]);
   await directory.fill("discarded");
   page.once("dialog", dialog => dialog.accept());
   await page.getByRole("button", { name: "放弃修改", exact: true }).click();
