@@ -10,4 +10,5 @@ defines:
   - Actor 使用稳定 id、显示名称和 Permission 描述身份与可执行的 Memsphere 操作；Actor 不等同于 Procedure 中 Action 的 actor 字段。
   - Run 创建时，Actor 可以通过 Binding 承担一个或多个 Review Slot；Review Slot 表达评审视角，Actor 表达本次实际由谁参与。
   - Runner 是通用 Agent 框架托管的 Run 实际执行者，可以由主 Agent 单独构成，也可以由主 Agent 与子 Agent 共同构成。Runner 不是 Review Actor，也不需要通过 Review Slot Binding 才能执行。
+  - Human 明确要求把指定意见和 Vote 正式提交到本人当前 Artifact Review Assignment 时，Runner 可以作为受托执行者代为提交；CLI 已建立当前代提交语境且 payload 完整无歧义时，Human 的确定性“我投……”表达已经是本次授权，不需要同义二次确认；业务决定仍归 Human Actor，Runner provenance 和授权说明必须单独审计，且不因此成为 Review Actor。
   - Agent Reviewer 只能在自己的 Review Assignment 中读取 Submission、提交 Comment 和 Vote，不能接管 Run 步骤或直接修改 Artifact。

@@ -22,7 +22,7 @@ sections:
     asserts:
       - 代码变更影响用户或 agent 可见的概念、命令、YAML、流程或行为时，必须在同一需求中检查并更新对应 System Memory；纯内部重构且语义不变时可以不更新。
       - System Memory 必须修改 reserved-memory 中的源文件，并同步更新当前开发 Project 的 Memory 副本；新增、重命名或删除 System Memory 时必须同步更新 reserved-memory/manifest.json。
-      - System Memory 更新后必须同步检查 src/skills/memsphere/SKILL.md 中的冗余说明，并通过 memsphere validate 与相关测试。
+      - System Memory 更新后必须同步检查 src/skills/memsphere/SKILL.md 中的冗余说明，并通过 memsphere validate 与相关测试；存在 Memory 交付差异时还必须执行 memsphere memory change validate [change-id]，普通 validate 不能代替变更级校验。
       - 新增的用户可见能力没有对应 System Memory 时，必须补建合适的 System Memory，不得只修改代码、README 或 skill。
     sections:
       - !statement

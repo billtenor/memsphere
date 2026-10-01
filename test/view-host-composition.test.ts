@@ -1,0 +1,1405 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import test from "node:test";
+import { build } from "esbuild";
+import { chromium, type Page } from "playwright";
+import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import {
+  renderViewHostHtml,
+  viewRuntimeBundlePath,
+  viewSdkBundlePath,
+  type ViewHostBootInstance
+} from "../src/view/host.js";
+
+const sdkSource = await browserModule("../src/view/view-sdk.ts");
+const systemIconSource = await browserModule("../src/view/system-icon.ts");
+const runtimeSource = await browserRuntimeBundle();
+const referenceSource = await browserEntryBundle("../modules/org.memsphere.reference/adapter/view/index.ts");
+
+test("ViewHost applies instances in catalog order and isolates one failed instance", async () => {
+  const instances: ViewHostBootInstance[] = [
+    bootInstance("org.memsphere.memory", "memory", "/memory.js", "/"),
+    bootInstance("org.memsphere.broken", "broken", "/broken.js", "/"),
+    bootInstance("org.memsphere.settings", "settings", "/settings.js", "/")
+  ];
+  const bundles = new Map([
+    ["/memory.js", routedPlugin("memory", "/memories", "Memory")],
+    ["/broken.js", `
+      export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+        window.__compositionOrder.push("broken");
+        context.lifecycle.own(() => window.__compositionOrder.push("broken:rollback"));
+        context.router.register({ id: "broken", path: "/broken" });
+        throw new Error("broken apply");
+      }};
+    `],
+    ["/settings.js", routedPlugin("settings", "/settings", "Settings")]
+  ]);
+
+  await withPage(renderViewHostHtml("en", instances), bundles, async page => {
+    await page.addInitScript(() => {
+      (window as Window & { __compositionOrder: string[] }).__compositionOrder = [];
+    });
+  }, async page => {
+    await page.locator("#active-composed-view").waitFor();
+    assert.equal(await page.locator("#active-composed-view").textContent(), "Memory");
+    assert.deepEqual(await page.evaluate(() => (
+      window as Window & { __compositionOrder: string[] }
+    ).__compositionOrder), ["memory", "broken", "broken:rollback", "settings", "memory:mount"]);
+    assert.equal(await page.locator("html").getAttribute("data-view-host-state"), "ready");
+  }, "/memories");
+});
+
+test("Theme v1 is one Host-owned context applied to main and portal roots and cleaned on unload", async () => {
+  const instance = {
+    ...bootInstance("org.memsphere.theme", "theme", "/theme-plugin.js", "/"),
+    routeGrants: [{ id: "index", path: "/theme" }]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, themeVersion: 1, inject: ["slots", "router", "theme"], apply(context) {
+      const route = context.router.register({ id: "index", path: "/theme" });
+      window.__pluginTheme = context.theme;
+      context.theme.subscribe(() => undefined);
+      context.slots.register(slots.mainView, { id: "theme", key: route.key, value: {
+        mount({ element, portal }, renderContext) {
+          window.__mountThemeSame = renderContext.theme === window.__pluginTheme;
+          element.id = "theme-page";
+          portal.id = "theme-portal";
+          element.textContent = renderContext.theme.tokens["color.text"];
+        }
+      }});
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/theme-plugin.js", bundle]]), undefined, async page => {
+    await page.locator("#theme-page").waitFor();
+    assert.equal(await page.evaluate(() => (window as Window & { __mountThemeSame: boolean }).__mountThemeSame), true);
+    assert.equal(await page.locator("#theme-page").getAttribute("data-view-theme-version"), "1");
+    assert.equal(await page.locator("#theme-portal").getAttribute("data-view-theme-mode"), "light");
+    assert.equal(await page.locator("#theme-page").evaluate(element => getComputedStyle(element).getPropertyValue("--mem-view-color-text").trim()), "#202826");
+    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+    await page.waitForFunction(() => document.querySelector("#theme-page") === null);
+  }, "/theme");
+});
+
+test("portable Memory presentation shadows by priority and automatically falls back after mount failure", async () => {
+  const replacement = bootInstance("org.example.memory-theme", "replacement", "/replacement.js", "/");
+  const official = {
+    ...bootInstance("org.memsphere.memory", "memory", "/official-memory.js", "/"),
+    routeGrants: [{ id: "index", path: "/memories" }]
+  };
+  const bundles = new Map([
+    ["/replacement.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots"], apply(context) {
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "replacement", key: "page", priority: 100, value: {
+          async mount() { window.__replacementAttempts = (window.__replacementAttempts || 0) + 1; await Promise.resolve(); throw new Error("replacement failed"); }
+        }});
+      }};
+    `],
+    ["/official-memory.js", `
+      import { portableSlots, slots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+        const route = context.router.register({ id: "index", path: "/memories" });
+        const mount = { mount({ element }) { element.id = "official-memory-fallback"; element.textContent = "Official memory"; } };
+        context.slots.register(slots.mainView, { id: "legacy", key: route.key, when: route.activation, value: mount });
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "official", key: "page", priority: 1000, when: route.activation, value: mount });
+      }};
+    `]
+  ]);
+  await withPage(renderViewHostHtml("en", [replacement, official]), bundles, undefined, async page => {
+    await page.locator("#official-memory-fallback").waitFor();
+    assert.equal(await page.locator("#official-memory-fallback").textContent(), "Official memory");
+    assert.equal(await page.evaluate(() => (window as any).__replacementAttempts), 1);
+    assert.equal(await page.locator("html").getAttribute("data-view-host-state"), "ready");
+  }, "/memories");
+});
+
+test("presentation service exposes frozen route, selection, summaries, and official navigation actions", async () => {
+  const replacement = {
+    ...bootInstance("org.example.presentation", "presentation", "/presentation.js", "/"),
+    module: { projectId: "demo", moduleId: "org.example.presentation", moduleVersion: "1.0.0", instanceId: "presentation" }
+  };
+  const official = {
+    ...bootInstance("org.memsphere.memory", "memory", "/presentation-official.js", "/"),
+    routeGrants: [
+      { id: "detail", path: "/projects/:projectId/memories/:kind/:name" },
+      { id: "market", path: "/projects/:projectId/market" },
+      { id: "runs", path: "/projects/:projectId/tasks" }
+    ]
+  };
+  const bundles = new Map([
+    ["/presentation.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots", "presentation"], apply(context) {
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "replacement", key: "page", priority: 100, value: {
+          async mount({ element }) {
+            const memory = await context.presentation.memoryPage({ status: "ready" });
+            const runs = await context.presentation.runPage({ status: "running" });
+            window.__presentationContract = {
+              route: memory.route,
+              selectedReference: memory.selectedReference,
+              memoryFrozen: Object.isFrozen(memory) && Object.isFrozen(memory.items) && Object.isFrozen(memory.items[0]),
+              runFrozen: Object.isFrozen(runs) && Object.isFrozen(runs.runs) && Object.isFrozen(runs.runs[0])
+            };
+            const create = document.createElement("button"); create.id = "presentation-create"; create.onclick = () => memory.openCreate();
+            const start = document.createElement("button"); start.id = "presentation-start"; start.onclick = () => runs.startRun();
+            element.append(create, start);
+          }
+        }});
+      }};
+    `],
+    ["/presentation-official.js", `
+      import { portableSlots, slots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+        const detail = context.router.register({ id: "detail", path: "/projects/:projectId/memories/:kind/:name" });
+        context.router.register({ id: "market", path: "/projects/:projectId/market" });
+        context.router.register({ id: "runs", path: "/projects/:projectId/tasks" });
+        const page = { mount({ element }) { element.id = "official-presentation-page"; } };
+        context.slots.register(slots.mainView, { id: "legacy", key: detail.key, when: detail.activation, value: page });
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "official", key: "page", priority: 1000, when: detail.activation, value: page });
+      }};
+    `]
+  ]);
+  await withPage(renderViewHostHtml("en", [replacement, official]), bundles, async page => {
+    await page.route("**/api/projects/demo/memories**", route => route.fulfill({
+      contentType: "application/json", body: JSON.stringify({ memories: [{ id: "concepts/example", title: "Example" }] })
+    }));
+    await page.route("**/api/projects/demo/runs**", route => route.fulfill({
+      contentType: "application/json", body: JSON.stringify({ runs: [{ id: "run-1", name: "Run one" }] })
+    }));
+  }, async page => {
+    await page.locator("#presentation-create").waitFor();
+    const contract = await page.evaluate(() => (window as any).__presentationContract);
+    assert.equal(contract.route.pathname, "/projects/demo/memories/concepts/example");
+    assert.equal(contract.selectedReference, "concepts/example");
+    assert.equal(contract.memoryFrozen, true);
+    assert.equal(contract.runFrozen, true);
+    await page.locator("#presentation-create").click();
+    await page.waitForURL(/\/projects\/demo\/market$/);
+    await page.goBack();
+    await page.locator("#presentation-start").click();
+    await page.waitForURL(/\/projects\/demo\/tasks$/);
+  }, "/projects/demo/memories/concepts/example");
+});
+
+test("portable data renderer receives business data and falls back from an async rejection", async () => {
+  const replacement = bootInstance("org.example.memory-renderer", "replacement", "/renderer.js", "/");
+  const official = {
+    ...bootInstance("org.memsphere.memory", "memory", "/renderer-host.js", "/"),
+    routeGrants: [{ id: "detail", path: "/memories/:kind/:name" }]
+  };
+  const bundles = new Map([
+    ["/renderer.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots"], apply(context) {
+        context.slots.register(portableSlots.memoryDetailRenderer, { id: "replacement", key: "detail", priority: 100, value: {
+          async render(input) { window.__rendererInput = input.entity; throw new Error("custom detail failed"); }
+        }});
+      }};
+    `],
+    ["/renderer-host.js", `
+      import { portableSlots, slots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+        const route = context.router.register({ id: "detail", path: "/memories/:kind/:name" });
+        context.slots.register(portableSlots.memoryDetailRenderer, { id: "official-renderer", key: "detail", priority: 1000, value: {
+          render(input) { const node = document.createElement("strong"); node.id = "official-detail-renderer"; node.textContent = input.entity.title; return node; }
+        }});
+        const page = { mount({ element }) { element.append(context.slots.render(portableSlots.memoryDetailRenderer, "detail", { entity: { title: "Actual memory entity" } })); } };
+        context.slots.register(slots.mainView, { id: "legacy", key: route.key, when: route.activation, value: page });
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "official-page", key: "page", priority: 1000, when: route.activation, value: page });
+      }};
+    `]
+  ]);
+  await withPage(renderViewHostHtml("en", [replacement, official]), bundles, undefined, async page => {
+    await page.locator("#official-detail-renderer").waitFor();
+    assert.equal(await page.locator("#official-detail-renderer").textContent(), "Actual memory entity");
+    assert.deepEqual(await page.evaluate(() => (window as any).__rendererInput), { title: "Actual memory entity" });
+  }, "/memories/concepts/example");
+});
+
+test("external contribution policy rejects undeclared or mismatched cells and owns effective priority", async () => {
+  const undeclared = {
+    ...bootInstance("org.example.undeclared", "undeclared", "/undeclared.js", "/"),
+    contributionPolicy: { registrations: [], blockedCells: [] }
+  };
+  const mismatched = {
+    ...bootInstance("org.example.mismatched", "mismatched", "/mismatched.js", "/"),
+    contributionPolicy: {
+      registrations: [{ cell: "org.memsphere.memory.page.presentation@1:page", id: "declared", priority: [10, 0] as const }],
+      blockedCells: []
+    }
+  };
+  const governed = {
+    ...bootInstance("org.example.governed", "governed", "/governed.js", "/"),
+    contributionPolicy: {
+      registrations: [{ cell: "org.memsphere.memory.page.presentation@1:page", id: "declared", priority: [100, 0] as const }],
+      blockedCells: []
+    }
+  };
+  const official = {
+    ...bootInstance("org.memsphere.memory", "memory", "/policy-official.js", "/"),
+    routeGrants: [{ id: "index", path: "/memories" }]
+  };
+  const bundles = new Map([
+    ["/undeclared.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots"], apply(context) {
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "hidden", key: "page", priority: 0, value: { mount() {} } });
+      }};
+    `],
+    ["/mismatched.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots"], apply(context) {
+        context.slots.register(portableSlots.runPagePresentation, { id: "declared", key: "page", priority: 0, value: { mount() {} } });
+      }};
+    `],
+    ["/governed.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots"], apply(context) {
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "declared", key: "page", priority: 5000, value: {
+          mount({ element }) { element.id = "manifest-governed-page"; element.textContent = "Manifest wins"; }
+        }});
+      }};
+    `],
+    ["/policy-official.js", `
+      import { portableSlots, slots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+        const route = context.router.register({ id: "index", path: "/memories" });
+        const page = { mount({ element }) { element.id = "policy-official"; } };
+        context.slots.register(slots.mainView, { id: "legacy", key: route.key, when: route.activation, value: page });
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "official", key: "page", priority: 1000, when: route.activation, value: page });
+      }};
+    `]
+  ]);
+  await withPage(renderViewHostHtml("en", [undeclared, mismatched, governed, official]), bundles, undefined, async page => {
+    await page.locator("#manifest-governed-page").waitFor();
+    assert.equal(await page.locator("#policy-official").count(), 0);
+    assert.equal(await page.locator("html").getAttribute("data-view-host-state"), "ready");
+  }, "/memories");
+});
+
+test("a package that bundles the current View SDK is rejected and cannot replace the Host singleton", async () => {
+  const inline = await build({
+    stdin: {
+      contents: `
+        import { portableSlots } from "./src/view/view-sdk.ts";
+        export default { apiVersion: 1, inject: ["slots"], apply(context) {
+          context.slots.register(portableSlots.memoryPagePresentation, { id: "inline", key: "page", value: { mount({ element }) { element.id = "inline-sdk-page"; } } });
+        }};
+      `,
+      resolveDir: process.cwd(),
+      sourcefile: "generated-inline-sdk-package.js"
+    },
+    bundle: true,
+    format: "esm",
+    platform: "browser",
+    write: false,
+    logLevel: "silent"
+  });
+  const bad = {
+    ...bootInstance("org.example.inline-sdk", "inline", "/inline-sdk.js", "/"),
+    contributionPolicy: {
+      registrations: [{ cell: "org.memsphere.memory.page.presentation@1:page", id: "inline", priority: [1, 0] as const }],
+      blockedCells: []
+    }
+  };
+  const official = {
+    ...bootInstance("org.memsphere.memory", "memory", "/inline-sdk-official.js", "/"),
+    routeGrants: [{ id: "index", path: "/memories" }]
+  };
+  const bundles = new Map([
+    ["/inline-sdk.js", inline.outputFiles[0]!.text],
+    ["/inline-sdk-official.js", `
+      import { portableSlots, slots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+        const route = context.router.register({ id: "index", path: "/memories" });
+        const page = { mount({ element }) { element.id = "inline-sdk-official"; } };
+        context.slots.register(slots.mainView, { id: "legacy", key: route.key, when: route.activation, value: page });
+        context.slots.register(portableSlots.memoryPagePresentation, { id: "official", key: "page", priority: 1000, when: route.activation, value: page });
+      }};
+    `]
+  ]);
+  await withPage(renderViewHostHtml("en", [bad, official]), bundles, undefined, async page => {
+    await page.locator("#inline-sdk-official").waitFor({ state: "attached" });
+    assert.equal(await page.locator("#inline-sdk-page").count(), 0);
+    const diagnostics = await page.evaluate(() => (window as any).__memsphereViewDiagnostics());
+    assert.equal(diagnostics.instances.find((entry: any) => entry.module.moduleId === "org.example.inline-sdk")?.status, "failed");
+  }, "/memories");
+});
+
+test("Run page and Artifact renderer exhaust sync and async failures before official fallback", async () => {
+  const external = [
+    bootInstance("org.example.run-sync", "run-sync", "/run-sync.js", "/"),
+    bootInstance("org.example.run-async", "run-async", "/run-async.js", "/")
+  ];
+  const official = {
+    ...bootInstance("org.memsphere.run", "run", "/run-official.js", "/"),
+    routeGrants: [{ id: "detail", path: "/tasks/:runId" }]
+  };
+  const bundles = new Map([
+    ["/run-sync.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots"], apply(context) {
+        context.slots.register(portableSlots.runPagePresentation, { id: "page-sync", key: "page", priority: 50, value: {
+          mount({ element, portal }) { element.id = "failed-run-page-sync"; portal.id = "failed-run-portal-sync"; throw new Error("run page sync failure"); }
+        }});
+        context.slots.register(portableSlots.runArtifactRenderer, { id: "artifact-sync", key: "artifact", priority: 50, value: {
+          render() { throw new Error("run artifact sync failure"); }
+        }});
+      }};
+    `],
+    ["/run-async.js", `
+      import { portableSlots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots"], apply(context) {
+        context.slots.register(portableSlots.runPagePresentation, { id: "page-async", key: "page", priority: 60, value: {
+          async mount({ element, portal }) { element.id = "failed-run-page-async"; portal.id = "failed-run-portal-async"; await Promise.resolve(); throw new Error("run page async failure"); }
+        }});
+        context.slots.register(portableSlots.runArtifactRenderer, { id: "artifact-async", key: "artifact", priority: 60, value: {
+          async render() { await Promise.resolve(); throw new Error("run artifact async failure"); }
+        }});
+      }};
+    `],
+    ["/run-official.js", `
+      import { portableSlots, slots } from "@memsphere/view-sdk";
+      export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+        const route = context.router.register({ id: "detail", path: "/tasks/:runId" });
+        context.slots.register(portableSlots.runArtifactRenderer, { id: "artifact-official", key: "artifact", priority: 1000, value: {
+          render(input) { const node = document.createElement("pre"); node.id = "official-run-artifact"; node.textContent = input.artifact.title; return node; }
+        }});
+        const page = { mount({ element }) {
+          element.id = "official-run-page";
+          element.append(context.slots.render(portableSlots.runArtifactRenderer, "artifact", { artifact: { title: "Official artifact body" } }));
+        }};
+        context.slots.register(slots.mainView, { id: "legacy", key: route.key, when: route.activation, value: page });
+        context.slots.register(portableSlots.runPagePresentation, { id: "page-official", key: "page", priority: 1000, when: route.activation, value: page });
+      }};
+    `]
+  ]);
+  await withPage(renderViewHostHtml("en", [...external, official]), bundles, undefined, async page => {
+    await page.locator("#official-run-artifact").waitFor();
+    assert.equal(await page.locator("#official-run-artifact").textContent(), "Official artifact body");
+    assert.equal(await page.locator('[id^="failed-run-page-"]').count(), 0);
+    assert.equal(await page.locator('[id^="failed-run-portal-"]').count(), 0);
+    const diagnostics = await page.evaluate(() => (window as any).__memsphereViewDiagnostics());
+    for (const id of ["page-sync", "page-async", "artifact-sync", "artifact-async"]) {
+      const entry = diagnostics.entries.find((candidate: any) => candidate.id === id);
+      assert.equal(entry?.state, "abdicated", id);
+      assert.match(entry?.fallbackTo ?? "", /org\.memsphere\.run/, id);
+    }
+  }, "/tasks/demo-run");
+});
+
+test("UI v1 renders, updates, navigates, and disposes a standard content list", async () => {
+  const instance = {
+    ...bootInstance("org.memsphere.ui", "ui", "/ui-plugin.js", "/"),
+    routeGrants: [{ id: "index", path: "/ui", query: ["item"] }]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, uiVersion: 1, inject: ["slots", "router", "ui"], apply(context) {
+      const route = context.router.register({ id: "index", path: "/ui", query: ["item"] });
+      let filter = "";
+      const list = context.ui.contentList(renderContext => ({
+        label: { text: "Objects" },
+        filter: { label: { text: "Filter objects" }, value: filter, onInput(value) { filter = value; } },
+        empty: { title: { text: "Nothing found" } },
+        sections: [{ id: "all", items: ["one", "two"].filter(id => id.includes(filter)).map(id => ({
+          id, title: { text: id }, selected: renderContext.route.query.item === id,
+          icon: { kind: "system", name: id === "two" ? "run" : "stack" },
+          route: route.to({}, { query: { item: id } })
+        })) }]
+      }));
+      context.slots.register(slots.contentList, { id: "objects", when: route.activation, value: list });
+      context.slots.register(slots.mainView, { id: "page", key: route.key, value: { mount({ element }) { element.textContent = "UI page"; } } });
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/ui-plugin.js", bundle]]), undefined, async page => {
+    await page.getByRole("button", { name: "one", exact: true }).waitFor();
+    await page.getByRole("searchbox", { name: "Filter objects" }).fill("missing");
+    await page.getByText("Nothing found", { exact: true }).waitFor();
+    const filter = page.getByRole("searchbox", { name: "Filter objects" });
+    await filter.fill("");
+    await filter.focus();
+    await page.keyboard.type("two", { delay: 30 });
+    assert.equal(await filter.evaluate(element => element === document.activeElement), true);
+    assert.equal(await filter.inputValue(), "two");
+    assert.match(await page.getByRole("button", { name: "two", exact: true }).locator(".mem-view-system-icon").getAttribute("style") ?? "", /play-circle\.svg/);
+    await page.getByRole("button", { name: "two", exact: true }).click();
+    assert.match(page.url(), /[?&]item=two/);
+    assert.equal(await page.getByRole("button", { name: "two", exact: true }).getAttribute("aria-current"), "page");
+    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+    await page.waitForFunction(() => document.querySelector(".mem-view-content-list-root") === null);
+  }, "/ui");
+});
+
+test("Content List isolates trailing actions, renders states, and disposes nested mounts", async () => {
+  const instance = {
+    ...bootInstance("org.memsphere.list-contract", "list-contract", "/list-contract.js", "/"),
+    routeGrants: [{ id: "index", path: "/list-contract" }]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, uiVersion: 1, inject: ["slots", "router", "ui"], apply(context) {
+      const route = context.router.register({ id: "index", path: "/list-contract" });
+      let expanded = true;
+      let state = "ready";
+      let renderContext;
+      window.__listContract = { row: 0, trailing: 0, mounts: 0, disposes: 0 };
+      const details = { mount({ element }) {
+        window.__listContract.mounts += 1;
+        element.textContent = "Nested details";
+        return () => { window.__listContract.disposes += 1; };
+      }};
+      const list = context.ui.contentList(current => {
+        renderContext = current;
+        if (state === "loading") return { label: { text: "Objects" }, state, sections: [] };
+        if (state === "error") return { label: { text: "Objects" }, state, error: { state: "error", title: { text: "List failed" } }, sections: [] };
+        return { label: { text: "Objects" }, header: { eyebrow: { text: "Module" }, title: { text: "An intentionally long content list title that must not compress its refresh action" }, action: { label: { text: "Refresh list" }, icon: { kind: "system", name: "arrows-clockwise" }, run() {} } }, empty: { title: { text: "Empty" } }, sections: [{ id: "all", items: [{
+          id: "one", title: { text: "One" }, description: { text: "Third line" },
+          badges: [{ label: { text: "Ready" }, tone: "success" }, { label: { text: "Two badges" }, tone: "info" }],
+          action: { label: { text: "Open One" }, run() { window.__listContract.row += 1; } },
+          trailingActions: [{ label: { text: "Bookmark" }, icon: { kind: "system", name: "check" }, run() { window.__listContract.trailing += 1; } }],
+          expanded, details,
+          toggle: { label: { text: expanded ? "Collapse details" : "Expand details" }, icon: { kind: "system", name: "caret-down" }, async run() { expanded = !expanded; await list.update(renderContext); } }
+        }] }] };
+      });
+      window.__setListState = async next => { state = next; await list.update(renderContext); };
+      context.slots.register(slots.contentList, { id: "list", when: route.activation, value: list });
+      context.slots.register(slots.mainView, { id: "page", key: route.key, value: { mount({ element }) { element.textContent = "List contract"; } } });
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/list-contract.js", bundle]]), undefined, async page => {
+    await page.getByText("Nested details", { exact: true }).waitFor();
+    assert.equal(await page.locator(".mem-view-list-item-badges .mem-view-badge").count(), 2);
+    const refresh = page.getByRole("button", { name: "Refresh list" });
+    assert.equal(await refresh.getAttribute("data-tooltip"), "Refresh list");
+    const refreshBox = await refresh.boundingBox();
+    assert(refreshBox && Math.abs(refreshBox.width - 34) < 1 && Math.abs(refreshBox.height - 34) < 1, JSON.stringify(refreshBox));
+    const bookmark = page.getByRole("button", { name: "Bookmark" });
+    assert.equal(await bookmark.getAttribute("title"), "Bookmark");
+    assert.equal(await bookmark.getAttribute("data-tooltip"), "Bookmark");
+    await bookmark.hover();
+    assert.equal(await bookmark.evaluate(node => getComputedStyle(node, "::after").content), '"Bookmark"');
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('[aria-label="Bookmark"]')!, "::after").opacity === "1");
+    assert.equal(await bookmark.evaluate(node => getComputedStyle(node, "::after").opacity), "1");
+    await bookmark.click();
+    assert.equal(await bookmark.getAttribute("title"), "Bookmark");
+    assert.deepEqual(await page.evaluate(() => ({ row: (window as any).__listContract.row, trailing: (window as any).__listContract.trailing })), { row: 0, trailing: 1 });
+    await page.getByRole("button", { name: "Collapse details" }).click();
+    await page.getByText("Nested details", { exact: true }).waitFor({ state: "detached" });
+    assert.deepEqual(await page.evaluate(() => ({ mounts: (window as any).__listContract.mounts, disposes: (window as any).__listContract.disposes })), { mounts: 1, disposes: 1 });
+    await page.getByRole("button", { name: "Expand details" }).click();
+    assert.equal(await page.getByRole("button", { name: "Collapse details" }).getAttribute("title"), "Collapse details");
+    await page.getByText("Nested details", { exact: true }).waitFor();
+    await page.evaluate(() => (window as any).__setListState("loading"));
+    await page.locator('.mem-view-list-loading[role="status"]').waitFor();
+    assert.equal(await page.evaluate(() => (window as any).__listContract.disposes), 2);
+    await page.evaluate(() => (window as any).__setListState("error"));
+    const listError = page.getByRole("alert");
+    await listError.getByText("List failed", { exact: true }).waitFor();
+    const listContentBox = await page.locator(".mem-view-list-content").boundingBox();
+    const listErrorBox = await listError.boundingBox();
+    assert(listContentBox && listErrorBox);
+    assert(listErrorBox.x > listContentBox.x);
+    assert(listErrorBox.x + listErrorBox.width < listContentBox.x + listContentBox.width);
+    await page.evaluate(() => (window as any).__setListState("ready"));
+    await page.getByText("Nested details", { exact: true }).waitFor();
+    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+    await page.waitForFunction(() => (window as any).__listContract.disposes === 3);
+  }, "/list-contract");
+});
+
+test("UI v1 isolates an invalid content-list provider update", async () => {
+  const instance = {
+    ...bootInstance("org.memsphere.invalid-ui", "invalid-ui", "/invalid-ui.js", "/"),
+    routeGrants: [{ id: "index", path: "/invalid-ui", query: ["state"] }]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, uiVersion: 1, inject: ["slots", "router", "ui"], apply(context) {
+      const route = context.router.register({ id: "index", path: "/invalid-ui", query: ["state"] });
+      const list = context.ui.contentList(renderContext => {
+        if (renderContext.route.query.state === "invalid") return { label: { text: "broken" } };
+        return { label: { text: "Objects" }, empty: { title: { text: "Empty" } }, sections: [{ id: "all", items: [{
+          id: "break", title: { text: "Break provider" }, route: route.to({}, { query: { state: "invalid" } })
+        }] }] };
+      });
+      context.slots.register(slots.contentList, { id: "objects", when: route.activation, value: list });
+      context.slots.register(slots.mainView, { id: "page", key: route.key, value: { mount({ element }) { element.textContent = "Page stays available"; } } });
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/invalid-ui.js", bundle]]), undefined, async page => {
+    await page.getByRole("button", { name: "Break provider", exact: true }).click();
+    const diagnostic = page.locator('[data-view-slot="content.list"] .view-host-module-error');
+    await diagnostic.waitFor();
+    assert.match(await diagnostic.innerText(), /content list descriptor is invalid/);
+    assert.equal(await page.getByText("Page stays available", { exact: true }).count(), 1);
+    assert.equal(await page.getByRole("button", { name: "Break provider", exact: true }).count(), 0);
+  }, "/invalid-ui");
+});
+
+test("Reference Module keeps its standard filter focused during multi-character typing", async () => {
+  const instance: ViewHostBootInstance = {
+    ...bootInstance("org.memsphere.reference", "reference", "/reference.js", "/"),
+    config: { locale: "zh-CN" },
+    routeGrants: [
+      { id: "index", path: "/reference", query: ["item"] },
+      { id: "dialog", path: "/reference/dialog" },
+      { id: "drawer", path: "/reference/drawer" },
+    ]
+  };
+  await withPage(renderViewHostHtml("zh-CN", [instance]), new Map([["/reference.js", referenceSource]]), undefined, async page => {
+    const filter = page.getByRole("searchbox", { name: "筛选对象" });
+    await filter.focus();
+    await page.keyboard.type("研究", { delay: 30 });
+    assert.equal(await filter.evaluate(element => element === document.activeElement), true);
+    assert.equal(await filter.inputValue(), "研究");
+    assert.equal(await page.getByRole("button", { name: /研究笔记/ }).count(), 1);
+    assert.equal(await page.getByRole("button", { name: /关系画布/ }).count(), 0);
+  }, "/reference");
+});
+
+test("Reference Module exposes the shared UI catalog and restores focus after confirmation", async () => {
+  const instance = {
+    ...bootInstance("org.memsphere.reference", "reference", "/reference.js", "/"),
+    config: { locale: "zh-CN" },
+    routeGrants: [
+      { id: "index", path: "/reference", query: ["item"] },
+      { id: "dialog", path: "/reference/dialog" },
+      { id: "drawer", path: "/reference/drawer" }
+    ]
+  };
+  await withPage(renderViewHostHtml("zh-CN", [instance]), new Map([["/reference.js", referenceSource]]), undefined, async page => {
+    await page.locator('html[data-view-host-state="ready"]').waitFor();
+    await page.getByText("表单字段", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "标记收藏" }).count(), 1);
+    assert.equal(await page.locator(".mem-view-list-item-badges .mem-view-badge").count(), 2);
+    await page.getByText("由 Content List 挂载并清理的嵌套业务详情。", { exact: true }).waitFor();
+    const listStateCard = page.locator(".reference-component-card", { hasText: "列表栏状态" });
+    const listStateBox = await listStateCard.boundingBox();
+    assert(listStateBox && listStateBox.height < 180, JSON.stringify(listStateBox));
+    await page.getByRole("radio", { name: "加载", exact: true }).click();
+    await page.locator('[data-view-slot="content.list"] .mem-view-list-loading[role="status"]').waitFor();
+    await page.getByRole("radio", { name: "失败", exact: true }).click();
+    await page.getByRole("alert").getByText("列表加载失败", { exact: true }).waitFor();
+    await page.getByRole("radio", { name: "正常", exact: true }).click();
+    await page.getByText("由 Content List 挂载并清理的嵌套业务详情。", { exact: true }).waitFor();
+    await page.getByRole("button", { name: /研究笔记/ }).click();
+    assert.equal(await page.getByRole("button", { name: "标记收藏" }).count(), 0);
+    assert.equal(await page.locator('[data-item-id="canvas"] .mem-view-list-item-heading > .mem-view-badge').count(), 1);
+    await page.getByRole("button", { name: /关系画布/ }).click();
+    await page.getByRole("button", { name: "标记收藏" }).waitFor();
+    assert.equal(await page.getByRole("tablist", { name: "示例选项卡" }).count(), 1);
+    assert.equal(await page.getByRole("radiogroup", { name: "内容模式" }).count(), 1);
+    assert.equal(await page.getByRole("combobox", { name: "评审人" }).count(), 1);
+    assert.equal(await page.getByRole("progressbar").count(), 2);
+    assert.equal(await page.locator('.mem-view-feedback[data-state="read-only"]').getAttribute("aria-readonly"), "true");
+    const invalidDescription = page.getByRole("textbox", { name: "说明" });
+    assert.equal(await invalidDescription.getAttribute("aria-invalid"), "true");
+    assert.match(await invalidDescription.getAttribute("aria-describedby") ?? "", /-description$/);
+    assert.equal(await page.locator(`#${await invalidDescription.getAttribute("aria-describedby")}`).innerText(), "请填写说明");
+    const priority = page.getByRole("combobox", { name: "优先级" });
+    await priority.scrollIntoViewIfNeeded();
+    await priority.click();
+    const priorityListbox = page.getByRole("listbox", { name: "优先级" });
+    await priorityListbox.waitFor();
+    assert.equal(await priorityListbox.getByRole("option").count(), 2);
+    assert.equal(await priority.getAttribute("aria-expanded"), "true");
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    assert.equal(await priority.inputValue(), "high");
+    assert.equal(await priority.getAttribute("aria-expanded"), "false");
+    const overviewTab = page.getByRole("tab", { name: "概览" });
+    await overviewTab.focus();
+    await page.keyboard.press("ArrowRight");
+    const activityTab = page.getByRole("tab", { name: "动态" });
+    assert.equal(await activityTab.getAttribute("aria-selected"), "true");
+    const diffOption = page.getByRole("radio", { name: "差异" });
+    await diffOption.focus();
+    await page.keyboard.press("End");
+    assert.equal(await page.getByRole("radio", { name: "完整内容" }).getAttribute("aria-checked"), "true");
+    const combobox = page.getByRole("combobox", { name: "评审人" });
+    assert.equal(await combobox.getAttribute("placeholder"), "选择或搜索评审人…");
+    assert.equal(await page.locator(".mem-view-field-combobox .mem-view-combobox-caret").count(), 1);
+    await combobox.scrollIntoViewIfNeeded();
+    await combobox.focus();
+    assert.equal(await combobox.getAttribute("aria-autocomplete"), "list");
+    const listbox = page.getByRole("listbox", { name: "评审人" });
+    assert.equal(await listbox.count(), 1);
+    const assertAnchored = async () => {
+      await page.waitForFunction(() => {
+        const control = document.querySelector<HTMLElement>('[role="combobox"][aria-autocomplete="list"]');
+        const list = document.querySelector<HTMLElement>('[role="listbox"]:not([hidden])');
+        if (!control || !list) return false;
+        const controlRect = control.getBoundingClientRect();
+        const listRect = list.getBoundingClientRect();
+        return Math.abs(listRect.left - controlRect.left) < 1
+          && Math.abs(listRect.width - controlRect.width) < 1
+          && Math.abs(listRect.top - controlRect.bottom - 4) < 1;
+      });
+      const controlBox = await combobox.boundingBox();
+      const listBox = await listbox.boundingBox();
+      assert(controlBox && listBox);
+      assert(Math.abs(listBox.x - controlBox.x) < 1, JSON.stringify({ controlBox, listBox }));
+      assert(Math.abs(listBox.width - controlBox.width) < 1, JSON.stringify({ controlBox, listBox }));
+      assert(Math.abs(listBox.y - controlBox.y - controlBox.height - 4) < 1, JSON.stringify({ controlBox, listBox }));
+      assert.equal(await listbox.isVisible(), true);
+    };
+    await assertAnchored();
+    await page.setViewportSize({ width: 760, height: 900 });
+    await combobox.scrollIntoViewIfNeeded();
+    await assertAnchored();
+    await page.keyboard.press("PageDown");
+    assert.match(await combobox.getAttribute("aria-activedescendant") ?? "", /-2$/);
+    await page.keyboard.press("PageUp");
+    assert.match(await combobox.getAttribute("aria-activedescendant") ?? "", /-0$/);
+    await page.keyboard.press("Home");
+    assert.match(await combobox.getAttribute("aria-activedescendant") ?? "", /-0$/);
+    await page.keyboard.press("End");
+    assert.match(await combobox.getAttribute("aria-activedescendant") ?? "", /-2$/);
+    await page.keyboard.press("Enter");
+    assert.equal(await combobox.inputValue(), "测试工程师");
+    assert.equal(await combobox.getAttribute("aria-expanded"), "false");
+    await page.getByText("表单字段", { exact: true }).click();
+    await combobox.focus();
+    assert.equal(await listbox.getByRole("option").count(), 3);
+    await page.keyboard.press("Escape");
+    await combobox.fill("研");
+    assert.equal(await combobox.getAttribute("aria-expanded"), "true");
+    assert.match(await combobox.getAttribute("aria-activedescendant") ?? "", /-0$/);
+    await page.keyboard.press("Escape");
+    assert.equal(await combobox.getAttribute("aria-expanded"), "false");
+    await combobox.focus();
+    await page.getByText("表单字段", { exact: true }).click();
+    assert.equal(await combobox.getAttribute("aria-expanded"), "false");
+    assert.equal(await page.getByRole("progressbar", { name: "评审进度" }).count(), 1);
+    const indeterminate = page.getByRole("progressbar", { name: "后台处理中" });
+    assert.equal(await indeterminate.locator("span").count(), 1);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    assert.equal(await indeterminate.locator("span").evaluate(node => getComputedStyle(node).animationName), "none");
+    const disclosure = page.locator(".mem-view-disclosure > button");
+    assert.equal(await disclosure.getAttribute("aria-expanded"), "true");
+    assert.equal(await disclosure.locator(".mem-view-disclosure-caret").count(), 1);
+    const disclosureBox = await disclosure.boundingBox();
+    const disclosureCaretBox = await disclosure.locator(".mem-view-disclosure-caret").boundingBox();
+    assert(disclosureBox && disclosureCaretBox);
+    assert(disclosureBox.x + disclosureBox.width - disclosureCaretBox.x - disclosureCaretBox.width < 24);
+    await disclosure.click();
+    assert.equal(await disclosure.getAttribute("aria-expanded"), "false");
+    const trigger = page.getByRole("button", { name: "删除示例" });
+    await trigger.click();
+    await page.getByRole("dialog", { name: "删除这个示例？" }).waitFor();
+    await page.keyboard.press("Escape");
+    await trigger.waitFor();
+    await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "删除示例");
+  }, "/reference");
+});
+
+test("a failed builtin route renders a local retry diagnostic while the Shell stays ready", async () => {
+  const broken = bootInstance("org.memsphere.broken", "broken", "/broken.js", "/");
+  const settings = bootInstance("org.memsphere.settings", "settings", "/settings.js", "/");
+  const instances: ViewHostBootInstance[] = [
+    { ...broken, routeGrants: [{ id: "index", path: "/broken" }] },
+    { ...settings, routeGrants: [{ id: "index", path: "/settings" }] }
+  ];
+  const bundles = new Map([
+    ["/broken.js", "export default { apiVersion: 1, inject: ['router'], apply() { throw new Error('broken import contract'); } };"],
+    ["/settings.js", compositionPlugin("settings")]
+  ]);
+  await withPage(renderViewHostHtml("en", instances), bundles, undefined, async page => {
+    await page.locator('[data-view-failed-module="org.memsphere.broken"]').waitFor();
+    assert.equal(await page.locator("html").getAttribute("data-view-host-state"), "ready");
+    assert.match(await page.locator(".view-host-module-error").innerText(), /broken import contract/);
+    const settingsNavigation = page.getByRole("navigation").getByRole("button", { name: "Settings", exact: true });
+    assert.match(await settingsNavigation.locator(".mem-view-system-icon").getAttribute("style") ?? "", /gear-six\.svg/);
+    await settingsNavigation.click();
+    await page.locator("#settings-view").waitFor();
+  }, "/broken");
+});
+
+test("Shell navigation composes main/header descriptors and browser back restores the route", async () => {
+  const memory = bootInstance("org.memsphere.memory", "memory", "/memory.js", "/");
+  const instances: ViewHostBootInstance[] = [
+    {
+      ...memory,
+      routeGrants: [
+        { id: "index", path: "/memories" },
+        { id: "detail", path: "/memories/:kind" }
+      ]
+    },
+    {
+      ...bootInstance("org.memsphere.settings", "settings", "/settings.js", "/"),
+      routeGrants: [{ id: "index", path: "/settings" }]
+    }
+  ];
+  const bundles = new Map([
+    ["/memory.js", compositionPlugin("memory")],
+    ["/settings.js", compositionPlugin("settings")]
+  ]);
+
+  await withPage(renderViewHostHtml("en", instances), bundles, undefined, async page => {
+    await page.locator("#memory-index-view").waitFor();
+    assert.equal(new URL(page.url()).pathname, "/memories");
+    assert.equal(await page.locator(".view-shell-heading h1").textContent(), "Memories");
+    assert.notEqual(await page.locator(".view-shell-sidebar").evaluate(element => getComputedStyle(element).display), "none");
+    assert.doesNotMatch(await page.locator("#memsphere-view-root").innerText(), /Loading/);
+    const shellLayout = await page.evaluate(() => {
+      const sidebar = document.querySelector<HTMLElement>(".view-shell-sidebar")!;
+      const navigationItem = document.querySelector<HTMLElement>(".view-shell-navigation-item")!;
+      const footer = document.querySelector<HTMLElement>(".view-shell-footer")!;
+      return {
+        sidebarHeight: sidebar.getBoundingClientRect().height,
+        navigationItemHeight: navigationItem.getBoundingClientRect().height,
+        footerBottom: footer.getBoundingClientRect().bottom,
+        viewportHeight: window.innerHeight,
+      };
+    });
+    assert.ok(shellLayout.sidebarHeight <= shellLayout.viewportHeight + 1);
+    assert.ok(shellLayout.navigationItemHeight < 80);
+    assert.ok(shellLayout.footerBottom <= shellLayout.viewportHeight + 1);
+
+    await page.getByRole("button", { name: "Concepts" }).click();
+    await page.locator("#memory-detail-view").waitFor();
+    assert.equal(await page.locator("#memory-detail-view").textContent(), "Memory detail concepts");
+    assert.equal(new URL(page.url()).pathname, "/memories/concepts");
+    assert.equal(await page.locator(".view-shell-heading h1").textContent(), "Memory detail");
+    const breadcrumbButton = page.locator(".view-shell-breadcrumbs button");
+    assert.equal(await breadcrumbButton.textContent(), "Memories");
+    assert.deepEqual(await breadcrumbButton.evaluate(node => {
+      const style = getComputedStyle(node);
+      return { border: style.borderStyle, background: style.backgroundColor };
+    }), { border: "none", background: "rgba(0, 0, 0, 0)" });
+
+    const capture = page.getByRole("button", { name: "Capture params" });
+    await capture.click();
+    await page.waitForFunction(() => (window as Window & { __capturedKind?: string }).__capturedKind === "concepts");
+    assert.equal(await capture.getAttribute("aria-busy"), null);
+    assert.equal(await page.getByRole("button", { name: "Disabled action" }).isDisabled(), true);
+    const failing = page.getByRole("button", { name: "Failing action" });
+    await failing.click();
+    await page.waitForFunction(() => document.querySelector('[data-view-action-error="action failed"]'));
+    assert.equal(await failing.getAttribute("title"), "action failed");
+
+    await page.getByRole("button", { name: "Statements" }).click();
+    await page.waitForURL(/\/memories\/statements$/);
+    assert.equal(await page.locator("#memory-detail-view").textContent(), "Memory detail statements");
+
+    await page.getByRole("navigation").getByRole("button", { name: "Settings", exact: true }).click();
+    await page.locator("#settings-view").waitFor();
+    assert.equal(await page.locator(".view-shell-heading h1").textContent(), "Settings");
+
+    await page.goBack();
+    await page.locator("#memory-detail-view").waitFor();
+    assert.equal(new URL(page.url()).pathname, "/memories/statements");
+    assert.equal(await page.locator(".view-shell-heading h1").textContent(), "Memory detail");
+  }, "/memories");
+});
+
+test("ViewHost keeps the current page visible until the next Mount is ready", async () => {
+  const instance: ViewHostBootInstance = {
+    ...bootInstance("org.memsphere.memory", "memory", "/memory.js", "/"),
+    routeGrants: [
+      { id: "first", path: "/first" },
+      { id: "second", path: "/second" }
+    ]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const first = context.router.register({ id: "first", path: "/first" });
+      const second = context.router.register({ id: "second", path: "/second" });
+      context.slots.register(slots.navigationPrimary, { id: "second-nav", value: {
+        label: { text: "Second" }, icon: { kind: "system", name: "arrow-right" }, route: second.to()
+      }});
+      context.slots.register(slots.mainView, { id: "first", key: first.key, value: {
+        mount({ element }) { element.innerHTML = '<p id="first-page">First page</p>'; }
+      }});
+      context.slots.register(slots.mainView, { id: "second", key: second.key, value: {
+        async mount({ element }) {
+          element.innerHTML = '<p id="next-loading">Loading next page</p>';
+          await new Promise(resolve => setTimeout(resolve, 250));
+          element.innerHTML = '<p id="second-page">Second page</p>';
+        }
+      }});
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/memory.js", bundle]]), undefined, async page => {
+    await page.locator("#first-page").waitFor();
+    await page.getByRole("button", { name: "Second", exact: true }).click();
+    await page.waitForURL(/\/second$/);
+    assert.equal(await page.locator("#first-page").count(), 1);
+    assert.equal(await page.locator("#next-loading").count(), 0);
+    await page.locator("#second-page").waitFor();
+    assert.equal(await page.locator("#first-page").count(), 0);
+  }, "/first");
+});
+
+test("related Routes can update one active Mount without remounting its page", async () => {
+  const instance: ViewHostBootInstance = {
+    ...bootInstance("org.memsphere.memory", "memory", "/memory.js", "/"),
+    routeGrants: [
+      { id: "index", path: "/memories" },
+      { id: "market", path: "/market" }
+    ]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const index = context.router.register({ id: "index", path: "/memories" });
+      const market = context.router.register({ id: "market", path: "/market" });
+      const shared = {
+        mount({ element }, renderContext) {
+          window.__mountCount = (window.__mountCount || 0) + 1;
+          element.id = "shared-page";
+          element.textContent = renderContext.route.pathname;
+        },
+        update(renderContext) {
+          window.__updateCount = (window.__updateCount || 0) + 1;
+          document.querySelector("#shared-page").textContent = renderContext.route.pathname;
+        }
+      };
+      context.slots.register(slots.navigationPrimary, { id: "market-nav", value: {
+        label: { text: "Market" }, icon: { kind: "system", name: "arrow-right" }, route: market.to()
+      }});
+      context.slots.register(slots.mainView, { id: "index", key: index.key, value: shared });
+      context.slots.register(slots.mainView, { id: "market", key: market.key, value: shared });
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/memory.js", bundle]]), undefined, async page => {
+    await page.locator("#shared-page").waitFor();
+    await page.getByRole("button", { name: "Market", exact: true }).click();
+    await page.waitForURL(/\/market$/);
+    await page.waitForFunction(() => document.querySelector("#shared-page")?.textContent === "/market");
+    assert.deepEqual(await page.evaluate(() => ({
+      mounts: (window as any).__mountCount,
+      updates: (window as any).__updateCount
+    })), { mounts: 1, updates: 1 });
+  }, "/memories");
+});
+
+test("Overlay preserves the active Page portal and disposes Overlay before Page", async () => {
+  const instance: ViewHostBootInstance = {
+    ...bootInstance("org.memsphere.run", "run", "/run.js", "/"),
+    routeGrants: [
+      { id: "detail", path: "/tasks/:runId" },
+      { id: "review", path: "/tasks/:runId/artifact-reviews/:reviewId" }
+    ]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const detail = context.router.register({ id: "detail", path: "/tasks/:runId" });
+      const review = context.router.register({ id: "review", path: "/tasks/:runId/artifact-reviews/:reviewId" });
+      const events = window.__portalEvents = [];
+      context.slots.register(slots.mainView, { id: "detail", key: detail.key, value: {
+        mount({ element, portal }) {
+          events.push("page:mount");
+          window.__backgroundPortal = portal;
+          element.innerHTML = '<button id="open-review">Open review</button>';
+          element.querySelector("button").onclick = () => context.router.navigate(review.to({ runId: "run-1", reviewId: "review-1" }));
+          const marker = document.createElement("p"); marker.id = "page-portal-before"; marker.textContent = "before"; portal.append(marker);
+          return () => events.push("page:dispose");
+        }
+      }});
+      context.slots.register(slots.overlay, { id: "review", key: review.key, value: {
+        label: { text: "Review" }, presentation: "dialog",
+        background: context.router.project({ from: review, to: detail, params: { runId: "runId" } }),
+        mount: { mount({ element }) {
+          events.push("overlay:mount"); element.innerHTML = '<p id="review-overlay">Review body</p>';
+          return () => events.push("overlay:dispose");
+        }}
+      }});
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/run.js", bundle]]), undefined, async page => {
+    await page.locator("#page-portal-before").waitFor();
+    await page.locator("#open-review").click();
+    await page.locator("#review-overlay").waitFor();
+    assert.equal(await page.locator("#page-portal-before").count(), 1);
+    assert.equal(await page.evaluate(() => (window as any).__backgroundPortal.isConnected), true);
+    await page.evaluate(() => {
+      const marker = document.createElement("p"); marker.id = "page-portal-during"; marker.textContent = "during";
+      (window as any).__backgroundPortal.append(marker);
+    });
+    await page.locator("#page-portal-during").waitFor();
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.waitForURL(/\/tasks\/run-1$/);
+    assert.equal(await page.locator("#page-portal-during").count(), 1);
+    await page.evaluate(async () => {
+      const marker = document.createElement("p"); marker.id = "page-portal-after"; marker.textContent = "after";
+      (window as any).__backgroundPortal.append(marker);
+      dispatchEvent(new PageTransitionEvent("pagehide"));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    assert.equal(await page.locator("#page-portal-after").count(), 0);
+    assert.deepEqual(await page.evaluate(() => (window as any).__portalEvents), [
+      "page:mount", "overlay:mount", "overlay:dispose", "page:dispose"
+    ]);
+  }, "/tasks/run-1");
+});
+
+test("Router query targets canonicalize allowlisted values and preserve browser history", async () => {
+  const instance: ViewHostBootInstance = {
+    ...bootInstance("org.memsphere.memory", "memory", "/memory.js", "/"),
+    routeGrants: [
+      { id: "index", path: "/items", query: ["filter"] },
+      { id: "detail", path: "/items/:id", query: ["filter"] }
+    ]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const index = context.router.register({ id: "index", path: "/items", query: ["filter"] });
+      const detail = context.router.register({ id: "detail", path: "/items/:id", query: ["filter"] });
+      context.slots.register(slots.navigationPrimary, { id: "detail", value: {
+        label: { text: "Open item" }, icon: { kind: "system", name: "arrow-right" },
+        route: detail.to({ id: "a/b" }, { query: { filter: "x y" }, hash: "anchor /" })
+      }});
+      const view = {
+        mount({ element }, renderContext) {
+          element.id = "query-view";
+          element.textContent = JSON.stringify(renderContext.route);
+        },
+        update(renderContext) { document.querySelector("#query-view").textContent = JSON.stringify(renderContext.route); }
+      };
+      context.slots.register(slots.mainView, { id: "index", key: index.key, value: view });
+      context.slots.register(slots.mainView, { id: "detail", key: detail.key, value: view });
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/memory.js", bundle]]), undefined, async page => {
+    await page.locator("#query-view").waitFor();
+    assert.equal(new URL(page.url()).search, "?filter=old");
+    assert.equal(new URL(page.url()).hash, "#keep");
+    assert.equal(JSON.parse(await page.locator("#query-view").textContent() ?? "{}").query.filter, "old");
+
+    await page.getByRole("button", { name: "Open item" }).click();
+    await page.waitForURL(/\/items\/a%2Fb\?filter=x\+y#anchor%20%2F$/);
+    const detailRoute = JSON.parse(await page.locator("#query-view").textContent() ?? "{}");
+    assert.deepEqual(detailRoute.query, { filter: "x y" });
+
+    await page.goBack();
+    await page.waitForURL(/\/items\?filter=old#keep$/);
+  }, "/items?filter=old&unknown=gone#keep");
+});
+
+test("Overlay projection maps only declared query and Host dismissal replaces the deep link", async () => {
+  const instance: ViewHostBootInstance = {
+    ...bootInstance("org.memsphere.run", "run", "/run.js", "/"),
+    routeGrants: [
+      { id: "detail", path: "/tasks/:runId", query: ["status"] },
+      { id: "review", path: "/tasks/:runId/artifact-reviews/:reviewId", query: ["status", "round", "material"] }
+    ]
+  };
+  const bundle = `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const detail = context.router.register({ id: "detail", path: "/tasks/:runId", query: ["status"] });
+      const review = context.router.register({ id: "review", path: "/tasks/:runId/artifact-reviews/:reviewId", query: ["status", "round", "material"] });
+      context.slots.register(slots.mainView, { id: "detail", key: detail.key, value: {
+        mount({ element }, renderContext) {
+          element.id = "projected-detail";
+          element.textContent = JSON.stringify(renderContext.route);
+        }
+      }});
+      context.slots.register(slots.overlay, { id: "review", key: review.key, value: {
+        label: { text: "Review" }, presentation: "dialog",
+        background: context.router.project({
+          from: review, to: detail, params: { runId: "runId" }, query: { status: "status" }, hash: "discard"
+        }),
+        mount: { mount({ element }) { element.innerHTML = '<p id="projected-overlay">Review</p>'; } }
+      }});
+    }};
+  `;
+  await withPage(renderViewHostHtml("en", [instance]), new Map([["/run.js", bundle]]), undefined, async page => {
+    await page.locator("#projected-overlay").waitFor();
+    const beforeLength = await page.evaluate(() => history.length);
+    const background = JSON.parse(await page.locator("#projected-detail").textContent() ?? "{}");
+    assert.deepEqual(background.query, { status: "done" });
+    assert.equal(background.hash, "");
+    assert.equal(background.projected, true);
+    assert.equal(new URL(page.url()).search, "?status=done&round=2&material=report");
+
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.waitForURL(/\/tasks\/run-1\?status=done$/);
+    assert.equal(await page.evaluate(() => history.length), beforeLength);
+  }, "/tasks/run-1/artifact-reviews/review-1?status=done&round=2&material=report&unknown=gone#comment");
+});
+
+test("built-in Route grants reject an unapproved path before composition", async () => {
+  const instances: ViewHostBootInstance[] = [{
+    ...bootInstance("org.memsphere.memory", "memory", "/memory.js", "/"),
+    routeGrants: [{ id: "index", path: "/memories" }]
+  }];
+  const bundles = new Map([["/memory.js", `
+    export default { apiVersion: 1, inject: ["router"], apply(context) {
+      context.router.register({ id: "index", path: "/unapproved" });
+    }};
+  `]]);
+  await withPage(renderViewHostHtml("en", instances), bundles, undefined, async page => {
+    const error = page.locator(".view-host-module-error");
+    await error.waitFor();
+    assert.match(await error.textContent() ?? "", /does not match built-in grant index/);
+    assert.equal(await page.locator("html").getAttribute("data-view-host-state"), "ready");
+  }, "/memories");
+});
+
+test("shared main.view conflicts roll back the later instance and cleanup is reverse ordered", async () => {
+  const html = runtimeHarness();
+  await withPage(html, new Map(), undefined, async page => {
+    await page.locator("#runtime-mounted").waitFor();
+    assert.deepEqual(await page.evaluate(() => (
+      window as Window & { __runtimeState: { diagnostics: unknown; events: string[] } }
+    ).__runtimeState.events), ["first:apply", "second:apply", "second:rollback", "first:mount"]);
+    const statuses = await page.evaluate(() => (
+      window as Window & {
+        __runtimeState: { diagnostics: { instances: { status: string; message?: string }[] } };
+      }
+    ).__runtimeState.diagnostics.instances);
+    assert.deepEqual(statuses.map(value => value.status), ["active", "failed"]);
+    assert.match(statuses[1]?.message ?? "", /Slot Entry conflicts in main\.view@1: shared/);
+
+    await page.evaluate(async () => {
+      const state = (window as Window & {
+        __runtimeState: { active: { dispose(): Promise<void> } };
+      }).__runtimeState;
+      await state.active.dispose();
+    });
+    assert.deepEqual(await page.evaluate(() => (
+      window as Window & { __runtimeState: { events: string[] } }
+    ).__runtimeState.events), [
+      "first:apply", "second:apply", "second:rollback", "first:mount", "first:unmount", "first:dispose"
+    ]);
+  });
+});
+
+test("content.list keeps one Mount and local state across detail, query, and Overlay routes", async () => {
+  const run = bootInstance("org.memsphere.run", "run", "/run.js", "/");
+  const instances: ViewHostBootInstance[] = [{
+    ...run,
+    routeGrants: [
+      { id: "index", path: "/tasks", query: ["status"] },
+      { id: "detail", path: "/tasks/:runId", query: ["status"] },
+      { id: "review", path: "/tasks/:runId/reviews/:reviewId", query: ["status", "round"] }
+    ]
+  }];
+  const bundles = new Map([["/run.js", `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const index = context.router.register({ id: "index", path: "/tasks", query: ["status"] });
+      const detail = context.router.register({ id: "detail", path: "/tasks/:runId", query: ["status"] });
+      const review = context.router.register({ id: "review", path: "/tasks/:runId/reviews/:reviewId", query: ["status", "round"] });
+      window.__listLifecycle = { mounts: 0, updates: 0, disposes: 0 };
+      let listElement;
+      const listMount = {
+        mount({ element }, renderContext) {
+          window.__listLifecycle.mounts += 1;
+          listElement = element;
+          element.innerHTML = '<input id="list-filter"><button id="open-detail">Run 1</button>';
+          element.dataset.route = renderContext.route.pathname + renderContext.route.search;
+          element.querySelector('#open-detail').onclick = () => context.router.navigate(detail.to({ runId: "run-1" }, { query: { status: "running" } }));
+          return () => { window.__listLifecycle.disposes += 1; };
+        },
+        update(renderContext) {
+          window.__listLifecycle.updates += 1;
+          listElement.dataset.route = renderContext.route.pathname + renderContext.route.search;
+        }
+      };
+      for (const [id, route] of [["index", index], ["detail", detail]]) {
+        context.slots.register(slots.contentList, { id: "list." + id, when: route.activation, value: listMount });
+      }
+      context.slots.register(slots.mainView, { id: "index", key: index.key, when: index.activation, value: {
+        mount({ element }) { element.innerHTML = '<p id="run-index">Runs</p>'; }
+      }});
+      context.slots.register(slots.mainView, { id: "detail", key: detail.key, when: detail.activation, value: {
+        mount({ element }) {
+          element.innerHTML = '<p id="run-detail">Run detail</p><button id="open-review">Review</button>';
+          element.querySelector('#open-review').onclick = () => context.router.navigate(review.to(
+            { runId: "run-1", reviewId: "review-1" }, { query: { status: "running", round: "2" } }
+          ));
+        }
+      }});
+      context.slots.register(slots.overlay, { id: "review", key: review.key, when: review.activation, value: {
+        label: { text: "Review" }, presentation: "dialog",
+        background: context.router.project({ from: review, to: detail, params: { runId: "runId" }, query: { status: "status" } }),
+        mount: { mount({ element }) { element.innerHTML = '<p id="review-body">Review body</p>'; } }
+      }});
+    }};
+  `]]);
+
+  await withPage(renderViewHostHtml("en", instances), bundles, undefined, async page => {
+    await page.locator("#list-filter").fill("keep me");
+    await page.locator("#open-detail").click();
+    await page.locator("#run-detail").waitFor();
+    assert.equal(await page.locator("#list-filter").inputValue(), "keep me");
+    await page.locator("#open-review").click();
+    await page.locator("#review-body").waitFor();
+    assert.equal(await page.locator("#list-filter").inputValue(), "keep me");
+    await page.locator(".view-overlay-close").click();
+    await page.locator("#review-body").waitFor({ state: "detached" });
+    assert.equal(await page.locator("#list-filter").inputValue(), "keep me");
+    const lifecycle = await page.evaluate(() => (window as Window & {
+      __listLifecycle: { mounts: number; updates: number; disposes: number };
+    }).__listLifecycle);
+    assert.equal(lifecycle.mounts, 1);
+    assert.ok(lifecycle.updates >= 1);
+    assert.equal(lifecycle.disposes, 0);
+  }, "/tasks?status=running");
+});
+
+test("global search filters Providers and isolates aborted or stale queries", async () => {
+  const memory = bootInstance("org.memsphere.memory", "memory", "/memory.js", "/");
+  const instances: ViewHostBootInstance[] = [{
+    ...memory,
+    routeGrants: [{ id: "index", path: "/memories" }]
+  }];
+  const bundles = new Map([["/memory.js", `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const index = context.router.register({ id: "index", path: "/memories" });
+      window.__searchState = { queries: [], aborts: 0 };
+      context.slots.register(slots.navigationPrimary, { id: "memory", value: {
+        label: { text: "Memory" }, icon: { kind: "system", name: "memory" }, route: index.to()
+      }});
+      context.slots.register(slots.mainView, { id: "index", key: index.key, value: { mount({ element }) {
+        element.innerHTML = '<label>Business <input id="business-input"></label>';
+      }}});
+      context.slots.register(slots.searchProviders, { id: "memory-search", value: {
+        label: { text: "Memory" }, icon: { kind: "system", name: "memory" },
+        search({ query, signal }) {
+          window.__searchState.queries.push(query);
+          return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+              if (query === "failure") { reject(new Error("provider failed")); return; }
+              resolve([{ title: { text: query }, summary: { text: "result" }, type: { text: "Memory" }, route: index.to() }]);
+            }, query === "old" ? 400 : 20);
+            signal.addEventListener("abort", () => {
+              clearTimeout(timer);
+              window.__searchState.aborts += 1;
+              reject(new DOMException("aborted", "AbortError"));
+            }, { once: true });
+          });
+        }
+      }});
+    }};
+  `]]);
+
+  await withPage(renderViewHostHtml("en", instances), bundles, undefined, async page => {
+    await page.locator("#business-input").waitFor();
+    await page.locator("[data-view-search-trigger]").focus();
+    await page.keyboard.press("Control+K");
+    await page.locator("[data-view-search-input]").waitFor();
+    assert.equal(await page.locator("[data-view-search-input]").evaluate(element => element === document.activeElement), true);
+    assert.deepEqual(await page.locator('[data-view-slot="search.providers"] button').allTextContents(), ["All", "Memory"]);
+    await page.locator('[data-view-slot="search.providers"] button', { hasText: "Memory" }).click();
+    await page.locator("[data-view-search-input]").fill("old");
+    await page.waitForTimeout(230);
+    await page.locator("[data-view-search-input]").fill("new");
+    await page.getByRole("button", { name: /new/ }).waitFor();
+    assert.equal(await page.locator(".view-shell-search-provider-error").count(), 0);
+    assert.equal(await page.getByRole("button", { name: /old/ }).count(), 0);
+    assert.ok(await page.evaluate(() => (window as Window & { __searchState: { aborts: number } }).__searchState.aborts) >= 1);
+    await page.locator("[data-view-search-input]").fill("failure");
+    await page.locator(".view-shell-search-provider-error").waitFor();
+    assert.match(await page.locator(".view-shell-search-provider-error").innerText(), /provider failed/);
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("[data-view-search-overlay]").isHidden(), true);
+    assert.equal(await page.locator("[data-view-search-trigger]").evaluate(element => element === document.activeElement), true);
+    await page.locator("#business-input").focus();
+    await page.keyboard.press("Control+K");
+    assert.equal(await page.locator("[data-view-search-overlay]").isHidden(), true);
+  }, "/memories");
+});
+
+function bootInstance(
+  moduleId: string,
+  instanceId: string,
+  pluginPath: string,
+  routeBasePath: string,
+): ViewHostBootInstance {
+  return {
+    pluginPath,
+    routeBasePath,
+    module: { projectId: "memsphere", moduleId, moduleVersion: "1.0.0", instanceId }
+  };
+}
+
+function routedPlugin(name: string, path: string, label: string): string {
+  return `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      window.__compositionOrder.push(${JSON.stringify(name)});
+      const route = context.router.register({ id: "index", path: ${JSON.stringify(path)} });
+      context.slots.register(slots.mainView, {
+        id: "page", key: route.key,
+        value: { mount({ element }) {
+          window.__compositionOrder.push(${JSON.stringify(`${name}:mount`)});
+          element.innerHTML = '<p id="active-composed-view">${label}</p>';
+        }}
+      });
+    }};
+  `;
+}
+
+function compositionPlugin(name: "memory" | "settings"): string {
+  if (name === "settings") return `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const route = context.router.register({ id: "index", path: "/settings" });
+      context.slots.register(slots.navigationPrimary, { id: "settings-nav", order: 30, value: {
+        label: { text: "Settings" }, icon: { kind: "system", name: "settings" }, route: route.to()
+      }});
+      context.slots.register(slots.headerTitle, { id: "settings-title", when: route.activation,
+        value: { title: { text: "Settings" }, subtitle: { text: "Configuration" } }
+      });
+      context.slots.register(slots.mainView, { id: "settings-view", key: route.key, value: {
+        mount({ element }) { element.innerHTML = '<p id="settings-view">Settings body</p>'; }
+      }});
+    }};
+  `;
+  return `
+    import { slots } from "@memsphere/view-sdk";
+    export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
+      const index = context.router.register({ id: "index", path: "/memories" });
+      const detail = context.router.register({ id: "detail", path: "/memories/:kind" });
+      context.slots.register(slots.navigationPrimary, { id: "memory-nav", order: 10, value: {
+        label: { text: "Memory" }, icon: { kind: "system", name: "memory" }, route: index.to()
+      }});
+      context.slots.register(slots.navigationPrimary, { id: "concept-nav", order: 20, value: {
+        label: { text: "Concepts" }, icon: { kind: "system", name: "brain" }, route: detail.to({ kind: "concepts" })
+      }});
+      context.slots.register(slots.navigationPrimary, { id: "statement-nav", order: 21, value: {
+        label: { text: "Statements" }, icon: { kind: "system", name: "file-text" }, route: detail.to({ kind: "statements" })
+      }});
+      context.slots.register(slots.headerTitle, { id: "memory-title", when: index.activation,
+        value: { title: { text: "Memories" } }
+      });
+      context.slots.register(slots.headerTitle, { id: "memory-detail-title", when: detail.activation,
+        value: { title: { text: "Memory detail" }, breadcrumbs: [{ label: { text: "Memories" }, route: index.to() }] }
+      });
+      context.slots.register(slots.headerActions, { id: "capture", when: detail.activation, value: {
+        label: { text: "Capture params" }, async run() {
+          await new Promise(resolve => setTimeout(resolve, 20));
+          window.__capturedKind = context.router.location.params.kind;
+        }
+      }});
+      context.slots.register(slots.headerActions, { id: "disabled", when: detail.activation, value: {
+        label: { text: "Disabled action" }, disabled: true, run() { throw new Error("must not run"); }
+      }});
+      context.slots.register(slots.headerActions, { id: "failing", when: detail.activation, value: {
+        label: { text: "Failing action" }, run() { throw new Error("action failed"); }
+      }});
+      context.slots.register(slots.mainView, { id: "memory-index", key: index.key, value: {
+        mount({ element }) { element.innerHTML = '<p id="memory-index-view">Memory index</p>'; }
+      }});
+      context.slots.register(slots.mainView, { id: "memory-detail", key: detail.key, value: {
+        mount({ element }, renderContext) {
+          element.innerHTML = '<p id="memory-detail-view">Memory detail ' + renderContext.route.params.kind + '</p>';
+        }
+      }});
+    }};
+  `;
+}
+
+function runtimeHarness(): string {
+  return `<!doctype html><html><body><main id="root"></main>
+    <script type="importmap">{"imports":{"@memsphere/view-sdk":"${viewSdkBundlePath}"}}</script>
+    <script type="module">
+      import { slots } from "@memsphere/view-sdk";
+      import { startViewHost } from "${viewRuntimeBundlePath}";
+      const events = [];
+      const module = instanceId => ({ projectId: "p", moduleId: "org.test." + instanceId, moduleVersion: "1.0.0", instanceId });
+      const plugin = (name, conflict) => ({ apiVersion: 1, inject: ["slots"], apply(context) {
+        events.push(name + ":apply");
+        context.lifecycle.own(() => events.push(name + (conflict ? ":rollback" : ":dispose")));
+        context.slots.register(slots.mainView, { id: "page", key: "shared", value: {
+          mount({ element }) {
+            events.push(name + ":mount");
+            element.innerHTML = '<p id="runtime-mounted">mounted</p>';
+            return () => events.push(name + ":unmount");
+          }
+        }});
+      }});
+      const active = await startViewHost({
+        instances: [
+          { plugin: plugin("first", false), config: {}, module: module("first") },
+          { plugin: plugin("second", true), config: {}, module: module("second") }
+        ],
+        root: document.getElementById("root"), mainViewKey: "shared"
+      });
+      window.__runtimeState = { active, diagnostics: active.diagnostics(), events };
+    </script></body></html>`;
+}
+
+async function withPage(
+  html: string,
+  bundles: ReadonlyMap<string, string>,
+  prepare: ((page: Page) => Promise<void>) | undefined,
+  run: (page: Page) => Promise<void>,
+  pathname = "/",
+): Promise<void> {
+  const server = createServer((request, response) => {
+    const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    const source = path === viewSdkBundlePath ? sdkSource
+      : path === "/assets/system-icon.js" ? systemIconSource
+      : path === viewRuntimeBundlePath ? runtimeSource
+        : bundles.get(path);
+    if (source !== undefined) {
+      response.writeHead(200, { "content-type": "text/javascript" });
+      response.end(source);
+      return;
+    }
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end(html);
+  });
+  const origin = await listen(server);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await prepare?.(page);
+    await page.goto(`${origin}${pathname}`);
+    await run(page);
+  } finally {
+    await browser.close();
+    await close(server);
+  }
+}
+
+async function browserModule(relativePath: string): Promise<string> {
+  const source = await readFile(new URL(relativePath, import.meta.url), "utf8");
+  return transpileModule(source, {
+    compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 }
+  }).outputText;
+}
+
+async function browserRuntimeBundle(): Promise<string> {
+  const result = await build({
+    entryPoints: [fileURLToPath(new URL("../src/view/view-runtime.ts", import.meta.url))],
+    bundle: true, write: false, format: "esm", platform: "browser", target: "es2022",
+    external: ["@memsphere/view-sdk", "./view-sdk.js"], logLevel: "silent"
+  });
+  return result.outputFiles[0]?.text ?? "";
+}
+
+async function browserEntryBundle(relativePath: string): Promise<string> {
+  const result = await build({
+    entryPoints: [fileURLToPath(new URL(relativePath, import.meta.url))],
+    bundle: true, write: false, format: "esm", platform: "browser", target: "es2022",
+    external: ["@memsphere/view-sdk"], logLevel: "silent"
+  });
+  return result.outputFiles[0]?.text ?? "";
+}
+
+async function listen(server: Server): Promise<string> {
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+async function close(server: Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+}

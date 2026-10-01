@@ -57,6 +57,7 @@ import {
   runReviewRetryCommand,
   runReviewAssignmentShowCommand,
   runReviewSubmitCommand,
+  runReviewSubmitForHumanCommand,
   runReviewVoteCommand,
   runReviewWaitCommand,
   runSchemaShowCommand,
@@ -155,9 +156,17 @@ project.command("prune").description("Remove missing registrations and their bin
 
 program
   .command("validate")
-  .description("Validate config, memory directories, and YAML memory entities.")
+  .description("Validate the current Project Store or one stateless Memory root.")
   .option("--memory-root <path>", "validate one Memory root without Home, Registry or Binding")
   .addOption(new Option("--format <format>", "diagnostic output format").choices(["text", "json"]).default("text"))
+  .addHelpText("after", `
+This command validates Store/config health and Memory entities. It never creates
+or updates a ChangeSet. To capture and validate unpublished Memory changes in a
+bound Project, run:
+  memsphere memory change validate [change-id]
+
+The stateless --memory-root mode has no Project or ChangeSet context.
+`)
   .action(validateCommand);
 
 const memory = program
@@ -445,6 +454,22 @@ runReview
   .requiredOption("--assignment <identity-or-assignment-id>", "agent identity or assignment id")
   .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
   .action(runReviewRetryCommand);
+
+runReview
+  .command("submit-for-human")
+  .description("Submit one Human Assignment after explicit Human authorization.")
+  .requiredOption("--run <id>", "target run id")
+  .requiredOption("--review <id>", "artifact review id")
+  .requiredOption("--round <id>", "current artifact review round id")
+  .requiredOption("--assignment <identity-or-assignment-id>", "human identity or assignment id")
+  .addOption(new Option("--vote <vote>", "Human review vote").choices(["approve", "request_changes", "abstain"]).makeOptionMandatory())
+  .requiredOption("--comments-file <path>", "strict JSON array of review comments")
+  .option("--summary <text>", "overall review summary")
+  .option("--summary-file <path>", "read overall review summary from a file")
+  .option("--authorization-note <text>", "Human authorization audit note")
+  .option("--authorization-note-file <path>", "read the Human authorization audit note from a file")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runReviewSubmitForHumanCommand);
 
 runReview
   .command("resolve")

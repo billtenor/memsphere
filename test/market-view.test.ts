@@ -87,7 +87,7 @@ test("an unpublished Market import stays out of the Project Catalog", async () =
     const imported = await importMarket(origin, "statements", "memsphere-general-testing-rules");
     assert.equal(imported.response.status, 201);
 
-    const ordinary = await fetch(`${origin}/api/memories`).then((response) => response.json()) as {
+    const ordinary = await fetch(`${origin}/api/projects/market-view/memories`).then((response) => response.json()) as {
       memories: Array<{ id: string }>;
     };
     assert.equal(ordinary.memories.some((memory) => (
@@ -101,7 +101,7 @@ test("an unpublished Market candidate is visible in its ChangeSet detail", async
     const imported = await importMarket(origin, "statements", "memsphere-general-testing-rules");
     assert.equal(imported.response.status, 201);
 
-    const response = await fetch(`${origin}/api/changes/${imported.payload.change.id}`);
+    const response = await fetch(`${origin}/api/projects/market-view/changes/${imported.payload.change.id}`);
     assert.equal(response.status, 200);
     const detail = await response.json() as {
       targetMemories: Array<{ reference: string }>;
@@ -109,7 +109,7 @@ test("an unpublished Market candidate is visible in its ChangeSet detail", async
     assert.equal(detail.targetMemories.some((memory) => (
       memory.reference === "statements/memsphere-general-testing-rules"
     )), true);
-    const catalog = await fetch(`${origin}/api/memories`).then((result) => result.json()) as {
+    const catalog = await fetch(`${origin}/api/projects/market-view/memories`).then((result) => result.json()) as {
       memories: Array<{ id: string }>;
     };
     assert.equal(catalog.memories.some((memory) => (
@@ -161,7 +161,7 @@ test("Memory Market ignores unrelated corrupt ChangeSets for listing and imports
 async function marketPayload(origin: string): Promise<{
   memories: Array<{ reference: string; status: string; changeId?: string }>;
 }> {
-  const response = await fetch(`${origin}/api/market/memories`);
+  const response = await fetch(`${origin}/api/projects/market-view/market/memories`);
   if (response.status !== 200) assert.fail(await response.text());
   return response.json() as Promise<{
     memories: Array<{ reference: string; status: string; changeId?: string }>;
@@ -172,7 +172,7 @@ async function importMarket(origin: string, kind: string, name: string): Promise
   response: Response;
   payload: { change: { id: string }; code?: string };
 }> {
-  const response = await fetch(`${origin}/api/market/memories/${kind}/${name}/import`, {
+  const response = await fetch(`${origin}/api/projects/market-view/market/memories/${kind}/${name}/import`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ operator: { kind: "browser", id: "00000000-0000-4000-8000-000000000001" } })

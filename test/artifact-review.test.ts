@@ -13,6 +13,7 @@ import {
   parseControlPlaneConfig,
   resolveArtifactControlPlane,
 } from "../src/control-plane/index.js";
+import { parseRunnerDelegatedComments } from "../src/commands/run.js";
 
 function fixture(input?: { runnerDecides?: boolean; humanDecides?: boolean }) {
   const config = parseControlPlaneConfig({
@@ -217,4 +218,33 @@ test("submitted opinions expose whether implementation evidence was referenced",
   };
   assert.equal(artifactReviewOpinionReferencesImplementation(opinion), true);
   assert.equal(artifactReviewOpinionReferencesImplementation({ ...opinion, summary: "The requirement text is clear." }), false);
+});
+
+test("Runner delegated comments file parser accepts only the strict public shape", () => {
+  assert.deepEqual(parseRunnerDelegatedComments([{
+    body: "Please update this section.",
+    severity: "blocking",
+    anchor: {
+      submissionId: "submission-1",
+      target: "markdown:h2:1",
+      sourceHash: "sha256:abc",
+      location: "section 1",
+      context: "Current wording"
+    }
+  }]), [{
+    body: "Please update this section.",
+    severity: "blocking",
+    anchor: {
+      submissionId: "submission-1",
+      target: "markdown:h2:1",
+      sourceHash: "sha256:abc",
+      location: "section 1",
+      context: "Current wording"
+    }
+  }]);
+  assert.deepEqual(parseRunnerDelegatedComments([]), []);
+  assert.throws(() => parseRunnerDelegatedComments({}), /JSON array/);
+  assert.throws(() => parseRunnerDelegatedComments([{ body: "ok", extra: true }]), /not allowed/);
+  assert.throws(() => parseRunnerDelegatedComments([{ body: " " }]), /non-empty/);
+  assert.throws(() => parseRunnerDelegatedComments([{ body: "ok", anchor: { target: "x" } }]), /submissionId/);
 });

@@ -4,6 +4,27 @@
 {{#ifEq kind "wait"}}
 memsphere run review wait --review {{reviewId}}
 {{/ifEq}}
+{{#ifEq kind "human_vote"}}
+请使用当前语言向以下 Human 收集本轮正式投票：
+{{#each assignments}}
+- {{actorName}}（actor_id={{actorId}}；assignment_id={{assignmentId}}）
+{{/each}}
+
+请明确询问 Human 选择以下三种投票之一：
+- 通过：Comment 可选。
+- 要求修改：至少需要一条 Comment。
+- 弃权：至少需要一条说明原因的 Comment。
+{{#if agentReviewsPending}}
+Agent Reviewer 仍在后台评审；无需等待其完成，可以同时向 Human 收集投票。
+{{/if}}
+本提示已经明确当前 Review、Round 和 Runner 代提交语境。若 Human 使用“我投通过”“我投要求修改”“我投弃权”或“请提交……”等确定的执行性表达，且 Vote、必需 Comments 与目标均完整无歧义，该表达同时构成本次投票决定和 Runner 代提交授权；直接提交并记录 authorization note，不要再次询问同义确认。普通讨论、“倾向于”“可以考虑”等非确定表达不构成授权；目标不明确、必需 Comment 缺失、引用意见无法唯一确定或 payload 仍需补全时，才完整复述待提交内容并取得确认。
+
+确认授权后，为每个 Human Assignment 执行：
+memsphere run review submit-for-human --run {{runId}} --review {{reviewId}} --round {{roundId}} --assignment <assignment_id> --vote <approve|request_changes|abstain> --comments-file <path> --authorization-note-file <path> [--summary-file <path>]
+
+Human Assignment 提交后继续检查本轮状态：
+memsphere run review wait --review {{reviewId}}
+{{/ifEq}}
 {{#ifEq kind "runner_vote"}}
 memsphere run review vote --review {{reviewId}} --round {{roundId}} --vote approve
 memsphere run review vote --review {{reviewId}} --round {{roundId}} --vote request_changes --comment <text>

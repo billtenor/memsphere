@@ -1,9 +1,18 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { access, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import MarkdownIt from "markdown-it";
 import { ZodError, type ZodIssue } from "zod";
+import { builtinModuleCatalog } from "../module/builtin-catalog.js";
+import { isViewSdkCompatible, readModuleManifest, resolveModuleViewEntry } from "../module/manifest.js";
+import {
+  resolveViewPackageComposition,
+  ViewPackageAssetRegistry,
+  type ResolvedViewPackageComposition
+} from "../module/package-registry.js";
 import { archiveRun } from "../archive/store.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
 import { agentActivityDelta, readAgentActivitySnapshot } from "../acp/activity.js";
@@ -25,6 +34,7 @@ import {
   type ArtifactReviewVote
 } from "../artifact-review.js";
 import { type MemsphereConfig, readProjectConfig, readViewConfig } from "../config.js";
+import { configurableViewSlotIdForCell, configurableViewSlots } from "../view/package-config.js";
 import { homePaths, resolveMemsphereHome } from "../home.js";
 import { listRegisteredProjects } from "../project/registry.js";
 import {
@@ -38,6 +48,7 @@ import {
   validateGlobalConfigDraft,
   validateProjectConfigDraft,
   writeGlobalConfigDraft,
+  writeGlobalOperatorToken,
   writeProjectConfigDraft,
   type EditableGlobalConfigDraft,
   type EditableProjectConfigDraft,
@@ -70,6 +81,7 @@ import {
 } from "../memory/changeset.js";
 import { readBundledSystemMemories } from "../reserved/store.js";
 import {
+  countMemoryMarket,
   listMemoryMarket,
   MarketMemoryNameConflictError,
   planMemoryMarketImport
@@ -78,6 +90,7 @@ import {
   abandonRun,
   ArtifactAuthorizationFailure,
   ArtifactReviewConflictError,
+  ArtifactReviewSubmissionConflictError,
   artifactReviewForActor,
   buildRunBindingSnapshot,
   buildSchemaWritingSnapshot,
@@ -99,7 +112,16 @@ import {
   type RunState,
   type RunStep
 } from "../run/store.js";
-import { renderBrowserHtml } from "../view/browser.js";
+import {
+  renderViewHostHtml,
+  viewRuntimeBundlePath,
+  viewSdkBundlePath,
+  type ViewHostBootInstance
+} from "../view/host.js";
+import { rewriteGlobalStyleUrls, scopePackageStyle, validateGlobalStyle } from "../view/global-style-contract.js";
+import { viewCompositionDigest } from "../view/package-config.js";
+import { validateViewThemePalette, VIEW_THEME_HOME_LAYER } from "../view/theme.js";
+import { coreViewRoutes } from "../view/core-routes.js";
 import {
   localizeAcpProviderDefinition,
   localizeAcpProviderDetection,
@@ -197,7 +219,7 @@ export async function viewServeCommand(options: ViewServeOptions): Promise<void>
   const runningDocument = await readGlobalSettingsDocument(config);
   const settingsToken = isLoopbackHost(host)
     ? undefined
-    : createSettingsToken();
+    : config.view.operatorToken ?? createSettingsToken();
   const server = createViewServer(config, {
     runningRevision: runningDocument.revision,
     settingsToken
@@ -233,10 +255,36 @@ export async function viewServeCommand(options: ViewServeOptions): Promise<void>
   process.once("SIGINT", () => void close());
 }
 
+export type ViewDevelopmentModule = Readonly<{
+  assetPath: `/assets/dev-modules/${string}.js`;
+  source: string;
+  instance: ViewHostBootInstance;
+  pagePaths: readonly string[];
+}>;
+
 type ViewServerOptions = {
   runningRevision?: string;
   settingsToken?: string;
+  developmentModules?: readonly ViewDevelopmentModule[];
 };
+
+type ViewCompositionBootEntry = Readonly<{
+  projectId: string;
+  globalRevision: string;
+  viewPackages: MemsphereConfig["viewPackages"];
+  viewTheme: MemsphereConfig["viewTheme"];
+  viewComposition: MemsphereConfig["viewComposition"];
+  digest: string;
+  composition: Promise<ResolvedViewPackageComposition>;
+  externalInstances: Promise<readonly ViewHostBootInstance[]>;
+}>;
+
+type ViewCompositionBootSnapshot = Readonly<{
+  globalRevision: string;
+  globalDigest: string;
+  registeredProjectIds: ReadonlySet<string>;
+  entries: ReadonlyMap<string, ViewCompositionBootEntry>;
+}>;
 
 class ViewMemoryCache {
   readonly previews = new MemoryChangePreviewCache();
@@ -273,10 +321,26 @@ class ViewMemoryCache {
 }
 
 export function createViewServer(config: MemsphereConfig, options: ViewServerOptions = {}) {
+  for (const module of options.developmentModules ?? []) {
+    if (!/^\/assets\/dev-modules\/[a-z0-9._-]+\.js$/.test(module.assetPath)) {
+      throw new Error(`Invalid development Module asset path: ${module.assetPath}`);
+    }
+    if (module.instance.pluginPath !== module.assetPath) {
+      throw new Error(`Development Module instance asset mismatch: ${module.instance.module.moduleId}`);
+    }
+    if (module.pagePaths.some(path => !path.startsWith("/") || path.includes(".."))) {
+      throw new Error(`Invalid development Module page path: ${module.instance.module.moduleId}`);
+    }
+  }
   const viewCache = new ViewMemoryCache();
+  const packageAssets = new ViewPackageAssetRegistry();
+  const compositionBootSnapshot = captureViewCompositionBootSnapshot(config, packageAssets);
+  void systemMemoryReferences().catch(() => {
+    systemMemoryReferencesPromise = undefined;
+  });
   const server = createServer(async (request, response) => {
     try {
-      await handleRequest(request, response, config, options, viewCache);
+      await handleRequest(request, response, config, options, viewCache, packageAssets, compositionBootSnapshot);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       sendJson(response, 500, {
@@ -294,42 +358,247 @@ async function handleRequest(
   response: ServerResponse,
   config: MemsphereConfig,
   options: ViewServerOptions,
-  viewCache: ViewMemoryCache
+  viewCache: ViewMemoryCache,
+  packageAssets: ViewPackageAssetRegistry,
+  compositionBootSnapshotPromise: Promise<ViewCompositionBootSnapshot>
 ): Promise<void> {
+  const compositionBootSnapshot = await compositionBootSnapshotPromise;
   const url = new URL(request.url ?? "/", "http://localhost");
+  const requestedPathname = url.pathname;
+  const scopedApi = url.pathname === "/api/projects/select"
+    ? undefined
+    : matchProjectScopedPath(url.pathname, "/api/projects/");
+  const scopedPage = scopedApi ? undefined : matchProjectScopedPath(url.pathname, "/projects/");
+  const projectScope = scopedApi ?? scopedPage;
+  if (projectScope) {
+    const startupProjectId = config.project?.name ?? "memsphere";
+    if (projectScope.projectId !== startupProjectId || compositionBootSnapshot.registeredProjectIds.has(projectScope.projectId)) {
+      const projects = await listRegisteredProjects(config.homeRoot ?? resolveMemsphereHome());
+      if (!projects.some(project => project.name === projectScope.projectId && !project.missing)) {
+        sendJson(response, 404, { code: "project_not_found", error: `Project not found: ${projectScope.projectId}` });
+        return;
+      }
+    }
+    if (projectScope.projectId !== startupProjectId) {
+      config = await readProjectConfig(projectScope.projectId, config.homeRoot);
+    }
+    if (scopedApi) url.pathname = `/api${scopedApi.remainder === "/" ? "" : scopedApi.remainder}`;
+  }
   const { memoryRoot, runsRoot } = config;
   const archiveRoot = config.archiveRoot;
 
+  const packageAssetMatch = url.pathname.match(/^\/assets\/view-packages\/([^/]+)\/([A-Za-z0-9_-]+)$/);
+  if (request.method === "GET" && packageAssetMatch) {
+    const projectId = decodeURIComponent(packageAssetMatch[1]!);
+    const result = await packageAssets.read(packageAssetMatch[2]!, projectId);
+    if (!result) {
+      sendText(response, 404, "View Package asset not found");
+      return;
+    }
+    response.writeHead(200, {
+      "content-type": result.asset.mime,
+      "cache-control": "private, immutable, max-age=31536000",
+      "x-content-type-options": "nosniff"
+    });
+    response.end(result.body);
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === viewSdkBundlePath) {
+    sendJavaScript(request, response, await readCompiledBrowserModule(compiledViewSdkUrl, sourceViewSdkUrl));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === viewRuntimeBundlePath) {
+    sendJavaScript(request, response, await readCompiledBrowserModule(compiledViewRuntimeUrl, sourceViewRuntimeUrl));
+    return;
+  }
+
+  const runtimeDependency = viewRuntimeDependencies.get(url.pathname);
+  if (request.method === "GET" && runtimeDependency) {
+    sendJavaScript(request, response, await readCompiledBrowserModule(runtimeDependency.compiled, runtimeDependency.source));
+    return;
+  }
+
+  const systemIcon = url.pathname.match(/^\/assets\/system-icons\/([a-z0-9-]+)\.svg$/)?.[1];
+  if (request.method === "GET" && systemIcon) {
+    await sendSystemIcon(response, systemIcon);
+    return;
+  }
+
+  const builtinAsset = builtinModuleAsset(url.pathname);
+  if (request.method === "GET" && builtinAsset) {
+    sendJavaScript(request, response, await readBuiltinViewBundle(builtinAsset.packageDirectory, builtinAsset.moduleId));
+    return;
+  }
+
+  const developmentAsset = options.developmentModules?.find(module => module.assetPath === url.pathname);
+  if (request.method === "GET" && developmentAsset) {
+    sendJavaScript(request, response, developmentAsset.source);
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/projects") {
     const projects = await listRegisteredProjects(config.homeRoot ?? resolveMemsphereHome());
-    sendJson(response, 200, { current: config.project?.name, projects });
+    sendJson(response, 200, {
+      current: config.project?.name,
+      projects,
+      currentProject: config.project ? {
+        name: config.project.name,
+        root: config.scopeRoot,
+        storeType: config.project.store?.type,
+        revision: config.project.revision,
+        memoryRoot: config.memoryRoot
+      } : undefined
+    });
     return;
   }
 
   if (request.method === "POST" && url.pathname === "/api/projects/select") {
-    const body = await readJsonBody<{ name?: unknown }>(request);
-    if (typeof body.name !== "string" || !body.name.trim()) {
-      sendJson(response, 400, { error: "Project name is required" });
-      return;
-    }
-    const selected = await readProjectConfig(body.name.trim(), config.homeRoot);
-    await viewCache.clear();
-    Object.assign(config, selected);
-    sendJson(response, 200, { current: selected.project?.name });
+    sendJson(response, 400, {
+      code: "project_scope_required",
+      error: "Project selection is URL-scoped; navigate to /projects/:projectId instead"
+    });
     return;
   }
 
-  if (request.method === "GET" && isViewPagePath(url.pathname)) {
-    sendHtml(response, renderBrowserHtml(config.language));
+  if (!projectScope && isProjectResourceApi(url.pathname)) {
+    if (request.method === "GET" || request.method === "HEAD") {
+      redirect(response, 307, projectApiPath(config.project?.name, `${url.pathname}${url.search}`));
+    } else {
+      sendJson(response, 400, { code: "project_scope_required", error: "Project-scoped API URL is required" });
+    }
+    return;
+  }
+
+  const pagePath = scopedPage?.remainder ?? url.pathname;
+  const developmentPage = options.developmentModules?.some(module => module.pagePaths.includes(pagePath)) === true;
+  if (request.method === "GET" && (isViewPagePath(requestedPathname) || isViewPagePath(pagePath) || developmentPage)) {
+    if (!projectScope) {
+      redirect(response, 302, projectPagePath(config.project?.name, `${url.pathname}${url.search}`));
+      return;
+    }
+    const projectId = config.project?.name ?? "memsphere";
+    const bootEntry = compositionBootSnapshot.entries.get(projectId);
+    const presentationConfig = bootEntry ? configWithViewCompositionSnapshot(config, bootEntry) : config;
+    const [instances, packageInstances] = await Promise.all([
+      builtinViewInstances(config),
+      bootEntry ? bootEntry.externalInstances : Promise.resolve([])
+    ]);
+    sendHtml(response, renderViewHostHtml(
+      config.language,
+      [...instances, ...packageInstances, ...(options.developmentModules?.map(module => module.instance) ?? [])],
+      requestedPathname,
+      presentationConfig.viewTheme?.mode ?? "system",
+      configuredThemeOverrides(presentationConfig),
+    ));
     return;
   }
 
   if (request.method === "GET" && url.pathname === "/api/settings/meta") {
+    const document = await readGlobalSettingsDocument(config);
     sendJson(response, 200, {
       requiresToken: !isLoopbackHost(config.view.host),
+      operatorTokenConfigured: Boolean(document.raw.view?.operator_token),
       host: config.view.host,
       port: config.view.port
     });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/settings/view-packages") {
+    if (!authorizeSettingsRequest(request, response, config, options)) return;
+    const globalDocument = await readGlobalSettingsDocument(config);
+    const composition = await resolveViewPackageComposition({
+      global: globalDocument.raw.view_packages,
+      globalThemeSource: globalDocument.raw.view_theme?.selected_source,
+      composition: globalDocument.raw.view_composition,
+      sdkVersion: viewSdkVersion
+    });
+    const running = compositionBootSnapshot.entries.get(config.project?.name ?? "memsphere");
+    const diskDigest = compositionConfigDigest(
+      globalDocument.raw.view_packages,
+      globalDocument.raw.view_theme,
+      globalDocument.raw.view_composition
+    );
+    sendJson(response, 200, {
+      installed: composition.installed.map(entry => ({
+        id: entry.manifest.id,
+        version: entry.manifest.version,
+        path: entry.configuredPath,
+        source: entry.manifest.source,
+        capabilities: entry.manifest.view.capabilities ?? [],
+        dependencies: entry.manifest.view.dependencies ?? [],
+        contributions: (entry.manifest.view.contributions ?? []).map(contribution => ({
+          ...contribution,
+          slotId: configurableViewSlotIdForCell(contribution.cell)
+        })),
+        styles: entry.manifest.view.styles ?? [],
+        themes: entry.manifest.view.themes ?? []
+      })),
+      configurableSlots: configurableViewSlots,
+      instances: composition.instances.map(entry => ({
+        id: entry.package.manifest.id,
+        version: entry.package.manifest.version,
+        instanceId: entry.instanceId,
+        capabilities: [...entry.capabilities],
+        contributionPolicy: entry.contributionPolicy
+      })),
+      diagnostics: composition.diagnostics,
+      composition: {
+        runningDigest: running?.digest,
+        diskDigest,
+        runningGlobalRevision: running?.globalRevision,
+        diskGlobalRevision: globalDocument.revision,
+        restartPending: !running || running.digest !== diskDigest
+      }
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/settings/global/operator-token" && request.method === "PUT") {
+    if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+    const body = await readJsonBody<{ expectedRevision?: unknown; token?: unknown }>(request, 16 * 1024);
+    if (typeof body.expectedRevision !== "string" || (body.token !== null && typeof body.token !== "string")) {
+      sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and token are required" });
+      return;
+    }
+    const token = typeof body.token === "string" ? body.token.trim() : undefined;
+    if (token !== undefined && !token) {
+      sendJson(response, 422, {
+        code: "config_invalid",
+        error: "Operation token must not be empty"
+      });
+      return;
+    }
+    const document = await readGlobalSettingsDocument(config);
+    try {
+      const saved = await writeGlobalOperatorToken({
+        document,
+        expectedRevision: body.expectedRevision,
+        ...(token ? { token } : {})
+      });
+      sendJson(response, 200, {
+        diskRevision: saved.revision,
+        operatorTokenConfigured: Boolean(saved.raw.view?.operator_token),
+        restartRequired: true
+      });
+    } catch (error) {
+      if (error instanceof ConfigRevisionConflictError) {
+        sendJson(response, 409, {
+          code: "revision_conflict",
+          error: error.message,
+          expectedRevision: error.expectedRevision,
+          actualRevision: error.actualRevision
+        });
+        return;
+      }
+      if (error instanceof ZodError) {
+        sendJson(response, 422, { code: "config_invalid", error: error.issues[0]?.message ?? "Invalid token" });
+        return;
+      }
+      throw error;
+    }
     return;
   }
 
@@ -341,7 +610,8 @@ async function handleRequest(
       document,
       options.runningRevision ?? document.revision,
       config.view,
-      projects
+      projects,
+      compositionBootSnapshot
     ));
     return;
   }
@@ -374,7 +644,12 @@ async function handleRequest(
       ...publicValidation,
       expectedRevision: document.revision,
       runningRevision: options.runningRevision ?? document.revision,
-      restartRequired: !sameViewConfig(candidateView, config.view)
+      restartRequired: !sameViewConfig(candidateView, config.view),
+      ...globalCompositionState({
+        view_packages: validation.candidate?.view_packages,
+        view_theme: validation.candidate?.view_theme,
+        view_composition: validation.candidate?.view_composition
+      }, document.revision, compositionBootSnapshot)
     });
     return;
   }
@@ -445,7 +720,8 @@ async function handleRequest(
           saved,
           options.runningRevision ?? document.revision,
           config.view,
-          await readRegisteredProjectConfigs(config.homeRoot)
+          await readRegisteredProjectConfigs(config.homeRoot),
+          compositionBootSnapshot
         ),
         saved: true
       });
@@ -479,7 +755,11 @@ async function handleRequest(
       sendJson(response, 404, { code: "project_unavailable", error: "No Project is currently selected" });
       return;
     }
-    sendJson(response, 200, projectSettingsPayload(document));
+    sendJson(response, 200, projectSettingsPayload(
+      document,
+      await readGlobalSettingsDocument(config),
+      compositionBootSnapshot.entries.get(document.resolved.project?.name ?? "memsphere")
+    ));
     return;
   }
 
@@ -514,7 +794,13 @@ async function handleRequest(
     sendJson(response, validation.valid ? 200 : 422, {
       ...publicValidation,
       expectedRevision: document.revision,
-      restartRequired: false
+      restartRequired: false,
+      ...projectCompositionState(
+        validation.candidate?.view,
+        document.revision,
+        global,
+        compositionBootSnapshot.entries.get(document.resolved.project?.name ?? "memsphere")
+      )
     });
     return;
   }
@@ -539,7 +825,14 @@ async function handleRequest(
         draft: body.config as EditableProjectConfigDraft,
         globalConfigPath: global.configPath
       });
-      sendJson(response, 200, { ...projectSettingsPayload(saved), saved: true });
+      sendJson(response, 200, {
+        ...projectSettingsPayload(
+          saved,
+          global,
+          compositionBootSnapshot.entries.get(saved.resolved.project?.name ?? "memsphere")
+        ),
+        saved: true
+      });
     } catch (error) {
       if (error instanceof ConfigDraftValidationError) {
         sendJson(response, 422, {
@@ -582,10 +875,18 @@ async function handleRequest(
 
   if (request.method === "GET" && url.pathname === "/api/market/memories") {
     try {
+      if (url.searchParams.get("representation") === "count") {
+        sendJson(response, 200, { count: await countMemoryMarket() });
+        return;
+      }
       const [memories, changeResult] = await Promise.all([
         listMemoryMarket(config.memoryRoot),
         config.project?.name
-          ? listMemoryChangesBestEffort({ home: config.homeRoot, project: config.project.name })
+          ? listMemoryChangesBestEffort({
+            home: config.homeRoot,
+            project: config.project.name,
+            memoryScope: "canonical"
+          })
           : Promise.resolve({ changes: [], failures: [] })
       ]);
       const importing = activeMarketImports(changeResult.changes);
@@ -615,10 +916,16 @@ async function handleRequest(
       const body = await readJsonBody<{ operator?: unknown }>(request);
       const active = activeMarketImports((await listMemoryChangesBestEffort({
         home: config.homeRoot,
-        project: config.project.name
+        project: config.project.name,
+        memoryScope: "canonical"
       })).changes).get(reference);
       if (active) {
-        const change = await readMemoryChange({ home: config.homeRoot, project: config.project.name, changeId: active });
+        const change = await readMemoryChange({
+          home: config.homeRoot,
+          project: config.project.name,
+          memoryScope: "canonical",
+          changeId: active
+        });
         sendJson(response, 200, { change: await memoryChangeSummary(change) });
         return;
       }
@@ -647,7 +954,8 @@ async function handleRequest(
     }
     const { changes, failures } = await listMemoryChangesBestEffort({
       home: config.homeRoot,
-      project: config.project.name
+      project: config.project.name,
+      memoryScope: "canonical"
     });
     sendJson(response, 200, {
       changes: [
@@ -696,7 +1004,12 @@ async function handleRequest(
     const changeId = decodeURIComponent(changeMatch[1]);
     let change: MemoryChangeSet;
     try {
-      change = await readMemoryChange({ home: config.homeRoot, project: config.project.name, changeId });
+      change = await readMemoryChange({
+        home: config.homeRoot,
+        project: config.project.name,
+        memoryScope: "canonical",
+        changeId
+      });
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
         sendJson(response, 404, { code: "changeset_not_found", error: `ChangeSet not found: ${changeId}` });
@@ -716,12 +1029,22 @@ async function handleRequest(
     const targetMemories = await withMemoryChangeDetailSnapshot({
       home: config.homeRoot,
       project: config.project.name,
+      memoryScope: "canonical",
       changeId,
-      use: async ({ files }) => Promise.all(files.map(async (file) => ({
-        reference: file.reference,
-        operation: file.operation,
-        memory: memoryPayloadFromSource(file.label, await readFile(file.path, "utf8"))
-      })))
+      use: async ({ files }) => Promise.all(files.map(async (file) => {
+        const memory = file.candidatePath
+          ? memoryPayloadFromSource(file.label, await readFile(file.candidatePath, "utf8"))
+          : undefined;
+        const baseMemory = file.basePath
+          ? memoryPayloadFromSource(file.label, await readFile(file.basePath, "utf8"))
+          : undefined;
+        return {
+          reference: file.reference,
+          operation: file.operation,
+          ...(memory ? { memory } : {}),
+          ...(baseMemory ? { baseMemory } : {})
+        };
+      }))
     });
     sendJson(response, 200, {
       change: await memoryChangeSummary(change),
@@ -898,7 +1221,13 @@ async function handleRequest(
 
   if (request.method === "GET" && url.pathname === "/api/runs") {
     if (url.searchParams.get("representation") === "summary") {
-      sendJson(response, 200, { runs: await listRunSummaries(config.runsRoot) });
+      const status = url.searchParams.get("status")?.trim();
+      if (status && !["running", "done", "abandoned"].includes(status)) {
+        sendJson(response, 400, { error: "unsupported Run status" });
+        return;
+      }
+      const runs = await listRunSummaries(config.runsRoot);
+      sendJson(response, 200, { runs: status ? runs.filter(run => run.status === status) : runs });
       return;
     }
     sendJson(response, 200, { runs: await loadRunPayload(config) });
@@ -1386,16 +1715,18 @@ function resolveMemoryChangeActor(config: MemsphereConfig, input: unknown): Memo
   throw new Error("operator must identify a configured Human Actor or a browser UUID");
 }
 
-function normalizeMemoryChangeLocation(input: unknown): { anchor: string; line: number; hash?: string } | undefined {
+function normalizeMemoryChangeLocation(input: unknown): { anchor: string; line?: number; hash?: string } | undefined {
   if (input === undefined) return undefined;
   if (!input || typeof input !== "object") throw new Error("location must be an object");
   const location = input as { anchor?: unknown; line?: unknown; hash?: unknown };
   if (typeof location.anchor !== "string" || !location.anchor.trim()) throw new Error("location.anchor is required");
-  if (!Number.isInteger(location.line) || Number(location.line) < 1) throw new Error("location.line must be a positive integer");
+  if (location.line !== undefined && (!Number.isInteger(location.line) || Number(location.line) < 1)) {
+    throw new Error("location.line must be a positive integer");
+  }
   if (location.hash !== undefined && typeof location.hash !== "string") throw new Error("location.hash must be a string");
   return {
     anchor: location.anchor.trim(),
-    line: Number(location.line),
+    ...(location.line !== undefined ? { line: Number(location.line) } : {}),
     ...(typeof location.hash === "string" && location.hash ? { hash: location.hash } : {})
   };
 }
@@ -1425,6 +1756,7 @@ async function withMemoryPayloadRoot<T>(
     return viewCache.previews.use({
       home: config.homeRoot,
       project: config.project.name,
+      memoryScope: "canonical",
       changeId,
       use: async ({ change, memoryRoot }) => use(memoryRoot, {
         mode: "changeset",
@@ -1486,31 +1818,40 @@ async function loadMemorySummaryPayloadFromRoot(
   memoryRoot: string,
   source: MemoryPayload["source"]
 ): Promise<MemoryPayload> {
-  const systemReferences = await systemMemoryReferences();
+  const [systemReferences, pathsByKind] = await Promise.all([
+    systemMemoryReferences(),
+    Promise.all(memoryKinds.map(async kind => ({ kind, paths: await listMemoryFiles(memoryRoot, kind) })))
+  ]);
   const memories: MemoryPayload["memories"] = [];
   const fileIndex = new Map<string, { kind: MemoryKind; path: string }>();
-  for (const kind of memoryKinds) {
-    for (const path of await listMemoryFiles(memoryRoot, kind)) {
-      const relativePath = portableRelative(memoryRoot, path);
-      try {
-        const summary = await readMemoryFileSummary(kind, path);
-        memories.push({
-          id: `${kind}/${summary.names[0]}`,
-          kind,
-          path: relativePath,
-          system: summary.names.some((name) => systemReferences.has(`${kind}/${name}`)),
-          names: summary.names
-        });
-        fileIndex.set(`${kind}/${summary.names[0]}`, { kind, path });
-      } catch (error) {
-        memories.push({
-          id: `${kind}/${relativePath}`,
-          kind,
-          path: relativePath,
-          system: false,
-          error: formatMemoryLoadError(error)
-        });
-      }
+  const summaries = await Promise.all(pathsByKind.flatMap(({ kind, paths }) => paths.map(async path => {
+    const relativePath = portableRelative(memoryRoot, path);
+    try {
+      return { ok: true as const, kind, path, relativePath, summary: await readMemoryFileSummary(kind, path) };
+    } catch (error) {
+      return { ok: false as const, kind, path, relativePath, error };
+    }
+  })));
+  for (const item of summaries) {
+    const { kind, path, relativePath } = item;
+    if (item.ok) {
+      const summary = item.summary;
+      memories.push({
+        id: `${kind}/${summary.names[0]}`,
+        kind,
+        path: relativePath,
+        system: summary.names.some((name) => systemReferences.has(`${kind}/${name}`)),
+        names: summary.names
+      });
+      fileIndex.set(`${kind}/${summary.names[0]}`, { kind, path });
+    } else {
+      memories.push({
+        id: `${kind}/${relativePath}`,
+        kind,
+        path: relativePath,
+        system: false,
+        error: formatMemoryLoadError(item.error)
+      });
     }
   }
   viewCache.replaceIndex(memoryRoot, fileIndex);
@@ -1584,12 +1925,13 @@ function isMemoryReferenceValue(value: unknown): boolean {
   return Boolean(value && typeof value === "object" && (value as { tag?: unknown }).tag === "!ref");
 }
 
+let systemMemoryReferencesPromise: Promise<Set<string>> | undefined;
+
 async function systemMemoryReferences(): Promise<Set<string>> {
-  return new Set(
-    (await readBundledSystemMemories()).flatMap((memory) =>
-      memory.names.map((name) => `${memory.kind}/${name}`)
-    )
-  );
+  systemMemoryReferencesPromise ??= readBundledSystemMemories().then(memories => new Set(
+    memories.flatMap((memory) => memory.names.map((name) => `${memory.kind}/${name}`))
+  ));
+  return systemMemoryReferencesPromise;
 }
 
 async function loadRunPayload(config: MemsphereConfig): Promise<unknown[]> {
@@ -1916,7 +2258,13 @@ function publicArtifactReviewOpinion(opinion: ArtifactReviewSubmittedOpinion | u
     vote: opinion.vote,
     summary: opinion.summary,
     renderedSummary: opinion.summary ? renderArtifactReviewMarkdown(opinion.summary) : undefined,
-    submittedAt: opinion.submittedAt
+    submittedAt: opinion.submittedAt,
+    delegation: opinion.delegation ? {
+      kind: opinion.delegation.kind,
+      runId: opinion.delegation.runId,
+      humanActorId: opinion.delegation.humanActorId,
+      authorizationNote: opinion.delegation.authorizationNote
+    } : undefined
   };
 }
 
@@ -2074,16 +2422,19 @@ function globalSettingsPayload(
   document: GlobalConfigDocument,
   runningRevision: string,
   runningView: MemsphereConfig["view"],
-  projects: ProjectConfigReference[]
+  projects: ProjectConfigReference[],
+  compositionBootSnapshot: ViewCompositionBootSnapshot
 ): Record<string, unknown> {
   const diskView = document.raw.view ?? { host: "127.0.0.1", port: 0 };
   return {
     configPath: document.configPath,
     scopeRoot: document.scopeRoot,
     runningRevision,
-    runningView,
+    runningView: { host: runningView.host, port: runningView.port },
     diskRevision: document.revision,
     restartRequired: !sameViewConfig(diskView, runningView),
+    ...globalCompositionState(document.raw, document.revision, compositionBootSnapshot),
+    operatorTokenConfigured: Boolean(document.raw.view?.operator_token),
     explicit: {
       language: Object.hasOwn(document.raw, "language"),
       view: Object.hasOwn(document.raw, "view"),
@@ -2103,19 +2454,25 @@ function globalSettingsPayload(
 }
 
 function sameViewConfig(
-  left: MemsphereConfig["view"],
+  left: { host: string; port: number; operator_token?: string },
   right: MemsphereConfig["view"]
 ): boolean {
-  return left.host === right.host && left.port === right.port;
+  return left.host === right.host && left.port === right.port &&
+    left.operator_token === right.operatorToken;
 }
 
-function projectSettingsPayload(document: ProjectConfigDocument): Record<string, unknown> {
+function projectSettingsPayload(
+  document: ProjectConfigDocument,
+  global: GlobalConfigDocument,
+  running: ViewCompositionBootEntry | undefined
+): Record<string, unknown> {
   return {
     configPath: document.configPath,
     projectName: document.resolved.project?.name,
     scopeRoot: document.scopeRoot,
     diskRevision: document.revision,
     restartRequired: false,
+    ...projectCompositionState(document.raw.view, document.revision, global, running),
     explicit: { controlPlane: Object.hasOwn(document.raw, "control_plane") },
     config: editableProjectConfigDraft(document),
     store: document.raw.store,
@@ -2126,6 +2483,46 @@ function projectSettingsPayload(document: ProjectConfigDocument): Record<string,
     },
     permissionCatalog: listPermissionDefinitions()
       .filter((definition) => !hiddenSettingsPermissionIds.has(definition.id))
+  };
+}
+
+function globalCompositionState(
+  disk: Pick<GlobalConfigDocument["raw"], "view_packages" | "view_theme" | "view_composition">,
+  diskRevision: string,
+  running: ViewCompositionBootSnapshot
+): Record<string, unknown> {
+  const diskDigest = viewCompositionDigest({
+    view_packages: disk.view_packages,
+    view_theme: disk.view_theme,
+    view_composition: disk.view_composition
+  });
+  return {
+    restartPending: running.globalDigest !== diskDigest,
+    composition: {
+      runningDigest: running.globalDigest,
+      diskDigest,
+      runningRevision: running.globalRevision,
+      diskRevision
+    }
+  };
+}
+
+function projectCompositionState(
+  _projectView: NonNullable<MemsphereConfig["project"]>["view"],
+  projectRevision: string,
+  global: GlobalConfigDocument,
+  running: ViewCompositionBootEntry | undefined
+): Record<string, unknown> {
+  const diskDigest = compositionConfigDigest(global.raw.view_packages, global.raw.view_theme, global.raw.view_composition);
+  return {
+    restartPending: !running || running.digest !== diskDigest,
+    composition: {
+      runningDigest: running?.digest,
+      diskDigest,
+      runningGlobalRevision: running?.globalRevision,
+      diskGlobalRevision: global.revision,
+      diskProjectRevision: projectRevision
+    }
   };
 }
 
@@ -2312,6 +2709,14 @@ function normalizeArtifactReviewDraft(input: { vote?: unknown; comments?: unknow
 }
 
 function sendArtifactReviewError(response: ServerResponse, error: unknown): void {
+  if (error instanceof ArtifactReviewSubmissionConflictError) {
+    sendJson(response, 409, {
+      error: error.message,
+      code: error.code,
+      assignmentId: error.assignmentId
+    });
+    return;
+  }
   if (error instanceof ArtifactReviewConflictError) {
     sendJson(response, 409, {
       error: error.message,
@@ -2397,17 +2802,488 @@ function sendHtml(response: ServerResponse, body: string): void {
   response.end(body);
 }
 
+const compiledViewSdkUrl = new URL("../view/view-sdk.js", import.meta.url);
+const compiledViewRuntimeUrl = new URL("../view/view-runtime.js", import.meta.url);
+const sourceViewSdkUrl = new URL("../view/view-sdk.ts", import.meta.url);
+const sourceViewRuntimeUrl = new URL("../view/view-runtime.ts", import.meta.url);
+const viewRuntimeDependencies = new Map([
+  ["/assets/system-icon.js", {
+    compiled: new URL("../view/system-icon.js", import.meta.url),
+    source: new URL("../view/system-icon.ts", import.meta.url)
+  }],
+  ["/assets/theme.js", {
+    compiled: new URL("../view/theme.js", import.meta.url),
+    source: new URL("../view/theme.ts", import.meta.url)
+  }],
+  ["/assets/ui-primitives.js", {
+    compiled: new URL("../view/ui-primitives.js", import.meta.url),
+    source: new URL("../view/ui-primitives.ts", import.meta.url)
+  }],
+  ["/assets/core-plugin.js", {
+    compiled: new URL("../view/core-plugin.js", import.meta.url),
+    source: new URL("../view/core-plugin.ts", import.meta.url)
+  }],
+  ["/assets/core-routes.js", {
+    compiled: new URL("../view/core-routes.js", import.meta.url),
+    source: new URL("../view/core-routes.ts", import.meta.url)
+  }],
+  ["/assets/shell/home.js", {
+    compiled: new URL("../view/shell/home.js", import.meta.url),
+    source: new URL("../view/shell/home.ts", import.meta.url)
+  }]
+]);
+
+const viewSdkVersion = "1.0.0";
+
+function configuredThemeOverrides(config: MemsphereConfig): NonNullable<ViewHostBootInstance["themes"]> {
+  const contributions: Array<NonNullable<ViewHostBootInstance["themes"]>[number]> = [];
+  const add = (
+    sourceId: string,
+    layer: number,
+    overrides: { light?: Record<string, string>; dark?: Record<string, string> } | undefined,
+  ) => {
+    if (!overrides) return;
+    if (!overrides.light || !overrides.dark) throw new Error(`${sourceId} must provide both light and dark token overrides`);
+    contributions.push(Object.freeze({
+      sourceId,
+      tokens: Object.freeze({ light: Object.freeze({ ...overrides.light }), dark: Object.freeze({ ...overrides.dark }) }),
+      selected: true,
+      layer
+    }));
+  };
+  add("org.memsphere.user.home-overrides", VIEW_THEME_HOME_LAYER - 50, config.viewTheme?.overrides);
+  return Object.freeze(contributions);
+}
+
+async function captureViewCompositionBootSnapshot(
+  config: MemsphereConfig,
+  assets: ViewPackageAssetRegistry
+): Promise<ViewCompositionBootSnapshot> {
+  const globalDocument = await readGlobalSettingsDocument(config);
+  const viewPackages = structuredClone(config.viewPackages);
+  const viewTheme = structuredClone(config.viewTheme);
+  const viewComposition = structuredClone(config.viewComposition);
+  const entries = new Map<string, ViewCompositionBootEntry>();
+  const registered = (await listRegisteredProjects(config.homeRoot ?? resolveMemsphereHome()))
+    .filter(project => !project.missing);
+  const startupProjectId = config.project?.name;
+  const projectIds = new Set(registered.map(project => project.name));
+  if (startupProjectId) projectIds.add(startupProjectId);
+  await Promise.all([...projectIds].map(async projectId => {
+    const resolved = projectId === startupProjectId
+      ? config
+      : await readProjectConfig(projectId, config.homeRoot);
+    try {
+      await readProjectConfigDocument(resolved.configPath, resolved);
+    } catch {
+      // A Project removed during startup remains absent from the immutable boot snapshot.
+      return;
+    }
+    const digest = compositionConfigDigest(viewPackages, viewTheme, viewComposition);
+    const presentationConfig: MemsphereConfig = {
+      ...resolved,
+      viewPackages,
+      viewTheme,
+      viewComposition
+    };
+    const composition = resolveViewPackageComposition({
+      global: viewPackages,
+      globalThemeSource: viewTheme?.selected_source,
+      composition: viewComposition,
+      sdkVersion: viewSdkVersion
+    });
+    entries.set(projectId, Object.freeze({
+      projectId,
+      globalRevision: globalDocument.revision,
+      viewPackages,
+      viewTheme,
+      viewComposition,
+      digest,
+      composition,
+      externalInstances: composition.then(value => externalViewInstances(presentationConfig, value, assets))
+    }));
+  }));
+  await Promise.all([...entries.values()].map(entry => entry.externalInstances));
+  return Object.freeze({
+    globalRevision: globalDocument.revision,
+    globalDigest: viewCompositionDigest({ view_packages: viewPackages, view_theme: viewTheme, view_composition: viewComposition }),
+    registeredProjectIds: Object.freeze(new Set(registered.map(project => project.name))),
+    entries
+  });
+}
+
+function compositionConfigDigest(
+  viewPackages: MemsphereConfig["viewPackages"],
+  viewTheme: MemsphereConfig["viewTheme"],
+  viewComposition: MemsphereConfig["viewComposition"]
+): string {
+  return viewCompositionDigest({
+    view_packages: viewPackages,
+    view_theme: viewTheme,
+    view_composition: viewComposition
+  });
+}
+
+function configWithViewCompositionSnapshot(
+  config: MemsphereConfig,
+  entry: ViewCompositionBootEntry
+): MemsphereConfig {
+  return {
+    ...config,
+    viewPackages: entry.viewPackages,
+    viewTheme: entry.viewTheme,
+    viewComposition: entry.viewComposition
+  };
+}
+
+async function externalViewInstances(
+  config: MemsphereConfig,
+  composition: ResolvedViewPackageComposition,
+  assets: ViewPackageAssetRegistry,
+): Promise<readonly ViewHostBootInstance[]> {
+  const projectId = config.project?.name ?? "memsphere";
+  return Promise.all(composition.instances.map(async instance => {
+    try {
+    const entry = await assets.register({
+      projectId,
+      instanceId: instance.instanceId,
+      packageRoot: instance.package.root,
+      file: instance.package.manifest.view.entry
+    });
+    const capabilities = instance.capabilities;
+    const owner = `${instance.package.manifest.id}@${instance.package.manifest.version}:${instance.instanceId}`;
+    const styles = await Promise.all((instance.package.manifest.view.styles ?? []).flatMap(style => {
+      if (!instance.allowedStyleIds.has(style.id)) return [];
+      const required = style.scope === "global" ? "styles.global" as const : "styles.scoped" as const;
+      if (!capabilities.has(required)) return [];
+      return [loadViewPackageStyle({ projectId, owner, instance, style, assets })];
+    }));
+    const selectedHomeTheme = config.viewTheme?.selected_source;
+    const suppliesSelectedTheme = selectedHomeTheme?.split(":")[0] === instance.package.manifest.id;
+    const themes = await Promise.all((instance.package.manifest.view.themes ?? []).flatMap(theme => {
+      const sourceId = `${instance.package.manifest.id}:${theme.id}`;
+      const selected = sourceId === selectedHomeTheme;
+      return selected
+        ? [loadViewPackageTheme({ projectId, sourceId, layer: VIEW_THEME_HOME_LAYER, selected, instance, file: theme.file, assets })]
+        : [];
+    }));
+    return Object.freeze({
+      pluginPath: `/assets/view-packages/${encodeURIComponent(projectId)}/${entry.key}`,
+      config: instance.config,
+      styles: Object.freeze(styles),
+      themes: Object.freeze(themes),
+      contributionPolicy: Object.freeze({
+        registrations: instance.contributionPolicy.registrations,
+        blockedCells: instance.contributionPolicy.blockedCells
+      }),
+      themeOperations: Object.freeze([
+        ...(suppliesSelectedTheme && capabilities.has("theme.register") ? ["register" as const] : []),
+        ...(suppliesSelectedTheme && capabilities.has("theme.override") ? ["override" as const] : [])
+      ]),
+      allowedServices: Object.freeze([
+        "slots" as const,
+        "theme" as const,
+        "presentation" as const,
+        "ui" as const,
+        ...(
+          suppliesSelectedTheme && (capabilities.has("theme.register") || capabilities.has("theme.override"))
+            ? ["themeRegistry" as const]
+            : []
+        )
+      ]),
+      module: Object.freeze({
+        projectId,
+        moduleId: instance.package.manifest.id,
+        moduleVersion: instance.package.manifest.version,
+        instanceId: instance.instanceId
+      })
+    });
+    } catch (error) {
+      return Object.freeze({
+        pluginPath: `/assets/view-packages/${encodeURIComponent(projectId)}/invalid`,
+        loadError: error instanceof Error ? error.message : String(error),
+        config: instance.config,
+        module: Object.freeze({
+          projectId,
+          moduleId: instance.package.manifest.id,
+          moduleVersion: instance.package.manifest.version,
+          instanceId: instance.instanceId
+        })
+      });
+    }
+  }));
+}
+
+async function loadViewPackageTheme(input: {
+  projectId: string;
+  sourceId: string;
+  layer: number;
+  selected: boolean;
+  instance: ResolvedViewPackageComposition["instances"][number];
+  file: string;
+  assets: ViewPackageAssetRegistry;
+}): Promise<NonNullable<ViewHostBootInstance["themes"]>[number]> {
+  const asset = await input.assets.register({
+    projectId: input.projectId,
+    instanceId: input.instance.instanceId,
+    packageRoot: input.instance.package.root,
+    file: input.file
+  });
+  const loaded = await input.assets.read(asset.key, input.projectId);
+  if (!loaded) throw new Error(`Theme changed while composing View Package: ${input.file}`);
+  const value = JSON.parse(loaded.body.toString("utf8")) as Record<string, unknown>;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Theme must be a JSON object: ${input.file}`);
+  const light = value.light;
+  const dark = value.dark;
+  if (!light || typeof light !== "object" || Array.isArray(light) || !dark || typeof dark !== "object" || Array.isArray(dark)) {
+    throw new Error(`Theme must provide light and dark token maps: ${input.file}`);
+  }
+  const complete = value.complete === true;
+  validateViewThemePalette({ light, dark } as Parameters<typeof validateViewThemePalette>[0], complete);
+  const required = complete ? "theme.register" as const : "theme.override" as const;
+  if (!input.instance.capabilities.has(required)) throw new Error(`Theme contribution lacks declared ${required} capability: ${input.sourceId}`);
+  return Object.freeze({
+    sourceId: input.sourceId,
+    tokens: Object.freeze({ light: Object.freeze({ ...light }), dark: Object.freeze({ ...dark }) }),
+    ...(complete ? { complete: true } : {}),
+    ...(input.selected ? { selected: true } : {}),
+    layer: input.layer
+  });
+}
+
+async function loadViewPackageStyle(input: {
+  projectId: string;
+  owner: string;
+  instance: ResolvedViewPackageComposition["instances"][number];
+  style: NonNullable<ResolvedViewPackageComposition["instances"][number]["package"]["manifest"]["view"]["styles"]>[number];
+  assets: ViewPackageAssetRegistry;
+}): Promise<{ id: string; css: string; scope: "module" | "global" }> {
+  const styleAsset = await input.assets.register({
+    projectId: input.projectId,
+    instanceId: input.instance.instanceId,
+    packageRoot: input.instance.package.root,
+    file: input.style.file
+  });
+  const styleBody = await input.assets.read(styleAsset.key, input.projectId);
+  if (!styleBody) throw new Error(`Style changed while composing View Package: ${input.style.file}`);
+  const source = styleBody.body.toString("utf8");
+  const validated = validateGlobalStyle(source, input.style.namespace);
+  const urls = new Map<string, string>();
+  for (const relativePath of validated.assets) {
+    const asset = await input.assets.register({
+      projectId: input.projectId,
+      instanceId: input.instance.instanceId,
+      packageRoot: input.instance.package.root,
+      file: relativePath.startsWith("./") ? relativePath : `./${relativePath}`
+    });
+    urls.set(relativePath, `/assets/view-packages/${encodeURIComponent(input.projectId)}/${asset.key}`);
+  }
+  const scoped = input.style.scope === "module" ? scopePackageStyle(validated.css, input.owner) : validated.css;
+  return Object.freeze({
+    id: `${input.instance.package.manifest.id}:${input.instance.instanceId}:${input.style.id}`,
+    css: rewriteGlobalStyleUrls(scoped, relativePath => {
+      const url = urls.get(relativePath);
+      if (!url) throw new Error(`Style references an unregistered asset: ${relativePath}`);
+      return url;
+    }),
+    scope: input.style.scope
+  });
+}
+
+function builtinAssetPath(moduleId: string): string {
+  return `/assets/modules/${encodeURIComponent(moduleId)}/index.js`;
+}
+
+function builtinModuleAsset(pathname: string) {
+  return builtinModuleCatalog.find(entry => builtinAssetPath(entry.moduleId) === pathname);
+}
+
+async function builtinViewInstances(config: MemsphereConfig): Promise<readonly ViewHostBootInstance[]> {
+  const projectId = config.project?.name ?? "memsphere";
+  const projectPrefix = `/projects/${encodeURIComponent(projectId)}`;
+  const projectApiBase = `/api/projects/${encodeURIComponent(projectId)}`;
+  return Promise.all(builtinModuleCatalog.map(async entry => {
+    const { manifest } = await readBuiltinViewManifest(entry.packageDirectory, entry.moduleId);
+    const homeRoute = entry.routes.find(route => route.id === entry.homeRouteId);
+    const homeRouteParams = {
+      ...(homeRoute?.path.split("/").includes(":projectId") ? { projectId } : {}),
+      ...(entry.moduleId === "org.memsphere.settings" ? { module: "general" } : {})
+    };
+    return {
+      pluginPath: builtinAssetPath(entry.moduleId),
+      config: { projectApiBase },
+      routeBasePath: ["org.memsphere.run", "org.memsphere.settings"].includes(entry.moduleId)
+        ? projectPrefix
+        : "/",
+      routeGrants: entry.routes,
+      home: {
+        title: entry.title,
+        summary: entry.summary,
+        icon: entry.icon,
+        routeId: entry.homeRouteId,
+        ...(Object.keys(homeRouteParams).length ? { routeParams: homeRouteParams } : {})
+      },
+      module: {
+        projectId,
+        moduleId: entry.moduleId,
+        moduleVersion: manifest.version,
+        instanceId: entry.instanceId
+      }
+    };
+  }));
+}
+
+async function readBuiltinViewManifest(packageDirectory: string, expectedModuleId: string) {
+  const packageUrl = import.meta.url.endsWith(".ts")
+    ? new URL(`../../modules/${packageDirectory}/`, import.meta.url)
+    : new URL(`../modules/${packageDirectory}/`, import.meta.url);
+  const manifest = await readModuleManifest(fileURLToPath(new URL("module.json", packageUrl)));
+  if (manifest.id !== expectedModuleId) throw new Error(`Builtin Module id does not match catalog: ${expectedModuleId}`);
+  if (!isViewSdkCompatible(manifest, viewSdkVersion)) throw new Error(`Builtin Module requires incompatible View SDK: ${manifest.view.sdk}`);
+  return { manifest, packageUrl };
+}
+
+async function readBuiltinViewBundle(packageDirectory: string, expectedModuleId: string): Promise<string> {
+  const { manifest, packageUrl } = await readBuiltinViewManifest(packageDirectory, expectedModuleId);
+  const compiledPath = resolveModuleViewEntry(fileURLToPath(packageUrl), manifest);
+  try {
+    const bundle = await readFile(compiledPath, "utf8");
+    if (!bundle.trim()) throw new Error(`Builtin View bundle is empty: ${compiledPath}`);
+    return bundle;
+  } catch (error) {
+    if (!(import.meta.url.endsWith(".ts") && error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error;
+    const [{ build }, source] = await Promise.all([
+      import("esbuild"),
+      Promise.resolve(new URL(`../../modules/${packageDirectory}/adapter/view/index.ts`, import.meta.url))
+    ]);
+    const result = await build({
+      entryPoints: [fileURLToPath(source)], bundle: true, write: false, format: "esm", platform: "browser",
+      target: "es2022", external: ["@memsphere/view-sdk"], logLevel: "silent"
+    });
+    const bundle = result.outputFiles[0]?.text;
+    if (!bundle?.trim()) throw new Error(`Builtin View source bundle is empty: ${source.pathname}`);
+    return bundle;
+  }
+}
+
+async function readCompiledBrowserModule(compiledUrl: URL, sourceUrl: URL): Promise<string> {
+  try {
+    const source = await readFile(compiledUrl, "utf8");
+    if (!source.trim()) throw new Error(`View browser module is empty: ${compiledUrl.pathname}`);
+    return source;
+  } catch (error) {
+    if (
+      import.meta.url.endsWith(".ts")
+      && error && typeof error === "object" && "code" in error && error.code === "ENOENT"
+    ) {
+      const [{ transpileModule, ModuleKind, ScriptTarget }, source] = await Promise.all([
+        import("typescript"),
+        readFile(sourceUrl, "utf8")
+      ]);
+      return transpileModule(source, {
+        compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 }
+      }).outputText;
+    }
+    throw error;
+  }
+}
+
+function sendJavaScript(request: IncomingMessage, response: ServerResponse, body: string): void {
+  const etag = `"${createHash("sha256").update(body).digest("base64url")}"`;
+  const commonHeaders = {
+    "cache-control": "no-cache",
+    "etag": etag,
+    "vary": "Accept-Encoding",
+    "x-content-type-options": "nosniff"
+  };
+  if (request.headers["if-none-match"] === etag) {
+    response.writeHead(304, commonHeaders);
+    response.end();
+    return;
+  }
+  const gzip = /(?:^|,)\s*gzip\s*(?:,|$)/i.test(request.headers["accept-encoding"] ?? "");
+  const payload = gzip ? gzipSync(body) : body;
+  response.writeHead(200, {
+    "content-type": "text/javascript; charset=utf-8",
+    ...commonHeaders,
+    ...(gzip ? { "content-encoding": "gzip" } : {}),
+    "content-length": Buffer.byteLength(payload)
+  });
+  response.end(payload);
+}
+
+async function sendSystemIcon(response: ServerResponse, name: string): Promise<void> {
+  const supportedRegular = new Set([
+    "archive", "arrow-right", "arrows-clockwise", "brain", "caret-down", "check", "check-circle", "circle-fill", "clock-counter-clockwise", "code", "cube", "dots-three", "file-text", "folder", "gear-six", "house", "magnifying-glass", "play-circle", "plus", "seal-check", "sidebar-simple", "sliders-horizontal", "sparkle", "stack", "storefront", "trash", "user", "warning-circle", "x"
+  ]);
+  const weighted = name.match(/^(brain|circle|cube|gear-six|house|play-circle|seal-check|stack)-(duotone|fill)$/);
+  if (!supportedRegular.has(name) && !weighted) {
+    sendText(response, 404, "Icon not found");
+    return;
+  }
+  const iconUrl = weighted
+    ? import.meta.resolve(`@phosphor-icons/core/${weighted[2]}/${weighted[1]}-${weighted[2]}.svg`)
+    : import.meta.resolve(`@phosphor-icons/core/regular/${name}.svg`);
+  const body = await readFile(fileURLToPath(iconUrl), "utf8");
+  response.writeHead(200, {
+    "content-type": "image/svg+xml; charset=utf-8",
+    "cache-control": "public, max-age=31536000, immutable",
+    "x-content-type-options": "nosniff"
+  });
+  response.end(body);
+}
+
 export function isViewPagePath(pathname: string): boolean {
-  if (["/", "/memories", "/market", "/tasks"].includes(pathname)) return true;
-  if (/^\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
-  if (/^\/projects\/[^/]+\/memories$/.test(pathname)) return true;
-  if (/^\/projects\/[^/]+\/memories\/[^/]+\/[^/]+$/.test(pathname)) return true;
-  if (/^\/projects\/[^/]+\/market$/.test(pathname)) return true;
-  if (/^\/projects\/[^/]+\/changes\/[^/]+$/.test(pathname)) return true;
-  if (/^\/tasks\/[^/]+$/.test(pathname)) return true;
-  if (/^\/tasks\/[^/]+\/artifact-reviews\/[^/]+$/.test(pathname)) return true;
-  if (/^\/settings\/[^/]+$/.test(pathname)) return true;
-  return false;
+  return coreViewRoutes.some(route => matchesViewRoute(route.path, pathname))
+    || builtinModuleCatalog.some(module => module.routes.some(route => (
+    [route.path, ...(route.aliases ?? [])].some(pattern => matchesViewRoute(pattern, pathname))
+  )));
+}
+
+function matchProjectScopedPath(pathname: string, prefix: string): { projectId: string; remainder: string } | undefined {
+  if (!pathname.startsWith(prefix)) return undefined;
+  const tail = pathname.slice(prefix.length);
+  const separator = tail.indexOf("/");
+  const encodedProjectId = separator < 0 ? tail : tail.slice(0, separator);
+  if (!encodedProjectId) return undefined;
+  try {
+    const projectId = decodeURIComponent(encodedProjectId);
+    if (!projectId || projectId.includes("/")) return undefined;
+    return { projectId, remainder: separator < 0 ? "/" : tail.slice(separator) };
+  } catch {
+    return undefined;
+  }
+}
+
+function isProjectResourceApi(pathname: string): boolean {
+  return [
+    "/api/runs", "/api/artifact-reviews", "/api/memories", "/api/changes",
+    "/api/market", "/api/archive/runs", "/api/archive/changes", "/api/settings/project"
+  ].some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+function projectApiPath(projectId: string | undefined, resource: string): string {
+  const suffix = resource.startsWith("/api/") ? resource.slice(4) : resource;
+  return `/api/projects/${encodeURIComponent(projectId ?? "memsphere")}${suffix}`;
+}
+
+function projectPagePath(projectId: string | undefined, resource: string): string {
+  const suffix = resource === "/" ? "" : resource;
+  return `/projects/${encodeURIComponent(projectId ?? "memsphere")}${suffix}`;
+}
+
+function redirect(response: ServerResponse, status: 302 | 307, location: string): void {
+  response.writeHead(status, { location, "cache-control": "no-store" });
+  response.end();
+}
+
+function matchesViewRoute(pattern: string, pathname: string): boolean {
+  if (pattern === "/" || pathname === "/") return pattern === pathname;
+  const expected = pattern.split("/").filter(Boolean);
+  const actual = pathname.split("/").filter(Boolean);
+  return expected.length === actual.length && expected.every((segment, index) => (
+    segment.startsWith(":") ? Boolean(actual[index]) : segment === actual[index]
+  ));
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {

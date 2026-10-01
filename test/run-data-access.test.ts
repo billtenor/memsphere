@@ -1,19 +1,64 @@
 import assert from "node:assert/strict";
-import { link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { AgentActivityRecorder, agentActivityIds, readAgentActivitySnapshot } from "../src/acp/activity.js";
+import { parseControlPlaneConfig } from "../src/control-plane/index.js";
 import { exportRunArtifact } from "../src/commands/run.js";
 import { RunMemoryProvider, runMemoryFiles } from "../src/memory/run-provider.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 import { prepareRunData, readRunContent, runDataModels, runDataStore, saveRunContent } from "../src/project/run-data.js";
-import { currentSchemaFinalization, enterSchema, readRun, reportRun, startRun, type RunState } from "../src/run/store.js";
+import { currentArtifactReview, currentSchemaFinalization, enterSchema, readRun, reportRun, startRun, submitArtifactReviewHumanAssignmentForRunner, type RunState } from "../src/run/store.js";
 import { opaqueRunData } from "./helpers/run-data.js";
+import { reviewConfiguration } from "./helpers/review.js";
 
 function state(): RunState {
   return { contractVersion: 3, id: "run-access", name: "Access", status: "running", procedureName: "test", memoryRoot: "/memory", createdAt: "2026-01-01", updatedAt: "2026-01-01", procedureSnapshots: {}, events: [], stack: [{ type: "procedure", memoryName: "test", index: 0, steps: [{ id: "flow[1]", kind: "action", instruction: "write", artifact: "report", type: "string", format: { name: "markdown", options: {} } }] }] };
 }
+
+test("delegated Human vote preserves the storage failure and pending opinion when Run status cannot be committed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-delegated-store-failure-"));
+  try {
+    const memoryRoot = join(root, "memory");
+    const runsRoot = join(root, "runs");
+    await mkdir(join(memoryRoot, "procedures"), { recursive: true });
+    await writeFile(join(memoryRoot, "procedures", "probe.yaml"), `!procedure\nsyntax: ${currentMemorySyntax}\nnames: [probe]\nflow:\n  - !action\n    action: Review report.\n    artifact: !artifact\n      name: report\n      format: markdown\n      review: [reviewer]\n`);
+    const data = opaqueRunData();
+    prepareRunData({ runsRoot, archiveRoot: join(root, "archive"), manager: data.manager });
+    const started = await startRun({
+      name: "Delegated storage failure", memoryRoot, runsRoot, procedureName: "probe",
+      controlPlane: parseControlPlaneConfig({
+        runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+        actors: { human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] } }
+      }),
+      reviewConfiguration: reviewConfiguration({ procedure: "probe", slots: { reviewer: ["human"] } })
+    });
+    const candidate = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Candidate\n" } });
+    const review = currentArtifactReview(candidate)!;
+    // A readable legacy status plus a directory at the new status target makes
+    // the final rename fail deterministically, without permissions or timing.
+    const target = join(runsRoot, started.id, `${started.id}.json`);
+    const legacy = join(runsRoot, `${started.id}.json`);
+    await rename(target, legacy);
+    await mkdir(target);
+    const before = await readFile(legacy, "utf8");
+    const recordsBefore = [...data.records.keys()];
+    await assert.rejects(submitArtifactReviewHumanAssignmentForRunner({
+      runsRoot, runId: started.id, reviewId: review.id, roundId: review.currentRoundId,
+      assignmentId: "human", vote: "approve", comments: [], authorizationNote: "Human explicitly approved."
+    }), (error: unknown) => {
+      assert(error && typeof error === "object" && "code" in error);
+      assert(["EISDIR", "EEXIST", "EACCES", "EPERM", "ENOTEMPTY"].includes(String(error.code)));
+      return true;
+    });
+    assert.equal(await readFile(legacy, "utf8"), before);
+    assert.deepEqual([...data.records.keys()], recordsBefore);
+    const assignment = currentArtifactReview(await readRun(runsRoot, started.id))!.rounds[0]!.assignments[0]!;
+    assert.equal(assignment.status, "draft");
+    assert.equal(assignment.submitted, undefined);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("Run snapshot excludes Git placeholders, preserves source files and reports/exports via opaque Stores", async () => {
   const root = await mkdtemp(join(tmpdir(), "memsphere-run-snapshot-content-"));

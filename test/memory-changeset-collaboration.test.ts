@@ -76,7 +76,8 @@ test("View ChangeSet records attribution and drives flat Comment claim lifecycle
       use: async ({ files }) => {
         assert.equal(files.length, 1);
         snapshotOperation = files[0]!.operation;
-        assert.match(await readFile(files[0]!.path, "utf8"), /!concept/);
+        assert(files[0]!.candidatePath);
+        assert.match(await readFile(files[0]!.candidatePath, "utf8"), /!concept/);
       }
     });
     assert.equal(snapshotOperation, "unchanged");
@@ -302,7 +303,8 @@ test("View ChangeSet records attribution and drives flat Comment claim lifecycle
       use: async ({ files }) => {
         const later = files.find((file) => file.reference === "concepts/later");
         assert(later);
-        assert.match(await readFile(later.path, "utf8"), /Published after ChangeSet creation/);
+        assert(later.candidatePath);
+        assert.match(await readFile(later.candidatePath, "utf8"), /Published after ChangeSet creation/);
       }
     });
     await assert.rejects(
@@ -367,7 +369,8 @@ test("View ChangeSet uses the Git revision for an Embedded scope snapshot", asyn
       changeId: created.id,
       use: async ({ files }) => {
         assert.equal(files.length, 1);
-        assert.match(await readFile(files[0]!.path, "utf8"), /Published/);
+        assert(files[0]!.candidatePath);
+        assert.match(await readFile(files[0]!.candidatePath, "utf8"), /Published/);
       }
     });
   } finally {

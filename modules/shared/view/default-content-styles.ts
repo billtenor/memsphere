@@ -1,0 +1,721 @@
+/**
+ * The built-in visual contract shared by Memory and Run content.
+ *
+ * Selected global View Package styles are mounted after Module surfaces so
+ * equal-specificity extension rules can override these defaults.
+ */
+export const defaultContentStyles = `
+/* Reduce nested outlines while preserving spacing, grouping, and semantic color. */
+:is(.memory-module, .run-module) [data-mem-content-canvas] {
+  border: 0;
+  background: var(--surface);
+  box-shadow: none;
+}
+
+:is(.memory-module, .run-module) [data-mem-content-list] {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 0;
+  list-style-position: inside;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+:is(.memory-module, .run-module) [data-mem-content-list] > li {
+  padding: 2px 4px 2px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: inherit;
+  line-height: inherit;
+}
+.memory-module .memory-toolbar,
+.memory-module .memory-panel,
+.memory-module .memory-section,
+.memory-module .memory-schema-field,
+.memory-module .memory-flow-item,
+.memory-module .action-contracts,
+.run-module .run-head,
+.run-module .run-panel,
+.run-module .run-step,
+.run-module .run-artifact {
+  border: 0;
+  box-shadow: none;
+}
+
+.memory-module .memory-panel,
+.memory-module .memory-section,
+.memory-module .memory-schema-field,
+.memory-module .action-contracts,
+.run-module .run-panel,
+.run-module .run-artifact {
+  background: color-mix(in srgb, var(--soft) 55%, var(--surface));
+}
+
+.memory-module .memory-panel {
+  background: var(--surface);
+}
+
+/* Statement and Schema nodes share the same quiet hierarchy language. */
+.memory-module .memory-section.memory-node {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.memory-module .memory-section.memory-node > .memory-section-header {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.memory-module .memory-section.memory-node > .memory-section-body {
+  padding: 3px 0 12px 24px;
+  border-top: 0;
+}
+
+.memory-module .memory-section.memory-node.memory-disclosure-root:has(> .memory-section-header .memory-node-title:empty) > .memory-section-header {
+  display: none;
+}
+
+.memory-module .memory-section.memory-node.memory-disclosure-root:has(> .memory-section-header .memory-node-title:empty) > .memory-section-body {
+  padding: 4px 0 16px;
+}
+
+.memory-module .node-badges {
+  gap: 10px;
+}
+
+.memory-module .node-badges > .memory-pill {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.memory-module .node-badges > .memory-pill:first-child {
+  display: none;
+}
+
+.memory-module .memory-schema-field {
+  min-height: 32px;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.memory-module .memory-section.memory-node .memory-child-stack {
+  gap: 3px;
+}
+
+.memory-module .memory-flow-item > .memory-artifact-schema {
+  margin: 0 0 7px;
+}
+
+.memory-module .memory-flow-item > .memory-artifact-schema > .memory-section-header {
+  display: flex;
+  width: max-content;
+  gap: 5px;
+  min-height: 28px;
+  margin: 0;
+  padding: 4px 5px 4px 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text) 76%, var(--muted));
+  font-weight: 600;
+}
+
+.memory-module .memory-flow-item > .memory-artifact-schema > .memory-section-header:hover {
+  background: color-mix(in srgb, var(--soft) 70%, transparent);
+  color: var(--text);
+}
+
+.memory-module .memory-flow-item > .memory-artifact-schema > .memory-section-header .memory-chevron {
+  font-size: 13px;
+  opacity: 0.58;
+}
+
+.memory-module .memory-flow-item > .memory-artifact-schema > .memory-section-header .memory-node-title {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 18px;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: var(--memory-page-line-compact);
+}
+
+.memory-module .memory-flow-item > .memory-artifact-schema > .memory-section-header .node-badges {
+  display: none;
+}
+
+.memory-module .memory-section.memory-node.memory-statement-document {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.memory-module .memory-section.memory-node.memory-statement-document > .memory-section-body {
+  padding: 4px 0 16px;
+  border-top: 0;
+}
+
+/* Memory and Run share one flow visual primitive. Run only adds runtime output. */
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow {
+  display: grid;
+  gap: 6px;
+}
+
+:is(.memory-module, .run-module) .mem-content-document > .mem-content-flow-title {
+  display: none;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-node {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+  background: transparent;
+  box-shadow: none;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 35px;
+  padding: 8px 0;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-action {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding-top: 1px;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.45;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-label {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 19px;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent-soft, #dfeeea) 82%, var(--surface));
+  color: color-mix(in srgb, var(--accent) 82%, var(--text));
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-label.is-branch,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-condition:not(:empty) {
+  display: block;
+  width: max-content;
+  background: color-mix(in srgb, #e8b763 28%, var(--surface));
+  color: #75521b;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-condition {
+  margin-left: -30px;
+  margin-bottom: 7px;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-condition:empty {
+  display: none;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-branch,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-node.is-branch > .mem-content-flow-node-body {
+  position: relative;
+  margin-left: 0;
+  padding: 4px 0 0 30px;
+  border-top: 0;
+  background: transparent;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-branch::before,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-node.is-branch > .mem-content-flow-node-body::before {
+  position: absolute;
+  top: 0;
+  bottom: 12px;
+  left: 0;
+  width: 1px;
+  background: color-mix(in srgb, #c58b2b 34%, transparent);
+  content: "";
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-branch:has(> .mem-content-flow-condition:not(:empty))::before {
+  top: 30px;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-children {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-flow-children > .mem-content-flow-node::before {
+  position: absolute;
+  top: 19px;
+  left: -30px;
+  width: 18px;
+  height: 1px;
+  background: color-mix(in srgb, #c58b2b 34%, transparent);
+  content: "";
+}
+
+/* List headings act as quiet disclosure controls rather than boxed buttons. */
+.memory-module .memory-collapsible-list > summary {
+  gap: 5px;
+  min-height: 24px;
+  margin: 12px 0 5px;
+  padding: 1px 4px 1px 2px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.memory-module .memory-collapsible-list > summary:hover {
+  background: color-mix(in srgb, var(--soft) 70%, transparent);
+  color: var(--text);
+}
+
+.memory-module .memory-list-chevron {
+  font-size: 13px;
+  opacity: 0.58;
+}
+
+.memory-module .memory-list-count {
+  min-width: 18px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--soft) 82%, transparent);
+  padding: 1px 6px;
+  text-align: center;
+  opacity: 0.76;
+}
+
+.memory-module .memory-collapsible-list:not([open]) > summary {
+  margin-bottom: 0;
+}
+
+/* The same disclosure primitive is used by Memory fields and Run-only additions. */
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure {
+  width: max-content;
+  max-width: calc(100% - 26px);
+  min-width: 0;
+  margin: 0 0 7px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure > .mem-content-disclosure-summary,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure-host .mem-view-disclosure > button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: max-content;
+  max-width: 100%;
+  min-height: 28px;
+  gap: 5px;
+  margin: 0;
+  padding: 4px 5px 4px 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text) 76%, var(--muted));
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  box-shadow: none;
+  cursor: pointer;
+  list-style: none;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure > .mem-content-disclosure-summary::-webkit-details-marker {
+  display: none;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure > .mem-content-disclosure-summary::before {
+  content: none;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure > .mem-content-disclosure-summary:hover,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure-host .mem-view-disclosure > button:hover {
+  background: color-mix(in srgb, var(--soft) 70%, transparent);
+  color: var(--text);
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure-chevron,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure-host .mem-view-disclosure-caret {
+  order: -1;
+  display: inline-flex;
+  flex: 0 0 13px;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.58;
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure[open] > .mem-content-disclosure-summary > .mem-content-disclosure-chevron {
+  transform: rotate(90deg);
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure-host .mem-view-disclosure > button[aria-expanded="false"] .mem-view-disclosure-caret {
+  transform: rotate(-90deg);
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure[open] {
+  width: auto;
+  max-width: none;
+  margin-right: 12px;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure > .mem-content-disclosure-body {
+  margin-top: 5px;
+  padding: 5px 8px 9px 0;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure > .mem-content-disclosure-summary > .memory-block-title,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure > .mem-content-disclosure-summary > h3,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure-title,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-disclosure-host .mem-view-disclosure-copy strong {
+  min-width: 0;
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
+/* Top-level Memory fields form a quiet editorial index. */
+.memory-module .memory-document > .memory-collapsible-list,
+.memory-module .memory-statement-document > .memory-section-body > .memory-collapsible-list {
+  margin: 0;
+  border-radius: 7px;
+  background: transparent;
+}
+
+.memory-module .memory-document > .memory-collapsible-list + .memory-collapsible-list,
+.memory-module .memory-statement-document > .memory-section-body > .memory-collapsible-list + .memory-collapsible-list {
+  margin-top: 3px;
+}
+
+.memory-module .memory-document > .memory-collapsible-list > summary,
+.memory-module .memory-statement-document > .memory-section-body > .memory-collapsible-list > summary {
+  width: max-content;
+  min-height: 28px;
+  margin: 0;
+  padding: 4px 5px 4px 0;
+  border-radius: 4px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text) 76%, var(--muted));
+  box-shadow: none;
+}
+
+.memory-module .memory-document > .memory-collapsible-list > summary:hover,
+.memory-module .memory-statement-document > .memory-section-body > .memory-collapsible-list > summary:hover {
+  background: color-mix(in srgb, var(--soft) 92%, var(--surface));
+}
+
+.memory-module .memory-document > .memory-collapsible-list > summary .memory-list-count,
+.memory-module .memory-statement-document > .memory-section-body > .memory-collapsible-list > summary .memory-list-count {
+  order: 0;
+  min-width: 18px;
+  margin-left: 0;
+  background: color-mix(in srgb, var(--soft) 82%, transparent);
+  color: var(--muted);
+  opacity: 0.76;
+}
+
+.memory-module .memory-document > .memory-collapsible-list > summary .memory-list-chevron,
+.memory-module .memory-statement-document > .memory-section-body > .memory-collapsible-list > summary .memory-list-chevron {
+  order: 0;
+  margin-left: 0;
+}
+
+.memory-module .memory-document > .memory-collapsible-list > .memory-collapsible-body,
+.memory-module .memory-statement-document > .memory-section-body > .memory-collapsible-list > .memory-collapsible-body {
+  padding: 1px 14px 12px 0;
+}
+
+.memory-module .memory-collapsible-body > .text-list {
+  padding-left: 0;
+  list-style-position: inside;
+}
+
+.memory-module .memory-collapsible-body > .text-list > li {
+  padding-left: 0;
+}
+
+/* Field names stay neutral; only execution-node type labels carry color. */
+.memory-module .memory-document > .memory-collapsible-list > summary .memory-block-title,
+.memory-module .memory-statement-document > .memory-section-body > .memory-collapsible-list > summary .memory-block-title,
+.memory-module .memory-flow-item > .memory-collapsible-list > summary .memory-block-title {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 18px;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: var(--memory-page-line-compact);
+}
+
+.memory-module .memory-document > .memory-collapsible-list > summary .memory-list-count,
+.memory-module .memory-statement-document > .memory-section-body > .memory-collapsible-list > summary .memory-list-count,
+.memory-module .memory-flow-item > .memory-collapsible-list > summary .memory-list-count {
+  min-width: auto;
+  background: transparent;
+  padding: 0 2px;
+  font-size: 11px;
+  opacity: 0.72;
+}
+
+.memory-module .memory-flow-item > .memory-collapsible-list > .memory-collapsible-body { border-left: 0; }
+
+/* Chapters keep their tree relationship visible without adding boxes. */
+.memory-module .memory-sections-block > .memory-collapsible-body {
+  margin-left: 8px;
+  padding-left: 16px;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
+}
+
+/* Memory and Run expose the same compact contract summary and hover details. */
+:is(.memory-module, .run-module) .mem-content-document .mem-content-artifact-contract {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin-left: auto;
+  padding-top: 2px;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-artifact-summary,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-review-summary {
+  position: relative;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 5px;
+  border-radius: 6px;
+  outline: none;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-artifact-label,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-review-count {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-artifact-name {
+  display: block;
+  min-height: 0;
+  max-width: 310px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  color: color-mix(in srgb, var(--accent) 76%, var(--text));
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-artifact-summary:focus-visible,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-review-summary:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-artifact-details,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-review-details {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  right: 0;
+  width: max-content;
+  max-width: min(420px, 80vw);
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(26, 39, 36, 0.16);
+  transition: opacity 120ms ease, visibility 120ms ease;
+}
+
+:is(.memory-module, .run-module) .mem-content-document .mem-content-artifact-summary:hover > .mem-content-artifact-details,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-artifact-summary:focus-within > .mem-content-artifact-details,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-review-summary:hover > .mem-content-review-details,
+:is(.memory-module, .run-module) .mem-content-document .mem-content-review-summary:focus-within > .mem-content-review-details {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* Run reuses the same quiet hierarchy as Memory: labels identify nodes, lines only show containment. */
+.run-module .run-detail-content {
+  padding-top: 30px;
+}
+
+.run-module .run-meta-container,
+.run-module .run-meta-container .mem-view-card,
+.run-module .run-procedure-asserts,
+.run-module .run-bindings {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.run-module .run-meta-container .mem-view-container-content {
+  padding: 0;
+}
+
+.run-module .run-meta-container .run-meta {
+  gap: 5px 11px;
+}
+
+.run-module .run-meta-container .mem-view-badge {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.run-module .run-meta-container .mem-view-badge[data-tone="info"],
+.run-module .run-meta-container .mem-view-badge[data-tone="success"],
+.run-module .run-meta-container .mem-view-badge[data-tone="warning"] {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent-soft, #dfeeea) 72%, var(--surface));
+  color: color-mix(in srgb, var(--accent) 82%, var(--text));
+  font-weight: 650;
+}
+
+.run-module .run-procedure-asserts,
+.run-module .run-bindings {
+  margin-top: 7px;
+}
+
+.run-module .run-bindings > .mem-view-disclosure,
+.run-module .run-bindings .mem-view-disclosure > button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.run-module .run-bindings .mem-view-disclosure-copy {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.run-module .run-bindings .mem-view-disclosure-copy small {
+  display: none;
+}
+
+.run-module .run-binding-body {
+  padding: 2px 0 12px;
+}
+
+.run-module .run-binding-row {
+  padding: 10px 0;
+  border-top-color: color-mix(in srgb, var(--line) 72%, transparent);
+}
+
+.run-module .run-flow {
+  margin-top: 8px;
+}
+
+.run-module .run-detail-content .flow-head > .artifact-row > .run-pill {
+  display: none;
+}
+
+.run-module .run-step > .run-disclosure-body {
+  margin: 0;
+}
+
+
+.run-module .run-detail-content .flow-else {
+  margin: 4px 0 0;
+}
+
+.run-module .run-detail-content .flow-else > .flow-label {
+  width: max-content;
+  margin: 0 0 7px -30px;
+}
+
+.run-module .run-detail-content .run-call-summary > .run-pill {
+  display: none;
+}
+
+.run-module .run-detail-content .call-link {
+  font-size: 13px;
+  font-weight: 550;
+}
+
+@media (max-width: 820px) {
+  :is(.memory-module, .run-module) .mem-content-document .mem-content-flow-head {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 6px 10px;
+  }
+
+  :is(.memory-module, .run-module) .mem-content-document .mem-content-artifact-contract {
+    grid-column: 2;
+    margin-left: 0;
+    padding-top: 0;
+  }
+
+  :is(.memory-module, .run-module) .mem-content-document .mem-content-artifact-name {
+    max-width: 100%;
+  }
+}
+`;

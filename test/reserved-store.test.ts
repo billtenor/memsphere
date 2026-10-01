@@ -201,6 +201,30 @@ test("bundled branch-review applies general development and testing rules", asyn
   );
 });
 
+test("official agile memories enforce conditional Memory ChangeSet delivery evidence", async () => {
+  const market = await readBundledMarketMemories();
+  for (const reference of [
+    "procedures/generic-agile-requirement-development",
+    "statements/memsphere-general-development-rules",
+    "statements/memsphere-general-testing-rules",
+    "statements/memsphere-general-delivery-rules"
+  ]) {
+    const memory = market.find((item) => item.reference === reference);
+    assert(memory, `missing official Memory: ${reference}`);
+    const source = memory.source.toString("utf8");
+    assert.match(source, /项目使用 Memsphere.*Memory 差异/);
+    assert.match(source, /memsphere memory change validate \[change-id\]/);
+    assert.match(source, /普通 (?:Store 校验|memsphere validate).*不能代替/);
+  }
+
+  const agile = market.find((item) => item.reference === "procedures/generic-agile-requirement-development");
+  assert(agile);
+  const source = agile.source.toString("utf8");
+  for (const signal of ["功能实现摘要", "初始验证报告", "报告必须包含", "commit 前必须重新执行"]) {
+    assert.match(source, new RegExp(signal));
+  }
+});
+
 test("chapter one teaches one bounded first-use journey with Chinese user-facing terms", async () => {
   const tutorial = await readFile(
     join(bundledSystemMemoryRoot(), "procedures", "memsphere-tutorial-chapter-01.yaml"),

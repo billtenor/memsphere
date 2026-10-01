@@ -3,7 +3,7 @@ import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, 
 import { tmpdir } from "node:os";
 import { basename, dirname, join, posix, relative, resolve, sep } from "node:path";
 import { z } from "zod";
-import { atomicWriteJson, withFileLock } from "../persistence.js";
+import { atomicReplaceDirectoryWithCommit, atomicWriteJson, withFileLock } from "../persistence.js";
 import { archiveChangeDirectory, type ArchiveEntry } from "../archive/store.js";
 import { gitHashObject, gitOutput, gitOutputRaw, runGit } from "../git.js";
 import { memoryKinds, type MemoryKind } from "./kinds.js";
@@ -81,7 +81,7 @@ const changeScopeSchema = z.object({
 
 const changeCommentLocationSchema = z.object({
   anchor: z.string().min(1),
-  line: z.number().int().positive(),
+  line: z.number().int().positive().optional(),
   hash: z.string().min(1).optional()
 }).strict();
 
@@ -192,7 +192,8 @@ export type MemoryChangeDetailSnapshot = MemoryChangePreview & {
   files: Array<{
     reference: string;
     label: string;
-    path: string;
+    candidatePath?: string;
+    basePath?: string;
     operation: MemoryChangeOperation | "unchanged";
   }>;
 };
@@ -221,6 +222,7 @@ export class MemoryChangePreviewCache {
   async use<T>(input: {
     home?: string;
     project: string;
+    memoryScope?: "workspace" | "canonical";
     changeId: string;
     use: (preview: MemoryChangePreview) => Promise<T>;
   }): Promise<T> {
@@ -297,6 +299,7 @@ export class MemoryChangePreviewCache {
 export async function withMemoryChangePreview<T>(input: {
   home?: string;
   project: string;
+  memoryScope?: "workspace" | "canonical";
   changeId: string;
   use: (preview: MemoryChangePreview) => Promise<T>;
 }): Promise<T> {
@@ -314,6 +317,7 @@ export async function withMemoryChangePreview<T>(input: {
 export async function withMemoryChangeReviewSnapshot<T>(input: {
   home?: string;
   project: string;
+  memoryScope?: "workspace" | "canonical";
   changeId: string;
   use: (snapshot: MemoryChangeReviewSnapshot) => Promise<T>;
 }): Promise<T> {
@@ -348,6 +352,7 @@ export async function withMemoryChangeReviewSnapshot<T>(input: {
 export async function withMemoryChangeDetailSnapshot<T>(input: {
   home?: string;
   project: string;
+  memoryScope?: "workspace" | "canonical";
   changeId: string;
   use: (snapshot: MemoryChangeDetailSnapshot) => Promise<T>;
 }): Promise<T> {
@@ -355,7 +360,7 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
     const context = await resolveProjectContext({
       home: input.home,
       project: input.project,
-      memoryScope: "canonical"
+      memoryScope: input.memoryScope
     });
     const change = await readReconciledChange(context.primary, input.changeId);
     const baseRoot = await mkdtemp(join(tmpdir(), "memsphere-change-detail-base-"));
@@ -424,7 +429,12 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
         return {
           reference: scope.reference,
           label: scope.path,
-          path: join(target?.operation === "delete" ? baseRoot : previewRoot, scope.path),
+          candidatePath: target?.operation === "delete"
+            ? undefined
+            : join(previewRoot, scope.path),
+          basePath: target?.operation === "create"
+            ? undefined
+            : join(baseRoot, target?.path ?? scope.path),
           operation: target?.operation ?? "unchanged" as const
         };
       }).sort((left, right) => {
@@ -441,19 +451,28 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
 }
 
 export async function withMemoryChangeCheckpointLock<T>(
-  input: { home?: string; project: string },
+  input: { home?: string; project: string; memoryScope?: "workspace" | "canonical" },
   action: () => Promise<T>
 ): Promise<T> {
-  const context = await resolveProjectContext({ home: input.home, project: input.project });
+  const context = await resolveProjectContext({
+    home: input.home,
+    project: input.project,
+    memoryScope: input.memoryScope
+  });
   return withFileLock(memoryMutationLock(context.primary), action);
 }
 
 async function prepareMemoryChangePreview(input: {
   home?: string;
   project: string;
+  memoryScope?: "workspace" | "canonical";
   changeId: string;
 }): Promise<PreparedMemoryChangePreview> {
-  const context = await resolveProjectContext({ home: input.home, project: input.project });
+  const context = await resolveProjectContext({
+    home: input.home,
+    project: input.project,
+    memoryScope: input.memoryScope
+  });
   const change = await readReconciledChange(context.primary, input.changeId);
   if (change.project !== context.primary.name) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
   if (!change.checkpoint) throw new Error(`ChangeSet ${change.id} has no validated checkpoint`);
@@ -1200,12 +1219,34 @@ async function persistValidatedCheckpoint(
   };
   if (checkpointChanged && change.store_type === "embedded") delete change.candidate_revision;
   change.updated_at = new Date().toISOString();
-  await writeChange(project, change);
+  if (change.store_type === "managed") {
+    await atomicReplaceDirectoryWithCommit(
+      candidateRoot,
+      recoveryRoot(project, change.id),
+      async () => writeChangeConfirmingCommit(project, change)
+    );
+  } else {
+    await writeChange(project, change);
+  }
   for (const entry of await readdir(checkpoints, { withFileTypes: true })) {
     if (entry.name === digest || !entry.isDirectory()) continue;
     await rm(join(checkpoints, entry.name), { recursive: true, force: true });
   }
   return finalMemoryRoot;
+}
+
+async function writeChangeConfirmingCommit(project: ResolvedProject, change: MemoryChangeSet): Promise<void> {
+  try {
+    await writeChange(project, change);
+  } catch (error) {
+    try {
+      const persisted = await readChange(project, change.id);
+      if (JSON.stringify(persisted) === JSON.stringify(change)) return;
+    } catch {
+      // Preserve the original write failure when the persisted state cannot confirm the commit.
+    }
+    throw error;
+  }
 }
 
 async function checkpointDigest(targets: MemoryChangeSet["targets"], candidateRoot: string): Promise<string> {
@@ -1307,7 +1348,9 @@ async function captureEmbeddedWorkingChange(
         await forwardEmbeddedViewBase(change, workspace.path, memoryPath, baseRevision);
       }
     } else {
-      const projectChanges = await listProjectChanges(project, true);
+      const listed = await listProjectChangesBestEffort(project);
+      await assertEmbeddedCaptureFailuresAreTerminal(project, listed.failures);
+      const projectChanges = listed.changes;
       const completedChangeIds: string[] = [];
       const matches = projectChanges.filter((candidate) => (
         candidate.status === "active"
@@ -1566,6 +1609,27 @@ async function listProjectChangesBestEffort(project: ResolvedProject): Promise<{
   return { changes, failures };
 }
 
+async function assertEmbeddedCaptureFailuresAreTerminal(
+  project: ResolvedProject,
+  failures: Array<{ id: string; error: string }>
+): Promise<void> {
+  for (const failure of failures) {
+    let status: unknown;
+    try {
+      const persisted = JSON.parse(await readFile(changePath(project, failure.id), "utf8")) as unknown;
+      status = persisted && typeof persisted === "object"
+        ? (persisted as Record<string, unknown>).status
+        : undefined;
+    } catch {
+      status = undefined;
+    }
+    if (status === "completed" || status === "abandoned") continue;
+
+    // Re-read the blocking record so callers retain the canonical integrity error.
+    await readReconciledChange(project, failure.id);
+  }
+}
+
 function sortMemoryChanges(changes: MemoryChangeSet[]): MemoryChangeSet[] {
   return changes.sort((left, right) => {
     const activity = Number(right.status === "active") - Number(left.status === "active");
@@ -1573,19 +1637,35 @@ function sortMemoryChanges(changes: MemoryChangeSet[]): MemoryChangeSet[] {
   });
 }
 
-export async function listMemoryChanges(input: { home?: string; project: string }): Promise<MemoryChangeSet[]> {
-  const context = await resolveProjectContext({ home: input.home, project: input.project });
+export async function listMemoryChanges(input: {
+  home?: string;
+  project: string;
+  memoryScope?: "workspace" | "canonical";
+}): Promise<MemoryChangeSet[]> {
+  const context = await resolveProjectContext({
+    home: input.home,
+    project: input.project,
+    memoryScope: input.memoryScope
+  });
   return withFileLock(memoryMutationLock(context.primary), async () => {
     const changes = await listProjectChanges(context.primary, true);
     return sortMemoryChanges(changes);
   });
 }
 
-export async function listMemoryChangesBestEffort(input: { home?: string; project: string }): Promise<{
+export async function listMemoryChangesBestEffort(input: {
+  home?: string;
+  project: string;
+  memoryScope?: "workspace" | "canonical";
+}): Promise<{
   changes: MemoryChangeSet[];
   failures: Array<{ id: string; error: string }>;
 }> {
-  const context = await resolveProjectContext({ home: input.home, project: input.project });
+  const context = await resolveProjectContext({
+    home: input.home,
+    project: input.project,
+    memoryScope: input.memoryScope
+  });
   return withFileLock(memoryMutationLock(context.primary), async () => {
     const result = await listProjectChangesBestEffort(context.primary);
     return {
@@ -1595,8 +1675,17 @@ export async function listMemoryChangesBestEffort(input: { home?: string; projec
   });
 }
 
-export async function readMemoryChange(input: { home?: string; project: string; changeId: string }): Promise<MemoryChangeSet> {
-  const context = await resolveProjectContext({ home: input.home, project: input.project });
+export async function readMemoryChange(input: {
+  home?: string;
+  project: string;
+  memoryScope?: "workspace" | "canonical";
+  changeId: string;
+}): Promise<MemoryChangeSet> {
+  const context = await resolveProjectContext({
+    home: input.home,
+    project: input.project,
+    memoryScope: input.memoryScope
+  });
   return withFileLock(memoryMutationLock(context.primary), () => readReconciledChange(context.primary, input.changeId));
 }
 
@@ -1738,7 +1827,7 @@ export async function createMemoryChangeComment(input: {
   memoryReference: string;
   path: string;
   target?: string;
-  location?: { anchor: string; line: number; hash?: string };
+  location?: { anchor: string; line?: number; hash?: string };
   snapshot?: string;
   body: string;
   expectedUpdatedAt?: string;

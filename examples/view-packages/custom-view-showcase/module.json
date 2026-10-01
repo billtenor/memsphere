@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "org.example.memsphere.custom-view",
+  "version": "1.0.0",
+  "source": {
+    "type": "local",
+    "homepage": "https://example.invalid/memsphere-custom-view",
+    "license": "MIT"
+  },
+  "view": {
+    "entry": "./index.js",
+    "sdk": "^1.0.0",
+    "capabilities": ["theme.override", "styles.scoped", "styles.global"],
+    "styles": [
+      { "id": "pages", "file": "./pages.css", "scope": "module", "namespace": "--org-example-showcase-*" },
+      { "id": "shared", "file": "./shared.css", "scope": "global", "namespace": "--org-example-showcase-*" }
+    ],
+    "themes": [
+      { "id": "sea-glass", "file": "./sea-glass.theme.json" }
+    ],
+    "contributions": [
+      { "id": "memory-page", "cell": "org.memsphere.memory.page.presentation@1:page", "priority": 100 },
+      { "id": "memory-detail", "cell": "org.memsphere.memory.detail.renderer@1:detail", "priority": 100 },
+      { "id": "run-page", "cell": "org.memsphere.run.page.presentation@1:page", "priority": 100 },
+      { "id": "run-artifact", "cell": "org.memsphere.run.artifact.renderer@1:artifact", "priority": 100 }
+    ]
+  }
+}

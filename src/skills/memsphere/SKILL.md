@@ -15,6 +15,12 @@ Memory 是 Agent 理解并进入个性化软件的语义入口。通过 memspher
 
 Memsphere Home 的 `config.json` 中，`language` 同时控制面向 Agent 的工作语言与 View 固定界面语言，支持 `zh-CN` 和 `en`，省略时固定为 `zh-CN`。Run 启动后只冻结该 Run 的 Agent 工作语言，因此修改配置只影响后续创建的 Run；配置中心成功保存语言后，当前 View 进程立即更新，下一次页面加载使用新界面语言。
 
+## Memory 写入硬门禁
+
+只要本轮创建、修改、移动、重命名或删除了任何 Memory，结束任务、提交评审或创建 Git commit 前都必须执行 `memsphere memory change validate [change-id]`。普通 `memsphere validate` 只校验当前 Project Store 或显式 Memory root，不能代替变更级校验，也不会创建或更新 ChangeSet。最终实现摘要、验证报告或交付报告必须包含与当前最终 Memory 内容匹配的 ChangeSet ID、校验状态和 View 入口；校验后继续修改 Memory 时必须重新执行变更级校验。
+
+没有 Memory 差异时不创建空 ChangeSet。`memsphere validate --memory-root` 是没有 Project、Registry 或 ChangeSet 上下文的无状态入口，不得把它的成功结果当作变更级交付证据。
+
 ## Memsphere 如何组织记忆
 
 memsphere 将 Memory 分为四类：
@@ -96,7 +102,7 @@ memsphere memory change validate [change-id]
 
 Managed 省略 id 时当前 Workspace 必须恰有一个 active ChangeSet。Embedded 的标准路径直接运行无额外选择参数的命令，并按 Project、Git common repository 与 base revision 创建或复用逻辑 CLI ChangeSet；linked worktree 路径不参与身份判断。命令只保存一份稀疏、内容寻址的当前验证内容，再次 validate 原子替换它，不生成供选择或回滚的多份快照。ChangeSet 生命周期只有 active、completed、abandoned：普通 commit、push 或创建 PR 后仍为 active，候选提交合入 `master` 后才自动成为 completed；Managed publish 后直接成为 completed。输出的稳定 View 入口为 `/projects/<project>/changes/<change-id>`。普通 `memsphere validate` 只校验正式 Store，不创建 Embedded ChangeSet。
 
-View 顶层只展示 Memory 与 Run，Memory 下分“当前项目”与“记忆市场”，Run 下分 running、done 与 abandoned。记忆市场只展示 npm 包内的官方精选 Memory，未导入内容不会进入 Catalog 或 Run。点击“导入”或“重新导入”只创建 `market_import` ChangeSet，不预先展示 diff；同一 Project 的后续导入继续追加到同一个 active ChangeSet，完成或废弃后才新建。用户进入 ChangeSet 查看合并后的候选并决定是否继续。active 的导入 ChangeSet 会让对应市场条目显示“导入中”，并可直接跳转到该 ChangeSet。导入后的实体就是普通用户 Memory，可以重命名和自由修改；它与包内内容独立演进，不保存来源或版本，也不自动更新。View 仅按当前 `<kind>/<canonical-name>` 关联两者，并按原始文件字节显示“未导入 / 导入中 / 已导入 · 无变更 / 已导入 · 有差异 / 名称冲突”。重命名后不再关联，市场条目改名等同旧条目下架、新条目新增。
+View 使用稳定 Shell 组合 Home、Memory、Run 和启用的用户 Module 视图。Home `/` 汇总待处理、继续工作与我的模块；Memory `/memories` 下分“当前项目”与“记忆市场”，Run `/tasks` 下分 running、done 与 abandoned。记忆市场只展示 npm 包内的官方精选 Memory，未导入内容不会进入 Catalog 或 Run。点击“导入”或“重新导入”只创建 `market_import` ChangeSet，不预先展示 diff；同一 Project 的后续导入继续追加到同一个 active ChangeSet，完成或废弃后才新建。用户进入 ChangeSet 查看合并后的候选并决定是否继续。active 的导入 ChangeSet 会让对应市场条目显示“导入中”，并可直接跳转到该 ChangeSet。导入后的实体就是普通用户 Memory，可以重命名和自由修改；它与包内内容独立演进，不保存来源或版本，也不自动更新。View 仅按当前 `<kind>/<canonical-name>` 关联两者，并按原始文件字节显示“未导入 / 导入中 / 已导入 · 无变更 / 已导入 · 有差异 / 名称冲突”。重命名后不再关联，市场条目改名等同旧条目下架、新条目新增。
 
 Memory 详情的“修改”经简单确认后总是创建一个新的持久、未绑定 ChangeSet；用户不能直接编辑 YAML，只能在 ChangeSet 中加入已有 Memory，并通过结构位置旁的 `+` 逐条提交 Comment。Comment 直接绑定 ChangeSet，状态为 pending、processing、completed，不存在独立 Memory Review、ChangeSet Review、Submit Review、Round 或 Vote。Human Actor 和稳定 Browser user UUID 只用于归因，不构成认证。ChangeSet 详情仅展示纳入范围的候选 Memory，不展示 diff 或完整 Store；active 可添加 Memory、提交 Comment 或确认废弃，completed、abandoned 只读。
 
@@ -179,6 +185,7 @@ flow:
 - 原生 Windows 要求 Windows Node.js 与 Git for Windows；用户和 Agent CLI 支持 Windows PowerShell 5.1、PowerShell 7、CMD、Git for Windows 随附的 Git Bash。WSL 按独立 Linux 环境处理，MSYS2/Cygwin 不在当前支持范围。Provider 的安装检测与 Windows 支持等级分别展示。
 - `memsphere run start` 必须通过 `--name` 指定本次 Run 的非空名称，并会先列出所有 Review scope、Slot、可用 Actor 和内置 Decision Policy。把预检示例保存并调整后，使用相同的 `--name` 和 `--review-config <path>` 启动。
 - Review 配置必须为每个 scope 选择 Policy，并为每个 Slot 绑定 Actor 或显式 `skip`；一个 Actor 绑定多个 Slot 时只产生一个 Assignment 和 Vote。
+- 当前 Run 的全部可达 Review Slot 都显式 `skip` 时，不创建 Artifact Review，也不要求 Project 配置 `control_plane`；只要任一 Slot 实际绑定 Actor，Project 仍必须配置 Control Plane。无 Control Plane 时预检仍列出内置 Decision Policy，提供有效全 skip 示例；已经提供含 Actor Binding 的 Review 配置时，CLI 必须明确报告缺少 `control_plane`，不得误报为未提供 Review 配置。
 - Permission 只在 Runner/Actor 的 `permissions` 中配置；Run Review 配置不追加临时权限。Memory YAML 不允许 `role_bindings` 或 `permission_grants`。
 - `runner` 是当前 Run 执行上下文，不需要 Slot Binding。
 - Human 完成当前 Review Round 后若不再参与后续流程，Runner 可以执行 `memsphere run binding show --run <run_id>` 查看 Run 冻结的 Actor、当前 Round Binding、下一 Round Binding、影响 scope 和历史，再执行 `memsphere run binding update --run <run_id> --slot <procedure::slot> --actor <actor_id>` 换绑；多个 Actor 重复传 `--actor`，未来不需要该 Slot 时使用 `--skip`。只能选择 Run 启动时已经冻结的 Actor；更新不改变已经创建的当前或历史 Round、Assignment、Comment、Vote 和结算，同一 Review 的下一 Round 与尚未创建的 Review 使用创建前最后一次成功保存的 Binding。View 中更新 Binding 不使用 Settings operation token，但仍要求同源 JSON 请求。
@@ -186,12 +193,16 @@ flow:
 - 确定性校验通过后，Run 会返回稳定的 `review_id` 和 `memsphere run review wait --review <review_id>`；Review 通过前当前 Action 不推进。Review Submission 自动冻结当前候选之前已经上报的全部 Artifact，Reviewer 根据当前 Artifact 与要求按需追溯。全部评审意见收齐后，如 CLI 提示等待 Runner 投票，应先阅读摘要和 blocking 意见，再显式执行 `memsphere run review vote`。Runner 拥有最终决定权；建议意见和 blocking 严重级别不会形成额外否决权。需要留下审计记录时，可在投票前使用 `memsphere run review resolve` 记录意见的接受、延期或驳回原因。
 - 绑定到当前 Slot 的 Agent Actor 会由 Memsphere 通过 ACP 自动启动。初始 Prompt 会给出精炼的 Review contract 和前序 Artifact 索引；Agent Reviewer 在当前 Workspace/worktree 中使用 PATH 注入的受限 `memsphere-review` 会话命令，命令自动绑定当前 Run 与 Assignment；ChangeSet Run 的 `memory list/read` 还会自动绑定该 Run 的冻结 Memory 快照。Reviewer 直接通过 Store 操作自己的 Assignment，不创建或监听 Review bridge/socket，也不依赖某一种 shell 的环境变量语法。`run review comment` 必须声明 severity；短意见使用 `--body`，多行 Markdown 使用 `--body-file`，历史 `--body-stdin` 仍兼容。提交摘要可使用 `--summary-file`。普通 ACP 文本回复不构成 Comment 或 Vote。Agent 失败时可用 `memsphere run review retry --review <id> --assignment <actor-or-assignment-id>` 显式重试。
 - Human 使用 View 中的大尺寸 Artifact Review 浮窗操作本人 Assignment：按 Round 查看当时的不可变 Submission、正式 Comment、Vote、Result 与 Revision Summary，在当前轮添加整体或定位 Comment、选择 Vote 并 Submit。历史 Round 只读，完成后的 Review 仍可从对应 Run 步骤重新打开。
+- Review 的下一步输出若列出待提交 Human Assignment，Runner 应立即使用 Run 冻结的语言向相应 Human 询问三种正式投票之一：通过、要求修改或弃权。通过的 Comment 可选；要求修改必须收集至少一条修改意见；弃权必须收集至少一条原因说明。Agent Reviewer 仍在后台执行时可以并行询问 Human，不必先反复 wait；只有不存在待提交 Human、仍有 Agent Reviewer 未完成时才继续执行 `memsphere run review wait`。
+- CLI 已明确当前 Review、Round 和 Runner 代提交语境时，Human 使用“我投通过”“我投要求修改”“我投弃权”“请提交……”等确定的执行性表达，且 Vote、票型要求的 Comments、引用意见和目标均完整无歧义，该表达同时构成本次正式投票决定与 Runner 代提交授权；直接提交并在 authorization note 中记录依据，不得再询问一次同义确认。普通讨论、提出问题、“倾向于”“可以考虑”等非确定表达、沉默或只说“继续”都不构成授权。目标不明确、必需 Comment 缺失、引用意见无法唯一确定或 payload 仍需补全时，才完整复述 Vote、Comments 与可选 Summary 并取得确认。提交前仍须确认目标属于当前对话关联 Run、Round 仍为 current、Human Draft 无业务内容，再把 Comments 写成严格 JSON array（`approve` 无意见也写 `[]`），执行 `memsphere run review submit-for-human --run <run_id> --review <review_id> --round <round_id> --assignment <human_actor_or_assignment_id> --vote <approve|request_changes|abstain> --comments-file <path> --authorization-note-file <path> [--summary-file <path>]`。命令会同时检查 Human 与 Runner 权限并记录受托 provenance；冲突时不得覆盖 Draft 或既有 Opinion。成功后向 Human 回报 Vote、Comment 数和授权说明，并继续执行 CLI 返回的下一动作；若进入 `awaiting_runner_vote`，仍须另行阅读全部意见并执行 Runner 最终票。
 - Artifact Review Comment 只绑定当前 Artifact Submission；定位 Comment 保存 Submission、digest、Renderer target 和短上下文，不评论 Memory 或 Workspace 文件，也不会自动迁移到下一轮。Memory 修改意见只作为 ChangeSet Comment 存储和处理，与 Artifact Review 完全独立。
 - 调试 Agent 启动时，可设置 `debug.agent_review: true` 禁止后台真实派发，再显式执行 `memsphere run try-run --run <run_id>` 生成 `launch.json` 和 `prompt.md`。该命令不 claim Assignment、不启动 ACP，也不修改 Run；View 轮询不会自动生成调试文件。
 
 ### 维护当前配置
 
-View 是 Memsphere Home 级单一服务，可从 Project 选择器切换当前展示内容。Memory、ChangeSet、Run、设置与 Artifact Review 的主要界面都有稳定 URL，可复制到另一窗口直接重开；ChangeSet 从 Memory 列表的“修改中”标记进入，不占用顶层菜单；Artifact Review 的 Round 与 Material 由查询参数定位，临时身份、草稿和布局不写入 URL。固定界面文案通过 zh-CN/en 语言资源并跟随 Home `language`，与 Memory DSL 的中文标签/YAML 原名展示偏好彼此独立；用户内容、标识符、命令、路径和错误原文保持原样。配置中心通过左侧分组导航直接进入 Memsphere 或当前 Project 设置，右侧只展示当前配置内容：全局设置维护语言、View 服务和 ACP Provider，Project 设置展示 Store 并维护 Control Plane 与 Actor。两个 Scope 分别保存草稿、Revision、校验结果和确认 diff，保存时只原子写入各自配置文件；切换 Project 不清除全局草稿，放弃未保存的 Project 草稿前必须确认。全局 ACP Provider 被任一已注册 Project 的 Actor 引用时不能重置或删除。成功保存 `language` 后下一次加载立即使用新界面语言；只有磁盘 host 或 port 与当前 View 进程不一致时，需要手动执行：
+View 是 Memsphere Home 级单一服务，可从 Project 选择器切换当前展示内容。稳定 Shell 通过十四个根 Slot 组合主导航、二级导航、对象列表、全局搜索、头部、账户、底部、Home 三个区域、Page、默认隐藏的上下文侧栏与 Overlay；Module 只操作 Host 分配的列表、Page、侧栏或 Overlay 容器。主导航、二级导航、对象列表和详情形成可伸缩四栏，二级导航栏与对象列表栏宽度由用户拖动并在浏览器本地保存。Memory、ChangeSet、Run、设置与 Artifact Review 的主要界面都有稳定 URL，可复制到另一窗口直接重开；ChangeSet 从 Memory 列表的“修改中”标记进入，不占用顶层菜单；Artifact Review 由 Run Module 注册到 Host overlay，Round 与 Material 由查询参数定位，临时身份、草稿和布局不写入 URL。固定界面文案通过 zh-CN/en 语言资源并跟随 Home `language`，与 Memory DSL 的中文标签/YAML 原名展示偏好彼此独立；用户内容、标识符、命令、路径和错误原文保持原样。配置中心通过左侧分组导航直接进入 Memsphere 或当前 Project 设置，右侧只展示当前配置内容：全局设置维护语言、View 服务和 ACP Provider，Project 设置展示 Store 并维护 Control Plane 与 Actor。两个 Scope 分别保存草稿、Revision、校验结果和确认 diff，保存时只原子写入各自配置文件；切换 Project 不清除全局草稿，放弃未保存的 Project 草稿前必须确认。全局 ACP Provider 被任一已注册 Project 的 Actor 引用时不能重置或删除。成功保存 `language` 后下一次加载立即使用新界面语言；只有磁盘 host 或 port 与当前 View 进程不一致时，需要手动执行：
+
+开发 View 原型时，Agent 应创建独立 Module，不为演示框架能力改造 Memory、Run 或 Settings。Shell 管公共区域和尺寸，Theme 管共享视觉，UI Primitives 管通用交互，Slot 管组合，Module 只管领域与 `main.view` 自由正文。Plugin 使用 `theme`/`ui` 服务时必须同时声明 `themeVersion: 1`/`uiVersion: 1`；常规对象列表由 `ctx.ui.contentList()` 生成并注册到现有 `content.list`，复杂领域可以使用自定义 Mount。Module 样式只消费 `--mem-view-*` 并使用 Feature 前缀 selector，不声明公共 Token、不读取 Host 私有 `--view-*`、`.view-shell-*` 或 `data-view-slot`，不以 `!important` 覆盖公共壳。仓库 Reference Module 位于 `modules/org.memsphere.reference`，由正式 View 在 `/reference` 加载并提供一级导航入口。交付前必须在真实 Shell 检查桌面/窄屏、标准列表状态、键盘路径、自由正文交互、console 和卸载清理，不能用静态页、独立端口或测试 Fixture 代替。
 
 ```bash
 memsphere view restart
@@ -242,6 +253,19 @@ memsphere memory list --kind procedures
 ### 使用 memsphere 框架遵循流程记忆
 
 memsphere 使用 Run 记录和控制一次 Procedure 的执行过程，保证 Agent 每次只处理当前步骤，并在取得步骤产物后继续推进。
+
+#### 持续推进整个 Run
+
+启动或接手 Run 后，Agent 必须自主推进整个 Run，直到 CLI 明确返回流程完成。每完成一个步骤，立即执行 CLI 返回的 `Then`，并继续处理返回的新步骤或下一动作，包括子流程、Schema 填写与收尾、产物修订、Agent 评审等待和 Runner 投票。不得在步骤之间结束回复、仅汇报局部完成情况后停下，或要求用户发送“请继续”。
+
+Run 未完成时，仅在以下两种情况下可以暂停执行并结束当前回复：
+
+1. **需要人介入**：需要 Human 执行步骤、提供无法自行获取的必要信息、审批、授权，或处理 Agent 无法自行恢复的阻塞。明确说明需要谁做什么，并等待所需结果；已有明确授权不重复确认。
+2. **同一阻塞事项实际连续等待超过 5 分钟，且没有其他可推进的工作**：从开始等待该事项计时，多次调用 `wait` 或查询状态不能重置计时。5 分钟是等待阈值，不是整个 Run 的执行时限；仍在执行有效工作不能因此暂停。
+
+完成步骤、上报产物、进入 Agent 评审、等待当前 Agent 自己作出 Runner 投票，以及遇到可自行修复的错误，都不是暂停理由。等待期间按 CLI 提示继续查询，避免忙轮询；进度汇报后继续执行，不以汇报代替推进。
+
+暂停时说明 Run ID、停止位置、暂停原因，以及所需人工动作或等待对象和恢复方式。恢复后查询并继续同一个 Run，直到完成或再次满足暂停条件。暂停不改变 Run 生命周期，不得因等待超时跳过步骤或评审、代替 Human 决策、另起 Run 或自动废弃；Human 明确要求停止或废弃时遵从其指示。
 
 #### 启动流程
 
@@ -301,7 +325,7 @@ Concept、Statement、Schema 和 Procedure 都必须从该入口读取，不能�
 
 正常的当前步骤提示不展开权限清单。权限不足时，CLI 只说明被拒绝的操作、所需权限和处理方式；不得把 Memsphere Permission 误解为任意操作系统文件、进程或网络权限。
 
-只执行当前返回的步骤，不提前执行尚未返回的后续步骤。
+每次只执行 CLI 当前返回的步骤，不提前执行尚未返回的后续步骤；当前步骤完成后必须继续推进整个 Run，不能把步骤边界当作对话结束点。
 
 #### 上报步骤产物
 
@@ -321,7 +345,7 @@ memsphere run report --run <Run ID> --artifact "<产物内容>"
 memsphere run report --run <Run ID> --artifact-file <文件路径>
 ```
 
-report 成功后会先返回本次 Run 与 Artifact 的上报回执。如果触发 Artifact Review，回执还包含稳定的 Review 标识，并紧接着返回等待命令；不要继续执行后续步骤：
+report 成功后会先返回本次 Run 与 Artifact 的上报回执。如果触发 Artifact Review，回执还包含稳定的 Review 标识，并紧接着返回等待命令。立即执行该命令以继续推进 Review；评审通过前不得执行后续 Action，是否暂停对话仍遵循“持续推进整个 Run”的两种条件：
 
 ```bash
 memsphere run review wait --review <Review ID>
@@ -404,6 +428,10 @@ memsphere run abandon --run <Run ID> [--reason "<可选原因>"]
 需要保留多行原因时使用 `--reason-file <文件路径>`；若要把已冻结的 Human Actor 记录为发起者，可附加 `--actor <Human Actor ID>`。命令把 Run 从 `running` 转为独立的 `abandoned` 终态，记录时间、Human 发起信息和停止位置，保留已有 Artifact、Schema 草稿及 Review 证据，取消未完成的 Review/Assignment/Attempt，并尽力停止 Reviewer Worker。重复废弃是幂等读取；done Run 不得废弃。
 
 废弃后 Run 只读且不可恢复执行，不能继续 report、schema、binding 或 Review 写入。废弃不会自动归档；Human 若还希望隐藏该 Run，必须再单独点击或执行归档。只有 `done` 或 `abandoned` Run 可以归档，恢复后仍保持归档前的终态。
+
+#### View Package 自定义
+
+可信本地 View Package 可在“设置 → 界面与主题”添加绝对路径，并在同一页面选择主题与 Slot；这些配置保存在 Home 并统一应用到所有 Project，保存后使用 `memsphere view restart` 应用固定 composition snapshot。全局样式通过 `styles.global@1` 多选 Slot 组合，scoped CSS 随 Package 实例自动加载；历史 `view_composition.styles` 只保留解析兼容。Memory/Run 官方 renderer 自带低层叠优先级的系统默认内容视觉，无需配置扩展包；用户选择的全局样式可在不使用 `!important` 的情况下覆盖它，示例 View Package 则作为独立参考实现演进。Memory/Run 的 page 与 detail/artifact renderer 可通过 portable cells 替换，失败时回退官方候选。Theme/Style 使用 light/dark 分层 Token 与实例 lifecycle；高权限能力必须在安装记录中显式授予。
 
 #### 人机协同
 

@@ -1,15 +1,22 @@
 import { resolve } from "node:path";
 import { validateMemoryRoot, validateMemoryStore } from "../validation.js";
-import { checkpointWorkspaceChanges } from "../memory/changeset.js";
+
+const memoryChangeValidateCommand = "memsphere memory change validate [change-id]";
 
 export async function validateCommand(options: { memoryRoot?: string; format?: "text" | "json" } = {}): Promise<void> {
-  if (!options.memoryRoot) await checkpointWorkspaceChanges();
+  const validationScope = options.memoryRoot ? "memory-root" : "project-store";
   const result = options.memoryRoot
     ? { configPath: "(stateless)", ...(await validateMemoryRoot(resolve(options.memoryRoot))), runsRoot: undefined }
     : await validateMemoryStore();
 
   if (options.format === "json") {
-    process.stdout.write(`${JSON.stringify({ valid: result.issues.length === 0, ...result }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({
+      valid: result.issues.length === 0,
+      ...result,
+      validationScope,
+      changeSetEffect: "none",
+      ...(!options.memoryRoot ? { nextCommand: memoryChangeValidateCommand } : {})
+    }, null, 2)}\n`);
     if (result.issues.length > 0) process.exitCode = 1;
     return;
   }
@@ -24,6 +31,15 @@ export async function validateCommand(options: { memoryRoot?: string; format?: "
 
     if (result.runsRoot) {
       console.log(`runsRoot: ${result.runsRoot}`);
+    }
+
+    if (options.memoryRoot) {
+      console.log("Validation scope: stateless Memory root.");
+      console.log("ChangeSet: not applicable in --memory-root mode.");
+    } else {
+      console.log("Validation scope: current Project Store.");
+      console.log("ChangeSet: not created or updated.");
+      console.log(`For unpublished Memory changes, run: ${memoryChangeValidateCommand}`);
     }
 
     return;

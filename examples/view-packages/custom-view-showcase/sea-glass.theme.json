@@ -1,0 +1,12 @@
+{
+  "light": {
+    "color.accent": "#16786f",
+    "color.accentHover": "#0e5f58",
+    "color.accentSoft": "#dff4f0"
+  },
+  "dark": {
+    "color.accent": "#71d2c6",
+    "color.accentHover": "#91e3da",
+    "color.accentSoft": "#173d38"
+  }
+}

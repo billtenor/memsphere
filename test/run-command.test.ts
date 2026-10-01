@@ -13,6 +13,7 @@ import {
   printRunOutput,
   printRunBindingOutput,
   printSchemaWritingOverview,
+  parseRunReviewConfiguration,
   runStartCommand,
   resolveReviewCommentBody,
   validateInlineReviewCommentBody
@@ -46,6 +47,30 @@ test("run start command rejects missing, blank, and control-character names", as
   await assert.rejects(
     runStartCommand("procedure", { name: "line one\nline two" }),
     /run name must not contain control characters/
+  );
+});
+
+test("run start command parses skipped and Actor-bound Review Slots without requiring a control plane", () => {
+  assert.deepEqual(parseRunReviewConfiguration({
+    reviews: {
+      "delivery#flow[1]": { policy: "artifact_acceptance.unanimous" }
+    },
+    slots: {
+      "delivery::optional": { skip: true },
+      "delivery::required": { actors: ["human"] }
+    }
+  }), {
+    reviews: {
+      "delivery#flow[1]": { policy: "artifact_acceptance.unanimous" }
+    },
+    slots: {
+      "delivery::optional": { skip: true },
+      "delivery::required": { actorIds: ["human"] }
+    }
+  });
+  assert.throws(
+    () => parseRunReviewConfiguration({ reviews: {}, slots: { "delivery::reviewer": {} } }),
+    /actors must be a string array or skip must be true/
   );
 });
 

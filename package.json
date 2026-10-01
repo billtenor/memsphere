@@ -1,6 +1,6 @@
 {
   "name": "memsphere",
-  "version": "0.1.2",
+  "version": "0.1.5",
   "description": "A local YAML-backed memory CLI for AI runtimes.",
   "license": "Apache-2.0",
   "author": "Yanjun Liu <billtenor.thu@gmail.com>",
@@ -40,12 +40,14 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node -e \"const fs=require('node:fs'); fs.chmodSync('dist/cli.js',0o755); fs.cpSync('src/skills','dist/skills',{recursive:true}); fs.cpSync('src/prompts/templates','dist/prompts/templates',{recursive:true})\"",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && tsc -p tsconfig.modules.json --noEmit && node --import tsx scripts/build-view-assets.mjs && node scripts/build-example-view-package.mjs --check && node -e \"const fs=require('node:fs'); fs.chmodSync('dist/cli.js',0o755); fs.cpSync('src/skills','dist/skills',{recursive:true}); fs.cpSync('src/prompts/templates','dist/prompts/templates',{recursive:true})\"",
     "dev": "tsx src/cli.ts",
+    "pretest": "npm run build",
     "test": "node scripts/run-tests.mjs",
+    "pretest:ci": "npm run build",
     "test:ci": "node scripts/run-tests.mjs --test-concurrency=1",
     "smoke:project": "node scripts/project-smoke.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.modules.json --noEmit",
     "validate": "npm run build",
     "security:check": "sh scripts/security-check.sh --staged",
     "security:audit": "sh scripts/security-check.sh --all",
@@ -56,11 +58,14 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.2.1",
+    "@phosphor-icons/core": "^2.1.1",
     "ajv": "^8.20.0",
     "commander": "^12.1.0",
     "cross-spawn": "^7.0.6",
     "handlebars": "^4.7.9",
     "markdown-it": "^14.3.0",
+    "postcss": "8.5.28",
+    "semver": "^7.7.3",
     "yaml": "^2.5.1",
     "zod": "^3.23.8"
   },
@@ -68,6 +73,8 @@
     "@types/cross-spawn": "^6.0.6",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.5.4",
+    "@types/semver": "^7.7.1",
+    "esbuild": "^0.28.1",
     "husky": "^9.1.7",
     "playwright": "^1.55.1",
     "tsx": "^4.19.1",

@@ -71,7 +71,7 @@ async function withManagedMarket(run: (fixture: MarketFixture) => Promise<void>)
     await run({ home, project: "managed", workspace, memoryRoot: join(project.root, "memory") });
   } finally {
     restoreEnvironment(previous);
-    await rm(fixture, { recursive: true, force: true });
+    await rm(fixture, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 
@@ -100,7 +100,7 @@ async function withEmbeddedMarket(run: (fixture: MarketFixture) => Promise<void>
     await run({ home, project: "embedded", workspace, memoryRoot });
   } finally {
     restoreEnvironment(previous);
-    await rm(fixture, { recursive: true, force: true });
+    await rm(fixture, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 
@@ -146,7 +146,8 @@ test("active Market ChangeSet details expose the candidate before Project activa
       use: async ({ files }) => {
         const candidate = files.find((file) => file.reference === target.reference);
         assert(candidate);
-        assert.match(await readFile(candidate.path, "utf8"), /!statement/);
+        assert(candidate.candidatePath);
+        assert.match(await readFile(candidate.candidatePath, "utf8"), /!statement/);
       }
     });
     await assert.rejects(readFile(join(fixture.memoryRoot, target.path)), /ENOENT/);

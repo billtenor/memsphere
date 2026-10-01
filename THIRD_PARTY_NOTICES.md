@@ -1,7 +1,7 @@
 # Third-Party Notices
 
 Memsphere depends on the third-party packages listed below. Versions are
-resolved from `package-lock.json` for Memsphere 0.1.2.
+resolved from `package-lock.json` for Memsphere 0.1.5.
 
 These packages are installed as separate npm dependencies and retain their own
 license files and copyright notices. This document is provided as a convenient
@@ -17,6 +17,7 @@ summary; the license distributed with each package is authoritative.
 | `cross-spawn` | 7.0.6 | MIT | [moxystudio/node-cross-spawn](https://github.com/moxystudio/node-cross-spawn) |
 | `handlebars` | 4.7.9 | MIT | [handlebars-lang/handlebars.js](https://github.com/handlebars-lang/handlebars.js) |
 | `markdown-it` | 14.3.0 | MIT | [markdown-it/markdown-it](https://github.com/markdown-it/markdown-it) |
+| `semver` | 7.8.5 | ISC | [npm/node-semver](https://github.com/npm/node-semver) |
 | `yaml` | 2.9.0 | ISC | [eemeli/yaml](https://github.com/eemeli/yaml) |
 | `zod` | 3.25.76 | MIT | [colinhacks/zod](https://github.com/colinhacks/zod) |
 

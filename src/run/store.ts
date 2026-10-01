@@ -41,6 +41,7 @@ import {
   authorizeArtifactOperation,
   controlPlaneSnapshotSchema,
   createControlPlaneSnapshot,
+  listDecisionPolicyDefinitions,
   permissionIds,
   renderPermissionGuidance,
   resolveArtifactControlPlane,
@@ -705,7 +706,14 @@ const artifactReviewAssignmentSchema = z.object({
     vote: z.enum(artifactReviewVoteValues),
     summary: z.string().optional(),
     submittedAt: z.string(),
-    authorization: authorizationDecisionSchema
+    authorization: authorizationDecisionSchema,
+    delegation: z.object({
+      kind: z.literal("runner"),
+      runId: z.string().min(1),
+      humanActorId: z.string().min(1),
+      authorizationNote: z.string().min(1),
+      authorization: authorizationDecisionSchema
+    }).strict().optional()
   }).strict().optional(),
   attempts: z.array(artifactReviewAgentAttemptSchema).default([])
 }).strict();
@@ -1193,12 +1201,34 @@ export async function readRun(runsRoot: string, id: string): Promise<RunState> {
 
 export function parseRunState(parsed: unknown): RunState {
   if (parsed && typeof parsed === "object" && (parsed as { contractVersion?: unknown }).contractVersion === 3) {
-    return runStateV3Schema.parse(parsed);
+    return assertArtifactReviewDelegationProvenance(runStateV3Schema.parse(parsed));
   }
   if (parsed && typeof parsed === "object" && (parsed as { contractVersion?: unknown }).contractVersion === 2) {
-    return runStateSchema.parse(parsed);
+    return assertArtifactReviewDelegationProvenance(runStateSchema.parse(parsed));
   }
-  return normalizeLegacyRun(parsed);
+  return assertArtifactReviewDelegationProvenance(normalizeLegacyRun(parsed));
+}
+
+function assertArtifactReviewDelegationProvenance(run: RunState): RunState {
+  for (const review of run.artifactReviews ?? []) {
+    for (const round of review.rounds) {
+      for (const assignment of round.assignments) {
+        const delegation = assignment.submitted?.delegation;
+        if (!delegation) continue;
+        if (delegation.runId !== run.id) {
+          throw new Error(
+            `invalid Runner delegation provenance: Run ${delegation.runId} does not match enclosing Run ${run.id}`
+          );
+        }
+        if (delegation.humanActorId !== assignment.actorId) {
+          throw new Error(
+            `invalid Runner delegation provenance: Human Actor ${delegation.humanActorId} does not match Assignment ${assignment.actorId}`
+          );
+        }
+      }
+    }
+  }
+  return run;
 }
 
 export async function listRuns(runsRoot: string): Promise<RunState[]> {
@@ -1228,37 +1258,57 @@ export async function listRuns(runsRoot: string): Promise<RunState[]> {
 export async function listRunSummaries(runsRoot: string): Promise<RunListSummary[]> {
   await ensureRunDirectory(runsRoot);
   const entries = await readdir(runsRoot, { withFileTypes: true });
-  const summariesById = new Map<string, RunListSummary>();
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
+  const directoryIds = new Set(entries.filter(entry => entry.isDirectory()).map(entry => entry.name));
+  const ids = [
+    ...directoryIds,
+    ...entries
+      .filter(entry => entry.isFile() && entry.name.endsWith(".json"))
+      .map(entry => entry.name.slice(0, -".json".length))
+      .filter(id => !directoryIds.has(id))
+  ];
+  const summaries: RunListSummary[] = [];
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(16, ids.length) }, async () => {
+    while (cursor < ids.length) {
+      const id = ids[cursor++];
+      if (!id) continue;
       try {
-        const summary = await readRunSummary(runsRoot, entry.name);
-        summariesById.set(summary.id, summary);
+        summaries.push(await readRunSummary(runsRoot, id));
       } catch {
-        // Ignore directories that are not valid run roots.
-      }
-      continue;
-    }
-    if (entry.isFile() && entry.name.endsWith(".json")) {
-      const id = entry.name.slice(0, -".json".length);
-      if (summariesById.has(id)) continue;
-      try {
-        const summary = await readRunSummary(runsRoot, id);
-        summariesById.set(summary.id, summary);
-      } catch {
-        // Ignore files that are not valid runs.
+        // Ignore entries that are not valid runs.
       }
     }
-  }
-  return [...summariesById.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  });
+  await Promise.all(workers);
+  return summaries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+type CachedRunSummary = {
+  readonly mtimeMs: number;
+  readonly ctimeMs: number;
+  readonly size: number;
+  readonly summary: RunListSummary;
+};
+
+const runSummaryCache = new Map<string, CachedRunSummary>();
+
 async function readRunSummary(runsRoot: string, id: string): Promise<RunListSummary> {
-  const raw = JSON.parse(await readFile(await existingRunPath(runsRoot, id), "utf8")) as unknown;
+  const path = await existingRunPath(runsRoot, id);
+  const file = await stat(path);
+  const cached = runSummaryCache.get(path);
+  if (cached
+    && cached.mtimeMs === file.mtimeMs
+    && cached.ctimeMs === file.ctimeMs
+    && cached.size === file.size) {
+    return cached.summary;
+  }
+  const raw = JSON.parse(await readFile(path, "utf8")) as unknown;
   if (!raw || typeof raw !== "object") throw new Error(`invalid Run summary: ${id}`);
   const source = raw as Record<string, unknown>;
   if (source.contractVersion !== 2 && source.contractVersion !== 3) {
-    return summarizeRun(await readRun(runsRoot, id));
+    const summary = summarizeRun(parseRunState(raw));
+    cacheRunSummary(path, file, summary);
+    return summary;
   }
   const runId = requiredSummaryString(source.id, "id");
   const status = source.status;
@@ -1271,7 +1321,7 @@ async function readRunSummary(runsRoot: string, id: string): Promise<RunListSumm
   const activeReview = [...reviews]
     .filter((review) => review.status !== "passed" && review.status !== "cancelled")
     .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")))[0];
-  return {
+  const summary: RunListSummary = {
     id: runId,
     ...(typeof source.name === "string" && source.name.trim() ? { name: source.name } : {}),
     status,
@@ -1282,6 +1332,24 @@ async function readRunSummary(runsRoot: string, id: string): Promise<RunListSumm
     eventCount: Array.isArray(source.events) ? source.events.length : 0,
     ...(activeReview ? { reviewProgress: summarizeReviewProgress(activeReview) } : {})
   };
+  cacheRunSummary(path, file, summary);
+  return summary;
+}
+
+function cacheRunSummary(
+  path: string,
+  file: { readonly mtimeMs: number; readonly ctimeMs: number; readonly size: number },
+  summary: RunListSummary
+): void {
+  runSummaryCache.set(path, {
+    mtimeMs: file.mtimeMs,
+    ctimeMs: file.ctimeMs,
+    size: file.size,
+    summary
+  });
+  if (runSummaryCache.size <= 4096) return;
+  const oldest = runSummaryCache.keys().next().value;
+  if (oldest) runSummaryCache.delete(oldest);
 }
 
 function summarizeRun(run: RunState): RunListSummary {
@@ -1894,14 +1962,22 @@ export async function submitArtifactReviewAssignment(input: {
   const located = await findArtifactReview({ runsRoot: input.runsRoot, reviewId: input.reviewId });
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const run = await readRun(input.runsRoot, located.run.id);
-    assertRunRunning(run);
     const review = requireArtifactReview(run, input.reviewId);
     const round = requireArtifactReviewRound(review, input.roundId);
     const assignment = requireArtifactReviewAssignment(round, input.actorId);
-    if (assignment.status === "submitted") return { run, review, round, assignment };
     if ((assignment.actorKind ?? "human") === "agent") {
       throw new Error(`Agent Artifact Review assignment cannot use the Human submit API: ${assignment.actorId}`);
     }
+    if (assignment.status === "submitted") {
+      if (assignment.submitted?.delegation) {
+        throw new ArtifactReviewSubmissionConflictError(
+          assignment.actorId,
+          "assignment was already submitted by a delegated Runner"
+        );
+      }
+      return { run, review, round, assignment };
+    }
+    assertRunRunning(run);
     if (review.status !== "pending" || round.status !== "pending") {
       throw new Error(`Artifact Review Round is read-only: ${round.id}`);
     }
@@ -1930,6 +2006,122 @@ export async function submitArtifactReviewAssignment(input: {
       authorization
     };
     round.votes.push(submittedAssignmentVote(assignment, authorization));
+    round.revision += 1;
+    review.updatedAt = now;
+    const createdArtifactFiles: string[] = [];
+    try {
+      await settleArtifactReviewRound(input.runsRoot, run, review, round, createdArtifactFiles, now);
+      run.updatedAt = now;
+      await writeRun(input.runsRoot, run);
+      return { run, review, round, assignment };
+    } catch (error) {
+      await removeArtifactFiles(input.runsRoot, createdArtifactFiles);
+      throw error;
+    }
+  });
+}
+
+export async function submitArtifactReviewHumanAssignmentForRunner(input: {
+  runsRoot: string;
+  runId: string;
+  reviewId: string;
+  roundId: string;
+  assignmentId: string;
+  vote: ArtifactReviewVoteValue;
+  comments: ArtifactReviewDraftInput["comments"];
+  summary?: string;
+  authorizationNote: string;
+}): Promise<ArtifactReviewContext> {
+  return withRunWriteLock(input.runsRoot, input.runId, async () => {
+    const run = await readRun(input.runsRoot, input.runId);
+    const review = requireArtifactReview(run, input.reviewId);
+    if (review.currentRoundId !== input.roundId) {
+      throw new Error(`Artifact Review Round is not current: ${input.roundId}`);
+    }
+    const round = requireArtifactReviewRound(review, input.roundId);
+    const assignment = requireArtifactReviewAssignment(round, input.assignmentId);
+    if ((assignment.actorKind ?? "human") !== "human") {
+      throw new Error(`Runner delegated submit requires a Human Artifact Review assignment: ${assignment.actorId}`);
+    }
+    const summary = input.summary?.trim() || undefined;
+    const authorizationNote = input.authorizationNote.trim();
+    if (!authorizationNote) throw new Error("Runner delegated submit authorization note must not be empty");
+    const submission = reviewSubmission(review, round.submissionId);
+    const now = new Date().toISOString();
+    if (assignment.binding === "advisory" && input.comments.some((comment) => !comment.severity)) {
+      throw new Error("Advisory Artifact Review Comment severity is required");
+    }
+    const comments = normalizeArtifactReviewComments(
+      input.comments,
+      submission,
+      now,
+      assignment.submitted?.comments ?? []
+    );
+    if ((input.vote === "request_changes" || input.vote === "abstain") && comments.length === 0) {
+      throw new Error(`${input.vote} requires at least one Comment`);
+    }
+
+    if (assignment.status === "submitted") {
+      const delegated = assignment.submitted?.delegation;
+      if (
+        assignment.submitted
+        && delegated?.kind === "runner"
+        && delegated.runId === run.id
+        && delegated.humanActorId === assignment.actorId
+        && assignment.submitted.vote === input.vote
+        && assignment.submitted.summary === summary
+        && delegated.authorizationNote === authorizationNote
+        && artifactReviewCommentsSemanticallyEqual(assignment.submitted.comments, comments)
+      ) {
+        return { run, review, round, assignment };
+      }
+      throw new ArtifactReviewSubmissionConflictError(
+        assignment.actorId,
+        "assignment is already submitted with a different origin or payload"
+      );
+    }
+
+    assertRunRunning(run);
+    if (review.status !== "pending" || round.status !== "pending") {
+      throw new Error(`Artifact Review Round is read-only: ${round.id}`);
+    }
+    if (assignment.draft.vote || assignment.draft.comments.length > 0) {
+      throw new ArtifactReviewSubmissionConflictError(
+        assignment.actorId,
+        "Human draft contains review content"
+      );
+    }
+    const permission = assignment.binding === "decision" ? "decision.decide" : "decision.assess";
+    const humanAuthorization = authorizeArtifactReviewActor({
+      controlPlane: artifactReviewRoundControlPlane(review, round),
+      assignment,
+      permission
+    });
+    if (!humanAuthorization.allowed) throw new ArtifactAuthorizationFailure(humanAuthorization, []);
+    const runnerAuthorization = authorizeArtifactOperation({
+      controlPlane: artifactReviewRoundControlPlane(review, round),
+      subject: { kind: "runner" },
+      permission: "decision.decide"
+    });
+    if (!runnerAuthorization.allowed) throw new ArtifactAuthorizationFailure(runnerAuthorization, []);
+
+    assignment.draft = { comments, vote: input.vote, updatedAt: now };
+    assignment.status = "submitted";
+    assignment.submitted = {
+      comments: structuredClone(comments),
+      vote: input.vote,
+      summary,
+      submittedAt: now,
+      authorization: humanAuthorization,
+      delegation: {
+        kind: "runner",
+        runId: run.id,
+        humanActorId: assignment.actorId,
+        authorizationNote,
+        authorization: runnerAuthorization
+      }
+    };
+    round.votes.push(submittedAssignmentVote(assignment, humanAuthorization));
     round.revision += 1;
     review.updatedAt = now;
     const createdArtifactFiles: string[] = [];
@@ -2335,6 +2527,15 @@ export class ArtifactReviewConflictError extends Error {
   }
 }
 
+export class ArtifactReviewSubmissionConflictError extends Error {
+  readonly code = "artifact_review_submission_conflict";
+
+  constructor(readonly assignmentId: string, detail: string) {
+    super(`Artifact Review submission conflict for ${assignmentId}: ${detail}`);
+    this.name = "ArtifactReviewSubmissionConflictError";
+  }
+}
+
 async function settleArtifactReviewRound(
   runsRoot: string,
   run: RunState,
@@ -2457,6 +2658,24 @@ function normalizeArtifactReviewComments(
       updatedAt: now
     };
   });
+}
+
+function artifactReviewCommentsSemanticallyEqual(
+  left: readonly ArtifactReviewComment[],
+  right: readonly ArtifactReviewComment[]
+): boolean {
+  const semantic = (comment: ArtifactReviewComment) => ({
+    body: comment.body,
+    severity: comment.severity,
+    anchor: comment.anchor ? {
+      submissionId: comment.anchor.submissionId,
+      target: comment.anchor.target,
+      location: comment.anchor.location,
+      sourceHash: comment.anchor.sourceHash,
+      context: comment.anchor.context
+    } : undefined
+  });
+  return JSON.stringify(left.map(semantic)) === JSON.stringify(right.map(semantic));
 }
 
 function requireArtifactReview(run: RunState, reviewId: string): ArtifactReview<RunEvent["artifact"]> {
@@ -3181,7 +3400,8 @@ function buildRunReviewPreflight(
   ).values()];
   const reviews: RunReviewPreflight["reviews"] = [];
   const slots = new Map<string, RunReviewPreflight["slots"][number]>();
-  const policies = snapshot?.decisionPolicyCatalog.definitions.map((policy) => policy.id) ?? [];
+  const policies = (snapshot?.decisionPolicyCatalog.definitions ?? listDecisionPolicyDefinitions())
+    .map((policy) => policy.id);
   for (const template of templates) {
     for (const step of flattenRunSteps(template.steps)) {
       if (!step.artifact || !step.reviewSlots?.length) continue;
@@ -3224,23 +3444,24 @@ function validateRunReviewConfiguration(
   snapshot: ControlPlaneSnapshot | undefined
 ): RunReviewConfiguration | undefined {
   if (!preflight.reviews.length) return undefined;
-  if (!configuration || !snapshot) throw new RunReviewConfigurationRequired(preflight);
+  if (!configuration) throw new RunReviewConfigurationRequired(preflight);
   const issues: string[] = [];
-  const requiredReviews = new Set(preflight.reviews.map((review) => review.scope));
+  const requiredReviews = new Map(preflight.reviews.map((review) => [review.scope, review]));
   const requiredSlots = new Set(preflight.slots.map((slot) => slot.key));
-  for (const scope of requiredReviews) {
+  for (const [scope, preflightReview] of requiredReviews) {
     const review = configuration.reviews[scope];
     if (!review) {
       issues.push(`reviews.${scope}: required`);
       continue;
     }
-    if (!snapshot.decisionPolicyCatalog.definitions.some((policy) => policy.id === review.policy)) {
+    if (!preflightReview.policies.includes(review.policy)) {
       issues.push(`reviews.${scope}.policy: unknown Decision Policy id ${review.policy}`);
     }
   }
   for (const scope of Object.keys(configuration.reviews)) {
     if (!requiredReviews.has(scope)) issues.push(`reviews.${scope}: unknown Review scope`);
   }
+  const actorBoundSlots: string[] = [];
   for (const key of requiredSlots) {
     const binding = configuration.slots[key];
     if (!binding) {
@@ -3248,6 +3469,7 @@ function validateRunReviewConfiguration(
       continue;
     }
     if ("actorIds" in binding) {
+      actorBoundSlots.push(key);
       if (!binding.actorIds.length) issues.push(`slots.${key}.actors: at least one Actor is required`);
       const seenActorIds = new Set<string>();
       for (const [index, actorId] of binding.actorIds.entries()) {
@@ -3256,7 +3478,7 @@ function validateRunReviewConfiguration(
           continue;
         }
         seenActorIds.add(actorId);
-        if (!snapshot.actors[actorId]) issues.push(`slots.${key}.actors: unknown Actor id ${actorId}`);
+        if (snapshot && !snapshot.actors[actorId]) issues.push(`slots.${key}.actors: unknown Actor id ${actorId}`);
       }
     }
   }
@@ -3264,6 +3486,9 @@ function validateRunReviewConfiguration(
     if (!requiredSlots.has(key)) issues.push(`slots.${key}: unknown Review Slot`);
   }
   if (issues.length) throw new Error(`Invalid Review configuration:\n- ${issues.join("\n- ")}`);
+  if (!snapshot && actorBoundSlots.length) {
+    throw new Error(`control_plane config is required for Actor-bound Review Slots:\n- ${actorBoundSlots.join("\n- ")}`);
+  }
   return structuredClone(configuration);
 }
 
@@ -3431,26 +3656,12 @@ function flattenRunSteps(steps: readonly RunStep[]): RunStep[] {
   return flattened;
 }
 
-function containsArtifactReview(steps: readonly RunStep[]): boolean {
-  return steps.some((step) =>
-    Boolean(
-      step.reviewSlots?.length ||
-        (step.branches &&
-          (containsArtifactReview(step.branches.truthy) || containsArtifactReview(step.branches.falsy))) ||
-        (step.loop && containsArtifactReview(step.loop.body))
-    )
-  );
-}
-
 function instantiateProcedureTemplate(
   template: RunProcedureTemplate,
   snapshot: ControlPlaneSnapshot | undefined,
   reviewConfiguration: RunReviewConfiguration | undefined,
   validationScopes?: ReadonlySet<string>
 ): RunStep[] {
-  if (!snapshot && containsArtifactReview(template.steps)) {
-    throw new Error(`control_plane config is required for Artifact Review: procedure:${template.memoryName}`);
-  }
   const steps = cloneSteps(template.steps);
   applyControlPlaneToSteps(steps, snapshot, reviewConfiguration, template.memoryName, validationScopes);
   return steps;
@@ -3467,7 +3678,14 @@ function applyControlPlaneToSteps(
     if (step.artifact) {
       const artifactScope = `${procedureName}#${step.id}`;
       if (step.reviewSlots?.length && !snapshot) {
-        throw new Error(`control_plane config is required for Artifact Review: ${artifactScope}`);
+        const actorBoundSlots = step.reviewSlots.flatMap((slot) => {
+          const key = `${procedureName}::${slot}`;
+          const binding = reviewConfiguration?.slots[key];
+          return binding && "skip" in binding ? [] : [key];
+        });
+        if (actorBoundSlots.length) {
+          throw new Error(`control_plane config is required for Actor-bound Review Slots in ${artifactScope}:\n- ${actorBoundSlots.join("\n- ")}`);
+        }
       }
       if (snapshot && step.reviewSlots?.length) {
         const review = reviewConfiguration?.reviews[artifactScope];
@@ -4662,7 +4880,8 @@ function legacyRunPath(runsRoot: string, id: string): string {
 async function existingRunPath(runsRoot: string, id: string): Promise<string> {
   const current = runPath(runsRoot, id);
   try {
-    await readFile(current, "utf8");
+    const file = await stat(current);
+    if (!file.isFile()) throw new Error(`Run path is not a file: ${current}`);
     return current;
   } catch {
     return legacyRunPath(runsRoot, id);

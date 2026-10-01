@@ -1,0 +1,15 @@
+:root {
+  --org-example-showcase-accent: #16786f;
+}
+.example-custom-page {
+  margin: 24px;
+  padding: 28px;
+  border: 1px solid var(--org-example-showcase-accent);
+  border-radius: 16px;
+  background: var(--mem-view-color-surface);
+}
+.example-custom-renderer {
+  padding: 18px;
+  border-left: 4px solid var(--org-example-showcase-accent);
+  background: var(--mem-view-color-subtle);
+}

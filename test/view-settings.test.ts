@@ -155,8 +155,36 @@ test("non-loopback Settings requires a token in addition to same-origin requests
     assert.equal(authorized.status, 200);
     const payload = await authorized.json() as {
       diskRevision: string;
-      config: { language?: string };
+      operatorTokenConfigured: boolean;
+      runningView?: Record<string, unknown>;
+      config: { language?: string; view?: Record<string, unknown> };
     };
+    assert.equal(payload.operatorTokenConfigured, false);
+    assert.equal(payload.config.view?.operator_token, undefined);
+
+    const fixedToken = "1";
+    const configured = await fetch(`${origin}/api/settings/global/operator-token`, {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        origin
+      },
+      body: JSON.stringify({ expectedRevision: payload.diskRevision, token: fixedToken })
+    });
+    assert.equal(configured.status, 200);
+    const configuredPayload = await configured.json() as { diskRevision: string; operatorTokenConfigured: boolean };
+    assert.equal(configuredPayload.operatorTokenConfigured, true);
+    assert.match(await readFile(globalConfigPath, "utf8"), /"operator_token": "1"/);
+
+    const reloaded = await fetch(`${origin}/api/settings/global`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const reloadedPayload = await reloaded.json() as typeof payload;
+    assert.equal(reloadedPayload.operatorTokenConfigured, true);
+    assert.equal(reloadedPayload.config.view?.operator_token, undefined);
+    assert.equal(reloadedPayload.runningView?.operatorToken, undefined);
+    payload.diskRevision = configuredPayload.diskRevision;
     payload.config.language = "en";
 
     const saved = await fetch(`${origin}/api/settings/global`, {
@@ -249,7 +277,7 @@ test("global and Project Settings save independently and protect referenced Prov
       permissions: ["artifact.read"],
       agent: { provider: "codex" }
     };
-    const projectSaved = await fetch(`${origin}/api/settings/project`, {
+    const projectSaved = await fetch(`${origin}/api/projects/demo/settings/project`, {
       method: "PUT",
       headers: { "content-type": "application/json", origin },
       body: JSON.stringify({ expectedRevision: projectPayload.diskRevision, config: projectPayload.config })
@@ -330,7 +358,7 @@ test("global Settings remains available when no Project is selected", async () =
 test("saving language updates the next View page in the same process without requiring restart", async () => {
   await withSettingsServer("127.0.0.1", async ({ origin }) => {
     const initialPage = await (await fetch(origin)).text();
-    assert.match(initialPage, /<html lang="zh-CN">/);
+    assert.match(initialPage, /<html lang="zh-CN"(?: [^>]*)?>/);
 
     const payload = await (await fetch(`${origin}/api/settings/global`)).json() as {
       diskRevision: string;
@@ -346,7 +374,7 @@ test("saving language updates the next View page in the same process without req
     assert.equal((await saved.json() as { restartRequired: boolean }).restartRequired, false);
 
     const englishPage = await (await fetch(origin)).text();
-    assert.match(englishPage, /<html lang="en">/);
+    assert.match(englishPage, /<html lang="en"(?: [^>]*)?>/);
     assert.match(englishPage, /"common\.refresh":"Refresh"/);
 
     const current = await (await fetch(`${origin}/api/settings/global`)).json() as {
@@ -362,7 +390,7 @@ test("saving language updates the next View page in the same process without req
       })
     });
     assert.equal(invalid.status, 422);
-    assert.match(await (await fetch(origin)).text(), /<html lang="en">/);
+    assert.match(await (await fetch(origin)).text(), /<html lang="en"(?: [^>]*)?>/);
 
     const validateHostChange = await fetch(`${origin}/api/settings/global/validate`, {
       method: "POST",

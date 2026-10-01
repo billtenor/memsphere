@@ -346,10 +346,11 @@ sections:
           - 每个 Slot 表示一个评审人席位，名称应使用可以自然指代评审人的角色称呼，例如产品负责人、测试工程师或流程设计者；不得使用验收、质量、架构设计等评审事项名称代替评审人称呼。
           - Slot 只声明当前 Procedure 需要哪类评审人，不直接引用 Actor、Permission、Decision Policy、system_prompt 或 Agent 配置。
           - 省略 review 时，Artifact 在 type、format 和 schema 校验通过后按既有行为立即被接纳并推进 Run。
-          - Procedure 含 Review 时，创建 Run 前必须为每个 Review scope 选择 Decision Policy，并把所有 Slot 绑定到 Actor 或显式跳过；Run v3 冻结 Actor、权限、Agent 运行配置和初始 Binding。Runner 只能通过显式、受校验且带审计记录的运行期操作修改 Binding；已经创建的当前和历史 Round 保留各自冻结的 Binding，同一 Review 的下一 Round 与尚未创建的 Review 使用创建前最后一次成功保存的 Binding。
+          - Procedure 含 Review 时，创建 Run 前必须为每个可达 Review scope 选择 Decision Policy，并把所有 Slot 绑定到 Actor 或显式跳过；全部 Slot 都显式跳过时不创建 Artifact Review 且不要求 Project 配置 Control Plane，任一 Slot 绑定 Actor 时仍必须配置 Control Plane；Run v3 在存在 Control Plane 时冻结 Actor、权限、Agent 运行配置和初始 Binding。Runner 只能通过显式、受校验且带审计记录的运行期操作修改 Binding；已经创建的当前和历史 Round 保留各自冻结的 Binding，同一 Review 的下一 Round 与尚未创建的 Review 使用创建前最后一次成功保存的 Binding。
           - Artifact 校验通过后按 Run 中冻结的配置创建 Artifact Review；Review 通过前不得把候选 Artifact 加入 Run events 或推进当前 Action。
           - Review 要求修改时，Runner 修改并重新提交同一个 Artifact，系统创建新的 Review Round；通常不需要在 Procedure 中另写 !while 表达该 Artifact 的评审返工。
           - 当前内置 artifact_acceptance.unanimous 要求全部 Human 与 Agent Reviewer Assignment 提交；只有具有 decision.decide 的 Vote 参与一致通过判定，只有 decision.assess 的 Vote 作为建议保存；Reviewer 完成后仍需 Runner 显式投票。
+          - Human 明确要求把指定意见和 Vote 正式提交到本人当前 Assignment 时，当前 Run Runner 可以受托原子提交；CLI 已建立当前 Review、Round 与代提交语境且 Vote、必需 Comment 和目标完整无歧义时，Human 的确定性“我投……”表达同时构成决定与本次授权，不得要求同义二次确认。必须同时校验 Human Assignment 权限与 Runner decision.decide，限定当前 Review Round、Human Assignment、当前 Submission 和无业务内容 Draft，并记录 Human 业务归属、Runner provenance 与非空授权说明。普通讨论、建议、非确定倾向、沉默或仅要求继续不得推断为授权，受托提交也不替代 Runner 最终 Vote。
           - View 按 Review 与 Round 展示每轮不可变 Artifact Submission、正式 Comment、Vote、Result 和 Revision Summary；历史 Round 只读，完成后的 Review 仍可从对应 Run 步骤重新打开。
           - Artifact Review 定位 Comment 只能绑定创建时的 Submission、digest 和 Renderer target，不得锚定 Memory 或 Workspace 文件，也不得自动迁移到下一轮。
 

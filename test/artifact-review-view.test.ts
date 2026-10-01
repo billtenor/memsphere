@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -15,6 +15,7 @@ import {
   reportRun,
   resolveArtifactReviewComment,
   startRun,
+  submitArtifactReviewHumanAssignmentForRunner,
   submitArtifactReviewRunnerVote
 } from "../src/run/store.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
@@ -118,7 +119,7 @@ flow:
     const address = server.address();
     assert(address && typeof address === "object");
     const base = `http://127.0.0.1:${address.port}`;
-    const publicRuns = await fetch(`${base}/api/runs`);
+    const publicRuns = await fetch(`${base}/api/projects/memsphere/runs`);
     assert.equal(publicRuns.status, 200);
     const publicSource = await publicRuns.text();
     assert.match(publicSource, /"artifactReview"/);
@@ -129,7 +130,7 @@ flow:
     assert.doesNotMatch(publicSource, /artifactReviews|Private candidate/);
     assert.doesNotMatch(publicSource, /attempt-private|workerPid|cliReadyAt|private-prompt|private-session|protocolVersion|private-agent|private-version|private-model|private-stop/);
 
-    const summaryResponse = await fetch(`${base}/api/runs?representation=summary`);
+    const summaryResponse = await fetch(`${base}/api/projects/memsphere/runs?representation=summary`);
     assert.equal(summaryResponse.status, 200);
     const summarySource = await summaryResponse.text();
     const summaryPayload = JSON.parse(summarySource) as {
@@ -147,8 +148,8 @@ flow:
     assert.equal(runSummary?.eventCount, 0);
     assert.doesNotMatch(summarySource, /artifactReviews|Private candidate|attempt-private/);
 
-    const roundPath = `${base}/api/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
-    const directRoundPath = `${base}/api/runs/${started.id}/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
+    const roundPath = `${base}/api/projects/memsphere/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
+    const directRoundPath = `${base}/api/projects/memsphere/runs/${started.id}/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
     const publicInitial = await fetch(roundPath);
     assert.equal(publicInitial.status, 200);
     const publicContext = await publicInitial.json() as ReviewContext;
@@ -256,7 +257,7 @@ flow:
     assert.equal(completed.artifactReviews?.[0]?.rounds[0]?.result?.decisionApprove, 2);
     assert.equal(completed.artifactReviews?.[0]?.rounds[0]?.result?.advisoryTotal, 1);
 
-    const completedRunsResponse = await fetch(`${base}/api/runs`);
+    const completedRunsResponse = await fetch(`${base}/api/projects/memsphere/runs`);
     assert.equal(completedRunsResponse.status, 200);
     const completedRuns = await completedRunsResponse.json() as {
       runs: Array<{
@@ -291,13 +292,13 @@ flow:
     assert.match(advisory?.renderedBody ?? "", /<p>Advisory suggestion<\/p>\s*<p>Second paragraph<\/p>/);
 
     await archiveRun({ archiveRoot, runsRoot, id: started.id });
-    const archivedDetail = await fetch(`${base}/api/runs/${started.id}`);
+    const archivedDetail = await fetch(`${base}/api/projects/memsphere/runs/${started.id}`);
     assert.equal(archivedDetail.status, 200);
     assert.equal((await archivedDetail.json() as { run: { readOnly?: boolean } }).run.readOnly, true);
     const archivedEvidence = await fetch(`${directRoundPath}?actor_id=alice`);
     assert.equal(archivedEvidence.status, 200);
     assert.equal((await archivedEvidence.json() as ReviewContext).submission.artifact.content, "# Private candidate\n");
-    const activeSummaries = await fetch(`${base}/api/runs?representation=summary`).then(response => response.json()) as {
+    const activeSummaries = await fetch(`${base}/api/projects/memsphere/runs?representation=summary`).then(response => response.json()) as {
       runs: Array<{ id: string }>;
     };
     assert.equal(activeSummaries.runs.some((candidate) => candidate.id === started.id), false);
@@ -310,27 +311,21 @@ flow:
       const directContextRequests: string[] = [];
       page.on("request", (request) => {
         const url = new URL(request.url());
-        if (url.pathname.startsWith(`/api/runs/${started.id}/artifact-reviews/${review.id}/rounds/`)) {
+        if (url.pathname.startsWith(`/api/projects/memsphere/runs/${started.id}/artifact-reviews/${review.id}/rounds/`)) {
           directContextRequests.push(url.pathname);
         }
       });
       await page.goto(archivedReviewUrl);
-      const archivedModal = page.locator("#artifact-review-modal[open]");
+      const archivedModal = page.locator(".view-overlay-layer #artifact-review-modal");
       await archivedModal.waitFor();
       await archivedModal.getByText("Private candidate", { exact: true }).waitFor();
 
-      const summaryRefresh = page.waitForResponse((response) => {
-        const url = new URL(response.url());
-        return url.pathname === "/api/runs" && url.searchParams.get("representation") === "summary";
-      });
-      assert.equal((await summaryRefresh).status(), 200);
-      await page.waitForFunction(() => document.querySelector("#count")?.textContent === "0 个运行");
-      assert.equal(new URL(page.url()).pathname, `/tasks/${started.id}/artifact-reviews/${review.id}`);
+      await page.locator(".mem-view-content-list").getByText("当前状态下没有 Run。", { exact: true }).waitFor();
+      assert.equal(new URL(page.url()).pathname, `/projects/memsphere/tasks/${started.id}/artifact-reviews/${review.id}`);
       assert.equal(await archivedModal.isVisible(), true);
       await archivedModal.getByText("Private candidate", { exact: true }).waitFor();
-      assert.equal(directContextRequests.every(path => path.includes(`/api/runs/${started.id}/`)), true);
-      assert.equal(await page.locator(".task-card").count(), 0);
-      assert.equal(await page.locator("#count").textContent(), "0 个运行");
+      assert.equal(directContextRequests.every(path => path.includes(`/api/projects/memsphere/runs/${started.id}/`)), true);
+      assert.equal(await page.locator(".mem-view-list-item").count(), 0);
     } finally {
       await browser.close();
     }
@@ -393,7 +388,7 @@ flow:
   try {
     const address = server.address();
     assert(address && typeof address === "object");
-    const endpoint = `http://127.0.0.1:${address.port}/api/runs/${started.id}/bindings`;
+    const endpoint = `http://127.0.0.1:${address.port}/api/projects/memsphere/runs/${started.id}/bindings`;
     assert.equal((await fetch(`http://127.0.0.1:${address.port}/api/settings/global`)).status, 401);
     const initial = await fetch(endpoint);
     assert.equal(initial.status, 200);
@@ -437,6 +432,112 @@ flow:
     });
     assert.equal(invalid.status, 400);
     assert.match(await invalid.text(), /unknown frozen Actor/);
+  } finally {
+    server.close();
+    await once(server, "close");
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("View exposes safe delegated provenance and reads legacy direct opinions", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-delegated-view-"));
+  const memoryRoot = join(dir, "memory");
+  const runsRoot = join(dir, "runs");
+  const reviewsRoot = join(dir, "reviews");
+  await mkdir(join(memoryRoot, "procedures"), { recursive: true });
+  await mkdir(reviewsRoot, { recursive: true });
+  await writeFile(join(memoryRoot, "procedures", "delegated-view.yaml"), withCurrentMemorySyntax(`!procedure
+name: delegated-view
+flow:
+  - !action
+    action: Produce a reviewed Artifact.
+    artifact: !artifact
+      name: reviewed result
+      format: markdown
+      review: [reviewer]
+`));
+  const controlPlane = parseControlPlaneConfig({
+    runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+    actors: { human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] } }
+  });
+  const started = await startRun({
+    name: "Delegated View",
+    memoryRoot,
+    runsRoot,
+    procedureName: "delegated-view",
+    controlPlane,
+    reviewConfiguration: reviewConfiguration({ procedure: "delegated-view", slots: { reviewer: ["human"] } })
+  });
+  const pending = await reportRun({
+    runsRoot,
+    runId: started.id,
+    artifact: { kind: "inline", value: "# Candidate\n" }
+  });
+  const review = currentArtifactReview(pending)!;
+  const delegated = await submitArtifactReviewHumanAssignmentForRunner({
+    runsRoot,
+    runId: started.id,
+    reviewId: review.id,
+    roundId: review.currentRoundId,
+    assignmentId: "human",
+    vote: "approve",
+    comments: [],
+    authorizationNote: "Human explicitly authorized this submission."
+  });
+  const config: MemsphereConfig = {
+    configPath: join(dir, "config.json"), scopeRoot: dir, memoryRoot, reviewsRoot, runsRoot,
+    archiveRoot: join(dir, "archives"), view: { host: "127.0.0.1", port: 0 }, controlPlane
+  };
+  const server = createViewServer(config);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const address = server.address();
+    assert(address && typeof address === "object");
+    const roundPath = `http://127.0.0.1:${address.port}/api/projects/memsphere/artifact-reviews/${review.id}/rounds/${review.currentRoundId}`;
+    const response = await fetch(`${roundPath}?actor_id=human`);
+    const source = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(source, /"kind":\s*"runner"/);
+    assert.match(source, /Human explicitly authorized this submission/);
+    assert.doesNotMatch(source, /"authorization"/);
+
+    const conflict = await mutate(`${roundPath}/assignments/human/submit`, "POST", {
+      expectedRevision: delegated.round.revision
+    });
+    assert.equal(conflict.status, 409);
+    assert.equal((await conflict.json() as { code: string }).code, "artifact_review_submission_conflict");
+
+    await submitArtifactReviewRunnerVote({
+      runsRoot,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      vote: "approve"
+    });
+    const doneRetry = await submitArtifactReviewHumanAssignmentForRunner({
+      runsRoot,
+      runId: started.id,
+      reviewId: review.id,
+      roundId: review.currentRoundId,
+      assignmentId: "human",
+      vote: "approve",
+      comments: [],
+      authorizationNote: "Human explicitly authorized this submission."
+    });
+    assert.equal(doneRetry.run.status, "done");
+    assert.equal(doneRetry.round.revision, delegated.round.revision + 1);
+
+    const persistedPath = join(runsRoot, started.id, `${started.id}.json`);
+    const legacy = JSON.parse(await readFile(persistedPath, "utf8")) as {
+      artifactReviews: Array<{ rounds: Array<{ assignments: Array<{ submitted?: Record<string, unknown> }> }> }>;
+    };
+    delete legacy.artifactReviews[0]!.rounds[0]!.assignments[0]!.submitted!.delegation;
+    await writeFile(persistedPath, `${JSON.stringify(legacy, null, 2)}\n`);
+    const legacyResponse = await fetch(`${roundPath}?actor_id=human`);
+    const legacySource = await legacyResponse.text();
+    assert.equal(legacyResponse.status, 200);
+    assert.doesNotMatch(legacySource, /delegation|authorization/);
+    assert.match(legacySource, /"vote":\s*"approve"/);
   } finally {
     server.close();
     await once(server, "close");

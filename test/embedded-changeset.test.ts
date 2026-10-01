@@ -18,6 +18,7 @@ import {
   listMemoryChanges,
   readMemoryChange,
   validateMemoryChange,
+  withMemoryChangeDetailSnapshot,
   withMemoryChangePreview,
   withMemoryChangeReviewSnapshot
 } from "../src/memory/changeset.js";
@@ -80,6 +81,40 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     assert.equal(await readFile(join(mainMemory, "concepts", "shared.yaml"), "utf8"), mainSource);
     const changesAfterFirst = (await readdir(join(project.root, "changes"))).filter((name) => name.startsWith("change-"));
     assert.deepEqual(changesAfterFirst, [first.changeId]);
+
+    const firstChange = JSON.parse(
+      await readFile(join(project.root, "changes", first.changeId, "change.json"), "utf8")
+    ) as Record<string, unknown>;
+    const legacyId = "change-legacy-without-store-type";
+    const legacyChange = {
+      ...firstChange,
+      id: legacyId,
+      status: "completed",
+      published_revision: "legacy-revision"
+    };
+    delete legacyChange.store_type;
+    await mkdir(join(project.root, "changes", legacyId));
+    await writeFile(
+      join(project.root, "changes", legacyId, "change.json"),
+      `${JSON.stringify(legacyChange, null, 2)}\n`
+    );
+    assert.equal((await validateMemoryChange()).changeId, first.changeId);
+
+    legacyChange.status = "abandoned";
+    delete legacyChange.published_revision;
+    await writeFile(
+      join(project.root, "changes", legacyId, "change.json"),
+      `${JSON.stringify(legacyChange, null, 2)}\n`
+    );
+    assert.equal((await validateMemoryChange()).changeId, first.changeId);
+
+    legacyChange.status = "active";
+    await writeFile(
+      join(project.root, "changes", legacyId, "change.json"),
+      `${JSON.stringify(legacyChange, null, 2)}\n`
+    );
+    await assert.rejects(validateMemoryChange(), /invalid persisted data.*store_type/s);
+    await rm(join(project.root, "changes", legacyId), { recursive: true });
 
     await runGit(["worktree", "add", "-b", "linked-twin", linkedTwin], { cwd: main });
     await writeFile(join(linkedTwin, ".memsphere", "memory", "concepts", "shared.yaml"), linkedSource);
@@ -152,6 +187,18 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       }
     }, null, 2)}\n`);
 
+    const outsideViewWorkspace = join(fixture, "outside-view-workspace");
+    await mkdir(outsideViewWorkspace);
+    process.chdir(outsideViewWorkspace);
+    await assert.rejects(
+      withMemoryChangeDetailSnapshot({
+        home,
+        project: "embedded",
+        changeId: first.changeId,
+        use: async () => undefined
+      }),
+      /Embedded Project commands must run inside the Project's Git repository/
+    );
     const view = createViewServer(await readViewConfig());
     await new Promise<void>((resolve, reject) => {
       view.once("error", reject);
@@ -159,7 +206,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     });
     const origin = `http://127.0.0.1:${(view.address() as AddressInfo).port}`;
     try {
-      const formalResponse = await fetch(`${origin}/api/memories`);
+      const formalResponse = await fetch(`${origin}/api/projects/embedded/memories`);
       const formal = await formalResponse.json() as {
         memories: Array<{ entity: { defines?: string[] } }>;
         source?: { mode: string };
@@ -168,7 +215,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       assert.deepEqual(formal.source, { mode: "formal" });
       assert.deepEqual(formal.memories.find((memory) => memory.entity.defines?.includes("Published"))?.entity.defines, ["Published"]);
 
-      const previewResponse = await fetch(`${origin}/api/memories?change=${encodeURIComponent(first.changeId)}`);
+      const previewResponse = await fetch(`${origin}/api/projects/embedded/memories?change=${encodeURIComponent(first.changeId)}`);
       const preview = await previewResponse.json() as {
         memories: Array<{ entity: { defines?: string[] } }>;
         source?: { mode: string; changeId: string; storeType: string; valid: boolean };
@@ -181,7 +228,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       assert.equal(preview.source?.valid, true);
 
       const previewSummaryResponse = await fetch(
-        `${origin}/api/memories?representation=summary&change=${encodeURIComponent(first.changeId)}`
+        `${origin}/api/projects/embedded/memories?representation=summary&change=${encodeURIComponent(first.changeId)}`
       );
       const previewSummarySource = await previewSummaryResponse.text();
       const previewSummary = JSON.parse(previewSummarySource) as {
@@ -198,7 +245,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       assert.equal(previewSummary.memories.some((memory) => memory.entity !== undefined), false);
       assert.doesNotMatch(previewSummarySource, /Linked preview/);
 
-      const changeDetailResponse = await fetch(`${origin}/api/changes/${encodeURIComponent(first.changeId)}`);
+      const changeDetailResponse = await fetch(`${origin}/api/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
       const changeDetail = await changeDetailResponse.json() as {
         actorNames: Record<string, string>;
         actorKinds: Record<string, string>;
@@ -221,7 +268,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       unavailableSource.source_worktree.root = join(fixture, "removed-linked-worktree");
       await writeFile(changeRecordPath, `${JSON.stringify(unavailableSource, null, 2)}\n`);
       try {
-        const unavailableResponse = await fetch(`${origin}/api/changes/${encodeURIComponent(first.changeId)}`);
+        const unavailableResponse = await fetch(`${origin}/api/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
         const unavailable = await unavailableResponse.json() as {
           change: { status: string; sourceWorktree: { root: string; available: boolean } };
         };
@@ -234,7 +281,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
           const page = await sourceBrowser.newPage({ viewport: { width: 1366, height: 900 } });
           await page.goto(`${origin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
           await page.getByText("来源工作区不可用", { exact: true }).waitFor();
-          assert.match(await page.locator(".meta").first().textContent() ?? "", /removed-linked-worktree/);
+          assert.match(await page.locator(".memory-source-worktree .memory-muted").textContent() ?? "", /removed-linked-worktree/);
         } finally {
           await sourceBrowser.close();
         }
@@ -243,7 +290,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       }
 
       const previewDetailResponse = await fetch(
-        `${origin}/api/memories/concepts/shared?change=${encodeURIComponent(first.changeId)}`
+        `${origin}/api/projects/embedded/memories/concepts/shared?change=${encodeURIComponent(first.changeId)}`
       );
       const previewDetail = await previewDetailResponse.json() as {
         memory: { entity: { defines?: string[] } };
@@ -251,9 +298,9 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       assert.equal(previewDetailResponse.status, 200);
       assert.deepEqual(previewDetail.memory.entity.defines, ["Linked preview"]);
 
-      const missing = await fetch(`${origin}/api/memories?change=change-missing`);
+      const missing = await fetch(`${origin}/api/projects/embedded/memories?change=change-missing`);
       assert.equal(missing.status, 404);
-      const missingDetail = await fetch(`${origin}/api/changes/change-missing`);
+      const missingDetail = await fetch(`${origin}/api/projects/embedded/changes/change-missing`);
       assert.equal(missingDetail.status, 404);
       assert.equal((await missingDetail.json() as { code: string }).code, "changeset_not_found");
 
@@ -266,7 +313,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
         id: corruptId
       }, null, 2)}\n`);
       try {
-        const listResponse = await fetch(origin + "/api/changes");
+        const listResponse = await fetch(origin + "/api/projects/embedded/changes");
         const listPayload = await listResponse.json() as {
           changes: Array<{ id: string; status: string; error?: string }>;
         };
@@ -275,7 +322,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
         assert.equal(unavailable?.status, "unavailable");
         assert.match(unavailable?.error ?? "", /store_type/);
 
-        const detailResponse = await fetch(origin + `/api/changes/${corruptId}`);
+        const detailResponse = await fetch(origin + `/api/projects/embedded/changes/${corruptId}`);
         const detailPayload = await detailResponse.json() as { code: string; error: string };
         assert.equal(detailResponse.status, 500);
         assert.equal(detailPayload.code, "changeset_integrity_error");
@@ -286,9 +333,9 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
         try {
           const page = await corruptBrowser.newPage({ viewport: { width: 1366, height: 900 } });
           await page.goto(`${origin}/projects/embedded/changes/${corruptId}`);
-          await page.locator(".error-panel").waitFor();
-          assert.match(await page.locator(".error-panel").textContent() ?? "", new RegExp(corruptId));
-          assert.match(await page.locator(".error-panel").textContent() ?? "", /store_type/);
+          await page.locator(".memory-error").waitFor();
+          assert.match(await page.locator(".memory-error").textContent() ?? "", new RegExp(corruptId));
+          assert.match(await page.locator(".memory-error").textContent() ?? "", /store_type/);
         } finally {
           await corruptBrowser.close();
         }
@@ -297,6 +344,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       }
     } finally {
       await new Promise<void>((resolve) => view.close(() => resolve()));
+      process.chdir(linked);
     }
 
     const repeated = await validateMemoryChange();
@@ -318,6 +366,77 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     };
     assert.deepEqual(new Set(expandedChange.targets.map((target) => target.operation)), new Set(["create", "delete", "rename", "update"]));
     assert.deepEqual(await readdir(join(project.root, "changes", first.changeId, "checkpoints")), [expanded.checkpointDigest]);
+    await withMemoryChangeDetailSnapshot({
+      home,
+      project: "embedded",
+      changeId: first.changeId,
+      use: async ({ files }) => {
+        const byOperation = new Map(files.map((file) => [file.operation, file]));
+        assert(byOperation.get("create")?.candidatePath);
+        assert.equal(byOperation.get("create")?.basePath, undefined);
+        assert(byOperation.get("update")?.candidatePath);
+        assert(byOperation.get("update")?.basePath);
+        assert(byOperation.get("rename")?.candidatePath);
+        assert(byOperation.get("rename")?.basePath);
+        assert.equal(byOperation.get("delete")?.candidatePath, undefined);
+        assert(byOperation.get("delete")?.basePath);
+      }
+    });
+
+    const operationView = createViewServer(await readViewConfig());
+    await new Promise<void>((resolve, reject) => {
+      operationView.once("error", reject);
+      operationView.listen(0, "127.0.0.1", resolve);
+    });
+    try {
+      const operationOrigin = `http://127.0.0.1:${(operationView.address() as AddressInfo).port}`;
+      const detailResponse = await fetch(`${operationOrigin}/api/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
+      const detail = await detailResponse.json() as {
+        change: { updatedAt: string };
+        targetMemories: Array<{ reference: string; operation: string; memory?: unknown; baseMemory?: unknown }>;
+      };
+      assert.equal(detailResponse.status, 200);
+      const byOperation = new Map(detail.targetMemories.map((target) => [target.operation, target]));
+      assert(byOperation.get("create")?.memory);
+      assert.equal(byOperation.get("create")?.baseMemory, undefined);
+      assert(byOperation.get("update")?.memory);
+      assert(byOperation.get("update")?.baseMemory);
+      assert(byOperation.get("rename")?.memory);
+      assert(byOperation.get("rename")?.baseMemory);
+      assert.equal(byOperation.get("delete")?.memory, undefined);
+      assert(byOperation.get("delete")?.baseMemory);
+      const commentResponse = await fetch(`${operationOrigin}/api/projects/embedded/changes/${encodeURIComponent(first.changeId)}/comments`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          operator: { kind: "human", id: "alice" },
+          memoryReference: "concepts/shared",
+          path: "concepts/shared.yaml",
+          target: "concept.defines[1]",
+          location: { anchor: "concept.defines[1]" },
+          snapshot: "Linked preview",
+          body: "Anchor-only structured View comment",
+          expectedUpdatedAt: detail.change.updatedAt
+        })
+      });
+      const commentPayload = await commentResponse.json() as {
+        change: { updatedAt: string };
+        comment: { id: string; location?: { anchor: string; line?: number } };
+      };
+      assert.equal(commentResponse.status, 201);
+      assert.deepEqual(commentPayload.comment.location, { anchor: "concept.defines[1]" });
+      const deleteResponse = await fetch(`${operationOrigin}/api/projects/embedded/changes/${encodeURIComponent(first.changeId)}/comments/${encodeURIComponent(commentPayload.comment.id)}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          operator: { kind: "human", id: "alice" },
+          expectedUpdatedAt: commentPayload.change.updatedAt
+        })
+      });
+      assert.equal(deleteResponse.status, 200);
+    } finally {
+      await new Promise<void>((resolve) => operationView.close(() => resolve()));
+    }
 
     let releaseSnapshot!: () => void;
     let snapshotEntered!: () => void;
@@ -371,16 +490,14 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
    try {
       const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
       await page.goto(`${invalidOrigin}/projects/embedded/memories?change=${encodeURIComponent(first.changeId)}`);
-      await page.getByText("草稿预览", { exact: true }).first().waitFor();
+      await page.getByRole("heading", { name: "草稿预览", exact: true }).waitFor();
       await page.getByRole("button", { name: "shared", exact: true }).click();
       await page.getByRole("heading", { name: "记忆 YAML 无效", exact: true }).waitFor();
-      assert.match(await page.locator(".meta").first().textContent() ?? "", /存储：embedded/);
-      assert.match(await page.locator(".meta").first().textContent() ?? "", /校验失败/);
-      assert.deepEqual(
-        await page.evaluate(() => (window as unknown as { currentChangeOperator(): unknown }).currentChangeOperator()),
-        { kind: "human", id: "alice" }
-      );
-      assert.match(await page.locator(".error-panel").first().textContent() ?? "", /concepts\/shared\.yaml/);
+      const changeContext = page.locator(".memory-change-context .memory-meta");
+      assert.match(await changeContext.textContent() ?? "", /存储：embedded/);
+      assert.match(await changeContext.textContent() ?? "", /校验失败/);
+      assert.equal(await page.evaluate(() => localStorage.getItem("memsphere.changeActorSelection.v1")), null);
+      assert.match(await page.locator(".memory-error").first().textContent() ?? "", /concepts\/shared\.yaml/);
       assert.equal(await page.getByRole("button", { name: "Create Review", exact: true }).count(), 0);
       await page.close();
     } finally {
@@ -464,8 +581,9 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     try {
       const page = await completedBrowser.newPage();
       await page.goto(`${completedOrigin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
-      await page.getByText("已完成 · 变更集", { exact: true }).waitFor();
-      assert.equal(await page.getByText("进行中 · 变更集", { exact: true }).count(), 0);
+      await page.locator(".view-shell-heading", { hasText: first.changeId }).waitFor();
+      await page.locator(".view-shell-heading", { hasText: "已完成" }).waitFor();
+      assert.equal(await page.locator(".view-shell-heading", { hasText: "进行中" }).count(), 0);
     } finally {
       await completedBrowser.close();
       await new Promise<void>((resolve) => completedView.close(() => resolve()));

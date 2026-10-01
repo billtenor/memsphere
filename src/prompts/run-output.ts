@@ -55,7 +55,7 @@ export type RunOutputScene =
 
 const allowedPurposeSequences: Record<RunOutputScene["kind"], readonly (readonly PromptPurpose[])[]> = {
   start: [["instruction"], ["summary"]],
-  status: [["instruction"], ["summary"]],
+  status: [["instruction"], ["summary"], ["summary", "next_action"]],
   report: [
     ["receipt", "instruction"],
     ["receipt", "summary"],
@@ -95,6 +95,16 @@ export function runOutputPromptIds(scene: RunOutputScene, locale: PromptLocale):
 }
 
 function buildInvocations(scene: RunOutputScene, locale: PromptLocale): PromptInvocation[] {
+  if (scene.kind === "status") {
+    const review = currentArtifactReview(scene.run);
+    if (review?.status === "pending" || review?.status === "awaiting_runner_vote") {
+      const round = requireCurrentRound(review);
+      return [
+        invocation("run.review-summary", buildArtifactReviewSummaryPromptModel(review, round, locale)),
+        invocation("run.review-next-action", buildArtifactReviewNextActionPromptModel(review, round, scene.run.id))
+      ];
+    }
+  }
   if (scene.kind === "report") {
     const receipt = invocation("run.report-receipt", buildRunReportReceiptPromptModel(scene.run));
     const review = currentArtifactReview(scene.run);

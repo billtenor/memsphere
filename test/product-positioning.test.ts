@@ -58,6 +58,32 @@ test("all installed System Memory sources match the current Project copies", asy
   }
 });
 
+test("Skill and project delivery memories enforce the Memory ChangeSet gate", async () => {
+  const [skill, framework, development, testing, delivery, agile] = await Promise.all([
+    readFile(join(root, "src", "skills", "memsphere", "SKILL.md"), "utf8"),
+    readReserved("concepts/memsphere-framework.yaml"),
+    readFile(join(projectMemoryRoot, "statements", "memsphere-repository-development-rules.yaml"), "utf8"),
+    readFile(join(projectMemoryRoot, "statements", "memsphere-repository-testing-rules.yaml"), "utf8"),
+    readFile(join(projectMemoryRoot, "statements", "memsphere-repository-delivery-rules.yaml"), "utf8"),
+    readFile(join(projectMemoryRoot, "procedures", "memsphere-agile-requirement-development.yaml"), "utf8")
+  ]);
+
+  assert(skill.indexOf("## Memory 写入硬门禁") < skill.indexOf("## Memsphere 如何组织记忆"));
+  for (const source of [skill, framework, development, testing, delivery, agile]) {
+    assert.match(source, /memsphere memory change validate \[change-id\]/);
+    assert.match(source, /不能(?:代替|满足)/);
+  }
+  for (const signal of ["功能实现摘要", "初始验证报告", "报告前必须检查 Memory 差异", "commit 前必须检查 Memory 差异"]) {
+    assert.match(agile, new RegExp(signal));
+  }
+  for (const evidence of ["ChangeSet ID", "校验状态", "View 入口"]) {
+    assert.match(skill, new RegExp(evidence));
+    assert.match(testing, new RegExp(evidence));
+    assert.match(delivery, new RegExp(evidence));
+    assert.match(agile, new RegExp(evidence));
+  }
+});
+
 test("chapter one is a bounded first-use journey based on a real scenario", async () => {
   const tutorial = await readReserved("procedures/memsphere-tutorial-chapter-01.yaml");
 
@@ -109,7 +135,7 @@ test("chapter three teaches flow execution and configurable artifact review role
   assert.match(actor, /Review Slot.*Binding/);
   assert.match(review, /不可变 Artifact Submission/);
   assert.match(review, /ChangeSet Comment 是两种不同对象/);
-  assert.match(view, /Memory 与 Run 是 View 的顶层入口/);
+  assert.match(view, /稳定 Shell 组合 Home、Memory、Run 和启用的用户 Module 视图/);
   assert.match(view, /本地操作界面/);
   assert.match(view, /不等同于.*专属界面/);
   assert.match(procedure, /memsphere-run/);

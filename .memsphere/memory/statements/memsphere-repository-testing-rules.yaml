@@ -7,6 +7,7 @@ defines:
   - 规定 memsphere 代码与 Memory 变更交付前的最低测试和校验要求。
 asserts:
   - 交付前必须通过 npm run typecheck、npm test、npm run build 和 memsphere validate；存在失败时不得声称交付完成。
+  - 本轮存在 Memory 交付差异时，还必须对最终内容执行 memsphere memory change validate [change-id]，并记录 ChangeSet ID、校验状态和 View 入口；普通 memsphere validate 不能满足该门禁。
   - 必须记录实际执行的测试命令、结果和未执行项，不得用历史结果代替当前变更验证。
   - npm run validate 当前只执行构建，不得替代 memsphere validate。
 sections:
@@ -55,7 +56,7 @@ sections:
     names:
       - Memory Store 校验
     asserts:
-      - 新建、修改、移动或删除 .memsphere/memory 中的任意 Concept、Statement、Procedure 或 Schema 后，必须运行 memsphere validate。
+      - 新建、修改、移动、重命名或删除 .memsphere/memory 中的任意 Concept、Statement、Procedure 或 Schema 后，必须同时运行 memsphere validate 和 memsphere memory change validate [change-id]；前者检查当前 Store 健康，后者捕获并验证交付差异，两者不得互相替代。
       - memsphere validate 必须确认 config 与各 root 可用、四类当前 Memory 均可解析、syntax 与字段结构合法，并检查规范名称和别名等 catalog 冲突。
       - memsphere validate 不验证自然语言 asserts 是否成立、Procedure 是否能按预期运行、Artifact 内容是否符合业务语义，也不直接校验 reserved-memory 源目录；这些必须由覆盖对应语义的自动化测试或实际运行验证。
   - !statement
@@ -63,7 +64,7 @@ sections:
       - System 与 Reserved Memory
     asserts:
       - 修改 reserved-memory 中的 Memory、manifest 或安装行为时，必须运行 test/reserved-store.test.ts，验证 Managed Project bootstrap、System Memory manifest 完整性和受控更新契约，以及重复创建时的拒绝行为。
-      - 修改 System Memory 后必须同步当前开发 Project 的 Memory 副本，再运行 memsphere validate；源文件与安装副本不得出现非预期差异。
+      - 修改 System Memory 后必须同步当前开发 Project 的 Memory 副本，再运行 memsphere validate 和 memsphere memory change validate [change-id]；源文件与安装副本不得出现非预期差异，ChangeSet 证据必须匹配最终内容。
   - !statement
     names:
       - 变更范围与必跑测试

@@ -12,6 +12,7 @@ asserts:
   - 不得通过删除、跳过或弱化有效测试和断言来使验证通过。
   - 必须记录本轮实际执行的命令、结果和未执行项，不得用历史结果代替当前验证。
   - 验证失败时必须区分本轮变更导致的失败、既有失败和环境阻塞；存在阻塞交付的问题时不得声称验证通过。
+  - 项目使用 Memsphere 且本轮存在 Memory 差异时，必须对最终内容执行 memsphere memory change validate [change-id]，并记录 ChangeSet ID、校验状态和 View 入口；普通 Store 校验或无状态 Memory root 校验不能代替变更级校验。
 sections:
   - !statement
     names:
