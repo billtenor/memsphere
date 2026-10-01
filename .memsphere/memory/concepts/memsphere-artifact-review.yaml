@@ -15,3 +15,4 @@ defines:
   - 全部 Reviewer 完成后，Runner 阅读意见并作出推进决定；要求修改时由 Runner 修订同一 Artifact，再形成新的 Submission 和 Review Round。
   - 每个 Round 在创建时冻结自己的 Binding、权限和 Assignment；运行期换绑不改变当前或历史 Round，只让同一 Review 的下一 Round 使用创建前最后一次成功保存的 Binding。
   - Artifact Review Comment 只评价当前 Submission，与用于修改长期 Memory 的 ChangeSet Comment 是两种不同对象。
+  - View 切换到前序 Artifact 时，只读展示接受该冻结快照的正式评审记录，不把当前 Submission 的意见或提交操作应用到前序材料；记录关联必须唯一，无法确认或存在歧义时显示无独立评审记录，不按同名产物或步骤猜测。
