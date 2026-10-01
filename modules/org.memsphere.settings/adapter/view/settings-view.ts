@@ -3,7 +3,7 @@ import type { SettingsViewConfig } from "./index.js";
 
 type JsonObject = Record<string, any>;
 type ScopeName = "global" | "project";
-type SectionName = "overview" | "general" | "view" | "appearance" | "packages" | "composition" | "providers" | "project" | "participants";
+type SectionName = "overview" | "general" | "view" | "appearance" | "packages" | "composition" | "providers" | "project" | "participants" | "models";
 
 interface SettingsViewOptions {
   readonly config: SettingsViewConfig;
@@ -31,6 +31,7 @@ const sections: Record<SectionName, { scope: ScopeName; module: string }> = {
   composition: { scope: "global", module: "appearance" },
   providers: { scope: "global", module: "providers" },
   project: { scope: "project", module: "overview" },
+  models: { scope: "project", module: "models" },
   participants: { scope: "project", module: "participants" }
 };
 
@@ -249,6 +250,7 @@ class SettingsApplication {
       ]],
       ["project", `${this.t("navigation.project", "项目")} · ${this.#currentProject}`, [
         ["project", this.t("settings.overview", "概览")],
+        ["models", this.t("settings.models", "模型存储")],
         ["participants", this.t("settings.participants", "参与者配置")]
       ]]
     ];
@@ -271,6 +273,7 @@ class SettingsApplication {
       appearance: this.t("settings.appearance", "界面与主题"),
       providers: this.t("settings.providers", "模型提供商"),
       project: this.t("navigation.project", "当前项目"),
+      models: this.t("settings.models", "模型存储"),
       participants: this.t("settings.participants", "参与者")
     };
     const section = this.#scope === "project" && this.#module === "overview" ? "project" : this.#module;
@@ -306,9 +309,10 @@ class SettingsApplication {
       : this.#module === "view" ? this.viewHtml(scope)
       : this.#module === "providers" ? this.providersHtml(scope)
       : this.#module === "participants" ? this.participantsHtml(scope)
+      : this.#module === "models" ? this.modelsHtml(scope)
       : this.overviewHtml(scope);
-    const actions = ["general", "view", "providers", "participants"].includes(this.#module)
-      ? `<div class="settings-actions"><button class="btn" data-action="reload">${escapeHtml(this.t("settings.reload", "重新读取"))}</button><button class="btn primary" data-action="validate">${escapeHtml(this.t("common.save", "保存"))}</button></div>` : "";
+    const actions = ["general", "view", "providers", "participants", "models"].includes(this.#module)
+      ? `<div class="settings-actions"><button class="btn" data-action="reload">${escapeHtml(this.t("settings.reload", "重新读取"))}</button>${this.#module === "models" ? `<button class="btn" data-action="discard-project">${escapeHtml(this.t("settings.discard", "放弃修改"))}</button>` : ""}<button class="btn primary" data-action="validate">${escapeHtml(this.t("common.save", "保存"))}</button></div>` : "";
     return `<div class="settings-layout">${status}${notice}${panel}${actions}</div>`;
   }
 
@@ -426,7 +430,11 @@ class SettingsApplication {
     const slotDefinitions: JsonObject[] = this.#viewPackages.configurableSlots ?? [];
     const slotFields = slotDefinitions.map(slot => {
       const cell = String(slot.id);
-      const [label, help] = viewSlotLabel(cell);
+      const [label, help] = cell === "org.memsphere.models.page.presentation@1:page"
+        ? [this.t("settings.slotModelsPage", "模型模块 / 整体页面"), this.t("settings.slotModelsPageHelp", "模型详情页的整体展示")]
+        : cell === "org.memsphere.models.definition.renderer@1:definition"
+          ? [this.t("settings.slotModelDefinition", "模型模块 / 定义正文"), this.t("settings.slotModelDefinitionHelp", "模型结构或原始定义的内容区域")]
+          : viewSlotLabel(cell);
       const candidates: Array<{ identity: string; label: string; packageIdentity: string }> = [];
       for (const item of installed) {
         const record = selected.find((entry: JsonObject) => entry.id === item.id && entry.version === item.version);
@@ -458,6 +466,15 @@ class SettingsApplication {
       return `<tr><td><strong>${escapeHtml(label)}</strong><small>${escapeHtml(help)}</small></td><td>单选</td><td>${selectField(`view_composition.slot.${cell}`, `选择${label}使用的内容`, current, options)}</td></tr>`;
     }).join("");
     return `<section class="settings-section"><div class="settings-section-head"><div><h3>界面配置</h3><p class="settings-section-subtitle">为每个界面位置选择系统默认内容，或选用任意已安装扩展包提供的页面、组件和样式。</p></div></div><div class="settings-table-wrap"><table class="settings-config-table"><thead><tr><th>界面位置</th><th>类型</th><th>使用内容</th></tr></thead><tbody>${slotFields}</tbody></table></div>${this.errorsHtml(scope)}</section>`;
+  }
+
+  modelsHtml(scope: ScopeState): string {
+    return `<section class="settings-section"><h3>${escapeHtml(this.t("settings.models", "模型存储"))}</h3>
+      ${inputField("modelsDirectory", this.t("settings.modelsDirectory", "模型目录"), scope.draft!.modelsDirectory ?? "models/json-schema/draft-07")}
+      <p class="settings-help">${escapeHtml(this.t("settings.modelsHelp", "相对路径以登记的 Project 根目录为基准，也可填写绝对路径。更改目录只切换位置，不搬运原文件。"))}</p>
+      <dl><dt>${escapeHtml(this.t("settings.projectRoot", "Project 根目录"))}</dt><dd class="mono">${escapeHtml(scope.data!.scopeRoot ?? "")}</dd>
+      <dt>${escapeHtml(this.t("settings.modelsResolved", "当前生效目录"))}</dt><dd class="mono">${escapeHtml(scope.data!.resolvedPaths?.modelsDirectory ?? "")}</dd></dl>
+      ${this.errorsHtml(scope)}</section>`;
   }
 
   participantsHtml(scope: ScopeState): string {
@@ -619,6 +636,11 @@ class SettingsApplication {
       } else if (name === "reload") await this.load(this.#scope);
       else if (name === "reload-global") await this.load("global");
       else if (name === "reload-project") await this.load("project");
+      else if (name === "discard-project") {
+        if (window.confirm(this.t("settings.discardConfirm", "放弃当前项目未保存的修改？"))) {
+          this.state.draft = clone(this.state.data!.config); this.state.errors = []; this.state.confirmation = null; this.render();
+        }
+      }
       else if (name === "reload-appearance") { await this.load("global"); await this.load("project"); }
       else if (name === "validate") await this.validate();
       else if (name === "validate-global") await this.validateScope("global");
@@ -655,6 +677,7 @@ class SettingsApplication {
     const scope = this.#scopes[scopeName];
     const draft = scope.draft!;
     if (path === "language") draft.language = value;
+    else if (path === "modelsDirectory") draft.modelsDirectory = value;
     else if (path === "view_theme.mode") (draft.view_theme ??= { mode: "system" }).mode = value;
     else if (path === "view_theme.selected_source") {
       draft.view_theme ??= { mode: "system" };

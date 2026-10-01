@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "用例 03 · 根数组与多维数组",
+  "description": "根值不是对象而是数组；包含数组套数组、数组套对象、嵌套枚举数组。",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "name": { "type": "string", "description": "数据组名称。" },
+      "matrix": { "type": "array", "description": "二维数值矩阵。", "items": { "type": "array", "items": { "type": "number" } } },
+      "cube": { "type": "array", "description": "三维整数数组。", "items": { "type": "array", "items": { "type": "array", "items": { "type": "integer" } } } },
+      "groups": {
+        "type": "array", "items": {
+          "type": "object", "properties": {
+            "key": { "type": "string" },
+            "rows": { "type": "array", "items": { "type": "object", "properties": { "active": { "type": "boolean" }, "states": { "type": "array", "items": { "type": "string", "enum": ["new", "valid", "invalid"] } } }, "required": ["active"] } }
+          }, "required": ["key", "rows"]
+        }
+      }
+    },
+    "required": ["name", "matrix"]
+  }
+}

@@ -33,6 +33,7 @@ const embeddedStoreSchema = z.object({
 
 export const projectConfigSchema = z.object({
   store: z.discriminatedUnion("type", [managedStoreSchema, embeddedStoreSchema]),
+  modelsDirectory: z.string().refine(value => value.trim().length > 0 && !value.includes("\0"), "modelsDirectory must be a nonblank path without NUL characters").optional(),
   control_plane: projectControlPlaneConfigSchema.optional(),
   view: projectViewConfigSchema.optional()
 }).strict();

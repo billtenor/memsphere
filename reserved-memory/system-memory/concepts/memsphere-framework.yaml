@@ -4,6 +4,8 @@ names:
   - memsphere-framework
   - Memsphere
 defines:
+  - Project 模型定义使用绑定 json-schema/draft-07 的 filesystem DataStore，文件直接保存原始 JSON，ModelId 为包含 .json 的可移植相对路径。Project config.json 的可选 modelsDirectory 默认 models/json-schema/draft-07，相对 Registry 登记的 Project 根目录解析，不依赖 Git、Memory 或当前命令目录；绝对路径直接使用。改变目录只切换位置，不自动迁移。
+  - View 的模型模块只读列举当前 Project 持久化的 JSON Schema 定义与装配的内置 raw 业务模型，不按 Runtime 缓存发现模型；元模型不列为业务模型。JSON Schema 元模型通过独立 Factory 和已解码启动定义读取，无需递归读取自身，业务 Runtime 仍只支持既有反射子集。
   - Memsphere 是 AI 时代个性化软件的运行环境：它为软件提供相对稳定的语言、运行时和资产管理方式，让软件能够从自然语言开始并在真实使用中持续演化。
   - Memsphere 不是 Agent，而是运行在不同通用 Agent 之上的一层；Agent 负责理解意图和执行工作，Memsphere 负责组织、运行和管理可以跨对话、模型与 Agent 积累的软件资产。
   - memsphere-personalized-software 定义 Memsphere 所承载的个性化软件、四类协作资产及两种算力的完整产品模型。

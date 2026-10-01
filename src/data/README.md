@@ -1,6 +1,6 @@
 # 数据层
 
-本目录实现[数据层设计](../../docs/data-layer-design.md)的公共接口和内置扩展。公共入口为 `memsphere/data`，内置扩展入口为 `memsphere/data/extensions`；尚未接入现有 CLI 和运行流程。
+本目录实现[数据层设计](../../docs/data-layer-design.md)的公共接口和内置扩展。公共入口为 `memsphere/data`，内置扩展入口为 `memsphere/data/extensions`。Project 已装配 Run 内容及模型定义存储，View 提供模型只读浏览与目录配置。
 
 ## 目录组织
 
@@ -86,15 +86,17 @@ tuple、Record、Set 不另设类型。动态对象字段仍由 `ObjectDescripto
 
 - 文件系统 DataStore：以可读的相对文件路径保存原始 Payload，支持子目录，通过文件扩展名恢复 contentType；逐块写入，支持可选追加能力，无锁，不维护 revision。
 - JSON Schema Draft-07 ModelRuntimeFactory：将模型定义转换为 Descriptor，并提供值实例反射。
+- JSON Schema 元模型 Factory：单独匹配 `json-schema/draft-07` 本身，启动模型定义的读取与校验。
 - Raw ModelRuntimeFactory：匹配 `raw` 模型定义标准，提供 `bytes` 标量的整体读取与替换，不暴露内部字段或元素。
 - JSON PayloadSerializer：在 JSON 字节与原生值实例之间转换。
 - 文件系统 JSON ValueStore：保存包含 id、值实例及记录信息的格式化 JSON；按文件共享内存锁，保护单运行环境内的 revision 条件写入。
 
-五项分别注册、替换，导入不会自动装配。配置、使用示例和支持范围见[内置扩展说明](./extensions/README.md)。raw 的 Runtime 不负责 Payload 编解码；原始 DataStore 的内容读写仍不要求创建 Runtime 或进行反射。
+六项分别注册、替换，导入不会自动装配。配置、使用示例和支持范围见[内置扩展说明](./extensions/README.md)。raw 的 Runtime 不负责 Payload 编解码；原始 DataStore 的内容读写仍不要求创建 Runtime 或进行反射。
 
 ## 尚未展开的部分
 
 - 模型定义标准中其他复杂类型到基础反射结构的映射。
 - 跨 Data 引用和领域约束；不混入基本的字段、元素读写操作。
 - 路径访问与查询只确定为扩展方向，未增加查询接口或注册字段。
-- Project 持久配置与 CLI/View 的接入、模型依赖自动发现、内置 JSON Schema / raw 元模型引导扩展和资源释放协议尚未实现；当前由宿主显式提供装配输入。
+- Project 模型目录通过 `src/project/models.ts` 装配。模型定义 Store 绑定 Draft-07，ModelId 是包含 `.json` 的相对文件路径。相对 `modelsDirectory` 以 Registry 的 Project 根目录为基准，不依赖 Git、Memory 或 cwd。刷新创建新的宿主，不承诺跨请求的文件快照。
+- Manager 本身仍不自动发现模型依赖；Project 宿主按现有 JSON Schema 精确 ModelRef 语义准备所需依赖，不下载远端定义或建立 `$id` 别名。raw 元模型引导和资源释放协议仍未提供。

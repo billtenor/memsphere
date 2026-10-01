@@ -144,9 +144,42 @@ export interface RunArtifactPresentationContext {
   defaultRender(): HTMLElement;
 }
 
+export interface ModelPresentationSummary {
+  readonly id: string;
+  readonly metaModel: string;
+  readonly builtin: boolean;
+  readonly title?: string;
+  readonly description?: string;
+  readonly status: "available" | "unavailable";
+  readonly error?: string;
+}
+
+export interface ModelPresentationDefinition extends Omit<ModelPresentationSummary, "status" | "error"> {
+  readonly definition: unknown;
+  readonly source: string;
+}
+
+export interface ModelsPagePresentationContext {
+  readonly kind: "models-page";
+  readonly route: Readonly<RouteLocation>;
+  readonly models: readonly ModelPresentationSummary[];
+  readonly selectedModelId?: string;
+  refresh(): Promise<ModelsPagePresentationContext>;
+  openModel(id: string): Promise<void>;
+  /** Reads a frozen definition through the official Project API. */
+  getDefinition(id: string): Promise<ModelPresentationDefinition>;
+}
+
+export interface ModelDefinitionPresentationContext {
+  readonly model: ModelPresentationDefinition;
+  readonly view: "structure" | "source";
+  defaultRender(): HTMLElement;
+}
+
 export interface ViewPresentationService {
   memoryPage(filters?: Readonly<Record<string, string>>): Promise<MemoryPagePresentationContext>;
   runPage(filters?: Readonly<Record<string, string>>): Promise<RunPagePresentationContext>;
+  modelsPage(): Promise<ModelsPagePresentationContext>;
 }
 
 export interface ViewLifecycle {
@@ -1328,6 +1361,22 @@ export const portableSlots = Object.freeze({
   }),
   runArtifactRenderer: defineSlot<ViewDataRenderer<RunArtifactPresentationContext>, "artifact">()({
     name: "org.memsphere.run.artifact.renderer",
+    version: 1,
+    kind: "keyed",
+    scope: "page",
+    render: "descriptor",
+    validate: isViewDataRenderer
+  }),
+  modelsPagePresentation: defineSlot<ViewMount, "page">()({
+    name: "org.memsphere.models.page.presentation",
+    version: 1,
+    kind: "keyed",
+    scope: "page",
+    render: "mount",
+    validate: isViewMount
+  }),
+  modelDefinitionRenderer: defineSlot<ViewDataRenderer<ModelDefinitionPresentationContext>, "definition">()({
+    name: "org.memsphere.models.definition.renderer",
     version: 1,
     kind: "keyed",
     scope: "page",

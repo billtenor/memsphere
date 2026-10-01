@@ -1427,8 +1427,11 @@ async function clickAndWaitForDraftSave(
   const saved = page.waitForResponse((response) =>
     response.url().endsWith("/draft") && response.request().method() === "PATCH"
   );
+  // Successful inline saves remove the editor. Inspect its role before clicking,
+  // rather than racing the removal while querying the now-obsolete button.
+  const isRadio = await button.getAttribute("role") === "radio";
   await button.click();
-  if (await button.getAttribute("role") === "radio") {
+  if (isRadio) {
     assert.equal(await button.getAttribute("aria-checked"), "true");
   }
   const response = await saved;

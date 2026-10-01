@@ -88,6 +88,27 @@ test("global and Project config documents have independent revisions and drafts"
   }
 });
 
+test("Project model directory saves and reloads without changing Store or Home configuration", async () => {
+  const fixture = await fixtureConfig();
+  try {
+    const draft = { ...editableProjectConfigDraft(fixture.projectDocument), modelsDirectory: "custom/models" };
+    const validation = validateProjectConfigDraft(fixture.projectDocument, draft, fixture.globalDocument.raw);
+    assert.equal(validation.valid, true);
+    assert.equal(validation.resolvedPaths?.modelsDirectory, join(fixture.resolved.scopeRoot, "custom/models"));
+    const homeBefore = await readFile(fixture.globalConfigPath, "utf8");
+    const saved = await writeProjectConfigDraft({ document: fixture.projectDocument, expectedRevision: fixture.projectDocument.revision,
+      draft, globalConfigPath: fixture.globalConfigPath });
+    assert.equal(saved.raw.modelsDirectory, "custom/models");
+    assert.deepEqual(saved.raw.store, fixture.projectDocument.raw.store);
+    assert.equal((await readProjectConfigDocument(fixture.configPath, fixture.resolved)).raw.modelsDirectory, "custom/models");
+    assert.equal(await readFile(fixture.globalConfigPath, "utf8"), homeBefore);
+    assert.equal(validateProjectConfigDraft(saved, { ...draft, modelsDirectory: " " }, fixture.globalDocument.raw).valid, false);
+    assert.equal(validateProjectConfigDraft(saved, { ...draft, modelsDirectory: "bad\0path" }, fixture.globalDocument.raw).valid, false);
+    await assert.rejects(writeProjectConfigDraft({ document: fixture.projectDocument, expectedRevision: fixture.projectDocument.revision,
+      draft, globalConfigPath: fixture.globalConfigPath }), ConfigRevisionConflictError);
+  } finally { await rm(fixture.dir, { recursive: true, force: true }); }
+});
+
 test("fixed View operator token stays secret and survives ordinary Settings saves", async () => {
   const fixture = await fixtureConfig();
   try {

@@ -186,17 +186,20 @@ test("Settings completes the local Package installation and Project enablement f
     await page.getByText("记忆模块 / 详情正文", { exact: true }).waitFor();
     await page.getByText("运行模块 / 整体页面", { exact: true }).waitFor();
     await page.getByText("运行模块 / 产物正文", { exact: true }).waitFor();
+    await page.getByText("模型模块 / 整体页面", { exact: true }).waitFor();
+    await page.getByText("模型模块 / 定义正文", { exact: true }).waitFor();
     for (const label of ["公共组件 / 内容画布", "公共组件 / 流程展示", "公共组件 / 折叠字段"]) {
       await page.getByText(label, { exact: true }).waitFor();
     }
-    assert.equal(await page.locator(".settings-config-table").first().locator("tbody tr").count(), 20);
-    assert.equal(await page.getByText("暂无可选扩展，使用系统默认", { exact: true }).count(), 15);
-    assert.equal(await page.locator(".settings-select-disabled").count(), 15);
+    assert.equal(await page.locator(".settings-config-table").first().locator("tbody tr").count(), 22);
+    assert.equal(await page.getByText("暂无可选扩展，使用系统默认", { exact: true }).count(), 17);
+    assert.equal(await page.locator(".settings-select-disabled").count(), 17);
     assert.equal(await page.getByRole("button", { name: "保存", exact: true }).count(), 1);
     assert.equal(await page.locator('[data-select-field="project_view.theme"]').count(), 0);
     assert.equal(await page.getByText(/^[123]\. /).count(), 0);
     assert.equal(await page.locator("[data-project-view-package]").count(), 0);
     const finalSlotSelect = page.getByRole("combobox", { name: "选择运行模块 / 产物正文使用的内容" });
+    await finalSlotSelect.evaluate(node => node.scrollIntoView({ block: "end" }));
     await finalSlotSelect.click();
     const finalSlotMenu = finalSlotSelect.locator("xpath=following-sibling::*[contains(@class, 'settings-select-menu')]");
     assert.equal(await finalSlotMenu.getAttribute("data-placement"), "top");

@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "用例 06 · 引用与递归",
+  "description": "本地 definitions 复用、递归树与精确文件 ModelRef；当前树表显示引用提示，引用目标查看原文，不无限展开。",
+  "type": "object",
+  "definitions": {
+    "money": { "type": "object", "properties": { "amount": { "type": "number" }, "currency": { "type": "string", "enum": ["CNY", "USD"] } }, "required": ["amount", "currency"] },
+    "node": { "type": "object", "properties": { "name": { "type": "string" }, "children": { "type": "array", "items": { "$ref": "#/definitions/node" } } }, "required": ["name"] }
+  },
+  "properties": {
+    "budget": { "$ref": "#/definitions/money", "description": "复用金额值对象；目标见 definitions.money。" },
+    "tree": { "$ref": "#/definitions/node", "description": "递归树；不无限展开字段。" },
+    "externalStatus": { "$ref": "examples/07-scalar-enum-root.json", "description": "精确 ModelRef 指向另一个已保存的模型，不按所在子目录改写 ID。" }
+  },
+  "required": ["budget", "tree"]
+}

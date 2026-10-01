@@ -52,9 +52,9 @@ The Catalog defines fourteen long-term Slots. `header.account` is Core-reserved 
 
 ## Current Implementation Status
 
-The SDK and ViewHost now wire all 14 root Slots in this Catalog. Core provides Home, account, and other Shell-owned content through an in-Host Plugin. All four built-in Modules use the same public Slot Tree for primary navigation, secondary navigation, object lists, contextual side panels, Header, Page, search Providers, and Home aggregate contributions. Shell provides resizable and persisted secondary-navigation and content-list columns. Ordinary Run pages do not poll. Run registers Artifact Review in `overlay`; ViewHost owns the background Route, mask, focus, dismissal, cleanup, and local failure boundary.
+The SDK and ViewHost now wire all 14 root Slots in this Catalog. Core provides Home, account, and other Shell-owned content through an in-Host Plugin. The built-in Modules use the same public Slot Tree for primary navigation, secondary navigation, object lists, contextual side panels, Header, Page, search Providers, and Home aggregate contributions. Shell provides resizable and persisted secondary-navigation and content-list columns. Ordinary Run pages do not poll. Run registers Artifact Review in `overlay`; ViewHost owns the background Route, mask, focus, dismissal, cleanup, and local failure boundary.
 
-Arbitrary dynamic child Slots remain unwired. The twelve extensible root Slot classes, four versioned portable presentation cells, trusted local interface-extension-package discovery, and contribution-level global composition are wired. Interface configuration lists these sixteen stable classes, omits Core-reserved locations, and applies the same selections to every Project. Implementation progress belongs only in this section and must not delete or narrow the long-term Catalog above.
+Arbitrary dynamic child Slots remain unwired. The twelve extensible root Slot classes, six versioned portable presentation cells, trusted local interface-extension-package discovery, and contribution-level global composition are wired. Interface configuration lists twenty-two stable classes (including shared components and global styles), omits Core-reserved locations, and applies the same selections to every Project. Implementation progress belongs only in this section and must not delete or narrow the long-term Catalog above.
 
 ## Slot Structure
 
@@ -140,7 +140,7 @@ Add a semantic Slot only when a concrete extension need exists. Do not reserve e
 - View plugins do not require hot replacement. After a Module update, View may restart and recover from the current URL, Project composition, and persisted data.
 ### Cross-Package Presentation Cells
 
-These four stable portable cells are separate from the fourteen Shell root Slots and do not transfer ownership of official Routes or business APIs:
+These six stable portable cells are separate from the fourteen Shell root Slots and do not transfer ownership of official Routes or business APIs:
 
 | Cell | Official owner | key | Input |
 | --- | --- | --- | --- |
@@ -148,5 +148,9 @@ These four stable portable cells are separate from the fourteen Shell root Slots
 | `org.memsphere.memory.detail.renderer@1` | Memory | `detail` | Memory kind, entity, and official fallback factory |
 | `org.memsphere.run.page.presentation@1` | Run | `page` | `ViewMount` |
 | `org.memsphere.run.artifact.renderer@1` | Run | `artifact` | Artifact, event, Run, and official fallback factory |
+| `org.memsphere.models.page.presentation@1` | Models | `page` | `ViewMount`, using `presentation.modelsPage()` |
+| `org.memsphere.models.definition.renderer@1` | Models | `definition` | Frozen model, structure/source selection, and official fallback factory |
+
+The Models page Slot replaces the detail page, not the model list, Route ownership, or business API. `modelsPage()` provides frozen summaries for the current Project, selection, `refresh()`, `openModel(id)`, and `getDefinition(id)`. The definition renderer receives `ModelDefinitionPresentationContext` and returns an HTMLElement synchronously. Its `view` is `structure` or `source`; `defaultRender()` preserves the built-in tree/source and interactions. Each view is rendered separately and its generated node is retained when switching. Both JSON Schema and raw models use this cell.
 
 Official implementations register at priority `1000`. Settings selects one candidate for each single/keyed Slot and multiple candidates for list Slots. Once a Slot is explicitly configured, unselected contributions are safely ignored during registration. A failing selected candidate abdicates to its fallback.

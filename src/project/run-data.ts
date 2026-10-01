@@ -20,6 +20,14 @@ export type RunDataArea = "current" | "archive";
 const extensions = new DefaultDataExtensionRegistry([rawExtension, filesystemDataStoreExtension]);
 const hosts = new Map<string, { manager: DataManager; area: RunDataArea; archiveRoot: string }>();
 
+/** The same definitions used by Run assembly and the Project model catalog. */
+export function runModelBindings() {
+  return Object.values(runDataModels).map(id => ({ model: {
+    data: { id, model: RAW_MODEL, payload: { contentType: "application/json", content: bytesContent(Buffer.from("{}")) } },
+    definition: {}
+  } }));
+}
+
 /** Project assembly; roots and Store IDs are independent of any individual Run. */
 export function prepareRunData(input: { runsRoot: string; archiveRoot: string; manager?: DataManager }): DataManager {
   const runsRoot = resolve(input.runsRoot);
@@ -28,10 +36,7 @@ export function prepareRunData(input: { runsRoot: string; archiveRoot: string; m
   if (!input.manager && existing?.area === "current" && existing.archiveRoot === archiveRoot) return existing.manager;
   const manager = input.manager ?? new DefaultDataManager({
     extensions,
-    models: Object.values(runDataModels).map((id) => ({ model: {
-      data: { id, model: RAW_MODEL, payload: { contentType: "application/json", content: bytesContent(Buffer.from("{}")) } },
-      definition: {}
-    } })),
+    models: runModelBindings(),
     stores: Object.entries(runDataModels).flatMap(([kind, model]) => (["current", "archive"] as const).map((area) => ({
       id: `${model}/${area}`,
       model,

@@ -125,6 +125,7 @@ import { coreViewRoutes } from "../view/core-routes.js";
 import {
   localizeAcpProviderDefinition,
   localizeAcpProviderDetection,
+  formatViewMessage,
   resolveViewLocale
 } from "../view/locales/index.js";
 import {
@@ -852,6 +853,30 @@ async function handleRequest(
         return;
       }
       throw error;
+    }
+    return;
+  }
+
+  if (request.method === "GET" && (url.pathname === "/api/models" || url.pathname === "/api/models/definition")) {
+    const document = await readCurrentProjectSettingsDocument(config);
+    if (!document) { sendJson(response, 404, { error: "Project is not available" }); return; }
+    const { createProjectModelHost } = await import("../project/models.js");
+    const controller = new AbortController();
+    response.once("close", () => controller.abort());
+    try {
+      const host = await createProjectModelHost({ signal: controller.signal }, {
+        root: document.scopeRoot, modelsDirectory: document.raw.modelsDirectory
+      });
+      if (url.pathname === "/api/models") sendJson(response, 200, { models: await host.list() });
+      else {
+        const id = url.searchParams.get("model");
+        if (!id) { sendJson(response, 400, { error: "model ID is required" }); return; }
+        sendJson(response, 200, await host.definition(id));
+      }
+    } catch (error) {
+      const missing = error && typeof error === "object" && "code" in error && error.code === "MODEL_NOT_FOUND";
+      sendJson(response, missing ? 404 : error instanceof TypeError || error instanceof SyntaxError ? 422 : 500,
+        { error: error instanceof Error ? error.message : String(error) });
     }
     return;
   }
@@ -2497,6 +2522,7 @@ function projectSettingsPayload(
     config: editableProjectConfigDraft(document),
     store: document.raw.store,
     resolvedPaths: {
+      modelsDirectory: resolve(document.scopeRoot, document.raw.modelsDirectory ?? "models/json-schema/draft-07"),
       memoryRoot: document.resolved.memoryRoot,
       runsRoot: document.resolved.runsRoot,
       archiveRoot: document.resolved.archiveRoot
@@ -3132,13 +3158,15 @@ async function builtinViewInstances(config: MemsphereConfig): Promise<readonly V
     return {
       pluginPath: builtinAssetPath(entry.moduleId),
       config: { projectApiBase },
-      routeBasePath: ["org.memsphere.run", "org.memsphere.settings"].includes(entry.moduleId)
+      routeBasePath: ["org.memsphere.run", "org.memsphere.settings", "org.memsphere.model-prototype", "org.memsphere.models"].includes(entry.moduleId)
         ? projectPrefix
         : "/",
       routeGrants: entry.routes,
       home: {
-        title: entry.title,
-        summary: entry.summary,
+        title: entry.moduleId === "org.memsphere.models" ? formatViewMessage(config.language, "models.title")
+          : entry.moduleId === "org.memsphere.model-prototype" ? formatViewMessage(config.language, "modelPrototype.title") : entry.title,
+        summary: entry.moduleId === "org.memsphere.models" ? formatViewMessage(config.language, "models.summary")
+          : entry.moduleId === "org.memsphere.model-prototype" ? formatViewMessage(config.language, "modelPrototype.summary") : entry.summary,
         icon: entry.icon,
         routeId: entry.homeRouteId,
         ...(Object.keys(homeRouteParams).length ? { routeParams: homeRouteParams } : {})

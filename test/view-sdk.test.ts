@@ -40,6 +40,7 @@ import {
   isSidebarFooterDescriptor,
   isSlotToken,
   slots,
+  portableSlots,
   viewThemeCssVariables,
   type ViewMount,
   type ViewRenderContext
@@ -85,6 +86,24 @@ test("main.view Token carries one stable keyed Mount contract", () => {
   );
   assert.equal(slots.mainView.definition.validate({ mount() {} }), true);
   assert.equal(slots.mainView.definition.validate({}), false);
+});
+
+test("Models portable slots validate page mounts and definition renderers as separate stable contracts", () => {
+  const page = portableSlots.modelsPagePresentation;
+  const definition = portableSlots.modelDefinitionRenderer;
+  assert.equal(page.definition.name, "org.memsphere.models.page.presentation");
+  assert.equal(definition.definition.name, "org.memsphere.models.definition.renderer");
+  for (const token of [page, definition]) {
+    assert.equal(isSlotToken(token), true);
+    assert.equal(token.definition.version, 1);
+    assert.equal(token.definition.kind, "keyed");
+    assert.equal(token.definition.scope, "page");
+    assert.equal(token.definition.validate({}), false);
+  }
+  assert.equal(page.definition.render, "mount");
+  assert.equal(page.definition.validate({ mount() {} }), true);
+  assert.equal(definition.definition.render, "descriptor");
+  assert.equal(definition.definition.validate({ render() {} }), true);
 });
 
 test("ViewRenderContext exposes the Host-resolved readonly Route location", () => {

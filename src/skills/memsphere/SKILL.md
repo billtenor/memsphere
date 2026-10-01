@@ -21,6 +21,10 @@ Memsphere Home 的 `config.json` 中，`language` 同时控制面向 Agent 的�
 
 没有 Memory 差异时不创建空 ChangeSet。`memsphere validate --memory-root` 是没有 Project、Registry 或 ChangeSet 上下文的无状态入口，不得把它的成功结果当作变更级交付证据。
 
+## Project 模型定义
+
+Project 的模型定义直接保存在 filesystem DataStore 的 `.json` 文件中，ModelId 使用包含后缀的相对路径，例如 `sales/order.json`。Project `config.json` 的可选 `modelsDirectory` 默认 `models/json-schema/draft-07`，相对 Registry 登记的 Project 根目录解析，不是 Git/Memory/cwd；绝对路径直接使用。在“设置 → 模型存储”保存目录后刷新模型页生效，不自动迁移文件。View 的“模型”模块只读列举持久化定义与内置 raw 业务模型，支持树形表格和完整原始 JSON 查看，不提供单独的复制定义按钮，暂不提供模型编辑或值实例管理。JSON Schema 元模型引导不等于支持全部 Draft-07 业务反射特性。
+
 ## Memsphere 如何组织记忆
 
 memsphere 将 Memory 分为四类：
@@ -431,7 +435,7 @@ memsphere run abandon --run <Run ID> [--reason "<可选原因>"]
 
 #### View Package 自定义
 
-可信本地 View Package 可在“设置 → 界面与主题”添加绝对路径，并在同一页面选择主题与 Slot；这些配置保存在 Home 并统一应用到所有 Project，保存后使用 `memsphere view restart` 应用固定 composition snapshot。全局样式通过 `styles.global@1` 多选 Slot 组合，scoped CSS 随 Package 实例自动加载；历史 `view_composition.styles` 只保留解析兼容。Memory/Run 官方 renderer 自带低层叠优先级的系统默认内容视觉，无需配置扩展包；用户选择的全局样式可在不使用 `!important` 的情况下覆盖它，示例 View Package 则作为独立参考实现演进。Memory/Run 的 page 与 detail/artifact renderer 可通过 portable cells 替换，失败时回退官方候选。Theme/Style 使用 light/dark 分层 Token 与实例 lifecycle；高权限能力必须在安装记录中显式授予。
+可信本地 View Package 可在“设置 → 界面与主题”添加绝对路径，并在同一页面选择主题与 Slot；这些配置保存在 Home 并统一应用到所有 Project，保存后使用 `memsphere view restart` 应用固定 composition snapshot。全局样式通过 `styles.global@1` 多选 Slot 组合，scoped CSS 随 Package 实例自动加载；历史 `view_composition.styles` 只保留解析兼容。Memory/Run 官方 renderer 自带低层叠优先级的系统默认内容视觉，无需配置扩展包；用户选择的全局样式可在不使用 `!important` 的情况下覆盖它，示例 View Package 则作为独立参考实现演进。Memory/Run/Models 的 page 与 detail/artifact/definition renderer 可通过 portable cells 替换，失败时回退官方候选。Theme/Style 使用 light/dark 分层 Token 与实例 lifecycle；高权限能力必须在安装记录中显式授予。
 
 #### 人机协同
 

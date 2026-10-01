@@ -19,6 +19,21 @@ export const enViewPluralMessages = {
 } satisfies Partial<Record<ZhCNViewMessageKey, { one: string; other: string }>>;
 
 export const enViewMessages = {
+  "settings.slotModelsPage": "Models module / Whole page",
+  "settings.slotModelsPageHelp": "The overall model detail page presentation",
+  "settings.slotModelDefinition": "Models module / Definition body",
+  "settings.slotModelDefinitionHelp": "The model structure or source definition content",
+  "models.title": "Models",
+  "models.summary": "Browse project model definitions",
+  "modelPrototype.title": "Model prototype",
+  "modelPrototype.summary": "Product prototype of the model browser and storage settings",
+  "settings.models": "Model storage",
+  "settings.modelsDirectory": "Model directory",
+  "settings.modelsHelp": "Relative paths use the registered Project root. Absolute paths are also accepted. Changing the directory switches locations without moving files.",
+  "settings.projectRoot": "Project root",
+  "settings.modelsResolved": "Active directory",
+  "settings.discard": "Discard changes",
+  "settings.discardConfirm": "Discard unsaved Project changes?",
   "locale.code": "en",
   "navigation.home": "Home",
   "home.title": "What needs your attention today?",

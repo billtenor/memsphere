@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { ZodError, type z } from "zod";
 import { globalConfigSchema, type MemsphereConfig } from "./config.js";
 import {
@@ -56,6 +56,7 @@ export type EditableGlobalConfigDraft = {
 };
 
 export type EditableProjectConfigDraft = {
+  modelsDirectory?: string;
   control_plane?: ProjectControlPlaneConfigFile;
   view?: ProjectViewConfig;
 };
@@ -80,6 +81,7 @@ export type ProjectConfigDraftValidation = {
   normalizedJson?: string;
   changes: ConfigChange[];
   resolvedPaths?: {
+    modelsDirectory: string;
     memoryRoot: string;
     runsRoot: string;
     archiveRoot: string;
@@ -148,6 +150,7 @@ export function editableGlobalConfigDraft(document: GlobalConfigDocument): Edita
 
 export function editableProjectConfigDraft(document: ProjectConfigDocument): EditableProjectConfigDraft {
   return {
+    ...(document.raw.modelsDirectory === undefined ? {} : { modelsDirectory: document.raw.modelsDirectory }),
     ...(document.raw.control_plane === undefined
       ? {}
       : { control_plane: structuredClone(document.raw.control_plane) }),
@@ -199,6 +202,7 @@ export function validateProjectConfigDraft(
 ): ProjectConfigDraftValidation {
   const candidateInput = {
     store: structuredClone(document.raw.store),
+    ...(draft.modelsDirectory === undefined ? {} : { modelsDirectory: draft.modelsDirectory }),
     ...(draft.control_plane === undefined ? {} : { control_plane: structuredClone(draft.control_plane) }),
     ...(draft.view === undefined ? {} : { view: structuredClone(draft.view) })
   };
@@ -214,6 +218,7 @@ export function validateProjectConfigDraft(
       normalizedJson: `${JSON.stringify(normalized, null, 2)}\n`,
       changes: diffConfig(editableProjectConfigDraft(document), normalized),
       resolvedPaths: {
+        modelsDirectory: resolve(document.scopeRoot, candidate.modelsDirectory ?? "models/json-schema/draft-07"),
         memoryRoot: document.resolved.memoryRoot,
         runsRoot: document.resolved.runsRoot,
         archiveRoot: document.resolved.archiveRoot
@@ -367,6 +372,7 @@ function normalizeGlobalDraft(global: GlobalConfigFile): EditableGlobalConfigDra
 
 function normalizeProjectDraft(project: ProjectConfigFile): EditableProjectConfigDraft {
   return {
+    ...(project.modelsDirectory === undefined ? {} : { modelsDirectory: project.modelsDirectory }),
     ...(project.control_plane === undefined
       ? {}
       : { control_plane: structuredClone(project.control_plane) }),

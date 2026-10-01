@@ -54,7 +54,7 @@ Memory 详情画布、Procedure 流程、字段列表，以及 Run 画布、流�
 
 ### 跨 Package Presentation Cells
 
-以下四项是独立于 14 个 Shell 根 Slot 的稳定 portable cell。它们不转移官方 Route 或业务 API 所有权：
+以下六项是独立于 14 个 Shell 根 Slot 的稳定 portable cell。它们不转移官方 Route 或业务 API 所有权：
 
 | Cell | 官方所有者 | key | 输入 |
 | --- | --- | --- | --- |
@@ -62,14 +62,18 @@ Memory 详情画布、Procedure 流程、字段列表，以及 Run 画布、流�
 | `org.memsphere.memory.detail.renderer@1` | Memory | `detail` | Memory kind、实体及官方 fallback factory |
 | `org.memsphere.run.page.presentation@1` | Run | `page` | `ViewMount` |
 | `org.memsphere.run.artifact.renderer@1` | Run | `artifact` | Artifact、事件、Run 及官方 fallback factory |
+| `org.memsphere.models.page.presentation@1` | Models | `page` | `ViewMount`，使用 `presentation.modelsPage()` |
+| `org.memsphere.models.definition.renderer@1` | Models | `definition` | 冻结的 model、structure/source 选择及官方 fallback factory |
+
+模型页面 Slot 替换详情页，不替换左侧模型列表或转移 Route/API 所有权。`modelsPage()` 提供当前 Project 的冻结摘要、当前选择、`refresh()`、`openModel(id)` 与 `getDefinition(id)`。定义 renderer 接收 `ModelDefinitionPresentationContext`，同步返回 HTMLElement；`view` 为 `structure` 或 `source`，`defaultRender()` 保留内置树表/原文和交互，结构与原文分别调用并在切换时保留已生成节点。JSON Schema 与 raw 模型均经过该入口。
 
 官方实现以 priority `1000` 注册。较小 priority 的用户候选可以 shadow；设置表为每个 single/keyed Slot 选择一个候选，为 list Slot 选择多个候选。显式设置后，未选 contribution 在注册阶段被安全忽略；失败候选标为 abdicated 并自动回退。
 
 ## 当前实现状态
 
-当前 SDK 与 ViewHost 已接线本 Catalog 的全部 14 个根 Slot。Core 通过 Host 内置 Plugin 提供 Home、账户等 Shell 内容；四个 builtin Module 通过同一公开 Slot Tree 贡献主导航、二级导航、对象列表、按需右侧栏、Header、Page、搜索 Provider 与 Home 聚合项。Shell 使用可拖动且持久化的二级导航栏和内容列表栏；Run 普通页面不轮询，Artifact Review 由 Run Module 注册到 `overlay`，Host 负责背景 Route、遮罩、焦点、关闭、清理与局部故障边界。
+当前 SDK 与 ViewHost 已接线本 Catalog 的全部 14 个根 Slot。Core 通过 Host 内置 Plugin 提供 Home、账户等 Shell 内容；内置 Module 通过同一公开 Slot Tree 贡献主导航、二级导航、对象列表、按需右侧栏、Header、Page、搜索 Provider 与 Home 聚合项。Shell 使用可拖动且持久化的二级导航栏和内容列表栏；Run 普通页面不轮询，Artifact Review 由 Run Module 注册到 `overlay`，Host 负责背景 Route、遮罩、焦点、关闭、清理与局部故障边界。
 
-任意动态子 Slot 仍未接线；12 类可扩展根 Slot、四个版本化 portable presentation cell、可信本地界面扩展包发现/安装及按 contribution 的全局动态组合已经接线。“界面配置”表展示这 16 类稳定位置，不展示 Core 保留位置；同一选择应用到所有 Project。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
+任意动态子 Slot 仍未接线；12 类可扩展根 Slot、六个版本化 portable presentation cell、可信本地界面扩展包发现/安装及按 contribution 的全局动态组合已经接线。“界面配置”表展示这 22 类稳定位置（含公共组件与全局样式），不展示 Core 保留位置；同一选择应用到所有 Project。实现进度只记录在本节，不删除或缩减上面的长期 Catalog。
 
 ## Slot 结构
 

@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "用例 01 · 基本类型与枚举",
+  "description": "覆盖 JSON Schema 的全部基本类型、整数子类型、字符串/数字枚举、必填/可选、空容器。",
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "description": "文本；必填。", "minLength": 1 },
+    "ratio": { "type": "number", "description": "浮点数字。", "minimum": 0, "maximum": 1 },
+    "count": { "type": "integer", "description": "整数；属于 number 的约束子类型。", "minimum": 0 },
+    "enabled": { "type": "boolean", "description": "布尔开关。", "default": false },
+    "emptyValue": { "type": "null", "description": "明确为空，和缺少字段不是一回事。" },
+    "status": { "type": "string", "enum": ["pending", "paid", "cancelled"], "description": "字符串枚举。" },
+    "level": { "type": "integer", "enum": [0, 1, 2], "description": "数字枚举。" },
+    "constant": { "type": "string", "const": "demo", "description": "单一固定值 demo；完整规则见原始定义。" },
+    "metadata": { "type": "object", "properties": {}, "additionalProperties": false, "description": "不声明成员的空对象。" },
+    "labels": { "type": "array", "items": { "type": "string" }, "description": "文本数组；数组元素单独展开。" },
+    "flags": { "type": "array", "items": { "type": "boolean" }, "description": "布尔数组。" },
+    "measurements": { "type": "array", "items": { "type": "number" }, "description": "浮点数组。" },
+    "positions": { "type": "array", "items": { "type": "integer" }, "description": "整数数组。" },
+    "nulls": { "type": "array", "items": { "type": "null" }, "description": "空值数组。" },
+    "stateHistory": { "type": "array", "items": { "type": "string", "enum": ["pending", "paid", "cancelled"] }, "description": "枚举数组。" },
+    "emptyList": { "type": "array", "items": { "type": "string" }, "maxItems": 0, "description": "只能为空的数组；maxItems 规则见原文。" }
+  },
+  "required": ["name", "ratio", "count", "enabled", "emptyValue", "status", "level"]
+}
