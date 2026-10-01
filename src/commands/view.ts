@@ -2156,7 +2156,23 @@ async function artifactReviewContextPayload(
       }
     }
   };
-  const contextArtifacts = structuredClone(submission.contextArtifacts);
+  const contextArtifacts = structuredClone(submission.contextArtifacts).map((item, index) => {
+    // Associate snapshots with the accepted review that existed when they were frozen.
+    const event = context.run.events[index];
+    const reviews = (context.run.artifactReviews ?? []).filter((candidate) =>
+      event?.stepId === item.stepId && candidate.stepId === item.stepId &&
+      candidate.outcome?.status === "passed" && candidate.outcome.completedAt === event.at &&
+      candidate.outcome.completedAt <= submission.createdAt
+    );
+    const review = reviews.length === 1 ? reviews[0] : undefined;
+    return {
+      ...item,
+      reviewContext: review ? {
+        review: artifactReviewSummary(review, context.run.controlPlane),
+        rounds: publicArtifactReviewRounds(review)
+      } : undefined
+    };
+  });
   for (const item of contextArtifacts) {
     await hydrateArtifactContent(runsRoot, context.run.id, item.artifact);
     const { authorization: _authorization, ...publicContextArtifact } = item.artifact;
@@ -2188,33 +2204,37 @@ async function artifactReviewContextPayload(
       attempts: context.assignment.attempts?.map(publicArtifactReviewAttempt),
       slotNames: artifactReviewSlotNames(context.assignment.slotIds)
     } : undefined,
-    rounds: context.review.rounds.map((round) => ({
-      id: round.id,
-      sequence: round.sequence,
-      submissionId: round.submissionId,
-      status: round.status,
-      revision: round.revision,
-      createdAt: round.createdAt,
-      bindingSource: round.bindingSource,
-      assignments: round.assignments.map((assignment) => ({
-        id: assignment.id,
-        actorId: assignment.actorId,
-        actorName: assignment.actorName,
-        slotNames: artifactReviewSlotNames(assignment.slotIds),
-        actorKind: assignment.actorKind ?? "human",
-        slotIds: assignment.slotIds,
-        binding: assignment.binding,
-        status: assignment.status,
-        submitted: publicArtifactReviewOpinion(assignment.submitted),
-        implementationEvidenceReferenced: artifactReviewOpinionReferencesImplementation(assignment.submitted),
-        attempts: assignment.attempts?.map(publicArtifactReviewAttempt)
-      })),
-      votes: round.votes.map(publicArtifactReviewVote),
-      result: round.result,
-      commentDispositions: structuredClone(round.commentDispositions ?? []),
-      revisionSummary: context.review.submissions.find((submission) => submission.id === round.submissionId)?.revisionSummary
-    }))
+    rounds: publicArtifactReviewRounds(context.review)
   };
+}
+
+function publicArtifactReviewRounds(review: ArtifactReviewContext["review"]): unknown[] {
+  return review.rounds.map((round) => ({
+    id: round.id,
+    sequence: round.sequence,
+    submissionId: round.submissionId,
+    status: round.status,
+    revision: round.revision,
+    createdAt: round.createdAt,
+    bindingSource: round.bindingSource,
+    assignments: round.assignments.map((assignment) => ({
+      id: assignment.id,
+      actorId: assignment.actorId,
+      actorName: assignment.actorName,
+      slotNames: artifactReviewSlotNames(assignment.slotIds),
+      actorKind: assignment.actorKind ?? "human",
+      slotIds: assignment.slotIds,
+      binding: assignment.binding,
+      status: assignment.status,
+      submitted: publicArtifactReviewOpinion(assignment.submitted),
+      implementationEvidenceReferenced: artifactReviewOpinionReferencesImplementation(assignment.submitted),
+      attempts: assignment.attempts?.map(publicArtifactReviewAttempt)
+    })),
+    votes: round.votes.map(publicArtifactReviewVote),
+    result: round.result,
+    commentDispositions: structuredClone(round.commentDispositions ?? []),
+    revisionSummary: review.submissions.find((submission) => submission.id === round.submissionId)?.revisionSummary
+  }));
 }
 
 function findReviewStep(run: RunState, stepId: string): RunStep | undefined {

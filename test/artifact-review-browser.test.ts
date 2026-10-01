@@ -505,6 +505,124 @@ test("Artifact Review locates an anchored historical comment in its artifact", a
   }
 });
 
+test("material selection displays the earlier artifact review and preserves the current draft", async () => {
+  const fixture = await createReviewFixture({
+    procedureName: "material-review-switch",
+    secondArtifact: true,
+    reviewSlots: "[Decider]",
+    actors: { alice: { kind: "human", name: "Decider", permissions: ["artifact.read", "decision.decide"] } },
+    slots: { Decider: ["alice"] }
+  });
+  try {
+    await approveSingleActorReview(fixture.runsRoot, fixture.runId, fixture.review.id, fixture.review.currentRoundId, [{ body: "First artifact accepted" }]);
+    const pending = await reportRun({ runsRoot: fixture.runsRoot, runId: fixture.runId,
+      artifact: { kind: "inline", value: "# Second candidate" } });
+    const current = currentArtifactReview(pending);
+    assert(current);
+    await withReviewBrowser(fixture.config, { width: 1440, height: 900 }, async (page, origin) => {
+      await page.goto(`${origin}/tasks/${fixture.runId}/artifact-reviews/${current.id}`);
+      const modal = page.locator("#artifact-review-modal");
+      const chooser = modal.getByRole("combobox", { name: "选择评审材料", exact: true });
+      const panel = modal.locator("#artifact-review-review-pane");
+      const composer = modal.getByPlaceholder("补充整体评审意见");
+      await composer.fill("Keep second artifact draft");
+      await chooser.selectOption("context:0");
+      await panel.getByText("focused candidate", { exact: true }).waitFor();
+      await panel.getByText("前序产物评审记录 · 只读", { exact: true }).waitFor();
+      await panel.getByText("First artifact accepted", { exact: true }).waitFor();
+      assert.match(await panel.locator(".artifact-review-progress-summary").innerText(), /1\/1.*评审已完成/);
+      assert.equal(await panel.getByRole("button", { name: "提交评审", exact: true }).count(), 0);
+      assert.equal(await panel.getByText("second candidate", { exact: true }).count(), 0);
+      await chooser.selectOption("candidate");
+      assert.equal(await composer.inputValue(), "Keep second artifact draft");
+      await chooser.selectOption("context:0");
+      await page.reload();
+      await panel.getByText("focused candidate", { exact: true }).waitFor();
+      await chooser.selectOption("candidate");
+      await composer.fill("Keep second artifact draft");
+      await chooser.selectOption("contract");
+      await panel.getByText("此材料没有独立的评审记录", { exact: true }).waitFor();
+      assert.equal(await panel.locator(".artifact-review-progress-summary").count(), 0);
+      await chooser.selectOption("candidate");
+      await panel.getByText("second candidate", { exact: true }).waitFor();
+      assert.equal(await composer.inputValue(), "Keep second artifact draft");
+      assert.match(await panel.locator(".artifact-review-progress-summary").innerText(), /0\/1/);
+    });
+  } finally {
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+for (const ambiguous of [false, true]) {
+  test(ambiguous
+    ? "frozen material with ambiguous accepted reviews exposes no review record"
+    : "frozen material uses its accepted review despite later reviews of the same step", async () => {
+    const fixture = await createMaterialReviewApiFixture();
+    try {
+      const run = await readRun(fixture.runsRoot, fixture.runId);
+      const original = run.artifactReviews!.find(review => review.id === fixture.review.id)!;
+      const duplicate = structuredClone(original);
+      duplicate.id = "review-other-occurrence";
+      if (!ambiguous) duplicate.outcome!.completedAt = new Date(Date.parse(original.outcome!.completedAt) + 1000).toISOString();
+      run.artifactReviews!.unshift(duplicate);
+      await writeFile(join(fixture.runsRoot, fixture.runId, `${fixture.runId}.json`), JSON.stringify(run));
+      const response = await fetch(fixture.endpoint);
+      assert.equal(response.status, 200);
+      const payload = await response.json();
+      const prior = payload.submission.contextArtifacts[0].reviewContext;
+      if (ambiguous) assert.equal(prior, undefined);
+      else assert.equal(prior.review.id, original.id);
+    } finally {
+      await fixture.close();
+    }
+  });
+}
+
+test("preceding material review records contain submitted opinions without private drafts", async () => {
+  const fixture = await createMaterialReviewApiFixture();
+  try {
+    const run = await readRun(fixture.runsRoot, fixture.runId);
+    const previous = run.artifactReviews!.find(review => review.id === fixture.review.id)!;
+    const assignment = previous.rounds[0].assignments[0];
+    const now = new Date().toISOString();
+    assignment.draft.comments = [{ id: "private-previous-draft", body: "Private previous draft", createdAt: now, updatedAt: now }];
+    await writeFile(join(fixture.runsRoot, fixture.runId, `${fixture.runId}.json`), JSON.stringify(run));
+    const response = await fetch(fixture.endpoint);
+    assert.equal(response.status, 200);
+    const source = await response.text();
+    assert.match(source, /First artifact accepted/);
+    assert.doesNotMatch(source, /Private previous draft|private-previous-draft|"draft"\s*:|"authorization"\s*:/);
+  } finally {
+    await fixture.close();
+  }
+});
+
+async function createMaterialReviewApiFixture() {
+  const fixture = await createReviewFixture({
+    procedureName: "material-review-api", secondArtifact: true, reviewSlots: "[Decider]",
+    actors: { alice: { kind: "human", name: "Decider", permissions: ["artifact.read", "decision.decide"] } },
+    slots: { Decider: ["alice"] }
+  });
+  await approveSingleActorReview(fixture.runsRoot, fixture.runId, fixture.review.id, fixture.review.currentRoundId, [{ body: "First artifact accepted" }]);
+  const pending = await reportRun({ runsRoot: fixture.runsRoot, runId: fixture.runId,
+    artifact: { kind: "inline", value: "# Second candidate" } });
+  const current = currentArtifactReview(pending)!;
+  const server = createViewServer(fixture.config);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address === "object");
+  return {
+    ...fixture,
+    endpoint: `http://127.0.0.1:${address.port}/api/projects/memsphere/runs/${fixture.runId}/artifact-reviews/${current.id}/rounds/${current.currentRoundId}`,
+    close: async () => {
+      server.close();
+      await once(server, "close");
+      await rm(fixture.dir, { recursive: true, force: true });
+    }
+  };
+}
+
 test("Artifact Review normalizes invalid Round and Material URLs and syncs material selection", async () => {
   const fixture = await createSingleActorReviewFixture();
   try {
@@ -908,7 +1026,7 @@ flow:
     materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
     await materialChooser.selectOption({ label: "前序产物 · validation report" });
     await modal.getByText("Focused tests passed.", { exact: true }).waitFor();
-    assert.equal(await composer.inputValue(), "Human draft remains visible");
+    await modal.getByText("此材料没有独立的评审记录", { exact: true }).waitFor();
     materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
     await materialChooser.selectOption({ label: "待评审产物 · activity candidate" });
     const agentRow = modal.locator(".artifact-review-row").filter({ hasText: "Advisor" }).first();
@@ -1057,6 +1175,7 @@ async function createSingleActorReviewFixture(): Promise<BrowserReviewFixture> {
 
 async function createReviewFixture(input: {
   procedureName: string;
+  secondArtifact?: boolean;
   reviewSlots: string;
   actors: Record<string, {
     kind: "human";
@@ -1080,7 +1199,13 @@ flow:
       name: focused candidate
       format: markdown
       review: ${input.reviewSlots}
-`));
+${input.secondArtifact ? `  - !action
+    action: Produce a second reviewed Artifact.
+    artifact: !artifact
+      name: second candidate
+      format: markdown
+      review: ${input.reviewSlots}
+` : ""}`));
   const controlPlane = parseControlPlaneConfig({
     runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
     actors: input.actors
@@ -1093,6 +1218,7 @@ flow:
     controlPlane,
     reviewConfiguration: reviewConfiguration({
       procedure: input.procedureName,
+      flowIndexes: input.secondArtifact ? [1, 2] : [1],
       slots: input.slots
     })
   });
@@ -1125,7 +1251,8 @@ async function approveSingleActorReview(
   runsRoot: string,
   runId: string,
   reviewId: string,
-  roundId: string
+  roundId: string,
+  comments: Array<{ body: string }> = []
 ): Promise<void> {
   const run = await readRun(runsRoot, runId);
   const revision = currentArtifactReview(run)?.rounds.find((round) => round.id === roundId)?.revision;
@@ -1136,7 +1263,7 @@ async function approveSingleActorReview(
     roundId,
     actorId: "alice",
     expectedRevision: revision,
-    draft: { vote: "approve", comments: [] }
+    draft: { vote: "approve", comments }
   });
   await submitArtifactReviewAssignment({
     runsRoot,
