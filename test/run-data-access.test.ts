@@ -17,6 +17,45 @@ function state(): RunState {
   return { contractVersion: 3, id: "run-access", name: "Access", status: "running", procedureName: "test", memoryRoot: "/memory", createdAt: "2026-01-01", updatedAt: "2026-01-01", procedureSnapshots: {}, events: [], stack: [{ type: "procedure", memoryName: "test", index: 0, steps: [{ id: "flow[1]", kind: "action", instruction: "write", artifact: "report", type: "string", format: { name: "markdown", options: {} } }] }] };
 }
 
+test("Review candidate and frozen context use portable DataIds and preserve readable files and export bytes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-review-portable-data-"));
+  try {
+    const memoryRoot = join(root, "memory");
+    const runsRoot = join(root, "runs");
+    await mkdir(join(memoryRoot, "procedures"), { recursive: true });
+    await writeFile(join(memoryRoot, "procedures", "probe.yaml"), `!procedure\nsyntax: ${currentMemorySyntax}\nnames: [probe]\nflow:\n  - !action\n    action: Record source.\n    artifact: !artifact\n      name: source\n      format: markdown\n  - !action\n    action: Review report.\n    artifact: !artifact\n      name: reviewed\n      format: markdown\n      review: [reviewer]\n`);
+    prepareRunData({ runsRoot, archiveRoot: join(root, "archives") });
+    const started = await startRun({
+      name: "Portable Review content", memoryRoot, runsRoot, procedureName: "probe",
+      controlPlane: parseControlPlaneConfig({
+        runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+        actors: { human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] } }
+      }),
+      reviewConfiguration: reviewConfiguration({ procedure: "probe", flowIndexes: [2], slots: { reviewer: ["human"] } })
+    });
+    const source = "# Source\n\nOriginal context bytes.\n";
+    const candidate = "# Candidate\n\nReadable Review bytes.\n";
+    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: source } });
+    const reported = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: candidate } });
+    const review = currentArtifactReview(reported)!;
+    assert(review);
+    const submission = review.submissions[0];
+    const prefix = `${started.id}/artifacts/reviews/${review.id}/${submission.id}`;
+    assert.equal(submission.artifact.path, `${prefix}/reviewed.md`);
+    assert.equal(submission.contextArtifacts.length, 1);
+    assert.equal(submission.contextArtifacts[0].artifact.path, `${prefix}/context/001-source.md`);
+    for (const [id, expected] of [[submission.artifact.path, candidate], [submission.contextArtifacts[0].artifact.path, source]]) {
+      assert(id);
+      assert.doesNotMatch(id, /\\/);
+      assert.equal((await readRunContent(runsRoot, "artifact", id))?.toString(), expected);
+      assert.equal(await readFile(join(runsRoot, id), "utf8"), expected);
+    }
+    const exported = join(root, "candidate-copy.md");
+    await exportRunArtifact(runsRoot, reported, "probe#flow[2]", exported);
+    assert.equal(await readFile(exported, "utf8"), candidate);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("delegated Human vote preserves the storage failure and pending opinion when Run status cannot be committed", async () => {
   const root = await mkdtemp(join(tmpdir(), "memsphere-delegated-store-failure-"));
   try {

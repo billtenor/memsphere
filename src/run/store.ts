@@ -1719,7 +1719,7 @@ async function reportReviewedArtifact(
       createdArtifactFiles,
       authorization,
       {
-        relativeDirectory: join("reviews", reviewId, submissionId),
+        relativeDirectory: posix.join("reviews", reviewId, submissionId),
         fileName: `${slugify(step.artifact) || "artifact"}${extensionForFormat(step.format ?? { name: "plain", options: {} })}`
       }
     );
