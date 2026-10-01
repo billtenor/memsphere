@@ -9,6 +9,7 @@ export type ProjectMemorySource = {
   memoryRoot: string;
   revision?: string;
   managed?: { branch: string; publishedRevision: string };
+  provider?: MemoryProvider;
 };
 
 export class ProjectMemoryProvider implements MemoryProvider {
@@ -18,9 +19,9 @@ export class ProjectMemoryProvider implements MemoryProvider {
   constructor(sources: ProjectMemorySource[]) {
     this.#sources = sources.map((source) => ({
       source,
-      provider: source.managed
+      provider: source.provider ?? (source.managed
         ? new GitRevisionMemoryProvider(source.memoryRoot, source.managed.publishedRevision)
-        : new FileMemoryProvider(source.memoryRoot)
+        : new FileMemoryProvider(source.memoryRoot))
     }));
   }
 

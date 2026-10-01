@@ -36,6 +36,7 @@ import {
 } from "../memory/changeset.js";
 import { resolveProjectContext } from "../project/resolver.js";
 import { readConfig } from "../config.js";
+import { RunMemoryProvider } from "../memory/run-provider.js";
 import { readRun } from "../run/store.js";
 import { getViewServiceStatus, viewServiceUrl } from "../view/service.js";
 
@@ -197,7 +198,7 @@ export async function createMemoryCommandCatalog(runId?: string): Promise<Memory
   const memoryRoot = join(config.runsRoot, run.id, run.memorySnapshot.path);
   const revision = run.memoryProjects?.primary.revision
     ?? `changeset:${run.memorySource.changeId}@${run.memorySource.checkpointDigest}`;
-  return createMemoryCatalogForConfig(config, { memoryRoot, revision });
+  return createMemoryCatalogForConfig(config, { memoryRoot, revision, provider: new RunMemoryProvider(config.runsRoot, run) });
 }
 
 export async function memoryEditCommand(references: string[], options: { change?: string } = {}): Promise<void> {

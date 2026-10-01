@@ -31,6 +31,7 @@
   },
   "files": [
     "dist",
+    "scripts/backfill-run-memory-manifest.mjs",
     "reserved-memory",
     "LICENSE",
     "NOTICE",

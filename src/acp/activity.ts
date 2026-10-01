@@ -1,8 +1,9 @@
-import { randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { SessionUpdate } from "@agentclientprotocol/sdk";
 import { z } from "zod";
+import type { AppendableDataStore } from "../data/api/data-store.js";
+import { bytesContent } from "../data/extensions/shared/payload.js";
+import { readRunContent, runDataStore, saveRunContent } from "../project/run-data.js";
 
 export const agentActivityMaxEvents = 500;
 export const agentActivityMaxBytes = 512 * 1024;
@@ -84,8 +85,7 @@ type ActivityProjectionState = {
 };
 
 export class AgentActivityRecorder {
-  private readonly path: string;
-  private readonly rawPath: string;
+  private readonly location: AgentActivityLocation;
   private readonly workspaceRoot: string;
   private readonly onError?: (error: unknown) => void;
   private readonly projection = emptyActivityProjectionState();
@@ -93,13 +93,15 @@ export class AgentActivityRecorder {
   private flushChain: Promise<void> = Promise.resolve();
   private reportedError = false;
   private rawLines: string[] = [];
+  private projectionTrusted = false;
+  private projectionFailed = false;
 
   constructor(input: AgentActivityLocation & {
     workspaceRoot: string;
     onError?: (error: unknown) => void;
   }) {
-    this.path = agentActivityPath(input);
-    this.rawPath = agentActivityRawPath(input);
+    agentActivityPath(input); // Validate identities before accepting any events.
+    this.location = { ...input };
     this.workspaceRoot = resolve(input.workspaceRoot);
     this.onError = input.onError;
   }
@@ -139,9 +141,21 @@ export class AgentActivityRecorder {
     this.flushChain = this.flushChain
       .catch(() => undefined)
       .then(async () => {
-        if (raw.length) await appendAgentActivityRaw(this.rawPath, raw);
-        snapshot.sourceBytes = await activityRawSize(this.rawPath);
-        await writeAgentActivitySnapshot(this.path, snapshot);
+        try {
+          if (raw.length) {
+            const created = await appendAgentActivityRaw(this.location, raw);
+            if (created && !this.projectionFailed) this.projectionTrusted = true;
+          }
+          const bytes = await readRunContent(this.location.runsRoot, "activityLog", agentActivityIds(this.location).log) ?? Buffer.alloc(0);
+          const saved = this.projectionTrusted ? snapshot : rebuildAgentActivitySnapshot(bytes, this.workspaceRoot);
+          if (this.projectionTrusted) saved.sourceBytes = bytes.byteLength;
+          await writeAgentActivitySnapshot(this.location, saved);
+        } catch (error) {
+          // Never publish events whose raw batch may not have reached storage.
+          this.projectionTrusted = false;
+          this.projectionFailed = true;
+          throw error;
+        }
       });
     try {
       await this.flushChain;
@@ -293,26 +307,27 @@ function enforceActivityCapacity(snapshot: AgentActivitySnapshot): void {
 export async function readAgentActivitySnapshot(
   input: AgentActivityLocation & { workspaceRoot?: string }
 ): Promise<AgentActivitySnapshot> {
-  const path = agentActivityPath(input);
-  const rawPath = agentActivityRawPath(input);
-  const rawBytes = await activityRawSize(rawPath);
+  const ids = agentActivityIds(input);
+  const raw = await readRunContent(input.runsRoot, "activityLog", ids.log) ?? Buffer.alloc(0);
+  const rawBytes = raw.byteLength;
   let cached: AgentActivitySnapshot | undefined;
+  const cache = await readRunContent(input.runsRoot, "activitySnapshot", ids.snapshot);
   try {
-    cached = activitySnapshotSchema.parse(JSON.parse(await readFile(path, "utf8")));
+    if (cache) cached = activitySnapshotSchema.parse(JSON.parse(cache.toString("utf8")));
   } catch {}
   if (cached?.sourceBytes === rawBytes) return cached;
   if (rawBytes === 0) {
     const empty = emptyAgentActivitySnapshot();
-    await writeAgentActivitySnapshot(path, empty);
+    await writeAgentActivitySnapshot(input, empty);
     return empty;
   }
-  const rebuilt = await rebuildAgentActivitySnapshot(rawPath, input.workspaceRoot);
-  await writeAgentActivitySnapshot(path, rebuilt);
+  const rebuilt = rebuildAgentActivitySnapshot(raw, input.workspaceRoot);
+  await writeAgentActivitySnapshot(input, rebuilt);
   return rebuilt;
 }
 
-async function rebuildAgentActivitySnapshot(rawPath: string, fallbackWorkspaceRoot?: string): Promise<AgentActivitySnapshot> {
-  const raw = await readFile(rawPath, "utf8");
+function rebuildAgentActivitySnapshot(bytes: Uint8Array, fallbackWorkspaceRoot?: string): AgentActivitySnapshot {
+  const raw = Buffer.from(bytes).toString("utf8");
   const completeRaw = raw.endsWith("\n") ? raw : raw.slice(0, raw.lastIndexOf("\n") + 1);
   const state = emptyActivityProjectionState();
   for (const [index, line] of completeRaw.split("\n").entries()) {
@@ -390,6 +405,11 @@ export function agentActivityRawPath(input: AgentActivityLocation): string {
   return agentActivityPath(input).replace(/\.json$/, ".acp.jsonl");
 }
 
+export function agentActivityIds(input: AgentActivityLocation): { log: string; snapshot: string } {
+  const snapshot = relative(input.runsRoot, agentActivityPath(input)).split(sep).join("/");
+  return { snapshot, log: snapshot.replace(/\.json$/, ".acp.jsonl") };
+}
+
 function emptyAgentActivitySnapshot(): AgentActivitySnapshot {
   return { version: 1, revision: 0, truncated: false, droppedCount: 0, sourceBytes: 0, events: [] };
 }
@@ -406,30 +426,21 @@ function rawActivityLine(record: RawActivityRecord): string {
   return `${JSON.stringify(record)}\n`;
 }
 
-async function activityRawSize(path: string): Promise<number> {
-  try {
-    return (await stat(path)).size;
-  } catch (error) {
-    if (isNodeError(error, "ENOENT")) return 0;
-    throw error;
-  }
+async function writeAgentActivitySnapshot(location: AgentActivityLocation, snapshot: AgentActivitySnapshot): Promise<void> {
+  await saveRunContent(location.runsRoot, "activitySnapshot", agentActivityIds(location).snapshot, "application/json", Buffer.from(`${JSON.stringify(snapshot, null, 2)}\n`));
 }
 
-async function writeAgentActivitySnapshot(path: string, snapshot: AgentActivitySnapshot): Promise<void> {
-  const directory = dirname(path);
-  const temp = join(directory, `.${randomUUID()}.tmp`);
-  await mkdir(directory, { recursive: true });
-  try {
-    await writeFile(temp, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
-    await rename(temp, path);
-  } finally {
-    await rm(temp, { force: true });
+async function appendAgentActivityRaw(location: AgentActivityLocation, lines: string[]): Promise<boolean> {
+  const store = await runDataStore(location.runsRoot, "activityLog");
+  const id = agentActivityIds(location).log;
+  const data = { id, model: store.model, payload: { contentType: "application/x-ndjson", content: bytesContent(Buffer.from(lines.join(""))) } };
+  if (!await store.has({}, id)) {
+    await store.create({}, data);
+    return true;
   }
-}
-
-async function appendAgentActivityRaw(path: string, lines: string[]): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await appendFile(path, lines.join(""), { encoding: "utf8", mode: 0o600 });
+  if (typeof (store as Partial<AppendableDataStore>).append !== "function") throw new Error(`Agent activity Store does not support append: ${store.id}`);
+  await (store as AppendableDataStore).append({}, data);
+  return false;
 }
 
 function contentText(content: unknown): string | undefined {

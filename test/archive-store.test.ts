@@ -97,8 +97,8 @@ test("refuses non-terminal runs and active restore conflicts", async () => {
     await assert.rejects(archiveRun({ archiveRoot, runsRoot, id: "run-running" }), /only done or abandoned runs/);
     await writeRunFixture(runsRoot, "run-conflict", "done");
     await archiveRun({ archiveRoot, runsRoot, id: "run-conflict" });
-    await writeRunFixture(runsRoot, "run-conflict", "done");
-    await assert.rejects(restoreRun({ archiveRoot, runsRoot, id: "run-conflict" }), /target already exists/);
+    await writeRunFixture(runsRoot, "run-conflict", "running");
+    await assert.rejects(restoreRun({ archiveRoot, runsRoot, id: "run-conflict" }), /only done or abandoned runs/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -1,5 +1,7 @@
-import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { lstat, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { requireRunContent } from "../project/run-data.js";
 import {
   type ArtifactReview,
   type ArtifactReviewRound
@@ -485,6 +487,52 @@ export async function runArtifactShowCommand(options: RunArtifactShowOptions): P
   printStructured(await buildRunArtifactDetail(config.runsRoot, run, stepRef), options.output);
 }
 
+export async function runArtifactExportCommand(options: { run: string; step: string; file: string; force?: boolean }): Promise<void> {
+  const config = await readConfig();
+  const run = await readRun(config.runsRoot, requireRunId(options.run));
+  await exportRunArtifact(config.runsRoot, run, requireStepRef(options.step), options.file, options.force, join(config.archiveRoot, "runs"));
+  console.log(`Artifact exported: ${resolve(options.file)}`);
+}
+
+export async function exportRunArtifact(runsRoot: string, run: RunState, reference: string, file: string, force = false, archivedRunsRoot = join(dirname(runsRoot), "archives", "runs")): Promise<void> {
+  const located = findRunStep(run, reference);
+  const draft = run.schemaDrafts?.[located.step.id];
+  const review = [...(run.artifactReviews ?? [])].reverse().find((candidate) => candidate.stepId === located.step.id);
+  const round = review?.rounds.find((candidate) => candidate.id === review.currentRoundId);
+  const submission = round && review?.submissions.find((candidate) => candidate.id === round.submissionId);
+  const event = [...run.events].reverse().find((candidate) => candidate.stepId === located.step.id);
+  const selected = draft && ["writing", "awaiting_finalization"].includes(draft.status) ? draft : submission?.artifact ?? event?.artifact;
+  if (!selected?.path) throw new Error(`No file Artifact to export: ${reference}`);
+  const target = resolve(file);
+  const parent = await realpath(dirname(target));
+  try {
+    if ((await lstat(target)).isSymbolicLink()) throw new Error(`Artifact export target must not be a symbolic link: ${target}`);
+  } catch (error) {
+    if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error;
+  }
+  for (const root of [runsRoot, archivedRunsRoot]) {
+    const contained = (path: string, boundary: string) => {
+      const child = relative(resolve(boundary), path);
+      return !child || (!isAbsolute(child) && child !== ".." && !child.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`));
+    };
+    let resolvedRoot = resolve(root);
+    try { resolvedRoot = await realpath(root); } catch (error) {
+      if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error;
+    }
+    if (contained(target, root) || contained(join(parent, basename(target)), resolvedRoot)) throw new Error("Export to a local working copy outside managed Run storage");
+  }
+  const bytes = await requireRunContent(runsRoot, "artifact", selected.path);
+  if (!force) await writeFile(target, bytes, { flag: "wx" });
+  else {
+    // Replace the working-copy entry, not a possibly hard-linked managed inode.
+    const temporary = join(parent, `.artifact-export.${randomUUID()}.tmp`);
+    try {
+      await writeFile(temporary, bytes, { flag: "wx" });
+      await rename(temporary, target);
+    } finally { await rm(temporary, { force: true }); }
+  }
+}
+
 export async function runArtifactContractShowCommand(options: RunArtifactShowOptions): Promise<void> {
   if (options.assignment) {
     if (options.run || options.step) throw new Error("use --assignment or --run with --step, not both");
@@ -869,7 +917,7 @@ async function artifactForDisplay(
   artifact: RunState["events"][number]["artifact"]
 ): Promise<unknown> {
   const value = artifact.storage === "file" && artifact.path
-    ? await readFile(join(runsRoot, artifact.path), "utf8")
+    ? (await requireRunContent(runsRoot, "artifact", artifact.path)).toString("utf8")
     : artifact.value;
   return {
     name: artifact.name,

@@ -14,13 +14,13 @@ Schema Overview:
 - final artifact: {{#if artifact.final}}yes{{else}}no{{/if}}
 - progress: {{progress.completed}}/{{progress.total}}
 {{#if progress.pendingRepeatControls}}- repeat controls pending: {{progress.pendingRepeatControls}}{{/if}}
-- workflow: report each field to update one managed draft; after all fields, read and edit the complete draft before explicitly submitting that same file.
+- workflow: report each field to update one managed Artifact; after all fields, export it, read and edit the local copy, then report that copy.
 Fields:
 {{#each progress.fields}}
 - {{path}}: {{status}}
 {{/each}}
 {{#if draft}}
-Draft:
+Current Artifact:
 - status: {{draft.status}}
 - file: {{draft.filePath}}
 {{#if draft.validationStatus}}- contract validation: {{draft.validationStatus}}{{/if}}

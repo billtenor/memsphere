@@ -535,6 +535,7 @@ sections:
         asserts:
           - schema 如出现必须是 Schema canonical name、指向 schemas/* canonical reference 的 !ref，或带 !schema tag 的 YAML mapping；外部 Schema alias 不可持久化在 schema 中。
           - schema 的根值契约必须与其约束的值契约一致。
+          - Schema 产物的 export/report 和中间状态管理属于 Run 运行时操作，不为 !schema 或 !artifact 增加存储路径、草稿目录或导出参数等 YAML 关键字。
 
       - !statement
         names:

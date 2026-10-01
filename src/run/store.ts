@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, posix, relative, resolve } from "node:path";
 import { z } from "zod";
+import { deleteRunContent, requireRunContent, runDataStore, saveRunContent } from "../project/run-data.js";
 import {
   artifactReviewDispositionValues,
   artifactReviewSeverityValues,
@@ -297,6 +298,7 @@ export type RunState = {
   };
   memorySnapshot?: {
     path: "memory";
+    files?: string[];
   };
   createdAt: string;
   updatedAt: string;
@@ -859,7 +861,8 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
     baseRevision: z.string()
   }).strict().optional(),
   memorySnapshot: z.object({
-    path: z.literal("memory")
+    path: z.literal("memory"),
+    files: z.array(z.string()).optional()
   }).strict().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -1023,24 +1026,40 @@ export async function startRun(input: {
 
   await expandAutoCallSteps(run);
   if (input.memorySnapshotRoot) {
-    await writeRunMemorySnapshot(input.runsRoot, run.id, input.memorySnapshotRoot);
+    run.memorySnapshot!.files = await writeRunMemorySnapshot(input.runsRoot, run.id, input.memorySnapshotRoot);
   }
   try {
     await writeRun(input.runsRoot, run);
   } catch (error) {
     if (input.memorySnapshotRoot) {
-      await rm(join(input.runsRoot, run.id, "memory"), { recursive: true, force: true });
+      for (const id of run.memorySnapshot!.files ?? []) await deleteRunContent(input.runsRoot, "memory", id);
     }
     throw error;
   }
   return run;
 }
 
-async function writeRunMemorySnapshot(runsRoot: string, runId: string, sourceRoot: string): Promise<void> {
-  const directory = join(runsRoot, runId);
-  const target = join(directory, "memory");
-  const temporary = join(directory, `.memory.${process.pid}.${randomUUID()}.tmp`);
-  await mkdir(temporary, { recursive: true });
+async function writeRunMemorySnapshot(runsRoot: string, runId: string, sourceRoot: string): Promise<string[]> {
+  const created: string[] = [];
+  const store = await runDataStore(runsRoot, "memory");
+  const walk = async (directory: string, prefix: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      // Git's empty-directory placeholder is not Run Memory content.
+      if (entry.isFile() && entry.name === ".gitkeep") continue;
+      const path = join(directory, entry.name);
+      const id = posix.join(prefix, entry.name);
+      if (entry.isSymbolicLink()) throw new Error(`Memory snapshot source must not be a symbolic link: ${path}`);
+      if (entry.isDirectory()) await walk(path, id);
+      else if (entry.isFile()) {
+        // The selected filesystem Store determines the content type from its configured suffixes.
+        const contentType = /\.ya?ml$/i.test(entry.name) ? "application/yaml"
+          : /\.json$/i.test(entry.name) ? "application/json"
+          : /\.md$/i.test(entry.name) ? "text/markdown" : "application/octet-stream";
+        await saveRunContent(runsRoot, "memory", id, contentType, await readFile(path), "create");
+        created.push(id);
+      } else throw new Error(`Unsupported Memory snapshot source: ${path}`);
+    }
+  };
   try {
     for (const kind of memoryKinds) {
       const source = join(sourceRoot, kind);
@@ -1050,11 +1069,12 @@ async function writeRunMemorySnapshot(runsRoot: string, runId: string, sourceRoo
         if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") continue;
         throw error;
       }
-      await cp(source, join(temporary, kind), { recursive: true, errorOnExist: true, force: false });
+      await walk(source, posix.join(runId, "memory", kind));
     }
-    await rename(temporary, target);
-  } finally {
-    await rm(temporary, { recursive: true, force: true });
+    return created.sort();
+  } catch (error) {
+    for (const id of [...created].reverse()) await store.delete({}, id).catch(() => undefined);
+    throw error;
   }
 }
 
@@ -1544,7 +1564,7 @@ async function acceptPreparedArtifact(
     await writeRun(input.runsRoot, run);
     return run;
   } catch (error) {
-    await removeArtifactFiles(createdArtifactFiles);
+    await removeArtifactFiles(input.runsRoot, createdArtifactFiles);
     throw error;
   }
 }
@@ -1703,7 +1723,7 @@ async function reportReviewedArtifact(
     await writeRun(input.runsRoot, run);
     return run;
   } catch (error) {
-    await removeArtifactFiles(createdArtifactFiles);
+    await removeArtifactFiles(input.runsRoot, createdArtifactFiles);
     throw error;
   }
 }
@@ -1919,7 +1939,7 @@ export async function submitArtifactReviewAssignment(input: {
       await writeRun(input.runsRoot, run);
       return { run, review, round, assignment };
     } catch (error) {
-      await removeArtifactFiles(createdArtifactFiles);
+      await removeArtifactFiles(input.runsRoot, createdArtifactFiles);
       throw error;
     }
   });
@@ -2178,7 +2198,7 @@ export async function submitArtifactReviewAgentAssignment(input: {
       await writeRun(input.runsRoot, context.run);
       return context;
     } catch (error) {
-      await removeArtifactFiles(createdArtifactFiles);
+      await removeArtifactFiles(input.runsRoot, createdArtifactFiles);
       throw error;
     }
   });
@@ -2302,7 +2322,7 @@ export async function submitArtifactReviewRunnerVote(input: {
       await writeRun(input.runsRoot, run);
       return { run, review, round };
     } catch (error) {
-      await removeArtifactFiles(createdArtifactFiles);
+      await removeArtifactFiles(input.runsRoot, createdArtifactFiles);
       throw error;
     }
   });
@@ -2698,7 +2718,7 @@ async function repeatRunUnlocked(input: { runsRoot: string; runId: string; count
     await writeRun(input.runsRoot, run);
     return run;
   } catch (error) {
-    await removeArtifactFiles(createdArtifactFiles);
+    await removeArtifactFiles(input.runsRoot, createdArtifactFiles);
     throw error;
   }
 }
@@ -2966,8 +2986,7 @@ export async function ensureCurrentSchemaDraft(runsRoot: string, run: RunState):
   const progress = schemaFrameProgress(run, context.schemaFrame);
   if (progress.completed === 0) return run;
   const draft = run.schemaDrafts?.[context.parentStep.id];
-  const path = draft ? resolve(runsRoot, draft.path) : undefined;
-  const missing = !path || !(await fileExists(path));
+  const missing = !draft || !await (await runDataStore(runsRoot, "artifact")).has({}, draft.path);
   if (!missing) return run;
 
   await refreshSchemaDraft(
@@ -2980,16 +2999,6 @@ export async function ensureCurrentSchemaDraft(runsRoot: string, run: RunState):
   run.updatedAt = new Date().toISOString();
   await writeRun(runsRoot, run);
   return run;
-}
-
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return false;
-    throw error;
-  }
 }
 
 function currentSchemaParentContext(run: RunState): SchemaParentContext | undefined {
@@ -3022,7 +3031,7 @@ async function reportSchemaFinalArtifact(
   if (input.revisionSummary !== undefined) {
     throw new Error("--revision-summary-file is only allowed after an Artifact Review requests changes");
   }
-  await assertManagedSchemaDraftSource(input.runsRoot, run.id, finalization.draft, input.artifact);
+  if (input.artifact.kind !== "file") throw new Error("Schema finalization requires --artifact-file with a local artifact copy");
 
   const step = finalization.parentStep;
   const authorization = authorizeRunnerForReport(run, step, input.locale ?? "en");
@@ -3060,32 +3069,6 @@ async function reportSchemaFinalArtifact(
   finalization.draft.validation = validation;
   finalization.draft.updatedAt = new Date().toISOString();
   return acceptPreparedArtifact(input, run, step, candidate, validation, authorization);
-}
-
-async function assertManagedSchemaDraftSource(
-  runsRoot: string,
-  runId: string,
-  draft: SchemaDraftState,
-  source: ArtifactReportSource
-): Promise<void> {
-  if (source.kind !== "file") {
-    throw new Error("Schema finalization requires --artifact-file with the managed draft path");
-  }
-  const expected = resolve(runsRoot, draft.path);
-  if (resolve(source.path) !== expected) {
-    throw new Error(`Schema finalization requires the managed draft file: ${expected}`);
-  }
-  const artifactRoot = resolve(runArtifactDirectory(runsRoot, runId));
-  const sourceStat = await lstat(source.path);
-  if (sourceStat.isSymbolicLink()) {
-    throw new Error(`managed Schema draft must not be a symbolic link: ${expected}`);
-  }
-  if (!sourceStat.isFile()) {
-    throw new Error(`managed Schema draft must be a regular file: ${expected}`);
-  }
-  const actual = await realpath(source.path);
-  const root = await realpath(artifactRoot);
-  assertInsideRunArtifactDirectory(actual, root);
 }
 
 async function persistSchemaDraftValidation(
@@ -3825,21 +3808,21 @@ async function buildRunEventArtifact(
     });
   }
 
-  const artifactRoot = await ensureRunArtifactDirectory(runsRoot, run.id);
+  const artifactRoot = runArtifactDirectory(runsRoot, run.id);
   const artifactDir = storage ? resolve(artifactRoot, storage.relativeDirectory) : artifactRoot;
   assertInsideRunArtifactDirectory(artifactDir, artifactRoot, true);
-  await mkdir(artifactDir, { recursive: true });
   const fileName = storage?.fileName ?? nextArtifactFileName(run, step);
   const absolutePath = resolve(artifactDir, fileName);
   assertInsideRunArtifactDirectory(absolutePath, artifactRoot);
 
-  await writeFile(absolutePath, candidate.raw);
-  createdArtifactFiles.push(absolutePath);
+  const id = posix.join(run.id, "artifacts", storage?.relativeDirectory ?? "", fileName);
+  await saveRunContent(runsRoot, "artifact", id, contentTypeForFormat(step.format)!, candidate.raw, "create");
+  createdArtifactFiles.push(id);
 
   return compactArtifact({
     ...base,
     storage: "file",
-    path: posix.join(run.id, "artifacts", storage?.relativeDirectory ?? "", fileName),
+    path: id,
     fileName,
     contentType: contentTypeForFormat(step.format)
   });
@@ -3853,21 +3836,20 @@ async function buildArtifactReviewContextArtifacts(
   createdArtifactFiles: string[]
 ): Promise<ArtifactReview<RunEvent["artifact"]>["submissions"][number]["contextArtifacts"]> {
   const contextArtifacts: ArtifactReview<RunEvent["artifact"]>["submissions"][number]["contextArtifacts"] = [];
-  const artifactRoot = await ensureRunArtifactDirectory(runsRoot, run.id);
+  const artifactRoot = runArtifactDirectory(runsRoot, run.id);
   const contextDirectory = resolve(artifactRoot, "reviews", reviewId, submissionId, "context");
 
   for (const [index, event] of run.events.entries()) {
     const snapshot = structuredClone(event.artifact);
     if (snapshot.storage === "file" && snapshot.path) {
-      await mkdir(contextDirectory, { recursive: true });
-      const sourcePath = resolve(runsRoot, snapshot.path);
       const extension = snapshot.fileName?.match(/(\.[^.]+)$/)?.[1] ?? extensionForFormat(snapshot.format);
       const fileName = `${String(index + 1).padStart(3, "0")}-${slugify(snapshot.name) || "artifact"}${extension}`;
       const targetPath = resolve(contextDirectory, fileName);
       assertInsideRunArtifactDirectory(targetPath, artifactRoot);
-      await writeFile(targetPath, await readFile(sourcePath));
-      createdArtifactFiles.push(targetPath);
-      snapshot.path = posix.join(run.id, "artifacts", "reviews", reviewId, submissionId, "context", fileName);
+      const targetId = posix.join(run.id, "artifacts", "reviews", reviewId, submissionId, "context", fileName);
+      await saveRunContent(runsRoot, "artifact", targetId, snapshot.contentType ?? contentTypeForFormat(snapshot.format)!, await requireRunContent(runsRoot, "artifact", snapshot.path), "create");
+      createdArtifactFiles.push(targetId);
+      snapshot.path = targetId;
       snapshot.fileName = fileName;
     }
     contextArtifacts.push({ stepId: event.stepId, artifact: snapshot });
@@ -3875,8 +3857,8 @@ async function buildArtifactReviewContextArtifacts(
   return contextArtifacts;
 }
 
-async function removeArtifactFiles(paths: readonly string[]): Promise<void> {
-  for (const path of [...paths].reverse()) await rm(path, { force: true });
+async function removeArtifactFiles(runsRoot: string, ids: readonly string[]): Promise<void> {
+  for (const id of [...ids].reverse()) await deleteRunContent(runsRoot, "artifact", id);
 }
 
 async function contractForStep(run: RunState, step: RunStep): Promise<CompiledArtifactContract> {
@@ -3927,12 +3909,6 @@ function shouldStoreArtifactAsFile(format: ArtifactFormatSpec): boolean {
 
 function runArtifactDirectory(runsRoot: string, runId: string): string {
   return join(runsRoot, runId, "artifacts");
-}
-
-async function ensureRunArtifactDirectory(runsRoot: string, runId: string): Promise<string> {
-  const artifactDir = runArtifactDirectory(runsRoot, runId);
-  await mkdir(artifactDir, { recursive: true });
-  return artifactDir;
 }
 
 function assertInsideRunArtifactDirectory(path: string, artifactDir: string, allowRoot = false): void {
@@ -4496,7 +4472,7 @@ async function refreshSchemaDraft(
 ): Promise<SchemaDraftState> {
   const existing = run.schemaDrafts?.[context.parentStep.id];
   const fileName = existing?.fileName ?? schemaDraftFileName(context.parentStep);
-  const relativePath = existing?.path ?? posix.join(run.id, "artifacts", "drafts", fileName);
+  const relativePath = existing?.path ?? posix.join(run.id, "artifacts", fileName);
   const assembled = await assembleSchemaArtifact(runsRoot, run, context.schemaFrame, !completed);
   await writeManagedSchemaDraft(runsRoot, run.id, relativePath, assembled);
 
@@ -4554,17 +4530,10 @@ async function writeManagedSchemaDraft(
   relativePath: string,
   content: string
 ): Promise<void> {
-  const artifactRoot = await ensureRunArtifactDirectory(runsRoot, runId);
+  const artifactRoot = runArtifactDirectory(runsRoot, runId);
   const target = resolve(runsRoot, relativePath);
   assertInsideRunArtifactDirectory(target, artifactRoot);
-  await mkdir(dirname(target), { recursive: true });
-  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporary, content, "utf8");
-    await rename(temporary, target);
-  } finally {
-    await rm(temporary, { force: true });
-  }
+  await saveRunContent(runsRoot, "artifact", relativePath, "text/markdown", Buffer.from(content));
 }
 
 async function assembleSchemaArtifact(
@@ -4581,7 +4550,7 @@ async function assembleSchemaArtifact(
     if (!event && !includePending) continue;
     if (event?.artifact.fields?.skipped === true) continue;
     const value = event?.artifact.storage === "file" && event.artifact.path
-      ? await readFile(join(runsRoot, event.artifact.path), "utf8")
+      ? (await requireRunContent(runsRoot, "artifact", event.artifact.path)).toString("utf8")
       : String(event?.artifact.value ?? "");
     const pending = event ? undefined : `<!-- memsphere:pending field=${step.artifact} -->`;
     if (step.artifact === frame.memoryName) {

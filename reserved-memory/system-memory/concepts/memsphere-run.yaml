@@ -10,3 +10,6 @@ defines:
   - Runner 是 Memsphere 在当前通用 Agent 框架中的实际执行者。Runner 由 Agent 框架托管：框架只使用主 Agent 时，Runner 就是主 Agent；框架启用子 Agent 时，主 Agent 和子 Agent 共同构成 Runner。Memsphere 只把 Agent Action 交给这个 Runner，不介入 Agent 框架内部如何分工。
   - Artifact Review 是 Run 中对已提交 Artifact 的独立评审环节；Reviewer 负责审查，Runner 仍负责执行和推进。
   - Run 正常完成时进入 done；只有 Human 可以主动将仍在执行的 Run 变为 abandoned。两种终态都保留已有执行证据。
+  - Run 的 Artifact、中间产物、Memory 快照文件、Agent 活动日志和活动快照分别由四类 raw 模型描述，经当前或归档 DataStore 按 DataId 访问；资源发现沿用 Run 状态中的业务引用，Memory 快照补充 memorySnapshot.files。
+  - Run status 与 .archive.json 仍是原生 JSON 状态文件，不进入内容 Store。归档与恢复先复制覆盖并校验内容，最后切换 Run status，再清理旧端；状态切换后重试只续做清理。
+  - 归档或恢复前须确认已有记录的 Agent Worker PID 已退出；无法确认时保留两端并重试，不主动终止 Worker。

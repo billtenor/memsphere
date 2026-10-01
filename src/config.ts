@@ -10,6 +10,7 @@ import { defaultPromptLocale, promptLocales, type PromptLocale } from "./prompts
 import { homePaths, resolveMemsphereHome } from "./home.js";
 import { resolveProjectContext } from "./project/resolver.js";
 import { projectConfigSchema } from "./project/model.js";
+import { prepareRunData } from "./project/run-data.js";
 
 export type MemsphereConfig = {
   configPath: string;
@@ -96,6 +97,7 @@ async function readProjectExecutionConfig(options: {
     revision: await storeRevision(project.memoryRoot, project.config.store.type),
     store: project.config.store
   })));
+  prepareRunData(context.primary.paths);
   return {
     configPath: context.primary.paths.configPath,
     scopeRoot: context.primary.paths.root,

@@ -347,13 +347,13 @@ Review 要求修改时，先修改 Artifact，再把本轮修改摘要写入文�
 memsphere run report --run <Run ID> --artifact-file <文件路径> --revision-summary-file <摘要文件路径>
 ```
 
-带 Schema 的 Markdown 结构化产物可以按照 CLI 提示进入 Schema 填写流程。进入后先阅读整体概览，再逐个上报字段；需要重新查看完整结构、字段状态、约束来源和累计草稿路径时执行：
+带 Schema 的 Markdown 结构化产物可以按照 CLI 提示进入 Schema 填写流程。进入后先阅读整体概览，再逐个上报字段；需要重新查看完整结构、字段状态、约束来源和中间产物信息时执行：
 
 ```bash
 memsphere run schema show --run <Run ID>
 ```
 
-字段提示只提供产出当前内容所需的父 Action、父 Artifact 契约、Schema 约束与进度，不包含后续 Review 的参与者、权限或决策信息。每个字段 report 后，Run 会原位更新同一份受管草稿；不得把字段 Event 或中途草稿当作已经接纳的父 Artifact。
+字段提示只提供产出当前内容所需的父 Action、父 Artifact 契约、Schema 约束与进度，不包含后续 Review 的参与者、权限或决策信息。每个字段 report 后，Run 更新同一份托管中间 Artifact；不得把字段 Event 或中间产物当作已接纳的父 Artifact，也不得直接编辑其托管位置。
 
 当 Schema Run 到达 `!repeat` 控制步骤时，CLI 不要求 Artifact，而会提示一次提交总重复次数：
 
@@ -371,13 +371,25 @@ memsphere run skip --run <Run ID>
 
 只能跳过当前可选字段；必填字段不得 skip。跳过后 Run 会记录 skipped 事件，最终组装的结构化 Artifact 中省略该字段内容。
 
-全部字段完成后，Run 不会自动推进，而会返回 `Schema Finalization`、结构与契约校验结果、受管草稿的绝对路径和精确提交命令。Runner 必须阅读完整草稿，可直接编辑该文件，然后严格执行返回的命令显式提交同一文件：
+全部字段完成后，Run 不会自动推进，而会返回 `Schema Finalization`、结构与契约校验结果及精确步骤引用。Runner 先将完整产物另存为本地副本，阅读并编辑副本后统一上报：
 
 ```bash
-memsphere run report --run <Run ID> --artifact-file <受管草稿绝对路径>
+memsphere run artifact export --run <Run ID> --step '<CLI 返回的步骤引用>' --file <本地副本路径>
+memsphere run report --run <Run ID> --artifact-file <本地副本路径>
 ```
 
-提交时会读取文件最新内容并重新校验。失败时继续留在全局调整状态，修订同一文件后重试；成功后由 Run 按父 Artifact 契约决定直接接纳还是进入 Artifact Review。Runner 不需要也不应自行判断何时发起 Review，只继续执行每次 CLI 返回的 `Then`。
+export 同样适用于正式 Artifact，默认选择中间产物、当前 Review Submission 或最近已上报 Event，不提供历史版本选择。目标必须是托管 Run 存储之外的本地路径，默认不覆盖已有文件；显式 --force 才覆盖本地副本。
+
+report 读取本地副本并重新校验。失败时继续留在全局调整状态，修订副本后重试；成功后由 Run 按父 Artifact 契约决定直接接纳还是进入 Artifact Review。Runner 不需要也不应自行判断何时发起 Review，只继续执行每次 CLI 返回的 `Then`。
+
+Run 内容通过当前或归档 DataStore 管理；Run status 和 .archive.json 保持原生 JSON 状态文件。旧 Run 的 Memory 快照缺少 memorySnapshot.files 时，相关读取和完整归档/恢复会提示手动运行独立补齐工具；核心不会自动扫描目录或写回清单：
+
+```bash
+node scripts/backfill-run-memory-manifest.mjs --run-file <Run 状态 JSON 路径>
+node scripts/backfill-run-memory-manifest.mjs --run-file <Run 状态 JSON 路径> --write
+```
+
+仅对明确需要补齐的记录执行写入。工具不移动内容、不覆盖已有清单、不处理旧的半成品 drafts。普通 .gitkeep 仅是 Git 占位，不进入新快照或补齐清单，来源 Project 文件保持不变。归档/恢复先复制覆盖并校验内容，最后切换 Run 状态，再清理旧端及其 Memory 占位文件；失败可重复执行。其他未知文件仍保留并报错。已有 Worker PID 尚存或无法确认退出时须稍后重试。
 
 未触发 Review 的上报回执后会继续显示下一个待执行步骤或 Run 完成状态。完整 Review 汇总由 `run review wait` 返回；`run review vote` 只确认投票结果并给出推进后的下一动作，不重复刚刚展示的意见。不应从 report 回执推断评审结果。继续执行和上报，直到 CLI 明确显示完成。
 

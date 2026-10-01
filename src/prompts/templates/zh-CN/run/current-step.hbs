@@ -20,7 +20,6 @@ Memory 来源：ChangeSet {{memorySource.changeId}} @ {{memorySource.checkpointD
 - 状态：等待整体调整
 - 产物：{{step.artifactName}}
 - 进度：{{step.completed}}/{{step.total}}
-- 托管草稿：{{step.draftPath}}
 {{#if step.validation}}
 - 契约校验：{{step.validation.status}}
 {{#each step.validation.issues}}
@@ -29,10 +28,12 @@ Memory 来源：ChangeSet {{memorySource.changeId}} @ {{memorySource.checkpointD
 {{/if}}
 
 请执行：
-完整阅读托管草稿，按需直接编辑，然后提交同一个文件。
+将完整产物另存为本地文件，阅读并按需编辑这个副本，再统一上报。不要直接编辑托管存储。
+
+memsphere run artifact export --run {{runId}} --step {{step.stepRefArgument}} --file <本地文件>
 
 下一步：
-memsphere run report --run {{runId}} --artifact-file {{step.draftPathArgument}}
+memsphere run report --run {{runId}} --artifact-file <本地文件>
 {{/ifEq}}
 {{#ifEq step.kind "repeat"}}
 
@@ -120,13 +121,13 @@ Schema 写作：
 - 当前字段：{{step.progress.field}}
 - 进度：{{step.progress.completed}}/{{step.progress.total}}
 - 剩余：{{step.progress.remaining}}
-- 工作方式：逐字段上报以更新同一份托管草稿；全部字段完成后，先完整阅读并编辑草稿，再明确提交同一个文件。
+- 工作方式：逐字段上报以更新同一份托管产物；全部字段完成后，将完整产物另存为本地副本，阅读并编辑后统一上报。
 {{#if step.progress.pendingRepeatControls}}
 - 待处理 repeat 控制：{{step.progress.pendingRepeatControls}}
 {{/if}}
 - 字段契约：{{step.progress.contract.type}} · {{step.progress.contract.format}}
 {{#if step.progress.draftPath}}
-- 托管草稿：{{step.progress.draftPath}}
+- 托管产物：{{step.progress.draftPath}}
 {{/if}}
 
 {{#ifEq step.actor "human"}}请 Human 填写：{{else}}请填写：{{/ifEq}}

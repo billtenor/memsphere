@@ -195,6 +195,7 @@ const runCurrentStepSchema = z.object({
   step: z.discriminatedUnion("kind", [
     z.object({
       kind: z.literal("schema_finalization"),
+      stepRefArgument: z.string(),
       artifactName: z.string(),
       completed: z.number().int().nonnegative(),
       total: z.number().int().nonnegative(),
