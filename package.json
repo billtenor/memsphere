@@ -25,6 +25,7 @@
     "./data/extensions": "./dist/data/extensions/index.js",
     "./data/extensions/filesystem-datastore": "./dist/data/extensions/filesystem-datastore/index.js",
     "./data/extensions/json-schema": "./dist/data/extensions/json-schema/index.js",
+    "./data/extensions/json-schema-metamodel": "./dist/data/extensions/json-schema-metamodel/index.js",
     "./data/extensions/raw": "./dist/data/extensions/raw/index.js",
     "./data/extensions/json-serializer": "./dist/data/extensions/json-serializer/index.js",
     "./data/extensions/filesystem-json-valuestore": "./dist/data/extensions/filesystem-json-valuestore/index.js"

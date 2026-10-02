@@ -50,6 +50,29 @@ export const builtinModuleCatalog: readonly BuiltinModuleCatalogEntry[] = deepFr
     ]
   },
   {
+    moduleId: "org.memsphere.models",
+    instanceId: "models",
+    packageDirectory: "org.memsphere.models",
+    title: "模型",
+    summary: "浏览项目模型定义",
+    icon: "stack",
+    homeRouteId: "index",
+    routes: [{ id: "index", path: "/models", query: ["model"] }]
+  },
+  {
+    moduleId: "org.memsphere.model-prototype",
+    instanceId: "model-prototype",
+    packageDirectory: "org.memsphere.model-prototype",
+    title: "模型原型",
+    summary: "模型列表、定义与项目存储配置的产品原型",
+    icon: "stack",
+    homeRouteId: "index",
+    routes: [
+      { id: "index", path: "/model-prototype", query: ["model"] },
+      { id: "storage", path: "/model-prototype/storage" }
+    ]
+  },
+  {
     moduleId: "org.memsphere.reference",
     instanceId: "reference",
     packageDirectory: "org.memsphere.reference",

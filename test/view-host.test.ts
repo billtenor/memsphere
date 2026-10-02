@@ -24,7 +24,7 @@ const viewSdkBundle = await transpileBrowserModule("../src/view/view-sdk.ts");
 const systemIconBundle = await transpileBrowserModule("../src/view/system-icon.ts");
 const viewRuntimeBundle = await browserRuntimeBundle();
 
-test("ViewHost document boots the four builtin Module instances in catalog order", () => {
+test("ViewHost document boots the builtin Module instances in catalog order", () => {
   const instances = builtinModuleCatalog.map(entry => bootInstance(
     entry.moduleId,
     entry.instanceId,
@@ -63,7 +63,7 @@ test("View server serves Host, SDK, Runtime, and all builtin bundles without ser
     const bootSource = host.match(/<script id="memsphere-view-boot" type="application\/json">([\s\S]*?)<\/script>/)?.[1];
     assert(bootSource);
     const boot = JSON.parse(bootSource);
-    assert.equal(boot.instances.length, 4);
+    assert.deepEqual(boot.instances.map((instance: ViewHostBootInstance) => instance.module.moduleId), builtinModuleCatalog.map(entry => entry.moduleId));
     const memory = boot.instances.find((instance: { module: { moduleId: string } }) => (
       instance.module.moduleId === "org.memsphere.memory"
     ));

@@ -59,6 +59,15 @@ test("View Package installation, theme, and composition are strict global config
   }).success, false);
 });
 
+test("Models page and definition cells are accepted independently in global composition", () => {
+  for (const cell of ["org.memsphere.models.page.presentation@1:page", "org.memsphere.models.definition.renderer@1:definition"]) {
+    const selected = "org.example.models:main:custom";
+    const parsed = globalConfigSchema.parse({ view_composition: { packages: [], slots: { [cell]: selected } } });
+    assert.equal(parsed.view_composition?.slots?.[cell], selected);
+    assert.equal(globalConfigSchema.safeParse({ view_composition: { packages: [], slots: { [cell.replace(/:[^:]+$/, ":wrong")]: selected } } }).success, false);
+  }
+});
+
 test("View Package paths and composition digests are canonical", () => {
   const packagePath = resolve("fixtures/custom-view-package");
   assert.deepEqual(normalizeInstalledViewPackagePaths({

@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "用例 05 · 联合与条件展示边界",
+  "description": "合法 Draft-07 的联合、组合、条件、布尔子模式；用于检查展示边界，不承诺现有业务 Runtime 支持这些特性。",
+  "type": "object",
+  "properties": {
+    "nickname": { "type": ["string", "null"], "description": "可为空文本，类型列显示文本与空值的联合。" },
+    "flexibleId": { "anyOf": [{ "type": "string" }, { "type": "integer" }], "description": "anyOf：文本或整数；具体分支见原文。" },
+    "payment": {
+      "oneOf": [
+        { "type": "object", "properties": { "method": { "const": "card" }, "cardLast4": { "type": "string" } }, "required": ["method", "cardLast4"] },
+        { "type": "object", "properties": { "method": { "const": "cash" }, "received": { "type": "boolean" } }, "required": ["method", "received"] }
+      ], "description": "oneOf：两个支付对象分支；当前树表不伪造统一字段。"
+    },
+    "bounded": { "type": "number", "allOf": [{ "minimum": 0 }, { "maximum": 100 }], "description": "allOf 组合约束，见原始定义。" },
+    "mixedItems": { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "value": { "type": "number" } } }] }, "description": "联合元素数组；分支结构查看原文。" },
+    "allowedAnything": true,
+    "forbiddenField": false,
+    "kind": { "type": "string", "enum": ["personal", "company"] },
+    "companyName": { "type": "string" }
+  },
+  "if": { "properties": { "kind": { "const": "company" } }, "required": ["kind"] },
+  "then": { "required": ["companyName"] },
+  "else": { "not": { "required": ["companyName"] } },
+  "required": ["nickname", "kind"]
+}

@@ -38,7 +38,7 @@ export default defineViewPlugin<SettingsViewConfig>({
           title: { text: settingsSectionLabel(config, selected) },
           subtitle: { text: selected === "appearance"
             ? text(config, "settings.appearanceHelp", "安装和管理界面扩展包，并配置主题、页面、组件和样式。")
-            : ["project", "participants"].includes(selected)
+            : ["project", "participants", "models"].includes(selected)
             ? text(config, "navigation.projectSettingsSubtitle", "管理当前项目配置。")
             : text(config, "navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。") }
         }
@@ -71,7 +71,7 @@ export default defineViewPlugin<SettingsViewConfig>({
         title: { text: settingsSectionLabel(config, initialSection) },
         subtitle: { text: initialSection === "appearance"
           ? text(config, "settings.appearanceHelp", "安装和管理界面扩展包，并配置主题、页面、组件和样式。")
-          : ["project", "participants"].includes(initialSection)
+          : ["project", "participants", "models"].includes(initialSection)
           ? text(config, "navigation.projectSettingsSubtitle", "管理当前项目配置。")
           : text(config, "navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。") }
       }
@@ -111,6 +111,7 @@ function settingsSecondaryItems(config: SettingsViewConfig, section: RouteToken,
     ["appearance", text(config, "settings.appearance", "界面与主题"), "cube"],
     ["providers", text(config, "settings.providers", "模型提供商"), "sparkle"],
     ["participants", text(config, "settings.participants", "参与者"), "user"],
+    ["models", text(config, "settings.models", "模型存储"), "stack"],
   ] as const;
   return entries.map(([id, label, icon]) => ({
     id,
@@ -128,7 +129,8 @@ function settingsSectionLabel(config: SettingsViewConfig, section: string): stri
     appearance: text(config, "settings.appearance", "界面与主题"),
     providers: text(config, "settings.providers", "模型提供商"),
     project: text(config, "navigation.project", "当前项目"),
-    participants: text(config, "settings.participants", "参与者")
+    participants: text(config, "settings.participants", "参与者"),
+    models: text(config, "settings.models", "模型存储")
   };
   return labels[section] ?? labels.general;
 }

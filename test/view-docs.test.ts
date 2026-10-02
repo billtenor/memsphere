@@ -44,6 +44,12 @@ test("View architecture documentation matches the wired Module and Slot runtime"
     assert.match(document, /\.\/view-slots\.md/);
   }
   assert.match(api, /slots\.headerTitle/);
+  for (const cell of ["org.memsphere.models.page.presentation@1", "org.memsphere.models.definition.renderer@1"]) {
+    assert.ok(slots.includes(cell));
+    assert.ok(api.includes(cell.replace("@1", "")));
+  }
+  assert.match(api, /presentation\.modelsPage/);
+  assert.match(guide, /modelDefinitionRenderer/);
   assert.match(guide, /\.\/view-ui-primitives\.md/);
   for (const primitive of [
     "contentList", "confirmButton", "iconButton", "feedback", "tabs", "segmentedControl",

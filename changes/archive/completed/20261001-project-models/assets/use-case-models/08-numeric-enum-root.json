@@ -1,0 +1,7 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "用例 08 · 数字枚举根",
+  "description": "整数作为根值；数值枚举成员，不把数字转换为字符串。",
+  "type": "integer",
+  "enum": [0, 10, 20]
+}

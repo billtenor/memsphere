@@ -18,7 +18,9 @@ export const portableViewContributionCells = [
   "org.memsphere.memory.page.presentation@1:page",
   "org.memsphere.memory.detail.renderer@1:detail",
   "org.memsphere.run.page.presentation@1:page",
-  "org.memsphere.run.artifact.renderer@1:artifact"
+  "org.memsphere.run.artifact.renderer@1:artifact",
+  "org.memsphere.models.page.presentation@1:page",
+  "org.memsphere.models.definition.renderer@1:definition"
 ] as const;
 
 export const globalStylesViewSlot = "styles.global@1" as const;

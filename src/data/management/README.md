@@ -80,7 +80,7 @@ await store.create(context, "order-001", { orderNo: "O-001", amount: 100 });
 { ref: "order-model.json", loadData: context => modelStore.get(context, "order-model.json").then(record => record?.data) }
 ```
 
-读取回调必须返回 ID 与 `ref` 相同的 Data。Manager 根据 Data.model 准备元模型 Runtime，再按 Payload.contentType 选择 Serializer 解码，并用元模型 Runtime 检查模型定义。元模型本身应有已解码的 Model 绑定及对应 Factory，避免依赖自身解码才能启动。当前没有新增内置 JSON Schema 元模型的引导 Factory，需要宿主或标准扩展提供；上面的已解码订单示例不依赖它。
+读取回调必须返回 ID 与 `ref` 相同的 Data。Manager 根据 Data.model 准备元模型 Runtime，再按 Payload.contentType 选择 Serializer 解码，并用元模型 Runtime 检查模型定义。元模型本身应有已解码的 Model 绑定及对应 Factory，避免依赖自身解码才能启动。内置 `jsonSchemaMetaModelExtension` 已提供 JSON Schema 元模型引导 Factory，Project 模型宿主提供启动绑定；上面的已解码订单示例不依赖它。
 
 `dependencies` 列出创建 Runtime 前需要准备的其他模型，可以跨模型定义标准。定义内部的局部递归由 Factory 处理，不写入依赖列表；跨模型循环准备目前明确报错，不发布未完成的 Runtime。
 

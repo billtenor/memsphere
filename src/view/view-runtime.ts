@@ -45,6 +45,8 @@ import {
   type ViewPlugin,
   type ViewPluginContext,
   type ViewPresentationService,
+  type ModelPresentationSummary,
+  type ModelPresentationDefinition,
   type ViewRouter,
   type ViewServiceName
 } from "./view-sdk.js";
@@ -872,7 +874,32 @@ function createPresentationService(projectId: string): ViewPresentationService {
       }
     });
   };
-  return Object.freeze({ memoryPage, runPage });
+  const modelsPage = async () => {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/models`);
+    if (!response.ok) throw new Error(`Models presentation request failed: ${response.status}`);
+    const payload = await response.json() as { models: ModelPresentationSummary[] };
+    const models = deepFreeze(structuredClone(payload.models));
+    const route = routeSnapshot();
+    const selectedModelId = route.query.model ?? models[0]?.id;
+    return Object.freeze({
+      kind: "models-page" as const,
+      route,
+      models,
+      ...(selectedModelId ? { selectedModelId } : {}),
+      refresh: modelsPage,
+      async openModel(id: string) {
+        if (!id.trim()) throw new Error("Model id must be non-empty");
+        await navigate(`${projectBase}/models?${new URLSearchParams({ model: id })}`);
+      },
+      async getDefinition(id: string) {
+        if (!id.trim()) throw new Error("Model id must be non-empty");
+        const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/models/definition?${new URLSearchParams({ model: id })}`);
+        if (!response.ok) throw new Error(`Model definition presentation request failed: ${response.status}`);
+        return deepFreeze(await response.json() as ModelPresentationDefinition);
+      }
+    });
+  };
+  return Object.freeze({ memoryPage, runPage, modelsPage });
 }
 
 function deepFreeze<T>(value: T): T {
@@ -2767,7 +2794,9 @@ function presentationEntryForLocation(
     ? portableSlots.memoryPagePresentation
     : moduleId === "org.memsphere.run"
       ? portableSlots.runPagePresentation
-      : undefined;
+      : moduleId === "org.memsphere.models"
+        ? portableSlots.modelsPagePresentation
+        : undefined;
   return (portable ? store.entry(portable as AnySlotToken, "page", location) : undefined)
     ?? (mainViewKey ? store.entry(slots.mainView, mainViewKey, location) : undefined);
 }

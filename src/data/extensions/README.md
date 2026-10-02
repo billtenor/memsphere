@@ -7,6 +7,7 @@
 | `filesystemDataStoreExtension` | `memsphere/filesystem-datastore` | `FilesystemDataStoreFactory`，ID 为 `memsphere/filesystem` |
 | `jsonSchemaExtension` | `memsphere/json-schema-draft-07` | `JsonSchemaModelRuntimeFactory`，匹配元模型 `json-schema/draft-07` |
 | `rawExtension` | `memsphere/raw` | `RawModelRuntimeFactory`，匹配元模型 `raw` |
+| `jsonSchemaMetaModelExtension` | `memsphere/json-schema-metamodel` | `JsonSchemaMetaModelRuntimeFactory`，匹配具体元模型 `json-schema/draft-07` |
 | `jsonSerializerExtension` | `memsphere/json-serializer` | `JsonPayloadSerializer`，ID 为 `json`，contentType 为 `application/json` |
 | `filesystemJsonValueStoreExtension` | `memsphere/filesystem-json-valuestore` | `FilesystemJsonValueStoreFactory`，ID 为 `memsphere/filesystem-json` |
 
@@ -155,7 +156,7 @@ DataStore 不加内存锁或文件锁。创建不得覆盖同名文件；更新�
 
 `additionalProperties` 缺省或为 true 时，额外属性保留，但不提供其反射字段描述。Runtime 对初始值和反射修改都执行校验；修改失败会恢复原值。使用普通对象、稠密数组和标量作为原生表示，不执行对象 getter。
 
-此 Factory 创建业务模型的 Runtime；JSON Schema 元模型自身的引导 Factory、Registry 和自动装配仍属于后续框架工作。
+此 Factory 创建业务模型的 Runtime，与单独的 `jsonSchemaMetaModelExtension` 配合完成模型定义读取。元模型 Factory 匹配具体 ID，使用已解码的启动 ModelBinding，不递归读取自己的文件。元模型 Runtime 验证 Draft-07 对象定义，反射只公开确定为字符串的 `$schema`、`$id`、`title`、`description`；其他关键字保留在完整 JSON 中，不伪造多形态关键字的反射类型。定义可读取不等于业务 Factory 支持其中全部特性；boolean 根及完整 Draft-07 的联合类型业务反射仍未支持。
 
 ## Raw Runtime：整体字节反射
 

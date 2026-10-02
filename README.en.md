@@ -254,6 +254,10 @@ Start the local View:
 memsphere view start
 ~~~
 
+Each Project has a read-only **Models** module alongside Memory and Runs. JSON Schema Draft-07 definitions are stored as ordinary JSON files in the default `models/json-schema/draft-07` directory; a model ID is its relative filename, such as `sales/order.json`. The model browser lists those definitions and the four built-in raw Run models, presents fields as an expandable tree table, and exposes the complete original JSON for viewing. It does not edit models or manage value instances.
+
+Under **Settings → Project → Model storage**, the optional `modelsDirectory` setting selects the directory. Relative paths are resolved against the registered Project root, not the Git repository, Memory root or current working directory; absolute paths are accepted. Saving switches the location on the next model refresh without restarting View or moving the old files. Advanced Schema keywords remain available in the source definition; reading a definition does not imply that the current business Runtime supports every Draft-07 feature.
+
 #### Repair or Upgrade System Memory
 
 To install missing System Memory, restore it, or upgrade it to the bundled version in an existing Managed or Embedded Project, run repair. System Memory marked as retired by the current manifest v4 (with v3 compatibility) is removed by default, but only when both its historical path and canonical identity match. User Memory and Mounted Projects are not touched:

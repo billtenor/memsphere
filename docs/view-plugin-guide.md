@@ -277,10 +277,24 @@ View Plugin 现在可以作为可信本地“界面扩展包”安装，而不�
 
 Package 通过 `module.json` 声明 `capabilities`、`dependencies`、`styles`、`themes`、`contributions` 和可选 `source`。global CSS 作为 `styles.global@1` 多选 Slot 的候选，只有被选择后才加载；`styles.global` 是显式高权限，`@import`、远程资源、Host 私有 selector、`!important` 和 `--mem-view-*` 声明都会被拒绝。普通 scoped CSS 随 Package 实例加载并绑定其 root/portal；声明 `namespace` 后，所有自定义变量定义都会按此前缀强制校验。Theme 的 light/dark 必须声明相同的已知 token 集合。旧 `view_composition.styles` 仍可解析以兼容历史配置，新保存统一写入 Slot。
 
-界面扩展包可以声明 12 类非 Core 保留的 Host 根 Slot、`styles.global@1`，以及 `portableSlots.memoryPagePresentation`、`memoryDetailRenderer`、`runPagePresentation` 和 `runArtifactRenderer` 四个稳定展示位置。设置页以表格列出全部 17 类可配置位置：single/keyed Slot 单选，list Slot 多选；四个 Module 位置显示为“记忆模块 / 整体页面、记忆模块 / 详情正文、运行模块 / 整体页面、运行模块 / 产物正文”。Manifest 的 `cell` 仍必须精确匹配运行时注册的 `cell + id`；显式配置后，未选择的 contribution 会被安全忽略，渲染异常则 abdicate 并回退。完整目录见 [View Slot List](./view-slots.md)。
+界面扩展包可以声明 12 类非 Core 保留的 Host 根 Slot、`styles.global@1`，以及 `portableSlots.memoryPagePresentation`、`memoryDetailRenderer`、`runPagePresentation`、`runArtifactRenderer`、`modelsPagePresentation` 和 `modelDefinitionRenderer` 六个稳定展示位置。设置页以表格列出全部 22 类可配置位置：single/keyed Slot 单选，list Slot 多选；六个 Module 位置显示为“记忆模块 / 整体页面、记忆模块 / 详情正文、运行模块 / 整体页面、运行模块 / 产物正文、模型模块 / 整体页面、模型模块 / 定义正文”。Manifest 的 `cell` 仍必须精确匹配运行时注册的 `cell + id`；显式配置后，未选择的 contribution 会被安全忽略，渲染异常则 abdicate 并回退。完整目录见 [View Slot List](./view-slots.md)。
 
 界面扩展包安装、light/dark/system 模式、主题和 Slot 选择都是全局设置，同一配置统一应用到所有 Project。安装即信任这个本地包，Manifest capability 只声明内容类型，选择主题或 Slot 即启用相应内容，不另设 Package 权限。历史 Project View 字段仍可解析以保持配置兼容，但不再参与展示。普通设置页不展示 revision、digest 或 running/disk 快照，只显示已保存、未保存或保存后需重启。
 
-页面 Package 通过 `presentation` 服务读取冻结的摘要、当前 Route/选择，并调用 `refresh/openMemory/openCreate/openRun/startRun` 进入官方控制的流程；不直接请求业务 API。Detail/Artifact renderer 只接收 SDK 定义的最小只读正文 context 及官方包装的复制、ChangeSet、Review、下载动作。
+页面 Package 通过 `presentation` 服务读取冻结的摘要、当前 Route/选择，并调用 `refresh/openMemory/openCreate/openRun/startRun` 进入官方控制的流程；不直接请求业务 API。模型页面使用 `presentation.modelsPage()` 的 `refresh/openModel/getDefinition`，模型列表仍独立加载。Detail/Artifact renderer 只接收 SDK 定义的最小只读正文 context 及官方包装的复制、ChangeSet、Review、下载动作。模型定义 renderer 接收冻结 model、structure/source 选择与 defaultRender，支持保留默认交互的渐进包装。
+
+例如定义正文扩展（Manifest 声明 cell `org.memsphere.models.definition.renderer@1:definition`、id `custom`，并在设置中选择）：
+
+```ts
+ctx.slots.register(portableSlots.modelDefinitionRenderer, {
+  id: "custom", key: "definition",
+  value: { render(input) {
+    const wrapper = document.createElement("section");
+    wrapper.className = "custom-model-definition";
+    wrapper.append(input.defaultRender());
+    return wrapper;
+  } }
+});
+```
 
 示例的 `index.js` 是预编译 ESM；修改 `src/index.js` 后运行 `node scripts/build-example-view-package.mjs`。正式构建会逐字节检查签入 bundle，并强制保持 `@memsphere/view-sdk` 为 external import。Package 不得内联 SDK，Host 的单例 Token brand 会拒绝这种 bundle。Data renderer 必须同步返回 `HTMLElement`；抛错、返回 Promise/thenable 或其他值都会立即 abdicate 并进入官方 fallback，abdication 持续到实例卸载或 View 重启。

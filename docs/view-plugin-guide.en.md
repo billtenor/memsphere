@@ -275,10 +275,24 @@ A View Plugin can be installed as a trusted local “interface extension package
 
 The Package `module.json` may declare `capabilities`, `dependencies`, `styles`, `themes`, `contributions`, and optional `source` metadata. Global CSS is exposed as a candidate in the multi-select `styles.global@1` Slot and loads only when selected. `styles.global` is explicitly privileged: imports, remote resources, Host-private selectors, `!important`, and declarations of `--mem-view-*` are rejected. Scoped CSS loads with its Package instance and is attached to that instance's roots and portals. When `namespace` is declared, every custom-property definition is checked against that prefix. Theme light/dark maps must declare the same set of known tokens. Legacy `view_composition.styles` remains parse-compatible; new saves use the Slot.
 
-An extension package may target the twelve non-Core-reserved Host root Slot classes, `styles.global@1`, and the four stable Memory/Run presentation cells. Settings lists all seventeen configurable classes in a table: single/keyed Slots are single-select and list Slots are multi-select. The four Module positions are labeled Memory module / Whole page, Memory module / Detail body, Run module / Whole page, and Run module / Artifact body. A Manifest `cell` must still exactly match the runtime `cell + id`; after explicit configuration, unselected contributions are safely ignored and a failing selected contribution abdicates to its fallback. See [View Slot List](./view-slots.en.md).
+An extension package may target the twelve non-Core-reserved Host root Slot classes, `styles.global@1`, and the six stable Memory/Run/Models presentation cells. Settings lists all twenty-two configurable classes in a table: single/keyed Slots are single-select and list Slots are multi-select. The six Module positions are labeled Memory module / Whole page, Memory module / Detail body, Run module / Whole page, Run module / Artifact body, Models module / Whole page, and Models module / Definition body. A Manifest `cell` must still exactly match the runtime `cell + id`; after explicit configuration, unselected contributions are safely ignored and a failing selected contribution abdicates to its fallback. See [View Slot List](./view-slots.en.md).
 
 Extension package installation, light/dark/system mode, theme, and Slot selections are global and apply uniformly to every Project. Installing a local Package establishes trust; Manifest capabilities only declare content kinds, and selecting a theme or Slot activates that content without a second Package-permission layer. Legacy Project View fields still parse for configuration compatibility but no longer affect presentation. Normal Settings surfaces show only saved, unsaved, or restart-required state—not revision, digest, or running/disk snapshots.
 
-Page Packages use the `presentation` service for frozen summaries, current Route/selection, and controlled `refresh/openMemory/openCreate/openRun/startRun` transitions into official flows; they do not call business APIs directly. Detail/Artifact renderers receive only SDK-defined minimal read-only body contexts and official wrappers for copy, ChangeSet, Review, and download actions.
+Page Packages use the `presentation` service for frozen summaries, current Route/selection, and controlled `refresh/openMemory/openCreate/openRun/startRun` transitions into official flows; they do not call business APIs directly. Models pages use `presentation.modelsPage()` with `refresh/openModel/getDefinition`; the model list loads independently. Detail/Artifact renderers receive only SDK-defined minimal read-only body contexts and official wrappers for copy, ChangeSet, Review, and download actions. Model definition renderers receive a frozen model, structure/source selection, and defaultRender for progressive wrapping that preserves official interactions.
+
+For example, a definition body extension (declare cell `org.memsphere.models.definition.renderer@1:definition` and id `custom` in the Manifest, then select it in Settings):
+
+```ts
+ctx.slots.register(portableSlots.modelDefinitionRenderer, {
+  id: "custom", key: "definition",
+  value: { render(input) {
+    const wrapper = document.createElement("section");
+    wrapper.className = "custom-model-definition";
+    wrapper.append(input.defaultRender());
+    return wrapper;
+  } }
+});
+```
 
 The example `index.js` is precompiled ESM; after editing `src/index.js`, run `node scripts/build-example-view-package.mjs`. The production build checks the committed bundle byte for byte and keeps `@memsphere/view-sdk` external. A Package must not inline the SDK; the Host singleton Token brand rejects such a bundle. A data renderer must synchronously return an `HTMLElement`; throwing, returning a Promise/thenable, or returning another value immediately abdicates it and selects the official fallback. Abdication lasts until instance unload or View restart.

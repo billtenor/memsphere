@@ -241,6 +241,10 @@ View 的 Memory 下提供“当前项目 / 记忆市场”入口。记忆市场�
 
 ### 6.5 验证 Project 并启动 View
 
+Project 的“模型”页面只读展示模型定义，可用树形字段表逐级展开对象和数组，或查看完整原始 JSON。JSON Schema Draft-07 定义直接保存为可阅读的 `.json` 文件，模型 ID 是包含后缀的相对路径，例如 `sales/order.json`。
+
+在“设置 → 模型存储”配置当前 Project 的目录；Project `config.json` 的可选 `modelsDirectory` 默认 `models/json-schema/draft-07`。相对路径以 Registry 登记的 Project 根目录为基准，而不是 Git 或 Memory 目录；也可指定绝对路径。保存后刷新模型页面即可切换，不自动迁移原目录文件。本轮不提供网页模型编辑或值实例管理。
+
 查看当前绑定的 Project，并验证其中的 Memory：
 
 ```bash
