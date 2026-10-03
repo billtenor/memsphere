@@ -29,7 +29,7 @@ test("Project-root scanning prunes every configured registry, backups and retain
 }));
 test("Conflicting scan roots and canonical symlink aliases fail before any write", async () => fixture(async (root) => {
   await mkdir(join(root, "registry"));
-  await symlink(join(root, "registry"), join(root, "alias"));
+  await symlink(join(root, "registry"), join(root, "alias"), process.platform === "win32" ? "junction" : "dir");
   const config = { storeId: "main", stores: { main: { factory: "memsphere/filesystem-json" as const, directory: "registry" } } };
   for (const modelsDirectory of ["registry", "registry/nested", "alias", "alias/nested"])
     await assert.rejects(validateModelStoragePaths({ root, modelsDirectory, modelRegistration: config }), /conflict/);

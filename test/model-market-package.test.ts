@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crossSpawn from "cross-spawn";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
@@ -16,8 +17,10 @@ test("Packed distribution contains model market assets and its HTTP host imports
   const temporary = await mkdtemp(join(tmpdir(), "model-market-package-"));
   let server: ReturnType<(typeof import("../src/commands/view.js"))["createViewServer"]> | undefined;
   try {
-    const { stdout } = await execute("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", temporary, "--cache", join(temporary, "npm-cache")], { cwd: repository, maxBuffer: 8 * 1024 * 1024 });
-    const packed = JSON.parse(stdout) as {
+    const packResult = crossSpawn.sync("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", temporary, "--cache", join(temporary, "npm-cache")], { cwd: repository, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+    if (packResult.error) throw packResult.error;
+    assert.equal(packResult.status, 0, packResult.stderr || `npm pack exited with status ${packResult.status}`);
+    const packed = JSON.parse(packResult.stdout) as {
       filename: string;
       files: {
         path: string;
@@ -28,7 +31,7 @@ test("Packed distribution contains model market assets and its HTTP host imports
     await execute("tar", ["-xzf", join(temporary, packed[0]!.filename), "-C", temporary]);
     const packageRoot = join(temporary, "package");
     // Offline dependency linkage; the application and all assets must come from the tarball.
-    await symlink(join(repository, "node_modules"), join(packageRoot, "node_modules"), "dir");
+    await symlink(join(repository, "node_modules"), join(packageRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
     const packedView = await import(pathToFileURL(join(packageRoot, "dist/commands/view.js")).href) as typeof import("../src/commands/view.js");
     const home = join(temporary, "home");
     const root = join(home, "projects", "demo");
