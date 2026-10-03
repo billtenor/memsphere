@@ -1,0 +1,58 @@
+{
+  "runId": "run-20261003-055813z-2e69aa7e",
+  "reviewId": "review-20261003-093613z-5714da24",
+  "roundId": "round-20261003-093613z-65368dd5",
+  "status": "passed",
+  "assignments": [
+    {
+      "actorId": "actor5",
+      "actorName": "billtenor",
+      "actorKind": "human",
+      "binding": "decision",
+      "submitted": {
+        "comments": [],
+        "vote": "approve",
+        "summary": "Human 已实际验收当前实现，明确表示“我验收没问题了，请你继续流程，我投同意”。\n本次通过覆盖最新确认的范围：Project 创建自动初始化五个内置模型；模型市场仅保留含用例 01–08 的示例包，订单示例作为其中用例 02；已有导入数据保留，暂不增加卸载功能。\n首轮冻结交付报告中的“两市场包”由 Human 后续明确修改，并由 market-adjustment.md 及其测试、Memory、实际 View 核验回执补充记录。",
+        "submittedAt": "2026-10-03T12:34:37.524Z"
+      }
+    },
+    {
+      "actorId": "traex1",
+      "actorName": "产品",
+      "actorKind": "agent",
+      "binding": "advisory",
+      "submitted": {
+        "comments": [],
+        "vote": "approve",
+        "summary": "## 评审结论\n\n**通过（approve）**。当前候选报告满足本次交付报告契约：清楚说明了交付内容、实际验证、验收结论、后续范围和残留边界。\n\n我独立核验了当前工作树与证据，而非仅采信候选说明：\n\n- `npm run typecheck`、完整 `npm test`（其 pretest 包含构建）和 `memsphere validate` 均通过；完整回归仅跳过一个明确标注的 Windows 专用 shell 集成测试。\n- 资产门禁确认 5 个系统模型与 2 个市场包；资产、系统初始化、市场与迁移恢复的 32 个聚焦测试全部通过，其中包含正式 tarball 的独立创建、导入与恢复验证。\n- 迁移回执记录 8 个确切示例模型已迁移、隔离恢复演练通过；独立核验记录确认保留 5 个系统模型、11 个项目模型、24 个非目标文件和 16 份备份文件的预期状态。\n- Memory 差异证据存在且匹配报告：`change-20261003-091636402z-a82cefa2` 的记录为 `valid=true`、issues 为空，并给出了对应 View 入口；当前 Memory Store 亦通过普通校验。\n\n残留边界已如实披露：Windows PowerShell/CMD/Git Bash 专用测试尚未在 Windows 实机执行；远程市场、自动升级/卸载、模型编辑和完整 Draft-07 Runtime 支持不属于本迭代。交付规范要求的需求状态更新与目录归档属于验收后的收尾动作，候选报告没有将其误报为已完成。",
+        "submittedAt": "2026-10-03T09:38:36.189Z"
+      }
+    }
+  ],
+  "votes": [
+    {
+      "subject": {
+        "kind": "actor",
+        "actorId": "traex1"
+      },
+      "value": "approve",
+      "submittedAt": "2026-10-03T09:38:36.189Z"
+    },
+    {
+      "subject": {
+        "kind": "actor",
+        "actorId": "actor5"
+      },
+      "value": "approve",
+      "submittedAt": "2026-10-03T12:34:37.524Z"
+    },
+    {
+      "subject": {
+        "kind": "runner"
+      },
+      "value": "approve",
+      "comment": "已完整阅读 Human 与产品 Agent 的提交意见；均为 approve，无待处置 Comment。产品 Agent 的独立验证对应首轮交付报告。后续 Human 明确要求移除独立订单市场包并暂不增加卸载，相关调整已由 Runner 实现、独立只读审查、受影响验证及完整回归确认，并由 Human 本次明确验收通过。\n最终市场为一个 memsphere.examples 包、八项用例；既有导入数据保持。最终 npm test 为 937 项，936 通过、0 失败、1 项 Windows 专用测试跳过；typecheck、build、Memory 双校验均通过。最终 Memory checkpoint 为 5d3be81216981d1f9d269c10841c6b260b1ec44cb7578f85fdc9959c3f191b50。\n最终补充材料：changes/active/20261003-model-catalogs/market-adjustment.md；SHA-256：940b79f499dec4f42c86d0a440702e1333d5ef0ee4fc8b58ada749616f7ebce3。首轮材料作为历史记录保留；最终状态以补充及验收记录为准。无阻塞交付问题，Runner 接纳当前迭代并进入提交及归档。",
+      "submittedAt": "2026-10-03T12:35:33.460Z"
+    }
+  ]
+}

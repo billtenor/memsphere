@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "operationId": "696aed90-7f2b-4c97-93ee-081659a3be56",
+  "createdAt": "2026-10-03T09:27:00.382Z",
+  "project": {
+    "name": "memsphere",
+    "root": "${MEMSPHERE_HOME}/projects/memsphere"
+  },
+  "configDigest": "3bc8cca09e26724cab7bdf73e9e12c339890379f58b73041216f9b1cf15a71eb",
+  "projectManifestDigest": "9767a93bacddc19a7e436066e5937e8845f538ad0a36762fbc7726a3a08efd90",
+  "paths": {
+    "modelsDirectory": "${MEMSPHERE_HOME}/projects/memsphere/models/json-schema/draft-07",
+    "registrationDirectory": "${MEMSPHERE_HOME}/projects/memsphere/models/registrations",
+    "backupDirectory": "${MEMSPHERE_HOME}/projects/memsphere/backups/model-registration",
+    "excludedDirectories": [
+      "${MEMSPHERE_HOME}/projects/memsphere/models/registrations",
+      "${MEMSPHERE_HOME}/projects/memsphere/backups/model-registration"
+    ]
+  },
+  "targets": [
+    {
+      "modelRef": "examples/01-basic-types.json",
+      "definitionDigest": "82477702aebc2298921d02473b6cdbf2a2902a64a1d35899ecdfcc2e0b5645e3",
+      "recordId": "5655855f-aef4-45c8-9f36-7adcc741cf00",
+      "recordDigest": "5316b87dbd6e748e7ea0de8c37759646ab8fe49b0d60f6add5c07d301eab781f"
+    },
+    {
+      "modelRef": "examples/02-nested-order.json",
+      "definitionDigest": "6e54e0de21b2e1ec8e2de8cd9e397ecbe7b50d24d371ced11bebc80e856c221a",
+      "recordId": "4f341d34-f46e-40bf-b200-b683657b2247",
+      "recordDigest": "ce77b228726e58b665c31ea386ac9adb09cc7f18563555f42b678c790c6f4d44"
+    },
+    {
+      "modelRef": "examples/03-array-root.json",
+      "definitionDigest": "cfac6a2d83b3a9fe1e16814845cb2bb423515573e3816d2bd8c779312cc281c0",
+      "recordId": "05403432-0e33-4e00-b826-21b9bc742736",
+      "recordDigest": "0f53d0e7e38643b6a74506634ae6b2422a288834fa24ce4b2b381504ea70e2ae"
+    },
+    {
+      "modelRef": "examples/04-dictionaries-and-encodings.json",
+      "definitionDigest": "f5a0f1dcdea6e98daabbfd6827a878dc063e203a2461f9cc37ade08b623a139e",
+      "recordId": "45f4e950-6aad-4f50-bb02-07a0527b7002",
+      "recordDigest": "696d4d6c7f64ce175af8341f864eba0c1ab231d0a92d687c6831ccf1a5fcb61b"
+    },
+    {
+      "modelRef": "examples/05-unions-and-conditions.json",
+      "definitionDigest": "890c5c427b9d08b71743e2fc16596a4b6a9f85e337db49f3759d9718ab4da089",
+      "recordId": "64d9745e-249c-4d63-8701-2821d8962163",
+      "recordDigest": "5d573eef4706ba13ad0cf6a37df63500e67ab28e86518740d39db8f2e65f0c26"
+    },
+    {
+      "modelRef": "examples/06-references-and-recursion.json",
+      "definitionDigest": "463ee40780c9726758fdbe90e1f7f0283e0bcfea13342934aaf2614c0a6efa13",
+      "recordId": "f701d1bc-33b1-417f-8b8a-ad767c8b11ac",
+      "recordDigest": "2fd5fca9944367afabd2c05bd56ecf222a504c8f4430be8046bdf97eb4cb1af7"
+    },
+    {
+      "modelRef": "examples/07-scalar-enum-root.json",
+      "definitionDigest": "83fbd06b0e907f586e13180dd8780f7c42b5d2ef878c037a351a1d62348a195f",
+      "recordId": "ae856ce2-d5da-41aa-b23c-0010ba27ba1a",
+      "recordDigest": "edfe4484ff0f9f89a0dd2a91d33bd4aba215f602690b20d76d35f7ec216f710a"
+    },
+    {
+      "modelRef": "examples/08-numeric-enum-root.json",
+      "definitionDigest": "622d3a326ed1ce273b91227f7483ab496f713f60db84c3d250e2bf833f65ddde",
+      "recordId": "7360dc6e-3e37-4097-a06f-522121f2e316",
+      "recordDigest": "a012f95badc067517a5621294a115e99ef181243543b1cedadb124b8bf9175dc"
+    }
+  ],
+  "marketDigest": "51116e9c4a58c4bbcca69b308fa004fc010760c01b2ae69c5a00299dbdf90d94",
+  "preservedDigest": "3587f3c676b97bf01b0af069b56dc938ce46d658e6c9b3ec358b9ddb075de366"
+}

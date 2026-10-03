@@ -894,9 +894,7 @@ async function handleRequest(
         if (typeof body.expectedRevision !== "string" || body.expectedRevision !== document.revision) throw new ConfigRevisionConflictError(String(body.expectedRevision), document.revision);
         const input = { root: document.scopeRoot, modelsDirectory: document.raw.modelsDirectory, modelRegistration: document.raw.modelRegistration };
         if (url.pathname === "/api/models/initialize") {
-          const initialized = await initializeProjectModelRegistrations({ signal: controller.signal }, input);
-          const { atomicWriteJson } = await import("../persistence.js");
-          await atomicWriteJson(document.configPath, { ...document.raw, modelRegistration: initialized.config });
+          const initialized = await initializeProjectModelRegistrations({ signal: controller.signal }, input, { config: { path: document.configPath, value: document.raw } });
           return initialized;
         }
         if (url.pathname === "/api/models/market/cleanup") {

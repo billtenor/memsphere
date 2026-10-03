@@ -1,0 +1,7 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "用例 07 · 标量枚举根",
+  "description": "整个模型就是一个字符串枚举，没有对象字段。",
+  "type": "string",
+  "enum": ["pending", "paid", "cancelled"]
+}

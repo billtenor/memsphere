@@ -1,0 +1,93 @@
+{
+  "project": "memsphere",
+  "remainingModels": [
+    {
+      "id": "memsphere/model-registration",
+      "origin": "system",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run-domain/agent-attempt.json",
+      "origin": "project",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run-domain/artifact.json",
+      "origin": "project",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run-domain/assignment.json",
+      "origin": "project",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run-domain/comment.json",
+      "origin": "project",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run-domain/external.json",
+      "origin": "project",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run-domain/review.json",
+      "origin": "project",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run-domain/round.json",
+      "origin": "project",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run-domain/run-event.json",
+      "origin": "project",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run-domain/run.json",
+      "origin": "project",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run-domain/step.json",
+      "origin": "project",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run-domain/vote.json",
+      "origin": "project",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run/agent-activity-log",
+      "origin": "system",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run/agent-activity-snapshot",
+      "origin": "system",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run/artifact",
+      "origin": "system",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run/memory-snapshot-file",
+      "origin": "system",
+      "status": "available"
+    }
+  ],
+  "systemCount": 5,
+  "retainedProjectCount": 11,
+  "marketExampleCount": 8,
+  "removedProjectExamples": 8,
+  "verifiedPreservedFiles": 24,
+  "verifiedBackupFiles": 16,
+  "rehearsalPassed": true,
+  "backup": "${MEMSPHERE_HOME}/projects/memsphere/backups/model-registration/20261003-model-catalogs/696aed90-7f2b-4c97-93ee-081659a3be56"
+}

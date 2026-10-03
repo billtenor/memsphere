@@ -1,0 +1,15 @@
+{
+  "tests": 937,
+  "pass": 936,
+  "fail": 0,
+  "cancelled": 0,
+  "skipped": 1,
+  "todo": 0,
+  "command": "npm test",
+  "log": "/tmp/memsphere-market-adjustment-full.log",
+  "affectedIntegrationTests": 26,
+  "affectedIntegrationLog": "/tmp/memsphere-market-adjustment-affected.log",
+  "typecheck": "passed",
+  "build": "passed",
+  "memoryValidation": "passed"
+}

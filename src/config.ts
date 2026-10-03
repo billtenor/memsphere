@@ -113,7 +113,11 @@ async function readProjectExecutionConfig(options: {
     revision: await storeRevision(project.memoryRoot, project.config.store.type),
     store: project.config.store
   })));
-  prepareRunData(context.primary.paths);
+  prepareRunData({ ...context.primary.paths, project: {
+    root: context.primary.paths.root,
+    modelsDirectory: context.primary.config.modelsDirectory,
+    modelRegistration: context.primary.config.modelRegistration
+  } });
   return {
     configPath: context.primary.paths.configPath,
     scopeRoot: context.primary.paths.root,

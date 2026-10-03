@@ -1,0 +1,11 @@
+{
+  "command": "npm test",
+  "tests": 933,
+  "pass": 932,
+  "fail": 0,
+  "skip": 1,
+  "skipReason": "Windows shell integration test on Linux",
+  "typecheck": "passed",
+  "build": "passed (npm test pretest)",
+  "log": "/tmp/memsphere-model-catalogs-final-tests.log"
+}

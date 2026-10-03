@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "用例 04 · 字典与特殊类型映射",
+  "description": "动态键字典以及 bigint/bytes 的 JSON 表示示例；它们不是原生 Map、bigint、Uint8Array 的反射声明。",
+  "type": "object",
+  "properties": {
+    "labelsByKey": {
+      "type": "object", "description": "固定的分组信息和自定义标签保存在同一个对象中。",
+      "properties": {
+        "groupName": { "type": "string", "description": "固定字段：标签分组名称。" },
+        "version": { "type": "integer", "description": "固定字段：标签分组版本号。" }
+      },
+      "required": ["groupName"],
+      "additionalProperties": { "type": "string", "description": "自定义标签名称对应的文本，例如颜色、尺寸。" },
+      "examples": [{ "groupName": "商品标签", "version": 1, "颜色": "红色", "尺寸": "大号" }]
+    },
+    "productsBySku": {
+      "type": "object", "description": "按商品 SKU 保存商品信息。",
+      "additionalProperties": { "type": "object", "properties": { "name": { "type": "string" }, "stock": { "type": "integer" }, "prices": { "type": "array", "items": { "type": "number" } } }, "required": ["name", "stock"] }
+    },
+    "batchesByDate": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "quantity": { "type": "integer" } }, "required": ["id", "quantity"] } }, "description": "按日期保存当日的批次列表。" },
+    "bigIntegerText": { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)$", "examples": ["9007199254740993"], "description": "任意精度整数的十进制文本表示，避免 JSON number 精度损失；反射类型仍是 string，不会自动转 bigint。" },
+    "binaryBase64": { "type": "string", "contentEncoding": "base64", "contentMediaType": "application/octet-stream", "examples": ["AAECAw=="], "description": "二进制内容的 Base64 文本表示；仍是 string，不会自动转 bytes，注解见原始定义。" },
+    "createdAt": { "type": "string", "format": "date-time", "description": "日期时间文本，不引入独立 Date 类型。format 见原文。" },
+    "homepage": { "type": "string", "format": "uri", "description": "URI 文本，format 见原文。" },
+    "email": { "type": "string", "format": "email", "description": "邮件地址文本，format 见原文。" }
+  },
+  "required": ["labelsByKey", "bigIntegerText", "binaryBase64"]
+}

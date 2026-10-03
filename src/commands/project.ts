@@ -52,6 +52,9 @@ export async function projectCreateCommand(
       const config = options.embedded
         ? await createEmbeddedProject(stagingRoot, options.embedded)
         : await createManagedProject(stagingRoot);
+      const { initializeProjectModelRegistrations } = await import("../project/model-registration.js");
+      const models = await initializeProjectModelRegistrations({}, { root: stagingRoot });
+      config.modelRegistration = models.config;
       await writeProjectMetadata(stagingRoot, name, config);
       await rename(stagingRoot, root);
       moved = true;
@@ -1115,8 +1118,7 @@ export async function projectModelsInitializeCommand(nameInput?: string, options
     const { initializeProjectModelRegistrations, withModelRegistrationLock } = await import("../project/model-registration.js");
     return withModelRegistrationLock(context.primary.paths.root, async () => {
       const current = projectConfigSchema.parse(JSON.parse(await readFile(context.primary.paths.configPath, "utf8")));
-      const initialized = await initializeProjectModelRegistrations({}, { root: context.primary.paths.root, modelsDirectory: current.modelsDirectory, modelRegistration: current.modelRegistration });
-      await atomicWriteJson(context.primary.paths.configPath, { ...current, modelRegistration: initialized.config });
+      const initialized = await initializeProjectModelRegistrations({}, { root: context.primary.paths.root, modelsDirectory: current.modelsDirectory, modelRegistration: current.modelRegistration }, { config: { path: context.primary.paths.configPath, value: current } });
       return initialized;
     });
   });

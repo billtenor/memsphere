@@ -1,0 +1,12 @@
+{
+  "valid": true,
+  "changeId": "change-20261003-091636402z-a82cefa2",
+  "memoryRoot": "${WORKSPACE_ROOT}/.memsphere/memory",
+  "candidateRoot": "${MEMSPHERE_HOME}/projects/memsphere/changes/change-20261003-091636402z-a82cefa2/checkpoints/5d3be81216981d1f9d269c10841c6b260b1ec44cb7578f85fdc9959c3f191b50/memory",
+  "storeType": "embedded",
+  "baseRevision": "f27d9f02bc5aed832274f3c7c786b414db514fb0",
+  "checkpointDigest": "5d3be81216981d1f9d269c10841c6b260b1ec44cb7578f85fdc9959c3f191b50",
+  "completedChangeIds": [],
+  "issues": [],
+  "previewUrl": "http://0.0.0.0:30000/projects/memsphere/changes/change-20261003-091636402z-a82cefa2"
+}

@@ -1,0 +1,27 @@
+{
+  "reviewId": "review-20261003-092937z-1a30d87f",
+  "roundId": "round-20261003-092937z-9ab1a8ce",
+  "reviews": [
+    {
+      "actor": "研发",
+      "status": "submitted",
+      "vote": "approve",
+      "comments": [],
+      "summary": "# 研发工程师评审总结\n\n**投票：通过。**\n\n## 亲自检查的实现与验证\n\n- 阅读了已确认的需求契约、实施与验证方案、开发计划、功能实现摘要及初始验证报告，并以基线 `f27d9f0` 检查当前工作树的差异与 `git diff --check`。\n- 审查了 `reserved-models/manifest.json`、`src/reserved/models.ts`、`src/project/system-models.ts`、`src/project/system-model-store.ts`、`src/project/model-market.ts`、`src/project/models.ts` 和相关创建/Run 装配改动。实现从发行资产读入五项系统模型，创建时以候选目录验证后原子发布；旧 Project 仅通过显式初始化写入。模型市场按清单提供两个包，整包导入有预检、候选隔离、回滚与发布回执，且完整 Draft-07 定义校验与业务 Runtime 子集解耦。\n- 审查并复跑了资产、系统安装、市场导入、打包发行、引用校验、Run Store 与八项示例迁移/恢复相关测试；完整 `npm test`（含 pretest clean build）实际通过：933 项中 932 通过、0 失败、1 项 Windows 专用测试在 Linux 跳过。`npm run typecheck` 通过；`npm pack --dry-run` 确认发行物包含 `reserved-models/`、恢复脚本与 `dist/` 发布配置。\n- 对包测试的单独并行复跑曾因同时运行的构建命令删除 `dist/` 而失败；这是测试运行互相干扰，不是实现缺陷。之后顺序执行的完整回归包含该包测试并通过。\n\n## 仅引用、未再次执行的证据\n\n- 候选材料和初始验证报告中的当前真实 memsphere Project 整理回执、备份路径、浏览器手工操作、ChangeSet `change-20261003-091636402z-a82cefa2` 与其最终 Memory 校验，作为补充审计材料阅读，未由我在本次评审重新操作生产/当前 Project 数据。\n\n## 残余风险\n\n- Windows PowerShell/CMD/Git Bash 的 Agent Review shell 集成在 Linux 环境按测试设计跳过；这不影响本迭代模型资产、初始化、市场导入或整理恢复的验收范围，仍应在 Windows 支持环境中持续覆盖。\n\n未发现阻止交付的实现、验证或范围一致性问题。"
+    },
+    {
+      "actor": "测试",
+      "status": "submitted",
+      "vote": "approve",
+      "comments": [],
+      "summary": "# 测试工程评审结论\n\n**投票：approve**\n\n## 亲自检查与执行\n\n- 阅读了本轮需求契约、实施/开发计划、功能实现摘要、初始验证报告和候选验收材料；以需求中的五个持久系统模型、两个市场包/八个示例、显式补装、冲突与回滚保护、正式包和当前 Project 整理为核验重点。\n- 检查了工作区相对 `f27d9f0` 的实际改动、`reserved-models/manifest.json`、资产加载/校验实现、系统初始化、市场导入、示例整理恢复以及打包门禁；`git diff --check` 无输出。\n- 亲自执行 `npm run typecheck`，通过。\n- 亲自执行清洁 `npm run build`，通过，并确认门禁报告 5 个系统模型、2 个市场包。\n- 亲自执行 38 项受影响定向测试：资产目录与清单、系统安装/幂等/冲突/损坏/并发修改保护、CLI 补装、两市场包与正式 tarball、八项示例导入、引用闭包、Run/归档装配以及迁移计划、隔离恢复、备份损坏与回滚冲突；38/38 通过。\n- 亲自执行完整 `node scripts/run-tests.mjs --test-reporter=dot`（在成功构建后），运行器正常退出且无失败输出。\n\n## 仅引用、未在本次复跑的证据\n\n- 候选报告中的当前真实 `memsphere` Project 初始化与八项整理回执、文件字节核验、Memory ChangeSet 校验、以及隔离浏览器实操。其证据路径和内容已阅，但我未对用户的持久 Project 重新执行写入性整理，也未重跑浏览器交互。\n\n## 残余风险\n\n- Windows PowerShell/CMD/Git Bash 专用的 Agent Review shell 集成未在本 Linux 环境实测；当前报告将其正确标为一项跳过，且它不改变本轮模型目录、初始化、市场或恢复的 Linux 验收结论。\n- `npm run build` 会清理共享的 `dist/`。评审期间一次并行构建造成短暂的 `dist/cli.js` 缺失；在无并发构建时，清洁构建和完整回归均成功。该工作区协调风险不构成本轮已确认功能的交付阻塞。"
+    },
+    {
+      "actor": "架构师",
+      "status": "submitted",
+      "vote": "approve",
+      "comments": [],
+      "summary": "# 架构评审总结\n\n投票：**approve**。\n\n## 亲自检查的实现与验证\n\n- 阅读了当前候选、需求契约、实施与验证方案、验证报告，以及工作区相对基线 `f27d9f0` 的实际 diff 和未跟踪实现文件；确认改动覆盖清单资产、系统模型持久化、显式初始化、市场导入、Run/归档模型装配、八项示例可恢复整理和发布内容。\n- 重点审查 `src/reserved/models.ts`、`src/project/system-models.ts`、`src/project/system-model-store.ts`、`src/project/model-registration.ts`、`src/project/models.ts`、`src/project/model-market.ts` 与 `src/project/model-schema-references.ts`。系统模型在不可发现的候选目录完成定义和登记的回读校验后才 rename 发布；已安装场景会核验身份、Store、包和原始字节，避免覆盖。Project Host 只从实际登记与持久 Store 读取系统模型，不再合成虚拟行；市场导入以候选、发布记录和补偿清理维持整包可见性边界。整理服务的备份、演练、最终复核、无覆盖恢复和登记身份冲突保护与契约一致。\n- 实际复跑 `npm run typecheck`，通过。实际复跑受影响的系统、资产、市场、引用、运行时模型和迁移恢复测试：48 项通过、0 失败。实际启动 `npm test`，其 `pretest` clean build 成功并输出“Reserved models validated: 5 system models, 2 market packages”；测试进程随后结束，未见遗留测试进程。`git diff --check` 实际通过。\n\n## 仅引用、未重新完整复跑的材料\n\n- 候选和初始验证报告所述的全量测试最终统计（933 项、932 通过、1 个 Linux 下 Windows 专用跳过）、正式 npm tarball、浏览器实操、真实 memsphere Project 整理与 ChangeSet 校验，作为可追溯材料审阅，未由本次评审完整重新执行。\n\n## 结论与残余风险\n\n当前迭代在已确认范围内实现了持久化系统模型和声明式市场资产，且关键数据保护/恢复边界已有代码和定向复测支撑；没有发现阻塞交付的问题。残余环境边界是 Windows PowerShell/CMD/Git Bash 集成未在本 Linux 评审环境实测，及完整 Draft-07 业务 Runtime 仍明确不属于本轮；二者均未扩大为已交付承诺。"
+    }
+  ]
+}

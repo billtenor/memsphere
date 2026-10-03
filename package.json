@@ -33,7 +33,9 @@
   "files": [
     "dist",
     "scripts/backfill-run-memory-manifest.mjs",
+    "scripts/relocate-example-models.mjs",
     "reserved-memory",
+    "reserved-models",
     "LICENSE",
     "NOTICE",
     "README.md",
@@ -41,7 +43,7 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && tsc -p tsconfig.modules.json --noEmit && node --import tsx scripts/build-view-assets.mjs && node scripts/build-example-view-package.mjs --check && node -e \"const fs=require('node:fs'); fs.chmodSync('dist/cli.js',0o755); fs.cpSync('src/skills','dist/skills',{recursive:true}); fs.cpSync('src/prompts/templates','dist/prompts/templates',{recursive:true})\"",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && tsc -p tsconfig.modules.json --noEmit && node scripts/check-reserved-models.mjs && node --import tsx scripts/build-view-assets.mjs && node scripts/build-example-view-package.mjs --check && node -e \"const fs=require('node:fs'); fs.chmodSync('dist/cli.js',0o755); fs.cpSync('src/skills','dist/skills',{recursive:true}); fs.cpSync('src/prompts/templates','dist/prompts/templates',{recursive:true})\"",
     "dev": "tsx src/cli.ts",
     "pretest": "npm run build",
     "test": "node scripts/run-tests.mjs",

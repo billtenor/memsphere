@@ -66,24 +66,54 @@ test('Model list shows only two tags plus accessible overflow, and information d
     await page.getByRole('radio', { name: '模型信息', exact: true }).click();
     await page.locator('.model-information-table').waitFor();
 }));
-test('Formal local market imports real definitions and a repeated import reports unchanged', async () => fixture(async (page, origin) => {
+test('The market supplies one example package with the order use case and keeps discovery separate from installed packages', async () => fixture(async (page, origin) => {
     await page.goto(`${origin}/projects/alpha/models/market`);
-    await page.getByRole('heading', { name: '订单示例', exact: true }).waitFor();
+    await page.getByRole('heading', { name: '示例模型', exact: true }).waitFor();
+    assert.equal(await page.locator('.model-market-card').count(), 1);
+    assert.equal(await page.getByRole('heading', { name: '订单示例', exact: true }).count(), 0);
     const secondary = page.getByRole('complementary', { name: 'Secondary navigation', exact: true });
     assert.equal(await secondary.getByRole('navigation').getByRole('separator').count(), 1, 'market is separated from package groups');
     assert.equal(await secondary.getByRole('button', { name: '模型市场', exact: true }).evaluate(button => button.previousElementSibling?.textContent), '发现');
-    await page.getByRole('button', { name: '预览', exact: true }).click();
-    await page.locator('.model-market-card .model-definition-table').waitFor();
-    await page.getByRole('button', { name: '导入', exact: true }).click();
-    await page.getByRole('button', { name: '订单示例', exact: true }).waitFor();
-    const response = await page.request.get(`${origin}/api/projects/alpha/models`);
-    const data = await response.json();
-    assert.equal(data.models.find((m: {
-        id: string;
-    }) => m.id === 'memsphere/examples/order.json')?.origin, 'market');
-    await page.getByRole('button', { name: '导入', exact: true }).click();
+    const examples = page.locator('.model-market-card');
+    await examples.getByRole('button', { name: '预览', exact: true }).click();
+    await examples.getByRole('heading', { name: '用例 02 · 订单与深层嵌套', exact: true }).waitFor();
+    const models = await (await page.request.get(`${origin}/api/projects/alpha/models`)).json();
+    assert.equal(models.models.some((model: { origin: string }) => model.origin === 'market'), false, 'preview does not import market models');
+}));
+
+test('The eight example models preview and import together, then each imported model exposes its structure and exact source', async () => fixture(async (page, origin) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`${origin}/projects/alpha/models/market`);
+    const examples = page.locator('.model-market-card').filter({ has: page.getByRole('heading', { name: '示例模型', exact: true }) });
+    await examples.getByRole('button', { name: '预览', exact: true }).click();
+    await examples.locator('.model-definition-table').last().waitFor();
+    assert.equal(await examples.getByRole('heading', { level: 4 }).count(), 8);
+    assert.equal(await examples.locator('.model-definition-table').count(), 8);
+    const market = await (await page.request.get(`${origin}/api/projects/alpha/models/market`)).json();
+    assert.deepEqual(market.packages.map((pack: { id: string }) => pack.id), ['memsphere.examples']);
+    const expected = market.packages.find((pack: { id: string }) => pack.id === 'memsphere.examples').models as Array<{ source: string; registration: { modelRef: string; name: string } }>;
+    assert.equal(expected.length, 8);
+    await examples.getByRole('button', { name: '导入', exact: true }).click();
+    const secondary = page.getByRole('complementary', { name: 'Secondary navigation', exact: true });
+    await secondary.getByRole('button', { name: '示例模型', exact: true }).waitFor();
+    const data = await (await page.request.get(`${origin}/api/projects/alpha/models`)).json();
+    const imported = data.models.filter((model: { id: string }) => expected.some(item => item.registration.modelRef === model.id));
+    assert.equal(imported.length, 8);
+    assert.equal(data.models.some((model: { id: string }) => model.id === 'memsphere/examples/order.json'), false);
+    assert.ok(imported.every((model: { status: string; origin: string; registration: { package: string } }) => model.status === 'available' && model.origin === 'market' && model.registration.package === 'memsphere.examples'));
+    await examples.getByRole('button', { name: '导入', exact: true }).click();
     await page.getByRole('status').filter({ hasText: '无变更' }).waitFor();
-    await page.getByRole('button', { name: '订单示例', exact: true }).click();
-    await page.getByRole('heading', { name: '订单与深层嵌套', exact: true }).waitFor();
-    assert.match(await page.locator('.model-information-table').innerText(), /持久化存储/);
+    await secondary.getByRole('button', { name: '示例模型', exact: true }).click();
+    await page.waitForURL(url => url.searchParams.get('scope') === 'market:memsphere.examples');
+    for (const model of expected) {
+        await page.goto(`${origin}/projects/alpha/models?scope=market%3Amemsphere.examples&model=${encodeURIComponent(model.registration.modelRef)}`);
+        await page.getByRole('heading', { name: model.registration.name, exact: true }).waitFor();
+        assert.match(await page.locator('.model-information-table').innerText(), /models\/imported\/json-schema\/draft-07/);
+        await page.getByRole('radio', { name: '模型结构', exact: true }).click();
+        await page.locator('.model-definition-table').waitFor();
+        await page.getByRole('radio', { name: '原始定义', exact: true }).click();
+        assert.equal(await page.locator('.model-browser-code').textContent(), model.source);
+    }
+    assert.deepEqual(errors, []);
 }, true));

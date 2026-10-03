@@ -13,7 +13,9 @@ test("npm package preserves the memsphere first-use bootstrap contract", async (
   assert.deepEqual(packageJson.files, [
     "dist",
     "scripts/backfill-run-memory-manifest.mjs",
+    "scripts/relocate-example-models.mjs",
     "reserved-memory",
+    "reserved-models",
     "LICENSE",
     "NOTICE",
     "README.md",

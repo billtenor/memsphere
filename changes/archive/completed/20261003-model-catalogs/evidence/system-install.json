@@ -1,0 +1,19 @@
+{
+  "created": 0,
+  "retained": 19,
+  "diagnostics": [],
+  "config": {
+    "storeId": "memsphere/model-registrations",
+    "stores": {
+      "memsphere/model-registrations": {
+        "factory": "memsphere/filesystem-json",
+        "directory": "models/registrations"
+      }
+    }
+  },
+  "system": {
+    "status": "installed",
+    "created": 5,
+    "retained": 0
+  }
+}

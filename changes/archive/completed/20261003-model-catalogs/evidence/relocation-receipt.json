@@ -1,0 +1,19 @@
+{
+  "status": "applied",
+  "backup": "${MEMSPHERE_HOME}/projects/memsphere/backups/model-registration/20261003-model-catalogs/696aed90-7f2b-4c97-93ee-081659a3be56",
+  "operationId": "696aed90-7f2b-4c97-93ee-081659a3be56",
+  "restoreCommand": "node '${WORKSPACE_ROOT}/scripts/relocate-example-models.mjs' restore --backup '${MEMSPHERE_HOME}/projects/memsphere/backups/model-registration/20261003-model-catalogs/696aed90-7f2b-4c97-93ee-081659a3be56'",
+  "at": "2026-10-03T09:27:13.245Z",
+  "modelRefs": [
+    "examples/01-basic-types.json",
+    "examples/02-nested-order.json",
+    "examples/03-array-root.json",
+    "examples/04-dictionaries-and-encodings.json",
+    "examples/05-unions-and-conditions.json",
+    "examples/06-references-and-recursion.json",
+    "examples/07-scalar-enum-root.json",
+    "examples/08-numeric-enum-root.json"
+  ],
+  "rehearsalPassed": true,
+  "preservedDigest": "3587f3c676b97bf01b0af069b56dc938ce46d658e6c9b3ec358b9ddb075de366"
+}

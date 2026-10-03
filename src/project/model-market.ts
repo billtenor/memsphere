@@ -6,11 +6,12 @@ import type { Context } from "../data/api/context.js";
 import type { DataStore } from "../data/api/data-store.js";
 import { Config } from "../data/api/config.js";
 import { FilesystemDataStoreFactory } from "../data/extensions/filesystem-datastore/index.js";
-import { JsonSchemaModelRuntimeFactory } from "../data/extensions/json-schema/index.js";
 import { JSON_SCHEMA_DRAFT_07 } from "../data/extensions/index.js";
 import { bytesContent, readAll } from "../data/extensions/shared/payload.js";
 import { atomicWriteJson } from "../persistence.js";
-import { orderModelRegistration, orderModelSource } from "./model-market-assets.js";
+import { readBundledMarketModelPackages } from "../reserved/models.js";
+import { validateJsonSchemaDefinition } from "../data/extensions/json-schema-metamodel/index.js";
+import { validateModelSchemaReferences } from "./model-schema-references.js";
 import { createProjectModelHost } from "./models.js";
 import { createModelRegistrationStore, IMPORTED_MODEL_DEFINITIONS_STORE, pathExists, readModelRegistrations, validateModelRegistration, type ProjectModelInput, type ModelRegistration } from "./model-registration.js";
 export type ModelMarketPackage = {
@@ -24,7 +25,9 @@ export type ModelMarketPackage = {
     metaModel: string;
   }[];
 };
-export function listModelMarket(): ModelMarketPackage[] { return [{ id: "memsphere.examples.orders", name: "订单示例", description: "订单与深层嵌套的 JSON Schema 示例。", models: [{ registration: structuredClone(orderModelRegistration), definition: JSON.parse(orderModelSource.replace(/^\uFEFF/, "")), source: orderModelSource, metaModel: JSON_SCHEMA_DRAFT_07 }] }]; }
+export function listModelMarket(): ModelMarketPackage[] {
+  return readBundledMarketModelPackages().map(pack => ({ ...pack, models: pack.models.map(({ sourcePath: _sourcePath, ...model }) => model) }));
+}
 /** Caller serializes this operation with Project settings/config mutation. */
 export async function importModelMarketPackage(context: Context, input: ProjectModelInput, packageId: string, options: {
   afterStage?: () => Promise<void>;
@@ -51,9 +54,10 @@ export async function importModelMarketPackage(context: Context, input: ProjectM
       else
         conflicts.push(model.registration.modelRef);
     }
-    // Compile the package's actual definition before any writes, including the metamodel/runtime constraints.
-    await new JsonSchemaModelRuntimeFactory().createRuntime(context, { data: { id: model.registration.modelRef, model: JSON_SCHEMA_DRAFT_07, payload: { contentType: "application/json", content: bytesContent(Buffer.from(model.source)) } }, definition: model.definition }, { get() { return undefined; }, register() { } });
+    // The complete definition standard is independent of the business reflection subset.
+    validateJsonSchemaDefinition(model.definition);
   }
+  validateModelSchemaReferences(pack.models);
   if (conflicts.length || identical && identical !== pack.models.length)
     throw Object.assign(new Error(`Existing content differs; package not imported: ${conflicts.join(", ")}`), { code: "MODEL_PACKAGE_CONFLICT", conflicts });
   if (identical === pack.models.length)
@@ -173,7 +177,10 @@ export async function cleanupModelMarketCandidates(context: Context, input: Proj
     if (!receipt || typeof receipt !== "object" || !("packageId" in receipt) || typeof receipt.packageId !== "string" || !("recordIds" in receipt) || !Array.isArray(receipt.recordIds) || receipt.recordIds.some(id => typeof id !== "string" || !/^[a-f0-9-]{36}$/.test(id)) || !("modelRefs" in receipt) || !Array.isArray(receipt.modelRefs) || receipt.modelRefs.some(id => typeof id !== "string"))
       throw new TypeError(`Invalid candidate receipt: ${entry.name}`);
     const pack = listModelMarket().find(p => p.id === receipt.packageId);
-    if (!pack || !isDeepStrictEqual(receipt.modelRefs, pack.models.map(m => m.registration.modelRef)) || receipt.recordIds.length !== pack.models.length)
+    // Retiring a market listing must not strand its existing import candidates.
+    const modelRefs = pack?.models.map(m => m.registration.modelRef)
+      ?? (receipt.packageId === "memsphere.examples.orders" ? ["memsphere/examples/order.json"] : undefined);
+    if (!modelRefs || !isDeepStrictEqual(receipt.modelRefs, modelRefs) || receipt.recordIds.length !== modelRefs.length)
       throw new TypeError(`Unrecognized candidate package: ${entry.name}`);
     for (const [index, id] of (receipt.recordIds as string[]).entries()) {
       context.signal?.throwIfAborted();
