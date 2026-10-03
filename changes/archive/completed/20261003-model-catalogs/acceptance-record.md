@@ -11,3 +11,5 @@ Human 于 2026-10-03 实际验收后明确投同意，并要求继续流程。�
 仓库归档副本将个人绝对路径替换为 `${WORKSPACE_ROOT}`、`${MEMSPHERE_HOME}` 等占位符，遵循仓库提交隐私检查；原始本机证据另存 `/tmp/memsphere-model-catalogs-local-evidence`，Run Submission 和 Project 中持久备份保持原样。归档 JSON 中的路径是展示值，执行恢复应使用实际 Project 备份中的原始回执或先替换占位符。
 
 提交结果（包含 commit SHA）记录于同一 Run 的“本轮 Commit 结果”Artifact；PR 创建与 CI 结果继续记录于后续流程产物。
+
+PR CI 后续发现并修正的两处 macOS 临时目录路径断言及复验结果见 `ci-followup.md`；这次修复只涉及测试，验收的产品行为及 Memory 内容不变。

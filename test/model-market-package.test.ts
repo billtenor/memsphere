@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import crossSpawn from "cross-spawn";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
@@ -41,7 +41,8 @@ test("Packed distribution independently creates persistent system models, import
     assert.equal([...shipped].filter(path => path.startsWith("reserved-models/system-models/") && path.endsWith(".json")).length, 5);
     assert.equal([...shipped].filter(path => path.startsWith("reserved-models/market-models/") && path.endsWith(".json")).length, 8);
     await execute("tar", ["-xzf", join(temporary, packed[0]!.filename), "-C", temporary]);
-    const packageRoot = join(temporary, "package");
+    // ESM resolves symlinks; macOS temp paths can spell /private/var as /var.
+    const packageRoot = await realpath(join(temporary, "package"));
     // Offline dependency linkage; all application modules, scripts and assets come from this tarball.
     await symlink(join(repository, "node_modules"), join(packageRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
     const catalogModule = await import(pathToFileURL(join(packageRoot, "dist/reserved/models.js")).href) as typeof import("../src/reserved/models.js");
@@ -49,7 +50,7 @@ test("Packed distribution independently creates persistent system models, import
     assert.equal(catalog.systemModels.length, 5);
     assert.deepEqual(catalog.marketPackages.map(pack => [pack.id, pack.models.length]), [["memsphere.examples", 8]]);
     for (const model of [...catalog.systemModels, ...catalog.marketPackages.flatMap(pack => pack.models)]) {
-      assert.ok(model.sourcePath.startsWith(join(packageRoot, "reserved-models")));
+      assert.ok((await realpath(model.sourcePath)).startsWith(join(packageRoot, "reserved-models") + sep));
       assert.deepEqual(Buffer.from(model.source), await readFile(model.sourcePath));
     }
     assert.equal(catalog.marketPackages[0]!.models[1]!.registration.modelRef, "examples/02-nested-order.json");

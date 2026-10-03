@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -12,7 +12,7 @@ import { readBundledMarketModelPackages } from "../src/reserved/models.js";
 type Fixture = { root: string; models: string; registrations: string; target: { name: string; root: string }; original: Map<string, Buffer> };
 /** Same construction can be run using the installed package's dist modules. */
 async function fixture(action: (fixture: Fixture) => Promise<void>) {
-  const root = await mkdtemp(join(tmpdir(), "example-relocation-test-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "example-relocation-test-")));
   const models = join(root, "models/json-schema/draft-07");
   const registrations = join(root, "models/registrations/project");
   try {
@@ -58,7 +58,7 @@ test("example relocation plans without writes, moves only eight exact models, an
   const result = await applyExampleRelocation({}, plan);
   assert.equal(result.status, "applied");
   assert.equal(result.rehearsalPassed, true);
-  assert.ok(result.backup.startsWith(join(f.root, "backups/model-registration/20261003-model-catalogs/")));
+  assert.equal(result.backup, join(f.root, "backups/model-registration/20261003-model-catalogs", plan.operationId));
   const host = await createProjectModelHost({}, { root: f.root });
   const listed = await host.list();
   assert.equal(listed.filter(model => model.id.startsWith("examples/")).length, 0);
