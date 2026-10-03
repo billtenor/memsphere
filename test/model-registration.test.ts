@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -80,7 +80,7 @@ test("Changing registry directory requires explicit migration and preserves orig
   assert.deepEqual(after.records, before.records);
   const filename = `${before.records[0]!.id}.json`;
   assert.deepEqual(await readFile(join(root, "models/registrations/project", filename)), await readFile(join(root, "internal/registry/project", filename)));
-  assert.ok(migration.excludedDirectories.includes(join(root, "models/registrations")));
+  assert.ok(migration.excludedDirectories.includes(await realpath(join(root, "models/registrations"))));
   const conflictStore = await createModelRegistrationStore({}, "conflict", join(root, "bad/project"));
   await conflictStore.create({}, "one", { modelRef: "one.json", storage: "store", store_id: "models/json-schema/draft-07", name: "Different" });
   await assert.rejects(prepareModelRegistrationMigration({}, { root }, { storeId: "bad", stores: { bad: { factory: "memsphere/filesystem-json", directory: "bad" } } }, { migrate: true }), /conflict/);

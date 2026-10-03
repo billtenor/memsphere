@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -274,7 +274,7 @@ test("registration directory switches require explicit migration, preserve bytes
     let saved = await writeProjectConfigDraft({ document: fixture.projectDocument, expectedRevision: fixture.projectDocument.revision, draft: { ...editableProjectConfigDraft(fixture.projectDocument), modelRegistration: initialized.config }, globalConfigPath: fixture.globalConfigPath });
     const sameDirectory = { ...editableProjectConfigDraft(saved), modelRegistration: { storeId: "alias", stores: { alias: { factory: "memsphere/filesystem-json" as const, directory: "models/registrations" } } } };
     await assert.rejects(writeProjectConfigDraft({ document: saved, expectedRevision: saved.revision, draft: sameDirectory, globalConfigPath: fixture.globalConfigPath }), error => !!error && typeof error === "object" && "code" in error && error.code === "MODEL_REGISTRATION_MIGRATION_REQUIRED");
-    const oldDirectory = join(saved.scopeRoot, "models/registrations");
+    const oldDirectory = await realpath(join(saved.scopeRoot, "models/registrations"));
     const oldManifest = await readFile(join(oldDirectory, "initialized.json"));
     const draft = { ...editableProjectConfigDraft(saved), modelRegistration: { storeId: "new", stores: { new: { factory: "memsphere/filesystem-json" as const, directory: "models/next-registration" } } } };
     const save = (revision: string, migrate: boolean) => writeProjectConfigDraft({ document: saved, expectedRevision: revision, draft, globalConfigPath: fixture.globalConfigPath, migrateModelRegistrations: migrate });
