@@ -1,0 +1,346 @@
+TAP version 13
+# Subtest: Packed distribution contains model market assets and its HTTP host imports without workspace source files
+ok 1 - Packed distribution contains model market assets and its HTTP host imports without workspace source files
+  ---
+  duration_ms: 2324.404573
+  type: 'test'
+  ...
+# Subtest: Models combine package scope, exact tags and managed search and restore search from URL
+ok 2 - Models combine package scope, exact tags and managed search and restore search from URL
+  ---
+  duration_ms: 2551.225425
+  type: 'test'
+  ...
+# Subtest: Model list shows only two tags plus accessible overflow, and information defaults to the agreed field order
+ok 3 - Model list shows only two tags plus accessible overflow, and information defaults to the agreed field order
+  ---
+  duration_ms: 729.699812
+  type: 'test'
+  ...
+# Subtest: Formal local market imports real definitions and a repeated import reports unchanged
+ok 4 - Formal local market imports real definitions and a repeated import reports unchanged
+  ---
+  duration_ms: 1390.049902
+  type: 'test'
+  ...
+# Subtest: model structure omits generated reading hints while preserving authored descriptions, actual rules and full source
+ok 5 - model structure omits generated reading hints while preserving authored descriptions, actual rules and full source
+  ---
+  duration_ms: 2398.949062
+  type: 'test'
+  ...
+# Subtest: referenced fields show actual types and expandable target structure without altering source
+ok 6 - referenced fields show actual types and expandable target structure without altering source
+  ---
+  duration_ms: 949.318364
+  type: 'test'
+  ...
+# Subtest: failed references stay explicit and isolated from valid fields rather than inventing structure
+ok 7 - failed references stay explicit and isolated from valid fields rather than inventing structure
+  ---
+  duration_ms: 762.484267
+  type: 'test'
+  ...
+# Subtest: recursive references expand on demand but bulk expansion stays finite and collapse retains identity
+ok 8 - recursive references expand on demand but bulk expansion stays finite and collapse retains identity
+  ---
+  duration_ms: 868.77583
+  type: 'test'
+  ...
+# Subtest: model tree exposes array-element fields and local required flags with keyboard expansion
+ok 9 - model tree exposes array-element fields and local required flags with keyboard expansion
+  ---
+  duration_ms: 800.050261
+  type: 'test'
+  ...
+# Subtest: tree bulk actions are right-aligned text buttons without instructions and retain keyboard operation
+ok 10 - tree bulk actions are right-aligned text buttons without instructions and retain keyboard operation
+  ---
+  duration_ms: 1197.481537
+  type: 'test'
+  ...
+# Subtest: expanded fields align their labels at each depth and distinguish array structure from fields
+ok 11 - expanded fields align their labels at each depth and distinguish array structure from fields
+  ---
+  duration_ms: 656.256664
+  type: 'test'
+  ...
+# Subtest: object roots omit their container while array roots distinguish the model from its element structure
+ok 12 - object roots omit their container while array roots distinguish the model from its element structure
+  ---
+  duration_ms: 1640.266527
+  type: 'test'
+  ...
+# Subtest: model source remains complete without a copy action or an intervening action row
+ok 13 - model source remains complete without a copy action or an intervening action row
+  ---
+  duration_ms: 645.193465
+  type: 'test'
+  ...
+# Subtest: model prototype keeps source viewing without a copy action or its empty header
+ok 14 - model prototype keeps source viewing without a copy action or its empty header
+  ---
+  duration_ms: 483.048903
+  type: 'test'
+  ...
+# Subtest: format column preserves explicit schema formats for fields and structures without inferring or altering source
+ok 15 - format column preserves explicit schema formats for fields and structures without inferring or altering source
+  ---
+  duration_ms: 1044.095289
+  type: 'test'
+  ...
+# Subtest: dynamic fields align with named fields and expand their values with local required flags
+ok 16 - dynamic fields align with named fields and expand their values with local required flags
+  ---
+  duration_ms: 755.8399
+  type: 'test'
+  ...
+# Subtest: dictionary roots and boolean value schemas describe permitted dynamic keys without fabricating fields
+ok 17 - dictionary roots and boolean value schemas describe permitted dynamic keys without fabricating fields
+  ---
+  duration_ms: 1090.061361
+  type: 'test'
+  ...
+# Subtest: boolean sub-schemas are acceptance rules rather than types and unsupported root definitions remain rejected
+ok 18 - boolean sub-schemas are acceptance rules rather than types and unsupported root definitions remain rejected
+  ---
+  duration_ms: 1508.021288
+  type: 'test'
+  ...
+# Subtest: rules stay separate from author descriptions and optional fields remain unmarked
+ok 19 - rules stay separate from author descriptions and optional fields remain unmarked
+  ---
+  duration_ms: 679.926126
+  type: 'test'
+  ...
+# Subtest: enum types and candidate values are visible without descriptions and preserve an accompanying format
+ok 20 - enum types and candidate values are visible without descriptions and preserve an accompanying format
+  ---
+  duration_ms: 1103.611311
+  type: 'test'
+  ...
+# Subtest: model list filtering keeps a model without description readable and shows unmatched state
+ok 21 - model list filtering keeps a model without description readable and shows unmatched state
+  ---
+  duration_ms: 659.504472
+  type: 'test'
+  ...
+# Subtest: a corrupt model remains selectable without preventing other definitions from opening
+ok 22 - a corrupt model remains selectable without preventing other definitions from opening
+  ---
+  duration_ms: 766.396961
+  type: 'test'
+  ...
+# Subtest: union roots show candidate types and independent branches instead of an unspecified type
+ok 23 - union roots show candidate types and independent branches instead of an unspecified type
+  ---
+  duration_ms: 651.660369
+  type: 'test'
+  ...
+# Subtest: anyOf and oneOf show alternatives while object branch expansion preserves separate fields and required flags
+ok 24 - anyOf and oneOf show alternatives while object branch expansion preserves separate fields and required flags
+  ---
+  duration_ms: 788.399185
+  type: 'test'
+  ...
+# Subtest: nested unions retain titles, branch formats, boolean schemas and resolved references without broadening an explicit parent type
+ok 25 - nested unions retain titles, branch formats, boolean schemas and resolved references without broadening an explicit parent type
+  ---
+  duration_ms: 687.239945
+  type: 'test'
+  ...
+# Subtest: built-in raw models show whole-content semantics without pretending to declare object fields
+ok 26 - built-in raw models show whole-content semantics without pretending to declare object fields
+  ---
+  duration_ms: 630.592584
+  type: 'test'
+  ...
+# Subtest: model deep links preserve the selected Project and reload the correct definition
+ok 27 - model deep links preserve the selected Project and reload the correct definition
+  ---
+  duration_ms: 1592.053398
+  type: 'test'
+  ...
+# Subtest: leaving models removes its page marker and returning remounts a usable model view
+ok 28 - leaving models removes its page marker and returning remounts a usable model view
+  ---
+  duration_ms: 1004.219754
+  type: 'test'
+  ...
+# Subtest: narrow model pages keep horizontal scrolling inside the field table
+ok 29 - narrow model pages keep horizontal scrolling inside the field table
+  ---
+  duration_ms: 608.281347
+  type: 'test'
+  ...
+# Subtest: a late model definition response cannot replace the newer selected model
+ok 30 - a late model definition response cannot replace the newer selected model
+  ---
+  duration_ms: 781.197856
+  type: 'test'
+  ...
+# Subtest: saved Home language applies to the actual model browser and model storage settings
+ok 31 - saved Home language applies to the actual model browser and model storage settings
+  ---
+  duration_ms: 3420.21297
+  type: 'test'
+  ...
+# Subtest: Project model settings discard restores the saved directory without writing configuration
+ok 32 - Project model settings discard restores the saved directory without writing configuration
+  ---
+  duration_ms: 618.342483
+  type: 'test'
+  ...
+# Subtest: Project model settings reject an empty directory before save confirmation
+ok 33 - Project model settings reject an empty directory before save confirmation
+  ---
+  duration_ms: 595.393023
+  type: 'test'
+  ...
+# Subtest: confirmed model directory save switches the next refresh without migration or changes to other scopes
+ok 34 - confirmed model directory save switches the next refresh without migration or changes to other scopes
+  ---
+  duration_ms: 1184.538906
+  type: 'test'
+  ...
+# Subtest: model information is the default tab and orders identity, standard, tags and storage fields
+ok 35 - model information is the default tab and orders identity, standard, tags and storage fields
+  ---
+  duration_ms: 934.971053
+  type: 'test'
+  ...
+# Subtest: selected definition renderer receives frozen model data and can wrap the official tree and source without replacing navigation
+ok 36 - selected definition renderer receives frozen model data and can wrap the official tree and source without replacing navigation
+  ---
+  duration_ms: 2852.071841
+  type: 'test'
+  ...
+# Subtest: selected Models page uses the official presentation service for definitions, navigation and project isolation
+ok 37 - selected Models page uses the official presentation service for definitions, navigation and project isolation
+  ---
+  duration_ms: 1477.415656
+  type: 'test'
+  ...
+# Subtest: a failed page replacement falls back to the official Models presentation
+ok 38 - a failed page replacement falls back to the official Models presentation
+  ---
+  duration_ms: 648.236744
+  type: 'test'
+  ...
+# Subtest: a failed definition replacement falls back to the official Models presentation
+ok 39 - a failed definition replacement falls back to the official Models presentation
+  ---
+  duration_ms: 647.087246
+  type: 'test'
+  ...
+# Subtest: explicit system-default selection suppresses an installed Models definition contribution
+ok 40 - explicit system-default selection suppresses an installed Models definition contribution
+  ---
+  duration_ms: 607.324182
+  type: 'test'
+  ...
+# Subtest: Settings exposes both Models slots with zh-CN labels and a selectable installed contribution
+ok 41 - Settings exposes both Models slots with zh-CN labels and a selectable installed contribution
+  ---
+  duration_ms: 570.976289
+  type: 'test'
+  ...
+# Subtest: Settings exposes both Models slots with en labels and a selectable installed contribution
+ok 42 - Settings exposes both Models slots with en labels and a selectable installed contribution
+  ---
+  duration_ms: 585.653578
+  type: 'test'
+  ...
+# Subtest: bundled memory contains a valid self-bootstrap chain and manifest
+ok 43 - bundled memory contains a valid self-bootstrap chain and manifest
+  ---
+  duration_ms: 377.552359
+  type: 'test'
+  ...
+# Subtest: bundled Market manifest exposes every complete source
+ok 44 - bundled Market manifest exposes every complete source
+  ---
+  duration_ms: 74.65434
+  type: 'test'
+  ...
+# Subtest: bundled branch-review applies general development and testing rules
+ok 45 - bundled branch-review applies general development and testing rules
+  ---
+  duration_ms: 82.042131
+  type: 'test'
+  ...
+# Subtest: official agile memories enforce conditional Memory ChangeSet delivery evidence
+ok 46 - official agile memories enforce conditional Memory ChangeSet delivery evidence
+  ---
+  duration_ms: 76.798744
+  type: 'test'
+  ...
+# Subtest: chapter one teaches one bounded first-use journey with Chinese user-facing terms
+ok 47 - chapter one teaches one bounded first-use journey with Chinese user-facing terms
+  ---
+  duration_ms: 0.948928
+  type: 'test'
+  ...
+# Subtest: framework Memory and Skill describe scoped Settings consistently
+ok 48 - framework Memory and Skill describe scoped Settings consistently
+  ---
+  duration_ms: 2.344096
+  type: 'test'
+  ...
+# Subtest: manifest rejects unsafe, duplicate, overlapping, and unknown values
+ok 49 - manifest rejects unsafe, duplicate, overlapping, and unknown values
+  ---
+  duration_ms: 1.634281
+  type: 'test'
+  ...
+# Subtest: legacy manifests remain readable but cannot authorize identity-based removal
+ok 50 - legacy manifests remain readable but cannot authorize identity-based removal
+  ---
+  duration_ms: 0.281003
+  type: 'test'
+  ...
+# Subtest: manifest requires install sources to be regular YAML files but allows removed sources to be absent
+ok 51 - manifest requires install sources to be regular YAML files but allows removed sources to be absent
+  ---
+  duration_ms: 4.825593
+  type: 'test'
+  ...
+# Subtest: manifest v4 requires every market dependency to be declared by System or Market install
+ok 52 - manifest v4 requires every market dependency to be declared by System or Market install
+  ---
+  duration_ms: 11.604672
+  type: 'test'
+  ...
+# Subtest: Settings browser preserves omitted sections and stays responsive
+ok 53 - Settings browser preserves omitted sections and stays responsive
+  ---
+  duration_ms: 5655.164223
+  type: 'test'
+  ...
+# Subtest: switching Projects replaces an entity URL with the new Project landing page
+ok 54 - switching Projects replaces an entity URL with the new Project landing page
+  ---
+  duration_ms: 1534.935503
+  type: 'test'
+  ...
+# Subtest: Settings browser shows an inline error for an invalid operator token
+ok 55 - Settings browser shows an inline error for an invalid operator token
+  ---
+  duration_ms: 1929.707087
+  type: 'test'
+  ...
+# Subtest: model registration settings select Store first, preserve drafts and explicitly confirm migration
+ok 56 - model registration settings select Store first, preserve drafts and explicitly confirm migration
+  ---
+  duration_ms: 1797.974449
+  type: 'test'
+  ...
+1..56
+# tests 56
+# suites 0
+# pass 56
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 32401.043949

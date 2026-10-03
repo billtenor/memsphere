@@ -31,9 +31,21 @@ const embeddedStoreSchema = z.object({
   })
 }).strict();
 
+const modelStorePathSchema = z.string().refine(value => value.trim().length > 0 && !value.includes("\0"), "must be a nonblank path without NUL characters");
+export const modelRegistrationConfigSchema = z.object({
+  storeId: z.string().min(1).refine(value => value.trim().length > 0, "store ID must not be blank"),
+  stores: z.record(z.string().min(1), z.object({
+    factory: z.literal("memsphere/filesystem-json"), directory: modelStorePathSchema
+  }).strict()),
+  excludedDirectories: z.array(modelStorePathSchema).optional()
+}).strict().superRefine((config, context) => {
+  if (!Object.hasOwn(config.stores, config.storeId)) context.addIssue({ code: "custom", path: ["storeId"], message: "selected Store ID has no configuration" });
+});
+
 export const projectConfigSchema = z.object({
   store: z.discriminatedUnion("type", [managedStoreSchema, embeddedStoreSchema]),
   modelsDirectory: z.string().refine(value => value.trim().length > 0 && !value.includes("\0"), "modelsDirectory must be a nonblank path without NUL characters").optional(),
+  modelRegistration: modelRegistrationConfigSchema.optional(),
   control_plane: projectControlPlaneConfigSchema.optional(),
   view: projectViewConfigSchema.optional()
 }).strict();

@@ -474,7 +474,9 @@ export const viewShellStyles = `
   .view-shell-secondary-settings { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border: 0; border-radius: var(--mem-view-radius-sm); background: transparent; color: var(--mem-view-color-text-muted); cursor: pointer; }
   .view-shell-secondary-settings:hover { background: var(--mem-view-color-subtle); color: var(--mem-view-color-accent-hover); }
   .view-shell-secondary-settings .view-shell-icon { width: 18px; height: 18px; }
+  .view-shell-secondary-group{display:block;padding:var(--mem-view-space-4) var(--mem-view-space-3) var(--mem-view-space-2);color:var(--mem-view-color-text-muted);font-size:var(--mem-view-font-size-xs)}
   .view-shell-secondary-items { display: grid; gap: 3px; }
+  .view-shell-secondary-separator { width: 100%; margin: var(--mem-view-space-4) 0 var(--mem-view-space-2); border: 0; border-top: 1px solid var(--mem-view-color-border); }
   .view-shell-secondary-item { display: grid; width: 100%; height: 41px; grid-template-columns: 23px minmax(0, 1fr) auto; align-items: center; gap: 7px; border: 0; border-radius: var(--mem-view-radius-sm); background: transparent; padding: 0 10px; color: var(--mem-view-color-text-muted); cursor: pointer; text-align: left; }
   .view-shell-secondary-item:hover { background: var(--mem-view-color-subtle); }
   .view-shell-secondary-item.active { background: var(--mem-view-color-accent-soft); color: var(--mem-view-color-accent-hover); font-weight: 650; }
@@ -661,6 +663,7 @@ export const viewShellStyles = `
     .view-shell-secondary-header small { margin-bottom: 2px; }
     .view-shell-secondary-header h1, .view-shell-secondary-header h2 { font-size: var(--mem-view-font-size-md); }
     .view-shell-secondary-settings, .view-shell-secondary-footer { display: none; }
+    .view-shell-secondary-separator { display: none; }
     .view-shell-secondary-items { display: flex; min-width: 0; flex: 1; gap: 4px; overflow-x: auto; }
     .view-shell-secondary-item { width: auto; min-width: max-content; padding: 0 12px; }
     .view-shell[data-view-layout="home"] .view-shell-workspace { grid-template-rows: minmax(0, 1fr); }

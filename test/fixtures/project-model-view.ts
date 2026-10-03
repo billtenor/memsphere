@@ -35,7 +35,7 @@ export async function startProjectModelView(prepare?: (config: MemsphereConfig) 
     memoryRoot: join(root, "memory"), runsRoot: join(root, "runs"), archiveRoot: join(root, "archives"),
     debug: { agentReview: false, root: join(home, ".runtime") }, view: { host: "127.0.0.1", port: 0 }, project: { name: "alpha", mounted: [] } };
   await prepare?.(config);
-  const server = createViewServer(config);
+  const server = createViewServer(config, { settingsToken: config.view.operatorToken });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   return { home, root, source, origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     async close() { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(home, { recursive: true, force: true }); } };

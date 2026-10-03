@@ -241,9 +241,23 @@ View 的 Memory 下提供“当前项目 / 记忆市场”入口。记忆市场�
 
 ### 6.5 验证 Project 并启动 View
 
-Project 的“模型”页面只读展示模型定义，可用树形字段表逐级展开对象和数组，或查看完整原始 JSON。JSON Schema Draft-07 定义直接保存为可阅读的 `.json` 文件，模型 ID 是包含后缀的相对路径，例如 `sales/order.json`。
+Project 的“模型”页面按包管理模型：“本项目”下有未定义包和项目包，“已导入的包”下有系统包和市场导入包，另有模型市场入口。列表展示名称、模型 ID、说明与标签，可组合包范围、标签和搜索；详情默认以“模型信息”表格展示管理属性，再查看树形模型结构或完整原始 JSON。
 
-在“设置 → 模型存储”配置当前 Project 的目录；Project `config.json` 的可选 `modelsDirectory` 默认 `models/json-schema/draft-07`。相对路径以 Registry 登记的 Project 根目录为基准，而不是 Git 或 Memory 目录；也可指定绝对路径。保存后刷新模型页面即可切换，不自动迁移原目录文件。本轮不提供网页模型编辑或值实例管理。
+模型结构与管理信息分别存储。JSON Schema Draft-07 定义直接保存为可阅读的 `.json` 文件，模型 ID 是包含后缀的相对路径，例如 `sales/order.json`。代码内置的 `memsphere/model-registration` 定义登记信息：`modelRef`、`name`、`description`、`package`、`package_name`、`tags`、`storage`、`store_id`。其中 `storage` 区分代码内置与持久化存储，持久化模型用 `store_id` 指向保存其结构的 DataStore；登记记录则放在独立的 filesystem ValueStore 中，不存在依赖自身登记才能启动的问题。
+
+先显式初始化登记；浏览模型不会自动写入：
+
+```bash
+memsphere --project my-project project models initialize
+```
+
+当前界面暂时隐藏“添加存储”和“初始化模型登记”入口；已有存储仍可选择和配置，相关服务与 CLI 保留供后续开放。
+
+命令也可用 `project models initialize my-project --output json` 获取结构化回执。已有的已确认登记模型预览会先备份再迁移到内置身份；其他模型原文与管理属性保留。
+
+在“设置 → 模型登记存储”先选择存储 ID，再配置该 Store 的类型和目录，登记模型固定只读。默认使用 `memsphere/model-registrations`，filesystem 目录为 `models/registrations`。已有数据时切换 ID 或目录需要明确确认迁移；目标校验成功后才切换配置，失败保留原数据，旧目录仍保留且不参与模型扫描。项目原有“模型存储”配置独立：`modelsDirectory` 默认 `models/json-schema/draft-07`，相对 Registry 登记的 Project 根目录解析，也可指定绝对路径；修改它不自动迁移模型文件。
+
+模型市场提供随发行包附带的本地订单模型包；导入后定义进入独立模型 DataStore，登记进入导入区域。重复导入相同内容显示无变更；已修改的内容或同模型 ID 冲突拒绝整包，并返回冲突清单，不静默覆盖。未导入和导入失败的候选不会进入正常模型列表。模型定义编辑、值实例管理和远程市场不在当前功能范围内。
 
 查看当前绑定的 Project，并验证其中的 Memory：
 

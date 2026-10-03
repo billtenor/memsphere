@@ -57,7 +57,7 @@ export const builtinModuleCatalog: readonly BuiltinModuleCatalogEntry[] = deepFr
     summary: "浏览项目模型定义",
     icon: "stack",
     homeRouteId: "index",
-    routes: [{ id: "index", path: "/models", query: ["model"] }]
+    routes: [{ id: "index", path: "/models", query: ["model", "scope", "tag", "q"] }, { id: "market", path: "/models/market" }]
   },
   {
     moduleId: "org.memsphere.model-prototype",

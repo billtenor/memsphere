@@ -880,7 +880,18 @@ function createPresentationService(projectId: string): ViewPresentationService {
     const payload = await response.json() as { models: ModelPresentationSummary[] };
     const models = deepFreeze(structuredClone(payload.models));
     const route = routeSnapshot();
-    const selectedModelId = route.query.model ?? models[0]?.id;
+    const origin = (model: ModelPresentationSummary) => model.origin ?? (model.builtin ? "system" : "project");
+    const scopes = new Set(models.filter(model => model.registration?.package).map(model => `${origin(model)}:${model.registration!.package}`));
+    const requestedModel = models.find(model => model.id === route.query.model || route.query.model === "memsphere/model-registration.json" && model.id === "memsphere/model-registration");
+    const requested = route.query.scope ?? (requestedModel?.registration?.package ? `${origin(requestedModel)}:${requestedModel.registration.package}` : "custom");
+    const scope = scopes.has(requested) ? requested : [...scopes].find(value => value.split(":").slice(1).join(":") === requested) ?? "custom";
+    const availableTags = new Set(models.filter(model => scope === "custom" ? origin(model) === "project" && !model.registration?.package : `${origin(model)}:${model.registration?.package}` === scope).flatMap(model => model.registration?.tags ?? []));
+    const tag = route.query.tag && availableTags.has(route.query.tag) ? route.query.tag : undefined;
+    const query = (route.query.q ?? "").trim().toLowerCase();
+    const visible = models.filter(model => (scope === "custom" ? origin(model) === "project" && !model.registration?.package : `${origin(model)}:${model.registration?.package}` === scope)
+      && (!tag || model.registration?.tags?.includes(tag))
+      && `${model.registration?.name ?? model.title ?? model.id} ${model.id} ${model.registration?.description ?? model.description ?? ""} ${(model.registration?.tags ?? []).join(" ")}`.toLowerCase().includes(query));
+    const selectedModelId = visible.find(model => model.id === route.query.model || route.query.model === "memsphere/model-registration.json" && model.id === "memsphere/model-registration")?.id ?? visible[0]?.id;
     return Object.freeze({
       kind: "models-page" as const,
       route,
@@ -889,7 +900,9 @@ function createPresentationService(projectId: string): ViewPresentationService {
       refresh: modelsPage,
       async openModel(id: string) {
         if (!id.trim()) throw new Error("Model id must be non-empty");
-        await navigate(`${projectBase}/models?${new URLSearchParams({ model: id })}`);
+        const model = models.find(candidate => candidate.id === id);
+        const targetScope = model?.registration?.package ? `${origin(model)}:${model.registration.package}` : "custom";
+        await navigate(`${projectBase}/models?${new URLSearchParams({ scope: targetScope, model: id })}`);
       },
       async getDefinition(id: string) {
         if (!id.trim()) throw new Error("Model id must be non-empty");
@@ -2321,7 +2334,19 @@ function renderSecondaryNavigation(
   }
   const list = document.createElement("nav");
   list.className = "view-shell-secondary-items";
+  let lastGroup: string | undefined;
   for (const item of descriptor.items) {
+    const group = item.group ? textValue(item.group) : undefined;
+    if (item.separatorBefore || lastGroup && !group) {
+      const separator = document.createElement("hr");
+      separator.className = "view-shell-secondary-separator";
+      list.append(separator);
+    }
+    if (group && group !== lastGroup) {
+      const label = document.createElement("small"); label.className = "view-shell-secondary-group";
+      label.textContent = group; list.append(label);
+    }
+    lastGroup = group;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "view-shell-secondary-item";

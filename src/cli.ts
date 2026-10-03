@@ -29,6 +29,7 @@ import {
   projectCreateCommand,
   projectListCommand,
   projectMountCommand,
+  projectModelsInitializeCommand,
   projectPruneCommand,
   projectRepairCommand,
   projectRegisterCommand,
@@ -97,6 +98,12 @@ program.hook("preAction", () => {
 const project = program
   .command("project")
   .description("Manage persistent Memsphere Projects and Workspace bindings.");
+
+project.command("models").description("Manage model registrations.")
+  .command("initialize").description("Explicitly initialize registration values and migrate the known preview definition with a backup.")
+  .argument("[name]", "Project name; defaults to the current Primary")
+  .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
+  .action(projectModelsInitializeCommand);
 
 project.command("create")
   .argument("<name>", "globally unique Project name")

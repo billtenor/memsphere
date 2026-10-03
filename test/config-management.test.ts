@@ -240,3 +240,54 @@ test("each config write rejects only its own stale revision", async () => {
     await rm(fixture.dir, { recursive: true, force: true });
   }
 });
+
+test("registration configuration selects an existing Store and retains independent Store details", async () => {
+  const fixture = await fixtureConfig();
+  try {
+    const draft = { ...editableProjectConfigDraft(fixture.projectDocument), modelRegistration: {
+      storeId: "second", stores: {
+        first: { factory: "memsphere/filesystem-json" as const, directory: "models/registration-first" },
+        second: { factory: "memsphere/filesystem-json" as const, directory: "models/registration-second" }
+      }
+    } };
+    const invalid = validateProjectConfigDraft(fixture.projectDocument, { ...draft, modelRegistration: { ...draft.modelRegistration, storeId: "missing" } }, fixture.globalDocument.raw);
+    assert.equal(invalid.valid, false);
+    assert.equal(invalid.errors[0]?.path, "modelRegistration.storeId");
+    const blank = validateProjectConfigDraft(fixture.projectDocument, { ...draft, modelRegistration: { ...draft.modelRegistration, stores: { first: draft.modelRegistration.stores.first, second: { factory: "memsphere/filesystem-json", directory: " " } } } }, fixture.globalDocument.raw);
+    assert.equal(blank.valid, false);
+    const saved = await writeProjectConfigDraft({ document: fixture.projectDocument, expectedRevision: fixture.projectDocument.revision, draft, globalConfigPath: fixture.globalConfigPath });
+    assert.deepEqual(saved.raw.modelRegistration, draft.modelRegistration);
+    assert.deepEqual(saved.raw.store, fixture.projectDocument.raw.store);
+    assert.deepEqual(editableProjectConfigDraft(saved).modelRegistration, draft.modelRegistration);
+    await assert.rejects(writeProjectConfigDraft({ document: saved, expectedRevision: saved.revision, draft: { ...draft, modelRegistration: { ...draft.modelRegistration, stores: { ...draft.modelRegistration.stores, second: { factory: "memsphere/filesystem-json", directory: "models/json-schema/draft-07" } } } }, globalConfigPath: fixture.globalConfigPath }), /path conflict/);
+    assert.equal((await readProjectConfigDocument(fixture.configPath, fixture.resolved)).revision, saved.revision);
+  } finally { await rm(fixture.dir, { recursive: true, force: true }); }
+});
+
+test("registration directory switches require explicit migration, preserve bytes and reject stale revision", async () => {
+  const fixture = await fixtureConfig();
+  try {
+    const { initializeProjectModelRegistrations } = await import("../src/project/model-registration.js");
+    await mkdir(join(fixture.projectDocument.scopeRoot, "models/json-schema/draft-07"), { recursive: true });
+    await writeFile(join(fixture.projectDocument.scopeRoot, "models/json-schema/draft-07/demo.json"), ' {"type":"string","title":"Original"}\n');
+    const initialized = await initializeProjectModelRegistrations({}, { root: fixture.projectDocument.scopeRoot });
+    let saved = await writeProjectConfigDraft({ document: fixture.projectDocument, expectedRevision: fixture.projectDocument.revision, draft: { ...editableProjectConfigDraft(fixture.projectDocument), modelRegistration: initialized.config }, globalConfigPath: fixture.globalConfigPath });
+    const sameDirectory = { ...editableProjectConfigDraft(saved), modelRegistration: { storeId: "alias", stores: { alias: { factory: "memsphere/filesystem-json" as const, directory: "models/registrations" } } } };
+    await assert.rejects(writeProjectConfigDraft({ document: saved, expectedRevision: saved.revision, draft: sameDirectory, globalConfigPath: fixture.globalConfigPath }), error => !!error && typeof error === "object" && "code" in error && error.code === "MODEL_REGISTRATION_MIGRATION_REQUIRED");
+    const oldDirectory = join(saved.scopeRoot, "models/registrations");
+    const oldManifest = await readFile(join(oldDirectory, "initialized.json"));
+    const draft = { ...editableProjectConfigDraft(saved), modelRegistration: { storeId: "new", stores: { new: { factory: "memsphere/filesystem-json" as const, directory: "models/next-registration" } } } };
+    const save = (revision: string, migrate: boolean) => writeProjectConfigDraft({ document: saved, expectedRevision: revision, draft, globalConfigPath: fixture.globalConfigPath, migrateModelRegistrations: migrate });
+    await assert.rejects(save(saved.revision, false), error => !!error && typeof error === "object" && "code" in error && error.code === "MODEL_REGISTRATION_MIGRATION_REQUIRED");
+    assert.equal((await readProjectConfigDocument(fixture.configPath, fixture.resolved)).revision, saved.revision);
+    await assert.rejects(save("stale", true), ConfigRevisionConflictError);
+    saved = await save(saved.revision, true);
+    assert.equal(saved.raw.modelRegistration?.storeId, "new");
+    assert.deepEqual(await readFile(join(saved.scopeRoot, "models/next-registration/initialized.json")), oldManifest);
+    assert.deepEqual(await readFile(join(oldDirectory, "initialized.json")), oldManifest);
+    assert.ok(saved.raw.modelRegistration?.excludedDirectories?.includes(oldDirectory));
+    const withoutExclusions = { ...editableProjectConfigDraft(saved), modelRegistration: { ...saved.raw.modelRegistration!, excludedDirectories: [] } };
+    const validation = validateProjectConfigDraft(saved, withoutExclusions, fixture.globalDocument.raw);
+    assert.ok(validation.candidate?.modelRegistration?.excludedDirectories?.includes(oldDirectory));
+  } finally { await rm(fixture.dir, { recursive: true, force: true }); }
+});

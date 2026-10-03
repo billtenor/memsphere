@@ -20,7 +20,7 @@ test("Model product prototype styles stay inside their public Feature boundary",
 
 test("Production model browser styles consume public tokens within the model Feature", async () => {
   const source = await readFile(new URL("../modules/org.memsphere.models/adapter/view/styles.ts", import.meta.url), "utf8");
-  assert.doesNotThrow(() => validateModuleStyleBoundary(source, "models", { scope: "[data-models]" }));
+  assert.doesNotThrow(() => validateModuleStyleBoundary(source, "models", { scope: ["[data-models]", "[data-models-list]"] }));
 });
 
 test("real Memory and Run Modules pass the public style boundary and keep migrated control CSS removed", async () => {

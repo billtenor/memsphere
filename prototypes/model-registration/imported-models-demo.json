@@ -1,0 +1,48 @@
+[
+  {
+    "prototypeOnly": true,
+    "registration": {
+      "modelRef": "acme/commerce/order",
+      "name": "市场订单",
+      "package": "acme.commerce",
+      "tags": [
+        "demo"
+      ],
+      "description": "从市场包导入的订单模型示例，仅用于展示包来源和导航。",
+      "store_id": "models/json-schema/draft-07",
+      "package_name": "交易与订单",
+      "storage": "store"
+    },
+    "metaModel": "json-schema/draft-07",
+    "schema": {
+      "title": "市场订单",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "orderId",
+        "amount"
+      ],
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "description": "订单唯一编号。"
+        },
+        "amount": {
+          "type": "number",
+          "minimum": 0,
+          "description": "订单金额。"
+        },
+        "currency": {
+          "type": "string",
+          "enum": [
+            "CNY",
+            "USD"
+          ],
+          "description": "结算币种。"
+        }
+      }
+    },
+    "source": "{\n  \"title\": \"市场订单\",\n  \"type\": \"object\",\n  \"additionalProperties\": false,\n  \"required\": [\n    \"orderId\",\n    \"amount\"\n  ],\n  \"properties\": {\n    \"orderId\": {\n      \"type\": \"string\",\n      \"description\": \"订单唯一编号。\"\n    },\n    \"amount\": {\n      \"type\": \"number\",\n      \"minimum\": 0,\n      \"description\": \"订单金额。\"\n    },\n    \"currency\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"CNY\",\n        \"USD\"\n      ],\n      \"description\": \"结算币种。\"\n    }\n  }\n}",
+    "origin": "market"
+  }
+]

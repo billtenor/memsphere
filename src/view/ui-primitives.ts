@@ -280,6 +280,7 @@ export function createPrimitiveBadge(value: TextRef | BadgeDescriptor): HTMLElem
   const badge = document.createElement("span");
   badge.className = "mem-view-badge";
   badge.dataset.tone = descriptor.tone ?? "default";
+  if (descriptor.title) { badge.title = textValue(descriptor.title); badge.setAttribute("aria-label", `${textValue(descriptor.label)}: ${textValue(descriptor.title)}`); }
   if (descriptor.icon) badge.append(renderPrimitiveIcon(descriptor.icon));
   const label = document.createElement("span");
   label.textContent = textValue(descriptor.label);
@@ -1062,6 +1063,7 @@ async function renderContentList(
       if (item.meta) {
         const meta = document.createElement("small");
         meta.textContent = textValue(item.meta);
+        meta.title = textValue(item.meta);
         copy.append(meta);
       }
       if (item.description) {

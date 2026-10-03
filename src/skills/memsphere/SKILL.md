@@ -21,9 +21,21 @@ Memsphere Home 的 `config.json` 中，`language` 同时控制面向 Agent 的�
 
 没有 Memory 差异时不创建空 ChangeSet。`memsphere validate --memory-root` 是没有 Project、Registry 或 ChangeSet 上下文的无状态入口，不得把它的成功结果当作变更级交付证据。
 
-## Project 模型定义
+## Project 模型与登记
 
-Project 的模型定义直接保存在 filesystem DataStore 的 `.json` 文件中，ModelId 使用包含后缀的相对路径，例如 `sales/order.json`。Project `config.json` 的可选 `modelsDirectory` 默认 `models/json-schema/draft-07`，相对 Registry 登记的 Project 根目录解析，不是 Git/Memory/cwd；绝对路径直接使用。在“设置 → 模型存储”保存目录后刷新模型页生效，不自动迁移文件。View 的“模型”模块只读列举持久化定义与内置 raw 业务模型，支持树形表格和完整原始 JSON 查看，不提供单独的复制定义按钮，暂不提供模型编辑或值实例管理。JSON Schema 元模型引导不等于支持全部 Draft-07 业务反射特性。
+模型结构保存在 filesystem DataStore 的原始 `.json` 文件中，modelRef 使用包含后缀的相对路径，例如 `sales/order.json`。项目模型 Store ID 为 `models/json-schema/draft-07`；Project `config.json` 的可选 `modelsDirectory` 默认 `models/json-schema/draft-07`，相对 Registry 登记的 Project 根目录解析，也可用绝对路径。修改模型存储目录不自动迁移原文件。
+
+管理信息使用代码内置的 `memsphere/model-registration`，无需先读取自己的登记记录就能装配 Runtime。字段为 `modelRef`、`name`、`description`、`package`、`package_name`、`tags`、`storage`、`store_id`；`modelRef`、`storage` 必填。`storage=builtin` 是代码内置且不带 `store_id`；`storage=store` 是持久化存储且必须用 `store_id` 指向模型 DataStore。登记 value 存在 filesystem ValueStore 中，不能将这个管理 Store 当作模型定义的 Store。来源由项目、导入及系统上下文提供；本项目也可以组织包，没有 `package` 就进入未定义包，包显示名来自 `package_name`，不额外建立包模型或 `domain`。
+
+通过明确的 Project 执行初始化，读取页面不会自动写入：
+
+```bash
+memsphere --project <project-name> project models initialize
+```
+
+初始化保留已有管理属性及模型原文字节，可重复执行，损坏记录明确报诊断；仅对已确认的旧登记模型预览执行备份和内置身份迁移，无法处理的引用阻止迁移。命令也接受 `project models initialize [name] --output json`，输出创建、保留、诊断及备份回执。当前 View 暂时隐藏“添加存储”和“初始化模型登记”入口，保留已有存储配置，相关服务和 CLI 保留供以后开放。“设置 → 模型登记存储”先选择存储 ID，再编辑对应 Store 的类型和目录；登记模型固定只读。`modelRegistration.storeId` 默认 `memsphere/model-registrations`，`stores` 中的 filesystem ValueStore 默认目录为 `models/registrations`。有数据时切换 Store 或目录必须明确授权迁移；完整校验目标后才切配置，失败保留原数据，旧目录继续排除于模型发现。登记数据、备份与导入定义都不会被误当作项目模型扫描。
+
+正式模型页面按本项目的包、已导入的包和模型市场展示。列表第四行只展示标签，默认“模型信息”表格在“模型结构”和“原始定义”之前；包范围、标签和搜索共同筛选并保存在 URL。市场随发行包提供最小订单包；未导入模型不生效，导入定义使用独立的 `models/imported/json-schema/draft-07` DataStore。重复相同内容无变更，已有修改或同模型 ID 冲突拒绝整包并列出冲突，未完成导入不进入正常模型列表。保存设置与市场导入使用正式 View 写权限。暂不提供网页模型定义编辑或值实例管理，JSON Schema 元模型引导不等于支持全部 Draft-07 业务反射特性。
 
 ## Memsphere 如何组织记忆
 

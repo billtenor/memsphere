@@ -19,6 +19,19 @@ export const enViewPluralMessages = {
 } satisfies Partial<Record<ZhCNViewMessageKey, { one: string; other: string }>>;
 
 export const enViewMessages = {
+  "settings.registrationMigrationRequired": "Existing model registrations require revalidation and explicit migration confirmation.",
+  "settings.modelRegistrationStorage": "Model registration storage",
+  "settings.storeId": "Store ID",
+  "settings.addStore": "Add store",
+  "settings.selectedStoreConfiguration": "Selected store configuration",
+  "settings.storeDirectory": "Store directory",
+  "settings.registrationModel": "Registration model",
+  "settings.registrationStorageHelp": "Choose a store ID, then configure that store. Switching stores or changing directories with existing data requires explicit migration; old data is retained.",
+  "settings.initializeRegistrations": "Initialize model registrations",
+  "settings.saveBeforeInitialize": "Save or discard configuration changes before initializing model registrations.",
+  "settings.initializeFailed": "Initialization failed",
+  "settings.initializedRegistrations": "Model registrations initialized.",
+  "settings.confirmRegistrationMigration": "This change requires migrating model registrations and imported models. The configuration switches after completion; old data is retained. Migrate?",
   "settings.slotModelsPage": "Models module / Whole page",
   "settings.slotModelsPageHelp": "The overall model detail page presentation",
   "settings.slotModelDefinition": "Models module / Definition body",

@@ -4,8 +4,13 @@ names:
   - memsphere-framework
   - Memsphere
 defines:
-  - Project 模型定义使用绑定 json-schema/draft-07 的 filesystem DataStore，文件直接保存原始 JSON，ModelId 为包含 .json 的可移植相对路径。Project config.json 的可选 modelsDirectory 默认 models/json-schema/draft-07，相对 Registry 登记的 Project 根目录解析，不依赖 Git、Memory 或当前命令目录；绝对路径直接使用。改变目录只切换位置，不自动迁移。
-  - View 的模型模块只读列举当前 Project 持久化的 JSON Schema 定义与装配的内置 raw 业务模型，不按 Runtime 缓存发现模型；元模型不列为业务模型。JSON Schema 元模型通过独立 Factory 和已解码启动定义读取，无需递归读取自身，业务 Runtime 仍只支持既有反射子集。
+  - Project 模型存储与模型登记存储分离。JSON Schema 模型使用绑定 json-schema/draft-07 的 filesystem DataStore，文件直接保存原始 JSON，modelRef 为包含 .json 的可移植相对路径。项目模型 Store ID 是 models/json-schema/draft-07；Project config.json 的可选 modelsDirectory 默认 models/json-schema/draft-07，相对 Registry 登记的 Project 根目录解析，不依赖 Git、Memory 或当前命令目录，绝对路径直接使用。改变此目录不自动迁移原文件。
+  - 模型登记使用代码内置的 memsphere/model-registration；其 Runtime 在登记数据读取之前装配，不依赖自己的登记记录。登记 value 包含 modelRef、name、description、package、package_name、tags、storage、store_id；modelRef 与 storage 必填。storage 为 builtin 表示代码内置且不得有 store_id，为 store 表示持久化存储且必须有 store_id；store_id 选择模型 DataStore，再由 modelRef 读取定义，不能指向登记 ValueStore。名称和说明可回退到定义，package_name 是同包一致的展示名称，tags 支持任意标签，不另设 domain 或包登记模型。
+  - Project config.json 的 modelRegistration 选择 storeId，并在 stores 中配置各 ID 的 filesystem ValueStore 类型与 directory；默认 ID 为 memsphere/model-registrations、目录为 models/registrations。模型登记根保存 project 与 imported 两个区域，系统登记由代码提供；来源由区域上下文区分，不添加登记来源字段，也不从 package 是否存在推断来源。本项目可有包，未指定 package 的模型进入未定义包。
+  - memsphere project models initialize 显式初始化模型登记；读取模型列表不会自动迁移或写入。初始化保留已有管理属性和模型原文字节，可重复执行，损坏记录返回诊断而不静默覆盖；已确认的旧登记模型预览先备份再迁移到内置身份，无法处理的引用阻止迁移。命令接受可选 Project 名称及 --output json，输出创建、保留、诊断和备份回执。登记根、保留的旧登记根及备份根从项目模型发现与单项读取中排除；扫描根包含登记根时剪枝，根目录重叠或路径别名造成冲突时拒绝配置。
+  - View 的模型模块按本项目的未定义包及项目包、已导入的包和模型市场展示，无全部模型入口。列表展示名称、模型 ID、可选说明与标签；默认模型信息以表格展示名称、说明、所属包、模型 ID、定义标准、标签、存储方式、存储 ID，然后提供模型结构及原始定义。包范围、精确标签和名称/ID/说明/标签搜索共同过滤，URL 保留范围、标签、搜索及选中模型。JSON Schema 元模型不列为业务模型，通过独立 Factory 和已解码启动定义读取，业务 Runtime 仍只支持既有反射子集；管理模型及四个 raw Run 模型属于系统模型。
+  - 设置中的模型登记存储先选择存储 ID，再编辑该 ID 下的类型和目录；登记模型固定只读。保存使用既有设置写权限和 revision 检查；已有数据时切换所选 ID 或目录必须明确授权迁移，目标完整校验成功后才切配置，失败保留原配置和数据，旧目录保留且继续排除。项目模型存储目录配置与登记配置独立。
+  - 模型市场展示随发行包提供的本地模型包，未导入内容不进入 Project 模型列表；最小订单包为 memsphere.examples.orders。导入模型定义使用独立的 models/imported/json-schema/draft-07 DataStore，目录位于登记根的 imported-definitions，登记进入 imported 区域。导入前检查全部模型身份、定义原文及管理属性；重复相同内容显示已导入且无变更，已有修改或跨区域 modelRef 冲突拒绝整包并返回冲突 IDs，不覆盖或重命名。写入失败不会把未完成候选展示为成功导入；清理失败必须报告残留项。迁移登记根同时保留导入定义原文字节与 store_id。
   - Memsphere 是 AI 时代个性化软件的运行环境：它为软件提供相对稳定的语言、运行时和资产管理方式，让软件能够从自然语言开始并在真实使用中持续演化。
   - Memsphere 不是 Agent，而是运行在不同通用 Agent 之上的一层；Agent 负责理解意图和执行工作，Memsphere 负责组织、运行和管理可以跨对话、模型与 Agent 积累的软件资产。
   - memsphere-personalized-software 定义 Memsphere 所承载的个性化软件、四类协作资产及两种算力的完整产品模型。
@@ -33,3 +38,4 @@ defines:
   - Agent Actor 只引用 ACP Provider 实例并可选择 model；工作目录、托管安全参数和 Prompt version 由 Memsphere 固定。旧的 Actor 内 command、args、env、cwd、Prompt version 和 timeout 配置不兼容，不自动迁移。
   - 原生 Windows 使用 Windows Node.js，并要求安装 Git for Windows；用户与 Agent CLI 支持 Windows PowerShell 5.1、PowerShell 7、CMD 和 Git for Windows 随附的 Git Bash。Windows Terminal 只是终端宿主，WSL 按独立 Linux 环境处理，MSYS2/Cygwin 不在当前承诺范围。
   - ACP 不规定 Agent 的命令 shell。Agent Review 通过当前 worktree 中可从 PATH 解析的受限 memsphere-review 会话命令工作，不要求 Agent 展开 shell 专属环境变量；Provider 安装检测与 Windows supported/experimental/unsupported 支持等级分别展示。
+  - 当前 View 暂不展示添加模型登记存储和初始化模型登记的操作入口，保留已有存储的选择与配置；登记服务和显式 CLI 初始化仍保留供后续开放。模型市场在独立的发现导航分组中展示，标签筛选使用统一界面组件。

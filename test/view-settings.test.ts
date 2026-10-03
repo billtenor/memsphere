@@ -404,3 +404,97 @@ test("saving language updates the next View page in the same process without req
     assert.equal((await validateHostChange.json() as { restartRequired: boolean }).restartRequired, true);
   });
 });
+
+test("model registration initialization and market imports protect permission and config revision", async () => {
+  await withSettingsServer("0.0.0.0", async ({ origin, configPath, token }) => {
+    const headers = { "content-type": "application/json", origin, authorization: `Bearer ${token}` };
+    const root = (await import("node:path")).dirname(configPath);
+    const { mkdir, readdir } = await import("node:fs/promises");
+    await mkdir(join(root, "models/json-schema/draft-07"), { recursive: true });
+    const source = '  {"type":"string","title":"Test model"}\n';
+    await writeFile(join(root, "models/json-schema/draft-07/test.json"), source);
+    const originalConfig = await readFile(configPath, "utf8");
+    const before = await (await fetch(`${origin}/api/projects/demo/models`)).json();
+    assert.equal(before.registrationInitialized, false);
+    assert.equal(await readFile(configPath, "utf8"), originalConfig);
+    await assert.rejects(readdir(join(root, "models/registrations")), /ENOENT/);
+    const initialize = (revision: string, authorized: boolean) => fetch(`${origin}/api/projects/demo/models/initialize`, { method: "POST", headers: authorized ? headers : { "content-type": "application/json", origin }, body: JSON.stringify({ expectedRevision: revision }) });
+    assert.equal((await initialize(before.configRevision, false)).status, 401);
+    assert.equal((await initialize("stale", true)).status, 409);
+    assert.equal(await readFile(configPath, "utf8"), originalConfig);
+    const initialized = await initialize(before.configRevision, true);
+    assert.equal(initialized.status, 200, await initialized.clone().text());
+    assert.equal((await initialized.json()).created, 1);
+    const after = await (await fetch(`${origin}/api/projects/demo/models`)).json();
+    assert.equal(after.registrationInitialized, true);
+    assert.equal(after.models.find((item: { id: string }) => item.id === "test.json").registration.name, "Test model");
+    assert.equal((await (await fetch(`${origin}/api/projects/demo/models/definition?model=test.json`)).json()).source, source);
+    const packages = (await (await fetch(`${origin}/api/projects/demo/models/market`)).json()).packages;
+    assert.equal(packages.length >= 1, true);
+    const install = (authorized: boolean) => fetch(`${origin}/api/projects/demo/models/market/import`, { method: "POST", headers: authorized ? headers : { "content-type": "application/json", origin }, body: JSON.stringify({ packageId: packages[0].id, expectedRevision: after.configRevision }) });
+    assert.equal((await install(false)).status, 401);
+    const installed = await install(true);
+    assert.equal(installed.status, 200, await installed.clone().text());
+    assert.equal((await installed.json()).status, "imported");
+    assert.equal((await (await install(true)).json()).status, "unchanged");
+    const imported = await (await fetch(`${origin}/api/projects/demo/models`)).json();
+    assert.ok(imported.models.some((item: { origin: string }) => item.origin === "market"));
+  });
+});
+
+test("model registration settings validate migration and never publish an unauthorized directory switch", async () => {
+  await withSettingsServer("127.0.0.1", async ({ origin, configPath }) => {
+    const headers = { "content-type": "application/json", origin };
+    const initial = await (await fetch(`${origin}/api/projects/demo/settings/project`)).json();
+    assert.equal((await fetch(`${origin}/api/projects/demo/models/initialize`, { method: "POST", headers, body: JSON.stringify({ expectedRevision: initial.diskRevision }) })).status, 200);
+    const settings = await (await fetch(`${origin}/api/projects/demo/settings/project`)).json();
+    const config = { ...settings.config, modelRegistration: { storeId: "other", stores: { other: { factory: "memsphere/filesystem-json", directory: "other-registrations" } } } };
+    const body = { expectedRevision: settings.diskRevision, config };
+    const validation = await fetch(`${origin}/api/projects/demo/settings/project/validate`, { method: "POST", headers, body: JSON.stringify(body) });
+    assert.equal(validation.status, 200, await validation.clone().text());
+    assert.equal((await validation.json()).migrationRequired, true);
+    const original = await readFile(configPath, "utf8");
+    const blocked = await fetch(`${origin}/api/projects/demo/settings/project`, { method: "PUT", headers, body: JSON.stringify(body) });
+    assert.equal(blocked.status, 409);
+    assert.equal((await blocked.json()).code, "MODEL_REGISTRATION_MIGRATION_REQUIRED");
+    assert.equal(await readFile(configPath, "utf8"), original);
+    const migrated = await fetch(`${origin}/api/projects/demo/settings/project`, { method: "PUT", headers, body: JSON.stringify({ ...body, migrateModelRegistrations: true }) });
+    assert.equal(migrated.status, 200, await migrated.clone().text());
+    assert.equal((await migrated.json()).config.modelRegistration.storeId, "other");
+  });
+});
+
+test("model market cleanup requires authorization and current revision before recovering failed candidates", async () => {
+  await withSettingsServer("0.0.0.0", async ({ origin, configPath, token }) => {
+    const root = (await import("node:path")).dirname(configPath);
+    const { importModelMarketPackage, listModelMarket } = await import("../src/project/model-market.js");
+    const pack = listModelMarket()[0]!;
+    await assert.rejects(importModelMarketPackage({}, { root }, pack.id, {
+      afterStage: async () => { throw new Error("injected stage failure"); },
+      removeCandidate: async () => { throw new Error("injected candidate cleanup failure"); }
+    }), { code: "MODEL_IMPORT_CLEANUP_REQUIRED" });
+    const before = await (await fetch(`${origin}/api/projects/demo/models`)).json();
+    assert.equal(before.models.some((item: { origin: string }) => item.origin === "market"), false);
+    const cleanup = (revision: string, authorized: boolean) => fetch(`${origin}/api/projects/demo/models/market/cleanup`, {
+      method: "POST", headers: { "content-type": "application/json", origin, ...(authorized ? { authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ expectedRevision: revision })
+    });
+    assert.equal((await cleanup(before.configRevision, false)).status, 401);
+    assert.equal((await cleanup("stale", true)).status, 409);
+    await assert.rejects(importModelMarketPackage({}, { root }, pack.id), { code: "MODEL_IMPORT_CLEANUP_REQUIRED" });
+    const cleaned = await cleanup(before.configRevision, true);
+    assert.equal(cleaned.status, 200, await cleaned.clone().text());
+    assert.deepEqual((await cleaned.json()).cleanedModelRefs, pack.models.map(model => model.registration.modelRef));
+    const imported = await fetch(`${origin}/api/projects/demo/models/market/import`, {
+      method: "POST", headers: { "content-type": "application/json", origin, authorization: `Bearer ${token}` },
+      body: JSON.stringify({ expectedRevision: before.configRevision, packageId: pack.id })
+    });
+    assert.equal(imported.status, 200, await imported.clone().text());
+    assert.equal((await imported.json()).status, "imported");
+    assert.deepEqual((await (await cleanup(before.configRevision, true)).json()).cleanedModelRefs, []);
+    const modelRef = pack.models[0]!.registration.modelRef;
+    const definition = await fetch(`${origin}/api/projects/demo/models/definition?model=${encodeURIComponent(modelRef)}`);
+    assert.equal(definition.status, 200);
+    assert.equal((await definition.json()).source, pack.models[0]!.source);
+  });
+});

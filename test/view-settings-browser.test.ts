@@ -397,3 +397,67 @@ async function settingsConfigFixture(dir: string, host: string): Promise<Memsphe
     }
   };
 }
+
+test("model registration settings select Store first, preserve drafts and explicitly confirm migration", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-model-settings-browser-"));
+  const config = await settingsConfigFixture(dir, "127.0.0.1");
+  const existing = JSON.parse(await (await import("node:fs/promises")).readFile(config.configPath, "utf8"));
+  const registration = { storeId: "first", stores: {
+    first: { factory: "memsphere/filesystem-json", directory: "models/registrations-first" },
+    second: { factory: "memsphere/filesystem-json", directory: "models/registrations-second" }
+  } };
+  await writeFile(config.configPath, JSON.stringify({ ...existing, modelRegistration: registration }));
+  const server = createViewServer(config);
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    page.setDefaultTimeout(8_000);
+    const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+    await page.goto(`${origin}/projects/demo/settings/models`, { waitUntil: "networkidle" });
+    await page.getByRole("heading", { name: "模型登记存储", exact: true }).waitFor();
+    const directory = () => page.getByLabel("存储目录", { exact: true });
+    assert.equal(await directory().inputValue(), "models/registrations-first");
+    await page.getByRole("combobox", { name: "存储 ID", exact: true }).click();
+    await page.getByRole("option", { name: "second", exact: true }).click();
+    assert.equal(await directory().inputValue(), "models/registrations-second");
+    await directory().fill("models/edited-second");
+    await page.getByRole("combobox", { name: "存储 ID", exact: true }).click();
+    await page.getByRole("option", { name: "first", exact: true }).click();
+    assert.equal(await directory().inputValue(), "models/registrations-first");
+    await page.getByRole("combobox", { name: "存储 ID", exact: true }).click();
+    await page.getByRole("option", { name: "second", exact: true }).click();
+    assert.equal(await directory().inputValue(), "models/edited-second");
+    page.once("dialog", dialog => dialog.accept());
+    await page.getByRole("button", { name: "放弃修改", exact: true }).click();
+    assert.equal(await directory().inputValue(), "models/registrations-first");
+    await directory().fill("");
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await page.getByRole("alert").filter({ hasText: /modelRegistration/ }).waitFor();
+    await directory().fill("models/registrations-first");
+    assert.equal(await page.getByRole("button", { name: "添加存储", exact: true }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "初始化模型登记", exact: true }).count(), 0);
+    // Initialization is pre-existing data for the migration contract; its UI is deferred.
+    const modelState = await (await page.request.get(`${origin}/api/projects/demo/models`)).json();
+    const initialized = await page.request.post(`${origin}/api/projects/demo/models/initialize`, {
+      headers: { origin }, data: { expectedRevision: modelState.configRevision }
+    });
+    assert.equal(initialized.status(), 200, await initialized.text());
+    await page.reload();
+    await page.getByRole("heading", { name: "模型登记存储", exact: true }).waitFor();
+    await page.getByRole("combobox", { name: "存储 ID", exact: true }).click();
+    await page.getByRole("option", { name: "second", exact: true }).click();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await page.getByRole("button", { name: "确认保存", exact: true }).waitFor();
+    page.once("dialog", dialog => { assert.match(dialog.message(), /迁移/); void dialog.dismiss(); });
+    await page.getByRole("button", { name: "确认保存", exact: true }).click();
+    assert.equal(JSON.parse(await (await import("node:fs/promises")).readFile(config.configPath, "utf8")).modelRegistration.storeId, "first");
+    page.once("dialog", dialog => dialog.accept());
+    await page.getByRole("button", { name: "确认保存", exact: true }).click();
+    await page.getByText("配置已保存并生效。", { exact: true }).waitFor();
+    assert.equal(JSON.parse(await (await import("node:fs/promises")).readFile(config.configPath, "utf8")).modelRegistration.storeId, "second");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); }
+});

@@ -1107,3 +1107,19 @@ async function projectHealth(memoryRoot: string, config: ProjectConfigFile): Pro
     return { status: "unhealthy", detail: error instanceof Error ? error.message : String(error) };
   }
 }
+
+/** Explicit initialization never runs during model discovery or GET requests. */
+export async function projectModelsInitializeCommand(nameInput?: string, options: OutputOption = {}): Promise<void> {
+  const result = await withSelectedProject(nameInput, async () => {
+    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    const { initializeProjectModelRegistrations, withModelRegistrationLock } = await import("../project/model-registration.js");
+    return withModelRegistrationLock(context.primary.paths.root, async () => {
+      const current = projectConfigSchema.parse(JSON.parse(await readFile(context.primary.paths.configPath, "utf8")));
+      const initialized = await initializeProjectModelRegistrations({}, { root: context.primary.paths.root, modelsDirectory: current.modelsDirectory, modelRegistration: current.modelRegistration });
+      await atomicWriteJson(context.primary.paths.configPath, { ...current, modelRegistration: initialized.config });
+      return initialized;
+    });
+  });
+  if (options.output === "json") console.log(JSON.stringify(result, null, 2));
+  else console.log(`Model registrations initialized: ${JSON.stringify(result)}`);
+}

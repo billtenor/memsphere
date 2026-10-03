@@ -47,7 +47,7 @@ test("Project model catalog traverses all pages and keeps corrupt definitions vi
   await writeFile(join(directory, "ignored.md"), "not a model");
   const models = await (await createProjectModelHost({}, { root })).list();
   assert.equal(models.filter(item => !item.builtin && item.status === "available").length, 1001);
-  assert.equal(models.filter(item => item.builtin).length, 4);
+  assert.equal(models.filter(item => item.builtin).length, 5);
   assert.equal(models.find(item => item.id === "bad.json")?.status, "unavailable");
   assert.equal(models.find(item => item.id === "invalid.json")?.status, "unavailable");
   assert.equal(models.some(item => item.id === "ignored.md"), false);
