@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -66,10 +66,11 @@ test("Project model refresh reads changed files while each definition and source
 }));
 
 test("Relative and absolute model directories use the Project root rather than cwd", async () => fixture(async (root) => {
+  const canonicalRoot = await realpath(root);
   const relative = await createProjectModelHost({}, { root, modelsDirectory: "custom" });
-  assert.equal(relative.directory, resolve(root, "custom"));
+  assert.equal(relative.directory, resolve(canonicalRoot, "custom"));
   const absolute = await createProjectModelHost({}, { root, modelsDirectory: resolve(root, "absolute") });
-  assert.equal(absolute.directory, resolve(root, "absolute"));
+  assert.equal(absolute.directory, resolve(canonicalRoot, "absolute"));
   const fresh = await createProjectModelHost({}, { root, modelsDirectory: "new/missing" });
   assert.equal((await fresh.list()).filter(model => !model.builtin).length, 0);
 }));
