@@ -5,6 +5,7 @@ import { readRun, type RunState } from "../run/store.js";
 import { ensureRunWorkersExited } from "./worker-guard.js";
 import { runContentManifest, type RunContentRef } from "../run/content-manifest.js";
 import { prepareRunData, runDataStore } from "../project/run-data.js";
+import type { ProjectModelInput } from "../project/model-registration.js";
 import { consumeContent } from "../data/extensions/shared/payload.js";
 import type { PayloadContent } from "../data/api/payload.js";
 
@@ -34,6 +35,8 @@ type ArchiveRoots = {
   changesRoot: string;
 };
 
+type RunArchiveInput = Pick<ArchiveRoots, "archiveRoot" | "runsRoot"> & { id: string; project?: ProjectModelInput };
+
 export function archiveRootForScope(scopeRoot: string): string {
   return join(scopeRoot, "archives");
 }
@@ -58,7 +61,7 @@ export async function listArchived(input: { archiveRoot: string; kind?: ArchiveK
   return entries.sort((a, b) => (b.archivedAt ?? b.id).localeCompare(a.archivedAt ?? a.id));
 }
 
-export async function archiveRun(input: Pick<ArchiveRoots, "archiveRoot" | "runsRoot"> & { id: string }): Promise<ArchiveEntry> {
+export async function archiveRun(input: RunArchiveInput): Promise<ArchiveEntry> {
   const archivePath = archiveItemPath(input.archiveRoot, "runs", input.id);
   await transferRun(input, "archive");
   const metadata = await readArchiveMetadata(archivePath);
@@ -84,12 +87,12 @@ export async function archiveChangeDirectory(
   }
 }
 
-export async function restoreRun(input: Pick<ArchiveRoots, "archiveRoot" | "runsRoot"> & { id: string }): Promise<RunState> {
+export async function restoreRun(input: RunArchiveInput): Promise<RunState> {
   await transferRun(input, "restore");
   return readRun(input.runsRoot, input.id);
 }
 
-async function transferRun(input: Pick<ArchiveRoots, "archiveRoot" | "runsRoot"> & { id: string }, direction: "archive" | "restore"): Promise<void> {
+async function transferRun(input: RunArchiveInput, direction: "archive" | "restore"): Promise<void> {
   if (!/^run-[a-zA-Z0-9-]+$/.test(input.id)) throw new Error(`invalid Run id: ${input.id}`);
   const archivedRoot = archiveKindRoot(input.archiveRoot, "runs");
   const sourceRoot = direction === "archive" ? input.runsRoot : archivedRoot;

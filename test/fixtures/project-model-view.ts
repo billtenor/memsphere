@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { createViewServer } from "../../src/commands/view.js";
+import { installBundledSystemModels } from "../../src/project/system-models.js";
 import type { MemsphereConfig } from "../../src/config.js";
 
 /** Runs the actual View server and built-in modules against an isolated on-disk Home. */
@@ -23,6 +24,7 @@ export async function startProjectModelView(prepare?: (config: MemsphereConfig) 
     await writeFile(join(directory, "project.json"), JSON.stringify({ format_version: 1, name, created_at: new Date().toISOString() }));
     await writeFile(join(directory, "config.json"), JSON.stringify({ store }));
     await writeFile(join(directory, "models/json-schema/draft-07/sales/order.json"), name === "alpha" ? source : '{"title":"订单 Beta","type":"number"}');
+    await installBundledSystemModels({}, { root: directory });
   }
   await writeFile(join(root, "models/json-schema/draft-07/bad.json"), "invalid json");
   await writeFile(join(root, "models/json-schema/draft-07/advanced.json"), '{"title":"组合条件","anyOf":[{"type":"string"},{"type":"number"}]}');

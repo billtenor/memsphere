@@ -1,0 +1,3 @@
+# Model definitions are byte-preserved assets, including the approved relocation originals.
+reserved-models/**/*.json -text
+changes/archive/completed/20261001-project-models/assets/use-case-models/*.json -text

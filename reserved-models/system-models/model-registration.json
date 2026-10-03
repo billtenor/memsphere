@@ -1,0 +1,103 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "模型登记",
+  "description": "管理模型的名称、说明、所属包、包名称、标签与模型存储方式。代码内置定义由系统直接提供；持久化定义通过存储 ID 与模型 ID 读取。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "modelRef",
+    "storage"
+  ],
+  "properties": {
+    "modelRef": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S",
+      "description": "模型的稳定 ID，与 Runtime 使用的 ModelRef 一致；读取模型定义时也以此值作为 Store 内的记录 ID。项目内不得重复登记。"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S",
+      "description": "管理侧显示名称。未设置时使用模型定义中的 title；定义没有 title 时使用 modelRef。"
+    },
+    "description": {
+      "type": "string",
+      "description": "管理侧说明。未设置时使用模型定义中的 description；显式空字符串表示不显示说明。"
+    },
+    "package": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S",
+      "description": "模型所属包的稳定标识，例如 memsphere.builtin、memsphere.examples.orders。省略表示未定义包；本项目也可有自己的包。",
+      "examples": [
+        "memsphere.builtin",
+        "memsphere.examples.orders",
+        "acme.commerce"
+      ]
+    },
+    "package_name": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S",
+      "description": "所属包的显示名称，例如 Memsphere 内置、订单示例。仅在设置 package 时填写；未设置时显示 package。同一个包的模型可重复保存名称，名称应保持一致。"
+    },
+    "tags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S"
+      },
+      "description": "辅助分类标签，例如 example、experimental。一个模型可以有多个标签，同一条记录中的标签不得重复。"
+    },
+    "storage": {
+      "type": "string",
+      "enum": [
+        "builtin",
+        "store"
+      ],
+      "description": "模型存储方式：builtin 为代码内置，由系统直接提供定义；store 为持久化存储，必须同时填写 store_id。此字段不表示包的来源。"
+    },
+    "store_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S",
+      "description": "保存模型定义的 Store ID。storage 为 store 时必填，以 store_id 与 modelRef 读取定义；storage 为 builtin 时不得填写。不得另存重复的定义 ID。"
+    }
+  },
+  "examples": [
+    {
+      "modelRef": "sales/order.json",
+      "name": "订单",
+      "package": "myproject.orders",
+      "package_name": "订单管理",
+      "tags": [
+        "order"
+      ],
+      "store_id": "models/json-schema/draft-07",
+      "storage": "store"
+    },
+    {
+      "modelRef": "memsphere/run/artifact",
+      "name": "运行产物",
+      "package": "memsphere.builtin",
+      "package_name": "Memsphere 内置",
+      "tags": [
+        "run",
+        "artifact"
+      ],
+      "storage": "builtin"
+    },
+    {
+      "modelRef": "notes.json",
+      "name": "备注",
+      "tags": [
+        "example"
+      ],
+      "store_id": "models/json-schema/draft-07",
+      "storage": "store"
+    }
+  ]
+}

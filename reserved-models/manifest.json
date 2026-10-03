@@ -1,0 +1,234 @@
+{
+  "version": 1,
+  "system_models": [
+    {
+      "source": "system-models/model-registration.json",
+      "metaModel": "json-schema/draft-07",
+      "registration": {
+        "modelRef": "memsphere/model-registration",
+        "name": "模型登记",
+        "package": "memsphere.builtin",
+        "tags": [
+          "management"
+        ],
+        "description": "管理模型的名称、说明、所属包、包名称、标签与模型存储方式。代码内置定义由系统直接提供；持久化定义通过存储 ID 与模型 ID 读取。",
+        "package_name": "Memsphere 内置",
+        "storage": "store",
+        "store_id": "models/system/json-schema/draft-07"
+      }
+    },
+    {
+      "source": "system-models/run/agent-activity-log.json",
+      "metaModel": "raw",
+      "registration": {
+        "modelRef": "memsphere/run/agent-activity-log",
+        "name": "智能体活动日志",
+        "package": "memsphere.builtin",
+        "tags": [
+          "run",
+          "observability"
+        ],
+        "description": "智能体执行过程中的追加活动日志，用于查看过程与定位问题。",
+        "package_name": "Memsphere 内置",
+        "storage": "store",
+        "store_id": "models/system/raw"
+      }
+    },
+    {
+      "source": "system-models/run/agent-activity-snapshot.json",
+      "metaModel": "raw",
+      "registration": {
+        "modelRef": "memsphere/run/agent-activity-snapshot",
+        "name": "智能体活动快照",
+        "package": "memsphere.builtin",
+        "tags": [
+          "run",
+          "observability"
+        ],
+        "description": "智能体当前活动状态的快照，用于展示运行进度。",
+        "package_name": "Memsphere 内置",
+        "storage": "store",
+        "store_id": "models/system/raw"
+      }
+    },
+    {
+      "source": "system-models/run/artifact.json",
+      "metaModel": "raw",
+      "registration": {
+        "modelRef": "memsphere/run/artifact",
+        "name": "运行产物",
+        "package": "memsphere.builtin",
+        "tags": [
+          "run",
+          "artifact"
+        ],
+        "description": "运行过程中提交的产物内容，以完整字节值保存。",
+        "package_name": "Memsphere 内置",
+        "storage": "store",
+        "store_id": "models/system/raw"
+      }
+    },
+    {
+      "source": "system-models/run/memory-snapshot-file.json",
+      "metaModel": "raw",
+      "registration": {
+        "modelRef": "memsphere/run/memory-snapshot-file",
+        "name": "记忆快照文件",
+        "package": "memsphere.builtin",
+        "tags": [
+          "run",
+          "memory"
+        ],
+        "description": "运行启动时冻结的记忆文件，为本次运行提供稳定的记忆快照。",
+        "package_name": "Memsphere 内置",
+        "storage": "store",
+        "store_id": "models/system/raw"
+      }
+    }
+  ],
+  "market_packages": [
+    {
+      "id": "memsphere.examples",
+      "name": "示例模型",
+      "description": "覆盖基本类型、嵌套、字典、联合与引用的八个 JSON Schema 示例。",
+      "models": [
+        {
+          "source": "market-models/examples/01-basic-types.json",
+          "metaModel": "json-schema/draft-07",
+          "registration": {
+            "modelRef": "examples/01-basic-types.json",
+            "name": "用例 01 · 基本类型与枚举",
+            "tags": [
+              "example",
+              "json-schema"
+            ],
+            "description": "覆盖 JSON Schema 的全部基本类型、整数子类型、字符串/数字枚举、必填/可选、空容器。",
+            "store_id": "models/imported/json-schema/draft-07",
+            "storage": "store",
+            "package": "memsphere.examples",
+            "package_name": "示例模型"
+          }
+        },
+        {
+          "source": "market-models/examples/02-nested-order.json",
+          "metaModel": "json-schema/draft-07",
+          "registration": {
+            "modelRef": "examples/02-nested-order.json",
+            "name": "用例 02 · 订单与深层嵌套",
+            "tags": [
+              "example",
+              "json-schema"
+            ],
+            "description": "对象套对象、对象套数组、数组套对象；订单、明细、规格、价格与收货信息的多级结构。",
+            "package": "memsphere.examples",
+            "store_id": "models/imported/json-schema/draft-07",
+            "package_name": "示例模型",
+            "storage": "store"
+          }
+        },
+        {
+          "source": "market-models/examples/03-array-root.json",
+          "metaModel": "json-schema/draft-07",
+          "registration": {
+            "modelRef": "examples/03-array-root.json",
+            "name": "用例 03 · 根数组与多维数组",
+            "tags": [
+              "example",
+              "json-schema"
+            ],
+            "description": "根值不是对象而是数组；包含数组套数组、数组套对象、嵌套枚举数组。",
+            "store_id": "models/imported/json-schema/draft-07",
+            "storage": "store",
+            "package": "memsphere.examples",
+            "package_name": "示例模型"
+          }
+        },
+        {
+          "source": "market-models/examples/04-dictionaries-and-encodings.json",
+          "metaModel": "json-schema/draft-07",
+          "registration": {
+            "modelRef": "examples/04-dictionaries-and-encodings.json",
+            "name": "用例 04 · 字典与特殊类型映射",
+            "tags": [
+              "example",
+              "json-schema"
+            ],
+            "description": "动态键字典以及 bigint/bytes 的 JSON 表示示例；它们不是原生 Map、bigint、Uint8Array 的反射声明。",
+            "store_id": "models/imported/json-schema/draft-07",
+            "storage": "store",
+            "package": "memsphere.examples",
+            "package_name": "示例模型"
+          }
+        },
+        {
+          "source": "market-models/examples/05-unions-and-conditions.json",
+          "metaModel": "json-schema/draft-07",
+          "registration": {
+            "modelRef": "examples/05-unions-and-conditions.json",
+            "name": "用例 05 · 联合与条件展示边界",
+            "tags": [
+              "example",
+              "json-schema"
+            ],
+            "description": "合法 Draft-07 的联合、组合、条件、布尔子模式；用于检查展示边界，不承诺现有业务 Runtime 支持这些特性。",
+            "store_id": "models/imported/json-schema/draft-07",
+            "storage": "store",
+            "package": "memsphere.examples",
+            "package_name": "示例模型"
+          }
+        },
+        {
+          "source": "market-models/examples/06-references-and-recursion.json",
+          "metaModel": "json-schema/draft-07",
+          "registration": {
+            "modelRef": "examples/06-references-and-recursion.json",
+            "name": "用例 06 · 引用与递归",
+            "tags": [
+              "example",
+              "json-schema"
+            ],
+            "description": "本地 definitions 复用、递归树与精确文件 ModelRef；当前树表显示引用提示，引用目标查看原文，不无限展开。",
+            "store_id": "models/imported/json-schema/draft-07",
+            "storage": "store",
+            "package": "memsphere.examples",
+            "package_name": "示例模型"
+          }
+        },
+        {
+          "source": "market-models/examples/07-scalar-enum-root.json",
+          "metaModel": "json-schema/draft-07",
+          "registration": {
+            "modelRef": "examples/07-scalar-enum-root.json",
+            "name": "用例 07 · 标量枚举根",
+            "tags": [
+              "example",
+              "json-schema"
+            ],
+            "description": "整个模型就是一个字符串枚举，没有对象字段。",
+            "store_id": "models/imported/json-schema/draft-07",
+            "storage": "store",
+            "package": "memsphere.examples",
+            "package_name": "示例模型"
+          }
+        },
+        {
+          "source": "market-models/examples/08-numeric-enum-root.json",
+          "metaModel": "json-schema/draft-07",
+          "registration": {
+            "modelRef": "examples/08-numeric-enum-root.json",
+            "name": "用例 08 · 数字枚举根",
+            "tags": [
+              "example",
+              "json-schema"
+            ],
+            "description": "整数作为根值；数值枚举成员，不把数字转换为字符串。",
+            "store_id": "models/imported/json-schema/draft-07",
+            "storage": "store",
+            "package": "memsphere.examples",
+            "package_name": "示例模型"
+          }
+        }
+      ]
+    }
+  ]
+}

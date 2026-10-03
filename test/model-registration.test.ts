@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rm } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readBundledSystemModels } from "../src/reserved/models.js";
 import { createProjectModelHost, DEFAULT_MODELS_DIRECTORY } from "../src/project/models.js";
 import { createModelRegistrationStore, initializeProjectModelRegistrations, modelRegistrationSchema, MODEL_REGISTRATION_MODEL, DEFAULT_MODEL_REGISTRATION_CONFIG, prepareModelRegistrationMigration, readModelRegistrations, validateModelRegistration } from "../src/project/model-registration.js";
 async function fixture(fn: (root: string, directory: string) => Promise<void>) {
@@ -16,14 +17,18 @@ async function fixture(fn: (root: string, directory: string) => Promise<void>) {
     await rm(root, { recursive: true, force: true });
   }
 }
-test("Empty registry bootstraps its own code model without writing management data", async () => fixture(async (root) => {
+test("Empty registry stays empty until explicit initialization installs its persistent system models", async () => fixture(async (root) => {
+  const empty = await createProjectModelHost({}, { root });
+  assert.equal(empty.initialized, false);
+  assert.deepEqual(await empty.list(), []);
+  await assert.rejects(empty.definition(MODEL_REGISTRATION_MODEL), { code: "MODEL_NOT_FOUND" });
+  await assert.rejects(readFile(join(root, "models/registrations/initialized.json")), { code: "ENOENT" });
+  await initializeProjectModelRegistrations({}, { root });
   const host = await createProjectModelHost({}, { root });
-  assert.equal(host.initialized, false);
   const runtime = await host.runtime(MODEL_REGISTRATION_MODEL);
   assert.equal(runtime.descriptor.id, MODEL_REGISTRATION_MODEL);
   assert.equal(runtime.reflect({ modelRef: "sales/order.json", storage: "store", store_id: "models/json-schema/draft-07" }).kind, "object");
-  await assert.rejects(readFile(join(root, "models/registrations/initialized.json")), { code: "ENOENT" });
-  assert.equal((await host.definition(MODEL_REGISTRATION_MODEL)).registration.storage, "builtin");
+  assert.equal((await host.definition(MODEL_REGISTRATION_MODEL)).registration.storage, "store");
   assert.equal((await host.definition("memsphere/model-registration.json")).id, MODEL_REGISTRATION_MODEL);
   assert.throws(() => validateModelRegistration({ modelRef: "x", storage: "store" }), /store_id/);
   assert.throws(() => validateModelRegistration({ modelRef: "x", storage: "builtin", store_id: "x" }), /must not/);
@@ -35,7 +40,8 @@ test("Explicit initialization uses UUID records for slash IDs, preserves metadat
   const initial = await initializeProjectModelRegistrations({}, { root });
   assert.equal(initial.created, 1);
   const state = await readModelRegistrations({}, { root });
-  assert.equal(state.records.length, 1);
+  assert.equal(state.records.filter(record => record.origin === "project").length, 1);
+  assert.equal(state.records.filter(record => record.origin === "system").length, 5);
   assert.equal(state.records[0]!.registration.modelRef, "sales/order.json");
   assert.ok(!state.records[0]!.id.includes("/"));
   const store = await createModelRegistrationStore({}, "registry", join(root, "models/registrations/project"));
@@ -78,6 +84,12 @@ test("Changing registry directory requires explicit migration and preserves orig
   assert.equal(migration.migrated, true);
   const after = await readModelRegistrations({}, { root, modelRegistration: target });
   assert.deepEqual(after.records, before.records);
+  const migratedHost = await createProjectModelHost({}, { root, modelRegistration: target });
+  for (const model of readBundledSystemModels()) {
+    const path = join("system/definitions", model.metaModel, `${model.registration.modelRef}.json`);
+    assert.deepEqual(await readFile(join(root, "models/registrations", path)), await readFile(join(root, "internal/registry", path)));
+    assert.equal((await migratedHost.definition(model.registration.modelRef)).source, model.source);
+  }
   const filename = `${before.records[0]!.id}.json`;
   assert.deepEqual(await readFile(join(root, "models/registrations/project", filename)), await readFile(join(root, "internal/registry/project", filename)));
   assert.ok(migration.excludedDirectories.includes(await realpath(join(root, "models/registrations"))));

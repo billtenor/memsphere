@@ -6,146 +6,46 @@ import type { Context } from "../data/api/context.js";
 import type { ValueStore } from "../data/api/value-store.js";
 import { Config } from "../data/api/config.js";
 import { filesystemJsonValueStoreExtension, jsonSchemaExtension, jsonSchemaMetaModelExtension, jsonSerializerExtension, JSON_SCHEMA_DRAFT_07 } from "../data/extensions/index.js";
-import { bytesContent } from "../data/extensions/shared/payload.js";
+import { bytesContent, readAll } from "../data/extensions/shared/payload.js";
 import { DefaultDataManager } from "../data/management/data-manager.js";
 import { DefaultDataExtensionRegistry } from "../data/management/extension-registry.js";
 import { atomicWriteJson, withFileLock } from "../persistence.js";
 import { validateModelStoragePaths, within } from "./model-storage-paths.js";
-export const MODEL_REGISTRATION_MODEL = "memsphere/model-registration";
-export const LEGACY_MODEL_REGISTRATION_MODEL = "memsphere/model-registration.json";
-export const IMPORTED_MODEL_DEFINITIONS_STORE = "models/imported/json-schema/draft-07";
-export type ModelOrigin = "project" | "system" | "market";
-export type ModelRegistration = {
-  modelRef: string;
-  name?: string;
-  description?: string;
-  package?: string;
-  package_name?: string;
-  tags?: string[];
-  storage: "builtin" | "store";
-  store_id?: string;
-};
-export type ModelRegistrationConfig = {
-  storeId: string;
-  stores: Record<string, {
-    factory: "memsphere/filesystem-json";
-    directory: string;
-  }>;
-  excludedDirectories?: string[];
-};
-export type ProjectModelInput = {
-  root: string;
-  modelsDirectory?: string;
-  modelRegistration?: ModelRegistrationConfig;
-};
-export const DEFAULT_MODEL_REGISTRATION_CONFIG: ModelRegistrationConfig = { storeId: "memsphere/model-registrations", stores: { "memsphere/model-registrations": { factory: "memsphere/filesystem-json", directory: "models/registrations" } } };
-export const modelRegistrationSchema = {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "模型登记",
-  "description": "管理模型的名称、说明、所属包、包名称、标签与模型存储方式。代码内置定义由系统直接提供；持久化定义通过存储 ID 与模型 ID 读取。",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "modelRef",
-    "storage"
-  ],
-  "properties": {
-    "modelRef": {
-      "type": "string",
-      "minLength": 1,
-      "pattern": "\\S",
-      "description": "模型的稳定 ID，与 Runtime 使用的 ModelRef 一致；读取模型定义时也以此值作为 Store 内的记录 ID。项目内不得重复登记。"
-    },
-    "name": {
-      "type": "string",
-      "minLength": 1,
-      "pattern": "\\S",
-      "description": "管理侧显示名称。未设置时使用模型定义中的 title；定义没有 title 时使用 modelRef。"
-    },
-    "description": {
-      "type": "string",
-      "description": "管理侧说明。未设置时使用模型定义中的 description；显式空字符串表示不显示说明。"
-    },
-    "package": {
-      "type": "string",
-      "minLength": 1,
-      "pattern": "\\S",
-      "description": "模型所属包的稳定标识，例如 memsphere.builtin、memsphere.examples.orders。省略表示未定义包；本项目也可有自己的包。",
-      "examples": [
-        "memsphere.builtin",
-        "memsphere.examples.orders",
-        "acme.commerce"
-      ]
-    },
-    "package_name": {
-      "type": "string",
-      "minLength": 1,
-      "pattern": "\\S",
-      "description": "所属包的显示名称，例如 Memsphere 内置、订单示例。仅在设置 package 时填写；未设置时显示 package。同一个包的模型可重复保存名称，名称应保持一致。"
-    },
-    "tags": {
-      "type": "array",
-      "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "minLength": 1,
-        "pattern": "\\S"
-      },
-      "description": "辅助分类标签，例如 example、experimental。一个模型可以有多个标签，同一条记录中的标签不得重复。"
-    },
-    "storage": {
-      "type": "string",
-      "enum": [
-        "builtin",
-        "store"
-      ],
-      "description": "模型存储方式：builtin 为代码内置，由系统直接提供定义；store 为持久化存储，必须同时填写 store_id。此字段不表示包的来源。"
-    },
-    "store_id": {
-      "type": "string",
-      "minLength": 1,
-      "pattern": "\\S",
-      "description": "保存模型定义的 Store ID。storage 为 store 时必填，以 store_id 与 modelRef 读取定义；storage 为 builtin 时不得填写。不得另存重复的定义 ID。"
-    }
-  },
-  "examples": [
-    {
-      "modelRef": "sales/order.json",
-      "name": "订单",
-      "package": "myproject.orders",
-      "package_name": "订单管理",
-      "tags": [
-        "order"
-      ],
-      "store_id": "models/json-schema/draft-07",
-      "storage": "store"
-    },
-    {
-      "modelRef": "memsphere/run/artifact",
-      "name": "运行产物",
-      "package": "memsphere.builtin",
-      "package_name": "Memsphere 内置",
-      "tags": [
-        "run",
-        "artifact"
-      ],
-      "storage": "builtin"
-    },
-    {
-      "modelRef": "notes.json",
-      "name": "备注",
-      "tags": [
-        "example"
-      ],
-      "store_id": "models/json-schema/draft-07",
-      "storage": "store"
-    }
-  ]
-} as const;
-export function modelRegistrationBinding() { return { model: { data: { id: MODEL_REGISTRATION_MODEL, model: JSON_SCHEMA_DRAFT_07, payload: { contentType: "application/json", content: bytesContent(Buffer.from(JSON.stringify(modelRegistrationSchema))) } }, definition: modelRegistrationSchema } }; }
+import {
+  MODEL_REGISTRATION_MODEL, LEGACY_MODEL_REGISTRATION_MODEL, IMPORTED_MODEL_DEFINITIONS_STORE,
+  DEFAULT_MODEL_REGISTRATION_CONFIG, SYSTEM_JSON_SCHEMA_MODELS_STORE,
+  validateModelRegistration, type ModelOrigin, type ModelRegistration, type ModelRegistrationConfig, type ProjectModelInput
+} from "./model-registration-contract.js";
+import { readBundledSystemModels } from "../reserved/models.js";
+import { modelDefinitionStore } from "./system-model-store.js";
+import { validateJsonSchemaDefinition } from "../data/extensions/json-schema-metamodel/index.js";
+export * from "./model-registration-contract.js";
+export const modelRegistrationSchema = readBundledSystemModels().find(model => model.registration.modelRef === MODEL_REGISTRATION_MODEL)!.definition;
+export function modelRegistrationBinding(definition = modelRegistrationSchema, source = JSON.stringify(definition)) {
+  return { model: { data: { id: MODEL_REGISTRATION_MODEL, model: JSON_SCHEMA_DRAFT_07,
+    payload: { contentType: "application/json", content: bytesContent(Buffer.from(source)) } }, definition } };
+}
+async function registrationBootstrap(context: Context, directory: string) {
+  const systemRoot = join(directory, "system");
+  if (!await pathExists(systemRoot)) return modelRegistrationBinding();
+  const filename = join(systemRoot, "definitions/json-schema/draft-07", `${MODEL_REGISTRATION_MODEL}.json`);
+  let source: string;
+  try {
+    const store = modelDefinitionStore(SYSTEM_JSON_SCHEMA_MODELS_STORE, JSON_SCHEMA_DRAFT_07, join(systemRoot, "definitions/json-schema/draft-07"), true);
+    const stored = await store.get(context, MODEL_REGISTRATION_MODEL);
+    if (!stored) throw new Error("Missing definition");
+    source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await readAll(context, stored.data.payload.content));
+  }
+  catch (error) { throw new TypeError(`Installed system registration definition is missing: ${filename}`, { cause: error }); }
+  let definition: unknown;
+  try { definition = JSON.parse(source.replace(/^\uFEFF/, "")); }
+  catch (error) { throw new TypeError(`Installed system registration definition is damaged: ${filename}`, { cause: error }); }
+  validateJsonSchemaDefinition(definition);
+  return modelRegistrationBinding(definition, source);
+}
 const registry = new DefaultDataExtensionRegistry([filesystemJsonValueStoreExtension, jsonSchemaExtension, jsonSchemaMetaModelExtension, jsonSerializerExtension]);
-export async function createModelRegistrationStore(context: Context, id: string, directory: string): Promise<ValueStore> {
-  const manager = new DefaultDataManager({ extensions: registry, models: [modelRegistrationBinding()], stores: [{ id, model: MODEL_REGISTRATION_MODEL, kind: "ValueStore", factory: "memsphere/filesystem-json", config: new Config({ directory }) }] });
+export async function createModelRegistrationStore(context: Context, id: string, directory: string, binding = modelRegistrationBinding()): Promise<ValueStore> {
+  const manager = new DefaultDataManager({ extensions: registry, models: [binding], stores: [{ id, model: MODEL_REGISTRATION_MODEL, kind: "ValueStore", factory: "memsphere/filesystem-json", config: new Config({ directory }) }] });
   const store = await manager.getStore(context, id) as ValueStore;
   return {
     id: store.id, kind: store.kind, model: store.model,
@@ -156,39 +56,15 @@ export async function createModelRegistrationStore(context: Context, id: string,
     async update(ctx, recordId, value, options) { validateModelRegistration(value); return store.update(ctx, recordId, value, options); }
   };
 }
-export function validateModelRegistration(value: unknown): asserts value is ModelRegistration {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new TypeError("Invalid model registration: expected object");
-  const v = value as Record<string, unknown>;
-  const keys = new Set(["modelRef", "name", "description", "package", "package_name", "tags", "storage", "store_id"]);
-  for (const key of Object.keys(v))
-    if (!keys.has(key))
-      throw new TypeError(`Unknown model registration field: ${key}`);
-  for (const key of ["modelRef", "name", "package", "package_name", "store_id"])
-    if ((key === "modelRef" || v[key] !== undefined) && (typeof v[key] !== "string" || !(v[key] as string).trim()))
-      throw new TypeError(`Invalid model registration ${key}`);
-  if (v.description !== undefined && typeof v.description !== "string")
-    throw new TypeError("Invalid model registration description");
-  if (v.storage !== "builtin" && v.storage !== "store")
-    throw new TypeError("Invalid model registration storage");
-  if (v.storage === "store" && (typeof v.store_id !== "string" || !v.store_id.trim()))
-    throw new TypeError("Persistent model requires store_id");
-  if (v.storage === "builtin" && v.store_id !== undefined)
-    throw new TypeError("Builtin model must not have store_id");
-  if (v.package_name !== undefined && v.package === undefined)
-    throw new TypeError("package_name requires package");
-  if (v.tags !== undefined && (!Array.isArray(v.tags) || v.tags.some(t => typeof t !== "string" || !t.trim()) || new Set(v.tags).size !== v.tags.length))
-    throw new TypeError("Invalid model registration tags");
-}
 export type RegistrationRecord = {
   id: string;
   registration: ModelRegistration;
-  origin: "project" | "market";
+  origin: ModelOrigin;
 };
 export type RegistrationDiagnostic = {
   id: string;
   message: string;
-  origin: "project" | "market";
+  origin: ModelOrigin;
   modelRef?: string;
 };
 export async function pathExists(path: string) {
@@ -216,11 +92,14 @@ export async function readModelRegistrations(context: Context, input: ProjectMod
     for (const id of published.recordIds)
       publishedIds.add(id);
   }
-  for (const area of ["project", "imported"] as const) {
-    const directory = join(paths.registrationDirectory, area);
+  const bootstrap = await registrationBootstrap(context, paths.registrationDirectory);
+  if (await pathExists(join(paths.registrationDirectory, "system")) && !await pathExists(join(paths.registrationDirectory, "system/registrations")))
+    throw new TypeError("Installed system model registrations are missing");
+  for (const area of ["project", "imported", "system"] as const) {
+    const directory = join(paths.registrationDirectory, area === "system" ? "system/registrations" : area);
     if (!await pathExists(directory))
       continue;
-    const store = await createModelRegistrationStore(context, `${(input.modelRegistration ?? DEFAULT_MODEL_REGISTRATION_CONFIG).storeId}/${area}`, directory);
+    const store = await createModelRegistrationStore(context, `${(input.modelRegistration ?? DEFAULT_MODEL_REGISTRATION_CONFIG).storeId}/${area}`, directory, bootstrap);
     let cursor: string | undefined;
     do {
       const page = await store.list(context, { limit: 1000, ...(cursor ? { cursor } : {}) });
@@ -233,16 +112,22 @@ export async function readModelRegistrations(context: Context, input: ProjectMod
           if (!record)
             continue;
           validateModelRegistration(record.value);
-          records.push({ id: item.id, registration: record.value, origin: area === "project" ? "project" : "market" });
+          records.push({ id: item.id, registration: record.value, origin: area === "system" ? "system" : area === "project" ? "project" : "market" });
         }
         catch (error) {
           context.signal?.throwIfAborted();
           if (!(error instanceof TypeError) && !(error instanceof SyntaxError))
             throw error;
-          diagnostics.push({ id: item.id, origin: area === "project" ? "project" : "market", message: error.message });
+          diagnostics.push({ id: item.id, origin: area === "system" ? "system" : area === "project" ? "project" : "market", message: error.message });
         }
       }
     } while (cursor !== undefined);
+  }
+  if (await pathExists(join(paths.registrationDirectory, "system"))) {
+    const expected = new Set(readBundledSystemModels().map(model => model.registration.modelRef));
+    const registered = new Set(records.filter(record => record.origin === "system").map(record => record.registration.modelRef));
+    for (const modelRef of expected) if (!registered.has(modelRef)) diagnostics.push({ id: `system/${modelRef}`, modelRef, origin: "system", message: `Installed system model registration is missing: ${modelRef}` });
+    for (const modelRef of registered) if (!expected.has(modelRef)) diagnostics.push({ id: `system/${modelRef}`, modelRef, origin: "system", message: `Unexpected system model registration: ${modelRef}` });
   }
   const duplicates = new Set<string>();
   const seen = new Map<string, RegistrationRecord>();
@@ -478,12 +363,96 @@ const confirmedSeedDefinitions: Record<string, {
     }
   }
 };
+export type ModelInitializationOptions = {
+  config?: { path: string; value: Record<string, unknown> };
+  afterSystemInstall?: () => Promise<void>;
+  afterRegistrations?: () => Promise<void>;
+};
+/** The entire explicit operation rolls back its writes, including legacy migration. Caller holds settings.lock. */
+export async function initializeProjectModelRegistrations(context: Context, input: ProjectModelInput, options: ModelInitializationOptions = {}) {
+  const initial = await readModelRegistrations(context, input);
+  if (initial.diagnostics.length) throw new TypeError(`Damaged model registrations: ${initial.diagnostics.map(d => d.id).join(", ")}`);
+  const { createProjectModelHost } = await import("./models.js");
+  const host = await createProjectModelHost(context, input);
+  const summaries = await host.list();
+  for (const model of summaries) if (model.status !== "available") throw new TypeError(`Invalid model definition: ${model.id}: ${model.error}`);
+  const legacy = summaries.find(model => model.id === LEGACY_MODEL_REGISTRATION_MODEL);
+  if (legacy) {
+    if (!isDeepStrictEqual((await host.definition(legacy.id)).definition, modelRegistrationSchema))
+      throw new TypeError("Legacy model registration definition is not the confirmed preview; migration refused");
+    for (const model of summaries) {
+      if (model.id !== legacy.id && model.origin !== "system") migrateSchemaReferences((await host.definition(model.id)).source, model.id);
+    }
+  }
+  const registrationRoot = initial.paths.registrationDirectory;
+  const systemRoot = join(registrationRoot, "system");
+  const mutations: InitializationMutation[] = [];
+  const same = (left: Buffer | undefined, right: Buffer | undefined) => left === undefined ? right === undefined : right !== undefined && left.equals(right);
+  const currentBytes = async (path: string) => await pathExists(path) ? await readFile(path) : undefined;
+  const mutate: InitializationWriter = async (path, before, after, operation) => {
+    if (!same(await currentBytes(path), before)) throw new Error(`Model initialization write conflict: ${path}`);
+    // Record intent first: an atomic publisher can fail after committing its bytes.
+    mutations.push({ path, before, after });
+    await operation();
+  };
+  const createdRecord = (path: string, value: unknown) => mutations.push({ path, before: undefined, after: Buffer.from(`${JSON.stringify(value, null, 2)}\n`) });
+  let installedSnapshot: Map<string, Buffer> | undefined;
+  try {
+    const { installBundledSystemModels } = await import("./system-models.js");
+    const system = await installBundledSystemModels(context, input);
+    if (system.status === "installed") installedSnapshot = await treeBytes(systemRoot);
+    await options.afterSystemInstall?.();
+    const result = await initializeProjectModelRegistrationsInner(context, input, mutate, createdRecord);
+    await options.afterRegistrations?.();
+    if (options.config && !isDeepStrictEqual(options.config.value.modelRegistration, result.config)) {
+      const next = { ...options.config.value, modelRegistration: result.config };
+      const before = await currentBytes(options.config.path);
+      if (before && !isDeepStrictEqual(JSON.parse(before.toString("utf8")), options.config.value))
+        throw new Error(`Model initialization configuration conflict: ${options.config.path}`);
+      await mutate(options.config.path, before, Buffer.from(`${JSON.stringify(next, null, 2)}\n`), () => atomicWriteJson(options.config!.path, next));
+    }
+    return { ...result, system };
+  } catch (error) {
+    const failures: string[] = [];
+    for (const mutation of [...mutations].reverse()) {
+      try {
+        const current = await currentBytes(mutation.path);
+        if (same(current, mutation.before)) continue;
+        if (!same(current, mutation.after)) {
+          failures.push(`rollback conflict (newer content preserved): ${mutation.path}`);
+          continue;
+        }
+        if (mutation.before === undefined) await rm(mutation.path, { force: true });
+        else {
+          const { atomicWriteFile } = await import("../persistence.js");
+          await atomicWriteFile(mutation.path, mutation.before.toString("utf8"));
+        }
+      } catch (restoreError) { failures.push(`${mutation.path}: ${String(restoreError)}`); }
+    }
+    if (installedSnapshot) {
+      try {
+        const current = await treeBytes(systemRoot);
+        if (!isDeepStrictEqual(current, installedSnapshot)) failures.push(`rollback conflict (changed system subtree preserved): ${systemRoot}`);
+        else await rm(systemRoot, { recursive: true, force: true });
+      } catch (restoreError) { failures.push(`${systemRoot}: ${String(restoreError)}`); }
+    }
+    if (failures.length) throw Object.assign(new AggregateError([error], `Model initialization failed; restore required: ${failures.join(", ")}`), { rollbackErrors: failures });
+    throw error;
+  }
+}
+type InitializationMutation = { path: string; before: Buffer | undefined; after: Buffer | undefined };
+type InitializationWriter = (path: string, before: Buffer | undefined, after: Buffer | undefined, operation: () => Promise<unknown>) => Promise<void>;
+
 /** Caller holds the same Project settings lock used for config publication. */
-export async function initializeProjectModelRegistrations(context: Context, input: ProjectModelInput) {
+async function initializeProjectModelRegistrationsInner(context: Context, input: ProjectModelInput, mutate: InitializationWriter, createdRecord: (path: string, value: unknown) => unknown) {
   const initial = await readModelRegistrations(context, input);
   if (initial.diagnostics.length)
     throw new TypeError(`Damaged model registrations: ${initial.diagnostics.map(d => d.id).join(", ")}`);
   const { createProjectModelHost } = await import("./models.js");
+  const legacyRecordBytes = new Map<string, Buffer>();
+  for (const record of initial.records.filter(record => record.origin === "project" && record.registration.modelRef === LEGACY_MODEL_REGISTRATION_MODEL)) {
+    legacyRecordBytes.set(record.id, await readFile(join(initial.paths.registrationDirectory, "project", `${record.id}.json`)));
+  }
   let host = await createProjectModelHost(context, input);
   let backupPath: string | undefined;
   const legacy = (await host.list()).find(m => m.id === LEGACY_MODEL_REGISTRATION_MODEL);
@@ -529,36 +498,18 @@ export async function initializeProjectModelRegistrations(context: Context, inpu
       references.push({ modelRef: rewrite.id, backupPath: path });
     }
     await atomicWriteJson(join(backupRoot, "migration-receipt.json"), { oldRef: LEGACY_MODEL_REGISTRATION_MODEL, newRef: MODEL_REGISTRATION_MODEL, originalPath: filename, backupPath, references });
-    const changed: typeof rewrites = [];
-    try {
-      for (const rewrite of rewrites) {
-        const store = rewrite.origin === "market" ? await host.manager.getStore(context, IMPORTED_MODEL_DEFINITIONS_STORE) : host.store;
-        if (store.kind !== "DataStore")
-          throw new TypeError("Model references require a DataStore");
-        await store.update(context, { id: rewrite.id, model: JSON_SCHEMA_DRAFT_07, payload: { contentType: "application/json", content: bytesContent(Buffer.from(rewrite.replacement)) } });
-        changed.push(rewrite);
-      }
-      await rm(filename);
+    for (const rewrite of rewrites) {
+      const store = rewrite.origin === "market" ? await host.manager.getStore(context, IMPORTED_MODEL_DEFINITIONS_STORE) : host.store;
+      if (store.kind !== "DataStore") throw new TypeError("Model references require a DataStore");
+      const root = rewrite.origin === "market" ? join(initial.paths.registrationDirectory, "imported-definitions") : initial.paths.modelsDirectory;
+      await mutate(join(root, rewrite.id), Buffer.from(rewrite.source), Buffer.from(rewrite.replacement), () => store.update(context, {
+        id: rewrite.id, model: JSON_SCHEMA_DRAFT_07, payload: { contentType: "application/json", content: bytesContent(Buffer.from(rewrite.replacement)) }
+      }));
     }
-    catch (error) {
-      const failures: string[] = [];
-      for (const rewrite of changed.reverse())
-        try {
-          const store = rewrite.origin === "market" ? await host.manager.getStore({}, IMPORTED_MODEL_DEFINITIONS_STORE) : host.store;
-          if (store.kind !== "DataStore")
-            throw new TypeError("Expected DataStore");
-          await store.update({}, { id: rewrite.id, model: JSON_SCHEMA_DRAFT_07, payload: { contentType: "application/json", content: bytesContent(Buffer.from(rewrite.source)) } });
-        }
-        catch {
-          failures.push(rewrite.id);
-        }
-      if (failures.length)
-        throw Object.assign(new Error(`Migration failed; restore references from ${backupRoot}: ${failures.join(", ")}`), { cause: error });
-      throw error;
-    }
+    await mutate(filename, Buffer.from(old.source), undefined, () => rm(filename));
     for (const r of initial.records.filter(r => r.registration.modelRef === LEGACY_MODEL_REGISTRATION_MODEL)) {
       const store = await createModelRegistrationStore(context, `${(input.modelRegistration ?? DEFAULT_MODEL_REGISTRATION_CONFIG).storeId}/project`, join(initial.paths.registrationDirectory, "project"));
-      await store.delete(context, r.id);
+      await mutate(join(initial.paths.registrationDirectory, "project", `${r.id}.json`), legacyRecordBytes.get(r.id), undefined, () => store.delete(context, r.id));
     }
     host = await createProjectModelHost(context, input);
   }
@@ -584,74 +535,17 @@ export async function initializeProjectModelRegistrations(context: Context, inpu
     catch { }
     const registration: ModelRegistration = seedMatches ? structuredClone(seed!.registration) : { modelRef: summary.id, storage: "store", store_id: "models/json-schema/draft-07", ...(summary.title ? { name: summary.title } : {}), ...(summary.description !== undefined ? { description: summary.description } : {}) };
     validateModelRegistration(registration);
-    await store.create(context, randomUUID(), registration);
+    const record = await store.create(context, randomUUID(), registration);
+    createdRecord(join(existing.paths.registrationDirectory, "project", `${record.id}.json`), record);
     created++;
   }
-  await atomicWriteJson(join(existing.paths.registrationDirectory, "initialized.json"), { initializedAt: new Date().toISOString() });
+  if (!existing.initialized) {
+    const value = { initializedAt: new Date().toISOString() };
+    const path = join(existing.paths.registrationDirectory, "initialized.json");
+    await mutate(path, undefined, Buffer.from(`${JSON.stringify(value, null, 2)}\n`), () => atomicWriteJson(path, value));
+  }
   return { created, retained, diagnostics: existing.diagnostics, config: input.modelRegistration ?? structuredClone(DEFAULT_MODEL_REGISTRATION_CONFIG), ...(backupPath ? { backupPath } : {}) };
 }
-export const builtinModelRegistrations: ReadonlyArray<ModelRegistration> = [
-  {
-    "modelRef": "memsphere/model-registration",
-    "name": "模型登记",
-    "package": "memsphere.builtin",
-    "tags": [
-      "management"
-    ],
-    "description": "管理模型的名称、说明、所属包、包名称、标签与模型存储方式。代码内置定义由系统直接提供；持久化定义通过存储 ID 与模型 ID 读取。",
-    "package_name": "Memsphere 内置",
-    "storage": "builtin"
-  },
-  {
-    "modelRef": "memsphere/run/agent-activity-log",
-    "name": "智能体活动日志",
-    "package": "memsphere.builtin",
-    "tags": [
-      "run",
-      "observability"
-    ],
-    "description": "智能体执行过程中的追加活动日志，用于查看过程与定位问题。",
-    "package_name": "Memsphere 内置",
-    "storage": "builtin"
-  },
-  {
-    "modelRef": "memsphere/run/agent-activity-snapshot",
-    "name": "智能体活动快照",
-    "package": "memsphere.builtin",
-    "tags": [
-      "run",
-      "observability"
-    ],
-    "description": "智能体当前活动状态的快照，用于展示运行进度。",
-    "package_name": "Memsphere 内置",
-    "storage": "builtin"
-  },
-  {
-    "modelRef": "memsphere/run/artifact",
-    "name": "运行产物",
-    "package": "memsphere.builtin",
-    "tags": [
-      "run",
-      "artifact"
-    ],
-    "description": "运行过程中提交的产物内容，以完整字节值保存。",
-    "package_name": "Memsphere 内置",
-    "storage": "builtin"
-  },
-  {
-    "modelRef": "memsphere/run/memory-snapshot-file",
-    "name": "记忆快照文件",
-    "package": "memsphere.builtin",
-    "tags": [
-      "run",
-      "memory"
-    ],
-    "description": "运行启动时冻结的记忆文件，为本次运行提供稳定的记忆快照。",
-    "package_name": "Memsphere 内置",
-    "storage": "builtin"
-  }
-];
-
 /** Edit only schema $ref string tokens, preserving the original bytes everywhere else. */
 function migrateSchemaReferences(source:string,modelRef:string):string {
   const tokens=[...source.matchAll(/"(?:\\.|[^"\\])*"|[{}\[\]:,]|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g)];

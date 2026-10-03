@@ -1,0 +1,70 @@
+{
+  "project": "model-init-check",
+  "type": "managed",
+  "root": "${MEMSPHERE_HOME}/projects/model-init-check",
+  "createCommand": "node dist/cli.js project create model-init-check",
+  "separateInitializeCommandRun": false,
+  "checkedAt": "2026-10-03T10:12:54.783Z",
+  "initialized": true,
+  "marker": {
+    "initializedAt": "2026-10-03T10:10:51.782Z"
+  },
+  "currentPrimaryProject": "memsphere",
+  "totalModels": 5,
+  "availableSystemModels": 5,
+  "projectModels": 0,
+  "marketModels": 0,
+  "diagnostics": [],
+  "registrationDirectoryEntries": [
+    "initialized.json",
+    "project",
+    "system"
+  ],
+  "models": [
+    {
+      "model": "memsphere/model-registration",
+      "name": "模型登记",
+      "status": "available",
+      "metaModel": "json-schema/draft-07",
+      "storeId": "models/system/json-schema/draft-07",
+      "definitionFile": "${MEMSPHERE_HOME}/projects/model-init-check/models/registrations/system/definitions/json-schema/draft-07/memsphere/model-registration.json",
+      "registrationFile": "${MEMSPHERE_HOME}/projects/model-init-check/models/registrations/system/registrations/dfc92c9f-dc34-4295-bd64-6d0a7209dd26.json"
+    },
+    {
+      "model": "memsphere/run/agent-activity-log",
+      "name": "智能体活动日志",
+      "status": "available",
+      "metaModel": "raw",
+      "storeId": "models/system/raw",
+      "definitionFile": "${MEMSPHERE_HOME}/projects/model-init-check/models/registrations/system/definitions/raw/memsphere/run/agent-activity-log.json",
+      "registrationFile": "${MEMSPHERE_HOME}/projects/model-init-check/models/registrations/system/registrations/9599f237-ab1c-4772-abdc-f46d7c33742f.json"
+    },
+    {
+      "model": "memsphere/run/agent-activity-snapshot",
+      "name": "智能体活动快照",
+      "status": "available",
+      "metaModel": "raw",
+      "storeId": "models/system/raw",
+      "definitionFile": "${MEMSPHERE_HOME}/projects/model-init-check/models/registrations/system/definitions/raw/memsphere/run/agent-activity-snapshot.json",
+      "registrationFile": "${MEMSPHERE_HOME}/projects/model-init-check/models/registrations/system/registrations/9954b49e-28b8-49b7-a0a2-2ba58b191822.json"
+    },
+    {
+      "model": "memsphere/run/artifact",
+      "name": "运行产物",
+      "status": "available",
+      "metaModel": "raw",
+      "storeId": "models/system/raw",
+      "definitionFile": "${MEMSPHERE_HOME}/projects/model-init-check/models/registrations/system/definitions/raw/memsphere/run/artifact.json",
+      "registrationFile": "${MEMSPHERE_HOME}/projects/model-init-check/models/registrations/system/registrations/4fcc8424-a909-4d79-bd17-13a20831c91a.json"
+    },
+    {
+      "model": "memsphere/run/memory-snapshot-file",
+      "name": "记忆快照文件",
+      "status": "available",
+      "metaModel": "raw",
+      "storeId": "models/system/raw",
+      "definitionFile": "${MEMSPHERE_HOME}/projects/model-init-check/models/registrations/system/definitions/raw/memsphere/run/memory-snapshot-file.json",
+      "registrationFile": "${MEMSPHERE_HOME}/projects/model-init-check/models/registrations/system/registrations/730a4f98-ce40-4beb-8a78-214c0b037e56.json"
+    }
+  ]
+}

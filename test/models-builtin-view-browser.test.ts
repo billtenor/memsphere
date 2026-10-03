@@ -802,8 +802,8 @@ test("model information is the default tab and orders identity, standard, tags a
   await table.waitFor();
   const row = (label: string) => table.locator("tr").filter({ has: page.getByRole("rowheader", { name: label, exact: true }) }).locator("td");
   assert.equal(await row("模型 ID").innerText(), "memsphere/model-registration");
-  assert.equal(await row("存储方式").innerText(), "代码内置");
-  assert.equal(await row("存储 ID").innerText(), "—");
+  assert.equal(await row("存储方式").innerText(), "持久化存储");
+  assert.equal(await row("存储 ID").innerText(), "models/system/json-schema/draft-07");
   await showStructure(page);
   assert.deepEqual(await page.locator(".model-definition-name").allTextContents(), ["modelRef", "name", "description", "package", "package_name", "tags", "storage", "store_id"]);
 }));

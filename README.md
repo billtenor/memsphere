@@ -243,9 +243,11 @@ View 的 Memory 下提供“当前项目 / 记忆市场”入口。记忆市场�
 
 Project 的“模型”页面按包管理模型：“本项目”下有未定义包和项目包，“已导入的包”下有系统包和市场导入包，另有模型市场入口。列表展示名称、模型 ID、说明与标签，可组合包范围、标签和搜索；详情默认以“模型信息”表格展示管理属性，再查看树形模型结构或完整原始 JSON。
 
-模型结构与管理信息分别存储。JSON Schema Draft-07 定义直接保存为可阅读的 `.json` 文件，模型 ID 是包含后缀的相对路径，例如 `sales/order.json`。代码内置的 `memsphere/model-registration` 定义登记信息：`modelRef`、`name`、`description`、`package`、`package_name`、`tags`、`storage`、`store_id`。其中 `storage` 区分代码内置与持久化存储，持久化模型用 `store_id` 指向保存其结构的 DataStore；登记记录则放在独立的 filesystem ValueStore 中，不存在依赖自身登记才能启动的问题。
+模型结构与管理信息分别存储。JSON Schema Draft-07 定义直接保存为可阅读的 `.json` 文件，项目模型 ID 是包含后缀的相对路径，例如 `sales/order.json`。`memsphere/model-registration` 定义登记信息：`modelRef`、`name`、`description`、`package`、`package_name`、`tags`、`storage`、`store_id`。持久化模型使用 `storage=store` 和 `store_id` 指向保存其结构的 DataStore，登记记录放在独立的 filesystem ValueStore 中。登记 Runtime 直接读取固定位置的定义，不依赖自己的登记记录。
 
-先显式初始化登记；浏览模型不会自动写入：
+`project create` 为 Managed 和 Embedded Project 自动安装五个内置模型（登记模型和四个 raw Run 模型）。原始 JSON 在发行包的 `reserved-models/system-models/`，统一由 `reserved-models/manifest.json` 管理。实际定义和登记进入所选登记目录的 `system/definitions/` 与 `system/registrations/`，稳定模型 ID 保持不变，Store ID 分别为 `models/system/json-schema/draft-07` 和 `models/system/raw`。
+
+已有 Project 显式补装内置模型并初始化登记；浏览模型不会自动写入：
 
 ```bash
 memsphere --project my-project project models initialize
@@ -257,7 +259,9 @@ memsphere --project my-project project models initialize
 
 在“设置 → 模型登记存储”先选择存储 ID，再配置该 Store 的类型和目录，登记模型固定只读。默认使用 `memsphere/model-registrations`，filesystem 目录为 `models/registrations`。已有数据时切换 ID 或目录需要明确确认迁移；目标校验成功后才切换配置，失败保留原数据，旧目录仍保留且不参与模型扫描。项目原有“模型存储”配置独立：`modelsDirectory` 默认 `models/json-schema/draft-07`，相对 Registry 登记的 Project 根目录解析，也可指定绝对路径；修改它不自动迁移模型文件。
 
-模型市场提供随发行包附带的本地订单模型包；导入后定义进入独立模型 DataStore，登记进入导入区域。重复导入相同内容显示无变更；已修改的内容或同模型 ID 冲突拒绝整包，并返回冲突清单，不静默覆盖。未导入和导入失败的候选不会进入正常模型列表。模型定义编辑、值实例管理和远程市场不在当前功能范围内。
+模型市场通过同一清单管理 `reserved-models/market-models/` 中的原始 JSON，提供包含用例 01–08 的示例包 `memsphere.examples`，订单示例保留在用例 02 中，不再单列市场包。新 Project 不自动安装示例；市场移除包不会删除已导入数据，当前不提供卸载入口。导入后定义进入独立模型 DataStore，登记进入导入区域。重复导入相同内容显示无变更；已修改的内容或同模型 ID 冲突拒绝整包，并返回冲突清单，不静默覆盖。未导入和导入失败的候选不会进入正常模型列表。模型定义编辑、值实例管理和远程市场不在当前功能范围内。
+
+维护脚本 `scripts/relocate-example-models.mjs` 专门整理 memsphere Project 中原始的八个历史示例：先 `node scripts/relocate-example-models.mjs plan --project memsphere --out <plan.json>`，再 `node scripts/relocate-example-models.mjs apply --plan <plan.json>`。只有定义、登记基线和保留模型引用检查通过，且完整备份经过隔离恢复演练后才移出示例；备份长期保存在 Project 的 `backups/model-registration/20261003-model-catalogs/`。使用 `node scripts/relocate-example-models.mjs restore --backup <备份目录>` 原样恢复，冲突或损坏时拒绝写入。这不是启动或浏览时自动执行的迁移。
 
 查看当前绑定的 Project，并验证其中的 Memory：
 

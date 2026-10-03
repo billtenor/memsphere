@@ -1,0 +1,224 @@
+{
+  "checkedAt": "2026-10-03T12:32:41.009Z",
+  "pid": 1004918,
+  "startedAt": "2026-10-03T12:32:14.568Z",
+  "cmdline": "/usr/bin/node ${WORKSPACE_ROOT}/dist/cli.js view serve --config ${MEMSPHERE_HOME}/projects/memsphere/config.json --state ${MEMSPHERE_HOME}/.runtime/view-service.json ",
+  "checks": [
+    {
+      "project": "model-init-check",
+      "packages": [
+        {
+          "id": "memsphere.examples",
+          "name": "示例模型",
+          "models": [
+            "examples/01-basic-types.json",
+            "examples/02-nested-order.json",
+            "examples/03-array-root.json",
+            "examples/04-dictionaries-and-encodings.json",
+            "examples/05-unions-and-conditions.json",
+            "examples/06-references-and-recursion.json",
+            "examples/07-scalar-enum-root.json",
+            "examples/08-numeric-enum-root.json"
+          ]
+        }
+      ],
+      "installedModels": [
+        {
+          "id": "examples/01-basic-types.json",
+          "status": "available",
+          "origin": "market",
+          "package": "memsphere.examples"
+        },
+        {
+          "id": "examples/02-nested-order.json",
+          "status": "available",
+          "origin": "market",
+          "package": "memsphere.examples"
+        },
+        {
+          "id": "examples/03-array-root.json",
+          "status": "available",
+          "origin": "market",
+          "package": "memsphere.examples"
+        },
+        {
+          "id": "examples/04-dictionaries-and-encodings.json",
+          "status": "available",
+          "origin": "market",
+          "package": "memsphere.examples"
+        },
+        {
+          "id": "examples/05-unions-and-conditions.json",
+          "status": "available",
+          "origin": "market",
+          "package": "memsphere.examples"
+        },
+        {
+          "id": "examples/06-references-and-recursion.json",
+          "status": "available",
+          "origin": "market",
+          "package": "memsphere.examples"
+        },
+        {
+          "id": "examples/07-scalar-enum-root.json",
+          "status": "available",
+          "origin": "market",
+          "package": "memsphere.examples"
+        },
+        {
+          "id": "examples/08-numeric-enum-root.json",
+          "status": "available",
+          "origin": "market",
+          "package": "memsphere.examples"
+        },
+        {
+          "id": "memsphere/model-registration",
+          "status": "available",
+          "origin": "system",
+          "package": "memsphere.builtin"
+        },
+        {
+          "id": "memsphere/run/agent-activity-log",
+          "status": "available",
+          "origin": "system",
+          "package": "memsphere.builtin"
+        },
+        {
+          "id": "memsphere/run/agent-activity-snapshot",
+          "status": "available",
+          "origin": "system",
+          "package": "memsphere.builtin"
+        },
+        {
+          "id": "memsphere/run/artifact",
+          "status": "available",
+          "origin": "system",
+          "package": "memsphere.builtin"
+        },
+        {
+          "id": "memsphere/run/memory-snapshot-file",
+          "status": "available",
+          "origin": "system",
+          "package": "memsphere.builtin"
+        }
+      ]
+    },
+    {
+      "project": "memsphere",
+      "packages": [
+        {
+          "id": "memsphere.examples",
+          "name": "示例模型",
+          "models": [
+            "examples/01-basic-types.json",
+            "examples/02-nested-order.json",
+            "examples/03-array-root.json",
+            "examples/04-dictionaries-and-encodings.json",
+            "examples/05-unions-and-conditions.json",
+            "examples/06-references-and-recursion.json",
+            "examples/07-scalar-enum-root.json",
+            "examples/08-numeric-enum-root.json"
+          ]
+        }
+      ],
+      "installedModels": [
+        {
+          "id": "memsphere/model-registration",
+          "status": "available",
+          "origin": "system",
+          "package": "memsphere.builtin"
+        },
+        {
+          "id": "memsphere/run-domain/agent-attempt.json",
+          "status": "available",
+          "origin": "project",
+          "package": "memsphere.run-domain"
+        },
+        {
+          "id": "memsphere/run-domain/artifact.json",
+          "status": "available",
+          "origin": "project",
+          "package": "memsphere.run-domain"
+        },
+        {
+          "id": "memsphere/run-domain/assignment.json",
+          "status": "available",
+          "origin": "project",
+          "package": "memsphere.run-domain"
+        },
+        {
+          "id": "memsphere/run-domain/comment.json",
+          "status": "available",
+          "origin": "project",
+          "package": "memsphere.run-domain"
+        },
+        {
+          "id": "memsphere/run-domain/external.json",
+          "status": "available",
+          "origin": "project",
+          "package": "memsphere.run-domain"
+        },
+        {
+          "id": "memsphere/run-domain/review.json",
+          "status": "available",
+          "origin": "project",
+          "package": "memsphere.run-domain"
+        },
+        {
+          "id": "memsphere/run-domain/round.json",
+          "status": "available",
+          "origin": "project",
+          "package": "memsphere.run-domain"
+        },
+        {
+          "id": "memsphere/run-domain/run-event.json",
+          "status": "available",
+          "origin": "project",
+          "package": "memsphere.run-domain"
+        },
+        {
+          "id": "memsphere/run-domain/run.json",
+          "status": "available",
+          "origin": "project",
+          "package": "memsphere.run-domain"
+        },
+        {
+          "id": "memsphere/run-domain/step.json",
+          "status": "available",
+          "origin": "project",
+          "package": "memsphere.run-domain"
+        },
+        {
+          "id": "memsphere/run-domain/vote.json",
+          "status": "available",
+          "origin": "project",
+          "package": "memsphere.run-domain"
+        },
+        {
+          "id": "memsphere/run/agent-activity-log",
+          "status": "available",
+          "origin": "system",
+          "package": "memsphere.builtin"
+        },
+        {
+          "id": "memsphere/run/agent-activity-snapshot",
+          "status": "available",
+          "origin": "system",
+          "package": "memsphere.builtin"
+        },
+        {
+          "id": "memsphere/run/artifact",
+          "status": "available",
+          "origin": "system",
+          "package": "memsphere.builtin"
+        },
+        {
+          "id": "memsphere/run/memory-snapshot-file",
+          "status": "available",
+          "origin": "system",
+          "package": "memsphere.builtin"
+        }
+      ]
+    }
+  ]
+}

@@ -7,6 +7,21 @@ import type { FieldDescriptor, ObjectDescriptor } from "../../api/reflection.js"
 import { JSON_SCHEMA_DRAFT_07 } from "../json-schema/index.js";
 import { createPlainRuntime } from "../shared/reflection.js";
 
+const ajv = new Ajv({ allErrors: true, strict: false, ownProperties: true });
+
+/** Validate the definition standard without compiling the business Runtime subset. */
+export function validateJsonSchemaDefinition(value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("JSON Schema definition must be an object");
+  const schema = value as Record<string, unknown>;
+  if (schema.$schema !== undefined && (typeof schema.$schema !== "string"
+    || !/^https?:\/\/json-schema\.org\/draft-07\/schema#?$/.test(schema.$schema))) {
+    throw new TypeError("Only JSON Schema Draft-07 is supported");
+  }
+  if (!ajv.validate("http://json-schema.org/draft-07/schema", value)) {
+    throw new TypeError(`Invalid JSON Schema definition: ${ajv.errorsText(ajv.errors)}`);
+  }
+}
+
 /** Bootstrap the definition format itself, independently of business-model compilation. */
 export class JsonSchemaMetaModelRuntimeFactory implements ModelRuntimeFactory {
   readonly target = Object.freeze({ model: JSON_SCHEMA_DRAFT_07 });
@@ -21,19 +36,8 @@ export class JsonSchemaMetaModelRuntimeFactory implements ModelRuntimeFactory {
     }
     Object.freeze(fields);
     Object.freeze(root);
-    const ajv = new Ajv({ allErrors: true, strict: false, ownProperties: true });
     return createPlainRuntime(Object.freeze({ id: model.data.id, root }), {
-      validate(value) {
-        if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("JSON Schema definition must be an object");
-        const schema = value as Record<string, unknown>;
-        if (schema.$schema !== undefined && (typeof schema.$schema !== "string"
-          || !/^https?:\/\/json-schema\.org\/draft-07\/schema#?$/.test(schema.$schema))) {
-          throw new TypeError("Only JSON Schema Draft-07 is supported");
-        }
-        if (!ajv.validate("http://json-schema.org/draft-07/schema", value)) {
-          throw new TypeError(`Invalid JSON Schema definition: ${ajv.errorsText(ajv.errors)}`);
-        }
-      }
+      validate: validateJsonSchemaDefinition
     });
   }
 }
