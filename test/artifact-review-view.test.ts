@@ -21,7 +21,7 @@ import {
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 import { reviewConfiguration } from "./helpers/review.js";
 
-test("Artifact Review View API isolates drafts and settles the Run once", async () => {
+test("Artifact Review View API isolates drafts and settles the Run once", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-artifact-review-view-"));
   const memoryRoot = join(dir, "memory");
   const runsRoot = join(dir, "runs");
@@ -77,6 +77,7 @@ flow:
   assert(review);
   const privateAttempt = review.rounds[0].assignments.find((assignment) => assignment.actorId === "bob");
   assert(privateAttempt);
+  const fixtureWorkerPid = 4242;
   privateAttempt.attempts = [{
     id: "attempt-private",
     sequence: 1,
@@ -85,7 +86,7 @@ flow:
     createdAt: "2026-07-22T00:00:00.000Z",
     startedAt: "2026-07-22T00:00:01.000Z",
     completedAt: "2026-07-22T00:00:02.000Z",
-    workerPid: 4242,
+    workerPid: fixtureWorkerPid,
     cliReadyAt: "2026-07-22T00:00:01.500Z",
     promptVersion: "private-prompt",
     sessionId: "private-session",
@@ -291,7 +292,23 @@ flow:
     assert.equal(advisory?.body, "Advisory suggestion\\n\\nSecond paragraph");
     assert.match(advisory?.renderedBody ?? "", /<p>Advisory suggestion<\/p>\s*<p>Second paragraph<\/p>/);
 
-    await archiveRun({ archiveRoot, runsRoot, id: started.id });
+    const originalKill = process.kill.bind(process);
+    const probedWorkerPids: number[] = [];
+    // The private attempt is synthetic; its PID must not depend on host processes.
+    const workerProbe = t.mock.method(process, "kill", (...args: Parameters<typeof process.kill>) => {
+      const [pid, signal] = args;
+      if (pid === fixtureWorkerPid && signal === 0) {
+        probedWorkerPids.push(pid);
+        throw Object.assign(new Error("Fixture Worker has exited"), { code: "ESRCH" });
+      }
+      return originalKill(...args);
+    });
+    try {
+      await archiveRun({ archiveRoot, runsRoot, id: started.id });
+    } finally {
+      workerProbe.mock.restore();
+    }
+    assert.deepEqual(probedWorkerPids, [fixtureWorkerPid]);
     const archivedDetail = await fetch(`${base}/api/projects/memsphere/runs/${started.id}`);
     assert.equal(archivedDetail.status, 200);
     assert.equal((await archivedDetail.json() as { run: { readOnly?: boolean } }).run.readOnly, true);
