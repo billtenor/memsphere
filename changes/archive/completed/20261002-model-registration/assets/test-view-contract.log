@@ -1,0 +1,88 @@
+TAP version 13
+# Subtest: View page routes are the union of the builtin Module route grants
+ok 1 - View page routes are the union of the builtin Module route grants
+  ---
+  duration_ms: 1.797015
+  type: 'test'
+  ...
+# Subtest: each builtin View entry is a separately compiled Plugin source
+ok 2 - each builtin View entry is a separately compiled Plugin source
+  ---
+  duration_ms: 6.682483
+  type: 'test'
+  ...
+# Subtest: Memory summaries do not reuse full Memory readers
+ok 3 - Memory summaries do not reuse full Memory readers
+  ---
+  duration_ms: 1.425163
+  type: 'test'
+  ...
+# Subtest: renderMarkdownContent renders GFM blocks while escaping unsafe HTML and links
+ok 4 - renderMarkdownContent renders GFM blocks while escaping unsafe HTML and links
+  ---
+  duration_ms: 5.361694
+  type: 'test'
+  ...
+# Subtest: Reference Module styles use public tokens and stay inside the Feature root
+ok 5 - Reference Module styles use public tokens and stay inside the Feature root
+  ---
+  duration_ms: 6.260683
+  type: 'test'
+  ...
+# Subtest: Model product prototype styles stay inside their public Feature boundary
+ok 6 - Model product prototype styles stay inside their public Feature boundary
+  ---
+  duration_ms: 1.637569
+  type: 'test'
+  ...
+# Subtest: Production model browser styles consume public tokens within the model Feature
+ok 7 - Production model browser styles consume public tokens within the model Feature
+  ---
+  duration_ms: 3.173282
+  type: 'test'
+  ...
+# Subtest: real Memory and Run Modules pass the public style boundary and keep migrated control CSS removed
+ok 8 - real Memory and Run Modules pass the public style boundary and keep migrated control CSS removed
+  ---
+  duration_ms: 5.315511
+  type: 'test'
+  ...
+# Subtest: Memory and Run share one canonical Procedure flow renderer
+ok 9 - Memory and Run share one canonical Procedure flow renderer
+  ---
+  duration_ms: 2.970522
+  type: 'test'
+  ...
+# Subtest: Module style boundary rejects public token declarations and Host internals
+ok 10 - Module style boundary rejects public token declarations and Host internals
+  ---
+  duration_ms: 0.790133
+  type: 'test'
+  ...
+# Subtest: Feature scope rejects global selectors but allows custom local geometry
+ok 11 - Feature scope rejects global selectors but allows custom local geometry
+  ---
+  duration_ms: 0.400835
+  type: 'test'
+  ...
+# Subtest: Feature scope rejects CSS forms the static scope check cannot inspect
+ok 12 - Feature scope rejects CSS forms the static scope check cannot inspect
+  ---
+  duration_ms: 0.318088
+  type: 'test'
+  ...
+# Subtest: Shell public visuals use Theme tokens while private variables stay geometric
+ok 13 - Shell public visuals use Theme tokens while private variables stay geometric
+  ---
+  duration_ms: 1.746233
+  type: 'test'
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 13
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 495.39844

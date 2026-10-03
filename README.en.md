@@ -254,9 +254,21 @@ Start the local View:
 memsphere view start
 ~~~
 
-Each Project has a read-only **Models** module alongside Memory and Runs. JSON Schema Draft-07 definitions are stored as ordinary JSON files in the default `models/json-schema/draft-07` directory; a model ID is its relative filename, such as `sales/order.json`. The model browser lists those definitions and the four built-in raw Run models, presents fields as an expandable tree table, and exposes the complete original JSON for viewing. It does not edit models or manage value instances.
+The **Models** module groups models under **This project** (unpackaged models and project packages), **Imported packages** (built-in and market packages), and **Model market**. Package scope, tags and search work together. Each list entry shows its name, model ID, description and tags; the default **Model information** tab displays a property table before **Model structure** and **Source definition**.
 
-Under **Settings → Project → Model storage**, the optional `modelsDirectory` setting selects the directory. Relative paths are resolved against the registered Project root, not the Git repository, Memory root or current working directory; absolute paths are accepted. Saving switches the location on the next model refresh without restarting View or moving the old files. Advanced Schema keywords remain available in the source definition; reading a definition does not imply that the current business Runtime supports every Draft-07 feature.
+Model definitions and registration data use separate stores. JSON Schema Draft-07 definitions remain ordinary `.json` files, identified by relative filenames such as `sales/order.json`. The code-built-in `memsphere/model-registration` model defines `modelRef`, `name`, `description`, `package`, `package_name`, `tags`, `storage` and `store_id`. The required `storage` field distinguishes built-in code from persistent storage; a persistent definition uses `store_id` to select its DataStore. Registration values live in a separate filesystem ValueStore. The registration Runtime starts without reading its own registration.
+
+Initialize registrations explicitly; browsing models does not write data:
+
+~~~bash
+memsphere --project my-project project models initialize
+~~~
+
+Use `project models initialize my-project --output json` for a structured receipt. A recognized legacy registration-model preview is backed up before migration to the built-in identity; other definition bytes and management properties are preserved.
+
+Under **Settings → Model registration storage**, select a storage ID first, then edit that Store's type and directory. The registration model is fixed and read-only. Defaults are `memsphere/model-registrations` and the filesystem directory `models/registrations`. Changing the selected ID or directory with existing data requires explicit migration consent. Configuration switches only after the destination passes validation; failure preserves the original data. Old registration directories remain excluded from model discovery. **Model storage** remains separate: `modelsDirectory` defaults to `models/json-schema/draft-07`, resolves against the registered Project root, and accepts absolute paths. Changing it does not move the original model files.
+
+The local model market includes an order-model package shipped with the release. Imported definitions use a separate model DataStore and their registrations enter the imported area. Reimporting identical content makes no changes; modified content or a conflicting model ID rejects the entire package with a conflict list, without overwriting existing models. Unimported or incomplete imports do not appear in the normal model list. Model definition editing, value-instance management and a remote market are outside the current feature scope. Viewing a Draft-07 definition does not imply full support for all its keywords in the business Runtime.
 
 #### Repair or Upgrade System Memory
 

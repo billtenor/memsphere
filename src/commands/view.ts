@@ -791,9 +791,22 @@ async function handleRequest(
       body.config as EditableProjectConfigDraft,
       global.raw
     );
+    let migrationRequired = false;
+    if (validation.valid && validation.candidate) {
+      try {
+        const { validateModelStoragePaths } = await import("../project/model-storage-paths.js");
+        await validateModelStoragePaths({ root: document.scopeRoot, modelsDirectory: validation.candidate.modelsDirectory, modelRegistration: validation.candidate.modelRegistration });
+        const { prepareModelRegistrationMigration, DEFAULT_MODEL_REGISTRATION_CONFIG } = await import("../project/model-registration.js");
+        await prepareModelRegistrationMigration({}, { root: document.scopeRoot, modelsDirectory: document.raw.modelsDirectory, modelRegistration: document.raw.modelRegistration }, validation.candidate.modelRegistration ?? DEFAULT_MODEL_REGISTRATION_CONFIG);
+      } catch (error) {
+        if (error && typeof error === "object" && "code" in error && error.code === "MODEL_REGISTRATION_MIGRATION_REQUIRED") migrationRequired = true;
+        else { validation.valid = false; validation.errors.push({ path: "modelRegistration", message: error instanceof Error ? error.message : String(error) }); }
+      }
+    }
     const { candidate: _candidate, ...publicValidation } = validation;
     sendJson(response, validation.valid ? 200 : 422, {
       ...publicValidation,
+      migrationRequired,
       expectedRevision: document.revision,
       restartRequired: false,
       ...projectCompositionState(
@@ -808,7 +821,7 @@ async function handleRequest(
 
   if (url.pathname === "/api/settings/project" && request.method === "PUT") {
     if (!authorizeSettingsRequest(request, response, config, options, true)) return;
-    const body = await readJsonBody<{ expectedRevision?: unknown; config?: unknown }>(request, 128 * 1024);
+    const body = await readJsonBody<{ expectedRevision?: unknown; config?: unknown; migrateModelRegistrations?: unknown }>(request, 128 * 1024);
     if (typeof body.expectedRevision !== "string" || !body.config || typeof body.config !== "object") {
       sendJson(response, 400, { code: "invalid_request", error: "expectedRevision and config are required" });
       return;
@@ -824,7 +837,8 @@ async function handleRequest(
         document,
         expectedRevision: body.expectedRevision,
         draft: body.config as EditableProjectConfigDraft,
-        globalConfigPath: global.configPath
+        globalConfigPath: global.configPath,
+        migrateModelRegistrations: body.migrateModelRegistrations === true
       });
       sendJson(response, 200, {
         ...projectSettingsPayload(
@@ -835,6 +849,10 @@ async function handleRequest(
         saved: true
       });
     } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "MODEL_REGISTRATION_MIGRATION_REQUIRED") {
+        sendJson(response, 409, { code: error.code, error: error instanceof Error ? error.message : String(error), migrationRequired: true }); return;
+      }
+      if (error instanceof TypeError) { sendJson(response, 422, { code: "config_invalid", errors: [{ path: "modelRegistration", message: error.message }] }); return; }
       if (error instanceof ConfigDraftValidationError) {
         sendJson(response, 422, {
           code: "config_invalid",
@@ -857,6 +875,47 @@ async function handleRequest(
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/models/market") {
+    const { listModelMarket } = await import("../project/model-market.js");
+    sendJson(response, 200, { packages: listModelMarket() }); return;
+  }
+  if (request.method === "POST" && (url.pathname === "/api/models/initialize" || url.pathname === "/api/models/market/import" || url.pathname === "/api/models/market/cleanup")) {
+    if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+    const body = await readJsonBody<{ packageId?: unknown; expectedRevision?: unknown }>(request, 128 * 1024);
+    const initial = await readCurrentProjectSettingsDocument(config);
+    if (!initial) { sendJson(response, 404, { code: "project_unavailable", error: "Project is not available" }); return; }
+    const controller = new AbortController();
+    request.once("aborted", () => controller.abort());
+    try {
+      const { withModelRegistrationLock, initializeProjectModelRegistrations } = await import("../project/model-registration.js");
+      const result = await withModelRegistrationLock(initial.scopeRoot, async () => {
+        const document = await readCurrentProjectSettingsDocument(config);
+        if (!document) throw new Error("Project is not available");
+        if (typeof body.expectedRevision !== "string" || body.expectedRevision !== document.revision) throw new ConfigRevisionConflictError(String(body.expectedRevision), document.revision);
+        const input = { root: document.scopeRoot, modelsDirectory: document.raw.modelsDirectory, modelRegistration: document.raw.modelRegistration };
+        if (url.pathname === "/api/models/initialize") {
+          const initialized = await initializeProjectModelRegistrations({ signal: controller.signal }, input);
+          const { atomicWriteJson } = await import("../persistence.js");
+          await atomicWriteJson(document.configPath, { ...document.raw, modelRegistration: initialized.config });
+          return initialized;
+        }
+        if (url.pathname === "/api/models/market/cleanup") {
+          const { cleanupModelMarketCandidates } = await import("../project/model-market.js");
+          return cleanupModelMarketCandidates({ signal: controller.signal }, input);
+        }
+        if (typeof body.packageId !== "string" || !body.packageId.trim()) throw new TypeError("packageId is required");
+        const { importModelMarketPackage } = await import("../project/model-market.js");
+        return importModelMarketPackage({ signal: controller.signal }, input, body.packageId);
+      });
+      sendJson(response, 200, result);
+    } catch (error) {
+      const details = error && typeof error === "object" ? error as { code?: string; conflicts?: unknown; pendingModelRefs?: unknown } : {};
+      sendJson(response, error instanceof ConfigRevisionConflictError ? 409 : details.code?.includes("CONFLICT") ? 409 : error instanceof TypeError ? 422 : 500,
+        { code: error instanceof ConfigRevisionConflictError ? "revision_conflict" : details.code, error: error instanceof Error ? error.message : String(error), conflicts: details.conflicts, pendingModelRefs: details.pendingModelRefs });
+    }
+    return;
+  }
+
   if (request.method === "GET" && (url.pathname === "/api/models" || url.pathname === "/api/models/definition")) {
     const document = await readCurrentProjectSettingsDocument(config);
     if (!document) { sendJson(response, 404, { error: "Project is not available" }); return; }
@@ -865,9 +924,13 @@ async function handleRequest(
     response.once("close", () => controller.abort());
     try {
       const host = await createProjectModelHost({ signal: controller.signal }, {
-        root: document.scopeRoot, modelsDirectory: document.raw.modelsDirectory
+        root: document.scopeRoot, modelsDirectory: document.raw.modelsDirectory, modelRegistration: document.raw.modelRegistration
       });
-      if (url.pathname === "/api/models") sendJson(response, 200, { models: await host.list() });
+      if (url.pathname === "/api/models") {
+        const { readModelRegistrations } = await import("../project/model-registration.js");
+        const registrationState = await readModelRegistrations({ signal: controller.signal }, { root: document.scopeRoot, modelsDirectory: document.raw.modelsDirectory, modelRegistration: document.raw.modelRegistration });
+        sendJson(response, 200, { models: await host.list(), configRevision: document.revision, registrationInitialized: registrationState.initialized, diagnostics: registrationState.diagnostics });
+      }
       else {
         const id = url.searchParams.get("model");
         if (!id) { sendJson(response, 400, { error: "model ID is required" }); return; }
@@ -3306,7 +3369,7 @@ function matchProjectScopedPath(pathname: string, prefix: string): { projectId: 
 function isProjectResourceApi(pathname: string): boolean {
   return [
     "/api/runs", "/api/artifact-reviews", "/api/memories", "/api/changes",
-    "/api/market", "/api/archive/runs", "/api/archive/changes", "/api/settings/project"
+    "/api/market", "/api/models", "/api/archive/runs", "/api/archive/changes", "/api/settings/project"
   ].some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 

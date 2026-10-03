@@ -48,3 +48,15 @@ export const modelStyles = `
   [data-models] .model-definition-text-action:hover:not(:disabled) { background:transparent; color:var(--mem-view-color-accent-hover); text-decoration:underline; }
   [data-models] .model-definition-text-action:focus-visible { outline:2px solid var(--mem-view-color-accent); outline-offset:2px; box-shadow:0 0 0 3px var(--mem-view-color-focus-ring); }
 `;
+
+export const registrationStyles = `
+[data-models-list] .model-tags-filter{padding:var(--mem-view-space-2) var(--mem-view-space-4)}
+[data-models-list] .model-tags-filter .mem-view-field{min-width:0;margin:0}
+[data-models] .model-information-table{border:1px solid var(--mem-view-color-border);border-radius:var(--mem-view-radius-md);background:var(--mem-view-color-surface);border-collapse:collapse;width:100%;font-size:var(--mem-view-font-size-sm)}
+[data-models] .model-information-table th,[data-models] .model-information-table td{padding:var(--mem-view-space-3);border-bottom:1px solid var(--mem-view-color-border);text-align:left;vertical-align:top;overflow-wrap:anywhere}
+[data-models] .model-information-table th{width:120px;color:var(--mem-view-color-text-muted);font-weight:400;background:var(--mem-view-color-canvas)}
+[data-models] .model-market-grid{display:grid;gap:var(--mem-view-space-4)}
+[data-models] .model-market-card{padding:var(--mem-view-space-5);border:1px solid var(--mem-view-color-border);border-radius:var(--mem-view-radius-md);background:var(--mem-view-color-surface)}
+[data-models] .model-market-card h3{margin-top:0}
+@media(max-width:700px){[data-models] .model-information-table th{width:85px}}
+`;

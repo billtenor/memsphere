@@ -144,7 +144,20 @@ export interface RunArtifactPresentationContext {
   defaultRender(): HTMLElement;
 }
 
+export interface ModelRegistrationPresentation {
+ readonly modelRef: string;
+ readonly name?: string;
+ readonly description?: string;
+ readonly package?: string;
+ readonly package_name?: string;
+ readonly tags?: readonly string[];
+ readonly storage: "builtin" | "store";
+ readonly store_id?: string;
+}
+
 export interface ModelPresentationSummary {
+  readonly registration?: ModelRegistrationPresentation;
+  readonly origin?: "project" | "system" | "market";
   readonly id: string;
   readonly metaModel: string;
   readonly builtin: boolean;
@@ -350,6 +363,8 @@ export interface NavigationItemDescriptor {
 }
 
 export type SecondaryNavigationItemDescriptor = Readonly<{
+  group?: TextRef;
+  separatorBefore?: boolean;
   id: string;
   label: TextRef;
   icon: IconRef;
@@ -420,6 +435,7 @@ export type UiTone = "default" | "info" | "success" | "warning" | "danger";
 export type UiSize = "sm" | "md";
 
 export interface BadgeDescriptor {
+  readonly title?: TextRef;
   readonly label: TextRef;
   readonly tone?: UiTone;
   readonly icon?: IconRef;
@@ -794,12 +810,14 @@ export function isSecondaryNavigationItemDescriptor(value: unknown): value is Se
   const candidate = value as Partial<SecondaryNavigationItemDescriptor> & { route?: unknown; action?: unknown };
   const hasRoute = candidate.route !== undefined;
   const hasAction = candidate.action !== undefined;
-  return hasOnlyKeys(value, ["id", "label", "icon", "badge", "selected", "route", "action"])
+  return hasOnlyKeys(value, ["id", "label", "icon", "badge", "group", "separatorBefore", "selected", "route", "action"])
     && typeof candidate.id === "string"
     && candidate.id.length > 0
     && isTextRef(candidate.label)
     && isIconRef(candidate.icon)
     && (candidate.badge === undefined || isTextRef(candidate.badge))
+    && (candidate.group === undefined || isTextRef(candidate.group))
+    && (candidate.separatorBefore === undefined || typeof candidate.separatorBefore === "boolean")
     && typeof candidate.selected === "boolean"
     && hasRoute !== hasAction
     && (!hasRoute || isRouteTarget(candidate.route))
@@ -948,8 +966,9 @@ function isContentListItemDescriptor(value: unknown): value is ContentListItemDe
 export function isBadgeDescriptor(value: unknown): value is BadgeDescriptor {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Partial<BadgeDescriptor>;
-  return hasOnlyKeys(value, ["label", "tone", "icon"])
+  return hasOnlyKeys(value, ["label", "tone", "icon", "title"])
     && isTextRef(candidate.label)
+    && (candidate.title === undefined || isTextRef(candidate.title))
     && (candidate.tone === undefined || ["default", "info", "success", "warning", "danger"].includes(candidate.tone))
     && (candidate.icon === undefined || isIconRef(candidate.icon));
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -47,7 +47,7 @@ test("Project model catalog traverses all pages and keeps corrupt definitions vi
   await writeFile(join(directory, "ignored.md"), "not a model");
   const models = await (await createProjectModelHost({}, { root })).list();
   assert.equal(models.filter(item => !item.builtin && item.status === "available").length, 1001);
-  assert.equal(models.filter(item => item.builtin).length, 4);
+  assert.equal(models.filter(item => item.builtin).length, 5);
   assert.equal(models.find(item => item.id === "bad.json")?.status, "unavailable");
   assert.equal(models.find(item => item.id === "invalid.json")?.status, "unavailable");
   assert.equal(models.some(item => item.id === "ignored.md"), false);
@@ -66,10 +66,11 @@ test("Project model refresh reads changed files while each definition and source
 }));
 
 test("Relative and absolute model directories use the Project root rather than cwd", async () => fixture(async (root) => {
+  const canonicalRoot = await realpath(root);
   const relative = await createProjectModelHost({}, { root, modelsDirectory: "custom" });
-  assert.equal(relative.directory, resolve(root, "custom"));
+  assert.equal(relative.directory, resolve(canonicalRoot, "custom"));
   const absolute = await createProjectModelHost({}, { root, modelsDirectory: resolve(root, "absolute") });
-  assert.equal(absolute.directory, resolve(root, "absolute"));
+  assert.equal(absolute.directory, resolve(canonicalRoot, "absolute"));
   const fresh = await createProjectModelHost({}, { root, modelsDirectory: "new/missing" });
   assert.equal((await fresh.list()).filter(model => !model.builtin).length, 0);
 }));

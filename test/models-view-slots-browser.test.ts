@@ -51,6 +51,7 @@ const definitionPackage = `
 test("selected definition renderer receives frozen model data and can wrap the official tree and source without replacing navigation", async () => {
   await withPackage(definitionCell, definitionPackage, async (page, origin) => {
     await page.goto(`${origin}/projects/alpha/models?model=sales%2Forder.json`);
+    await page.getByRole("radio", { name: "模型结构", exact: true }).click();
     await page.locator('[data-custom-definition="structure"] .model-definition-table').waitFor();
     await page.getByRole("button", { name: "展开 items", exact: true }).click();
     await page.getByText("[元素结构]", { exact: true }).waitFor();
@@ -64,6 +65,7 @@ test("selected definition renderer receives frozen model data and can wrap the o
       { id: "sales/order.json", view: "source", frozen: true }
     ]);
     await page.goto(`${origin}/projects/alpha/models?model=memsphere%2Frun%2Fartifact`);
+    await page.getByRole("radio", { name: "模型结构", exact: true }).click();
     await page.locator('[data-custom-definition="structure"]').waitFor();
     await page.getByText("原始内容模型", { exact: true }).waitFor();
     assert.equal(await page.locator(".model-definition-table").count(), 0);
@@ -100,7 +102,7 @@ test("selected Models page uses the official presentation service for definition
     await page.getByRole("button", { name: "Refresh models", exact: true }).click();
     await page.waitForFunction(() => (window as any).__modelsRefreshed > 0);
     await page.getByRole("button", { name: "Open union model", exact: true }).click();
-    await page.waitForURL("**/models?model=advanced.json");
+    await page.waitForURL(url => url.pathname.endsWith("/models") && url.searchParams.get("model") === "advanced.json");
     await page.getByRole("heading", { name: "组合条件", exact: true }).waitFor();
     await page.getByRole("button", { name: "记忆", exact: true }).click();
     await page.waitForURL("**/memories");
@@ -123,6 +125,7 @@ for (const [cell, token, key] of [[pageCell, "modelsPagePresentation", "page"], 
       }};`;
     await withPackage(cell, source, async (page, origin) => {
       await page.goto(`${origin}/projects/alpha/models?model=sales%2Forder.json`);
+      await page.getByRole("radio", { name: "模型结构", exact: true }).click();
       await page.locator(".model-definition-table").waitFor();
       assert.equal(await page.locator(".model-browser-heading").innerText(), "订单 Alpha");
       assert.equal(await page.evaluate(() => (window as any).__modelsFailed), 1);
@@ -136,6 +139,7 @@ for (const [cell, token, key] of [[pageCell, "modelsPagePresentation", "page"], 
 test("explicit system-default selection suppresses an installed Models definition contribution", async () => {
   await withPackage(definitionCell, definitionPackage, async (page, origin) => {
     await page.goto(`${origin}/projects/alpha/models?model=sales%2Forder.json`);
+    await page.getByRole("radio", { name: "模型结构", exact: true }).click();
     await page.locator(".model-definition-table").waitFor();
     assert.equal(await page.locator("[data-custom-definition]").count(), 0);
     assert.equal(await page.evaluate(() => (window as any).__modelRendererInputs), undefined);

@@ -26,6 +26,7 @@ export type MemsphereConfig = {
   runsRoot: string;
   archiveRoot: string;
   modelsDirectory?: string;
+  modelRegistration?: import("./project/model.js").ProjectConfigFile["modelRegistration"];
   controlPlane?: ControlPlaneConfig;
   debug: {
     agentReview: boolean;
@@ -122,6 +123,7 @@ async function readProjectExecutionConfig(options: {
     runsRoot: context.primary.paths.runsRoot,
     archiveRoot: context.primary.paths.archiveRoot,
     modelsDirectory: resolve(context.primary.paths.root, context.primary.config.modelsDirectory ?? "models/json-schema/draft-07"),
+    modelRegistration: context.primary.config.modelRegistration,
     controlPlane: context.primary.config.control_plane
       ? resolveProjectControlPlane(context.primary.config.control_plane, global.acp_providers)
       : undefined,

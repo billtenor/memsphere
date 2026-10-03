@@ -57,6 +57,7 @@ export type EditableGlobalConfigDraft = {
 
 export type EditableProjectConfigDraft = {
   modelsDirectory?: string;
+  modelRegistration?: ProjectConfigFile["modelRegistration"];
   control_plane?: ProjectControlPlaneConfigFile;
   view?: ProjectViewConfig;
 };
@@ -151,6 +152,7 @@ export function editableGlobalConfigDraft(document: GlobalConfigDocument): Edita
 export function editableProjectConfigDraft(document: ProjectConfigDocument): EditableProjectConfigDraft {
   return {
     ...(document.raw.modelsDirectory === undefined ? {} : { modelsDirectory: document.raw.modelsDirectory }),
+    ...(document.raw.modelRegistration === undefined ? {} : { modelRegistration: structuredClone(document.raw.modelRegistration) }),
     ...(document.raw.control_plane === undefined
       ? {}
       : { control_plane: structuredClone(document.raw.control_plane) }),
@@ -203,12 +205,18 @@ export function validateProjectConfigDraft(
   const candidateInput = {
     store: structuredClone(document.raw.store),
     ...(draft.modelsDirectory === undefined ? {} : { modelsDirectory: draft.modelsDirectory }),
+    ...(draft.modelRegistration === undefined ? {} : { modelRegistration: structuredClone(draft.modelRegistration) }),
     ...(draft.control_plane === undefined ? {} : { control_plane: structuredClone(draft.control_plane) }),
     ...(draft.view === undefined ? {} : { view: structuredClone(draft.view) })
   };
 
   try {
     const candidate = projectConfigSchema.parse(candidateInput);
+    // Retained roots are internal isolation state; editing a draft cannot expose old envelopes.
+    if (document.raw.modelRegistration?.excludedDirectories?.length) {
+      candidate.modelRegistration ??= structuredClone(document.raw.modelRegistration);
+      candidate.modelRegistration.excludedDirectories = [...new Set([...(candidate.modelRegistration.excludedDirectories ?? []), ...document.raw.modelRegistration.excludedDirectories])];
+    }
     if (candidate.control_plane) resolveProjectControlPlane(candidate.control_plane, global.acp_providers);
     const normalized = normalizeProjectDraft(candidate);
     return {
@@ -275,6 +283,7 @@ export async function writeProjectConfigDraft(input: {
   expectedRevision: string;
   draft: EditableProjectConfigDraft;
   globalConfigPath: string;
+  migrateModelRegistrations?: boolean;
 }): Promise<ProjectConfigDocument> {
   const globalLockPath = join(dirname(input.globalConfigPath), ".runtime", "settings.lock");
   const projectLockPath = join(input.document.scopeRoot, ".runtime", "settings.lock");
@@ -286,6 +295,11 @@ export async function writeProjectConfigDraft(input: {
     assertExpectedRevision(input.expectedRevision, latest.revision);
     const validation = validateProjectConfigDraft(latest, input.draft, global.raw);
     if (!validation.valid || !validation.candidate) throw new ConfigDraftValidationError(validation.errors);
+    const { validateModelStoragePaths } = await import("./project/model-storage-paths.js");
+    await validateModelStoragePaths({ root: latest.scopeRoot, modelsDirectory: validation.candidate.modelsDirectory, modelRegistration: validation.candidate.modelRegistration });
+    const { prepareModelRegistrationMigration, DEFAULT_MODEL_REGISTRATION_CONFIG } = await import("./project/model-registration.js");
+    const migration = await prepareModelRegistrationMigration({}, { root: latest.scopeRoot, modelsDirectory: latest.raw.modelsDirectory, modelRegistration: latest.raw.modelRegistration }, validation.candidate.modelRegistration ?? DEFAULT_MODEL_REGISTRATION_CONFIG, { migrate: input.migrateModelRegistrations });
+    if (migration.migrated) validation.candidate.modelRegistration = { ...(validation.candidate.modelRegistration ?? structuredClone(DEFAULT_MODEL_REGISTRATION_CONFIG)), excludedDirectories: migration.excludedDirectories };
     await atomicWriteJson(latest.configPath, validation.candidate);
     return readProjectConfigDocument(latest.configPath, latest.resolved);
   }));
@@ -373,6 +387,7 @@ function normalizeGlobalDraft(global: GlobalConfigFile): EditableGlobalConfigDra
 function normalizeProjectDraft(project: ProjectConfigFile): EditableProjectConfigDraft {
   return {
     ...(project.modelsDirectory === undefined ? {} : { modelsDirectory: project.modelsDirectory }),
+    ...(project.modelRegistration === undefined ? {} : { modelRegistration: structuredClone(project.modelRegistration) }),
     ...(project.control_plane === undefined
       ? {}
       : { control_plane: structuredClone(project.control_plane) }),

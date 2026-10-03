@@ -974,7 +974,8 @@ test("concurrent creation of one Project preserves the winning Project Root", as
   const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME, gitConfig: process.env.GIT_CONFIG_GLOBAL };
   try {
     await import("node:fs/promises").then(({ mkdir }) => mkdir(workspace));
-    await writeFile(gitConfig, "[user]\n\tname = Test User\n\temail = test@example.com\n");
+    // Keep Git maintenance in the foreground so it finishes before fixture cleanup.
+    await writeFile(gitConfig, "[user]\n\tname = Test User\n\temail = test@example.com\n[maintenance]\n\tautoDetach = false\n[gc]\n\tautoDetach = false\n");
     process.env.MEMSPHERE_HOME = home;
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     process.chdir(workspace);

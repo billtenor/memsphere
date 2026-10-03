@@ -1,3 +1,4 @@
+import { modelRegistrationSetupEnabled } from "../../../shared/model-browser-features.js";
 import type { RouteLocation, RouteTarget, RouteToken, ViewMount } from "@memsphere/view-sdk";
 import type { SettingsViewConfig } from "./index.js";
 
@@ -469,11 +470,22 @@ class SettingsApplication {
   }
 
   modelsHtml(scope: ScopeState): string {
+    const registration = scope.draft!.modelRegistration ?? { storeId: "memsphere/model-registrations", stores: { "memsphere/model-registrations": { factory: "memsphere/filesystem-json", directory: "models/registrations" } } };
+    const store = registration.stores[registration.storeId];
     return `<section class="settings-section"><h3>${escapeHtml(this.t("settings.models", "模型存储"))}</h3>
       ${inputField("modelsDirectory", this.t("settings.modelsDirectory", "模型目录"), scope.draft!.modelsDirectory ?? "models/json-schema/draft-07")}
       <p class="settings-help">${escapeHtml(this.t("settings.modelsHelp", "相对路径以登记的 Project 根目录为基准，也可填写绝对路径。更改目录只切换位置，不搬运原文件。"))}</p>
-      <dl><dt>${escapeHtml(this.t("settings.projectRoot", "Project 根目录"))}</dt><dd class="mono">${escapeHtml(scope.data!.scopeRoot ?? "")}</dd>
-      <dt>${escapeHtml(this.t("settings.modelsResolved", "当前生效目录"))}</dt><dd class="mono">${escapeHtml(scope.data!.resolvedPaths?.modelsDirectory ?? "")}</dd></dl>
+      <dl class="settings-model-info"><dt>${escapeHtml(this.t("settings.projectRoot", "Project 根目录"))}</dt><dd class="mono">${escapeHtml(scope.data!.scopeRoot ?? "")}</dd>
+      <dt>${escapeHtml(this.t("settings.modelsResolved", "当前生效目录"))}</dt><dd class="mono">${escapeHtml(scope.data!.resolvedPaths?.modelsDirectory ?? "")}</dd></dl></section>
+      <section class="settings-section"><h3>${escapeHtml(this.t("settings.modelRegistrationStorage", "模型登记存储"))}</h3>
+      ${selectField("modelRegistration.storeId", this.t("settings.storeId", "存储 ID"), registration.storeId, Object.keys(registration.stores).map(id => [id, id]))}
+${modelRegistrationSetupEnabled ? `<button class="btn" data-action="add-model-registration-store">${escapeHtml(this.t("settings.addStore", "添加存储"))}</button>` : ""}
+      ${store ? `<h4>${escapeHtml(this.t("settings.selectedStoreConfiguration", "所选存储的详细配置"))}</h4>
+      ${selectField("modelRegistration.factory", this.t("settings.storeType", "存储类型"), store.factory, [["memsphere/filesystem-json", "filesystem ValueStore"]])}
+      ${inputField("modelRegistration.directory", this.t("settings.storeDirectory", "存储目录"), store.directory)}` : ""}
+      <dl class="settings-model-info"><dt>${escapeHtml(this.t("settings.registrationModel", "登记模型"))}</dt><dd class="mono">memsphere/model-registration</dd></dl>
+      <p class="settings-help">${escapeHtml(this.t("settings.registrationStorageHelp", "先选择存储 ID，再配置该存储。已有数据时切换存储或修改目录须确认迁移；旧数据保留。"))}</p>
+${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-model-registrations">${escapeHtml(this.t("settings.initializeRegistrations", "初始化模型登记"))}</button>` : ""}
       ${this.errorsHtml(scope)}</section>`;
   }
 
@@ -527,7 +539,7 @@ class SettingsApplication {
   confirmationHtml(scope: ScopeState): string {
     const confirmation = scope.confirmation!;
     const changes = confirmation.changes ?? [];
-    return `<div class="settings-layout">${this.statusHtml(scope)}<section class="settings-section"><h3>${escapeHtml(this.t("settings.confirmChanges", "确认配置变更"))}</h3><ul class="settings-change-list">${changes.length ? changes.map((change: JsonObject) => `<li>${escapeHtml(`${change.path} · ${change.kind} · ${compact(change.before)} → ${compact(change.after)}`)}</li>`).join("") : `<li>${escapeHtml(this.t("settings.noChanges", "没有配置变化。"))}</li>`}</ul><h4>${escapeHtml(this.t("settings.jsonDiff", "JSON diff"))}</h4><pre class="settings-code mono">${escapeHtml(confirmation.normalizedJson ?? JSON.stringify(scope.draft, null, 2))}</pre><div class="settings-actions"><button class="btn" data-action="back">${escapeHtml(this.t("settings.backToEdit", "返回编辑"))}</button><button class="btn primary" data-action="save"${changes.length ? "" : " disabled"}>${escapeHtml(this.t("settings.confirmSave", "确认保存"))}</button></div></section></div>`;
+    return `<div class="settings-layout">${this.statusHtml(scope)}<section class="settings-section"><h3>${escapeHtml(this.t("settings.confirmChanges", "确认配置变更"))}</h3><ul class="settings-change-list">${changes.length ? changes.map((change: JsonObject) => `<li>${escapeHtml(`${change.path} · ${change.kind} · ${compact(change.before)} → ${compact(change.after)}`)}</li>`).join("") : `<li>${escapeHtml(this.t("settings.noChanges", "没有配置变化。"))}</li>`}</ul>${confirmation.migrationRequired ? `<p class="settings-help" role="status">${escapeHtml(this.t("settings.registrationMigrationRequired", "已有模型登记数据，需要重新校验并明确确认迁移。"))}</p>` : ""}<h4>${escapeHtml(this.t("settings.jsonDiff", "JSON diff"))}</h4><pre class="settings-code mono">${escapeHtml(confirmation.normalizedJson ?? JSON.stringify(scope.draft, null, 2))}</pre><div class="settings-actions"><button class="btn" data-action="back">${escapeHtml(this.t("settings.backToEdit", "返回编辑"))}</button><button class="btn primary" data-action="save"${changes.length ? "" : " disabled"}>${escapeHtml(this.t("settings.confirmSave", "确认保存"))}</button></div></section></div>`;
   }
 
   errorsHtml(scope: ScopeState): string {
@@ -656,6 +668,20 @@ class SettingsApplication {
       else if (name === "save-operator-token") await this.saveOperatorToken(false);
       else if (name === "clear-operator-token") await this.saveOperatorToken(true);
       else if (name === "add-view-package") this.addViewPackage();
+      else if (name === "add-model-registration-store") {
+        const draft = this.state.draft!;
+        const registration = draft.modelRegistration ??= { storeId: "memsphere/model-registrations", stores: { "memsphere/model-registrations": { factory: "memsphere/filesystem-json", directory: "models/registrations" } } };
+        let suffix = 1; while (registration.stores[`model-registrations-${suffix}`]) suffix++;
+        const id = `model-registrations-${suffix}`;
+        registration.stores[id] = { factory: "memsphere/filesystem-json", directory: `models/registrations-${suffix}` };
+        registration.storeId = id; this.state.confirmation = null; this.render();
+      } else if (name === "initialize-model-registrations") {
+        if (JSON.stringify(this.state.draft) !== JSON.stringify(this.state.data?.config)) throw new Error(this.t("settings.saveBeforeInitialize", "请先保存或取消配置修改，再初始化模型登记。"));
+        const response = await this.settingsFetch("/api/models/initialize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedRevision: this.state.data!.diskRevision }) });
+        const payload = await response.json() as JsonObject;
+        if (!response.ok) throw new Error(payload.error ?? this.t("settings.initializeFailed", "初始化失败"));
+        await this.load("project"); this.state.notice = this.t("settings.initializedRegistrations", "模型登记已初始化。"); this.render();
+      }
       else if (name === "enable-participants") {
         this.state.draft!.control_plane = { runner: { permissions: [] }, actors: {} };
         this.render();
@@ -678,6 +704,12 @@ class SettingsApplication {
     const draft = scope.draft!;
     if (path === "language") draft.language = value;
     else if (path === "modelsDirectory") draft.modelsDirectory = value;
+    else if (path.startsWith("modelRegistration.")) {
+      const registration = draft.modelRegistration ??= { storeId: "memsphere/model-registrations", stores: { "memsphere/model-registrations": { factory: "memsphere/filesystem-json", directory: "models/registrations" } } };
+      if (path === "modelRegistration.storeId") registration.storeId = value;
+      else if (path === "modelRegistration.directory") registration.stores[registration.storeId].directory = value;
+      else if (path === "modelRegistration.factory") registration.stores[registration.storeId].factory = value;
+    }
     else if (path === "view_theme.mode") (draft.view_theme ??= { mode: "system" }).mode = value;
     else if (path === "view_theme.selected_source") {
       draft.view_theme ??= { mode: "system" };
@@ -936,12 +968,16 @@ class SettingsApplication {
 
   async saveScope(scopeName: ScopeName): Promise<void> {
     const scope = this.#scopes[scopeName];
+    const migrateModelRegistrations = scopeName === "project" && scope.confirmation?.migrationRequired === true;
+    if (migrateModelRegistrations && !window.confirm(this.t("settings.confirmRegistrationMigration", "此变更需要迁移模型登记及导入模型。完成后切换配置，旧数据保留。确认迁移？"))) return;
     const response = await this.settingsFetch(`/api/settings/${scopeName}`, {
       method: "PUT", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ expectedRevision: scope.data!.diskRevision, config: scope.draft })
+      body: JSON.stringify({ expectedRevision: scope.data!.diskRevision, config: scope.draft, migrateModelRegistrations })
     });
     const payload = await response.json() as JsonObject;
-    if (response.status === 409) { scope.confirmation = null; scope.notice = this.t("settings.saveConflict", "保存失败：配置已被其他进程修改，请先重新读取。"); }
+    if (response.status === 409) { scope.confirmation = null; scope.notice = payload.code === "MODEL_REGISTRATION_MIGRATION_REQUIRED"
+      ? this.t("settings.registrationMigrationRequired", "已有模型登记数据，需要重新校验并明确确认迁移。")
+      : this.t("settings.saveConflict", "保存失败：配置已被其他进程修改，请先重新读取。"); }
     else if (!response.ok) { scope.confirmation = null; scope.errors = payload.errors ?? [{ path: "", message: payload.error ?? this.t("settings.saveFailed", "保存失败") }]; }
     else {
       scope.data = payload;
@@ -1072,7 +1108,7 @@ class SettingsApplication {
   settingsFetch(url: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
     if (this.#token) headers.set("authorization", `Bearer ${this.#token}`);
-    const scopedUrl = this.#config.projectApiBase && (url === "/api/settings/view-packages" || url === "/api/settings/project" || url.startsWith("/api/settings/project/"))
+    const scopedUrl = this.#config.projectApiBase && (url === "/api/models/initialize" || url === "/api/settings/view-packages" || url === "/api/settings/project" || url.startsWith("/api/settings/project/"))
       ? `${this.#config.projectApiBase}${url.slice(4)}`
       : url;
     return fetch(scopedUrl, { ...init, headers, signal: this.#signal });
@@ -1198,5 +1234,8 @@ const styles = `
   .settings-status{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.pill{display:inline-flex;border:1px solid var(--line);border-radius:999px;background:#fff;padding:2px 8px;color:var(--muted);font-size:12px}.pill.done{border-color:#b9d6c7;background:#edf7f1;color:#226044}.pill.warn{border-color:#e2c99c;background:#fff8e8;color:#7a5714}.pill.strong{font-weight:700}.settings-actions,.settings-participant-actions{display:flex;gap:8px;justify-content:flex-end}.btn{border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text);padding:8px 12px;cursor:pointer}.btn:hover{background:var(--soft)}.btn.primary{border-color:var(--accent);background:var(--accent);color:#fff}.btn.danger{color:var(--danger)}.btn:disabled{cursor:not-allowed;opacity:.5}
   .settings-check{display:flex;gap:8px;align-items:flex-start}.settings-check input{width:16px;height:16px;margin-top:2px;accent-color:var(--accent)}.settings-default-toggle{margin-top:14px}.settings-token-management{margin-top:28px;padding-top:24px;border-top:1px solid var(--line)}.settings-token-management h4{margin:0 0 6px;font-size:16px}.settings-token-editor{display:flex;align-items:end;gap:12px;margin-top:18px}.settings-token-editor .settings-field{flex:1;margin:0}.settings-token-buttons{display:flex;gap:8px;padding-bottom:1px;white-space:nowrap}.settings-help,.settings-error{font-size:12px;overflow-wrap:anywhere}.settings-help{color:var(--muted)}.settings-error{color:var(--danger)}.settings-notice{border-left:3px solid var(--accent);padding:10px 12px;background:var(--accent-soft)}.settings-token{max-width:520px}.settings-token .btn{margin-top:14px}.empty{padding:30px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center}.settings-installed-packages{border:1px solid var(--line);border-radius:8px;overflow:hidden}.settings-view-package{padding:16px}.settings-view-package+.settings-view-package{border-top:1px solid var(--line)}.settings-view-package .settings-section-head{align-items:flex-start;margin-bottom:0}.settings-view-package .settings-section-head>.btn{flex:none;white-space:nowrap}.settings-package-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.settings-package-path{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;margin:7px 0 0;color:var(--muted);font-size:12px}.settings-package-path span{white-space:nowrap}.settings-package-path code{min-width:0}.settings-package-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0 10px;color:var(--muted)}.settings-table-wrap{width:100%;min-width:0;overflow-x:auto;border:1px solid var(--line);border-radius:8px}.settings-config-table{width:100%;border-collapse:collapse;min-width:620px}.settings-config-table th,.settings-config-table td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}.settings-config-table th{background:var(--soft);color:var(--muted);font-size:12px;font-weight:600}.settings-config-table tbody tr:last-child td{border-bottom:0}.settings-config-table td:first-child{width:28%}.settings-config-table td:first-child small{display:block;margin-top:3px;color:var(--muted);font-weight:400}.settings-config-table td:nth-child(2){width:18%;color:var(--muted)}.settings-config-table .settings-field{margin:0}.settings-config-table .settings-label{display:none}
   .settings-participants,.settings-providers{border-top:1px solid var(--line)}.settings-participant{border-bottom:1px solid var(--line)}.settings-participant>summary{list-style:none}.settings-participant>summary::-webkit-details-marker{display:none}.settings-participant-summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;min-height:58px;padding:10px 4px;cursor:pointer}.settings-participant-summary:hover{background:#f7f8f5}.settings-participant-summary-meta{margin-top:5px;color:var(--muted);font-size:12px;overflow-wrap:anywhere}.settings-participant-body{padding:2px 4px 18px}.settings-permissions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px}.settings-permission{border-left:2px solid var(--line);padding-left:9px}.settings-permission p{margin:3px 0 0 24px;color:var(--muted);font-size:12px}.settings-provider-preview{margin:12px 0 0;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:#f3f5f0;overflow-wrap:anywhere}.settings-change-list{display:grid;min-width:0;gap:8px;padding:0;list-style:none}.settings-change-list li{min-width:0;border-left:3px solid var(--accent);padding:7px 10px;background:#f3f5f0;overflow-wrap:anywhere}.settings-code{width:100%;min-width:0;max-width:100%;max-height:440px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;background:#f3f5f0;border:1px solid var(--line);border-radius:6px;padding:12px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.muted{color:var(--muted)}
+  .memsphere-settings .settings-model-info { display:grid; gap:var(--mem-view-space-2); margin:var(--mem-view-space-4) 0 0; min-width:0; }
+  .memsphere-settings .settings-model-info dt { margin:0; color:var(--mem-view-color-text-muted); font-size:var(--mem-view-font-size-sm); font-weight:600; }
+  .memsphere-settings .settings-model-info dd { margin:0 0 var(--mem-view-space-3); min-width:0; overflow-wrap:anywhere; }
   @media(max-width:760px){.memsphere-settings{grid-template-columns:1fr}.settings-sidebar{border-right:0;border-bottom:1px solid var(--line)}.settings-content{padding:18px 16px 36px}.settings-grid,.settings-compact-grid,.settings-participant-basic,.settings-permissions{grid-template-columns:minmax(0,1fr)}.settings-section{padding:14px}.settings-section-head{align-items:flex-start}.settings-token-editor,.settings-token-buttons{align-items:stretch;flex-direction:column}.settings-token-buttons .btn{width:100%}}
 `;

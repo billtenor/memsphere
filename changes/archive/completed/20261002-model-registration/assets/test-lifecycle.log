@@ -1,0 +1,16 @@
+TAP version 13
+# Subtest: leaving models removes its page marker and returning remounts a usable model view
+ok 1 - leaving models removes its page marker and returning remounts a usable model view
+  ---
+  duration_ms: 2443.447636
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3263.746206
