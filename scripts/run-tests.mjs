@@ -8,7 +8,8 @@ import { partitionTests } from "./test-plan.mjs";
 const testDirectory = new URL("../test/", import.meta.url);
 const files = (await readdir(testDirectory)).filter(name => name.endsWith(".test.ts"))
   .sort().map(name => fileURLToPath(new URL(name, testDirectory)));
-const durations = JSON.parse(await readFile(new URL("./test-durations.json", import.meta.url), "utf8"));
+const platformDurations = JSON.parse(await readFile(new URL("./test-durations.json", import.meta.url), "utf8"));
+const durations = platformDurations[process.platform] ?? platformDurations.win32;
 const nodeArguments = [];
 let concurrency = 2;
 let shard = 1;

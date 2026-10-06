@@ -4,7 +4,7 @@ CI 与 Security 的整条 workflow 从 GitHub `created_at` 到完成应不超过
 
 ## 执行方式
 
-CI 在 Linux、macOS、Windows 上各执行全部测试。`scripts/run-tests.mjs` 自动发现 `test/*.test.ts`，按 `scripts/test-durations.json` 的历史耗时采用最长任务优先算法分成四组，每组两个独立进程并行；单个测试文件内部仍串行。每个文件获得独立临时 MEMSPHERE_HOME，测试自身的临时仓库、配置和浏览器 Context 继续隔离。没有历史数据的新文件使用默认权重并自动加入，不依赖人工维护测试清单。
+CI 在 Linux、macOS、Windows 上各执行全部测试。`scripts/run-tests.mjs` 自动发现 `test/*.test.ts`，按 `scripts/test-durations.json` 中各平台独立的历史耗时采用最长任务优先算法在 Linux/Windows 上分成四组、每组两个独立进程并行；macOS 分成两组、每组四个独立进程并行；单个测试文件内部仍串行。每个文件获得独立临时 MEMSPHERE_HOME，测试自身的临时仓库、配置和浏览器 Context 继续隔离。没有历史数据的新文件使用默认权重并自动加入，不依赖人工维护测试清单。
 
 `npm run test:ci -- --shard=1/4` 运行其中一组；`node scripts/run-tests.mjs --shard=1/4 --list` 查看计划；`npm test` 运行全部文件。`--test-concurrency=N` 控制文件进程数量。`--results=<path>` 或 CI_TEST_RESULTS 保存计划、退出码及文件耗时；失败不停止其他文件，也不转换为成功。
 

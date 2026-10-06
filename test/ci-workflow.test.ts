@@ -21,6 +21,7 @@ type Workflow = {
         matrix?: {
           os?: string[];
           shard?: number[];
+          include?: Array<{ os: string; shard: number; shards: number; workers: number }>;
         };
       };
       "timeout-minutes"?: number;
@@ -46,12 +47,18 @@ test("CI bounds and supersedes cross-platform browser test runs", async () => {
   );
   assert.equal(workflow.concurrency?.["cancel-in-progress"], true);
   assert.equal(testJob?.["timeout-minutes"], 5);
-  assert.deepEqual(testJob?.strategy?.matrix?.shard, [1, 2, 3, 4]);
-  assert.deepEqual(testJob?.strategy?.matrix?.os, [
+  const matrix = testJob?.strategy?.matrix?.include ?? [];
+  assert.deepEqual([...new Set(matrix.map(row => row.os))], [
     "ubuntu-latest",
     "macos-latest",
     "windows-latest"
   ]);
+  for (const os of new Set(matrix.map(row => row.os))) {
+    const rows = matrix.filter(row => row.os === os);
+    assert.equal(rows.length, rows[0].shards);
+    assert.deepEqual(rows.map(row => row.shard), Array.from({ length: rows[0].shards }, (_, i) => i + 1));
+    assert(rows.every(row => row.shards === rows[0].shards && row.workers > 0));
+  }
 
   assert.equal(browserInstall?.if, undefined);
   assert.equal(browserInstall?.run, "npx playwright install chromium");
@@ -61,7 +68,7 @@ test("CI bounds and supersedes cross-platform browser test runs", async () => {
   );
   assert.equal(npmTest?.if, undefined);
   assert.equal(packageJson.scripts?.["test:ci"], "node scripts/run-tests.mjs --test-concurrency=2");
-  assert.match(npmTest?.run ?? "", /--shard=\$\{\{ matrix.shard \}\}\/4/);
+  assert.match(npmTest?.run ?? "", /--shard=\$\{\{ matrix.shard \}\}\/\$\{\{ matrix.shards \}\}/);
   assert.equal(steps.some(step => step.run === "npm run build"), false);
   assert.match(
     normalizedWindowsPackageSmoke,

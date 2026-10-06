@@ -16,16 +16,25 @@ concurrency:
 
 jobs:
   test:
-    name: Test (${{ matrix.os }}, ${{ matrix.shard }}/4)
+    name: Test (${{ matrix.os }}, ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        shard: [1, 2, 3, 4]
+        include:
+          - { os: ubuntu-latest, shard: 1, shards: 4, workers: 2 }
+          - { os: ubuntu-latest, shard: 2, shards: 4, workers: 2 }
+          - { os: ubuntu-latest, shard: 3, shards: 4, workers: 2 }
+          - { os: ubuntu-latest, shard: 4, shards: 4, workers: 2 }
+          - { os: macos-latest, shard: 1, shards: 2, workers: 4 }
+          - { os: macos-latest, shard: 2, shards: 2, workers: 4 }
+          - { os: windows-latest, shard: 1, shards: 4, workers: 2 }
+          - { os: windows-latest, shard: 2, shards: 4, workers: 2 }
+          - { os: windows-latest, shard: 3, shards: 4, workers: 2 }
+          - { os: windows-latest, shard: 4, shards: 4, workers: 2 }
     env:
-      CI_TEST_RESULTS: .ci-results/${{ matrix.os }}-${{ matrix.shard }}.json
+      CI_TEST_RESULTS: ci-results/${{ matrix.os }}-${{ matrix.shard }}.json
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -36,7 +45,7 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install chromium
       # pretest:ci builds and typechecks both core and View Modules once.
-      - run: npm run test:ci -- --shard=${{ matrix.shard }}/4
+      - run: npm run test:ci -- --shard=${{ matrix.shard }}/${{ matrix.shards }} --test-concurrency=${{ matrix.workers }}
       - if: matrix.shard == 1
         run: npm run smoke:project
       - name: Preserve test timings
@@ -44,7 +53,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: timings-${{ matrix.os }}-${{ matrix.shard }}
-          path: .ci-results
+          path: ci-results
+          if-no-files-found: error
 
   windows-package-smoke:
     name: Windows packaged CLI shells
