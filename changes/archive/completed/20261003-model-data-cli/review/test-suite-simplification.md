@@ -11,7 +11,7 @@
 - 同一公共契约的组合覆盖放在最低有效层；CLI/浏览器保留真实接线和失败边界。
 - 前置条件中不被测的 Project、模型和数据写入通过 Store/API/helper 构造。Project 创建、bootstrap、包交付和 Git 真实故障本身仍调用原流程。
 - 拆开互不相关的主要失败含义；连续 CRUD 或发布流程本身是一条公开生命周期契约的测试仍保留。
-- 浏览器共享同一文件内的 Chromium 进程，每个 page/context、服务、目录和配置仍独立，作用域结束即关闭 context，文件结束关闭进程；不共享 localStorage、登录态或可变业务夹具。
+- 浏览器在测试文件的 before hook、尚未切换到临时 cwd 时启动并共享 Chromium 进程，每个 page/context、服务、目录和配置仍独立，作用域结束即关闭 context，文件结束关闭进程；不共享 localStorage、登录态或可变业务夹具。
 - 等待实际可观察状态，并为故意悬挂的响应提供显式释放点；负向验证窗口和竞争等待的失败上限仍保留。
 - 不通过 skip、重试、放宽断言、提高并发或延长 timeout 避开失败。原有平台 skip 保留。
 
@@ -33,11 +33,11 @@
 
 ## 验证与测量
 
-测量使用同一台本地机器、Node 22.16.0、`--test-concurrency=1`，不同时运行另一批重型测试。基线四个文件为 output-format、list-pagination-cli、memory-cli 和 models-builtin-view-browser：52 项通过、159.851 秒。精简后同一组公开契约及新下移的 presentation/model-unavailable 覆盖：75 项通过、111.991 秒，约减少 30%。执行项数增加是因为独立场景拆开，并不代表浏览器/CLI 启动成本增加。
+首个精简提交 `f415ab2` 的本地基准使用同一台本地机器、Node 22.16.0、`--test-concurrency=1`，不同时运行另一批重型测试。基线四个文件为 output-format、list-pagination-cli、memory-cli 和 models-builtin-view-browser：52 项通过、159.851 秒。精简后同一组公开契约及新下移的 presentation/model-unavailable 覆盖：75 项通过、111.991 秒，约减少 30%。执行项数增加是因为独立场景拆开，并不代表浏览器/CLI 启动成本增加。
 
 其余受影响的 20 个文件 166/166 通过（184.014 秒），包括全部实际浏览器隐私、跨 Project、组合、响应式和故障隔离场景。受健康 Store 夹具变更影响的六个文件 41/41 通过（47.671 秒）；model-unavailable 与现有 model-validation 合计 24/24 通过（1.145 秒）；新的 summary HTTP 行为 3/3 通过（0.827 秒）。公共 helper 和 presentation/summary 测试的独立严格类型检查通过。跨机器 CI 耗时受 runner 波动影响，不用局部测量承诺整个套件固定降幅。
 
-最终在 Node 22.16.0 执行 `npm run typecheck` 通过；`npm test -- --test-concurrency=1` 的 pretest 完整执行 `npm run build` 通过，随后全量 1100 项测试：1099 通过、0 失败、1 项原有 Windows 专属 skip，耗时 475.377 秒（7 分 55 秒）。`node dist/cli.js --project memsphere validate` 通过。独立严格类型检查覆盖新增公共 helper、presentation 和 summary API 测试。`git diff --check` 通过，已批准的需求、实施计划、验收和交付文件四份原件摘要未变。
+最终在 Node 22.16.0 执行 `npm run typecheck` 通过；`npm test -- --test-concurrency=1` 的 pretest 完整执行 `npm run build` 通过，随后全量 1100 项测试：1099 通过、0 失败、1 项原有 Windows 专属 skip，耗时 475.172 秒（7 分 55 秒）。`node dist/cli.js --project memsphere validate` 通过。独立严格类型检查覆盖新增公共 helper、presentation 和 summary API 测试。`git diff --check` 通过，已批准的需求、实施计划、验收和交付文件四份原件摘要未变。
 
 CI 验收要求仍是本提交在 [PR #85](https://github.com/billtenor/memsphere/pull/85/checks) 的原有五项全部成功；结果以 GitHub 当前提交的检查记录为准，不沿用基线绿灯，也不为填写检查结果另造一个需要再次跑 CI 的提交。
 
@@ -183,3 +183,9 @@ CI 验收要求仍是本提交在 [PR #85](https://github.com/billtenor/memspher
 | `test/windows-prerequisites.test.ts` | 1 | Git Bash candidates include locations derived from Git exec-path and Windows installation roots | 进程内入口（helper 另核对） | 保留原公共契约/必要边界 |
 
 新增的 `cli-presentation.test.ts`、`model-unavailable.test.ts` 承接上表迁移的组合规则；`helpers/browser.ts`、`helpers/project.ts` 只提供隔离夹具，不增加产品能力。
+
+## Windows 首轮 CI 反馈与修正
+
+首轮精简提交 `f415ab2` 的 Ubuntu、macOS、Windows 安装包和 Gitleaks 检查通过，Windows 完整套件有一项失败：`Embedded validation checkpoints linked-worktree changes without changing the main worktree` 清理 `outside-view-workspace` 时 `rmdir` 返回 EBUSY。其余测试无失败。
+
+原因是新共享 Chromium 在第一个测试已经切换到临时目录后启动。浏览器继承该 cwd；即使所有页面/context 已关闭，浏览器进程仍活到文件结束，Windows 不允许删除该进程占用的目录。修正为在测试文件的 before hook、仍位于稳定仓库 cwd 时启动 Chromium。每个场景依旧使用独立 context，文件结束关闭进程。不增加清理重试或超时，不忽略目录删除错误，也不跳过这个测试。失败文件在本机重跑 2/2 通过，browser helper 严格类型检查通过；修正后重新执行完整回归：1100 项、1099 通过、0 失败、1 个原有平台 skip，475.172 秒；pretest 完整构建通过。最新 CI 由修正提交重新触发确认。

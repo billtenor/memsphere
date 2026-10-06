@@ -1,16 +1,22 @@
-import { after } from "node:test";
+import { after, before } from "node:test";
 import { chromium, type Browser, type BrowserContext } from "playwright";
 
 export type TestBrowser = Pick<Browser, "newPage" | "newContext" | "close">;
 
-let browserPromise: Promise<Browser> | undefined;
+let sharedBrowser: Browser | undefined;
+before(async () => {
+  // Launch before any fixture changes cwd: on Windows a live browser process
+  // retains its inherited working directory and would block fixture removal.
+  sharedBrowser = await chromium.launch({ headless: true });
+});
 after(async () => {
-  if (browserPromise) await (await browserPromise).close();
+  await sharedBrowser?.close();
 });
 
 /** Reuse the Chromium process within a test file; each scope owns isolated contexts. */
 export async function browserScope(): Promise<TestBrowser> {
-  const browser = await (browserPromise ??= chromium.launch({ headless: true }));
+  const browser = sharedBrowser;
+  if (!browser) throw new Error("Browser scopes require the test file setup hook");
   const contexts = new Set<BrowserContext>();
   return {
     async newPage(options) {
