@@ -20,6 +20,7 @@ type Workflow = {
       strategy?: {
         matrix?: {
           os?: string[];
+          shard?: number[];
         };
       };
       "timeout-minutes"?: number;
@@ -37,14 +38,15 @@ test("CI bounds and supersedes cross-platform browser test runs", async () => {
   const testJob = workflow.jobs?.test;
   const steps = testJob?.steps ?? [];
   const browserInstall = steps.find((step) => step.name === "Install Playwright Chromium");
-  const npmTest = steps.find((step) => step.run === "npm run test:ci");
+  const npmTest = steps.find((step) => step.run?.startsWith("npm run test:ci"));
 
   assert.equal(
     workflow.concurrency?.group,
     "ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
   );
   assert.equal(workflow.concurrency?.["cancel-in-progress"], true);
-  assert.equal(testJob?.["timeout-minutes"], 30);
+  assert.equal(testJob?.["timeout-minutes"], 5);
+  assert.deepEqual(testJob?.strategy?.matrix?.shard, [1, 2, 3, 4]);
   assert.deepEqual(testJob?.strategy?.matrix?.os, [
     "ubuntu-latest",
     "macos-latest",
@@ -58,7 +60,9 @@ test("CI bounds and supersedes cross-platform browser test runs", async () => {
     false
   );
   assert.equal(npmTest?.if, undefined);
-  assert.equal(packageJson.scripts?.["test:ci"], "node scripts/run-tests.mjs --test-concurrency=1");
+  assert.equal(packageJson.scripts?.["test:ci"], "node scripts/run-tests.mjs --test-concurrency=2");
+  assert.match(npmTest?.run ?? "", /--shard=\$\{\{ matrix.shard \}\}\/4/);
+  assert.equal(steps.some(step => step.run === "npm run build"), false);
   assert.match(
     normalizedWindowsPackageSmoke,
     /names:\s*\n\s*- windows-ci-smoke\n\s*- Windows CI smoke/

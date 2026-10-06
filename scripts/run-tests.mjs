@@ -1,31 +1,77 @@
-import { readdir } from "node:fs/promises";
-import { mkdtempSync, rmSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { readdir, readFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { partitionTests } from "./test-plan.mjs";
 
 const testDirectory = new URL("../test/", import.meta.url);
-const testFiles = (await readdir(testDirectory))
-  .filter((name) => name.endsWith(".test.ts"))
-  .sort()
-  .map((name) => fileURLToPath(new URL(name, testDirectory)));
-const testRunnerArguments = process.argv.slice(2);
+const files = (await readdir(testDirectory)).filter(name => name.endsWith(".test.ts"))
+  .sort().map(name => fileURLToPath(new URL(name, testDirectory)));
+const durations = JSON.parse(await readFile(new URL("./test-durations.json", import.meta.url), "utf8"));
+const nodeArguments = [];
+let concurrency = 2;
+let shard = 1;
+let shardCount = 1;
+let listOnly = false;
+let resultsPath = process.env.CI_TEST_RESULTS;
+for (const argument of process.argv.slice(2)) {
+  if (argument.startsWith("--test-concurrency=")) concurrency = Number(argument.split("=")[1]);
+  else if (argument.startsWith("--shard=")) [shard, shardCount] = argument.slice(8).split("/").map(Number);
+  else if (argument === "--list") listOnly = true;
+  else if (argument.startsWith("--results=")) resultsPath = argument.slice(10);
+  else nodeArguments.push(argument);
+}
+if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error("Concurrency must be a positive integer");
+if (!Number.isInteger(shard) || !Number.isInteger(shardCount) || shard < 1 || shard > shardCount) {
+  throw new Error("Shard must be an integer pair such as --shard=1/4");
+}
+const selected = partitionTests(files, durations, shardCount)[shard - 1];
+if (listOnly) {
+  console.log(JSON.stringify({ shard, shardCount, ...selected }, null, 2));
+  process.exit(0);
+}
 
-const testHome = mkdtempSync(join(tmpdir(), "memsphere-test-home-"));
-let result;
+const started = performance.now();
+const testHome = await mkdtemp(join(tmpdir(), "memsphere-test-home-"));
+const results = [];
+let next = 0;
 try {
-  result = spawnSync(process.execPath, ["--import", "tsx", "--test", ...testRunnerArguments, ...testFiles], {
-    stdio: "inherit",
-    env: { ...process.env, MEMSPHERE_HOME: testHome }
-  });
+  console.log(`Running ${selected.files.length}/${files.length} files, shard ${shard}/${shardCount}, concurrency ${concurrency}`);
+  await Promise.all(Array.from({ length: Math.min(concurrency, selected.files.length) }, async () => {
+    while (next < selected.files.length) {
+      const file = selected.files[next++];
+      console.log(`# Starting: ${basename(file)}`);
+      const home = await mkdtemp(join(testHome, "file-"));
+      const fileStarted = performance.now();
+      const result = await new Promise(resolveResult => {
+        const child = spawn(process.execPath, ["--import", "tsx", "--test", "--test-concurrency=1", ...nodeArguments, file], {
+          env: { ...process.env, MEMSPHERE_HOME: home },
+          stdio: ["ignore", "pipe", "pipe"]
+        });
+        const output = [];
+        child.stdout.on("data", data => output.push(data));
+        child.stderr.on("data", data => output.push(data));
+        child.on("error", error => output.push(Buffer.from(`${error.stack}\n`)));
+        child.on("close", (code, signal) => resolveResult({ code: code ?? 1, signal, output: Buffer.concat(output).toString() }));
+      });
+      const seconds = (performance.now() - fileStarted) / 1000;
+      // Keep each file's TAP intact even when files execute concurrently.
+      console.log(`\n# File: ${basename(file)} (${seconds.toFixed(2)}s)`);
+      process.stdout.write(result.output);
+      results.push({ file: basename(file), seconds, exitCode: result.code, signal: result.signal });
+      await rm(home, { recursive: true, force: true });
+    }
+  }));
 } finally {
-  rmSync(testHome, { recursive: true, force: true });
+  await rm(testHome, { recursive: true, force: true });
+  if (resultsPath) {
+    const path = resolve(resultsPath);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify({ platform: process.platform, shard, shardCount,
+      seconds: (performance.now() - started) / 1000, planned: selected.files.map(file => basename(file)), results }, null, 2) + "\n");
+  }
 }
-
-if (result.error) {
-  console.error(result.error.message);
-  process.exit(1);
-}
-
-process.exit(result.status ?? 1);
+const failures = results.filter(result => result.exitCode !== 0);
+console.log(`\nFiles: ${results.length}; failed: ${failures.length}; elapsed: ${((performance.now() - started) / 1000).toFixed(2)}s`);
+process.exitCode = failures.length ? 1 : 0;

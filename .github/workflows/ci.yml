@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -15,13 +16,16 @@ concurrency:
 
 jobs:
   test:
-    name: Test (${{ matrix.os }})
+    name: Test (${{ matrix.os }}, ${{ matrix.shard }}/4)
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        shard: [1, 2, 3, 4]
+    env:
+      CI_TEST_RESULTS: .ci-results/${{ matrix.os }}-${{ matrix.shard }}.json
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -31,15 +35,21 @@ jobs:
       - run: npm ci
       - name: Install Playwright Chromium
         run: npx playwright install chromium
-      - run: npm run typecheck
-      - run: npm run test:ci
-      - run: npm run build
-      - run: npm run smoke:project
+      # pretest:ci builds and typechecks both core and View Modules once.
+      - run: npm run test:ci -- --shard=${{ matrix.shard }}/4
+      - if: matrix.shard == 1
+        run: npm run smoke:project
+      - name: Preserve test timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: timings-${{ matrix.os }}-${{ matrix.shard }}
+          path: .ci-results
 
   windows-package-smoke:
     name: Windows packaged CLI shells
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
     env:
       MEMSPHERE_HOME: ${{ github.workspace }}\.ci-memsphere-home
     steps:
@@ -54,7 +64,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force .ci-pack, .ci-install | Out-Null
-          npm pack --pack-destination .ci-pack
+          npm pack --ignore-scripts --pack-destination .ci-pack
           $package = (Get-ChildItem .ci-pack\*.tgz | Select-Object -First 1).FullName
           npm install --prefix .ci-install $package
       - name: Packaged core Run and View lifecycle
@@ -90,3 +100,21 @@ jobs:
           ./.ci-install/node_modules/.bin/memsphere --help
           cd ".ci windows project"
           ../.ci-install/node_modules/.bin/memsphere view status
+
+  budget:
+    name: CI five-minute budget
+    runs-on: ubuntu-latest
+    needs: [test, windows-package-smoke]
+    if: always()
+    timeout-minutes: 1
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require all tests and the full workflow to meet the budget
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TEST_RESULT: ${{ needs.test.result }}
+          PACKAGE_RESULT: ${{ needs.windows-package-smoke.result }}
+        run: |
+          node scripts/ci-budget.mjs
+          test "$TEST_RESULT" = success
+          test "$PACKAGE_RESULT" = success
