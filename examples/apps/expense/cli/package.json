@@ -3,5 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "bin": { "expense": "expense.cjs" },
-  "files": ["expense.cjs"]
+  "files": ["expense.cjs"],
+  "dependencies": { "fs-native-extensions": "1.5.1" },
+  "engines": { "node": ">=22" }
 }

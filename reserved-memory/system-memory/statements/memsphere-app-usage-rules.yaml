@@ -16,3 +16,4 @@ asserts:
   - Managed 安装复用 ChangeSet 校验与发布；Embedded 只应用到当前 worktree，不自动提交 Git。Mounted 来源严格只读。未完成安装的保留路径不会作为普通 Memory 暴露，重试必须使用相同发行内容。
   - App 归属来自安装登记；普通 Memory 内容编辑和规范名称变更不转移归属。必需资产不能通过普通删除或文件移动脱离 App，首版不提供升级、卸载或自动认领已有 Memory。
   - ChangeSet 的 App 归属附件参与 checkpoint 摘要；候选 Run 冻结四类 Memory 及归属，归档恢复使用已有内容清单，不能重新混入当前 App 状态。
+  - App 自有模型和元模型 ID 遵守 Project 的 .json 后缀规则；通用 model update/delete 命令不得修改或删除 App 包内模型。

@@ -25,7 +25,7 @@ test("Project Memory provider annotates sources and rejects cross-Project ambigu
       { name: "career", memoryRoot: mounted, revision: "bbb" }
     ]));
     const listed = await catalog.list({ kind: "concepts" });
-    assert.deepEqual(listed.memories.map((item) => item.project_name), ["primary", "career", "primary"]);
+    assert.deepEqual(listed.items.map((item) => item.project_name), ["career", "primary", "primary"]);
     assert.equal((await catalog.read("local")).names[0], "local");
     await assert.rejects(catalog.read("shared"), (error) => {
       assert(error instanceof MemoryAmbiguityError);

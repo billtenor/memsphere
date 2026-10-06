@@ -160,6 +160,8 @@ Human 指出：现有产品与技术方案没有说明如何创建和安装 App�
 
 ## 验证与验收状态
 
+已按用户要求合并最新 master；合并适配、1111 项回归和新的最终 Memory ChangeSet 证据见 [master-merge-verification.md](./master-merge-verification.md)。
+
 实现与验证评审 `review-20261006-101328z-113e901e` 已通过：Human 明确投通过，Runner 在修复新增 App 测试对可变 dist 的依赖并完成缺失入口复验后通过。最终全量回归 947 pass、0 fail、1 skip，Memory ChangeSet 校验再次通过。交付报告见 [delivery-report.md](./delivery-report.md)。产品评审 `review-20261006-124256z-8eacbd21` 已由 Human、产品 Reviewer 和 Runner 通过；需求记录归档至当前目录，commit 结果由 Run 后续产物记录。
 
 补充按指南执行的完整验收：见 [App 指南端到端验收](./guide-acceptance.md)。使用打包安装后的 CLI、复制出的 App 发行目录、全新 Managed Project 和 CLI 启动的正式 View，完成安装、页面/CLI 双向操作、停用重启、恢复和 Project 隔离；同时补齐指南的新建 Project 与服务地址步骤。

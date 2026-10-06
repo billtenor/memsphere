@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -11,11 +11,12 @@ import { resolveProjectContext } from "../src/project/resolver.js";
 import { readConfig } from "../src/config.js";
 import { createMemoryCatalogForConfig, createProjectMemoryCatalogs } from "../src/memory/factory.js";
 import { startRun } from "../src/run/store.js";
-import { installApp, setAppEnabled } from "../src/app/install.js";
+import { checkApp, installApp, setAppEnabled } from "../src/app/install.js";
 import { readAppState } from "../src/app/state.js";
 import { packageDigest } from "../src/app/files.js";
 import { bindCli, checkCli, listClis, registerCli, showCli } from "../src/tools/registry.js";
 import { invokeAppOperation } from "../src/app/backend.js";
+import { mutateModel } from "../src/project/model-service.js";
 import { createProjectModelHost } from "../src/project/models.js";
 
 // Keep recovery subprocesses independent of concurrent builds replacing dist.
@@ -27,6 +28,9 @@ async function fixture(action: (root: string, context: Awaited<ReturnType<typeof
   const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME, project: process.env.MEMSPHERE_PROJECT,
     author: process.env.GIT_AUTHOR_NAME, authorEmail: process.env.GIT_AUTHOR_EMAIL, committer: process.env.GIT_COMMITTER_NAME, committerEmail: process.env.GIT_COMMITTER_EMAIL };
   try {
+    // Supply installed native dependencies to the copied CLI integration fixture.
+    // The guide E2E separately verifies npm installs the distributed package.
+    await symlink(join(previous.cwd, "node_modules"), join(root, "node_modules"), "junction");
     process.chdir(root);
     process.env.MEMSPHERE_HOME = join(root, "home"); process.env.MEMSPHERE_PROJECT = "test";
     Object.assign(process.env, { GIT_AUTHOR_NAME: "App Test", GIT_AUTHOR_EMAIL: "app@example.test", GIT_COMMITTER_NAME: "App Test", GIT_COMMITTER_EMAIL: "app@example.test" });
@@ -166,7 +170,12 @@ test("Real View API and independently launched CLI share records, revisions and 
   await assert.rejects(invoke("create", { description: "Invalid", amount: -1 }), /positive/);
   assert.throws(() => execFileSync(process.execPath, [executable, "--ledger", ledger, "create", "--description", "Invalid", "--amount", "-1"], { encoding: "utf8", stdio: "pipe" }), /positive/);
   const models = await createProjectModelHost({}, { root: context.primary.paths.root });
-  assert.equal((await models.definition("example/expense")).origin, "app");
+  assert.equal((await models.definition("example/expense.json")).origin, "app");
+  for (const operation of ["update", "delete"] as const) {
+    await assert.rejects(mutateModel({}, context.primary.paths.root, operation, "example/expense.json",
+      operation === "update" ? { fields: { description: "cannot overwrite an App model" } } : {}),
+      (error: unknown) => (error as { code?: string }).code === "APP_MODEL_READ_ONLY");
+  }
   await setAppEnabled(context, "org.memsphere.expense", false);
   await assert.rejects(invoke("list", {}), /disabled/);
   assert.equal(JSON.parse(execFileSync(process.execPath, [executable, "--ledger", ledger, "list"], { encoding: "utf8" })).records.length, 1);
@@ -248,3 +257,18 @@ test("Shared Model Package remains usable when another App is disabled; separate
   assert.deepEqual((await invokeAppOperation(separate.primary, "org.memsphere.expense", "list", {}) as { records: unknown[] }).records, []);
   await assert.rejects(invokeAppOperation(separate.primary, "org.memsphere.expense", "undeclared", {}), /Undeclared/);
 }));
+
+
+test("App show and check find renamed entrypoints beyond the first Memory page", async () => fixture(async (root, context, app) => {
+  await installApp(context, app);
+  const installed = (await readAppState(context.primary)).installations["example.app"];
+  const memoryPath = join(context.primary.memoryRoot, installed.memories[0]!.path);
+  await writeFile(memoryPath, (await readFile(memoryPath, "utf8")).replace("app-intro", "zzz-app-intro"));
+  await Promise.all(Array.from({ length: 105 }, (_, index) => writeFile(
+    join(context.primary.memoryRoot, "concepts", `before-${index}.yaml`),
+    `!concept\nsyntax: memsphere-20260721-stable\nnames: [before-${index}]\ndefines: [Pagination fixture]\n`
+  )));
+  const shown = JSON.parse(execFileSync(process.execPath, [...cliArguments, "--project", "test", "app", "show", "example.app", "--output", "json"], { cwd: root, encoding: "utf8" }));
+  assert.equal(shown.usage.agent[0].reference, "concepts/zzz-app-intro");
+  assert.equal((await checkApp(context.primary, "example.app")).items.find(item => item.name === "entrypoint:concepts/app-intro")?.available, true);
+}, true));

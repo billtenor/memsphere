@@ -7,6 +7,7 @@ defines:
   - 定义 memsphere Memory YAML DSL 的节点、字段、缺省值、组合约束和树状关系，作为语法设计与实现的一致性基线。
   - 本记忆描述当前稳定版本 memsphere-20260721-stable 支持的 Memsphere YAML 语法。
 asserts:
+  - memory list 的 JSON/YAML 响应使用 items 和可选 nextCursor，它们是 CLI 分页字段，不是 Memory YAML DSL 关键字；翻页不改变 Memory 声明、Node 顺序或 node_ref，不能把分页响应当作完整 Memory 文档校验。
   - 语法实现、Reserved Memory、技能文档、迁移工具和示例必须以本规则树中评审通过的规则为共同依据。
   - App 归属、安装状态及 ChangeSet 归属附件是宿主元数据，不是 Memory YAML 关键字；本次 App 整合不增加 YAML 字段或改变 syntax。
 sections:

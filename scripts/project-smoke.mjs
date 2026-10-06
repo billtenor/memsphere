@@ -25,7 +25,7 @@ try {
     [cli, "project", "list", "--output", "json"],
     { cwd: workspace, env, encoding: "utf8" }
   ));
-  assert.deepEqual(projects.map((project) => ({ name: project.name, primary: project.primary })), [
+  assert.deepEqual(projects.items.map((project) => ({ name: project.name, primary: project.primary })), [
     { name: "smoke", primary: true }
   ]);
   const validation = execFileSync(process.execPath, [cli, "validate"], {

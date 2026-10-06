@@ -1,11 +1,28 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { MemsphereConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
+import { randomUUID } from "node:crypto";
+import { importModelMarketPackage, listModelMarket } from "../src/project/model-market.js";
+import { createModelRegistrationStore } from "../src/project/model-registration.js";
+import { snapshotTree } from "./helpers/business-data.js";
+
+/** Real reserved assets, selecting only models supported by the existing Runtime. */
+async function supportedMarketSource(root: string) {
+  const sourceRoot = join(root, "supported-market-fixture");
+  await cp(new URL("../reserved-models", import.meta.url), sourceRoot, { recursive: true });
+  const manifestPath = join(sourceRoot, "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const pack = manifest.market_packages[0];
+  for (const model of pack.models.filter((model: { registration: { modelRef: string } }) => /examples\/0[45]-/.test(model.registration.modelRef))) await rm(join(sourceRoot, model.source));
+  pack.models = pack.models.filter((model: { registration: { modelRef: string } }) => !/examples\/0[45]-/.test(model.registration.modelRef));
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  return sourceRoot;
+}
 
 async function withSettingsServer(
   host: string,
@@ -61,6 +78,7 @@ async function withSettingsServer(
     await fn({ origin: `http://127.0.0.1:${port}`, configPath, globalConfigPath, token });
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(dir, { recursive: true, force: true });
   }
 }
 
@@ -433,12 +451,23 @@ test("model registration initialization and market imports protect permission an
     assert.equal(packages.length >= 1, true);
     const install = (authorized: boolean) => fetch(`${origin}/api/projects/demo/models/market/import`, { method: "POST", headers: authorized ? headers : { "content-type": "application/json", origin }, body: JSON.stringify({ packageId: packages[0].id, expectedRevision: after.configRevision }) });
     assert.equal((await install(false)).status, 401);
-    const installed = await install(true);
-    assert.equal(installed.status, 200, await installed.clone().text());
-    assert.equal((await installed.json()).status, "imported");
-    assert.equal((await (await install(true)).json()).status, "unchanged");
+    const beforeImport = await snapshotTree(join(root, "models"));
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const installed = await install(true);
+      assert.equal(installed.status, 422, await installed.clone().text());
+      assert.equal((await installed.json()).code, "MODEL_RUNTIME_UNSUPPORTED");
+      assert.deepEqual(await snapshotTree(join(root, "models")), beforeImport);
+      const rejected = await (await fetch(`${origin}/api/projects/demo/models`)).json();
+      assert.equal(rejected.models.some((item: { origin: string }) => item.origin === "market"), false);
+    }
+    const sourceRoot = await supportedMarketSource(root);
+    const supported = listModelMarket(sourceRoot)[0]!;
+    assert.equal((await importModelMarketPackage({}, { root }, supported.id, { sourceRoot })).status, "imported");
+    assert.equal((await importModelMarketPackage({}, { root }, supported.id, { sourceRoot })).status, "unchanged");
     const imported = await (await fetch(`${origin}/api/projects/demo/models`)).json();
-    assert.ok(imported.models.some((item: { origin: string }) => item.origin === "market"));
+    assert.deepEqual(imported.models.filter((item: { origin: string }) => item.origin === "market").map((item: { id: string }) => item.id).sort(), supported.models.map(model => model.registration.modelRef).sort());
+    const definition = await (await fetch(`${origin}/api/projects/demo/models/definition?model=${encodeURIComponent(supported.models[0]!.registration.modelRef)}`)).json();
+    assert.equal(definition.source, supported.models[0]!.source);
   });
 });
 
@@ -464,37 +493,59 @@ test("model registration settings validate migration and never publish an unauth
   });
 });
 
-test("model market cleanup requires authorization and current revision before recovering failed candidates", async () => {
+test("model market cleanup protects authorization and revision before removing unpublished historical candidates", async () => {
   await withSettingsServer("0.0.0.0", async ({ origin, configPath, token }) => {
     const root = (await import("node:path")).dirname(configPath);
-    const { importModelMarketPackage, listModelMarket } = await import("../src/project/model-market.js");
+    const sourceRoot = await supportedMarketSource(root);
+    const supported = listModelMarket(sourceRoot)[0]!;
     const pack = listModelMarket()[0]!;
-    await assert.rejects(importModelMarketPackage({}, { root }, pack.id, {
-      afterStage: async () => { throw new Error("injected stage failure"); },
-      removeCandidate: async () => { throw new Error("injected candidate cleanup failure"); }
-    }), { code: "MODEL_IMPORT_CLEANUP_REQUIRED" });
+    // The current journal rolls failed imports back. Construct an authentic old unpublished
+    // candidate receipt to retain coverage of the still-supported explicit cleanup endpoint.
+    const registrationRoot = join(root, "models/registrations");
+    const store = await createModelRegistrationStore({}, "historical-candidates", join(registrationRoot, "imported"));
+    const recordIds: string[] = [];
+    for (const model of pack.models) {
+      const path = join(registrationRoot, "imported-definitions", model.registration.modelRef);
+      await mkdir(join(path, ".."), { recursive: true }); await writeFile(path, model.source);
+      const id = randomUUID(); recordIds.push(id);
+      await store.create({}, id, model.registration);
+    }
+    await writeFile(join(registrationRoot, "published-imports.json"), JSON.stringify({ recordIds: [] }));
+    const stage = join(registrationRoot, "staging", randomUUID()); await mkdir(stage, { recursive: true });
+    const receiptPath = join(stage, "candidate.json");
+    await writeFile(receiptPath, JSON.stringify({ packageId: pack.id, recordIds, modelRefs: pack.models.map(model => model.registration.modelRef) }));
     const before = await (await fetch(`${origin}/api/projects/demo/models`)).json();
     assert.equal(before.models.some((item: { origin: string }) => item.origin === "market"), false);
+    const bytes = await snapshotTree(join(root, "models"));
     const cleanup = (revision: string, authorized: boolean) => fetch(`${origin}/api/projects/demo/models/market/cleanup`, {
       method: "POST", headers: { "content-type": "application/json", origin, ...(authorized ? { authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ expectedRevision: revision })
     });
     assert.equal((await cleanup(before.configRevision, false)).status, 401);
     assert.equal((await cleanup("stale", true)).status, 409);
-    await assert.rejects(importModelMarketPackage({}, { root }, pack.id), { code: "MODEL_IMPORT_CLEANUP_REQUIRED" });
+    assert.deepEqual(await snapshotTree(join(root, "models")), bytes);
+    await assert.rejects(importModelMarketPackage({}, { root }, supported.id, { sourceRoot }), { code: "MODEL_IMPORT_CLEANUP_REQUIRED" });
     const cleaned = await cleanup(before.configRevision, true);
     assert.equal(cleaned.status, 200, await cleaned.clone().text());
     assert.deepEqual((await cleaned.json()).cleanedModelRefs, pack.models.map(model => model.registration.modelRef));
-    const imported = await fetch(`${origin}/api/projects/demo/models/market/import`, {
+    for (const [index, model] of pack.models.entries()) {
+      await assert.rejects(readFile(join(registrationRoot, "imported-definitions", model.registration.modelRef)), { code: "ENOENT" });
+      await assert.rejects(readFile(join(registrationRoot, "imported", `${recordIds[index]}.json`)), { code: "ENOENT" });
+    }
+    await assert.rejects(readFile(receiptPath), { code: "ENOENT" });
+    const afterCleanup = await snapshotTree(join(root, "models"));
+    const rejected = await fetch(`${origin}/api/projects/demo/models/market/import`, {
       method: "POST", headers: { "content-type": "application/json", origin, authorization: `Bearer ${token}` },
       body: JSON.stringify({ expectedRevision: before.configRevision, packageId: pack.id })
     });
-    assert.equal(imported.status, 200, await imported.clone().text());
-    assert.equal((await imported.json()).status, "imported");
+    assert.equal(rejected.status, 422, await rejected.clone().text());
+    assert.equal((await rejected.json()).code, "MODEL_RUNTIME_UNSUPPORTED");
+    assert.deepEqual(await snapshotTree(join(root, "models")), afterCleanup);
+    assert.equal((await importModelMarketPackage({}, { root }, supported.id, { sourceRoot })).status, "imported");
     assert.deepEqual((await (await cleanup(before.configRevision, true)).json()).cleanedModelRefs, []);
-    const modelRef = pack.models[0]!.registration.modelRef;
+    const modelRef = supported.models[0]!.registration.modelRef;
     const definition = await fetch(`${origin}/api/projects/demo/models/definition?model=${encodeURIComponent(modelRef)}`);
     assert.equal(definition.status, 200);
-    assert.equal((await definition.json()).source, pack.models[0]!.source);
+    assert.equal((await definition.json()).source, supported.models[0]!.source);
   });
 });

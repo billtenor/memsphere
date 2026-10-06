@@ -158,23 +158,36 @@ for (const entity of entities) {
 
 test("list serializers produce structured machine output and compact text", () => {
   const page = {
-    memories: [
+    items: [
       { reference: "concepts/memory", kind: "concepts" as const, names: ["memory", "记忆"], defines: ["A memory."] },
       { reference: "schemas/record", kind: "schemas" as const, names: ["record"], defines: [] }
     ],
-    next_cursor: null
   };
 
   assert.deepEqual(parse(serializeMemoryListYaml(page)), page);
   assert.deepEqual(JSON.parse(serializeMemoryListJson(page)), page);
   assert.equal(serializeMemoryListText(page), "concepts/memory (记忆)\nschemas/record\n");
-  assert.equal(serializeMemoryListText({ memories: [], next_cursor: null }), "");
+  assert.equal(serializeMemoryListText({ items: [] }), "");
+});
+
+test("every Memory list format exposes the next-page cursor without legacy fields", () => {
+  const page = { items: [{ reference: "concepts/a", kind: "concepts" as const, names: ["a"], defines: [] }], nextCursor: "opaque-cursor" };
+  assert.deepEqual(JSON.parse(serializeMemoryListJson(page)), page);
+  assert.deepEqual(parse(serializeMemoryListYaml(page)), page);
+  assert.equal(serializeMemoryListText(page), "concepts/a\nnextCursor: opaque-cursor\n");
+  const nodes = {
+    memory: { reference: "schemas/a", kind: "schemas" as const, names: ["a"] },
+    parent_node_ref: "schema:parent", items: [], nextCursor: "node-cursor"
+  };
+  assert.deepEqual(JSON.parse(serializeMemoryNodeListJson(nodes)), nodes);
+  assert.deepEqual(parse(serializeMemoryNodeListYaml(nodes)), nodes);
+  assert.equal(serializeMemoryNodeListText(nodes), "nextCursor: node-cursor\n");
 });
 
 test("memory node serializers preserve tagged fragments and copyable text references", () => {
   const page = {
     memory: { reference: "procedures/flow", kind: "procedures" as const, names: ["flow"] },
-    nodes: [{
+    items: [{
       node_ref: "action:Result",
       type: "Action" as const,
       artifact: "Result",
@@ -182,7 +195,6 @@ test("memory node serializers preserve tagged fragments and copyable text refere
       relation: "flow",
       has_children: false
     }],
-    next_cursor: null
   };
   assert.deepEqual(parse(serializeMemoryNodeListYaml(page)), page);
   assert.deepEqual(JSON.parse(serializeMemoryNodeListJson(page)), page);

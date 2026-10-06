@@ -5,9 +5,9 @@
 | 导出 | 扩展 ID | 提供的能力 |
 | --- | --- | --- |
 | `filesystemDataStoreExtension` | `memsphere/filesystem-datastore` | `FilesystemDataStoreFactory`，ID 为 `memsphere/filesystem` |
-| `jsonSchemaExtension` | `memsphere/json-schema-draft-07` | `JsonSchemaModelRuntimeFactory`，匹配元模型 `json-schema/draft-07` |
-| `rawExtension` | `memsphere/raw` | `RawModelRuntimeFactory`，匹配元模型 `raw` |
-| `jsonSchemaMetaModelExtension` | `memsphere/json-schema-metamodel` | `JsonSchemaMetaModelRuntimeFactory`，匹配具体元模型 `json-schema/draft-07` |
+| `jsonSchemaExtension` | `memsphere/json-schema-draft-07` | `JsonSchemaModelRuntimeFactory`，匹配元模型 `json-schema/draft-07.json` |
+| `rawExtension` | `memsphere/raw` | `RawModelRuntimeFactory`，匹配元模型 `raw.json` |
+| `jsonSchemaMetaModelExtension` | `memsphere/json-schema-metamodel` | `JsonSchemaMetaModelRuntimeFactory`，匹配具体元模型 `json-schema/draft-07.json` |
 | `jsonSerializerExtension` | `memsphere/json-serializer` | `JsonPayloadSerializer`，ID 为 `json`，contentType 为 `application/json` |
 | `filesystemJsonValueStoreExtension` | `memsphere/filesystem-json-valuestore` | `FilesystemJsonValueStoreFactory`，ID 为 `memsphere/filesystem-json` |
 
@@ -37,7 +37,7 @@ const definition = {
 const bytes = new TextEncoder().encode(JSON.stringify(definition));
 const model: Model = {
   data: {
-    id: "order-model",
+    id: "order-model.json",
     model: JSON_SCHEMA_DRAFT_07,
     payload: {
       contentType: "application/json",
@@ -126,9 +126,9 @@ DataStore 不加内存锁或文件锁。创建不得覆盖同名文件；更新�
 
 业务值嵌套在 `value`，不是编码后的字符串。文件内冗余保存 id，读取时校验与请求及文件名映射一致。model 由 Store 绑定，不写入记录。revision 从 1 递增，更新保留 createdAt；创建人、更新人不可得时省略。格式不正确或值不符合 Runtime 的记录明确报错。
 
-只有 ValueStore 使用内存锁，按规范化后的绝对文件路径共享，而不是按 Store 实例或整个目录加锁。不同记录可以并行；同一文件的多个实例共享队列，revision 检查和文件提交在同一个临界区完成。等待可以通过 Context.signal 取消，不创建磁盘锁文件，也没有 lockTimeoutMs 配置。
+filesystem JSON ValueStore 按规范化后的真实目录和记录文件名取得操作系统文件锁，覆盖同一记录的 create/update/delete、版本检查及发布；各 Store 实例和独立 CLI 进程采用同一规则，不同记录可以并行。永久锁文件及删除记录的最高 revision 保存于 `.memsphere-json-store`，不替换或删除锁文件；进程结束由操作系统释放锁。等待可通过 Context.signal 取消，配置不提供 lockTimeoutMs。
 
-并发保证限于同一 Node.js 运行环境、同一模块实例中的调用；独立 Worker Threads、多进程和外部编辑器不共享此锁。人工修改记录时也要自行维护 revision，不能把文件存在 revision 字段理解为任意外部写入都受保护。
+条件写保证覆盖共同使用此 Factory 的独立进程；不遵循协议的外部编辑器不在保证范围内。删除保留最高 revision，重新创建同 ID 从更高 revision 开始，旧 expectedRevision 不命中新记录。原始 filesystem DataStore 不新增记录锁或 revision。
 
 ## 跨平台文件行为
 
@@ -137,7 +137,7 @@ DataStore 不加内存锁或文件锁。创建不得覆盖同名文件；更新�
 - 文件名和每级目录名均遵守可移植命名规则：拒绝 Windows 设备保留名、非法字符、末尾点或空格、过长名称。保留可读的 Unicode，要求输入为 NFC；适配 macOS 返回的分解形式名称。拒绝大小写或规范化后存在歧义的名称，不通过哈希或编码消除冲突。DataStore 无锁，不应并发创建仅在大小写上不同的文件或目录。
 - 使用 Node 文件 API 和系统路径函数，不依赖 shell、符号链接或操作系统专属命令。目标记录必须是普通文件，不能是符号链接或目录；存储目录须可信，不作为对抗恶意目录修改的安全边界。
 - 创建和替换先写同目录临时文件，关闭句柄后再发布。创建使用排他硬链接，保证完整内容可见且不覆盖现有文件；更新使用原子 rename。Windows 的暂时性文件占用错误有限重试，绝不通过先删旧文件来规避替换失败。本地文件系统须支持硬链接和同目录原子替换，不支持时明确失败；不承诺断电恢复或网络文件系统事务。DataStore 的追加直接写已有文件，不采用这一替换流程。
-- `.memsphere-` 前缀保留给临时文件，不属于数据 ID。正常结束会清理临时文件；崩溃遗留文件不进入列表，可在确认没有活跃写入后清理。
+- `.memsphere-` 前缀为内部文件保留，不属于数据 ID。`.memsphere-json-store` 是永久协调和删除 revision 历史，不能当临时文件清理。临时文件正常结束会清理，崩溃残留不进入 Factory 列表；业务 Store 重新登记或打开遇到未知内部条目明确报错，不自动删除。
 - `list()` 只枚举文件路径，不读取正文。按完整 ID 字符串顺序分页，默认 100 条、最多 1000 条；DataStore 扫描目录树，ValueStore 扫描单层目录，没有索引，不保证并发修改时的跨页快照。DataStore 写入逐块处理，读取仍完整缓冲到内存；ValueStore 的 JSON 编解码仍处理完整值。
 
 文件名规则参考 [Windows 文件命名约定](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)，时间信息参考 [Node.js Stats 时间语义](https://nodejs.org/docs/latest-v22.x/api/fs.html#stat-time-values)。测试沿用仓库 Linux、Windows、macOS 的 CI 矩阵；本地在什么系统执行，只能验证该系统。
@@ -151,7 +151,7 @@ DataStore 不加内存锁或文件锁。创建不得覆盖同名文件；更新�
 - 支持 object、同类型 array、string、number / integer、boolean、null；integer 映射为 number，并保留整数校验。
 - 支持字段、required、具有类型的 additionalProperties，以及数值、字符串长度和 pattern、数组长度和 uniqueItems 等约束；不填默认值、不转换类型、不删除未知属性。
 - 支持同类型标量 enum；字符串和数值枚举暴露 EnumDescriptor。const 和其他约束由 Runtime 校验，不额外发明反射类型。
-- 支持本地 JSON Pointer `$ref` 和递归结构。外部 `$ref` 查询已登记的依赖 Runtime，可引用其他模型定义标准；依赖必须兼容这里使用的原生内存表示。
+- 只支持本模型内部的空引用、`#`、`#/...` JSON Pointer 与递归结构；全部跨模型 `$ref` 明确拒绝，已登记目标或合法 URI 不构成例外。数据 examples 中名为 `$ref` 的普通字段不是模型引用。
 - 未声明类型的开放 schema、联合类型、元组、组合关键字、format、patternProperties、嵌套 `$id` 和外部引用片段等未支持形态会明确报错，不悄悄降级。
 
 `additionalProperties` 缺省或为 true 时，额外属性保留，但不提供其反射字段描述。Runtime 对初始值和反射修改都执行校验；修改失败会恢复原值。使用普通对象、稠密数组和标量作为原生表示，不执行对象 getter。
@@ -160,7 +160,7 @@ DataStore 不加内存锁或文件锁。创建不得覆盖同名文件；更新�
 
 ## Raw Runtime：整体字节反射
 
-`RAW_MODEL` 为 `"raw"`，表示模型定义标准，不是所有原始内容共用的业务模型 ID。`RawModelRuntimeFactory` 为每个具体模型创建独立的 `RawModelRuntime`，描述符保留该模型 ID，根类型为 `{ kind: "scalar", scalar: "bytes" }`。例如 `artifact-model` 和 `log-model` 可以共用这一标准，同时分别绑定各自的 Store。
+`RAW_MODEL` 为 `"raw.json"`，表示模型定义标准，不是所有原始内容共用的业务模型 ID。`RawModelRuntimeFactory` 为每个具体模型创建独立的 `RawModelRuntime`，描述符保留该模型 ID，根类型为 `{ kind: "scalar", scalar: "bytes" }`。例如 `artifact-model.json` 和 `log-model.json` 可以共用这一标准，同时分别绑定各自的 Store。
 
 `RawModelDefinition` 只支持可选的字符串 `description`，空对象 `{}` 有效；其他字段或不支持的定义会报错。`reflect()` 和 `ScalarValue.set()` 接受 `Uint8Array`（包括 Node.js `Buffer`），不将字符串、普通数组或 `ArrayBuffer` 自动转换成字节。反射只提供整体 `value` 读取与 `set(bytes)` 替换，不提供字段、数组元素或 Map 条目访问；替换仅改变内存视图，不自动写入 Store。
 
@@ -174,7 +174,7 @@ const definition: RawModelDefinition = { description: "原始交付物内容" };
 const definitionBytes = new TextEncoder().encode(JSON.stringify(definition));
 const model: Model<RawModelDefinition> = {
   data: {
-    id: "artifact-model",
+    id: "artifact-model.json",
     model: RAW_MODEL,
     payload: {
       contentType: "application/json",
@@ -191,7 +191,7 @@ const manager = new DefaultDataManager({
   extensions: new DefaultDataExtensionRegistry([rawExtension]),
   models: [{ model }],
 });
-const runtime = await manager.getRuntime({}, "artifact-model");
+const runtime = await manager.getRuntime({}, "artifact-model.json");
 const value = runtime.reflect(new TextEncoder().encode("原始内容"));
 if (value.kind !== "scalar") throw new Error("Expected a scalar");
 value.set(new TextEncoder().encode("替换后的内容"));

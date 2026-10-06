@@ -42,10 +42,19 @@ export const modelRegistrationConfigSchema = z.object({
   if (!Object.hasOwn(config.stores, config.storeId)) context.addIssue({ code: "custom", path: ["storeId"], message: "selected Store ID has no configuration" });
 });
 
+const businessDirectorySchema = modelStorePathSchema;
+export const businessStoreBindingSchema = z.discriminatedUnion("kind", [
+  z.object({ model: z.string().min(1), kind: z.literal("value"), factory: z.literal("memsphere/filesystem-json"),
+    config: z.object({ directory: businessDirectorySchema }).strict() }).strict(),
+  z.object({ model: z.string().min(1), kind: z.literal("data"), factory: z.literal("memsphere/filesystem"),
+    config: z.object({ directory: businessDirectorySchema, contentTypeExtensions: z.record(z.array(z.string())).optional() }).strict() }).strict()
+]);
+export type BusinessStoreBinding = z.infer<typeof businessStoreBindingSchema>;
 export const projectConfigSchema = z.object({
   store: z.discriminatedUnion("type", [managedStoreSchema, embeddedStoreSchema]),
   modelsDirectory: z.string().refine(value => value.trim().length > 0 && !value.includes("\0"), "modelsDirectory must be a nonblank path without NUL characters").optional(),
   modelRegistration: modelRegistrationConfigSchema.optional(),
+  dataStores: z.record(z.string().min(1).refine(value => value.trim().length > 0 && !value.includes("\0") && value !== "__proto__", "Store ID must be nonblank and cannot be __proto__"), businessStoreBindingSchema).optional(),
   control_plane: projectControlPlaneConfigSchema.optional(),
   view: projectViewConfigSchema.optional()
 }).strict();

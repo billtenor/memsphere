@@ -1,4 +1,4 @@
-import { access, lstat } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Config } from "../data/api/config.js";
 import type { Context } from "../data/api/context.js";
@@ -9,7 +9,7 @@ import { validateRelativeFilePath } from "../data/extensions/shared/filesystem.j
 /** Project-private adapter: preserve ModelRef while keeping JSON files readable. */
 export function modelDefinitionStore(id: string, model: string, directory: string, system = false): DataStore {
   const factory = new FilesystemDataStoreFactory();
-  const filename = (ref: string) => { validateRelativeFilePath(ref); return system ? `${ref}.json` : ref; };
+  const filename = (ref: string) => { validateRelativeFilePath(ref); return ref; };
   const open = async (context: Context, writing = false) => {
     context.signal?.throwIfAborted();
     if (system) {
@@ -21,11 +21,9 @@ export function modelDefinitionStore(id: string, model: string, directory: strin
         catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
       }
     }
-    if (!writing) {
-      try { await access(directory); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
-    }
-    return factory.createStore(context, id, model, new Config({ directory }));
+    if (writing) return factory.createStore(context, id, model, new Config({ directory }));
+    try { return await factory.openExisting(context, id, model, new Config({ directory })); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
   };
   return {
     id, model, kind: "DataStore",
@@ -43,7 +41,7 @@ export function modelDefinitionStore(id: string, model: string, directory: strin
     async delete(context, ref, options) { return await (await open(context))?.delete(context, filename(ref), options) ?? false; },
     async list(context, options) {
       const result = await (await open(context))?.list(context, options) ?? { items: [] };
-      return { ...result, items: result.items.filter(item => !system || item.id.endsWith(".json")).map(item => ({ id: system ? item.id.slice(0, -5) : item.id })) };
+      return { ...result, items: result.items.filter(item => !system || item.id.endsWith(".json")) };
     }
   };
 }

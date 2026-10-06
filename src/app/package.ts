@@ -1,3 +1,4 @@
+import { assertModelRef } from "../project/model-registration-contract.js";
 import { readFile, realpath } from "node:fs/promises";
 import { Ajv } from "ajv";
 import { appManifestSchema, cliDescriptorSchema, modelPackageSchema, AppError, type AppManifest } from "./contracts.js";
@@ -35,7 +36,10 @@ export async function readAppPackage(directory: string) {
     const definition = modelPackageSchema.parse(await readJson(await packagePath(path, "model-package.json")));
     if (new Set(definition.models.map(model => model.modelRef)).size !== definition.models.length)
       throw new AppError("APP_MODEL_CONFLICT", `Duplicate modelRef in package: ${definition.id}`);
-    for (const model of definition.models) await packagePath(path, model.path);
+    for (const model of definition.models) {
+      assertModelRef(model.modelRef); assertModelRef(model.metaModel);
+      await packagePath(path, model.path);
+    }
     return { key: asset.key, path, definition, digest: await packageDigest(path) };
   }));
   for (const extension of manifest.assets.dataExtensions) await packagePath(root, extension.entry);

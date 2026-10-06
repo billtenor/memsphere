@@ -7,6 +7,7 @@ names:
 defines:
   - 规定 Agent 如何通过 memsphere CLI 发现和读取当前 Workspace 可见 Project 中的 Memory。
 asserts:
+  - 所有 memory list（包括直接子 Node 列表）使用 items 和可选 nextCursor；默认每页 100 条、最多 1000，先筛选再分页。需要完整结果时必须以相同 Project、Run 和筛选条件持续传入返回的 cursor，直到没有 nextCursor，不得把第一页当作完整目录；可调整 limit 或输出格式，分页不承诺并发修改期间的快照。
   - 当用户已经给出可唯一解析的 bare 规范名称、bare 别名或 canonical 逻辑引用时，Agent 可以直接使用 memsphere memory read；目标尚未唯一确定时，必须先使用 memsphere memory list 发现候选。
   - 显式逻辑引用固定使用 `<kind>/<canonical-name>`；canonical name 必须是 1–120 字符的小写 ASCII kebab-case，不接受 alias。别名只能作为不带 kind 的 selector，并在同一解析范围内无冲突时定位到当前 canonical reference。
   - memsphere memory list 的 --query 只精确匹配规范名称或别名，不执行全文检索或语义检索；Agent 应优先使用从用户请求中提取的准确名称或别名，并在已知类型时同时使用 --kind。

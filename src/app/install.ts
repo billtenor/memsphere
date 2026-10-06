@@ -1,3 +1,4 @@
+import { listAppMemoryEntries } from "./ownership.js";
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -172,7 +173,7 @@ export async function checkApp(project: AppProject, id: string) {
     catch (error) { if (installed.manifest.id === id) { add("package", false, String(error)); return { id, status: "unavailable", items }; } }
   }
   const catalog = new DefaultMemoryCatalog(new AppMemoryProvider(project.paths.root, project.memoryRoot));
-  const entries = (await catalog.list()).memories;
+  const entries = await listAppMemoryEntries(catalog);
   for (const entry of app.manifest.entrypoints.agent) {
     try {
       const asset = app.memories.find(memory => memory.reference === entry);

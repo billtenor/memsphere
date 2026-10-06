@@ -13,6 +13,10 @@ npm ci
 npm run build
 ```
 
+Requires Node.js 22 or later. The CLI package declares its native file-lock dependency. `--install-links` installs the local package and its dependencies instead of linking the source directory.
+
+要求 Node.js 22 或更高版本。CLI 包声明了原生文件锁依赖；`--install-links` 使 npm 安装本地包及依赖，而不是只链接源目录。
+
 Copy this entire directory to distribute the App. The build creates `cli/expense.cjs`, a standalone Node executable bundling the public `memsphere/data` APIs; it does not need the repository or a running Memsphere server. The View uses the host's public `@memsphere/view-sdk`. All backend imports are local to this directory.
 
 复制本目录即可交付。构建后的 CLI 不依赖仓库源码或运行中的 Memsphere 服务；View 使用宿主公开 SDK，backend 仅引用目录内共享业务代码。使用者安装发行目录时不需要重新构建 Memsphere。
@@ -22,7 +26,7 @@ Copy this entire directory to distribute the App. The build creates `cli/expense
 Obtain the built directory as `expense-app`. Install its external CLI into a directory you own / 取得构建好的 `expense-app` 目录，将 CLI 安装到自己的工具目录：
 
 ```bash
-npm install --global --prefix "$HOME/.local" ./expense-app/cli
+npm install --global --install-links --prefix "$HOME/.local" ./expense-app/cli
 export PATH="$HOME/.local/bin:$PATH"
 expense --version
 ```

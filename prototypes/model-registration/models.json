@@ -11,7 +11,7 @@
       "store_id": "models/json-schema/draft-07",
       "storage": "store"
     },
-    "metaModel": "json-schema/draft-07",
+    "metaModel": "json-schema/draft-07.json",
     "schema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "用例 01 · 基本类型与枚举",
@@ -155,7 +155,7 @@
       "package_name": "订单示例",
       "storage": "store"
     },
-    "metaModel": "json-schema/draft-07",
+    "metaModel": "json-schema/draft-07.json",
     "schema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "用例 02 · 订单与深层嵌套",
@@ -360,7 +360,7 @@
       "store_id": "models/json-schema/draft-07",
       "storage": "store"
     },
-    "metaModel": "json-schema/draft-07",
+    "metaModel": "json-schema/draft-07.json",
     "schema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "用例 03 · 根数组与多维数组",
@@ -458,7 +458,7 @@
       "store_id": "models/json-schema/draft-07",
       "storage": "store"
     },
-    "metaModel": "json-schema/draft-07",
+    "metaModel": "json-schema/draft-07.json",
     "schema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "用例 04 · 字典与特殊类型映射",
@@ -581,7 +581,9 @@
       ]
     },
     "source": "{\n  \"$schema\": \"http://json-schema.org/draft-07/schema#\",\n  \"title\": \"用例 04 · 字典与特殊类型映射\",\n  \"description\": \"动态键字典以及 bigint/bytes 的 JSON 表示示例；它们不是原生 Map、bigint、Uint8Array 的反射声明。\",\n  \"type\": \"object\",\n  \"properties\": {\n    \"labelsByKey\": {\n      \"type\": \"object\", \"description\": \"固定的分组信息和自定义标签保存在同一个对象中。\",\n      \"properties\": {\n        \"groupName\": { \"type\": \"string\", \"description\": \"固定字段：标签分组名称。\" },\n        \"version\": { \"type\": \"integer\", \"description\": \"固定字段：标签分组版本号。\" }\n      },\n      \"required\": [\"groupName\"],\n      \"additionalProperties\": { \"type\": \"string\", \"description\": \"自定义标签名称对应的文本，例如颜色、尺寸。\" },\n      \"examples\": [{ \"groupName\": \"商品标签\", \"version\": 1, \"颜色\": \"红色\", \"尺寸\": \"大号\" }]\n    },\n    \"productsBySku\": {\n      \"type\": \"object\", \"description\": \"按商品 SKU 保存商品信息。\",\n      \"additionalProperties\": { \"type\": \"object\", \"properties\": { \"name\": { \"type\": \"string\" }, \"stock\": { \"type\": \"integer\" }, \"prices\": { \"type\": \"array\", \"items\": { \"type\": \"number\" } } }, \"required\": [\"name\", \"stock\"] }\n    },\n    \"batchesByDate\": { \"type\": \"object\", \"additionalProperties\": { \"type\": \"array\", \"items\": { \"type\": \"object\", \"properties\": { \"id\": { \"type\": \"string\" }, \"quantity\": { \"type\": \"integer\" } }, \"required\": [\"id\", \"quantity\"] } }, \"description\": \"按日期保存当日的批次列表。\" },\n    \"bigIntegerText\": { \"type\": \"string\", \"pattern\": \"^-?(0|[1-9][0-9]*)$\", \"examples\": [\"9007199254740993\"], \"description\": \"任意精度整数的十进制文本表示，避免 JSON number 精度损失；反射类型仍是 string，不会自动转 bigint。\" },\n    \"binaryBase64\": { \"type\": \"string\", \"contentEncoding\": \"base64\", \"contentMediaType\": \"application/octet-stream\", \"examples\": [\"AAECAw==\"], \"description\": \"二进制内容的 Base64 文本表示；仍是 string，不会自动转 bytes，注解见原始定义。\" },\n    \"createdAt\": { \"type\": \"string\", \"format\": \"date-time\", \"description\": \"日期时间文本，不引入独立 Date 类型。format 见原文。\" },\n    \"homepage\": { \"type\": \"string\", \"format\": \"uri\", \"description\": \"URI 文本，format 见原文。\" },\n    \"email\": { \"type\": \"string\", \"format\": \"email\", \"description\": \"邮件地址文本，format 见原文。\" }\n  },\n  \"required\": [\"labelsByKey\", \"bigIntegerText\", \"binaryBase64\"]\n}\n",
-    "origin": "project"
+    "origin": "project",
+    "status": "unavailable",
+    "error": "MODEL_RUNTIME_UNSUPPORTED：定义合法，但当前 Runtime 不支持其中的约束。"
   },
   {
     "registration": {
@@ -595,7 +597,7 @@
       "store_id": "models/json-schema/draft-07",
       "storage": "store"
     },
-    "metaModel": "json-schema/draft-07",
+    "metaModel": "json-schema/draft-07.json",
     "schema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "用例 05 · 联合与条件展示边界",
@@ -727,7 +729,9 @@
       ]
     },
     "source": "{\n  \"$schema\": \"http://json-schema.org/draft-07/schema#\",\n  \"title\": \"用例 05 · 联合与条件展示边界\",\n  \"description\": \"合法 Draft-07 的联合、组合、条件、布尔子模式；用于检查展示边界，不承诺现有业务 Runtime 支持这些特性。\",\n  \"type\": \"object\",\n  \"properties\": {\n    \"nickname\": { \"type\": [\"string\", \"null\"], \"description\": \"可为空文本，类型列显示文本与空值的联合。\" },\n    \"flexibleId\": { \"anyOf\": [{ \"type\": \"string\" }, { \"type\": \"integer\" }], \"description\": \"anyOf：文本或整数；具体分支见原文。\" },\n    \"payment\": {\n      \"oneOf\": [\n        { \"type\": \"object\", \"properties\": { \"method\": { \"const\": \"card\" }, \"cardLast4\": { \"type\": \"string\" } }, \"required\": [\"method\", \"cardLast4\"] },\n        { \"type\": \"object\", \"properties\": { \"method\": { \"const\": \"cash\" }, \"received\": { \"type\": \"boolean\" } }, \"required\": [\"method\", \"received\"] }\n      ], \"description\": \"oneOf：两个支付对象分支；当前树表不伪造统一字段。\"\n    },\n    \"bounded\": { \"type\": \"number\", \"allOf\": [{ \"minimum\": 0 }, { \"maximum\": 100 }], \"description\": \"allOf 组合约束，见原始定义。\" },\n    \"mixedItems\": { \"type\": \"array\", \"items\": { \"anyOf\": [{ \"type\": \"string\" }, { \"type\": \"object\", \"properties\": { \"value\": { \"type\": \"number\" } } }] }, \"description\": \"联合元素数组；分支结构查看原文。\" },\n    \"allowedAnything\": true,\n    \"forbiddenField\": false,\n    \"kind\": { \"type\": \"string\", \"enum\": [\"personal\", \"company\"] },\n    \"companyName\": { \"type\": \"string\" }\n  },\n  \"if\": { \"properties\": { \"kind\": { \"const\": \"company\" } }, \"required\": [\"kind\"] },\n  \"then\": { \"required\": [\"companyName\"] },\n  \"else\": { \"not\": { \"required\": [\"companyName\"] } },\n  \"required\": [\"nickname\", \"kind\"]\n}\n",
-    "origin": "project"
+    "origin": "project",
+    "status": "unavailable",
+    "error": "MODEL_RUNTIME_UNSUPPORTED：定义合法，但当前 Runtime 不支持其中的约束。"
   },
   {
     "registration": {
@@ -737,15 +741,15 @@
         "example",
         "json-schema"
       ],
-      "description": "本地 definitions 复用、递归树与精确文件 ModelRef；当前树表显示引用提示，引用目标查看原文，不无限展开。",
+      "description": "本地 definitions 复用、递归树与模型内的状态枚举；引用目标保存在本模型中，不无限展开递归字段。",
       "store_id": "models/json-schema/draft-07",
       "storage": "store"
     },
-    "metaModel": "json-schema/draft-07",
+    "metaModel": "json-schema/draft-07.json",
     "schema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "用例 06 · 引用与递归",
-      "description": "本地 definitions 复用、递归树与精确文件 ModelRef；当前树表显示引用提示，引用目标查看原文，不无限展开。",
+      "description": "本地 definitions 复用、递归树与模型内的状态枚举；引用目标保存在本模型中，不无限展开递归字段。",
       "type": "object",
       "definitions": {
         "money": {
@@ -795,8 +799,13 @@
           "description": "递归树；不无限展开字段。"
         },
         "externalStatus": {
-          "$ref": "examples/07-scalar-enum-root.json",
-          "description": "精确 ModelRef 指向另一个已保存的模型，不按所在子目录改写 ID。"
+          "type": "string",
+          "enum": [
+            "pending",
+            "paid",
+            "cancelled"
+          ],
+          "description": "订单状态；枚举约束直接保存在本模型中。"
         }
       },
       "required": [
@@ -804,7 +813,7 @@
         "tree"
       ]
     },
-    "source": "{\n  \"$schema\": \"http://json-schema.org/draft-07/schema#\",\n  \"title\": \"用例 06 · 引用与递归\",\n  \"description\": \"本地 definitions 复用、递归树与精确文件 ModelRef；当前树表显示引用提示，引用目标查看原文，不无限展开。\",\n  \"type\": \"object\",\n  \"definitions\": {\n    \"money\": { \"type\": \"object\", \"properties\": { \"amount\": { \"type\": \"number\" }, \"currency\": { \"type\": \"string\", \"enum\": [\"CNY\", \"USD\"] } }, \"required\": [\"amount\", \"currency\"] },\n    \"node\": { \"type\": \"object\", \"properties\": { \"name\": { \"type\": \"string\" }, \"children\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/definitions/node\" } } }, \"required\": [\"name\"] }\n  },\n  \"properties\": {\n    \"budget\": { \"$ref\": \"#/definitions/money\", \"description\": \"复用金额值对象；目标见 definitions.money。\" },\n    \"tree\": { \"$ref\": \"#/definitions/node\", \"description\": \"递归树；不无限展开字段。\" },\n    \"externalStatus\": { \"$ref\": \"examples/07-scalar-enum-root.json\", \"description\": \"精确 ModelRef 指向另一个已保存的模型，不按所在子目录改写 ID。\" }\n  },\n  \"required\": [\"budget\", \"tree\"]\n}\n",
+    "source": "{\n  \"$schema\": \"http://json-schema.org/draft-07/schema#\",\n  \"title\": \"用例 06 · 引用与递归\",\n  \"description\": \"本地 definitions 复用、递归树与模型内的状态枚举；引用目标保存在本模型中，不无限展开递归字段。\",\n  \"type\": \"object\",\n  \"definitions\": {\n    \"money\": { \"type\": \"object\", \"properties\": { \"amount\": { \"type\": \"number\" }, \"currency\": { \"type\": \"string\", \"enum\": [\"CNY\", \"USD\"] } }, \"required\": [\"amount\", \"currency\"] },\n    \"node\": { \"type\": \"object\", \"properties\": { \"name\": { \"type\": \"string\" }, \"children\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/definitions/node\" } } }, \"required\": [\"name\"] }\n  },\n  \"properties\": {\n    \"budget\": { \"$ref\": \"#/definitions/money\", \"description\": \"复用金额值对象；目标见 definitions.money。\" },\n    \"tree\": { \"$ref\": \"#/definitions/node\", \"description\": \"递归树；不无限展开字段。\" },\n    \"externalStatus\": { \"type\": \"string\", \"enum\": [\"pending\", \"paid\", \"cancelled\"], \"description\": \"订单状态；枚举约束直接保存在本模型中。\" }\n  },\n  \"required\": [\"budget\", \"tree\"]\n}\n",
     "origin": "project"
   },
   {
@@ -819,7 +828,7 @@
       "store_id": "models/json-schema/draft-07",
       "storage": "store"
     },
-    "metaModel": "json-schema/draft-07",
+    "metaModel": "json-schema/draft-07.json",
     "schema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "用例 07 · 标量枚举根",
@@ -846,7 +855,7 @@
       "store_id": "models/json-schema/draft-07",
       "storage": "store"
     },
-    "metaModel": "json-schema/draft-07",
+    "metaModel": "json-schema/draft-07.json",
     "schema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "用例 08 · 数字枚举根",
@@ -863,7 +872,7 @@
   },
   {
     "registration": {
-      "modelRef": "memsphere/model-registration",
+      "modelRef": "memsphere/model-registration.json",
       "name": "模型登记",
       "package": "memsphere.builtin",
       "tags": [
@@ -871,9 +880,10 @@
       ],
       "description": "管理模型的名称、说明、所属包、包名称、标签与模型存储方式。代码内置定义由系统直接提供；持久化定义通过存储 ID 与模型 ID 读取。",
       "package_name": "Memsphere 内置",
-      "storage": "builtin"
+      "storage": "store",
+      "store_id": "models/system/json-schema/draft-07"
     },
-    "metaModel": "json-schema/draft-07",
+    "metaModel": "json-schema/draft-07.json",
     "schema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "模型登记",
@@ -956,7 +966,7 @@
           "storage": "store"
         },
         {
-          "modelRef": "memsphere/run/artifact",
+          "modelRef": "memsphere/run/artifact.json",
           "name": "运行产物",
           "package": "memsphere.builtin",
           "package_name": "Memsphere 内置",
@@ -977,12 +987,12 @@
         }
       ]
     },
-    "source": "{\n  \"$schema\": \"http://json-schema.org/draft-07/schema#\",\n  \"title\": \"模型登记\",\n  \"description\": \"管理模型的名称、说明、所属包、包名称、标签与模型存储方式。代码内置定义由系统直接提供；持久化定义通过存储 ID 与模型 ID 读取。\",\n  \"type\": \"object\",\n  \"additionalProperties\": false,\n  \"required\": [\n    \"modelRef\",\n    \"storage\"\n  ],\n  \"properties\": {\n    \"modelRef\": {\n      \"type\": \"string\",\n      \"minLength\": 1,\n      \"pattern\": \"\\\\S\",\n      \"description\": \"模型的稳定 ID，与 Runtime 使用的 ModelRef 一致；读取模型定义时也以此值作为 Store 内的记录 ID。项目内不得重复登记。\"\n    },\n    \"name\": {\n      \"type\": \"string\",\n      \"minLength\": 1,\n      \"pattern\": \"\\\\S\",\n      \"description\": \"管理侧显示名称。未设置时使用模型定义中的 title；定义没有 title 时使用 modelRef。\"\n    },\n    \"description\": {\n      \"type\": \"string\",\n      \"description\": \"管理侧说明。未设置时使用模型定义中的 description；显式空字符串表示不显示说明。\"\n    },\n    \"package\": {\n      \"type\": \"string\",\n      \"minLength\": 1,\n      \"pattern\": \"\\\\S\",\n      \"description\": \"模型所属包的稳定标识，例如 memsphere.builtin、memsphere.examples.orders。省略表示未定义包；本项目也可有自己的包。\",\n      \"examples\": [\n        \"memsphere.builtin\",\n        \"memsphere.examples.orders\",\n        \"acme.commerce\"\n      ]\n    },\n    \"package_name\": {\n      \"type\": \"string\",\n      \"minLength\": 1,\n      \"pattern\": \"\\\\S\",\n      \"description\": \"所属包的显示名称，例如 Memsphere 内置、订单示例。仅在设置 package 时填写；未设置时显示 package。同一个包的模型可重复保存名称，名称应保持一致。\"\n    },\n    \"tags\": {\n      \"type\": \"array\",\n      \"uniqueItems\": true,\n      \"items\": {\n        \"type\": \"string\",\n        \"minLength\": 1,\n        \"pattern\": \"\\\\S\"\n      },\n      \"description\": \"辅助分类标签，例如 example、experimental。一个模型可以有多个标签，同一条记录中的标签不得重复。\"\n    },\n    \"storage\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"builtin\",\n        \"store\"\n      ],\n      \"description\": \"模型存储方式：builtin 为代码内置，由系统直接提供定义；store 为持久化存储，必须同时填写 store_id。此字段不表示包的来源。\"\n    },\n    \"store_id\": {\n      \"type\": \"string\",\n      \"minLength\": 1,\n      \"pattern\": \"\\\\S\",\n      \"description\": \"保存模型定义的 Store ID。storage 为 store 时必填，以 store_id 与 modelRef 读取定义；storage 为 builtin 时不得填写。不得另存重复的定义 ID。\"\n    }\n  },\n  \"examples\": [\n    {\n      \"modelRef\": \"sales/order.json\",\n      \"name\": \"订单\",\n      \"package\": \"myproject.orders\",\n      \"package_name\": \"订单管理\",\n      \"tags\": [\n        \"order\"\n      ],\n      \"store_id\": \"models/json-schema/draft-07\",\n      \"storage\": \"store\"\n    },\n    {\n      \"modelRef\": \"memsphere/run/artifact\",\n      \"name\": \"运行产物\",\n      \"package\": \"memsphere.builtin\",\n      \"package_name\": \"Memsphere 内置\",\n      \"tags\": [\n        \"run\",\n        \"artifact\"\n      ],\n      \"storage\": \"builtin\"\n    },\n    {\n      \"modelRef\": \"notes.json\",\n      \"name\": \"备注\",\n      \"tags\": [\n        \"example\"\n      ],\n      \"store_id\": \"models/json-schema/draft-07\",\n      \"storage\": \"store\"\n    }\n  ]\n}\n",
+    "source": "{\n  \"$schema\": \"http://json-schema.org/draft-07/schema#\",\n  \"title\": \"模型登记\",\n  \"description\": \"管理模型的名称、说明、所属包、包名称、标签与模型存储方式。代码内置定义由系统直接提供；持久化定义通过存储 ID 与模型 ID 读取。\",\n  \"type\": \"object\",\n  \"additionalProperties\": false,\n  \"required\": [\n    \"modelRef\",\n    \"storage\"\n  ],\n  \"properties\": {\n    \"modelRef\": {\n      \"type\": \"string\",\n      \"minLength\": 1,\n      \"pattern\": \"\\\\S\",\n      \"description\": \"模型的稳定 ID，与 Runtime 使用的 ModelRef 一致；读取模型定义时也以此值作为 Store 内的记录 ID。项目内不得重复登记。\"\n    },\n    \"name\": {\n      \"type\": \"string\",\n      \"minLength\": 1,\n      \"pattern\": \"\\\\S\",\n      \"description\": \"管理侧显示名称。未设置时使用模型定义中的 title；定义没有 title 时使用 modelRef。\"\n    },\n    \"description\": {\n      \"type\": \"string\",\n      \"description\": \"管理侧说明。未设置时使用模型定义中的 description；显式空字符串表示不显示说明。\"\n    },\n    \"package\": {\n      \"type\": \"string\",\n      \"minLength\": 1,\n      \"pattern\": \"\\\\S\",\n      \"description\": \"模型所属包的稳定标识，例如 memsphere.builtin、memsphere.examples.orders。省略表示未定义包；本项目也可有自己的包。\",\n      \"examples\": [\n        \"memsphere.builtin\",\n        \"memsphere.examples.orders\",\n        \"acme.commerce\"\n      ]\n    },\n    \"package_name\": {\n      \"type\": \"string\",\n      \"minLength\": 1,\n      \"pattern\": \"\\\\S\",\n      \"description\": \"所属包的显示名称，例如 Memsphere 内置、订单示例。仅在设置 package 时填写；未设置时显示 package。同一个包的模型可重复保存名称，名称应保持一致。\"\n    },\n    \"tags\": {\n      \"type\": \"array\",\n      \"uniqueItems\": true,\n      \"items\": {\n        \"type\": \"string\",\n        \"minLength\": 1,\n        \"pattern\": \"\\\\S\"\n      },\n      \"description\": \"辅助分类标签，例如 example、experimental。一个模型可以有多个标签，同一条记录中的标签不得重复。\"\n    },\n    \"storage\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"builtin\",\n        \"store\"\n      ],\n      \"description\": \"模型存储方式：builtin 为代码内置，由系统直接提供定义；store 为持久化存储，必须同时填写 store_id。此字段不表示包的来源。\"\n    },\n    \"store_id\": {\n      \"type\": \"string\",\n      \"minLength\": 1,\n      \"pattern\": \"\\\\S\",\n      \"description\": \"保存模型定义的 Store ID。storage 为 store 时必填，以 store_id 与 modelRef 读取定义；storage 为 builtin 时不得填写。不得另存重复的定义 ID。\"\n    }\n  },\n  \"examples\": [\n    {\n      \"modelRef\": \"sales/order.json\",\n      \"name\": \"订单\",\n      \"package\": \"myproject.orders\",\n      \"package_name\": \"订单管理\",\n      \"tags\": [\n        \"order\"\n      ],\n      \"store_id\": \"models/json-schema/draft-07\",\n      \"storage\": \"store\"\n    },\n    {\n      \"modelRef\": \"memsphere/run/artifact.json\",\n      \"name\": \"运行产物\",\n      \"package\": \"memsphere.builtin\",\n      \"package_name\": \"Memsphere 内置\",\n      \"tags\": [\n        \"run\",\n        \"artifact\"\n      ],\n      \"storage\": \"builtin\"\n    },\n    {\n      \"modelRef\": \"notes.json\",\n      \"name\": \"备注\",\n      \"tags\": [\n        \"example\"\n      ],\n      \"store_id\": \"models/json-schema/draft-07\",\n      \"storage\": \"store\"\n    }\n  ]\n}\n",
     "origin": "system"
   },
   {
     "registration": {
-      "modelRef": "memsphere/run/agent-activity-log",
+      "modelRef": "memsphere/run/agent-activity-log.json",
       "name": "智能体活动日志",
       "package": "memsphere.builtin",
       "tags": [
@@ -991,16 +1001,17 @@
       ],
       "description": "智能体执行过程中的追加活动日志，用于查看过程与定位问题。",
       "package_name": "Memsphere 内置",
-      "storage": "builtin"
+      "storage": "store",
+      "store_id": "models/system/raw"
     },
-    "metaModel": "raw",
+    "metaModel": "raw.json",
     "schema": {},
     "source": "{}",
     "origin": "system"
   },
   {
     "registration": {
-      "modelRef": "memsphere/run/agent-activity-snapshot",
+      "modelRef": "memsphere/run/agent-activity-snapshot.json",
       "name": "智能体活动快照",
       "package": "memsphere.builtin",
       "tags": [
@@ -1009,16 +1020,17 @@
       ],
       "description": "智能体当前活动状态的快照，用于展示运行进度。",
       "package_name": "Memsphere 内置",
-      "storage": "builtin"
+      "storage": "store",
+      "store_id": "models/system/raw"
     },
-    "metaModel": "raw",
+    "metaModel": "raw.json",
     "schema": {},
     "source": "{}",
     "origin": "system"
   },
   {
     "registration": {
-      "modelRef": "memsphere/run/artifact",
+      "modelRef": "memsphere/run/artifact.json",
       "name": "运行产物",
       "package": "memsphere.builtin",
       "tags": [
@@ -1027,16 +1039,17 @@
       ],
       "description": "运行过程中提交的产物内容，以完整字节值保存。",
       "package_name": "Memsphere 内置",
-      "storage": "builtin"
+      "storage": "store",
+      "store_id": "models/system/raw"
     },
-    "metaModel": "raw",
+    "metaModel": "raw.json",
     "schema": {},
     "source": "{}",
     "origin": "system"
   },
   {
     "registration": {
-      "modelRef": "memsphere/run/memory-snapshot-file",
+      "modelRef": "memsphere/run/memory-snapshot-file.json",
       "name": "记忆快照文件",
       "package": "memsphere.builtin",
       "tags": [
@@ -1045,9 +1058,10 @@
       ],
       "description": "运行启动时冻结的记忆文件，为本次运行提供稳定的记忆快照。",
       "package_name": "Memsphere 内置",
-      "storage": "builtin"
+      "storage": "store",
+      "store_id": "models/system/raw"
     },
-    "metaModel": "raw",
+    "metaModel": "raw.json",
     "schema": {},
     "source": "{}",
     "origin": "system"

@@ -1,3 +1,4 @@
+import { managedProjectFixture } from "./helpers/project.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -65,7 +66,7 @@ async function withManagedMarket(run: (fixture: MarketFixture) => Promise<void>)
     process.env.MEMSPHERE_PROJECT = "managed";
     await runGit(["init", "-b", "master"], { cwd: workspace });
     process.chdir(workspace);
-    await projectCreateCommand("managed", { bind: true });
+    await managedProjectFixture("managed", { bind: true });
     const project = (await readProjectRegistry(home)).projects.managed;
     assert(project);
     await run({ home, project: "managed", workspace, memoryRoot: join(project.root, "memory") });

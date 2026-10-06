@@ -8,7 +8,7 @@ import { parseControlPlaneConfig } from "../src/control-plane/index.js";
 import { exportRunArtifact } from "../src/commands/run.js";
 import { RunMemoryProvider, runMemoryFiles } from "../src/memory/run-provider.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
-import { prepareRunData, readRunContent, runDataModels, runDataStore, saveRunContent } from "../src/project/run-data.js";
+import { prepareRunData, readRunContent, runDataModels, runDataStoreIds, runDataStore, saveRunContent } from "../src/project/run-data.js";
 import { currentArtifactReview, currentSchemaFinalization, enterSchema, readRun, reportRun, startRun, submitArtifactReviewHumanAssignmentForRunner, type RunState } from "../src/run/store.js";
 import { opaqueRunData } from "./helpers/run-data.js";
 import { reviewConfiguration } from "./helpers/review.js";
@@ -171,7 +171,7 @@ test("Project host caches eight isolated model/area Stores and preserves raw fil
     const manager = prepareRunData(first);
     assert.equal(prepareRunData(first), manager);
     assert.notEqual(prepareRunData(second), manager);
-    const stores = await Promise.all(Object.values(runDataModels).flatMap((model) => ["current", "archive"].map((area) => manager.getStore({}, `${model}/${area}`))));
+    const stores = await Promise.all(Object.values(runDataStoreIds).flatMap((storeId) => ["current", "archive"].map((area) => manager.getStore({}, `${storeId}/${area}`))));
     assert.equal(new Set(stores).size, 8);
     assert.equal(await runDataStore(first.runsRoot, "artifact"), stores[0]);
     assert.equal(await runDataStore(join(first.archiveRoot, "runs"), "artifact"), stores[1]);

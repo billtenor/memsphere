@@ -17,9 +17,9 @@ async function main() {
     } else positional.push(args[i]);
   }
   if (!options.ledger || positional.length !== 1) throw new Error("Provide --ledger and one operation; see --help");
-  const model = { data: { id: "example/expense", model: JSON_SCHEMA_DRAFT_07, payload: { contentType: "application/json", content: { stream: () => new ReadableStream({ start(c) { c.enqueue(Buffer.from(JSON.stringify(definition))); c.close(); } }) } } }, definition };
+  const model = { data: { id: "example/expense.json", model: JSON_SCHEMA_DRAFT_07, payload: { contentType: "application/json", content: { stream: () => new ReadableStream({ start(c) { c.enqueue(Buffer.from(JSON.stringify(definition))); c.close(); } }) } } }, definition };
   const manager = new DefaultDataManager({ extensions: new DefaultDataExtensionRegistry([filesystemJsonValueStoreExtension, jsonSchemaExtension, jsonSchemaMetaModelExtension, jsonSerializerExtension]),
-    models: [{ model }], stores: [{ id: "ledger", model: "example/expense", kind: "ValueStore", factory: "memsphere/filesystem-json", config: new Config({ directory: resolve(options.ledger) }) }] });
+    models: [{ model }], stores: [{ id: "ledger", model: "example/expense.json", kind: "ValueStore", factory: "memsphere/filesystem-json", config: new Config({ directory: resolve(options.ledger) }) }] });
   const input = { ...options, ...(options.amount !== undefined ? { amount: Number(options.amount) } : {}), ...(options.revision !== undefined ? { revision: Number(options.revision) } : {}) };
   console.log(JSON.stringify(await expenses(await manager.getStore({}, "ledger"), positional[0], input)));
 }

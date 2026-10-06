@@ -1,5 +1,22 @@
-export const MODEL_REGISTRATION_MODEL = "memsphere/model-registration";
-export const LEGACY_MODEL_REGISTRATION_MODEL = "memsphere/model-registration.json";
+import { validateRelativeFilePath } from "../data/extensions/shared/filesystem.js";
+
+export const MODEL_REGISTRATION_MODEL = "memsphere/model-registration.json";
+/** Only explicit initialization interprets these former identities; they are not aliases. */
+export const MODEL_ID_UPGRADES: Readonly<Record<string, string>> = Object.freeze(Object.fromEntries([
+  "json-schema/draft-07", "raw", "memsphere/model-registration", "memsphere/run/artifact",
+  "memsphere/run/memory-snapshot-file", "memsphere/run/agent-activity-log", "memsphere/run/agent-activity-snapshot"
+].map(id => [id, `${id}.json`])));
+
+export function assertModelRef(value: string): void {
+  try {
+    validateRelativeFilePath(value);
+    if (!value.endsWith(".json")) throw new TypeError("Model ID must end with .json; use project models initialize to correct existing identities");
+  } catch (cause) {
+    throw Object.assign(new TypeError(`Invalid model ID ${JSON.stringify(value)}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause }), {
+      code: "MODEL_ID_INVALID", details: { modelRef: value, path: "modelRef" }
+    });
+  }
+}
 export const IMPORTED_MODEL_DEFINITIONS_STORE = "models/imported/json-schema/draft-07";
 export type ModelOrigin = "project" | "system" | "market" | "app";
 export type ModelRegistration = {
@@ -42,6 +59,7 @@ export function validateModelRegistration(value: unknown): asserts value is Mode
   for (const key of ["modelRef", "name", "package", "package_name", "store_id"])
     if ((key === "modelRef" || v[key] !== undefined) && (typeof v[key] !== "string" || !(v[key] as string).trim()))
       throw new TypeError(`Invalid model registration ${key}`);
+  assertModelRef(v.modelRef as string);
   if (v.description !== undefined && typeof v.description !== "string")
     throw new TypeError("Invalid model registration description");
   if (v.storage !== "builtin" && v.storage !== "store")

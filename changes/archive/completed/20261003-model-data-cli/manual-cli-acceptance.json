@@ -1,0 +1,1698 @@
+{
+  "date": "2026-10-06",
+  "timezone": "Asia/Shanghai",
+  "kind": "实际 CLI 运行验收，不是单元测试覆盖统计",
+  "environment": {
+    "platform": "Linux",
+    "node": "v22.16.0",
+    "cli": "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+    "cliSha256": "ca2f81edc3e2a76037606439d6adc063583405ab784d0ef9402258c9162a2658",
+    "isolatedRoot": "/tmp/memsphere-cli-acceptance-ZuG9xZ",
+    "project": "cli-acceptance",
+    "projectRoot": "/tmp/memsphere-cli-acceptance-ZuG9xZ/home/projects/cli-acceptance",
+    "inheritedMemsphereVariablesRemoved": true
+  },
+  "summary": {
+    "newCommandsRun": 19,
+    "actualInvocations": 54,
+    "exit0": 45,
+    "exit1": 9,
+    "expectedExitMismatches": [
+      2
+    ],
+    "productDefectsDiscovered": []
+  },
+  "matrix": [
+    {
+      "command": "model list",
+      "invocations": [
+        5,
+        6
+      ],
+      "observed": "每页 1 条，使用返回游标读取下一页，末页无游标"
+    },
+    {
+      "command": "model read",
+      "invocations": [
+        7,
+        8,
+        10
+      ],
+      "observed": "读取 definition / all；JSON 与 YAML；修改后的定义和登记名称一致"
+    },
+    {
+      "command": "model create",
+      "invocations": [
+        3,
+        4
+      ],
+      "observed": "创建两个模型，登记与定义实际保存"
+    },
+    {
+      "command": "model update",
+      "invocations": [
+        9,
+        10
+      ],
+      "observed": "修改定义及登记信息；磁盘定义字节与输入文件一致"
+    },
+    {
+      "command": "model delete",
+      "invocations": [
+        12,
+        14,
+        45,
+        48,
+        49
+      ],
+      "observed": "删除成功后文件消失且读取报缺失；仍绑定 Store 时拒绝删除"
+    },
+    {
+      "command": "model validate",
+      "invocations": [
+        11,
+        36
+      ],
+      "observed": "定义及 Runtime 校验通过；检查 Store 中的 2 条记录无失败"
+    },
+    {
+      "command": "data list",
+      "invocations": [
+        23,
+        24
+      ],
+      "observed": "每页 1 条，游标连续读取两条记录"
+    },
+    {
+      "command": "data read",
+      "invocations": [
+        25,
+        26,
+        27,
+        31,
+        39,
+        41
+      ],
+      "observed": "完整值、默认 YAML、路径 $.count、修改后 revision；删除后报缺失；二进制元信息"
+    },
+    {
+      "command": "data has",
+      "invocations": [
+        28,
+        38
+      ],
+      "observed": "创建后 exists=true；删除后 exists=false"
+    },
+    {
+      "command": "data create",
+      "invocations": [
+        21,
+        22,
+        40
+      ],
+      "observed": "写入两条 JSON 数据和一个二进制文件"
+    },
+    {
+      "command": "data update",
+      "invocations": [
+        29,
+        31
+      ],
+      "observed": "完整替换成功，revision 从 1 增为 2"
+    },
+    {
+      "command": "data edit",
+      "invocations": [
+        30,
+        31,
+        43
+      ],
+      "observed": "局部修改 count 成功，revision 增为 3；不支持 edit 的 Store 明确报错"
+    },
+    {
+      "command": "data delete",
+      "invocations": [
+        35,
+        37,
+        39,
+        44
+      ],
+      "observed": "旧 revision 拒绝；当前 revision 删除成功，文件消失；dry-run 不改变字节或修改时间"
+    },
+    {
+      "command": "data export",
+      "invocations": [
+        34,
+        42
+      ],
+      "observed": "JSON 导出内容一致；二进制 stdout 原始字节为 00ff800a41，与输入一致"
+    },
+    {
+      "command": "data validate",
+      "invocations": [
+        32,
+        33
+      ],
+      "observed": "已保存记录及候选值都校验成功"
+    },
+    {
+      "command": "data store list",
+      "invocations": [
+        17,
+        18
+      ],
+      "observed": "每页 1 条，游标读取两个 Store"
+    },
+    {
+      "command": "data store read",
+      "invocations": [
+        19,
+        20
+      ],
+      "observed": "两个 Store 的路径及能力符合类型，分别检查 JSON 与 YAML 输出"
+    },
+    {
+      "command": "data store create",
+      "invocations": [
+        15,
+        16
+      ],
+      "observed": "创建 filesystem JSON ValueStore 与 filesystem DataStore，目录按 Project Root 解析"
+    },
+    {
+      "command": "data store remove",
+      "invocations": [
+        46,
+        47
+      ],
+      "observed": "解除登记成功，已有数据和 revision 历史文件保持原样"
+    }
+  ],
+  "operatorIncidents": [
+    {
+      "invocation": 2,
+      "kind": "unsupported fixture input",
+      "details": "初始 schema 的相对 $id 被现有 Runtime 拒绝，CLI 返回 MODEL_RUNTIME_UNSUPPORTED，未保存模型；改用 Runtime 支持的绝对 URI 后重试成功。模型引用始终是 sales/order.json。本次没有扩展 Runtime。"
+    },
+    {
+      "invocation": 13,
+      "kind": "temporary recorder bug",
+      "details": "CLI 正确返回 MODEL_NOT_FOUND、退出 1，临时验收记录器却尝试把空 stdout 解析为 JSON，导致记录器异常。修正记录器并重跑读取；未修改产品代码。"
+    }
+  ],
+  "fixtures": {
+    "spare.schema.json": {
+      "sha256": "85803e087e684bdab3e5d6c2dd1af627da83382db625be9a42aea3d4d06539be",
+      "text": "{\"type\":\"string\"}\n"
+    },
+    "order.schema.json": {
+      "sha256": "ecef80261f2d13fbd21cad7fb89597d4b3b014a35d8c260aa94eba430b656a6c",
+      "text": "{\n  \"$id\": \"https://example.invalid/sales/order.json\",\n  \"type\": \"object\",\n  \"title\": \"验收订单\",\n  \"properties\": {\n    \"name\": {\n      \"type\": \"string\"\n    },\n    \"count\": {\n      \"type\": \"integer\",\n      \"minimum\": 0\n    },\n    \"items\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"integer\"\n      }\n    }\n  },\n  \"required\": [\n    \"name\",\n    \"count\"\n  ],\n  \"additionalProperties\": false\n}\n"
+    },
+    "orders.store.json": {
+      "sha256": "afd25f2b5960fa916b03ea80eac34d551af16bcd24226f65e4e8ca91d7288ec0",
+      "text": "{\"directory\": \"values/orders\"}"
+    },
+    "updated.schema.json": {
+      "sha256": "782510389d4e5e7dd644f9bd76fd20aae45522d1e7ef1a0369a7f3396033e108",
+      "text": "{\n  \"$id\": \"https://example.invalid/sales/order.json\",\n  \"type\": \"object\",\n  \"title\": \"验收订单\",\n  \"properties\": {\n    \"name\": {\n      \"type\": \"string\"\n    },\n    \"count\": {\n      \"type\": \"integer\",\n      \"minimum\": 0,\n      \"maximum\": 100\n    },\n    \"items\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"integer\"\n      }\n    }\n  },\n  \"required\": [\n    \"name\",\n    \"count\"\n  ],\n  \"additionalProperties\": false\n}\n"
+    },
+    "files.store.json": {
+      "sha256": "040dbad0aa114e99f6d13230620be4a3e1e59be6c64f0e72b9507c28eb054513",
+      "text": "{\"directory\": \"payload/orders\"}"
+    },
+    "input.bin": {
+      "sha256": "c9d475a56c0591b48d321b6b32915ee76499b0bfc7c053bfacc04cea4ff3c68a",
+      "base64": "AP+ACkE="
+    }
+  },
+  "commands": [
+    {
+      "number": 1,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "project",
+        "create",
+        "cli-acceptance",
+        "--embedded",
+        "memory",
+        "--bind"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "Created Project: cli-acceptance\nProject Root: /tmp/memsphere-cli-acceptance-ZuG9xZ/home/projects/cli-acceptance\n",
+      "stderr": "",
+      "at": "2026-10-06T05:50:23.377845+00:00"
+    },
+    {
+      "number": 2,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "create",
+        "sales/order.json",
+        "--definition-file",
+        "order.schema.json",
+        "--name",
+        "初始订单",
+        "--tag",
+        "acceptance",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "{\"error\":{\"code\":\"MODEL_RUNTIME_UNSUPPORTED\",\"message\":\"Unsupported JSON Schema at #/$id: relative $id values are not supported; provide an absolute URI\",\"details\":{\"path\":\"#/$id\",\"modelRef\":\"sales/order.json\"}}}\n",
+      "at": "2026-10-06T05:50:24.092716+00:00"
+    },
+    {
+      "number": 3,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "create",
+        "sales/order.json",
+        "--definition-file",
+        "order.schema.json",
+        "--name",
+        "初始订单",
+        "--tag",
+        "acceptance",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"operation\":\"model.create\",\"modelRef\":\"sales/order.json\",\"registration\":{\"modelRef\":\"sales/order.json\",\"storage\":\"store\",\"store_id\":\"models/json-schema/draft-07\",\"name\":\"初始订单\",\"tags\":[\"acceptance\"]}}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:50:47.657701+00:00"
+    },
+    {
+      "number": 4,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "create",
+        "spare.json",
+        "--definition-file",
+        "spare.schema.json",
+        "--tag",
+        "acceptance",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"operation\":\"model.create\",\"modelRef\":\"spare.json\",\"registration\":{\"modelRef\":\"spare.json\",\"storage\":\"store\",\"store_id\":\"models/json-schema/draft-07\",\"tags\":[\"acceptance\"]}}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:50:48.317593+00:00"
+    },
+    {
+      "number": 5,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "list",
+        "--origin",
+        "project",
+        "--tag",
+        "acceptance",
+        "--limit",
+        "1",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"items\":[{\"id\":\"sales/order.json\",\"registration\":{\"modelRef\":\"sales/order.json\",\"storage\":\"store\",\"store_id\":\"models/json-schema/draft-07\",\"name\":\"初始订单\",\"tags\":[\"acceptance\"]},\"origin\":\"project\",\"metaModel\":\"json-schema/draft-07.json\",\"builtin\":false,\"title\":\"验收订单\",\"status\":\"available\"}],\"nextCursor\":\"eyJ2ZXJzaW9uIjoxLCJzY29wZSI6ImNiOWQwM2NjZTNlMzk5MTQ2NzhiOTc2ZWU4ZTZkNzVjYzM2MWJhYzMyYzJlM2E2M2ExYWU2NmE2ZmYxZWU0OTIiLCJwb3NpdGlvbiI6IjEiLCJjaGVjayI6IjFlM2RkNGY0NGZhNzJjNmQ5NDYwMGJiODE1ZDBiZTQ2YmFiNWNlZGZmYzE4YjFhMzNlODFhNWU2MjQ2MDIxYzgifQ\"}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:50:48.939884+00:00"
+    },
+    {
+      "number": 6,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "list",
+        "--origin",
+        "project",
+        "--tag",
+        "acceptance",
+        "--limit",
+        "1",
+        "--cursor",
+        "eyJ2ZXJzaW9uIjoxLCJzY29wZSI6ImNiOWQwM2NjZTNlMzk5MTQ2NzhiOTc2ZWU4ZTZkNzVjYzM2MWJhYzMyYzJlM2E2M2ExYWU2NmE2ZmYxZWU0OTIiLCJwb3NpdGlvbiI6IjEiLCJjaGVjayI6IjFlM2RkNGY0NGZhNzJjNmQ5NDYwMGJiODE1ZDBiZTQ2YmFiNWNlZGZmYzE4YjFhMzNlODFhNWU2MjQ2MDIxYzgifQ",
+        "--output=text"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "project: cli-acceptance\nitems:\n  - id: spare.json\n    registration:\n      modelRef: spare.json\n      storage: store\n      store_id: models/json-schema/draft-07\n      tags:\n        - acceptance\n    origin: project\n    metaModel: json-schema/draft-07.json\n    builtin: false\n    status: available\n",
+      "stderr": "",
+      "at": "2026-10-06T05:50:49.538686+00:00"
+    },
+    {
+      "number": 7,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "read",
+        "sales/order.json",
+        "--part",
+        "all",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"modelRef\":\"sales/order.json\",\"registration\":{\"modelRef\":\"sales/order.json\",\"storage\":\"store\",\"store_id\":\"models/json-schema/draft-07\",\"name\":\"初始订单\",\"tags\":[\"acceptance\"]},\"origin\":\"project\",\"definition\":{\"$id\":\"https://example.invalid/sales/order.json\",\"type\":\"object\",\"title\":\"验收订单\",\"properties\":{\"name\":{\"type\":\"string\"},\"count\":{\"type\":\"integer\",\"minimum\":0},\"items\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}},\"required\":[\"name\",\"count\"],\"additionalProperties\":false}}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:50:50.135663+00:00"
+    },
+    {
+      "number": 8,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "read",
+        "sales/order.json",
+        "--part",
+        "definition",
+        "--output=text"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "project: cli-acceptance\nmodelRef: sales/order.json\ndefinition:\n  $id: https://example.invalid/sales/order.json\n  type: object\n  title: 验收订单\n  properties:\n    name:\n      type: string\n    count:\n      type: integer\n      minimum: 0\n    items:\n      type: array\n      items:\n        type: integer\n  required:\n    - name\n    - count\n  additionalProperties: false\n",
+      "stderr": "",
+      "at": "2026-10-06T05:50:50.718752+00:00"
+    },
+    {
+      "number": 9,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "update",
+        "sales/order.json",
+        "--definition-file",
+        "updated.schema.json",
+        "--name",
+        "已更新订单",
+        "--description",
+        "实际运行验收",
+        "--tag",
+        "acceptance",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"operation\":\"model.update\",\"modelRef\":\"sales/order.json\",\"registration\":{\"modelRef\":\"sales/order.json\",\"storage\":\"store\",\"store_id\":\"models/json-schema/draft-07\",\"name\":\"已更新订单\",\"tags\":[\"acceptance\"],\"description\":\"实际运行验收\"}}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:50:51.530293+00:00"
+    },
+    {
+      "number": 10,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "read",
+        "sales/order.json",
+        "--part",
+        "all",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"modelRef\":\"sales/order.json\",\"registration\":{\"modelRef\":\"sales/order.json\",\"storage\":\"store\",\"store_id\":\"models/json-schema/draft-07\",\"name\":\"已更新订单\",\"tags\":[\"acceptance\"],\"description\":\"实际运行验收\"},\"origin\":\"project\",\"definition\":{\"$id\":\"https://example.invalid/sales/order.json\",\"type\":\"object\",\"title\":\"验收订单\",\"properties\":{\"name\":{\"type\":\"string\"},\"count\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":100},\"items\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}},\"required\":[\"name\",\"count\"],\"additionalProperties\":false}}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:50:52.210503+00:00"
+    },
+    {
+      "number": 11,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "validate",
+        "sales/order.json",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"operation\":\"model.validate\",\"modelRef\":\"sales/order.json\",\"valid\":true,\"checks\":{\"definition\":\"passed\",\"runtime\":\"passed\"}}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:50:52.787654+00:00"
+    },
+    {
+      "number": 12,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "delete",
+        "spare.json",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"operation\":\"model.delete\",\"modelRef\":\"spare.json\"}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:50:53.486052+00:00"
+    },
+    {
+      "number": 13,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "read",
+        "spare.json",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 1,
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "{\"error\":{\"code\":\"MODEL_NOT_FOUND\",\"message\":\"Model not found: spare.json; use project models initialize if system models are not installed\"}}\n",
+      "at": "2026-10-06T05:50:54.093485+00:00"
+    },
+    {
+      "number": 14,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "read",
+        "spare.json",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 1,
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "{\"error\":{\"code\":\"MODEL_NOT_FOUND\",\"message\":\"Model not found: spare.json; use project models initialize if system models are not installed\"}}\n",
+      "at": "2026-10-06T05:51:11.141486+00:00"
+    },
+    {
+      "number": 15,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "store",
+        "create",
+        "orders",
+        "--model",
+        "sales/order.json",
+        "--kind",
+        "value",
+        "--factory",
+        "memsphere/filesystem-json",
+        "--config-file",
+        "orders.store.json",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"operation\":\"data.store.create\",\"storeId\":\"orders\",\"binding\":{\"model\":\"sales/order.json\",\"kind\":\"value\",\"factory\":\"memsphere/filesystem-json\",\"config\":{\"directory\":\"values/orders\"}},\"directory\":\"/tmp/memsphere-cli-acceptance-ZuG9xZ/home/projects/cli-acceptance/values/orders\"}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:20.286827+00:00"
+    },
+    {
+      "number": 16,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "store",
+        "create",
+        "files",
+        "--model",
+        "sales/order.json",
+        "--kind",
+        "data",
+        "--factory",
+        "memsphere/filesystem",
+        "--config-file",
+        "files.store.json",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"operation\":\"data.store.create\",\"storeId\":\"files\",\"binding\":{\"model\":\"sales/order.json\",\"kind\":\"data\",\"factory\":\"memsphere/filesystem\",\"config\":{\"directory\":\"payload/orders\"}},\"directory\":\"/tmp/memsphere-cli-acceptance-ZuG9xZ/home/projects/cli-acceptance/payload/orders\"}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:20.872180+00:00"
+    },
+    {
+      "number": 17,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "store",
+        "list",
+        "--model",
+        "sales/order.json",
+        "--limit",
+        "1",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"items\":[{\"storeId\":\"files\",\"model\":\"sales/order.json\",\"kind\":\"data\",\"factory\":\"memsphere/filesystem\",\"config\":{\"directory\":\"payload/orders\"},\"directory\":\"/tmp/memsphere-cli-acceptance-ZuG9xZ/home/projects/cli-acceptance/payload/orders\",\"status\":\"available\"}],\"nextCursor\":\"eyJ2ZXJzaW9uIjoxLCJzY29wZSI6ImVjMGM4MThmZGQ0ZTk2ZTE4NjcxYzUxMDE1NjdjMTAxNjY5MTMzYzAxODY3YzIxZjZmZDk0MGRkOWEzNmUyMDgiLCJwb3NpdGlvbiI6IjEiLCJjaGVjayI6IjhkYzg2ODI4NzhhODBmOTRmYjdkYjMwMDdkYWJlYTIxZDBmMzRhMTEyM2M0ZDczYTUyNzJmN2FmYWU0ZDBiNzgifQ\"}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:21.482793+00:00"
+    },
+    {
+      "number": 18,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "store",
+        "list",
+        "--model",
+        "sales/order.json",
+        "--cursor",
+        "eyJ2ZXJzaW9uIjoxLCJzY29wZSI6ImVjMGM4MThmZGQ0ZTk2ZTE4NjcxYzUxMDE1NjdjMTAxNjY5MTMzYzAxODY3YzIxZjZmZDk0MGRkOWEzNmUyMDgiLCJwb3NpdGlvbiI6IjEiLCJjaGVjayI6IjhkYzg2ODI4NzhhODBmOTRmYjdkYjMwMDdkYWJlYTIxZDBmMzRhMTEyM2M0ZDczYTUyNzJmN2FmYWU0ZDBiNzgifQ",
+        "--output=text"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "project: cli-acceptance\nitems:\n  - storeId: orders\n    model: sales/order.json\n    kind: value\n    factory: memsphere/filesystem-json\n    config:\n      directory: values/orders\n    directory: /tmp/memsphere-cli-acceptance-ZuG9xZ/home/projects/cli-acceptance/values/orders\n    status: available\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:22.124920+00:00"
+    },
+    {
+      "number": 19,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "store",
+        "read",
+        "orders",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"model\":\"sales/order.json\",\"kind\":\"value\",\"factory\":\"memsphere/filesystem-json\",\"config\":{\"directory\":\"values/orders\"},\"directory\":\"/tmp/memsphere-cli-acceptance-ZuG9xZ/home/projects/cli-acceptance/values/orders\",\"status\":\"available\",\"idRule\":\"single portable record name; .json is a physical suffix\",\"capabilities\":{\"value\":true,\"payload\":false,\"conditionalWrite\":true,\"edit\":true}}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:22.755244+00:00"
+    },
+    {
+      "number": 20,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "store",
+        "read",
+        "files",
+        "--output=text"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "project: cli-acceptance\nstoreId: files\nmodel: sales/order.json\nkind: data\nfactory: memsphere/filesystem\nconfig:\n  directory: payload/orders\ndirectory: /tmp/memsphere-cli-acceptance-ZuG9xZ/home/projects/cli-acceptance/payload/orders\nstatus: available\nidRule: portable relative path including a MIME-mapped suffix\ncapabilities:\n  value: true\n  payload: true\n  conditionalWrite: false\n  edit: false\ncontentTypeExtensions:\n  text/markdown:\n    - .markdown\n    - .md\n  text/html:\n    - .html\n    - .htm\n  image/jpeg:\n    - .jpeg\n    - .jpg\n  application/json:\n    - .json\n  image/webp:\n    - .webp\n  application/yaml:\n    - .yaml\n    - .yml\n  application/octet-stream:\n    - .bin\n  text/csv:\n    - .csv\n  image/gif:\n    - .gif\n  application/pdf:\n    - .pdf\n  image/png:\n    - .png\n  image/svg+xml:\n    - .svg\n  text/plain:\n    - .txt\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:23.350577+00:00"
+    },
+    {
+      "number": 21,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "create",
+        "one",
+        "--store",
+        "orders",
+        "--value",
+        "{\"name\": \"首条订单\", \"count\": 1, \"items\": [1, 2]}",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"operation\":\"data.create\",\"id\":\"one\",\"modelRef\":\"sales/order.json\",\"revision\":1,\"createdAt\":1791265887039,\"updatedAt\":1791265887039}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:27.058874+00:00"
+    },
+    {
+      "number": 22,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "create",
+        "two",
+        "--store",
+        "orders",
+        "--value",
+        "{\"name\": \"第二条\", \"count\": 2, \"items\": [1, 2]}",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"operation\":\"data.create\",\"id\":\"two\",\"modelRef\":\"sales/order.json\",\"revision\":1,\"createdAt\":1791265887661,\"updatedAt\":1791265887661}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:27.676830+00:00"
+    },
+    {
+      "number": 23,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "list",
+        "--store",
+        "orders",
+        "--limit",
+        "1",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"items\":[{\"id\":\"one\"}],\"nextCursor\":\"eyJ2ZXJzaW9uIjoxLCJzY29wZSI6ImVhZTMyODFmY2QyYTU5Yjc2NTM2NzQ1OTc1NzNjYmE5MmVhMGFmZjljZjZkMjJmZDliNWQwNjgwZWQ1OTJlNGYiLCJwb3NpdGlvbiI6ImV5SnpZMjl3WlNJNklsdGNJbVpwYkdWemVYTjBaVzB0YW5OdmJpMTJZV3gxWlZ3aUxGd2lMM1J0Y0M5dFpXMXpjR2hsY21VdFkyeHBMV0ZqWTJWd2RHRnVZMlV0V25WSE9YaGFMMmh2YldVdmNISnZhbVZqZEhNdlkyeHBMV0ZqWTJWd2RHRnVZMlV2ZG1Gc2RXVnpMMjl5WkdWeWMxd2lMRndpYzJGc1pYTXZiM0prWlhJdWFuTnZibHdpTEZ3aWIzSmtaWEp6WENKZElpd2lZV1owWlhJaU9pSnZibVVpTENKamFHVmpheUk2SW1ZNVpEVmpNRE16T0Rjek1EbGhNak0wTXpWa1l6YzVaV1JoTURGbVpqSmxNMlE1TXpObE5UVXpNbUUzTmpNMk1qRTBOV0ZsTVdGbE4yTXhOemxtTUdNaWZRIiwiY2hlY2siOiI3NGY2NDE0ZTJlMWQyMmJkYzMxYThiMGNmMTljMWU1OThlZjFmMzNiZjgxZTk2Mjk3NmM3Nzk2YzQxNjlkOTU5In0\"}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:28.340866+00:00"
+    },
+    {
+      "number": 24,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "list",
+        "--store",
+        "orders",
+        "--cursor",
+        "eyJ2ZXJzaW9uIjoxLCJzY29wZSI6ImVhZTMyODFmY2QyYTU5Yjc2NTM2NzQ1OTc1NzNjYmE5MmVhMGFmZjljZjZkMjJmZDliNWQwNjgwZWQ1OTJlNGYiLCJwb3NpdGlvbiI6ImV5SnpZMjl3WlNJNklsdGNJbVpwYkdWemVYTjBaVzB0YW5OdmJpMTJZV3gxWlZ3aUxGd2lMM1J0Y0M5dFpXMXpjR2hsY21VdFkyeHBMV0ZqWTJWd2RHRnVZMlV0V25WSE9YaGFMMmh2YldVdmNISnZhbVZqZEhNdlkyeHBMV0ZqWTJWd2RHRnVZMlV2ZG1Gc2RXVnpMMjl5WkdWeWMxd2lMRndpYzJGc1pYTXZiM0prWlhJdWFuTnZibHdpTEZ3aWIzSmtaWEp6WENKZElpd2lZV1owWlhJaU9pSnZibVVpTENKamFHVmpheUk2SW1ZNVpEVmpNRE16T0Rjek1EbGhNak0wTXpWa1l6YzVaV1JoTURGbVpqSmxNMlE1TXpObE5UVXpNbUUzTmpNMk1qRTBOV0ZsTVdGbE4yTXhOemxtTUdNaWZRIiwiY2hlY2siOiI3NGY2NDE0ZTJlMWQyMmJkYzMxYThiMGNmMTljMWU1OThlZjFmMzNiZjgxZTk2Mjk3NmM3Nzk2YzQxNjlkOTU5In0",
+        "--output=text"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "project: cli-acceptance\nstoreId: orders\nitems:\n  - id: two\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:28.916616+00:00"
+    },
+    {
+      "number": 25,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "read",
+        "one",
+        "--store",
+        "orders",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"id\":\"one\",\"modelRef\":\"sales/order.json\",\"revision\":1,\"createdAt\":1791265887039,\"updatedAt\":1791265887039,\"value\":{\"name\":\"首条订单\",\"count\":1,\"items\":[1,2]}}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:29.596598+00:00"
+    },
+    {
+      "number": 26,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "read",
+        "one",
+        "--store",
+        "orders"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "project: cli-acceptance\nstoreId: orders\nid: one\nmodelRef: sales/order.json\nrevision: 1\ncreatedAt: 1791265887039\nupdatedAt: 1791265887039\nvalue:\n  name: 首条订单\n  count: 1\n  items:\n    - 1\n    - 2\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:30.215219+00:00"
+    },
+    {
+      "number": 27,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "read",
+        "one",
+        "--store",
+        "orders",
+        "--path",
+        "$.count",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"id\":\"one\",\"modelRef\":\"sales/order.json\",\"revision\":1,\"createdAt\":1791265887039,\"updatedAt\":1791265887039,\"value\":[1]}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:30.933918+00:00"
+    },
+    {
+      "number": 28,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "has",
+        "one",
+        "--store",
+        "orders",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"id\":\"one\",\"modelRef\":\"sales/order.json\",\"exists\":true}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:31.636672+00:00"
+    },
+    {
+      "number": 29,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "update",
+        "one",
+        "--store",
+        "orders",
+        "--value",
+        "{\"name\": \"完整替换\", \"count\": 5, \"items\": [1, 2]}",
+        "--expected-revision",
+        "1",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"operation\":\"data.update\",\"id\":\"one\",\"modelRef\":\"sales/order.json\",\"revision\":2,\"createdAt\":1791265887039,\"updatedAt\":1791265892275}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:32.292042+00:00"
+    },
+    {
+      "number": 30,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "edit",
+        "one",
+        "--store",
+        "orders",
+        "--patch",
+        "[{\"op\":\"replace\",\"path\":\"/count\",\"value\":7}]",
+        "--expected-revision",
+        "2",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"operation\":\"data.edit\",\"id\":\"one\",\"modelRef\":\"sales/order.json\",\"revision\":3,\"createdAt\":1791265887039,\"updatedAt\":1791265893048}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:33.064153+00:00"
+    },
+    {
+      "number": 31,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "read",
+        "one",
+        "--store",
+        "orders",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"id\":\"one\",\"modelRef\":\"sales/order.json\",\"revision\":3,\"createdAt\":1791265887039,\"updatedAt\":1791265893048,\"value\":{\"name\":\"完整替换\",\"count\":7,\"items\":[1,2]}}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:33.644339+00:00"
+    },
+    {
+      "number": 32,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "validate",
+        "one",
+        "--store",
+        "orders",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"operation\":\"data.validate\",\"id\":\"one\",\"modelRef\":\"sales/order.json\",\"valid\":true}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:34.223194+00:00"
+    },
+    {
+      "number": 33,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "validate",
+        "--model",
+        "sales/order.json",
+        "--value",
+        "{\"name\": \"候选值\", \"count\": 3, \"items\": [1, 2]}",
+        "--output=text"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "project: cli-acceptance\noperation: data.validate\nmodelRef: sales/order.json\nvalid: true\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:34.819740+00:00"
+    },
+    {
+      "number": 34,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "export",
+        "one",
+        "--store",
+        "orders",
+        "--as",
+        "json",
+        "--out",
+        "/tmp/memsphere-cli-acceptance-ZuG9xZ/order-export.json",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"operation\":\"data.export\",\"id\":\"one\",\"modelRef\":\"sales/order.json\",\"out\":\"/tmp/memsphere-cli-acceptance-ZuG9xZ/order-export.json\",\"bytes\":47}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:35.410317+00:00"
+    },
+    {
+      "number": 35,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "delete",
+        "one",
+        "--store",
+        "orders",
+        "--expected-revision",
+        "2",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 1,
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "{\"error\":{\"code\":\"REVISION_CONFLICT\",\"message\":\"Record one revision conflict: expected 2, found 3\",\"details\":{\"id\":\"one\",\"expectedRevision\":2,\"actualRevision\":3}}}\n",
+      "at": "2026-10-06T05:51:36.126880+00:00"
+    },
+    {
+      "number": 36,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "validate",
+        "sales/order.json",
+        "--check-data",
+        "--store",
+        "orders",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"operation\":\"model.validate\",\"modelRef\":\"sales/order.json\",\"valid\":true,\"checks\":{\"definition\":\"passed\",\"runtime\":\"passed\"},\"data\":[{\"storeId\":\"orders\",\"checked\":2,\"failures\":[]}],\"snapshot\":false}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:36.882063+00:00"
+    },
+    {
+      "number": 37,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "delete",
+        "one",
+        "--store",
+        "orders",
+        "--expected-revision",
+        "3",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"operation\":\"data.delete\",\"id\":\"one\",\"modelRef\":\"sales/order.json\",\"deleted\":true}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:37.461644+00:00"
+    },
+    {
+      "number": 38,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "has",
+        "one",
+        "--store",
+        "orders",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"id\":\"one\",\"modelRef\":\"sales/order.json\",\"exists\":false}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:38.068356+00:00"
+    },
+    {
+      "number": 39,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "read",
+        "one",
+        "--store",
+        "orders",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 1,
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "{\"error\":{\"code\":\"NOT_FOUND\",\"message\":\"Record not found: one\"}}\n",
+      "at": "2026-10-06T05:51:38.638874+00:00"
+    },
+    {
+      "number": 40,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "create",
+        "blob.bin",
+        "--store",
+        "files",
+        "--payload-file",
+        "input.bin",
+        "--content-type",
+        "application/octet-stream",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"files\",\"operation\":\"data.create\",\"id\":\"blob.bin\",\"modelRef\":\"sales/order.json\",\"updatedAt\":1791265904036.1309}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:44.052149+00:00"
+    },
+    {
+      "number": 41,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "read",
+        "blob.bin",
+        "--store",
+        "files",
+        "--metadata-only",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"files\",\"id\":\"blob.bin\",\"modelRef\":\"sales/order.json\",\"updatedAt\":1791265904036.1309,\"contentType\":\"application/octet-stream\"}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:44.666323+00:00"
+    },
+    {
+      "number": 42,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "export",
+        "blob.bin",
+        "--store",
+        "files",
+        "--as",
+        "payload",
+        "--out",
+        "-"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": null,
+      "stderr": "",
+      "at": "2026-10-06T05:51:45.320320+00:00",
+      "stdoutBase64": "AP+ACkE=",
+      "stdoutHex": "00ff800a41"
+    },
+    {
+      "number": 43,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "edit",
+        "blob.bin",
+        "--store",
+        "files",
+        "--patch",
+        "[]",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 1,
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "{\"error\":{\"code\":\"UNSUPPORTED_CAPABILITY\",\"message\":\"edit requires a conditional-write ValueStore\"}}\n",
+      "at": "2026-10-06T05:51:45.909548+00:00"
+    },
+    {
+      "number": 44,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "delete",
+        "two",
+        "--store",
+        "orders",
+        "--dry-run",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"storeId\":\"orders\",\"operation\":\"data.delete\",\"id\":\"two\",\"modelRef\":\"sales/order.json\",\"deleted\":true,\"dryRun\":true}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:46.488455+00:00"
+    },
+    {
+      "number": 45,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "delete",
+        "sales/order.json",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 1,
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "{\"error\":{\"code\":\"MODEL_IN_USE\",\"message\":\"Model is used by business Stores: sales/order.json\",\"details\":{\"storeIds\":[\"orders\",\"files\"]}}}\n",
+      "at": "2026-10-06T05:51:47.104230+00:00"
+    },
+    {
+      "number": 46,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "store",
+        "remove",
+        "orders",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"operation\":\"data.store.remove\",\"storeId\":\"orders\",\"dataRetained\":true,\"directory\":\"/tmp/memsphere-cli-acceptance-ZuG9xZ/home/projects/cli-acceptance/values/orders\"}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:47.698709+00:00"
+    },
+    {
+      "number": 47,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "data",
+        "store",
+        "remove",
+        "files",
+        "--output=text"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "project: cli-acceptance\noperation: data.store.remove\nstoreId: files\ndataRetained: true\ndirectory: /tmp/memsphere-cli-acceptance-ZuG9xZ/home/projects/cli-acceptance/payload/orders\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:48.319618+00:00"
+    },
+    {
+      "number": 48,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "delete",
+        "sales/order.json",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"project\":\"cli-acceptance\",\"operation\":\"model.delete\",\"modelRef\":\"sales/order.json\"}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:51:48.949632+00:00"
+    },
+    {
+      "number": 49,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "read",
+        "sales/order.json",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 1,
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "{\"error\":{\"code\":\"MODEL_NOT_FOUND\",\"message\":\"Model not found: sales/order.json; use project models initialize if system models are not installed\"}}\n",
+      "at": "2026-10-06T05:51:49.494860+00:00"
+    },
+    {
+      "number": 50,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "project",
+        "list",
+        "--limit",
+        "1",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"items\":[{\"name\":\"cli-acceptance\",\"root\":\"/tmp/memsphere-cli-acceptance-ZuG9xZ/home/projects/cli-acceptance\",\"missing\":false,\"primary\":true,\"mounted\":false}]}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:52:25.571451+00:00"
+    },
+    {
+      "number": 51,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "memory",
+        "list",
+        "--kind",
+        "concepts",
+        "--limit",
+        "1",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\n  \"items\": [\n    {\n      \"reference\": \"concepts/memsphere-actor\",\n      \"kind\": \"concepts\",\n      \"names\": [\n        \"memsphere-actor\",\n        \"Actor\",\n        \"参与者\"\n      ],\n      \"defines\": [\n        \"Memsphere Project 控制平面中可参与 Artifact Review 的 Human 或 Agent。\",\n        \"Human Actor 代表真实 Human；Agent Actor 通过已配置的 ACP Provider 和可选模型参与评审。\",\n        \"Actor 使用稳定 id、显示名称和 Permission 描述身份与可执行的 Memsphere 操作；Actor 不等同于 Procedure 中 Action 的 actor 字段。\",\n        \"Run 创建时，Actor 可以通过 Binding 承担一个或多个 Review Slot；Review Slot 表达评审视角，Actor 表达本次实际由谁参与。\",\n        \"Runner 是通用 Agent 框架托管的 Run 实际执行者，可以由主 Agent 单独构成，也可以由主 Agent 与子 Agent 共同构成。Runner 不是 Review Actor，也不需要通过 Review Slot Binding 才能执行。\",\n        \"Human 明确要求把指定意见和 Vote 正式提交到本人当前 Artifact Review Assignment 时，Runner 可以作为受托执行者代为提交；CLI 已建立当前代提交语境且 payload 完整无歧义时，Human 的确定性“我投……”表达已经是本次授权，不需要同义二次确认；业务决定仍归 Human Actor，Runner provenance 和授权说明必须单独审计，且不因此成为 Review Actor。\",\n        \"Agent Reviewer 只能在自己的 Review Assignment 中读取 Submission、提交 Comment 和 Vote，不能接管 Run 步骤或直接修改 Artifact。\"\n      ],\n      \"project_name\": \"cli-acceptance\",\n      \"revision\": \"uncommitted\"\n    }\n  ],\n  \"nextCursor\": \"eyJ2ZXJzaW9uIjoxLCJzY29wZSI6IjllY2E1YjE2ODBlYzc0YzQ1OTM4OWI4YWRlNDY5NjY1NzEzNjEwMTRiYmQwYjYyYTcyNWE0NDQ5YTI3NzcyNzciLCJwb3NpdGlvbiI6IjEiLCJjaGVjayI6ImU2ZGU1NmRiZGM0ZTE3YzNlMmIyMTAzNjI2YzJmOTM5NTNkMTBmYWIyODNhMjJkN2Y4MjlhN2UzOGE4ZTQxMzEifQ\"\n}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:52:26.107228+00:00"
+    },
+    {
+      "number": 52,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "archive",
+        "list",
+        "--limit",
+        "1",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\"items\":[]}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:52:26.715818+00:00"
+    },
+    {
+      "number": 53,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "project",
+        "models",
+        "initialize",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 0,
+      "exitCode": 0,
+      "stdout": "{\n  \"created\": 0,\n  \"retained\": 0,\n  \"diagnostics\": [],\n  \"config\": {\n    \"storeId\": \"memsphere/model-registrations\",\n    \"stores\": {\n      \"memsphere/model-registrations\": {\n        \"factory\": \"memsphere/filesystem-json\",\n        \"directory\": \"models/registrations\"\n      }\n    }\n  },\n  \"system\": {\n    \"status\": \"unchanged\",\n    \"created\": 0,\n    \"retained\": 5\n  }\n}\n",
+      "stderr": "",
+      "at": "2026-10-06T05:52:27.327150+00:00"
+    },
+    {
+      "number": 54,
+      "command": [
+        "node",
+        "/data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/dist/cli.js",
+        "--project",
+        "cli-acceptance",
+        "model",
+        "update",
+        "memsphere/model-registration.json",
+        "--name",
+        "不能修改",
+        "--output=json"
+      ],
+      "cwd": "/tmp/memsphere-cli-acceptance-ZuG9xZ/workspace",
+      "expectedExit": 1,
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "{\"error\":{\"code\":\"SYSTEM_MODEL_READ_ONLY\",\"message\":\"System model is read-only: memsphere/model-registration.json\"}}\n",
+      "at": "2026-10-06T05:52:27.802387+00:00"
+    }
+  ],
+  "diskObservations": [
+    {
+      "observation": "initial relative schema $id rejected without saving a model; retry with supported absolute $id",
+      "value": true
+    },
+    {
+      "observation": "model update persisted exact definition bytes and registration name",
+      "value": {
+        "path": "/tmp/memsphere-cli-acceptance-ZuG9xZ/home/projects/cli-acceptance/models/json-schema/draft-07/sales/order.json",
+        "name": "已更新订单"
+      }
+    },
+    {
+      "observation": "deleted model definition absent",
+      "value": true
+    },
+    {
+      "observation": "phase completed",
+      "value": "finish-models"
+    },
+    {
+      "observation": "phase completed",
+      "value": "stores"
+    },
+    {
+      "observation": "record written on disk after update and edit",
+      "value": {
+        "id": "one",
+        "revision": 3,
+        "createdAt": 1791265887039,
+        "updatedAt": 1791265893048,
+        "value": {
+          "name": "完整替换",
+          "count": 7,
+          "items": [
+            1,
+            2
+          ]
+        }
+      }
+    },
+    {
+      "observation": "exported JSON content",
+      "value": {
+        "name": "完整替换",
+        "count": 7,
+        "items": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "observation": "record absent after CLI delete",
+      "value": true
+    },
+    {
+      "observation": "phase completed",
+      "value": "records"
+    },
+    {
+      "observation": "raw export bytes equal input",
+      "value": "00ff800a41"
+    },
+    {
+      "observation": "dry-run preserved Project tree bytes and mtimes",
+      "value": true
+    },
+    {
+      "observation": "Store removal retained remaining record and revision history",
+      "value": {
+        "remainingRecord": {
+          "id": "two",
+          "revision": 1,
+          "createdAt": 1791265887661,
+          "updatedAt": 1791265887661,
+          "value": {
+            "name": "第二条",
+            "count": 2,
+            "items": [
+              1,
+              2
+            ]
+          }
+        },
+        "treeUnchanged": true
+      }
+    },
+    {
+      "observation": "bound model deletable after explicit Store removal",
+      "value": true
+    },
+    {
+      "observation": "phase completed",
+      "value": "payload-and-cleanup"
+    },
+    {
+      "observation": "phase completed",
+      "value": "adjacent-entries"
+    }
+  ],
+  "review": {
+    "run": "run-20261003-090655z-f1e492f6",
+    "review": "review-20261005-140919z-0e5efb80",
+    "supplementOnly": true,
+    "frozenArtifactHashes": {
+      "requirements.md": "d7293a0552a4c7fb4016402e72cbb42d04089a0b7088f4768778b48704762724",
+      "implementation-plan.md": "cddc81883d393e375bee3aef3a14ad87cdccccb46c24e558be89c4e7c7f250f8",
+      "implementation-acceptance.md": "c61b3907c9c1741bce7628a68fd0f080e9964b21ca56e2ce53d374d4bc353281",
+      "delivery-report.md": "c131e9649bc611c8b5ab114e65236afb0931d8969f65ea4435b053e155712c66"
+    }
+  },
+  "memory": {
+    "id": "change-20261005-031024825z-a1b5f8c3",
+    "status": "passed",
+    "store": "embedded",
+    "baseRevision": "2b7400b0d3bff6670982ebcd0a02f023a6859e34",
+    "contentDigest": "076c3c71256feb93c6754b44fecaa97d0b461b2da54b15da7bc1321a10a1f04e",
+    "view": "http://0.0.0.0:30000/projects/memsphere/changes/change-20261005-031024825z-a1b5f8c3",
+    "commands": [
+      {
+        "command": "node dist/cli.js --project memsphere validate",
+        "exitCode": 0
+      },
+      {
+        "command": "node dist/cli.js --project memsphere memory change validate",
+        "exitCode": 0
+      }
+    ],
+    "sourceCopiesIdentical": true
+  },
+  "currentNonChangeRecordFileHashes": {
+    ".github/workflows/ci.yml": "6ccfaba7311fc7e9a26217499135e1c681f29b70ca23b8866806548dacdf6402",
+    ".memsphere/memory/concepts/memsphere-framework.yaml": "f27f4e9ca5b7da4685060b3e64544bac11a1958508a2c76a64beb8d69119c210",
+    ".memsphere/memory/statements/memsphere-memory-access-rules.yaml": "8dd05172bfc6bcc40525edff436ca53d6c2759bb145cd13b44fb45772b326ef8",
+    ".memsphere/memory/statements/memsphere-yaml-syntax-rules.yaml": "c6c3f5ac06d2d217964f3754d9eddfaa19aab2a838c0b0334f3b6c77ef723020",
+    "README.en.md": "513f863d679039678e03e4b48487d920ef4a6100393b160b928b3f6c60bb39a2",
+    "README.md": "ebcfa2fdfd47a80b7723c4bdeac884ad4692389e1435c999d83ce46f9088ca7a",
+    "THIRD_PARTY_NOTICES.md": "1ef0930e71ac06b37d045b757f375fef1461c7c006798ccbc08e7b54d8c7c441",
+    "docs/data-layer-design.md": "61872d1432b54ee0e5f9d870cb93e959ab4f0cc86ed36b09d84f1d24aba54513",
+    "examples/models/model-registration.json": "5ffbe8a60e432c0dfd436e44f03895ba0574518afc3b38edcb8950dd88d114bf",
+    "examples/models/model-registrations.json": "077782dd9836ec426c022cf8af7d356ec859411ef473734b1f3e18c75ca538d0",
+    "modules/org.memsphere.model-prototype/adapter/view/index.ts": "b33f06fabc0b65f5e7fecc7d2830694c47cf7c244145e985f9dec62a39796da9",
+    "modules/org.memsphere.models/adapter/view/index.ts": "e6b020b7d0238a3d0cc76fba217bc58ab4be39c80050ebf0565012dba723f353",
+    "modules/org.memsphere.settings/adapter/view/settings-view.ts": "26034ad8f973529dc208da493e69ea790a94a61d4b1ea91cdf16260eca75b99d",
+    "package-lock.json": "60402d9f39d827475dab0b474c8c62d89918e0ab1710437dfed5679e221ba93d",
+    "package.json": "28abead203484ff2e1a71a5903cea76d43ac056ede0b50925483a1452e7cf10d",
+    "prototypes/model-registration/README.md": "5a467acef9b2b2f2e58cc894b9e490b4ff004d1ac633cec83e8e9973af143446",
+    "prototypes/model-registration/app.js": "26f72e6952397281852eb54b743db3c78ffbbf0513de0a1e06a8a6f9c681b97b",
+    "prototypes/model-registration/imported-models-demo.json": "44ae94526b31040832576899af6e327d3eb1afc354d7192e397ea74464a58008",
+    "prototypes/model-registration/index.html": "f6faaa253354cd3bd284c70a6dd9a4e87e80af7391a01b03cd9761adb3d92ace",
+    "prototypes/model-registration/models.json": "b0d6be6c32e82d0faaa2233dfc8552ca08f3532ac0dc0c187bb1e67e905afa64",
+    "reserved-memory/system-memory/concepts/memsphere-framework.yaml": "f27f4e9ca5b7da4685060b3e64544bac11a1958508a2c76a64beb8d69119c210",
+    "reserved-memory/system-memory/statements/memsphere-memory-access-rules.yaml": "8dd05172bfc6bcc40525edff436ca53d6c2759bb145cd13b44fb45772b326ef8",
+    "reserved-memory/system-memory/statements/memsphere-yaml-syntax-rules.yaml": "c6c3f5ac06d2d217964f3754d9eddfaa19aab2a838c0b0334f3b6c77ef723020",
+    "reserved-models/manifest.json": "f8c961d4a7c9bc423c8a833273bb718343217322330ecc5546c37b3a40befe5f",
+    "reserved-models/market-models/examples/06-references-and-recursion.json": "c7ebece416d53529445d710bc3e6563d95c6e87c2e7ed793caf51dc5e9903210",
+    "reserved-models/system-models/model-registration.json": "5ffbe8a60e432c0dfd436e44f03895ba0574518afc3b38edcb8950dd88d114bf",
+    "scripts/model-data-package-smoke.mjs": "ed8b480d63834be717f324c69278371d44c1d858efd6c45a197d7208b3777ac3",
+    "scripts/model-data-smoke.mjs": "c6681eceb239f7496c0feb16e70454c29ffbc2eb73d38349412b40279a3416d9",
+    "scripts/project-smoke.mjs": "70b67299a8a5b137b6d502cfb66e55467336603fc7c56d8c885669eeabfd758a",
+    "src/acp/cli-runtime.ts": "c8bdf4862891e8527d8230fd467e470ce5d4b0cc8bc509498f532513919e4f7a",
+    "src/cli.ts": "c3134687bb350a9f91d5c91ba1c6225364c884a618cb88acca6c711460c8c0e6",
+    "src/commands/archive.ts": "452a908da863cf9247758dbe9a2527ba52020b76fb496eee81434a50d0745ec4",
+    "src/commands/cli-errors.ts": "ea10241b81531ca6255759da135bb73ff7c2c220221852859435e119dd748ea9",
+    "src/commands/data-store.ts": "00447682475aeed50cbc1c82ca2a707b8e91dd3941b87df75eb49c4a02621844",
+    "src/commands/data.ts": "c5e49f7c15d8b6edb3357eeeaf96414dff2436d0b4b5b5c25a98ad432db0c9d8",
+    "src/commands/input.ts": "0a69e009ff37b69f59856753bfdb4abd66c7ef5cea5dce605bebd1a610f4c101",
+    "src/commands/memory.ts": "556c068d4a502764d3bfb4a7148fa5cf60e22bd83320a7250dcd25f71cabb211",
+    "src/commands/model.ts": "06ec9daaa1c07837d9deab7f5677539ec78d8eb91c95956977e5e724f050b3bb",
+    "src/commands/project.ts": "7b882a3d079fcfac59028642ec9823b2b6e215fbe30c62f81072a80da2616072",
+    "src/config-management.ts": "c7768b0f4ec0397d1688fc0e52c60c60127db44e29c7387961c5012fc5a04cad",
+    "src/config.ts": "413c7f8ccb4f221a4c477dd7396dcedf84bba9d47cfc0bf93a54dfe179d259a0",
+    "src/data/README.md": "a2443097e56d37c223921c34b8708a99acfb5e6a2f1113cba2871e553444f42c",
+    "src/data/extensions/README.md": "f759b400abb9661a28147bde66c89d85f4e918431ba155d46cb203c29c4e4e74",
+    "src/data/extensions/filesystem-datastore/README.md": "dcd653e29edbe0f9d397b47858ed164e680cc9a041edb4f3c4b5857be11fea8d",
+    "src/data/extensions/filesystem-datastore/index.ts": "5bc933798f3fee3dd3fa2ec9ed9487b0284c4eb4a773a5bfd7d68d44058684ec",
+    "src/data/extensions/filesystem-json-valuestore/README.md": "65605bd3228a0c22a12823963eca064a4c7bbed96d838b2b62e11fa3d5032e4c",
+    "src/data/extensions/filesystem-json-valuestore/index.ts": "700af1e8f5dbad87265927cc6c17f3ed8d44605a1c61fd930590cf035715057a",
+    "src/data/extensions/filesystem-json-valuestore/revision-state.ts": "1d06506e67871df09447446559379427b25a37e73e80d1366588cd7df0c4d60b",
+    "src/data/extensions/json-schema-metamodel/index.ts": "b164c3c360696e6e286f525d573e038ee59b94d8fc06904fe40fa32818346f59",
+    "src/data/extensions/json-schema/index.ts": "7168dba58d1e12c240a4653e86a5134819c85aaafdc2f5e77bdecef731d0aee5",
+    "src/data/extensions/json-serializer/index.ts": "7aba3634e52f5c954fa351b4d68b1d47a1472f96906f12633cf70b7e06409784",
+    "src/data/extensions/raw/index.ts": "7ffe326d4c5495dbb7294bf16adea6c25273aa4afe53764be6f649759321594a",
+    "src/data/extensions/shared/filesystem.ts": "1310c8116e50c67bbf9bf94031294398a8dfb98bcea79d5c59fc8bfdca49bf98",
+    "src/data/management/README.md": "4eafd5f4b28d340dac462cd7273f16f194d0717c30b716c4afb17ccd691bcc94",
+    "src/data/operations/json-patch.ts": "1ba66baf57bd0c87109f1ae3465db8665df3cb3173247a80942b66035b0300ed",
+    "src/data/operations/json-path.ts": "44aab3e445cf234b19e373b6de7329edddd149dbcc35f7c2f2eed917afccd7a2",
+    "src/file-lock.ts": "468b84348572d03876c35d420385e4500dca21e843eaf1962d00fa178812f680",
+    "src/memory/catalog.ts": "c4c0e7fb972e4f797134511612d44c3d15af16db242ee677fb9bdf196bf8fa53",
+    "src/memory/factory.ts": "14aa05b3887fd4020a44d023f072a54dee8debcfab8958077fcc89765ffb23c8",
+    "src/memory/navigation.ts": "28dc26fdc310471ee7d1845242ad7fab1f30a8cdd58e8db702add06c0dcd15bb",
+    "src/memory/serializer.ts": "3eaaa354b86c1b215525c59937c293860f60365a34b2d69752720f33c83e65d3",
+    "src/pagination.ts": "2424b3df274cee9c1d1b7ab7e925aa4f85d569962355d75ea5685ecab572ddda",
+    "src/project/business-stores.ts": "75919175fe8c5a307127632015d17a174fe5a8675bbc23bceacd71f9ff17c4ca",
+    "src/project/data-service.ts": "1164fed9bd4328724757921d3483692ac5baa5ddc8819e9b2dcde582378fabea",
+    "src/project/example-relocation.ts": "5b7688634745e076874d1d1b1527f87fc8ec8eb53f48da62bbd4ada3f66cac51",
+    "src/project/model-market.ts": "6d08d30cc79643f1c7984661c28f1651e09582427f2068684d3b1c18f046eeb9",
+    "src/project/model-operation.ts": "6f0fc5eb201e69c3bf2f97df13c15ac44b0bdcb2e802cebf3534840838084308",
+    "src/project/model-registration-contract.ts": "31811b4d16973822f25e7ffbdb1d4be22cf9a127acc1cf95b25df2e809b82888",
+    "src/project/model-registration.ts": "b08d4e21b9a71f475a5c1b6a392bece02105847758bb2c9de944b9e7d9b946b4",
+    "src/project/model-schema-references.ts": "e508cf3521ff671fd4f8c3cf3b223504bdeffea90fac0716f154dce58935e1fb",
+    "src/project/model-service.ts": "4430f62e94f30788604ab68c07ec501752e43c9e07fafb7e731fed4bd1a07bef",
+    "src/project/model-validation.ts": "711ed60947d15b6cb758a2fc6aa99dca808bc706850562f0d29078cb61844ac2",
+    "src/project/model.ts": "2d746f92a4d745f2b9fd0a859f9a581ac5a22dd584050c3c511399e4182b27fd",
+    "src/project/models.ts": "bf657ae9e2c8630325ece57c6801f75e63aaf0ce19edbe55beac26084b8767e0",
+    "src/project/run-data.ts": "3e3ba26349f57efee9ecf89ae631c35d47809543c0fa79d18fc0806414de3a3d",
+    "src/project/system-model-store.ts": "806158fa6e12949ce8e88203b19bef2a29701a2bb153c701c8cf1ad63799cafc",
+    "src/project/system-models.ts": "e936f8391e70446d8b9cca68885d549063f502cdc44df94d87239c84d3eb4c23",
+    "src/prompts/templates/en/acp-review-v2/partials/commands.hbs": "044f26ef8f5e23ebda0edb80a051c469070fe194555eb0f097cd4803efb845a9",
+    "src/prompts/templates/en/acp-review/partials/commands.hbs": "b61995efd74b82d6b3859c747f495854b2cc0b312a73c9564deefc700e32c472",
+    "src/prompts/templates/zh-CN/acp-review-v2/partials/commands.hbs": "2473cb5ed7973dd57613c03b02670b191a973a813c1a1fe62fdb6bf81e263e65",
+    "src/prompts/templates/zh-CN/acp-review/partials/commands.hbs": "cabc131a0eace9e3787916ee0df0dc337759fdfd8126c29fe456d0267da81550",
+    "src/skills/memsphere/SKILL.md": "7c8936f6913cf30e868230fca5cf975a7c581b1580d4f5bd7e582e78c7188614",
+    "src/view/view-runtime.ts": "62661d7d1d97025912eac5b4e869b57ba3327e9b06b174ad14fdbc80158acbd4",
+    "test/agent-review.test.ts": "6931af5deab6672c76dd67c7e04a76ac180dc74a42fc374f6e1ef2cc7537d00b",
+    "test/archive-run-data.test.ts": "0aa29647318a17562d825c216254caf64099ba7ba8f4378bdda621048dc634dc",
+    "test/business-data-service.test.ts": "e1cdd1f3745e5ba18663541084ed30e80604f05188bf00b7b8eb471df15ba770",
+    "test/cli-errors.test.ts": "67ded4975844891e90146cba9990d11c28302247a883fa40ed2d52a4d99ffcb2",
+    "test/cli-output-format.test.ts": "935fb7e7b3a0ed61e55df6a4f150e39584033b822b286c714c1666bf182a278c",
+    "test/config-management.test.ts": "16ba29da2a75265027e4b25603df67a7f1543073846446441c78b4b616b2cbf5",
+    "test/data-command.test.ts": "b7e303bfd01fb64c6873b85c10f7c98cc3680a1965fe7c215b2c02c0a17e37ba",
+    "test/data-extensions.test.ts": "4788c961cc33f445e95adf700334c76021c5a98685bea647143265999470fd67",
+    "test/data-filesystem-datastore.test.ts": "61035d6ebda14f686b8757553bd1cfb2a373dc4a61308cc39110795fb1cd6aac",
+    "test/data-filesystem-helpers.test.ts": "e3dd9638f63d3556da4bdc24c92d8b0bfa8890e287b6b8c880e807c89f8775c6",
+    "test/data-filesystem-json-valuestore.test.ts": "f247088c9d0ddc321217479470b4eab4dfc8a5b73122577dfe7bbbf05ac985a4",
+    "test/data-filesystem-open.test.ts": "d13ba3c8a24a269c04895fb5c531bf827a01d67911f60df5565fde54797b55dc",
+    "test/data-filesystem-process.test.ts": "64518cb7becc7b091bc29cec5991a7e00528eadf8783e00633bea9a17ac91498",
+    "test/data-filesystem-revisions.test.ts": "04bc7794f1be63de4bf5e3e3db6849075a536f0eb2eba22c447ef938b6ab1992",
+    "test/data-json-schema.test.ts": "604ad6cb0987799502980157ff113a0c18ce21294673c38b62e25860e07e2c51",
+    "test/data-manager.test.ts": "7fa7578b026a6e747418175637886d62d0cf312780a851e82c41a945cee99f30",
+    "test/data-raw.test.ts": "9dfff8213135c893362ee2c4fdc88169d719b8b396cff2b303c4fa166982c934",
+    "test/example-relocation.test.ts": "086dca84f93cd3a9d8ad7f0fbe103bc4d75082ea594111c47280e876609488e1",
+    "test/file-lock.test.ts": "3d3dc2bf4c19d30f104b33febd01d804b18fed2f87fd346bea1fa0d61d60deed",
+    "test/fixtures/data-cli-worker.ts": "583a854ab2a5d4bab4d64af3d548e609e0c9d254d9e0b14842ae371cf3e2cf45",
+    "test/fixtures/data-management.ts": "36fe887945a334ed765d194d5768ddf284ef4baa4d4e5438b62f743bb93078ac",
+    "test/fixtures/filesystem-store-worker.ts": "09f3e9641b7c12802bb441f413960916bff6dcd773d5870eabfaff2bb8dd8c7c",
+    "test/fixtures/model-operation-worker.ts": "471fac44641cf43ebe6295f5409c785c3845bea79c355df021117cd11ad0698b",
+    "test/helpers/business-data.ts": "c8db3024f92162bd79b28d2bd76989a49dd2d64654733221b75c5682e0bc1a15",
+    "test/helpers/filesystem-process.ts": "569fa2244ab931116a51b398a11ef1c3287b384c964182c993c7d37de1adbb6f",
+    "test/helpers/run-data.ts": "9704811034d4bca92b6e6e378f6a48c014a261b9dfaaf3b0559f759e45df5572",
+    "test/json-patch.test.ts": "a24ec3945447d287b5c6a46ad4a4654f2d6ef2518b31e0598f5828fcd916b92f",
+    "test/json-path.test.ts": "8342a09ae9aa4bd76ff3c7944b7865744672bb39811192b5bb2526dc6ebeeadf",
+    "test/list-pagination-cli.test.ts": "ffcd608c6b5d23a263a75454177ad2d3737645f7301e59c8e42eda44998c56c3",
+    "test/memory-catalog.test.ts": "1a863c35420cd303483f2099e8f1e9337fa570ff44c937f4b040ade422cd34a9",
+    "test/memory-changeset.test.ts": "2848ef99f10ea3b46bbd8ad10221b98be93d3cc0bbb032b29c4e9cb18a732e25",
+    "test/memory-cli.test.ts": "5de79f734f9df76fef7356586e3e076e1e321f61d66e88713185716addbebbeb",
+    "test/memory-command.test.ts": "552e36acfeaea25711a238d86ba3984e30874cf49c10ed2ab4bbd14a55eb2a4f",
+    "test/memory-navigation.test.ts": "adf162e3bb38e2b31860b35dfd810217c1d8b4d7d35350718211bb502a378e93",
+    "test/memory-serializer.test.ts": "d7b90db43a08a6d9458795aa2b39864202d627131df0ae64d5ecf0be97005a36",
+    "test/model-browser-state.test.ts": "ae0d906043e7a125c19ae94c658f3fbf34b3ddd27a60ce372ff8fd11baab7728",
+    "test/model-command.test.ts": "2be20f24907866cc890ddf0a44e50df8fd7655577b50abc80791a6733b9ab32e",
+    "test/model-market-package.test.ts": "61ddac197dca6c9a33577130777a051437bc6a879be3c9879d54db00ebc95248",
+    "test/model-market.test.ts": "fe086158d605d58e8fb2a41fef4be00831c2401c94d8330a511b82aabd5a0f2c",
+    "test/model-operation.test.ts": "3693ecc822e72e0c96e805bb0b58e2d68ec88d9db5cffaa9898652abc4404b8d",
+    "test/model-registration-browser.test.ts": "c421ae86fdbe89082ec710878ed62f98bc434867b2e2e949d73a5fc85b604575",
+    "test/model-registration.test.ts": "dfaf1c6e9a4036837b41f98d2ef23c7fe7d822f60cf399af1d24ff5b7693d3ac",
+    "test/model-schema-references.test.ts": "af1f2efc15417b85d46f9bdfdebea26863388b02973a989ee6b7fe6f38a66c78",
+    "test/model-service.test.ts": "631fb369157e60c6ad88bd762b27bed773b4ee01af161bc9076051b460223451",
+    "test/model-validation.test.ts": "2dec52f75b8db4ee8527a1129c4ceeb905a33dd863f20c903faf6403bea12781",
+    "test/models-builtin-view-browser.test.ts": "e2e187fc36ed33c5b5e6bca6a145fcc1f42af05e07b9cd923232ee45c76241f1",
+    "test/models-view-slots-browser.test.ts": "ab0e24fd51eca4ab7a5c8c0715788d1a35a464af39453bf81fd329382b7831b5",
+    "test/pagination.test.ts": "895b2ea6078f23a2f690bf9056e48ef66026852c60371bf4684b2824d4e5d950",
+    "test/project-memory-provider.test.ts": "dd6fd3b948d60213087b9b4fdb5d0614a2800a8e1de528c964e0b6495e208c47",
+    "test/project-models.test.ts": "517d12693ae4dfa91463a0802137b17493e6f8bc8f815dcd5b0dc25a2ff153a0",
+    "test/reserved-models.test.ts": "bace0b974d3f75fa75c891324dd7a0074350e5e1499b4b8eb8693098dceb6b72",
+    "test/run-data-access.test.ts": "359822284f233893ddf489d257212ef586d2bf44e822fe2c0b85327f8e8a7f54",
+    "test/run-model-storage.test.ts": "fa256192fa20d6487d6d7e1aa07782d9e408543c7afd7407d332ff3ad8daadf3",
+    "test/system-models.test.ts": "1be7519023ccd422a325b0d6602beee48996692f8a9a39e258dd38312b1ce8e0",
+    "test/view-settings.test.ts": "7ff5380a78a5f28f86efac2ca11e4518d6382c02bb59c15e08fc5833c74b07ff"
+  },
+  "limits": [
+    "运行了每个命令的主要流程与若干错误分支，没有穷举全部参数组合。",
+    "本次实际运行平台为 Linux；未进行 Windows/macOS 人工运行验收。",
+    "本次验收未新增单元测试，未修改业务代码或 Memory；既有自动化完整回归的证据另存。"
+  ]
+}

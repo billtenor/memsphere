@@ -1,3 +1,4 @@
+import { listAppMemoryEntries } from "../app/ownership.js";
 import { Command, Option } from "commander";
 import { z } from "zod";
 import { resolveProjectContext } from "../project/resolver.js";
@@ -37,8 +38,8 @@ export function registerAppCommands(program: Command): void {
   command(app, "show").argument("<id>").action((id, options: Output) => output(options, async () => {
     const project = (await context()).primary, app = requireApp(await readAppState(project), id);
     const catalog = new DefaultMemoryCatalog(new AppMemoryProvider(project.paths.root, project.memoryRoot));
-    const page = await catalog.list();
-    const memories = app.memories.map(memory => ({ ...memory, reference: page.memories.find(item => item.app?.id === id && item.app?.assetKey === memory.key)?.reference ?? memory.reference }));
+    const entries = await listAppMemoryEntries(catalog);
+    const memories = app.memories.map(memory => ({ ...memory, reference: entries.find(item => item.app?.id === id && item.app?.assetKey === memory.key)?.reference ?? memory.reference }));
     const agent = app.manifest.entrypoints.agent.map(reference => {
       const memory = app.memories.find(memory => memory.reference === reference);
       const current = memory ? memories.find(m => m.key === memory.key)?.reference ?? reference : reference;

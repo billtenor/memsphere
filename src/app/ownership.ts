@@ -1,3 +1,4 @@
+import type { MemoryCatalog, MemoryDescriptor } from "../memory/catalog.js";
 import { relative, sep } from "node:path";
 import { z } from "zod";
 import { FileMemoryProvider } from "../memory/file-provider.js";
@@ -29,4 +30,16 @@ export class AppSnapshotMemoryProvider extends FileMemoryProvider {
     }
     return descriptors;
   }
+}
+
+/** Follow every page: renamed App entries may sort past the first page. */
+export async function listAppMemoryEntries(catalog: MemoryCatalog): Promise<MemoryDescriptor[]> {
+  const entries: MemoryDescriptor[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await catalog.list({ cursor });
+    entries.push(...page.items);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return entries;
 }

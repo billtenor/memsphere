@@ -23,7 +23,7 @@ flow:
       action: 实际检查教学准入要求，判断是否仍有任何一项未满足。
       actor: agent
       asserts:
-        - 必须实际检查 Node.js 20+、Git、memsphere 命令行工具、memsphere 技能、当前工作区的主项目绑定、当前项目类型和配置、`memsphere validate`，以及当前环境可访问的可视化界面地址。
+        - 必须实际检查 Node.js 22+、Git、memsphere 命令行工具、memsphere 技能、当前工作区的主项目绑定、当前项目类型和配置、`memsphere validate`，以及当前环境可访问的可视化界面地址。
         - 必须区分托管型与嵌入型项目，并只把“记忆是否跟随代码仓库”作为本章需要理解的首要差异。
         - Windows 专项要求只在原生 Windows 环境出现；WSL 按独立 Linux 环境处理。
         - "`memsphere project repair` 只在托管型项目的系统记忆确有故障且适用时作为排障手段，不是准入必经步骤。"

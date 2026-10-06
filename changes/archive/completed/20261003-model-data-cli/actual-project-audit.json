@@ -1,0 +1,99 @@
+{
+  "date": "2026-10-05",
+  "root": "/data00/home/liuyanjun.lyj/.local/share/memsphere/projects/memsphere",
+  "changedModelFiles": [
+    "models/registrations/system/definitions/json-schema/draft-07/memsphere/model-registration.json",
+    "models/registrations/system/registrations/075488d6-733e-4157-a2df-17dbd98cce04.json",
+    "models/registrations/system/registrations/53208cc3-02da-4c8d-858a-4a5b05c61c67.json",
+    "models/registrations/system/registrations/73c0547e-307a-46d7-a5c3-df943a8f31b2.json",
+    "models/registrations/system/registrations/8e472886-13f9-4c56-936e-ba1931d2f392.json",
+    "models/registrations/system/registrations/d8e9a87b-951c-4bff-80df-6841b80563f5.json"
+  ],
+  "historyFilesChecked": 10679,
+  "historyUnchanged": true,
+  "models": [
+    {
+      "id": "memsphere/model-registration.json",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run-domain/agent-attempt.json",
+      "status": "unavailable",
+      "errorCode": "MODEL_RUNTIME_UNSUPPORTED",
+      "error": "Unsupported JSON Schema at #/definitions/Timestamp/format: keyword \"format\" is not supported by this reflection extension"
+    },
+    {
+      "id": "memsphere/run-domain/artifact.json",
+      "status": "unavailable",
+      "errorCode": "MODEL_RUNTIME_UNSUPPORTED",
+      "error": "Unsupported JSON Schema at #/definitions/Content/oneOf: keyword \"oneOf\" is not supported by this reflection extension"
+    },
+    {
+      "id": "memsphere/run-domain/assignment.json",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run-domain/comment.json",
+      "status": "unavailable",
+      "errorCode": "MODEL_RUNTIME_UNSUPPORTED",
+      "error": "Unsupported JSON Schema at #/definitions/Timestamp/format: keyword \"format\" is not supported by this reflection extension"
+    },
+    {
+      "id": "memsphere/run-domain/external.json",
+      "status": "unavailable",
+      "errorCode": "MODEL_RUNTIME_UNSUPPORTED",
+      "error": "Unsupported JSON Schema at #/definitions/ExternalPin/anyOf: keyword \"anyOf\" is not supported by this reflection extension"
+    },
+    {
+      "id": "memsphere/run-domain/review.json",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run-domain/round.json",
+      "status": "unavailable",
+      "errorCode": "MODEL_RUNTIME_UNSUPPORTED",
+      "error": "Unsupported JSON Schema at #/definitions/Timestamp/format: keyword \"format\" is not supported by this reflection extension"
+    },
+    {
+      "id": "memsphere/run-domain/run-event.json",
+      "status": "unavailable",
+      "errorCode": "MODEL_RUNTIME_UNSUPPORTED",
+      "error": "Unsupported JSON Schema at #/allOf: keyword \"allOf\" is not supported by this reflection extension"
+    },
+    {
+      "id": "memsphere/run-domain/run.json",
+      "status": "unavailable",
+      "errorCode": "MODEL_RUNTIME_UNSUPPORTED",
+      "error": "Unsupported JSON Schema at #/if: keyword \"if\" is not supported by this reflection extension"
+    },
+    {
+      "id": "memsphere/run-domain/step.json",
+      "status": "unavailable",
+      "errorCode": "MODEL_RUNTIME_UNSUPPORTED",
+      "error": "Unsupported JSON Schema at #/definitions/Origin/oneOf: keyword \"oneOf\" is not supported by this reflection extension"
+    },
+    {
+      "id": "memsphere/run-domain/vote.json",
+      "status": "unavailable",
+      "errorCode": "MODEL_RUNTIME_UNSUPPORTED",
+      "error": "Unsupported JSON Schema at #/allOf: keyword \"allOf\" is not supported by this reflection extension"
+    },
+    {
+      "id": "memsphere/run/agent-activity-log.json",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run/agent-activity-snapshot.json",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run/artifact.json",
+      "status": "available"
+    },
+    {
+      "id": "memsphere/run/memory-snapshot-file.json",
+      "status": "available"
+    }
+  ],
+  "diagnostics": []
+}

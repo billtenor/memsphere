@@ -60,7 +60,7 @@ export const jsonSerializerExtension: DataExtension = {
 };
 
 /** Check the whole graph, not just branches present in a particular value. */
-function assertJsonDescriptor(root: TypeDescriptor): void {
+export function assertJsonDescriptor(root: TypeDescriptor): void {
   const seen = new Set<TypeDescriptor>();
   const pending = [root];
   while (pending.length > 0) {
@@ -103,7 +103,7 @@ function assertJsonDescriptor(root: TypeDescriptor): void {
  * Encode data properties directly. Passing caller objects to JSON.stringify
  * would invoke hooks and silently omit unsupported properties and array keys.
  */
-function encodeJsonValue(value: unknown, path = "$", ancestors = new Set<object>()): string {
+export function encodeJsonValue(value: unknown, path = "$", ancestors = new Set<object>()): string {
   if (value === null) return "null";
   switch (typeof value) {
     case "string":

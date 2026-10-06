@@ -31,6 +31,8 @@ import { isMemoryKind, memoryKinds, memoryKindTags, type MemoryKind } from "../m
 import { parseMemoryYaml } from "../memory/yaml.js";
 import { listMemoryFiles } from "../memory/store.js";
 import { assertWindowsPrerequisites } from "../windows-prerequisites.js";
+import { compareStrings, paginateItems, parseListLimit, type PaginationOptions } from "../pagination.js";
+import { emitCommandResult } from "./cli-errors.js";
 
 type BindOption = { bind?: boolean };
 type OutputOption = { output?: "text" | "json" };
@@ -877,29 +879,33 @@ function withProjectLock<T>(home: string, name: string, action: () => Promise<T>
   return withFileLock(resolve(homePaths(home).runtimeRoot, "projects", `${name}.lock`), action);
 }
 
-export async function projectListCommand(options: OutputOption = {}): Promise<void> {
+export async function projectListCommand(options: OutputOption & PaginationOptions = {}): Promise<void> {
+  parseListLimit(options.limit);
   const home = resolveMemsphereHome();
   const registry = await readProjectRegistry(home);
   const projects = await listRegisteredProjects(home);
   const workspace = await resolveWorkspaceIdentity();
   const binding = registry.workspaces[workspace.key];
-  const result = projects.map((project) => ({
+  const result = paginateItems(projects.map((project) => ({
     ...project,
     primary: binding?.primary === project.name,
     mounted: binding?.mounted.includes(project.name) ?? false
-  }));
+  })).sort((a, b) => compareStrings(a.name, b.name)), options, {
+    command: "project list", scope: { home: resolve(home), workspace: workspace.key }
+  });
   if (options.output === "json") {
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    emitCommandResult(result, "json");
     return;
   }
-  if (result.length === 0) {
+  if (result.items.length === 0) {
     console.log("No registered Projects.");
     return;
   }
-  for (const item of result) {
+  for (const item of result.items) {
     const relation = item.primary ? "primary" : item.mounted ? "mounted" : "unbound";
     console.log(`${item.name}\t${item.missing ? "missing" : "available"}\t${relation}\t${item.root}`);
   }
+  if (result.nextCursor) console.log(`nextCursor: ${result.nextCursor}`);
 }
 
 export async function projectShowCommand(nameInput: string | undefined, options: OutputOption = {}): Promise<void> {

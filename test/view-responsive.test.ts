@@ -1,10 +1,11 @@
+import { browserScope, type TestBrowser } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium, type Browser, type Page } from "playwright";
+import { type Page } from "playwright";
 import { createViewServer } from "../src/commands/view.js";
 import type { MemsphereConfig } from "../src/config.js";
 import { parseControlPlaneConfig } from "../src/control-plane.js";
@@ -16,7 +17,7 @@ const legacyRunId = "run-responsive-legacy";
 const runName = `本次Run名称-${"x".repeat(120)}`;
 
 async function withResponsiveView(
-  fn: (browser: Browser, url: string) => Promise<void>,
+  fn: (browser: TestBrowser, url: string) => Promise<void>,
   options: { includeBrokenMemory?: boolean; extraMemoryCount?: number } = {}
 ): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-responsive-view-"));
@@ -282,7 +283,7 @@ async function withResponsiveView(
   await once(server, "listening");
   const address = server.address();
   assert(address && typeof address === "object");
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
 
   try {
     await fn(browser, `http://127.0.0.1:${address.port}`);
@@ -294,7 +295,7 @@ async function withResponsiveView(
   }
 }
 
-async function openTaskPage(browser: Browser, url: string, width: number): Promise<Page> {
+async function openTaskPage(browser: TestBrowser, url: string, width: number): Promise<Page> {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   page.setDefaultTimeout(5_000);
   await page.goto(`${url}/projects/responsive/tasks/${runId}`);
@@ -586,6 +587,7 @@ test("Run status list refreshes only when the user asks", async () => {
       assert.equal(await page.getByRole("button", { name: "运行中", exact: true }).getAttribute("aria-current"), "page");
       status = "done";
       const requestsBeforeWait = summaryRequests;
+      // Bounded negative observation after the loaded state; explicit refresh is verified below.
       await page.waitForTimeout(4_250);
       assert.equal(summaryRequests, requestsBeforeWait);
       const refreshed = page.waitForResponse((response) => (
@@ -666,6 +668,7 @@ test("Run detail refresh is manual", async () => {
       await page.goto(`${url}/projects/responsive/tasks/${runId}`);
       await page.locator(".run-title", { hasText: runName }).waitFor();
       const initialRequests = detailRequests;
+      // Bounded negative observation after the loaded state; explicit refresh is verified below.
       await page.waitForTimeout(4_250);
       assert.equal(detailRequests, initialRequests);
       const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === `/api/projects/responsive/runs/${runId}`);

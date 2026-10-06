@@ -11,12 +11,18 @@ import { DefaultDataExtensionRegistry } from "../data/management/extension-regis
 import { DefaultDataManager } from "../data/management/data-manager.js";
 import { readBundledSystemModels } from "../reserved/models.js";
 import type { ProjectModelInput } from "./model-registration.js";
+import { readModelOperationStamp } from "./model-operation.js";
 
 export const runDataModels = Object.freeze({
-  artifact: "memsphere/run/artifact",
-  memory: "memsphere/run/memory-snapshot-file",
-  activityLog: "memsphere/run/agent-activity-log",
-  activitySnapshot: "memsphere/run/agent-activity-snapshot"
+  artifact: "memsphere/run/artifact.json",
+  memory: "memsphere/run/memory-snapshot-file.json",
+  activityLog: "memsphere/run/agent-activity-log.json",
+  activitySnapshot: "memsphere/run/agent-activity-snapshot.json"
+});
+/** Persisted ContentRef addresses are independent of model identities. */
+export const runDataStoreIds = Object.freeze({
+  artifact: "memsphere/run/artifact", memory: "memsphere/run/memory-snapshot-file",
+  activityLog: "memsphere/run/agent-activity-log", activitySnapshot: "memsphere/run/agent-activity-snapshot"
 });
 export type RunDataKind = keyof typeof runDataModels;
 export type RunDataArea = "current" | "archive";
@@ -48,7 +54,7 @@ export function prepareRunData(input: { runsRoot: string; archiveRoot: string; m
     extensions,
     models: runModelBindings(),
     stores: Object.entries(runDataModels).flatMap(([kind, model]) => (["current", "archive"] as const).map((area) => ({
-      id: `${model}/${area}`,
+      id: `${runDataStoreIds[kind as RunDataKind]}/${area}`,
       model,
       kind: "DataStore" as const,
       factory: "memsphere/filesystem",
@@ -87,8 +93,13 @@ function snapshotProjectInput(input: ProjectModelInput): ProjectModelInput {
 function withProjectModels(content: DataManager, configured: ProjectModelInput | undefined, root: string): DataManager {
   type Host = Awaited<ReturnType<typeof import("./models.js").createProjectModelHost>>;
   let prepared: Promise<Host | undefined> | undefined;
-  const runtimes = new Map<string, ReturnType<Host["runtime"]>>();
-  const host = (): Promise<Host | undefined> => {
+  let preparedStamp: string | undefined;
+  const host = async (): Promise<Host | undefined> => {
+    const stamp = await readModelOperationStamp(root);
+    if (preparedStamp !== stamp) {
+      prepared = undefined;
+      preparedStamp = stamp;
+    }
     if (!prepared) {
       prepared = (async () => {
         const input = configured ?? await implicitProjectInput(root);
@@ -114,12 +125,8 @@ function withProjectModels(content: DataManager, configured: ProjectModelInput |
     getRuntime: (context, ref) => checked(context, async () => {
       const project = await host();
       if (!project) return content.getRuntime({}, ref);
-      let runtime = runtimes.get(ref);
-      if (!runtime) {
-        runtime = project.runtime(ref).catch(error => { runtimes.delete(ref); throw error; });
-        runtimes.set(ref, runtime);
-      }
-      return runtime;
+      // The host owns Runtime caching and rechecks its operation stamp on every access.
+      return project.runtime(ref);
     })
   };
 }
@@ -139,7 +146,7 @@ export async function runDataStore(root: string, kind: RunDataKind): Promise<Dat
   const key = resolve(root);
   if (!hosts.has(key)) prepareRunData({ runsRoot: key, archiveRoot: join(dirname(key), "archives") });
   const host = hosts.get(key)!;
-  const store = await host.manager.getStore({}, `${runDataModels[kind]}/${host.area}`);
+  const store = await host.manager.getStore({}, `${runDataStoreIds[kind]}/${host.area}`);
   if (store.kind !== "DataStore") throw new Error(`Run content requires a DataStore: ${store.id}`);
   return store;
 }

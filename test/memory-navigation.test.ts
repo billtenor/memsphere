@@ -11,6 +11,26 @@ function identity(kind: MemoryIdentity["kind"], name: string): MemoryIdentity {
   return { reference: `${kind}/${name}`, kind, names: [name] };
 }
 
+test("node pages preserve declaration order and reject a cursor from another parent or Run", () => {
+  const section = (name: string): StatementMemory => ({
+    tag: "!statement", names: [name], defines: [], sections: ["zed", "alpha", "middle"].map((child) => ({
+      tag: "!statement", names: [child], defines: []
+    }))
+  });
+  const entity: StatementMemory = { tag: "!statement", names: ["rules"], defines: [], sections: [section("first"), section("second")] };
+  const navigation = new MemoryNavigation(identity("statements", "rules"), entity);
+  const scope = { project: "p", run: "run-a" };
+  const first = navigation.listChildren("statement:first", { limit: 1 }, scope);
+  const last = navigation.listChildren("statement:first", { cursor: first.nextCursor, limit: 2 }, scope);
+  assert.deepEqual([...first.items, ...last.items].map((node) => node.name), ["zed", "alpha", "middle"]);
+  assert.equal(last.parent_node_ref, "statement:first");
+  assert.equal(last.memory.reference, "statements/rules");
+  assert.equal(Object.hasOwn(last, "nextCursor"), false);
+  assert.throws(() => navigation.listChildren("statement:second", { cursor: first.nextCursor }, scope), { code: "INVALID_CURSOR" });
+  assert.throws(() => navigation.listChildren("statement:first", { cursor: first.nextCursor }, { ...scope, run: "run-b" }), { code: "INVALID_CURSOR" });
+  assert.throws(() => navigation.listChildren(undefined, { cursor: first.nextCursor }, scope), { code: "INVALID_CURSOR" });
+});
+
 test("Statement navigation lists direct sections and preserves root and ancestor constraints", () => {
   const statement: StatementMemory = {
     tag: "!statement",
@@ -33,7 +53,7 @@ test("Statement navigation lists direct sections and preserves root and ancestor
   const navigation = new MemoryNavigation(identity("statements", "Repository rules"), statement);
 
   const root = navigation.listChildren();
-  assert.deepEqual(root.nodes, [{
+  assert.deepEqual(root.items, [{
     node_ref: "statement:Testing",
     type: "Statement",
     name: "Testing",
@@ -43,7 +63,7 @@ test("Statement navigation lists direct sections and preserves root and ancestor
   }]);
 
   const children = navigation.listChildren("statement:Testing");
-  assert.deepEqual(children.nodes.map((node) => node.node_ref), ["statement:Testing/statement:Core logic"]);
+  assert.deepEqual(children.items.map((node) => node.node_ref), ["statement:Testing/statement:Core logic"]);
 
   const read = navigation.readNode("statement:Testing/statement:Core logic");
   assert.equal((read.context.root as StatementMemory).sections, undefined);
@@ -85,13 +105,13 @@ test("Schema navigation exposes fields under Repeat while retaining Repeat and p
   };
   const navigation = new MemoryNavigation(identity("schemas", "Report"), schema);
 
-  assert.deepEqual(navigation.listChildren().nodes.map((node) => node.node_ref), [
+  assert.deepEqual(navigation.listChildren().items.map((node) => node.node_ref), [
     "string:Title",
     "schema:Details",
     "repeat[1]/string:Note",
     "repeat[1]/schema:Item"
   ]);
-  assert.deepEqual(navigation.listChildren("schema:Details").nodes.map((node) => node.node_ref), [
+  assert.deepEqual(navigation.listChildren("schema:Details").items.map((node) => node.node_ref), [
     "schema:Details/string:Amount"
   ]);
 
@@ -116,11 +136,11 @@ test("Schema navigation exposes item and union items as recursive contracts", ()
   };
   const navigation = new MemoryNavigation(identity("schemas", "Values"), schema);
 
-  assert.deepEqual(navigation.listChildren().nodes.map((node) => [node.node_ref, node.relation]), [
+  assert.deepEqual(navigation.listChildren().items.map((node) => [node.node_ref, node.relation]), [
     ["items[1]", "items"],
     ["items[2]", "items"]
   ]);
-  assert.deepEqual(navigation.listChildren("items[2]").nodes.map((node) => node.node_ref), [
+  assert.deepEqual(navigation.listChildren("items[2]").items.map((node) => node.node_ref), [
     "items[2]/string:ID"
   ]);
   const read = navigation.readNode("items[2]/string:ID");
@@ -186,21 +206,21 @@ test("Procedure navigation uses Artifact names as fixed references and preserves
   };
   const navigation = new MemoryNavigation(identity("procedures", "Review flow"), procedure);
 
-  assert.deepEqual(navigation.listChildren().nodes.map((node) => node.node_ref), [
+  assert.deepEqual(navigation.listChildren().items.map((node) => node.node_ref), [
     "action:Result~1One~2A",
     "if:Continue",
     "while:Retry",
     "call:Shared",
     "call:Shared#2"
   ]);
-  const rootNodes = navigation.listChildren().nodes;
+  const rootNodes = navigation.listChildren().items;
   assert.equal(rootNodes[0].artifact, "Result/One#A");
   assert.equal(rootNodes[1].condition_artifact, "Continue");
   assert.equal(rootNodes[2].condition_artifact, "Retry");
   assert.equal(rootNodes[3].artifact, undefined);
   assert.equal(rootNodes[3].target, "Shared");
 
-  assert.deepEqual(navigation.listChildren("if:Continue").nodes.map((node) => node.node_ref), [
+  assert.deepEqual(navigation.listChildren("if:Continue").items.map((node) => node.node_ref), [
     "if:Continue/then/action:Result",
     "if:Continue/then/action:Result#2",
     "if:Continue/elseif/if:Fallback",
@@ -240,7 +260,7 @@ test("Concept navigation is empty and unknown node references fail clearly", () 
     defines: ["A memory."]
   };
   const navigation = new MemoryNavigation(identity("concepts", "Memory"), concept);
-  assert.deepEqual(navigation.listChildren().nodes, []);
+  assert.deepEqual(navigation.listChildren().items, []);
   assert.throws(
     () => navigation.readNode("statement:Missing"),
     (error: unknown) => error instanceof MemoryNodeNotFoundError

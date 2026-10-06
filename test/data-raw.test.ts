@@ -16,7 +16,7 @@ import { bytesContent, readAll } from "../src/data/extensions/shared/payload.js"
 import { DefaultDataManager } from "../src/data/management/data-manager.js";
 import { DefaultDataExtensionRegistry } from "../src/data/management/extension-registry.js";
 
-function model(definition: unknown = {}, id = "tests/artifact", metaModel = RAW_MODEL): Model {
+function model(definition: unknown = {}, id = "tests/artifact.json", metaModel = RAW_MODEL): Model {
   return {
     data: {
       id, model: metaModel,
@@ -39,7 +39,7 @@ function compile(definition: unknown = {}, id?: string) {
 }
 
 test("raw is an independent, meta-model-targeted Runtime extension without storage or serialization", () => {
-  assert.equal(RAW_MODEL, "raw");
+  assert.equal(RAW_MODEL, "raw.json");
   assert.equal(rawExtension.id, "memsphere/raw");
   assert.equal(rawExtension.version, "0.1.0");
   assert.equal(rawExtension.modelRuntimeFactories?.length, 1);
@@ -55,7 +55,7 @@ test("raw exposes a stable, frozen bytes scalar descriptor for the concrete mode
   const input = model(definition);
   const runtime = new RawModelRuntime(input);
   assert.deepEqual(runtime.descriptor, {
-    id: "tests/artifact", root: { kind: "scalar", scalar: "bytes", description: "Opaque artifact bytes" }
+    id: "tests/artifact.json", root: { kind: "scalar", scalar: "bytes", description: "Opaque artifact bytes" }
   });
   assert.equal(Object.isFrozen(runtime.descriptor), true);
   assert.equal(Object.isFrozen(runtime.descriptor.root), true);
@@ -151,13 +151,13 @@ test("raw factory checks model identity and cancellation without Payload or regi
   for (const id of ["", " "]) {
     await assert.rejects(factory.createRuntime({}, model({}, id), noDependencies), TypeError);
   }
-  await assert.rejects(factory.createRuntime({}, model({}, "tests/artifact", "other/standard"), noDependencies), TypeError);
+  await assert.rejects(factory.createRuntime({}, model({}, "tests/artifact.json", "other/standard"), noDependencies), TypeError);
   const controller = new AbortController();
   const reason = new Error("cancel raw creation");
   controller.abort(reason);
   await assert.rejects(factory.createRuntime({ signal: controller.signal }, model(), noDependencies), error => error === reason);
   const runtime = await factory.createRuntime({}, model(), noDependencies);
-  assert.equal(runtime.descriptor.id, "tests/artifact");
+  assert.equal(runtime.descriptor.id, "tests/artifact.json");
 });
 
 test("DataManager creates and caches distinct raw runtimes for Artifact and Log models", async () => {

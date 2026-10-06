@@ -23,6 +23,8 @@ This contract describes local App integration. See [App Design](./app-design.en.
 | `cliBindings` | `{cli,args?,cwd?,env?}[]`; values may reference installation configuration with `{configKey:"ledgerDirectory"}`. |
 | `backend` | `{entry,operations}`; trusted ESM entry and operation-name-to-read/write mapping. |
 
+Model and metamodel IDs end in `.json`, following Project model rules; for example, `example/expense.json` and `json-schema/draft-07.json`. App-owned models are read-only through the general model update/delete commands.
+
 A Model Package requires schemaVersion 1, id, name, version, and models. Each model declares modelRef, metaModel, and path, with optional name, description, and tags. Optional dependencies are model-package `{id,version?}[]`. Existing RuntimeFactories interpret definitions.
 
 The single-field configKey form also works in Store and View instance configurations. Store directories resolve against the Project root. Relative paths in local CLI bindings resolve against the binding file. Keep secrets in host environment variables, outside distributions and examples.

@@ -10,7 +10,8 @@ import { JSON_SCHEMA_DRAFT_07 } from "../data/extensions/index.js";
 import { bytesContent, readAll } from "../data/extensions/shared/payload.js";
 import { atomicWriteJson } from "../persistence.js";
 import { readBundledMarketModelPackages } from "../reserved/models.js";
-import { validateJsonSchemaDefinition } from "../data/extensions/json-schema-metamodel/index.js";
+import { checkModelDefinition } from "./model-validation.js";
+import { commitModelOperation, optionalFileBytes, recoverModelOperation, type ModelFileChange } from "./model-operation.js";
 import { validateModelSchemaReferences } from "./model-schema-references.js";
 import { createProjectModelHost } from "./models.js";
 import { createModelRegistrationStore, IMPORTED_MODEL_DEFINITIONS_STORE, pathExists, readModelRegistrations, validateModelRegistration, type ProjectModelInput, type ModelRegistration } from "./model-registration.js";
@@ -25,128 +26,71 @@ export type ModelMarketPackage = {
     metaModel: string;
   }[];
 };
-export function listModelMarket(): ModelMarketPackage[] {
-  return readBundledMarketModelPackages().map(pack => ({ ...pack, models: pack.models.map(({ sourcePath: _sourcePath, ...model }) => model) }));
+export function listModelMarket(sourceRoot?: string): ModelMarketPackage[] {
+  return readBundledMarketModelPackages(sourceRoot).map(pack => ({ ...pack, models: pack.models.map(({ sourcePath: _sourcePath, ...model }) => model) }));
 }
 /** Caller serializes this operation with Project settings/config mutation. */
 export async function importModelMarketPackage(context: Context, input: ProjectModelInput, packageId: string, options: {
+  sourceRoot?: string;
   afterStage?: () => Promise<void>;
   beforePublish?: () => Promise<void>;
   removeCandidate?: (path: string) => Promise<void>;
 } = {}) {
-  const pack = listModelMarket().find(p => p.id === packageId);
-  if (!pack)
-    throw Object.assign(new Error(`Unknown model package: ${packageId}`), { code: "MODEL_PACKAGE_NOT_FOUND" });
-  const state = await readModelRegistrations(context, input);
-  if (state.diagnostics.length)
-    throw new TypeError("Cannot import with damaged registration records");
-  const host = await createProjectModelHost(context, input);
-  const summaries = await host.list();
-  const conflicts: string[] = [];
-  let identical = 0;
+  await recoverModelOperation(input.root);
+  const pack = listModelMarket(options.sourceRoot).find(p => p.id === packageId);
+  if (!pack) throw Object.assign(new Error(`Unknown model package: ${packageId}`), { code: "MODEL_PACKAGE_NOT_FOUND" });
+  // Validate the complete package before writing even a candidate directory.
   for (const model of pack.models) {
     validateModelRegistration(model.registration);
-    const registered = state.records.find(r => r.registration.modelRef === model.registration.modelRef);
-    const existing = summaries.find(s => s.id === model.registration.modelRef);
+    await checkModelDefinition(context, { modelRef: model.registration.modelRef, ...model });
+  }
+  const state = await readModelRegistrations(context, input);
+  if (state.diagnostics.length) throw new TypeError("Cannot import with damaged registration records");
+  const stagingRoot = join(state.paths.registrationDirectory, "staging");
+  if (await pathExists(stagingRoot) && (await readdir(stagingRoot)).length)
+    throw Object.assign(new Error("Pending model import candidate requires explicit cleanup"), { code: "MODEL_IMPORT_CLEANUP_REQUIRED" });
+  const importedRoot = join(state.paths.registrationDirectory, "imported");
+  if (await pathExists(importedRoot)) {
+    const publishedRecords = new Set(state.records.filter(record => record.origin === "market").map(record => `${record.id}.json`));
+    const pending = (await readdir(importedRoot)).filter(name => !name.startsWith(".memsphere-") && !publishedRecords.has(name));
+    if (pending.length) throw Object.assign(new Error("Unpublished import registrations require explicit cleanup"), { code: "MODEL_IMPORT_CLEANUP_REQUIRED", pendingModelRefs: pending });
+  }
+  const host = await createProjectModelHost(context, input);
+  const summaries = await host.list();
+  let identical = 0;
+  const conflicts: string[] = [];
+  for (const model of pack.models) {
+    const existing = summaries.find(item => item.id === model.registration.modelRef);
     if (existing) {
-      if (registered?.origin === "market" && existing.status === "available" && isDeepStrictEqual(registered.registration, model.registration) && (await host.definition(existing.id)).source === model.source)
-        identical++;
-      else
-        conflicts.push(model.registration.modelRef);
+      const record = state.records.find(item => item.registration.modelRef === existing.id);
+      if (record?.origin === "market" && existing.status === "available" && isDeepStrictEqual(record.registration, model.registration) && (await host.definition(existing.id)).source === model.source) identical++;
+      else conflicts.push(existing.id);
     }
-    // The complete definition standard is independent of the business reflection subset.
-    validateJsonSchemaDefinition(model.definition);
   }
-  validateModelSchemaReferences(pack.models);
-  if (conflicts.length || identical && identical !== pack.models.length)
-    throw Object.assign(new Error(`Existing content differs; package not imported: ${conflicts.join(", ")}`), { code: "MODEL_PACKAGE_CONFLICT", conflicts });
-  if (identical === pack.models.length)
-    return { status: "unchanged" as const, package: packageId, modelRefs: pack.models.map(m => m.registration.modelRef) };
-  const root = state.paths.registrationDirectory;
-  const stagingRoot = join(root, "staging");
-  if (await pathExists(stagingRoot)) {
-    const candidates = await readdir(stagingRoot);
-    if (candidates.length)
-      throw Object.assign(new Error("Pending model import candidate requires cleanup before retry"), { code: "MODEL_IMPORT_CLEANUP_REQUIRED", pendingModelRefs: pack.models.map(m => m.registration.modelRef) });
+  if (conflicts.length || identical && identical !== pack.models.length) throw Object.assign(new Error(`Existing content differs; package not imported: ${conflicts.join(", ")}`), { code: "MODEL_PACKAGE_CONFLICT", conflicts });
+  if (identical === pack.models.length) return { status: "unchanged" as const, package: packageId, modelRefs: pack.models.map(model => model.registration.modelRef) };
+  const changes: ModelFileChange[] = [];
+  const recordIds: string[] = [];
+  for (const model of pack.models) {
+    const path = join(state.paths.registrationDirectory, "imported-definitions", model.registration.modelRef);
+    const before = await optionalFileBytes(path);
+    if (before) throw Object.assign(new Error(`Unpublished model exists: ${model.registration.modelRef}`), { code: "MODEL_IMPORT_CLEANUP_REQUIRED" });
+    changes.push({ path, before, after: Buffer.from(model.source) });
+    const id = randomUUID(); recordIds.push(id);
+    const recordPath = join(state.paths.registrationDirectory, "imported", `${id}.json`);
+    changes.push({ path: recordPath, before: undefined, after: Buffer.from(`${JSON.stringify({ id, revision: 1, createdAt: Date.now(), updatedAt: Date.now(), value: model.registration }, null, 2)}\n`) });
   }
-  const stage = join(stagingRoot, randomUUID());
-  await mkdir(stage, { recursive: true });
-  const candidateIds = pack.models.map(() => randomUUID());
-  const created: {
-    kind: "record" | "definition";
-    id: string;
-  }[] = [];
-  let finalStore: DataStore | undefined;
-  let recordStore: Awaited<ReturnType<typeof createModelRegistrationStore>> | undefined;
-  const publicationPath = join(root, "published-imports.json");
-  try {
-    await atomicWriteJson(join(stage, "candidate.json"), { packageId, recordIds: candidateIds, modelRefs: pack.models.map(m => m.registration.modelRef) });
-    const stageRecords = await createModelRegistrationStore(context, "model-import-candidate", join(stage, "imported"));
-    for (const [index, model] of pack.models.entries()) {
-      await stageRecords.create(context, candidateIds[index]!, model.registration);
-      const path = join(stage, "definitions", model.registration.modelRef);
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, Buffer.from(model.source), { flag: "wx" });
-      if (!(await readFile(path)).equals(Buffer.from(model.source)))
-        throw new Error("Candidate definition byte verification failed");
-    }
-    await options.afterStage?.();
-    context.signal?.throwIfAborted();
-    // Only registered/published records are read by the host. Raw candidate files are never discovered.
-    finalStore = await new FilesystemDataStoreFactory().createStore(context, IMPORTED_MODEL_DEFINITIONS_STORE, JSON_SCHEMA_DRAFT_07, new Config({ directory: join(root, "imported-definitions") }));
-    recordStore = await createModelRegistrationStore(context, "model-imported", join(root, "imported"));
-    for (const [index, model] of pack.models.entries()) {
-      if (await finalStore.has(context, model.registration.modelRef))
-        throw Object.assign(new Error(`Unpublished model content exists: ${model.registration.modelRef}`), { code: "MODEL_IMPORT_CLEANUP_REQUIRED", pendingModelRefs: [model.registration.modelRef] });
-      await finalStore.create(context, { id: model.registration.modelRef, model: JSON_SCHEMA_DRAFT_07, payload: { contentType: "application/json", content: bytesContent(Buffer.from(model.source)) } });
-      created.push({ kind: "definition", id: model.registration.modelRef });
-      const stored = await finalStore.get(context, model.registration.modelRef);
-      if (!stored || !Buffer.from(await readAll(context, stored.data.payload.content)).equals(Buffer.from(model.source)))
-        throw new Error("Imported model byte verification failed");
-      await recordStore.create(context, candidateIds[index]!, model.registration);
-      created.push({ kind: "record", id: candidateIds[index]! });
-    }
-    await options.beforePublish?.();
-    context.signal?.throwIfAborted();
-    const old = await pathExists(publicationPath) ? JSON.parse(await readFile(publicationPath, "utf8")) as {
-      recordIds: string[];
-    } : { recordIds: [] };
-    await atomicWriteJson(publicationPath, { recordIds: [...old.recordIds, ...candidateIds] });
-    // The complete package is now published. Cleanup failure does not misreport a successful import as failed.
-    let pendingCleanup = false;
-    try {
-      await rm(stage, { recursive: true, force: true });
-    }
-    catch {
-      pendingCleanup = true;
-    }
-    return { status: "imported" as const, package: packageId, modelRefs: pack.models.map(m => m.registration.modelRef), ...(pendingCleanup ? { pendingCleanup: true, pendingModelRefs: pack.models.map(m => m.registration.modelRef) } : {}) };
-  }
-  catch (error) {
-    const pending: string[] = [];
-    for (const item of created.reverse())
-      try {
-        if (item.kind === "record")
-          await recordStore!.delete({}, item.id);
-        else
-          await finalStore!.delete({}, item.id);
-      }
-      catch {
-        pending.push(item.id);
-      }
-    try {
-      if (options.removeCandidate)
-        await options.removeCandidate(stage);
-      else
-        await rm(stage, { recursive: true, force: true });
-    }
-    catch {
-      pending.push(...pack.models.map(m => m.registration.modelRef));
-    }
-    if (pending.length)
-      throw Object.assign(new Error(`Import failed; pending cleanup: ${pending.join(", ")}`), { code: "MODEL_IMPORT_CLEANUP_REQUIRED", pendingModelRefs: pending, cause: error });
-    throw error;
-  }
+  const publicationPath = join(state.paths.registrationDirectory, "published-imports.json");
+  const before = await optionalFileBytes(publicationPath);
+  const prior = before ? JSON.parse(before.toString("utf8")) as { recordIds: string[] } : { recordIds: [] };
+  if (!Array.isArray(prior.recordIds) || prior.recordIds.some(id => typeof id !== "string")) throw new TypeError("Invalid publication state");
+  changes.push({ path: publicationPath, before, after: Buffer.from(`${JSON.stringify({ recordIds: [...prior.recordIds, ...recordIds] }, null, 2)}\n`) });
+  await options.afterStage?.();
+  context.signal?.throwIfAborted();
+  await commitModelOperation(input.root, "model.market.import", changes, { afterFile: async index => {
+    if (index === changes.length - 2) { await options.beforePublish?.(); context.signal?.throwIfAborted(); }
+  } });
+  return { status: "imported" as const, package: packageId, modelRefs: pack.models.map(model => model.registration.modelRef) };
 }
 /** Explicit recovery of known import candidates; published package content is never removed. */
 export async function cleanupModelMarketCandidates(context: Context, input: ProjectModelInput) {

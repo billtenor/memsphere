@@ -1,0 +1,10 @@
+[
+  {
+    "body": "明确文件锁范围：数据记录的跨进程文件锁仅落实在 filesystem JSON ValueStore，其他 Store 按自身实现保证写入；Project 配置和模型多文件修改使用独立的 Project 写锁，不把文件锁作为全部 Store 的通用要求。",
+    "severity": "blocking"
+  },
+  {
+    "body": "普通模型 CRUD 的中断恢复不应要求用户执行 project models initialize。恢复放入共同模型写入服务，下一次实际模型写操作先恢复上次未完成修改，再执行当前操作；initialize 也是调用方之一。读取和 dry-run 不自动恢复、不写文件。同步执行顺序、错误提示与验证方案，然后重新发起评审。",
+    "severity": "blocking"
+  }
+]

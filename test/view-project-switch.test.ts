@@ -1,10 +1,10 @@
+import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
 import type { MemsphereConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
@@ -51,7 +51,7 @@ test("View keeps Project selection in the URL and isolates concurrent Project re
       server.listen(0, "127.0.0.1", resolve);
     });
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    const browser = await chromium.launch({ headless: true });
+    const browser = await browserScope();
     try {
       assert.deepEqual(await memoryNames(origin, "alpha"), ["alpha-memory"]);
       assert.deepEqual(await memoryNames(origin, "beta"), ["beta-memory"]);

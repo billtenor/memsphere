@@ -1,10 +1,10 @@
+import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { build } from "esbuild";
-import { chromium } from "playwright";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import { builtinModuleCatalog } from "../src/module/builtin-catalog.js";
 import {
@@ -77,7 +77,7 @@ async function withBuiltinFixture(
     return send(response, 200, "text/html", renderViewHostHtml("en", instances));
   });
   const origin = await listen(server);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const page = await browser.newPage();
     page.setDefaultTimeout(3_000);

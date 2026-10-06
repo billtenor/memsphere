@@ -10,7 +10,7 @@ import type { PayloadContent } from "../src/data/api/payload.js";
 import { FilesystemDataStoreFactory, filesystemDataStoreExtension } from "../src/data/extensions/filesystem-datastore/index.js";
 import { bytesContent, readAll } from "../src/data/extensions/shared/payload.js";
 
-const MODEL = "example/file-v1";
+const MODEL = "example/file-v1.json";
 const STORE = "example/files";
 const factory = new FilesystemDataStoreFactory();
 
@@ -255,14 +255,14 @@ test("model isolation uses explicitly configured directories, not hidden model n
   await withDirectory(async (directory) => {
     const firstDirectory = join(directory, "orders");
     const secondDirectory = join(directory, "products");
-    const first = await factory.createStore({}, "orders", "order-model", new Config({ directory: firstDirectory }));
-    const second = await factory.createStore({}, "products", "product-model", new Config({ directory: secondDirectory }));
-    await first.create({}, data("item.json", '{"order":1}', "application/json", "order-model"));
-    await second.create({}, data("item.json", '{"product":1}', "application/json", "product-model"));
+    const first = await factory.createStore({}, "orders", "order-model.json", new Config({ directory: firstDirectory }));
+    const second = await factory.createStore({}, "products", "product-model.json", new Config({ directory: secondDirectory }));
+    await first.create({}, data("item.json", '{"order":1}', "application/json", "order-model.json"));
+    await second.create({}, data("item.json", '{"product":1}', "application/json", "product-model.json"));
     assert.equal(await readFile(join(firstDirectory, "item.json"), "utf8"), '{"order":1}');
     assert.equal(await readFile(join(secondDirectory, "item.json"), "utf8"), '{"product":1}');
-    const sameDirectory = await factory.createStore({}, "alias", "another-model", new Config({ directory: firstDirectory }));
-    assert.equal((await sameDirectory.get({}, "item.json"))!.data.model, "another-model");
+    const sameDirectory = await factory.createStore({}, "alias", "another-model.json", new Config({ directory: firstDirectory }));
+    assert.equal((await sameDirectory.get({}, "item.json"))!.data.model, "another-model.json");
     await assert.rejects(first.create({}, data("wrong.bin")), /model does not match/);
     await assert.rejects(first.update({}, data("item.json", "{}", "application/json")), /model does not match/);
     assert.deepEqual((await readdir(directory)).sort(), ["orders", "products"]);

@@ -2,20 +2,29 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium, type Page } from "playwright";
+import { type Page } from "playwright";
+import { browserScope } from "./helpers/browser.js";
 import { startProjectModelView } from "./fixtures/project-model-view.js";
 
 type Fixture = Awaited<ReturnType<typeof startProjectModelView>>;
 async function withView(run: (page: Page, fixture: Fixture) => Promise<void>) {
   const fixture = await startProjectModelView();
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage();
     page.setDefaultTimeout(10_000);
     const errors: string[] = [];
+    const modelResponses: { url: string; status: number }[] = [];
     page.on("pageerror", error => errors.push(error.message));
-    await run(page, fixture);
+    page.on("response", response => {
+      if (response.url().includes("/api/projects/alpha/models")) modelResponses.push({ url: response.url(), status: response.status() });
+    });
+    try { await run(page, fixture); }
+    catch (error) {
+      console.error("Model view failure:", JSON.stringify({ url: page.url(), errors, modelResponses, body: await page.locator("body").innerText({ timeout: 1000 }).catch(() => "unavailable") }));
+      throw error;
+    }
     assert.deepEqual(errors, []);
   } finally { await browser.close(); await fixture.close(); }
 }
@@ -34,18 +43,30 @@ async function settings(page: Page, fixture: Fixture) {
   return directory;
 }
 
+async function unavailable(page: Page, fixture: Fixture, id: string, message: RegExp = /Unsupported|not supported|must be an object|plain object|reference/i) {
+  const response = await page.request.get(`${fixture.origin}/api/projects/alpha/models/definition?model=${encodeURIComponent(id)}`);
+  assert.equal(response.status(), 422);
+  const body = await response.json();
+  assert.match(body.error, message);
+  assert.equal(Object.hasOwn(body, "definition"), false);
+  const catalog = await (await page.request.get(`${fixture.origin}/api/projects/alpha/models`)).json();
+  assert.equal(catalog.models.find((model: { id: string }) => model.id === id).status, "unavailable");
+  await page.goto(`${fixture.origin}/projects/alpha/models?model=${encodeURIComponent(id)}`);
+  await page.getByText(/^(读取模型失败|Could not read model)$/).waitFor();
+  assert.equal(await page.locator(".model-definition-table, .model-browser-code").count(), 0);
+}
+
 test("model structure omits generated reading hints while preserving authored descriptions, actual rules and full source", async () => withView(async (page, fixture) => {
   const source = JSON.stringify({ title: "无冗余提示", description: "模型作者的说明", type: "object",
-    if: { properties: { kind: { const: "company" } } }, then: { required: ["companyName"] }, else: { required: ["name"] },
     properties: {
-      score: { type: "number", minimum: 0, allOf: [{ maximum: 100 }], description: "字段作者的说明" },
-      choice: { anyOf: [{ type: "string" }, { type: "integer" }] },
-      tuple: { type: "array", items: [{ type: "string" }, { type: "number" }] },
-      conditional: { if: { type: "string" }, then: { minLength: 2 }, else: false },
-      opaque: { not: { type: "null" }, dependencies: { a: ["b"] }, contains: { type: "string" } }
+      score: { type: "number", minimum: 0, maximum: 100, description: "字段作者的说明" },
+      values: { type: "array", items: { type: "string" } },
+      name: { type: "string", minLength: 2 }
     }, required: ["score"] }, null, 2);
   await writeFile(join(fixture.root, "models/json-schema/draft-07/no-hints.json"), source);
-  await page.goto(`${fixture.origin}/projects/alpha/models?model=no-hints.json`);
+  // This test covers presentation, so enter the canonical route directly.
+  // Deep-link canonicalization has its own integration coverage below.
+  await page.goto(`${fixture.origin}/projects/alpha/models?scope=custom&model=no-hints.json`);
   await page.getByRole("heading", { name: "无冗余提示", exact: true }).waitFor();
   await showStructure(page);
   const structure = page.locator(".model-definition-structure");
@@ -53,11 +74,11 @@ test("model structure omits generated reading hints while preserving authored de
   assert.doesNotMatch(await structure.innerText(), /整体定义|详见原始定义|请查看原始定义|值结构见下方/);
   const table = structure.locator("table");
   const score = table.locator("tbody tr").filter({ has: page.getByText("score", { exact: true }) });
-  assert.equal(await score.locator("td").nth(3).innerText(), "必填 · 最小值: 0");
+  assert.equal(await score.locator("td").nth(3).innerText(), "必填 · 最小值: 0 · 最大值: 100");
   assert.equal(await score.locator("td").nth(4).innerText(), "字段作者的说明");
   assert.equal(await page.locator(".model-browser-description").innerText(), "模型作者的说明");
   await page.getByRole("button", { name: "全部展开", exact: true }).click();
-  assert.equal(await table.locator('tr[data-definition-kind="branch"]').count(), 2);
+  assert.equal(await table.locator('tr[data-definition-kind="branch"]').count(), 0);
   await page.getByRole("radio", { name: "原始定义", exact: true }).click();
   assert.equal(await page.locator(".model-browser-code").textContent(), source);
 }));
@@ -65,11 +86,10 @@ test("model structure omits generated reading hints while preserving authored de
 test("referenced fields show actual types and expandable target structure without altering source", async () => withView(async (page, fixture) => {
   const schema = { title: "引用结构", type: "object", properties: {
     address: { $ref: "#/definitions/alias" }, addresses: { type: "array", items: { $ref: "#/definitions/address" } },
-    code: { $ref: "#/definitions/code" }, choice: { anyOf: [{ $ref: "#/definitions/code" }, { type: "integer" }] },
-    forbidden: { $ref: "#/definitions/forbidden" }
+    code: { $ref: "#/definitions/code" }
   }, required: ["address"], definitions: { alias: { $ref: "#/definitions/address" },
-    address: { type: "object", properties: { city: { type: "string", description: "城市", format: "city-name" } }, required: ["city"] },
-    code: { type: "string", enum: ["A", "B"], format: "custom-code", description: "代码" }, forbidden: false } };
+    address: { type: "object", properties: { city: { type: "string", description: "城市" } }, required: ["city"] },
+    code: { type: "string", enum: ["A", "B"], description: "代码" } } };
   const source = JSON.stringify(schema, null, 2);
   const path = join(fixture.root, "models/json-schema/draft-07/references.json");
   await writeFile(path, source);
@@ -86,11 +106,8 @@ test("referenced fields show actual types and expandable target structure withou
   assert.equal(await named("city").locator("td").nth(3).innerText(), "必填");
   assert.equal(await named("city").locator("td").nth(4).innerText(), "城市");
   assert.equal(await named("code").locator("td").nth(1).innerText(), "文本枚举");
-  assert.equal(await named("code").locator("td").nth(2).innerText(), 'custom-code\n可选值: "A", "B"');
+  assert.equal(await named("code").locator("td").nth(2).innerText(), '可选值: "A", "B"');
   assert.equal(await named("code").locator("td").nth(4).innerText(), "代码");
-  assert.equal(await named("choice").locator("td").nth(1).innerText(), "文本枚举 | 整数");
-  assert.equal(await named("forbidden").locator("td").nth(1).innerText(), "—");
-  assert.match(await named("forbidden").locator("td").nth(3).innerText(), /不允许存在/);
   await page.getByRole("button", { name: "全部展开", exact: true }).click();
   assert.equal(await named("city").count(), 2);
   assert.equal(await named("[元素结构]").locator("td").nth(1).innerText(), "对象");
@@ -105,31 +122,20 @@ test("referenced fields show actual types and expandable target structure withou
   assert.equal(await readFile(path, "utf8"), source);
 }));
 
-test("failed references stay explicit and isolated from valid fields rather than inventing structure", async () => withView(async (page, fixture) => {
-  await writeFile(join(fixture.root, "models/json-schema/draft-07/missing-ref.json"), JSON.stringify({ title: "引用失败", type: "object", properties: {
-    missing: { $ref: "#/definitions/missing", properties: { fake: { type: "string" } } },
-    external: { $ref: "other.json" }, cycle: { $ref: "#/definitions/alias" }, valid: { type: "integer" }
-  }, definitions: { alias: { $ref: "#/definitions/alias" } } }));
-  await page.goto(`${fixture.origin}/projects/alpha/models?model=missing-ref.json`);
-  await page.getByRole("heading", { name: "引用失败", exact: true }).waitFor();
-  await showStructure(page);
-  await page.getByRole("button", { name: "全部展开", exact: true }).click();
-  const rows = page.locator(".model-definition-table tbody tr");
-  assert.equal(await rows.count(), 4);
-  assert.equal(await page.getByText("fake", { exact: true }).count(), 0);
-  for (const [name, reason] of [["missing", "目标不存在"], ["external", "跨模型引用尚未支持展示"], ["cycle", "循环引用没有具体结构"]]) {
-    const row = rows.filter({ has: page.getByText(name, { exact: true }) });
-    assert.equal(await row.locator("td").nth(1).innerText(), "引用");
-    assert.match(await row.locator("td").nth(3).innerText(), new RegExp(`引用无法解析: ${reason}`));
-  }
-  assert.equal(await rows.filter({ has: page.getByText("valid", { exact: true }) }).locator("td").nth(1).innerText(), "整数");
+test("a forbidden cross-model reference shows the unavailable screen and preserves its source", async () => withView(async (page, fixture) => {
+  const id = "external-ref.json";
+  const source = JSON.stringify({ type: "object", properties: { external: { $ref: "other.json" }, valid: { type: "integer" } } });
+  const path = join(fixture.root, "models/json-schema/draft-07", id);
+  await writeFile(path, source);
+  await unavailable(page, fixture, id);
+  assert.equal(await readFile(path, "utf8"), source);
+  await order(page, fixture);
 }));
 
 test("recursive references expand on demand but bulk expansion stays finite and collapse retains identity", async () => withView(async (page, fixture) => {
   await writeFile(join(fixture.root, "models/json-schema/draft-07/recursive.json"), JSON.stringify({ title: "递归结构", type: "object", properties: {
-    name: { type: "string" }, children: { type: "array", items: { $ref: "#" } },
-    choice: { anyOf: [{ $ref: "#/definitions/choice" }, { type: "string" }] }
-  }, definitions: { choice: { anyOf: [{ $ref: "#/definitions/choice" }, { type: "string" }] } } }));
+    name: { type: "string" }, children: { type: "array", items: { $ref: "#" } }
+  } }));
   await page.goto(`${fixture.origin}/projects/alpha/models?model=recursive.json`);
   await page.getByRole("heading", { name: "递归结构", exact: true }).waitFor();
   await showStructure(page);
@@ -138,7 +144,7 @@ test("recursive references expand on demand but bulk expansion stays finite and 
   const initial = await table.locator("tbody tr").count();
   await page.getByRole("button", { name: "全部展开", exact: true }).click();
   assert.equal(await table.locator("tbody tr").count(), initial);
-  assert.match(await table.innerText(), /递归类型/);
+  assert.match(await table.innerText(), /递归引用，可继续展开/);
   const recursive = page.getByRole("button", { name: "展开 [元素结构]", exact: true }).first();
   await recursive.focus(); await page.keyboard.press("Enter");
   assert.equal(await page.getByRole("button", { name: "收起 [元素结构]", exact: true }).evaluate(button => button === document.activeElement), true);
@@ -150,7 +156,7 @@ test("recursive references expand on demand but bulk expansion stays finite and 
   await page.getByRole("button", { name: "展开 [元素结构]", exact: true }).first().click();
   assert.equal(await table.locator("tbody tr").count(), next);
   await page.getByRole("button", { name: "全部收起", exact: true }).click();
-  assert.equal(await table.locator("tbody tr").count(), 3);
+  assert.equal(await table.locator("tbody tr").count(), 2);
 }));
 
 test("model tree exposes array-element fields and local required flags with keyboard expansion", async () => withView(async (page, fixture) => {
@@ -297,41 +303,16 @@ test("model prototype keeps source viewing without a copy action or its empty he
   assert.equal(await page.getByRole("button", { name: "复制定义", exact: true }).count(), 0);
 }));
 
-test("format column preserves explicit schema formats for fields and structures without inferring or altering source", async () => withView(async (page, fixture) => {
-  const source = JSON.stringify({ title: "格式展示", type: "object", properties: {
-    createdAt: { type: "string", format: "date-time" },
-    homepage: { type: "string", format: "uri" },
-    email: { type: "string", format: "email" },
-    custom: { type: "string", format: "business-id" },
-    literal: { type: "string", format: "<b>custom</b>" },
-    unformatted: { type: "string", pattern: "^[0-9]+$", contentEncoding: "base64" },
-    union: { anyOf: [{ type: "string", format: "email" }, { type: "integer" }] },
-    items: { type: "array", items: { type: "string", format: "date" } },
-    dictionary: { type: "object", additionalProperties: { type: "string", format: "hostname" } }
-  }, required: ["createdAt"] }, null, 2);
-  const directory = join(fixture.root, "models/json-schema/draft-07");
-  await writeFile(join(directory, "formats.json"), source);
-  await page.goto(`${fixture.origin}/projects/alpha/models?model=formats.json`);
-  await page.getByRole("heading", { name: "格式展示", exact: true }).waitFor();
-  await showStructure(page);
-  const table = page.locator(".model-definition-table");
-  assert.deepEqual(await table.locator("th").allTextContents(), ["字段 / 结构", "类型", "格式", "规则", "说明"]);
-  await page.getByRole("button", { name: "全部展开", exact: true }).click();
-  const formats = await table.locator("tbody tr").evaluateAll(rows => rows.map(row => [row.querySelector(".model-definition-name")!.textContent, row.querySelectorAll("td")[2].textContent]));
-  assert.deepEqual(formats, [["createdAt", "date-time"], ["homepage", "uri"], ["email", "email"], ["custom", "business-id"],
-    ["literal", "<b>custom</b>"], ["unformatted", "—"], ["union", "—"], ["[类型1]", "email"], ["[类型2]", "—"], ["items", "—"], ["[元素结构]", "date"],
-    ["dictionary", "—"], ["[动态字段]", "hostname"]]);
-  assert.equal(await table.locator("td:nth-child(3) b").count(), 0, "format is text, not interpreted as markup");
-  await page.setViewportSize({ width: 390, height: 844 });
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  assert.equal(await page.locator(".model-definition-table-scroll").evaluate(element => element.scrollWidth > element.clientWidth), true);
-  await page.getByRole("radio", { name: "原始定义", exact: true }).click();
-  assert.equal(await page.locator(".model-browser-code").textContent(), source);
-  await writeFile(join(directory, "format-root.json"), '{"title":"格式根结构","type":"string","format":"uuid"}');
-  await page.goto(`${fixture.origin}/projects/alpha/models?model=format-root.json`);
-  await page.getByRole("heading", { name: "格式根结构", exact: true }).waitFor();
-  await showStructure(page);
-  assert.deepEqual(await page.locator('tr[data-definition-kind="root"] td').allTextContents(), ["[根结构]", "文本", "uuid", "—", "—"]);
+test("an unsupported format reports an unavailable model while supported structure keeps an empty format column", async () => withView(async (page, fixture) => {
+  const id = "format-field.json";
+  const source = JSON.stringify({ type: "object", properties: { email: { type: "string", format: "email" } } }, null, 2);
+  const path = join(fixture.root, "models/json-schema/draft-07", id);
+  await writeFile(path, source);
+  await unavailable(page, fixture, id);
+  assert.equal(await readFile(path, "utf8"), source);
+  await order(page, fixture);
+  assert.equal(await page.getByRole("columnheader", { name: "格式", exact: true }).count(), 1);
+  assert.deepEqual(await page.locator(".model-definition-table tbody td:nth-child(3)").allTextContents(), ["—", "—"]);
 }));
 
 test("dynamic fields align with named fields and expand their values with local required flags", async () => withView(async (page, fixture) => {
@@ -382,8 +363,8 @@ test("dictionary roots and boolean value schemas describe permitted dynamic keys
   assert.equal(await page.locator(".model-definition-structure > p").count(), 0);
   await writeFile(join(directory, "open.json"), JSON.stringify({ title: "开放字典", type: "object", properties: {
     open: { type: "object", additionalProperties: true },
-    closed: { type: "object", additionalProperties: false, patternProperties: { "^tag": { type: "string" } } },
-    patterned: { type: "object", patternProperties: { "^tag": { type: "string" } }, additionalProperties: { type: "integer" } }
+    closed: { type: "object", additionalProperties: false },
+    typed: { type: "object", additionalProperties: { type: "integer" } }
   } }));
   await page.goto(`${fixture.origin}/projects/alpha/models?model=open.json`);
   await page.getByRole("heading", { name: "开放字典", exact: true }).waitFor();
@@ -393,37 +374,10 @@ test("dictionary roots and boolean value schemas describe permitted dynamic keys
   assert.equal(await table.locator('tr[data-definition-kind="dynamic-field"]').count(), 2);
   assert.equal(await table.locator('tr[data-definition-kind="dynamic-field"] td').nth(1).innerText(), "—");
   assert.match(await table.innerText(), /键名可自定义，值不限类型/);
-  assert.match(await table.innerText(), /不允许未声明且未匹配规则的字段/);
-  assert.match(await table.innerText(), /未声明且未匹配规则的键名可自定义，每个值都是整数/);
+  assert.match(await table.innerText(), /不允许未声明的字段/);
+  assert.match(await table.innerText(), /键名可自定义，每个值都是整数/);
   assert.equal(await table.getByText("^tag", { exact: true }).count(), 0);
   assert.doesNotMatch(await table.innerText(), /patternProperties: 详见原始定义/);
-}));
-
-test("boolean sub-schemas are acceptance rules rather than types and unsupported root definitions remain rejected", async () => withView(async (page, fixture) => {
-  const directory = join(fixture.root, "models/json-schema/draft-07");
-  const source = JSON.stringify({ title: "允许规则", type: "object", properties: { allowed: true, forbidden: false, items: { type: "array", items: false } } });
-  await writeFile(join(directory, "boolean-rules.json"), source);
-  await page.goto(`${fixture.origin}/projects/alpha/models?model=boolean-rules.json`);
-  await page.getByRole("heading", { name: "允许规则", exact: true }).waitFor();
-  await showStructure(page);
-  await page.getByRole("button", { name: "全部展开", exact: true }).click();
-  const table = page.locator(".model-definition-table");
-  for (const [name, rule] of [["allowed", "无限制"], ["forbidden", "不允许存在"], ["[元素结构]", "不允许任何值"]]) {
-    const row = table.locator("tbody tr").filter({ has: page.getByText(name, { exact: true }) });
-    assert.equal(await row.locator("td").nth(1).innerText(), "—");
-    assert.equal(await row.locator("td").nth(3).innerText(), rule);
-    assert.equal(await row.locator("td").nth(4).innerText(), "—");
-  }
-  await page.getByRole("radio", { name: "原始定义", exact: true }).click();
-  assert.equal(await page.locator(".model-browser-code").textContent(), source);
-  // The existing metamodel accepts object definitions only; UI changes must not broaden it.
-  for (const [name, value] of [["allow-root.json", true], ["deny-root.json", false]] as const) {
-    await writeFile(join(directory, name), JSON.stringify(value));
-    await page.goto(`${fixture.origin}/projects/alpha/models?model=${name}`);
-    await page.getByText("读取模型失败", { exact: true }).waitFor();
-    assert.match(await page.locator(".model-browser-body").innerText(), /Expected a plain object value/);
-    assert.equal(await page.locator(".model-definition-table").count(), 0);
-  }
 }));
 
 test("rules stay separate from author descriptions and optional fields remain unmarked", async () => withView(async (page, fixture) => {
@@ -431,12 +385,8 @@ test("rules stay separate from author descriptions and optional fields remain un
     optional: { type: "string", description: "<b>作者说明</b>" },
     bounded: { type: "number", minimum: 0, maximum: 10, description: "金额说明" },
     fixed: { type: "string", const: "card", description: "支付说明" },
-    unrestricted: true,
-    requiredUnrestricted: true,
-    prohibited: false,
-    impossible: false,
     instanceBoolean: { type: "boolean", description: "真正的布尔值" }
-  }, required: ["bounded", "requiredUnrestricted", "impossible"] };
+  }, required: ["bounded"] };
   const source = JSON.stringify(schema, null, 2);
   await writeFile(join(fixture.root, "models/json-schema/draft-07/rules.json"), source);
   await page.goto(`${fixture.origin}/projects/alpha/models?model=rules.json`);
@@ -448,10 +398,6 @@ test("rules stay separate from author descriptions and optional fields remain un
     ["optional", "—", "<b>作者说明</b>"],
     ["bounded", "必填 · 最小值: 0 · 最大值: 10", "金额说明"],
     ["fixed", '固定值: "card"', "支付说明"],
-    ["unrestricted", "无限制", "—"],
-    ["requiredUnrestricted", "必填 · 无限制", "—"],
-    ["prohibited", "不允许存在", "—"],
-    ["impossible", "必填 · 不允许存在", "—"],
     ["instanceBoolean", "—", "真正的布尔值"]
   ]) {
     const row = table.locator("tbody tr").filter({ has: page.getByText(name, { exact: true }) });
@@ -470,14 +416,13 @@ test("rules stay separate from author descriptions and optional fields remain un
   assert.equal(await page.locator(".model-browser-code").textContent(), source);
 }));
 
-test("enum types and candidate values are visible without descriptions and preserve an accompanying format", async () => withView(async (page, fixture) => {
+test("enum types and candidate values remain visible with their authored descriptions", async () => withView(async (page, fixture) => {
   const schema = { title: "枚举展示", type: "object", properties: {
     text: { type: "string", enum: ["personal", "company"] },
     number: { type: "number", enum: [1.5, 2.5] },
     integer: { type: "integer", enum: [1, 2] },
     boolean: { type: "boolean", enum: [true] },
-    formatted: { type: "string", format: "email", enum: ["one@example.com", "two@example.com"], description: "业务说明" },
-    untyped: { enum: ["x", 1, null] },
+    formatted: { type: "string", enum: ["one@example.com", "two@example.com"], description: "业务说明" },
     literal: { type: "string", enum: ["<b>red</b>", "line\nbreak"] }
   } };
   const directory = join(fixture.root, "models/json-schema/draft-07");
@@ -492,8 +437,7 @@ test("enum types and candidate values are visible without descriptions and prese
     ["number", "数字枚举", "可选值: 1.5, 2.5", "—"],
     ["integer", "整数枚举", "可选值: 1, 2", "—"],
     ["boolean", "布尔枚举", "可选值: true", "—"],
-    ["formatted", "文本枚举", 'email\n可选值: "one@example.com", "two@example.com"', "业务说明"],
-    ["untyped", "枚举", '可选值: "x", 1, null', "—"]
+    ["formatted", "文本枚举", '可选值: "one@example.com", "two@example.com"', "业务说明"],
   ]) {
     const row = table.locator("tbody tr").filter({ has: page.getByText(name, { exact: true }) });
     assert.equal(await row.locator("td").nth(1).innerText(), type);
@@ -523,7 +467,7 @@ test("model list filtering keeps a model without description readable and shows 
   await page.getByLabel("模型列表", { exact: true }).getByText("没有匹配的模型", { exact: true }).waitFor();
   await page.locator(".model-browser-body").getByText("没有匹配的模型", { exact: true }).waitFor();
   await filter.fill("");
-  await page.getByRole("button", { name: "组合条件", exact: true }).waitFor();
+  await page.getByRole("button", { name: "advanced.json", exact: true }).waitFor();
 }));
 
 test("a corrupt model remains selectable without preventing other definitions from opening", async () => withView(async (page, fixture) => {
@@ -535,93 +479,12 @@ test("a corrupt model remains selectable without preventing other definitions fr
   await showStructure(page);
 }));
 
-test("union roots show candidate types and independent branches instead of an unspecified type", async () => withView(async (page, fixture) => {
-  await page.goto(`${fixture.origin}/projects/alpha/models?model=advanced.json`);
-  await showStructure(page);
-  await page.getByText("至少满足一个分支", { exact: true }).waitFor();
-  assert.match(await page.locator('tr[data-definition-kind="root"] td').nth(1).innerText(), /文本 \| 数字/);
-  assert.deepEqual(await page.locator(".model-definition-name").allTextContents(), ["[根结构]", "[类型1]", "[类型2]"]);
-  assert.equal(await page.locator('tr[data-definition-kind="branch"]').count(), 2);
-  await page.getByRole("button", { name: "全部收起", exact: true }).click();
-  assert.deepEqual(await page.locator(".model-definition-name").allTextContents(), ["[根结构]"]);
-  await page.getByRole("radio", { name: "原始定义", exact: true }).click();
-  assert.match(await page.locator(".model-browser-code").innerText(), /anyOf/);
-}));
-
-test("anyOf and oneOf show alternatives while object branch expansion preserves separate fields and required flags", async () => withView(async (page, fixture) => {
-  const source = JSON.stringify({ title: "候选分支", type: "object", properties: {
-    nullable: { type: ["string", "null"] },
-    flexibleId: { anyOf: [{ type: "string" }, { type: "integer" }] },
-    payment: { oneOf: [
-      { type: "object", properties: { method: { const: "card" }, cardLast4: { type: "string" } }, required: ["cardLast4"] },
-      { type: "object", properties: { method: { const: "cash" }, received: { type: "boolean" } }, required: ["received"] }
-    ] }
-  }, required: ["payment"] }, null, 2);
-  await writeFile(join(fixture.root, "models/json-schema/draft-07/union-fields.json"), source);
-  await page.goto(`${fixture.origin}/projects/alpha/models?model=union-fields.json`);
-  await page.getByRole("heading", { name: "候选分支", exact: true }).waitFor();
-  await showStructure(page);
-  const table = page.locator(".model-definition-table");
-  const named = (name: string) => table.locator("tbody tr").filter({ has: page.getByText(name, { exact: true }) });
-  assert.match(await named("nullable").locator("td").nth(1).innerText(), /^文本 \| 空值/);
-  assert.match(await named("flexibleId").locator("td").nth(1).innerText(), /文本 \| 整数/);
-  assert.equal(await named("flexibleId").locator("td").nth(3).innerText(), "至少满足一个分支");
-  assert.match(await named("payment").locator("td").nth(1).innerText(), /类型1 \| 类型2/);
-  assert.equal(await table.locator(".model-definition-combination").count(), 0);
-  assert.equal(await named("payment").locator("td").nth(1).innerText(), "类型1 | 类型2");
-  assert.equal(await named("flexibleId").locator("td").nth(1).innerText(), "文本 | 整数");
-  assert.equal(await named("payment").locator("td").nth(3).innerText(), "必填 · 恰好满足一个分支");
-  await page.getByRole("button", { name: "展开 payment", exact: true }).focus();
-  await page.keyboard.press("Enter");
-  assert.equal(await page.getByRole("button", { name: "收起 payment", exact: true }).evaluate(button => button === document.activeElement), true);
-  assert.deepEqual(await table.locator('tr[data-definition-kind="branch"] .model-definition-name').allTextContents(), ["[类型1]", "[类型2]"]);
-  assert.equal(await named("[类型1]").locator("td").nth(3).innerText(), "—");
-  await page.getByRole("button", { name: "展开 [类型1]", exact: true }).click();
-  assert.equal(await named("cardLast4").locator("td").nth(3).innerText(), "必填");
-  assert.equal(await named("received").count(), 0, "the other branch remains collapsed");
-  assert.equal(await named("method").locator("td").nth(3).innerText(), '固定值: "card"');
-  await page.getByRole("button", { name: "全部展开", exact: true }).click();
-  assert.equal(await named("received").locator("td").nth(3).innerText(), "必填");
-  assert.deepEqual(await table.locator("tbody tr").evaluateAll(rows => rows.filter(row => row.querySelector(".model-definition-name")?.textContent === "method").map(row => row.querySelectorAll("td")[3].textContent)), ['固定值: "card"', '固定值: "cash"']);
-  assert.deepEqual(await named("cardLast4").getAttribute("data-definition-depth"), "2");
-  await page.getByRole("radio", { name: "原始定义", exact: true }).click();
-  assert.equal(await page.locator(".model-browser-code").textContent(), source);
-}));
-
-test("nested unions retain titles, branch formats, boolean schemas and resolved references without broadening an explicit parent type", async () => withView(async (page, fixture) => {
-  const schema = { title: "嵌套分支", type: "object", properties: {
-    items: { type: "array", items: { oneOf: [
-      { title: "订单", type: "object", properties: { email: { type: "string", format: "email" } } },
-      { title: "日志", type: "object", properties: { message: { type: "string" } } }
-    ] } },
-    restricted: { type: "string", anyOf: [{ type: "string", format: "uri" }, { type: "integer" }] },
-    choices: { anyOf: [true, false, { $ref: "#/definitions/shared" }] },
-    both: { anyOf: [{ type: "string" }, { type: "number" }], oneOf: [{ type: "string" }, { type: "boolean" }] }
-  }, definitions: { shared: { type: "string" } } };
-  await writeFile(join(fixture.root, "models/json-schema/draft-07/nested-unions.json"), JSON.stringify(schema));
-  await page.goto(`${fixture.origin}/projects/alpha/models?model=nested-unions.json`);
-  await page.getByRole("heading", { name: "嵌套分支", exact: true }).waitFor();
-  await showStructure(page);
-  const table = page.locator(".model-definition-table");
-  const named = (name: string) => table.locator("tbody tr").filter({ has: page.getByText(name, { exact: true }) });
-  assert.equal(await named("restricted").locator("td").nth(1).evaluate(td => td.lastElementChild!.textContent), "文本");
-  await page.getByRole("button", { name: "全部展开", exact: true }).click();
-  assert.match(await named("[元素结构]").locator("td").nth(1).innerText(), /订单 \| 日志/);
-  assert.equal(await named("email").locator("td").nth(2).innerText(), "email");
-  assert.equal(await table.locator("tbody tr").filter({ has: page.getByText("订单", { exact: true }) }).locator("td").nth(3).innerText(), "—");
-  assert.equal(await named("[类型3]").locator("td").nth(3).innerText(), "引用: #/definitions/shared");
-  assert.equal(await named("[类型3]").locator("td").nth(1).innerText(), "文本");
-  assert.equal(await table.locator("tbody tr").filter({ has: page.getByText("无限制", { exact: true }) }).locator("td").nth(1).innerText(), "—");
-  assert.equal(await table.locator("tbody tr").filter({ has: page.getByText("不允许任何值", { exact: true }) }).locator("td").nth(1).innerText(), "—");
-  assert.equal(await named("both").locator("td").nth(1).evaluate(td => td.lastElementChild!.textContent), "组合类型");
-  assert.equal(await named("[任一匹配: 类型1]").count(), 1);
-  assert.equal(await named("[唯一匹配: 类型1]").count(), 1);
-  await page.setViewportSize({ width: 390, height: 844 });
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+test("unsupported union roots remain listed as unavailable and cannot open a normal definition", async () => withView(async (page, fixture) => {
+  await unavailable(page, fixture, "advanced.json", /anyOf/);
 }));
 
 test("built-in raw models show whole-content semantics without pretending to declare object fields", async () => withView(async (page, fixture) => {
-  await page.goto(`${fixture.origin}/projects/alpha/models?model=memsphere%2Frun%2Fartifact`);
+  await page.goto(`${fixture.origin}/projects/alpha/models?model=memsphere%2Frun%2Fartifact.json`);
   await showStructure(page);
   await page.getByText("原始内容模型", { exact: true }).waitFor();
   assert.equal(await page.locator(".model-definition-table").count(), 0);
@@ -668,14 +531,14 @@ test("a late model definition response cannot replace the newer selected model",
   });
   try {
     const pending = page.waitForRequest(request => request.url().endsWith("definition?model=advanced.json"));
-    await page.getByRole("button", { name: "组合条件", exact: true }).click();
+    await page.getByRole("button", { name: "advanced.json", exact: true }).click();
     await pending;
     await page.getByRole("button", { name: "订单 Alpha", exact: true }).click();
     await page.waitForURL(url => url.pathname.endsWith("/models") && url.searchParams.get("model") === "sales/order.json");
     release();
     await page.getByRole("heading", { name: "订单 Alpha", exact: true }).waitFor();
   await showStructure(page);
-    assert.equal(await page.getByRole("heading", { name: "组合条件", exact: true }).count(), 0);
+    assert.equal(await page.getByRole("heading", { name: "advanced.json", exact: true }).count(), 0);
   } finally { release(); await page.unroute(pattern); }
 }));
 
@@ -708,38 +571,22 @@ test("saved Home language applies to the actual model browser and model storage 
   await showStructure(page);
   assert.deepEqual(await page.locator(".model-definition-name").allTextContents(), ["[Dynamic field]"]);
   assert.equal(await page.locator(".model-definition-structure > p").count(), 0);
-  await page.goto(`${fixture.origin}/projects/alpha/models?model=advanced.json`);
-  await showStructure(page);
-  await page.getByText("Match at least one branch", { exact: true }).waitFor();
-  assert.match(await page.locator('tr[data-definition-kind="root"] td').nth(1).innerText(), /String \| Number/);
-  assert.deepEqual(await page.locator('tr[data-definition-kind="branch"] .model-definition-name').allTextContents(), ["[Type 1]", "[Type 2]"]);
-  assert.equal(await page.locator('tr[data-definition-kind="root"] td').nth(1).innerText(), "String | Number");
+  await unavailable(page, fixture, "advanced.json", /anyOf/);
   await writeFile(join(fixture.root, "models/json-schema/draft-07/rules-en.json"), JSON.stringify({ title: "English rules", type: "object", properties: {
-    choice: { oneOf: [{ type: "string" }, { type: "number" }] },
-    status: { type: "string", enum: ["open", "closed"] }, allowed: true, forbidden: false,
-    referenced: { $ref: "#/definitions/text" }, missing: { $ref: "#/missing" }, recursive: { $ref: "#" }
-  }, definitions: { text: { type: "string", format: "email" } } }));
+    status: { type: "string", enum: ["open", "closed"] },
+    referenced: { $ref: "#/definitions/text" }, recursive: { $ref: "#" }
+  }, definitions: { text: { type: "string" } } }));
   await page.goto(`${fixture.origin}/projects/alpha/models?model=rules-en.json`);
   await page.getByRole("heading", { name: "English rules", exact: true }).waitFor();
   await showStructure(page);
   const englishRow = (name: string) => page.locator(".model-definition-table tbody tr").filter({ has: page.getByText(name, { exact: true }) });
-  assert.equal(await englishRow("choice").locator("td").nth(1).innerText(), "String | Number");
-  assert.equal(await englishRow("choice").locator("td").nth(3).innerText(), "Match exactly one branch");
   assert.equal(await englishRow("referenced").locator("td").nth(1).innerText(), "String");
-  assert.equal(await englishRow("referenced").locator("td").nth(2).innerText(), "email");
+  assert.equal(await englishRow("referenced").locator("td").nth(2).innerText(), "—");
   assert.equal(await englishRow("referenced").locator("td").nth(3).innerText(), "Reference: #/definitions/text");
-  assert.match(await englishRow("missing").locator("td").nth(3).innerText(), /Cannot resolve reference: Target not found/);
   assert.match(await englishRow("recursive").locator("td").nth(3).innerText(), /Recursive reference, expand to continue/);
   assert.equal(await page.locator(".model-definition-combination").count(), 0);
-  await page.getByRole("button", { name: "Expand all", exact: true }).click();
-  assert.deepEqual(await page.locator('tr[data-definition-kind="branch"] .model-definition-name').allTextContents(), ["[Type 1]", "[Type 2]"]);
   assert.equal(await englishRow("status").locator("td").nth(1).innerText(), "String enum");
   assert.equal(await englishRow("status").locator("td").nth(2).innerText(), 'Allowed values: "open", "closed"');
-  for (const [name, rule] of [["allowed", "Unrestricted"], ["forbidden", "Must not be present"]]) {
-    assert.equal(await englishRow(name).locator("td").nth(1).innerText(), "—");
-    assert.equal(await englishRow(name).locator("td").nth(3).innerText(), rule);
-    assert.equal(await englishRow(name).locator("td").nth(4).innerText(), "—");
-  }
   await page.goto(`${fixture.origin}/projects/alpha/settings/models`);
   await page.getByRole("textbox", { name: "Model directory", exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: "Discard changes", exact: true }).count(), 1);
@@ -789,21 +636,33 @@ test("confirmed model directory save switches the next refresh without migration
 
 
 test("model information is the default tab and orders identity, standard, tags and storage fields", async () => withView(async (page, fixture) => {
+  // Route canonicalization can replace the detail table after it first appears.
+  // Capture one complete DOM state instead of querying between those renders.
+  const readInformation = async (modelId: string) => {
+    const handle = await page.waitForFunction((id) => {
+      const table = document.querySelector(".model-information-table");
+      const headers = Array.from(table?.querySelectorAll("th") ?? [], cell => cell.textContent);
+      const values = Array.from(table?.querySelectorAll("td") ?? [], cell => cell.textContent);
+      const selected = document.querySelector('[role="radio"][aria-checked="true"]');
+      if (headers.length !== 8 || values.length !== 8 || values[3] !== id || !selected) return false;
+      return { headers, values, selected: selected.textContent, structureCount: document.querySelectorAll(".model-definition-table").length };
+    }, modelId);
+    try { return await handle.jsonValue(); } finally { await handle.dispose(); }
+  };
   await page.goto(`${fixture.origin}/projects/alpha/models?model=sales%2Forder.json`);
-  const table = page.locator(".model-information-table");
-  await table.waitFor();
-  assert.deepEqual(await table.locator("th").allTextContents(), ["名称", "说明", "所属包", "模型 ID", "定义标准", "标签", "存储方式", "存储 ID"]);
-  assert.deepEqual((await table.locator("td").allTextContents()).slice(3), ["sales/order.json", "json-schema/draft-07", "—", "持久化存储", "models/json-schema/draft-07"]);
-  assert.equal(await page.getByRole("radio", { name: "模型信息", exact: true }).getAttribute("aria-checked"), "true");
-  assert.equal(await page.locator(".model-definition-table").count(), 0);
+  const information = await readInformation("sales/order.json");
+  assert.deepEqual(information.headers, ["名称", "说明", "所属包", "模型 ID", "定义标准", "标签", "存储方式", "存储 ID"]);
+  assert.deepEqual(information.values.slice(3), ["sales/order.json", "json-schema/draft-07.json", "—", "持久化存储", "models/json-schema/draft-07"]);
+  assert.equal(information.selected, "模型信息");
+  assert.equal(information.structureCount, 0);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await page.goto(`${fixture.origin}/projects/alpha/models?scope=memsphere.builtin&model=memsphere%2Fmodel-registration`);
-  await table.waitFor();
-  const row = (label: string) => table.locator("tr").filter({ has: page.getByRole("rowheader", { name: label, exact: true }) }).locator("td");
-  assert.equal(await row("模型 ID").innerText(), "memsphere/model-registration");
-  assert.equal(await row("存储方式").innerText(), "持久化存储");
-  assert.equal(await row("存储 ID").innerText(), "models/system/json-schema/draft-07");
+  await page.goto(`${fixture.origin}/projects/alpha/models?scope=memsphere.builtin&model=memsphere%2Fmodel-registration.json`);
+  const builtin = await readInformation("memsphere/model-registration.json");
+  const row = (label: string) => builtin.values[builtin.headers.indexOf(label)];
+  assert.equal(row("模型 ID"), "memsphere/model-registration.json");
+  assert.equal(row("存储方式"), "持久化存储");
+  assert.equal(row("存储 ID"), "models/system/json-schema/draft-07");
   await showStructure(page);
   assert.deepEqual(await page.locator(".model-definition-name").allTextContents(), ["modelRef", "name", "description", "package", "package_name", "tags", "storage", "store_id"]);
 }));

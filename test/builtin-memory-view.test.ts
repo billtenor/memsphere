@@ -1,3 +1,4 @@
+import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -5,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { build } from "esbuild";
-import { chromium } from "playwright";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import {
   renderViewHostHtml,
@@ -51,7 +51,7 @@ test("Memory builtin independently registers its route pages and renders Memory 
     return send(response, 200, "text/html", renderViewHostHtml("en", instances));
   });
   const origin = await listen(server);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const page = await browser.newPage();
     await page.goto(`${origin}/memories/statements/demo-memory`, { waitUntil: "networkidle" });
@@ -140,7 +140,7 @@ test("Memory builtin renders Market status and opens an importing ChangeSet", as
     return send(response, 200, "text/html", renderViewHostHtml("en", instances));
   });
   const origin = await listen(server);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const page = await browser.newPage();
     await page.goto(`${origin}/market`, { waitUntil: "networkidle" });
@@ -213,7 +213,7 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     return send(response, 200, "text/html", renderViewHostHtml("en", instances));
   });
   const origin = await listen(server);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const page = await browser.newPage();
     let dialogCount = 0;
@@ -476,7 +476,7 @@ test("Memory builtin keeps Procedure content structured instead of exposing obje
     return send(response, 200, "text/html", renderViewHostHtml("en", instances));
   });
   const origin = await listen(server);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const page = await browser.newPage();
     await page.goto(`${origin}/memories/procedures/demo-flow`, { waitUntil: "networkidle" });

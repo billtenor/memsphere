@@ -9,10 +9,15 @@ import { filesystemJsonValueStoreExtension, jsonSchemaExtension, jsonSchemaMetaM
 import { bytesContent, readAll } from "../data/extensions/shared/payload.js";
 import { DefaultDataManager } from "../data/management/data-manager.js";
 import { DefaultDataExtensionRegistry } from "../data/management/extension-registry.js";
-import { atomicWriteJson, withFileLock } from "../persistence.js";
+import { atomicWriteJson } from "../persistence.js";
+import { commitModelOperation, optionalFileBytes, recoverModelOperation, withProjectModelWrite, type ModelFileChange } from "./model-operation.js";
+import { checkModelDefinition } from "./model-validation.js";
+import { discoverModelIds, assertModelPath } from "./model-storage-paths.js";
+import { RAW_MODEL } from "../data/extensions/raw/index.js";
+import { FilesystemJsonValueStoreFactory, assertRecord } from "../data/extensions/filesystem-json-valuestore/index.js";
 import { validateModelStoragePaths, within } from "./model-storage-paths.js";
 import {
-  MODEL_REGISTRATION_MODEL, LEGACY_MODEL_REGISTRATION_MODEL, IMPORTED_MODEL_DEFINITIONS_STORE,
+  MODEL_REGISTRATION_MODEL, MODEL_ID_UPGRADES, IMPORTED_MODEL_DEFINITIONS_STORE,
   DEFAULT_MODEL_REGISTRATION_CONFIG, SYSTEM_JSON_SCHEMA_MODELS_STORE,
   validateModelRegistration, type ModelOrigin, type ModelRegistration, type ModelRegistrationConfig, type ProjectModelInput
 } from "./model-registration-contract.js";
@@ -28,7 +33,7 @@ export function modelRegistrationBinding(definition = modelRegistrationSchema, s
 async function registrationBootstrap(context: Context, directory: string) {
   const systemRoot = join(directory, "system");
   if (!await pathExists(systemRoot)) return modelRegistrationBinding();
-  const filename = join(systemRoot, "definitions/json-schema/draft-07", `${MODEL_REGISTRATION_MODEL}.json`);
+  const filename = join(systemRoot, "definitions/json-schema/draft-07", MODEL_REGISTRATION_MODEL);
   let source: string;
   try {
     const store = modelDefinitionStore(SYSTEM_JSON_SCHEMA_MODELS_STORE, JSON_SCHEMA_DRAFT_07, join(systemRoot, "definitions/json-schema/draft-07"), true);
@@ -44,9 +49,11 @@ async function registrationBootstrap(context: Context, directory: string) {
   return modelRegistrationBinding(definition, source);
 }
 const registry = new DefaultDataExtensionRegistry([filesystemJsonValueStoreExtension, jsonSchemaExtension, jsonSchemaMetaModelExtension, jsonSerializerExtension]);
-export async function createModelRegistrationStore(context: Context, id: string, directory: string, binding = modelRegistrationBinding()): Promise<ValueStore> {
+export async function createModelRegistrationStore(context: Context, id: string, directory: string, binding = modelRegistrationBinding(), readOnly = false): Promise<ValueStore> {
   const manager = new DefaultDataManager({ extensions: registry, models: [binding], stores: [{ id, model: MODEL_REGISTRATION_MODEL, kind: "ValueStore", factory: "memsphere/filesystem-json", config: new Config({ directory }) }] });
-  const store = await manager.getStore(context, id) as ValueStore;
+  const store = readOnly
+    ? await new FilesystemJsonValueStoreFactory().openExisting(context, id, await manager.getRuntime(context, MODEL_REGISTRATION_MODEL), new Config({ directory }))
+    : await manager.getStore(context, id) as ValueStore;
   return {
     id: store.id, kind: store.kind, model: store.model,
     list: store.list.bind(store), has: store.has.bind(store), delete: store.delete.bind(store),
@@ -99,7 +106,7 @@ export async function readModelRegistrations(context: Context, input: ProjectMod
     const directory = join(paths.registrationDirectory, area === "system" ? "system/registrations" : area);
     if (!await pathExists(directory))
       continue;
-    const store = await createModelRegistrationStore(context, `${(input.modelRegistration ?? DEFAULT_MODEL_REGISTRATION_CONFIG).storeId}/${area}`, directory, bootstrap);
+    const store = await createModelRegistrationStore(context, `${(input.modelRegistration ?? DEFAULT_MODEL_REGISTRATION_CONFIG).storeId}/${area}`, directory, bootstrap, true);
     let cursor: string | undefined;
     do {
       const page = await store.list(context, { limit: 1000, ...(cursor ? { cursor } : {}) });
@@ -151,7 +158,7 @@ export async function readModelRegistrations(context: Context, input: ProjectMod
   }
   return { records: records.filter(r => !duplicates.has(r.registration.modelRef)), diagnostics, initialized, paths };
 }
-export function withModelRegistrationLock<T>(root: string, action: () => Promise<T>): Promise<T> { return withFileLock(resolve(root, ".runtime/settings.lock"), action); }
+export function withModelRegistrationLock<T>(root: string, action: () => Promise<T>): Promise<T> { return withProjectModelWrite(root, action); }
 export async function prepareModelRegistrationMigration(context: Context, input: ProjectModelInput, target: ModelRegistrationConfig, options: {
   migrate?: boolean;
 } = {}) {
@@ -368,220 +375,137 @@ export type ModelInitializationOptions = {
   afterSystemInstall?: () => Promise<void>;
   afterRegistrations?: () => Promise<void>;
 };
-/** The entire explicit operation rolls back its writes, including legacy migration. Caller holds settings.lock. */
+/** Caller owns Project settings lock (or an unpublished Project staging root). */
 export async function initializeProjectModelRegistrations(context: Context, input: ProjectModelInput, options: ModelInitializationOptions = {}) {
-  const initial = await readModelRegistrations(context, input);
-  if (initial.diagnostics.length) throw new TypeError(`Damaged model registrations: ${initial.diagnostics.map(d => d.id).join(", ")}`);
-  const { createProjectModelHost } = await import("./models.js");
-  const host = await createProjectModelHost(context, input);
-  const summaries = await host.list();
-  for (const model of summaries) if (model.status !== "available") throw new TypeError(`Invalid model definition: ${model.id}: ${model.error}`);
-  const legacy = summaries.find(model => model.id === LEGACY_MODEL_REGISTRATION_MODEL);
-  if (legacy) {
-    if (!isDeepStrictEqual((await host.definition(legacy.id)).definition, modelRegistrationSchema))
-      throw new TypeError("Legacy model registration definition is not the confirmed preview; migration refused");
-    for (const model of summaries) {
-      if (model.id !== legacy.id && model.origin !== "system") migrateSchemaReferences((await host.definition(model.id)).source, model.id);
-    }
-  }
-  const registrationRoot = initial.paths.registrationDirectory;
-  const systemRoot = join(registrationRoot, "system");
-  const mutations: InitializationMutation[] = [];
-  const same = (left: Buffer | undefined, right: Buffer | undefined) => left === undefined ? right === undefined : right !== undefined && left.equals(right);
-  const currentBytes = async (path: string) => await pathExists(path) ? await readFile(path) : undefined;
-  const mutate: InitializationWriter = async (path, before, after, operation) => {
-    if (!same(await currentBytes(path), before)) throw new Error(`Model initialization write conflict: ${path}`);
-    // Record intent first: an atomic publisher can fail after committing its bytes.
-    mutations.push({ path, before, after });
-    await operation();
+  await recoverModelOperation(input.root);
+  const paths = await validateModelStoragePaths(input);
+  const root = paths.registrationDirectory;
+  const systemRoot = join(root, "system");
+  const changes: ModelFileChange[] = [];
+  const records: Array<{ id: string; registration: ModelRegistration; origin: ModelOrigin; path: string }> = [];
+  const upgrade = (ref: string) => MODEL_ID_UPGRADES[ref] ?? (ref.endsWith(".json") ? ref : `${ref}.json`);
+  const jsonBytes = (value: unknown) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
+  const put = async (path: string, after: Buffer) => {
+    const before = await optionalFileBytes(path);
+    if (!before?.equals(after)) changes.push({ path, before, after });
   };
-  const createdRecord = (path: string, value: unknown) => mutations.push({ path, before: undefined, after: Buffer.from(`${JSON.stringify(value, null, 2)}\n`) });
-  let installedSnapshot: Map<string, Buffer> | undefined;
-  try {
-    const { installBundledSystemModels } = await import("./system-models.js");
-    const system = await installBundledSystemModels(context, input);
-    if (system.status === "installed") installedSnapshot = await treeBytes(systemRoot);
-    await options.afterSystemInstall?.();
-    const result = await initializeProjectModelRegistrationsInner(context, input, mutate, createdRecord);
-    await options.afterRegistrations?.();
-    if (options.config && !isDeepStrictEqual(options.config.value.modelRegistration, result.config)) {
-      const next = { ...options.config.value, modelRegistration: result.config };
-      const before = await currentBytes(options.config.path);
-      if (before && !isDeepStrictEqual(JSON.parse(before.toString("utf8")), options.config.value))
-        throw new Error(`Model initialization configuration conflict: ${options.config.path}`);
-      await mutate(options.config.path, before, Buffer.from(`${JSON.stringify(next, null, 2)}\n`), () => atomicWriteJson(options.config!.path, next));
+  const publicationPath = join(root, "published-imports.json");
+  const publicationBytes = await optionalFileBytes(publicationPath);
+  const published = publicationBytes ? JSON.parse(publicationBytes.toString("utf8")) as { recordIds: string[] } : { recordIds: [] };
+  if (!Array.isArray(published.recordIds) || published.recordIds.some(id => typeof id !== "string")) throw new TypeError("Invalid model publication state");
+  const seen = new Set<string>();
+  for (const [area, origin] of [["project", "project"], ["imported", "market"], ["system/registrations", "system"]] as const) {
+    const directory = join(root, area);
+    for (const [filename, bytes] of await treeBytes(directory)) {
+      if (filename.startsWith(".memsphere-")) continue;
+      if (!filename.endsWith(".json") || filename.includes("/")) throw new TypeError(`Unknown registration file: ${filename}`);
+      const path = join(directory, filename);
+      let envelope: { id: string; revision: number; value: ModelRegistration; createdAt: number; updatedAt: number };
+      try { envelope = JSON.parse(bytes.toString("utf8")); }
+      catch (cause) { throw Object.assign(new TypeError(`Damaged model registration: ${path}`, { cause }), { code: "MODEL_REGISTRATION_INVALID", details: { file: path } }); }
+      assertRecord(envelope, filename.slice(0, -5));
+      if (!envelope.value || typeof envelope.value.modelRef !== "string")
+        throw new TypeError(`Damaged registration: ${path}`);
+      if (origin === "market" && !published.recordIds.includes(envelope.id)) throw new TypeError(`Unpublished registration requires cleanup: ${path}`);
+      const registration = { ...envelope.value, modelRef: upgrade(envelope.value.modelRef) };
+      validateModelRegistration(registration);
+      if (seen.has(registration.modelRef)) throw new TypeError(`Model identity conflict: ${registration.modelRef}`);
+      seen.add(registration.modelRef);
+      if (!isDeepStrictEqual(registration, envelope.value)) {
+        if (envelope.revision === Number.MAX_SAFE_INTEGER) throw new TypeError(`Revision overflow: ${path}`);
+        await put(path, jsonBytes({ ...envelope, revision: envelope.revision + 1, updatedAt: Date.now(), value: registration }));
+      }
+      records.push({ id: envelope.id, registration, origin, path });
     }
-    return { ...result, system };
-  } catch (error) {
-    const failures: string[] = [];
-    for (const mutation of [...mutations].reverse()) {
-      try {
-        const current = await currentBytes(mutation.path);
-        if (same(current, mutation.before)) continue;
-        if (!same(current, mutation.after)) {
-          failures.push(`rollback conflict (newer content preserved): ${mutation.path}`);
-          continue;
-        }
-        if (mutation.before === undefined) await rm(mutation.path, { force: true });
-        else {
-          const { atomicWriteFile } = await import("../persistence.js");
-          await atomicWriteFile(mutation.path, mutation.before.toString("utf8"));
-        }
-      } catch (restoreError) { failures.push(`${mutation.path}: ${String(restoreError)}`); }
-    }
-    if (installedSnapshot) {
-      try {
-        const current = await treeBytes(systemRoot);
-        if (!isDeepStrictEqual(current, installedSnapshot)) failures.push(`rollback conflict (changed system subtree preserved): ${systemRoot}`);
-        else await rm(systemRoot, { recursive: true, force: true });
-      } catch (restoreError) { failures.push(`${systemRoot}: ${String(restoreError)}`); }
-    }
-    if (failures.length) throw Object.assign(new AggregateError([error], `Model initialization failed; restore required: ${failures.join(", ")}`), { rollbackErrors: failures });
-    throw error;
   }
-}
-type InitializationMutation = { path: string; before: Buffer | undefined; after: Buffer | undefined };
-type InitializationWriter = (path: string, before: Buffer | undefined, after: Buffer | undefined, operation: () => Promise<unknown>) => Promise<void>;
-
-/** Caller holds the same Project settings lock used for config publication. */
-async function initializeProjectModelRegistrationsInner(context: Context, input: ProjectModelInput, mutate: InitializationWriter, createdRecord: (path: string, value: unknown) => unknown) {
-  const initial = await readModelRegistrations(context, input);
-  if (initial.diagnostics.length)
-    throw new TypeError(`Damaged model registrations: ${initial.diagnostics.map(d => d.id).join(", ")}`);
-  const { createProjectModelHost } = await import("./models.js");
-  const legacyRecordBytes = new Map<string, Buffer>();
-  for (const record of initial.records.filter(record => record.origin === "project" && record.registration.modelRef === LEGACY_MODEL_REGISTRATION_MODEL)) {
-    legacyRecordBytes.set(record.id, await readFile(join(initial.paths.registrationDirectory, "project", `${record.id}.json`)));
+  const bundled = readBundledSystemModels();
+  const installed = await pathExists(systemRoot);
+  let systemCreated = 0;
+  for (const model of bundled) {
+    await checkModelDefinition(context, { modelRef: model.registration.modelRef, ...model });
+    const raw = model.metaModel === RAW_MODEL;
+    const definitionPath = join(systemRoot, "definitions", raw ? "raw" : "json-schema/draft-07", model.registration.modelRef);
+    const saved = await optionalFileBytes(definitionPath);
+    const existing = records.find(record => record.registration.modelRef === model.registration.modelRef);
+    if (existing && existing.origin !== "system") throw new TypeError(`System model identity conflict: ${model.registration.modelRef}`);
+    if (installed) {
+      if (!existing || !saved) throw new TypeError(`Installed system model is missing: ${model.registration.modelRef}`);
+      const definition = JSON.parse(saved.toString("utf8").replace(/^\uFEFF/, ""));
+      const upgradeIdentityFields = (value: unknown): void => {
+        if (!value || typeof value !== "object") return;
+        if (Array.isArray(value)) { value.forEach(upgradeIdentityFields); return; }
+        const item = value as Record<string, unknown>;
+        for (const key of ["$id", "modelRef", "model"]) if (typeof item[key] === "string" && MODEL_ID_UPGRADES[item[key]]) item[key] = MODEL_ID_UPGRADES[item[key]];
+        Object.values(item).forEach(upgradeIdentityFields);
+      };
+      upgradeIdentityFields(definition);
+      if (!isDeepStrictEqual(definition, model.definition) || existing.registration.store_id !== model.registration.store_id || existing.registration.package !== model.registration.package)
+        throw new TypeError(`Installed system model conflicts: ${model.registration.modelRef}`);
+      if (!isDeepStrictEqual(JSON.parse(saved.toString("utf8").replace(/^\uFEFF/, "")), definition)) await put(definitionPath, Buffer.from(model.source));
+    } else {
+      if (existing || saved) throw new TypeError(`System model identity conflict: ${model.registration.modelRef}`);
+      await put(definitionPath, Buffer.from(model.source));
+      const id = randomUUID();
+      await put(join(systemRoot, "registrations", `${id}.json`), jsonBytes({ id, revision: 1, createdAt: Date.now(), updatedAt: Date.now(), value: model.registration }));
+      systemCreated++;
+    }
   }
-  let host = await createProjectModelHost(context, input);
-  let backupPath: string | undefined;
-  const legacy = (await host.list()).find(m => m.id === LEGACY_MODEL_REGISTRATION_MODEL);
-  if (legacy) {
-    const old = await host.definition(legacy.id);
-    if (!isDeepStrictEqual(old.definition, modelRegistrationSchema))
-      throw new TypeError("Legacy model registration definition is not the confirmed preview; migration refused");
-    const rewrites: {
-      id: string;
-      source: string;
-      replacement: string;
-      origin: ModelOrigin;
-    }[] = [];
-    // Only schema reference tokens change; whitespace/BOM and unrelated strings remain intact.
-    for (const summary of await host.list()) {
-      if (summary.id === legacy.id || summary.builtin)
-        continue;
-      if (summary.status !== "available")
-        throw new TypeError(`Cannot preflight model references: ${summary.id}`);
-      const definition = await host.definition(summary.id);
-      const replacement = migrateSchemaReferences(definition.source, summary.id);
-      if (replacement !== definition.source)
-        rewrites.push({ id: summary.id, source: definition.source, replacement, origin: definition.origin });
-    }
-    const filename = join(initial.paths.modelsDirectory, LEGACY_MODEL_REGISTRATION_MODEL);
-    const backupRoot = join(initial.paths.backupDirectory, randomUUID());
-    await mkdir(backupRoot, { recursive: true });
-    backupPath = join(backupRoot, "model-registration.json");
-    const bytes = await readFile(filename);
-    await writeFile(backupPath, bytes, { flag: "wx" });
-    if (!(await readFile(backupPath)).equals(bytes))
-      throw new Error("Preview backup verification failed");
-    const references: {
-      modelRef: string;
-      backupPath: string;
-    }[] = [];
-    for (const rewrite of rewrites) {
-      const path = join(backupRoot, "references", rewrite.origin, rewrite.id);
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, Buffer.from(rewrite.source), { flag: "wx" });
-      if (!(await readFile(path)).equals(Buffer.from(rewrite.source)))
-        throw new Error(`Reference backup verification failed: ${rewrite.id}`);
-      references.push({ modelRef: rewrite.id, backupPath: path });
-    }
-    await atomicWriteJson(join(backupRoot, "migration-receipt.json"), { oldRef: LEGACY_MODEL_REGISTRATION_MODEL, newRef: MODEL_REGISTRATION_MODEL, originalPath: filename, backupPath, references });
-    for (const rewrite of rewrites) {
-      const store = rewrite.origin === "market" ? await host.manager.getStore(context, IMPORTED_MODEL_DEFINITIONS_STORE) : host.store;
-      if (store.kind !== "DataStore") throw new TypeError("Model references require a DataStore");
-      const root = rewrite.origin === "market" ? join(initial.paths.registrationDirectory, "imported-definitions") : initial.paths.modelsDirectory;
-      await mutate(join(root, rewrite.id), Buffer.from(rewrite.source), Buffer.from(rewrite.replacement), () => store.update(context, {
-        id: rewrite.id, model: JSON_SCHEMA_DRAFT_07, payload: { contentType: "application/json", content: bytesContent(Buffer.from(rewrite.replacement)) }
-      }));
-    }
-    await mutate(filename, Buffer.from(old.source), undefined, () => rm(filename));
-    for (const r of initial.records.filter(r => r.registration.modelRef === LEGACY_MODEL_REGISTRATION_MODEL)) {
-      const store = await createModelRegistrationStore(context, `${(input.modelRegistration ?? DEFAULT_MODEL_REGISTRATION_CONFIG).storeId}/project`, join(initial.paths.registrationDirectory, "project"));
-      await mutate(join(initial.paths.registrationDirectory, "project", `${r.id}.json`), legacyRecordBytes.get(r.id), undefined, () => store.delete(context, r.id));
-    }
-    host = await createProjectModelHost(context, input);
-  }
-  const existing = await readModelRegistrations(context, input);
-  const store = await createModelRegistrationStore(context, `${(input.modelRegistration ?? DEFAULT_MODEL_REGISTRATION_CONFIG).storeId}/project`, join(existing.paths.registrationDirectory, "project"));
+  if (records.filter(record => record.origin === "system").length !== (installed ? bundled.length : 0)) throw new TypeError("Unexpected system model registrations");
+  const systemEnd = changes.length;
   let created = 0, retained = 0;
-  for (const summary of await host.list()) {
-    if (summary.builtin)
-      continue;
-    if (summary.status !== "available")
-      throw new TypeError(`Invalid model definition: ${summary.id}: ${summary.error}`);
-    if (existing.records.some(r => r.registration.modelRef === summary.id)) {
-      retained++;
-      continue;
-    }
-    const definition = await host.definition(summary.id);
-    const seed = confirmedSeedDefinitions[summary.id];
-    // Seed only the exact approved example asset, never unrelated models sharing an ID.
-    let seedMatches = false;
-    try {
-      seedMatches = !!seed && createHash("sha256").update(JSON.stringify(definition.definition)).digest("hex") === seed.hash;
-    }
-    catch { }
-    const registration: ModelRegistration = seedMatches ? structuredClone(seed!.registration) : { modelRef: summary.id, storage: "store", store_id: "models/json-schema/draft-07", ...(summary.title ? { name: summary.title } : {}), ...(summary.description !== undefined ? { description: summary.description } : {}) };
-    validateModelRegistration(registration);
-    const record = await store.create(context, randomUUID(), registration);
-    createdRecord(join(existing.paths.registrationDirectory, "project", `${record.id}.json`), record);
-    created++;
-  }
-  if (!existing.initialized) {
-    const value = { initializedAt: new Date().toISOString() };
-    const path = join(existing.paths.registrationDirectory, "initialized.json");
-    await mutate(path, undefined, Buffer.from(`${JSON.stringify(value, null, 2)}\n`), () => atomicWriteJson(path, value));
-  }
-  return { created, retained, diagnostics: existing.diagnostics, config: input.modelRegistration ?? structuredClone(DEFAULT_MODEL_REGISTRATION_CONFIG), ...(backupPath ? { backupPath } : {}) };
-}
-/** Edit only schema $ref string tokens, preserving the original bytes everywhere else. */
-function migrateSchemaReferences(source:string,modelRef:string):string {
-  const tokens=[...source.matchAll(/"(?:\\.|[^"\\])*"|[{}\[\]:,]|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g)];
-  const edits:{start:number;end:number;text:string}[]=[];
-  let position=0,uriBase=false;
-  type Mode="schema"|"map"|"array"|"annotation";
-  const schemaChildren=new Set(["items","additionalProperties","additionalItems","contains","not","if","then","else","propertyNames"]);
-  const schemaMaps=new Set(["properties","definitions","patternProperties","$defs"]);
-  const schemaArrays=new Set(["allOf","anyOf","oneOf"]);
-  const visit=(mode:Mode):void=>{
-    const token=tokens[position++]!;
-    if(token[0]==="{"){
-      while(tokens[position]?.[0]!=="}"){
-        const key=JSON.parse(tokens[position++]![0]) as string;position++; // colon
-        const child=tokens[position]!;
-        if(mode==="schema"&&key==="$id"&&child[0].startsWith('"')&&URL.canParse(JSON.parse(child[0])))uriBase=true;
-        if(mode==="schema"&&key==="$ref"&&child[0].startsWith('"')){
-          const ref=JSON.parse(child[0]) as string;
-          if(ref===LEGACY_MODEL_REGISTRATION_MODEL||ref.startsWith(`${LEGACY_MODEL_REGISTRATION_MODEL}#`))edits.push({start:child.index!,end:child.index!+child[0].length,text:JSON.stringify(MODEL_REGISTRATION_MODEL+ref.slice(LEGACY_MODEL_REGISTRATION_MODEL.length))});
-        }
-        const nextMode:Mode=mode==="map"?"schema":mode!=="schema"?"annotation":schemaMaps.has(key)?"map":schemaArrays.has(key)?"array":schemaChildren.has(key)?"schema":"annotation";
-        visit(nextMode);
-        if(tokens[position]?.[0]===",")position++;
+  for (const [directory, origin, storeId] of [[paths.modelsDirectory, "project", "models/json-schema/draft-07"], [join(root, "imported-definitions"), "market", IMPORTED_MODEL_DEFINITIONS_STORE]] as const) {
+    for (const id of await discoverModelIds(context, directory, origin === "project" ? paths.excludedDirectories : [])) {
+      await assertModelPath(directory, id, origin === "project" ? paths.excludedDirectories : []);
+      const source = (await readFile(join(directory, id))).toString("utf8");
+      const definition: unknown = JSON.parse(source.replace(/^\uFEFF/, ""));
+      await checkModelDefinition(context, { modelRef: id, definition, source }, "definition");
+      if (bundled.some(model => model.registration.modelRef === id)) throw new TypeError(`System model identity conflict: ${id}`);
+      const existing = records.find(record => record.registration.modelRef === id);
+      if (existing) {
+        if (existing.origin !== origin || existing.registration.store_id !== storeId) throw new TypeError(`Model binding conflict: ${id}`);
+        retained++;
+      } else {
+        if (origin === "market") throw new TypeError(`Imported model has no published registration: ${id}`);
+        const value = definition as Record<string, unknown>;
+        const registration: ModelRegistration = { modelRef: id, storage: "store", store_id: storeId,
+          ...(typeof value.title === "string" && value.title.trim() ? { name: value.title } : {}),
+          ...(typeof value.description === "string" ? { description: value.description } : {}) };
+        const seed = confirmedSeedDefinitions[id];
+        if (seed && createHash("sha256").update(JSON.stringify(definition)).digest("hex") === seed.hash) Object.assign(registration, structuredClone(seed.registration));
+        validateModelRegistration(registration);
+        const recordId = randomUUID();
+        await put(join(root, "project", `${recordId}.json`), jsonBytes({ id: recordId, revision: 1, createdAt: Date.now(), updatedAt: Date.now(), value: registration }));
+        created++;
       }
-      position++;
-    }else if(token[0]==="["){
-      while(tokens[position]?.[0]!=="]"){
-        visit(mode==="array"||mode==="schema"?"schema":"annotation");
-        if(tokens[position]?.[0]===",")position++;
-      }
-      position++;
     }
-  };
-  visit("schema");
-  if(edits.length&&uriBase)throw new TypeError(`Cannot migrate URI-based legacy reference: ${modelRef}`);
-  let result=source;
-  for(const edit of edits.reverse())result=result.slice(0,edit.start)+edit.text+result.slice(edit.end);
-  return result;
+  }
+  for (const record of records.filter(record => record.origin !== "system")) {
+    const directory = record.origin === "market" ? join(root, "imported-definitions") : paths.modelsDirectory;
+    if (!await optionalFileBytes(join(directory, record.registration.modelRef))) throw new TypeError(`Registration definition missing: ${record.registration.modelRef}`);
+  }
+  const marker = join(root, "initialized.json");
+  if (!await optionalFileBytes(marker)) await put(marker, jsonBytes({ initializedAt: new Date().toISOString() }));
+  const config = input.modelRegistration ?? structuredClone(DEFAULT_MODEL_REGISTRATION_CONFIG);
+  if (options.config) {
+    const before = await optionalFileBytes(options.config.path);
+    if (before && !isDeepStrictEqual(JSON.parse(before.toString("utf8")), options.config.value)) throw new Error("Model initialization configuration conflict");
+    const next = structuredClone(options.config.value);
+    next.modelRegistration = config;
+    if (next.dataStores && typeof next.dataStores === "object") for (const binding of Object.values(next.dataStores as Record<string, { model: string }>)) {
+      if (typeof binding.model !== "string") throw new TypeError("Invalid business Store model binding");
+      binding.model = upgrade(binding.model);
+    }
+    if (!isDeepStrictEqual(next, options.config.value)) await put(options.config.path, jsonBytes(next));
+  }
+  let systemHookCalled = false;
+  await commitModelOperation(input.root, "initialize", changes, {
+    afterPending: async () => { if (systemEnd === 0) { await options.afterSystemInstall?.(); systemHookCalled = true; } },
+    afterFile: async index => {
+      if (index + 1 === systemEnd && !systemHookCalled) { await options.afterSystemInstall?.(); systemHookCalled = true; }
+      if (index + 1 === changes.length) await options.afterRegistrations?.();
+    }
+  });
+  if (!changes.length) { await options.afterSystemInstall?.(); await options.afterRegistrations?.(); }
+  return { created, retained, diagnostics: [], config,
+    system: { status: installed ? "unchanged" as const : "installed" as const, created: systemCreated, retained: installed ? bundled.length : 0 } };
 }

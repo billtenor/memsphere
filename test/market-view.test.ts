@@ -1,3 +1,4 @@
+import { managedProjectFixture } from "./helpers/project.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
@@ -5,7 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { readProjectConfig } from "../src/config.js";
-import { projectCreateCommand } from "../src/commands/project.js";
 import { createViewServer } from "../src/commands/view.js";
 import { runGit } from "../src/git.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
@@ -31,7 +31,7 @@ async function withMarketView(
     process.env.MEMSPHERE_PROJECT = "market-view";
     await runGit(["init", "-b", "master"], { cwd: workspace });
     process.chdir(workspace);
-    await projectCreateCommand("market-view", { bind: true });
+    await managedProjectFixture("market-view", { bind: true });
     const config = await readProjectConfig("market-view", home);
     const server = createViewServer(config);
     await new Promise<void>((resolve, reject) => {

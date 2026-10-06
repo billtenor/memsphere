@@ -3,9 +3,9 @@
   "system_models": [
     {
       "source": "system-models/model-registration.json",
-      "metaModel": "json-schema/draft-07",
+      "metaModel": "json-schema/draft-07.json",
       "registration": {
-        "modelRef": "memsphere/model-registration",
+        "modelRef": "memsphere/model-registration.json",
         "name": "模型登记",
         "package": "memsphere.builtin",
         "tags": [
@@ -19,9 +19,9 @@
     },
     {
       "source": "system-models/run/agent-activity-log.json",
-      "metaModel": "raw",
+      "metaModel": "raw.json",
       "registration": {
-        "modelRef": "memsphere/run/agent-activity-log",
+        "modelRef": "memsphere/run/agent-activity-log.json",
         "name": "智能体活动日志",
         "package": "memsphere.builtin",
         "tags": [
@@ -36,9 +36,9 @@
     },
     {
       "source": "system-models/run/agent-activity-snapshot.json",
-      "metaModel": "raw",
+      "metaModel": "raw.json",
       "registration": {
-        "modelRef": "memsphere/run/agent-activity-snapshot",
+        "modelRef": "memsphere/run/agent-activity-snapshot.json",
         "name": "智能体活动快照",
         "package": "memsphere.builtin",
         "tags": [
@@ -53,9 +53,9 @@
     },
     {
       "source": "system-models/run/artifact.json",
-      "metaModel": "raw",
+      "metaModel": "raw.json",
       "registration": {
-        "modelRef": "memsphere/run/artifact",
+        "modelRef": "memsphere/run/artifact.json",
         "name": "运行产物",
         "package": "memsphere.builtin",
         "tags": [
@@ -70,9 +70,9 @@
     },
     {
       "source": "system-models/run/memory-snapshot-file.json",
-      "metaModel": "raw",
+      "metaModel": "raw.json",
       "registration": {
-        "modelRef": "memsphere/run/memory-snapshot-file",
+        "modelRef": "memsphere/run/memory-snapshot-file.json",
         "name": "记忆快照文件",
         "package": "memsphere.builtin",
         "tags": [
@@ -94,7 +94,7 @@
       "models": [
         {
           "source": "market-models/examples/01-basic-types.json",
-          "metaModel": "json-schema/draft-07",
+          "metaModel": "json-schema/draft-07.json",
           "registration": {
             "modelRef": "examples/01-basic-types.json",
             "name": "用例 01 · 基本类型与枚举",
@@ -111,7 +111,7 @@
         },
         {
           "source": "market-models/examples/02-nested-order.json",
-          "metaModel": "json-schema/draft-07",
+          "metaModel": "json-schema/draft-07.json",
           "registration": {
             "modelRef": "examples/02-nested-order.json",
             "name": "用例 02 · 订单与深层嵌套",
@@ -128,7 +128,7 @@
         },
         {
           "source": "market-models/examples/03-array-root.json",
-          "metaModel": "json-schema/draft-07",
+          "metaModel": "json-schema/draft-07.json",
           "registration": {
             "modelRef": "examples/03-array-root.json",
             "name": "用例 03 · 根数组与多维数组",
@@ -145,7 +145,7 @@
         },
         {
           "source": "market-models/examples/04-dictionaries-and-encodings.json",
-          "metaModel": "json-schema/draft-07",
+          "metaModel": "json-schema/draft-07.json",
           "registration": {
             "modelRef": "examples/04-dictionaries-and-encodings.json",
             "name": "用例 04 · 字典与特殊类型映射",
@@ -162,7 +162,7 @@
         },
         {
           "source": "market-models/examples/05-unions-and-conditions.json",
-          "metaModel": "json-schema/draft-07",
+          "metaModel": "json-schema/draft-07.json",
           "registration": {
             "modelRef": "examples/05-unions-and-conditions.json",
             "name": "用例 05 · 联合与条件展示边界",
@@ -179,7 +179,7 @@
         },
         {
           "source": "market-models/examples/06-references-and-recursion.json",
-          "metaModel": "json-schema/draft-07",
+          "metaModel": "json-schema/draft-07.json",
           "registration": {
             "modelRef": "examples/06-references-and-recursion.json",
             "name": "用例 06 · 引用与递归",
@@ -187,7 +187,7 @@
               "example",
               "json-schema"
             ],
-            "description": "本地 definitions 复用、递归树与精确文件 ModelRef；当前树表显示引用提示，引用目标查看原文，不无限展开。",
+            "description": "本地 definitions 复用、递归树与模型内的状态枚举；引用目标保存在本模型中，不无限展开递归字段。",
             "store_id": "models/imported/json-schema/draft-07",
             "storage": "store",
             "package": "memsphere.examples",
@@ -196,7 +196,7 @@
         },
         {
           "source": "market-models/examples/07-scalar-enum-root.json",
-          "metaModel": "json-schema/draft-07",
+          "metaModel": "json-schema/draft-07.json",
           "registration": {
             "modelRef": "examples/07-scalar-enum-root.json",
             "name": "用例 07 · 标量枚举根",
@@ -213,7 +213,7 @@
         },
         {
           "source": "market-models/examples/08-numeric-enum-root.json",
-          "metaModel": "json-schema/draft-07",
+          "metaModel": "json-schema/draft-07.json",
           "registration": {
             "modelRef": "examples/08-numeric-enum-root.json",
             "name": "用例 08 · 数字枚举根",

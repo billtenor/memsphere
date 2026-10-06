@@ -37,7 +37,7 @@ async function orderRuntime() {
   };
   const model: Model = {
     data: {
-      id: "order-model", model: JSON_SCHEMA_DRAFT_07,
+      id: "order-model.json", model: JSON_SCHEMA_DRAFT_07,
       payload: { contentType: "application/json", content: bytesContent(new TextEncoder().encode(JSON.stringify(definition))) }
     },
     definition
@@ -120,7 +120,7 @@ test("schema reflection composes with readable raw files and independent JSON va
     assert.deepEqual((await reopened.list({})).items, [{ id: "order-001" }]);
     assert.deepEqual((await rawReopened.list({})).items, [{ id: rawId }]);
     assert.deepEqual(await readdir(join(rawDirectory, "a", "b", "c")), ["order-001.json"]);
-    assert.deepEqual(await readdir(valueDirectory), ["order-001.json"]);
+    assert.deepEqual(await readdir(valueDirectory), [".memsphere-json-store", "order-001.json"]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

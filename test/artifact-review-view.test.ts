@@ -1,10 +1,10 @@
+import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
 import { archiveRun } from "../src/archive/store.js";
 import { createViewServer } from "../src/commands/view.js";
 import type { MemsphereConfig } from "../src/config.js";
@@ -320,7 +320,7 @@ flow:
     };
     assert.equal(activeSummaries.runs.some((candidate) => candidate.id === started.id), false);
 
-    const browser = await chromium.launch({ headless: true });
+    const browser = await browserScope();
     try {
       const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
       const archivedReviewUrl = `${base}/tasks/${started.id}/artifact-reviews/${review.id}`

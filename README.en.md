@@ -136,7 +136,7 @@ The CLI is therefore not primarily a collection of commands for humans. It is a 
 
 ### 6.1 Requirements
 
-- Node.js 20 or later;
+- Node.js 22 or later; Node 22 LTS is recommended;
 - Git;
 - an Agent that can use Skills and terminal commands.
 
@@ -149,7 +149,7 @@ Memsphere is designed for Agents, so installation, initialization, and Project s
 ~~~text
 Install and configure Memsphere in the current working directory. Perform all required terminal operations yourself:
 
-1. Check that Node.js 20 or later and Git are available. If a prerequisite is missing, tell me clearly what I need to install.
+1. Check that Node.js 22 or later and Git are available. If a prerequisite is missing, tell me clearly what I need to install.
 2. Run npm install -g memsphere, then run memsphere skill init --global.
 3. Read and follow the Memsphere Skill you just installed. If this session does not automatically refresh its Skill list, read SKILL.md directly from the location reported by the installation command and continue this task; do not ask me to open a new session solely for that reason.
 4. Check whether the current directory is already bound to a Project. Reuse an existing binding. If it is not bound, ask whether I want a Managed Project or an Embedded Project. If I am unsure, recommend and create a Managed Project, then bind this directory.
@@ -256,9 +256,9 @@ memsphere view start
 
 The **Models** module groups models under **This project** (unpackaged models and project packages), **Imported packages** (built-in and market packages), and **Model market**. Package scope, tags and search work together. Each list entry shows its name, model ID, description and tags; the default **Model information** tab displays a property table before **Model structure** and **Source definition**.
 
-Model definitions and registration data use separate stores. Project JSON Schema Draft-07 definitions remain ordinary `.json` files, identified by relative filenames such as `sales/order.json`. The `memsphere/model-registration` model defines `modelRef`, `name`, `description`, `package`, `package_name`, `tags`, `storage` and `store_id`. Persistent definitions use `storage=store` and `store_id` to select their DataStore. Registration values live in a separate filesystem ValueStore. The registration Runtime reads its definition at a fixed location without reading its own registration.
+Model definitions and registration data use separate stores. Project JSON Schema Draft-07 definitions remain ordinary `.json` files, identified by relative filenames such as `sales/order.json`. The `memsphere/model-registration.json` model defines `modelRef`, `name`, `description`, `package`, `package_name`, `tags`, `storage` and `store_id`. Persistent definitions use `storage=store` and `store_id` to select their DataStore. Registration values live in a separate filesystem ValueStore. The registration Runtime reads its definition at a fixed location without reading its own registration.
 
-`project create` installs five built-in models for both Managed and Embedded Projects: the registration model and four raw Run models. Original JSON lives in the release's `reserved-models/system-models/`, managed by `reserved-models/manifest.json`. Definitions and registrations are persisted under the selected registration directory's `system/definitions/` and `system/registrations/`. Stable model IDs are preserved; Store IDs are `models/system/json-schema/draft-07` and `models/system/raw`.
+`project create` installs five built-in models for both Managed and Embedded Projects: the registration model and four raw Run models. Original JSON lives in the release's `reserved-models/system-models/`, managed by `reserved-models/manifest.json`. Definitions and registrations are persisted under the selected registration directory's `system/definitions/` and `system/registrations/`. All model IDs include the `.json` suffix; Store IDs are `models/system/json-schema/draft-07` and `models/system/raw`.
 
 For an existing Project, explicitly install built-in models and initialize registrations; browsing models does not write data:
 
@@ -266,13 +266,11 @@ For an existing Project, explicitly install built-in models and initialize regis
 memsphere --project my-project project models initialize
 ~~~
 
-Use `project models initialize my-project --output json` for a structured receipt. A recognized legacy registration-model preview is backed up before migration to the built-in identity; other definition bytes and management properties are preserved.
+Use `project models initialize my-project --output json` for a structured receipt. Initialization checks current models, installs system models and completes registration. Existing and new models obey the same rules. This command also explicitly recovers interrupted model operations; browsing does not run it automatically.
 
 Under **Settings → Model registration storage**, select a storage ID first, then edit that Store's type and directory. The registration model is fixed and read-only. Defaults are `memsphere/model-registrations` and the filesystem directory `models/registrations`. Changing the selected ID or directory with existing data requires explicit migration consent. Configuration switches only after the destination passes validation; failure preserves the original data. Old registration directories remain excluded from model discovery. **Model storage** remains separate: `modelsDirectory` defaults to `models/json-schema/draft-07`, resolves against the registered Project root, and accepts absolute paths. Changing it does not move the original model files.
 
-The same manifest manages original JSON in `reserved-models/market-models/`: the `memsphere.examples` package containing examples 01–08. The order example remains as example 02, without a separate market package. New Projects do not install examples automatically. Removing a market listing does not remove imported data; uninstalling imported packages is not supported yet. Imported definitions use a separate model DataStore and their registrations enter the imported area. Reimporting identical content makes no changes; modified content or a conflicting model ID rejects the entire package with a conflict list, without overwriting existing models. Unimported or incomplete imports do not appear in the normal model list. Model definition editing, value-instance management and a remote market are outside the current feature scope. Viewing a Draft-07 definition does not imply full support for all its keywords in the business Runtime.
-
-The maintenance script `scripts/relocate-example-models.mjs` relocates the eight original historical examples in the memsphere Project: run `node scripts/relocate-example-models.mjs plan --project memsphere --out <plan.json>`, then `node scripts/relocate-example-models.mjs apply --plan <plan.json>`. It verifies definition and registration baselines, retained model references, and a complete backup with an isolated restore rehearsal before removal. Backups remain under the Project's `backups/model-registration/20261003-model-catalogs/`. Use `node scripts/relocate-example-models.mjs restore --backup <backup-directory>` to restore original bytes and records; conflicts or corruption prevent writes. This operation never runs automatically during startup or browsing.
+The same manifest manages original JSON in `reserved-models/market-models/`: the `memsphere.examples` package containing examples 01–08. The order example remains as example 02, without a separate market package. New Projects do not install examples automatically. Removing a market listing does not remove imported data; uninstalling imported packages is not supported yet. Imported definitions use a separate model DataStore and their registrations enter the imported area. Reimporting identical content makes no changes; modified content or a conflicting model ID rejects the entire package with a conflict list, without overwriting existing models. Unimported or incomplete imports do not appear in the normal model list. The CLI below manages model definitions and data records; a remote market remains out of scope. Market imports and Project writes use the same definition and Runtime checks, with no exemption for existing models. Examples 04/05 retain original constraints beyond current Runtime support, so importing the eight-example package fails explicitly without publishing any model; constraints are not removed to make the import succeed.
 
 #### Repair or Upgrade System Memory
 
@@ -323,6 +321,64 @@ Use memsphere to start memsphere-tutorial-chapter-01.
 
 The Agent will discover and read the applicable Procedure, create a Run, and advance through its steps.
 
+### 6.8 Model and Data CLI
+
+Commands use the current Project; prepend `--project <name>` to select one explicitly. Every model ID ends in `.json`, including `memsphere/model-registration.json`, `memsphere/run/artifact.json` and the metamodels `json-schema/draft-07.json` and `raw.json`. Store, Factory and record IDs do not change as a result.
+
+| Command | Main options |
+| --- | --- |
+| `model list` | `--origin project\|system\|market`, `--package <id>` or `--unpackaged`, repeatable `--tag <tag>`, `--query <text>`, `--status available\|unavailable` |
+| `model read <model-ref>` | `--part definition\|registration\|all`; defaults to definition |
+| `model create <model-ref>` | Required `--definition-file <path\|->`; optional `--name`, `--description`, `--package`, `--package-name`, repeatable `--tag` |
+| `model update <model-ref>` | Replace `--definition-file` or change the registration fields above; repeatable `--unset name\|description\|package\|package_name\|tags` removes fields |
+| `model delete <model-ref>` | Delete an unused Project or imported model |
+| `model validate <model-ref>` | Optional `--definition-file <path\|->`, `--check definition\|runtime` (runtime by default), `--check-data`, repeatable `--store <id>` |
+| `data store list / read <store-id>` | list filters direct bindings with `--model <ref>` and `--kind data\|value` |
+| `data store create <store-id>` | Required `--model <ref>`, `--kind data\|value`, `--factory <id>`, `--config-file <path\|->` |
+| `data store remove <store-id>` | Remove registration while retaining the data directory and contents |
+| `data list / read <id> / has <id>` | Required `--store <id>`; read accepts `--metadata-only` or `--path <path>` |
+| `data create <id> / update <id>` | Required `--store <id>` and exactly one of `--value <json>`, `--value-file <path\|->`, `--payload-file <path\|->`; Payload also requires `--content-type <mime>` |
+| `data edit <id>` | Required `--store <id>` and `--patch <json>` or `--patch-file <path\|->`; RFC 6902 JSON Patch |
+| `data delete <id>` | Required `--store <id>` |
+| `data export <id>` | Required `--store <id>`, `--as json\|payload`, `--out <path\|->` |
+| `data validate [id]` | Stored records use `<id> --store <id>`; candidates use `--model <ref>` and `--value` or `--value-file` |
+
+Model create/update must pass definition, local-reference and Runtime checks. Only `$ref: ""`, `"#"` and `#/...` within the same model are supported; cross-model and external URI references are rejected. The current JSON Schema Runtime supports explicit types, object fields, homogeneous arrays, local recursion and supported numeric, length and enum constraints. Rules it cannot fully execute, such as unions, conditionals, boolean subschemas and `format`, are rejected. Unavailable models remain discoverable for diagnosis, but normal reads and registration-only updates cannot bypass validation. `validate --check definition` is diagnostic and does not establish usability. System models are entirely read-only. A model used by a Store permits registration changes and source formatting changes that preserve its definition, but cannot be semantically replaced or deleted.
+
+Prepare this UTF-8 JSON definition as `counter.json`:
+
+```json
+{"type":"object","properties":{"count":{"type":"integer","minimum":0}},"required":["count"]}
+```
+
+Save `{"directory":"data/counters"}` as `store.json`, then run:
+
+```sh
+memsphere model create counter.json --definition-file counter.json --tag sample --output json
+memsphere data store create counters --model counter.json --kind value --factory memsphere/filesystem-json --config-file store.json --output json
+memsphere data create one --store counters --value '{"count":1}' --output json
+memsphere data read one --store counters --path '$.count' --output json
+memsphere data edit one --store counters --patch '[{"op":"replace","path":"/count","value":2}]' --expected-revision 1 --output json
+memsphere data export one --store counters --as json --out one.json --output json
+```
+
+`--path <path>` currently uses RFC 9535 JSONPath. With this option, `value` is always an array of matched values: no match yields `[]`, a matched null yields `[null]`, and a matched array is not flattened. Omitting it returns the whole value. JSON Patch `path/from` use RFC 6901 JSON Pointer, a different syntax. File options accept `-` to consume stdin once. JSON input accepts a UTF-8 BOM and rejects invalid UTF-8 or JSON.
+
+Business data requires an explicitly registered Store; commands neither infer one from a model nor access Run, archive or system model stores. A Store directory may be absolute or relative: absolute paths use the specified location, while relative paths resolve from the Registry Project root. Both undergo overlap and content compatibility checks. ValueStore uses `memsphere/filesystem-json` and record IDs without the physical filename suffix. DataStore uses `memsphere/filesystem`, IDs with a MIME-mapped suffix, and supports Payload input. `update` replaces the whole record. ValueStore update/edit/delete accept `--expected-revision` to prevent stale overwrites; DataStore supports neither that option nor edit. Models have no user-facing revision or CAS option.
+
+Model, data and Store writes support `--dry-run` to check the proposed change. Export is an exception: it writes only the explicit target and refuses to overwrite an existing file. `--out -` emits raw content and is incompatible with a JSON receipt. Ordinary reads do not create directories, repair registration or update business state. File writers coordinate through native locks across local processes; the operating system releases ownership on process exit. Coordination files may remain and must not be deleted as stale locks. This protects local filesystem access through the same protocol, without promising network filesystem locking or consistency with external programs that edit files directly. Unsupported locking fails explicitly.
+
+All six `list` commands—model, data, data store, project, memory and archive—accept `--limit <n>` and `--cursor <token>`. The default is 100 and the range is 1–1000. Filtering precedes pagination. JSON/YAML results contain `{ "items": [...], "nextCursor": "..." }`; the final page omits nextCursor, and empty results have an empty items array. A continuation can change limit but must retain its command, Project/Store/Run, filters and Memory parent scope. Memory children retain declaration order. Reviewer lists remain bound to the Session Project and frozen Run.
+
+```sh
+memsphere model list --origin project --limit 20 --output json
+memsphere model list --origin project --limit 20 --cursor '<nextCursor>' --output json
+memsphere data store list --kind value --limit 20 --output json
+memsphere memory list --kind procedures --limit 20 --output json
+```
+
+New model/data commands, including data store, default to `--output text`: successful results use YAML keys, indentation and lists, preserving nested data and pagination cursors rather than rendering indented JSON. `--output json` emits exactly one JSON value on stdout for programs; all lists also support this JSON protocol. Failures leave stdout empty and exit with status 1. Text mode shows an error message on stderr; JSON mode emits only `{ "error": { "code": "...", "message": "...", "details": ... } }`, with optional details. Argument parsing failures follow the selected format. Raw export content, help and version retain their own output rules. See each command's `--help` for the full options.
+
 ## 7. Memsphere Is Still Evolving
 
 The sections above describe the complete direction Memsphere is working toward. We are beginning with the most important foundation and turning that direction into reality one step at a time.
@@ -343,6 +399,7 @@ Together, these four types form the semantic part of software. Concept gives the
 The current version also provides:
 
 - **Project**: organizes persistent or repository-managed Memory and binds it to a working directory;
+- **Model and data CLI**: validates and manages models, registers business Stores and reads or writes data through explicit IDs;
 - **Run**: turns a Procedure into a named, stateful execution;
 - **Artifact**: preserves each step's deliverable and validates it against a Schema;
 - **Review**: lets people or Agents review Run artifacts;
@@ -378,9 +435,12 @@ cd memsphere
 npm install
 npm run build
 npm test
+node scripts/model-data-smoke.mjs
 ~~~
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before contributing. For security issues, see [SECURITY.md](SECURITY.md).
+
+CI uses Node 22 LTS to run all automated tests on Linux, macOS and Windows, including native cross-process file locks and the model/data CLI. The Windows package check verifies the CLI in all four supported shells. The model/data CLI and installed-package smoke scripts are also available for manual runs.
 
 ## 9. License
 

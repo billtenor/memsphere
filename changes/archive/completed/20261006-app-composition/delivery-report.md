@@ -1,5 +1,7 @@
 # App 整合能力交付报告
 
+合并最新 master 后的最终验证见 [master-merge-verification.md](./master-merge-verification.md)；下文保留交付评审时点的验证结果。
+
 ## 交付内容
 
 本轮为 Project 提供可安装、可启停、可发现入口的 App 整合能力，贯通 Memory、View Package、Model Package、后端业务操作与独立外部 CLI。Project 可以安装多个 App，也继续保留不归属任何 App 的 Memory。

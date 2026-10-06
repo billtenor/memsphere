@@ -1,0 +1,20 @@
+{
+  "run": "run-20261003-090655z-f1e492f6",
+  "review": "review-20261005-140919z-0e5efb80",
+  "round": "round-20261005-140919z-15827b8f",
+  "submissionId": "submission-20261005-140919z-7dfd3385",
+  "deliveryReportSha256": "c131e9649bc611c8b5ab114e65236afb0931d8969f65ea4435b053e155712c66",
+  "statusAtReceipt": "pending",
+  "assignments": [
+    {
+      "id": "assignment-20261005-140919z-15df3313",
+      "actorId": "actor5",
+      "status": "draft"
+    },
+    {
+      "id": "assignment-20261005-140919z-6f3cb41f",
+      "actorId": "traex1",
+      "status": "running"
+    }
+  ]
+}

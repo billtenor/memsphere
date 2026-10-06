@@ -3,5 +3,5 @@
   "id": "org.memsphere.expense-models",
   "name": "费用模型",
   "version": "0.1.0",
-  "models": [{ "modelRef": "example/expense", "path": "expense.json", "metaModel": "json-schema/draft-07" }]
+  "models": [{ "modelRef": "example/expense.json", "path": "expense.json", "metaModel": "json-schema/draft-07.json" }]
 }

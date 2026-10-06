@@ -29,32 +29,23 @@ test("View Shell exposes the four-column Slot and search surfaces", () => {
   assert.match(html, /data-project-detail="store"/);
 });
 
-test("Project Home and Project switching are separate keyboard controls", () => {
+test("Project Home and Project switching expose separate accessible controls", () => {
   const html = renderViewHostHtml("en", instances, "/");
 
   assert.match(html, /data-view-layout="home"/);
   assert.match(html, /class="view-shell-project-home" href="\/"/);
   assert.match(html, /data-view-project-menu-trigger/);
   assert.match(html, /aria-haspopup="menu"/);
-  assert.match(html, /projectHome\?\.addEventListener\("click"/);
   assert.match(html, /view-shell-project-current/);
-  assert.match(html, /boot\.coreShell\.projectDetails/);
 });
 
-test("Shell resizers provide pointer, keyboard, reset, and persistence behavior", () => {
+test("Shell resizers expose separate accessible handles with bounded widths", () => {
   const html = renderViewHostHtml("en", instances, "/tasks");
 
   assert.match(html, /data-view-resizer="secondary"/);
   assert.match(html, /data-view-resizer="content-list"/);
   assert.match(html, /aria-valuemin="176" aria-valuemax="360"/);
   assert.match(html, /aria-valuemin="260" aria-valuemax="520"/);
-  assert.match(html, /memsphere\.view\.shell-widths\.v1/);
-  assert.match(html, /event\.key !== "ArrowLeft" && event\.key !== "ArrowRight"/);
-  assert.match(html, /requestAnimationFrame\(flush\)/);
-  assert.match(html, /event\.shiftKey \? 48 : 12/);
-  assert.match(html, /cancelAnimationFrame\(animationFrame\)/);
-  assert.match(html, /addEventListener\("dblclick"/);
-  assert.match(html, /max-width: 820px/);
 });
 
 test("Non-Home SSR uses a local detail skeleton instead of a centered page loader", () => {

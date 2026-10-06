@@ -23,6 +23,8 @@
 | `cliBindings` | `{cli,args?,cwd?,env?}[]`，参数或环境值可以用单字段 `{configKey:"ledgerDirectory"}` 引用安装配置。 |
 | `backend` | `{entry,operations}`；entry 是可信 ESM，operations 把操作名映射为 read 或 write。 |
 
+模型和元模型 ID 均使用 `.json` 后缀，与 Project 模型规则一致；例如 `example/expense.json` 和 `json-schema/draft-07.json`。App 自有模型不允许通过通用 model update/delete 命令修改或删除。
+
 Model Package 的必填字段为 `schemaVersion:1`、`id`、`name`、`version` 和 `models`；每个模型包含 `modelRef`、`metaModel`、`path`，可带 name、description、tags。可选 dependencies 为模型包 `{id,version?}[]`。定义使用现有 RuntimeFactory 解释，不新增业务模型 SDK。
 
 配置中的单字段 `{configKey:"..."}` 也可用于 Store 和 View 实例配置。Store 的 directory 相对 Project 根解析；CLI 本机绑定中的相对路径相对 binding 文件解析。秘密使用宿主环境变量引用，不放入发行清单或配置示例。

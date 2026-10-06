@@ -12,14 +12,20 @@ const schemaArrays = ["allOf", "anyOf", "oneOf"];
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const pointer = (path: string, key: string) => `${path}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`;
 
-function pointerSegments(fragment: string): string[] {
+function referenceError(modelRef: string, path: string, message: string, unsupported = false): never {
+  throw Object.assign(new TypeError(`${message}: ${modelRef} ${path}`), {
+    code: unsupported ? "MODEL_REFERENCE_UNSUPPORTED" : "MODEL_REFERENCE_INVALID", details: { modelRef, path }
+  });
+}
+
+function pointerSegments(fragment: string, modelRef: string, path: string): string[] {
   let decoded: string;
   try { decoded = decodeURIComponent(fragment); }
-  catch { throw new TypeError(`Invalid URI-encoded JSON Pointer: #${fragment}`); }
+  catch { referenceError(modelRef, path, `Invalid URI-encoded JSON Pointer: #${fragment}`); }
   if (!decoded) return [];
-  if (!decoded.startsWith("/")) throw new TypeError(`Unsupported schema reference anchor: #${fragment}`);
+  if (!decoded.startsWith("/")) referenceError(modelRef, path, `Unsupported schema reference anchor: #${fragment}`);
   return decoded.slice(1).split("/").map(segment => {
-    if (/~(?:[^01]|$)/.test(segment)) throw new TypeError(`Invalid JSON Pointer escape: #${fragment}`);
+    if (/~(?:[^01]|$)/.test(segment)) referenceError(modelRef, path, `Invalid JSON Pointer escape: #${fragment}`);
     return segment.replaceAll("~1", "/").replaceAll("~0", "~");
   });
 }
@@ -27,39 +33,34 @@ function pointerSegments(fragment: string): string[] {
 /** Only schema positions are visited; ordinary examples/default/enum data stay opaque. */
 export function collectModelSchemaReferences(definition: unknown, modelRef: string): ModelSchemaReference[] {
   if (!object(definition)) return [];
-  let base: URL | undefined;
-  if (definition.$id !== undefined) {
-    if (typeof definition.$id !== "string" || !URL.canParse(definition.$id)) {
-      throw new TypeError(`Cannot inspect relative schema $id: ${modelRef}`);
-    }
-    base = new URL(definition.$id);
-    if (base.hash && base.hash !== "#") throw new TypeError(`Cannot inspect schema $id fragment: ${modelRef}`);
-    base.hash = "";
-  }
   const result: ModelSchemaReference[] = [];
+  const visited = new WeakSet<object>();
   const visit = (schema: unknown, path: string): void => {
-    if (!object(schema)) return;
-    if (schema !== definition && schema.$id !== undefined) throw new TypeError(`Cannot inspect nested schema $id: ${modelRef} ${path}`);
+    if (!object(schema) || visited.has(schema)) return;
+    visited.add(schema);
     if (schema.$ref !== undefined) {
-      if (typeof schema.$ref !== "string") throw new TypeError(`Invalid schema $ref: ${modelRef} ${path}`);
+      const refPath = pointer(path, "$ref");
+      if (typeof schema.$ref !== "string") referenceError(modelRef, refPath, "Invalid schema $ref");
       const ref = schema.$ref;
-      let targetModelRef = modelRef;
-      let fragment = "";
-      if (!ref || ref.startsWith("#")) fragment = ref.slice(1);
-      else if (base) {
-        let resolved: URL;
-        try { resolved = new URL(ref, base); }
-        catch { throw new TypeError(`Cannot resolve schema reference: ${modelRef} ${path} ${ref}`); }
-        fragment = resolved.hash.slice(1);
-        resolved.hash = "";
-        if (resolved.href !== base.href) targetModelRef = resolved.href;
-      } else {
-        const hash = ref.indexOf("#");
-        targetModelRef = hash < 0 ? ref : ref.slice(0, hash);
-        fragment = hash < 0 ? "" : ref.slice(hash + 1);
+      if (ref !== "" && ref !== "#" && !ref.startsWith("#/")) {
+        referenceError(modelRef, refPath, ref.startsWith("#")
+          ? `Unsupported schema reference anchor or pointer: ${ref}`
+          : `Cross-model schema references are not supported (${ref}); use a local JSON Pointer`, !ref.startsWith("#"));
       }
-      pointerSegments(fragment);
-      result.push({ ref, path: pointer(path, "$ref"), targetModelRef, fragment });
+      const fragment = ref.slice(1);
+      const segments = pointerSegments(fragment, modelRef, refPath);
+      let target: unknown = definition;
+      let targetPath = "#";
+      for (const key of segments) {
+        if (target === null || typeof target !== "object" || !Object.hasOwn(target, key))
+          referenceError(modelRef, refPath, `Missing schema reference: ${ref}`);
+        target = (target as Record<string, unknown>)[key];
+        targetPath = pointer(targetPath, key);
+      }
+      if (typeof target !== "boolean" && !object(target)) referenceError(modelRef, refPath, `Reference target is not a schema: ${ref}`);
+      result.push({ ref, path: refPath, targetModelRef: modelRef, fragment });
+      // A locally referenced object is a schema even if stored under an otherwise opaque annotation.
+      visit(target, targetPath);
     }
     for (const key of schemaMaps) {
       if (object(schema[key])) for (const [name, child] of Object.entries(schema[key])) visit(child, pointer(pointer(path, key), name));
@@ -82,20 +83,7 @@ export function collectExternalSchemaReferences(definition: unknown, modelRef: s
   return [...new Set(collectModelSchemaReferences(definition, modelRef).map(ref => ref.targetModelRef).filter(ref => ref !== modelRef))];
 }
 
-/** Package dependencies must be in the same atomic import; no network or other package is loaded. */
+/** Every definition is self-contained; package membership never grants reference access. */
 export function validateModelSchemaReferences(models: readonly { registration: { modelRef: string }; definition: unknown }[]): void {
-  const byId = new Map(models.map(model => [model.registration.modelRef, model.definition]));
-  for (const model of models) {
-    for (const ref of collectModelSchemaReferences(model.definition, model.registration.modelRef)) {
-      if (!byId.has(ref.targetModelRef)) throw new TypeError(`Missing model reference: ${model.registration.modelRef} ${ref.path} -> ${ref.targetModelRef}`);
-      let target = byId.get(ref.targetModelRef);
-      for (const key of pointerSegments(ref.fragment)) {
-        if (target === null || typeof target !== "object" || !Object.hasOwn(target, key)) {
-          throw new TypeError(`Missing schema reference: ${model.registration.modelRef} ${ref.path} -> ${ref.ref}`);
-        }
-        target = (target as Record<string, unknown>)[key];
-      }
-      if (typeof target !== "boolean" && !object(target)) throw new TypeError(`Reference target is not a schema: ${model.registration.modelRef} ${ref.ref}`);
-    }
-  }
+  for (const model of models) collectModelSchemaReferences(model.definition, model.registration.modelRef);
 }

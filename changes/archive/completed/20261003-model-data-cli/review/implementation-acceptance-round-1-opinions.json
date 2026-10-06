@@ -1,0 +1,194 @@
+{
+  "run": "run-20261003-090655z-f1e492f6",
+  "review": "review-20261005-034612z-e11cf3b0",
+  "round": "round-20261005-034612z-aa5a54fb",
+  "participants": [
+    {
+      "actor": "actor5",
+      "name": "billtenor",
+      "kind": "human",
+      "submitted": {
+        "comments": [],
+        "vote": "approve",
+        "submittedAt": "2026-10-05T13:49:11.119Z",
+        "authorization": {
+          "allowed": true,
+          "permission": "decision.decide",
+          "subject": {
+            "kind": "actor",
+            "actorId": "actor5"
+          },
+          "artifactScope": "memsphere-agile-requirement-development#flow[6]",
+          "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+          "actorId": "actor5",
+          "authoritySource": "config:control_plane.actors.actor5",
+          "basePermissions": [
+            "artifact.read",
+            "artifact.submit",
+            "artifact.write",
+            "decision.assess",
+            "decision.decide"
+          ],
+          "grantedPermissions": [],
+          "effectivePermissions": [
+            "artifact.read",
+            "artifact.submit",
+            "artifact.write",
+            "decision.assess",
+            "decision.decide"
+          ],
+          "reason": "allowed"
+        },
+        "delegation": {
+          "kind": "runner",
+          "runId": "run-20261003-090655z-f1e492f6",
+          "humanActorId": "actor5",
+          "authorizationNote": "# 实现验收第一轮 Human 投票授权\n\n日期：2026-10-05（Asia/Shanghai）。\nRun：run-20261003-090655z-f1e492f6。\nReview：review-20261005-034612z-e11cf3b0。\nRound：round-20261005-034612z-aa5a54fb。\nHuman：actor5（billtenor）；Assignment：assignment-20261005-034612z-56877920。\n\nRunner 已明确本轮完整实现验收对象，并询问 Human 正式票。Human 在本对话回复“通过”，无附加意见。这是本轮 approve、0 条 Comment 的明确决定及代提交授权。提交前核对该 Round 仍为 current，Human Assignment 为 draft，comments 为空且无 draft vote；未覆盖任何既有意见。\n\n按 memsphere Skill 的执行性表达规则直接代提交，不重复要求同义确认。实施方案通过票与本次实现验收票分别记录；该授权不代替后续交付验收或 PR 决定。",
+          "authorization": {
+            "allowed": true,
+            "permission": "decision.decide",
+            "subject": {
+              "kind": "runner"
+            },
+            "artifactScope": "memsphere-agile-requirement-development#flow[6]",
+            "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+            "actorId": "runner",
+            "authoritySource": "config:control_plane.runner",
+            "basePermissions": [
+              "artifact.read",
+              "artifact.submit",
+              "artifact.write",
+              "decision.assess",
+              "decision.decide"
+            ],
+            "grantedPermissions": [],
+            "effectivePermissions": [
+              "artifact.read",
+              "artifact.submit",
+              "artifact.write",
+              "decision.assess",
+              "decision.decide"
+            ],
+            "reason": "allowed"
+          }
+        }
+      }
+    },
+    {
+      "actor": "traex2",
+      "name": "研发",
+      "kind": "agent",
+      "submitted": {
+        "comments": [
+          {
+            "id": "comment-20261005-035653z-329a9ac8",
+            "body": "完整串行门槛未通过：我实际执行 `npm test -- --test-concurrency=1` 得到 1,062 项、1,060 通过、1 失败、1 跳过、退出码 1。失败为 `test/agent-review.test.ts` 的 “Agent Review CLI launcher injects Session bindings without shell environment syntax”。本轮 `src/acp/cli-runtime.ts` 为 Reviewer 的 `memory list/read` 新增从 `MEMSPHERE_CONFIG_PATH` 相邻 `project.json` 读取并注入 `--project` 的行为，但该测试将宿主 `process.env` 继承至子进程，仍断言旧参数列表，故在实际 Session 环境中失败。请使测试显式隔离/控制该环境并覆盖新 Project 绑定行为（或修正实现），随后重跑该测试和完整 `npm test -- --test-concurrency=1`；在完整门槛退出 0 前不得宣称 A15 已满足。",
+            "severity": "blocking",
+            "createdAt": "2026-10-05T03:56:53.084Z",
+            "updatedAt": "2026-10-05T03:56:53.084Z"
+          }
+        ],
+        "vote": "request_changes",
+        "summary": "# 研发评审结论：请求修改\n\n我亲自检查了当前工作区的新增模型/数据 CLI、业务 Store、跨进程 ValueStore 锁、模型操作恢复与 Reviewer CLI 运行时改动，并复跑了 `npm run typecheck` 及模型/数据/JSONPath/JSON Patch/真实进程/分页定向测试；这些定向检查均通过。`git diff --check` 也无空白错误。\n\n但我随后亲自执行完整串行门槛 `npm test -- --test-concurrency=1`，结果为 1,062 项：1,060 通过、1 失败、1 跳过，退出码 1，耗时约 510.6 秒。失败用例是 `test/agent-review.test.ts` 的 “Agent Review CLI launcher injects Session bindings without shell environment syntax”。本轮 `src/acp/cli-runtime.ts` 新增 Reviewer Memory 命令按 `MEMSPHERE_CONFIG_PATH` 找到 Session Project 并注入 `--project`；测试继承宿主环境却仍断言旧参数列表，因此回归门槛在实际评审环境失败。\n\n已提交 blocking 意见，要求显式隔离测试环境并覆盖新增的 Project 绑定行为（或调整实现），再复跑该测试和完整门槛。候选材料声称全量通过，但该说法仅作引用、未作为本次结论的证明。\n\n残余风险：我未在 Node 20、macOS 或 Windows 实机复跑；候选也只配置了这些 CI 平台。由于 Linux 全量门槛已失败，当前不具备通过验收的条件。",
+        "submittedAt": "2026-10-05T03:57:09.118Z",
+        "authorization": {
+          "allowed": true,
+          "permission": "decision.assess",
+          "subject": {
+            "kind": "actor",
+            "actorId": "traex2"
+          },
+          "artifactScope": "memsphere-agile-requirement-development#flow[6]",
+          "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+          "actorId": "traex2",
+          "authoritySource": "config:control_plane.actors.traex2",
+          "basePermissions": [
+            "artifact.read",
+            "decision.assess"
+          ],
+          "grantedPermissions": [],
+          "effectivePermissions": [
+            "artifact.read",
+            "decision.assess"
+          ],
+          "reason": "allowed"
+        }
+      }
+    },
+    {
+      "actor": "traex3",
+      "name": "测试",
+      "kind": "agent",
+      "submitted": {
+        "comments": [
+          {
+            "id": "comment-20261005-035001z-02c44d34",
+            "body": "业务 Store 的 `config.directory` 未被限制为 Project-relative 路径，违反需求契约中“相对目录以 Registry Project 根解析”的规则，并允许越出 Project 根。证据：[`src/project/model.ts`](src/project/model.ts) 将 `businessDirectorySchema` 直接设为只检查非空/NUL 的 `modelStorePathSchema`；[`src/project/business-stores.ts`](src/project/business-stores.ts) 的 `validateBusinessBindings` 随后执行 `resolve(root, binding.config.directory)`。在 Node 中 `resolve(root, \"/tmp/store\")` 直接得到 `/tmp/store`，`resolve(root, \"../outside\")` 也越出 root，因此 `data store create` 可登记外部目录（若未与当前受保护路径重叠）。请使用与 `memory_path` 同等严格的规范化相对路径校验（拒绝绝对路径、反斜杠、`.`/`..` 逃逸和非规范化形式），并补充 CLI/API 的创建、既有 config 加载及重登记的正/负向测试。",
+            "severity": "blocking",
+            "createdAt": "2026-10-05T03:50:01.013Z",
+            "updatedAt": "2026-10-05T03:50:01.013Z"
+          }
+        ],
+        "vote": "request_changes",
+        "summary": "# 测试工程师评审结论：请求修改\n\n我独立检查了当前 Run 的步骤状态、需求契约、候选验收材料、功能实现摘要、初始验证报告和工作区相对基线 `2b7400b0d3bff6670982ebcd0a02f023a6859e34` 的实际 diff（97 个已修改文件及新增实现/测试）。工作区处于未提交状态，与候选材料的描述相符；`git diff --check` 未报告空白错误。\n\n## 亲自检查与复跑的证据\n\n- 代码审查了新数据 CLI、模型 CLI、数据服务、业务 Store 绑定、JSON ValueStore 留存 revision 和统一 JSON 错误处理，特别核对了输入消费顺序、条件写、纯读、分页和错误输出路径。\n- `npm run typecheck` 通过。\n- `node --import tsx --test test/data-filesystem-process.test.ts test/model-operation.test.ts`：25/25 通过。实际覆盖独立进程 create/create、create/delete 的初始状态和持锁顺序、CAS update/delete、删除重建旧 revision 拒绝、SIGKILL 后记录与模型恢复。\n- `node --import tsx --test test/cli-errors.test.ts test/data-command.test.ts test/data-filesystem-process.test.ts test/list-pagination-cli.test.ts test/model-command.test.ts test/model-operation.test.ts` 的前六个已输出用例均通过；该次组合在本执行环境到达命令时间窗时未取得完整结论，故不把它计为完整套件通过。\n- `node --import tsx --test test/json-path.test.ts test/json-patch.test.ts test/pagination.test.ts`：15/15 通过。\n- 构建后的实际 CLI 分页定向复跑 `node --import tsx --test --test-name-pattern='model, data Store|Reviewer Memory' test/list-pagination-cli.test.ts`：2/2 通过。第一次分页复跑在构建尚未完成时因缺失 `dist/cli.js` 失败；不是产品断言失败，随后构建产物就绪后上述复跑通过。\n\n## 阻塞问题\n\n已单独提交 blocking comment：`businessDirectorySchema` 只拒绝空/NUL，`validateBusinessBindings` 用 `resolve(root, directory)` 解析，因此绝对目录及 `..` 会逃离 Registry Project 根。这直接违反需求契约“相对目录以 Registry Project 根解析”，并可令 `data store create`/既有 config 绑定可访问的外部目录。须收紧 schema 和加载路径的校验，并补充创建、既有 config 和重登记的正/负向覆盖后重新验证。\n\n## 仅引用、未复跑的材料\n\n候选报告声称最终全量 `npm test` 为 1,061 通过、0 失败、1 个 Windows 专属跳过，也声称 package smoke、浏览器验证、实际 Project 初始化审计和 Memory ChangeSet 校验通过；我没有在本轮复跑这些全量或浏览器/Memory 命令，故仅将其视作候选材料，不作为本投票的独立证明。\n\n## 残余风险\n\n候选材料已如实说明 Node 20/macOS/Windows 未在本地运行、网络文件系统未验证。即使修复上述阻塞问题，仍应保留这些平台和网络文件系统限制，不能把 CI 配置当作已验证结果。\n\n在阻塞的路径隔离缺陷修正并完成受影响验证前，当前完整实现成果不满足验收条件，故投票 `request_changes`。",
+        "submittedAt": "2026-10-05T03:50:19.174Z",
+        "authorization": {
+          "allowed": true,
+          "permission": "decision.assess",
+          "subject": {
+            "kind": "actor",
+            "actorId": "traex3"
+          },
+          "artifactScope": "memsphere-agile-requirement-development#flow[6]",
+          "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+          "actorId": "traex3",
+          "authoritySource": "config:control_plane.actors.traex3",
+          "basePermissions": [
+            "artifact.read",
+            "decision.assess"
+          ],
+          "grantedPermissions": [],
+          "effectivePermissions": [
+            "artifact.read",
+            "decision.assess"
+          ],
+          "reason": "allowed"
+        }
+      }
+    },
+    {
+      "actor": "traex4",
+      "name": "架构师",
+      "kind": "agent",
+      "submitted": {
+        "comments": [],
+        "vote": "approve",
+        "summary": "# 架构评审结论：批准\n\n我独立检查了当前 Run 的候选产物、已确认需求契约与实施方案，以及工作区相对基线 `2b7400b0d3bff6670982ebcd0a02f023a6859e34` 的实际改动（97 个已跟踪文件，另有新增 CLI、服务、锁、JSONPath/Patch 与测试文件）。实现将模型写入恢复、项目级协调、记录级原生锁、业务 Store 边界和 CLI 编排分离，关键调用路径未见违反已确认范围的架构阻塞问题。\n\n## 我亲自检查并复跑的证据\n\n- 静态检查：`npm run typecheck` 成功。\n- 构建：`npm run build` 成功，包含保留模型资产检查与 View 资产构建；输出确认 5 个系统模型和 1 个市场包。\n- 恢复：`test/model-operation.test.ts` 11/11 通过，覆盖 pending、三处文件写入中断、恢复再次中断、只读阻断、冲突保留和路径/符号链接防护。\n- 并发：`test/data-filesystem-process.test.ts` 的 14 项独立进程测试均通过，覆盖 create/create、create/delete 的双初态/双持锁次序、条件 update/delete、无条件写、删除后重建高水位、SIGKILL 与丢失回执。\n- 模型架构：`test/model-service.test.ts`、`test/model-market.test.ts`、`test/project-models.test.ts`、`test/system-models.test.ts` 合计 46/46 通过，覆盖完整准入、系统只读、直接 Store 绑定、市场整包零发布、可中断发布、统一 ID、定义/Runtime 区分、系统安装幂等和损坏隔离。\n- 还观察到业务 Store/数据 CLI 组合测试输出的前 25 个子测试全部成功；因单次执行超过工具的 30 秒观测窗口，未将其不完整尾部作为独立的完整套件结论。\n\n## 仅引用、未在本轮复跑的证据\n\n我核对了候选材料中对最终全量 `npm test`（1,061 pass、1 Windows skip）、发行冒烟、浏览器验证和 Memory ChangeSet 校验的记录与其对应的源码/测试范围，但没有在本次评审重新运行完整约八分钟的全量套件、Playwright 验证或 Memory ChangeSet 命令，因此不把这些报告本身当作独立证明。\n\n## 残余风险\n\n- 本地亲测范围是 Linux / Node 22；Node 20、macOS、Windows 和网络文件系统语义仍未在本轮本地复跑。候选材料同样没有将 CI 配置误称为这些平台的已通过结果。\n- `importModelMarketPackage` 与候选清理函数的内部 API 依赖调用方持有项目模型锁；当前 View 生产入口确实这样包装。后续新增调用点应继续复用该锁，避免绕过模型多文件恢复与串行化约定。这是演进注意事项，不是当前已暴露入口的阻塞缺陷。\n\n在已检查的需求边界内，没有发现需要修改才能交付的问题；提交 `approve`。",
+        "submittedAt": "2026-10-05T03:50:30.751Z",
+        "authorization": {
+          "allowed": true,
+          "permission": "decision.assess",
+          "subject": {
+            "kind": "actor",
+            "actorId": "traex4"
+          },
+          "artifactScope": "memsphere-agile-requirement-development#flow[6]",
+          "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+          "actorId": "traex4",
+          "authoritySource": "config:control_plane.actors.traex4",
+          "basePermissions": [
+            "artifact.read",
+            "decision.assess"
+          ],
+          "grantedPermissions": [],
+          "effectivePermissions": [
+            "artifact.read",
+            "decision.assess"
+          ],
+          "reason": "allowed"
+        }
+      }
+    }
+  ],
+  "note": "Formal first-round votes and comments are preserved; Runner dispositions and any supplemental fix verification are separate."
+}

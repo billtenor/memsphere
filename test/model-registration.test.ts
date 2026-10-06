@@ -30,8 +30,8 @@ test("Empty registry stays empty until explicit initialization installs its pers
   assert.equal(runtime.reflect({ modelRef: "sales/order.json", storage: "store", store_id: "models/json-schema/draft-07" }).kind, "object");
   assert.equal((await host.definition(MODEL_REGISTRATION_MODEL)).registration.storage, "store");
   assert.equal((await host.definition("memsphere/model-registration.json")).id, MODEL_REGISTRATION_MODEL);
-  assert.throws(() => validateModelRegistration({ modelRef: "x", storage: "store" }), /store_id/);
-  assert.throws(() => validateModelRegistration({ modelRef: "x", storage: "builtin", store_id: "x" }), /must not/);
+  assert.throws(() => validateModelRegistration({ modelRef: "x.json", storage: "store" }), /store_id/);
+  assert.throws(() => validateModelRegistration({ modelRef: "x.json", storage: "builtin", store_id: "x" }), /must not/);
 }));
 test("Explicit initialization uses UUID records for slash IDs, preserves metadata on repeat and definition bytes", async () => fixture(async (root, directory) => {
   const source = '\uFEFF  {"type":"string","title":"Title","description":"Description"}\r\n';
@@ -86,7 +86,7 @@ test("Changing registry directory requires explicit migration and preserves orig
   assert.deepEqual(after.records, before.records);
   const migratedHost = await createProjectModelHost({}, { root, modelRegistration: target });
   for (const model of readBundledSystemModels()) {
-    const path = join("system/definitions", model.metaModel, `${model.registration.modelRef}.json`);
+    const path = join("system/definitions", model.metaModel === "raw.json" ? "raw" : "json-schema/draft-07", model.registration.modelRef);
     assert.deepEqual(await readFile(join(root, "models/registrations", path)), await readFile(join(root, "internal/registry", path)));
     assert.equal((await migratedHost.definition(model.registration.modelRef)).source, model.source);
   }
@@ -98,22 +98,18 @@ test("Changing registry directory requires explicit migration and preserves orig
   await assert.rejects(prepareModelRegistrationMigration({}, { root }, { storeId: "bad", stores: { bad: { factory: "memsphere/filesystem-json", directory: "bad" } } }, { migrate: true }), /conflict/);
   assert.deepEqual((await readModelRegistrations({}, { root })).records, before.records);
 }));
-test("Known preview migration backs up exact bytes and exposes a single canonical builtin", async () => fixture(async (root, directory) => {
+test("A canonical system filename already owned by a project model is preserved as an explicit identity conflict", async () => fixture(async (root, directory) => {
   await mkdir(join(directory, "memsphere"));
   const source = `  ${JSON.stringify(modelRegistrationSchema, null, 2)}\n`;
-  await writeFile(join(directory, "memsphere/model-registration.json"), source);
+  const filename = join(directory, "memsphere/model-registration.json");
+  await writeFile(filename, source);
   await writeFile(join(directory, "one.json"), '{"type":"string"}');
-  const result = await initializeProjectModelRegistrations({}, { root });
-  assert.ok(result.backupPath);
-  assert.equal(await readFile(result.backupPath!, "utf8"), source);
-  const host = await createProjectModelHost({}, { root });
-  const models = await host.list();
-  assert.equal(models.filter(m => m.id === MODEL_REGISTRATION_MODEL).length, 1);
-  assert.equal(models.some(m => m.id === "memsphere/model-registration.json"), false);
-  assert.equal((await host.definition("memsphere/model-registration.json")).id, MODEL_REGISTRATION_MODEL);
-  await assert.rejects(readFile(join(directory, "memsphere/model-registration.json")), { code: "ENOENT" });
+  await assert.rejects(initializeProjectModelRegistrations({}, { root }), /identity conflict/i);
+  assert.equal(await readFile(filename, "utf8"), source);
+  await assert.rejects(readFile(join(root, "models/registrations/initialized.json")), { code: "ENOENT" });
 }));
-test("Approved example seeds and preview migration produce exactly thirteen models without changing source assets", async () => fixture(async (root, directory) => {
+
+test("Existing examples retain all constraints and sources while unsupported models remain unavailable", async () => fixture(async (root, directory) => {
   const snapshots = JSON.parse(await readFile(new URL("../prototypes/model-registration/models.json", import.meta.url), "utf8")) as {
     registration: {
       modelRef: string;
@@ -127,33 +123,29 @@ test("Approved example seeds and preview migration produce exactly thirteen mode
     await mkdir(join(path, ".."), { recursive: true });
     await writeFile(path, example.source);
   }
-  await mkdir(join(directory, "memsphere"));
-  await writeFile(join(directory, "memsphere/model-registration.json"), JSON.stringify(modelRegistrationSchema));
   const result = await initializeProjectModelRegistrations({}, { root });
   assert.equal(result.created, 8);
   const host = await createProjectModelHost({}, { root });
   assert.equal((await host.list()).length, 13);
-  assert.equal((await host.list()).every(m => m.status === "available"), true);
+  assert.deepEqual((await host.list()).filter(m => m.status === "unavailable").map(m => m.id), ["examples/04-dictionaries-and-encodings.json", "examples/05-unions-and-conditions.json"]);
   assert.equal((await host.definition("examples/02-nested-order.json")).registration.package, "memsphere.examples.orders");
   for (const example of examples)
-    assert.equal((await host.definition(example.registration.modelRef)).source, example.source);
+    assert.equal((await host.inspect(example.registration.modelRef)).source, example.source);
 }));
-test("Preview migration updates supported schema references while backing up their complete original bytes", async () => fixture(async (root, directory) => {
-  await mkdir(join(directory, "memsphere"));
-  await writeFile(join(directory, "memsphere/model-registration.json"), JSON.stringify(modelRegistrationSchema));
-  const source = '\uFEFF {"type":"object", "properties":{"registration":{"$ref" : "memsphere/model-registration.json"}},"description":"memsphere/model-registration.json", "examples":[{"$ref":"memsphere/model-registration.json"}]}\r\n';
+test("Identity initialization never rewrites cross-model refs or ordinary annotation strings into identity aliases", async () => fixture(async (root, directory) => {
+  const source = '\uFEFF {"type":"object","properties":{"registration":{"$ref":"memsphere/model-registration.json"}},"description":"memsphere/model-registration", "examples":[{"$ref":"memsphere/model-registration"}]}\r\n';
   await writeFile(join(directory, "reference.json"), source);
-  const result = await initializeProjectModelRegistrations({}, { root });
-  const expected = source.replace('"$ref" : "memsphere/model-registration.json"', '"$ref" : "memsphere/model-registration"');
+  await assert.rejects(initializeProjectModelRegistrations({}, { root }), { code: "MODEL_REFERENCE_UNSUPPORTED" });
+  assert.equal(await readFile(join(directory, "reference.json"), "utf8"), source);
   const host = await createProjectModelHost({}, { root });
-  assert.equal((await host.definition("reference.json")).source, expected);
-  assert.equal((await host.runtime("reference.json")).reflect({ registration: { modelRef: "x", storage: "builtin" } }).kind, "object");
-  const receipt = JSON.parse(await readFile(join(result.backupPath!, "..", "migration-receipt.json"), "utf8"));
-  assert.equal(await readFile(receipt.references[0].backupPath, "utf8"), source);
+  assert.equal((await host.list()).find(model => model.id === "reference.json")?.status, "unavailable");
+  await assert.rejects(host.definition("reference.json"), { code: "MODEL_REFERENCE_UNSUPPORTED" });
+  await assert.rejects(host.runtime("reference.json"), { code: "MODEL_REFERENCE_UNSUPPORTED" });
 }));
+
 test("Registry Store writes enforce storage conditions as business validation, including bootstrap", async () => fixture(async (root) => {
   const store = await createModelRegistrationStore({}, "registry", join(root, "registry"));
-  await assert.rejects(store.create({}, "missing", { modelRef: "x", storage: "store" }), /store_id/);
-  await assert.rejects(store.create({}, "builtin", { modelRef: "x", storage: "builtin", store_id: "x" }), /must not/);
-  await assert.rejects(store.create({}, "package", { modelRef: "x", storage: "builtin", package_name: "Name" }), /requires package/);
+  await assert.rejects(store.create({}, "missing", { modelRef: "x.json", storage: "store" }), /store_id/);
+  await assert.rejects(store.create({}, "builtin", { modelRef: "x.json", storage: "builtin", store_id: "x" }), /must not/);
+  await assert.rejects(store.create({}, "package", { modelRef: "x.json", storage: "builtin", package_name: "Name" }), /requires package/);
 }));

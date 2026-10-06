@@ -66,18 +66,18 @@ export default defineViewPlugin<{ locale?: string }>({
     const storage = router.register({ id: "storage", path: "/model-prototype/storage" });
     const samples = [
       {
-        id: "sales/order.json", title: text("订单", "Order"), description: text("订单编号、金额与订单明细的定义。", "Defines an order number, amount, and line items."), metaModel: "json-schema/draft-07", builtin: false,
+        id: "sales/order.json", title: text("订单", "Order"), description: text("订单编号、金额与订单明细的定义。", "Defines an order number, amount, and line items."), metaModel: "json-schema/draft-07.json", builtin: false,
         definition: { $schema: "http://json-schema.org/draft-07/schema#", title: "Order", type: "object", properties: { orderNo: { title: text("订单编号", "Order number"), type: "string", description: text("订单的唯一编号", "Unique order number") }, amount: { title: text("订单金额", "Order amount"), type: "number", minimum: 0 }, items: { title: text("订单明细", "Line items"), type: "array", items: { type: "object", properties: { productId: { title: text("商品编号", "Product ID"), type: "string" }, quantity: { title: text("数量", "Quantity"), type: "number", minimum: 1 } }, required: ["productId", "quantity"] } } }, required: ["orderNo", "amount", "items"] }
       },
       {
-        id: "memsphere/run-status.json", title: text("运行状态", "Run status"), description: text("示例：运行的身份、名称与状态。", "Example: a run's identity, name and status."), metaModel: "json-schema/draft-07", builtin: false,
+        id: "memsphere/run-status.json", title: text("运行状态", "Run status"), description: text("示例：运行的身份、名称与状态。", "Example: a run's identity, name and status."), metaModel: "json-schema/draft-07.json", builtin: false,
         definition: { $schema: "http://json-schema.org/draft-07/schema#", title: "Run status", type: "object", properties: { id: { type: "string" }, name: { type: "string" }, status: { type: "string", enum: ["running", "done", "abandoned"] } }, required: ["id", "name", "status"] }
       },
       {
-        id: "memsphere/run/artifact", title: text("运行产物", "Run artifact"), description: text("项目装配的内置 raw 模型，展示原始内容的领域身份。", "A project-assembled raw model for managed Run content."), metaModel: "raw", builtin: true, definition: {}
+        id: "memsphere/run/artifact.json", title: text("运行产物", "Run artifact"), description: text("项目装配的内置 raw 模型，展示原始内容的领域身份。", "A project-assembled raw model for managed Run content."), metaModel: "raw.json", builtin: true, definition: {}
       },
       {
-        id: "broken-schema.json", title: text("无法读取的定义", "Unavailable definition"), description: text("用于评审单个模型失败时的展示。", "Demonstrates a failure isolated to one model."), metaModel: "json-schema/draft-07", builtin: false, definition: null
+        id: "broken-schema.json", title: text("无法读取的定义", "Unavailable definition"), description: text("用于评审单个模型失败时的展示。", "Demonstrates a failure isolated to one model."), metaModel: "json-schema/draft-07.json", builtin: false, definition: null
       }
     ];
     let query = "";
@@ -127,7 +127,7 @@ export default defineViewPlugin<{ locale?: string }>({
         const heading = document.createElement("h2"); heading.className = "model-prototype-heading";
         if (isStorage) {
           heading.textContent = text("项目设置：模型存储", "Project settings: model storage"); body.append(heading);
-          body.append(metadata([[text("当前项目", "Project"), ctx.module.projectId], [text("模型定义标准", "Definition standard"), "json-schema/draft-07"], [text("存储实现", "Storage implementation"), "memsphere/filesystem"]]));
+          body.append(metadata([[text("当前项目", "Project"), ctx.module.projectId], [text("模型定义标准", "Definition standard"), "json-schema/draft-07.json"], [text("存储实现", "Storage implementation"), "memsphere/filesystem"]]));
           const form = document.createElement("div"); form.className = "model-prototype-form";
           let field: ReturnType<typeof ui.textField>;
           const descriptor = () => ({ label: t("存储目录", "Storage directory"), value: directory, required: true, description: t("相对路径以登记的 Project 根目录为基准，不是 Git 或 Memory 目录；也可填写绝对路径。更改目录只切换读取位置，不搬运原文件。", "Relative paths use the registered Project root, not the Git or Memory directory. Absolute paths are also accepted. Changing the directory switches the location without moving files."), error: directory.trim() ? undefined : t("请填写存储目录", "Enter a storage directory"), onInput(value: string) { directory = value; field.update(descriptor()); } });
@@ -147,7 +147,7 @@ export default defineViewPlugin<{ locale?: string }>({
         if (model.definition === null) { body.append(ui.feedback({ state: "error", title: t("读取模型定义失败", "Could not read the definition"), description: t("示例文件包含无效 JSON。其他模型仍可查看。", "The sample file contains invalid JSON. Other models remain available.") })); return; }
         const definition = JSON.stringify(model.definition, null, 2);
         const code = document.createElement("pre"); code.className = "model-prototype-code"; code.textContent = definition;
-        const structure = model.metaModel === "raw"
+        const structure = model.metaModel === "raw.json"
           ? ui.feedback({ state: "read-only", title: t("原始内容模型", "Raw content model"), description: t("此模型不声明成员字段；内容可以是文件、图片等原始载荷。", "This model does not declare member fields. Its content may be a file, image or another raw payload.") })
           : definitionTable(ui, model.definition, text);
         const panel = document.createElement("div");
