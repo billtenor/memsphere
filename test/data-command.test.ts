@@ -48,6 +48,7 @@ async function ipcCli(t: TestContext, fixture: Fixture, args: string[], pauseRea
     const waiter = waits.get(message.type); if (waiter) { waits.delete(message.type); waiter.resolve(); } else messages.push(message.type);
   });
   let closed = false;
+  const exit = new Promise<void>(resolve => child.once("exit", () => resolve()));
   const result = new Promise<Result>((resolve, reject) => {
     child.once("error", reject);
     child.once("close", code => {
@@ -56,7 +57,13 @@ async function ipcCli(t: TestContext, fixture: Fixture, args: string[], pauseRea
       resolve({ code, stdout: bytes.toString("utf8"), stderr: error, bytes });
     });
   });
-  t.after(async () => { if (!closed) child.kill("SIGKILL"); await result; });
+  t.after(async () => {
+    if (!closed) child.kill("SIGKILL");
+    await exit;
+    // Killed tsx workers can leave inherited pipes open in their compiler
+    // subprocess on Windows. Cleanup must not wait for those pipes to close.
+    child.stdout!.destroy(); child.stderr!.destroy();
+  });
   function next(type: string): Promise<void> {
     const index = messages.indexOf(type); if (index !== -1) { messages.splice(index, 1); return Promise.resolve(); }
     if (closed) return Promise.reject(new Error(`CLI exited before ${type}`));

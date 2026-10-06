@@ -21,3 +21,13 @@
 本次未修改 Memory、命令契约或已批准范围。现有最终 Memory Checkpoint change-20261005-031024825z-a1b5f8c3 的内容仍匹配，passed，digest 076c3c71256feb93c6754b44fecaa97d0b461b2da54b15da7bc1321a10a1f04e，View：http://0.0.0.0:30000/projects/memsphere/changes/change-20261005-031024825z-a1b5f8c3 。不创建空 ChangeSet。
 
 修复 commit 推送后继续观察最新 head，发现新问题则修复并复验；只有最新 head 的全部检查成功才上报 CI 跟进 Run 完成。不合并 PR、不发布 GitHub review/comment。
+
+## 第二次修正：Windows CLI 并发测试
+
+head bb4456d5c535e221fedba8f80fadb3e0a5b8f662 的 Security、三平台 Node 20、Windows 安装包，以及 Ubuntu / macOS 完整套件全部通过。Windows 完整套件 job 112148552677（CI Run 37426859157）在 30 分钟限额处取消。
+
+实际日志只有一条失败：two CLI edits that capture the same revision commit exactly one complete patch。第一个 CLI 的 rename 返回 EPERM；测试暂停第二个 CLI 的位置尚未关闭数据文件句柄，人为阻止了 Windows 对同一文件的替换。之后日志完成至第 190 项，进程没有正常退出，最终由 job 时限取消。
+
+修正只涉及测试：CLI Worker 读取完整快照并关闭句柄后，再发出 captured 并暂停；两个 CLI 仍捕获同一 revision，原“仅一个修改成功、另一个报冲突、最终值和 revision 正确”全部断言保留。失败清理等待 Worker 的 exit 并销毁管道，不等待可能由其子进程保留的 stdio close。未增加 job 时限，也未修改产品的锁、替换或 revision 实现。
+
+本地受影响文件 12/12 通过，0 失败；当前普通 Memory validate 通过。第二次完整 npm test 正在执行，后续还须持续跟进新 head 的全部八项 CI。原日志及上一次成功的完整本地回归 1,074 项（1,073 通过、1 跳过）作为历史证据保留，不代替第二次验证。

@@ -20,15 +20,26 @@ fs.open = async (...args) => {
   const handle = await open(...args);
   if (request.pauseRead && String(args[0]) === request.recordPath) {
     const readFile = handle.readFile.bind(handle);
+    const close = handle.close.bind(handle);
+    let snapshotRead = false;
     handle.readFile = (async (...readArgs: Parameters<typeof readFile>) => {
       const bytes = await readFile(...readArgs);
       if (!captured) {
         captured = true;
-        process.send!({ type: "captured" });
-        await released;
+        snapshotRead = true;
       }
       return bytes;
     }) as typeof handle.readFile;
+    handle.close = async () => {
+      await close();
+      if (snapshotRead) {
+        snapshotRead = false;
+        // Pause a completed read, not an open file handle: Windows cannot
+        // replace that file while another CLI's descriptor remains open.
+        process.send!({ type: "captured" });
+        await released;
+      }
+    };
   }
   return handle;
 };
