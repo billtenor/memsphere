@@ -15,6 +15,8 @@ Memory 是 Agent 理解并进入个性化软件的语义入口。通过 memspher
 
 Memsphere Home 的 `config.json` 中，`language` 同时控制面向 Agent 的工作语言与 View 固定界面语言，支持 `zh-CN` 和 `en`，省略时固定为 `zh-CN`。Run 启动后只冻结该 Run 的 Agent 工作语言，因此修改配置只影响后续创建的 Run；配置中心成功保存语言后，当前 View 进程立即更新，下一次页面加载使用新界面语言。
 
+Memsphere CLI 要求 Node.js 24 或更高版本；开发与 CI 使用 Node 24 LTS。
+
 ## Memory 写入硬门禁
 
 只要本轮创建、修改、移动、重命名或删除了任何 Memory，结束任务、提交评审或创建 Git commit 前都必须执行 `memsphere memory change validate [change-id]`。普通 `memsphere validate` 只校验当前 Project Store 或显式 Memory root，不能代替变更级校验，也不会创建或更新 ChangeSet。最终实现摘要、验证报告或交付报告必须包含与当前最终 Memory 内容匹配的 ChangeSet ID、校验状态和 View 入口；校验后继续修改 Memory 时必须重新执行变更级校验。

@@ -136,7 +136,7 @@ The CLI is therefore not primarily a collection of commands for humans. It is a 
 
 ### 6.1 Requirements
 
-- Node.js 20 or later;
+- Node.js 24 or later; Node 24 LTS is recommended;
 - Git;
 - an Agent that can use Skills and terminal commands.
 
@@ -149,7 +149,7 @@ Memsphere is designed for Agents, so installation, initialization, and Project s
 ~~~text
 Install and configure Memsphere in the current working directory. Perform all required terminal operations yourself:
 
-1. Check that Node.js 20 or later and Git are available. If a prerequisite is missing, tell me clearly what I need to install.
+1. Check that Node.js 24 or later and Git are available. If a prerequisite is missing, tell me clearly what I need to install.
 2. Run npm install -g memsphere, then run memsphere skill init --global.
 3. Read and follow the Memsphere Skill you just installed. If this session does not automatically refresh its Skill list, read SKILL.md directly from the location reported by the installation command and continue this task; do not ask me to open a new session solely for that reason.
 4. Check whether the current directory is already bound to a Project. Reuse an existing binding. If it is not bound, ask whether I want a Managed Project or an Embedded Project. If I am unsure, recommend and create a Managed Project, then bind this directory.
@@ -432,7 +432,7 @@ node scripts/model-data-smoke.mjs
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before contributing. For security issues, see [SECURITY.md](SECURITY.md).
 
-CI runs the existing full checks on Node 22 and checks native cross-process locks and the model/data CLI smoke on Node 20 Linux, macOS and Windows runners. After a successful build, it also packs, installs and verifies the installed CLI.
+CI uses Node 24 LTS to run all automated tests on Linux, macOS and Windows, including native cross-process file locks and the model/data CLI. The Windows package check verifies the CLI in all four supported shells. The model/data CLI and installed-package smoke scripts are also available for manual runs.
 
 ## 9. License
 

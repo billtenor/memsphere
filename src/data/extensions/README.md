@@ -140,7 +140,7 @@ filesystem JSON ValueStore 按规范化后的真实目录和记录文件名取�
 - `.memsphere-` 前缀为内部文件保留，不属于数据 ID。`.memsphere-json-store` 是永久协调和删除 revision 历史，不能当临时文件清理。临时文件正常结束会清理，崩溃残留不进入 Factory 列表；业务 Store 重新登记或打开遇到未知内部条目明确报错，不自动删除。
 - `list()` 只枚举文件路径，不读取正文。按完整 ID 字符串顺序分页，默认 100 条、最多 1000 条；DataStore 扫描目录树，ValueStore 扫描单层目录，没有索引，不保证并发修改时的跨页快照。DataStore 写入逐块处理，读取仍完整缓冲到内存；ValueStore 的 JSON 编解码仍处理完整值。
 
-文件名规则参考 [Windows 文件命名约定](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)，时间信息参考 [Node.js Stats 时间语义](https://nodejs.org/docs/latest-v22.x/api/fs.html#stat-time-values)。测试沿用仓库 Linux、Windows、macOS 的 CI 矩阵；本地在什么系统执行，只能验证该系统。
+文件名规则参考 [Windows 文件命名约定](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)，时间信息参考 [Node.js Stats 时间语义](https://nodejs.org/docs/latest-v24.x/api/fs.html#stat-time-values)。测试沿用仓库 Linux、Windows、macOS 的 CI 矩阵；本地在什么系统执行，只能验证该系统。
 
 旧的哈希目录与私有 `.data` 文件不会被自动迁移、覆盖或删除；需要保留已有数据时，应另行迁移到新格式。两种 Store 均拒绝已移除的 lockTimeoutMs 和其他未知配置字段，避免配置失效而不自知。
 

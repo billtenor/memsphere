@@ -4,6 +4,7 @@ names:
   - memsphere-framework
   - Memsphere
 defines:
+  - Memsphere CLI 要求 Node.js 24 或更高版本；开发与 CI 统一使用 Node 24 LTS。
   - Project 模型定义与登记分开保存。模型和元模型 ID 统一为带 .json 后缀的相对路径，例如 sales/order.json、memsphere/model-registration.json、json-schema/draft-07.json、raw.json；Store ID 和 Factory ID 不改名。项目原始 JSON 定义使用 filesystem DataStore，默认目录和 Store ID 为 models/json-schema/draft-07。相对 modelsDirectory 以 Registry 登记的 Project 根目录解析，绝对路径直接使用，改变目录不自动迁移原文件。
   - 模型登记使用持久化的 memsphere/model-registration.json。启动登记 Runtime 只读取其固定定义，不依赖自己的登记记录；系统区完全未安装时仅借发行定义读取登记数据，列表不补造系统模型，读取未安装系统 ID 报缺失并提示显式初始化。登记字段为 modelRef、name、description、package、package_name、tags、storage、store_id；modelRef、storage 必填。storage=store 必须指向定义 DataStore，不能指向登记 ValueStore；storage=builtin 不带 store_id。全部系统模型的定义和登记字段只读，普通模型命令不能创建、覆盖、修改或删除。
   - Project config.json 的 modelRegistration 选择 storeId，并在 stores 中配置各 ID 的 filesystem ValueStore 类型与 directory；默认 ID 为 memsphere/model-registrations、目录为 models/registrations。模型登记根保存 project、imported 与 system/registrations 三个区域；来源由区域上下文区分，不添加登记来源字段，也不从 package 是否存在推断来源。本项目可有包，未指定 package 的模型进入未定义包。
