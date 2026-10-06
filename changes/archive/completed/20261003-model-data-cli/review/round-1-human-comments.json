@@ -1,0 +1,6 @@
+[
+  {
+    "body": "按合入最新 master（2b7400b，#84）后的设计分析修订需求契约：系统模型以 Project 中持久化的定义与登记为准，覆盖四类模型定义 Store、稳定的无后缀 system ModelRef、原始 source 和显式初始化/已安装损坏的边界；允许系统模型 name、description、tags 展示元数据修改，保护定义、身份、元模型、Store 与包归属。模型 create/update/validate 默认采用 definition 检查，Runtime 支持单独显式检查，使用独立于 Runtime 的完整 Schema 引用分析，避免合法高级 Schema 被错误拒绝。同步系统目录与保留 Store 防绕过规则，以及验收用例；保持模型市场 CLI 后置，现有数据 CRUD、最小业务 Store 和并发保护范围不变。修订完成后在同一 Run 中再次发起 Review。",
+    "severity": "blocking"
+  }
+]

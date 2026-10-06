@@ -1,0 +1,10 @@
+[
+  {
+    "body": "所有 list 命令都必须支持分页。补齐 model list、data store list，全面检查其他 list，不得只修当前指出的一个入口；同步统一的分页参数、返回值、示例和验收要求。",
+    "severity": "blocking"
+  },
+  {
+    "body": "数据局部修改命令使用已讨论并接受的 data edit <id> 命名，替换原 data patch 命令名；同步相关说明、示例及验收，区分 update 的整条替换与 edit 的局部修改。",
+    "severity": "blocking"
+  }
+]

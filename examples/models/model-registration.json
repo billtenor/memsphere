@@ -80,7 +80,7 @@
       "storage": "store"
     },
     {
-      "modelRef": "memsphere/run/artifact",
+      "modelRef": "memsphere/run/artifact.json",
       "name": "运行产物",
       "package": "memsphere.builtin",
       "package_name": "Memsphere 内置",

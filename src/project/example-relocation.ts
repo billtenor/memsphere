@@ -15,7 +15,8 @@ import { readModelRegistrations, withModelRegistrationLock } from "./model-regis
 import type { ProjectModelInput } from "./model-registration-contract.js";
 import { validateModelStoragePaths, assertModelPath, discoverModelIds, canonicalPath } from "./model-storage-paths.js";
 import { createProjectModelHost } from "./models.js";
-import { collectExternalSchemaReferences } from "./model-schema-references.js";
+import { checkModelDefinition, type ModelCandidate } from "./model-validation.js";
+import { commitModelOperation, readModelOperationStamp, assertModelOperationStamp, recoverModelOperation, type ModelFileChange } from "./model-operation.js";
 
 export { exampleRelocationBaseline } from "./example-relocation-baseline.js";
 const CHANGE = "20261003-model-catalogs";
@@ -83,7 +84,7 @@ function marketSources() {
   if (!pack || pack.models.length !== 8) throw failure("The complete example market package is required before relocation");
   const sources = exampleRelocationBaseline.map(baseline => {
     const model = pack.models.find(model => model.registration.modelRef === baseline.modelRef);
-    if (!model || digest(model.source) !== baseline.sourceDigest) throw failure(`Market source differs from approved example: ${baseline.modelRef}`);
+    if (!model) throw failure(`Market model is missing: ${baseline.modelRef}`);
     return model;
   });
   return { sources, digest: digest(JSON.stringify(sources.map(model => [model.registration.modelRef, digest(model.source)]))) };
@@ -124,23 +125,23 @@ async function preservedDigest(paths: Paths, targets: ExampleRelocationPlan["tar
   const pathsToHash = [...ids.map(id => join(paths.modelsDirectory, id)), ...await treeFiles(paths.registrationDirectory)].filter(path => !excluded.has(path));
   return digest(JSON.stringify(await Promise.all([...new Set(pathsToHash)].sort().map(async path => [path, digest(await bytes(path))]))));
 }
-async function assertNoRetainedReferences(context: Context, input: ProjectModelInput): Promise<void> {
-  const host = await createProjectModelHost(context, input);
-  const targetRefs = new Set(exampleRelocationBaseline.map(item => item.modelRef));
-  for (const summary of await host.list()) {
-    if (targetRefs.has(summary.id)) continue;
-    if (summary.status !== "available") throw failure(`Cannot inspect retained model: ${summary.id}`);
-    if (summary.metaModel !== "json-schema/draft-07") continue;
-    const model = await host.definition(summary.id);
-    const refs = collectExternalSchemaReferences(model.definition, model.id).filter(ref => targetRefs.has(ref));
-    if (refs.length) throw failure(`Retained model ${summary.id} depends on examples: ${refs.join(", ")}`, { modelRef: summary.id, references: refs });
-  }
+/** Historical evidence is not a grandfathered publishing path. Check the whole set before writing. */
+async function checkHistoricalModels(context: Context, candidates: ModelCandidate[]): Promise<void> {
+  for (const candidate of candidates) await checkModelDefinition(context, candidate, "definition");
+  for (const candidate of candidates) await checkModelDefinition(context, candidate, "runtime");
+}
+async function checkBackupModels(context: Context, backup: Backup): Promise<void> {
+  const candidates = await Promise.all(backup.entries.filter(entry => entry.kind === "definition").map(async entry => ({
+    modelRef: entry.modelRef, definition: undefined, source: (await bytes(entry.backup)).toString("utf8")
+  })));
+  await checkHistoricalModels(context, candidates);
 }
 async function inspect(context: Context, target: ExampleRelocationTarget, identity: { operationId: string; createdAt: string }): Promise<ExampleRelocationPlan> {
   const current = await readTarget(target);
   const state = await readModelRegistrations(context, current.input);
   if (state.diagnostics.length) throw failure("Cannot relocate damaged or duplicate model registrations", { diagnostics: state.diagnostics });
   const targets: ExampleRelocationPlan["targets"] = [];
+  const candidates: ModelCandidate[] = [];
   for (const baseline of exampleRelocationBaseline) {
     const matches = state.records.filter(record => record.registration.modelRef === baseline.modelRef);
     const record = matches[0];
@@ -150,17 +151,21 @@ async function inspect(context: Context, target: ExampleRelocationTarget, identi
     await assertModelPath(current.paths.modelsDirectory, baseline.modelRef, current.paths.excludedDirectories);
     const source = await bytes(join(current.paths.modelsDirectory, baseline.modelRef));
     if (digest(source) !== baseline.sourceDigest) throw failure(`Example definition differs from the approved bytes: ${baseline.modelRef}`);
+    candidates.push({ modelRef: baseline.modelRef, definition: undefined, source: source.toString("utf8") });
     targets.push({ modelRef: baseline.modelRef, definitionDigest: baseline.sourceDigest, recordId: record.id,
       recordDigest: digest(await bytes(join(current.paths.registrationDirectory, "project", `${record.id}.json`))) });
   }
-  await assertNoRetainedReferences(context, current.input);
+  await checkHistoricalModels(context, candidates);
   return parsePlan({ version: 1, ...identity, project: { name: target.name, root: current.input.root },
     configDigest: current.configDigest, projectManifestDigest: current.projectManifestDigest, paths: current.paths,
     targets, marketDigest: marketSources().digest, preservedDigest: await preservedDigest(current.paths, targets) });
 }
 /** Read-only: planning never initializes models, creates directories, or changes a Project. */
 export async function planExampleRelocation(context: Context, target: ExampleRelocationTarget): Promise<ExampleRelocationPlan> {
-  return inspect(context, target, { operationId: randomUUID(), createdAt: new Date().toISOString() });
+  const stamp = await readModelOperationStamp(target.root);
+  const plan = await inspect(context, target, { operationId: randomUUID(), createdAt: new Date().toISOString() });
+  await assertModelOperationStamp(target.root, stamp);
+  return plan;
 }
 async function assertTargetMapping(plan: ExampleRelocationPlan) {
   const current = await readTarget(plan.project);
@@ -211,7 +216,7 @@ async function assertRestoreRegistrations(backup: Backup, modelRef?: string): Pr
     }
   }
 }
-/** Shared by real recovery and the mandatory isolated rehearsal. */
+/** Undoing an uncommitted relocation restores its before bytes; it does not republish historical models. */
 async function restoreEntries(backup: Backup, entries = backup.entries, hooks: ExampleRelocationHooks = {}) {
   await assertRestorePreflight(entries);
   const restored: string[] = [];
@@ -232,6 +237,7 @@ async function restoreEntries(backup: Backup, entries = backup.entries, hooks: E
   return restored;
 }
 async function rehearse(backup: Backup): Promise<void> {
+  await checkBackupModels({}, backup);
   const root = await mkdtemp(join(tmpdir(), "memsphere-example-restore-"));
   try {
     const input = { root };
@@ -245,8 +251,6 @@ async function rehearse(backup: Backup): Promise<void> {
       const model = await host.definition(item.modelRef);
       if (model.origin !== "project" || digest(model.source) !== item.definitionDigest) throw failure(`Isolated restore failed: ${item.modelRef}`);
     }
-    const references = collectExternalSchemaReferences((await host.definition("examples/06-references-and-recursion.json")).definition, "examples/06-references-and-recursion.json");
-    if (!references.includes("examples/07-scalar-enum-root.json")) throw failure("Isolated restore lost the 06 to 07 reference");
     for (const entry of entries) if (digest(await bytes(entry.original)) !== entry.digest) throw failure(`Isolated restore byte mismatch: ${entry.modelRef}`);
   } finally { await rm(root, { recursive: true, force: true }); }
 }
@@ -263,8 +267,8 @@ async function receipt(backup: string, plan: ExampleRelocationPlan, status: Relo
 /** Explicit, fixed-scope write. Callers never invoke this from model discovery or Project creation. */
 export async function applyExampleRelocation(context: Context, value: unknown, hooks: ExampleRelocationHooks = {}): Promise<RelocationReceipt> {
   const plan = parsePlan(value);
-  await assertTargetMapping(plan);
   return withModelRegistrationLock(plan.project.root, async () => {
+    await recoverModelOperation(plan.project.root);
     const backupRoot = join(plan.paths.backupDirectory, CHANGE, plan.operationId);
     const current = await assertTargetMapping(plan);
     const previousReceipt = await optionalBytes(join(backupRoot, "receipt.json"));
@@ -272,6 +276,7 @@ export async function applyExampleRelocation(context: Context, value: unknown, h
       const previous = JSON.parse(previousReceipt.toString("utf8"));
       const saved = await loadBackup(backupRoot);
       if (!isDeepStrictEqual(saved.plan, plan)) throw failure("Backup belongs to a different plan");
+      await checkBackupModels(context, saved);
       if (previous.status === "applied" && marketSources().digest === plan.marketDigest && await preservedDigest(current.paths, plan.targets) === plan.preservedDigest
         && (await Promise.all(saved.entries.map(entry => optionalBytes(entry.original)))).every(value => value === undefined)) {
         return { ...previous, status: "unchanged" } as RelocationReceipt;
@@ -364,14 +369,26 @@ export async function restoreExampleRelocation(context: Context, backupRoot: str
   const initial = await loadBackup(backupRoot).catch(error => {
     throw Object.assign(error, { backup: resolve(backupRoot), restoreCommand: restoreCommand(resolve(backupRoot)) });
   });
-  await assertTargetMapping(initial.plan);
   return withModelRegistrationLock(initial.plan.project.root, async () => {
+    await recoverModelOperation(initial.plan.project.root);
     try {
       context.signal?.throwIfAborted();
       const backup = await loadBackup(backupRoot);
       await assertTargetMapping(backup.plan);
       await assertRestoreRegistrations(backup);
-      const restored = await restoreEntries(backup, backup.entries, hooks);
+      await assertRestorePreflight(backup.entries);
+      await checkBackupModels(context, backup);
+      const changes: ModelFileChange[] = [];
+      for (const [index, entry] of backup.entries.entries()) {
+        await hooks.beforeRestore?.(index, entry.original);
+        const after = await bytes(entry.backup);
+        if (digest(after) !== entry.digest) throw failure(`Backup changed during restore: ${entry.backup}`);
+        const before = await optionalBytes(entry.original);
+        if (before && digest(before) !== entry.digest) throw failure(`Restore conflict: ${entry.original}`);
+        if (!before) changes.push({ path: entry.original, before, after });
+      }
+      await commitModelOperation(backup.plan.project.root, "restore-example-models", changes);
+      const restored = changes.map(change => change.path);
       const state = await readModelRegistrations({}, (await readTarget(backup.plan.project)).input);
       if (state.diagnostics.length) throw failure("Restored Project has registration diagnostics", { diagnostics: state.diagnostics });
       for (const entry of backup.entries) if (digest(await bytes(entry.original)) !== entry.digest) throw failure(`Restore verification failed: ${entry.original}`);

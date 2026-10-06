@@ -63,7 +63,7 @@
       "example",
       "json-schema"
     ],
-    "description": "本地 definitions 复用、递归树与精确文件 ModelRef；当前树表显示引用提示，引用目标查看原文，不无限展开。",
+    "description": "本地 definitions 复用、递归树与模型内的状态枚举；引用目标保存在本模型中，不无限展开递归字段。",
     "store_id": "models/json-schema/draft-07",
     "storage": "store"
   },
@@ -90,7 +90,7 @@
     "storage": "store"
   },
   {
-    "modelRef": "memsphere/model-registration",
+    "modelRef": "memsphere/model-registration.json",
     "name": "模型登记",
     "package": "memsphere.builtin",
     "tags": [
@@ -101,7 +101,7 @@
     "storage": "builtin"
   },
   {
-    "modelRef": "memsphere/run/agent-activity-log",
+    "modelRef": "memsphere/run/agent-activity-log.json",
     "name": "智能体活动日志",
     "package": "memsphere.builtin",
     "tags": [
@@ -113,7 +113,7 @@
     "storage": "builtin"
   },
   {
-    "modelRef": "memsphere/run/agent-activity-snapshot",
+    "modelRef": "memsphere/run/agent-activity-snapshot.json",
     "name": "智能体活动快照",
     "package": "memsphere.builtin",
     "tags": [
@@ -125,7 +125,7 @@
     "storage": "builtin"
   },
   {
-    "modelRef": "memsphere/run/artifact",
+    "modelRef": "memsphere/run/artifact.json",
     "name": "运行产物",
     "package": "memsphere.builtin",
     "tags": [
@@ -137,7 +137,7 @@
     "storage": "builtin"
   },
   {
-    "modelRef": "memsphere/run/memory-snapshot-file",
+    "modelRef": "memsphere/run/memory-snapshot-file.json",
     "name": "记忆快照文件",
     "package": "memsphere.builtin",
     "tags": [

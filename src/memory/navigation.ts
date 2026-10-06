@@ -14,6 +14,7 @@ import type {
   WhileNode
 } from "./ast.js";
 import type { MemoryKind } from "./kinds.js";
+import { paginateItems, type Page, type PaginationOptions } from "../pagination.js";
 
 export const memoryNodeTypes = ["Statement", "String", "Schema", "Ref", "Action", "If", "While", "Call"] as const;
 export type MemoryNodeType = (typeof memoryNodeTypes)[number];
@@ -37,11 +38,9 @@ export type MemoryNodeDescriptor = {
   has_children: boolean;
 };
 
-export type MemoryNodeListPage = {
+export type MemoryNodeListPage = Page<MemoryNodeDescriptor> & {
   memory: MemoryIdentity;
   parent_node_ref?: string;
-  nodes: MemoryNodeDescriptor[];
-  next_cursor: null;
 };
 
 export type MemoryNodeContextEntry = {
@@ -88,13 +87,15 @@ export class MemoryNavigation {
     this.#index = indexNodes(this.#nodes);
   }
 
-  listChildren(nodeRef?: string): MemoryNodeListPage {
+  listChildren(nodeRef?: string, options: PaginationOptions = {}, scope: unknown = this.#identity): MemoryNodeListPage {
     const nodes = nodeRef === undefined ? this.#nodes : this.#resolve(nodeRef).children;
     return {
       memory: cloneIdentity(this.#identity),
       parent_node_ref: nodeRef,
-      nodes: nodes.map(toDescriptor),
-      next_cursor: null
+      ...paginateItems(nodes.map(toDescriptor), options, {
+        command: "memory list",
+        scope: { source: scope, memory: this.#identity.reference, parent: nodeRef ?? null, mode: "children" }
+      })
     };
   }
 

@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-06",
+  "command": "node dist/cli.js --project memsphere memory change validate",
+  "exitCode": 0,
+  "stdout": "ChangeSet validation passed\nChangeSet: change-20261005-031024825z-a1b5f8c3\nStore: embedded\nBase Revision: 2b7400b0d3bff6670982ebcd0a02f023a6859e34\nContent Digest: 076c3c71256feb93c6754b44fecaa97d0b461b2da54b15da7bc1321a10a1f04e\nmemoryRoot: /data00/home/liuyanjun.lyj/.codex/worktrees/2f70/vibe-mem/.memsphere/memory\nPreview: http://0.0.0.0:30000/projects/memsphere/changes/change-20261005-031024825z-a1b5f8c3\n",
+  "changeId": "change-20261005-031024825z-a1b5f8c3",
+  "status": "passed",
+  "contentDigest": "076c3c71256feb93c6754b44fecaa97d0b461b2da54b15da7bc1321a10a1f04e",
+  "view": "http://0.0.0.0:30000/projects/memsphere/changes/change-20261005-031024825z-a1b5f8c3",
+  "attempts": [
+    {
+      "command": "node dist/cli.js --project memsphere memory change validate --output json",
+      "exitCode": 1,
+      "reason": "校验命令不支持 --output，未执行校验或修改内容；随后用原生命令成功校验。"
+    }
+  ]
+}

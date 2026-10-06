@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import { Config } from "../src/data/api/config.js";
 import {
@@ -13,6 +13,7 @@ import {
   cleanupCreatedDirectories,
   deleteFile,
   findFile,
+  FILESYSTEM_JSON_METADATA_DIRECTORY,
   INTERNAL_PREFIX,
   isCode,
   listFilenames,
@@ -476,7 +477,7 @@ test("pagination is lexical, scoped, bounded and rejects malformed cursors", () 
   assert.throws(() => paginate([], { limit: null as unknown as number }, "store-1"), /limit/);
 });
 
-test("record mutex serializes the same canonical file while unrelated files proceed", async () => {
+test("record lock serializes the same canonical file while unrelated files proceed", async () => {
   await temporary(async (directory) => {
     const started = deferred();
     const release = deferred();
@@ -494,11 +495,11 @@ test("record mutex serializes the same canonical file while unrelated files proc
     release.resolve();
     await Promise.all([first, second]);
     assert.deepEqual(events, ["first", "other", "first done", "second"]);
-    assert.deepEqual(await fs.readdir(directory), []);
+    assert.deepEqual(await fs.readdir(directory), [FILESYSTEM_JSON_METADATA_DIRECTORY]);
   });
 });
 
-test("cancelled mutex waiter cannot let a later writer bypass its active predecessor", async () => {
+test("cancelled lock waiter cannot let a later writer bypass its active predecessor", async (t) => {
   await temporary(async (directory) => {
     const started = deferred();
     const release = deferred();
@@ -509,14 +510,22 @@ test("cancelled mutex waiter cannot let a later writer bypass its active predece
       events.push("first done");
     });
     await started.promise;
+    const native = createRequire(import.meta.url)("fs-native-extensions");
+    const tryLock = native.tryLock;
+    let contended = deferred();
+    t.mock.method(native, "tryLock", (...args) => {
+      const acquired = tryLock(...args);
+      if (!acquired) contended.resolve();
+      return acquired;
+    });
     const controller = new AbortController();
     const cancelled = withRecordLock({ signal: controller.signal }, directory, "one.json", async () => { events.push("cancelled ran"); });
-    // Let the waiter enter the queue before aborting it.
-    await sleep(20);
+    await contended.promise;
     controller.abort(new Error("cancel waiter"));
     await assert.rejects(cancelled, /cancel waiter/);
+    contended = deferred();
     const next = withRecordLock({}, directory, "one.json", async () => { events.push("next"); });
-    await sleep(20);
+    await contended.promise;
     assert.deepEqual(events, []);
     release.resolve();
     await Promise.all([first, next]);

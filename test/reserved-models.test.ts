@@ -14,19 +14,19 @@ function fixture(run: (root: string, manifest: ReservedModelManifest, save: () =
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
-test("Reserved model assets contain five persistent system definitions and one market package containing all eight original examples", () => {
+test("Reserved model assets use canonical identities and retain eight examples with a self-contained recursive model", () => {
   const catalog = readReservedModelCatalog();
   assert.equal(catalog.systemModels.length, 5);
   assert.deepEqual(catalog.marketPackages.map(pack => [pack.id, pack.models.length]), [["memsphere.examples", 8]]);
-  const registration = catalog.systemModels.find(model => model.registration.modelRef === "memsphere/model-registration")!;
-  assert.equal(registration.metaModel, "json-schema/draft-07");
+  const registration = catalog.systemModels.find(model => model.registration.modelRef === "memsphere/model-registration.json")!;
+  assert.equal(registration.metaModel, "json-schema/draft-07.json");
   assert.equal(registration.registration.store_id, "models/system/json-schema/draft-07");
   for (const model of catalog.systemModels.filter(model => model !== registration)) {
-    assert.equal(model.metaModel, "raw");
+    assert.equal(model.metaModel, "raw.json");
     assert.equal(model.registration.storage, "store");
     assert.equal(model.registration.store_id, "models/system/raw");
     assert.deepEqual(model.definition, {});
-    assert.equal(model.registration.modelRef.endsWith(".json"), false);
+    assert.equal(model.registration.modelRef.endsWith(".json"), true);
   }
   const [examples] = catalog.marketPackages;
   assert.equal(examples!.models[1]!.registration.modelRef, "examples/02-nested-order.json");
@@ -34,7 +34,14 @@ test("Reserved model assets contain five persistent system definitions and one m
   for (const model of examples!.models) {
     assert.ok(model.registration.tags!.includes("example"));
     const approved = readFileSync(new URL(`../changes/archive/completed/20261001-project-models/assets/use-case-models/${model.registration.modelRef.split("/").at(-1)}`, import.meta.url));
-    assert.deepEqual(Buffer.from(model.source), approved);
+    if (model.registration.modelRef === "examples/06-references-and-recursion.json") {
+      const current = model.definition as { properties: { externalStatus: unknown }; required: string[] };
+      const historical = JSON.parse(approved.toString());
+      const scalar = examples!.models.find(entry => entry.registration.modelRef === "examples/07-scalar-enum-root.json")!.definition as { type: string; enum: string[] };
+      assert.deepEqual(current.properties.externalStatus, { type: scalar.type, enum: scalar.enum, description: "订单状态；枚举约束直接保存在本模型中。" });
+      assert.deepEqual(current.required, historical.required);
+      assert.equal(historical.properties.externalStatus.$ref, "examples/07-scalar-enum-root.json", "frozen historical evidence is preserved");
+    } else assert.deepEqual(Buffer.from(model.source), approved);
   }
 });
 
@@ -74,7 +81,7 @@ test("Catalog gate rejects malformed definitions and inconsistent package or mod
   fixture((root, manifest) => { writeFileSync(join(root, manifest.system_models[1]!.source), '{"type":"object"}'); assert.throws(() => readReservedModelCatalog(root), /Unsupported raw model/); });
   fixture((root, manifest, save) => { manifest.market_packages[0]!.models[0]!.registration.package = "different"; save(); assert.throws(() => readReservedModelCatalog(root), /Invalid bundled model package/); });
   fixture((root, manifest, save) => { manifest.system_models[0]!.registration.store_id = "models/system/raw"; save(); assert.throws(() => readReservedModelCatalog(root), /Store binding/); });
-  fixture((root, manifest, save) => { manifest.market_packages[0]!.models = manifest.market_packages[0]!.models.filter(model => !model.registration.modelRef.includes("07-scalar")); save(); assert.throws(() => readReservedModelCatalog(root), /Missing model reference/); });
+  fixture((root, manifest) => { writeFileSync(join(root, manifest.market_packages[0]!.models[0]!.source), '{"$ref":"examples/07-scalar-enum-root.json"}'); assert.throws(() => readReservedModelCatalog(root), { code: "MODEL_REFERENCE_UNSUPPORTED" }); });
 });
 
 test("Catalog asset paths reject traversal, source-category substitution and symlinks without following their targets", () => {

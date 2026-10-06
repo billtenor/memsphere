@@ -24,7 +24,7 @@ async function snapshot(root: string): Promise<Map<string, Buffer>> {
   return new Map([...result].sort(([a], [b]) => a.localeCompare(b)));
 }
 
-test("Packed distribution independently creates persistent system models, imports the eight-model example package and restores the approved examples", async () => {
+test("Packed distribution creates canonical persistent system models and rejects unsupported import and historical relocation", async () => {
   const repository = resolve(import.meta.dirname, "..");
   // npm pretest performs the clean build. Never recurse into npm test/build from a test.
   await readFile(join(repository, "dist/reserved/models.js"));
@@ -104,7 +104,8 @@ test("Packed distribution independently creates persistent system models, import
         const record = reopened.records.find(record => record.registration.modelRef === model.id)!;
         assert.equal(record.registration.storage, "store");
         assert.equal(record.registration.store_id, source.registration.store_id);
-        const relative = `models/registrations/system/definitions/${source.metaModel}/${model.id}.json`;
+        const directory = source.metaModel === "raw.json" ? "raw" : "json-schema/draft-07";
+        const relative = `models/registrations/system/definitions/${directory}/${model.id}`;
         assert.deepEqual(await readFile(join(root, relative)), Buffer.from(source.source));
       }
     }
@@ -118,19 +119,18 @@ test("Packed distribution independently creates persistent system models, import
     assert.deepEqual(market.packages.map((pack: { id: string; models: unknown[] }) => [pack.id, pack.models.length]), [["memsphere.examples", 8]]);
     for (const pack of market.packages) {
       const before = await (await fetch(`${origin}/api/projects/embedded/models`)).json();
+      const original = await snapshot(join(home, "projects/embedded/models"));
       const imported = await fetch(`${origin}/api/projects/embedded/models/market/import`, { method: "POST", headers: { "content-type": "application/json", origin }, body: JSON.stringify({ packageId: pack.id, expectedRevision: before.configRevision }) });
-      assert.equal(imported.status, 200, await imported.clone().text());
-      assert.equal((await imported.json()).status, "imported");
-      for (const model of pack.models) {
-        const definition = await (await fetch(`${origin}/api/projects/embedded/models/definition?model=${encodeURIComponent(model.registration.modelRef)}`)).json();
-        assert.equal(definition.source, model.source);
-        assert.equal(definition.registration.store_id, "models/imported/json-schema/draft-07");
-        assert.equal(definition.origin, "market");
-      }
+      assert.equal(imported.status, 422, await imported.clone().text());
+      assert.equal((await imported.json()).code, "MODEL_RUNTIME_UNSUPPORTED");
+      assert.deepEqual(await snapshot(join(home, "projects/embedded/models")), original);
+      const after = await (await fetch(`${origin}/api/projects/embedded/models`)).json();
+      assert.equal(after.models.length, 5);
+
     }
     await new Promise<void>(done => server!.close(() => done())); server = undefined;
 
-    // Construct the historical fixture only from published definitions and the published approved baseline.
+    // The frozen baseline stays published evidence; corrected current assets cannot satisfy that old maintenance plan.
     const relocation = await import(pathToFileURL(join(packageRoot, "dist/project/example-relocation.js")).href) as typeof import("../src/project/example-relocation.js");
     const registrationModule = await import(pathToFileURL(join(packageRoot, "dist/project/model-registration.js")).href) as typeof import("../src/project/model-registration.js");
     const root = join(home, "projects/memsphere");
@@ -145,38 +145,12 @@ test("Packed distribution independently creates persistent system models, import
     const original = await snapshot(join(root, "models"));
     const script = join(packageRoot, "scripts/relocate-example-models.mjs");
     const planPath = join(temporary, "relocation-plan.json");
-    successful(process.execPath, [script, "plan", "--project", "memsphere", "--out", planPath]);
+    const result = command(process.execPath, [script, "plan", "--project", "memsphere", "--out", planPath]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /approved bytes|Cross-model|Runtime|Unsupported/);
     assert.deepEqual(await snapshot(join(root, "models")), original);
-    const applied = JSON.parse(successful(process.execPath, [script, "apply", "--plan", planPath])) as { status: string; backup: string; rehearsalPassed: boolean };
-    assert.equal(applied.status, "applied");
-    assert.equal(applied.rehearsalPassed, true);
-    const afterApply = await snapshot(join(root, "models"));
-    assert.equal((await registrationModule.readModelRegistrations({}, { root })).records.filter(record => record.origin === "project").length, 0);
-    assert.equal(JSON.parse(successful(process.execPath, [script, "apply", "--plan", planPath])).status, "unchanged");
-    assert.deepEqual(await snapshot(join(root, "models")), afterApply);
+    await assert.rejects(readFile(planPath), { code: "ENOENT" });
 
-    const backupDefinition = join(applied.backup, "definitions", relocation.exampleRelocationBaseline[0]!.modelRef);
-    const backupBytes = await readFile(backupDefinition);
-    await writeFile(backupDefinition, "{}");
-    const badBackup = command(process.execPath, [script, "restore", "--backup", applied.backup]);
-    assert.notEqual(badBackup.status, 0);
-    assert.match(badBackup.stderr, /Backup checksum/);
-    assert.deepEqual(await snapshot(join(root, "models")), afterApply);
-    await writeFile(backupDefinition, backupBytes);
-
-    const conflictPath = join(models, relocation.exampleRelocationBaseline.at(-1)!.modelRef);
-    await writeFile(conflictPath, '{"type":"boolean"}');
-    const beforeConflict = await snapshot(join(root, "models"));
-    const conflict = command(process.execPath, [script, "restore", "--backup", applied.backup]);
-    assert.notEqual(conflict.status, 0);
-    assert.match(conflict.stderr, /conflict|different|changed/i);
-    assert.deepEqual(await snapshot(join(root, "models")), beforeConflict);
-    await rm(conflictPath);
-    assert.equal(JSON.parse(successful(process.execPath, [script, "restore", "--backup", applied.backup])).status, "restored");
-    // Comparing the complete files includes registration IDs, revisions and timestamps.
-    assert.deepEqual(await snapshot(join(root, "models")), original);
-    assert.equal(JSON.parse(successful(process.execPath, [script, "restore", "--backup", applied.backup])).unchanged, true);
-    assert.deepEqual(await snapshot(join(root, "models")), original);
   } finally {
     if (server) await new Promise<void>(done => server!.close(() => done()));
     await rm(temporary, { recursive: true, force: true });

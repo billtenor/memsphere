@@ -46,10 +46,12 @@ storage 显式取 builtin / store，界面显示“代码内置” / “持久�
 
 ## 登记存储设置（第 5 轮）
 
-左下角设置打开“设置 / 存储”面板，选择登记 ValueStore ID，默认 memsphere/model-registrations；所选 Store 类型 filesystem、项目相对目录 models/registrations、固定代码内置登记模型作为配置摘要展示。保存仅反馈，不改真实配置。正式设置包含有效目标校验、持久化与显式切换迁移，待需求评审后实施。
+左下角设置打开“设置 / 存储”面板，选择登记 ValueStore ID，默认 memsphere/model-registrations；所选 Store 类型 filesystem、项目相对目录 models/registrations、固定只读系统登记模型作为配置摘要展示。保存仅反馈，不改真实配置。正式设置包含有效目标校验、持久化与显式切换迁移，待需求评审后实施。
 
-原型和登记草案使用 canonical memsphere/model-registration，旧 .json URL 自动规范化，仍展示 13 项。实际 Project 临时 .json 预览文件保留；正式迁移提案在契约中明确备份原文到扫描范围之外，退出正常列表，替换为单个内置模型。
+原型和登记草案统一使用 memsphere/model-registration.json；所有模型和元模型身份均以 .json 结尾，不提供旧 ID 别名。用例 06 只引用自身 definitions，状态枚举直接定义在模型内。历史 Project 的显式身份修正由正式 initialize 服务负责。
 
 ## 第 6 轮设置交互
 
 先选择存储 ID，再编辑所选存储目录。新增 project/model-registrations 演示选项以展示切换配置；只支持当前 filesystem 类型，登记模型只读。保存将配置保留在页面内存，关闭/取消丢弃本次草稿，刷新重置，不写真实 Project。正式隔离扫描及目录迁移规则纳入第六轮契约。
+
+04/05 保留原始约束，并在当前展示中标为 Runtime 不支持；不提供正常模型详情。系统登记使用持久化定义的 Store 绑定，与代码内置 storage 区分。

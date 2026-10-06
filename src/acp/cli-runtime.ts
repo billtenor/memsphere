@@ -73,8 +73,10 @@ export function agentReviewCliSource(descriptor: CliRuntimeDescriptor): "install
 
 function buildGuard(descriptor: CliRuntimeDescriptor): string {
   return `import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 const args = process.argv.slice(2);
-const options = name => args.flatMap((arg, index) => {
+const options = name => args.slice(0, args.indexOf("--") < 0 ? args.length : args.indexOf("--")).flatMap((arg, index) => {
   if (arg === name) return [args[index + 1]];
   return arg.startsWith(name + "=") ? [arg.slice(name.length + 1)] : [];
 });
@@ -85,11 +87,18 @@ const artifactContractShow = args[0] === "run" && args[1] === "artifact" && args
 const stepShow = args[0] === "run" && args[1] === "step" && args[2] === "show";
 const runShow = args[0] === "run" && args[1] === "show";
 const memoryRead = args[0] === "memory" && ["list", "read"].includes(args[1]);
+const fail = (message, code, status) => {
+  const json = args[0] === "memory" && args[1] === "list" && options("--output").at(-1) === "json";
+  console.error(json ? JSON.stringify({ error: { code, message } }) : "error: " + message);
+  process.exit(json ? 1 : status);
+};
 const bind = (name, value) => {
   const existing = options(name);
   if (existing.length > 0) return Boolean(value) && existing.every(item => item === value);
   if (!value) return false;
-  args.push(name, value);
+  const separator = args.indexOf("--");
+  if (separator < 0) args.push(name, value);
+  else args.splice(separator, 0, name, value);
   return true;
 };
 const needsAssignment = assignmentShow || artifactContractShow || reviewWrite || (artifactShow && options("--step").length === 0);
@@ -98,8 +107,18 @@ const boundAssignment = !needsAssignment || bind("--assignment", process.env.MEM
 const boundRun = !needsRun || bind("--run", process.env.MEMSPHERE_REVIEW_RUN_ID);
 const memoryRun = process.env.MEMSPHERE_REVIEW_MEMORY_RUN_ID;
 const boundMemoryRun = !memoryRead || (memoryRun ? bind("--run", memoryRun) : options("--run").length === 0);
+let boundMemoryProject = true;
+if (memoryRead && process.env.MEMSPHERE_CONFIG_PATH) {
+  try {
+    const manifest = JSON.parse(readFileSync(join(dirname(process.env.MEMSPHERE_CONFIG_PATH), "project.json"), "utf8"));
+    if (typeof manifest.name !== "string" || !manifest.name) throw new Error("Session Project identity is unavailable");
+    boundMemoryProject = bind("--project", manifest.name);
+  } catch {
+    fail("Session Project identity is unavailable", "REVIEW_SESSION_INVALID", 2);
+  }
+}
 const allowed = (args.length === 1 && args[0] === "--version")
-  || (memoryRead && boundMemoryRun)
+  || (memoryRead && boundMemoryRun && boundMemoryProject)
   || (runShow && boundRun)
   || (stepShow && boundRun)
   || (artifactShow && boundAssignment && boundRun)
@@ -107,16 +126,14 @@ const allowed = (args.length === 1 && args[0] === "--version")
   || (assignmentShow && boundAssignment)
   || (reviewWrite && boundAssignment);
 if (!allowed) {
-  console.error("error: command is not allowed in this Agent Review Session");
-  process.exit(2);
+  fail("command is not allowed in this Agent Review Session", "REVIEW_SESSION_DENIED", 2);
 }
 const result = spawnSync(${JSON.stringify(descriptor.nodeExecutable)}, [${JSON.stringify(descriptor.cliEntrypoint)}, ...args], {
   stdio: "inherit",
   env: process.env
 });
 if (result.error) {
-  console.error("error: " + result.error.message);
-  process.exit(1);
+  fail(result.error.message, "CLI_LAUNCH_FAILED", 1);
 }
 process.exit(result.status ?? 1);
 `;

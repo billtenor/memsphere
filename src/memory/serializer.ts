@@ -117,14 +117,15 @@ export function serializeMemoryListJson(page: MemoryListPage): string {
 }
 
 export function serializeMemoryListText(page: MemoryListPage): string {
-  if (page.memories.length === 0) return "";
-  return `${page.memories.map((memory) => {
+  const lines = page.items.map((memory) => {
     const aliases = memory.names.slice(1);
     const identity = aliases.length > 0
       ? `${memory.reference} (${aliases.join(", ")})`
       : memory.reference;
     return memory.project_name ? `${identity}\t${memory.project_name}@${memory.revision ?? "unknown"}` : identity;
-  }).join("\n")}\n`;
+  });
+  if (page.nextCursor) lines.push(`nextCursor: ${page.nextCursor}`);
+  return lines.length ? `${lines.join("\n")}\n` : "";
 }
 
 export function serializeMemoryNodeListYaml(page: MemoryNodeListPage): string {
@@ -136,8 +137,9 @@ export function serializeMemoryNodeListJson(page: MemoryNodeListPage): string {
 }
 
 export function serializeMemoryNodeListText(page: MemoryNodeListPage): string {
-  if (page.nodes.length === 0) return "";
-  return `${page.nodes.map((node) => node.node_ref).join("\n")}\n`;
+  const lines = page.items.map((node) => node.node_ref);
+  if (page.nextCursor) lines.push(`nextCursor: ${page.nextCursor}`);
+  return lines.length ? `${lines.join("\n")}\n` : "";
 }
 
 export function serializeMemoryNodeReadYaml(result: MemoryNodeReadResult): string {

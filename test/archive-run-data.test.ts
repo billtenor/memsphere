@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { archiveRun, listArchived, restoreRun } from "../src/archive/store.js";
 import { agentActivityIds } from "../src/acp/activity.js";
-import { prepareRunData, runDataModels, saveRunContent } from "../src/project/run-data.js";
+import { prepareRunData, runDataStoreIds, saveRunContent } from "../src/project/run-data.js";
 import { opaqueRunData } from "./helpers/run-data.js";
 
 const id = "run-transfer";
@@ -39,8 +39,8 @@ test("Run archive and restore transfer opaque Store content without list or loca
   const f = await fixture();
   try {
     const archived = await archiveRun(f.input);
-    assert.equal(f.data.records.has(f.data.key(`${runDataModels.artifact}/current`, artifactId)), false);
-    assert.equal(Buffer.from(f.data.records.get(f.data.key(`${runDataModels.artifact}/archive`, artifactId))!.bytes).toString(), "original readable content\n");
+    assert.equal(f.data.records.has(f.data.key(`${runDataStoreIds.artifact}/current`, artifactId)), false);
+    assert.equal(Buffer.from(f.data.records.get(f.data.key(`${runDataStoreIds.artifact}/archive`, artifactId))!.bytes).toString(), "original readable content\n");
     await assert.rejects(readFile(f.statePath), { code: "ENOENT" });
     assert.deepEqual((await listArchived({ archiveRoot: f.archiveRoot })).map((entry) => entry.id), [id]);
     await archiveRun(f.input);
@@ -48,7 +48,7 @@ test("Run archive and restore transfer opaque Store content without list or loca
     await restoreRun(f.input);
     await restoreRun(f.input);
     assert.deepEqual(await listArchived({ archiveRoot: f.archiveRoot }), []);
-    assert.equal(Buffer.from(f.data.records.get(f.data.key(`${runDataModels.artifact}/current`, artifactId))!.bytes).toString(), "original readable content\n");
+    assert.equal(Buffer.from(f.data.records.get(f.data.key(`${runDataStoreIds.artifact}/current`, artifactId))!.bytes).toString(), "original readable content\n");
     assert.equal(JSON.parse(await readFile(join(f.runsRoot, id, ".archive.json"), "utf8")).archivedAt, archived.archivedAt);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
@@ -67,7 +67,7 @@ test("a failed destination write preserves the source and redo overwrites partia
     assert.deepEqual(await listArchived({ archiveRoot: f.archiveRoot }), []);
     f.data.setHook(undefined);
     await archiveRun(f.input);
-    assert.equal(Buffer.from(f.data.records.get(f.data.key(`${runDataModels.artifact}/archive`, artifactId))!.bytes).toString(), "original readable content\n");
+    assert.equal(Buffer.from(f.data.records.get(f.data.key(`${runDataStoreIds.artifact}/archive`, artifactId))!.bytes).toString(), "original readable content\n");
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -77,12 +77,12 @@ test("post-commit cleanup failure retries deletion without copying stale source 
     f.data.setHook((operation, store) => { if (operation === "delete" && store.endsWith("/current")) throw new Error("cleanup failure"); });
     await assert.rejects(archiveRun(f.input), /cleanup failure/);
     await assert.rejects(readFile(f.statePath), { code: "ENOENT" });
-    f.data.records.get(f.data.key(`${runDataModels.artifact}/current`, artifactId))!.bytes = Buffer.from("stale source");
+    f.data.records.get(f.data.key(`${runDataStoreIds.artifact}/current`, artifactId))!.bytes = Buffer.from("stale source");
     f.data.setHook(undefined);
     const before = f.data.calls.length;
     await archiveRun(f.input);
     assert(!f.data.calls.slice(before).some((call) => call.startsWith("update:")));
-    assert.equal(Buffer.from(f.data.records.get(f.data.key(`${runDataModels.artifact}/archive`, artifactId))!.bytes).toString(), "original readable content\n");
+    assert.equal(Buffer.from(f.data.records.get(f.data.key(`${runDataStoreIds.artifact}/archive`, artifactId))!.bytes).toString(), "original readable content\n");
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -140,11 +140,11 @@ for (const status of ["queued", "running", "submitted", "failed", "cancelled"] a
       if (includeSnapshot) await saveRunContent(f.runsRoot, "activitySnapshot", ids.snapshot, "application/json", Buffer.from("{\"original\":true}\n"));
       await archiveRun(f.input);
       for (const [kind, dataId, expected] of [["activityLog", ids.log, includeLog], ["activitySnapshot", ids.snapshot, includeSnapshot]] as const) {
-        assert.equal(f.data.records.has(f.data.key(`${runDataModels[kind]}/archive`, dataId)), expected);
+        assert.equal(f.data.records.has(f.data.key(`${runDataStoreIds[kind]}/archive`, dataId)), expected);
       }
       await restoreRun(f.input);
       for (const [kind, dataId, expected] of [["activityLog", ids.log, includeLog], ["activitySnapshot", ids.snapshot, includeSnapshot]] as const) {
-        assert.equal(f.data.records.has(f.data.key(`${runDataModels[kind]}/current`, dataId)), expected);
+        assert.equal(f.data.records.has(f.data.key(`${runDataStoreIds[kind]}/current`, dataId)), expected);
       }
       assert.deepEqual(await listArchived({ archiveRoot: f.archiveRoot }), []);
     } finally { await rm(f.root, { recursive: true, force: true }); }
@@ -160,7 +160,7 @@ test("activity read errors are not treated as optional absence and leave source 
     });
     await assert.rejects(archiveRun(f.input), { code: "EACCES" });
     assert(JSON.parse(await readFile(f.statePath, "utf8")));
-    assert(f.data.records.has(f.data.key(`${runDataModels.artifact}/current`, artifactId)));
+    assert(f.data.records.has(f.data.key(`${runDataStoreIds.artifact}/current`, artifactId)));
     assert.deepEqual(await listArchived({ archiveRoot: f.archiveRoot }), []);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
@@ -176,7 +176,7 @@ test("an activity file discovered then lost before verification prevents the sta
     });
     await assert.rejects(archiveRun(f.input), /disappeared during transfer/);
     assert(JSON.parse(await readFile(f.statePath, "utf8")));
-    assert(f.data.records.has(f.data.key(`${runDataModels.artifact}/current`, artifactId)));
+    assert(f.data.records.has(f.data.key(`${runDataStoreIds.artifact}/current`, artifactId)));
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -190,12 +190,12 @@ test("restore cleanup retains unknown files, removes ghost listing and redo neve
     await assert.rejects(restoreRun(f.input), /Unmanaged Run file retained/);
     assert.equal(await readFile(unknown, "utf8"), "do not delete");
     assert.deepEqual(await listArchived({ archiveRoot: f.archiveRoot }), []);
-    f.data.records.set(f.data.key(`${runDataModels.artifact}/archive`, artifactId), { contentType: "text/markdown", bytes: Buffer.from("stale archive") });
+    f.data.records.set(f.data.key(`${runDataStoreIds.artifact}/archive`, artifactId), { contentType: "text/markdown", bytes: Buffer.from("stale archive") });
     await rm(unknown);
     const before = f.data.calls.length;
     await restoreRun(f.input);
     assert(!f.data.calls.slice(before).some((call) => call.startsWith("update:") || call.startsWith("create:")));
-    assert.equal(Buffer.from(f.data.records.get(f.data.key(`${runDataModels.artifact}/current`, artifactId))!.bytes).toString(), "original readable content\n");
+    assert.equal(Buffer.from(f.data.records.get(f.data.key(`${runDataStoreIds.artifact}/current`, artifactId))!.bytes).toString(), "original readable content\n");
     assert.deepEqual(await listArchived({ archiveRoot: f.archiveRoot }), []);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });

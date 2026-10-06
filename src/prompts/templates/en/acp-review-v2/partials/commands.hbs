@@ -14,6 +14,7 @@
 - Discover and read project Memory; ChangeSet Run sessions automatically bind their frozen Memory snapshot:
   memsphere-review memory list --output json
   memsphere-review memory read <reference> --output json
+- Memory list returns items and an optional nextCursor; the default page contains up to 100 entries. For a complete list, continue with memsphere-review memory list --cursor <nextCursor> --output json using the same filters until nextCursor is absent.
 - Add a concrete review comment. Comment bodies use Markdown:
   - Choose an explicit severity: `blocking`, `risk`, or `suggestion`.
   - For a short single-line comment:

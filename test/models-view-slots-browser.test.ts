@@ -64,7 +64,7 @@ test("selected definition renderer receives frozen model data and can wrap the o
       { id: "sales/order.json", view: "structure", frozen: true },
       { id: "sales/order.json", view: "source", frozen: true }
     ]);
-    await page.goto(`${origin}/projects/alpha/models?model=memsphere%2Frun%2Fartifact`);
+    await page.goto(`${origin}/projects/alpha/models?model=memsphere%2Frun%2Fartifact.json`);
     await page.getByRole("radio", { name: "模型结构", exact: true }).click();
     await page.locator('[data-custom-definition="structure"]').waitFor();
     await page.getByText("原始内容模型", { exact: true }).waitFor();
@@ -81,8 +81,8 @@ test("selected Models page uses the official presentation service for definition
         const data = await context.presentation.modelsPage();
         const model = await data.getDefinition(data.selectedModelId);
         window.__modelsPageContract = { frozen: Object.isFrozen(data) && Object.isFrozen(data.models) && Object.isFrozen(data.models[0]) && Object.isFrozen(model.definition), id: model.id, count: data.models.length };
-        const heading = document.createElement("h2"); heading.textContent = model.title; heading.dataset.customModelPage = "true";
-        const next = document.createElement("button"); next.textContent = "Open union model"; next.onclick = () => data.openModel("advanced.json");
+        const heading = document.createElement("h2"); heading.textContent = model.title ?? model.registration?.name ?? model.id; heading.dataset.customModelPage = "true";
+        const next = document.createElement("button"); next.textContent = "Open raw model"; next.onclick = () => data.openModel("memsphere/run/artifact.json");
         const refresh = document.createElement("button"); refresh.textContent = "Refresh models"; refresh.onclick = async () => { window.__modelsRefreshed = (await data.refresh()).models.length; };
         element.replaceChildren(heading, next, refresh);
       }
@@ -101,9 +101,9 @@ test("selected Models page uses the official presentation service for definition
     assert.equal(await page.evaluate(() => (window as any).__modelsPageContract.frozen), true);
     await page.getByRole("button", { name: "Refresh models", exact: true }).click();
     await page.waitForFunction(() => (window as any).__modelsRefreshed > 0);
-    await page.getByRole("button", { name: "Open union model", exact: true }).click();
-    await page.waitForURL(url => url.pathname.endsWith("/models") && url.searchParams.get("model") === "advanced.json");
-    await page.getByRole("heading", { name: "组合条件", exact: true }).waitFor();
+    await page.getByRole("button", { name: "Open raw model", exact: true }).click();
+    await page.waitForURL(url => url.pathname.endsWith("/models") && url.searchParams.get("model") === "memsphere/run/artifact.json");
+    await page.getByRole("heading", { name: "运行产物", exact: true }).waitFor();
     await page.getByRole("button", { name: "记忆", exact: true }).click();
     await page.waitForURL("**/memories");
     await page.locator("[data-custom-model-page]").waitFor({ state: "detached" });

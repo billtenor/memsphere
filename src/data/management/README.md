@@ -29,7 +29,7 @@ const definition = {
 const bytes = new TextEncoder().encode(JSON.stringify(definition));
 const model: Model = {
   data: {
-    id: "order-model",
+    id: "order-model.json",
     model: JSON_SCHEMA_DRAFT_07,
     payload: {
       contentType: "application/json",
@@ -48,7 +48,7 @@ const dataManager = new DefaultDataManager({
   models: [{ model }],
   stores: [{
     id: "orders",
-    model: "order-model",
+    model: "order-model.json",
     kind: "ValueStore",
     factory: "memsphere/filesystem-json",
     config: new Config({ directory: resolve(projectRoot, "data/orders") }),
@@ -82,7 +82,7 @@ await store.create(context, "order-001", { orderNo: "O-001", amount: 100 });
 
 读取回调必须返回 ID 与 `ref` 相同的 Data。Manager 根据 Data.model 准备元模型 Runtime，再按 Payload.contentType 选择 Serializer 解码，并用元模型 Runtime 检查模型定义。元模型本身应有已解码的 Model 绑定及对应 Factory，避免依赖自身解码才能启动。内置 `jsonSchemaMetaModelExtension` 已提供 JSON Schema 元模型引导 Factory，Project 模型宿主提供启动绑定；上面的已解码订单示例不依赖它。
 
-`dependencies` 列出创建 Runtime 前需要准备的其他模型，可以跨模型定义标准。定义内部的局部递归由 Factory 处理，不写入依赖列表；跨模型循环准备目前明确报错，不发布未完成的 Runtime。
+`dependencies` 是通用装配接口，保留已有能力，不意味着 Project 开放跨模型引用。当前内置 JSON Schema Runtime 和所有 Project 发布/使用入口只允许本模型内部引用，外部引用明确拒绝；本模型内部递归由 Factory 处理，不写入依赖列表。模型与元模型 ID 均使用 `.json` 后缀，Store/Factory ID 不改名。
 
 ## 实例与配置边界
 

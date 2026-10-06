@@ -1,4 +1,5 @@
 import { readConfig } from "../config.js";
+import { resolve } from "node:path";
 import { DefaultMemoryCatalog, type MemoryCatalog } from "./catalog.js";
 import { FileMemoryProvider } from "./file-provider.js";
 import { ProjectMemoryProvider } from "./project-provider.js";
@@ -8,6 +9,7 @@ export type PrimaryMemoryCatalogOverride = {
   memoryRoot: string;
   revision: string;
   provider?: MemoryProvider;
+  runId?: string;
 };
 
 export async function createMemoryCatalog(): Promise<MemoryCatalog> {
@@ -19,8 +21,14 @@ export function createMemoryCatalogForConfig(
   config: Awaited<ReturnType<typeof readConfig>>,
   primaryOverride?: PrimaryMemoryCatalogOverride
 ): MemoryCatalog {
-  if (!config.project) return new DefaultMemoryCatalog(primaryOverride?.provider ?? new FileMemoryProvider(primaryOverride?.memoryRoot ?? config.memoryRoot));
-  return new DefaultMemoryCatalog(new ProjectMemoryProvider(projectSources(config, primaryOverride)));
+  if (!config.project) {
+    const root = primaryOverride?.memoryRoot ?? config.memoryRoot;
+    return new DefaultMemoryCatalog(primaryOverride?.provider ?? new FileMemoryProvider(root), {
+      memoryRoot: resolve(root), run: primaryOverride?.runId
+    });
+  }
+  const sources = projectSources(config, primaryOverride);
+  return new DefaultMemoryCatalog(new ProjectMemoryProvider(sources), catalogScope(sources, primaryOverride));
 }
 
 export function createProjectMemoryCatalogs(
@@ -30,8 +38,16 @@ export function createProjectMemoryCatalogs(
   if (!config.project) return {};
   return Object.fromEntries(projectSources(config, primaryOverride).map((source) => [
     source.name,
-    new DefaultMemoryCatalog(new ProjectMemoryProvider([source]))
+    new DefaultMemoryCatalog(new ProjectMemoryProvider([source]), catalogScope([source], primaryOverride))
   ]));
+}
+
+function catalogScope(sources: Array<{ name: string; memoryRoot: string }>, override?: PrimaryMemoryCatalogOverride) {
+  return {
+    projects: sources.map(({ name, memoryRoot }) => ({ name, memoryRoot: resolve(memoryRoot) }))
+      .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+    run: override?.runId
+  };
 }
 
 function projectSources(

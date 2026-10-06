@@ -39,6 +39,7 @@ import { readConfig } from "../config.js";
 import { RunMemoryProvider } from "../memory/run-provider.js";
 import { readRun } from "../run/store.js";
 import { getViewServiceStatus, viewServiceUrl } from "../view/service.js";
+import { parseListLimit, type PaginationOptions } from "../pagination.js";
 
 const listOutputs = ["yaml", "json", "text"] as const;
 const readOutputs = ["yaml", "json"] as const;
@@ -46,7 +47,7 @@ const readOutputs = ["yaml", "json"] as const;
 type ListOutput = (typeof listOutputs)[number];
 type ReadOutput = (typeof readOutputs)[number];
 
-export type MemoryListCommandOptions = {
+export type MemoryListCommandOptions = PaginationOptions & {
   kind?: string;
   query?: string;
   node?: string;
@@ -79,18 +80,24 @@ export async function memoryListCommand(
 ): Promise<void> {
   const kind = parseKind(options.kind);
   const output = parseOutput(options.output ?? "yaml", listOutputs, "memory list");
+  const limit = parseListLimit(options.limit);
   if (!reference && options.node !== undefined) {
-    throw new Error("memory list --node requires a memory reference");
+    throw new TypeError("memory list --node requires a memory reference");
   }
-  if (reference && options.query) {
-    throw new Error("memory list --query cannot be used with a memory reference");
+  if (reference && options.query !== undefined) {
+    throw new TypeError("memory list --query cannot be used with a memory reference");
   }
   const catalog = await dependencies.createCatalog(options.run);
   if (reference) {
     const descriptor = await catalog.resolve(reference, { kind });
     const entity = await catalog.read(descriptor.reference, { kind: descriptor.kind });
     const navigation = new MemoryNavigation(toIdentity(descriptor), entity);
-    const page = navigation.listChildren(options.node);
+    const page = navigation.listChildren(options.node, { limit, cursor: options.cursor }, {
+      catalog: catalog.paginationScope ?? null,
+      project: descriptor.project_name,
+      run: options.run,
+      kind
+    });
     const value = output === "json"
       ? serializeMemoryNodeListJson(page)
       : output === "text"
@@ -99,7 +106,7 @@ export async function memoryListCommand(
     dependencies.writeStdout(value);
     return;
   }
-  const page = await catalog.list({ kind, query: options.query });
+  const page = await catalog.list({ kind, query: options.query, limit, cursor: options.cursor });
   const value = output === "json"
     ? serializeMemoryListJson(page)
     : output === "text"
@@ -198,7 +205,7 @@ export async function createMemoryCommandCatalog(runId?: string): Promise<Memory
   const memoryRoot = join(config.runsRoot, run.id, run.memorySnapshot.path);
   const revision = run.memoryProjects?.primary.revision
     ?? `changeset:${run.memorySource.changeId}@${run.memorySource.checkpointDigest}`;
-  return createMemoryCatalogForConfig(config, { memoryRoot, revision, provider: new RunMemoryProvider(config.runsRoot, run) });
+  return createMemoryCatalogForConfig(config, { memoryRoot, revision, runId: run.id, provider: new RunMemoryProvider(config.runsRoot, run) });
 }
 
 export async function memoryEditCommand(references: string[], options: { change?: string } = {}): Promise<void> {

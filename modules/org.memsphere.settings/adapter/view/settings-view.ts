@@ -483,7 +483,7 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="add-model-re
       ${store ? `<h4>${escapeHtml(this.t("settings.selectedStoreConfiguration", "所选存储的详细配置"))}</h4>
       ${selectField("modelRegistration.factory", this.t("settings.storeType", "存储类型"), store.factory, [["memsphere/filesystem-json", "filesystem ValueStore"]])}
       ${inputField("modelRegistration.directory", this.t("settings.storeDirectory", "存储目录"), store.directory)}` : ""}
-      <dl class="settings-model-info"><dt>${escapeHtml(this.t("settings.registrationModel", "登记模型"))}</dt><dd class="mono">memsphere/model-registration</dd></dl>
+      <dl class="settings-model-info"><dt>${escapeHtml(this.t("settings.registrationModel", "登记模型"))}</dt><dd class="mono">memsphere/model-registration.json</dd></dl>
       <p class="settings-help">${escapeHtml(this.t("settings.registrationStorageHelp", "先选择存储 ID，再配置该存储。已有数据时切换存储或修改目录须确认迁移；旧数据保留。"))}</p>
 ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-model-registrations">${escapeHtml(this.t("settings.initializeRegistrations", "初始化模型登记"))}</button>` : ""}
       ${this.errorsHtml(scope)}</section>`;

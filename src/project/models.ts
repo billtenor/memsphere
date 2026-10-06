@@ -1,18 +1,19 @@
 import { resolve } from "node:path";
 import { assertModelPath, discoverModelIds } from "./model-storage-paths.js";
-import { readModelRegistrations, MODEL_REGISTRATION_MODEL, LEGACY_MODEL_REGISTRATION_MODEL, IMPORTED_MODEL_DEFINITIONS_STORE, type ModelRegistration, type ModelOrigin, type ProjectModelInput } from "./model-registration.js";
+import { readModelRegistrations, IMPORTED_MODEL_DEFINITIONS_STORE, type ModelRegistration, type ModelOrigin, type ProjectModelInput } from "./model-registration.js";
 import type { Context } from "../data/api/context.js";
 import type { Data } from "../data/api/data.js";
 import type { DataStore } from "../data/api/data-store.js";
 import { filesystemDataStoreExtension, jsonSchemaExtension, jsonSchemaMetaModelExtension, jsonSerializerExtension, rawExtension, JSON_SCHEMA_DRAFT_07 } from "../data/extensions/index.js";
-import { validateRelativeFilePath } from "../data/extensions/shared/filesystem.js";
 import { bytesContent, readAll } from "../data/extensions/shared/payload.js";
 import { DefaultDataManager, type ModelBinding } from "../data/management/data-manager.js";
 import { DefaultDataExtensionRegistry } from "../data/management/extension-registry.js";
 import { modelDefinitionStore } from "./system-model-store.js";
-import { SYSTEM_JSON_SCHEMA_MODELS_STORE, SYSTEM_RAW_MODELS_STORE } from "./model-registration-contract.js";
+import { assertModelRef, SYSTEM_JSON_SCHEMA_MODELS_STORE, SYSTEM_RAW_MODELS_STORE } from "./model-registration-contract.js";
 import { readBundledSystemModels } from "../reserved/models.js";
-import { RawModelRuntime } from "../data/extensions/raw/index.js";
+import { RAW_MODEL } from "../data/extensions/raw/index.js";
+import { checkModelDefinition, type CheckedModel, type ModelCheck } from "./model-validation.js";
+import { readModelOperationStamp, assertModelOperationStamp } from "./model-operation.js";
 export const DEFAULT_MODELS_DIRECTORY = "models/json-schema/draft-07";
 export const MODEL_DEFINITIONS_STORE = "models/json-schema/draft-07";
 export type ProjectModelSummary = {
@@ -23,6 +24,8 @@ export type ProjectModelSummary = {
   description?: string;
   status: "available" | "unavailable";
   error?: string;
+  errorCode?: string;
+  errorDetails?: unknown;
   registration?: ModelRegistration;
   origin?: ModelOrigin;
 };
@@ -31,6 +34,8 @@ const extensions = new DefaultDataExtensionRegistry([
 ]);
 /** A fresh host per explicit operation; no stale directory or model cache crosses refreshes. */
 export async function createProjectModelHost(context: Context, input: ProjectModelInput) {
+  const operationStamp = await readModelOperationStamp(input.root);
+  const assertSnapshot = () => assertModelOperationStamp(input.root, operationStamp);
   const registrationState = await readModelRegistrations(context, input);
   const paths = registrationState.paths;
   const directory = paths.modelsDirectory;
@@ -38,7 +43,7 @@ export async function createProjectModelHost(context: Context, input: ProjectMod
     [MODEL_DEFINITIONS_STORE, modelDefinitionStore(MODEL_DEFINITIONS_STORE, JSON_SCHEMA_DRAFT_07, directory)],
     [IMPORTED_MODEL_DEFINITIONS_STORE, modelDefinitionStore(IMPORTED_MODEL_DEFINITIONS_STORE, JSON_SCHEMA_DRAFT_07, resolve(paths.registrationDirectory, "imported-definitions"))],
     [SYSTEM_JSON_SCHEMA_MODELS_STORE, modelDefinitionStore(SYSTEM_JSON_SCHEMA_MODELS_STORE, JSON_SCHEMA_DRAFT_07, resolve(paths.registrationDirectory, "system/definitions/json-schema/draft-07"), true)],
-    [SYSTEM_RAW_MODELS_STORE, modelDefinitionStore(SYSTEM_RAW_MODELS_STORE, "raw", resolve(paths.registrationDirectory, "system/definitions/raw"), true)]
+    [SYSTEM_RAW_MODELS_STORE, modelDefinitionStore(SYSTEM_RAW_MODELS_STORE, RAW_MODEL, resolve(paths.registrationDirectory, "system/definitions/raw"), true)]
   ]);
   const store = dataStores.get(MODEL_DEFINITIONS_STORE)!;
   const ids = await discoverModelIds(context, directory, paths.excludedDirectories);
@@ -80,6 +85,7 @@ export async function createProjectModelHost(context: Context, input: ProjectMod
     let pending = snapshots.get(id);
     if (!pending) {
       pending = (async () => {
+        await assertSnapshot();
         if (errors.has(id))
           throw new TypeError(errors.get(id));
         const registered = registrations.get(id);
@@ -95,68 +101,96 @@ export async function createProjectModelHost(context: Context, input: ProjectMod
           throw Object.assign(new Error(`Model not found: ${id}`), { code: "MODEL_NOT_FOUND" });
         const bytes = await readAll(context, stored.data.payload.content);
         const source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+        await assertSnapshot();
         return { source, data: { ...stored.data, payload: { contentType: "application/json", content: bytesContent(bytes) } } };
       })();
       snapshots.set(id, pending);
     }
     return pending;
   };
-  const bindings: ModelBinding[] = [meta];
-  for (const ref of allStoredIds) {
-    if (registrations.get(ref)?.registration.store_id === SYSTEM_RAW_MODELS_STORE) {
-      try {
-        const saved = await snapshot(ref);
-        const model = { data: saved.data, definition: JSON.parse(saved.source.replace(/^\uFEFF/, "")) };
-        new RawModelRuntime(model);
-        bindings.push({ model });
-      } catch (error) {
-        if (!(error instanceof TypeError) && !(error instanceof SyntaxError)
-          && (error as NodeJS.ErrnoException).code !== "MODEL_NOT_FOUND") throw error;
-        errors.set(ref, error instanceof Error ? error.message : String(error));
-      }
-    } else bindings.push({ ref, loadData: async () => (await snapshot(ref)).data });
+  const preparedManager = new DefaultDataManager({ extensions, models: [meta] });
+  const checks = new Map<string, Promise<CheckedModel>>();
+  async function checked(id: string, check: ModelCheck = "runtime"): Promise<CheckedModel> {
+    await assertSnapshot();
+    assertId(id);
+    const key = `${check}:${id}`;
+    let pending = checks.get(key);
+    if (!pending) {
+      pending = (async () => {
+        const saved = await snapshot(id);
+        let definition: unknown;
+        try { definition = JSON.parse(saved.source.replace(/^\uFEFF/, "")); }
+        catch (cause) {
+          throw Object.assign(new TypeError(`Invalid model JSON: ${id}`, { cause }), {
+            code: "MODEL_DEFINITION_INVALID", details: { modelRef: id, path: "#" }
+          });
+        }
+        return checkModelDefinition(context, { modelRef: id, metaModel: saved.data.model, source: saved.source, definition }, check);
+      })();
+      checks.set(key, pending);
+    }
+    const result = await pending;
+    await assertSnapshot();
+    return result;
   }
-  const preparedManager = new DefaultDataManager({ extensions, models: bindings });
   const manager = {
     async getModel(ctx: Context, ref: string) {
       ctx.signal?.throwIfAborted();
-      if (errors.has(ref)) throw new TypeError(errors.get(ref));
-      return preparedManager.getModel(ctx, ref);
+      await assertSnapshot();
+      if (ref === JSON_SCHEMA_DRAFT_07) {
+        const model = await preparedManager.getModel(ctx, ref);
+        await assertSnapshot();
+        return model;
+      }
+      return (await checked(ref)).model;
     },
     async getRuntime(ctx: Context, ref: string) {
       ctx.signal?.throwIfAborted();
-      if (errors.has(ref)) throw new TypeError(errors.get(ref));
-      return preparedManager.getRuntime(ctx, ref);
+      await assertSnapshot();
+      if (ref === JSON_SCHEMA_DRAFT_07) {
+        const runtime = await preparedManager.getRuntime(ctx, ref);
+        await assertSnapshot();
+        return runtime;
+      }
+      return (await checked(ref)).runtime!;
     },
     async getStore(ctx: Context, id: string) {
+      await assertSnapshot();
       const store = dataStores.get(id);
       if (store) return store;
       return preparedManager.getStore(ctx, id);
     }
   };
   function assertId(id: string) {
-    validateRelativeFilePath(id);
+    assertModelRef(id);
     if (!known.has(id)) {
-      throw Object.assign(new Error(`Model not found: ${id}`), { code: "MODEL_NOT_FOUND" });
+      throw Object.assign(new Error(`Model not found: ${id}; use project models initialize if system models are not installed`), { code: "MODEL_NOT_FOUND" });
     }
   }
-  const definition = async (id: string) => {
-    if (id === LEGACY_MODEL_REGISTRATION_MODEL && !known.has(id))
-      id = MODEL_REGISTRATION_MODEL;
-    assertId(id);
-    if (errors.has(id))
-      throw new TypeError(errors.get(id));
-    const model = await manager.getModel(context, id);
+  const describe = async (id: string, check: ModelCheck) => {
+    const { model } = await checked(id, check);
     const isBuiltin = registrations.get(id)?.origin === "system";
     const source = (await snapshot(id)).source;
     const value = model.definition as Record<string, unknown>;
-    const managed = registrations.get(id) ?? { origin: "project" as const, registration: { modelRef: id, storage: "store" as const, store_id: MODEL_DEFINITIONS_STORE } };
+    const managed: { origin: ModelOrigin; registration: ModelRegistration } = registrations.get(id)
+      ?? { origin: "project", registration: { modelRef: id, storage: "store", store_id: MODEL_DEFINITIONS_STORE } };
+    await assertSnapshot();
     return { id, registration: managed.registration, origin: managed.origin, metaModel: model.data.model, builtin: isBuiltin, definition: model.definition, source,
       ...(typeof value.title === "string" ? { title: value.title } : {}),
       ...(typeof value.description === "string" ? { description: value.description } : {}) };
   };
+  const definition = (id: string) => describe(id, "runtime");
+  const inspect = (id: string) => describe(id, "definition");
+  await assertSnapshot();
   return {
-    directory, store, manager, definition, initialized: registrationState.initialized, diagnostics: registrationState.diagnostics,
+    directory, store, manager, definition, inspect, initialized: registrationState.initialized, diagnostics: registrationState.diagnostics,
+    /** Internal repair/delete input: retain storage and snapshot checks without approving an old definition. */
+    async source(id: string) {
+      assertId(id);
+      const saved = await snapshot(id);
+      await assertSnapshot();
+      return { source: saved.source, metaModel: saved.data.model };
+    },
     async list(): Promise<ProjectModelSummary[]> {
       const result: ProjectModelSummary[] = [];
       for (const id of [...allStoredIds].sort()) {
@@ -166,69 +200,21 @@ export async function createProjectModelHost(context: Context, input: ProjectMod
         }
         catch (error) {
           context.signal?.throwIfAborted();
+          if (["MODEL_OPERATION_PENDING", "MODEL_READ_CONFLICT"].includes((error as { code?: string })?.code ?? "")) throw error;
           // Invalid content is isolated; storage I/O failures are not reclassified as corrupt models.
           if (!(error instanceof SyntaxError) && !(error instanceof TypeError)
             && !(error && typeof error === "object" && "code" in error && error.code === "MODEL_NOT_FOUND"))
             throw error;
-          result.push({ id, ...(registrations.get(id) ?? {}), metaModel: registrations.get(id)?.registration.store_id === SYSTEM_RAW_MODELS_STORE ? "raw" : JSON_SCHEMA_DRAFT_07, builtin: registrations.get(id)?.origin === "system", status: "unavailable",
-            error: error instanceof Error ? error.message : String(error) });
+          const details = error && typeof error === "object" ? error as { code?: string; details?: unknown } : undefined;
+          result.push({ id, ...(registrations.get(id) ?? {}), metaModel: registrations.get(id)?.registration.store_id === SYSTEM_RAW_MODELS_STORE ? RAW_MODEL : JSON_SCHEMA_DRAFT_07, builtin: registrations.get(id)?.origin === "system", status: "unavailable",
+            error: error instanceof Error ? error.message : String(error), errorCode: details?.code, errorDetails: details?.details });
         }
       }
+      await assertSnapshot();
       return result;
     },
     async runtime(id: string) {
-      if (id === LEGACY_MODEL_REGISTRATION_MODEL && !known.has(id))
-        id = MODEL_REGISTRATION_MODEL;
-      assertId(id);
-      if (errors.has(id)) throw new TypeError(errors.get(id));
-      const dependencies = new Map<string, string[]>();
-      const visit = async (ref: string): Promise<void> => {
-        if (dependencies.has(ref))
-          return;
-        const model = await manager.getModel(context, ref);
-        const refs = model.data.model === JSON_SCHEMA_DRAFT_07 ? schemaDependencies(model.definition) : [];
-        dependencies.set(ref, refs);
-        for (const dependency of refs)
-          await visit(dependency);
-      };
-      await visit(id);
-      const prepared = new DefaultDataManager({ extensions,
-        models: bindings.map(binding => ({ ...binding, dependencies: dependencies.get(binding.model?.data.id ?? binding.ref!) ?? [] })) });
-      return prepared.getRuntime(context, id);
+      return (await checked(id)).runtime!;
     }
   };
-}
-/** Match the existing compiler's external ModelRef semantics, without network loads or aliases. */
-function schemaDependencies(definition: unknown): string[] {
-  const root = definition as Record<string, unknown>;
-  // Only absolute IDs establish the compiler's supported reference base.
-  // Leave unsupported relative IDs to the existing compiler's explicit diagnostic.
-  const base = typeof root.$id === "string" && URL.canParse(root.$id) ? new URL(root.$id) : undefined;
-  if (base)
-    base.hash = "";
-  const refs = new Set<string>();
-  function visit(value: unknown) {
-    if (!value || typeof value !== "object" || Array.isArray(value))
-      return;
-    const schema = value as Record<string, unknown>;
-    if (typeof schema.$ref === "string" && schema.$ref !== "" && !schema.$ref.startsWith("#")) {
-      const target = base ? new URL(schema.$ref, base) : undefined;
-      if (target) {
-        target.hash = "";
-        if (target.href !== base!.href)
-          refs.add(target.href);
-      }
-      else
-        refs.add(schema.$ref.split("#", 1)[0]!);
-    }
-    for (const key of ["properties", "definitions"]) {
-      const children = schema[key];
-      if (children && typeof children === "object" && !Array.isArray(children))
-        Object.values(children).forEach(visit);
-    }
-    visit(schema.items);
-    visit(schema.additionalProperties);
-  }
-  visit(root);
-  return [...refs];
 }

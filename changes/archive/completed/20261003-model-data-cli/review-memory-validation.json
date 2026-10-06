@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-05",
+  "project": "memsphere",
+  "ordinary": {
+    "command": "node dist/cli.js --project memsphere validate",
+    "exitCode": 0,
+    "status": "passed"
+  },
+  "change": {
+    "command": "node dist/cli.js --project memsphere memory change validate",
+    "exitCode": 0,
+    "status": "passed",
+    "id": "change-20261005-031024825z-a1b5f8c3",
+    "store": "embedded",
+    "baseRevision": "2b7400b0d3bff6670982ebcd0a02f023a6859e34",
+    "contentDigest": "57cd421178ab8068812af88bfd18e6f6f6cc0b675513e895f7edb5d345d8bffc",
+    "view": "http://0.0.0.0:30000/projects/memsphere/changes/change-20261005-031024825z-a1b5f8c3"
+  },
+  "sourceCopies": "framework, memory-access-rules and yaml-syntax-rules are byte-identical between reserved-memory/system-memory and .memsphere/memory",
+  "execution": "host execution; no sandbox child-process result used"
+}

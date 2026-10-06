@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
 import { Command, Option } from "commander";
+import { parseCli } from "./commands/cli-errors.js";
+import { registerModelCommands } from "./commands/model.js";
+import { registerDataCommands } from "./commands/data.js";
 import {
   archiveListCommand,
   archiveRestoreRunCommand,
@@ -95,12 +98,15 @@ program.hook("preAction", () => {
   if (selected) process.env.MEMSPHERE_PROJECT = selected;
 });
 
+registerModelCommands(program);
+registerDataCommands(program);
+
 const project = program
   .command("project")
   .description("Manage persistent Memsphere Projects and Workspace bindings.");
 
 project.command("models").description("Manage model registrations.")
-  .command("initialize").description("Explicitly initialize registration values and migrate the known preview definition with a backup.")
+  .command("initialize").description("Explicitly install system models, initialize registrations, and recover interrupted model operations.")
   .argument("[name]", "Project name; defaults to the current Primary")
   .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
   .action(projectModelsInitializeCommand);
@@ -125,6 +131,8 @@ project.command("register")
   .action(projectRegisterCommand);
 
 project.command("list")
+  .option("--limit <n>", "maximum entries per page (1–1000; default 100)")
+  .option("--cursor <token>", "continue with the previous page's nextCursor")
   .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
   .action(projectListCommand);
 
@@ -188,6 +196,8 @@ memory
   .option("--query <text>", "match a top-level canonical name or alias")
   .option("--node <node-ref>", "list direct children of a memory node")
   .option("--run <run-id>", "read from a Run's frozen ChangeSet Memory snapshot")
+  .option("--limit <n>", "maximum entries per page (1–1000; default 100)")
+  .option("--cursor <token>", "continue with the previous page's nextCursor")
   .addOption(new Option("--output <format>", "output format").choices(["yaml", "json", "text"]).default("yaml"))
   .action((reference, options) => memoryListCommand(reference, options));
 
@@ -606,6 +616,9 @@ archive
   .command("list")
   .description("List archived items.")
   .argument("[kind]", "optional: runs or changes")
+  .option("--limit <n>", "maximum entries per page (1–1000; default 100)")
+  .option("--cursor <token>", "continue with the previous page's nextCursor")
+  .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
   .action(archiveListCommand);
 
 archive
@@ -624,8 +637,4 @@ restore
   .argument("<id>", "run id")
   .action(archiveRestoreRunCommand);
 
-await program.parseAsync(process.argv).catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`error: ${message}`);
-  process.exitCode = 1;
-});
+await parseCli(program);

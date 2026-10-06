@@ -33,7 +33,7 @@ class FakeCatalog implements MemoryCatalog {
   async resolve(reference: string, query: MemoryResolveQuery = {}): Promise<MemoryDescriptor> {
     this.resolveCalls.push({ reference, query });
     if (this.fail) throw this.fail;
-    return this.page.memories[0];
+    return this.page.items[0];
   }
 
   async read(reference: string, query: MemoryResolveQuery = {}): Promise<MemoryEntity> {
@@ -50,8 +50,7 @@ function fixture() {
     defines: ["A memory."]
   };
   const page: MemoryListPage = {
-    memories: [{ reference: "concepts/Memory", kind: "concepts", names: ["Memory", "记忆"], defines: ["A memory."] }],
-    next_cursor: null
+    items: [{ reference: "concepts/Memory", kind: "concepts", names: ["Memory", "记忆"], defines: ["A memory."] }],
   };
   const catalog = new FakeCatalog(page, entity);
   let stdout = "";
@@ -66,7 +65,7 @@ test("memory list defaults to YAML and forwards filters", async () => {
   const state = fixture();
   await memoryListCommand(undefined, { kind: "concepts", query: "记忆" }, state.dependencies);
   assert.deepEqual(parse(state.stdout()), state.page);
-  assert.deepEqual(state.catalog.listCalls, [{ kind: "concepts", query: "记忆" }]);
+  assert.deepEqual(state.catalog.listCalls, [{ kind: "concepts", query: "记忆", limit: 100, cursor: undefined }]);
 });
 
 test("memory list and read select the frozen catalog for a Run", async () => {
@@ -131,8 +130,7 @@ test("memory read --effective preserves references and section groups without ex
     }]
   };
   const page: MemoryListPage = {
-    memories: [{ reference: "schemas/record", kind: "schemas", names: ["record"], defines: ["A record."] }],
-    next_cursor: null
+    items: [{ reference: "schemas/record", kind: "schemas", names: ["record"], defines: ["A record."] }],
   };
   const catalog = new FakeCatalog(page, consumer);
   catalog.read = async (reference: string, query: MemoryResolveQuery = {}) => {
@@ -189,13 +187,12 @@ test("memory list and read navigate nodes after resolving a canonical memory ref
     }]
   };
   const page: MemoryListPage = {
-    memories: [{
+    items: [{
       reference: "statements/Repository rules",
       kind: "statements",
       names: ["Repository rules"],
       defines: ["Repository-wide rules."]
     }],
-    next_cursor: null
   };
   const catalog = new FakeCatalog(page, entity);
   let stdout = "";
@@ -207,7 +204,7 @@ test("memory list and read navigate nodes after resolving a canonical memory ref
   await memoryListCommand("Repository rules", { output: "json" }, dependencies);
   const listed = JSON.parse(stdout);
   assert.equal(listed.memory.reference, "statements/Repository rules");
-  assert.equal(listed.nodes[0].node_ref, "statement:Testing");
+  assert.equal(listed.items[0].node_ref, "statement:Testing");
   assert.deepEqual(catalog.resolveCalls, [{ reference: "Repository rules", query: { kind: undefined } }]);
   assert.deepEqual(catalog.readCalls, [{ reference: "statements/Repository rules", query: { kind: "statements" } }]);
 

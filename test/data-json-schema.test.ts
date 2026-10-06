@@ -10,7 +10,7 @@ import type { Model } from "../src/data/api/model.js";
 import type { ModelRuntime, ModelRuntimeRegistry } from "../src/data/api/model-runtime.js";
 import type { ArrayValue, ObjectDescriptor, ObjectValue, ScalarValue } from "../src/data/api/reflection.js";
 
-function model(definition: unknown, id = "tests/example"): Model {
+function model(definition: unknown, id = "tests/example.json"): Model {
   return {
     data: { id, model: JSON_SCHEMA_DRAFT_07, payload: { contentType: "application/json", content: { stream: () => new ReadableStream() } } },
     definition
@@ -51,7 +51,7 @@ test("JSON Schema is an independent meta-model-targeted extension with stable de
     },
     additionalProperties: { type: "number" }
   });
-  assert.equal(runtime.descriptor.id, "tests/example");
+  assert.equal(runtime.descriptor.id, "tests/example.json");
   assert.equal(runtime.descriptor.root.kind, "object");
   const root = runtime.descriptor.root as ObjectDescriptor;
   assert.equal(root.description, "A record");
@@ -169,7 +169,7 @@ test("JSON Schema local references preserve descriptor reuse and support recursi
         type: "object", required: ["label"], additionalProperties: false,
         properties: {
           label: { $ref: "#/definitions/label" },
-          children: { type: "array", items: { $ref: "https://schemas.example.test/tree.json#/definitions/node" } }
+          children: { type: "array", items: { $ref: "#/definitions/node" } }
         }
       },
       label: { type: "string", minLength: 1 }
@@ -202,37 +202,15 @@ test("JSON Schema JSON Pointers decode escaped property names", async () => {
   assert.doesNotThrow(() => runtime.reflect({ first: "xyz", second: "xxx" }));
 });
 
-test("JSON Schema external references reuse any registered runtime and preserve its validation", async () => {
-  const dependency = createPlainRuntime({ id: "https://schemas.example.test/positive", root: { kind: "scalar", scalar: "number" } }, {
-    validate(value) { if (typeof value !== "number" || value <= 0) throw new TypeError("positive dependency requires value > 0"); }
-  });
+test("JSON Schema rejects external references even when their Runtime is already registered", async () => {
+  const dependency = createPlainRuntime({ id: "positive.json", root: { kind: "scalar", scalar: "number" } });
   const dependencies = registry(dependency);
-  const runtime = await compile({
-    $id: "https://schemas.example.test/models/record", type: "object",
-    properties: { amount: { $ref: "../positive" } }, required: ["amount"]
-  }, dependencies);
-  const descriptor = runtime.descriptor.root as ObjectDescriptor;
-  assert.strictEqual(descriptor.field("amount")?.type, dependency.descriptor.root);
-  const raw = { amount: 2 };
-  const root = runtime.reflect(raw) as ObjectValue;
-  const amount = root.get(descriptor.field("amount")!) as ScalarValue;
-  assert.throws(() => amount.set(-1), /positive dependency/);
-  assert.equal(raw.amount, 2);
-  amount.set(3);
-  assert.equal(raw.amount, 3);
-  assert.throws(() => runtime.reflect({ amount: 0 }), /positive dependency/);
-  const alias = await compile({ $ref: dependency.descriptor.id }, dependencies);
-  assert.strictEqual(alias.descriptor.root, dependency.descriptor.root);
-  assert.equal(alias.descriptor.id, "tests/example");
-  assert.throws(() => alias.reflect(0), /positive dependency/);
-  assert.equal(alias.reflect(1).value, 1);
-  const metadataPointer = await compile({
-    type: "object", properties: { amount: { $ref: "#/default" } },
-    default: { $ref: dependency.descriptor.id }
-  }, dependencies);
-  assert.equal((metadataPointer.reflect({ amount: 2 }).value as { amount: number }).amount, 2);
-  assert.throws(() => metadataPointer.reflect({ amount: -1 }), /positive dependency/);
-  await assert.rejects(compile({ $ref: "not-registered" }), /dependency "not-registered" is not registered/);
+  for (const ref of ["positive.json", "positive.json#", "positive.json#/definitions/value", "https://schemas.example.test/root.json#/definitions/value"]) {
+    await assert.rejects(compile({ $id: "https://schemas.example.test/root.json", type: "object",
+      properties: { value: { $ref: ref } }, definitions: { value: { type: "string" } } }, dependencies), { code: "MODEL_REFERENCE_UNSUPPORTED" });
+  }
+  await assert.rejects(compile({ type: "object", properties: { amount: { $ref: "#/default" } },
+    default: { $ref: dependency.descriptor.id } }, dependencies), { code: "MODEL_REFERENCE_UNSUPPORTED" });
 });
 
 test("JSON Schema prototype-sensitive field names remain own fields and satisfy Ajv constraints", async () => {
@@ -300,17 +278,12 @@ test("JSON Schema never invokes getters or conversion hooks inside opaque descen
   assert.equal(calls, 0);
 });
 
-test("JSON Schema safety scanning preserves external native Maps, bigint, bytes and recursive graphs", async () => {
-  const dependency = createPlainRuntime({
-    id: "native-map",
-    root: { kind: "map", key: { kind: "scalar", scalar: "bigint" }, value: { kind: "scalar", scalar: "bytes" } }
-  });
-  const runtime = await compile({ type: "object", properties: { native: { $ref: "native-map" } } }, registry(dependency));
+test("JSON Schema safety scanning preserves opaque native values and recursive graphs without invoking accessors", async () => {
   const bytes = new Uint8Array([1, 2]);
   const map = new Map([[1n, bytes], [2n, Buffer.from([3, 4])]]);
-  const raw = { native: map };
-  assert.strictEqual(runtime.reflect(raw).value, raw);
   const opaque = await compile({ type: "object" });
+  const raw = { native: map };
+  assert.strictEqual(opaque.reflect(raw).value, raw);
   const cycle: Record<string, unknown> = {};
   cycle.self = cycle;
   assert.strictEqual(opaque.reflect(cycle).value, cycle);

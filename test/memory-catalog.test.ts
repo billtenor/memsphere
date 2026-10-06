@@ -52,11 +52,10 @@ test("catalog lists stable public descriptors without reading bodies", async () 
   const catalog = new DefaultMemoryCatalog(provider);
 
   assert.deepEqual(await catalog.list(), {
-    memories: [
+    items: [
       { reference: "concepts/alpha", kind: "concepts", names: ["alpha", "A"], defines: ["Alpha summary"] },
       { reference: "statements/zed", kind: "statements", names: ["zed", "Z"], defines: ["Z summary"] }
     ],
-    next_cursor: null
   });
   assert.deepEqual(provider.readCalls, []);
   assert(!JSON.stringify(await catalog.list()).includes("/private/"));
@@ -74,13 +73,12 @@ test("catalog exposes textual definitions without a structured-definition side c
   );
 
   assert.deepEqual(await new DefaultMemoryCatalog(provider).list(), {
-    memories: [{
+    items: [{
       reference: "concepts/memory",
       kind: "concepts",
       names: ["memory"],
       defines: ["A managed memory."]
     }],
-    next_cursor: null
   });
 });
 
@@ -94,10 +92,10 @@ test("catalog filters exact normalized names and passes kind to provider", async
   );
   const catalog = new DefaultMemoryCatalog(provider);
 
-  assert.deepEqual((await catalog.list({ kind: "concepts", query: " 记忆 " })).memories.map((item) => item.reference), [
+  assert.deepEqual((await catalog.list({ kind: "concepts", query: " 记忆 " })).items.map((item) => item.reference), [
     "concepts/memory"
   ]);
-  assert.deepEqual((await catalog.list({ query: "memory" })).memories.map((item) => item.reference), ["concepts/memory"]);
+  assert.deepEqual((await catalog.list({ query: "memory" })).items.map((item) => item.reference), ["concepts/memory"]);
   assert.deepEqual(provider.listCalls[0], { kind: "concepts" });
 });
 
@@ -183,4 +181,36 @@ test("catalog rejects invalid canonical names and aliases from providers", async
     {}
   ));
   await assert.rejects(invalidAlias.list(), MemoryCatalogDataError);
+});
+
+test("catalog pagination does not hide names beyond the first page from resolve and read", async () => {
+  const entries = Array.from({ length: 105 }, (_, index) => ({
+    id: `id-${index}`, kind: "concepts" as const, names: [`memory-${String(index).padStart(3, "0")}`], defines: []
+  }));
+  const entity = concept("memory-104");
+  const catalog = new DefaultMemoryCatalog(new FakeProvider(entries, { "id-104": entity }), { project: "p" });
+  const first = await catalog.list();
+  assert.equal(first.items.length, 100);
+  const second = await catalog.list({ cursor: first.nextCursor, limit: 3 });
+  const last = await catalog.list({ cursor: second.nextCursor, limit: 1000 });
+  assert.deepEqual([...first.items, ...second.items, ...last.items].map((item) => item.names[0]), entries.map((item) => item.names[0]));
+  assert.equal(last.nextCursor, undefined);
+  assert.equal((await catalog.resolve("memory-104")).reference, "concepts/memory-104");
+  assert.deepEqual(await catalog.read("memory-104"), entity);
+});
+
+test("catalog cursors bind normalized filters and the actual Project source", async () => {
+  const provider = new FakeProvider([
+    { id: "a", kind: "concepts", names: ["a"], defines: [] },
+    { id: "b", kind: "concepts", names: ["b"], defines: [] },
+    { id: "c", kind: "schemas", names: ["c"], defines: [] }
+  ], {});
+  const catalog = new DefaultMemoryCatalog(provider, { projects: ["p"] });
+  const first = await catalog.list({ kind: "concepts", limit: 1 });
+  assert.deepEqual(first.items.map((item) => item.reference), ["concepts/a"]);
+  assert.deepEqual((await catalog.list({ kind: "concepts", limit: 1000, cursor: first.nextCursor })).items.map((item) => item.reference), ["concepts/b"]);
+  await assert.rejects(catalog.list({ cursor: first.nextCursor }), { code: "INVALID_CURSOR" });
+  await assert.rejects(catalog.list({ kind: "concepts", query: "a", cursor: first.nextCursor }), { code: "INVALID_CURSOR" });
+  const other = new DefaultMemoryCatalog(provider, { projects: ["other"] });
+  await assert.rejects(other.list({ kind: "concepts", cursor: first.nextCursor }), { code: "INVALID_CURSOR" });
 });

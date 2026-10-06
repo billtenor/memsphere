@@ -1,0 +1,22 @@
+[
+  {
+    "body": "重写整个“2. 模型命令”，使用能直接理解的中文说明每个命令的用途、参数和执行结果。不要随意引入没有解释的概念，不要把 bootstrap、Catalog、adapter 等内部实现用语写成用户必须理解的操作规则。必要的已有技术名称首次出现时要解释。",
+    "severity": "blocking"
+  },
+  {
+    "body": "落实此前关于 model read 的讨论：保留 registration、definition、references 三种内容，all 用于一次返回这三部分；删除 source 和 structure，默认读取 definition。",
+    "severity": "blocking"
+  },
+  {
+    "body": "model create 和替换定义的 update 不提供 --check 选择，必须通过定义、引用和当前运行时支持检查才保存。创建成功就应能被当前 Memsphere 使用，失败不写入；不要为此引入模型草稿态。只修改允许编辑的登记信息无需检查运行时支持。",
+    "severity": "blocking"
+  },
+  {
+    "body": "撤掉模型级 if-match、expected-version、expected-revision 参数，以及整个模型的修订号和对应并发保护设计。现有定义没有 revision，不能把登记记录的 revision 当成整个模型的 revision。业务数据记录已有的 --expected-revision 保留。",
+    "severity": "blocking"
+  },
+  {
+    "body": "系统模型不允许修改：定义、名称、说明、标签等全部内容只读，不开放通用 CLI 创建、修改或删除系统模型，也不能通过 data 命令绕过。",
+    "severity": "blocking"
+  }
+]

@@ -32,12 +32,12 @@ declare const orderData: Data;
 declare const orderValue: unknown;
 declare const decodedModel: Model;
 
-const orderModel: ModelRef = "order-model";
+const orderModel: ModelRef = "order-model.json";
 const orderStore: StoreId = "orders";
-const metaModel: ModelRef = "json-schema/draft-07";
+const metaModel: ModelRef = "json-schema/draft-07.json";
 
-const decodedBinding: ModelBinding = { model: decodedModel, dependencies: ["money-model"] };
-const rawBinding: ModelBinding = { ref: "loaded-model", loadData: async context => ({ ...orderData, id: "loaded-model" }) };
+const decodedBinding: ModelBinding = { model: decodedModel, dependencies: ["money-model.json"] };
+const rawBinding: ModelBinding = { ref: "loaded-model.json", loadData: async context => ({ ...orderData, id: "loaded-model.json" }) };
 const storeBinding: StoreBinding = {
   id: orderStore, model: orderModel, kind: "ValueStore", factory: "memsphere/filesystem-json",
   config: new Config({ directory: "/project/data/orders" })

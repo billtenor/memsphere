@@ -81,7 +81,7 @@ test('The market supplies one example package with the order use case and keeps 
     assert.equal(models.models.some((model: { origin: string }) => model.origin === 'market'), false, 'preview does not import market models');
 }));
 
-test('The eight example models preview and import together, then each imported model exposes its structure and exact source', async () => fixture(async (page, origin) => {
+test('The eight examples remain previewable, while unsupported package import reports failure and publishes none', async () => fixture(async (page, origin) => {
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${origin}/projects/alpha/models/market`);
@@ -90,30 +90,17 @@ test('The eight example models preview and import together, then each imported m
     await examples.locator('.model-definition-table').last().waitFor();
     assert.equal(await examples.getByRole('heading', { level: 4 }).count(), 8);
     assert.equal(await examples.locator('.model-definition-table').count(), 8);
-    const market = await (await page.request.get(`${origin}/api/projects/alpha/models/market`)).json();
-    assert.deepEqual(market.packages.map((pack: { id: string }) => pack.id), ['memsphere.examples']);
-    const expected = market.packages.find((pack: { id: string }) => pack.id === 'memsphere.examples').models as Array<{ source: string; registration: { modelRef: string; name: string } }>;
-    assert.equal(expected.length, 8);
-    await examples.getByRole('button', { name: '导入', exact: true }).click();
-    const secondary = page.getByRole('complementary', { name: 'Secondary navigation', exact: true });
-    await secondary.getByRole('button', { name: '示例模型', exact: true }).waitFor();
-    const data = await (await page.request.get(`${origin}/api/projects/alpha/models`)).json();
-    const imported = data.models.filter((model: { id: string }) => expected.some(item => item.registration.modelRef === model.id));
-    assert.equal(imported.length, 8);
-    assert.equal(data.models.some((model: { id: string }) => model.id === 'memsphere/examples/order.json'), false);
-    assert.ok(imported.every((model: { status: string; origin: string; registration: { package: string } }) => model.status === 'available' && model.origin === 'market' && model.registration.package === 'memsphere.examples'));
-    await examples.getByRole('button', { name: '导入', exact: true }).click();
-    await page.getByRole('status').filter({ hasText: '无变更' }).waitFor();
-    await secondary.getByRole('button', { name: '示例模型', exact: true }).click();
-    await page.waitForURL(url => url.searchParams.get('scope') === 'market:memsphere.examples');
-    for (const model of expected) {
-        await page.goto(`${origin}/projects/alpha/models?scope=market%3Amemsphere.examples&model=${encodeURIComponent(model.registration.modelRef)}`);
-        await page.getByRole('heading', { name: model.registration.name, exact: true }).waitFor();
-        assert.match(await page.locator('.model-information-table').innerText(), /models\/imported\/json-schema\/draft-07/);
-        await page.getByRole('radio', { name: '模型结构', exact: true }).click();
-        await page.locator('.model-definition-table').waitFor();
-        await page.getByRole('radio', { name: '原始定义', exact: true }).click();
-        assert.equal(await page.locator('.model-browser-code').textContent(), model.source);
+    const before = await (await page.request.get(`${origin}/api/projects/alpha/models`)).json();
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const response = page.waitForResponse(response => response.url().endsWith('/models/market/import'));
+        await examples.getByRole('button', { name: '导入', exact: true }).click();
+        const result = await response;
+        assert.equal(result.status(), 422);
+        assert.equal((await result.json()).code, 'MODEL_RUNTIME_UNSUPPORTED');
+        await page.getByRole('status').filter({ hasText: /Unsupported|Runtime|unsupported/ }).waitFor();
+        const after = await (await page.request.get(`${origin}/api/projects/alpha/models`)).json();
+        assert.deepEqual(after.models, before.models);
+        assert.equal(after.models.some((model: { origin: string }) => model.origin === 'market'), false);
     }
     assert.deepEqual(errors, []);
 }, true));
