@@ -16,25 +16,29 @@ concurrency:
 
 jobs:
   test:
-    name: Test (${{ matrix.os }}, ${{ matrix.shard }}/${{ matrix.shards }})
+    name: Test (${{ matrix.os }}, ${{ matrix.title }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, shard: 1, shards: 4, workers: 2 }
-          - { os: ubuntu-latest, shard: 2, shards: 4, workers: 2 }
-          - { os: ubuntu-latest, shard: 3, shards: 4, workers: 2 }
-          - { os: ubuntu-latest, shard: 4, shards: 4, workers: 2 }
-          - { os: macos-latest, shard: 1, shards: 2, workers: 4 }
-          - { os: macos-latest, shard: 2, shards: 2, workers: 4 }
-          - { os: windows-latest, shard: 1, shards: 4, workers: 2 }
-          - { os: windows-latest, shard: 2, shards: 4, workers: 2 }
-          - { os: windows-latest, shard: 3, shards: 4, workers: 2 }
-          - { os: windows-latest, shard: 4, shards: 4, workers: 2 }
+          - { os: ubuntu-latest, suite: browser, title: "Browser UI", workers: 3, browser: true }
+          - { os: ubuntu-latest, suite: cli, title: "CLI & Packaging", workers: 3, browser: false }
+          - { os: ubuntu-latest, suite: memory-and-projects, title: "Projects & Memory", workers: 2, browser: true }
+          - { os: ubuntu-latest, suite: runtime-core, title: "Run, Data & SDK", workers: 2, browser: false }
+          - { os: macos-latest, suite: browser, title: "Browser UI", workers: 3, browser: true }
+          - { os: macos-latest, suite: cli, title: "CLI & Packaging", workers: 4, browser: false }
+          - { os: macos-latest, suite: core, title: "Projects, Memory & Runtime", workers: 4, browser: true }
+          - { os: windows-latest, suite: model-ui, title: "Models & Settings UI", workers: 2, browser: true }
+          - { os: windows-latest, suite: review-ui, title: "Review & Shell UI", workers: 2, browser: true }
+          - { os: windows-latest, suite: memory-cli, title: "Memory & Project CLI", workers: 2, browser: false }
+          - { os: windows-latest, suite: app-cli, title: "App, Model & Data CLI", workers: 2, browser: false }
+          - { os: windows-latest, suite: project-core, title: "Project Lifecycle", workers: 2, browser: false }
+          - { os: windows-latest, suite: memory-core, title: "Memory Stores & Changes", workers: 2, browser: true }
+          - { os: windows-latest, suite: runtime-core, title: "Run, Data & SDK", workers: 2, browser: false }
     env:
-      CI_TEST_RESULTS: ci-results/${{ matrix.os }}-${{ matrix.shard }}.json
+      CI_TEST_RESULTS: ci-results/${{ matrix.os }}-${{ matrix.suite }}.json
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -43,16 +47,17 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Install Playwright Chromium
+        if: matrix.browser
         run: npx playwright install chromium
       # pretest:ci builds and typechecks both core and View Modules once.
-      - run: npm run test:ci -- --shard=${{ matrix.shard }}/${{ matrix.shards }} --test-concurrency=${{ matrix.workers }}
-      - if: matrix.shard == 1
+      - run: npm run test:ci -- --suite=${{ matrix.suite }} --test-concurrency=${{ matrix.workers }}
+      - if: matrix.suite == 'cli' || matrix.suite == 'app-cli'
         run: npm run smoke:project
       - name: Preserve test timings
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: timings-${{ matrix.os }}-${{ matrix.shard }}
+          name: timings-${{ matrix.os }}-${{ matrix.suite }}
           path: ci-results
           if-no-files-found: error
 

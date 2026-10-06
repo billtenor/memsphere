@@ -4,9 +4,11 @@ CI 与 Security 的整条 workflow 从 GitHub `created_at` 到完成应不超过
 
 ## 执行方式
 
-CI 在 Linux、macOS、Windows 上各执行全部测试。`scripts/run-tests.mjs` 自动发现 `test/*.test.ts`，按 `scripts/test-durations.json` 中各平台独立的历史耗时采用最长任务优先算法在 Linux/Windows 上分成四组、每组两个独立进程并行；macOS 分成两组、每组四个独立进程并行；单个测试文件内部仍串行。每个文件获得独立临时 MEMSPHERE_HOME，测试自身的临时仓库、配置和浏览器 Context 继续隔离。没有历史数据的新文件使用默认权重并自动加入，不依赖人工维护测试清单。
+CI 在 Linux、macOS、Windows 上各执行全部测试。`scripts/run-tests.mjs` 自动发现 `test/*.test.ts`，按主要验证契约分成七个类别：模型与设置 UI、评审与 Shell UI、Memory 与 Project CLI、App/Model/Data CLI、Project 生命周期、Memory 存储与变更、Run/Data/SDK。Job 使用类别名称，Linux 和 macOS 合并相关类别以减少 runner 排队和准备开销，Windows 使用细分类别。
 
-`npm run test:ci -- --shard=1/4` 运行其中一组；`node scripts/run-tests.mjs --shard=1/4 --list` 查看计划；`npm test` 运行全部文件。`--test-concurrency=N` 控制文件进程数量。`--results=<path>` 或 CI_TEST_RESULTS 保存计划、退出码及文件耗时；失败不停止其他文件，也不转换为成功。
+类别由测试文件名和浏览器入口识别，新测试自动加入对应类别或运行时类别，不依赖人工维护文件清单。配置契约测试检查每个平台的类别组合恰好覆盖全部测试文件一次，避免合并类别后重复或遗漏。每个类别内部依据 `scripts/test-durations.json` 的平台独立计时优先执行昂贵文件，用 2–4 个独立进程并行；单个测试文件内部仍串行。每个文件获得独立临时 MEMSPHERE_HOME，测试自身的临时仓库、配置和浏览器 Context 继续隔离。
+
+`npm run test:ci -- --suite=app-cli` 运行 App/Model/Data CLI；`node scripts/run-tests.mjs --suite=app-cli --list` 查看文件清单；`npm test` 运行全部文件。`--test-concurrency=N` 控制文件进程数量。`--results=<path>` 或 CI_TEST_RESULTS 保存类别、计划、退出码及文件耗时；失败不停止其他文件，也不转换为成功。
 
 `pretest:ci` 执行一次完整 build，同时完成 core 与 View Module 的 TypeScript 检查。测试后复用该产物执行每个平台的 Project smoke，不再重复构建。Windows 的独立 npm 安装、Run/View 生命周期和四种 Shell smoke 均保留；它在完成 build 后使用 `npm pack --ignore-scripts` 复用产物，用户发布包的 prepack 构建契约不变。
 

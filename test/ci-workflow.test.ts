@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { parse } from "yaml";
+import { readdir } from "node:fs/promises";
+import { selectTests, testSuites } from "../scripts/test-plan.mjs";
 
 type WorkflowStep = {
   if?: string;
@@ -21,7 +23,7 @@ type Workflow = {
         matrix?: {
           os?: string[];
           shard?: number[];
-          include?: Array<{ os: string; shard: number; shards: number; workers: number }>;
+          include?: Array<{ os: string; suite: string; title: string; workers: number; browser: boolean }>;
         };
       };
       "timeout-minutes"?: number;
@@ -53,14 +55,21 @@ test("CI bounds and supersedes cross-platform browser test runs", async () => {
     "macos-latest",
     "windows-latest"
   ]);
+  const files = (await readdir("test")).filter(file => file.endsWith(".test.ts"));
+  const sources = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(`test/${file}`, "utf8")])));
   for (const os of new Set(matrix.map(row => row.os))) {
     const rows = matrix.filter(row => row.os === os);
-    assert.equal(rows.length, rows[0].shards);
-    assert.deepEqual(rows.map(row => row.shard), Array.from({ length: rows[0].shards }, (_, i) => i + 1));
-    assert(rows.every(row => row.shards === rows[0].shards && row.workers > 0));
+    assert(rows.every(row => row.workers > 0 && row.title === testSuites[row.suite].title));
+    for (const row of rows) {
+      const selected = selectTests(files, sources, {}, row.suite);
+      const requiresBrowser = selected.some(file => sources[file].includes("helpers/browser") || /from ["']playwright["']/.test(sources[file]));
+      assert.equal(row.browser, requiresBrowser, `${os}/${row.suite}: Chromium is available when required`);
+    }
+    const assigned = rows.flatMap(row => selectTests(files, sources, {}, row.suite));
+    assert.deepEqual([...assigned].sort(), [...files].sort(), `${os}: no missing or duplicate test files`);
   }
 
-  assert.equal(browserInstall?.if, undefined);
+  assert.equal(browserInstall?.if, "matrix.browser");
   assert.equal(browserInstall?.run, "npx playwright install chromium");
   assert.equal(
     steps.some((step) => step.run?.includes("playwright install --with-deps")),
@@ -68,7 +77,7 @@ test("CI bounds and supersedes cross-platform browser test runs", async () => {
   );
   assert.equal(npmTest?.if, undefined);
   assert.equal(packageJson.scripts?.["test:ci"], "node scripts/run-tests.mjs --test-concurrency=2");
-  assert.match(npmTest?.run ?? "", /--shard=\$\{\{ matrix.shard \}\}\/\$\{\{ matrix.shards \}\}/);
+  assert.match(npmTest?.run ?? "", /--suite=\$\{\{ matrix.suite \}\}/);
   assert.equal(steps.some(step => step.run === "npm run build"), false);
   assert.match(
     normalizedWindowsPackageSmoke,
