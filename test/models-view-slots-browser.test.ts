@@ -1,8 +1,9 @@
+import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium, type Page } from "playwright";
+import { type Page } from "playwright";
 import { startProjectModelView } from "./fixtures/project-model-view.js";
 
 const pageCell = "org.memsphere.models.page.presentation@1:page";
@@ -23,7 +24,7 @@ async function withPackage(cell: string, source: string, run: (page: Page, origi
     await writeFile(join(config.homeRoot!, "config.json"), JSON.stringify({ language,
       view_packages: config.viewPackages, view_composition: config.viewComposition }));
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     page.setDefaultTimeout(10_000);

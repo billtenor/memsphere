@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 import test from "node:test";
-import { builtinModuleCatalog } from "../src/module/builtin-catalog.js";
-import { isViewPagePath, renderMarkdownContent } from "../src/commands/view.js";
-import { coreViewRoutes } from "../src/view/core-routes.js";
+import { createViewServer, isViewPagePath, renderMarkdownContent } from "../src/commands/view.js";
+import type { MemsphereConfig } from "../src/config.js";
+import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
-test("View page routes are the union of the builtin Module route grants", () => {
+test("View page routing accepts supported pages and rejects API, asset, and unknown paths", () => {
   const concretePaths = [
     "/",
     "/memories",
@@ -42,37 +44,40 @@ test("View page routes are the union of the builtin Module route grants", () => 
     "/assets/modules/unknown/index.js"
   ]) assert.equal(isViewPagePath(path), false, path);
 
-  assert.deepEqual(
-    [
-      ...coreViewRoutes.flatMap(route => [route.path, ...("aliases" in route ? route.aliases ?? [] : [])]),
-      ...builtinModuleCatalog.flatMap(module => module.routes.flatMap(route => [route.path, ...(route.aliases ?? [])]))
-    ],
-    [
-      "/", "/memories", "/market", "/memory-market", "/memories/:kind/:name",
-      "/projects/:projectId/memories", "/projects/:projectId/memories/:kind/:name",
-      "/projects/:projectId/market", "/projects/:projectId/changes/:changeId",
-      "/tasks", "/tasks/:runId", "/tasks/:runId/artifact-reviews/:reviewId",
-      "/models", "/models/market", "/model-prototype", "/model-prototype/storage",
-      "/reference", "/reference/dialog", "/reference/drawer",
-      "/settings/:module"
-    ]
-  );
 });
 
-test("each builtin View entry is a separately compiled Plugin source", async () => {
-  for (const entry of builtinModuleCatalog) {
-    const source = await readFile(resolve("modules", entry.packageDirectory, "adapter/view/index.ts"), "utf8");
-    assert.match(source, /from "@memsphere\/view-sdk"/);
-    assert.match(source, /export default defineViewPlugin/);
-    assert.match(source, /slots\.mainView/);
-  }
-});
+test("Memory summary API lists valid headers even when the body cannot be parsed", async t => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-summary-api-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const memoryRoot = join(root, "memory");
+  await mkdir(join(memoryRoot, "concepts"), { recursive: true });
+  await writeFile(join(memoryRoot, "concepts/broken.yaml"), withCurrentMemorySyntax(
+    "!concept\nnames: [valid-name, Valid name]\ndefines: [\n"
+  ));
+  const config: MemsphereConfig = {
+    configPath: join(root, "config.json"), scopeRoot: root, homeRoot: root,
+    language: "en", memoryRoot, runsRoot: join(root, "runs"), archiveRoot: join(root, "archives"),
+    debug: { agentReview: false, root: join(root, ".runtime") }, view: { host: "127.0.0.1", port: 0 }
+  };
+  const server = createViewServer(config);
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const summaryResponse = await fetch(`${origin}/api/memories?representation=summary`);
+  assert.equal(summaryResponse.status, 200);
+  const summary = (await summaryResponse.json()).memories;
+  assert.equal(summary.length, 1);
+  assert.equal(summary[0].id, "concepts/valid-name");
+  assert.deepEqual(summary[0].names, ["valid-name", "Valid name"]);
+  assert.equal(summary[0].error, undefined);
+  assert.equal(summary[0].entity, undefined);
 
-test("Memory summaries do not reuse full Memory readers", async () => {
-  const source = await readFile(new URL("../src/commands/view.ts", import.meta.url), "utf8");
-  const body = source.match(/async function loadMemorySummaryPayload[\s\S]*?\r?\n}\r?\n\r?\nasync function loadMemoryDetailPayload/)?.[0] ?? "";
-  assert.match(body, /readMemoryFileSummary/);
-  assert.doesNotMatch(body, /loadMemoryPayload|readMemoryFile\(/);
+  const fullResponse = await fetch(`${origin}/api/memories`);
+  assert.equal(fullResponse.status, 200);
+  const full = (await fullResponse.json()).memories;
+  assert.equal(full.length, 1);
+  assert.equal(full[0].path, "concepts/broken.yaml");
+  assert.ok(full[0].error);
 });
 
 test("renderMarkdownContent renders GFM blocks while escaping unsafe HTML and links", () => {

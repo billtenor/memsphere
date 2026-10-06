@@ -1,9 +1,9 @@
+import { managedProjectFixture } from "./helpers/project.js";
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { projectCreateCommand } from "../src/commands/project.js";
 import { gitOutput, runGit } from "../src/git.js";
 import {
   checkpointWorkspaceChanges,
@@ -39,7 +39,7 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     process.env.MEMSPHERE_HOME = home;
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     process.chdir(workspace);
-    await projectCreateCommand("project", { bind: true });
+    await managedProjectFixture("project", { bind: true });
     const registry = await readProjectRegistry(home);
     const memoryRoot = join(registry.projects.project.root, "memory");
 

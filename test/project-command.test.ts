@@ -1,3 +1,4 @@
+import { managedProjectFixture } from "./helpers/project.js";
 import assert from "node:assert/strict";
 import { access, chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -168,7 +169,7 @@ test("Managed Project System Memory repair validates and publishes automatically
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     process.chdir(workspace);
 
-    await projectCreateCommand("existing", { bind: true });
+    await managedProjectFixture("existing", { bind: true });
     assert.equal(await prepareManagedSystemMemoryChange(), undefined);
 
     const registry = await readProjectRegistry(home);
@@ -309,7 +310,7 @@ test("Managed System Memory repair updates canonical identity at its current sto
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     process.chdir(workspace);
 
-    await projectCreateCommand("identity-path", { bind: true });
+    await managedProjectFixture("identity-path", { bind: true });
     const registry = await readProjectRegistry(home);
     const projectRoot = registry.projects["identity-path"].root;
     const memoryRoot = join(projectRoot, "memory");
@@ -368,9 +369,9 @@ test("System Memory repair honors explicit, global, Primary, and Mounted selecti
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     process.chdir(workspace);
 
-    await projectCreateCommand("primary", { bind: true });
-    await projectCreateCommand("mounted", {});
-    await projectCreateCommand("explicit", {});
+    await managedProjectFixture("primary", { bind: true });
+    await managedProjectFixture("mounted", {});
+    await managedProjectFixture("explicit", {});
     await projectMountCommand("mounted");
     const registry = await readProjectRegistry(home);
     const systemPath = (await readReservedMemoryManifest()).system_memory.install[0];
@@ -425,8 +426,8 @@ test("System Memory repair freezes validation and publish failures without chang
     process.env.MEMSPHERE_HOME = home;
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     process.chdir(workspace);
-    await projectCreateCommand("validation-failure", { bind: true });
-    await projectCreateCommand("publish-failure", {});
+    await managedProjectFixture("validation-failure", { bind: true });
+    await managedProjectFixture("publish-failure", {});
     const registry = await readProjectRegistry(home);
     const systemPath = (await readReservedMemoryManifest()).system_memory.install[0];
 

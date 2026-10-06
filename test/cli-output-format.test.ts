@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import test, { type TestContext } from "node:test";
 import { parse } from "yaml";
 import { writeData } from "../src/project/data-service.js";
+import { mutateModel } from "../src/project/model-service.js";
 import { businessFixture, snapshotTree } from "./helpers/business-data.js";
 
 const entry = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
@@ -71,8 +72,9 @@ test("actual model/data/Store reads use YAML text by default and preserve specia
   const data = representations(f, ["data", "read", "a", "--store", "records"]);
   assert.deepEqual(data.value, value);
   assert.equal(data.revision, 1);
-  const query = representations(f, ["data", "read", "a", "--store", "records", "--path", "$.nested.nil"]);
-  assert.deepEqual(query.value, [null]);
+  const query = cli(f, ["data", "read", "a", "--store", "records", "--path", "$.nested.nil"], "json");
+  assert.equal(query.status, 0, query.stderr);
+  assert.deepEqual(JSON.parse(query.stdout).value, [null]);
   const store = representations(f, ["data", "store", "read", "records"]);
   assert.equal(store.storeId, "records");
   assert.equal(store.model, "record.json");
@@ -80,7 +82,7 @@ test("actual model/data/Store reads use YAML text by default and preserve specia
   assert.deepEqual(await snapshotTree(f.root), before);
 });
 
-test("all three new list commands retain items and usable cursors across JSON, text and default output", { timeout: 60_000 }, async t => {
+test("all three list commands expose the same paged receipt in JSON, text and default output", { timeout: 60_000 }, async t => {
   const f = await fixture(t);
   const before = await snapshotTree(f.root);
   for (const args of [["model", "list"], ["data", "list", "--store", "records"], ["data", "store", "list"]]) {
@@ -88,55 +90,61 @@ test("all three new list commands retain items and usable cursors across JSON, t
     assert.equal(first.items.length, 1);
     assert.equal(typeof first.nextCursor, "string");
     assert.ok(first.nextCursor.length);
-    const second = representations(f, [...args, "--limit", "1", "--cursor", first.nextCursor]);
-    assert.equal(second.items.length, 1);
-    assert.notDeepEqual(second.items, first.items);
-    assert.equal(Object.hasOwn(second, "nextCursor"), false);
-    const all = representations(f, args);
-    assert.deepEqual([...first.items, ...second.items], all.items);
   }
+  // Continuation/order/filter contracts belong to list-pagination-cli and service tests.
   assert.deepEqual(await snapshotTree(f.root), before);
 });
 
-test("model/data/Store dry-run receipts differ only in presentation and leave the Project unchanged", { timeout: 60_000 }, async t => {
-  const f = await fixture(t);
-  // A saved registration gives every dry-run the same ID; create plans allocate a new UUID each time.
-  const created = cli(f, ["model", "create", "planned.json", "--definition-file", "-"], "json", JSON.stringify(schema));
-  assert.equal(created.status, 0, created.stderr);
-  const before = await snapshotTree(f.root);
-  const model = representations(f, ["model", "update", "planned.json", "--name", "true", "--description", "line: # note\nnext", "--dry-run"]);
-  assert.equal(model.operation, "model.update");
-  assert.equal(model.dryRun, true);
-  assert.equal(model.registration.name, "true");
-  const data = representations(f, ["data", "create", "planned", "--store", "records", "--value-file", "-", "--dry-run"], JSON.stringify(value));
-  assert.equal(data.operation, "data.create");
-  assert.equal(data.dryRun, true);
-  const store = representations(f, ["data", "store", "create", "planned", "--model", "record.json", "--kind", "value",
-    "--factory", "memsphere/filesystem-json", "--config-file", "-", "--dry-run"], '{"directory":"data/planned"}');
-  assert.equal(store.operation, "data.store.create");
-  assert.equal(store.dryRun, true);
-  assert.deepEqual(await snapshotTree(f.root), before);
-});
+for (const domain of ["model", "data", "store"] as const) {
+  test(`${domain} dry-run exposes a YAML plan without changing the Project`, { timeout: 60_000 }, async t => {
+    const f = await fixture(t);
+    await mutateModel({}, f.root, "create", "planned.json", { source: JSON.stringify(schema) });
+    const plans = {
+      model: { args: ["model", "update", "planned.json", "--name", "true", "--description", "line: # note\nnext", "--dry-run"], input: undefined, operation: "model.update" },
+      data: { args: ["data", "create", "planned", "--store", "records", "--value-file", "-", "--dry-run"], input: JSON.stringify(value), operation: "data.create" },
+      store: { args: ["data", "store", "create", "planned", "--model", "record.json", "--kind", "value", "--factory", "memsphere/filesystem-json", "--config-file", "-", "--dry-run"], input: '{"directory":"data/planned"}', operation: "data.store.create" }
+    };
+    const before = await snapshotTree(f.root);
+    const result = cli(f, plans[domain].args, domain === "data" ? undefined : "text", plans[domain].input);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, "");
+    const plan = parse(result.stdout);
+    assert.equal(plan.project, "test-project");
+    assert.equal(plan.operation, plans[domain].operation);
+    assert.equal(plan.dryRun, true);
+    if (domain === "model") assert.equal(plan.registration.name, "true");
+    assert.throws(() => JSON.parse(result.stdout), SyntaxError);
+    assert.deepEqual(await snapshotTree(f.root), before);
+  });
+}
 
-test("model/data/Store failures preserve empty stdout and separate text from the JSON error protocol", { timeout: 60_000 }, async t => {
+test("model/data/Store failures keep stdout empty and wire the shared JSON or readable error protocol", { timeout: 60_000 }, async t => {
   const f = await fixture(t);
-  for (const [args, code] of [
+  const cases = [
     [["model", "read", "missing.json"], "MODEL_NOT_FOUND"],
     [["data", "read", "missing", "--store", "records"], "NOT_FOUND"],
     [["data", "store", "read", "missing"], "STORE_NOT_FOUND"],
     [["model", "list", "--unknown-option"], "INVALID_ARGUMENT"],
     [["data", "list", "--store", "records", "--unknown-option"], "INVALID_ARGUMENT"],
     [["data", "store", "list", "--unknown-option"], "INVALID_ARGUMENT"]
-  ] as const) {
-    const [json, text, implicit] = (["json", "text", undefined] as const).map(format => cli(f, [...args], format));
-    for (const result of [json, text, implicit]) { assert.equal(result.status, 1); assert.equal(result.stdout, ""); }
+  ] as const;
+  for (const [index, [args, code]] of cases.entries()) {
+    const json = cli(f, [...args], "json");
+    assert.equal(json.status, 1);
+    assert.equal(json.stdout, "");
     const error = JSON.parse(json.stderr);
     assert.equal(error.error.code, code);
     assert.equal(typeof error.error.message, "string");
     assert.ok(error.error.message.length);
     assert.equal(json.stderr, `${JSON.stringify(error)}\n`);
-    assert.equal(text.stderr, `error: ${error.error.message}\n`);
-    assert.equal(implicit.stderr, text.stderr);
-    assert.throws(() => JSON.parse(text.stderr), SyntaxError);
+    // The presentation unit tests exhaust text/default combinations; these calls
+    // retain real explicit-text and default-text error dispatch at the CLI boundary.
+    if (index < 2) {
+      const readable = cli(f, [...args], index === 0 ? "text" : undefined);
+      assert.equal(readable.status, 1);
+      assert.equal(readable.stdout, "");
+      assert.equal(readable.stderr, `error: ${error.error.message}\n`);
+      assert.throws(() => JSON.parse(readable.stderr), SyntaxError);
+    }
   }
 });

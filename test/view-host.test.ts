@@ -1,3 +1,4 @@
+import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -5,7 +6,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { build } from "esbuild";
-import { chromium, type Page } from "playwright";
+import { type Page } from "playwright";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import { createViewServer } from "../src/commands/view.js";
 import type { MemsphereConfig } from "../src/config.js";
@@ -573,7 +574,7 @@ async function withBrowserHost(
     )]));
   });
   const origin = await listen(server);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const page = await browser.newPage();
     await prepare?.(page);

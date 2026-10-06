@@ -1,3 +1,4 @@
+import { managedProjectFixture } from "./helpers/project.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -42,7 +43,7 @@ test("View ChangeSet records attribution and drives flat Comment claim lifecycle
     process.env.MEMSPHERE_PROJECT = "project";
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     process.chdir(workspace);
-    await projectCreateCommand("project", { bind: true });
+    await managedProjectFixture("project", { bind: true });
     const seed = await editMemories({ references: ["concepts/shared", "concepts/other"] });
     await writeFile(
       join(seed.candidateRoot, "concepts", "shared.yaml"),

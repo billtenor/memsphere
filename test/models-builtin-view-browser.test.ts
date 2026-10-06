@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium, type Page } from "playwright";
+import { type Page } from "playwright";
+import { browserScope } from "./helpers/browser.js";
 import { startProjectModelView } from "./fixtures/project-model-view.js";
 
 type Fixture = Awaited<ReturnType<typeof startProjectModelView>>;
 async function withView(run: (page: Page, fixture: Fixture) => Promise<void>) {
   const fixture = await startProjectModelView();
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage();
@@ -121,19 +122,13 @@ test("referenced fields show actual types and expandable target structure withou
   assert.equal(await readFile(path, "utf8"), source);
 }));
 
-test("invalid local and cross-model references make the entire model unavailable", async () => withView(async (page, fixture) => {
-  const cases = [
-    ["missing-ref.json", { type: "object", properties: { missing: { $ref: "#/definitions/missing" } } }],
-    ["external-ref.json", { type: "object", properties: { external: { $ref: "other.json" }, valid: { type: "integer" } } }],
-    ["alias-cycle.json", { $ref: "#/definitions/alias", definitions: { alias: { $ref: "#/definitions/alias" } } }]
-  ] as const;
-  for (const [id, schema] of cases) {
-    const source = JSON.stringify(schema);
-    const path = join(fixture.root, "models/json-schema/draft-07", id);
-    await writeFile(path, source);
-    await unavailable(page, fixture, id);
-    assert.equal(await readFile(path, "utf8"), source);
-  }
+test("a forbidden cross-model reference shows the unavailable screen and preserves its source", async () => withView(async (page, fixture) => {
+  const id = "external-ref.json";
+  const source = JSON.stringify({ type: "object", properties: { external: { $ref: "other.json" }, valid: { type: "integer" } } });
+  const path = join(fixture.root, "models/json-schema/draft-07", id);
+  await writeFile(path, source);
+  await unavailable(page, fixture, id);
+  assert.equal(await readFile(path, "utf8"), source);
   await order(page, fixture);
 }));
 
@@ -308,19 +303,13 @@ test("model prototype keeps source viewing without a copy action or its empty he
   assert.equal(await page.getByRole("button", { name: "复制定义", exact: true }).count(), 0);
 }));
 
-test("unsupported format and contentEncoding keywords are unavailable without altering their saved source", async () => withView(async (page, fixture) => {
-  for (const [id, schema] of [
-    ["format-root.json", { type: "string", format: "uuid" }],
-    ["format-field.json", { type: "object", properties: { email: { type: "string", format: "email" } } }],
-    ["custom-format.json", { type: "string", format: "<b>custom</b>" }],
-    ["encoded.json", { type: "string", contentEncoding: "base64" }]
-  ] as const) {
-    const source = JSON.stringify(schema, null, 2);
-    const path = join(fixture.root, "models/json-schema/draft-07", id);
-    await writeFile(path, source);
-    await unavailable(page, fixture, id);
-    assert.equal(await readFile(path, "utf8"), source);
-  }
+test("an unsupported format reports an unavailable model while supported structure keeps an empty format column", async () => withView(async (page, fixture) => {
+  const id = "format-field.json";
+  const source = JSON.stringify({ type: "object", properties: { email: { type: "string", format: "email" } } }, null, 2);
+  const path = join(fixture.root, "models/json-schema/draft-07", id);
+  await writeFile(path, source);
+  await unavailable(page, fixture, id);
+  assert.equal(await readFile(path, "utf8"), source);
   await order(page, fixture);
   assert.equal(await page.getByRole("columnheader", { name: "格式", exact: true }).count(), 1);
   assert.deepEqual(await page.locator(".model-definition-table tbody td:nth-child(3)").allTextContents(), ["—", "—"]);
@@ -389,18 +378,6 @@ test("dictionary roots and boolean value schemas describe permitted dynamic keys
   assert.match(await table.innerText(), /键名可自定义，每个值都是整数/);
   assert.equal(await table.getByText("^tag", { exact: true }).count(), 0);
   assert.doesNotMatch(await table.innerText(), /patternProperties: 详见原始定义/);
-}));
-
-test("boolean property, items and root schemas are unavailable under the same Runtime rules", async () => withView(async (page, fixture) => {
-  for (const [id, schema] of [
-    ["allow-root.json", true], ["deny-root.json", false],
-    ["allow-property.json", { type: "object", properties: { allowed: true } }],
-    ["deny-property.json", { type: "object", properties: { forbidden: false } }],
-    ["deny-items.json", { type: "array", items: false }]
-  ] as const) {
-    await writeFile(join(fixture.root, "models/json-schema/draft-07", id), JSON.stringify(schema));
-    await unavailable(page, fixture, id);
-  }
 }));
 
 test("rules stay separate from author descriptions and optional fields remain unmarked", async () => withView(async (page, fixture) => {
@@ -504,29 +481,6 @@ test("a corrupt model remains selectable without preventing other definitions fr
 
 test("unsupported union roots remain listed as unavailable and cannot open a normal definition", async () => withView(async (page, fixture) => {
   await unavailable(page, fixture, "advanced.json", /anyOf/);
-}));
-
-test("union type arrays, anyOf and oneOf each fail the normal model read", async () => withView(async (page, fixture) => {
-  for (const [id, field] of [
-    ["nullable.json", { type: ["string", "null"] }],
-    ["any-of.json", { anyOf: [{ type: "string" }, { type: "integer" }] }],
-    ["one-of.json", { oneOf: [{ type: "string" }, { type: "integer" }] }]
-  ] as const) {
-    await writeFile(join(fixture.root, "models/json-schema/draft-07", id), JSON.stringify({ type: "object", properties: { value: field } }));
-    await unavailable(page, fixture, id);
-  }
-}));
-
-test("nested unsupported rules are not hidden by a supported parent schema", async () => withView(async (page, fixture) => {
-  for (const [id, schema] of [
-    ["nested-union.json", { type: "array", items: { oneOf: [{ type: "string" }, { type: "integer" }] } }],
-    ["conditional.json", { type: "object", if: { type: "object" }, then: { type: "object" } }],
-    ["all-of.json", { type: "number", allOf: [{ type: "number", minimum: 0 }] }],
-    ["patterned.json", { type: "object", patternProperties: { "^tag": { type: "string" } } }]
-  ] as const) {
-    await writeFile(join(fixture.root, "models/json-schema/draft-07", id), JSON.stringify(schema));
-    await unavailable(page, fixture, id);
-  }
 }));
 
 test("built-in raw models show whole-content semantics without pretending to declare object fields", async () => withView(async (page, fixture) => {

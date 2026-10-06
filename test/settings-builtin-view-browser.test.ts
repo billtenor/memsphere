@@ -1,3 +1,4 @@
+import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -5,7 +6,6 @@ import type { AddressInfo } from "node:net";
 import { resolve } from "node:path";
 import test from "node:test";
 import { build } from "esbuild";
-import { chromium } from "playwright";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 const sdk = transpile(await readFile(new URL("../src/view/view-sdk.ts", import.meta.url), "utf8"));
@@ -55,7 +55,7 @@ test("Settings Builtin Mount loads both scopes and validates an edited global dr
     server.listen(0, "127.0.0.1", resolveListen);
   });
   const port = (server.address() as AddressInfo).port;
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const page = await browser.newPage({ viewport: { width: 1000, height: 800 } });
     const pageErrors: string[] = [];

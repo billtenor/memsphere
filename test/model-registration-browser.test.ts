@@ -1,3 +1,4 @@
+import { browserScope } from "./helpers/browser.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
@@ -20,7 +21,7 @@ async function fixture(run: (page: import('playwright').Page, origin: string) =>
                 await store.update({}, item.id, { ...r, name: '订单 Alpha', description: '订购与支付', package: 'project.orders', package_name: '订单管理', tags: ['订单', '交易', '示例'] });
         }
     });
-    const browser = await chromium.launch({ headless: true });
+    const browser = await browserScope();
     const page = await browser.newPage();
     if (requireToken) await page.addInitScript(() => sessionStorage.setItem('memsphere.settingsToken.v1', 'fixture-token'));
     try {

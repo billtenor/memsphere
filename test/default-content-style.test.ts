@@ -1,3 +1,4 @@
+import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -7,7 +8,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { build } from "esbuild";
-import { chromium } from "playwright";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import { createViewServer } from "../src/commands/view.js";
 import { readProjectConfig } from "../src/config.js";
@@ -250,7 +250,7 @@ async function browserRuntimeBundle(): Promise<string> {
 
 async function withBrowserPage(server: Server, run: (origin: string, page: import("playwright").Page) => Promise<void>): Promise<void> {
   const origin = await listen(server);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     await run(origin, await browser.newPage());
   } finally {

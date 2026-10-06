@@ -1,3 +1,6 @@
+import { mutateModel } from "../src/project/model-service.js";
+import { createBusinessStore } from "../src/project/business-stores.js";
+import { writeData } from "../src/project/data-service.js";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -191,12 +194,11 @@ test("list argument and runtime failures return one JSON error and leave stdout 
 test("model, data Store and record lists paginate through the registered CLI commands", async () => {
   const f = await fixture();
   try {
-    result(f.run(["project", "models", "initialize", "--output=json"]));
-    const definition = join(f.root, "definition.json");
-    await writeFile(definition, json({ type: "object", properties: { count: { type: "integer" } }, required: ["count"] }));
-    for (const name of ["zed", "alpha", "middle"]) result(f.run([
-      "model", "create", `${name}.json`, "--definition-file", definition, "--tag", "paged", "--tag", "sample", "--output=json"
-    ]));
+    // Model/Store creation is a precondition; this test protects only CLI pagination.
+    for (const name of ["zed", "alpha", "middle"]) await mutateModel({}, f.project, "create", `${name}.json`, {
+      source: json({ type: "object", properties: { count: { type: "integer" } }, required: ["count"] }),
+      fields: { tags: ["paged", "sample"] }
+    });
     const models = ["model", "list", "--origin", "project", "--tag", "paged", "--output=json"];
     const modelFirst = result(f.run([...models, "--limit", "1"]));
     const modelLast = result(f.run([...models, "--cursor", modelFirst.nextCursor, "--limit", "1000"]));
@@ -206,18 +208,16 @@ test("model, data Store and record lists paginate through the registered CLI com
     assert.equal(modelText.status, 0, modelText.stderr);
     assert.deepEqual(parse(modelText.stdout).items, modelLast.items);
     assert.deepEqual(result(f.run(["model", "list", "--query", "no-match", "--output=json"])).items, []);
-    const storeConfig = join(f.root, "store.json");
-    for (const id of ["zed", "alpha", "middle"]) {
-      await writeFile(storeConfig, json({ directory: `business/${id}` }));
-      result(f.run(["data", "store", "create", id, "--model", "alpha.json", "--kind", "value", "--factory", "memsphere/filesystem-json", "--config-file", storeConfig, "--output=json"]));
-    }
+    for (const id of ["zed", "alpha", "middle"]) await createBusinessStore({}, f.project, id, {
+      model: "alpha.json", kind: "value", factory: "memsphere/filesystem-json", config: { directory: `business/${id}` }
+    });
     const stores = ["data", "store", "list", "--model", "alpha.json", "--kind", "value", "--output=json"];
     const storeFirst = result(f.run([...stores, "--limit", "1"]));
     const storeLast = result(f.run([...stores, "--cursor", storeFirst.nextCursor, "--limit", "1000"]));
     assert.deepEqual([...storeFirst.items, ...storeLast.items].map((item: { storeId: string }) => item.storeId), ["alpha", "middle", "zed"]);
     assert.equal(Object.hasOwn(storeLast, "nextCursor"), false);
     assert.deepEqual(result(f.run(["data", "list", "--store", "middle", "--output=json"])).items, []);
-    for (const id of ["zed", "alpha", "middle"]) result(f.run(["data", "create", id, "--store", "alpha", "--value", '{"count":1}', "--output=json"]));
+    for (const id of ["zed", "alpha", "middle"]) await writeData({}, f.project, "alpha", id, "create", { kind: "value", value: { count: 1 } });
     const records = ["data", "list", "--store", "alpha", "--output=json"];
     const recordFirst = result(f.run([...records, "--limit", "1"]));
     const recordLast = result(f.run([...records, "--cursor", recordFirst.nextCursor, "--limit", "1000"]));
@@ -234,6 +234,14 @@ test("model, data Store and record lists paginate through the registered CLI com
       assert.equal(failed.stdout, "");
       assert.equal(JSON.parse(failed.stderr).error.code, "INVALID_CURSOR");
     }
+  } finally { await f.cleanup(); }
+});
+
+test("Store creation reports invalid configuration as JSON field diagnostics without stdout", async () => {
+  const f = await fixture();
+  try {
+    await mutateModel({}, f.project, "create", "alpha.json", { source: '{"type":"object"}' });
+    const storeConfig = join(f.root, "store.json");
     await writeFile(storeConfig, json({ directory: 42 }));
     const invalidConfig = f.run(["data", "store", "create", "invalid", "--model", "alpha.json", "--kind", "value", "--factory", "memsphere/filesystem-json", "--config-file", storeConfig, "--output=json"]);
     assert.ifError(invalidConfig.error);

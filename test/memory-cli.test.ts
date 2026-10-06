@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { parse } from "yaml";
@@ -13,8 +13,7 @@ import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
 import { runGit } from "../src/git.js";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const cliPath = join(projectRoot, "src", "cli.ts");
-const tsxLoaderPath = join(projectRoot, "node_modules", "tsx", "dist", "loader.mjs");
+const cliPath = join(projectRoot, "dist", "cli.js");
 
 type CommandResult = {
   code: number | null;
@@ -62,8 +61,6 @@ async function withScope(fn: (scope: { root: string; nested: string; memoryRoot:
 async function runCli(cwd: string, args: string[], home?: string): Promise<CommandResult> {
   return new Promise((resolveResult, reject) => {
     const child = spawn(process.execPath, [
-      "--import",
-      pathToFileURL(tsxLoaderPath).href,
       cliPath,
       ...args
     ], {

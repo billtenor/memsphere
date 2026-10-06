@@ -70,7 +70,7 @@ test("definition input filenames resolve from cwd while mutations use the explic
   assert.deepEqual(await snapshotTree(f.root), before);
 });
 
-test("system create/update/delete and invalid ModelRefs reject before consuming an open stdin", { timeout: 30_000 }, async t => {
+test("system model writes reject before consuming an open stdin", { timeout: 30_000 }, async t => {
   const f = await businessFixture(t, {}); const before = await snapshotTree(f.root);
   for (const args of [
     ["create", "memsphere/model-registration.json", "--definition-file", "-", "--name", "changed"],
@@ -79,11 +79,16 @@ test("system create/update/delete and invalid ModelRefs reject before consuming 
     ["update", "memsphere/run/artifact.json", "--unset", "name"],
     ["delete", "memsphere/run/artifact.json", "--dry-run"]
   ]) failure(await cli(t, f, ["model", ...args, ...json], { keepStdin: true }), "SYSTEM_MODEL_READ_ONLY");
+  assert.deepEqual(await snapshotTree(f.root), before);
+});
+
+test("invalid model identities reject before consuming an open stdin", { timeout: 30_000 }, async t => {
+  const f = await businessFixture(t, {}); const before = await snapshotTree(f.root);
   for (const ref of ["no-suffix", "../outside.json", "/absolute.json"]) failure(await cli(t, f, ["model", "create", ref, "--definition-file", "-", ...json], { keepStdin: true }), "MODEL_ID_INVALID");
   assert.deepEqual(await snapshotTree(f.root), before);
 });
 
-test("CLI syntax and model validation failures use stderr JSON only and distinguish definition from Runtime", { timeout: 30_000 }, async t => {
+test("CLI rejects invalid option combinations before reading stdin and reports JSON diagnostics", { timeout: 30_000 }, async t => {
   const f = await businessFixture(t);
   for (const args of [
     ["create", "missing.json"], ["update", "record.json"], ["read", "record.json", "--part", "references"],
@@ -91,8 +96,18 @@ test("CLI syntax and model validation failures use stderr JSON only and distingu
     ["validate", "record.json", "--definition-file", "-", "--check", "definition", "--check-data"],
     ["validate", "record.json", "--definition-file", "-", "--store", "records"]
   ]) failure(await cli(t, f, ["model", ...args, ...json], { keepStdin: true }), "INVALID_ARGUMENT");
+  await assert.rejects(fs.readFile(join(f.root, "models/json-schema/draft-07/new.json")), { code: "ENOENT" });
+});
+
+test("malformed definition input returns the specific JSON diagnostic without saving a model", async t => {
+  const f = await businessFixture(t);
   failure(await cli(t, f, ["model", "create", "new.json", "--definition-file", "-", ...json], { input: "{broken" }), "INPUT_INVALID");
   failure(await cli(t, f, ["model", "create", "new.json", "--definition-file", "-", ...json], { input: '{"required":42}' }), "MODEL_DEFINITION_INVALID");
+  await assert.rejects(fs.readFile(join(f.root, "models/json-schema/draft-07/new.json")), { code: "ENOENT" });
+});
+
+test("definition-only CLI diagnostics cannot create a Runtime-unsupported model", async t => {
+  const f = await businessFixture(t);
   const unsupported = '{"anyOf":[{"type":"string"},{"type":"number"}]}';
   const diagnostic = success(await cli(t, f, ["model", "validate", "candidate.json", "--definition-file", "-", "--check", "definition", ...json], { input: unsupported }));
   assert.deepEqual(diagnostic.checks, { definition: "passed", runtime: "not_checked" });
@@ -102,11 +117,16 @@ test("CLI syntax and model validation failures use stderr JSON only and distingu
   await assert.rejects(fs.readFile(join(f.root, "models/json-schema/draft-07/new.json")), { code: "ENOENT" });
 });
 
-test("CLI check-data reports concrete records, and empty Store binding blocks definition change and deletion", { timeout: 30_000 }, async t => {
+test("empty Store bindings block CLI definition changes and deletion while allowing metadata edits", { timeout: 30_000 }, async t => {
   const f = await businessFixture(t); await f.createStore();
   failure(await cli(t, f, ["model", "delete", "record.json", ...json]), "MODEL_IN_USE");
   failure(await cli(t, f, ["model", "update", "record.json", "--definition-file", "-", ...json], { input: source }), "MODEL_IN_USE");
   success(await cli(t, f, ["model", "update", "record.json", "--name", "Editable metadata", ...json]));
+  assert.deepEqual(JSON.parse(await fs.readFile(join(f.root, "models/json-schema/draft-07/record.json"), "utf8")), objectSchema);
+});
+
+test("CLI check-data reports failing record identities without saving the candidate definition", async t => {
+  const f = await businessFixture(t); await f.createStore();
   await writeData({}, f.root, "records", "bad-for-candidate", "create", { kind: "value", value: { name: "saved", count: 3 } });
   const good = success(await cli(t, f, ["model", "validate", "record.json", "--check-data", "--store", "records", ...json]));
   assert.deepEqual(good.data.map((item: { storeId: string; checked: number }) => [item.storeId, item.checked]), [["records", 1]]);

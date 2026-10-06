@@ -199,9 +199,8 @@ test("Embedded Store registration protects Memory in every worktree of its own r
     });
   }
   await t.test("selected Project CLI rejects linked Memory during dry-run", async () => {
-    const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
-    const loader = new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href;
-    await assert.rejects(promisify(execFile)(process.execPath, ["--import", loader, cliPath, "--project", "test-project",
+    const cliPath = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+    await assert.rejects(promisify(execFile)(process.execPath, [cliPath, "--project", "test-project",
       "data", "store", "create", "linked-cli", "--model", "record.json", "--kind", "value", "--factory", "memsphere/filesystem-json",
       "--config-file", storeConfigFile, "--dry-run", "--output", "json"], { cwd: linked, env: { ...process.env, MEMSPHERE_HOME: home } }),
     (error: unknown) => {
