@@ -3,6 +3,7 @@ import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 
 export const viewPackageCapabilitySchema = z.enum([
+  "router.register",
   "theme.register",
   "theme.override",
   "styles.scoped",
@@ -78,7 +79,7 @@ export const projectViewPackageSchema = z.object({
   id: z.string().min(1),
   version: z.string().min(1),
   enabled: z.boolean().default(true),
-  instance_id: z.string().min(1).optional(),
+  instance_id: z.string().min(1).refine(value => value !== "." && value !== "..", "instance_id must not be a dot segment").optional(),
   config: z.record(z.unknown()).optional(),
   preferences: z.record(z.string().min(1)).optional()
 }).strict();

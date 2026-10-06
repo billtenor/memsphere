@@ -520,7 +520,7 @@ Module Routes live below the instance base path:
 /projects/:projectId/modules/:instanceId/...
 ```
 
-Plugins provide relative paths. Host generates complete paths. A Plugin must not override Home, Memory, Run, settings, or another instance’s absolute path.
+Plugins provide relative paths. Host generates complete paths. A Plugin must not override Home, Memory, Run, settings, or another instance’s absolute path. Dot segments, encoded dot segments or separators, backslashes, and invalid percent encoding are rejected. Ordinary external Packages must declare `view.capabilities: ["router.register"]` to inject Router, and page registrations must declare `main.view@1:route:<route-id>` with the matching contribution id in the Manifest. Theme-only instances do not receive Router; App-bound instances retain their App grant.
 
 ```ts
 const route = ctx.router.register({ id: "index", path: "/" });

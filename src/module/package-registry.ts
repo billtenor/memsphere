@@ -296,7 +296,8 @@ export async function resolveViewPackageComposition(input: {
         message: `unresolved contributions: ${[...candidate.blockedCells].sort().join(", ")}`
       });
     }
-    const capabilities = new Set(candidate.package.manifest.view.capabilities ?? []) as ReadonlySet<ViewPackageCapability>;
+    const capabilities = new Set(candidate.package.manifest.view.capabilities ?? []);
+    if (candidate.themeOnly) capabilities.delete("router.register");
     const configuredGlobalStyles = input.composition?.slots?.[globalStylesViewSlot];
     const hasGlobalStyleSlot = Object.prototype.hasOwnProperty.call(input.composition?.slots ?? {}, globalStylesViewSlot);
     const selectedGlobalStyles = new Set(Array.isArray(configuredGlobalStyles)

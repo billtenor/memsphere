@@ -527,7 +527,7 @@ Module Route 必须位于实例基路径下：
 /projects/:projectId/modules/:instanceId/...
 ```
 
-Plugin 在 `path` 中填写相对路径，Host 生成完整路径。Plugin 不得覆盖 Home、Memory、Run、设置或其他实例的绝对路径。
+Plugin 在 `path` 中填写相对路径，Host 生成完整路径。Plugin 不得覆盖 Home、Memory、Run、设置或其他实例的绝对路径。路径中的点段、编码的点段、编码的分隔符、反斜杠和非法百分号编码会被拒绝。普通外部 Package 必须声明 `view.capabilities: ["router.register"]` 才能注入 Router；页面注册须在 Manifest 中声明 `main.view@1:route:<route-id>` 及匹配的 contribution id。仅供主题的实例不获得 Router；App 绑定实例沿用 App 授权。
 
 ```ts
 const route = ctx.router.register({ id: "index", path: "/" });

@@ -297,6 +297,34 @@ ctx.slots.register(portableSlots.modelDefinitionRenderer, {
 
 The example `index.js` is precompiled ESM; after editing `src/index.js`, run `node scripts/build-example-view-package.mjs`. The production build checks the committed bundle byte for byte and keeps `@memsphere/view-sdk` external. A Package must not inline the SDK; the Host singleton Token brand rejects such a bundle. A data renderer must synchronously return an `HTMLElement`; throwing, returning a Promise/thenable, or returning another value immediately abdicates it and selects the official fallback. Abdication lasts until instance unload or View restart.
 
+## Local Packages for Independent Business Modules
+
+Trusted local Packages can add independent pages. Ordinary external instances receive `slots/theme/presentation/ui` by default. To inject `router`, declare `router.register` in `module.json` under `view.capabilities` and enable the instance. Selecting only the Package's theme does not grant Router access. Built-in Module routes are granted by the Host; App-bound instances retain their existing Router grant, and `api` remains exclusive to App-bound instances.
+
+For example, the independent Module above can declare:
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "com.example.crawler",
+  "version": "0.1.0",
+  "view": {
+    "entry": "./index.js",
+    "sdk": "^1.0.0",
+    "capabilities": ["router.register"],
+    "contributions": [
+      { "id": "navigation", "cell": "navigation.primary@1:navigation", "priority": 100 },
+      { "id": "title", "cell": "header.title@1:title", "priority": 100 },
+      { "id": "page", "cell": "main.view@1:route:index", "priority": 100 }
+    ]
+  }
+}
+```
+
+After injecting `router`, `ctx.router.register({ id: "index", path: "/" })` generates `/projects/<project>/modules/<instanceId>`. A path of `/crawler/run` appends `/crawler/run` to that base. The instance id defaults to the Package id and can be set through composition's `instance_id`. Declare a page contribution as `main.view@1:route:<route-id>` with an `id` matching its `ctx.slots.register()` registration. Declare list and other Slot contributions individually as well. Routes cannot override other instances or official pages; conflicting or escaping routes fail the instance and roll back its registration transaction.
+
+Use `route.to()`, `route.activation`, and public UI Primitives for navigation, list selection, and related links. Declare selection parameters in the Route's `query` allowlist. Enabled instances with Router access support direct visits and refresh within their namespace; the browser Runtime matches the specific route. Unknown routes and browser load failures show a route error inside the Shell with runtime diagnostics. Paths for uninstalled, disabled, ungranted, or server-side asset load failures return 404. Restart View after saving installation or composition changes to update the boot snapshot.
+
 ## App Business Pages
 
 Apps install Module instances through `entrypoints.view`. Declare `main.view@1:route:<route-id>` and the registration id in the Package to contribute a Module-relative page. Include api in Plugin inject to use `ctx.api.invoke(operation,input)`; this service is available only to App-bound instances. See the [expense App](../examples/apps/expense/README.md) and [App contract](./app-contract.en.md).
