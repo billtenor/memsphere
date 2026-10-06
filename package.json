@@ -49,7 +49,7 @@
     "pretest": "npm run build",
     "test": "node scripts/run-tests.mjs",
     "pretest:ci": "npm run build",
-    "test:ci": "node scripts/run-tests.mjs --test-concurrency=1",
+    "test:ci": "node scripts/run-tests.mjs --test-concurrency=2",
     "smoke:project": "node scripts/project-smoke.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.modules.json --noEmit",
     "validate": "npm run build",

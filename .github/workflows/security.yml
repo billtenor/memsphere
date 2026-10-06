@@ -11,11 +11,13 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   gitleaks:
     name: Gitleaks
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Check out complete history
         uses: actions/checkout@v6
@@ -27,3 +29,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks-privacy.toml
+
+      - name: Enforce the workflow performance budget
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ci-budget.mjs
