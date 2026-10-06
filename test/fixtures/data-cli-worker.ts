@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const request = JSON.parse(process.argv[2]) as { args: string[]; recordPath: string; pauseRead?: boolean };
+if (request.pauseRead) request.recordPath = await fs.realpath(request.recordPath);
 const native = createRequire(import.meta.url)("fs-native-extensions");
 const tryLock = native.tryLock;
 let reportedWaiting = false;

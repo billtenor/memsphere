@@ -9,3 +9,11 @@
 # documents now use localhost; ignore only the exact historical findings.
 91f1f7cb7e1397111b9bc6283fc94cef58c0c4c4:changes/archive/completed/20260905-view-package-customization/change.md:private-ipv4-address:60
 91f1f7cb7e1397111b9bc6283fc94cef58c0c4c4:changes/archive/completed/20260905-view-package-customization/delivery-report.md:private-ipv4-address:31
+
+# PR #85's immutable CLI acceptance evidence records file SHA-256 digests.
+# These three generic-api-key matches were verified against the actual blobs
+# in this exact commit; they are checksums, not credentials. Ignore only these
+# historical fingerprints, preserving detection for all other files/commits.
+85aed8668eea5514e3d1acaf0a44a19391a1d892:changes/archive/completed/20261003-model-data-cli/manual-cli-acceptance.json:generic-api-key:1556
+85aed8668eea5514e3d1acaf0a44a19391a1d892:changes/archive/completed/20261003-model-data-cli/manual-cli-acceptance.json:generic-api-key:1575
+85aed8668eea5514e3d1acaf0a44a19391a1d892:changes/archive/completed/20261003-model-data-cli/manual-cli-acceptance.json:generic-api-key:1688

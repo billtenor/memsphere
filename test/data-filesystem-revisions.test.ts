@@ -9,7 +9,7 @@ import { recordStateKey } from "../src/data/extensions/shared/filesystem.js";
 import { createPlainRuntime } from "../src/data/extensions/shared/reflection.js";
 
 async function fixture(t: TestContext) {
-  const directory = await fs.mkdtemp(join(tmpdir(), "memsphere-revision-history-"));
+  const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "memsphere-revision-history-")));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const runtime = createPlainRuntime({ id: "test/record.json", root: { kind: "object", fields: [], field: () => undefined } });
   const store = await new FilesystemJsonValueStoreFactory().openExisting({}, "test/records", runtime, new Config({ directory }));

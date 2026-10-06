@@ -7,7 +7,7 @@ import { createPlainRuntime } from "../../src/data/extensions/shared/reflection.
 import { withNativeFileLock } from "../../src/file-lock.js";
 
 type Request = { operation: "create" | "update" | "delete" | "lock"; expectedRevision?: number; pause?: "after-lock" | "before-publish" | "after-publish" | "after-history"; timeoutMs?: number; value?: unknown };
-const directory = process.argv[2];
+const directory = await fs.realpath(process.argv[2]);
 const request = JSON.parse(process.argv[3]) as Request;
 const locks = createRequire(import.meta.url)("fs-native-extensions");
 const originalTryLock = locks.tryLock;

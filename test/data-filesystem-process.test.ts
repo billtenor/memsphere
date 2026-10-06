@@ -9,7 +9,7 @@ import { createPlainRuntime } from "../src/data/extensions/shared/reflection.js"
 import { filesystemWorker } from "./helpers/filesystem-process.js";
 
 async function fixture(t: TestContext) {
-  const directory = await fs.mkdtemp(join(tmpdir(), "memsphere-process-store-"));
+  const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "memsphere-process-store-")));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const runtime = createPlainRuntime({ id: "test/record.json", root: { kind: "object", fields: [], field: () => undefined } });
   const store = await new FilesystemJsonValueStoreFactory().openExisting({}, "test/records", runtime, new Config({ directory }));

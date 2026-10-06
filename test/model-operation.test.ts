@@ -40,6 +40,31 @@ async function setup(t: TestContext) {
   return { ...f, definition, config: await readFile(join(f.root, "config.json")) };
 }
 
+test("Model writes through an aliased Project root target the same physical Project", async t => {
+  const f = await setup(t);
+  const alias = join(f.directory, "project-alias");
+  await symlink(f.root, alias, process.platform === "win32" ? "junction" : "dir");
+  const path = join(alias, "models/json-schema/draft-07/existing.json");
+  await withProjectModelWrite(alias, () => commitModelOperation(alias, "model.update", [
+    { path, before: Buffer.from("before\n"), after: Buffer.from("updated\n") }
+  ]));
+  assert.equal(await readFile(f.definition, "utf8"), "updated\n");
+  assert.equal(await readModelOperationStamp(alias), await readModelOperationStamp(f.root));
+});
+
+test("Interrupted model writes through an aliased Project root roll back in the physical Project", async t => {
+  const f = await setup(t);
+  const alias = join(f.directory, "project-alias");
+  await symlink(f.root, alias, process.platform === "win32" ? "junction" : "dir");
+  const path = join(alias, "models/json-schema/draft-07/existing.json");
+  await assert.rejects(withProjectModelWrite(alias, () => commitModelOperation(alias, "model.update", [
+    { path, before: Buffer.from("before\n"), after: Buffer.from("interrupted\n") }
+  ], { afterFile: async () => { throw new Error("interrupted write"); } })), /interrupted write/);
+  assert.equal(await readFile(f.definition, "utf8"), "before\n");
+  assert.match(await readModelOperationStamp(f.root), /:recovered$/);
+  assert.equal(await readModelOperationStamp(alias), await readModelOperationStamp(f.root));
+});
+
 for (const pause of ["pending", "file-0", "file-1", "file-2"]) {
   test(`Killed model writer at ${pause}: pure reads fail, a different request restores before preflight`, { timeout: 30_000 }, async t => {
     const f = await setup(t);

@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
 import { mkdir, readFile, rm, rmdir, lstat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { atomicWriteJson, atomicWriteFile } from "../persistence.js";
 import { withNativeFileLock } from "../file-lock.js";
@@ -36,7 +36,7 @@ async function readOperation(root: string): Promise<Operation | undefined> {
     const operation = operationSchema.parse(JSON.parse(bytes.toString("utf8")));
     // Project creation publishes a fully committed staging tree by directory rename.
     // Only an unfinished record may act on its original absolute target paths.
-    if (operation.root !== resolve(root) && ["pending", "recovering"].includes(operation.phase)) throw new TypeError("Wrong Project in unfinished operation record");
+    if (operation.root !== await canonicalPath(root) && ["pending", "recovering"].includes(operation.phase)) throw new TypeError("Wrong Project in unfinished operation record");
     for (const change of operation.changes) {
       for (const side of ["before", "after"] as const) {
         const content = change[side];
@@ -84,6 +84,7 @@ export async function withProjectModelWrite<T>(root: string, action: () => Promi
 
 /** The roots are derived from config, never accepted from the recovery record. */
 async function allowedPaths(root: string, operation?: Operation) {
+  root = await canonicalPath(root);
   const configPath = join(root, "config.json");
   const candidates: unknown[] = [];
   const bytes = await optionalFileBytes(configPath);
@@ -143,6 +144,13 @@ export async function recoverModelOperation(root: string, hooks: ModelOperationH
 /** Preflight every path and conflict before publishing any pending state or target bytes. */
 export async function commitModelOperation(root: string, kind: string, changes: ModelFileChange[], hooks: ModelOperationHooks = {}) {
   if (!changes.length) return;
+  // The Registry root is trusted and may have an aliased ancestor (e.g. macOS
+  // /var -> /private/var). Normalize that prefix only; aliases inside model
+  // storage must still fail assertAllowed rather than redirecting a write.
+  const configuredRoot = resolve(root);
+  root = await canonicalPath(root);
+  changes = changes.map(change => ({ ...change, path: within(resolve(change.path), configuredRoot)
+    ? resolve(root, relative(configuredRoot, resolve(change.path))) : resolve(change.path) }));
   const operation: Operation = { version: 1, operationId: randomUUID(), root: resolve(root), kind, phase: "pending", changes: changes.map(change => ({
     path: resolve(change.path), before: change.before?.toString("base64") ?? null, after: change.after?.toString("base64") ?? null,
     beforeHash: digest(change.before), afterHash: digest(change.after)

@@ -6,7 +6,7 @@ import { createBusinessStore } from "../../src/project/business-stores.js";
 
 export const objectSchema = { type: "object", properties: { name: { type: "string" }, count: { type: "integer", minimum: 0 }, items: { type: "array", items: { type: "integer" } } }, required: ["name", "count"], additionalProperties: false };
 export async function businessFixture(t: TestContext, schemas: Record<string, unknown> = { "record.json": objectSchema }) {
-  const directory = await fs.mkdtemp(join(tmpdir(), "memsphere-business-data-"));
+  const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "memsphere-business-data-")));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const root = join(directory, "project"); const home = join(directory, "home"); const cwd = join(directory, "workspace");
   await fs.mkdir(join(root, "models", "json-schema", "draft-07"), { recursive: true });
