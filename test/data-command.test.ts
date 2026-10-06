@@ -9,13 +9,13 @@ import { businessFixture, snapshotTree } from "./helpers/business-data.js";
 import { filesystemWorker } from "./helpers/filesystem-process.js";
 import { initializeProjectModelRegistrations } from "../src/project/model-registration.js";
 
-const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+const cliPath = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 const loader = new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href;
 type Fixture = Awaited<ReturnType<typeof businessFixture>>;
 type Result = { code: number | null; stdout: string; stderr: string; bytes: Buffer };
 
 function cli(t: TestContext, fixture: Fixture, args: string[], input?: string | Uint8Array, keepStdin = false): Promise<Result> {
-  const child = spawn(process.execPath, ["--import", loader, cliPath, "--project", "test-project", ...args], {
+  const child = spawn(process.execPath, [cliPath, "--project", "test-project", ...args], {
     cwd: fixture.cwd, env: { ...process.env, MEMSPHERE_HOME: fixture.home }, stdio: ["pipe", "pipe", "pipe"]
   });
   t.after(() => { if (child.exitCode === null) child.kill("SIGKILL"); });

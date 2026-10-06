@@ -6,15 +6,14 @@ import { parse } from "yaml";
 import { writeData } from "../src/project/data-service.js";
 import { businessFixture, snapshotTree } from "./helpers/business-data.js";
 
-const entry = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
-const loader = new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href;
+const entry = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 type Fixture = Awaited<ReturnType<typeof businessFixture>>;
 type Format = "json" | "text" | undefined;
 
 function cli(fixture: Fixture, args: string[], format?: Format, input?: string) {
   const env = { ...process.env };
   for (const name of Object.keys(env)) if (name.toUpperCase().startsWith("MEMSPHERE_")) delete env[name];
-  const result = spawnSync(process.execPath, ["--import", loader, entry, "--project", "test-project", ...args,
+  const result = spawnSync(process.execPath, [entry, "--project", "test-project", ...args,
     ...(format ? ["--output", format] : [])], {
     cwd: fixture.cwd, env: { ...env, MEMSPHERE_HOME: fixture.home }, input, encoding: "utf8", timeout: 15_000
   });

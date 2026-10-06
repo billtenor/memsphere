@@ -14,8 +14,16 @@ async function withView(run: (page: Page, fixture: Fixture) => Promise<void>) {
     const page = await context.newPage();
     page.setDefaultTimeout(10_000);
     const errors: string[] = [];
+    const modelResponses: { url: string; status: number }[] = [];
     page.on("pageerror", error => errors.push(error.message));
-    await run(page, fixture);
+    page.on("response", response => {
+      if (response.url().includes("/api/projects/alpha/models")) modelResponses.push({ url: response.url(), status: response.status() });
+    });
+    try { await run(page, fixture); }
+    catch (error) {
+      console.error("Model view failure:", JSON.stringify({ url: page.url(), errors, modelResponses, body: await page.locator("body").innerText({ timeout: 1000 }).catch(() => "unavailable") }));
+      throw error;
+    }
     assert.deepEqual(errors, []);
   } finally { await browser.close(); await fixture.close(); }
 }
@@ -55,7 +63,9 @@ test("model structure omits generated reading hints while preserving authored de
       name: { type: "string", minLength: 2 }
     }, required: ["score"] }, null, 2);
   await writeFile(join(fixture.root, "models/json-schema/draft-07/no-hints.json"), source);
-  await page.goto(`${fixture.origin}/projects/alpha/models?model=no-hints.json`);
+  // This test covers presentation, so enter the canonical route directly.
+  // Deep-link canonicalization has its own integration coverage below.
+  await page.goto(`${fixture.origin}/projects/alpha/models?scope=custom&model=no-hints.json`);
   await page.getByRole("heading", { name: "无冗余提示", exact: true }).waitFor();
   await showStructure(page);
   const structure = page.locator(".model-definition-structure");
@@ -672,21 +682,33 @@ test("confirmed model directory save switches the next refresh without migration
 
 
 test("model information is the default tab and orders identity, standard, tags and storage fields", async () => withView(async (page, fixture) => {
+  // Route canonicalization can replace the detail table after it first appears.
+  // Capture one complete DOM state instead of querying between those renders.
+  const readInformation = async (modelId: string) => {
+    const handle = await page.waitForFunction((id) => {
+      const table = document.querySelector(".model-information-table");
+      const headers = Array.from(table?.querySelectorAll("th") ?? [], cell => cell.textContent);
+      const values = Array.from(table?.querySelectorAll("td") ?? [], cell => cell.textContent);
+      const selected = document.querySelector('[role="radio"][aria-checked="true"]');
+      if (headers.length !== 8 || values.length !== 8 || values[3] !== id || !selected) return false;
+      return { headers, values, selected: selected.textContent, structureCount: document.querySelectorAll(".model-definition-table").length };
+    }, modelId);
+    try { return await handle.jsonValue(); } finally { await handle.dispose(); }
+  };
   await page.goto(`${fixture.origin}/projects/alpha/models?model=sales%2Forder.json`);
-  const table = page.locator(".model-information-table");
-  await table.waitFor();
-  assert.deepEqual(await table.locator("th").allTextContents(), ["名称", "说明", "所属包", "模型 ID", "定义标准", "标签", "存储方式", "存储 ID"]);
-  assert.deepEqual((await table.locator("td").allTextContents()).slice(3), ["sales/order.json", "json-schema/draft-07.json", "—", "持久化存储", "models/json-schema/draft-07"]);
-  assert.equal(await page.getByRole("radio", { name: "模型信息", exact: true }).getAttribute("aria-checked"), "true");
-  assert.equal(await page.locator(".model-definition-table").count(), 0);
+  const information = await readInformation("sales/order.json");
+  assert.deepEqual(information.headers, ["名称", "说明", "所属包", "模型 ID", "定义标准", "标签", "存储方式", "存储 ID"]);
+  assert.deepEqual(information.values.slice(3), ["sales/order.json", "json-schema/draft-07.json", "—", "持久化存储", "models/json-schema/draft-07"]);
+  assert.equal(information.selected, "模型信息");
+  assert.equal(information.structureCount, 0);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.goto(`${fixture.origin}/projects/alpha/models?scope=memsphere.builtin&model=memsphere%2Fmodel-registration.json`);
-  await table.waitFor();
-  const row = (label: string) => table.locator("tr").filter({ has: page.getByRole("rowheader", { name: label, exact: true }) }).locator("td");
-  assert.equal(await row("模型 ID").innerText(), "memsphere/model-registration.json");
-  assert.equal(await row("存储方式").innerText(), "持久化存储");
-  assert.equal(await row("存储 ID").innerText(), "models/system/json-schema/draft-07");
+  const builtin = await readInformation("memsphere/model-registration.json");
+  const row = (label: string) => builtin.values[builtin.headers.indexOf(label)];
+  assert.equal(row("模型 ID"), "memsphere/model-registration.json");
+  assert.equal(row("存储方式"), "持久化存储");
+  assert.equal(row("存储 ID"), "models/system/json-schema/draft-07");
   await showStructure(page);
   assert.deepEqual(await page.locator(".model-definition-name").allTextContents(), ["modelRef", "name", "description", "package", "package_name", "tags", "storage", "store_id"]);
 }));

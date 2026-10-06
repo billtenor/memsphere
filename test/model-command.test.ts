@@ -7,12 +7,11 @@ import test, { type TestContext } from "node:test";
 import { businessFixture, objectSchema, snapshotTree } from "./helpers/business-data.js";
 import { writeData } from "../src/project/data-service.js";
 
-const entry = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
-const loader = new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href;
+const entry = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 type Fixture = Awaited<ReturnType<typeof businessFixture>>;
 type Result = { code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string };
 function cli(t: TestContext, f: Fixture, args: string[], options: { input?: string; keepStdin?: boolean; project?: string } = {}): Promise<Result> {
-  const child = spawn(process.execPath, ["--import", loader, entry, "--project", options.project ?? "test-project", ...args], {
+  const child = spawn(process.execPath, [entry, "--project", options.project ?? "test-project", ...args], {
     cwd: f.cwd, env: { ...process.env, MEMSPHERE_HOME: f.home, MEMSPHERE_PROJECT: "", MEMSPHERE_CONFIG_PATH: "" },
     stdio: ["pipe", "pipe", "pipe"], timeout: 8000
   });
