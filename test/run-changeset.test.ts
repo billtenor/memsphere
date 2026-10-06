@@ -1,3 +1,4 @@
+import { managedProjectFixture } from "./helpers/project.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -68,7 +69,7 @@ test("Managed Run can start from a validated active ChangeSet without publishing
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     await runGit(["init", "-b", "master"], { cwd: workspace });
     process.chdir(workspace);
-    await silently(() => projectCreateCommand("managed", { bind: true }));
+    await silently(() => managedProjectFixture("managed", { bind: true }));
 
     const edited = await editMemories({
       references: ["procedures/candidate-run", "statements/candidate-rule"],

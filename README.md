@@ -136,7 +136,7 @@ CLI 因而不是面向人的命令集合，而是优先面向 Agent 的软件能
 
 ### 6.1 环境要求
 
-- Node.js 20 或更高版本；
+- Node.js 22 或更高版本，推荐 Node 22 LTS；
 - Git；
 - 一个能够使用 Skill 和终端命令的 Agent。
 
@@ -149,7 +149,7 @@ Memsphere 面向 Agent 使用，安装、初始化和 Project 配置也建议直
 ```text
 请帮我在当前工作目录安装并配置 Memsphere，全程由你执行需要的终端命令：
 
-1. 检查 Node.js 20 或更高版本以及 Git 是否可用；如果缺少环境，清楚告诉我需要补什么。
+1. 检查 Node.js 22 或更高版本以及 Git 是否可用；如果缺少环境，清楚告诉我需要补什么。
 2. 执行 npm install -g memsphere，然后执行 memsphere skill init --global。
 3. 读取刚安装的 Memsphere Skill 并遵循它。若当前会话没有自动刷新 Skill 列表，请根据安装命令返回的位置直接读取 SKILL.md，继续当前任务，不要仅因此要求我新开会话。
 4. 检查当前目录是否已经绑定 Project。已绑定就复用；未绑定时，询问我要使用 Managed Project 还是 Embedded Project。如果我不确定，推荐并创建 Managed Project，再绑定当前目录。
@@ -243,9 +243,9 @@ View 的 Memory 下提供“当前项目 / 记忆市场”入口。记忆市场�
 
 Project 的“模型”页面按包管理模型：“本项目”下有未定义包和项目包，“已导入的包”下有系统包和市场导入包，另有模型市场入口。列表展示名称、模型 ID、说明与标签，可组合包范围、标签和搜索；详情默认以“模型信息”表格展示管理属性，再查看树形模型结构或完整原始 JSON。
 
-模型结构与管理信息分别存储。JSON Schema Draft-07 定义直接保存为可阅读的 `.json` 文件，项目模型 ID 是包含后缀的相对路径，例如 `sales/order.json`。`memsphere/model-registration` 定义登记信息：`modelRef`、`name`、`description`、`package`、`package_name`、`tags`、`storage`、`store_id`。持久化模型使用 `storage=store` 和 `store_id` 指向保存其结构的 DataStore，登记记录放在独立的 filesystem ValueStore 中。登记 Runtime 直接读取固定位置的定义，不依赖自己的登记记录。
+模型结构与管理信息分别存储。JSON Schema Draft-07 定义直接保存为可阅读的 `.json` 文件，项目模型 ID 是包含后缀的相对路径，例如 `sales/order.json`。`memsphere/model-registration.json` 定义登记信息：`modelRef`、`name`、`description`、`package`、`package_name`、`tags`、`storage`、`store_id`。持久化模型使用 `storage=store` 和 `store_id` 指向保存其结构的 DataStore，登记记录放在独立的 filesystem ValueStore 中。登记 Runtime 直接读取固定位置的定义，不依赖自己的登记记录。
 
-`project create` 为 Managed 和 Embedded Project 自动安装五个内置模型（登记模型和四个 raw Run 模型）。原始 JSON 在发行包的 `reserved-models/system-models/`，统一由 `reserved-models/manifest.json` 管理。实际定义和登记进入所选登记目录的 `system/definitions/` 与 `system/registrations/`，稳定模型 ID 保持不变，Store ID 分别为 `models/system/json-schema/draft-07` 和 `models/system/raw`。
+`project create` 为 Managed 和 Embedded Project 自动安装五个内置模型（登记模型和四个 raw Run 模型）。原始 JSON 在发行包的 `reserved-models/system-models/`，统一由 `reserved-models/manifest.json` 管理。实际定义和登记进入所选登记目录的 `system/definitions/` 与 `system/registrations/`，所有模型 ID 都包含 `.json` 后缀，Store ID 分别为 `models/system/json-schema/draft-07` 和 `models/system/raw`。
 
 已有 Project 显式补装内置模型并初始化登记；浏览模型不会自动写入：
 
@@ -255,13 +255,11 @@ memsphere --project my-project project models initialize
 
 当前界面暂时隐藏“添加存储”和“初始化模型登记”入口；已有存储仍可选择和配置，相关服务与 CLI 保留供后续开放。
 
-命令也可用 `project models initialize my-project --output json` 获取结构化回执。已有的已确认登记模型预览会先备份再迁移到内置身份；其他模型原文与管理属性保留。
+命令也可用 `project models initialize my-project --output json` 获取结构化回执。初始化检查当前模型、安装系统模型并补齐登记；已有与新增模型必须满足相同规则。该命令也是中断模型操作的显式恢复入口，不在浏览时自动执行。
 
 在“设置 → 模型登记存储”先选择存储 ID，再配置该 Store 的类型和目录，登记模型固定只读。默认使用 `memsphere/model-registrations`，filesystem 目录为 `models/registrations`。已有数据时切换 ID 或目录需要明确确认迁移；目标校验成功后才切换配置，失败保留原数据，旧目录仍保留且不参与模型扫描。项目原有“模型存储”配置独立：`modelsDirectory` 默认 `models/json-schema/draft-07`，相对 Registry 登记的 Project 根目录解析，也可指定绝对路径；修改它不自动迁移模型文件。
 
-模型市场通过同一清单管理 `reserved-models/market-models/` 中的原始 JSON，提供包含用例 01–08 的示例包 `memsphere.examples`，订单示例保留在用例 02 中，不再单列市场包。新 Project 不自动安装示例；市场移除包不会删除已导入数据，当前不提供卸载入口。导入后定义进入独立模型 DataStore，登记进入导入区域。重复导入相同内容显示无变更；已修改的内容或同模型 ID 冲突拒绝整包，并返回冲突清单，不静默覆盖。未导入和导入失败的候选不会进入正常模型列表。模型定义编辑、值实例管理和远程市场不在当前功能范围内。
-
-维护脚本 `scripts/relocate-example-models.mjs` 专门整理 memsphere Project 中原始的八个历史示例：先 `node scripts/relocate-example-models.mjs plan --project memsphere --out <plan.json>`，再 `node scripts/relocate-example-models.mjs apply --plan <plan.json>`。只有定义、登记基线和保留模型引用检查通过，且完整备份经过隔离恢复演练后才移出示例；备份长期保存在 Project 的 `backups/model-registration/20261003-model-catalogs/`。使用 `node scripts/relocate-example-models.mjs restore --backup <备份目录>` 原样恢复，冲突或损坏时拒绝写入。这不是启动或浏览时自动执行的迁移。
+模型市场通过同一清单管理 `reserved-models/market-models/` 中的原始 JSON，提供包含用例 01–08 的示例包 `memsphere.examples`，订单示例保留在用例 02 中，不再单列市场包。新 Project 不自动安装示例；市场移除包不会删除已导入数据，当前不提供卸载入口。导入后定义进入独立模型 DataStore，登记进入导入区域。重复导入相同内容显示无变更；已修改的内容或同模型 ID 冲突拒绝整包，并返回冲突清单，不静默覆盖。未导入和导入失败的候选不会进入正常模型列表。模型定义和数据记录可通过下方 CLI 管理；远程市场不在当前范围内。模型市场与项目写入使用相同的定义和 Runtime 校验，不保留不合规模型的使用豁免。当前示例 04/05 保留超出 Runtime 支持范围的原约束，因此八例整包导入会明确失败且不发布任何模型；不会为了导入而删减约束。
 
 查看当前绑定的 Project，并验证其中的 Memory：
 
@@ -325,6 +323,64 @@ Review 已开始后，可以用 `memsphere run binding show/update` 或 View 调
 
 Agent 会发现并读取适用的 Procedure，创建 Run，并按照步骤推进任务。
 
+### 6.8 模型与数据 CLI
+
+命令使用当前 Project；可在命令前加 `--project <name>` 明确选择。所有模型 ID，包括 `memsphere/model-registration.json`、`memsphere/run/artifact.json` 和元模型 `json-schema/draft-07.json`、`raw.json`，都以 `.json` 结尾；Store ID、Factory ID 和记录 ID 不因此改名。
+
+| 命令 | 常用参数 |
+| --- | --- |
+| `model list` | `--origin project\|system\|market`、`--package <id>` 或 `--unpackaged`、可重复 `--tag <tag>`、`--query <text>`、`--status available\|unavailable` |
+| `model read <model-ref>` | `--part definition\|registration\|all`，默认 definition |
+| `model create <model-ref>` | 必填 `--definition-file <path\|->`；可选 `--name`、`--description`、`--package`、`--package-name`、可重复 `--tag` |
+| `model update <model-ref>` | 可替换 `--definition-file` 或修改上述登记字段；可重复 `--unset name\|description\|package\|package_name\|tags` 清除字段 |
+| `model delete <model-ref>` | 删除未被业务 Store 使用的项目或导入模型 |
+| `model validate <model-ref>` | 可选 `--definition-file <path\|->`、`--check definition\|runtime`（默认 runtime）、`--check-data`、可重复 `--store <id>` |
+| `data store list / read <store-id>` | list 可用 `--model <ref>`、`--kind data\|value` 筛选直接绑定 |
+| `data store create <store-id>` | 必填 `--model <ref>`、`--kind data\|value`、`--factory <id>`、`--config-file <path\|->` |
+| `data store remove <store-id>` | 仅移除登记，保留数据目录和内容 |
+| `data list / read <id> / has <id>` | 必填 `--store <id>`；read 可用 `--metadata-only` 或 `--path <path>` |
+| `data create <id> / update <id>` | 必填 `--store <id>`，输入三选一：`--value <json>`、`--value-file <path\|->`、`--payload-file <path\|->`；Payload 还须 `--content-type <mime>` |
+| `data edit <id>` | 必填 `--store <id>`，`--patch <json>` 或 `--patch-file <path\|->`；使用 RFC 6902 JSON Patch |
+| `data delete <id>` | 必填 `--store <id>` |
+| `data export <id>` | 必填 `--store <id>`、`--as json\|payload`、`--out <path\|->` |
+| `data validate [id]` | 已存记录用 `<id> --store <id>`；候选值用 `--model <ref>` 与 `--value` 或 `--value-file` |
+
+模型 create/update 必须通过定义、本地引用和 Runtime 检查。只允许同一模型内的 `$ref: ""`、`"#"` 或 `#/...`；跨模型和外部 URI 引用不支持。当前 JSON Schema Runtime 支持明确类型、对象字段、同类数组、本地递归及受支持的数值、长度、枚举等约束；union、条件分支、boolean 子 schema、`format` 等无法完整执行的规则会明确拒绝。不可用模型可在列表中定位问题，不能通过普通读取或只改登记绕过校验。`validate --check definition` 只是诊断，不代表模型可用。系统模型完全只读；被 Store 使用的模型允许修改登记和不改变定义内容的原文调整，但不允许修改定义语义或删除。
+
+例如，先准备两个 UTF-8 JSON 文件：
+
+```json
+{"type":"object","properties":{"count":{"type":"integer","minimum":0}},"required":["count"]}
+```
+
+将上面的定义保存为 `counter.json`，将 `{"directory":"data/counters"}` 保存为 `store.json`，然后执行：
+
+```sh
+memsphere model create counter.json --definition-file counter.json --tag sample --output json
+memsphere data store create counters --model counter.json --kind value --factory memsphere/filesystem-json --config-file store.json --output json
+memsphere data create one --store counters --value '{"count":1}' --output json
+memsphere data read one --store counters --path '$.count' --output json
+memsphere data edit one --store counters --patch '[{"op":"replace","path":"/count","value":2}]' --expected-revision 1 --output json
+memsphere data export one --store counters --as json --out one.json --output json
+```
+
+`--path <path>` 本轮使用 RFC 9535 JSONPath。传入时 `value` 始终为匹配值数组：未命中 `[]`，命中 null 为 `[null]`，命中数组不展开；省略时返回整条值。JSON Patch 的 `path/from` 使用 RFC 6901 JSON Pointer，和读取路径不同。文件参数中的 `-` 从 stdin 读取一次；JSON 输入接受 UTF-8 BOM，拒绝无效 UTF-8 或 JSON。
+
+业务数据必须显式选择已登记的 Store，不会通过模型名猜测，也不会访问 Run、归档或系统模型存储。Store 配置中的 directory 可以是绝对路径或相对路径：绝对路径按指定位置使用，相对路径以 Registry Project 根目录解析；两者都检查存储重叠和内容兼容性。ValueStore 使用 `memsphere/filesystem-json`，记录 ID 不带物理文件后缀；DataStore 使用 `memsphere/filesystem`，ID 包含 MIME 映射后缀，Payload 输入只适用于 DataStore。`update` 是整条替换；ValueStore 的 update/edit/delete 可带 `--expected-revision` 防止覆盖旧版本，DataStore 不支持该选项和 edit。模型没有面向用户的修订号或 CAS 参数。
+
+模型、数据和 Store 的写命令支持 `--dry-run`，只检查拟议变更；export 例外，只写显式指定的导出目标，已有目标拒绝覆盖。`--out -` 输出原始内容，与 `--output json` 回执互斥。普通读取不创建目录、修复登记或更新业务状态。文件写入通过本机跨进程锁协调，进程退出后由系统释放；锁文件可保留，不能当成过期锁删除。保护范围是通过该协议访问的本地文件系统，不承诺网络文件系统锁或外部程序直接改文件时的并发一致性；平台不支持锁时明确失败。
+
+全部六种 `list`（model、data、data store、project、memory、archive）都支持 `--limit <n>` 和 `--cursor <token>`，默认 100，范围 1–1000。先筛选再分页；JSON/YAML 输出为 `{ "items": [...], "nextCursor": "..." }`，末页省略 nextCursor，空页为 items 空数组。继续时可改 limit，必须保持命令、Project/Store/Run、筛选条件及 Memory 父节点等查询范围。Memory 子节点保持声明顺序；Reviewer 列表继续使用 Session 绑定的 Project 与冻结 Run。
+
+```sh
+memsphere model list --origin project --limit 20 --output json
+memsphere model list --origin project --limit 20 --cursor '<nextCursor>' --output json
+memsphere data store list --kind value --limit 20 --output json
+memsphere memory list --kind procedures --limit 20 --output json
+```
+
+新增 model/data（含 data store）命令默认 `--output text`，成功时使用 YAML 的键值、缩进和列表格式展示完整结果，保留嵌套数据及分页的 nextCursor，不是缩进 JSON。`--output json` 面向程序读取，成功的 stdout 只有一个 JSON 值；所有 list 也支持此 JSON 协议。失败时 stdout 为空，text 在 stderr 显示错误说明，json 的 stderr 只有 `{ "error": { "code": "...", "message": "...", "details": ... } }`，退出码 1。details 按需要返回；参数解析失败也遵循所选格式。原始导出正文、帮助与版本保持各自的输出规则。完整参数以各命令 `--help` 为准。
+
 ## 7. Memsphere 仍在进化
 
 上面描述的是 Memsphere 要抵达的完整方向。我们正在从最重要的基础开始，一步步把它变成现实。
@@ -345,6 +401,7 @@ Memsphere 当前支持四种 Memory：
 除此之外，当前版本还提供：
 
 - **Project**：组织持久或随仓库维护的 Memory，并绑定当前工作目录；
+- **模型与数据 CLI**：校验和管理模型、登记业务 Store，并通过明确的 ID 读写数据；
 - **Run**：把 Procedure 变成一次有名称、有状态的实际运行；
 - **Artifact**：保存每个步骤的交付结果，并依据 Schema 进行校验；
 - **Review**：让人或 Agent 审阅运行产物；
@@ -372,9 +429,12 @@ cd memsphere
 npm install
 npm run build
 npm test
+node scripts/model-data-smoke.mjs
 ```
 
 参与开发前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题请参阅 [SECURITY.md](SECURITY.md)。
+
+CI 统一使用 Node 22 LTS，在 Linux、macOS 和 Windows 上运行全部自动化测试，包含原生跨进程文件锁与模型/数据 CLI 测试；Windows 安装包检查验证四种受支持 Shell 中的 CLI。模型/数据 CLI 与安装包冒烟脚本也可手动运行。
 
 ## 9. 许可证
 

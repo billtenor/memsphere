@@ -1,4 +1,6 @@
 import type { MemoryEntity } from "./ast.js";
+import { randomUUID } from "node:crypto";
+import { compareStrings, paginateItems, parseListLimit, decodeListCursor, type Page, type PaginationOptions } from "../pagination.js";
 import type { MemoryKind } from "./kinds.js";
 import {
   canonicalMemoryNameIssue,
@@ -19,21 +21,19 @@ export type MemoryDescriptor = {
   frozen?: string;
 };
 
-export type MemoryListQuery = {
+export type MemoryListQuery = PaginationOptions & {
   kind?: MemoryKind;
   query?: string;
 };
 
-export type MemoryListPage = {
-  memories: MemoryDescriptor[];
-  next_cursor: null;
-};
+export type MemoryListPage = Page<MemoryDescriptor>;
 
 export type MemoryResolveQuery = {
   kind?: MemoryKind;
 };
 
 export interface MemoryCatalog {
+  readonly paginationScope?: unknown;
   list(query?: MemoryListQuery): Promise<MemoryListPage>;
   resolve(referenceOrName: string, query?: MemoryResolveQuery): Promise<MemoryDescriptor>;
   read(referenceOrName: string, query?: MemoryResolveQuery): Promise<MemoryEntity>;
@@ -100,20 +100,25 @@ export class InvalidMemoryReferenceError extends Error {
 
 export class DefaultMemoryCatalog implements MemoryCatalog {
   readonly #provider: MemoryProvider;
+  readonly paginationScope: unknown;
 
-  constructor(provider: MemoryProvider) {
+  constructor(provider: MemoryProvider, paginationScope: unknown = { instance: randomUUID() }) {
     this.#provider = provider;
+    this.paginationScope = paginationScope;
   }
 
   async list(query: MemoryListQuery = {}): Promise<MemoryListPage> {
-    const index = await this.#loadIndex(query.kind);
     const normalizedQuery = query.query === undefined ? undefined : normalizeMemoryName(query.query);
+    const scope = { command: "memory list", scope: this.paginationScope, filters: { kind: query.kind, query: normalizedQuery } };
+    parseListLimit(query.limit);
+    decodeListCursor(query.cursor, scope);
+    const index = await this.#loadIndex(query.kind);
     const memories = index.entries
       .filter((entry) => normalizedQuery === undefined || entry.descriptor.names.includes(normalizedQuery))
       .map((entry) => entry.descriptor)
       .sort(compareDescriptors);
 
-    return { memories, next_cursor: null };
+    return paginateItems(memories, query, scope);
   }
 
   async resolve(referenceOrName: string, query: MemoryResolveQuery = {}): Promise<MemoryDescriptor> {
@@ -297,9 +302,5 @@ function duplicateValues(values: string[]): string[] {
 }
 
 function compareDescriptors(a: MemoryDescriptor, b: MemoryDescriptor): number {
-  return compareStrings(`${a.reference}\0${a.project_name ?? ""}`, `${b.reference}\0${b.project_name ?? ""}`);
-}
-
-function compareStrings(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
+  return compareStrings(a.project_name ?? "", b.project_name ?? "") || compareStrings(a.reference, b.reference);
 }

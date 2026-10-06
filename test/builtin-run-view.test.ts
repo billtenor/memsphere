@@ -1,3 +1,4 @@
+import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -5,7 +6,6 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { build } from "esbuild";
-import { chromium } from "playwright";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import { builtinModuleCatalog } from "../src/module/builtin-catalog.js";
 import { renderViewHostHtml, viewRuntimeBundlePath, viewSdkBundlePath, type ViewHostBootInstance } from "../src/view/host.js";
@@ -60,7 +60,7 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
     }
     return send(response, "text/html", renderViewHostHtml("en", instances));
   });
-  const origin = await listen(server); const browser = await chromium.launch({ headless: true });
+  const origin = await listen(server); const browser = await browserScope();
   try {
     const page = await browser.newPage();
     await page.goto(`${origin}/tasks/run-demo`, { waitUntil: "networkidle" });

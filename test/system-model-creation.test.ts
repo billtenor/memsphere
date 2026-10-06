@@ -17,7 +17,7 @@ test("Managed and Embedded project create publish complete persistent system mod
     const git = spawnSync("git", ["init", "-b", "master"], { cwd: workspace, env, encoding: "utf8" });
     assert.equal(git.status, 0, git.stderr);
     for (const mode of ["managed", "embedded"]) {
-      const args = ["--import", import.meta.resolve("tsx"), resolve("src/cli.ts"), "project", "create", mode, ...(mode === "embedded" ? ["--embedded", join(workspace, "memory")] : [])];
+      const args = [resolve("dist/cli.js"), "project", "create", mode, ...(mode === "embedded" ? ["--embedded", join(workspace, "memory")] : [])];
       const created = spawnSync(process.execPath, args, { cwd: workspace, env, encoding: "utf8", timeout: 30000 });
       assert.equal(created.status, 0, created.stderr);
       const project = join(home, "projects", mode);

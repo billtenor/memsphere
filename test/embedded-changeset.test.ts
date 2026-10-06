@@ -1,3 +1,4 @@
+import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5,7 +6,6 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { chromium } from "playwright";
 import { projectCreateCommand } from "../src/commands/project.js";
 import { createViewServer } from "../src/commands/view.js";
 import { runGit } from "../src/git.js";
@@ -276,7 +276,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
         assert.equal(unavailable.change.status, "active");
         assert.equal(unavailable.change.sourceWorktree.available, false);
 
-        const sourceBrowser = await chromium.launch({ headless: true });
+        const sourceBrowser = await browserScope();
         try {
           const page = await sourceBrowser.newPage({ viewport: { width: 1366, height: 900 } });
           await page.goto(`${origin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);
@@ -329,7 +329,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
         assert.match(detailPayload.error, new RegExp(corruptId));
         assert.match(detailPayload.error, /store_type/);
 
-        const corruptBrowser = await chromium.launch({ headless: true });
+        const corruptBrowser = await browserScope();
         try {
           const page = await corruptBrowser.newPage({ viewport: { width: 1366, height: 900 } });
           await page.goto(`${origin}/projects/embedded/changes/${corruptId}`);
@@ -486,7 +486,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       invalidView.listen(0, "127.0.0.1", resolve);
     });
     const invalidOrigin = `http://127.0.0.1:${(invalidView.address() as AddressInfo).port}`;
-    const browser = await chromium.launch({ headless: true });
+    const browser = await browserScope();
    try {
       const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
       await page.goto(`${invalidOrigin}/projects/embedded/memories?change=${encodeURIComponent(first.changeId)}`);
@@ -577,7 +577,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       completedView.listen(0, "127.0.0.1", resolve);
     });
     const completedOrigin = `http://127.0.0.1:${(completedView.address() as AddressInfo).port}`;
-    const completedBrowser = await chromium.launch({ headless: true });
+    const completedBrowser = await browserScope();
     try {
       const page = await completedBrowser.newPage();
       await page.goto(`${completedOrigin}/projects/embedded/changes/${encodeURIComponent(first.changeId)}`);

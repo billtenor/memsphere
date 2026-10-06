@@ -7,13 +7,13 @@ import { Config } from "../src/data/api/config.js";
 import type { ModelRuntime } from "../src/data/api/model-runtime.js";
 import type { TypeDescriptor } from "../src/data/api/reflection.js";
 import type { ValueStore } from "../src/data/api/value-store.js";
-import { FilesystemJsonValueStoreFactory, filesystemJsonValueStoreExtension } from "../src/data/extensions/filesystem-json-valuestore/index.js";
+import { FILESYSTEM_JSON_METADATA_DIRECTORY, FilesystemJsonValueStoreFactory, filesystemJsonValueStoreExtension } from "../src/data/extensions/filesystem-json-valuestore/index.js";
 import { JSON_SCHEMA_DRAFT_07, JsonSchemaModelRuntimeFactory } from "../src/data/extensions/json-schema/index.js";
 import { bytesContent } from "../src/data/extensions/shared/payload.js";
 import { withRecordLock } from "../src/data/extensions/shared/filesystem.js";
 import { createPlainRuntime } from "../src/data/extensions/shared/reflection.js";
 
-const MODEL = "example/filesystem-json-value-v1";
+const MODEL = "example/filesystem-json-value-v1.json";
 const STORE_ID = "example/values";
 
 async function makeRuntime(): Promise<ModelRuntime> {
@@ -82,7 +82,7 @@ test("filesystem JSON ValueStore persists raw values, metadata and exact JSON ac
     assert.equal(text, `${JSON.stringify(created, null, 2)}\n`);
     assert.deepEqual(JSON.parse(text), created);
     assert.equal("model" in JSON.parse(text), false);
-    assert.deepEqual(await readdir(directory), ["item.json"]);
+    assert.deepEqual(await readdir(directory), [FILESYSTEM_JSON_METADATA_DIRECTORY, "item.json"]);
     assert.equal(await store.has({}, "item"), true);
     await assert.rejects(store.create({}, "item", value), /already exists/);
     await assert.rejects(store.update({}, "missing", value), /does not exist/);
@@ -158,7 +158,7 @@ test("filesystem JSON ValueStore enforces complete runtime validation before wri
 
 test("filesystem JSON ValueStore rejects unsupported JSON values and descriptors without changing records", async () => {
   await withStore(async (_store, directory) => {
-    const runtime = createPlainRuntime({ id: "loose-json", root: { kind: "object", fields: [], field: () => undefined } });
+    const runtime = createPlainRuntime({ id: "loose-json.json", root: { kind: "object", fields: [], field: () => undefined } });
     const store = await new FilesystemJsonValueStoreFactory().createStore({}, STORE_ID, runtime, new Config({ directory }));
     await store.create({}, "kept", { valid: true });
     const cyclic: { self?: unknown } = {};
@@ -181,7 +181,7 @@ test("filesystem JSON ValueStore rejects unsupported JSON values and descriptors
       [{ kind: "map", key: { kind: "scalar", scalar: "string" }, value: { kind: "scalar", scalar: "number" } }, new Map([["a", 1]])]
     ];
     for (const [index, [root, value]] of descriptors.entries()) {
-      const unsupported = await new FilesystemJsonValueStoreFactory().createStore({}, `unsupported-store-${index}`, createPlainRuntime({ id: `unsupported-${index}`, root }), new Config({ directory }));
+      const unsupported = await new FilesystemJsonValueStoreFactory().createStore({}, `unsupported-store-${index}`, createPlainRuntime({ id: `unsupported-${index}.json`, root }), new Config({ directory }));
       await assert.rejects(unsupported.create({}, "missing", value), /JSON does not support/);
       assert.equal(await unsupported.has({}, "missing"), false);
     }
@@ -191,7 +191,7 @@ test("filesystem JSON ValueStore rejects unsupported JSON values and descriptors
 
 test("filesystem JSON ValueStore rejects a runtime-incompatible round trip before publication", async () => {
   await withStore(async (_store, directory) => {
-    const runtime = createPlainRuntime({ id: "null-prototype-only", root: { kind: "object", fields: [], field: () => undefined } }, {
+    const runtime = createPlainRuntime({ id: "null-prototype-only.json", root: { kind: "object", fields: [], field: () => undefined } }, {
       validate(value) {
         if (Object.getPrototypeOf(value) !== null) throw new Error("Only null-prototype values accepted");
       }
@@ -225,7 +225,7 @@ test("filesystem JSON ValueStore shares per-record atomic CAS and pagination acr
     assert.deepEqual(page.items, [{ id: "a" }, { id: "b" }]);
     assert.ok(page.nextCursor);
     assert.deepEqual(await second.list({}, { cursor: page.nextCursor }), { items: [{ id: "c" }] });
-    assert.deepEqual((await readdir(directory)).sort(), ["a.json", "b.json", "c.json"]);
+    assert.deepEqual((await readdir(directory)).sort(), [FILESYSTEM_JSON_METADATA_DIRECTORY, "a.json", "b.json", "c.json"]);
     await assert.rejects(first.list({}, { cursor: "bad cursor" }), /Invalid.*list cursor/);
     await assert.rejects(first.list({}, { limit: 0 }), /limit/);
     await assert.rejects(first.update({}, "a", { name: "x", count: 0 }, { expectedRevision: 0 }), /expectedRevision/);
@@ -280,7 +280,7 @@ test("filesystem JSON ValueStore identity is logical and pagination does not cro
     const page = await first.list({}, { limit: 1 });
     assert.ok(page.nextCursor);
     await assert.rejects(second.list({}, { cursor: page.nextCursor }), /Invalid.*list cursor/);
-    assert.deepEqual((await readdir(directory)).sort(), ["a.json", "b.json"]);
+    assert.deepEqual((await readdir(directory)).sort(), [FILESYSTEM_JSON_METADATA_DIRECTORY, "a.json", "b.json"]);
   });
 });
 
@@ -359,7 +359,7 @@ test("filesystem JSON ValueStore preserves creator but does not attribute an upd
 
 test("filesystem JSON ValueStore preserves dangerous business keys without invoking getters or JSON hooks", async () => {
   await withStore(async (_store, directory) => {
-    const runtime = createPlainRuntime({ id: "opaque-fields", root: { kind: "object", fields: [], field: () => undefined } });
+    const runtime = createPlainRuntime({ id: "opaque-fields.json", root: { kind: "object", fields: [], field: () => undefined } });
     const store = await new FilesystemJsonValueStoreFactory().createStore({}, STORE_ID, runtime, new Config({ directory }));
     const value: unknown = JSON.parse('{"__proto__":{"polluted":true},"constructor":1,"toJSON":"ordinary field","nested":{"value":true}}');
     const stored = await store.create({}, "safe", value);
@@ -410,7 +410,7 @@ test("filesystem JSON ValueStore lock is only per record and a canceled waiter n
       assert.equal(independent.revision, 1);
       controller.abort();
       await rejected;
-      assert.deepEqual((await readdir(directory)).sort(), ["busy.json", "independent.json"]);
+      assert.deepEqual((await readdir(directory)).sort(), [FILESYSTEM_JSON_METADATA_DIRECTORY, "busy.json", "independent.json"]);
       assert.deepEqual((await store.get({}, "busy"))!.value, value);
     } finally {
       controller.abort();

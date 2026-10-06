@@ -68,7 +68,7 @@ export default defineViewPlugin<{
         };
         function state(context: ViewRenderContext) {
             const q = context.route.query;
-            const selected = (models ?? []).find(m => m.id === q.model || q.model === 'memsphere/model-registration.json' && m.id === 'memsphere/model-registration');
+            const selected = (models ?? []).find(m => m.id === q.model);
             const inferred = selected?.registration?.package ? `${selected.origin ?? (selected.builtin ? 'system' : 'project')}:${selected.registration.package}` : 'custom';
             const scope = normalizeModelScope(models ?? [], q.scope ?? inferred);
             const available = [...new Set(scopeModels(models ?? [], scope).flatMap(m => m.registration?.tags ?? []))];
@@ -240,8 +240,6 @@ export default defineViewPlugin<{
                 return;
             const s = state(context), visible = filterModels(models ?? [], s.scope, s.tag, s.q);
             let id = visible.find(m => m.id === context.route.query.model)?.id ?? visible[0]?.id;
-            if (context.route.query.model === 'memsphere/model-registration.json')
-                id = visible.find(m => m.id === 'memsphere/model-registration')?.id ?? id;
             if (!initialized)
                 body.append(ui.feedback({ state: 'read-only', title: t('模型登记尚未初始化', 'Model registrations are not initialized'), description: t('当前显示已有模型。初始化后将保存模型管理信息。', 'Existing models are shown. Initialize to persist their management information.'), ...(modelRegistrationSetupEnabled ? { action: { label: t('初始化模型登记', 'Initialize registrations'), async run() { await mutate('/models/initialize', {}); } } } : {}) }));
             if (!id) {
@@ -281,7 +279,7 @@ export default defineViewPlugin<{
                     pre.className = 'model-browser-code';
                     pre.textContent = model.source;
                     return pre;
-                } return model.metaModel === 'raw' ? ui.feedback({ state: 'read-only', title: t('原始内容模型', 'Raw content model'), description: t('此模型不声明成员字段，内容作为整体字节值管理。', 'This model declares no member fields; content is managed as a whole byte value.') }) : definitionTable(ui, model.definition, text); };
+                } return model.metaModel === 'raw.json' ? ui.feedback({ state: 'read-only', title: t('原始内容模型', 'Raw content model'), description: t('此模型不声明成员字段，内容作为整体字节值管理。', 'This model declares no member fields; content is managed as a whole byte value.') }) : definitionTable(ui, model.definition, text); };
                 function select(selectedId: string) { activeTab = selectedId; switcher.replaceChildren(ui.segmentedControl({ label: t('模型详情', 'Model details'), selectedId, items: [{ id: 'information', label: t('模型信息', 'Model information') }, { id: 'structure', label: t('模型结构', 'Model structure') }, { id: 'source', label: t('原始定义', 'Source definition') }], onSelect: select })); let content = rendered.get(selectedId); if (!content) {
                     if (selectedId === 'information')
                         content = information(model);
@@ -401,7 +399,7 @@ export default defineViewPlugin<{
                 return;
             const s = state(context);
             const visible = filterModels(models ?? [], s.scope, s.tag, s.q);
-            const id = visible.find(m => m.id === context.route.query.model || context.route.query.model === 'memsphere/model-registration.json' && m.id === 'memsphere/model-registration')?.id ?? visible[0]?.id;
+            const id = visible.find(m => m.id === context.route.query.model)?.id ?? visible[0]?.id;
             if (context.route.query.scope === s.scope && (context.route.query.tag ?? '') === s.tag && context.route.query.model === id)
                 return;
             // Route updates follow mount completion; navigating during mount can dispose the incoming page.

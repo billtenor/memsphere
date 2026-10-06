@@ -7,7 +7,7 @@ import { readConfigAt } from "../src/config.js";
 import { archiveRun, restoreRun } from "../src/archive/store.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 import { startRun, reportRun } from "../src/run/store.js";
-import { prepareRunData, readRunContent, runDataModels, runDataStore } from "../src/project/run-data.js";
+import { prepareRunData, readRunContent, runDataModels, runDataStore, runDataStoreIds } from "../src/project/run-data.js";
 import { installBundledSystemModels } from "../src/project/system-models.js";
 import type { ProjectModelInput } from "../src/project/model-registration.js";
 
@@ -67,7 +67,7 @@ test("Changing Project model storage replaces both current and archive assembly 
     assert.deepEqual((await second.getModel({}, runDataModels.artifact)).definition, { description: "second definition" });
     assert.equal(prepareRunData(roots), second);
     assert.notEqual(await runDataStore(join(roots.archiveRoot, "runs"), "artifact"), firstArchived);
-    assert.equal(await runDataStore(join(roots.archiveRoot, "runs"), "artifact"), await second.getStore({}, `${runDataModels.artifact}/archive`));
+    assert.equal(await runDataStore(join(roots.archiveRoot, "runs"), "artifact"), await second.getStore({}, `${runDataStoreIds.artifact}/archive`));
     const otherRoot = join(root, "other");
     const other = await install(otherRoot, "a", "other Project");
     const third = prepareRunData({ runsRoot: join(otherRoot, "runs"), archiveRoot: join(otherRoot, "archives"), project: other.project });

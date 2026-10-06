@@ -11,14 +11,17 @@ const ajv = new Ajv({ allErrors: true, strict: false, ownProperties: true });
 
 /** Validate the definition standard without compiling the business Runtime subset. */
 export function validateJsonSchemaDefinition(value: unknown): void {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("JSON Schema definition must be an object");
+  const fail = (message: string, path = "#"): never => {
+    throw Object.assign(new TypeError(message), { code: "MODEL_DEFINITION_INVALID", details: { path } });
+  };
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail("JSON Schema definition must be an object");
   const schema = value as Record<string, unknown>;
   if (schema.$schema !== undefined && (typeof schema.$schema !== "string"
     || !/^https?:\/\/json-schema\.org\/draft-07\/schema#?$/.test(schema.$schema))) {
-    throw new TypeError("Only JSON Schema Draft-07 is supported");
+    fail("Only JSON Schema Draft-07 is supported", "#/$schema");
   }
   if (!ajv.validate("http://json-schema.org/draft-07/schema", value)) {
-    throw new TypeError(`Invalid JSON Schema definition: ${ajv.errorsText(ajv.errors)}`);
+    fail(`Invalid JSON Schema definition: ${ajv.errorsText(ajv.errors)}`, `#${ajv.errors?.[0]?.instancePath ?? ""}`);
   }
 }
 

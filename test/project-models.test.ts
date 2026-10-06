@@ -5,7 +5,6 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { createProjectModelHost, DEFAULT_MODELS_DIRECTORY } from "../src/project/models.js";
 import { bytesContent } from "../src/data/extensions/shared/payload.js";
-import { JsonSchemaModelRuntimeFactory } from "../src/data/extensions/json-schema/index.js";
 
 async function fixture(fn: (root: string, directory: string) => Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), "memsphere-models-"));
@@ -75,23 +74,25 @@ test("Relative and absolute model directories use the Project root rather than c
   assert.equal((await fresh.list()).filter(model => !model.builtin).length, 0);
 }));
 
-test("Readable advanced schemas do not claim business reflection support or silently lose keywords", async () => fixture(async (root, directory) => {
+test("Advanced schemas are unavailable for normal reads while definition diagnostics preserve the source", async () => fixture(async (root, directory) => {
   const source = '{"anyOf":[{"type":"string"},{"type":"number"}]}';
   await writeFile(join(directory, "advanced.json"), source);
   const host = await createProjectModelHost({}, { root });
-  assert.equal((await host.definition("advanced.json")).source, source);
-  await assert.rejects(host.runtime("advanced.json"), /not supported/);
+  assert.equal((await host.inspect("advanced.json")).source, source);
+  for (const operation of [() => host.definition("advanced.json"), () => host.runtime("advanced.json"), () => host.manager.getModel({}, "advanced.json")])
+    await assert.rejects(operation(), { code: "MODEL_RUNTIME_UNSUPPORTED" });
+  assert.equal((await host.list())[0]!.status, "unavailable");
+  assert.equal(await readFile(join(directory, "advanced.json"), "utf8"), source);
 }));
 
-test("Project model dependencies reuse exact existing ModelRefs without downloading remote schemas", async () => fixture(async (root, directory) => {
+test("Project models reject cross-model references even when the referenced model exists", async () => fixture(async (root, directory) => {
   await writeFile(join(directory, "value.json"), '{"type":"string"}');
   await writeFile(join(directory, "entry.json"), '{"type":"object","properties":{"value":{"$ref":"value.json"}}}');
   const host = await createProjectModelHost({}, { root });
-  const runtime = await host.runtime("entry.json");
-  assert.equal(runtime.reflect({ value: "ok" }).kind, "object");
-  assert.throws(() => runtime.reflect({ value: 4 }));
+  await assert.rejects(host.runtime("entry.json"), { code: "MODEL_REFERENCE_UNSUPPORTED" });
+  await assert.rejects(host.definition("entry.json"), { code: "MODEL_REFERENCE_UNSUPPORTED" });
   await writeFile(join(directory, "missing.json"), '{"$ref":"https://example.test/unknown"}');
-  await assert.rejects((await createProjectModelHost({}, { root })).runtime("missing.json"), /No model binding/);
+  await assert.rejects((await createProjectModelHost({}, { root })).runtime("missing.json"), { code: "MODEL_REFERENCE_UNSUPPORTED" });
 }));
 
 test("Project model ID lookup rejects traversal and reports unknown IDs", async () => fixture(async (root) => {
@@ -114,11 +115,9 @@ test("Project model runtime preserves the existing compiler's relative-ID suppor
   const definition = { $id: "relative-id", type: "string" };
   await writeFile(join(directory, "relative-id.json"), JSON.stringify(definition));
   const host = await createProjectModelHost({}, { root });
-  assert.deepEqual((await host.definition("relative-id.json")).definition, definition);
-  const model = await host.manager.getModel({}, "relative-id.json");
-  const factory = new JsonSchemaModelRuntimeFactory();
+  assert.deepEqual((await host.inspect("relative-id.json")).definition, definition);
   const error = /Unsupported JSON Schema at #\/\$id: relative \$id values are not supported/;
-  await assert.rejects(factory.createRuntime({}, model, { get() { return undefined; }, register() {} }), error);
+  await assert.rejects(host.definition("relative-id.json"), error);
   await assert.rejects(host.runtime("relative-id.json"), error);
 }));
 
@@ -128,8 +127,8 @@ test("Project model runtime does not invent URI aliases for file-backed ModelRef
   await writeFile(join(directory, "value.json"), JSON.stringify({ $id: "https://example.test/value.json", type: "string" }));
   const host = await createProjectModelHost({}, { root });
   const models = await host.list();
-  assert.equal(models.find(model => model.id === "entry.json")?.status, "available");
+  assert.equal(models.find(model => model.id === "entry.json")?.status, "unavailable");
   assert.equal(models.find(model => model.id === "value.json")?.status, "available");
   assert.equal((await host.runtime("value.json")).reflect("ok").value, "ok");
-  await assert.rejects(host.runtime("entry.json"), /No model binding: https:\/\/example\.test\/value\.json/);
+  await assert.rejects(host.runtime("entry.json"), { code: "MODEL_REFERENCE_UNSUPPORTED" });
 }));

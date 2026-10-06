@@ -47,6 +47,13 @@ const fakeReviewer = join(testDirectory, "fixtures", "fake-acp-reviewer.mjs");
 const fakeCli = join(testDirectory, "fixtures", "fake-review-cli.mjs");
 const fakeArgsCli = join(testDirectory, "fixtures", "fake-args-cli.mjs");
 
+/** Keep fake launchers independent of the ACP Session running this test suite. */
+function launcherEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const name of Object.keys(env)) if (name.toUpperCase().startsWith("MEMSPHERE_")) delete env[name];
+  return { ...env, ...overrides };
+}
+
 test("ACP Agent Reviewer completes its bound Assignment through the Session CLI", async () => {
   await withAgentReviewFixture("approve", async ({ configPath, runsRoot, runId }) => {
     const before = await readRun(runsRoot, runId);
@@ -502,32 +509,32 @@ test("Agent Review CLI launcher rejects commands outside the Session allowlist",
   try {
     const denied = crossSpawn.sync(runtime.launcherPath, ["run", "report", "--run", "other"], {
       encoding: "utf8",
-      env: process.env
+      env: launcherEnv()
     });
     assert.equal(denied.status, 2);
     assert.match(denied.stderr, /not allowed/);
 
     const wrongRun = crossSpawn.sync(runtime.launcherPath, ["run", "show", "--run", "other"], {
       encoding: "utf8",
-      env: { ...process.env, MEMSPHERE_REVIEW_RUN_ID: "bound-run" }
+      env: launcherEnv({ MEMSPHERE_REVIEW_RUN_ID: "bound-run" })
     });
     assert.equal(wrongRun.status, 2);
 
     const wrongStepRun = crossSpawn.sync(runtime.launcherPath, ["run", "step", "show", "--run", "other", "--step", "flow[1]"], {
       encoding: "utf8",
-      env: { ...process.env, MEMSPHERE_REVIEW_RUN_ID: "bound-run" }
+      env: launcherEnv({ MEMSPHERE_REVIEW_RUN_ID: "bound-run" })
     });
     assert.equal(wrongStepRun.status, 2);
 
     const wrongMemoryRun = crossSpawn.sync(runtime.launcherPath, ["memory", "list", "--run", "other"], {
       encoding: "utf8",
-      env: { ...process.env, MEMSPHERE_REVIEW_MEMORY_RUN_ID: "bound-run" }
+      env: launcherEnv({ MEMSPHERE_REVIEW_MEMORY_RUN_ID: "bound-run" })
     });
     assert.equal(wrongMemoryRun.status, 2);
 
     const wrongEqualsMemoryRun = crossSpawn.sync(runtime.launcherPath, ["memory", "read", "example", "--run=other"], {
       encoding: "utf8",
-      env: { ...process.env, MEMSPHERE_REVIEW_MEMORY_RUN_ID: "bound-run" }
+      env: launcherEnv({ MEMSPHERE_REVIEW_MEMORY_RUN_ID: "bound-run" })
     });
     assert.equal(wrongEqualsMemoryRun.status, 2);
 
@@ -535,7 +542,7 @@ test("Agent Review CLI launcher rejects commands outside the Session allowlist",
       "memory", "list", "--run", "bound-run", "--run=other"
     ], {
       encoding: "utf8",
-      env: { ...process.env, MEMSPHERE_REVIEW_MEMORY_RUN_ID: "bound-run" }
+      env: launcherEnv({ MEMSPHERE_REVIEW_MEMORY_RUN_ID: "bound-run" })
     });
     assert.equal(duplicateMemoryRun.status, 2);
 
@@ -543,7 +550,7 @@ test("Agent Review CLI launcher rejects commands outside the Session allowlist",
       "run", "review", "assignment", "show", "--assignment", "other"
     ], {
       encoding: "utf8",
-      env: { ...process.env, MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment" }
+      env: launcherEnv({ MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment" })
     });
     assert.equal(wrongAssignment.status, 2);
 
@@ -551,7 +558,7 @@ test("Agent Review CLI launcher rejects commands outside the Session allowlist",
       "run", "review", "assignment", "show", "--assignment=other"
     ], {
       encoding: "utf8",
-      env: { ...process.env, MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment" }
+      env: launcherEnv({ MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment" })
     });
     assert.equal(wrongEqualsAssignment.status, 2);
 
@@ -559,13 +566,11 @@ test("Agent Review CLI launcher rejects commands outside the Session allowlist",
       "run", "artifact", "contract", "show", "--assignment", "other"
     ], {
       encoding: "utf8",
-      env: { ...process.env, MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment" }
+      env: launcherEnv({ MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment" })
     });
     assert.equal(wrongContractAssignment.status, 2);
 
-    const unboundEnv = { ...process.env };
-    delete unboundEnv.MEMSPHERE_REVIEW_RUN_ID;
-    delete unboundEnv.MEMSPHERE_REVIEW_ASSIGNMENT_ID;
+    const unboundEnv = launcherEnv();
     const missingBinding = crossSpawn.sync(runtime.launcherPath, [
       "run", "artifact", "show", "--output", "json"
     ], { encoding: "utf8", env: unboundEnv });
@@ -589,12 +594,11 @@ test("Agent Review CLI launcher rejects commands outside the Session allowlist",
 
 test("Agent Review CLI launcher injects Session bindings without shell environment syntax", async () => {
   const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: fakeArgsCli });
-  const env = {
-    ...process.env,
+  const env = launcherEnv({
     MEMSPHERE_REVIEW_RUN_ID: "bound-run",
     MEMSPHERE_REVIEW_MEMORY_RUN_ID: "bound-run",
     MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment"
-  };
+  });
   try {
     const current = crossSpawn.sync(runtime.launcherPath, ["run", "artifact", "show", "--output", "json"], {
       encoding: "utf8",
@@ -643,18 +647,142 @@ test("Agent Review CLI launcher injects Session bindings without shell environme
   }
 });
 
+test("Agent Review CLI reads the Session manifest and binds Project and ordinary or frozen Memory scope", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-session-manifest-"));
+  const configPath = join(root, "config.json");
+  await writeFile(configPath, "{}");
+  await writeFile(join(root, "project.json"), JSON.stringify({ format_version: 1, name: "session-project" }));
+  const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: fakeArgsCli });
+  const invoke = (args: string[], env: NodeJS.ProcessEnv) => {
+    const result = crossSpawn.sync(runtime.launcherPath, args, { encoding: "utf8", env });
+    assert.ifError(result.error);
+    return result;
+  };
+  try {
+    for (const frozen of [false, true]) {
+      const env = launcherEnv({ MEMSPHERE_CONFIG_PATH: configPath, MEMSPHERE_REVIEW_RUN_ID: "session-run",
+        ...(frozen ? { MEMSPHERE_REVIEW_MEMORY_RUN_ID: "frozen-run" } : {}) });
+      for (const command of ["list", "read"]) {
+        const args = ["memory", command, ...(command === "read" ? ["example"] : []), "--output=json"];
+        const injected = invoke(args, env);
+        assert.equal(injected.status, 0, injected.stderr);
+        assert.equal(injected.stderr, "");
+        assert.deepEqual(JSON.parse(injected.stdout), [...args, ...(frozen ? ["--run", "frozen-run"] : []), "--project", "session-project"]);
+        for (const explicit of [["--project", "session-project"], ["--project=session-project"]]) {
+          const matched = invoke([...args, ...explicit], env);
+          assert.equal(matched.status, 0, matched.stderr);
+          assert.deepEqual(JSON.parse(matched.stdout), [...args, ...explicit, ...(frozen ? ["--run", "frozen-run"] : [])]);
+        }
+        for (const deniedArgs of [
+          ["--project", "other"], ["--project=other"], ["--project", "session-project", "--project=other"],
+          ["--run", "other"], ["--run=frozen-run", "--run=other"], ...(frozen ? [] : [["--run", "session-run"]])
+        ]) {
+          const denied = invoke([...args, ...deniedArgs], env);
+          assert.equal(denied.status, command === "list" ? 1 : 2, denied.stderr);
+          assert.equal(denied.stdout, "");
+          if (command === "list") assert.equal(JSON.parse(denied.stderr).error.code, "REVIEW_SESSION_DENIED");
+          else assert.match(denied.stderr, /not allowed/);
+        }
+        if (frozen) for (const explicitRun of [["--run", "frozen-run"], ["--run=frozen-run"]]) {
+          const matched = invoke([...args, ...explicitRun], env);
+          assert.equal(matched.status, 0, matched.stderr);
+          assert.deepEqual(JSON.parse(matched.stdout), [...args, ...explicitRun, "--project", "session-project"]);
+        }
+      }
+      const literalArgs = ["memory", "list", "--output=json", "--", "--project", "literal-name"];
+      const literal = invoke(literalArgs, env);
+      assert.equal(literal.status, 0, literal.stderr);
+      assert.deepEqual(JSON.parse(literal.stdout), ["memory", "list", "--output=json", ...(frozen ? ["--run", "frozen-run"] : []),
+        "--project", "session-project", "--", "--project", "literal-name"]);
+    }
+  } finally { await runtime.cleanup(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Agent Review CLI refuses missing, malformed and unidentified Session manifests", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-invalid-session-manifest-"));
+  const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: fakeArgsCli });
+  try {
+    const manifest = join(root, "project.json");
+    for (const source of [undefined, "invalid JSON", "{}", '{"name":""}', '{"name":42}']) {
+      if (source === undefined) await rm(manifest, { force: true });
+      else await writeFile(manifest, source);
+      for (const frozen of [false, true]) for (const command of ["list", "read"]) {
+        const result = crossSpawn.sync(runtime.launcherPath, ["memory", command, ...(command === "read" ? ["example"] : []), "--output=json"], {
+          encoding: "utf8", env: launcherEnv({ MEMSPHERE_CONFIG_PATH: join(root, "config.json"),
+            ...(frozen ? { MEMSPHERE_REVIEW_MEMORY_RUN_ID: "frozen-run" } : {}) })
+        });
+        assert.ifError(result.error);
+        assert.equal(result.status, command === "list" ? 1 : 2, result.stderr);
+        assert.equal(result.stdout, "");
+        if (command === "list") assert.equal(JSON.parse(result.stderr).error.code, "REVIEW_SESSION_INVALID");
+        else assert.match(result.stderr, /Session Project identity is unavailable/);
+      }
+    }
+  } finally { await runtime.cleanup(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Agent Review CLI reads live and frozen Memory from its actual Session Project", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-session-memory-"));
+  const projectRoot = join(root, "projects", "session-project");
+  const configPath = join(projectRoot, "config.json");
+  const memoryRoot = join(projectRoot, "memory");
+  const runId = "run-frozen-session";
+  const runRoot = join(projectRoot, "runs", runId);
+  for (const directory of ["concepts", "statements", "schemas", "procedures"].map(kind => join(memoryRoot, kind))) await mkdir(directory, { recursive: true });
+  await mkdir(join(runRoot, "memory", "concepts"), { recursive: true });
+  await runGit(["init", "-b", "master"], { cwd: projectRoot });
+  await writeFile(join(projectRoot, "project.json"), JSON.stringify({ format_version: 1, name: "session-project", created_at: "2026-01-01T00:00:00.000Z" }));
+  await writeFile(configPath, JSON.stringify({ store: { type: "embedded", repository_path: projectRoot, memory_path: "memory" } }));
+  await writeFile(join(root, "registry.json"), JSON.stringify({ format_version: 1, projects: { "session-project": { root: projectRoot } }, workspaces: {} }));
+  await writeFile(join(memoryRoot, "concepts", "live.yaml"), withCurrentMemorySyntax("!concept\nnames: [live]\ndefines: [Live Session Memory.]\n"));
+  await writeFile(join(runRoot, "memory", "concepts", "frozen.yaml"), withCurrentMemorySyntax("!concept\nnames: [frozen]\ndefines: [Frozen Session Memory.]\n"));
+  await writeFile(join(runRoot, `${runId}.json`), JSON.stringify({
+    contractVersion: 3, id: runId, name: "Frozen Session", status: "running", procedureName: "probe", memoryRoot,
+    memorySource: { kind: "changeset", project: "session-project", changeId: "change-session", checkpointDigest: "fixture", baseRevision: "fixture" },
+    memorySnapshot: { path: "memory", files: [`${runId}/memory/concepts/frozen.yaml`] }, createdAt: "2026-01-01", updatedAt: "2026-01-01", stack: [], events: [], procedureSnapshots: {}
+  }));
+  const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: join(testDirectory, "../dist/cli.js") });
+  const invoke = (args: string[], env: NodeJS.ProcessEnv) => {
+    const result = crossSpawn.sync(runtime.launcherPath, args, { cwd: projectRoot, encoding: "utf8", env });
+    assert.ifError(result.error);
+    return result;
+  };
+  try {
+    for (const frozen of [false, true]) {
+      const env = launcherEnv({ MEMSPHERE_HOME: root, MEMSPHERE_CONFIG_PATH: configPath, MEMSPHERE_REVIEW_RUN_ID: "session-run",
+        ...(frozen ? { MEMSPHERE_REVIEW_MEMORY_RUN_ID: runId } : {}) });
+      const listed = invoke(["memory", "list", "--output=json"], env);
+      assert.equal(listed.status, 0, listed.stderr);
+      assert.deepEqual(JSON.parse(listed.stdout).items.map((item: { reference: string; project_name: string }) => [item.reference, item.project_name]),
+        [[frozen ? "concepts/frozen" : "concepts/live", "session-project"]]);
+      const read = invoke(["memory", "read", frozen ? "frozen" : "live", "--project=session-project", "--output=json"], env);
+      assert.equal(read.status, 0, read.stderr);
+      assert.match(read.stdout, frozen ? /Frozen Session Memory/ : /Live Session Memory/);
+      for (const extra of [["--project", "other"], ["--run", "other"]]) {
+        const denied = invoke(["memory", "list", ...extra, "--output=json"], env);
+        assert.equal(denied.status, 1);
+        assert.equal(denied.stdout, "");
+        assert.equal(JSON.parse(denied.stderr).error.code, "REVIEW_SESSION_DENIED");
+      }
+      const absent = invoke(["memory", "read", frozen ? "live" : "frozen", "--output=json"], env);
+      assert.equal(absent.status, 1);
+      assert.equal(absent.stdout, "");
+      assert.match(absent.stderr, /not found/i);
+    }
+  } finally { await runtime.cleanup(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("Windows PowerShell, CMD, and Git Bash execute Agent Review read, comment, and vote commands", {
   skip: process.platform !== "win32"
 }, async () => {
   const prerequisites = await assertWindowsPrerequisites();
   assert(prerequisites);
   const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: fakeArgsCli });
-  const env = {
-    ...process.env,
+  const env = launcherEnv({
     PATH: `${runtime.directory};${process.env.PATH ?? ""}`,
     MEMSPHERE_REVIEW_RUN_ID: "bound-run",
     MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment"
-  };
+  });
   try {
     const reviewCommands = [
       "memsphere-review run artifact show --output json",
@@ -792,7 +920,7 @@ test("ACP Client reports a missing Provider executable as a process startup fail
       command: join(tmpdir(), `missing-acp-${Date.now()}`),
       args: [],
       cwd: tmpdir(),
-      env: process.env,
+      env: launcherEnv(),
       startupTimeoutMs: 2_000,
       idleTimeoutMs: 2_000,
       maxRuntimeMs: 2_000,
@@ -813,7 +941,7 @@ test("ACP Client preserves Provider stderr when a Session request fails", async 
       command: process.execPath,
       args: [fakeReviewer, "internal-error"],
       cwd: tmpdir(),
-      env: process.env,
+      env: launcherEnv(),
       startupTimeoutMs: 2_000,
       idleTimeoutMs: 2_000,
       maxRuntimeMs: 2_000,
@@ -1058,7 +1186,7 @@ const fakeAgentReviewProvider: AgentReviewProvider = {
       command: actor.agent.command,
       args: [...actor.agent.args],
       cwd: workspaceRoot,
-      env: { ...process.env, ...sessionEnv },
+      env: launcherEnv({ MEMSPHERE_HOME: process.env.MEMSPHERE_HOME, ...sessionEnv }),
       startupTimeoutMs: actor.agent.startupTimeoutMs,
       idleTimeoutMs: actor.agent.idleTimeoutMs,
       maxRuntimeMs: actor.agent.maxRuntimeMs,
@@ -1082,7 +1210,7 @@ function fakeClientLaunch(
     command: process.execPath,
     args: [fakeReviewer, mode],
     cwd: tmpdir(),
-    env: process.env,
+    env: launcherEnv(),
     promptVersion: "artifact-review-v1",
     ...timeouts
   };

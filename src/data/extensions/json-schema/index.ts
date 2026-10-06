@@ -18,7 +18,7 @@ import type {
 import { createPlainRuntime } from "../shared/reflection.js";
 
 /** This extension implements the reflectable, explicitly typed subset of Draft-07. */
-export const JSON_SCHEMA_DRAFT_07 = "json-schema/draft-07";
+export const JSON_SCHEMA_DRAFT_07 = "json-schema/draft-07.json";
 
 const draft07 = "http://json-schema.org/draft-07/schema#";
 const metadata = new Set(["$comment", "title", "description", "default", "examples", "readOnly", "writeOnly"]);
@@ -30,7 +30,9 @@ const keywords = new Set([
 ]);
 
 function fail(path: string, message: string): never {
-  throw new TypeError(`Unsupported JSON Schema at ${path}: ${message}`);
+  throw Object.assign(new TypeError(`Unsupported JSON Schema at ${path}: ${message}`), {
+    code: "MODEL_RUNTIME_UNSUPPORTED", details: { path }
+  });
 }
 
 function object(value: Json | undefined): value is Schema {
@@ -108,17 +110,16 @@ function snapshot(value: unknown, path = "#", ancestors = new Set<object>()): Js
   }
 }
 
-type Reference = { schema: Schema; path: string } | { runtime: ModelRuntime };
+type Reference = { schema: Schema; path: string };
 
 class Compiler {
   readonly types = new Map<Schema, TypeDescriptor>();
-  readonly externalValidators = new Map<TypeDescriptor, ModelRuntime>();
   readonly references = new Map<Schema, Reference>();
   private readonly checked = new Set<Schema>();
   private readonly paths = new Map<Schema, string>();
   private readonly base?: URL;
 
-  constructor(readonly context: Context, readonly root: Schema, readonly registry: ModelRuntimeRegistry) {
+  constructor(readonly context: Context, readonly root: Schema) {
     if (root.$id !== undefined) {
       if (typeof root.$id !== "string") fail("#/$id", "$id must be an absolute URI string");
       try {
@@ -155,7 +156,7 @@ class Compiler {
       }
       const reference = this.resolve(schema.$ref, path);
       this.references.set(schema, reference);
-      if ("schema" in reference) this.check(reference.schema, reference.path);
+      this.check(reference.schema, reference.path);
     } else {
       this.scalarType(schema, path);
     }
@@ -203,31 +204,12 @@ class Compiler {
   }
 
   private resolve(ref: string, path: string): Reference {
-    let fragment: string | undefined;
-    let external: string | undefined;
-    if (ref === "" || ref.startsWith("#")) {
-      fragment = ref === "" ? "" : ref.slice(1);
-    } else if (this.base) {
-      let resolved: URL;
-      try { resolved = new URL(ref, this.base); }
-      catch { fail(pointer(path, "$ref"), `cannot resolve ${JSON.stringify(ref)} against $id`); }
-      const hash = resolved.hash;
-      resolved.hash = "";
-      if (resolved.href === this.base.href) fragment = hash.slice(1);
-      else {
-        if (hash && hash !== "#") fail(pointer(path, "$ref"), "external reference fragments are not supported");
-        external = resolved.href;
-      }
-    } else {
-      const hash = ref.indexOf("#");
-      if (hash >= 0 && ref.slice(hash + 1)) fail(pointer(path, "$ref"), "external reference fragments are not supported");
-      external = hash < 0 ? ref : ref.slice(0, hash);
+    if (ref !== "" && ref !== "#" && !ref.startsWith("#/")) {
+      throw Object.assign(new TypeError(`Cross-model schema references are not supported at ${pointer(path, "$ref")}: ${ref}; use a local JSON Pointer`), {
+        code: "MODEL_REFERENCE_UNSUPPORTED", details: { path: pointer(path, "$ref"), ref }
+      });
     }
-    if (external !== undefined) {
-      const runtime = this.registry.get(external);
-      if (!runtime) throw new Error(`JSON Schema dependency ${JSON.stringify(external)} is not registered (at ${pointer(path, "$ref")})`);
-      return { runtime };
-    }
+    const fragment = ref.slice(1);
     let decoded: string;
     try { decoded = decodeURIComponent(fragment!); }
     catch { fail(pointer(path, "$ref"), "invalid URI-encoded JSON Pointer"); }
@@ -259,14 +241,6 @@ class Compiler {
         if (aliases.has(target)) fail(path, "reference cycle has no concrete type");
         aliases.add(target);
         const reference = this.references.get(target)!;
-        if ("runtime" in reference) {
-          const type = reference.runtime.descriptor.root;
-          const existing = this.externalValidators.get(type);
-          if (existing && existing !== reference.runtime) fail(path, "distinct external runtimes sharing one root descriptor are not supported");
-          this.externalValidators.set(type, reference.runtime);
-          for (const alias of aliases) this.types.set(alias, type);
-          return type;
-        }
         target = reference.schema;
       }
       const type = this.type(target);
@@ -340,13 +314,11 @@ class Compiler {
     return Object.freeze(enumeration);
   }
 
-  /** External constraints are enforced through their own Runtime, not translated. */
+  /** Preserve constraints while adapting supported Draft-07 annotations for Ajv. */
   validationSchema(schema: Schema): AnySchema {
     const rewrite = (node: Json): Json => {
       if (Array.isArray(node)) return node.map(rewrite);
       if (!object(node)) return node;
-      const reference = this.references.get(node);
-      if (reference && "runtime" in reference) return true;
       const result: Schema = {};
       for (const [name, child] of Object.entries(node)) {
         Object.defineProperty(result, name, { value: rewrite(child), enumerable: true, writable: true, configurable: true });
@@ -368,14 +340,14 @@ class Compiler {
 export class JsonSchemaModelRuntimeFactory implements ModelRuntimeFactory {
   readonly target = Object.freeze({ metaModel: JSON_SCHEMA_DRAFT_07 });
 
-  async createRuntime(context: Context, model: Model, registry: ModelRuntimeRegistry): Promise<ModelRuntime> {
+  async createRuntime(context: Context, model: Model, _registry: ModelRuntimeRegistry): Promise<ModelRuntime> {
     context.signal?.throwIfAborted();
     if (model.data.model !== JSON_SCHEMA_DRAFT_07) {
       throw new TypeError(`JSON Schema factory requires model.data.model to be ${JSON_SCHEMA_DRAFT_07}`);
     }
     const schema = snapshot(model.definition);
     if (!object(schema)) fail("#", "the root must be a typed schema object; boolean schemas are not supported");
-    const compiler = new Compiler(context, schema, registry);
+    const compiler = new Compiler(context, schema);
     compiler.check(schema, "#");
     const descriptor: Descriptor = Object.freeze({ id: model.data.id, root: compiler.type(schema) });
     const ajv = new Ajv({
@@ -388,13 +360,6 @@ export class JsonSchemaModelRuntimeFactory implements ModelRuntimeFactory {
       validate(value) {
         assertSafeValidationValue(value);
         if (!validate(value)) throw new TypeError(`JSON Schema validation failed: ${ajv.errorsText(validate.errors, { separator: "; " })}`);
-      },
-      validateType(type, value) {
-        const dependency = compiler.externalValidators.get(type);
-        if (dependency) {
-          assertSafeValidationValue(value);
-          dependency.reflect(value);
-        }
       }
     });
   }

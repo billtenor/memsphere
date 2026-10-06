@@ -3,14 +3,16 @@ import { constants, type Stats } from "node:fs";
 import fs, { type FileHandle } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { withNativeFileLock } from "../../../file-lock.js";
 import type { Config } from "../../api/config.js";
 import type { Context } from "../../api/context.js";
 import type { PayloadContent } from "../../api/payload.js";
 import type { ListOptions, ListResult } from "../../api/store.js";
 import { consumeContent, throwIfAborted } from "./payload.js";
 
-/** Reserved for short-lived implementation files, never for data records. */
+/** Reserved for implementation files and persistent metadata, never data records. */
 export const INTERNAL_PREFIX = ".memsphere-";
+export const FILESYSTEM_JSON_METADATA_DIRECTORY = ".memsphere-json-store";
 
 export function requireString(value: unknown, name: string): asserts value is string {
   if (typeof value !== "string" || value.length === 0) {
@@ -60,13 +62,30 @@ export function validateRelativeFilePath(path: string): void {
 
 export async function prepareDirectory(context: Context, config: Config): Promise<string> {
   throwIfAborted(context);
-  const directory = config.json.directory;
-  requireString(directory, "directory");
-  const path = resolve(directory);
+  const path = configuredDirectory(config);
   await fs.mkdir(path, { recursive: true });
+  return openDirectoryPath(context, path);
+}
+
+/** Pure open: even a root removed during validation is never recreated. */
+export async function openExistingDirectory(context: Context, config: Config): Promise<string> {
+  throwIfAborted(context);
+  const path = configuredDirectory(config);
+  return openDirectoryPath(context, path);
+}
+
+async function openDirectoryPath(context: Context, path: string): Promise<string> {
   const canonical = await fs.realpath(path);
+  if (!(await fs.stat(canonical)).isDirectory()) throw new TypeError(`Store root must be a directory: ${path}`);
   throwIfAborted(context);
   return canonical;
+}
+
+function configuredDirectory(config: Config): string {
+  const directory = config.json.directory;
+  requireString(directory, "directory");
+  if (directory.trim().length === 0) throw new TypeError("directory must not be all whitespace");
+  return resolve(directory);
 }
 
 type Entry = { name: string; actual: string; regular: boolean };
@@ -339,12 +358,10 @@ export async function deleteFile(context: Context, directory: string, name: stri
   }
 }
 
-const recordQueues = new Map<string, Promise<void>>();
-
 /**
- * Serialize one file's mutations in this JS realm, including across Store instances.
- * This is not a filesystem lock: other processes/worker isolates do not participate.
- * Abandoned waiters stay in the queue until their predecessor finishes.
+ * The filesystem JSON ValueStore's per-record lock. Case aliases lock together,
+ * including across processes and Store instances. Only mutators call this;
+ * reads do not create the metadata directory or a coordination file.
  */
 export async function withRecordLock<T>(
   context: Context,
@@ -356,27 +373,20 @@ export async function withRecordLock<T>(
   throwIfAborted(context);
   const canonical = await fs.realpath(directory);
   throwIfAborted(context);
-  const key = portableNameKey(join(canonical, filename));
-  const previous = recordQueues.get(key) ?? Promise.resolve();
-  let release!: () => void;
-  const current = new Promise<void>((resolveCurrent) => { release = resolveCurrent; });
-  const tail = previous.then(() => current);
-  recordQueues.set(key, tail);
-  void tail.then(() => { if (recordQueues.get(key) === tail) recordQueues.delete(key); });
-  let onAbort: (() => void) | undefined;
+  const metadata = join(canonical, FILESYSTEM_JSON_METADATA_DIRECTORY);
   try {
-    await new Promise<void>((resolveTurn, reject) => {
-      onAbort = () => reject(context.signal?.reason ?? new DOMException("Aborted", "AbortError"));
-      context.signal?.addEventListener("abort", onAbort, { once: true });
-      if (context.signal?.aborted) onAbort();
-      void previous.then(resolveTurn);
-    });
-    throwIfAborted(context);
-    return await action();
-  } finally {
-    if (onAbort) context.signal?.removeEventListener("abort", onAbort);
-    release();
+    await fs.mkdir(metadata, { mode: 0o700 });
+  } catch (error) {
+    if (!isCode(error, "EEXIST")) throw error;
   }
+  if (!(await fs.lstat(metadata)).isDirectory()) throw new TypeError(`Store metadata must be a directory, not a symlink or file: ${metadata}`);
+  return withNativeFileLock(join(metadata, `${recordStateKey(filename)}.lock`), action, { signal: context.signal });
+}
+
+/** Short internal names preserve support for maximum-length public record IDs. */
+export function recordStateKey(filename: string): string {
+  validateFilename(filename);
+  return createHash("sha256").update(portableNameKey(filename)).digest("hex");
 }
 
 /** Stable lexical pagination without reading record bodies. Scope binds a cursor to its Store. */

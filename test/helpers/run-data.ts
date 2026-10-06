@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { runDataModels, runDataStoreIds, type RunDataKind } from "../../src/project/run-data.js";
 import type { DataManager } from "../../src/data/api/data-manager.js";
 import type { AppendableDataStore, StoredData } from "../../src/data/api/data-store.js";
 import type { Data } from "../../src/data/api/data.js";
@@ -15,7 +16,10 @@ export function opaqueRunData() {
     async getRuntime() { throw new Error("Runtime load is not needed for content storage"); },
     async getStore(_context, id) {
       if (stores.has(id)) return stores.get(id)!;
-      const model = id.slice(0, id.lastIndexOf("/"));
+      const prefix = id.slice(0, id.lastIndexOf("/"));
+      const kind = (Object.keys(runDataStoreIds) as RunDataKind[]).find(kind => runDataStoreIds[kind] === prefix);
+      assert(kind, `Unknown Run Store fixture: ${id}`);
+      const model = runDataModels[kind];
       const save = async (data: Data, append: boolean) => {
         assert.equal(data.model, model);
         const bytes = await readAll({}, data.payload.content);

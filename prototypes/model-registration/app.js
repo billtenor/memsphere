@@ -21,7 +21,6 @@ if (!['custom', 'market', ...packageGroups.map(record => record.id)].includes(sc
 let tag = query.get('tag') || '';
 let search = '';
 let selected = query.get('model') || 'examples/02-nested-order.json';
-if (selected === 'memsphere/model-registration.json') selected = 'memsphere/model-registration';
 let tab = 'information';
 let expanded = new Set();
 const $ = id => document.getElementById(id);
@@ -62,18 +61,19 @@ function render() {
  const items = visible();
  if (!items.some(model => model.registration.modelRef === selected)) { selected = items[0]?.registration.modelRef; tab = 'information'; expanded = new Set(); }
  $('list-footer').textContent = `显示 ${items.length} / ${scoped().length} 个模型${groupById.get(scope)?.prototypeOnly ? ' · 市场导入演示' : ''}`;
- $('model-list').innerHTML = items.length ? items.map(({ registration:r })=>`<button class="model-item ${selected === r.modelRef ? 'selected' : ''}" data-model="${escape(r.modelRef)}" ${selected === r.modelRef ? 'aria-current="true"' : ''}><h3>${escape(r.name)}</h3><div class="model-id">${escape(r.modelRef)}</div><p class="model-summary">${escape(r.description)}</p>${r.tags?.length ? `<div class="badges">${r.tags.slice(0,2).map(tag=>`<span class="badge">${escape(tag)}</span>`).join('')}${r.tags.length > 2 ? `<span class="badge neutral" title="${escape(r.tags.slice(2).join(', '))}" aria-label="另有 ${r.tags.length - 2} 个标签">+${r.tags.length - 2}</span>` : ''}</div>` : ''}</button>`).join('') : '<div class="empty">没有匹配的模型<br>试试其他标签或搜索词</div>';
+ $('model-list').innerHTML = items.length ? items.map(({ registration:r, status })=>`<button class="model-item ${selected === r.modelRef ? 'selected' : ''}" data-model="${escape(r.modelRef)}" ${selected === r.modelRef ? 'aria-current="true"' : ''}><h3>${escape(r.name)}${status === 'unavailable' ? ' · 不可用' : ''}</h3><div class="model-id">${escape(r.modelRef)}</div><p class="model-summary">${escape(r.description)}</p>${r.tags?.length ? `<div class="badges">${r.tags.slice(0,2).map(tag=>`<span class="badge">${escape(tag)}</span>`).join('')}${r.tags.length > 2 ? `<span class="badge neutral" title="${escape(r.tags.slice(2).join(', '))}" aria-label="另有 ${r.tags.length - 2} 个标签">+${r.tags.length - 2}</span>` : ''}</div>` : ''}</button>`).join('') : '<div class="empty">没有匹配的模型<br>试试其他标签或搜索词</div>';
  renderDetail(); syncURL();
 }
 function renderDetail() {
  const model = models.find(model => model.registration.modelRef === selected);
  if (!model) { $('content').innerHTML = '<div class="empty">当前筛选下没有模型</div>'; return; }
  const r = model.registration;
+ if (model.status === 'unavailable') { $('content').innerHTML = `<article class="detail-inner"><h2 class="detail-heading">${escape(r.name)}</h2><p role="alert">${escape(model.error)}</p></article>`; return; }
  $('content').innerHTML = `<article class="detail-inner"><div class="breadcrumb">${escape(model.origin !== 'project' ? '已导入的包' : '本项目')}<span>/</span>${escape(scopeName())}</div><h2 class="detail-heading">${escape(r.name)}</h2><p class="detail-description">${escape(r.description)}</p><div class="detail-badges"><span class="badge ${r.package ? 'blue' : 'neutral'}">${escape(r.package ? r.package_name || r.package : '本项目 · 未定义包')}</span>${model.prototypeOnly ? '<span class="badge neutral">导入演示</span>' : ''}${r.tags.map(tag=>`<span class="badge neutral">${escape(tag)}</span>`).join('')}</div><div class="tab-bar" role="tablist" aria-label="模型详情">${[['information','模型信息'],['structure','模型结构'],['source','原始定义']].map(([id,name])=>`<button class="tab ${tab===id?'selected':''}" role="tab" aria-selected="${tab===id}" data-tab="${id}">${name}</button>`).join('')}</div><div id="tab-content" role="tabpanel"></div></article>`;
  const panel = $('tab-content');
  if (tab === 'source') panel.innerHTML = `<pre class="code">${escape(model.source)}</pre>`;
  else if (tab === 'information') panel.innerHTML = modelInformation(model);
- else if (model.metaModel === 'raw') panel.innerHTML = '<div class="raw-card"><span style="font-size:28px">▱</span><h3>原始内容模型</h3><p>内容作为完整字节值管理，不声明成员字段。</p></div>';
+ else if (model.metaModel === 'raw.json') panel.innerHTML = '<div class="raw-card"><span style="font-size:28px">▱</span><h3>原始内容模型</h3><p>内容作为完整字节值管理，不声明成员字段。</p></div>';
  else panel.innerHTML = `<div class="section-tools"><span>字段与约束</span><div><button class="text-button" id="expand-all">全部展开</button> <button class="text-button" id="collapse-all">全部收起</button></div></div><div class="table-wrap"><table><thead><tr><th>字段 / 结构</th><th>类型</th><th>规则</th><th>说明</th></tr></thead><tbody>${schemaRows(model.schema)}</tbody></table></div>`;
 }
 function modelInformation(model) {

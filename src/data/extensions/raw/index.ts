@@ -7,7 +7,7 @@ import type { Descriptor, ScalarValue } from "../../api/reflection.js";
 import { createPlainRuntime } from "../shared/reflection.js";
 
 /** Model definition standard for content treated as a single byte value. */
-export const RAW_MODEL = "raw";
+export const RAW_MODEL = "raw.json";
 
 /** Raw models describe the content as a whole, without declaring member fields. */
 export interface RawModelDefinition {

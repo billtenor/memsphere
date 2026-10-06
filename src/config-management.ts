@@ -9,6 +9,7 @@ import {
   type ProjectControlPlaneConfigFile
 } from "./control-plane/index.js";
 import { atomicWriteJson, withFileLock } from "./persistence.js";
+import { readModelOperationStamp, withProjectSettingsLock } from "./project/model-operation.js";
 import { projectConfigSchema, type ProjectConfigFile } from "./project/model.js";
 import {
   normalizeInstalledViewPackagePaths,
@@ -204,6 +205,7 @@ export function validateProjectConfigDraft(
 ): ProjectConfigDraftValidation {
   const candidateInput = {
     store: structuredClone(document.raw.store),
+    ...(document.raw.dataStores === undefined ? {} : { dataStores: structuredClone(document.raw.dataStores) }),
     ...(draft.modelsDirectory === undefined ? {} : { modelsDirectory: draft.modelsDirectory }),
     ...(draft.modelRegistration === undefined ? {} : { modelRegistration: structuredClone(draft.modelRegistration) }),
     ...(draft.control_plane === undefined ? {} : { control_plane: structuredClone(draft.control_plane) }),
@@ -286,8 +288,8 @@ export async function writeProjectConfigDraft(input: {
   migrateModelRegistrations?: boolean;
 }): Promise<ProjectConfigDocument> {
   const globalLockPath = join(dirname(input.globalConfigPath), ".runtime", "settings.lock");
-  const projectLockPath = join(input.document.scopeRoot, ".runtime", "settings.lock");
-  return withFileLock(globalLockPath, () => withFileLock(projectLockPath, async () => {
+  return withFileLock(globalLockPath, () => withProjectSettingsLock(input.document.scopeRoot, async () => {
+    await readModelOperationStamp(input.document.scopeRoot);
     const [latest, global] = await Promise.all([
       readProjectConfigDocument(input.document.configPath, input.document.resolved),
       readGlobalConfigDocument(input.globalConfigPath)
@@ -297,6 +299,8 @@ export async function writeProjectConfigDraft(input: {
     if (!validation.valid || !validation.candidate) throw new ConfigDraftValidationError(validation.errors);
     const { validateModelStoragePaths } = await import("./project/model-storage-paths.js");
     await validateModelStoragePaths({ root: latest.scopeRoot, modelsDirectory: validation.candidate.modelsDirectory, modelRegistration: validation.candidate.modelRegistration });
+    const { validateBusinessBindings } = await import("./project/business-stores.js");
+    await validateBusinessBindings(latest.scopeRoot, validation.candidate);
     const { prepareModelRegistrationMigration, DEFAULT_MODEL_REGISTRATION_CONFIG } = await import("./project/model-registration.js");
     const migration = await prepareModelRegistrationMigration({}, { root: latest.scopeRoot, modelsDirectory: latest.raw.modelsDirectory, modelRegistration: latest.raw.modelRegistration }, validation.candidate.modelRegistration ?? DEFAULT_MODEL_REGISTRATION_CONFIG, { migrate: input.migrateModelRegistrations });
     if (migration.migrated) validation.candidate.modelRegistration = { ...(validation.candidate.modelRegistration ?? structuredClone(DEFAULT_MODEL_REGISTRATION_CONFIG)), excludedDirectories: migration.excludedDirectories };

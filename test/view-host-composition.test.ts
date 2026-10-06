@@ -1,3 +1,4 @@
+import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -5,7 +6,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { build } from "esbuild";
-import { chromium, type Page } from "playwright";
+import { type Page } from "playwright";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import {
   renderViewHostHtml,
@@ -820,7 +821,7 @@ test("ViewHost keeps the current page visible until the next Mount is ready", as
       context.slots.register(slots.mainView, { id: "second", key: second.key, value: {
         async mount({ element }) {
           element.innerHTML = '<p id="next-loading">Loading next page</p>';
-          await new Promise(resolve => setTimeout(resolve, 250));
+          await new Promise(resolve => { window.__releaseNextMount = resolve; });
           element.innerHTML = '<p id="second-page">Second page</p>';
         }
       }});
@@ -830,8 +831,10 @@ test("ViewHost keeps the current page visible until the next Mount is ready", as
     await page.locator("#first-page").waitFor();
     await page.getByRole("button", { name: "Second", exact: true }).click();
     await page.waitForURL(/\/second$/);
+    await page.waitForFunction(() => typeof (window as any).__releaseNextMount === "function");
     assert.equal(await page.locator("#first-page").count(), 1);
     assert.equal(await page.locator("#next-loading").count(), 0);
+    await page.evaluate(() => (window as any).__releaseNextMount());
     await page.locator("#second-page").waitFor();
     assert.equal(await page.locator("#first-page").count(), 0);
   }, "/first");
@@ -932,8 +935,8 @@ test("Overlay preserves the active Page portal and disposes Overlay before Page"
       const marker = document.createElement("p"); marker.id = "page-portal-after"; marker.textContent = "after";
       (window as any).__backgroundPortal.append(marker);
       dispatchEvent(new PageTransitionEvent("pagehide"));
-      await new Promise(resolve => setTimeout(resolve, 0));
     });
+    await page.waitForFunction(() => document.querySelector("#page-portal-after") === null);
     assert.equal(await page.locator("#page-portal-after").count(), 0);
     assert.deepEqual(await page.evaluate(() => (window as any).__portalEvents), [
       "page:mount", "overlay:mount", "overlay:dispose", "page:dispose"
@@ -1159,7 +1162,7 @@ test("global search filters Providers and isolates aborted or stale queries", as
     import { slots } from "@memsphere/view-sdk";
     export default { apiVersion: 1, inject: ["slots", "router"], apply(context) {
       const index = context.router.register({ id: "index", path: "/memories" });
-      window.__searchState = { queries: [], aborts: 0 };
+      window.__searchState = { queries: [], aborts: 0, releaseOld: undefined };
       context.slots.register(slots.navigationPrimary, { id: "memory", value: {
         label: { text: "Memory" }, icon: { kind: "system", name: "memory" }, route: index.to()
       }});
@@ -1171,14 +1174,17 @@ test("global search filters Providers and isolates aborted or stale queries", as
         search({ query, signal }) {
           window.__searchState.queries.push(query);
           return new Promise((resolve, reject) => {
-            const timer = setTimeout(() => {
+            const complete = () => {
               if (query === "failure") { reject(new Error("provider failed")); return; }
               resolve([{ title: { text: query }, summary: { text: "result" }, type: { text: "Memory" }, route: index.to() }]);
-            }, query === "old" ? 400 : 20);
+            };
+            // Hold the old response until the newer result is visible. It ignores
+            // cancellation so the Host must also guard against a stale response.
+            if (query === "old") window.__searchState.releaseOld = complete;
+            else complete();
             signal.addEventListener("abort", () => {
-              clearTimeout(timer);
               window.__searchState.aborts += 1;
-              reject(new DOMException("aborted", "AbortError"));
+              if (query !== "old") reject(new DOMException("aborted", "AbortError"));
             }, { once: true });
           });
         }
@@ -1195,9 +1201,14 @@ test("global search filters Providers and isolates aborted or stale queries", as
     assert.deepEqual(await page.locator('[data-view-slot="search.providers"] button').allTextContents(), ["All", "Memory"]);
     await page.locator('[data-view-slot="search.providers"] button', { hasText: "Memory" }).click();
     await page.locator("[data-view-search-input]").fill("old");
-    await page.waitForTimeout(230);
+    await page.waitForFunction(() => (window as Window & { __searchState: { queries: string[] } }).__searchState.queries.includes("old"));
     await page.locator("[data-view-search-input]").fill("new");
     await page.getByRole("button", { name: /new/ }).waitFor();
+    await page.evaluate(async () => {
+      (window as Window & { __searchState: { releaseOld: () => void } }).__searchState.releaseOld();
+      // Observe the next paint after the late Promise has settled, without a timed race.
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    });
     assert.equal(await page.locator(".view-shell-search-provider-error").count(), 0);
     assert.equal(await page.getByRole("button", { name: /old/ }).count(), 0);
     assert.ok(await page.evaluate(() => (window as Window & { __searchState: { aborts: number } }).__searchState.aborts) >= 1);
@@ -1281,7 +1292,7 @@ function compositionPlugin(name: "memory" | "settings"): string {
       });
       context.slots.register(slots.headerActions, { id: "capture", when: detail.activation, value: {
         label: { text: "Capture params" }, async run() {
-          await new Promise(resolve => setTimeout(resolve, 20));
+          await Promise.resolve();
           window.__capturedKind = context.router.location.params.kind;
         }
       }});
@@ -1355,7 +1366,7 @@ async function withPage(
     response.end(html);
   });
   const origin = await listen(server);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const page = await browser.newPage();
     await prepare?.(page);

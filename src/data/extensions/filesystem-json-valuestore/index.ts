@@ -1,4 +1,4 @@
-import type { Config } from "../../api/config.js";
+import { Config } from "../../api/config.js";
 import type { Context } from "../../api/context.js";
 import type { DataId, ModelRef } from "../../api/data.js";
 import type { DataExtension } from "../../api/extension.js";
@@ -7,9 +7,13 @@ import type { DeleteOptions, ListOptions, ListResult, StoreId, UpdateOptions } f
 import type { StoredValue, ValueStore, ValueStoreFactory } from "../../api/value-store.js";
 import { JsonPayloadSerializer } from "../json-serializer/index.js";
 import {
-  atomicPublish, deleteFile, findFile, listFilenames, paginate, prepareDirectory,
-  readFileSnapshot, requirePositiveInteger, validateFilename, withRecordLock
+  atomicPublish, deleteFile, findFile, listFilenames, openExistingDirectory, paginate, prepareDirectory,
+  readFileSnapshot, requirePositiveInteger, requireString, validateFilename, withRecordLock
 } from "../shared/filesystem.js";
+import { readDeletedRevision, retainDeletedRevision } from "./revision-state.js";
+
+export { FILESYSTEM_JSON_METADATA_DIRECTORY } from "../shared/filesystem.js";
+export { validateFilesystemJsonStoreMetadata } from "./revision-state.js";
 
 type JsonRecord = StoredValue & { revision: number; createdAt: number; updatedAt: number };
 
@@ -18,22 +22,28 @@ type JsonRecord = StoredValue & { revision: number; createdAt: number; updatedAt
  * { id, revision, createdAt, updatedAt, value }. The model belongs to this Store,
  * not the file. IDs are portable filename stems, never hashed or encoded.
  *
- * Same-record writes share an in-memory mutex across Store instances in this JS
- * realm. Separate worker realms, processes and external editors are outside the
- * revision guarantee. Different records do not share a lock. Publication uses
- * temporary files and atomic replacement, without on-disk locks or sidecars.
- * Configuration contains only the required directory.
+ * Same-record writes share a native file lock across all Store instances and
+ * processes. Permanent lock files and deleted revision high-water marks live in
+ * .memsphere-json-store and are excluded from list. Recreating a deleted record
+ * does not reuse its revision. External editors are outside this guarantee.
+ * Configuration contains only the required directory. openExisting is pure.
  */
 export class FilesystemJsonValueStoreFactory implements ValueStoreFactory {
   readonly id = "memsphere/filesystem-json";
 
   async createStore(context: Context, id: StoreId, runtime: ModelRuntime, config: Config): Promise<ValueStore> {
+    return this.open(context, id, runtime, config, prepareDirectory);
+  }
+
+  async openExisting(context: Context, id: StoreId, runtime: ModelRuntime, config: Config): Promise<ValueStore> {
+    return this.open(context, id, runtime, config, openExistingDirectory);
+  }
+
+  private async open(context: Context, id: StoreId, runtime: ModelRuntime, config: Config, open: typeof prepareDirectory): Promise<ValueStore> {
     context.signal?.throwIfAborted();
     if (typeof id !== "string" || id.trim().length === 0) throw new TypeError("Store ID must be a non-empty string");
-    for (const key of Object.keys(config.json)) {
-      if (key !== "directory") throw new TypeError(`Unknown filesystem JSON ValueStore configuration: ${key}`);
-    }
-    const directory = await prepareDirectory(context, config);
+    const snapshot = parseFilesystemJsonValueStoreConfig(config);
+    const directory = await open(context, new Config(snapshot));
     return new FilesystemJsonValueStore(id, runtime, directory);
   }
 }
@@ -60,9 +70,11 @@ class FilesystemJsonValueStore implements ValueStore {
     const filename = recordFilename(id);
     const snapshot = await this.prepare(context, value);
     return withRecordLock(context, this.directory, filename, async () => {
-      if (await findFile(context, this.directory, filename)) throw new Error(`Record ${id} already exists`);
+      if (await findFile(context, this.directory, filename)) throw Object.assign(new Error(`Record ${id} already exists`), { code: "ALREADY_EXISTS" });
+      const revision = await readDeletedRevision(context, this.directory, filename);
+      if (revision === Number.MAX_SAFE_INTEGER) throw new RangeError(`Record ${id} revision overflow`);
       const now = Date.now();
-      const record: JsonRecord = { id, revision: 1, createdAt: now, updatedAt: now, value: snapshot };
+      const record: JsonRecord = { id, revision: revision + 1, createdAt: now, updatedAt: now, value: snapshot };
       await atomicPublish(context, this.directory, filename, recordBytes(record), "create");
       return record;
     });
@@ -75,7 +87,8 @@ class FilesystemJsonValueStore implements ValueStore {
     return withRecordLock(context, this.directory, filename, async () => {
       const previous = await this.read(context, id, filename);
       checkRevision(id, previous, expectedRevision);
-      if (previous === undefined) throw new Error(`Record ${id} does not exist`);
+      if (previous === undefined) throw Object.assign(new Error(`Record ${id} does not exist`), { code: "NOT_FOUND" });
+      await this.checkRetainedRevision(context, filename, previous.revision);
       if (previous.revision === Number.MAX_SAFE_INTEGER) throw new RangeError(`Record ${id} revision overflow`);
       const record: JsonRecord = {
         id, revision: previous.revision + 1, createdAt: previous.createdAt,
@@ -94,6 +107,8 @@ class FilesystemJsonValueStore implements ValueStore {
       const previous = await this.read(context, id, filename);
       checkRevision(id, previous, expectedRevision);
       if (previous === undefined) return false;
+      await this.checkRetainedRevision(context, filename, previous.revision);
+      await retainDeletedRevision(context, this.directory, filename, previous.revision);
       return deleteFile(context, this.directory, filename);
     });
   }
@@ -119,6 +134,12 @@ class FilesystemJsonValueStore implements ValueStore {
     this.runtime.reflect(snapshot);
     context.signal?.throwIfAborted();
     return snapshot;
+  }
+
+  private async checkRetainedRevision(context: Context, filename: string, revision: number): Promise<void> {
+    if (await readDeletedRevision(context, this.directory, filename) > revision) {
+      throw Object.assign(new Error(`Record revision is older than retained deletion history: ${filename}`), { code: "INVALID_STORE_METADATA" });
+    }
   }
 
   private async read(context: Context, id: DataId, filename: string): Promise<JsonRecord | undefined> {
@@ -148,8 +169,22 @@ function captureRevision(options: UpdateOptions | DeleteOptions | undefined): nu
 
 function checkRevision(id: string, record: JsonRecord | undefined, expected: number | undefined): void {
   if (expected !== undefined && record?.revision !== expected) {
-    throw new Error(`Record ${id} revision conflict: expected ${expected}, found ${record?.revision ?? "missing"}`);
+    throw Object.assign(new Error(`Record ${id} revision conflict: expected ${expected}, found ${record?.revision ?? "missing"}`), {
+      code: "REVISION_CONFLICT", details: { id, expectedRevision: expected, actualRevision: record?.revision }
+    });
   }
+}
+
+export function parseFilesystemJsonValueStoreConfig(config: Config): { directory: string } {
+  const json = config.json;
+  if (typeof json !== "object" || json === null || Array.isArray(json)) throw new TypeError("config must be a JSON object");
+  for (const key of Object.keys(json)) {
+    if (key !== "directory") throw new TypeError(`Unknown filesystem JSON ValueStore configuration: ${key}`);
+  }
+  const directory = json.directory;
+  requireString(directory, "config.directory");
+  if (directory.trim().length === 0) throw new TypeError("config.directory must not be all whitespace");
+  return { directory };
 }
 
 function recordBytes(record: JsonRecord): Uint8Array {
@@ -157,7 +192,7 @@ function recordBytes(record: JsonRecord): Uint8Array {
   return new TextEncoder().encode(`${JSON.stringify(record, null, 2)}\n`);
 }
 
-function assertRecord(value: unknown, id: string): asserts value is JsonRecord {
+export function assertRecord(value: unknown, id: string): asserts value is JsonRecord {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`Invalid JSON record ${id}: expected an object`);
   }

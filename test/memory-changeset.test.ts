@@ -1,9 +1,9 @@
+import { managedProjectFixture } from "./helpers/project.js";
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { projectCreateCommand } from "../src/commands/project.js";
 import { gitOutput, runGit } from "../src/git.js";
 import {
   checkpointWorkspaceChanges,
@@ -39,7 +39,7 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     process.env.MEMSPHERE_HOME = home;
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     process.chdir(workspace);
-    await projectCreateCommand("project", { bind: true });
+    await managedProjectFixture("project", { bind: true });
     const registry = await readProjectRegistry(home);
     const memoryRoot = join(registry.projects.project.root, "memory");
 
@@ -271,7 +271,7 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
       managed: { branch: config.store.branch, publishedRevision: config.store.published_revision }
     }]));
     const listed = await catalog.list();
-    assert.deepEqual(listed.memories.filter((item) => item.frozen).map((item) => item.names[0]).sort(), ["dependent", "shared", "shared-schema"]);
+    assert.deepEqual(listed.items.filter((item) => item.frozen).map((item) => item.names[0]).sort(), ["dependent", "shared", "shared-schema"]);
     await assert.rejects(catalog.read("shared"), MemoryFrozenError);
     assert.equal((await catalog.read("Other Alias")).names[0], "other-renamed");
     await recoverMemory("schemas/shared-schema", "restore");

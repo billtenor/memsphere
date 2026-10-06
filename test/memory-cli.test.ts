@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { parse } from "yaml";
@@ -13,8 +13,7 @@ import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
 import { runGit } from "../src/git.js";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const cliPath = join(projectRoot, "src", "cli.ts");
-const tsxLoaderPath = join(projectRoot, "node_modules", "tsx", "dist", "loader.mjs");
+const cliPath = join(projectRoot, "dist", "cli.js");
 
 type CommandResult = {
   code: number | null;
@@ -62,8 +61,6 @@ async function withScope(fn: (scope: { root: string; nested: string; memoryRoot:
 async function runCli(cwd: string, args: string[], home?: string): Promise<CommandResult> {
   return new Promise((resolveResult, reject) => {
     const child = spawn(process.execPath, [
-      "--import",
-      pathToFileURL(tsxLoaderPath).href,
       cliPath,
       ...args
     ], {
@@ -306,20 +303,20 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
     assert.equal(list.code, 0);
     assert.equal(list.stderr, "");
     const page = parse(list.stdout);
-    assert.deepEqual(page.memories.map((item: { reference: string }) => item.reference), ["concepts/memory", "schemas/record"]);
-    const memorySummary = page.memories.find((item: { reference: string }) => item.reference === "concepts/memory");
+    assert.deepEqual(page.items.map((item: { reference: string }) => item.reference), ["concepts/memory", "schemas/record"]);
+    const memorySummary = page.items.find((item: { reference: string }) => item.reference === "concepts/memory");
     assert.deepEqual(memorySummary.defines, ["A managed memory."]);
     assert.equal(memorySummary.structured_defines, undefined);
-    assert.equal(page.next_cursor, null);
+    assert.equal(Object.hasOwn(page, "nextCursor"), false);
     assert(!list.stdout.includes("random-95f2"));
     assert(!list.stdout.includes(memoryRoot));
 
     const filtered = await runCli(nested, ["memory", "list", "--kind", "concepts", "--query", "记忆", "--output", "json"]);
     assert.equal(filtered.code, 0);
     const filteredPage = JSON.parse(filtered.stdout);
-    assert.deepEqual(filteredPage.memories.map((item: { reference: string }) => item.reference), ["concepts/memory"]);
-    assert.deepEqual(filteredPage.memories[0].defines, ["A managed memory."]);
-    assert.equal(filteredPage.memories[0].structured_defines, undefined);
+    assert.deepEqual(filteredPage.items.map((item: { reference: string }) => item.reference), ["concepts/memory"]);
+    assert.deepEqual(filteredPage.items[0].defines, ["A managed memory."]);
+    assert.equal(filteredPage.items[0].structured_defines, undefined);
 
     for (const reference of ["concepts/memory", "memory", "记忆"]) {
       const read = await runCli(nested, ["memory", "read", reference]);
@@ -454,11 +451,11 @@ flow:
 
     const concept = await runCli(nested, ["memory", "list", "Memory", "--output", "json"]);
     assert.equal(concept.code, 0, concept.stderr);
-    assert.deepEqual(JSON.parse(concept.stdout).nodes, []);
+    assert.deepEqual(JSON.parse(concept.stdout).items, []);
 
     const statement = await runCli(nested, ["memory", "list", "Rules", "--output", "json"]);
     assert.equal(statement.code, 0, statement.stderr);
-    assert.equal(JSON.parse(statement.stdout).nodes[0].node_ref, "statement:Testing");
+    assert.equal(JSON.parse(statement.stdout).items[0].node_ref, "statement:Testing");
 
     const statementRead = await runCli(nested, [
       "memory", "read", "Rules", "--node", "statement:Testing", "--output", "json"
@@ -468,7 +465,7 @@ flow:
 
     const schema = await runCli(nested, ["memory", "list", "Report", "--output", "json"]);
     assert.equal(schema.code, 0, schema.stderr);
-    assert.deepEqual(JSON.parse(schema.stdout).nodes.map((node: { node_ref: string }) => node.node_ref), [
+    assert.deepEqual(JSON.parse(schema.stdout).items.map((node: { node_ref: string }) => node.node_ref), [
       "string:Title",
       "repeat[1]/schema:Item"
     ]);
@@ -487,7 +484,7 @@ flow:
       "memory", "list", "Workflow", "--node", "if:Continue", "--output", "json"
     ]);
     assert.equal(branch.code, 0, branch.stderr);
-    const branchNode = JSON.parse(branch.stdout).nodes[0];
+    const branchNode = JSON.parse(branch.stdout).items[0];
     assert.equal(branchNode.node_ref, "if:Continue/then/action:Result");
     assert.equal(branchNode.artifact, "Result");
 

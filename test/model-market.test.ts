@@ -1,15 +1,24 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createProjectModelHost, DEFAULT_MODELS_DIRECTORY } from "../src/project/models.js";
 import { listModelMarket, importModelMarketPackage, cleanupModelMarketCandidates } from "../src/project/model-market.js";
 import { createModelRegistrationStore, prepareModelRegistrationMigration, readModelRegistrations } from "../src/project/model-registration.js";
+const importOptions = (root: string) => ({ sourceRoot: join(root, "bundled") });
 async function fixture(fn: (root: string) => Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), "model-market-"));
   try {
+    const sourceRoot = importOptions(root).sourceRoot;
+    await cp(new URL("../reserved-models", import.meta.url), sourceRoot, { recursive: true });
+    const manifestPath = join(sourceRoot, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const pack = manifest.market_packages[0];
+    for (const model of pack.models.filter((model: { registration: { modelRef: string } }) => /examples\/0[45]-/.test(model.registration.modelRef))) await rm(join(sourceRoot, model.source));
+    pack.models = pack.models.filter((model: { registration: { modelRef: string } }) => !/examples\/0[45]-/.test(model.registration.modelRef));
+    await writeFile(manifestPath, JSON.stringify(manifest));
     await fn(root);
   }
   finally {
@@ -55,7 +64,7 @@ test("The retired order package is absent from the market while published histor
   assert.deepEqual((await cleanupModelMarketCandidates({}, { root })).cleanedModelRefs, [legacyModelRef]);
   await assert.rejects(readFile(legacy.receipt), { code: "ENOENT" });
   assert.deepEqual(await Promise.all([legacy.definition, legacy.record, legacy.publication].map(path => readFile(path))), before);
-  assert.equal((await importModelMarketPackage({}, { root }, packageId)).status, "imported");
+  assert.equal((await importModelMarketPackage({}, { root }, packageId, importOptions(root))).status, "imported");
   assert.equal((await (await createProjectModelHost({}, { root })).definition(legacyModelRef)).source, legacy.source);
   assert.deepEqual(await readFile(legacy.record), before[1]);
 }));
@@ -63,10 +72,10 @@ test("The retired order package is absent from the market while published histor
 test("Unpublished candidates from the retired order package remain invisible and can still be cleaned", async () => fixture(async (root) => {
   const legacy = await historicalOrderImport(root, false);
   assert.equal((await (await createProjectModelHost({}, { root })).list()).some(model => model.id === legacyModelRef), false);
-  await assert.rejects(importModelMarketPackage({}, { root }, packageId), { code: "MODEL_IMPORT_CLEANUP_REQUIRED" });
+  await assert.rejects(importModelMarketPackage({}, { root }, packageId, importOptions(root)), { code: "MODEL_IMPORT_CLEANUP_REQUIRED" });
   assert.deepEqual((await cleanupModelMarketCandidates({}, { root })).cleanedModelRefs, [legacyModelRef]);
   for (const path of [legacy.receipt, legacy.record, legacy.definition]) await assert.rejects(readFile(path), { code: "ENOENT" });
-  assert.equal((await importModelMarketPackage({}, { root }, packageId)).status, "imported");
+  assert.equal((await importModelMarketPackage({}, { root }, packageId, importOptions(root))).status, "imported");
 }));
 
 test("Legacy cleanup rejects unrecognized package identities without deleting candidate or imported data", async () => fixture(async (root) => {
@@ -88,7 +97,7 @@ test("Market source is shipped as catalog assets; import binds the independent m
   assert.equal(pack.id, packageId);
   const before = await createProjectModelHost({}, { root });
   assert.equal((await before.list()).some(m => m.id === modelRef), false);
-  const result = await importModelMarketPackage({}, { root }, packageId);
+  const result = await importModelMarketPackage({}, { root }, packageId, importOptions(root));
   assert.equal(result.status, "imported");
   const host = await createProjectModelHost({}, { root });
   const model = await host.definition(modelRef);
@@ -98,7 +107,7 @@ test("Market source is shipped as catalog assets; import binds the independent m
   assert.equal((await host.runtime(modelRef)).descriptor.id, modelRef);
   const state = await readModelRegistrations({}, { root });
   const bytes = await readFile(join(root, "models/registrations/imported", `${state.records[0]!.id}.json`));
-  assert.equal((await importModelMarketPackage({}, { root }, packageId)).status, "unchanged");
+  assert.equal((await importModelMarketPackage({}, { root }, packageId, importOptions(root))).status, "unchanged");
   assert.deepEqual(await readFile(join(root, "models/registrations/imported", `${state.records[0]!.id}.json`)), bytes);
   // Migration preserves exact imported definition bytes and stable Store/model identity.
   const target = { storeId: "next", stores: { next: { factory: "memsphere/filesystem-json" as const, directory: "next-registry" } } };
@@ -107,43 +116,31 @@ test("Market source is shipped as catalog assets; import binds the independent m
   assert.equal((await migrated.definition(modelRef)).source, model.source);
   assert.equal((await migrated.definition(modelRef)).registration.store_id, model.registration.store_id);
 }));
-test("All eight examples import with exact bytes and market origin while advanced Runtime restrictions remain explicit", async () => fixture(async (root) => {
+test("The complete eight-example package rejects unsupported Runtime definitions before writing any model", async () => fixture(async (root) => {
   const pack = listModelMarket().find(pack => pack.id === "memsphere.examples")!;
   assert.equal(pack.models.length, 8);
-  const result = await importModelMarketPackage({}, { root }, pack.id);
-  assert.equal(result.status, "imported");
-  const host = await createProjectModelHost({}, { root });
-  for (const model of pack.models) {
-    const imported = await host.definition(model.registration.modelRef);
-    assert.equal(imported.origin, "market");
-    assert.equal(imported.registration.package, "memsphere.examples");
-    assert.equal(imported.source, model.source);
-  }
-  assert.equal((await host.runtime("examples/06-references-and-recursion.json")).descriptor.id, "examples/06-references-and-recursion.json");
-  await assert.rejects(host.runtime("examples/04-dictionaries-and-encodings.json"), /contentEncoding/);
-  await assert.rejects(host.runtime("examples/05-unions-and-conditions.json"), /keyword "if"/);
-  const before = await readModelRegistrations({}, { root });
-  assert.equal((await importModelMarketPackage({}, { root }, pack.id)).status, "unchanged");
-  assert.deepEqual((await readModelRegistrations({}, { root })).records, before.records);
+  await assert.rejects(importModelMarketPackage({}, { root }, pack.id), { code: "MODEL_RUNTIME_UNSUPPORTED" });
+  assert.equal((await readModelRegistrations({}, { root })).records.length, 0);
+  await assert.rejects(readFile(join(root, "models/registrations/published-imports.json")), { code: "ENOENT" });
+  assert.equal((await (await createProjectModelHost({}, { root })).list()).length, 0);
 }));
 
-test("Eight-model imports remain invisible before publication and roll back every record on failure", async () => fixture(async (root) => {
-  await assert.rejects(importModelMarketPackage({}, { root }, "memsphere.examples", { beforePublish: async () => {
-    const host = await createProjectModelHost({}, { root });
-    assert.equal((await host.list()).filter(model => model.origin === "market").length, 0);
+test("Supported package imports block partial reads before publication and roll back every record on failure", async () => fixture(async (root) => {
+  await assert.rejects(importModelMarketPackage({}, { root }, "memsphere.examples", { ...importOptions(root), beforePublish: async () => {
+    await assert.rejects(createProjectModelHost({}, { root }), { code: "MODEL_OPERATION_PENDING" });
     throw new Error("injected eight-model failure");
   } }), /injected eight-model failure/);
   assert.equal((await readModelRegistrations({}, { root })).records.length, 0);
-  assert.equal((await importModelMarketPackage({}, { root }, "memsphere.examples")).status, "imported");
+  assert.equal((await importModelMarketPackage({}, { root }, "memsphere.examples", importOptions(root))).status, "imported");
 }));
 
-test("A collision in the middle of the example package preserves the project model and imports none of the eight", async () => fixture(async (root) => {
-  const id = "examples/04-dictionaries-and-encodings.json";
+test("A collision within a supported package preserves the project model and imports none", async () => fixture(async (root) => {
+  const id = "examples/06-references-and-recursion.json";
   const filename = join(root, DEFAULT_MODELS_DIRECTORY, id);
   await mkdir(join(filename, ".."), { recursive: true });
   const custom = '\uFEFF {"type":"boolean","title":"My custom model"}\r\n';
   await writeFile(filename, custom);
-  await assert.rejects(importModelMarketPackage({}, { root }, "memsphere.examples"), { code: "MODEL_PACKAGE_CONFLICT", conflicts: [id] });
+  await assert.rejects(importModelMarketPackage({}, { root }, "memsphere.examples", importOptions(root)), { code: "MODEL_PACKAGE_CONFLICT", conflicts: [id] });
   assert.equal(await readFile(filename, "utf8"), custom);
   assert.equal((await readModelRegistrations({}, { root })).records.length, 0);
   const summaries = await (await createProjectModelHost({}, { root })).list();
@@ -151,14 +148,14 @@ test("A collision in the middle of the example package preserves the project mod
   assert.equal(summaries.find(model => model.id === id)!.origin, "project");
 }));
 test("A user-modified imported registration rejects the whole repeated import without replacing content", async () => fixture(async (root) => {
-  await importModelMarketPackage({}, { root }, packageId);
+  await importModelMarketPackage({}, { root }, packageId, importOptions(root));
   const state = await readModelRegistrations({}, { root });
   const record = state.records.find(record => record.registration.modelRef === modelRef)!;
   const store = await createModelRegistrationStore({}, "market", join(root, "models/registrations/imported"));
   await store.update({}, record.id, { ...record.registration, name: "My order", tags: ["custom"] });
   const filename = join(root, "models/registrations/imported", `${record.id}.json`);
   const bytes = await readFile(filename);
-  await assert.rejects(importModelMarketPackage({}, { root }, packageId), { code: "MODEL_PACKAGE_CONFLICT" });
+  await assert.rejects(importModelMarketPackage({}, { root }, packageId, importOptions(root)), { code: "MODEL_PACKAGE_CONFLICT" });
   assert.deepEqual(await readFile(filename), bytes);
   assert.equal((await (await createProjectModelHost({}, { root })).definition(modelRef)).registration.name, "My order");
 }));
@@ -167,22 +164,23 @@ test("Project identity collision refuses import and preserves original definitio
   await mkdir(join(path, ".."), { recursive: true });
   const source = '\uFEFF  {"type":"string"}\r\n';
   await writeFile(path, source);
-  await assert.rejects(importModelMarketPackage({}, { root }, packageId), { code: "MODEL_PACKAGE_CONFLICT" });
+  await assert.rejects(importModelMarketPackage({}, { root }, packageId, importOptions(root)), { code: "MODEL_PACKAGE_CONFLICT" });
   assert.equal(await readFile(path, "utf8"), source);
   assert.equal((await (await createProjectModelHost({}, { root })).definition(modelRef)).origin, "project");
 }));
-test("Candidates and partially written imports remain invisible; write failures roll back and allow clean retry", async () => fixture(async (root) => {
-  let during: boolean | undefined;
-  await assert.rejects(importModelMarketPackage({}, { root }, packageId, { beforePublish: async () => { during = (await (await createProjectModelHost({}, { root })).list()).some(m => m.id === modelRef); throw new Error("injected publication failure"); } }), /injected/);
-  assert.equal(during, false);
+test("An interrupted publication blocks partial reads and rolls back before a clean retry", async () => fixture(async (root) => {
+  await assert.rejects(importModelMarketPackage({}, { root }, packageId, { ...importOptions(root), beforePublish: async () => {
+    await assert.rejects(createProjectModelHost({}, { root }), { code: "MODEL_OPERATION_PENDING" });
+    throw new Error("injected publication failure");
+  } }), /injected/);
   assert.equal((await (await createProjectModelHost({}, { root })).list()).some(m => m.id === modelRef), false);
   assert.equal((await readModelRegistrations({}, { root })).records.length, 0);
-  assert.equal((await importModelMarketPackage({}, { root }, packageId)).status, "imported");
+  assert.equal((await importModelMarketPackage({}, { root }, packageId, importOptions(root))).status, "imported");
 }));
-test("Cleanup failure reports pending identities, keeps candidates invisible and blocks ambiguous retry", async () => fixture(async (root) => {
-  await assert.rejects(importModelMarketPackage({}, { root }, packageId, { afterStage: async () => { throw new Error("injected stage failure"); }, removeCandidate: async () => { throw new Error("injected cleanup failure"); } }), { code: "MODEL_IMPORT_CLEANUP_REQUIRED" });
+
+test("Failure while preparing a candidate leaves no partially published models and allows retry", async () => fixture(async (root) => {
+  await assert.rejects(importModelMarketPackage({}, { root }, packageId, { ...importOptions(root), afterStage: async () => { throw new Error("injected candidate failure"); } }), /injected candidate/);
   assert.equal((await (await createProjectModelHost({}, { root })).list()).some(m => m.id === modelRef), false);
-  await assert.rejects(importModelMarketPackage({}, { root }, packageId), { code: "MODEL_IMPORT_CLEANUP_REQUIRED" });
-  assert.deepEqual((await cleanupModelMarketCandidates({}, { root })).cleanedModelRefs, listModelMarket()[0]!.models.map(model => model.registration.modelRef));
-  assert.equal((await importModelMarketPackage({}, { root }, packageId)).status, "imported");
+  assert.equal((await readModelRegistrations({}, { root })).records.length, 0);
+  assert.equal((await importModelMarketPackage({}, { root }, packageId, importOptions(root))).status, "imported");
 }));

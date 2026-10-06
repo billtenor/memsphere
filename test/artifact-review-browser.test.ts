@@ -1,3 +1,4 @@
+import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -5,7 +6,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { chromium } from "playwright";
 import { createViewServer } from "../src/commands/view.js";
 import type { MemsphereConfig } from "../src/config.js";
 import { parseControlPlaneConfig } from "../src/control-plane/index.js";
@@ -460,6 +460,7 @@ test("Artifact Review keeps a selected historical round without background polli
         }
       };
       page.on("response", countRoundRequests);
+      // A bounded observation window is needed to detect unsolicited historical-round requests.
       await page.waitForTimeout(4_200);
       page.off("response", countRoundRequests);
       assert.equal(backgroundRoundRequests, 0);
@@ -815,7 +816,7 @@ flow:
   const runsPayload = JSON.parse(runsSource) as { runs: Array<{ artifactReview?: unknown; artifactReviewSummaries?: unknown[] }> };
   assert.equal(runsPayload.runs[0]?.artifactReviewSummaries?.length, 1);
   assert(runsPayload.runs[0]?.artifactReview);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await page.goto(`http://127.0.0.1:${address.port}`);
@@ -1001,7 +1002,7 @@ flow:
   await once(server, "listening");
   const address = server.address();
   assert(address && typeof address === "object");
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await page.goto(`http://127.0.0.1:${address.port}`);
@@ -1337,7 +1338,7 @@ async function withReviewBrowser(
   await once(server, "listening");
   const address = server.address();
   assert(address && typeof address === "object");
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const page = await browser.newPage({ viewport });
     page.setDefaultTimeout(10_000);

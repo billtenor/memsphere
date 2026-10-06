@@ -2,39 +2,43 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { collectExternalSchemaReferences, collectModelSchemaReferences, validateModelSchemaReferences } from "../src/project/model-schema-references.js";
 
-test("Reference inspection visits Draft-07 schema positions and skips ordinary example/default/enum data", () => {
-  const ref = (name: string) => ({ $ref: `${name}.json` });
-  const definition = {
-    properties: { item: ref("properties") }, patternProperties: { "x.*": ref("pattern") }, definitions: { item: ref("definitions") },
-    additionalProperties: ref("additionalProperties"), additionalItems: ref("additionalItems"), contains: ref("contains"), propertyNames: ref("propertyNames"),
-    not: ref("not"), if: ref("if"), then: ref("then"), else: ref("else"),
-    allOf: [ref("allOf")], anyOf: [ref("anyOf")], oneOf: [ref("oneOf")], items: [ref("tuple0"), ref("tuple1")],
-    dependencies: { scalar: ["field"], schema: ref("dependencies") },
-    examples: [ref("ignored")], default: ref("ignored"), enum: [ref("ignored")]
-  };
-  assert.deepEqual(new Set(collectExternalSchemaReferences(definition, "root.json")), new Set([
-    "properties", "pattern", "definitions", "additionalProperties", "additionalItems", "contains", "propertyNames", "not", "if", "then", "else", "allOf", "anyOf", "oneOf", "tuple0", "tuple1", "dependencies"
-  ].map(name => `${name}.json`)));
-  assert.deepEqual(collectExternalSchemaReferences({ items: ref("homogeneous") }, "root.json"), ["homogeneous.json"]);
-});
-
-test("Package references preserve exact ModelRef identity and allow finite local recursive pointers", () => {
+test("Every Draft-07 schema position rejects cross-model references while ordinary annotation data stays opaque", () => {
+  const ref = { $ref: "other.json" };
   const definitions = [
-    { registration: { modelRef: "examples/06.json" }, definition: { definitions: { node: { properties: { child: { $ref: "#/definitions/node" } } } }, properties: { external: { $ref: "examples/07.json" } } } },
-    { registration: { modelRef: "examples/07.json" }, definition: { type: "string" } }
+    ...["properties", "patternProperties", "definitions"].map(key => ({ [key]: { item: ref } })),
+    ...["additionalProperties", "additionalItems", "contains", "propertyNames", "not", "if", "then", "else"].map(key => ({ [key]: ref })),
+    ...["allOf", "anyOf", "oneOf", "items"].map(key => ({ [key]: [ref] })),
+    { items: ref }, { dependencies: { item: ref } }
   ];
-  validateModelSchemaReferences(definitions);
-  assert.deepEqual(collectExternalSchemaReferences(definitions[0]!.definition, "examples/06.json"), ["examples/07.json"]);
-  assert.throws(() => validateModelSchemaReferences(definitions.slice(0, 1)), /Missing model reference/);
-  assert.throws(() => validateModelSchemaReferences([{ registration: { modelRef: "test.json" }, definition: { anyOf: [{ $ref: "#/missing" }] } }]), /Missing schema reference/);
-  assert.throws(() => validateModelSchemaReferences([{ registration: { modelRef: "test.json" }, definition: { if: { $ref: "missing.json" } } }]), /Missing model reference/);
+  for (const definition of definitions) assert.throws(() => collectModelSchemaReferences(definition, "root.json"), { code: "MODEL_REFERENCE_UNSUPPORTED" });
+  assert.deepEqual(collectModelSchemaReferences({ type: "object", properties: { $ref: { type: "string" } },
+    examples: [ref], default: ref, enum: [ref], dependencies: { value: ["other.json"] } }, "root.json"), []);
 });
 
-test("Pointers are decoded safely, boolean subschemas are valid targets, and unsupported scopes are explicit", () => {
-  validateModelSchemaReferences([{ registration: { modelRef: "test.json" }, definition: { definitions: { "a/b~c": false }, $ref: "#%2Fdefinitions%2Fa~1b~0c" } }]);
-  for (const definition of [{ $ref: "#named" }, { $ref: "#/%bad" }, { $ref: "#/bad~2" }, { $id: "relative.json" }, { properties: { sub: { $id: "https://example.test/sub" } } }]) {
-    assert.throws(() => collectModelSchemaReferences(definition, "test.json"), TypeError);
+test("Package membership and a matching document URI do not permit nonlocal reference syntax", () => {
+  for (const $ref of ["other.json", "other.json#/definitions/value", "https://example.test/root.json#", "https://example.test/root.json#/definitions/value"]) {
+    assert.throws(() => validateModelSchemaReferences([
+      { registration: { modelRef: "root.json" }, definition: { $id: "https://example.test/root.json", $ref, definitions: { value: { type: "string" } } } },
+      { registration: { modelRef: "other.json" }, definition: { type: "string" } }
+    ]), { code: "MODEL_REFERENCE_UNSUPPORTED" });
   }
-  assert.deepEqual(collectExternalSchemaReferences({ $id: "https://example.test/root.json", properties: { a: { $ref: "other.json" } } }, "root.json"), ["https://example.test/other.json"]);
-  assert.throws(() => validateModelSchemaReferences([{ registration: { modelRef: "test.json" }, definition: { title: "text", $ref: "#/title" } }]), /not a schema/);
+});
+
+test("Local recursive pointers remain finite and escaped targets can be boolean schemas", () => {
+  const definition = { definitions: { node: { properties: { child: { $ref: "#/definitions/node" } } }, "a/b~c": false },
+    properties: { tree: { $ref: "#/definitions/node" }, condition: { $ref: "#/definitions/a~1b~0c" } } };
+  validateModelSchemaReferences([{ registration: { modelRef: "root.json" }, definition }]);
+  assert.deepEqual(collectExternalSchemaReferences(definition, "root.json"), []);
+  for (const $ref of ["", "#"]) assert.equal(collectModelSchemaReferences({ $ref }, "root.json").length, 1);
+});
+
+test("Local pointers reject missing or nonschema targets, named anchors and invalid escapes", () => {
+  for (const $ref of ["#named", "#%2Fdefinitions%2Fvalue", "#/%bad", "#/bad~2", "#/missing", "#/title"]) {
+    assert.throws(() => collectModelSchemaReferences({ title: "text", $ref, definitions: { value: true } }, "root.json"), { code: "MODEL_REFERENCE_INVALID" });
+  }
+});
+
+test("An annotation reached by a local reference becomes a checked schema and cannot hide an external reference", () => {
+  assert.throws(() => collectModelSchemaReferences({ type: "object", properties: { value: { $ref: "#/default" } },
+    default: { $ref: "other.json" } }, "root.json"), { code: "MODEL_REFERENCE_UNSUPPORTED", details: { modelRef: "root.json", path: "#/default/$ref" } });
 });

@@ -1,10 +1,11 @@
+import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium, type Page } from "playwright";
+import { type Page } from "playwright";
 import type { MemsphereConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
@@ -18,7 +19,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     server.listen(0, "127.0.0.1", resolve);
   });
   const port = (server.address() as AddressInfo).port;
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
 
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
@@ -236,7 +237,7 @@ test("switching Projects replaces an entity URL with the new Project landing pag
     server.listen(0, "127.0.0.1", resolve);
   });
   const port = (server.address() as AddressInfo).port;
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
 
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
@@ -266,7 +267,7 @@ test("Settings browser shows an inline error for an invalid operator token", asy
     server.listen(0, "127.0.0.1", resolve);
   });
   const port = (server.address() as AddressInfo).port;
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
 
   try {
     const page = await browser.newPage({ viewport: { width: 900, height: 760 } });
@@ -409,7 +410,7 @@ test("model registration settings select Store first, preserve drafts and explic
   await writeFile(config.configPath, JSON.stringify({ ...existing, modelRegistration: registration }));
   const server = createViewServer(config);
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   try {
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });

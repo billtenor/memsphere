@@ -1,0 +1,342 @@
+{
+  "date": "2026-10-06",
+  "timezone": "Asia/Shanghai",
+  "run": "run-20261003-090655z-f1e492f6",
+  "pendingDeliveryReview": "review-20261005-140919z-0e5efb80",
+  "round": "round-20261005-140919z-15827b8f",
+  "platform": "Linux",
+  "node": "22.16.0",
+  "checks": {
+    "platform": "linux",
+    "timezone": "Asia/Shanghai",
+    "commands": [
+      {
+        "command": [
+          "npm",
+          "test",
+          "--",
+          "--test-concurrency=1"
+        ],
+        "exitCode": 0,
+        "startedAtEpoch": 1791263793.1743805,
+        "finishedAtEpoch": 1791264381.0884972,
+        "durationSeconds": 587.914,
+        "log": "/tmp/memsphere-output-format-full-test.log",
+        "logSha256": "9ad854d2221d7ffe69632b3dc633b9583f34ff706fe96038b3b4bf8896d34e9e",
+        "environment": "Real Linux host outside sandbox; inherited environment. No environment values recorded.",
+        "tap": {
+          "tests": "1072",
+          "pass": "1071",
+          "fail": "0",
+          "skipped": "1",
+          "duration_ms": "577731.71613"
+        }
+      },
+      {
+        "command": [
+          "npm",
+          "run",
+          "typecheck"
+        ],
+        "exitCode": 0,
+        "startedAtEpoch": 1791264381.1125393,
+        "finishedAtEpoch": 1791264390.185872,
+        "durationSeconds": 9.073,
+        "log": "/tmp/memsphere-output-format-typecheck.log",
+        "logSha256": "072e1ec238b34ee728ff99c11b4b7043b463790a6354d8ef2395aa16265ba53a",
+        "environment": "Real Linux host outside sandbox; inherited environment. No environment values recorded."
+      },
+      {
+        "command": [
+          "npm",
+          "run",
+          "build"
+        ],
+        "exitCode": 0,
+        "startedAtEpoch": 1791264390.1865702,
+        "finishedAtEpoch": 1791264400.734749,
+        "durationSeconds": 10.548,
+        "log": "/tmp/memsphere-output-format-build.log",
+        "logSha256": "dd492a5cd77cbecf93354303c7b215733839ed818d60604ffbc5208707fb849e",
+        "environment": "Real Linux host outside sandbox; inherited environment. No environment values recorded."
+      },
+      {
+        "command": [
+          "node",
+          "scripts/project-smoke.mjs"
+        ],
+        "exitCode": 0,
+        "startedAtEpoch": 1791264400.7354615,
+        "finishedAtEpoch": 1791264403.2619364,
+        "durationSeconds": 2.526,
+        "log": "/tmp/memsphere-output-format-project-smoke.log",
+        "logSha256": "59bce0f9bf0054fc413812fd639345b335b273e765b1dce2c5386b3504dbe05b",
+        "environment": "Real Linux host outside sandbox; inherited environment. No environment values recorded."
+      },
+      {
+        "command": [
+          "node",
+          "scripts/model-data-smoke.mjs"
+        ],
+        "exitCode": 0,
+        "startedAtEpoch": 1791264403.262425,
+        "finishedAtEpoch": 1791264419.5473125,
+        "durationSeconds": 16.285,
+        "log": "/tmp/memsphere-output-format-model-data-smoke.log",
+        "logSha256": "d2abe13060e34add19f5d3e31c115dde0c1aa32d6e915b5d9ba84e7910dc30a0",
+        "environment": "Real Linux host outside sandbox; inherited environment. No environment values recorded."
+      },
+      {
+        "command": [
+          "node",
+          "scripts/model-data-package-smoke.mjs"
+        ],
+        "exitCode": 0,
+        "startedAtEpoch": 1791264419.547785,
+        "finishedAtEpoch": 1791264440.9128323,
+        "durationSeconds": 21.365,
+        "log": "/tmp/memsphere-output-format-model-data-package-smoke.log",
+        "logSha256": "a426129ca44acfcbf9e3e32d46d1c2a57668679ab5b98537d52855d03437c139",
+        "environment": "Real Linux host outside sandbox; inherited environment. No environment values recorded."
+      }
+    ],
+    "verifiedFiles": [
+      {
+        "path": "test/cli-output-format.test.ts",
+        "sha256": "935fb7e7b3a0ed61e55df6a4f150e39584033b822b286c714c1666bf182a278c"
+      },
+      {
+        "path": "test/list-pagination-cli.test.ts",
+        "sha256": "ffcd608c6b5d23a263a75454177ad2d3737645f7301e59c8e42eda44998c56c3"
+      },
+      {
+        "path": "scripts/model-data-smoke.mjs",
+        "sha256": "c6681eceb239f7496c0feb16e70454c29ffbc2eb73d38349412b40279a3416d9"
+      },
+      {
+        "path": "src/commands/cli-errors.ts",
+        "sha256": "ea10241b81531ca6255759da135bb73ff7c2c220221852859435e119dd748ea9"
+      }
+    ],
+    "localPlatform": "Linux / Node 22.16.0; Windows-specific test skipped; no macOS or Node20 local execution claimed."
+  },
+  "history": {
+    "checks": "/tmp/memsphere-output-format-checks.json",
+    "logs": [
+      {
+        "log": "/tmp/memsphere-output-format-targeted.log",
+        "sha256": "04463f602f0cee34040a87f3923ac5ee3a05ac0ed64688032f1bcab7ab71e9d1",
+        "tests": "4",
+        "pass": "3",
+        "fail": "1",
+        "skipped": "0",
+        "duration_ms": "253.827881"
+      },
+      {
+        "log": "/tmp/memsphere-output-format-targeted-fixed.log",
+        "sha256": "c3fc719c117dfe3beaea18f098b1f22dd40ea2647d2326ff959161bc8ccf5cfd",
+        "tests": "7",
+        "pass": "6",
+        "fail": "1",
+        "skipped": "0",
+        "duration_ms": "47897.525963"
+      },
+      {
+        "log": "/tmp/memsphere-output-format-targeted-final.log",
+        "sha256": "0b33cf8d63da42643f493a3dec3f9d773c96680cf9a1e0001ca65341225c015f",
+        "tests": "7",
+        "pass": "7",
+        "fail": "0",
+        "skipped": "0",
+        "duration_ms": "52575.896148"
+      },
+      {
+        "log": "/tmp/memsphere-output-format-full-test.log",
+        "sha256": "9ad854d2221d7ffe69632b3dc633b9583f34ff706fe96038b3b4bf8896d34e9e",
+        "tests": "1072",
+        "pass": "1071",
+        "fail": "0",
+        "skipped": "1",
+        "duration_ms": "577731.71613"
+      }
+    ]
+  },
+  "fullSuite": {
+    "tests": 1072,
+    "pass": 1071,
+    "fail": 0,
+    "skip": 1,
+    "skipReason": "Windows-only shell integration on Linux"
+  },
+  "memory": {
+    "id": "change-20261005-031024825z-a1b5f8c3",
+    "status": "passed",
+    "store": "embedded",
+    "baseRevision": "2b7400b0d3bff6670982ebcd0a02f023a6859e34",
+    "contentDigest": "076c3c71256feb93c6754b44fecaa97d0b461b2da54b15da7bc1321a10a1f04e",
+    "view": "http://0.0.0.0:30000/projects/memsphere/changes/change-20261005-031024825z-a1b5f8c3",
+    "commands": [
+      {
+        "command": "node dist/cli.js --project memsphere validate",
+        "exitCode": 0
+      },
+      {
+        "command": "node dist/cli.js --project memsphere memory change validate",
+        "exitCode": 0
+      }
+    ],
+    "sourceCopiesIdentical": true
+  },
+  "nonChangeRecordFiles": {
+    "count": 138,
+    "pathAndBytesSha256": "976594d9c285c46d9046034190f1789b689b529fba8255474f83c73162d822e3",
+    "paths": [
+      ".github/workflows/ci.yml",
+      ".memsphere/memory/concepts/memsphere-framework.yaml",
+      ".memsphere/memory/statements/memsphere-memory-access-rules.yaml",
+      ".memsphere/memory/statements/memsphere-yaml-syntax-rules.yaml",
+      "README.en.md",
+      "README.md",
+      "THIRD_PARTY_NOTICES.md",
+      "docs/data-layer-design.md",
+      "examples/models/model-registration.json",
+      "examples/models/model-registrations.json",
+      "modules/org.memsphere.model-prototype/adapter/view/index.ts",
+      "modules/org.memsphere.models/adapter/view/index.ts",
+      "modules/org.memsphere.settings/adapter/view/settings-view.ts",
+      "package-lock.json",
+      "package.json",
+      "prototypes/model-registration/README.md",
+      "prototypes/model-registration/app.js",
+      "prototypes/model-registration/imported-models-demo.json",
+      "prototypes/model-registration/index.html",
+      "prototypes/model-registration/models.json",
+      "reserved-memory/system-memory/concepts/memsphere-framework.yaml",
+      "reserved-memory/system-memory/statements/memsphere-memory-access-rules.yaml",
+      "reserved-memory/system-memory/statements/memsphere-yaml-syntax-rules.yaml",
+      "reserved-models/manifest.json",
+      "reserved-models/market-models/examples/06-references-and-recursion.json",
+      "reserved-models/system-models/model-registration.json",
+      "scripts/model-data-package-smoke.mjs",
+      "scripts/model-data-smoke.mjs",
+      "scripts/project-smoke.mjs",
+      "src/acp/cli-runtime.ts",
+      "src/cli.ts",
+      "src/commands/archive.ts",
+      "src/commands/cli-errors.ts",
+      "src/commands/data-store.ts",
+      "src/commands/data.ts",
+      "src/commands/input.ts",
+      "src/commands/memory.ts",
+      "src/commands/model.ts",
+      "src/commands/project.ts",
+      "src/config-management.ts",
+      "src/config.ts",
+      "src/data/README.md",
+      "src/data/extensions/README.md",
+      "src/data/extensions/filesystem-datastore/README.md",
+      "src/data/extensions/filesystem-datastore/index.ts",
+      "src/data/extensions/filesystem-json-valuestore/README.md",
+      "src/data/extensions/filesystem-json-valuestore/index.ts",
+      "src/data/extensions/filesystem-json-valuestore/revision-state.ts",
+      "src/data/extensions/json-schema-metamodel/index.ts",
+      "src/data/extensions/json-schema/index.ts",
+      "src/data/extensions/json-serializer/index.ts",
+      "src/data/extensions/raw/index.ts",
+      "src/data/extensions/shared/filesystem.ts",
+      "src/data/management/README.md",
+      "src/data/operations/json-patch.ts",
+      "src/data/operations/json-path.ts",
+      "src/file-lock.ts",
+      "src/memory/catalog.ts",
+      "src/memory/factory.ts",
+      "src/memory/navigation.ts",
+      "src/memory/serializer.ts",
+      "src/pagination.ts",
+      "src/project/business-stores.ts",
+      "src/project/data-service.ts",
+      "src/project/example-relocation.ts",
+      "src/project/model-market.ts",
+      "src/project/model-operation.ts",
+      "src/project/model-registration-contract.ts",
+      "src/project/model-registration.ts",
+      "src/project/model-schema-references.ts",
+      "src/project/model-service.ts",
+      "src/project/model-validation.ts",
+      "src/project/model.ts",
+      "src/project/models.ts",
+      "src/project/run-data.ts",
+      "src/project/system-model-store.ts",
+      "src/project/system-models.ts",
+      "src/prompts/templates/en/acp-review-v2/partials/commands.hbs",
+      "src/prompts/templates/en/acp-review/partials/commands.hbs",
+      "src/prompts/templates/zh-CN/acp-review-v2/partials/commands.hbs",
+      "src/prompts/templates/zh-CN/acp-review/partials/commands.hbs",
+      "src/skills/memsphere/SKILL.md",
+      "src/view/view-runtime.ts",
+      "test/agent-review.test.ts",
+      "test/archive-run-data.test.ts",
+      "test/business-data-service.test.ts",
+      "test/cli-errors.test.ts",
+      "test/cli-output-format.test.ts",
+      "test/config-management.test.ts",
+      "test/data-command.test.ts",
+      "test/data-extensions.test.ts",
+      "test/data-filesystem-datastore.test.ts",
+      "test/data-filesystem-helpers.test.ts",
+      "test/data-filesystem-json-valuestore.test.ts",
+      "test/data-filesystem-open.test.ts",
+      "test/data-filesystem-process.test.ts",
+      "test/data-filesystem-revisions.test.ts",
+      "test/data-json-schema.test.ts",
+      "test/data-manager.test.ts",
+      "test/data-raw.test.ts",
+      "test/example-relocation.test.ts",
+      "test/file-lock.test.ts",
+      "test/fixtures/data-cli-worker.ts",
+      "test/fixtures/data-management.ts",
+      "test/fixtures/filesystem-store-worker.ts",
+      "test/fixtures/model-operation-worker.ts",
+      "test/helpers/business-data.ts",
+      "test/helpers/filesystem-process.ts",
+      "test/helpers/run-data.ts",
+      "test/json-patch.test.ts",
+      "test/json-path.test.ts",
+      "test/list-pagination-cli.test.ts",
+      "test/memory-catalog.test.ts",
+      "test/memory-changeset.test.ts",
+      "test/memory-cli.test.ts",
+      "test/memory-command.test.ts",
+      "test/memory-navigation.test.ts",
+      "test/memory-serializer.test.ts",
+      "test/model-browser-state.test.ts",
+      "test/model-command.test.ts",
+      "test/model-market-package.test.ts",
+      "test/model-market.test.ts",
+      "test/model-operation.test.ts",
+      "test/model-registration-browser.test.ts",
+      "test/model-registration.test.ts",
+      "test/model-schema-references.test.ts",
+      "test/model-service.test.ts",
+      "test/model-validation.test.ts",
+      "test/models-builtin-view-browser.test.ts",
+      "test/models-view-slots-browser.test.ts",
+      "test/pagination.test.ts",
+      "test/project-memory-provider.test.ts",
+      "test/project-models.test.ts",
+      "test/reserved-models.test.ts",
+      "test/run-data-access.test.ts",
+      "test/run-model-storage.test.ts",
+      "test/system-models.test.ts",
+      "test/view-settings.test.ts"
+    ]
+  },
+  "frozenArtifacts": {
+    "requirements.md": "d7293a0552a4c7fb4016402e72cbb42d04089a0b7088f4768778b48704762724",
+    "implementation-plan.md": "cddc81883d393e375bee3aef3a14ad87cdccccb46c24e558be89c4e7c7f250f8",
+    "implementation-acceptance.md": "c61b3907c9c1741bce7628a68fd0f080e9964b21ca56e2ce53d374d4bc353281",
+    "delivery-report.md": "c131e9649bc611c8b5ab114e65236afb0931d8969f65ea4435b053e155712c66"
+  },
+  "scope": "Success receipt presentation only: YAML text vs compact JSON; stable fields, types, cursors, stderr protocol and raw export; documented and tested. No formal Human vote inferred from the question.",
+  "unexecuted": "No Node20/macOS/Windows host run or remote CI result; no network filesystem claim"
+}

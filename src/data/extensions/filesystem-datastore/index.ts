@@ -6,7 +6,7 @@ import type { AppendableDataStore, DataStoreFactory, StoredData } from "../../ap
 import type { DataExtension } from "../../api/extension.js";
 import type { DeleteOptions, ListOptions, ListResult, StoreId, UpdateOptions } from "../../api/store.js";
 import {
-  appendFileContent, atomicPublish, cleanupCreatedDirectories, deleteFile, findFile, listRelativeFilenames, paginate, prepareDirectory,
+  appendFileContent, atomicPublish, cleanupCreatedDirectories, deleteFile, findFile, listRelativeFilenames, openExistingDirectory, paginate, prepareDirectory,
   readFileSnapshot, requirePositiveInteger, requireString, resolveFileParent,
   validateFilename, validateRelativeFilePath
 } from "../shared/filesystem.js";
@@ -44,12 +44,20 @@ export class FilesystemDataStoreFactory implements DataStoreFactory {
   readonly id = "memsphere/filesystem";
 
   async createStore(context: Context, id: StoreId, model: ModelRef, config: Config): Promise<AppendableDataStore> {
+    return this.open(context, id, model, config, prepareDirectory);
+  }
+
+  async openExisting(context: Context, id: StoreId, model: ModelRef, config: Config): Promise<AppendableDataStore> {
+    return this.open(context, id, model, config, openExistingDirectory);
+  }
+
+  private async open(context: Context, id: StoreId, model: ModelRef, config: Config, open: typeof prepareDirectory): Promise<AppendableDataStore> {
     throwIfAborted(context);
     requireString(id, "store id");
     requireString(model, "model");
     // Snapshot and validate the entire configuration before the first await.
-    const { directory, extensions } = parseConfig(config);
-    const root = await prepareDirectory(context, new Config({ directory }));
+    const { directory, extensions } = parseFilesystemDataStoreConfig(config);
+    const root = await open(context, new Config({ directory }));
     return new FilesystemDataStore(id, model, root, extensions);
   }
 }
@@ -166,10 +174,10 @@ class FilesystemDataStore implements AppendableDataStore {
 function rejectRevision(expectedRevision: number | undefined): void {
   if (expectedRevision === undefined) return;
   requirePositiveInteger(expectedRevision, "expectedRevision");
-  throw new Error("Filesystem DataStore does not support expectedRevision");
+  throw Object.assign(new Error("Filesystem DataStore does not support expectedRevision"), { code: "UNSUPPORTED_CAPABILITY" });
 }
 
-function parseConfig(config: Config): { directory: string; extensions: Array<readonly [string, string]> } {
+export function parseFilesystemDataStoreConfig(config: Config): { directory: string; extensions: Array<readonly [string, string]> } {
   const json = config.json;
   if (typeof json !== "object" || json === null || Array.isArray(json)) throw new TypeError("config must be a JSON object");
   for (const key of Object.keys(json)) {
@@ -177,6 +185,7 @@ function parseConfig(config: Config): { directory: string; extensions: Array<rea
   }
   const directory = json.directory;
   requireString(directory, "config.directory");
+  if (directory.trim().length === 0) throw new TypeError("config.directory must not be all whitespace");
   const mappings = new Map(Object.entries(DEFAULT_CONTENT_TYPE_EXTENSIONS));
   const configured = json.contentTypeExtensions;
   if (configured !== undefined) {

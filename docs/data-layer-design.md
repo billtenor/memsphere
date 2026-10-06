@@ -6,6 +6,8 @@
 
 接口代码与 review 入口见 [src/data](../src/data/README.md)。
 
+当前 Project 与 CLI 的统一规则：全部模型和元模型 ID 带 `.json` 后缀；禁止跨模型引用，只允许本模型内部复用。模型创建、更新、导入和使用都要求现有 Runtime 支持，不引入草稿或扩展 Runtime；合法但未支持的定义由只读校验明确诊断。CLI 通过 `config.json.dataStores` 显式访问业务 Store，保护系统目录，模型定义被直接绑定时不可替换或删除。filesystem JSON ValueStore 使用操作系统记录锁及持续递增的 revision，原始 filesystem DataStore 只提供无条件写，不提供记录锁或 revision；另有独立 Project 写锁协调模型和配置修改，模型写入中断后由下一条模型写命令先恢复一致状态。CLI 使用 RFC 9535 JSONPath 和 RFC 6902 JSON Patch，所有 list 都支持 limit/cursor。设计中扩展接口的通用能力不能用来绕过这些 Project 规则。
+
 ## 1. 目标
 
 Memsphere 的数据层不只负责“把值存下来”，还应当回答：
@@ -226,7 +228,7 @@ Descriptor 提供模型的类型和字段信息，Value 提供针对具体值实
 
 ### 4.4 根据模型定义创建 Runtime
 
-模型定义自身也是 Data。它的 `model` 指向元模型，即描述模型定义的模型。JSON Schema Draft-07 对应的元模型标识为 `json-schema/draft-07`。
+模型定义自身也是 Data。它的 `model` 指向元模型，即描述模型定义的模型。JSON Schema Draft-07 对应的元模型标识为 `json-schema/draft-07.json`。
 
 ```text
 order-001                  一条订单数据的 ID
@@ -236,7 +238,7 @@ order-model                订单模型的 ID
   model -> json-schema/draft-07
 ```
 
-业务或模型配置提供订单模型 ID `order-model` 及其元模型 ID `json-schema/draft-07`。系统加载订单模型定义，按照该元模型对应的 JSON Schema 标准解释定义，创建订单模型的 Runtime。
+业务或模型配置提供订单模型 ID `order-model.json` 及其元模型 ID `json-schema/draft-07.json`。系统加载订单模型定义，按照该元模型对应的 JSON Schema 标准解释定义，创建订单模型的 Runtime。
 
 ### 4.5 ModelRuntimeRegistry：按模型 ID 管理 Runtime
 
@@ -249,7 +251,7 @@ interface ModelRuntimeRegistry {
 }
 ```
 
-`register()` 按 `runtime.descriptor.id` 登记；`registry.get("order-model")` 返回已登记的订单 Runtime。未登记时返回 undefined，这不表示模型数据不存在。Memsphere 数据层负责加载模型、调用 Factory 创建 Runtime，并登记到 Registry；业务无需手工组织这些步骤。
+`register()` 按 `runtime.descriptor.id` 登记；`registry.get("order-model.json")` 返回已登记的订单 Runtime。未登记时返回 undefined，这不表示模型数据不存在。Memsphere 数据层负责加载模型、调用 Factory 创建 Runtime，并登记到 Registry；业务无需手工组织这些步骤。
 
 创建一个模型的 Runtime 时，通过 Registry 查询已准备好的依赖 Runtime。
 
@@ -322,7 +324,7 @@ DataStore 保存四项信息：
 - `payload.contentType`：内容格式；
 - `payload.content`：通过流读取的内容字节。
 
-例如，订单的 `id` 为 `order-001`，`model` 为 `order-model`，Payload 保存 `application/json` 和 `{"items":[{"quantity":2}]}` 的 JSON 字节。`id` 和 `model` 随 Data 一起保存，不需要放进订单的 JSON 内容中。
+例如，订单的 `id` 为 `order-001`，`model` 为 `order-model.json`，Payload 保存 `application/json` 和 `{"items":[{"quantity":2}]}` 的 JSON 字节。`id` 和 `model` 随 Data 一起保存，不需要放进订单的 JSON 内容中。
 
 `create/update` 各消费输入 Payload 一次，可以边读边写，不要求先将全部内容聚合到内存。正常 EOF 且保存完成后 Promise 成功；流错误、取消或存储失败时拒绝。不自动重放输入，也不回传保存的数据；需要读取内容或记录信息时，调用 `get()`。
 
@@ -400,7 +402,7 @@ interface ValueStore {
 
 UpdateOptions、DeleteOptions、ListOptions 和 ListResult 复用第 5.1 节的定义。
 
-例如，`orderStore` 是绑定 `order-model` 的 ValueStore，创建订单时可以直接提交订单对象：
+例如，`orderStore` 是绑定 `order-model.json` 的 ValueStore，创建订单时可以直接提交订单对象：
 
 ```ts
 await orderStore.create(context, "order-001", {
@@ -557,8 +559,8 @@ interface ModelRuntimeFactory<TDefinition = unknown> {
 
 `target` 声明 Factory 处理的对象：
 
-- `{ model: "json-schema/draft-07" }`：专门创建这个元模型的 Runtime，用于描述和操作 JSON Schema 模型定义。
-- `{ metaModel: "json-schema/draft-07" }`：解释采用 JSON Schema 编写的订单等模型定义，创建对应业务模型的 Runtime。
+- `{ model: "json-schema/draft-07.json" }`：专门创建这个元模型的 Runtime，用于描述和操作 JSON Schema 模型定义。
+- `{ metaModel: "json-schema/draft-07.json" }`：解释采用 JSON Schema 编写的订单等模型定义，创建对应业务模型的 Runtime。
 
 这是两个不同的 Factory 实现，都使用同一个 `createRuntime()` 接口。Memsphere 优先匹配具体模型 ID；没有专用 Factory 时，才按元模型 ID 选择通用 Factory。同一模型的专用 Factory 与其标准的通用 Factory 可以同时注册。
 
@@ -631,7 +633,7 @@ interface DataExtension {
 
 内置实现与业务实现使用相同的 DataExtension 接口。内置扩展按单个可独立替换的 Serializer 或 Factory 拆分，各自拥有独立的扩展 ID。例如，JSON Serializer、JSON Schema 业务模型的 Factory、文件系统 DataStoreFactory、文件系统 JSON ValueStoreFactory 分别作为独立扩展。内部辅助类和共用代码可以复用，不需要各自成为扩展；DataExtension 仍允许业务扩展组合多个实现。
 
-已实现扩展的配置、用法及支持范围见[内置扩展说明](../src/data/extensions/README.md)。默认注册表和 DataManager 已实现显式装配，见[装配用法](../src/data/management/README.md)；Project 配置接入与内置元模型引导扩展仍待实现。
+已实现扩展的配置、用法及支持范围见[内置扩展说明](../src/data/extensions/README.md)。默认注册表和 DataManager 已实现显式装配，见[装配用法](../src/data/management/README.md)；Project 已接入模型目录、登记及显式业务 Store，内置 JSON Schema 元模型引导已实现。
 
 默认装配维护这些独立扩展的列表。替换某项内置能力时，在注册前移除对应扩展并加入替代扩展，保留其他扩展；若 Store Factory 的 ID 改变，同时调整对应存储绑定。替换后的组合仍须满足依赖和兼容性要求，注册冲突不通过加载顺序覆盖。
 
@@ -734,7 +736,7 @@ DefaultDataManager 接收共享扩展目录、模型来源和 Store 绑定，并
 
 Memsphere 在确定的模型版本或快照范围内创建和复用 Runtime，并将完成的实例登记到 Registry。同一模型 ID 重复注册时报错；同一快照复用 Runtime 和 Descriptor，保证字段归属检查一致。模型及其依赖变化时，由 Memsphere 组织重建和更新。
 
-无环依赖按依赖顺序创建并注册。类型图仍需支持递归结构；跨标准依赖的发现协议，以及跨模型循环依赖的分阶段构建、占位连接和发布方式见待决问题。
+类型图支持本模型内部递归；当前不支持跨模型引用，不设计跨标准依赖发现或跨模型循环构建。通用 Manager 依赖接口不是 Project 开放跨模型引用的入口。
 
 ### 8.2 准备模型 Runtime
 
@@ -742,14 +744,14 @@ Memsphere 在反射访问值实例前准备并注册所需的 Runtime。业务�
 
 元模型的 Runtime 也由 Factory 创建。Memsphere 使用标准扩展提供的已解码内置定义，调用匹配该元模型 ID 的专用 Factory，再登记返回的 Runtime。这一步不经过依赖该 Runtime 的反序列化流程；内置创建输入的提供方式及元信息表示见第 13 章待决问题。
 
-本例的订单模型定义保存在业务指定的 `model-definitions` DataStore 中，其绑定模型为 `json-schema/draft-07`；订单值实例则由 `orders` Store 保存，其绑定模型为 `order-model`。
+本例的订单模型定义保存在业务指定的 `model-definitions` DataStore 中，其绑定模型为 `json-schema/draft-07.json`；订单值实例则由 `orders` Store 保存，其绑定模型为 `order-model.json`。
 
-以尚未登记的 `order-model` 为例，普通无环依赖的准备过程如下：
+以尚未登记的 `order-model.json` 为例，普通无环依赖的准备过程如下：
 
-1. 按第 8.3 节准备 `model-definitions` DataStore，再通过 `get(context, "order-model")` 加载模型定义的 Data，并检查其 ID 和元模型与请求一致。
-2. 准备或复用 `json-schema/draft-07` 的 Runtime，使用它的 Descriptor 和匹配模型 Payload.contentType 的 Serializer，反序列化订单模型定义，组成 Model。
-3. 准备并注册订单模型依赖的其他 Runtime。
-4. 优先选择 `target.model` 为 `order-model` 的 Factory；没有专用 Factory 时，选择 `target.metaModel` 为 `json-schema/draft-07` 的 Factory，调用 `createRuntime(context, model, registry)`。
+1. 按第 8.3 节准备 `model-definitions` DataStore，再通过 `get(context, "order-model.json")` 加载模型定义的 Data，并检查其 ID 和元模型与请求一致。
+2. 准备或复用 `json-schema/draft-07.json` 的 Runtime，使用它的 Descriptor 和匹配模型 Payload.contentType 的 Serializer，反序列化订单模型定义，组成 Model。
+3. 检查模型只使用本模型内部引用，发现跨模型引用明确失败。
+4. 优先选择 `target.model` 为 `order-model.json` 的 Factory；没有专用 Factory 时，选择 `target.metaModel` 为 `json-schema/draft-07.json` 的 Factory，调用 `createRuntime(context, model, registry)`。
 5. 检查返回 Runtime 的模型 ID，再调用 `registry.register(runtime)` 登记并复用。
 
 ### 8.3 根据存储绑定创建 Store
@@ -771,7 +773,7 @@ type StoreBinding = {
 ```json
 {
   "id": "orders",
-  "model": "order-model",
+  "model": "order-model.json",
   "kind": "DataStore",
   "factory": "memsphere/filesystem",
   "config": {
@@ -896,11 +898,11 @@ const extension: DataExtension = {
 其中：
 
 - `acmeDslSerializer` 把 `application/vnd.acme.model+yaml` 反序列化为运行时定义；
-- `acmeMetaModelRuntimeFactory.target` 为 `{ model: "acme/domain-model-language@1" }`，创建该元模型的 Runtime，描述该语言的模型定义结构；
-- `acmeDomainModelRuntimeFactory.target` 为 `{ metaModel: "acme/domain-model-language@1" }`，解释该语言编写的模型定义，创建具体模型的 Runtime；
+- `acmeMetaModelRuntimeFactory.target` 为 `{ model: "acme/domain-model-language@1.json" }`，创建该元模型的 Runtime，描述该语言的模型定义结构；
+- `acmeDomainModelRuntimeFactory.target` 为 `{ metaModel: "acme/domain-model-language@1.json" }`，解释该语言编写的模型定义，创建具体模型的 Runtime；
 - `fileDataStoreFactory` 和 `orderValueStoreFactory` 分别提供 Data 与值实例的存储实现，具体模型使用哪种实现由存储绑定配置决定；
-- `acme/order-model` 是采用该语言编写的订单模型的 ID；
-- 订单数据 `order-001` 的 `model` 指向 `acme/order-model`。
+- `acme/order-model.json` 是采用该语言编写的订单模型的 ID；
+- 订单数据 `order-001` 的 `model` 指向 `acme/order-model.json`。
 
 ## 13. 待决问题
 

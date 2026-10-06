@@ -1,0 +1,140 @@
+{
+  "date": "2026-10-05",
+  "run": "run-20261003-090655z-f1e492f6",
+  "platform": {
+    "os": "linux",
+    "node": "22.16.0",
+    "npm": "10.9.2"
+  },
+  "finalChecks": [
+    {
+      "command": "npm test -- --test-concurrency=1",
+      "exitCode": 0,
+      "startedAt": 1791171034.4716244,
+      "finishedAt": 1791171553.7279935,
+      "durationSeconds": 519.256,
+      "log": "/tmp/memsphere-model-data-full-test-final.log",
+      "tests": {
+        "tests": 1062,
+        "suites": 0,
+        "pass": 1061,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 1,
+        "todo": 0,
+        "duration_ms": 508546.311263
+      },
+      "logSha256": "c334046f60567604787c6b6c42d81fe494da2f792772e545420c9ade99b8bc80"
+    },
+    {
+      "command": "npm run typecheck",
+      "exitCode": 0,
+      "startedAt": 1791171667.3288617,
+      "finishedAt": 1791171676.510387,
+      "durationSeconds": 9.182,
+      "log": "/tmp/memsphere-model-data-final-typecheck.log",
+      "logSha256": "072e1ec238b34ee728ff99c11b4b7043b463790a6354d8ef2395aa16265ba53a"
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "startedAt": 1791171676.5106797,
+      "finishedAt": 1791171687.316946,
+      "durationSeconds": 10.806,
+      "log": "/tmp/memsphere-model-data-final-build.log",
+      "logSha256": "dd492a5cd77cbecf93354303c7b215733839ed818d60604ffbc5208707fb849e"
+    },
+    {
+      "command": "node scripts/project-smoke.mjs",
+      "exitCode": 0,
+      "startedAt": 1791171687.3172565,
+      "finishedAt": 1791171689.6963723,
+      "durationSeconds": 2.379,
+      "log": "/tmp/memsphere-model-data-final-project-smoke.log",
+      "logSha256": "59bce0f9bf0054fc413812fd639345b335b273e765b1dce2c5386b3504dbe05b"
+    },
+    {
+      "command": "node scripts/model-data-smoke.mjs",
+      "exitCode": 0,
+      "startedAt": 1791171689.6966872,
+      "finishedAt": 1791171702.6331513,
+      "durationSeconds": 12.936,
+      "log": "/tmp/memsphere-model-data-final-model-data-smoke.log",
+      "logSha256": "d2abe13060e34add19f5d3e31c115dde0c1aa32d6e915b5d9ba84e7910dc30a0"
+    },
+    {
+      "command": "node scripts/model-data-package-smoke.mjs",
+      "exitCode": 0,
+      "startedAt": 1791171702.6334984,
+      "finishedAt": 1791171721.3198223,
+      "durationSeconds": 18.686,
+      "log": "/tmp/memsphere-model-data-final-model-data-package-smoke.log",
+      "logSha256": "a426129ca44acfcbf9e3e32d46d1c2a57668679ab5b98537d52855d03437c139"
+    },
+    {
+      "command": "node dist/cli.js --project memsphere validate",
+      "exitCode": 0,
+      "result": "memsphere validation passed",
+      "scope": "current worktree Project Memory Store"
+    },
+    {
+      "command": "node dist/cli.js --project memsphere memory change validate",
+      "exitCode": 0,
+      "changeId": "change-20261005-031024825z-a1b5f8c3",
+      "status": "active",
+      "validation": "passed",
+      "contentDigest": "e62d52dda1c709b34a59320245f3fa899f6092e8b550ade9c5c82e7d4a654022",
+      "view": "http://0.0.0.0:30000/projects/memsphere/changes/change-20261005-031024825z-a1b5f8c3"
+    }
+  ],
+  "firstFullTest": {
+    "command": "npm test -- --test-concurrency=1",
+    "exitCode": 1,
+    "startedAt": 1791170124.0863853,
+    "finishedAt": 1791170641.537831,
+    "durationSeconds": 517.451,
+    "log": "/tmp/memsphere-model-data-full-test.log",
+    "tests": {
+      "tests": 1049,
+      "pass": 1025,
+      "fail": 23,
+      "skipped": 1
+    },
+    "failedCases": [
+      "Run archive and restore transfer opaque Store content without list or local content paths",
+      "a failed destination write preserves the source and redo overwrites partial target content",
+      "post-commit cleanup failure retries deletion without copying stale source over the committed target",
+      "archive/restore allows optional activity absence without inventing presence flags (queued, log)",
+      "archive/restore allows optional activity absence without inventing presence flags (queued, snapshot)",
+      "archive/restore allows optional activity absence without inventing presence flags (queued, both)",
+      "archive/restore allows optional activity absence without inventing presence flags (running, log)",
+      "archive/restore allows optional activity absence without inventing presence flags (running, snapshot)",
+      "archive/restore allows optional activity absence without inventing presence flags (running, both)",
+      "archive/restore allows optional activity absence without inventing presence flags (submitted, log)",
+      "archive/restore allows optional activity absence without inventing presence flags (submitted, snapshot)",
+      "archive/restore allows optional activity absence without inventing presence flags (submitted, both)",
+      "archive/restore allows optional activity absence without inventing presence flags (failed, log)",
+      "archive/restore allows optional activity absence without inventing presence flags (failed, snapshot)",
+      "archive/restore allows optional activity absence without inventing presence flags (failed, both)",
+      "archive/restore allows optional activity absence without inventing presence flags (cancelled, log)",
+      "archive/restore allows optional activity absence without inventing presence flags (cancelled, snapshot)",
+      "archive/restore allows optional activity absence without inventing presence flags (cancelled, both)",
+      "activity read errors are not treated as optional absence and leave source status/content intact",
+      "an activity file discovered then lost before verification prevents the status switch",
+      "restore cleanup retains unknown files, removes ghost listing and redo never copies stale archive content back",
+      "model registration initialization and market imports protect permission and config revision",
+      "model market cleanup requires authorization and current revision before recovering failed candidates"
+    ],
+    "logSha256": "af35f8a441bfd870b1b913b7b2b805b428e86f847b8ff989d9d8a0337d5fec8d"
+  },
+  "memorySourcesMatch": true,
+  "approvedArtifactHashesUnchanged": true,
+  "unverified": [
+    "Node 20 local execution",
+    "macOS",
+    "Windows",
+    "network filesystem",
+    "power-loss durability"
+  ],
+  "note": "Logs remain local in /tmp; this file preserves actual commands, counts, exit codes and log digests. See browser-verification.md for recorded actual playwright-cli and model-side commands."
+}

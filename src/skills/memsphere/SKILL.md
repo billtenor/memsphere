@@ -15,29 +15,62 @@ Memory 是 Agent 理解并进入个性化软件的语义入口。通过 memspher
 
 Memsphere Home 的 `config.json` 中，`language` 同时控制面向 Agent 的工作语言与 View 固定界面语言，支持 `zh-CN` 和 `en`，省略时固定为 `zh-CN`。Run 启动后只冻结该 Run 的 Agent 工作语言，因此修改配置只影响后续创建的 Run；配置中心成功保存语言后，当前 View 进程立即更新，下一次页面加载使用新界面语言。
 
+Memsphere CLI 要求 Node.js 22 或更高版本；开发与 CI 使用 Node 22 LTS。
+
 ## Memory 写入硬门禁
 
 只要本轮创建、修改、移动、重命名或删除了任何 Memory，结束任务、提交评审或创建 Git commit 前都必须执行 `memsphere memory change validate [change-id]`。普通 `memsphere validate` 只校验当前 Project Store 或显式 Memory root，不能代替变更级校验，也不会创建或更新 ChangeSet。最终实现摘要、验证报告或交付报告必须包含与当前最终 Memory 内容匹配的 ChangeSet ID、校验状态和 View 入口；校验后继续修改 Memory 时必须重新执行变更级校验。
 
 没有 Memory 差异时不创建空 ChangeSet。`memsphere validate --memory-root` 是没有 Project、Registry 或 ChangeSet 上下文的无状态入口，不得把它的成功结果当作变更级交付证据。
 
-## Project 模型与登记
+## Project 模型与业务数据
 
-本项目自定义 JSON Schema 模型结构保存在 filesystem DataStore 的原始 `.json` 文件中，modelRef 使用包含后缀的相对路径，例如 `sales/order.json`。项目模型 Store ID 为 `models/json-schema/draft-07`；Project `config.json` 的可选 `modelsDirectory` 默认 `models/json-schema/draft-07`，相对 Registry 登记的 Project 根目录解析，也可用绝对路径。修改模型存储目录不自动迁移原文件。
+模型定义和模型登记分别保存：定义是原始 JSON，登记包含名称、说明、包、标签及定义存储位置。所有模型和元模型 ID 都使用 `.json` 后缀，例如 `sales/order.json`、`memsphere/model-registration.json`、`json-schema/draft-07.json` 和 `raw.json`；Store ID 和 Factory ID 不因此改名。相对目录以 Registry 登记的 Project 根目录为基准，不以当前命令目录为基准。
 
-管理信息使用持久化的 `memsphere/model-registration`，Runtime 直接读取固定位置的定义，无需先读取自己的登记记录；仅在整个系统模型子树不存在时使用发行 JSON 自举。字段为 `modelRef`、`name`、`description`、`package`、`package_name`、`tags`、`storage`、`store_id`；`modelRef`、`storage` 必填。`storage=builtin` 是代码内置且不带 `store_id`；`storage=store` 是持久化存储且必须用 `store_id` 指向模型 DataStore。登记 value 存在 filesystem ValueStore 中，不能将这个管理 Store 当作模型定义的 Store。来源由项目、导入及系统上下文提供；本项目也可以组织包，没有 `package` 就进入未定义包，包显示名来自 `package_name`，不额外建立包模型或 `domain`。
+```bash
+memsphere model list --limit 100 --output json
+memsphere model read sales/order.json --part all --output json
+memsphere model create sales/order.json --definition-file order.json --name 订单
+memsphere model update sales/order.json --description 新说明 --unset tags
+memsphere model validate sales/order.json --definition-file candidate.json --check runtime
+memsphere model delete sales/order.json --dry-run
+```
 
-通过明确的 Project 执行初始化，读取页面不会自动写入：
+`model read` 的 `--part` 只有 `definition`、`registration` 和 `all`，默认读取定义。`--unset` 删除指定登记字段，例如删除标签；不能删除身份或存储绑定。系统模型的定义和全部登记字段只读，普通模型命令不能创建、覆盖、修改或删除系统模型。创建、更新固定要求定义合法且现有 Runtime 支持；没有草稿模型。`validate --check definition` 只检查定义及本模型内部引用，`--check runtime` 还检查运行能力，默认 runtime；它们是只读诊断，不决定创建的准入标准。不支持的规则明确报错，不扩大 Runtime 支持范围。跨模型引用一律不允许，本模型内部的 `#`、`#/...` 引用仍可使用。
 
-`project create` 为 Managed 和 Embedded 自动将 `reserved-models/system-models/` 的五个内置定义及清单登记安装到所选登记根的 `system/definitions/` 与 `system/registrations/`；使用 `storage=store`、`models/system/json-schema/draft-07` 或 `models/system/raw`，模型 ID 保持不变。系统来源与持久化存储是不同属性。未安装 Project 的列表不提供虚拟内置模型，已有 Project 用下面命令补装；已有完整相同内容保持不变，部分缺失、损坏或定义冲突明确失败。
+项目模型的默认定义目录是 `models/json-schema/draft-07`，默认 Store ID 同名。登记模型为 `memsphere/model-registration.json`；`config.json` 的 `modelRegistration` 选择登记 Store ID，默认 `memsphere/model-registrations`，目录默认 `models/registrations`。登记分别保存在 project、imported、system/registrations；来源由这些区域决定。定义和管理数据不能混用 Store。
+
+新建 Project 自动安装五个系统模型。已有 Project 用以下命令显式安装及统一旧模型 ID；命令保留登记 UUID、管理属性、业务记录和冻结 Run 历史，检查全部冲突后才修改身份绑定，普通模型原文不改写。跨模型引用必须先清理，损坏、缺失或身份冲突明确失败，不静默覆盖。
 
 ```bash
 memsphere --project <project-name> project models initialize
 ```
 
-初始化保留已有管理属性及模型原文字节，可重复执行，损坏记录明确报诊断；仅对已确认的旧登记模型预览执行备份和内置身份迁移，无法处理的引用阻止迁移。命令也接受 `project models initialize [name] --output json`，输出创建、保留、诊断及备份回执。当前 View 暂时隐藏“添加存储”和“初始化模型登记”入口，保留已有存储配置，相关服务和 CLI 保留供以后开放。“设置 → 模型登记存储”先选择存储 ID，再编辑对应 Store 的类型和目录；登记模型固定只读。`modelRegistration.storeId` 默认 `memsphere/model-registrations`，`stores` 中的 filesystem ValueStore 默认目录为 `models/registrations`。有数据时切换 Store 或目录必须明确授权迁移；完整校验目标后才切配置，失败保留原数据，旧目录继续排除于模型发现。登记数据、备份与导入定义都不会被误当作项目模型扫描。
+模型写入共享 Project 文件锁，并保存修改前后的文件内容；写入中断后，下一条模型写命令先恢复文件的一致状态，再检查新请求。重试原写命令即可，不要求专门运行 initialize；读取和 dry-run 不恢复。如果文件被外部改动，恢复保留新内容并报告冲突。设置修改、模型 CRUD、初始化和市场导入共用 Project 写锁；业务记录的跨进程锁位于 filesystem JSON ValueStore 内。filesystem DataStore 不新增记录锁或 revision。
 
-正式模型页面按本项目的包、已导入的包和模型市场展示。列表第四行只展示标签，默认“模型信息”表格在“模型结构”和“原始定义”之前；包范围、标签和搜索共同筛选并保存在 URL。市场通过 `reserved-models/manifest.json` 管理 `reserved-models/market-models/` 原始 JSON，提供含用例 01–08 的 `memsphere.examples`，订单示例仅作为其中用例 02；未导入模型不生效，导入定义使用独立的 `models/imported/json-schema/draft-07` DataStore。重复相同内容无变更，已有修改或同模型 ID 冲突拒绝整包并列出冲突，未完成导入不进入正常模型列表。市场移除包不删除已有导入数据，当前不提供卸载入口。保存设置与市场导入使用正式 View 写权限。暂不提供网页模型定义编辑或值实例管理，JSON Schema 元模型引导不等于支持全部 Draft-07 业务反射特性。
+模型市场的 `memsphere.examples` 包包含八份原始示例。导入前对整包执行与普通模型写入相同的完整检查；其中例 04/05 使用现有 Runtime 不支持的规则，所以当前整包明确拒绝，不删规则或部分导入。已有不支持的模型在列表标为 unavailable，正常读取或写入同样拒绝；可以用只读 definition 诊断查明原因。例 06 只演示本模型内部复用和递归。
+
+业务 Store 必须在当前 Project 的 `config.json.dataStores` 显式登记，每个 Store 绑定一个模型。CLI 当前支持 `value + memsphere/filesystem-json` 和 `data + memsphere/filesystem` 两组。Store ID 不能空白、包含 NUL 字符或使用 `__proto__`，也不能使用模型、登记或 Run 的保留 ID。directory 的相对路径以 Registry Project 根解析，绝对路径按指定位置解析；两者都不得与 Memory、模型、登记、Run、Archive 或其他业务 Store 重叠。Embedded Project 在所有 Git worktree 中的 Memory 目录都受保护。配置文件只提供 Factory 配置，例如 `{ "directory": "data/orders" }`；DataStore 可用 `contentTypeExtensions` 配置 MIME 后缀，省略时采用内置映射，如 `{ "application/json": [".json"] }`。
+
+```bash
+memsphere data store create orders --model sales/order.json --kind value --factory memsphere/filesystem-json --config-file store.json
+memsphere data store list --limit 100 --output json
+memsphere data store read orders --output json
+memsphere data create order-001 --store orders --value-file order-value.json
+memsphere data list --store orders --limit 100 --output json
+memsphere data read order-001 --store orders --path '$.items[*]' --output json
+memsphere data update order-001 --store orders --value-file new-value.json --expected-revision 1
+memsphere data edit order-001 --store orders --patch-file edits.json
+memsphere data export order-001 --store orders --as json --out exported.json
+memsphere data delete order-001 --store orders --expected-revision 2
+memsphere data store remove orders
+```
+
+`--path <path>` 当前使用 RFC 9535 JSONPath，结果始终是匹配值数组。`data edit` 使用 RFC 6902 JSON Patch，修改完整副本后校验并以读取时的 revision 条件保存，冲突不自动重试。ValueStore 的 update/delete 可选 `--expected-revision`，省略表示无条件写；删除后重建同 ID 的 revision 继续增加，旧 revision 不能命中新记录。DataStore 不支持条件写或 edit；它支持原始 Payload 的文件和 MIME 检查、原样写入及导出，二进制不能按 JSON 路径读取。
+
+`data store remove` 只移除绑定，保留记录、锁文件和已删除记录的 revision 历史。重新登记非空目录须完整检查格式和兼容性。export 文件目标必须不存在；`--out -` 只输出正文，不能同时请求 JSON 回执。输入文件参数中的 `-` 明确表示标准输入，不带参数时不会自动读标准输入。
+
+所有 list 命令都支持 `--limit <n>`、`--cursor <token>`：默认 100、最多 1000，先筛选再分页，响应使用 `items` 和可选 `nextCursor`。需要完整列表时，把返回的 nextCursor 原样传给同一查询继续读取，直到不再返回；不要把第一页当作全部结果。可更改 limit/output，不能更改 Project、Store 或筛选条件后复用 cursor，分页不承诺并发修改期间的快照。新增模型、数据和 data store 命令默认 `--output text`，成功用 YAML 键值、缩进和列表展示完整结果，包括嵌套值和 nextCursor；失败只在 stderr 显示文本说明。使用 `--output json` 时，成功只在 stdout 输出一个 JSON，失败只在 stderr 输出 `{ "error": { "code": "...", "message": "...", "details": ... } }` 并以非零状态退出。原始导出正文不经过回执格式转换。
 
 ## Memsphere 如何组织记忆
 

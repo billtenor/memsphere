@@ -291,3 +291,37 @@ test("registration directory switches require explicit migration, preserve bytes
     assert.ok(validation.candidate?.modelRegistration?.excludedDirectories?.includes(oldDirectory));
   } finally { await rm(fixture.dir, { recursive: true, force: true }); }
 });
+
+test("ordinary Project settings saves preserve all business Store bindings", async () => {
+  const fixture = await fixtureConfig();
+  try {
+    const dataStores = { orders: { model: "order.json", kind: "value", factory: "memsphere/filesystem-json", config: { directory: "data/orders" } } };
+    await writeFile(fixture.configPath, JSON.stringify({ ...fixture.projectDocument.raw, dataStores }));
+    const latest = await readProjectConfigDocument(fixture.configPath, fixture.resolved);
+    const draft = editableProjectConfigDraft(latest); draft.control_plane!.actors.human!.name = "Changed name";
+    const saved = await writeProjectConfigDraft({ document: latest, expectedRevision: latest.revision, draft, globalConfigPath: fixture.globalConfigPath });
+    assert.deepEqual(saved.raw.dataStores, dataStores);
+    assert.deepEqual(JSON.parse(await readFile(fixture.configPath, "utf8")).dataStores, dataStores);
+    assert.equal(saved.raw.control_plane?.actors.human?.name, "Changed name");
+  } finally { await rm(fixture.dir, { recursive: true, force: true }); }
+});
+
+test("Project settings reject model directories overlapping any business Store before changing config or data", async () => {
+  const fixture = await fixtureConfig();
+  try {
+    const dataStores = { orders: { model: "order.json", kind: "value", factory: "memsphere/filesystem-json", config: { directory: "data/orders" } } };
+    await writeFile(fixture.configPath, JSON.stringify({ ...fixture.projectDocument.raw, dataStores }));
+    const dataPath = join(fixture.resolved.scopeRoot, "data/orders"); await mkdir(dataPath, { recursive: true });
+    await writeFile(join(dataPath, "existing.json"), "retained original data");
+    const latest = await readProjectConfigDocument(fixture.configPath, fixture.resolved);
+    const source = await readFile(fixture.configPath, "utf8");
+    const { snapshotTree } = await import("./helpers/business-data.js"); const before = await snapshotTree(dataPath);
+    for (const modelsDirectory of ["data", "data/orders", "data/orders/nested"]) {
+      await assert.rejects(writeProjectConfigDraft({ document: latest, expectedRevision: latest.revision,
+        draft: { ...editableProjectConfigDraft(latest), modelsDirectory }, globalConfigPath: fixture.globalConfigPath }),
+      error => !!error && typeof error === "object" && "code" in error && error.code === "STORE_PATH_CONFLICT");
+      assert.equal(await readFile(fixture.configPath, "utf8"), source);
+      assert.deepEqual(await snapshotTree(dataPath), before);
+    }
+  } finally { await rm(fixture.dir, { recursive: true, force: true }); }
+});

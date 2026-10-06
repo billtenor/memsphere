@@ -13,7 +13,7 @@
       "package_name": "交易与订单",
       "storage": "store"
     },
-    "metaModel": "json-schema/draft-07",
+    "metaModel": "json-schema/draft-07.json",
     "schema": {
       "title": "市场订单",
       "type": "object",

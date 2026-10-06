@@ -882,7 +882,7 @@ function createPresentationService(projectId: string): ViewPresentationService {
     const route = routeSnapshot();
     const origin = (model: ModelPresentationSummary) => model.origin ?? (model.builtin ? "system" : "project");
     const scopes = new Set(models.filter(model => model.registration?.package).map(model => `${origin(model)}:${model.registration!.package}`));
-    const requestedModel = models.find(model => model.id === route.query.model || route.query.model === "memsphere/model-registration.json" && model.id === "memsphere/model-registration");
+    const requestedModel = models.find(model => model.id === route.query.model);
     const requested = route.query.scope ?? (requestedModel?.registration?.package ? `${origin(requestedModel)}:${requestedModel.registration.package}` : "custom");
     const scope = scopes.has(requested) ? requested : [...scopes].find(value => value.split(":").slice(1).join(":") === requested) ?? "custom";
     const availableTags = new Set(models.filter(model => scope === "custom" ? origin(model) === "project" && !model.registration?.package : `${origin(model)}:${model.registration?.package}` === scope).flatMap(model => model.registration?.tags ?? []));
@@ -891,7 +891,7 @@ function createPresentationService(projectId: string): ViewPresentationService {
     const visible = models.filter(model => (scope === "custom" ? origin(model) === "project" && !model.registration?.package : `${origin(model)}:${model.registration?.package}` === scope)
       && (!tag || model.registration?.tags?.includes(tag))
       && `${model.registration?.name ?? model.title ?? model.id} ${model.id} ${model.registration?.description ?? model.description ?? ""} ${(model.registration?.tags ?? []).join(" ")}`.toLowerCase().includes(query));
-    const selectedModelId = visible.find(model => model.id === route.query.model || route.query.model === "memsphere/model-registration.json" && model.id === "memsphere/model-registration")?.id ?? visible[0]?.id;
+    const selectedModelId = visible.find(model => model.id === route.query.model)?.id ?? visible[0]?.id;
     return Object.freeze({
       kind: "models-page" as const,
       route,

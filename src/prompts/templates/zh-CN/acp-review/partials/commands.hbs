@@ -14,6 +14,7 @@
 - 发现和读取项目 Memory：
   "$MEMSPHERE_CLI" memory list --output json
   "$MEMSPHERE_CLI" memory read <reference> --output json
+- Memory list 返回 items 和可选 nextCursor，默认只取 100 条。需要完整结果时用 "$MEMSPHERE_CLI" memory list --cursor <nextCursor> --output json 持续翻页，保持筛选条件不变；没有 nextCursor 才表示结束。
 - 添加具体评审意见。Comment 正文使用 Markdown：
   - 必须选择明确的严重程度：`blocking`、`risk` 或 `suggestion`。
   - 单行意见：

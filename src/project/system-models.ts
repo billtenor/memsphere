@@ -3,19 +3,22 @@ import { mkdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Context } from "../data/api/context.js";
 import { bytesContent, readAll } from "../data/extensions/shared/payload.js";
-import { RawModelRuntime } from "../data/extensions/raw/index.js";
+import { RAW_MODEL } from "../data/extensions/raw/index.js";
+import { JSON_SCHEMA_DRAFT_07 } from "../data/extensions/json-schema/index.js";
 import { readBundledSystemModels } from "../reserved/models.js";
 import { createModelRegistrationStore, pathExists, readModelRegistrations } from "./model-registration.js";
 import { DEFAULT_MODEL_REGISTRATION_CONFIG, SYSTEM_JSON_SCHEMA_MODELS_STORE, SYSTEM_RAW_MODELS_STORE, type ProjectModelInput } from "./model-registration-contract.js";
 import { modelDefinitionStore } from "./system-model-store.js";
 import { discoverModelIds } from "./model-storage-paths.js";
+import { checkModelDefinition } from "./model-validation.js";
 
 export type SystemModelInstallation = { status: "installed" | "unchanged"; created: number; retained: number };
 export type SystemModelInstallOptions = { beforePublish?: () => Promise<void> };
 
-/** Caller owns the Project settings lock or an unpublished Project staging root. */
+/** Internal bootstrap for an unpublished Project staging root only. Published Projects use initializeProjectModelRegistrations and its operation journal. */
 export async function installBundledSystemModels(context: Context, input: ProjectModelInput, options: SystemModelInstallOptions = {}): Promise<SystemModelInstallation> {
   const models = readBundledSystemModels();
+  for (const model of models) await checkModelDefinition(context, { modelRef: model.registration.modelRef, ...model });
   const state = await readModelRegistrations(context, input);
   if (state.diagnostics.length) throw new TypeError(`Damaged model registrations: ${state.diagnostics.map(d => d.message).join(", ")}`);
   const ids = await discoverModelIds(context, state.paths.modelsDirectory, state.paths.excludedDirectories);
@@ -51,7 +54,6 @@ export async function installBundledSystemModels(context: Context, input: Projec
       const saved = await store.get(context, data.id);
       if (!saved || !Buffer.from(await readAll(context, saved.data.payload.content)).equals(Buffer.from(model.source)))
         throw new Error(`System model byte verification failed: ${data.id}`);
-      if (model.metaModel === "raw") new RawModelRuntime({ data, definition: model.definition });
       const recordId = randomUUID();
       await records.create(context, recordId, structuredClone(model.registration));
       if (!await records.get(context, recordId)) throw new Error(`System model registration verification failed: ${data.id}`);
@@ -68,7 +70,8 @@ export async function installBundledSystemModels(context: Context, input: Projec
   }
 }
 function systemStore(root: string, metaModel: string) {
-  if (metaModel !== "raw" && metaModel !== "json-schema/draft-07") throw new TypeError(`Unsupported system model standard: ${metaModel}`);
-  const id = metaModel === "raw" ? SYSTEM_RAW_MODELS_STORE : SYSTEM_JSON_SCHEMA_MODELS_STORE;
-  return modelDefinitionStore(id, metaModel, join(root, "definitions", metaModel), true);
+  if (metaModel !== RAW_MODEL && metaModel !== JSON_SCHEMA_DRAFT_07) throw new TypeError(`Unsupported system model standard: ${metaModel}`);
+  const raw = metaModel === RAW_MODEL;
+  return modelDefinitionStore(raw ? SYSTEM_RAW_MODELS_STORE : SYSTEM_JSON_SCHEMA_MODELS_STORE,
+    metaModel, join(root, "definitions", raw ? "raw" : "json-schema/draft-07"), true);
 }

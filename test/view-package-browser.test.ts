@@ -1,10 +1,10 @@
+import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { chromium } from "playwright";
 import type { MemsphereConfig } from "../src/config.js";
 import { readProjectConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
@@ -54,7 +54,7 @@ test("trusted local Package replaces Memory and Run through formal composition a
     server.listen(0, "127.0.0.1", resolveListen);
   });
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   try {
     await page.goto(`${origin}/projects/demo/memories`);
@@ -123,7 +123,7 @@ test("Settings completes the local Package installation and Project enablement f
   await writeFile(join(projectRoot, "config.json"), JSON.stringify({ store: { type: "managed", branch: "master", published_revision: "test" } }));
   await writeFile(join(projectRoot, "project.json"), JSON.stringify({ format_version: 1, name: "demo", created_at: new Date(0).toISOString() }));
   await writeFile(join(home, "registry.json"), JSON.stringify({ format_version: 1, projects: { demo: { root: projectRoot } }, workspaces: {} }));
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   const page = await browser.newPage({ viewport: { width: 1180, height: 760 } });
   const launch = async () => {
     const config = await readProjectConfig("demo", home);
@@ -321,7 +321,7 @@ test("real Run Artifact uses a custom renderer and restores the official body wh
   await writeFile(join(projectRoot, "config.json"), JSON.stringify({ store: { type: "managed", branch: "master", published_revision: "test" } }));
   await writeFile(join(projectRoot, "project.json"), JSON.stringify({ format_version: 1, name: "demo", created_at: new Date(0).toISOString() }));
   await writeFile(join(home, "registry.json"), JSON.stringify({ format_version: 1, projects: { demo: { root: projectRoot } }, workspaces: {} }));
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   const page = await browser.newPage();
   const launch = async () => {
     const server = createViewServer(await readProjectConfig("demo", home));
@@ -384,7 +384,7 @@ test("global composition applies to every Project and stays frozen across disk c
   const server = createViewServer(await readProjectConfig("a", home));
   await new Promise<void>((resolveListen, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolveListen); });
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserScope();
   const page = await browser.newPage();
   try {
     await page.goto(`${origin}/projects/a/memories`);
