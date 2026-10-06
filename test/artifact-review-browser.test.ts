@@ -965,9 +965,11 @@ flow:
         args: [...actor.agent.args],
         cwd: workspaceRoot,
         env: { ...process.env, ...sessionEnv },
-        startupTimeoutMs: 10_000,
-        idleTimeoutMs: 10_000,
-        maxRuntimeMs: 20_000,
+        // This tests Activity UI, not ACP timing. The fake reviewer invokes
+        // several CLI processes, which can exceed 10s on a busy Windows runner.
+        startupTimeoutMs: 30_000,
+        idleTimeoutMs: 30_000,
+        maxRuntimeMs: 60_000,
         promptVersion: "artifact-review-v1"
       };
     }
@@ -986,6 +988,8 @@ flow:
     (assignment) => assignment.actorId === "reviewer-agent"
   );
   assert(completedAgent?.attempts?.[0]);
+  assert.equal(completedAgent.attempts[0].status, "submitted", JSON.stringify(completedAgent.attempts[0]));
+  assert.equal(completedAgent.submitted?.vote, "approve");
 
   const config: MemsphereConfig = {
     configPath,
