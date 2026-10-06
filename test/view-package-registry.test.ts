@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -63,6 +63,27 @@ test("global style capability is declared by the Package manifest", async () => 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("Router capability requires an enabled instance even when its theme is selected", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-router-theme-only-"));
+  try {
+    const packageRoot = await makePackage(root, "router", "org.example.router", "page");
+    const manifest = JSON.parse(await readFile(join(packageRoot, "module.json"), "utf8"));
+    manifest.view.capabilities = ["router.register", "theme.register"];
+    await writeFile(join(packageRoot, "module.json"), JSON.stringify(manifest));
+    for (const enabled of [true, false]) {
+      const composition = await resolveViewPackageComposition({
+        global: { installed: [{ path: packageRoot }] },
+        globalThemeSource: "org.example.router:theme",
+        composition: { packages: [{ id: "org.example.router", version: "1.0.0", enabled }] },
+        sdkVersion: "1.0.0"
+      });
+      assert.equal(composition.instances.length, 1);
+      assert.equal(composition.instances[0]!.capabilities.has("router.register"), enabled);
+      assert.equal(composition.instances[0]!.capabilities.has("theme.register"), true);
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("global composition can select Package contributions and global styles through Slots", async () => {

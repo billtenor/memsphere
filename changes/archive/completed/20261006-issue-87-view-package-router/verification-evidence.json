@@ -1,0 +1,57 @@
+{
+  "run_id": "run-20261006-142737z-c8d2dca6",
+  "base_revision": "544eca6f4b28115a41808af6ef05b4e4e5e03e7c",
+  "candidate_digest": "b28037548f871d3184e4d3d38354cffe4c557aa209e8adebe48f218e412dd0a3",
+  "files": [
+    {
+      "path": "docs/view-plugin-api.en.md",
+      "sha256": "7065ebf6d222b050a1bfcc8036eda3a4c94b4eeb80c0987525e83116f607a5c9"
+    },
+    {
+      "path": "docs/view-plugin-api.md",
+      "sha256": "6747994285eb69e32046db9f2c0cc8688e4c95f99ac73aea2cf540a7ee7fd779"
+    },
+    {
+      "path": "docs/view-plugin-guide.en.md",
+      "sha256": "878f22d57f27d5302c83a3c72e9f55774b988e2ac0ce7a0c8b1b1edac2116fd4"
+    },
+    {
+      "path": "docs/view-plugin-guide.md",
+      "sha256": "2f1817cd48cad4067803b09010632f81a63f560f2795096b5b53d03031d37b5d"
+    },
+    {
+      "path": "src/commands/view.ts",
+      "sha256": "91f00179638cd14e55c8f5e218e1d87508d99b6f1ee698f1566cd35c4f1e8bd6"
+    },
+    {
+      "path": "src/module/package-registry.ts",
+      "sha256": "6ba568c7377ad38c6586f36ae04317a6d9ec471b6e72e88513bf58f609ecd8c6"
+    },
+    {
+      "path": "src/view/package-config.ts",
+      "sha256": "fabd26ff7ce1c14d1011241345898e1266ae4d97c2038b9c8b07d8a7dba6848d"
+    },
+    {
+      "path": "src/view/view-runtime.ts",
+      "sha256": "3fe9832d21294ca4bde01c1633c46bb1a6dee55e8af565b70f87c640bb152d17"
+    },
+    {
+      "path": "test/view-package-config.test.ts",
+      "sha256": "0b8b95095fb5578b54991a8a6556e47707c4850ea10240a2efa132db1e3affdd"
+    },
+    {
+      "path": "test/view-package-registry.test.ts",
+      "sha256": "274db5748736a212e1b737a9362db70e4ba377f06e9cc2c1be5b30783eaffbec"
+    },
+    {
+      "path": "test/view-package-router-browser.test.ts",
+      "sha256": "a9bafc5d185e5b6e58680f514eb43f0e5886cfb8ee8fb4fa1f9c09817ad875eb"
+    }
+  ],
+  "logs": {
+    "/tmp/issue87-formal-typecheck.log": "072e1ec238b34ee728ff99c11b4b7043b463790a6354d8ef2395aa16265ba53a",
+    "/tmp/issue87-formal-build.log": "f51f342cb0db7350701fc2bee2607630d0c117d6ab0f69ec4e2b1d551cae16ea",
+    "/tmp/issue87-formal-regression.log": "2fb49ad0c3f07eee75e079524115b9b01edfbf82f855e83cdb924d2c97085bd4",
+    "/tmp/issue87-formal-router.log": "159818978870bddfad5fa98feca015b881b54aa3a3b200caf3a55407eecf82a9"
+  }
+}

@@ -299,6 +299,34 @@ ctx.slots.register(portableSlots.modelDefinitionRenderer, {
 
 示例的 `index.js` 是预编译 ESM；修改 `src/index.js` 后运行 `node scripts/build-example-view-package.mjs`。正式构建会逐字节检查签入 bundle，并强制保持 `@memsphere/view-sdk` 为 external import。Package 不得内联 SDK，Host 的单例 Token brand 会拒绝这种 bundle。Data renderer 必须同步返回 `HTMLElement`；抛错、返回 Promise/thenable 或其他值都会立即 abdicate 并进入官方 fallback，abdication 持续到实例卸载或 View 重启。
 
+## 独立业务 Module 的本地 Package
+
+可信本地 Package 可以新增独立页面。普通外部实例默认获得 `slots/theme/presentation/ui`；要注入 `router`，必须在 `module.json` 的 `view.capabilities` 中显式声明 `router.register`，并启用对应实例。仅选择该包的主题不会授予 Router。内置 Module 的路由由 Host 授权；App 绑定实例沿用 App 的 Router 授权，`api` 仍只提供给 App 绑定实例。
+
+例如上文独立 Module 的包可声明：
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "com.example.crawler",
+  "version": "0.1.0",
+  "view": {
+    "entry": "./index.js",
+    "sdk": "^1.0.0",
+    "capabilities": ["router.register"],
+    "contributions": [
+      { "id": "navigation", "cell": "navigation.primary@1:navigation", "priority": 100 },
+      { "id": "title", "cell": "header.title@1:title", "priority": 100 },
+      { "id": "page", "cell": "main.view@1:route:index", "priority": 100 }
+    ]
+  }
+}
+```
+
+Plugin 注入 `router` 后，`ctx.router.register({ id: "index", path: "/" })` 生成 `/projects/<project>/modules/<instanceId>`；`path: "/crawler/run"` 生成该基路径下的 `/crawler/run`。`instanceId` 默认为包 id，也可通过组合配置的 `instance_id` 指定。页面 contribution 使用 `main.view@1:route:<route-id>`，其 `id` 必须匹配 `ctx.slots.register()` 的注册 id；列表等其他 Slot 也须逐项声明。注册的路由不能覆盖其他实例或官方页面，重复路由与越界路径会使实例加载失败，注册事务会撤销。
+
+使用 `route.to()`、`route.activation` 和公开 UI Primitives 完成导航、列表选择及关联跳转；对象选择参数应列入 Route 的 `query`。已启用且获得 Router 的实例命名空间支持直接打开和刷新，由浏览器 Runtime 匹配具体路由。未知路由或浏览器加载失败显示 Shell 内的路由错误与运行诊断；未安装、未启用、未声明 Router 或服务端资源加载失败的实例路径返回 404。保存安装或组合配置后，需要重启 View 才能更新启动快照。
+
 ## App 业务页面
 
 App 通过 `entrypoints.view` 安装 Module 实例。包声明 `main.view@1:route:<route-id>` 与对应注册 id 后，可以注册自己的 Module 相对路由；使用 `ctx.api.invoke(operation,input)` 调用 App backend 时，Plugin 的 inject 必须包含 api。该服务仅提供给 App 绑定实例。完整示例见 [费用 App](../examples/apps/expense/README.md)，接口见 [App 实现契约](./app-contract.md)。

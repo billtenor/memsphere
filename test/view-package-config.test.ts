@@ -99,3 +99,12 @@ test("duplicate installed paths and global composition instance identities are r
     }
   }).success, false);
 });
+
+
+test("View instance namespace cannot use URL dot segments", () => {
+  for (const instance_id of [".", ".."]) {
+    assert.equal(globalConfigSchema.safeParse({ view_composition: {
+      packages: [{ id: "com.example.crawler", version: "0.1.0", instance_id }]
+    } }).success, false);
+  }
+});

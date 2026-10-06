@@ -495,10 +495,10 @@ async function handleRequest(
 
   const pagePath = scopedPage?.remainder ?? url.pathname;
   const developmentPage = options.developmentModules?.some(module => module.pagePaths.includes(pagePath)) === true;
-  const appPage = scopedPage && (await compositionBootSnapshot.entries.get(scopedPage.projectId)?.externalInstances ?? [])
-    .some(instance => instance.appApiBase && (pagePath === `/modules/${encodeURIComponent(instance.module.instanceId)}`
+  const externalPage = scopedPage && (await compositionBootSnapshot.entries.get(scopedPage.projectId)?.externalInstances ?? [])
+    .some(instance => instance.allowedServices?.includes("router") && (pagePath === `/modules/${encodeURIComponent(instance.module.instanceId)}`
       || pagePath.startsWith(`/modules/${encodeURIComponent(instance.module.instanceId)}/`)));
-  if (request.method === "GET" && (isViewPagePath(requestedPathname) || isViewPagePath(pagePath) || developmentPage || appPage)) {
+  if (request.method === "GET" && (isViewPagePath(requestedPathname) || isViewPagePath(pagePath) || developmentPage || externalPage)) {
     if (!projectScope) {
       redirect(response, 302, projectPagePath(config.project?.name, `${url.pathname}${url.search}`));
       return;
@@ -3116,7 +3116,8 @@ async function externalViewInstances(
         ...(suppliesSelectedTheme && capabilities.has("theme.override") ? ["override" as const] : [])
       ]),
       allowedServices: Object.freeze([
-        ...(apps.has(instance.instanceId) ? ["api" as const, "router" as const] : []),
+        ...(apps.has(instance.instanceId) ? ["api" as const] : []),
+        ...(apps.has(instance.instanceId) || capabilities.has("router.register") ? ["router" as const] : []),
         "slots" as const,
         "theme" as const,
         "presentation" as const,

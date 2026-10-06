@@ -2634,6 +2634,14 @@ function validateRouteDefinition(definition: RouteDefinition): void {
   if (definition.path.includes("?") || definition.path.includes("#") || definition.path.split("/").includes("..")) {
     throw new Error(`Route path is not a safe relative path: ${definition.path}`);
   }
+  for (const segment of definition.path.split("/")) {
+    let decoded: string;
+    try { decoded = decodeURIComponent(segment); }
+    catch { throw new Error(`Route path has invalid encoding: ${definition.path}`); }
+    if (decoded === "." || decoded === ".." || decoded.includes("/") || decoded.includes("\\") || decoded.includes("\0")) {
+      throw new Error(`Route path is not a safe relative path: ${definition.path}`);
+    }
+  }
   validateRouteQueryKeys(definition.query, "Route definition");
 }
 
