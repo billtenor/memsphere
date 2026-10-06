@@ -159,7 +159,7 @@ export async function listMemoryFiles(memoryRoot: string, kind: MemoryKind): Pro
     .sort((a, b) => a.localeCompare(b));
 }
 
-export async function readAllMemoryFiles(memoryRoot: string, kind?: MemoryKind): Promise<MemoryFile[]> {
+export async function readAllMemoryFiles(memoryRoot: string, kind?: MemoryKind, include?: (path: string) => boolean): Promise<MemoryFile[]> {
   const kinds = kind ? [kind] : memoryKinds;
   const files: MemoryFile[] = [];
 
@@ -167,6 +167,7 @@ export async function readAllMemoryFiles(memoryRoot: string, kind?: MemoryKind):
     const paths = await listMemoryFiles(memoryRoot, currentKind);
 
     for (const path of paths) {
+      if (include && !include(path)) continue;
       files.push(await readMemoryFile(currentKind, path));
     }
   }

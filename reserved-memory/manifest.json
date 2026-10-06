@@ -27,7 +27,9 @@
       "procedures/memsphere-tutorial-chapter-01.yaml",
       "procedures/memsphere-tutorial-chapter-02.yaml",
       "procedures/memsphere-tutorial-chapter-03.yaml",
-      "procedures/memsphere-tutorial-chapter-03-review-experience.yaml"
+      "procedures/memsphere-tutorial-chapter-03-review-experience.yaml",
+      "concepts/memsphere-app.yaml",
+      "statements/memsphere-app-usage-rules.yaml"
     ],
     "remove": []
   },

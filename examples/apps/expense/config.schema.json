@@ -1,0 +1,7 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": { "ledgerDirectory": { "type": "string", "minLength": 1, "description": "当前 Project 费用账本的绝对目录路径。" } },
+  "required": ["ledgerDirectory"],
+  "additionalProperties": false
+}

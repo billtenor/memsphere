@@ -209,7 +209,9 @@ export async function resolveViewPackageComposition(input: {
   for (const candidate of candidates) {
     if (candidate.themeOnly) continue;
     for (const contribution of candidate.package.manifest.view.contributions ?? []) {
-      const key = `${contribution.cell}\0${contribution.priority}`;
+      const cell = contribution.cell.startsWith("main.view@1:route:")
+        ? `${contribution.cell}:instance:${candidate.instanceId}` : contribution.cell;
+      const key = `${cell}\0${contribution.priority}`;
       const group = contributionGroups.get(key) ?? [];
       group.push({ candidate, id: `${candidate.package.manifest.id}:${candidate.instanceId}:${contribution.id}` });
       contributionGroups.set(key, group);

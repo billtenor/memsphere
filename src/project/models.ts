@@ -1,4 +1,6 @@
 import { resolve } from "node:path";
+import { appDataComposition, appProjectFromRoot } from "../app/composition.js";
+import { filesystemJsonValueStoreExtension } from "../data/extensions/index.js";
 import { assertModelPath, discoverModelIds } from "./model-storage-paths.js";
 import { readModelRegistrations, IMPORTED_MODEL_DEFINITIONS_STORE, type ModelRegistration, type ModelOrigin, type ProjectModelInput } from "./model-registration.js";
 import type { Context } from "../data/api/context.js";
@@ -34,6 +36,7 @@ const extensions = new DefaultDataExtensionRegistry([
 ]);
 /** A fresh host per explicit operation; no stale directory or model cache crosses refreshes. */
 export async function createProjectModelHost(context: Context, input: ProjectModelInput) {
+  const appComposition = await appDataComposition(await appProjectFromRoot(input.root, input.memoryRoot), input.enableApp);
   const operationStamp = await readModelOperationStamp(input.root);
   const assertSnapshot = () => assertModelOperationStamp(input.root, operationStamp);
   const registrationState = await readModelRegistrations(context, input);
@@ -70,7 +73,11 @@ export async function createProjectModelHost(context: Context, input: ProjectMod
     if (record.origin !== "project" && ids.includes(record.registration.modelRef))
       errors.set(record.registration.modelRef, `Duplicate modelRef: ${record.registration.modelRef}`);
   }
-  const allStoredIds = [...new Set([...ids, ...registrationState.records.map(r => r.registration.modelRef)])];
+  for (const [ref, model] of appComposition.models) {
+    if (registrations.has(ref) || ids.includes(ref)) errors.set(ref, `Duplicate modelRef: ${ref}`);
+    else registrations.set(ref, { origin: "app", registration: { modelRef: ref, package: model.packageId, storage: "store", store_id: `apps/${model.appId}/models` } });
+  }
+  const allStoredIds = [...new Set([...ids, ...registrations.keys()])];
   const known = new Set(allStoredIds);
   const meta: ModelBinding = { model: {
       data: { id: JSON_SCHEMA_DRAFT_07, model: JSON_SCHEMA_DRAFT_07,
@@ -89,6 +96,10 @@ export async function createProjectModelHost(context: Context, input: ProjectMod
         if (errors.has(id))
           throw new TypeError(errors.get(id));
         const registered = registrations.get(id);
+        if (registered?.origin === "app") {
+          const model = appComposition.models.get(id)!;
+          return { source: model.source, data: { id, model: model.metaModel, payload: { contentType: "application/json", content: bytesContent(Buffer.from(model.source)) } } };
+        }
         const storeId = registered?.registration.store_id ?? MODEL_DEFINITIONS_STORE;
         const sourceStore = dataStores.get(storeId!);
         if (!sourceStore) throw new TypeError(`Unknown model Store: ${storeId}`);
@@ -108,7 +119,13 @@ export async function createProjectModelHost(context: Context, input: ProjectMod
     }
     return pending;
   };
-  const preparedManager = new DefaultDataManager({ extensions, models: [meta] });
+  const preparedManager = new DefaultDataManager({
+    extensions: new DefaultDataExtensionRegistry([...extensions.list(), filesystemJsonValueStoreExtension, ...appComposition.extensions]),
+    models: [meta, ...allStoredIds.filter(id => id !== JSON_SCHEMA_DRAFT_07).map(ref => ({
+      ref, loadData: async () => (await checked(ref)).model.data
+    }))],
+    stores: appComposition.stores
+  });
   const checks = new Map<string, Promise<CheckedModel>>();
   async function checked(id: string, check: ModelCheck = "runtime"): Promise<CheckedModel> {
     await assertSnapshot();

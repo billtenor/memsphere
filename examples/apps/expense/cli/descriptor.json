@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "org.memsphere.expense-cli",
+  "name": "费用 CLI",
+  "description": "共享账本上的 list、create、submit；参数见 --help。",
+  "command": ["expense"],
+  "help": ["--help"],
+  "versionProbe": { "args": ["--version"], "format": "semver" }
+}

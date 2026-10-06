@@ -4,6 +4,8 @@
 
 本文定义 Memsphere View Plugin 的架构边界和长期设计原则，面向 ViewHost、Module Loader 和 View SDK 的维护者。扩展开发入门见 [View Plugin Guide](./view-plugin-guide.md)，精确接口见 [View Plugin API](./view-plugin-api.md)，Slot Catalog 见 [View Slot List](./view-slots.md)。
 
+View 与模型、数据扩展、CLI 及 Memory 的业务组合由 [App 整体设计](./app-design.md)定义。**Module 专指 View Module**，负责页面、路由、Slot 贡献、交互与视图状态；App 直接组合 Module 和其他能力。当前 Home 全局 View 配置与目标 Project App 启用机制的关系由 App 设计说明。
+
 ## 设计目标
 
 - Memsphere 与用户 Module 分别编译；安装 Module 不要求 Memsphere 源码或重新编译 Memsphere。
@@ -40,11 +42,11 @@ ViewHost 负责加载、上下文、组合、故障隔离和清理；Plugin 负�
 
 ## 当前落地状态
 
-当前实现使用固定 builtin catalog 发现 `org.memsphere.memory`、`org.memsphere.run`、`org.memsphere.reference` 和 `org.memsphere.settings`，校验各自 `module.json` 的最小 View 切片、入口包内路径和 SDK SemVer，再动态加载四个独立 ESM Bundle。所有实例共享 Route/Slot Registry，但拥有独立 Context、事务、诊断和清理作用域。
+当前实现通过 builtin catalog 加载随版本发布的 Module，并按 Home 配置加载可信本地 View Package。Loader 校验各自 `module.json` 的 View 切片、入口包内路径和 SDK SemVer，再动态加载独立 ESM Bundle。所有实例共享 Route/Slot Registry，但拥有独立 Context、事务、诊断和清理作用域。
 
-已接通的 Context 服务为 `slots`、`router`、`theme` 与 `ui`。Core 与 builtin Module 通过同一 Slot Tree 组合界面，稳定 Shell、Project selector、Theme v1、UI Primitives 和故障诊断仍属于 ViewHost；准确的根 Slot 清单、所有权、组合语义与当前接线状态统一见 [Memsphere View Slot List](./view-slots.md)。View API、I18n、Logger、自定义子 Slot、用户 Module 发现/安装和 Project 动态组合仍是后续能力。
+已接通的 Context 服务为 `slots`、`router`、`theme`、`themeRegistry`、`presentation` 与 `ui`。Core 与 builtin Module 通过同一 Slot Tree 组合界面，稳定 Shell、Project selector、Theme v1、UI Primitives 和故障诊断仍属于 ViewHost；准确的根 Slot 清单、所有权、组合语义与当前接线状态统一见 [Memsphere View Slot List](./view-slots.md)。通用 View API、I18n、Logger、自定义子 Slot 和 Project 动态组合仍是后续能力；本地 View Package 安装与 Home 全局组合已落地，见本文末尾的 Package Composition 说明。
 
-职责边界固定为五层：Shell 管区域、尺寸、滚动和响应式；Theme 管公共视觉 Token；UI Primitives 管跨 Module 通用 DOM、状态与交互；Slot 管可验证的组合关系；Feature/Module 管领域数据、行为和 `main.view` 内自由正文。标准内容列表由 UI 服务生成 `ViewMount` 后进入原有 `content.list`，不增加第二个 Slot；自定义 Mount 是复杂领域界面的受控逃生口。
+职责边界固定为五层：Shell 管区域、尺寸、滚动和响应式；Theme 管公共视觉 Token；UI Primitives 管跨 Module 通用 DOM、状态与交互；Slot 管可验证的组合关系；Feature/Module 管领域数据的呈现、界面交互和 `main.view` 内自由正文。标准内容列表由 UI 服务生成 `ViewMount` 后进入原有 `content.list`，不增加第二个 Slot；自定义 Mount 是复杂领域界面的受控逃生口。
 
 Theme 与 Route/Slot 一样由 Host 形成单一真实组合路径：同一个实例作用域的 Theme 同时进入 `apply()`、`main.view`、`content.list` 和 `overlay` 的 Mount Context，并由 Host 把公开 `--mem-view-*` 变量安装到 element 与 portal root。Plugin 只能读取公开 Token，不能声明这些 Token、读取 Host 私有 `--view-*` 变量或依赖 Host 私有 class。Mount 卸载或实例回滚时，Theme root 与订阅一并清理。
 
@@ -64,7 +66,7 @@ Manifest 的 View 切片至少声明浏览器 ESM 入口和 SDK SemVer 范围。
 
 Memsphere 编译时不知道用户以后会安装哪些 Module，因此 ViewHost 在运行时使用动态 `import()` 加载 Bundle，并从 `module.default` 取得 `ViewPlugin`。Bundle 的顶层代码在第一次导入时执行，`apply()` 随后为每个启用实例分别执行。
 
-同一版本 Bundle 可以只加载一次，但不得用顶层变量保存实例业务状态。每个实例拥有独立的配置、Context、注册作用域和数据命名空间。
+同一版本 Bundle 可以只加载一次，但不得用顶层变量保存实例界面状态。每个实例拥有独立的配置、Context、注册作用域和临时界面状态；业务数据绑定由 App 与 Project 决定。
 
 ## Plugin Context 与能力声明
 
@@ -156,7 +158,7 @@ Route Token 把同一个路由身份连接到导航 Descriptor、Header 激活�
 
 ## 后端与数据边界
 
-浏览器 Bundle 不直接导入 Node.js 侧的 Domain、Application 或 Persistence Adapter，也不直接访问 Project 文件和数据库。View 需要的业务用例通过当前 Module 实例命名空间内的 View API 暴露：
+Module 的浏览器 Bundle 不直接导入 Node.js 侧的 Domain、Application 或 Persistence Adapter，也不直接访问 Project 文件和数据库。View 需要的业务用例通过宿主提供、按当前 Module 实例限定访问范围的 View API 暴露。服务端 Adapter 和共享业务实现独立于 Module，使用 App 与 Project 的业务及数据绑定；Module 实例身份本身不产生权威数据命名空间。目标调用关系如下，其中 `ctx.api` 的精确接口尚待专项契约定义：
 
 ```text
 Module View
@@ -170,7 +172,7 @@ Domain
 Persistence Adapter
 ```
 
-API 面向“创建客户”“获取列表”等 Application 用例，而不是逐个暴露内部函数或数据库操作。CLI 可以在 Node.js 进程中直接调用同一 Application 层，因此 View 与 CLI 共享业务规则和数据命名空间。
+API 面向“创建客户”“获取列表”等 Application 用例，而不是逐个暴露内部函数或数据库操作。独立 CLI 可以直接复用该业务实现或调用同一服务，Module 与 CLI 经 App 绑定到同一业务上下文和权威数据。
 
 ViewHost 和 Module View 都是可丢弃的交互运行时。需要持久化的数据必须在 View 外写入权威存储；临时展开状态和未提交表单草稿允许在刷新时丢失。
 
@@ -228,7 +230,7 @@ Slot 使用独立的 `name@version` 身份。改变 kind、scope、必填字段�
 
 ## 文档边界
 
-完整 Module Manifest、CLI SDK、服务端 View API 注册、Module 配置迁移、市场、签名与沙箱由各自专项契约定义。它们必须遵守本文确定的独立编译、公开 Context、Slot 所有权、实例隔离、数据边界和整体重启模型。
+Module Manifest、服务端 View API 注册、Module 配置迁移、市场、签名与沙箱由各自专项契约定义。它们必须遵守本文确定的独立编译、公开 Context、Slot 所有权、实例隔离、数据边界和整体重启模型。CLI 登记与调用另有契约，不纳入 Module 或 View SDK。
 # 本地 Package Composition 与资产演进
 
 内置实现与可信本地界面扩展包使用同一 Manifest、实例 Context 和 Slot 协议。Home 记录已安装路径、全局主题及 Slot 选择，并将同一组合应用到所有 Project。安装建立对本地包的信任；Manifest capability 声明包提供的内容类型，主题或 Slot 选择决定启用哪些内容，不再设置重复的 Package 权限。全局样式进入 `styles.global@1` 多选 Slot，scoped CSS 随 Package 实例自动加载；历史 Style 开关仅作为配置兼容入口。View 服务启动后固定全局 composition snapshot，并为每个 Project 构建实例；变更通过跨平台 `memsphere view restart` 生效。入口和资源使用包根 realpath 约束、内容摘要及 Project 隔离 URL；文件变化不会让旧 URL 返回新字节。

@@ -186,10 +186,13 @@ export async function runStartCommand(procedureName: string | undefined, options
   const start = async (source?: {
     memoryRoot: string;
     revision: string;
+    provider?: import("../memory/provider.js").MemoryProvider;
+    ownership?: import("../app/ownership.js").AppOwnership;
     memorySource: NonNullable<RunState["memorySource"]>;
   }): Promise<RunState> => startRun({
     memoryRoot: config.memoryRoot,
     memorySnapshotRoot: source?.memoryRoot,
+    memoryOwnership: source?.ownership,
     runsRoot: config.runsRoot,
     name: runName,
     language: config.language,
@@ -228,8 +231,17 @@ export async function runStartCommand(procedureName: string | undefined, options
             throw new Error(`ChangeSet ${changeId} does not have a valid checkpoint`);
           }
           const revision = `changeset:${changeId}@${preview.change.checkpoint.digest}`;
+          const ownership = structuredClone(preview.change.app_ownership);
+          // Provenance comes from the checkpoint; current disable intent still gates new Runs.
+          if (ownership) {
+            const project = await (await import("../app/composition.js")).appProjectFromRoot(dirname(config.configPath), config.memoryRoot);
+            const state = project ? await (await import("../app/state.js")).readAppState(project) : undefined;
+            for (const owner of Object.values(ownership)) owner.enabled = owner.enabled && Boolean(state?.installations[owner.id]?.enabled);
+          }
           return start({
             memoryRoot: preview.memoryRoot,
+            provider: new (await import("../app/ownership.js")).AppSnapshotMemoryProvider(preview.memoryRoot, ownership),
+            ownership: preview.change.app_ownership,
             revision,
             memorySource: {
               kind: "changeset",

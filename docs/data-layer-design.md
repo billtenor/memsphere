@@ -6,6 +6,7 @@
 
 接口代码与 review 入口见 [src/data](../src/data/README.md)。
 
+模型、数据扩展与 CLI、界面及 Memory 如何组合为完整业务功能，见 [App 整体设计](./app-design.md)。App 负责组合和 Project 资源绑定，本文继续定义数据层自身的契约。
 当前 Project 与 CLI 的统一规则：全部模型和元模型 ID 带 `.json` 后缀；禁止跨模型引用，只允许本模型内部复用。模型创建、更新、导入和使用都要求现有 Runtime 支持，不引入草稿或扩展 Runtime；合法但未支持的定义由只读校验明确诊断。CLI 通过 `config.json.dataStores` 显式访问业务 Store，保护系统目录，模型定义被直接绑定时不可替换或删除。filesystem JSON ValueStore 使用操作系统记录锁及持续递增的 revision，原始 filesystem DataStore 只提供无条件写，不提供记录锁或 revision；另有独立 Project 写锁协调模型和配置修改，模型写入中断后由下一条模型写命令先恢复一致状态。CLI 使用 RFC 9535 JSONPath 和 RFC 6902 JSON Patch，所有 list 都支持 limit/cursor。设计中扩展接口的通用能力不能用来绕过这些 Project 规则。
 
 ## 1. 目标
@@ -633,7 +634,7 @@ interface DataExtension {
 
 内置实现与业务实现使用相同的 DataExtension 接口。内置扩展按单个可独立替换的 Serializer 或 Factory 拆分，各自拥有独立的扩展 ID。例如，JSON Serializer、JSON Schema 业务模型的 Factory、文件系统 DataStoreFactory、文件系统 JSON ValueStoreFactory 分别作为独立扩展。内部辅助类和共用代码可以复用，不需要各自成为扩展；DataExtension 仍允许业务扩展组合多个实现。
 
-已实现扩展的配置、用法及支持范围见[内置扩展说明](../src/data/extensions/README.md)。默认注册表和 DataManager 已实现显式装配，见[装配用法](../src/data/management/README.md)；Project 已接入模型目录、登记及显式业务 Store，内置 JSON Schema 元模型引导已实现。
+已实现扩展的配置、用法及支持范围见[内置扩展说明](../src/data/extensions/README.md)。默认注册表和 DataManager 已实现显式装配，见[装配用法](../src/data/management/README.md)；Project Model Host 已接入项目模型、内置元模型以及 App 的模型、数据扩展和 Store 绑定；App 字段见 [App 实现契约](./app-contract.md)。
 
 默认装配维护这些独立扩展的列表。替换某项内置能力时，在注册前移除对应扩展并加入替代扩展，保留其他扩展；若 Store Factory 的 ID 改变，同时调整对应存储绑定。替换后的组合仍须满足依赖和兼容性要求，注册冲突不通过加载顺序覆盖。
 

@@ -39,11 +39,13 @@ temp/
 .anthropic/
 .agents/
 .codex/
+.playwright-cli/
 *.sqlite
 *.sqlite3
 *.db
 
 # OS and editor files
+examples/apps/expense/cli/expense.cjs
 .DS_Store
 Thumbs.db
 .idea/

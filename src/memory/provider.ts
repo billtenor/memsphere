@@ -9,6 +9,7 @@ export type ProviderMemoryDescriptor = {
   project_name?: string;
   revision?: string;
   frozen?: string;
+  app?: { id: string; version: string; assetKey: string; enabled: boolean; packageDigest: string };
 };
 
 export type MemoryProviderQuery = {

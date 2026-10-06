@@ -11,10 +11,12 @@ import { readAllMemoryFiles, readMemoryFile } from "./store.js";
 import { currentMemorySyntax } from "./syntax.js";
 import { serializeMemoryYaml } from "./serializer.js";
 import { validateMemoryRoot, type ValidationIssue } from "../validation.js";
-import { resolveProjectContext, type ResolvedProject } from "../project/resolver.js";
+import { resolveProjectContext, type ResolvedProject, type ProjectContext } from "../project/resolver.js";
 import { resolveWorkspaceIdentity, type WorkspaceIdentity } from "../project/workspace.js";
 import { projectConfigSchema } from "../project/model.js";
 import { GitRevisionMemoryProvider } from "./git-provider.js";
+import { guardAppMemoryTargets } from "../app/memory-guard.js";
+import { appOwnershipSchema, captureAppOwnership, type AppOwnership } from "../app/ownership.js";
 import {
   assertCanonicalMemoryName,
   normalizeMemoryName,
@@ -132,7 +134,9 @@ export const memoryChangeSetSchema = z.object({
   failure: changeFailureSchema.optional(),
   targets: z.array(changeTargetSchema),
   origin: z.enum(["cli", "view"]).default("cli"),
-  intent: z.literal("market_import").optional(),
+  intent: z.enum(["market_import", "app_install"]).optional(),
+  app_install: z.object({ appId: z.string(), operationId: z.string(), packageDigest: z.string() }).strict().optional(),
+  app_ownership: appOwnershipSchema.optional(),
   created_by: memoryChangeActorSchema.optional(),
   scope: z.array(changeScopeSchema).default([]),
   comments: z.array(memoryChangeCommentSchema).default([]),
@@ -405,7 +409,7 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
       if (change.targets.length > 0) {
         const candidateRoot = change.checkpoint
           ? checkpointMemoryRoot(context.primary, change.id, change.checkpoint.digest)
-          : change.intent === "market_import" ? marketCandidateRoot(context.primary, change.id) : undefined;
+          : (change.intent === "market_import" || change.intent === "app_install") ? marketCandidateRoot(context.primary, change.id) : undefined;
         if (candidateRoot && await exists(candidateRoot)) {
           await applyTargets(previewRoot, candidateRoot, change.targets);
         }
@@ -478,7 +482,7 @@ async function prepareMemoryChangePreview(input: {
   if (!change.checkpoint) throw new Error(`ChangeSet ${change.id} has no validated checkpoint`);
   const candidateRoot = checkpointMemoryRoot(context.primary, change.id, change.checkpoint.digest);
   if (!await exists(candidateRoot)) throw new Error(`ChangeSet checkpoint is missing: ${change.id}`);
-  if (await checkpointDigest(change.targets, candidateRoot) !== change.checkpoint.digest) {
+  if (await checkpointDigest(change.targets, candidateRoot, change.app_ownership) !== change.checkpoint.digest) {
     throw new Error(`ChangeSet checkpoint digest does not match: ${change.id}`);
   }
   const changeKey = `${context.primary.memoryRoot}\0${change.id}`;
@@ -581,6 +585,47 @@ export async function editMemories(input: {
   change.updated_at = new Date().toISOString();
   await writeChange(context.primary, change);
   return { change, candidateRoot };
+}
+
+/** Internal App asset import, using the same validated candidate/apply boundary as other imports. */
+export function withAppMemoryReservation<T>(project: ResolvedProject, reserve: () => Promise<T>): Promise<T> {
+  return withFileLock(memoryMutationLock(project), reserve);
+}
+
+export async function createAppMemoryChange(input: {
+  appId: string; operationId: string; packageDigest: string;
+  ownership?: AppOwnership;
+  context?: ProjectContext;
+  targets: Array<{ reference: string; path: string; source: Buffer }>;
+}): Promise<MemoryChangeSet> {
+  const context = input.context ?? await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  const project = context.primary;
+  return withFileLock(memoryMutationLock(project), async () => {
+    const workspace = context.workspace;
+    const baseRevision = project.config.store.type === "managed" ? project.config.store.published_revision
+      : await gitOutput(["rev-parse", "HEAD"], workspace.path);
+    const change = newChange(project, workspace.key, { baseRevision });
+    change.intent = "app_install";
+    change.app_install = { appId: input.appId, operationId: input.operationId, packageDigest: input.packageDigest };
+    change.app_ownership = input.ownership;
+    if (project.config.store.type === "embedded") change.source_worktree = {
+      instance_key: workspace.instanceKey, root: workspace.path,
+      repository_root: project.config.store.repository_path, memory_path: project.config.store.memory_path
+    };
+    const candidateRoot = project.config.store.type === "managed"
+      ? workspaceCandidateRoot(workspace.path, change.id) : marketCandidateRoot(project, change.id);
+    for (const source of input.targets) {
+      assertSafeCreatePath(source.reference, source.path);
+      const target = await resolveTarget(project, source.reference, "edit", source.path, baseRevision);
+      if (target.operation !== "create") throw new Error(`App installation cannot overwrite Memory: ${source.reference}`);
+      const candidate = join(candidateRoot, source.path);
+      await mkdir(dirname(candidate), { recursive: true });
+      await writeFile(candidate, source.source);
+      change.targets.push(target);
+    }
+    await writeChange(project, change);
+    return change;
+  });
 }
 
 export async function createMarketMemoryChange(input: {
@@ -909,15 +954,15 @@ export async function resumeMemoryChange(changeId: string): Promise<string> {
 export async function publishMemoryChange(
   changeId: string,
   message?: string,
-  options: { expectedKind?: "regular" | "sync" } = {}
+  options: { expectedKind?: "regular" | "sync"; context?: ProjectContext } = {}
 ): Promise<MemoryChangeSet> {
-  const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  const workspace = await resolveWorkspaceIdentity();
+  const initialContext = options.context ?? await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  const workspace = initialContext.workspace;
   return withFileLock(memoryMutationLock(initialContext.primary), async () => {
-    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    const context = await resolveProjectContext({ home: initialContext.home, project: initialContext.primary.name, cwd: workspace.path });
     const change = await readReconciledChange(context.primary, changeId);
     if (context.primary.config.store.type === "embedded") {
-      if (change.intent !== "market_import") {
+      if ((change.intent !== "market_import" && change.intent !== "app_install")) {
         throw new Error("Managed Memory ChangeSets are not available for an Embedded Project");
       }
       return applyEmbeddedMarketChange(context.primary, change, workspace);
@@ -963,12 +1008,12 @@ export async function failMemoryChange(
 
 export async function validateMemoryChange(
   changeId?: string,
-  options: { onLockWait?: () => void } = {}
+  options: { onLockWait?: () => void; context?: ProjectContext } = {}
 ): Promise<MemoryChangeValidationResult> {
-  const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  const workspace = await resolveWorkspaceIdentity();
+  const initialContext = options.context ?? await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  const workspace = initialContext.workspace;
   return withFileLock(memoryMutationLock(initialContext.primary), async () => {
-    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    const context = await resolveProjectContext({ home: initialContext.home, project: initialContext.primary.name, cwd: workspace.path });
     if (context.primary.config.store.type === "managed") {
       await assertManagedHealthy(context.primary);
       const resolvedId = changeId ?? await resolveSingleManagedActive(context.primary, workspace);
@@ -989,7 +1034,7 @@ export async function validateMemoryChange(
           checkpointCandidate,
           candidateRoot
         );
-        if (change.intent === "market_import") {
+        if ((change.intent === "market_import" || change.intent === "app_install")) {
           const centralCandidateRoot = marketCandidateRoot(context.primary, change.id);
           await rm(centralCandidateRoot, { recursive: true, force: true });
           await mkdir(dirname(centralCandidateRoot), { recursive: true });
@@ -1020,7 +1065,7 @@ export async function validateMemoryChange(
 
     if (changeId) {
       const marketChange = await readReconciledChange(context.primary, changeId);
-      if (marketChange.intent === "market_import") {
+      if ((marketChange.intent === "market_import" || marketChange.intent === "app_install")) {
         if (marketChange.status !== "active") throw new Error(`ChangeSet ${marketChange.id} is already ${marketChange.status}`);
         if (marketChange.store_type !== "embedded") throw new Error(`ChangeSet ${marketChange.id} is not an Embedded ChangeSet`);
         const source = marketChange.source_worktree;
@@ -1192,7 +1237,9 @@ async function persistValidatedCheckpoint(
   effectiveMemoryRoot: string,
   issueCandidateRoot = candidateRoot
 ): Promise<string> {
-  const digest = await checkpointDigest(change.targets, candidateRoot);
+  change.app_ownership = { ...await captureAppOwnership(project, change.app_install?.operationId), ...(change.intent === "app_install" ? change.app_ownership : {}) };
+  if (!Object.keys(change.app_ownership).length) delete change.app_ownership;
+  const digest = await checkpointDigest(change.targets, candidateRoot, change.app_ownership);
   const checkpointChanged = change.checkpoint?.digest !== digest;
   const checkpoints = checkpointsRoot(project, change.id);
   const revisionRoot = join(checkpoints, digest);
@@ -1249,9 +1296,10 @@ async function writeChangeConfirmingCommit(project: ResolvedProject, change: Mem
   }
 }
 
-async function checkpointDigest(targets: MemoryChangeSet["targets"], candidateRoot: string): Promise<string> {
+async function checkpointDigest(targets: MemoryChangeSet["targets"], candidateRoot: string, ownership?: AppOwnership): Promise<string> {
   const hash = createHash("sha256");
   hash.update(JSON.stringify(targets));
+  if (ownership) hash.update(`\0app-ownership\0${JSON.stringify(ownership)}`);
   for (const target of targets) {
     hash.update(`\0${target.path}\0${target.destination_path ?? ""}\0`);
     if (target.operation !== "delete") hash.update(await readFile(join(candidateRoot, target.path)));
@@ -1359,7 +1407,7 @@ async function captureEmbeddedWorkingChange(
         && candidate.base_revision === baseRevision
       ));
       if (matches.length > 1) {
-        const digest = await checkpointDigest(captured.targets, captured.candidateRoot);
+        const digest = await checkpointDigest(captured.targets, captured.candidateRoot, await captureAppOwnership(project));
         const exact = matches.filter((candidate) => candidate.checkpoint?.digest === digest)
           .sort((left, right) => left.created_at.localeCompare(right.created_at));
         if (exact.length !== matches.length) {
@@ -1958,7 +2006,7 @@ export async function claimMemoryChange(input: {
     if (change.claim?.instance_key === workspace.instanceKey) {
       const candidateRoot = change.store_type === "managed"
         ? workspaceCandidateRoot(workspace.path, change.id)
-        : change.intent === "market_import"
+        : (change.intent === "market_import" || change.intent === "app_install")
           ? workspaceCandidateRoot(workspace.path, change.id)
           : context.primary.memoryRoot;
       if (await exists(candidateRoot)) {
@@ -1991,7 +2039,7 @@ export async function claimMemoryChange(input: {
       change,
       candidateRoot: change.store_type === "managed"
         ? workspaceCandidateRoot(workspace.path, change.id)
-        : change.intent === "market_import"
+        : (change.intent === "market_import" || change.intent === "app_install")
           ? workspaceCandidateRoot(workspace.path, change.id)
           : context.primary.memoryRoot,
       warnings
@@ -2119,7 +2167,7 @@ async function prepareClaimCandidate(
       throw new Error(`Embedded ChangeSet ${change.id} belongs to another Git repository`);
     }
     const currentBase = await gitOutput(["rev-parse", "HEAD"], workspace.path);
-    if (change.intent === "market_import") {
+    if ((change.intent === "market_import" || change.intent === "app_install")) {
       if (change.base_revision !== currentBase) {
         throw new Error(`Embedded market ChangeSet ${change.id} belongs to another Git base revision`);
       }
@@ -2167,7 +2215,7 @@ async function prepareClaimCandidate(
   const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
   if (change.origin === "cli" && await exists(candidateRoot)) return warnings;
   if (await exists(candidateRoot)) warnings.push("the current Workspace already contains a candidate for this ChangeSet");
-  if (change.intent === "market_import") {
+  if ((change.intent === "market_import" || change.intent === "app_install")) {
     const source = change.checkpoint?.valid
       ? checkpointMemoryRoot(project, change.id, change.checkpoint.digest)
       : marketCandidateRoot(project, change.id);
@@ -2453,7 +2501,7 @@ async function applyEmbeddedMarketChange(
   if (head !== change.base_revision) throw new Error(`Embedded market ChangeSet ${change.id} belongs to another Git base revision`);
   const checkpointRoot = checkpointMemoryRoot(project, change.id, change.checkpoint.digest);
   if (!await exists(checkpointRoot)) throw new Error(`ChangeSet checkpoint is missing: ${change.id}`);
-  if (await checkpointDigest(change.targets, checkpointRoot) !== change.checkpoint.digest) {
+  if (await checkpointDigest(change.targets, checkpointRoot, change.app_ownership) !== change.checkpoint.digest) {
     throw new Error(`ChangeSet checkpoint digest does not match: ${change.id}`);
   }
   const pendingTargets = await pendingEmbeddedMarketTargets(project, change, checkpointRoot);
@@ -2591,6 +2639,7 @@ async function restoreJsonIfChanged(path: string, value: unknown): Promise<void>
 }
 
 async function assertChangeTargetsCurrent(project: ResolvedProject, change: MemoryChangeSet): Promise<void> {
+  await guardAppMemoryTargets(project, change.targets, change.app_install?.operationId);
   for (const target of change.targets) {
     const current = join(project.memoryRoot, target.path);
     if (target.operation === "create") {
@@ -2613,6 +2662,7 @@ async function validateEffectiveMemoryChange(
   candidateRoot: string,
   issueCandidateRoot = candidateRoot
 ): Promise<ValidationIssue[]> {
+  await guardAppMemoryTargets(project, change.targets, change.app_install?.operationId);
   const staging = await mkdtemp(join(tmpdir(), "memsphere-publish-"));
   try {
     await copyWorkingTree(project.memoryRoot, staging);

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
 import { Command, Option } from "commander";
+import { registerAppCommands } from "./commands/app.js";
 import { parseCli } from "./commands/cli-errors.js";
 import { registerModelCommands } from "./commands/model.js";
 import { registerDataCommands } from "./commands/data.js";
@@ -104,6 +105,8 @@ registerDataCommands(program);
 const project = program
   .command("project")
   .description("Manage persistent Memsphere Projects and Workspace bindings.");
+
+registerAppCommands(program);
 
 project.command("models").description("Manage model registrations.")
   .command("initialize").description("Explicitly install system models, initialize registrations, and recover interrupted model operations.")

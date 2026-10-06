@@ -23,7 +23,7 @@ After building and restarting, choose **Prototype** from the primary navigation 
 
 ## Understand the Runtime Flow
 
-A View Plugin is the browser UI entrypoint of a Module. It neither starts an independent service nor edits the complete Memsphere page directly.
+Module means View Module, an independently loaded and composed interface module; a View Plugin is its browser code entrypoint. It neither starts an independent service nor edits the complete Memsphere page directly.
 
 ```text
 ViewHost dynamically imports the Module Bundle
@@ -44,7 +44,7 @@ The two entrypoints serve different purposes:
 
 ## Minimal Module Package
 
-User Modules and Memsphere compile separately. A Module with a View contains at least a Manifest and a compiled browser Bundle:
+User Modules and Memsphere compile separately. A Module contains at least a Manifest and a compiled browser Bundle:
 
 ```text
 customer-list/
@@ -183,9 +183,9 @@ The example's `slots.navigationPrimary`, `slots.headerTitle`, and `slots.mainVie
 
 The first two Slots accept Descriptors: the Plugin supplies text, icons, and behavior descriptions and Memsphere renders them consistently. `mainView` accepts a Mount: ViewHost supplies a container and the Plugin renders the complete page.
 
-For a conventional object list, call `ctx.ui.contentList(descriptorOrProvider)` to obtain the standard Mount and register it in `slots.contentList`. Prefer `ctx.ui` for actions and confirmations, feedback, Tabs/Segmented controls, Disclosure, controlled fields, Select/Combobox, Progress, and Card/Section as well. Use a custom Mount only when a primitive cannot express the domain interaction; domain content and state machines remain Module-owned. The standard list covers sections, icons, three-line copy, multiple badges, selection, route/action, trailing actions, expandable details, filtering, loading, empty and retryable error states, and safe long-text truncation.
+For a conventional object list, call `ctx.ui.contentList(descriptorOrProvider)` to obtain the standard Mount and register it in `slots.contentList`. Prefer `ctx.ui` for actions and confirmations, feedback, Tabs/Segmented controls, Disclosure, controlled fields, Select/Combobox, Progress, and Card/Section as well. Use a custom Mount only when a primitive cannot express the domain interaction; domain content and UI interaction state machines remain Module-owned. The standard list covers sections, icons, three-line copy, multiple badges, selection, route/action, trailing actions, expandable details, filtering, loading, empty and retryable error states, and safe long-text truncation.
 
-Keep the five boundaries explicit: Shell owns public regions and geometry; Theme owns shared visual tokens; UI Primitives own reusable interaction behavior; Slots own validated composition; the Module owns domain data, actions, and its free-form `main.view`. Module CSS must stay under a Feature root and consume `--mem-view-*`; do not read `--view-*`, target `.view-shell-*` or `[data-view-slot]`, redefine public tokens, or override the Host with `!important`.
+Keep the five boundaries explicit: Shell owns public regions and geometry; Theme owns shared visual tokens; UI Primitives own reusable interaction behavior; Slots own validated composition; the Module owns presentation of domain data, UI interactions, and its free-form `main.view`. Module CSS must stay under a Feature root and consume `--mem-view-*`; do not read `--view-*`, target `.view-shell-*` or `[data-view-slot]`, redefine public tokens, or override the Host with `!important`.
 
 The build-time style contract is a heuristic guardrail for common mistakes, not a security sandbox. It checks statically recognizable style templates and known private dependencies; it cannot prove arbitrary dynamic strings safe. Module authors must still honor the boundary above: keep ordinary Feature CSS in a statically inspectable template constant and scope it below the Feature root. Historical helper files in production builtins have not all migrated to this gate yet; new or modified Module styles should be enrolled explicitly.
 
@@ -296,3 +296,7 @@ ctx.slots.register(portableSlots.modelDefinitionRenderer, {
 ```
 
 The example `index.js` is precompiled ESM; after editing `src/index.js`, run `node scripts/build-example-view-package.mjs`. The production build checks the committed bundle byte for byte and keeps `@memsphere/view-sdk` external. A Package must not inline the SDK; the Host singleton Token brand rejects such a bundle. A data renderer must synchronously return an `HTMLElement`; throwing, returning a Promise/thenable, or returning another value immediately abdicates it and selects the official fallback. Abdication lasts until instance unload or View restart.
+
+## App Business Pages
+
+Apps install Module instances through `entrypoints.view`. Declare `main.view@1:route:<route-id>` and the registration id in the Package to contribute a Module-relative page. Include api in Plugin inject to use `ctx.api.invoke(operation,input)`; this service is available only to App-bound instances. See the [expense App](../examples/apps/expense/README.md) and [App contract](./app-contract.en.md).

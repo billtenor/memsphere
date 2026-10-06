@@ -24,7 +24,8 @@ test("README, System Memory, and Skill share the personalized software positioni
   for (const source of [readme, framework, skill]) {
     assert.match(source, /个性化软件/);
     assert.match(source, /Memsphere (?:本身)?不是(?:另一个)? Agent/);
-    assert.match(source, /当前版本首先实现(?:了| Memory)/);
+    assert.match(source, /App/);
+    assert.match(source, /Project/);
   }
   assert.match(personalizedSoftware, /个性化软件/);
   assert.doesNotMatch(personalizedSoftware, /Memsphere 不是 Agent|当前版本首先实现/);

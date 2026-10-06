@@ -92,6 +92,7 @@ export async function mutateModel(context: Context, root: string, operation: "cr
     if (operation === "create" && existing) throw serviceError("ALREADY_EXISTS", `Model already exists: ${ref}`);
     if (operation !== "create" && !existing) throw serviceError("MODEL_NOT_FOUND", `Model not found: ${ref}`);
     if (existing?.origin === "system") throw serviceError("SYSTEM_MODEL_READ_ONLY", `System model is read-only: ${ref}`);
+    if (existing?.origin === "app") throw serviceError("APP_MODEL_READ_ONLY", `App model is read-only: ${ref}; manage it through its App package`);
     const market = existing?.origin === "market";
     const definitionDirectory = market ? join(state.paths.registrationDirectory, "imported-definitions") : state.paths.modelsDirectory;
     await assertModelPath(definitionDirectory, ref, market ? [] : state.paths.excludedDirectories);

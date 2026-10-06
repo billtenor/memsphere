@@ -10,7 +10,7 @@ export class GitRevisionMemoryProvider implements MemoryProvider {
   readonly #revision: string;
   readonly #entities = new Map<string, MemoryEntity>();
 
-  constructor(root: string, revision: string) {
+  constructor(root: string, revision: string, readonly include?: (path: string) => boolean) {
     this.#root = root;
     this.#revision = revision;
   }
@@ -21,6 +21,7 @@ export class GitRevisionMemoryProvider implements MemoryProvider {
     const paths = output.split("\n").filter(Boolean).filter((path) => path.endsWith(".yaml") || path.endsWith(".yml"));
     const descriptors: ProviderMemoryDescriptor[] = [];
     for (const path of paths) {
+      if (this.include && !this.include(path)) continue;
       const kindName = path.split("/")[0];
       if (!isMemoryKind(kindName) || (query.kind && query.kind !== kindName)) continue;
       const kind = kindName as MemoryKind;

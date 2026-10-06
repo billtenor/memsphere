@@ -151,7 +151,9 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   assert(files.every((file) => file.entity.defines.every((definition) => typeof definition === "string")));
   assert.equal(manifest.version, 4);
   assert.equal("memory_syntax" in manifest ? manifest.memory_syntax : undefined, currentMemorySyntax);
-  assert.equal(manifest.system_memory.install.length, 25);
+  assert.equal(manifest.system_memory.install.length, 27);
+  assert(manifest.system_memory.install.includes("concepts/memsphere-app.yaml"));
+  assert(manifest.system_memory.install.includes("statements/memsphere-app-usage-rules.yaml"));
   assert.deepEqual(systemMemories.map((memory) => memory.path), manifest.system_memory.install);
   assert(systemMemories.every((memory) => memory.sourcePath === join(bundledSystemMemoryRoot(), memory.path)));
   assert(systemMemories.every((memory) => memory.names[0] === basename(memory.path, ".yaml")));

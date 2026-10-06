@@ -53,7 +53,9 @@ import {
   type SlotBindings
 } from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile, type MemoryFile } from "../memory/store.js";
-import { MemoryNotFoundError, type MemoryCatalog } from "../memory/catalog.js";
+import { MemoryNotFoundError, type MemoryCatalog, type MemoryDescriptor } from "../memory/catalog.js";
+import { appProcedureFileSource } from "../app/run.js";
+import { appOwnershipSchema, type AppOwnership } from "../app/ownership.js";
 import { memoryKinds } from "../memory/kinds.js";
 import { currentMemorySyntax, type MemorySyntaxVersion } from "../memory/syntax.js";
 import { inheritSchemaFormat, resolveSchemaContract } from "../memory/schema.js";
@@ -297,8 +299,10 @@ export type RunState = {
     checkpointDigest: string;
     baseRevision: string;
   };
+  appSources?: Array<{ reference: string; id: string; version: string; assetKey: string; packageDigest: string }>;
   memorySnapshot?: {
     path: "memory";
+    appOwnership?: AppOwnership;
     files?: string[];
   };
   createdAt: string;
@@ -868,8 +872,10 @@ const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
     checkpointDigest: z.string(),
     baseRevision: z.string()
   }).strict().optional(),
+  appSources: z.array(z.object({ reference: z.string(), id: z.string(), version: z.string(), assetKey: z.string(), packageDigest: z.string() }).strict()).optional(),
   memorySnapshot: z.object({
     path: z.literal("memory"),
+    appOwnership: appOwnershipSchema.optional(),
     files: z.array(z.string()).optional()
   }).strict().optional(),
   createdAt: z.string(),
@@ -939,6 +945,7 @@ export async function ensureRunDirectory(runsRoot: string): Promise<string> {
 export async function startRun(input: {
   memoryRoot: string;
   memorySnapshotRoot?: string;
+  memoryOwnership?: AppOwnership;
   runsRoot: string;
   name: string;
   language?: PromptLocale;
@@ -954,6 +961,12 @@ export async function startRun(input: {
   const runName = normalizeRunName(input.name);
   const procedureName = input.procedureName?.trim();
   const procedureFile = input.procedureFile?.trim();
+  const appSources: NonNullable<RunState["appSources"]> = [];
+  const remember = (descriptor: MemoryDescriptor) => {
+    if (!descriptor.app) return;
+    const { enabled, ...source } = descriptor.app;
+    if (!appSources.some(item => item.reference === descriptor.reference && item.id === source.id)) appSources.push({ reference: descriptor.reference, ...source });
+  };
   if (!procedureName && !procedureFile) throw new Error("provide a procedure name or procedure file");
   if (procedureName && procedureFile) throw new Error("use either a procedure name or procedure file, not both");
 
@@ -961,19 +974,30 @@ export async function startRun(input: {
   let lookup: RunMemoryLookup | undefined;
   let procedure: MemoryFile | undefined;
   if (procedureFile) {
+    const source = await appProcedureFileSource(input.runsRoot, input.memoryRoot, procedureFile);
+    if (source) appSources.push(source);
     procedure = await readMemoryFile("procedures", resolve(procedureFile));
+    if (input.memoryCatalog) {
+      const catalog = await input.memoryCatalog.snapshot?.() ?? input.memoryCatalog;
+      lookup = catalogLookup(catalog, remember);
+    }
   } else if (input.memoryCatalog) {
     const descriptor = await input.memoryCatalog.resolve(procedureName!, { kind: "procedures" });
-    const catalog = descriptor.project_name
+    if (descriptor.app && !descriptor.app.enabled) throw new Error(`App is disabled: ${descriptor.app.id}`);
+    const selectedCatalog = descriptor.project_name
       ? input.projectMemoryCatalogs?.[descriptor.project_name]
       : input.memoryCatalog;
-    if (!catalog) throw new Error(`Run Memory source is unavailable: ${descriptor.project_name}`);
+    if (!selectedCatalog) throw new Error(`Run Memory source is unavailable: ${descriptor.project_name}`);
+    const catalog = await selectedCatalog.snapshot?.() ?? selectedCatalog;
+    const selectedDescriptor = await catalog.resolve(descriptor.reference, { kind: "procedures" });
+    if (selectedDescriptor.app && !selectedDescriptor.app.enabled) throw new Error(`App is disabled: ${selectedDescriptor.app.id}`);
+    remember(selectedDescriptor);
     procedure = {
       kind: "procedures",
       path: descriptor.reference,
       entity: await catalog.read(descriptor.reference, { kind: "procedures" })
     };
-    lookup = catalogLookup(catalog);
+    lookup = catalogLookup(catalog, remember);
   } else {
     procedure = await findMemoryByName(input.memoryRoot, "procedures", procedureName!);
   }
@@ -1014,7 +1038,8 @@ export async function startRun(input: {
     memoryRoot: input.memoryRoot,
     memoryProjects: input.memoryProjects,
     memorySource: input.memorySource,
-    memorySnapshot: input.memorySnapshotRoot ? { path: "memory" } : undefined,
+    ...(appSources.length ? { appSources } : {}),
+    memorySnapshot: input.memorySnapshotRoot ? { path: "memory", appOwnership: input.memoryOwnership } : undefined,
     createdAt: now,
     updatedAt: now,
     plan: cloneSteps(steps),
@@ -4462,10 +4487,12 @@ async function freezeRulePair(
   };
 }
 
-function catalogLookup(catalog: MemoryCatalog): RunMemoryLookup {
+function catalogLookup(catalog: MemoryCatalog, remember?: (descriptor: MemoryDescriptor) => void): RunMemoryLookup {
   return async (kind, referenceOrName) => {
     try {
       const descriptor = await catalog.resolve(referenceOrName, { kind });
+      if (kind === "procedures" && descriptor.app && !descriptor.app.enabled) throw new Error(`App is disabled: ${descriptor.app.id}`);
+      remember?.(descriptor);
       return {
         kind,
         path: descriptor.reference,

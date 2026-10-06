@@ -1,0 +1,9 @@
+!concept
+syntax: memsphere-20260721-stable
+names:
+  - expense-app
+  - 费用记录 App
+defines:
+  - 费用记录 App 为当前 Project 提供共享账本，Human 在 View 中录入和提交，Agent 使用独立 expense CLI 完成相同操作。
+  - 使用前读取 memsphere cli show org.memsphere.expense-cli --app org.memsphere.expense，按返回的命令入口和固定账本参数调用 expense；子命令为 list、create 和 submit，详细参数见 expense --help。
+  - 费用金额必须为正数，记录初始为 draft，只有 draft 可提交为 submitted；提交必须携带查询得到的当前 revision，过期版本被拒绝。

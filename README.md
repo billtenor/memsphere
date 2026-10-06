@@ -385,7 +385,7 @@ memsphere memory list --kind procedures --limit 20 --output json
 
 上面描述的是 Memsphere 要抵达的完整方向。我们正在从最重要的基础开始，一步步把它变成现实。
 
-当前版本首先实现了 Memory，因为任何长期软件都需要一套可以被 Agent 准确读取和遵循的语义基础。
+当前版本以 Memory 提供可以被 Agent 准确读取和遵循的语义基础，并支持 Project 安装 App，将 Memory、界面、模型、数据扩展和独立 CLI 登记组成完整功能。创建与安装见 [App 指南](docs/app-guide.md)。
 
 Memsphere 当前支持四种 Memory：
 
@@ -422,6 +422,14 @@ Memsphere 将沿着同一原则继续扩展：
 我们希望最终做到的，并不是让每个人都成为传统意义上的程序员，而是让每个人、每个组织，都能拥有真正适合自己的软件。
 
 ## 8. 开发
+
+架构与专项设计：
+
+- [总体架构](docs/architecture.md)：系统定位、Project 与 App 边界及代码分层。
+- [App 设计](docs/app-design.md)：App 的组成与 Memory 归属、Project 安装与组织多个 App，以及前后端协作。
+- [创建和安装 App](docs/app-guide.md)：最小 App 文件示例、作者交付内容与 Project 安装使用路径。
+- [数据层设计](docs/data-layer-design.md)：数据协议、模型、Runtime、Store 与数据扩展。
+- [View 插件设计](docs/view-plugin-design.md)：前端插件、Slot、生命周期与故障隔离。
 
 ```bash
 git clone https://github.com/billtenor/memsphere.git
