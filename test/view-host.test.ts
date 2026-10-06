@@ -194,7 +194,7 @@ test("ViewHost rejects a Plugin service that is not wired into the current Conte
   await withBrowserHost(
     'export default { apiVersion: 1, inject: ["api"], apply() {} };',
     async page => {
-      await assertModuleFailure(page, "View Plugin requests unsupported service: api");
+      await assertModuleFailure(page, "API service requires an App-bound Module instance");
     }
   );
 });

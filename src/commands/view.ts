@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 import MarkdownIt from "markdown-it";
 import { ZodError, type ZodIssue } from "zod";
 import { builtinModuleCatalog } from "../module/builtin-catalog.js";
+import { appProjectFromRoot, appViewComposition } from "../app/composition.js";
+import { invokeAppOperation } from "../app/backend.js";
+import { AppError } from "../app/contracts.js";
 import { isViewSdkCompatible, readModuleManifest, resolveModuleViewEntry } from "../module/manifest.js";
 import {
   resolveViewPackageComposition,
@@ -388,6 +391,24 @@ async function handleRequest(
   const { memoryRoot, runsRoot } = config;
   const archiveRoot = config.archiveRoot;
 
+  const appOperation = url.pathname.match(/^\/api\/apps\/([^/]+)\/operations\/([^/]+)$/);
+  if (request.method === "POST" && scopedApi && appOperation) {
+    if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+    const body = await readJsonBody<{ input?: unknown }>(request);
+    try {
+      const project = await appProjectFromRoot(dirname(config.configPath), config.memoryRoot);
+      if (!project) throw new AppError("APP_PROJECT_NOT_FOUND", "Project is unavailable");
+      project.name = projectScope!.projectId;
+      const controller = new AbortController();
+      request.once("aborted", () => controller.abort());
+      const result = await invokeAppOperation(project, decodeURIComponent(appOperation[1]!), decodeURIComponent(appOperation[2]!), body.input, controller.signal);
+      sendJson(response, 200, { result });
+    } catch (error) {
+      sendJson(response, error instanceof AppError ? 409 : 400, { code: error instanceof AppError ? error.code : "APP_OPERATION_FAILED", error: error instanceof Error ? error.message : String(error) });
+    }
+    return;
+  }
+
   const packageAssetMatch = url.pathname.match(/^\/assets\/view-packages\/([^/]+)\/([A-Za-z0-9_-]+)$/);
   if (request.method === "GET" && packageAssetMatch) {
     const projectId = decodeURIComponent(packageAssetMatch[1]!);
@@ -474,7 +495,10 @@ async function handleRequest(
 
   const pagePath = scopedPage?.remainder ?? url.pathname;
   const developmentPage = options.developmentModules?.some(module => module.pagePaths.includes(pagePath)) === true;
-  if (request.method === "GET" && (isViewPagePath(requestedPathname) || isViewPagePath(pagePath) || developmentPage)) {
+  const appPage = scopedPage && (await compositionBootSnapshot.entries.get(scopedPage.projectId)?.externalInstances ?? [])
+    .some(instance => instance.appApiBase && (pagePath === `/modules/${encodeURIComponent(instance.module.instanceId)}`
+      || pagePath.startsWith(`/modules/${encodeURIComponent(instance.module.instanceId)}/`)));
+  if (request.method === "GET" && (isViewPagePath(requestedPathname) || isViewPagePath(pagePath) || developmentPage || appPage)) {
     if (!projectScope) {
       redirect(response, 302, projectPagePath(config.project?.name, `${url.pathname}${url.search}`));
       return;
@@ -2986,28 +3010,30 @@ async function captureViewCompositionBootSnapshot(
       // A Project removed during startup remains absent from the immutable boot snapshot.
       return;
     }
+    const appView = await appViewComposition({ ...resolved, viewPackages, viewComposition });
+    // Settings revisions compare the user's Home configuration, not derived App instances.
     const digest = compositionConfigDigest(viewPackages, viewTheme, viewComposition);
     const presentationConfig: MemsphereConfig = {
       ...resolved,
-      viewPackages,
+      viewPackages: appView.global,
       viewTheme,
-      viewComposition
+      viewComposition: appView.composition
     };
     const composition = resolveViewPackageComposition({
-      global: viewPackages,
+      global: appView.global,
       globalThemeSource: viewTheme?.selected_source,
-      composition: viewComposition,
+      composition: appView.composition,
       sdkVersion: viewSdkVersion
-    });
+    }).then(value => ({ ...value, diagnostics: [...value.diagnostics, ...appView.diagnostics] }));
     entries.set(projectId, Object.freeze({
       projectId,
       globalRevision: globalDocument.revision,
-      viewPackages,
+      viewPackages: appView.global,
       viewTheme,
-      viewComposition,
+      viewComposition: appView.composition,
       digest,
       composition,
-      externalInstances: composition.then(value => externalViewInstances(presentationConfig, value, assets))
+      externalInstances: composition.then(value => externalViewInstances(presentationConfig, value, assets, appView.apps))
     }));
   }));
   await Promise.all([...entries.values()].map(entry => entry.externalInstances));
@@ -3047,6 +3073,7 @@ async function externalViewInstances(
   config: MemsphereConfig,
   composition: ResolvedViewPackageComposition,
   assets: ViewPackageAssetRegistry,
+  apps: ReadonlyMap<string, string> = new Map(),
 ): Promise<readonly ViewHostBootInstance[]> {
   const projectId = config.project?.name ?? "memsphere";
   return Promise.all(composition.instances.map(async instance => {
@@ -3076,6 +3103,7 @@ async function externalViewInstances(
     }));
     return Object.freeze({
       pluginPath: `/assets/view-packages/${encodeURIComponent(projectId)}/${entry.key}`,
+      ...(apps.has(instance.instanceId) ? { appApiBase: `/api/projects/${encodeURIComponent(projectId)}/apps/${encodeURIComponent(apps.get(instance.instanceId)!)}/operations` } : {}),
       config: instance.config,
       styles: Object.freeze(styles),
       themes: Object.freeze(themes),
@@ -3088,6 +3116,7 @@ async function externalViewInstances(
         ...(suppliesSelectedTheme && capabilities.has("theme.override") ? ["override" as const] : [])
       ]),
       allowedServices: Object.freeze([
+        ...(apps.has(instance.instanceId) ? ["api" as const, "router" as const] : []),
         "slots" as const,
         "theme" as const,
         "presentation" as const,

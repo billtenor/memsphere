@@ -327,7 +327,7 @@ The Agent will discover and read the applicable Procedure, create a Run, and adv
 
 The sections above describe the complete direction Memsphere is working toward. We are beginning with the most important foundation and turning that direction into reality one step at a time.
 
-The current version starts with Memory because any long-lived software needs a semantic foundation that an Agent can read and follow accurately.
+The current version provides Memory as an Agent-readable semantic foundation and supports Project App installations combining Memory, interfaces, models, data extensions, and independent CLI registration. See the [App guide](docs/app-guide.en.md).
 
 Memsphere currently supports four kinds of Memory:
 
@@ -363,6 +363,14 @@ Memsphere will continue to expand according to the same principles:
 Our goal is not to turn everyone into a programmer in the traditional sense. It is to let every person and every organization own software that truly fits them.
 
 ## 8. Development
+
+Architecture and specialized designs:
+
+- [Architecture](docs/architecture.en.md): system positioning, Project and App boundaries, and code layers.
+- [App Design](docs/app-design.en.md): App composition and Memory ownership, installing and organizing multiple Apps in a Project, and frontend/backend collaboration.
+- [Create and Install an App](docs/app-guide.en.md): minimal App files, author deliverables, and Project installation and usage.
+- [Data Layer Design (Chinese)](docs/data-layer-design.md): data protocols, models, Runtimes, Stores, and data extensions.
+- [View Plugin Design](docs/view-plugin-design.en.md): frontend plugins, Slots, lifecycle, and failure isolation.
 
 ~~~bash
 git clone https://github.com/billtenor/memsphere.git

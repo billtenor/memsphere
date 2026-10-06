@@ -36,3 +36,4 @@ defines:
   - View 对单条持久化记录实行故障隔离：损坏 ChangeSet 在列表中标为 unavailable，详细错误只在 Human 选择后显示，不阻塞 Memory、记忆市场或其他有效 ChangeSet；记忆市场只跳过明确的 ChangeSet 完整性损坏，非完整性存储故障仍显式失败；单个 Run detail 损坏只在该 Run 详情区报错，不阻塞 Running 列表与其他 Run。
   - View 是 Memsphere 当前的通用管理界面，不等同于某个个性化软件未来生长出的专属界面。
   - Artifact Review 右侧内容跟随所选材料：当前待评审产物展示其评审与可用编辑操作；前序产物展示对应已接受快照的只读评审；冻结契约与无对应记录的材料展示空状态。切回当前待评审产物保留未提交的本地意见。
+  - App 的 View Package 随 Project 安装、配置与启用，只在对应 Project 装配；Home 主题与显式 Slot 选择继续生效。Module 可以声明 main.view@1:route:<route-id> 对应自身路由，通过 App 绑定的 ctx.api.invoke 调用清单声明的业务操作。

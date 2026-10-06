@@ -1451,6 +1451,8 @@ export interface SlotRegistry {
 }
 
 export interface ViewPluginContext {
+  /** Host-bound operations of this Module instance's App. */
+  readonly api?: { invoke<T = unknown>(operation: string, input?: unknown): Promise<T> };
   readonly module: Readonly<ModuleInstanceContext>;
   readonly slots: SlotRegistry;
   /** Present only after the Plugin declares and ViewHost wires the router service. */

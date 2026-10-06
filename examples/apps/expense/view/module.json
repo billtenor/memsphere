@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "org.memsphere.expense-view",
+  "version": "0.1.0",
+  "view": {
+    "entry": "./index.js", "sdk": "^1.0.0",
+    "contributions": [
+      { "id": "expense.navigation", "cell": "navigation.primary@1:expense.navigation", "priority": 100 },
+      { "id": "expense.main", "cell": "main.view@1:route:expenses", "priority": 100 }
+    ]
+  }
+}

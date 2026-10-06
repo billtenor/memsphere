@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
 import { Command, Option } from "commander";
+import { registerAppCommands } from "./commands/app.js";
 import {
   archiveListCommand,
   archiveRestoreRunCommand,
@@ -98,6 +99,8 @@ program.hook("preAction", () => {
 const project = program
   .command("project")
   .description("Manage persistent Memsphere Projects and Workspace bindings.");
+
+registerAppCommands(program);
 
 project.command("models").description("Manage model registrations.")
   .command("initialize").description("Explicitly initialize registration values and migrate the known preview definition with a backup.")

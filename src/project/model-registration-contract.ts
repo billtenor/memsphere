@@ -1,7 +1,7 @@
 export const MODEL_REGISTRATION_MODEL = "memsphere/model-registration";
 export const LEGACY_MODEL_REGISTRATION_MODEL = "memsphere/model-registration.json";
 export const IMPORTED_MODEL_DEFINITIONS_STORE = "models/imported/json-schema/draft-07";
-export type ModelOrigin = "project" | "system" | "market";
+export type ModelOrigin = "project" | "system" | "market" | "app";
 export type ModelRegistration = {
   modelRef: string;
   name?: string;
@@ -22,6 +22,9 @@ export type ModelRegistrationConfig = {
 };
 export type ProjectModelInput = {
   root: string;
+  memoryRoot?: string;
+  /** Internal preflight only; does not persist an enable operation. */
+  enableApp?: string;
   modelsDirectory?: string;
   modelRegistration?: ModelRegistrationConfig;
 };

@@ -8,6 +8,7 @@ defines:
   - 本记忆描述当前稳定版本 memsphere-20260721-stable 支持的 Memsphere YAML 语法。
 asserts:
   - 语法实现、Reserved Memory、技能文档、迁移工具和示例必须以本规则树中评审通过的规则为共同依据。
+  - App 归属、安装状态及 ChangeSet 归属附件是宿主元数据，不是 Memory YAML 关键字；本次 App 整合不增加 YAML 字段或改变 syntax。
 sections:
   - !statement
     names:

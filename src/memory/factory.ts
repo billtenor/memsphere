@@ -1,4 +1,5 @@
 import { readConfig } from "../config.js";
+import { dirname } from "node:path";
 import { DefaultMemoryCatalog, type MemoryCatalog } from "./catalog.js";
 import { FileMemoryProvider } from "./file-provider.js";
 import { ProjectMemoryProvider } from "./project-provider.js";
@@ -42,6 +43,7 @@ function projectSources(
   return [
     {
       name: config.project.name,
+      projectRoot: primaryOverride ? undefined : dirname(config.configPath),
       memoryRoot: primaryOverride?.memoryRoot ?? config.memoryRoot,
       revision: primaryOverride?.revision ?? config.project.revision,
       provider: primaryOverride?.provider,
@@ -52,6 +54,7 @@ function projectSources(
     },
     ...config.project.mounted.map((project) => ({
       name: project.name,
+      projectRoot: project.root,
       memoryRoot: project.memoryRoot,
       revision: project.revision,
       managed: project.store.type === "managed" ? {

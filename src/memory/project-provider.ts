@@ -3,6 +3,7 @@ import { FileMemoryProvider } from "./file-provider.js";
 import { GitRevisionMemoryProvider } from "./git-provider.js";
 import type { MemoryProvider, MemoryProviderQuery, ProviderMemoryDescriptor } from "./provider.js";
 import { gitOutput } from "../git.js";
+import { AppMemoryProvider } from "../app/memory-provider.js";
 
 export type ProjectMemorySource = {
   name: string;
@@ -10,6 +11,7 @@ export type ProjectMemorySource = {
   revision?: string;
   managed?: { branch: string; publishedRevision: string };
   provider?: MemoryProvider;
+  projectRoot?: string;
 };
 
 export class ProjectMemoryProvider implements MemoryProvider {
@@ -19,7 +21,7 @@ export class ProjectMemoryProvider implements MemoryProvider {
   constructor(sources: ProjectMemorySource[]) {
     this.#sources = sources.map((source) => ({
       source,
-      provider: source.provider ?? (source.managed
+      provider: source.provider ?? (source.projectRoot ? new AppMemoryProvider(source.projectRoot, source.memoryRoot, source.managed?.publishedRevision) : source.managed
         ? new GitRevisionMemoryProvider(source.memoryRoot, source.managed.publishedRevision)
         : new FileMemoryProvider(source.memoryRoot))
     }));
@@ -30,7 +32,7 @@ export class ProjectMemoryProvider implements MemoryProvider {
     const result: ProviderMemoryDescriptor[] = [];
     for (const { source, provider } of this.#sources) {
       const descriptors = await provider.list(query);
-      const frozen = source.managed ? await frozenMemoryReferences(source, provider, descriptors) : new Set<string>();
+      const frozen = source.managed ? await frozenMemoryReferences({ ...source, managed: { ...source.managed, publishedRevision: descriptors[0]?.revision ?? source.managed.publishedRevision } }, provider, descriptors) : new Set<string>();
       for (const descriptor of descriptors) {
         const id = `${source.name}\0${descriptor.id}`;
         this.#owners.set(id, { provider, sourceId: descriptor.id });
@@ -38,7 +40,7 @@ export class ProjectMemoryProvider implements MemoryProvider {
           ...descriptor,
           id,
           project_name: source.name,
-          ...(source.revision ? { revision: source.revision } : {}),
+          ...(descriptor.revision || source.revision ? { revision: descriptor.revision ?? source.revision } : {}),
           ...(frozen.has(logicalReference(descriptor)) ? { frozen: "formal Memory or one of its dependencies changed outside Memsphere" } : {})
         });
       }

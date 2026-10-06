@@ -31,7 +31,7 @@ Reference is a real Module, not a separate port or static mock. It demonstrates 
 | Domain canvases, Memory bodies, Run trees, and other unique content | Module-owned DOM in `main.view` |
 | Color, typography, spacing, radius, shadow, and responsive geometry | Theme v1 `--mem-view-*` tokens |
 
-The Shell owns shared placement and geometry, Theme owns shared visuals, primitives own common interaction states, and the Module owns business data and custom content.
+The Shell owns shared placement and geometry, Theme owns shared visuals, primitives own common interaction states, and the Module owns presentation of business data, UI interaction state, and custom content.
 
 ## Minimal integration
 

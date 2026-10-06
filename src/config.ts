@@ -47,6 +47,7 @@ export type MemsphereConfig = {
     view?: import("./view/package-config.js").ProjectViewConfig;
     mounted: Array<{
       name: string;
+      root?: string;
       memoryRoot: string;
       revision?: string;
       store: import("./project/model.js").ProjectConfigFile["store"];
@@ -109,6 +110,7 @@ async function readProjectExecutionConfig(options: {
   const revision = await storeRevision(context.primary.memoryRoot, context.primary.config.store.type);
   const mounted = await Promise.all(context.mounted.map(async (project) => ({
     name: project.name,
+    root: project.paths.root,
     memoryRoot: project.memoryRoot,
     revision: await storeRevision(project.memoryRoot, project.config.store.type),
     store: project.config.store

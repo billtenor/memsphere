@@ -6,12 +6,12 @@ export class FileMemoryProvider implements MemoryProvider {
   readonly #memoryRoot: string;
   readonly #entities = new Map<string, MemoryEntity>();
 
-  constructor(memoryRoot: string) {
+  constructor(memoryRoot: string, readonly include?: (path: string) => boolean) {
     this.#memoryRoot = memoryRoot;
   }
 
   async list(query: MemoryProviderQuery = {}): Promise<ProviderMemoryDescriptor[]> {
-    const files = await readAllMemoryFiles(this.#memoryRoot, query.kind);
+    const files = await readAllMemoryFiles(this.#memoryRoot, query.kind, this.include);
     this.#entities.clear();
 
     return files.map((file) => {

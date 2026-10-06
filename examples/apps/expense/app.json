@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "org.memsphere.expense",
+  "name": "费用记录",
+  "version": "0.1.0",
+  "description": "通过 View 或独立 CLI 录入费用，使用同一账本与状态规则。",
+  "configuration": "config.schema.json",
+  "assets": {
+    "memories": [{ "key": "intro", "path": "memories/expense.yaml" }],
+    "viewPackages": [{ "key": "expense", "path": "view" }],
+    "modelPackages": [{ "key": "expense", "path": "models" }],
+    "cliDescriptors": [{ "key": "expense", "path": "cli/descriptor.json" }]
+  },
+  "entrypoints": {
+    "agent": ["concepts/expense-app"],
+    "view": [{ "packageKey": "expense", "instanceId": "expense", "path": "/expenses" }]
+  },
+  "cliBindings": [{ "cli": "org.memsphere.expense-cli", "args": ["--ledger", { "configKey": "ledgerDirectory" }] }],
+  "stores": [{ "key": "ledger", "model": "example/expense", "kind": "ValueStore", "factory": "memsphere/filesystem-json", "config": { "directory": { "configKey": "ledgerDirectory" } } }],
+  "backend": { "entry": "backend/index.mjs", "operations": { "list": "read", "create": "write", "submit": "write" } }
+}

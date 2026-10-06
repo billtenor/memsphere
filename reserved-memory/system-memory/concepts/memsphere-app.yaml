@@ -1,0 +1,11 @@
+!concept
+syntax: memsphere-20260721-stable
+names:
+  - memsphere-app
+  - App
+defines:
+  - App 是围绕完整业务功能组织插件与资产的独立软件单元，可以包含自己的 Memory、View Package、Model Package、数据扩展和外部 CLI 描述。
+  - Project 通过安装多个 App 形成项目，同时容纳不属于任何 App 的待组织 Memory；跨 App 逻辑引用不改变 Memory 归属。
+  - Module 即 View Module；View Package 分发界面模块、主题和样式，Model Package 分发模型定义，包的身份与版本独立于 App。
+  - app.json 是可信本地发行目录的组合清单；Project 安装记录保存版本、内容摘要、配置、资产归属和启用状态。
+  - 外部 CLI 是独立程序，登记描述说明工具身份与入口，Project 或 App 绑定提供固定参数、工作目录和环境引用；Memsphere 不代理业务命令执行。

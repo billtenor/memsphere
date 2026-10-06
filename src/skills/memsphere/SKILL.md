@@ -9,7 +9,7 @@ Memsphere 是 AI 时代个性化软件的运行环境。它让软件从自然语
 
 Memsphere 不是 Agent，而是运行在不同通用 Agent 之上的一层，为个性化软件提供相对稳定的语言、运行时和资产管理方式。Prompt 适合一次意图，Skill 适合边界清晰的可复用能力；当软件需要长期运行、持续管理和不断演化时，再由 Memsphere 组织。三者不是必须走完的升级路线，也不是互相替代的关系。
 
-Memsphere 规划管理 Memory、个性化 CLI、数据和界面四类协作资产，并让 LLM 的 Token 算力与传统确定性算力按各自优势协同工作。当前版本首先实现 Memory，同时提供 Project、Run、Artifact、Review、ChangeSet、View 和 Skill 接入作为第一块地基；个性化 CLI、数据和界面成为完整一等资产仍属于后续方向。
+Memsphere 规划管理 Memory、个性化 CLI、数据和界面四类协作资产，并让 LLM 的 Token 算力与传统确定性算力按各自优势协同工作。当前版本提供 Project App 安装，将 Memory、View Package、Model Package、数据扩展和外部 CLI 登记组合为功能；Project 同时保留尚未归入 App 的 Memory。
 
 Memory 是 Agent 理解并进入个性化软件的语义入口。通过 memsphere CLI，Agent 可以读取当前 Workspace 的 Primary 与 Mounted Project 中积累的知识、规则、结构和流程，并按照这些资产完成任务。
 
@@ -20,6 +20,14 @@ Memsphere Home 的 `config.json` 中，`language` 同时控制面向 Agent 的�
 只要本轮创建、修改、移动、重命名或删除了任何 Memory，结束任务、提交评审或创建 Git commit 前都必须执行 `memsphere memory change validate [change-id]`。普通 `memsphere validate` 只校验当前 Project Store 或显式 Memory root，不能代替变更级校验，也不会创建或更新 ChangeSet。最终实现摘要、验证报告或交付报告必须包含与当前最终 Memory 内容匹配的 ChangeSet ID、校验状态和 View 入口；校验后继续修改 Memory 时必须重新执行变更级校验。
 
 没有 Memory 差异时不创建空 ChangeSet。`memsphere validate --memory-root` 是没有 Project、Registry 或 ChangeSet 上下文的无状态入口，不得把它的成功结果当作变更级交付证据。
+
+## App 与外部 CLI
+
+先读取 `memsphere-app` 与 `memsphere-app-usage-rules`。作者交付可信本地目录 `app.json` 及声明资产；使用者执行 `memsphere --project <project> app install <directory> [--config <file>]`，再 `app check <id>`、`app enable <id>`。`app show <id>` 给出 Agent 阅读/流程命令及 Human 界面路径。View 组合变更后按提示 `memsphere view restart`。
+
+App 自有工具描述自动登记，独立工具使用 `cli register <descriptor-file>`。程序需按作者说明独立安装。`cli bind <id> --binding <file> [--app <id>]` 保存固定参数、工作目录和本机入口；`cli list/show [--app <id>]` 只读且不执行程序。Agent 按结构化调用信息直接执行工具，`envFrom` 只引用环境变量名，凭据不写入清单。`cli check` 仅执行声明的版本探测和条件检查，不猜测协议。
+
+App 停用保留 Memory 阅读、归属、数据及历史 Run；新的 Procedure 根流程或调用闭包涉及停用 App 时拒绝。Managed 安装复用 ChangeSet 发布，Embedded 只应用当前 worktree，不提交 Git；未完成安装的 Memory 被隐藏，使用相同发行目录重试。Mounted 来源只读。首版没有升级、卸载或已有 Memory 自动认领。
 
 ## Project 模型与登记
 
@@ -128,7 +136,7 @@ View 对持久化记录按记录隔离故障：损坏 ChangeSet 在列表中标�
 
 Human 在 Agent 对话中提供 ChangeSet id 后，Agent 在当前 worktree 执行 `memsphere memory change claim <change-id>`。已有 claim 时默认停止；只有 human 明确要求接手才使用 `--force`。claim 把 pending Comment 置为 processing，并将中央候选准备到当前 worktree/Workspace；已有本地 Memory 修改只警告，最终由目标级 CAS 阻止静默覆盖。合理 Comment 修改后必须执行 `memsphere memory change validate <change-id>`，再用 `memsphere memory change finish <change-id> --comment <id> --reason fixed` 完成；不合理 Comment 保持内容不变并用 `--reason rejected`，判断说明只在对话中反馈。finish 释放 claim。没有实际差异且所有 Comment 已完成时使用 `memsphere memory change complete <change-id>`。Embedded View ChangeSet 显式绑定新 HEAD 时，仅在 scoped target digest 未变化时允许安全前移，否则报 edit conflict。
 
-Managed 最终使用 `memsphere memory publish --change <change-id>` 发布并完成 ChangeSet。普通 Embedded ChangeSet 仍使用普通 Git commit、push 与合入流程；只有 `market_import` ChangeSet 可在 validate 后复用同一 publish 命令，把隔离候选应用到当前 worktree。该操作不 commit、push，也不完成 ChangeSet；候选内容进入 `master` 后 ChangeSet 才完成。ChangeSet candidate 与当前验证内容都不是完整 Memory Root，不得传给 `memsphere validate --memory-root`。
+Managed 最终使用 `memsphere memory publish --change <change-id>` 发布并完成 ChangeSet。普通 Embedded ChangeSet 仍使用普通 Git commit、push 与合入流程；只有 `market_import` 或 `app_install` ChangeSet 可在 validate 后复用同一 publish 命令，把隔离候选应用到当前 worktree。该操作不 commit、push，也不完成 ChangeSet；候选内容进入 `master` 后 ChangeSet 才完成。ChangeSet candidate 与当前验证内容都不是完整 Memory Root，不得传给 `memsphere validate --memory-root`。
 
 ## Memsphere 记忆语法规则
 

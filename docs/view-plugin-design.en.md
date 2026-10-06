@@ -4,6 +4,8 @@
 
 This document defines the architectural boundaries and long-term design principles of Memsphere View Plugins. It is intended for maintainers of ViewHost, Module Loader, and View SDK. For extension development, see the [View Plugin Guide](./view-plugin-guide.en.md). For exact interfaces, see the [View Plugin API](./view-plugin-api.en.md). For the Slot Catalog, see the [View Slot List](./view-slots.en.md).
 
+The [App Design](./app-design.en.md) defines how View, models, data extensions, CLI tools, and Memory form a complete business capability. **Module means View Module**, responsible for pages, Routes, Slot contributions, interactions, and view state. App directly composes Modules and other capabilities. The App design also explains the boundary between current Home-wide View configuration and the proposed Project-level App enablement.
+
 ## Design Goals
 
 - Memsphere and user Modules are compiled separately. Installing a Module does not require Memsphere source code or recompilation.
@@ -40,11 +42,11 @@ ViewHost owns loading, contexts, composition, failure isolation, and cleanup. A 
 
 ## Current Implementation
 
-The current implementation discovers `org.memsphere.memory`, `org.memsphere.run`, `org.memsphere.reference`, and `org.memsphere.settings` from a fixed builtin catalog. It validates each `module.json` minimum View slice, package-contained entry path, and SDK SemVer range before dynamically importing four independent ESM Bundles. Instances share Route and Slot registries while retaining separate Contexts, transactions, diagnostics, and cleanup scopes.
+The current implementation loads bundled Modules through the builtin catalog and trusted local View Packages through Home configuration. The Loader validates each `module.json` View slice, package-contained entry path, and SDK SemVer range before dynamically importing independent ESM Bundles. Instances share Route and Slot registries while retaining separate Contexts, transactions, diagnostics, and cleanup scopes.
 
-The wired Context services are `slots`, `router`, `theme`, and `ui`. Core and built-in Modules compose through the same Slot Tree, while the Stable Shell, Project selector, Theme v1, UI Primitives, and diagnostics remain ViewHost responsibilities. The authoritative root Slot list, ownership, composition semantics, and current wiring status are maintained in the [Memsphere View Slot List](./view-slots.en.md). View API, I18n, Logger, custom child Slots, user Module discovery/installation, and dynamic Project composition remain future capabilities.
+The wired Context services are `slots`, `router`, `theme`, `themeRegistry`, `presentation`, and `ui`. Core and built-in Modules compose through the same Slot Tree, while the Stable Shell, Project selector, Theme v1, UI Primitives, and diagnostics remain ViewHost responsibilities. The authoritative root Slot list, ownership, composition semantics, and current wiring status are maintained in the [Memsphere View Slot List](./view-slots.en.md). A general View API, I18n, Logger, custom child Slots, and dynamic Project composition remain future capabilities. Local View Package installation and Home-wide composition are implemented, as described in the Package Composition section at the end of this document.
 
-The responsibility boundary has five layers: Shell owns regions, dimensions, scrolling, and responsive behavior; Theme owns shared visual Tokens; UI Primitives own reusable DOM, states, and interaction; Slots own validated composition; Features/Modules own domain data, behavior, and free-form content inside `main.view`. Standard lists are UI-generated Mounts in the existing `content.list` Slot, not a second Slot.
+The responsibility boundary has five layers: Shell owns regions, dimensions, scrolling, and responsive behavior; Theme owns shared visual Tokens; UI Primitives own reusable DOM, states, and interaction; Slots own validated composition; Features/Modules own presentation of domain data, UI interactions, and free-form content inside `main.view`. Standard lists are UI-generated Mounts in the existing `content.list` Slot, not a second Slot.
 
 Theme follows the same single real composition path as Routes and Slots. One instance-scoped Theme enters `apply()` and the Mount Contexts for `main.view`, `content.list`, and `overlay`; ViewHost installs its public `--mem-view-*` variables on both element and portal roots. Plugins may consume public Tokens but must not declare them, read private Host `--view-*` variables, or depend on private Host classes. Theme roots and subscriptions are cleaned up with Mount disposal or instance rollback.
 
@@ -64,7 +66,7 @@ The View section of the Manifest declares at least a browser ESM entrypoint and 
 
 Memsphere cannot know at build time which Modules users will install later. ViewHost therefore loads Bundles at runtime with dynamic `import()` and reads the `ViewPlugin` from `module.default`. Top-level Bundle code executes on first import; `apply()` then executes separately for every enabled instance.
 
-One Bundle version may be imported once, but top-level variables must not hold instance business state. Every instance has isolated configuration, Context, registration scope, and data namespace.
+One Bundle version may be imported once, but top-level variables must not hold instance UI state. Every instance has isolated configuration, Context, registration scope, and transient UI state; App and Project determine business data bindings.
 
 ## Plugin Context and Capability Declaration
 
@@ -156,7 +158,7 @@ A Route Token connects one route identity to navigation Descriptors, Header acti
 
 ## Backend and Data Boundary
 
-Browser Bundles neither import Node.js Domain, Application, or Persistence Adapters nor access Project files or databases. Business use cases required by View are exposed through the current Module instance’s View API namespace:
+A Module's browser Bundle neither imports Node.js Domain, Application, or Persistence Adapters nor accesses Project files or databases. Business use cases required by View are exposed through Host-provided View APIs with access scoped to the current Module instance. Server-side Adapters and shared business implementations are separate from the Module and use App and Project business and data bindings. A Module instance identity does not itself create an authoritative data namespace. The target call structure follows; the exact `ctx.api` interface remains a separate design task:
 
 ```text
 Module View
@@ -170,7 +172,7 @@ Domain
 Persistence Adapter
 ```
 
-APIs represent Application use cases such as “create customer” or “list customers,” not internal functions or database operations one by one. A CLI running in Node.js may invoke the same Application layer directly, so CLI and View share business rules and a data namespace.
+APIs represent Application use cases such as “create customer” or “list customers,” not internal functions or database operations one by one. An independent CLI may reuse that implementation directly or call the same service. App binds the Module and CLI to the same business context and authoritative data.
 
 ViewHost and Module Views are disposable interaction runtimes. Persistent information must be written to authoritative storage outside View; transient expansion state and unsubmitted drafts may be lost on refresh.
 
@@ -228,7 +230,7 @@ Distribution to unknown third parties requires separate designs for signing, per
 
 ## Document Boundary
 
-The complete Module Manifest, CLI SDK, server-side View API registration, Module configuration migration, marketplace, signing, and sandbox are defined by their own contracts. They must preserve the separate-compilation, public-Context, Slot-ownership, instance-isolation, data-boundary, and full-restart model defined here.
+Module Manifest, server-side View API registration, Module configuration migration, marketplace, signing, and sandbox are defined by their own contracts. They must preserve the separate-compilation, public-Context, Slot-ownership, instance-isolation, data-boundary, and full-restart model defined here. CLI registration and invocation have separate contracts and are not part of Module or View SDK.
 # Local Package Composition and Asset Evolution
 
 Built-ins and trusted local interface extension packages use the same Manifest, instance Context, and Slot protocol. Home records installed paths, the theme, and Slot selections, then applies the same composition to every Project. Installation establishes trust in the local Package; Manifest capabilities declare the kinds of content it provides, while theme and Slot selections decide what is active, without a second Package-permission layer. Global styles enter the multi-select `styles.global@1` Slot, while scoped CSS loads automatically with its Package instance; the legacy Style switch remains only for configuration compatibility. The View service freezes one global composition snapshot and builds its instances for each Project, with changes applied through the cross-platform `memsphere view restart`. Entrypoints and resources use package-root realpath confinement, content digests, and Project-isolated URLs; changed files cannot make an old URL return new bytes.

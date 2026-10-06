@@ -17,6 +17,7 @@ export type MemoryDescriptor = {
   project_name?: string;
   revision?: string;
   frozen?: string;
+  app?: ProviderMemoryDescriptor["app"];
 };
 
 export type MemoryListQuery = {
@@ -34,6 +35,7 @@ export type MemoryResolveQuery = {
 };
 
 export interface MemoryCatalog {
+  snapshot?(): Promise<MemoryCatalog>;
   list(query?: MemoryListQuery): Promise<MemoryListPage>;
   resolve(referenceOrName: string, query?: MemoryResolveQuery): Promise<MemoryDescriptor>;
   read(referenceOrName: string, query?: MemoryResolveQuery): Promise<MemoryEntity>;
@@ -103,6 +105,20 @@ export class DefaultMemoryCatalog implements MemoryCatalog {
 
   constructor(provider: MemoryProvider) {
     this.#provider = provider;
+  }
+
+  async snapshot(): Promise<MemoryCatalog> {
+    const descriptors = structuredClone(await this.#provider.list());
+    const entities = new Map<string, MemoryEntity>();
+    for (const descriptor of descriptors) entities.set(descriptor.id, structuredClone(await this.#provider.read(descriptor.id)));
+    return new DefaultMemoryCatalog({
+      async list(query = {}) { return descriptors.filter(d => !query.kind || d.kind === query.kind); },
+      async read(id) {
+        const entity = entities.get(id);
+        if (!entity) throw new MemoryCatalogDataError("Memory is absent from the snapshot");
+        return structuredClone(entity);
+      }
+    });
   }
 
   async list(query: MemoryListQuery = {}): Promise<MemoryListPage> {
@@ -216,7 +232,8 @@ function buildCatalogIndex(descriptors: ProviderMemoryDescriptor[]): CatalogInde
         defines: [...source.defines],
         ...(source.project_name ? { project_name: source.project_name } : {}),
         ...(source.revision ? { revision: source.revision } : {}),
-        ...(source.frozen ? { frozen: source.frozen } : {})
+        ...(source.frozen ? { frozen: source.frozen } : {}),
+        ...(source.app ? { app: source.app } : {})
       }
     });
   }

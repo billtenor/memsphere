@@ -26,7 +26,7 @@ export function runMemoryFiles(run: Pick<RunState, "id" | "memorySnapshot">): re
 export class RunMemoryProvider implements MemoryProvider {
   private readonly files: readonly string[];
   private readonly entities = new Map<string, MemoryEntity>();
-  constructor(private readonly runsRoot: string, run: Pick<RunState, "id" | "memorySnapshot">) {
+  constructor(private readonly runsRoot: string, private readonly run: Pick<RunState, "id" | "memorySnapshot">) {
     this.files = [...runMemoryFiles(run)];
   }
   async list(query: MemoryProviderQuery = {}): Promise<ProviderMemoryDescriptor[]> {
@@ -41,7 +41,8 @@ export class RunMemoryProvider implements MemoryProvider {
       assertExpectedTag(raw, kind, id);
       const entity = parseMemoryEntity(kind, raw);
       this.entities.set(id, entity);
-      descriptors.push({ id, kind, names: [...entity.names], defines: structuredClone(entity.defines) });
+      const owner = this.run.memorySnapshot?.appOwnership?.[id.slice(`${this.run.id}/memory/`.length)];
+      descriptors.push({ id, kind, names: [...entity.names], defines: structuredClone(entity.defines), ...(owner ? { app: owner } : {}) });
     }
     return descriptors;
   }

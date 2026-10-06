@@ -106,6 +106,7 @@ export interface ViewRouteGrant {
 }
 
 export interface ViewPluginInstanceOptions<Config = unknown> {
+  readonly appApiBase?: string;
   readonly plugin: unknown;
   readonly config: Readonly<Config>;
   readonly module: Readonly<ModuleInstanceContext>;
@@ -198,7 +199,7 @@ export interface ActiveViewPlugin {
   dispose(): Promise<void>;
 }
 
-const supportedServices = new Set<ViewServiceName>(["slots", "router", "theme", "themeRegistry", "presentation", "ui"]);
+const supportedServices = new Set<ViewServiceName>(["slots", "router", "theme", "themeRegistry", "presentation", "ui", "api"]);
 
 /**
  * Compose all enabled Module instances into one shared Route/Slot runtime.
@@ -327,6 +328,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     try {
       const plugin = validatePlugin(instanceOptions.plugin);
       validateServices(plugin, instanceOptions.allowedServices);
+      if (plugin.inject.includes("api") && !instanceOptions.appApiBase) throw new Error("API service requires an App-bound Module instance");
       validateThemeVersion(plugin);
       validateThemeRegistryVersion(plugin);
       validateUiVersion(plugin);
@@ -335,6 +337,17 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       const context = Object.freeze({
         module,
         lifecycle,
+        ...(plugin.inject.includes("api") && instanceOptions.appApiBase ? { api: Object.freeze({
+          async invoke(operation: string, input?: unknown) {
+            if (!/^[a-z0-9][a-z0-9._-]*$/.test(operation)) throw new Error("Invalid App operation");
+            const response = await fetch(`${instanceOptions.appApiBase}/${encodeURIComponent(operation)}`, {
+              method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ input })
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error ?? "App operation failed");
+            return result.result;
+          }
+        }) } : {}),
         ...(plugin.inject.includes("slots") ? { slots: slotTransaction } : {}),
         ...(plugin.inject.includes("router") ? { router: routeTransaction } : {}),
         ...(plugin.inject.includes("theme") ? { theme } : {}),
@@ -1350,10 +1363,14 @@ class RuntimeSlotTransaction implements SlotRegistry {
     const key = "key" in options ? options.key : undefined;
     const owner = moduleIdentity(this.#module);
     const cell = `${slotIdentity(token)}:${key ?? options.id}`;
-    if (this.#contributionPolicy?.blockedCells.includes(cell)) {
+    // Package manifests cannot contain a Project-specific runtime route identity.
+    // Only this instance's own route keys can use the portable route declaration.
+    const policyCell = slotIdentity(token) === "main.view@1" && typeof key === "string" && key.startsWith(`${owner}:route:`)
+      ? `main.view@1:${key.slice(owner.length + 1)}` : cell;
+    if (this.#contributionPolicy?.blockedCells.includes(policyCell)) {
       throw new Error(`View contribution is blocked by an unresolved Project preference: ${cell}`);
     }
-    const declared = this.#contributionPolicy?.registrations.find(entry => entry.cell === cell && entry.id === options.id);
+    const declared = this.#contributionPolicy?.registrations.find(entry => (entry.cell === cell || entry.cell === policyCell) && entry.id === options.id);
     if (this.#contributionPolicy && !declared) {
       throw new Error(`View contribution is not declared by the Package manifest: ${cell}#${options.id}`);
     }

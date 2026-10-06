@@ -23,7 +23,7 @@ node dist/cli.js view restart
 
 ## 先理解运行过程
 
-View Plugin 是 Module 的浏览器界面入口。它不启动独立服务，也不直接修改整个 Memsphere 页面。
+Module 专指 View Module，即可独立加载和组合的界面模块；View Plugin 是它的浏览器代码入口。它不启动独立服务，也不直接修改整个 Memsphere 页面。
 
 ```text
 ViewHost 动态加载 Module Bundle
@@ -44,7 +44,7 @@ Plugin 向 Slot 注册界面内容
 
 ## Module 的最小发布结构
 
-用户 Module 与 Memsphere 分别编译。一个带 View 的 Module 至少包含 Manifest 和编译后的浏览器 Bundle：
+用户 Module 与 Memsphere 分别编译。一个 Module 至少包含 Manifest 和编译后的浏览器 Bundle：
 
 ```text
 customer-list/
@@ -181,9 +181,9 @@ ctx.slots.register(slots.mainView, {
 
 示例中的 `slots.navigationPrimary`、`slots.headerTitle` 和 `slots.mainView` 都是 Slot Token。Token 同时告诉 TypeScript 和 ViewHost：内容放在哪里、允许什么类型、怎样组合以及如何在运行时校验；其他可用 Token 请直接查询 [View Slot List](./view-slots.md)。
 
-前两个 Slot 接收 Descriptor：Plugin 只提供文字、图标和行为描述，由 Memsphere 统一渲染。`mainView` 接收 Mount：ViewHost 提供容器，由 Plugin 渲染完整页面。常规对象列表使用 `ctx.ui.contentList(descriptorOrProvider)` 得到标准 Mount 后注册到 `slots.contentList`；动作与确认、状态反馈、Tabs/Segmented、Disclosure、受控表单、Select/Combobox、Progress、Card/Section 也应优先使用 `ctx.ui`。只有公共组件无法表达领域诉求时才在 Module Mount 内自行实现，领域正文和状态机不应反向进入 UI Primitives。
+前两个 Slot 接收 Descriptor：Plugin 只提供文字、图标和行为描述，由 Memsphere 统一渲染。`mainView` 接收 Mount：ViewHost 提供容器，由 Plugin 渲染完整页面。常规对象列表使用 `ctx.ui.contentList(descriptorOrProvider)` 得到标准 Mount 后注册到 `slots.contentList`；动作与确认、状态反馈、Tabs/Segmented、Disclosure、受控表单、Select/Combobox、Progress、Card/Section 也应优先使用 `ctx.ui`。只有公共组件无法表达领域诉求时才在 Module Mount 内自行实现，领域正文与界面交互状态机不应反向进入 UI Primitives。
 
-五层边界可以用一句话判断：Shell 决定区域和尺寸，Theme 决定公共视觉变量，UI Primitives 决定通用控件的 DOM/交互，Slot 决定内容放在哪里，Module 只决定领域数据、行为和正文。Module 不读取 `src/view/shell/**`，不依赖 `.view-shell-*` 或 `[data-view-slot]`，不声明 `--mem-view-*`，也不使用 `!important` 覆盖公共壳。
+五层边界可以用一句话判断：Shell 决定区域和尺寸，Theme 决定公共视觉变量，UI Primitives 决定通用控件的 DOM/交互，Slot 决定内容放在哪里，Module 只决定领域数据的呈现、界面交互和正文。Module 不读取 `src/view/shell/**`，不依赖 `.view-shell-*` 或 `[data-view-slot]`，不声明 `--mem-view-*`，也不使用 `!important` 覆盖公共壳。
 
 构建期 style contract 是面向常见错误的启发式防错检查，不是安全沙箱；它检查可静态识别的样式模板和已知私有依赖，无法证明任意动态字符串绝对安全。Module 作者仍须遵守上述边界：常规 Feature CSS 应放在可静态检查的模板常量中，并限定在 Feature root 下。生产 builtin 的历史辅助文件尚未全量迁移到此门禁；新增或修改的 Module 样式应主动纳入检查。
 
@@ -298,3 +298,7 @@ ctx.slots.register(portableSlots.modelDefinitionRenderer, {
 ```
 
 示例的 `index.js` 是预编译 ESM；修改 `src/index.js` 后运行 `node scripts/build-example-view-package.mjs`。正式构建会逐字节检查签入 bundle，并强制保持 `@memsphere/view-sdk` 为 external import。Package 不得内联 SDK，Host 的单例 Token brand 会拒绝这种 bundle。Data renderer 必须同步返回 `HTMLElement`；抛错、返回 Promise/thenable 或其他值都会立即 abdicate 并进入官方 fallback，abdication 持续到实例卸载或 View 重启。
+
+## App 业务页面
+
+App 通过 `entrypoints.view` 安装 Module 实例。包声明 `main.view@1:route:<route-id>` 与对应注册 id 后，可以注册自己的 Module 相对路由；使用 `ctx.api.invoke(operation,input)` 调用 App backend 时，Plugin 的 inject 必须包含 api。该服务仅提供给 App 绑定实例。完整示例见 [费用 App](../examples/apps/expense/README.md)，接口见 [App 实现契约](./app-contract.md)。

@@ -7,6 +7,7 @@ export const viewSdkBundlePath = "/assets/view-sdk.js";
 export const viewRuntimeBundlePath = "/assets/view-runtime.js";
 
 export interface ViewHostBootInstance {
+  readonly appApiBase?: string;
   readonly pluginPath: string;
   readonly loadError?: string;
   readonly allowedServices?: readonly import("./view-sdk.js").ViewServiceName[];
