@@ -15,7 +15,7 @@ Memory 是 Agent 理解并进入个性化软件的语义入口。通过 memspher
 
 Memsphere Home 的 `config.json` 中，`language` 同时控制面向 Agent 的工作语言与 View 固定界面语言，支持 `zh-CN` 和 `en`，省略时固定为 `zh-CN`。Run 启动后只冻结该 Run 的 Agent 工作语言，因此修改配置只影响后续创建的 Run；配置中心成功保存语言后，当前 View 进程立即更新，下一次页面加载使用新界面语言。
 
-Memsphere CLI 要求 Node.js 24 或更高版本；开发与 CI 使用 Node 24 LTS。
+Memsphere CLI 要求 Node.js 22 或更高版本；开发与 CI 使用 Node 22 LTS。
 
 ## Memory 写入硬门禁
 

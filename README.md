@@ -136,7 +136,7 @@ CLI 因而不是面向人的命令集合，而是优先面向 Agent 的软件能
 
 ### 6.1 环境要求
 
-- Node.js 24 或更高版本，推荐 Node 24 LTS；
+- Node.js 22 或更高版本，推荐 Node 22 LTS；
 - Git；
 - 一个能够使用 Skill 和终端命令的 Agent。
 
@@ -149,7 +149,7 @@ Memsphere 面向 Agent 使用，安装、初始化和 Project 配置也建议直
 ```text
 请帮我在当前工作目录安装并配置 Memsphere，全程由你执行需要的终端命令：
 
-1. 检查 Node.js 24 或更高版本以及 Git 是否可用；如果缺少环境，清楚告诉我需要补什么。
+1. 检查 Node.js 22 或更高版本以及 Git 是否可用；如果缺少环境，清楚告诉我需要补什么。
 2. 执行 npm install -g memsphere，然后执行 memsphere skill init --global。
 3. 读取刚安装的 Memsphere Skill 并遵循它。若当前会话没有自动刷新 Skill 列表，请根据安装命令返回的位置直接读取 SKILL.md，继续当前任务，不要仅因此要求我新开会话。
 4. 检查当前目录是否已经绑定 Project。已绑定就复用；未绑定时，询问我要使用 Managed Project 还是 Embedded Project。如果我不确定，推荐并创建 Managed Project，再绑定当前目录。
@@ -434,7 +434,7 @@ node scripts/model-data-smoke.mjs
 
 参与开发前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题请参阅 [SECURITY.md](SECURITY.md)。
 
-CI 统一使用 Node 24 LTS，在 Linux、macOS 和 Windows 上运行全部自动化测试，包含原生跨进程文件锁与模型/数据 CLI 测试；Windows 安装包检查验证四种受支持 Shell 中的 CLI。模型/数据 CLI 与安装包冒烟脚本也可手动运行。
+CI 统一使用 Node 22 LTS，在 Linux、macOS 和 Windows 上运行全部自动化测试，包含原生跨进程文件锁与模型/数据 CLI 测试；Windows 安装包检查验证四种受支持 Shell 中的 CLI。模型/数据 CLI 与安装包冒烟脚本也可手动运行。
 
 ## 9. 许可证
 
