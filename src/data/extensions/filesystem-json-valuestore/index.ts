@@ -80,6 +80,22 @@ class FilesystemJsonValueStore implements ValueStore {
     });
   }
 
+  async upsert(context: Context, id: DataId, value: unknown): Promise<StoredValue> {
+    const filename = recordFilename(id);
+    const snapshot = await this.prepare(context, value);
+    return withRecordLock(context, this.directory, filename, async () => {
+      const previous = await this.read(context, id, filename);
+      if (previous) await this.checkRetainedRevision(context, filename, previous.revision);
+      const revision = previous?.revision ?? await readDeletedRevision(context, this.directory, filename);
+      if (revision === Number.MAX_SAFE_INTEGER) throw new RangeError(`Record ${id} revision overflow`);
+      const now = Date.now();
+      const record: JsonRecord = { id, revision: revision + 1, createdAt: previous?.createdAt ?? now, updatedAt: now, value: snapshot };
+      if (previous && Object.hasOwn(previous, "createdBy")) record.createdBy = previous.createdBy;
+      await atomicPublish(context, this.directory, filename, recordBytes(record), previous ? "replace" : "create");
+      return record;
+    });
+  }
+
   async update(context: Context, id: DataId, value: unknown, options?: UpdateOptions): Promise<StoredValue> {
     const expectedRevision = captureRevision(options);
     const filename = recordFilename(id);

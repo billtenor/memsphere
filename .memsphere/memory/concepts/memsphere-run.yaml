@@ -13,3 +13,5 @@ defines:
   - Run 的 Artifact、中间产物、Memory 快照文件、Agent 活动日志和活动快照分别由四类 raw 模型描述，经当前或归档 DataStore 按 DataId 访问；资源发现沿用 Run 状态中的业务引用，Memory 快照补充 memorySnapshot.files。
   - Run status 与 .archive.json 仍是原生 JSON 状态文件，不进入内容 Store。归档与恢复先复制覆盖并校验内容，最后切换 Run status，再清理旧端；状态切换后重试只续做清理。
   - 归档或恢复前须确认已有记录的 Agent Worker PID 已退出；无法确认时保留两端并重试，不主动终止 Worker。
+  - Run 启动冻结全部可达模型产物的目标绑定和模型指纹；report 及接受写入前检查，变化时明确拒绝。stepExecutionId 持久化且同次失败重试、审核修改重交复用，循环或 Call 的下一次执行生成新身份；业务数据 ID 自动取 run_id 与 stepExecutionId 的组合。
+  - 模型 Artifact 仍完整保存不可变提交快照，用于 Review、历史查看和追溯；接受后另行将同一模型值整条 upsert 到业务 Store，成功才推进。业务记录后续更新不改变历史快照；Store revision 不是历史内容读取能力，Artifact 不仅保存业务引用。写入后 Run 保存失败时同 ID redo，允许 revision 增长；取消、删除、归档或恢复 Run 不联动删除或重写业务数据。

@@ -34,6 +34,8 @@ export interface ValueStore {
     value: unknown,
     options?: UpdateOptions
   ): Promise<StoredValue>;
+  /** 原子创建或整条替换；缺少此能力时不得用 has/create/update 拼接替代。 */
+  upsert?(context: Context, id: DataId, value: unknown): Promise<StoredValue>;
   /** 无版本条件时缺失返回 false；有条件时缺失或版本不匹配均报冲突。 */
   delete(
     context: Context,

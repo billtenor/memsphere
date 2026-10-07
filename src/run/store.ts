@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, posix, relative, resolve } from "node:path";
 import { z } from "zod";
+import { freezeModelArtifactTargets, processModelArtifact, modelArtifactTargetSchema, modelArtifactReceiptSchema, type ModelArtifactTarget, type ModelArtifactReceipt } from "../project/model-artifact.js";
+import { canonicalPath } from "../project/model-storage-paths.js";
 import { deleteRunContent, requireRunContent, runDataStore, saveRunContent } from "../project/run-data.js";
 import {
   artifactReviewDispositionValues,
@@ -178,6 +180,9 @@ export type RunFrame = {
 };
 
 export type RunStep = {
+  store?: string;
+  model?: string;
+  stepExecutionId?: string;
   id: string;
   kind?: "action" | "branch" | "loop" | "call" | "repeat";
   instruction: string;
@@ -230,6 +235,7 @@ export type RunEvent = {
   frame: FrameType;
   stepId: string;
   artifact: {
+    modelData?: ModelArtifactReceipt;
     name: string;
     type: string;
     format: ArtifactFormatSpec;
@@ -276,6 +282,8 @@ export type RunBindingChange = {
 };
 
 export type RunState = {
+  modelProjectRoot?: string;
+  modelTargets?: Record<string, ModelArtifactTarget>;
   contractVersion: 1 | 2 | 3;
   language?: PromptLocale;
   readOnly?: boolean;
@@ -535,6 +543,9 @@ const authorizationDecisionSchema: z.ZodType<AuthorizationDecision> = z.object({
 
 const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
   z.object({
+    store: z.string().optional(),
+    model: z.string().optional(),
+    stepExecutionId: z.string().uuid().optional(),
     id: z.string(),
     kind: z.enum(["action", "branch", "loop", "call", "repeat"]).optional(),
     instruction: z.string(),
@@ -797,6 +808,7 @@ const artifactReviewRoundSchema = z.object({
 }).strict();
 
 const runEventArtifactSchema = z.object({
+  modelData: modelArtifactReceiptSchema.optional(),
   name: z.string(),
   type: z.string(),
   format: artifactFormatSpecSchema,
@@ -850,6 +862,8 @@ const artifactReviewSchema: z.ZodType<ArtifactReview<RunEvent["artifact"]>, z.Zo
 }).strict();
 
 const runStateV3Schema: z.ZodType<RunState, z.ZodTypeDef, unknown> = z.object({
+  modelProjectRoot: z.string().optional(),
+  modelTargets: z.record(modelArtifactTargetSchema).optional(),
   contractVersion: z.literal(3),
   language: z.enum(["zh-CN", "en"]).default("zh-CN"),
   readOnly: z.boolean().optional(),
@@ -943,6 +957,7 @@ export async function ensureRunDirectory(runsRoot: string): Promise<string> {
 }
 
 export async function startRun(input: {
+  projectRoot?: string;
   memoryRoot: string;
   memorySnapshotRoot?: string;
   memoryOwnership?: AppOwnership;
@@ -1024,9 +1039,28 @@ export async function startRun(input: {
     throw new Error(`procedure has no flow steps: ${procedureMemory.names[0]}`);
   }
 
+  const declarations: Array<{ store: string; model?: string }> = [];
+  const collect = (items: RunStep[]) => {
+    for (const step of items) {
+      if (step.store) declarations.push({ store: step.store, model: step.model });
+      if (step.branches) { collect(step.branches.truthy); collect(step.branches.falsy); }
+      if (step.loop) collect(step.loop.body);
+    }
+  };
+  for (const template of Object.values(procedureSnapshots)) collect(template.steps);
+  let modelProjectRoot: string | undefined;
+  let modelTargets: Record<string, ModelArtifactTarget> | undefined;
+  if (declarations.length) {
+    if (!input.projectRoot) throw new Error("Model Artifacts require an explicit Project context");
+    modelProjectRoot = await canonicalPath(input.projectRoot);
+    if (modelProjectRoot !== await canonicalPath(dirname(input.runsRoot))) throw new Error("Model Artifact Project does not own this Run Store");
+    modelTargets = await freezeModelArtifactTargets(modelProjectRoot, declarations);
+  }
+
   const now = new Date().toISOString();
   const run: RunState = {
     contractVersion: 3,
+    ...(modelProjectRoot ? { modelProjectRoot, modelTargets } : {}),
     language: resolvePromptLocale(input.language),
     memorySyntax: procedure.entity.syntax,
     id: makeRunId(now),
@@ -1590,6 +1624,10 @@ async function reportRunUnlocked(input: {
   }
 
   const authorization = authorizeRunnerForReport(run, step, resolvePromptLocale(run.language));
+  if (step.store && !step.stepExecutionId) {
+    step.stepExecutionId = randomUUID();
+    await writeRun(input.runsRoot, run);
+  }
   const contract = await contractForStep(run, step);
   const context = {
     runId: run.id,
@@ -1601,8 +1639,17 @@ async function reportRunUnlocked(input: {
   const plan = step.validationPlan ?? artifactValidatorRegistry.resolvePlan(contract);
   const validation = await artifactValidatorRegistry.execute(plan, { contract, candidate, context });
   if (validation.status !== "passed") throw new ArtifactValidationFailure(validation);
+  if (step.store) await validateOrCommitModelArtifact(input.runsRoot, run, step, candidate.representation.value);
 
   return acceptPreparedArtifact(input, run, step, candidate, validation, authorization);
+}
+
+async function validateOrCommitModelArtifact(runsRoot: string, run: RunState, step: RunStep, value: unknown, digest?: string) {
+  if (!step.store || !step.stepExecutionId || !run.modelProjectRoot) throw new Error("Model Artifact execution identity or Project context missing");
+  if (await canonicalPath(dirname(runsRoot)) !== run.modelProjectRoot) throw new Error("Model Artifact Project does not own this Run Store");
+  const target = run.modelTargets?.[step.store];
+  if (!target) throw new Error(`Model Artifact frozen target missing: ${step.store}`);
+  return processModelArtifact(run.modelProjectRoot, target, value, digest === undefined ? undefined : { runId: run.id, stepExecutionId: step.stepExecutionId, digest });
 }
 
 async function acceptPreparedArtifact(
@@ -1639,6 +1686,7 @@ async function acceptPreparedArtifact(
       createdArtifactFiles,
       authorization
     );
+    if (step.store) artifact.modelData = await validateOrCommitModelArtifact(input.runsRoot, run, step, candidate.representation.value, digestBytes(candidate.raw));
     const controlValue = step.kind === "branch" || step.kind === "loop" ? candidate.representation.value : undefined;
 
     run.events.push({
@@ -2615,11 +2663,21 @@ async function acceptArtifactReviewSubmission(
     throw new Error(`Artifact Review current Step changed before acceptance: ${review.stepId}`);
   }
   const submission = reviewSubmission(review, round.submissionId);
+  const acceptedArtifact = structuredClone(submission.artifact);
+  if (step.store) {
+    if (!acceptedArtifact.path) throw new Error("Model Artifact Submission snapshot missing");
+    const raw = await requireRunContent(runsRoot, "artifact", acceptedArtifact.path);
+    const source = { kind: "inline" as const, value: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw) };
+    const candidate = await prepareArtifactCandidate(await contractForStep(run, step), source, { runId: run.id, stepId: step.id, artifactPath: step.id, attemptId: randomUUID() });
+    const digest = digestBytes(candidate.raw);
+    if (digest !== submission.digest) throw new Error("Model Artifact Submission snapshot digest changed");
+    acceptedArtifact.modelData = await validateOrCommitModelArtifact(runsRoot, run, step, candidate.representation.value, digest);
+  }
   run.events.push({
     at: now,
     frame: frame.type,
     stepId: step.id,
-    artifact: structuredClone(submission.artifact)
+    artifact: acceptedArtifact
   });
   const controlValue = step.kind === "branch" || step.kind === "loop"
     ? submission.artifact.value
@@ -3837,7 +3895,7 @@ async function compileActionStep(
 function compileArtifactStep(
   artifact: ActionNode["artifact"],
   id: string
-): Pick<RunStep, "artifact" | "type" | "format" | "schema" | "validationPlan" | "final" | "reviewSlots"> {
+): Pick<RunStep, "artifact" | "type" | "format" | "schema" | "validationPlan" | "final" | "reviewSlots" | "store" | "model"> {
   const contract = compileArtifactContract(artifact);
   const schema = typeof artifact.schema === "string"
     ? { kind: "external" as const, name: artifact.schema }
@@ -3851,6 +3909,8 @@ function compileArtifactStep(
     : artifactValidatorRegistry.resolvePlan(contract);
   return {
     artifact: artifact.name,
+    store: artifact.store,
+    model: artifact.model,
     type: contract.type,
     format: contract.format,
     schema,
@@ -3948,6 +4008,7 @@ function cloneSteps(steps: RunStep[]): RunStep[] {
 function cloneStep(step: RunStep): RunStep {
   return {
     ...step,
+    stepExecutionId: undefined,
     format: step.format ? { name: step.format.name, options: structuredClone(step.format.options) } : undefined,
     schema: step.schema ? structuredClone(step.schema) : undefined,
     validationPlan: step.validationPlan ? structuredClone(step.validationPlan) : undefined,
@@ -4043,7 +4104,7 @@ async function buildRunEventArtifact(
     authorization
   };
 
-  if (!shouldStoreArtifactAsFile(step.format)) {
+  if (!step.store && !shouldStoreArtifactAsFile(step.format)) {
     return compactArtifact({
       ...base,
       storage: "inline",
@@ -4059,7 +4120,7 @@ async function buildRunEventArtifact(
   assertInsideRunArtifactDirectory(absolutePath, artifactRoot);
 
   const id = posix.join(run.id, "artifacts", storage?.relativeDirectory ?? "", fileName);
-  await saveRunContent(runsRoot, "artifact", id, contentTypeForFormat(step.format)!, candidate.raw, "create");
+  await saveRunContent(runsRoot, "artifact", id, contentTypeForFormat(step.format) ?? "text/plain", candidate.raw, "create");
   createdArtifactFiles.push(id);
 
   return compactArtifact({
@@ -4067,7 +4128,7 @@ async function buildRunEventArtifact(
     storage: "file",
     path: id,
     fileName,
-    contentType: contentTypeForFormat(step.format)
+    contentType: contentTypeForFormat(step.format) ?? (step.store ? "text/plain" : undefined)
   });
 }
 

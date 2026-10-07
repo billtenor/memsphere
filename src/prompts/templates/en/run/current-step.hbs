@@ -75,6 +75,12 @@ Details:
 
 Artifact:
 {{step.artifact.name}} ({{step.artifact.type}} · {{step.artifact.format}})
+{{#if step.artifact.modelTarget}}
+- Store: {{step.artifact.modelTarget.storeId}}
+- Model: {{step.artifact.modelTarget.modelRef}}
+Read this model definition with memsphere model read.
+Validate the model value and retain a full Artifact snapshot; acceptance generates a data ID and performs a whole-value upsert.
+{{/if}}
 {{#ifEq step.actor "human"}}
 Report the artifact value provided by the human.
 {{/ifEq}}

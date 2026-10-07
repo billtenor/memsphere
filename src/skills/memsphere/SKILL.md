@@ -221,6 +221,10 @@ artifact: !artifact
 - 不要使用已删除的 `element_types`；旧版字符串 `items` 必须迁移为带 `!schema` tag 的 `item/items`。
 - `asserts` 和 `suggests` 是自然语言契约，不会被代码 validator 猜测执行。
 
+模型数据 Artifact 在普通 Action 中声明 `store: <业务 Store ID>`，可选 `model: <相对 .json 模型 ID>`；model 省略时从 Store 推导，显式声明须一致。首版只支持 filesystem JSON ValueStore，不能同时声明 schema。object/array 使用 json/yaml，string/number/boolean 使用 json/yaml 或 plain；普通模型 boolean 是业务数据，条件 Artifact 不声明 store/model。
+
+Run 启动冻结目标绑定和模型指纹，提交及接受写入前发现变化明确拒绝。框架持久化步骤执行实例 ID，同次重试和审核修改复用，循环/Call 下一次执行重新生成；数据 ID 自动生成，不声明 create/update 或业务 ID。report 保留完整不可变 Artifact 快照，Review 通过后（或无 Review 时接受后）另行整条 upsert 业务 Store，成功才推进。业务记录变化不影响历史快照，取消/删除/归档/恢复 Run 不联动业务数据。写入后 Run 保存失败时以同 ID redo，允许 revision 增长。通用数据操作使用 `memsphere data upsert <id> --store <store> --value <JSON>` 或 `--value-file`，支持 dry-run/output，仅写完整 value，不支持 payload、patch 或 expected-revision。
+
 Artifact 可以使用 `review` 声明当前 Procedure 内的 Review Slot。Procedure 不引用 Project `config.json` 中的 Actor，也不选择 Decision Policy：
 
 ```yaml

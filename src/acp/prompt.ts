@@ -51,6 +51,7 @@ export async function buildArtifactReviewerPrompt(input: {
         type: contract.artifact.type ?? (locale === "zh-CN" ? "未指定" : "unspecified"),
         format: formatArtifactFormat(contract.artifact.format),
         schema: summarizeAgentReviewSchema(step.schema),
+        modelTarget: contract.artifact.modelTarget,
         final: contract.artifact.final,
         reviewPolicy: contract.artifact.review ?? (locale === "zh-CN" ? "无" : "none")
       }

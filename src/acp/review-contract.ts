@@ -28,6 +28,7 @@ export type AgentReviewContract = {
     type?: string;
     format?: { name: string; options: Readonly<Record<string, unknown>> };
     schema?: unknown;
+    modelTarget?: { storeId: string; modelRef: string };
     final: boolean;
     review?: string;
   };
@@ -55,6 +56,7 @@ export function buildAgentReviewContract(context: ArtifactReviewContext): AgentR
       type: step.type,
       format: step.format,
       schema: toEffectiveRuleDisplayValue(step.schema),
+      modelTarget: step.store && context.run.modelTargets?.[step.store] ? { storeId: step.store, modelRef: context.run.modelTargets[step.store].modelRef } : undefined,
       final: step.final ?? false,
       review: step.reviewPolicy
     }

@@ -75,6 +75,12 @@ memsphere run repeat <count> --run {{runId}}
 
 产物：
 {{step.artifact.name}}（{{step.artifact.type}} · {{step.artifact.format}}）
+{{#if step.artifact.modelTarget}}
+- Store: {{step.artifact.modelTarget.storeId}}
+- Model: {{step.artifact.modelTarget.modelRef}}
+使用 memsphere model read 阅读该模型定义。
+校验模型值，保留完整 Artifact 快照；接受后自动生成数据 ID 并执行整条 upsert。
+{{/if}}
 {{#ifEq step.actor "human"}}
 请上报 Human 提供的产物值。
 {{/ifEq}}
