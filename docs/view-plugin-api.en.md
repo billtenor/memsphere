@@ -724,3 +724,22 @@ Module Manifest, CLI SDK, server-side View API registration, configuration Schem
 - `ViewThemeRegistry` supplies lifecycle-owned `registerTheme`, `selectTheme`, and `overrideTokens`. Complete Themes and partial overrides both provide light and dark maps.
 - The `presentation` service gives portable pages the current `route`, frozen Memory/Run summaries, filters, current selection, `refresh()`, and controlled `openMemory()`/`openCreate()`/`openRun()`/`startRun()` navigation. Creation and start flows remain official; Packages receive no writable store and should not call business APIs with raw `fetch`. Memory detail and Run Artifact renderers receive SDK-defined minimal read-only contexts plus official wrappers for ChangeSet/Review/copy/download actions.
 - Every external contribution must declare an exact Manifest `cell + id` and target one of the twelve extensible root Slot classes or six portable cells in the Slot Catalog. Runtime uses only the resolver priority tuple and ignores Bundle-reported priority. Unknown cells, missing keys, and id/cell mismatches fail the instance transaction atomically.
+
+## Embed a read-only model definition
+
+`ctx.ui.modelDefinition({ model, view?: "structure" | "source", locale?: "zh-CN" | "en" })` returns an independent HTMLElement. Declare `inject: ["ui"]` and `uiVersion: 1`. Supply an already loaded `ModelPresentationDefinition` with id, metaModel, builtin, definition and source: a static snapshot or a definition from `presentation.modelsPage().getDefinition(id)` for the current Project. The factory does not request APIs, mutate models, register routes or grant write access. Handle failed/unavailable reads in the page with `ui.feedback`; do not invent empty definitions.
+
+The default view is structure. Draft-07 uses the official field tree, rules and expansion boundaries; raw.json gives read-only whole-content feedback; other metamodels give unsupported-structure feedback. Source preserves the exact source text, including raw or unsupported models. Missing or invalid definition inputs give unavailable feedback. The tree does not interpret additional unsupported Schema keywords. Language follows the Host unless locale explicitly overrides this component.
+
+Each call creates independent nodes and expansion state. Cache structure/source nodes when switching if state should persist. Removing nodes releases the default component's node listeners; no component-specific disposer is needed. Host-owned theme CSS works without copying styles, mounting the official Models module first or depending on its private DOM.
+
+The factory applies `portableSlots.modelDefinitionRenderer` (`org.memsphere.models.definition.renderer@1:definition`) with a cloned, deeply frozen model, view and official defaultRender. Existing renderers can wrap defaults. With no entry, all candidates throwing, or invalid nodes, the factory falls back to its own official implementation. defaultRender bypasses the Slot to prevent recursion. Third-party renderers must still manage global effects through their Plugin lifecycle.
+
+```ts
+const page = await ctx.presentation.modelsPage();
+const model = await page.getDefinition("sales/order.json");
+container.append(ctx.ui.modelDefinition({ model }));
+container.append(ctx.ui.modelDefinition({ model, view: "source" }));
+```
+
+Independent routes also need the `router.register` capability, a matching `main.view@1:route:<route-id>` Manifest contribution and a Mount registered through `slots.mainView`. The component does not register a page for you. See the runnable [model-definition example](../examples/view-packages/model-definition/README.md).

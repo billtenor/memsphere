@@ -189,6 +189,14 @@ export interface ModelDefinitionPresentationContext {
   defaultRender(): HTMLElement;
 }
 
+/** Read-only body rendering; loading and error/retry states belong to the caller. */
+export interface ModelDefinitionDescriptor {
+  readonly model: ModelPresentationDefinition;
+  readonly view?: "structure" | "source";
+  /** Overrides the Host language for this component only. */
+  readonly locale?: "zh-CN" | "en";
+}
+
 export interface ViewPresentationService {
   memoryPage(filters?: Readonly<Record<string, string>>): Promise<MemoryPagePresentationContext>;
   runPage(filters?: Readonly<Record<string, string>>): Promise<RunPagePresentationContext>;
@@ -616,6 +624,7 @@ export type ContentListProvider = (
 
 export interface ViewUi {
   readonly version: 1;
+  modelDefinition(descriptor: ModelDefinitionDescriptor): HTMLElement;
   contentComponent(input: ContentComponentContext): HTMLElement;
   contentList(source: ContentListDescriptor | ContentListProvider): ViewMount;
   button(action: ActionDescriptor, options?: Readonly<{ tone?: "default" | "primary" | "danger" }>): HTMLButtonElement;

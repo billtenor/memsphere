@@ -1,6 +1,5 @@
 import { modelRegistrationSetupEnabled } from "../../../shared/model-browser-features.js";
-import { defineViewPlugin, slots, portableSlots, type BadgeDescriptor, type ContentListDescriptor, type ViewMount, type ViewRenderContext, type ModelPresentationSummary, type ModelPresentationDefinition, type ModelDefinitionPresentationContext, type SecondaryNavigationDescriptor } from "@memsphere/view-sdk";
-import { definitionTable } from '../../../shared/model-definition.js';
+import { defineViewPlugin, slots, portableSlots, type BadgeDescriptor, type ContentListDescriptor, type ViewMount, type ViewRenderContext, type ModelPresentationSummary, type ModelPresentationDefinition, type SecondaryNavigationDescriptor } from "@memsphere/view-sdk";
 import { filterModels, modelGroups, modelName, modelDescription, normalizeModelScope, scopeModels } from '../../../shared/model-browser-state.js';
 import { modelStyles, registrationStyles } from './styles.js';
 type ModelSummary = ModelPresentationSummary;
@@ -274,19 +273,12 @@ export default defineViewPlugin<{
                 const switcher = document.createElement('div'), panel = document.createElement('div');
                 panel.className = 'model-browser-definition-panel';
                 const rendered = new Map<string, HTMLElement>();
-                const defaultRender = (view: 'structure' | 'source') => { if (view === 'source') {
-                    const pre = document.createElement('pre');
-                    pre.className = 'model-browser-code';
-                    pre.textContent = model.source;
-                    return pre;
-                } return model.metaModel === 'raw.json' ? ui.feedback({ state: 'read-only', title: t('原始内容模型', 'Raw content model'), description: t('此模型不声明成员字段，内容作为整体字节值管理。', 'This model declares no member fields; content is managed as a whole byte value.') }) : definitionTable(ui, model.definition, text); };
                 function select(selectedId: string) { activeTab = selectedId; switcher.replaceChildren(ui.segmentedControl({ label: t('模型详情', 'Model details'), selectedId, items: [{ id: 'information', label: t('模型信息', 'Model information') }, { id: 'structure', label: t('模型结构', 'Model structure') }, { id: 'source', label: t('原始定义', 'Source definition') }], onSelect: select })); let content = rendered.get(selectedId); if (!content) {
                     if (selectedId === 'information')
                         content = information(model);
                     else {
                         const view = selectedId === 'source' ? 'source' : 'structure';
-                        const input: ModelDefinitionPresentationContext = Object.freeze({ model: snapshot, view, defaultRender: () => defaultRender(view) });
-                        content = ctx.slots.render(portableSlots.modelDefinitionRenderer, 'definition', input) ?? defaultRender(view);
+                        content = ui.modelDefinition({ model: snapshot, view });
                     }
                     rendered.set(selectedId, content);
                 } panel.replaceChildren(content); }
@@ -370,14 +362,11 @@ export default defineViewPlugin<{
                         const name = document.createElement('h4');
                         name.textContent = model.name ?? model.registration?.name ?? model.modelRef ?? model.id ?? '';
                         preview.append(name);
-                        if (model.definition)
-                            preview.append(definitionTable(ui, model.definition, text));
-                        else if (model.source) {
-                            const pre = document.createElement('pre');
-                            pre.className = 'model-browser-code';
-                            pre.textContent = model.source;
-                            preview.append(pre);
-                        }
+                        if (model.definition !== undefined || model.source !== undefined)
+                            preview.append(ui.modelDefinition({ model: {
+                                id: model.modelRef ?? model.id ?? '', metaModel: 'json-schema/draft-07.json', builtin: false,
+                                definition: model.definition, source: model.source ?? JSON.stringify(model.definition, null, 2)
+                            }, view: model.definition !== undefined ? 'structure' : 'source' }));
                     }
                     const actions = document.createElement('div');
                     actions.className = 'model-browser-actions';

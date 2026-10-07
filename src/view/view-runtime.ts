@@ -47,6 +47,7 @@ import {
   type ViewPresentationService,
   type ModelPresentationSummary,
   type ModelPresentationDefinition,
+  type ModelDefinitionDescriptor,
   type ViewRouter,
   type ViewServiceName
 } from "./view-sdk.js";
@@ -305,7 +306,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
   const allInstances: readonly ViewPluginInstanceOptions[] = options.coreConfig
     ? [coreInstance, ...options.instances]
     : options.instances;
-  const hostUi = createViewUi(target => routeRegistry.navigate(target));
+  const hostUi = createViewUi(target => routeRegistry.navigate(target), options.coreConfig?.locale === "en" ? "en" : "zh-CN");
 
   for (const instanceOptions of allInstances) {
     const module = Object.freeze({ ...instanceOptions.module });
@@ -316,7 +317,20 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     const owner = moduleIdentity(module);
     const slotTransaction = slotsRegistry.transaction(module, lifecycle, instanceOptions.contributionPolicy);
     const ui = Object.freeze({ ...hostUi, contentComponent: (input: ContentComponentContext) =>
-      slotTransaction.render(componentSlots[input.kind], "default", Object.freeze(input)) });
+      slotTransaction.render(componentSlots[input.kind], "default", Object.freeze(input)),
+      modelDefinition: (descriptor: ModelDefinitionDescriptor) => {
+        const snapshot = deepFreeze(structuredClone(descriptor));
+        const defaultRender = () => hostUi.modelDefinition(snapshot);
+        const input = Object.freeze({ model: snapshot.model, view: snapshot.view ?? "structure", defaultRender });
+        try {
+          const rendered = slotTransaction.render(portableSlots.modelDefinitionRenderer, "definition", input);
+          if (rendered instanceof HTMLElement) return rendered;
+        } catch {
+          // No renderer (or no successful candidate) is a normal standalone use.
+        }
+        return defaultRender();
+      }
+    });
     const routeTransaction = routeRegistry.transaction(
       module,
       lifecycle,
