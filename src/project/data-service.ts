@@ -116,6 +116,20 @@ export async function writeData(context: Context, root: string, storeId: string,
   };
   return options.dryRun ? execute() : withProjectSettingsLock(root, execute, context.signal);
 }
+export async function upsertData(context: Context, root: string, storeId: string, id: string, input: DataInput, options: { dryRun?: boolean } = {}) {
+  const execute = async () => {
+    const opened = await openBusinessStore(context, root, storeId);
+    assertId(opened, id);
+    if (opened.store.kind !== "ValueStore" || !opened.store.upsert || input.kind !== "value")
+      throw serviceError("UNSUPPORTED_CAPABILITY", "upsert requires a value and an atomic-upsert ValueStore");
+    await prepareInput(context, opened, id, input);
+    if (options.dryRun) return { operation: "data.upsert", id, modelRef: opened.binding.model, dryRun: true };
+    const record = await opened.store.upsert(context, id, input.value);
+    return { operation: "data.upsert", id, modelRef: opened.binding.model, ...metadata(record) };
+  };
+  return options.dryRun ? execute() : withProjectSettingsLock(root, execute, context.signal);
+}
+
 export async function deleteData(context: Context, root: string, storeId: string, id: string, options: { expectedRevision?: number; dryRun?: boolean } = {}) {
   assertRevision(options.expectedRevision);
   const execute = async () => {

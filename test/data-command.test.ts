@@ -245,3 +245,15 @@ test("Factory delete followed by CLI recreation cannot reuse a stale client revi
   }
   assert.deepEqual((await readData({}, fixture.root, "records", "item")).value, { name: "recreated", count: 1 });
 });
+
+test("data upsert CLI creates then replaces a whole value and dry-run leaves data unchanged", async (t) => {
+  const fixture = await businessFixture(t); await fixture.createStore();
+  const args = ["data", "upsert", "item", "--store", "records", "--output", "json"];
+  assert.equal(success(await cli(t, fixture, [...args, "--value-file", "-"], '{"name":"first","count":1,"items":[2]}')).revision, 1);
+  assert.equal(success(await cli(t, fixture, [...args, "--value", '{"name":"second","count":2}'])).revision, 2);
+  assert.deepEqual((await readData({}, fixture.root, "records", "item")).value, { name: "second", count: 2 });
+  success(await cli(t, fixture, [...args, "--value", '{"name":"dry","count":3}', "--dry-run"]));
+  assert.equal((await readData({}, fixture.root, "records", "item")).revision, 2);
+  await fixture.createStore("files", "record.json", "data");
+  failure(await cli(t, fixture, ["data", "upsert", "item.json", "--store", "files", "--value", '{"name":"x","count":0}', "--output", "json"]), "UNSUPPORTED_CAPABILITY");
+});

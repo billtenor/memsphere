@@ -37,6 +37,10 @@ These requirements define what the current Artifact must satisfy.
 - Type: {{contract.artifact.type}}
 - Format: {{contract.artifact.format}}
 - Schema: {{contract.artifact.schema}}
+{{#if contract.artifact.modelTarget}}
+- Store: {{contract.artifact.modelTarget.storeId}}
+- Model: {{contract.artifact.modelTarget.modelRef}}
+{{/if}}
 - Final Artifact: {{#if contract.artifact.final}}yes{{else}}no{{/if}}
 - Review policy: {{contract.artifact.reviewPolicy}}
 

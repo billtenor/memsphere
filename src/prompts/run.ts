@@ -97,7 +97,8 @@ export function buildRunCurrentStepPromptModel(
     artifact: {
       name: step.artifact,
       type: step.type ?? "unknown",
-      format: formatDisplay(step.format)
+      format: formatDisplay(step.format),
+      modelTarget: step.store && run.modelTargets?.[step.store] ? { storeId: step.store, modelRef: run.modelTargets[step.store].modelRef } : undefined
     },
     next: review?.status === "awaiting_revision"
       ? { kind: "revision" as const }

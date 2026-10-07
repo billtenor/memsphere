@@ -1,7 +1,7 @@
 import { Command, Option } from "commander";
 import { readConfig } from "../config.js";
 import { openBusinessStore, serviceError } from "../project/business-stores.js";
-import { listData, readData, hasData, writeData, deleteData, editData, validateData, exportData } from "../project/data-service.js";
+import { listData, readData, hasData, writeData, upsertData, deleteData, editData, validateData, exportData } from "../project/data-service.js";
 import { emitCommandResult } from "./cli-errors.js";
 import { assertInputOptions, readDataInput, readInputText, parseJsonInput, parseRevision } from "./input.js";
 import { registerDataStoreCommands } from "./data-store.js";
@@ -30,6 +30,12 @@ export function registerDataCommands(program: Command) {
       emitCommandResult({ project: config.project?.name, storeId: options.store, ...await writeData({}, config.scopeRoot, options.store, id, operation, input, { expectedRevision, dryRun: options.dryRun }) }, options.output);
     });
   }
+  stored(valueInput(data.command("upsert <id>")).option("--dry-run"))
+    .action(async (id, options) => {
+      assertInputOptions(options, false);
+      const input = await readDataInput(options, false); const config = await readConfig();
+      emitCommandResult({ project: config.project?.name, storeId: options.store, ...await upsertData({}, config.scopeRoot, options.store, id, input, { dryRun: options.dryRun }) }, options.output);
+    });
   stored(data.command("delete <id>").option("--expected-revision <n>").option("--dry-run"))
     .action(async (id, options) => { const expectedRevision = parseRevision(options.expectedRevision); const config = await readConfig();
       emitCommandResult({ project: config.project?.name, storeId: options.store, ...await deleteData({}, config.scopeRoot, options.store, id, { expectedRevision, dryRun: options.dryRun }) }, options.output);

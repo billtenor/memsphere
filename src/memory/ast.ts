@@ -69,6 +69,8 @@ export type SchemaNode = CommonMemoryNode & {
 
 export type ArtifactNode = {
   tag: "!artifact";
+  store?: string;
+  model?: string;
   name: string;
   type: ArtifactType;
   format: ArtifactFormatSpec;

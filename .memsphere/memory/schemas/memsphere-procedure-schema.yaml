@@ -15,12 +15,16 @@ asserts:
   - Procedure.asserts 可以包含非空字符串或指向 Statement 的 !ref，引用只投影目标的有效规则。
   - Procedure.asserts 如出现，其中每一项都在整个 Procedure 及其调用链执行期间持续生效。
   - flow 的每个成员必须使用 !action、!if、!while 或 !call tag，并满足对应节点规则。
-  - "!action 只允许 action、actor、asserts、suggests 和 artifact；artifact 必须使用 !artifact tag，并只允许 name、type、format、schema、review 和 final。"
+  - "!action 只允许 action、actor、asserts、suggests 和 artifact；artifact 必须使用 !artifact tag，并只允许 name、type、format、schema、review、final、store 和 model。"
   - Artifact.review 如出现，必须是非空且成员不重复的 Reviewer Slot 名称数组；Slot 应使用评审人称呼，Actor Binding 与 Decision Policy 在创建 Run 时配置。
-  - Artifact export、DataStore 绑定及中间状态属于 Run 运行时能力，不在 Procedure 或 Artifact YAML 中声明；正式上报仍按原 type、format、schema 契约校验。
+  - Artifact export 和中间状态属于 Run 运行时能力；模型产物通过 store 声明业务 Store，不声明 create/update 或数据 ID，正式上报复用模型 Runtime 校验。
   - 创建 Run 时必须为全部可达 Review scope 选择 Decision Policy，并为每个 Slot 配置 Actor Binding 或显式 skip；全部 Slot 都显式 skip 时不要求 Control Plane，任一 Slot 绑定 Actor 时必须配置 Control Plane。
   - "!if 使用 condition、then、可选 elseif 和可选 else；!while 使用 condition 和 do；condition 必须是产出 boolean Artifact 的 !action。"
   - "!call 只允许 target，且 target 必须指向可解析的 Procedure。"
+  - 模型数据 Artifact 可声明 store 和可选 model；模型从业务 Store 推导，model 显式指定时须一致。首版目标为 filesystem JSON ValueStore，schema 与 store/model 互斥；object/array 使用 json/yaml，string/number/boolean 使用 json/yaml 或 plain，普通 Action 的模型 boolean 是业务数据而非控制条件。
+  - Run 启动冻结全部可达模型产物的目标绑定和模型指纹；report 及接受写入前检查，变化时明确拒绝。stepExecutionId 持久化且同次失败重试、审核修改重交复用，循环或 Call 的下一次执行生成新身份；业务数据 ID 自动取 run_id 与 stepExecutionId 的组合。
+  - 模型 Artifact 仍完整保存不可变提交快照，用于 Review、历史查看和追溯；接受后另行将同一模型值整条 upsert 到业务 Store，成功才推进。业务记录后续更新不改变历史快照；Store revision 不是历史内容读取能力，Artifact 不仅保存业务引用。写入后 Run 保存失败时同 ID redo，允许 revision 增长；取消、删除、归档或恢复 Run 不联动删除或重写业务数据。
+  - store/model 只允许普通 Action 的 Artifact，不允许 condition 或 Schema 字段；model 单独出现、不支持的格式及 Store 能力必须拒绝。
 fields:
   - !schema
     name: syntax

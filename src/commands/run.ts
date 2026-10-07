@@ -190,6 +190,7 @@ export async function runStartCommand(procedureName: string | undefined, options
     ownership?: import("../app/ownership.js").AppOwnership;
     memorySource: NonNullable<RunState["memorySource"]>;
   }): Promise<RunState> => startRun({
+    projectRoot: config.project ? config.scopeRoot : undefined,
     memoryRoot: config.memoryRoot,
     memorySnapshotRoot: source?.memoryRoot,
     memoryOwnership: source?.ownership,

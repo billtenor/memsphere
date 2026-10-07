@@ -421,3 +421,27 @@ test("filesystem JSON ValueStore lock is only per record and a canceled waiter n
     assert.equal((await store.update({}, "busy", { name: "next", count: 3 }, { expectedRevision: 1 })).revision, 2);
   });
 });
+
+test("atomic upsert replaces complete records and preserves deletion revision history", async () => {
+  await withStore(async (store) => {
+    assert(store.upsert);
+    const first = await store.upsert({}, "upsert", { name: "first", count: 1, tags: ["old"] });
+    const second = await store.upsert({}, "upsert", { name: "second", count: 2 });
+    assert.equal(second.createdAt, first.createdAt);
+    assert.equal(second.revision, 2);
+    assert.deepEqual((await store.get({}, "upsert"))?.value, { name: "second", count: 2 });
+    await store.delete({}, "upsert");
+    assert.equal((await store.upsert({}, "upsert", { name: "reborn", count: 0 })).revision, 3);
+    await assert.rejects(store.upsert({}, "upsert", { name: "invalid", count: -1 }));
+    assert.equal((await store.get({}, "upsert"))?.revision, 3);
+  });
+});
+
+test("concurrent upserts of a missing ID create one record with every revision retained", async () => {
+  await withStore(async (store) => {
+    const results = await Promise.all(Array.from({ length: 8 }, (_, count) => store.upsert!({}, "shared", { name: "concurrent", count })));
+    assert.deepEqual(results.map(result => result.revision).sort((a, b) => a! - b!), [1, 2, 3, 4, 5, 6, 7, 8]);
+    assert.equal((await store.get({}, "shared"))?.revision, 8);
+    assert.deepEqual(await store.list({}), { items: [{ id: "shared" }] });
+  });
+});

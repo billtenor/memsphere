@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { assertModelRef } from "../project/model-registration-contract.js";
 import type { MemoryKind } from "./kinds.js";
 import {
   builtInArtifactFormats,
@@ -418,8 +419,21 @@ const legacyArtifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> =
   type: nonEmptyString.default("string"),
   format: artifactFormatInputSchema,
   schema: z.lazy(() => z.union([canonicalMemoryNameSchema, schemaNodeSchema, memoryRefNodeSchema])).optional(),
-  final: z.boolean().optional()
+  final: z.boolean().optional(),
+  store: nonEmptyString.optional(),
+  model: nonEmptyString.optional()
 }).strict().superRefine((artifact, context) => {
+  if (artifact.model) {
+    try {
+      if (!artifact.store) throw new TypeError("model requires store");
+      assertModelRef(artifact.model);
+    } catch (error) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["model"], message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  if (artifact.store && (artifact.schema || artifact.store === "__proto__" || artifact.store.includes("\0") ||
+      !["json", "yaml", "plain"].includes(artifact.format.name)))
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["store"], message: "Model Artifact requires a business Store, no schema, and json/yaml or scalar plain format" });
   const formatName = artifact.format.name;
   const layout = (artifact.format.options as Record<string, unknown>).layout;
   const knownType = builtInArtifactTypes.includes(artifact.type as (typeof builtInArtifactTypes)[number]);
@@ -447,7 +461,8 @@ const legacyArtifactNodeSchema: z.ZodType<ArtifactNode, z.ZodTypeDef, unknown> =
     (["boolean", "number", "string"].includes(artifact.type) && formatName === "plain") ||
     (artifact.type === "string" && formatName === "markdown") ||
     (["object", "array"].includes(artifact.type) && ["json", "yaml", "markdown"].includes(formatName));
-  if (!validCombination) {
+  const modelCombination = artifact.store !== undefined && ["boolean", "number", "string"].includes(artifact.type) && ["json", "yaml"].includes(formatName);
+  if (!validCombination && !modelCombination) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["format"],
@@ -698,7 +713,7 @@ export const actionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = z.
 }).strict();
 
 const plainActionNodeSchema: z.ZodType<ActionNode, z.ZodTypeDef, unknown> = actionNodeSchema.superRefine((node, context) => {
-  if (node.artifact.type === "boolean") {
+  if (node.artifact.type === "boolean" && !node.artifact.store) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["artifact", "type"],
@@ -716,6 +731,7 @@ const whileNodeSchema: z.ZodType<WhileNode, z.ZodTypeDef, unknown> = z.lazy(() =
     condition: actionNodeSchema,
     do: z.array(flowNodeSchema).min(1)
   }).strict().superRefine((node, context) => {
+    if (node.condition.artifact.store || node.condition.artifact.model) context.addIssue({ code: z.ZodIssueCode.custom, path: ["condition", "artifact", "store"], message: "Condition Artifacts cannot write business data" });
     if (node.condition.artifact.type !== "boolean") {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -734,6 +750,7 @@ ifNodeSchema = z.lazy(() =>
     elseif: ifNodeSchema.optional(),
     else: z.array(flowNodeSchema).optional()
   }).strict().superRefine((node, context) => {
+    if (node.condition.artifact.store || node.condition.artifact.model) context.addIssue({ code: z.ZodIssueCode.custom, path: ["condition", "artifact", "store"], message: "Condition Artifacts cannot write business data" });
     if (node.condition.artifact.type !== "boolean") {
       context.addIssue({
         code: z.ZodIssueCode.custom,

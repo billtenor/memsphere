@@ -35,6 +35,7 @@ const acpArtifactReviewPromptSchema = z.object({
       type: z.string(),
       format: z.string(),
       schema: z.string(),
+      modelTarget: z.object({ storeId: z.string(), modelRef: z.string() }).strict().optional(),
       final: z.boolean(),
       reviewPolicy: z.string()
     }).strict()
@@ -178,7 +179,8 @@ const currentStepContentSchema = z.object({
   artifact: z.object({
     name: z.string(),
     type: z.string(),
-    format: z.string()
+    format: z.string(),
+    modelTarget: z.object({ storeId: z.string(), modelRef: z.string() }).strict().optional()
   }).strict(),
   next: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("revision") }).strict(),
