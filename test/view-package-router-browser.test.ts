@@ -77,7 +77,7 @@ async function fixture(capability = true, enabled = true, config: Record<string,
     origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   }, path: "/projects/demo/modules/crawler-one/crawler/run", async close() {
     await new Promise<void>(resolve => server.close(() => resolve()));
-    await rm(temporary, { recursive: true, force: true });
+    await rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } };
 }
 

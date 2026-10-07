@@ -330,3 +330,22 @@ Plugin 注入 `router` 后，`ctx.router.register({ id: "index", path: "/" })` �
 ## App 业务页面
 
 App 通过 `entrypoints.view` 安装 Module 实例。包声明 `main.view@1:route:<route-id>` 与对应注册 id 后，可以注册自己的 Module 相对路由；使用 `ctx.api.invoke(operation,input)` 调用 App backend 时，Plugin 的 inject 必须包含 api。该服务仅提供给 App 绑定实例。完整示例见 [费用 App](../examples/apps/expense/README.md)，接口见 [App 实现契约](./app-contract.md)。
+
+## 嵌入只读模型定义
+
+`ctx.ui.modelDefinition({ model, view?: "structure" | "source", locale?: "zh-CN" | "en" })` 返回一个独立 HTMLElement。Plugin 声明 `inject: ["ui"]` 和 `uiVersion: 1`。model 为已读取的 `ModelPresentationDefinition`，包含 id、metaModel、builtin、definition、source；可使用静态快照，或从 `presentation.modelsPage().getDefinition(id)` 读取当前 Project 定义。factory 不请求 API、不改模型、不注册路由或授予写权限。读取失败/不可用由页面用 `ui.feedback` 处理，不应构造空定义。
+
+view 默认 structure：Draft-07 使用与官方模型页相同的树表、字段规则和展开边界；raw.json 展示整体内容只读反馈；其他元模型结构明确显示不支持。source 忠实展示 source 文本，raw 或不支持模型仍可看原文。缺失或非法定义输入显示不可用反馈。结构视图不新增对未支持 Schema 关键字的解释。locale 默认跟随 Host，显式指定只覆盖当前组件。
+
+每次调用生成独立节点与展开状态。切换结构/原文时，调用方可缓存各自节点以保留展开状态；移除节点即可释放默认组件的节点监听，不需要组件专属 disposer。Host 提供主题 CSS，外部包无需复制样式、先挂载官方 Models 模块或依赖私有 DOM。
+
+factory 自动应用 `portableSlots.modelDefinitionRenderer`（`org.memsphere.models.definition.renderer@1:definition`），传入深复制冻结的 model、view 与官方 defaultRender。已有 renderer 可包装默认内容；无条目、所有候选抛错或返回非法节点时由 factory 回退官方实现。defaultRender 不再次经过 Slot，因此不会递归。第三方 renderer 的全局副作用仍应通过其 Plugin lifecycle 管理。
+
+```ts
+const page = await ctx.presentation.modelsPage();
+const model = await page.getDefinition("sales/order.json");
+container.append(ctx.ui.modelDefinition({ model }));
+container.append(ctx.ui.modelDefinition({ model, view: "source" }));
+```
+
+独立路由还需在 Manifest 声明 `router.register` capability 和匹配的 `main.view@1:route:<route-id>` contribution，并通过 `slots.mainView` 注册 Mount；组件不替页面完成这些接线。可运行的独立业务示例见 [model-definition](../examples/view-packages/model-definition/README.md)。

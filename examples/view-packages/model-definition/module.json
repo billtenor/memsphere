@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "org.example.model-definition",
+  "version": "1.0.0",
+  "view": {
+    "entry": "./index.js",
+    "sdk": "^1.0.0",
+    "capabilities": ["router.register"],
+    "contributions": [
+      {"id": "targets", "cell": "main.view@1:route:targets", "priority": 100},
+      {"id": "navigation", "cell": "navigation.primary@1:navigation", "priority": 100}
+    ]
+  }
+}

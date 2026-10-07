@@ -2938,6 +2938,14 @@ const compiledViewRuntimeUrl = new URL("../view/view-runtime.js", import.meta.ur
 const sourceViewSdkUrl = new URL("../view/view-sdk.ts", import.meta.url);
 const sourceViewRuntimeUrl = new URL("../view/view-runtime.ts", import.meta.url);
 const viewRuntimeDependencies = new Map([
+  ["/assets/model-definition.js", {
+    compiled: new URL("../view/model-definition.js", import.meta.url),
+    source: new URL("../view/model-definition.ts", import.meta.url)
+  }],
+  ["/assets/model-definition-styles.js", {
+    compiled: new URL("../view/model-definition-styles.js", import.meta.url),
+    source: new URL("../view/model-definition-styles.ts", import.meta.url)
+  }],
   ["/assets/system-icon.js", {
     compiled: new URL("../view/system-icon.js", import.meta.url),
     source: new URL("../view/system-icon.ts", import.meta.url)

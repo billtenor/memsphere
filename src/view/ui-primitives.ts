@@ -43,12 +43,15 @@ import {
   type ViewUi
 } from "./view-sdk.js";
 import { normalizeSystemIconName } from "./system-icon.js";
+import { renderModelDefinition } from "./model-definition.js";
+import { modelDefinitionStyles } from "./model-definition-styles.js";
 
 type UiNavigation = (target: RouteTarget) => Promise<void>;
 
-export function createViewUi(navigate: UiNavigation): ViewUi {
+export function createViewUi(navigate: UiNavigation, locale: "zh-CN" | "en" = "zh-CN"): ViewUi {
   const ui: ViewUi = {
     version: 1 as const,
+    modelDefinition: descriptor => renderModelDefinition(ui, descriptor, locale),
     contentComponent: input => input.defaultRender(),
     contentList(source: ContentListDescriptor | ContentListProvider): ViewMount {
       if (typeof source !== "function") assertContentListDescriptor(source);
@@ -1155,6 +1158,7 @@ function textValue(value: TextRef): string {
 }
 
 export const viewUiStyles = `
+  ${modelDefinitionStyles}
   .mem-view-button { position:relative; display:inline-flex; min-height:34px; align-items:center; justify-content:center; gap:7px; border:1px solid var(--mem-view-color-border); border-radius:var(--mem-view-radius-sm); background:var(--mem-view-color-surface); padding:0 var(--mem-view-space-3); color:var(--mem-view-color-text); font:600 var(--mem-view-font-size-sm)/var(--mem-view-line-compact) var(--mem-view-font-sans); cursor:pointer; }
   .mem-view-button:hover:not(:disabled) { border-color:var(--mem-view-color-accent); background:var(--mem-view-color-subtle); }
   .mem-view-button[data-tone="primary"] { border-color:var(--mem-view-color-accent); background:var(--mem-view-color-accent); color:var(--mem-view-color-on-accent); }

@@ -97,6 +97,12 @@ test("View server serves Host, SDK, Runtime, and all builtin bundles without ser
     assert.equal(uiResponse.status, 200);
     assert.match(await uiResponse.text(), /export function createViewUi/);
 
+    for (const dependency of ["model-definition", "model-definition-styles"]) {
+      const response = await fetch(`${origin}/assets/${dependency}.js`);
+      assert.equal(response.status, 200, `Shared model component asset: ${dependency}`);
+      assert.match(response.headers.get("content-type") ?? "", /^text\/javascript/);
+    }
+
     const iconResponse = await fetch(`${origin}/assets/system-icon.js`);
     assert.equal(iconResponse.status, 200);
     assert.match(await iconResponse.text(), /export function normalizeSystemIconName/);
