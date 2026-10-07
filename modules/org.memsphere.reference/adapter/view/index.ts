@@ -24,12 +24,15 @@ const referenceStyles = `
   [data-reference-module] .reference-line { position:absolute; top:50%; left:30%; width:42%; height:2px; background:var(--mem-view-color-accent); transform:rotate(18deg); transform-origin:left; }
   [data-reference-module] .reference-inspector { padding:var(--mem-view-space-5); }
   [data-reference-module] .reference-count { display:block; margin:var(--mem-view-space-5) 0; color:var(--mem-view-color-accent); font-size:var(--mem-view-font-size-display); font-weight:700; }
-  [data-reference-module] .reference-components { display:grid; max-width:var(--mem-view-layout-content-max); grid-template-columns:repeat(3,minmax(0,1fr)); align-items:start; gap:var(--mem-view-space-3); margin:0 auto var(--mem-view-space-4); }
+  [data-reference-module] .reference-components { display:grid; max-width:var(--mem-view-layout-content-max); grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); align-items:start; gap:var(--mem-view-space-3); margin:0 auto var(--mem-view-space-4); }
   [data-reference-module] .reference-component-column { display:grid; min-width:0; align-content:start; gap:var(--mem-view-space-3); }
   [data-reference-module] .reference-component-card { min-width:0; border:1px solid var(--mem-view-color-border); border-radius:var(--mem-view-radius-lg); background:var(--mem-view-color-surface); padding:var(--mem-view-space-4); box-shadow:var(--mem-view-shadow-card); }
   [data-reference-module] .reference-component-card > strong { display:block; margin-bottom:var(--mem-view-space-3); font-size:var(--mem-view-font-size-md); }
   [data-reference-module] .reference-component-row { display:flex; flex-wrap:wrap; align-items:center; gap:var(--mem-view-space-2); }
   [data-reference-module] .reference-component-card .mem-view-empty-state { min-height:120px; padding:var(--mem-view-space-3); }
+  [data-reference-module]:where([data-view-theme-mode="dark"], [data-view-theme-mode="dark"] *) .reference-component-card {
+    border-color:color-mix(in srgb,var(--mem-view-color-border) 65%,var(--mem-view-color-surface));
+  }
   [data-reference-panel] { display:grid; gap:var(--mem-view-space-4); padding:var(--mem-view-space-4); color:var(--mem-view-color-text); font:var(--mem-view-font-size-base)/var(--mem-view-line-body) var(--mem-view-font-sans); }
   [data-reference-panel] section { display:grid; gap:var(--mem-view-space-3); border-bottom:1px solid var(--mem-view-color-border); padding-bottom:var(--mem-view-space-4); }
   [data-reference-panel] p { margin:0; color:var(--mem-view-color-text-muted); }
