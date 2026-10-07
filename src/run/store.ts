@@ -4908,8 +4908,7 @@ async function existingRunPath(runsRoot: string, id: string): Promise<string> {
   const current = runPath(runsRoot, id);
   try {
     const file = await stat(current);
-    if (!file.isFile()) throw new Error(`Run path is not a file: ${current}`);
-    return current;
+    return file.isFile() ? current : legacyRunPath(runsRoot, id);
   } catch (error) {
     if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") throw error;
     return legacyRunPath(runsRoot, id);
