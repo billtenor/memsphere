@@ -31,7 +31,6 @@ export function renderViewShellMarkup(options: ViewShellMarkupOptions): string {
   const navigation = initial ? renderInitialNavigation(initial) : "";
   const footer = initial ? `<a class="view-shell-settings" href="${escapeHtml(initial.settingsHref)}"><img class="view-shell-icon" src="/assets/system-icons/gear-six.svg" alt="" aria-hidden="true" /><span>${escapeHtml(initial.settingsLabel)}</span></a>` : "";
   const header = initial?.pathname === "/" ? `<div class="view-shell-heading"><h1>${escapeHtml(initial.homeLabel)}</h1><p>${escapeHtml(initial.projectName)}</p></div>` : "";
-  const account = initial ? `<div class="view-shell-account" aria-label="${escapeHtml(initial.accountLabel)}"><span class="view-shell-account-avatar">${escapeHtml(initial.accountLabel)}</span></div>` : "";
   const main = initial?.pathname === "/" ? renderInitialHome(initial) : renderInitialLoading(options.loading);
   const isHome = initial?.pathname === "/";
   const hasInitialContentList = !initial?.pathname.includes("/settings/");
@@ -60,10 +59,6 @@ export function renderViewShellMarkup(options: ViewShellMarkupOptions): string {
       <nav data-view-slot="navigation.primary">${navigation}</nav>
       <div class="view-shell-rail-spacer"></div>
       <div class="view-shell-footer" data-view-slot="sidebar.footer">${footer}</div>
-      <button class="view-shell-add-module" type="button" aria-label="${chinese ? "新增 Module" : "Add Module"}" title="${chinese ? "新增 Module" : "Add Module"}">
-        <img src="/assets/system-icons/plus.svg" alt="" aria-hidden="true" />
-      </button>
-      <div class="view-shell-account-slot" data-view-slot="header.account">${account}</div>
     </aside>
     <section class="view-shell-workspace">
       <aside class="view-shell-secondary-panel" aria-label="Secondary navigation">
@@ -439,7 +434,6 @@ export const viewShellStyles = `
   [data-view-theme-mode="dark"] .view-shell-navigation-item.active .view-shell-module-icon {
     background:color-mix(in srgb,var(--mem-view-color-accent) 45%,var(--mem-view-color-canvas));
   }
-  [data-view-theme-mode="dark"] .view-shell-add-module img,
   [data-view-theme-mode="dark"] .view-shell-side-panel > header img,
   [data-view-theme-mode="dark"] .view-shell-project-details-card header img,
   [data-view-theme-mode="dark"] .view-shell-search-overlay img,
@@ -449,13 +443,6 @@ export const viewShellStyles = `
   }
   .view-shell-navigation-badge { position: absolute; transform: translate(21px, -19px); min-width: 16px; height: 16px; border-radius: var(--mem-view-radius-sm); background: var(--mem-view-color-badge); padding: 0 4px; color: var(--mem-view-color-on-accent); font-size: var(--mem-view-font-size-xs); line-height: 16px; }
   .view-shell-rail-spacer { min-height: 4px; flex: 1; }
-  .view-shell-account-slot { min-height: 36px; }
-  .view-shell-add-module { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border: 0; border-radius: var(--mem-view-radius-sm); background: transparent; color: var(--mem-view-color-text-muted); cursor: pointer; }
-  .view-shell-add-module:hover { background: var(--mem-view-color-subtle); color: var(--mem-view-color-accent-hover); }
-  .view-shell-add-module img { width: 20px; height: 20px; opacity: .72; }
-  .view-shell-account { display: grid; width: 36px; min-width: 36px; height: 36px; min-height: 36px; place-items: center; border: 0; border-radius: var(--mem-view-radius-md); background: var(--mem-view-color-account); padding: 0; }
-  .view-shell-account-avatar { width: auto; height: auto; border-radius: 0; background: transparent; color: var(--mem-view-color-on-accent); font:700 var(--mem-view-font-size-sm)/1 var(--mem-view-font-sans); }
-  .view-shell-account-user-icon, .view-shell-account-caret { display: none; }
   .view-shell-footer { display: grid; width: 100%; flex: 0 0 auto; gap: 4px; margin: 0; padding: 0; border: 0; }
   .view-shell-footer:empty { display: none; }
   .view-shell-footer .view-shell-settings { display: flex; width: 100%; height: 48px; min-height: 48px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: var(--mem-view-radius-md); padding: 3px; font-size: var(--mem-view-font-size-xs); text-align: center; }
@@ -671,7 +658,7 @@ export const viewShellStyles = `
     .view-shell-project-caret { display: block; }
     .view-shell-project-menu { inset: auto auto 56px 0; width: min(304px, calc(100vw - 16px)); }
     .view-shell-search-trigger { width: 44px; height: 44px; flex: 0 0 44px; margin: 0; }
-    .view-shell-rail-divider, .view-shell-rail-spacer, .view-shell-add-module, .view-shell-account-slot { display: none; }
+    .view-shell-rail-divider, .view-shell-rail-spacer { display: none; }
     .view-shell-sidebar [data-view-slot="navigation.primary"] { display: grid; width: auto; height: 56px; min-width: 0; flex: 1; grid-template-columns: repeat(auto-fit, minmax(52px, 1fr)); gap: 3px; overflow-x: auto; }
     .view-shell-navigation-item { width: auto; height: 56px; min-height: 56px; gap: 2px; padding: 3px 2px; }
     .view-shell-module-icon { width: 30px; height: 30px; }
