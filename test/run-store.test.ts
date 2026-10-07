@@ -339,7 +339,8 @@ flow:
     assert.equal(delegatedRace.filter((result) => result.status === "fulfilled").length, 1);
     assert.equal(delegatedRace[0].status, "fulfilled");
     assert.equal(delegatedRace[1].status, "rejected");
-    assert(delegatedRace[1].status === "rejected" && delegatedRace[1].reason instanceof ArtifactReviewSubmissionConflictError);
+    assert(delegatedRace[1].status === "rejected" && delegatedRace[1].reason instanceof ArtifactReviewSubmissionConflictError,
+      delegatedRace[1].status === "rejected" ? String(delegatedRace[1].reason) : "expected a submission conflict");
     const delegatedFinal = currentArtifactReview(await readRun(runsRoot, delegatedFirst.started.id))!.rounds[0]!;
     assert.equal(delegatedFinal.votes.length, 1);
     assert.equal(delegatedFinal.assignments[0]!.submitted?.delegation?.kind, "runner");

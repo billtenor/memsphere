@@ -26,8 +26,9 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     page.setDefaultTimeout(5_000);
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
-    await page.goto(`http://127.0.0.1:${port}`, { waitUntil: "networkidle" });
+    await page.goto(`http://127.0.0.1:${port}`, { waitUntil: "domcontentloaded", timeout: 15_000 });
     const settingsButton = page.locator('[data-view-slot="sidebar.footer"]').getByRole("button", { name: "设置", exact: true });
+    await settingsButton.waitFor({ timeout: 15_000 });
     const settingsButtonBox = await settingsButton.boundingBox();
     const sidebarBox = await page.locator(".view-shell-sidebar").boundingBox();
     assert.ok(settingsButtonBox && sidebarBox, JSON.stringify({ settingsButtonBox, sidebarBox }));

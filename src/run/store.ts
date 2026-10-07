@@ -1220,7 +1220,7 @@ function assertRunRunning(run: RunState): void {
 }
 
 export async function readRun(runsRoot: string, id: string): Promise<RunState> {
-  const raw = await readFile(await existingRunPath(runsRoot, id), "utf8");
+  const raw = await retryRunFileAccess(async () => readFile(await existingRunPath(runsRoot, id), "utf8"));
   return parseRunState(JSON.parse(raw));
 }
 
@@ -4910,8 +4910,24 @@ async function existingRunPath(runsRoot: string, id: string): Promise<string> {
     const file = await stat(current);
     if (!file.isFile()) throw new Error(`Run path is not a file: ${current}`);
     return current;
-  } catch {
+  } catch (error) {
+    if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") throw error;
     return legacyRunPath(runsRoot, id);
+  }
+}
+
+async function retryRunFileAccess<T>(operation: () => Promise<T>): Promise<T> {
+  // Windows can deny reads briefly while an atomic replacement is in progress.
+  // Retry sharing violations before listRuns mistakes a valid Run for an unrelated directory.
+  const attempts = process.platform === "win32" ? 20 : 1;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+      if (!["EACCES", "EBUSY", "EPERM"].includes(String(code)) || attempt === attempts - 1) throw error;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10 * (attempt + 1)));
+    }
   }
 }
 
