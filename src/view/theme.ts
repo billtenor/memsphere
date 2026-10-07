@@ -42,19 +42,19 @@ export const viewThemeLightTokens: Readonly<Record<ViewThemeToken, string>> = Ob
 
 export const viewThemeDarkTokens: Readonly<Record<ViewThemeToken, string>> = Object.freeze({
   ...viewThemeLightTokens,
-  "color.canvas": "#101513", "color.surface": "#18201d", "color.subtle": "#202a26",
-  "color.text": "#e7efec", "color.textMuted": "#a4b2ad", "color.border": "#34413c",
-  "color.accent": "#62b9ae", "color.accentHover": "#83d0c6", "color.accentSoft": "#203b37",
-  "color.info": "#77ade8", "color.infoSoft": "#1b3048", "color.onInfo": "#09131f",
-  "color.success": "#62b9ae", "color.successSoft": "#203b37", "color.onSuccess": "#071613",
-  "color.warning": "#e0b65b", "color.warningSoft": "#3c311b", "color.onWarning": "#1d1404",
-  "color.danger": "#e58d7d", "color.dangerSoft": "#432722", "color.onDanger": "#210b08",
-  "color.focusRing": "rgba(98,185,174,.42)",
-  "color.onAccent": "#071613", "color.overlay": "rgba(0,0,0,.62)",
-  "color.badge": "#ef7777", "color.account": "#c39b7a", "color.borderStrong": "#52655f",
-  "shadow.card": "0 1px 2px rgba(0,0,0,.32)",
-  "shadow.popover": "0 14px 40px rgba(0,0,0,.48)",
-  "shadow.overlay": "0 24px 70px rgba(0,0,0,.58)"
+  "color.canvas": "#282a36", "color.surface": "#30323e", "color.subtle": "#383a46",
+  "color.text": "#f8f8f2", "color.textMuted": "#b5b6c3", "color.border": "#444653",
+  "color.accent": "#62b9ae", "color.accentHover": "#83d0c6", "color.accentSoft": "#30433f",
+  "color.info": "#8be9fd", "color.infoSoft": "#293e49", "color.onInfo": "#282a36",
+  "color.success": "#7ddba3", "color.successSoft": "#2c4038", "color.onSuccess": "#282a36",
+  "color.warning": "#f1fa8c", "color.warningSoft": "#414132", "color.onWarning": "#282a36",
+  "color.danger": "#ff8585", "color.dangerSoft": "#48343e", "color.onDanger": "#15161c",
+  "color.focusRing": "rgba(98,185,174,.38)",
+  "color.onAccent": "#15161c", "color.overlay": "rgba(15,16,23,.68)",
+  "color.badge": "#ff8585", "color.account": "#bd93f9", "color.borderStrong": "#626575",
+  "shadow.card": "0 1px 2px rgba(0,0,0,.24)",
+  "shadow.popover": "0 14px 40px rgba(0,0,0,.40)",
+  "shadow.overlay": "0 24px 70px rgba(0,0,0,.50)"
 });
 
 const lightThemeCss = (
@@ -64,9 +64,31 @@ const darkThemeCss = (
   Object.entries(viewThemeCssVariables) as Array<[ViewThemeToken, string]>
 ).map(([token, variable]) => `${variable}: ${viewThemeDarkTokens[token]};`).join(" ");
 
-export const viewThemeStyles = `:root { ${lightThemeCss} }
-:root[data-view-theme-mode="dark"] { ${darkThemeCss} }
-@media (prefers-color-scheme: dark) { :root:not([data-view-theme-mode="light"]):not([data-view-theme-mode="dark"]) { ${darkThemeCss} } }`;
+export const viewThemeStyles = `:root { color-scheme: light; ${lightThemeCss} }
+:root[data-view-theme-mode="dark"] { color-scheme: dark; ${darkThemeCss} }
+@media (prefers-color-scheme: dark) { :root:not([data-view-theme-mode="light"]):not([data-view-theme-mode="dark"]) { color-scheme: dark; ${darkThemeCss} } }
+:where([data-view-theme-mode="light"]) { color-scheme: light; }
+:where([data-view-theme-mode="dark"]) { color-scheme: dark; }
+:where(*) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--mem-view-color-border-strong) transparent;
+}
+/* Older WebKit engines use pseudo-elements instead of the standard properties. */
+@supports not (scrollbar-color: auto) {
+  :where(*)::-webkit-scrollbar { width: 8px; height: 8px; }
+  :where(*)::-webkit-scrollbar-track,
+  :where(*)::-webkit-scrollbar-corner { background: transparent; }
+  :where(*)::-webkit-scrollbar-thumb {
+    background: var(--mem-view-color-border-strong);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: var(--mem-view-radius-pill);
+  }
+  :where(*)::-webkit-scrollbar-thumb:hover { background-color: var(--mem-view-color-text-muted); }
+}
+@media (forced-colors: active) {
+  :where(*) { scrollbar-width: auto; scrollbar-color: auto; }
+}`;
 
 type ThemeLayer = {
   readonly sources: Map<string, ViewThemePalette>;

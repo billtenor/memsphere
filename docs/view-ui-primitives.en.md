@@ -33,6 +33,10 @@ Reference is a real Module, not a separate port or static mock. It demonstrates 
 
 The Shell owns shared placement and geometry, Theme owns shared visuals, primitives own common interaction states, and the Module owns presentation of business data, UI interaction state, and custom content.
 
+Dark mode uses charcoal surfaces, warm white text, and green accents. Memory, Run, and Settings surfaces, status labels, and error feedback consume Theme tokens; local color aliases should reference those tokens rather than hard-coded light colors. Native controls follow the theme through `color-scheme`, with thin scrollbar thumbs and transparent tracks.
+
+Filled primitives use darker green or red backgrounds with warm white text in dark mode, and selected navigation icons use warm white strokes. Disabled controls retain readable muted text, and input placeholders follow the theme.
+
 ## Minimal integration
 
 Declare both service injection and supported versions:

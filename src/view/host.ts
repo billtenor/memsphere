@@ -110,9 +110,9 @@ export function renderViewHostHtml(
     ${viewThemeStyles}
     body { margin: 0; background: var(--mem-view-color-canvas); color: var(--mem-view-color-text); font: var(--mem-view-font-size-base)/var(--mem-view-line-body) var(--mem-view-font-sans); }
     .view-host-status { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
-    .view-host-error { width: min(680px, 100%); border: 1px solid #e8c7bd; border-left: 4px solid #a14436; border-radius: 8px; background: #fffdfb; padding: 18px; box-sizing: border-box; }
-    .view-host-error h1 { margin: 0 0 8px; color: #a14436; font-size: 18px; }
-    .view-host-error p { margin: 0; color: #6c7379; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .view-host-error { width: min(680px, 100%); border: 1px solid var(--mem-view-color-danger); border-left: 4px solid var(--mem-view-color-danger); border-radius: 8px; background: var(--mem-view-color-danger-soft); padding: 18px; box-sizing: border-box; }
+    .view-host-error h1 { margin: 0 0 8px; color: var(--mem-view-color-danger); font-size: 18px; }
+    .view-host-error p { margin: 0; color: var(--mem-view-color-text-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
     ${viewShellStyles}
     ${viewUiStyles}
   </style>
@@ -417,10 +417,9 @@ export function renderViewHostHtml(
             const detailLabel = document.createElement("small");
             detailLabel.textContent = boot.coreShell.projectDetails;
             copy.append(name, detailLabel);
-            const caret = document.createElement("img");
+            const caret = document.createElement("span");
             caret.className = "view-shell-project-details-caret";
-            caret.src = "/assets/system-icons/caret-down.svg";
-            caret.alt = "";
+            caret.setAttribute("aria-hidden", "true");
             current.append(avatar, copy, caret);
             current.addEventListener("click", openDetails);
             projectMenu.append(current);

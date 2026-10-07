@@ -213,7 +213,7 @@ export const defaultContentStyles = `
   min-height: 19px;
   border: 0;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--accent-soft, #dfeeea) 82%, var(--surface));
+  background: color-mix(in srgb, var(--mem-view-color-accent-soft) 82%, var(--surface));
   color: color-mix(in srgb, var(--accent) 82%, var(--text));
   padding: 2px 7px;
   font-size: 11px;
@@ -225,8 +225,8 @@ export const defaultContentStyles = `
 :is(.memory-module, .run-module) .mem-content-document .mem-content-flow-condition:not(:empty) {
   display: block;
   width: max-content;
-  background: color-mix(in srgb, #e8b763 28%, var(--surface));
-  color: #75521b;
+  background: color-mix(in srgb, var(--mem-view-color-warning) 28%, var(--surface));
+  color: var(--mem-view-color-warning);
   font-size: 11px;
   font-weight: 650;
   line-height: 1.4;
@@ -259,7 +259,7 @@ export const defaultContentStyles = `
   bottom: 12px;
   left: 0;
   width: 1px;
-  background: color-mix(in srgb, #c58b2b 34%, transparent);
+  background: color-mix(in srgb, var(--mem-view-color-warning) 34%, transparent);
   content: "";
 }
 
@@ -281,7 +281,7 @@ export const defaultContentStyles = `
   left: -30px;
   width: 18px;
   height: 1px;
-  background: color-mix(in srgb, #c58b2b 34%, transparent);
+  background: color-mix(in srgb, var(--mem-view-color-warning) 34%, transparent);
   content: "";
 }
 
@@ -633,7 +633,7 @@ export const defaultContentStyles = `
 .run-module .run-meta-container .mem-view-badge[data-tone="warning"] {
   padding: 2px 7px;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--accent-soft, #dfeeea) 72%, var(--surface));
+  background: color-mix(in srgb, var(--mem-view-color-accent-soft) 72%, var(--surface));
   color: color-mix(in srgb, var(--accent) 82%, var(--text));
   font-weight: 650;
 }

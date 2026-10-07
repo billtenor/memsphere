@@ -298,8 +298,9 @@ async function withResponsiveView(
 async function openTaskPage(browser: TestBrowser, url: string, width: number): Promise<Page> {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   page.setDefaultTimeout(5_000);
-  await page.goto(`${url}/projects/responsive/tasks/${runId}`);
-  await page.locator(".run-title").waitFor();
+  await page.goto(`${url}/projects/responsive/tasks/${runId}`, { waitUntil: "domcontentloaded", timeout: 15_000 });
+  // Initial Module loading competes with other browser suites on CI runners.
+  await page.locator(".run-title").waitFor({ timeout: 15_000 });
   await page.getByRole("button", { name: "展开全部", exact: true }).click();
   await page.locator(".markdown-table-scroll").first().waitFor();
   return page;

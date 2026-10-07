@@ -48,12 +48,12 @@ export function renderViewShellMarkup(options: ViewShellMarkupOptions): string {
         </a>
         <button class="view-shell-project-trigger" id="view-shell-project-trigger" data-view-project-menu-trigger type="button" aria-haspopup="menu" aria-expanded="false" aria-label="${escapeHtml(switchProjectLabel)}" disabled>
           <span class="view-shell-project-trigger-value">${escapeHtml(initial?.projectName ?? "")}</span>
-          <img class="view-shell-project-caret" src="/assets/system-icons/caret-down.svg" alt="" aria-hidden="true" />
+          <span class="view-shell-project-caret" aria-hidden="true"></span>
         </button>
         <div class="view-shell-project-menu" id="view-shell-project-menu" role="menu" aria-labelledby="view-shell-project-label" hidden></div>
       </div>
       <button class="view-shell-search-trigger" data-view-search-trigger type="button" aria-haspopup="dialog" aria-controls="view-shell-search-overlay" aria-expanded="false">
-        <img src="/assets/system-icons/magnifying-glass.svg" alt="" aria-hidden="true" />
+        <i class="view-shell-search-icon" aria-hidden="true"></i>
         <span>${chinese ? "搜索" : "Search"}</span>
       </button>
       <div class="view-shell-rail-divider" aria-hidden="true"></div>
@@ -331,14 +331,18 @@ export const viewShellStyles = `
     border-radius: 50%;
     background: var(--mem-view-color-surface);
     padding: 0;
-    color: var(--mem-view-color-accent);
+    color: var(--mem-view-color-text);
     cursor: pointer;
   }
   .view-shell-project-trigger:disabled { cursor: default; opacity: .72; }
   .view-shell-project-trigger:not(:disabled):hover, .view-shell-project-trigger[aria-expanded="true"] { background: var(--mem-view-color-accent-soft); }
   .view-shell-project-trigger:focus-visible { outline: 2px solid var(--mem-view-color-accent); outline-offset: 2px; box-shadow: none; }
   .view-shell-project-trigger-value { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .view-shell-project-caret { width: 11px; height: 11px; }
+  .view-shell-project-caret {
+    display: block; width: 11px; height: 11px; background: currentColor;
+    -webkit-mask: url(/assets/system-icons/caret-down.svg) center/contain no-repeat;
+    mask: url(/assets/system-icons/caret-down.svg) center/contain no-repeat;
+  }
   .view-shell-project-trigger[aria-expanded="true"] .view-shell-project-caret { transform: rotate(180deg); }
   .view-shell-project-menu {
     position: absolute;
@@ -367,7 +371,12 @@ export const viewShellStyles = `
   .view-shell-project-option-name, .view-shell-project-current-name { min-width: 0; overflow: hidden; font-size: var(--mem-view-font-size-lg); text-overflow: ellipsis; white-space: nowrap; }
   .view-shell-project-current-copy { display: grid; min-width: 0; gap: 2px; }
   .view-shell-project-current-copy small { color: var(--mem-view-color-text-muted); font-size: var(--mem-view-font-size-xs); font-weight: 600; }
-  .view-shell-project-details-caret { width: 15px; height: 15px; opacity: .62; transform: rotate(-90deg); }
+  .view-shell-project-details-caret {
+    display: block; width: 15px; height: 15px; background: currentColor;
+    -webkit-mask: url(/assets/system-icons/caret-down.svg) center/contain no-repeat;
+    mask: url(/assets/system-icons/caret-down.svg) center/contain no-repeat;
+    transform: rotate(-90deg);
+  }
   .view-shell-search-trigger {
     display: flex;
     width: 46px;
@@ -380,12 +389,16 @@ export const viewShellStyles = `
     border: 1px solid var(--mem-view-color-border);
     border-radius: var(--mem-view-radius-md);
     background: color-mix(in srgb, var(--mem-view-color-surface) 70%, transparent);
-    color: var(--mem-view-color-text-muted);
+    color: var(--mem-view-color-text);
     cursor: pointer;
   }
   .view-shell-search-trigger:hover, .view-shell-search-trigger[aria-expanded="true"] { background: var(--mem-view-color-surface); color: var(--mem-view-color-accent-hover); }
   .view-shell-search-trigger:focus-visible { outline: 2px solid var(--mem-view-color-accent); outline-offset: 2px; }
-  .view-shell-search-trigger img { width: 21px; height: 21px; }
+  .view-shell-search-icon {
+    display: block; width: 21px; height: 21px; background: currentColor;
+    -webkit-mask: url(/assets/system-icons/magnifying-glass.svg) center/contain no-repeat;
+    mask: url(/assets/system-icons/magnifying-glass.svg) center/contain no-repeat;
+  }
   .view-shell-search-trigger span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .view-shell-rail-divider { width: 44px; height: 1px; flex: 0 0 1px; margin: 4px 0; background: var(--mem-view-color-border); }
   .view-shell-sidebar [data-view-slot="navigation.primary"] { display: grid; width: 100%; gap: 6px; margin: 0; }
@@ -421,7 +434,19 @@ export const viewShellStyles = `
   .view-shell-navigation-item.active .view-shell-module-icon { background:var(--mem-view-color-accent); }
   .view-shell-navigation-item.active img.view-shell-icon { filter:invert(1); }
   .view-shell-navigation-item.active .mem-view-system-icon { color:var(--mem-view-color-on-accent); filter:none; }
+  [data-view-theme-mode="dark"] .view-shell-navigation-item.active .mem-view-system-icon { color:var(--mem-view-color-text); }
   .view-shell-navigation-item[data-view-entry*="org.memsphere.run"].active .view-shell-module-icon, .view-shell-navigation-item[data-view-entry*="org.memsphere.settings"].active .view-shell-module-icon { background:var(--mem-view-color-accent); }
+  [data-view-theme-mode="dark"] .view-shell-navigation-item.active .view-shell-module-icon {
+    background:color-mix(in srgb,var(--mem-view-color-accent) 45%,var(--mem-view-color-canvas));
+  }
+  [data-view-theme-mode="dark"] .view-shell-add-module img,
+  [data-view-theme-mode="dark"] .view-shell-side-panel > header img,
+  [data-view-theme-mode="dark"] .view-shell-project-details-card header img,
+  [data-view-theme-mode="dark"] .view-shell-search-overlay img,
+  [data-view-theme-mode="dark"] .view-home-arrow,
+  [data-view-theme-mode="dark"] .view-home-module-card[data-icon] .view-home-module-icon {
+    filter:brightness(0) invert(1);
+  }
   .view-shell-navigation-badge { position: absolute; transform: translate(21px, -19px); min-width: 16px; height: 16px; border-radius: var(--mem-view-radius-sm); background: var(--mem-view-color-badge); padding: 0 4px; color: var(--mem-view-color-on-accent); font-size: var(--mem-view-font-size-xs); line-height: 16px; }
   .view-shell-rail-spacer { min-height: 4px; flex: 1; }
   .view-shell-account-slot { min-height: 36px; }
@@ -520,6 +545,13 @@ export const viewShellStyles = `
   .view-shell-header [data-view-slot="header.actions"] .view-shell-action:last-child:not(:disabled) { border-color: var(--mem-view-color-accent); background: var(--mem-view-color-accent); color: var(--mem-view-color-on-accent); }
   .view-shell-header [data-view-slot="header.actions"] .view-shell-action:last-child:not(:disabled) img.view-shell-icon { filter:brightness(0) saturate(100%) invert(1); }
   .view-shell-header [data-view-slot="header.actions"] .view-shell-action:last-child:not(:disabled):hover { border-color: var(--mem-view-color-accent-hover); background: var(--mem-view-color-accent-hover); }
+  [data-view-theme-mode="dark"] .view-shell-header [data-view-slot="header.actions"] .view-shell-action:last-child:not(:disabled) {
+    background:color-mix(in srgb,var(--mem-view-color-accent) 45%,var(--mem-view-color-canvas));
+    color:var(--mem-view-color-text);
+  }
+  [data-view-theme-mode="dark"] .view-shell-header [data-view-slot="header.actions"] .view-shell-action:last-child:not(:disabled):hover {
+    background:color-mix(in srgb,var(--mem-view-color-accent) 55%,var(--mem-view-color-canvas));
+  }
   #memsphere-view-root { min-width: 0; min-height: 0; flex: 1; overflow-x: hidden; overflow-y: auto; }
   .view-shell-side-panel { display:flex; width:min(300px, 38vw); min-width:260px; min-height:0; flex:0 0 auto; flex-direction:column; overflow:hidden; border-left:1px solid var(--mem-view-color-border); background:var(--mem-view-color-surface); box-shadow:-8px 0 24px color-mix(in srgb, var(--mem-view-color-text) 5%, transparent); }
   .view-shell-side-panel[hidden] { display:none; }

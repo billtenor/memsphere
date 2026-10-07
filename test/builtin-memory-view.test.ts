@@ -235,10 +235,20 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     assert.equal(await replacedDefinition.locator(":scope > .memory-inline-old, :scope > .memory-inline-new").evaluateAll(nodes => nodes.every(node => node.tagName === "DIV")), true);
     const unchangedDefinitionLeft = await inlineDiff.locator("li").filter({ hasText: "Definition stays unchanged" }).evaluate(node => node.getBoundingClientRect().left);
     assert.equal(Math.abs(await replacedDefinition.evaluate(node => node.getBoundingClientRect().left) - unchangedDefinitionLeft) < 1, true);
-    assert.notEqual(await replacedDefinition.evaluate(node => getComputedStyle(node, "::marker").color), "rgb(201, 75, 64)");
-    assert.notEqual(await replacedDefinition.evaluate(node => getComputedStyle(node, "::marker").color), "rgb(25, 128, 113)");
-    assert.equal(await page.locator("li.memory-inline-marker-old").first().evaluate(node => getComputedStyle(node, "::marker").color), "rgb(201, 75, 64)");
-    assert.equal(await page.locator("li.memory-inline-marker-new").first().evaluate(node => getComputedStyle(node, "::marker").color), "rgb(25, 128, 113)");
+    const diffColors = await inlineDiff.evaluate(node => {
+      const probe = document.createElement("span");
+      node.append(probe);
+      probe.style.color = "var(--mem-view-color-danger)";
+      const removed = getComputedStyle(probe).color;
+      probe.style.color = "var(--mem-view-color-success)";
+      const added = getComputedStyle(probe).color;
+      probe.remove();
+      return { removed, added };
+    });
+    assert.notEqual(await replacedDefinition.evaluate(node => getComputedStyle(node, "::marker").color), diffColors.removed);
+    assert.notEqual(await replacedDefinition.evaluate(node => getComputedStyle(node, "::marker").color), diffColors.added);
+    assert.equal(await page.locator("li.memory-inline-marker-old").first().evaluate(node => getComputedStyle(node, "::marker").color), diffColors.removed);
+    assert.equal(await page.locator("li.memory-inline-marker-new").first().evaluate(node => getComputedStyle(node, "::marker").color), diffColors.added);
     const replacementLineBox = await page.locator(".memory-inline-new").filter({ hasText: "After definition" }).evaluate(node => node.getBoundingClientRect().toJSON());
     const additionLine = page.locator(".memory-inline-new").filter({ hasText: "Open the ChangeSet View" });
     assert.match(await additionLine.innerText(), /^Added\s+Open the ChangeSet View/);
