@@ -17,3 +17,9 @@
 85aed8668eea5514e3d1acaf0a44a19391a1d892:changes/archive/completed/20261003-model-data-cli/manual-cli-acceptance.json:generic-api-key:1556
 85aed8668eea5514e3d1acaf0a44a19391a1d892:changes/archive/completed/20261003-model-data-cli/manual-cli-acceptance.json:generic-api-key:1575
 85aed8668eea5514e3d1acaf0a44a19391a1d892:changes/archive/completed/20261003-model-data-cli/manual-cli-acceptance.json:generic-api-key:1688
+
+# The same PR #85 SHA-256 evidence also exists in its squash-merge commit.
+# All three values were verified against the file blobs in this exact commit.
+a6520b1618351e64bd8875bb6ad65b61a06164ee:changes/archive/completed/20261003-model-data-cli/manual-cli-acceptance.json:generic-api-key:1556
+a6520b1618351e64bd8875bb6ad65b61a06164ee:changes/archive/completed/20261003-model-data-cli/manual-cli-acceptance.json:generic-api-key:1575
+a6520b1618351e64bd8875bb6ad65b61a06164ee:changes/archive/completed/20261003-model-data-cli/manual-cli-acceptance.json:generic-api-key:1688
