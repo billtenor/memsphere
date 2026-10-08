@@ -1,0 +1,33 @@
+{
+  "run_id": "run-20261008-064617z-ca3c75d4",
+  "platform": "linux",
+  "node": "22.16.0",
+  "full_regression": {
+    "command": "npm test",
+    "files": 141,
+    "tests": 1164,
+    "failed_files": 0,
+    "failed_tests": 0,
+    "elapsed_seconds": 289.01,
+    "exit_code": 0,
+    "log": "/tmp/issue95-full-tests-final.log"
+  },
+  "first_regression": {
+    "files": 141,
+    "failed_files": 1,
+    "elapsed_seconds": 290.52,
+    "root_cause": "Non-model ACP contract attempted to read model Submission metadata; repaired without weakening the test."
+  },
+  "checks": {
+    "typecheck": "passed",
+    "build": "passed",
+    "memory_store": "passed",
+    "changeset": "passed",
+    "diff_check": "passed"
+  },
+  "memory_changeset": {
+    "id": "change-20261008-071155715z-ff7c51a9",
+    "digest": "02720c9f5e02f2706d1ed57d93cad1e6eed29641d234ed2fbf0618e7061ac01e",
+    "view": "http://0.0.0.0:30000/projects/memsphere/changes/change-20261008-071155715z-ff7c51a9"
+  }
+}

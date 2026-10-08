@@ -2,7 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, posix, relative, resolve } from "node:path";
 import { z } from "zod";
-import { freezeModelArtifactTargets, processModelArtifact, modelArtifactTargetSchema, modelArtifactReceiptSchema, type ModelArtifactTarget, type ModelArtifactReceipt } from "../project/model-artifact.js";
+import {
+  freezeModelArtifactTargets, processModelArtifact, parseModelArtifactWriteOptions,
+  modelArtifactCandidateTargetSchema, modelArtifactTargetSchema, modelArtifactReceiptSchema,
+  type ModelArtifactWriteOptions, type ModelArtifactCandidateTarget, type ModelArtifactTarget, type ModelArtifactReceipt
+} from "../project/model-artifact.js";
 import { canonicalPath } from "../project/model-storage-paths.js";
 import { deleteRunContent, requireRunContent, runDataStore, saveRunContent } from "../project/run-data.js";
 import {
@@ -183,6 +187,7 @@ export type RunStep = {
   store?: string;
   model?: string;
   stepExecutionId?: string;
+  modelDataId?: string;
   id: string;
   kind?: "action" | "branch" | "loop" | "call" | "repeat";
   instruction: string;
@@ -236,6 +241,7 @@ export type RunEvent = {
   stepId: string;
   artifact: {
     modelData?: ModelArtifactReceipt;
+    modelTarget?: ModelArtifactCandidateTarget;
     name: string;
     type: string;
     format: ArtifactFormatSpec;
@@ -546,6 +552,7 @@ const runStepSchema: z.ZodType<RunStep> = z.lazy(() =>
     store: z.string().optional(),
     model: z.string().optional(),
     stepExecutionId: z.string().uuid().optional(),
+    modelDataId: z.string().optional(),
     id: z.string(),
     kind: z.enum(["action", "branch", "loop", "call", "repeat"]).optional(),
     instruction: z.string(),
@@ -809,6 +816,7 @@ const artifactReviewRoundSchema = z.object({
 
 const runEventArtifactSchema = z.object({
   modelData: modelArtifactReceiptSchema.optional(),
+  modelTarget: modelArtifactCandidateTargetSchema.optional(),
   name: z.string(),
   type: z.string(),
   format: artifactFormatSpecSchema,
@@ -1587,6 +1595,7 @@ export async function reportRun(input: {
   runsRoot: string;
   runId: string;
   artifact: ArtifactReportSource;
+  writeOptions?: ModelArtifactWriteOptions;
   revisionSummary?: string;
   beforeArtifactReview?: () => Promise<unknown>;
 }): Promise<RunState> {
@@ -1597,6 +1606,7 @@ async function reportRunUnlocked(input: {
   runsRoot: string;
   runId: string;
   artifact: ArtifactReportSource;
+  writeOptions?: ModelArtifactWriteOptions;
   revisionSummary?: string;
   beforeArtifactReview?: () => Promise<unknown>;
 }): Promise<RunState> {
@@ -1606,6 +1616,11 @@ async function reportRunUnlocked(input: {
   }
   assertRunRunning(run);
 
+  const writeOptions = input.writeOptions === undefined ? undefined : parseModelArtifactWriteOptions(input.writeOptions);
+  if (writeOptions !== undefined && (!currentStep(run)?.store || currentSchemaFinalization(run))) {
+    throw new Error("--write-options is only supported for model Artifacts that write to a business Store");
+  }
+  const dataId = writeOptions?.data_id;
   const schemaFinalization = currentSchemaFinalization(run);
   if (schemaFinalization) {
     return reportSchemaFinalArtifact(input, run, schemaFinalization);
@@ -1628,6 +1643,12 @@ async function reportRunUnlocked(input: {
     step.stepExecutionId = randomUUID();
     await writeRun(input.runsRoot, run);
   }
+  // An existing Review has already selected the legacy generated target, even
+  // if its older persisted Step has no modelDataId field.
+  const frozenDataId = step.modelDataId ?? (step.store && activeReviewForStep(run, step)
+    ? `${run.id}--${step.stepExecutionId}` : undefined);
+  if (dataId !== undefined && frozenDataId !== undefined && dataId !== frozenDataId)
+    throw new Error(`Model Artifact data_id is frozen as ${frozenDataId}; cannot change the target`);
   const contract = await contractForStep(run, step);
   const context = {
     runId: run.id,
@@ -1639,7 +1660,15 @@ async function reportRunUnlocked(input: {
   const plan = step.validationPlan ?? artifactValidatorRegistry.resolvePlan(contract);
   const validation = await artifactValidatorRegistry.execute(plan, { contract, candidate, context });
   if (validation.status !== "passed") throw new ArtifactValidationFailure(validation);
-  if (step.store) await validateOrCommitModelArtifact(input.runsRoot, run, step, candidate.representation.value);
+  if (step.store) {
+    await validateOrCommitModelArtifact(input.runsRoot, run, step, candidate.representation.value);
+    if (step.modelDataId === undefined) {
+      step.modelDataId = frozenDataId ?? dataId ?? `${run.id}--${step.stepExecutionId}`;
+      // Persist BEFORE Review dispatch or any upsert. A failed final Run save
+      // must never permit the retry to silently choose a different business ID.
+      await writeRun(input.runsRoot, run);
+    }
+  }
 
   return acceptPreparedArtifact(input, run, step, candidate, validation, authorization);
 }
@@ -1649,7 +1678,7 @@ async function validateOrCommitModelArtifact(runsRoot: string, run: RunState, st
   if (await canonicalPath(dirname(runsRoot)) !== run.modelProjectRoot) throw new Error("Model Artifact Project does not own this Run Store");
   const target = run.modelTargets?.[step.store];
   if (!target) throw new Error(`Model Artifact frozen target missing: ${step.store}`);
-  return processModelArtifact(run.modelProjectRoot, target, value, digest === undefined ? undefined : { runId: run.id, stepExecutionId: step.stepExecutionId, digest });
+  return processModelArtifact(run.modelProjectRoot, target, value, digest === undefined ? undefined : { runId: run.id, stepExecutionId: step.stepExecutionId, digest, dataId: step.modelDataId });
 }
 
 async function acceptPreparedArtifact(
@@ -1657,6 +1686,7 @@ async function acceptPreparedArtifact(
     runsRoot: string;
     runId: string;
     artifact: ArtifactReportSource;
+    writeOptions?: ModelArtifactWriteOptions;
     revisionSummary?: string;
     beforeArtifactReview?: () => Promise<unknown>;
   },
@@ -1715,6 +1745,7 @@ async function reportReviewedArtifact(
     runsRoot: string;
     runId: string;
     artifact: ArtifactReportSource;
+    writeOptions?: ModelArtifactWriteOptions;
     revisionSummary?: string;
     locale?: "zh-CN" | "en";
     beforeArtifactReview?: () => Promise<unknown>;
@@ -2671,6 +2702,14 @@ async function acceptArtifactReviewSubmission(
     const candidate = await prepareArtifactCandidate(await contractForStep(run, step), source, { runId: run.id, stepId: step.id, artifactPath: step.id, attemptId: randomUUID() });
     const digest = digestBytes(candidate.raw);
     if (digest !== submission.digest) throw new Error("Model Artifact Submission snapshot digest changed");
+    const frozen = acceptedArtifact.modelTarget;
+    const target = run.modelTargets?.[step.store];
+    const dataId = frozen?.dataId ?? `${run.id}--${step.stepExecutionId}`;
+    if ((step.modelDataId !== undefined && step.modelDataId !== dataId) || (frozen && (
+      frozen.stepExecutionId !== step.stepExecutionId || frozen.storeId !== step.store ||
+      frozen.modelRef !== target?.modelRef || frozen.fingerprint !== target?.fingerprint)))
+      throw new Error("Model Artifact Submission target does not match its frozen execution target");
+    step.modelDataId = dataId;
     acceptedArtifact.modelData = await validateOrCommitModelArtifact(runsRoot, run, step, candidate.representation.value, digest);
   }
   run.events.push({
@@ -3323,6 +3362,7 @@ async function reportSchemaFinalArtifact(
     runsRoot: string;
     runId: string;
     artifact: ArtifactReportSource;
+    writeOptions?: ModelArtifactWriteOptions;
     revisionSummary?: string;
     locale?: "zh-CN" | "en";
     beforeArtifactReview?: () => Promise<unknown>;
@@ -4009,6 +4049,7 @@ function cloneStep(step: RunStep): RunStep {
   return {
     ...step,
     stepExecutionId: undefined,
+    modelDataId: undefined,
     format: step.format ? { name: step.format.name, options: structuredClone(step.format.options) } : undefined,
     schema: step.schema ? structuredClone(step.schema) : undefined,
     validationPlan: step.validationPlan ? structuredClone(step.validationPlan) : undefined,
@@ -4093,7 +4134,11 @@ async function buildRunEventArtifact(
     throw new Error(`step ${step.id} has no artifact`);
   }
 
+  const modelTarget = step.store && step.stepExecutionId && step.modelDataId !== undefined
+    ? { ...run.modelTargets![step.store], dataId: step.modelDataId, stepExecutionId: step.stepExecutionId }
+    : undefined;
   const base = {
+    modelTarget,
     name: step.artifact,
     type: step.type,
     format: step.format,

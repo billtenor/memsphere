@@ -1,0 +1,14 @@
+{
+  "reviews": {
+    "memsphere-agile-requirement-development#flow[1]": {"policy": "artifact_acceptance.unanimous"},
+    "memsphere-agile-requirement-development#flow[2]": {"policy": "artifact_acceptance.unanimous"},
+    "memsphere-agile-requirement-development#flow[6]": {"policy": "artifact_acceptance.unanimous"},
+    "memsphere-agile-requirement-development#flow[7]": {"policy": "artifact_acceptance.unanimous"}
+  },
+  "slots": {
+    "memsphere-agile-requirement-development::产品负责人": {"actors": ["traex1"]},
+    "memsphere-agile-requirement-development::研发工程师": {"actors": ["traex2"]},
+    "memsphere-agile-requirement-development::测试工程师": {"actors": ["traex3"]},
+    "memsphere-agile-requirement-development::架构师": {"actors": ["traex4"]}
+  }
+}

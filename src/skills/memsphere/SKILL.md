@@ -223,7 +223,7 @@ artifact: !artifact
 
 模型数据 Artifact 在普通 Action 中声明 `store: <业务 Store ID>`，可选 `model: <相对 .json 模型 ID>`；model 省略时从 Store 推导，显式声明须一致。首版只支持 filesystem JSON ValueStore，不能同时声明 schema。object/array 使用 json/yaml，string/number/boolean 使用 json/yaml 或 plain；普通模型 boolean 是业务数据，条件 Artifact 不声明 store/model。
 
-Run 启动冻结目标绑定和模型指纹，提交及接受写入前发现变化明确拒绝。框架持久化步骤执行实例 ID，同次重试和审核修改复用，循环/Call 下一次执行重新生成；数据 ID 自动生成，不声明 create/update 或业务 ID。report 保留完整不可变 Artifact 快照，Review 通过后（或无 Review 时接受后）另行整条 upsert 业务 Store，成功才推进。业务记录变化不影响历史快照，取消/删除/归档/恢复 Run 不联动业务数据。写入后 Run 保存失败时以同 ID redo，允许 revision 增长。通用数据操作使用 `memsphere data upsert <id> --store <store> --value <JSON>` 或 `--value-file`，支持 dry-run/output，仅写完整 value，不支持 payload、patch 或 expected-revision。
+Run 启动冻结目标绑定和模型指纹，提交及接受写入前发现变化明确拒绝。框架持久化步骤执行实例 ID，同次重试和审核修改复用，循环/Call 下一次执行重新生成；数据 ID 默认自动生成，也可通过 run report --write-options 内联 JSON 的 data_id 字段选择稳定业务 ID，不声明 create/update。report 保留完整不可变 Artifact 快照，Review 通过后（或无 Review 时接受后）另行整条 upsert 业务 Store，成功才推进。业务记录变化不影响历史快照，取消/删除/归档/恢复 Run 不联动业务数据。写入后 Run 保存失败时以同 ID redo，允许 revision 增长。通用数据操作使用 `memsphere data upsert <id> --store <store> --value <JSON>` 或 `--value-file`，支持 dry-run/output，仅写完整 value，不支持 payload、patch 或 expected-revision。
 
 Artifact 可以使用 `review` 声明当前 Procedure 内的 Review Slot。Procedure 不引用 Project `config.json` 中的 Actor，也不选择 Decision Policy：
 
@@ -391,6 +391,10 @@ Concept、Statement、Schema 和 Procedure 都必须从该入口读取，不能�
 正常的当前步骤提示不展开权限清单。权限不足时，CLI 只说明被拒绝的操作、所需权限和处理方式；不得把 Memsphere Permission 误解为任意操作系统文件、进程或网络权限。
 
 每次只执行 CLI 当前返回的步骤，不提前执行尚未返回的后续步骤；当前步骤完成后必须继续推进整个 Run，不能把步骤边界当作对话结束点。
+
+#### 模型 Artifact 业务 ID
+
+模型产物可使用 `memsphere run report --run <run-id> --artifact-file <value.json> --write-options '{"data_id":"<id>"}'` 更新稳定业务对象。仅绑定业务 Store 的普通模型 Artifact 支持（包括空对象）；write-options 只接受内联 JSON 对象，当前仅支持可选字符串 data_id，未知字段拒绝，不支持文件引用或 YAML；ID 必须非空白并符合 filesystem JSON ValueStore 可移植文件名规则，包括 `.json` 后缀长度。省略时维持 Run ID 与执行 UUID 的组合。首个通过格式和模型校验的候选在评审或写入前冻结目标；后续重试和评审修订省略参数时继承、同 ID 可重交、不同 ID 拒绝。候选 modelTarget、评审材料和接受 modelData 回执记录 ID，接受不得更换目标。不同步骤和 Run 可选同一 ID，历史快照仍独立。写入是无条件整条原子 upsert，最后成功写入覆盖，字段不合并；首版没有 expected-revision 或 CAS。
 
 #### 上报步骤产物
 

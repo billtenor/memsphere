@@ -35,7 +35,7 @@ const acpArtifactReviewPromptSchema = z.object({
       type: z.string(),
       format: z.string(),
       schema: z.string(),
-      modelTarget: z.object({ storeId: z.string(), modelRef: z.string() }).strict().optional(),
+      modelTarget: z.object({ storeId: z.string(), modelRef: z.string(), dataId: z.string().optional() }).strict().optional(),
       final: z.boolean(),
       reviewPolicy: z.string()
     }).strict()
@@ -180,7 +180,7 @@ const currentStepContentSchema = z.object({
     name: z.string(),
     type: z.string(),
     format: z.string(),
-    modelTarget: z.object({ storeId: z.string(), modelRef: z.string() }).strict().optional()
+    modelTarget: z.object({ storeId: z.string(), modelRef: z.string(), dataId: z.string().optional() }).strict().optional()
   }).strict(),
   next: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("revision") }).strict(),
@@ -271,6 +271,7 @@ const runAbandonedSchema = z.object({
 }).strict();
 
 const runReportReceiptSchema = z.object({
+  dataId: z.string().optional(),
   runId: z.string(),
   artifactName: z.string(),
   review: z.object({

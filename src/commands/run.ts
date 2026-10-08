@@ -66,12 +66,14 @@ import {
   type ArtifactReviewDraftInput,
   type RunState
 } from "../run/store.js";
+import { parseModelArtifactWriteOptions } from "../project/model-artifact.js";
 import { assertReportExecutionCapability } from "../report-execution.js";
 
 type ReportOptions = {
   run?: string;
   artifact?: string;
   artifactFile?: string;
+  writeOptions?: string;
   revisionSummary?: string;
   revisionSummaryFile?: string;
 };
@@ -307,6 +309,13 @@ export function parseRunReviewConfiguration(value: unknown): RunReviewConfigurat
 
 export async function runReportCommand(options: ReportOptions): Promise<void> {
   const runId = requireRunId(options.run);
+  let writeOptions;
+  if (options.writeOptions !== undefined) {
+    let value: unknown;
+    try { value = JSON.parse(options.writeOptions); }
+    catch { throw new Error("--write-options must be an inline JSON object"); }
+    writeOptions = parseModelArtifactWriteOptions(value);
+  }
   const artifact = readArtifactOption(options);
   if (options.revisionSummary !== undefined && options.revisionSummaryFile !== undefined) {
     throw new Error("use only one of --revision-summary or --revision-summary-file");
@@ -319,6 +328,7 @@ export async function runReportCommand(options: ReportOptions): Promise<void> {
     runsRoot: config.runsRoot,
     runId,
     artifact,
+    writeOptions,
     revisionSummary,
     beforeArtifactReview: assertReportExecutionCapability
   });
@@ -1111,7 +1121,9 @@ async function artifactForDisplay(
     fileName: artifact.fileName,
     filePath: artifact.path ? resolve(runsRoot, artifact.path) : undefined,
     contentType: artifact.contentType,
-    validation: artifact.validation
+    validation: artifact.validation,
+    modelTarget: artifact.modelTarget,
+    modelData: artifact.modelData
   };
 }
 

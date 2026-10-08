@@ -98,7 +98,7 @@ export function buildRunCurrentStepPromptModel(
       name: step.artifact,
       type: step.type ?? "unknown",
       format: formatDisplay(step.format),
-      modelTarget: step.store && run.modelTargets?.[step.store] ? { storeId: step.store, modelRef: run.modelTargets[step.store].modelRef } : undefined
+      modelTarget: step.store && run.modelTargets?.[step.store] ? { storeId: step.store, modelRef: run.modelTargets[step.store].modelRef, dataId: step.modelDataId } : undefined
     },
     next: review?.status === "awaiting_revision"
       ? { kind: "revision" as const }
@@ -192,6 +192,9 @@ export function buildRunReportReceiptPromptModel(run: RunState): RunReportReceip
   return {
     runId: run.id,
     artifactName,
+    dataId: review && round
+      ? review.submissions.find(item => item.id === round.submissionId)?.artifact.modelTarget?.dataId
+      : event?.artifact.modelData?.dataId,
     review: review && round ? {
       reviewId: review.id,
       roundId: round.id,

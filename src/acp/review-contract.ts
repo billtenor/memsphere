@@ -28,7 +28,7 @@ export type AgentReviewContract = {
     type?: string;
     format?: { name: string; options: Readonly<Record<string, unknown>> };
     schema?: unknown;
-    modelTarget?: { storeId: string; modelRef: string };
+    modelTarget?: { storeId: string; modelRef: string; dataId?: string };
     final: boolean;
     review?: string;
   };
@@ -40,6 +40,9 @@ export function buildAgentReviewContract(context: ArtifactReviewContext): AgentR
     throw new Error(`Artifact Review current Step is unavailable: ${context.review.stepId}`);
   }
   const frame = currentFrame(context.run);
+  const submission = step.store
+    ? context.review.submissions.find(item => item.id === context.round.submissionId)
+    : undefined;
   return {
     procedure: {
       name: frame?.memoryName ?? context.run.procedureName,
@@ -56,7 +59,7 @@ export function buildAgentReviewContract(context: ArtifactReviewContext): AgentR
       type: step.type,
       format: step.format,
       schema: toEffectiveRuleDisplayValue(step.schema),
-      modelTarget: step.store && context.run.modelTargets?.[step.store] ? { storeId: step.store, modelRef: context.run.modelTargets[step.store].modelRef } : undefined,
+      modelTarget: step.store && context.run.modelTargets?.[step.store] ? { storeId: step.store, modelRef: context.run.modelTargets[step.store].modelRef, dataId: submission?.artifact.modelTarget?.dataId ?? `${context.run.id}--${step.stepExecutionId}` } : undefined,
       final: step.final ?? false,
       review: step.reviewPolicy
     }

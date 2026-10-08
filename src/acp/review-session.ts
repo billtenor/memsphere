@@ -139,7 +139,9 @@ async function expandArtifact(runsRoot: string, artifact: RunEvent["artifact"]):
     fileName: artifact.fileName,
     filePath: artifact.path ? resolve(runsRoot, artifact.path) : undefined,
     contentType: artifact.contentType,
-    validation: artifact.validation
+    validation: artifact.validation,
+    modelTarget: artifact.modelTarget,
+    modelData: artifact.modelData
   };
 }
 

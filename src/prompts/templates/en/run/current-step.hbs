@@ -78,6 +78,9 @@ Artifact:
 {{#if step.artifact.modelTarget}}
 - Store: {{step.artifact.modelTarget.storeId}}
 - Model: {{step.artifact.modelTarget.modelRef}}
+{{#if step.artifact.modelTarget.dataId}}
+- data_id: {{step.artifact.modelTarget.dataId}}
+{{/if}}
 Read this model definition with memsphere model read.
 Validate the model value and retain a full Artifact snapshot; acceptance generates a data ID and performs a whole-value upsert.
 {{/if}}

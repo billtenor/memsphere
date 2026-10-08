@@ -46,5 +46,6 @@ defines:
   - ACP 不规定 Agent 的命令 shell。Agent Review 通过当前 worktree 中可从 PATH 解析的受限 memsphere-review 会话命令工作，不要求 Agent 展开 shell 专属环境变量；Provider 安装检测与 Windows supported/experimental/unsupported 支持等级分别展示。
   - 当前 View 暂不展示添加模型登记存储和初始化模型登记的操作入口，保留已有存储的选择与配置；登记服务和显式 CLI 初始化仍保留供后续开放。模型市场在独立的发现导航分组中展示，标签筛选使用统一界面组件。
   - 模型数据 Artifact 可声明 store 和可选 model；模型从业务 Store 推导，model 显式指定时须一致。首版目标为 filesystem JSON ValueStore，schema 与 store/model 互斥；object/array 使用 json/yaml，string/number/boolean 使用 json/yaml 或 plain，普通 Action 的模型 boolean 是业务数据而非控制条件。
-  - Run 启动冻结全部可达模型产物的目标绑定和模型指纹；report 及接受写入前检查，变化时明确拒绝。stepExecutionId 持久化且同次失败重试、审核修改重交复用，循环或 Call 的下一次执行生成新身份；业务数据 ID 自动取 run_id 与 stepExecutionId 的组合。
+  - Run 启动冻结全部可达模型产物的目标绑定和模型指纹；report 及接受写入前检查，变化时明确拒绝。stepExecutionId 持久化且同次失败重试、审核修改重交复用，循环或 Call 的下一次执行生成新身份；业务数据 ID 默认取 run_id 与 stepExecutionId 的组合，显式选择规则见下文。
   - data upsert 提供完整 value 的原子创建或整条替换，支持 value/value-file、dry-run 和 output；仅用于具有原子 upsert 能力的 ValueStore，不支持原始 DataStore、payload、patch 或 expected-revision。
+  - 模型 Artifact 可通过 run report --write-options 内联 JSON 对象（可选 data_id 字段） 选择稳定业务 ID，仅适用于绑定业务 Store 的普通模型产物（空对象也受此限制）；仅接受 JSON 对象与当前支持的 data_id 字段，不支持文件引用，未知字段或非字符串值拒绝；ID 必须非空白并符合 filesystem JSON ValueStore 可移植文件名规则（含 .json 后缀长度），不修剪或编码。省略时按 Run ID 与 stepExecutionId 生成。首个通过格式及模型校验的候选在评审或业务写入前持久化目标，重试/评审修订省略时继承、同 ID 可重交、不同 ID 拒绝；校验失败尚未冻结目标。不同步骤、循环或 Run 可显式选择同一 ID，执行身份和历史快照仍独立。候选 modelTarget、评审材料和接受 modelData 回执记录业务 ID，接受只写已评审目标；旧记录未含目标字段时按原生成规则处理。写入为无条件整条原子 upsert，最后成功写入覆盖，不合并字段，无 expected-revision 或 CAS，写入后 Run 保存失败以同 ID redo。
