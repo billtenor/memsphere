@@ -1,0 +1,74 @@
+[
+  {
+    "review_id": "review-20261008-064704z-3d6347de",
+    "round_id": "round-20261008-064941z-8c918b5c",
+    "artifact": "当前迭代需求契约",
+    "status": "passed",
+    "assignments": [
+      {
+        "actor_id": "traex1",
+        "vote": "approve",
+        "summary": "# 产品评审总结\n\n投票：**approve**。\n\n我独立核对了当前候选、完整评审契约、Issue #95、工作区现有模型 Artifact 实现与测试、适用的需求/开发/测试/交付 Statement，以及 `CONTRIBUTING.md` 和 `changes/README.md`。\n\n候选完整覆盖本阶段规定的契约字段：整体目标、当前与后续范围、交付物、可验收标准、向前兼容决定、采用规范和待确认项。它将 Issue #95 未固定的输入形态明确收敛为 `memsphere run report --data-id <id>`，同时保持现有默认执行身份 ID；并清楚规定跨步骤/跨 Run 复用、整条无条件 upsert、快照与业务当前值分离、评审修订冻结目标、校验/写入失败不推进及旧可选字段的读取接受。\n\n证据显示当前 `src/project/model-artifact.ts` 固定用 `${runId}--${stepExecutionId}` 生成 ID，现有 `test/run-model-artifact.test.ts` 保护快照、复试、评审和失败路径；候选的验收标准准确覆盖了改动后必须保护和新增的用户可观察行为。Issue #95 也明确将 CLI/DSL 输入形态、ID 校验、冻结和冲突策略交由维护者设计；当前选择可选 CLI ID、首次成功候选冻结、首版无条件覆盖，边界清楚且符合需求价值。\n\n兼容性结论经实际 `git tag --list '*stable*'` 核实：仓库无名称包含 `stable` 的 Tag。根据 `memsphere-repository-requirement-rules`，无需建立历史 checkpoint 兼容责任；候选仍将 Issue 明确要求的默认 ID 行为与旧 Run/Submission 可读可接受纳入回归验收，足以避免本功能损害现有用户路径。\n\n残余风险：并发写入仍采取最后一次成功写入覆盖，可能产生业务层面的竞争覆盖；候选已经明确该语义、排除跨 Store 事务，并将 expected-revision/CAS 放入后续范围。因此这不是当前需求契约的阻塞缺口，后续若业务需要并发保护，应以独立迭代引入明确的冲突反馈体验。"
+      }
+    ]
+  },
+  {
+    "review_id": "review-20261008-065219z-fb23614f",
+    "round_id": "round-20261008-070348z-d1645743",
+    "artifact": "实施与验证方案",
+    "status": "passed",
+    "assignments": [
+      {
+        "actor_id": "traex2",
+        "vote": "approve",
+        "summary": "# 评审结论\n\n投票：approve。\n\n我独立读取候选方案、当前需求契约及工作区实现，并核对了 `src/commands/run.ts`、`src/run/store.ts`、`src/project/model-artifact.ts`、ACP/Prompt 投影和现有模型 Artifact 测试。方案基于实际实现：当前 `reportRun` 在模型步骤分配 `stepExecutionId`，`processModelArtifact` 以 `${runId}--${stepExecutionId}` 写入；Review 接受从 Submission 不可变快照重新验证并提交。因此，方案提出将业务 ID 绑定到步骤执行、随 Submission 保存，并在接受时以 Submission 冻结目标提交，能够满足同 ID 整条覆盖、评审前不写、历史快照独立与目标变更拒绝的需求。\n\n方案明确覆盖 CLI 参数及非法/非模型误用的前置拒绝、ID 与 `${id}.json` 的 portable filename 校验、重试/修订继承与不同 ID 拒绝、循环与 Call clone 清理、旧可选字段回归、业务写入后 Run 保存失败的幂等重报，以及 `artifactForDisplay`、`expandArtifact`、ACP contract 和中英文 Prompt 的字段投影。影响范围、Memory/Skill 同步和测试分层也与适用开发/测试规范相符；没有引入需求排除的 DSL、CAS 或字段合并。\n\n我实际运行了 `node --test --import tsx test/run-model-artifact.test.ts`，23 项通过、0 失败，确认候选所依赖的当前模型 Artifact 基线行为正常。后续实现仍应按方案执行完整受影响套件、CLI 临时项目集成验证、typecheck、全量测试、build、`memsphere validate` 及最终 Memory ChangeSet 校验；这是施工阶段的验证义务，并非本“实施与验证方案”产物的缺陷。\n\n残余风险：当前评审环境中再次调用部分 Memsphere 只读查询时遇到运行锁目录 `EROFS`，因此未能通过该入口重新列出冻结 Memory；但候选方案列出的适用 Memory、工作区副本及其具体规则已由只读源码核对，且不影响上述方案结论。"
+      },
+      {
+        "actor_id": "traex3",
+        "vote": "approve",
+        "summary": "## 评审结论\n\n通过。候选方案与已确认的需求契约一致，并基于实际代码定位了完整的变更链：CLI `run report` 参数、`ReportOptions`/`reportRun` 输入、步骤持久化与 clone、模型 Artifact 目标冻结、Review Submission/接受写入、展示与 ACP Prompt 透传。\n\n## 已核实证据\n\n- 当前实现中 `src/run/store.ts` 在格式和模型校验之前分配 `stepExecutionId`，`src/project/model-artifact.ts` 在业务写入时用 `${runId}--${stepExecutionId}` 生成 ID；方案对显式 ID 的校验、持久化冻结和兼容兜底针对这些实际路径。\n- 当前 Review 接受会重新从 Submission snapshot 构造候选；方案明确接受时改用 Submission 中冻结的目标并校验身份/指纹，覆盖“评审后不跟随可变步骤目标”的关键风险。\n- 方案覆盖成功、评审修订、默认回归、两个步骤/Run 同 ID 的整条替换，以及非法/空白/保留名/长度、误用、失败不推进、写后 Run 保存失败和旧持久化记录等异常与边界。\n- 方案列出并采用开发、测试、需求、交付及 YAML 语法规则；不新增 YAML syntax 关键字的独立章节符合规则。相关 System Memory、Skill、文档和 ChangeSet 校验均纳入后续实施验证。\n- 本次独立实际执行基线命令 `node --import ./node_modules/tsx/dist/loader.mjs --test test/run-model-artifact.test.ts`，23 个测试全部通过。\n\n## 残余风险\n\n本产物为实施与验证方案，尚未实施，因此显式 ID 的 CLI 集成、持久化兼容、Review 接受冻结及完整回归仍需在实现后按方案实际执行并记录结果；候选已将这些列为交付前门禁，未将基线测试误作最终验证。"
+      },
+      {
+        "actor_id": "traex4",
+        "vote": "approve",
+        "summary": "## 投票：通过\n\n我独立阅读了当前候选、完整评审契约和前序需求契约，并在工作区核对了模型 Artifact 的真实实现与现有测试：`reportRun` 当前会分配步骤执行身份、校验候选，再在无评审时提交；评审路径先保存不可变 Submission，接受后才写入业务 Store；`processModelArtifact` 当前以 `${runId}--${stepExecutionId}` 生成 ID，并通过 Project/记录锁执行整条 upsert。现有 `run-model-artifact` 测试也覆盖默认身份、循环/Call 隔离、评审前无业务写入、模型目标变更与失败重试。\n\n方案针对这些具体边界给出了可实施的变化：在身份分配和目标冻结前独立校验显式 ID、把选定 ID 固化到步骤/Submission 目标、修订时拒绝更换已冻结 ID、审核接受按 Submission 目标写入，并同步 CLI、展示、ACP 契约与中英文 Prompt。它还明确无条件整条覆盖的并发语义及不扩大到 CAS 的范围，避免为当前需求引入不必要的通用并发协议。\n\n验证计划覆盖显式/默认 ID、跨步骤与跨 Run 更新、非法及非模型误用、冻结与评审修订、写入/保存故障、旧持久化内容，以及真实 CLI 集成和受影响回归套件；并列出了 System Memory、Skill、文档和最终 ChangeSet 校验责任。`docs/model-artifact.md` 与 `docs/model-artifact.en.md` 均存在；当前没有 stable Tag，方案也将旧行为作为回归要求而非虚构的向前兼容责任。\n\n残余风险：本轮只批准实施方案；文件名可移植性、写后 Run 保存失败的重试语义、以及 Submission 与展示 API 的实际字段保留，仍须在实现及后续验收中按计划运行测试验证。"
+      }
+    ]
+  },
+  {
+    "review_id": "review-20261008-072557z-4c823b76",
+    "round_id": "round-20261008-072557z-5f07b0fa",
+    "artifact": "实现与验证验收材料",
+    "status": "passed",
+    "assignments": [
+      {
+        "actor_id": "traex2",
+        "vote": "approve",
+        "summary": "# 研发工程师评审总结\n\n## 结论\n\n通过。实现符合已确认的 #95 当前迭代范围：普通模型 Artifact 可通过 `--data-id` 选择稳定业务对象 ID，首个有效候选在评审/写入前持久化目标，评审接受从 Submission 的不可变目标写入，并保留原来的默认 ID 与独立 Artifact 快照语义。\n\n## 本人实际检查与验证\n\n- 阅读当前候选、需求契约、实施方案、开发计划、功能实现摘要、验证报告及 Run 状态；确认当前仅评审本轮实现与验证验收材料。\n- 审查工作区 diff，重点核对 `src/run/store.ts`、`src/project/model-artifact.ts`、CLI/命令转发、ACP contract/会话展示、提示词及模型 Artifact 测试。代码在格式/模型校验通过后冻结 `modelDataId` 并在写入前保存；接受路径以 Submission `modelTarget` 和当前冻结的 Store/模型/执行身份交叉校验，避免接受时跟随可变步骤目标；clone 清除执行级 ID；非法 ID 在执行身份与业务写入前拒绝。\n- 实际运行 `node --import tsx --test --test-reporter=spec test/run-model-artifact.test.ts`：34/34 通过，覆盖稳定 ID 跨步骤/Run 的整条替换、评审冻结与修订、legacy Submission、失败重试、循环/Call、非法/非模型使用及真实 CLI 转发。\n- 实际运行 `npm run typecheck` 和 `npm run build`，均通过；运行 `memsphere validate` 通过；`git diff --check` 无输出。\n- 逐字节比较六份修改的 `.memsphere/memory` 与 `reserved-memory/system-memory` 对应文件，均一致；审阅中英文模型 Artifact 文档，确认其明确无条件整条 upsert、最后成功写入覆盖、目标冻结及无 CAS 的范围限制。\n\n## 仅引用、未复跑的验证\n\n- 候选验证报告声明最终 `npm test` 为 141/141 files、1164 tests 通过，以及最终 Memory ChangeSet `change-20261008-071155715z-ff7c51a9` 校验通过；本评审未重跑这两项耗时/会更新交付状态的操作，未将其作为唯一正确性依据。\n\n## 残余风险\n\n- 已确认的首版语义没有 expected-revision/CAS：同一 ID 的并发成功 upsert 仍是最后成功写入覆盖。文档已准确披露，属于需求明确排除的后续能力，并非本次阻塞项。\n- 本人只在当前 Linux/Node 环境验证；可移植文件名规则由既有实现复用，但 Windows/macOS 未由本人实际运行。"
+      },
+      {
+        "actor_id": "traex3",
+        "vote": "approve",
+        "summary": "# 测试工程师评审总结\n\n投票：**approve**。\n\n## 我亲自检查与复跑的证据\n\n- 逐项检查了当前 Workspace 相对基线的改动（31 个已修改文件及新增 ChangeSet 文档），重点阅读了 `src/run/store.ts`、`src/project/model-artifact.ts`、`src/commands/run.ts`、`src/cli.ts`、ACP review contract/session 以及 `test/run-model-artifact.test.ts`。\n- 验证了实现路径：`--data-id` 在执行身份分配前拒绝非法值；在候选格式、模型校验后、Review 或业务写入前冻结到 `RunStep.modelDataId`；事件 Submission 保存带 `storeId`、模型指纹、执行身份和 data ID 的 `modelTarget`；Review 接受按 Submission 的目标、当前冻结目标和指纹核对后才写入。循环/Call 的 `cloneStep` 清除执行级 data ID。\n- 亲自运行 `node --import tsx --test --test-reporter=spec test/run-model-artifact.test.ts`：34/34 通过。覆盖显式同 ID 跨步骤/跨 Run 整条替换、快照独立、非法 ID/非模型误用、验证和写入失败、评审修订冻结、legacy pending Review、目标指纹变化、循环清理，以及真实 CLI 参数与回执。\n- 亲自运行 `npm run typecheck`：通过。\n- 亲自运行受影响回归：`run-store`、`run-command`、`review-store`、`prompt-renderer`、`reserved-store`，105/105 通过。该组包含 Review 接受、非模型 Artifact、Prompt 双语契约等相邻路径，未观察到此次候选元数据展示导致的非模型回归。\n- `git diff --check` 在检查时无输出，未发现空白错误。\n\n## 仅核对、未在本次评审复跑的材料\n\n- 前序验证报告记录最终 `npm test` 为 141 文件、1164 测试、0 失败，并记录最终 build、`memsphere validate` 和 Memory ChangeSet 校验通过。我将它们视为已提供的验证材料，未把它们当作自己复跑的证明。\n- 文档、System Memory 源与项目副本均在 Workspace diff 内；本次已核对其变更范围和需求所述语义，但没有逐一执行 byte comparison 或 Memory ChangeSet 验证命令。\n\n## 契约结论与残余风险\n\n当前代码符合已确认范围：默认 ID 仍由 Run/执行身份生成；显式 ID 仅用于模型 Artifact；首次合格候选先冻结；Review 不在接受前写业务 Store；接受不会跟随可变步骤目标；旧缺少可选字段的 pending Review 保持默认 ID 接受；无条件原子整条 upsert 的最后成功写入覆盖语义已被文档化。\n\n残余风险不是阻塞项：本轮明确未提供 expected-revision/CAS，因此同 ID 并发写入仍以最后成功写入为准；本次实际复跑环境为 Linux/Node，未额外进行 Windows/macOS 实机验证。二者均符合当前需求契约中已确认的范围与限制。"
+      },
+      {
+        "actor_id": "traex4",
+        "vote": "approve",
+        "summary": "# 架构评审总结\n\n结论：**approve**。\n\n## 亲自检查与复跑\n\n- 已读取冻结的需求契约、实施与验证方案、开发计划、功能实现摘要、初始验证报告以及当前候选材料，并核查工作区全部相关 diff。\n- 已重点检查 `src/run/store.ts`、`src/project/model-artifact.ts`、CLI/command 转发、Review contract 与展示路径。实现将 `modelDataId` 明确限定为步骤执行状态：首个通过格式与模型校验的候选在评审派发或业务 upsert 前持久化；不同 ID 重报被拒绝；循环/Call 克隆清除该状态。接受路径从不可变 Submission 重建候选，并核对步骤执行身份、Store/模型指纹和业务 ID，避免接受可变运行状态。\n- 已复跑 `node --import tsx --test --test-reporter=spec test/run-model-artifact.test.ts test/run-rule-integration.test.ts`：35/35 通过。\n- 已复跑 `npm run typecheck`：通过。\n- 已运行 `git diff --check`：通过；并逐一比较六份 System Memory 源与 `.memsphere/memory` 副本，均一致。\n\n## 仅引用、未在本评审内复跑的证据\n\n- 验证报告声明最终 `npm test` 为 141 个文件、1164 个测试全通过，以及 build、Memsphere validate 与最终 Memory ChangeSet validate 均通过；本评审未重复运行这套完整回归或 ChangeSet 校验。\n\n## 残余风险\n\n- 同一 Store ID 的并发 Run 仍采用确认范围内的无条件整条 upsert，最后成功写入会覆盖先前值；没有 expected-revision/CAS。实现与中英文文档明确该限制，且本迭代契约将冲突检测列为后续范围，因此不构成本轮阻塞。\n- 本次亲自复跑环境为 Linux；Windows/macOS 未额外实测，验证材料也已如实限定。"
+      }
+    ]
+  },
+  {
+    "review_id": "review-20261008-073129z-f1b9c469",
+    "round_id": "round-20261008-073129z-a48e0fd9",
+    "artifact": "敏捷需求开发交付报告",
+    "status": "passed",
+    "assignments": [
+      {
+        "actor_id": "traex1",
+        "vote": "approve",
+        "summary": "# 产品验收评审总结\n\n结论：**approve**。\n\n我独立读取了当前候选、完整评审契约、前序需求/方案/验收材料和适用的 `memsphere-repository-delivery-rules`，并复核了工作区实际差异及关键实现路径。\n\n## 验收依据\n\n- 交付满足当前迭代的核心用户价值：调用方可用稳定业务 ID 将多个步骤、循环或 Run 的模型值更新至同一业务对象；省略参数仍保留原有执行身份生成的默认 ID。\n- 明确的边界保护已落实：非模型与 Schema/控制步骤拒绝该参数，空白或不可移植 ID 在分配执行身份、冻结目标和业务写入前被拒绝；首个格式和模型校验通过的候选才冻结目标，重试/评审修订不能无意切换到其他对象。\n- 评审体验和历史完整性已覆盖：Submission 保存目标 ID，评审材料与回执可见 ID；接受从不可变 Submission 核对 Store、模型指纹、执行身份与 ID，快照不依赖当前业务数据。旧的缺失新增字段记录仍按旧默认 ID 接受。\n- 文档清楚向使用者说明无条件整条覆盖、最后成功写入胜出、字段不合并，以及本轮未提供 CAS/expected-revision 的并发限制和后续范围。\n- Memory 差异已实际检查；六份本轮修改的源 Memory 与项目副本无内容差异。候选报告包含 ChangeSet `change-20261008-071155715z-ff7c51a9`、`passed` 状态及 View 入口，符合报告字段要求。\n\n## 独立验证\n\n- `git diff --check` 通过。\n- `node --import tsx --test --test-reporter=spec test/run-model-artifact.test.ts`：34/34 通过，覆盖显式 ID、跨 Run/步骤替换、非法参数、评审冻结/修订、旧记录、循环以及实际 CLI 调用。\n- `npm run typecheck` 通过。\n- 我两次启动完整 141 文件测试；构建、保留模型检查及最先执行的浏览器测试均未报失败，但此会话的命令承载环境在约 55 秒后截断，未返回全量退出状态。因此，未将候选材料中记录的全量测试结论冒充为本人独立复跑结果。\n\n## 残留范围\n\n本轮没有 CAS 或 expected-revision；同 ID 并发写入仍为最后成功写入覆盖。Windows/macOS 没有额外实机验证。这些限制已在需求契约、文档和交付报告中明示，属于已确认的后续范围，不阻止本次验收。"
+      }
+    ]
+  }
+]

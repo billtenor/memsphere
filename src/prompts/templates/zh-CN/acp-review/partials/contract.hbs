@@ -40,6 +40,9 @@
 {{#if contract.artifact.modelTarget}}
 - Store: {{contract.artifact.modelTarget.storeId}}
 - Model: {{contract.artifact.modelTarget.modelRef}}
+{{#if contract.artifact.modelTarget.dataId}}
+- data_id: {{contract.artifact.modelTarget.dataId}}
+{{/if}}
 {{/if}}
 - 最终产物：{{#if contract.artifact.final}}是{{else}}否{{/if}}
 - 评审策略：{{contract.artifact.reviewPolicy}}

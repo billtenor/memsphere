@@ -342,6 +342,7 @@ run
   .requiredOption("--run <id>", "run id")
   .option("--artifact <value>", "artifact value")
   .option("--artifact-file <path>", "read artifact value from file")
+  .option("--data-id <id>", "select a stable business record ID for a model Artifact")
   .option("--revision-summary <text>", "revision summary")
   .option("--revision-summary-file <path>", "read the revision summary from file")
   .action(runReportCommand);

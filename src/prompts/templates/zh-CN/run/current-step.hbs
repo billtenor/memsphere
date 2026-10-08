@@ -78,6 +78,9 @@ memsphere run repeat <count> --run {{runId}}
 {{#if step.artifact.modelTarget}}
 - Store: {{step.artifact.modelTarget.storeId}}
 - Model: {{step.artifact.modelTarget.modelRef}}
+{{#if step.artifact.modelTarget.dataId}}
+- data_id: {{step.artifact.modelTarget.dataId}}
+{{/if}}
 使用 memsphere model read 阅读该模型定义。
 校验模型值，保留完整 Artifact 快照；接受后自动生成数据 ID 并执行整条 upsert。
 {{/if}}

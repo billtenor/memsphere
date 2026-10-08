@@ -40,6 +40,9 @@ These requirements define what the current Artifact must satisfy.
 {{#if contract.artifact.modelTarget}}
 - Store: {{contract.artifact.modelTarget.storeId}}
 - Model: {{contract.artifact.modelTarget.modelRef}}
+{{#if contract.artifact.modelTarget.dataId}}
+- data_id: {{contract.artifact.modelTarget.dataId}}
+{{/if}}
 {{/if}}
 - Final Artifact: {{#if contract.artifact.final}}yes{{else}}no{{/if}}
 - Review policy: {{contract.artifact.reviewPolicy}}

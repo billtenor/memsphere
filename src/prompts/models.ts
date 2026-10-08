@@ -34,7 +34,7 @@ export type AcpArtifactReviewPromptModel = {
       type: string;
       format: string;
       schema: string;
-      modelTarget?: { storeId: string; modelRef: string };
+      modelTarget?: { storeId: string; modelRef: string; dataId?: string };
       final: boolean;
       reviewPolicy: string;
     };
@@ -189,7 +189,7 @@ export type RunCurrentStepPromptModel = {
           name: string;
           type: string;
           format: string;
-          modelTarget?: { storeId: string; modelRef: string };
+          modelTarget?: { storeId: string; modelRef: string; dataId?: string };
         };
         next:
           | { kind: "revision" }
@@ -263,6 +263,7 @@ export type RunAbandonedPromptModel = {
 };
 
 export type RunReportReceiptPromptModel = {
+  dataId?: string;
   runId: string;
   artifactName: string;
   review?: {

@@ -3,12 +3,24 @@ import { z } from "zod";
 import { openBusinessStore, serviceError } from "./business-stores.js";
 import { createProjectModelHost } from "./models.js";
 import { withProjectSettingsLock } from "./model-operation.js";
+import { validateFilename } from "../data/extensions/shared/filesystem.js";
 import { JSON_SCHEMA_DRAFT_07 } from "../data/extensions/index.js";
 
 export const modelArtifactTargetSchema = z.object({
   storeId: z.string(), modelRef: z.string(), fingerprint: z.string()
 }).strict();
 export type ModelArtifactTarget = z.infer<typeof modelArtifactTargetSchema>;
+export const modelArtifactCandidateTargetSchema = modelArtifactTargetSchema.extend({
+  stepExecutionId: z.string().uuid(), dataId: z.string()
+}).strict();
+export type ModelArtifactCandidateTarget = z.infer<typeof modelArtifactCandidateTargetSchema>;
+
+export function validateModelArtifactDataId(id: string): void {
+  if (typeof id !== "string" || id.trim().length === 0) throw serviceError("INVALID_ARGUMENT", "data-id must be a non-empty, non-whitespace string");
+  validateFilename(id);
+  validateFilename(`${id}.json`);
+}
+
 export const modelArtifactReceiptSchema = modelArtifactTargetSchema.extend({
   stepExecutionId: z.string().uuid(), dataId: z.string(), digest: z.string(),
   committedAt: z.string(), revision: z.number().int().positive().optional()
@@ -48,14 +60,15 @@ export function freezeModelArtifactTargets(root: string, declarations: Array<{ s
 }
 /** Check and write under the same Project lock; no nested settings-lock acquisition. */
 export function processModelArtifact(root: string, target: ModelArtifactTarget, value: unknown,
-  commit?: { runId: string; stepExecutionId: string; digest: string }): Promise<ModelArtifactReceipt | undefined> {
+  commit?: { runId: string; stepExecutionId: string; digest: string; dataId?: string }): Promise<ModelArtifactReceipt | undefined> {
   return withProjectSettingsLock(root, async () => {
     const current = await inspect(root, target.storeId, target.modelRef);
     if (current.target.fingerprint !== target.fingerprint)
       throw serviceError("MODEL_ARTIFACT_TARGET_CHANGED", `Model Artifact target changed: ${target.storeId}; restore the original binding and model before retrying`);
     current.opened.runtime.reflect(value);
     if (!commit) return undefined;
-    const dataId = `${commit.runId}--${commit.stepExecutionId}`;
+    const dataId = commit.dataId ?? `${commit.runId}--${commit.stepExecutionId}`;
+    validateModelArtifactDataId(dataId);
     const store = current.opened.store;
     if (store.kind !== "ValueStore" || !store.upsert) throw serviceError("UNSUPPORTED_CAPABILITY", "Store has no atomic upsert");
     const result = await store.upsert({}, dataId, value);

@@ -72,6 +72,7 @@ type ReportOptions = {
   run?: string;
   artifact?: string;
   artifactFile?: string;
+  dataId?: string;
   revisionSummary?: string;
   revisionSummaryFile?: string;
 };
@@ -319,6 +320,7 @@ export async function runReportCommand(options: ReportOptions): Promise<void> {
     runsRoot: config.runsRoot,
     runId,
     artifact,
+    dataId: options.dataId,
     revisionSummary,
     beforeArtifactReview: assertReportExecutionCapability
   });
@@ -1111,7 +1113,9 @@ async function artifactForDisplay(
     fileName: artifact.fileName,
     filePath: artifact.path ? resolve(runsRoot, artifact.path) : undefined,
     contentType: artifact.contentType,
-    validation: artifact.validation
+    validation: artifact.validation,
+    modelTarget: artifact.modelTarget,
+    modelData: artifact.modelData
   };
 }
 
