@@ -3,9 +3,9 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import { dirname, join, posix, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
-  freezeModelArtifactTargets, processModelArtifact, validateModelArtifactDataId,
+  freezeModelArtifactTargets, processModelArtifact, parseModelArtifactWriteOptions,
   modelArtifactCandidateTargetSchema, modelArtifactTargetSchema, modelArtifactReceiptSchema,
-  type ModelArtifactCandidateTarget, type ModelArtifactTarget, type ModelArtifactReceipt
+  type ModelArtifactWriteOptions, type ModelArtifactCandidateTarget, type ModelArtifactTarget, type ModelArtifactReceipt
 } from "../project/model-artifact.js";
 import { canonicalPath } from "../project/model-storage-paths.js";
 import { deleteRunContent, requireRunContent, runDataStore, saveRunContent } from "../project/run-data.js";
@@ -1595,7 +1595,7 @@ export async function reportRun(input: {
   runsRoot: string;
   runId: string;
   artifact: ArtifactReportSource;
-  dataId?: string;
+  writeOptions?: ModelArtifactWriteOptions;
   revisionSummary?: string;
   beforeArtifactReview?: () => Promise<unknown>;
 }): Promise<RunState> {
@@ -1606,7 +1606,7 @@ async function reportRunUnlocked(input: {
   runsRoot: string;
   runId: string;
   artifact: ArtifactReportSource;
-  dataId?: string;
+  writeOptions?: ModelArtifactWriteOptions;
   revisionSummary?: string;
   beforeArtifactReview?: () => Promise<unknown>;
 }): Promise<RunState> {
@@ -1616,10 +1616,11 @@ async function reportRunUnlocked(input: {
   }
   assertRunRunning(run);
 
-  if (input.dataId !== undefined) {
-    if (!currentStep(run)?.store || currentSchemaFinalization(run)) throw new Error("--data-id is only supported for model Artifacts");
-    validateModelArtifactDataId(input.dataId);
+  const writeOptions = input.writeOptions === undefined ? undefined : parseModelArtifactWriteOptions(input.writeOptions);
+  if (writeOptions !== undefined && (!currentStep(run)?.store || currentSchemaFinalization(run))) {
+    throw new Error("--write-options is only supported for model Artifacts that write to a business Store");
   }
+  const dataId = writeOptions?.data_id;
   const schemaFinalization = currentSchemaFinalization(run);
   if (schemaFinalization) {
     return reportSchemaFinalArtifact(input, run, schemaFinalization);
@@ -1646,8 +1647,8 @@ async function reportRunUnlocked(input: {
   // if its older persisted Step has no modelDataId field.
   const frozenDataId = step.modelDataId ?? (step.store && activeReviewForStep(run, step)
     ? `${run.id}--${step.stepExecutionId}` : undefined);
-  if (input.dataId !== undefined && frozenDataId !== undefined && input.dataId !== frozenDataId)
-    throw new Error(`Model Artifact data-id is frozen as ${frozenDataId}; cannot change the target`);
+  if (dataId !== undefined && frozenDataId !== undefined && dataId !== frozenDataId)
+    throw new Error(`Model Artifact data_id is frozen as ${frozenDataId}; cannot change the target`);
   const contract = await contractForStep(run, step);
   const context = {
     runId: run.id,
@@ -1662,7 +1663,7 @@ async function reportRunUnlocked(input: {
   if (step.store) {
     await validateOrCommitModelArtifact(input.runsRoot, run, step, candidate.representation.value);
     if (step.modelDataId === undefined) {
-      step.modelDataId = frozenDataId ?? input.dataId ?? `${run.id}--${step.stepExecutionId}`;
+      step.modelDataId = frozenDataId ?? dataId ?? `${run.id}--${step.stepExecutionId}`;
       // Persist BEFORE Review dispatch or any upsert. A failed final Run save
       // must never permit the retry to silently choose a different business ID.
       await writeRun(input.runsRoot, run);
@@ -1685,7 +1686,7 @@ async function acceptPreparedArtifact(
     runsRoot: string;
     runId: string;
     artifact: ArtifactReportSource;
-    dataId?: string;
+    writeOptions?: ModelArtifactWriteOptions;
     revisionSummary?: string;
     beforeArtifactReview?: () => Promise<unknown>;
   },
@@ -1744,7 +1745,7 @@ async function reportReviewedArtifact(
     runsRoot: string;
     runId: string;
     artifact: ArtifactReportSource;
-    dataId?: string;
+    writeOptions?: ModelArtifactWriteOptions;
     revisionSummary?: string;
     locale?: "zh-CN" | "en";
     beforeArtifactReview?: () => Promise<unknown>;
@@ -3361,7 +3362,7 @@ async function reportSchemaFinalArtifact(
     runsRoot: string;
     runId: string;
     artifact: ArtifactReportSource;
-    dataId?: string;
+    writeOptions?: ModelArtifactWriteOptions;
     revisionSummary?: string;
     locale?: "zh-CN" | "en";
     beforeArtifactReview?: () => Promise<unknown>;

@@ -41,7 +41,7 @@ async function fixture(t: TestContext, flow = action(), schemas?: Record<string,
     controlPlane: parseControlPlaneConfig({ runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", name: "Owner", permissions: ["artifact.read", "decision.decide"] } } }),
     reviewConfiguration: reviewConfiguration({ procedure: "model-flow", slots: { owner: ["human"] } })
   } : {}) });
-  const report = (runId: string, value = '{"name":"original","count":1}', revisionSummary?: string, dataId?: string) => reportRun({ runsRoot, runId, artifact: { kind: "inline", value }, revisionSummary, dataId });
+  const report = (runId: string, value = '{"name":"original","count":1}', revisionSummary?: string, dataId?: string) => reportRun({ runsRoot, runId, artifact: { kind: "inline", value }, revisionSummary, writeOptions: dataId === undefined ? undefined : { data_id: dataId } });
   return { ...f, memoryRoot, runsRoot, save, start, report };
 }
 
@@ -266,6 +266,7 @@ test("explicit ID cannot be supplied for a non-model or control Artifact", async
   for (const flow of [action().replace('      store: records\n', ''), '  - !if\n    condition: !action\n      action: Continue?\n      artifact: !artifact\n        name: condition\n        type: boolean\n    then:\n      - !action\n        action: Continue.\n        artifact: !artifact\n          name: next\n']) {
     const f = await fixture(t, flow); const run = await f.start();
     await assert.rejects(f.report(run.id, "true", undefined, "task"), /only supported for model Artifacts/);
+    await assert.rejects(reportRun({ runsRoot: f.runsRoot, runId: run.id, artifact: { kind: "inline", value: "true" }, writeOptions: {} }), /only supported for model Artifacts/);
     assert.equal((await readRun(f.runsRoot, run.id)).events.length, 0);
     assert.deepEqual(await listData({}, f.root, "records"), { items: [] });
   }
@@ -343,9 +344,14 @@ test("real CLI report forwards explicit ID and exposes it in the receipt", async
   await fs.writeFile(configPath, JSON.stringify(config)); await runGit(["init", "-b", "master"], { cwd: f.root });
   const cliPath = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
   const cli = (...args: string[]) => spawnSync(process.execPath, [cliPath, "--project", "test-project", "run", "report", "--run", run.id, "--artifact", '{"name":"cli","count":1}', ...args], { cwd: f.root, env: { ...process.env, MEMSPHERE_HOME: f.home }, encoding: "utf8" });
-  const invalid = cli("--data-id", ""); assert.equal(invalid.status, 1); assert.match(invalid.stderr, /non-empty/);
-  assert.equal((await readRun(f.runsRoot, run.id)).events.length, 0);
-  const result = cli("--data-id", "cli-task"); assert.equal(result.status, 0, result.stderr); assert.match(result.stdout, /data_id: cli-task/);
+  for (const value of ["", "{", "null", "[]", '"task"', '{"data_id":null}', '{"data_id":1}', '{"data_id":""}', '{"data_id":"task","expected_revision":3}', "@options.json", "data_id: task"]) {
+    const invalid = cli("--write-options", value); assert.equal(invalid.status, 1, value); assert.match(invalid.stderr, /write-options|data_id/);
+    const state = await readRun(f.runsRoot, run.id);
+    assert.equal(state.events.length, 0); assert.equal(currentStep(state)!.stepExecutionId, undefined);
+    assert.deepEqual((await listData({}, f.root, "records")).items, []);
+  }
+  const removed = cli("--data-id", "task"); assert.equal(removed.status, 1); assert.match(removed.stderr, /unknown option/);
+  const result = cli("--write-options", '{"data_id":"cli-task"}'); assert.equal(result.status, 0, result.stderr); assert.match(result.stdout, /data_id: cli-task/);
   assert.deepEqual((await readData({}, f.root, "records", "cli-task")).value, { name: "cli", count: 1 });
 });
 
@@ -363,10 +369,42 @@ test("explicit ID is rejected for Schema fields and finalization without advanci
   const f = await fixture(t, flow); const run = await f.start();
   await enterSchema({ memoryRoot: f.memoryRoot, runsRoot: f.runsRoot, runId: run.id });
   await assert.rejects(f.report(run.id, "Title", undefined, "task"), /only supported for model Artifacts/);
+  await assert.rejects(reportRun({ runsRoot: f.runsRoot, runId: run.id, artifact: { kind: "inline", value: "Title" }, writeOptions: {} }), /only supported for model Artifacts/);
   let saved = await readRun(f.runsRoot, run.id); assert.equal(saved.events.length, 0);
   await f.report(run.id, "Title"); saved = await readRun(f.runsRoot, run.id);
   const before = saved.events.length;
   await assert.rejects(f.report(run.id, "unused", undefined, "task"), /only supported for model Artifacts/);
+  await assert.rejects(reportRun({ runsRoot: f.runsRoot, runId: run.id, artifact: { kind: "inline", value: "unused" }, writeOptions: {} }), /only supported for model Artifacts/);
   assert.equal((await readRun(f.runsRoot, run.id)).events.length, before);
   assert.deepEqual(await listData({}, f.root, "records"), { items: [] });
+});
+
+// Runtime validation also protects JavaScript/API callers that bypass TypeScript.
+test("write options reject unsupported shapes and fields before allocating an execution", async t => {
+  const f = await fixture(t); const run = await f.start();
+  for (const options of [null, [], "task", 3, { data_id: null }, { data_id: 3 }, { data_id: "valid", expected_revision: 1 }, { dataId: "typo" }]) {
+    await assert.rejects(reportRun({ runsRoot: f.runsRoot, runId: run.id, artifact: { kind: "inline", value: '{"name":"x","count":1}' }, writeOptions: options as never }), /Invalid write-options/);
+    const state = await readRun(f.runsRoot, run.id);
+    assert.equal(state.events.length, 0); assert.equal(currentStep(state)!.stepExecutionId, undefined); assert.equal(currentStep(state)!.modelDataId, undefined);
+    assert.deepEqual((await listData({}, f.root, "records")).items, []);
+  }
+});
+
+test("empty write options select the default target and inherit a frozen target", async t => {
+  for (const explicitId of [undefined, "frozen-explicit"]) {
+  const f = await fixture(t, action(true)); const run = await f.start(true);
+  const send = (revisionSummary?: string) => reportRun({ runsRoot: f.runsRoot, runId: run.id, artifact: { kind: "inline", value: '{"name":"x","count":1}' }, writeOptions: {}, revisionSummary });
+  let state = explicitId ? await f.report(run.id, undefined, undefined, explicitId) : await send();
+  const id = currentStep(state)!.modelDataId!;
+  if (explicitId) assert.equal(id, explicitId); else assert(id.startsWith(`${run.id}--`));
+  const review = currentArtifactReview(state)!;
+  await submitArtifactReviewHumanAssignmentForRunner({ runsRoot: f.runsRoot, runId: run.id, reviewId: review.id, roundId: review.currentRoundId, assignmentId: "human", vote: "request_changes", comments: [{ body: "Revise" }], authorizationNote: "Fixture Human requests revision." });
+  state = await send("Updated"); assert.equal(currentStep(state)!.modelDataId, id);
+  }
+});
+
+test("empty write options are rejected on non-model Artifacts", async t => {
+  const f = await fixture(t, action().replace('      store: records\n', '')); const run = await f.start();
+  await assert.rejects(reportRun({ runsRoot: f.runsRoot, runId: run.id, artifact: { kind: "inline", value: "unused" }, writeOptions: {} }), /only supported for model Artifacts/);
+  assert.equal((await readRun(f.runsRoot, run.id)).events.length, 0);
 });

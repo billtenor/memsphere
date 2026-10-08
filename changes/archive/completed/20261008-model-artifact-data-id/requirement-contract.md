@@ -8,7 +8,7 @@
 
 ## 当前迭代范围
 
-采用 `memsphere run report --data-id <id>`，只适用于绑定业务 Store 的普通模型 Artifact。省略时保持 `${runId}--${stepExecutionId}`。
+采用 `memsphere run report --write-options '{"data_id":"<id>"}'`，只适用于绑定业务 Store 的普通模型 Artifact。省略时保持 `${runId}--${stepExecutionId}`。
 ID 使用现有 filesystem JSON ValueStore 记录 ID 规则；非法 ID、非模型产物使用此选项必须明确拒绝且不推进、不写业务数据。
 首次通过格式及模型校验的候选在任何业务写入前持久化所选目标到当前步骤执行；失败重试和评审修订省略参数时继承该 ID，显式指定相同 ID 可重试，指定不同 ID 必须拒绝。默认生成的 ID 同样冻结，不能在评审修订时改成显式 ID。
 候选 Submission 保存业务 ID，评审材料可读取该目标，接受只写被评审目标，接受回执记录 ID、执行身份、digest 和 revision。不同步骤和 Run 可以选择相同 ID。
@@ -43,3 +43,10 @@ CLI/API、Run 步骤与 Submission 元数据及接受路径、失败与边界测
 ## 待确认项
 
 无必要外部信息待补。Issue 将输入形态和冲突策略交由维护者设计，以上采用可选 CLI ID、首版无条件覆盖并明确文档化的方案，交由产品 Agent Review 审核。
+
+
+## 发布前入口调整（Human 已确认）
+
+最终入口改为 `run report --write-options '{"data_id":"task-123"}'`，移除尚未发布的 `--data-id`。仅接收内联 JSON 对象，当前只接受可选字符串 `data_id`；非对象、无效 JSON、未知字段（含 `expected_revision`）及非法 ID 拒绝。空对象表示未指定 ID，但仍只能用于绑定业务 Store 的普通模型 Artifact。Run API 同步改为 `writeOptions?: { data_id?: string }`，不保留新的顶层 dataId 输入。此前冻结目标、验收后写入、默认生成 ID、快照独立与无条件整条 upsert 语义不变。文件引用、YAML、CAS 与其他写入策略不在本次范围。
+
+本调整经用户在当前对话确认；此前评审与 commit 是旧入口的历史证据，不能作为新入口验收结论。当前 Run 保持 Human PR 决策位置，不修改其不可变历史；新入口需要补充角色审查和验证证据后才能交付。

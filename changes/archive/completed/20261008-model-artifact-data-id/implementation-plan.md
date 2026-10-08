@@ -10,11 +10,11 @@
 
 # Syntax 关键字变更
 
-无。本轮允许新增的 YAML syntax 关键字集合为空。仅新增 CLI `--data-id` 和内部 Run 可选元数据，不增加 Artifact DSL 字段，不修改 schema 的字段定义。
+无。本轮允许新增的 YAML syntax 关键字集合为空。仅新增 CLI `--write-options` 和内部 Run 可选元数据，不增加 Artifact DSL 字段，不修改 schema 的字段定义。
 
 ## 实现方式
 
-1. CLI 增加 `--data-id <id>`；ReportOptions 与 reportRun input 增加 `dataId?: string`。非模型步骤、Repeat 或 Schema finalization 上显式指定时优先拒绝。在任何步骤执行身份分配、目标冻结与业务写入之前，显式 ID 先独立校验类型为 string 且 `id.trim().length > 0`，拒绝空字符串和全空白（仅用于判断，不修剪实际 ID）；然后复用 filesystem portable filename validator，同时校验 ID 和 `${id}.json`，不编码 ID。现有 validator 不拒绝空字符串，故必须有此前置校验。非法值测试断言 Run 不推进、目标未冻结、业务 Store 无写入。
+1. CLI 增加 `--write-options <json>`；ReportOptions 增加 `writeOptions?: string`，reportRun input 增加 `writeOptions?: { data_id?: string }`。非模型步骤、Repeat 或 Schema finalization 上显式指定时优先拒绝。在任何步骤执行身份分配、目标冻结与业务写入之前，显式 ID 先独立校验类型为 string 且 `id.trim().length > 0`，拒绝空字符串和全空白（仅用于判断，不修剪实际 ID）；然后复用 filesystem portable filename validator，同时校验 ID 和 `${id}.json`，不编码 ID。现有 validator 不拒绝空字符串，故必须有此前置校验。非法值测试断言 Run 不推进、目标未冻结、业务 Store 无写入。
 2. RunStep 增加可选 `modelDataId`，strict 持久化 schema 同步；只属于步骤执行，不进入 Procedure template。cloneStep 清除 modelDataId，与清除 stepExecutionId 一致，保证新循环/Call 不继承上次目标。
 3. 对格式及模型校验通过的首个候选，确定 `input.dataId ?? step.modelDataId ?? generatedId`。存在已冻结目标时，参数不同则拒绝。冻结目标并 writeRun 成功后才进入 Review/业务写入；上报校验失败允许重新选择，因为尚无合法候选和业务写入。既有 stepExecutionId 分配行为保持。
 4. 旧 pending Review 若无 modelDataId，则已有 Submission 对应目标只能是旧生成 ID；禁止通过重试或修订改写成新显式 ID。以活动 Review 或已有冻结 ID 识别目标已固定；本次候选 `modelTarget` 可选对象保存 storeId、modelRef、fingerprint、dataId、stepExecutionId。构造候选快照时统一附加，包括 default ID。
@@ -34,9 +34,16 @@ changes 文档记录计划、测试、验收及 ChangeSet 证据。
 
 - 模块测试：两个步骤、两个 Run 同 ID 整条替换（删除旧可选字段）；原快照保持；显式/default ID 目标冻结，修订省略/同 ID 可行、不同 ID 拒绝；候选及 ACP contract 暴露 ID；接受只写 Submission 的目标。
 - 失败测试：非法路径/空值/Windows reserved/NFC/扩展名长度；非模型/Schema/控制步骤误用；格式及模型失败不冻结目标；写入失败与写后保存失败重试；目标变化阻止接受。无业务写入或不推进通过 Store 查询和 readRun 断言。
-- 回归：旧 Run/Review 去掉新增字段后继续读取、修订和接受；现有循环/Call 不同默认 ID 保持；新执行 clone 清除目标。CLI 集成实际运行 `node dist/cli.js ... run report --data-id`（独立临时 MEMSPHERE_HOME/Project）并检查数据/回执/失败行为。
+- 回归：旧 Run/Review 去掉新增字段后继续读取、修订和接受；现有循环/Call 不同默认 ID 保持；新执行 clone 清除目标。CLI 集成实际运行 `node dist/cli.js ... run report --write-options`（独立临时 MEMSPHERE_HOME/Project）并检查数据/回执/失败行为。
 - 先执行受影响 run-model-artifact、run-store、run-command、review-store、prompt-renderer、reserved-store 等实际测试；再运行 npm run typecheck、npm test（包含 build）、npm run build、memsphere validate、memsphere memory change validate。所有命令记录日志及结果；环境失败单独记录，不冒充通过。
 
 ## 兼容、风险与待决问题
 
 无 stable Tag，因此不需要向前兼容；默认 ID 和旧可选字段读取作为已确认回归要求，不变更 Run contractVersion。非法或不同 ID 在写入前拒绝，冻结保存失败不得进入业务 upsert。无条件覆盖的并发语义可能覆盖别人更新，按已确认范围明确文档化，后续可考虑 CAS。无需要 human 补充的必要信息。
+
+
+## 发布前入口调整（Human 已确认）
+
+最终入口改为 `run report --write-options '{"data_id":"task-123"}'`，移除尚未发布的 `--data-id`。仅接收内联 JSON 对象，当前只接受可选字符串 `data_id`；非对象、无效 JSON、未知字段（含 `expected_revision`）及非法 ID 拒绝。空对象表示未指定 ID，但仍只能用于绑定业务 Store 的普通模型 Artifact。Run API 同步改为 `writeOptions?: { data_id?: string }`，不保留新的顶层 dataId 输入。此前冻结目标、验收后写入、默认生成 ID、快照独立与无条件整条 upsert 语义不变。文件引用、YAML、CAS 与其他写入策略不在本次范围。
+
+本调整经用户在当前对话确认；此前评审与 commit 是旧入口的历史证据，不能作为新入口验收结论。当前 Run 保持 Human PR 决策位置，不修改其不可变历史；新入口需要补充角色审查和验证证据后才能交付。

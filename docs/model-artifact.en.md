@@ -20,10 +20,10 @@ Each step execution has a persisted UUID. The business data ID combines the Run 
 ## Stable business IDs
 
 ```bash
-memsphere run report --run <run-id> --artifact-file result.json --data-id task-123
+memsphere run report --run <run-id> --artifact-file result.json --write-options '{"data_id":"task-123"}'
 ```
 
-Only normal model Artifacts bound to a business Store support `--data-id` (Run API: optional `dataId`). Different steps, loop iterations and Runs may select the same ID in the same Store. Omitting it retains the generated ID behavior.
+`--write-options` accepts an inline JSON object describing the Store write after acceptance. The only supported field is optional string `data_id`. Only normal model Artifacts bound to a business Store support it, including an empty object `{}` (Run API: optional `writeOptions: { data_id?: string }`). File references and YAML are unsupported. Unknown fields (including unimplemented `expected_revision`), non-objects and non-string IDs are rejected. The business Artifact remains pure model data. Different steps, loop iterations and Runs may select the same ID in the same Store. Omitting the option or passing `{}` retains generated IDs, or inherits an already frozen target.
 
 An explicit ID must be nonempty and contain non-whitespace characters. Both the ID and `<id>.json` must satisfy the filesystem JSON ValueStore portable filename rules, including NFC, reserved names, forbidden characters and the 255-byte/character limit. IDs are neither trimmed nor encoded. Invalid IDs and use on non-model Artifacts are rejected before target freezing or business writes.
 

@@ -1,3 +1,5 @@
+> 此文件记录 ee71c65 的旧入口实现/评审材料。发布前已按 Human 确认改为 `--write-options` 内联 JSON；最终实现与验证以 options-delivery-report.md 和 options-review-evidence.json 为准，以下测试结果及旧 ChangeSet 不是调整后验证证据。
+
 # 实现与验证验收材料
 
 需求：https://github.com/billtenor/memsphere/issues/95 。Run：run-20261008-064617z-ca3c75d4；分支 codex/issue-95-model-artifact-data-id，基线 0b4ad089。

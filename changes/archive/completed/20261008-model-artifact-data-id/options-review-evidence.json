@@ -1,0 +1,107 @@
+{
+  "run_id": "run-20261008-064617z-ca3c75d4",
+  "review_kind": "supplemental role review for human-confirmed pre-release API change; original Run review snapshots unmodified",
+  "runner_decision": "approve; final full regression passed",
+  "reviews": [
+    {
+      "role": "产品负责人",
+      "agent": "/root/product_options_review",
+      "vote": "approve",
+      "personally_checked": [
+        "CLI help: only --write-options",
+        "unknown expected_revision, @file, removed --data-id rejected",
+        "contract, plan, public docs, Skill, source and test assertions"
+      ],
+      "referenced_only": [
+        "root build/typecheck/model tests/Store/ChangeSet evidence",
+        "other role approvals"
+      ],
+      "risks": [
+        "full regression pending at review time; root must confirm before commit"
+      ]
+    },
+    {
+      "role": "架构师",
+      "agent": "/root/architecture_options_review",
+      "vote": "approve",
+      "personally_checked": [
+        "CLI/API/strict schema and validation before execution allocation",
+        "target freezing and legacy acceptance unchanged",
+        "14 parser assertions passed",
+        "six System Memory copies byte-identical",
+        "git diff --check"
+      ],
+      "referenced_only": [
+        "root build and complete regression"
+      ],
+      "risks": [
+        "no CAS is confirmed iteration scope"
+      ]
+    },
+    {
+      "role": "研发工程师",
+      "agent": "/root/engineering_options_review",
+      "vote": "approve",
+      "personally_checked": [
+        "CLI/API/target lifecycle and public docs",
+        "parser examples and git diff --check",
+        "final model file 37/37 passed, 23.518 seconds"
+      ],
+      "referenced_only": [
+        "root full regression/build/ChangeSet validation"
+      ],
+      "risks": [
+        "initial invalid test fixture fixed and independently rerun",
+        "Linux shell only; no CAS/file/YAML by agreed scope"
+      ]
+    },
+    {
+      "role": "测试工程师",
+      "agent": "/root/testing_options_review",
+      "vote": "approve",
+      "personally_checked": [
+        "CLI/API/strict fields/empty-options context and inheritance",
+        "final model file 37/37 passed, 23.804 seconds"
+      ],
+      "referenced_only": [
+        "root full regression"
+      ],
+      "risks": [
+        "Repeat lacks a dedicated option test; shared pre-branch Store check inspected, nonblocking",
+        "Windows shell quoting not independently tested",
+        "initial invalid test fixture fixed and rerun"
+      ]
+    }
+  ],
+  "root_verification": {
+    "full_test": {
+      "files": 141,
+      "tests": 1167,
+      "failures": 0,
+      "elapsed_seconds": 294.73,
+      "exit_code": 0,
+      "passed": 1166,
+      "skipped": 1,
+      "skip_reason": "Windows-only shell Agent Review integration on Linux"
+    },
+    "model_file": {
+      "tests": 37,
+      "failures": 0,
+      "elapsed_seconds": 23.398
+    },
+    "checks": [
+      "build",
+      "typecheck",
+      "Project Store validate",
+      "Memory ChangeSet validate",
+      "git diff --check",
+      "security:check"
+    ],
+    "changeset": {
+      "id": "change-20261008-093640917z-58b657d1",
+      "status": "passed",
+      "digest": "d796c1a847acb78d1b9d7c1280459d9e0bb83a9c04493f8ea88cd68e29f6bb11",
+      "view": "http://0.0.0.0:30000/projects/memsphere/changes/change-20261008-093640917z-58b657d1"
+    }
+  }
+}

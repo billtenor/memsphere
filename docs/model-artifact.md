@@ -23,10 +23,10 @@ Run 启动时检查全部可达目标并冻结绑定及模型指纹。提交和�
 ## 稳定业务 ID
 
 ```bash
-memsphere run report --run <run-id> --artifact-file result.json --data-id task-123
+memsphere run report --run <run-id> --artifact-file result.json --write-options '{"data_id":"task-123"}'
 ```
 
-`--data-id` 仅支持绑定 Store 的普通模型 Artifact；对应 Run API 为可选 `dataId`。不同步骤、循环及 Run 可向同一 Store 的同一 ID 提交完整值。省略时保持上述自动 ID 行为。
+`--write-options` 接收内联 JSON 对象，将验收后写入 Store 的选项集中表达；当前仅支持可选字符串字段 `data_id`。仅支持绑定 Store 的普通模型 Artifact（包括传入空对象 `{}`）；对应 Run API 为可选 `writeOptions: { data_id?: string }`。不支持文件引用或 YAML，未知字段（包括尚未实现的 `expected_revision`）、非对象与非字符串 ID 均拒绝。业务 Artifact 文件仍只包含业务数据，不增加框架字段。不同步骤、循环及 Run 可向同一 Store 的同一 ID 提交完整值。省略选项或传 `{}` 时保持上述自动 ID 行为；已有冻结目标时继承该目标。
 
 ID 必须非空白、符合 filesystem JSON ValueStore 的可移植文件名规则；会同时检查 ID 与 `<id>.json`，包括 NFC、保留名、危险字符和 255 字节/字符限制。不修剪、不编码 ID。非法 ID 或非模型产物误用在目标冻结/业务写入前拒绝。
 

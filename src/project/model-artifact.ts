@@ -15,8 +15,20 @@ export const modelArtifactCandidateTargetSchema = modelArtifactTargetSchema.exte
 }).strict();
 export type ModelArtifactCandidateTarget = z.infer<typeof modelArtifactCandidateTargetSchema>;
 
+export const modelArtifactWriteOptionsSchema = z.object({
+  data_id: z.string().optional()
+}).strict();
+export type ModelArtifactWriteOptions = z.infer<typeof modelArtifactWriteOptionsSchema>;
+
+export function parseModelArtifactWriteOptions(value: unknown): ModelArtifactWriteOptions {
+  const result = modelArtifactWriteOptionsSchema.safeParse(value);
+  if (!result.success) throw serviceError("INVALID_ARGUMENT", `Invalid write-options: ${result.error.message}`);
+  if (result.data.data_id !== undefined) validateModelArtifactDataId(result.data.data_id);
+  return result.data;
+}
+
 export function validateModelArtifactDataId(id: string): void {
-  if (typeof id !== "string" || id.trim().length === 0) throw serviceError("INVALID_ARGUMENT", "data-id must be a non-empty, non-whitespace string");
+  if (typeof id !== "string" || id.trim().length === 0) throw serviceError("INVALID_ARGUMENT", "data_id must be a non-empty, non-whitespace string");
   validateFilename(id);
   validateFilename(`${id}.json`);
 }
