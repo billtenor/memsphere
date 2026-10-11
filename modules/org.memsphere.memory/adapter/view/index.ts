@@ -284,6 +284,10 @@ const memoryStyles = `
   .memory-panel p,.memory-panel li { font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); }
   .memory-meta { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 12px; }
   .memory-pill { display:inline-flex; border:1px solid var(--line); border-radius:999px; background:var(--soft); color:var(--muted); padding:2px 8px; font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
+  .memory-flow-actor { display:inline-flex; flex:none; align-items:center; gap:5px; padding-top:2px; white-space:nowrap; }
+  .memory-flow-meta { display:flex; align-items:baseline; flex-wrap:wrap; gap:12px; min-width:0; margin-left:auto; }
+  .memory-flow-meta .memory-artifact-row { margin-left:0; }
+  @media(max-width:820px){.memory-flow-meta{grid-column:2;margin-left:0}.memory-flow-actor{padding-top:0}}
   .memory-market-row { align-items:start; }
   .memory-market-status { border:1px solid var(--line); border-radius:999px; background:var(--surface); color:var(--muted); padding:1px 6px; font-size:11px; white-space:nowrap; }
   .memory-market-status[data-status=consistent],.memory-market-status[data-status=importing] { border-color:var(--mem-view-color-border-strong); color:var(--accent); }
@@ -2581,8 +2585,14 @@ function memoryFlowHooks(t: (key: string) => string, comment?: CommentCallback, 
       if (node.kind === "call") commentable(head, node.path, node.source, comment);
       else if (node.content.actor === "human") {
         const path = `${node.path}${node.content === node.source ? "" : ".condition"}.actor`;
-        const actor = commentable(el("span", "memory-pill memory-flow-actor", `${t("executor")}: ${t("human")}`), path, "human", comment);
-        head.insertBefore(actor, head.querySelector(".memory-artifact-row"));
+        const actor = el("span", "memory-flow-actor");
+        actor.append(el("span", "memory-flow-actor-label memory-artifact-label mem-content-artifact-label", t("executor")), " ", el("span", "memory-flow-actor-value memory-pill strong mem-content-artifact-name", t("human")));
+        commentable(actor, path, "human", comment);
+        const meta = el("div", "memory-flow-meta");
+        const artifact = head.querySelector(".memory-artifact-row");
+        meta.append(actor);
+        if (artifact) meta.append(artifact);
+        head.append(meta);
       }
     },
     renderBody: node => {

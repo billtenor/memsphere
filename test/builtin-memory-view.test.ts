@@ -387,10 +387,10 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     await page.getByRole("button", { name: "Procedure delivery", exact: true }).click();
     await page.getByRole("radio", { name: "Diff", exact: true }).click();
     const actorDiff = page.locator('.memory-inline-new [data-anchor="procedure.flow[1].actor"]');
-    assert.match(await actorDiff.innerText(), /Executor: Human/);
+    assert.match(await actorDiff.textContent() ?? "", /Executor Human/);
     assert.equal(await page.locator('.memory-inline-old .memory-flow-actor').count(), 0);
     await page.getByRole("radio", { name: "Full content", exact: true }).click();
-    assert.match(await page.locator('.memory-flow-actor').innerText(), /Executor: Human/);
+    assert.match(await page.locator('.memory-flow-actor').textContent() ?? "", /Executor Human/);
     await page.getByRole("radio", { name: "Diff", exact: true }).click();
     const artifactDiff = page.locator(".memory-inline-diff-pair").filter({ hasText: "Old artifact" });
     assert.equal(await artifactDiff.locator(".memory-artifact-row").count(), 2);
@@ -526,7 +526,7 @@ test("Memory builtin keeps Procedure content structured instead of exposing obje
     assert.match(await page.locator(".memory-flow").innerText(), /Needs another pass/);
     assert.equal(await page.locator('.memory-flow-actor').count(), 3);
     for (const path of ['procedure.flow[2].actor', 'procedure.flow[3].condition.actor', 'procedure.flow[4].condition.actor']) {
-      assert.equal(await page.locator(`[data-anchor="${path}"]`).innerText(), 'Executor: Human');
+      assert.equal(await page.locator(`[data-anchor="${path}"]`).textContent(), 'Executor Human');
     }
     assert.equal(await page.locator('.memory-flow-item').first().locator('.memory-flow-actor').count(), 0);
     const inlineSchema = page.locator('[data-anchor="procedure.flow[1].artifact.schema"]');
@@ -610,7 +610,7 @@ for (const locale of ["en", "zh-CN"] as const) {
     const browser = await browserScope();
     try {
       const page = await browser.newPage();
-      const label = locale === "en" ? "Executor: Human" : "执行者: Human";
+      const label = locale === "en" ? "Executor Human" : "执行者 Human";
       const humanPaths = ["flow[1].actor", "flow[4].condition.actor", "flow[4].then[1].actor", "flow[5].condition.actor", "flow[5].do[1].actor", "flow[6].actor"];
       await page.goto(`${origin}/memories/procedures/executors`, { waitUntil: "networkidle" });
       await page.getByRole("heading", { name: "Executor Flow", exact: true }).waitFor();
