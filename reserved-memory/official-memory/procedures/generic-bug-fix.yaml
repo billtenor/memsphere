@@ -5,9 +5,6 @@ names:
   - 通用 bug 修复流程
 defines:
   - 当软件项目在使用、测试或维护过程中暴露 bug 时，引导 human 和 agent 共同完成 bug 理解确认、根因定位、修复方案确认、代码修复、测试补充、验证、PR 提交和全部适用 CI 通过。
-asserts:
-  - 通过既有验收后，agent 必须自主完成 commit、push、创建或更新 GitHub PR 和 CI 跟进，无需 human 再决定是否创建 PR 或提醒继续；只有缺少必要授权、需要人工操作或无法自行恢复的阻塞时才请求 human 介入，未通过 CI 时不得声称流程完成。
-  - 最终交付物是最新提交的全部适用 CI 已通过、等待 human 审核的 PR；最终审核、确认和合入由 human 完成，agent 不得自行 merge 或启用自动合入，也不以 PR 已合入作为本流程完成条件。
 goals:
   - 完成针对已确认 bug 的代码修复。
   - 补充能够覆盖该 bug 的测试 case；自动化不可行时，将手工验证 case 整理到测试文档或测试文档集合。
@@ -136,6 +133,7 @@ flow:
     action: 汇总 PR 和 CI 最终结果，将全部适用 CI 已通过的 PR 交付给 human 审核并由 human 操作合入。
     actor: agent
     asserts:
+      - 最终审核、确认和合入由 human 完成；agent 不得自行合入或启用自动合入，交付通过 CI 且待审核的 PR 后即可完成本流程。
       - 报告必须记录 PR URL、最终远端 head SHA、全部适用检查的名称、成功状态和结果链接，以及修复摘要与残留问题；提交报告前再次确认 head 未变化且检查仍全部通过。
       - 本轮存在 Memory 差异时，报告必须包含与最终内容匹配且校验通过的 ChangeSet ID、校验状态和 View 入口。
     artifact: !artifact
