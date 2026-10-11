@@ -6,11 +6,15 @@ names:
   - MemsphereBugFix
   - FixMemsphereBug
 defines:
-  - 当 memsphere 工程在使用、测试或维护过程中暴露 bug 时，引导 human 和 agent 共同完成 bug 理解确认、根因定位、修复方案确认、代码修复、测试补充和验证摘要整理的流程。
+  - 当 memsphere 工程在使用、测试或维护过程中暴露 bug 时，引导 human 和 agent 共同完成 bug 理解确认、根因定位、修复方案确认、代码修复、测试补充、验证、PR 提交和全部适用 CI 通过的流程。
+asserts:
+  - 通过既有验收后，agent 必须自主完成 commit、push、创建或更新 GitHub PR 和 CI 跟进，无需 human 再决定是否创建 PR 或提醒继续；只有缺少必要授权、需要人工操作或无法自行恢复的阻塞时才请求 human 介入，未通过 CI 时不得声称流程完成。
+  - 最终交付物是最新提交的全部适用 CI 已通过、等待 human 审核的 PR；最终审核、确认和合入由 human 完成，agent 不得自行 merge 或启用自动合入，也不以 PR 已合入作为本流程完成条件。
 goals:
   - 完成针对已确认 bug 的代码修复。
   - 补充能够覆盖该 bug 的测试 case；自动化不可行时，将手工验证 case 整理到测试文档或测试文档集合。
   - 给出验证摘要，说明已执行验证、结果、未执行项及原因。
+  - 自主提交修复 commit 和 GitHub PR，并跟进和修复直到最新提交的全部适用 CI 通过。
 flow:
   - !action
     action: 接收 bug 初始描述。
@@ -74,7 +78,7 @@ flow:
       format: markdown
 
   - !action
-    action: 整理最终验证摘要，说明已执行验证、结果、未执行项及原因。
+    action: 整理本地验证摘要，说明已执行验证、结果、未执行项及原因。
     actor: agent
     artifact: !artifact
       name: 验证摘要
@@ -83,3 +87,60 @@ flow:
         - 研发工程师
         - 测试工程师
         - 需求负责人
+
+  - !action
+    action: 按已确认的 bug 修复范围检查改动并创建 Git commit。
+    actor: agent
+    asserts:
+      - 读取适用的 Git 和交付规范；只提交本轮修复、测试和相关文档，不得暂存或提交其他工作区内容，并记录 commit SHA。
+      - 必须确认修复方案、补充测试和验证摘要已通过既有 Review，且不存在阻塞交付的验证失败。
+      - 本轮存在 Memory 差异时，commit 前必须对最终内容执行 memsphere memory change validate [change-id] 并记录 ChangeSet ID、校验状态和 View 入口。
+    artifact: !artifact
+      name: Bug 修复 Commit 结果
+      format: markdown
+
+  - !action
+    action: 推送本轮 commit，创建 GitHub Pull Request；当前分支已有对应 PR 时更新该 PR。
+    actor: agent
+    asserts:
+      - 创建前核对远端、当前分支和目标分支，遵循适用的仓库交付规范；不得重复创建同一交付的 PR。
+      - PR 标题和描述必须概括本轮交付范围、验证结果和残留问题；记录 PR URL、目标分支和远端 head SHA。
+    artifact: !artifact
+      name: GitHub PR 提交结果
+      format: markdown
+
+  - !while
+    condition: !action
+      action: 查询 PR 最新 head SHA 对应的全部适用 CI，判断是否仍需等待、修复或重新验证。
+      actor: agent
+      asserts:
+        - 每轮重新读取远端 head SHA，并核对检查所属提交；head 变化后必须以新提交为准，不能复用旧提交的通过结果。
+        - 只有最新 head 的全部适用 CI 已执行完毕且成功时才返回 false；排队、运行中、失败、取消、超时、预期检查缺失或尚未触发时均返回 true。
+        - 不得把无检查、只通过部分检查或 skipped、neutral 当作全部通过；仓库明确不适用的检查须记录依据，其余预期检查必须实际执行成功。
+      artifact: !artifact
+        name: CI 是否仍需跟进
+        type: boolean
+    do:
+      - !action
+        action: 根据当前检查状态继续等待，或定位失败原因、完成修复和本地验证，再提交并推送修复，更新 PR 后继续跟进 CI。
+        actor: agent
+        asserts:
+          - 排队或运行中时使用有界等待或合理查询间隔后继续循环；检查未触发、被取消或超时时查明原因并触发适用检查，不得仅因等待而要求 human 提醒继续。
+          - 失败时读取具体检查日志，区分本轮问题、历史问题和环境阻塞；可自行修复时修复后运行受影响验证，环境暂时性故障可有依据地重跑，不得用反复重跑掩盖确定性失败。
+          - 不得通过删除、跳过或弱化测试、关闭检查或降低验收标准使 CI 通过；修复涉及范围或方案变化时仍须完成既有确认。
+          - 修复产生 Memory 差异时，commit 前必须对最终内容执行 memsphere memory change validate [change-id] 并记录 ChangeSet ID、校验状态和 View 入口。
+          - 每次只提交本轮相关修复；推送后重新核对远端 head 和全部适用 CI，不得只重查此前失败的一项。
+        artifact: !artifact
+          name: CI 跟进与修复记录
+          format: markdown
+
+  - !action
+    action: 汇总 PR 和 CI 最终结果，将全部适用 CI 已通过的 PR 交付给 human 审核并由 human 操作合入。
+    actor: agent
+    asserts:
+      - 报告必须记录 PR URL、最终远端 head SHA、全部适用检查的名称、成功状态和结果链接，以及修复摘要与残留问题；提交报告前再次确认 head 未变化且检查仍全部通过。
+      - 本轮存在 Memory 差异时，报告必须包含与最终内容匹配且校验通过的 ChangeSet ID、校验状态和 View 入口。
+    artifact: !artifact
+      name: PR 与 CI 最终交付报告
+      format: markdown
+      final: true
